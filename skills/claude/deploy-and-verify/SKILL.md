@@ -25,10 +25,8 @@ check `git remote -v`.
 
 1. **Commit to `main`** (single-branch policy for all u2giants app repos).
    Author: `Albert Hazan <u2giants@users.noreply.github.com>`.
-2. **Push, then check Actions once.** Never `gh run watch`, `--watch`, or a
-   sleep loop around `gh` - they burn the shared hourly GitHub API budget. Run one
-   `gh run list --commit <sha> --limit 5`; if still running, rely on the completion
-   notification or one blocking `ai-pr-wait` (5-minute interval). A local-only
+2. **Push and wait for Actions.** Wait with `ai-gh-wait` or `ai-pr-wait` (at most one
+   GitHub call every 5 minutes, always with a deadline); never `gh run watch` (#401). A local-only
    commit that was never pushed has burned sessions before — verify the SHA is
    on origin/main.
 3. **Verify GHCR** published the image (`ghcr.io/u2giants/<app>` with a

@@ -44,6 +44,13 @@ pipeline. The recovery procedure lives in
 - Wait on CI through **bounded, event-aware** tools.
   Use `bin/ai-pr-wait <pr>` for a pull request, surface a failing check or queue
   ejection immediately, and do independent useful work while long checks run.
+  Make every GitHub call through `bin/ai-gh` (machine-wide lock, spacing, hourly
+  budget, and rate-limit back-off) — this is a rule for callers, not something the
+  shell enforces, and a few older scripts still call `gh` directly and are being
+  migrated; other waits use `bin/ai-gh-wait`. At most one
+  GitHub call every 5 minutes per waiter; never `gh run watch`, and never an
+  open-ended `until`/`while` loop around `gh` — every wait needs a deadline or
+  iteration cap (#401).
 - Reuse before adding another plan, workflow, harness, or provider copy. Every
   new shared artifact needs an owner, a reason the
   shared home cannot serve the need, and a retirement or consolidation path.

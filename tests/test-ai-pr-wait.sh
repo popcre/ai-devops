@@ -64,11 +64,56 @@ OUT="$(AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --
 check "repeated API failure still exits at the deadline" \
   "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'could not be read before the 1m deadline'"
 
+# A recorded machine-wide back-off: the throttle exits 75 without calling GitHub,
+# and ai-pr-wait treats it as temporary and gives up only at its deadline.
+mkdir -p "$TMP/bo-state"; echo $(( $(date +%s) + 3600 )) > "$TMP/bo-state/backoff_until"
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+: > "${AI_PR_WAIT_TEST_MARKER:?}"
+echo '{}'
+EOF
+chmod +x "$TMP/bin/gh"; rm -f "$TMP/clock" "$TMP/bo-called"
+OUT="$(AI_DEVOPS_TEST_MODE=1 AI_GH_STATE_DIR="$TMP/bo-state" AI_PR_WAIT_TEST_MARKER="$TMP/bo-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
+check "a throttle back-off (exit 75) is temporary: GitHub is not called and the wait ends at its deadline" \
+  "test ! -e '$TMP/bo-called' && test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'transient'"
+
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
+if [ "$count" -eq 1 ]; then
+  printf '%s\n' 'temporary upstream reset' >&2
+  exit 1
+fi
+printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","isInMergeQueue":false,"mergeCommit":{"oid":"retry123"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"nodes":[]}}}}]}}}}}'
+EOF
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+printf '1000\n'
+EOF
+cat > "$TMP/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/bin/gh" "$TMP/bin/date" "$TMP/bin/sleep"
+rm -f "$TMP/transient-called"
+OUT="$(AI_DEVOPS_TEST_MODE=1 AI_PR_WAIT_TEST_TRACE="$TMP/transient-trace" AI_PR_WAIT_TEST_MARKER="$TMP/transient-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a transient read reports its cause and elapsed time, then recovers" \
+  "test '$RC' -eq 0 && test \"$(cat "$TMP/transient-called")\" -eq 2 && printf '%s' \"$OUT\" | grep -q 'after [0-9][0-9]*s (transient: temporary upstream reset); retrying' && printf '%s' \"$OUT\" | grep -q 'MERGED  merge commit retry123' && ! printf '%s' \"$OUT\" | grep -q 'deadline - giving up'"
+
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 : > "${AI_PR_WAIT_TEST_MARKER:?}"
 sleep 300
 EOF
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+state="${AI_PR_WAIT_TEST_CLOCK:?}"
+count="$(cat "$state" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
+if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
+EOF
+rm -f "$TMP/bin/sleep"
 rm -f "$TMP/clock"
 SECONDS=0
 OUT="$(AI_DEVOPS_TEST_MODE=1 AI_PR_WAIT_TEST_TRACE="$TMP/hung-trace" AI_PR_WAIT_TEST_MARKER="$TMP/hung-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 --api-timeout-seconds 1 2>&1)"; RC=$?

@@ -1,7 +1,6 @@
 ---
 name: designflow-human-qa
 description: Test DesignFlow PLM as real business roles. Use for human QA, role access, customer journeys, RFQ pricing, Item Library, Art Piece, licensing, production, samples, factory workflows, or requests to click through alsand.designflow.app.
-disable-model-invocation: true
 ---
 
 # DesignFlow Human QA
@@ -19,7 +18,7 @@ does. Treat production as read-only unless Albert explicitly approves named
 mutations.
 
 Before testing, establish which role accounts are available and which modules
-the request covers. Use dedicated QA records with a unique `AI-QA-<date>-`
+the request covers. Use dedicated QA records with a unique `AI-QA-<YYYYMMDD>-<journey>-`
 prefix. Record every created identifier and remove the records through supported
 application controls when safe. Never use direct database writes for browser QA.
 
@@ -29,6 +28,9 @@ Read only the references needed for the requested scope:
 - Read [customer-journeys.md](references/customer-journeys.md) to choose realistic workflows.
 - Read [rfq-math-checks.md](references/rfq-math-checks.md) for RFQ, sourcing, royalty, cost, selling-price, or margin testing.
 - Read [safety-and-evidence.md](references/safety-and-evidence.md) before any mutation or final report.
+
+Whenever Sourcing Manager is in scope, the independent pricing and margin pass
+in [rfq-math-checks.md](references/rfq-math-checks.md) is mandatory.
 
 ## Build the coverage pass
 

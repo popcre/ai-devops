@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# ai-gh-wait — the sanctioned way to wait for a GitHub run, check, or PR state.
+#
+# It repeats one read through the ai-gh throttle no more often than every five
+# minutes, prints output only when it changes, honours any machine-wide
+# rate-limit back-off, and exits when the output matches a pattern or the
+# deadline passes. Never use `gh run watch` or a sleep loop around bare `gh`
+# (2026-09-15 secondary rate-limit incident, popcre/ai-devops#401).
+#
+# Usage:
+#   ai-gh-wait --until-regex REGEX [--interval SECONDS] [--timeout-minutes N] -- <gh args>
+# Example:
+#   ai-gh-wait --until-regex '"status":"completed"' -- run view 123 --repo o/r --json status,conclusion
+#
+# The interval may not be below 300 seconds. Exit: 0 matched, 1 repeated
+# non-rate-limit failure, 2 deadline reached, 3 usage error.
+set -uo pipefail
+say(){ printf 'ai-gh-wait: %s\n' "$*" >&2; }
+MIN=300
+[ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_GH_WAIT_TEST_MIN_INTERVAL:-}" ] && MIN="$AI_GH_WAIT_TEST_MIN_INTERVAL"
+INTERVAL=300; TIMEOUT=120; REGEX=''
+# Exit codes that mean "not finished yet" rather than failure (gh pr checks: 8).
+PENDING="${AI_GH_WAIT_PENDING_CODES:-8}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --until-regex|--interval|--timeout-minutes)
+      [ $# -ge 2 ] || { say "$1 needs a value"; exit 3; }
+      case "$1" in
+        --until-regex) REGEX="$2" ;;
+        --interval) INTERVAL="$2" ;;
+        --timeout-minutes) TIMEOUT="$2" ;;
+      esac
+      shift 2 ;;
+    --) shift; break ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    *) say "unknown option $1"; exit 3 ;;
+  esac
+done
+case "$INTERVAL$TIMEOUT" in *[!0-9]*|'') say "--interval and --timeout-minutes must be whole numbers"; exit 3 ;; esac
+[ -n "$REGEX" ] || { say "--until-regex is required"; exit 3; }
+[ $# -gt 0 ] || { say "gh arguments are required after --"; exit 3; }
+[ "$INTERVAL" -ge "$MIN" ] || { say "--interval ${INTERVAL}s is below the 300-second minimum for GitHub waits"; exit 3; }
+GH="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)/ai-gh"
+STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
+deadline=$(( $(date +%s) + TIMEOUT * 60 ))
+prev=''; fails=0
+while :; do
+  out="$(AI_GH_NO_WAIT=1 "$GH" "$@")"; rc=$?   # stderr passes through so the real error is visible
+  delay="$INTERVAL"
+  if [ "$rc" -eq 75 ]; then
+    until_ts="$(cat "$STATE/backoff_until" 2>/dev/null)"; case "$until_ts" in ''|*[!0-9]*) until_ts=0;; esac
+    left=$(( until_ts - $(date +%s) )); [ "$left" -gt "$delay" ] && delay="$left"
+    say "GitHub back-off active; next attempt in ${delay}s"
+  elif [ "$rc" -eq 2 ]; then
+    say "the throttle refused this command (rc=2); not retrying"; exit 3
+  elif [ "$rc" -ne 0 ] && ! printf ' %s ' "$PENDING" | grep -q " $rc "; then
+    fails=$((fails+1)); say "gh failed (rc=$rc, attempt $fails)"
+    [ "$fails" -ge 3 ] && { say "three consecutive failures; stopping"; exit 1; }
+  else
+    # rc 0, or a "not done yet" exit such as 8 from `gh pr checks` while checks
+    # are pending: the output is real state, so it is shown and matched.
+    fails=0
+    [ "$out" != "$prev" ] && printf '%s\n' "$out"
+    prev="$out"
+    # Here-string, not a pipe: with pipefail, grep -q closing a large pipe early
+    # would turn a real match into a failure.
+    grep -Eq -- "$REGEX" <<<"$out" && exit 0
+  fi
+  [ $(( $(date +%s) + delay )) -lt "$deadline" ] || { say "deadline reached"; exit 2; }
+  sleep "$delay"
+done

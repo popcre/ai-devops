@@ -17,7 +17,7 @@ Read this table first. Do not re-derive it, and do not re-plan from chat.
 
 | # | Step | Status | Evidence (an artifact, never a bare number) |
 |---|---|---|---|
-| 1 | Retract the superseded "more than 5 files" rule in `skills/claude/wrap-up/SKILL.md` | ⬜ open | — |
+| 1 | Retract the superseded "more than 5 files" rule in `skills/shared/wrap-up/SKILL.md` | ⬜ open | Count cap removed during closeout consolidation; the planned terminology correction across all three contract sources remains. |
 | 2 | Repair the dangling `HANDOFF.d/` pointer in `AGENTS.md` | ⬜ open | — |
 | 3 | Make the handoff contract block MANDATORY in this repo | ⬜ open | — |
 | 4 | Build `bin/ai-housekeeping` — report-only inventory | ⬜ open | — |
@@ -156,7 +156,9 @@ cd /c/repos/ai-devops && git worktree list && git branch
 
 ### 5. Current state of the code
 
-Nothing has been built for this plan. Every step is ⬜ open. What exists today:
+No housekeeping tool has been built and every numbered step remains open. The
+wrap-up count cap was removed during a separate consolidation, but step 1 still
+owns the cross-source successor-review terminology correction. What exists today:
 
 **Rules that exist and are correct, except for the closed-issue terminology
 called out in step 1**
@@ -176,7 +178,7 @@ called out in step 1**
 
 | Where | The defect |
 |---|---|
-| `skills/claude/wrap-up/SKILL.md:59-62` | Still instructs: *"If `HANDOFF.d/` holds more than 5 files, warn loudly."* The owner overruled this on 2026-08-13 and `handoff-writer/SKILL.md:161-175` explicitly says any such wording is **superseded**. Sessions wrapping up today follow the dead rule |
+| `skills/shared/handoff-writer/SKILL.md` and `templates/system/handoff-standard.md` | Still call a closed-issue handoff "STALE." Step 1 must replace that unsafe shorthand with `SUCCESSOR REVIEW` and retain the three proof conditions before deletion. |
 | `AGENTS.md:403-404` | Points readers at *"the newest open file under `HANDOFF.d/`"* for the `916` machine rollout. `HANDOFF.d/` is now empty; the pointer resolves to nothing |
 
 **Infrastructure the new tool will reuse**
@@ -400,7 +402,7 @@ may have changed the files named below. Pair this with the `fresh-session` skill
 
 ### Step 1 — Retract the superseded five-file rule
 
-**Change 1:** `skills/claude/wrap-up/SKILL.md`, the retention bullet at lines
+**Change 1:** `skills/shared/wrap-up/SKILL.md`, the retention bullet at lines
 59-62. Delete the sentence *"If `HANDOFF.d/` holds more than 5 files, warn loudly
 in the closing report — list them oldest-first with dates and ask which are
 actually finished."*
@@ -721,7 +723,7 @@ Four small registrations. Miss one and the tool exists only on this machine.
    ownership appears only when recorded and that local branches/refs are not
    shared by default. Link it from the new `AGENTS.md` row.
    Also link it from `skills/shared/cleanup-worktree/SKILL.md` and
-   `skills/claude/wrap-up/SKILL.md`, so the trigger paths lead there.
+   `skills/shared/wrap-up/SKILL.md`, so the trigger paths lead there.
 
 **Depends on:** step 4.
 
@@ -758,7 +760,7 @@ write its own log.
    `UNKNOWN` and exits `0` (D3). It must never block, never retry in a loop, and
    never wake a sleeping machine.
 4. Surface it where Albert will actually see it: add one line to the closing
-   report in `skills/claude/wrap-up/SKILL.md` telling the wrapping-up session to
+   report in `skills/shared/wrap-up/SKILL.md` telling the wrapping-up session to
    run `ai-housekeeping` and report the summary in plain English. The scheduled
    log is history and diagnosis, not user notification; the wrap-up report is
    the visibility mechanism.

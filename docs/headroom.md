@@ -18,12 +18,12 @@ blobs *before* they are sent upstream, and forwards everything else untouched.
 Goal: **fewer input tokens per request → lower Claude token usage.**
 
 - Vendor claim: 15–20% fewer tokens for coding agents (60–95% for raw JSON).
-- **Our measured reality: ~2.2%** over the trailing 7 days to 2026-08-31, and
-  ~4.1% lifetime across 1,756 requests (see §6). The old "0.27%" figure was
+- **Our measured reality in current `cache` mode: 2.06%** across 1,601 deep
+  requests through 2026-09-15 (see §6). The old "0.27%" figure was
   measured BEFORE the 2026-07-14 crash-loop fix and is obsolete — do not quote
   it. Higher per-session figures quoted earlier (13.2%) were single favourable
-  sessions, not a trend. **All of these are `token`-mode / 0.30.0 numbers and
-  must be re-measured** — see §5b and §5c.
+  sessions, not a trend. The like-for-like historical `token`-mode baseline was
+  4.22%; the current mode preserves slightly better provider-cache behaviour.
 - It does **not** break the prompt cache; that was measured, not assumed (§5b).
 - Installed version: **0.37.0** (pipx package `headroom-ai`, upgraded from
   0.30.0 on 2026-08-31).
@@ -257,10 +257,8 @@ Mode: cache
 **Vendor agreement.** Headroom 0.37.0 changed its own default to `cache`. Our
 explicit flag is now belt-and-braces rather than a deviation.
 
-> ⚠️ **All savings figures in §6 predate this change.** They were measured in
-> `token` mode on 0.30.0. 0.37.0 also enables code-aware (AST) compression that
-> was not previously active. The percentages must be re-measured before being
-> quoted as current.
+The post-change measurement in §6 confirms that `cache` mode trades some raw
+compression for stronger provider-cache behaviour, as intended.
 
 ## 5c. Durable performance recording (added 2026-08-31)
 
@@ -274,7 +272,7 @@ path to being overwritten. Metrics are now extracted to a permanent CSV.
 | Cron log | `/home/ai/headroom-perf/record.log` |
 | Schedule | `17 * * * *` in the `ai` user crontab |
 
-The recorder parses every `PERF` line from `proxy.log` and its rotations into
+The recorder parses every `PERF` line from the configured Headroom log and its rotations into
 `ts, reqid, model, msgs, tok_before, tok_after, tok_saved, cache_read,
 cache_write, cache_hit_pct, transforms`. It is **idempotent** — it dedupes on the
 `hr_` request id, so re-running it adds nothing. Run it by hand any time:
@@ -286,6 +284,11 @@ sudo -u ai python3 /home/ai/headroom-perf/record.py
 The `token`-mode baseline is preserved: **1,706 requests, 2026-07-15 to
 2026-08-28.** Compare `cache` mode against that window rather than against the
 narrative figures in §6.
+
+> The 2026-09-15 audit found that the recorder still watched the pre-0.37.0 log
+> location after Headroom moved its logs under `.headroom/logs/`. The cache-mode
+> comparison was recovered directly from the five retained rotations. Repair
+> the recorder path before relying on `perf.csv` for newer requests.
 
 > Watch out: the log timestamp uses a comma for milliseconds
 > (`18:11:53,213`). A naive CSV split on commas shifts every column and silently
@@ -303,24 +306,22 @@ sudo -u ai /home/ai/.local/bin/headroom perf        # savings report
 sudo -u ai /home/ai/.local/bin/headroom dashboard   # live savings screen
 ```
 
-**Numbers as of 2026-08-21** (superseding the pre-fix 2026-07-14 reading of
-50 requests / 0.27%, which was taken while the proxy was crash-looping):
+**Like-for-like measurement through 2026-09-15.** Both groups exclude
+passthrough rows and zero-token requests and include only deep conversations
+(`msgs >= 10`):
 
-| Metric | Value |
-|---|---|
-| Requests handled (lifetime) | 1,020 |
-| Tokens saved (lifetime) | 2,328,077 of 41,771,171 input tokens (**~5.6%**) |
-| $ saved (lifetime) | ~$11.52 |
-| Most recent session | 60,423 saved of 1,285,497 (**4.49%**) |
-| Last real activity | **2026-08-26** |
+| Mode and version | Requests | Tokens saved | Avg cache hit | Avg cache_write |
+|---|---:|---:|---:|---:|
+| `token`, 0.30.0 baseline | 1,106 | 2,781,969 / 65,968,228 (**4.22%**) | 92.51% | 8,185 |
+| `cache`, 0.37.0 | 1,601 | 2,937,051 / 142,427,291 (**2.06%**) | **93.89%** | **3,777** |
 
-Read live with the commands above; these are a snapshot, re-checked 2026-08-27.
-
-> **These numbers are `token`-mode / 0.30.0 figures and are now historical.**
-> See §5b. The durable per-request record in §5c is the source to re-measure
-> from. Live lifetime as of 2026-08-31: 1,756 requests, 2,854,228 tokens saved
-> (~$14.15) against $200.66 of input; trailing 7 days 668,804 saved on
-> 30,253,311 sent = **2.21%**.
+This is directional evidence, not a controlled experiment: the modes handled
+different real workloads, and the version upgrade also enabled AST compression.
+Cache mode saved fewer raw tokens but improved the cache-hit rate and cut
+cache-write volume by 54%. Across this sample it still removed 2.94 million
+input tokens. **Decision: keep Headroom in cache mode.** The measured saving and
+better cache behaviour justify the existing private-network hop; continue to
+retain the documented instant bypass for outages.
 
 > ⚠️ **Traffic, not health, is the thing to check.** On 2026-08-21 the service
 > was `active`, `enabled`, 16 days uptime, `NRestarts=0`, `/health` green — and
@@ -400,8 +401,8 @@ screen — Headroom's own ledger only counts what actually flowed through it.
   third-party proxy is not an Anthropic-sanctioned path. It works technically and
   did before, but carries some non-zero breakage/account risk. Albert's account,
   Albert's call.
-- **Savings now look real** (13.2% on the last measured session) but the sample
-  is small, and the "pull it if it is not worth it" stance above still stands.
+- **The measured benefit is modest but real:** 2.06% token reduction across
+  1,601 deep cache-mode requests, alongside fewer provider-cache writes (§6).
 - **Silent disuse is the real failure mode**, not crashes. Nothing alerts when a
   machine stops routing through the proxy — it just quietly saves nothing while
   looking perfectly healthy. See the warning in §6.

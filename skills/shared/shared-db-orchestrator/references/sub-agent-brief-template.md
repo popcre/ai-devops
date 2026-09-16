@@ -106,8 +106,8 @@ open PRs = `<list>`.
   evidence and options; decide nothing.
 
 - **No GitHub polling.** Check a run or pull request once. To wait, use one
-  `ai-pr-wait <pr>` (checks at most every 5 minutes) or a completion
-  notification. Never `gh run watch`, `--watch`, `gh pr checks --watch`, or a
+  `ai-gh-wait` or `ai-pr-wait <pr>` (at most one GitHub call every 5 minutes,
+  always with a deadline), or a completion notification. Never `gh run watch`, `--watch`, `gh pr checks --watch`, or a
   sleep loop around `gh`. On a rate-limit refusal stop calling GitHub until the
   reset. (2026-09-15 rate-limit incident.)
 

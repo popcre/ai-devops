@@ -31,7 +31,7 @@ set -uo pipefail
 PR=''
 REPO=''
 TIMEOUT_MINUTES=180
-INTERVAL=60
+INTERVAL=300
 API_TIMEOUT_SECONDS=30
 OWNER_REQUEST=''
 
@@ -70,6 +70,38 @@ esac
 command -v gh >/dev/null 2>&1 || { printf 'ai-pr-wait: gh is not installed\n' >&2; exit 3; }
 command -v jq >/dev/null 2>&1 || { printf 'ai-pr-wait: jq is not installed\n' >&2; exit 3; }
 GH_RUNNER="$(command -v gh)"
+# GitHub waits poll at most every five minutes and every call goes through the
+# machine-wide throttle (2026-09-15 secondary-limit incident, popcre/ai-devops#401).
+# During a recorded back-off the throttle exits 75 at once rather than sleeping
+# past the per-request timeout; the loop treats that as transient and waits.
+if [ "$INTERVAL" -lt 300 ] && [ "${AI_DEVOPS_TEST_MODE:-0}" != 1 ]; then
+  printf 'ai-pr-wait: --interval %ss raised to the 300-second GitHub wait minimum\n' "$INTERVAL" >&2
+  INTERVAL=300
+fi
+THROTTLE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)/ai-gh"
+if [ -x "$THROTTLE" ]; then
+  export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
+  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
+    if [ -z "${AI_GH_STATE_DIR:-}" ]; then
+      AI_GH_STATE_DIR="$(mktemp -d)"; TMP_STATE_DIR="$AI_GH_STATE_DIR"
+      trap 'rm -rf "$TMP_STATE_DIR"' EXIT
+    fi
+    export AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}" AI_GH_QUOTA_PROBE_SECONDS="${AI_GH_QUOTA_PROBE_SECONDS:-off}"
+  fi
+  GH_RUNNER="$THROTTLE"
+  # Allowance = the longest the throttle can spend before gh starts (lock wait +
+  # spacing). Without it the supervisor could kill a healthy call and leave the
+  # shared lock behind.
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=1}"
+  export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
+  # lock wait + call spacing + the spacing the budget probe adds before the call
+  # + the time-limited budget probe made while holding the lock
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_PROBE_TIMEOUT_SECONDS:=0}"
+  THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + 2 * ${AI_GH_MIN_SPACING_SECONDS:-3} + ${AI_GH_PROBE_TIMEOUT_SECONDS:-15} ))
+else
+  printf 'ai-pr-wait: WARNING the ai-gh throttle is not installed next to this script; calling gh directly (no machine-wide rate-limit protection)\n' >&2
+  THROTTLE_ALLOWANCE_SECONDS=0
+fi
 SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
 [ -x "$SUPERVISOR" ] || { printf 'ai-pr-wait: ai-process-supervisor is not installed\n' >&2; exit 3; }
 BASH_RUNNER="$(command -v bash 2>/dev/null || true)"
@@ -92,6 +124,7 @@ case "$(uname -s 2>/dev/null || true)" in
 esac
 
 DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
+WAIT_STARTED_SECONDS=$SECONDS
 
 bounded_gh() {
   local now remaining limit
@@ -100,7 +133,10 @@ bounded_gh() {
   # 125 means the overall deadline expired before any GitHub process started;
   # 124 remains the supervisor's genuine request-timeout result.
   [ "$remaining" -gt 0 ] || return 125
-  limit="$API_TIMEOUT_SECONDS"
+  # The throttle may spend a few seconds acquiring the shared lock or honouring
+  # spacing before gh even starts; add that allowance so a healthy call is never
+  # killed as hung (a kill would leave the shared lock behind).
+  limit=$(( API_TIMEOUT_SECONDS + THROTTLE_ALLOWANCE_SECONDS ))
   [ "$limit" -le "$remaining" ] || limit="$remaining"
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
     printf '%s\n' "$GH_RUNNER" > "$AI_PR_WAIT_TEST_TRACE.resolved"
@@ -160,7 +196,31 @@ LAST=''
 API_STDERR=/dev/null
 if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
   API_STDERR="$AI_PR_WAIT_TEST_TRACE.stderr"
+else
+  API_STDERR="$(mktemp "${TMPDIR:-/tmp}/ai-pr-wait-stderr.XXXXXX")" || {
+    printf 'ai-pr-wait: could not create diagnostic file\n' >&2
+    exit 3
+  }
+  trap 'rm -f "$API_STDERR"' EXIT
 fi
+
+elapsed_seconds() {
+  printf '%s' "$(( SECONDS - WAIT_STARTED_SECONDS ))"
+}
+
+read_failure_cause() {
+  local cause
+  cause="$(tr '\r\n' '  ' < "$API_STDERR" 2>/dev/null | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//' | cut -c1-240)"
+  if [ -n "$cause" ]; then
+    printf '%s' "$cause"
+  elif [ "$GH_RC" -eq 124 ]; then
+    printf 'request exceeded the %ss API limit' "$API_TIMEOUT_SECONDS"
+  elif [ "$GH_RC" -ne 0 ]; then
+    printf 'GitHub client exited %s without a diagnostic' "$GH_RC"
+  else
+    printf 'GitHub returned an empty or invalid pull-request response'
+  fi
+}
 
 deadline_reached() {
   [ "$(date +%s)" -ge "$DEADLINE" ]
@@ -184,11 +244,12 @@ while :; do
   GH_RC=$?
 
   if [ -z "$Q" ] || ! printf '%s' "$Q" | jq -e '.data.repository.pullRequest' >/dev/null 2>&1; then
+    READ_CAUSE="$(read_failure_cause)"
     if [ "$GH_RC" -eq 125 ] && [ -n "$LAST" ]; then
       say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($LAST)"
       exit 2
     fi
-    say "ai-pr-wait: could not read PR #$PR (transient); retrying"
+    say "ai-pr-wait: could not read PR #$PR after $(elapsed_seconds)s (transient: $READ_CAUSE); retrying"
     if deadline_reached; then
       say "PR #$PR could not be read before the ${TIMEOUT_MINUTES}m deadline - giving up rather than waiting silently"
       exit 2

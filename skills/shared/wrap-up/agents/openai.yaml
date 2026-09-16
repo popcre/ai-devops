@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wrap Up"
+  short_description: "Close a session with docs, shipping, and proof"
+  default_prompt: "Use $wrap-up to close this session with project-aware shipping, docs, handoff, secrets, workspace cleanup, and verification."

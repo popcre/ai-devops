@@ -8,7 +8,7 @@ the others live where noted.
 
 | Skill | What it does | Say this |
 |---|---|---|
-| ⚙ `wrap-up` | **The one-phrase closer.** Chains docs update → secrets sweep → handoff-safe state → push & verify, then one closing report. | **"wrap up"** |
+| ⚙ `wrap-up` | **The one-phrase Claude/Codex closer.** Detects DesignFlow first, then chains docs update → secrets sweep → handoff-safe state → project-aware push & verify, then one closing report. | **"wrap up"** |
 | ⚙ `session-docs-update` | Routine end-of-session .md update — records what THIS session learned/changed. Includes secrets sweep + handoff-safe-state closers. | "update the .md files" |
 | ⚙ `repo-docs-overhaul` | FULL documentation rebuild per the AI TASK SPEC — AGENTS.md router, all 15 required sections, ignore files. For new apps or after big changes. | "do a full documentation overhaul" |
 | ⚙ `secrets-to-1password` | **The quality gate on every 1Password MCP write** — secret or plain info note. Sweeps the session for credentials, or stores/updates a single entry you hand it, in the `vibe_coding` vault: searchable title, mandatory tags, and notes detailed enough for a future context-free session to find it, know what it's for, and use it. Checks for an existing entry first, and never stores a truncated value or reveals a live one to compare. Shared by Claude and Codex/ChatGPT. | "secrets sweep" / "any secrets not in 1password?" / "save this key" / "add this note to the vault" |
@@ -29,7 +29,7 @@ the others live where noted.
 | Skill | What it does | Say this |
 |---|---|---|
 | ⚙ `dflow-session-start` | Syncs develop → your sandbox branch across all six repos; loads the standing dflow rules (branch policy, AG-Grid MCP, unit tests). | "pull develop into sandbox-albert" — or it fires automatically at dflow session start |
-| ⚙ `dflow-ship` | Tests → commit → push → PR to develop → watches the Cloud Build deploy → verifies the sandbox site. | "push and commit" / "ship it" |
+| ⚙ `dflow-ship` | Shared by Claude and Codex: tests → commit → push → PR to develop → watches the Cloud Build deploy → verifies the sandbox site. | "push and commit" / "ship it" |
 | ⚙ `design-handoff-implement` | Implements a Claude Design zip in the real stack, phase by phase, with visual verification. Shared by Claude and Codex. | attach the zip + "read the README in full" |
 
 ## Infrastructure & deploys
@@ -51,7 +51,7 @@ the others live where noted.
 |---|---|---|
 | ⚙ `pop-business-rules` | Uses the companywide Business Logic Library to find, explain, add, change, reconcile, or audit POP business rules. Loads only relevant topics and never copies rules into the Skill or an application. | "use our Business Logic Library" / "add this business rule" / "what rules apply to this feature?" |
 | ⚙ `human-app-qa` | Uses Chrome DevTools MCP to explore a running web app like a customer, probe unusual behavior, judge usability, and capture screenshots plus browser evidence. It does not review or change code, and uses Playwright only when explicitly asked to preserve a confirmed journey as a permanent check. Shared by Claude and Codex. | "use the app like a human" / "poke and prod everywhere" / "exploratory frontend QA" / "test the user journey" |
-| ⚙ `designflow-human-qa` | Applies human-style QA to DesignFlow's six user roles and complete PLM journeys, including RFQ royalty, cost, selling-price and margin math; Item Library; Art Piece; licensing; production; samples; factory work; role boundaries; and safe disposable records on `alsand.designflow.app`. Shared by Claude and Codex. | "use designflow-human-qa" / "test DesignFlow like each user" / "QA the DesignFlow RFQ math" |
+| ⚙ `designflow-human-qa` | Applies human-style QA to DesignFlow's six user roles and requested PLM journeys, including RFQ royalty, cost, selling-price and margin math; Item Library; Art Piece; licensing; production; samples; factory work; role boundaries; and safe disposable records on `alsand.designflow.app`. Shared by Claude and Codex. | "use designflow-human-qa" / "test DesignFlow like each user" / "QA the DesignFlow RFQ math" |
 | ⚙ `item-description-taxonomy` | Semantically parses item descriptions into item type, size, licensor, property and artwork; consolidates spelling, prefix and detail variants into merchant-sensible canonical product families instead of treating text fragments as separate types. Shared by Claude and Codex. | "break down these item descriptions" / "build an item-type phrase list" / "clean up the item taxonomy" |
 | ⚙ `repo-bug-audit` | Whole-codebase sweep across repos: bugs, silent failures, hard-coded values, inefficiency; uses parallel review agents when available and writes bugs.md. Shared by Claude and Codex. | "read the entire codebase and tell me if you find any bugs" |
 | ⚙ `log-reviewer-issue` | Records a reviewer failure with complete automatic evidence and detailed notes already present in the session. Shared by Claude and Codex. | "log the reviewer error" / "record this reviewer issue" |
@@ -77,10 +77,8 @@ the others live where noted.
 | Skill | What it does | Say this |
 |---|---|---|
 | ⚙ `codex-github-ship` | Syncs with GitHub, commits, pushes, creates/updates PRs when appropriate, and verifies CI/deploy/live SHA. | "push and commit" / "sync this repo with github.com" |
-| ⚙ `codex-session-closeout` | Codex wrap-up: durable docs, handoff quality gate, secret hygiene, git/deploy evidence. | "wrap up" / "update the .md files" |
 | ⚙ `codex-docs-update` | Updates only durable markdown docs for an existing project/task/session, without closeout, secrets, git, or deploy steps. | "update only the .md files" / "document this" |
 | ⚙ `codex-repo-docs-overhaul` | Creates/rebuilds the standard AGENTS.md + docs set for a new repo or big application change. | "create the standard .md files" / "full documentation overhaul" |
-| ⚙ `codex-dflow-plm` | Codex rules for DesignFlow PLM: sandbox sync, AG-Grid rules, browser-proof gates for UI fixes, PR to develop for Uma. | "DesignFlow session" / "sandbox-albert" |
 | ⚙ `codex-shared-db-change` | Proper way to change the shared supabase backend's STRUCTURE from an app repo: author in `u2giants/shared-db` (branch+PR, preview-first, AI merges), never app-repo migrations or direct DDL, correct project refs, regenerate types. Does NOT gate DATA — app sessions own their own row writes (§0.0-B), except bulk outside-sourced loads into curated Master Data. | any shared-backend schema/structure change / "make db changes the proper way" / "all db work through shared-db" |
 | ⚙ `codex-new-application` | New POP app bootstrap: repo, docs, tests, CI/CD, Hetz/Coolify deployment path when needed. | "set up a new application" |
 | ⚙ `codex-cicd-pipeline` | Creates/audits GitHub → GHCR → deployment-platform pipeline rules. | "audit CI/CD" / "deploying from GitHub" |

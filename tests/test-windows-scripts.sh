@@ -222,6 +222,12 @@ for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway t
     bad "MCP catalog is missing $server"
   fi
 done
+if grep -Fq 'op://vibe_coding/recall-ai MCP/password' bin/setup-machine.ps1 &&
+   grep -Fq 'op://vibe_coding/recall-ai MCP/password' bin/setup-secrets.sh &&
+   grep -Fq 'op://vibe_coding/recall-ai MCP/password' config/mcp.env.example &&
+   ! grep -Fq 'dwvlpanu4odty3bjnmb5my5esy' bin/setup-secrets.sh; then
+  ok "Recall.ai uses one portable 1Password reference on Windows and Linux"
+else bad "Recall.ai 1Password references differ across installers"; fi
 if ! grep -Fq '$McpServerCatalog["vercel"]' bin/setup-machine.ps1 &&
    grep -Fq "\$CodexMcpServers['vercel']" bin/setup-machine.ps1; then
   ok "Vercel is Codex-only and cannot trigger Claude browser-auth loops"
