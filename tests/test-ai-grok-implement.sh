@@ -263,6 +263,16 @@ if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE -e '--always-approve' -e 'permi
 else
   ok "implementer_never_uses_blanket_approval"
 fi
+grep -q 'native_home="$(native_path "$tmp_home")"' "$SCRIPT" \
+  && grep -q 'USERPROFILE=$native_home' "$SCRIPT" \
+  && ok "investigate_windows_home_is_native" || bad "investigate_windows_home_is_native"
+if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE 'cp -P .*auth\.json|cp .*auth\.json'; then
+  bad "investigate_never_copies_auth"
+else
+  ok "investigate_never_copies_auth"
+fi
+grep -q 'rm -rf "$tmp_home"' "$SCRIPT" && ok "investigate_removes_temp_home" || bad "investigate_removes_temp_home"
+grep -q 'unset OP_SERVICE_ACCOUNT_TOKEN' "$SCRIPT" && ok "investigate_unsets_operator_tokens" || bad "investigate_unsets_operator_tokens"
 
 # --- 14. investigate (issue #513) --------------------------------------------
 inv_case() { # inv_case NAME MODE REPO [extra args...]
@@ -287,6 +297,8 @@ rc="$(inv_case inv1 ok "$R7" --keep)"
 [ "$rc" = 0 ] && ok "investigate_happy_path" || bad "investigate_happy_path (rc=$rc: $(cat "$TMP/err.inv1"))"
 grep -q -- '--allow Bash' "$TMP/argv.txt" && ok "investigate_allows_bash" || bad "investigate_allows_bash"
 grep -q -- '--deny Bash' "$TMP/argv.txt" && bad "investigate_does_not_deny_bash" || ok "investigate_does_not_deny_bash"
+grep -q -- '--permission-mode default' "$TMP/argv.txt" && ok "investigate_uses_default_permissions" || bad "investigate_uses_default_permissions"
+grep -q -- '--permission-mode acceptEdits' "$TMP/argv.txt" && bad "investigate_does_not_use_acceptEdits" || ok "investigate_does_not_use_acceptEdits"
 grep -q -- '--disable-web-search' "$TMP/argv.txt" && ok "investigate_keeps_web_search_disabled" || bad "investigate_keeps_web_search_disabled"
 if grep -q -- '--worktree' "$TMP/argv.txt"; then bad "investigate_never_passes_worktree_flag"; else ok "investigate_never_passes_worktree_flag"; fi
 grep -q 'INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL' "$AI_GROK_STATE_DIR/implement/claude__inv1.d/brief.md" \

@@ -251,21 +251,26 @@ create_investigate_copy() { # create_investigate_copy REPO WT BASE_SHA
 # never as an environment value, argument, report, or patch.
 launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
   local grok="$1"; shift
-  local tmp_home grok_home auth_src
-  tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/ai-grok-investigate-home.XXXXXX")"
+  local tmp_home grok_home auth_src rc=0
+  mkdir -p "$IMPL_DIR"
+  tmp_home="$(mktemp -d "$IMPL_DIR/investigate-home.XXXXXX")"
   grok_home="$tmp_home/.grok"
   mkdir -p "$grok_home"
   chmod 700 "$tmp_home" "$grok_home" 2>/dev/null || true
   auth_src="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
   if [ -f "$auth_src" ]; then
     ln "$auth_src" "$grok_home/auth.json" 2>/dev/null \
-      || cp -P "$auth_src" "$grok_home/auth.json" 2>/dev/null \
-      || die "could not place Grok auth into the isolated investigation home."
+      || { rm -rf "$tmp_home"; die "could not create a same-inode authentication link for the isolated investigation home; refusing to copy or persist credentials."; }
   fi
+  local native_home native_grok_home
+  native_home="$(native_path "$tmp_home")"
+  native_grok_home="$(native_path "$grok_home")"
+  # Keep the operator PATH and Windows process environment so native Grok can
+  # spawn Bash. env -i cancelled live shell turns (2026-09-16). Strip secrets
+  # in a subshell instead, and override only the home/isolation variables.
   local -a env_args=(
-    "PATH=$PATH"
-    "HOME=$tmp_home"
-    "GROK_HOME=$grok_home"
+    "HOME=$native_home"
+    "GROK_HOME=$native_grok_home"
     "GROK_CLAUDE_SKILLS_ENABLED=false" "GROK_CLAUDE_RULES_ENABLED=false"
     "GROK_CLAUDE_AGENTS_ENABLED=false" "GROK_CLAUDE_MCPS_ENABLED=false"
     "GROK_CLAUDE_HOOKS_ENABLED=false" "GROK_CLAUDE_SESSIONS_ENABLED=false"
@@ -274,29 +279,26 @@ launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
     "GROK_CURSOR_HOOKS_ENABLED=false" "GROK_CURSOR_SESSIONS_ENABLED=false"
     "GROK_CODEX_SESSIONS_ENABLED=false"
   )
-  [ -n "${LANG:-}" ] && env_args+=("LANG=$LANG")
-  [ -n "${LC_ALL:-}" ] && env_args+=("LC_ALL=$LC_ALL")
-  [ -n "${TERM:-}" ] && env_args+=("TERM=$TERM")
-  [ -n "${TMPDIR:-}" ] && env_args+=("TMPDIR=$TMPDIR")
-  [ -n "${TMP:-}" ] && env_args+=("TMP=$TMP")
-  [ -n "${TEMP:-}" ] && env_args+=("TEMP=$TEMP")
-  # Offline tests park argv/mode next to this marker. Never a secret.
-  [ -n "${TMPDIR_FOR_TEST:-}" ] && env_args+=("TMPDIR_FOR_TEST=$TMPDIR_FOR_TEST")
-  [ -n "${AI_GROK_TEST_VERSION:-}" ] && env_args+=("AI_GROK_TEST_VERSION=$AI_GROK_TEST_VERSION")
   if is_windows; then
-    env_args+=("USERPROFILE=$tmp_home")
-    env_args+=("APPDATA=$tmp_home/AppData/Roaming")
-    env_args+=("LOCALAPPDATA=$tmp_home/AppData/Local")
-    env_args+=("XDG_CONFIG_HOME=$tmp_home/.config")
-    env_args+=("XDG_CACHE_HOME=$tmp_home/.cache")
-    env_args+=("XDG_DATA_HOME=$tmp_home/.local/share")
-    [ -n "${SYSTEMROOT:-}" ] && env_args+=("SYSTEMROOT=$SYSTEMROOT")
-    [ -n "${WINDIR:-}" ] && env_args+=("WINDIR=$WINDIR")
-    [ -n "${COMSPEC:-}" ] && env_args+=("COMSPEC=$COMSPEC")
-    [ -n "${PATHEXT:-}" ] && env_args+=("PATHEXT=$PATHEXT")
-    [ -n "${SystemDrive:-}" ] && env_args+=("SystemDrive=$SystemDrive")
+    env_args+=("USERPROFILE=$native_home")
+    env_args+=("APPDATA=$native_home\\AppData\\Roaming")
+    env_args+=("LOCALAPPDATA=$native_home\\AppData\\Local")
+    env_args+=("XDG_CONFIG_HOME=$native_home\\.config")
+    env_args+=("XDG_CACHE_HOME=$native_home\\.cache")
+    env_args+=("XDG_DATA_HOME=$native_home\\.local\\share")
   fi
-  env -i "${env_args[@]}" "$grok" "$@"
+  (
+    unset OP_SERVICE_ACCOUNT_TOKEN OP_SERVICE_ACCOUNT_TOKEN_FILE \
+          GH_TOKEN GITHUB_TOKEN GITHUB_TOKEN_FILE \
+          AWS_SECRET_ACCESS_KEY AWS_ACCESS_KEY_ID AWS_SESSION_TOKEN \
+          SSH_AUTH_SOCK SSH_AGENT_PID \
+          GOOGLE_APPLICATION_CREDENTIALS \
+          OPENAI_API_KEY ANTHROPIC_API_KEY XAI_API_KEY GROK_API_KEY \
+          AI_TEST_OPERATOR_SECRET 2>/dev/null || true
+    env "${env_args[@]}" "$grok" "$@"
+  ) || rc=$?
+  rm -rf "$tmp_home"
+  return "$rc"
 }
 
 is_primary() { # is_primary REPO PATH — refuse to ever remove the main checkout
@@ -455,10 +457,20 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
   # run with stopReason "Cancelled" (measured 2026-08-12). An explicit --deny is
   # reported to Grok, which then works around it and still finishes.
   # Investigation keeps --disable-web-search: public HTTP is Bash (curl/wget).
-  local perms=(--permission-mode acceptEdits
-               --allow Read --allow Grep --allow Edit --allow Write
-               --disable-web-search --no-memory)
-  if [ "$allow_shell" -eq 1 ]; then perms+=(--allow Bash); else perms+=(--deny Bash); fi
+  # acceptEdits auto-approves file edits but can still cancel a headless Bash
+  # tool (live 2026-09-16 canary, stopReason cancelled on turn 1). Investigation
+  # therefore uses default plus an explicit Bash allow, never auto.
+  local perms
+  if [ "$mode" = investigate ]; then
+    perms=(--permission-mode default
+           --allow Read --allow Grep --allow Edit --allow Write --allow Bash
+           --disable-web-search --no-memory)
+  else
+    perms=(--permission-mode acceptEdits
+           --allow Read --allow Grep --allow Edit --allow Write
+           --disable-web-search --no-memory)
+    if [ "$allow_shell" -eq 1 ]; then perms+=(--allow Bash); else perms+=(--deny Bash); fi
+  fi
 
   # NOTE: --worktree is deliberately NOT passed. Grok 1.0.13 documents that
   # headless mode (-p) creates no worktree from that flag, and its absence is
@@ -531,6 +543,7 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
     return 1
   fi
 
+  [ "$mode" = investigate ] && printf 'INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL\n'
   cat "$out"
   if [ "$keep" -eq 0 ]; then
     if remove_worktree "$repo" "$wt" "$name" "$copy_kind"; then
