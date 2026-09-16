@@ -1,7 +1,7 @@
 # IMPLEMENTATION PLAN — one unproven live-proof outcome per session (2026-09-16)
 
 **Tracking issue:** [popcre/ai-devops #511](https://github.com/popcre/ai-devops/issues/511)
-**Handoff:** [`HANDOFF.d/2026-09-16T2004Z-edge-dev-grok-live-proof-session-sizing.md`](HANDOFF.d/2026-09-16T2004Z-edge-dev-grok-live-proof-session-sizing.md)
+**Handoff:** retired 2026-09-16 (deleted `HANDOFF.d/2026-09-16T2004Z-edge-dev-grok-live-proof-session-sizing.md`).
 **Branch for this work:** `grok/live-proof-session-sizing` (planning). The implementing session uses its own current-upstream worktree; do not reuse a dirty checkout.
 
 Related: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401), [u2giants/shared-db #3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator), [u2giants/shared-db #3028](https://github.com/u2giants/shared-db/issues/3028) (non-orchestrator, CLOSED), [u2giants/shared-db #3029](https://github.com/u2giants/shared-db/issues/3029) (non-orchestrator).
@@ -12,12 +12,12 @@ A fresh session starts at **Step 0**. If Step 0 finds the rule already on `origi
 
 | # | Step | State | Date | Evidence |
 |---|---|---|---|---|
-| 0 | Confirm the gap still exists on current `origin/main` | ⬜ open | 2026-09-16 | You'll know it worked when `git grep -n "one unproven live-behavior outcome" origin/main -- templates/system/` prints nothing, and `git grep -n "Live proof owner (routed 2026-09-16): \[shared-db#3027\]" origin/main -- plan_shared-db-complete-throughput-repair.md` still shows several rows. |
-| 1 | Add the locked sentence to both globals | ⬜ open | 2026-09-16 | Phrase present unwrapped in both files; `bash tests/test-client-globals-required-phrases.sh` PASS. |
-| 2 | Guard the phrase in the cheap Linux test and in parity audit | ⬜ open | 2026-09-16 | New entry in `tests/test-client-globals-required-phrases.sh` and `PARITY_RULES` in `tools/context-audit/context-audit.py`. |
-| 3 | One sentence in `shared-db-handover` | ⬜ open | 2026-09-16 | Skill says leftover live proofs are one issue and one session each. |
-| 4 | Stop #401 STATUS from dumping several unproven steps on one ticket | ⬜ open | 2026-09-16 | Legend plus remaining-unproven rows follow the liveness rule in §9 Step 4. |
-| 5 | Keep routers pointing here; merge; install globals | ⬜ open | 2026-09-16 | PR merged to `origin/main`; installed Claude and Codex globals contain the phrase. |
+| 0 | Confirm the gap still exists on current `origin/main` | ✅ complete | 2026-09-16 | `origin/main` `82216ba3` had no `one unproven live-behavior outcome` in `templates/system/`; #401 still named [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) on Steps 1, 2, 2A, 3, 4, 6, and 7. |
+| 1 | Add the locked sentence to both globals | ✅ complete | 2026-09-16 | Phrase present unwrapped in both `templates/system/CLAUDE-global.md` and `templates/system/AGENTS-global-codex.md`. |
+| 2 | Guard the phrase in the cheap Linux test and in parity audit | ✅ complete | 2026-09-16 | Phrase added to `tests/test-client-globals-required-phrases.sh` and `PARITY_RULES` in `tools/context-audit/context-audit.py`. |
+| 3 | One sentence in `shared-db-handover` | ✅ complete | 2026-09-16 | Skill says leftover live proofs are one issue and one session each, and still says proofs never go to the orchestrator. |
+| 4 | Stop #401 STATUS from dumping several unproven steps on one ticket | ✅ complete | 2026-09-16 | 3027 session live at 2026-09-16T20:18Z (helper PR [shared-db#3101](https://github.com/u2giants/shared-db/pull/3101) updating; transcript 20:09Z). Split forbidden. Legend added. Posted proofs on Steps 1 and 2A stay with 3027. Remaining unproven Steps 2, 3, 4, 6, 7 stay with 3027 with “No further steps may be added to #3027.” 3029 not started. |
+| 5 | Keep routers pointing here; merge; install globals | ⬜ open | 2026-09-16 | Routers already point here. Merge and `bin/ai-adopt-globals` remain. |
 
 **Fresh-session starting point:** Step 0 on a worktree from current `origin/main`. Re-read Steps 4–5 before starting Step 4; if the 3027 session is still live, Step 4's split is forbidden.
 

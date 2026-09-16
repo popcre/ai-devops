@@ -14,7 +14,7 @@ that ships one) plus curated Master Data loads. Everything else — live proofs,
 monitoring, reports, tooling, scripts, docs, repository maintenance, app data —
 is **never** sent to the orchestrator, not even as a small item. Do it yourself
 or give it to a separately started repository session. When in doubt, it does
-not go to the orchestrator. Handing over means something completely
+not go to the orchestrator. When you keep leftover live-proof work, open one issue per unproven step and start one session per issue. Do not bundle several leftover proofs into one ticket or one chat. Handing over means something completely
 different depending on which you are, so settle it first.
 
 **You are the orchestrator only if** this session was opened as the orchestrator —
