@@ -134,10 +134,16 @@ remain bounded by the wrapper wall time.
 
 Run the repository-owned provider CLI installer after installation or a Qwen
 version change; it backs up and reapplies the child-process credential hardening.
-Then run `ai-qwen doctor --live`. A version string is not enough. The live proof
+The wrapper does **not** use an npm `qwen` on PATH. On Windows it only accepts
+the vendor standalone at `%LOCALAPPDATA%\qwen-code\bin\qwen.cmd`. If
+`Get-Command qwen` already finds npm, the installer skips the standalone unless
+you pass `-SelectedProvider qwen -QwenVersion v0.23.0`. Then run
+`ai-qwen doctor --live`. A version string is not enough. The live proof
 must return the terminal success record. Finally run
 `ai-review-preflight qualify qwen`; it repeats the live check and records the
-exact wrapper hash. Any wrapper change automatically restores quarantine.
+exact wrapper, runtime, and preloader hashes. Any of those changing
+automatically restores quarantine. Registry membership is not usability:
+check `ai-review-preflight status qwen`.
 
 Provider turns extract only the `BAILIAN_CODING_PLAN_API_KEY` 1Password
 reference from managed `~/.config/ai-devops/mcp.env`, resolve it through a
@@ -145,8 +151,10 @@ single-variable temporary environment file, and pass the real value through one
 private, self-deleting handoff file to the repository-owned Node preloader. Qwen itself
 launches in an explicit allowlisted OS environment with no provider key and
 `QWEN_HOME` as its only home directory.
-The wrapper uses the international Coding Plan endpoint with the supported
-`qwen3.8-max` model. Never paste the key into Qwen
+The supported model is `qwen3.8-max`. The Coding Plan subscription key is
+dead (401 as of 2026-09-07); live EDGE-DEV reviews use the Model Studio
+pay-per-token endpoint selected by `~/.config/ai-devops/qwen-endpoint`, with
+the same env-var name. Never paste the key into Qwen
 settings, prompts, command arguments, or logs. If the managed reference is
 missing, repair the ai-devops machine installation instead of configuring an
 unmanaged plaintext key.

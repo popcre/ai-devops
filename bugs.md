@@ -262,21 +262,25 @@ Claude Opus 5 debate.
 
 ### 12. Qwen identity and freshness rules remain unresolved; Kimi is fixed
 
-- **Current severity: HIGH**
+- **Current severity: RESOLVED 2026-09-16**
 
 - Files: `bin/ai-qwen:901-979`,
   `plan_qwen_reviewer_evidence_repair.md:7-12`
-- Confidence: high
-- What happens: Qwen can resume old reasoning after refreshing to new code without
-  binding head/tree/packet identity. Qwen live qualification is skipped while account
-  credits are exhausted.
-- Kimi outcome: normalized upstream locking, durable session identity, installed live
-  completion, and clone-deletion recovery are production-qualified; see
+- Confidence: certain from the landed evidence-repair plan plus the 2026-09-16
+  EDGE-DEV restore.
+- Historical failure: Qwen could resume old reasoning after refreshing to new
+  code without binding head/tree/packet identity, and live qualification was
+  skipped while credits were exhausted.
+- Current outcome: identity/freshness guards are in source and tested offline.
+  Qwen is registered and was live-qualified on 2026-09-07, then re-qualified on
+  EDGE-DEV on 2026-09-16 after the official standalone install went missing. A
+  governed review of a planted inverted `is_even` returned
+  `VERDICT: REJECT f3aa8eb23ee739d4f8c5b5238520791cb65d217a` with the exact
+  wrong line. Do not treat this finding as open. Verify with
+  `ai-review-preflight status qwen` (`usable` must be true); membership in
+  `config/reviewer-registry.json` is not enough.
+- Kimi outcome: unchanged; see
   `tests/verification/kimi-review-issue-46/2026-08-23-live.md`.
-- User-visible impact: Qwen conclusions can cross code versions until its separate
-  repair and later live qualification finish.
-- Required correction: finish Qwen's source repair and keep it quarantined until live
-  credits permit qualification; do not regress Kimi's proven identity schema.
 
 ### 13. Central reviewer governance exists but wrappers do not use it automatically
 
@@ -841,10 +845,12 @@ untracked links are refused before link content is copied.**
 
 ### 16. Qwen can silently continue a review against a different code version
 
-**Repair status (2026-08-22): fixed in source and proven offline; exact
-head/tree/packet/model identity blocks committed, dirty, untracked, and packet
-drift before provider contact. Live qualification is intentionally skipped
-under the owner's exhausted-credit exception, so Qwen remains quarantined.**
+**Repair status (2026-09-16): fixed in source, proven offline, and live on
+EDGE-DEV.** Exact head/tree/packet/model identity still blocks committed, dirty,
+untracked, and packet drift before provider contact. The exhausted-credit
+quarantine is historical: Qwen was live-qualified 2026-09-07 on the Model Studio
+pay-per-token lane and re-qualified 2026-09-16 after the official standalone
+install was restored. Do not re-quarantine from this paragraph.
 
 - Files: `bin/ai-qwen:894-899`, `bin/ai-qwen:949`
 - Confidence: high
