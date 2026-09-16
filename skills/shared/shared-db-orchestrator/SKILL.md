@@ -227,6 +227,73 @@ Expiry never removes collision protection. Cleanup must prove ownership and
 finished branch/worktree/PR state before removing temporary refs. The reserved
 version remains permanently unavailable because it may already exist in preview.
 
+## Quarantine, recovery, and terminal retirement
+
+Once a lane is recorded as abandoned there are exactly two endings, and the
+difference is whether the work can still come back. Choosing the wrong one is
+expensive in opposite directions: retiring recoverable work throws away a
+reserved version and a reviewed branch, while quarantining truly dead work leaves
+a lane permanently half-held.
+
+**Quarantine and recovery — the work may still come back.** Open a durable
+abandonment audit issue from shared-db's
+`.github/ISSUE_TEMPLATE/author-lane-abandonment.md`, and let the
+`--abandonment-audit` output be its first piece of evidence, so the record starts
+from the machine's reading rather than from someone's recollection. Then
+relinquish capacity with the observed worktree state:
+
+```bash
+node scripts/manage-migration-author-lanes.mjs --relinquish-author-lease \
+  --claim <n> --owner <owner> --blocked-on issue:#<audit issue>
+```
+
+Change nothing else. The pull request, the claim, the exact-object locks, the
+version reservation, the branch and the worktree all stay exactly as they are —
+relinquishing returns a slot, not the work. No ref, branch, claim or worktree is
+ever deleted to free a lane, because a lane is a scheduling convenience and those
+are the only durable evidence that the migration was ever authored. Recover the
+work, record the recovery evidence on the audit issue, and resume atomically:
+
+```bash
+node scripts/manage-migration-author-lanes.mjs --resume-author-lease \
+  --claim <n> --owner <owner> --lease-hours <hours>
+```
+
+Resume is not a reversal of the relinquish; it re-runs every current collision,
+capacity and version check, because the world moved while the lane was parked.
+
+**Terminal retirement — the work cannot or should not return.** Record the
+terminal evidence on the audit issue first, so the decision is auditable before
+anything closes. Obtain Albert's explicit decision only where the work is
+potentially recoverable — a `dirty` or `remote` worktree; `clean` or proven
+`absent` work the orchestrator retires on its own authority. Close the pull
+request through the normal authenticated operator flow, never deleting its branch
+or refs, so the history survives the closure. Retire the claim with the
+tombstoning form:
+
+```bash
+node scripts/manage-migration-author-lanes.mjs --release-claim <n> --owner <owner>
+```
+
+That write is deliberately not a deletion: it writes an immutable tombstone and
+reads it back before the claim closes, so a later reader can tell a retired claim
+from one that silently vanished. A successor takes a fresh claim tuple and a
+fresh migration version; a retired version can never be reissued, because it may
+already exist in a preview database.
+
+**What the record must contain.** The abandonment record must identify the claim,
+the pull request and its exact head, the recorded owner, the branch, the
+migration version, the last known worktree and machine, the expiry, the evidence
+that the author is terminal or unreachable, the observed worktree state, and the
+recovery or successor references. All of these are recorded as identifiers only —
+never personal paths, account names, credentials, tokens or message contents,
+because the audit issue is a durable shared artifact and an identifier is all a
+successor needs to reconstruct the lane.
+
+The audit issue's `db-work-scope` fence carries an empty `objects:` on purpose.
+Claiming an object there would collide with the very claim being investigated,
+and the investigation would block itself.
+
 ## Phase 2 preview and reviewer lifecycle
 
 Phase 2 is active. Protected claims never disappear when author capacity is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations serialize provider/wrapper execution keys for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek, and create durable ordered waits when every eligible reviewer is busy. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
