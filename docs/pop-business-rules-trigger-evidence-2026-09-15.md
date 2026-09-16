@@ -1,8 +1,8 @@
 # `pop-business-rules` trigger evidence — 2026-09-15
 
-This evidence closes the remaining live-client gate in issue #35. The tested
-source and both installed client copies had SHA-256
-`9ED982608A7F11ED9F250E52672F78DF9DFE9B504086DA1EF33EEA2B4FEED888`.
+This evidence closes the remaining live-client gate in issue #35. After PR #492
+merged as `67d2e3c8`, the source and both installed client copies had SHA-256
+`B3A8DC4BBEA1A9953BC06EB90C77C937D6FAC6E0D653A46D450CE0CE29104ADA`.
 The 20 prompts and their expected outcomes remain in
 `tools/skill-trigger-eval/pop-business-rules.eval.json`.
 
@@ -28,6 +28,22 @@ was observed directly. Each prompt opened the installed
 after that selection event, before any repository or business-data mutation.
 Combined result: all 10 intended prompts selected the Skill, and all 10
 near-misses declined it, with three observations per prompt.
+
+## Behavioral probes
+
+Three read/write-isolated probes ran in a disposable Git fixture containing a
+small application map, two business-rule topics, and one consumer application
+document:
+
+- Read: the Skill opened the map and only the mapped taxonomy topic, identified
+  `mgCategory` as governed by Product classification, and reported it Settled.
+- Add/change: without an authority or effective date, the Skill added the
+  hypothetical statement only to the applicable business-rule topic as
+  Proposed with both fields Unknown. The consumer application was unchanged.
+- Audit: the Skill identified the current application statement as conflicting
+  with the Settled sourcing-owner rule, retained the explicitly Historical
+  sales-owner statement as non-controlling, and ignored an unrelated Proposed
+  packaging rule. The read-only audit changed no files.
 
 ## Offline and installation checks
 
