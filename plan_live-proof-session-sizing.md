@@ -8,7 +8,7 @@ Related: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401)
 
 ## STATUS — read first
 
-A fresh session starts at **Step 0**. If Step 0 finds the rule already on `origin/main`, stop and close #511 rather than adding a second copy.
+All steps are ✅. A fresh session must **not** re-implement #511. Remaining leftover proofs stay with live [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator); do not start a second chat on them.
 
 | # | Step | State | Date | Evidence |
 |---|---|---|---|---|
@@ -19,7 +19,7 @@ A fresh session starts at **Step 0**. If Step 0 finds the rule already on `origi
 | 4 | Stop #401 STATUS from dumping several unproven steps on one ticket | ✅ complete | 2026-09-16 | 3027 session live at 2026-09-16T20:18Z (helper PR [shared-db#3101](https://github.com/u2giants/shared-db/pull/3101) updating; transcript 20:09Z). Split forbidden. Legend added. Posted proofs on Steps 1 and 2A stay with 3027. Remaining unproven Steps 2, 3, 4, 6, 7 stay with 3027 with “No further steps may be added to #3027.” 3029 not started. |
 | 5 | Keep routers pointing here; merge; install globals | ✅ complete | 2026-09-16 | PR #515 merged as `837fe41d`. Installed Claude and Codex globals on edge-dev contain `one unproven live-behavior outcome`. #511 closed. |
 
-**Fresh-session starting point:** Step 0 on a worktree from current `origin/main`. Re-read Steps 4–5 before starting Step 4; if the 3027 session is still live, Step 4's split is forbidden.
+**Fresh-session starting point:** none for #511. The rule is on `origin/main` (`837fe41d`) and installed on edge-dev. Do not add a second copy. 3027 leftover proofs are not this plan’s work.
 
 ---
 
@@ -84,29 +84,26 @@ Plain-English diagnosis (not in git; do not commit transcripts): `C:\Users\ahaza
 
 ## 5. Current state of the code
 
-Checked against `origin/main` `9b205e22` on 2026-09-16 (re-check in Step 0; `main` moves).
+✅ UPDATED 2026-09-16 — do not redo. Implementation merged as PR #515 (`837fe41d`); STATUS tick PR #519 (`a4d83944`); #511 CLOSED. Installed on edge-dev.
 
 **Already on main, works, do not rewrite**
 
 - Orchestrator gets only database-shape work: `skills/shared/shared-db-handover/SKILL.md:10-18` and both globals (PR #500, `e67d959d`).
 - Stalled subagent restart, quote Albert’s exact words, Grok/independent-reviewer production approvals, prose verification skip: `templates/system/CLAUDE-global.md` (PR #508, `f60a78ad`). Codex copy in `templates/system/AGENTS-global-codex.md`.
 - Trace live path before a proof; `Waiting on —` must name owner and last activity; overlapping files go to one agent in sequence: PR #509, `2719315e`.
-- Cheap phrase guard: `tests/test-client-globals-required-phrases.sh:23-35` (no “one unproven” phrase yet).
-- Cross-client parity map: `tools/context-audit/context-audit.py` `PARITY_RULES` at line 101 (no “one unproven” rule yet).
-- #401 STATUS still says `Live proof owner (routed 2026-09-16): shared-db#3027` on Steps 1, 2, 2A, 3, 4, 6, and 7 (`plan_shared-db-complete-throughput-repair.md:12-19`). Step 5 points at 3028 (closed). Step 10 points at 3029.
+- Cheap phrase guard includes `one unproven live-behavior outcome` (must stay unwrapped).
+- Cross-client parity map includes `"one unproven outcome per session"`. Adding another `PARITY_RULES` key also requires the same phrase in `$parityLines` in `tests/test-context-audit.ps1` (see `docs/development.md`).
+- Handover skill: one issue and one session per leftover proof; proofs still never go to the orchestrator.
+- #401 legend: a Live proof owner cell names at most one unproven step and one issue. Remaining unproven 3027 rows say no further steps may be added. Posted proofs on Steps 1 and 2A stay with 3027.
 
-**Half-done**
+**Not this plan’s work (do not take over)**
 
-- 3027 collected some live proofs today (Step 1 automatic production apply; some of 2/2A/4). Steps 6 and 7 were still unproven at 18:59Z. This plan does not finish them.
+- 3027 leftover proofs (non-orchestrator) stay with that live owner.
+- 3029 five-outcome trial is not started.
 
 **Untouched by this plan**
 
 - shared-db production-train code, reviewer-reroute wiring, merge-queue settings.
-
-**This planning branch**
-
-- Issue #511 is OPEN.
-- This plan file and its handoff are the first commit of `grok/live-proof-session-sizing`. Implementation is not started.
 
 ## 6. Key findings and root cause
 
@@ -117,7 +114,7 @@ Evidence:
 - #401 STATUS legend already says 🟨 means “code landed, not accepted” (`plan_shared-db-complete-throughput-repair.md:24-26`). The scoreboard knew. The packaging still pointed seven steps at 3027.
 - 2026-09-16 routing comment on those issues labelled them orchestrator work even though they do not change database shape. The 3027 chat froze until Albert overrode it. #500 later forbade that routing; this plan does not repeat #500.
 - The 3027 chat spawned eight helpers, messaged other sessions 19 times, and wrote one file in the parent. Helpers stopped to “wait” at least four times. Parallel helpers plus exact-head merge caused seven redo cycles in 2.5 hours. Those are symptoms. #508/#509 already cover helper-wait, quoted authority, owned waits, and colliding files.
-- **The gap that remains:** nothing tells a session to refuse a bundle. Nothing stops a scoreboard from pointing seven unproven steps at one ticket.
+- **The gap this plan closed:** nothing told a session to refuse a bundle, and the scoreboard pointed seven unproven steps at one ticket. Do not reopen that packaging.
 
 **Do not confuse this with “the merge process is too slow.”** Exact-head merge is how colliding work is stopped. The fix is one worker and one unproven outcome, not a weaker merge.
 
@@ -261,6 +258,8 @@ Add no other tests.
 - **Must stay green:** the existing context-audit required-check path that uses `PARITY_RULES` (the Windows `tests/test-context-audit.ps1` suite is *not* required on every prose-adjacent PR, but adding a `PARITY_RULES` key is the Linux-cheap equivalent for this rule; run `python tools/context-audit/context-audit.py --root . --strict` if it finishes in this session, and do not fail closed on budget warnings unless this edit caused a new budget breach — if it did, shorten nothing else; say so on #511).
 - Do not run a local full Windows reviewer series. Check `bin/ai-test-local --check-collision` before any local full suite; a busy self-hosted runner on this host is a stop for that suite only.
 
+**Ran 2026-09-16:** phrase test PASS; wrap-fail then restore PASS; `python tools/context-audit/context-audit.py --root . --strict` 0 parity mismatches. Pre-existing always-loaded budget warning remained (42341 vs 12449); one bullet added; no other rules deleted. First PR #515 Windows section 3 failed because `$parityLines` lacked the new phrase — not a 30-minute runner timeout. Fixture fix then passed.
+
 ## 11. Constraints, standing rules, and gotchas in force
 
 - Branch and PR; never push to `main`. Merge through the queue. Albert does not merge.
@@ -271,7 +270,7 @@ Add no other tests.
 - Do not bulk-load Markdown. Read this plan’s STATUS, then only the files a step names.
 - Shared-db structure changes stay in `u2giants/shared-db`. This plan makes none.
 - GitHub calls through `bin/ai-gh`. No `gh run watch`. `bin/ai-pr-wait` for the PR.
-- Installation writes outside the repo. Read `docs/deployment.md` / skills-usage-guide before `ai-adopt-globals`. Preserve machine sections.
+- Installation writes outside the repo. Read `docs/deployment.md` / skills-usage-guide before `ai-adopt-globals`. Preserve machine sections. A linked worktree run can install globals then refuse machine launchers; finish from the canonical checkout (`docs/skills-usage-guide.md`).
 - Public repo: never commit transcripts or the diagnosis file under `.grok\tmp`.
 - Do not start a second 3027 chat.
 - Response Style still applies to Albert; this plan file is allowed to run long.

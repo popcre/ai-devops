@@ -338,6 +338,26 @@ in `tools/context-audit/budgets.json`. **Budgets warn and never fail a run**,
 even under `--strict`; ratchet a budget down only after a measured reduction has
 landed, and never raise one to silence a warning.
 
+### Adding a `PARITY_RULES` key
+
+What changed:
+A new `PARITY_RULES` entry in `tools/context-audit/context-audit.py` also needs
+the same phrase in `$parityLines` in `tests/test-context-audit.ps1`.
+
+Why:
+The cheap Linux phrase test and `python tools/context-audit/context-audit.py
+--root . --strict` can pass against the real globals while the Windows positive
+fixture still reports a mismatch. On 2026-09-16, PR #515’s Windows section 3
+failed after ~30 minutes of its bash shard; the PowerShell suite then failed in
+seconds on `one unproven outcome per session`. That duration looks like a job
+timeout (`timeout-minutes: 40`). It was the fixture.
+
+Future sessions should:
+When adding a `PARITY_RULES` key, add the same unwrapped phrase to `$parityLines`
+in the same change. If Windows section 3 fails near 30 minutes after that kind of
+edit, run `pwsh -NoProfile -File tests/test-context-audit.ps1` locally before
+treating it as a runner timeout.
+
 The tests use temporary repositories and temporary Claude/Codex homes. They
 cover shared-skill installation, counts, dry-run safety, source-name collisions,
 automatic quarantine of the retired ShareSync skill, Markdown parsing
