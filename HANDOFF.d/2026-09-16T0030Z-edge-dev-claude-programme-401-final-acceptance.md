@@ -3,6 +3,7 @@
 - **Created:** 2026-09-16T00:30Z, machine `edge-dev`, agent Claude Code (Opus 5)
 - **Plan:** [`../plan_shared-db-complete-throughput-repair.md`](../plan_shared-db-complete-throughput-repair.md). Read its STATUS table first; it is now reconciled against live GitHub and must not be re-derived.
 - **Tracking issue:** [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401) — **still OPEN**
+- **Update 2026-09-16T01:38Z:** PR #412 merged as `9d02b382ad6a50ee2cb9e6b6c99ba994fcf6073d`. No ai-devops pull request for #401 is open.
 - **Retires:** the three 2026-09-11 Codex `-401` handoffs and the 2026-09-15 Claude stall-integration handoff. Their content is superseded by the STATUS table and by the acceptance audit comment on #401.
 
 ## 1. What this session was doing, and why
