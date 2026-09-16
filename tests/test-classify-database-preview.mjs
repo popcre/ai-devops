@@ -127,3 +127,10 @@ test('root text, executable text, and binary docs cannot claim no preview', () =
   const binaryManifest = { ...manifest, files: [{ ...manifest.files[0], sha256: sha256(binary) }] }
   assert.equal(classifyDatabasePreview(binaryManifest, { ...adapters, readFileAt: () => binary }).decision, 'DATABASE_PREVIEW_REQUIRED')
 })
+
+for (const [file, decision] of [['tests/verification/proof.md', 'NO_DATABASE_PREVIEW'], ['tests/verification/proof.json', 'DATABASE_PREVIEW_REQUIRED']]) test(`${file} under tests/verification is ${decision}`, () => {
+  const content = 'evidence write-up'
+  const manifest = { schema_version: 1, base_sha: 'a'.repeat(40), head_sha: 'b'.repeat(40), applicable_checks: ['unit-tests'], files: [{ path: file, sha256: sha256(content), impact: 'documentation', reason: 'verification evidence' }] }
+  const adapters = { root: tmpdir(), isAncestor: () => true, listChangedFiles: () => [file], listDeletedFiles: () => [], readFileAt: () => Buffer.from(content), modeAt: () => '100644' }
+  assert.equal(classifyDatabasePreview(manifest, adapters).decision, decision)
+})

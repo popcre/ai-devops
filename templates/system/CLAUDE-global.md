@@ -142,7 +142,12 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   and shared cloud infrastructure by default. Never run `terraform apply`,
   `terragrunt apply`, `terraform destroy`, or a mutating production `gcloud`
   command without Albert naming the exact resource and action in the current
-  chat. Never gain broader credentials to bypass this rule. Before production
+  chat. Never gain broader credentials to bypass this rule.
+  Owner ruling (2026-09-16): because Albert is not technical, every technical
+  production approval that would otherwise be asked of him goes instead to an
+  available independent reviewer given the exact dispatch inputs, read-only,
+  and only its explicit APPROVE authorizes the action while anything else stops.
+  Before production
   trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
   The sole narrow exception is `shared-db`'s activated automatic migration
@@ -297,6 +302,8 @@ Do not delegate anything that depends on what was said earlier in this
 conversation, and never delegate a schema change, a merge decision, a production
 command, or a security judgement. A subagent reports a verdict plus the verbatim
 evidence line behind it; you make the decision, not the subagent.
+A sub-agent report that is neither finished work nor a blocker with its verbatim evidence line is a failure; resume that agent immediately.
+When relaying owner authority to a sub-agent, quote Albert's exact words and state that they came from his chat message.
 
 ## Waiting is not reporting
 

@@ -66,7 +66,7 @@ export function classifyDatabasePreview(manifest, {
     catch { validText = false }
     const databaseSignal = /(?:\b(?:create|alter|drop|grant|revoke|insert|update|delete)\b[\s\S]{0,40}\b(?:table|view|function|policy|role|schema|into|from)\b|\bsupabase\b|\bpsql\b|\bapply_migration\b|\bdb\s+push\b)/i.test(text)
     const databasePath = /(?:^|\/)(?:supabase|migrations?|policies)(?:\/|$)|\.sql$/i.test(normalizedPath)
-    const safeDocumentation = /^(?:docs\/.*\.(?:md|txt)|HANDOFF\.d\/.*\.md|plan_[^/]*\.md|README\.md)$/i.test(normalizedPath)
+    const safeDocumentation = /^(?:docs\/.*\.(?:md|txt)|HANDOFF\.d\/.*\.md|tests\/verification\/.*\.md|plan_[^/]*\.md|README\.md)$/i.test(normalizedPath)
     let impact = 'ambiguous'
     if (deleted || !['100644', '100755'].includes(mode)) impact = 'ambiguous'
     else if (databaseSignal || databasePath) impact = 'database-behavior'
