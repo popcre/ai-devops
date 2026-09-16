@@ -1,15 +1,20 @@
 ---
 name: shared-db-handover
-description: Hand over, wrap up, close out, or stop any shared-db or shared Supabase session. Use for orchestrator/coordinator transfer, database handoff, "wrap up" after schema work, fresh-session transfer, or dispatched database agents. Non-orchestrators stop and route work; orchestrators write coordination plus per-agent handoff state.
+description: Hand over, wrap up, close out, or stop any shared-db or shared Supabase session. Use for orchestrator/coordinator transfer, database handoff, "wrap up" after schema work, fresh-session transfer, or dispatched database agents. Non-orchestrators route ONLY database-shape changes to the orchestrator and keep everything else; orchestrators write coordination plus per-agent handoff state.
 ---
 
 # shared-db-handover
 
 ## FIRST: are you the orchestrator? Answer this before anything else
 
-`u2giants/shared-db` runs **ONE orchestrator session at a time**, and that
-orchestrator dispatches every piece of work to sub-agents in isolated worktrees
-(see `shared-db-orchestrator`). Handing over means something completely
+`u2giants/shared-db` runs **ONE orchestrator session at a time**. It takes
+**only work that changes the SHAPE of the database** (schema, table, column,
+view, function, trigger, policy, grant, index, constraint, or the migration
+that ships one) plus curated Master Data loads. Everything else — live proofs,
+monitoring, reports, tooling, scripts, docs, repository maintenance, app data —
+is **never** sent to the orchestrator, not even as a small item. Do it yourself
+or give it to a separately started repository session. When in doubt, it does
+not go to the orchestrator. Handing over means something completely
 different depending on which you are, so settle it first.
 
 **You are the orchestrator only if** this session was opened as the orchestrator —
@@ -27,7 +32,7 @@ Then take exactly one path:
 
 ---
 
-## (A) You are NOT the orchestrator — stop, and open a handover issue
+## (A) You are NOT the orchestrator — stop mutating, and hand over only structural work
 
 **Stop working now.** Do not continue the task, and do not commit, push, merge,
 apply, promote, or write anything further to any database. Do not create
@@ -35,7 +40,7 @@ background task chips. Do not delete or clean up your worktree or branch — the
 orchestrator may resume them, and an agent that tidies itself away destroys the
 evidence.
 
-**Do exactly one thing: open a GitHub issue** on `u2giants/shared-db` describing
+**If — and only if — the unfinished work changes the database's shape, open a GitHub issue** on `u2giants/shared-db` describing
 what you were doing and what state you left it in. Include a `db-work-scope` block
 with separate `status`, `work_type`, and `route`. Never infer the route from the
 repository, `db-work`, or `needs-albert`.

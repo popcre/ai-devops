@@ -136,6 +136,10 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   Outside-sourced bulk loads into curated Master Data also use that governed
   route. Prove the target database immediately before every write. Load
   `codex-shared-db-change` for the full procedure.
+- **Shared-db orchestrator gets the minimum.** Send it only work that changes
+  the database's SHAPE, or a curated Master Data load. Proofs, monitoring,
+  reports, tooling, scripts, docs, and repository maintenance never go there,
+  whatever their size; the session that owns the outcome does them.
 - **Shared-db orchestrator sessions only:** when opening or running the sole
   orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
   queue, reviewer, and owner-decision rules apply only in that context and stay
