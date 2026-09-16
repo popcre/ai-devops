@@ -21,7 +21,7 @@ Correction baseline: `origin/main` `2719315e13fc6e3cb99511dced33915ea46f4d47` (2
 | 2. Kimi investigate on the current CLI | #255 | ⬜ open | Required artifacts are listed in Step 2 |
 | 3. Qwen investigate on the current CLI; repair discovery only if still broken | #256 | ⬜ open | Required artifacts are listed in Step 3 |
 | 4. Muse investigate on the current OpenCode pin | #257 | ⬜ open | Required artifacts are listed in Step 4 |
-| 5. Grok investigate on the current pin | #513 | ⬜ open | Required artifacts are listed in Step 5 |
+| 5. Grok investigate on the current pin | #513 | 🟡 landing | `ai-grok-implement investigate` on pin 1.0.13; formal review unchanged; #249 untouched |
 | 6. Cross-provider integration, exact-head review, and merge | #253 | ⬜ open | Required artifacts are listed in Step 6 |
 
 **2026-09-16 correction (locked):** the 2026-09-04 plan mixed a thin `investigate` command with OpenCode/Kimi/Qwen upgrades and made Muse wait on GLM's upgrade. That mix is withdrawn. Deliver investigation on the currently qualified pin. Upgrades are out of this plan. Provider children are independent after Step 0.

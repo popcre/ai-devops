@@ -14,6 +14,10 @@ roles, adapting CLI flags, and how the scripts use the commands.
   reviews through a tool-limited, digest-bound adapter.
 - **GLM-5.3** — optional independent second opinion invoked by either Claude or
   Codex through `ai-glm`, in named persistent sessions; defaults to read-only review.
+- **Grok Build 4.6** — optional independent review through `ai-grok-review`
+  (read-only) and isolated edits through `ai-grok-implement`. Advisory
+  look-into-this work uses `ai-grok-implement investigate`; that is not a formal
+  pass.
 
 ## GLM configuration
 
@@ -45,6 +49,21 @@ Kimi home, the read-only review profile, and provider availability. A restricted
 task that cannot pass receives `execution-context-denied` and must send the same
 request to the Full Access main task. It must not retry, change permissions, or
 copy credentials.
+
+## Grok Build
+
+Grok is pinned to one exact CLI build in `config/provider-cli-versions.json`
+(currently 1.0.13). Both wrappers refuse paid work against any other build.
+
+- Formal review: `ai-grok-review`. Bash and web search stay denied. Investigation
+  is not added to this command.
+- Isolated edits: `ai-grok-implement run`. Bash stays denied unless you pass
+  `--allow-shell`.
+- Look-into-this: `ai-grok-implement investigate <name> --repo <path> --prompt-file <f>`.
+  This reuses the isolated copy with the shell allowed. The report is labeled
+  `INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL`. It is not issue #249.
+
+Never call `grok` directly for these jobs.
 
 ## Important: the exact flags may differ on your machine
 

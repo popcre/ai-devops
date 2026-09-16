@@ -77,7 +77,11 @@ For Grok, GLM, or Kimi debate changes, keep the shared field contract in
 offline in `tests/test-ai-grok-review.sh`. Grok is pinned to one exact CLI build
 in `config/provider-cli-versions.json`; the wrappers refuse paid work against any
 other build, so a Grok CLI upgrade means changing that policy file and
-re-qualifying, not relaxing the check. Do not add runtime parsing for
+re-qualifying, not relaxing the check. Advisory look-into-this work is
+`ai-grok-implement investigate` (issue #513): shell and public internet in a
+remote-less copy, labeled not-formal-approval. Do not add Bash or web search to
+`ai-grok-review`. Do not implement the #249 broker in that command. Test both
+wrappers in `tests/test-ai-grok-implement.sh` and `tests/test-ai-grok-review.sh`. Do not add runtime parsing for
 semantic fields: missing evidence is a skill review failure, while the wrapper
 continues to enforce terminal completion, fixed permissions, session reuse,
 cache reporting, and cost reporting.

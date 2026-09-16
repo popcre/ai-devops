@@ -1,6 +1,6 @@
 ---
 name: grok-cli
-description: Use xAI Grok Build through ai-grok-review for repository analysis, read-only review, debate, continuation, or explicit isolated implementation. Use for "ask Grok", "run this by Grok", "Grok CLI", a Grok second opinion, or delegated Grok coding.
+description: Use xAI Grok Build through ai-grok-review for repository analysis, read-only review, debate, continuation, or explicit isolated implementation. Use for "ask Grok", "run this by Grok", "Grok CLI", a Grok second opinion, delegated Grok coding, or Grok look-into-this / investigate.
 ---
 
 # Grok CLI
@@ -188,9 +188,16 @@ code**, use the companion wrapper:
 
 ```bash
 ai-grok-implement run <name> --repo <path> --prompt-file "$brief" [--ref <ref>] [--max-turns 20]
+ai-grok-implement investigate <name> --repo <path> --prompt-file "$brief" [--ref <ref>] [--max-turns 20]
 ai-grok-implement cleanup <name> [--force]
 ai-grok-implement list | doctor
 ```
+
+`investigate` is advisory look-into-this mode. It runs in an isolated remote-less
+copy with the shell allowed so Grok can run builds, tests, and a public HTTP
+check. The brief and doctor output say `INVESTIGATION — ADVISORY, NOT FORMAL
+APPROVAL`. Do not treat it as exact-head approval. Do not add Bash or web search
+to `ai-grok-review`. Do not use this command to build the #249 broker.
 
 It creates the isolated worktree itself with `git worktree add`, bases it on `origin/main`
 by default, converts every path to native Windows form, keeps the brief inside the

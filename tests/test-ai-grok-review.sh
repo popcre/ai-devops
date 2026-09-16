@@ -543,7 +543,9 @@ check "wrapper still reports cost" "grep -Fq 'cost:' '$SCRIPT'"
 echo "== usage_and_exit_codes =="
 run >/dev/null 2>&1; [ $? -eq 2 ] && ok "no args exits 2" || bad "no args exits 2"
 run bogus-cmd >/dev/null 2>&1; [ $? -eq 2 ] && ok "unknown command exits 2" || bad "unknown command exits 2"
+run investigate >/dev/null 2>&1; [ $? -eq 2 ] && ok "investigate is not a review command" || bad "investigate is not a review command"
 check "help exits 0" "run --help"
+check "review help does not advertise investigate" "! run --help 2>/dev/null | grep -qi investigate"
 
 # 2/3 -----------------------------------------------------------------------
 echo "== max_turns_always_present / permissions_are_fixed =="
