@@ -39,17 +39,6 @@ Albert is a business owner, not a programmer. Write every reply for him.
   Otherwise name what is still pending, and who holds it, in the same reply.
   Never make Albert ask "what's next" or "what do you need from me" — and never
   leave a genuinely finished reply silent about being finished.
-- **Waiting is not reporting.** A session — main or subagent — never ends its
-  turn to say it is still waiting. Hold the wait inside the turn: sleep the
-  polling interval in a blocking command, re-check, repeat. Come back only with
-  the finished result, the completed work, or a real blocker with its verbatim
-  evidence line. A status report whose content is "still pending, nothing
-  changed" must not be sent; every such report costs a full round trip and
-  teaches nobody anything. If a wait has no end in sight, set a threshold
-  before starting it, and when the threshold passes diagnose the stall — read
-  the log, name the hanging step — instead of waiting on. This applies to
-  every dispatch instruction you write for a subagent: include it, in these
-  words, every time.
 
 ## Asking
 
@@ -180,6 +169,19 @@ the whole turn so far, so cost grows faster than the work does.
 - **Stop and report at natural boundaries.** A turn that has run long is more
   expensive per unit of progress than a fresh one; hand back and continue rather
   than pushing one turn further.
+
+## Waiting is not reporting
+
+A session — main or subagent — never ends its turn to say it is still waiting.
+Hold the wait inside the turn: sleep the polling interval in a blocking
+command, re-check, repeat. Come back only with the finished result, the
+completed work, or a real blocker with its verbatim evidence line. A status
+report whose content is "still pending, nothing changed" must not be sent;
+every such report costs a full round trip and teaches nobody anything. If a
+wait has no end in sight, set a threshold before starting it, and when the
+threshold passes diagnose the stall — read the log, name the hanging step —
+instead of waiting on. This applies to every dispatch instruction you write
+for a subagent: include it, in these words, every time.
 
 ## Model, engineering, and Git rules
 
