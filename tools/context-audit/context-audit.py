@@ -118,7 +118,7 @@ PARITY_RULES = {
     "repairs preserve original capability": r"original capability still works",
     "symptom suppression is not a fix": r"symptom suppression",
     "pending work in one Still open block": r"\*\*Still open\*\*",
-    "every pending bullet names its holder": r"`Waiting on —`",
+    "every pending bullet names its holder": r"`Waiting on",
     "process rules never override replies": r"Process rules never override this",
     "never delegate a decision": r"never delegate a schema change|Never delegate a decision",
     "finished reply says it is finished": r"silent about being finished",

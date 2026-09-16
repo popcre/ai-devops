@@ -26,7 +26,7 @@ $parityLines = @(
     "# Response Style",
     "Account for the whole job",
     "**Still open**",
-    '`Waiting on —`',
+    '`Waiting on',
     "Process rules never override this",
     "never delegate a schema change",
     "silent about being finished",
