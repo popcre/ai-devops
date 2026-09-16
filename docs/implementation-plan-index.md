@@ -22,7 +22,7 @@ record merely to reduce the file count.
 | [`plan_shared-db-complete-throughput-repair.md`](../plan_shared-db-complete-throughput-repair.md) | [#401](https://github.com/popcre/ai-devops/issues/401) | Step 0; consume independently owned #2705/#2709/#2715/#2716 work, then enforce two-sided structural admission and request-to-live delivery |
 | [`plan_reviewer-assisted-problem-solving.md`](../plan_reviewer-assisted-problem-solving.md) | [#198](https://github.com/popcre/ai-devops/issues/198) | Step 0; no implementation has started |
 | [`plan_reviewer-cache-efficiency.md`](../plan_reviewer-cache-efficiency.md) | [#333](https://github.com/popcre/ai-devops/issues/333) | Step 2.1; only provider-returned cache reporting remains |
-| [`plan_reviewer-investigation-mode-option-b.md`](../plan_reviewer-investigation-mode-option-b.md) | [#253](https://github.com/popcre/ai-devops/issues/253) | Corrected 2026-09-16: Step 0, then independent children #254-#257 and Grok #513 on current pins; no CLI upgrades; #249 stays separate |
+| [`plan_reviewer-investigation-mode-option-b.md`](../plan_reviewer-investigation-mode-option-b.md) | [#253](https://github.com/popcre/ai-devops/issues/253) | Step 0 still open. Grok #513 landed `7f0f8f6c` 2026-09-16 — do not redo. Remaining children #254–#257. No CLI upgrades; #249 stays separate |
 
 ## Completed decision records
 

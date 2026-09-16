@@ -16,13 +16,13 @@ Correction baseline: `origin/main` `2719315e13fc6e3cb99511dced33915ea46f4d47` (2
 
 | Step | Owner issue | Status | Evidence |
 |---|---:|---|---|
-| 0. Re-resolve source truth, ownership, and current pins | #253 | ⬜ open | Record output under `tests/verification/reviewer-investigation-option-b/<UTC>-baseline/` |
+| 0. Re-resolve source truth, ownership, and current pins | #253 | ⬜ open | Full multi-provider baseline directory was not written; #513 used a Grok-only live doctor. Do not treat Step 0 as done. |
 | 1. GLM investigate on the current OpenCode pin | #254 | ⬜ open | Required artifacts are listed in Step 1 |
 | 2. Kimi investigate on the current CLI | #255 | ⬜ open | Required artifacts are listed in Step 2 |
 | 3. Qwen investigate on the current CLI; repair discovery only if still broken | #256 | ⬜ open | Required artifacts are listed in Step 3 |
 | 4. Muse investigate on the current OpenCode pin | #257 | ⬜ open | Required artifacts are listed in Step 4 |
-| 5. Grok investigate on the current pin | #513 | 🟡 landing | `ai-grok-implement investigate` on pin 1.0.13; formal review unchanged; #249 untouched |
-| 6. Cross-provider integration, exact-head review, and merge | #253 | ⬜ open | Required artifacts are listed in Step 6 |
+| 5. Grok investigate on the current pin | #513 | ✅ done 2026-09-16 | `origin/main` `7f0f8f6c` (PR #517); issue #513 closed; do not redo |
+| 6. Cross-provider integration, exact-head review, and merge | #253 | ⬜ open | Required artifacts are listed in Step 6. Wait for #254–#257. |
 
 **2026-09-16 correction (locked):** the 2026-09-04 plan mixed a thin `investigate` command with OpenCode/Kimi/Qwen upgrades and made Muse wait on GLM's upgrade. That mix is withdrawn. Deliver investigation on the currently qualified pin. Upgrades are out of this plan. Provider children are independent after Step 0.
 
@@ -30,7 +30,9 @@ Correction baseline: `origin/main` `2719315e13fc6e3cb99511dced33915ea46f4d47` (2
 
 **2026-09-16 owner:** add Grok as a #253 child (#513). Same Option B rules. Do not implement the #249 broker here.
 
-Fresh session starts at **Step 0**. Re-read the remaining downstream steps before each provider child. Do not start a child until Step 0 has a baseline artifact.
+Fresh session starts at **Step 0** for remaining children #254–#257. Do not redo #513. Do not start a child until Step 0 has a baseline artifact. #513 landed without that full baseline; that is not permission to skip Step 0 for the others.
+
+**2026-09-16 #513 landed (do not redo):** `ai-grok-implement investigate` is on `origin/main` `7f0f8f6c`. Formal `ai-grok-review` is unchanged. Pin stays `1.0.13`. Issue #249 was not implemented. Exact-head Claude Opus 5 final-check APPROVE on `6a63f84e` (run `20260916T214612-2826818-29891`). Offline: `tests/test-ai-grok-implement.sh` 80 passed; `tests/test-ai-grok-review.sh` 272 passed, 0 failed. Live Windows doctor: Grok `1.0.13`, auth OK. Live headless Bash on that pin returned `stopReason: cancelled` for both `investigate` and `run --allow-shell`. Ubuntu live canary was not run. Redacted note: `tests/verification/reviewer-investigation-option-b/2026-09-16-issue-513-windows.md`.
 
 ## 1. Ultimate goal
 
@@ -109,7 +111,7 @@ Planning-time version observations from 2026-09-04 (OpenCode `1.18.12` vs then-c
 
 ## 5. Current state of the code
 
-No `investigate` command exists on GLM, Kimi, Qwen, Muse, or Grok as of `origin/main` `82216ba3` (2026-09-16). `rg investigate bin/ai-{glm,kimi,qwen,muse,grok-review,grok-implement}` has no command dispatch.
+As of `origin/main` `7f0f8f6c` (2026-09-16): Grok has `ai-grok-implement investigate`. GLM, Kimi, Qwen, and Muse still have no `investigate` command. **Do not redo Grok #513.** `rg investigate bin/ai-{glm,kimi,qwen,muse,grok-review}` still has no command dispatch.
 
 Existing reusable machinery on that SHA:
 
@@ -118,12 +120,12 @@ Existing reusable machinery on that SHA:
 - `bin/ai-kimi`: `cmd_implement` at 2244, dispatch at 2317. `config/kimi/local-implement.md` grants Bash and states Bash can still use the network; web and subagent tools are absent. `config/kimi/readonly-review.md` has no Bash and no network.
 - `bin/ai-qwen`: `cmd_implement` at 1932, dispatch at 1988. Implementation runs `--safe-mode --sandbox --approval-mode yolo` inside a wrapper-owned disposable worktree (header lines 33–40). `resolve_qwen` at 254–282 does **not** search `PATH`; it checks `AI_QWEN_BIN` then a short list of official standalone locations. `cmd_doctor` at 1102 uses `resolve_qwen`. Whether the 2026-09-04 “PowerShell finds it, doctor does not” fault still reproduces is unknown until Step 0.
 - `bin/ai-muse`: commands are `new`, `ask`, `list`, `show`, `transcript`, `reconcile`, `delete`, `doctor`, and legacy `review` (dispatch 558–566). There is no `implement` and no `investigate`. `config/opencode-muse/agent/muse-review.md` has `bash: false` and `webfetch: false`. Named sessions, private snapshots, private credential handoff, terminal `step_finish` proof, and durable reports already exist.
-- `bin/ai-grok-review` is read-only: `--deny Edit --deny Bash` and `--disable-web-search` (header ~104–106, 1453). There is no `investigate` command.
-- `bin/ai-grok-implement`: `cmd_run` at 258, `--allow-shell` at 270, Bash allow/deny at 343, dispatch `run` at 490. Isolated real git worktree. Shell is optional and off by default. No `investigate` command.
+- `bin/ai-grok-review` is read-only: `--deny Edit --deny Bash` and `--disable-web-search`. There is no `investigate` command. Do not add one here.
+- `bin/ai-grok-implement` (**updated 2026-09-16, do not redo**): `cmd_investigate` / `execute_isolated investigate`; dispatch includes `investigate`. Isolated remote-less clone, Bash allowed, `--permission-mode default`, report labeled `INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL`. `run` still defaults to deny-Bash. Pin unchanged. #249 not implemented.
 - `config/opencode/version` pins `1.18.12` for both GLM and Muse.
 - `config/provider-cli-versions.json` pins Grok `1.0.13` and leaves Kimi and Qwen unpinned.
 
-The 2026-09-04 plan, parent #253, and children #254–#257 landed as planning-only. The 2026-09-16 correction rewrote those issue bodies (no upgrades, independent children). Muse agreed with that correction. Grok child #513 was added the same day. Implementation never started.
+The 2026-09-04 plan, parent #253, and children #254–#257 landed as planning-only. The 2026-09-16 correction rewrote those issue bodies (no upgrades, independent children). Muse agreed with that correction. Grok child #513 was added the same day and **implemented the same day** (`7f0f8f6c`). GLM/Kimi/Qwen/Muse implementation has not started.
 
 A concurrent worktree `C:/repos/ai-devops/.claude/worktrees/parent-issue-253-status-9293e4` on branch `claude/parent-issue-253-status-9293e4` exists at an older SHA. Do not edit it. Do not reuse that branch name.
 
@@ -298,7 +300,7 @@ Targets: `bin/ai-grok-implement` (`cmd_run` 258, `--allow-shell` 270, Bash toggl
 5. Preserve bounded turns, exact session identity, terminal completion proof, incomplete artifact recovery, and cleanup.
 6. Update focused tests, doctor, docs, and shared skill. Do not add upgrade/pin-change assertions.
 
-**Verification gate:** issue #513 holds redacted evidence for Grok `1.0.13` (or the pin Step 0 recorded), successful shell/internet investigation, credential-free children, unchanged formal read-only review, recoverable interruption, and no #249 broker. Land through a feature-branch PR.
+**Verification gate (2026-09-16, landed):** issue #513 closed with redacted evidence; merge `7f0f8f6c` on `origin/main`. Formal review unchanged. No #249 broker. Live Windows headless Bash on pin `1.0.13` cancelled for both `investigate` and `run --allow-shell` — treat that as pin behavior, not a missing wrapper flag. Ubuntu live canary remains for Step 6. **Do not redo this step.**
 
 ### Step 6 — cross-provider integration, independent review, and merge (#253)
 
