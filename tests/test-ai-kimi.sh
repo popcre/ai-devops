@@ -693,14 +693,13 @@ jq '.patch_sha256="deliberately-corrupt"' "$META" > "$META.tmp"; mv "$META.tmp" 
 run delete persistent1 >/dev/null 2>&1
 check "delete cleans hash-mismatched state but keeps human artifacts" "test ! -e '$META' && test \"\$(find '$REPO/.ai/reviews' -name 'kimi-persistent1-*' | wc -l)\" -eq '$HUMAN_BEFORE'"
 echo slow > "$TMP/mode"
+TURNS_BEFORE="$(wc -l < "$TMP/provider-turns.txt")"
 ( cd "$REPO" && exec bash "$SCRIPT" implement implinterrupt --prompt wait ) >/dev/null 2>&1 &
 INT_PID=$!
-for _ in $(seq 1 "$(budget 5 10)"); do
-  find "$AI_KIMI_STATE_DIR/worktrees" -name owner.json -print -quit 2>/dev/null | grep -q . && break
-  sleep 1
-done
-find "$AI_KIMI_STATE_DIR/worktrees" -name owner.json -print -quit 2>/dev/null | grep -q . || \
-  printf '  fixture: the implinterrupt run never registered a worktree owner before the interrupt (baseline %ss)\n' "$BASELINE" >&2
+poll_until "$AI_KIMI_STARTUP_TIMEOUT" 'the implinterrupt run started its provider turn' \
+  "test \"\$(wc -l < '$TMP/provider-turns.txt')\" -gt '$TURNS_BEFORE'" || true
+test "$(wc -l < "$TMP/provider-turns.txt")" -gt "$TURNS_BEFORE" || \
+  printf '  fixture: the implinterrupt run never started its provider turn before the interrupt (baseline %ss)\n' "$BASELINE" >&2
 kill -TERM "$INT_PID" 2>/dev/null || true
 wait "$INT_PID" 2>/dev/null || true
 check "implement interrupt removes worktree" "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
@@ -753,11 +752,9 @@ check "timeout exports incomplete patch" "test -s '$TPATCH' && grep -q 'Terminal
 echo interruptpartial > "$TMP/mode"
 ( cd "$REPO" && exec bash "$SCRIPT" implement interruptpartial --prompt wait ) >/dev/null 2>&1 &
 INT_PID=$!
-for _ in $(seq 1 "$(budget 5 10)"); do
-  OWNER="$(find "$AI_KIMI_STATE_DIR/worktrees" -name owner.json -print -quit 2>/dev/null)"
-  [ -n "$OWNER" ] && [ -f "$(jq -r .worktree "$OWNER")/interrupt-partial.txt" ] && break
-  sleep 1
-done
+OWNER=''
+poll_until "$AI_KIMI_STARTUP_TIMEOUT" 'interruptpartial wrote its partial file' \
+  "OWNER=\$(find '$AI_KIMI_STATE_DIR/worktrees' -name owner.json -print -quit 2>/dev/null); [ -n \"\$OWNER\" ] && [ -f \"\$(jq -r .worktree \"\$OWNER\")/interrupt-partial.txt\" ]" || true
 { [ -n "$OWNER" ] && [ -f "$(jq -r .worktree "$OWNER" 2>/dev/null)/interrupt-partial.txt" ]; } || \
   printf '  fixture: interruptpartial never wrote its partial file before the interrupt (baseline %ss)\n' "$BASELINE" >&2
 kill -TERM "$INT_PID" 2>/dev/null || true
