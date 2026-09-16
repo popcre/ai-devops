@@ -18,7 +18,6 @@ record merely to reduce the file count.
 | [`plan_cross_repo_routing_and_gate_enforcement.md`](../plan_cross_repo_routing_and_gate_enforcement.md) | [#335](https://github.com/popcre/ai-devops/issues/335) | Phase 4, Step 4.1; roll out thin policies to the remaining repositories |
 | [`plan_full-strategy-remediation.md`](../plan_full-strategy-remediation.md) | [#62](https://github.com/popcre/ai-devops/issues/62) | First non-complete STATUS row; externally blocked work stays explicit |
 | [`plan_grok_integration-review-access.md`](../plan_grok_integration-review-access.md) | [#249](https://github.com/popcre/ai-devops/issues/249) | Step 0; no implementation has landed |
-| [`plan_pop-business-rules-skill.md`](../plan_pop-business-rules-skill.md) | [#35](https://github.com/popcre/ai-devops/issues/35) | Live trigger evidence remains before closure |
 | [`plan_repo-throughput-restructure.md`](../plan_repo-throughput-restructure.md) | [#159](https://github.com/popcre/ai-devops/issues/159) | #212 is complete; #169 source is merged but Kimi removal from the shared-db allocator is awaiting its active owner; #166 remains last and needs explicit owner authority for the live ruleset cutover |
 | [`plan_shared-db-complete-throughput-repair.md`](../plan_shared-db-complete-throughput-repair.md) | [#401](https://github.com/popcre/ai-devops/issues/401) | Step 0; consume independently owned #2705/#2709/#2715/#2716 work, then enforce two-sided structural admission and request-to-live delivery |
 | [`plan_reviewer-assisted-problem-solving.md`](../plan_reviewer-assisted-problem-solving.md) | [#198](https://github.com/popcre/ai-devops/issues/198) | Step 0; no implementation has started |
@@ -42,6 +41,7 @@ approach.
 | `plan_kimi-debate-context-continuity.md`, `plan_kimi-incomplete-implementation-recovery.md`, `plan_kimi-persistent-implementation-sessions.md` | Complete STATUS tables and current Kimi wrapper contract |
 | `plan_phase3-config-consolidation.md`, `plan_sync-machine-wrapper-reconciliation.md` | Complete STATUS tables and current restore/configuration documentation |
 | `plan_progress-wait-misuse-guard.md` | Closed issue #89 and current wait-policy tests |
+| `plan_pop-business-rules-skill.md` | PR #492, installed live trigger evidence, and closed issue #35 |
 | `plan_reintegrate-gemini-flash-3-8-qwen-3-8-max.md` | Closed issue #261 and completed STATUS |
 | `plan_reviewer_lease_liveness.md` | Closed issue #283; implementation lives in `u2giants/shared-db` |
 | `plan_reviewer-diagnostics-quota-preflight.md` | Closed issue #312 and merged evidence |

@@ -1,7 +1,7 @@
 # Implementation plan: `pop-business-rules` Skill
 
 **Tracking issue:** [u2giants/ai-devops #35](https://github.com/u2giants/ai-devops/issues/35)  
-**Handoff:** [HANDOFF.d/2026-08-18T1631Z-edge-dev-codex-pop-business-rules-skill-plan.md](HANDOFF.d/2026-08-18T1631Z-edge-dev-codex-pop-business-rules-skill-plan.md)
+**Handoff:** retired after completion
 
 ## STATUS
 
@@ -11,10 +11,10 @@
 | 2. Author the shared Skill | ✅ complete | 2026-08-18 | `skills/shared/pop-business-rules/SKILL.md` |
 | 3. Add trigger evaluations and behavioral contract tests | ✅ complete | 2026-08-18 | Eval JSON and offline contract test added; local tests pass |
 | 4. Register the Skill in repository documentation | ✅ complete | 2026-08-18 | Router and Claude/Codex usage guides updated |
-| 5. Install and verify on Claude and Codex | ⚠️ partly blocked | 2026-08-18 | Installed copies match source. Claude live eval: 10/10 intended triggers, 0/10 near-miss triggers, three rounds, zero errors. Windows still denies child access to the Codex desktop executable |
-| 6. Commit, push, verify CI, and close the workstream | 🔄 in progress | 2026-08-18 | Skill merged in ai-devops PR #36; issue #35 stays open until valid live trigger evidence exists |
+| 5. Install and verify on Claude and Codex | ✅ complete | 2026-09-16 | Both installed copies match merged source. Three-round Claude and Codex evidence plus read/add/audit probes are recorded in `docs/pop-business-rules-trigger-evidence-2026-09-15.md` |
+| 6. Commit, push, verify CI, and close the workstream | ✅ complete | 2026-09-16 | PR #492 merged as `67d2e3c8`; all Linux and Windows checks passed; the documentation-only closeout retires the handoff and issue #35 |
 
-**Fresh-session starting point:** Step 1. Read this entire plan before editing anything.
+**Workstream state:** complete. This plan remains as the implementation record.
 
 ## 1. Ultimate goal
 
@@ -508,22 +508,22 @@ specific access blocker and leave the corresponding STATUS row open.
 
 ### Definition of done
 
-- [ ] Canonical Business Logic Library entry files exist on `shared-db/main`.
-- [ ] `skills/shared/pop-business-rules/SKILL.md` implements all three modes.
-- [ ] The Skill contains procedure and routing, with no copied business rules.
-- [ ] The application/task map is the first content entry point.
-- [ ] All four rule statuses are handled correctly.
-- [ ] Conflicting and stale current-looking text must be corrected in the same workstream.
-- [ ] Trigger eval set covers positives and near-miss negatives.
-- [ ] Offline behavioral contract test passes.
-- [ ] Existing installer, parity, trigger-runner, and context tests remain green.
-- [ ] Claude and Codex trigger evaluations meet the stated target with inspected evidence.
-- [ ] Read, add/change, and audit probes behave correctly.
-- [ ] Documentation and AGENTS router make the Skill discoverable.
-- [ ] Installed copies match the shared source byte for byte.
-- [ ] Commit identity is correct; changes are committed and pushed.
-- [ ] GitHub checks are green and `main` contains the result.
-- [ ] Issue #35 is closed and the handoff is retired.
+- [x] Canonical Business Logic Library entry files exist on `shared-db/main`.
+- [x] `skills/shared/pop-business-rules/SKILL.md` implements all three modes.
+- [x] The Skill contains procedure and routing, with no copied business rules.
+- [x] The application/task map is the first content entry point.
+- [x] All four rule statuses are handled correctly.
+- [x] Conflicting and stale current-looking text must be corrected in the same workstream.
+- [x] Trigger eval set covers positives and near-miss negatives.
+- [x] Offline behavioral contract test passes.
+- [x] Existing installer, parity, trigger-runner, and context tests remain green.
+- [x] Claude and Codex trigger evaluations meet the stated target with inspected evidence.
+- [x] Read, add/change, and audit probes behave correctly.
+- [x] Documentation and AGENTS router make the Skill discoverable.
+- [x] Installed copies match the shared source byte for byte.
+- [x] Commit identity is correct; changes are committed and pushed.
+- [x] GitHub checks are green and `main` contains the result.
+- [x] Issue #35 is closed and the handoff is retired.
 
 ### Risks and rollback
 
