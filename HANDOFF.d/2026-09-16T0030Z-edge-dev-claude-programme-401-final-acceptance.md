@@ -4,6 +4,7 @@
 - **Plan:** [`../plan_shared-db-complete-throughput-repair.md`](../plan_shared-db-complete-throughput-repair.md). Read its STATUS table first; it is now reconciled against live GitHub and must not be re-derived.
 - **Tracking issue:** [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401) — **still OPEN**
 - **Update 2026-09-16T01:38Z:** PR #412 merged as `9d02b382ad6a50ee2cb9e6b6c99ba994fcf6073d`. No ai-devops pull request for #401 is open.
+- **Update 2026-09-16 (wrap-up):** Albert moved Step 8 (the `popcre` transfer) out of #401 into u2giants/shared-db #2530; it no longer gates closure. He also asked to close #401 on the belief everything else was done. It is NOT: Steps 1–7 lack live behavior proof, Step 5 lacks the sidecar declaration registry, Step 9 lacks fleet install equality, and Step 10 has no trial report. #401 was deliberately left OPEN and the decision returned to Albert.
 - **Retires:** the three 2026-09-11 Codex `-401` handoffs and the 2026-09-15 Claude stall-integration handoff. Their content is superseded by the STATUS table and by the acceptance audit comment on #401.
 
 ## 1. What this session was doing, and why
@@ -47,7 +48,7 @@ transfer that #401 explicitly does not authorize. **Do not close #401 without bo
 ## 6. Exact next action
 
 1. Land #412, then complete shared-db #2716's live promotion and refusal-path proof.
-2. Ask Albert to authorize Step 8 (the `popcre` transfer) as its own scoped work.
+2. Step 8 is now owned by u2giants/shared-db #2530 — do not track it here.
 3. Start the Step 10 trial only after Steps 1–7 each have a linked live proof; record the
    five outcomes in a committed report with raw `n` and every exception.
 
