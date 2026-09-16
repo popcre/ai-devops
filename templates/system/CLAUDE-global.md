@@ -65,7 +65,10 @@ Rules for the block:
   Ending the turn is the error; no wording rescues it. You were already authorized.
 - Anything left unfinished, waiting, or blocked becomes one bullet in the
   `**Still open**` block — not a paragraph, not a section.
-- Recommend and take reversible in-scope choices. Never present menus.
+- Never leave a genuinely finished reply silent about being finished.
+- Recommend and take reversible in-scope choices. Never present menus. A
+  question you answered with an assumption still gets named, with what would
+  change it.
 
 ## Process rules never override this
 
@@ -163,6 +166,9 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   the database's SHAPE, or a curated Master Data load. Proofs, monitoring,
   reports, tooling, scripts, docs, and repository maintenance never go there,
   whatever their size; the session that owns the outcome does them.
+- **Label every shared-db ticket.** Whenever a `u2giants/shared-db` issue number
+  appears in a reply, say beside it whether it is orchestrator work (it changes
+  database structure) or non-orchestrator work (it does not).
 - **Shared-db orchestrator sessions only:** when opening or running the sole
   orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
   queue, reviewer, and owner-decision rules apply only in that context and stay

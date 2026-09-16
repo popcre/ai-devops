@@ -25,6 +25,13 @@ $safetyLines = [ordered]@{
 $parityLines = @(
     "# Response Style",
     "Account for the whole job",
+    "**Still open**",
+    '`Waiting on',
+    "Process rules never override this",
+    "never delegate a schema change",
+    "silent about being finished",
+    "answered with an assumption",
+    "non-orchestrator work",
     "Preparation is not delivery",
     "Ending the turn is the error",
     "Production infrastructure safety is absolute.",

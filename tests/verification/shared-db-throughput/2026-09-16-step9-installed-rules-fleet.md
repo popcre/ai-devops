@@ -44,10 +44,10 @@ Canonical short hashes: Claude body `8b7a6d5b2e34`, Codex body `e08911fd4e39`.
 
 Unreachable evidence (verbatim):
 
-- EDGE-ALIEN: `ssh: connect to host 100.65.60.70 port 22: Connection timed out`
-  (Tailscale itself answers: `pong from edge-alien (100.65.60.70) via 192.168.3.51:41641 in 2ms`, so the SSH service is not accepting connections).
+- EDGE-ALIEN: `ssh: connect to host <tailscale-ip> port 22: Connection timed out`
+  (Tailscale itself answers: `pong from edge-alien (<tailscale-ip>) via <lan-ip> in 2ms`, so the SSH service is not accepting connections).
 - t16 (first attempt): `offline, last seen 4d ago` in `tailscale status`.
-- t16 (retry after it came online, key `916-alien`, users `ahazan2` and `ahazan`): `ssh: connect to host 100.96.221.71 port 22: Connection timed out`, while `pong from t16 (100.96.221.71) via 10.0.5.62:41641 in 11ms`. The SSH service on t16 is not accepting connections; there is no SSH alias for it either.
+- t16 (retry after it came online, key `916-alien`, users `ahazan2` and `ahazan`): `ssh: connect to host <tailscale-ip> port 22: Connection timed out`, while `pong from t16 (<tailscale-ip>) via <private-ip>:41641 in 11ms`. The SSH service on t16 is not accepting connections; there is no SSH alias for it either.
 
 ## Verdict
 

@@ -117,6 +117,13 @@ PARITY_RULES = {
     "repairs resolve reported problem": r"(?:reported )?problem is gone|symptom is gone",
     "repairs preserve original capability": r"original capability still works",
     "symptom suppression is not a fix": r"symptom suppression",
+    "pending work in one Still open block": r"\*\*Still open\*\*",
+    "every pending bullet names its holder": r"`Waiting on",
+    "process rules never override replies": r"Process rules never override this",
+    "never delegate a decision": r"never delegate a schema change|Never delegate a decision",
+    "finished reply says it is finished": r"silent about being finished",
+    "assumptions get named": r"answered with an\s+assumption",
+    "label shared-db tickets orchestrator or not": r"non-orchestrator work",
     "never replace system binaries": r"system binaries|operating-system binaries",
 }
 
@@ -129,6 +136,9 @@ PARITY_DIVERGENCE_ALLOWLIST = {
     "Claude global install line": ("claude", r"Install this as the \*\*user-level\*\*"),
     "Codex global install line": ("codex", r"Install as `~/\.codex/AGENTS\.md`"),
     "Codex edition framing": ("codex", r"Codex edition"),
+    "Claude hard reply cap": ("claude", r"150 words maximum"),
+    "Codex default reply length": ("codex", r"Default to under 120 words"),
+    "Codex spawn_agent cost thresholds": ("codex", r"`spawn_agent` one per piece"),
 }
 
 # Final budgets, set at step 10 (2026-08-14) from the sizes that were live on
