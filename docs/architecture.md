@@ -34,6 +34,7 @@ a script you run from the shell (installed as symlinks in `/usr/local/bin`).
 | Approval review | `bin/ai-review`, `bin/ai-claude-review`, `bin/ai-codex-review` | Exact-source, lifecycle-accounted Claude Opus 5 or Codex approval |
 | Model invocation | `bin/ai-model-call` | Runs one stage with validated arguments and atomic output; never shell-evaluates config |
 | Task orchestrator | `bin/ai-run-task` | Immutable seven-stage manifest, artifact chain, fail-closed resume and retry |
+| Documentation reachability | `bin/ai-doc-reachability`, `.doc-reachability.json`, reusable workflow | Blocks PR-added, copied, or moved Markdown that no configured root can reach; legacy orphans are not gated |
 | Lifecycle | `install.sh`, `update.sh`, `uninstall.sh` | Install/update/remove the toolkit on a host |
 | Prompts | `templates/prompts/01..07` | One Markdown prompt per workflow stage |
 | Config seed | `config/*.env.example` | Seeds `/etc/ai-devops/*.env` on install |

@@ -252,6 +252,11 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-run-task start "<task>"` | Create an immutable seven-stage run; use `run`, `resume`, and `status` to operate it |
 | `ai-task-gates start|check|explain|status|end` | Declare what a task is and refuse an action the change set does not call for |
 | `ai-glm new|ask|implement <name> ...` | Persistent, named GLM-5.3 sessions (see docs/glm-opencode.md) |
+| `ai-doc-reachability --repo . --base <ref>` | Block new or moved Markdown that no living root can reach |
+
+Before enabling or changing that gate, read the
+[Markdown reachability contract](docs/doc-reachability.md) for its roots,
+exclusions, rollout workflow, and legacy-document boundary.
 
 `ai-codex-review` modes: `plan-review`, `diff-review`, `security-review`,
 `visual-review`, `final-check`.
