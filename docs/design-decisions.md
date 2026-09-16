@@ -327,3 +327,48 @@ Do not change because:
 A Grok session that sets `claude` or `codex` can attach to or collide with
 that client's Muse sessions.
 
+## Grok 1.0.13 headless Bash cancels on Windows
+
+Looks like:
+`ai-grok-implement investigate` is broken because a live look-into-this turn
+returns `stopReason: cancelled` before any shell write.
+
+Actually:
+The same cancel happens on `ai-grok-implement run --allow-shell` with no
+investigate isolation. Offline tests prove the wrapper passes `--allow Bash`.
+Measured 2026-09-16 on edge-dev against pin `1.0.13` (issue #513 / PR #517,
+merge `7f0f8f6c`). Formal `ai-grok-review` stays deny-Bash / no web search.
+
+Why:
+Headless Grok 1.0.13 on this Windows host cancels the shell tool. That is pin
+behavior, not a missing investigate flag.
+
+Do not change because:
+"Fixing" it by upgrading Grok, implementing the #249 broker, or widening
+`ai-grok-review` is out of the Option B plan. A later pin change must
+re-qualify. Verify: `tests/test-ai-grok-implement.sh`,
+`tests/verification/reviewer-investigation-option-b/2026-09-16-issue-513-windows.md`.
+
+## Grok investigate isolation must not copy credentials or inherit HOME
+
+Looks like:
+`env -i` with a short list, or `cp` of `auth.json` into a temp home, would be
+simpler, and putting auth under `$HOME/.grok` matches Grok's default layout.
+
+Actually:
+A short `env -i` cancelled live turns. Copying `auth.json` was REJECTED on
+exact-head review. Investigate uses `env -i` plus a process allowlist, a
+same-inode `ln` proven with `-ef`, an empty `HOME` separate from `GROK_HOME`,
+and deletes the temp root after the process. `GROK_HOME` must stay in the
+launcher environment or Grok cannot authenticate; a Bash child of that process
+can read that file.
+
+Why:
+Issue #513 / Claude Opus 5 final-check REJECT on `cdde073c` and `5d60ccb4`,
+then APPROVE on `6a63f84e` (run `20260916T214612-2826818-29891`).
+
+Do not change because:
+Copying credentials, pointing `HOME` at the auth directory, or dropping the
+allowlist reopens the rejected findings. Do not merge the review and implement
+wrappers to reuse `prepare_auth_link`.
+
