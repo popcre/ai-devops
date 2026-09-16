@@ -24,6 +24,7 @@ Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issu
 **Legend.** ✅ complete — accepted with live evidence. 🟨 code landed, not accepted — the
 implementation merged on `main` but the plan’s live behavior gate has no linked proof.
 ⬜ open. ➡️ moved to its own issue and no longer gates #401.
+How leftover live proofs are sized (one unproven step, one issue, one session) is owned by [`plan_live-proof-session-sizing.md`](plan_live-proof-session-sizing.md) / [#511](https://github.com/popcre/ai-devops/issues/511). Do not add another unproven step onto an issue that already owns a different one.
 
 **Acceptance audit of 2026-09-15** (recorded on popcre/ai-devops#401) rechecked every row
 against live GitHub. `u2giants/shared-db` main was `921fef3a`. Merged programme work proves
