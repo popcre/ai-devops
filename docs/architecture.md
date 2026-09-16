@@ -80,6 +80,15 @@ contract, safety boundaries, tests, and live-installation gates are in the
 Until its STATUS table proves completion, existing provider skills remain the
 only implemented route; do not infer proactive selection from this pointer.
 
+## Reviewer investigation mode (advisory)
+
+Parent issue #253 adds a named look-into-this mode with shell and public
+internet in a disposable copy. Formal review stays read-only and never counts
+investigation output as a pass. The contract, child issues, and STATUS live in
+[`plan_reviewer-investigation-mode-option-b.md`](../plan_reviewer-investigation-mode-option-b.md).
+Do not bundle CLI upgrades. Do not implement Grok issue #249 (brokered
+integration-review) inside #253; Grok's Option B child is #513.
+
 ## Delegate debate continuity
 
 Grok, GLM, and Kimi debates use the provider-neutral

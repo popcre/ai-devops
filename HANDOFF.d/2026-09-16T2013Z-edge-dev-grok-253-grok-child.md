@@ -31,8 +31,9 @@ Albert asked whether the corrected plans already contained Muse's fixes, and to 
 - Grok child [#513](https://github.com/popcre/ai-devops/issues/513) exists as a sub-issue of #253. Option B: reuse `ai-grok-implement` isolated worktree and `--allow-shell`; keep `ai-grok-review` read-only; no pin upgrade; do not build #249.
 - This commit updates the plan STATUS (Step 5 = #513, Step 6 = parent landing), parent issue #253, router, and index.
 - `ai-grok-review` still denies Bash and disables web search. `ai-grok-implement` can allow Bash. No `investigate` command exists yet.
-- Implementation of any child remains unstarted.
-- Worktree: `C:\repos\ai-devops-worktrees\253-add-grok-child`, branch `grok/253-add-grok-child` from `origin/main` `82216ba3`.
+- After this planning session opened #513, another session landed `ai-grok-implement investigate` on `origin/main` `7f0f8f6c` (PR #517). Plan STATUS Step 5 is 🟡 landing. Do not redo #513.
+- GLM #254, Kimi #255, Qwen #256, and Muse #257 remain unstarted. Parent #253 Step 0 and Step 6 remain open.
+- Durable session notes from this planning chat also live in `docs/design-decisions.md` (investigation vs formal review; #253 vs #249; Muse caller `grok`) and `docs/architecture.md` (investigation pointer).
 
 ## 4. Everything we tried that did NOT work
 
@@ -46,9 +47,9 @@ Albert asked whether the corrected plans already contained Muse's fixes, and to 
 
 ## 6. Exact next steps
 
-1. Merge this prose PR. **You'll know it worked when** #513 is a child of #253, the plan STATUS lists Step 5 as #513, and the merge SHA is on `origin/main`.
-2. Start implementation at plan Step 0. **You'll know it worked when** the baseline artifact exists under `tests/verification/reviewer-investigation-option-b/`.
-3. Implement #254, #255, #256, #257, and #513 independently after Step 0. **You'll know each worked when** its issue holds redacted shell/internet canaries and unchanged formal review.
+1. Do not redo Grok #513. Confirm `ai-grok-implement investigate` on current `origin/main` and whether Step 5 still needs live canaries. **You'll know it worked when** the plan STATUS evidence cell for Step 5 names a verification artifact, not only the landing commit.
+2. Start remaining implementation at plan Step 0, then #254, #255, #256, and #257 independently. **You'll know Step 0 worked when** the baseline artifact exists under `tests/verification/reviewer-investigation-option-b/`. **You'll know each child worked when** its issue holds redacted shell/internet canaries and unchanged formal review.
+3. Parent Step 6 only after those children land. **You'll know it worked when** #253 is closed with current evidence and this handoff is deleted.
 
 ## 7. Constraints and gotchas in force
 
