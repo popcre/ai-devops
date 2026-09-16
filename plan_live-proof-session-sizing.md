@@ -17,7 +17,7 @@ A fresh session starts at **Step 0**. If Step 0 finds the rule already on `origi
 | 2 | Guard the phrase in the cheap Linux test and in parity audit | ✅ complete | 2026-09-16 | Phrase added to `tests/test-client-globals-required-phrases.sh` and `PARITY_RULES` in `tools/context-audit/context-audit.py`. |
 | 3 | One sentence in `shared-db-handover` | ✅ complete | 2026-09-16 | Skill says leftover live proofs are one issue and one session each, and still says proofs never go to the orchestrator. |
 | 4 | Stop #401 STATUS from dumping several unproven steps on one ticket | ✅ complete | 2026-09-16 | 3027 session live at 2026-09-16T20:18Z (helper PR [shared-db#3101](https://github.com/u2giants/shared-db/pull/3101) updating; transcript 20:09Z). Split forbidden. Legend added. Posted proofs on Steps 1 and 2A stay with 3027. Remaining unproven Steps 2, 3, 4, 6, 7 stay with 3027 with “No further steps may be added to #3027.” 3029 not started. |
-| 5 | Keep routers pointing here; merge; install globals | ⬜ open | 2026-09-16 | Routers already point here. Merge and `bin/ai-adopt-globals` remain. |
+| 5 | Keep routers pointing here; merge; install globals | ✅ complete | 2026-09-16 | PR #515 merged as `837fe41d`. Installed Claude and Codex globals on edge-dev contain `one unproven live-behavior outcome`. #511 closed. |
 
 **Fresh-session starting point:** Step 0 on a worktree from current `origin/main`. Re-read Steps 4–5 before starting Step 4; if the 3027 session is still live, Step 4's split is forbidden.
 
@@ -293,12 +293,12 @@ Add no other tests.
 
 **Done when all of these are true**
 
-- [ ] Steps 1–3 merged on `origin/main` (globals, phrase test, parity rule, handover sentence).
-- [ ] Step 4’s STATUS legend is on `origin/main`, and either 3027 was left as live owner of remaining unproven steps with “no further steps,” or idle-split issues exist, one per remaining unproven step.
-- [ ] Installed Claude and Codex globals on the implementing machine contain `one unproven live-behavior outcome`.
-- [ ] #511 comments the merge commit SHA and is closed only after the above.
-- [ ] This plan’s STATUS table is updated in the same commits as the work (or in a follow-up docs commit if the implementer must split).
-- [ ] This handoff is deleted in the commit that closes #511, under the successor rule.
+- [x] Steps 1–3 merged on `origin/main` (globals, phrase test, parity rule, handover sentence).
+- [x] Step 4’s STATUS legend is on `origin/main`, and either 3027 was left as live owner of remaining unproven steps with “no further steps,” or idle-split issues exist, one per remaining unproven step.
+- [x] Installed Claude and Codex globals on the implementing machine contain `one unproven live-behavior outcome`.
+- [x] #511 comments the merge commit SHA and is closed only after the above.
+- [x] This plan’s STATUS table is updated in the same commits as the work (or in a follow-up docs commit if the implementer must split).
+- [x] This handoff is deleted in the commit that closes #511, under the successor rule.
 
 **Risks**
 
