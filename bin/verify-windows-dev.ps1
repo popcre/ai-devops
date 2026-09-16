@@ -25,6 +25,26 @@ $checks.Add([pscustomobject]@{ Check='configuration:file'; Passed=(Test-Path $co
 $setup = Join-Path $RepoPath 'bin\setup-machine.ps1'
 $checks.Add([pscustomobject]@{ Check='machine-setup:file'; Passed=(Test-Path $setup); Detail=$setup })
 
+$runnerServices = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object {
+  $_.Name -like 'actions.runner.*' -or $_.PathName -match 'Runner\.Listener\.exe'
+})
+$runnerPassed = ($runnerServices.Count -eq 0) -or -not ($runnerServices | Where-Object { $_.State -ne 'Running' })
+$runnerDetail = if ($runnerServices.Count -eq 0) {
+  'official runner not installed; compatibility policy verified separately'
+} else {
+  ($runnerServices | ForEach-Object { "$($_.Name)=$($_.State)" }) -join '; '
+}
+$checks.Add([pscustomobject]@{ Check='compatibility:github-runner-listener'; Passed=$runnerPassed; Detail=$runnerDetail })
+
+$smartAppPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy'
+$smartAppState = try { [int](Get-ItemPropertyValue -LiteralPath $smartAppPath -Name 'VerifiedAndReputablePolicyState' -ErrorAction Stop) } catch { $null }
+$smartAppRequired = $runnerServices.Count -gt 0
+$smartAppRefreshMarker = Join-Path $env:ProgramData 'ai-devops\smart-app-control-off-refreshed.json'
+$checks.Add([pscustomobject]@{
+  Check='compatibility:smart-app-control-off'; Passed=(-not $smartAppRequired -or ($smartAppState -eq 0 -and (Test-Path -LiteralPath $smartAppRefreshMarker)))
+  Detail=$(if (-not $smartAppRequired) { 'not required: official GitHub runner is not installed' } elseif ($null -eq $smartAppState) { 'state missing; runner host requires 0 (Off)' } elseif (-not (Test-Path -LiteralPath $smartAppRefreshMarker)) { 'registry is Off but active-policy refresh is unproven' } else { "state=$smartAppState; active-policy refresh marker present" })
+})
+
 $sshd = Get-Service sshd -ErrorAction SilentlyContinue
 $checks.Add([pscustomobject]@{ Check='remote:sshd'; Passed=($sshd -and $sshd.Status -eq 'Running'); Detail=$(if($sshd){$sshd.Status}else{'not installed'}) })
 $winrm = Get-CimInstance Win32_Service -Filter "Name='WinRM'" -ErrorAction SilentlyContinue
