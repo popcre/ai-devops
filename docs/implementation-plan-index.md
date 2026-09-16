@@ -47,6 +47,7 @@ approach.
 | `plan_reviewer-diagnostics-quota-preflight.md` | Closed issue #312 and merged evidence |
 | `plan_reviewer-log-repair-checkpoints.md` | Closed issue #308; issue #322 is a separate Qwen limitation |
 | `plan_reviewer-system-repair.md` | Closed issue #34 and complete STATUS |
+| `plan_live-proof-session-sizing.md` | Closed issue #511 and PR #515; one unproven live-proof outcome per session |
 
 ## Superseded or reference-only records
 

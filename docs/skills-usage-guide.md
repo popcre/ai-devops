@@ -47,6 +47,24 @@ current global already carries, printing every KEPT/DROPPED decision, and keeps
 the untouched original in `~/.ai-globals-backup/<UTC>/`. If it cannot identify
 the section boundary it prints the file's tail and stops rather than guessing.
 
+### Do not finish `ai-adopt-globals` from a linked worktree
+
+What changed:
+On 2026-09-16, `bin/ai-adopt-globals` from
+`C:\repos\ai-devops-worktrees\issue-511-live-proof-session-sizing` replaced the
+Claude and Codex globals, then `bin/install-machine-tools.ps1` refused: durable
+machine launchers must come from the canonical checkout.
+
+Why:
+Globals and skills can look installed while the wrapper still prints
+`SYNC INCOMPLETE`. Reporting success there leaves launchers unreconciled.
+
+Future sessions should:
+Fast-forward `C:\repos\ai-devops` (landing-only; prove it is idle first) and
+rerun `bash bin/ai-adopt-globals` from that checkout. Verify with
+`Select-String` on `~\.claude\CLAUDE.md` and `~\.codex\AGENTS.md`. A running
+Claude or Codex session does not pick up the files until it is fully restarted.
+
 Windows: use the **native PowerShell installer**
 `bin/install-ai-devops-windows.ps1`, not the Bash script:
 
