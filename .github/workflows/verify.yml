@@ -75,9 +75,20 @@ jobs:
   fast-classifier:
     uses: ./.github/workflows/fast-classifier.yml
 
-  linux-offline:
+  # The complete offline Bash suite, split into four sections that run at the
+  # same time on separate hosted machines (docs/ci-speed-audit-2026-09-17.md,
+  # speedup 2). tests/test-all.sh --balanced packs every discovered suite into
+  # exactly one section by the measured seconds in config/ci-suite-manifest.json
+  # (runs 35227802085, 35227474047, 35224512570: about 21 minutes serial); an
+  # unmeasured suite still lands in a section at a default weight.
+  linux-offline-shard:
     needs: [fast-classifier, manual-preflight]
     if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
+    strategy:
+      # One failing section must never hide the other sections' results.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -96,13 +107,30 @@ jobs:
             -o Dir::Etc::sourceparts=-
           sudo apt-get install -y jq ripgrep shellcheck
       - name: Syntax
+        if: ${{ matrix.shard == 1 }}
         run: |
           find bin tests -type f \( -name '*.sh' -o -path 'bin/ai-*' \) | while read -r file; do
             head -n 1 "$file" | grep -q 'bash' || continue
             bash -n "$file"
           done
-      - name: Complete offline Bash suite
-        run: bash tests/test-all.sh
+      - name: Offline Bash suite section ${{ matrix.shard }} of 4
+        run: bash tests/test-all.sh --balanced --shard '${{ matrix.shard }}/4'
+
+  # The required check keeps its name. It passes only when every section passed
+  # and the four sections reconstitute the whole suite exactly once; a failed,
+  # cancelled, skipped or missing section fails it closed. Its run condition is
+  # the sections' condition, so it is skipped only when they legitimately were.
+  linux-offline:
+    needs: [fast-classifier, manual-preflight, linux-offline-shard]
+    if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Aggregate the offline Bash sections
+        env:
+          SHARD_RESULT: ${{ needs.linux-offline-shard.result }}
+        run: bash tools/ci/linux-offline-aggregate.sh "$SHARD_RESULT" 4
 
   # The queue gate is deliberately light: #204 took the long Windows jobs off
   # merge_group because a required check that never reports on a merge group

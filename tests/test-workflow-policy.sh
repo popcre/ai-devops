@@ -264,8 +264,24 @@ grep -Fq 'run.id !== current' "$workflow" || {
   printf 'FAIL: manual preflight must exclude its own run\n' >&2
   exit 1
 }
+linux_shard_block="$(sed -n '/^  linux-offline-shard:/,/^  linux-offline:$/p' "$workflow")"
+linux_aggregate_block="$(sed -n '/^  linux-offline:$/,/^  merge-group-evidence:/p' "$workflow")"
+linux_weight_names="$(jq -r '.linux_offline_suite_seconds | keys[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
+# docs/ci-speed-audit-2026-09-17.md speedup 2: the Linux lane is sectioned on
+# independent hosted machines, and the required `linux-offline` name survives
+# as a fail-closed aggregate that proves every suite ran exactly once.
+check 'the offline Bash suite runs as balanced parallel sections' \
+  'printf "%s" "$linux_shard_block" | grep -qF "fail-fast: false" && printf "%s" "$linux_shard_block" | grep -qF "shard: [1, 2, 3, 4]" && printf "%s" "$linux_shard_block" | grep -qF "tests/test-all.sh --balanced --shard" && printf "%s" "$linux_shard_block" | grep -qF "matrix.shard }}/4" && ! printf "%s" "$linux_shard_block" | grep -qE "run: bash tests/test-all.sh[[:space:]]*$"'
+check 'the required linux-offline name is a fail-closed aggregate over every section' \
+  'printf "%s" "$linux_aggregate_block" | grep -qF "needs: [fast-classifier, manual-preflight, linux-offline-shard]" && printf "%s" "$linux_aggregate_block" | grep -qF "bash tools/ci/linux-offline-aggregate.sh \"\$SHARD_RESULT\" 4" && printf "%s" "$linux_aggregate_block" | grep -qF "needs.linux-offline-shard.result" && printf "%s" "$linux_aggregate_block" | awk "/uses: actions\/checkout@/{c=NR} /linux-offline-aggregate.sh/{r=NR} END {exit !(c && r && c < r)}"'
+check 'the aggregate and its sections share one run condition, so a skip is never a pass' \
+  '[ "$(printf "%s\n" "$linux_shard_block" | grep "^    if:")" = "$(printf "%s\n" "$linux_aggregate_block" | grep "^    if:")" ]'
+check 'measured Linux suite seconds name only discovered suites' \
+  '[ -n "$linux_weight_names" ] && [ -z "$(comm -23 <(printf "%s\n" "$linux_weight_names") <(printf "%s\n" "$manifest_bash"))" ]'
+check 'the four balanced sections partition every discovered Bash suite exactly once' \
+  '[ "$(for i in 1 2 3 4; do bash "$ROOT/tests/test-all.sh" --balanced --shard "$i/4" --list | grep "^test-"; done | LC_ALL=C sort)" = "$manifest_bash" ]'
 cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
-[ "$cancel_aware_jobs" -eq 10 ] || {
+[ "$cancel_aware_jobs" -eq 11 ] || {
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
   exit 1
 }
