@@ -164,6 +164,10 @@ runtime_env(){
     export XDG_DATA_HOME="$PROFILE_HOME/.local/share/ai-devops/muse-code"
     export XDG_STATE_HOME="$PROFILE_HOME/.local/state/ai-devops/muse-code"
     export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/muse-code"
+    local store; for store in "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"; do
+      # Refuse linked stores before creating or changing permissions on anything.
+      [ ! -L "$store" ] && [ ! -L "$(dirname "$store")" ] || die "Muse Code store is a link; refusing to use it: $store"
+    done
     mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
     # Enforced on every use (one PowerShell call), never remembered: permissions can drift.
     chmod 700 "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" && protect_windows_dirs "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" || die 'could not make the Muse Code stores private.'
@@ -521,7 +525,7 @@ require_engine_model(){ # older same-engine models stay deletable; only a sessio
 }
 cmd_transcript(){
   local m sid; m="$(find_meta "$1")"; require_engine_model "$m" "$1"; runtime_env; sid="$(jq -r .session_id "$m")"
-  if [ "$ENGINE" = muse-code ]; then local xd rc; xd="$(mktemp -d "$XDG_STATE_HOME/export.XXXXXXXX")" || die 'could not create a private export directory.'; chmod 700 "$xd" || { rm -rf -- "$xd"; die 'could not protect the export directory.'; }
+  if [ "$ENGINE" = muse-code ]; then require_runtime; local xd rc; xd="$(mktemp -d "$XDG_STATE_HOME/export.XXXXXXXX")" || die 'could not create a private export directory.'; chmod 700 "$xd" || { rm -rf -- "$xd"; die 'could not protect the export directory.'; }
     # Fresh unpredictable directory owned by this run; the provider creates the only file in it.
     "$BIN" export --session "$sid" --out "$xd/transcript.json" >/dev/null && [ -f "$xd/transcript.json" ] && [ ! -L "$xd/transcript.json" ] && cat "$xd/transcript.json"; rc=$?; rm -rf -- "$xd"; return "$rc"; fi
   "$BIN" export "$sid"
