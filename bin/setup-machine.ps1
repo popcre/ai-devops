@@ -38,6 +38,8 @@ What it does (idempotent - safe to re-run):
        - no secret, pinned runtime : playwright, chrome-devtools, ag-grid
        - Codex-only native HTTP    : vercel (browser OAuth)
        - codex-cli                 : native `codex mcp-server`, absolute exe
+                                      (definition kept; suspended 2026-09-17 -
+                                      out of Claude membership, enabled=false in Codex)
      No token is ever written into either config; only URLs and op:// references.
      Servers we do not define (the Windows-MCP extension, anything hand-added)
      and all other settings keys are preserved untouched.
@@ -529,8 +531,13 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
 }
 
 $ManagedMcpServerNames = @($McpServerCatalog.Keys)
-$ClaudeCodeMcpNames = @("1password", "codex-cli")
-$ClaudeDesktopMcpNames = @("1password", "ag-grid", "codex-cli", "playwright", "recall-ai", "synology-monitor", "trigger")
+# codex-cli is suspended from Claude Code and Claude Desktop (2026-09-17):
+# transcript mining on edge-dev found ~34 real invocations in 1,489 Claude
+# sessions and none after 2026-09-10, while every session still paid the
+# server's startup. The catalog definition is retained; restoring the entry
+# here re-wires both clients on the next setup run.
+$ClaudeCodeMcpNames = @("1password")
+$ClaudeDesktopMcpNames = @("1password", "ag-grid", "playwright", "recall-ai", "synology-monitor", "trigger")
 
 function Select-McpServers([string[]]$Names) {
   $selected = [ordered]@{}
@@ -917,6 +924,11 @@ if (Test-Path -LiteralPath $codexMcpSetup) {
   $CodexMcpServers['chrome-devtools']['enabled'] = $false
   if ($CodexMcpServers.Contains('codex-cli')) {
     $CodexMcpServers['codex-cli']['tool_timeout_sec'] = 3600
+    # Parked like chrome-devtools (2026-09-17): mining found no meaningful
+    # Codex-side use of the self-MCP server. The table stays written so the
+    # suspension is one `enabled` flip away, and tool_timeout survives for
+    # the day it is turned back on.
+    $CodexMcpServers['codex-cli']['enabled'] = $false
   }
 
   & $codexMcpSetup -Servers $CodexMcpServers

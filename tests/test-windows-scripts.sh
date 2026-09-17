@@ -204,11 +204,11 @@ fi
 
 echo "== MCP catalog has explicit per-client membership =="
 if grep -q '\$McpServerCatalog\["chrome-devtools"\]' bin/setup-machine.ps1 &&
-   grep -Fq '$ClaudeCodeMcpNames = @("1password", "codex-cli")' bin/setup-machine.ps1 &&
-   grep -Fq '$ClaudeDesktopMcpNames = @("1password", "ag-grid", "codex-cli", "playwright", "recall-ai", "synology-monitor", "trigger")' bin/setup-machine.ps1 &&
+   grep -Fq '$ClaudeCodeMcpNames = @("1password")' bin/setup-machine.ps1 &&
+   grep -Fq '$ClaudeDesktopMcpNames = @("1password", "ag-grid", "playwright", "recall-ai", "synology-monitor", "trigger")' bin/setup-machine.ps1 &&
    grep -Fq 'if (-not $ClaudeCodeMcpServers.Contains($name))' bin/setup-machine.ps1 &&
    grep -Fq 'if (-not $ClaudeDesktopMcpServers.Contains($name))' bin/setup-machine.ps1; then
-  ok "Claude Code user scope stays lean and cannot restore Chrome DevTools"
+  ok "Claude Code user scope stays lean and cannot restore Chrome DevTools or codex-cli"
 else bad "Claude Code user scope is not explicitly frozen"; fi
 if grep -q 'configure-codex-mcps.ps1' bin/setup-machine.ps1 &&
    grep -q '\$CodexMcpServers' bin/setup-machine.ps1; then
