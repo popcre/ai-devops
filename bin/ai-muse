@@ -377,6 +377,7 @@ run_turn(){
     # Read-only review: no writes, no shell, no web, no personal context, no prompts.
     args=(exec --json --model "$MODEL" --session-id "$sid" --workspace "$workspace" --disable-write --disable-shell --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve)
     # The prompt travels in a private file, never as an argument the CLI could parse as options.
+    chmod 600 "$prompt" 2>/dev/null && protect_windows_path "$prompt" file || die 'could not make the Muse Code prompt file private.'
     if command -v cygpath >/dev/null 2>&1; then args+=(--prompt-file "$(cygpath -w "$prompt")"); else args+=(--prompt-file "$prompt"); fi
   else
     prompt_arg=("$prompt_text"); args=(run --dir "$dir" --agent muse-review --model "$MODEL" --format json); [ -z "$sid" ] || args+=(--session "$sid")
