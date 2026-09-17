@@ -11,6 +11,7 @@
     "test-ai-deepseek-agent.sh",
     "test-ai-devops-doctor-codex-probe.sh",
     "test-ai-devops-doctor-install-state.sh",
+    "test-ai-blocker-watch.sh",
     "test-ai-facts.sh",
     "test-ai-gemini-usage.sh",
     "test-ai-gemini.sh",
