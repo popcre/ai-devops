@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "canonical_repository": {
+    "name": "popcre/ai-devops",
+    "aliases": [
+      "https://github.com/popcre/ai-devops",
+      "https://github.com/popcre/ai-devops.git",
+      "git@github.com:popcre/ai-devops.git",
+      "ssh://git@github.com/popcre/ai-devops.git"
+    ]
+  },
+  "ref_namespace": "refs/ai-devops-claims",
+  "task_key": {
+    "kind": "issue",
+    "tuple": [
+      "ai-work-claim",
+      1,
+      "<canonical_repository>",
+      "issue",
+      "<positive_decimal_issue_number>"
+    ],
+    "serialization": "compact_json_utf8_without_trailing_newline",
+    "hash_algorithm": "sha256",
+    "hash_encoding": "lowercase_hex",
+    "ref_template": "refs/ai-devops-claims/<task_key>"
+  },
+  "owner_hash": {
+    "per_acquisition": true,
+    "token_bytes": 32,
+    "token_encoding": "base64url_without_padding",
+    "domain_separator": "ai-work-claim-owner:v1\u0000",
+    "hash_algorithm": "sha256",
+    "hash_encoding": "lowercase_hex",
+    "raw_token_is_remote": false
+  },
+  "liveness": {
+    "time_source": "github_server_time",
+    "warn_after_seconds": 28800,
+    "stale_after_seconds": 86400,
+    "stale_behavior": "protective_no_transfer"
+  },
+  "intended_paths": {
+    "optional": true,
+    "authority": "descriptive_only",
+    "format": "repository_relative_posix",
+    "normalization": "trim_slashes_collapse_dot_reject_dotdot",
+    "deduplication": "bytewise_sorted_unique",
+    "append_only": true,
+    "append_requires_matching_owner_hash": true,
+    "max_items": 32,
+    "max_utf8_bytes_each": 512
+  },
+  "claim_metadata": {
+    "schema": "ai-work-claim/v1",
+    "required_fields": [
+      "schema",
+      "canonical_repository",
+      "task",
+      "owner_hash",
+      "client",
+      "machine_nickname",
+      "purpose",
+      "intended_paths",
+      "base_sha_observed",
+      "issue_observation",
+      "follow_up_purpose",
+      "created_at",
+      "heartbeat_at",
+      "previous_object"
+    ],
+    "additional_fields": false,
+    "base_sha_semantics": "advisory_observation_only",
+    "issue_observation_states": [
+      "open",
+      "closed"
+    ],
+    "timestamps": "github_utc_rfc3339_seconds"
+  },
+  "limits": {
+    "request_utf8_bytes": 16384,
+    "output_utf8_bytes": 32768,
+    "purpose_utf8_bytes": 512,
+    "follow_up_purpose_utf8_bytes": 512,
+    "client_utf8_bytes": 64,
+    "machine_nickname_utf8_bytes": 64,
+    "remote_refs_per_page": 100,
+    "remote_ref_pages": 5,
+    "audit_comment_pages": 5
+  },
+  "github_request_budget": {
+    "availability_max": 5,
+    "acquire_max": 10,
+    "minimum_core_remaining_before_acquire": 200,
+    "secondary_or_abuse_limit_behavior": "refuse_before_ref_creation_no_retry"
+  },
+  "remote_ownership_failure": "fail_closed"
+}

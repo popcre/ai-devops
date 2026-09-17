@@ -1,0 +1,1 @@
+{"sample_count":30,"conclusions":[{"conclusion":"failure","count":2},{"conclusion":"success","count":28}],"durations_seconds":{"count":30,"min":394,"median":1266,"max":2355}}
