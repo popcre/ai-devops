@@ -5,6 +5,7 @@ workflow="${WORKFLOW_UNDER_TEST:-$ROOT/.github/workflows/verify.yml}"
 fast_workflow="$ROOT/.github/workflows/fast-classifier.yml"
 classifier="$ROOT/tools/ci/classify-changes.sh"
 manifest="$ROOT/config/ci-suite-manifest.json"
+. "$ROOT/tools/lib/task-gates.sh"
 failures=0
 
 check() {
@@ -12,7 +13,11 @@ check() {
   if eval "$command"; then printf '  ok   %s\n' "$label"
   else printf '  FAIL %s\n' "$label" >&2; failures=$((failures + 1)); fi
 }
-classify() { printf '%s\n' "$2" | bash "$classifier" "$1"; }
+classify() {
+  local result
+  result="$(printf '%s\n' "$2" | tg_legacy_classify "$1")" || return
+  printf '%s\n' "$result"
+}
 
 windows_timeout="$(sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 reviewer_timeout="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
@@ -23,8 +28,8 @@ check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ]
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
-check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 7 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
-check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 7 ]"
+check 'long and reviewer jobs use their separate classifier outputs' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -c \"needs.fast-classifier.outputs.reviewer == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
+check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 8 ]"
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
@@ -48,6 +53,14 @@ check 'code runs long' "classify pull_request 'bin/ai-example' | grep -q '^run_l
 check 'workflow changes run long' "classify pull_request '.github/workflows/verify.yml' | grep -q '^workflow=true$'"
 check 'PowerShell changes run long' "classify pull_request 'tests/example.ps1' | grep -q '^powershell=true$'"
 check 'test fixtures run long' "classify pull_request 'tests/fixtures/example/data.md' | grep -q '^test_fixtures=true$'"
+check 'unrelated code skips reviewer lane' "classify pull_request 'bin/ai-example' | grep -q '^reviewer=false$'"
+check 'every declared reviewer dependency selects reviewer lane' \
+  ". '$ROOT/tools/lib/task-gates.sh'; while IFS= read -r pattern; do pattern=\${pattern%\$'\\r'}; case \"\$pattern\" in ''|'#'*) continue ;; esac; sample=\${pattern//\*\*\/nested\/file}; sample=\${sample//\*/file}; tg_legacy_classify pull_request <<<\"\$sample\" | grep -q '^reviewer=true$' || exit 1; done < '$ROOT/config/reviewer-ci-paths.txt'"
+check 'reviewer path policy is safe after a Windows CRLF checkout' \
+  "tmp=\$(mktemp -d); mkdir -p \"\$tmp/config\"; sed 's/\$/\\r/' '$ROOT/config/reviewer-ci-paths.txt' >\"\$tmp/config/reviewer-ci-paths.txt\"; saved_root=\$TG_LIB_REPO_ROOT; TG_LIB_REPO_ROOT=\$tmp; result=\$(tg_legacy_classify pull_request <<<'bin/ai-codex-review'); TG_LIB_REPO_ROOT=\$saved_root; rm -rf \"\$tmp\"; grep -Fqx 'reviewer=true' <<<\"\$result\""
+check 'representative shared reviewer paths select reviewer lane' \
+  ". '$ROOT/tools/lib/task-gates.sh'; for path in 'tools/reviewer_event_guard.sh' 'tools/reviewer_events.py' 'tools/reviewer_maintenance.py' 'tools/lib/provider-wrapper-common.sh' 'config/provider-cli-versions.json' 'tests/lib-test-timing.sh' '.github/workflows/verify.yml'; do tg_legacy_classify pull_request <<<\"\$path\" | grep -q '^reviewer=true$' || exit 1; done"
+check 'non-PR events always run reviewer lane' "classify schedule 'docs/example.md' | grep -q '^reviewer=true$' && classify workflow_dispatch 'docs/example.md' | grep -q '^reviewer=true$'"
 check 'non-PR events always run long' "classify schedule 'docs/example.md' | grep -q '^run_long=true$' && classify workflow_dispatch 'docs/example.md' | grep -q '^run_long=true$' && classify merge_group 'docs/example.md' | grep -q '^run_long=true$'"
 check 'mixed changes fail closed' "printf 'docs/example.md\nbin/ai-example\n' | bash '$classifier' pull_request | grep -q '^run_long=true$'"
 check 'skills-to-docs rename paths fail closed' "printf 'skills/shared/example/SKILL.md\ndocs/example.md\n' | bash '$classifier' pull_request | grep -q '^run_long=true$'"
@@ -60,7 +73,7 @@ windows_sensitive="$(jq -r '.windows_sensitive_bash[]' "$manifest" | tr -d '\r' 
 windows_offline="$(jq -r '.windows_offline_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 windows_reviewer="$(jq -r '.windows_reviewer_safety_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 reviewer_workflow_count="$(grep -Ec 'test-ai-codex-review\.sh.*test-ai-grok-review\.sh' "$workflow")"
-hosted_without_reviewer="$(comm -23 <(printf "%s\n" "$windows_offline") <(printf "%s\n" "$windows_reviewer"))"
+hosted_without_reviewer="$(LC_ALL=C comm -23 <(printf "%s\n" "$windows_offline") <(printf "%s\n" "$windows_reviewer"))"
 # The queue gate carries no long jobs by design (#204), so the only thing
 # standing between a queued commit and main is proof that the pull-request run
 # on that exact commit passed. Losing this job would restore the silent trust
@@ -83,15 +96,20 @@ check 'the required closure delegates to the regression-tested evaluator' \
 check 'the required closure checks out its evaluator before running it' \
   "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | awk '/uses: actions\/checkout@/{checkout=NR} /bash tools\/ci\/verify-closure.sh/{run=NR} END {exit !(checkout && run && checkout < run)}'"
 
-check 'manifest declares 80 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 80 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 80 ]"
-check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
+# Counts are derived from discovery (checked exactly below), never hard-coded:
+# a literal count went stale on every new suite and failed 11 of 23 runs.
+check 'manifest declares unique, non-empty Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -gt 0 ] && [ \"\$(jq '.bash | length' '$manifest')\" -eq \"\$(jq '.bash | unique | length' '$manifest')\" ]"
+check 'manifest declares unique, non-empty PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -gt 0 ] && [ \"\$(jq '.powershell | length' '$manifest')\" -eq \"\$(jq '.powershell | unique | length' '$manifest')\" ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'
 check 'Windows groups are unique subsets of Bash discovery' \
-  '[ "$(printf "%s\n" "$windows_sensitive" | LC_ALL=C sort -u)" = "$windows_sensitive" ] && [ "$(printf "%s\n" "$windows_offline" | LC_ALL=C sort -u)" = "$windows_offline" ] && [ "$(printf "%s\n" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_reviewer" ] && [ -z "$(comm -13 <(printf "%s\n" "$manifest_bash") <(printf "%s\n" "$windows_sensitive"))" ]'
+  '[ "$(printf "%s\n" "$windows_sensitive" | LC_ALL=C sort -u)" = "$windows_sensitive" ] && [ "$(printf "%s\n" "$windows_offline" | LC_ALL=C sort -u)" = "$windows_offline" ] && [ "$(printf "%s\n" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_reviewer" ] && [ -z "$(LC_ALL=C comm -13 <(printf "%s\n" "$manifest_bash") <(printf "%s\n" "$windows_sensitive"))" ]'
 check 'manifest Windows coverage is complete before the reviewer split' '[ "$windows_offline" = "$windows_sensitive" ]'
 check 'reviewer lane owns exactly Codex and Grok safety suites' \
-  '[ "$windows_reviewer" = "$(printf "%s\n" test-ai-codex-review.sh test-ai-grok-review.sh | LC_ALL=C sort)" ] && [ "$reviewer_workflow_count" -eq 2 ] && [ -z "$(comm -23 <(printf "%s\n" "$windows_reviewer") <(printf "%s\n" "$windows_offline"))" ]'
+  '[ "$windows_reviewer" = "$(printf "%s\n" test-ai-codex-review.sh test-ai-grok-review.sh | LC_ALL=C sort)" ] && [ "$reviewer_workflow_count" -eq 2 ] && [ -z "$(LC_ALL=C comm -23 <(printf "%s\n" "$windows_reviewer") <(printf "%s\n" "$windows_offline"))" ]'
+# Inputs are byte-sorted; comm under a UTF-8 locale (Git Bash) collates
+# differently and silently misreports membership, so every comm is C-locale.
+check 'every set comparison uses byte order on every platform'   "! grep -nE '(^|[^_=A-Z])comm -' '$0' | grep -v 'LC_ALL=C comm -'"
 section_block="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow")"
 aggregate_block="$(sed -n '/^  windows-offline:$/,/^  windows-reviewer-safety:/p' "$workflow")"
 shard_union="$(jq -r '.windows_offline_shards[][]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
@@ -100,6 +118,7 @@ shard_smallest="$(jq '[.windows_offline_shards[] | length] | min' "$manifest" | 
 powershell_owner="$(jq -r '.windows_offline_powershell_shard' "$manifest" | tr -d '\r')"
 deepseek_owner="$(jq -r 'to_entries[] | select(.value | index("test-ai-deepseek-agent.sh")) | .key + 1' < <(jq '.windows_offline_shards' "$manifest") | tr -d '\r')"
 muse_owner="$(jq -r 'to_entries[] | select(.value | index("test-ai-muse.sh")) | .key + 1' < <(jq '.windows_offline_shards' "$manifest") | tr -d '\r')"
+measured_rebalance='[["test-ai-kimi.sh"],["test-ai-claude-review.sh","test-ai-codex-memories.sh","test-ai-deepseek-agent.sh","test-ai-gh.sh","test-bin-cmd-launchers.sh"],["test-ai-adopt-globals.sh","test-ai-install-skills.sh","test-ai-memory-sync.sh","test-ai-muse.sh","test-mcp-launch-lock.sh"],["test-ai-gemini-usage.sh","test-ai-grok-implement.sh","test-ai-machine-tools.sh","test-ai-qwen.sh","test-ai-test-local.sh","test-install-ai-provider-clis.sh","test-installer-parity.sh"],["test-ai-claude-permissions.sh","test-ai-gemini.sh","test-ai-glm.sh","test-ai-muse-code.sh","test-line-endings.sh","test-windows-scripts.sh"]]'
 sections_declared="$(printf '%s\n' "$section_block" | sed -n 's/^[[:space:]]*section:[[:space:]]*//p' | tr -d '\r' | head -1)"
 sections_expected="[$(seq -s ', ' 1 "$shard_count")]"
 check 'declared sections cover the ordinary hosted lane exactly, with no suite twice' \
@@ -110,6 +129,8 @@ check 'the PowerShell suites are owned by exactly one existing section' \
   '[ "$powershell_owner" != null ] && [ "$powershell_owner" -ge 1 ] && [ "$powershell_owner" -le "$shard_count" ]'
 check 'the expanded DeepSeek and Muse suites run in separate sections' \
   '[ -n "$deepseek_owner" ] && [ -n "$muse_owner" ] && [ "$deepseek_owner" -ne "$muse_owner" ]'
+check 'five Windows sections retain the measured-duration rebalance' \
+  '[ "$(jq -c .windows_offline_shards "$manifest")" = "$measured_rebalance" ]'
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 # Sections run at the same time on independent hosted machines, and one failing
@@ -145,7 +166,7 @@ complete_union="$(printf '%s\n' "$complete_union" | sed '/^$/d' | LC_ALL=C sort)
 check 'complete workflow sections cover actual Bash discovery with no omissions or duplicates' \
   '[ "$complete_selection_ok" = true ] && [ "$complete_union" = "$actual_bash" ] && [ "$(printf "%s\n" "$complete_union" | LC_ALL=C sort -u)" = "$complete_union" ]'
 check 'ordinary hosted and self-hosted assignments are disjoint and complete' \
-  '[ -z "$(comm -12 <(printf "%s\n" "$hosted_without_reviewer") <(printf "%s\n" "$windows_reviewer"))" ] && [ "$(printf "%s\n%s\n" "$hosted_without_reviewer" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_sensitive" ]'
+  '[ -z "$(LC_ALL=C comm -12 <(printf "%s\n" "$hosted_without_reviewer") <(printf "%s\n" "$windows_reviewer"))" ] && [ "$(printf "%s\n%s\n" "$hosted_without_reviewer" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_sensitive" ]'
 
 # A pull-request run must be superseded by a newer push to the same pull
 # request. Keying the group on the head SHA made that impossible and filled the
@@ -243,8 +264,24 @@ grep -Fq 'run.id !== current' "$workflow" || {
   printf 'FAIL: manual preflight must exclude its own run\n' >&2
   exit 1
 }
+linux_shard_block="$(sed -n '/^  linux-offline-shard:/,/^  linux-offline:$/p' "$workflow")"
+linux_aggregate_block="$(sed -n '/^  linux-offline:$/,/^  merge-group-evidence:/p' "$workflow")"
+linux_weight_names="$(jq -r '.linux_offline_suite_seconds | keys[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
+# docs/ci-speed-audit-2026-09-17.md speedup 2: the Linux lane is sectioned on
+# independent hosted machines, and the required `linux-offline` name survives
+# as a fail-closed aggregate that proves every suite ran exactly once.
+check 'the offline Bash suite runs as balanced parallel sections' \
+  'printf "%s" "$linux_shard_block" | grep -qF "fail-fast: false" && printf "%s" "$linux_shard_block" | grep -qF "shard: [1, 2, 3, 4]" && printf "%s" "$linux_shard_block" | grep -qF "tests/test-all.sh --balanced --shard" && printf "%s" "$linux_shard_block" | grep -qF "matrix.shard }}/4" && ! printf "%s" "$linux_shard_block" | grep -qE "run: bash tests/test-all.sh[[:space:]]*$"'
+check 'the required linux-offline name is a fail-closed aggregate over every section' \
+  'printf "%s" "$linux_aggregate_block" | grep -qF "needs: [fast-classifier, manual-preflight, linux-offline-shard]" && printf "%s" "$linux_aggregate_block" | grep -qF "bash tools/ci/linux-offline-aggregate.sh \"\$SHARD_RESULT\" 4" && printf "%s" "$linux_aggregate_block" | grep -qF "needs.linux-offline-shard.result" && printf "%s" "$linux_aggregate_block" | awk "/uses: actions\/checkout@/{c=NR} /linux-offline-aggregate.sh/{r=NR} END {exit !(c && r && c < r)}"'
+check 'the aggregate and its sections share one run condition, so a skip is never a pass' \
+  '[ "$(printf "%s\n" "$linux_shard_block" | grep "^    if:")" = "$(printf "%s\n" "$linux_aggregate_block" | grep "^    if:")" ]'
+check 'measured Linux suite seconds name only discovered suites' \
+  '[ -n "$linux_weight_names" ] && [ -z "$(LC_ALL=C comm -23 <(printf "%s\n" "$linux_weight_names") <(printf "%s\n" "$manifest_bash"))" ]'
+check 'the four balanced sections partition every discovered Bash suite exactly once' \
+  '[ "$(for i in 1 2 3 4; do bash "$ROOT/tests/test-all.sh" --balanced --shard "$i/4" --list | grep "^test-"; done | LC_ALL=C sort)" = "$manifest_bash" ]'
 cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
-[ "$cancel_aware_jobs" -eq 10 ] || {
+[ "$cancel_aware_jobs" -eq 11 ] || {
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
   exit 1
 }
@@ -307,7 +344,7 @@ check_reviewer_result() {
     exit 1
   }
 }
-common_reviewer_env='EVENT=pull_request CLASSIFIER_RESULT=success RUN_LONG=true RUN_EXPENSIVE=true WATCHDOG_RESULT=success'
+common_reviewer_env='EVENT=pull_request CLASSIFIER_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=true WATCHDOG_RESULT=success'
 # Regression: a timed-out or cancelled preferred host is not a global stop when
 # the independent hosted runner completed every identical reviewer assertion.
 check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=success
@@ -315,8 +352,8 @@ check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=failure FALLBACK_R
 check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=failure
 check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=skipped
 check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cleanup_failure FALLBACK_RESULT=skipped
-check_reviewer_result 0 EVENT=pull_request CLASSIFIER_RESULT=success RUN_LONG=false RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
-check_reviewer_result 0 EVENT=workflow_dispatch CLASSIFIER_RESULT=success RUN_LONG=true RUN_EXPENSIVE=false WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+check_reviewer_result 0 EVENT=pull_request CLASSIFIER_RESULT=success RUN_REVIEWER=false RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+check_reviewer_result 0 EVENT=workflow_dispatch CLASSIFIER_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=false WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
 rm -f "$aggregate_script"
 
 if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then

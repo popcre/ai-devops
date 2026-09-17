@@ -40,6 +40,7 @@ CLOSEOUT_CONTRACT_PATTERNS = {
     r"Preparation is not delivery": "preparation must not be reported as delivery",
     r"keep working|Ending\s+the turn is the error": "unfinished authorized work means keep working, not end the turn",
     r"nothing is needed.{0,80}every deliverable|name what is still pending": "completion may only be claimed once every deliverable checks out",
+    r"Do not end a turn by describing work you are about to do": "future action promises cannot replace action in the current turn",
 }
 
 SAFETY_MARKERS = {
@@ -103,6 +104,7 @@ PARITY_RULES = {
     "closeout contract: account for deliverables": r"Account for the whole job",
     "closeout contract: preparation is not delivery": r"Preparation is not delivery",
     "closeout contract: keep working when unfinished": r"Ending\s+the turn is the error",
+    "closeout contract: do not promise future action instead of acting": r"Do not end a turn by describing work you are about to do",
     "GPT-5.6 low or medium only": r"GPT-5\.6",
     "production infrastructure safety": r"production infrastructure safety",
     "no terraform apply against prod": r"terraform apply",

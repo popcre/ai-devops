@@ -75,9 +75,20 @@ jobs:
   fast-classifier:
     uses: ./.github/workflows/fast-classifier.yml
 
-  linux-offline:
+  # The complete offline Bash suite, split into four sections that run at the
+  # same time on separate hosted machines (docs/ci-speed-audit-2026-09-17.md,
+  # speedup 2). tests/test-all.sh --balanced packs every discovered suite into
+  # exactly one section by the measured seconds in config/ci-suite-manifest.json
+  # (runs 35227802085, 35227474047, 35224512570: about 21 minutes serial); an
+  # unmeasured suite still lands in a section at a default weight.
+  linux-offline-shard:
     needs: [fast-classifier, manual-preflight]
     if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
+    strategy:
+      # One failing section must never hide the other sections' results.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -96,13 +107,30 @@ jobs:
             -o Dir::Etc::sourceparts=-
           sudo apt-get install -y jq ripgrep shellcheck
       - name: Syntax
+        if: ${{ matrix.shard == 1 }}
         run: |
           find bin tests -type f \( -name '*.sh' -o -path 'bin/ai-*' \) | while read -r file; do
             head -n 1 "$file" | grep -q 'bash' || continue
             bash -n "$file"
           done
-      - name: Complete offline Bash suite
-        run: bash tests/test-all.sh
+      - name: Offline Bash suite section ${{ matrix.shard }} of 4
+        run: bash tests/test-all.sh --balanced --shard '${{ matrix.shard }}/4'
+
+  # The required check keeps its name. It passes only when every section passed
+  # and the four sections reconstitute the whole suite exactly once; a failed,
+  # cancelled, skipped or missing section fails it closed. Its run condition is
+  # the sections' condition, so it is skipped only when they legitimately were.
+  linux-offline:
+    needs: [fast-classifier, manual-preflight, linux-offline-shard]
+    if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Aggregate the offline Bash sections
+        env:
+          SHARD_RESULT: ${{ needs.linux-offline-shard.result }}
+        run: bash tools/ci/linux-offline-aggregate.sh "$SHARD_RESULT" 4
 
   # The queue gate is deliberately light: #204 took the long Windows jobs off
   # merge_group because a required check that never reports on a merge group
@@ -145,7 +173,7 @@ jobs:
   # this is real parallelism on separate hardware, not four processes competing
   # for one desktop - the failure mode the issue explicitly forbids. The section
   # boundaries live in config/ci-suite-manifest.json and are sized from the
-  # measured per-suite timings of runs 34394706703, 34377910065 and 34366159903;
+  # measured per-suite timings of runs 35200063547 and 35189676116;
   # tests/test-all.sh refuses to run a section unless the declared sections
   # reconstitute the whole lane exactly, so a coverage gap is a configuration
   # error rather than a quiet pass.
@@ -168,12 +196,10 @@ jobs:
       matrix:
         section: [1, 2, 3, 4, 5]
     runs-on: windows-2025
-    # The retained-session expansions made DeepSeek and Muse consume more than
-    # 31 minutes together in run 34804029887 before the 35-minute ceiling killed
-    # their old shared section. Five sections keep those indivisible suites
-    # separate. Exact-head run 34822350212 then showed the indivisible Kimi
-    # section still advancing at 35m13s with no assertion failure, so a bounded
-    # 40-minute ceiling supplies measured finalization headroom without a
+    # The two measured runs above put the old Muse section at 36-38 minutes and
+    # the old Qwen section at 36 minutes. Rebalancing their smaller neighbours
+    # makes the indivisible Kimi suite the expected long pole at 34-35 minutes,
+    # while a bounded 40-minute ceiling retains finalization headroom without a
     # same-run fallback or removing any test.
     timeout-minutes: 40
     steps:
@@ -302,7 +328,7 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'workflow_dispatch' &&
       (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true') &&
+       needs.fast-classifier.outputs.reviewer == 'true') &&
       needs.manual-preflight.outputs.run_expensive_jobs == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 3
@@ -334,15 +360,15 @@ jobs:
     needs: [fast-classifier, manual-preflight, reviewer-runner-availability]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
-    # Also skipped when the fast classifier proves the change is prose-only.
-    # Fail-closed: any classifier result other than a clean prose-only verdict
-    # runs the complete matrix.
+    # Also skipped when the fast classifier proves the change does not touch
+    # the declared reviewer dependency path set. Classifier failure remains
+    # fail-closed and runs the complete reviewer proof.
     if: >-
       !cancelled() && github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true') &&
+       needs.fast-classifier.outputs.reviewer == 'true') &&
       needs.reviewer-runner-availability.outputs.preferred_available == 'true' &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
@@ -411,7 +437,7 @@ jobs:
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true') &&
+       needs.fast-classifier.outputs.reviewer == 'true') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
     runs-on: ubuntu-24.04
@@ -440,7 +466,7 @@ jobs:
     if: >-
       always() && !cancelled() && github.event_name != 'merge_group' &&
       (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true') &&
+       needs.fast-classifier.outputs.reviewer == 'true') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
@@ -480,15 +506,15 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           CLASSIFIER_RESULT: ${{ needs.fast-classifier.result }}
-          RUN_LONG: ${{ needs.fast-classifier.outputs.run_long }}
+          RUN_REVIEWER: ${{ needs.fast-classifier.outputs.reviewer }}
           RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
           PREFERRED_RESULT: ${{ needs.reviewer-safety-start-deadline.outputs.preferred_result }}
           WATCHDOG_RESULT: ${{ needs.reviewer-safety-start-deadline.result }}
           FALLBACK_RESULT: ${{ needs.windows-reviewer-fallback.result }}
         run: |
           set -uo pipefail
-          printf 'event=%s classifier=%s run_long=%s preferred=%s watchdog=%s fallback=%s\n' \
-            "$EVENT" "$CLASSIFIER_RESULT" "$RUN_LONG" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT"
+          printf 'event=%s classifier=%s reviewer=%s preferred=%s watchdog=%s fallback=%s\n' \
+            "$EVENT" "$CLASSIFIER_RESULT" "$RUN_REVIEWER" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT"
 
           if [ "$PREFERRED_RESULT" = 'success' ]; then
             printf 'windows-reviewer-safety: qualified self-hosted proof succeeded.\n'
@@ -500,7 +526,7 @@ jobs:
           fi
 
           legitimate_skip=false
-          if [ "$CLASSIFIER_RESULT" = 'success' ] && [ "$RUN_LONG" != 'true' ]; then
+          if [ "$CLASSIFIER_RESULT" = 'success' ] && [ "$RUN_REVIEWER" != 'true' ]; then
             legitimate_skip=true
           fi
           if [ "$EVENT" = 'workflow_dispatch' ] && [ "$RUN_EXPENSIVE" != 'true' ]; then

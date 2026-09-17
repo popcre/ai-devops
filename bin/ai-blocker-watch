@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+# ai-blocker-watch — tell waiting work, and waiting sessions, that a blocker closed.
+#
+# WHY THIS EXISTS. Shared-db work nests: an application issue waits on an
+# orchestrator issue, which waits on a gate bug, which waits on a pull request.
+# The only link was prose ("Blocked on #2852"), nothing followed it, and a
+# parent resumed only if one session happened to remember it. Sessions in
+# Claude, Codex and ZCode sat open for days not knowing their blocker had closed.
+#
+# Two mechanisms, both driven by `tick` (run every few minutes by `schedule`):
+#   1. Propagation. Blocking is recorded as GitHub's native "blocked by"
+#      dependency. When an issue in a configured repo closes, every OPEN issue
+#      it was blocking gets one comment naming the closed blocker. Closing that
+#      parent later repeats the step one level up, so a chain unwinds by itself.
+#   2. Wake. A session that runs `wait` is registered with its harness, session
+#      ID and directory. When its blocker closes, the watcher resumes that exact
+#      session headlessly (claude -p --resume / codex exec resume /
+#      zcode --resume) with a prompt to recheck and continue.
+#
+# Usage:
+#   ai-blocker-watch wait <owner/repo#N> [--for <owner/repo#M>] [--note TEXT]
+#       Register this session as waiting on N. --for also records the native
+#       "M is blocked by N" link. Harness and session come from the environment
+#       (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID, ZCODE_SESSION_ID) or
+#       --harness/--session/--cwd.
+#   ai-blocker-watch link <blocked owner/repo#M> <blocker owner/repo#N>
+#   ai-blocker-watch list
+#   ai-blocker-watch cancel <wait-id>
+#   ai-blocker-watch tick [--dry-run]
+#   ai-blocker-watch schedule | unschedule      (Windows Task Scheduler)
+#
+# tick exits non-zero when any propagation or wake failed, so a scheduled run
+# that did not do its work is visible. Failed wakes retry on later ticks up to
+# max_wake_attempts, then stay in state "failed" for a human.
+#
+# Environment:
+#   AI_BLOCKER_WATCH_HOME    state (default ~/.ai-devops/blocker-watch)
+#   AI_BLOCKER_WATCH_CONFIG  settings (default <repo>/config/blocker-watch.json)
+#   AI_BLOCKER_WATCH_GH      GitHub command (default ai-gh from this checkout)
+set -euo pipefail
+die(){ printf 'ai-blocker-watch: error: %s\n' "$*" >&2; exit 2; }
+note(){ printf 'ai-blocker-watch: %s\n' "$*" >&2; }
+
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+  _t="$(readlink "$_self")"
+  case "$_t" in /*) _self="$_t" ;; *) _self="$(dirname "$_self")/$_t" ;; esac
+done
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
+HOME_DIR="${AI_BLOCKER_WATCH_HOME:-${HOME:?HOME is unavailable}/.ai-devops/blocker-watch}"
+CONFIG="${AI_BLOCKER_WATCH_CONFIG:-$TOOL_ROOT/config/blocker-watch.json}"
+GH="${AI_BLOCKER_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
+WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
+LOGS="$HOME_DIR/logs"
+command -v jq >/dev/null || die "jq is required"
+# Windows jq and gh builds can end lines with CR; strip it so values compare cleanly.
+jq(){ command jq "$@" | tr -d '\r'; }
+[ -f "$CONFIG" ] || die "config not found: $CONFIG"
+cfg(){ jq -r "$1" "$CONFIG"; }
+mkdir -p "$WAITS" "$LOGS"; touch "$NOTIFIED"
+
+now_iso(){ date -u +%Y-%m-%dT%H:%M:%SZ; }
+parse_ref(){ # owner/repo#N -> "owner/repo N"
+  [[ "$1" =~ ^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)$ ]] || die "expected owner/repo#N, got: $1"
+  printf '%s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+}
+gh_api(){ "$GH" api "$@" | tr -d '\r'; }
+
+link(){ # link <blocked> <blocker>
+  local br bn kr kn id
+  read -r br bn <<<"$(parse_ref "$1")"; read -r kr kn <<<"$(parse_ref "$2")"
+  id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
+  if gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
+    note "$1 is already blocked by $2"; return 0
+  fi
+  gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null ||
+    die "GitHub refused the link $1 blocked by $2"
+  note "recorded: $1 is blocked by $2"
+}
+
+cmd_wait(){
+  local ref="" for="" text="" harness="" session="" cwd="$PWD"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --for) [ $# -ge 2 ] || die "--for needs a value"; for="$2"; shift 2 ;;
+      --note) [ $# -ge 2 ] || die "--note needs a value"; text="$2"; shift 2 ;;
+      --harness) [ $# -ge 2 ] || die "--harness needs a value"; harness="$2"; shift 2 ;;
+      --session) [ $# -ge 2 ] || die "--session needs a value"; session="$2"; shift 2 ;;
+      --cwd) [ $# -ge 2 ] || die "--cwd needs a value"; cwd="$2"; shift 2 ;;
+      -*) die "unknown option: $1" ;;
+      *) [ -z "$ref" ] || die "one blocker per wait"; ref="$1"; shift ;;
+    esac
+  done
+  [ -n "$ref" ] || die "usage: ai-blocker-watch wait <owner/repo#N> [--for owner/repo#M] [--note TEXT]"
+  parse_ref "$ref" >/dev/null
+  if [ -z "$harness" ]; then
+    if [ -n "${ZCODE_SESSION_ID:-}" ]; then harness=zcode; session="${session:-$ZCODE_SESSION_ID}"
+    elif [ -n "${CODEX_THREAD_ID:-}" ]; then harness=codex; session="${session:-$CODEX_THREAD_ID}"
+    elif [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then harness=claude; session="${session:-$CLAUDE_CODE_SESSION_ID}"
+    else die "cannot tell which program this session runs in; pass --harness and --session"; fi
+  fi
+  [ -n "$session" ] || die "no session ID; pass --session"
+  jq -e --arg h "$harness" '.harness[$h]' "$CONFIG" >/dev/null || die "unknown harness: $harness"
+  if command -v cygpath >/dev/null 2>&1; then cwd="$(cygpath -m "$cwd")"; fi
+  [ -z "$for" ] || link "$for" "$ref"
+  local id; id="$(date -u +%Y%m%dT%H%M%S)-$harness-${session:0:8}-$(printf '%s' "$ref" | tr '/#' '__')"
+  jq -n --arg id "$id" --arg ref "$ref" --arg for "$for" --arg note "$text" --arg h "$harness" \
+    --arg s "$session" --arg cwd "$cwd" --arg at "$(now_iso)" \
+    '{id:$id, blocker:$ref, for:$for, note:$note, harness:$h, session:$s, cwd:$cwd,
+      registered_at:$at, state:"waiting", attempts:0}' > "$WAITS/$id.json"
+  printf '%s\n' "$id"
+  note "this session will be resumed when $ref closes. End the turn; do not hold the wait open."
+}
+
+cmd_list(){
+  local f any=0
+  for f in "$WAITS"/*.json; do [ -e "$f" ] || continue; any=1
+    jq -r '[.id, .state, .blocker, .harness, (.for // "")] | @tsv' "$f"; done
+  [ "$any" = 1 ] || note "no registered waits"
+}
+
+cmd_cancel(){ [ $# -eq 1 ] || die "usage: cancel <wait-id>"; rm -f -- "$WAITS/$1.json" || true; note "cancelled $1"; }
+
+# --- tick -------------------------------------------------------------------
+DRY=0; FAILED=0
+propagate(){
+  local start since repo n dep dr dn key
+  start="$(now_iso)"
+  if [ -s "$SCAN" ]; then since="$(cat "$SCAN")"
+  else since="$(date -u -d "-$(cfg .first_scan_lookback_minutes) minutes" +%Y-%m-%dT%H:%M:%SZ)"; fi
+  local ok=1
+  while read -r repo; do
+    [ -n "$repo" ] || continue
+    local closed
+    if ! closed="$(gh_api -X GET search/issues -f "q=repo:$repo is:issue is:closed closed:>=$since" -f per_page=100 --jq '.items[].number')"; then
+      note "could not list closed issues in $repo"; ok=0; continue
+    fi
+    for n in $closed; do
+      local deps
+      if ! deps="$(gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
+        note "could not read what $repo#$n was blocking"; ok=0; continue
+      fi
+      for dep in $deps; do
+        key="$repo#$n	$dep"
+        grep -qxF "$key" "$NOTIFIED" && continue
+        read -r dr dn <<<"$(parse_ref "$dep")"
+        if [ "$DRY" = 1 ]; then note "would tell $dep that $repo#$n closed"; continue; fi
+        if "$GH" issue comment "$dn" -R "$dr" --body "<!-- ai-blocker-watch:$repo#$n -->
+Blocker $repo#$n is closed. Whoever owns this issue: recheck it and continue. (ai-blocker-watch)" >/dev/null; then
+          printf '%s\n' "$key" >> "$NOTIFIED"; note "told $dep that $repo#$n closed"
+        else note "could not comment on $dep"; ok=0; fi
+      done
+    done
+  done < <(cfg '.repos[]')
+  if [ "$ok" = 1 ]; then [ "$DRY" = 1 ] || printf '%s' "$start" > "$SCAN"; else FAILED=1; fi
+}
+
+wake(){ # wake <wait file>
+  local f="$1" h s cwd ref r n state title prompt log arg
+  h="$(jq -r .harness "$f")"; s="$(jq -r .session "$f")"; cwd="$(jq -r .cwd "$f")"; ref="$(jq -r .blocker "$f")"
+  read -r r n <<<"$(parse_ref "$ref")"
+  if ! state="$(gh_api "repos/$r/issues/$n" --jq '.state + "\t" + .title')"; then
+    note "could not read $ref"; FAILED=1; return; fi
+  title="${state#*	}"; state="${state%%	*}"
+  [ "$state" = closed ] || return 0
+  prompt="ai-blocker-watch: the blocker you registered a wait on, $ref (\"$title\"), is now closed."
+  [ -z "$(jq -r '.for // ""' "$f")" ] || prompt="$prompt You were waiting on it for $(jq -r .for "$f")."
+  [ -z "$(jq -r '.note // ""' "$f")" ] || prompt="$prompt Your note: $(jq -r .note "$f")."
+  prompt="$prompt Recheck the blocker's final state, then continue the work you were waiting to do. If something else now blocks you, register a new wait with ai-blocker-watch."
+  local home_m="$HOME" zb=""
+  command -v cygpath >/dev/null 2>&1 && home_m="$(cygpath -m "$HOME")"
+  zb="$(ls -t "$HOME"/.zcode/v2/runtime/provider/*/*/*/zcode-builtin.json 2>/dev/null | head -1 || true)"
+  [ -z "$zb" ] || ! command -v cygpath >/dev/null 2>&1 || zb="$(cygpath -m "$zb")"
+  local -a cmd=()
+  while IFS= read -r -d '' arg; do
+    arg="${arg//\{session\}/$s}"; arg="${arg//\{cwd\}/$cwd}"; arg="${arg//\{prompt\}/$prompt}"
+    arg="${arg//\{home\}/$home_m}"; arg="${arg//\{zcode_builtin\}/$zb}"
+    cmd+=("$arg")
+  done < <(jq -j --arg h "$h" '.harness[$h][] | . + "\u0000"' "$CONFIG")
+  [ "${#cmd[@]}" -gt 0 ] || { note "no command for harness $h"; FAILED=1; return; }
+  if [ "$DRY" = 1 ]; then note "would resume $h session $s in $cwd ($ref closed)"; return; fi
+  log="$LOGS/$(basename "$f" .json)-$(date -u +%Y%m%dT%H%M%S).log"
+  local tmp="$f.tmp"
+  jq --arg at "$(now_iso)" '.state="waking" | .attempts+=1 | .last_attempt_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
+  note "resuming $h session $s ($ref closed); log $log"
+  if (cd "$cwd" && timeout "$(( $(cfg .wake_timeout_minutes) * 60 ))" "${cmd[@]}") >"$log" 2>&1 </dev/null; then
+    jq --arg at "$(now_iso)" --arg log "$log" '.state="woken" | .woken_at=$at | .log=$log' "$f" > "$tmp" && mv "$tmp" "$f"
+  else
+    local rc=$?; FAILED=1
+    if [ "$(jq .attempts "$f")" -ge "$(cfg .max_wake_attempts)" ]; then
+      jq --arg log "$log" --argjson rc "$rc" '.state="failed" | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
+    else
+      jq --arg log "$log" --argjson rc "$rc" '.state="waiting" | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
+    fi
+    note "resume of $h session $s failed with exit $rc; see $log"
+  fi
+}
+
+cmd_tick(){
+  [ "${1:-}" != --dry-run ] || DRY=1
+  local lock="$HOME_DIR/tick.lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    # A tick killed mid-run leaves the lock; anything older than the wake timeout is stale.
+    if [ -n "$(find "$lock" -maxdepth 0 -mmin +"$(( $(cfg .wake_timeout_minutes) + 5 ))" 2>/dev/null)" ]; then
+      rmdir "$lock"; mkdir "$lock"
+    else note "another tick is running"; return 0; fi
+  fi
+  trap 'rmdir "$HOME_DIR/tick.lock" 2>/dev/null || true' EXIT
+  propagate
+  local f
+  for f in "$WAITS"/*.json; do
+    [ -e "$f" ] || continue
+    [ "$(jq -r .state "$f")" = waiting ] || continue
+    wake "$f"
+  done
+  [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
+}
+
+TASK_NAME='ai-devops\blocker-watch'
+cmd_schedule(){
+  command -v schtasks.exe >/dev/null || die "schedule is for Windows; on Linux run 'ai-blocker-watch tick' from cron or a systemd timer"
+  local bash_exe self every
+  bash_exe="$(cygpath -w "$(command -v bash)")"; self="$(cygpath -m "$TOOL_ROOT/bin/ai-blocker-watch")"
+  every="$(cfg .schedule_every_minutes)"
+  # conhost --headless keeps a console window from flashing every run.
+  MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /TN "$TASK_NAME" \
+    /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' tick >> ~/.ai-devops/blocker-watch/tick.log 2>&1\"" >/dev/null
+  note "scheduled every $every minutes as $TASK_NAME"
+}
+cmd_unschedule(){ MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Delete /F /TN "$TASK_NAME" >/dev/null; note "removed $TASK_NAME"; }
+
+case "${1:-}" in
+  wait) shift; cmd_wait "$@" ;;
+  link) shift; [ $# -eq 2 ] || die "usage: link <blocked owner/repo#M> <blocker owner/repo#N>"; link "$1" "$2" ;;
+  list) cmd_list ;;
+  cancel) shift; cmd_cancel "$@" ;;
+  tick) shift; cmd_tick "$@" ;;
+  schedule) cmd_schedule ;;
+  unschedule) cmd_unschedule ;;
+  -h|--help|help) sed -n '2,40p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command; see ai-blocker-watch --help" ;;
+esac

@@ -2,8 +2,17 @@
 
 Scope: `.github/workflows/verify.yml`, the last 24 completed Verify runs
 (19 `pull_request`, 4 `merge_group` usable; run IDs from `gh run list -L 60`),
-job timings from the Actions jobs API. Recommendations only — no workflow,
-required-check, or ruleset change was made.
+job timings from the Actions jobs API. The audit originally made recommendations
+only; implementation status is recorded below.
+
+## Implementation status
+
+Speedup #1 shipped in [#539](https://github.com/popcre/ai-devops/pull/539)
+(`52d92c81`). Pull requests now run the Windows reviewer lanes only when the
+reviewer path manifest matches, while the stable `windows-reviewer-safety`
+required check still reports success when those lanes are legitimately skipped.
+Scheduled and manual runs remain complete, and classifier failures still run the
+reviewer lanes fail-closed.
 
 ## Headline numbers
 
@@ -43,19 +52,22 @@ Windows section (22 / 35 min); linux-offline (~20 min) sets the merge-queue time
 
 ## Ranked speedups
 
-1. **Only run windows-reviewer-fallback when reviewer files change.** It
-   caught 0 failures in 18 runs yet is the PR long pole. Gate it in
-   fast-classifier on paths (`bin/ai-codex-review*`, `bin/ai-grok-review*`,
-   their libs and tests). Saves ~20–40 min wall on unrelated PRs. Risk: low–
-   medium (path list must include shared helpers; keep full run on schedule).
+1. **DONE 2026-09-17 — only run Windows reviewer lanes when reviewer files
+   change ([#539](https://github.com/popcre/ai-devops/pull/539)).** The dedicated
+   reviewer classifier uses a tested manifest covering wrappers, configuration,
+   sourced helpers, tests, and workflows. Scheduled/manual runs remain full,
+   classifier failures fail closed, and the required aggregate check name is
+   preserved when physical reviewer jobs are skipped. Expected saving: ~20–40
+   minutes wall time on unrelated PRs.
 2. **Split linux-offline into 3–4 shards like the Windows lane.** It is the
    sole merge-queue gate and the ~20 min floor of every PR round, and it is the
    job that actually catches regressions (8 failures). Saves ~12–14 min on both
    PR and queue runs. Risk: low (same mechanism already used on Windows;
    aggregator check keeps the required name).
-3. **Rebalance / add a 6th Windows section.** p90 35 min vs median 22 means one
-   section carries the heavy indivisible suites. Balancing by measured suite
-   time should cut the Windows p90 to ~25 min. Saves ~10 min at p90. Risk: low.
+3. **DONE 2026-09-17 — rebalance the five Windows sections ([#537](https://github.com/popcre/ai-devops/pull/537)).**
+   The exact-head run kept all 24 suites once and reduced the four movable
+   sections to 24–30 minutes; the isolated, indivisible Kimi suite remained the
+   35-minute long pole. The fail-closed `windows-offline` aggregate was retained.
 4. **Docs-only / prose-only PRs skip long lanes entirely** (classifier already
    exists; confirm run_long=false for Markdown-only diffs and that aggregators
    pass). Saves the full ~26 min for doc PRs. Risk: low.

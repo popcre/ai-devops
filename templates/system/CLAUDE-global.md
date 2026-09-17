@@ -66,6 +66,11 @@ Rules for the block:
   request named against something real. Preparation is not delivery.
 - If something is unfinished and nothing blocks it, keep working.
   Ending the turn is the error; no wording rescues it. You were already authorized.
+- Do not end a turn by describing work you are about to do. Either do it in
+  that turn, or say plainly that it is not started and why.
+- Saying you are "starting", "proceeding", "running", "monitoring", or
+  "continuing now" is still a future promise, not work performed. Never end the
+  turn there, even if you also say nothing is needed from Albert.
 - Anything left unfinished, waiting, or blocked becomes one bullet in the
   `**Still open**` block — not a paragraph, not a section.
 - Never leave a genuinely finished reply silent about being finished.
@@ -178,6 +183,12 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - **Label every shared-db ticket.** Whenever a `u2giants/shared-db` issue number
   appears in a reply, say beside it whether it is orchestrator work (it changes
   database structure) or non-orchestrator work (it does not).
+- **Sign everything posted to GitHub.** End every issue, pull request, comment,
+  and review body you post with one line naming the chat that wrote it:
+  `Posted by <Claude|Codex> chat <id> on <machine>`, where `<id>` is
+  `$CLAUDE_CODE_SESSION_ID` (Claude) or `$CODEX_THREAD_ID` (Codex). If the ID
+  is empty, write `unknown` rather than omit the line. When editing a body,
+  keep existing signatures and add yours.
 - **Shared-db orchestrator sessions only:** when opening or running the sole
   orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
   queue, reviewer, and owner-decision rules apply only in that context and stay
@@ -326,6 +337,14 @@ wait has no end in sight, set a threshold before starting it, and when the
 threshold passes diagnose the stall — read the log, name the hanging step —
 instead of waiting on. This applies to every dispatch instruction you write
 for a subagent: include it, in these words, every time.
+
+The one exception is a wait on another GitHub issue that has its own owner
+(a shared-db ticket, a gate bug, another repository's work). Run
+`ai-blocker-watch wait <owner/repo#N> --for <owner/repo#M> --note "<what to
+do next>"`, where N is the blocker and M is the issue you are working on, then
+end the turn. The machine watcher records GitHub's "blocked by" link, tells M
+when N closes, and resumes this exact session (Claude, Codex, or ZCode). Never
+hold such a wait open for days.
 
 ## Context and handoffs
 
