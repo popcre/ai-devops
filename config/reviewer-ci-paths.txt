@@ -35,6 +35,15 @@ tests/test-provider-wrapper-common.sh
 tests/test-verify-closure.sh
 tests/test-windows-bash-selection.sh
 tests/test-workflow-policy.sh
+bin/ai-task-gates*
+bin/setup-opencode-glm.*
+bin/setup-opencode-muse.sh
+config/muse-code/**
+config/opencode/**
+config/opencode-muse/**
+config/systemd/opencode-*
+tests/fixtures/**
+tests/test-reviewer-ci-paths.sh
 tools/ci/classify-changes.sh
 tools/ci/stop-process-tree.ps1
 tools/lib/provider-wrapper-common.sh
