@@ -413,7 +413,7 @@ probing the CLI directly):
     (`~/.zcode/cli/memories/projects/`) gated by its own `memoryEnabled` setting, today
     `false`. Indexing ZCode edits into a foreign store before ZCode's own memory is even
     enabled would be machinery with no reader. Enable the native feature instead
-    (recommendation to the owner: yes — see §13 open question 3).
+    (the owner enabled it on 2026-09-17; see §13 open question 3, settled).
 
 ## 8. Design decisions already made (2026-09-17)
 
@@ -459,9 +459,9 @@ probing the CLI directly):
   exception if `tests/test-installer-parity.sh` demands one.
 - **D8 (completion hook only; memory is native).** Only the completion-honesty hook is
   ported — its registration under ZCode's `hooks.events` with `hooks.enabled: true` is
-  new; the script itself is reused unchanged. ZCode's memory is its own native feature;
-  the recommendation is to enable it (owner decision, one setting), and **no**
-  Claude memory-index hook is ported (§7.11).
+  new; the script itself is reused unchanged. ZCode's memory is its own native feature,
+  **enabled by the owner on 2026-09-17**, and **no** Claude memory-index hook is ported
+  (§7.11).
 
 **OPEN — implementer's judgment within the stated criteria:**
 
@@ -938,16 +938,19 @@ artifact — file path, commit SHA, or CI run ID):
    (`reviewersForOrchestrator`, `scripts/manage-migration-author-lanes.mjs` ~:553)
    excludes only rows whose `orchestratorEngine` matches the marker's declared engine,
    the `glm-5.3` row declares none, and the marker vocabulary has no `zcode` engine.
-   Before the first ZCode-orchestrated structural change in shared-db, file an issue
-   there to (a) give the glm rows `orchestratorEngine: 'glm'` and (b) map a ZCode
-   orchestrator marker to engine `glm`. Criteria: a read-only re-check proves a
-   zcode-orchestrated draw can never include glm.
-3. **ZCode native memory** (`memoryEnabled: false` today): the recommendation is **on**
-   — ZCode's per-project memory gives sessions persistent learnings, matching how the
-   owner works (he mines transcripts for better ways of working; memory is the in-band
-   version of that). Flipping it is one setting and reversible; syncing accumulated
-   memory to the private memory repository remains a separate later decision. No
-   Claude memory hook is ported either way (§7.11).
+   Before the first ZCode-orchestrated structural change in shared-db, this must land:
+   filed 2026-09-17 as
+   [u2giants/shared-db#3232](https://github.com/u2giants/shared-db/issues/3232) —
+   (a) give the glm rows `orchestratorEngine: 'glm'` and (b) map a ZCode
+   orchestrator marker to engine `glm` (the marker engine vocabulary
+   `ENGINES = { codex, claude }` accepts neither today). Criteria: a read-only
+   re-check proves a zcode-orchestrated draw can never include glm.
+3. **ZCode native memory — SETTLED 2026-09-17: the owner enabled it.** ZCode's
+   per-project memory (`memoryEnabled`) is now ON, matching how the owner works (he
+   mines transcripts for better ways of working; memory is the in-band version of
+   that). The only remaining memory decision is a separate later one: whether to sync
+   accumulated memory to the private memory repository. No Claude memory hook is ported
+   either way (§7.11).
 4. **`~/.agents/skills` junction** (D11): keep as compatibility, or later repoint to a
    real shared-only root? Decide after Step 4's testing shows whether the codex-view
    leak matters in practice.
