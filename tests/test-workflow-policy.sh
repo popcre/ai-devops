@@ -28,8 +28,8 @@ check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ]
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
-check 'long and reviewer jobs use their separate classifier outputs' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 3 ] && [ \"\$(grep -c \"needs.fast-classifier.outputs.reviewer == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
-check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 7 ]"
+check 'long and reviewer jobs use their separate classifier outputs' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -c \"needs.fast-classifier.outputs.reviewer == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
+check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 8 ]"
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
@@ -264,8 +264,24 @@ grep -Fq 'run.id !== current' "$workflow" || {
   printf 'FAIL: manual preflight must exclude its own run\n' >&2
   exit 1
 }
+linux_shard_block="$(sed -n '/^  linux-offline-shard:/,/^  linux-offline:$/p' "$workflow")"
+linux_aggregate_block="$(sed -n '/^  linux-offline:$/,/^  merge-group-evidence:/p' "$workflow")"
+linux_weight_names="$(jq -r '.linux_offline_suite_seconds | keys[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
+# docs/ci-speed-audit-2026-09-17.md speedup 2: the Linux lane is sectioned on
+# independent hosted machines, and the required `linux-offline` name survives
+# as a fail-closed aggregate that proves every suite ran exactly once.
+check 'the offline Bash suite runs as balanced parallel sections' \
+  'printf "%s" "$linux_shard_block" | grep -qF "fail-fast: false" && printf "%s" "$linux_shard_block" | grep -qF "shard: [1, 2, 3, 4]" && printf "%s" "$linux_shard_block" | grep -qF "tests/test-all.sh --balanced --shard" && printf "%s" "$linux_shard_block" | grep -qF "matrix.shard }}/4" && ! printf "%s" "$linux_shard_block" | grep -qE "run: bash tests/test-all.sh[[:space:]]*$"'
+check 'the required linux-offline name is a fail-closed aggregate over every section' \
+  'printf "%s" "$linux_aggregate_block" | grep -qF "needs: [fast-classifier, manual-preflight, linux-offline-shard]" && printf "%s" "$linux_aggregate_block" | grep -qF "bash tools/ci/linux-offline-aggregate.sh \"\$SHARD_RESULT\" 4" && printf "%s" "$linux_aggregate_block" | grep -qF "needs.linux-offline-shard.result" && printf "%s" "$linux_aggregate_block" | awk "/uses: actions\/checkout@/{c=NR} /linux-offline-aggregate.sh/{r=NR} END {exit !(c && r && c < r)}"'
+check 'the aggregate and its sections share one run condition, so a skip is never a pass' \
+  '[ "$(printf "%s\n" "$linux_shard_block" | grep "^    if:")" = "$(printf "%s\n" "$linux_aggregate_block" | grep "^    if:")" ]'
+check 'measured Linux suite seconds name only discovered suites' \
+  '[ -n "$linux_weight_names" ] && [ -z "$(LC_ALL=C comm -23 <(printf "%s\n" "$linux_weight_names") <(printf "%s\n" "$manifest_bash"))" ]'
+check 'the four balanced sections partition every discovered Bash suite exactly once' \
+  '[ "$(for i in 1 2 3 4; do bash "$ROOT/tests/test-all.sh" --balanced --shard "$i/4" --list | grep "^test-"; done | LC_ALL=C sort)" = "$manifest_bash" ]'
 cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
-[ "$cancel_aware_jobs" -eq 10 ] || {
+[ "$cancel_aware_jobs" -eq 11 ] || {
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
   exit 1
 }

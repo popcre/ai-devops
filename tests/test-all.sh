@@ -12,6 +12,9 @@
 #                                      run only declared section <i> of <n> (#210)
 #   test-all.sh --list                 print the selection and exit without running
 #   test-all.sh --shard <i>/<n>         partition every discovered suite round-robin
+#   test-all.sh --shard <i>/<n> --balanced
+#                                      partition every discovered suite by the
+#                                      manifest's measured Linux suite seconds
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tests/lib-selection.sh
@@ -46,7 +49,7 @@ if [ -n "$SHARED_RUNTIME_LOCK" ]; then
 fi
 
 only=''; changed_since=''; list_only=false; windows_offline=false; exclude_reviewer_safety=false
-shard=''; shard_requested=false
+shard=''; shard_requested=false; balanced=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --only)
@@ -62,13 +65,16 @@ while [ $# -gt 0 ]; do
       [ "$shard_requested" = false ] || { printf 'test-all.sh: duplicate --shard\n' >&2; exit 2; }
       shard_requested=true
       shard="$2"; shift 2 ;;
+    --balanced) balanced=true; shift ;;
     --list) list_only=true; shift ;;
-    -h|--help) sed -n '2,14p' "$ROOT/tests/test-all.sh"; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$ROOT/tests/test-all.sh"; exit 0 ;;
     *) printf 'test-all.sh: unknown argument %s\n' "$1" >&2; exit 2 ;;
   esac
 done
 [ "$exclude_reviewer_safety" = false ] || [ "$windows_offline" = true ] || {
   printf 'test-all.sh: --exclude-reviewer-safety requires --windows-offline\n' >&2; exit 2; }
+[ "$balanced" = false ] || { [ "$shard_requested" = true ] && [ "$windows_offline" = false ]; } || {
+  printf 'test-all.sh: --balanced requires --shard without --windows-offline\n' >&2; exit 2; }
 # PR sections retain their declared assignment. Complete sections partition
 # every discovered suite; no-argument runs retain the complete serial backstop.
 shard_index=''; shard_total=''
@@ -180,10 +186,44 @@ else
     [ "$shard_total" -le "${#all_tests[@]}" ] || {
       printf 'test-all.sh: complete section count exceeds discovered suites\n' >&2; exit 2; }
     tests=()
-    for ((i=0; i<${#all_tests[@]}; i++)); do
-      [ "$((i % shard_total + 1))" -ne "$shard_index" ] || tests+=("${all_tests[i]}")
-    done
-    reason="every Bash suite, complete section $shard_index of $shard_total"
+    if [ "$balanced" = true ]; then
+      # Greedy longest-first packing by measured seconds (#533 speedup 2).
+      # Every discovered suite is placed in exactly one section; a suite with
+      # no measurement is still placed, at a default weight, so a new suite
+      # can never fall out of the lane.
+      [ -f "$MANIFEST" ] || { printf 'test-all.sh: suite manifest is missing: %s\n' "$MANIFEST" >&2; exit 2; }
+      jq -e '.linux_offline_suite_seconds | type == "object" and length > 0 and all(.[]; type == "number" and . >= 0 and floor == .)' "$MANIFEST" >/dev/null 2>&1 || {
+        printf 'test-all.sh: suite manifest has no valid linux_offline_suite_seconds map\n' >&2; exit 2; }
+      default_seconds=30
+      declare -A suite_seconds=()
+      while read -r w name; do
+        [ -n "$name" ] && suite_seconds["$name"]="$w"
+      done < <(jq -r '.linux_offline_suite_seconds | to_entries[] | "\(.value) \(.key)"' "$MANIFEST" | tr -d '\r')
+      mapfile -t weighted < <(
+        for name in "${all_tests[@]}"; do
+          printf '%s %s\n' "${suite_seconds[$name]:-$default_seconds}" "$name"
+        done | LC_ALL=C sort -k1,1nr -k2,2
+      )
+      loads=()
+      for ((b=0; b<shard_total; b++)); do loads[b]=0; done
+      for entry in "${weighted[@]}"; do
+        w="${entry%% *}"; name="${entry#* }"; best=0
+        for ((b=1; b<shard_total; b++)); do
+          [ "${loads[b]}" -lt "${loads[best]}" ] && best=$b
+        done
+        loads[best]=$((loads[best] + w))
+        [ "$((best + 1))" -ne "$shard_index" ] || tests+=("$name")
+      done
+      mapfile -t tests < <(printf '%s\n' "${tests[@]}" | LC_ALL=C sort)
+      reason="every Bash suite, balanced section $shard_index of $shard_total (~${loads[shard_index-1]}s measured)"
+    else
+      for ((i=0; i<${#all_tests[@]}; i++)); do
+        [ "$((i % shard_total + 1))" -ne "$shard_index" ] || tests+=("${all_tests[i]}")
+      done
+      reason="every Bash suite, complete section $shard_index of $shard_total"
+    fi
+    [ "${#tests[@]}" -gt 0 ] || {
+      printf 'test-all.sh: section %s of %s is empty\n' "$shard_index" "$shard_total" >&2; exit 2; }
   fi
 fi
 
