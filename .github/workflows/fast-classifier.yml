@@ -17,6 +17,8 @@ on:
         value: ${{ jobs.classify.outputs.powershell }}
       test_fixtures:
         value: ${{ jobs.classify.outputs.test_fixtures }}
+      reviewer:
+        value: ${{ jobs.classify.outputs.reviewer }}
 
 permissions:
   contents: read
@@ -33,6 +35,7 @@ jobs:
       workflow: ${{ steps.classify.outputs.workflow }}
       powershell: ${{ steps.classify.outputs.powershell }}
       test_fixtures: ${{ steps.classify.outputs.test_fixtures }}
+      reviewer: ${{ steps.classify.outputs.reviewer }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

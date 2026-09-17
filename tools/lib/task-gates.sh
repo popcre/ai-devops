@@ -5,6 +5,8 @@
 #
 # Nothing here writes state or starts an external process. Callers own that.
 
+TG_LIB_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 # ---------------------------------------------------------------------------
 # Legacy coarse classifier.
 #
@@ -16,7 +18,14 @@
 tg_legacy_classify() {
   local event="$1" path
   local prose_only=true skills=false code=false workflow=false
-  local powershell=false test_fixtures=false count=0 run_long=true
+  local powershell=false test_fixtures=false reviewer=false count=0 run_long=true
+  local reviewer_paths_file reviewer_pattern
+  reviewer_paths_file="$TG_LIB_REPO_ROOT/config/reviewer-ci-paths.txt"
+
+  [ -r "$reviewer_paths_file" ] || {
+    printf 'reviewer CI path policy is unreadable: %s\n' "$reviewer_paths_file" >&2
+    return 2
+  }
 
   while IFS= read -r path; do
     [ -n "$path" ] || continue
@@ -25,6 +34,11 @@ tg_legacy_classify() {
     case "$path" in .github/workflows/*) workflow=true ;; esac
     case "$path" in *.ps1|*.psm1|*.psd1) powershell=true ;; esac
     case "$path" in tests/fixtures/*) test_fixtures=true ;; esac
+    while IFS= read -r reviewer_pattern; do
+      reviewer_pattern="${reviewer_pattern%$'\r'}"
+      case "$reviewer_pattern" in ''|'#'*) continue ;; esac
+      if [[ "$path" == $reviewer_pattern ]]; then reviewer=true; break; fi
+    done < "$reviewer_paths_file"
     case "$path" in
       README.md|AGENTS.md|bugs.md|plan_*.md|HANDOFF.d/*.md|docs/*.md|docs/**/*.md|tests/verification/*.md|tests/verification/**/*.md) ;;
       *) prose_only=false; code=true ;;
@@ -33,6 +47,8 @@ tg_legacy_classify() {
 
   # Only pull requests may use the prose bypass. All other events stay complete.
   if [ "$event" != pull_request ] || [ "$count" -eq 0 ]; then prose_only=false; fi
+  # Scheduled and explicitly dispatched runs remain the complete safety net.
+  if [ "$event" != pull_request ]; then reviewer=true; fi
   [ "$prose_only" = true ] && run_long=false
 
   printf 'changed_count=%s\n' "$count"
@@ -42,6 +58,7 @@ tg_legacy_classify() {
   printf 'workflow=%s\n' "$workflow"
   printf 'powershell=%s\n' "$powershell"
   printf 'test_fixtures=%s\n' "$test_fixtures"
+  printf 'reviewer=%s\n' "$reviewer"
   printf 'run_long=%s\n' "$run_long"
 }
 
