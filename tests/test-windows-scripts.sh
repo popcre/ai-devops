@@ -135,6 +135,16 @@ if rendered="$("$PYTHON" tests/render-windows-launcher.py 2>&1)"; then
     ok "op run re-execs through bash.exe by absolute path"
   else bad "op run re-exec does not name bash.exe (Windows cannot exec the script directly)"; fi
   if printf '%s' "$rendered" | grep -q 'export HOME='; then ok "launcher pins HOME"; else bad "launcher does not pin HOME"; fi
+  # The renderer now carries the service wrapper too; prove it and prove the wrapper's
+  # own contracts, or the wrapper silently stops being checked (review finding, 2026-09-18).
+  if printf '%s' "$rendered" | grep -q 'max_attempts=4'; then ok "rendered output carries the service wrapper"
+  else bad "service wrapper missing from rendered output"; fi
+  if printf '%s' "$rendered" | grep -qF 'Where-Object { \$_.CommandLine' && printf '%s' "$rendered" | grep -qF "name='op.exe'"; then ok "wrapper kill helper survives here-string expansion with valid WQL and its pipeline variable"
+  else bad "wrapper kill helper was gutted by here-string expansion (bare \$_ or broken WQL filter)"; fi
+  if printf '%s' "$rendered" | grep -q 'owner_pid'; then ok "wrapper distinguishes pre-existing listeners when judging attempt health"
+  else bad "wrapper health probe cannot distinguish a stale listener"; fi
+  if printf '%s' "$rendered" | grep -q 'kill_attempt_tree' && printf '%s' "$rendered" | grep -qF 'taskkill.exe'; then ok "wrapper kills a timed-out attempt as a process tree"
+  else bad "wrapper attempt kill is not a tree kill"; fi
 else
   bad "could not render the launcher: $rendered"
 fi

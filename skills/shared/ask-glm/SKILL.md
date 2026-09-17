@@ -64,7 +64,8 @@ When in doubt, continue rather than create.
 
 Review sessions are persistent while in use. One idle longer than
 `AI_GLM_REVIEW_RETENTION_HOURS` (24 by default) is retired automatically by `ai-glm new`
-and `ai-glm doctor`, because hundreds of retained sessions stall the OpenCode server.
+(a bounded batch per session), because hundreds of retained sessions stall the OpenCode
+server. `ai-glm doctor` reports the retained count; clear a backlog with `ai-glm prune`.
 A retired session no longer appears in `ai-glm list`, so reuse still means "continue
 whatever `list` shows"; start a new one only when nothing listed fits. Implementation
 jobs, locked sessions and sessions with recent activity are never retired.

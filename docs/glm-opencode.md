@@ -127,11 +127,19 @@ Get-ScheduledTaskInfo -TaskName AiDevOps-OpenCodeGlm
 ```
 
 The generated service wrapper owns bounded crash recovery: three retries, one minute
-apart, then a loud failure. Task Scheduler's native restart setting was removed after a
+apart, then a loud failure. Each attempt is itself bounded by
+`AI_GLM_ATTEMPT_TIMEOUT` (default 1500s — a loaded cold boot's directory refresh
+has measured up to 25 minutes, and killing a legitimately booting server is the
+failure this wrapper exists to prevent); a timed-out attempt is killed as a full
+process tree, including any wedged `op run` secret-resolution child, before the
+retry. A healthy OpenCode listener that predates the task lets the task exit 0
+without owning it; a foreign holder of the port is a loud fatal. Task Scheduler's
+native restart setting was removed after a
 controlled 2026-08-09 test showed that Git Bash translated a killed native OpenCode
 child to `0x8007007F`/127 and Task Scheduler recorded completion without retrying. The
 wrapper now remains the task process and keeps `server.log` below 1 MiB with one prior
 copy. An explicit task stop is intentional and is not auto-restarted; use
+`ai-glm server stop` to clear a wedged task (state Running, nothing answering) and
 `ai-glm server start` to recover it. `start` succeeds only after the loopback
 health endpoint answers within the bounded readiness window; scheduling the task
 alone is not reported as success.
@@ -178,7 +186,11 @@ ai-glm server status|start|stop|restart
 ```
 
 On both Windows and Ubuntu, `server start` and `server restart` return success
-only after bounded health proof. A launch that never becomes ready is nonzero,
+only after bounded health proof. The readiness window is `AI_GLM_SERVER_START_TIMEOUT`
+— 150s on Windows (a cold boot re-checks every registered review directory and
+runs 1–2 minutes), 30s elsewhere. A start issued while the scheduled task is
+already mid-boot waits for that boot instead of issuing a no-op `//Run`. A launch
+that never becomes ready is nonzero,
 prints service/task diagnostics, and names `doctor` plus `server status` as the
 next checks.
 
@@ -211,8 +223,8 @@ this caller's session and record go). That final decision is made while holding 
 sandbox's own build lock, which every snapshot build needs, so a same-name session
 cannot start in between. The lock and checks come before the server session is deleted:
 a sandbox being built leaves session and record untouched for a later prune, and once the
-session is deleted its record always goes (a sandbox that will not delete is retried by the
-orphan sweep), so prune never strands a record without its session. An interrupt is held
+session is deleted its record always goes (a sandbox that will not delete stays until an
+unbounded `ai-glm prune`), so prune never strands a record without its session. An interrupt is held
 until the item in hand is finished under its build lock, then prune stops and releases
 the lock, so an interrupt never strands a record or deletes unguarded. The orphan sweep leaves every
 sandbox alone while any session record cannot be read, since that record may own one.
