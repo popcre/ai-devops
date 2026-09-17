@@ -13,19 +13,31 @@ Paired handoff: [`HANDOFF.d/2026-09-17T1955Z-edge-dev-zcode-zcode-windows-suppor
 | 4. Managed skills: `skills/zcode/` tree + installer + junction migration | ⬜ open | — | — |
 | 5. Global instructions: `AGENTS-global-zcode.md` template + seeding | ⬜ open | — | — |
 | 6. MCP wiring: `bin/configure-zcode-mcps.ps1` + catalog membership | ⬜ open | — | — |
-| 7. Hooks: completion-check + memory-index under `hooks.events` | ⬜ open | — | — |
-| 8. Transcript backup skill for the SQLite + rollout store | ⬜ open | — | — |
-| 9. Reviewer wrapper `bin/ai-zcode-review` + registry (absent) + lifecycle | ⬜ open | — | — |
+| 7. Hooks: completion-check hook under `hooks.events` | ⬜ open | — | — |
+| 8. Transcript backup + SQL mining cookbook (SQLite + rollout store) | ⬜ open | — | — |
+| ~~9. Reviewer wrapper `bin/ai-zcode-review`~~ | ⛔ removed 2026-09-17 | — | Owner ruling: GLM never reviews GLM-orchestrated work; ZCode's engine is GLM-5.3. See §7.9. |
 | 10. Doctor and machine verification surface | ⬜ open | — | — |
-| 11. Documentation (README, task router, model setup, usage guide) | ⬜ open | — | — |
-| 12. Land: tests green, independent review where required, merge, install, verify | ⬜ open | — | — |
+| 11. Documentation (README, task router, model setup) | ⬜ open | — | — |
+| 12. Land: tests green, merge, install, verify | ⬜ open | — | — |
 
 **Fresh-session starting point:** begin at Step 1. Re-read §§5–8 before changing any code,
 and re-read the phase heading before starting each phase — steps drift once reality moves.
 Phases: **A** = Steps 1–3 (foundations), **B** = Steps 4–7 (managed configuration),
-**C** = Steps 8–9 (workflow depth), **D** = Steps 10–12 (verification and landing).
+**C** = Step 8 (transcripts; the former Step 9 was removed 2026-09-17),
+**D** = Steps 10–12 (verification and landing).
 Each phase boundary is a natural context cut point: finish the phase, update this table with a
 reproducible artifact, and let the next session start from a clean context.
+
+**Amendment 2026-09-17 (owner review of the drafted plan):** the ZCode reviewer step was
+removed **permanently** — owner ruling "I never want GLM reviewing GLM code", and ZCode's
+engine is GLM-5.3 (§7.9). The memory-index hook port was dropped in favor of ZCode's
+native memory feature (§7.11). The `zcode-config-repair` skill was killed (§7.10).
+Step 8 was redesigned around SQL mining of the copied session database, which is better
+than the Claude/Codex JSONL approach for ZCode's relational store. Leanness details were
+then settled by a Grok 4.6 consultation (session `zcode-plan-leanness-558`, 2026-09-17,
+$0.20): the wrapper ships `doctor`+`ask` with no state dir, the `provider-cli-versions.json`
+entry is deferred until a consumer exists, and documentation lands as a
+`docs/model-setup.md` section with no standalone guide.
 
 ---
 
@@ -50,10 +62,13 @@ failure modes — so that:
   shared `mcp-launch.cmd` 1Password launcher — never as plaintext in config files.
 - `bin/ai-devops doctor` and `verify-windows-dev.ps1` tell the truth about ZCode
   (installed? logged in? config valid? MCP present? hooks enabled?).
-- ZCode session transcripts can be backed up to the private transcripts repository like
-  Claude's and Codex's.
-- A future live qualification can promote ZCode to a rotation reviewer through the same
-  evidence path every other reviewer uses — never by flipping a registry flag.
+- ZCode session transcripts can be backed up to the private transcripts repository AND
+  mined by direct SQL query — better than the Claude/Codex JSONL-mining approach,
+  because ZCode's store is already relational.
+- **No ZCode-based reviewer is ever built.** ZCode's engine is GLM-5.3 and the owner's
+  standing rule is that GLM never reviews GLM-orchestrated work. GLM reviewer capacity
+  for Claude- and Codex-orchestrated work continues through the existing `glm` OpenCode
+  wrapper, which this plan does not touch.
 
 **If any step below conflicts with this goal, the goal wins — stop and flag the conflict.**
 
@@ -105,8 +120,9 @@ reconciled, and nobody can tell managed from unmanaged content.
 
 **IN this plan (Windows only):**
 
-- ZCode presence/install policy in the toolkit (`provider-cli-versions.json`,
-  `setup-machine.ps1`, optionally the winget DSC file if a real package exists).
+- ZCode presence/install policy in the toolkit (`setup-machine.ps1` presence probe,
+  optionally the winget DSC file if a real package exists — **no**
+  `provider-cli-versions.json` entry until something consumes it, D5).
 - A `zcode` launcher on PATH (shims) and the governed headless wrapper `bin/ai-zcode`
   (+ `machine-tools.tsv` row, `.cmd` stub, doctor subcommand).
 - Managed skills: a new `skills/zcode/` client tree, installed to a real managed
@@ -115,12 +131,11 @@ reconciled, and nobody can tell managed from unmanaged content.
   `~/.zcode/AGENTS.md` (seed-only), with `ai-adopt-globals` support.
 - MCP wiring: `bin/configure-zcode-mcps.ps1` writing `~/.zcode/cli/config.json`
   → `mcp.servers` from the shared catalog, 1Password entry through `mcp-launch.cmd`.
-- Hooks: registering the existing completion-honesty and memory-index hooks under ZCode's
-  `hooks` config with `hooks.enabled: true`.
-- Transcript backup: a `zcode-transcript-backup` skill for ZCode's SQLite + rollout-JSONL
-  session store, targeting the private transcripts repository.
-- Reviewer wrapper `bin/ai-zcode-review` with a registry entry held **absent** until a
-  live qualification, and an `ai-review-lifecycle` provider entry.
+- Hooks: registering the existing completion-honesty hook under ZCode's `hooks` config
+  with `hooks.enabled: true` (completion hook only — no memory hook, §7.11).
+- Transcript backup + mining: a `zcode-transcript-backup` skill that copies ZCode's
+  SQLite + rollout-JSONL session store to the private transcripts repository and mines
+  it by SQL query against the copy.
 - Doctor and verification: `bin/ai-devops` doctor checks and `verify-windows-dev.ps1`.
 - Documentation and tests for all of the above.
 
@@ -129,11 +144,19 @@ reconciled, and nobody can tell managed from unmanaged content.
 - **Ubuntu/Linux ZCode support.** ZCode support here is Windows-only; `install.sh`
   stages, `bin/ai-install-skills` (bash installer), and Ubuntu symlinks are untouched
   except where a parity test demands a documented exception (see Step 4).
-- **Registering ZCode into any allocating reviewer rotation.** The registry entry lands as
-  `absent`. Promoting it to `registered` requires a live qualification and is a separate
-  owner decision — and note `config/reviewer-registry.json` explicitly mirrors the
-  membership in `u2giants/shared-db`'s `REVIEWERS`; changing that rotation is shared-db
-  work under its own issue.
+- **Any ZCode-based reviewer, ever.** Owner ruling 2026-09-17: *"I never want GLM
+  reviewing GLM code."* ZCode's engine is GLM-5.3, so a ZCode reviewer is GLM reviewing
+  GLM-orchestrated work by construction — permanently out of scope, not merely deferred.
+  No wrapper, no registry entry, no `ai-review-lifecycle` provider. GLM reviewer capacity
+  for Claude- and Codex-orchestrated work continues through the existing `glm` OpenCode
+  wrapper, which this plan does not touch.
+- **A `zcode-config-repair` skill.** Killed by the owner 2026-09-17: ZCode ships its own
+  `zcode-guide` plugin documenting exactly that content (it is the source of this plan's
+  config facts); a second copy can only drift out of date.
+- **Porting Claude's memory-index hook.** ZCode has its own native memory feature
+  (`memoryEnabled`, currently `false` in `~/.zcode/v2/setting.json`); the correct path is
+  enabling that (owner decision, one setting), not indexing ZCode edits into a foreign
+  store nobody reads.
 - **Making ZCode an orchestrator stage engine** (`ai-model-call` / `ai-run-task` roles).
 - **ZCode memory sync** to the private memory repository (ZCode's `memoryEnabled` is
   `false` in `~/.zcode/v2/setting.json`; enabling and syncing it is a separate decision).
@@ -350,7 +373,9 @@ probing the CLI directly):
 
 4. **Exact version pinning in `provider-cli-versions.json`.** Rejected: the desktop app
    self-updates and carries two version numbers; a pin would either strand machines on
-   stale builds or fail closed on every auto-update. Presence-only (kimi/qwen precedent).
+   stale builds or fail closed on every auto-update. Revised 2026-09-17 after the Grok
+   4.6 consultation: even the presence-only entry is deferred — nothing consumes it,
+   and the fully managed clients (Claude, Codex) are not in that file either (D5).
 
 5. **Reusing `bin/ai-glm` (OpenCode harness) for ZCode because both run GLM.** Rejected:
    different harness, different CLI contract, different failure modes; the wrapper
@@ -368,6 +393,27 @@ probing the CLI directly):
 
 8. **Editing ZCode's bundled resources or intercepting its updater.** Rejected outright:
    `app.asar` and everything under `C:\Program Files\ZCode\resources\` are vendor bytes.
+
+9. **A ZCode reviewer wrapper (was draft Step 9).** Rejected **permanently** by owner
+   ruling 2026-09-17: *"I never want GLM reviewing GLM code."* ZCode's engine is
+   GLM-5.3, so a ZCode reviewer would be GLM reviewing GLM-orchestrated work by
+   construction. The draft's `registry_state: "absent"` treatment was still speculative
+   build-out of a provider that could never be promoted; the whole step is removed.
+   This rejection also creates a duty recorded in D6: ZCode-orchestrated shared-db work
+   must exclude the `glm` reviewer via the orchestrator marker's engine declaration.
+
+10. **A `zcode-config-repair` skill.** Killed by owner instruction 2026-09-17. ZCode
+    ships its own `zcode-guide` plugin (installed by default) that documents config
+    locations, the strict MCP schema, and hooks — the very facts in §6. Duplicating
+    vendor-shipped docs violates the repo's "reuse before adding" rule and creates a
+    second copy that silently drifts when ZCode updates.
+
+11. **Porting Claude's memory-index hook to ZCode.** Rejected: the hook feeds Claude's
+    memory model, while ZCode has native per-project memory
+    (`~/.zcode/cli/memories/projects/`) gated by its own `memoryEnabled` setting, today
+    `false`. Indexing ZCode edits into a foreign store before ZCode's own memory is even
+    enabled would be machinery with no reader. Enable the native feature instead
+    (recommendation to the owner: yes — see §13 open question 3).
 
 ## 8. Design decisions already made (2026-09-17)
 
@@ -389,20 +435,33 @@ probing the CLI directly):
 - **D4 (wrapper-first headless access).** `bin/ai-zcode` is the only supported way for
   any session to drive ZCode headlessly (Kimi/Grok precedent). Raw `zcode` shims exist
   for interactive convenience and for the wrapper's own use.
-- **D5 (presence-only version policy).** `provider-cli-versions.json` gets a `zcode`
-  entry with `supported_version: null`; notes record the two-version fact and the
-  per-qualification STEP 0 duty.
-- **D6 (reviewer registered-absent).** `bin/ai-zcode-review` ships with a registry entry
-  `registry_state: "absent"` whose reason names the promotion path (live qualification +
-  reviewed registry change; membership mirror in shared-db is separate). No allocating
-  system may draw zcode until that flips.
+- **D5 (no version-policy entry until a consumer exists — revised 2026-09-17).**
+  `provider-cli-versions.json` is a paid-work pin, not a tool catalog: Grok is the exact
+  pin; kimi/qwen rows exist because the Windows provider installer's
+  `Get-RequiredProviderVersion` reads them; Claude and Codex — the fully managed
+  clients ZCode is joining — are absent from it. ZCode presence lives in
+  `setup-machine.ps1` and `ai-zcode doctor`; a `zcode` key is added only in the same
+  PR as its first real consumer. (Grok 4.6 consultation concurred; original draft's
+  presence-only entry was unlocked.)
+- **D6 (no ZCode reviewer — permanent).** Owner ruling 2026-09-17: GLM never reviews
+  GLM-orchestrated work, and ZCode's engine is GLM-5.3. No ZCode reviewer wrapper,
+  registry entry, or lifecycle provider is built — now or later. **Duty this ruling
+  creates elsewhere:** when a ZCode session orchestrates shared-db structural work, the
+  orchestrator marker must declare engine `glm` so the independence filter excludes the
+  glm reviewer. Verified 2026-09-17 against
+  `u2giants/shared-db/scripts/manage-migration-author-lanes.mjs`: the filter
+  (`reviewersForOrchestrator`, ~line 553) excludes only rows whose `orchestratorEngine`
+  equals the marker's declared engine, and the `glm-5.3` reviewer row (~line 274) carries
+  **no** `orchestratorEngine` at all — so nothing excludes glm today, and the marker
+  vocabulary has no `zcode` engine. Closing that gap is shared-db work under its own
+  issue (§13, open question 2); this plan only records it.
 - **D7 (Windows-only).** No `install.sh`/Ubuntu changes except a documented parity-test
   exception if `tests/test-installer-parity.sh` demands one.
-- **D8 (hooks reuse the existing scripts).** The same
-  `~/.config/ai-devops/completion-check-hook` and `memory-index-hook` scripts serve
-  ZCode; only their registration (config location + `hooks.enabled: true`) is new. If
-  Step 1's payload qualification finds an incompatibility, the fix is a
-  ZCode-compatible shim invocation of the same scripts, not a fork of their logic.
+- **D8 (completion hook only; memory is native).** Only the completion-honesty hook is
+  ported — its registration under ZCode's `hooks.events` with `hooks.enabled: true` is
+  new; the script itself is reused unchanged. ZCode's memory is its own native feature;
+  the recommendation is to enable it (owner decision, one setting), and **no**
+  Claude memory-index hook is ported (§7.11).
 
 **OPEN — implementer's judgment within the stated criteria:**
 
@@ -421,10 +480,10 @@ probing the CLI directly):
   testing shows the codex-view leak via `.agents` confuses ZCode sessions, a follow-up
   may repoint `~/.agents/skills` to a real shared-only root — separate change, separate
   tests, not required for this plan's done.
-- **D12 (hook registration mechanism).** Extend the two existing
-  `ai-install-*-hook` commands with a `--client zcode` mode, or add one
-  `bin/ai-install-zcode-hooks` orchestrator. Criteria: one command a dotfiles sync can
-  call idempotently; `--check` mode required.
+- **D12 (hook registration mechanism).** Extend the existing
+  `ai-install-completion-check-hook` with a `--client zcode` mode, or add one
+  `bin/ai-install-zcode-hooks`. Criteria: one command a dotfiles sync can call
+  idempotently; `--check` mode required.
 - **D13 (raw `zcode` shim env assembly).** Mirror the blocker-watch provider-env argv by
   default (it is the proven-working assembly) unless Step 1 proves plain invocation
   sufficient; record the answer in the facts file either way.
@@ -455,8 +514,8 @@ command that reproduces it:
   blocker-watch env set (`config/blocker-watch.json:29-43`). Record which authenticated
   and which model answered — this decides D13 and the wrapper's env assembly.
 - Write-denial proof: the same one-shot with `--mode plan` asked to create a file, and
-  with `--allowed-tools "Read Grep Glob"`; confirm no file appears (decides the review
-  pinning).
+  with `--allowed-tools "Read Grep Glob"`; confirm no file appears (decides the
+  wrapper's safe-mode pinning).
 - The actual stdin payload shape ZCode feeds hooks (run with a probe hook registered in
   a THROWAWAY `--settings` config — never the user config — capture one
   `PostToolUse`/`Stop` payload). Confirms D8's compatibility assumption.
@@ -469,21 +528,22 @@ reproducing command, and a second session on edge-dev can re-run three of them w
 identical results. Nothing else in the plan starts before this lands.
 
 **Step 2. Install policy and presence checks.**
-Add the `zcode` entry to `config/provider-cli-versions.json` (`command: "zcode"`,
-`supported_version: null`, `qualified_on: null`, notes carrying D5's two-version duty).
-Apply D9's outcome: a winget DSC resource in `.config/configuration.winget` only if
-Step 1 positively identified the package; else a presence check. Add the presence probe
-to `bin/setup-machine.ps1` (near the kimi/qwen presence notes `:727-752`): resolve
-`C:\Program Files\ZCode\ZCode.exe` + `resources\glm\zcode.cjs`, warn honestly when
-absent, and never fabricate an install. If (and only if) a stable vendor installer
-exists, add the catalog row to `bin/install-windows-ai-provider-clis.ps1` with SHA256
-pinning per `Invoke-PinnedProviderInstaller` `:134-158`.
+No `provider-cli-versions.json` entry — that file is a paid-work pin, not a tool
+catalog, and the fully managed clients (Claude, Codex) are not in it either; add a
+`zcode` key only in the same PR as the first real consumer (D5, Grok 4.6 consult
+2026-09-17). Apply D9's outcome: a winget DSC resource in `.config/configuration.winget`
+only if Step 1 positively identified the package; else a presence check. Add the
+presence probe to `bin/setup-machine.ps1` (near the kimi/qwen presence notes
+`:727-752`): resolve `C:\Program Files\ZCode\ZCode.exe` + `resources\glm\zcode.cjs`,
+warn honestly when absent, and never fabricate an install. If (and only if) a stable
+vendor installer exists, add the catalog row to
+`bin/install-windows-ai-provider-clis.ps1` with SHA256 pinning per
+`Invoke-PinnedProviderInstaller` `:134-158`.
 
-*Dependencies:* Step 1 (D9 decided). *Verification gate:* on edge-dev,
-`node -e`/`pwsh` invoking the presence probe reports ZCode present with both version
-numbers; with the app path renamed in a `-TestOnly` fixture, it reports absent and exits
-non-zero without touching anything. `bin/ai-provider-version`-style reads of the registry
-entry behave for `zcode` as they do for `kimi`.
+*Dependencies:* Step 1 (D9 decided). *Verification gate:* on edge-dev, a `pwsh`
+invocation of the presence probe reports ZCode present with both version numbers; with
+the app path renamed in a `-TestOnly` fixture, it reports absent and exits non-zero
+without touching anything.
 
 **Step 3. Launcher shims + `bin/ai-zcode` governed wrapper.**
 Create `bin/ai-zcode` (Bash, Git-Bash-compatible) — the only supported headless
@@ -502,7 +562,10 @@ ZCode driver, modeled on the Kimi/Grok wrapper essentials, not their full surfac
   (`--mode` never `yolo` from caller input; `--max-turns` ceiling enforced).
 - Binary resolution mirroring `Get-CodexBin`'s caution (`bin/setup-machine.ps1:92-108`):
   resolve the app path once, fail closed with the exact missing path.
-- State under `AI_ZCODE_STATE_DIR` (default `~/.local/state/ai-devops/zcode/`).
+- **No state directory and no `--resume`** (Grok 4.6 consult 2026-09-17): ZCode
+  persists sessions in its own SQLite store and blocker-watch already owns interactive
+  `--resume`; an empty wrapper state dir has no owner and no retirement path. If a
+  later feature needs state, create it in that feature's PR.
 - Add the `machine-tools.tsv` row
   (`ai-zcode  bin/ai-zcode  bash+cmd  none  zcode  install-machine-tools.ps1`) and the
   `bin/ai-zcode.cmd` Git-Bash stub.
@@ -521,17 +584,18 @@ continuing —**
 ### Phase B — Managed configuration (Steps 4–7)
 
 **Step 4. Managed skills: `skills/zcode/` tree + installer + junction migration.**
-Create `skills/zcode/zcode-config-repair/SKILL.md` — a ZCode-client skill distilling the
-config surface for ZCode sessions themselves (where config lives, strict-schema trap,
-hooks-enabled trap, skills discovery order), pointing at the canonical `zcode-guide`
-plugin for depth. Extend `bin/install-ai-devops-windows.ps1`:
+`skills/zcode/` starts **empty** — its first occupant is the transcript skill from Step 8.
+(No `zcode-config-repair` skill: the vendor-shipped `zcode-guide` plugin already documents
+ZCode's config surface, and duplicating it would only drift — §7.10.) Extend
+`bin/install-ai-devops-windows.ps1`:
 
 - Junction migration BEFORE install: if `~/.zcode/skills` is a reparse point
   (`(Get-Item …).LinkType -eq 'Junction'`), remove it NON-recursively
   (`cmd /c rmdir` — a recursive delete would destroy the Claude skills it points at),
   then create the real directory. Record the migration in the installer output.
-- Two new `Install-SkillFolder` calls (`skills/zcode` and `skills/shared` →
-  `~/.zcode/skills`) alongside the existing four (`:572-605`); the 5-state
+- A new `Install-SkillFolder` call (`skills/shared` → `~/.zcode/skills`) alongside the
+  existing four (`:572-605`), plus a `skills/zcode` call that activates when Step 8 adds
+  the tree's first skill (skip gracefully while the source dir is absent); the 5-state
   reconciliation, `.ai-devops-managed` markers, quarantine, and orphan pruning then
   apply to ZCode unchanged.
 - Extend `Assert-NoSharedSkillCollisions` coverage to the zcode tree (`:164`).
@@ -585,79 +649,75 @@ construction, backup created, idempotent second run is a no-op diff); live on ed
 a `zcode` session (or `ai-zcode ask` with a tool probe) can list the connected servers
 and `~/.zcode/cli/config.json` contains exactly the membership set with absolute paths.
 
-**Step 7. Hooks: register the two existing hooks under `hooks.events`.**
-Per D12: one idempotent installer (extend the existing `ai-install-*-hook` commands or
+**Step 7. Hooks: register the completion-honesty hook under `hooks.events`.**
+Per D8 — completion hook ONLY (no memory hook; see §7.11). One idempotent installer
+(extend the existing `ai-install-completion-check-hook` with a `--client zcode` mode, or
 add `bin/ai-install-zcode-hooks`) that merges into `~/.zcode/cli/config.json`:
 
 ```json
 { "hooks": { "enabled": true, "events": {
     "UserPromptSubmit": [ { "hooks": [ { "type": "command",
       "command": "<absolute path> completion-check-hook", "timeoutMs": 30000 } ] } ],
-    "PostToolUse":  [ { "matcher": "Write|Edit", "hooks": [ … memory-index-hook … ] } ],
     "Stop":         [ { "hooks": [ { "type": "command",
       "command": "<absolute path> completion-check-hook", "timeoutMs": 30000 } ] } ] } } }
 ```
 
-(exact matchers per the Claude registrations the existing installers write; adjust to
-Step 1's payload findings — e.g. if the scripts need a shell wrapper on Windows, use the
-documented `bash "<path>"` invocation form). Registration must set `hooks.enabled: true`
-(the silent default-off trap) and merge additively without touching `mcp`. A `--check`
-mode reports drift. Wire the installer into the dotfiles-sync skill's client steps
+(exact event set per what the Claude registration writes and Step 1's payload findings —
+adjust if the script needs a shell wrapper on Windows, using the documented
+`bash "<path>"` invocation form). Registration must set `hooks.enabled: true` (the
+silent default-off trap) and merge additively without touching `mcp`. A `--check` mode
+reports drift. Wire the installer into the dotfiles-sync skill's client steps
 (`skills/claude/sync-dotfiles/SKILL.md` step-6 pattern) for zcode.
 
 *Dependencies:* Steps 1 (payload facts) and 6 (config writer conventions). *Verification
-gate:* on edge-dev, after registration, one `ai-zcode ask` session shows hook effects
-(completion hook fires once per prompt; memory hook indexes a Write) or — if a script
-proves incompatible despite D8 — the mismatch is documented with the shim that fixed it;
-`zcode` daily-log (`~/.zcode/cli/log/zcode-*.jsonl`) records hooks fired, not failed;
-`--check` exits 0 clean and 2 on a deliberately removed entry.
+gate:* on edge-dev, after registration, one `ai-zcode ask` session shows the hook fire
+once per prompt; the ZCode daily-log (`~/.zcode/cli/log/zcode-*.jsonl`) records hooks
+fired, not failed; `--check` exits 0 clean and 2 on a deliberately removed entry.
 
 **— context cut point: Phase B complete —**
 
-### Phase C — Workflow depth (Steps 8–9)
+### Phase C — Workflow depth (Step 8; Step 9 removed 2026-09-17)
 
-**Step 8. Transcript backup skill.**
-Create `skills/zcode/zcode-transcript-backup/SKILL.md` modeled on
-`skills/claude/claude-transcript-backup/SKILL.md`: copy-then-read the SQLite store
-(`db.sqlite` + `-wal` + `-shm` — never open the live DB directly; it is locked while
-ZCode runs), export per-machine archives plus the
-`rollout/model-io-sess_*.jsonl` raw captures, destination
-`zcode_chats/<machine>/` in the private repo `u2giants/ai-devops-transcripts`, gated by
-`bin/ai-transcript-destination-check`. Public-repo discipline: nothing from the store is
-ever committed here; the skill names the private destination only.
+**Step 8. Transcript backup + SQL mining cookbook for the SQLite + rollout store.**
+Albert mines Claude and Codex transcripts to find better ways of working and wants the
+same for ZCode. ZCode's store is **better suited to mining than Claude/Codex JSONL**
+because it is already relational — so do NOT convert it into a JSONL pile; query it.
+
+Create `skills/zcode/zcode-transcript-backup/SKILL.md` with two halves:
+
+- **Backup:** copy — never live-open — `~/.zcode/cli/db/db.sqlite` **plus its `-wal` and
+  `-shm` sidecars** (a copy without them can be missing recent commits) and the
+  `~/.zcode/cli/rollout/model-io-sess_*.jsonl` raw model-I/O captures into
+  `zcode_chats/<machine>/` in the private repo `u2giants/ai-devops-transcripts`, gated
+  by `bin/ai-transcript-destination-check` (it refuses any non-canonical remote). If
+  ZCode is running, snapshot via copy-while-open is still safe for SQLite in WAL mode,
+  but prefer running the backup with ZCode closed when convenient.
+- **Mining cookbook (`queries.md` inside the skill):** ready-to-run recipes against the
+  COPIED database using Python's stdlib `sqlite3` (no dependencies, `python` is already
+  installed by the toolkit): sessions per project over time; most-used and
+  most-failing tools (tables `tool_usage`, `session`); model/token spend per session
+  (`model_usage`, `turn_usage`); longest sessions and their prompts
+  (`session`, `message`, `part`); plus one JSONL recipe for prompt-shape analysis on the
+  rollout files. Every recipe names its tables and is re-runnable — per the §4.3
+  live-reading rule, no measured counts are pasted into the skill.
+
+Public-repo discipline: nothing from the store is ever committed here; the skill names
+the private destination only.
 
 *Dependencies:* Step 4 (the tree exists). *Verification gate:* a dry run on edge-dev
-produces a listing of exportable sessions (count + newest title) without copying, and a
-real run pushes to the private repo only when its remote is the canonical one (the
-destination check refuses otherwise); no path under `popcre/ai-devops` gains transcript
-bytes (`git status` clean after a run).
+produces a listing of exportable sessions (count + newest title) without copying; a real
+run pushes to the private repo only when its remote is the canonical one (the
+destination check refuses otherwise); two cookbook queries run against the copy and
+return sensible results; no path under `popcre/ai-devops` gains transcript bytes
+(`git status` clean after a run).
 
-**Step 9. Reviewer wrapper `bin/ai-zcode-review` + registry (absent) + lifecycle.**
-Create `bin/ai-zcode-review` modeled on `bin/ai-claude-review` (159 lines — read it
-first): fail-closed read-only review via `ai-zcode ask` internals — pinned argv with
-`--mode plan` (never the `--prompt` default `yolo`), `--allowed-tools "Read Grep Glob"`
-plus `--disallowed-tools` for Bash/Edit/Write belt-and-braces, bounded `--max-turns`,
-`--settings` isolation so a review never reads user MCP servers or hooks,
-`validate_command()` enforcement, `## Verdict` final-section parsing (the repo's common
-verdict contract), `doctor [--live]`, reports under `.ai/reviews/zcode-<mode>-<runid>.md`
-with the same permission hardening, all shared machinery (`ai-review-sandbox`,
-`ai-review-packet`, `ai-review-lifecycle`). Add `zcode` to `valid_provider` in
-`bin/ai-review-lifecycle:34`. Add the registry entry to `config/reviewer-registry.json`
-as `registry_state: "absent"` with a reason naming: engine GLM-5.3 via Z.AI coding plan
-(distinct from the `glm` OpenCode entry); the self-exclusion rule (a zcode-orchestrated
-change is not reviewed by zcode, mirroring the Claude/Codex exclusions); and the
-promotion path (live well-formed verdict + reviewed registry change; shared-db mirror is
-separate). Add the `machine-tools.tsv` row (`ai-zcode-review`) and `.cmd` stub.
-
-*Dependencies:* Steps 1 (write-denial + JSON facts) and 3 (wrapper internals). *Task
-gates:* this file matches the `reviewer-safety` globs — that PR additionally requires an
-independent read-only exact-head review before merge (§11). *Verification gate:*
-`tests/test-ai-zcode-review.sh` passes offline (validator refusals: yolo mode, missing
-mode pin, over-max turns, unpinned binary; verdict parsing: well-formed, malformed,
-truncated; fail-closed paths: no credentials file, missing app); the registry entry
-reads `absent`; `bin/ai-review zcode <mode>` refuses allocation exactly as kimi's absent
-entry does. **No live review runs in this step** — live qualification is the separate
-owner-gated follow-up named in the registry reason.
+**Step 9. REMOVED FROM SCOPE (2026-09-17).** The drafted reviewer wrapper
+(`bin/ai-zcode-review`, registry entry, lifecycle provider) was removed permanently by
+owner ruling — GLM never reviews GLM-orchestrated work, and ZCode's engine is GLM-5.3
+(§7.9, D6). Do not build it, do not "prepare" it, and do not re-add a registry entry.
+The one live duty the ruling creates lives in shared-db, not here: ZCode-orchestrated
+structural work must exclude the glm reviewer via the orchestrator marker's engine
+declaration (D6; §13 open question 2).
 
 **— context cut point: Phase C complete —**
 
@@ -679,28 +739,27 @@ each fixture is withdrawn; `tests/test-ai-devops-doctor-install-state.sh` stays 
 and gains zcode cases if it fixtures doctor states.
 
 **Step 11. Documentation.**
-Update: `README.md` (tool list — ZCode joins Claude/Codex as a managed Windows client);
-`docs/task-router.md` (router row: ZCode config/wrapper/doctor work → this plan's
-STATUS first); `docs/model-setup.md` (ZCode role: interactive client + future reviewer,
-engine GLM-5.3); new `docs/zcode-windows-usage-guide.md` (mirror of
-`docs/codex-skills-usage-guide.md`: how to drive `ai-zcode`, what is managed where, the
-strict-schema and hooks-enabled traps, transcript backup); `AGENTS.md` documentation map
-only if the router table needs a pointer. Every claim links to the artifact that proves
-it (facts file, tests).
+No standalone usage guide (Grok 4.6 consult 2026-09-17 — the unique toolkit content is
+20–40 lines, and `docs/codex-skills-usage-guide.md` is a skill-trigger dictionary, not
+a client manual; ZCode's own config surface is documented by the vendor's in-app
+`zcode-guide` plugin). Instead: a ZCode section in `docs/model-setup.md` (role:
+interactive client, engine GLM-5.3; how to run `ai-zcode doctor`/`ask`; the yolo,
+strict-schema, and `hooks.enabled` traps; transcript backup pointer), a managed-paths
+row in `docs/config-inventory.md`, the `README.md` tool-list mention, and the router
+row already in `AGENTS.md`/`docs/task-router.md`. Every claim links to the artifact
+that proves it (facts file, tests).
 
 *Dependencies:* Steps 3–10 (docs describe landed behavior). *Verification gate:* the
 Markdown reachability gate (`bin/ai-doc-reachability`) passes for new/moved files; a
 fresh session reading only the usage guide can correctly run `ai-zcode doctor` and
 explain what ai-devops manages in `~/.zcode`.
 
-**Step 12. Land: tests, review, merge, install, verify.**
+**Step 12. Land: tests, merge, install, verify.**
 Register every new test in `config/ci-suite-manifest.json`. Run the full local suites —
 Bash tests through Git Bash, PowerShell tests through `pwsh` — after checking
 `bin/ai-test-local --check-collision`. Land by PR through the merge queue
-(`bin/ai-pr-wait`, all `gh` calls via `bin/ai-gh`); split the reviewer-safety hunks
-(Step 9) into their own PR carrying its independent exact-head review if that is cleaner
-than one reviewed PR. After `origin/main` carries the work: re-run
-`install-ai-devops-windows.ps1` and `setup-machine.ps1` on edge-dev, verify the
+(`bin/ai-pr-wait`, all `gh` calls via `bin/ai-gh`). After `origin/main` carries the work:
+re-run `install-ai-devops-windows.ps1` and `setup-machine.ps1` on edge-dev, verify the
 installed state (`ai-install-manifest` clean, `bin/ai-devops doctor` zcode block green,
 `~/.local/bin/zcode` live), and only then update this plan's STATUS table with commit
 SHAs and run IDs. Machines beyond edge-dev get the same re-run when their owners ask.
@@ -716,11 +775,8 @@ New tests (all registered in `config/ci-suite-manifest.json`):
 
 - `tests/test-ai-zcode.sh` — offline wrapper contract: STEP 0 env assembly, argv pinning
   (refuses `yolo`, enforces max-turns ceiling, fails closed on missing app), `doctor`
-  offline mode, `ask` output parsing against a mock `zcode.cjs` fixture, state-dir
-  behavior. Model: `tests/test-ai-kimi.sh`'s offline sections.
-- `tests/test-ai-zcode-review.sh` — validator refusals, verdict parsing (well-formed /
-  malformed / truncated), fail-closed paths, sandbox/packet integration. Model:
-  `tests/test-ai-claude-review.sh` + `tests/test-ai-codex-review.sh`.
+  offline mode, `ask` output parsing against a mock `zcode.cjs` fixture. Model:
+  `tests/test-ai-kimi.sh`'s offline sections.
 - `tests/test-configure-zcode-mcps.ps1` — fixtures per Step 6's gate: fresh write,
   foreign-preservation, stale-managed removal, no-unknown-keys by construction, backup
   creation, idempotence. Model: `tests/test-configure-codex-mcps.ps1`.
@@ -733,13 +789,13 @@ New tests (all registered in `config/ci-suite-manifest.json`):
   D7 exception.
 
 Existing suites that must stay green: the full `tests/` tree per
-`docs/development.md`, `tests/test-ai-review-lifecycle.sh` (valid_provider change),
-`tests/test-ai-install-manifest.sh`, `tests/test-ubuntu-install-stages.sh` (unchanged by
-D7), `tests/test-ai-devops-doctor-install-state.sh`.
+`docs/development.md`, `tests/test-ai-install-manifest.sh`,
+`tests/test-ubuntu-install-stages.sh` (unchanged by D7),
+`tests/test-ai-devops-doctor-install-state.sh`.
 
 Live qualifications (NOT CI; recorded as artifacts, not test files): Step 1's facts file
-under `tests/verification/zcode-windows-2026-09-17/`, and any later live reviewer
-qualification in its own dated verification directory.
+under `tests/verification/zcode-windows-2026-09-17/`. No live reviewer qualification is
+planned or permitted — the reviewer step was removed permanently (§7.9).
 
 ## 11. Constraints, standing rules, and gotchas in force
 
@@ -749,13 +805,13 @@ qualification in its own dated verification directory.
 - Verify `git var GIT_COMMITTER_IDENT` shows `Albert Hazan <u2giants@users.noreply.github.com>`
   before committing. Work in your own worktree cut from `origin/main`; stage only
   task-owned files.
-- **Task gates:** declare `ai-task-gates start --class <class>` per PR. This plan's
-  steps touch two protected classes: `installation` (globs cover `install-*`,
-  `setup-machine.ps1`, `machine-tools.tsv` — gates: `recoverable-config-backup`,
-  `installed-command-smoke-proof`) and `reviewer-safety` (globs cover `bin/ai-*-review`,
-  `ai-review-lifecycle` via `bin/ai-review-*` adjacency — gates: `installed-routing-proof`
-  plus one independent read-only exact-head review before merge). A docs-only PR (like
-  the one landing this plan) is class `prose`.
+- **Task gates:** declare `ai-task-gates start --class <class>` per PR. After the
+  2026-09-17 amendment this plan touches ONE protected class: `installation` (globs
+  cover `install-*`, `setup-machine.ps1`, `machine-tools.tsv` — gates:
+  `recoverable-config-backup`, `installed-command-smoke-proof`). The drafted
+  reviewer-safety step was removed (§7.9), so no `bin/ai-*-review` or lifecycle file is
+  touched and no independent exact-head review is required. A docs-only PR (like the
+  one landing this plan) is class `prose`.
 - All GitHub calls through `bin/ai-gh`; wait on CI through `bin/ai-pr-wait`; never
   open-ended `gh` loops.
 - Never overlap a local full test series with a GitHub job on the same host:
@@ -832,8 +888,8 @@ artifact — file path, commit SHA, or CI run ID):
 1. Steps 1–12 complete; every STATUS row cites a reproducible artifact.
 2. All new tests registered in `config/ci-suite-manifest.json` and green in CI on the
    merged `main` SHA; existing suites green on the same SHA.
-3. Reviewer-safety hunks (Step 9) merged with an independent read-only exact-head
-   review recorded; installation-class PRs carry their backup + smoke-proof evidence.
+3. Installation-class PRs carry their backup + smoke-proof evidence. (No
+   reviewer-safety class is touched — the reviewer step was removed permanently, §7.9.)
 4. edge-dev installed state verified: `bin/ai-devops doctor` zcode block green,
    `~/.local/bin/zcode` live, `~/.zcode/skills` a real managed directory (junction
    gone, Claude skills intact), `~/.zcode/AGENTS.md` seeded, `~/.zcode/cli/config.json`
@@ -872,12 +928,26 @@ artifact — file path, commit SHA, or CI run ID):
 
 1. **MCP membership final set** (D10): is `1password` + `codex-cli` the right ZCode
    default, or should it carry the broader Desktop set? Criteria: demonstrated need by a
-   ZCode session; expand by one-line membership change.
-2. **Reviewer promotion:** after `ai-zcode-review` lands absent, does Albert want the
-   live qualification run (bounded, coding-plan cost) and the registry flip? Promotion
-   also implies the shared-db rotation mirror — its own issue there.
-3. **ZCode memory enablement + sync** (`memoryEnabled: false` today): separate decision,
-   not started here.
+   ZCode session; expand by one-line membership change. (Context from the owner's
+   2026-09-17 review: cross-engine delegation is a valued pattern — GLM-in-OpenCode
+   exists precisely so Claude and Codex can use GLM — so `codex-cli`-inside-ZCode is
+   consistent with how he works.)
+2. **GLM-exclusion for ZCode-orchestrated shared-db work** (a shared-db issue, not this
+   repo's). Owner ruling 2026-09-17 — *"I never want GLM reviewing GLM code"* — is not
+   yet enforced for ZCode orchestrators: shared-db's reviewer filter
+   (`reviewersForOrchestrator`, `scripts/manage-migration-author-lanes.mjs` ~:553)
+   excludes only rows whose `orchestratorEngine` matches the marker's declared engine,
+   the `glm-5.3` row declares none, and the marker vocabulary has no `zcode` engine.
+   Before the first ZCode-orchestrated structural change in shared-db, file an issue
+   there to (a) give the glm rows `orchestratorEngine: 'glm'` and (b) map a ZCode
+   orchestrator marker to engine `glm`. Criteria: a read-only re-check proves a
+   zcode-orchestrated draw can never include glm.
+3. **ZCode native memory** (`memoryEnabled: false` today): the recommendation is **on**
+   — ZCode's per-project memory gives sessions persistent learnings, matching how the
+   owner works (he mines transcripts for better ways of working; memory is the in-band
+   version of that). Flipping it is one setting and reversible; syncing accumulated
+   memory to the private memory repository remains a separate later decision. No
+   Claude memory hook is ported either way (§7.11).
 4. **`~/.agents/skills` junction** (D11): keep as compatibility, or later repoint to a
    real shared-only root? Decide after Step 4's testing shows whether the codex-view
    leak matters in practice.
@@ -915,3 +985,16 @@ doctor, transcript backup, and an evidence-gated reviewer path) and the explicit
 "goal wins over a wrong step — stop and flag" instruction. Every phase's gates trace
 back to that outcome, and §13's definition of done restates it as a verifiable
 checklist.
+
+---
+
+**Amendment note (2026-09-17, later the same day):** after owner review of the drafted
+plan, the scope was narrowed — the reviewer step was removed permanently (§7.9; ruling:
+GLM never reviews GLM-orchestrated work, and ZCode's engine is GLM-5.3), the
+memory-index hook port was dropped in favor of ZCode's native memory (§7.11), the
+`zcode-config-repair` skill was killed (§7.10), and Step 8 was redesigned around SQL
+mining of the copied session database. Sections 1, 4, 7, 8, 9, 10, 11, and 13 were
+updated together so no removed item is still referenced as active; the phrase
+"evidence-gated reviewer path" in the self-audit answer above is historical and no
+longer part of the goal. The audit questions were re-checked against the narrowed scope
+and still hold.
