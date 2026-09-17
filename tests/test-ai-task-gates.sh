@@ -331,4 +331,11 @@ check 'a path rule naming an undeclared class is rejected' \
 check 'an unrecognised top-level key is rejected' \
   "! '$PY_BIN' '$VALIDATE' '$SCHEMA_TMP/stray.json'"
 
+# A flag given without its value must fail fast, never spin: on 2026-09-17 an
+# orphaned `start --class` burned 11 CPU-hours and starved the local GLM server.
+for args in 'start --class' 'start --class prose --reason' 'start --base' 'check --before' 'check --acknowledge' 'check --owner-request' 'check --base'; do
+  check "missing value for '$args' fails fast instead of looping" \
+    "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
+done
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
