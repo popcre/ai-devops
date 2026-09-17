@@ -33,7 +33,7 @@ check "skill and manual name the guarded relinquish command" "grep -q -- '--reli
 check "skill and manual name the guarded resume command" "grep -q -- '--resume-author-lease' '$ORCH' && grep -q -- '--resume-author-lease' '$MANUAL'"
 check "clock expiry releases neither protection nor capacity" "grep -qi 'Clock expiry releases neither protection nor capacity' '$ORCH' && grep -qi 'releases neither object protection nor active-author capacity' '$MANUAL'"
 check "Phase 2 commands and historical warning stay synchronized" "grep -q -- '--prepare-preview-dispatch <issue>' '$ORCH' && grep -q -- '--repair-preview-ready <ready-id> --issue <n>' '$ORCH' && grep -q 'historical dry-run proves nothing' '$ORCH'"
-check "review reservations use provider execution identity" "grep -q 'provider/wrapper execution keys' '$ORCH'"
+check "review reservations are keyed per review, never per provider (#401 decision 21)" "grep -q 'keyed per review, never per provider' '$ORCH' && ! grep -q 'provider/wrapper execution keys' '$ORCH'"
 check "both globals carry only the governed automatic production exception" "grep -q 'sole narrow exception is .*shared-db.*activated automatic migration' '$CODEX' && grep -q 'sole narrow exception is .*shared-db.*activated automatic migration' '$CLAUDE'"
 check "automatic production never falls back to owner version naming" "grep -q 'never manually reconstruct version or artifact inputs' '$ORCH' && grep -q 'never falls back to asking Albert for migration numbers' '$MANUAL'"
 check "automatic production retains engineer refusal and dry-run lock" "grep -q 'engineer action required' '$MANUAL' && grep -q 'fresh dry-run immediately' '$MANUAL' && grep -q 'global production lock' '$MANUAL'"
