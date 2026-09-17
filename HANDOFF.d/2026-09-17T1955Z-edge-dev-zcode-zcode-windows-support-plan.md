@@ -16,12 +16,13 @@ documents that content. (3) No ported Claude memory-index hook. (4) Transcript m
 is wanted, and is designed ZCode-natively (SQL over the copied session DB) rather than
 copying the Claude/Codex JSONL approach.
 
-Still open, none blocking Steps 1–8: the final ZCode MCP membership set; whether to
-enable ZCode's native memory (recommendation: on); the `~/.agents/skills` junction
-disposition; and — in `u2giants/shared-db`, not here — enforcing glm-reviewer exclusion
-for ZCode-orchestrated structural work (see §5 below). Do not treat this open handoff
-as authorization to run paid/live qualifications or touch any machine other than
-edge-dev.
+Still open, none blocking Steps 1–8: the final ZCode MCP membership set; the
+`~/.agents/skills` junction disposition; and — now filed as
+[u2giants/shared-db#3232](https://github.com/u2giants/shared-db/issues/3232) — enforcing
+glm-reviewer exclusion for ZCode-orchestrated structural work (see §5 below). **ZCode
+native memory: the owner enabled it himself on 2026-09-17** — recorded in plan §13.
+Do not treat this open handoff as authorization to run paid/live qualifications or
+touch any machine other than edge-dev.
 
 ## 1. What this application is
 
