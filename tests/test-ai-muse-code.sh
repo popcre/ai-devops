@@ -18,7 +18,7 @@ printf '#!/usr/bin/env bash\nprintf fake-key\n' > "$TMP/bin/op"
 cat > "$MBIN/muse-bin-$VERSION.exe" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
-  --version) printf 'Muse Code 1.3.0 (%s)\n' "${MUSE_STUB_VERSION:-1.3.0-R3233.1}";;
+  --version) [ -z "${MUSE_STUB_SIDE_ENV_FILE:-}" ] || env >> "$MUSE_STUB_SIDE_ENV_FILE"; printf 'Muse Code 1.3.0 (%s)\n' "${MUSE_STUB_VERSION:-1.3.0-R3233.1}";;
   exec)
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
     [ -z "${MUSE_STUB_ARGS_FILE:-}" ] || printf '%s\n' "$@" > "$MUSE_STUB_ARGS_FILE"
@@ -40,6 +40,7 @@ case "${1:-}" in
       *) ev "$sid" run.terminal.completed "$(jq -cn --arg t "$text" '{terminal:"completed",text:$t}')";;
     esac;;
   export)
+    [ -z "${MUSE_STUB_SIDE_ENV_FILE:-}" ] || env >> "$MUSE_STUB_SIDE_ENV_FILE"
     sid=''; out=''; while [ $# -gt 0 ]; do case "$1" in --session) sid="$2"; shift;; --out) out="$2"; shift;; esac; shift; done
     jq -n --arg sid "$sid" '{sessions:[{session_id:$sid}]}' > "$out";;
   *) exit 2;;
@@ -65,6 +66,7 @@ check 'wrapper chooses and records a UUID session identity' "cd '$REPO' && eval 
 check 'follow-up resumes the exact recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask first --prompt again\" | grep -qx remembered && grep -qx \"\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .session_id)\" '$TMP/provider-args'"
 check 'report records usage as unavailable, not zero' "grep -q 'engine-usage-not-reported' '$REPO'/.ai/reviews/muse-first-*.md"
 check 'transcript refuses an unpinned Muse Code binary' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' transcript first\" 2>/dev/null | grep -q session_id"
+check 'version checks and exports never see unrelated caller secrets' "cd '$REPO' && rm -f '$TMP/side-env' && eval \"$ENV MUSE_STUB_SIDE_ENV_FILE='$TMP/side-env' LEAKY_TOKEN=shh '$SCRIPT' transcript first\" >/dev/null && grep -q '^XDG_DATA_HOME=' '$TMP/side-env' && ! grep -q 'shh' '$TMP/side-env'"
 check 'transcript exports the recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' transcript first\" | jq -e '.sessions[0].session_id|length==36'"
 check 'transcript under the wrong engine is refused' "cd '$REPO' && ! eval \"$ENV AI_MUSE_ENGINE=opencode '$SCRIPT' transcript first\" 2>&1 | grep -q session_id"
 check 'delete under the wrong engine is refused and keeps the session' "cd '$REPO' && ! eval \"$ENV AI_MUSE_ENGINE=opencode '$SCRIPT' delete first\" && eval \"$ENV '$SCRIPT' show first\" | jq -e .session_id"

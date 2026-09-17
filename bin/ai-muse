@@ -179,10 +179,22 @@ runtime_env(){
   export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/opencode-muse-direct"
   mkdir -p "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 }
+muse_code_run(){ # every non-turn Muse Code call gets the same minimal environment as a turn, minus the key
+  local -a e=(/usr/bin/env -i "PATH=$PATH" "HOME=$PROFILE_HOME") ; local n
+  for n in XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
+    [ -z "${!n:-}" ] || e+=("$n=${!n}")
+  done
+  if [ -n "${AI_MUSE_TEST_DIR:-}" ]; then
+    e+=("AI_MUSE_TEST_DIR=$AI_MUSE_TEST_DIR")
+    while IFS='=' read -r n _; do case "$n" in AI_MUSE_TEST_*|MUSE_STUB_*) e+=("$n=${!n}");; esac; done < <(env)
+  fi
+  "${e[@]}" "$BIN" "$@"
+}
+muse_code_pinned(){ muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
 require_runtime(){
   if [ "$ENGINE" = muse-code ]; then
     [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL Muse Code $VERSION is not installed at $BIN."
-    "$BIN" --version 2>/dev/null | grep -Fq "($VERSION)" || die "local_dependency_unavailable: LOCAL Muse Code cannot start or is not the pinned $VERSION. Run: AI_MUSE_CALLER=$CALLER AI_MUSE_ENGINE=muse-code ai-muse doctor"
+    muse_code_pinned || die "local_dependency_unavailable: LOCAL Muse Code cannot start or is not the pinned $VERSION. Run: AI_MUSE_CALLER=$CALLER AI_MUSE_ENGINE=muse-code ai-muse doctor"
     return 0
   fi
   [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL OpenCode is not installed. Run: $ROOT/bin/setup-opencode-muse.sh"
@@ -527,7 +539,7 @@ cmd_transcript(){
   local m sid; m="$(find_meta "$1")"; require_engine_model "$m" "$1"; runtime_env; sid="$(jq -r .session_id "$m")"
   if [ "$ENGINE" = muse-code ]; then require_runtime; local xd rc; xd="$(mktemp -d "$XDG_STATE_HOME/export.XXXXXXXX")" || die 'could not create a private export directory.'; chmod 700 "$xd" || { rm -rf -- "$xd"; die 'could not protect the export directory.'; }
     # Fresh unpredictable directory owned by this run; the provider creates the only file in it.
-    "$BIN" export --session "$sid" --out "$xd/transcript.json" >/dev/null && [ -f "$xd/transcript.json" ] && [ ! -L "$xd/transcript.json" ] && cat "$xd/transcript.json"; rc=$?; rm -rf -- "$xd"; return "$rc"; fi
+    muse_code_run export --session "$sid" --out "$xd/transcript.json" >/dev/null && [ -f "$xd/transcript.json" ] && [ ! -L "$xd/transcript.json" ] && cat "$xd/transcript.json"; rc=$?; rm -rf -- "$xd"; return "$rc"; fi
   "$BIN" export "$sid"
 }
 muse_code_delete_session(){ # the CLI has no delete command; remove only this exact private session store
@@ -615,7 +627,7 @@ cmd_doctor(){
   printf 'ai-muse doctor (engine: %s)\n\n' "$ENGINE"
   if [ "$ENGINE" = muse-code ]; then
     check "pinned Muse Code $VERSION is installed" test -x "$BIN"
-    check "Muse Code reports the pinned $VERSION" bash -c '"$1" --version | grep -Fq "($2)"' _ "$BIN" "$VERSION"
+    check "Muse Code reports the pinned $VERSION" muse_code_pinned
   else
     check 'pinned OpenCode is installed' test -x "$BIN"
     check 'Muse configuration is installed' test -f "$OC_CFG/opencode.json"
