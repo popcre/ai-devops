@@ -13,3 +13,10 @@ max_context_tokens = 2000
 
 [windows]
 sandbox = "elevated"
+
+[tui]
+status_line = [
+  "model-with-reasoning", "current-dir", "git-branch",
+  "context-remaining", "used-tokens", "five-hour-limit", "weekly-limit",
+]
+status_line_use_colors = true

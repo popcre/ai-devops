@@ -233,6 +233,7 @@
     "test-configure-claude-desktop-chrome-devtools.ps1",
     "test-configure-codex-chrome-devtools.ps1",
     "test-configure-codex-mcps.ps1",
+    "test-configure-codex-statusline.ps1",
     "test-context-audit.ps1",
     "test-install-ai-devops-windows.ps1",
     "test-kimi-windows-execution.ps1",

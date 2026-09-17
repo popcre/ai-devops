@@ -64,6 +64,14 @@ using the usage records inside the transcripts rather than an estimate.
 
 Two findings mattered.
 
+Codex already compacts automatically at 80% of its context window, so no
+parallel compaction override was needed. Its status line is off by default.
+Windows setup now reconciles a visible status line on every Codex machine with
+the model and reasoning level, working directory and branch, remaining context,
+used tokens, and five-hour and weekly limits. The reconciler backs up an
+existing `config.toml`, changes only the two `[tui]` status-line keys, and
+preserves machine-local plugins, trust entries, and other settings.
+
 **Session length dominates everything else.** Turns past number 200 were 40% of
 all activity but 66% of all input tokens; turns past 400 were 19% of activity
 and 40% of tokens, at an average 488,000 tokens of context each. Fifty-nine
