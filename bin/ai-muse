@@ -15,13 +15,24 @@ SELF="${BASH_SOURCE[0]}"
 REAL_SELF="$(readlink -f "$SELF" 2>/dev/null || true)"
 [ -z "$REAL_SELF" ] || SELF="$REAL_SELF"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
-VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
 PROFILE_HOME="${USERPROFILE:-$HOME}"
 case "$PROFILE_HOME" in [A-Za-z]:*) PROFILE_HOME="/$(printf '%s' "$PROFILE_HOME" | sed 's#\\#/#g; s#:#/#')";; esac
 CFG="${AI_MUSE_CONFIG_DIR:-$PROFILE_HOME/.config/ai-devops-muse}"
 OC_CFG="$CFG/opencode-xdg/opencode"
-BIN="$PROFILE_HOME/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin/opencode.exe"
-MODEL="meta-model-api/muse-spark-1.3-contributor"
+# Runtime engine: the pinned OpenCode harness (default) or Meta's Muse Code CLI.
+# Sessions never cross engines: each engine records its own model identifier.
+ENGINE="${AI_MUSE_ENGINE:-opencode}"
+case "$ENGINE" in
+  opencode)
+    VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
+    BIN="$PROFILE_HOME/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin/opencode.exe"
+    MODEL="meta-model-api/muse-spark-1.3-contributor";;
+  muse-code)
+    VERSION="$(tr -d ' \r\n' < "$ROOT/config/muse-code/version")"
+    BIN="$PROFILE_HOME/AppData/Local/Programs/muse/muse-bin-$VERSION.exe"
+    MODEL="muse-spark-1.3-contributor";;
+  *) printf 'ai-muse: error: start_failed: unknown AI_MUSE_ENGINE: %s (use opencode or muse-code)\n' "$ENGINE" >&2; exit 1;;
+esac
 CALLER="${AI_MUSE_CALLER:-}"
 STATE="${AI_MUSE_STATE_DIR:-$PROFILE_HOME/.local/state/ai-devops/muse}"
 TIMEOUT="${AI_MUSE_TIMEOUT:-1800}"
@@ -53,6 +64,16 @@ protect_windows_path(){
   helper="$ROOT/bin/windows-private-file.ps1"; [ -f "$helper" ] || return 1
   AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$path")" AI_DEVOPS_PRIVATE_KIND="$kind" \
     "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; if ($env:AI_DEVOPS_PRIVATE_KIND -eq "directory") { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory } else { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET }' >/dev/null
+}
+protect_windows_dirs(){
+  local ps helper d targets=""
+  [ -n "${SYSTEMROOT:-}" ] || return 0
+  command -v cygpath >/dev/null 2>&1 || return 1
+  ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"; [ -n "$ps" ] || return 1
+  helper="$ROOT/bin/windows-private-file.ps1"; [ -f "$helper" ] || return 1
+  for d in "$@"; do targets+="$(cygpath -w "$d")"$'
+'; done
+  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGETS="$targets"     "$ps" -NoProfile -ExecutionPolicy Bypass -Command '$ErrorActionPreference = "Stop"; . $env:AI_DEVOPS_PRIVATE_HELPER; foreach ($t in ($env:AI_DEVOPS_PRIVATE_TARGETS -split "`n" | Where-Object { $_ })) { Protect-AiDevOpsPrivatePath -Path $t -Directory }' >/dev/null
 }
 secure_review_directory(){
   local dir="$1"
@@ -137,13 +158,61 @@ lock_session(){
 unlock_session(){ release_lock; }
 
 runtime_env(){
+  if [ "$ENGINE" = muse-code ]; then
+    # Private stores: no personal skills, settings or sessions leak in or out.
+    export XDG_CONFIG_HOME="$CFG/muse-code-xdg"
+    export XDG_DATA_HOME="$PROFILE_HOME/.local/share/ai-devops/muse-code"
+    export XDG_STATE_HOME="$PROFILE_HOME/.local/state/ai-devops/muse-code"
+    export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/muse-code"
+    local store; for store in "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"; do
+      # Refuse linked stores before creating or changing permissions on anything.
+      ! linked_below_home "$store" || die "Muse Code store is a link; refusing to use it: $store"
+    done
+    mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+    # Enforced on every use (one PowerShell call), never remembered: permissions can drift.
+    chmod 700 "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" && protect_windows_dirs "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" || die 'could not make the Muse Code stores private.'
+    return 0
+  fi
   export XDG_CONFIG_HOME="$CFG/opencode-xdg"
   export XDG_DATA_HOME="$PROFILE_HOME/.local/share/ai-devops/opencode-muse-direct"
   export XDG_STATE_HOME="$PROFILE_HOME/.local/state/ai-devops/muse-direct"
   export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/opencode-muse-direct"
   mkdir -p "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 }
+muse_code_run(){ # every non-turn Muse Code call gets the same minimal environment as a turn, minus the key
+  local -a e=(/usr/bin/env -i "PATH=$PATH" "HOME=$PROFILE_HOME") ; local n
+  for n in XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
+    [ -z "${!n:-}" ] || e+=("$n=${!n}")
+  done
+  if [ -n "${AI_MUSE_TEST_DIR:-}" ]; then
+    e+=("AI_MUSE_TEST_DIR=$AI_MUSE_TEST_DIR")
+    while IFS='=' read -r n _; do case "$n" in AI_MUSE_TEST_*|MUSE_STUB_*) e+=("$n=${!n}");; esac; done < <(env)
+  fi
+  "${e[@]}" "$BIN" "$@"
+}
+muse_code_sha256(){ tr -d ' \r\n' < "$ROOT/config/muse-code/sha256"; } # the exact pinned file, checked before it runs or sees a key; no override
+muse_code_stage(){ # run only a private copy verified after it was made, so swapping the installed file later changes nothing
+  local want dir tmp got; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] || return 1
+  [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] || return 1
+  dir="$PROFILE_HOME/.local/share/ai-devops/muse-code-bin"
+  ! linked_below_home "$dir" || return 1
+  mkdir -p "$dir" && chmod 700 "$dir" && protect_windows_path "$dir" directory || return 1
+  if [ ! -f "$dir/muse-$want.exe" ] || [ -L "$dir/muse-$want.exe" ] || [ "$(sha256sum "$dir/muse-$want.exe" | cut -d' ' -f1)" != "$want" ]; then
+    rm -f -- "$dir/muse-$want.exe"; tmp="$(mktemp "$dir/copy.XXXXXXXX")" || return 1
+    cp -- "$BIN" "$tmp" && chmod 700 "$tmp" && protect_windows_path "$tmp" file && got="$(sha256sum "$tmp" | cut -d' ' -f1)" && [ "$got" = "$want" ] && mv -f -- "$tmp" "$dir/muse-$want.exe" || { rm -f -- "$tmp"; return 1; }
+  fi
+  BIN="$dir/muse-$want.exe"
+}
+muse_code_pinned(){ local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
+linked_below_home(){ # true when the path or any ancestor below the profile home is a link or junction
+  local p="$1"; while [ -n "$p" ] && [ "$p" != "$PROFILE_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do [ ! -L "$p" ] || return 0; p="$(dirname "$p")"; done; return 1
+}
 require_runtime(){
+  if [ "$ENGINE" = muse-code ]; then
+    [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL Muse Code $VERSION is not installed at $BIN."
+    { muse_code_stage && muse_code_pinned; } || die "local_dependency_unavailable: LOCAL Muse Code cannot start or is not the pinned $VERSION. Run: AI_MUSE_CALLER=$CALLER AI_MUSE_ENGINE=muse-code ai-muse doctor"
+    return 0
+  fi
   [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL OpenCode is not installed. Run: $ROOT/bin/setup-opencode-muse.sh"
   "$BIN" --version >/dev/null 2>&1 || die "local_dependency_unavailable: LOCAL OpenCode cannot start. This is not a Muse provider fault. Run: AI_MUSE_CALLER=$CALLER ai-muse doctor"
   [ -f "$OC_CFG/opencode.json" ] || die "local_dependency_unavailable: Muse is not configured. Run: $ROOT/bin/setup-opencode-muse.sh"
@@ -271,7 +340,12 @@ secret_file="${AI_MUSE_SECRET_FILE:-}"
 IFS= read -r MODEL_API_KEY < "$secret_file" || exit 87
 rm -f -- "$secret_file" || exit 88
 unset AI_MUSE_SECRET_FILE
-export MODEL_API_KEY
+case "${AI_MUSE_KEY_ENV:-MODEL_API_KEY}" in
+  MODEL_API_KEY) export MODEL_API_KEY;;
+  META_API_KEY) export META_API_KEY="$MODEL_API_KEY"; unset MODEL_API_KEY;;
+  *) exit 89;;
+esac
+unset AI_MUSE_KEY_ENV
 exec "$@"
 '
 validate_heartbeat(){
@@ -279,6 +353,7 @@ validate_heartbeat(){
 }
 turn_usage(){
   local out="$1" sid="$2" event="$3" usage_python usage
+  [ "$ENGINE" != muse-code ] || { printf '%s' '{"scope":"turn","completeness":"unavailable","availability_reason":"engine-usage-not-reported"}'; return 0; }
   usage_python="$(command -v python3 || command -v python || true)"
   if { [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ "${AI_MUSE_TEST_USAGE_FAILURE:-0}" = 1 ]; } || [ -z "$usage_python" ] || ! usage="$("$usage_python" "$ROOT/tools/reviewer_usage.py" opencode "$out" --version "$VERSION" --provider muse --model "$MODEL" --session "$sid" --run "$event" 2> "$out.usage-error")"; then
     usage='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-formatting-failed"}'
@@ -286,6 +361,8 @@ turn_usage(){
   fi
   printf '%s' "$usage"
 }
+sid_filter(){ if [ "$ENGINE" = muse-code ]; then printf '%s' 'select(.stream.kind=="session")|.stream.id//empty'; else printf '%s' '.sessionID//.part.sessionID//empty'; fi; }
+new_session_uuid(){ local h; h="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"; [ "${#h}" -eq 32 ] || return 1; printf '%s-%s-4%s-%x%s-%s' "${h:0:8}" "${h:8:4}" "${h:13:3}" $(( (16#${h:16:1} & 3) | 8 )) "${h:17:3}" "${h:20:12}"; }
 retain_turn(){ # retain exact bytes and optional observations in one metadata write
   local meta="$1" out="$2" prompt="$3" rc="$4" sid="$5" event="${AI_REVIEW_EVENT_RUN_ID:-}" stem tmp item usage observed_sid
   [[ "$event" =~ ^[0-9a-f]{32}$ ]] || return 1
@@ -296,19 +373,32 @@ retain_turn(){ # retain exact bytes and optional observations in one metadata wr
     [ ! -e "$to" ] && [ ! -L "$to" ] || return 1
     (set -C; cat "$from" > "$to") && chmod 600 "$to" && protect_windows_path "$to" file || return 1
   done
-  observed_sid="$(jq -sr '[.[]|.sessionID//.part.sessionID//empty]|last//empty' "$stem.jsonl" 2>/dev/null || true)"
+  observed_sid="$(jq -sr "[.[]|$(sid_filter)]|last//empty" "$stem.jsonl" 2>/dev/null || true)"
   usage="$(turn_usage "$stem.jsonl" "$observed_sid" "$event")"
   tmp="$(tmp_file)"
   jq --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage}' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
 run_turn(){
-  local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
+  local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text prompt_arg=() timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
   local bash_bin=/usr/bin/bash key_file
   local -a clean_env
   validate_heartbeat
   TURN_SID=""; FINISH=""; TEXT=""; TOKENS=null; TURN_ERROR=""
   runtime_env; [ -x "$timeout_bin" ] || die "local_dependency_unavailable: trusted timeout executable is unavailable: $timeout_bin"; case "$timeout_bin" in /*) ;; *) die 'trusted timeout executable path must be absolute.';; esac
-  prompt_text="$(cat "$prompt")"; load_key; provider_key="$MODEL_API_KEY"; unset MODEL_API_KEY; args=(run --dir "$dir" --agent muse-review --model "$MODEL" --format json); [ -z "$sid" ] || args+=(--session "$sid")
+  prompt_text="$(cat "$prompt")"; load_key; provider_key="$MODEL_API_KEY"; unset MODEL_API_KEY
+  if [ "$ENGINE" = muse-code ]; then
+    # The caller chooses the conversation identity, so a new turn is provable too.
+    [ -n "$sid" ] || sid="$(new_session_uuid)" || die 'could not choose a Muse Code session identity.'
+    local workspace="$dir"; if command -v cygpath >/dev/null 2>&1; then workspace="$(cygpath -w "$dir")"; fi
+    # Read-only review: no writes, no shell, no web, no personal context, no prompts.
+    args=(exec --json --model "$MODEL" --session-id "$sid" --workspace "$workspace" --disable-write --disable-shell --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve)
+    # The prompt travels in a private file, never as an argument the CLI could parse as options.
+    chmod 600 "$prompt" 2>/dev/null && protect_windows_path "$prompt" file || die 'could not make the Muse Code prompt file private.'
+    if command -v cygpath >/dev/null 2>&1; then args+=(--prompt-file "$(cygpath -w "$prompt")"); else args+=(--prompt-file "$prompt"); fi
+  else
+    prompt_arg=("$prompt_text"); args=(run --dir "$dir" --agent muse-review --model "$MODEL" --format json); [ -z "$sid" ] || args+=(--session "$sid")
+  fi
+  EXPECTED_SID="$sid"
   [ -x "$bash_bin" ] && [ -x "$env_bin" ] || die 'trusted absolute Bash/env executables are required for the Muse credential boundary.'
   key_file="$(mktemp "$RUN_TMP/muse-key.XXXXXX")" || die 'could not reserve the private Muse credential handoff.'
   printf '%s\n' "$provider_key" > "$key_file" || die 'could not write the private Muse credential handoff.'
@@ -318,6 +408,7 @@ run_turn(){
   test_interrupt_at pre_launch
   set +e
   clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "AI_MUSE_SECRET_FILE=$key_file" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
+  [ "$ENGINE" != muse-code ] || clean_env+=("AI_MUSE_KEY_ENV=META_API_KEY")
   for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
     [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
   done
@@ -330,7 +421,7 @@ run_turn(){
     local launch_tmp; launch_tmp="$(tmp_file)"
     jq --arg now "$(date -u +%FT%TZ)" '.status="provider_launching"|.updated_at=$now' "$meta" > "$launch_tmp" && mv -f "$launch_tmp" "$meta"
   fi
-  ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" "$prompt_text" ) > "$out" 2> "$out.stderr" & TURN_PID=$!
+  ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
   MUSE_FAILURE_PHASE=provider-turn
   ACTIVE_META="$meta"; test_interrupt_at post_launch
   [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
@@ -346,20 +437,32 @@ run_turn(){
   [ -z "${AI_MUSE_TEST_POST_PROCESS_MARKER:-}" ] || printf reached > "$AI_MUSE_TEST_POST_PROCESS_MARKER"
   [ -z "${AI_MUSE_TEST_POST_PROCESS_DELAY:-}" ] || sleep "$AI_MUSE_TEST_POST_PROCESS_DELAY"
   set -e
-  parse_turn "$out" "$rc" "$meta"
+  parse_turn "$out" "$rc" "$meta" || return 1
+  if [ "$ENGINE" = muse-code ] && [ "$TURN_SID" != "$EXPECTED_SID" ]; then TURN_ERROR="Muse Code answered in a different session ($TURN_SID instead of $EXPECTED_SID)."; return 1; fi
 }
 parse_turn(){ # shared terminal parser; never launches the provider
   local out="$1" rc="$2" meta="${3:-}" salvaged_ids event_sid_count usage_event
   RUN_RC="$rc"; TURN_SID=""; FINISH=""; TEXT=""; TOKENS=null; TURN_ERROR=""
-  salvaged_ids="$(while IFS= read -r line; do printf '%s\n' "$line" | jq -r '.sessionID//empty' 2>/dev/null || true; done < "$out" | sed '/^$/d' | sort -u)"
+  salvaged_ids="$(while IFS= read -r line; do printf '%s\n' "$line" | jq -r "$(sid_filter)" 2>/dev/null || true; done < "$out" | sed '/^$/d' | sort -u)"
   [ "$(printf '%s\n' "$salvaged_ids" | sed '/^$/d' | wc -l)" -ne 1 ] || TURN_SID="$salvaged_ids"
   if ! jq -s -e 'length>0 and all(.[];type=="object")' "$out" >/dev/null 2>&1; then TURN_ERROR='Muse returned malformed event output.'; return 1; fi
-  event_sid_count="$(jq -sr '[.[]|.sessionID//empty]|unique|length' "$out")"
-  [ "$event_sid_count" -eq 1 ] || { TURN_ERROR='Muse returned a mixed or unidentified session event stream.'; return 1; }
-  TURN_SID="$(jq -sr '[.[]|.sessionID//empty]|unique|first//empty' "$out")"
-  FINISH="$(jq -sr '[.[]|select(.type=="step_finish")|.part.reason//empty]|last//empty' "$out")"
-  TEXT="$(jq -sr '[.[]|select(.type=="text")|.part.text//empty]|join("")' "$out")"
-  TOKENS="$(jq -sc '[.[]|select(.type=="step_finish")|.part.tokens//empty]|last//null' "$out")"
+  if [ "$ENGINE" = muse-code ]; then
+    # Every event must belong to one session stream, and only a final terminal
+    # "completed" event proves the answer is finished.
+    event_sid_count="$(jq -sr '[.[]|.stream.id//"<none>"]|unique|length' "$out")"
+    [ "$event_sid_count" -eq 1 ] && jq -s -e 'all(.[];.stream.kind=="session")' "$out" >/dev/null || { TURN_ERROR='Muse returned a mixed or unidentified session event stream.'; return 1; }
+    TURN_SID="$(jq -sr '[.[]|.stream.id]|first//empty' "$out")"
+    FINISH="$(jq -sr '[.[]|select((.payload_type//"")|startswith("run.terminal."))]|last|if .==null then "" elif .payload_type=="run.terminal.completed" and .payload.terminal=="completed" then "stop" else (.payload.terminal//.payload_type) end' "$out")"
+    TEXT="$(jq -sr '[.[]|select((.payload_type//"")|startswith("run.terminal."))]|last|.payload.text//empty' "$out")"
+    TOKENS=null
+  else
+    event_sid_count="$(jq -sr '[.[]|.sessionID//empty]|unique|length' "$out")"
+    [ "$event_sid_count" -eq 1 ] || { TURN_ERROR='Muse returned a mixed or unidentified session event stream.'; return 1; }
+    TURN_SID="$(jq -sr '[.[]|.sessionID//empty]|unique|first//empty' "$out")"
+    FINISH="$(jq -sr '[.[]|select(.type=="step_finish")|.part.reason//empty]|last//empty' "$out")"
+    TEXT="$(jq -sr '[.[]|select(.type=="text")|.part.text//empty]|join("")' "$out")"
+    TOKENS="$(jq -sc '[.[]|select(.type=="step_finish")|.part.tokens//empty]|last//null' "$out")"
+  fi
   if [ "$rc" -ne 0 ]; then TURN_ERROR="Muse turn failed before proven completion (exit $rc). Run: AI_MUSE_CALLER=$CALLER ai-muse doctor"; return 1; fi
   if [ -z "$TURN_SID" ]; then TURN_ERROR='Muse completed without a session ID.'; return 1; fi
   if [ "$FINISH" != stop ]; then TURN_ERROR="Muse did not prove completion (reason: ${FINISH:-missing})."; return 1; fi
@@ -445,7 +548,29 @@ cmd_ask(){
 find_meta(){ local root rid m; name_ok "$1" || die "invalid session name '$1'."; root="$(repo_root)"; rid="$(repo_id "$root")"; m="$(meta_path "$rid" "$1")"; [ -f "$m" ] || die "no session '$1' for caller '$CALLER' in this repository."; printf '%s' "$m"; }
 cmd_list(){ local f; printf '%-24s %-8s %-26s %s\n' NAME CALLER UPDATED REPOSITORY; while IFS= read -r -d '' f; do jq -r '[.name,.caller,.updated_at,.repository_root]|@tsv' "$f"; done < <(find "$STATE/sessions" -type f -name '*.json' -print0 2>/dev/null) | awk -F '\t' '{printf "%-24s %-8s %-26s %s\n",$1,$2,$3,$4}'; }
 cmd_show(){ jq . "$(find_meta "$1")"; }
-cmd_transcript(){ local m; m="$(find_meta "$1")"; runtime_env; "$BIN" export "$(jq -r .session_id "$m")"; }
+require_engine_model(){ # older same-engine models stay deletable; only a session from the other engine is refused
+  local stored owner; stored="$(jq -r '.model//""' "$1")"; case "$stored" in */*) owner=opencode;; "") owner="$ENGINE";; *) owner=muse-code;; esac
+  [ "$owner" = "$ENGINE" ] || die "session '$2' was created by the $owner engine (model '$stored'); rerun with AI_MUSE_ENGINE=$owner."
+}
+cmd_transcript(){
+  local m sid; m="$(find_meta "$1")"; require_engine_model "$m" "$1"; runtime_env; sid="$(jq -r .session_id "$m")"
+  if [ "$ENGINE" = muse-code ]; then require_runtime; local xd rc; xd="$(mktemp -d "$XDG_STATE_HOME/export.XXXXXXXX")" || die 'could not create a private export directory.'; chmod 700 "$xd" || { rm -rf -- "$xd"; die 'could not protect the export directory.'; }
+    # Fresh unpredictable directory owned by this run; the provider creates the only file in it.
+    muse_code_run export --session "$sid" --out "$xd/transcript.json" >/dev/null && [ -f "$xd/transcript.json" ] && [ ! -L "$xd/transcript.json" ] && cat "$xd/transcript.json"; rc=$?; rm -rf -- "$xd"; return "$rc"; fi
+  "$BIN" export "$sid"
+}
+muse_code_delete_session(){ # the CLI has no delete command; remove only this exact private session store
+  local sid="$1" dir
+  [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+  local base="$XDG_DATA_HOME" part parent
+  parent="$base/muse/sessions/.msp-view-v1"; ! linked_below_home "$parent" || return 1; [ -d "$parent" ] || return 0
+  # Enter the verified parent once, then delete relative to it: a later swap of any
+  # ancestor path cannot redirect the removal outside this directory.
+  ( cd -P -- "$parent" || exit 1
+    [ "$(pwd -P)" = "$(cd -P -- "$PROFILE_HOME" && pwd -P)/.local/share/ai-devops/muse-code/muse/sessions/.msp-view-v1" ] || exit 1
+    [ ! -L "./$sid" ] || exit 1
+    rm -rf -- "./$sid" && [ ! -e "./$sid" ] )
+}
 cmd_reconcile(){
   local name="$1" m rid tmp status sid root event stem out prompt rep stale=0 item path expected
   m="$(find_meta "$name")"; root="$(repo_root)"; rid="$(repo_id "$root")"; lock_session "$rid" "$name"
@@ -503,8 +628,9 @@ cmd_delete(){ local m root rid tag sid status tmp; m="$(find_meta "$1")"; root="
     [ "$status" = preparation_failed ] || die "session '$1' has no provider identity and cannot be deleted from status: $status"
     "$PACKET" remove "$(jq -r '.review_dir//""' "$m")" "$tag" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$root" "$tag" >/dev/null 2>&1 || true; rm -f "$m"; unlock_session; printf 'deleted pre-provider Muse session: %s\n' "$1"; return 0
   fi
+  require_engine_model "$m" "$1"
   if [ "$status" != provider_deleted ]; then
-    "$BIN" session delete "$sid" >/dev/null 2>&1 || die "could not positively confirm deletion of Muse session $sid; local record preserved."
+    if [ "$ENGINE" = muse-code ]; then muse_code_delete_session "$sid"; else "$BIN" session delete "$sid" >/dev/null 2>&1; fi || die "could not positively confirm deletion of Muse session $sid; local record preserved."
     tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="provider_deleted"|.updated_at=$now' "$m" > "$tmp"; mv -f "$tmp" "$m"
   fi
   "$PACKET" remove "$(jq -r .review_dir "$m")" "$tag" >/dev/null 2>&1 || true; "$SANDBOX" remove-copy "$root" "$tag"; rm -f "$m"; unlock_session; printf 'deleted Muse session: %s\n' "$1"
@@ -514,11 +640,16 @@ cmd_doctor(){
   case "${1:-}" in '') ;; --live) live=1;; *) die "unknown doctor option: $1";; esac
   [ "$#" -le 1 ] || die 'usage: ai-muse doctor [--live]'
   check(){ local label="$1"; shift; if "$@" >/dev/null 2>&1; then printf 'PASS  %s\n' "$label"; else printf 'FAIL  %s\n' "$label"; failures=$((failures+1)); fi; }
-  printf 'ai-muse doctor\n\n'
-  check 'pinned OpenCode is installed' test -x "$BIN"
-  check 'Muse configuration is installed' test -f "$OC_CFG/opencode.json"
-  check 'trusted provider configuration is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/opencode.json" "$OC_CFG/opencode.json"
-  check 'trusted review profile is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/agent/muse-review.md" "$OC_CFG/agent/muse-review.md"
+  printf 'ai-muse doctor (engine: %s)\n\n' "$ENGINE"
+  if [ "$ENGINE" = muse-code ]; then
+    check "pinned Muse Code $VERSION is installed" test -x "$BIN"
+    check "Muse Code is the pinned $VERSION file and reports it" eval 'muse_code_stage && muse_code_pinned'
+  else
+    check 'pinned OpenCode is installed' test -x "$BIN"
+    check 'Muse configuration is installed' test -f "$OC_CFG/opencode.json"
+    check 'trusted provider configuration is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/opencode.json" "$OC_CFG/opencode.json"
+    check 'trusted review profile is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/agent/muse-review.md" "$OC_CFG/agent/muse-review.md"
+  fi
   check '1Password command is available' command -v op
   [ "$failures" -eq 0 ] || exit 1
   if [ "$live" -eq 1 ]; then
@@ -530,7 +661,7 @@ cmd_doctor(){
     case "$TIMEOUT" in ''|0|*[!0-9]*) die 'AI_MUSE_DOCTOR_TIMEOUT must be a positive whole number of seconds.';; esac
     if ! run_turn "$fixture" "$prompt" "$out"; then TIMEOUT="$prior_timeout"; die "$TURN_ERROR"; fi
     TIMEOUT="$prior_timeout"
-    final_text="$(jq -sr '[.[]|select(.type=="text")|.part.text//empty]|last//empty' "$out")"
+    if [ "$ENGINE" = muse-code ]; then final_text="$TEXT"; else final_text="$(jq -sr '[.[]|select(.type=="text")|.part.text//empty]|last//empty' "$out")"; fi
     final_line="$(printf '%s\n' "$final_text" | awk 'NF { line=$0 } END { print line }')"
     [ "$final_line" = 'VERDICT: APPROVE' ] || die 'Muse live probe returned an unexpected final verdict.'
     printf 'PASS  live provider response\n'
