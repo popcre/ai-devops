@@ -366,6 +366,11 @@ impl_dir()      { printf '%s/sessions/%s/%s--%s.d' "$STATE_DIR" "$1" "$CALLER" "
 impl_meta_path(){ printf '%s/metadata.json' "$(impl_dir "$1" "$2")"; }
 lock_path()     { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 repolock_path() { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
+# Reviews are isolated per session (own snapshot qwen-$CALLER-$name, Qwen
+# session, verdict record), so their lock is keyed by the review, not the
+# repository: any number of same-repository Qwen reviews may run at once
+# (plan Step 7A, decisions 20-21). Implementation keeps the repository lock.
+reviewlock_path() { printf '%s/locks/review--%s--%s.lock.d' "$STATE_DIR" "$1" "$2"; }
 workspace_path(){ printf '%s/worktrees/qwen.%s-%s-%s/wt' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 
 # Portable mutex (flock does not exist in Git Bash); stale locks are reclaimed.
@@ -1498,8 +1503,8 @@ start_session() { # start_session NAME MODE
   [ "$mode" = implement ] && meta="$(impl_meta_path "$rid" "$name")"
   [ -f "$meta" ] && die "session '$name' already exists here. Continue it with: ai-qwen ask $name"
 
-  rid_lock="$(repolock_path "$rid")"
-  lock_acquire "$rid_lock" "$mode:$name" || die "another Qwen run is already active in this repository: $(lock_info "$rid_lock").
+  if [ "$mode" = review ]; then rid_lock="$(reviewlock_path "$rid" "$name")"; else rid_lock="$(repolock_path "$rid")"; fi
+  lock_acquire "$rid_lock" "$mode:$name" || die "this Qwen $mode run is already active: $(lock_info "$rid_lock").
   Do not start a second one; wait for it, or continue it with 'ask'."
   LIFECYCLE_LOCK="$rid_lock"
   trap lifecycle_exit_trap EXIT
@@ -1642,10 +1647,10 @@ cmd_ask() {
 The committed, dirty, or untracked source state changed. Start a new named Qwen review; no provider call was made."
   fi
 
-  sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$rid")"
+  sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(reviewlock_path "$rid" "$name")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
   if ! lock_acquire "$rid_lock" "ask:$name"; then
-    lock_release "$sess_lock"; die "another Qwen run is active in this repository: $(lock_info "$rid_lock")"
+    lock_release "$sess_lock"; die "this Qwen review session is already active: $(lock_info "$rid_lock")"
   fi
   # shellcheck disable=SC2064
   trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT
@@ -1801,8 +1806,8 @@ cmd_finalize() { # local-only completion of one sealed provider turn
   repo="$(repo_root)"; rid="$(repo_id "$repo")"; meta="$(meta_path "$rid" "$name")"
   [ -f "$meta" ] && [ ! -L "$meta" ] || die 'no exact local recovery record exists for this caller and repository.'
   lock_acquire "$(lock_path "$rid" "$name")" "finalize:$name" || die 'this exact Qwen session is busy.'
-  lock_acquire "$(repolock_path "$rid")" "finalize:$name" || { lock_release "$(lock_path "$rid" "$name")"; die 'another Qwen turn is active in this repository.'; }
-  FINALIZE_SESSION_LOCK="$(lock_path "$rid" "$name")"; FINALIZE_REPO_LOCK="$(repolock_path "$rid")"
+  lock_acquire "$(reviewlock_path "$rid" "$name")" "finalize:$name" || { lock_release "$(lock_path "$rid" "$name")"; die 'this Qwen review session is already active.'; }
+  FINALIZE_SESSION_LOCK="$(lock_path "$rid" "$name")"; FINALIZE_REPO_LOCK="$(reviewlock_path "$rid" "$name")"
   trap release_finalize_locks EXIT
   jq -e --arg caller "$CALLER" --arg name "$name" --arg model "$QWEN_MODEL" '.mode=="review" and .caller==$caller and .name==$name and .model==$model' "$meta" >/dev/null || die 'recovery identity differs from the exact requested review.'
   same_path "$(jq -r .repo "$meta")" "$repo" || die 'recovery belongs to a different repository.'

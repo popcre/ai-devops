@@ -526,6 +526,11 @@ impl_dir()      { printf '%s/sessions/%s/%s--%s.d' "$STATE_DIR" "$1" "$CALLER" "
 impl_meta_path(){ printf '%s/metadata.json' "$(impl_dir "$1" "$2")"; }
 lock_path()     { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 repolock_path() { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
+# Reviews are isolated per session (own snapshot kimi-$CALLER-$name, job dir,
+# Kimi session, verdict record), so their paid-work lock is keyed by the review,
+# not the repository: any number of same-repository Kimi reviews may run at once
+# (plan Step 7A, decisions 20-21). Implementation keeps the repository lock.
+reviewlock_path() { printf '%s/locks/review--%s--%s.lock.d' "$STATE_DIR" "$1" "$2"; }
 workspace_path(){ printf '%s/worktrees/kimi.%s-%s-%s/wt' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 
 # Portable mutex (flock does not exist in Git Bash); stale locks are reclaimed.
@@ -1358,8 +1363,8 @@ start_review_job() { # NAME [CONTINUE]
     jq -r '.job_id' "$dir/job.json"; return 0
   fi
   upstream="$(require_upstream_identity "$repo")"; lockid="$(review_lock_id "$upstream")"
-  repo_lock="$(repolock_path "$lockid")"
-  lock_acquire "$repo_lock" "review:$name" || die "another Kimi run is already active in this repository: $(lock_info "$repo_lock")"
+  repo_lock="$(reviewlock_path "$lockid" "$name")"
+  lock_acquire "$repo_lock" "review:$name" || die "this Kimi review session is already active: $(lock_info "$repo_lock")"
   trap "lock_release '$repo_lock'" EXIT
   sid=""
   if [ "$cont" = 1 ]; then
@@ -1936,8 +1941,8 @@ start_session() { # start_session NAME MODE
     upstream="$(require_upstream_identity "$repo")"
     lockid="$(review_lock_id "$upstream")"
   fi
-  rid_lock="$(repolock_path "$lockid")"
-  lock_acquire "$rid_lock" "$mode:$name" || die "another Kimi run is already active in this repository: $(lock_info "$rid_lock").
+  if [ "$mode" = review ]; then rid_lock="$(reviewlock_path "$lockid" "$name")"; else rid_lock="$(repolock_path "$lockid")"; fi
+  lock_acquire "$rid_lock" "$mode:$name" || die "this Kimi $mode run is already active: $(lock_info "$rid_lock").
   Do not start a second one; wait for it, or continue it with 'ask'."
   LIFECYCLE_LOCK="$rid_lock"
   trap lifecycle_exit_trap EXIT
@@ -2051,10 +2056,10 @@ cmd_ask() {
   current_upstream="$(require_upstream_identity "$repo")"
   [ "$current_upstream" = "$stored_upstream" ] || die "review session '$name' belongs to a different shared upstream. Restore its original origin or start a new named Kimi review; no provider call was made."
   lockid="$(review_lock_id "$stored_upstream")"
-  sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$lockid")"
+  sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(reviewlock_path "$lockid" "$name")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
   if ! lock_acquire "$rid_lock" "ask:$name"; then
-    lock_release "$sess_lock"; die "another Kimi run is active in this repository: $(lock_info "$rid_lock")"
+    lock_release "$sess_lock"; die "this Kimi review session is already active: $(lock_info "$rid_lock")"
   fi
   # shellcheck disable=SC2064
   trap "lock_release '$sess_lock'; lock_release '$rid_lock'" EXIT

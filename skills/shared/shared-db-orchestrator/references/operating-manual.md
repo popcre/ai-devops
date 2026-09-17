@@ -39,15 +39,10 @@ records. Do not allocate while any malformed claim or lock exists.
 
 ## Author locks
 
-Albert's 2026-08-14 ruling allowed no more than three unrelated migration
-authors; he raised it to five on 2026-08-25. The manager acquires GitHub-backed
-object locks and one of `MAX_AUTHOR_LANES` renewable active-author slots across all
-computers. Read the constant in
-`scripts/manage-migration-author-lanes.mjs` rather than trusting a number
-written in prose. The cap is throughput only: isolation comes from the exact
-object lock, the acquisition mutex, the permanent version reservation, and the
-single-holder preview/merge/production refs, and preview, merge and production
-stay serial at any cap. The readable GitHub issue mirrors the lock; it does
+There is no numeric ceiling on concurrent authors, sub-agents, or runners (Albert, 2026-09-16; plan Step 7A, decisions 20–21). Admit every author whose exact objects do not overlap a live claim; isolation comes from exact-object locks, permanent version reservations, and the serialized preview/merge/production stage leases, never from a count. Back off and reroute only on a real provider or machine refusal (rate limit, quota, out-of-memory). The manager acquires GitHub-backed object locks and a renewable
+author lease across all computers. Isolation comes from the exact object lock,
+the acquisition mutex, the permanent version reservation, and the single-holder
+preview/merge/production refs; preview, merge and production stay serial. The readable GitHub issue mirrors the lock; it does
 not create the lock.
 
 ```bash
@@ -61,10 +56,10 @@ The manager must include open draft and ready pull requests, paginate all GitHub
 reads, reject unreadable input, reserve a permanent unique migration version and
 return success only after lock read-back. Older claims protect their objects and
 versions until adopted or explicitly released. A lease expiry is a warning and
-releases neither object protection nor active-author capacity.
+releases no object protection.
 
 When a durable external blocker stops a clean worktree and the claim holds no
-preview, merge, or production stage, relinquish only capacity:
+preview, merge, or production stage, relinquish only the author lease:
 
 ```bash
 node scripts/manage-migration-author-lanes.mjs --relinquish-author-lease \
@@ -73,7 +68,7 @@ node scripts/manage-migration-author-lanes.mjs --relinquish-author-lease \
 
 The protected claim remains in every collision calculation. After the blocker
 clears, resume through the guarded command; it renews the clock lease and
-rechecks active capacity, every collision, and the permanent version reservation:
+rechecks every collision and the permanent version reservation:
 
 ```bash
 node scripts/manage-migration-author-lanes.mjs --resume-author-lease \
@@ -109,26 +104,26 @@ Only `ready + structural + shared-db-orchestrator` is eligible for an author lan
 It must use exact normalized objects, including every whole-body function or
 trigger the implementation replaces. Non-structural work must not claim database
 objects. Outside-sourced writes into curated `core.*` Master Data keep the
-`curated-master-data-governance` route and never consume an author lane. Higher
+`curated-master-data-governance` route. Higher
 priority runs first. Open dependencies make otherwise ready structural work wait.
 
 Run `node scripts/manage-migration-author-lanes.mjs --queue-audit` at startup,
 after every merge, and immediately after every claim release. Exact-overlap
-components form serial queues; unrelated components fill the available lanes.
-Claims and permanent version reservations protect future work independently of
-active-author capacity. A relinquished claim is not an active author but still
-blocks overlap. Report a lane as working only when current worker evidence exists.
-When any author slot frees, run a live queue audit immediately, close stale issues
-whose outcome is already delivered, and dispatch the next genuinely eligible
-issue in an isolated worktree. Keep explicit successor queues, but say plainly
+components form serial queues; every unrelated component is dispatched at once,
+with no count limit. Claims and permanent version reservations protect future
+work. A relinquished claim is not an active author but still blocks overlap.
+Report an author as working only when current worker evidence exists. After every
+claim release, run a live queue audit immediately, close stale issues whose
+outcome is already delivered, and dispatch every genuinely eligible issue in an
+isolated worktree. Keep explicit successor queues, but say plainly
 when the audit proves no eligible successor exists. Do not ask Albert to approve
 dispatch.
 
-An empty lane is justified only by a complete audit with no eligible candidate.
+Undispatched ready work is justified only by a complete audit showing overlap or a blocker.
 Unclassified or malformed issues make that proof impossible and the command
-fails. Blocked work consumes no active-author slot only after the guarded
+fails. Blocked work releases its author lease only through the guarded
 relinquishment above; its claim remains protected. Owner-decision and every
-non-structural work type are reported but never consume a lane. `needs-albert` is not a route: after an answer, change
+non-structural work type are reported and never block structural dispatch. `needs-albert` is not a route: after an answer, change
 status only and preserve work type and route. Preview and merge remain globally serialized. An
 author waiting for those stages keeps doing safe local work or prepares the next
 issue without creating an overlapping migration.
@@ -178,7 +173,7 @@ scope block. Never paste a private artifact into a public shared-db issue.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Keep object protection separate from active-author capacity. A dependency wait creates no successful workflow evidence. Immediately before each manual preview run, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and dispatch only the matching instruction. Historical recovery uses `mode=apply` only; its dry-run applies nothing and proves nothing. Repair only a v2-bound stale wrong digest with `--repair-preview-ready <ready-id> --issue <n>`; a corrupt current digest needs an owner decision and no mutation. Reviewer reservations use canonical provider/wrapper execution keys and durable ordered waits.
+Keep object protection separate from author leases. A dependency wait creates no successful workflow evidence. Immediately before each manual preview run, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and dispatch only the matching instruction. Historical recovery uses `mode=apply` only; its dry-run applies nothing and proves nothing. Repair only a v2-bound stale wrong digest with `--repair-preview-ready <ready-id> --issue <n>`; a corrupt current digest needs an owner decision and no mutation. Reviewer reservations record one review per exact head and session; a provider already reviewing is never busy and never causes a wait (decision 21).
 
 ## Preview and merge locks
 
@@ -228,11 +223,12 @@ exposes five one-shot modes only — `plan-review`, `diff-review`,
 continuation of any kind, and `bin/ai-review` whitelists exactly those five.
 
 **Codex is overflow, not rotation.** `codex-gpt-5.6-sol` is assigned only when
-every rotation provider is already holding live review work in shared-db, or
-when all of them have already failed on the exact head. It never takes an
-ordinary turn. The busy probe fails open, so an unreadable GitHub keeps the
-ordinary rotation rather than diverting reviews to a provider that costs real
-money per run.
+every rotation provider has refused (quota, rate limit, auth, crash, non-start) or
+already failed on the exact head. A rotation provider that is already running
+other reviews is not busy: it takes the new review concurrently in its own
+session (decision 21). It never takes an
+ordinary turn. An unreadable GitHub keeps the ordinary rotation rather than
+diverting reviews to a provider that costs real money per run.
 
 **A Codex verdict cannot be debated, and that constrains when to spend one.**
 Because the wrapper is one-shot, the rebuttal rule below has no compliant path
@@ -241,14 +237,14 @@ invent one, and do not treat a fresh one-shot run as a continuation of an
 earlier verdict — it is a new review of whatever the repository looks like now.
 
 So when a Codex overflow verdict is disputed on the merits, the debate moves to
-a persistent reviewer as soon as one frees up, and that reviewer reviews the
+a persistent reviewer immediately (reviewers take concurrent reviews), and that reviewer reviews the
 exact head from scratch rather than arbitrating a transcript it never saw. A
 Codex `REVISE` whose findings the author accepts needs no debate at all; fix the
 code, and re-review at the new exact head under the ordinary rotation.
 
-Prefer waiting for a free rotation provider over spending an overflow review on
-work you expect to argue about. Overflow exists to keep the author lanes moving
-when every eligible reviewer is genuinely busy, not to review contentious work.
+Never spend an overflow review on work you expect to argue about. Overflow exists
+only for the case where every rotation provider has genuinely refused, not to
+review contentious work.
 
 **The retired `glm-5.2` label receives no new work** until an explicit owner
 instruction restores it. Qwen 3.8 Max is no longer retired (owner instruction,
@@ -257,15 +253,13 @@ assignments, failures, and replacement evidence stay readable and must be
 recovered through `scripts/manage-migration-author-lanes.mjs`, never
 hand-edited.
 
-**A Grok review running in another repository never blocks one here.**
-`ai-grok-review`'s locking is scoped to work, not to the reviewer: whatever it
-serializes, it does not serialize across repositories, so five repositories with
-work can run five Grok reviews at once. Never skip Grok here because Grok is
-busy elsewhere, and never read a busy Grok as a Grok outage. What it serializes
-*within* one repository changed in `ai-grok-review` 1.1.0 — check
-`ai-grok-review doctor` and `skills/shared/grok-cli/SKILL.md` for the installed
-wrapper's exact rule instead of assuming either the old repository-wide lock or
-none at all.
+**No reviewer review ever blocks another independent review.** Every reviewer
+wrapper (`ai-grok-review`, `ai-kimi`, `ai-qwen`, `ai-gemini`, `ai-glm`, `ai-muse`,
+`ai-deepseek-agent`) locks only the exact review session or submission, never the
+repository or the provider, so any number of reviews by one provider run at once
+in the same or different repositories (plan Step 7A, decision 21). Never skip a
+provider because it is already reviewing, and never read a provider running other
+reviews as an outage. Only the same named session is serialized.
 
 Require the reviewer to re-read the current exact head and return `APPROVE` or
 `REVISE` with evidence. Independently verify every claim. Reuse the same named
