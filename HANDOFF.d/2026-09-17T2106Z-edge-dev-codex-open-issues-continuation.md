@@ -98,7 +98,7 @@ At 2026-09-17 21:02Z, GitHub showed PRs #15, #33, #66, #135, #184, #192, #392, #
 - Installation is a separate protected outcome. A merge cannot be reported as machine-wide acceptance for #103, #133, #200, #511, or #262.
 - #185 and #186 are distinct: splitting tests across hosted jobs solves shared-host duration pressure, but it does not identify a process that never makes progress.
 - #262 needs both a narrow privilege boundary and a truthful plan. Exact-head approval must cover the same head and current target base that will enter the merge queue.
-- The current handoff directory has stale contracts. A live comparison found these files tied to closed issues: the #131 handoff, the #337 handoff, eight #159 handoffs, and the #478 PR handoff. Issue #125 owns retirement; do not delete them casually because obligations must be reconciled first. Several older files also still use `issue: none`.
+- The current handoff directory has stale contracts. A live comparison found these files tied to closed issues: the #131 handoff, the #337 handoff, nine #159 handoffs, and the #478 PR handoff. Issue #125 owns retirement; do not delete them casually because obligations must be reconciled first. Several older files also still use `issue: none`.
 - Secrets sweep result: the two exposed values were already stored in the correct 1Password item. No credential was newly created or copied. The transcript exposure still requires rotation approval.
 
 ## 6. Exact next steps
