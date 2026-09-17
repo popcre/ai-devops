@@ -65,6 +65,7 @@
     "test-public-boundary.sh",
     "test-repository-policy.sh",
     "test-repository-coverage.sh",
+    "test-reviewer-ci-paths.sh",
     "test-session-conduct-policy.sh",
     "test-setup-credentials-source.sh",
     "test-shared-db-fast-close-skill.sh",
