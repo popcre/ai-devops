@@ -8,14 +8,20 @@ owner: zcode/plan-zcode-windows-support-558
 
 ## 0. ⚠️ DECISIONS ONLY THE OWNER CAN MAKE
 
-None blocking the start of implementation (Steps 1–8 of the plan need no further owner
-input). Four decisions are deliberately deferred and named in
-[plan_zcode-windows-support.md](../plan_zcode-windows-support.md) §13: the final ZCode
-MCP membership set, whether to run the live reviewer qualification and flip the registry
-absent→registered (which also implies the shared-db rotation mirror, under a shared-db
-issue), whether to enable ZCode memory + sync, and the `~/.agents/skills` junction
-disposition. Do not treat this open handoff as authorization to promote the reviewer,
-run paid/live qualifications, or touch any machine other than edge-dev.
+**Settled by the owner on 2026-09-17 (plan review, later the same day) — do not
+relitigate:** (1) NO ZCode-based reviewer, ever — "I never want GLM reviewing GLM
+code," and ZCode's engine is GLM-5.3; the drafted Step 9 was removed permanently.
+(2) The `zcode-config-repair` skill is killed — ZCode's own `zcode-guide` plugin
+documents that content. (3) No ported Claude memory-index hook. (4) Transcript mining
+is wanted, and is designed ZCode-natively (SQL over the copied session DB) rather than
+copying the Claude/Codex JSONL approach.
+
+Still open, none blocking Steps 1–8: the final ZCode MCP membership set; whether to
+enable ZCode's native memory (recommendation: on); the `~/.agents/skills` junction
+disposition; and — in `u2giants/shared-db`, not here — enforcing glm-reviewer exclusion
+for ZCode-orchestrated structural work (see §5 below). Do not treat this open handoff
+as authorization to run paid/live qualifications or touch any machine other than
+edge-dev.
 
 ## 1. What this application is
 
@@ -76,14 +82,24 @@ need `hooks.enabled: true`; `~/.zcode/AGENTS.md` is the global-instruction analo
 sessions live in SQLite + rollout JSONL; two version numbers and electron self-update
 make presence-only version policy correct.
 
+**Finding from the 2026-09-17 owner review (cross-repo, unfiled):** the owner's rule
+"GLM never reviews GLM code" is NOT enforced for ZCode orchestrators in
+`u2giants/shared-db`. `scripts/manage-migration-author-lanes.mjs`
+(`reviewersForOrchestrator`, ~:553) excludes only reviewers whose `orchestratorEngine`
+matches the orchestrator marker's declared engine; the `glm-5.3` reviewer row (~:274)
+declares no `orchestratorEngine`, and the marker vocabulary has no `zcode`. So a
+ZCode-orchestrated structural change could today draw the glm reviewer. Fix belongs in
+shared-db (give glm rows `orchestratorEngine: 'glm'`; map a zcode orchestrator marker
+to engine `glm`) — plan §13 open question 2 records it; no shared-db issue filed yet.
+
 ## 6. Exact next steps
 
 1. A fresh session opens [plan_zcode-windows-support.md](../plan_zcode-windows-support.md),
    reads its STATUS table, and starts at Step 1 (freeze the ZCode Windows baseline into
    `tests/verification/zcode-windows-2026-09-17/README.md`).
 2. Follow the plan's phases A→D in order; declare the honest task-gate class per PR
-   (`installation` for installer/setup/machine-tools hunks, `reviewer-safety` for the
-   Step 9 wrapper/lifecycle hunks — that PR needs an independent exact-head review).
+   (`installation` for installer/setup/machine-tools hunks — the only protected class
+   left; the reviewer-safety step was removed permanently on 2026-09-17).
 3. After each completed step, update the plan's STATUS table with a reproducible
    artifact; after the plan's PR merges, retire nothing until implementation ends —
    this handoff stays OPEN while any STATUS row is open.
