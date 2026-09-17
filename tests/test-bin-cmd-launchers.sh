@@ -28,7 +28,7 @@ for launcher in "$REPO_ROOT"/bin/*.cmd; do
   [ -z "$mode" ] || [ "$mode" = 100644 ] || { echo "FAIL: $(basename "$launcher") must not be executable (mode $mode)" >&2; fail=1; }
 done
 
-if command -v pwsh >/dev/null 2>&1 && [ -f "$REPO_ROOT/bin/ai-task-gates.cmd" ]; then
+if command -v cmd.exe >/dev/null 2>&1 && command -v pwsh >/dev/null 2>&1 && [ -f "$REPO_ROOT/bin/ai-task-gates.cmd" ]; then
   resolved="$(cd "$REPO_ROOT" && pwsh -NoProfile -Command '(Get-Command bin/ai-task-gates).Source' | tr -d '\r')"
   case "$resolved" in *.cmd) ;; *) echo "FAIL: PowerShell resolves bin/ai-task-gates to $resolved" >&2; fail=1 ;; esac
 fi
