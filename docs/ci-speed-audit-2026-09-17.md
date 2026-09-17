@@ -53,9 +53,10 @@ Windows section (22 / 35 min); linux-offline (~20 min) sets the merge-queue time
    job that actually catches regressions (8 failures). Saves ~12–14 min on both
    PR and queue runs. Risk: low (same mechanism already used on Windows;
    aggregator check keeps the required name).
-3. **Rebalance / add a 6th Windows section.** p90 35 min vs median 22 means one
-   section carries the heavy indivisible suites. Balancing by measured suite
-   time should cut the Windows p90 to ~25 min. Saves ~10 min at p90. Risk: low.
+3. **DONE 2026-09-17 — rebalance the five Windows sections ([#537](https://github.com/popcre/ai-devops/pull/537)).**
+   The exact-head run kept all 24 suites once and reduced the four movable
+   sections to 24–30 minutes; the isolated, indivisible Kimi suite remained the
+   35-minute long pole. The fail-closed `windows-offline` aggregate was retained.
 4. **Docs-only / prose-only PRs skip long lanes entirely** (classifier already
    exists; confirm run_long=false for Markdown-only diffs and that aggregators
    pass). Saves the full ~26 min for doc PRs. Risk: low.
