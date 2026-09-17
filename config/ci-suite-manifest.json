@@ -23,6 +23,7 @@
     "test-ai-machine-tools.sh",
     "test-ai-memory-health.sh",
     "test-ai-gh.sh",
+    "test-bin-cmd-launchers.sh",
     "test-ai-memory-index-hook.sh",
     "test-ai-memory-sync-fanout.sh",
     "test-ai-memory-sync.sh",
@@ -90,6 +91,7 @@
     "test-ai-gemini.sh",
     "test-ai-gemini-usage.sh",
     "test-ai-gh.sh",
+    "test-bin-cmd-launchers.sh",
     "test-ai-glm.sh",
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
@@ -120,6 +122,7 @@
     "test-ai-gemini.sh",
     "test-ai-gemini-usage.sh",
     "test-ai-gh.sh",
+    "test-bin-cmd-launchers.sh",
     "test-ai-glm.sh",
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
@@ -187,7 +190,8 @@
       "test-ai-claude-review.sh",
       "test-ai-codex-memories.sh",
       "test-ai-gh.sh",
-      "test-ai-qwen.sh"
+      "test-ai-qwen.sh",
+      "test-bin-cmd-launchers.sh"
     ]
   ],
   "windows_offline_powershell_shard": 3

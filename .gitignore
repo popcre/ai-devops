@@ -20,6 +20,7 @@ id_ed25519
 !docs/onboarding-secrets.md
 # These public helpers resolve protected inputs but contain no private values.
 !bin/ai-private-config
+!bin/ai-private-config.cmd
 !tests/test-ai-private-config.sh
 
 # Memory notes (memory/**/*.md) document things *about* credentials — incident
