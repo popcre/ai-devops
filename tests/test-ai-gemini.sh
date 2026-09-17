@@ -205,16 +205,22 @@ echo '== lifecycle, concurrency, report, and head gates'
 R5="$TMP/repo5"; make_repo "$R5" no
 check 'unsafe report destination makes the review fail' "! new_run '$R5' report normal"
 check 'report failure remains recovery-required' "test \"\$(jq -r .status \"\$(meta_for report)\")\" = RECOVERY_REQUIRED"
-R5B="$TMP/repo5b"; make_repo "$R5B"; R5B_ID="$(printf '%s\n%s' "$(cd "$R5B" && pwd -P)" "$(git -C "$R5B" config --get remote.origin.url 2>/dev/null || true)" | sha256sum | cut -c1-12)"; mkdir -p "$TMP/state/locks/repo-$R5B_ID"; printf '99999999\n' > "$TMP/state/locks/repo-$R5B_ID/owner"
+R5B="$TMP/repo5b"; make_repo "$R5B"; R5B_ID="$(printf '%s\n%s' "$(cd "$R5B" && pwd -P)" "$(git -C "$R5B" config --get remote.origin.url 2>/dev/null || true)" | sha256sum | cut -c1-12)"; mkdir -p "$TMP/state/locks/session-$R5B_ID-test-stale-owner"; printf '99999999\n' > "$TMP/state/locks/session-$R5B_ID-test-stale-owner/owner"
 check 'dead local lock owner is safely reclaimed' "new_run '$R5B' stale-owner normal"
-R5C="$TMP/repo5c"; make_repo "$R5C"; R5C_ID="$(printf '%s\n%s' "$(cd "$R5C" && pwd -P)" "$(git -C "$R5C" config --get remote.origin.url 2>/dev/null || true)" | sha256sum | cut -c1-12)"; mkdir -p "$TMP/state/locks/repo-$R5C_ID"; printf '99999999\n' > "$TMP/state/locks/repo-$R5C_ID/owner"
-(new_run "$R5C" reclaim-a reclaim-slow >/dev/null 2>&1) & RECLAIM_A=$!; (new_run "$R5C" reclaim-b reclaim-slow >/dev/null 2>&1) & RECLAIM_B=$!; RA=0; RB=0; wait "$RECLAIM_A" || RA=$?; wait "$RECLAIM_B" || RB=$?
+R5C="$TMP/repo5c"; make_repo "$R5C"; R5C_ID="$(printf '%s\n%s' "$(cd "$R5C" && pwd -P)" "$(git -C "$R5C" config --get remote.origin.url 2>/dev/null || true)" | sha256sum | cut -c1-12)"; mkdir -p "$TMP/state/locks/session-$R5C_ID-test-reclaim"; printf '99999999\n' > "$TMP/state/locks/session-$R5C_ID-test-reclaim/owner"
+(new_run "$R5C" reclaim reclaim-slow >/dev/null 2>&1) & RECLAIM_A=$!; (new_run "$R5C" reclaim reclaim-slow >/dev/null 2>&1) & RECLAIM_B=$!; RA=0; RB=0; wait "$RECLAIM_A" || RA=$?; wait "$RECLAIM_B" || RB=$?
 check 'concurrent stale-lock reclaimers cannot both enter a review' "test \$(( (RA == 0) + (RB == 0) )) -eq 1"
 R6="$TMP/repo6"; make_repo "$R6"
 (cd "$R6" && exec env MOCK_MODE=sleep "$SCRIPT" new concurrent --prompt wait) >/dev/null 2>&1 & RUNPID=$!
 for _ in $(seq 1 "$(scale_ticks 100)"); do [ -n "$(meta_for concurrent 2>/dev/null || true)" ] && break; sleep .05; done
 CONCURRENT_COPY="$(jq -r .review_dir "$(meta_for concurrent)")"; printf owner-evidence > "$CONCURRENT_COPY/concurrency-owner"
 check 'concurrent new is refused before touching evidence' "! (cd '$R6' && '$SCRIPT' new concurrent --prompt collide) && grep -qx owner-evidence '$CONCURRENT_COPY/concurrency-owner'"
+# Decision 21 (#401 Step 7A): no ceiling on same-provider reviews. Three other
+# reviews in the same repository complete while this one is still in flight.
+PRC=0; PIDS=''; for n in para-1 para-2 para-3; do (cd "$R6" && exec env MOCK_MODE=normal "$SCRIPT" new "$n" --prompt review >/dev/null 2>&1) & PIDS="$PIDS $!"; done
+for p in $PIDS; do wait "$p" || PRC=$((PRC+1)); done
+check 'three unrelated same-provider reviews complete while another review runs' "test '$PRC' -eq 0 && kill -0 '$RUNPID'"
+check 'each concurrent review keeps its own session, copy, and verdict record' "test \"\$(for n in para-1 para-2 para-3; do jq -r .review_dir \"\$(meta_for \$n)\"; done | sort -u | wc -l)\" -eq 3 && test \"\$(for n in para-1 para-2 para-3; do jq -r .status \"\$(meta_for \$n)\"; done | sort -u)\" = COMPLETE"
 check 'concurrent delete is refused while review runs' "! (cd '$R6' && '$SCRIPT' delete concurrent)"
 check 'concurrent follow-up is refused while review runs' "! (cd '$R6' && '$SCRIPT' ask concurrent --prompt collide)"
 kill -TERM "$RUNPID" 2>/dev/null || true; RUNRC=0; wait "$RUNPID" 2>/dev/null || RUNRC=$?

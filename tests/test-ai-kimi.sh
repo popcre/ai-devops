@@ -881,27 +881,32 @@ BODY="$(bash -c '. "$1"; extract_answer "$2"' _ "$TMP/extract.sh" "$TMP/good.jso
 check "the text above the verdict is still emitted" "printf '%s' \"\$BODY\" | grep -q 'finding one'"
 
 
-echo "== duplicate run refused (per-repo lock) =="
+echo "== duplicate run refused (per-review lock; decision 21, #401 Step 7A) =="
 UPSTREAM_ID='example.invalid/test/repo'
-LOCK_ID="$(printf '%s' "$UPSTREAM_ID" | sha256sum | cut -c1-16)"
-LOCK="$AI_KIMI_STATE_DIR/locks/repo--$LOCK_ID.lock.d"
+review_lock(){ printf '%s/locks/repo--%s.lock.d' "$AI_KIMI_STATE_DIR" "$(printf '%s|%s|%s' "$UPSTREAM_ID" "$AI_KIMI_CALLER" "$1" | sha256sum | cut -c1-16)"; }
+LOCK="$(review_lock r8)"
 mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "new:other" > "$LOCK/label"
 OUT="$(run new r8 --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
-[ $RC -ne 0 ] && ok "a second concurrent run is refused" || bad "a second concurrent run is refused"
-check "refusal names the active run" "printf '%s' \"\$OUT\" | grep -q 'already active'"
+[ $RC -ne 0 ] && ok "a second concurrent run of the same review is refused" || bad "a second concurrent run of the same review is refused"
+check "refusal names the active run" "printf '%s' \"\$OUT\" | grep -q 'already has a Kimi run active'"
+# No ceiling on same-provider reviews: live locks held by N other reviews in the
+# same repository never refuse an unrelated review.
+for other in busy-a busy-b busy-c; do L="$(review_lock "$other")"; mkdir -p "$L"; echo $$ > "$L/pid"; echo "review:$other" > "$L/label"; done
+OUT="$(run new r8-unrelated --prompt x 2>&1)"; for other in busy-a busy-b busy-c; do rm -rf "$(review_lock "$other")"; done
+check "three live same-provider reviews do not block an unrelated review" "! printf '%s' \"\$OUT\" | grep -Eq 'already has a Kimi run active|active in this repository'"
 CLONE="$TMP/equivalent-clone"; mkdir -p "$CLONE"; git -C "$CLONE" init -q; git -C "$CLONE" config user.name T; git -C "$CLONE" config user.email t@example.com
 git -C "$CLONE" remote add origin git@example.invalid:test/repo.git; printf 'x\n' > "$CLONE/a"; git -C "$CLONE" add a; git -C "$CLONE" commit -qm init
-mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:other-clone" > "$LOCK/label"
+LOCK="$(review_lock clone-lock)"; mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:other-clone" > "$LOCK/label"
 OUT="$(cd "$CLONE" && bash "$SCRIPT" new clone-lock --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
 [ $RC -ne 0 ] && ok "equivalent HTTPS and SSH remotes share one paid-review lock" || bad "equivalent HTTPS and SSH remotes share one paid-review lock"
 CASE_CLONE="$TMP/case-suffix-clone"; mkdir -p "$CASE_CLONE"; git -C "$CASE_CLONE" init -q; git -C "$CASE_CLONE" config user.name T; git -C "$CASE_CLONE" config user.email t@example.com; git -C "$CASE_CLONE" remote add origin https://EXAMPLE.INVALID/test/repo.GIT; printf x > "$CASE_CLONE/a"; git -C "$CASE_CLONE" add a; git -C "$CASE_CLONE" commit -qm init
-mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:case-suffix" > "$LOCK/label"; OUT="$(cd "$CASE_CLONE" && bash "$SCRIPT" new case-suffix --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
+LOCK="$(review_lock case-suffix)"; mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:case-suffix" > "$LOCK/label"; OUT="$(cd "$CASE_CLONE" && bash "$SCRIPT" new case-suffix --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
 [ "$RC" -ne 0 ] && ok "remote .git suffix normalization is case-insensitive" || bad "remote .git suffix normalization is case-insensitive"
 USER_CLONE="$TMP/arbitrary-ssh-user"; mkdir -p "$USER_CLONE"; git -C "$USER_CLONE" init -q; git -C "$USER_CLONE" config user.name T; git -C "$USER_CLONE" config user.email t@example.com; git -C "$USER_CLONE" remote add origin deploy@example.invalid:test/repo.git; printf x > "$USER_CLONE/a"; git -C "$USER_CLONE" add a; git -C "$USER_CLONE" commit -qm init
-mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:ssh-user" > "$LOCK/label"; OUT="$(cd "$USER_CLONE" && bash "$SCRIPT" new ssh-user --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
+LOCK="$(review_lock ssh-user)"; mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:ssh-user" > "$LOCK/label"; OUT="$(cd "$USER_CLONE" && bash "$SCRIPT" new ssh-user --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
 [ "$RC" -ne 0 ] && ok "SCP-style remotes accept arbitrary valid SSH usernames" || bad "SCP-style remotes accept arbitrary valid SSH usernames"
 AUTH_CLONE="$TMP/authenticated-https"; mkdir -p "$AUTH_CLONE"; git -C "$AUTH_CLONE" init -q; git -C "$AUTH_CLONE" config user.name T; git -C "$AUTH_CLONE" config user.email t@example.com; git -C "$AUTH_CLONE" remote add origin https://user@example.invalid/test/repo.git; printf x > "$AUTH_CLONE/a"; git -C "$AUTH_CLONE" add a; git -C "$AUTH_CLONE" commit -qm init
-mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:authenticated-https" > "$LOCK/label"; OUT="$(cd "$AUTH_CLONE" && bash "$SCRIPT" new authenticated-https --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
+LOCK="$(review_lock authenticated-https)"; mkdir -p "$LOCK"; echo $$ > "$LOCK/pid"; echo "review:authenticated-https" > "$LOCK/label"; OUT="$(cd "$AUTH_CLONE" && bash "$SCRIPT" new authenticated-https --prompt x 2>&1)"; RC=$?; rm -rf "$LOCK"
 [ "$RC" -ne 0 ] && ok "authenticated HTTPS remotes share the canonical paid-review lock" || bad "authenticated HTTPS remotes share the canonical paid-review lock"
 CALLS_BEFORE_PATH_CASE="$(wc -l < "$TMP/argv.txt")"; git -C "$REPO" remote set-url origin https://example.invalid/TEST/REPO.git
 OUT="$(run ask r1 --prompt 'path case must remain distinct' 2>&1)"; RC=$?

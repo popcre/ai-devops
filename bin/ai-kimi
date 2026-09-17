@@ -514,6 +514,11 @@ upstream_identity() {
   upstream_identity "$target" $((depth + 1)) "$visited|$physical"
 }
 review_lock_id() { printf '%s' "$1" | sha256sum | cut -c1-16; }
+# Decision 21 (#401 Step 7A): a review lock is keyed by the exact review
+# (upstream, caller, session name), never the whole repository, so any number
+# of independent Kimi reviews may run at once. Implementation keeps its
+# repository lock because it writes the shared checkout.
+review_work_lock_id() { review_lock_id "$1|$CALLER|$2"; }
 require_upstream_identity() {
   local identity
   identity="$(upstream_identity "$1")" || die "cannot identify this repository's shared upstream. Set origin to an unambiguous network repository; no paid Kimi review was started."
@@ -1357,9 +1362,9 @@ start_review_job() { # NAME [CONTINUE]
   if [ -f "$dir/job.json" ] && ! job_is_terminal "$dir/job.json"; then
     jq -r '.job_id' "$dir/job.json"; return 0
   fi
-  upstream="$(require_upstream_identity "$repo")"; lockid="$(review_lock_id "$upstream")"
+  upstream="$(require_upstream_identity "$repo")"; lockid="$(review_work_lock_id "$upstream" "$name")"
   repo_lock="$(repolock_path "$lockid")"
-  lock_acquire "$repo_lock" "review:$name" || die "another Kimi run is already active in this repository: $(lock_info "$repo_lock")"
+  lock_acquire "$repo_lock" "review:$name" || die "review '$name' already has a Kimi run active: $(lock_info "$repo_lock")"
   trap "lock_release '$repo_lock'" EXIT
   sid=""
   if [ "$cont" = 1 ]; then
@@ -1934,7 +1939,7 @@ start_session() { # start_session NAME MODE
   lockid="$rid"
   if [ "$mode" = review ]; then
     upstream="$(require_upstream_identity "$repo")"
-    lockid="$(review_lock_id "$upstream")"
+    lockid="$(review_work_lock_id "$upstream" "$name")"
   fi
   rid_lock="$(repolock_path "$lockid")"
   lock_acquire "$rid_lock" "$mode:$name" || die "another Kimi run is already active in this repository: $(lock_info "$rid_lock").
@@ -2050,7 +2055,7 @@ cmd_ask() {
   [ -n "$stored_upstream" ] || die "review session '$name' predates durable upstream binding and cannot be resumed safely. Start a new named Kimi review."
   current_upstream="$(require_upstream_identity "$repo")"
   [ "$current_upstream" = "$stored_upstream" ] || die "review session '$name' belongs to a different shared upstream. Restore its original origin or start a new named Kimi review; no provider call was made."
-  lockid="$(review_lock_id "$stored_upstream")"
+  lockid="$(review_work_lock_id "$stored_upstream" "$name")"
   sess_lock="$(lock_path "$rid" "$name")"; rid_lock="$(repolock_path "$lockid")"
   lock_acquire "$sess_lock" "ask:$name" || die "session '$name' already has a turn running: $(lock_info "$sess_lock")"
   if ! lock_acquire "$rid_lock" "ask:$name"; then

@@ -323,7 +323,7 @@ fi
 fixture_pid(){ [[ "${1:-}" =~ ^[1-9][0-9]*$ ]] && [ "$1" -gt 1 ]; }
 crash_recorded_worker(){ # SUPERVISOR PROVIDER EXPECTED_LOCK_LABEL
   local supervisor="$1" provider="$2" label="$3" dir worker='' rc=0
-  for dir in "$AI_QWEN_STATE_DIR"/locks/repo--*.lock.d; do
+  for dir in "$AI_QWEN_STATE_DIR"/locks/repo--*.lock.d "$AI_QWEN_STATE_DIR"/locks/review--*.lock.d; do
     [ -f "$dir/label" ] && [ "$(cat "$dir/label")" = "$label" ] || continue
     worker="$(cat "$dir/pid" 2>/dev/null | tr -d '\r\n')"; break
   done
