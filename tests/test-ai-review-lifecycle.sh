@@ -30,6 +30,9 @@ export AI_TEST_FRONT_LOG="$TMP/front.log"
 (cd "$R" && AI_CODEX_REVIEW_BIN="$FRONT_STUB" "$FRONT" codex final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789)
 check "approval front door forwards exact test and source options" \
   "printf '%s\n' final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789 | diff -u - '$AI_TEST_FRONT_LOG'"
+(cd "$R" && AI_CLAUDE_REVIEW_BIN="$FRONT_STUB" "$FRONT" claude final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789)
+check "approval front door forwards exact test and source options to Claude" \
+  "printf '%s\n' final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789 | diff -u - '$AI_TEST_FRONT_LOG'"
 
 PREFLIGHT="$TMP/preflight"
 cat > "$PREFLIGHT" <<'EOF'
