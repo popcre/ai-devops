@@ -83,8 +83,10 @@ check 'the required closure delegates to the regression-tested evaluator' \
 check 'the required closure checks out its evaluator before running it' \
   "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | awk '/uses: actions\/checkout@/{checkout=NR} /bash tools\/ci\/verify-closure.sh/{run=NR} END {exit !(checkout && run && checkout < run)}'"
 
-check 'manifest declares 80 unique Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -eq 80 ] && [ \"\$(jq '.bash | unique | length' '$manifest')\" -eq 80 ]"
-check 'manifest declares 18 unique PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -eq 18 ] && [ \"\$(jq '.powershell | unique | length' '$manifest')\" -eq 18 ]"
+# Counts are derived from discovery (checked exactly below), never hard-coded:
+# a literal count went stale on every new suite and failed 11 of 23 runs.
+check 'manifest declares unique, non-empty Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -gt 0 ] && [ \"\$(jq '.bash | length' '$manifest')\" -eq \"\$(jq '.bash | unique | length' '$manifest')\" ]"
+check 'manifest declares unique, non-empty PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -gt 0 ] && [ \"\$(jq '.powershell | length' '$manifest')\" -eq \"\$(jq '.powershell | unique | length' '$manifest')\" ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'
 check 'Windows groups are unique subsets of Bash discovery' \
