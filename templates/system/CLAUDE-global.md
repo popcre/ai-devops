@@ -205,6 +205,8 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - **GPT-5.6 uses `low` or `medium` reasoning only**—never `high`, `none`, or
   `minimal`. Set it explicitly and verify the run header. Split a harder task;
   do not raise the setting.
+- Before requesting the first independent review, self-audit the whole class of each risk (all sibling paths,
+  links, trust points) and fix them together; when a review rejects, fix the whole class, not just the instance.
 - Prefer permanent, fewest-moving-parts fixes. Make fallbacks visible, keep
   configurable values out of code, test created code, and verify UI changes
   visually before reporting completion.

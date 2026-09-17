@@ -618,7 +618,11 @@ Structure your reply in this order:
    If your run is cut short, this is what the orchestrator gets.
    A provisional verdict cannot approve a change on its own; it exists so that
    work can continue instead of waiting blind.
-2. **Findings** — each with the file and line that evidences it.
+2. **Findings** — report EVERY finding you can find in this single pass, not
+   just the first one: an exhaustive list grouped by severity, each with the
+   file and line that evidences it. Before you return, look for sibling issues
+   of the same class elsewhere in the change (for example other symlink or path
+   escapes, other places that trust a binary or input) and report those too.
 3. **Final verdict** — last, under a literal \`## Verdict\` heading.
 
 Allowed verdict words: **APPROVE**, **REJECT**, **BLOCKED**.
