@@ -20,9 +20,9 @@ The original refuse-bundle work is complete. The source-rule follow-up is implem
 | 5 | Keep routers pointing here; merge; install globals | ✅ complete | 2026-09-16 | PR #515 merged as `837fe41d`. Installed Claude and Codex globals on edge-dev contain `one unproven live-behavior outcome`. #511 closed. |
 | 6 | Prevent later live-proof dumps at the source | 🟡 partial | 2026-09-17 | PR #520 adds `Never save several unproven steps` to both globals and the handover rule. Not yet on `origin/main` or installed. |
 | 7 | Require one live-proof owner when code lands | 🟡 partial | 2026-09-17 | PR #520 adds `opened when that code landed` to both plan-writer sources and guards both new rules. Not yet on `origin/main`. |
-| 8 | Review, merge, install, and close | ⬜ open | 2026-09-17 | Rebase and focused validation are owned by the PR repair; exact-head independent review, merge queue, installed proof, and issue close remain. |
+| 8 | Review, merge, install, and close | 🟡 partial | 2026-09-17 | Rebased focused validation passed: required globals 1/1, context enforcement 11/11, strict audit 0 parity mismatches, Markdown reachability 1/1. Exact-head independent review, merge queue, installed proof, and issue close remain. |
 
-**Fresh-session starting point:** Step 8 on PR #520 after its rebased head passes focused validation. Do not re-implement Steps 1–7. 3027 leftover proofs are not this plan’s work.
+**Fresh-session starting point:** Step 8 exact-head independent review on PR #520. Do not re-implement Steps 1–7. 3027 leftover proofs are not this plan’s work.
 
 ---
 
@@ -291,6 +291,8 @@ Add no other tests beyond the existing phrase and parity guards.
 - Do not run a local full Windows reviewer series. Check `bin/ai-test-local --check-collision` before any local full suite; a busy self-hosted runner on this host is a stop for that suite only.
 
 **Ran 2026-09-16:** phrase test PASS; wrap-fail then restore PASS; `python tools/context-audit/context-audit.py --root . --strict` 0 parity mismatches. Pre-existing always-loaded budget warning remained (42341 vs 12449); one bullet added; no other rules deleted. First PR #515 Windows section 3 failed because `$parityLines` lacked the new phrase — not a 30-minute runner timeout. Fixture fix then passed.
+
+**Ran 2026-09-17 on rebased PR #520:** required-globals phrase test PASS (1); PowerShell context enforcement PASS (11); strict context audit PASS with 0 parity mismatches and 0 broken links; Markdown reachability PASS (1). The pre-existing context-budget and legacy-handoff warnings remain warnings and were not introduced by this change.
 
 ## 11. Constraints, standing rules, and gotchas in force
 
