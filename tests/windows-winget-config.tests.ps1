@@ -5,6 +5,7 @@ $bootstrap = Join-Path $root 'bin\bootstrap-windows-dev.ps1'
 $verify = Join-Path $root 'bin\verify-windows-dev.ps1'
 $exceptions = Join-Path $root 'bin\reconcile-windows-package-exceptions.ps1'
 $providerClis = Join-Path $root 'bin\install-windows-ai-provider-clis.ps1'
+$smartAppControl = Join-Path $root 'bin\reconcile-smart-app-control.ps1'
 $remoteAccess = Join-Path $root 'bin\configure-windows-bootstrap-access.ps1'
 $ansibleController = Join-Path $root 'bin\configure-wsl-ansible-controller.ps1'
 $machineSetup = Join-Path $root 'bin\setup-machine.ps1'
@@ -31,7 +32,7 @@ Assert ($yaml -match 'Anthropic\.ClaudeCode') 'configuration must include Claude
 Assert ($yaml -match '9PLM9XGG6VKS') 'configuration must include the Codex desktop Store app'
 Assert ($yaml -notmatch '(?i)(ops_[A-Za-z0-9]|password\s*:|token\s*:)') 'configuration appears to contain a secret'
 
-foreach ($script in @($bootstrap,$verify,$exceptions,$providerClis,$remoteAccess,$ansibleController)) {
+foreach ($script in @($bootstrap,$verify,$exceptions,$providerClis,$smartAppControl,$remoteAccess,$ansibleController)) {
   Assert (Test-Path $script) "$script is missing"
   $tokens=$null; $errors=$null
   [void][Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
@@ -46,12 +47,20 @@ Assert ($bootstrapText -match 'TestOnly') 'bootstrap must expose a non-installin
 Assert ($bootstrapText.Contains("'merge', '--ff-only', 'origin/main'")) 'bootstrap must update without rewriting local history'
 Assert ($bootstrapText.Contains("'fetch', 'origin', 'main'")) 'bootstrap must fetch the canonical branch before machine changes'
 Assert ($bootstrapText -match 'reconcile-windows-package-exceptions\.ps1') 'bootstrap must own non-WinGet package exceptions'
+Assert ($bootstrapText -match 'reconcile-smart-app-control\.ps1') 'bootstrap must reconcile Smart App Control for runner compatibility'
+Assert ($bootstrapText -match 'GitHubRunnerHost') 'irreversible Smart App Control change must require explicit runner-host designation'
+Assert ($bootstrapText -match "Smart App Control' 'SKIPPED'") 'ordinary Windows setup must preserve Smart App Control'
+$smartAppText = Get-Content -Raw $smartAppControl
+Assert ($smartAppText -match 'VerifiedAndReputablePolicyState') 'Smart App Control reconciliation must use the canonical policy state'
+Assert ($smartAppText -match 'reg\.exe export') 'Smart App Control reconciliation must back up registry state before mutation'
+Assert ($smartAppText -match 'CiToolPath.*-r') 'Smart App Control reconciliation must reload the active Code Integrity policy'
+Assert ($smartAppText -match 'TestOnly') 'Smart App Control reconciliation must expose a non-mutating verification path'
 Assert ($bootstrapText -match 'setup.*-SkipRailwayCliReconcile') 'bootstrap must not install Railway twice'
 Assert ($exceptionsText -match '@railway/cli@5\.43\.1') 'package exceptions must install the pinned official Railway CLI'
 Assert ($machineSetupText -match "https://mcp\.railway\.com") 'machine setup must configure Railway hosted MCP for Codex'
 Assert ($machineSetupText -match "args = @\('mcp', 'proxy'\)") 'Codex must use Railway CLI authenticated proxy'
 Assert ($machineSetupText -match '(?s)reconciling Railway CLI via npm.*npm\.cmd install --global ''@railway/cli@5\.43\.1''') 'direct machine setup must reconcile the pinned Railway CLI on every run'
-Assert ($machineSetupText -match '\$McpServers\["railway"\]') 'Railway MCP must be shared with Claude consumers'
+Assert ($machineSetupText -match '\$McpServerCatalog\["railway"\]') 'Railway MCP must be present in the shared server catalog'
 Assert ($bootstrapText -match 'install-windows-ai-provider-clis\.ps1') 'bootstrap must install Grok, Kimi, and Qwen CLIs'
 Assert ($bootstrapText -match 'configure-windows-bootstrap-access\.ps1') 'bootstrap must own first-connection Tailscale/OpenSSH setup'
 Assert ($bootstrapText -match 'configure-wsl-ansible-controller\.ps1') 'bootstrap must own WSL Ansible controller setup'

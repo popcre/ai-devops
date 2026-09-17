@@ -34,6 +34,17 @@ This split is intentional:
 - WinGet Configuration and DSC own ordinary packages and non-secret Windows
   settings. Every recovery-critical package is pinned to the reviewed version
   in `config/tool-versions.json`; re-running repairs drift to that version.
+- `bin/reconcile-smart-app-control.ps1` owns the runner compatibility state.
+  Only an explicitly designated runner host uses
+  `bootstrap-windows-dev.ps1 -GitHubRunnerHost`; ordinary Windows setup leaves
+  the irreversible security state unchanged. The runner path backs up the Code
+  Integrity policy registry and active policy files before setting Smart App
+  Control to Off, then runs `CiTool.exe -r` so the active policy reloads as
+  [Microsoft requires](https://learn.microsoft.com/windows/security/application-security/application-control/app-control-for-business/appcontrol).
+  Windows provides no supported
+  arbitrary local allowlist, and Off cannot be re-enabled without a Windows
+  reset or reinstall. Trusted code signing or an isolated runner VM/host are
+  the alternatives when that tradeoff is unacceptable.
 - `setup-machine.ps1` owns skills, managed dotfiles, SSH aliases and keys, MCP
   launchers, and 1Password references. Secrets are resolved only at runtime and
   are never placed in the WinGet file or Git.
@@ -109,6 +120,10 @@ pwsh -NoProfile -File .\bin\bootstrap-windows-dev.ps1 -TestOnly -SkipMachineSetu
 pwsh -NoProfile -File .\bin\verify-windows-dev.ps1
 pwsh -NoProfile -File .\tests\windows-winget-config.tests.ps1
 ```
+
+On an intentionally dedicated GitHub runner host, use
+`-GitHubRunnerHost` on both the apply run and its `-TestOnly` second run. That
+switch is the explicit acknowledgement of the irreversible security tradeoff.
 
 `-TestOnly` fetches and proves the checkout is clean canonical `main` exactly
 equal to `origin/main`, then asks WinGet/DSC to test desired state; it does not
