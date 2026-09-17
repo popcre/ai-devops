@@ -9,13 +9,13 @@
 |---|---|---|
 | 0. Reconcile Grok, GLM, and two execution-session reviews | ✅ done 2026-08-27 | [`plan_must_address.md`](plan_must_address.md); [`docs/work-claims-plan-review-2026-08-27.md`](docs/work-claims-plan-review-2026-08-27.md); Grok 4.6 closing verdict `APPROVE` |
 | 1. Stabilize and shorten the existing merge queue before adding claim checks | ✅ done 2026-09-08 | Reviewer determinism landed as `08269a1f10ec349c55a17a5afddf9c9255b7dcc7` with `tests/verification/reviewer-reliability/issue-160-determinism.md`; fast change-aware CI landed as `9d3dd8af9b9cacbc56cd06b75fcf584e1e64ec50` with `tests/verification/repo-throughput/issue-161-focused.md`. Start at Step 2. |
-| 2. Qualify the Git-ref primitive on Windows and Ubuntu | ⬜ open | §9.2; target `tests/verification/work-claims/<UTC>/ref-qualification.md` |
+| 2. Qualify the Git-ref primitive on Windows and Ubuntu | ✅ done 2026-09-17 | [`tests/verification/work-claims/2026-09-17T175505Z/ref-qualification.md`](tests/verification/work-claims/2026-09-17T175505Z/ref-qualification.md) proves the custom namespace on both platforms and zero surviving disposable refs. |
 | 3. Build the task-only v1 command and owner-extensible paths | ⬜ open | Target: `bin/ai-work-claim`, `config/work-claim-policy.json` |
 | 4. Add deterministic concurrency tests and an advisory PR guard | ⬜ open | Target: `tests/test-ai-work-claim.sh`, advisory workflow |
 | 5. Route, document, install, and qualify v1 | ⬜ open | Target: globals, `docs/work-claims.md`, restore/install evidence |
 | 6. Land v1 and measure its value for 30 days | ⬜ open | Target: exact-head review, merged SHA, baseline/follow-up measurement artifact |
 
-**Fresh-session starting point:** Step 2. The reviewer-determinism and CI-cost prerequisites are complete. Before each phase, fetch `origin/main`, read this STATUS table and all downstream steps, recheck issues #89/#131 and ruleset `21564317`, and preserve unrelated dirty work.
+**Fresh-session starting point:** Step 3. The authority and portability gate passed with the evidence linked above. Before each phase, fetch `origin/main`, read this STATUS table and all downstream steps, recheck issues #89/#131 and ruleset `21564317`, and preserve unrelated dirty work.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
