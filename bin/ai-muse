@@ -245,12 +245,25 @@ prepare(){
   HEAD_SHA="$(git -C "$REVIEW_DIR" rev-parse HEAD)"; PACKET_HASH="$(cat "$PACKET_DIR/MANIFEST.sha256")"
 }
 load_key(){
-  need op; local candidate="$STATE/credential.lock.d" owner token attempt; token="$$-$RANDOM-$(date +%s)"; mkdir -p "$STATE"
-  for attempt in 1 2 3; do
-    if mkdir "$candidate" 2>/dev/null; then printf '%s\n' "$token" > "$candidate/token"; printf '%s\n' "$$" > "$candidate/pid"; CRED_LOCK="$candidate"; CRED_TOKEN="$token"; break; fi
-    owner="$(cat "$candidate/pid" 2>/dev/null || true)"; case "$owner" in ''|*[!0-9]*) if [ -n "$(find "$candidate" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ]; then mv "$candidate" "$candidate.stale.$token" 2>/dev/null && rm -rf "$candidate.stale.$token"; else sleep 1; fi;; *) kill -0 "$owner" 2>/dev/null && sleep 1 || { mv "$candidate" "$candidate.stale.$token" 2>/dev/null && rm -rf "$candidate.stale.$token"; };; esac
+  # Serialize every 1Password read behind one machine-wide lock. Concurrent
+  # turns wait their turn (bounded, with backoff) instead of refusing.
+  need op; local candidate="$STATE/credential.lock.d" owner token budget deadline delay=1 waited=0; token="$$-$RANDOM-$(date +%s)"; mkdir -p "$STATE"
+  budget="${AI_MUSE_CREDENTIAL_WAIT_SECONDS:-120}"; case "$budget" in ''|*[!0-9]*) die 'AI_MUSE_CREDENTIAL_WAIT_SECONDS must be a whole number of seconds.';; esac
+  deadline=$(( $(date +%s) + budget ))
+  while :; do
+    if mkdir "$candidate" 2>/dev/null; then printf '%s
+' "$token" > "$candidate/token"; printf '%s
+' "$$" > "$candidate/pid"; CRED_LOCK="$candidate"; CRED_TOKEN="$token"; break; fi
+    owner="$(cat "$candidate/pid" 2>/dev/null || true)"
+    case "$owner" in
+      ''|*[!0-9]*) if [ -n "$(find "$candidate" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ]; then ! mv "$candidate" "$candidate.stale.$token" 2>/dev/null || { rm -rf "$candidate.stale.$token"; continue; }; fi;;
+      *) if ! kill -0 "$owner" 2>/dev/null; then ! mv "$candidate" "$candidate.stale.$token" 2>/dev/null || { rm -rf "$candidate.stale.$token"; continue; }; fi;;
+    esac
+    [ "$(date +%s)" -lt "$deadline" ] || die "1Password credential lock still held by another Muse turn after ${budget}s; no key was read. Retry the Muse turn."
+    [ "$waited" -eq 1 ] || { printf 'Muse: waiting for another turn to finish reading 1Password...
+' >&2; waited=1; }
+    sleep "$delay"; [ "$delay" -ge 4 ] || delay=$((delay * 2))
   done
-  [ -n "$CRED_LOCK" ] || die '1Password is busy; retry the Muse turn.'
   MODEL_API_KEY="$(op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"; release_credential_lock; [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
 }
 tree_state(){
