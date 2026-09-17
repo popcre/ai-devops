@@ -65,6 +65,16 @@ protect_windows_path(){
   AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$path")" AI_DEVOPS_PRIVATE_KIND="$kind" \
     "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; if ($env:AI_DEVOPS_PRIVATE_KIND -eq "directory") { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory } else { Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET }' >/dev/null
 }
+protect_windows_dirs(){
+  local ps helper d targets=""
+  [ -n "${SYSTEMROOT:-}" ] || return 0
+  command -v cygpath >/dev/null 2>&1 || return 1
+  ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"; [ -n "$ps" ] || return 1
+  helper="$ROOT/bin/windows-private-file.ps1"; [ -f "$helper" ] || return 1
+  for d in "$@"; do targets+="$(cygpath -w "$d")"$'
+'; done
+  AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGETS="$targets"     "$ps" -NoProfile -ExecutionPolicy Bypass -Command '$ErrorActionPreference = "Stop"; . $env:AI_DEVOPS_PRIVATE_HELPER; foreach ($t in ($env:AI_DEVOPS_PRIVATE_TARGETS -split "`n" | Where-Object { $_ })) { Protect-AiDevOpsPrivatePath -Path $t -Directory }' >/dev/null
+}
 secure_review_directory(){
   local dir="$1"
   chmod 700 "$dir" 2>/dev/null || return 1
@@ -155,12 +165,8 @@ runtime_env(){
     export XDG_STATE_HOME="$PROFILE_HOME/.local/state/ai-devops/muse-code"
     export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/muse-code"
     mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-    local store
-    for store in "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"; do
-      [ ! -f "$store/.ai-devops-private-store-v1" ] || continue
-      { chmod 700 "$store" && protect_windows_path "$store" directory && printf 'private store enforced
-' > "$store/.ai-devops-private-store-v1"; } || die "could not make Muse Code store private: $store"
-    done
+    # Enforced on every use (one PowerShell call), never remembered: permissions can drift.
+    chmod 700 "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" && protect_windows_dirs "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" || die 'could not make the Muse Code stores private.'
     return 0
   fi
   export XDG_CONFIG_HOME="$CFG/opencode-xdg"
@@ -515,7 +521,7 @@ require_engine_model(){ # older same-engine models stay deletable; only a sessio
 }
 cmd_transcript(){
   local m sid; m="$(find_meta "$1")"; require_engine_model "$m" "$1"; runtime_env; sid="$(jq -r .session_id "$m")"
-  if [ "$ENGINE" = muse-code ]; then "$BIN" export --session "$sid" --out "$RUN_TMP/transcript.json" >/dev/null && cat "$RUN_TMP/transcript.json"; return; fi
+  if [ "$ENGINE" = muse-code ]; then local out="$XDG_STATE_HOME/export-$$.json"; rm -f "$out"; "$BIN" export --session "$sid" --out "$out" >/dev/null && cat "$out"; local rc=$?; rm -f "$out"; return "$rc"; fi
   "$BIN" export "$sid"
 }
 muse_code_delete_session(){ # the CLI has no delete command; remove only this exact private session store
