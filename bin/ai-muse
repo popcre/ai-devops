@@ -243,11 +243,8 @@ prepare(){
   "$PACKET" verify "$PACKET_DIR" --identity "$identity" >/dev/null
   rm -f "$identity"
   HEAD_SHA="$(git -C "$REVIEW_DIR" rev-parse HEAD)"; PACKET_HASH="$(cat "$PACKET_DIR/MANIFEST.sha256")"
-  # Muse otherwise never sees the shared manifest and its answer contract.
-  printf '
-
-Read %s/MANIFEST.md first for the exact change evidence, but keep the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning.
-' "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
+  # Muse keeps its own verdict contract, so only the all-findings rule is added.
+  printf '\n\nReturn ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning.\n' >> "$prompt"
 }
 load_key(){
   need op; local candidate="$STATE/credential.lock.d" owner token attempt; token="$$-$RANDOM-$(date +%s)"; mkdir -p "$STATE"
