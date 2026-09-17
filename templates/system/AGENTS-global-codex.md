@@ -166,6 +166,12 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 - **Label every shared-db ticket.** Whenever a `u2giants/shared-db` issue number
   appears in a reply, say beside it whether it is orchestrator work (it changes
   database structure) or non-orchestrator work (it does not).
+- **Sign everything posted to GitHub.** End every issue, pull request, comment,
+  and review body you post with one line naming the chat that wrote it:
+  `Posted by <Claude|Codex> chat <id> on <machine>`, where `<id>` is
+  `$CLAUDE_CODE_SESSION_ID` (Claude) or `$CODEX_THREAD_ID` (Codex). If the ID
+  is empty, write `unknown` rather than omit the line. When editing a body,
+  keep existing signatures and add yours.
 - **Shared-db orchestrator sessions only:** when opening or running the sole
   orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
   queue, reviewer, and owner-decision rules apply only in that context and stay
