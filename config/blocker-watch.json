@@ -1,0 +1,45 @@
+{
+  "_comment": "ai-blocker-watch settings. repos: where closed issues are propagated to the issues they were blocking. harness: how a waiting session is resumed; {session}, {cwd}, {prompt}, {home} and {zcode_builtin} (newest ZCode provider runtime file) are substituted per argument. ZCode headless needs a one-time CLI sign-in (zcode.cjs login) before its wakes succeed. Override the whole file with AI_BLOCKER_WATCH_CONFIG.",
+  "repos": [
+    "u2giants/shared-db",
+    "popcre/ai-devops"
+  ],
+  "first_scan_lookback_minutes": 60,
+  "max_wake_attempts": 3,
+  "wake_timeout_minutes": 45,
+  "schedule_every_minutes": 10,
+  "harness": {
+    "claude": [
+      "claude",
+      "-p",
+      "--resume",
+      "{session}",
+      "--permission-mode",
+      "bypassPermissions",
+      "{prompt}"
+    ],
+    "codex": [
+      "codex",
+      "exec",
+      "resume",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "{session}",
+      "{prompt}"
+    ],
+    "zcode": [
+      "env",
+      "ELECTRON_RUN_AS_NODE=1",
+      "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE={zcode_builtin}",
+      "ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE=C:/Program Files/ZCode/resources/config/provider/zcode-builtin.json",
+      "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE={home}/.zcode/v2/provider_config.json",
+      "C:/Program Files/ZCode/ZCode.exe",
+      "C:/Program Files/ZCode/resources/glm/zcode.cjs",
+      "--resume",
+      "{session}",
+      "--cwd",
+      "{cwd}",
+      "--prompt",
+      "{prompt}"
+    ]
+  }
+}

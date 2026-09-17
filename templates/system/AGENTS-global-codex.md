@@ -211,6 +211,14 @@ threshold passes diagnose the stall — read the log, name the hanging step —
 instead of waiting on. This applies to every dispatch instruction you write
 for a subagent: include it, in these words, every time.
 
+The one exception is a wait on another GitHub issue that has its own owner
+(a shared-db ticket, a gate bug, another repository's work). Run
+`ai-blocker-watch wait <owner/repo#N> --for <owner/repo#M> --note "<what to
+do next>"`, where N is the blocker and M is the issue you are working on, then
+end the turn. The machine watcher records GitHub's "blocked by" link, tells M
+when N closes, and resumes this exact session (Claude, Codex, or ZCode). Never
+hold such a wait open for days.
+
 ## Model, engineering, and Git rules
 
 - **GPT-5.6 uses `low` or `medium` reasoning only**—never `high`, `none`, or
