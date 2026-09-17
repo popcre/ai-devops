@@ -63,6 +63,8 @@ check 'wrapper chooses and records a UUID session identity' "cd '$REPO' && eval 
 check 'follow-up resumes the exact recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask first --prompt again\" | grep -qx remembered && grep -qx \"\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .session_id)\" '$TMP/provider-args'"
 check 'report records usage as unavailable, not zero' "grep -q 'engine-usage-not-reported' '$REPO'/.ai/reviews/muse-first-*.md"
 check 'transcript exports the recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' transcript first\" | jq -e '.sessions[0].session_id|length==36'"
+check 'transcript under the wrong engine is refused' "cd '$REPO' && ! eval \"$ENV AI_MUSE_ENGINE=opencode '$SCRIPT' transcript first\" 2>&1 | grep -q session_id"
+check 'delete under the wrong engine is refused and keeps the session' "cd '$REPO' && ! eval \"$ENV AI_MUSE_ENGINE=opencode '$SCRIPT' delete first\" && eval \"$ENV '$SCRIPT' show first\" | jq -e .session_id"
 check 'delete removes exactly the private session store' "cd '$REPO' && sid=\"\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .session_id)\" && test -d '$STORE'/\"\$sid\" && eval \"$ENV '$SCRIPT' delete first\" && test ! -e '$STORE'/\"\$sid\""
 check 'provider failure is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' new f1 --prompt test\""
 check 'malformed output is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=malformed '$SCRIPT' new f2 --prompt test\""
