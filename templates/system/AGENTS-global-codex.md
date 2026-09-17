@@ -230,6 +230,16 @@ end the turn. The machine watcher records GitHub's "blocked by" link, tells M
 when N closes, and resumes this exact session (Claude, Codex, or ZCode). Never
 hold such a wait open for days.
 
+A blocker issue gets an owner at birth, and that owner is you. When you open
+an issue whose purpose is to block other work — a gate bug, a shared-db
+handover, any dependency another session will wait on — either assign
+yourself (or the session that will own it) and say so in the issue, or hand it
+to a named queue owner with an `owner:` line in the issue body. Never leave it
+unowned: the watcher alarms on open blockers that have no assignee, no
+`owner:` line, no open linked pull request, and no activity for a day, because
+an unowned blocker stalls every session behind it. A line starting `owner:` in
+the body or a comment is the machine-readable marker of who owns it.
+
 ## Model, engineering, and Git rules
 
 - **GPT-5.6 uses `low` or `medium` reasoning only**—never `high`, `none`, or

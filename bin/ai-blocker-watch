@@ -7,7 +7,8 @@
 # parent resumed only if one session happened to remember it. Sessions in
 # Claude, Codex and ZCode sat open for days not knowing their blocker had closed.
 #
-# Two mechanisms, both driven by `tick` (run every few minutes by `schedule`):
+# Three mechanisms. `tick` (run every few minutes by `schedule`) drives all of
+# them; the alarm part is interval-gated so a tick stays cheap:
 #   1. Propagation. Blocking is recorded as GitHub's native "blocked by"
 #      dependency. When an issue in a configured repo closes, every OPEN issue
 #      it was blocking gets one comment naming the closed blocker. Closing that
@@ -16,6 +17,13 @@
 #      ID and directory. When its blocker closes, the watcher resumes that exact
 #      session headlessly (claude -p --resume / codex exec resume /
 #      zcode --resume) with a prompt to recheck and continue.
+#   3. Unowned-blocker alarm. A blocker nobody owns stalls every session behind
+#      it. Each alarm scan finds OPEN issues that block another OPEN issue yet
+#      have no assignee, no `owner:` line, no open linked pull request and no
+#      activity (ignoring this tool's own comments) for more than
+#      alarm_stall_hours, leaves ONE marked comment asking for an owner, and
+#      lists them in a daily digest issue in alarm_digest_repo — blockers
+#      holding up a chain alarm_depth_priority or more levels deep first.
 #
 # Usage:
 #   ai-blocker-watch wait <owner/repo#N> [--for <owner/repo#M>] [--note TEXT]
@@ -27,10 +35,12 @@
 #   ai-blocker-watch list
 #   ai-blocker-watch cancel <wait-id>
 #   ai-blocker-watch tick [--dry-run]
+#   ai-blocker-watch alarm [--dry-run]      scan for unowned blockers now
 #   ai-blocker-watch schedule | unschedule      (Windows Task Scheduler)
 #
-# tick exits non-zero when any propagation or wake failed, so a scheduled run
-# that did not do its work is visible. Failed wakes retry on later ticks up to
+# tick exits non-zero when any propagation, wake or alarm scan failed, so a
+# scheduled run that did not do its work is visible. Finding stalled unowned
+# blockers is NOT a failure. Failed wakes retry on later ticks up to
 # max_wake_attempts, then stay in state "failed" for a human.
 #
 # Environment:
@@ -51,6 +61,7 @@ HOME_DIR="${AI_BLOCKER_WATCH_HOME:-${HOME:?HOME is unavailable}/.ai-devops/block
 CONFIG="${AI_BLOCKER_WATCH_CONFIG:-$TOOL_ROOT/config/blocker-watch.json}"
 GH="${AI_BLOCKER_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
 WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
+LAST_ALARM="$HOME_DIR/last-alarm"
 LOGS="$HOME_DIR/logs"
 command -v jq >/dev/null || die "jq is required"
 # Windows jq and gh builds can end lines with CR; strip it so values compare cleanly.
@@ -196,16 +207,202 @@ wake(){ # wake <wait file>
   fi
 }
 
-cmd_tick(){
-  [ "${1:-}" != --dry-run ] || DRY=1
+# --- alarm: unowned open blockers (#550) ------------------------------------
+# A blocker nobody owns stalls every session behind it. Each scan finds OPEN
+# issues that block another OPEN issue yet have no assignee, no `owner:` line,
+# no open linked pull request and no activity (ignoring this tool's own
+# comments) for more than alarm_stall_hours, leaves ONE marked comment asking
+# for an owner, and lists them in a daily digest issue in alarm_digest_repo —
+# blockers holding up a chain alarm_depth_priority or more levels deep first.
+# Stalls are findings, not failures: only a failed read or post fails the tick.
+cfgd(){ local v; v="$(cfg "$1")"; if [ "$v" != null ] && [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "$2"; fi; }
+alarm_on(){ [ "$(cfgd .alarm_enabled true)" = true ]; }
+PARENTS_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number blockedBy(first:50){nodes{number state title repository{nameWithOwner} assignees(first:10){totalCount}}}}}}}'
+ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){updatedAt createdAt body comments(last:30){nodes{body createdAt}} timelineItems(first:50,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{... on PullRequest{number state}}}}} blocking(first:50){nodes{number state repository{nameWithOwner}}}}}}'
+declare -A ACACHE; AGQL=0
+issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node budget, 2 failed
+  local repo="$1" n="$2" out key="$1#$2"
+  [ -n "${ACACHE[$key]:-}" ] && { printf '%s' "${ACACHE[$key]}"; return 0; }
+  [ "$AGQL" -lt "$(cfgd .alarm_max_nodes 40)" ] || return 1
+  AGQL=$((AGQL+1))
+  out="$(gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || return 2
+  printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository.issue != null)' >/dev/null || return 2
+  ACACHE[$key]="$out"; printf '%s' "$out"
+}
+depth_of(){ # depth_of <owner/repo> <n> <seen>: longest open chain this issue holds up; best effort
+  local repo="$1" n="$2" seen="$3" j rc d best=0 kr kn st key
+  key="$repo#$n"
+  case ",$seen," in *",$key,"*) printf '%s' 1; return 0 ;; esac
+  j="$(issue_json "$repo" "$n")"; rc=$?
+  if [ "$rc" -eq 1 ]; then note "alarm: node budget reached while measuring the chain behind $key"; printf '%s' 1; return 0; fi
+  [ "$rc" -eq 0 ] || { printf '%s' 1; return 0; }
+  while IFS=$'\t' read -r kr kn st; do
+    [ "$st" = OPEN ] || continue
+    d="$(depth_of "$kr" "$kn" "$seen,$key")"
+    [ "$d" -gt "$best" ] && best="$d"
+  done < <(printf '%s' "$j" | jq -r '.data.repository.issue.blocking.nodes[] | [.repository.nameWithOwner, (.number|tostring), .state] | @tsv')
+  printf '%s' "$((best+1))"
+}
+
+alarm_scan(){ # alarm_scan <dry 0|1>
+  local dry="$1" start repo out pages cursor cutoff afail=0
+  local pr pn kr kn ac ti k key j rc marker pr_open alarmed lastact la_ep
+  start="$(now_iso)"
+  ACACHE=(); AGQL=0
+  local -A seen=() sttl=() spar=() stall=() sage=() salarmed=() sdepth=() sact=()
+  cutoff="$(date -u -d "-$(cfgd .alarm_stall_hours 24) hours" +%Y-%m-%dT%H:%M:%SZ)"
+  # Pass 1: one GraphQL page walk per repo collects every OPEN blocker of an
+  # OPEN issue (the parent scan gives assignees for free; owned ones drop out).
+  for repo in $(cfg '.repos[]'); do
+    pages=0; cursor=""
+    while :; do
+      pages=$((pages+1))
+      if [ "$pages" -gt 10 ]; then note "alarm: $repo has more open issues than one scan reads (1000)"; afail=1; break; fi
+      if [ -n "$cursor" ]; then
+        out="$(gh_api graphql -f query="$PARENTS_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || { note "alarm: could not list open issues in $repo"; afail=1; break; }
+      else
+        out="$(gh_api graphql -f query="$PARENTS_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || { note "alarm: could not list open issues in $repo"; afail=1; break; }
+      fi
+      printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository != null)' >/dev/null || { note "alarm: unreadable answer from $repo"; afail=1; break; }
+      while IFS=$'\t' read -r pr pn kr kn ac ti; do
+        [ -n "$kr" ] || continue
+        [ "$ac" -gt 0 ] && continue # an assignee is an owner; nothing further to check
+        key="$kr#$kn"
+        if [ -z "${seen[$key]+set}" ]; then seen[$key]=1; sttl[$key]="$ti"; fi
+        spar[$key]="${spar[$key]:-}$pr#$pn "
+      done < <(printf '%s' "$out" | jq -r --arg pr "$repo" '.data.repository.issues.nodes[] | .number as $p | .blockedBy.nodes[] | select(.state=="OPEN") | [$pr, ($p|tostring), .repository.nameWithOwner, (.number|tostring), (.assignees.totalCount|tostring), .title] | @tsv')
+      if [ "$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.hasNextPage')" = true ]; then
+        cursor="$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.endCursor')"; continue
+      fi
+      break
+    done
+  done
+  # Pass 2: per unassigned candidate, one cached query decides owner marker,
+  # open linked pull request, prior alarm comment, and real last activity.
+  for key in "${!seen[@]}"; do
+    kr="${key%#*}"; kn="${key#*#}"
+    j="$(issue_json "$kr" "$kn")"; rc=$?
+    if [ "$rc" -eq 1 ]; then note "alarm: node budget reached before $key; raise alarm_max_nodes"; afail=1; continue; fi
+    if [ "$rc" -ne 0 ]; then note "alarm: could not read $key"; afail=1; continue; fi
+    marker="$(printf '%s' "$j" | jq -r '[(.data.repository.issue.comments.nodes[].body // ""), (.data.repository.issue.body // "")] | join("\n") | test("(?im)^[[:space:]]*owner[[:space:]]*[:=]")')"
+    [ "$marker" = true ] && continue
+    pr_open="$(printf '%s' "$j" | jq -r '[.data.repository.issue.timelineItems.nodes[].source.state] | any(. == "OPEN")')"
+    [ "$pr_open" = true ] && continue
+    alarmed="$(printf '%s' "$j" | jq -r --arg k "$key" 'any(.data.repository.issue.comments.nodes[].body; contains("ai-blocker-watch:unowned:" + $k))')"
+    # updatedAt counts this tool's own alarm comment as activity; look past it.
+    lastact="$(printf '%s' "$j" | jq -r '
+      .data.repository.issue as $i |
+      ($i.comments.nodes | map(select((.body // "") | contains("ai-blocker-watch:unowned:"))) | map(.createdAt) | max) as $ours |
+      ($i.comments.nodes | map(select((.body // "") | (contains("ai-blocker-watch:unowned:") | not))) | map(.createdAt) | max) as $theirs |
+      if ($ours != null and ($i.updatedAt <= $ours) and ($theirs == null or $theirs < $ours)) then ($theirs // $i.createdAt) else $i.updatedAt end')"
+    [[ "$lastact" > "$cutoff" ]] && continue
+    la_ep="$(date -u -d "$lastact" +%s 2>/dev/null || printf 0)"
+    if [ "$la_ep" -eq 0 ]; then lastact="2000-01-01T00:00:00Z"; fi # unknown activity time reads as the oldest
+    stall[$key]=1; salarmed[$key]="$alarmed"; sact[$key]="$lastact"
+    sage[$key]="$(( ( $(date -u +%s) - la_ep ) / 3600 ))h"
+    spar[$key]="${spar[$key]% }"
+  done
+  # Depth: a blocker holding up a chain 3+ levels deep idles the most sessions.
+  for key in "${!stall[@]}"; do
+    sdepth[$key]="$(depth_of "${key%#*}" "${key#*#}" "")"
+  done
+  local day body drepo title dnum sorted depth_prio line pri="" rest=""
+  day="$(date -u +%Y-%m-%d)"
+  body="$HOME_DIR/digest-$day.md"
+  drepo="$(cfgd .alarm_digest_repo popcre/ai-devops)"
+  depth_prio="$(cfgd .alarm_depth_priority 3)"
+  sorted="$(for key in "${!stall[@]}"; do printf '%s\t%s\t%s\n' "${sdepth[$key]}" "${sact[$key]}" "$key"; done | sort -t$'\t' -k1,1rn -k2,2 | cut -f3)"
+  for key in $sorted; do
+    line="$(printf -- '- **%s** "%s" — no assignee, no `owner:` line, no open linked pull request, no activity for %s. Blocks %s (chain %s deep).' "$key" "${sttl[$key]}" "${sage[$key]}" "${spar[$key]}" "${sdepth[$key]}")"
+    if [ "${sdepth[$key]}" -ge "$depth_prio" ]; then pri="${pri:+$pri
+}$line"; else rest="${rest:+$rest
+}$line"; fi
+  done
+  {
+    printf '<!-- ai-blocker-watch:digest:%s -->\n' "$day"
+    printf 'ai-blocker-watch unowned-blocker digest for %s (UTC).\n\n' "$day"
+    if [ "${#stall[@]}" -eq 0 ]; then
+      printf 'No open blocker older than %s hours lacks an owner (an assignee, an `owner:` line, an open linked pull request, or activity).\n' "$(cfgd .alarm_stall_hours 24)"
+    else
+      if [ -n "$pri" ]; then
+        printf '## Priority — holding up a chain %s+ levels deep (idles the most sessions)\n\n%s\n' "$depth_prio" "$pri"
+        [ -z "$rest" ] || printf '\n## Also unowned\n\n%s\n' "$rest"
+      else
+        printf '## Unowned blockers older than %s hours\n\n%s\n' "$(cfgd .alarm_stall_hours 24)" "$rest"
+      fi
+      printf '\nAn issue leaves this list when it gains an assignee, an `owner:` line, an open linked pull request, or fresh activity. Each issue gets at most one request-for-owner comment from the watcher.\n'
+    fi
+  } > "$body"
+  for key in $sorted; do
+    [ "${salarmed[$key]}" = true ] && continue
+    if [ "$dry" = 1 ]; then note "would ask $key for an owner (no owner, no activity for ${sage[$key]})"; continue; fi
+    if "$GH" issue comment "${key#*#}" -R "${key%#*}" --body "<!-- ai-blocker-watch:unowned:$key -->
+This open issue blocks ${spar[$key]} and has gone ${sage[$key]} with no owner: no assignee, no \`owner:\` line, no open linked pull request, no activity.
+Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand it to a named queue owner. Listed in today's ai-blocker-watch digest. (ai-blocker-watch)" >/dev/null; then
+      note "asked $key for an owner"
+    else note "alarm: could not comment on $key"; afail=1; fi
+  done
+  if [ "${#stall[@]}" -gt 0 ] || [ -e "$HOME_DIR/digest-$day.done" ]; then
+    title="ai-blocker-watch digest $day"
+    if [ "$dry" = 1 ]; then
+      note "would update the digest in $drepo: $title"
+    else
+      if dnum="$("$GH" search issues "$title" --repo "$drepo" --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null)"; then
+        dnum="$(printf '%s' "$dnum" | head -1)"
+      else
+        note "alarm: could not search $drepo for today's digest"; dnum=""; afail=1
+      fi
+      if [ -n "$dnum" ]; then
+        touch "$HOME_DIR/digest-$day.done"
+        if ! cmp -s "$body" "$HOME_DIR/digest-$day.prev" 2>/dev/null; then
+          if "$GH" issue edit "$dnum" -R "$drepo" --body-file "$body" >/dev/null; then
+            cp "$body" "$HOME_DIR/digest-$day.prev"; note "updated digest $drepo#$dnum"
+          else note "alarm: could not update digest $drepo#$dnum"; afail=1; fi
+        fi
+      else
+        if "$GH" issue create -R "$drepo" -t "$title" --body-file "$body" >/dev/null; then
+          cp "$body" "$HOME_DIR/digest-$day.prev"; touch "$HOME_DIR/digest-$day.done"; note "opened digest in $drepo: $title"
+        else note "alarm: could not open today's digest in $drepo"; afail=1; fi
+      fi
+    fi
+  fi
+  if [ "$afail" = 0 ]; then
+    [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_ALARM"
+  else FAILED=1; fi
+}
+
+maybe_alarm(){
+  alarm_on || return 0
+  if [ "$DRY" = 1 ]; then alarm_scan 1; return 0; fi
+  local since elapsed
+  since="$(cat "$LAST_ALARM" 2>/dev/null || printf '')"
+  elapsed="$(( $(date -u +%s) - $(date -u -d "${since:-1970-01-01T00:00:00Z}" +%s 2>/dev/null || printf 0) ))"
+  if [ "$elapsed" -ge "$(( $(cfgd .alarm_interval_minutes 60) * 60 ))" ]; then alarm_scan 0; fi
+}
+
+lock_take(){
   local lock="$HOME_DIR/tick.lock"
   if ! mkdir "$lock" 2>/dev/null; then
     # A tick killed mid-run leaves the lock; anything older than the wake timeout is stale.
     if [ -n "$(find "$lock" -maxdepth 0 -mmin +"$(( $(cfg .wake_timeout_minutes) + 5 ))" 2>/dev/null)" ]; then
       rmdir "$lock"; mkdir "$lock"
-    else note "another tick is running"; return 0; fi
+    else note "another tick is running"; return 1; fi
   fi
   trap 'rmdir "$HOME_DIR/tick.lock" 2>/dev/null || true' EXIT
+  return 0
+}
+
+cmd_alarm(){
+  [ "${1:-}" != --dry-run ] || DRY=1
+  alarm_on || die "the unowned-blocker alarm is disabled in the config"
+  lock_take || return 0
+  alarm_scan "$DRY"
+  [ "$FAILED" = 0 ] || { note "alarm finished with failures"; exit 1; }
+}
+
+cmd_tick(){
+  [ "${1:-}" != --dry-run ] || DRY=1
+  lock_take || return 0
   propagate
   local f
   for f in "$WAITS"/*.json; do
@@ -213,8 +410,10 @@ cmd_tick(){
     [ "$(jq -r .state "$f")" = waiting ] || continue
     wake "$f"
   done
+  maybe_alarm
   [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
 }
+
 
 TASK_NAME='ai-devops\blocker-watch'
 cmd_schedule(){
@@ -235,8 +434,9 @@ case "${1:-}" in
   list) cmd_list ;;
   cancel) shift; cmd_cancel "$@" ;;
   tick) shift; cmd_tick "$@" ;;
+  alarm) shift; cmd_alarm "$@" ;;
   schedule) cmd_schedule ;;
   unschedule) cmd_unschedule ;;
-  -h|--help|help) sed -n '2,40p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,49p' "$_self" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command; see ai-blocker-watch --help" ;;
 esac
