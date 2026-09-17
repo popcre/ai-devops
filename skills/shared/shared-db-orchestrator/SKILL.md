@@ -130,23 +130,22 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 
 Albert approved concurrent migration authoring on 2026-08-14.
 
-- Allow at most `MAX_AUTHOR_LANES` active-author leases simultaneously — eight after Albert's 2026-08-28 approval of the six-reviewer rotation. Protected blocked claims do not consume active-author capacity, but keep every object and version lock. Clock expiry releases neither protection nor capacity. Read the constant in `scripts/manage-migration-author-lanes.mjs`; the cap is throughput, never isolation.
-- Relinquish capacity only with `--relinquish-author-lease --claim <n> --owner <owner> --blocked-on issue:#<n>` after clean-worktree and stage-holder proof. Resume only with `--resume-author-lease --claim <n> --owner <owner> --lease-hours <hours>`; resume renews the time lease and rechecks capacity, collision, and permanent version truth.
+- There is no numeric ceiling on concurrent authors, sub-agents, or runners (Albert, 2026-09-16; plan Step 7A, decisions 20–21). Admit every author whose exact objects do not overlap a live claim; isolation comes from exact-object locks, permanent version reservations, and the serialized preview/merge/production stage leases, never from a count. Back off and reroute only on a real provider or machine refusal (rate limit, quota, out-of-memory). Protected blocked claims keep every object and version lock; clock expiry releases no protection.
+- Relinquish an author lease only with `--relinquish-author-lease --claim <n> --owner <owner> --blocked-on issue:#<n>` after clean-worktree and stage-holder proof. Resume only with `--resume-author-lease --claim <n> --owner <owner> --lease-hours <hours>`; resume renews the time lease and rechecks collision and permanent version truth.
 - Give each author an isolated worktree and branch.
 - Require exact, parseable database-object claims.
 - Reserve a unique 14-digit migration version atomically before any migration file is created.
 - Keep preview application, PR merges and production promotion strictly one at a time.
-- Do not count read-only analysis, application code, tests or planning against the author lanes.
 - Distinguish an actively running author from a reserved claim. Claims protect
   objects and versions; they are never reported as working slots without live
   worker evidence.
-- Maintain one dynamic queue per lane, grouped by exact object overlap. Recompute them after every merge.
-- Run a live queue audit BEFORE every allocation and every refill tick, not only
-  after one. An audit run afterwards describes a decision already taken; the
-  audit is what the decision is supposed to be made from.
-- When any author lane frees, run a live queue audit immediately. Close stale
-  already-delivered issues instead of duplicating them, then dispatch the next
-  genuinely eligible issue in an isolated worktree. Maintain explicit successor
+- Maintain dynamic queues grouped by exact object overlap only; unrelated work never queues behind other work. Recompute them after every merge.
+- Run a live queue audit BEFORE every allocation, not only after one. An audit
+  run afterwards describes a decision already taken; the audit is what the
+  decision is supposed to be made from.
+- Dispatch every genuinely eligible, non-overlapping issue at once, each in an
+  isolated worktree; never wait for a lane or slot to free. Close stale
+  already-delivered issues instead of duplicating them. Maintain explicit successor
   queues and report truthfully when no eligible successor exists. Never wait for
   Albert to request status or say start.
 - Dispatch only issues whose machine block says `status: ready`, `work_type: structural`, and `route: shared-db-orchestrator` and lists exact objects.
@@ -155,7 +154,7 @@ Albert approved concurrent migration authoring on 2026-08-14.
   inherit `work_type`, `route`, or database objects from a predecessor issue.
   A successor that performs offline analysis or application work remains
   non-structural even when its predecessor changed the database.
-- Outside-sourced writes into curated `core.*` Master Data remain governed through `route: curated-master-data-governance`, but they never consume a migration-author lane.
+- Outside-sourced writes into curated `core.*` Master Data remain governed through `route: curated-master-data-governance`, and are admitted like any other non-overlapping work.
 - Assign each exact-head issue one external reviewer from the durable round robin after excluding
   the live orchestrator engine: Codex never reviews a Codex-orchestrated issue, and Claude never
   reviews a Claude-orchestrated issue. A provider may be assigned only when
@@ -167,6 +166,12 @@ Albert approved concurrent migration authoring on 2026-08-14.
   substantive report; it is now gated by the same one command as every other provider.
   Never add a provider to the registry to make an allocation succeed. Qwen is treated
   like any other reviewer, gated by the same one command.
+- One reviewer provider may run any number of independent reviews at once, each in
+  its own session, worktree, and verdict record (decision 21). "Reviewer busy" is
+  never a reason to wait or reroute; only a real provider refusal (quota, rate
+  limit, auth, crash) or a review that fails to start triggers reroute. A review
+  never reuses another review's session, and one head still needs distinct
+  reviewers where policy requires them.
 
 Acquire a lane from the shared-db checkout:
 
@@ -177,10 +182,10 @@ node scripts/manage-migration-author-lanes.mjs --claim \
   --objects "<every exact object written, comma-separated>"
 ```
 
-The command acquires GitHub-backed exact-object locks and one of the fixed
-author slots across computers. It must include open pull requests and refuse
-unreadable claims, overlapping objects, unavailable GitHub state, failed version
-reservation, or an author beyond the cap. Older claims count. Never choose a version
+The command acquires GitHub-backed exact-object locks across computers. It must
+include open pull requests and refuse unreadable claims, overlapping objects,
+unavailable GitHub state, or failed version reservation; it never refuses on an
+author count. Older claims count. Never choose a version
 manually and never hand-edit fenced claim blocks.
 
 Audit and cleanup:
@@ -240,7 +245,7 @@ abandonment audit issue from shared-db's
 `.github/ISSUE_TEMPLATE/author-lane-abandonment.md`, and let the
 `--abandonment-audit` output be its first piece of evidence, so the record starts
 from the machine's reading rather than from someone's recollection. Then
-relinquish capacity with the observed worktree state:
+relinquish the author lease with the observed worktree state:
 
 ```bash
 node scripts/manage-migration-author-lanes.mjs --relinquish-author-lease \
@@ -249,9 +254,8 @@ node scripts/manage-migration-author-lanes.mjs --relinquish-author-lease \
 
 Change nothing else. The pull request, the claim, the exact-object locks, the
 version reservation, the branch and the worktree all stay exactly as they are —
-relinquishing returns a slot, not the work. No ref, branch, claim or worktree is
-ever deleted to free a lane, because a lane is a scheduling convenience and those
-are the only durable evidence that the migration was ever authored. Recover the
+relinquishing releases the lease, not the work. No ref, branch, claim or worktree is
+ever deleted, because those are the only durable evidence that the migration was ever authored. Recover the
 work, record the recovery evidence on the audit issue, and resume atomically:
 
 ```bash
@@ -259,8 +263,8 @@ node scripts/manage-migration-author-lanes.mjs --resume-author-lease \
   --claim <n> --owner <owner> --lease-hours <hours>
 ```
 
-Resume is not a reversal of the relinquish; it re-runs every current collision,
-capacity and version check, because the world moved while the lane was parked.
+Resume is not a reversal of the relinquish; it re-runs every current collision
+and version check, because the world moved while the work was parked.
 
 **Terminal retirement — the work cannot or should not return.** Record the
 terminal evidence on the audit issue first, so the decision is auditable before
@@ -296,7 +300,7 @@ and the investigation would block itself.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Phase 2 is active. Protected claims never disappear when author capacity is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations serialize provider/wrapper execution keys for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek, and create durable ordered waits when every eligible reviewer is busy. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
+Phase 2 is active. Protected claims never disappear when an author lease is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations record one review per exact head and session for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek; they never serialize independent reviews by the same provider and never create a wait because a provider is already reviewing. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
 
 ## Before preview and merge
 

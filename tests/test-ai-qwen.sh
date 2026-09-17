@@ -323,7 +323,7 @@ fi
 fixture_pid(){ [[ "${1:-}" =~ ^[1-9][0-9]*$ ]] && [ "$1" -gt 1 ]; }
 crash_recorded_worker(){ # SUPERVISOR PROVIDER EXPECTED_LOCK_LABEL
   local supervisor="$1" provider="$2" label="$3" dir worker='' rc=0
-  for dir in "$AI_QWEN_STATE_DIR"/locks/repo--*.lock.d; do
+  for dir in "$AI_QWEN_STATE_DIR"/locks/review--*.lock.d; do
     [ -f "$dir/label" ] && [ "$(cat "$dir/label")" = "$label" ] || continue
     worker="$(cat "$dir/pid" 2>/dev/null | tr -d '\r\n')"; break
   done
@@ -751,6 +751,22 @@ else
   [ "$POST_TURN_RC" -eq 0 ] || printf '  diagnostic: post-turn: %s\n' "$POST_TURN_OUT"
   bad '1Password service token is absent from wrapper post-call processes'
 fi
+
+# Step 7A (decision 21): a live review of one name, and a legacy repository-wide
+# lock, never block a different review of the same repository; the same name
+# stays serialized, and the two reviews share no Qwen session record.
+QWEN_RID="$(printf '%s\n%s' "$(cd "$REPO" && pwd -P)" "$(git -C "$REPO" config --get remote.origin.url 2>/dev/null || echo '')" | sha256sum | cut -c1-12)"
+HELD_REVIEW_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-held.lock.d"
+LEGACY_QWEN_REPO_LOCK="$AI_QWEN_STATE_DIR/locks/repo--$QWEN_RID.lock.d"
+mkdir -p "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
+for held in "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"; do printf '%s\n' "$$" > "$held/pid"; printf 'review:held\n' > "$held/label"; done
+SIBLING_OUT="$(run new review-sibling --prompt 'review this' 2>&1)"; SIBLING_RC=$?
+[ "$SIBLING_RC" -eq 0 ] || printf '  diagnostic: sibling review: %s\n' "$SIBLING_OUT"
+check 'a second same-repository Qwen review is admitted while another review holds its lock' "test '$SIBLING_RC' -eq 0"
+check 'concurrent same-provider Qwen reviews do not share a session' "test \"\$(run show review-sibling | jq -r .qwen_session_id)\" != \"\$(run show review-1 | jq -r .qwen_session_id)\""
+HELD_OUT="$(run new review-held --prompt 'review this' 2>&1)"; HELD_RC=$?
+check 'the same named Qwen review is still serialized by its own lock' "test '$HELD_RC' -ne 0 && printf '%s' \"\$HELD_OUT\" | grep -q 'already active'"
+rm -rf "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
 
 recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
