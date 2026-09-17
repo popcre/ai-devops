@@ -417,6 +417,8 @@ reviewed. Re-read the SHA from git rather than transcribing it."
 This is a $OPT_REVIEW_KIND review, not a code-diff approval. Read the source documents
 named in the brief from this workspace. Return a decision-by-decision conclusion and
 an unresolved-objection ledger. Do not approve or reject an unrelated working-tree patch.
+Return ALL findings in one pass, grouped by severity; check for sibling issues of the
+same class before returning.
 EOF
     REVIEW_BASE="$REVIEW_HEAD"
     PACKET_HASH="$(sha256sum "$pkt/MANIFEST.md" | awk '{print $1}')"
