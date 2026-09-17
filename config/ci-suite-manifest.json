@@ -167,35 +167,35 @@
       "test-ai-kimi.sh"
     ],
     [
-      "test-ai-deepseek-agent.sh"
+      "test-ai-claude-review.sh",
+      "test-ai-codex-memories.sh",
+      "test-ai-deepseek-agent.sh",
+      "test-ai-gh.sh",
+      "test-bin-cmd-launchers.sh"
     ],
     [
       "test-ai-adopt-globals.sh",
-      "test-ai-gemini-usage.sh",
-      "test-ai-grok-implement.sh",
       "test-ai-install-skills.sh",
-      "test-ai-machine-tools.sh",
       "test-ai-memory-sync.sh",
       "test-ai-muse.sh",
-      "test-ai-muse-code.sh",
+      "test-mcp-launch-lock.sh"
+    ],
+    [
+      "test-ai-gemini-usage.sh",
+      "test-ai-grok-implement.sh",
+      "test-ai-machine-tools.sh",
+      "test-ai-qwen.sh",
       "test-ai-test-local.sh",
       "test-install-ai-provider-clis.sh",
-      "test-mcp-launch-lock.sh"
+      "test-installer-parity.sh"
     ],
     [
       "test-ai-claude-permissions.sh",
       "test-ai-gemini.sh",
       "test-ai-glm.sh",
-      "test-installer-parity.sh",
+      "test-ai-muse-code.sh",
       "test-line-endings.sh",
       "test-windows-scripts.sh"
-    ],
-    [
-      "test-ai-claude-review.sh",
-      "test-ai-codex-memories.sh",
-      "test-ai-gh.sh",
-      "test-ai-qwen.sh",
-      "test-bin-cmd-launchers.sh"
     ]
   ],
   "windows_offline_powershell_shard": 3

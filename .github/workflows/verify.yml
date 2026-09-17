@@ -145,7 +145,7 @@ jobs:
   # this is real parallelism on separate hardware, not four processes competing
   # for one desktop - the failure mode the issue explicitly forbids. The section
   # boundaries live in config/ci-suite-manifest.json and are sized from the
-  # measured per-suite timings of runs 34394706703, 34377910065 and 34366159903;
+  # measured per-suite timings of runs 35200063547 and 35189676116;
   # tests/test-all.sh refuses to run a section unless the declared sections
   # reconstitute the whole lane exactly, so a coverage gap is a configuration
   # error rather than a quiet pass.
@@ -168,12 +168,10 @@ jobs:
       matrix:
         section: [1, 2, 3, 4, 5]
     runs-on: windows-2025
-    # The retained-session expansions made DeepSeek and Muse consume more than
-    # 31 minutes together in run 34804029887 before the 35-minute ceiling killed
-    # their old shared section. Five sections keep those indivisible suites
-    # separate. Exact-head run 34822350212 then showed the indivisible Kimi
-    # section still advancing at 35m13s with no assertion failure, so a bounded
-    # 40-minute ceiling supplies measured finalization headroom without a
+    # The two measured runs above put the old Muse section at 36-38 minutes and
+    # the old Qwen section at 36 minutes. Rebalancing their smaller neighbours
+    # makes the indivisible Kimi suite the expected long pole at 34-35 minutes,
+    # while a bounded 40-minute ceiling retains finalization headroom without a
     # same-run fallback or removing any test.
     timeout-minutes: 40
     steps:
