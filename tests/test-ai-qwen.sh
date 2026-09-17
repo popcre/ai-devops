@@ -763,7 +763,9 @@ for held in "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"; do printf '%s\n' "$$" 
 SIBLING_OUT="$(run new review-sibling --prompt 'review this' 2>&1)"; SIBLING_RC=$?
 [ "$SIBLING_RC" -eq 0 ] || printf '  diagnostic: sibling review: %s\n' "$SIBLING_OUT"
 check 'a second same-repository Qwen review is admitted while another review holds its lock' "test '$SIBLING_RC' -eq 0"
-check 'concurrent same-provider Qwen reviews do not share a session' "test \"\$(run show review-sibling | jq -r .qwen_session_id)\" != \"\$(run show review-1 | jq -r .qwen_session_id)\""
+SIB_DIR="$(run show review-sibling | jq -r '.review_dir // empty')"; ONE_DIR="$(run show review-1 | jq -r '.review_dir // empty')"
+SIB_REP="$(run show review-sibling | jq -r '.last_report // empty')"; ONE_REP="$(run show review-1 | jq -r '.last_report // empty')"
+check 'concurrent same-provider Qwen reviews use separate review copies and verdict reports' "test -n '$SIB_DIR' && test -n '$SIB_REP' && test '$SIB_DIR' != '$ONE_DIR' && test '$SIB_REP' != '$ONE_REP'"
 HELD_OUT="$(run new review-held --prompt 'review this' 2>&1)"; HELD_RC=$?
 check 'the same named Qwen review is still serialized by its own lock' "test '$HELD_RC' -ne 0 && printf '%s' \"\$HELD_OUT\" | grep -q 'already active'"
 rm -rf "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
