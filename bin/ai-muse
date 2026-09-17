@@ -521,18 +521,23 @@ require_engine_model(){ # older same-engine models stay deletable; only a sessio
 }
 cmd_transcript(){
   local m sid; m="$(find_meta "$1")"; require_engine_model "$m" "$1"; runtime_env; sid="$(jq -r .session_id "$m")"
-  if [ "$ENGINE" = muse-code ]; then local out="$XDG_STATE_HOME/export-$$.json"; rm -f "$out"; "$BIN" export --session "$sid" --out "$out" >/dev/null && cat "$out"; local rc=$?; rm -f "$out"; return "$rc"; fi
+  if [ "$ENGINE" = muse-code ]; then local xd rc; xd="$(mktemp -d "$XDG_STATE_HOME/export.XXXXXXXX")" || die 'could not create a private export directory.'; chmod 700 "$xd" || { rm -rf -- "$xd"; die 'could not protect the export directory.'; }
+    # Fresh unpredictable directory owned by this run; the provider creates the only file in it.
+    "$BIN" export --session "$sid" --out "$xd/transcript.json" >/dev/null && [ -f "$xd/transcript.json" ] && [ ! -L "$xd/transcript.json" ] && cat "$xd/transcript.json"; rc=$?; rm -rf -- "$xd"; return "$rc"; fi
   "$BIN" export "$sid"
 }
 muse_code_delete_session(){ # the CLI has no delete command; remove only this exact private session store
   local sid="$1" dir
   [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
-  local base="$XDG_DATA_HOME" part real_base
-  # No symlink anywhere from the private store root down to the session directory.
-  for part in "" /muse /muse/sessions /muse/sessions/.msp-view-v1 "/muse/sessions/.msp-view-v1/$sid"; do [ ! -L "$base$part" ] || return 1; done
-  dir="$base/muse/sessions/.msp-view-v1/$sid"
-  if [ -e "$dir" ]; then real_base="$(cd "$base" && pwd -P)" || return 1; [ "$(cd "$dir" && pwd -P)" = "$real_base/muse/sessions/.msp-view-v1/$sid" ] || return 1; fi
-  rm -rf -- "$dir" && [ ! -e "$dir" ]
+  local base="$XDG_DATA_HOME" part parent
+  for part in "" /muse /muse/sessions /muse/sessions/.msp-view-v1; do [ ! -L "$base$part" ] || return 1; done
+  parent="$base/muse/sessions/.msp-view-v1"; [ -d "$parent" ] || return 0
+  # Enter the verified parent once, then delete relative to it: a later swap of any
+  # ancestor path cannot redirect the removal outside this directory.
+  ( cd -P -- "$parent" || exit 1
+    [ "$(pwd -P)" = "$(cd -P -- "$base" && pwd -P)/muse/sessions/.msp-view-v1" ] || exit 1
+    [ ! -L "./$sid" ] || exit 1
+    rm -rf -- "./$sid" && [ ! -e "./$sid" ] )
 }
 cmd_reconcile(){
   local name="$1" m rid tmp status sid root event stem out prompt rep stale=0 item path expected
