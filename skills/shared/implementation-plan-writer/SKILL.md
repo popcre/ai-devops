@@ -206,6 +206,11 @@ When asked whether the plan is comprehensive/detailed enough:
   **33** behaviour tests, and it was a pull-request description rather than a run. The
   figure was wrong, relabelled in transit, and unsourced at every hop. No CI check can
   catch that class; only citing the artifact can.
+- **A STATUS row that is "code landed, not accepted" names exactly one live-proof
+  owner issue, opened when that code landed.** Do not point several unproven steps
+  at one issue. Do not open a bundle of leftover proofs later for a later chat.
+  The session that merged the code either proves it live or files that one
+  leftover-proof issue before it ends.
 - **A plan goes stale the moment someone executes part of it.** Whoever does the work
   owns updating it — the `session-docs-update` / `codex-docs-update` skills carry a
   **mandatory plan-file gate** for exactly this (de-stale the "current state" section,

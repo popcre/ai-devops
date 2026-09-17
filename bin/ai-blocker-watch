@@ -36,12 +36,22 @@
 #   ai-blocker-watch cancel <wait-id>
 #   ai-blocker-watch tick [--dry-run]
 #   ai-blocker-watch alarm [--dry-run]      scan for unowned blockers now
-#   ai-blocker-watch schedule | unschedule      (Windows Task Scheduler)
+#   ai-blocker-watch schedule | unschedule      (Windows Task Scheduler, or the
+#       user crontab on Linux/macOS; both marked, idempotent, safe to re-run)
 #
 # tick exits non-zero when any propagation, wake or alarm scan failed, so a
 # scheduled run that did not do its work is visible. Finding stalled unowned
 # blockers is NOT a failure. Failed wakes retry on later ticks up to
-# max_wake_attempts, then stay in state "failed" for a human.
+# max_wake_attempts, then stay in state "failed" for a human. A wake whose
+# harness program is not installed on this machine is skipped once with a
+# visible error and left in state "unrunnable" — it does not burn retries.
+# Propagation (commenting) AND the unowned-blocker alarm (request-for-owner
+# comments, the daily digest) run on ONE machine only, named by
+# propagate_on_host in the config; every machine wakes its own sessions.
+#
+# ZCode wakes need a one-time CLI sign-in: run zcode.cjs login on each machine.
+# On Windows the login URL is TRUNCATED AT '&' when auto-opened, so copy the
+# full URL from the terminal into the browser yourself.
 #
 # Environment:
 #   AI_BLOCKER_WATCH_HOME    state (default ~/.ai-devops/blocker-watch)
@@ -135,18 +145,48 @@ cmd_cancel(){ [ $# -eq 1 ] || die "usage: cancel <wait-id>"; rm -f -- "$WAITS/$1
 # --- tick -------------------------------------------------------------------
 DRY=0; FAILED=0
 propagate(){
+  # Exactly one machine propagates comments (config propagate_on_host). Every
+  # machine still wakes its own local sessions below. notified.tsv dedupes per
+  # machine only, so without this gate N scheduled machines post N copies of
+  # each comment. An absent key keeps the historic behaviour (propagate here),
+  # which stays correct for a single-machine install.
+  local want; want="$(cfg '.propagate_on_host // ""')"
+  if [ -n "$want" ]; then
+    local me; me="$(hostname 2>/dev/null | tr '[:upper:]' '[:lower:]' | cut -d. -f1)"
+    if [ "$me" != "${want,,}" ]; then
+      note "propagation is owned by $want (this machine is ${me:-unknown}); only local wakes run here"
+      return 0
+    fi
+  fi
   local start since repo n dep dr dn key
   start="$(now_iso)"
   if [ -s "$SCAN" ]; then since="$(cat "$SCAN")"
   else since="$(date -u -d "-$(cfg .first_scan_lookback_minutes) minutes" +%Y-%m-%dT%H:%M:%SZ)"; fi
-  local ok=1
+  # One search query per BATCH of repos, never one per repo: ai-gh already
+  # throttles GitHub, and a per-repo loop costs one search per repo per tick.
+  # GitHub caps a search q at 256 characters, so batches flush before the
+  # shared qualifier tail ("is:issue is:closed closed:>=<timestamp>", 48 chars
+  # with the trailing repo term) pushes them over; nineteen repos cost three
+  # queries instead of nineteen.
+  local -a queries=() ; local cur=""
   while read -r repo; do
     [ -n "$repo" ] || continue
-    local closed
-    if ! closed="$(gh_api -X GET search/issues -f "q=repo:$repo is:issue is:closed closed:>=$since" -f per_page=100 --jq '.items[].number')"; then
-      note "could not list closed issues in $repo"; ok=0; continue
+    local term="repo:$repo "
+    if [ -n "$cur" ] && [ $(( ${#cur} + ${#term} + 48 )) -gt 256 ]; then
+      queries+=("${cur}is:issue is:closed closed:>=$since"); cur=""
     fi
-    for n in $closed; do
+    cur+="$term"
+  done < <(cfg '.repos[]')
+  [ -z "$cur" ] || queries+=("${cur}is:issue is:closed closed:>=$since")
+  local ok=1 q closed
+  for q in "${queries[@]}"; do
+    if ! closed="$(gh_api -X GET search/issues -f "q=$q" -f per_page=100 \
+        --jq '.items[] | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
+      note "could not list closed issues for: $q"; ok=0; continue
+    fi
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      repo="${line%%#*}"; n="${line##*#}"
       local deps
       if ! deps="$(gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
         note "could not read what $repo#$n was blocking"; ok=0; continue
@@ -161,8 +201,8 @@ Blocker $repo#$n is closed. Whoever owns this issue: recheck it and continue. (a
           printf '%s\n' "$key" >> "$NOTIFIED"; note "told $dep that $repo#$n closed"
         else note "could not comment on $dep"; ok=0; fi
       done
-    done
-  done < <(cfg '.repos[]')
+    done <<<"$closed"
+  done
   if [ "$ok" = 1 ]; then [ "$DRY" = 1 ] || printf '%s' "$start" > "$SCAN"; else FAILED=1; fi
 }
 
@@ -189,6 +229,38 @@ wake(){ # wake <wait file>
     cmd+=("$arg")
   done < <(jq -j --arg h "$h" '.harness[$h][] | . + "\u0000"' "$CONFIG")
   [ "${#cmd[@]}" -gt 0 ] || { note "no command for harness $h"; FAILED=1; return; }
+  # The harness must exist on THIS machine — wakes are per-machine, and a wait
+  # registered for a program this machine does not have (ZCode on a Claude-only
+  # box, say) must stop with a visible error instead of burning its retries on
+  # a command that can never run. Skip `env` and VAR=value prefixes; the first
+  # remaining argument is the program.
+  local prog="" elem
+  for elem in "${cmd[@]}"; do
+    case "$elem" in
+      env) ;;
+      *=*) ;;
+      *) prog="$elem"; break ;;
+    esac
+  done
+  local resolved=0
+  if [ -n "$prog" ]; then
+    case "$prog" in
+      */*|*\\*) [ -e "$prog" ] && resolved=1 ;;
+      *) command -v "$prog" >/dev/null 2>&1 && resolved=1 ;;
+    esac
+  fi
+  if [ "$resolved" != 1 ]; then
+    local wid; wid="$(basename "$f" .json)"
+    if [ "$DRY" = 1 ]; then
+      note "would mark $h wait $wid unrunnable: harness program not found on this machine: ${prog:-<empty command>}"
+    else
+      local tmp="$f.tmp"
+      jq --arg at "$(now_iso)" --arg p "${prog:-<empty command>}" \
+        '.state="unrunnable" | .error=("harness program not found on this machine: " + $p) | .checked_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
+      note "cannot wake $h session $s: harness program not found on this machine: ${prog:-<empty command>}; wait $wid is now unrunnable (re-register the wait once the program is installed)"
+    fi
+    FAILED=1; return
+  fi
   if [ "$DRY" = 1 ]; then note "would resume $h session $s in $cwd ($ref closed)"; return; fi
   log="$LOGS/$(basename "$f" .json)-$(date -u +%Y%m%dT%H%M%S).log"
   local tmp="$f.tmp"
@@ -247,6 +319,21 @@ depth_of(){ # depth_of <owner/repo> <n> <seen>: longest open chain this issue ho
 alarm_scan(){ # alarm_scan <dry 0|1>
   local dry="$1" start repo out pages cursor cutoff afail=0
   local pr pn kr kn ac ti k key j rc marker pr_open alarmed lastact la_ep
+  # The alarm POSTS (request-for-owner comments, the digest issue), so it is
+  # owned by the same single machine as propagation: without this gate N
+  # scheduled machines race to open N digests and N comments. A dry run only
+  # reads, so it stays available on every machine. Absent key = act here,
+  # matching propagate()'s single-machine default.
+  if [ "$dry" -ne 1 ]; then
+    local want; want="$(cfg '.propagate_on_host // ""')"
+    if [ -n "$want" ]; then
+      local me; me="$(hostname 2>/dev/null | tr '[:upper:]' '[:lower:]' | cut -d. -f1)"
+      if [ "$me" != "${want,,}" ]; then
+        note "the unowned-blocker alarm is owned by $want (this machine is ${me:-unknown}); only local wakes run here"
+        return 0
+      fi
+    fi
+  fi
   start="$(now_iso)"
   ACACHE=(); AGQL=0
   local -A seen=() sttl=() spar=() stall=() sage=() salarmed=() sdepth=() sact=()
@@ -416,17 +503,43 @@ cmd_tick(){
 
 
 TASK_NAME='ai-devops\blocker-watch'
+CRON_MARKER='# ai-devops blocker-watch (managed by ai-blocker-watch schedule; unschedule removes)'
+cron_job_line(){ printf '*/%s * * * * %s tick >> %s 2>&1' "$(cfg .schedule_every_minutes)" "'$TOOL_ROOT/bin/ai-blocker-watch'" "'$HOME_DIR/tick.log'"; }
 cmd_schedule(){
-  command -v schtasks.exe >/dev/null || die "schedule is for Windows; on Linux run 'ai-blocker-watch tick' from cron or a systemd timer"
-  local bash_exe self every
-  bash_exe="$(cygpath -w "$(command -v bash)")"; self="$(cygpath -m "$TOOL_ROOT/bin/ai-blocker-watch")"
+  local every self
   every="$(cfg .schedule_every_minutes)"
-  # conhost --headless keeps a console window from flashing every run.
-  MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /TN "$TASK_NAME" \
-    /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' tick >> ~/.ai-devops/blocker-watch/tick.log 2>&1\"" >/dev/null
-  note "scheduled every $every minutes as $TASK_NAME"
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    local bash_exe
+    bash_exe="$(cygpath -w "$(command -v bash)")"; self="$(cygpath -m "$TOOL_ROOT/bin/ai-blocker-watch")"
+    # conhost --headless keeps a console window from flashing every run.
+    # /F re-points an existing task, so rerunning the installer stays safe.
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /TN "$TASK_NAME" \
+      /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' tick >> ~/.ai-devops/blocker-watch/tick.log 2>&1\"" >/dev/null
+    note "scheduled every $every minutes as $TASK_NAME"
+    return
+  fi
+  # Linux/macOS: the same command installs a marked, idempotent USER crontab
+  # entry, so the machine install path is one command on every platform.
+  command -v crontab >/dev/null || die "schedule needs schtasks (Windows) or crontab (Linux/macOS); neither is available"
+  local tmp; tmp="$(mktemp)"
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "'$TOOL_ROOT/bin/ai-blocker-watch' tick" || :; } >> "$tmp"
+  printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >> "$tmp"
+  local rc=0; crontab "$tmp" || rc=$?; rm -f "$tmp"
+  [ "$rc" -eq 0 ] || die "crontab refused the blocker-watch entry"
+  note "scheduled every $every minutes in the user crontab"
 }
-cmd_unschedule(){ MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Delete /F /TN "$TASK_NAME" >/dev/null; note "removed $TASK_NAME"; }
+cmd_unschedule(){
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Delete /F /TN "$TASK_NAME" >/dev/null; note "removed $TASK_NAME"
+    return
+  fi
+  command -v crontab >/dev/null || die "unschedule needs schtasks (Windows) or crontab"
+  local tmp; tmp="$(mktemp)"
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "'$TOOL_ROOT/bin/ai-blocker-watch' tick" || :; } > "$tmp"
+  local rc=0; crontab "$tmp" || rc=$?; rm -f "$tmp"
+  [ "$rc" -eq 0 ] || die "crontab refused the removal"
+  note "removed the blocker-watch crontab entry"
+}
 
 case "${1:-}" in
   wait) shift; cmd_wait "$@" ;;
@@ -437,6 +550,5 @@ case "${1:-}" in
   alarm) shift; cmd_alarm "$@" ;;
   schedule) cmd_schedule ;;
   unschedule) cmd_unschedule ;;
-  -h|--help|help) sed -n '2,49p' "$_self" | sed 's/^# \{0,1\}//' ;;
-  *) die "unknown command; see ai-blocker-watch --help" ;;
+  -h|--help|help) sed -n '2,59p' "$_self" | sed 's/^# \{0,1\}//' ;;  *) die "unknown command; see ai-blocker-watch --help" ;;
 esac

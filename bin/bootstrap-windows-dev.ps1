@@ -12,6 +12,7 @@ param(
   [switch]$SkipMachineSetup,
   [switch]$SkipRemoteAccess,
   [switch]$SkipAnsibleController,
+  [switch]$GitHubRunnerHost,
   [switch]$TestOnly
 )
 
@@ -86,7 +87,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     '-RepoPath', "`"$RepoPath`"", '-RepoUrl', "`"$RepoUrl`"",
     '-AnsibleRepoPath', "`"$AnsibleRepoPath`"", '-AnsibleRepoUrl', "`"$AnsibleRepoUrl`""
   )
-  foreach ($switchName in @('SkipMachineSetup','SkipRemoteAccess','SkipAnsibleController','TestOnly')) {
+  foreach ($switchName in @('SkipMachineSetup','SkipRemoteAccess','SkipAnsibleController','GitHubRunnerHost','TestOnly')) {
     if ((Get-Variable $switchName -ValueOnly)) { $elevatedArgs += "-$switchName" }
   }
   Write-Host 'Requesting Administrator permission for Windows provisioning...' -ForegroundColor Yellow
@@ -120,6 +121,20 @@ try {
     if ($script:LastGitExitCode -ne 0) { throw 'Clone failed. Verify network access to the public ai-devops repository.' }
     $sourceSha = Assert-ReadyRepository $RepoPath
     Add-Result 'Repository' 'OK' "Cloned canonical main at $sourceSha."
+  }
+
+  if ($GitHubRunnerHost) {
+    $smartAppControl = Join-Path $RepoPath 'bin\reconcile-smart-app-control.ps1'
+    $smartAppArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$smartAppControl)
+    if ($TestOnly) { $smartAppArgs += '-TestOnly' }
+    & powershell.exe @smartAppArgs
+    if ($LASTEXITCODE -eq 0) {
+      Add-Result 'Smart App Control' $(if ($TestOnly) { 'COMPLIANT' } else { 'APPLIED' }) 'Off; official unsigned GitHub runner assemblies may load.'
+    } elseif ($LASTEXITCODE -eq 2 -and $TestOnly) {
+      Add-Result 'Smart App Control' 'DRIFT' 'Must be Off for official GitHub runner compatibility.'
+    } else { throw "Smart App Control reconciliation failed with exit code $LASTEXITCODE." }
+  } else {
+    Add-Result 'Smart App Control' 'SKIPPED' 'Not designated as a GitHub runner host; irreversible security state was not changed.'
   }
 
   $configuration = Join-Path $RepoPath '.config\configuration.winget'

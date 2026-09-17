@@ -101,6 +101,11 @@ cp "$ROOT/config/opencode-muse/agent/muse-review.md" "$HOME_FIX/.config/ai-devop
 mkdir -p "$REPO/.ai/reviews"; printf 'historic\n' > "$REPO/.ai/reviews/historic.md"; git -C "$REPO" add -f .ai/reviews/historic.md; git -C "$REPO" commit -qm 'tracked historic review'
 cat > "$TMP/bin/op" <<'EOF'
 #!/usr/bin/env bash
+if [ -n "${OP_STUB_DELAY:-}" ]; then
+  mkdir "$OP_STUB_ACTIVE" 2>/dev/null || printf 'overlap
+' >> "$OP_STUB_OVERLAP"
+  sleep "$OP_STUB_DELAY"; rmdir "$OP_STUB_ACTIVE" 2>/dev/null || true
+fi
 printf fake-key
 EOF
 cat > "$BIN/opencode.exe" <<'EOF'
@@ -441,6 +446,19 @@ check 'compatibility review rejects a verdict before the final line' "cd '$REPO'
 check 'compatibility review rejects an undefined verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: UNKNOWN' '$SCRIPT' review '$REPO' test\""
 check 'compatibility review rejects a legacy undefined verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' review '$REPO' test\""
 check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: NO FINDINGS' '$SCRIPT' review '$REPO' test\" | grep -q 'VERDICT: NO FINDINGS'"
+
+CONC="$TMP/concurrent-cred"; mkdir -p "$CONC"; CONC_PIDS=()
+for n in 1 2 3; do
+  (cd "$REPO" && eval "$ENV OP_STUB_DELAY=4 OP_STUB_ACTIVE='$CONC/active' OP_STUB_OVERLAP='$CONC/overlap' '$SCRIPT' new cred-race-$n --prompt race$n") > "$CONC/$n.log" 2>&1 & CONC_PIDS+=("$!")
+done
+CONC_RC=0; for pid in "${CONC_PIDS[@]}"; do wait "$pid" || CONC_RC=1; done
+check 'three simultaneous turns with a slow 1Password read all succeed' "test '$CONC_RC' -eq 0 && grep -q '^Muse session: cred-race-1$' '$CONC/1.log' && grep -q '^Muse session: cred-race-2$' '$CONC/2.log' && grep -q '^Muse session: cred-race-3$' '$CONC/3.log' && grep -q 'waiting for another turn' '$CONC'/*.log && ! grep -q 'busy' '$CONC'/*.log"
+check 'simultaneous 1Password reads stay serialized' "test ! -e '$CONC/overlap' && test ! -e '$TMP/state/credential.lock.d'"
+mkdir -p "$TMP/state/credential.lock.d"; printf '%s
+' "$$" > "$TMP/state/credential.lock.d/pid"
+CRED_TIMEOUT_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_CREDENTIAL_WAIT_SECONDS=2 '$SCRIPT' new cred-timeout --prompt t" 2>&1 || true)"
+check 'a held credential lock fails closed with a clear message after the wait budget' "printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q 'credential lock still held by another Muse turn after 2s' && ! printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q fake-key"
+rm -rf "$TMP/state/credential.lock.d"
 
 muse_recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

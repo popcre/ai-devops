@@ -1,0 +1,16 @@
+count	path
+3	bin/ai-muse
+3	bin/setup-machine.ps1
+3	templates/system/AGENTS-global-codex.md
+3	templates/system/CLAUDE-global.md
+2	AGENTS.md
+2	bin/ai-kimi
+2	bin/bootstrap-windows-dev.ps1
+2	bin/verify-windows-dev.ps1
+2	config/ci-suite-manifest.json
+2	docs/configuration.md
+2	docs/windows-winget-configuration.md
+2	tests/test-context-audit.ps1
+2	tests/test-workflow-policy.sh
+2	tests/windows-winget-config.tests.ps1
+2	tools/context-audit/context-audit.py

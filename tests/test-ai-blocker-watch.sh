@@ -42,13 +42,17 @@ cat > "$TMP/harness" <<'EOF'
 printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"; [ -f "$FAKE/harness_fail" ] && exit 7; exit 0
 EOF
 chmod +x "$TMP/gh" "$TMP/harness"
-jq --arg h "$TMP/harness" '.repos=["o/r"] | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2' \
+# The fixture config drops propagate_on_host so the suite is machine-independent:
+# the shipped value names one real machine, and on any other host (CI runners)
+# propagation would be skipped and every propagation check below would fail.
+jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2' \
   "$ROOT/config/blocker-watch.json" > "$TMP/config.json"
 export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_BLOCKER_WATCH_GH="$TMP/gh"
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID ZCODE_SESSION_ID
 BW(){ "$SCRIPT" "$@"; }
 
 check 'shipped config is valid and names all three programs' "jq -e '.harness|has(\"claude\") and has(\"codex\") and has(\"zcode\")' '$ROOT/config/blocker-watch.json'"
+check 'shipped config names exactly one propagating machine' "jq -e '(.propagate_on_host | type == \"string\" and length > 0)' '$ROOT/config/blocker-watch.json'"
 check 'wait refuses a malformed reference' "! BW wait 'not-a-ref' --harness claude --session s1"
 check 'wait refuses when the program cannot be detected' "! (cd '$TMP/work' && BW wait o/r#5)"
 id="$(cd "$TMP/work" && CODEX_THREAD_ID=thread-abc BW wait o/r#5 --for o/r#9 --note 'finish the loader' 2>/dev/null)"
@@ -69,7 +73,7 @@ check 'both waits are marked woken' "[ \"\$(jq -s 'map(select(.state==\"woken\")
 check 'a woken session is never resumed twice' "BW tick && [ ! -s '$FAKE/resumed' ]"
 
 # Propagation up the chain.
-echo '{"items":[{"number":5}]}' > "$FAKE/closed.json"
+echo '{"items":[{"number":5,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
 echo '[{"number":9,"state":"open","repository_url":"https://api.github.com/repos/o/r"},{"number":8,"state":"closed","repository_url":"https://api.github.com/repos/o/r"}]' > "$FAKE/blocking.json"
 rm -f "$TMP/home/last-scan"
 check 'tick tells the open issue a closed blocker was blocking' "BW tick && grep -q 'issue comment 9 -R o/r' '$FAKE/comments'"
@@ -78,6 +82,31 @@ check 'the comment carries a machine marker' "grep -q 'ai-blocker-watch:o/r#5' '
 rm -f "$TMP/home/last-scan"
 check 'the same closure is never announced twice' "BW tick && [ \"\$(grep -c 'issue comment 9' '$FAKE/comments')\" = 1 ]"
 
+# One batched search query per tick, never one per repo (issue #549).
+: > "$FAKE/calls"
+jq '.repos=["o/r","o/r2","o/r3"]' "$TMP/config.json" > "$TMP/config-many.json"
+rm -f "$TMP/home/last-scan"
+AI_BLOCKER_WATCH_CONFIG="$TMP/config-many.json" BW tick >/dev/null 2>&1
+check 'one search query per tick covers every configured repo' "[ \"\$(grep -c 'search/issues' '$FAKE/calls')\" = 1 ]"
+
+# Exactly one machine propagates; every machine still wakes its own sessions.
+: > "$FAKE/calls"; : > "$FAKE/comments"
+id4="$(cd "$TMP/work" && BW wait o/r#5 --harness claude --session s9 2>/dev/null)"
+jq '.propagate_on_host="some-other-machine"' "$TMP/config.json" > "$TMP/config-off.json"
+rm -f "$TMP/home/last-scan"
+# Run to completion into a file: `BW tick | grep -q` would SIGPIPE the tick at
+# its first output line and never reach the wake.
+AI_BLOCKER_WATCH_CONFIG="$TMP/config-off.json" BW tick >"$TMP/off-tick.out" 2>&1
+check 'a non-propagating machine says so and still exits zero' "grep -q 'only local wakes run here' '$TMP/off-tick.out'"
+check 'a non-propagating machine never searches or comments' "[ \"\$(grep -c 'search/issues' '$FAKE/calls')\" = 0 ] && [ ! -s '$FAKE/comments' ]"
+check 'a non-propagating machine still wakes its own sessions' "grep -q '|claude s9' '$FAKE/resumed'"
+this_host="$(hostname | tr '[:upper:]' '[:lower:]' | cut -d. -f1)"
+: > "$FAKE/calls"; : > "$FAKE/resumed"
+jq --arg h "$this_host" '.propagate_on_host=($h | ascii_upcase)' "$TMP/config.json" > "$TMP/config-host.json"
+rm -f "$TMP/home/last-scan"
+AI_BLOCKER_WATCH_CONFIG="$TMP/config-host.json" BW tick >/dev/null 2>&1
+check 'the propagating machine is matched case-insensitively' "[ \"\$(grep -c 'search/issues' '$FAKE/calls')\" -ge 1 ]"
+
 # Failures must be loud and bounded.
 id3="$(cd "$TMP/work" && BW wait o/r#5 --harness claude --session broken 2>/dev/null)"
 touch "$FAKE/harness_fail"
@@ -85,6 +114,15 @@ check 'a failed resume makes tick exit non-zero' "! BW tick"
 check 'a failed resume is retried later' "jq -e '.state==\"waiting\" and .attempts==1' '$TMP/home/waits/$id3.json'"
 BW tick >/dev/null 2>&1
 check 'after max attempts the wait is left failed for a human' "jq -e '.state==\"failed\" and .attempts==2 and .exit==7' '$TMP/home/waits/$id3.json'"
+
+# A harness program this machine does not have is skipped with a visible error,
+# never retried, and never starts a session (issue #549).
+jq '.harness.claude=["/nonexistent-machines/claude-bin","{session}"]' "$TMP/config.json" > "$TMP/config-noharness.json"
+id5="$(cd "$TMP/work" && AI_BLOCKER_WATCH_CONFIG="$TMP/config-noharness.json" BW wait o/r#5 --harness claude --session s10 2>/dev/null)"
+: > "$FAKE/resumed"
+check 'a missing harness program makes tick exit non-zero' "! AI_BLOCKER_WATCH_CONFIG='$TMP/config-noharness.json' BW tick"
+check 'the wait is marked unrunnable without burning attempts' "jq -e '.state==\"unrunnable\" and .attempts==0 and (.error | contains(\"not found on this machine\"))' '$TMP/home/waits/$id5.json'"
+check 'an unrunnable wake never starts a session' "[ ! -s '$FAKE/resumed' ]"
 rm -f "$FAKE/harness_fail"; touch "$FAKE/fail"; rm -f "$TMP/home/last-scan"
 check 'an unreachable GitHub makes tick exit non-zero' "! BW tick"
 check 'a failed scan does not advance the scan window' "[ ! -f '$TMP/home/last-scan' ]"
@@ -150,8 +188,15 @@ rm -f "$FAKE/fail"
 g_before="$(grep -c graphql "$FAKE/calls")"
 check 'a tick inside the alarm interval does not rescan' "BW tick && [ \"\$(grep -c graphql "$FAKE/calls")\" = \"\$g_before\" ]"
 
-jq '.alarm_enabled=false' "$TMP/config.json" > "$TMP/config-off.json"
-check 'a disabled alarm refuses to run standalone' "! AI_BLOCKER_WATCH_CONFIG='$TMP/config-off.json' BW alarm"
+jq '.alarm_enabled=false' "$TMP/config.json" > "$TMP/config-noalarm.json"
+check 'a disabled alarm refuses to run standalone' "! AI_BLOCKER_WATCH_CONFIG='$TMP/config-noalarm.json' BW alarm"
+
+# Only the machine named by propagate_on_host may post alarm comments and
+# digests; every other machine must leave GitHub untouched.
+jq '.propagate_on_host="not-this-machine-xyz"' "$TMP/config.json" > "$TMP/config-foreign.json"
+gate_before="$(grep -cE 'issue (create|edit|comment)' "$FAKE/calls")"
+la_gate="$(cat "$TMP/home/last-alarm" 2>/dev/null || printf none)"
+check 'a foreign host runs no alarm posting and advances no clock' "AI_BLOCKER_WATCH_CONFIG='$TMP/config-foreign.json' BW alarm && [ \"\$(grep -cE 'issue (create|edit|comment)' "$FAKE/calls")\" = \"\$gate_before\" ] && [ \"\$(cat "$TMP/home/last-alarm")\" = \"\$la_gate\" ]"
 
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"

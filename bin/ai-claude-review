@@ -123,7 +123,7 @@ Read $PACKET_DIR/MANIFEST.md first. It binds the exact whole-source digest and c
 
 $DECISION
 
-Return findings with file and line evidence. End with a literal heading and one allowed word exactly:
+Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. End with a literal heading and one allowed word exactly:
 
 ## Verdict
 APPROVE|REJECT|BLOCKED"

@@ -13,11 +13,12 @@ record merely to reduce the file count.
 
 | Plan | Live owner | Current restart point |
 |---|---|---|
-| [`plan_ai-devops-work-claims.md`](../plan_ai-devops-work-claims.md) | [#131](https://github.com/popcre/ai-devops/issues/131) | Step 2; the throughput prerequisites are complete |
+| [`plan_ai-devops-work-claims.md`](../plan_ai-devops-work-claims.md) | [#131](https://github.com/popcre/ai-devops/issues/131) | Step 3, §9.4; the [Windows and Ubuntu Git-ref qualification](../tests/verification/work-claims/2026-09-17T175505Z/ref-qualification.md) and [task-only schema/baseline](../tests/verification/work-claims/2026-09-17T182535Z/baseline-2026-09-17T182535Z.md) passed |
 | [`plan_ast-grep-multi-machine-management.md`](../plan_ast-grep-multi-machine-management.md) | [#187](https://github.com/popcre/ai-devops/issues/187) | In flight in PR #192; do not duplicate it |
 | [`plan_cross_repo_routing_and_gate_enforcement.md`](../plan_cross_repo_routing_and_gate_enforcement.md) | [#335](https://github.com/popcre/ai-devops/issues/335) | Phase 4, Step 4.1; roll out thin policies to the remaining repositories |
 | [`plan_full-strategy-remediation.md`](../plan_full-strategy-remediation.md) | [#62](https://github.com/popcre/ai-devops/issues/62) | First non-complete STATUS row; externally blocked work stays explicit |
 | [`plan_grok_integration-review-access.md`](../plan_grok_integration-review-access.md) | [#249](https://github.com/popcre/ai-devops/issues/249) | Step 0; no implementation has landed |
+| [`plan_windows-runner-maintenance-elevation.md`](../plan_windows-runner-maintenance-elevation.md) | [#262](https://github.com/popcre/ai-devops/issues/262) | Step 1; implement the offline narrow privilege boundary before any protected installation or live-host proof |
 | [`plan_repo-throughput-restructure.md`](../plan_repo-throughput-restructure.md) | [#159](https://github.com/popcre/ai-devops/issues/159) | #212 is complete; #169 source is merged but Kimi removal from the shared-db allocator is awaiting its active owner; #166 remains last and needs explicit owner authority for the live ruleset cutover |
 | [`plan_shared-db-complete-throughput-repair.md`](../plan_shared-db-complete-throughput-repair.md) | [#401](https://github.com/popcre/ai-devops/issues/401) | Step 0; consume independently owned #2705/#2709/#2715/#2716 work, then enforce two-sided structural admission and request-to-live delivery |
 | [`plan_reviewer-assisted-problem-solving.md`](../plan_reviewer-assisted-problem-solving.md) | [#198](https://github.com/popcre/ai-devops/issues/198) | Step 0; no implementation has started |

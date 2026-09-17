@@ -81,6 +81,7 @@ if [ "${1:-}" = "--test-stage-runner" ]; then
   for test_name in dependencies directories config config-migration tools skills identity permissions memory manifest doctor; do
     run_stage required "$test_name" test_stage "$test_name"
   done
+  run_stage optional blocker-watch test_stage blocker-watch
   run_stage optional optional-provider test_stage optional-provider
   test_node_toolchain() {
     [ "${AI_INSTALL_TEST_FAIL_STAGE:-}" != "node-toolchain" ] || return 1
@@ -286,6 +287,22 @@ seed_memory() {
   fi
 }
 run_stage required "Private memory seed" seed_memory
+
+# --------------------------------------------------------------------------
+# 4c-b. Blocker watch scheduling (#549). A waiting session is only woken by a
+#     machine that runs `ai-blocker-watch tick`, so every agent machine gets
+#     the schedule from its installer: a marked, idempotent USER crontab entry
+#     here, the Scheduled Task on Windows (bin/install-ai-devops-windows.ps1
+#     runs the same `schedule` command). Optional on purpose — a machine with
+#     neither crontab nor schtasks still installs everything else, and reruns
+#     are safe. Exactly one machine ALSO propagates blocker comments; that is
+#     decided by propagate_on_host in config/blocker-watch.json, never by this
+#     stage, so every machine can run this installer without double-posting.
+#     (Unlike ai-memory-sync's cron above, this does not wait for Ansible:
+#     wakes are needed on EVERY machine that runs sessions, including the
+#     Windows boxes Ansible does not manage.)
+# --------------------------------------------------------------------------
+run_stage optional "Blocker watch scheduling" "$REPO_ROOT/bin/ai-blocker-watch" schedule
 
 publish_install_manifest() {
   local source_sha staged owner group

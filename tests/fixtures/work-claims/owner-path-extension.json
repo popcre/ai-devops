@@ -1,0 +1,36 @@
+{
+  "fixture_schema_version": 1,
+  "case": "owner-path-extension",
+  "github_now": "2026-09-17T18:25:35Z",
+  "current": {
+    "canonical_repository": "popcre/ai-devops",
+    "task": 131,
+    "owner_hash": "2de810328380efc32d78533550b7996b8e3b68be37ce5f840787a9f667dd7c45",
+    "intended_paths": [
+      "config/work-claim-policy.json"
+    ]
+  },
+  "request": {
+    "owner_hash": "2de810328380efc32d78533550b7996b8e3b68be37ce5f840787a9f667dd7c45",
+    "append_paths": [
+      "tests/fixtures/work-claims",
+      "config/work-claim-policy.json"
+    ]
+  },
+  "non_owner_request": {
+    "owner_hash": "1118368bdf19babd49a587ab4082750fbb014092d5b5585961e7b33725454798",
+    "append_paths": [
+      "tests/verification/work-claims"
+    ]
+  },
+  "expected": {
+    "task_key": "2a603966e56a45017f91b643e309c48d07a64cd14790191e5f20cb79192e9695",
+    "owner_request_allowed": true,
+    "non_owner_request_allowed": false,
+    "paths": [
+      "config/work-claim-policy.json",
+      "tests/fixtures/work-claims"
+    ],
+    "paths_are_authority": false
+  }
+}

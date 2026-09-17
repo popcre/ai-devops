@@ -1,0 +1,28 @@
+{
+  "fixture_schema_version": 1,
+  "case": "candidate",
+  "github_now": "2026-09-17T18:25:35Z",
+  "input": {
+    "repository_alias": "git@github.com:popcre/ai-devops.git",
+    "task": 131,
+    "purpose": "freeze the policy and baseline",
+    "intended_paths": [
+      "tests/verification/work-claims",
+      "config/work-claim-policy.json"
+    ],
+    "synthetic_owner_token": "CAIiKA6oZ9XBZRj-Bt_FRgrGm3FRzNMOQf4h2i_G1Eo"
+  },
+  "remote": null,
+  "expected": {
+    "canonical_repository": "popcre/ai-devops",
+    "task_key": "2a603966e56a45017f91b643e309c48d07a64cd14790191e5f20cb79192e9695",
+    "ref": "refs/ai-devops-claims/2a603966e56a45017f91b643e309c48d07a64cd14790191e5f20cb79192e9695",
+    "owner_hash": "31ce4754b491e84aa16d74ba202ada91489641ab7a4a1e48e8dedf56656dee71",
+    "normalized_paths": [
+      "config/work-claim-policy.json",
+      "tests/verification/work-claims"
+    ],
+    "classification": "candidate",
+    "remote_action": "create_if_absent"
+  }
+}

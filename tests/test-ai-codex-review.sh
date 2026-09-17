@@ -104,6 +104,7 @@ if [ -n "${SYSTEMROOT:-}" ]; then
 fi
 check "prompt_names_the_packet_relative_to_the_review_directory" "grep -hq 'Read [.]ai-review[^ ]*/MANIFEST[.]md' '$TMP/args'/prompt-*"
 check "prompt_sends_no_absolute_snapshot_path" "! grep -hq 'Read /' '$TMP/args'/prompt-*"
+check "prompt_demands_all_findings_and_sibling_issues" "grep -hq 'Return ALL findings in one pass' '$TMP/args'/prompt-* && grep -hq 'sibling issues' '$TMP/args'/prompt-*"
 check "source_is_unchanged_by_successful_review" "[ \"$BEFORE\" = \"\$('$REPO_ROOT/bin/ai-review-sandbox' digest '$R')\" ]"
 if [ -n "${SYSTEMROOT:-}" ]; then
   export AI_PRIVATE_HELPER_WIN="$(cygpath -w "$REPO_ROOT/bin/windows-private-file.ps1")"

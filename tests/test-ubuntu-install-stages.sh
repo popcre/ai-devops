@@ -19,6 +19,15 @@ output="$(AI_INSTALL_TEST_FAIL_STAGE=optional-provider bash "$ROOT/install.sh" -
 grep -Fq 'Optional stage failed: optional-provider' <<<"$output" ||
   fail 'optional failure was not named'
 
+# Blocker-watch scheduling is optional: a machine with neither schtasks nor
+# crontab must still install cleanly, and the stage must exist on the real path.
+output="$(AI_INSTALL_TEST_FAIL_STAGE=blocker-watch bash "$ROOT/install.sh" --test-stage-runner 2>&1)" ||
+  fail 'blocker-watch scheduling failure made install nonzero'
+grep -Fq 'Optional stage failed: blocker-watch' <<<"$output" ||
+  fail 'blocker-watch scheduling was not an optional stage'
+grep -Fq 'run_stage optional "Blocker watch scheduling" "$REPO_ROOT/bin/ai-blocker-watch" schedule' "$ROOT/install.sh" ||
+  fail 'Ubuntu install does not schedule the blocker watch'
+
 AI_INSTALL_TEST_NODE_MODE=present bash "$ROOT/install.sh" --test-stage-runner >/dev/null ||
   fail 'present node/npm/npx fixture failed'
 if AI_INSTALL_TEST_NODE_MODE=missing bash "$ROOT/install.sh" --test-stage-runner >/dev/null 2>&1; then

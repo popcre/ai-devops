@@ -243,14 +243,29 @@ prepare(){
   "$PACKET" verify "$PACKET_DIR" --identity "$identity" >/dev/null
   rm -f "$identity"
   HEAD_SHA="$(git -C "$REVIEW_DIR" rev-parse HEAD)"; PACKET_HASH="$(cat "$PACKET_DIR/MANIFEST.sha256")"
+  # Muse reads the sealed evidence but keeps its own verdict contract.
+  printf '\n\nRead %s/MANIFEST.md first for the exact change and test evidence; ignore its answer-format section and use the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning.\n' "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
 }
 load_key(){
-  need op; local candidate="$STATE/credential.lock.d" owner token attempt; token="$$-$RANDOM-$(date +%s)"; mkdir -p "$STATE"
-  for attempt in 1 2 3; do
-    if mkdir "$candidate" 2>/dev/null; then printf '%s\n' "$token" > "$candidate/token"; printf '%s\n' "$$" > "$candidate/pid"; CRED_LOCK="$candidate"; CRED_TOKEN="$token"; break; fi
-    owner="$(cat "$candidate/pid" 2>/dev/null || true)"; case "$owner" in ''|*[!0-9]*) if [ -n "$(find "$candidate" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ]; then mv "$candidate" "$candidate.stale.$token" 2>/dev/null && rm -rf "$candidate.stale.$token"; else sleep 1; fi;; *) kill -0 "$owner" 2>/dev/null && sleep 1 || { mv "$candidate" "$candidate.stale.$token" 2>/dev/null && rm -rf "$candidate.stale.$token"; };; esac
+  # Serialize every 1Password read behind one machine-wide lock. Concurrent
+  # turns wait their turn (bounded, with backoff) instead of refusing.
+  need op; local candidate="$STATE/credential.lock.d" owner token budget deadline delay=1 waited=0; token="$$-$RANDOM-$(date +%s)"; mkdir -p "$STATE"
+  budget="${AI_MUSE_CREDENTIAL_WAIT_SECONDS:-120}"; case "$budget" in ''|*[!0-9]*) die 'AI_MUSE_CREDENTIAL_WAIT_SECONDS must be a whole number of seconds.';; esac
+  deadline=$(( $(date +%s) + budget ))
+  while :; do
+    if mkdir "$candidate" 2>/dev/null; then printf '%s
+' "$token" > "$candidate/token"; printf '%s
+' "$$" > "$candidate/pid"; CRED_LOCK="$candidate"; CRED_TOKEN="$token"; break; fi
+    owner="$(cat "$candidate/pid" 2>/dev/null || true)"
+    case "$owner" in
+      ''|*[!0-9]*) if [ -n "$(find "$candidate" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ]; then ! mv "$candidate" "$candidate.stale.$token" 2>/dev/null || { rm -rf "$candidate.stale.$token"; continue; }; fi;;
+      *) if ! kill -0 "$owner" 2>/dev/null; then ! mv "$candidate" "$candidate.stale.$token" 2>/dev/null || { rm -rf "$candidate.stale.$token"; continue; }; fi;;
+    esac
+    [ "$(date +%s)" -lt "$deadline" ] || die "1Password credential lock still held by another Muse turn after ${budget}s; no key was read. Retry the Muse turn."
+    [ "$waited" -eq 1 ] || { printf 'Muse: waiting for another turn to finish reading 1Password...
+' >&2; waited=1; }
+    sleep "$delay"; [ "$delay" -ge 4 ] || delay=$((delay * 2))
   done
-  [ -n "$CRED_LOCK" ] || die '1Password is busy; retry the Muse turn.'
   MODEL_API_KEY="$(op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"; release_credential_lock; [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
 }
 tree_state(){
@@ -351,10 +366,36 @@ exec "$@"
 validate_heartbeat(){
   case "${AI_MUSE_HEARTBEAT_INTERVAL:-10}" in ''|0|*[!0-9]*) die 'AI_MUSE_HEARTBEAT_INTERVAL must be a positive whole number of seconds.' ;; esac
 }
+muse_code_durable_log(){ # this session's date-bucketed durable log; bounded, symlink-safe, fail closed
+  local sid="$1" hits
+  [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+  [ -n "${XDG_DATA_HOME:-}" ] && [ -d "$XDG_DATA_HOME/muse/sessions" ] || return 1
+  hits="$(find "$XDG_DATA_HOME/muse/sessions" -maxdepth 4 -name '.*' -prune -o -type d -name "$sid" -print 2>/dev/null)" || return 1
+  [ "$(printf '%s\n' "$hits" | sed '/^$/d' | wc -l)" -eq 1 ] || return 1
+  [ -f "$hits/session.jsonl" ] && [ ! -L "$hits/session.jsonl" ] || return 1
+  printf '%s' "$hits/session.jsonl"
+}
 turn_usage(){
-  local out="$1" sid="$2" event="$3" usage_python usage
-  [ "$ENGINE" != muse-code ] || { printf '%s' '{"scope":"turn","completeness":"unavailable","availability_reason":"engine-usage-not-reported"}'; return 0; }
+  local out="$1" sid="$2" event="$3" usage_python usage log run
   usage_python="$(command -v python3 || command -v python || true)"
+  if [ "$ENGINE" = muse-code ]; then
+    # The stdout stream carries no token counters; the CLI's own durable store does.
+    # Scope the store by the run id this turn's stream itself reported.
+    run="$(jq -sr '[.[]|select(.payload_type=="runtime.command.accepted")|.payload.command_id//empty]|first//empty' "$out" 2>/dev/null || true)"
+    [ -n "$run" ] || run="$(jq -sr '[.[]|select(.payload_type=="session.run.linked")|.payload.run_stream.id//empty]|first//empty' "$out" 2>/dev/null || true)"
+    log=""; { [ -n "$sid" ] && [ -n "$run" ]; } && log="$(muse_code_durable_log "$sid" || true)"
+    if [ -z "$run" ]; then
+      usage='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-run-id-unresolved"}'
+    elif [ -z "$log" ]; then
+      usage='{"scope":"turn","completeness":"unavailable","availability_reason":"durable-store-unreadable"}'
+    elif { [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ "${AI_MUSE_TEST_USAGE_FAILURE:-0}" = 1 ]; } || [ -z "$usage_python" ] || ! usage="$("$usage_python" "$ROOT/tools/reviewer_usage.py" muse-code "$log" --version "$VERSION" --provider muse --model "$MODEL" --session "$sid" --run "$run" 2> "$out.usage-error")"; then
+      usage='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-formatting-failed"}'
+    fi
+    if [ "$(printf '%s' "$usage" | jq -r '.completeness//""' 2>/dev/null || true)" = unavailable ]; then
+      printf 'Muse usage is unavailable; the completed response is retained and must not be replayed.\n' >&2
+    fi
+    printf '%s' "$usage"; return 0
+  fi
   if { [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ "${AI_MUSE_TEST_USAGE_FAILURE:-0}" = 1 ]; } || [ -z "$usage_python" ] || ! usage="$("$usage_python" "$ROOT/tools/reviewer_usage.py" opencode "$out" --version "$VERSION" --provider muse --model "$MODEL" --session "$sid" --run "$event" 2> "$out.usage-error")"; then
     usage='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-formatting-failed"}'
     printf 'Muse usage is unavailable; the completed response is retained and must not be replayed.\n' >&2

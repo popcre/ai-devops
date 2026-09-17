@@ -1,0 +1,19 @@
+{
+  "fixture_schema_version": 1,
+  "case": "malformed",
+  "github_now": "2026-09-17T18:25:35Z",
+  "remote": {
+    "schema": "ai-work-claim/v999",
+    "canonical_repository": "popcre/ai-devops",
+    "task": {
+      "kind": "issue",
+      "number": 131
+    },
+    "owner_hash": "not-a-sha256"
+  },
+  "expected": {
+    "task_key": "2a603966e56a45017f91b643e309c48d07a64cd14790191e5f20cb79192e9695",
+    "classification": "malformed",
+    "remote_action": "fail_closed"
+  }
+}

@@ -8,6 +8,7 @@ PASS=0; FAIL=0
 check(){ local label="$1" out; shift; if out="$(bash -c "$1" 2>&1)"; then printf 'PASS  %s\n' "$label"; PASS=$((PASS+1)); else printf 'FAIL  %s\n' "$label"; printf '%s\n' "$out" | tail -n 8 | sed 's/^/      /'; FAIL=$((FAIL+1)); fi; }
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/muse-code-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 command -v jq >/dev/null 2>&1 || { printf 'SKIP  jq unavailable\n'; exit 0; }
+PYTHON="$(command -v python3 || command -v python)" || { printf 'SKIP  python unavailable\n'; exit 0; }
 
 VERSION="$(tr -d ' \r\n' < "$ROOT/config/muse-code/version")"
 HOME_FIX="$TMP/home"; REPO="$TMP/repo"; mkdir -p "$HOME_FIX" "$REPO" "$TMP/bin"
@@ -29,7 +30,20 @@ case "${1:-}" in
     store="$XDG_DATA_HOME/muse/sessions/.msp-view-v1/$sid"
     text="${MUSE_STUB_TEXT:-$([ -d "$store" ] && echo remembered || echo first)}"
     mkdir -p "$store"; printf '{}' > "$store/HEAD.json"
+    # The real CLI keeps a date-bucketed durable store with per-model-call token
+    # counters; the stream itself only names the run (command_id).
+    run="$sid-run-$RANDOM$$"
+    if [ -z "${MUSE_STUB_NO_DURABLE_STORE:-}" ]; then
+      dstore="$XDG_DATA_HOME/muse/sessions/$(date +%Y/%m/%d)/$sid"; mkdir -p "$dstore"
+      if [ -n "${MUSE_STUB_GARBAGE_STORE:-}" ]; then printf 'not-json\n' >> "$dstore/session.jsonl"
+      else
+        mrow(){ jq -cn --arg rid "$1" --argjson i "$2" --argjson o "$3" --argjson cr "$4" --argjson cw "$5" --argjson r "$6" '{payload_type:"runtime.session",payload:{run_id:$rid,event:{kind:"model_completed",model:"muse-spark-1.3-contributor",finish_reason:"stop",usage:{input_tokens:$i,output_tokens:$o,cached_tokens:$cr,cache_write_tokens:$cw,cache_read_tokens:$cr,reasoning_tokens:$r}}}}'; }
+        mrow "$run" 19835 472 8561 0 387 >> "$dstore/session.jsonl"
+        mrow 11111111-2222-4333-8444-555555555555 999999 999999 999999 0 999999 >> "$dstore/session.jsonl"
+      fi
+    fi
     ev(){ jq -cn --arg sid "$1" --arg t "$2" --argjson p "$3" '{stream:{kind:"session",id:$sid},payload_type:$t,payload:$p}'; }
+    [ -n "${MUSE_STUB_NO_RUN_ID:-}" ] || ev "$sid" runtime.command.accepted "$(jq -cn --arg cid "$run" '{kind:"command_accepted",command_id:$cid,command_kind:"exec"}')"
     ev "$sid" task.lifecycle.started '{}'
     [ "${MUSE_STUB_MODE:-}" = mixed ] && ev 11111111-1111-4111-8111-111111111111 task.lifecycle.started '{}'
     [ "${MUSE_STUB_MODE:-}" = nostream ] && printf '{"payload_type":"note","payload":{}}\n'
@@ -54,11 +68,13 @@ STORE="$HOME_FIX/.local/share/ai-devops/muse-code/muse/sessions/.msp-view-v1"
 ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=claude AI_MUSE_ENGINE=muse-code AI_MUSE_TEST_DIR='$TMP' MUSE_STUB_ENV_FILE='$TMP/provider-env' MUSE_STUB_ARGS_FILE='$TMP/provider-args'"
 
 check 'unknown engine refuses before any work' "cd '$REPO' && ! eval \"$ENV AI_MUSE_ENGINE=bogus '$SCRIPT' doctor\" 2>&1 | grep -q PASS"
+check 'reviewer_usage muse-code adapter unit cases' "'$PYTHON' '$ROOT/tests/fixtures/muse-code/usage_cases.py' -q"
 check 'default engine stays OpenCode' "cd '$REPO' && eval \"USERPROFILE='$HOME_FIX' PATH='$TMP/bin:$PATH' AI_MUSE_CALLER=claude '$SCRIPT' doctor\" 2>&1 | grep -q 'engine: opencode'"
 check 'doctor proves the pinned Muse Code version' "cd '$REPO' && eval \"$ENV '$SCRIPT' doctor\" | grep -q 'PASS  Muse Code is the pinned'"
 check 'doctor refuses an unpinned Muse Code version' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' doctor\""
 check 'turn refuses an unpinned Muse Code version without contact' "cd '$REPO' && rm -f '$TMP/provider-args' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' new pin --prompt test\" && test ! -e '$TMP/provider-args'"
 check 'new session completes and returns the final answer' "cd '$REPO' && eval \"$ENV '$SCRIPT' new first --prompt test\" | grep -qx first"
+check 'provider prompt demands all findings and sibling issues' "grep -rq 'Return ALL findings in one pass' '$REPO/.ai/reviews' && grep -rq 'sibling issues' '$REPO/.ai/reviews' && grep -rq 'MANIFEST.md first' '$REPO/.ai/reviews'"
 check 'launch is read-only: no write, shell, web, personal context or prompts' "for f in exec --json --disable-write --disable-shell --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve; do grep -qx -- \"\$f\" '$TMP/provider-args' || exit 1; done && grep -qx 'muse-spark-1.3-contributor' '$TMP/provider-args'"
 check 'provider gets the key only as META_API_KEY' "grep -qx 'META_API_KEY=fake-key' '$TMP/provider-env' && ! grep -q '^MODEL_API_KEY=' '$TMP/provider-env' && ! grep -q '^AI_MUSE_KEY_ENV=' '$TMP/provider-env' && ! grep -q '^AI_MUSE_SECRET_FILE=' '$TMP/provider-env'"
 check 'prompt that looks like options never reaches the argument list' "cd '$REPO' && eval \"$ENV '$SCRIPT' new optprompt --prompt '--workspace=C:/ --enable-write'\" && ! grep -q -- '--enable-write' '$TMP/provider-args' && grep -qx -- --prompt-file '$TMP/provider-args'"
@@ -67,7 +83,11 @@ check 'provider uses private isolated stores' "grep -q '^XDG_DATA_HOME=.*ai-devo
 check 'private stores exist with owner-only modes' "for d in '$HOME_FIX/.local/share/ai-devops/muse-code' '$HOME_FIX/.local/state/ai-devops/muse-code' '$HOME_FIX/.cache/ai-devops/muse-code'; do test -d \"\$d\" || exit 1; done && ! ls '$HOME_FIX/.local/state/ai-devops/muse-code'/export-*.json 2>/dev/null"
 check 'wrapper chooses and records a UUID session identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' show first\" | jq -e '.status==\"active\" and (.session_id|test(\"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$\"))'"
 check 'follow-up resumes the exact recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask first --prompt again\" | grep -qx remembered && grep -qx \"\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .session_id)\" '$TMP/provider-args'"
-check 'report records usage as unavailable, not zero' "grep -q 'engine-usage-not-reported' '$REPO'/.ai/reviews/muse-first-*.md"
+check 'usage is scoped to this turn run and maps the durable store' "cd '$REPO' && u=\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"core-complete\" and .model_calls==1 and .counters.input==19835 and .counters.output==472 and .counters.cache_read==8561 and .counters.cache_write==0 and .counters.reasoning==387 and .counters.total==null and .counters.cost==null and (.counter_provenance|startswith(\"muse-code-\"))' >/dev/null && ! printf '%s' \"\$u\" | grep -q 999999"
+check 'report records durable-store usage counters, never invented ones' "grep -q '\"input\": 19835' '$REPO'/.ai/reviews/muse-first-*.md && grep -q 'durable-store-model-completed' '$REPO'/.ai/reviews/muse-first-*.md && ! grep -q 999999 '$REPO'/.ai/reviews/muse-first-*.md"
+check 'missing durable store keeps the turn complete and usage honestly unavailable' "cd '$REPO' && eval \"$ENV MUSE_STUB_NO_DURABLE_STORE=1 '$SCRIPT' new nostore --prompt test\" | grep -qx first && u=\$(eval \"$ENV '$SCRIPT' show nostore\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"unavailable\" and .availability_reason==\"durable-store-unreadable\"' >/dev/null && grep -q 'durable-store-unreadable' '$REPO'/.ai/reviews/muse-nostore-*.md"
+check 'garbage durable store keeps the turn complete and usage honestly unavailable' "cd '$REPO' && eval \"$ENV MUSE_STUB_GARBAGE_STORE=1 '$SCRIPT' new garbage --prompt test\" | grep -qx first && u=\$(eval \"$ENV '$SCRIPT' show garbage\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"unavailable\" and .availability_reason==\"durable-store-unreadable\"' >/dev/null"
+check 'stream without a run id keeps the turn complete and usage honestly unavailable' "cd '$REPO' && eval \"$ENV MUSE_STUB_NO_RUN_ID=1 '$SCRIPT' new norunid --prompt test\" | grep -qx first && u=\$(eval \"$ENV '$SCRIPT' show norunid\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"unavailable\" and .availability_reason==\"usage-run-id-unresolved\"' >/dev/null"
 check 'a replaced binary claiming the pinned version never runs, whatever the caller sets' "cd '$REPO' && cp '$MBIN/muse-bin-$VERSION.exe' '$TMP/stub.keep' && printf '# tampered\n' >> '$MBIN/muse-bin-$VERSION.exe' && rm -f '$TMP/provider-args' '$TMP/side-env' && ! eval \"$ENV MUSE_STUB_SIDE_ENV_FILE='$TMP/side-env' AI_MUSE_TEST_MUSE_CODE_SHA256=\$(sha256sum '$MBIN/muse-bin-$VERSION.exe' | cut -d' ' -f1) '$SCRIPT' new swapped --prompt test\"; rc=\$?; cp '$TMP/stub.keep' '$MBIN/muse-bin-$VERSION.exe'; [ \$rc -eq 0 ] && test ! -e '$TMP/provider-args' && test ! -e '$TMP/side-env'"
 check 'swapping the installed binary after the check never runs the swapped file' "cd '$REPO' && cp '$MBIN/muse-bin-$VERSION.exe' '$TMP/stub.keep2' && rm -f '$TMP/swap-mark' && out=\$(eval \"$ENV MUSE_STUB_SWAP='$MBIN/muse-bin-$VERSION.exe' MUSE_STUB_SWAP_MARK='$TMP/swap-mark' '$SCRIPT' new swaprace --prompt test\"); rc=\$?; cp '$TMP/stub.keep2' '$MBIN/muse-bin-$VERSION.exe'; [ \$rc -eq 0 ] && [ \"\$out\" = first ] && test ! -e '$TMP/swap-mark'"
 check 'the shipped fingerprint is a SHA-256' "grep -Eqx '[0-9a-f]{64}' '$ROOT/config/muse-code/sha256'"

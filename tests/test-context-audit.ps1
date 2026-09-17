@@ -38,7 +38,8 @@ $parityLines = @(
     "Serialize every 1Password read.",
     "Synology long reads use the managed long-running skill.",
     "Write a HANDOFF file at session end.",
-    "one unproven live-behavior outcome"
+    "one unproven live-behavior outcome",
+    "Never save several unproven steps"
 )
 
 $overlapSentence = "The quiet fixture sentence about pointer triggers exists only to prove overlap detection works correctly here."

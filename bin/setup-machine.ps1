@@ -138,6 +138,11 @@ if (-not (Test-Path -LiteralPath $codexConfigPath) -and
   New-Item -ItemType Directory -Force -Path (Split-Path $codexConfigPath -Parent) | Out-Null
   Copy-Item -LiteralPath $codexPortableTemplate -Destination $codexConfigPath
 }
+$codexStatuslineSetup = Join-Path $RepoPath "bin\configure-codex-statusline.ps1"
+if (-not (Test-Path -LiteralPath $codexStatuslineSetup)) {
+  throw "Missing Codex status-line reconciler: $codexStatuslineSetup"
+}
+& $codexStatuslineSetup -ConfigPath $codexConfigPath
 # %USERPROFILE%, never $HOME: on a machine with a roaming profile $HOME can point at a
 # network drive (Z:) that nothing reads back, which has silently misplaced installs here
 # before.

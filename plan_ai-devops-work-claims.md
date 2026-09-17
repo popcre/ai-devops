@@ -9,13 +9,13 @@
 |---|---|---|
 | 0. Reconcile Grok, GLM, and two execution-session reviews | ✅ done 2026-08-27 | [`plan_must_address.md`](plan_must_address.md); [`docs/work-claims-plan-review-2026-08-27.md`](docs/work-claims-plan-review-2026-08-27.md); Grok 4.6 closing verdict `APPROVE` |
 | 1. Stabilize and shorten the existing merge queue before adding claim checks | ✅ done 2026-09-08 | Reviewer determinism landed as `08269a1f10ec349c55a17a5afddf9c9255b7dcc7` with `tests/verification/reviewer-reliability/issue-160-determinism.md`; fast change-aware CI landed as `9d3dd8af9b9cacbc56cd06b75fcf584e1e64ec50` with `tests/verification/repo-throughput/issue-161-focused.md`. Start at Step 2. |
-| 2. Qualify the Git-ref primitive on Windows and Ubuntu | ⬜ open | §9.2; target `tests/verification/work-claims/<UTC>/ref-qualification.md` |
-| 3. Build the task-only v1 command and owner-extensible paths | ⬜ open | Target: `bin/ai-work-claim`, `config/work-claim-policy.json` |
+| 2. Qualify the Git-ref primitive on Windows and Ubuntu | ✅ done 2026-09-17 | [`tests/verification/work-claims/2026-09-17T175505Z/ref-qualification.md`](tests/verification/work-claims/2026-09-17T175505Z/ref-qualification.md) proves the custom namespace on both platforms and zero surviving disposable refs. |
+| 3. Build the task-only v1 command and owner-extensible paths | 🟨 schema/baseline frozen 2026-09-17; command open | [`config/work-claim-policy.json`](config/work-claim-policy.json); [`tests/verification/work-claims/2026-09-17T182535Z/baseline-2026-09-17T182535Z.md`](tests/verification/work-claims/2026-09-17T182535Z/baseline-2026-09-17T182535Z.md). Continue at §9.4; no command exists yet. |
 | 4. Add deterministic concurrency tests and an advisory PR guard | ⬜ open | Target: `tests/test-ai-work-claim.sh`, advisory workflow |
 | 5. Route, document, install, and qualify v1 | ⬜ open | Target: globals, `docs/work-claims.md`, restore/install evidence |
 | 6. Land v1 and measure its value for 30 days | ⬜ open | Target: exact-head review, merged SHA, baseline/follow-up measurement artifact |
 
-**Fresh-session starting point:** Step 2. The reviewer-determinism and CI-cost prerequisites are complete. Before each phase, fetch `origin/main`, read this STATUS table and all downstream steps, recheck issues #89/#131 and ruleset `21564317`, and preserve unrelated dirty work.
+**Fresh-session starting point:** Step 3, §9.4. The authority/portability gate and §9.3 task-only schema/baseline passed with the evidence linked above. Before each phase, fetch `origin/main`, read this STATUS table and all downstream steps, recheck issues #89/#131 and ruleset `21564317`, and preserve unrelated dirty work.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -78,8 +78,8 @@ Earlier designs and reviews still matter. A committed claims file was rejected b
 
 ## 5. Current state of the code
 
-- The first plan is published on `origin/main` at `ac72d40798d3867feef83b3d4de1bcc49acf045c` and linked from `AGENTS.md`. It is a planning artifact only; no claim tool exists. This revision is on `codex/revise-work-claims-plan-131` in PR #136 and must be refreshed after every review-driven edit.
-- Issue #131 is open. No `work-claim` labels, refs, policy file, command, tests, hooks, or workflow have been implemented.
+- The Git-ref primitive passed on Windows and Ubuntu and was published on `origin/main` at `d30b5a321f30f37d9f2c37bc567796b0b9c0e276`. Section 9.3 now freezes the policy, strict fixtures, and public measurement baseline; no claim command exists yet.
+- Issue #131 remains open. The schema/baseline phase creates no live claim, label, audit marker, command, hook, workflow, or installed behavior.
 - `AGENTS.md:20-27` now requires feature branch + PR; `config/repository-policy.json` maps both old and new ai-devops owner names to `feature-branch-pr`.
 - Active ruleset `21564317` requires pull requests, squash merging through the merge queue, and `linux-offline` + `windows-offline` checks. Organization admins have an always-bypass capability; the implementation must not use it.
 - `HANDOFF.d/` avoids one shared handoff file but records continuation, not live edit ownership.

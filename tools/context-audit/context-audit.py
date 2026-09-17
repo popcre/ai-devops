@@ -128,6 +128,7 @@ PARITY_RULES = {
     "label shared-db tickets orchestrator or not": r"non-orchestrator work",
     "never replace system binaries": r"system binaries|operating-system binaries",
     "one unproven outcome per session": r"one unproven live-behavior outcome",
+    "do not defer live-proof dumps": r"Never save several unproven steps",
 }
 
 # Client-only text that is allowed to appear in exactly one global. If one of
