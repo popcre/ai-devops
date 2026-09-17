@@ -57,6 +57,7 @@ check 'turn refuses an unpinned Muse Code version without contact' "cd '$REPO' &
 check 'new session completes and returns the final answer' "cd '$REPO' && eval \"$ENV '$SCRIPT' new first --prompt test\" | grep -qx first"
 check 'launch is read-only: no write, shell, web, personal context or prompts' "for f in exec --json --disable-write --disable-shell --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve; do grep -qx -- \"\$f\" '$TMP/provider-args' || exit 1; done && grep -qx 'muse-spark-1.3-contributor' '$TMP/provider-args'"
 check 'provider gets the key only as META_API_KEY' "grep -qx 'META_API_KEY=fake-key' '$TMP/provider-env' && ! grep -q '^MODEL_API_KEY=' '$TMP/provider-env' && ! grep -q '^AI_MUSE_KEY_ENV=' '$TMP/provider-env' && ! grep -q '^AI_MUSE_SECRET_FILE=' '$TMP/provider-env'"
+check 'prompt that looks like options never reaches the argument list' "cd '$REPO' && eval \"$ENV '$SCRIPT' new optprompt --prompt '--workspace=C:/ --enable-write'\" && ! grep -q -- '--enable-write' '$TMP/provider-args' && grep -qx -- --prompt-file '$TMP/provider-args'"
 check 'key never appears in provider arguments' "! grep -q fake-key '$TMP/provider-args'"
 check 'provider uses private isolated stores' "grep -q '^XDG_DATA_HOME=.*ai-devops/muse-code' '$TMP/provider-env' && grep -q '^XDG_CONFIG_HOME=.*muse-code-xdg' '$TMP/provider-env'"
 check 'wrapper chooses and records a UUID session identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' show first\" | jq -e '.status==\"active\" and (.session_id|test(\"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$\"))'"
@@ -77,6 +78,10 @@ check 'completion followed by failure is rejected' "cd '$REPO' && ! eval \"$ENV 
 check 'rejected turns leave incomplete evidence, not accepted reports' "test -n \"\$(ls '$REPO'/.ai/reviews/muse-f7-incomplete-*.md 2>/dev/null)\" && test -z \"\$(ls '$REPO'/.ai/reviews/muse-f7-2*.md 2>/dev/null)\""
 check 'compatibility review requires a final verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=narration '$SCRIPT' review '$REPO' test\""
 check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: NO FINDINGS' '$SCRIPT' review '$REPO' test\" | grep -q 'VERDICT: NO FINDINGS'"
+# Symlink refusal needs real symlinks; Git Bash only makes them with native symlink support.
+if (export MSYS=winsymlinks:nativestrict; mkdir -p "$TMP/lt" && ln -s "$TMP/lt" "$TMP/lt-link" 2>/dev/null && test -L "$TMP/lt-link"); then
+  check 'delete refuses a symlinked session store' "export MSYS=winsymlinks:nativestrict; cd '$REPO' && eval \"$ENV '$SCRIPT' new linked --prompt test\" >/dev/null && sid=\"\$(eval \"$ENV '$SCRIPT' show linked\" | jq -r .session_id)\" && mv '$STORE' '$TMP/decoy' && ln -s '$TMP/decoy' '$STORE' && ! eval \"$ENV '$SCRIPT' delete linked\"; rc=\$?; test -d '$TMP/decoy/'\"\$sid\" || rc=1; rm -f '$STORE'; mv '$TMP/decoy' '$STORE'; exit \$rc"
+else printf 'SKIP  delete refuses a symlinked session store (no native symlinks)\n'; fi
 check 'source repository is untouched' "test -z \"\$(git -C '$REPO' status --porcelain)\""
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

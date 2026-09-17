@@ -155,6 +155,7 @@ runtime_env(){
     export XDG_STATE_HOME="$PROFILE_HOME/.local/state/ai-devops/muse-code"
     export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/muse-code"
     mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+    chmod 700 "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" 2>/dev/null || true
     return 0
   fi
   export XDG_CONFIG_HOME="$CFG/opencode-xdg"
@@ -335,7 +336,7 @@ retain_turn(){ # retain exact bytes and optional observations in one metadata wr
   jq --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage}' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
 run_turn(){
-  local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
+  local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text prompt_arg=() timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
   local bash_bin=/usr/bin/bash key_file
   local -a clean_env
   validate_heartbeat
@@ -348,8 +349,10 @@ run_turn(){
     local workspace="$dir"; if command -v cygpath >/dev/null 2>&1; then workspace="$(cygpath -w "$dir")"; fi
     # Read-only review: no writes, no shell, no web, no personal context, no prompts.
     args=(exec --json --model "$MODEL" --session-id "$sid" --workspace "$workspace" --disable-write --disable-shell --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve)
+    # The prompt travels in a private file, never as an argument the CLI could parse as options.
+    if command -v cygpath >/dev/null 2>&1; then args+=(--prompt-file "$(cygpath -w "$prompt")"); else args+=(--prompt-file "$prompt"); fi
   else
-    args=(run --dir "$dir" --agent muse-review --model "$MODEL" --format json); [ -z "$sid" ] || args+=(--session "$sid")
+    prompt_arg=("$prompt_text"); args=(run --dir "$dir" --agent muse-review --model "$MODEL" --format json); [ -z "$sid" ] || args+=(--session "$sid")
   fi
   EXPECTED_SID="$sid"
   [ -x "$bash_bin" ] && [ -x "$env_bin" ] || die 'trusted absolute Bash/env executables are required for the Muse credential boundary.'
@@ -374,7 +377,7 @@ run_turn(){
     local launch_tmp; launch_tmp="$(tmp_file)"
     jq --arg now "$(date -u +%FT%TZ)" '.status="provider_launching"|.updated_at=$now' "$meta" > "$launch_tmp" && mv -f "$launch_tmp" "$meta"
   fi
-  ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" "$prompt_text" ) > "$out" 2> "$out.stderr" & TURN_PID=$!
+  ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
   MUSE_FAILURE_PHASE=provider-turn
   ACTIVE_META="$meta"; test_interrupt_at post_launch
   [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
@@ -513,8 +516,11 @@ cmd_transcript(){
 muse_code_delete_session(){ # the CLI has no delete command; remove only this exact private session store
   local sid="$1" dir
   [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
-  dir="$XDG_DATA_HOME/muse/sessions/.msp-view-v1/$sid"
-  [ ! -L "$dir" ] || return 1
+  local base="$XDG_DATA_HOME" part real_base
+  # No symlink anywhere from the private store root down to the session directory.
+  for part in "" /muse /muse/sessions /muse/sessions/.msp-view-v1 "/muse/sessions/.msp-view-v1/$sid"; do [ ! -L "$base$part" ] || return 1; done
+  dir="$base/muse/sessions/.msp-view-v1/$sid"
+  if [ -e "$dir" ]; then real_base="$(cd "$base" && pwd -P)" || return 1; [ "$(cd "$dir" && pwd -P)" = "$real_base/muse/sessions/.msp-view-v1/$sid" ] || return 1; fi
   rm -rf -- "$dir" && [ ! -e "$dir" ]
 }
 cmd_reconcile(){
