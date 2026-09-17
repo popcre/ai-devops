@@ -191,6 +191,18 @@ muse_code_run(){ # every non-turn Muse Code call gets the same minimal environme
   "${e[@]}" "$BIN" "$@"
 }
 muse_code_sha256(){ tr -d ' \r\n' < "$ROOT/config/muse-code/sha256"; } # the exact pinned file, checked before it runs or sees a key; no override
+muse_code_stage(){ # run only a private copy verified after it was made, so swapping the installed file later changes nothing
+  local want dir tmp got; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] || return 1
+  [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] || return 1
+  dir="$PROFILE_HOME/.local/share/ai-devops/muse-code-bin"
+  ! linked_below_home "$dir" || return 1
+  mkdir -p "$dir" && chmod 700 "$dir" && protect_windows_path "$dir" directory || return 1
+  if [ ! -f "$dir/muse-$want.exe" ] || [ -L "$dir/muse-$want.exe" ] || [ "$(sha256sum "$dir/muse-$want.exe" | cut -d' ' -f1)" != "$want" ]; then
+    rm -f -- "$dir/muse-$want.exe"; tmp="$(mktemp "$dir/copy.XXXXXXXX")" || return 1
+    cp -- "$BIN" "$tmp" && chmod 700 "$tmp" && protect_windows_path "$tmp" file && got="$(sha256sum "$tmp" | cut -d' ' -f1)" && [ "$got" = "$want" ] && mv -f -- "$tmp" "$dir/muse-$want.exe" || { rm -f -- "$tmp"; return 1; }
+  fi
+  BIN="$dir/muse-$want.exe"
+}
 muse_code_pinned(){ local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
 linked_below_home(){ # true when the path or any ancestor below the profile home is a link or junction
   local p="$1"; while [ -n "$p" ] && [ "$p" != "$PROFILE_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do [ ! -L "$p" ] || return 0; p="$(dirname "$p")"; done; return 1
@@ -198,7 +210,7 @@ linked_below_home(){ # true when the path or any ancestor below the profile home
 require_runtime(){
   if [ "$ENGINE" = muse-code ]; then
     [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL Muse Code $VERSION is not installed at $BIN."
-    muse_code_pinned || die "local_dependency_unavailable: LOCAL Muse Code cannot start or is not the pinned $VERSION. Run: AI_MUSE_CALLER=$CALLER AI_MUSE_ENGINE=muse-code ai-muse doctor"
+    { muse_code_stage && muse_code_pinned; } || die "local_dependency_unavailable: LOCAL Muse Code cannot start or is not the pinned $VERSION. Run: AI_MUSE_CALLER=$CALLER AI_MUSE_ENGINE=muse-code ai-muse doctor"
     return 0
   fi
   [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL OpenCode is not installed. Run: $ROOT/bin/setup-opencode-muse.sh"
@@ -631,7 +643,7 @@ cmd_doctor(){
   printf 'ai-muse doctor (engine: %s)\n\n' "$ENGINE"
   if [ "$ENGINE" = muse-code ]; then
     check "pinned Muse Code $VERSION is installed" test -x "$BIN"
-    check "Muse Code is the pinned $VERSION file and reports it" muse_code_pinned
+    check "Muse Code is the pinned $VERSION file and reports it" eval 'muse_code_stage && muse_code_pinned'
   else
     check 'pinned OpenCode is installed' test -x "$BIN"
     check 'Muse configuration is installed' test -f "$OC_CFG/opencode.json"

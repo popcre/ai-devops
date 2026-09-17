@@ -18,7 +18,7 @@ printf '#!/usr/bin/env bash\nprintf fake-key\n' > "$TMP/bin/op"
 cat > "$MBIN/muse-bin-$VERSION.exe" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
-  --version) [ -z "${MUSE_STUB_SIDE_ENV_FILE:-}" ] || env >> "$MUSE_STUB_SIDE_ENV_FILE"; printf 'Muse Code 1.3.0 (%s)\n' "${MUSE_STUB_VERSION:-1.3.0-R3233.1}";;
+  --version) [ -z "${MUSE_STUB_SWAP:-}" ] || printf '#!/usr/bin/env bash\ntouch "%s"\n' "$MUSE_STUB_SWAP_MARK" > "$MUSE_STUB_SWAP"; [ -z "${MUSE_STUB_SIDE_ENV_FILE:-}" ] || env >> "$MUSE_STUB_SIDE_ENV_FILE"; printf 'Muse Code 1.3.0 (%s)\n' "${MUSE_STUB_VERSION:-1.3.0-R3233.1}";;
   exec)
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
     [ -z "${MUSE_STUB_ARGS_FILE:-}" ] || printf '%s\n' "$@" > "$MUSE_STUB_ARGS_FILE"
@@ -69,6 +69,7 @@ check 'wrapper chooses and records a UUID session identity' "cd '$REPO' && eval 
 check 'follow-up resumes the exact recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask first --prompt again\" | grep -qx remembered && grep -qx \"\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .session_id)\" '$TMP/provider-args'"
 check 'report records usage as unavailable, not zero' "grep -q 'engine-usage-not-reported' '$REPO'/.ai/reviews/muse-first-*.md"
 check 'a replaced binary claiming the pinned version never runs, whatever the caller sets' "cd '$REPO' && cp '$MBIN/muse-bin-$VERSION.exe' '$TMP/stub.keep' && printf '# tampered\n' >> '$MBIN/muse-bin-$VERSION.exe' && rm -f '$TMP/provider-args' '$TMP/side-env' && ! eval \"$ENV MUSE_STUB_SIDE_ENV_FILE='$TMP/side-env' AI_MUSE_TEST_MUSE_CODE_SHA256=\$(sha256sum '$MBIN/muse-bin-$VERSION.exe' | cut -d' ' -f1) '$SCRIPT' new swapped --prompt test\"; rc=\$?; cp '$TMP/stub.keep' '$MBIN/muse-bin-$VERSION.exe'; [ \$rc -eq 0 ] && test ! -e '$TMP/provider-args' && test ! -e '$TMP/side-env'"
+check 'swapping the installed binary after the check never runs the swapped file' "cd '$REPO' && cp '$MBIN/muse-bin-$VERSION.exe' '$TMP/stub.keep2' && rm -f '$TMP/swap-mark' && out=\$(eval \"$ENV MUSE_STUB_SWAP='$MBIN/muse-bin-$VERSION.exe' MUSE_STUB_SWAP_MARK='$TMP/swap-mark' '$SCRIPT' new swaprace --prompt test\"); rc=\$?; cp '$TMP/stub.keep2' '$MBIN/muse-bin-$VERSION.exe'; [ \$rc -eq 0 ] && [ \"\$out\" = first ] && test ! -e '$TMP/swap-mark'"
 check 'the shipped fingerprint is a SHA-256' "grep -Eqx '[0-9a-f]{64}' '$ROOT/config/muse-code/sha256'"
 check 'transcript refuses an unpinned Muse Code binary' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' transcript first\" 2>/dev/null | grep -q session_id"
 check 'version checks and exports never see unrelated caller secrets' "cd '$REPO' && rm -f '$TMP/side-env' && eval \"$ENV MUSE_STUB_SIDE_ENV_FILE='$TMP/side-env' LEAKY_TOKEN=leak-marker-7Q2Z '$SCRIPT' transcript first\" >/dev/null && { grep -q '^XDG_DATA_HOME=' '$TMP/side-env' || { echo 'no provider environment was recorded'; exit 1; }; } && { ! grep -nE 'LEAKY_TOKEN|leak-marker-7Q2Z' '$TMP/side-env' || { echo 'caller secret reached the provider'; exit 1; }; }"
