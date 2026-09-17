@@ -219,7 +219,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 5. One outcome issue remains open through `live_verified`; claims and PRs are supporting records.
 6. Reuse existing coordination events and blocker ledger as the state store.
 7. Reviewer/runner SLOs govern start/reroute, not cancellation of healthy active work.
-8. Native merge queue activation follows #2530 exactly and preserves all required checks.
+8. (Moved out 2026-09-16, owner ruling.) Native merge queue activation and the `popcre` transfer are not #401 acceptance criteria; they belong only to shared-db #2530.
 9. An approved-migration train is an immutable exact list with dependency closure, risk compatibility, target proof, and per-migration live assertions. If #2716 is authorized and lands, a fully machine-qualified train promotes automatically and serially; any missing or ambiguous proof stops for an engineer, not a non-technical version-number choice from Albert.
 10. Owner authorization is consumed once for its stated scope. A session must not ask again for the same fix/deploy action, and must not ask Albert to judge migration identifiers that the governed evidence already decides.
 11. Routing is enforced twice: the sending session must classify from the actual proposed change, and the orchestrator must independently admit only database structure/schema work. A handover, `db-work` label, repository location, or sender assertion is never sufficient.
@@ -252,7 +252,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 
 #### Step 0 — freeze one live dependency baseline
 
-In a fresh worktree in each repository, re-resolve `origin/main`, #401, shared-db #2530/#2705/#2709/#2715/#2716, ai-devops #159/#166/#337, open PRs, required checks, active marker, claims, reviewer leases, stage locks, and runner labels. Write a redacted baseline under `tests/verification/shared-db-throughput/` in ai-devops. Map every item in this plan to an existing owner or a new #401 child; never create duplicate implementation owners.
+In a fresh worktree in each repository, re-resolve `origin/main`, #401, shared-db #2705/#2709/#2715/#2716, ai-devops #159/#166/#337, open PRs, required checks, active marker, claims, reviewer leases, stage locks, and runner labels. Write a redacted baseline under `tests/verification/shared-db-throughput/` in ai-devops. Map every item in this plan to an existing owner or a new #401 child; never create duplicate implementation owners.
 
 **Dependencies:** none. **Parallel:** read-only shared-db and ai-devops inventory may run together.
 
@@ -530,7 +530,7 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 3. **Batch partial failure:** stop, read the exact target ledger, record the applied prefix, and fix forward.
 4. **Runner duplication:** stable aggregator accepts exactly one qualified result per required assertion.
 5. **Reviewer false release:** only unstarted/terminal evidence may return a slot; active liveness protects the lease.
-6. **Transfer integration break:** follow #2530 recovery pack and keep the old guarded path until native queue proof.
+6. **Transfer integration break:** outside #401; owned by shared-db #2530 and its recovery pack.
 7. **Instruction drift:** canonical/installed hash and forbidden-phrase tests block activation.
 8. **Programme expansion:** every new defect maps to one existing phase/owner; otherwise #401 records why it is genuinely outside scope. The 2026-09-15 stall causes were mapped this way, into Steps 2–7, rather than added as new steps.
 9. **Self-service proof overreach:** a live-proof agent could be tempted to write production to satisfy an assertion. The brief must stop at any write and route it to the §11 authority gate.
