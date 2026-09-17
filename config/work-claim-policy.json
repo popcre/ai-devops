@@ -87,5 +87,11 @@
     "remote_ref_pages": 5,
     "audit_comment_pages": 5
   },
+  "github_request_budget": {
+    "availability_max": 5,
+    "acquire_max": 10,
+    "minimum_core_remaining_before_acquire": 200,
+    "secondary_or_abuse_limit_behavior": "refuse_before_ref_creation_no_retry"
+  },
   "remote_ownership_failure": "fail_closed"
 }
