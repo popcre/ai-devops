@@ -8,7 +8,7 @@ Related: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401)
 
 ## STATUS — read first
 
-The original refuse-bundle work is complete. The source-rule follow-up is implemented on PR #520 but is not accepted until exact-head review, merge, and installed-global proof. Remaining leftover proofs stay with live [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator); do not start a second chat on them.
+The original refuse-bundle work is complete. The source-rule follow-up merged through PR #520; acceptance now waits only on installed-global proof and issue closure. Remaining leftover proofs stay with live [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator); do not start a second chat on them.
 
 | # | Step | State | Date | Evidence |
 |---|---|---|---|---|
@@ -18,11 +18,11 @@ The original refuse-bundle work is complete. The source-rule follow-up is implem
 | 3 | One sentence in `shared-db-handover` | ✅ complete | 2026-09-16 | Skill says leftover live proofs are one issue and one session each, and still says proofs never go to the orchestrator. |
 | 4 | Stop #401 STATUS from dumping several unproven steps on one ticket | ✅ complete | 2026-09-16 | 3027 session live at 2026-09-16T20:18Z (helper PR [shared-db#3101](https://github.com/u2giants/shared-db/pull/3101) updating; transcript 20:09Z). Split forbidden. Legend added. Posted proofs on Steps 1 and 2A stay with 3027. Remaining unproven Steps 2, 3, 4, 6, 7 stay with 3027 with “No further steps may be added to #3027.” 3029 not started. |
 | 5 | Keep routers pointing here; merge; install globals | ✅ complete | 2026-09-16 | PR #515 merged as `837fe41d`. Installed Claude and Codex globals on edge-dev contain `one unproven live-behavior outcome`. #511 closed. |
-| 6 | Prevent later live-proof dumps at the source | 🟡 partial | 2026-09-17 | PR #520 adds `Never save several unproven steps` to both globals and the handover rule. Not yet on `origin/main` or installed. |
-| 7 | Require one live-proof owner when code lands | 🟡 partial | 2026-09-17 | PR #520 adds `opened when that code landed` to both plan-writer sources and guards both new rules. Not yet on `origin/main`. |
-| 8 | Review, merge, install, and close | 🟡 partial | 2026-09-17 | Rebased focused validation passed: required globals 1/1, context enforcement 11/11, strict audit 0 parity mismatches, Markdown reachability 1/1. Exact-head independent review, merge queue, installed proof, and issue close remain. |
+| 6 | Prevent later live-proof dumps at the source | ✅ complete in source | 2026-09-17 | PR #520 merged as `7f8976a8d3e4542dc6a3c042cf3a73560e7ea1aa`; installation remains Step 8. |
+| 7 | Require one live-proof owner when code lands | ✅ complete in source | 2026-09-17 | PR #520 merged as `7f8976a8d3e4542dc6a3c042cf3a73560e7ea1aa`; both plan-writer sources and guards are on `origin/main`. |
+| 8 | Review, merge, install, and close | 🟡 partial | 2026-09-17 | Exact-head review approved and PR #520 merged as `7f8976a8d3e4542dc6a3c042cf3a73560e7ea1aa`. Installed-global proof and issue #511 closure remain; installation is owner-gated. |
 
-**Fresh-session starting point:** Step 8 exact-head independent review on PR #520. Do not re-implement Steps 1–7. 3027 leftover proofs are not this plan’s work.
+**Fresh-session starting point:** Step 8 installed-global proof from merged `origin/main`, then close #511. Do not re-implement Steps 1–7. 3027 leftover proofs are not this plan’s work.
 
 ---
 
