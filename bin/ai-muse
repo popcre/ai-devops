@@ -191,8 +191,7 @@ muse_code_run(){ # every non-turn Muse Code call gets the same minimal environme
   "${e[@]}" "$BIN" "$@"
 }
 muse_code_sha256(){ # the binary must be the exact pinned file before it runs or sees a key
-  if [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ -n "${AI_MUSE_TEST_MUSE_CODE_SHA256:-}" ]; then printf '%s' "$AI_MUSE_TEST_MUSE_CODE_SHA256"; else tr -d ' 
-' < "$ROOT/config/muse-code/sha256"; fi
+  if [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ -n "${AI_MUSE_TEST_MUSE_CODE_SHA256:-}" ]; then printf '%s' "$AI_MUSE_TEST_MUSE_CODE_SHA256"; else tr -d ' \r\n' < "$ROOT/config/muse-code/sha256"; fi
 }
 muse_code_pinned(){ local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
 linked_below_home(){ # true when the path or any ancestor below the profile home is a link or junction
