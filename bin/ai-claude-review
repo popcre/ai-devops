@@ -22,7 +22,7 @@ CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort high --output-format
 
 die(){ printf 'ai-claude-review: error: %s\n' "$*" >&2; exit 1; }
 usage(){ cat <<'EOF'
-Usage: ai-claude-review <plan-review|diff-review|security-review|visual-review|final-check> [--base REF] [--assert-head SHA]
+Usage: ai-claude-review <plan-review|diff-review|security-review|visual-review|final-check> [--tests <command>] [--base REF] [--assert-head SHA]
        ai-claude-review doctor [--live]
 
 Claude Opus 5 receives a complete disposable snapshot with only Read, Grep,
@@ -59,6 +59,7 @@ MODE="${1:-}"; case "$MODE" in
   plan-review|diff-review|security-review|visual-review|final-check) ;;
   ''|-h|--help|help) usage; exit 0;; *) usage >&2; exit 2;; esac
 shift
+TESTS_COMMAND=""
 OPT_BASE=""; OPT_ASSERT_HEAD=""; SOURCE_IDENTITY=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -66,6 +67,10 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."
       if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
       shift 2;;
+    --tests)
+      [ -z "$TESTS_COMMAND" ] || die '--tests may be supplied only once.'
+      [ "$#" -ge 2 ] && [ -n "$2" ] || die '--tests requires a non-empty command.'
+      TESTS_COMMAND="$2"; shift 2;;
     *) die "unknown option: $1";;
   esac
 done
@@ -107,7 +112,9 @@ Follow this exact stage brief and treat its named prior artifact as the input co
 
 $(cat "$AI_REVIEW_BRIEF_FILE")"
 fi
-PACKET_DIR="$($PACKET build "$REVIEW_DIR" "$TAG" --identity "$SOURCE_IDENTITY" --decision "$DECISION" --class medium)" || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-failed >/dev/null 2>&1 || true; die 'could not build exact evidence.'; }
+PACKET_ARGS=(build "$REVIEW_DIR" "$TAG" --identity "$SOURCE_IDENTITY" --decision "$DECISION" --class medium)
+[ -z "$TESTS_COMMAND" ] || PACKET_ARGS+=(--tests "$TESTS_COMMAND")
+PACKET_DIR="$($PACKET "${PACKET_ARGS[@]}")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-failed >/dev/null 2>&1 || true; die 'could not build exact evidence.'; }
 "$PACKET" verify "$PACKET_DIR" --identity "$SOURCE_IDENTITY" >/dev/null || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure packet-invalid >/dev/null 2>&1 || true; die 'review evidence failed verification.'; }
 
 PROMPT="You are performing a READ-ONLY $MODE. Do not edit, create, commit, push, merge, or delete files.

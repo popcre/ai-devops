@@ -3,8 +3,8 @@
 #
 # Copies bin/ai-completion-check-hook to ~/.config/ai-devops/completion-check-hook
 # (a stable per-machine path, so the settings entry never points into a repo
-# checkout that might move) and registers it as a Stop hook in the USER-level
-# ~/.claude/settings.json.
+# checkout that might move) and registers its turn-start, tool-use, and Stop
+# events in the USER-level ~/.claude/settings.json.
 #
 # Idempotent, strictly additive: it never removes an existing hook — including the
 # memory-index hook installed by its sibling script — never touches any other
@@ -55,7 +55,13 @@ marker='completion-check-hook'
 if (( check_only )); then
   [[ -f "$dest" ]] || { echo "ERROR completion-check hook script not installed"; exit 1; }
   [[ -f "$settings" ]] || { echo "ERROR no $settings"; exit 1; }
-  if grep -qF "$marker" "$settings"; then echo "OK completion-check hook already registered"; exit 0; fi
+  if jq -e --arg m "$marker" '. as $cfg |
+      ["UserPromptSubmit", "PostToolUse", "Stop"] as $events |
+      [$events[] as $event |
+        ($cfg.hooks[$event] // []) | map(.hooks // []) | flatten |
+        map(.command // "") | any(contains($m))] | all' "$settings" >/dev/null 2>&1; then
+    echo "OK completion-check hook already registered"; exit 0
+  fi
   echo "ERROR completion-check hook not registered in $settings"; exit 1
 fi
 
@@ -74,8 +80,11 @@ if ! jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
   exit 1
 fi
 
-if jq -e --arg m "$marker" '(.hooks.Stop // []) | map(.hooks // []) | flatten
-      | map(.command // "") | any(contains($m))' "$settings" >/dev/null 2>&1; then
+if jq -e --arg m "$marker" '. as $cfg |
+      ["UserPromptSubmit", "PostToolUse", "Stop"] as $events |
+      [$events[] as $event |
+        ($cfg.hooks[$event] // []) | map(.hooks // []) | flatten |
+        map(.command // "") | any(contains($m))] | all' "$settings" >/dev/null 2>&1; then
   echo "OK completion-check hook already registered"
   exit 0
 fi
@@ -85,13 +94,18 @@ backup="$settings.aidevops.bak"
 
 cmd='bash "$HOME/.config/ai-devops/completion-check-hook" 2>/dev/null || true'
 tmp="$settings.tmp.$$"
-if ! jq --arg cmd "$cmd" '
+if ! jq --arg cmd "$cmd" --arg marker "$marker" '
       .hooks //= {} |
-      .hooks.Stop //= [] |
-      .hooks.Stop += [{
-        hooks: [{ type: "command", command: $cmd, timeout: 15,
-                  statusMessage: "checking the closeout" }]
-      }]' "$settings" > "$tmp"; then
+      reduce ["UserPromptSubmit", "PostToolUse", "Stop"][] as $event (.;
+        .hooks[$event] //= [] |
+        if ((.hooks[$event] | map(.hooks // []) | flatten |
+             map(.command // "") | any(contains($marker))))
+        then .
+        else .hooks[$event] += [{
+          hooks: [{ type: "command", command: $cmd, timeout: 15,
+                    statusMessage: (if $event == "Stop" then "checking the closeout" else "recording turn activity" end) }]
+        }]
+        end)' "$settings" > "$tmp"; then
   rm -f "$tmp"; echo "ERROR could not build the updated settings" >&2; exit 1
 fi
 

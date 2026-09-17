@@ -66,6 +66,11 @@ Rules for the block:
   request named against something real. Preparation is not delivery.
 - If something is unfinished and nothing blocks it, keep working.
   Ending the turn is the error; no wording rescues it. You were already authorized.
+- Do not end a turn by describing work you are about to do. Either do it in
+  that turn, or say plainly that it is not started and why.
+- Saying you are "starting", "proceeding", "running", "monitoring", or
+  "continuing now" is still a future promise, not work performed. Never end the
+  turn there, even if you also say nothing is needed from Albert.
 - Anything left unfinished, waiting, or blocked becomes one bullet in the
   `**Still open**` block — not a paragraph, not a section.
 - Never leave a genuinely finished reply silent about being finished.

@@ -61,6 +61,42 @@ mention_msg="A turn ending on the phrase nothing is needed gets stopped once.\n\
 mention_out="$(fire m3 "$mention_msg")"
 check "a MENTION of the trigger phrase mid-reply is NOT caught" "[ -z \"\$mention_out\" ]"
 
+# --- a promise of action must be backed by action in this turn -----------------
+fire init '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+future_out="$(fire f1 "I am going to proceed now.")"
+check "'I'm proceeding' with no execution action is stopped" "[ -n \"\$future_out\" ]"
+check "future block names the no-action defect" "printf '%s' \"\$future_out\" | grep -q 'no implementation, test, or other execution action'"
+for future_phrase in 'Running now; I will update you.' 'Monitoring now; I will update you.' 'Continuing now; I will update you.'; do
+  fire phrase-init '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+  check "future activity phrase is stopped: $future_phrase" "[ -n \"\$(fire \"phrase-$future_phrase\" '$future_phrase')\" ]"
+done
+fire init2 '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+fire inspect '' '{"hook_event_name":"PostToolUse","tool_name":"Read"}' >/dev/null
+check "inspection alone does not fulfil a future promise" \
+  "[ -n \"\$(fire f2 'I will proceed now.')\" ]"
+fire shellread '' '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"rg -n TODO ."}}' >/dev/null
+check "read-only shell use does not fulfil a future promise" \
+  "[ -n \"\$(fire f2b 'Proceeding now.')\" ]"
+fire connector '' '{"hook_event_name":"PostToolUse","tool_name":"mcp__example__lookup"}' >/dev/null
+check "an unknown connector cannot become a future-promise bypass" \
+  "[ -n \"\$(fire f2c 'I will proceed now.')\" ]"
+fire tool '' '{"hook_event_name":"PostToolUse","tool_name":"Edit"}' >/dev/null
+check "the same promise after an execution action is silent" \
+  "[ -z \"\$(fire f3 'Next I will summarize the result.')\" ]"
+fire init-race '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+(fire race-action '' '{"hook_event_name":"PostToolUse","tool_name":"Edit"}' >/dev/null) & race_action_pid=$!
+(fire race-read '' '{"hook_event_name":"PostToolUse","tool_name":"Read"}' >/dev/null) & race_read_pid=$!
+wait "$race_action_pid"; wait "$race_read_pid"
+check "parallel inspection cannot erase execution evidence" \
+  "[ -z \"\$(fire f3-race 'I will proceed now.')\" ]"
+fire init3 '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
+fire shelltest '' '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"bash tests/test-focused.sh"}}' >/dev/null
+check "a test command is an execution action" \
+  "[ -z \"\$(fire f3b 'I will proceed with the report now.')\" ]"
+rm -f "$XDG_STATE_HOME/ai-devops/completion-check/actions/sess-1"
+check "a promise without activity-event evidence stays fail-open" \
+  "[ -z \"\$(fire f4 \"I'll start now.\")\" ]"
+
 # --- silence where silence is correct ------------------------------------------
 check "an ordinary reply is silent" "[ -z \"\$(fire p4 'Here is the diff. Two tests fail on line 40.')\" ]"
 check "a reply naming pending work is silent" "[ -z \"\$(fire p5 'The loader is still pending; I am building it next.')\" ]"
@@ -80,6 +116,8 @@ CH="$TMP/claudehome"; mkdir -p "$CH"
 printf '{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo pre-existing"}]}]}}\n' > "$CH/settings.json"
 HOME="$TMP/fakehome" bash "$INSTALL" --claude-home "$CH" --repo-root "$ROOT" >/dev/null 2>&1
 check "installer registers the hook" "grep -q 'completion-check-hook' \"$CH/settings.json\""
+check "installer registers turn-start activity" "jq -e '.hooks.UserPromptSubmit | length == 1' \"$CH/settings.json\" >/dev/null"
+check "installer registers tool-use activity" "jq -e '.hooks.PostToolUse | length == 1' \"$CH/settings.json\" >/dev/null"
 check "installer keeps the pre-existing Stop hook" "grep -q 'pre-existing' \"$CH/settings.json\""
 check "installer keeps unrelated settings" "grep -q '\"theme\"' \"$CH/settings.json\""
 check "installer leaves valid JSON" "jq -e 'type == \"object\"' \"$CH/settings.json\""
