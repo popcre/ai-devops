@@ -167,7 +167,8 @@
       "test-ai-kimi.sh"
     ],
     [
-      "test-ai-deepseek-agent.sh"
+      "test-ai-deepseek-agent.sh",
+      "test-ai-muse-code.sh"
     ],
     [
       "test-ai-adopt-globals.sh",
@@ -177,7 +178,6 @@
       "test-ai-machine-tools.sh",
       "test-ai-memory-sync.sh",
       "test-ai-muse.sh",
-      "test-ai-muse-code.sh",
       "test-ai-test-local.sh",
       "test-install-ai-provider-clis.sh",
       "test-mcp-launch-lock.sh"

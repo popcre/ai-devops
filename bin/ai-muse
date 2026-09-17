@@ -256,8 +256,8 @@ load_key(){
 ' "$$" > "$candidate/pid"; CRED_LOCK="$candidate"; CRED_TOKEN="$token"; break; fi
     owner="$(cat "$candidate/pid" 2>/dev/null || true)"
     case "$owner" in
-      ''|*[!0-9]*) if [ -n "$(find "$candidate" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ]; then mv "$candidate" "$candidate.stale.$token" 2>/dev/null && rm -rf "$candidate.stale.$token"; continue; fi;;
-      *) if ! kill -0 "$owner" 2>/dev/null; then mv "$candidate" "$candidate.stale.$token" 2>/dev/null && rm -rf "$candidate.stale.$token"; continue; fi;;
+      ''|*[!0-9]*) if [ -n "$(find "$candidate" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ]; then ! mv "$candidate" "$candidate.stale.$token" 2>/dev/null || { rm -rf "$candidate.stale.$token"; continue; }; fi;;
+      *) if ! kill -0 "$owner" 2>/dev/null; then ! mv "$candidate" "$candidate.stale.$token" 2>/dev/null || { rm -rf "$candidate.stale.$token"; continue; }; fi;;
     esac
     [ "$(date +%s)" -lt "$deadline" ] || die "1Password credential lock still held by another Muse turn after ${budget}s; no key was read. Retry the Muse turn."
     [ "$waited" -eq 1 ] || { printf 'Muse: waiting for another turn to finish reading 1Password...
