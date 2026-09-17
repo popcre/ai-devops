@@ -257,6 +257,9 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 Before enabling or changing that gate, read the
 [Markdown reachability contract](docs/doc-reachability.md) for its roots,
 exclusions, rollout workflow, and legacy-document boundary.
+Active multi-session work is catalogued in the
+[implementation-plan index](docs/implementation-plan-index.md), including the
+evidence that establishes each completed gate.
 
 `ai-codex-review` modes: `plan-review`, `diff-review`, `security-review`,
 `visual-review`, `final-check`.

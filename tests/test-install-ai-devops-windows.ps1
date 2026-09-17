@@ -237,7 +237,7 @@ try {
     # Every machine must schedule the blocker watch, or its waiting sessions are
     # never woken. The test must not touch the real scheduler.
     $installerText = (Get-Content -LiteralPath $Installer) -join "`n"
-    Assert-True ($installerText.Contains("bwTool' schedule")) "installer no longer schedules the blocker watch"
+    Assert-True ($installerText -match [regex]::Escape("bin\ai-blocker-watch") -and $installerText -match "'\`$bwTool' schedule") "installer no longer schedules the blocker watch"
     Assert-True ($output -match "not touching this computer's scheduled tasks") "schedule step did not honour test mode"
 
     Write-Host "PASS: install-ai-devops-windows"
