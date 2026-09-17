@@ -8,6 +8,7 @@ What this does:
 - Installs Claude skills to $HOME\.claude\skills.
 - Installs Codex skills to $HOME\.codex\skills.
 - Seeds $HOME\.claude\CLAUDE.md and $HOME\.codex\AGENTS.md only if missing.
+- Schedules the blocker watch so waiting sessions on this computer get woken.
 
 Run in PowerShell:
   powershell -ExecutionPolicy Bypass -File .\bin\install-ai-devops-windows.ps1
@@ -619,6 +620,25 @@ if ($SkillsDryRun) {
     Write-Step "Skills dry-run complete"
     Write-Host "No files were changed."
     exit 0
+}
+
+# Blocker notices and session wake-ups only happen on a machine that runs the
+# tick, so every machine installs the task. `schedule` uses schtasks /F, so
+# rerunning the installer re-points an existing task instead of failing.
+Write-Step "Scheduling the blocker watch"
+$bwBash = Get-Command bash -ErrorAction SilentlyContinue
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note "Test mode: not touching this computer's scheduled tasks."
+} elseif ($bwBash) {
+    $bwTool = (Join-Path $RepoPath 'bin\ai-blocker-watch') -replace '\\', '/'
+    $bwProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$bwTool' schedule")
+    if ($bwProbe.ExitCode -eq 0) {
+        Write-Note "Blocker watch scheduled. Waiting sessions on this computer now get woken when their blocker closes."
+    } else {
+        Write-Note "Could not schedule the blocker watch: $($bwProbe.Output -join ' ')"
+    }
+} else {
+    Write-Note "Git Bash not found, so the blocker watch was not scheduled. Install Git for Windows and rerun this script."
 }
 
 Write-Step "Checking optional logins"
