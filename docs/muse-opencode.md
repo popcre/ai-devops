@@ -42,7 +42,8 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
 
 - Pinned build: `config/muse-code/version`, installed by Meta's Windows installer at
   `%LOCALAPPDATA%\Programs\muse\muse-bin-<version>.exe`. `doctor` refuses any other
-  version; the auto-updating `muse` launcher is never used.
+  version; the auto-updating `muse` launcher is never used. The file must also match
+  the SHA-256 in `config/muse-code/sha256` before it runs; update both together.
 - Read-only launch: `exec --json --disable-write --disable-shell --disable-web-tools
   --no-foreign-personal-context --user-input-auto-resolve`. The shell stays disabled,
   so the Windows sandbox is not needed and the model cannot pretend to run commands.

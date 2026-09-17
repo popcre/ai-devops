@@ -47,12 +47,13 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$TMP/bin/op" "$MBIN/muse-bin-$VERSION.exe"
+STUB_SHA="$(sha256sum "$MBIN/muse-bin-$VERSION.exe" | cut -d' ' -f1)"
 STORE="$HOME_FIX/.local/share/ai-devops/muse-code/muse/sessions/.msp-view-v1"
-ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=claude AI_MUSE_ENGINE=muse-code AI_MUSE_TEST_DIR='$TMP' MUSE_STUB_ENV_FILE='$TMP/provider-env' MUSE_STUB_ARGS_FILE='$TMP/provider-args'"
+ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=claude AI_MUSE_ENGINE=muse-code AI_MUSE_TEST_DIR='$TMP' MUSE_STUB_ENV_FILE='$TMP/provider-env' MUSE_STUB_ARGS_FILE='$TMP/provider-args' AI_MUSE_TEST_MUSE_CODE_SHA256='$STUB_SHA'"
 
 check 'unknown engine refuses before any work' "cd '$REPO' && ! eval \"$ENV AI_MUSE_ENGINE=bogus '$SCRIPT' doctor\" 2>&1 | grep -q PASS"
 check 'default engine stays OpenCode' "cd '$REPO' && eval \"USERPROFILE='$HOME_FIX' PATH='$TMP/bin:$PATH' AI_MUSE_CALLER=claude '$SCRIPT' doctor\" 2>&1 | grep -q 'engine: opencode'"
-check 'doctor proves the pinned Muse Code version' "cd '$REPO' && eval \"$ENV '$SCRIPT' doctor\" | grep -q 'PASS  Muse Code reports the pinned'"
+check 'doctor proves the pinned Muse Code version' "cd '$REPO' && eval \"$ENV '$SCRIPT' doctor\" | grep -q 'PASS  Muse Code is the pinned'"
 check 'doctor refuses an unpinned Muse Code version' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' doctor\""
 check 'turn refuses an unpinned Muse Code version without contact' "cd '$REPO' && rm -f '$TMP/provider-args' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' new pin --prompt test\" && test ! -e '$TMP/provider-args'"
 check 'new session completes and returns the final answer' "cd '$REPO' && eval \"$ENV '$SCRIPT' new first --prompt test\" | grep -qx first"
@@ -65,6 +66,8 @@ check 'private stores exist with owner-only modes' "for d in '$HOME_FIX/.local/s
 check 'wrapper chooses and records a UUID session identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' show first\" | jq -e '.status==\"active\" and (.session_id|test(\"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$\"))'"
 check 'follow-up resumes the exact recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask first --prompt again\" | grep -qx remembered && grep -qx \"\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .session_id)\" '$TMP/provider-args'"
 check 'report records usage as unavailable, not zero' "grep -q 'engine-usage-not-reported' '$REPO'/.ai/reviews/muse-first-*.md"
+check 'a replaced binary claiming the pinned version never runs' "cd '$REPO' && rm -f '$TMP/provider-args' '$TMP/side-env' && ! eval \"$ENV MUSE_STUB_SIDE_ENV_FILE='$TMP/side-env' AI_MUSE_TEST_MUSE_CODE_SHA256=0000000000000000000000000000000000000000000000000000000000000000 '$SCRIPT' new swapped --prompt test\" && test ! -e '$TMP/provider-args' && test ! -e '$TMP/side-env'"
+check 'the shipped fingerprint is a SHA-256' "grep -Eqx '[0-9a-f]{64}' '$ROOT/config/muse-code/sha256'"
 check 'transcript refuses an unpinned Muse Code binary' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' transcript first\" 2>/dev/null | grep -q session_id"
 check 'version checks and exports never see unrelated caller secrets' "cd '$REPO' && rm -f '$TMP/side-env' && eval \"$ENV MUSE_STUB_SIDE_ENV_FILE='$TMP/side-env' LEAKY_TOKEN=leak-marker-7Q2Z '$SCRIPT' transcript first\" >/dev/null && { grep -q '^XDG_DATA_HOME=' '$TMP/side-env' || { echo 'no provider environment was recorded'; exit 1; }; } && { ! grep -nE 'LEAKY_TOKEN|leak-marker-7Q2Z' '$TMP/side-env' || { echo 'caller secret reached the provider'; exit 1; }; }"
 check 'transcript exports the recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' transcript first\" | jq -e '.sessions[0].session_id|length==36'"
@@ -82,10 +85,13 @@ check 'completion followed by failure is rejected' "cd '$REPO' && ! eval \"$ENV 
 check 'rejected turns leave incomplete evidence, not accepted reports' "test -n \"\$(ls '$REPO'/.ai/reviews/muse-f7-incomplete-*.md 2>/dev/null)\" && test -z \"\$(ls '$REPO'/.ai/reviews/muse-f7-2*.md 2>/dev/null)\""
 check 'compatibility review requires a final verdict' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=narration '$SCRIPT' review '$REPO' test\""
 check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: NO FINDINGS' '$SCRIPT' review '$REPO' test\" | grep -q 'VERDICT: NO FINDINGS'"
-# Symlink refusal needs real symlinks; Git Bash only makes them with native symlink support.
-if (export MSYS=winsymlinks:nativestrict; mkdir -p "$TMP/lt" && ln -s "$TMP/lt" "$TMP/lt-link" 2>/dev/null && test -L "$TMP/lt-link"); then
-  check 'delete refuses a symlinked session store' "export MSYS=winsymlinks:nativestrict; cd '$REPO' && eval \"$ENV '$SCRIPT' new linked --prompt test\" >/dev/null && sid=\"\$(eval \"$ENV '$SCRIPT' show linked\" | jq -r .session_id)\" && mv '$STORE' '$TMP/decoy' && ln -s '$TMP/decoy' '$STORE' && ! eval \"$ENV '$SCRIPT' delete linked\"; rc=\$?; test -d '$TMP/decoy/'\"\$sid\" || rc=1; rm -f '$STORE'; mv '$TMP/decoy' '$STORE'; exit \$rc"
-else printf 'SKIP  delete refuses a symlinked session store (no native symlinks)\n'; fi
+# Link refusal on an ancestor of the session store. A directory junction needs no
+# special Windows privilege; Git Bash reports it as a link.
+ANC="$HOME_FIX/.local/share/ai-devops/muse-code/muse"
+if (mkdir -p "$TMP/jt" && cmd //c mklink //J "$(cygpath -w "$TMP/jt-link")" "$(cygpath -w "$TMP/jt")" >/dev/null 2>&1 && test -L "$TMP/jt-link"); then
+  check 'delete refuses a session store behind a linked ancestor' "cd '$REPO' && eval \"$ENV '$SCRIPT' new linked --prompt test\" >/dev/null && sid=\"\$(eval \"$ENV '$SCRIPT' show linked\" | jq -r .session_id)\" && mv '$ANC' '$TMP/decoy' && cmd //c mklink //J \"\$(cygpath -w '$ANC')\" \"\$(cygpath -w '$TMP/decoy')\" >/dev/null && ! eval \"$ENV '$SCRIPT' delete linked\"; rc=\$?; test -d '$TMP/decoy/sessions/.msp-view-v1/'\"\$sid\" || rc=1; cmd //c rmdir \"\$(cygpath -w '$ANC')\" >/dev/null 2>&1; mv '$TMP/decoy' '$ANC'; exit \$rc"
+else printf 'SKIP  delete refuses a session store behind a linked ancestor (no junctions)
+'; fi
 check 'source repository is untouched' "test -z \"\$(git -C '$REPO' status --porcelain)\""
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

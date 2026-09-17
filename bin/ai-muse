@@ -166,7 +166,7 @@ runtime_env(){
     export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/muse-code"
     local store; for store in "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"; do
       # Refuse linked stores before creating or changing permissions on anything.
-      [ ! -L "$store" ] && [ ! -L "$(dirname "$store")" ] || die "Muse Code store is a link; refusing to use it: $store"
+      ! linked_below_home "$store" || die "Muse Code store is a link; refusing to use it: $store"
     done
     mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
     # Enforced on every use (one PowerShell call), never remembered: permissions can drift.
@@ -190,7 +190,14 @@ muse_code_run(){ # every non-turn Muse Code call gets the same minimal environme
   fi
   "${e[@]}" "$BIN" "$@"
 }
-muse_code_pinned(){ muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
+muse_code_sha256(){ # the binary must be the exact pinned file before it runs or sees a key
+  if [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ -n "${AI_MUSE_TEST_MUSE_CODE_SHA256:-}" ]; then printf '%s' "$AI_MUSE_TEST_MUSE_CODE_SHA256"; else tr -d ' 
+' < "$ROOT/config/muse-code/sha256"; fi
+}
+muse_code_pinned(){ local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
+linked_below_home(){ # true when the path or any ancestor below the profile home is a link or junction
+  local p="$1"; while [ -n "$p" ] && [ "$p" != "$PROFILE_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do [ ! -L "$p" ] || return 0; p="$(dirname "$p")"; done; return 1
+}
 require_runtime(){
   if [ "$ENGINE" = muse-code ]; then
     [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL Muse Code $VERSION is not installed at $BIN."
@@ -547,12 +554,11 @@ muse_code_delete_session(){ # the CLI has no delete command; remove only this ex
   local sid="$1" dir
   [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
   local base="$XDG_DATA_HOME" part parent
-  for part in "" /muse /muse/sessions /muse/sessions/.msp-view-v1; do [ ! -L "$base$part" ] || return 1; done
-  parent="$base/muse/sessions/.msp-view-v1"; [ -d "$parent" ] || return 0
+  parent="$base/muse/sessions/.msp-view-v1"; ! linked_below_home "$parent" || return 1; [ -d "$parent" ] || return 0
   # Enter the verified parent once, then delete relative to it: a later swap of any
   # ancestor path cannot redirect the removal outside this directory.
   ( cd -P -- "$parent" || exit 1
-    [ "$(pwd -P)" = "$(cd -P -- "$base" && pwd -P)/muse/sessions/.msp-view-v1" ] || exit 1
+    [ "$(pwd -P)" = "$(cd -P -- "$PROFILE_HOME" && pwd -P)/.local/share/ai-devops/muse-code/muse/sessions/.msp-view-v1" ] || exit 1
     [ ! -L "./$sid" ] || exit 1
     rm -rf -- "./$sid" && [ ! -e "./$sid" ] )
 }
@@ -628,7 +634,7 @@ cmd_doctor(){
   printf 'ai-muse doctor (engine: %s)\n\n' "$ENGINE"
   if [ "$ENGINE" = muse-code ]; then
     check "pinned Muse Code $VERSION is installed" test -x "$BIN"
-    check "Muse Code reports the pinned $VERSION" muse_code_pinned
+    check "Muse Code is the pinned $VERSION file and reports it" muse_code_pinned
   else
     check 'pinned OpenCode is installed' test -x "$BIN"
     check 'Muse configuration is installed' test -f "$OC_CFG/opencode.json"
