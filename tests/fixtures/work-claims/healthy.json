@@ -1,0 +1,35 @@
+{
+  "fixture_schema_version": 1,
+  "case": "healthy",
+  "github_now": "2026-09-17T18:25:35Z",
+  "remote": {
+    "schema": "ai-work-claim/v1",
+    "canonical_repository": "popcre/ai-devops",
+    "task": {
+      "kind": "issue",
+      "number": 131
+    },
+    "owner_hash": "2de810328380efc32d78533550b7996b8e3b68be37ce5f840787a9f667dd7c45",
+    "client": "codex",
+    "machine_nickname": "windows-fixture",
+    "purpose": "freeze the policy and baseline",
+    "intended_paths": [
+      "config/work-claim-policy.json"
+    ],
+    "base_sha_observed": "d30b5a321f30f37d9f2c37bc567796b0b9c0e276",
+    "issue_observation": {
+      "state": "open",
+      "observed_at": "2026-09-17T14:25:35Z"
+    },
+    "follow_up_purpose": null,
+    "created_at": "2026-09-17T14:25:35Z",
+    "heartbeat_at": "2026-09-17T14:25:35Z",
+    "previous_object": null
+  },
+  "expected": {
+    "task_key": "2a603966e56a45017f91b643e309c48d07a64cd14790191e5f20cb79192e9695",
+    "age_seconds": 14400,
+    "classification": "healthy",
+    "ownership_transfers": false
+  }
+}

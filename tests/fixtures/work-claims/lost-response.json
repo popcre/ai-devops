@@ -1,0 +1,21 @@
+{
+  "fixture_schema_version": 1,
+  "case": "lost-response",
+  "github_now": "2026-09-17T18:25:35Z",
+  "candidate": {
+    "canonical_repository": "popcre/ai-devops",
+    "task": 131,
+    "owner_hash": "31ce4754b491e84aa16d74ba202ada91489641ab7a4a1e48e8dedf56656dee71",
+    "intended_object": "1111111111111111111111111111111111111111"
+  },
+  "remote": {
+    "ref": "refs/ai-devops-claims/2a603966e56a45017f91b643e309c48d07a64cd14790191e5f20cb79192e9695",
+    "object": "1111111111111111111111111111111111111111",
+    "owner_hash": "31ce4754b491e84aa16d74ba202ada91489641ab7a4a1e48e8dedf56656dee71"
+  },
+  "expected": {
+    "task_key": "2a603966e56a45017f91b643e309c48d07a64cd14790191e5f20cb79192e9695",
+    "classification": "owned_lost_response_recovery",
+    "remote_action": "readopt_without_create"
+  }
+}
