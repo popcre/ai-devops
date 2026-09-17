@@ -189,7 +189,8 @@
       "test-ai-claude-review.sh",
       "test-ai-codex-memories.sh",
       "test-ai-gh.sh",
-      "test-ai-qwen.sh"
+      "test-ai-qwen.sh",
+      "test-bin-cmd-launchers.sh"
     ]
   ],
   "windows_offline_powershell_shard": 3
