@@ -17,6 +17,7 @@ ai-review-preflight	bin/ai-review-preflight	bash+cmd	yes	none	install-machine-to
 ai-review-scoreboard	bin/ai-review-scoreboard	bash+cmd	yes	none	install-machine-tools.ps1
 ai-reviewer-issue	bin/ai-reviewer-issue	bash+cmd	yes	none	install-machine-tools.ps1
 ai-task-gates	bin/ai-task-gates	bash+cmd	yes	none	install-machine-tools.ps1
+ai-blocker-watch	bin/ai-blocker-watch	bash+cmd	yes	none	install-machine-tools.ps1
 ai-model-call	bin/ai-model-call	bash+cmd	yes	none	install-machine-tools.ps1
 ai-run-task	bin/ai-run-task	bash+cmd	yes	none	install-machine-tools.ps1
 ai-repo-policy	bin/ai-repo-policy	bash+cmd	yes	none	install-machine-tools.ps1
