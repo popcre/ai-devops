@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Truthful usage from DeepSeek responses and qualified OpenCode step events.
+"""Truthful usage from DeepSeek responses, qualified OpenCode step events, and
+Muse Code durable-store model_completed events.
 
-Owner: #333. Both adapters use this formatter; no prompt or response text is
+Owner: #333. The adapters share this formatter; no prompt or response text is
 returned. OpenCode 1.18.12 normalizes absent counters to zero, so its observed
-numbers never claim to recover missingness from the original provider.
+numbers never claim to recover missingness from the original provider. The
+muse-code adapter reads the CLI's own durable session store, scoped to one run,
+and reports no total because the store carries none.
 """
 import argparse
 import datetime
 import json
 import math
+import pathlib
 import sys
 
 
@@ -124,9 +128,75 @@ def opencode(events, version):
     }
 
 
+MUSE_CODE_FIELDS = ('input', 'cache_read', 'cache_write', 'output', 'reasoning', 'total')
+
+
+def muse_code_unavailable(reason):
+    return {'scope': 'turn', 'counters': {name: None for name in (*MUSE_CODE_FIELDS, 'cost')},
+            'completeness': 'unavailable', 'availability_reason': reason}
+
+
+def muse_code(events, version, run):
+    pin = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'muse-code' / 'version'
+    try:
+        pinned = pin.read_text(encoding='utf-8-sig').strip()
+    except OSError:
+        return muse_code_unavailable('unqualified-muse-code-version')
+    if not pinned or version != pinned:
+        return muse_code_unavailable('unqualified-muse-code-version')
+    if not run:
+        return muse_code_unavailable('no-model-completed-for-run')
+    rows = []
+    for event in events:
+        if not isinstance(event, dict):
+            return muse_code_unavailable('durable-store-unreadable')
+        if event.get('payload_type') != 'runtime.session':
+            continue
+        payload = event.get('payload')
+        inner = payload.get('event') if isinstance(payload, dict) else None
+        if not isinstance(inner, dict) or inner.get('kind') != 'model_completed':
+            continue
+        if payload.get('run_id') != run:  # Other runs in the shared session log are not this turn.
+            continue
+        usage = inner.get('usage')
+        if not isinstance(usage, dict):
+            usage = {}
+        rows.append({'input': number(usage.get('input_tokens')),
+                     'cache_read': number(usage.get('cache_read_tokens')),
+                     'cache_write': number(usage.get('cache_write_tokens')),
+                     'output': number(usage.get('output_tokens')),
+                     'reasoning': number(usage.get('reasoning_tokens'))})
+    if not rows:
+        return muse_code_unavailable('no-model-completed-for-run')
+    coherent = all(row['input'] is None or row['cache_read'] is None or row['cache_read'] <= row['input']
+                   for row in rows)
+    counters = {key: add([row[key] for row in rows]) for key in MUSE_CODE_FIELDS[:5]}
+    if not coherent:
+        counters['cache_read'] = None
+    counters['total'] = None  # The store reports no per-run total; never invent one.
+    counters['cost'] = None
+    complete = coherent and counters['input'] is not None and counters['output'] is not None
+    return {
+        'scope': 'turn', 'counters': counters, 'model_calls': len(rows),
+        'counter_provenance': 'muse-code-%s-durable-store-model-completed' % version,
+        'counting_semantics': 'input includes cache_read; output includes reasoning; store has no total; do not add overlapping fields',
+        'completeness': 'core-complete' if complete else 'partial',
+        'availability_reason': None if complete else 'incomplete-or-invalid-model-completed-counters',
+    }
+
+
+def muse_code_read(path, version, run):
+    try:
+        with open(path, encoding='utf-8-sig') as source:
+            events = [json.loads(line) for line in source if line.strip()]
+    except (OSError, ValueError):
+        return muse_code_unavailable('durable-store-unreadable')
+    return muse_code(events, version, run)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('adapter', choices=('deepseek', 'opencode'))
+    parser.add_argument('adapter', choices=('deepseek', 'muse-code', 'opencode'))
     parser.add_argument('input_file')
     parser.add_argument('--version', default='')
     parser.add_argument('--provider', required=True)
@@ -134,9 +204,12 @@ def main():
     parser.add_argument('--session', default='')
     parser.add_argument('--run', default='')
     args = parser.parse_args()
-    with open(args.input_file, encoding='utf-8-sig') as source:
-        data = json.load(source) if args.adapter == 'deepseek' else [json.loads(line) for line in source if line.strip()]
-    result = deepseek(data) if args.adapter == 'deepseek' else opencode(data, args.version)
+    if args.adapter == 'muse-code':
+        result = muse_code_read(args.input_file, args.version, args.run)
+    else:
+        with open(args.input_file, encoding='utf-8-sig') as source:
+            data = json.load(source) if args.adapter == 'deepseek' else [json.loads(line) for line in source if line.strip()]
+        result = deepseek(data) if args.adapter == 'deepseek' else opencode(data, args.version)
     result.update(schema_version=1, provider=args.provider, model=args.model,
                   runtime_version=args.version or None, session_id=args.session or None,
                   run_id=args.run or None, observed_at=datetime.datetime.now(datetime.timezone.utc).isoformat())

@@ -364,10 +364,36 @@ exec "$@"
 validate_heartbeat(){
   case "${AI_MUSE_HEARTBEAT_INTERVAL:-10}" in ''|0|*[!0-9]*) die 'AI_MUSE_HEARTBEAT_INTERVAL must be a positive whole number of seconds.' ;; esac
 }
+muse_code_durable_log(){ # this session's date-bucketed durable log; bounded, symlink-safe, fail closed
+  local sid="$1" hits
+  [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+  [ -n "${XDG_DATA_HOME:-}" ] && [ -d "$XDG_DATA_HOME/muse/sessions" ] || return 1
+  hits="$(find "$XDG_DATA_HOME/muse/sessions" -maxdepth 4 -name '.*' -prune -o -type d -name "$sid" -print 2>/dev/null)" || return 1
+  [ "$(printf '%s\n' "$hits" | sed '/^$/d' | wc -l)" -eq 1 ] || return 1
+  [ -f "$hits/session.jsonl" ] && [ ! -L "$hits/session.jsonl" ] || return 1
+  printf '%s' "$hits/session.jsonl"
+}
 turn_usage(){
-  local out="$1" sid="$2" event="$3" usage_python usage
-  [ "$ENGINE" != muse-code ] || { printf '%s' '{"scope":"turn","completeness":"unavailable","availability_reason":"engine-usage-not-reported"}'; return 0; }
+  local out="$1" sid="$2" event="$3" usage_python usage log run
   usage_python="$(command -v python3 || command -v python || true)"
+  if [ "$ENGINE" = muse-code ]; then
+    # The stdout stream carries no token counters; the CLI's own durable store does.
+    # Scope the store by the run id this turn's stream itself reported.
+    run="$(jq -sr '[.[]|select(.payload_type=="runtime.command.accepted")|.payload.command_id//empty]|first//empty' "$out" 2>/dev/null || true)"
+    [ -n "$run" ] || run="$(jq -sr '[.[]|select(.payload_type=="session.run.linked")|.payload.run_stream.id//empty]|first//empty' "$out" 2>/dev/null || true)"
+    log=""; { [ -n "$sid" ] && [ -n "$run" ]; } && log="$(muse_code_durable_log "$sid" || true)"
+    if [ -z "$run" ]; then
+      usage='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-run-id-unresolved"}'
+    elif [ -z "$log" ]; then
+      usage='{"scope":"turn","completeness":"unavailable","availability_reason":"durable-store-unreadable"}'
+    elif { [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ "${AI_MUSE_TEST_USAGE_FAILURE:-0}" = 1 ]; } || [ -z "$usage_python" ] || ! usage="$("$usage_python" "$ROOT/tools/reviewer_usage.py" muse-code "$log" --version "$VERSION" --provider muse --model "$MODEL" --session "$sid" --run "$run" 2> "$out.usage-error")"; then
+      usage='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-formatting-failed"}'
+    fi
+    if [ "$(printf '%s' "$usage" | jq -r '.completeness//""' 2>/dev/null || true)" = unavailable ]; then
+      printf 'Muse usage is unavailable; the completed response is retained and must not be replayed.\n' >&2
+    fi
+    printf '%s' "$usage"; return 0
+  fi
   if { [ -n "${AI_MUSE_TEST_DIR:-}" ] && [ "${AI_MUSE_TEST_USAGE_FAILURE:-0}" = 1 ]; } || [ -z "$usage_python" ] || ! usage="$("$usage_python" "$ROOT/tools/reviewer_usage.py" opencode "$out" --version "$VERSION" --provider muse --model "$MODEL" --session "$sid" --run "$event" 2> "$out.usage-error")"; then
     usage='{"scope":"turn","completeness":"unavailable","availability_reason":"usage-formatting-failed"}'
     printf 'Muse usage is unavailable; the completed response is retained and must not be replayed.\n' >&2
