@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "operation": "refresh-qualification",
+  "task_path": "\\AiDevOps\\WindowsRunnerMaintenance",
+  "payload_root": "C:\\Program Files\\ai-devops\\windows-runner-maintenance",
+  "runtime_root": "C:\\ProgramData\\ai-devops\\windows-runner-maintenance",
+  "evidence_path": "C:\\ProgramData\\ai-devops\\windows-runner-security.json",
+  "powershell_path": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+  "max_request_bytes": 2048,
+  "max_result_bytes": 8192,
+  "max_audit_bytes": 8388608,
+  "max_ledger_bytes": 1048576,
+  "request_max_age_seconds": 300,
+  "default_timeout_seconds": 180,
+  "hard_timeout_seconds": 300,
+  "payload_hashes": {
+    "windows-runner-maintenance-worker.ps1": "bea50503670bd0f0069cb857bee794051d960781074c9798ac6fa11594adad48",
+    "qualify-windows-runner.ps1": "172e1dac1d6de2407acef170b5f63332fb0bfa1e8db73e27b16d6ad2168ccaf7"
+  }
+}

@@ -211,6 +211,49 @@ The runner service cannot reliably query TPM itself under its restricted
 account. That is why the Administrator preflight exists; weakening or deleting
 the TPM/Secure Boot gate is not the fix.
 
+### Narrow remote refresh operation
+
+Issue #262 adds one administrator-installed scheduled task for refreshing this
+evidence from a filtered Tailscale SSH session. It is not a general elevation
+tool and does not replace the full GitHub qualification in section 5. Its only
+operation is `refresh-qualification`; callers cannot supply a command, argument,
+path, environment, evidence destination or working directory.
+
+From an elevated current checkout, install or update the fixed protected copy:
+
+```powershell
+pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Install -OperatorUser "$env:COMPUTERNAME\ahazan"
+pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Update -OperatorUser "$env:COMPUTERNAME\ahazan"
+```
+
+Verify is read-only. An ordinary filtered SSH session may then invoke only the
+fixed operation:
+
+```powershell
+pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Verify -OperatorUser "$env:COMPUTERNAME\ahazan"
+pwsh -NoProfile -File .\bin\invoke-windows-runner-maintenance.ps1 -Operation refresh-qualification
+```
+
+The task is `\AiDevOps\WindowsRunnerMaintenance`; its administrator-owned
+payload is under `C:\Program Files\ai-devops\windows-runner-maintenance` and its
+bounded requests, results and audit are under
+`C:\ProgramData\ai-devops\windows-runner-maintenance`. Results are one of
+`SUCCESS`, `MISSING_TASK`, `STALE_INSTALLATION`, `CONCURRENT_EXECUTION`,
+`REQUEST_REJECTED`, `OPERATION_FAILED`, `RESULT_INVALID` or `TIMEOUT`.
+
+Removal first verifies manifest ownership and drift, then writes a protected
+recovery bundle. Supply a reviewed protected backup location when required:
+
+```powershell
+pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Remove -RequireManifestMatch -BackupPath C:\ProgramData\ai-devops\reviewed-maintenance-recovery -OperatorUser "$env:COMPUTERNAME\ahazan"
+```
+
+If verification refuses, do not force-delete the task or directories. Use the
+exported task XML, security descriptor and payload manifest in an elevated
+recovery session. Removal never deletes
+`C:\ProgramData\ai-devops\windows-runner-security.json` and never changes the
+runner service.
+
 Restart the service after any machine-wide package or PATH change:
 
 ```powershell

@@ -247,6 +247,7 @@
     "test-windows-git-bash-path.ps1",
     "test-windows-json-atomic.ps1",
     "test-windows-private-file.ps1",
+    "test-windows-runner-maintenance.ps1",
     "test-windows-source-gate.ps1"
   ],
   "windows_offline_shards": [

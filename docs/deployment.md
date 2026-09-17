@@ -29,6 +29,16 @@ also has a row in `config/machine-tools.tsv`. Ubuntu picks it up from the
 the catalog. Add the row in the same change that adds the script, or sessions
 will be told to run a command that does not exist on the machine.
 
+The Windows runner maintenance boundary is the one narrow exception to the
+global command catalog. Its explicit `.ps1` entrypoints are installed only by
+an elevated administrator following
+[`independent-windows-runner-setup.md`](independent-windows-runner-setup.md).
+They create one fixed S4U scheduled task and a hash-verified protected payload;
+they are deliberately not added to `config/machine-tools.tsv`. Installation,
+update and removal are protected deployment actions and require the repository
+task gate plus exact-host approval. Offline tests must mock Task Scheduler and
+ACL behavior and may not register a real task.
+
 ## Install
 
 ```bash

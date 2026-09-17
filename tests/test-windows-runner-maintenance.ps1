@@ -1,0 +1,100 @@
+$ErrorActionPreference = 'Stop'
+$repo = Split-Path -Parent $PSScriptRoot
+$installerPath = Join-Path $repo 'bin\install-windows-runner-maintenance.ps1'
+$workerPath = Join-Path $repo 'bin\windows-runner-maintenance-worker.ps1'
+$clientPath = Join-Path $repo 'bin\invoke-windows-runner-maintenance.ps1'
+$policyPath = Join-Path $repo 'config\windows-runner-maintenance-policy.json'
+$installer = Get-Content -Raw -LiteralPath $installerPath
+$worker = Get-Content -Raw -LiteralPath $workerPath
+$client = Get-Content -Raw -LiteralPath $clientPath
+$policyText = Get-Content -Raw -LiteralPath $policyPath
+$policy = $policyText | ConvertFrom-Json
+$script:passed = 0
+$script:failed = 0
+
+function Assert-True([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
+function Assert-Contains([string]$Text, [string]$Needle) { Assert-True $Text.Contains($Needle) "Missing contract marker: $Needle" }
+function Case([string]$Name, [scriptblock]$Body) {
+  try { & $Body; $script:passed++; Write-Output "PASS $Name" }
+  catch { $script:failed++; Write-Error "FAIL ${Name}: $($_.Exception.Message)" -ErrorAction Continue }
+}
+
+$temp = Join-Path ([IO.Path]::GetTempPath()) ('ai-devops-maintenance-test-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $temp | Out-Null
+try {
+  . $installerPath -LibraryMode
+  $sourceRoot = $repo
+  $script:PayloadRoot = Join-Path $temp 'payload'
+  $script:RuntimeRoot = Join-Path $temp 'runtime'
+  $script:EvidencePath = Join-Path $temp 'windows-runner-security.json'
+  $script:mockTask = $null
+  function Set-ProtectedFilesystemAcl { param($LiteralPath,$OperatorSid,$Kind) Assert-NoReparsePoint -LiteralPath $LiteralPath }
+  function Test-PathAclContract { param($LiteralPath,$OperatorSid,$Kind) }
+  function Register-MaintenanceTask { param($OperatorSid) $script:mockTask = [ordered]@{ execute=$script:PowerShellPath; arguments='-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'; user_id=$OperatorSid; logon_type='S4U'; run_level='Highest'; trigger_count=0; multiple_instances='IgnoreNew'; sddl="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$OperatorSid)"; state='Ready' } }
+  function Get-InstalledTaskSnapshot { return $script:mockTask }
+  function Backup-MaintenanceInstallation { param($Destination) New-Item -ItemType Directory -Path $Destination -Force | Out-Null; 'backup' | Set-Content (Join-Path $Destination 'recovery.json') }
+  $sid = 'S-1-5-21-100-200-300-1001'
+
+  Case 'Install_IsIdempotent' {
+    Install-MaintenancePayload -SourceRoot $sourceRoot -OperatorSid $sid
+    Register-MaintenanceTask -OperatorSid $sid
+    $first = (Get-FileHash (Join-Path $script:PayloadRoot 'manifest.json')).Hash
+    Install-MaintenancePayload -SourceRoot $sourceRoot -OperatorSid $sid
+    $second = (Get-FileHash (Join-Path $script:PayloadRoot 'manifest.json')).Hash
+    Assert-True ($first -eq $second) 'second install changed owned state'
+  }
+  Case 'Update_IsAtomicAndBackedUp' { Assert-Contains $installer 'Backup-MaintenanceInstallation'; Assert-Contains $installer "Move-Item -LiteralPath `$staging -Destination `$script:PayloadRoot" }
+  Case 'Verify_IsReadOnly' { Assert-True (([regex]::Match($installer, 'if \(\$Verify[\s\S]*?return \}').Value -notmatch 'Set-|New-Item|Move-Item|Remove-Item|Register-')) 'verify branch mutates state' }
+  Case 'Remove_IsIdempotent' { Assert-Contains $installer "return 'ABSENT'"; Assert-Contains $installer "return 'REMOVED'" }
+  Case 'Remove_RefusesForeignOrDriftedTask' { $prior=$script:mockTask.arguments; $script:mockTask.arguments='foreign.exe'; try { Test-MaintenanceInstallation -ExpectedOperatorSid $sid; throw 'drift accepted' } catch { Assert-True ($_.Exception.Message -like 'STALE_INSTALLATION*') 'wrong refusal' }; $script:mockTask.arguments=$prior }
+  Case 'Task_UsesS4UHighestFixedProtectedAction' { foreach($m in @('-LogonType S4U','-RunLevel Highest',$script:PowerShellPath,'windows-runner-maintenance-worker.ps1')) { Assert-Contains $installer $m } }
+  Case 'Task_HasNoTrigger' { Assert-True ($installer -notmatch 'New-ScheduledTaskTrigger') 'a trigger was created'; Assert-Contains $installer 'trigger_count -ne 0' }
+  Case 'Task_IgnoresParallelInstance' { Assert-Contains $installer '-MultipleInstances IgnoreNew' }
+  Case 'Operator_CanReadAndRunOnly' { Assert-Contains $installer '(A;;GRGX;;;' }
+  Case 'Operator_CannotChangeDeleteOrReplaceTask' { Assert-True ($installer -notmatch '\(A;;FA;;;\$OperatorSid') 'operator gets full task access'; Assert-Contains $installer 'SetSecurityDescriptor($sddl, 0)' }
+  Case 'Payload_IsAdministratorOwnedAndHashVerified' { Assert-Contains $installer '*S-1-5-32-544'; Assert-Contains $installer 'Get-FileHash -Algorithm SHA256'; Assert-True ($policy.payload_hashes.'windows-runner-maintenance-worker.ps1' -ceq (Get-FileHash -Algorithm SHA256 $workerPath).Hash.ToLowerInvariant()) 'policy worker hash is stale'; Assert-True ($policy.payload_hashes.'qualify-windows-runner.ps1' -ceq (Get-FileHash -Algorithm SHA256 (Join-Path $repo 'bin\qualify-windows-runner.ps1')).Hash.ToLowerInvariant()) 'policy qualification hash is stale' }
+  Case 'RepositoryMutation_CannotChangeInstalledPayload' { Assert-Contains $installer 'Copy-Item -LiteralPath $source'; Assert-Contains $worker 'Test-PayloadManifest' }
+  Case 'ReparsePoint_IsRejected' { Assert-Contains $installer '[IO.FileAttributes]::ReparsePoint'; Assert-Contains $worker '[IO.FileAttributes]::ReparsePoint' }
+  Case 'AclDrift_FailsClosed' { Assert-Contains $installer 'Set-ProtectedFilesystemAcl'; Assert-Contains $installer 'STALE_INSTALLATION' }
+
+  Remove-Item Function:\Set-ProtectedFilesystemAcl,Function:\Test-PathAclContract,Function:\Register-MaintenanceTask,Function:\Get-InstalledTaskSnapshot,Function:\Backup-MaintenanceInstallation -ErrorAction SilentlyContinue
+  . $workerPath
+  $requestPath = Join-Path $temp 'request.json'
+  function Write-Request($Object) { [IO.File]::WriteAllText($requestPath, ($Object | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false)) }
+  function Valid-Request { [ordered]@{ schema_version=1; request_id=[guid]::NewGuid().ToString(); operation='refresh-qualification'; requested_at=[DateTime]::UtcNow.ToString('o') } }
+  $owner = { param($p) 'S-1-5-21-100-200-300-1001' }
+  Case 'Request_AllowsOnlyRefreshQualification' { Write-Request (Valid-Request); $r=Read-ValidatedRequest $requestPath $sid -OwnerSidReader $owner; Assert-True ($r.operation -ceq 'refresh-qualification') 'operation rejected' }
+  Case 'Request_RejectsUnknownFields' { $r=Valid-Request; $r.extra='x'; Write-Request $r; try { Read-ValidatedRequest $requestPath $sid -OwnerSidReader $owner; throw 'accepted' } catch { Assert-True ($_.Exception.Message -eq 'UNKNOWN_FIELDS') 'wrong refusal' } }
+  Case 'Request_RejectsArgumentsPathsAndEnvironment' { foreach($field in @('arguments','path','environment')) { $r=Valid-Request; $r[$field]='x'; Write-Request $r; try { Read-ValidatedRequest $requestPath $sid -OwnerSidReader $owner; throw 'accepted' } catch { Assert-True ($_.Exception.Message -eq 'UNKNOWN_FIELDS') 'wrong refusal' } } }
+  Case 'Request_RejectsWrongOwner' { Write-Request (Valid-Request); try { Read-ValidatedRequest $requestPath $sid -OwnerSidReader { 'S-1-5-21-9' }; throw 'accepted' } catch { Assert-True ($_.Exception.Message -eq 'WRONG_OWNER') 'wrong refusal' } }
+  Case 'Request_RejectsMalformedJson' { [IO.File]::WriteAllText($requestPath,'{bad',[Text.UTF8Encoding]::new($false)); try { Read-ValidatedRequest $requestPath $sid -OwnerSidReader $owner; throw 'accepted' } catch { Assert-True ($_.Exception.Message -eq 'MALFORMED_JSON') 'wrong refusal' } }
+  Case 'Request_RejectsOversize' { [IO.File]::WriteAllText($requestPath,('x'*2049)); try { Read-ValidatedRequest $requestPath $sid -OwnerSidReader $owner; throw 'accepted' } catch { Assert-True ($_.Exception.Message -eq 'OVERSIZE') 'wrong refusal' } }
+  Case 'Request_RejectsStaleTimestamp' { $r=Valid-Request; $r.requested_at=[DateTime]::UtcNow.AddMinutes(-10).ToString('o'); Write-Request $r; try { Read-ValidatedRequest $requestPath $sid -OwnerSidReader $owner; throw 'accepted' } catch { Assert-True ($_.Exception.Message -eq 'STALE_TIMESTAMP') 'wrong refusal' } }
+  Case 'Request_RejectsReusedUuid' { Assert-Contains $worker 'REUSED_UUID'; Assert-Contains $worker 'processed-requests.jsonl' }
+  Case 'Concurrency_OneRunsAndDuplicateGetsExplicitResult' { Assert-Contains $worker "'CONCURRENT_EXECUTION'"; Assert-Contains $worker 'WaitOne(0)' }
+  Case 'StaleLock_IsDiagnosedNotSilentlyRemoved' { Assert-True ($worker -notmatch 'Remove-Item.*lock') 'worker deletes a lock'; Assert-Contains $worker 'Enter-MaintenanceLock' }
+  Case 'TaskIgnoredStart_DoesNotLoseRequest' { Assert-Contains $worker 'Get-ChildItem -LiteralPath $requests'; Assert-Contains $worker 'CONCURRENT_EXECUTION' }
+  Case 'Result_IsAtMost8KiB' { Assert-True ($policy.max_result_bytes -eq 8192) 'wrong result bound'; Assert-Contains $worker 'RESULT_OVERSIZE' }
+  Case 'Result_ContainsOnlySafeSchema' { $result=[ordered]@{schema_version=1;request_id='x';operation='refresh-qualification';host='host';started_at_utc='s';ended_at_utc='e';result='SUCCESS';exit_code=0;message='ok'}; $out=Join-Path $temp 'result.json'; Write-SafeResult $result $out; Assert-True ((Get-Item $out).Length -lt 8192) 'result too large' }
+  Case 'Result_RejectsMismatchedUuid' { Assert-Contains $client 'result.request_id -cne $ExpectedRequestId' }
+  Case 'Result_RejectsReparsePoint' { Assert-Contains $client '[IO.FileAttributes]::ReparsePoint' }
+  Case 'Timeout_IsBounded' { Assert-Contains $client '[ValidateRange(1,300)]'; Assert-Contains $client '[Math]::Min($Timeout, 300)' }
+  Case 'Failure_DoesNotExposeExceptionStdoutStderrEnvironmentOrEvidence' { foreach($unsafe in @('StackTrace','Get-ChildItem Env:','Out-String')) { Assert-True (-not $worker.Contains($unsafe)) "unsafe diagnostic marker: $unsafe" }; Assert-Contains $worker "The request was rejected." }
+  Case 'Audit_RecordsRequesterSidHostOperationStartEndResult' { foreach($f in @('requester_sid','host','operation','started_at_utc','ended_at_utc','result')) { Assert-Contains $worker $f } }
+  Case 'Audit_IsAppendOnlyForOperator' { Assert-Contains $worker '[IO.File]::AppendAllText'; Assert-Contains $installer '*${OperatorSid}:R' }
+  Case 'Audit_RecordsRejectedAndFailedRequests' { Assert-Contains $worker 'Write-AuditEvent'; Assert-Contains $worker "'REQUEST_REJECTED'"; Assert-Contains $worker "'OPERATION_FAILED'" }
+  Case 'RefreshQualification_UsesFixedEvidencePath' { Assert-Contains $worker "`$script:EvidencePath = 'C:\ProgramData\ai-devops\windows-runner-security.json'"; Assert-Contains $worker "'-EvidencePath',`$script:EvidencePath" }
+  Case 'RefreshQualification_PreservesAllExistingGuards' { foreach($m in @('Get-Tpm','Confirm-SecureBootUEFI','CurrentBuildNumber','actions.runner.*','StartMode')) { Assert-Contains (Get-Content -Raw (Join-Path $repo 'bin\qualify-windows-runner.ps1')) $m } }
+  Case 'RunnerService_IsReadOnly' { Assert-True (($installer+$worker+$client) -notmatch 'Stop-Service|Start-Service|Restart-Service|Set-Service|sc.exe') 'runner service mutation found' }
+  Case 'Recovery_MissingTask' { Assert-Contains $client "throw 'MISSING_TASK'" }
+  Case 'Recovery_StaleInstall' { Assert-Contains $worker "'STALE_INSTALLATION'" }
+  Case 'Recovery_RunningTask' { Assert-Contains $worker "'CONCURRENT_EXECUTION'"; Assert-Contains $installer 'RECOVERY_RUNNING_TASK' }
+  Case 'Recovery_FailedCleanup' { Assert-Contains $installer 'Refusing to replace an unverified previous payload backup.' }
+  Case 'Rollback_RestoresExactPriorOwnedState' { Assert-Contains $installer 'Export-ScheduledTask'; Assert-Contains $installer 'task.xml'; Assert-Contains $installer 'recovery.json' }
+  Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
+} finally {
+  Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Output "RESULT: $script:passed passed, $script:failed failed, 0 skipped"
+if ($script:failed -ne 0) { exit 1 }
