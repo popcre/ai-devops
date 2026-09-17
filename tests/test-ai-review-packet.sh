@@ -75,6 +75,10 @@ check "manifest_carries_full_base_sha"        "grep -qF '$BASE_SHA' '$M'"
 check "shas_are_40_characters"                "[ \${#HEAD_SHA} -eq 40 ]"
 check "base_selection_rule_is_stated"         "grep -q 'Base selection rule:' '$M'"
 check "verdict_is_bound_to_head"              "grep -q 'applies to head' '$M'"
+check "manifest_demands_every_finding_and_sibling_issues" "grep -q 'report EVERY finding' '$M' && grep -q 'sibling issues' '$M'"
+for wrapper in ai-claude-review ai-codex-review ai-deepseek-agent ai-gemini ai-glm ai-grok-review ai-kimi ai-muse ai-qwen; do
+  check "reviewer_${wrapper}_reads_the_shared_manifest_prompt" "grep -q 'MANIFEST' '$REPO_ROOT/bin/$wrapper'"
+done
 
 # shared-db #2709: fetched origin/main is authoritative when local main is
 # stale. Otherwise an update-from-main merge makes unrelated mainline files

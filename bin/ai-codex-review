@@ -244,7 +244,7 @@ untracked file listed by the manifest.
 
 $DECISION
 
-Return findings with file and line evidence. End with a literal heading and one
+Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. End with a literal heading and one
 allowed word exactly as follows:
 
 ## Verdict
