@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# ai-qwen-cli — run plain Qwen Code (interactive or `-p`) with the governed key.
+# The key stays in 1Password: `op run` resolves the single op:// reference in
+# mcp.env for this one process only. Nothing is written to disk or settings.
+# For reviews and delegated coding use `ai-qwen`, which adds containment.
+set -euo pipefail
+CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
+MCP_ENV="${AI_QWEN_OP_ENV_FILE:-$CFG_DIR/mcp.env}"
+TOKEN_FILE="$CFG_DIR/op-service-account"
+KEY=BAILIAN_CODING_PLAN_API_KEY
+die() { printf 'ai-qwen-cli: error: %s\n' "$*" >&2; exit 1; }
+
+case "${1:-}" in --version) echo "ai-qwen-cli 0.1.0"; exit 0 ;; esac
+qwen="${AI_QWEN_CLI_QWEN_BIN:-$(command -v qwen 2>/dev/null || true)}"; [ -n "$qwen" ] || die "qwen is not installed."
+op="${AI_QWEN_CLI_OP_BIN:-$(command -v op 2>/dev/null || true)}"; [ -n "$op" ] || die "1Password CLI (op) is not installed."
+[ -f "$MCP_ENV" ] || die "$MCP_ENV is missing."
+[ "$(grep -c "^$KEY=" "$MCP_ENV" || true)" = 1 ] && grep -q "^$KEY=op://" "$MCP_ENV" \
+  || die "$MCP_ENV must hold exactly one $KEY=op:// reference."
+
+envf="$(mktemp)"; trap 'rm -f "$envf"' EXIT; chmod 600 "$envf" 2>/dev/null || true
+grep "^$KEY=op://" "$MCP_ENV" > "$envf"
+[ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || [ ! -s "$TOKEN_FILE" ] || export OP_SERVICE_ACCOUNT_TOKEN="$(<"$TOKEN_FILE")"
+# --no-masking keeps the terminal UI intact; op only masks, it does not protect.
+"$op" run --no-masking --env-file "$envf" -- "$qwen" "$@"

@@ -37,6 +37,9 @@ the wrapper against `qwen --help` and a hostile write canary.
 
 ## Continue the exact named session
 
+For plain, uncontained Qwen Code (interactive or `-p`), run `ai-qwen-cli`; it
+resolves the governed 1Password key for that one process. Never use it for reviews.
+
 Run `ai-qwen list` before creating another session. Use `ask` for every follow-up.
 Never use Qwen's `--continue`, which means the newest session for that project and
 can select another agent's conversation. The wrapper stores and resumes the exact
