@@ -102,7 +102,6 @@
     "test-ai-grok-review.sh",
     "test-ai-install-manifest.sh",
     "test-ai-install-skills.sh",
-    "test-ai-kimi.sh",
     "test-ai-machine-tools.sh",
     "test-ai-memory-health.sh",
     "test-ai-gh.sh",
@@ -182,7 +181,6 @@
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
     "test-ai-install-skills.sh",
-    "test-ai-kimi.sh",
     "test-ai-machine-tools.sh",
     "test-ai-memory-sync.sh",
     "test-ai-muse.sh",
@@ -214,7 +212,6 @@
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
     "test-ai-install-skills.sh",
-    "test-ai-kimi.sh",
     "test-ai-machine-tools.sh",
     "test-ai-memory-sync.sh",
     "test-ai-muse.sh",
@@ -236,13 +233,11 @@
     "test-configure-codex-statusline.ps1",
     "test-context-audit.ps1",
     "test-install-ai-devops-windows.ps1",
-    "test-kimi-windows-execution.ps1",
     "test-mcp-env-launch.ps1",
     "test-memory-sync-scheduled-task.ps1",
     "test-qualify-windows-runner.ps1",
     "test-reconcile-smart-app-control.ps1",
     "test-repo-identity.ps1",
-    "test-windows-ai-kimi-shim.ps1",
     "test-windows-ai-provider-clis.ps1",
     "test-windows-git-bash-path.ps1",
     "test-windows-json-atomic.ps1",
@@ -250,9 +245,6 @@
     "test-windows-source-gate.ps1"
   ],
   "windows_offline_shards": [
-    [
-      "test-ai-kimi.sh"
-    ],
     [
       "test-ai-claude-review.sh",
       "test-ai-codex-memories.sh",
@@ -285,5 +277,13 @@
       "test-windows-scripts.sh"
     ]
   ],
-  "windows_offline_powershell_shard": 3
+  "windows_offline_powershell_shard": 3,
+  "suspended_bash": [
+    "test-ai-kimi.sh"
+  ],
+  "suspended_powershell": [
+    "test-kimi-windows-execution.ps1",
+    "test-windows-ai-kimi-shim.ps1"
+  ],
+  "_comment_suspended": "Suites suspended from every CI lane (declared here, honored by tests/test-all.sh and tests/test-all.ps1). Kimi suspended 2026-09-17: the provider is out of credit and registry-absent since 2026-09-10; the wrapper, suites, and timing entries are retained for re-entry. Remove the entries from the suspended lists to restore the lanes."
 }

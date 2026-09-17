@@ -1,6 +1,6 @@
 ---
 name: kimi-code-delegation
-description: Delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrapper — read-only reviews, repository analysis, session continuation, and explicit isolated implementation. Use when an AI session should drive Kimi headlessly, split planning from execution, resume a prior Kimi session, or verify Kimi-authored changes without relying on the interactive TUI.
+description: "SUSPENDED (2026-09-17): the Kimi account is out of credit and kimi is registry-absent — do NOT route work here until this banner is removed. Retained for re-entry: delegate scoped coding work to Kimi Code CLI via the `ai-kimi` wrapper — read-only reviews, repository analysis, session continuation, and explicit isolated implementation."
 ---
 
 # Kimi Code Delegation

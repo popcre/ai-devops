@@ -194,13 +194,14 @@ jobs:
       # and the rest of the evidence still lands.
       fail-fast: false
       matrix:
-        section: [1, 2, 3, 4, 5]
+        section: [1, 2, 3, 4]
     runs-on: windows-2025
-    # The two measured runs above put the old Muse section at 36-38 minutes and
-    # the old Qwen section at 36 minutes. Rebalancing their smaller neighbours
-    # makes the indivisible Kimi suite the expected long pole at 34-35 minutes,
-    # while a bounded 40-minute ceiling retains finalization headroom without a
-    # same-run fallback or removing any test.
+    # Four sections since the Kimi CI suspension (2026-09-17): the indivisible
+    # Kimi suite that owned a dedicated section is suspended in
+    # config/ci-suite-manifest.json while the provider is out of credit, so the
+    # lane is rebalanced over the remaining four sections under the same
+    # 40-minute ceiling. The suite file is retained and returns by removing its
+    # suspended_bash entry.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -212,10 +213,10 @@ jobs:
           if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
             throw 'The pinned Windows runner image does not provide jq.'
           }
-      - name: Windows-sensitive section ${{ matrix.section }} of 5
+      - name: Windows-sensitive section ${{ matrix.section }} of 4
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/5'
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/4'
 
   # Scheduled, manual and qualification verification stay complete and
   # unsectioned. Sectioning is a wall-clock lever for the pull-request lane; the
