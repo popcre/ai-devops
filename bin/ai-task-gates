@@ -50,6 +50,7 @@ EX_BLOCKED=3
 EX_UNCLASSIFIED=4
 
 die(){ printf 'ai-task-gates: error: %s\n' "$*" >&2; exit 1; }
+need_value(){ [ $# -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."; }
 fail_closed(){ printf 'ai-task-gates: cannot classify: %s\n' "$*" >&2; exit "$EX_UNCLASSIFIED"; }
 blocked(){ printf '%s\n' "$*" >&2; exit "$EX_BLOCKED"; }
 
@@ -286,9 +287,9 @@ cmd_start(){
   local class="" reason="" base=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --class) class="${2:-}"; shift 2 ;;
-      --reason) reason="${2:-}"; shift 2 ;;
-      --base) base="${2:-}"; shift 2 ;;
+      --class) need_value "$@"; class="$2"; shift 2 ;;
+      --reason) need_value "$@"; reason="$2"; shift 2 ;;
+      --base) need_value "$@"; base="$2"; shift 2 ;;
       *) die "unknown option for start: $1" ;;
     esac
   done
@@ -340,8 +341,8 @@ cmd_explain(){
   while [ $# -gt 0 ]; do
     case "$1" in
       --json) as_json=true; shift ;;
-      --base) base="${2:-}"; shift 2 ;;
-      --paths-from) paths_from="${2:-}"; shift 2 ;;
+      --base) need_value "$@"; base="$2"; shift 2 ;;
+      --paths-from) need_value "$@"; paths_from="$2"; shift 2 ;;
       *) die "unknown option for explain: $1" ;;
     esac
   done
@@ -399,10 +400,10 @@ cmd_check(){
   local action="" acknowledge="" owner_request="" base=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --before) action="${2:-}"; shift 2 ;;
-      --acknowledge) acknowledge="${2:-}"; shift 2 ;;
-      --owner-request) owner_request="${2:-}"; shift 2 ;;
-      --base) base="${2:-}"; shift 2 ;;
+      --before) need_value "$@"; action="$2"; shift 2 ;;
+      --acknowledge) need_value "$@"; acknowledge="$2"; shift 2 ;;
+      --owner-request) need_value "$@"; owner_request="$2"; shift 2 ;;
+      --base) need_value "$@"; base="$2"; shift 2 ;;
       *) die "unknown option for check: $1" ;;
     esac
   done
