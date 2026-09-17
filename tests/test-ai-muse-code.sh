@@ -47,9 +47,11 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$TMP/bin/op" "$MBIN/muse-bin-$VERSION.exe"
-STUB_SHA="$(sha256sum "$MBIN/muse-bin-$VERSION.exe" | cut -d' ' -f1)"
+# The fingerprint has no override: run a private copy of the tool that pins the stub.
+mkdir -p "$TMP/tool"; cp -R "$ROOT/bin" "$ROOT/config" "$ROOT/tools" "$TMP/tool/"; SCRIPT="$TMP/tool/bin/ai-muse"
+sha256sum "$MBIN/muse-bin-$VERSION.exe" | cut -d' ' -f1 > "$TMP/tool/config/muse-code/sha256"
 STORE="$HOME_FIX/.local/share/ai-devops/muse-code/muse/sessions/.msp-view-v1"
-ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=claude AI_MUSE_ENGINE=muse-code AI_MUSE_TEST_DIR='$TMP' MUSE_STUB_ENV_FILE='$TMP/provider-env' MUSE_STUB_ARGS_FILE='$TMP/provider-args' AI_MUSE_TEST_MUSE_CODE_SHA256='$STUB_SHA'"
+ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=claude AI_MUSE_ENGINE=muse-code AI_MUSE_TEST_DIR='$TMP' MUSE_STUB_ENV_FILE='$TMP/provider-env' MUSE_STUB_ARGS_FILE='$TMP/provider-args'"
 
 check 'unknown engine refuses before any work' "cd '$REPO' && ! eval \"$ENV AI_MUSE_ENGINE=bogus '$SCRIPT' doctor\" 2>&1 | grep -q PASS"
 check 'default engine stays OpenCode' "cd '$REPO' && eval \"USERPROFILE='$HOME_FIX' PATH='$TMP/bin:$PATH' AI_MUSE_CALLER=claude '$SCRIPT' doctor\" 2>&1 | grep -q 'engine: opencode'"
@@ -66,7 +68,7 @@ check 'private stores exist with owner-only modes' "for d in '$HOME_FIX/.local/s
 check 'wrapper chooses and records a UUID session identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' show first\" | jq -e '.status==\"active\" and (.session_id|test(\"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$\"))'"
 check 'follow-up resumes the exact recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask first --prompt again\" | grep -qx remembered && grep -qx \"\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .session_id)\" '$TMP/provider-args'"
 check 'report records usage as unavailable, not zero' "grep -q 'engine-usage-not-reported' '$REPO'/.ai/reviews/muse-first-*.md"
-check 'a replaced binary claiming the pinned version never runs' "cd '$REPO' && rm -f '$TMP/provider-args' '$TMP/side-env' && ! eval \"$ENV MUSE_STUB_SIDE_ENV_FILE='$TMP/side-env' AI_MUSE_TEST_MUSE_CODE_SHA256=0000000000000000000000000000000000000000000000000000000000000000 '$SCRIPT' new swapped --prompt test\" && test ! -e '$TMP/provider-args' && test ! -e '$TMP/side-env'"
+check 'a replaced binary claiming the pinned version never runs, whatever the caller sets' "cd '$REPO' && cp '$MBIN/muse-bin-$VERSION.exe' '$TMP/stub.keep' && printf '# tampered\n' >> '$MBIN/muse-bin-$VERSION.exe' && rm -f '$TMP/provider-args' '$TMP/side-env' && ! eval \"$ENV MUSE_STUB_SIDE_ENV_FILE='$TMP/side-env' AI_MUSE_TEST_MUSE_CODE_SHA256=\$(sha256sum '$MBIN/muse-bin-$VERSION.exe' | cut -d' ' -f1) '$SCRIPT' new swapped --prompt test\"; rc=\$?; cp '$TMP/stub.keep' '$MBIN/muse-bin-$VERSION.exe'; [ \$rc -eq 0 ] && test ! -e '$TMP/provider-args' && test ! -e '$TMP/side-env'"
 check 'the shipped fingerprint is a SHA-256' "grep -Eqx '[0-9a-f]{64}' '$ROOT/config/muse-code/sha256'"
 check 'transcript refuses an unpinned Muse Code binary' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' transcript first\" 2>/dev/null | grep -q session_id"
 check 'version checks and exports never see unrelated caller secrets' "cd '$REPO' && rm -f '$TMP/side-env' && eval \"$ENV MUSE_STUB_SIDE_ENV_FILE='$TMP/side-env' LEAKY_TOKEN=leak-marker-7Q2Z '$SCRIPT' transcript first\" >/dev/null && { grep -q '^XDG_DATA_HOME=' '$TMP/side-env' || { echo 'no provider environment was recorded'; exit 1; }; } && { ! grep -nE 'LEAKY_TOKEN|leak-marker-7Q2Z' '$TMP/side-env' || { echo 'caller secret reached the provider'; exit 1; }; }"
