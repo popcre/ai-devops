@@ -155,7 +155,12 @@ runtime_env(){
     export XDG_STATE_HOME="$PROFILE_HOME/.local/state/ai-devops/muse-code"
     export XDG_CACHE_HOME="$PROFILE_HOME/.cache/ai-devops/muse-code"
     mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-    chmod 700 "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" 2>/dev/null || true
+    local store
+    for store in "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"; do
+      [ ! -f "$store/.ai-devops-private-store-v1" ] || continue
+      { chmod 700 "$store" && protect_windows_path "$store" directory && printf 'private store enforced
+' > "$store/.ai-devops-private-store-v1"; } || die "could not make Muse Code store private: $store"
+    done
     return 0
   fi
   export XDG_CONFIG_HOME="$CFG/opencode-xdg"

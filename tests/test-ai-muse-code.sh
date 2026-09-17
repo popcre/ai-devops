@@ -60,6 +60,7 @@ check 'provider gets the key only as META_API_KEY' "grep -qx 'META_API_KEY=fake-
 check 'prompt that looks like options never reaches the argument list' "cd '$REPO' && eval \"$ENV '$SCRIPT' new optprompt --prompt '--workspace=C:/ --enable-write'\" && ! grep -q -- '--enable-write' '$TMP/provider-args' && grep -qx -- --prompt-file '$TMP/provider-args'"
 check 'key never appears in provider arguments' "! grep -q fake-key '$TMP/provider-args'"
 check 'provider uses private isolated stores' "grep -q '^XDG_DATA_HOME=.*ai-devops/muse-code' '$TMP/provider-env' && grep -q '^XDG_CONFIG_HOME=.*muse-code-xdg' '$TMP/provider-env'"
+check 'every private store is locked down before use' "for d in '$HOME_FIX/.local/share/ai-devops/muse-code' '$HOME_FIX/.local/state/ai-devops/muse-code' '$HOME_FIX/.cache/ai-devops/muse-code'; do test -f \"\$d/.ai-devops-private-store-v1\" || exit 1; done"
 check 'wrapper chooses and records a UUID session identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' show first\" | jq -e '.status==\"active\" and (.session_id|test(\"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$\"))'"
 check 'follow-up resumes the exact recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask first --prompt again\" | grep -qx remembered && grep -qx \"\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .session_id)\" '$TMP/provider-args'"
 check 'report records usage as unavailable, not zero' "grep -q 'engine-usage-not-reported' '$REPO'/.ai/reviews/muse-first-*.md"
