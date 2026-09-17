@@ -8,7 +8,8 @@ owner: claude/ai-muse-native-engine-parity-plan
 
 The executable plan is [`../plan_ai-muse-native-engine-parity.md`](../plan_ai-muse-native-engine-parity.md)
 (tracking issue [#542](https://github.com/popcre/ai-devops/issues/542)). **Read
-its STATUS table first.** No implementation has started; every row is open.
+its STATUS table first.** Phase 0 and Phase A are done with artifacts; B, C, D
+remain open.
 
 ## What this workstream is
 
@@ -20,11 +21,13 @@ durable-store deletion hygiene), live-qualify the engine, update shared-db's
 
 ## Next exact action
 
-Phase 0A: check whether the credential-lock wait branch
-`claude/muse-cred-lock-wait-20260917` (worktree
-`C:\repos\ai-devops-wt-muse-lock-0917`, another live session's work) has
-landed; then start Phase A (usage telemetry) in a fresh worktree under
-`ai-task-gates start --class reviewer-safety`.
+Phase B (first-party catalog truth), in a fresh session and worktree under
+`ai-task-gates start --class reviewer-safety`: B1 doctor catalog checks, B2
+catalog-priced estimate in the `muse-code` adapter, B3 tests — all per the
+plan's §9 Phase B. Phase A landed as PR #554 (merge `8e1426f5`). Before
+editing `bin/ai-muse`, re-check whether
+`claude/muse-cred-lock-wait-20260917` (PR #540) has landed and cut the worktree
+from the then-current `origin/main`.
 
 ## Decisions only the owner can make
 
@@ -36,8 +39,10 @@ None outstanding. Already settled — do not re-ask:
 
 ## Traps for whoever continues
 
-- `bin/ai-muse` is hot: the credential-lock branch edits `load_key` and
-  `tests/test-ai-muse.sh`; do not start Phase A's wrapper edit before it lands.
+- `bin/ai-muse` is hot: the credential-lock branch (PR #540, `load_key` +
+  `tests/test-ai-muse.sh`) is still open — cut from current `origin/main`,
+  keep hunks disjoint, let the merge queue serialize, and re-run the full muse
+  suites before requesting review.
 - The durable store and model-catalog formats are internal to pinned build
   `1.3.0-R3233.1` — fail closed on any shape mismatch; never guess counters.
 - Every phase PR is reviewer-safety class: independent read-only exact-head

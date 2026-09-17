@@ -11,11 +11,11 @@ at every cut point.
 
 | Step | What | State | Evidence / notes |
 |---|---|---|---|
-| 0A | Credential-lock wait branch landed or explicitly coordinated | ⬜ open | Dependency, owned by another live session — see §5 |
-| 0B | Phase A worktree + `ai-task-gates start --class reviewer-safety` | ⬜ open | — |
-| A1 | `muse-code` adapter in `tools/reviewer_usage.py` | ⬜ open | — |
-| A2 | Wrapper reads durable-store usage at retain time (`turn_usage`) | ⬜ open | — |
-| A3 | Stub store + usage tests in `tests/test-ai-muse-code.sh` (+ adapter unit tests) | ⬜ open | — |
+| 0A | Credential-lock wait branch landed or explicitly coordinated | ✅ done | Not landed — **coordinated instead**: Albert cleared Phase A to proceed without it (chat, 2026-09-17). PR #540 open at `ac1e0d46`; Phase A hunks stayed disjoint (`turn_usage` vs `load_key`); merge queue serializes the landing order. |
+| 0B | Phase A worktree + `ai-task-gates start --class reviewer-safety` | ✅ done | Worktree `C:\repos\ai-devops-worktrees\542-muse-phase-a-0917` cut from `origin/main` `38981f58`; gate recorded, `check --before ship` allowed for class `reviewer-safety`. |
+| A1 | `muse-code` adapter in `tools/reviewer_usage.py` | ✅ done | PR #554 (merge `8e1426f5`): `muse_code()`/`muse_code_read()`; 10 unit cases in `tests/fixtures/muse-code/usage_cases.py`. Token fields live under `.payload.event.usage.*` (live-store verified; §6a's sketch omitted the `usage` nesting). §8 semantics confirmed empirically: `input_tokens >= cache_read_tokens` on every live row. |
+| A2 | Wrapper reads durable-store usage at retain time (`turn_usage`) | ✅ done | PR #554: muse-code branch of `turn_usage()` + `muse_code_durable_log()` (exact-UUID, `find -maxdepth 4`, dot-dirs pruned, single match, non-symlink). Unavailable reasons: `usage-run-id-unresolved`, `durable-store-unreadable`, `usage-formatting-failed`; a completed review is never blocked. |
+| A3 | Stub store + usage tests in `tests/test-ai-muse-code.sh` (+ adapter unit tests) | ✅ done | PR #554: stub writes a date-bucketed store + decoy run + `runtime.command.accepted`. `bash tests/test-ai-muse-code.sh` **42/0**; `bash tests/test-ai-muse.sh` **165/0**; `bash tests/test-muse-opencode-contract.sh` pass (Git Bash). Independent Codex `diff-review` APPROVE with coverage at exact head `fdf715ed`; `ai-muse.cmd doctor` PASS through the installed Windows launcher route. |
 | B1 | Doctor catalog checks (exists / `is_current` / `visibility`, report limits + cost) | ⬜ open | — |
 | B2 | Catalog-priced cost estimate in the adapter (provenance-labeled) | ⬜ open | — |
 | B3 | Catalog + doctor tests | ⬜ open | — |
@@ -139,7 +139,8 @@ investigation that established:
 
 ### 5. Current state of the code
 
-All `bin/ai-muse` line numbers are as of `origin/main` `9224759b` (2026-09-17).
+All `bin/ai-muse` line numbers are as of `origin/main` `8e1426f5` (2026-09-17,
+after Phase A landed).
 Re-grep before editing; function names are the stable anchors.
 
 - Engine selection: `bin/ai-muse:24-34` — `ENGINE="${AI_MUSE_ENGINE:-opencode}"`;
@@ -159,9 +160,16 @@ Re-grep before editing; function names are the stable anchors.
   session stream; `FINISH="stop"` only from a final `run.terminal.completed`
   with `payload.terminal=="completed"`; `TEXT` from that event's
   `payload.text`; **`TOKENS=null`** — the stdout stream carries no usage.
-- Usage recording: `turn_usage` (~:354-363) — muse-code early-returns
-  `{"scope":"turn","completeness":"unavailable","availability_reason":"engine-usage-not-reported"}`;
-  the OpenCode branch shells `tools/reviewer_usage.py opencode <stdout-jsonl>`.
+- Usage recording: `turn_usage` (~:376-404) — both engines shell
+  `tools/reviewer_usage.py`. The muse-code branch extracts this turn's run id
+  from the retained stdout (`runtime.command.accepted` `.payload.command_id`,
+  falling back to `session.run.linked` `.payload.run_stream.id`), locates the
+  durable log via `muse_code_durable_log` (~:354-363: exact-UUID regex,
+  `find -maxdepth 4` with dot-dirs pruned, single match, regular non-symlink
+  `session.jsonl`), and calls the `muse-code` adapter with `--run`. Any failure
+  keeps `completeness:"unavailable"` with a specific reason
+  (`usage-run-id-unresolved`, `durable-store-unreadable`,
+  `usage-formatting-failed`) and never blocks a completed review.
   `retain_turn` (~:365-380) writes `retained_turn.usage_json` into session
   metadata at retain time — **usage is post-turn metadata, never streamed**.
 - Engine isolation: `require_engine_model` (~:551-553) — a stored model id
@@ -177,13 +185,18 @@ Re-grep before editing; function names are the stable anchors.
 - Doctor: `cmd_doctor` (~:638+). muse-code branch proves the pinned version,
   config presence, fingerprint, and prints `PASS  <check>` lines — a format
   shared-db's preflight consumes; keep it.
-- Formatter: `tools/reviewer_usage.py` — argparse adapters `deepseek` and
-  `opencode`. Output JSON: `{scope, counters{input, cache_read, cache_write,
-  output, reasoning, total, cost}, counter_provenance, counting_semantics,
-  completeness, availability_reason, adapter_cost_estimate?, cost_provenance?,
-  schema_version, provider, model, runtime_version, session_id, run_id,
-  observed_at}`. The `opencode` adapter refuses non-`1.18.12` versions
-  (`unqualified-opencode-version`) — copy that version-gating pattern.
+- Formatter: `tools/reviewer_usage.py` — argparse adapters `deepseek`,
+  `opencode`, and `muse-code` (Phase A, PR #554). Output JSON: `{scope,
+  counters{input, cache_read, cache_write, output, reasoning, total, cost},
+  counter_provenance, counting_semantics, completeness, availability_reason,
+  model_calls?, adapter_cost_estimate?, cost_provenance?, schema_version,
+  provider, model, runtime_version, session_id, run_id, observed_at}`. The
+  `opencode` adapter refuses non-`1.18.12` versions
+  (`unqualified-opencode-version`); the `muse-code` adapter reads the pinned
+  `config/muse-code/version` itself and refuses mismatches
+  (`unqualified-muse-code-version`), scopes store rows by `--run`, keeps
+  `total: null` (the store reports none), and labels provenance
+  `muse-code-<version>-durable-store-model-completed`.
 - Tests: `tests/test-ai-muse-code.sh` (offline; a stub bash "CLI" at a fake
   `%LOCALAPPDATA%\Programs\muse\muse-bin-$VERSION.exe` with modes
   `fail|malformed|wrongsid|mixed|nostream|noterminal|failed|completedthenfailed`;
@@ -200,14 +213,14 @@ Re-grep before editing; function names are the stable anchors.
   (`meta-model-api/muse-spark-1.3-contributor`, 2026-09-08, qualification via
   issue #2285). Phase D2 updates this evidence after native-engine
   qualification.
-- **In-flight dependency (0A):** branch `claude/muse-cred-lock-wait-20260917`
-  in worktree `C:\repos\ai-devops-wt-muse-lock-0917` has **uncommitted** changes
-  to `bin/ai-muse` (`load_key`: bounded machine-wide 1Password credential-lock
-  wait, `AI_MUSE_CREDENTIAL_WAIT_SECONDS`, default 120s) and
-  `tests/test-ai-muse.sh` (concurrent-read tests). Another live session owns it.
-  Phase A edits the same file; **do not start Phase A's wrapper edit until that
-  branch lands (or the owner explicitly coordinates)**, and rebase on its
-  result. Never touch that worktree.
+- **In-flight dependency (0A) — resolved by coordination, 2026-09-17:** branch
+  `claude/muse-cred-lock-wait-20260917` (worktree
+  `C:\repos\ai-devops-wt-muse-lock-0917`, another live session's work) had not
+  landed when Phase A started; Albert explicitly cleared Phase A to proceed on
+  a coordinating basis. Phase A kept its `bin/ai-muse` edits disjoint from that
+  branch's `load_key` hunk, and the merge queue serializes the landing order —
+  whichever lands second rebases. Later phases re-check that branch's state
+  before touching `bin/ai-muse` again. Never touch that worktree.
 
 ### 6. Key findings and root cause
 
