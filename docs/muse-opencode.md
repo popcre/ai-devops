@@ -33,6 +33,29 @@ The older `ai-muse review [repository] [request]` command remains available. It 
 creates a timestamped named conversation, so the result is not trapped in a one-off
 call.
 
+## Muse Code engine (trial)
+
+`AI_MUSE_ENGINE=muse-code` runs the same commands through Meta's Muse Code CLI
+instead of OpenCode. The default stays `opencode` until the new engine has earned
+it. Everything shared is unchanged: the disposable review copy, evidence packet,
+locks, private reports, credential handoff, retained turns, and `reconcile`.
+
+- Pinned build: `config/muse-code/version`, installed by Meta's Windows installer at
+  `%LOCALAPPDATA%\Programs\muse\muse-bin-<version>.exe`. `doctor` refuses any other
+  version; the auto-updating `muse` launcher is never used.
+- Read-only launch: `exec --json --disable-write --disable-shell --disable-web-tools
+  --no-foreign-personal-context --user-input-auto-resolve`. The shell stays disabled,
+  so the Windows sandbox is not needed and the model cannot pretend to run commands.
+- The wrapper chooses each session UUID and passes `--session-id`; a turn answered
+  in any other session is rejected. Only a final `run.terminal.completed` event with
+  `terminal: completed` proves completion.
+- Private stores under `~/.local/share|state|cache/ai-devops/muse-code` keep personal
+  skills, settings, and sessions separate. `delete` removes only that exact session
+  directory, because the CLI has no delete command.
+- The key reaches the CLI only as `META_API_KEY` through the credential boundary.
+  Token usage is recorded as unavailable. Sessions never cross engines.
+- Tests: `tests/test-ai-muse-code.sh` (offline stub). Windows only so far.
+
 ## Safety and evidence
 
 - Exact model: `meta-model-api/muse-spark-1.3-contributor`. No fallback is accepted.

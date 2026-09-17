@@ -60,3 +60,8 @@ force a packet read.
 A turn is valid only when the wrapper proves OpenCode's structured stop event, the
 exact session ID, and non-empty response text. Do not substitute GLM, another model,
 or your own opinion without stating that Muse did not complete.
+
+Muse Code engine trial: prefix a command with `AI_MUSE_ENGINE=muse-code` to run the
+same conversation through Meta's pinned Muse Code CLI instead of OpenCode. Proof is
+its final `run.terminal.completed` event in the wrapper-chosen session. Keep one
+engine per named session; the default engine remains OpenCode.
