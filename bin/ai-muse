@@ -246,7 +246,7 @@ prepare(){
   # Muse otherwise never sees the shared manifest and its answer contract.
   printf '
 
-Read %s/MANIFEST.md first and follow its required answer format. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning.
+Read %s/MANIFEST.md first for the exact change evidence, but keep the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning.
 ' "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
 }
 load_key(){
