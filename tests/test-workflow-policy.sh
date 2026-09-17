@@ -5,6 +5,7 @@ workflow="${WORKFLOW_UNDER_TEST:-$ROOT/.github/workflows/verify.yml}"
 fast_workflow="$ROOT/.github/workflows/fast-classifier.yml"
 classifier="$ROOT/tools/ci/classify-changes.sh"
 manifest="$ROOT/config/ci-suite-manifest.json"
+. "$ROOT/tools/lib/task-gates.sh"
 failures=0
 
 check() {
@@ -12,7 +13,11 @@ check() {
   if eval "$command"; then printf '  ok   %s\n' "$label"
   else printf '  FAIL %s\n' "$label" >&2; failures=$((failures + 1)); fi
 }
-classify() { printf '%s\n' "$2" | bash "$classifier" "$1"; }
+classify() {
+  local result
+  result="$(printf '%s\n' "$2" | tg_legacy_classify "$1")" || return
+  printf '%s\n' "$result"
+}
 
 windows_timeout="$(sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 reviewer_timeout="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
@@ -23,7 +28,7 @@ check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ]
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
-check 'long jobs skip only after successful prose classification' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 7 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
+check 'long and reviewer jobs use their separate classifier outputs' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 3 ] && [ \"\$(grep -c \"needs.fast-classifier.outputs.reviewer == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
 check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 7 ]"
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
@@ -48,6 +53,14 @@ check 'code runs long' "classify pull_request 'bin/ai-example' | grep -q '^run_l
 check 'workflow changes run long' "classify pull_request '.github/workflows/verify.yml' | grep -q '^workflow=true$'"
 check 'PowerShell changes run long' "classify pull_request 'tests/example.ps1' | grep -q '^powershell=true$'"
 check 'test fixtures run long' "classify pull_request 'tests/fixtures/example/data.md' | grep -q '^test_fixtures=true$'"
+check 'unrelated code skips reviewer lane' "classify pull_request 'bin/ai-example' | grep -q '^reviewer=false$'"
+check 'every declared reviewer dependency selects reviewer lane' \
+  ". '$ROOT/tools/lib/task-gates.sh'; while IFS= read -r pattern; do pattern=\${pattern%\$'\\r'}; case \"\$pattern\" in ''|'#'*) continue ;; esac; sample=\${pattern//\*\*\/nested\/file}; sample=\${sample//\*/file}; tg_legacy_classify pull_request <<<\"\$sample\" | grep -q '^reviewer=true$' || exit 1; done < '$ROOT/config/reviewer-ci-paths.txt'"
+check 'reviewer path policy is safe after a Windows CRLF checkout' \
+  "tmp=\$(mktemp -d); mkdir -p \"\$tmp/config\"; sed 's/\$/\\r/' '$ROOT/config/reviewer-ci-paths.txt' >\"\$tmp/config/reviewer-ci-paths.txt\"; saved_root=\$TG_LIB_REPO_ROOT; TG_LIB_REPO_ROOT=\$tmp; result=\$(tg_legacy_classify pull_request <<<'bin/ai-codex-review'); TG_LIB_REPO_ROOT=\$saved_root; rm -rf \"\$tmp\"; grep -Fqx 'reviewer=true' <<<\"\$result\""
+check 'representative shared reviewer paths select reviewer lane' \
+  ". '$ROOT/tools/lib/task-gates.sh'; for path in 'tools/reviewer_event_guard.sh' 'tools/reviewer_events.py' 'tools/reviewer_maintenance.py' 'tools/lib/provider-wrapper-common.sh' 'config/provider-cli-versions.json' 'tests/lib-test-timing.sh' '.github/workflows/verify.yml'; do tg_legacy_classify pull_request <<<\"\$path\" | grep -q '^reviewer=true$' || exit 1; done"
+check 'non-PR events always run reviewer lane' "classify schedule 'docs/example.md' | grep -q '^reviewer=true$' && classify workflow_dispatch 'docs/example.md' | grep -q '^reviewer=true$'"
 check 'non-PR events always run long' "classify schedule 'docs/example.md' | grep -q '^run_long=true$' && classify workflow_dispatch 'docs/example.md' | grep -q '^run_long=true$' && classify merge_group 'docs/example.md' | grep -q '^run_long=true$'"
 check 'mixed changes fail closed' "printf 'docs/example.md\nbin/ai-example\n' | bash '$classifier' pull_request | grep -q '^run_long=true$'"
 check 'skills-to-docs rename paths fail closed' "printf 'skills/shared/example/SKILL.md\ndocs/example.md\n' | bash '$classifier' pull_request | grep -q '^run_long=true$'"
@@ -312,7 +325,7 @@ check_reviewer_result() {
     exit 1
   }
 }
-common_reviewer_env='EVENT=pull_request CLASSIFIER_RESULT=success RUN_LONG=true RUN_EXPENSIVE=true WATCHDOG_RESULT=success'
+common_reviewer_env='EVENT=pull_request CLASSIFIER_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=true WATCHDOG_RESULT=success'
 # Regression: a timed-out or cancelled preferred host is not a global stop when
 # the independent hosted runner completed every identical reviewer assertion.
 check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=success
@@ -320,8 +333,8 @@ check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=failure FALLBACK_R
 check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=failure
 check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=skipped
 check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cleanup_failure FALLBACK_RESULT=skipped
-check_reviewer_result 0 EVENT=pull_request CLASSIFIER_RESULT=success RUN_LONG=false RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
-check_reviewer_result 0 EVENT=workflow_dispatch CLASSIFIER_RESULT=success RUN_LONG=true RUN_EXPENSIVE=false WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+check_reviewer_result 0 EVENT=pull_request CLASSIFIER_RESULT=success RUN_REVIEWER=false RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+check_reviewer_result 0 EVENT=workflow_dispatch CLASSIFIER_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=false WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
 rm -f "$aggregate_script"
 
 if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then

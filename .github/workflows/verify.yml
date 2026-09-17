@@ -300,7 +300,7 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'workflow_dispatch' &&
       (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true') &&
+       needs.fast-classifier.outputs.reviewer == 'true') &&
       needs.manual-preflight.outputs.run_expensive_jobs == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 3
@@ -332,15 +332,15 @@ jobs:
     needs: [fast-classifier, manual-preflight, reviewer-runner-availability]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
-    # Also skipped when the fast classifier proves the change is prose-only.
-    # Fail-closed: any classifier result other than a clean prose-only verdict
-    # runs the complete matrix.
+    # Also skipped when the fast classifier proves the change does not touch
+    # the declared reviewer dependency path set. Classifier failure remains
+    # fail-closed and runs the complete reviewer proof.
     if: >-
       !cancelled() && github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true') &&
+       needs.fast-classifier.outputs.reviewer == 'true') &&
       needs.reviewer-runner-availability.outputs.preferred_available == 'true' &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
@@ -409,7 +409,7 @@ jobs:
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true') &&
+       needs.fast-classifier.outputs.reviewer == 'true') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
     runs-on: ubuntu-24.04
@@ -438,7 +438,7 @@ jobs:
     if: >-
       always() && !cancelled() && github.event_name != 'merge_group' &&
       (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true') &&
+       needs.fast-classifier.outputs.reviewer == 'true') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
@@ -478,15 +478,15 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           CLASSIFIER_RESULT: ${{ needs.fast-classifier.result }}
-          RUN_LONG: ${{ needs.fast-classifier.outputs.run_long }}
+          RUN_REVIEWER: ${{ needs.fast-classifier.outputs.reviewer }}
           RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
           PREFERRED_RESULT: ${{ needs.reviewer-safety-start-deadline.outputs.preferred_result }}
           WATCHDOG_RESULT: ${{ needs.reviewer-safety-start-deadline.result }}
           FALLBACK_RESULT: ${{ needs.windows-reviewer-fallback.result }}
         run: |
           set -uo pipefail
-          printf 'event=%s classifier=%s run_long=%s preferred=%s watchdog=%s fallback=%s\n' \
-            "$EVENT" "$CLASSIFIER_RESULT" "$RUN_LONG" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT"
+          printf 'event=%s classifier=%s reviewer=%s preferred=%s watchdog=%s fallback=%s\n' \
+            "$EVENT" "$CLASSIFIER_RESULT" "$RUN_REVIEWER" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT"
 
           if [ "$PREFERRED_RESULT" = 'success' ]; then
             printf 'windows-reviewer-safety: qualified self-hosted proof succeeded.\n'
@@ -498,7 +498,7 @@ jobs:
           fi
 
           legitimate_skip=false
-          if [ "$CLASSIFIER_RESULT" = 'success' ] && [ "$RUN_LONG" != 'true' ]; then
+          if [ "$CLASSIFIER_RESULT" = 'success' ] && [ "$RUN_REVIEWER" != 'true' ]; then
             legitimate_skip=true
           fi
           if [ "$EVENT" = 'workflow_dispatch' ] && [ "$RUN_EXPENSIVE" != 'true' ]; then
