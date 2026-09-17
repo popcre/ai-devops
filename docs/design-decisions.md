@@ -263,6 +263,53 @@ Every destructive reset in this script must also fail closed; otherwise a
 damaged hidden clone can look healthy. Regression coverage:
 `tests/test-ai-memory-sync.sh`.
 
+## A memory that one side extended is an update, not a conflict
+
+Looks like:
+Two machines that hold different bytes for one memory disagree, so the safe
+choice is to preserve both copies under distinct names.
+
+Actually:
+`bin/ai-sync-memory` compares non-blank line sets. When one copy contains every
+line from the other plus more, the longer copy is the update and replaces the
+shorter one. Only a genuine divergence, where each side has lines the other
+lacks, creates a machine-labelled fork.
+
+Why:
+The former fork-on-any-difference rule turned ordinary cross-machine edits into
+new files. Their index lines were repeatedly appended until memory indexes grew
+beyond the amount Claude loads, making otherwise-preserved entries invisible.
+
+Do not change because:
+Returning to byte-only conflict detection recreates that growth. The index
+union must retain only the first occurrence of each entry, batch forgets must
+remain transactional, and disposable worktrees, scratchpads, and temporary
+folders must stay excluded from the published project set.
+
+## Routine memory sync runs at most once a day
+
+Looks like:
+Every dotfiles sync should perform a full private-memory round trip so every
+machine is always current.
+
+Actually:
+`bin/ai-memory-sync sync-if-stale` records each successful round trip and exits
+without network work when the last success is newer than
+`AI_MEMORY_MAX_AGE_HOURS` (24 by default). Plain `sync` remains available when
+memory is the purpose of the run or another machine needs a new fact promptly.
+
+Why:
+A full round trip performs a fetch, reset, union, privacy checks, health checks,
+and a conditional push for data that normally changes only a few times a week.
+Repeating it during every routine dotfiles sync adds delay without improving
+correctness.
+
+Do not change because:
+Removing the age gate restores that avoidable delay; removing the explicit
+`sync` escape hatch can strand a new fact for up to a day. The health audit's
+trend state must remain available so renewed index growth is visible before the
+health limit blocks synchronization.
+
 ## Investigation mode is advisory and must not reuse formal review
 
 Looks like:
