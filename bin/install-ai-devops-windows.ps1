@@ -626,7 +626,17 @@ if ($SkillsDryRun) {
 # tick, so every machine installs the task. `schedule` uses schtasks /F, so
 # rerunning the installer re-points an existing task instead of failing.
 Write-Step "Scheduling the blocker watch"
-$bwBash = Get-Command bash -ErrorAction SilentlyContinue
+# Prefer Git for Windows' bundled bash: on WSL-equipped machines (916-alien,
+# 2026-09-17) a bare `bash` resolves to WSL bash, which cannot run the Windows
+# checkout path and fails with no usable output.
+$bwBash = $null
+$gitCmd = Get-Command git -ErrorAction SilentlyContinue
+if ($gitCmd) {
+    $gitRoot = Split-Path (Split-Path $gitCmd.Source -Parent) -Parent
+    $gitBashPath = Join-Path $gitRoot 'bin\bash.exe'
+    if (Test-Path $gitBashPath) { $bwBash = Get-Command $gitBashPath -ErrorAction SilentlyContinue }
+}
+if (-not $bwBash) { $bwBash = Get-Command bash -ErrorAction SilentlyContinue }
 if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Test mode: not touching this computer's scheduled tasks."
 } elseif ($bwBash) {
