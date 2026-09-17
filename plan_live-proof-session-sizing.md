@@ -1,14 +1,14 @@
 # IMPLEMENTATION PLAN — one unproven live-proof outcome per session (2026-09-16)
 
 **Tracking issue:** [popcre/ai-devops #511](https://github.com/popcre/ai-devops/issues/511)
-**Handoff:** retired 2026-09-16 (deleted `HANDOFF.d/2026-09-16T2004Z-edge-dev-grok-live-proof-session-sizing.md`).
-**Branch for this work:** `grok/live-proof-session-sizing` (planning). The implementing session uses its own current-upstream worktree; do not reuse a dirty checkout.
+**Handoff:** retired 2026-09-16. The original handoff and the temporary PR #520 handoff were deleted after their obligations were incorporated here.
+**Branch for the source-rule follow-up:** `grok/511-no-deferred-proof-dump` in [PR #520](https://github.com/popcre/ai-devops/pull/520).
 
 Related: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401), [u2giants/shared-db #3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator), [u2giants/shared-db #3028](https://github.com/u2giants/shared-db/issues/3028) (non-orchestrator, CLOSED), [u2giants/shared-db #3029](https://github.com/u2giants/shared-db/issues/3029) (non-orchestrator).
 
 ## STATUS — read first
 
-All steps are ✅. A fresh session must **not** re-implement #511. Remaining leftover proofs stay with live [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator); do not start a second chat on them.
+The original refuse-bundle work is complete. The source-rule follow-up is implemented on PR #520 but is not accepted until exact-head review, merge, and installed-global proof. Remaining leftover proofs stay with live [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator); do not start a second chat on them.
 
 | # | Step | State | Date | Evidence |
 |---|---|---|---|---|
@@ -18,8 +18,11 @@ All steps are ✅. A fresh session must **not** re-implement #511. Remaining lef
 | 3 | One sentence in `shared-db-handover` | ✅ complete | 2026-09-16 | Skill says leftover live proofs are one issue and one session each, and still says proofs never go to the orchestrator. |
 | 4 | Stop #401 STATUS from dumping several unproven steps on one ticket | ✅ complete | 2026-09-16 | 3027 session live at 2026-09-16T20:18Z (helper PR [shared-db#3101](https://github.com/u2giants/shared-db/pull/3101) updating; transcript 20:09Z). Split forbidden. Legend added. Posted proofs on Steps 1 and 2A stay with 3027. Remaining unproven Steps 2, 3, 4, 6, 7 stay with 3027 with “No further steps may be added to #3027.” 3029 not started. |
 | 5 | Keep routers pointing here; merge; install globals | ✅ complete | 2026-09-16 | PR #515 merged as `837fe41d`. Installed Claude and Codex globals on edge-dev contain `one unproven live-behavior outcome`. #511 closed. |
+| 6 | Prevent later live-proof dumps at the source | 🟡 partial | 2026-09-17 | PR #520 adds `Never save several unproven steps` to both globals and the handover rule. Not yet on `origin/main` or installed. |
+| 7 | Require one live-proof owner when code lands | 🟡 partial | 2026-09-17 | PR #520 adds `opened when that code landed` to both plan-writer sources and guards both new rules. Not yet on `origin/main`. |
+| 8 | Review, merge, install, and close | 🟡 partial | 2026-09-17 | Rebased focused validation passed: required globals 1/1, context enforcement 11/11, strict audit 0 parity mismatches, Markdown reachability 1/1. Exact-head independent review, merge queue, installed proof, and issue close remain. |
 
-**Fresh-session starting point:** none for #511. The rule is on `origin/main` (`837fe41d`) and installed on edge-dev. Do not add a second copy. 3027 leftover proofs are not this plan’s work.
+**Fresh-session starting point:** Step 8 exact-head independent review on PR #520. Do not re-implement Steps 1–7. 3027 leftover proofs are not this plan’s work.
 
 ---
 
@@ -84,7 +87,7 @@ Plain-English diagnosis (not in git; do not commit transcripts): `C:\Users\ahaza
 
 ## 5. Current state of the code
 
-✅ UPDATED 2026-09-16 — do not redo. Implementation merged as PR #515 (`837fe41d`); STATUS tick PR #519 (`a4d83944`); #511 CLOSED. Installed on edge-dev.
+✅ UPDATED 2026-09-17 — PR #515 (`837fe41d`) and its installed last-line defense remain complete. #511 was reopened because refusing a later bundle did not prevent earlier sessions from creating the pile. PR #520 owns only that source-side follow-up.
 
 **Already on main, works, do not rewrite**
 
@@ -95,6 +98,12 @@ Plain-English diagnosis (not in git; do not commit transcripts): `C:\Users\ahaza
 - Cross-client parity map includes `"one unproven outcome per session"`. Adding another `PARITY_RULES` key also requires the same phrase in `$parityLines` in `tests/test-context-audit.ps1` (see `docs/development.md`).
 - Handover skill: one issue and one session per leftover proof; proofs still never go to the orchestrator.
 - #401 legend: a Live proof owner cell names at most one unproven step and one issue. Remaining unproven 3027 rows say no further steps may be added. Posted proofs on Steps 1 and 2A stay with 3027.
+
+**On PR #520, not yet accepted**
+
+- Both globals say that code landing without live proof creates exactly one leftover-proof issue for that step in the same session and never saves several unproven steps for a later chat.
+- Both implementation-plan sources require a `code landed, not accepted` row to name that one owner issue when the code lands.
+- The handover skill, required-phrase test, parity map, and Windows parity fixture carry the same rule.
 
 **Not this plan’s work (do not take over)**
 
@@ -115,6 +124,7 @@ Evidence:
 - 2026-09-16 routing comment on those issues labelled them orchestrator work even though they do not change database shape. The 3027 chat froze until Albert overrode it. #500 later forbade that routing; this plan does not repeat #500.
 - The 3027 chat spawned eight helpers, messaged other sessions 19 times, and wrote one file in the parent. Helpers stopped to “wait” at least four times. Parallel helpers plus exact-head merge caused seven redo cycles in 2.5 hours. Those are symptoms. #508/#509 already cover helper-wait, quoted authority, owned waits, and colliding files.
 - **The gap this plan closed:** nothing told a session to refuse a bundle, and the scoreboard pointed seven unproven steps at one ticket. Do not reopen that packaging.
+- **The source gap PR #520 closes:** nothing required the session that landed unproven code to create its one proof owner immediately. Refusing a later bundle alone still allowed the pile to be created.
 
 **Do not confuse this with “the merge process is too slow.”** Exact-head merge is how colliding work is stopped. The fix is one worker and one unproven outcome, not a weaker merge.
 
@@ -139,6 +149,7 @@ Evidence:
 - 2026-09-16: proofs, reports, and tooling never go to the shared-db orchestrator (#500).
 - 2026-09-16: this plan does not implement shared-db product fixes.
 - 2026-09-16: both Claude and Codex globals get the same sentence; the required phrase must not wrap across lines (#209).
+- 2026-09-16: when code lands without live proof, its session files exactly one leftover-proof owner issue for that step; several unproven steps are never saved for a later chat.
 
 **OPEN — implementer’s judgment**
 
@@ -249,16 +260,39 @@ Then:
 
 **Context cut:** if context is full after Step 4, stop, update this STATUS table, and let a fresh session do Step 5 from the handoff.
 
+### Step 6 — Prevent the dump at its source
+
+**Depends on:** the completed Steps 1–5.
+**Files:** both global templates and `skills/shared/shared-db-handover/SKILL.md`.
+**Do:** add one matching global rule: when code lands without live proof, open exactly one leftover-proof issue for that step in the same session; never save several unproven steps for a later chat. Keep proofs out of the shared-db orchestrator.
+**You’ll know it worked when:** `git grep -n "Never save several unproven steps" templates/system/CLAUDE-global.md templates/system/AGENTS-global-codex.md` finds one unwrapped line in each file.
+
+### Step 7 — Make the plan writer assign the owner immediately
+
+**Depends on:** Step 6.
+**Files:** `templates/system/implementation-plan-standard.md`, `skills/shared/implementation-plan-writer/SKILL.md`, and the existing phrase/parity guards.
+**Do:** require each `code landed, not accepted` STATUS row to name exactly one live-proof owner issue opened when that code landed. Guard `Never save several unproven steps` in the required-phrase test, parity map, and Windows parity fixture.
+**You’ll know it worked when:** both plan-writer sources contain `opened when that code landed`, and the focused global/context tests pass.
+
+### Step 8 — Review, merge, install, close
+
+**Depends on:** Step 7 and focused validation.
+**Do:** obtain a read-only exact-head independent review because installed routing rules change; merge through the normal queue; verify current `origin/main`; run `bin/ai-adopt-globals`; verify both installed globals contain `Never save several unproven steps`; comment the merge SHA; then the issue-opening session closes #511. Do not create or take over any current leftover-proof ticket.
+**You’ll know it worked when:** the phrase is on current main and in both installed globals, the temporary handoff is absent, and #511 is closed with the merge SHA recorded.
+
 ## 10. Tests required
 
-Add no other tests.
+Add no other tests beyond the existing phrase and parity guards.
 
 - **Must add:** the one phrase in `tests/test-client-globals-required-phrases.sh` as named in Step 2.
 - **Must stay green:** `bash tests/test-client-globals-required-phrases.sh` via Git Bash on Windows.
 - **Must stay green:** the existing context-audit required-check path that uses `PARITY_RULES` (the Windows `tests/test-context-audit.ps1` suite is *not* required on every prose-adjacent PR, but adding a `PARITY_RULES` key is the Linux-cheap equivalent for this rule; run `python tools/context-audit/context-audit.py --root . --strict` if it finishes in this session, and do not fail closed on budget warnings unless this edit caused a new budget breach — if it did, shorten nothing else; say so on #511).
+- **Must stay green for PR #520:** the required-phrase test, `tests/test-context-audit.ps1`, strict context audit, and Markdown reachability validation.
 - Do not run a local full Windows reviewer series. Check `bin/ai-test-local --check-collision` before any local full suite; a busy self-hosted runner on this host is a stop for that suite only.
 
 **Ran 2026-09-16:** phrase test PASS; wrap-fail then restore PASS; `python tools/context-audit/context-audit.py --root . --strict` 0 parity mismatches. Pre-existing always-loaded budget warning remained (42341 vs 12449); one bullet added; no other rules deleted. First PR #515 Windows section 3 failed because `$parityLines` lacked the new phrase — not a 30-minute runner timeout. Fixture fix then passed.
+
+**Ran 2026-09-17 on rebased PR #520:** required-globals phrase test PASS (1); PowerShell context enforcement PASS (11); strict context audit PASS with 0 parity mismatches and 0 broken links; Markdown reachability PASS (1). The pre-existing context-budget and legacy-handoff warnings remain warnings and were not introduced by this change.
 
 ## 11. Constraints, standing rules, and gotchas in force
 
@@ -298,6 +332,10 @@ Add no other tests.
 - [x] #511 comments the merge commit SHA and is closed only after the above.
 - [x] This plan’s STATUS table is updated in the same commits as the work (or in a follow-up docs commit if the implementer must split).
 - [x] This handoff is deleted in the commit that closes #511, under the successor rule.
+- [ ] Current `origin/main` and both installed globals contain `Never save several unproven steps`.
+- [ ] Both plan-writer sources contain `opened when that code landed`, with focused guards passing.
+- [ ] PR #520 has read-only exact-head independent approval and lands through the normal merge path.
+- [x] The temporary PR #520 handoff is deleted after all obligations were incorporated in this plan.
 
 **Risks**
 
