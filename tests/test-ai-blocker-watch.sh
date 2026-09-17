@@ -126,6 +126,10 @@ mkissue 7 "gate bug" "$alarmcmt" '[{"source":{"number":1,"state":"CLOSED"}}]' '[
 echo "[{\"number\":31,\"title\":\"ai-blocker-watch digest $day\"}]" > "$FAKE/digest_search.json"
 c_before="$(grep -c 'issue comment' "$FAKE/comments")"
 la_before="$(cat "$TMP/home/last-alarm")"
+# The scan clock has whole-second resolution; without this sleep the second
+# alarm can start inside the same second as the first and "advanced" reads
+# as "unchanged" (seen failing a merge-group run exactly that way).
+sleep 1.1
 if BW alarm && [ "$(grep -c 'issue comment' "$FAKE/comments")" = "$c_before" ] && [ ! -e "$FAKE/edited" ] && [ "$(cat "$TMP/home/last-alarm")" != "$la_before" ]; then
   ok 'a re-scan neither re-posts nor edits an unchanged digest, but advances the scan clock'
 else bad 'a re-scan neither re-posts nor edits an unchanged digest, but advances the scan clock'; fi
