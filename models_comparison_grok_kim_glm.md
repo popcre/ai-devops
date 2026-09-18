@@ -1377,3 +1377,102 @@ Scope: governed review sequence 1820 of the final Asset freshness head `b82a211f
 - Adherence and continuity: the report distinguished direct static inspection from worker-attested tests and pending CI, kept the final decision bound to the exact SHA, and completed without a rebuttal or correction turn.
 - Provider-reported usage: input 2,888; output 1,838; reasoning 2,678; cache read 107,840; cache write 0. These are separate counters, not an inferred total or saving. Elapsed latency and cost were not reported.
 - Final outcome: all PR checks passed; PR #2523 merged as `fbd49fe829a33a225805334a0cdba662dfd44084`. Preview run 34249227742 and production run 34249862877 succeeded, including the production evidence gate and automatic apply. The closed issue records live production ledger and catalog verification for migration `20260907152838`, its Asset freshness columns and constraints, enabled trigger, and guard function.
+
+## 2026-09-17/18 — three-reviewer plan-audit rotation (Qwen, Grok 4.6, Muse)
+
+Scope: not a diff review. One implementation plan (`u2giants/shared-db` root,
+`plan_coldlion_order_intake.md` — the ColdLion automatic order intake) was audited read-only
+through three successive revisions by three different reviewers, with every load-bearing
+finding independently re-verified by the supervising session (ZCode/GLM) against the
+repository before incorporation. The plan lived in the uncommitted working tree throughout;
+each wrapper's private snapshot carried it without any commit being made. Reports preserved
+under the target repo's `.ai/reviews/`.
+
+### Qwen 3.8 Max (`ai-qwen`, v1 audit) — verdict REJECT
+
+- 3 blockers + 8 major + 7 minor findings, plus a 15-item "plan claims the repository
+  contradicts" table with file:line evidence for each. 43 internal turns, ~4.1M input tokens;
+  no cost figure reported by the wrapper.
+- Quality: the most exhaustive fact-checker of the three. Nearly every citation was exact —
+  and it independently listed which of the plan's claims it had VERIFIED as accurate, which
+  made trust cheap for everything except what it got wrong.
+- One material error: it asserted the sealed history tables grant nothing to `service_role`.
+  False (`20260905105038:780-782` grants all). Caught only because the NEXT reviewer
+  contradicted it and the supervisor re-verified. Lesson unchanged from this file's earlier
+  entries: **verify reviewer claims about repo content even when the review is excellent.**
+- Wrapper availability dominated setup cost: the runtime was a hollow stub (vendor bundle
+  entirely missing; reinstall needed the repo installer WITH `-QwenVersion v0.23.0` — the
+  unpinned run throws on a missing bundle), and the snapshot builder refused the canonical
+  dirty checkout because a *different agent's* zero-byte untracked log failed its identity
+  check. Both filed as reviewer issues (`20260918T005544Z-edge-dev-qwen-557782`,
+  `20260918T005647Z-edge-dev-qwen-562328`). Workaround that preserved the foreign agent's
+  state: clean local clone + copy only this session's changed files; reviews ran from there.
+
+### Grok 4.6 (`ai-grok-review`, v2 audit) — verdict "not ready"
+
+- 2 blocking + 3 major headline findings plus an 11-item contradiction table. 1,826,087
+  tokens, **$0.56** — the only reviewer reporting real money, recovered via
+  `ai-grok-review show` after the captured stdout tail lost the usage line.
+- Quality: the best pure-design auditor of the three. Its sharpest finding
+  (novelty-detection consulting the sealed landing table, which the daily sealed sync
+  already fills — so the poller would detect nothing and the live proof would compare
+  against an empty set) was a logic flaw no file:line check could find. It also correctly
+  overturned Qwen's `service_role` error, and caught that `recordFailure()` writes
+  `window_ledger` (reuse would poison sealed resume) and that the docs-only merge path
+  refuses the plan+AGENTS mix the previous revision assumed.
+- No finding was disproved on verification; several line-number citations were unresolvable
+  for an environmental reason Muse later exposed (see below).
+
+### Muse (`ai-muse`, muse-spark-1.2-contributor, v3 audit) — verdict "not ready"
+
+- 4 blocking + 9 major + several minor findings.
+- The highest-leverage finding of the whole rotation: **the defect was in the authority
+  file, not the plan.** The business-rules topic — the document the plan declares supreme —
+  still carried the pre-2026-08-31 "bare list, no paging" description of `/orderHistory`,
+  contradicting both the plan and the live feed. A fresh session obeying its own authority
+  would have built the wrong poller. Fixed in the authority file itself (superseded
+  paragraph, live re-verified).
+- Also strongest at second-order effects of a fix round: it caught leftovers the v2→v3
+  edits created or missed (a stale grants parenthetical one hunk away from the corrected
+  one; Phase E tests asserting a detector §8 had just forbidden, making the suite
+  unpassable-as-specified), the pause constant weakened 15× below the repo standard
+  (`REQUEST_PAUSE_MS = 3000`), the missing `reads:` block, and an unordered
+  production-dispatch sequence.
+- One weak "contradiction": it challenged the plan's live-proven claim that a
+  `salesOrderNo`-only query 400s, citing the endpoint's parameter table — but the
+  supervisor's earlier live probe had in fact received HTTP 400. Parameter-exists is not
+  parameter-sufficient; the plan's wording was tightened anyway.
+- Its line-count finding (a cited workflow range past the file's end) exposed a real
+  environmental fact: the canonical repo had advanced two commits mid-engagement (another
+  agent's merges), so the audit clone's surrounding evidence was two commits stale even
+  though the plan under audit was current. The clone was refreshed to `079fed75` and the
+  finding reclassified as drift, not error.
+
+### Cross-rotation observations
+
+- **Serial audit → fix → re-audit converged.** Three consecutive "not ready" verdicts whose
+  findings got progressively shallower (design flaws → governance grammar → leftover text
+  and constants). Each reviewer caught things both others missed; blind spots were
+  complementary, not redundant.
+- **The supervisor's independent verification was load-bearing three times**: it disproved
+  one Qwen claim (service_role), reclassified one Muse finding as environmental drift, and
+  would otherwise have shipped a wrong grants policy on the strength of an otherwise-excellent
+  review.
+- **Plan/working-tree targets are cheap to review** with these wrappers — no commit, branch,
+  or diff machinery needed; briefs pointed at files and the snapshots carried uncommitted
+  state. The only friction was snapshot refusal on foreign untracked files, solvable with a
+  clean clone.
+- Cost of the full three-audit rotation: Qwen ~4.1M input tokens (no price), Grok $0.56,
+  Muse no cost reported — against roughly a day of supervisor session time including the
+  fix rounds.
+
+### Convergence turn (same Muse session, resumed)
+
+A cheap same-session `ai-muse ask` convergence check on v4 confirmed 13 of 14 blocking/major
+findings RESOLVED, one PARTIAL (component-winner tiebreak), and caught four small defects the
+v4 fix edits themselves introduced — including a duplicated article and a STATUS-table
+self-contradiction. After applying its four concrete fixes (v4.1), Muse's final line was
+**"Yes — plan v4 is ready for a fresh implementing session once the component-tiebreak wording
+is tightened."** The resumed-turn pattern worked exactly as the wrapper advertises: the
+session's context was already paid for, and reviewing its own findings' resolution was a
+fraction of a fresh audit.
