@@ -276,6 +276,16 @@ resolve_qwen() {
     else
       case "$physical" in "$HOME/.local/bin/qwen"|"$HOME/.local/lib/qwen-code/bin/qwen"|/home/ai/.local/bin/qwen|/home/ai/.local/lib/qwen-code/bin/qwen) ;; *) continue;; esac
     fi
+    # The standalone shim forwards to the nested bundle; a shim whose bundle is
+    # gone fails later as an opaque "runtime identity" error, so name it here.
+    # Same completeness rule as Test-QwenRuntimeTree in the installer: both
+    # launchers non-empty and a non-empty chunks directory.
+    local qroot=""
+    [ -n "${LOCALAPPDATA:-}" ] && qroot="$(cygpath -u "$LOCALAPPDATA")/qwen-code"
+    if [ -n "$qroot" ] && { [ ! -s "$qroot/bin/qwen.cmd" ] || [ ! -s "$qroot/qwen-code/bin/qwen.cmd" ] \
+        || [ -z "$(ls -A "$qroot/qwen-code/lib/chunks" 2>/dev/null)" ]; }; then
+      die "the Qwen standalone runtime is incomplete (only the launcher remains under %LOCALAPPDATA%\qwen-code). Repair it with: powershell -NoProfile -ExecutionPolicy Bypass -File <ai-devops>\bin\install-windows-ai-provider-clis.ps1 -SelectedProvider qwen"
+    fi
     printf '%s' "$c"; return 0
   done
   die "qwen binary not found. Set AI_QWEN_BIN, or install Qwen Code. Looked on PATH, the official standalone locations, and /usr/local/bin."
@@ -374,19 +384,87 @@ reviewlock_path() { printf '%s/locks/review--%s--%s.lock.d' "$STATE_DIR" "$1" "$
 workspace_path(){ printf '%s/worktrees/qwen.%s-%s-%s/wt' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 
 # Portable mutex (flock does not exist in Git Bash); stale locks are reclaimed.
-lock_acquire() {
-  local dir="$1" label="$2" owner
-  mkdir -p "$(dirname "$dir")"
-  if mkdir "$dir" 2>/dev/null; then
-    printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
-  fi
-  owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
-  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then return 1; fi
-  warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
-  rm -rf "$dir"; mkdir "$dir" 2>/dev/null || return 1
-  printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
+lock_owner_alive() {
+  local pid="$1" winpid="$2"
+  [ -n "$pid" ] || return 1
+  if kill -0 "$pid" 2>/dev/null || [ -d "/proc/$pid" ]; then return 0; fi
+  # A sibling MSYS runtime has its own pid table, so its live shells are
+  # invisible to kill -0; the Windows process id is visible to every runtime.
+  [ -n "$winpid" ] && ps -W 2>/dev/null | awk -v w="$winpid" '$4 == w { f = 1 } END { exit !f }'
 }
-lock_release() { rm -rf "$1" 2>/dev/null || true; }
+declare -A LOCK_TOKENS=()
+lock_publish() {
+  # Build the whole lock, owner record included, in a private staging
+  # directory and publish it with one rename: no reader ever sees a lock
+  # without its owner, and a paused creator cannot overwrite a later owner.
+  local dir="$1" stage winpid token published
+  stage="$(mktemp -d "$dir.stage.XXXXXX" 2>/dev/null)" || return 1
+  winpid="$(cat "/proc/$$/winpid" 2>/dev/null || echo '')"
+  token="$$.${winpid:-0}.$(date +%s%N).$RANDOM"
+  printf '%s\n' "$$" > "$stage/pid"; printf '%s\n' "$2" > "$stage/label"
+  printf '%s %s %s\n' "$$" "${winpid:--}" "$token" > "$stage/owner"
+  if ! mv -T "$stage" "$dir" 2>/dev/null; then rm -rf "$stage"; return 1; fi
+  read -r _ _ published <<<"$(lock_owner_record "$dir")"
+  [ "$published" = "$token" ] || return 1
+  LOCK_TOKENS["$dir"]="$token"
+}
+lock_owner_record() { cat "$1/owner" 2>/dev/null || true; }
+lock_acquire() {
+  local dir="$1" label="$2" record owner winowner token published
+  mkdir -p "$(dirname "$dir")"
+  [ -e "$dir" ] || { lock_publish "$dir" "$label" && return 0; }
+  record="$(lock_owner_record "$dir")"
+  read -r owner winowner token <<<"$record"
+  [ "$winowner" != - ] || winowner=""
+  if [ -z "$owner" ] || [ -z "$token" ]; then
+    # No owner record: an older wrapper's lock. Its pid file still names the
+    # owner; a live pid holds it. With no readable pid, only a lock older than
+    # any review (two hours) is treated as abandoned.
+    local born now
+    born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
+    owner="$(cat "$dir/pid" 2>/dev/null || true)"
+    if [ -n "$owner" ]; then
+      lock_owner_alive "$owner" "" && return 1
+    else
+      now="$(date +%s)"; [ $((now - born)) -ge 7200 ] || return 1
+    fi
+    token="legacy.${owner:-none}.$born"
+  else
+    # One missed sighting is not proof the owner is gone: it must stay
+    # invisible to every witness for three checks.
+    local attempt
+    for attempt in 1 2 3; do
+      if lock_owner_alive "$owner" "$winowner"; then return 1; fi
+      [ "$attempt" = 3 ] || sleep 1
+    done
+  fi
+  # Each stale record has exactly one place it can be moved to, named by its
+  # token, and that place is kept. A second reclaimer judging the same record
+  # finds the place taken and backs off, so it can never move a newer live
+  # lock aside.
+  local tomb="$dir.dead.$token"
+  mv -T "$dir" "$tomb" 2>/dev/null || return 1
+  if [ "$(lock_owner_record "$tomb")" != "$record" ]; then
+    mv -T "$tomb" "$dir" 2>/dev/null || warn "a live Qwen lock was displaced to $tomb and could not be put back"
+    return 1
+  fi
+  find "$(dirname "$dir")" -maxdepth 1 -name "$(basename "$dir").dead.*" -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
+  warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
+  lock_publish "$dir" "$label"
+}
+lock_release() {
+  # Remove only the acquisition this process made; a replacement owner's
+  # lock is left alone.
+  local dir="$1" mine="${LOCK_TOKENS[$1]:-}" record pid token
+  record="$(lock_owner_record "$dir")"; read -r pid _ token <<<"$record"
+  if [ -n "$mine" ]; then
+    { [ -z "$record" ] || [ "$token" = "$mine" ]; } && rm -rf "$dir" 2>/dev/null
+  elif [ -n "$record" ] && [ "$pid" = "$$" ]; then
+    # Taken in a subshell of this process, which could not hand back its token.
+    rm -rf "$dir" 2>/dev/null
+  fi
+  unset 'LOCK_TOKENS[$dir]'
+}
 lock_info() {
   local dir="$1" label pid started now
   label="$(cat "$dir/label" 2>/dev/null || echo unknown)"
@@ -687,6 +765,10 @@ cleanup_qualification_probe() {
 }
 run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
+  # Validate the startup deadline before anything is launched, so a bad value
+  # can never leave a credential-bearing provider running unsupervised.
+  local QWEN_STARTUP_LIMIT="${AI_QWEN_STARTUP_TIMEOUT_SECONDS:-300}"
+  [[ "$QWEN_STARTUP_LIMIT" =~ ^[1-9][0-9]*$ ]] || die 'AI_QWEN_STARTUP_TIMEOUT_SECONDS must be a positive whole number of seconds.'
   local qwen qwen_env="" credential_ref="" op_bin="" credential_count=0 preload max_turns max_tool_calls max_wall_time; qwen="$(resolve_qwen)"
   if [ "$mode" = review ]; then
     max_turns="$REVIEW_MAX_TURNS"; max_tool_calls="$REVIEW_MAX_TOOL_CALLS"; max_wall_time="$REVIEW_MAX_WALL_TIME"
@@ -743,8 +825,26 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     die "governed Qwen authentication is unavailable. $MCP_ENV must contain exactly one BAILIAN_CODING_PLAN_API_KEY=op:// reference; no provider call was made."
   fi
   RUN_TURN_PID=$!
-  wait "$RUN_TURN_PID"
-  RUN_TURN_RC=$?
+  # A cold start that never writes one stream byte hangs past Qwen's own
+  # --max-wall-time (seen: 15 minutes silent), so the wrapper enforces its own
+  # first-output deadline and reports it as a timeout (exit 124).
+  local startup_limit="$QWEN_STARTUP_LIMIT" started=$SECONDS startup_expired=0
+  while kill -0 "$RUN_TURN_PID" 2>/dev/null && [ ! -s "$out" ]; do
+    if [ $((SECONDS - started)) -ge "$startup_limit" ]; then startup_expired=1; break; fi
+    sleep 1
+  done
+  if [ "$startup_expired" = 1 ]; then
+    printf 'ai-qwen: Qwen produced no output within %ss of starting; stopped it as a startup timeout.
+' "$startup_limit" >> "$out.err"
+    warn "Qwen produced no output within ${startup_limit}s of starting; stopped it as a startup timeout."
+    signal_run_tree TERM "$RUN_TURN_PID"; sleep 1
+    kill -0 "$RUN_TURN_PID" 2>/dev/null && signal_run_tree KILL "$RUN_TURN_PID"
+    wait "$RUN_TURN_PID" 2>/dev/null
+    RUN_TURN_RC=124; QWEN_STARTUP_EXPIRED=1
+  else
+    wait "$RUN_TURN_PID"
+    RUN_TURN_RC=$?
+  fi
   RUN_TURN_PID=""
   cleanup_run_turn_env
   [ -z "${AI_QWEN_TEST_POST_TURN_ENV_FILE:-}" ] || env | sort > "$AI_QWEN_TEST_POST_TURN_ENV_FILE"
@@ -972,7 +1072,9 @@ tree_state() {
           exec {fd}<"$repo/$f" || { printf 'ai-qwen: could not bind untracked evidence: %s\n' "$f" >&2; return 1; }
           before="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "/proc/$BASHPID/fd/$fd" 2>/dev/null || true)"
           path_state="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "$repo/$f" 2>/dev/null || true)"
-          case "$before" in 'regular file:'*':1:'*) ;; *) exec {fd}<&-; printf 'ai-qwen: refusing untracked evidence without one regular-file identity: %s\n' "$f" >&2; return 1;; esac
+          # stat reports a zero-byte file as "regular empty file"; it is still
+          # one regular-file identity and must not block every review.
+          case "$before" in 'regular file:'*':1:'*|'regular empty file:'*':1:'*) ;; *) exec {fd}<&-; printf 'ai-qwen: refusing untracked evidence without one regular-file identity: %s\n' "$f" >&2; return 1;; esac
           [ "$before" = "$path_state" ] && [ ! -L "$repo/$f" ] || { exec {fd}<&-; printf 'ai-qwen: untracked evidence identity changed before hashing: %s\n' "$f" >&2; return 1; }
           hash="$(sha256sum <&$fd | awk '{print $1}')" || { exec {fd}<&-; return 1; }
           after="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "/proc/$BASHPID/fd/$fd" 2>/dev/null || true)"; path_state="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "$repo/$f" 2>/dev/null || true)"
@@ -1240,6 +1342,7 @@ record_new_review_recovery() { # META REPO NAME REVIEW_DIR OUT REASON
       recovery_stream:$pending,recovery_stderr:($pending+".stderr"),recovery_stderr_sha256:$stderr_digest,recovery_evidence_version:2,recovery_sha256:$digest,recovery_runtime_sha256:$runtime,recovery_preloader_sha256:$preloader,recovery_event_run_id:$event,governed_head:$governed,failure_reason:$reason,created:$now,updated:$now,turns:0}')"
 }
 LIFECYCLE_SID=""
+QWEN_STARTUP_EXPIRED=0
 LIFECYCLE_PRIOR_TREE=""
 
 classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_REASON
@@ -1252,6 +1355,8 @@ classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_RE
   elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
     || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$err"; }; then
     printf 'usage-limit'
+  elif [ "${QWEN_STARTUP_EXPIRED:-0}" = 1 ]; then
+    printf 'timed-out'
   elif [ "$LIFECYCLE_COMMAND_RC" != unavailable ] && [ "$LIFECYCLE_COMMAND_RC" -ne 0 ] 2>/dev/null; then
     printf 'failed'
   elif [ "$reason" = timeout ]; then

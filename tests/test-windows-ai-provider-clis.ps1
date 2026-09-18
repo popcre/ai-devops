@@ -49,6 +49,9 @@ $hardenerAst = $ast.Find({
 Assert ($null -ne $hardenerAst) 'could not load the Qwen hardener for its behavioral fixture'
 $fixtureFunction = $hardenerAst.Extent.Text.Replace('$PSScriptRoot', "'$($root.Replace("'", "''"))\bin'")
 Invoke-Expression $fixtureFunction
+$checkerAst = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-QwenChildEnvironmentHardened' }, $true)
+Assert ($null -ne $checkerAst) 'could not load the Qwen hardening check'
+Invoke-Expression $checkerAst.Extent.Text
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-qwen-hardener-{0}" -f [Guid]::NewGuid().ToString('N'))
 try {
   $chunkRoot = Join-Path $fixtureRoot 'lib\chunks'
@@ -71,7 +74,9 @@ function sanitizeChildEnv(env2 = process.env) {
 '@
   [IO.File]::WriteAllText((Join-Path $chunkRoot 'fixture.js'), $bundle, [Text.UTF8Encoding]::new($false))
   Copy-Item -LiteralPath (Get-Command node -ErrorAction Stop).Source -Destination (Join-Path $nodeRoot 'node.exe')
+  Assert (-not (Test-QwenChildEnvironmentHardened -Root $fixtureRoot)) 'an unpatched sanitizer must report that hardening is due'
   $patchedPath = Set-QwenChildEnvironmentHardening -Root $fixtureRoot
+  Assert (Test-QwenChildEnvironmentHardened -Root $fixtureRoot) 'a patched sanitizer must report that no hardening is due'
   $patchedText = Get-Content -Raw -LiteralPath $patchedPath
   $patchedDeclaration = [regex]::Match($patchedText, 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];').Value
   Assert ($patchedDeclaration.Contains('"BAILIAN_CODING_PLAN_API_KEY"')) 'hardener was fooled by an unrelated bundle occurrence of the credential name'
@@ -222,6 +227,70 @@ Assert ($installerText -match 'pins no Grok version') 'an unpinned Grok must be 
 
 $qwenWrapperText = Get-Content -Raw $qwenWrapper
 Assert ($qwenWrapperText -match '\*\.cmd\|\*\.bat') 'Qwen wrapper must accept official Windows command shims that are not marked executable by Git Bash'
+
+# A launcher without its bundle, or an npm qwen on PATH, must not count as installed.
+$installerAst = [Management.Automation.Language.Parser]::ParseFile($installer, [ref]$null, [ref]$null)
+$completeFn = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-QwenRuntimeComplete' }, $true)
+Assert ($null -ne $completeFn) 'installer must define Test-QwenRuntimeComplete'
+$fakeLocal = Join-Path ([IO.Path]::GetTempPath()) ("qwen-complete-" + [Guid]::NewGuid().ToString('N'))
+$savedLocal = $env:LOCALAPPDATA
+try {
+  $env:LOCALAPPDATA = $fakeLocal
+  $treeFn = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-QwenRuntimeTree' }, $true)
+  Assert ($null -ne $treeFn) 'installer must define Test-QwenRuntimeTree'
+  . ([ScriptBlock]::Create($treeFn.Extent.Text))
+  . ([ScriptBlock]::Create($completeFn.Extent.Text))
+  [void](New-Item -ItemType Directory -Force -Path (Join-Path $fakeLocal 'qwen-code\bin'))
+  Set-Content -LiteralPath (Join-Path $fakeLocal 'qwen-code\bin\qwen.cmd') -Value '@echo off'
+  Assert (-not (Test-QwenRuntimeComplete)) 'a Qwen launcher whose bundle is gone must be reported incomplete'
+  [void](New-Item -ItemType Directory -Force -Path (Join-Path $fakeLocal 'qwen-code\qwen-code\bin'), (Join-Path $fakeLocal 'qwen-code\qwen-code\lib\chunks'))
+  Set-Content -LiteralPath (Join-Path $fakeLocal 'qwen-code\qwen-code\bin\qwen.cmd') -Value '@echo off'
+  Assert (-not (Test-QwenRuntimeComplete)) 'an empty chunks directory must be reported incomplete'
+  Set-Content -LiteralPath (Join-Path $fakeLocal 'qwen-code\qwen-code\lib\chunks\a.js') -Value 'x'
+  Assert (Test-QwenRuntimeComplete) 'a launcher plus its bundle must be reported complete'
+  [IO.File]::WriteAllBytes((Join-Path $fakeLocal 'qwen-code\qwen-code\bin\qwen.cmd'), [byte[]]@())
+  Assert (-not (Test-QwenRuntimeComplete)) 'a zero-byte launcher must be reported incomplete'
+} finally {
+  $env:LOCALAPPDATA = $savedLocal
+  Remove-Item -LiteralPath $fakeLocal -Recurse -Force -ErrorAction SilentlyContinue
+}
+Assert ($installerText -match "\`$present = Test-QwenRuntimeComplete") 'Qwen presence must come from the standalone runtime, not from any qwen on PATH'
+Assert ($installerText -match 'Global\\ai-devops-qwen-install') 'Qwen installs must be serialized machine-wide, across logon sessions'
+# A failed install restores the exact prior runtime and keeps the failed tree.
+$restoreFn = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Restore-QwenRuntime' }, $true)
+Assert ($null -ne $restoreFn) 'installer must define Restore-QwenRuntime'
+$restoreHome = Join-Path ([IO.Path]::GetTempPath()) ("qwen-restore-" + [Guid]::NewGuid().ToString('N'))
+try {
+  . ([ScriptBlock]::Create($restoreFn.Extent.Text))
+  function Write-QwenInstallEvent([string]$Event) { }
+  $bk = Join-Path $restoreHome 'backup'; $live = Join-Path $restoreHome 'qwen-code'
+  foreach ($d in @("$bk\bin", "$bk\qwen-code\bin", "$bk\qwen-code\lib\chunks", "$live\bin")) { [void](New-Item -ItemType Directory -Force -Path $d) }
+  Set-Content -LiteralPath "$bk\qwen-code\lib\chunks\a.js" -Value 'x'
+  Set-Content -LiteralPath "$bk\bin\qwen.cmd" -Value 'shim'
+  Set-Content -LiteralPath "$bk\qwen-code\bin\qwen.cmd" -Value 'bundle'
+  Set-Content -LiteralPath "$live\bin\qwen.cmd" -Value 'partial'
+  Assert (Restore-QwenRuntime -Backup $bk -Root $live) 'a complete backup must be restored'
+  Assert ((Get-Content -Raw "$live\qwen-code\bin\qwen.cmd").Trim() -eq 'bundle') 'the restored runtime must be the exact backup'
+  Assert ((Get-Content -Raw "$live\bin\qwen.cmd").Trim() -eq 'shim') 'no partial file may survive the restore'
+  Assert (@(Get-ChildItem -LiteralPath $restoreHome -Directory -Filter 'qwen-code.failed.*').Count -eq 1) 'the failed runtime must be moved aside, not deleted'
+  Assert (@(Get-ChildItem -LiteralPath $restoreHome -Directory -Filter 'qwen-code.restoring.*').Count -eq 0) 'no staging copy may be left behind'
+  Remove-Item -LiteralPath "$bk\qwen-code\lib" -Recurse -Force
+  Assert (-not (Restore-QwenRuntime -Backup $bk -Root $live)) 'an incomplete backup must never replace the runtime'
+} finally {
+  Remove-Item -LiteralPath $restoreHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+Assert ($installerText -match 'install-events\.log') 'every Qwen install attempt must be logged'
+Assert ($installerText -match 'restored previous runtime') 'a failed Qwen install must restore the previous complete runtime'
+# The lock must still be held when hardening and version verification run, and
+# their failures must restore too: all of it sits inside the one try.
+$lockAt = $installerText.IndexOf("Global\ai-devops-qwen-install")
+$hardenAt = $installerText.IndexOf('$hardened = Set-QwenChildEnvironmentHardening')
+$releaseAt = $installerText.IndexOf('ReleaseMutex()')
+Assert ($lockAt -gt 0 -and $lockAt -lt $hardenAt -and $hardenAt -lt $releaseAt) 'the Qwen install lock must cover hardening and verification'
+Assert ($installerText.IndexOf('Restore-QwenRuntime -Backup $backup') -gt $hardenAt) 'a hardening or verification failure must restore the previous runtime'
+$hardenBlock = $installerText.Substring([Math]::Max(0, $hardenAt - 400), [Math]::Min(400, $hardenAt))
+Assert ($hardenBlock -match 'if \(-not \$backup -and -not \(Test-QwenChildEnvironmentHardened\)\) \{\s*\$backup = Backup-QwenRuntime[\s\S]*\$installStarted = \$true') 'a due hardening patch without an install must first back up the runtime and arm the restore'
+Assert ($qwenWrapperText -match 'standalone runtime is incomplete') 'Qwen wrapper must name a hollow runtime and its repair command'
 
 $bootstrapText = Get-Content -Raw $bootstrap
 Assert ($bootstrapText -match 'install-windows-ai-provider-clis\.ps1') 'bootstrap must run the provider installer'

@@ -79,6 +79,7 @@ if (process.argv[2] === '--version') { console.log('0.21.11'); process.exit(0); 
 if (process.argv[2] === 'sessions') { console.log(JSON.stringify({sessionId:'qwen-session-1', filePath:path.join(root, 'transcript.jsonl')})); process.exit(0); }
 const mode = fs.existsSync(path.join(root, 'mode')) ? fs.readFileSync(path.join(root, 'mode'), 'utf8').trim() : 'review';
 fs.appendFileSync(path.join(root, 'provider-turns'), 'turn\n');
+if (mode === 'silent-hang') { setInterval(() => {}, 1000); return; }
 if (mode === 'publication-failure') {
   const events = fs.readFileSync(path.join(root, 'reviewer-events', 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   const current = events.filter(event => event.provider === 'qwen' && event.event === 'started').at(-1);
@@ -755,20 +756,66 @@ fi
 # Step 7A (decision 21): a live review of one name, and a legacy repository-wide
 # lock, never block a different review of the same repository; the same name
 # stays serialized, and the two reviews share no Qwen session record.
-QWEN_RID="$(printf '%s\n%s' "$(cd "$REPO" && pwd -P)" "$(git -C "$REPO" config --get remote.origin.url 2>/dev/null || echo '')" | sha256sum | cut -c1-12)"
+run new review-baseline --prompt 'review this' >/dev/null 2>&1 || bad 'baseline review for the concurrency comparison completes'
+# Take the repository id from the wrapper's own session record, so the held
+# locks sit exactly where the wrapper looks whatever environment runs the suite.
+QWEN_RID="$(for f in "$AI_QWEN_STATE_DIR"/sessions/*/*--review-baseline.json; do [ -f "$f" ] && basename "$(dirname "$f")"; done | head -n 1)"
+check 'the wrapper recorded the repository id used for its locks' "test -n '$QWEN_RID'"
 HELD_REVIEW_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-held.lock.d"
 LEGACY_QWEN_REPO_LOCK="$AI_QWEN_STATE_DIR/locks/repo--$QWEN_RID.lock.d"
 mkdir -p "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
-for held in "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"; do printf '%s\n' "$$" > "$held/pid"; printf 'review:held\n' > "$held/label"; done
+for held in "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"; do printf '%s\n' "$$" > "$held/pid"; printf 'review:held\n' > "$held/label"; printf '%s %s fixture-held\n' "$$" "$(cat "/proc/$$/winpid" 2>/dev/null || echo -)" > "$held/owner"; done
 SIBLING_OUT="$(run new review-sibling --prompt 'review this' 2>&1)"; SIBLING_RC=$?
 [ "$SIBLING_RC" -eq 0 ] || printf '  diagnostic: sibling review: %s\n' "$SIBLING_OUT"
 check 'a second same-repository Qwen review is admitted while another review holds its lock' "test '$SIBLING_RC' -eq 0"
-SIB_DIR="$(run show review-sibling | jq -r '.review_dir // empty')"; ONE_DIR="$(run show review-1 | jq -r '.review_dir // empty')"
-SIB_REP="$(run show review-sibling | jq -r '.last_report // empty')"; ONE_REP="$(run show review-1 | jq -r '.last_report // empty')"
-check 'concurrent same-provider Qwen reviews use separate review copies and verdict reports' "test -n '$SIB_DIR' && test -n '$SIB_REP' && test '$SIB_DIR' != '$ONE_DIR' && test '$SIB_REP' != '$ONE_REP'"
+SIB_DIR="$(run show review-sibling | jq -r '.review_dir // empty')"; ONE_DIR="$(run show review-baseline | jq -r '.review_dir // empty')"
+SIB_REP="$(run show review-sibling | jq -r '.last_report // empty')"; ONE_REP="$(run show review-baseline | jq -r '.last_report // empty')"
+check 'concurrent same-provider Qwen reviews use separate review copies and verdict reports' "test -n '$SIB_DIR' && test -n '$SIB_REP' && test -n '$ONE_DIR' && test -n '$ONE_REP' && test '$SIB_DIR' != '$ONE_DIR' && test '$SIB_REP' != '$ONE_REP'"
 HELD_OUT="$(run new review-held --prompt 'review this' 2>&1)"; HELD_RC=$?
 check 'the same named Qwen review is still serialized by its own lock' "test '$HELD_RC' -ne 0 && printf '%s' \"\$HELD_OUT\" | grep -q 'already active'"
 rm -rf "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
+STALE_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-stale.lock.d"
+if [ -r "/proc/$$/winpid" ]; then
+  mkdir -p "$STALE_LOCK"; printf '999999\n' > "$STALE_LOCK/pid"; printf '999999 %s fixture-live\n' "$(cat "/proc/$$/winpid")" > "$STALE_LOCK/owner"
+  FRESH_OUT="$(run new review-stale --prompt 'review this' 2>&1)"; FRESH_RC=$?
+  check 'a lock whose Windows owner is alive is not reclaimed' "test '$FRESH_RC' -ne 0 && printf '%s' \"\$FRESH_OUT\" | grep -q 'already active' && test \"\$(cat '$STALE_LOCK/pid')\" = 999999"
+fi
+mkdir -p "$STALE_LOCK"; printf '999999\n' > "$STALE_LOCK/pid"; printf 'review:stale\n' > "$STALE_LOCK/label"; printf '999999 - fixture-dead\n' > "$STALE_LOCK/owner"
+UNREAD_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-unread.lock.d"; mkdir -p "$UNREAD_LOCK"
+UNREAD_OUT="$(run new review-unread --prompt 'review this' 2>&1)"; UNREAD_RC=$?
+check 'a lock whose owner cannot be read is treated as held' "test '$UNREAD_RC' -ne 0 && printf '%s' \"\$UNREAD_OUT\" | grep -q 'already active' && test -d '$UNREAD_LOCK'"
+rm -rf "$UNREAD_LOCK"
+# An older wrapper's lock (pid file, no owner record) whose pid is alive stays held.
+mkdir -p "$UNREAD_LOCK"; printf '%s
+' "$$" > "$UNREAD_LOCK/pid"; touch -d '3 hours ago' "$UNREAD_LOCK"
+LEGACY_OUT="$(run new review-unread --prompt 'review this' 2>&1)"; LEGACY_RC=$?
+check 'an older lock whose recorded pid is alive is held, however old' "test '$LEGACY_RC' -ne 0 && printf '%s' \"\$LEGACY_OUT\" | grep -q 'already active' && test -d '$UNREAD_LOCK'"
+rm -rf "$UNREAD_LOCK"
+# A second reclaimer judging the same dead record finds its only destination taken.
+mkdir -p "$STALE_LOCK.dead.fixture-dead"; : > "$STALE_LOCK.dead.fixture-dead/owner"
+RACE_OUT="$(run new review-stale --prompt 'review this' 2>&1)"; RACE_RC=$?
+check 'a stale lock already being reclaimed is not reclaimed twice' "test '$RACE_RC' -ne 0 && test \"\$(cat '$STALE_LOCK/owner')\" = '999999 - fixture-dead'"
+rm -rf "$STALE_LOCK.dead.fixture-dead"
+OLD_OUT="$(run new review-stale --prompt 'review this' 2>&1)"; OLD_RC=$?
+[ "$OLD_RC" -eq 0 ] || printf '  diagnostic: stale reclaim: %s\n' "$OLD_OUT"
+check 'a lock whose owner is gone is reclaimed once' "test '$OLD_RC' -eq 0 && printf '%s' \"\$OLD_OUT\" | grep -q 'reclaiming stale lock' && test ! -e '$STALE_LOCK.reclaim'"
+rm -rf "$STALE_LOCK" "$STALE_LOCK.reclaim"
+
+echo review > "$TMP/mode"; : > "$REPO/empty-untracked.txt"
+EMPTY_START=$SECONDS
+if run new empty-untracked --prompt review >/dev/null 2>&1; then ok 'an empty untracked file does not block a review'; else bad 'an empty untracked file does not block a review'; fi
+EMPTY_SECONDS=$((SECONDS - EMPTY_START)); rm -f "$REPO/empty-untracked.txt"
+
+echo silent-hang > "$TMP/mode"
+HANG_START=$SECONDS
+HANG_OUT="$(AI_QWEN_STARTUP_TIMEOUT_SECONDS=3 run new silent-hang --prompt review 2>&1)"; HANG_RC=$?
+HANG_SECONDS=$((SECONDS - HANG_START))
+# Judge the stop against a normal review measured moments ago on this same
+# machine, not a fixed ceiling: a hang would run far past both.
+if [ "$HANG_RC" -ne 0 ] && [ "$HANG_SECONDS" -lt $((EMPTY_SECONDS + 30)) ]; then ok 'a silent Qwen start is stopped by the startup deadline'; else bad "a silent Qwen start is stopped by the startup deadline (rc=$HANG_RC, ${HANG_SECONDS}s; normal review ${EMPTY_SECONDS}s)"; fi
+if printf '%s' "$HANG_OUT" | grep -q 'no output within 3s of starting' && printf '%s' "$HANG_OUT" | grep -q 'terminal reason: timed-out'; then ok 'the startup deadline is reported as a timeout'; else bad 'the startup deadline is reported as a timeout'; fi
+echo review > "$TMP/mode"
+if (cd "$REPO" && AI_QWEN_STARTUP_TIMEOUT_SECONDS=soon bash "$SCRIPT" new bad-deadline --prompt review) >/dev/null 2>&1; then bad 'a non-numeric startup deadline is refused'; else ok 'a non-numeric startup deadline is refused'; fi
 
 recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
