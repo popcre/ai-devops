@@ -7,7 +7,10 @@ What this does:
 - Pulls the latest main branch if the repo already exists.
 - Installs Claude skills to $HOME\.claude\skills.
 - Installs Codex skills to $HOME\.codex\skills.
-- Seeds $HOME\.claude\CLAUDE.md and $HOME\.codex\AGENTS.md only if missing.
+- Installs ZCode skills to $HOME\.zcode\skills (migrating the hand-made
+  junction to ~/.claude/skills away first, non-recursively).
+- Seeds $HOME\.claude\CLAUDE.md, $HOME\.codex\AGENTS.md, and
+  $HOME\.zcode\AGENTS.md only if missing.
 - Schedules the blocker watch so waiting sessions on this computer get woken.
 
 Run in PowerShell:
@@ -25,6 +28,7 @@ param(
     [switch]$SkipGitInstall,
     [string]$ClaudeHome = (Join-Path $HOME ".claude"),
     [string]$CodexHome = (Join-Path $HOME ".codex"),
+    [string]$ZCodeHome = (Join-Path $HOME ".zcode"),
     [switch]$SkillsDryRun,
     # Replace an installed global that differs from the repo copy. Without this
     # switch a differing global is reported and left alone. The old file is
@@ -165,7 +169,7 @@ function Assert-NoSharedSkillCollisions {
     param([string]$Root)
 
     $sharedNames = @(Get-SkillNames (Join-Path $Root "skills\shared"))
-    foreach ($client in @("claude", "codex")) {
+    foreach ($client in @("claude", "codex", "zcode")) {
         $clientRoot = Join-Path $Root "skills\$client"
         foreach ($name in $sharedNames) {
             if (Test-Path -LiteralPath (Join-Path $clientRoot "$name\SKILL.md")) {
@@ -490,6 +494,34 @@ function Invoke-OrphanSkillPruning {
     }
 }
 
+# Migrate the hand-made ~/.zcode/skills junction (~/.claude/skills) away so the
+# managed directory can exist. NON-RECURSIVE by necessity: a recursive delete
+# would destroy the CLAUDE skills the junction points at. Only a reparse point
+# is ever removed here; a real directory (already migrated) is left untouched.
+function Remove-ZCodeSkillsJunction {
+    param([string]$ClientHome)
+
+    $skillsDir = Join-Path $ClientHome "skills"
+    if (-not (Test-Path -LiteralPath $skillsDir)) { return }
+    $item = Get-Item -LiteralPath $skillsDir -Force
+    if ($item.LinkType -ne 'Junction') { return }
+
+    $target = $item.Target
+    if ($SkillsDryRun) {
+        Write-Note "[skills-dry-run] remove junction $skillsDir -> $target (non-recursive)"
+        return
+    }
+    # cmd's rmdir removes ONLY the junction itself, never its target's contents.
+    & cmd.exe /c rmdir "$skillsDir" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not remove the ~/.zcode/skills junction (cmd /c rmdir exited $LASTEXITCODE). Nothing was deleted; resolve manually before re-running."
+    }
+    if (Test-Path -LiteralPath $skillsDir) {
+        throw "~/.zcode/skills still exists after rmdir; refusing to continue into an unknown state."
+    }
+    Write-Note "Migrated ~/.zcode/skills: removed the hand-made junction to $target (its contents were untouched)."
+}
+
 function Install-GlobalFile {
     param(
         [string]$Source,
@@ -604,6 +636,26 @@ Write-Note "$sharedCodexCount shared skills installed for Codex."
 Invoke-OrphanSkillPruning -ClientHome $CodexHome -Label "Codex" -Root $RepoPath -SourceRoots @(
     (Join-Path $RepoPath "skills\codex"), (Join-Path $RepoPath "skills\shared"))
 
+Write-Step "Installing ZCode skills"
+# The junction migration MUST precede the install: Install-SkillFolder's
+# Ensure-Directory would otherwise see the junction as an existing directory
+# and reconcile INTO ~/.claude/skills, stamping Claude's tree with ZCode state.
+Remove-ZCodeSkillsJunction -ClientHome $ZCodeHome
+$zcodeCount = Install-SkillFolder `
+    -SourceRoot (Join-Path $RepoPath "skills\zcode") `
+    -DestRoot (Join-Path $ZCodeHome "skills") `
+    -Label "ZCode" `
+    -ClientHome $ZCodeHome
+Write-Note "$zcodeCount ZCode-specific skills installed."
+$sharedZCodeCount = Install-SkillFolder `
+    -SourceRoot (Join-Path $RepoPath "skills\shared") `
+    -DestRoot (Join-Path $ZCodeHome "skills") `
+    -Label "shared" `
+    -ClientHome $ZCodeHome
+Write-Note "$sharedZCodeCount shared skills installed for ZCode."
+Invoke-OrphanSkillPruning -ClientHome $ZCodeHome -Label "ZCode" -Root $RepoPath -SourceRoots @(
+    (Join-Path $RepoPath "skills\zcode"), (Join-Path $RepoPath "skills\shared"))
+
 Write-Step "Installing global instruction files"
 Install-GlobalFile `
     -Source (Join-Path $RepoPath "templates\system\CLAUDE-global.md") `
@@ -613,6 +665,10 @@ Install-GlobalFile `
     -Source (Join-Path $RepoPath "templates\system\AGENTS-global-codex.md") `
     -Dest (Join-Path $CodexHome "AGENTS.md") `
     -Label "Codex global instructions"
+Install-GlobalFile `
+    -Source (Join-Path $RepoPath "templates\system\AGENTS-global-zcode.md") `
+    -Dest (Join-Path $ZCodeHome "AGENTS.md") `
+    -Label "ZCode global instructions"
 
 # A dry run is a preview of everything, globals included, and stops before the
 # environment checks that would otherwise look like part of the plan.
@@ -697,6 +753,18 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
     Write-Note "Verify model access and completion with: ai-qwen doctor --live"
 } else {
     Write-Note "Qwen Code CLI not found. Install/login separately if you want the qwen-code skill to run local Qwen jobs."
+}
+
+if (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "ZCode\ZCode.exe")) {
+    if (Test-Path -LiteralPath (Join-Path $ZCodeHome "v2\credentials.json")) {
+        Write-Note "ZCode desktop app found and signed in."
+    } else {
+        Write-Note "ZCode desktop app found but NOT signed in. Run once: zcode login --no-browser"
+        Write-Note "  (the URL prints to the terminal because Windows auto-open truncates login URLs at '&')."
+    }
+    Write-Note "Verify the full integration when needed with: ai-zcode doctor"
+} else {
+    Write-Note "ZCode desktop app not found. Install when needed: winget install ZhipuAI.ZCode"
 }
 
 Write-Step "Done"

@@ -24,6 +24,7 @@ function New-Fixture {
     New-Item -ItemType Directory -Force -Path $root | Out-Null
     New-TestSkill $root "claude" "client-claude"
     New-TestSkill $root "codex" "client-codex"
+    New-TestSkill $root "zcode" "client-zcode"
     if (-not $NoShared) {
         New-TestSkill $root "shared" "shared-one"
         New-TestSkill $root "shared" "synology-sharesync-triage"
@@ -32,6 +33,7 @@ function New-Fixture {
     New-Item -ItemType Directory -Force -Path $templates | Out-Null
     "# test Claude global" | Set-Content -LiteralPath (Join-Path $templates "CLAUDE-global.md")
     "# test Codex global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-codex.md")
+    "# test ZCode global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-zcode.md")
 
     git -C $root init -b main | Out-Null
     git -C $root config user.name "AI DevOps Test"
@@ -50,6 +52,7 @@ function Invoke-Installer {
         [string]$Fixture,
         [string]$ClaudeHome,
         [string]$CodexHome,
+        [string]$ZCodeHome = "",
         [switch]$SkillsDryRun,
         [switch]$MigrateObsolete,
         [switch]$AdoptGlobals
@@ -60,6 +63,7 @@ function Invoke-Installer {
         ClaudeHome = $ClaudeHome
         CodexHome = $CodexHome
         SkipGitInstall = $true
+        ZCodeHome = $(if ($ZCodeHome) { $ZCodeHome } else { Join-Path $TempRoot "no-zcode-home" })
         SkillsDryRun = [bool]$SkillsDryRun
         MigrateObsolete = [bool]$MigrateObsolete
         AdoptGlobals = [bool]$AdoptGlobals
@@ -233,6 +237,61 @@ try {
     Assert-True (-not (((Get-Content -LiteralPath $global) -join "`n") -match "machine-specific")) `
         "-AdoptGlobals did not replace the global"
     Assert-True ($output -match "restore with") "restore hint missing"
+
+    Write-Host "9/9 ZCode: junction migration, install, and global seeding"
+    $fixture = New-Fixture "zcode"
+    $claude = Join-Path $TempRoot "zcode\claude"
+    $codex = Join-Path $TempRoot "zcode\codex"
+    $zcode = Join-Path $TempRoot "zcode\zcode-home"
+    # Pre-seed the Claude home with skills and create the hand-made junction
+    # ~/.zcode/skills -> ~/.claude/skills (the exact unmanaged baseline).
+    Invoke-Installer $fixture $claude $codex | Out-Null
+    $claudeSkillCount = @(Get-ChildItem -LiteralPath (Join-Path $claude "skills") -Directory).Count
+    New-Item -ItemType Directory -Force -Path $zcode | Out-Null
+    $junctionTarget = Join-Path $claude "skills"
+    & cmd.exe /c mklink /J ("`"$zcode\skills`"") ("`"$junctionTarget`"") | Out-Null
+    Assert-True ($LASTEXITCODE -eq 0) "test junction could not be created"
+
+    $output = Invoke-Installer $fixture $claude $codex -ZCodeHome $zcode
+    Assert-True ($output -match "Migrated ~/.zcode/skills") "junction migration not reported"
+    $skillsItem = Get-Item -LiteralPath (Join-Path $zcode "skills") -Force
+    Assert-True ($skillsItem.LinkType -ne 'Junction') "junction still present after install"
+    Assert-True ($skillsItem.PSIsContainer) "managed skills dir is not a real directory"
+    Assert-True (Test-Path (Join-Path $zcode "skills\client-zcode\SKILL.md")) "ZCode client skill missing"
+    Assert-True (Test-Path (Join-Path $zcode "skills\shared-one\SKILL.md")) "shared skill missing for ZCode"
+    Assert-True (Test-Path (Join-Path $zcode "skills\client-zcode\.ai-devops-managed")) "ZCode skill lacks managed marker"
+    # THE critical safety property: the migration must not delete the Claude
+    # skills the junction pointed at.
+    Assert-True (@(Get-ChildItem -LiteralPath $junctionTarget -Directory).Count -eq $claudeSkillCount) `
+        "junction target (Claude skills) was modified by the migration"
+    Assert-True ($output -match "ZCode-specific skills installed") "ZCode install count missing"
+
+    # ZCode global: seeded when absent, protected when locally edited.
+    $zcodeGlobal = Join-Path $zcode "AGENTS.md"
+    Assert-True ((((Get-Content -LiteralPath $zcodeGlobal) -join "`n") -match "test ZCode global")) "ZCode global not seeded when absent"
+    @("# test ZCode global", "## zcode machine section") | Set-Content -LiteralPath $zcodeGlobal
+    $output = Invoke-Installer $fixture $claude $codex -ZCodeHome $zcode
+    Assert-True ($output -match "not overwriting local edits") "differing ZCode global was not protected"
+    Assert-True (((Get-Content -LiteralPath $zcodeGlobal) -join "`n") -match "zcode machine section") "ZCode global was clobbered"
+    $output = Invoke-Installer $fixture $claude $codex -ZCodeHome $zcode -AdoptGlobals
+    Assert-True (-not (((Get-Content -LiteralPath $zcodeGlobal) -join "`n") -match "zcode machine section")) `
+        "-AdoptGlobals did not replace the ZCode global"
+    Assert-True (((Get-Content -LiteralPath (Join-Path $zcode "globals-backup\AGENTS.md")) -join "`n") -match "zcode machine section") `
+        "old ZCode global not backed up"
+
+    # Shared/ZCode tree collision must fail like the other clients.
+    $fixture = New-Fixture "collision-zcode"
+    New-TestSkill $fixture "shared" "client-zcode"
+    git -C $fixture add .
+    git -C $fixture commit -m "add zcode collision" | Out-Null
+    git -C $fixture push | Out-Null
+    $claude = Join-Path $TempRoot "collision-zcode\claude"
+    $codex = Join-Path $TempRoot "collision-zcode\codex"
+    $zcode = Join-Path $TempRoot "collision-zcode\zcode-home"
+    $failed = $false
+    try { Invoke-Installer $fixture $claude $codex -ZCodeHome $zcode | Out-Null } catch { $failed = $_.Exception.Message -match "skills/zcode" }
+    Assert-True $failed "ZCode collision did not fail loudly"
+    Assert-True (-not (Test-Path (Join-Path $zcode "skills"))) "ZCode collision partially changed the ZCode home"
 
     # Every machine must schedule the blocker watch, or its waiting sessions are
     # never woken. The test must not touch the real scheduler.

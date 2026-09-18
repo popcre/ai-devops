@@ -4,13 +4,24 @@
 # Copies bin/ai-completion-check-hook to ~/.config/ai-devops/completion-check-hook
 # (a stable per-machine path, so the settings entry never points into a repo
 # checkout that might move) and registers its turn-start, tool-use, and Stop
-# events in the USER-level ~/.claude/settings.json.
+# events in the client's user config:
+#
+#   --client claude (default)  ~/.claude/settings.json, hooks.<Event>[].hooks[]
+#   --client zcode             ~/.zcode/cli/config.json, hooks.events.<Event>[]
+#                              with hooks.enabled=true — the silent default-off
+#                              trap: config-file hooks NEVER run unless enabled.
+#                              ZCode events carry {type,command,timeoutMs} and no
+#                              statusMessage (strict schema; an unknown key
+#                              drops the hook). Verified structurally only: in
+#                              CLI 0.16.5 hooks do not fire in headless -p runs
+#                              at all, so the live proof is interactive.
 #
 # Idempotent, strictly additive: it never removes an existing hook — including the
 # memory-index hook installed by its sibling script — never touches any other
-# setting, and backs the settings file up before its first change. Refuses to write
-# if the settings file is not valid JSON, because a broken settings.json silently
-# disables EVERY setting in it.
+# setting (ZCode's mcp/plugins blocks are preserved untouched), and backs the
+# settings file up before its first change. Refuses to write if the settings
+# file is not valid JSON, because a broken settings file silently disables
+# EVERY setting in it.
 #
 # Why a Stop hook: the always-loaded rule against reporting unfinished work as
 # finished had already been rewritten twice and was live when it failed again on
@@ -21,17 +32,26 @@ set -u
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 claude_home=""
+zcode_home=""
+client="claude"
 check_only=0
 
 while (($#)); do
   case "$1" in
     --claude-home) claude_home="$2"; shift 2 ;;
+    --zcode-home) zcode_home="$2"; shift 2 ;;
+    --client) client="$2"; shift 2 ;;
     --repo-root) repo_root="$2"; shift 2 ;;
     --check) check_only=1; shift ;;
-    -h|--help) echo "usage: ai-install-completion-check-hook [--check] [--claude-home DIR] [--repo-root DIR]"; exit 0 ;;
+    -h|--help) echo "usage: ai-install-completion-check-hook [--check] [--client claude|zcode] [--claude-home DIR] [--zcode-home DIR] [--repo-root DIR]"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+case "$client" in
+  claude|zcode) ;;
+  *) echo "ERROR unknown --client: $client (accepted: claude, zcode)" >&2; exit 2 ;;
+esac
 
 if [[ -z "$claude_home" ]]; then
   case "${OSTYPE:-}" in
@@ -43,14 +63,97 @@ if [[ -z "$claude_home" ]]; then
     *) claude_home="$HOME/.claude" ;;
   esac
 fi
+if [[ -z "$zcode_home" ]]; then
+  case "${OSTYPE:-}" in
+    msys*|cygwin*)
+      profile="${USERPROFILE:-}"
+      [[ -n "$profile" ]] || { echo "ERROR USERPROFILE is unset" >&2; exit 1; }
+      command -v cygpath >/dev/null 2>&1 && zcode_home="$profile/.zcode" ;;
+    *) zcode_home="$HOME/.zcode" ;;
+  esac
+fi
 
 src="$repo_root/bin/ai-completion-check-hook"
 [[ -f "$src" ]] || { echo "ERROR not found: $src" >&2; exit 1; }
 
 cfg_dir="$HOME/.config/ai-devops"
 dest="$cfg_dir/completion-check-hook"
-settings="$claude_home/settings.json"
 marker='completion-check-hook'
+
+if [[ "$client" == "zcode" ]]; then
+  # -----------------------------------------------------------------------
+  # ZCode: ~/.zcode/cli/config.json, hooks.events.<Event>[] + hooks.enabled.
+  # -----------------------------------------------------------------------
+  settings="$zcode_home/cli/config.json"
+  command -v jq >/dev/null 2>&1 || { echo "ERROR jq is required to edit the ZCode config safely" >&2; exit 1; }
+
+  # The hook command needs an absolute bash-compatible path; $HOME-style
+  # expansion is NOT performed for config-file hooks.
+  hook_cmd="bash \"$(cygpath -m "$dest" 2>/dev/null || printf '%s' "$dest")\""
+
+  zcode_registered() {
+    jq -e --arg m "$marker" '
+      . as $cfg |
+      ($cfg.hooks.enabled == true) and
+      (["UserPromptSubmit", "PostToolUse", "Stop"] as $events |
+        [$events[] as $event |
+          ($cfg.hooks.events[$event] // []) | map(.hooks // []) | flatten |
+          map(.command // "") | any(contains($m))] | all)' "$1" >/dev/null 2>&1
+  }
+
+  if (( check_only )); then
+    [[ -f "$dest" ]] || { echo "ERROR completion-check hook script not installed"; exit 1; }
+    [[ -f "$settings" ]] || { echo "ERROR no $settings"; exit 1; }
+    if zcode_registered "$settings"; then
+      echo "OK completion-check hook already registered for zcode"; exit 0
+    fi
+    echo "ERROR completion-check hook not registered in $settings"; exit 1
+  fi
+
+  mkdir -p "$cfg_dir"
+  cp "$src" "$dest" || { echo "ERROR could not install $dest" >&2; exit 1; }
+  chmod +x "$dest" 2>/dev/null || true
+
+  [[ -f "$settings" ]] || printf '{}\n' > "$settings"
+  if ! jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
+    echo "ERROR $settings is not a valid JSON object - refusing to touch it" >&2
+    exit 1
+  fi
+  if zcode_registered "$settings"; then
+    echo "OK completion-check hook already registered for zcode"
+    exit 0
+  fi
+
+  backup="$settings.aidevops.bak"
+  [[ -f "$backup" ]] || cp "$settings" "$backup"
+  tmp="$settings.tmp.$$"
+  if ! jq --arg cmd "$hook_cmd" --arg marker "$marker" '
+        .hooks //= {} |
+        .hooks.enabled = true |
+        .hooks.events //= {} |
+        reduce ["UserPromptSubmit", "PostToolUse", "Stop"][] as $event (.;
+          .hooks.events[$event] //= [] |
+          if ((.hooks.events[$event] | map(.hooks // []) | flatten |
+               map(.command // "") | any(contains($marker))))
+          then .
+          else .hooks.events[$event] += [{
+            hooks: [{ type: "command", command: $cmd, timeoutMs: 30000 }]
+          }]
+          end)' "$settings" > "$tmp"; then
+    rm -f "$tmp"; echo "ERROR could not build the updated ZCode config" >&2; exit 1
+  fi
+  if ! jq -e 'type == "object"' "$tmp" >/dev/null 2>&1; then
+    rm -f "$tmp"; echo "ERROR refused to install a ZCode config that does not parse" >&2; exit 1
+  fi
+  mv "$tmp" "$settings"
+  echo "OK completion-check hook registered for zcode in $settings (hooks.enabled=true)"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Claude (default): ~/.claude/settings.json
+# ---------------------------------------------------------------------------
+settings="$claude_home/settings.json"
 
 if (( check_only )); then
   [[ -f "$dest" ]] || { echo "ERROR completion-check hook script not installed"; exit 1; }
