@@ -23,6 +23,9 @@ foreach ($hostile in @('DOTNET_STARTUP_HOOKS','DOTNET_ADDITIONAL_DEPS','CORECLR_
 }
 $script:TaskPath = '\AiDevOps\WindowsRunnerMaintenance'
 $script:TaskFolder = '\AiDevOps\'
+# The raw Schedule.Service COM interface rejects a trailing path separator
+# (0x8007007B, proven live on 2026-09-18); the cmdlet forms above tolerate it.
+$script:TaskFolderCom = '\AiDevOps'
 $script:TaskName = 'WindowsRunnerMaintenance'
 $script:PayloadRoot = 'C:\Program Files\ai-devops\windows-runner-maintenance'
 $script:RuntimeRoot = 'C:\ProgramData\ai-devops\windows-runner-maintenance'
@@ -197,7 +200,7 @@ function Set-MaintenanceTaskAcl {
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
-  $task = $service.GetFolder($script:TaskFolder).GetTask($script:TaskName)
+  $task = $service.GetFolder($script:TaskFolderCom).GetTask($script:TaskName)
   $sddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$OperatorSid)"
   $task.SetSecurityDescriptor($sddl, 0)
   return $sddl
@@ -208,7 +211,7 @@ function Get-InstalledTaskSnapshot {
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
-  $sddl = $service.GetFolder($script:TaskFolder).GetTask($script:TaskName).GetSecurityDescriptor(0)
+  $sddl = $service.GetFolder($script:TaskFolderCom).GetTask($script:TaskName).GetSecurityDescriptor(0)
   return [ordered]@{
     execute = [string]$task.Actions[0].Execute
     arguments = [string]$task.Actions[0].Arguments

@@ -144,6 +144,7 @@ try {
   Case 'RuntimeParent_OwnedBeforeTreesAreCreated' { Assert-Contains $installer 'Assert-NoForeignOwnership -LiteralPath $runtimeParent' }
   Case 'Installer_MachineNameNotEnvironment' { Assert-Contains $installer '[Environment]::MachineName'; Assert-True (-not $installer.Contains('$env:COMPUTERNAME')) 'installer identity still derived from the environment' }
   Case 'Worker_AcquiresAbandonedMutex' { Assert-Contains $worker 'AbandonedMutexException' }
+  Case 'ComFolder_HasNoTrailingSeparator' { Assert-Contains $installer 'GetFolder($script:TaskFolderCom)'; Assert-Contains $worker 'GetFolder(''\AiDevOps'')'; Assert-True (-not ($installer + $worker).Contains('GetFolder(''\AiDevOps\'')')) 'COM folder path ends in a separator (0x8007007B)' }
   Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
