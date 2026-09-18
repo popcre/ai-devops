@@ -11,7 +11,7 @@
 | 1. Confirm Jev is real, and what it actually guarantees | ✅ complete | 2026-09-18 | Section 3 below |
 | 2. Register the API key reference (no value in the repository) | ⏸ blocked | 2026-09-18 | `config/mcp.env.example` line added but commented out; needs the exact 1Password item title and field label |
 | 3. Reachability probe from one machine | ⬜ not started | — | — |
-| 4a. Track A: confirm upstream #33/#34 landed, then single-machine compaction trial | ⬜ not started | — | — |
+| 4a. Track A: upstream gate (#52 plus #33/#34/#30/#31), then single-machine compaction trial | ⛔ gated | 2026-09-18 | 12 open issues; PR #28 fixes 11 but is open and unreviewed; #52 not covered by it and measured 0/337 tool calls retained on defaults |
 | 4b. Track B: shadow-mode evaluation on completion-honesty checks | ⬜ not started | — | — |
 | 5. Go/no-go per track on promoting anything to enforcing | ⬜ not started | — | — |
 
@@ -100,26 +100,56 @@ Two reasons this fits measured reality in this repository:
 
 **Risk and its mitigation.** The failure mode is quiet: a misjudgement drops
 something needed, with no error, and the session simply forgets a constraint.
-The mitigation is a high confidence floor, applied in the safe direction —
-**delete only on high confidence that an item is stale; retain on any
-uncertainty.** The inverse framing ("keep only when confident it matters")
-uses the same number and deletes everything uncertain. This is not
-hypothetical: upstream issue #30 is "Reject keep thresholds that discard even
-a certain keep decision," so threshold handling there has already been wrong
-in that exact direction. Read the setting, do not assume it.
 
-A confidence floor is only worth its number if the model is calibrated on
-*our* traffic. Vendor calibration claims are unbenchmarked. Verify against the
-transcript archive rather than assuming: replay real sessions, apply the
-threshold, and check whether the deletions above the floor were in fact safe.
+The intended mitigation is a confidence floor applied in the safe direction.
+**Get the direction right — it is the opposite of the intuitive reading.** The
+knob is `keepThreshold` and it keeps an item when its score is at or above the
+threshold, so RAISING it deletes MORE. Conservative therefore means a LOW
+`keepThreshold`, not a high one. Setting it to 0.91 against the scores
+observed upstream (0.13-0.44, issue #52) would delete essentially everything.
+Upstream issue #30 is a related defect: out-of-range thresholds are accepted
+and then discard entries that were certain keeps.
 
-**Maturity, as of 2026-09-18.** 2.2k stars, roughly 30 commits. Open issues
-cover unbounded concurrent Jev requests (#33), no request deadline or caller
-cancellation (#34), an auto-compaction lock acquired too late (#35), logging
-failures breaking the fallback path (#36), and malformed-answer and
-control-flow race handling (PR #28). `AGENTS.md` requires bounded, rate-limited
-outbound calls, so #33 and #34 are not cosmetic here. Confirm both have landed
-before installing; otherwise pin a commit that has them, or wait.
+A floor is only worth its number if the model is calibrated on *our* traffic.
+Vendor calibration claims are unbenchmarked. Verify against the transcript
+archive rather than assuming: replay real sessions, apply the threshold, and
+check whether the deletions were in fact safe. Respect the private-data
+boundary — transcripts are a private submodule and this repository is public.
+
+**Upstream state as of 2026-09-18 — this is the real blocker.** 2.2k stars,
+roughly 30 commits, 12 open issues.
+
+Five are blocking for our use:
+
+- **#52** — question wording hides Jev's signal, and late fitting stages strip
+  non-pinned messages while still scoring them, so Jev judges calls it cannot
+  see. Replay of a real 1084-message session retained **0 of 337 tool calls**
+  on default settings. This is the exact silent-loss failure we care about,
+  measured rather than hypothesised.
+- **#33** — unbounded concurrent Jev batches; conflicts with the bounded-call
+  rule in `AGENTS.md` (the rule that exists because of #401).
+- **#34** — no request deadline or caller cancellation.
+- **#30** — invalid keep thresholds discard certain keep decisions.
+- **#31** — duplicate `tool_use_id` can delete PINNED content while the
+  decision report still claims it was kept: silent loss that misreports itself.
+
+Quality but not safety: #32, #35, #36, #38, #39. Irrelevant: #37, #54.
+
+**PR #28 fixes 11 of the 12** (including #30-#36), 13 commits, 36 unit and 49
+regression tests passing. It is **open, unreviewed, and authored by a
+community contributor, not the maintainer**. No maintainer response appears on
+any issue read, including #52 (which offers a replay script and a test branch)
+and #54 (an unanswered README question). Treat this as possibly unmaintained
+rather than as work in flight.
+
+Critically, **#52 is not among PR #28's fixes**. Even if #28 merged, the defect
+that makes the plugin delete everything on default settings would remain open.
+
+**Gate before installing anything:** #52 resolved or a configuration proven on
+our own replayed transcripts to retain sensibly, AND #33/#34/#30/#31 landed
+(by merge, or by pinning a commit that carries them). If neither upstream
+movement nor a proven local configuration exists, the honest answer is to
+stop and report, not to install and tune.
 
 **Trial scope:** one machine (`edge-dev`, which is where the spend measurement
 came from, so there is a real baseline to compare against). Not installed by
