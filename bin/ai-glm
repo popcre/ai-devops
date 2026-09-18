@@ -1934,7 +1934,9 @@ cmd_delete() {
 RETENTION_HOURS="${AI_GLM_REVIEW_RETENTION_HOURS:-24}"
 # Deleting a session makes OpenCode boot that session's directory instance (about a
 # second each, plus a snapshot gc a minute later), so `new` retires only a small batch;
-# at ~30 reviews a day that keeps pace. `ai-glm prune` and doctor clear any backlog.
+# at ~30 reviews a day that keeps pace. `ai-glm prune` clears any backlog; doctor only
+# reports it, because each removal can take minutes on a busy server and doctor must
+# answer inside the governed-review preflight window.
 PRUNE_BATCH="${AI_GLM_PRUNE_BATCH:-5}"
 prune_batch_valid() { case "$PRUNE_BATCH" in ''|0*|*[!0-9]*) return 1 ;; esac; }
 GLM_SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
@@ -1947,6 +1949,67 @@ newest_epoch() { # newest_epoch PATH -> newest of the file mtime and every recor
     if [ "$e" -gt "$newest" ]; then newest="$e"; fi
   done < <(jq -r '[.last_activity_at, .last_poll_at, .provider_progress_at, .remote_turn.started_at, .updated_at, .created_at][] | select(type=="string")' "$1" 2>/dev/null || true)
   printf '%s' "$newest"
+}
+
+# One jq pass (per bounded chunk) classifies every session record, instead of the
+# jq/stat/date spawns per record that cost ~0.1s each on Windows: at ~150 records the
+# per-record scans alone made `ai-glm doctor` overrun the 60s governed-review preflight
+# (u2giants/shared-db PR 3243, 2026-09-18). This is a PRE-FILTER only: it may say a
+# record is "not a review" or "active since CUTOFF" solely when that is proven; every
+# other record -- empty, malformed, several JSON values, unparseable timestamp, not
+# statted -- is "?" and takes the original per-record path, which re-proves everything
+# under its lock. A bad record costs only itself the slow path, never its chunk.
+# Output: one line per record, "PATH<TAB>TYPE<TAB>NEWEST", TYPE/NEWEST "?" when unknown.
+GLM_RECORD_END='@@ai-glm-record-end@@'
+glm_record_index() {
+  local files=("$STATE_DIR"/sessions/*/*.json) args chunk sep i j k n f idx type newest mt
+  local -A kind stamp mtime
+  [ -e "${files[0]:-}" ] || return 0
+  # jq reads all its files as ONE stream: it abandons every later file after a parse
+  # error, and in raw mode a file without a final newline runs into the next one. So
+  # each record is read as raw text, followed by a separator file that closes its last
+  # line and marks where it ends, and is parsed on its own; records are matched by
+  # position, which no path spelling (MSYS translation for a native jq) can disturb.
+  sep="$(mktemp "${TMPDIR:-/tmp}/ai-glm-record-end.XXXXXX")" || return 1
+  printf '\n%s\n' "$GLM_RECORD_END" > "$sep"
+  n=${#files[@]}
+  for ((i = 0; i < n; i += 100)); do   # bounded argv for Windows' command-line limit
+    chunk=("${files[@]:i:100}"); args=()
+    for f in "${chunk[@]}"; do args+=("$f" "$sep"); done
+    # Native jq can end lines with CR. The timestamp list is exactly newest_epoch's.
+    while IFS=$'\t' read -r idx type newest; do
+      case "$idx" in ''|*[!0-9]*) continue ;; esac
+      kind[$((i + idx))]="${type:-?}"; stamp[$((i + idx))]="$newest"
+    done < <(jq -nr --arg end "$GLM_RECORD_END" --argjson want "${#chunk[@]}" '
+      reduce inputs as $l ({cur: "", recs: []};
+        if ($l | rtrimstr("\r")) == $end then .recs += [.cur] | .cur = "" else .cur += $l + "\n" end)
+      | .recs | if length != $want then empty else to_entries[] end
+      | .key as $i
+      | try (.value | fromjson
+          | if type != "object" then error("not a record") else . end
+          | ([.last_activity_at, .last_poll_at, .provider_progress_at, .remote_turn.started_at, .updated_at, .created_at]
+             | map(select(type == "string") | (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch "?"))) as $ts
+          | [$i, (.type // "-" | tostring), (if any($ts[]; . == "?") then "?" else ($ts | max // 0) end)])
+        catch [$i, "?", "?"]
+      | @tsv' -R "${args[@]}" 2>/dev/null | tr -d '\r' || true)
+    while read -r mt f; do mtime[$f]="$mt"; done < <(stat -c '%Y %n' "${chunk[@]}" 2>/dev/null || true)
+  done
+  rm -f "$sep"
+  for ((k = 0; k < n; k++)); do
+    f="${files[k]}"; type="${kind[$k]:-?}"; newest="${stamp[$k]:-?}"; mt="${mtime[$f]:-}"
+    case "$mt" in ''|*[!0-9]*) newest="?" ;; esac
+    case "$newest" in ''|*[!0-9]*) newest="?" ;; *) [ "$mt" -le "$newest" ] || newest="$mt" ;; esac
+    printf '%s\t%s\t%s\n' "$f" "$type" "$newest"
+  done
+}
+
+glm_due_review_records() { # CUTOFF -> records prune_review might remove (all others provably not due)
+  local f type newest
+  while IFS=$'\t' read -r f type newest; do
+    case "$type" in review|'?') ;; *) continue ;; esac
+    [ "$newest" != '?' ] && [ "$newest" -ge "$1" ] && continue
+    printf '%s\n' "$f"
+  done < <(glm_record_index)
 }
 
 prune_claim() { # prune_claim LOCK -> 0 claimed; never waits and never reclaims
@@ -2085,7 +2148,10 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   trap 'PRUNE_SIGNAL=130' INT
   trap 'PRUNE_SIGNAL=143' TERM
   shopt -s nullglob
-  for mp in "$STATE_DIR"/sessions/*/*.json; do
+  local due=()
+  mapfile -t due < <(glm_due_review_records "$cutoff")
+  for mp in "${due[@]}"; do
+    [ -n "$mp" ] || continue
     [ "$PRUNE_SIGNAL" = 0 ] || exit "$PRUNE_SIGNAL"
     [ "$limit" -eq 0 ] || [ "$removed" -lt "$limit" ] || break
     rc=0; prune_review "$mp" "$cutoff" || rc=$?
@@ -2180,11 +2246,12 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
 }
 
 reconcile_implementation_records() {
-  local f rc=0
-  shopt -s nullglob
-  for f in "$STATE_DIR"/sessions/*/*.json; do
-    reconcile_implementation_record "$f" || rc=1
-  done
+  local f type newest rc=0
+  # Only implementation records (and any the index could not read) can need recovery;
+  # reconcile_implementation_record itself ignores every other type.
+  while IFS=$'\t' read -r f type newest; do
+    case "$type" in implementation|'?') reconcile_implementation_record "$f" || rc=1 ;; esac
+  done < <(glm_record_index)
   return "$rc"
 }
 
@@ -2485,10 +2552,18 @@ cmd_doctor() {
   else
     printf 'WARN  ambiguous implementation job state was preserved; inspect ai-glm list/show\n'
   fi
-  if server_up && ( cmd_prune ) >/dev/null 2>&1; then
-    printf 'PASS  idle review sessions older than %sh pruned\n' "$RETENTION_HOURS"
+  # Report, never act: removals belong to `new` (bounded) and `ai-glm prune`. Doctor
+  # runs inside the governed-review preflight window, which a prune pass overran.
+  local idle=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    # An entry the index could not read counts only if the record really is a review.
+    [ "$(jq -r '.type // empty' "$f" 2>/dev/null | tr -d '\r')" = review ] && idle=$((idle + 1))
+  done < <(glm_due_review_records $(( $(date +%s) - RETENTION_HOURS * 3600 )))
+  if [ "$idle" -eq 0 ]; then
+    printf 'PASS  no idle review sessions older than %sh\n' "$RETENTION_HOURS"
   else
-    printf 'WARN  some idle review sessions were kept; run: ai-glm prune\n'
+    printf 'WARN  %s idle review session(s) older than %sh remain (some may be kept for evidence); run: ai-glm prune\n' "$idle" "$RETENTION_HOURS"
   fi
   if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then
     printf 'WARN  scratch clones remain under %s/wt; ambiguous or live paths were left untouched\n' "$STATE_DIR"

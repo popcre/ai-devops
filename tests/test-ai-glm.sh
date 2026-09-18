@@ -722,7 +722,45 @@ check "an unreadable record stops the unrecorded-sandbox sweep" "test '$pr_bad_r
 PR_STATE="$TMP/prune-state"; PR_SB="$TMP/prune-sandboxes"
 NEW_FN="$(sed -n '/^cmd_new()/,/^}/p' "$AI_GLM")"
 check "new retires a bounded batch before creating a session" "printf '%s' \"\$NEW_FN\" | grep -q 'cmd_prune \"\$PRUNE_BATCH\"' && test \"\$(printf '%s\n' \"\$NEW_FN\" | grep -n 'cmd_prune' | cut -d: -f1)\" -lt \"\$(printf '%s\n' \"\$NEW_FN\" | grep -n 'create_session' | cut -d: -f1)\""
-check "doctor runs review retention" "sed -n '/^cmd_doctor()/,/^}/p' '$AI_GLM' | grep -q 'cmd_prune'"
+# Doctor answers inside the governed-review preflight window (60s): it reports retention
+# through the same due scan prune uses and never removes anything itself (PR 3243).
+DOCTOR_FN="$(sed -n '/^cmd_doctor()/,/^}/p' "$AI_GLM")"
+check "doctor reports review retention through prune's due scan" "printf '%s' \"\$DOCTOR_FN\" | grep -q 'glm_due_review_records' && printf '%s' \"\$DOCTOR_FN\" | grep -q 'idle review session(s) older than'"
+check "doctor never runs a prune pass" "! printf '%s' \"\$DOCTOR_FN\" | grep -q 'cmd_prune'"
+check "prune walks only the due scan's records" "sed -n '/^cmd_prune()/,/^}/p' '$AI_GLM' | grep -q 'glm_due_review_records'"
+# The record index is a pre-filter: it may skip a record only when prune_review would
+# also call it not due. Anything it cannot prove stays a candidate.
+IX_STATE="$TMP/index-state"; mkdir -p "$IX_STATE/sessions/rid1" "$IX_STATE/sessions/rid2"
+ix() { # DIR NAME JSON [MTIME_AGO]
+  printf '%s' "$3" > "$IX_STATE/sessions/$1/$2.json"; touch -d "${4:-3 days ago}" "$IX_STATE/sessions/$1/$2.json"
+}
+ix rid1 claude--old "{\"type\":\"review\",\"created_at\":\"$PR_OLD\",\"last_activity_at\":\"$PR_OLD\"}"
+ix rid2 claude--old "{\"type\":\"review\",\"created_at\":\"$PR_NOW\"}"   # same basename, other repository
+ix rid1 claude--fresh "{\"type\":\"review\",\"created_at\":\"$PR_OLD\",\"last_activity_at\":\"$PR_NOW\"}"
+ix rid1 claude--polling "{\"type\":\"review\",\"created_at\":\"$PR_OLD\",\"remote_turn\":{\"started_at\":\"$PR_OLD\"},\"last_poll_at\":\"$PR_NOW\"}"
+ix rid1 claude--touched "{\"type\":\"review\",\"created_at\":\"$PR_OLD\"}" 'now'
+ix rid1 claude--frac "{\"type\":\"review\",\"created_at\":\"${PR_NOW%Z}.123456Z\"}"
+ix rid1 claude--offset "{\"type\":\"review\",\"created_at\":\"$(date -u +%FT%T)+00:00\"}"
+ix rid1 claude--job "{\"type\":\"implementation\",\"created_at\":\"$PR_OLD\"}"
+ix rid1 claude--chat "{\"type\":\"assistant\",\"created_at\":\"$PR_OLD\"}"
+ix rid1 claude--untyped "{\"created_at\":\"$PR_OLD\"}"
+ix rid1 claude--empty ""
+ix rid1 claude--broken '{not json'
+ix rid1 claude--twice "{\"type\":\"assistant\"} {\"type\":\"review\",\"created_at\":\"$PR_OLD\"}"
+ix_run() { AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$IX_STATE" bash -c 'source "$AI_GLM_SOURCE"; '"$1"; }
+IX_DUE="$(ix_run 'glm_due_review_records $(( $(date +%s) - 86400 ))' | sed 's#.*/sessions/##' | sort | tr '\n' ' ')"
+check "the due scan keeps every record prune would remove, and only unprovable extras" \
+  "test '$IX_DUE' = 'rid1/claude--broken.json rid1/claude--empty.json rid1/claude--offset.json rid1/claude--old.json rid1/claude--twice.json '"
+IX_SLOW="$(ix_run 'for f in "$STATE_DIR"/sessions/*/*.json; do [ "$(jq -r ".type // empty" "$f" 2>/dev/null)" = review ] && [ "$(newest_epoch "$f")" -lt $(( $(date +%s) - 86400 )) ] && printf "%s\n" "${f#*/sessions/}"; done' | sort)"
+check "no record the per-record rule calls due is skipped by the index" \
+  "for r in $(printf '%s ' $IX_SLOW); do case ' $IX_DUE' in *\" \$r \"*) ;; *) exit 1 ;; esac; done"
+check "reconciliation visits only implementation records and unreadable ones" \
+  "test \"\$(ix_run 'reconcile_implementation_record(){ printf \"%s\n\" \"\${1#*/sessions/}\"; }; reconcile_implementation_records' | sort | tr '\n' ' ')\" = 'rid1/claude--broken.json rid1/claude--empty.json rid1/claude--job.json rid1/claude--twice.json '"
+# The cost that broke the preflight was spawns per record; the index is bounded per chunk.
+for i in $(seq 1 250); do ix rid2 "claude--bulk$i" "{\"type\":\"assistant\",\"created_at\":\"$PR_OLD\"}"; done
+IX_SPAWNS="$(ix_run 'jq(){ echo jq >> "$STATE_DIR/spawns"; command jq "$@"; }; stat(){ echo stat >> "$STATE_DIR/spawns"; command stat "$@"; }; date(){ echo date >> "$STATE_DIR/spawns"; command date "$@"; }
+  glm_due_review_records 0 >/dev/null; wc -l < "$STATE_DIR/spawns"' | tr -d ' ')"
+check "scanning 263 records costs a bounded number of spawns, not several per record" "test '$IX_SPAWNS' -le 6"
 pr_batch() { AI_GLM_SOURCE="$AI_GLM" AI_GLM_PRUNE_BATCH="$1" bash -c 'source "$AI_GLM_SOURCE"; prune_batch_valid' >/dev/null 2>&1; }
 check "a zero prune batch is refused (it would mean unlimited)" "! pr_batch 0"
 check "a non-numeric prune batch is refused, not silently skipped" "! pr_batch abc && ! pr_batch -3 && ! pr_batch 2x"
