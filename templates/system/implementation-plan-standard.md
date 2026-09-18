@@ -54,6 +54,10 @@ Mark each LOCKED (do not relitigate) or OPEN (implementer's judgment).
 Per step: target files (file:line/function), intended behavior when done,
 dependencies, and a verification gate — "you'll know it worked when ___."
 Group into phases for large work; mark the context cut points.
+For trust-boundary work (parsers, pricing/money, files or data coming from
+outside the repo) the plan MUST contain an adversarial-cases table — every
+external input × its hostile case × the test that proves it — and is not
+complete until every row names a test.
 
 ## 10. Tests required
 Specific unit tests to add; the existing suite/command that must stay green.
@@ -80,6 +84,8 @@ What could break, the rollback, what's still uncertain and how to decide it.
 - [ ] A fresh session could execute it without asking a single question.
 - [ ] Rejected approaches and failed attempts included, with why.
 - [ ] Every step names concrete files and has a verification gate.
+- [ ] Trust-boundary work carries an adversarial-cases table — every external
+      input × its hostile case × the test that proves it, every row naming a test.
 - [ ] Locked vs. open decisions labeled.
 - [ ] Explicit out-of-scope list.
 - [ ] Tests specified by name/behavior, not "add tests."
@@ -118,6 +124,7 @@ a specific missing checklist item — fix exactly that, re-grade, answer "Yes."
 - Omitting the dead ends, so the implementer walks into them.
 - Unlabeled decisions, silently redesigned by the implementer.
 - No out-of-scope list.
+- First draft of trust-boundary work sent to review without the adversarial-cases table.
 - A plan that only lives in chat.
 
 ## Mechanics
