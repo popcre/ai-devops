@@ -266,7 +266,8 @@
       "test-ai-codex-memories.sh",
       "test-ai-deepseek-agent.sh",
       "test-ai-gh.sh",
-      "test-bin-cmd-launchers.sh"
+      "test-bin-cmd-launchers.sh",
+      "test-worktree-reap-tool.sh"
     ],
     [
       "test-ai-adopt-globals.sh",
