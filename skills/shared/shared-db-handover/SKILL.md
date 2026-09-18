@@ -7,7 +7,7 @@ description: Hand over, wrap up, close out, or stop any shared-db or shared Supa
 
 ## FIRST: are you the orchestrator? Answer this before anything else
 
-`u2giants/shared-db` runs **ONE orchestrator session at a time**. It takes
+`popcre/shared-db` runs **ONE orchestrator session at a time**. It takes
 **only work that changes the SHAPE of the database** (schema, table, column,
 view, function, trigger, policy, grant, index, constraint, or the migration
 that ships one) plus curated Master Data loads. Everything else — live proofs,
@@ -40,13 +40,13 @@ background task chips. Do not delete or clean up your worktree or branch — the
 orchestrator may resume them, and an agent that tidies itself away destroys the
 evidence.
 
-**If — and only if — the unfinished work changes the database's shape, open a GitHub issue** on `u2giants/shared-db` describing
+**If — and only if — the unfinished work changes the database's shape, open a GitHub issue** on `popcre/shared-db` describing
 what you were doing and what state you left it in. Include a `db-work-scope` block
 with separate `status`, `work_type`, and `route`. Never infer the route from the
 repository, `db-work`, or `needs-albert`.
 
 ```bash
-gh issue create --repo u2giants/shared-db --label db-work   --title "HANDOVER: <what you were doing>"   --body-file <a file you wrote>
+gh issue create --repo popcre/shared-db --label db-work   --title "HANDOVER: <what you were doing>"   --body-file <a file you wrote>
 ```
 
 Only structural work uses `route: shared-db-orchestrator`. Source-data decisions,
@@ -144,7 +144,7 @@ opened one. Do not start anything else, and do not "just finish this one thing".
 
 ## (B) You ARE the orchestrator — the two-halves handover
 
-The end of a `u2giants/shared-db` session. This skill exists because the normal
+The end of a `popcre/shared-db` session. This skill exists because the normal
 handoff is not enough here: a shared-db session is run by a **orchestrator** that
 dispatched sub-agents (see the `shared-db-orchestrator` skill), and the next
 orchestrator has to be able to resume or retire **each agent individually**.
@@ -355,7 +355,7 @@ for unfinished work — `handoff-writer`'s own rule). Instead:
 - Post the closeout record as **one comment on your marker issue**: `main` tip
   SHA and time checked, maximum migration version, each open PR you touched with
   its state, the secrets-sweep result, the docs-pass result, and "no follow-up".
-- Close the marker with `gh issue close <marker> --repo u2giants/shared-db`.
+- Close the marker with `gh issue close <marker> --repo popcre/shared-db`.
   Nothing else waits on it. Secrets sweep and docs pass still report a result,
   but "n/a — no credential appeared; no durable fact changed" is a complete
   result when true; do not open files to look busy.
@@ -365,9 +365,9 @@ for unfinished work — `handoff-writer`'s own rule). Instead:
 no skill files. Then:
 
 ```bash
-until gh pr checks <n> --repo u2giants/shared-db --required >/dev/null 2>&1 || [ $? -eq 8 ]; do sleep 10; done
-gh pr checks <n> --repo u2giants/shared-db --required --watch --interval 30
-gh pr merge <n> --repo u2giants/shared-db --squash
+until gh pr checks <n> --repo popcre/shared-db --required >/dev/null 2>&1 || [ $? -eq 8 ]; do sleep 10; done
+gh pr checks <n> --repo popcre/shared-db --required --watch --interval 30
+gh pr merge <n> --repo popcre/shared-db --squash
 ```
 
 - `Documents-only merge authorization` posts the required
@@ -526,7 +526,7 @@ gh pr merge <n> --repo u2giants/shared-db --squash
    not a nicety: an unswept repo is how the next orchestrator inherits phantom
    worktrees and branches nobody dares delete.
 8. **Confirm the queue is seeded.** Run
-   `gh issue list --repo u2giants/shared-db --label db-work --state open` and
+   `gh issue list --repo popcre/shared-db --label db-work --state open` and
    check that every outstanding item — the opening agenda, the waiting-on-Albert
    list, and **every `B<n>` in `HANDOFF.md`'s `## BACKLOG`** — has an open issue
    pointing back at `HANDOFF.md`. **A handover without this is INCOMPLETE**, the
@@ -592,10 +592,10 @@ silent skip and a clean result look identical, and only one of them is finished.
   pointer; a required `Intake pointer guard` check fails any PR that regrows it.
   This entry used to call it the live REQUEST/INTAKE queue and "the single source
   of truth for both templates". It is neither. **GitHub issues on
-  `u2giants/shared-db` with the `db-work` label are the queue**, and the nine
+  `popcre/shared-db` with the `db-work` label are the queue**, and the nine
   things a handover issue must say are listed in path (A) of this skill. Corrected
   2026-08-09.
-- `AGENTS.md` at the root of `u2giants/shared-db` — **the live rulebook, and it
+- `AGENTS.md` at the root of `popcre/shared-db` — **the live rulebook, and it
   WINS over this skill wherever the two disagree.** This file is a portable
   summary; §12 "Standing facts an incoming session must know" is the canonical
   version of the safety rules restated here.

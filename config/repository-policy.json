@@ -11,6 +11,11 @@
       "main_branch": "develop"
     },
     {
+      "match": "popcre/shared-db",
+      "workflow": "feature-branch-pr",
+      "main_branch": "main"
+    },
+    {
       "match": "u2giants/shared-db",
       "workflow": "feature-branch-pr",
       "main_branch": "main"
