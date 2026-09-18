@@ -252,7 +252,7 @@ runtime-root overrides all load operator code into a .NET host before any
 script statement runs. Neither a denylist nor a naive clear loop closes the
 class — `FOR /F` spawns its child through `COMSPEC` and cmd re-parses
 substituted names — so the task action launches through `cmd.exe /d`
-(no per-user AutoRun) running the hash-pinned `launch-worker.cmd` from the
+(no per-user AutoRun) running the hash-pinned `launch-worker.bat` from the
 protected payload. That launcher first REFUSES to run when any `cmd`
 AutoRun override exists (per-user or system-wide, queried with the
 full-path `reg.exe` before any `FOR /F`, because a child command

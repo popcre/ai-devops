@@ -217,7 +217,7 @@ function Test-TaskBoundary {
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid)
   $task = Get-ScheduledTask -TaskPath '\AiDevOps\' -TaskName 'WindowsRunnerMaintenance' -ErrorAction Stop
   $expectedExecute = 'C:\Windows\System32\cmd.exe'
-  $expectedArguments = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'
+  $expectedArguments = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.bat"'
   if (@($task.Actions).Count -ne 1 -or [string]$task.Actions[0].Execute -cne $expectedExecute -or [string]$task.Actions[0].Arguments -cne $expectedArguments -or [string]$task.Principal.UserId -cne $ExpectedOperatorSid -or [string]$task.Principal.LogonType -cne 'S4U' -or [string]$task.Principal.RunLevel -cne 'Highest' -or @($task.Triggers).Count -ne 0 -or [string]$task.Settings.MultipleInstances -cne 'IgnoreNew') { throw 'STALE_INSTALLATION' }
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'

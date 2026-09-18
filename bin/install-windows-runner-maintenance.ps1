@@ -117,7 +117,7 @@ function Get-DesiredPayloadManifest {
   param([Parameter(Mandatory)][string]$SourceRoot, [Parameter(Mandatory)][string]$OperatorSid)
   $sources = [ordered]@{
     'windows-runner-maintenance-worker.ps1' = Join-Path $SourceRoot 'bin\windows-runner-maintenance-worker.ps1'
-    'launch-worker.cmd' = Join-Path $SourceRoot 'bin\launch-worker.cmd'
+    'launch-worker.bat' = Join-Path $SourceRoot 'bin\launch-worker.bat'
     'qualify-windows-runner.ps1' = Join-Path $SourceRoot 'bin\qualify-windows-runner.ps1'
     'windows-runner-maintenance-policy.json' = Join-Path $SourceRoot 'config\windows-runner-maintenance-policy.json'
   }
@@ -127,7 +127,7 @@ function Get-DesiredPayloadManifest {
     $files[$entry.Key] = (Get-FileHash -Algorithm SHA256 -LiteralPath $entry.Value).Hash.ToLowerInvariant()
   }
   $policy = Get-Content -Raw -LiteralPath $sources['windows-runner-maintenance-policy.json'] | ConvertFrom-Json
-  foreach ($name in @('windows-runner-maintenance-worker.ps1','launch-worker.cmd','qualify-windows-runner.ps1')) {
+  foreach ($name in @('windows-runner-maintenance-worker.ps1','launch-worker.bat','qualify-windows-runner.ps1')) {
     if ([string]$policy.payload_hashes.$name -cne [string]$files[$name]) { throw "Policy payload hash is stale for $name." }
   }
   return [ordered]@{ schema_version=1; owner='popcre/ai-devops#262'; operator_sid=$OperatorSid; task_path=$script:TaskPath; files=$files }
@@ -170,12 +170,12 @@ function Set-ProtectedFilesystemAcl {
 function Register-MaintenanceTask {
   param([Parameter(Mandatory)][string]$OperatorSid)
   # The worker is launched through cmd.exe with /d (no per-user AutoRun)
-  # running the hash-pinned launch-worker.cmd from the protected payload.
+  # running the hash-pinned launch-worker.bat from the protected payload.
   # That launcher clears the ENTIRE inherited S4U environment and rebuilds
   # a fixed allowlist of well-known literals, so no operator-controlled
   # variable - .NET startup hooks, CoreCLR profilers, runtime roots, or
   # their siblings - can reach a .NET host before the worker script runs.
-  $action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\cmd.exe' -Argument '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'
+  $action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\cmd.exe' -Argument '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.bat"'
   $principal = New-ScheduledTaskPrincipal -UserId $OperatorSid -LogonType S4U -RunLevel Highest
   $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::FromMinutes(6)) -StartWhenAvailable:$false
   Register-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
@@ -286,7 +286,7 @@ function Test-MaintenanceInstallation {
   Test-PathAclContract -LiteralPath "$script:EvidencePath.tmp" -OperatorSid $ExpectedOperatorSid -Kind Evidence
   $task = Get-InstalledTaskSnapshot
   $expectedExecute = 'C:\Windows\System32\cmd.exe'
-  $expectedArgs = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'
+  $expectedArgs = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.bat"'
   $expectedSddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)"
   if ($task.action_count -ne 1 -or $task.execute -cne $expectedExecute -or $task.arguments -cne $expectedArgs -or $task.user_id -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or $task.sddl -cne $expectedSddl) { throw 'STALE_INSTALLATION: scheduled task drift.' }
   return $true
@@ -404,7 +404,7 @@ function Remove-MaintenanceInstallation {
     # consistency unconditionally.
     $desired = Get-DesiredPayloadManifest -SourceRoot $SourceRoot -OperatorSid $ExpectedOperatorSid
     $installed = Get-Content -Raw -LiteralPath (Join-Path $script:PayloadRoot 'manifest.json') | ConvertFrom-Json
-    foreach ($name in @('windows-runner-maintenance-worker.ps1','launch-worker.cmd','qualify-windows-runner.ps1')) {
+    foreach ($name in @('windows-runner-maintenance-worker.ps1','launch-worker.bat','qualify-windows-runner.ps1')) {
       if ([string]$installed.files.$name -cne [string]$desired.files[$name]) { throw "RECOVERY_MANIFEST_MISMATCH: installed $name does not match this repository checkout." }
     }
   }
