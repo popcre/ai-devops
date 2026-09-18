@@ -65,6 +65,7 @@ if [[ -n "${USERPROFILE:-}" ]]; then
 fi
 CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
+ZCODE_HOME="${ZCODE_HOME:-$BASE_HOME/.zcode}"
 
 SHORT_HOST="$(hostname 2>/dev/null | cut -d. -f1 | tr '[:upper:]' '[:lower:]')"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -161,9 +162,12 @@ filter_section() {
 }
 
 # Files that will be replaced, as "label|installed path|repo template".
+# ZCode's global is adopted only when it exists (it is seeded, not always
+# present); the template must always exist in the repo.
 TARGETS=(
   "Claude|$CLAUDE_HOME/CLAUDE.md|$REPO_ROOT/templates/system/CLAUDE-global.md"
   "Codex|$CODEX_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-codex.md"
+  "ZCode|$ZCODE_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-zcode.md"
 )
 
 say "==> machine: ${SHORT_HOST:-unknown}"
@@ -229,6 +233,20 @@ say "==> originals copied to $BACKUP_DIR"
 say
 
 bash "$REPO_ROOT/bin/ai-install-skills" --adopt-globals
+
+# The Bash installer owns the Claude and Codex globals only. The ZCode global is
+# a Windows-only client installed by install-ai-devops-windows.ps1, which this
+# Bash flow cannot call — so a still-missing non-bash target is installed here
+# from the same template, keeping the adopt/verify cycle complete on every
+# platform instead of failing at the verification diff below.
+for entry in "${TARGETS[@]}"; do
+  IFS='|' read -r label installed template <<<"$entry"
+  if [[ ! -f "$installed" ]]; then
+    mkdir -p "$(dirname "$installed")"
+    cp "$template" "$installed"
+    say "$label: installed $installed directly from the repo template (the Bash installer does not own this client)."
+  fi
+done
 
 say
 say "==> re-appending machine sections"

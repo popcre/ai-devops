@@ -67,6 +67,36 @@ Grok is pinned to one exact CLI build in `config/provider-cli-versions.json`
 
 Never call `grok` directly for these jobs.
 
+## ZCode (Windows)
+
+ZCode is the third INTERACTIVE client (a Z.AI GLM-5.3 desktop agent, winget
+`ZhipuAI.ZCode`), not a reviewer and not a pipeline stage. It receives the
+Claude/Codex per-client treatment on Windows only: managed skills
+(`~/.zcode/skills` from `skills/zcode` + `skills/shared`), a seeded
+`~/.zcode/AGENTS.md` (`ai-adopt-globals` replaces it with machine-section
+preservation), MCP servers in `~/.zcode/cli/config.json` via
+`bin/configure-zcode-mcps.ps1`, and the completion-check hook via
+`bin/ai-install-completion-check-hook --client zcode`.
+
+- **Headless driving:** `ai-zcode ask "<prompt>"` — the governed wrapper
+  (`bin/ai-zcode`). Never call the zcode.cjs bundle directly: without the
+  provider-env assembly every headless run dies before the model call, and
+  `--prompt` defaults to yolo mode. Health: `ai-zcode doctor [--live]`.
+- **No ZCode reviewer, ever** (owner ruling 2026-09-17: GLM never reviews
+  GLM-orchestrated work; ZCode's engine is GLM-5.3). GLM review capacity for
+  Claude/Codex-orchestrated work stays with the `glm` OpenCode wrapper.
+- **Traps:** the MCP schema is strict (one unknown key silently drops a
+  server; `command` is a string, absolute paths only, no `${...}` expansion);
+  config-file hooks never run unless `hooks.enabled: true`; the CLI's
+  `--help` advertises flags its own parser rejects (`--max-turns`,
+  `--settings`, `--allowed-tools` on 0.16.5) — the wrapper pins what is
+  proven; two version numbers exist (desktop app + CLI core) and it
+  self-updates, so nothing is pinned. Qualification facts:
+  `tests/verification/zcode-windows-2026-09-17/README.md`.
+- **Transcripts:** ZCode keeps sessions in SQLite (`~/.zcode/cli/db/`) +
+  rollout JSONL; back them up and mine them by SQL with the
+  `zcode-transcript-backup` skill (private repo destination only).
+
 ## Important: the exact flags may differ on your machine
 
 The Claude/Codex CLIs evolve. The installed configuration is validated against

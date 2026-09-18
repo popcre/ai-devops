@@ -20,6 +20,21 @@ $checks.Add([pscustomobject]@{
   Detail=$(if($codexApp){$codexApp.PackageFullName}else{'Microsoft Store app not found'})
 })
 
+# ZCode desktop app (Windows-only client; machine-wide install). Presence only --
+# the app self-updates, so no version is pinned or asserted here.
+$zcodeAppExe = Join-Path $env:ProgramFiles 'ZCode\ZCode.exe'
+$zcodeCliCore = Join-Path $env:ProgramFiles 'ZCode\resources\glm\zcode.cjs'
+$zcodePassed = (Test-Path -LiteralPath $zcodeAppExe) -and (Test-Path -LiteralPath $zcodeCliCore)
+$checks.Add([pscustomobject]@{
+  Check='app:ZCode'; Passed=$zcodePassed
+  Detail=$(if($zcodePassed){
+    $v = (Get-Item -LiteralPath $zcodeAppExe).VersionInfo.ProductVersion
+    "desktop $v; cli core present"
+  }else{
+    "not found at $zcodeAppExe (winget install ZhipuAI.ZCode)"
+  })
+})
+
 $config = Join-Path $RepoPath '.config\configuration.winget'
 $checks.Add([pscustomobject]@{ Check='configuration:file'; Passed=(Test-Path $config); Detail=$config })
 $setup = Join-Path $RepoPath 'bin\setup-machine.ps1'

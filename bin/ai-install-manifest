@@ -44,7 +44,7 @@ schema="$(jq -r '.schema // "unknown"' "$CONFIG_DIR/config-state.json" 2>/dev/nu
     [ -f "$path" ] || continue
     printf 'config\t%s\tmanaged\t%s\n' "$path" "$(sha256sum "$path" | cut -d' ' -f1)"
   done
-  for marker in "$MANAGED_HOME/.claude/skills"/*/.ai-devops-managed "$MANAGED_HOME/.codex/skills"/*/.ai-devops-managed; do
+  for marker in "$MANAGED_HOME/.claude/skills"/*/.ai-devops-managed "$MANAGED_HOME/.codex/skills"/*/.ai-devops-managed "$MANAGED_HOME/.zcode/skills"/*/.ai-devops-managed; do
     [ -f "$marker" ] || continue
     printf 'skill-marker\t%s\tmanaged\t%s\n' "$marker" "$(sha256sum "$marker" | cut -d' ' -f1)"
   done

@@ -316,6 +316,61 @@ cmd_doctor() {
     c_warn "codex not found — install it and run: codex login"
   fi
 
+  c_head "ZCode (Windows desktop app)"
+  zcode_app="/c/Program Files/ZCode/ZCode.exe"
+  zcode_cli="/c/Program Files/ZCode/resources/glm/zcode.cjs"
+  zcode_home="$HOME/.zcode"
+  case "${OSTYPE:-}" in
+    msys*|cygwin*) if [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
+      zh="$(cygpath -u "$USERPROFILE")/.zcode"; [ -d "$zh" ] && zcode_home="$zh"
+    fi ;;
+  esac
+  if [ -f "$zcode_app" ] && [ -f "$zcode_cli" ]; then
+    c_ok "ZCode app present ($zcode_app)"
+    if [ -f "$zcode_home/v2/credentials.json" ]; then
+      c_ok "ZCode signed in (credentials file present)"
+    else
+      c_warn "ZCode not signed in — run once: zcode login --no-browser"
+    fi
+    if [ -f "$zcode_home/cli/config.json" ]; then
+      if jq -e 'type=="object"' "$zcode_home/cli/config.json" >/dev/null 2>&1; then
+        c_ok "ZCode config parses (~/.zcode/cli/config.json)"
+        zcode_mcp_count="$(jq '(.mcp.servers // {}) | length' "$zcode_home/cli/config.json" 2>/dev/null || echo 0)"
+        c_ok "ZCode managed MCP servers configured: $zcode_mcp_count"
+        if [ "$(jq -r '.hooks.enabled // false' "$zcode_home/cli/config.json" 2>/dev/null)" = "true" ]; then
+          c_ok "ZCode hooks.enabled=true"
+        else
+          c_warn "ZCode hooks not enabled — config-file hooks never run unless enabled (run: ai-install-completion-check-hook --client zcode)"
+        fi
+      else
+        c_warn "ZCode config DOES NOT PARSE — ZCode silently drops every MCP server on a malformed file"
+      fi
+    else
+      c_warn "no ~/.zcode/cli/config.json yet — re-run setup-machine.ps1 (ZCode MCP stage)"
+    fi
+    if [ -d "$zcode_home/skills" ]; then
+      if [ -L "$zcode_home/skills" ]; then
+        c_warn "~/.zcode/skills is still a JUNCTION — re-run install-ai-devops-windows.ps1 to migrate it to a managed directory"
+      else
+        zcode_managed="$(find "$zcode_home/skills" -maxdepth 2 -name .ai-devops-managed -type f 2>/dev/null | wc -l | tr -d ' ')"
+        c_ok "~/.zcode/skills managed (markers: $zcode_managed)"
+      fi
+    else
+      c_warn "no ~/.zcode/skills — re-run install-ai-devops-windows.ps1"
+    fi
+    if command -v zcode >/dev/null 2>&1 || [ -x "$HOME/.local/bin/zcode" ]; then
+      c_ok "zcode launcher on PATH"
+    else
+      c_warn "no zcode launcher on PATH — re-run setup-machine.ps1"
+    fi
+  else
+    # Absence is a warning, not a failure: ZCode is Windows-only and optional.
+    case "${OSTYPE:-}" in
+      msys*|cygwin*) c_warn "ZCode desktop app not found — install with: winget install ZhipuAI.ZCode" ;;
+      *) c_warn "ZCode not present (Windows-only client; expected on this platform)" ;;
+    esac
+  fi
+
   c_head "Paths & config"
   check_file "$AI_DEVOPS_HOME/README.md" "toolkit repo" req
   if [ -d "$AI_DEVOPS_HOME" ]; then c_ok "repo dir exists ($AI_DEVOPS_HOME)"; else c_fail "repo dir missing ($AI_DEVOPS_HOME)"; FAILED=1; fi
