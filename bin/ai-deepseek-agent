@@ -46,8 +46,10 @@ fi
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
-# deepseek-flash is the API slug for DeepSeek V4.1 Flash; the display-style
-# name is rejected by the provider (verified live 2026-09-17).
+# Both slugs below were verified live against https://api.deepseek.com on
+# 2026-09-17 (GET /models, then one doctor --live probe per slug, both PASS):
+# deepseek-flash is DeepSeek V4.1 Flash; deepseek-v4-pro is the other supported
+# id. Display-style names such as DeepSeek-V4.1-Flash are rejected HTTP 400.
 MODEL="${DEEPSEEK_MODEL:-deepseek-flash}"
 BASE_URL='https://api.deepseek.com'
 [ -z "${DEEPSEEK_BASE_URL:-}" ] || [ "$DEEPSEEK_BASE_URL" = "$BASE_URL" ] || { echo 'Error: DEEPSEEK_BASE_URL cannot override the pinned official DeepSeek endpoint.' >&2; exit 1; }
@@ -62,6 +64,9 @@ Usage:
   ai-deepseek-agent send "<message>" [--file FILE]... [--model deepseek-flash|deepseek-v4-pro] [--system "<prompt>"] [--review]
       Start a NEW conversation. Prints SESSION_ID: <id>, then the reply.
       Default model: deepseek-flash (DeepSeek V4.1 Flash). DEEPSEEK_MODEL overrides.
+      A formal --review session continues only at the model recorded when it
+      started, so continuing a session begun under an older default requires
+      DEEPSEEK_MODEL to match that recorded model.
 
   ai-deepseek-agent reply <session-id> "<message>" [--file FILE]...
       Continue an existing conversation with full history.
