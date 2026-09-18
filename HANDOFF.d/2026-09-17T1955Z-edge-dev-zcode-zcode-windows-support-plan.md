@@ -48,13 +48,27 @@ implementation.
 ## 3. Current state — what is true right now
 
 - Planning issue [#558](https://github.com/popcre/ai-devops/issues/558) is open.
-- `plan_zcode-windows-support.md` is committed at the repo root with a 12-step STATUS
-  table, all rows ⬜ open, on branch `plan/zcode-windows-support-558` (worktree
-  `/c/repos/ai-devops-worktrees/zcode-plan-558`, cut from `origin/main` `c9a92ce9`).
-- Task gates declared: class `prose` for the plan PR (recorded by `ai-task-gates start`).
-- ZCode on edge-dev: desktop `3.12.3.7463`, CLI core `0.16.5`, authenticated (Z.AI OAuth,
-  GLM-5.3), `~/.zcode/cli/config.json` absent, junctions as above. Facts verified
-  2026-09-17 and recorded in the plan §5–§6.
+- **Implementation landed 2026-09-17 (later the same day): branch
+  `feat/zcode-windows-support-558`** (worktree
+  `/c/repos/ai-devops-worktrees/zcode-558`) implements Steps 1–8, 10–11 — facts
+  file, winget id + presence probe, `bin/ai-zcode` wrapper + shims + TSV row,
+  managed skills with junction migration, zcode global template + adoption,
+  strict-schema MCP writer, `--client zcode` hook registration, transcript
+  skill with SQL cookbook, doctor + verify checks, docs. New suites:
+  `tests/test-ai-zcode.sh` (30/30), `tests/test-configure-zcode-mcps.ps1`
+  (19/19); installer and adopt-globals suites extended; all affected existing
+  suites green locally. STATUS table rows 1–8, 10–11 carry artifacts; Step 12
+  (merge + edge-dev install + installed-state verification) is the remainder.
+- Task gates declared: class `installation` (recorded by `ai-task-gates start`
+  in the worktree; owner authorization = the chat instruction "implement plan
+  #558").
+- Qualification deltas discovered during implementation (supersede the plan's
+  §5–§6 where they conflict): the 0.16.5 parser REJECTS `--max-turns`,
+  `--settings`, AND `--allowed-tools` (all advertised by `--help`) — bounds are
+  wall-clock + `--disallowed-tools`; `~/.zcode/cli/config.json` came to exist
+  2026-09-17 evening (plugins-only, written by the app); hooks never fire in
+  headless `-p` runs. All recorded with reproducing commands in
+  `tests/verification/zcode-windows-2026-09-17/README.md`.
 - Open branch `feat/blocker-watch-coverage-549` (zcode wake notes) may land while this
   plan is open; the plan tells implementers to rebase onto main first.
 
@@ -95,15 +109,17 @@ to engine `glm`) — plan §13 open question 2 records it; no shared-db issue fi
 
 ## 6. Exact next steps
 
-1. A fresh session opens [plan_zcode-windows-support.md](../plan_zcode-windows-support.md),
-   reads its STATUS table, and starts at Step 1 (freeze the ZCode Windows baseline into
-   `tests/verification/zcode-windows-2026-09-17/README.md`).
-2. Follow the plan's phases A→D in order; declare the honest task-gate class per PR
-   (`installation` for installer/setup/machine-tools hunks — the only protected class
-   left; the reviewer-safety step was removed permanently on 2026-09-17).
-3. After each completed step, update the plan's STATUS table with a reproducible
-   artifact; after the plan's PR merges, retire nothing until implementation ends —
-   this handoff stays OPEN while any STATUS row is open.
+1. The implementation PR (`feat/zcode-windows-support-558`) merges through the
+   queue once CI is green; re-read the run's commit SHA, not a stale verdict.
+2. After `origin/main` carries the work: on edge-dev re-run
+   `install-ai-devops-windows.ps1` and `setup-machine.ps1` from the canonical
+   checkout, then `bin/ai-install-completion-check-hook --client zcode`. Verify:
+   `ai-install-manifest` clean, `bin/ai-devops doctor` zcode block green,
+   `~/.local/bin/zcode` live, junction gone with Claude skills intact,
+   `~/.zcode/cli/config.json` carrying exactly the membership set + enabled
+   hooks with timestamped backups present.
+3. Update the plan's Step 12 STATUS row with the merge SHA and installed-state
+   evidence; only then retire this handoff (issue #558 closes with it).
 
 ## 7. Constraints and gotchas in force
 
