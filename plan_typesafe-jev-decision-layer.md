@@ -232,3 +232,34 @@ The section 7 Track A numbers used our own question and showed Jev the
 output text, so they do not predict the plugin's behavior. The rerun with the
 plugin's exact state and questions is written and ready; it was stopped by
 the session's safety filter before sending any transcript text.
+
+## 9. Reruns with the plugin's exact method, 2026-09-18 (owner-approved)
+
+**Track A — plugin replica** (`state.ts`/`compact.ts` reproduced: history with
+outputs replaced by `ok, N chars (omitted)`, goal = last three user requests,
+the plugin's two keep questions). 4 of the 8 longest local sessions produced
+answers (the other batches got HTTP 400, probably over the size limit; the
+plugin keeps everything when that happens). 523 old tool outputs; 153 were
+used later.
+
+| keepThreshold | outputs dropped | share of output text | of those, used later |
+|---|---|---|---|
+| 0.5 (plugin default) | 523 | 100% | 153 (29%) |
+| 0.2 | 492 | 95% | 143 (29%) |
+| 0.09 (Albert's 91% rule) | 4 | ~0% | 0 |
+
+Median keep score 0.15. Jev barely tells needed from unneeded outputs: mean keep
+score 0.155 vs 0.144, ranking quality (AUC) 0.61 where 0.5 is a coin flip. The
+cause is structural: the plugin never shows Jev the outputs, only their
+length. **Verdict: do not install as-is.** The default setting would have
+deleted material the session later used about 3 times in 10; the safe setting
+saves nothing. Worth retesting only if upstream starts sending output content
+(or a head of it) into the state, or with a goal-aware wrapper of our own.
+
+**Track B — reworded, split questions** (150 real endings): "does the last
+paragraph claim done", "does it name specific proof", "done without proof".
+Confident answers rose from 73 to 84 on the combined question, and the proof
+question was confident on 81 and sensible on manual review (commit ids, test
+counts, URLs scored 0.87-0.98). But the one genuine unproven "complete and
+verified" ending scored only 0.73 on "done without proof", below the 0.91
+floor. Useful as a signal to log; not yet decisive enough to flag anything.
