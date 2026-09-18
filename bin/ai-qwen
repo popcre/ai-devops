@@ -276,6 +276,11 @@ resolve_qwen() {
     else
       case "$physical" in "$HOME/.local/bin/qwen"|"$HOME/.local/lib/qwen-code/bin/qwen"|/home/ai/.local/bin/qwen|/home/ai/.local/lib/qwen-code/bin/qwen) ;; *) continue;; esac
     fi
+    # The standalone shim forwards to the nested bundle; a shim whose bundle is
+    # gone fails later as an opaque "runtime identity" error, so name it here.
+    if [ -n "${LOCALAPPDATA:-}" ] && [ ! -d "$(cygpath -u "$LOCALAPPDATA")/qwen-code/qwen-code/lib/chunks" ]; then
+      die "the Qwen standalone runtime is incomplete (only the launcher remains under %LOCALAPPDATA%\qwen-code). Repair it with: powershell -NoProfile -ExecutionPolicy Bypass -File <ai-devops>\bin\install-windows-ai-provider-clis.ps1 -SelectedProvider qwen"
+    fi
     printf '%s' "$c"; return 0
   done
   die "qwen binary not found. Set AI_QWEN_BIN, or install Qwen Code. Looked on PATH, the official standalone locations, and /usr/local/bin."
@@ -743,8 +748,26 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     die "governed Qwen authentication is unavailable. $MCP_ENV must contain exactly one BAILIAN_CODING_PLAN_API_KEY=op:// reference; no provider call was made."
   fi
   RUN_TURN_PID=$!
-  wait "$RUN_TURN_PID"
-  RUN_TURN_RC=$?
+  # A cold start that never writes one stream byte hangs past Qwen's own
+  # --max-wall-time (seen: 15 minutes silent), so the wrapper enforces its own
+  # first-output deadline and reports it as a timeout (exit 124).
+  local startup_limit="${AI_QWEN_STARTUP_TIMEOUT_SECONDS:-300}" started=$SECONDS startup_expired=0
+  [[ "$startup_limit" =~ ^[1-9][0-9]*$ ]] || die 'AI_QWEN_STARTUP_TIMEOUT_SECONDS must be a positive whole number of seconds.'
+  while kill -0 "$RUN_TURN_PID" 2>/dev/null && [ ! -s "$out" ]; do
+    if [ $((SECONDS - started)) -ge "$startup_limit" ]; then startup_expired=1; break; fi
+    sleep 1
+  done
+  if [ "$startup_expired" = 1 ]; then
+    printf 'ai-qwen: Qwen produced no output within %ss of starting; stopped it as a startup timeout.
+' "$startup_limit" >> "$out.err"
+    signal_run_tree TERM "$RUN_TURN_PID"; sleep 1
+    kill -0 "$RUN_TURN_PID" 2>/dev/null && signal_run_tree KILL "$RUN_TURN_PID"
+    wait "$RUN_TURN_PID" 2>/dev/null
+    RUN_TURN_RC=124
+  else
+    wait "$RUN_TURN_PID"
+    RUN_TURN_RC=$?
+  fi
   RUN_TURN_PID=""
   cleanup_run_turn_env
   [ -z "${AI_QWEN_TEST_POST_TURN_ENV_FILE:-}" ] || env | sort > "$AI_QWEN_TEST_POST_TURN_ENV_FILE"
@@ -972,7 +995,9 @@ tree_state() {
           exec {fd}<"$repo/$f" || { printf 'ai-qwen: could not bind untracked evidence: %s\n' "$f" >&2; return 1; }
           before="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "/proc/$BASHPID/fd/$fd" 2>/dev/null || true)"
           path_state="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "$repo/$f" 2>/dev/null || true)"
-          case "$before" in 'regular file:'*':1:'*) ;; *) exec {fd}<&-; printf 'ai-qwen: refusing untracked evidence without one regular-file identity: %s\n' "$f" >&2; return 1;; esac
+          # stat reports a zero-byte file as "regular empty file"; it is still
+          # one regular-file identity and must not block every review.
+          case "$before" in 'regular file:'*':1:'*|'regular empty file:'*':1:'*) ;; *) exec {fd}<&-; printf 'ai-qwen: refusing untracked evidence without one regular-file identity: %s\n' "$f" >&2; return 1;; esac
           [ "$before" = "$path_state" ] && [ ! -L "$repo/$f" ] || { exec {fd}<&-; printf 'ai-qwen: untracked evidence identity changed before hashing: %s\n' "$f" >&2; return 1; }
           hash="$(sha256sum <&$fd | awk '{print $1}')" || { exec {fd}<&-; return 1; }
           after="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "/proc/$BASHPID/fd/$fd" 2>/dev/null || true)"; path_state="$(stat -Lc '%F:%d:%i:%h:%s:%y:%z' "$repo/$f" 2>/dev/null || true)"

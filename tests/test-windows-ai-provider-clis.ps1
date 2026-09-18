@@ -223,6 +223,31 @@ Assert ($installerText -match 'pins no Grok version') 'an unpinned Grok must be 
 $qwenWrapperText = Get-Content -Raw $qwenWrapper
 Assert ($qwenWrapperText -match '\*\.cmd\|\*\.bat') 'Qwen wrapper must accept official Windows command shims that are not marked executable by Git Bash'
 
+# A launcher without its bundle, or an npm qwen on PATH, must not count as installed.
+$installerAst = [Management.Automation.Language.Parser]::ParseFile($installer, [ref]$null, [ref]$null)
+$completeFn = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-QwenRuntimeComplete' }, $true)
+Assert ($null -ne $completeFn) 'installer must define Test-QwenRuntimeComplete'
+$fakeLocal = Join-Path ([IO.Path]::GetTempPath()) ("qwen-complete-" + [Guid]::NewGuid().ToString('N'))
+$savedLocal = $env:LOCALAPPDATA
+try {
+  $env:LOCALAPPDATA = $fakeLocal
+  . ([ScriptBlock]::Create($completeFn.Extent.Text))
+  [void](New-Item -ItemType Directory -Force -Path (Join-Path $fakeLocal 'qwen-code\bin'))
+  Set-Content -LiteralPath (Join-Path $fakeLocal 'qwen-code\bin\qwen.cmd') -Value '@echo off'
+  Assert (-not (Test-QwenRuntimeComplete)) 'a Qwen launcher whose bundle is gone must be reported incomplete'
+  [void](New-Item -ItemType Directory -Force -Path (Join-Path $fakeLocal 'qwen-code\qwen-code\bin'), (Join-Path $fakeLocal 'qwen-code\qwen-code\lib\chunks'))
+  Set-Content -LiteralPath (Join-Path $fakeLocal 'qwen-code\qwen-code\bin\qwen.cmd') -Value '@echo off'
+  Assert (Test-QwenRuntimeComplete) 'a launcher plus its bundle must be reported complete'
+} finally {
+  $env:LOCALAPPDATA = $savedLocal
+  Remove-Item -LiteralPath $fakeLocal -Recurse -Force -ErrorAction SilentlyContinue
+}
+Assert ($installerText -match "\`$present = Test-QwenRuntimeComplete") 'Qwen presence must come from the standalone runtime, not from any qwen on PATH'
+Assert ($installerText -match 'Local\\ai-devops-qwen-install') 'Qwen installs must be serialized by a machine-local lock'
+Assert ($installerText -match 'install-events\.log') 'every Qwen install attempt must be logged'
+Assert ($installerText -match 'restored previous runtime') 'a failed Qwen install must restore the previous complete runtime'
+Assert ($qwenWrapperText -match 'standalone runtime is incomplete') 'Qwen wrapper must name a hollow runtime and its repair command'
+
 $bootstrapText = Get-Content -Raw $bootstrap
 Assert ($bootstrapText -match 'install-windows-ai-provider-clis\.ps1') 'bootstrap must run the provider installer'
 Write-Host 'PASS: Windows Grok, Kimi, and Qwen CLI setup wiring is valid.'

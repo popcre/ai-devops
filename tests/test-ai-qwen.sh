@@ -79,6 +79,7 @@ if (process.argv[2] === '--version') { console.log('0.21.11'); process.exit(0); 
 if (process.argv[2] === 'sessions') { console.log(JSON.stringify({sessionId:'qwen-session-1', filePath:path.join(root, 'transcript.jsonl')})); process.exit(0); }
 const mode = fs.existsSync(path.join(root, 'mode')) ? fs.readFileSync(path.join(root, 'mode'), 'utf8').trim() : 'review';
 fs.appendFileSync(path.join(root, 'provider-turns'), 'turn\n');
+if (mode === 'silent-hang') { setInterval(() => {}, 1000); return; }
 if (mode === 'publication-failure') {
   const events = fs.readFileSync(path.join(root, 'reviewer-events', 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   const current = events.filter(event => event.provider === 'qwen' && event.event === 'started').at(-1);
@@ -769,6 +770,19 @@ check 'concurrent same-provider Qwen reviews use separate review copies and verd
 HELD_OUT="$(run new review-held --prompt 'review this' 2>&1)"; HELD_RC=$?
 check 'the same named Qwen review is still serialized by its own lock' "test '$HELD_RC' -ne 0 && printf '%s' \"\$HELD_OUT\" | grep -q 'already active'"
 rm -rf "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
+
+echo review > "$TMP/mode"; : > "$REPO/empty-untracked.txt"
+if run new empty-untracked --prompt review >/dev/null 2>&1; then ok 'an empty untracked file does not block a review'; else bad 'an empty untracked file does not block a review'; fi
+rm -f "$REPO/empty-untracked.txt"
+
+echo silent-hang > "$TMP/mode"
+HANG_START=$SECONDS
+HANG_OUT="$(AI_QWEN_STARTUP_TIMEOUT_SECONDS=3 run new silent-hang --prompt review 2>&1)"; HANG_RC=$?
+HANG_SECONDS=$((SECONDS - HANG_START))
+if [ "$HANG_RC" -ne 0 ] && [ "$HANG_SECONDS" -lt 60 ]; then ok 'a silent Qwen start is stopped by the startup deadline'; else bad "a silent Qwen start is stopped by the startup deadline (rc=$HANG_RC, ${HANG_SECONDS}s)"; fi
+if grep -rqs 'no output within 3s' "$REPO/.ai/reviews" "$AI_QWEN_HOME" 2>/dev/null || printf '%s' "$HANG_OUT" | grep -qi 'timeout'; then ok 'the startup deadline is reported as a timeout'; else bad 'the startup deadline is reported as a timeout'; fi
+echo review > "$TMP/mode"
+if (cd "$REPO" && AI_QWEN_STARTUP_TIMEOUT_SECONDS=soon bash "$SCRIPT" new bad-deadline --prompt review) >/dev/null 2>&1; then bad 'a non-numeric startup deadline is refused'; else ok 'a non-numeric startup deadline is refused'; fi
 
 recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
