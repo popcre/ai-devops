@@ -771,6 +771,18 @@ check 'concurrent same-provider Qwen reviews use separate review copies and verd
 HELD_OUT="$(run new review-held --prompt 'review this' 2>&1)"; HELD_RC=$?
 check 'the same named Qwen review is still serialized by its own lock' "test '$HELD_RC' -ne 0 && printf '%s' \"\$HELD_OUT\" | grep -q 'already active'"
 rm -rf "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
+STALE_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-stale.lock.d"
+mkdir -p "$STALE_LOCK"; printf '999999
+' > "$STALE_LOCK/pid"; printf 'review:stale
+' > "$STALE_LOCK/label"
+FRESH_OUT="$(run new review-stale --prompt 'review this' 2>&1)"; FRESH_RC=$?
+check 'a fresh lock with an unseen owner is not reclaimed' "test '$FRESH_RC' -ne 0 && printf '%s' \"\$FRESH_OUT\" | grep -q 'already active' && test \"\$(cat '$STALE_LOCK/pid')\" = 999999"
+touch -d '10 minutes ago' "$STALE_LOCK"
+OLD_OUT="$(run new review-stale --prompt 'review this' 2>&1)"; OLD_RC=$?
+[ "$OLD_RC" -eq 0 ] || printf '  diagnostic: stale reclaim: %s
+' "$OLD_OUT"
+check 'an old lock whose owner is gone is reclaimed once' "test '$OLD_RC' -eq 0 && printf '%s' \"\$OLD_OUT\" | grep -q 'reclaiming stale lock' && test ! -e '$STALE_LOCK.reclaim'"
+rm -rf "$STALE_LOCK" "$STALE_LOCK.reclaim"
 
 echo review > "$TMP/mode"; : > "$REPO/empty-untracked.txt"
 if run new empty-untracked --prompt review >/dev/null 2>&1; then ok 'an empty untracked file does not block a review'; else bad 'an empty untracked file does not block a review'; fi

@@ -391,9 +391,10 @@ lock_acquire() {
     printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
   fi
   owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
-  # On Windows a sibling MSYS shell can briefly fail to see a live owner via
-  # kill -0 (see reviewer_event_guard.sh), so one miss is not proof the owner
-  # is gone: require it to stay invisible to both witnesses for three checks.
+  # On Windows a sibling MSYS shell can fail to see a live owner via kill -0
+  # (see reviewer_event_guard.sh), so a missing owner is not proof on its own:
+  # the owner must stay invisible to both witnesses for three checks AND the
+  # lock must be older than the stale threshold before it can be reclaimed.
   if [ -n "$owner" ]; then
     local attempt
     for attempt in 1 2 3; do
@@ -401,9 +402,26 @@ lock_acquire() {
       [ "$attempt" = 3 ] || sleep 1
     done
   fi
+  local stale_after="${AI_QWEN_STALE_LOCK_SECONDS:-120}" born now
+  case "$stale_after" in ''|*[!0-9]*) die "AI_QWEN_STALE_LOCK_SECONDS must be a whole number of seconds." ;; esac
+  born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
+  now="$(date +%s)"; [ $((now - born)) -ge "$stale_after" ] || return 1
+  # Reclaim under a sub-lock and re-read the owner inside it, so two
+  # reclaimers can never delete each other's freshly taken lock.
+  local guard="$dir.reclaim" gborn
+  if ! mkdir "$guard" 2>/dev/null; then
+    gborn="$(date -r "$guard" +%s 2>/dev/null || echo "$now")"
+    [ $((now - gborn)) -ge 60 ] || return 1
+    rm -rf "$guard"; mkdir "$guard" 2>/dev/null || return 1
+  fi
+  if [ "$(cat "$dir/pid" 2>/dev/null || echo '')" != "$owner" ]; then rmdir "$guard" 2>/dev/null; return 1; fi
   warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
-  rm -rf "$dir"; mkdir "$dir" 2>/dev/null || return 1
-  printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
+  rm -rf "$dir"
+  if ! mkdir "$dir" 2>/dev/null; then rmdir "$guard" 2>/dev/null; return 1; fi
+  printf '%s
+' "$$" > "$dir/pid"; printf '%s
+' "$label" > "$dir/label"
+  rmdir "$guard" 2>/dev/null || true; return 0
 }
 lock_release() { rm -rf "$1" 2>/dev/null || true; }
 lock_info() {

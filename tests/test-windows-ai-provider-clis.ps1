@@ -283,6 +283,8 @@ $hardenAt = $installerText.IndexOf('$hardened = Set-QwenChildEnvironmentHardenin
 $releaseAt = $installerText.IndexOf('ReleaseMutex()')
 Assert ($lockAt -gt 0 -and $lockAt -lt $hardenAt -and $hardenAt -lt $releaseAt) 'the Qwen install lock must cover hardening and verification'
 Assert ($installerText.IndexOf('Restore-QwenRuntime -Backup $backup') -gt $hardenAt) 'a hardening or verification failure must restore the previous runtime'
+$hardenBlock = $installerText.Substring([Math]::Max(0, $hardenAt - 400), [Math]::Min(400, $hardenAt))
+Assert ($hardenBlock -match 'if \(-not \$backup\) \{\s*\$backup = Backup-QwenRuntime' -and $hardenBlock -match '\$installStarted = \$true') 'hardening without an install must first back up the runtime and arm the restore'
 Assert ($qwenWrapperText -match 'standalone runtime is incomplete') 'Qwen wrapper must name a hollow runtime and its repair command'
 
 $bootstrapText = Get-Content -Raw $bootstrap

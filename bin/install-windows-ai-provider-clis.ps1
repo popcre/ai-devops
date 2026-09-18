@@ -338,6 +338,13 @@ foreach ($providerDefinition in $providerCatalog) {
       }
     }
     if ($provider.Command -eq 'qwen') {
+      # Hardening patches the live bundle even when no install ran, so take a
+      # backup first and let the restore path cover a failed patch or proof.
+      if (-not $backup) {
+        $backup = Backup-QwenRuntime
+        Write-QwenInstallEvent ("harden: backup={0}" -f $backup)
+      }
+      $installStarted = $true
       $hardened = Set-QwenChildEnvironmentHardening
       Write-Host "Qwen child-process credential hardening applied: $hardened"
       if ($forceQwenVersion) {
