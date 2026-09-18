@@ -10,7 +10,7 @@
 # a JSON transcript file and resends it each time).
 #
 # Usage:
-#   ai-deepseek-agent send "<message>" [--file FILE]... [--model MODEL] [--system "<system prompt>"] [--review]
+#   ai-deepseek-agent send "<message>" [--file FILE]... [--model deepseek-flash|deepseek-v4-pro] [--system "<system prompt>"] [--review]
 #       Start a NEW conversation. Prints:
 #         SESSION_ID: <id>
 #         <DeepSeek's reply>
@@ -46,7 +46,9 @@ fi
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
-MODEL="${DEEPSEEK_MODEL:-DeepSeek-V4.1-Flash}"
+# deepseek-flash is the API slug for DeepSeek V4.1 Flash; the display-style
+# name is rejected by the provider (verified live 2026-09-17).
+MODEL="${DEEPSEEK_MODEL:-deepseek-flash}"
 BASE_URL='https://api.deepseek.com'
 [ -z "${DEEPSEEK_BASE_URL:-}" ] || [ "$DEEPSEEK_BASE_URL" = "$BASE_URL" ] || { echo 'Error: DEEPSEEK_BASE_URL cannot override the pinned official DeepSeek endpoint.' >&2; exit 1; }
 LOCK_WAIT="${AI_DEEPSEEK_LOCK_WAIT:-30}"
@@ -57,8 +59,9 @@ CALL_TIMEOUT="${AI_DEEPSEEK_CALL_TIMEOUT:-300}"
 usage() {
   cat <<'EOF'
 Usage:
-  ai-deepseek-agent send "<message>" [--file FILE]... [--model MODEL] [--system "<prompt>"] [--review]
+  ai-deepseek-agent send "<message>" [--file FILE]... [--model deepseek-flash|deepseek-v4-pro] [--system "<prompt>"] [--review]
       Start a NEW conversation. Prints SESSION_ID: <id>, then the reply.
+      Default model: deepseek-flash (DeepSeek V4.1 Flash). DEEPSEEK_MODEL overrides.
 
   ai-deepseek-agent reply <session-id> "<message>" [--file FILE]...
       Continue an existing conversation with full history.
