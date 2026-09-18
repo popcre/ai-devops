@@ -14,6 +14,7 @@ import datetime
 import decimal
 import json
 import math
+import os
 import pathlib
 import sys
 
@@ -149,23 +150,40 @@ def catalog_price(value):
     return price if price.is_finite() and price > 0 else None
 
 
+def muse_code_is_link(path):
+    """A symlink or, on Windows Python 3.12+, a directory junction.
+
+    Path.is_symlink() alone reports junctions as regular directories on
+    Windows, and junctions need no special privilege to create."""
+    if path.is_symlink():
+        return True
+    isjunction = getattr(os.path, 'isjunction', None)
+    return bool(isjunction and isjunction(path))
+
+
 def muse_code_catalog_row(path, model):
     """The model's row from the CLI's first-party catalog beside the sessions
     tree, or None when no readable catalog file carries it. The file name is a
     provider/profile encoding that changes between builds; only the *.json glob
-    and the model_id selection are stable. Linked files are refused, matching
-    the doctor's catalog checks: a link must not supply attributed pricing."""
+    and the model_id selection are stable. Linked files and linked catalog
+    directories are refused, matching the doctor's catalog checks: a link must
+    not supply pricing attributed to the first-party catalog. Everything above
+    the muse root is the calling wrapper's verified private store."""
     if not model:
         return None
     sessions = next((parent for parent in path.parents if parent.name == 'sessions'), None)
     if sessions is None:
         return None
+    muse_root = sessions.parent
+    catalog_dir = muse_root / 'model-catalog'
+    if muse_code_is_link(muse_root) or muse_code_is_link(catalog_dir):
+        return None
     try:
-        files = sorted((sessions.parent / 'model-catalog').glob('*.json'))
+        files = sorted(catalog_dir.glob('*.json'))
     except OSError:
         return None
     for file in files:
-        if file.is_symlink():
+        if muse_code_is_link(file):
             continue
         try:
             catalog = json.loads(file.read_text(encoding='utf-8-sig'))

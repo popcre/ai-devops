@@ -8,6 +8,7 @@ response text is included.
 import importlib.util
 import json
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
@@ -218,6 +219,53 @@ class MuseCodeUsageCases(unittest.TestCase):
             result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_reader_refuses_a_linked_catalog_directory(self):
+        # A linked model-catalog directory (or muse root) is outside the
+        # wrapper-verified private store and must not price anything. Symlinks
+        # cover POSIX; on Windows, a directory junction needs no privilege.
+        line = json.dumps(completed(RUN, 19835, 472, 8561, 0, 387)) + '\n'
+        row_file = json.dumps({'rows': [CATALOG_ROW]})
+        for target in ('model-catalog', 'muse'):
+            with self.subTest(linked=target):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = pathlib.Path(tmp)
+                    store = root / 'store'
+                    if target == 'model-catalog':
+                        # The log is real; only the catalog directory is a link.
+                        sessions = store / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN
+                        sessions.mkdir(parents=True)
+                        log = sessions / 'session.jsonl'
+                        log.write_text(line, encoding='utf-8')
+                        real = root / 'real-catalog'
+                        real.mkdir()
+                        real.joinpath('realstub__row.json').write_text(row_file, encoding='utf-8')
+                        link = store / 'muse' / 'model-catalog'
+                    else:
+                        # The whole muse tree (log and catalog) lives behind a link.
+                        real = root / 'real-muse'
+                        real.joinpath('sessions', '2026', '09', '17', RUN).mkdir(parents=True)
+                        real.joinpath('sessions', '2026', '09', '17', RUN, 'session.jsonl').write_text(
+                            line, encoding='utf-8')
+                        real.joinpath('model-catalog').mkdir()
+                        real.joinpath('model-catalog', 'realstub__row.json').write_text(row_file, encoding='utf-8')
+                        store.mkdir()
+                        link = store / 'muse'
+                        log = link / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
+                    linked = False
+                    try:
+                        link.symlink_to(real, target_is_directory=True)
+                        linked = True
+                    except (OSError, NotImplementedError):
+                        junction = subprocess.run(
+                            ['cmd', '/c', 'mklink', '/J', str(link), str(real)],
+                            capture_output=True)
+                        linked = junction.returncode == 0 and link.exists()
+                    if not linked:
+                        self.skipTest('no symlink or junction support on this filesystem')
+                    result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+                self.assertIsNone(result['catalog_cost_estimate'])
+                self.assertEqual(result['completeness'], 'core-complete')
 
 
 if __name__ == '__main__':

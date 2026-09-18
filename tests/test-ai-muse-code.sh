@@ -93,6 +93,18 @@ write_catalog '{"model_id":"unrelated-model","visibility":"visible","context_lim
 printf '{"rows":{"nested":{"model_id":"muse-spark-1.3-contributor","visibility":"visible","context_limit":1,"output_limit":1,"is_current":true}}}' > "$CATALOG/malformed__rows-object.json"
 check 'doctor never takes the model row from a malformed rows-object file' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'PASS  Muse Code model catalog is present and parseable' && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
 write_catalog
+# A linked catalog directory must not be trusted as the first-party catalog,
+# even when its files are perfectly healthy behind the link.
+if (mkdir -p "$TMP/jt2" && cmd //c mklink //J "$(cygpath -w "$TMP/jt2-link")" "$(cygpath -w "$TMP/jt2")" >/dev/null 2>&1 && test -L "$TMP/jt2-link"); then
+  rm -rf "$TMP/jt2-link" "$TMP/jt2"
+  mv "$CATALOG" "$TMP/real-catalog"
+  cmd //c mklink //J "$(cygpath -w "$CATALOG")" "$(cygpath -w "$TMP/real-catalog")" >/dev/null
+  check 'doctor refuses a linked catalog directory' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  Muse Code model catalog is present and parseable'"
+  cmd //c rmdir "$(cygpath -w "$CATALOG")" >/dev/null 2>&1
+  rm -rf "$TMP/real-catalog"
+  write_catalog
+else printf 'SKIP  doctor refuses a linked catalog directory (no junctions)
+'; fi
 check 'turn refuses an unpinned Muse Code version without contact' "cd '$REPO' && rm -f '$TMP/provider-args' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' new pin --prompt test\" && test ! -e '$TMP/provider-args'"
 check 'new session completes and returns the final answer' "cd '$REPO' && eval \"$ENV '$SCRIPT' new first --prompt test\" | grep -qx first"
 check 'provider prompt demands all findings and sibling issues' "grep -rq 'Return ALL findings in one pass' '$REPO/.ai/reviews' && grep -rq 'sibling issues' '$REPO/.ai/reviews' && grep -rq 'MANIFEST.md first' '$REPO/.ai/reviews'"

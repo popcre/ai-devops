@@ -209,6 +209,7 @@ muse_code_catalog_dir(){ # the engine's private data store keeps Meta's first-pa
 }
 muse_code_catalog_parseable(){ # at least one non-linked *.json parses as an object with a rows array
   local dir="$1" f
+  ! linked_below_home "$dir" || return 1 # a linked catalog directory is not a trustworthy catalog
   for f in "$dir"/*.json; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
     jq -e 'type=="object" and (.rows|type=="array")' "$f" >/dev/null 2>&1 && return 0
@@ -217,6 +218,7 @@ muse_code_catalog_parseable(){ # at least one non-linked *.json parses as an obj
 }
 muse_code_catalog_row(){ # the configured model's row; only from a file whose rows is a true array of objects
   local dir="$1" model="$2" f row
+  ! linked_below_home "$dir" || return 1
   for f in "$dir"/*.json; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
     row="$(jq -c --arg m "$model" 'if (.rows|type)=="array" then ([.rows[]|select(type=="object" and .model_id==$m)]|first//empty) else empty end' "$f" 2>/dev/null)" || continue
