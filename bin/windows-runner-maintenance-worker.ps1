@@ -222,7 +222,7 @@ function Test-TaskBoundary {
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
-  $actualSddl = $service.GetFolder('\AiDevOps\').GetTask('WindowsRunnerMaintenance').GetSecurityDescriptor(0)
+  $actualSddl = $service.GetFolder('\AiDevOps').GetTask('WindowsRunnerMaintenance').GetSecurityDescriptor(0)
   if ($actualSddl -cne "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)") { throw 'ACL_DRIFT' }
 }
 
