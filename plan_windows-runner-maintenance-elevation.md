@@ -7,16 +7,16 @@ Companion handoff: [`HANDOFF.d/2026-09-17T1804Z-edge-dev-codex-windows-runner-ma
 
 | Step | State | Date | Evidence / restart point |
 |---|---|---|---|
-| 1. Freeze the contract and threat model | ⬜ open | 2026-09-17 | Start here. Re-read #262 and this plan; no implementation exists. |
-| 2. Build the protected installer and payload | ⬜ open | 2026-09-17 | No files exist yet. |
-| 3. Build the unprivileged request client | ⬜ open | 2026-09-17 | No files exist yet. |
-| 4. Add hostile offline tests and operating documentation | ⬜ open | 2026-09-17 | No files exist yet. |
-| 5. Obtain exact-head independent security approval and land | ⬜ open | 2026-09-17 | Protected gate; no review or implementation PR exists. |
+| 1. Freeze the contract and threat model | ✅ complete | 2026-09-17 | Locked schemas and hostile case names are executable in `tests/test-windows-runner-maintenance.ps1`. |
+| 2. Build the protected installer and payload | ✅ complete | 2026-09-17 | Installer, worker and policy exist; rerun the focused maintenance test for the protected-copy, task and lifecycle contract. |
+| 3. Build the unprivileged request client | ✅ complete | 2026-09-17 | Client exposes only `refresh-qualification`; rerun the focused maintenance test for schema, result and timeout coverage. |
+| 4. Add hostile offline tests and operating documentation | ✅ complete | 2026-09-17 | Focused maintenance 54/54 (43 original plus 11 review-driven hardening cases), qualification guard, Windows scripts 48/48, workflow policy, reachability and context audit pass on the repaired branch. The permitted full local matrix hit host resource exhaustion in `test-ai-codex-review.sh`: `CreateFileMapping ... Win32 error 1455`; PR #560's required checks on the exact reviewed head are the complete clean-host result. |
+| 5. Obtain exact-head independent security approval and land | ✅ complete | 2026-09-18 | Eight exact-head reviews; 1-6 REJECTed with every finding repaired on-branch, 7 (`ed7fa089`) APPROVE, 8 (`b1627d56`) APPROVE after a CI-convention launcher rename to `.bat`. All required checks passed on the approved head and the merge queue landed the full matrix. Merged as squash `bdb44193` on `origin/main` (2026-09-18 05:36Z). Reviewer rulings recorded: `RemoteSigned` for the hash-verified Program Files payload approved; hardening-only follow-ups (payload child-file ACL verification, `PSModulePath` in the launcher allowlist) noted in the review reports. |
 | 6. Install and prove `edge-dev-win` | ⬜ open | 2026-09-17 | Protected live-host gate; not authorized by this planning PR. |
 | 7. Install and prove `EDGE-RUNN-ENVY` | ⬜ open | 2026-09-17 | Protected live-host gate; not authorized by this planning PR. |
 | 8. Reconcile evidence, rollback readiness, and issue closure | ⬜ open | 2026-09-17 | Close only after both independent host proofs pass. |
 
-Fresh-session starting point: **Step 1**. Every row is open. Re-read the downstream phase before starting it and update this table immediately after each verified result.
+Fresh-session starting point: **Step 6, one live host per fresh session**. The source is landed (`bdb44193`); installation and each host proof remain protected owner-gated outcomes (§9 Phase C). Read the runbook section in `docs/independent-windows-runner-setup.md` and the locked decisions in §8 before touching either host.
 
 ## 1. The ultimate goal
 
@@ -115,6 +115,8 @@ The following is true on `origin/main` `26bb4a2e` as of 2026-09-17:
 - Task name: `\AiDevOps\WindowsRunnerMaintenance`.
 - Principal: resolved local `HOST\ahazan`, `LogonType S4U`, `RunLevel Highest`; no password is stored. If S4U cannot be installed and run on a host, stop rather than substitute SYSTEM or a stored credential.
 - Task action: machine-wide `C:\Program Files\PowerShell\7\pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy AllSigned -File <protected worker>`. If repository scripts are not signed at implementation time, use `RemoteSigned` only for the administrator-owned local payload and verify SHA-256 before every dispatch; never use caller-controlled content. The independent security reviewer must approve the final execution-policy choice.
+- Review-driven tightening of the task action (exact-head reviews at `8a72a9fc` and `b1b6007e`, 2026-09-17): the action launches through `C:\Windows\System32\cmd.exe /d` running the hash-pinned `launch-worker.bat` from the protected payload. The launcher clears the ENTIRE inherited S4U environment and rebuilds a fixed allowlist of well-known literals before the same machine-wide `pwsh.exe` command runs — a denylist was judged insufficient because the CoreCLR profiler channel and its siblings load operator code before any script statement. This tightens the locked action without broadening the operation or the privilege boundary.
+- Review-driven tightening of the evidence contract (same reviews): the operator holds NO grant on the qualification evidence or its tmp sibling. The elevated worker and qualification child write through their Administrators membership; any operator ACE on those files is ACL drift.
 - Protected payload root: `C:\Program Files\ai-devops\windows-runner-maintenance`; runtime root: `C:\ProgramData\ai-devops\windows-runner-maintenance`.
 - Request schema contains only `schema_version`, UUID `request_id`, literal `operation`, and UTC `requested_at`. All unknown fields and malformed/oversized inputs fail closed.
 - Worker derives requester SID from the request file owner and compares it to the install-time SID. It never trusts a claimed user.
@@ -237,6 +239,7 @@ Live tests run from a filtered, non-elevated SSH token on each host and must pro
 - **Unsafe diagnostics:** PowerShell exceptions can include paths or values. Map internal failures to curated codes; keep detailed audit bounded and secret-safe.
 - **S4U difference between hosts:** validate independently. If either host cannot run the fixed task as designed, stop; do not silently switch to SYSTEM or store a password.
 - **Rollback damage:** removal could target foreign state. Require manifest/hash/action/principal/DACL ownership proof and a verified recovery bundle before deletion.
+- **Repository tampering:** the policy-hash check in `Get-DesiredPayloadManifest` detects accidental drift, not a compromised checkout — the policy file lives in the same repository an operator could edit. Tamper resistance comes from the elevated install being run deliberately from a trusted checkout and from the administrator-owned protected copy installed on the host, never from the repository itself.
 
 ### Exact rollback
 

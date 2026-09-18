@@ -211,6 +211,120 @@ The runner service cannot reliably query TPM itself under its restricted
 account. That is why the Administrator preflight exists; weakening or deleting
 the TPM/Secure Boot gate is not the fix.
 
+### Narrow remote refresh operation
+
+Issue #262 adds one administrator-installed scheduled task for refreshing this
+evidence from a filtered Tailscale SSH session. It is not a general elevation
+tool and does not replace the full GitHub qualification in section 5. Its only
+operation is `refresh-qualification`; callers cannot supply a command, argument,
+path, environment, evidence destination or working directory.
+
+From an elevated current checkout, install or update the fixed protected copy:
+
+```powershell
+pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Install -OperatorUser "$env:COMPUTERNAME\ahazan"
+pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Update -OperatorUser "$env:COMPUTERNAME\ahazan"
+```
+
+Verify is read-only but reads the security descriptors of objects that grant
+the operator nothing (the replay ledger, the temp root), so run it from an
+elevated session; a filtered session will fail closed on access denied
+rather than skip the check. An ordinary filtered SSH session may then invoke
+only the
+fixed operation:
+
+```powershell
+pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Verify -OperatorUser "$env:COMPUTERNAME\ahazan"
+pwsh -NoProfile -File .\bin\invoke-windows-runner-maintenance.ps1 -Operation refresh-qualification
+```
+
+The task is `\AiDevOps\WindowsRunnerMaintenance`; its administrator-owned
+payload is under `C:\Program Files\ai-devops\windows-runner-maintenance` and its
+bounded requests, results and audit are under
+`C:\ProgramData\ai-devops\windows-runner-maintenance`. Results are one of
+`SUCCESS`, `MISSING_TASK`, `STALE_INSTALLATION`, `CONCURRENT_EXECUTION`,
+`REQUEST_REJECTED`, `OPERATION_FAILED`, `RESULT_INVALID` or `TIMEOUT`.
+
+Because the S4U task runs inside the operator's own logon session, its
+inherited environment is hostile input: the non-elevated operator can write
+`HKCU\Environment`, and .NET startup hooks, CoreCLR profiler variables and
+runtime-root overrides all load operator code into a .NET host before any
+script statement runs. Neither a denylist nor a naive clear loop closes the
+class — `FOR /F` spawns its child through `COMSPEC` and cmd re-parses
+substituted names — so the task action launches through `cmd.exe /d`
+(no per-user AutoRun) running the hash-pinned `launch-worker.bat` from the
+protected payload. That launcher first REFUSES to run when any `cmd`
+AutoRun override exists (per-user or system-wide, queried with the
+full-path `reg.exe` before any `FOR /F`, because a child command
+processor without `/d` would execute AutoRun first), then pins `COMSPEC`
+to the fixed system cmd, then clears only names filtered by the system
+findstr down to an injection-proof character class (names outside the
+class survive but nothing consumes them as configuration keys), then
+rebuilds a fixed
+allowlist of well-known literals — including an administrators-only
+`TEMP`/`TMP` under the protected runtime root, so no standard user can
+squat predictable temp names against the elevated host — before the
+machine-wide `pwsh.exe` starts. The worker then pins module resolution to
+the two system-owned module directories (with a literal, so no command
+resolves before the pin), refuses any per-user (`HKCU`) ProgID, versioned
+ProgID or CLSID registration for the Task Scheduler COM class — the
+installer refuses the same overrides and any hostile code-loading shell
+variables before its own elevated COM use — and re-checks the payload,
+runtime, task and evidence contracts before every execution. Result and
+audit records carry the machine name from the .NET API, never the
+environment. When the audit trail or replay ledger reaches its capacity
+bound, further requests are refused before the operation executes; a
+request file is always consumed exactly once under its canonical GUID
+spelling; and only canonical GUID spellings may enter the replay ledger,
+so a hostile filename can never poison future requests into a permanent
+`REUSED_UUID` lockout. A persistent `CONCURRENT_EXECUTION` with no running
+task can indicate a squatted global mutex and needs administrator
+investigation.
+
+Installation also pins the whole evidence neighbourhood and adopts
+nothing foreign: `C:\ProgramData\ai-devops` itself is pinned so only
+administrators can create entries (existing readers keep inherited
+read-only access, and existing admin-owned children such as the Smart App
+Control backup tree keep working because elevated tooling retains full
+control; only future entries inherit the pinned contract), and both `C:\ProgramData\ai-devops\windows-runner-security.json`
+and the `windows-runner-security.json.tmp` sibling its atomic refresh uses
+are pinned to a fixed contract — Administrators and SYSTEM full control,
+everyone else read-only, and **no operator grant at all**: the elevated
+worker and qualification child write through their Administrators
+membership, so the TPM/Secure Boot gate stays unwritable by the principal
+this boundary distrusts. Any pre-existing path under these roots that is
+not already Administrators/SYSTEM-owned stops installation instead of
+being adopted, so a forged evidence file or a pre-loaded audit trail can
+never be laundered with an administrator ACL. Existing evidence content
+from a manual elevated preflight is preserved, and the worker re-applies
+the contract to both files after every refresh. The worker verifies the
+evidence gate, its tmp sibling AND their parent directory with the full
+installer contract before every refresh, and the runtime `temp` directory
+is part of the runtime boundary it checks. The runtime `requests`
+directory is re-verified for junctions before enumeration and again
+immediately before each elevated cleanup delete, and removal re-verifies
+ownership and shape immediately before every elevated recursive delete
+into an administrator-owned recovery bundle.
+
+Removal first verifies manifest ownership and drift, then writes a protected
+recovery bundle (the backup path must be absolute and outside user
+profiles, and the bundle directory is itself pinned to Administrators and
+SYSTEM only). `-RequireManifestMatch` is the stricter rollback gate:
+removal then also requires the installed payload hashes to match the
+repository checkout you are removing from, so a rollback always removes
+exactly what was reviewed. Supply a reviewed protected backup location
+when required:
+
+```powershell
+pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Remove -RequireManifestMatch -BackupPath C:\ProgramData\ai-devops\reviewed-maintenance-recovery -OperatorUser "$env:COMPUTERNAME\ahazan"
+```
+
+If verification refuses, do not force-delete the task or directories. Use the
+exported task XML, security descriptor and payload manifest in an elevated
+recovery session. Removal never deletes
+`C:\ProgramData\ai-devops\windows-runner-security.json` and never changes the
+runner service.
+
 Restart the service after any machine-wide package or PATH change:
 
 ```powershell

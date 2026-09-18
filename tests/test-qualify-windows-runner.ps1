@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 $script = Get-Content -Raw (Join-Path $PSScriptRoot '..\bin\qualify-windows-runner.ps1')
 $required = @(
   '#Requires -RunAsAdministrator',
+  "[string]`$EvidencePath = 'C:\ProgramData\ai-devops\windows-runner-security.json'",
   'Get-Tpm',
   'Confirm-SecureBootUEFI',
   'CurrentBuildNumber',

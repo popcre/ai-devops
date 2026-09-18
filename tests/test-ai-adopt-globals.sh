@@ -16,6 +16,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 TEMPLATE_CLAUDE=$'# Global rules\n\nBody line one.\nBody line two.\n'
 TEMPLATE_CODEX=$'# Codex global rules\n\nCodex body.\n'
+TEMPLATE_ZCODE=$'# ZCode global rules\n\nZCode body.\n'
 SECTION_CLAUDE=$'## testbox — dev machine (machine-specific; not from the hub template)\n\n- A fact that exists nowhere else.\n- Another one.\n'
 SECTION_CODEX=$'# Machine facts — testbox\n\n- Codex-side machine fact.\n'
 
@@ -30,6 +31,7 @@ make_fixture() {
     > "$fixture/skills/shared/shared-one/SKILL.md"
   printf '%s' "$TEMPLATE_CLAUDE" > "$fixture/templates/system/CLAUDE-global.md"
   printf '%s' "$TEMPLATE_CODEX"  > "$fixture/templates/system/AGENTS-global-codex.md"
+  printf '%s' "$TEMPLATE_ZCODE"  > "$fixture/templates/system/AGENTS-global-zcode.md"
 }
 
 run_adopt() {

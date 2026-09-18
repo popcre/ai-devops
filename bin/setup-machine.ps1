@@ -33,13 +33,15 @@ What it does (idempotent - safe to re-run):
      MCP files add project tools. Claude Desktop and Codex retain their own
      deliberately broader sets. A setup rerun also removes retired managed
      entries instead of silently restoring them.
-       - stdio via the op launcher : supabase (--read-only), trigger, 1password
+     - stdio via the op launcher : supabase (--read-only), trigger, 1password
        - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
        - no secret, pinned runtime : playwright, chrome-devtools, ag-grid
        - Codex-only native HTTP    : vercel (browser OAuth)
        - codex-cli                 : native `codex mcp-server`, absolute exe
                                       (definition kept; suspended 2026-09-17 -
                                       out of Claude membership, enabled=false in Codex)
+       - ZCode strict-schema JSON  : 1password via bin/configure-zcode-mcps.ps1
+                                      (~/.zcode/cli/config.json -> mcp.servers)
      No token is ever written into either config; only URLs and op:// references.
      Servers we do not define (the Windows-MCP extension, anything hand-added)
      and all other settings keys are preserved untouched.
@@ -538,6 +540,13 @@ $ManagedMcpServerNames = @($McpServerCatalog.Keys)
 # here re-wires both clients on the next setup run.
 $ClaudeCodeMcpNames = @("1password")
 $ClaudeDesktopMcpNames = @("1password", "ag-grid", "playwright", "recall-ai", "synology-monitor", "trigger")
+# ZCode gets the same minimal default as Claude Code. The plan's illustrative
+# "@("1password","codex-cli")" predates PR #573 (2026-09-17), which suspended
+# the dormant codex-cli server from both Claude clients after transcript mining
+# found no meaningful use; by D10's own criterion (exclude servers whose value
+# is unproven), ZCode starts with 1password only. Expanding later is a one-line
+# membership change here.
+$ZCodeMcpNames = @("1password")
 
 function Select-McpServers([string[]]$Names) {
   $selected = [ordered]@{}
@@ -763,6 +772,112 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
   Warn "  Install the official Qwen Code CLI, configure Alibaba Coding Plan authentication, then run: ai-qwen doctor --live"
 }
 
+# ZCode desktop app (Z.AI GLM agent). Presence-only policy: the app self-updates
+# through electron-updater and carries two independently-drifting version numbers
+# (desktop app + CLI core zcode.cjs), so it is never version-pinned here; the
+# winget DSC entry installs it and this probe reports what is actually on disk.
+# An absent ZCode is a warning, never a fabricated install. The optional test
+# parameters exist so fixture tests can point the probe at a fake path without
+# touching the real machine.
+function Get-ZCodeInstall([string]$TestAppExe = "", [string]$TestCliCore = "") {
+  $appExe  = if ($TestAppExe)  { $TestAppExe }  else { Join-Path $env:ProgramFiles "ZCode\ZCode.exe" }
+  $cliCore = if ($TestCliCore) { $TestCliCore } else { Join-Path $env:ProgramFiles "ZCode\resources\glm\zcode.cjs" }
+  if (-not (Test-Path -LiteralPath $appExe)) { return $null }
+  $info = [ordered]@{ AppExe = $appExe; CliCore = $cliCore; DesktopVersion = $null; CliVersion = $null }
+  try { $info.DesktopVersion = (Get-Item -LiteralPath $appExe).VersionInfo.ProductVersion } catch {}
+  if (Test-Path -LiteralPath $cliCore) {
+    # The CLI core is a Node bundle run THROUGH the Electron binary; without
+    # ELECTRON_RUN_AS_NODE=1 the GUI app starts instead of the CLI.
+    try {
+      $env:ELECTRON_RUN_AS_NODE = "1"
+      $banner = & $appExe $cliCore --help 2>$null | Select-Object -First 1
+      if ($banner -match '^zcode\s+(\S+)') { $info.CliVersion = $Matches[1] }
+    } catch {} finally {
+      Remove-Item Env:\ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+    }
+  }
+  return $info
+}
+$ZCodeInstall = Get-ZCodeInstall
+if ($ZCodeInstall) {
+  Ok "ZCode found: desktop $($ZCodeInstall.DesktopVersion), CLI core $($ZCodeInstall.CliVersion ?? 'unknown')"
+  Note "Verify the full integration when needed with: ai-zcode doctor"
+  Note "First-run login when needed: zcode login --no-browser (prints the URL; Windows auto-open truncates it at '&')."
+} else {
+  Warn "ZCode desktop app not found at the expected machine-wide install path."
+  Warn "  Install it with: winget install ZhipuAI.ZCode   (then 'zcode login' once inside the app), and re-run this script."
+}
+
+# Raw `zcode` launcher on PATH (interactive TUI + direct CLI subcommands), giving
+# PATH parity with `claude`/`codex`. The governed HEADLESS driver is bin/ai-zcode;
+# this shim is for interactive use and for the wrapper's own convenience. The
+# provider-env assembly is mandatory (bin/ai-zcode STEP 0): without the three
+# ZCODE_*_PROVIDER_CONFIG_FILE vars every CLI-core invocation dies before any
+# model call. The runtime provider config lives under a versioned+hashed
+# directory that changes on update, so it is resolved newest-first at launch.
+# These shims deliberately do NOT shadow the blocker-watch wake argv -- the wake
+# path resolves its own env at wake time from config/blocker-watch.json.
+if ($ZCodeInstall) {
+  Step "ZCode launcher shim (~/.local/bin/zcode)"
+  $localBin = Join-Path $HOME ".local\bin"
+  New-Item -ItemType Directory -Force -Path $localBin | Out-Null
+  $zcodeShim = Join-Path $localBin "zcode"
+  $appFwd  = $ZCodeInstall.AppExe  -replace '\\','/'
+  $cliFwd  = $ZCodeInstall.CliCore -replace '\\','/'
+  # Derive the bundled config path HERE, in PowerShell: a ${...%...} bash
+  # expansion inside the double-quoted here-string is parsed as an (invalid)
+  # PowerShell variable and aborts the whole stage under Set-StrictMode.
+  $zcodeRootFwd = (Split-Path -Parent $ZCodeInstall.AppExe) -replace '\\','/'
+  $bundledFwd = "$zcodeRootFwd/resources/config/provider/zcode-builtin.json"
+  $shimBody = @"
+#!/usr/bin/env bash
+# Managed by ai-devops setup-machine.ps1 -- raw interactive ZCode launcher.
+# Re-run setup-machine.ps1 to refresh; delete this file to uninstall.
+# NOTE: generated from a PowerShell double-quoted here-string -- every bash
+# dollar is backtick-escaped, and bash brace-default expansion is avoided
+# because PowerShell would expand a braced variable itself.
+ZCODE_HOME="`$HOME/.zcode"
+APP="$appFwd"
+CLI="$cliFwd"
+[ -f "`$APP" ] && [ -f "`$CLI" ] || { echo "zcode: ZCode not found at `$APP" >&2; exit 1; }
+NEWEST="`$(ls -t "`$ZCODE_HOME"/v2/runtime/provider/*/*/*/zcode-builtin.json 2>/dev/null | head -1)"
+[ -n "`$NEWEST" ] || { echo "zcode: no runtime provider config under `$ZCODE_HOME -- sign in once inside the ZCode app." >&2; exit 1; }
+export ZCODE_BUILTIN_PROVIDER_CONFIG_FILE="`$(cygpath -m "`$NEWEST")"
+export ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE="$bundledFwd"
+export ZCODE_PERSONAL_PROVIDER_CONFIG_FILE="`$(cygpath -m "`$ZCODE_HOME/v2/provider_config.json" 2>/dev/null || echo "`$ZCODE_HOME/v2/provider_config.json")"
+export ELECTRON_RUN_AS_NODE=1
+exec "`$APP" "`$CLI" "`$@"
+"@
+  # Write with LF endings via [IO.File] so the shebang survives CRLF mangling.
+  [System.IO.File]::WriteAllText($zcodeShim, ($shimBody -replace "`r`n", "`n"))
+  $zcodeCmd = Join-Path $localBin "zcode.cmd"
+  $gitBashForShim = @(
+    (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe")
+  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+  if ($gitBashForShim) {
+    Set-Content -LiteralPath $zcodeCmd -Encoding ascii -Value @"
+@echo off
+rem Managed by ai-devops setup-machine.ps1 -- raw interactive ZCode launcher (cmd wrapper over the bash shim).
+"$gitBashForShim" "$localBin\zcode" %*
+"@
+    Ok "wrote $zcodeShim and $zcodeCmd"
+  } else {
+    Warn "Git Bash not found; wrote only the bash shim ($zcodeShim), no .cmd wrapper."
+  }
+  # Ensure ~/.local/bin is on the user PATH so the shim is reachable.
+  $userPath = [Environment]::GetEnvironmentVariable("PATH","User")
+  $entries  = @($userPath -split ';' | Where-Object { $_ -ne '' })
+  $localBinWin = (Join-Path $HOME ".local\bin")
+  if ($entries | Where-Object { $_.TrimEnd('\') -ieq $localBinWin.TrimEnd('\') }) {
+    Ok "~/.local/bin already on user PATH"
+  } else {
+    [Environment]::SetEnvironmentVariable("PATH", ((@($localBinWin) + $entries) -join ';'), "User")
+    Ok "prepended to user PATH: $localBinWin"
+    Note "Open a NEW terminal for this to take effect."
+  }
+}
+
 # --------------------------------------------------------------------------
 # 7. Claude Code (CLI) MCP config - same token-free treatment
 # --------------------------------------------------------------------------
@@ -934,6 +1049,33 @@ if (Test-Path -LiteralPath $codexMcpSetup) {
   & $codexMcpSetup -Servers $CodexMcpServers
 } else {
   Warn "Missing $codexMcpSetup - Codex MCP server set left as-is."
+}
+
+# --------------------------------------------------------------------------
+# 6d. ZCode's OWN config (~/.zcode/cli/config.json). ZCode is a coding agent
+# like Claude Code, so it gets the minimal membership, transformed into its
+# STRICT MCP schema by the dedicated writer (an unknown key silently drops a
+# whole server; no ${...} expansion, absolute paths only; explicit timeoutMs).
+# The writer preserves foreign servers, hooks, and plugin state untouched.
+# --------------------------------------------------------------------------
+Step "Wiring the MCP server set into ZCode"
+$zcodeMcpSetup = Join-Path $RepoPath "bin\configure-zcode-mcps.ps1"
+if ($ZCodeInstall -and (Test-Path -LiteralPath $zcodeMcpSetup)) {
+  $ZCodeMcpServers = [ordered]@{}
+  foreach ($name in $ZCodeMcpNames) {
+    if (-not $McpServerCatalog.Contains($name)) { continue }
+    $copy = [ordered]@{}
+    foreach ($key in $McpServerCatalog[$name].Keys) { $copy[$key] = $McpServerCatalog[$name][$key] }
+    # Cold start through the 1Password launcher can exceed the 30 s default;
+    # the writer stamps an explicit generous timeout on every entry.
+    $copy['timeoutMs'] = 120000
+    $ZCodeMcpServers[$name] = $copy
+  }
+  & $zcodeMcpSetup -Servers $ZCodeMcpServers -ManagedNames @($ManagedMcpServerNames)
+} elseif (-not $ZCodeInstall) {
+  Note "ZCode not present - its MCP config stage was skipped."
+} else {
+  Warn "Missing $zcodeMcpSetup - ZCode MCP server set left as-is."
 }
 
 # --------------------------------------------------------------------------

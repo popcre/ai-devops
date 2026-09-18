@@ -62,6 +62,10 @@ properties:
     id: CodexDesktop
     directives: { description: Install the Codex Windows desktop app from Microsoft Store }
     settings: { id: 9PLM9XGG6VKS, source: msstore, version: 26.818.3698.0 }
+  - resource: Microsoft.WinGet.DSC/WinGetPackage
+    id: ZCode
+    directives: { description: Install the ZCode desktop app (Z.AI GLM agent); it self-updates, so the winget pin is intentionally absent }
+    settings: { id: ZhipuAI.ZCode, source: winget }
   - resource: Microsoft.Windows.Developer/EnableLongPathSupport
     id: EnableLongPaths
     directives:

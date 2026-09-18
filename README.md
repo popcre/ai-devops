@@ -64,7 +64,10 @@ When it finishes,
 follow the short checklist it prints (fully close and reopen Claude Desktop; if
 it lists two "connectors" to add, add them once in Settings → Connectors).
 The first Grok and Kimi use each open their provider's sign-in page; that login
-is not automated or stored by AI DevOps.
+is not automated or stored by AI DevOps. The ZCode desktop agent (GLM-5.3) is
+installed the same way and, once signed in inside the app, is fully managed —
+skills, global instructions, MCP servers, hooks, and the `ai-zcode` headless
+wrapper (see [docs/model-setup.md](docs/model-setup.md)).
 
 ### Ubuntu server (hetz and others) — Claude Code
 

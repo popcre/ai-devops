@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+# ai-zcode — governed headless driver for the ZCode desktop app's CLI core.
+#
+# This is the ONLY supported way for another session to drive ZCode headlessly.
+# Never call the zcode.cjs bundle directly: this script owns the provider env
+# assembly (without which every headless run dies before the model call), the
+# read-only mode pin, the wall-clock ceiling, and the JSON contract check.
+#
+#   ai-zcode ask "<prompt>" [--mode plan|build|edit] [--disallowed-tools LIST]
+#                         [--json-output] [--cwd DIR]
+#   ai-zcode doctor [--live]
+#   ai-zcode version
+#
+# Deliberately NO session management and NO wrapper state directory: ZCode
+# persists sessions in its own SQLite store and blocker-watch owns interactive
+# --resume wakes. No ZCode REVIEWER exists or will ever be added to this
+# wrapper (owner ruling 2026-09-17: GLM never reviews GLM-orchestrated work;
+# ZCode's engine is GLM-5.3).
+#
+# ---------------------------------------------------------------------------
+# STEP 0 VERIFICATION — qualified 2026-09-17 against desktop 3.12.3.7463 /
+# CLI core 0.16.5 on Windows 11 (edge-dev). Re-run and update this block on
+# any version bump; evidence: tests/verification/zcode-windows-2026-09-17/.
+#
+#   ENV ASSEMBLY IS MANDATORY. Without ZCODE_BUILTIN_PROVIDER_CONFIG_FILE (the
+#     newest ~/.zcode/v2/runtime/provider/*/*/*/zcode-builtin.json),
+#     ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE, and
+#     ZCODE_PERSONAL_PROVIDER_CONFIG_FILE, every headless -p run exits with
+#     "无法定位 CLI ZCode Built-in Provider Config" BEFORE any model call.
+#     With them, the run authenticates (Z.AI OAuth in
+#     ~/.zcode/v2/credentials.json) and GLM-5.3 answers under
+#     account:zai-individual-coding-plan. Paths must be Windows-mixed (C:/).
+#   THE PARSER ACCEPTS FEWER FLAGS THAN --HELP ADVERTISES. `--max-turns`,
+#     `--settings`, and `--allowed-tools` are documented but REJECTED
+#     ("Unknown option") wherever they are placed. Proven-accepted:
+#     -p <text>, --json, --mode plan|build|edit|yolo, --disallowed-tools,
+#     --cwd, and the subcommands. Consequence: there is NO turn-count bound
+#     and NO allowlist in this build — this wrapper enforces a WALL-CLOCK
+#     ceiling (timeout) plus a tool DENYLIST instead, and never passes
+#     --max-turns, --settings, or --allowed-tools.
+#   --prompt/-p DEFAULTS TO YOLO MODE. The wrapper pins --mode plan and a
+#     write/bash tool denylist by default and REFUSES yolo from caller input.
+#     Write-denial proven live 2026-09-17: plan mode alone left the probed
+#     directory empty, and so did plan + --disallowed-tools
+#     "Edit,Write,ApplyPatch,Bash". (An allowlist-based probe was first
+#     misread as a denial — the parser had rejected the flag; only the two
+#     results above are evidence.)
+#   OUTPUT CONTRACT (--json): one JSON document on stdout with keys
+#     sessionId, traceId, turnId, response, usage{...}, eventCount,
+#     projection{status,turnCount,...}. Completion is proven by the document
+#     parsing AND response being non-empty AND projection.status == "idle".
+#     Stderr may carry a harmless "ZCode Built-in skipped (not-due)" line.
+#   HOOKS DO NOT FIRE in headless -p runs (0.16.5): user-scope and
+#     workspace-scope config hooks were both probed and never dispatched
+#     (workspace hooks sit behind a disabled trust feature). The
+#     completion-check hook registration therefore targets interactive
+#     sessions; doctor verifies it structurally only.
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+ZCODE_HOME="${AI_ZCODE_HOME:-$HOME/.zcode}"
+ZCODE_APP_EXE="${AI_ZCODE_APP_EXE:-/c/Program Files/ZCode/ZCode.exe}"
+ZCODE_CLI_CORE="${AI_ZCODE_CLI_CORE:-/c/Program Files/ZCode/resources/glm/zcode.cjs}"
+ASK_TIMEOUT="${AI_ZCODE_ASK_TIMEOUT:-900}"
+DEFAULT_DISALLOWED_TOOLS="${AI_ZCODE_DISALLOWED_TOOLS:-Edit,Write,ApplyPatch,Bash}"
+
+die()  { printf 'ai-zcode: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'ai-zcode: warning: %s\n' "$*" >&2; }
+note() { printf '%s\n' "$*" >&2; }
+
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+need jq
+need timeout
+
+# ---------------------------------------------------------------------------
+# Binary + provider-env resolution. Fail closed with the exact missing path:
+# a wrong guess here either starts the GUI app or dies before the model call.
+# ---------------------------------------------------------------------------
+resolve_app() {
+  if [ ! -f "$ZCODE_APP_EXE" ]; then
+    die "local_dependency_unavailable: ZCode app not found at $ZCODE_APP_EXE.
+This is not a ZCode provider fault. Install it (winget install ZhipuAI.ZCode),
+or set AI_ZCODE_APP_EXE. Presence probe: ai-zcode doctor"
+  fi
+  printf '%s' "$ZCODE_APP_EXE"
+}
+
+resolve_cli_core() {
+  if [ ! -f "$ZCODE_CLI_CORE" ]; then
+    die "local_dependency_unavailable: ZCode CLI core not found at $ZCODE_CLI_CORE.
+This is not a ZCode provider fault (the desktop app may have updated and moved
+it). Set AI_ZCODE_CLI_CORE to the zcode.cjs bundle."
+  fi
+  printf '%s' "$ZCODE_CLI_CORE"
+}
+
+# The runtime provider config lives under a versioned+hashed directory that
+# changes on update, so it is resolved newest-first every run — the same
+# {zcode_builtin} resolution bin/ai-blocker-watch performs at wake time.
+resolve_runtime_provider_config() {
+  if [ -n "${AI_ZCODE_BUILTIN_PROVIDER_CONFIG:-}" ]; then
+    [ -f "$AI_ZCODE_BUILTIN_PROVIDER_CONFIG" ] || die "AI_ZCODE_BUILTIN_PROVIDER_CONFIG does not exist: $AI_ZCODE_BUILTIN_PROVIDER_CONFIG"
+    printf '%s' "$AI_ZCODE_BUILTIN_PROVIDER_CONFIG"; return 0
+  fi
+  local newest
+  newest="$(ls -t "$ZCODE_HOME"/v2/runtime/provider/*/*/*/zcode-builtin.json 2>/dev/null | head -1 || true)"
+  [ -n "$newest" ] || die "local_dependency_unavailable: no runtime provider config under $ZCODE_HOME/v2/runtime/provider/.
+Sign in once inside the ZCode app (or run: zcode login --no-browser), then re-run. Provider was not contacted."
+  printf '%s' "$newest"
+}
+
+# Convert a POSIX-ish path to Windows-mixed (C:/...) for the Node bundle.
+to_mixed() {
+  case "$1" in
+    [A-Za-z]:*) printf '%s' "$1" ;;  # already Windows-shaped
+    *) cygpath -m "$1" 2>/dev/null || printf '%s' "$1" ;;
+  esac
+}
+
+provider_env() {
+  # Sets the three ZCODE_* vars in the environment of the caller (a subshell).
+  # Failures are handled EXPLICITLY: this function runs inside
+  # `( provider_env; … ) || rc=$?`, and that `||` context suppresses set -e
+  # for the entire subshell — a bare die would be swallowed and the CLI would
+  # run without its provider config.
+  local runtime bundled personal
+  runtime="$(resolve_runtime_provider_config)" || exit 1
+  bundled="${AI_ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG:-/c/Program Files/ZCode/resources/config/provider/zcode-builtin.json}"
+  personal="${AI_ZCODE_PERSONAL_PROVIDER_CONFIG:-$ZCODE_HOME/v2/provider_config.json}"
+  [ -f "$bundled" ]  || die "bundled provider config missing: $bundled (vendor install incomplete?)"
+  [ -f "$personal" ]  || warn "personal provider config missing ($personal); continuing with defaults."
+  export ZCODE_BUILTIN_PROVIDER_CONFIG_FILE="$(to_mixed "$runtime")"
+  export ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE="$(to_mixed "$bundled")"
+  export ZCODE_PERSONAL_PROVIDER_CONFIG_FILE="$(to_mixed "$personal")"
+  export ELECTRON_RUN_AS_NODE=1
+}
+
+cli_version() {
+  local app cli banner runtime bundled
+  app="$(resolve_app)"; cli="$(resolve_cli_core)"
+  runtime="$(resolve_runtime_provider_config)"
+  bundled="${AI_ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG:-/c/Program Files/ZCode/resources/config/provider/zcode-builtin.json}"
+  export ZCODE_BUILTIN_PROVIDER_CONFIG_FILE="$(to_mixed "$runtime")"
+  export ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE="$(to_mixed "$bundled")"
+  export ELECTRON_RUN_AS_NODE=1
+  banner="$("$app" "$cli" --help 2>/dev/null | head -1 || true)"
+  printf '%s' "$banner"
+}
+
+# ---------------------------------------------------------------------------
+# ask — one-shot headless prompt.
+# ---------------------------------------------------------------------------
+cmd_ask() {
+  local prompt="" mode="plan" denied="$DEFAULT_DISALLOWED_TOOLS" json_out=0 cwd="" arg
+  while [ $# -gt 0 ]; do
+    arg="$1"; shift
+    case "$arg" in
+      --mode)
+        [ $# -gt 0 ] || die "--mode requires a value"
+        mode="$1"; shift
+        ;;
+      --disallowed-tools|--disallow-tools)
+        [ $# -gt 0 ] || die "--disallowed-tools requires a value"
+        denied="$1"; shift
+        ;;
+      --json-output) json_out=1 ;;
+      --cwd)
+        [ $# -gt 0 ] || die "--cwd requires a value"
+        cwd="$1"; shift
+        ;;
+      --allowed-tools|--allow-tools)
+        die "--allowed-tools is documented by zcode --help but REJECTED by the 0.16.5 parser (STEP 0). Use --disallowed-tools."
+        ;;
+      -*) die "unknown ask option: $arg" ;;
+      *)  [ -z "$prompt" ] || die "only one positional prompt is allowed"
+          prompt="$arg" ;;
+    esac
+  done
+  [ -n "$prompt" ] || die "no prompt given. Usage: ai-zcode ask \"<prompt>\" [--mode plan|build|edit] [--disallowed-tools LIST]"
+
+  # yolo is the CLI's most dangerous default; it is never taken from caller
+  # input and never defaulted to here.
+  case "$mode" in
+    plan|build|edit) ;;
+    yolo) die "--mode yolo is refused: ZCode's --prompt defaults to yolo and this wrapper exists to pin that away. Use plan (default), build, or edit." ;;
+    *) die "unknown --mode: $mode (accepted: plan, build, edit)" ;;
+  esac
+
+  local app cli rc
+  app="$(resolve_app)"; cli="$(resolve_cli_core)"
+  local -a argv=("$cli" --mode "$mode")
+  [ -n "$denied" ] && argv+=(--disallowed-tools "$denied")
+  [ -n "$cwd" ] && argv+=(--cwd "$(to_mixed "$cwd")")
+  argv+=(--json -p "$prompt")
+
+  # Script-scope (not local): the EXIT trap must still see these after the
+  # function returns, and set -u makes an out-of-scope reference fatal.
+  out="$(mktemp)"; err="$(mktemp)"
+  trap 'rm -f "$out" "$err"' EXIT
+  rc=0
+  ( provider_env; cd "${cwd:-$(pwd)}" && timeout "$ASK_TIMEOUT"s "$app" "${argv[@]}" ) >"$out" 2>"$err" || rc=$?
+
+  if [ "$rc" -eq 124 ]; then
+    die "ask timed out after ${ASK_TIMEOUT}s (ceiling: AI_ZCODE_ASK_TIMEOUT). The provider may still be running; no answer was parsed."
+  fi
+  if [ "$rc" -ne 0 ]; then
+    cat "$err" >&2 || true
+    die "zcode CLI exited $rc. First stderr lines above; full stderr was kept out of the answer stream."
+  fi
+
+  # Completion honesty: a parsed document with an empty response or a non-idle
+  # projection is a failed run, not a silent empty success.
+  if ! jq -e 'type=="object" and (.response|type=="string") and (.projection.status|type=="string")' "$out" >/dev/null 2>&1; then
+    head -5 "$err" >&2 || true
+    die "the CLI output did not carry the qualified JSON contract (keys response/projection). Re-qualify this build: see STEP 0 in $(basename "$0")."
+  fi
+  local status
+  status="$(jq -r '.projection.status' "$out")"
+  [ "$status" = "idle" ] || die "run ended in projection.status='$status', not idle — treat as incomplete."
+
+  if [ "$json_out" = 1 ]; then
+    cat "$out"
+  else
+    jq -r '.response' "$out"
+    note ""
+    note "session: $(jq -r '.sessionId' "$out")  tokens: $(jq -r '.usage.totalTokens // "unknown"' "$out")  model requests: $(jq -r '.usage.modelRequestCount // "unknown"' "$out")"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# doctor — presence, versions, login, config sanity, managed state.
+# ---------------------------------------------------------------------------
+doctor_credentials_state() {
+  [ -f "$ZCODE_HOME/v2/credentials.json" ] && printf 'signed in (credentials file present)' || printf 'NOT signed in (no credentials file)'
+}
+
+cmd_doctor() {
+  local live=0
+  [ "${1:-}" = "--live" ] && live=1
+  [ $# -eq 0 ] || [ "$live" = 1 ] || die "unknown doctor argument: $1 (accepted: --live)"
+
+  local fail=0 app cli desktop_version cli_v
+  echo "ai-zcode doctor"
+  if [ -f "$ZCODE_APP_EXE" ] && [ -f "$ZCODE_CLI_CORE" ]; then
+    echo "  presence      : ok"
+    echo "    app          : $ZCODE_APP_EXE"
+    echo "    cli core     : $ZCODE_CLI_CORE"
+    desktop_version="$(powershell.exe -NoProfile -Command "(Get-Item -LiteralPath '$(to_mixed "$ZCODE_APP_EXE" | sed 's|/|\\|g')').VersionInfo.ProductVersion" 2>/dev/null | tr -d '\r' || true)"
+    cli_v="$(cli_version | sed -n 's/^zcode  *//p' || true)"
+    echo "    desktop ver  : ${desktop_version:-unknown}"
+    echo "    cli ver      : ${cli_v:-unknown}"
+  else
+    echo "  presence      : MISSING — install with: winget install ZhipuAI.ZCode"
+    [ -f "$ZCODE_APP_EXE" ] || echo "    absent: $ZCODE_APP_EXE"
+    [ -f "$ZCODE_CLI_CORE" ] || echo "    absent: $ZCODE_CLI_CORE"
+    fail=1
+  fi
+
+  echo "  login         : $(doctor_credentials_state)"
+  [ -f "$ZCODE_HOME/v2/credentials.json" ] || { echo "    sign in with: zcode login --no-browser  (URL prints; Windows auto-open truncates it at '&')"; }
+
+  local cfg="$ZCODE_HOME/cli/config.json"
+  if [ -f "$cfg" ]; then
+    if jq -e 'type=="object"' "$cfg" >/dev/null 2>&1; then
+      echo "  config        : parses ok ($cfg)"
+      local mcp_count hooks_enabled
+      mcp_count="$(jq '(.mcp.servers // {}) | length' "$cfg")"
+      hooks_enabled="$(jq -r '.hooks.enabled // false' "$cfg")"
+      echo "    mcp servers  : $mcp_count ($(jq -r '(.mcp.servers // {}) | keys | join(", ")' "$cfg"))"
+      echo "    hooks.enabled: $hooks_enabled$([ "$hooks_enabled" = true ] || printf '  (config-file hooks never run unless enabled)')"
+      [ "$hooks_enabled" = true ] || fail=1
+    else
+      echo "  config        : DOES NOT PARSE ($cfg) — ZCode silently drops every MCP server on a malformed file"
+      fail=1
+    fi
+  else
+    echo "  config        : absent ($cfg) — run bin/configure-zcode-mcps.ps1"
+    fail=1
+  fi
+
+  local skills_dir="$ZCODE_HOME/skills" managed_count=""
+  if [ -d "$skills_dir" ] && [ ! -L "$skills_dir" ]; then
+    managed_count="$(find "$skills_dir" -maxdepth 2 -name .ai-devops-managed -type f 2>/dev/null | wc -l | tr -d ' ')"
+    echo "  skills        : managed dir with $managed_count managed marker(s)"
+  elif [ -L "$skills_dir" ]; then
+    echo "  skills        : STILL A JUNCTION ($(readlink "$skills_dir" 2>/dev/null || echo unknown)) — re-run install-ai-devops-windows.ps1 to migrate"
+    fail=1
+  else
+    echo "  skills        : no ~/.zcode/skills — re-run install-ai-devops-windows.ps1"
+    fail=1
+  fi
+
+  if command -v zcode >/dev/null 2>&1 || [ -x "$HOME/.local/bin/zcode" ]; then
+    echo "  shim          : zcode on PATH"
+  else
+    echo "  shim          : absent — re-run setup-machine.ps1 (writes ~/.local/bin/zcode)"
+  fi
+
+  if [ "$live" = 1 ]; then
+    echo "  live probe    : running one bounded ask…"
+    if cmd_ask "Reply with the single word OK" >/dev/null; then
+      echo "  live probe    : ok (authenticated, GLM answered)"
+    else
+      echo "  live probe    : FAILED"
+      fail=1
+    fi
+  fi
+
+  [ "$fail" = 0 ] || { note "doctor: at least one check failed."; exit 1; }
+  echo "  all checks green"
+}
+
+cmd_version() {
+  printf 'ai-zcode %s; cli core: %s\n' "$VERSION" "$(cli_version | sed -n 's/^zcode  *//p' || echo unknown)"
+}
+
+case "${1:-}" in
+  ask)    shift; cmd_ask "$@" ;;
+  doctor) shift; cmd_doctor "$@" ;;
+  version) cmd_version ;;
+  ""|-h|--help|help)
+    sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+  *) die "unknown command: $1 (accepted: ask, doctor, version)" ;;
+esac

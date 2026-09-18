@@ -7,20 +7,20 @@ Paired handoff: [`HANDOFF.d/2026-09-17T1955Z-edge-dev-zcode-zcode-windows-suppor
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Freeze the ZCode Windows baseline (qualification facts) | ⬜ open | — | — |
-| 2. Install policy and presence checks | ⬜ open | — | — |
-| 3. `zcode` launcher shims + `bin/ai-zcode` governed wrapper | ⬜ open | — | — |
-| 4. Managed skills: `skills/zcode/` tree + installer + junction migration | ⬜ open | — | — |
-| 5. Global instructions: `AGENTS-global-zcode.md` template + seeding | ⬜ open | — | — |
-| 6. MCP wiring: `bin/configure-zcode-mcps.ps1` + catalog membership | ⬜ open | — | — |
-| 7. Hooks: completion-check hook under `hooks.events` | ⬜ open | — | — |
-| 8. Transcript backup + SQL mining cookbook (SQLite + rollout store) | ⬜ open | — | — |
-| ~~9. Reviewer wrapper `bin/ai-zcode-review`~~ | ⛔ removed 2026-09-17 | — | Owner ruling: GLM never reviews GLM-orchestrated work; ZCode's engine is GLM-5.3. See §7.9. |
-| 10. Doctor and machine verification surface | ⬜ open | — | — |
-| 11. Documentation (README, task router, model setup) | ⬜ open | — | — |
-| 12. Land: tests green, merge, install, verify | ⬜ open | — | — |
+| 1. Freeze the ZCode Windows baseline (qualification facts) | ✅ done | 2026-09-17 | `tests/verification/zcode-windows-2026-09-17/README.md` — every claim carries its reproducing command; live-probed on edge-dev (env-assembly mandatory; parser rejects `--max-turns`/`--settings`/`--allowed-tools`; plan-mode + denylist write-denial; hooks inert headlessly; junction + 111-skill leak inventoried). D9 decided (winget `ZhipuAI.ZCode` confirmed), D13 decided (env set required). |
+| 2. Install policy and presence checks | ✅ done | 2026-09-17 | `.config/configuration.winget` (unpinned `ZhipuAI.ZCode` — self-updating, never pinned); `bin/setup-machine.ps1` `Get-ZCodeInstall` probe (both version numbers, fixture-testable). |
+| 3. `zcode` launcher shims + `bin/ai-zcode` governed wrapper | ✅ done | 2026-09-17 | `bin/ai-zcode` (STEP 0 header; ask/doctor/version; yolo refused; wall-clock ceiling; env assembly) + `bin/ai-zcode.cmd`, `config/machine-tools.tsv` row, setup-machine shim stage. Offline: `tests/test-ai-zcode.sh` 30/30 (caught a real errexit-suppression bug). Live on edge-dev: `ai-zcode ask` answered, `ai-zcode doctor` runs. |
+| 4. Managed skills: `skills/zcode/` tree + installer + junction migration | ✅ done | 2026-09-17 | `bin/install-ai-devops-windows.ps1` (`Remove-ZCodeSkillsJunction`, zcode+shared install calls, orphan pruning, collision assert extended); `skills/zcode/zcode-transcript-backup/`; manifest scan in `bin/ai-install-manifest`. `tests/test-install-ai-devops-windows.ps1` §9 proves junction→dir migration leaves the junction TARGET untouched. |
+| 5. Global instructions: `AGENTS-global-zcode.md` template + seeding | ✅ done | 2026-09-17 | `templates/system/AGENTS-global-zcode.md`; installer seeds `~/.zcode/AGENTS.md` (seed-only); `bin/ai-adopt-globals` third target (installs a still-missing non-bash target itself — the Bash installer does not own the Windows-only client). Fixture-proven in both suites. |
+| 6. MCP wiring: `bin/configure-zcode-mcps.ps1` + catalog membership | ✅ done | 2026-09-17 | Strict-schema JSON writer (canonical keys only, string command, explicit `timeoutMs`, backups, idempotent, foreign-preserving); `tests/test-configure-zcode-mcps.ps1` 19/19. Membership `$ZCodeMcpNames = @("1password")` — the plan's illustrative `1password+codex-cli` predates PR #573's codex-cli suspension; D10's unproven-value criterion decides (expand later by one line). |
+| 7. Hooks: completion-check hook under `hooks.events` | ✅ done | 2026-09-17 | `bin/ai-install-completion-check-hook --client zcode` (merges `hooks.events`, sets `hooks.enabled: true`, preserves mcp/plugins; `--check` drift mode). Fixture-proven; live firing NOT provable in 0.16.5 (hooks never dispatch headlessly — recorded in the facts file), so verification is structural, per the amended Step 7 reality. |
+| 8. Transcript backup + SQL mining cookbook (SQLite + rollout store) | ✅ done | 2026-09-17 | `skills/zcode/zcode-transcript-backup/` (SKILL.md: copy db.sqlite+wal/shm+rollout to `zcode_chats/<machine>/` gated by `ai-transcript-destination-check`; queries.md: recipes validated live against a copy 2026-09-17 — epoch-ms timestamps, `completed/error/running` vocabulary). |
+| ~~9. Reviewer wrapper `bin/ai-zcode-review`~~ | ⛔ removed 2026-09-17 | — | Owner ruling: GLM never reviews GLM-orchestrated work; ZCode's engine is GLM-5.3. See §7.9. Never built; no registry entry. |
+| 10. Doctor and machine verification surface | ✅ done | 2026-09-17 | `bin/ai-devops` doctor zcode section (presence/versions/login/config parse/mcp/hooks/markers/shim, warn-only on absence, platform-honest on Linux); `bin/verify-windows-dev.ps1` `app:ZCode` check; installer login note (`zcode login --no-browser`, URL-truncation warning). `tests/test-ai-devops-doctor-install-state.sh` green. |
+| 11. Documentation (README, task router, model setup) | ✅ done | 2026-09-17 | `docs/model-setup.md` ZCode section (role, wrapper, traps, transcript pointer); `docs/config-inventory.md` ZCode-home row; `README.md` mention; AGENTS.md task-router row already present (PR #569). `bin/ai-doc-reachability --base origin/main` PASS. |
+| 12. Land: tests green, merge, install, verify | ✅ done | 2026-09-18 | Merged: PR #584 (`473007a4`, queue-verified) + follow-up fix PR #586 (`b964fb41`, shim here-string bug found on the first real run). edge-dev installed state verified 2026-09-18: `install-ai-devops-windows.ps1` + `setup-machine.ps1` + `ai-install-completion-check-hook --client zcode` re-run from the canonical checkout; `~/.zcode/skills` a real managed dir (36 markers; junction gone; Claude skills intact at 48 before/after; fixture leftover quarantined), `~/.zcode/AGENTS.md` seeded, `~/.zcode/cli/config.json` carries exactly `[1password]` strict-schema via the launcher with `hooks.enabled: true` and timestamped `.aidevops.*.bak` backups from the writer's first run, `~/.local/bin/zcode{,.cmd}` live (`zcode --version` -> 0.16.5), `ai-zcode doctor` all checks green, `ai-devops doctor` ZCode section all OK, public repo clean of transcript bytes. |
 
-**Fresh-session starting point:** begin at Step 1. Re-read §§5–8 before changing any code,
+**Fresh-session starting point:****Fresh-session starting point:** begin at Step 1. Re-read §§5–8 before changing any code,
 and re-read the phase heading before starting each phase — steps drift once reality moves.
 Phases: **A** = Steps 1–3 (foundations), **B** = Steps 4–7 (managed configuration),
 **C** = Step 8 (transcripts; the former Step 9 was removed 2026-09-17),
