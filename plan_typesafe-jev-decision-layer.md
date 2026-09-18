@@ -9,10 +9,10 @@
 | Step | Status | Last updated | Evidence |
 |---|---|---|---|
 | 1. Confirm Jev is real, and what it actually guarantees | ✅ complete | 2026-09-18 | Section 3 below |
-| 2. Register the API key reference (no value in the repository) | ⏸ blocked | 2026-09-18 | `config/mcp.env.example` line added but commented out; needs the exact 1Password item title and field label |
-| 3. Reachability probe from one machine | ⬜ not started | — | — |
-| 4a. Track A: confirm upstream #33/#34 landed, then single-machine compaction trial | ⬜ not started | — | — |
-| 4b. Track B: shadow-mode evaluation on completion-honesty checks | ⬜ not started | — | — |
+| 2. Register the API key reference (no value in the repository) | ✅ complete | 2026-09-18 | Vault item `typesafe.ai API` (API Credential); key is in field `credential` (non-empty, 108 chars; value never printed). `config/mcp.env.example` line active; resolved via `op run` on hetz → `PASS len=108` |
+| 3. Reachability probe from one machine | ✅ complete | 2026-09-18 | `bin/ai-jev-probe` (self-resolves via `op run`, 10s connect / 20s call timeout, fails loudly on empty key). Live on hetz: printed `ok` in 1.1s; the API reported model `jev-1.13.0`, response shape `answers.<id>.noul`. Offline guards: `tests/test-ai-jev-scripts.sh` 6/6 |
+| 4a. Track A: confirm upstream #33/#34 landed, then single-machine compaction trial | ⛔ gate not met — stopped | 2026-09-18 | Upstream issues #33 and #34 are both OPEN. Fixes exist only as unmerged PR #44 (bounded concurrency) and PR #45 (deadlines/cancellation); #28, #30, #35, #36 also still open. No upstream commit contains both fixes, so nothing was installed. Re-check when #44 and #45 merge |
+| 4b. Track B: shadow-mode evaluation on completion-honesty checks | 🟡 tool built, awaiting real traffic | 2026-09-18 | `bin/ai-jev-completion-shadow` replays Stop payloads through the existing hook and one Jev `Noul` question at a 0.91 floor; logs hashes and verdicts only, outside the repo; outage/uncertainty = `escalate`. Synthetic 7-item run worked end to end. Real-traffic replay NOT run: sending transcript text to TypeSafe needs Albert's approval. Note: the existing hook matches "nothing pending" closings, not "done without evidence", so some disagreement is scope difference, not error |
 | 5. Go/no-go per track on promoting anything to enforcing | ⬜ not started | — | — |
 
 **Workstream state:** evaluation only. Nothing in this plan authorizes Jev to
@@ -169,7 +169,10 @@ evidence.
 - **Bounded calls.** A connect timeout and a call timeout, as the other
   provider wrappers already set.
 
-## 6. Step 2, in detail — what is blocking
+## 6. Step 2 — resolved 2026-09-18
+
+Historical note kept for context: the guessed reference `TypeSafe Jev API/credential` was wrong; the real title is `typesafe.ai API`.
+
 
 `config/mcp.env.example` carries the `TYPESAFE_API_KEY` line commented out.
 Activating it needs two non-secret facts that only the vault can supply: the
