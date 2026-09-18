@@ -19,6 +19,7 @@ case "$*" in
   "issue create"*) printf '%s\n' "$*" >> "$F/created"; echo 'https://github.com/o/r/issues/31'; exit 0 ;;
   "issue edit"*) printf '%s\n' "$*" >> "$F/edited"; echo '{}'; exit 0 ;;
   "search issues"*) out "$(cat "$F/digest_search.json" 2>/dev/null || echo '[]')" ;;
+  *graphql*databaseId*) out "$(cat "$F/gql_links.json" 2>/dev/null || echo '{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}')" ;;
   *graphql*states:OPEN*) out "$(cat "$F/gql_parents.json" 2>/dev/null || echo '{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}')" ;;
   *graphql*)
     n=""
@@ -197,6 +198,59 @@ jq '.propagate_on_host="not-this-machine-xyz"' "$TMP/config.json" > "$TMP/config
 gate_before="$(grep -cE 'issue (create|edit|comment)' "$FAKE/calls")"
 la_gate="$(cat "$TMP/home/last-alarm" 2>/dev/null || printf none)"
 check 'a foreign host runs no alarm posting and advances no clock' "AI_BLOCKER_WATCH_CONFIG='$TMP/config-foreign.json' BW alarm && [ \"\$(grep -cE 'issue (create|edit|comment)' "$FAKE/calls")\" = \"\$gate_before\" ] && [ \"\$(cat "$TMP/home/last-alarm")\" = \"\$la_gate\" ]"
+
+# Blocked-by link maintenance from db-work-scope depends_on fences (#596).
+fence(){ printf '```db-work-scope\nstatus: ready\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 100\ndepends_on: %s\nobjects:\n```\n' "$1"; }
+lnode(){ jq -n --argjson n "$1" --argjson did "$2" --arg body "$3" --argjson bb "$4" \
+  '{number:$n,databaseId:$did,body:$body,blockedBy:{nodes:($bb|map({number:.}))}}'; }
+lnodes(){ jq -n --argjson nodes "$1" '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:$nodes}}}}' > "$FAKE/gql_links.json"; }
+check 'shipped config enables link maintenance' "jq -e '.links_enabled == true and (.links_interval_minutes | type == \"number\" and . > 0)' '$ROOT/config/blocker-watch.json'"
+: > "$FAKE/calls"; rm -f "$FAKE/links" "$TMP/home/last-links"
+lnodes "[$(lnode 20 220 "$(fence 7)" '[]'), $(lnode 7 207 'gate bug' '[]')]"
+check 'a tick records a missing blocked-by link from a depends_on fence' "BW tick && grep -q linked '$FAKE/links'"
+check 'the link used the blocker id found in the open-issue scan' "grep -q 'issue_id=207' '$FAKE/calls'"
+check 'the links scan clock advanced' "[ -f '$TMP/home/last-links' ]"
+
+: > "$FAKE/calls"; rm -f "$FAKE/links" "$TMP/home/last-links"
+lnodes "[$(lnode 20 220 "$(fence 7)" '[7]'), $(lnode 7 207 'gate bug' '[]')]"
+check 'a present link is left alone' "BW tick && [ ! -f '$FAKE/links' ]"
+
+: > "$FAKE/calls"; rm -f "$FAKE/links" "$TMP/home/last-links"
+lnodes "[$(lnode 21 221 "$(fence soon)" '[]'), $(lnode 22 222 'two fences ```db-work-scope
+depends_on: 7
+```
+```db-work-scope
+depends_on: 8
+```' '[]')]"
+BW tick > /dev/null 2> "$TMP/links-err.out"
+check 'malformed fences are skipped and counted, never a failure' "grep -q 'malformed db-work-scope' '$TMP/links-err.out' && [ ! -f '$FAKE/links' ]"
+check 'the malformed count is reported in the tick log' "grep -q 'skipped 2 malformed' '$TMP/links-err.out'"
+
+: > "$FAKE/calls"; rm -f "$FAKE/links" "$TMP/home/last-links"
+lnodes "[$(lnode 23 223 "$(fence '#7, 12')" '[]'), $(lnode 7 207 'gate bug' '[]')]"
+check '#-prefixed and comma-listed deps each get a link' "BW tick && [ \"\$(grep -c linked '$FAKE/links')\" = 2 ]"
+check 'an open blocker resolves its id without an extra read' "grep -q 'issue_id=207' '$FAKE/calls'"
+check 'a closed or absent blocker falls back to one REST read' "grep -q 'repos/o/r/issues/12' '$FAKE/calls' && grep -q 'issue_id=1' '$FAKE/calls'"
+
+: > "$FAKE/calls"; rm -f "$FAKE/links" "$TMP/home/last-links"
+lnodes "[$(lnode 24 224 "$(fence 24)" '[]')]"
+BW tick > /dev/null 2> "$TMP/links-err.out"
+check 'a self-dependency is skipped, not posted' "[ ! -f '$FAKE/links' ] && grep -q 'names itself' '$TMP/links-err.out'"
+
+: > "$FAKE/calls"; rm -f "$FAKE/links"
+lnodes "[$(lnode 20 220 "$(fence 7)" '[]'), $(lnode 7 207 'gate bug' '[]')]"
+check 'a dry run records no link' "BW links --dry-run 2> '$TMP/links-dry.out' && [ ! -f '$FAKE/links' ] && grep -q 'would record o/r#20 is blocked by o/r#7' '$TMP/links-dry.out'"
+check 'a standalone links run creates the link' "BW links && grep -q linked '$FAKE/links'"
+ll_before="$(grep -c databaseId "$FAKE/calls")"
+check 'a tick inside the links interval does not rescan' "BW tick && [ \"\$(grep -c databaseId '$FAKE/calls')\" = \"\$ll_before\" ]"
+jq '.links_enabled=false' "$TMP/config.json" > "$TMP/config-nolinks.json"
+check 'a disabled links config refuses a standalone run' "! AI_BLOCKER_WATCH_CONFIG='$TMP/config-nolinks.json' BW links"
+gate_before="$(grep -c databaseId "$FAKE/calls")"
+ll_gate="$(cat "$TMP/home/last-links" 2>/dev/null || printf none)"
+check 'a foreign host neither reads nor posts links' "AI_BLOCKER_WATCH_CONFIG='$TMP/config-foreign.json' BW links && [ \"\$(grep -c databaseId '$FAKE/calls')\" = \"\$gate_before\" ] && [ ! -f '$FAKE/links' ] && [ \"\$(cat "$TMP/home/last-links")\" = \"\$ll_gate\" ]"
+touch "$FAKE/fail"
+check 'an unreachable GitHub fails the links run and writes no clock' "! BW links && [ \"\$(cat "$TMP/home/last-links")\" = \"\$ll_gate\" ]"
+rm -f "$FAKE/fail"
 
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"

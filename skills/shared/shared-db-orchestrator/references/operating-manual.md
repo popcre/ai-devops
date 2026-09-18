@@ -100,6 +100,17 @@ are `structural`, `curated-master-data`, `application-data`, `source-data`,
 and have no default: `shared-db-orchestrator`, `curated-master-data-governance`,
 `application-session`, `source-data-session`, `owner-only`, or `repo-maintenance`.
 
+`depends_on:` is one inline comma-separated field of same-repo issue numbers
+(`depends_on: 3234` or `depends_on: #3180, #3199`), and it is the authoritative
+dependency record: the blocker watcher's tick parses it on every open issue and
+records any missing native "blocked by" link itself (ai-devops #596), so links
+can no longer be forgotten. Filing a dependency still owns it, though: the
+session that files or identifies "this cannot proceed until N closes" either
+registers `ai-blocker-watch wait N --for M` and ends its turn (the watcher wakes
+it when N closes), or hands the wait to a NAMED session/owner in the issue —
+never to "a future session." Deferring to an unnamed future owner left the
+#3180 follow-through unregistered for ~15 hours until Albert asked.
+
 Only `ready + structural + shared-db-orchestrator` is eligible for an author lane.
 It must use exact normalized objects, including every whole-body function or
 trigger the implementation replaces. Non-structural work must not claim database
