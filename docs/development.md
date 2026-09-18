@@ -194,6 +194,29 @@ so a narrowed run is a fast first signal, never a substitute for the complete
 run before shipping. `tests/lib-selection.sh` holds the logic and
 `tests/test-test-selection.sh` proves it in the fast workflow.
 
+Provider wrapper suites carry their own bounded subsets for iterating on one
+concern without paying for the whole file. For the DeepSeek wrapper:
+
+```bash
+AI_DEEPSEEK_MODEL_TESTS_ONLY=1 bash tests/test-ai-deepseek-agent.sh
+AI_DEEPSEEK_RECOVERY_TESTS_ONLY=1 bash tests/test-ai-deepseek-agent.sh
+```
+
+`MODEL_TESTS_ONLY` runs the credential-boundary, doctor, and model/flag-operand
+checks (the natural scope for a comment-only or model-adjacent delta);
+`RECOVERY_TESTS_ONLY` runs the retained-turn recovery checks. The complete
+suite stays the default, stays required once per pull request on the
+merge-candidate head, and CI still runs it in full; a subset is a fast first
+signal, never a substitute.
+
+When a change's correctness depends on a live provider fact — a pinned model
+slug, an endpoint shape, a quota behavior — the FIRST independent review of
+that change must embed a fresh probe of that fact in its evidence:
+`ai-review ... --tests '<live probe command>'` (for provider wrappers, the
+wrapper's own `doctor --live`). A reviewer shown no live proof cannot treat
+the fact as evidence and the review comes back unusable; PR #577 burned two
+review cycles learning this.
+
 `tests/test-session-conduct-policy.sh` protects the bounded CI-waiting and
 shared-infrastructure growth rules. Update that test with any deliberate change
 to those standing rules; do not weaken it simply to shorten guidance.

@@ -52,7 +52,7 @@ check "1Password re-exec was attempted" "grep -qx run '$TMP/args'"
 mkdir -p "$TMP/untrusted-test-root"
 check "credential resolution rejects an executable outside its trusted installation or test root" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_TEST_DIR='$TMP/untrusted-test-root' bash '$SCRIPT' send trust-check"
 OP_ARGS_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
-check "provider endpoint override is rejected before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_BASE_URL='https://attacker.invalid' bash '$SCRIPT' send endpoint-check && test '$OP_ARGS_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+check "provider endpoint override is rejected before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_TEST_ARGS='$TMP/args' DEEPSEEK_BASE_URL='https://attacker.invalid' bash '$SCRIPT' send endpoint-check && test '$OP_ARGS_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
 check "managed re-exec resolves only the DeepSeek reference behind an empty-environment boundary" "test \"\$(wc -l < '$TMP/op-env')\" -eq 1 && grep -q '^DEEPSEEK_API_KEY=op://' '$TMP/op-env' && grep -q '/usr/bin/env -i' '$SCRIPT'"
 check "managed re-exec keeps the DeepSeek key out of process arguments" "grep -q 'AI_DEEPSEEK_SECRET_FD=9' '$SCRIPT' && ! grep -q '\"DEEPSEEK_API_KEY=\$keep_key\"' '$SCRIPT'"
 FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && /usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9 DEEPSEEK_STUB_REPLY=DEEPSEEK_REVIEWER_HEALTHY DEEPSEEK_CURL_ARGS="$DEEPSEEK_CURL_ARGS" DEEPSEEK_CURL_ENV="$DEEPSEEK_CURL_ENV" DEEPSEEK_STUB_PID_FILE="$DEEPSEEK_STUB_PID_FILE" DEEPSEEK_STUB_TERM_MARKER="$DEEPSEEK_STUB_TERM_MARKER" "$SCRIPT" doctor --live 9<&9)"
@@ -130,8 +130,8 @@ check "invalid --model is refused with no provider call" "! run send model-check
 check "invalid DEEPSEEK_MODEL is refused with no provider call" "! DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run send model-check >'$TMP/model-env.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/model-env.out' && test '$MODEL_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "valid --model override still reaches the provider" "DEEPSEEK_STUB_REQUEST='$TMP/model-override-request.json' run send model-check --model deepseek-v4-pro >/dev/null && jq -e '.model==\"deepseek-v4-pro\"' '$TMP/model-override-request.json' && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((MODEL_CALLS+1))'"
 OP_ARGS_MODEL_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
-check "invalid --model is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' bash '$SCRIPT' send model-check --model deepseek-reasoner 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
-check "invalid DEEPSEEK_MODEL is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_MODEL=deepseek-reasoner bash '$SCRIPT' send model-check 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+check "invalid --model is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_TEST_ARGS='$TMP/args' bash '$SCRIPT' send model-check --model deepseek-reasoner 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+check "invalid DEEPSEEK_MODEL is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_TEST_ARGS='$TMP/args' DEEPSEEK_MODEL=deepseek-reasoner bash '$SCRIPT' send model-check 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
 OPERAND_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 check "--model with a missing operand is refused with usage" "! run send operand-check --model >'$TMP/operand-model.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-model.out' && grep -q 'Usage:' '$TMP/operand-model.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "--file with a missing operand is refused with usage" "! run send operand-check --file >'$TMP/operand-file.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-file.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
@@ -149,6 +149,12 @@ check "reply refuses an invalid ambient model before any provider call" "REPLY_E
 INVALID_ENV_OUT="$(AI_DEEPSEEK_TEST_LEDGER_FAILURE=publish run send invalid-env-fixture 2>&1)"
 INVALID_ENV_ID="$(printf '%s\n' "$INVALID_ENV_OUT" | sed -n 's/^Retained turn session: //p')"
 check "finalize recovers a retained paid turn under an invalid ambient model" "test -n '$INVALID_ENV_ID' && DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run finalize '$INVALID_ENV_ID' >/dev/null 2>&1 && test ! -e '$TMP/repo/.ai/deepseek-sessions/$INVALID_ENV_ID.recovery-required'"
+check "doctor --live refuses an invalid ambient model before contact" "LIVE_ENV_CALLS=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run doctor --live >'$TMP/doctor-invalid.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/doctor-invalid.out' && test \"\$LIVE_ENV_CALLS\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "--model= with an empty value gets the operand message, not a model error" "EMPTY_EQ_CALLS=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! run send eq-empty --model= >'$TMP/eq-empty.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/eq-empty.out' && ! grep -q 'unsupported DeepSeek model' '$TMP/eq-empty.out' && test \"\$EMPTY_EQ_CALLS\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "a flag-looking operand of --system is not scanned as a model" "DEEPSEEK_STUB_REQUEST='$TMP/operand-skip-request.json' run send operand-skip --system \"--model=deepseek-reasoner\" >/dev/null && jq -e '.messages[0].role==\"system\" and .messages[0].content==\"--model=deepseek-reasoner\"' '$TMP/operand-skip-request.json'"
+if [ "${AI_DEEPSEEK_MODEL_TESTS_ONLY:-0}" = 1 ]; then
+  printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]; exit $?
+fi
 SESSION="$(run send first | sed -n 's/^SESSION_ID: //p')"
 check "missing provider usage remains unknown" "jq -e '.counters.input==null and .counters.cost==null and .completeness==\"partial\"' '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl'"
 DEEPSEEK_STUB_USAGE='{"prompt_tokens":10,"prompt_cache_hit_tokens":0,"completion_tokens":3,"total_tokens":13}' run reply "$SESSION" measured >/dev/null
