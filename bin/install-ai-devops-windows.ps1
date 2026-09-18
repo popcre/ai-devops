@@ -707,6 +707,28 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Git Bash not found, so the blocker watch was not scheduled. Install Git for Windows and rerun this script."
 }
 
+# The shared-db reviewer start watch runs on ONE machine (run_on_host in
+# config/reviewer-start-watch.json): the one with the reviewer wrappers, because
+# drawing a replacement reviewer needs ai-review-preflight. Other machines skip it.
+Write-Step "Scheduling the reviewer start watch"
+$rswHost = $null
+try { $rswHost = (Get-Content -Raw (Join-Path $RepoPath 'config\reviewer-start-watch.json') | ConvertFrom-Json).run_on_host } catch { }
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note "Test mode: not touching this computer's scheduled tasks."
+} elseif (-not $rswHost -or $rswHost -ne $env:COMPUTERNAME) {
+    Write-Note "Reviewer start watch runs on $rswHost, not this computer; skipped."
+} elseif ($bwBash) {
+    $rswTool = (Join-Path $RepoPath 'bin\ai-reviewer-start-watch') -replace '\\', '/'
+    $rswProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$rswTool' schedule")
+    if ($rswProbe.ExitCode -eq 0) {
+        Write-Note "Reviewer start watch scheduled. Shared-db reviewers that never start are now rerouted from this computer."
+    } else {
+        Write-Note "Could not schedule the reviewer start watch: $($rswProbe.Output -join ' ')"
+    }
+} else {
+    Write-Note "Git Bash not found, so the reviewer start watch was not scheduled. Install Git for Windows and rerun this script."
+}
+
 Write-Step "Checking optional logins"
 if (Get-Command gh -ErrorAction SilentlyContinue) {
     $ghProbe = Invoke-NativeProbe -Command 'gh' -Arguments @('auth', 'status')
