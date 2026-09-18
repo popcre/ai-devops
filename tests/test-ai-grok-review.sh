@@ -101,7 +101,10 @@ cleanup() {
     rm -rf "$TMP" 2>/dev/null && return 0
     sleep 1
   done
-  rm -rf "$TMP"
+  # A stubborn leaked handle on $TMP is diagnostic, not a real test failure —
+  # the EXIT trap's own exit status would otherwise override an already
+  # fully-passing run. Best-effort final cleanup only.
+  rm -rf "$TMP" 2>/dev/null || true
 }
 trap cleanup EXIT
 

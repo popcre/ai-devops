@@ -95,7 +95,7 @@
       "aliases": []
     },
     {
-      "identity": "u2giants/shared-db",
+      "identity": "popcre/shared-db",
       "group": "shared-database",
       "local_representative": "C:/repos/shared-db",
       "default_branch": "main",
@@ -105,7 +105,7 @@
       "policy_source": "consumer",
       "routing_files": ["AGENTS.md", "HANDOFF.md", "README.md"],
       "special_gates": ["shared-db-structure", "orchestrator-claim", "target-identity-proof", "production-promotion"],
-      "aliases": []
+      "aliases": ["u2giants/shared-db"]
     },
     {
       "identity": "u2giants/theoracle",

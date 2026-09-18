@@ -80,7 +80,7 @@ ui_json="$(explain "$TMP/ui" src/app.ts)"
 check 'DesignFlow UI retains visual, authenticated, and no-self-merge gates' "jq -e '.observed_class==\"ui-live-workflow\" and ([\"visual-proof\",\"authenticated-workflow-proof\",\"designflow-no-self-merge\"]- .required_gates|length==0)' <<<\"\$ui_json\""
 
 # 6. Shared-database structure retains governance and target proof.
-new_repo "$TMP/db" u2giants/shared-db
+new_repo "$TMP/db" popcre/shared-db
 write_policy "$TMP/db" '{"schema_version":1,"paths":[{"glob":"supabase/**","class":"shared-db"}],"gates":{"shared-db":{"required":["repository-branch-and-pr","exact-head-independent-review","target-database-proof-before-write"],"forbidden_actions":[]}}}'
 start "$TMP/db" shared-db
 db_json="$(explain "$TMP/db" supabase/migrations/001.sql)"

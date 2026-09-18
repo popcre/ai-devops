@@ -370,6 +370,33 @@
       }
     },
     {
+      "match": "popcre/shared-db",
+      "paths": [
+        {
+          "glob": "migrations/**",
+          "class": "shared-db"
+        },
+        {
+          "glob": "master-data/**",
+          "class": "shared-db"
+        },
+        {
+          "glob": "policies/**",
+          "class": "shared-db"
+        }
+      ],
+      "gates": {
+        "shared-db": {
+          "required": [
+            "governed-issue-claim",
+            "preview-target-proof",
+            "production-promotion-authorization"
+          ],
+          "forbidden_actions": []
+        }
+      }
+    },
+    {
       "match": "u2giants/shared-db",
       "paths": [
         {
