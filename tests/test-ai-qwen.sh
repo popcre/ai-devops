@@ -785,6 +785,17 @@ UNREAD_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-unread.lock.d"; 
 UNREAD_OUT="$(run new review-unread --prompt 'review this' 2>&1)"; UNREAD_RC=$?
 check 'a lock whose owner cannot be read is treated as held' "test '$UNREAD_RC' -ne 0 && printf '%s' \"\$UNREAD_OUT\" | grep -q 'already active' && test -d '$UNREAD_LOCK'"
 rm -rf "$UNREAD_LOCK"
+# An older wrapper's lock (pid file, no owner record) whose pid is alive stays held.
+mkdir -p "$UNREAD_LOCK"; printf '%s
+' "$$" > "$UNREAD_LOCK/pid"; touch -d '3 hours ago' "$UNREAD_LOCK"
+LEGACY_OUT="$(run new review-unread --prompt 'review this' 2>&1)"; LEGACY_RC=$?
+check 'an older lock whose recorded pid is alive is held, however old' "test '$LEGACY_RC' -ne 0 && printf '%s' \"\$LEGACY_OUT\" | grep -q 'already active' && test -d '$UNREAD_LOCK'"
+rm -rf "$UNREAD_LOCK"
+# A second reclaimer judging the same dead record finds its only destination taken.
+mkdir -p "$STALE_LOCK.dead.fixture-dead"; : > "$STALE_LOCK.dead.fixture-dead/owner"
+RACE_OUT="$(run new review-stale --prompt 'review this' 2>&1)"; RACE_RC=$?
+check 'a stale lock already being reclaimed is not reclaimed twice' "test '$RACE_RC' -ne 0 && test \"\$(cat '$STALE_LOCK/owner')\" = '999999 - fixture-dead'"
+rm -rf "$STALE_LOCK.dead.fixture-dead"
 OLD_OUT="$(run new review-stale --prompt 'review this' 2>&1)"; OLD_RC=$?
 [ "$OLD_RC" -eq 0 ] || printf '  diagnostic: stale reclaim: %s\n' "$OLD_OUT"
 check 'a lock whose owner is gone is reclaimed once' "test '$OLD_RC' -eq 0 && printf '%s' \"\$OLD_OUT\" | grep -q 'reclaiming stale lock' && test ! -e '$STALE_LOCK.reclaim'"

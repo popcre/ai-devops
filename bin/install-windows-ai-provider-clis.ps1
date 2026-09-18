@@ -65,7 +65,7 @@ function Set-QwenChildEnvironmentHardening {
     if ($index -lt 0) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
     $backupDir = Join-Path $HOME '.local\state\ai-devops\qwen\vendor-backups'
     [void](New-Item -ItemType Directory -Force -Path $backupDir)
-    $backup = Join-Path $backupDir ("{0}.{1}.bak" -f $candidates[0].Name, (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
+    $backup = Join-Path $backupDir ("{0}.{1}.bak" -f $candidates[0].Name, ('{0}-{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N').Substring(0,8)))
     Copy-Item -LiteralPath $path -Destination $backup
     $patched = $content.Substring(0, $index) + $replacement + $content.Substring($index + $needle.Length)
     $temp = "$path.harden.$PID.tmp"
@@ -118,7 +118,7 @@ function Update-ProviderToExactVersion {
   }
   $backupDir = Join-Path $HOME '.local\state\ai-devops\provider-cli\backups'
   [void](New-Item -ItemType Directory -Force -Path $backupDir)
-  $backup = Join-Path $backupDir ("{0}.{1}.bak" -f $Provider.Command, (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
+  $backup = Join-Path $backupDir ("{0}.{1}.bak" -f $Provider.Command, ('{0}-{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N').Substring(0,8)))
   Copy-Item -LiteralPath $Path -Destination $backup
   Write-Host "Backed up $Path -> $backup"
   $restore = {
@@ -178,7 +178,7 @@ function Backup-QwenRuntime {
   if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return $null }
   $backupRoot = Join-Path $HOME '.local\state\ai-devops\qwen\vendor-backups'
   [void](New-Item -ItemType Directory -Force -Path $backupRoot)
-  $backup = Join-Path $backupRoot ("runtime-{0}" -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
+  $backup = Join-Path $backupRoot ("runtime-{0}" -f ('{0}-{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N').Substring(0,8)))
   Copy-Item -LiteralPath $Root -Destination $backup -Recurse
   if (-not (Test-Path -LiteralPath $backup -PathType Container)) { throw 'Qwen runtime backup could not be verified.' }
   return $backup
@@ -212,7 +212,7 @@ function Restore-QwenRuntime {
   # never deleted, and is moved back if the swap itself fails.
   param($Backup, [string]$Root = $(Join-Path $env:LOCALAPPDATA 'qwen-code'))
   if (-not (Test-QwenRuntimeTree $Backup)) { Write-QwenInstallEvent "no complete backup to restore ($Backup)"; return $false }
-  $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+  $stamp = ('{0}-{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N').Substring(0,8))
   $staging = "$Root.restoring.$stamp"
   $failed = "$Root.failed.$stamp"
   try {

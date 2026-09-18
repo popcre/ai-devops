@@ -417,12 +417,18 @@ lock_acquire() {
   read -r owner winowner token <<<"$record"
   [ "$winowner" != - ] || winowner=""
   if [ -z "$owner" ] || [ -z "$token" ]; then
-    # No readable owner record: an older wrapper's lock, or a record this
-    # environment cannot read. Neither proves the owner is gone; only a lock
-    # that has stayed ownerless for ten minutes is treated as abandoned.
+    # No owner record: an older wrapper's lock. Its pid file still names the
+    # owner; a live pid holds it. With no readable pid, only a lock older than
+    # any review (two hours) is treated as abandoned.
     local born now
     born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
-    now="$(date +%s)"; [ $((now - born)) -ge 600 ] || return 1
+    owner="$(cat "$dir/pid" 2>/dev/null || true)"
+    if [ -n "$owner" ]; then
+      lock_owner_alive "$owner" "" && return 1
+    else
+      now="$(date +%s)"; [ $((now - born)) -ge 7200 ] || return 1
+    fi
+    token="legacy.${owner:-none}.$born"
   else
     # One missed sighting is not proof the owner is gone: it must stay
     # invisible to every witness for three checks.
@@ -432,16 +438,17 @@ lock_acquire() {
       [ "$attempt" = 3 ] || sleep 1
     done
   fi
-  # Move the stale lock aside with one rename, then confirm what was moved
-  # is the record judged stale. If a live lock was taken instead (another
-  # reclaimer won in between), it is put straight back.
-  local tomb="$dir.tomb.$$.$RANDOM"
+  # Each stale record has exactly one place it can be moved to, named by its
+  # token, and that place is kept. A second reclaimer judging the same record
+  # finds the place taken and backs off, so it can never move a newer live
+  # lock aside.
+  local tomb="$dir.dead.$token"
   mv -T "$dir" "$tomb" 2>/dev/null || return 1
   if [ "$(lock_owner_record "$tomb")" != "$record" ]; then
     mv -T "$tomb" "$dir" 2>/dev/null || warn "a live Qwen lock was displaced to $tomb and could not be put back"
     return 1
   fi
-  rm -rf "$tomb"
+  find "$(dirname "$dir")" -maxdepth 1 -name "$(basename "$dir").dead.*" -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
   warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
   lock_publish "$dir" "$label"
 }
