@@ -756,10 +756,13 @@ fi
 # Step 7A (decision 21): a live review of one name, and a legacy repository-wide
 # lock, never block a different review of the same repository; the same name
 # stays serialized, and the two reviews share no Qwen session record.
-QWEN_RID="$(printf '%s\n%s' "$(cd "$REPO" && pwd -P)" "$(git -C "$REPO" config --get remote.origin.url 2>/dev/null || echo '')" | sha256sum | cut -c1-12)"
+run new review-baseline --prompt 'review this' >/dev/null 2>&1 || bad 'baseline review for the concurrency comparison completes'
+# Take the repository id from the wrapper's own session record, so the held
+# locks sit exactly where the wrapper looks whatever environment runs the suite.
+QWEN_RID="$(for f in "$AI_QWEN_STATE_DIR"/sessions/*/*--review-baseline.json; do [ -f "$f" ] && basename "$(dirname "$f")"; done | head -n 1)"
+check 'the wrapper recorded the repository id used for its locks' "test -n '$QWEN_RID'"
 HELD_REVIEW_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-held.lock.d"
 LEGACY_QWEN_REPO_LOCK="$AI_QWEN_STATE_DIR/locks/repo--$QWEN_RID.lock.d"
-run new review-baseline --prompt 'review this' >/dev/null 2>&1 || bad 'baseline review for the concurrency comparison completes'
 mkdir -p "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
 for held in "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"; do printf '%s\n' "$$" > "$held/pid"; printf 'review:held\n' > "$held/label"; printf '%s %s fixture-held\n' "$$" "$(cat "/proc/$$/winpid" 2>/dev/null || echo -)" > "$held/owner"; done
 SIBLING_OUT="$(run new review-sibling --prompt 'review this' 2>&1)"; SIBLING_RC=$?
