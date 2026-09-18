@@ -179,3 +179,32 @@ Activating it needs two non-secret facts that only the vault can supply: the
 exact 1Password item **title**, and the exact **field label** holding the key.
 A guessed reference resolves to an empty string silently, so the line stays
 commented until both are confirmed.
+
+## 7. Backtest results, 2026-09-18 (owner-approved; transcript text sent to TypeSafe, none committed)
+
+**Track B (150 real Claude session endings, hetz, floor 0.91).** Jev confident on
+73, unsure on 77 (median p of the unsure = 0.19, so most lean "clean" but miss
+the bar). Of the confident ones: 68 agree with the existing hook, 5 disagree.
+All 5 were closings that list open work and say "nothing needed from you": the
+existing hook flags that phrase; Jev correctly says they are not unsupported
+"done" claims. The two checks answer different questions; neither was wrong.
+The highest unsure scores (0.83-0.90) included real "that's what I fixed"
+closings with no named evidence that the existing hook misses. Next: tune the
+question wording and test a lower floor for the *flag-only* direction.
+
+**Track A calibration (6 longest local sessions, 300 old tool outputs).** At a
+point 60% through each session, Jev was asked whether each older tool output
+was safe to delete; "used later" = at least 3 distinctive tokens from it
+(paths, identifiers) reappear afterwards. 82 of 300 were used later.
+
+| delete when p(stale) >= | items deleted | of those, used later |
+|---|---|---|
+| 0.50 | 155 | 34 (22%) |
+| 0.80 | 2 | 0 |
+| 0.91 | 0 | 0 |
+
+At Albert's 0.91 floor Jev deletes nothing, so it is safe but saves nothing;
+at 0.50 it would discard needed material one time in five. Jev is not
+confidently calibrated on our traffic for this question. Caveat: this used our
+own question wording, not the plugin's; rerun with the plugin's prompt before
+the edge-dev trial.
