@@ -52,7 +52,7 @@ the reviewer-safety PR getting the mandatory independent exact-head review.
   `export PATH="/c/Program Files/jq:/c/Program Files/GitHub CLI:$PATH"` before
   `bin/ai-task-gates` / `bin/ai-gh`.
 - `bin/ai-doc-reachability` strips inline code BEFORE extracting Markdown links,
-  so a link whose label is backtick-wrapped — `` [`plan_x.md`](plan_x.md) `` —
+  so a link whose label is backtick-wrapped (a label written as `plan_x.md` inside backticks)
   is invisible to it and fails the gate with "not reachable". Use a plain-text
   label, like every neighboring AGENTS.md router row does. Hit and fixed in
   PR #600.
