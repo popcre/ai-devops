@@ -1962,8 +1962,8 @@ newest_epoch() { # newest_epoch PATH -> newest of the file mtime and every recor
 # Output: one line per record, "PATH<TAB>TYPE<TAB>NEWEST", TYPE/NEWEST "?" when unknown.
 GLM_RECORD_END='@@ai-glm-record-end@@'
 glm_record_index() {
-  local files=("$STATE_DIR"/sessions/*/*.json) args chunk sep i j k n f idx type newest mt
-  local -A kind stamp mtime
+  local files=("$STATE_DIR"/sessions/*/*.json) args chunk sep i j k n f idx type newest mt state
+  local -A kind stamp mtime settle
   [ -e "${files[0]:-}" ] || return 0
   # jq reads all its files as ONE stream: it abandons every later file after a parse
   # error, and in raw mode a file without a final newline runs into the next one. So
@@ -1977,9 +1977,9 @@ glm_record_index() {
     chunk=("${files[@]:i:100}"); args=()
     for f in "${chunk[@]}"; do args+=("$f" "$sep"); done
     # Native jq can end lines with CR. The timestamp list is exactly newest_epoch's.
-    while IFS=$'\t' read -r idx type newest; do
+    while IFS=$'\t' read -r idx type newest state; do
       case "$idx" in ''|*[!0-9]*) continue ;; esac
-      kind[$((i + idx))]="${type:-?}"; stamp[$((i + idx))]="$newest"
+      kind[$((i + idx))]="${type:-?}"; stamp[$((i + idx))]="$newest"; settle[$((i + idx))]="$state"
     done < <(jq -nr --arg end "$GLM_RECORD_END" --argjson want "${#chunk[@]}" '
       reduce inputs as $l ({cur: "", recs: []};
         if ($l | rtrimstr("\r")) == $end then .recs += [.cur] | .cur = "" else .cur += $l + "\n" end)
@@ -1989,8 +1989,14 @@ glm_record_index() {
           | if type != "object" then error("not a record") else . end
           | ([.last_activity_at, .last_poll_at, .provider_progress_at, .remote_turn.started_at, .updated_at, .created_at]
              | map(select(type == "string") | (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch "?"))) as $ts
-          | [$i, (.type // "-" | tostring), (if any($ts[]; . == "?") then "?" else ($ts | max // 0) end)])
-        catch [$i, "?", "?"]
+          # "settled": an implementation job whose own status leaves reconciliation nothing
+          # to do; reconcile_implementation_record returns early for exactly these.
+          | ((.type == "implementation") and ((.status | IN("completed", "aborted")) or
+              (.status == "failed" and ((.cleanup == null) or ((.cleanup | type) == "object" and
+                .cleanup.clone != "pending" and .cleanup.server_session != "pending"))))) as $settled
+          | [$i, (.type // "-" | tostring), (if any($ts[]; . == "?") then "?" else ($ts | max // 0) end),
+             (if $settled then "settled" else "open" end)])
+        catch [$i, "?", "?", "open"]
       | @tsv' -R "${args[@]}" 2>/dev/null | tr -d '\r' || true)
     while read -r mt f; do mtime[$f]="$mt"; done < <(stat -c '%Y %n' "${chunk[@]}" 2>/dev/null || true)
   done
@@ -1999,17 +2005,26 @@ glm_record_index() {
     f="${files[k]}"; type="${kind[$k]:-?}"; newest="${stamp[$k]:-?}"; mt="${mtime[$f]:-}"
     case "$mt" in ''|*[!0-9]*) newest="?" ;; esac
     case "$newest" in ''|*[!0-9]*) newest="?" ;; *) [ "$mt" -le "$newest" ] || newest="$mt" ;; esac
-    printf '%s\t%s\t%s\n' "$f" "$type" "$newest"
+    state="${settle[$k]:-open}"; [ "$state" = settled ] || state=open
+    printf '%s\t%s\t%s\t%s\n' "$f" "$type" "$newest" "$state"
   done
 }
 
-glm_due_review_records() { # CUTOFF -> records prune_review might remove (all others provably not due)
-  local f type newest
-  while IFS=$'\t' read -r f type newest; do
+glm_index() { # the record index; doctor builds it once and both of its scans reuse it
+  if [ -n "${GLM_INDEX_CACHED+x}" ]; then
+    [ -z "$GLM_INDEX_CACHED" ] || printf '%s\n' "$GLM_INDEX_CACHED"
+  else
+    glm_record_index
+  fi
+}
+
+glm_due_review_records() { # CUTOFF [typed] -> records prune_review might remove (all others provably not due)
+  local f type newest state
+  while IFS=$'\t' read -r f type newest state; do
     case "$type" in review|'?') ;; *) continue ;; esac
     [ "$newest" != '?' ] && [ "$newest" -ge "$1" ] && continue
-    printf '%s\n' "$f"
-  done < <(glm_record_index)
+    if [ "${2:-}" = typed ]; then printf '%s\t%s\n' "$type" "$f"; else printf '%s\n' "$f"; fi
+  done < <(glm_index)
 }
 
 prune_claim() { # prune_claim LOCK -> 0 claimed; never waits and never reclaims
@@ -2250,12 +2265,18 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
 }
 
 reconcile_implementation_records() {
-  local f type newest rc=0
+  local f type newest state rc=0
   # Only implementation records (and any the index could not read) can need recovery;
-  # reconcile_implementation_record itself ignores every other type.
-  while IFS=$'\t' read -r f type newest; do
-    case "$type" in implementation|'?') reconcile_implementation_record "$f" || rc=1 ;; esac
-  done < <(glm_record_index)
+  # reconcile_implementation_record itself ignores every other type. A settled job
+  # (completed, aborted, or failed with no pending cleanup) is one it would validate
+  # and then leave alone; that validation costs over ten seconds per record on a
+  # loaded Windows host, so the scan skips it and doctor fits its preflight window.
+  while IFS=$'\t' read -r f type newest state; do
+    case "$type:$state" in
+      implementation:settled) ;;
+      implementation:*|'?':*) reconcile_implementation_record "$f" || rc=1 ;;
+    esac
+  done < <(glm_index)
   return "$rc"
 }
 
@@ -2551,6 +2572,9 @@ cmd_doctor() {
   # Reconcile only records with exact schema, canonical clone, dead owner, matching
   # stale lock, and exact server evidence. Old unrecorded directories have no such
   # ownership proof and must never be swept automatically.
+  # Both record scans below share one index; each build reads every record.
+  local GLM_INDEX_CACHED
+  GLM_INDEX_CACHED="$(glm_record_index)"
   if reconcile_implementation_records; then
     printf 'PASS  implementation job records reconciled safely\n'
   else
@@ -2563,11 +2587,15 @@ cmd_doctor() {
   if [ -n "$bad" ]; then
     printf 'FAIL  review retention setting is usable: %s\n' "$bad"; FAILS=$((FAILS+1))
   else
-  while IFS= read -r f; do
+  local type
+  while IFS=$'\t' read -r type f; do
     [ -n "$f" ] || continue
     # An entry the index could not read counts only if the record really is a review.
-    [ "$(jq -r '.type // empty' "$f" 2>/dev/null | tr -d '\r')" = review ] && idle=$((idle + 1))
-  done < <(glm_due_review_records $(( $(date +%s) - 10#$RETENTION_HOURS * 3600 )))
+    case "$type" in
+      review) idle=$((idle + 1)) ;;
+      *) [ "$(jq -r '.type // empty' "$f" 2>/dev/null | tr -d '\r')" = review ] && idle=$((idle + 1)) ;;
+    esac
+  done < <(glm_due_review_records $(( $(date +%s) - 10#$RETENTION_HOURS * 3600 )) typed)
   if [ "$idle" -eq 0 ]; then
     printf 'PASS  no idle review sessions older than %sh\n' "$RETENTION_HOURS"
   else

@@ -754,6 +754,13 @@ ix rid1 claude--touched "{\"type\":\"review\",\"created_at\":\"$PR_OLD\"}" 'now'
 ix rid1 claude--frac "{\"type\":\"review\",\"created_at\":\"${PR_NOW%Z}.123456Z\"}"
 ix rid1 claude--offset "{\"type\":\"review\",\"created_at\":\"$(date -u +%FT%T)+00:00\"}"
 ix rid1 claude--job "{\"type\":\"implementation\",\"created_at\":\"$PR_OLD\"}"
+ix rid1 claude--done "{\"type\":\"implementation\",\"repository_root\":\"/r\",\"caller\":\"claude\",\"status\":\"completed\",\"created_at\":\"$PR_OLD\"}"
+ix rid1 claude--stopped "{\"type\":\"implementation\",\"repository_root\":\"/r\",\"caller\":\"claude\",\"status\":\"aborted\",\"created_at\":\"$PR_OLD\"}"
+ix rid1 claude--failclean "{\"type\":\"implementation\",\"repository_root\":\"/r\",\"caller\":\"claude\",\"status\":\"failed\",\"cleanup\":{\"clone\":\"removed\",\"server_session\":\"absent\"}}"
+ix rid1 claude--failbare "{\"type\":\"implementation\",\"repository_root\":\"/r\",\"caller\":\"claude\",\"status\":\"failed\"}"
+ix rid1 claude--failpend "{\"type\":\"implementation\",\"repository_root\":\"/r\",\"caller\":\"claude\",\"status\":\"failed\",\"cleanup\":{\"clone\":\"removed\",\"server_session\":\"pending\"}}"
+ix rid1 claude--failodd "{\"type\":\"implementation\",\"repository_root\":\"/r\",\"caller\":\"claude\",\"status\":\"failed\",\"cleanup\":\"pending\"}"
+ix rid1 claude--live "{\"type\":\"implementation\",\"repository_root\":\"/r\",\"caller\":\"claude\",\"status\":\"running\"}"
 ix rid1 claude--chat "{\"type\":\"assistant\",\"created_at\":\"$PR_OLD\"}"
 ix rid1 claude--untyped "{\"created_at\":\"$PR_OLD\"}"
 ix rid1 claude--empty ""
@@ -767,12 +774,28 @@ IX_SLOW="$(ix_run 'for f in "$STATE_DIR"/sessions/*/*.json; do [ "$(jq -r ".type
 check "no record the per-record rule calls due is skipped by the index" \
   "for r in $(printf '%s ' $IX_SLOW); do case ' $IX_DUE' in *\" \$r \"*) ;; *) exit 1 ;; esac; done"
 check "reconciliation visits only implementation records and unreadable ones" \
-  "test \"\$(ix_run 'reconcile_implementation_record(){ printf \"%s\n\" \"\${1#*/sessions/}\"; }; reconcile_implementation_records' | sort | tr '\n' ' ')\" = 'rid1/claude--broken.json rid1/claude--empty.json rid1/claude--job.json rid1/claude--twice.json '"
+  "test \"\$(ix_run 'reconcile_implementation_record(){ printf \"%s\n\" \"\${1#*/sessions/}\"; }; reconcile_implementation_records' | sort | tr '\n' ' ')\" = 'rid1/claude--broken.json rid1/claude--empty.json rid1/claude--failodd.json rid1/claude--failpend.json rid1/claude--job.json rid1/claude--live.json rid1/claude--twice.json '"
+# Settled jobs must be ones reconcile_implementation_record itself returns early for.
+# With validation stubbed, reaching the owner-liveness probe means it would act.
+IX_EARLY="$(ix_run 'implementation_record_path_valid(){ :; }; implementation_meta_valid(){ :; }; kill(){ printf "%s\n" "$CUR"; return 0; }
+  for f in "$STATE_DIR"/sessions/rid1/claude--*.json; do CUR="${f#*/sessions/}"; reconcile_implementation_record "$f" || :; done 2>/dev/null' | sort | tr '\n' ' ')"
+ix_col() { ix_run 'glm_record_index' | awk -F'\t' "$1"' {sub(/.*\/sessions\//, "", $1); print $1}' | sort | tr '\n' ' '; }
+IX_OPEN="$(ix_col '$2=="implementation" && $4=="open"')"
+IX_SETTLED="$(ix_col '$4=="settled"')"
+check "the index settles only completed, aborted, and cleanly failed jobs" \
+  "test '$IX_SETTLED' = 'rid1/claude--done.json rid1/claude--failbare.json rid1/claude--failclean.json rid1/claude--stopped.json '"
+check "every job reconciliation would act on stays open in the index" \
+  "test -n '$IX_EARLY' && (for r in $IX_EARLY; do case ' $IX_OPEN' in *\" \$r \"*) ;; *) exit 1 ;; esac; done)"
+IX_CACHE="$(ix_run 'glm_record_index(){ echo rebuilt; printf "%s\t%s\t%s\t%s\n" /s/r/a.json review 0 open; }
+  GLM_INDEX_CACHED="$(glm_record_index | tail -1)"; glm_due_review_records 5 typed; reconcile_implementation_records')"
+check "both doctor scans reuse one cached index" "test '$IX_CACHE' = \"\$(printf 'review\t/s/r/a.json')\""
+check "doctor builds the index once, before both scans" \
+  "printf '%s\n' \"\$DOCTOR_FN\" | grep -q 'GLM_INDEX_CACHED=\"\$(glm_record_index)\"'"
 # The cost that broke the preflight was spawns per record; the index is bounded per chunk.
 for i in $(seq 1 250); do ix rid2 "claude--bulk$i" "{\"type\":\"assistant\",\"created_at\":\"$PR_OLD\"}"; done
 IX_SPAWNS="$(ix_run 'jq(){ echo jq >> "$STATE_DIR/spawns"; command jq "$@"; }; stat(){ echo stat >> "$STATE_DIR/spawns"; command stat "$@"; }; date(){ echo date >> "$STATE_DIR/spawns"; command date "$@"; }
   glm_due_review_records 0 >/dev/null; wc -l < "$STATE_DIR/spawns"' | tr -d ' ')"
-check "scanning 263 records costs a bounded number of spawns, not several per record" "test '$IX_SPAWNS' -le 6"
+check "scanning 270 records costs a bounded number of spawns, not several per record" "test '$IX_SPAWNS' -le 6"
 pr_batch() { AI_GLM_SOURCE="$AI_GLM" AI_GLM_PRUNE_BATCH="$1" bash -c 'source "$AI_GLM_SOURCE"; prune_batch_valid' >/dev/null 2>&1; }
 check "a zero prune batch is refused (it would mean unlimited)" "! pr_batch 0"
 check "a non-numeric prune batch is refused, not silently skipped" "! pr_batch abc && ! pr_batch -3 && ! pr_batch 2x"
