@@ -241,8 +241,29 @@ bounded requests, results and audit are under
 `SUCCESS`, `MISSING_TASK`, `STALE_INSTALLATION`, `CONCURRENT_EXECUTION`,
 `REQUEST_REJECTED`, `OPERATION_FAILED`, `RESULT_INVALID` or `TIMEOUT`.
 
+Because the S4U task runs inside the operator's own logon session, the elevated
+worker hardens its resolution roots before doing anything else: module
+resolution is pinned to the two system-owned module directories only, the
+qualification child inherits that pinned environment, and a per-user
+(`HKCU`) CLSID override for the Task Scheduler COM class refuses the run with
+`STALE_INSTALLATION` instead of loading operator code elevated. When the audit
+trail or replay ledger reaches its capacity bound, further requests are refused
+before the operation executes, and a request file is always consumed exactly
+once — an integrity-write failure can never leave it behind to re-run later.
+
+Installation also pins ownership and the ACL of
+`C:\ProgramData\ai-devops\windows-runner-security.json` (Administrators and
+SYSTEM full control, the operator modify so the fixed refresh can replace it,
+everyone else read-only, no inherited or reparse ambiguity), so the TPM/Secure
+Boot evidence can never be pre-created by another local account. Existing
+evidence content from a manual preflight is preserved. The worker re-checks
+that file's ownership and shape before every refresh.
+
 Removal first verifies manifest ownership and drift, then writes a protected
-recovery bundle. Supply a reviewed protected backup location when required:
+recovery bundle. `-RequireManifestMatch` is the stricter rollback gate: removal
+then also requires the installed payload hashes to match the repository
+checkout you are removing from, so a rollback always removes exactly what was
+reviewed. Supply a reviewed protected backup location when required:
 
 ```powershell
 pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Remove -RequireManifestMatch -BackupPath C:\ProgramData\ai-devops\reviewed-maintenance-recovery -OperatorUser "$env:COMPUTERNAME\ahazan"

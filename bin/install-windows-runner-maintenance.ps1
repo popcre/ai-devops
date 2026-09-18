@@ -26,12 +26,30 @@ function Assert-Administrator {
   if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Administrator elevation is required.' }
 }
 
+function Invoke-ProtectedIcacls {
+  # Every icacls invocation must be checked immediately: $LASTEXITCODE only
+  # reflects the most recent native call, so a batch of unchecked calls lets
+  # a failed /setowner or grant pass silently.
+  param([Parameter(Mandatory)][string[]]$Arguments)
+  & icacls.exe @Arguments | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Filesystem ACL update failed.' }
+}
+
 function Resolve-OperatorSid {
   param([Parameter(Mandatory)][string]$User)
   if ($User -notmatch '^([^\\]+)\\([^\\]+)$' -or $Matches[1] -cne $env:COMPUTERNAME) { throw 'Operator must be one unambiguous local account on this host.' }
   $account = [Security.Principal.NTAccount]::new($User)
   try { $sid = $account.Translate([Security.Principal.SecurityIdentifier]) } catch { throw 'Operator SID could not be resolved.' }
   if (-not $sid.Value.StartsWith('S-1-5-21-', [StringComparison]::Ordinal)) { throw 'Operator SID is not a local account SID.' }
+  # A local GROUP resolves through the same Translate call and would grant
+  # every member request-write and task-run rights, so the account must be
+  # positively confirmed as a user before it may own the boundary.
+  try {
+    Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+    $machine = [System.DirectoryServices.AccountManagement.PrincipalContext]::new([System.DirectoryServices.AccountManagement.ContextType]::Machine)
+    $matched = [System.DirectoryServices.AccountManagement.Principal]::FindByIdentity($machine, [System.DirectoryServices.AccountManagement.IdentityType]::Sid, $sid.Value)
+  } catch { throw 'Operator account type could not be verified.' }
+  if ($null -eq $matched -or -not ($matched -is [System.DirectoryServices.AccountManagement.UserPrincipal])) { throw 'Operator is not a local user account.' }
   return $sid.Value
 }
 
@@ -67,24 +85,26 @@ function Get-DesiredPayloadManifest {
 }
 
 function Set-ProtectedFilesystemAcl {
-  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Runtime')][string]$Kind)
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Runtime','Evidence')][string]$Kind)
   Assert-NoReparsePoint -LiteralPath $LiteralPath
   $admins = '*S-1-5-32-544'
   $system = '*S-1-5-18'
   if ($Kind -eq 'Payload') {
-    & icacls.exe $LiteralPath /setowner $admins /T /C | Out-Null
-    & icacls.exe $LiteralPath /inheritance:r /grant:r "${admins}:(OI)(CI)F" "${system}:(OI)(CI)F" "*${OperatorSid}:(OI)(CI)RX" /T /C | Out-Null
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins,'/T','/C')
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX",'/T','/C')
+  } elseif ($Kind -eq 'Evidence') {
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:M",'*S-1-1-0:R')
   } else {
-    & icacls.exe $LiteralPath /setowner $admins /T /C | Out-Null
-    & icacls.exe $LiteralPath /inheritance:r /grant:r "${admins}:(OI)(CI)F" "${system}:(OI)(CI)F" "*${OperatorSid}:(OI)(CI)RX" | Out-Null
-    & icacls.exe (Join-Path $LiteralPath 'requests') /inheritance:r /grant:r "${admins}:(OI)(CI)F" "${system}:(OI)(CI)F" "*${OperatorSid}:(OI)(CI)M" /T /C | Out-Null
-    & icacls.exe (Join-Path $LiteralPath 'results') /inheritance:r /grant:r "${admins}:(OI)(CI)F" "${system}:(OI)(CI)F" "*${OperatorSid}:(OI)(CI)RX" /T /C | Out-Null
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins,'/T','/C')
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX")
+    Invoke-ProtectedIcacls -Arguments @((Join-Path $LiteralPath 'requests'),'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)M",'/T','/C')
+    Invoke-ProtectedIcacls -Arguments @((Join-Path $LiteralPath 'results'),'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX",'/T','/C')
     $audit = Join-Path $LiteralPath 'audit.jsonl'
-    if (Test-Path -LiteralPath $audit) { & icacls.exe $audit /inheritance:r /grant:r "${admins}:F" "${system}:F" "*${OperatorSid}:R" | Out-Null }
+    if (Test-Path -LiteralPath $audit) { Invoke-ProtectedIcacls -Arguments @($audit,'/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:R") }
     $ledger = Join-Path $LiteralPath 'processed-requests.jsonl'
-    if (Test-Path -LiteralPath $ledger) { & icacls.exe $ledger /inheritance:r /grant:r "${admins}:F" "${system}:F" | Out-Null }
+    if (Test-Path -LiteralPath $ledger) { Invoke-ProtectedIcacls -Arguments @($ledger,'/inheritance:r','/grant:r',"${admins}:F","${system}:F") }
   }
-  if ($LASTEXITCODE -ne 0) { throw 'Filesystem ACL update failed.' }
 }
 
 function Register-MaintenanceTask {
@@ -124,23 +144,33 @@ function Get-InstalledTaskSnapshot {
 }
 
 function Test-PathAclContract {
-  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','RuntimeRoot','Requests','Results','Audit','Ledger')][string]$Kind)
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','RuntimeRoot','Requests','Results','Audit','Ledger','Evidence')][string]$Kind)
   Assert-NoReparsePoint -LiteralPath $LiteralPath
   $acl = Get-Acl -LiteralPath $LiteralPath
   $ownerSid = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
   if ($ownerSid -notin @('S-1-5-32-544','S-1-5-18')) { throw "STALE_INSTALLATION: foreign owner on $Kind." }
+  $allowedIdentities = @('S-1-5-32-544','S-1-5-18',$OperatorSid)
+  if ($Kind -eq 'Evidence') { $allowedIdentities += 'S-1-1-0' }
   $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
-  $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18',$OperatorSid) })
+  $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin $allowedIdentities })
   if ($unexpected.Count -ne 0) { throw "STALE_INSTALLATION: unexpected ACL identity on $Kind." }
   foreach ($required in @('S-1-5-32-544','S-1-5-18')) {
     if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $required -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw "STALE_INSTALLATION: missing protected ACL on $Kind." }
+  }
+  if ($Kind -eq 'Evidence') {
+    # The evidence gate stays world-READABLE exactly as ProgramData files
+    # already are (the runner service account reads it), but read must
+    # never drift into write or delete for any non-operator principal.
+    $worldRules = @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-1-0' })
+    if ($worldRules.Count -eq 0) { throw 'STALE_INSTALLATION: world read access missing on Evidence.' }
+    if (@($worldRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -ne 0) { throw 'STALE_INSTALLATION: world access exceeds read on Evidence.' }
   }
   $operatorRules = @($rules | Where-Object { $_.IdentityReference.Value -eq $OperatorSid })
   if ($Kind -eq 'Ledger') { if ($operatorRules.Count -ne 0) { throw 'STALE_INSTALLATION: operator can read or write the replay ledger.' }; return }
   if ($operatorRules.Count -eq 0) { throw "STALE_INSTALLATION: operator ACL missing on $Kind." }
   $operatorRights = $operatorRules | ForEach-Object FileSystemRights
   $mayWrite = @($operatorRights | Where-Object { ($_ -band [Security.AccessControl.FileSystemRights]::Write) -or ($_ -band [Security.AccessControl.FileSystemRights]::Delete) -or ($_ -band [Security.AccessControl.FileSystemRights]::ChangePermissions) }).Count -ne 0
-  if ($Kind -eq 'Requests') { if (-not $mayWrite) { throw 'STALE_INSTALLATION: operator cannot create requests.' } }
+  if ($Kind -eq 'Requests' -or $Kind -eq 'Evidence') { if (-not $mayWrite) { throw "STALE_INSTALLATION: operator write access missing on $Kind." } }
   elseif ($mayWrite) { throw "STALE_INSTALLATION: operator has write access on $Kind." }
 }
 
@@ -161,6 +191,7 @@ function Test-MaintenanceInstallation {
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'results') -OperatorSid $ExpectedOperatorSid -Kind Results
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'audit.jsonl') -OperatorSid $ExpectedOperatorSid -Kind Audit
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'processed-requests.jsonl') -OperatorSid $ExpectedOperatorSid -Kind Ledger
+  Test-PathAclContract -LiteralPath $script:EvidencePath -OperatorSid $ExpectedOperatorSid -Kind Evidence
   $task = Get-InstalledTaskSnapshot
   $expectedArgs = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
   $expectedSddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)"
@@ -175,6 +206,23 @@ function Backup-MaintenanceInstallation {
   if ($null -ne $task) { Export-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName | Set-Content -LiteralPath (Join-Path $Destination 'task.xml') -Encoding utf8 }
   if (Test-Path -LiteralPath $script:PayloadRoot) { Copy-Item -LiteralPath $script:PayloadRoot -Destination (Join-Path $Destination 'payload') -Recurse }
   @{ schema_version=1; task_path=$script:TaskPath; backed_up_at_utc=[DateTime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination 'recovery.json') -Encoding utf8
+}
+
+function Protect-EvidenceFile {
+  # The qualification evidence is the TPM/Secure Boot gate CI consumes, and
+  # this boundary makes it remotely refreshable, so it may never sit as a
+  # pre-created attacker-owned file. Install pins its ownership and ACL;
+  # existing content (including a manual preflight's) is preserved.
+  param([Parameter(Mandatory)][string]$OperatorSid)
+  $parent = Split-Path -Parent $script:EvidencePath
+  New-Item -ItemType Directory -Path $parent -Force | Out-Null
+  Assert-NoReparsePoint -LiteralPath $parent
+  if (Test-Path -LiteralPath $script:EvidencePath) {
+    Assert-NoReparsePoint -LiteralPath $script:EvidencePath
+  } else {
+    [IO.File]::WriteAllBytes($script:EvidencePath, [byte[]]@())
+  }
+  Set-ProtectedFilesystemAcl -LiteralPath $script:EvidencePath -OperatorSid $OperatorSid -Kind Evidence
 }
 
 function Install-MaintenancePayload {
@@ -203,16 +251,34 @@ function Install-MaintenancePayload {
   $runtimeParent = Split-Path -Parent $script:RuntimeRoot
   New-Item -ItemType Directory -Path $runtimeParent -Force | Out-Null
   Assert-NoReparsePoint -LiteralPath $runtimeParent
+  # Assert the runtime root itself BEFORE anything is created through it:
+  # a pre-planted junction at that name would otherwise redirect the
+  # requests/results/audit creations outside the intended boundary.
+  if (-not (Test-Path -LiteralPath $script:RuntimeRoot)) { New-Item -ItemType Directory -Path $script:RuntimeRoot | Out-Null }
+  Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot
   New-Item -ItemType Directory -Path (Join-Path $script:RuntimeRoot 'requests'), (Join-Path $script:RuntimeRoot 'results') -Force | Out-Null
   foreach ($name in @('audit.jsonl','processed-requests.jsonl')) { $p = Join-Path $script:RuntimeRoot $name; if (-not (Test-Path -LiteralPath $p)) { [IO.File]::WriteAllBytes($p, [byte[]]@()) } }
   Set-ProtectedFilesystemAcl -LiteralPath $script:PayloadRoot -OperatorSid $OperatorSid -Kind Payload
   Set-ProtectedFilesystemAcl -LiteralPath $script:RuntimeRoot -OperatorSid $OperatorSid -Kind Runtime
+  Protect-EvidenceFile -OperatorSid $OperatorSid
 }
 
 function Remove-MaintenanceInstallation {
-  param([Parameter(Mandatory)][string]$ExpectedOperatorSid, [string]$RecoveryPath)
+  param([Parameter(Mandatory)][string]$ExpectedOperatorSid, [string]$RecoveryPath, [switch]$RequireManifestMatch, [string]$SourceRoot)
   if (-not (Test-Path -LiteralPath $script:PayloadRoot) -and $null -eq (Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue)) { return 'ABSENT' }
   Test-MaintenanceInstallation -ExpectedOperatorSid $ExpectedOperatorSid | Out-Null
+  if ($RequireManifestMatch) {
+    # The documented stricter rollback gate: removal may only proceed when
+    # the installed payload is byte-identical to the repository checkout the
+    # operator is removing from, so a rollback always removes exactly what
+    # was reviewed. Default removal still verifies ownership and internal
+    # consistency unconditionally.
+    $desired = Get-DesiredPayloadManifest -SourceRoot $SourceRoot -OperatorSid $ExpectedOperatorSid
+    $installed = Get-Content -Raw -LiteralPath (Join-Path $script:PayloadRoot 'manifest.json') | ConvertFrom-Json
+    foreach ($name in @('windows-runner-maintenance-worker.ps1','qualify-windows-runner.ps1')) {
+      if ([string]$installed.files.$name -cne [string]$desired.files[$name]) { throw "RECOVERY_MANIFEST_MISMATCH: installed $name does not match this repository checkout." }
+    }
+  }
   if ((Get-InstalledTaskSnapshot).state -eq 'Running') { throw 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before removal.' }
   if ([string]::IsNullOrWhiteSpace($RecoveryPath)) { $RecoveryPath = Join-Path (Split-Path -Parent $script:RuntimeRoot) ('windows-runner-maintenance-recovery-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')) }
   Backup-MaintenanceInstallation -Destination $RecoveryPath
@@ -225,7 +291,7 @@ function Remove-MaintenanceInstallation {
 function Invoke-InstallerMain {
   $sid = Resolve-OperatorSid -User $OperatorUser
   $sourceRoot = Split-Path -Parent $PSScriptRoot
-  if ($Remove) { Assert-Administrator; Remove-MaintenanceInstallation -ExpectedOperatorSid $sid -RecoveryPath $BackupPath; return }
+  if ($Remove) { Assert-Administrator; Remove-MaintenanceInstallation -ExpectedOperatorSid $sid -RecoveryPath $BackupPath -RequireManifestMatch:$RequireManifestMatch -SourceRoot $sourceRoot; return }
   if ($Verify -or (-not $Install -and -not $Update)) { Test-MaintenanceInstallation -ExpectedOperatorSid $sid | Out-Null; Write-Output 'PASS: Windows runner maintenance installation verified'; return }
   Assert-Administrator
   $existingTask = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue

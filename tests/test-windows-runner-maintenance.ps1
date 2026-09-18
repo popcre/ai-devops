@@ -91,6 +91,17 @@ try {
   Case 'Recovery_RunningTask' { Assert-Contains $worker "'CONCURRENT_EXECUTION'"; Assert-Contains $installer 'RECOVERY_RUNNING_TASK' }
   Case 'Recovery_FailedCleanup' { Assert-Contains $installer 'Refusing to replace an unverified previous payload backup.' }
   Case 'Rollback_RestoresExactPriorOwnedState' { Assert-Contains $installer 'Export-ScheduledTask'; Assert-Contains $installer 'task.xml'; Assert-Contains $installer 'recovery.json' }
+  Case 'Worker_PinsSystemOnlyModuleResolution' { Assert-Contains $worker '$env:PSModulePath'; Assert-Contains $worker "Join-Path `$PSHOME 'Modules'"; Assert-True ($worker.IndexOf('`$env:PSModulePath') -lt $worker.IndexOf('function Read-BoundedBytes')) 'module path pinned after function definitions' }
+  Case 'Worker_RefusesPerUserComOverride' { Assert-Contains $worker 'Assert-NoPerUserComOverride'; Assert-Contains $worker '{148BD52A-A2AB-11CE-B07F-00AA006C7A83}' }
+  Case 'Integrity_CapacityCheckedBeforeExecution' { Assert-Contains $worker 'Test-IntegrityCapacity'; Assert-True ($worker.IndexOf('Test-IntegrityCapacity -AuditPath') -lt $worker.IndexOf('Invoke-RefreshQualification -ProtectedQualificationScript')) 'capacity checked after execution' }
+  Case 'Integrity_RequestConsumedExactlyOnce' { Assert-True ($worker -match 'finally \{\s*\r?\n\s*Remove-Item -LiteralPath \$file\.FullName -Force') 'request removal is not guaranteed in finally'; Assert-Contains $worker "'AUDIT_FULL|LEDGER_FULL'" }
+  Case 'Evidence_IsProtectedAtInstall' { Assert-Contains $installer 'Protect-EvidenceFile'; Assert-Contains $installer "'*S-1-1-0:R'"; Assert-Contains $installer 'Test-PathAclContract -LiteralPath $script:EvidencePath' }
+  Case 'Evidence_WorkerVerifiesBeforeRefresh' { Assert-Contains $worker 'Test-EvidenceBoundary' }
+  Case 'RuntimeRoot_ReparseCheckedBeforeChildren' { Assert-True ($installer.IndexOf('Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot') -ge 0 -and $installer.IndexOf('Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot') -lt $installer.IndexOf("New-Item -ItemType Directory -Path (Join-Path `$script:RuntimeRoot 'requests')")) 'runtime root not asserted before children are created' }
+  Case 'RequestId_SanitizedBeforeUse' { Assert-Contains $worker "'REJECTED'"; Assert-True ($worker -match '\$id -notmatch ''\^\[A-Za-z0-9-\]\{1,80\}\$''') 'request id is not sanitized to a safe character set' }
+  Case 'Acl_EveryIcaclsCallChecksExitCode' { Assert-Contains $installer 'Invoke-ProtectedIcacls'; Assert-True (@([regex]::Matches($installer, '&\s+icacls\.exe')).Count -eq 1) 'icacls is invoked outside the per-call exit-checked helper' }
+  Case 'Operator_MustBeLocalUserNotGroup' { Assert-Contains $installer 'UserPrincipal'; Assert-Contains $installer 'Operator is not a local user account.' }
+  Case 'Remove_RequireManifestMatchEnforcesRepositoryMatch' { Assert-Contains $installer 'RECOVERY_MANIFEST_MISMATCH'; Assert-Contains $installer 'RequireManifestMatch:$RequireManifestMatch' }
   Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue

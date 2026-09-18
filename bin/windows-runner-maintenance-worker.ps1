@@ -2,6 +2,12 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+# The S4U task runs inside the operator's own logon session, so every
+# operator-writable resolution root must leave the process before any
+# cmdlet, module, or COM class is touched. Only system-owned module
+# directories may remain on the module path; -NoProfile does not stop
+# module autoloading by itself.
+$env:PSModulePath = (Join-Path $PSHOME 'Modules') + ';C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
 $script:PayloadRoot = 'C:\Program Files\ai-devops\windows-runner-maintenance'
 $script:RuntimeRoot = 'C:\ProgramData\ai-devops\windows-runner-maintenance'
 $script:EvidencePath = 'C:\ProgramData\ai-devops\windows-runner-security.json'
@@ -72,11 +78,40 @@ function Test-PayloadManifest {
   if ($operatorRules.Count -eq 0 -or @($operatorRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ChangePermissions) }).Count -ne 0) { throw 'ACL_DRIFT' }
 }
 
+function Assert-NoPerUserComOverride {
+  # HKCU CLSID registrations resolve BEFORE HKLM, so an operator-writable
+  # per-user override for the Task Scheduler COM class would load operator
+  # code into this elevated process. A legitimate installation never has one.
+  $scheduleServiceClsid = '{148BD52A-A2AB-11CE-B07F-00AA006C7A83}'
+  if (Test-Path -LiteralPath "HKCU:\Software\Classes\CLSID\$scheduleServiceClsid") { throw 'PER_USER_COM_OVERRIDE' }
+}
+
+function Test-EvidenceBoundary {
+  # The qualification evidence is the TPM/Secure Boot gate consumed by CI,
+  # so the worker refuses to refresh it through any path it does not own
+  # outright: it must exist as a plain file owned by Administrators/SYSTEM.
+  if (-not (Test-Path -LiteralPath $script:EvidencePath -PathType Leaf)) { throw 'ACL_DRIFT' }
+  $item = Get-Item -LiteralPath $script:EvidencePath -Force
+  if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'REPARSE_POINT' }
+  $owner = ([Security.AccessControl.FileSecurity]::new($script:EvidencePath, [Security.AccessControl.AccessControlSections]::Owner)).GetOwner([Security.Principal.SecurityIdentifier]).Value
+  if ($owner -notin @('S-1-5-32-544','S-1-5-18')) { throw 'ACL_DRIFT' }
+}
+
+function Test-IntegrityCapacity {
+  param([Parameter(Mandatory)][string]$AuditPath, [Parameter(Mandatory)][string]$LedgerPath, [Parameter(Mandatory)][int]$MaxAuditBytes, [Parameter(Mandatory)][int]$MaxLedgerBytes)
+  # Refuse BEFORE the operation runs: once the audit or replay ledger is
+  # full, executing further unrecorded operations is fail-open. One line of
+  # headroom (bounded by the audit line cap) is reserved for this decision.
+  if ((Test-Path -LiteralPath $AuditPath) -and (Get-Item -LiteralPath $AuditPath).Length -ge ($MaxAuditBytes - 8192)) { throw 'AUDIT_FULL' }
+  if ((Test-Path -LiteralPath $LedgerPath) -and (Get-Item -LiteralPath $LedgerPath).Length -ge ($MaxLedgerBytes - 8192)) { throw 'LEDGER_FULL' }
+}
+
 function Test-TaskBoundary {
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid)
-  $task = Get-ScheduledTask -TaskPath '\AiDevOps\' -TaskName 'WindowsRunnerMaintenance' -ErrorAction Stop
+  $task = Get-ScheduledTask -TaskPath '\AiDevops\' -TaskName 'WindowsRunnerMaintenance' -ErrorAction Stop
   $expectedArguments = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
   if ([string]$task.Actions[0].Execute -cne 'C:\Program Files\PowerShell\7\pwsh.exe' -or [string]$task.Actions[0].Arguments -cne $expectedArguments -or [string]$task.Principal.UserId -cne $ExpectedOperatorSid -or [string]$task.Principal.LogonType -cne 'S4U' -or [string]$task.Principal.RunLevel -cne 'Highest' -or @($task.Triggers).Count -ne 0 -or [string]$task.Settings.MultipleInstances -cne 'IgnoreNew') { throw 'STALE_INSTALLATION' }
+  Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
   $actualSddl = $service.GetFolder('\AiDevOps\').GetTask('WindowsRunnerMaintenance').GetSecurityDescriptor(0)
@@ -148,6 +183,7 @@ function Invoke-MaintenanceWorker {
       foreach ($file in $requestFiles) {
         $started = [DateTime]::UtcNow
         $id = [IO.Path]::GetFileNameWithoutExtension($file.Name)
+        if ($id -notmatch '^[A-Za-z0-9-]{1,80}$') { $id = 'REJECTED' }
         $resultCode = if ($null -eq $mutex -or -not $firstRequest) { 'CONCURRENT_EXECUTION' } else { 'REQUEST_REJECTED' }
         $exitCode = 1
         $message = if ($resultCode -eq 'CONCURRENT_EXECUTION') { 'Another maintenance request is already running.' } else { 'The request was rejected.' }
@@ -160,23 +196,38 @@ function Invoke-MaintenanceWorker {
           if ($null -eq $mutex -or -not $firstRequest) { throw 'CONCURRENT_EXECUTION' }
           Test-PayloadManifest -Root $script:PayloadRoot
           Test-TaskBoundary -ExpectedOperatorSid ([string]$policy.operator_sid)
+          Test-EvidenceBoundary
+          Test-IntegrityCapacity -AuditPath $auditPath -LedgerPath $ledgerPath -MaxAuditBytes ([int]$policy.max_audit_bytes) -MaxLedgerBytes ([int]$policy.max_ledger_bytes)
           Invoke-RefreshQualification -ProtectedQualificationScript (Join-Path $script:PayloadRoot 'qualify-windows-runner.ps1')
           $resultCode = 'SUCCESS'; $exitCode = 0; $message = 'Windows runner qualification evidence was refreshed.'
         } catch {
           switch -Regex ($_.Exception.Message) {
             'CONCURRENT_EXECUTION' { $resultCode = 'CONCURRENT_EXECUTION'; $message = 'Another maintenance request is already running.' }
-            'STALE_INSTALLATION|HASH_DRIFT|ACL_DRIFT|REPARSE_POINT' { $resultCode = 'STALE_INSTALLATION'; $message = 'The protected maintenance installation failed verification.' }
+            'STALE_INSTALLATION|HASH_DRIFT|ACL_DRIFT|REPARSE_POINT|PER_USER_COM_OVERRIDE' { $resultCode = 'STALE_INSTALLATION'; $message = 'The protected maintenance installation failed verification.' }
             '^TIMEOUT$' { $resultCode = 'TIMEOUT'; $message = 'Qualification exceeded its bounded execution time.' }
             'QUALIFICATION_FAILED' { $resultCode = 'OPERATION_FAILED'; $message = 'Qualification did not complete successfully.' }
+            'AUDIT_FULL|LEDGER_FULL' { $resultCode = 'REQUEST_REJECTED'; $message = 'Audit or replay capacity is exhausted; an administrator must archive the logs.' }
             default { $resultCode = 'REQUEST_REJECTED'; $message = 'The request was rejected.' }
           }
         }
         $ended = [DateTime]::UtcNow
         $safe = [ordered]@{ schema_version=1; request_id=$id; operation='refresh-qualification'; host=$env:COMPUTERNAME; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result=$resultCode; exit_code=$exitCode; message=$message }
-        Write-SafeResult -Result $safe -LiteralPath (Join-Path $results "$id.json") -MaximumBytes ([int]$policy.max_result_bytes)
-        Write-AuditEvent -Event ([ordered]@{ schema_version=1; request_id=$id; requester_sid=$ownerSid; host=$env:COMPUTERNAME; operation='refresh-qualification'; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result=$resultCode }) -LiteralPath $auditPath -MaximumFileBytes ([int]$policy.max_audit_bytes)
-        Write-ReplayLedgerEntry -RequestId $id -LiteralPath $ledgerPath -MaximumFileBytes ([int]$policy.max_ledger_bytes)
-        Remove-Item -LiteralPath $file.FullName -Force
+        try {
+          Write-SafeResult -Result $safe -LiteralPath (Join-Path $results "$id.json") -MaximumBytes ([int]$policy.max_result_bytes)
+          Write-AuditEvent -Event ([ordered]@{ schema_version=1; request_id=$id; requester_sid=$ownerSid; host=$env:COMPUTERNAME; operation='refresh-qualification'; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result=$resultCode }) -LiteralPath $auditPath -MaximumFileBytes ([int]$policy.max_audit_bytes)
+          Write-ReplayLedgerEntry -RequestId $id -LiteralPath $ledgerPath -MaximumFileBytes ([int]$policy.max_ledger_bytes)
+        } catch {
+          # The bounded decision already happened; an integrity-write failure
+          # must neither lose the result nor leave the request behind to be
+          # re-executed on every later task start. Record through whichever
+          # channels still work, then always drop the request file.
+          $safe.result = 'OPERATION_FAILED'; $safe.exit_code = 1
+          $safe.message = 'The request was processed but its integrity record could not be written; administrator attention is required.'
+          try { Write-SafeResult -Result $safe -LiteralPath (Join-Path $results "$id.json") -MaximumBytes ([int]$policy.max_result_bytes) } catch { }
+          try { Write-AuditEvent -Event ([ordered]@{ schema_version=1; request_id=$id; requester_sid=$ownerSid; host=$env:COMPUTERNAME; operation='refresh-qualification'; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result='OPERATION_FAILED' }) -LiteralPath $auditPath -MaximumFileBytes ([int]$policy.max_audit_bytes) } catch { }
+        } finally {
+          Remove-Item -LiteralPath $file.FullName -Force
+        }
         $firstRequest = $false
       }
       $quietDeadline = [DateTime]::UtcNow.AddSeconds(2)
