@@ -1245,6 +1245,73 @@ check "repository_policy_pins_grok_to_a_single_version" \
 check "reviewer_never_uses_blanket_approval" \
   "! grep -v '^[[:space:]]*#' '$SCRIPT' | grep -qE -e '--always-approve' -e 'permission-mode auto' -e 'bypassPermissions'"
 
+
+# --- approval front door: registry-driven pool dispatch -------------------
+# The front door must draw eligibility from config/reviewer-registry.json,
+# never from a hardcoded provider list, and the pool adapter must fail
+# closed on unbound verdicts, missing verdicts, thin reports, and source
+# drift during the review.
+FRONT="$REPO_ROOT/bin/ai-review"
+POOL="$REPO_ROOT/bin/ai-review-pool"
+
+bash "$FRONT" kimi security-review >/dev/null 2>&1; RC_KIMI=$?
+check "front_door_refuses_unregistered_provider" "[ '$RC_KIMI' -eq 2 ]"
+check "front_door_refusal_names_the_registry_state" "bash '$FRONT' kimi security-review 2>&1 | grep -q 'not a registered reviewer'"
+bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
+check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
+
+POOLTMP="$(mktemp -d)"
+mkdir -p "$POOLTMP/fakerepo"
+( cd "$POOLTMP/fakerepo" && git init -q && printf '.ai/\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm init )
+FAKE_HEAD="$(git -C "$POOLTMP/fakerepo" rev-parse HEAD)"
+cat > "$POOLTMP/packet" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  resolve) if [ -f "$POOLTMP/flip" ]; then printf 'identity-after\n'; else printf 'identity-before\n'; fi ;;
+  *) exit 0 ;;
+esac
+EOF
+cat > "$POOLTMP/lifecycle" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  begin) printf '{"head":"$FAKE_HEAD","source_digest":"deadbeef","stale":false,"verdict":null}\n' ;;
+  finish) verdict=''; shift; while [ \$# -gt 0 ]; do [ "\$1" = --verdict ] && verdict="\$2"; shift; done; printf '{"stale":false,"verdict":"%s"}\n' "\$verdict" ;;
+  *) exit 0 ;;
+esac
+EOF
+cat > "$POOLTMP/runner" <<'EOF'
+#!/usr/bin/env bash
+# invoked as: runner new TAG --prompt-file BRIEF --max-turns N
+BRIEF="$4"
+HEAD="$(grep -oE 'head commit is [0-9a-f]{7,40}' "$BRIEF" | head -1 | sed 's/.*is //')"
+case "${POOL_RUNNER_MODE:-approve}" in
+  approve) printf 'Analysis of the change with evidence lines and sibling checks. Head under review: %s. More analysis text follows to clear the minimum report floor with real content: findings grouped by severity, file and line references, and the sibling-class sweep this harness requires of every pool review before it may return a verdict word.\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+  nounbound) printf 'Some analysis without naming the head under review, deliberately long enough to clear the report floor so that the binding check is the only failure mode exercised by this case, with no other assertion depending on the content of this paragraph.\n\n## Verdict\nAPPROVE\n' ;;
+  noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
+  tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+esac
+EOF
+chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/runner"
+export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_GROK="$POOLTMP/runner" AI_POOL_CALLER=zcode-test; }
+
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-approve" 2>&1; RC_APPROVE=$?
+check "pool_adapter_approves_a_bound_verdict" "[ '$RC_APPROVE' -eq 0 ] && grep -q 'APPROVE' '$POOLTMP/out-approve'"
+check "pool_adapter_writes_the_report" "ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '^grok-security-review-'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=nounbound bash "$POOL" grok security-review ) > "$POOLTMP/out-nb" 2>&1; RC_NB=$?
+check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -eq 3 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
+check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -eq 3 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-nv'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" grok security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
+check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -eq 3 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
+touch "$POOLTMP/flip"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
+rm -f "$POOLTMP/flip"
+check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -eq 3 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift'"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok visual-review ) > "$POOLTMP/out-visual" 2>&1; RC_VISUAL=$?
+check "pool_adapter_refuses_unsupported_mode" "[ '$RC_VISUAL' -eq 2 ]"
+check "front_door_registry_comment_pins_the_promise" "grep -q 'registry decides the pool' '$FRONT'"
+rm -rf "$POOLTMP"
+
 echo
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

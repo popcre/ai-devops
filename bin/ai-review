@@ -2,17 +2,42 @@
 # ai-review — the only supported approval-gate front door.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <claude|codex> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       ai-review <claude|codex> <mode> --owner-request "<why Albert asked for it>" [review options]' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --owner-request "<why Albert asked for it>" [review options]' '       Providers: claude|codex (full mode wrappers) plus every reviewer registered in config/reviewer-registry.json (grok, muse, qwen, gemini; pool adapter, read-only session runners).' '       ai-review doctor'; }
+# bin/* is symlinked onto PATH, so resolve the real script location before
+# looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
+REAL_DIR="$ROOT"
+if command -v readlink >/dev/null 2>&1; then
+  REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
+fi
+pool_provider=""
 case "${1:-}" in
   claude) wrapper="${AI_CLAUDE_REVIEW_BIN:-$ROOT/ai-claude-review}" ;;
   codex) wrapper="${AI_CODEX_REVIEW_BIN:-$ROOT/ai-codex-review}" ;;
   doctor) "$ROOT/ai-claude-review" doctor; "$ROOT/ai-codex-review" doctor; exit 0 ;;
   -h|--help|help|'') usage; exit 0 ;;
-  *) printf 'ai-review: error: %s is advisory or quarantined and cannot satisfy an approval gate. Use claude or codex.\n' "${1:-unknown}" >&2; exit 2 ;;
+  grok|muse|qwen|gemini)
+    # Eligibility comes from the reviewer registry, never from a hardcoded
+    # list: health is not membership, and membership is not health (the
+    # lifecycle preflight owns health and quarantine).
+    REGISTRY=""
+    for candidate in "$REAL_DIR/../config/reviewer-registry.json" "$ROOT/../config/reviewer-registry.json"; do
+      [ -f "$candidate" ] && REGISTRY="$candidate" && break
+    done
+    registry_state=""
+    [ -z "$REGISTRY" ] || registry_state="$(jq -r --arg p "$1" '.providers[$p].registry_state // "absent"' "$REGISTRY" 2>/dev/null || true)"
+    if [ "$registry_state" != "registered" ]; then
+      printf 'ai-review: error: %s is not a registered reviewer (registry state: %s). The registry decides the pool; never flip a state to make a review succeed.\n' "${1:-unknown}" "${registry_state:-registry-not-found}" >&2
+      exit 2
+    fi
+    pool_provider="$1"; wrapper="${AI_REVIEW_POOL_BIN:-$ROOT/ai-review-pool}" ;;
+  *) printf 'ai-review: error: %s has no approval-gate wrapper. Use claude, codex, or a reviewer registered in config/reviewer-registry.json.\n' "${1:-unknown}" >&2; exit 2 ;;
 esac
 shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
-owner_request=""; wrapper_args=("$mode")
+owner_request=""; wrapper_args=()
+[ -n "$pool_provider" ] && wrapper_args+=("$pool_provider")
+wrapper_args+=("$mode")
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --owner-request)
@@ -26,13 +51,6 @@ while [ "$#" -gt 0 ]; do
 done
 # The approval gate is the front door, so the task gate belongs here: a review
 # the change set does not call for must not reach a provider wrapper at all.
-# bin/* is symlinked onto PATH, so resolve the real script location before
-# looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
-REAL_DIR="$ROOT"
-if command -v readlink >/dev/null 2>&1; then
-  REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
-  [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
-fi
 GATE_LIB=""
 for candidate in "$REAL_DIR/.." "$ROOT/.."; do
   [ -f "$candidate/tools/lib/task-gates.sh" ] || continue

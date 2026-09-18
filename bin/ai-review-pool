@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# ai-review-pool — fail-closed approval-gate reviews for the pool providers
+# (grok, muse, qwen, gemini) that the reviewer registry carries.
+#
+# The front door (bin/ai-review) dispatches here after checking
+# config/reviewer-registry.json. This adapter mirrors the claude/codex
+# wrappers' guarantees with the machinery that is already provider-neutral:
+#   - ai-review-packet resolve/build/verify binds the exact source identity
+#     (base + assert-head) before and after the paid run;
+#   - ai-review-lifecycle begin runs the provider preflight (health and
+#     quarantine) and owns terminal accounting;
+#   - the session runners (ai-grok-review and siblings) are read-only
+#     (Read/Grep only, no shell, no web) and read the checkout by absolute
+#     path, so no sandbox copy is taken; packet verify after the run is the
+#     source-drift guard;
+#   - a verdict is valid only when the report carries a literal
+#     "## Verdict" heading with exactly one allowed word AND names the
+#     reviewed head SHA, and the report clears a minimum analysis floor.
+# Exit status follows the wrapper contract: 0 for any VALID verdict
+# (including REJECT); the caller decides what an APPROVE authorizes.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+  source "$(dirname "$_AI_EVENT_SELF")/../tools/reviewer_event_guard.sh"
+  reviewer_event_guard pool "$_AI_EVENT_SELF" "$@"
+  unset _AI_EVENT_SELF
+fi
+
+VERSION="1.0.0"
+MODELS_ENV="${AI_DEVOPS_MODELS_ENV:-/etc/ai-devops/models.env}"
+PACKET="${AI_REVIEW_PACKET_BIN:-$ROOT/ai-review-packet}"
+LIFECYCLE="${AI_REVIEW_LIFECYCLE_BIN:-$ROOT/ai-review-lifecycle}"
+CALLER="${AI_POOL_CALLER:-zcode}"
+
+die(){ printf 'ai-review-pool: error: %s\n' "$*" >&2; exit 3; }
+
+provider="${1:-}"; mode="${2:-}"
+case "$provider" in
+  grok)  RUNNER="${AI_POOL_RUNNER_GROK:-$ROOT/ai-grok-review}";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-20}" ;;
+  muse)  RUNNER="${AI_POOL_RUNNER_MUSE:-$ROOT/ai-muse}";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-20}" ;;
+  qwen)  RUNNER="${AI_POOL_RUNNER_QWEN:-$ROOT/ai-qwen}";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-20}" ;;
+  gemini) RUNNER="${AI_POOL_RUNNER_GEMINI:-$ROOT/ai-gemini}";    RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-20}" ;;
+  ''|-h|--help|help) usage; [ -n "$provider" ] || exit 0; exit 2 ;;
+  *) printf 'ai-review-pool: error: %s is not a pool provider with a session runner.\n' "$provider" >&2; exit 2 ;;
+esac
+case "$mode" in plan-review|diff-review|security-review|final-check) ;; *) usage >&2; exit 2;; esac
+[ -x "$RUNNER" ] || [ -f "$RUNNER" ] || die "session runner not found for $provider: $RUNNER"
+[ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
+
+shift 2
+TESTS_COMMAND=""; OPT_BASE=""; OPT_ASSERT_HEAD=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --base|--assert-head)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."
+      if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
+      shift 2;;
+    --tests)
+      [ -z "$TESTS_COMMAND" ] || die '--tests may be supplied only once.'
+      [ "$#" -ge 2 ] && [ -n "$2" ] || die '--tests requires a non-empty command.'
+      TESTS_COMMAND="$2"; shift 2;;
+    *) die "unknown option: $1";;
+  esac
+done
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'must be run inside a Git repository.'
+REPO_ROOT="$(git rev-parse --show-toplevel)"; cd "$REPO_ROOT"
+REPORT_DIR="$REPO_ROOT/.ai/reviews"
+[ ! -L "$REPO_ROOT/.ai" ] && [ ! -L "$REPORT_DIR" ] || die 'refusing a linked .ai report destination.'
+git check-ignore -q .ai/reviews/ai-review-pool-probe || die '.ai/reviews must be Git-ignored.'
+mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became a link.'
+
+RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="pool-${provider}-${MODE}-${RUN_ID}"; STARTED="$(date +%s)"
+STATE=""; TMP_BRIEF=""; TMP_TEXT=""
+cleanup(){
+  reviewer_event_cleanup_allowed "$provider" || return 1
+  [ -z "$TMP_BRIEF" ] || rm -f "$TMP_BRIEF"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"
+}
+trap cleanup EXIT INT TERM
+
+SOURCE_IDENTITY="$("$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"})" || die 'source identity refused before review dispatch.'
+STATE="$($LIFECYCLE begin --provider "$provider" --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" || die 'provider preflight failed; no review was assigned.'
+REVIEW_HEAD="$(jq -r .head "$STATE")"; REVIEW_DIGEST="$(jq -r .source_digest "$STATE")"
+[ -n "$REVIEW_HEAD" ] && [ "$REVIEW_HEAD" != null ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die 'lifecycle state carries no reviewed head.'; }
+
+case "$MODE" in
+  plan-review) DECISION='Judge the implementation plan for missing cases, unsafe assumptions, forgotten files, and test gaps.';;
+  diff-review) DECISION='Judge the complete change for correctness, regressions, data exposure, and missing tests.';;
+  security-review) DECISION='Judge only security risks: authorization, data leakage, injection, secrets, file boundaries, and permissions.';;
+  final-check) DECISION='Give the final go/no-go judgment for shipping this exact source state.';;
+esac
+if [ -n "${AI_REVIEW_OWNER_REQUEST:-}" ]; then DECISION="$DECISION
+
+Owner request governing this review: $AI_REVIEW_OWNER_REQUEST"; fi
+
+TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"
+cat > "$TMP_BRIEF" <<BRIEF
+You are performing a READ-ONLY $MODE. Do not edit, create, commit, push, merge, or delete files. Use only your read-only tools (no shell, no web search).
+
+The repository checkout under $REPO_ROOT is the review subject. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report. Key evidence of the change: run your read tools over the repository files ($([ -n "$TESTS_COMMAND" ] && printf 'tests command on record: %s; ' "$TESTS_COMMAND")decision: $DECISION).
+
+$DECISION
+
+Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. End with a literal heading and one allowed word exactly:
+
+## Verdict
+APPROVE|REJECT|BLOCKED
+BRIEF
+
+reviewer_event_evidence require-report "$provider" "$REPO_ROOT" || die 'could not reserve durable review evidence.'
+set +e; "$RUNNER" new "$TAG" --prompt-file "$TMP_BRIEF" --max-turns "$RUNNER_MAX_TURNS" > "$TMP_TEXT" 2>&1; PROVIDER_RC=$?; set -e
+ELAPSED="$(( $(date +%s)-STARTED ))"
+[ "$PROVIDER_RC" -eq 0 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider runner exited nonzero ($PROVIDER_RC); diagnostic retained in the lifecycle record."; }
+[ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
+
+VERDICT="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
+case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
+MIN_HEAD="${REVIEW_HEAD:0:12}"
+grep -q "$MIN_HEAD" "$TMP_TEXT" || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure verdict-not-bound-to-head --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider verdict did not name the reviewed head; refusing unbound verdict."; }
+REPORT_BYTES="$(wc -c < "$TMP_TEXT")"
+[ "$REPORT_BYTES" -ge 400 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure report-floor --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider report is below the minimum analysis floor."; }
+
+OUT="$REPORT_DIR/${provider}-${MODE}-${RUN_ID}.md"; [ ! -e "$OUT" ] || die "unique report collision: $OUT"
+TMP_REPORT="$(mktemp "$REPORT_DIR/.pool-report.XXXXXX")"
+{
+  printf '# %s pool review — %s\n\n| field | value |\n|---|---|\n' "$provider" "$MODE"
+  printf '| provider | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| source digest | `%s` |\n' "$provider" "$REPO_ROOT" "$REVIEW_HEAD" "$REVIEW_DIGEST"
+  printf '| run | `%s` |\n| caller | `%s` |\n| elapsed seconds | `%s` |\n| tools | read-only session runner |\n\n## Result\n\n' "$RUN_ID" "$CALLER" "$ELAPSED"
+  cat "$TMP_TEXT"
+} > "$TMP_REPORT"; [ -s "$TMP_REPORT" ] || die 'report assembly was empty.'; mv "$TMP_REPORT" "$OUT"; TMP_REPORT=""
+reviewer_event_publish_report "$provider" "$OUT" || die 'report publication failed; local evidence retained.'
+
+AFTER_IDENTITY="$("$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"})" || AFTER_IDENTITY=""
+if [ -z "$AFTER_IDENTITY" ] || [ "$AFTER_IDENTITY" != "$SOURCE_IDENTITY" ]; then
+  mv "$OUT" "$OUT.stale" 2>/dev/null || true
+  "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure source-identity-changed --report "$OUT.stale" >/dev/null 2>&1 || true
+  die 'source identity changed during review; paid report retained as stale.'
+fi
+FINAL_STATE="$($LIFECYCLE finish --state "$STATE" --verdict "$VERDICT" --report "$OUT" --elapsed "$ELAPSED")" || { mv "$OUT" "$OUT.accounting-failed" 2>/dev/null || true; die 'lifecycle accounting failed.'; }
+[ "$(jq -r .stale <<<"$FINAL_STATE")" = false ] && [ "$(jq -r .verdict <<<"$FINAL_STATE")" = "$VERDICT" ] || { mv "$OUT" "$OUT.stale" 2>/dev/null || true; die 'source changed during review.'; }
+printf '%s\n' "$OUT"
