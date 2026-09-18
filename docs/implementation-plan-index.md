@@ -13,6 +13,7 @@ record merely to reduce the file count.
 
 | Plan | Live owner | Current restart point |
 |---|---|---|
+| [`plan_blockerwatch-parked-work.md`](../plan_blockerwatch-parked-work.md) | [#617](https://github.com/popcre/ai-devops/issues/617) | Step 1; nothing started |
 | [`plan_ai-devops-work-claims.md`](../plan_ai-devops-work-claims.md) | [#131](https://github.com/popcre/ai-devops/issues/131) | Step 3, §9.4; the [Windows and Ubuntu Git-ref qualification](../tests/verification/work-claims/2026-09-17T175505Z/ref-qualification.md) and [task-only schema/baseline](../tests/verification/work-claims/2026-09-17T182535Z/baseline-2026-09-17T182535Z.md) passed |
 | [`plan_ast-grep-multi-machine-management.md`](../plan_ast-grep-multi-machine-management.md) | [#187](https://github.com/popcre/ai-devops/issues/187) | In flight in PR #192; do not duplicate it |
 | [`plan_cross_repo_routing_and_gate_enforcement.md`](../plan_cross_repo_routing_and_gate_enforcement.md) | [#335](https://github.com/popcre/ai-devops/issues/335) | Phase 4, Step 4.1; roll out thin policies to the remaining repositories |
