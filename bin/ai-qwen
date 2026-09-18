@@ -278,8 +278,12 @@ resolve_qwen() {
     fi
     # The standalone shim forwards to the nested bundle; a shim whose bundle is
     # gone fails later as an opaque "runtime identity" error, so name it here.
-    # Same completeness rule as Test-QwenRuntimeComplete in the installer.
-    if [ -n "${LOCALAPPDATA:-}" ] && { [ ! -f "$(cygpath -u "$LOCALAPPDATA")/qwen-code/qwen-code/bin/qwen.cmd" ] || [ ! -d "$(cygpath -u "$LOCALAPPDATA")/qwen-code/qwen-code/lib/chunks" ]; }; then
+    # Same completeness rule as Test-QwenRuntimeTree in the installer: both
+    # launchers non-empty and a non-empty chunks directory.
+    local qroot=""
+    [ -n "${LOCALAPPDATA:-}" ] && qroot="$(cygpath -u "$LOCALAPPDATA")/qwen-code"
+    if [ -n "$qroot" ] && { [ ! -s "$qroot/bin/qwen.cmd" ] || [ ! -s "$qroot/qwen-code/bin/qwen.cmd" ] \
+        || [ -z "$(ls -A "$qroot/qwen-code/lib/chunks" 2>/dev/null)" ]; }; then
       die "the Qwen standalone runtime is incomplete (only the launcher remains under %LOCALAPPDATA%\qwen-code). Repair it with: powershell -NoProfile -ExecutionPolicy Bypass -File <ai-devops>\bin\install-windows-ai-provider-clis.ps1 -SelectedProvider qwen"
     fi
     printf '%s' "$c"; return 0
@@ -767,7 +771,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     signal_run_tree TERM "$RUN_TURN_PID"; sleep 1
     kill -0 "$RUN_TURN_PID" 2>/dev/null && signal_run_tree KILL "$RUN_TURN_PID"
     wait "$RUN_TURN_PID" 2>/dev/null
-    RUN_TURN_RC=124
+    RUN_TURN_RC=124; QWEN_STARTUP_EXPIRED=1
   else
     wait "$RUN_TURN_PID"
     RUN_TURN_RC=$?
@@ -1269,6 +1273,7 @@ record_new_review_recovery() { # META REPO NAME REVIEW_DIR OUT REASON
       recovery_stream:$pending,recovery_stderr:($pending+".stderr"),recovery_stderr_sha256:$stderr_digest,recovery_evidence_version:2,recovery_sha256:$digest,recovery_runtime_sha256:$runtime,recovery_preloader_sha256:$preloader,recovery_event_run_id:$event,governed_head:$governed,failure_reason:$reason,created:$now,updated:$now,turns:0}')"
 }
 LIFECYCLE_SID=""
+QWEN_STARTUP_EXPIRED=0
 LIFECYCLE_PRIOR_TREE=""
 
 classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_REASON
@@ -1281,6 +1286,8 @@ classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_RE
   elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
     || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$err"; }; then
     printf 'usage-limit'
+  elif [ "${QWEN_STARTUP_EXPIRED:-0}" = 1 ]; then
+    printf 'timed-out'
   elif [ "$LIFECYCLE_COMMAND_RC" != unavailable ] && [ "$LIFECYCLE_COMMAND_RC" -ne 0 ] 2>/dev/null; then
     printf 'failed'
   elif [ "$reason" = timeout ]; then

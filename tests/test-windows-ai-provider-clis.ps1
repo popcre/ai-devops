@@ -231,13 +231,20 @@ $fakeLocal = Join-Path ([IO.Path]::GetTempPath()) ("qwen-complete-" + [Guid]::Ne
 $savedLocal = $env:LOCALAPPDATA
 try {
   $env:LOCALAPPDATA = $fakeLocal
+  $treeFn = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-QwenRuntimeTree' }, $true)
+  Assert ($null -ne $treeFn) 'installer must define Test-QwenRuntimeTree'
+  . ([ScriptBlock]::Create($treeFn.Extent.Text))
   . ([ScriptBlock]::Create($completeFn.Extent.Text))
   [void](New-Item -ItemType Directory -Force -Path (Join-Path $fakeLocal 'qwen-code\bin'))
   Set-Content -LiteralPath (Join-Path $fakeLocal 'qwen-code\bin\qwen.cmd') -Value '@echo off'
   Assert (-not (Test-QwenRuntimeComplete)) 'a Qwen launcher whose bundle is gone must be reported incomplete'
   [void](New-Item -ItemType Directory -Force -Path (Join-Path $fakeLocal 'qwen-code\qwen-code\bin'), (Join-Path $fakeLocal 'qwen-code\qwen-code\lib\chunks'))
   Set-Content -LiteralPath (Join-Path $fakeLocal 'qwen-code\qwen-code\bin\qwen.cmd') -Value '@echo off'
+  Assert (-not (Test-QwenRuntimeComplete)) 'an empty chunks directory must be reported incomplete'
+  Set-Content -LiteralPath (Join-Path $fakeLocal 'qwen-code\qwen-code\lib\chunks\a.js') -Value 'x'
   Assert (Test-QwenRuntimeComplete) 'a launcher plus its bundle must be reported complete'
+  [IO.File]::WriteAllBytes((Join-Path $fakeLocal 'qwen-code\qwen-code\bin\qwen.cmd'), [byte[]]@())
+  Assert (-not (Test-QwenRuntimeComplete)) 'a zero-byte launcher must be reported incomplete'
 } finally {
   $env:LOCALAPPDATA = $savedLocal
   Remove-Item -LiteralPath $fakeLocal -Recurse -Force -ErrorAction SilentlyContinue
@@ -253,6 +260,7 @@ try {
   function Write-QwenInstallEvent([string]$Event) { }
   $bk = Join-Path $restoreHome 'backup'; $live = Join-Path $restoreHome 'qwen-code'
   foreach ($d in @("$bk\bin", "$bk\qwen-code\bin", "$bk\qwen-code\lib\chunks", "$live\bin")) { [void](New-Item -ItemType Directory -Force -Path $d) }
+  Set-Content -LiteralPath "$bk\qwen-code\lib\chunks\a.js" -Value 'x'
   Set-Content -LiteralPath "$bk\bin\qwen.cmd" -Value 'shim'
   Set-Content -LiteralPath "$bk\qwen-code\bin\qwen.cmd" -Value 'bundle'
   Set-Content -LiteralPath "$live\bin\qwen.cmd" -Value 'partial'
@@ -260,6 +268,7 @@ try {
   Assert ((Get-Content -Raw "$live\qwen-code\bin\qwen.cmd").Trim() -eq 'bundle') 'the restored runtime must be the exact backup'
   Assert ((Get-Content -Raw "$live\bin\qwen.cmd").Trim() -eq 'shim') 'no partial file may survive the restore'
   Assert (@(Get-ChildItem -LiteralPath $restoreHome -Directory -Filter 'qwen-code.failed.*').Count -eq 1) 'the failed runtime must be moved aside, not deleted'
+  Assert (@(Get-ChildItem -LiteralPath $restoreHome -Directory -Filter 'qwen-code.restoring.*').Count -eq 0) 'no staging copy may be left behind'
   Remove-Item -LiteralPath "$bk\qwen-code\lib" -Recurse -Force
   Assert (-not (Restore-QwenRuntime -Backup $bk -Root $live)) 'an incomplete backup must never replace the runtime'
 } finally {
@@ -267,6 +276,13 @@ try {
 }
 Assert ($installerText -match 'install-events\.log') 'every Qwen install attempt must be logged'
 Assert ($installerText -match 'restored previous runtime') 'a failed Qwen install must restore the previous complete runtime'
+# The lock must still be held when hardening and version verification run, and
+# their failures must restore too: all of it sits inside the one try.
+$lockAt = $installerText.IndexOf("Global\ai-devops-qwen-install")
+$hardenAt = $installerText.IndexOf('$hardened = Set-QwenChildEnvironmentHardening')
+$releaseAt = $installerText.IndexOf('ReleaseMutex()')
+Assert ($lockAt -gt 0 -and $lockAt -lt $hardenAt -and $hardenAt -lt $releaseAt) 'the Qwen install lock must cover hardening and verification'
+Assert ($installerText.IndexOf('Restore-QwenRuntime -Backup $backup') -gt $hardenAt) 'a hardening or verification failure must restore the previous runtime'
 Assert ($qwenWrapperText -match 'standalone runtime is incomplete') 'Qwen wrapper must name a hollow runtime and its repair command'
 
 $bootstrapText = Get-Content -Raw $bootstrap
