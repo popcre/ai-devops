@@ -755,7 +755,10 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
     Write-Note "Qwen Code CLI not found. Install/login separately if you want the qwen-code skill to run local Qwen jobs."
 }
 
-if (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "ZCode\ZCode.exe")) {
+# ZCode is a Windows-only client; $env:ProgramFiles is empty on non-Windows
+# runners, and Join-Path with an empty path is a terminating parameter error.
+$zcodeAppPresent = [bool]$env:ProgramFiles -and (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "ZCode\ZCode.exe"))
+if ($zcodeAppPresent) {
     if (Test-Path -LiteralPath (Join-Path $ZCodeHome "v2\credentials.json")) {
         Write-Note "ZCode desktop app found and signed in."
     } else {
