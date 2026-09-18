@@ -138,6 +138,12 @@ try {
   Case 'Worker_RuntimeBoundaryIncludesTemp' { Assert-Contains $worker "Join-Path `$script:RuntimeRoot 'temp'"; Assert-Contains $worker "'temp'" }
   Case 'RequestId_RejectsReservedDeviceNames' { Assert-Contains $worker '(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])' }
   Case 'BackupPath_RestrictedToAdminRoots' { Assert-Contains $installer 'must be under an administrator-managed root' }
+  Case 'BackupChain_RejectsAncestorJunction' { Assert-Contains $installer 'Assert-SafeBackupChain'; Assert-Contains $installer 'Reparse point refused in backup chain' }
+  Case 'BackupDestination_MustBeNewOrEmptyAndAdminOwned' { Assert-Contains $installer 'Recovery backup destination exists and is not empty'; Assert-True ($installer.IndexOf('Assert-NoForeignOwnership -LiteralPath $Destination') -lt $installer.IndexOf('New-Item -ItemType Directory -Path $Destination')) 'existing destination adopted before ownership check' }
+  Case 'Installer_VerifiesEvidenceParent' { Assert-Contains $installer "-Kind EvidenceParent" }
+  Case 'RuntimeParent_OwnedBeforeTreesAreCreated' { Assert-Contains $installer 'Assert-NoForeignOwnership -LiteralPath $runtimeParent' }
+  Case 'Installer_MachineNameNotEnvironment' { Assert-Contains $installer '[Environment]::MachineName'; Assert-True (-not $installer.Contains('$env:COMPUTERNAME')) 'installer identity still derived from the environment' }
+  Case 'Worker_AcquiresAbandonedMutex' { Assert-Contains $worker 'AbandonedMutexException' }
   Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue

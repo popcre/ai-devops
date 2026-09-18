@@ -6,7 +6,7 @@ param(
   [Parameter(ParameterSetName='Remove')][switch]$Remove,
   [Parameter(ParameterSetName='Remove')][switch]$RequireManifestMatch,
   [Parameter(ParameterSetName='Remove')][string]$BackupPath,
-  [string]$OperatorUser = "$env:COMPUTERNAME\ahazan",
+  [string]$OperatorUser = "$([Environment]::MachineName)\ahazan",
   [switch]$LibraryMode
 )
 
@@ -48,7 +48,7 @@ function Invoke-ProtectedIcacls {
 
 function Resolve-OperatorSid {
   param([Parameter(Mandatory)][string]$User)
-  if ($User -notmatch '^([^\\]+)\\([^\\]+)$' -or $Matches[1] -cne $env:COMPUTERNAME) { throw 'Operator must be one unambiguous local account on this host.' }
+  if ($User -notmatch '^([^\\]+)\\([^\\]+)$' -or $Matches[1] -cne [Environment]::MachineName) { throw 'Operator must be one unambiguous local account on this host.' }
   $account = [Security.Principal.NTAccount]::new($User)
   try { $sid = $account.Translate([Security.Principal.SecurityIdentifier]) } catch { throw 'Operator SID could not be resolved.' }
   if (-not $sid.Value.StartsWith('S-1-5-21-', [StringComparison]::Ordinal)) { throw 'Operator SID is not a local account SID.' }
@@ -89,6 +89,28 @@ function Assert-NoForeignOwnership {
   if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Reparse point refused: $LiteralPath" }
   $owner = (Get-Acl -LiteralPath $LiteralPath).GetOwner([Security.Principal.SecurityIdentifier]).Value
   if ($owner -notin @('S-1-5-32-544','S-1-5-18')) { throw "STALE_INSTALLATION: refusing to adopt foreign-owned path: $LiteralPath" }
+}
+
+function Assert-SafeBackupChain {
+  # A root-prefix allowlist is defeated by an ancestor junction: a standard
+  # user can create C:\ProgramData\<name> as a junction, and the elevated
+  # backup copy would then land outside the administrator-managed root.
+  # Every EXISTING ancestor of the destination must therefore be a plain
+  # directory, and every existing ancestor under ProgramData (where users
+  # can create entries) must additionally be Administrators/SYSTEM-owned.
+  param([Parameter(Mandatory)][string]$LiteralPath)
+  $full = [IO.Path]::GetFullPath($LiteralPath)
+  $current = $full
+  while ($true) {
+    $parent = Split-Path -Parent $current
+    if (-not $parent -or $parent -eq $current) { break }
+    if (Test-Path -LiteralPath $parent) {
+      $item = Get-Item -LiteralPath $parent -Force
+      if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Reparse point refused in backup chain: $parent" }
+      if ($parent -like 'C:\ProgramData\*') { Assert-NoForeignOwnership -LiteralPath $parent }
+    }
+    $current = $parent
+  }
 }
 
 function Get-DesiredPayloadManifest {
@@ -202,7 +224,7 @@ function Get-InstalledTaskSnapshot {
 }
 
 function Test-PathAclContract {
-  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','RuntimeRoot','Requests','Results','Audit','Ledger','Evidence','Temp')][string]$Kind)
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','RuntimeRoot','Requests','Results','Audit','Ledger','Evidence','EvidenceParent','Temp')][string]$Kind)
   Assert-NoReparsePoint -LiteralPath $LiteralPath
   $acl = Get-Acl -LiteralPath $LiteralPath
   $ownerSid = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
@@ -210,6 +232,7 @@ function Test-PathAclContract {
   $allowedIdentities = @('S-1-5-32-544','S-1-5-18',$OperatorSid)
   if ($Kind -eq 'Evidence') { $allowedIdentities = @('S-1-5-32-544','S-1-5-18','S-1-1-0') }
   if ($Kind -eq 'Temp') { $allowedIdentities = @('S-1-5-32-544','S-1-5-18') }
+  if ($Kind -eq 'EvidenceParent') { $allowedIdentities = @('S-1-5-32-544','S-1-5-18','S-1-5-32-545') }
   $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
   $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin $allowedIdentities })
   if ($unexpected.Count -ne 0) { throw "STALE_INSTALLATION: unexpected ACL identity on $Kind." }
@@ -224,8 +247,15 @@ function Test-PathAclContract {
     if ($worldRules.Count -eq 0) { throw 'STALE_INSTALLATION: world read access missing on Evidence.' }
     if (@($worldRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -ne 0) { throw 'STALE_INSTALLATION: world access exceeds read on Evidence.' }
   }
+  if ($Kind -eq 'EvidenceParent') {
+    # Users may hold inherit-only read on the shared ProgramData root and
+    # nothing else: no direct rights on the directory itself, and no write.
+    $userRules = @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' })
+    if ($userRules.Count -eq 0) { throw 'STALE_INSTALLATION: Users read access missing on EvidenceParent.' }
+    if (@($userRules | Where-Object { ($_.InheritanceFlags -eq [Security.AccessControl.InheritanceFlags]::None) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -ne 0) { throw 'STALE_INSTALLATION: Users access exceeds inherit-only read on EvidenceParent.' }
+  }
   $operatorRules = @($rules | Where-Object { $_.IdentityReference.Value -eq $OperatorSid })
-  if ($Kind -eq 'Ledger' -or $Kind -eq 'Evidence' -or $Kind -eq 'Temp') { if ($operatorRules.Count -ne 0) { throw "STALE_INSTALLATION: operator access must not exist on $Kind." }; return }
+  if ($Kind -eq 'Ledger' -or $Kind -eq 'Evidence' -or $Kind -eq 'EvidenceParent' -or $Kind -eq 'Temp') { if ($operatorRules.Count -ne 0) { throw "STALE_INSTALLATION: operator access must not exist on $Kind." }; return }
   if ($operatorRules.Count -eq 0) { throw "STALE_INSTALLATION: operator ACL missing on $Kind." }
   $operatorRights = $operatorRules | ForEach-Object FileSystemRights
   $mayWrite = @($operatorRights | Where-Object { ($_ -band [Security.AccessControl.FileSystemRights]::Write) -or ($_ -band [Security.AccessControl.FileSystemRights]::Delete) -or ($_ -band [Security.AccessControl.FileSystemRights]::ChangePermissions) }).Count -ne 0
@@ -251,6 +281,7 @@ function Test-MaintenanceInstallation {
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'audit.jsonl') -OperatorSid $ExpectedOperatorSid -Kind Audit
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'processed-requests.jsonl') -OperatorSid $ExpectedOperatorSid -Kind Ledger
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'temp') -OperatorSid $ExpectedOperatorSid -Kind Temp
+  Test-PathAclContract -LiteralPath (Split-Path -Parent $script:EvidencePath) -OperatorSid $ExpectedOperatorSid -Kind EvidenceParent
   Test-PathAclContract -LiteralPath $script:EvidencePath -OperatorSid $ExpectedOperatorSid -Kind Evidence
   Test-PathAclContract -LiteralPath "$script:EvidencePath.tmp" -OperatorSid $ExpectedOperatorSid -Kind Evidence
   $task = Get-InstalledTaskSnapshot
@@ -263,6 +294,16 @@ function Test-MaintenanceInstallation {
 
 function Backup-MaintenanceInstallation {
   param([Parameter(Mandatory)][string]$Destination)
+  # The destination must be NEW, or an EMPTY Administrators/SYSTEM-owned
+  # directory: re-ACLing an arbitrary pre-existing directory (for example
+  # the machine-wide PowerShell tree an allowlisted root contains) would
+  # strip access other software depends on. The ancestor chain is verified
+  # against junctions before anything is created through it.
+  if (Test-Path -LiteralPath $Destination) {
+    Assert-NoForeignOwnership -LiteralPath $Destination
+    if (@(Get-ChildItem -LiteralPath $Destination -Force).Count -ne 0) { throw "Recovery backup destination exists and is not empty: $Destination" }
+  }
+  Assert-SafeBackupChain -LiteralPath $Destination
   New-Item -ItemType Directory -Path $Destination -Force | Out-Null
   # The recovery bundle must be admin-only wherever it lands, and must not
   # itself be a redirection target.
@@ -324,6 +365,11 @@ function Install-MaintenancePayload {
   $runtimeParent = Split-Path -Parent $script:RuntimeRoot
   New-Item -ItemType Directory -Path $runtimeParent -Force | Out-Null
   Assert-NoReparsePoint -LiteralPath $runtimeParent
+  # The runtime parent's ownership is verified BEFORE the payload and
+  # runtime trees are created beneath it: an operator-owned ProgramData
+  # directory must stop the install immediately, not after owned state
+  # has already been written under it.
+  Assert-NoForeignOwnership -LiteralPath $runtimeParent
   # Nothing pre-existing under the runtime root may be foreign-owned: a
   # pre-planted audit trail or replay ledger must never be adopted.
   Assert-NoForeignOwnership -LiteralPath $script:RuntimeRoot

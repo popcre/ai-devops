@@ -61,7 +61,10 @@ function Read-ValidatedRequest {
 function Enter-MaintenanceLock {
   param([string]$Name = 'Global\AiDevOpsWindowsRunnerMaintenance')
   $mutex = [Threading.Mutex]::new($false, $Name)
-  if (-not $mutex.WaitOne(0)) { $mutex.Dispose(); return $null }
+  # An abandoned mutex (a previous holder died mid-run) is ACQUIRED by this
+  # WaitOne call - treat that as ownership rather than crashing and leaving
+  # the request file behind.
+  try { if (-not $mutex.WaitOne(0)) { $mutex.Dispose(); return $null } } catch [Threading.AbandonedMutexException] { }
   return $mutex
 }
 

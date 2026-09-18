@@ -226,7 +226,11 @@ pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Install -Ope
 pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Update -OperatorUser "$env:COMPUTERNAME\ahazan"
 ```
 
-Verify is read-only. An ordinary filtered SSH session may then invoke only the
+Verify is read-only but reads the security descriptors of objects that grant
+the operator nothing (the replay ledger, the temp root), so run it from an
+elevated session; a filtered session will fail closed on access denied
+rather than skip the check. An ordinary filtered SSH session may then invoke
+only the
 fixed operation:
 
 ```powershell
@@ -280,7 +284,9 @@ investigation.
 Installation also pins the whole evidence neighbourhood and adopts
 nothing foreign: `C:\ProgramData\ai-devops` itself is pinned so only
 administrators can create entries (existing readers keep inherited
-read-only access), and both `C:\ProgramData\ai-devops\windows-runner-security.json`
+read-only access, and existing admin-owned children such as the Smart App
+Control backup tree keep working because elevated tooling retains full
+control; only future entries inherit the pinned contract), and both `C:\ProgramData\ai-devops\windows-runner-security.json`
 and the `windows-runner-security.json.tmp` sibling its atomic refresh uses
 are pinned to a fixed contract — Administrators and SYSTEM full control,
 everyone else read-only, and **no operator grant at all**: the elevated
