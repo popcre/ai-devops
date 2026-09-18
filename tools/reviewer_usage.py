@@ -6,10 +6,12 @@ Owner: #333. The adapters share this formatter; no prompt or response text is
 returned. OpenCode 1.18.12 normalizes absent counters to zero, so its observed
 numbers never claim to recover missingness from the original provider. The
 muse-code adapter reads the CLI's own durable session store, scoped to one run,
-and reports no total because the store carries none.
+reports no total because the store carries none, and prices the turn from the
+CLI's first-party model catalog whenever that row is readable.
 """
 import argparse
 import datetime
+import decimal
 import json
 import math
 import pathlib
@@ -136,7 +138,71 @@ def muse_code_unavailable(reason):
             'completeness': 'unavailable', 'availability_reason': reason}
 
 
-def muse_code(events, version, run):
+def catalog_price(value):
+    """A per-million catalog price as an exact positive decimal, else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        price = decimal.Decimal(str(value).strip())
+    except decimal.InvalidOperation:
+        return None
+    return price if price.is_finite() and price > 0 else None
+
+
+def muse_code_catalog_row(path, model):
+    """The model's row from the CLI's first-party catalog beside the sessions
+    tree, or None when no readable catalog file carries it. The file name is a
+    provider/profile encoding that changes between builds; only the *.json glob
+    and the model_id selection are stable."""
+    if not model:
+        return None
+    sessions = next((parent for parent in path.parents if parent.name == 'sessions'), None)
+    if sessions is None:
+        return None
+    try:
+        files = sorted((sessions.parent / 'model-catalog').glob('*.json'))
+    except OSError:
+        return None
+    for file in files:
+        try:
+            catalog = json.loads(file.read_text(encoding='utf-8-sig'))
+        except (OSError, ValueError):
+            continue
+        rows = catalog.get('rows') if isinstance(catalog, dict) else None
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict) and row.get('model_id') == model:
+                return row
+    return None
+
+
+def muse_code_catalog_cost(counters, row):
+    """Catalog-priced estimate from the summed counters, in the row's currency.
+
+    The store's input counter already includes the cached portion, so cached
+    tokens are priced at the cached rate and never again at the input rate.
+    Returns (estimate, currency); (None, None) whenever anything needed to
+    price truthfully is missing or malformed."""
+    cost = row.get('cost') if isinstance(row, dict) else None
+    if not isinstance(cost, dict):
+        return None, None
+    prices = {name: catalog_price(cost.get(name)) for name in ('input', 'output', 'cached')}
+    currency = cost.get('currency')
+    if any(price is None for price in prices.values()):
+        return None, None
+    if not isinstance(currency, str) or not currency:
+        return None, None
+    input_tokens, cached, output = counters['input'], counters['cache_read'], counters['output']
+    if input_tokens is None or cached is None or output is None:
+        return None, None
+    per_million = ((input_tokens - cached) * prices['input']
+                   + cached * prices['cached']
+                   + output * prices['output'])
+    return float(per_million / decimal.Decimal(1_000_000)), currency
+
+
+def muse_code(events, version, run, catalog_row=None):
     pin = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'muse-code' / 'version'
     try:
         pinned = pin.read_text(encoding='utf-8-sig').strip()
@@ -176,22 +242,26 @@ def muse_code(events, version, run):
     counters['total'] = None  # The store reports no per-run total; never invent one.
     counters['cost'] = None
     complete = coherent and counters['input'] is not None and counters['output'] is not None
+    estimate, currency = muse_code_catalog_cost(counters, catalog_row)
     return {
         'scope': 'turn', 'counters': counters, 'model_calls': len(rows),
         'counter_provenance': 'muse-code-%s-durable-store-model-completed' % version,
         'counting_semantics': 'input includes cache_read; output includes reasoning; store has no total; do not add overlapping fields',
         'completeness': 'core-complete' if complete else 'partial',
         'availability_reason': None if complete else 'incomplete-or-invalid-model-completed-counters',
+        'catalog_cost_estimate': estimate,
+        'catalog_cost_currency': currency,
+        'cost_provenance': 'first-party model catalog price; estimate, not billed cost',
     }
 
 
-def muse_code_read(path, version, run):
+def muse_code_read(path, version, run, model=''):
     try:
         with open(path, encoding='utf-8-sig') as source:
             events = [json.loads(line) for line in source if line.strip()]
     except (OSError, ValueError):
         return muse_code_unavailable('durable-store-unreadable')
-    return muse_code(events, version, run)
+    return muse_code(events, version, run, muse_code_catalog_row(pathlib.Path(path), model))
 
 
 def main():
@@ -205,7 +275,7 @@ def main():
     parser.add_argument('--run', default='')
     args = parser.parse_args()
     if args.adapter == 'muse-code':
-        result = muse_code_read(args.input_file, args.version, args.run)
+        result = muse_code_read(args.input_file, args.version, args.run, args.model)
     else:
         with open(args.input_file, encoding='utf-8-sig') as source:
             data = json.load(source) if args.adapter == 'deepseek' else [json.loads(line) for line in source if line.strip()]

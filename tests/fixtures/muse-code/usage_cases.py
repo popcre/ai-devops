@@ -29,9 +29,16 @@ def completed(run, i, o, cr, cw, r):
                                             'reasoning_tokens': r}}}}
 
 
+# Mirrors the first-party catalog row verified live on 2026-09-17 (plan
+# ai-muse-native-engine-parity §6c); prices are per-million strings.
+CATALOG_ROW = {'model_id': 'muse-spark-1.3-contributor', 'visibility': 'visible',
+               'context_limit': 1007997, 'output_limit': 128000, 'is_current': True,
+               'cost': {'input': '0.10', 'output': '0.20', 'cached': '0.002', 'currency': 'USD'}}
+
+
 class MuseCodeUsageCases(unittest.TestCase):
-    def result(self, events, version=PINNED, run=RUN):
-        return usage.muse_code(events, version, run)
+    def result(self, events, version=PINNED, run=RUN, catalog_row=None):
+        return usage.muse_code(events, version, run, catalog_row=catalog_row)
 
     def test_maps_sums_and_scopes_model_completed_rows(self):
         events = [completed(RUN, 19835, 472, 8561, 0, 387),
@@ -97,6 +104,87 @@ class MuseCodeUsageCases(unittest.TestCase):
         missing = ROOT / 'tests' / 'fixtures' / 'muse-code' / 'absent-session.jsonl'
         result = usage.muse_code_read(str(missing), PINNED, RUN)
         self.assertEqual(result['availability_reason'], 'durable-store-unreadable')
+
+    def test_catalog_prices_the_cached_portion_once(self):
+        # 19835 input includes the 8561 cached tokens: the uncached 11274 pay
+        # the input rate, the cached 8561 the cached rate, output the output
+        # rate. (11274*0.10 + 8561*0.002 + 472*0.20) / 1e6 = 0.001238922 USD.
+        result = self.result([completed(RUN, 19835, 472, 8561, 0, 387)], catalog_row=CATALOG_ROW)
+        self.assertEqual(result['catalog_cost_estimate'], 0.001238922)
+        self.assertEqual(result['catalog_cost_currency'], 'USD')
+        self.assertEqual(result['cost_provenance'],
+                         'first-party model catalog price; estimate, not billed cost')
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_catalog_absent_leaves_estimate_null_and_completeness_intact(self):
+        result = self.result([completed(RUN, 19835, 472, 8561, 0, 387)])
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertIsNone(result['catalog_cost_currency'])
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_nonpositive_or_missing_price_is_never_an_estimate(self):
+        for cost in ({'input': '0.10', 'output': '0.20', 'cached': '0', 'currency': 'USD'},
+                     {'input': '0.10', 'output': 'cheap', 'cached': '0.002', 'currency': 'USD'},
+                     {'input': '0.10', 'output': '0.20', 'cached': '0.002'},
+                     {'input': '-1', 'output': '0.20', 'cached': '0.002', 'currency': 'USD'}):
+            with self.subTest(cost=cost):
+                result = self.result([completed(RUN, 19835, 472, 8561, 0, 387)],
+                                     catalog_row=dict(CATALOG_ROW, cost=cost))
+                self.assertIsNone(result['catalog_cost_estimate'])
+                self.assertIsNone(result['catalog_cost_currency'])
+
+    def test_partial_counters_carry_no_estimate(self):
+        row = completed(RUN, 19835, 472, 8561, 0, 387)
+        row['payload']['event']['usage']['output_tokens'] = 'many'
+        result = self.result([row], catalog_row=CATALOG_ROW)
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertEqual(result['completeness'], 'partial')
+
+    def test_incoherent_cache_read_carry_no_estimate(self):
+        # The coherence guard drops cache_read to None; without a trustworthy
+        # split of input into cached and uncached there is nothing to price.
+        result = self.result([completed(RUN, 5, 2, 7, 0, 1)], catalog_row=CATALOG_ROW)
+        self.assertIsNone(result['catalog_cost_estimate'])
+
+    def test_reader_prices_from_the_catalog_beside_the_sessions_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
+            log.parent.mkdir(parents=True)
+            log.write_text(json.dumps(completed(RUN, 19835, 472, 8561, 0, 387)) + '\n', encoding='utf-8')
+            catalog = root / 'muse' / 'model-catalog'
+            catalog.mkdir()
+            # Any *.json name must do: the real file name is a provider/profile
+            # encoding that changes between builds.
+            (catalog / 'teststub__glob.json').write_text(json.dumps(
+                {'profile_id': 'tbh', 'provider_id': 'meta', 'rows': [CATALOG_ROW],
+                 'schema_version': 1, 'source': 'provider_catalog'}), encoding='utf-8')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+        self.assertEqual(result['catalog_cost_estimate'], 0.001238922)
+        self.assertEqual(result['catalog_cost_currency'], 'USD')
+
+    def test_reader_without_a_catalog_keeps_usage_complete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
+            log.parent.mkdir(parents=True)
+            log.write_text(json.dumps(completed(RUN, 1, 2, 0, 0, 0)) + '\n', encoding='utf-8')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_reader_skips_an_unparseable_catalog_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
+            log.parent.mkdir(parents=True)
+            log.write_text(json.dumps(completed(RUN, 1, 2, 0, 0, 0)) + '\n', encoding='utf-8')
+            catalog = root / 'muse' / 'model-catalog'
+            catalog.mkdir()
+            (catalog / 'broken__file.json').write_text('not-json', encoding='utf-8')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertEqual(result['completeness'], 'core-complete')
 
 
 if __name__ == '__main__':

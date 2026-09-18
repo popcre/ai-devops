@@ -66,12 +66,30 @@ mkdir -p "$TMP/tool"; cp -R "$ROOT/bin" "$ROOT/config" "$ROOT/tools" "$TMP/tool/
 sha256sum "$MBIN/muse-bin-$VERSION.exe" | cut -d' ' -f1 > "$TMP/tool/config/muse-code/sha256"
 STORE="$HOME_FIX/.local/share/ai-devops/muse-code/muse/sessions/.msp-view-v1"
 ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=claude AI_MUSE_ENGINE=muse-code AI_MUSE_TEST_DIR='$TMP' MUSE_STUB_ENV_FILE='$TMP/provider-env' MUSE_STUB_ARGS_FILE='$TMP/provider-args'"
+# First-party model catalog (#542 Phase B): the healthy row is the default state;
+# the drift checks below mutate it per case. Any *.json name must do - the real
+# file name is a provider/profile encoding the wrapper must not depend on.
+CATALOG="$HOME_FIX/.local/share/ai-devops/muse-code/muse/model-catalog"
+CATALOG_ROW='{"model_id":"muse-spark-1.3-contributor","visibility":"visible","context_limit":1007997,"output_limit":128000,"is_current":true,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
+write_catalog(){ local row="${1:-$CATALOG_ROW}"; mkdir -p "$CATALOG"; rm -f "$CATALOG"/*.json; printf '{"profile_id":"tbh","provider_id":"meta","rows":[%s],"schema_version":1,"source":"provider_catalog"}' "$row" > "$CATALOG/teststub__glob.json"; }
+write_catalog
 
 check 'unknown engine refuses before any work' "cd '$REPO' && ! eval \"$ENV AI_MUSE_ENGINE=bogus '$SCRIPT' doctor\" 2>&1 | grep -q PASS"
 check 'reviewer_usage muse-code adapter unit cases' "'$PYTHON' '$ROOT/tests/fixtures/muse-code/usage_cases.py' -q"
 check 'default engine stays OpenCode' "cd '$REPO' && eval \"USERPROFILE='$HOME_FIX' PATH='$TMP/bin:$PATH' AI_MUSE_CALLER=claude '$SCRIPT' doctor\" 2>&1 | grep -q 'engine: opencode'"
 check 'doctor proves the pinned Muse Code version' "cd '$REPO' && eval \"$ENV '$SCRIPT' doctor\" | grep -q 'PASS  Muse Code is the pinned'"
 check 'doctor refuses an unpinned Muse Code version' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' doctor\""
+check 'doctor reads the first-party catalog and reports limits, price and currency' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -eq 0 ] && printf '%s\\n' \"\$out\" | grep -q 'PASS  Muse Code model catalog is present and parseable' && printf '%s\\n' \"\$out\" | grep -q 'PASS  model catalog has a row for muse-spark-1.3-contributor' && printf '%s\\n' \"\$out\" | grep -q 'PASS  model row for muse-spark-1.3-contributor is visible' && printf '%s\\n' \"\$out\" | grep -q 'context_limit=1007997' && printf '%s\\n' \"\$out\" | grep -q 'output_limit=128000' && printf '%s\\n' \"\$out\" | grep -q 'input=0.10' && printf '%s\\n' \"\$out\" | grep -q 'cached=0.002' && printf '%s\\n' \"\$out\" | grep -q 'is_current=true'"
+write_catalog '{"model_id":"muse-spark-1.4-max","visibility":"visible","context_limit":1000,"output_limit":1000,"is_current":false,"cost":{"input":"1","output":"2","cached":"0.1","currency":"USD"}}'
+check 'doctor fails when the catalog has no row for the configured model' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
+write_catalog '{"model_id":"muse-spark-1.3-contributor","visibility":"hidden","context_limit":1007997,"output_limit":128000,"is_current":true,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
+check 'doctor fails when the catalog row is not visible' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model row for muse-spark-1.3-contributor is visible'"
+write_catalog '{"model_id":"muse-spark-1.3-contributor","visibility":"visible","context_limit":1007997,"output_limit":128000,"is_current":false,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
+check 'doctor warns loudly but passes when the catalog row is not current' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -eq 0 ] && printf '%s\\n' \"\$out\" | grep -q 'WARN  ' && printf '%s\\n' \"\$out\" | grep -q 'is_current: false'"
+write_catalog
+mkdir -p "$CATALOG"; rm -f "$CATALOG"/*.json; printf 'not-json\n' > "$CATALOG/broken__file.json"
+check 'doctor fails on an unparseable catalog file' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  Muse Code model catalog is present and parseable'"
+write_catalog
 check 'turn refuses an unpinned Muse Code version without contact' "cd '$REPO' && rm -f '$TMP/provider-args' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' new pin --prompt test\" && test ! -e '$TMP/provider-args'"
 check 'new session completes and returns the final answer' "cd '$REPO' && eval \"$ENV '$SCRIPT' new first --prompt test\" | grep -qx first"
 check 'provider prompt demands all findings and sibling issues' "grep -rq 'Return ALL findings in one pass' '$REPO/.ai/reviews' && grep -rq 'sibling issues' '$REPO/.ai/reviews' && grep -rq 'MANIFEST.md first' '$REPO/.ai/reviews'"
@@ -84,6 +102,10 @@ check 'private stores exist with owner-only modes' "for d in '$HOME_FIX/.local/s
 check 'wrapper chooses and records a UUID session identity' "cd '$REPO' && eval \"$ENV '$SCRIPT' show first\" | jq -e '.status==\"active\" and (.session_id|test(\"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$\"))'"
 check 'follow-up resumes the exact recorded session' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask first --prompt again\" | grep -qx remembered && grep -qx \"\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .session_id)\" '$TMP/provider-args'"
 check 'usage is scoped to this turn run and maps the durable store' "cd '$REPO' && u=\$(eval \"$ENV '$SCRIPT' show first\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"core-complete\" and .model_calls==1 and .counters.input==19835 and .counters.output==472 and .counters.cache_read==8561 and .counters.cache_write==0 and .counters.reasoning==387 and .counters.total==null and .counters.cost==null and (.counter_provenance|startswith(\"muse-code-\"))' >/dev/null && ! printf '%s' \"\$u\" | grep -q 999999"
+check 'usage carries the catalog-priced estimate for the summed counters' "cd '$REPO' && eval \"$ENV '$SCRIPT' new catpriced --prompt test\" >/dev/null && u=\$(eval \"$ENV '$SCRIPT' show catpriced\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.catalog_cost_estimate==0.001238922 and .catalog_cost_currency==\"USD\" and .cost_provenance==\"first-party model catalog price; estimate, not billed cost\" and .counters.input==19835 and .counters.cache_read==8561 and .counters.output==472' >/dev/null"
+rm -f "$CATALOG"/*.json
+check 'absent catalog leaves the estimate null and completeness intact' "cd '$REPO' && eval \"$ENV '$SCRIPT' new nocatalog --prompt test\" | grep -qx first && u=\$(eval \"$ENV '$SCRIPT' show nocatalog\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"core-complete\" and .catalog_cost_estimate==null and .catalog_cost_currency==null' >/dev/null"
+write_catalog
 check 'report records durable-store usage counters, never invented ones' "grep -q '\"input\": 19835' '$REPO'/.ai/reviews/muse-first-*.md && grep -q 'durable-store-model-completed' '$REPO'/.ai/reviews/muse-first-*.md && ! grep -q 999999 '$REPO'/.ai/reviews/muse-first-*.md"
 check 'missing durable store keeps the turn complete and usage honestly unavailable' "cd '$REPO' && eval \"$ENV MUSE_STUB_NO_DURABLE_STORE=1 '$SCRIPT' new nostore --prompt test\" | grep -qx first && u=\$(eval \"$ENV '$SCRIPT' show nostore\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"unavailable\" and .availability_reason==\"durable-store-unreadable\"' >/dev/null && grep -q 'durable-store-unreadable' '$REPO'/.ai/reviews/muse-nostore-*.md"
 check 'garbage durable store keeps the turn complete and usage honestly unavailable' "cd '$REPO' && eval \"$ENV MUSE_STUB_GARBAGE_STORE=1 '$SCRIPT' new garbage --prompt test\" | grep -qx first && u=\$(eval \"$ENV '$SCRIPT' show garbage\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"unavailable\" and .availability_reason==\"durable-store-unreadable\"' >/dev/null"
