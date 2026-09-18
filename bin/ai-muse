@@ -216,12 +216,15 @@ muse_code_catalog_parseable(){ # at least one non-linked first-party catalog fil
   done
   return 1
 }
-muse_code_catalog_row(){ # the model's unique row across first-party files; ambiguity or a foreign provider refuses
+muse_code_catalog_row(){ # the model's unique row; every sibling must be a valid first-party file, exactly one may carry it
   local dir="$1" model="$2" f hits=""
   ! linked_below_home "$dir" || return 1
   for f in "$dir"/*.json; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
-    hits+="$(jq -c --arg m "$model" 'if (type=="object" and (.rows|type)=="array" and .source=="provider_catalog") then (.rows[]|select(type=="object" and .model_id==$m)) else empty end' "$f" 2>/dev/null || true)"$'\n'
+    # An unreadable or foreign sibling could hide a duplicate row: uniqueness
+    # is unprovable, so refuse rather than silently skip it.
+    jq -e 'type=="object" and (.rows|type=="array") and .source=="provider_catalog"' "$f" >/dev/null 2>&1 || return 1
+    hits+="$(jq -c --arg m "$model" '.rows[]|select(type=="object" and .model_id==$m)' "$f" 2>/dev/null || true)"$'\n'
   done
   hits="$(printf '%s\n' "$hits" | sed '/^$/d')"
   [ "$(printf '%s\n' "$hits" | sed '/^$/d' | wc -l)" -eq 1 ] || return 1

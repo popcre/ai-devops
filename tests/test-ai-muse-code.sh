@@ -42,7 +42,7 @@ case "${1:-}" in
       dstore="$XDG_DATA_HOME/muse/sessions/$(date +%Y/%m/%d)/$sid"; mkdir -p "$dstore"
       if [ -n "${MUSE_STUB_GARBAGE_STORE:-}" ]; then printf 'not-json\n' >> "$dstore/session.jsonl"
       else
-        mrow(){ jq -cn --arg rid "$1" --argjson i "$2" --argjson o "$3" --argjson cr "$4" --argjson cw "$5" --argjson r "$6" '{payload_type:"runtime.session",payload:{run_id:$rid,event:{kind:"model_completed",model:"muse-spark-1.3-contributor",finish_reason:"stop",usage:{input_tokens:$i,output_tokens:$o,cached_tokens:$cr,cache_write_tokens:$cw,cache_read_tokens:$cr,reasoning_tokens:$r}}}}'; }
+        mrow(){ jq -cn --arg rid "$1" --arg m "${MUSE_STUB_MODEL:-muse-spark-1.3-contributor}" --argjson i "$2" --argjson o "$3" --argjson cr "$4" --argjson cw "$5" --argjson r "$6" '{payload_type:"runtime.session",payload:{run_id:$rid,event:{kind:"model_completed",model:$m,finish_reason:"stop",usage:{input_tokens:$i,output_tokens:$o,cached_tokens:$cr,cache_write_tokens:$cw,cache_read_tokens:$cr,reasoning_tokens:$r}}}}'; }
         mrow "$run" 19835 472 8561 0 387 >> "$dstore/session.jsonl"
         mrow 11111111-2222-4333-8444-555555555555 999999 999999 999999 0 999999 >> "$dstore/session.jsonl"
       fi
@@ -94,6 +94,10 @@ check 'doctor warns loudly but passes when the catalog row is not current' "cd '
 write_catalog
 mkdir -p "$CATALOG"; rm -f "$CATALOG"/*.json; printf 'not-json\n' > "$CATALOG/broken__file.json"
 check 'doctor fails on an unparseable catalog file' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  Muse Code model catalog is present and parseable'"
+write_catalog
+printf 'not-json\n' > "$CATALOG/broken__sibling.json"
+check 'doctor refuses a valid row beside an unreadable sibling: uniqueness is unprovable' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'PASS  Muse Code model catalog is present and parseable' && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
+write_catalog
 write_catalog '{"model_id":"unrelated-model","visibility":"visible","context_limit":1,"output_limit":1,"is_current":true,"cost":{"input":"1","output":"1","cached":"1","currency":"USD"}}'
 printf '{"rows":{"nested":{"model_id":"muse-spark-1.3-contributor","visibility":"visible","context_limit":1,"output_limit":1,"is_current":true}}}' > "$CATALOG/malformed__rows-object.json"
 check 'doctor never takes the model row from a malformed rows-object file' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'PASS  Muse Code model catalog is present and parseable' && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
@@ -133,6 +137,7 @@ check 'usage is scoped to this turn run and maps the durable store' "cd '$REPO' 
 check 'usage carries the catalog-priced estimate for the summed counters' "cd '$REPO' && eval \"$ENV '$SCRIPT' new catpriced --prompt test\" >/dev/null && u=\$(eval \"$ENV '$SCRIPT' show catpriced\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.catalog_cost_estimate==0.001238922 and .catalog_cost_currency==\"USD\" and .cost_provenance==\"first-party model catalog price; estimate, not billed cost\" and .counters.input==19835 and .counters.cache_read==8561 and .counters.output==472' >/dev/null"
 rm -f "$CATALOG"/*.json
 check 'absent catalog leaves the estimate null and completeness intact' "cd '$REPO' && eval \"$ENV '$SCRIPT' new nocatalog --prompt test\" | grep -qx first && u=\$(eval \"$ENV '$SCRIPT' show nocatalog\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"core-complete\" and .catalog_cost_estimate==null and .catalog_cost_currency==null' >/dev/null"
+check 'a run answered on another model is never priced with this models row' "cd '$REPO' && eval \"$ENV MUSE_STUB_MODEL=muse-spark-1.3 '$SCRIPT' new foreignmodel --prompt test\" >/dev/null && u=\$(eval \"$ENV '$SCRIPT' show foreignmodel\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"core-complete\" and .counters.input==19835 and .catalog_cost_estimate==null and .catalog_cost_currency==null' >/dev/null"
 write_catalog
 check 'report records durable-store usage counters, never invented ones' "grep -q '\"input\": 19835' '$REPO'/.ai/reviews/muse-first-*.md && grep -q 'durable-store-model-completed' '$REPO'/.ai/reviews/muse-first-*.md && ! grep -q 999999 '$REPO'/.ai/reviews/muse-first-*.md"
 check 'missing durable store keeps the turn complete and usage honestly unavailable' "cd '$REPO' && eval \"$ENV MUSE_STUB_NO_DURABLE_STORE=1 '$SCRIPT' new nostore --prompt test\" | grep -qx first && u=\$(eval \"$ENV '$SCRIPT' show nostore\" | jq -r .retained_turn.usage_json) && printf '%s' \"\$u\" | jq -e '.completeness==\"unavailable\" and .availability_reason==\"durable-store-unreadable\"' >/dev/null && grep -q 'durable-store-unreadable' '$REPO'/.ai/reviews/muse-nostore-*.md"

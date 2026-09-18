@@ -163,11 +163,12 @@ def muse_code_is_link(path):
 
 def muse_code_catalog_row(path, model):
     """The model's row from the CLI's first-party catalog beside the sessions
-    tree, or None when no truthful row exists. Only files declaring
-    source=="provider_catalog" are consulted; the model's row must be unique
-    across all of them and belong to the meta provider — duplicates, foreign
-    providers, or stale overlays are ambiguity, not a price. The file name is a
-    provider/profile encoding that changes between builds; only the *.json
+    tree, or None when no truthful row exists. Every non-linked *.json sibling
+    must be a valid first-party catalog file (source provider_catalog, rows
+    array) — an unreadable or foreign sibling could hide a duplicate row, so
+    uniqueness is unprovable and nothing is priced. The model's row must then
+    be unique across the files and belong to the meta provider. The file name
+    is a provider/profile encoding that changes between builds; only the *.json
     glob and the model_id selection are stable. Linked files and linked catalog
     directories are refused, matching the doctor's catalog checks; everything
     above the muse root is the calling wrapper's verified private store."""
@@ -191,12 +192,12 @@ def muse_code_catalog_row(path, model):
         try:
             catalog = json.loads(file.read_text(encoding='utf-8-sig'))
         except (OSError, ValueError):
-            continue
+            return None
         if not (isinstance(catalog, dict) and catalog.get('source') == 'provider_catalog'):
-            continue
+            return None
         rows = catalog.get('rows')
         if not isinstance(rows, list):
-            continue
+            return None
         for row in rows:
             if isinstance(row, dict) and row.get('model_id') == model:
                 candidates.append(row)
@@ -240,7 +241,11 @@ def muse_code_catalog_cost(counters, row):
     return (total, currency) if math.isfinite(total) else (None, None)
 
 
-def muse_code(events, version, run, catalog_row=None):
+def muse_code(events, version, run, catalog_row=None, model=''):
+    """Format one run's model_completed rows. Pricing happens only when every
+    row names the requested model: a fallback or mixed-model run has no single
+    catalog price, and attributing one model's price to another's tokens would
+    be a false estimate."""
     pin = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'muse-code' / 'version'
     try:
         pinned = pin.read_text(encoding='utf-8-sig').strip()
@@ -265,7 +270,8 @@ def muse_code(events, version, run, catalog_row=None):
         usage = inner.get('usage')
         if not isinstance(usage, dict):
             usage = {}
-        rows.append({'input': number(usage.get('input_tokens')),
+        rows.append({'model': inner.get('model'),
+                     'input': number(usage.get('input_tokens')),
                      'cache_read': number(usage.get('cache_read_tokens')),
                      'cache_write': number(usage.get('cache_write_tokens')),
                      'output': number(usage.get('output_tokens')),
@@ -280,7 +286,8 @@ def muse_code(events, version, run, catalog_row=None):
     counters['total'] = None  # The store reports no per-run total; never invent one.
     counters['cost'] = None
     complete = coherent and counters['input'] is not None and counters['output'] is not None
-    estimate, currency = muse_code_catalog_cost(counters, catalog_row)
+    same_model = bool(model) and all(row['model'] == model for row in rows)
+    estimate, currency = muse_code_catalog_cost(counters, catalog_row) if same_model else (None, None)
     return {
         'scope': 'turn', 'counters': counters, 'model_calls': len(rows),
         'counter_provenance': 'muse-code-%s-durable-store-model-completed' % version,
@@ -299,7 +306,7 @@ def muse_code_read(path, version, run, model=''):
             events = [json.loads(line) for line in source if line.strip()]
     except (OSError, ValueError):
         return muse_code_unavailable('durable-store-unreadable')
-    return muse_code(events, version, run, muse_code_catalog_row(pathlib.Path(path), model))
+    return muse_code(events, version, run, muse_code_catalog_row(pathlib.Path(path), model), model)
 
 
 def main():

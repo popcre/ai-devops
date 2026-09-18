@@ -46,8 +46,9 @@ def catalog_json(rows=None, source='provider_catalog', provider='meta'):
 
 
 class MuseCodeUsageCases(unittest.TestCase):
-    def result(self, events, version=PINNED, run=RUN, catalog_row=None):
-        return usage.muse_code(events, version, run, catalog_row=catalog_row)
+    def result(self, events, version=PINNED, run=RUN, catalog_row=None,
+               model='muse-spark-1.3-contributor'):
+        return usage.muse_code(events, version, run, catalog_row=catalog_row, model=model)
 
     def test_maps_sums_and_scopes_model_completed_rows(self):
         events = [completed(RUN, 19835, 472, 8561, 0, 387),
@@ -226,7 +227,43 @@ class MuseCodeUsageCases(unittest.TestCase):
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')
 
-    def test_reader_skips_an_unparseable_catalog_file(self):
+    def test_other_model_rows_are_never_priced_with_this_models_row(self):
+        # A fallback or mixed-model run has no single catalog price; charging
+        # the requested model's price for another model's tokens would be a
+        # false estimate.
+        foreign = completed(RUN, 100, 28, 0, 0, 3)
+        foreign['payload']['event']['model'] = 'muse-spark-1.3'
+        result = self.result([completed(RUN, 19835, 472, 8561, 0, 387), foreign],
+                             catalog_row=CATALOG_ROW)
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertIsNone(result['catalog_cost_currency'])
+        self.assertEqual(result['counters']['input'], 19935)
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_row_without_model_identity_is_never_priced(self):
+        row = completed(RUN, 19835, 472, 8561, 0, 387)
+        del row['payload']['event']['model']
+        result = self.result([row], catalog_row=CATALOG_ROW)
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_valid_row_with_an_unreadable_sibling_is_not_unique_enough(self):
+        # A sibling that cannot be read could carry a duplicate row: uniqueness
+        # is unprovable, so no price.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
+            log.parent.mkdir(parents=True)
+            log.write_text(json.dumps(completed(RUN, 19835, 472, 8561, 0, 387)) + '\n', encoding='utf-8')
+            catalog = root / 'muse' / 'model-catalog'
+            catalog.mkdir()
+            catalog.joinpath('good__file.json').write_text(catalog_json(), encoding='utf-8')
+            catalog.joinpath('broken__sibling.json').write_text('not-json', encoding='utf-8')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_reader_refuses_an_unparseable_catalog_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
