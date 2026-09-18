@@ -304,6 +304,12 @@ run_stage required "Private memory seed" seed_memory
 # --------------------------------------------------------------------------
 run_stage optional "Blocker watch scheduling" "$REPO_ROOT/bin/ai-blocker-watch" schedule
 
+# Optional: retire shared-db worktrees whose pull requests already merged.
+# Same shape as the blocker-watch stage — one marked, idempotent `schedule`
+# command per platform. Machines with no shared-db checkout schedule the sweep
+# anyway; the run itself exits 0 with "nothing to reap" until one appears.
+run_stage optional "Shared-db worktree reap scheduling" "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" schedule
+
 publish_install_manifest() {
   local source_sha staged owner group
   source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1

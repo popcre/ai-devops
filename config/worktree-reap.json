@@ -1,0 +1,8 @@
+{
+  "_comment": "Scheduled shared-db worktree reaping (bin/ai-reap-shared-db-worktrees). checkout_candidates: probed in order for a shared-db checkout holding scripts/reap-merged-worktrees.mjs; machine-specific paths belong in the private machine atlas, and AI_SHARED_DB_CHECKOUT overrides everything. daily_at: local time the daily sweep runs, off the top of the hour to stay out of the crowd. The reaper's own safety rules (never dirty/locked/unpushed/main-checkout worktrees; GitHub-verified PR merges; open-claim holds) are the real guard and are NOT configurable from here.",
+  "checkout_candidates": [
+    "C:/repos/shared-db",
+    "/worksp/shared-db"
+  ],
+  "daily_at": "03:23"
+}

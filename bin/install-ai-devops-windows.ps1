@@ -729,6 +729,21 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Git Bash not found, so the reviewer start watch was not scheduled. Install Git for Windows and rerun this script."
 }
 
+# Scheduled retirement of merged shared-db worktrees (same shape as above).
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note "Test mode: not touching this computer's scheduled tasks (worktree reap)."
+} elseif ($bwBash) {
+    $reapTool = (Join-Path $RepoPath 'bin\ai-reap-shared-db-worktrees') -replace '\\', '/'
+    $reapProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$reapTool' schedule")
+    if ($reapProbe.ExitCode -eq 0) {
+        Write-Note "Worktree reap scheduled. Merged shared-db worktrees on this computer retire themselves daily."
+    } else {
+        Write-Note "Could not schedule the worktree reap: $($reapProbe.Output -join ' ')"
+    }
+} else {
+    Write-Note "Git Bash not found, so the worktree reap was not scheduled. Install Git for Windows and rerun this script."
+}
+
 Write-Step "Checking optional logins"
 if (Get-Command gh -ErrorAction SilentlyContinue) {
     $ghProbe = Invoke-NativeProbe -Command 'gh' -Arguments @('auth', 'status')
