@@ -1,7 +1,7 @@
 # IMPLEMENTATION PLAN — ZCode for Windows parity in ai-devops (2026-09-17)
 
 Planning issue: [popcre/ai-devops#558](https://github.com/popcre/ai-devops/issues/558)
-Paired handoff: [`HANDOFF.d/2026-09-17T1955Z-edge-dev-zcode-zcode-windows-support-plan.md`](HANDOFF.d/2026-09-17T1955Z-edge-dev-zcode-zcode-windows-support-plan.md)
+Paired handoff: retired when Step 12 landed (popcre/ai-devops#588); its last text is in that commit's history.
 
 ## STATUS
 
