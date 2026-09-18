@@ -1377,3 +1377,113 @@ Scope: governed review sequence 1820 of the final Asset freshness head `b82a211f
 - Adherence and continuity: the report distinguished direct static inspection from worker-attested tests and pending CI, kept the final decision bound to the exact SHA, and completed without a rebuttal or correction turn.
 - Provider-reported usage: input 2,888; output 1,838; reasoning 2,678; cache read 107,840; cache write 0. These are separate counters, not an inferred total or saving. Elapsed latency and cost were not reported.
 - Final outcome: all PR checks passed; PR #2523 merged as `fbd49fe829a33a225805334a0cdba662dfd44084`. Preview run 34249227742 and production run 34249862877 succeeded, including the production evidence gate and automatic apply. The closed issue records live production ledger and catalog verification for migration `20260907152838`, its Asset freshness columns and constraints, enabled trigger, and guard function.
+
+## 2026-09-17/18 — five-reviewer plan-audit rotation (Qwen, DeepSeek, Grok 4.6, Muse; Gemini blocked)
+
+Scope: not a diff review. One implementation plan (`popcre/designflow-frontend` root,
+`plan_hts-classifier-confidence-cross-first.md` — the HTS classifier fix after the
+"MDF lap desk" misclassification incident, correct code 4420.90.80.00 vs the shipped
+4421.99.97.80-at-medium) was audited read-only across seven revisions by four completed
+reviewers plus one blocked attempt, with every finding folded into the plan between rounds
+and every load-bearing claim re-verified by the supervising session (ZCode/GLM 5.3) against
+the repository before adoption. Reports preserved under the target repo's `.ai/reviews/`;
+the plan itself records all rounds in its "Review round 1–4" sections.
+
+### Qwen 3.8 Max (`ai-qwen`, round 1) — verdict REJECT
+
+- 26 findings (4 blocker / 11 major / 11 minor). 32 turns, 2.29M input / 43k output tokens
+  (Model Studio pay-per-token lane); no dollar figure reported by the wrapper.
+- Quality: the best breadth-first auditor of the rotation. It verified the plan's ~30
+  file:line claims against the tree, confirmed the dead-code claim for `suggestCrossTerms()`
+  (zero production callers), and found the unified zero-evidence predicate need, the
+  `callAi()` accumulator/turn-index mechanics that defeat naive chain re-entry, and the
+  assertion retire-list problem ("keep tests green" while deliberately breaking six pinned
+  assertions). One internal inconsistency of its own (8 vs 9 spec files; 8 was correct).
+- Ops dominated the round: the vendored standalone runtime had been deleted from the
+  machine (shim pointed at a missing nested path), so the wrapper was hash-quarantined.
+  Repair: `install-windows-ai-provider-clis.ps1 -SelectedProvider qwen -QwenVersion
+  v0.23.0`, then `doctor --live` and `ai-review-preflight qualify qwen`. Recorded as
+  reviewer issue `20260918T002253Z-edge-dev-qwen-369968`, resolved with the full
+  installation/qualification/live-review evidence chain.
+
+### DeepSeek (`ai-deepseek-agent send --review`, round 2) — verdict REJECT (BLOCKED on sub-questions)
+
+- 20 findings. Text-and-file transport with NO repository access; the wrapper
+  auto-attached the working-tree diff alongside the five files in the brief.
+- Quality: found what two repo-reading reviewers missed — the interview-guard counter
+  semantics (a question inside a chain let a sub-high classification escape the nudge),
+  the client-unenforceability of a prompt-only cap rule, the missing override parameter on
+  `buildInitialMessages`, and the STOP error-path matrix. The auto-attached diff cut both
+  ways: it produced a "what is actually under review" confusion finding (the diff carried
+  unrelated concurrent-session work), yet also let it catch scope entanglement no clean
+  snapshot could see.
+- Two repo-content claims were wrong (it cited a plan sentence and a file count from the
+  attached diff of OTHER sessions' work); both were verified wrong and corrected, and both
+  of its recommended fixes were still adopted. Lesson: for a no-repo-access reviewer,
+  attach exactly the evidence, and expect the auto-attached diff to leak other agents'
+  context into its claims.
+
+### Grok 4.6 (`ai-grok-review`, round 3) — verdict REJECT (84% confidence)
+
+- 17 findings (3 blocker / 11 major / 3 minor). 13 turns, 798,750 tokens (647k cached),
+  **$0.2548** — real-money reporting; ~11 minutes wall.
+- Quality: the best finding-per-finding round of the rotation. Its headline blocker was
+  the rotation's single most important catch: the plan's guard fired only on sub-high
+  confidence, so the incident's CONFIDENT wrong model would say `high` under the revised
+  prompt and ship 4421.99 with zero heading lookups — the incident's complete path,
+  survived three earlier audits. It also caught an over-correction (demoting honest `high`
+  after three successful lookup rounds = forcing confidence down), the silent
+  `catchError(() => of([]))` swallow in `suggestCrossTerms` with the spec line pinning
+  that silence, and the optional-`authorityStatus` predicate bug. No claim was disproved
+  on verification.
+
+### Muse (muse-spark, OpenCode engine, `ai-muse` persistent session, round 4) — verdict REVISE
+
+- 10 findings (2 blocker / 4 major / 4 minor), 80% confidence. First non-REJECT of the
+  rotation.
+- Quality: the stale-claim specialist. It re-verified the plan's pinned line references
+  and docs claims against the tree (only 2 stale pins found — both in the plan, fixed),
+  and its two blockers were **fold-sync errors introduced by the previous round's own
+  revision**: E2 Done-gate bullets still demanding the OLD cap semantics after A4 had been
+  corrected, and a "count the boolean" instruction left behind after the predicate fix.
+  Its majors closed the coverage-not-count gap (one irrelevant lookup must not unlock a
+  confident classification — reinstating a deleted tracking set, this time with semantics)
+  and success-only counter semantics (all-failed fetch rounds never unlock a card).
+- The persistent named session makes a cheap "confirmation turn" possible: `ai-muse ask`
+  on the same session re-audits the next revision with its accumulated context intact
+  (the repo snapshot refreshes each turn). Doctor all-PASS; cleanest ops of the rotation.
+
+### Gemini 3.8 Flash (`ai-gemini`) — BLOCKED before start
+
+- Quarantined by the hash-bound live-qualification gate; two sanctioned
+  `ai-review-preflight qualify gemini` attempts ran the live review to completion but
+  failed durable-evidence publication with the identical error ("sandbox evidence source
+  differs from invocation" → "could not reserve durable evidence"), from both a dirty and
+  a fully clean repo — a structural defect in the qualification evidence path, not an
+  environment problem. Allowance was 100% on both buckets and the runtime was present.
+  Recorded as open reviewer issue `20260918T005355Z-edge-dev-gemini-549175`; no audit
+  performed, no quarantine bypass attempted.
+
+### Cross-cutting observations
+
+- **Trajectory:** REJECT-26 → REJECT-20 → REJECT-17 → REVISE-10, with the finding TYPE
+  shifting from design gaps (rounds 1–3) to synchronization errors between plan sections
+  (round 4). That shift is the convergence signal: the rotation was stopped when a round
+  found nothing structural, only fold debris.
+- **Every round found what all previous rounds missed.** The false-high hole — the
+  incident's exact failure mode under the new prompt — survived three audits. A
+  single-reviewer gate on this plan would have shipped it.
+- **Verify-every-claim discipline is not optional:** two of four reviewers made wrong
+  repo-content claims (DeepSeek twice; Qwen once, self-inconsistent), and only
+  supervisor verification caught them. None of the wrong claims invalidated the
+  recommended fixes, but adopting them unverified would have propagated errors into the
+  plan.
+- **Fold-in is itself error-prone:** the highest-risk moments were not the reviews but
+  the revisions between them — round 3's fold left two sections contradicting each other,
+  and only round 4's stale-claim specialist caught it. A rotation is not done when a
+  review returns findings; it is done when a re-audit of the FOLDED revision returns
+  nothing structural (the confirmation turn).
+- **Transports differ enough to change findings:** repo-reading snapshots (Qwen, Grok,
+  Muse) verify file:line claims; text-and-file (DeepSeek) cannot, but sees the attached
+  diff; the persistent session (Muse) uniquely enables cheap same-context re-audits.
+  Rotating across transports rotated the failure modes each reviewer could catch.
