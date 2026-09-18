@@ -263,3 +263,16 @@ question was confident on 81 and sensible on manual review (commit ids, test
 counts, URLs scored 0.87-0.98). But the one genuine unproven "complete and
 verified" ending scored only 0.73 on "done without proof", below the 0.91
 floor. Useful as a signal to log; not yet decisive enough to flag anything.
+
+## 10. Upstream fix submitted, 2026-09-18
+
+Offered upstream as tamaratran/fast-jev-compaction#57 (from fork
+`u2giants/fast-jev-compaction`, branch `result-preview`): new option
+`resultPreviewChars` (default 300) quotes the head and tail of each tool output
+in its keep question. Replay on the same 523 outputs: ranking quality AUC
+0.61 → 0.71. Rewording the question as "contains facts later steps may rely
+on" shifted scores but did not improve ranking (0.70–0.71), nor did a 600-char
+preview. **Still below Albert's bar:** no setting deleted a meaningful share of
+output without also deleting material used later. Track A stays off until
+#44, #45 and #57 land and a rerun passes. A daily 9 AM scheduled check on
+Albert's desktop app reports upstream changes.
