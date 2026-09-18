@@ -253,5 +253,20 @@ check 'an over-long review name is refused before any provider contact' "! (cd '
 LONG_OUT="$TMP/longname.out"; (cd "$LONGREPO" && "$SCRIPT" new "$LONG_NAME" --prompt x) > "$LONG_OUT" 2>&1 || true
 check 'the refusal names the limit so the caller can shorten the name' "grep -q 'limit is 64' '$LONG_OUT'"
 check 'a name that fits is still accepted' "(cd '$LONGREPO' && '$SCRIPT' new fits-fine --prompt x)"
+
+# 2026-09-18: live qualification recorded the caller's checkout as the invoked
+# repository while it reviewed its private fixture, so sandbox evidence binding
+# refused every requalification. It must pass from any unrelated checkout and
+# leave that checkout untouched.
+QUAL_CALLER="$TMP/qual-caller"; make_repo "$QUAL_CALLER"; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$QUAL_CALLER" && "$SCRIPT" qualify-live) > "$TMP/qual.out" 2>&1; QUAL_RC=$?; set -e
+check 'live qualification from an unrelated checkout publishes durable evidence' "test '$QUAL_RC' -eq 0 && grep -Eq '^QUALIFIED session=qual-[^ ]+ model=gemini-3\.8-flash-high exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=.+$' '$TMP/qual.out'"
+QUAL_FIXTURE="$(sed -n 's/^QUALIFIED .* fixture=//p' "$TMP/qual.out")"
+check 'the recorded invocation reviews the private fixture, not the caller' "test -n '$QUAL_FIXTURE' && test -d '$QUAL_FIXTURE/.ai/reviews' && test ! -e '$QUAL_CALLER/.ai'"
+check 'qualification made exactly the new and resumed provider turns' "test \"\$(grep -Ec '^--(new-project|conversation) .* --model gemini' '$MOCK_AGY_CALLS')\" -eq 2"
+set +e; (cd "$QUAL_CALLER" && "$SCRIPT" doctor --live) > "$TMP/qual-doctor.out" 2>&1; QUAL_DOCTOR_RC=$?; set -e
+check 'doctor --live qualifies through the same fixture path' "test '$QUAL_DOCTOR_RC' -eq 0 && grep -q '^QUALIFIED ' '$TMP/qual-doctor.out'"
+set +e; (cd "$QUAL_CALLER" && AI_GEMINI_QUALIFY_FIXTURE="$QUAL_CALLER" "$SCRIPT" qualify-live) > "$TMP/qual-spoof.out" 2>&1; QUAL_SPOOF_RC=$?; set -e
+check 'a caller-supplied fixture path is replaced by a fresh private fixture' "test '$QUAL_SPOOF_RC' -eq 0 && grep -q '^QUALIFIED .* fixture=.*qualification-fixtures/qual-' '$TMP/qual-spoof.out' && test ! -e '$QUAL_CALLER/.ai'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
