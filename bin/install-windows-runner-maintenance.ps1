@@ -6,6 +6,7 @@ param(
   [Parameter(ParameterSetName='Remove')][switch]$Remove,
   [Parameter(ParameterSetName='Remove')][switch]$RequireManifestMatch,
   [Parameter(ParameterSetName='Remove')][string]$BackupPath,
+  [switch]$RecoverPartial,
   [string]$OperatorUser = "$([Environment]::MachineName)\ahazan",
   [switch]$LibraryMode
 )
@@ -440,9 +441,53 @@ function Remove-MaintenanceInstallation {
   return 'REMOVED'
 }
 
+function Recover-MaintenanceInstallation {
+  # Recovery of a PARTIAL or drifted installation (for example one that
+  # failed mid-run, leaving a registered task or installed trees that fail
+  # Test-MaintenanceInstallation and therefore block both -Install and
+  # -Remove). This runs INSIDE the hardened installer process - pinned
+  # module path, hostile-variable refusal, per-user COM override refusal -
+  # and uses the same per-delete re-verification as removal. It exports an
+  # administrator-pinned recovery bundle first, refuses a running task,
+  # removes only owned names, and never touches the qualification evidence,
+  # its tmp sibling, or the parent directory.
+  param([Parameter(Mandatory)][string]$ExpectedOperatorSid, [string]$RecoveryPath)
+  $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue
+  $payloadPresent = Test-Path -LiteralPath $script:PayloadRoot
+  if ($null -eq $task -and -not $payloadPresent) { return 'ABSENT' }
+  if ($null -ne $task -and [string]$task.State -eq 'Running') { throw 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before recovery.' }
+  if ([string]::IsNullOrWhiteSpace($RecoveryPath)) { $RecoveryPath = Join-Path (Split-Path -Parent $script:RuntimeRoot) ('windows-runner-maintenance-recovery-partial-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')) }
+  if (-not [IO.Path]::IsPathRooted($RecoveryPath)) { throw 'Recovery backup path must be absolute.' }
+  $normalizedRecovery = [IO.Path]::GetFullPath($RecoveryPath)
+  $adminRoots = @('C:\ProgramData\', 'C:\Program Files\', 'C:\Windows\')
+  if (-not @($adminRoots | Where-Object { $normalizedRecovery.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Recovery backup path must be under an administrator-managed root (ProgramData, Program Files or Windows).' }
+  Assert-SafeBackupChain -LiteralPath $RecoveryPath
+  Backup-MaintenanceInstallation -Destination $RecoveryPath
+  if ($null -ne $task) { Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false }
+  if ($payloadPresent) {
+    Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
+    Remove-Item -LiteralPath $script:PayloadRoot -Recurse -Force
+  }
+  foreach ($name in $script:OwnedRuntimeNames) {
+    $path = Join-Path $script:RuntimeRoot $name
+    if (Test-Path -LiteralPath $path) {
+      Assert-NoReparsePoint -LiteralPath $path
+      Assert-NoForeignOwnership -LiteralPath $path
+      Remove-Item -LiteralPath $path -Recurse -Force
+    }
+  }
+  return 'RECOVERED'
+}
+
 function Invoke-InstallerMain {
   $sid = Resolve-OperatorSid -User $OperatorUser
   $sourceRoot = Split-Path -Parent $PSScriptRoot
+  if ($RecoverPartial) {
+    Assert-Administrator
+    $result = Recover-MaintenanceInstallation -ExpectedOperatorSid $sid -RecoveryPath $BackupPath
+    Write-Output ("RECOVERY: " + $result)
+    if (-not $Install -and -not $Update) { return }
+  }
   if ($Remove) { Assert-Administrator; Remove-MaintenanceInstallation -ExpectedOperatorSid $sid -RecoveryPath $BackupPath -RequireManifestMatch:$RequireManifestMatch -SourceRoot $sourceRoot; return }
   if ($Verify -or (-not $Install -and -not $Update)) { Test-MaintenanceInstallation -ExpectedOperatorSid $sid | Out-Null; Write-Output 'PASS: Windows runner maintenance installation verified'; return }
   Assert-Administrator

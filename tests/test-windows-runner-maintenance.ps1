@@ -145,6 +145,11 @@ try {
   Case 'Installer_MachineNameNotEnvironment' { Assert-Contains $installer '[Environment]::MachineName'; Assert-True (-not $installer.Contains('$env:COMPUTERNAME')) 'installer identity still derived from the environment' }
   Case 'Worker_AcquiresAbandonedMutex' { Assert-Contains $worker 'AbandonedMutexException' }
   Case 'ComFolder_HasNoTrailingSeparator' { Assert-Contains $installer 'GetFolder($script:TaskFolderCom)'; Assert-Contains $worker 'GetFolder(''\AiDevOps'')'; Assert-True (-not ($installer + $worker).Contains('GetFolder(''\AiDevOps\'')')) 'COM folder path ends in a separator (0x8007007B)' }
+  Case 'RecoverPartial_RunsInsideTheHardenedInstaller' { Assert-Contains $installer 'function Recover-MaintenanceInstallation'; Assert-Contains $installer '[switch]$RecoverPartial'; Assert-Contains $installer 'if ($RecoverPartial) {' }
+  Case 'RecoverPartial_RefusesRunningTask' { Assert-Contains $installer 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before recovery.' }
+  Case 'RecoverPartial_ExportsPinnedBundleFirst' { Assert-True ($installer.IndexOf('Backup-MaintenanceInstallation -Destination $RecoveryPath') -gt 0 -and $installer.IndexOf('Backup-MaintenanceInstallation -Destination $RecoveryPath') -lt $installer.IndexOf('Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false', $installer.IndexOf('function Recover-MaintenanceInstallation'))) 'recovery removes before exporting' }
+  Case 'RecoverPartial_ReverifiesBeforeEveryDelete' { Assert-True ($installer -match 'RECOVERED') 'recovery result marker missing'; Assert-True (@([regex]::Matches($installer, 'Assert-NoReparsePoint -LiteralPath ' + '\$' + 'path')).Count -ge 2) 'recovery delete lacks immediate re-verification' }
+  Case 'RecoverPartial_RemovesOnlyOwnedNames' { Assert-Contains $installer 'foreach ($name in $script:OwnedRuntimeNames) {' }
   Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
