@@ -133,6 +133,18 @@ class MuseCodeUsageCases(unittest.TestCase):
                 self.assertIsNone(result['catalog_cost_estimate'])
                 self.assertIsNone(result['catalog_cost_currency'])
 
+    def test_extreme_finite_prices_never_degrade_the_usage(self):
+        # Prices far outside float range are finite decimals; pricing must fall
+        # back to no estimate, never raise into usage-formatting-failed and
+        # never emit an infinity the JSON writer would refuse.
+        for price in ('1E+999999', '1E+400'):
+            with self.subTest(price=price):
+                result = self.result([completed(RUN, 19835, 472, 8561, 0, 387)],
+                                     catalog_row=dict(CATALOG_ROW, cost={'input': price, 'output': '0.20',
+                                                                         'cached': '0.002', 'currency': 'USD'}))
+                self.assertIsNone(result['catalog_cost_estimate'])
+                self.assertEqual(result['completeness'], 'core-complete')
+
     def test_partial_counters_carry_no_estimate(self):
         row = completed(RUN, 19835, 472, 8561, 0, 387)
         row['payload']['event']['usage']['output_tokens'] = 'many'
@@ -182,6 +194,27 @@ class MuseCodeUsageCases(unittest.TestCase):
             catalog = root / 'muse' / 'model-catalog'
             catalog.mkdir()
             (catalog / 'broken__file.json').write_text('not-json', encoding='utf-8')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_reader_refuses_a_linked_catalog_file(self):
+        # Parity with the doctor's linked-file refusal: a link must not supply
+        # pricing attributed to the first-party catalog.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
+            log.parent.mkdir(parents=True)
+            log.write_text(json.dumps(completed(RUN, 19835, 472, 8561, 0, 387)) + '\n', encoding='utf-8')
+            catalog = root / 'muse' / 'model-catalog'
+            catalog.mkdir()
+            real = root / 'real-catalog.json'
+            real.write_text(json.dumps({'rows': [CATALOG_ROW]}), encoding='utf-8')
+            link = catalog / 'linked__file.json'
+            try:
+                link.symlink_to(real)
+            except (OSError, NotImplementedError):
+                self.skipTest('symlinks unavailable on this filesystem')
             result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')

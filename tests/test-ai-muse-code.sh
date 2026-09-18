@@ -89,6 +89,9 @@ check 'doctor warns loudly but passes when the catalog row is not current' "cd '
 write_catalog
 mkdir -p "$CATALOG"; rm -f "$CATALOG"/*.json; printf 'not-json\n' > "$CATALOG/broken__file.json"
 check 'doctor fails on an unparseable catalog file' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  Muse Code model catalog is present and parseable'"
+write_catalog '{"model_id":"unrelated-model","visibility":"visible","context_limit":1,"output_limit":1,"is_current":true,"cost":{"input":"1","output":"1","cached":"1","currency":"USD"}}'
+printf '{"rows":{"nested":{"model_id":"muse-spark-1.3-contributor","visibility":"visible","context_limit":1,"output_limit":1,"is_current":true}}}' > "$CATALOG/malformed__rows-object.json"
+check 'doctor never takes the model row from a malformed rows-object file' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'PASS  Muse Code model catalog is present and parseable' && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
 write_catalog
 check 'turn refuses an unpinned Muse Code version without contact' "cd '$REPO' && rm -f '$TMP/provider-args' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' new pin --prompt test\" && test ! -e '$TMP/provider-args'"
 check 'new session completes and returns the final answer' "cd '$REPO' && eval \"$ENV '$SCRIPT' new first --prompt test\" | grep -qx first"

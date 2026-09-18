@@ -215,11 +215,11 @@ muse_code_catalog_parseable(){ # at least one non-linked *.json parses as an obj
   done
   return 1
 }
-muse_code_catalog_row(){ # the configured model's row from the first parseable catalog file that carries it
+muse_code_catalog_row(){ # the configured model's row; only from a file whose rows is a true array of objects
   local dir="$1" model="$2" f row
   for f in "$dir"/*.json; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
-    row="$(jq -c --arg m "$model" '[.rows?[]?|select(.model_id==$m)]|first//empty' "$f" 2>/dev/null)" || continue
+    row="$(jq -c --arg m "$model" 'if (.rows|type)=="array" then ([.rows[]|select(type=="object" and .model_id==$m)]|first//empty) else empty end' "$f" 2>/dev/null)" || continue
     [ -n "$row" ] || continue
     printf '%s' "$row"; return 0
   done
