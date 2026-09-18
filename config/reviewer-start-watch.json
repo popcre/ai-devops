@@ -1,0 +1,8 @@
+{
+  "_comment": "ai-reviewer-start-watch settings. run_on_host: the ONE machine (hostname) that reroutes shared-db reviewers that were drawn but never started; every other machine's tick is a no-op and schedule refuses there, so two machines never race the same reroute. repo: the shared-db repository the watcher acts on. schedule_every_minutes: the pass interval; the start SLO is 10 minutes, so a non-start is rerouted within SLO + this interval. lock_stale_minutes: an overlapping tick is refused until the lock is this old. log_max_bytes: tick.log rotates to tick.log.1 past this size. Override the whole file with AI_REVIEWER_START_WATCH_CONFIG.",
+  "run_on_host": "edge-dev",
+  "repo": "popcre/shared-db",
+  "schedule_every_minutes": 2,
+  "lock_stale_minutes": 20,
+  "log_max_bytes": 5000000
+}

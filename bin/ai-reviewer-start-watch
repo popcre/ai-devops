@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# ai-reviewer-start-watch — reroute shared-db reviewers that were drawn but never started.
+#
+# WHY THIS EXISTS. shared-db's reviewer start watch (the watcher script in that
+# repository) finds a governed reviewer that was drawn but never started within
+# the 10-minute start SLO, frees its slot and draws a replacement. The replacement
+# draw checks every candidate reviewer with ai-review-preflight, which exists only
+# on a machine with the reviewer wrappers installed. A GitHub-hosted runner has
+# none, so a reroute started there reserves the slot and then fails its draw
+# (shared-db #3242). This tool runs the same watcher, unattended, on the machine
+# that has the reviewers.
+#
+# `tick` (run every schedule_every_minutes by `schedule`):
+#   1. Does nothing on any machine but run_on_host (config), so two machines
+#      never race one reroute.
+#   2. Refreshes a tool-owned clone of the repo (~/.ai-devops/reviewer-start-watch/
+#      shared-db) to origin/main; it refuses to touch the clone if it is dirty.
+#   3. Reads DRAWN_SINCE from that checkout's reviewer-start-watch workflow, so the
+#      transition guard has one source of truth, and runs the watcher with --apply.
+#   4. Appends the pass JSON to tick.log (rotated at log_max_bytes).
+# A tick exits non-zero when the refresh, the preflight check or the watcher
+# failed, so a scheduled run that did not do its work is visible. Overlapping
+# ticks are refused by a lock that is broken after lock_stale_minutes.
+#
+# Usage:
+#   ai-reviewer-start-watch tick
+#   ai-reviewer-start-watch schedule | unschedule   (Windows Task Scheduler, or
+#       the user crontab on Linux/macOS; marked, idempotent, safe to re-run)
+#
+# Environment:
+#   AI_REVIEWER_START_WATCH_HOME    state (default ~/.ai-devops/reviewer-start-watch)
+#   AI_REVIEWER_START_WATCH_CONFIG  settings (default <repo>/config/reviewer-start-watch.json)
+#   AI_REVIEWER_START_WATCH_HOST    hostname override (tests)
+#   AI_REVIEWER_START_WATCH_REMOTE  clone source override (tests)
+set -euo pipefail
+
+_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
+HOME_DIR="${AI_REVIEWER_START_WATCH_HOME:-$HOME/.ai-devops/reviewer-start-watch}"
+CONFIG="${AI_REVIEWER_START_WATCH_CONFIG:-$TOOL_ROOT/config/reviewer-start-watch.json}"
+CLONE="$HOME_DIR/shared-db"
+LOG="$HOME_DIR/tick.log"
+LOCK="$HOME_DIR/tick.lock"
+WATCHER='scripts/orchestrator-flow/reviewer-start-watch.mjs'
+WORKFLOW='.github/workflows/reviewer-start-watch.yml'
+
+note(){ printf 'ai-reviewer-start-watch: %s\n' "$*" >&2; }
+die(){ note "$*"; exit 1; }
+cfg(){ jq -er "$1" "$CONFIG" || die "config $CONFIG has no $1"; }
+lower(){ tr '[:upper:]' '[:lower:]'; }
+this_host(){ printf '%s' "${AI_REVIEWER_START_WATCH_HOST:-$(hostname)}" | lower; }
+is_watch_host(){ [ "$(this_host)" = "$(cfg .run_on_host | lower)" ]; }
+stamp(){ date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+rotate_log(){
+  [ -f "$LOG" ] || return 0
+  [ "$(wc -c < "$LOG")" -le "$(cfg .log_max_bytes)" ] || mv -f "$LOG" "$LOG.1"
+}
+
+take_lock(){
+  local stale
+  stale="$(cfg .lock_stale_minutes)"
+  if ! mkdir "$LOCK" 2>/dev/null; then
+    [ -n "$(find "$LOCK" -maxdepth 0 -mmin "+$stale" 2>/dev/null)" ] || die "another tick is still running (lock $LOCK)"
+    note "breaking a lock older than $stale minutes"
+    rm -rf "$LOCK"; mkdir "$LOCK"
+  fi
+  trap 'rm -rf "$LOCK"' EXIT
+}
+
+refresh_clone(){
+  local repo remote
+  repo="$(cfg .repo)"; remote="${AI_REVIEWER_START_WATCH_REMOTE:-https://github.com/$repo.git}"
+  if [ ! -d "$CLONE/.git" ]; then
+    git clone -q "$remote" "$CLONE" || die "could not clone $repo"
+  fi
+  [ -z "$(git -C "$CLONE" status --porcelain)" ] || die "the tool-owned clone $CLONE has local changes; refusing to refresh it"
+  git -C "$CLONE" fetch -q origin main || die "could not fetch $repo main"
+  git -C "$CLONE" checkout -q --detach FETCH_HEAD || die "could not check out $repo main"
+}
+
+drawn_since(){
+  local value
+  value="$(sed -n -E "s/^[[:space:]]*DRAWN_SINCE:[[:space:]]*['\"]?([0-9TZ:.-]+)['\"]?[[:space:]]*$/\1/p" "$CLONE/$WORKFLOW" | head -1)"
+  [ -n "$value" ] || die "no DRAWN_SINCE in $WORKFLOW at $(git -C "$CLONE" rev-parse --short HEAD)"
+  printf '%s' "$value"
+}
+
+cmd_tick(){
+  mkdir -p "$HOME_DIR"
+  if ! is_watch_host; then
+    note "$(this_host) is not the watching machine ($(cfg .run_on_host)); nothing to do"
+    return 0
+  fi
+  take_lock
+  rotate_log
+  command -v ai-review-preflight >/dev/null || die "ai-review-preflight is not on PATH; a replacement reviewer cannot be drawn here"
+  command -v node >/dev/null || die "node is not on PATH"
+  refresh_clone
+  local since head rc=0
+  since="$(drawn_since)"; head="$(git -C "$CLONE" rev-parse --short HEAD)"
+  printf '=== %s main %s drawn-since %s\n' "$(stamp)" "$head" "$since" >> "$LOG"
+  (cd "$CLONE" && node "$WATCHER" --repo "$(cfg .repo)" --apply --drawn-since "$since") >> "$LOG" 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '=== %s FAILED exit %s\n' "$(stamp)" "$rc" >> "$LOG"
+    die "the watcher pass failed (exit $rc); see $LOG"
+  fi
+}
+
+TASK_NAME='ai-devops\reviewer-start-watch'
+CRON_MARKER='# ai-devops reviewer-start-watch (managed by ai-reviewer-start-watch schedule; unschedule removes)'
+cmd_schedule(){
+  is_watch_host || die "$(this_host) is not the watching machine ($(cfg .run_on_host)); not scheduling"
+  local every self
+  every="$(cfg .schedule_every_minutes)"
+  mkdir -p "$HOME_DIR"
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    local bash_exe
+    bash_exe="$(cygpath -w "$(command -v bash)")"; self="$(cygpath -m "$TOOL_ROOT/bin/ai-reviewer-start-watch")"
+    # conhost --headless keeps a console window from flashing every run.
+    # /F re-points an existing task, so rerunning the installer stays safe.
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /TN "$TASK_NAME" \
+      /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' tick >> ~/.ai-devops/reviewer-start-watch/cron.log 2>&1\"" >/dev/null
+    note "scheduled every $every minutes as $TASK_NAME"
+    return
+  fi
+  command -v crontab >/dev/null || die "schedule needs schtasks (Windows) or crontab (Linux/macOS); neither is available"
+  local tmp; tmp="$(mktemp)"
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "'$TOOL_ROOT/bin/ai-reviewer-start-watch' tick" || :; } >> "$tmp"
+  printf '%s\n*/%s * * * * %s tick >> %s 2>&1\n' "$CRON_MARKER" "$every" "'$TOOL_ROOT/bin/ai-reviewer-start-watch'" "'$HOME_DIR/cron.log'" >> "$tmp"
+  local rc=0; crontab "$tmp" || rc=$?; rm -f "$tmp"
+  [ "$rc" -eq 0 ] || die "crontab refused the reviewer-start-watch entry"
+  note "scheduled every $every minutes in the user crontab"
+}
+cmd_unschedule(){
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Delete /F /TN "$TASK_NAME" >/dev/null; note "removed $TASK_NAME"
+    return
+  fi
+  command -v crontab >/dev/null || die "unschedule needs schtasks (Windows) or crontab"
+  local tmp; tmp="$(mktemp)"
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "'$TOOL_ROOT/bin/ai-reviewer-start-watch' tick" || :; } > "$tmp"
+  local rc=0; crontab "$tmp" || rc=$?; rm -f "$tmp"
+  [ "$rc" -eq 0 ] || die "crontab refused the removal"
+  note "removed the reviewer-start-watch crontab entry"
+}
+
+case "${1:-}" in
+  tick) cmd_tick ;;
+  schedule) cmd_schedule ;;
+  unschedule) cmd_unschedule ;;
+  -h|--help|help) sed -n '2,34p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command; see ai-reviewer-start-watch --help" ;;
+esac
