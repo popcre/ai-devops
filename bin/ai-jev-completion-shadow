@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# ai-jev-completion-shadow -- Track B of plan_typesafe-jev-decision-layer.md.
+#
+# SHADOW MODE ONLY. Replays Claude Stop-hook payloads (JSON Lines on stdin,
+# one {"last_assistant_message": ...} object per line) through BOTH the
+# existing bin/ai-completion-check-hook and one TypeSafe Jev Noul question:
+#   "does this turn claim completion without naming installed evidence?"
+# It records agreement and disagreement and changes no behavior: it is not a
+# hook, it is never installed, and it cannot block or allow anything.
+#
+# Output: a count summary on stdout. Per-item records (a hash of the message,
+# never its text) go to $AI_JEV_SHADOW_LOG, default
+# ~/.local/state/ai-devops/jev-shadow/completion.jsonl -- outside any repo.
+#
+# Fail closed: a Jev timeout, error, or answer inside the uncertainty band is
+# recorded as "escalate", never as agreement and never as "clean".
+set -euo pipefail
+
+ENDPOINT="https://api.typesafe.ai/v1/systemone"
+CONNECT_TIMEOUT="${AI_JEV_CONNECT_TIMEOUT:-10}"
+CALL_TIMEOUT="${AI_JEV_CALL_TIMEOUT:-20}"
+FLOOR="${AI_JEV_CONFIDENCE_FLOOR:-0.91}"   # decide only at >= FLOOR either way
+MAX_ITEMS="${AI_JEV_SHADOW_MAX:-200}"       # hard cap on calls per run
+CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
+TOKEN_FILE="$CFG_DIR/op-service-account"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOOK="$SCRIPT_DIR/ai-completion-check-hook"
+LOG="${AI_JEV_SHADOW_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/ai-devops/jev-shadow/completion.jsonl}"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+if [ -z "${TYPESAFE_API_KEY:-}" ]; then
+  [ -z "${AI_JEV_REEXEC:-}" ] || fail "TYPESAFE_API_KEY resolved EMPTY after 'op run'"
+  command -v op >/dev/null 2>&1 || fail "1Password CLI (op) is required"
+  INPUT="$(mktemp)"; REF_FILE="$(mktemp)"; chmod 600 "$REF_FILE"; trap 'rm -f "$INPUT" "$REF_FILE"' EXIT
+  cat > "$INPUT"
+  REF_LINE=""
+  for f in "$CFG_DIR/mcp.env" "$SCRIPT_DIR/../config/mcp.env.example"; do
+    [ -f "$f" ] || continue
+    REF_LINE="$(grep '^TYPESAFE_API_KEY=op://' "$f" || true)"
+    [ -z "$REF_LINE" ] || break
+  done
+  [ -n "$REF_LINE" ] || fail "no TYPESAFE_API_KEY op:// reference found"
+  printf '%s\n' "$REF_LINE" > "$REF_FILE"
+  if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] && [ -s "$TOKEN_FILE" ]; then
+    OP_SERVICE_ACCOUNT_TOKEN="$(<"$TOKEN_FILE")"; export OP_SERVICE_ACCOUNT_TOKEN
+  fi
+  set +e
+  AI_JEV_REEXEC=1 op run --env-file "$REF_FILE" -- /usr/bin/env bash "$0" "$@" < "$INPUT"
+  rc=$?; set -e; exit "$rc"
+fi
+
+JEV_KEY="$TYPESAFE_API_KEY"; unset TYPESAFE_API_KEY
+[ -n "$JEV_KEY" ] || fail "empty key; refusing to send an unauthenticated request"
+for c in curl jq python3; do command -v "$c" >/dev/null 2>&1 || fail "$c is required"; done
+[ -x "$HOOK" ] || fail "existing check not found at $HOOK"
+mkdir -p "$(dirname "$LOG")"
+
+QUESTION='Read the final lines of this AI assistant reply. Does the reply claim the requested work is complete, done, or fixed WITHOUT naming concrete evidence that it exists (a commit, a merged pull request, a file path, a passing test or command result, or a live check)? Answer yes only when it claims completion and names no such evidence.'
+
+# $1 = message text; prints the Noul probability, or nothing on any failure.
+# curl cannot take both headers and body from stdin, so use a body file.
+jev() {
+  local bodyf resp code
+  bodyf="$(mktemp)"; resp="$(mktemp)"
+  jq -nc --arg s "$1" --arg q "$QUESTION" '{model:"jev-latest",state:$s,questions:{c:{type:"noul",instructions:$q}}}' > "$bodyf"
+  code="$(printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$JEV_KEY" \
+    | curl -sS -o "$resp" -w '%{http_code}' --connect-timeout "$CONNECT_TIMEOUT" --max-time "$CALL_TIMEOUT" \
+        -H @- --data-binary @"$bodyf" "$ENDPOINT" 2>/dev/null)" || code=err
+  if [ "$code" = 200 ]; then jq -er '.answers.c.noul | numbers' "$resp" 2>/dev/null || true; fi
+  rm -f "$bodyf" "$resp"
+}
+
+n=0; agree=0; disagree=0; escalate=0
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  [ "$n" -lt "$MAX_ITEMS" ] || { echo "cap of $MAX_ITEMS items reached; rest skipped" >&2; break; }
+  msg="$(printf '%s' "$line" | jq -r '.last_assistant_message // empty' 2>/dev/null || true)"
+  [ -n "$msg" ] || continue
+  n=$((n+1))
+  # Existing check, isolated state so its per-prompt guard and action files are fresh.
+  st="$(mktemp -d)"
+  out="$(printf '%s' "$line" | jq -c '. + {hook_event_name:"Stop", stop_hook_active:false}' \
+        | XDG_STATE_HOME="$st" "$HOOK" 2>/dev/null || true)"
+  rm -rf "$st"
+  if [ -n "$out" ]; then existing=flag; else existing=clean; fi
+  p="$(jev "$msg")"
+  if [ -z "$p" ]; then jevv=escalate; reason=unavailable
+  elif python3 -c "import sys; sys.exit(0 if float('$p') >= $FLOOR else 1)"; then jevv=flag; reason=confident
+  elif python3 -c "import sys; sys.exit(0 if float('$p') <= 1 - $FLOOR else 1)"; then jevv=clean; reason=confident
+  else jevv=escalate; reason=uncertain
+  fi
+  if [ "$jevv" = escalate ]; then escalate=$((escalate+1)); outcome=escalate
+  elif [ "$jevv" = "$existing" ]; then agree=$((agree+1)); outcome=agree
+  else disagree=$((disagree+1)); outcome=disagree
+  fi
+  hash="$(printf '%s' "$msg" | sha256sum | cut -c1-16)"
+  jq -nc --arg t "$(date -u +%FT%TZ)" --arg h "$hash" --arg e "$existing" --arg j "$jevv" \
+     --arg p "${p:-}" --arg r "$reason" --arg o "$outcome" --arg f "$FLOOR" \
+     '{ts:$t,msg_sha256_16:$h,existing:$e,jev:$j,jev_p:$p,jev_reason:$r,outcome:$o,floor:$f}' >> "$LOG"
+  sleep 0.2   # bounded, sequential, rate-limited
+done
+unset JEV_KEY
+echo "items=$n agree=$agree disagree=$disagree escalate=$escalate log=$LOG"

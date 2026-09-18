@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# ai-jev-probe -- one bounded TypeSafe Jev reachability call.
+# Prints `ok` on a well-formed Noul answer, otherwise `FAIL: <reason>` and exits 1.
+# Evaluation only; see plan_typesafe-jev-decision-layer.md. The key is resolved
+# at exec time through `op run` (as ai-deepseek-agent does) and never printed.
+set -euo pipefail
+
+ENDPOINT="https://api.typesafe.ai/v1/systemone"
+CONNECT_TIMEOUT="${AI_JEV_CONNECT_TIMEOUT:-10}"
+CALL_TIMEOUT="${AI_JEV_CALL_TIMEOUT:-20}"
+CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
+TOKEN_FILE="$CFG_DIR/op-service-account"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+if [ -z "${TYPESAFE_API_KEY:-}" ]; then
+  [ -z "${AI_JEV_REEXEC:-}" ] || fail "TYPESAFE_API_KEY resolved EMPTY after 'op run'; check the reference in config/mcp.env.example"
+  command -v op >/dev/null 2>&1 || fail "1Password CLI (op) is required"
+  # The reference is not secret. Prefer the installed managed file, else the repository example.
+  REF_LINE=""
+  for f in "$CFG_DIR/mcp.env" "$SCRIPT_DIR/../config/mcp.env.example"; do
+    [ -f "$f" ] || continue
+    REF_LINE="$(grep '^TYPESAFE_API_KEY=op://' "$f" || true)"
+    [ -z "$REF_LINE" ] || break
+  done
+  [ -n "$REF_LINE" ] || fail "no TYPESAFE_API_KEY op:// reference found"
+  [ "$(printf '%s\n' "$REF_LINE" | wc -l)" -eq 1 ] || fail "more than one TYPESAFE_API_KEY reference"
+  REF_FILE="$(mktemp)"; chmod 600 "$REF_FILE"; trap 'rm -f "$REF_FILE"' EXIT
+  printf '%s\n' "$REF_LINE" > "$REF_FILE"
+  if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] && [ -s "$TOKEN_FILE" ]; then
+    OP_SERVICE_ACCOUNT_TOKEN="$(<"$TOKEN_FILE")"; export OP_SERVICE_ACCOUNT_TOKEN
+  fi
+  set +e
+  AI_JEV_REEXEC=1 op run --env-file "$REF_FILE" -- /usr/bin/env bash "$0" "$@"
+  rc=$?; set -e; exit "$rc"
+fi
+
+# Capture the key in a non-exported variable before any child starts.
+JEV_KEY="$TYPESAFE_API_KEY"; unset TYPESAFE_API_KEY
+[ -n "$JEV_KEY" ] || fail "empty key; refusing to send an unauthenticated request"
+command -v curl >/dev/null 2>&1 || fail "curl is required"
+command -v python3 >/dev/null 2>&1 || fail "python3 is required"
+
+body='{"model":"jev-latest","state":"The sky is blue on a clear day.","questions":{"probe":{"type":"noul","instructions":"Does the state describe the colour of the sky?"}}}'
+resp="$(mktemp)"; trap 'rm -f "$resp" "${REF_FILE:-}"' EXIT
+set +e
+code="$(printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$JEV_KEY" \
+  | curl -sS -o "$resp" -w '%{http_code}' --connect-timeout "$CONNECT_TIMEOUT" --max-time "$CALL_TIMEOUT" \
+      -H @- -d "$body" "$ENDPOINT" 2>/dev/null)"
+rc=$?; set -e
+unset JEV_KEY
+[ "$rc" -eq 0 ] || fail "network error (curl exit $rc; 28 = timeout after ${CALL_TIMEOUT}s)"
+[ "$code" = 200 ] || fail "HTTP $code from $ENDPOINT"
+python3 - "$resp" <<'PY' || fail "HTTP 200 but no numeric Noul answer at answers.probe.noul"
+import json, sys
+p = json.load(open(sys.argv[1]))["answers"]["probe"]["noul"]
+assert isinstance(p, (int, float)) and not isinstance(p, bool) and 0 <= p <= 1
+PY
+echo ok
