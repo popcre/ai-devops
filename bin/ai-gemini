@@ -9,13 +9,17 @@ STATE_DIR="${AI_GEMINI_STATE_DIR:-$HOME/.local/state/ai-devops/gemini}"
 # Live qualification reviews a fresh private fixture, never the caller's
 # checkout. Build and enter it before the invocation is recorded so the event
 # ledger, sandbox ownership and published reports all name one repository.
+# One spelling per directory. On Windows the same folder can reach Bash as
+# /C/... (installed launcher HOME) and /c/... (Git), so fold the drive letter.
+physical_dir(){ local p; p="$(cd "$1" 2>/dev/null && pwd -P)" || return 1; if command -v cygpath >/dev/null 2>&1; then p="$(cygpath -u "$(cygpath -m "$p")")" || return 1; fi; printf '%s
+' "$p"; }
 qualification_fixture(){
   local f="$STATE_DIR/qualification-fixtures/qual-$(date -u +%Y%m%dT%H%M%SZ)-$$"
   mkdir -p "$f" || return 1; chmod 700 "$f" 2>/dev/null || true
   git -C "$f" init -q && git -C "$f" config user.name ai-gemini-qualification && git -C "$f" config user.email qualification@invalid || return 1
   printf '.ai/\n' > "$f/.gitignore"; printf '# Qualification fixture\n\nRead-only review. Never change files.\n' > "$f/AGENTS.md"; printf '# Open issue fixture\n\nConfirm the reviewer cannot write and can resume the exact conversation.\n' > "$f/issue.md"
   git -C "$f" add .gitignore AGENTS.md issue.md && git -C "$f" commit -qm qualification || return 1
-  (cd "$f" && pwd -P)
+  physical_dir "$f"
 }
 
 # Preserve every invocation outcome before reusable session metadata changes.
@@ -185,8 +189,8 @@ doctor_identity(){ local a a_sha status=IDENTITY; need git; need jq; a="$(agy)";
 doctor(){ local a a_sha models; need git; need jq; a="$(agy)"; "$a" --help 2>&1 | grep -q -- --sandbox || die 'agy lacks --sandbox'; models="$(timeout "${AI_GEMINI_MODELS_TIMEOUT:-15}s" "$a" models)" || die 'configured model inventory unavailable or timed out'; printf '%s\n' "$models" | grep -q "^$MODEL" || die 'configured model unavailable'; a_sha="$(sha256sum < "$a" | awk '{print $1}')"; if [ "$QUARANTINED" -eq 1 ]; then printf 'QUARANTINED agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory live-qualification=required\n' "$("$a" --version)" "$a_sha" "$MODEL"; return 3; fi; printf 'PASS agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=--sandbox+byte-inventory\n' "$("$a" --version)" "$a_sha" "$MODEL"; }
 qualify_live(){
   local name sentinel before after fixture="${AI_GEMINI_QUALIFY_FIXTURE:-}" fixtures
-  require_local_runtime; fixtures="$(cd "$STATE_DIR/qualification-fixtures" 2>/dev/null && pwd -P)" || die 'live qualification fixture is unavailable'
-  [ -n "$fixture" ] && [ "$(dirname "$fixture")" = "$fixtures" ] && [ "$(pwd -P)" = "$fixture" ] && [ "$(cd "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null && pwd -P)" = "$fixture" ] || die 'live qualification must run inside its own private fixture'
+  require_local_runtime; fixtures="$(physical_dir "$STATE_DIR/qualification-fixtures")" || die 'live qualification fixture is unavailable'
+  [ -n "$fixture" ] && [ "$(dirname "$fixture")" = "$fixtures" ] && [ "$(physical_dir .)" = "$fixture" ] && [ "$(physical_dir "$(git rev-parse --show-toplevel 2>/dev/null)")" = "$fixture" ] || die 'live qualification must run inside its own private fixture'
   name="$(basename "$fixture")"; name_ok "$name" || die 'invalid live qualification fixture name'
   sentinel="$(mktemp)"; printf 'GEMINI-OUTSIDE-SENTINEL\n' > "$sentinel"; before="$(sha256sum "$sentinel" | cut -d' ' -f1)"
   export AI_GEMINI_OUTSIDE_SENTINELS="$sentinel"; QUARANTINED=0

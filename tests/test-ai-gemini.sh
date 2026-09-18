@@ -268,5 +268,16 @@ set +e; (cd "$QUAL_CALLER" && "$SCRIPT" doctor --live) > "$TMP/qual-doctor.out" 
 check 'doctor --live qualifies through the same fixture path' "test '$QUAL_DOCTOR_RC' -eq 0 && grep -q '^QUALIFIED ' '$TMP/qual-doctor.out'"
 set +e; (cd "$QUAL_CALLER" && AI_GEMINI_QUALIFY_FIXTURE="$QUAL_CALLER" "$SCRIPT" qualify-live) > "$TMP/qual-spoof.out" 2>&1; QUAL_SPOOF_RC=$?; set -e
 check 'a caller-supplied fixture path is replaced by a fresh private fixture' "test '$QUAL_SPOOF_RC' -eq 0 && grep -q '^QUALIFIED .* fixture=.*qualification-fixtures/qual-' '$TMP/qual-spoof.out' && test ! -e '$QUAL_CALLER/.ai'"
+# 2026-09-18: the installed Windows launcher exports HOME as /C/... while Git
+# reports the same fixture as /c/..., so the fixture self-check refused the live
+# requalification. The same folder must match however the drive is spelled.
+if command -v cygpath >/dev/null 2>&1; then
+  QUAL_UPPER_STATE="$(cygpath -u "$(cygpath -m "$TMP")")/state-upper"; QUAL_UPPER_STATE="/$(printf '%s' "${QUAL_UPPER_STATE:1:1}" | tr a-z A-Z)${QUAL_UPPER_STATE:2}"
+  set +e; (cd "$QUAL_CALLER" && AI_GEMINI_STATE_DIR="$QUAL_UPPER_STATE" "$SCRIPT" qualify-live) > "$TMP/qual-upper.out" 2>&1; QUAL_UPPER_RC=$?; set -e
+  check 'live qualification accepts an upper-case drive spelling of its state folder' "test '$QUAL_UPPER_RC' -eq 0 && grep -q '^QUALIFIED ' '$TMP/qual-upper.out'"
+else
+  printf '  note drive-letter spelling check needs cygpath (Windows only)
+'
+fi
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
