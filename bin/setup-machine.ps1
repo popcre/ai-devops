@@ -815,7 +815,7 @@ if ($ZCodeInstall) {
 # ZCODE_*_PROVIDER_CONFIG_FILE vars every CLI-core invocation dies before any
 # model call. The runtime provider config lives under a versioned+hashed
 # directory that changes on update, so it is resolved newest-first at launch.
-# These shims deliberately do NOT shadow the blocker-watch wake argv — the wake
+# These shims deliberately do NOT shadow the blocker-watch wake argv -- the wake
 # path resolves its own env at wake time from config/blocker-watch.json.
 if ($ZCodeInstall) {
   Step "ZCode launcher shim (~/.local/bin/zcode)"
@@ -826,14 +826,14 @@ if ($ZCodeInstall) {
   $cliFwd  = $ZCodeInstall.CliCore -replace '\\','/'
   $shimBody = @"
 #!/usr/bin/env bash
-# Managed by ai-devops setup-machine.ps1 — raw interactive ZCode launcher.
+# Managed by ai-devops setup-machine.ps1 -- raw interactive ZCode launcher.
 # Re-run setup-machine.ps1 to refresh; delete this file to uninstall.
 ZCODE_HOME="\${ZCODE_HOME:-`$HOME/.zcode}"
 APP="$appFwd"
 CLI="$cliFwd"
 [ -f "`$APP" ] && [ -f "`$CLI" ] || { echo "zcode: ZCode not found at `$APP" >&2; exit 1; }
 NEWEST="`$(ls -t "`$ZCODE_HOME"/v2/runtime/provider/*/*/*/zcode-builtin.json 2>/dev/null | head -1)"
-[ -n "`$NEWEST" ] || { echo "zcode: no runtime provider config under `$ZCODE_HOME — sign in once inside the ZCode app." >&2; exit 1; }
+[ -n "`$NEWEST" ] || { echo "zcode: no runtime provider config under `$ZCODE_HOME -- sign in once inside the ZCode app." >&2; exit 1; }
 export ZCODE_BUILTIN_PROVIDER_CONFIG_FILE="`$(cygpath -m "`$NEWEST")"
 export ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE="${appFwd%/ZCode.exe}/resources/config/provider/zcode-builtin.json"
 export ZCODE_PERSONAL_PROVIDER_CONFIG_FILE="`$(cygpath -m "`$ZCODE_HOME/v2/provider_config.json" 2>/dev/null || echo "`$ZCODE_HOME/v2/provider_config.json")"
@@ -850,7 +850,7 @@ exec "`$APP" "`$CLI" "`$@"
   if ($gitBashForShim) {
     Set-Content -LiteralPath $zcodeCmd -Encoding ascii -Value @"
 @echo off
-rem Managed by ai-devops setup-machine.ps1 — raw interactive ZCode launcher (cmd wrapper over the bash shim).
+rem Managed by ai-devops setup-machine.ps1 -- raw interactive ZCode launcher (cmd wrapper over the bash shim).
 "$gitBashForShim" "$localBin\zcode" %*
 "@
     Ok "wrote $zcodeShim and $zcodeCmd"

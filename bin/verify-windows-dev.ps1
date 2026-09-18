@@ -20,7 +20,7 @@ $checks.Add([pscustomobject]@{
   Detail=$(if($codexApp){$codexApp.PackageFullName}else{'Microsoft Store app not found'})
 })
 
-# ZCode desktop app (Windows-only client; machine-wide install). Presence only —
+# ZCode desktop app (Windows-only client; machine-wide install). Presence only --
 # the app self-updates, so no version is pinned or asserted here.
 $zcodeAppExe = Join-Path $env:ProgramFiles 'ZCode\ZCode.exe'
 $zcodeCliCore = Join-Path $env:ProgramFiles 'ZCode\resources\glm\zcode.cjs'

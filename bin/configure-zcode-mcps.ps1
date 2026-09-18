@@ -6,13 +6,13 @@
 .DESCRIPTION
   ZCode's MCP schema is STRICT: one unknown key inside a server entry silently
   drops the whole server, and config-file servers get no ${...} expansion, so
-  every entry is CONSTRUCTED here from an allowlist of canonical keys — never
+  every entry is CONSTRUCTED here from an allowlist of canonical keys -- never
   copied wholesale from another client's shape (command must be a string, not
   an array). Managed names that are no longer selected are removed; foreign
   user entries and every other config key (hooks, plugins, skills) are
   preserved untouched. Writes atomically with a timestamped .aidevops.<stamp>.bak
   backup, is idempotent (byte-identical re-runs write nothing), and is safe to
-  re-run. This writer never touches the hooks block — hook registration has its
+  re-run. This writer never touches the hooks block -- hook registration has its
   own installer.
 
   Called by bin/setup-machine.ps1; testable standalone via -Servers/-ManagedNames.
@@ -33,7 +33,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot 'windows-json-file.ps1')
 
 # Canonical ZCode stdio-server keys only (schema facts: zcode-guide plugin,
-# qualified 2026-09-17 — see tests/verification/zcode-windows-2026-09-17/).
+# qualified 2026-09-17 -- see tests/verification/zcode-windows-2026-09-17/).
 $canonicalKeys = @('command', 'args', 'cwd', 'env', 'enabled', 'timeoutMs')
 
 function ConvertTo-ZCodeMcpEntry([string]$Name, [System.Collections.IDictionary]$Server) {
