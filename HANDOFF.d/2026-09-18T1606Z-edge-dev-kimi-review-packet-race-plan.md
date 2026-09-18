@@ -1,5 +1,5 @@
 ---
-issue: pending — plan step 0.2 files it
+issue: 608 — filed 2026-09-18 by the implementing session (plan step 0.2)
 status: OPEN
 owner: kimi/review-packet-race-plan
 ---
