@@ -208,3 +208,27 @@ at 0.50 it would discard needed material one time in five. Jev is not
 confidently calibrated on our traffic for this question. Caveat: this used our
 own question wording, not the plugin's; rerun with the plugin's prompt before
 the edge-dev trial.
+
+## 8. How fast-jev-compaction actually decides (source read 2026-09-18)
+
+Read from `src/compact.ts` and `src/state.ts` at upstream HEAD:
+
+- It asks two `Noul` questions per old tool call: "should this **call** stay"
+  and "should this call's full **output** stay verbatim". The probability is
+  **p(keep)**, not p(stale).
+- `decideCall` keeps the output when `keepResult >= keepThreshold`, otherwise
+  drops it (keeping a 300-char head and a note). Default `keepThreshold` is 0.5.
+- **Albert's rule "delete only when 91% sure it is stale" is
+  `keepThreshold: 0.09`.** Setting 0.91 is the inverse: it would delete every
+  output Jev is less than 91% sure is still needed, which is most of them.
+- Jev never sees the tool outputs. The state is the conversation history with
+  each output replaced by `ok, N chars (omitted)`, plus the last three user
+  requests as the goal, fitted into about 25k tokens.
+- A failed Jev call is treated as keep for everything (`?? {keepCall: 1,
+  keepResult: 1}`), which is fail-safe. Batches still run through an unbounded
+  `Promise.all` (#33) with no deadline (#34).
+
+The section 7 Track A numbers used our own question and showed Jev the
+output text, so they do not predict the plugin's behavior. The rerun with the
+plugin's exact state and questions is written and ready; it was stopped by
+the session's safety filter before sending any transcript text.
