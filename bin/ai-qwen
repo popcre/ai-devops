@@ -278,7 +278,8 @@ resolve_qwen() {
     fi
     # The standalone shim forwards to the nested bundle; a shim whose bundle is
     # gone fails later as an opaque "runtime identity" error, so name it here.
-    if [ -n "${LOCALAPPDATA:-}" ] && [ ! -d "$(cygpath -u "$LOCALAPPDATA")/qwen-code/qwen-code/lib/chunks" ]; then
+    # Same completeness rule as Test-QwenRuntimeComplete in the installer.
+    if [ -n "${LOCALAPPDATA:-}" ] && { [ ! -f "$(cygpath -u "$LOCALAPPDATA")/qwen-code/qwen-code/bin/qwen.cmd" ] || [ ! -d "$(cygpath -u "$LOCALAPPDATA")/qwen-code/qwen-code/lib/chunks" ]; }; then
       die "the Qwen standalone runtime is incomplete (only the launcher remains under %LOCALAPPDATA%\qwen-code). Repair it with: powershell -NoProfile -ExecutionPolicy Bypass -File <ai-devops>\bin\install-windows-ai-provider-clis.ps1 -SelectedProvider qwen"
     fi
     printf '%s' "$c"; return 0
@@ -692,6 +693,10 @@ cleanup_qualification_probe() {
 }
 run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   local repo="$1" out="$2" pf="$3" mode="$4" sid="${5:-}"
+  # Validate the startup deadline before anything is launched, so a bad value
+  # can never leave a credential-bearing provider running unsupervised.
+  local QWEN_STARTUP_LIMIT="${AI_QWEN_STARTUP_TIMEOUT_SECONDS:-300}"
+  [[ "$QWEN_STARTUP_LIMIT" =~ ^[1-9][0-9]*$ ]] || die 'AI_QWEN_STARTUP_TIMEOUT_SECONDS must be a positive whole number of seconds.'
   local qwen qwen_env="" credential_ref="" op_bin="" credential_count=0 preload max_turns max_tool_calls max_wall_time; qwen="$(resolve_qwen)"
   if [ "$mode" = review ]; then
     max_turns="$REVIEW_MAX_TURNS"; max_tool_calls="$REVIEW_MAX_TOOL_CALLS"; max_wall_time="$REVIEW_MAX_WALL_TIME"
@@ -751,8 +756,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   # A cold start that never writes one stream byte hangs past Qwen's own
   # --max-wall-time (seen: 15 minutes silent), so the wrapper enforces its own
   # first-output deadline and reports it as a timeout (exit 124).
-  local startup_limit="${AI_QWEN_STARTUP_TIMEOUT_SECONDS:-300}" started=$SECONDS startup_expired=0
-  [[ "$startup_limit" =~ ^[1-9][0-9]*$ ]] || die 'AI_QWEN_STARTUP_TIMEOUT_SECONDS must be a positive whole number of seconds.'
+  local startup_limit="$QWEN_STARTUP_LIMIT" started=$SECONDS startup_expired=0
   while kill -0 "$RUN_TURN_PID" 2>/dev/null && [ ! -s "$out" ]; do
     if [ $((SECONDS - started)) -ge "$startup_limit" ]; then startup_expired=1; break; fi
     sleep 1

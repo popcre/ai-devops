@@ -173,9 +173,29 @@ function Test-QwenRuntimeComplete {
   # (bundle deleted) is not an install, and a qwen found on PATH (for example an
   # npm copy the wrapper refuses) says nothing about the standalone runtime.
   $bundle = Join-Path $env:LOCALAPPDATA 'qwen-code\qwen-code'
-  return (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'qwen-code\bin\qwen.cmd')) -and
-    (Test-Path -LiteralPath (Join-Path $bundle 'bin\qwen.cmd')) -and
+  # ai-qwen's resolve_qwen applies the same rule.
+  return (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'qwen-code\bin\qwen.cmd') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $bundle 'bin\qwen.cmd') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $bundle 'lib\chunks') -PathType Container)
+}
+
+function Restore-QwenRuntime {
+  # Put back the exact pre-install runtime after a failed install. The failed
+  # tree is moved aside, never deleted, so nothing is lost either way.
+  param($Backup, [string]$Root = $(Join-Path $env:LOCALAPPDATA 'qwen-code'))
+  $backupComplete = $Backup -and
+    (Test-Path -LiteralPath (Join-Path $Backup 'bin\qwen.cmd') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $Backup 'qwen-code\bin\qwen.cmd') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $Backup 'qwen-code\lib\chunks') -PathType Container)
+  if (-not $backupComplete) { Write-QwenInstallEvent "no complete backup to restore ($Backup)"; return $false }
+  if (Test-Path -LiteralPath $Root) {
+    $failed = "{0}.failed.{1}" -f $Root, (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+    Move-Item -LiteralPath $Root -Destination $failed
+    Write-QwenInstallEvent "moved failed runtime aside to $failed"
+  }
+  Copy-Item -LiteralPath $Backup -Destination $Root -Recurse
+  Write-QwenInstallEvent "restored previous runtime from $Backup"
+  return $true
 }
 
 function Write-QwenInstallEvent([string]$Event) {
@@ -252,8 +272,9 @@ foreach ($providerDefinition in $providerCatalog) {
     try {
       if ($provider.Id -eq 'qwen') {
         # Two sessions reinstalling at once rename the vendor directory under
-        # each other; serialize every Qwen install on this machine.
-        $qwenLock = [System.Threading.Mutex]::new($false, 'Local\ai-devops-qwen-install')
+        # each other; serialize every Qwen install on this machine, across
+        # Windows logon sessions (a Local\ mutex is per-session).
+        $qwenLock = [System.Threading.Mutex]::new($false, 'Global\ai-devops-qwen-install')
         try { $acquired = $qwenLock.WaitOne([TimeSpan]::FromMinutes(10)) } catch [System.Threading.AbandonedMutexException] { $acquired = $true }
         if (-not $acquired) { throw 'Another Qwen install on this machine has held the install lock for 10 minutes; not starting a second one.' }
         if (-not $forceQwenVersion -and (Test-QwenRuntimeComplete)) {
@@ -269,20 +290,17 @@ foreach ($providerDefinition in $providerCatalog) {
         if ($forceQwenVersion) { $env:QWEN_INSTALL_VERSION = $QwenVersion }
         try {
           Invoke-PinnedProviderInstaller -Provider $provider
+          if ($provider.Id -eq 'qwen') {
+            $complete = Test-QwenRuntimeComplete
+            Write-QwenInstallEvent "finished: complete=$complete"
+            if (-not $complete) { throw 'The Qwen installer finished but the standalone runtime is still incomplete.' }
+          }
         } catch {
           if ($provider.Id -eq 'qwen') {
             Write-QwenInstallEvent "failed: $($_.Exception.Message)"
-            if ($backup -and -not (Test-QwenRuntimeComplete) -and (Test-Path -LiteralPath (Join-Path $backup 'qwen-code\lib\chunks'))) {
-              Copy-Item -Path (Join-Path $backup '*') -Destination (Join-Path $env:LOCALAPPDATA 'qwen-code') -Recurse -Force
-              Write-QwenInstallEvent "restored previous runtime from $backup"
-            }
+            [void](Restore-QwenRuntime -Backup $backup)
           }
           throw
-        }
-        if ($provider.Id -eq 'qwen') {
-          $complete = Test-QwenRuntimeComplete
-          Write-QwenInstallEvent "finished: complete=$complete"
-          if (-not $complete) { throw 'The Qwen installer finished but the standalone runtime is still incomplete (lib\chunks missing).' }
         }
       }
     } finally {

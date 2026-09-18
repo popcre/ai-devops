@@ -243,7 +243,28 @@ try {
   Remove-Item -LiteralPath $fakeLocal -Recurse -Force -ErrorAction SilentlyContinue
 }
 Assert ($installerText -match "\`$present = Test-QwenRuntimeComplete") 'Qwen presence must come from the standalone runtime, not from any qwen on PATH'
-Assert ($installerText -match 'Local\\ai-devops-qwen-install') 'Qwen installs must be serialized by a machine-local lock'
+Assert ($installerText -match 'Global\\ai-devops-qwen-install') 'Qwen installs must be serialized machine-wide, across logon sessions'
+# A failed install restores the exact prior runtime and keeps the failed tree.
+$restoreFn = $installerAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Restore-QwenRuntime' }, $true)
+Assert ($null -ne $restoreFn) 'installer must define Restore-QwenRuntime'
+$restoreHome = Join-Path ([IO.Path]::GetTempPath()) ("qwen-restore-" + [Guid]::NewGuid().ToString('N'))
+try {
+  . ([ScriptBlock]::Create($restoreFn.Extent.Text))
+  function Write-QwenInstallEvent([string]$Event) { }
+  $bk = Join-Path $restoreHome 'backup'; $live = Join-Path $restoreHome 'qwen-code'
+  foreach ($d in @("$bk\bin", "$bk\qwen-code\bin", "$bk\qwen-code\lib\chunks", "$live\bin")) { [void](New-Item -ItemType Directory -Force -Path $d) }
+  Set-Content -LiteralPath "$bk\bin\qwen.cmd" -Value 'shim'
+  Set-Content -LiteralPath "$bk\qwen-code\bin\qwen.cmd" -Value 'bundle'
+  Set-Content -LiteralPath "$live\bin\qwen.cmd" -Value 'partial'
+  Assert (Restore-QwenRuntime -Backup $bk -Root $live) 'a complete backup must be restored'
+  Assert ((Get-Content -Raw "$live\qwen-code\bin\qwen.cmd").Trim() -eq 'bundle') 'the restored runtime must be the exact backup'
+  Assert ((Get-Content -Raw "$live\bin\qwen.cmd").Trim() -eq 'shim') 'no partial file may survive the restore'
+  Assert (@(Get-ChildItem -LiteralPath $restoreHome -Directory -Filter 'qwen-code.failed.*').Count -eq 1) 'the failed runtime must be moved aside, not deleted'
+  Remove-Item -LiteralPath "$bk\qwen-code\lib" -Recurse -Force
+  Assert (-not (Restore-QwenRuntime -Backup $bk -Root $live)) 'an incomplete backup must never replace the runtime'
+} finally {
+  Remove-Item -LiteralPath $restoreHome -Recurse -Force -ErrorAction SilentlyContinue
+}
 Assert ($installerText -match 'install-events\.log') 'every Qwen install attempt must be logged'
 Assert ($installerText -match 'restored previous runtime') 'a failed Qwen install must restore the previous complete runtime'
 Assert ($qwenWrapperText -match 'standalone runtime is incomplete') 'Qwen wrapper must name a hollow runtime and its repair command'
