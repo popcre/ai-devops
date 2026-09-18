@@ -2,6 +2,11 @@
 # Offline checks for the Muse Code engine of bin/ai-muse (AI_MUSE_ENGINE=muse-code).
 # A stub CLI stands in for Meta's binary; no provider or 1Password contact.
 set -uo pipefail
+# This suite also runs as a review packet's --tests evidence command, inside an
+# environment that exports reviewer-event variables. The stub wrapper must not
+# file suite turns as evidence for that outer review, so strip them first:
+# successful commands otherwise fail during their own evidence cleanup.
+unset AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_EVENT_OWNER_PID AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/bin/ai-muse"
 PASS=0; FAIL=0
@@ -70,7 +75,7 @@ ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_M
 # the drift checks below mutate it per case. Any *.json name must do - the real
 # file name is a provider/profile encoding the wrapper must not depend on.
 CATALOG="$HOME_FIX/.local/share/ai-devops/muse-code/muse/model-catalog"
-CATALOG_ROW='{"model_id":"muse-spark-1.3-contributor","visibility":"visible","context_limit":1007997,"output_limit":128000,"is_current":true,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
+CATALOG_ROW='{"model_id":"muse-spark-1.3-contributor","provider_id":"meta","visibility":"visible","context_limit":1007997,"output_limit":128000,"is_current":true,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
 write_catalog(){ local row="${1:-$CATALOG_ROW}"; mkdir -p "$CATALOG"; rm -f "$CATALOG"/*.json; printf '{"profile_id":"tbh","provider_id":"meta","rows":[%s],"schema_version":1,"source":"provider_catalog"}' "$row" > "$CATALOG/teststub__glob.json"; }
 write_catalog
 
@@ -82,9 +87,9 @@ check 'doctor refuses an unpinned Muse Code version' "cd '$REPO' && ! eval \"$EN
 check 'doctor reads the first-party catalog and reports limits, price and currency' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -eq 0 ] && printf '%s\\n' \"\$out\" | grep -q 'PASS  Muse Code model catalog is present and parseable' && printf '%s\\n' \"\$out\" | grep -q 'PASS  model catalog has a row for muse-spark-1.3-contributor' && printf '%s\\n' \"\$out\" | grep -q 'PASS  model row for muse-spark-1.3-contributor is visible' && printf '%s\\n' \"\$out\" | grep -q 'context_limit=1007997' && printf '%s\\n' \"\$out\" | grep -q 'output_limit=128000' && printf '%s\\n' \"\$out\" | grep -q 'input=0.10' && printf '%s\\n' \"\$out\" | grep -q 'cached=0.002' && printf '%s\\n' \"\$out\" | grep -q 'is_current=true'"
 write_catalog '{"model_id":"muse-spark-1.4-max","visibility":"visible","context_limit":1000,"output_limit":1000,"is_current":false,"cost":{"input":"1","output":"2","cached":"0.1","currency":"USD"}}'
 check 'doctor fails when the catalog has no row for the configured model' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
-write_catalog '{"model_id":"muse-spark-1.3-contributor","visibility":"hidden","context_limit":1007997,"output_limit":128000,"is_current":true,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
+write_catalog '{"model_id":"muse-spark-1.3-contributor","provider_id":"meta","visibility":"hidden","context_limit":1007997,"output_limit":128000,"is_current":true,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
 check 'doctor fails when the catalog row is not visible' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model row for muse-spark-1.3-contributor is visible'"
-write_catalog '{"model_id":"muse-spark-1.3-contributor","visibility":"visible","context_limit":1007997,"output_limit":128000,"is_current":false,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
+write_catalog '{"model_id":"muse-spark-1.3-contributor","provider_id":"meta","visibility":"visible","context_limit":1007997,"output_limit":128000,"is_current":false,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
 check 'doctor warns loudly but passes when the catalog row is not current' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -eq 0 ] && printf '%s\\n' \"\$out\" | grep -q 'WARN  ' && printf '%s\\n' \"\$out\" | grep -q 'is_current: false'"
 write_catalog
 mkdir -p "$CATALOG"; rm -f "$CATALOG"/*.json; printf 'not-json\n' > "$CATALOG/broken__file.json"
@@ -92,6 +97,14 @@ check 'doctor fails on an unparseable catalog file' "cd '$REPO' && out=\$(eval \
 write_catalog '{"model_id":"unrelated-model","visibility":"visible","context_limit":1,"output_limit":1,"is_current":true,"cost":{"input":"1","output":"1","cached":"1","currency":"USD"}}'
 printf '{"rows":{"nested":{"model_id":"muse-spark-1.3-contributor","visibility":"visible","context_limit":1,"output_limit":1,"is_current":true}}}' > "$CATALOG/malformed__rows-object.json"
 check 'doctor never takes the model row from a malformed rows-object file' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'PASS  Muse Code model catalog is present and parseable' && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
+write_catalog
+printf '{"profile_id":"tbh","provider_id":"meta","rows":[%s],"schema_version":1,"source":"provider_catalog"}' "$CATALOG_ROW" > "$CATALOG/second__file.json"
+check 'doctor refuses an ambiguous duplicate model row across catalog files' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
+write_catalog '{"model_id":"muse-spark-1.3-contributor","provider_id":"someone-else","visibility":"visible","context_limit":1007997,"output_limit":128000,"is_current":true,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}'
+check 'doctor refuses a model row from a foreign provider' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
+write_catalog '{"model_id":"unrelated-model","provider_id":"meta","visibility":"visible","context_limit":1,"output_limit":1,"is_current":true,"cost":{"input":"1","output":"1","cached":"1","currency":"USD"}}'
+printf '{"profile_id":"tbh","provider_id":"meta","rows":[%s],"schema_version":1,"source":"manual"}' '{"model_id":"muse-spark-1.3-contributor","provider_id":"meta","visibility":"visible","context_limit":1007997,"output_limit":128000,"is_current":true,"cost":{"input":"0.10","output":"0.20","cached":"0.002","currency":"USD"}}' > "$CATALOG/manual__file.json"
+check 'doctor prices only from first-party provider_catalog files' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -ne 0 ] && printf '%s\\n' \"\$out\" | grep -q 'PASS  Muse Code model catalog is present and parseable' && printf '%s\\n' \"\$out\" | grep -q 'FAIL  model catalog has a row for muse-spark-1.3-contributor'"
 write_catalog
 # A linked catalog directory must not be trusted as the first-party catalog,
 # even when its files are perfectly healthy behind the link.

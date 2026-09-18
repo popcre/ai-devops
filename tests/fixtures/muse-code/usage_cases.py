@@ -32,9 +32,17 @@ def completed(run, i, o, cr, cw, r):
 
 # Mirrors the first-party catalog row verified live on 2026-09-17 (plan
 # ai-muse-native-engine-parity §6c); prices are per-million strings.
-CATALOG_ROW = {'model_id': 'muse-spark-1.3-contributor', 'visibility': 'visible',
+CATALOG_ROW = {'model_id': 'muse-spark-1.3-contributor', 'provider_id': 'meta',
+               'visibility': 'visible',
                'context_limit': 1007997, 'output_limit': 128000, 'is_current': True,
                'cost': {'input': '0.10', 'output': '0.20', 'cached': '0.002', 'currency': 'USD'}}
+
+
+def catalog_json(rows=None, source='provider_catalog', provider='meta'):
+    row = dict(CATALOG_ROW, provider_id=provider)
+    return json.dumps({'profile_id': 'tbh', 'provider_id': 'meta',
+                       'rows': [row] if rows is None else rows,
+                       'schema_version': 1, 'source': source})
 
 
 class MuseCodeUsageCases(unittest.TestCase):
@@ -169,9 +177,7 @@ class MuseCodeUsageCases(unittest.TestCase):
             catalog.mkdir()
             # Any *.json name must do: the real file name is a provider/profile
             # encoding that changes between builds.
-            (catalog / 'teststub__glob.json').write_text(json.dumps(
-                {'profile_id': 'tbh', 'provider_id': 'meta', 'rows': [CATALOG_ROW],
-                 'schema_version': 1, 'source': 'provider_catalog'}), encoding='utf-8')
+            (catalog / 'teststub__glob.json').write_text(catalog_json(), encoding='utf-8')
             result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
         self.assertEqual(result['catalog_cost_estimate'], 0.001238922)
         self.assertEqual(result['catalog_cost_currency'], 'USD')
@@ -182,6 +188,40 @@ class MuseCodeUsageCases(unittest.TestCase):
             log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
             log.parent.mkdir(parents=True)
             log.write_text(json.dumps(completed(RUN, 1, 2, 0, 0, 0)) + '\n', encoding='utf-8')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_duplicate_model_rows_across_files_are_ambiguity_not_price(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
+            log.parent.mkdir(parents=True)
+            log.write_text(json.dumps(completed(RUN, 19835, 472, 8561, 0, 387)) + '\n', encoding='utf-8')
+            catalog = root / 'muse' / 'model-catalog'
+            catalog.mkdir()
+            catalog.joinpath('a__file.json').write_text(catalog_json(), encoding='utf-8')
+            catalog.joinpath('b__file.json').write_text(catalog_json(), encoding='utf-8')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_foreign_provider_row_is_not_first_party_price(self):
+        result = self.result([completed(RUN, 19835, 472, 8561, 0, 387)],
+                             catalog_row=dict(CATALOG_ROW, provider_id='someone-else'))
+        self.assertIsNone(result['catalog_cost_estimate'])
+        self.assertEqual(result['completeness'], 'core-complete')
+
+    def test_non_first_party_source_file_is_never_priced_from(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
+            log.parent.mkdir(parents=True)
+            log.write_text(json.dumps(completed(RUN, 19835, 472, 8561, 0, 387)) + '\n', encoding='utf-8')
+            catalog = root / 'muse' / 'model-catalog'
+            catalog.mkdir()
+            catalog.joinpath('manual__file.json').write_text(
+                catalog_json(source='manual'), encoding='utf-8')
             result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')
@@ -210,7 +250,7 @@ class MuseCodeUsageCases(unittest.TestCase):
             catalog = root / 'muse' / 'model-catalog'
             catalog.mkdir()
             real = root / 'real-catalog.json'
-            real.write_text(json.dumps({'rows': [CATALOG_ROW]}), encoding='utf-8')
+            real.write_text(catalog_json(), encoding='utf-8')
             link = catalog / 'linked__file.json'
             try:
                 link.symlink_to(real)
@@ -225,7 +265,7 @@ class MuseCodeUsageCases(unittest.TestCase):
         # wrapper-verified private store and must not price anything. Symlinks
         # cover POSIX; on Windows, a directory junction needs no privilege.
         line = json.dumps(completed(RUN, 19835, 472, 8561, 0, 387)) + '\n'
-        row_file = json.dumps({'rows': [CATALOG_ROW]})
+        row_file = catalog_json()
         for target in ('model-catalog', 'muse'):
             with self.subTest(linked=target):
                 with tempfile.TemporaryDirectory() as tmp:

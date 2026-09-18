@@ -163,12 +163,14 @@ def muse_code_is_link(path):
 
 def muse_code_catalog_row(path, model):
     """The model's row from the CLI's first-party catalog beside the sessions
-    tree, or None when no readable catalog file carries it. The file name is a
-    provider/profile encoding that changes between builds; only the *.json glob
-    and the model_id selection are stable. Linked files and linked catalog
-    directories are refused, matching the doctor's catalog checks: a link must
-    not supply pricing attributed to the first-party catalog. Everything above
-    the muse root is the calling wrapper's verified private store."""
+    tree, or None when no truthful row exists. Only files declaring
+    source=="provider_catalog" are consulted; the model's row must be unique
+    across all of them and belong to the meta provider — duplicates, foreign
+    providers, or stale overlays are ambiguity, not a price. The file name is a
+    provider/profile encoding that changes between builds; only the *.json
+    glob and the model_id selection are stable. Linked files and linked catalog
+    directories are refused, matching the doctor's catalog checks; everything
+    above the muse root is the calling wrapper's verified private store."""
     if not model:
         return None
     sessions = next((parent for parent in path.parents if parent.name == 'sessions'), None)
@@ -182,6 +184,7 @@ def muse_code_catalog_row(path, model):
         files = sorted(catalog_dir.glob('*.json'))
     except OSError:
         return None
+    candidates = []
     for file in files:
         if muse_code_is_link(file):
             continue
@@ -189,13 +192,17 @@ def muse_code_catalog_row(path, model):
             catalog = json.loads(file.read_text(encoding='utf-8-sig'))
         except (OSError, ValueError):
             continue
-        rows = catalog.get('rows') if isinstance(catalog, dict) else None
+        if not (isinstance(catalog, dict) and catalog.get('source') == 'provider_catalog'):
+            continue
+        rows = catalog.get('rows')
         if not isinstance(rows, list):
             continue
         for row in rows:
             if isinstance(row, dict) and row.get('model_id') == model:
-                return row
-    return None
+                candidates.append(row)
+    if len(candidates) != 1 or candidates[0].get('provider_id') != 'meta':
+        return None
+    return candidates[0]
 
 
 def muse_code_catalog_cost(counters, row):
@@ -203,9 +210,13 @@ def muse_code_catalog_cost(counters, row):
 
     The store's input counter already includes the cached portion, so cached
     tokens are priced at the cached rate and never again at the input rate.
-    Returns (estimate, currency); (None, None) whenever anything needed to
-    price truthfully is missing, malformed, or unrepresentable."""
-    cost = row.get('cost') if isinstance(row, dict) else None
+    Only a row that is itself Meta first-party (provider_id meta) is priced,
+    whatever path handed it in. Returns (estimate, currency); (None, None)
+    whenever anything needed to price truthfully is missing, malformed, or
+    unrepresentable."""
+    if not isinstance(row, dict) or row.get('provider_id') != 'meta':
+        return None, None
+    cost = row.get('cost')
     if not isinstance(cost, dict):
         return None, None
     prices = {name: catalog_price(cost.get(name)) for name in ('input', 'output', 'cached')}
