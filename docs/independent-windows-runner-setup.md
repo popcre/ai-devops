@@ -241,23 +241,31 @@ bounded requests, results and audit are under
 `SUCCESS`, `MISSING_TASK`, `STALE_INSTALLATION`, `CONCURRENT_EXECUTION`,
 `REQUEST_REJECTED`, `OPERATION_FAILED`, `RESULT_INVALID` or `TIMEOUT`.
 
-Because the S4U task runs inside the operator's own logon session, the elevated
-worker hardens its resolution roots before doing anything else: module
-resolution is pinned to the two system-owned module directories only, the
-qualification child inherits that pinned environment, and a per-user
-(`HKCU`) CLSID override for the Task Scheduler COM class refuses the run with
-`STALE_INSTALLATION` instead of loading operator code elevated. When the audit
-trail or replay ledger reaches its capacity bound, further requests are refused
-before the operation executes, and a request file is always consumed exactly
-once — an integrity-write failure can never leave it behind to re-run later.
+Because the S4U task runs inside the operator's own logon session, the
+boundary never lets a .NET host start under the operator's inherited
+environment: the task action launches through `cmd.exe /d` (no per-user
+AutoRun), which strips the .NET startup-hook and root-override variables
+before starting the machine-wide `pwsh.exe`, and the elevated worker then
+pins module resolution to the two system-owned module directories, refuses
+any per-user (`HKCU`) ProgID or CLSID registration for the Task Scheduler
+COM class, and re-checks the payload, runtime, task and evidence contracts
+before every execution. When the audit trail or replay ledger reaches its
+capacity bound, further requests are refused before the operation executes,
+and a request file is always consumed exactly once under its canonical GUID
+spelling — an integrity-write failure can never leave it behind to re-run
+later.
 
-Installation also pins ownership and the ACL of
-`C:\ProgramData\ai-devops\windows-runner-security.json` (Administrators and
-SYSTEM full control, the operator modify so the fixed refresh can replace it,
-everyone else read-only, no inherited or reparse ambiguity), so the TPM/Secure
-Boot evidence can never be pre-created by another local account. Existing
-evidence content from a manual preflight is preserved. The worker re-checks
-that file's ownership and shape before every refresh.
+Installation also pins the whole evidence neighbourhood:
+`C:\ProgramData\ai-devops` itself is pinned so only administrators can
+create entries (existing readers keep inherited read-only access), and both
+`C:\ProgramData\ai-devops\windows-runner-security.json` and the
+`windows-runner-security.json.tmp` sibling its atomic refresh uses are
+pinned to the fixed contract — Administrators and SYSTEM full control, the
+operator modify so the fixed refresh can replace the file, everyone else
+read-only, no inherited or reparse ambiguity — so the TPM/Secure Boot
+evidence and its replace target can never be pre-created by another local
+account. Existing evidence content from a manual preflight is preserved,
+and the worker re-applies the contract to both files after every refresh.
 
 Removal first verifies manifest ownership and drift, then writes a protected
 recovery bundle. `-RequireManifestMatch` is the stricter rollback gate: removal

@@ -29,9 +29,10 @@ function Assert-Administrator {
 function Invoke-ProtectedIcacls {
   # Every icacls invocation must be checked immediately: $LASTEXITCODE only
   # reflects the most recent native call, so a batch of unchecked calls lets
-  # a failed /setowner or grant pass silently.
+  # a failed /setowner or grant pass silently. The absolute path keeps the
+  # installer independent of any PATH entry.
   param([Parameter(Mandatory)][string[]]$Arguments)
-  & icacls.exe @Arguments | Out-Null
+  & 'C:\Windows\System32\icacls.exe' @Arguments | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'Filesystem ACL update failed.' }
 }
 
@@ -85,7 +86,7 @@ function Get-DesiredPayloadManifest {
 }
 
 function Set-ProtectedFilesystemAcl {
-  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Runtime','Evidence')][string]$Kind)
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Runtime','Evidence','EvidenceParent')][string]$Kind)
   Assert-NoReparsePoint -LiteralPath $LiteralPath
   $admins = '*S-1-5-32-544'
   $system = '*S-1-5-18'
@@ -95,6 +96,9 @@ function Set-ProtectedFilesystemAcl {
   } elseif ($Kind -eq 'Evidence') {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:M",'*S-1-1-0:R')
+  } elseif ($Kind -eq 'EvidenceParent') {
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F",'*S-1-5-32-545:(OI)(CI)(IO)(RX)')
   } else {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins,'/T','/C')
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX")
@@ -109,7 +113,14 @@ function Set-ProtectedFilesystemAcl {
 
 function Register-MaintenanceTask {
   param([Parameter(Mandatory)][string]$OperatorSid)
-  $action = New-ScheduledTaskAction -Execute $script:PowerShellPath -Argument '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
+  # The worker is launched through cmd.exe with /d (no per-user AutoRun) so
+  # that no .NET host ever starts inside the operator-controlled inherited
+  # environment: the .NET startup-hook and root-override variables are
+  # stripped by the launcher before pwsh.exe begins to load, which a worker
+  # script statement can never do for itself.
+  $pwshInvocation = '"C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
+  $arguments = '/d /c set "DOTNET_STARTUP_HOOKS=" & set "DOTNET_ADDITIONAL_DEPS=" & set "DOTNET_BUNDLE_EXTRACT_BASE_DIR=" & set "DOTNET_ROOT=" & ' + $pwshInvocation
+  $action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\cmd.exe' -Argument $arguments
   $principal = New-ScheduledTaskPrincipal -UserId $OperatorSid -LogonType S4U -RunLevel Highest
   $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::FromMinutes(6)) -StartWhenAvailable:$false
   Register-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
@@ -133,6 +144,7 @@ function Get-InstalledTaskSnapshot {
   return [ordered]@{
     execute = [string]$task.Actions[0].Execute
     arguments = [string]$task.Actions[0].Arguments
+    action_count = @($task.Actions).Count
     user_id = [string]$task.Principal.UserId
     logon_type = [string]$task.Principal.LogonType
     run_level = [string]$task.Principal.RunLevel
@@ -192,10 +204,12 @@ function Test-MaintenanceInstallation {
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'audit.jsonl') -OperatorSid $ExpectedOperatorSid -Kind Audit
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'processed-requests.jsonl') -OperatorSid $ExpectedOperatorSid -Kind Ledger
   Test-PathAclContract -LiteralPath $script:EvidencePath -OperatorSid $ExpectedOperatorSid -Kind Evidence
+  Test-PathAclContract -LiteralPath "$script:EvidencePath.tmp" -OperatorSid $ExpectedOperatorSid -Kind Evidence
   $task = Get-InstalledTaskSnapshot
-  $expectedArgs = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
+  $expectedExecute = 'C:\Windows\System32\cmd.exe'
+  $expectedArgs = '/d /c set "DOTNET_STARTUP_HOOKS=" & set "DOTNET_ADDITIONAL_DEPS=" & set "DOTNET_BUNDLE_EXTRACT_BASE_DIR=" & set "DOTNET_ROOT=" & "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
   $expectedSddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)"
-  if ($task.execute -cne $script:PowerShellPath -or $task.arguments -cne $expectedArgs -or $task.user_id -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or $task.sddl -cne $expectedSddl) { throw 'STALE_INSTALLATION: scheduled task drift.' }
+  if ($task.action_count -ne 1 -or $task.execute -cne $expectedExecute -or $task.arguments -cne $expectedArgs -or $task.user_id -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or $task.sddl -cne $expectedSddl) { throw 'STALE_INSTALLATION: scheduled task drift.' }
   return $true
 }
 
@@ -210,19 +224,26 @@ function Backup-MaintenanceInstallation {
 
 function Protect-EvidenceFile {
   # The qualification evidence is the TPM/Secure Boot gate CI consumes, and
-  # this boundary makes it remotely refreshable, so it may never sit as a
-  # pre-created attacker-owned file. Install pins its ownership and ACL;
-  # existing content (including a manual preflight's) is preserved.
+  # this boundary makes it remotely refreshable, so neither the gate itself
+  # nor its atomic-replace tmp sibling may ever sit as a pre-created
+  # attacker-owned file. The PARENT directory is pinned as well: ProgramData
+  # defaults let any local user create entries there, while the pinned
+  # contract keeps every existing reader reading and only admins creating.
+  # Existing evidence content (including a manual preflight's) is preserved.
   param([Parameter(Mandatory)][string]$OperatorSid)
   $parent = Split-Path -Parent $script:EvidencePath
   New-Item -ItemType Directory -Path $parent -Force | Out-Null
   Assert-NoReparsePoint -LiteralPath $parent
-  if (Test-Path -LiteralPath $script:EvidencePath) {
-    Assert-NoReparsePoint -LiteralPath $script:EvidencePath
-  } else {
-    [IO.File]::WriteAllBytes($script:EvidencePath, [byte[]]@())
+  Set-ProtectedFilesystemAcl -LiteralPath $parent -OperatorSid $OperatorSid -Kind EvidenceParent
+  $tmpSibling = "$script:EvidencePath.tmp"
+  foreach ($path in @($script:EvidencePath, $tmpSibling)) {
+    if (Test-Path -LiteralPath $path) {
+      Assert-NoReparsePoint -LiteralPath $path
+    } else {
+      [IO.File]::WriteAllBytes($path, [byte[]]@())
+    }
+    Set-ProtectedFilesystemAcl -LiteralPath $path -OperatorSid $OperatorSid -Kind Evidence
   }
-  Set-ProtectedFilesystemAcl -LiteralPath $script:EvidencePath -OperatorSid $OperatorSid -Kind Evidence
 }
 
 function Install-MaintenancePayload {

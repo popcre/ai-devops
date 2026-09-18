@@ -32,15 +32,19 @@ function Read-ValidatedRequest {
     [scriptblock]$OwnerSidReader = { param($Path) ([Security.AccessControl.FileSecurity]::new($Path, [Security.AccessControl.AccessControlSections]::Owner)).GetOwner([Security.Principal.SecurityIdentifier]).Value },
     [datetime]$NowUtc = [DateTime]::UtcNow
   )
+  $bytes = Read-BoundedBytes -LiteralPath $LiteralPath -MaximumBytes $MaximumBytes
   $actualOwner = & $OwnerSidReader $LiteralPath
   if ($actualOwner -ne $ExpectedOwnerSid) { throw 'WRONG_OWNER' }
-  $bytes = Read-BoundedBytes -LiteralPath $LiteralPath -MaximumBytes $MaximumBytes
   try { $request = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json -ErrorAction Stop } catch { throw 'MALFORMED_JSON' }
   $fields = @($request.PSObject.Properties.Name)
   if (@($fields | Where-Object { $_ -notin $script:AllowedRequestFields }).Count -ne 0 -or $fields.Count -ne 4) { throw 'UNKNOWN_FIELDS' }
   if ($request.schema_version -ne 1 -or $request.operation -cne 'refresh-qualification') { throw 'INVALID_OPERATION' }
   $requestId = [guid]::Empty
   if (-not [guid]::TryParse([string]$request.request_id, [ref]$requestId) -or $requestId -eq [guid]::Empty) { throw 'INVALID_REQUEST_ID' }
+  # Canonicalize: TryParse accepts N/B/P/X GUID spellings, so the raw string
+  # is replaced by the one canonical D-format spelling before it reaches the
+  # replay ledger, the result file, or the audit trail.
+  $request.request_id = $requestId.ToString('D')
   $requestedAt = [datetime]::MinValue
   if ($request.requested_at -is [datetime]) {
     $requestedAt = [datetime]$request.requested_at
@@ -74,27 +78,106 @@ function Test-PayloadManifest {
   $acl = Get-Acl -LiteralPath $Root
   $ownerSid = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
   if ($ownerSid -notin @('S-1-5-32-544','S-1-5-18')) { throw 'ACL_DRIFT' }
-  $operatorRules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq [string]$manifest.operator_sid })
+  $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+  # Group-granted rights count as drift: the allowlist admits only
+  # Administrators, SYSTEM and the manifest operator, and only Allow rules,
+  # so write access arriving through Users/INTERACTIVE never passes.
+  $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18',[string]$manifest.operator_sid) })
+  if ($unexpected.Count -ne 0) { throw 'ACL_DRIFT' }
+  foreach ($required in @('S-1-5-32-544','S-1-5-18')) {
+    if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $required -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw 'ACL_DRIFT' }
+  }
+  $operatorRules = @($rules | Where-Object { $_.IdentityReference.Value -eq [string]$manifest.operator_sid })
   if ($operatorRules.Count -eq 0 -or @($operatorRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ChangePermissions) }).Count -ne 0) { throw 'ACL_DRIFT' }
 }
 
+function Test-RuntimeBoundary {
+  # The runtime contract is verified with the same group-blind allowlist as
+  # the payload: the worker refuses to run when any runtime path carries an
+  # unexpected identity, a non-Allow rule, foreign ownership, a reparse
+  # point, or operator rights beyond the documented shape.
+  param([Parameter(Mandatory)][string]$ExpectedOperatorSid)
+  $parts = @(
+    @{ Path = $script:RuntimeRoot; Kind = 'root' },
+    @{ Path = (Join-Path $script:RuntimeRoot 'requests'); Kind = 'requests' },
+    @{ Path = (Join-Path $script:RuntimeRoot 'results'); Kind = 'results' },
+    @{ Path = (Join-Path $script:RuntimeRoot 'audit.jsonl'); Kind = 'audit' },
+    @{ Path = (Join-Path $script:RuntimeRoot 'processed-requests.jsonl'); Kind = 'ledger' }
+  )
+  foreach ($part in $parts) {
+    $item = Get-Item -LiteralPath $part.Path -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'REPARSE_POINT' }
+    $acl = Get-Acl -LiteralPath $part.Path
+    $ownerSid = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($ownerSid -notin @('S-1-5-32-544','S-1-5-18')) { throw 'ACL_DRIFT' }
+    $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18',$ExpectedOperatorSid) })
+    if ($unexpected.Count -ne 0) { throw 'ACL_DRIFT' }
+    foreach ($required in @('S-1-5-32-544','S-1-5-18')) {
+      if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $required -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw 'ACL_DRIFT' }
+    }
+    $operatorRules = @($rules | Where-Object { $_.IdentityReference.Value -eq $ExpectedOperatorSid })
+    if ($part.Kind -eq 'ledger') { if ($operatorRules.Count -ne 0) { throw 'ACL_DRIFT' }; continue }
+    if ($operatorRules.Count -eq 0) { throw 'ACL_DRIFT' }
+    $operatorRights = $operatorRules | ForEach-Object FileSystemRights
+    $mayWrite = @($operatorRights | Where-Object { ($_ -band [Security.AccessControl.FileSystemRights]::Write) -or ($_ -band [Security.AccessControl.FileSystemRights]::Delete) -or ($_ -band [Security.AccessControl.FileSystemRights]::ChangePermissions) }).Count -ne 0
+    if ($part.Kind -eq 'requests') { if (-not $mayWrite) { throw 'ACL_DRIFT' } }
+    elseif ($mayWrite) { throw 'ACL_DRIFT' }
+  }
+}
+
 function Assert-NoPerUserComOverride {
-  # HKCU CLSID registrations resolve BEFORE HKLM, so an operator-writable
-  # per-user override for the Task Scheduler COM class would load operator
-  # code into this elevated process. A legitimate installation never has one.
+  # HKCU Classes registrations resolve BEFORE HKLM, so operator-writable
+  # overrides would load operator code into this elevated process. Both
+  # resolution channels are refused: the ProgID key that New-Object
+  # resolves first, and the CLSID key it resolves through (whose subtree
+  # also carries any per-user TreatAs redirect). A legitimate installation
+  # has neither.
   $scheduleServiceClsid = '{148BD52A-A2AB-11CE-B07F-00AA006C7A83}'
+  if (Test-Path -LiteralPath 'HKCU:\Software\Classes\Schedule.Service') { throw 'PER_USER_COM_OVERRIDE' }
   if (Test-Path -LiteralPath "HKCU:\Software\Classes\CLSID\$scheduleServiceClsid") { throw 'PER_USER_COM_OVERRIDE' }
 }
 
 function Test-EvidenceBoundary {
   # The qualification evidence is the TPM/Secure Boot gate consumed by CI,
   # so the worker refuses to refresh it through any path it does not own
-  # outright: it must exist as a plain file owned by Administrators/SYSTEM.
+  # outright: a plain file, owned by Administrators/SYSTEM, whose DACL is
+  # exactly the pinned contract (world read-only, operator modify, no
+  # group-granted or inherited surprises).
+  param([Parameter(Mandatory)][string]$ExpectedOperatorSid)
   if (-not (Test-Path -LiteralPath $script:EvidencePath -PathType Leaf)) { throw 'ACL_DRIFT' }
   $item = Get-Item -LiteralPath $script:EvidencePath -Force
   if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'REPARSE_POINT' }
-  $owner = ([Security.AccessControl.FileSecurity]::new($script:EvidencePath, [Security.AccessControl.AccessControlSections]::Owner)).GetOwner([Security.Principal.SecurityIdentifier]).Value
+  $acl = Get-Acl -LiteralPath $script:EvidencePath
+  $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
   if ($owner -notin @('S-1-5-32-544','S-1-5-18')) { throw 'ACL_DRIFT' }
+  $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+  $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18','S-1-1-0',$ExpectedOperatorSid) })
+  if ($unexpected.Count -ne 0) { throw 'ACL_DRIFT' }
+  foreach ($required in @('S-1-5-32-544','S-1-5-18')) {
+    if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $required -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw 'ACL_DRIFT' }
+  }
+  $worldRules = @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-1-0' })
+  if ($worldRules.Count -eq 0 -or @($worldRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -ne 0) { throw 'ACL_DRIFT' }
+  $operatorRules = @($rules | Where-Object { $_.IdentityReference.Value -eq $ExpectedOperatorSid })
+  if (@($operatorRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -eq 0) { throw 'ACL_DRIFT' }
+}
+
+function Set-EvidenceContractAcl {
+  # Pure .NET descriptor application: the worker never resolves a helper
+  # executable through a caller-influenced PATH.
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid)
+  $acl = Get-Acl -LiteralPath $LiteralPath
+  $acl.SetAccessRuleProtection($true, $false)
+  foreach ($grant in @(
+    @{ Identity = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'); Rights = [Security.AccessControl.FileSystemRights]::FullControl },
+    @{ Identity = [Security.Principal.SecurityIdentifier]::new('S-1-5-18'); Rights = [Security.AccessControl.FileSystemRights]::FullControl },
+    @{ Identity = [Security.Principal.SecurityIdentifier]::new($OperatorSid); Rights = [Security.AccessControl.FileSystemRights]::Modify },
+    @{ Identity = [Security.Principal.SecurityIdentifier]::new('S-1-1-0'); Rights = [Security.AccessControl.FileSystemRights]::ReadAndExecute }
+  )) {
+    $acl.ResetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($grant.Identity, $grant.Rights, [Security.AccessControl.AccessControlType]::Allow))
+  }
+  Set-Acl -LiteralPath $LiteralPath -AclObject $acl
 }
 
 function Test-IntegrityCapacity {
@@ -108,9 +191,10 @@ function Test-IntegrityCapacity {
 
 function Test-TaskBoundary {
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid)
-  $task = Get-ScheduledTask -TaskPath '\AiDevops\' -TaskName 'WindowsRunnerMaintenance' -ErrorAction Stop
-  $expectedArguments = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
-  if ([string]$task.Actions[0].Execute -cne 'C:\Program Files\PowerShell\7\pwsh.exe' -or [string]$task.Actions[0].Arguments -cne $expectedArguments -or [string]$task.Principal.UserId -cne $ExpectedOperatorSid -or [string]$task.Principal.LogonType -cne 'S4U' -or [string]$task.Principal.RunLevel -cne 'Highest' -or @($task.Triggers).Count -ne 0 -or [string]$task.Settings.MultipleInstances -cne 'IgnoreNew') { throw 'STALE_INSTALLATION' }
+  $task = Get-ScheduledTask -TaskPath '\AiDevOps\' -TaskName 'WindowsRunnerMaintenance' -ErrorAction Stop
+  $expectedExecute = 'C:\Windows\System32\cmd.exe'
+  $expectedArguments = '/d /c set "DOTNET_STARTUP_HOOKS=" & set "DOTNET_ADDITIONAL_DEPS=" & set "DOTNET_BUNDLE_EXTRACT_BASE_DIR=" & set "DOTNET_ROOT=" & "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
+  if (@($task.Actions).Count -ne 1 -or [string]$task.Actions[0].Execute -cne $expectedExecute -or [string]$task.Actions[0].Arguments -cne $expectedArguments -or [string]$task.Principal.UserId -cne $ExpectedOperatorSid -or [string]$task.Principal.LogonType -cne 'S4U' -or [string]$task.Principal.RunLevel -cne 'Highest' -or @($task.Triggers).Count -ne 0 -or [string]$task.Settings.MultipleInstances -cne 'IgnoreNew') { throw 'STALE_INSTALLATION' }
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
@@ -164,6 +248,10 @@ function Write-ReplayLedgerEntry {
 function Invoke-MaintenanceWorker {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   if (-not [Security.Principal.WindowsPrincipal]::new($identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Administrator elevation is required.' }
+  # Verify the payload first: the manifest pins every payload hash including
+  # the policy file, so a drifted policy can never decide who is authorized
+  # or what the limits are. Only then is the policy loaded and trusted.
+  Test-PayloadManifest -Root $script:PayloadRoot
   $policy = Get-Content -Raw -LiteralPath (Join-Path $script:PayloadRoot 'windows-runner-maintenance-policy.json') | ConvertFrom-Json
   $requests = Join-Path $script:RuntimeRoot 'requests'
   $results = Join-Path $script:RuntimeRoot 'results'
@@ -192,18 +280,31 @@ function Invoke-MaintenanceWorker {
           $ownerSid = ([Security.AccessControl.FileSecurity]::new($file.FullName, [Security.AccessControl.AccessControlSections]::Owner)).GetOwner([Security.Principal.SecurityIdentifier]).Value
           $request = Read-ValidatedRequest -LiteralPath $file.FullName -ExpectedOwnerSid ([string]$policy.operator_sid) -MaximumBytes ([int]$policy.max_request_bytes) -MaximumAgeSeconds ([int]$policy.request_max_age_seconds)
           $id = [string]$request.request_id
-          if (Select-String -LiteralPath $ledgerPath -SimpleMatch -Quiet -Pattern $id -ErrorAction SilentlyContinue) { throw 'REUSED_UUID' }
+          $reused = $false
+          if (Test-Path -LiteralPath $ledgerPath -PathType Leaf) {
+            try { $reused = [bool](Select-String -LiteralPath $ledgerPath -SimpleMatch -Quiet -Pattern $id -ErrorAction Stop) } catch { throw 'LEDGER_UNREADABLE' }
+          }
+          if ($reused) { throw 'REUSED_UUID' }
           if ($null -eq $mutex -or -not $firstRequest) { throw 'CONCURRENT_EXECUTION' }
           Test-PayloadManifest -Root $script:PayloadRoot
+          Test-RuntimeBoundary -ExpectedOperatorSid ([string]$policy.operator_sid)
           Test-TaskBoundary -ExpectedOperatorSid ([string]$policy.operator_sid)
-          Test-EvidenceBoundary
+          Test-EvidenceBoundary -ExpectedOperatorSid ([string]$policy.operator_sid)
           Test-IntegrityCapacity -AuditPath $auditPath -LedgerPath $ledgerPath -MaxAuditBytes ([int]$policy.max_audit_bytes) -MaxLedgerBytes ([int]$policy.max_ledger_bytes)
           Invoke-RefreshQualification -ProtectedQualificationScript (Join-Path $script:PayloadRoot 'qualify-windows-runner.ps1')
+          # The atomic refresh consumed the pinned tmp sibling and moved its
+          # descriptor onto the evidence file. Re-apply the contract to both
+          # so no refresh can leave a foreign-owned or inherit-only gate and
+          # no later pre-creation race can start from a missing sibling.
+          $tmpSibling = "$script:EvidencePath.tmp"
+          if (-not (Test-Path -LiteralPath $tmpSibling -PathType Leaf)) { [IO.File]::WriteAllBytes($tmpSibling, [byte[]]@()) }
+          Set-EvidenceContractAcl -LiteralPath $tmpSibling -OperatorSid ([string]$policy.operator_sid)
+          Set-EvidenceContractAcl -LiteralPath $script:EvidencePath -OperatorSid ([string]$policy.operator_sid)
           $resultCode = 'SUCCESS'; $exitCode = 0; $message = 'Windows runner qualification evidence was refreshed.'
         } catch {
           switch -Regex ($_.Exception.Message) {
             'CONCURRENT_EXECUTION' { $resultCode = 'CONCURRENT_EXECUTION'; $message = 'Another maintenance request is already running.' }
-            'STALE_INSTALLATION|HASH_DRIFT|ACL_DRIFT|REPARSE_POINT|PER_USER_COM_OVERRIDE' { $resultCode = 'STALE_INSTALLATION'; $message = 'The protected maintenance installation failed verification.' }
+            'STALE_INSTALLATION|HASH_DRIFT|ACL_DRIFT|REPARSE_POINT|PER_USER_COM_OVERRIDE|LEDGER_UNREADABLE' { $resultCode = 'STALE_INSTALLATION'; $message = 'The protected maintenance installation failed verification.' }
             '^TIMEOUT$' { $resultCode = 'TIMEOUT'; $message = 'Qualification exceeded its bounded execution time.' }
             'QUALIFICATION_FAILED' { $resultCode = 'OPERATION_FAILED'; $message = 'Qualification did not complete successfully.' }
             'AUDIT_FULL|LEDGER_FULL' { $resultCode = 'REQUEST_REJECTED'; $message = 'Audit or replay capacity is exhausted; an administrator must archive the logs.' }
