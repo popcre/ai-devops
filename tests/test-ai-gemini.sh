@@ -263,7 +263,7 @@ set +e; (cd "$QUAL_CALLER" && "$SCRIPT" qualify-live) > "$TMP/qual.out" 2>&1; QU
 check 'live qualification from an unrelated checkout publishes durable evidence' "test '$QUAL_RC' -eq 0 && grep -Eq '^QUALIFIED session=qual-[^ ]+ model=gemini-3\.8-flash-high exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=.+$' '$TMP/qual.out'"
 QUAL_FIXTURE="$(sed -n 's/^QUALIFIED .* fixture=//p' "$TMP/qual.out")"
 check 'the recorded invocation reviews the private fixture, not the caller' "test -n '$QUAL_FIXTURE' && test -d '$QUAL_FIXTURE/.ai/reviews' && test ! -e '$QUAL_CALLER/.ai'"
-check 'qualification made exactly the new and resumed provider turns' "test \"\$(grep -vc ' /model$' '$MOCK_AGY_CALLS')\" -eq 2"
+check 'qualification made exactly the new and resumed provider turns' "test \"\$(grep -Ec '^--(new-project|conversation) .* --model gemini' '$MOCK_AGY_CALLS')\" -eq 2"
 set +e; (cd "$QUAL_CALLER" && "$SCRIPT" doctor --live) > "$TMP/qual-doctor.out" 2>&1; QUAL_DOCTOR_RC=$?; set -e
 check 'doctor --live qualifies through the same fixture path' "test '$QUAL_DOCTOR_RC' -eq 0 && grep -q '^QUALIFIED ' '$TMP/qual-doctor.out'"
 set +e; (cd "$QUAL_CALLER" && AI_GEMINI_QUALIFY_FIXTURE="$QUAL_CALLER" "$SCRIPT" qualify-live) > "$TMP/qual-spoof.out" 2>&1; QUAL_SPOOF_RC=$?; set -e
