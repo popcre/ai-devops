@@ -727,6 +727,18 @@ check "new retires a bounded batch before creating a session" "printf '%s' \"\$N
 DOCTOR_FN="$(sed -n '/^cmd_doctor()/,/^}/p' "$AI_GLM")"
 check "doctor reports review retention through prune's due scan" "printf '%s' \"\$DOCTOR_FN\" | grep -q 'glm_due_review_records' && printf '%s' \"\$DOCTOR_FN\" | grep -q 'idle review session(s) older than'"
 check "doctor never runs a prune pass" "! printf '%s' \"\$DOCTOR_FN\" | grep -q 'cmd_prune'"
+# Doctor and prune share one retention rule; an unusable value is a doctor FAIL, not arithmetic.
+retention_problem() { # HOURS -> the rule's complaint, empty when sound
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$TMP/retention-state" AI_GLM_REVIEW_RETENTION_HOURS="$1" \
+    bash -c 'source "$AI_GLM_SOURCE"; glm_retention_problem' 2>/dev/null
+}
+check "retention rule rejects a non-number" "retention_problem 'abc' | grep -q 'whole number of hours'"
+check "retention rule rejects an empty value" "AI_GLM_SOURCE='$AI_GLM' AI_GLM_STATE_DIR='$TMP/retention-state' bash -c 'source \"\$AI_GLM_SOURCE\"; RETENTION_HOURS=; glm_retention_problem' | grep -q 'whole number of hours'"
+check "retention rule rejects a retention within the turn timeout" "retention_problem 0 | grep -q 'longer than the turn timeout'"
+check "retention rule accepts a leading-zero value" "test -z \"\$(retention_problem 08)\""
+check "retention rule accepts the default" "test -z \"\$(retention_problem 24)\""
+check "doctor fails an unusable retention before scanning" "printf '%s\n' \"\$DOCTOR_FN\" | grep -q 'FAIL  review retention setting is usable' && test \"\$(printf '%s\n' \"\$DOCTOR_FN\" | grep -n 'glm_retention_problem' | head -1 | cut -d: -f1)\" -lt \"\$(printf '%s\n' \"\$DOCTOR_FN\" | grep -n 'glm_due_review_records' | head -1 | cut -d: -f1)\""
+check "prune uses the shared retention rule" "sed -n '/^cmd_prune()/,/^}/p' '$AI_GLM' | grep -q 'glm_retention_problem'"
 check "prune walks only the due scan's records" "sed -n '/^cmd_prune()/,/^}/p' '$AI_GLM' | grep -q 'glm_due_review_records'"
 # The record index is a pre-filter: it may skip a record only when prune_review would
 # also call it not due. Anything it cannot prove stays a candidate.

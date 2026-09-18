@@ -2130,15 +2130,19 @@ prune_review() { # prune_review META CUTOFF -> 0 removed, 1 kept (reason warned)
   return "$rc"
 }
 
+glm_retention_problem() { # prints why RETENTION_HOURS is unusable; nothing when it is sound
+  case "$RETENTION_HOURS" in ''|*[!0-9]*) echo "AI_GLM_REVIEW_RETENTION_HOURS must be a whole number of hours."; return ;; esac
+  [ $((10#$RETENTION_HOURS * 3600)) -gt "$TIMEOUT" ] ||
+    echo "review retention (${RETENTION_HOURS}h) must be longer than the turn timeout (${TIMEOUT}s), or a running turn could be pruned."
+}
+
 cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   local limit="${1:-0}" cutoff mp d tag rc removed=0 kept=0 referenced=""
   case "$limit" in ''|*[!0-9]*) die "the prune removal limit must be a whole number (0 means no limit)." ;; esac
-  case "$RETENTION_HOURS" in ''|*[!0-9]*) die "AI_GLM_REVIEW_RETENTION_HOURS must be a whole number of hours." ;; esac
-  [ $((RETENTION_HOURS * 3600)) -gt "$TIMEOUT" ] ||
-    die "review retention (${RETENTION_HOURS}h) must be longer than the turn timeout (${TIMEOUT}s), or a running turn could be pruned."
+  local bad; bad="$(glm_retention_problem)"; [ -z "$bad" ] || die "$bad"
   # Server sessions and local records leave together; never orphan either side.
   server_up || { warn "the GLM server is not answering; nothing was pruned."; return 1; }
-  cutoff=$(( $(date +%s) - RETENTION_HOURS * 3600 ))
+  cutoff=$(( $(date +%s) - 10#$RETENTION_HOURS * 3600 ))
   # A build lock left behind would make every later snapshot of that name refuse to build.
   # An interrupt is held until the item in hand is finished, then prune stops. Exiting
   # mid-item could strand a record whose server session is already deleted; releasing the
@@ -2554,16 +2558,21 @@ cmd_doctor() {
   fi
   # Report, never act: removals belong to `new` (bounded) and `ai-glm prune`. Doctor
   # runs inside the governed-review preflight window, which a prune pass overran.
-  local idle=0
+  local idle=0 bad
+  bad="$(glm_retention_problem)"
+  if [ -n "$bad" ]; then
+    printf 'FAIL  review retention setting is usable: %s\n' "$bad"; FAILS=$((FAILS+1))
+  else
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     # An entry the index could not read counts only if the record really is a review.
     [ "$(jq -r '.type // empty' "$f" 2>/dev/null | tr -d '\r')" = review ] && idle=$((idle + 1))
-  done < <(glm_due_review_records $(( $(date +%s) - RETENTION_HOURS * 3600 )))
+  done < <(glm_due_review_records $(( $(date +%s) - 10#$RETENTION_HOURS * 3600 )))
   if [ "$idle" -eq 0 ]; then
     printf 'PASS  no idle review sessions older than %sh\n' "$RETENTION_HOURS"
   else
     printf 'WARN  %s idle review session(s) older than %sh remain (some may be kept for evidence); run: ai-glm prune\n' "$idle" "$RETENTION_HOURS"
+  fi
   fi
   if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then
     printf 'WARN  scratch clones remain under %s/wt; ambiguous or live paths were left untouched\n' "$STATE_DIR"
