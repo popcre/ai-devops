@@ -759,14 +759,15 @@ fi
 QWEN_RID="$(printf '%s\n%s' "$(cd "$REPO" && pwd -P)" "$(git -C "$REPO" config --get remote.origin.url 2>/dev/null || echo '')" | sha256sum | cut -c1-12)"
 HELD_REVIEW_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-held.lock.d"
 LEGACY_QWEN_REPO_LOCK="$AI_QWEN_STATE_DIR/locks/repo--$QWEN_RID.lock.d"
+run new review-baseline --prompt 'review this' >/dev/null 2>&1 || bad 'baseline review for the concurrency comparison completes'
 mkdir -p "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
 for held in "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"; do printf '%s\n' "$$" > "$held/pid"; printf 'review:held\n' > "$held/label"; done
 SIBLING_OUT="$(run new review-sibling --prompt 'review this' 2>&1)"; SIBLING_RC=$?
 [ "$SIBLING_RC" -eq 0 ] || printf '  diagnostic: sibling review: %s\n' "$SIBLING_OUT"
 check 'a second same-repository Qwen review is admitted while another review holds its lock' "test '$SIBLING_RC' -eq 0"
-SIB_DIR="$(run show review-sibling | jq -r '.review_dir // empty')"; ONE_DIR="$(run show review-1 | jq -r '.review_dir // empty')"
-SIB_REP="$(run show review-sibling | jq -r '.last_report // empty')"; ONE_REP="$(run show review-1 | jq -r '.last_report // empty')"
-check 'concurrent same-provider Qwen reviews use separate review copies and verdict reports' "test -n '$SIB_DIR' && test -n '$SIB_REP' && test '$SIB_DIR' != '$ONE_DIR' && test '$SIB_REP' != '$ONE_REP'"
+SIB_DIR="$(run show review-sibling | jq -r '.review_dir // empty')"; ONE_DIR="$(run show review-baseline | jq -r '.review_dir // empty')"
+SIB_REP="$(run show review-sibling | jq -r '.last_report // empty')"; ONE_REP="$(run show review-baseline | jq -r '.last_report // empty')"
+check 'concurrent same-provider Qwen reviews use separate review copies and verdict reports' "test -n '$SIB_DIR' && test -n '$SIB_REP' && test -n '$ONE_DIR' && test -n '$ONE_REP' && test '$SIB_DIR' != '$ONE_DIR' && test '$SIB_REP' != '$ONE_REP'"
 HELD_OUT="$(run new review-held --prompt 'review this' 2>&1)"; HELD_RC=$?
 check 'the same named Qwen review is still serialized by its own lock' "test '$HELD_RC' -ne 0 && printf '%s' \"\$HELD_OUT\" | grep -q 'already active'"
 rm -rf "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
@@ -780,7 +781,7 @@ HANG_START=$SECONDS
 HANG_OUT="$(AI_QWEN_STARTUP_TIMEOUT_SECONDS=3 run new silent-hang --prompt review 2>&1)"; HANG_RC=$?
 HANG_SECONDS=$((SECONDS - HANG_START))
 if [ "$HANG_RC" -ne 0 ] && [ "$HANG_SECONDS" -lt 60 ]; then ok 'a silent Qwen start is stopped by the startup deadline'; else bad "a silent Qwen start is stopped by the startup deadline (rc=$HANG_RC, ${HANG_SECONDS}s)"; fi
-if grep -rqs 'no output within 3s' "$REPO/.ai/reviews" "$AI_QWEN_HOME" 2>/dev/null || printf '%s' "$HANG_OUT" | grep -qi 'timeout'; then ok 'the startup deadline is reported as a timeout'; else bad 'the startup deadline is reported as a timeout'; fi
+if printf '%s' "$HANG_OUT" | grep -q 'no output within 3s of starting' && printf '%s' "$HANG_OUT" | grep -q 'terminal reason: timed-out'; then ok 'the startup deadline is reported as a timeout'; else bad 'the startup deadline is reported as a timeout'; fi
 echo review > "$TMP/mode"
 if (cd "$REPO" && AI_QWEN_STARTUP_TIMEOUT_SECONDS=soon bash "$SCRIPT" new bad-deadline --prompt review) >/dev/null 2>&1; then bad 'a non-numeric startup deadline is refused'; else ok 'a non-numeric startup deadline is refused'; fi
 

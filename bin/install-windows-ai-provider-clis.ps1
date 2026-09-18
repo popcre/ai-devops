@@ -211,8 +211,13 @@ function Restore-QwenRuntime {
     if (Test-Path -LiteralPath $Root) { Move-Item -LiteralPath $Root -Destination $failed -ErrorAction Stop; $movedAside = $true }
     Move-Item -LiteralPath $staging -Destination $Root -ErrorAction Stop
   } catch {
-    if ($movedAside -and -not (Test-Path -LiteralPath $Root)) { Move-Item -LiteralPath $failed -Destination $Root -ErrorAction SilentlyContinue }
-    Write-QwenInstallEvent "restore swap failed, previous live tree put back: $($_.Exception.Message)"
+    $swapError = $_.Exception.Message
+    $putBack = $false
+    if ($movedAside -and -not (Test-Path -LiteralPath $Root)) {
+      try { Move-Item -LiteralPath $failed -Destination $Root -ErrorAction Stop; $putBack = $true } catch { }
+    }
+    if ($putBack) { Write-QwenInstallEvent "restore swap failed ($swapError); the pre-restore live tree was put back" }
+    else { Write-QwenInstallEvent "restore swap failed ($swapError); live tree state: failed=$failed staged=$staging" }
     return $false
   }
   Write-QwenInstallEvent "restored previous runtime from $Backup (failed runtime kept at $failed)"
@@ -347,8 +352,15 @@ foreach ($providerDefinition in $providerCatalog) {
     # completeness, version pin, hardening, verification) puts back the exact
     # runtime that was there before.
     if ($provider.Id -eq 'qwen' -and $installStarted) {
-      Write-QwenInstallEvent "failed: $($_.Exception.Message)"
-      [void](Restore-QwenRuntime -Backup $backup)
+      $installError = $_.Exception.Message
+      Write-QwenInstallEvent "failed: $installError"
+      if (-not $backup) {
+        throw "Qwen install failed and there was no prior runtime to restore: $installError"
+      }
+      if (-not (Restore-QwenRuntime -Backup $backup)) {
+        throw "Qwen install failed ($installError) AND the previous runtime could not be restored; Qwen may be unusable. Recover it from the backup at $backup (see install-events.log)."
+      }
+      throw "Qwen install failed ($installError); the previous runtime was restored from $backup."
     }
     throw
   } finally {

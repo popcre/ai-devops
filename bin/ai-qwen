@@ -391,7 +391,16 @@ lock_acquire() {
     printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
   fi
   owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
-  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then return 1; fi
+  # On Windows a sibling MSYS shell can briefly fail to see a live owner via
+  # kill -0 (see reviewer_event_guard.sh), so one miss is not proof the owner
+  # is gone: require it to stay invisible to both witnesses for three checks.
+  if [ -n "$owner" ]; then
+    local attempt
+    for attempt in 1 2 3; do
+      if kill -0 "$owner" 2>/dev/null || [ -d "/proc/$owner" ]; then return 1; fi
+      [ "$attempt" = 3 ] || sleep 1
+    done
+  fi
   warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
   rm -rf "$dir"; mkdir "$dir" 2>/dev/null || return 1
   printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
@@ -768,6 +777,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   if [ "$startup_expired" = 1 ]; then
     printf 'ai-qwen: Qwen produced no output within %ss of starting; stopped it as a startup timeout.
 ' "$startup_limit" >> "$out.err"
+    warn "Qwen produced no output within ${startup_limit}s of starting; stopped it as a startup timeout."
     signal_run_tree TERM "$RUN_TURN_PID"; sleep 1
     kill -0 "$RUN_TURN_PID" 2>/dev/null && signal_run_tree KILL "$RUN_TURN_PID"
     wait "$RUN_TURN_PID" 2>/dev/null
