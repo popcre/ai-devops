@@ -50,7 +50,8 @@ echo 'ai-deepseek-agent tests'
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test >/dev/null 2>&1
 check "1Password re-exec was attempted" "grep -qx run '$TMP/args'"
 mkdir -p "$TMP/untrusted-test-root"
-check "credential resolution rejects an executable outside its trusted installation or test root" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_TEST_DIR='$TMP/untrusted-test-root' bash '$SCRIPT' send trust-check"
+OP_ARGS_TRUST_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
+check "credential resolution rejects an executable outside its trusted installation or test root" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_TEST_DIR='$TMP/untrusted-test-root' DEEPSEEK_TEST_ARGS='$TMP/args' bash '$SCRIPT' send trust-check 2>/dev/null && test '$OP_ARGS_TRUST_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
 OP_ARGS_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
 check "provider endpoint override is rejected before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_TEST_ARGS='$TMP/args' DEEPSEEK_BASE_URL='https://attacker.invalid' bash '$SCRIPT' send endpoint-check && test '$OP_ARGS_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
 check "managed re-exec resolves only the DeepSeek reference behind an empty-environment boundary" "test \"\$(wc -l < '$TMP/op-env')\" -eq 1 && grep -q '^DEEPSEEK_API_KEY=op://' '$TMP/op-env' && grep -q '/usr/bin/env -i' '$SCRIPT'"
@@ -111,6 +112,7 @@ if [ "${AI_DEEPSEEK_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   check "proven HTTP failure finalizes locally but remains non-authorizing" "! run finalize '$HTTP_ID' >'$TMP/http-final.out' 2>&1 && grep -q 'retained-http-500' '$TMP/http-final.out' && test '$HTTP_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
   check "repeated incomplete finalization stays nonzero" "! run finalize '$HTTP_ID' >'$TMP/http-repeat.out' 2>&1 && test '$HTTP_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
   check "explicit continuation survives a retained HTTP refusal" "run reply '$HTTP_ID' legitimate-new-turn >'$TMP/http-next.out' 2>&1 && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((HTTP_CALLS+1))'"
+  check "shell syntax is valid" "bash -n '$SCRIPT'"
   printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]; exit $?
 fi
 if [ "${AI_DEEPSEEK_SOURCE_TESTS_ONLY:-0}" != 1 ]; then
@@ -152,7 +154,11 @@ check "finalize recovers a retained paid turn under an invalid ambient model" "t
 check "doctor --live refuses an invalid ambient model before contact" "LIVE_ENV_CALLS=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run doctor --live >'$TMP/doctor-invalid.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/doctor-invalid.out' && test \"\$LIVE_ENV_CALLS\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "--model= with an empty value gets the operand message, not a model error" "EMPTY_EQ_CALLS=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! run send eq-empty --model= >'$TMP/eq-empty.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/eq-empty.out' && ! grep -q 'unsupported DeepSeek model' '$TMP/eq-empty.out' && test \"\$EMPTY_EQ_CALLS\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "a flag-looking operand of --system is not scanned as a model" "DEEPSEEK_STUB_REQUEST='$TMP/operand-skip-request.json' run send operand-skip --system \"--model=deepseek-reasoner\" >/dev/null && jq -e '.messages[0].role==\"system\" and .messages[0].content==\"--model=deepseek-reasoner\"' '$TMP/operand-skip-request.json'"
+check "--file= with an empty value is refused with usage" "EMPTY_EQ_FILE_CALLS=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! run send eq-empty-file --file= >'$TMP/eq-empty-file.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/eq-empty-file.out' && test \"\$EMPTY_EQ_FILE_CALLS\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "--system= with an empty value is refused with usage" "! run send eq-empty-system --system= >'$TMP/eq-empty-system.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/eq-empty-system.out'"
+check "reply --file= with an empty value is refused with usage" "! run reply '$OPERAND_ID' eq-empty-reply --file= >'$TMP/eq-empty-reply.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/eq-empty-reply.out'"
 if [ "${AI_DEEPSEEK_MODEL_TESTS_ONLY:-0}" = 1 ]; then
+  check "shell syntax is valid" "bash -n '$SCRIPT'"
   printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]; exit $?
 fi
 SESSION="$(run send first | sed -n 's/^SESSION_ID: //p')"

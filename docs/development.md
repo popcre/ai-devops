@@ -200,11 +200,15 @@ concern without paying for the whole file. For the DeepSeek wrapper:
 ```bash
 AI_DEEPSEEK_MODEL_TESTS_ONLY=1 bash tests/test-ai-deepseek-agent.sh
 AI_DEEPSEEK_RECOVERY_TESTS_ONLY=1 bash tests/test-ai-deepseek-agent.sh
+AI_DEEPSEEK_SOURCE_TESTS_ONLY=1 bash tests/test-ai-deepseek-agent.sh
 ```
 
 `MODEL_TESTS_ONLY` runs the credential-boundary, doctor, and model/flag-operand
 checks (the natural scope for a comment-only or model-adjacent delta);
-`RECOVERY_TESTS_ONLY` runs the retained-turn recovery checks. The complete
+`RECOVERY_TESTS_ONLY` runs the retained-turn recovery checks;
+`SOURCE_TESTS_ONLY` runs the formal-review source-identity checks. When more
+than one is set, `SOURCE_TESTS_ONLY` wins and the source-identity path runs.
+Every subset still syntax-checks the wrapper. The complete
 suite stays the default, stays required once per pull request on the
 merge-candidate head, and CI still runs it in full; a subset is a fast first
 signal, never a substitute.
