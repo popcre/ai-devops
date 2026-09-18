@@ -101,7 +101,10 @@ cleanup() {
     rm -rf "$TMP" 2>/dev/null && return 0
     sleep 1
   done
-  rm -rf "$TMP"
+  # Last statement of the EXIT trap: its exit status becomes the whole
+  # script's exit status. A stubborn leftover handle (concurrent CI load on
+  # Windows/shared runners) must not silently override a fully passing run.
+  rm -rf "$TMP" || true
 }
 trap cleanup EXIT
 
