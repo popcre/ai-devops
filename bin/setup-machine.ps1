@@ -824,18 +824,26 @@ if ($ZCodeInstall) {
   $zcodeShim = Join-Path $localBin "zcode"
   $appFwd  = $ZCodeInstall.AppExe  -replace '\\','/'
   $cliFwd  = $ZCodeInstall.CliCore -replace '\\','/'
+  # Derive the bundled config path HERE, in PowerShell: a ${...%...} bash
+  # expansion inside the double-quoted here-string is parsed as an (invalid)
+  # PowerShell variable and aborts the whole stage under Set-StrictMode.
+  $zcodeRootFwd = (Split-Path -Parent $ZCodeInstall.AppExe) -replace '\\','/'
+  $bundledFwd = "$zcodeRootFwd/resources/config/provider/zcode-builtin.json"
   $shimBody = @"
 #!/usr/bin/env bash
 # Managed by ai-devops setup-machine.ps1 -- raw interactive ZCode launcher.
 # Re-run setup-machine.ps1 to refresh; delete this file to uninstall.
-ZCODE_HOME="\${ZCODE_HOME:-`$HOME/.zcode}"
+# NOTE: generated from a PowerShell double-quoted here-string -- every bash
+# dollar is backtick-escaped, and bash brace-default expansion is avoided
+# because PowerShell would expand a braced variable itself.
+ZCODE_HOME="`$HOME/.zcode"
 APP="$appFwd"
 CLI="$cliFwd"
 [ -f "`$APP" ] && [ -f "`$CLI" ] || { echo "zcode: ZCode not found at `$APP" >&2; exit 1; }
 NEWEST="`$(ls -t "`$ZCODE_HOME"/v2/runtime/provider/*/*/*/zcode-builtin.json 2>/dev/null | head -1)"
 [ -n "`$NEWEST" ] || { echo "zcode: no runtime provider config under `$ZCODE_HOME -- sign in once inside the ZCode app." >&2; exit 1; }
 export ZCODE_BUILTIN_PROVIDER_CONFIG_FILE="`$(cygpath -m "`$NEWEST")"
-export ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE="${appFwd%/ZCode.exe}/resources/config/provider/zcode-builtin.json"
+export ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE="$bundledFwd"
 export ZCODE_PERSONAL_PROVIDER_CONFIG_FILE="`$(cygpath -m "`$ZCODE_HOME/v2/provider_config.json" 2>/dev/null || echo "`$ZCODE_HOME/v2/provider_config.json")"
 export ELECTRON_RUN_AS_NODE=1
 exec "`$APP" "`$CLI" "`$@"
