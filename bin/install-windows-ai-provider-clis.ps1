@@ -29,6 +29,22 @@ function Result([string]$Name, [string]$Status, [string]$Detail) {
   $results.Add([pscustomobject]@{ Provider=$Name; Status=$Status; Detail=$Detail })
 }
 
+function Test-QwenChildEnvironmentHardened {
+  param([string]$Root = $(Join-Path $env:LOCALAPPDATA 'qwen-code\qwen-code'))
+  # Read-only: true only when the one sanitizer chunk already lists the key.
+  # Anything unexpected answers false, so the caller backs up before patching.
+  try {
+    $chunkRoot = Join-Path $Root 'lib\chunks'
+    $hits = @(Get-ChildItem -LiteralPath $chunkRoot -Filter '*.js' -File -ErrorAction Stop | Where-Object {
+      $text = Get-Content -Raw -LiteralPath $_.FullName
+      $text.Contains('var INTERNAL_SECRET_ENV_VARS') -and $text.Contains('function sanitizeChildEnv')
+    })
+    if ($hits.Count -ne 1) { return $false }
+    $declaration = [regex]::Match((Get-Content -Raw -LiteralPath $hits[0].FullName), 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
+    return ($declaration.Success -and $declaration.Value.Contains('"BAILIAN_CODING_PLAN_API_KEY"'))
+  } catch { return $false }
+}
+
 function Set-QwenChildEnvironmentHardening {
   param([string]$Root = $(Join-Path $env:LOCALAPPDATA 'qwen-code\qwen-code'))
   $chunkRoot = Join-Path $Root 'lib\chunks'
@@ -338,13 +354,14 @@ foreach ($providerDefinition in $providerCatalog) {
       }
     }
     if ($provider.Command -eq 'qwen') {
-      # Hardening patches the live bundle even when no install ran, so take a
-      # backup first and let the restore path cover a failed patch or proof.
-      if (-not $backup) {
+      # Hardening patches the live bundle even when no install ran. Only when a
+      # patch is actually due, take a backup first and arm the restore path; an
+      # already-hardened runtime is left untouched and needs no copy.
+      if (-not $backup -and -not (Test-QwenChildEnvironmentHardened)) {
         $backup = Backup-QwenRuntime
         Write-QwenInstallEvent ("harden: backup={0}" -f $backup)
+        $installStarted = $true
       }
-      $installStarted = $true
       $hardened = Set-QwenChildEnvironmentHardening
       Write-Host "Qwen child-process credential hardening applied: $hardened"
       if ($forceQwenVersion) {

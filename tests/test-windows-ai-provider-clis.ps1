@@ -49,6 +49,9 @@ $hardenerAst = $ast.Find({
 Assert ($null -ne $hardenerAst) 'could not load the Qwen hardener for its behavioral fixture'
 $fixtureFunction = $hardenerAst.Extent.Text.Replace('$PSScriptRoot', "'$($root.Replace("'", "''"))\bin'")
 Invoke-Expression $fixtureFunction
+$checkerAst = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-QwenChildEnvironmentHardened' }, $true)
+Assert ($null -ne $checkerAst) 'could not load the Qwen hardening check'
+Invoke-Expression $checkerAst.Extent.Text
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-qwen-hardener-{0}" -f [Guid]::NewGuid().ToString('N'))
 try {
   $chunkRoot = Join-Path $fixtureRoot 'lib\chunks'
@@ -71,7 +74,9 @@ function sanitizeChildEnv(env2 = process.env) {
 '@
   [IO.File]::WriteAllText((Join-Path $chunkRoot 'fixture.js'), $bundle, [Text.UTF8Encoding]::new($false))
   Copy-Item -LiteralPath (Get-Command node -ErrorAction Stop).Source -Destination (Join-Path $nodeRoot 'node.exe')
+  Assert (-not (Test-QwenChildEnvironmentHardened -Root $fixtureRoot)) 'an unpatched sanitizer must report that hardening is due'
   $patchedPath = Set-QwenChildEnvironmentHardening -Root $fixtureRoot
+  Assert (Test-QwenChildEnvironmentHardened -Root $fixtureRoot) 'a patched sanitizer must report that no hardening is due'
   $patchedText = Get-Content -Raw -LiteralPath $patchedPath
   $patchedDeclaration = [regex]::Match($patchedText, 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];').Value
   Assert ($patchedDeclaration.Contains('"BAILIAN_CODING_PLAN_API_KEY"')) 'hardener was fooled by an unrelated bundle occurrence of the credential name'
@@ -284,7 +289,7 @@ $releaseAt = $installerText.IndexOf('ReleaseMutex()')
 Assert ($lockAt -gt 0 -and $lockAt -lt $hardenAt -and $hardenAt -lt $releaseAt) 'the Qwen install lock must cover hardening and verification'
 Assert ($installerText.IndexOf('Restore-QwenRuntime -Backup $backup') -gt $hardenAt) 'a hardening or verification failure must restore the previous runtime'
 $hardenBlock = $installerText.Substring([Math]::Max(0, $hardenAt - 400), [Math]::Min(400, $hardenAt))
-Assert ($hardenBlock -match 'if \(-not \$backup\) \{\s*\$backup = Backup-QwenRuntime' -and $hardenBlock -match '\$installStarted = \$true') 'hardening without an install must first back up the runtime and arm the restore'
+Assert ($hardenBlock -match 'if \(-not \$backup -and -not \(Test-QwenChildEnvironmentHardened\)\) \{\s*\$backup = Backup-QwenRuntime[\s\S]*\$installStarted = \$true') 'a due hardening patch without an install must first back up the runtime and arm the restore'
 Assert ($qwenWrapperText -match 'standalone runtime is incomplete') 'Qwen wrapper must name a hollow runtime and its repair command'
 
 $bootstrapText = Get-Content -Raw $bootstrap

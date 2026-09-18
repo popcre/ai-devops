@@ -791,14 +791,17 @@ check 'a lock whose owner is gone is reclaimed once' "test '$OLD_RC' -eq 0 && pr
 rm -rf "$STALE_LOCK" "$STALE_LOCK.reclaim"
 
 echo review > "$TMP/mode"; : > "$REPO/empty-untracked.txt"
+EMPTY_START=$SECONDS
 if run new empty-untracked --prompt review >/dev/null 2>&1; then ok 'an empty untracked file does not block a review'; else bad 'an empty untracked file does not block a review'; fi
-rm -f "$REPO/empty-untracked.txt"
+EMPTY_SECONDS=$((SECONDS - EMPTY_START)); rm -f "$REPO/empty-untracked.txt"
 
 echo silent-hang > "$TMP/mode"
 HANG_START=$SECONDS
 HANG_OUT="$(AI_QWEN_STARTUP_TIMEOUT_SECONDS=3 run new silent-hang --prompt review 2>&1)"; HANG_RC=$?
 HANG_SECONDS=$((SECONDS - HANG_START))
-if [ "$HANG_RC" -ne 0 ] && [ "$HANG_SECONDS" -lt 60 ]; then ok 'a silent Qwen start is stopped by the startup deadline'; else bad "a silent Qwen start is stopped by the startup deadline (rc=$HANG_RC, ${HANG_SECONDS}s)"; fi
+# Judge the stop against a normal review measured moments ago on this same
+# machine, not a fixed ceiling: a hang would run far past both.
+if [ "$HANG_RC" -ne 0 ] && [ "$HANG_SECONDS" -lt $((EMPTY_SECONDS + 30)) ]; then ok 'a silent Qwen start is stopped by the startup deadline'; else bad "a silent Qwen start is stopped by the startup deadline (rc=$HANG_RC, ${HANG_SECONDS}s; normal review ${EMPTY_SECONDS}s)"; fi
 if printf '%s' "$HANG_OUT" | grep -q 'no output within 3s of starting' && printf '%s' "$HANG_OUT" | grep -q 'terminal reason: timed-out'; then ok 'the startup deadline is reported as a timeout'; else bad 'the startup deadline is reported as a timeout'; fi
 echo review > "$TMP/mode"
 if (cd "$REPO" && AI_QWEN_STARTUP_TIMEOUT_SECONDS=soon bash "$SCRIPT" new bad-deadline --prompt review) >/dev/null 2>&1; then bad 'a non-numeric startup deadline is refused'; else ok 'a non-numeric startup deadline is refused'; fi

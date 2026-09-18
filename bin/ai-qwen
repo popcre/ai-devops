@@ -393,30 +393,33 @@ lock_owner_alive() {
   [ -n "$winpid" ] && ps -W 2>/dev/null | awk -v w="$winpid" '$4 == w { f = 1 } END { exit !f }'
 }
 declare -A LOCK_TOKENS=()
-lock_stamp() {
-  # The owner record is written whole (temp file + rename), so a reader sees
-  # either no owner yet or a complete one. The token ties release to this
-  # exact acquisition, never to a reusable pid.
-  local dir="$1" token tmp winpid
+lock_publish() {
+  # Build the whole lock, owner record included, in a private staging
+  # directory and publish it with one rename: no reader ever sees a lock
+  # without its owner, and a paused creator cannot overwrite a later owner.
+  local dir="$1" stage winpid token published
+  stage="$(mktemp -d "$dir.stage.XXXXXX" 2>/dev/null)" || return 1
   winpid="$(cat "/proc/$$/winpid" 2>/dev/null || echo '')"
   token="$$.${winpid:-0}.$(date +%s%N).$RANDOM"
-  printf '%s\n' "$$" > "$dir/pid" 2>/dev/null; printf '%s\n' "$2" > "$dir/label" 2>/dev/null
-  tmp="$dir/.owner.$$"
-  printf '%s %s %s\n' "$$" "${winpid:--}" "$token" > "$tmp" 2>/dev/null && mv -f "$tmp" "$dir/owner" 2>/dev/null
+  printf '%s\n' "$$" > "$stage/pid"; printf '%s\n' "$2" > "$stage/label"
+  printf '%s %s %s\n' "$$" "${winpid:--}" "$token" > "$stage/owner"
+  if ! mv -T "$stage" "$dir" 2>/dev/null; then rm -rf "$stage"; return 1; fi
+  read -r _ _ published <<<"$(lock_owner_record "$dir")"
+  [ "$published" = "$token" ] || return 1
   LOCK_TOKENS["$dir"]="$token"
 }
 lock_owner_record() { cat "$1/owner" 2>/dev/null || true; }
 lock_acquire() {
-  local dir="$1" label="$2" record owner winowner token
+  local dir="$1" label="$2" record owner winowner token published
   mkdir -p "$(dirname "$dir")"
-  if mkdir "$dir" 2>/dev/null; then lock_stamp "$dir" "$label"; return 0; fi
+  [ -e "$dir" ] || { lock_publish "$dir" "$label" && return 0; }
   record="$(lock_owner_record "$dir")"
   read -r owner winowner token <<<"$record"
   [ "$winowner" != - ] || winowner=""
   if [ -z "$owner" ] || [ -z "$token" ]; then
-    # No readable owner: the lock is being created, or its record cannot be
-    # read here. Either way it is not proof of a dead owner; only a lock that
-    # has stayed ownerless for ten minutes is treated as abandoned.
+    # No readable owner record: an older wrapper's lock, or a record this
+    # environment cannot read. Neither proves the owner is gone; only a lock
+    # that has stayed ownerless for ten minutes is treated as abandoned.
     local born now
     born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
     now="$(date +%s)"; [ $((now - born)) -ge 600 ] || return 1
@@ -429,19 +432,18 @@ lock_acquire() {
       [ "$attempt" = 3 ] || sleep 1
     done
   fi
-  # Reclaim under a sub-lock and re-read the owner inside it, so two
-  # reclaimers can never delete each other's freshly taken lock.
-  local guard="$dir.reclaim" gborn now
-  if ! mkdir "$guard" 2>/dev/null; then
-    now="$(date +%s)"; gborn="$(date -r "$guard" +%s 2>/dev/null || echo "$now")"
-    [ $((now - gborn)) -ge 60 ] || return 1
-    rm -rf "$guard"; mkdir "$guard" 2>/dev/null || return 1
+  # Move the stale lock aside with one rename, then confirm what was moved
+  # is the record judged stale. If a live lock was taken instead (another
+  # reclaimer won in between), it is put straight back.
+  local tomb="$dir.tomb.$$.$RANDOM"
+  mv -T "$dir" "$tomb" 2>/dev/null || return 1
+  if [ "$(lock_owner_record "$tomb")" != "$record" ]; then
+    mv -T "$tomb" "$dir" 2>/dev/null || warn "a live Qwen lock was displaced to $tomb and could not be put back"
+    return 1
   fi
-  if [ "$(lock_owner_record "$dir")" != "$record" ]; then rmdir "$guard" 2>/dev/null; return 1; fi
+  rm -rf "$tomb"
   warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
-  rm -rf "$dir"
-  if ! mkdir "$dir" 2>/dev/null; then rmdir "$guard" 2>/dev/null; return 1; fi
-  lock_stamp "$dir" "$label"; rmdir "$guard" 2>/dev/null || true; return 0
+  lock_publish "$dir" "$label"
 }
 lock_release() {
   # Remove only the acquisition this process made; a replacement owner's
