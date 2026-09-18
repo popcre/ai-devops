@@ -54,12 +54,13 @@ MODEL="${DEEPSEEK_MODEL:-deepseek-flash}"
 BASE_URL='https://api.deepseek.com'
 [ -z "${DEEPSEEK_BASE_URL:-}" ] || [ "$DEEPSEEK_BASE_URL" = "$BASE_URL" ] || { echo 'Error: DEEPSEEK_BASE_URL cannot override the pinned official DeepSeek endpoint.' >&2; exit 1; }
 # Fail fast on any other slug -- including display-style names -- instead of
-# paying for credential resolution and a guaranteed provider HTTP 400.
+# paying for credential resolution and a guaranteed provider HTTP 400. The
+# guard itself runs below the subcommand dispatch, scoped to the subcommands
+# that can resolve credentials or reach the provider.
 refuse_unsupported_model() {
   echo "Error: unsupported DeepSeek model '$1'; the provider accepts exactly deepseek-flash and deepseek-v4-pro." >&2
   exit 2
 }
-case "$MODEL" in deepseek-flash|deepseek-v4-pro) ;; *) refuse_unsupported_model "$MODEL" ;; esac
 LOCK_WAIT="${AI_DEEPSEEK_LOCK_WAIT:-30}"
 CALLER="${AI_DEEPSEEK_CALLER:-unknown}"
 CONNECT_TIMEOUT="${AI_DEEPSEEK_CONNECT_TIMEOUT:-15}"
@@ -73,10 +74,13 @@ Usage:
       Default model: deepseek-flash (DeepSeek V4.1 Flash). DEEPSEEK_MODEL overrides.
       --model and DEEPSEEK_MODEL accept exactly deepseek-flash or
       deepseek-v4-pro; any other value is refused before credential
-      resolution.
+      resolution for send, reply and doctor --live. Local subcommands
+      (list, show, finalize, offline doctor) never consult the model.
       A formal --review session continues only at the model recorded when it
       started, so continuing a session begun under an older default requires
-      DEEPSEEK_MODEL to match that recorded model.
+      DEEPSEEK_MODEL to match that recorded model. Sessions recorded under
+      any other id are stranded: the provider accepts only the two ids
+      above, so no DEEPSEEK_MODEL value can continue them.
 
   ai-deepseek-agent reply <session-id> "<message>" [--file FILE]...
       Continue an existing conversation with full history.
@@ -119,20 +123,58 @@ case "$SUBCMD" in
   *) echo "Unknown subcommand: $SUBCMD" >&2; echo >&2; usage >&2; exit 2 ;;
 esac
 
+# Validate the model against the two live provider ids before credential
+# resolution or any provider call -- but only for the subcommands that can
+# resolve credentials or reach the provider. list, show, finalize and the
+# offline doctor never consult the model; an ambient invalid DEEPSEEK_MODEL
+# must not fence off local recovery of a retained paid turn.
+case "$SUBCMD" in
+  send|reply)
+    case "$MODEL" in deepseek-flash|deepseek-v4-pro) ;; *) refuse_unsupported_model "$MODEL" ;; esac
+    ;;
+  doctor)
+    for _AI_LIVE_ARG in "$@"; do
+      [ "$_AI_LIVE_ARG" = --live ] || continue
+      case "$MODEL" in deepseek-flash|deepseek-v4-pro) ;; *) refuse_unsupported_model "$MODEL" ;; esac
+      break
+    done
+    unset _AI_LIVE_ARG
+    ;;
+esac
+
 # --model is parsed per subcommand below the credential boundary; scan it here
 # so an invalid slug is refused before credential resolution or any provider
-# call. A trailing --model with no value is left for the send parser, which
-# refuses it with usage.
+# call. The scan mirrors the parser's token shapes (--model VALUE and
+# --model=VALUE) and skips the operand of any value-taking flag, so it cannot
+# refuse text the parser would treat as another flag's value. A trailing
+# --model with no value is left for the send parser, which refuses it with
+# usage. The parser re-validates MODEL after parsing, so a divergence here can
+# only refuse early, never let an unsupported slug through.
 if [ "$SUBCMD" = send ]; then
-  _AI_SCAN_ARGS=("$@")
-  _AI_SCAN_I=0
+  _AI_SCAN_ARGS=("$@"); _AI_SCAN_I=0; _AI_SCAN_OPERAND=0
   while [ "$_AI_SCAN_I" -lt "${#_AI_SCAN_ARGS[@]}" ]; do
-    if [ "${_AI_SCAN_ARGS[_AI_SCAN_I]}" = --model ] && [ -n "${_AI_SCAN_ARGS[_AI_SCAN_I+1]:-}" ]; then
-      case "${_AI_SCAN_ARGS[_AI_SCAN_I+1]}" in deepseek-flash|deepseek-v4-pro) ;; *) refuse_unsupported_model "${_AI_SCAN_ARGS[_AI_SCAN_I+1]}" ;; esac
+    if [ "$_AI_SCAN_OPERAND" = 1 ]; then
+      _AI_SCAN_OPERAND=0
+    else
+      case "${_AI_SCAN_ARGS[_AI_SCAN_I]}" in
+        --file|--system|--base|--assert-head|--governed-verdict) _AI_SCAN_OPERAND=1 ;;
+        --model)
+          _AI_SCAN_VALUE="${_AI_SCAN_ARGS[_AI_SCAN_I+1]:-}"
+          if [ -n "$_AI_SCAN_VALUE" ]; then
+            case "$_AI_SCAN_VALUE" in deepseek-flash|deepseek-v4-pro) ;; *) refuse_unsupported_model "$_AI_SCAN_VALUE" ;; esac
+          fi
+          ;;
+        --model=*)
+          case "${_AI_SCAN_ARGS[_AI_SCAN_I]#--model=}" in
+            deepseek-flash|deepseek-v4-pro) ;;
+            *) refuse_unsupported_model "${_AI_SCAN_ARGS[_AI_SCAN_I]#--model=}" ;;
+          esac
+          ;;
+      esac
     fi
     _AI_SCAN_I=$((_AI_SCAN_I+1))
   done
-  unset _AI_SCAN_ARGS _AI_SCAN_I
+  unset _AI_SCAN_ARGS _AI_SCAN_I _AI_SCAN_OPERAND _AI_SCAN_VALUE
 fi
 
 # --- Resolve only DEEPSEEK_API_KEY, then cross an explicit clean environment. ---
@@ -1018,6 +1060,13 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
           [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "Error: $1 requires a non-empty value." >&2; usage >&2; exit 2; }
           case "$1" in --file) REVIEW_FILES+=("$2") ;; --model) MODEL="$2" ;; --system) SYSTEM="$2" ;; esac
           shift 2 ;;
+        --file=*|--system=*)
+          [ -n "${1#*=}" ] || { echo "Error: $1 requires a non-empty value." >&2; usage >&2; exit 2; }
+          case "$1" in --file=*) REVIEW_FILES+=("${1#--file=}") ;; --system=*) SYSTEM="${1#--system=}" ;; esac
+          shift ;;
+        --model=*)
+          [ -n "${1#--model=}" ] || { echo 'Error: --model requires a non-empty value.' >&2; usage >&2; exit 2; }
+          MODEL="${1#--model=}"; shift ;;
         --review) REVIEW=1; shift ;;
         --governed-verdict) take_governed_head "${2:-}" || exit 2; shift 2 ;;
         --governed-verdict=*) take_governed_head "${1#*=}" || exit 2; shift ;;
@@ -1029,6 +1078,7 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
       esac
     done
     [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent send "<message>" [--file FILE]...' >&2; exit 2; }
+    case "$MODEL" in deepseek-flash|deepseek-v4-pro) ;; *) refuse_unsupported_model "$MODEL" ;; esac
     [ "$REVIEW" = 1 ] || [ -z "$OPT_BASE$OPT_ASSERT_HEAD" ] || { echo 'Error: --base and --assert-head require --review.' >&2; exit 2; }
     if [ "$REVIEW" = 1 ] && [ -n "$SYSTEM" ]; then echo "Error: --system cannot be combined with --review; the review evidence boundary owns the system prompt. Put your instructions in the review message instead." >&2; exit 2; fi
     [ "$REVIEW" = 0 ] || REVIEW_HEAD="$(require_review_head)" || exit 1
@@ -1090,6 +1140,9 @@ $REVIEW_INSTRUCTION"
         --file)
           [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'Error: --file requires a non-empty value.' >&2; usage >&2; exit 2; }
           REVIEW_FILES+=("$2"); shift 2 ;;
+        --file=*)
+          [ -n "${1#--file=}" ] || { echo 'Error: --file requires a non-empty value.' >&2; usage >&2; exit 2; }
+          REVIEW_FILES+=("${1#--file=}"); shift ;;
         --review) REVIEW=1; shift ;;
         --governed-verdict) take_governed_head "${2:-}" || exit 2; shift 2 ;;
         --governed-verdict=*) take_governed_head "${1#*=}" || exit 2; shift ;;

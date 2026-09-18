@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -u
-# Offline fixtures must not inherit a live key or a credential re-entry marker.
-unset DEEPSEEK_API_KEY AI_DEEPSEEK_REEXEC AI_DEEPSEEK_SECRET_FD
+# Offline fixtures must not inherit a live key, a credential re-entry marker,
+# or an ambient model override: the suite must control the model everywhere.
+unset DEEPSEEK_API_KEY AI_DEEPSEEK_REEXEC AI_DEEPSEEK_SECRET_FD DEEPSEEK_MODEL
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-deepseek-agent"
 PASS=0; FAIL=0; SKIP=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
@@ -137,6 +138,17 @@ check "--file with a missing operand is refused with usage" "! run send operand-
 check "--system with a missing operand is refused with usage" "! run send operand-check --system >'$TMP/operand-system.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-system.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 OPERAND_ID="$(run send operand-fixture | sed -n 's/^SESSION_ID: //p')"
 check "reply --file with a missing operand is refused with usage" "! run reply '$OPERAND_ID' operand-check --file >'$TMP/operand-reply-file.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-reply-file.out' && grep -q 'Usage:' '$TMP/operand-reply-file.out'"
+check "--model= with an invalid slug is refused with no provider call" "EQ_CALLS=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! run send eq-check --model=deepseek-reasoner >'$TMP/eq-invalid.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/eq-invalid.out' && test \"\$EQ_CALLS\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "--model= sets the model like the space form" "DEEPSEEK_STUB_REQUEST='$TMP/eq-model-request.json' run send eq-check --model=deepseek-v4-pro >/dev/null && jq -e '.model==\"deepseek-v4-pro\"' '$TMP/eq-model-request.json'"
+printf 'eq-form evidence\n' > "$TMP/eq-evidence.txt"
+check "--file= and --system= assign like the space forms" "DEEPSEEK_STUB_REQUEST='$TMP/eq-form-request.json' run send eq-forms --system=\"eq system prompt\" --file='$TMP/eq-evidence.txt' >/dev/null && jq -e '.messages[0].role==\"system\" and .messages[0].content==\"eq system prompt\" and (.messages[1].content|contains(\"eq-form evidence\"))' '$TMP/eq-form-request.json'"
+check "list and show ignore an invalid ambient model" "DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run list >/dev/null && DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run show '$OPERAND_ID' >/dev/null"
+check "help ignores an invalid ambient model" "DEEPSEEK_MODEL=DeepSeek-V4.1-Flash bash '$SCRIPT' --help"
+check "offline doctor ignores an invalid ambient model" "DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run doctor | grep -q 'bounded provider timeout'"
+check "reply refuses an invalid ambient model before any provider call" "REPLY_ENV_CALLS=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run reply '$OPERAND_ID' invalid-env >'$TMP/reply-invalid.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/reply-invalid.out' && test \"\$REPLY_ENV_CALLS\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+INVALID_ENV_OUT="$(AI_DEEPSEEK_TEST_LEDGER_FAILURE=publish run send invalid-env-fixture 2>&1)"
+INVALID_ENV_ID="$(printf '%s\n' "$INVALID_ENV_OUT" | sed -n 's/^Retained turn session: //p')"
+check "finalize recovers a retained paid turn under an invalid ambient model" "test -n '$INVALID_ENV_ID' && DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run finalize '$INVALID_ENV_ID' >/dev/null 2>&1 && test ! -e '$TMP/repo/.ai/deepseek-sessions/$INVALID_ENV_ID.recovery-required'"
 SESSION="$(run send first | sed -n 's/^SESSION_ID: //p')"
 check "missing provider usage remains unknown" "jq -e '.counters.input==null and .counters.cost==null and .completeness==\"partial\"' '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl'"
 DEEPSEEK_STUB_USAGE='{"prompt_tokens":10,"prompt_cache_hit_tokens":0,"completion_tokens":3,"total_tokens":13}' run reply "$SESSION" measured >/dev/null
