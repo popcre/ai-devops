@@ -786,9 +786,10 @@ check "the index settles only completed, aborted, and cleanly failed jobs" \
   "test '$IX_SETTLED' = 'rid1/claude--done.json rid1/claude--failbare.json rid1/claude--failclean.json rid1/claude--stopped.json '"
 check "every job reconciliation would act on stays open in the index" \
   "test -n '$IX_EARLY' && (for r in $IX_EARLY; do case ' $IX_OPEN' in *\" \$r \"*) ;; *) exit 1 ;; esac; done)"
-IX_CACHE="$(ix_run 'glm_record_index(){ echo rebuilt; printf "%s\t%s\t%s\t%s\n" /s/r/a.json review 0 open; }
-  GLM_INDEX_CACHED="$(glm_record_index | tail -1)"; glm_due_review_records 5 typed; reconcile_implementation_records')"
-check "both doctor scans reuse one cached index" "test '$IX_CACHE' = \"\$(printf 'review\t/s/r/a.json')\""
+IX_CACHE="$(ix_run 'rm -f "$STATE_DIR/builds"; glm_record_index(){ echo b >> "$STATE_DIR/builds"; printf "%s\t%s\t%s\t%s\n" /s/r/a.json review 0 open; }
+  GLM_INDEX_CACHED="$(glm_record_index)"; glm_due_review_records 5 typed; reconcile_implementation_records
+  GLM_INDEX_CACHED=""; glm_index; echo "builds=$(wc -l < "$STATE_DIR/builds" | tr -d " ")"')"
+check "both doctor scans reuse one cached index, even an empty one" "test '$IX_CACHE' = \"\$(printf 'review\t/s/r/a.json\nbuilds=1')\""
 check "doctor builds the index once, before both scans" \
   "printf '%s\n' \"\$DOCTOR_FN\" | grep -q 'GLM_INDEX_CACHED=\"\$(glm_record_index)\"'"
 # The cost that broke the preflight was spawns per record; the index is bounded per chunk.
