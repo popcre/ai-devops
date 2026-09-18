@@ -761,7 +761,7 @@ HELD_REVIEW_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-held.lock.d
 LEGACY_QWEN_REPO_LOCK="$AI_QWEN_STATE_DIR/locks/repo--$QWEN_RID.lock.d"
 run new review-baseline --prompt 'review this' >/dev/null 2>&1 || bad 'baseline review for the concurrency comparison completes'
 mkdir -p "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
-for held in "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"; do printf '%s\n' "$$" > "$held/pid"; printf 'review:held\n' > "$held/label"; cat "/proc/$$/winpid" > "$held/winpid" 2>/dev/null || true; done
+for held in "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"; do printf '%s\n' "$$" > "$held/pid"; printf 'review:held\n' > "$held/label"; printf '%s %s fixture-held\n' "$$" "$(cat "/proc/$$/winpid" 2>/dev/null || echo -)" > "$held/owner"; done
 SIBLING_OUT="$(run new review-sibling --prompt 'review this' 2>&1)"; SIBLING_RC=$?
 [ "$SIBLING_RC" -eq 0 ] || printf '  diagnostic: sibling review: %s\n' "$SIBLING_OUT"
 check 'a second same-repository Qwen review is admitted while another review holds its lock' "test '$SIBLING_RC' -eq 0"
@@ -773,12 +773,15 @@ check 'the same named Qwen review is still serialized by its own lock' "test '$H
 rm -rf "$HELD_REVIEW_LOCK" "$LEGACY_QWEN_REPO_LOCK"
 STALE_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-stale.lock.d"
 if [ -r "/proc/$$/winpid" ]; then
-  mkdir -p "$STALE_LOCK"; printf '999999\n' > "$STALE_LOCK/pid"; cat "/proc/$$/winpid" > "$STALE_LOCK/winpid"
+  mkdir -p "$STALE_LOCK"; printf '999999\n' > "$STALE_LOCK/pid"; printf '999999 %s fixture-live\n' "$(cat "/proc/$$/winpid")" > "$STALE_LOCK/owner"
   FRESH_OUT="$(run new review-stale --prompt 'review this' 2>&1)"; FRESH_RC=$?
   check 'a lock whose Windows owner is alive is not reclaimed' "test '$FRESH_RC' -ne 0 && printf '%s' \"\$FRESH_OUT\" | grep -q 'already active' && test \"\$(cat '$STALE_LOCK/pid')\" = 999999"
-  rm -f "$STALE_LOCK/winpid"
 fi
-mkdir -p "$STALE_LOCK"; printf '999999\n' > "$STALE_LOCK/pid"; printf 'review:stale\n' > "$STALE_LOCK/label"
+mkdir -p "$STALE_LOCK"; printf '999999\n' > "$STALE_LOCK/pid"; printf 'review:stale\n' > "$STALE_LOCK/label"; printf '999999 - fixture-dead\n' > "$STALE_LOCK/owner"
+UNREAD_LOCK="$AI_QWEN_STATE_DIR/locks/review--$QWEN_RID--review-unread.lock.d"; mkdir -p "$UNREAD_LOCK"
+UNREAD_OUT="$(run new review-unread --prompt 'review this' 2>&1)"; UNREAD_RC=$?
+check 'a lock whose owner cannot be read is treated as held' "test '$UNREAD_RC' -ne 0 && printf '%s' \"\$UNREAD_OUT\" | grep -q 'already active' && test -d '$UNREAD_LOCK'"
+rm -rf "$UNREAD_LOCK"
 OLD_OUT="$(run new review-stale --prompt 'review this' 2>&1)"; OLD_RC=$?
 [ "$OLD_RC" -eq 0 ] || printf '  diagnostic: stale reclaim: %s\n' "$OLD_OUT"
 check 'a lock whose owner is gone is reclaimed once' "test '$OLD_RC' -eq 0 && printf '%s' \"\$OLD_OUT\" | grep -q 'reclaiming stale lock' && test ! -e '$STALE_LOCK.reclaim'"

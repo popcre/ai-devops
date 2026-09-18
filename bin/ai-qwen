@@ -392,19 +392,37 @@ lock_owner_alive() {
   # invisible to kill -0; the Windows process id is visible to every runtime.
   [ -n "$winpid" ] && ps -W 2>/dev/null | awk -v w="$winpid" '$4 == w { f = 1 } END { exit !f }'
 }
+declare -A LOCK_TOKENS=()
 lock_stamp() {
-  printf '%s\n' "$$" > "$1/pid"; printf '%s\n' "$2" > "$1/label"
-  cat "/proc/$$/winpid" > "$1/winpid" 2>/dev/null || rm -f "$1/winpid"
+  # The owner record is written whole (temp file + rename), so a reader sees
+  # either no owner yet or a complete one. The token ties release to this
+  # exact acquisition, never to a reusable pid.
+  local dir="$1" token tmp winpid
+  winpid="$(cat "/proc/$$/winpid" 2>/dev/null || echo '')"
+  token="$$.${winpid:-0}.$(date +%s%N).$RANDOM"
+  printf '%s\n' "$$" > "$dir/pid" 2>/dev/null; printf '%s\n' "$2" > "$dir/label" 2>/dev/null
+  tmp="$dir/.owner.$$"
+  printf '%s %s %s\n' "$$" "${winpid:--}" "$token" > "$tmp" 2>/dev/null && mv -f "$tmp" "$dir/owner" 2>/dev/null
+  LOCK_TOKENS["$dir"]="$token"
 }
+lock_owner_record() { cat "$1/owner" 2>/dev/null || true; }
 lock_acquire() {
-  local dir="$1" label="$2" owner winowner
+  local dir="$1" label="$2" record owner winowner token
   mkdir -p "$(dirname "$dir")"
   if mkdir "$dir" 2>/dev/null; then lock_stamp "$dir" "$label"; return 0; fi
-  owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
-  winowner="$(cat "$dir/winpid" 2>/dev/null || echo '')"
-  # One missed sighting is not proof the owner is gone: it must stay
-  # invisible to every witness for three checks.
-  if [ -n "$owner" ]; then
+  record="$(lock_owner_record "$dir")"
+  read -r owner winowner token <<<"$record"
+  [ "$winowner" != - ] || winowner=""
+  if [ -z "$owner" ] || [ -z "$token" ]; then
+    # No readable owner: the lock is being created, or its record cannot be
+    # read here. Either way it is not proof of a dead owner; only a lock that
+    # has stayed ownerless for ten minutes is treated as abandoned.
+    local born now
+    born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
+    now="$(date +%s)"; [ $((now - born)) -ge 600 ] || return 1
+  else
+    # One missed sighting is not proof the owner is gone: it must stay
+    # invisible to every witness for three checks.
     local attempt
     for attempt in 1 2 3; do
       if lock_owner_alive "$owner" "$winowner"; then return 1; fi
@@ -419,13 +437,25 @@ lock_acquire() {
     [ $((now - gborn)) -ge 60 ] || return 1
     rm -rf "$guard"; mkdir "$guard" 2>/dev/null || return 1
   fi
-  if [ "$(cat "$dir/pid" 2>/dev/null || echo '')" != "$owner" ]; then rmdir "$guard" 2>/dev/null; return 1; fi
+  if [ "$(lock_owner_record "$dir")" != "$record" ]; then rmdir "$guard" 2>/dev/null; return 1; fi
   warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
   rm -rf "$dir"
   if ! mkdir "$dir" 2>/dev/null; then rmdir "$guard" 2>/dev/null; return 1; fi
   lock_stamp "$dir" "$label"; rmdir "$guard" 2>/dev/null || true; return 0
 }
-lock_release() { rm -rf "$1" 2>/dev/null || true; }
+lock_release() {
+  # Remove only the acquisition this process made; a replacement owner's
+  # lock is left alone.
+  local dir="$1" mine="${LOCK_TOKENS[$1]:-}" record pid token
+  record="$(lock_owner_record "$dir")"; read -r pid _ token <<<"$record"
+  if [ -n "$mine" ]; then
+    { [ -z "$record" ] || [ "$token" = "$mine" ]; } && rm -rf "$dir" 2>/dev/null
+  elif [ -n "$record" ] && [ "$pid" = "$$" ]; then
+    # Taken in a subshell of this process, which could not hand back its token.
+    rm -rf "$dir" 2>/dev/null
+  fi
+  unset 'LOCK_TOKENS[$dir]'
+}
 lock_info() {
   local dir="$1" label pid started now
   label="$(cat "$dir/label" 2>/dev/null || echo unknown)"
