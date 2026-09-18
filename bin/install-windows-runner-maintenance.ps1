@@ -70,6 +70,7 @@ function Get-DesiredPayloadManifest {
   param([Parameter(Mandatory)][string]$SourceRoot, [Parameter(Mandatory)][string]$OperatorSid)
   $sources = [ordered]@{
     'windows-runner-maintenance-worker.ps1' = Join-Path $SourceRoot 'bin\windows-runner-maintenance-worker.ps1'
+    'launch-worker.cmd' = Join-Path $SourceRoot 'bin\launch-worker.cmd'
     'qualify-windows-runner.ps1' = Join-Path $SourceRoot 'bin\qualify-windows-runner.ps1'
     'windows-runner-maintenance-policy.json' = Join-Path $SourceRoot 'config\windows-runner-maintenance-policy.json'
   }
@@ -79,7 +80,7 @@ function Get-DesiredPayloadManifest {
     $files[$entry.Key] = (Get-FileHash -Algorithm SHA256 -LiteralPath $entry.Value).Hash.ToLowerInvariant()
   }
   $policy = Get-Content -Raw -LiteralPath $sources['windows-runner-maintenance-policy.json'] | ConvertFrom-Json
-  foreach ($name in @('windows-runner-maintenance-worker.ps1','qualify-windows-runner.ps1')) {
+  foreach ($name in @('windows-runner-maintenance-worker.ps1','launch-worker.cmd','qualify-windows-runner.ps1')) {
     if ([string]$policy.payload_hashes.$name -cne [string]$files[$name]) { throw "Policy payload hash is stale for $name." }
   }
   return [ordered]@{ schema_version=1; owner='popcre/ai-devops#262'; operator_sid=$OperatorSid; task_path=$script:TaskPath; files=$files }
@@ -94,8 +95,11 @@ function Set-ProtectedFilesystemAcl {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins,'/T','/C')
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX",'/T','/C')
   } elseif ($Kind -eq 'Evidence') {
+    # No operator grant: the elevated qualification child writes through its
+    # Administrators membership, so the non-elevated operator must hold
+    # nothing on the CI qualification gate.
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
-    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:M",'*S-1-1-0:R')
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:F","${system}:F",'*S-1-1-0:R')
   } elseif ($Kind -eq 'EvidenceParent') {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F",'*S-1-5-32-545:(OI)(CI)(IO)(RX)')
@@ -113,21 +117,31 @@ function Set-ProtectedFilesystemAcl {
 
 function Register-MaintenanceTask {
   param([Parameter(Mandatory)][string]$OperatorSid)
-  # The worker is launched through cmd.exe with /d (no per-user AutoRun) so
-  # that no .NET host ever starts inside the operator-controlled inherited
-  # environment: the .NET startup-hook and root-override variables are
-  # stripped by the launcher before pwsh.exe begins to load, which a worker
-  # script statement can never do for itself.
-  $pwshInvocation = '"C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
-  $arguments = '/d /c set "DOTNET_STARTUP_HOOKS=" & set "DOTNET_ADDITIONAL_DEPS=" & set "DOTNET_BUNDLE_EXTRACT_BASE_DIR=" & set "DOTNET_ROOT=" & ' + $pwshInvocation
-  $action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\cmd.exe' -Argument $arguments
+  # The worker is launched through cmd.exe with /d (no per-user AutoRun)
+  # running the hash-pinned launch-worker.cmd from the protected payload.
+  # That launcher clears the ENTIRE inherited S4U environment and rebuilds
+  # a fixed allowlist of well-known literals, so no operator-controlled
+  # variable - .NET startup hooks, CoreCLR profilers, runtime roots, or
+  # their siblings - can reach a .NET host before the worker script runs.
+  $action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\cmd.exe' -Argument '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'
   $principal = New-ScheduledTaskPrincipal -UserId $OperatorSid -LogonType S4U -RunLevel Highest
   $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::FromMinutes(6)) -StartWhenAvailable:$false
   Register-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
 }
 
+function Assert-NoPerUserComOverride {
+  # The installer runs elevated under the same account the operator uses,
+  # so its HKCU is operator-writable too: a per-user ProgID or CLSID
+  # registration for the Task Scheduler COM class would load operator code
+  # into this elevated process. Both resolution channels are refused.
+  $scheduleServiceClsid = '{148BD52A-A2AB-11CE-B07F-00AA006C7A83}'
+  if (Test-Path -LiteralPath 'HKCU:\Software\Classes\Schedule.Service') { throw 'PER_USER_COM_OVERRIDE' }
+  if (Test-Path -LiteralPath "HKCU:\Software\Classes\CLSID\$scheduleServiceClsid") { throw 'PER_USER_COM_OVERRIDE' }
+}
+
 function Set-MaintenanceTaskAcl {
   param([Parameter(Mandatory)][string]$OperatorSid)
+  Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
   $task = $service.GetFolder($script:TaskFolder).GetTask($script:TaskName)
@@ -138,6 +152,7 @@ function Set-MaintenanceTaskAcl {
 
 function Get-InstalledTaskSnapshot {
   $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction Stop
+  Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
   $sddl = $service.GetFolder($script:TaskFolder).GetTask($script:TaskName).GetSecurityDescriptor(0)
@@ -162,7 +177,7 @@ function Test-PathAclContract {
   $ownerSid = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
   if ($ownerSid -notin @('S-1-5-32-544','S-1-5-18')) { throw "STALE_INSTALLATION: foreign owner on $Kind." }
   $allowedIdentities = @('S-1-5-32-544','S-1-5-18',$OperatorSid)
-  if ($Kind -eq 'Evidence') { $allowedIdentities += 'S-1-1-0' }
+  if ($Kind -eq 'Evidence') { $allowedIdentities = @('S-1-5-32-544','S-1-5-18','S-1-1-0') }
   $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
   $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin $allowedIdentities })
   if ($unexpected.Count -ne 0) { throw "STALE_INSTALLATION: unexpected ACL identity on $Kind." }
@@ -172,17 +187,17 @@ function Test-PathAclContract {
   if ($Kind -eq 'Evidence') {
     # The evidence gate stays world-READABLE exactly as ProgramData files
     # already are (the runner service account reads it), but read must
-    # never drift into write or delete for any non-operator principal.
+    # never drift into write or delete for any non-administrator.
     $worldRules = @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-1-0' })
     if ($worldRules.Count -eq 0) { throw 'STALE_INSTALLATION: world read access missing on Evidence.' }
     if (@($worldRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -ne 0) { throw 'STALE_INSTALLATION: world access exceeds read on Evidence.' }
   }
   $operatorRules = @($rules | Where-Object { $_.IdentityReference.Value -eq $OperatorSid })
-  if ($Kind -eq 'Ledger') { if ($operatorRules.Count -ne 0) { throw 'STALE_INSTALLATION: operator can read or write the replay ledger.' }; return }
+  if ($Kind -eq 'Ledger' -or $Kind -eq 'Evidence') { if ($operatorRules.Count -ne 0) { throw "STALE_INSTALLATION: operator access must not exist on $Kind." }; return }
   if ($operatorRules.Count -eq 0) { throw "STALE_INSTALLATION: operator ACL missing on $Kind." }
   $operatorRights = $operatorRules | ForEach-Object FileSystemRights
   $mayWrite = @($operatorRights | Where-Object { ($_ -band [Security.AccessControl.FileSystemRights]::Write) -or ($_ -band [Security.AccessControl.FileSystemRights]::Delete) -or ($_ -band [Security.AccessControl.FileSystemRights]::ChangePermissions) }).Count -ne 0
-  if ($Kind -eq 'Requests' -or $Kind -eq 'Evidence') { if (-not $mayWrite) { throw "STALE_INSTALLATION: operator write access missing on $Kind." } }
+  if ($Kind -eq 'Requests') { if (-not $mayWrite) { throw "STALE_INSTALLATION: operator write access missing on $Kind." } }
   elseif ($mayWrite) { throw "STALE_INSTALLATION: operator has write access on $Kind." }
 }
 
@@ -207,7 +222,7 @@ function Test-MaintenanceInstallation {
   Test-PathAclContract -LiteralPath "$script:EvidencePath.tmp" -OperatorSid $ExpectedOperatorSid -Kind Evidence
   $task = Get-InstalledTaskSnapshot
   $expectedExecute = 'C:\Windows\System32\cmd.exe'
-  $expectedArgs = '/d /c set "DOTNET_STARTUP_HOOKS=" & set "DOTNET_ADDITIONAL_DEPS=" & set "DOTNET_BUNDLE_EXTRACT_BASE_DIR=" & set "DOTNET_ROOT=" & "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
+  $expectedArgs = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'
   $expectedSddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)"
   if ($task.action_count -ne 1 -or $task.execute -cne $expectedExecute -or $task.arguments -cne $expectedArgs -or $task.user_id -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or $task.sddl -cne $expectedSddl) { throw 'STALE_INSTALLATION: scheduled task drift.' }
   return $true
@@ -296,12 +311,16 @@ function Remove-MaintenanceInstallation {
     # consistency unconditionally.
     $desired = Get-DesiredPayloadManifest -SourceRoot $SourceRoot -OperatorSid $ExpectedOperatorSid
     $installed = Get-Content -Raw -LiteralPath (Join-Path $script:PayloadRoot 'manifest.json') | ConvertFrom-Json
-    foreach ($name in @('windows-runner-maintenance-worker.ps1','qualify-windows-runner.ps1')) {
+    foreach ($name in @('windows-runner-maintenance-worker.ps1','launch-worker.cmd','qualify-windows-runner.ps1')) {
       if ([string]$installed.files.$name -cne [string]$desired.files[$name]) { throw "RECOVERY_MANIFEST_MISMATCH: installed $name does not match this repository checkout." }
     }
   }
   if ((Get-InstalledTaskSnapshot).state -eq 'Running') { throw 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before removal.' }
   if ([string]::IsNullOrWhiteSpace($RecoveryPath)) { $RecoveryPath = Join-Path (Split-Path -Parent $script:RuntimeRoot) ('windows-runner-maintenance-recovery-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')) }
+  # The rollback bundle must land in an admin-only location: an arbitrary
+  # supplied path could otherwise direct task XML and payload copies into
+  # an operator-writable location.
+  if (-not [IO.Path]::IsPathRooted($RecoveryPath) -or $RecoveryPath -match '(?i)[\\/]Users[\\/]') { throw 'Recovery backup path must be absolute and outside user profiles.' }
   Backup-MaintenanceInstallation -Destination $RecoveryPath
   Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false
   Remove-Item -LiteralPath $script:PayloadRoot -Recurse -Force

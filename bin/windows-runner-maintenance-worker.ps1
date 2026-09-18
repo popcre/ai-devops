@@ -6,8 +6,10 @@ $ErrorActionPreference = 'Stop'
 # operator-writable resolution root must leave the process before any
 # cmdlet, module, or COM class is touched. Only system-owned module
 # directories may remain on the module path; -NoProfile does not stop
-# module autoloading by itself.
-$env:PSModulePath = (Join-Path $PSHOME 'Modules') + ';C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
+# module autoloading by itself. The value is a literal (no cmdlet call)
+# so nothing resolves before the pin takes effect; the launcher has
+# already stripped the inherited environment to a fixed allowlist.
+$env:PSModulePath = "$PSHOME\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules"
 $script:PayloadRoot = 'C:\Program Files\ai-devops\windows-runner-maintenance'
 $script:RuntimeRoot = 'C:\ProgramData\ai-devops\windows-runner-maintenance'
 $script:EvidencePath = 'C:\ProgramData\ai-devops\windows-runner-security.json'
@@ -142,8 +144,9 @@ function Test-EvidenceBoundary {
   # The qualification evidence is the TPM/Secure Boot gate consumed by CI,
   # so the worker refuses to refresh it through any path it does not own
   # outright: a plain file, owned by Administrators/SYSTEM, whose DACL is
-  # exactly the pinned contract (world read-only, operator modify, no
-  # group-granted or inherited surprises).
+  # exactly the pinned contract. The operator holds NO grant on this file:
+  # the elevated worker and qualification child write through their
+  # Administrators membership, so any operator ACE is treated as drift.
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid)
   if (-not (Test-Path -LiteralPath $script:EvidencePath -PathType Leaf)) { throw 'ACL_DRIFT' }
   $item = Get-Item -LiteralPath $script:EvidencePath -Force
@@ -152,27 +155,26 @@ function Test-EvidenceBoundary {
   $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
   if ($owner -notin @('S-1-5-32-544','S-1-5-18')) { throw 'ACL_DRIFT' }
   $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
-  $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18','S-1-1-0',$ExpectedOperatorSid) })
+  $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18','S-1-1-0') })
   if ($unexpected.Count -ne 0) { throw 'ACL_DRIFT' }
   foreach ($required in @('S-1-5-32-544','S-1-5-18')) {
     if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $required -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw 'ACL_DRIFT' }
   }
   $worldRules = @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-1-0' })
   if ($worldRules.Count -eq 0 -or @($worldRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -ne 0) { throw 'ACL_DRIFT' }
-  $operatorRules = @($rules | Where-Object { $_.IdentityReference.Value -eq $ExpectedOperatorSid })
-  if (@($operatorRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -eq 0) { throw 'ACL_DRIFT' }
+  if (@($rules | Where-Object { $_.IdentityReference.Value -eq $ExpectedOperatorSid }).Count -ne 0) { throw 'ACL_DRIFT' }
 }
 
 function Set-EvidenceContractAcl {
   # Pure .NET descriptor application: the worker never resolves a helper
-  # executable through a caller-influenced PATH.
-  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid)
+  # executable through a caller-influenced PATH. No operator grant exists;
+  # the elevated writer works through its Administrators membership.
+  param([Parameter(Mandatory)][string]$LiteralPath)
   $acl = Get-Acl -LiteralPath $LiteralPath
   $acl.SetAccessRuleProtection($true, $false)
   foreach ($grant in @(
     @{ Identity = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'); Rights = [Security.AccessControl.FileSystemRights]::FullControl },
     @{ Identity = [Security.Principal.SecurityIdentifier]::new('S-1-5-18'); Rights = [Security.AccessControl.FileSystemRights]::FullControl },
-    @{ Identity = [Security.Principal.SecurityIdentifier]::new($OperatorSid); Rights = [Security.AccessControl.FileSystemRights]::Modify },
     @{ Identity = [Security.Principal.SecurityIdentifier]::new('S-1-1-0'); Rights = [Security.AccessControl.FileSystemRights]::ReadAndExecute }
   )) {
     $acl.ResetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($grant.Identity, $grant.Rights, [Security.AccessControl.AccessControlType]::Allow))
@@ -193,7 +195,7 @@ function Test-TaskBoundary {
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid)
   $task = Get-ScheduledTask -TaskPath '\AiDevOps\' -TaskName 'WindowsRunnerMaintenance' -ErrorAction Stop
   $expectedExecute = 'C:\Windows\System32\cmd.exe'
-  $expectedArguments = '/d /c set "DOTNET_STARTUP_HOOKS=" & set "DOTNET_ADDITIONAL_DEPS=" & set "DOTNET_BUNDLE_EXTRACT_BASE_DIR=" & set "DOTNET_ROOT=" & "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'
+  $expectedArguments = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'
   if (@($task.Actions).Count -ne 1 -or [string]$task.Actions[0].Execute -cne $expectedExecute -or [string]$task.Actions[0].Arguments -cne $expectedArguments -or [string]$task.Principal.UserId -cne $ExpectedOperatorSid -or [string]$task.Principal.LogonType -cne 'S4U' -or [string]$task.Principal.RunLevel -cne 'Highest' -or @($task.Triggers).Count -ne 0 -or [string]$task.Settings.MultipleInstances -cne 'IgnoreNew') { throw 'STALE_INSTALLATION' }
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
@@ -205,7 +207,10 @@ function Test-TaskBoundary {
 function Invoke-RefreshQualification {
   param([Parameter(Mandatory)][string]$ProtectedQualificationScript, [ValidateRange(1,300)][int]$TimeoutSeconds = 270)
   Test-PayloadManifest -Root $script:PayloadRoot
-  $arguments = @('-NoProfile','-NonInteractive','-ExecutionPolicy','RemoteSigned','-File',$ProtectedQualificationScript,'-EvidencePath',$script:EvidencePath)
+  # One pre-quoted argument string: Start-Process joins ArgumentList arrays
+  # without quoting on Windows, so space-bearing payload paths must never
+  # travel as separate elements.
+  $arguments = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "{0}" -EvidencePath "{1}"' -f $ProtectedQualificationScript, $script:EvidencePath
   $process = Start-Process -FilePath 'C:\Program Files\PowerShell\7\pwsh.exe' -ArgumentList $arguments -WindowStyle Hidden -PassThru
   try { Wait-Process -Id $process.Id -Timeout $TimeoutSeconds -ErrorAction Stop } catch { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue; throw 'TIMEOUT' }
   $process.Refresh()
@@ -261,6 +266,11 @@ function Invoke-MaintenanceWorker {
   $firstRequest = $true
   $hardDeadline = [DateTime]::UtcNow.AddSeconds([int]$policy.hard_timeout_seconds)
   $quietDeadline = [DateTime]::UtcNow.AddSeconds(2)
+  # Verify the runtime boundary BEFORE any enumeration: Modify rights on
+  # the (empty) requests directory let the operator plant a junction there
+  # in place, and enumerating through it would turn the per-file cleanup
+  # delete into arbitrary elevated deletion.
+  Test-RuntimeBoundary -ExpectedOperatorSid ([string]$policy.operator_sid)
   try {
     do {
       $requestFiles = @(Get-ChildItem -LiteralPath $requests -Filter '*.json' -File | Sort-Object Name)
@@ -282,7 +292,7 @@ function Invoke-MaintenanceWorker {
           $id = [string]$request.request_id
           $reused = $false
           if (Test-Path -LiteralPath $ledgerPath -PathType Leaf) {
-            try { $reused = [bool](Select-String -LiteralPath $ledgerPath -SimpleMatch -Quiet -Pattern $id -ErrorAction Stop) } catch { throw 'LEDGER_UNREADABLE' }
+            try { $reused = [bool](Select-String -LiteralPath $ledgerPath -SimpleMatch -Quiet -Pattern ('"request_id":"' + $id + '"') -ErrorAction Stop) } catch { throw 'LEDGER_UNREADABLE' }
           }
           if ($reused) { throw 'REUSED_UUID' }
           if ($null -eq $mutex -or -not $firstRequest) { throw 'CONCURRENT_EXECUTION' }
@@ -298,8 +308,8 @@ function Invoke-MaintenanceWorker {
           # no later pre-creation race can start from a missing sibling.
           $tmpSibling = "$script:EvidencePath.tmp"
           if (-not (Test-Path -LiteralPath $tmpSibling -PathType Leaf)) { [IO.File]::WriteAllBytes($tmpSibling, [byte[]]@()) }
-          Set-EvidenceContractAcl -LiteralPath $tmpSibling -OperatorSid ([string]$policy.operator_sid)
-          Set-EvidenceContractAcl -LiteralPath $script:EvidencePath -OperatorSid ([string]$policy.operator_sid)
+          Set-EvidenceContractAcl -LiteralPath $tmpSibling
+          Set-EvidenceContractAcl -LiteralPath $script:EvidencePath
           $resultCode = 'SUCCESS'; $exitCode = 0; $message = 'Windows runner qualification evidence was refreshed.'
         } catch {
           switch -Regex ($_.Exception.Message) {
@@ -316,7 +326,13 @@ function Invoke-MaintenanceWorker {
         try {
           Write-SafeResult -Result $safe -LiteralPath (Join-Path $results "$id.json") -MaximumBytes ([int]$policy.max_result_bytes)
           Write-AuditEvent -Event ([ordered]@{ schema_version=1; request_id=$id; requester_sid=$ownerSid; host=$env:COMPUTERNAME; operation='refresh-qualification'; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result=$resultCode }) -LiteralPath $auditPath -MaximumFileBytes ([int]$policy.max_audit_bytes)
-          Write-ReplayLedgerEntry -RequestId $id -LiteralPath $ledgerPath -MaximumFileBytes ([int]$policy.max_ledger_bytes)
+          # Only canonical GUID spellings may enter the replay ledger: a
+          # rejected filename stem (or any non-GUID id) would substring-match
+          # future request ids through the exact-value lookup and poison the
+          # ledger into a permanent lockout the operator cannot undo.
+          if ($id -cmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+            Write-ReplayLedgerEntry -RequestId $id -LiteralPath $ledgerPath -MaximumFileBytes ([int]$policy.max_ledger_bytes)
+          }
         } catch {
           # The bounded decision already happened; an integrity-write failure
           # must neither lose the result nor leave the request behind to be
@@ -327,6 +343,11 @@ function Invoke-MaintenanceWorker {
           try { Write-SafeResult -Result $safe -LiteralPath (Join-Path $results "$id.json") -MaximumBytes ([int]$policy.max_result_bytes) } catch { }
           try { Write-AuditEvent -Event ([ordered]@{ schema_version=1; request_id=$id; requester_sid=$ownerSid; host=$env:COMPUTERNAME; operation='refresh-qualification'; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result='OPERATION_FAILED' }) -LiteralPath $auditPath -MaximumFileBytes ([int]$policy.max_audit_bytes) } catch { }
         } finally {
+          # Re-verify the parent immediately before the elevated delete: the
+          # operator can replace the requests directory with a junction in
+          # place at any time, and this cleanup must never delete through it.
+          $requestsNow = Get-Item -LiteralPath $requests -Force
+          if (($requestsNow.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $file.FullName.StartsWith($requestsNow.FullName, [StringComparison]::OrdinalIgnoreCase)) { throw 'REPARSE_POINT' }
           Remove-Item -LiteralPath $file.FullName -Force
         }
         $firstRequest = $false

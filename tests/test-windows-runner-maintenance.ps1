@@ -7,6 +7,8 @@ $policyPath = Join-Path $repo 'config\windows-runner-maintenance-policy.json'
 $installer = Get-Content -Raw -LiteralPath $installerPath
 $worker = Get-Content -Raw -LiteralPath $workerPath
 $client = Get-Content -Raw -LiteralPath $clientPath
+$launcherPath = Join-Path $repo 'bin\launch-worker.cmd'
+$launcher = Get-Content -Raw -LiteralPath $launcherPath
 $policyText = Get-Content -Raw -LiteralPath $policyPath
 $policy = $policyText | ConvertFrom-Json
 $script:passed = 0
@@ -30,7 +32,7 @@ try {
   $script:mockTask = $null
   function Set-ProtectedFilesystemAcl { param($LiteralPath,$OperatorSid,$Kind) Assert-NoReparsePoint -LiteralPath $LiteralPath }
   function Test-PathAclContract { param($LiteralPath,$OperatorSid,$Kind) }
-  function Register-MaintenanceTask { param($OperatorSid) $script:mockTask = [ordered]@{ execute='C:\Windows\System32\cmd.exe'; arguments='/d /c set "DOTNET_STARTUP_HOOKS=" & set "DOTNET_ADDITIONAL_DEPS=" & set "DOTNET_BUNDLE_EXTRACT_BASE_DIR=" & set "DOTNET_ROOT=" & "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "C:\Program Files\ai-devops\windows-runner-maintenance\windows-runner-maintenance-worker.ps1"'; action_count=1; user_id=$OperatorSid; logon_type='S4U'; run_level='Highest'; trigger_count=0; multiple_instances='IgnoreNew'; sddl="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$OperatorSid)"; state='Ready' } }
+  function Register-MaintenanceTask { param($OperatorSid) $script:mockTask = [ordered]@{ execute='C:\Windows\System32\cmd.exe'; arguments='/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'; action_count=1; user_id=$OperatorSid; logon_type='S4U'; run_level='Highest'; trigger_count=0; multiple_instances='IgnoreNew'; sddl="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$OperatorSid)"; state='Ready' } }
   function Get-InstalledTaskSnapshot { return $script:mockTask }
   function Backup-MaintenanceInstallation { param($Destination) New-Item -ItemType Directory -Path $Destination -Force | Out-Null; 'backup' | Set-Content (Join-Path $Destination 'recovery.json') }
   $sid = 'S-1-5-21-100-200-300-1001'
@@ -83,7 +85,7 @@ try {
   Case 'Audit_RecordsRequesterSidHostOperationStartEndResult' { foreach($f in @('requester_sid','host','operation','started_at_utc','ended_at_utc','result')) { Assert-Contains $worker $f } }
   Case 'Audit_IsAppendOnlyForOperator' { Assert-Contains $worker '[IO.File]::AppendAllText'; Assert-Contains $installer '*${OperatorSid}:R' }
   Case 'Audit_RecordsRejectedAndFailedRequests' { Assert-Contains $worker 'Write-AuditEvent'; Assert-Contains $worker "'REQUEST_REJECTED'"; Assert-Contains $worker "'OPERATION_FAILED'" }
-  Case 'RefreshQualification_UsesFixedEvidencePath' { Assert-Contains $worker "`$script:EvidencePath = 'C:\ProgramData\ai-devops\windows-runner-security.json'"; Assert-Contains $worker "'-EvidencePath',`$script:EvidencePath" }
+  Case 'RefreshQualification_UsesFixedEvidencePath' { Assert-Contains $worker "`$script:EvidencePath = 'C:\ProgramData\ai-devops\windows-runner-security.json'"; Assert-Contains $worker ('-EvidencePath ' + [char]34 + '{1}' + [char]34 + [char]39 + ' -f') }
   Case 'RefreshQualification_PreservesAllExistingGuards' { foreach($m in @('Get-Tpm','Confirm-SecureBootUEFI','CurrentBuildNumber','actions.runner.*','StartMode')) { Assert-Contains (Get-Content -Raw (Join-Path $repo 'bin\qualify-windows-runner.ps1')) $m } }
   Case 'RunnerService_IsReadOnly' { Assert-True (($installer+$worker+$client) -notmatch 'Stop-Service|Start-Service|Restart-Service|Set-Service|sc.exe') 'runner service mutation found' }
   Case 'Recovery_MissingTask' { Assert-Contains $client "throw 'MISSING_TASK'" }
@@ -91,10 +93,10 @@ try {
   Case 'Recovery_RunningTask' { Assert-Contains $worker "'CONCURRENT_EXECUTION'"; Assert-Contains $installer 'RECOVERY_RUNNING_TASK' }
   Case 'Recovery_FailedCleanup' { Assert-Contains $installer 'Refusing to replace an unverified previous payload backup.' }
   Case 'Rollback_RestoresExactPriorOwnedState' { Assert-Contains $installer 'Export-ScheduledTask'; Assert-Contains $installer 'task.xml'; Assert-Contains $installer 'recovery.json' }
-  Case 'Worker_PinsSystemOnlyModuleResolution' { Assert-Contains $worker '$env:PSModulePath'; Assert-Contains $worker "Join-Path `$PSHOME 'Modules'"; Assert-True ($worker.IndexOf('`$env:PSModulePath') -lt $worker.IndexOf('function Read-BoundedBytes')) 'module path pinned after function definitions' }
+  Case 'Worker_PinsSystemOnlyModuleResolution' { Assert-Contains $worker '$env:PSModulePath'; Assert-Contains $worker '$PSHOME\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules'; Assert-True ($worker.IndexOf('`$env:PSModulePath') -lt $worker.IndexOf('function Read-BoundedBytes')) 'module path pinned after function definitions' }
   Case 'Worker_RefusesPerUserComOverride' { Assert-Contains $worker 'Assert-NoPerUserComOverride'; Assert-Contains $worker '{148BD52A-A2AB-11CE-B07F-00AA006C7A83}' }
   Case 'Integrity_CapacityCheckedBeforeExecution' { Assert-Contains $worker 'Test-IntegrityCapacity'; Assert-True ($worker.IndexOf('Test-IntegrityCapacity -AuditPath') -lt $worker.IndexOf('Invoke-RefreshQualification -ProtectedQualificationScript')) 'capacity checked after execution' }
-  Case 'Integrity_RequestConsumedExactlyOnce' { Assert-True ($worker -match 'finally \{\s*\r?\n\s*Remove-Item -LiteralPath \$file\.FullName -Force') 'request removal is not guaranteed in finally'; Assert-Contains $worker "'AUDIT_FULL|LEDGER_FULL'" }
+  Case 'Integrity_RequestConsumedExactlyOnce' { Assert-True ($worker -match 'finally \{[\s\S]*?Remove-Item -LiteralPath \$file\.FullName -Force') 'request removal is not guaranteed in finally'; Assert-Contains $worker "'AUDIT_FULL|LEDGER_FULL'" }
   Case 'Evidence_IsProtectedAtInstall' { Assert-Contains $installer 'Protect-EvidenceFile'; Assert-Contains $installer "'*S-1-1-0:R'"; Assert-Contains $installer 'Test-PathAclContract -LiteralPath $script:EvidencePath' }
   Case 'Evidence_WorkerVerifiesBeforeRefresh' { Assert-Contains $worker 'Test-EvidenceBoundary' }
   Case 'RuntimeRoot_ReparseCheckedBeforeChildren' { Assert-True ($installer.IndexOf('Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot') -ge 0 -and $installer.IndexOf('Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot') -lt $installer.IndexOf("New-Item -ItemType Directory -Path (Join-Path `$script:RuntimeRoot 'requests')")) 'runtime root not asserted before children are created' }
@@ -102,18 +104,26 @@ try {
   Case 'Acl_EveryIcaclsCallChecksExitCode' { Assert-Contains $installer 'Invoke-ProtectedIcacls'; Assert-Contains $installer "'C:\Windows\System32\icacls.exe'"; Assert-True (@([regex]::Matches($installer, [regex]::Escape("& 'C:\Windows\System32\icacls.exe'"))).Count -eq 1) 'icacls is invoked outside the per-call exit-checked helper' }
   Case 'Operator_MustBeLocalUserNotGroup' { Assert-Contains $installer 'UserPrincipal'; Assert-Contains $installer 'Operator is not a local user account.' }
   Case 'Remove_RequireManifestMatchEnforcesRepositoryMatch' { Assert-Contains $installer 'RECOVERY_MANIFEST_MISMATCH'; Assert-Contains $installer 'RequireManifestMatch:$RequireManifestMatch' }
-  Case 'Launcher_NeverStartsDotnetHostInOperatorEnvironment' { Assert-Contains $installer '/d /c set "DOTNET_STARTUP_HOOKS="'; Assert-Contains $installer "New-ScheduledTaskAction -Execute 'C:\Windows\System32\cmd.exe'"; Assert-Contains $worker '/d /c set "DOTNET_STARTUP_HOOKS="' }
+  Case 'Launcher_IsAnEnvironmentAllowlist' { Assert-Contains $installer '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'; Assert-Contains $worker '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'; Assert-Contains $launcher 'for /f "delims==" %%v in (''set'') do set "%%v="'; Assert-Contains $launcher 'set "SystemRoot=C:\Windows"'; Assert-True (-not $launcher.Contains('DOTNET_STARTUP_HOOKS')) 'launcher is still a denylist, not an allowlist' }
   Case 'Task_RefusesAdditionalActions' { Assert-Contains $worker '@($task.Actions).Count -ne 1'; Assert-Contains $installer 'action_count -ne 1' }
   Case 'Worker_RefusesPerUserProgIdOverride' { Assert-Contains $worker 'HKCU:\Software\Classes\Schedule.Service' }
   Case 'Worker_VerifiesRuntimeAclBoundary' { Assert-Contains $worker 'Test-RuntimeBoundary -ExpectedOperatorSid'; Assert-True ($worker.IndexOf('Test-RuntimeBoundary -ExpectedOperatorSid') -lt $worker.IndexOf('Invoke-RefreshQualification -ProtectedQualificationScript')) 'runtime boundary verified after execution' }
   Case 'Worker_AclChecksCountGroupGrantedRights' { Assert-True (@([regex]::Matches($worker, [regex]::Escape("AccessControlType -ne 'Allow'"))).Count -ge 3) 'group-granted rights are not refused in every boundary check' }
-  Case 'Evidence_TmpSiblingIsPinnedAndRestored' { Assert-Contains $installer 'tmpSibling = '$script:EvidencePath.tmp''; Assert-Contains $worker 'Set-EvidenceContractAcl'; Assert-Contains $installer 'Test-PathAclContract -LiteralPath '$script:EvidencePath.tmp'' }
+  Case 'Evidence_TmpSiblingIsPinnedAndRestored' { Assert-Contains $installer 'tmpSibling = "$script:EvidencePath.tmp"'; Assert-Contains $worker 'Set-EvidenceContractAcl'; Assert-Contains $installer 'Test-PathAclContract -LiteralPath "$script:EvidencePath.tmp"' }
   Case 'Evidence_ParentDirectoryIsPinned' { Assert-Contains $installer '*S-1-5-32-545:(OI)(CI)(IO)(RX)' }
   Case 'RequestId_CanonicalGuidSpelling' { Assert-Contains $worker '$requestId.ToString(''D'')' }
-  Case 'Ledger_CheckFailsClosed' { Assert-Contains $worker '-Pattern $id -ErrorAction Stop'; Assert-Contains $worker 'LEDGER_UNREADABLE' }
+  Case 'Ledger_CheckFailsClosed' { Assert-Contains $worker '-SimpleMatch -Quiet -Pattern ('; Assert-Contains $worker '-ErrorAction Stop'; Assert-Contains $worker 'LEDGER_UNREADABLE' }
   Case 'Policy_LoadedOnlyAfterManifestVerification' { Assert-True ($worker.IndexOf('Test-PayloadManifest -Root $script:PayloadRoot') -ge 0 -and $worker.IndexOf('Test-PayloadManifest -Root $script:PayloadRoot') -lt $worker.IndexOf("windows-runner-maintenance-policy.json') | ConvertFrom-Json")) 'policy loaded before payload verification' }
   Case 'Request_OwnerBoundToSingleRead' { Assert-True ($worker.IndexOf('Read-BoundedBytes -LiteralPath $LiteralPath -MaximumBytes $MaximumBytes') -gt 0 -and $worker.IndexOf('Read-BoundedBytes -LiteralPath $LiteralPath -MaximumBytes $MaximumBytes') -lt $worker.IndexOf("'WRONG_OWNER'")) 'owner check does not follow the single bounded read' }
   Case 'Worker_UsesCaseExactTaskPath' { Assert-Contains $worker "TaskPath '\AiDevOps\'" }
+  Case 'Payload_LauncherIsHashPinned' { Assert-True ($policy.payload_hashes.'launch-worker.cmd' -ceq (Get-FileHash -Algorithm SHA256 $launcherPath).Hash.ToLowerInvariant()) 'policy launcher hash is stale' }
+  Case 'Evidence_OperatorHoldsNoGrant' { Assert-Contains $installer 'operator access must not exist on'; Assert-Contains $worker '$_.IdentityReference.Value -eq $ExpectedOperatorSid }).Count -ne 0) { throw 'ACL_DRIFT' }' }
+  Case 'Runtime_VerifiedBeforeEnumerationAndDelete' { Assert-True ($worker.IndexOf('Test-RuntimeBoundary -ExpectedOperatorSid ([string]$policy.operator_sid)') -gt 0 -and $worker.IndexOf('Test-RuntimeBoundary -ExpectedOperatorSid ([string]$policy.operator_sid)') -lt $worker.IndexOf('Get-ChildItem -LiteralPath $requests')) 'runtime boundary not verified before enumeration'; Assert-Contains $worker '$requestsNow' }
+  Case 'Ledger_OnlyCanonicalGuidsAndExactMatch' { Assert-Contains $worker '-SimpleMatch -Quiet -Pattern ('; Assert-Contains $worker '"request_id":"'; Assert-Contains $worker '$id -cmatch' }
+  Case 'Installer_RefusesPerUserComOverride' { Assert-True (@([regex]::Matches($installer, 'Assert-NoPerUserComOverride')).Count -ge 3) 'installer COM use is not guarded' }
+  Case 'BackupPath_MustBeAdminControlled' { Assert-Contains $installer 'Recovery backup path must be absolute and outside user profiles.' }
+  Case 'ChildArguments_ArePreQuoted' { Assert-Contains $worker '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File ' }
+  Case 'Worker_ModulePinUsesNoCommand' { Assert-True (-not $worker.Contains('(Join-Path ' + [char]36 + 'PSHOME')) 'module pin still resolves a command'; Assert-Contains $worker '"$PSHOME\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules"' }
   Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
