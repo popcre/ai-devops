@@ -394,6 +394,7 @@ jq 'del(.model)' "$SOURCE_META" > "$TMP/legacy-meta.json"; cp "$TMP/legacy-meta.
 check "legacy formal identity is not invented from the current model setting" "! run reply '$SOURCE_ID' legacy --review >'$TMP/identity.out' 2>&1 && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 cp "$TMP/original-meta.json" "$SOURCE_META"
 check "ordinary conversations preserve model selection across process restarts" "DEEPSEEK_MODEL=deepseek-reasoner DEEPSEEK_STUB_REQUEST='$TMP/plain-model-request.json' run reply '$SESSION' ordinary-model >/dev/null && jq -e '.model==\"deepseek-reasoner\"' '$TMP/plain-model-request.json'"
+check "default model is pinned to deepseek-flash (DeepSeek V4.1 Flash)" "DEEPSEEK_STUB_REQUEST='$TMP/pinned-model-request.json' run send pinned-default >/dev/null && jq -e '.model==\"deepseek-flash\"' '$TMP/pinned-model-request.json'"
 IDENTITY_HEAD="$(git -C "$TMP/repo" rev-parse HEAD)"
 AI_DEEPSEEK_CALLER=codex DEEPSEEK_STUB_REPLY=$'Findings.\nVERDICT: APPROVE '"$IDENTITY_HEAD" run send identity-governed --review --governed-verdict "$IDENTITY_HEAD" > "$TMP/identity-gov.out" 2> "$TMP/identity-gov.err"
 IDENTITY_GOV="$(sed -n 's/^SESSION_ID: //p' "$TMP/identity-gov.err")"; IDENTITY_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
