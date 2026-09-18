@@ -384,33 +384,38 @@ reviewlock_path() { printf '%s/locks/review--%s--%s.lock.d' "$STATE_DIR" "$1" "$
 workspace_path(){ printf '%s/worktrees/qwen.%s-%s-%s/wt' "$STATE_DIR" "$1" "$CALLER" "$2"; }
 
 # Portable mutex (flock does not exist in Git Bash); stale locks are reclaimed.
+lock_owner_alive() {
+  local pid="$1" winpid="$2"
+  [ -n "$pid" ] || return 1
+  if kill -0 "$pid" 2>/dev/null || [ -d "/proc/$pid" ]; then return 0; fi
+  # A sibling MSYS runtime has its own pid table, so its live shells are
+  # invisible to kill -0; the Windows process id is visible to every runtime.
+  [ -n "$winpid" ] && ps -W 2>/dev/null | awk -v w="$winpid" '$4 == w { f = 1 } END { exit !f }'
+}
+lock_stamp() {
+  printf '%s\n' "$$" > "$1/pid"; printf '%s\n' "$2" > "$1/label"
+  cat "/proc/$$/winpid" > "$1/winpid" 2>/dev/null || rm -f "$1/winpid"
+}
 lock_acquire() {
-  local dir="$1" label="$2" owner
+  local dir="$1" label="$2" owner winowner
   mkdir -p "$(dirname "$dir")"
-  if mkdir "$dir" 2>/dev/null; then
-    printf '%s\n' "$$" > "$dir/pid"; printf '%s\n' "$label" > "$dir/label"; return 0
-  fi
+  if mkdir "$dir" 2>/dev/null; then lock_stamp "$dir" "$label"; return 0; fi
   owner="$(cat "$dir/pid" 2>/dev/null || echo '')"
-  # On Windows a sibling MSYS shell can fail to see a live owner via kill -0
-  # (see reviewer_event_guard.sh), so a missing owner is not proof on its own:
-  # the owner must stay invisible to both witnesses for three checks AND the
-  # lock must be older than the stale threshold before it can be reclaimed.
+  winowner="$(cat "$dir/winpid" 2>/dev/null || echo '')"
+  # One missed sighting is not proof the owner is gone: it must stay
+  # invisible to every witness for three checks.
   if [ -n "$owner" ]; then
     local attempt
     for attempt in 1 2 3; do
-      if kill -0 "$owner" 2>/dev/null || [ -d "/proc/$owner" ]; then return 1; fi
+      if lock_owner_alive "$owner" "$winowner"; then return 1; fi
       [ "$attempt" = 3 ] || sleep 1
     done
   fi
-  local stale_after="${AI_QWEN_STALE_LOCK_SECONDS:-120}" born now
-  case "$stale_after" in ''|*[!0-9]*) die "AI_QWEN_STALE_LOCK_SECONDS must be a whole number of seconds." ;; esac
-  born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
-  now="$(date +%s)"; [ $((now - born)) -ge "$stale_after" ] || return 1
   # Reclaim under a sub-lock and re-read the owner inside it, so two
   # reclaimers can never delete each other's freshly taken lock.
-  local guard="$dir.reclaim" gborn
+  local guard="$dir.reclaim" gborn now
   if ! mkdir "$guard" 2>/dev/null; then
-    gborn="$(date -r "$guard" +%s 2>/dev/null || echo "$now")"
+    now="$(date +%s)"; gborn="$(date -r "$guard" +%s 2>/dev/null || echo "$now")"
     [ $((now - gborn)) -ge 60 ] || return 1
     rm -rf "$guard"; mkdir "$guard" 2>/dev/null || return 1
   fi
@@ -418,10 +423,7 @@ lock_acquire() {
   warn "reclaiming stale lock $(basename "$dir") (owner pid ${owner:-unknown} is gone)"
   rm -rf "$dir"
   if ! mkdir "$dir" 2>/dev/null; then rmdir "$guard" 2>/dev/null; return 1; fi
-  printf '%s
-' "$$" > "$dir/pid"; printf '%s
-' "$label" > "$dir/label"
-  rmdir "$guard" 2>/dev/null || true; return 0
+  lock_stamp "$dir" "$label"; rmdir "$guard" 2>/dev/null || true; return 0
 }
 lock_release() { rm -rf "$1" 2>/dev/null || true; }
 lock_info() {
