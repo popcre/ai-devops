@@ -10,7 +10,7 @@
 # a JSON transcript file and resends it each time).
 #
 # Usage:
-#   ai-deepseek-agent send "<message>" [--file FILE]... [--model deepseek-chat|deepseek-reasoner] [--system "<system prompt>"] [--review]
+#   ai-deepseek-agent send "<message>" [--file FILE]... [--model MODEL] [--system "<system prompt>"] [--review]
 #       Start a NEW conversation. Prints:
 #         SESSION_ID: <id>
 #         <DeepSeek's reply>
@@ -46,7 +46,7 @@ fi
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
-MODEL="${DEEPSEEK_MODEL:-deepseek-chat}"
+MODEL="${DEEPSEEK_MODEL:-DeepSeek-V4.1-Flash}"
 BASE_URL='https://api.deepseek.com'
 [ -z "${DEEPSEEK_BASE_URL:-}" ] || [ "$DEEPSEEK_BASE_URL" = "$BASE_URL" ] || { echo 'Error: DEEPSEEK_BASE_URL cannot override the pinned official DeepSeek endpoint.' >&2; exit 1; }
 LOCK_WAIT="${AI_DEEPSEEK_LOCK_WAIT:-30}"
