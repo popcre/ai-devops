@@ -68,19 +68,6 @@ check "managed credential re-exec preserves governed lifecycle identity" "grep -
 if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then check "Windows re-exec uses explicit Git Bash" "grep -Eqi 'Git.*bash.exe$' '$TMP/args'"; else check "POSIX re-exec keeps script path" "grep -q ai-deepseek-agent '$TMP/args'"; fi
 check "help succeeds" "bash '$SCRIPT' --help"; check "unknown command fails" "! bash '$SCRIPT' unknown"
 run(){ (cd "$TMP/repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test "$SCRIPT" "$@"); }
-MODEL_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
-check "invalid --model is refused with no provider call" "! run send model-check --model deepseek-reasoner >'$TMP/model-flag.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/model-flag.out' && grep -q 'deepseek-flash and deepseek-v4-pro' '$TMP/model-flag.out' && test '$MODEL_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
-check "invalid DEEPSEEK_MODEL is refused with no provider call" "! DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run send model-check >'$TMP/model-env.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/model-env.out' && test '$MODEL_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
-check "valid --model override still reaches the provider" "DEEPSEEK_STUB_REQUEST='$TMP/model-override-request.json' run send model-check --model deepseek-v4-pro >/dev/null && jq -e '.model==\"deepseek-v4-pro\"' '$TMP/model-override-request.json' && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((MODEL_CALLS+1))'"
-OP_ARGS_MODEL_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
-check "invalid --model is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' bash '$SCRIPT' send model-check --model deepseek-reasoner 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
-check "invalid DEEPSEEK_MODEL is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_MODEL=deepseek-reasoner bash '$SCRIPT' send model-check 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
-OPERAND_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
-check "--model with a missing operand is refused with usage" "! run send operand-check --model >'$TMP/operand-model.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-model.out' && grep -q 'Usage:' '$TMP/operand-model.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
-check "--file with a missing operand is refused with usage" "! run send operand-check --file >'$TMP/operand-file.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-file.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
-check "--system with a missing operand is refused with usage" "! run send operand-check --system >'$TMP/operand-system.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-system.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
-OPERAND_ID="$(run send operand-fixture | sed -n 's/^SESSION_ID: //p')"
-check "reply --file with a missing operand is refused with usage" "! run reply '$OPERAND_ID' operand-check --file >'$TMP/operand-reply-file.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-reply-file.out' && grep -q 'Usage:' '$TMP/operand-reply-file.out'"
 if [ "${AI_DEEPSEEK_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   printf 'retained attachment\n' > "$TMP/repo/recovery-evidence.txt"
   AI_DEEPSEEK_TEST_LEDGER_FAILURE=publish run send recovery-paid --file recovery-evidence.txt > "$TMP/recovery.out" 2>&1
@@ -135,6 +122,21 @@ check "live doctor ignores an ambient session ID" "ID=ambient-session DEEPSEEK_S
 check "doctor rejects unknown options" "! run doctor --unknown"
 check "zero provider timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CALL_TIMEOUT=0 run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "nonnumeric connect timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CONNECT_TIMEOUT=nope run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+# Model and operand guards run after the doctor byte-state checks, which assert
+# no session storage exists yet; the sends below create it.
+MODEL_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+check "invalid --model is refused with no provider call" "! run send model-check --model deepseek-reasoner >'$TMP/model-flag.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/model-flag.out' && grep -q 'deepseek-flash and deepseek-v4-pro' '$TMP/model-flag.out' && test '$MODEL_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "invalid DEEPSEEK_MODEL is refused with no provider call" "! DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run send model-check >'$TMP/model-env.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/model-env.out' && test '$MODEL_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "valid --model override still reaches the provider" "DEEPSEEK_STUB_REQUEST='$TMP/model-override-request.json' run send model-check --model deepseek-v4-pro >/dev/null && jq -e '.model==\"deepseek-v4-pro\"' '$TMP/model-override-request.json' && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((MODEL_CALLS+1))'"
+OP_ARGS_MODEL_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
+check "invalid --model is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' bash '$SCRIPT' send model-check --model deepseek-reasoner 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+check "invalid DEEPSEEK_MODEL is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_MODEL=deepseek-reasoner bash '$SCRIPT' send model-check 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+OPERAND_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+check "--model with a missing operand is refused with usage" "! run send operand-check --model >'$TMP/operand-model.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-model.out' && grep -q 'Usage:' '$TMP/operand-model.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "--file with a missing operand is refused with usage" "! run send operand-check --file >'$TMP/operand-file.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-file.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "--system with a missing operand is refused with usage" "! run send operand-check --system >'$TMP/operand-system.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-system.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+OPERAND_ID="$(run send operand-fixture | sed -n 's/^SESSION_ID: //p')"
+check "reply --file with a missing operand is refused with usage" "! run reply '$OPERAND_ID' operand-check --file >'$TMP/operand-reply-file.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-reply-file.out' && grep -q 'Usage:' '$TMP/operand-reply-file.out'"
 SESSION="$(run send first | sed -n 's/^SESSION_ID: //p')"
 check "missing provider usage remains unknown" "jq -e '.counters.input==null and .counters.cost==null and .completeness==\"partial\"' '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl'"
 DEEPSEEK_STUB_USAGE='{"prompt_tokens":10,"prompt_cache_hit_tokens":0,"completion_tokens":3,"total_tokens":13}' run reply "$SESSION" measured >/dev/null
