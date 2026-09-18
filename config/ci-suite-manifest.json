@@ -127,6 +127,7 @@
     "test-ai-review-sandbox.sh",
     "test-ai-review-scoreboard.sh",
     "test-ai-reviewer-issue.sh",
+    "test-ai-reviewer-start-watch.sh",
     "test-ai-run-task.sh",
     "test-ai-sync-memory-public-containment.sh",
     "test-ai-task-gates.sh",
