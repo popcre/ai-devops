@@ -25,6 +25,7 @@ Read this table first. Do not re-derive it, and do not re-plan from chat.
 | 8 | Globals, router, and help text teach the new `wait` | ⬜ open | — |
 | 9 | PR, CI green, merge, pull the shared checkout on edge-dev | ⬜ open | — |
 | 10 | Live proof: one real park and one fresh start | ⬜ open | — |
+| 11 | Any kind of wait: pull requests, a time (`--until`), and long-running jobs | ⬜ open | — |
 
 **A fresh session starts at step 1.** Steps 1–8 fit in one session and land as
 one pull request. Step 10 is the single live proof, and it is owned by #617.
@@ -128,6 +129,7 @@ session was doing.
   behaviour, plus the one "orphaned" rule in step 3.
 - Claude desktop sidebar integration (renaming or pinning sessions).
 - A dashboard web page. The GitHub label list *is* the dashboard.
+- A separate waiting mechanism per kind of wait (see step 11 — three forms cover all).
 - Changing the alarm, propagation, scheduling, or the harness resume commands.
 
 ---
@@ -415,6 +417,35 @@ without `--brief-file`.** Update those `BW wait` calls (lines ~47-52) to pass
   to the BlockerWatch row.
 
 Done when `grep -c "brief-file" templates/system/*.md` shows all three files.
+
+
+#### Step 11 — Any kind of wait, not only orchestrator tickets
+Albert confirmed on 2026-09-18 that parking must cover **every** kind of
+waiting: orchestrator tickets, pull requests, scheduled tasks, and background
+data collection that runs for days. **Locked:** every wait is still expressed
+through one of the three forms below. Do not add a separate mechanism per kind.
+1. **Pull request.** `wait owner/repo#N` already works when N is a pull
+   request, because `wake` reads `repos/R/issues/N`, which returns pull requests
+   too. Add a check: when the blocker is a pull request that closed **unmerged**
+   (`gh_api repos/R/pulls/N --jq .merged` is `false`), say so in the wake prompt
+   and in the outcome comment ("closed without merging — decide whether to
+   reopen"). Test: `wake says when a blocking pull request closed unmerged`.
+2. **A point in time** (a scheduled task, "check back Monday"). Add
+   `--until <ISO-8601 UTC time>` as an alternative to the blocker ref, so
+   exactly one of the two is required. The record stores `until`, and `wake`
+   treats the wait as released once `now >= until`. The prompt names the time
+   instead of a blocker. Tests: `wait --until registers a time wait`,
+   `a time wait does not wake early`, `a time wait wakes after its time`.
+3. **A long-running job** (background data collection). The session opens
+   (or reuses) an issue for the job whose body says what "finished" means. It
+   then waits on that issue, with `--until` as a safety check-in. Whichever
+   comes first wakes it. So `--until` and a blocker ref may be combined; the
+   wait is released when **either** happens, and the wake prompt says which. The
+   job, or the session that checks it, closes the issue when done. Document
+   this pattern in the help text and the three global templates (step 8).
+   Test: `a combined wait wakes on whichever comes first`.
+
+Done when all tests above pass and the help text shows all three forms.
 
 ### 10. Tests required
 
