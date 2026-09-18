@@ -72,6 +72,16 @@ Add a new tool: drop an executable script in `bin/`, then re-run `./install.sh`
 (the symlink loop picks up any file in `bin/` automatically). Update `AGENTS.md`
 and `README.md` to list it.
 
+Review evidence commands follow the focused-suite convention: when
+`bin/ai-review-packet build --tests CMD` records test evidence, CMD is the
+focused unit suite for the change — seconds, not minutes. Full suites already
+run in PR CI and the merge queue ("never verify the same commit twice"), so a
+slow command only taxes every review round and widens the window in which the
+target ref can move while the packet is being built. The packet warns on stderr
+and seals a ⚠️ note into the manifest when a command runs past
+`AI_REVIEW_TEST_WARN_SECONDS` (default 120 s); the warning is advisory and never
+fails a build.
+
 For Grok, GLM, or Kimi debate changes, keep the shared field contract in
 `templates/delegation/debate-turn.md`. Test headings and safety guidance
 offline in `tests/test-ai-grok-review.sh`. Grok is pinned to one exact CLI build

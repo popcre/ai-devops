@@ -122,6 +122,22 @@ check "patch_not_inlined_into_manifest"       "! grep -q '^+uncommitted' '$M'"
 check "test_result_recorded"                  "grep -q 'Exit code' '$M' && grep -q 'PASSED' '$M'"
 check "test_duration_recorded"                "grep -q 'Measured duration:' '$M'"
 
+# --- evidence duration warning (issue #608, Fix A) -----------------------------
+# The convention: --tests attaches the FOCUSED unit suite (seconds); full suites
+# belong to PR CI and the merge queue. A slow command must warn on stderr AND
+# seal a ⚠️ into the manifest the reviewer reads — but never fail the build.
+SLOW_ERR="$TMP/slow-evidence.stderr"
+PKT_SLOW="$(AI_REVIEW_TEST_WARN_SECONDS=0 "$SCRIPT" build "$R" slowev --tests 'true' 2>"$SLOW_ERR")"
+check "slow_test_command_warns" \
+  "[ -d '$PKT_SLOW' ] && grep -q 'ai-review-packet: warning:' '$SLOW_ERR' && grep -q 'focused unit suite' '$SLOW_ERR' && grep -q 'evidence command was slow' '$PKT_SLOW/MANIFEST.md' && grep -qF '⚠️' '$PKT_SLOW/MANIFEST.md'"
+check "slow_evidence_warning_is_advisory_not_fatal" "'$SCRIPT' verify '$PKT_SLOW'"
+"$SCRIPT" remove "$R" slowev
+FAST_ERR="$TMP/fast-evidence.stderr"
+PKT_FAST="$("$SCRIPT" build "$R" fastev --tests 'true' 2>"$FAST_ERR")"
+check "fast_test_command_is_not_flagged" \
+  "[ -d '$PKT_FAST' ] && ! grep -q 'ai-review-packet: warning:' '$FAST_ERR' && ! grep -qF '⚠️' '$PKT_FAST/MANIFEST.md'"
+"$SCRIPT" remove "$R" fastev
+
 "$SCRIPT" remove "$R"
 PKT2="$("$SCRIPT" build "$R" notests)"
 check "absent_tests_are_stated_not_implied"   "grep -q 'No tests were run' '$PKT2/MANIFEST.md'"
@@ -274,11 +290,87 @@ printf 'tamper' >> "$IDENTITY_PACKET/MANIFEST.md"
 check "retained_verification_refuses_changed_packet" "! '$SCRIPT' verify-retained '$IDENTITY_PACKET'"
 head -c -6 "$IDENTITY_PACKET/MANIFEST.md" > "$TMP/restored-manifest"; mv "$TMP/restored-manifest" "$IDENTITY_PACKET/MANIFEST.md"
 rm "$STALE/identity-new.txt"
-git -C "$STALE" update-ref refs/heads/release HEAD
-check "identity_rejects_target_movement" "! '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
+# Re-scoped 2026-09-18 (issue #608) — re-scoped, NEVER deleted: this check used
+# to move the target ref FORWARD to HEAD and expect refusal. A forward move that
+# keeps the recorded tip an ancestor of the live tip is now tolerated (covered
+# by forward_moved_target_still_verifies below). What must still refuse is a
+# REWRITE that orphans the recorded tip: $STALE_LOCAL_SHA is stale main (A),
+# which does NOT contain the recorded release tip (B), so pointing release at
+# it is exactly that rewrite.
+git -C "$STALE" update-ref refs/heads/release "$STALE_LOCAL_SHA"
+check "identity_rejects_target_movement" "! '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY' 2> '$TMP/rescoped-rewrite.log' && grep -q 'source-target-rewritten' '$TMP/rescoped-rewrite.log' && grep -q 'refs/ai-review-packets/identity-contract' '$TMP/rescoped-rewrite.log'"
 git -C "$STALE" update-ref refs/heads/release "$STALE_REMOTE_SHA"
 check "unchanged_identity_verifies_after_restoring_target" "'$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
 "$REPO_ROOT/bin/ai-review-sandbox" remove-copy "$STALE" identity-contract
+
+# The per-tag private base ref pins the recorded base in the REAL source
+# checkout. Prove the full anti-GC property: with the release ref, the fetched
+# origin/main, and EVERY branch that contains the recorded base deleted (HEAD
+# detached onto stale main first so feature can go), plus reflogs expired, a
+# prune-gc must still find the recorded base — held only by
+# refs/ai-review-packets/identity-contract.
+check "base_ref_survives_for_retained_evidence" \
+  "git -C '$STALE' update-ref -d refs/ai-review-packets/stale-origin && git -C '$STALE' update-ref -d refs/heads/release && git -C '$STALE' update-ref --no-deref -d refs/remotes/origin/HEAD && git -C '$STALE' update-ref -d refs/remotes/origin/feature && git -C '$STALE' update-ref -d refs/remotes/origin/main && git -C '$STALE' checkout -q --detach '$STALE_LOCAL_SHA' && git -C '$STALE' branch -D feature main >/dev/null && git -C '$STALE' reflog expire --expire=now --all && git -C '$STALE' gc --prune=now --quiet && [ \"\$(git -C '$STALE' for-each-ref --format='x' 'refs/heads' 'refs/remotes' | wc -l)\" -eq 0 ] && [ \"\$(git -C '$STALE' rev-parse refs/ai-review-packets/identity-contract)\" = '$STALE_REMOTE_SHA' ] && git -C '$STALE' cat-file -e '$STALE_REMOTE_SHA'"
+
+# --- target ref movement under sealed evidence (issue #608, Fix B) -------------
+# The 2026-09-17/18 incident: unrelated work landing on the target ref during a
+# slow evidence run destroyed two complete review rounds. A FORWARD move of the
+# target ref is now tolerated — the recorded tip is still an ancestor of the
+# live tip, so the sealed base..head diff is byte-identical — while a rewrite,
+# a deletion, or a HEAD move still refuses loudly.
+FWD="$TMP/forward-move"
+mkdir -p "$FWD"
+git -C "$FWD" init -q -b main
+git -C "$FWD" config user.email t@example.com
+git -C "$FWD" config user.name Test
+echo fork > "$FWD/f.txt"
+git -C "$FWD" add -A; git -C "$FWD" commit -qm fork
+git -C "$FWD" checkout -q -b feature
+echo reviewed > "$FWD/feature.txt"
+git -C "$FWD" add -A; git -C "$FWD" commit -qm feature
+# Advance main once BEFORE sealing so the recorded target tip differs from the
+# recorded base (the merge-base) — the exact shape the incident had.
+git -C "$FWD" checkout -q main
+echo landed > "$FWD/landed.txt"
+git -C "$FWD" add -A; git -C "$FWD" commit -qm landed-before-seal
+git -C "$FWD" checkout -q feature
+FWD_RECORDED_TIP="$(git -C "$FWD" rev-parse main)"
+FWD_BASE="$(git -C "$FWD" merge-base feature main)"
+[ "$FWD_RECORDED_TIP" != "$FWD_BASE" ] || { echo "fixture broken: target tip equals merge-base" >&2; exit 1; }
+FWD_PKT="$("$SCRIPT" build "$FWD" fwd --tests 'true')"
+check "forward_fixture_records_main_as_target" "grep -qF '\"target_ref\": \"main\"' '$FWD_PKT/identity.json' && grep -q '$FWD_RECORDED_TIP' '$FWD_PKT/identity.json'"
+check "base_ref_written_at_build" "[ \"\$(git -C '$FWD' rev-parse refs/ai-review-packets/fwd)\" = '$FWD_BASE' ]"
+
+# The target ref moves FORWARD by one commit after sealing — without touching
+# the checked-out feature worktree — and the sealed packet must still verify,
+# with one explicit line naming the ref, the recorded tip, and the current tip.
+FWD_NEW_TIP="$(git -C "$FWD" commit-tree "$(git -C "$FWD" rev-parse 'main^{tree}')" -p "$FWD_RECORDED_TIP" -m landed-after-seal)"
+git -C "$FWD" update-ref refs/heads/main "$FWD_NEW_TIP"
+check "forward_moved_target_still_verifies" "'$SCRIPT' verify '$FWD_PKT' > '$TMP/forward.log' 2>&1 && grep -q 'moved forward' '$TMP/forward.log' && grep -q '$FWD_RECORDED_TIP' '$TMP/forward.log' && grep -q '$FWD_NEW_TIP' '$TMP/forward.log'"
+
+# A REWRITE that orphans the recorded tip must refuse loudly, naming the rewrite
+# and the private ref that preserved the base — and the base object must still
+# be there, pinned by that ref.
+FWD_REWRITE="$(git -C "$FWD" commit-tree "$(git -C "$FWD" rev-parse 'main^{tree}')" -m rewritten-history)"
+git -C "$FWD" update-ref refs/heads/main "$FWD_REWRITE"
+check "rewritten_target_refuses_loudly" "! '$SCRIPT' verify '$FWD_PKT' > '$TMP/rewrite.log' 2>&1 && grep -q 'source-target-rewritten' '$TMP/rewrite.log' && grep -q 'refs/ai-review-packets/fwd' '$TMP/rewrite.log' && grep -q '$FWD_RECORDED_TIP' '$TMP/rewrite.log' && git -C '$FWD' cat-file -e '$FWD_BASE'"
+
+# A DELETED target ref refuses as missing.
+git -C "$FWD" update-ref -d refs/heads/main
+check "deleted_target_ref_refuses" "! '$SCRIPT' verify '$FWD_PKT' 2> '$TMP/deleted.log' && grep -q 'source-target-missing' '$TMP/deleted.log'"
+
+# HEAD movement stays byte-strict: it fires before the (already unreachable)
+# target checks and names the real cause.
+echo moved >> "$FWD/feature.txt"
+git -C "$FWD" add -A; git -C "$FWD" commit -qm head-moved
+check "head_movement_still_refuses" "! '$SCRIPT' verify '$FWD_PKT' 2> '$TMP/head.log' && grep -q 'source-head-mismatch' '$TMP/head.log'"
+
+# remove deletes only its own tag's private base ref, never another tag's.
+"$SCRIPT" build "$R" refkeep >/dev/null
+"$SCRIPT" build "$R" refgone >/dev/null
+"$SCRIPT" remove "$R" refgone
+check "remove_deletes_only_own_base_ref" "! git -C '$R' rev-parse --verify --quiet refs/ai-review-packets/refgone >/dev/null && git -C '$R' rev-parse --verify --quiet refs/ai-review-packets/refkeep >/dev/null"
+"$SCRIPT" remove "$R" refkeep
 
 # --- linked worktrees ---------------------------------------------------------
 # A raw worktree kills a reviewer before it reads code. Refuse at the door and
