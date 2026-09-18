@@ -7,8 +7,9 @@
 # parent resumed only if one session happened to remember it. Sessions in
 # Claude, Codex and ZCode sat open for days not knowing their blocker had closed.
 #
-# Three mechanisms. `tick` (run every few minutes by `schedule`) drives all of
-# them; the alarm part is interval-gated so a tick stays cheap:
+# Four mechanisms. `tick` (run every few minutes by `schedule`) drives all of
+# them; the alarm and link-maintenance parts are interval-gated so a tick stays
+# cheap:
 #   1. Propagation. Blocking is recorded as GitHub's native "blocked by"
 #      dependency. When an issue in a configured repo closes, every OPEN issue
 #      it was blocking gets one comment naming the closed blocker. Closing that
@@ -24,6 +25,14 @@
 #      alarm_stall_hours, leaves ONE marked comment asking for an owner, and
 #      lists them in a daily digest issue in alarm_digest_repo — blockers
 #      holding up a chain alarm_depth_priority or more levels deep first.
+#   4. Link maintenance (#596). A shared-db work issue carries a db-work-scope
+#      fence whose `depends_on:` line names its blockers as same-repo issue
+#      numbers — data the issue already carries, validated by the queue
+#      tooling. Each links scan parses that fence on OPEN issues in the
+#      configured repos and records every missing native link: present →
+#      nothing to do; missing → create it and note it in the tick log. A
+#      malformed fence is skipped and counted, never a crash. Links can no
+#      longer be forgotten, because sessions were never trusted to record them.
 #
 # Usage:
 #   ai-blocker-watch wait <owner/repo#N> [--for <owner/repo#M>] [--note TEXT]
@@ -36,18 +45,21 @@
 #   ai-blocker-watch cancel <wait-id>
 #   ai-blocker-watch tick [--dry-run]
 #   ai-blocker-watch alarm [--dry-run]      scan for unowned blockers now
+#   ai-blocker-watch links [--dry-run]      maintain blocked-by links from
+#       db-work-scope depends_on fences now
 #   ai-blocker-watch schedule | unschedule      (Windows Task Scheduler, or the
 #       user crontab on Linux/macOS; both marked, idempotent, safe to re-run)
 #
-# tick exits non-zero when any propagation, wake or alarm scan failed, so a
-# scheduled run that did not do its work is visible. Finding stalled unowned
-# blockers is NOT a failure. Failed wakes retry on later ticks up to
+# tick exits non-zero when any propagation, wake, links or alarm scan failed,
+# so a scheduled run that did not do its work is visible. Finding stalled
+# unowned blockers is NOT a failure. Failed wakes retry on later ticks up to
 # max_wake_attempts, then stay in state "failed" for a human. A wake whose
 # harness program is not installed on this machine is skipped once with a
 # visible error and left in state "unrunnable" — it does not burn retries.
-# Propagation (commenting) AND the unowned-blocker alarm (request-for-owner
-# comments, the daily digest) run on ONE machine only, named by
-# propagate_on_host in the config; every machine wakes its own sessions.
+# Propagation (commenting), blocked-by link maintenance (link creation) AND
+# the unowned-blocker alarm (request-for-owner comments, the daily digest) run
+# on ONE machine only, named by propagate_on_host in the config; every machine
+# wakes its own sessions.
 #
 # ZCode wakes need a one-time CLI sign-in: run zcode.cjs login on each machine.
 # On Windows the login URL is TRUNCATED AT '&' when auto-opened, so copy the
@@ -71,7 +83,7 @@ HOME_DIR="${AI_BLOCKER_WATCH_HOME:-${HOME:?HOME is unavailable}/.ai-devops/block
 CONFIG="${AI_BLOCKER_WATCH_CONFIG:-$TOOL_ROOT/config/blocker-watch.json}"
 GH="${AI_BLOCKER_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
 WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
-LAST_ALARM="$HOME_DIR/last-alarm"
+LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
 LOGS="$HOME_DIR/logs"
 command -v jq >/dev/null || die "jq is required"
 # Windows jq and gh builds can end lines with CR; strip it so values compare cleanly.
@@ -467,6 +479,149 @@ maybe_alarm(){
   if [ "$elapsed" -ge "$(( $(cfgd .alarm_interval_minutes 60) * 60 ))" ]; then alarm_scan 0; fi
 }
 
+# --- links: blocked-by links from db-work-scope depends_on (#596) -----------
+# A session that files "M cannot proceed until N closes" writes N into M's
+# db-work-scope fence as `depends_on: N` — one inline comma-separated field of
+# same-repo issue numbers with an optional '#' prefix, the exact contract the
+# shared-db queue tooling validates. The native "blocked by" link is therefore
+# data the issue already carries, not a judgment call left to the session.
+# Each links scan reads OPEN issues in the configured repos, parses the fence,
+# and records every missing link: present → nothing to do; missing → create it
+# and note it in the tick log. A malformed fence (more than one block, an
+# unterminated block, a duplicated or unreadable depends_on line, a
+# non-numeric entry) is skipped and counted — never a crash and never a failed
+# tick. Links are only ever ADDED here; a stale depends_on line is the issue
+# author's to fix.
+links_on(){ [ "$(cfgd .links_enabled true)" = true ]; }
+LINKS_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number databaseId body blockedBy(first:50){nodes{number}}}}}}'
+
+parse_depends_on(){ # stdin: issue body -> dep numbers, one per line; rc 1 = malformed fence
+  local content line cur nlines val
+  content="$(awk '
+    /^```db-work-scope[ \t]*$/ { n++; if (n > 1) exit 3; inf=1; next }
+    inf && /^```[ \t]*$/ { inf=0; next }
+    inf { print }
+    END { if (inf) exit 4 }
+  ')" || return 1
+  [ -n "$content" ] || return 0
+  # Structural check, mirroring the queue tooling's line rules: list items are
+  # legal only inside objects:/writes:/reads:; every other line must be a
+  # lowercase field line, and no field repeats. A YAML-list-style depends_on
+  # (an empty field followed by `- N` items) is therefore malformed here
+  # exactly as it is there — skipped and counted, never silently empty.
+  cur=""
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
+    [ -n "$line" ] || continue
+    case "$line" in objects:|writes:|reads:) cur="${line%%:}"; continue ;; esac
+    if [ -n "$cur" ]; then case "$line" in -\ *) continue ;; esac; fi
+    cur=""
+    printf '%s\n' "$line" | grep -qE '^[a-z_]+:' || return 1
+  done <<<"$content"
+  nlines="$(printf '%s\n' "$content" | grep -c '^depends_on:')"
+  [ "$nlines" -le 1 ] || return 1
+  [ "$nlines" -eq 1 ] || return 0
+  val="$(printf '%s\n' "$content" | sed -n 's/^depends_on:[[:space:]]*//p' | head -1)"
+  [ -n "$val" ] || return 0
+  printf '%s\n' "$val" | tr ',' '\n' | {
+    local bad=0 tok
+    while IFS= read -r tok; do
+      tok="${tok#"${tok%%[![:space:]]*}"}"; tok="${tok%"${tok##*[![:space:]]}"}"
+      [ -n "$tok" ] || continue
+      tok="${tok#\#}"
+      case "$tok" in
+        *[!0-9]*|"") bad=1 ;;
+        *) if [ "$((10#$tok))" -gt 0 ]; then printf '%s\n' "$((10#$tok))"; else bad=1; fi ;;
+      esac
+    done
+    [ "$bad" -eq 0 ]
+  }
+}
+
+maintain_links(){ # maintain_links <dry 0|1>
+  local dry="$1" start repo out pages cursor lfail=0
+  # Link creation POSTs to GitHub, so posting is owned by the same single
+  # machine as propagation and the alarm — without this gate N scheduled
+  # machines race to create the same links. A dry run only reads, so it stays
+  # available on every machine. Absent key = act here.
+  if [ "$dry" -ne 1 ]; then
+    local want; want="$(cfg '.propagate_on_host // ""')"
+    if [ -n "$want" ]; then
+      local me; me="$(hostname 2>/dev/null | tr '[:upper:]' '[:lower:]' | cut -d. -f1)"
+      if [ "$me" != "${want,,}" ]; then
+        note "blocked-by link maintenance is owned by $want (this machine is ${me:-unknown}); only local wakes run here"
+        return 0
+      fi
+    fi
+  fi
+  start="$(now_iso)"
+  local -A idmap=() eseen=()
+  local -a edges=()
+  local malformed=0 unresolvable=0 created=0
+  # Pass 1: one GraphQL page walk per repo collects every OPEN issue's
+  # depends_on edges, plus an id map for same-repo resolution.
+  for repo in $(cfg '.repos[]'); do
+    pages=0; cursor=""
+    while :; do
+      pages=$((pages+1))
+      if [ "$pages" -gt 10 ]; then note "links: $repo has more open issues than one scan reads (1000)"; lfail=1; break; fi
+      if [ -n "$cursor" ]; then
+        out="$(gh_api graphql -f query="$LINKS_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || { note "links: could not list open issues in $repo"; lfail=1; break; }
+      else
+        out="$(gh_api graphql -f query="$LINKS_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || { note "links: could not list open issues in $repo"; lfail=1; break; }
+      fi
+      printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository != null)' >/dev/null || { note "links: unreadable answer from $repo"; lfail=1; break; }
+      local num did b64 blocked deps dep
+      while IFS=$'\t' read -r num did b64 blocked; do
+        [ -n "$num" ] || continue
+        idmap["$repo#$num"]="$did"
+        deps="$(printf '%s' "$b64" | base64 -d 2>/dev/null | tr -d '\r' | parse_depends_on)" || { malformed=$((malformed+1)); note "links: $repo#$num has a malformed db-work-scope fence; skipped"; continue; }
+        for dep in $deps; do
+          if [ "$dep" = "$num" ]; then note "links: $repo#$num depends_on names itself; skipped"; malformed=$((malformed+1)); continue; fi
+          case " $blocked " in *" $dep "*) continue ;; esac # link present → nothing to do
+          [ -z "${eseen[$repo#$num>$dep]+set}" ] || continue
+          eseen["$repo#$num>$dep"]=1; edges+=("$repo#$num $dep")
+        done
+      done < <(printf '%s' "$out" | jq -r '.data.repository.issues.nodes[] | [(.number|tostring), (.databaseId|tostring), ((.body // "") | @base64), ([.blockedBy.nodes[].number | tostring] | join(" "))] | @tsv')
+      if [ "$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.hasNextPage')" = true ]; then
+        cursor="$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.endCursor')"; continue
+      fi
+      break
+    done
+  done
+  # Pass 2: create each missing link. The blocker's id comes from the
+  # open-issue map when the blocker is open, else one REST read — a closed
+  # blocker still records a truthful link, and an unreadable target is
+  # skipped and counted, never a failed tick.
+  local edge bref dep id br bn
+  for edge in ${edges[@]+"${edges[@]}"}; do
+    bref="${edge%% *}"; dep="${edge##* }"; br="${bref%#*}"; bn="${bref#*#}"
+    id="${idmap[$br#$dep]:-}"
+    if [ -z "$id" ]; then
+      id="$(gh_api "repos/$br/issues/$dep" --jq '.id' 2>/dev/null)" || id=""
+      if [ -z "$id" ]; then note "links: cannot read $br#$dep (named in $bref's depends_on); skipped"; unresolvable=$((unresolvable+1)); continue; fi
+    fi
+    if [ "$dry" = 1 ]; then note "links: would record $bref is blocked by $br#$dep (from its db-work-scope depends_on)"; continue; fi
+    if gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
+      created=$((created+1)); note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
+    else
+      note "links: GitHub refused the link $bref blocked by $br#$dep"; lfail=1
+    fi
+  done
+  [ "$malformed" -eq 0 ] || note "links: skipped $malformed malformed db-work-scope fence(s) this scan"
+  [ "$unresolvable" -eq 0 ] || note "links: skipped $unresolvable unreadable depends_on target(s) this scan"
+  if [ "$lfail" = 0 ]; then [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_LINKS"; else FAILED=1; fi
+}
+
+maybe_links(){
+  links_on || return 0
+  if [ "$DRY" = 1 ]; then maintain_links 1; return 0; fi
+  local since elapsed
+  since="$(cat "$LAST_LINKS" 2>/dev/null || printf '')"
+  elapsed="$(( $(date -u +%s) - $(date -u -d "${since:-1970-01-01T00:00:00Z}" +%s 2>/dev/null || printf 0) ))"
+  if [ "$elapsed" -ge "$(( $(cfgd .links_interval_minutes 60) * 60 ))" ]; then maintain_links 0; fi
+}
+
 lock_take(){
   local lock="$HOME_DIR/tick.lock"
   if ! mkdir "$lock" 2>/dev/null; then
@@ -487,6 +642,14 @@ cmd_alarm(){
   [ "$FAILED" = 0 ] || { note "alarm finished with failures"; exit 1; }
 }
 
+cmd_links(){
+  [ "${1:-}" != --dry-run ] || DRY=1
+  links_on || die "blocked-by link maintenance is disabled in the config"
+  lock_take || return 0
+  maintain_links "$DRY"
+  [ "$FAILED" = 0 ] || { note "links finished with failures"; exit 1; }
+}
+
 cmd_tick(){
   [ "${1:-}" != --dry-run ] || DRY=1
   lock_take || return 0
@@ -497,6 +660,7 @@ cmd_tick(){
     [ "$(jq -r .state "$f")" = waiting ] || continue
     wake "$f"
   done
+  maybe_links
   maybe_alarm
   [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
 }
@@ -548,7 +712,8 @@ case "${1:-}" in
   cancel) shift; cmd_cancel "$@" ;;
   tick) shift; cmd_tick "$@" ;;
   alarm) shift; cmd_alarm "$@" ;;
+  links) shift; cmd_links "$@" ;;
   schedule) cmd_schedule ;;
   unschedule) cmd_unschedule ;;
-  -h|--help|help) sed -n '2,59p' "$_self" | sed 's/^# \{0,1\}//' ;;  *) die "unknown command; see ai-blocker-watch --help" ;;
+  -h|--help|help) sed -n '2,71p' "$_self" | sed 's/^# \{0,1\}//' ;;  *) die "unknown command; see ai-blocker-watch --help" ;;
 esac

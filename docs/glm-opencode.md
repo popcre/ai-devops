@@ -195,7 +195,11 @@ them and `/global/health` stopped answering for minutes at a time (median refres
 0.8s under 50 directories, 12s over 300, peaks of 25 minutes under concurrency).
 `ai-glm new` now first retires up to `AI_GLM_PRUNE_BATCH` (5, a positive whole
 number) review sessions idle longer than `AI_GLM_REVIEW_RETENTION_HOURS` (24), and
-`doctor` runs a full prune. The batch is small on purpose: OpenCode boots a session's
+`ai-glm prune` retires the whole backlog. `doctor` only reports how many idle reviews
+remain: it runs inside the governed-review preflight (60s), which a prune pass overran
+(u2giants/shared-db PR 3243, 2026-09-18). Which records are due is decided by one jq
+pass over all records, not several spawns per record; anything that pass cannot read
+falls back to the per-record check. The batch is small on purpose: OpenCode boots a session's
 directory instance to delete it (about a second each), so a large batch would slow the
 review that triggered it. A retired review loses its server session, sandbox and record,
 exactly like `delete`. Idle means no activity, poll, provider progress or turn start in

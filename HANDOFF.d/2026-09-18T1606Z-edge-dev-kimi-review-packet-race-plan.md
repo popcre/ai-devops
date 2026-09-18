@@ -1,5 +1,5 @@
 ---
-issue: pending — plan step 0.2 files it
+issue: 608 — filed 2026-09-18 by the implementing session (plan step 0.2)
 status: OPEN
 owner: kimi/review-packet-race-plan
 ---
@@ -51,3 +51,11 @@ the reviewer-safety PR getting the mandatory independent exact-head review.
 - On edge-dev Kimi shells, jq and gh are installed but off PATH:
   `export PATH="/c/Program Files/jq:/c/Program Files/GitHub CLI:$PATH"` before
   `bin/ai-task-gates` / `bin/ai-gh`.
+- `bin/ai-doc-reachability` strips inline code BEFORE extracting Markdown links,
+  so a link whose label is backtick-wrapped (a label written as `plan_x.md` inside backticks)
+  is invisible to it and fails the gate with "not reachable". Use a plain-text
+  label, like every neighboring AGENTS.md router row does. Hit and fixed in
+  PR #600.
+- `bin/ai-facts` on edge-dev (Kimi shell) fails with "private memory hub not
+  found … (run ai-sync-memory first)" — the portable-memory entry for this plan
+  is therefore assigned to the implementing session in plan step B.8.

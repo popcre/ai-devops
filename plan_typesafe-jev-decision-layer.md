@@ -11,9 +11,11 @@
 | 1. Confirm Jev is real, and what it actually guarantees | ✅ complete | 2026-09-18 | Section 3 below |
 | 2. Register the API key reference (no value in the repository) | ✅ complete | 2026-09-18 | Vault item `typesafe.ai API` (API Credential); key is in field `credential` (non-empty, 108 chars; value never printed). `config/mcp.env.example` line active; resolved via `op run` on hetz → `PASS len=108` |
 | 3. Reachability probe from one machine | ✅ complete | 2026-09-18 | `bin/ai-jev-probe` (self-resolves via `op run`, 10s connect / 20s call timeout, fails loudly on empty key). Live on hetz: printed `ok` in 1.1s; the API reported model `jev-1.13.0`, response shape `answers.<id>.noul`. Offline guards: `tests/test-ai-jev-scripts.sh` 6/6 |
-| 4a. Track A: confirm upstream #33/#34 landed, then single-machine compaction trial | ⛔ gate not met — stopped | 2026-09-18 | Upstream issues #33 and #34 are both OPEN. Fixes exist only as unmerged PR #44 (bounded concurrency) and PR #45 (deadlines/cancellation); #28, #30, #35, #36 also still open. No upstream commit contains both fixes, so nothing was installed. Re-check when #44 and #45 merge |
-| 4b. Track B: shadow-mode evaluation on completion-honesty checks | 🟡 tool built, awaiting real traffic | 2026-09-18 | `bin/ai-jev-completion-shadow` replays Stop payloads through the existing hook and one Jev `Noul` question at a 0.91 floor; logs hashes and verdicts only, outside the repo; outage/uncertainty = `escalate`. Synthetic 7-item run worked end to end. Real-traffic replay NOT run: sending transcript text to TypeSafe needs Albert's approval. Note: the existing hook matches "nothing pending" closings, not "done without evidence", so some disagreement is scope difference, not error |
+| 4a. Track A: confirm upstream #33/#34 landed, then single-machine compaction trial | ⛔ blocked upstream; NOT installed | 2026-09-18 | Backtests §7, §9, §10: the plugin as-is and with our preview fix (upstream PR #57) both fail Albert's 91% bar (AUC 0.61 → 0.71). #33/#34 fixes (PRs #44/#45) unmerged. Do not install; rerun the §9 replay when #44, #45 and #57 land |
+| 4b. Track B: shadow-mode evaluation on completion-honesty checks | 🟡 shadow tool live-tested, not decisive | 2026-09-18 | `bin/ai-jev-completion-shadow` (PR #592). Real-traffic runs §7 and §9: split questions give sensible proof detection, but the one real unproven "done" scored 0.73 < 0.91. Record-only; next: more real endings and question tuning |
 | 5. Go/no-go per track on promoting anything to enforcing | ⬜ not started | — | — |
+
+**Where to start (2026-09-18):** read §8–§10 first. Track A waits on upstream (a daily 9 AM scheduled task on Albert's desktop app watches PRs #44, #45, #57). Track B can continue tuning. Track C not started, by design.
 
 **Workstream state:** evaluation only. Nothing in this plan authorizes Jev to
 decide anything in the reviewer safety path, a task gate, or the shared-db
@@ -263,3 +265,16 @@ question was confident on 81 and sensible on manual review (commit ids, test
 counts, URLs scored 0.87-0.98). But the one genuine unproven "complete and
 verified" ending scored only 0.73 on "done without proof", below the 0.91
 floor. Useful as a signal to log; not yet decisive enough to flag anything.
+
+## 10. Upstream fix submitted, 2026-09-18
+
+Offered upstream as tamaratran/fast-jev-compaction#57 (from fork
+`u2giants/fast-jev-compaction`, branch `result-preview`): new option
+`resultPreviewChars` (default 300) quotes the head and tail of each tool output
+in its keep question. Replay on the same 523 outputs: ranking quality AUC
+0.61 → 0.71. Rewording the question as "contains facts later steps may rely
+on" shifted scores but did not improve ranking (0.70–0.71), nor did a 600-char
+preview. **Still below Albert's bar:** no setting deleted a meaningful share of
+output without also deleting material used later. Track A stays off until
+#44, #45 and #57 land and a rerun passes. A daily 9 AM scheduled check on
+Albert's desktop app reports upstream changes.

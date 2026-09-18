@@ -72,13 +72,19 @@ cd /worksp/ai-devops
    new Claude home with no project memory yet, this truthfully reports a
    fresh-machine seed and uploads nothing; matching project memory is applied
    by a later explicitly initiated sync after Claude creates the project.
-8. Schedules the blocker watch (optional stage): a marked, idempotent user
-   crontab entry running `ai-blocker-watch tick`, so waiting sessions on this
-   machine are woken when their blocker closes. Windows machines get the same
-   outcome from `bin/install-ai-devops-windows.ps1`, which registers the Task
-   Scheduler job via the same `schedule` command. Only the machine named by
-   `propagate_on_host` in `config/blocker-watch.json` posts blocker comments;
-   every other machine just wakes its own sessions.
+8. Schedules **BlockerWatch** — the `ai-blocker-watch` system (optional stage):
+   a marked, idempotent user crontab entry running `ai-blocker-watch tick`, so
+   waiting sessions on this machine are woken when their blocker closes. Windows
+   machines get the same outcome from `bin/install-ai-devops-windows.ps1`, which
+   registers the Task Scheduler job via the same `schedule` command. Only the
+   machine named by `propagate_on_host` in `config/blocker-watch.json` posts
+   blocker comments; every other machine just wakes its own sessions.
+   The Windows installer also schedules `ai-reviewer-start-watch tick` every
+   `schedule_every_minutes`, but only on the one machine named by
+   `run_on_host` in `config/reviewer-start-watch.json`: it reroutes shared-db
+   reviewers that were drawn but never started, and drawing the replacement
+   needs this machine's `ai-review-preflight` and reviewer wrappers. Its state
+   and `tick.log` live in `~/.ai-devops/reviewer-start-watch`.
 9. Records exact source, config schema, owned symlinks, config files, managed
    skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
 10. Runs `ai-devops doctor`.

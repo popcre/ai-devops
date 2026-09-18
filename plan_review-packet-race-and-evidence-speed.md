@@ -8,6 +8,9 @@
 | B — forward-move tolerance + base-ref snapshot (same reviewer-safety PR) | ⬜ open | |
 | Landing — reviews, merge queue, origin/main verification | ⬜ open | |
 
+The plan itself landed 2026-09-18 as PR #600, squash merge `51e680a3`, with
+its handoff and the AGENTS.md router row. No implementation step has started.
+
 **A fresh session starts at §1, then §9.** Registration handoff:
 [`HANDOFF.d/2026-09-18T1606Z-edge-dev-kimi-review-packet-race-plan.md`](HANDOFF.d/2026-09-18T1606Z-edge-dev-kimi-review-packet-race-plan.md).
 

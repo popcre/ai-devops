@@ -79,6 +79,10 @@ thin plan costs a whole session of rediscovery and a wrong build.
    - Dependencies: what must be done first; what can run in parallel.
    - **Verification gate: "you'll know it worked when ___"** — a command,
      an HTTP check, a test name, or a screenshot of a specific screen.
+   - For trust-boundary work (parsers, pricing/money, files or data coming
+     from outside the repo): the plan MUST contain an **adversarial-cases
+     table** — every external input × its hostile case × the test that proves
+     it — and is not complete until every row names a test.
    - Where a step is genuinely a judgment call, say so and give the criteria.
    Group steps into **phases** when the work is large enough that a session
    would run out of context; mark the natural cut points (see `fresh-session`).
@@ -112,6 +116,9 @@ could always be more detailed" is NOT an item on this list.
       without reading the planning chat.
 - [ ] Rejected approaches and failed attempts are written down, with why.
 - [ ] Every step names concrete files/functions and has a verification gate.
+- [ ] Trust-boundary work carries an **adversarial-cases table** — every
+      external input × its hostile case × the test that proves it, every row
+      naming a test.
 - [ ] Locked vs. open decisions are labeled.
 - [ ] Explicit out-of-scope list.
 - [ ] Tests are specified by name/behavior, not "add tests."
@@ -166,6 +173,8 @@ When asked whether the plan is comprehensive/detailed enough:
 - Silently omitting the approaches already tried and rejected.
 - Leaving locked decisions unlabeled, so the implementer redesigns them.
 - No out-of-scope list, so scope grows silently.
+- Sending the first draft of trust-boundary work to review without the
+  adversarial-cases table.
 - A plan that only lives in chat. It must be a file (see Mechanics).
 - Three bullet points called a plan. Under a screen of text for non-trivial work
   is almost certainly too thin — re-audit.

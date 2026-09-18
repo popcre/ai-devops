@@ -1,8 +1,7 @@
 {
-  "_comment": "ai-blocker-watch settings. repos: every u2giants/* and popcre/* repo with an issue or PR opened in the last 90 days (audited 2026-09-17; archived and zero-activity repos excluded) — re-audit when repos change. propagate_on_host: the ONE machine (hostname) that scans and posts blocker comments and runs the unowned-blocker alarm; every other machine still wakes its own sessions, so N machines never post N copies of a comment. Absent key = act here (single-machine installs). harness: how a waiting session is resumed; {session}, {cwd}, {prompt}, {home} and {zcode_builtin} (newest ZCode provider runtime file) are substituted per argument. ZCode headless needs a one-time CLI sign-in (zcode.cjs login) before its wakes succeed — on Windows copy the full login URL from the terminal, because auto-open truncates it at '&'. alarm_*: the unowned-blocker alarm — an open issue blocking another open issue with no assignee, no `owner:` line, no open linked pull request and no activity for alarm_stall_hours gets one request-for-owner comment and a daily digest issue in alarm_digest_repo (chains alarm_depth_priority+ levels deep first); a tick runs the scan at most every alarm_interval_minutes and bounds it to alarm_max_nodes issue reads. Override the whole file with AI_BLOCKER_WATCH_CONFIG.",
+  "_comment": "ai-blocker-watch settings. repos: every u2giants/* and popcre/* repo with an issue or PR opened in the last 90 days (audited 2026-09-17; archived and zero-activity repos excluded; u2giants/shared-db renamed to popcre/shared-db 2026-09-18, shared-db #2530) — re-audit when repos change. propagate_on_host: the ONE machine (hostname) that scans and posts blocker comments, maintains blocked-by links, and runs the unowned-blocker alarm; every other machine still wakes its own sessions, so N machines never post N copies of a comment. Absent key = act here (single-machine installs). harness: how a waiting session is resumed; {session}, {cwd}, {prompt}, {home} and {zcode_builtin} (newest ZCode provider runtime file) are substituted per argument. ZCode headless needs a one-time CLI sign-in (zcode.cjs login) before its wakes succeed — on Windows copy the full login URL from the terminal, because auto-open truncates it at '&'. alarm_*: the unowned-blocker alarm — an open issue blocking another open issue with no assignee, no `owner:` line, no open linked pull request and no activity for alarm_stall_hours gets one request-for-owner comment and a daily digest issue in alarm_digest_repo (chains alarm_depth_priority+ levels deep first); a tick runs the scan at most every alarm_interval_minutes and bounds it to alarm_max_nodes issue reads. links_*: blocked-by link maintenance (#596) — a tick at most every links_interval_minutes reads OPEN issues in repos, parses each db-work-scope fence's depends_on: line (same-repo issue numbers), and records any missing native blocked-by link; a malformed fence is skipped and counted, never a failure. Override the whole file with AI_BLOCKER_WATCH_CONFIG.",
   "repos": [
     "popcre/shared-db",
-    "u2giants/shared-db",
     "u2giants/popdam3",
     "u2giants/ansible",
     "u2giants/popcrm-web",
@@ -33,6 +32,8 @@
   "alarm_depth_priority": 3,
   "alarm_digest_repo": "popcre/ai-devops",
   "alarm_max_nodes": 40,
+  "links_enabled": true,
+  "links_interval_minutes": 60,
   "harness": {
     "claude": [
       "claude",
