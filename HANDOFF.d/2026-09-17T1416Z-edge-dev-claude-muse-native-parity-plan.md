@@ -21,13 +21,22 @@ durable-store deletion hygiene), live-qualify the engine, update shared-db's
 
 ## Next exact action
 
-Phase B (first-party catalog truth), in a fresh session and worktree under
-`ai-task-gates start --class reviewer-safety`: B1 doctor catalog checks, B2
-catalog-priced estimate in the `muse-code` adapter, B3 tests — all per the
-plan's §9 Phase B. Phase A landed as PR #554 (merge `8e1426f5`). Before
-editing `bin/ai-muse`, re-check whether
-`claude/muse-cred-lock-wait-20260917` (PR #540) has landed and cut the worktree
-from the then-current `origin/main`.
+Phase C (native extras), in a fresh session and worktree under
+`ai-task-gates start --class reviewer-safety`: C1 `AI_MUSE_REASONING_EFFORT`
+support in `run_turn` (validate against the catalog's
+`reasoning_effort_variants` when readable, refuse unknown tiers before any
+provider contact, record the effective tier in `retained_turn`, args
+byte-identical when unset) and C2 deletion hygiene
+(`muse_code_delete_session` also removes the date-bucketed durable dir with
+the same enter-verified-parent discipline) — all per the plan's §9 Phase C.
+Phases A and B have landed: A as PR #554 (merge `8e1426f5`), B as PR #574
+(merge `85df6d6e`; independent Grok 4.6 exact-head APPROVE, Codex quota
+exhausted and the Claude reviewer account no longer exists — owner, chat
+2026-09-18). For the pre-merge independent review use an available reviewer
+(`bin/ai-grok-review` is proven; `ai-qwen` carries `--governed-verdict`), pin
+the packet base with `--base <origin/main SHA>` so a concurrent fetch cannot
+invalidate it, and keep the `--tests` command fast (the unit suite, not a
+20-minute shell suite).
 
 ## Decisions only the owner can make
 
