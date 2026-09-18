@@ -11,8 +11,9 @@
 | 1. Confirm Jev is real, and what it actually guarantees | ✅ complete | 2026-09-18 | Section 3 below |
 | 2. Register the API key reference (no value in the repository) | ⏸ blocked | 2026-09-18 | `config/mcp.env.example` line added but commented out; needs the exact 1Password item title and field label |
 | 3. Reachability probe from one machine | ⬜ not started | — | — |
-| 4. Shadow-mode evaluation on completion-honesty checks | ⬜ not started | — | — |
-| 5. Go/no-go on promoting any check to enforcing | ⬜ not started | — | — |
+| 4a. Track A: confirm upstream #33/#34 landed, then single-machine compaction trial | ⬜ not started | — | — |
+| 4b. Track B: shadow-mode evaluation on completion-honesty checks | ⬜ not started | — | — |
+| 5. Go/no-go per track on promoting anything to enforcing | ⬜ not started | — | — |
 
 **Workstream state:** evaluation only. Nothing in this plan authorizes Jev to
 decide anything in the reviewer safety path, a task gate, or the shared-db
@@ -70,15 +71,76 @@ question and returns a value.
 
 ## 4. Where it fits this toolkit, and where it must not
 
-**Candidate uses, in order of safety:**
+Three candidate tracks. They are **independent, not ranked against each
+other** — they share one API key, one vendor relationship, and this plan, but
+they touch unrelated parts of the system and can proceed in parallel. Track A
+is sequenced first only because it pays off soonest and cannot corrupt a
+decision; that is an ordering argument, not a reason to drop the others.
 
-1. **Completion-honesty checks** (`plan_completion-honesty-enforcement.md`).
-   "Does this turn claim completion without naming installed evidence?" is a
-   textbook `Noul` question. A wrong answer costs one redundant human look.
-   This is the only use that should be prototyped first.
-2. **Reviewer and gate routing.** "Does this change set touch the reviewer
-   safety path?", "which task class does this work actually belong to?" —
-   `Noul` and `Choice` respectively. Higher value, higher blast radius.
+### Track A — context compaction (`fast-jev-compaction`)
+
+A third-party Claude Code plugin and npm package
+(https://github.com/tamaratran/fast-jev-compaction, MIT) that replaces Claude
+Code's built-in compaction. Rather than summarising old turns, it asks Jev to
+score every tool call and tool result, then deletes or truncates the stale
+ones and leaves everything it keeps **verbatim**. User and assistant text is
+never rewritten.
+
+Two reasons this fits measured reality in this repository:
+
+- `docs/ai-spend-waste-analysis-2026-09-04.md` measured that tool traffic is
+  most of what accumulates (52.5% of Claude characters, 70% of Codex
+  characters; worst single offender `sed`, 3,435 calls, 78% of its output
+  oversized), and that turns past 200 were 40% of activity but 66% of input
+  tokens. Stale tool output in long sessions is exactly what this deletes.
+- Delete-or-keep-verbatim is structurally safer than summarisation for a
+  repository whose gates demand named evidence. A summary can silently lose an
+  exact error string, a file path, or a failing command; this cannot rewrite
+  them, only drop them whole.
+
+**Risk and its mitigation.** The failure mode is quiet: a misjudgement drops
+something needed, with no error, and the session simply forgets a constraint.
+The mitigation is a high confidence floor, applied in the safe direction —
+**delete only on high confidence that an item is stale; retain on any
+uncertainty.** The inverse framing ("keep only when confident it matters")
+uses the same number and deletes everything uncertain. This is not
+hypothetical: upstream issue #30 is "Reject keep thresholds that discard even
+a certain keep decision," so threshold handling there has already been wrong
+in that exact direction. Read the setting, do not assume it.
+
+A confidence floor is only worth its number if the model is calibrated on
+*our* traffic. Vendor calibration claims are unbenchmarked. Verify against the
+transcript archive rather than assuming: replay real sessions, apply the
+threshold, and check whether the deletions above the floor were in fact safe.
+
+**Maturity, as of 2026-09-18.** 2.2k stars, roughly 30 commits. Open issues
+cover unbounded concurrent Jev requests (#33), no request deadline or caller
+cancellation (#34), an auto-compaction lock acquired too late (#35), logging
+failures breaking the fallback path (#36), and malformed-answer and
+control-flow race handling (PR #28). `AGENTS.md` requires bounded, rate-limited
+outbound calls, so #33 and #34 are not cosmetic here. Confirm both have landed
+before installing; otherwise pin a commit that has them, or wait.
+
+**Trial scope:** one machine (`edge-dev`, which is where the spend measurement
+came from, so there is a real baseline to compare against). Not installed by
+`ai-install-skills`, not added to managed config, nothing committed that other
+machines pick up. A wider rollout is a separate decision with its own
+evidence.
+
+### Track B — completion-honesty checks
+
+`plan_completion-honesty-enforcement.md`. "Does this turn claim completion
+without naming installed evidence?" is a textbook `Noul` question. A wrong
+answer costs one redundant human look, which is why this is the first
+*decision* use to prototype. Shadow mode first: it runs alongside the existing
+check and records agreement and disagreement only.
+
+### Track C — reviewer and gate routing
+
+"Does this change set touch the reviewer safety path?" (`Noul`), "which task
+class does this work actually belong to?" (`Choice`). Higher value than Track
+B, and higher blast radius. Not before Track B has produced shadow-mode
+evidence.
 
 **Excluded, permanently:**
 
