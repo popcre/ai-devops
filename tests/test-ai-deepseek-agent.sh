@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -u
-# Offline fixtures must not inherit a live key or a credential re-entry marker.
-unset DEEPSEEK_API_KEY AI_DEEPSEEK_REEXEC AI_DEEPSEEK_SECRET_FD
+# Offline fixtures must not inherit a live key, a credential re-entry marker,
+# or an ambient model override: the suite must control the model everywhere.
+unset DEEPSEEK_API_KEY AI_DEEPSEEK_REEXEC AI_DEEPSEEK_SECRET_FD DEEPSEEK_MODEL
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-deepseek-agent"
 PASS=0; FAIL=0; SKIP=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
@@ -122,6 +123,32 @@ check "live doctor ignores an ambient session ID" "ID=ambient-session DEEPSEEK_S
 check "doctor rejects unknown options" "! run doctor --unknown"
 check "zero provider timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CALL_TIMEOUT=0 run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "nonnumeric connect timeout is rejected before contact" "calls=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! AI_DEEPSEEK_CONNECT_TIMEOUT=nope run doctor --live; test \"\$calls\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+# Model and operand guards run after the doctor byte-state checks, which assert
+# no session storage exists yet; the sends below create it.
+MODEL_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+check "invalid --model is refused with no provider call" "! run send model-check --model deepseek-reasoner >'$TMP/model-flag.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/model-flag.out' && grep -q 'deepseek-flash and deepseek-v4-pro' '$TMP/model-flag.out' && test '$MODEL_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "invalid DEEPSEEK_MODEL is refused with no provider call" "! DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run send model-check >'$TMP/model-env.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/model-env.out' && test '$MODEL_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "valid --model override still reaches the provider" "DEEPSEEK_STUB_REQUEST='$TMP/model-override-request.json' run send model-check --model deepseek-v4-pro >/dev/null && jq -e '.model==\"deepseek-v4-pro\"' '$TMP/model-override-request.json' && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((MODEL_CALLS+1))'"
+OP_ARGS_MODEL_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
+check "invalid --model is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' bash '$SCRIPT' send model-check --model deepseek-reasoner 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+check "invalid DEEPSEEK_MODEL is refused before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_MODEL=deepseek-reasoner bash '$SCRIPT' send model-check 2>/dev/null && test '$OP_ARGS_MODEL_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+OPERAND_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+check "--model with a missing operand is refused with usage" "! run send operand-check --model >'$TMP/operand-model.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-model.out' && grep -q 'Usage:' '$TMP/operand-model.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "--file with a missing operand is refused with usage" "! run send operand-check --file >'$TMP/operand-file.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-file.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "--system with a missing operand is refused with usage" "! run send operand-check --system >'$TMP/operand-system.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-system.out' && test '$OPERAND_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+OPERAND_ID="$(run send operand-fixture | sed -n 's/^SESSION_ID: //p')"
+check "reply --file with a missing operand is refused with usage" "! run reply '$OPERAND_ID' operand-check --file >'$TMP/operand-reply-file.out' 2>&1 && grep -q 'requires a non-empty value' '$TMP/operand-reply-file.out' && grep -q 'Usage:' '$TMP/operand-reply-file.out'"
+check "--model= with an invalid slug is refused with no provider call" "EQ_CALLS=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! run send eq-check --model=deepseek-reasoner >'$TMP/eq-invalid.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/eq-invalid.out' && test \"\$EQ_CALLS\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "--model= sets the model like the space form" "DEEPSEEK_STUB_REQUEST='$TMP/eq-model-request.json' run send eq-check --model=deepseek-v4-pro >/dev/null && jq -e '.model==\"deepseek-v4-pro\"' '$TMP/eq-model-request.json'"
+printf 'eq-form evidence\n' > "$TMP/eq-evidence.txt"
+check "--file= and --system= assign like the space forms" "DEEPSEEK_STUB_REQUEST='$TMP/eq-form-request.json' run send eq-forms --system=\"eq system prompt\" --file='$TMP/eq-evidence.txt' >/dev/null && jq -e '.messages[0].role==\"system\" and .messages[0].content==\"eq system prompt\" and (.messages[1].content|contains(\"eq-form evidence\"))' '$TMP/eq-form-request.json'"
+check "list and show ignore an invalid ambient model" "DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run list >/dev/null && DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run show '$OPERAND_ID' >/dev/null"
+check "help ignores an invalid ambient model" "DEEPSEEK_MODEL=DeepSeek-V4.1-Flash bash '$SCRIPT' --help"
+check "offline doctor ignores an invalid ambient model" "DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run doctor | grep -q 'bounded provider timeout'"
+check "reply refuses an invalid ambient model before any provider call" "REPLY_ENV_CALLS=\$(wc -l < '$DEEPSEEK_CURL_ARGS'); ! DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run reply '$OPERAND_ID' invalid-env >'$TMP/reply-invalid.out' 2>&1 && grep -q 'unsupported DeepSeek model' '$TMP/reply-invalid.out' && test \"\$REPLY_ENV_CALLS\" -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+INVALID_ENV_OUT="$(AI_DEEPSEEK_TEST_LEDGER_FAILURE=publish run send invalid-env-fixture 2>&1)"
+INVALID_ENV_ID="$(printf '%s\n' "$INVALID_ENV_OUT" | sed -n 's/^Retained turn session: //p')"
+check "finalize recovers a retained paid turn under an invalid ambient model" "test -n '$INVALID_ENV_ID' && DEEPSEEK_MODEL=DeepSeek-V4.1-Flash run finalize '$INVALID_ENV_ID' >/dev/null 2>&1 && test ! -e '$TMP/repo/.ai/deepseek-sessions/$INVALID_ENV_ID.recovery-required'"
 SESSION="$(run send first | sed -n 's/^SESSION_ID: //p')"
 check "missing provider usage remains unknown" "jq -e '.counters.input==null and .counters.cost==null and .completeness==\"partial\"' '$TMP/repo/.ai/deepseek-sessions/$SESSION.usage.jsonl'"
 DEEPSEEK_STUB_USAGE='{"prompt_tokens":10,"prompt_cache_hit_tokens":0,"completion_tokens":3,"total_tokens":13}' run reply "$SESSION" measured >/dev/null
@@ -388,18 +415,18 @@ check "split packets attach the complete patch" "jq -e '.source_attached_files|a
 IDENTITY_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 IDENTITY_HASH="$(sha256sum "$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json" | cut -d' ' -f1)"
 check "formal continuation refuses changed caller before provider contact" "! AI_DEEPSEEK_CALLER=another-caller run reply '$SOURCE_ID' changed-caller --review >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
-check "formal continuation refuses changed model without altering the paid transcript" "! DEEPSEEK_MODEL=deepseek-reasoner run reply '$SOURCE_ID' changed-model --review >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_HASH' = \"\$(sha256sum '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json' | cut -d' ' -f1)\" && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "formal continuation refuses changed model without altering the paid transcript" "! DEEPSEEK_MODEL=deepseek-v4-pro run reply '$SOURCE_ID' changed-model --review >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_HASH' = \"\$(sha256sum '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.json' | cut -d' ' -f1)\" && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 cp "$SOURCE_META" "$TMP/original-meta.json"
 jq 'del(.model)' "$SOURCE_META" > "$TMP/legacy-meta.json"; cp "$TMP/legacy-meta.json" "$SOURCE_META"
 check "legacy formal identity is not invented from the current model setting" "! run reply '$SOURCE_ID' legacy --review >'$TMP/identity.out' 2>&1 && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 cp "$TMP/original-meta.json" "$SOURCE_META"
-check "ordinary conversations preserve model selection across process restarts" "DEEPSEEK_MODEL=deepseek-reasoner DEEPSEEK_STUB_REQUEST='$TMP/plain-model-request.json' run reply '$SESSION' ordinary-model >/dev/null && jq -e '.model==\"deepseek-reasoner\"' '$TMP/plain-model-request.json'"
-check "default model is pinned to deepseek-flash (DeepSeek V4.1 Flash)" "DEEPSEEK_STUB_REQUEST='$TMP/pinned-model-request.json' run send pinned-default >/dev/null && jq -e '.model==\"deepseek-flash\"' '$TMP/pinned-model-request.json'"
+check "ordinary conversations preserve model selection across process restarts" "DEEPSEEK_MODEL=deepseek-v4-pro DEEPSEEK_STUB_REQUEST='$TMP/plain-model-request.json' run reply '$SESSION' ordinary-model >/dev/null && jq -e '.model==\"deepseek-v4-pro\"' '$TMP/plain-model-request.json'"
+check "default model is pinned to deepseek-flash (DeepSeek V4.1 Flash)" "( unset DEEPSEEK_MODEL; export DEEPSEEK_STUB_REQUEST='$TMP/pinned-model-request.json'; run send pinned-default ) >/dev/null && jq -e '.model==\"deepseek-flash\"' '$TMP/pinned-model-request.json'"
 IDENTITY_HEAD="$(git -C "$TMP/repo" rev-parse HEAD)"
 AI_DEEPSEEK_CALLER=codex DEEPSEEK_STUB_REPLY=$'Findings.\nVERDICT: APPROVE '"$IDENTITY_HEAD" run send identity-governed --review --governed-verdict "$IDENTITY_HEAD" > "$TMP/identity-gov.out" 2> "$TMP/identity-gov.err"
 IDENTITY_GOV="$(sed -n 's/^SESSION_ID: //p' "$TMP/identity-gov.err")"; IDENTITY_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 check "governed caller change refuses before submission" "test -n '$IDENTITY_GOV' && ! AI_DEEPSEEK_CALLER=claude run reply '$IDENTITY_GOV' changed --review --governed-verdict '$IDENTITY_HEAD' >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
-check "governed model change refuses before submission" "! AI_DEEPSEEK_CALLER=codex DEEPSEEK_MODEL=deepseek-reasoner run reply '$IDENTITY_GOV' changed --review --governed-verdict '$IDENTITY_HEAD' >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+check "governed model change refuses before submission" "! AI_DEEPSEEK_CALLER=codex DEEPSEEK_MODEL=deepseek-v4-pro run reply '$IDENTITY_GOV' changed --review --governed-verdict '$IDENTITY_HEAD' >'$TMP/identity.out' 2>&1 && grep -q review-identity-mismatch '$TMP/identity.out' && test '$IDENTITY_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "exact governed identity continues in a fresh wrapper process" "AI_DEEPSEEK_CALLER=codex DEEPSEEK_STUB_REPLY=\$'Follow-up.\\nVERDICT: APPROVE $IDENTITY_HEAD' run reply '$IDENTITY_GOV' unchanged --review --governed-verdict '$IDENTITY_HEAD' >'$TMP/identity.out' && tail -1 '$TMP/identity.out' | grep -qx 'VERDICT: APPROVE $IDENTITY_HEAD'"
 SOURCE_MOVE_LOG="$TMP/source-move.log"
 set +e
