@@ -85,9 +85,15 @@ cd /worksp/ai-devops
    reviewers that were drawn but never started, and drawing the replacement
    needs this machine's `ai-review-preflight` and reviewer wrappers. Its state
    and `tick.log` live in `~/.ai-devops/reviewer-start-watch`.
-9. Records exact source, config schema, owned symlinks, config files, managed
-   skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
-10. Runs `ai-devops doctor`.
+9. Schedules the shared-db worktree reap (optional stage): one marked,
+   idempotent `ai-reap-shared-db-worktrees schedule` registration per platform
+   (Task Scheduler on Windows, user crontab elsewhere), so merged shared-db
+   worktrees retire themselves daily on every agent machine. Machines without a
+   shared-db checkout schedule the sweep anyway; the run exits 0 with nothing
+   to reap until one appears. All safety refusals live in shared-db's reaper.
+10. Records exact source, config, owned symlinks, config files, managed
+    skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
+11. Runs `ai-devops doctor`.
 
 Recovery-critical WinGet, npm/MCP, and model versions are governed by
 `config/tool-versions.json`. The install and Windows bootstrap paths use those

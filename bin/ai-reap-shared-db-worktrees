@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# Scheduled retirement of shared-db worktrees whose work already merged.
+#
+# WHY THIS EXISTS (Albert, 2026-09-18): sessions create isolated worktrees for
+# shared-db work and retire them at wrap-up — but a session that dies mid-run
+# never comes back, and every later session is correctly told not to touch
+# somebody else's worktree. The measured result on al8960ofc was 29 worktrees,
+# 12 of them on branches whose pull requests had already merged. shared-db
+# already owns the safe reaper (scripts/reap-merged-worktrees.mjs); what was
+# missing is anybody scheduled to RUN it. This wrapper is that schedule, in the
+# same cross-platform shape as ai-blocker-watch: one `schedule` subcommand
+# registers a marked, idempotent Task Scheduler job on Windows or a marked
+# user crontab entry on Linux/macOS, so every machine install gets it and
+# every agent on that machine (ZCode, Claude, Codex) benefits — the reaper is
+# plain git machinery and knows nothing about which agent made a worktree.
+#
+# SAFETY IS THE REAPER'S, NOT THIS WRAPPER'S. The underlying script is dry-run
+# by default and this wrapper passes --apply ONLY from the scheduled path; the
+# reaper still refuses every dirty, locked, detached or unpushed worktree,
+# never touches the main checkout, asks GitHub whether the PULL REQUEST merged
+# (never git ancestry), and holds any worktree named by an open db-claim or
+# showing fresh filesystem activity. A refusal from it is the system working.
+#
+# Exit codes of a SCHEDULED run: 0 when the sweep ran (including "kept
+# everything for safety" — that is the correct outcome, not a failure), and
+# non-zero only when the sweep could not run at all (no node, script missing,
+# hard read failure), so Task Scheduler's history shows real breakage while
+# safety refusals simply retry on the next run.
+#
+# Usage:
+#   ai-reap-shared-db-worktrees run [--dry-run]   # sweep now (dry run by flag)
+#   ai-reap-shared-db-worktrees schedule          # install the periodic task
+#   ai-reap-shared-db-worktrees unschedule        # remove it
+#   ai-reap-shared-db-worktrees status            # checkout, schedule, log tail
+#
+# Override the checkout with AI_SHARED_DB_CHECKOUT; the candidate list and the
+# daily time live in config/worktree-reap.json.
+set -u
+
+_self="${BASH_SOURCE[0]}"
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
+HOME_DIR="${HOME:?HOME is unavailable}/.ai-devops/worktree-reap"
+CONFIG="${AI_WORKTREE_REAP_CONFIG:-$TOOL_ROOT/config/worktree-reap.json}"
+REPO_SLUG_DEFAULT='popcre/shared-db'
+
+mkdir -p "$HOME_DIR"
+note(){ printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+die(){ note "::error::$*"; exit 2; }
+cfg(){ [ -f "$CONFIG" ] && jq -r "$1 // empty" "$CONFIG" 2>/dev/null || true; }
+
+# --- locate the shared-db checkout ------------------------------------------
+# Machine-specific paths live in the private machine atlas, not in this public
+# repo, so resolution is: explicit env override, then the reviewed candidate
+# list from config, then common conventions. A machine with no shared-db
+# checkout simply has nothing to reap.
+find_checkout(){
+  local candidate
+  if [ -n "${AI_SHARED_DB_CHECKOUT:-}" ]; then
+    [ -d "${AI_SHARED_DB_CHECKOUT}/scripts" ] && { printf '%s' "$AI_SHARED_DB_CHECKOUT"; return 0; }
+    return 1
+  fi
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    [ -f "$candidate/scripts/reap-merged-worktrees.mjs" ] && { printf '%s' "$candidate"; return 0; }
+  done < <(jq -r '.checkout_candidates[]' "$CONFIG" 2>/dev/null; printf '%s\n' "$HOME/repos/shared-db" /worksp/shared-db /c/repos/shared-db)
+  return 1
+}
+
+reap_script(){ printf '%s/scripts/reap-merged-worktrees.mjs' "$1"; }
+
+# --- run ----------------------------------------------------------------------
+cmd_run(){
+  local checkout script rc log="$HOME_DIR/reap.log"
+  checkout="$(find_checkout)" || { note "no shared-db checkout found (set AI_SHARED_DB_CHECKOUT if this machine has one); nothing to reap"; return 0; }
+  script="$(reap_script "$checkout")"
+  [ -f "$script" ] || die "checkout at $checkout has no scripts/reap-merged-worktrees.mjs — update the checkout or point AI_SHARED_DB_CHECKOUT at a current one"
+  command -v node >/dev/null 2>&1 || die "node is not on PATH; the reaper cannot run"
+  local mode="apply"
+  [ "${1:-}" = "--dry-run" ] && mode="dry-run"
+  {
+    note "run start ($mode, checkout $checkout)"
+    if [ "$mode" = apply ]; then
+      node "$script" --apply; rc=$?
+    else
+      node "$script"; rc=$?
+    fi
+    # rc 0: swept (or dry run). rc 1: the reaper's SAFE refusal — an orchestrator
+    # is active and open claims were unreadable, so it removed nothing. That is
+    # the sweep doing its job; the next run retries. Anything else is real
+    # breakage and must surface in the task history.
+    if [ "$rc" -eq 0 ]; then
+      note "run end: swept cleanly"
+      exit 0
+    elif [ "$rc" -eq 1 ]; then
+      note "run end: reaper refused for safety (kept everything); next run retries"
+      exit 0
+    else
+      note "run end: reaper FAILED with exit $rc"
+      exit "$rc"
+    fi
+  } >> "$log" 2>&1
+}
+
+# --- schedule / unschedule (the ai-blocker-watch shape, verbatim discipline) --
+TASK_NAME='ai-devops\worktree-reap'
+CRON_MARKER='# ai-devops worktree-reap (managed by ai-reap-shared-db-worktrees schedule; unschedule removes)'
+daily_at="$(cfg '.daily_at')"; [ -n "$daily_at" ] || daily_at='03:23'
+cron_job_line(){
+  local minute hour; minute="${daily_at#*:}"; hour="${daily_at%%:*}"
+  printf '%s %s * * * %s run >> %s 2>&1' "$minute" "$hour" "'$TOOL_ROOT/bin/ai-reap-shared-db-worktrees'" "'$HOME_DIR/reap.log'"
+}
+cmd_schedule(){
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    local bash_exe
+    bash_exe="$(cygpath -w "$(command -v bash)")"; local self; self="$(cygpath -m "$TOOL_ROOT/bin/ai-reap-shared-db-worktrees")"
+    # conhost --headless keeps a console window from flashing every run.
+    # /F re-points an existing task, so rerunning the installer stays safe.
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC DAILY /ST "$daily_at" /TN "$TASK_NAME" \
+      /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' run >> ~/.ai-devops/worktree-reap/reap.log 2>&1\"" >/dev/null \
+      || die "schtasks refused the worktree-reap task"
+    note "scheduled daily at $daily_at as $TASK_NAME"
+    return
+  fi
+  command -v crontab >/dev/null 2>&1 || die "schedule needs schtasks (Windows) or crontab (Linux/macOS); neither is available"
+  local tmp; tmp="$(mktemp)"
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "ai-reap-shared-db-worktrees' run" || :; } >> "$tmp"
+  printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >> "$tmp"
+  local rc=0; crontab "$tmp" || rc=$?; rm -f "$tmp"
+  [ "$rc" -eq 0 ] || die "crontab refused the worktree-reap entry"
+  note "scheduled daily at $daily_at in the user crontab"
+}
+cmd_unschedule(){
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Delete /F /TN "$TASK_NAME" >/dev/null; note "removed $TASK_NAME"; return
+  fi
+  command -v crontab >/dev/null 2>&1 || die "unschedule needs schtasks (Windows) or crontab"
+  local tmp; tmp="$(mktemp)"
+  { crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | grep -vF "ai-reap-shared-db-worktrees' run" || :; } > "$tmp"
+  local rc=0; crontab "$tmp" || rc=$?; rm -f "$tmp"
+  [ "$rc" -eq 0 ] || die "crontab refused the removal"
+  note "removed the worktree-reap crontab entry"
+}
+cmd_status(){
+  local checkout
+  if checkout="$(find_checkout)"; then note "checkout: $checkout"; else note "checkout: none found (set AI_SHARED_DB_CHECKOUT if this machine has one)"; fi
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Query /TN "$TASK_NAME" >/dev/null 2>&1 && note "schedule: $TASK_NAME (Task Scheduler)" || note "schedule: not installed"
+  elif command -v crontab >/dev/null 2>&1; then
+    crontab -l 2>/dev/null | grep -Fq "$CRON_MARKER" && note "schedule: user crontab" || note "schedule: not installed"
+  else
+    note "schedule: neither schtasks nor crontab available"
+  fi
+  [ -f "$HOME_DIR/reap.log" ] && { echo '--- last run ---'; tail -6 "$HOME_DIR/reap.log"; }
+}
+
+case "${1:-run}" in
+  run) shift; cmd_run "${1:-}" ;;
+  schedule) cmd_schedule ;;
+  unschedule) cmd_unschedule ;;
+  status) cmd_status ;;
+  -h|--help|help) sed -n '2,35p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command; see ai-reap-shared-db-worktrees --help" ;;
+esac
