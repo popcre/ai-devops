@@ -216,7 +216,8 @@ lnodes "[$(lnode 20 220 "$(fence 7)" '[7]'), $(lnode 7 207 'gate bug' '[]')]"
 check 'a present link is left alone' "BW tick && [ ! -f '$FAKE/links' ]"
 
 : > "$FAKE/calls"; rm -f "$FAKE/links" "$TMP/home/last-links"
-lnodes "[$(lnode 21 221 "$(fence soon)" '[]'), $(lnode 22 222 'two fences ```db-work-scope
+lnodes "[$(lnode 21 221 "$(fence soon)" '[]'), $(lnode 22 222 'two fences
+```db-work-scope
 depends_on: 7
 ```
 ```db-work-scope
@@ -247,6 +248,9 @@ jq '.links_enabled=false' "$TMP/config.json" > "$TMP/config-nolinks.json"
 check 'a disabled links config refuses a standalone run' "! AI_BLOCKER_WATCH_CONFIG='$TMP/config-nolinks.json' BW links"
 gate_before="$(grep -c databaseId "$FAKE/calls")"
 ll_gate="$(cat "$TMP/home/last-links" 2>/dev/null || printf none)"
+# The standalone run above created $FAKE/links; remove it so absence below
+# proves the foreign host posted nothing.
+rm -f "$FAKE/links"
 check 'a foreign host neither reads nor posts links' "AI_BLOCKER_WATCH_CONFIG='$TMP/config-foreign.json' BW links && [ \"\$(grep -c databaseId '$FAKE/calls')\" = \"\$gate_before\" ] && [ ! -f '$FAKE/links' ] && [ \"\$(cat "$TMP/home/last-links")\" = \"\$ll_gate\" ]"
 touch "$FAKE/fail"
 check 'an unreachable GitHub fails the links run and writes no clock' "! BW links && [ \"\$(cat "$TMP/home/last-links")\" = \"\$ll_gate\" ]"
