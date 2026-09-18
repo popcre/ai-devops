@@ -10,13 +10,13 @@ Companion handoff: [`HANDOFF.d/2026-09-17T1804Z-edge-dev-codex-windows-runner-ma
 | 1. Freeze the contract and threat model | ✅ complete | 2026-09-17 | Locked schemas and hostile case names are executable in `tests/test-windows-runner-maintenance.ps1`. |
 | 2. Build the protected installer and payload | ✅ complete | 2026-09-17 | Installer, worker and policy exist; rerun the focused maintenance test for the protected-copy, task and lifecycle contract. |
 | 3. Build the unprivileged request client | ✅ complete | 2026-09-17 | Client exposes only `refresh-qualification`; rerun the focused maintenance test for schema, result and timeout coverage. |
-| 4. Add hostile offline tests and operating documentation | 🟨 verification incomplete | 2026-09-17 | Focused maintenance 43/43, qualification guard, Windows scripts 47/47, reachability and context audit pass. The permitted full local matrix hit host resource exhaustion in `test-ai-codex-review.sh`: `CreateFileMapping ... Win32 error 1455`; use PR CI for the complete clean-host result. |
-| 5. Obtain exact-head independent security approval and land | ⬜ open | 2026-09-17 | Protected gate; no review or implementation PR exists. |
+| 4. Add hostile offline tests and operating documentation | 🟨 verification incomplete | 2026-09-17 | Focused maintenance 43/43, qualification guard, Windows scripts 48/48, workflow policy, reachability and context audit re-ran green on the rebased branch. The permitted full local matrix hit host resource exhaustion in `test-ai-codex-review.sh`: `CreateFileMapping ... Win32 error 1455`; PR #560's required checks on the exact reviewed head are the complete clean-host result. |
+| 5. Obtain exact-head independent security approval and land | 🟨 in progress | 2026-09-17 | Implementation PR #560 is open on `codex/issue-262-phase-a-0917`, rebased onto current `origin/main`. Protected gate still applies: one read-only exact-head security APPROVE naming the reviewed head, then merge through the queue and verify the commit on `origin/main`. |
 | 6. Install and prove `edge-dev-win` | ⬜ open | 2026-09-17 | Protected live-host gate; not authorized by this planning PR. |
 | 7. Install and prove `EDGE-RUNN-ENVY` | ⬜ open | 2026-09-17 | Protected live-host gate; not authorized by this planning PR. |
 | 8. Reconcile evidence, rollback readiness, and issue closure | ⬜ open | 2026-09-17 | Close only after both independent host proofs pass. |
 
-Fresh-session starting point: **Step 4 verification**. Resolve the full clean-host matrix first, then obtain exact-head independent security approval in Step 5; do not install on either host in that session.
+Fresh-session starting point: **Step 5 landing**. The full clean-host matrix resolves through PR #560's required checks on the exact reviewed head. Obtain the exact-head independent security APPROVE, merge through the queue, and verify the merge commit on `origin/main`; do not install on either host in that session.
 
 ## 1. The ultimate goal
 
