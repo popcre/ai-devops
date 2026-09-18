@@ -122,7 +122,7 @@ try {
   Case 'Runtime_VerifiedBeforeEnumerationAndDelete' { Assert-True ($worker.IndexOf('Test-RuntimeBoundary -ExpectedOperatorSid ([string]$policy.operator_sid)') -gt 0 -and $worker.IndexOf('Test-RuntimeBoundary -ExpectedOperatorSid ([string]$policy.operator_sid)') -lt $worker.IndexOf('Get-ChildItem -LiteralPath $requests')) 'runtime boundary not verified before enumeration'; Assert-Contains $worker '$requestsNow' }
   Case 'Ledger_OnlyCanonicalGuidsAndExactMatch' { Assert-Contains $worker '-SimpleMatch -Quiet -Pattern ('; Assert-Contains $worker '"request_id":"'; Assert-Contains $worker '$id -cmatch' }
   Case 'Installer_RefusesPerUserComOverride' { Assert-True (@([regex]::Matches($installer, 'Assert-NoPerUserComOverride')).Count -ge 3) 'installer COM use is not guarded' }
-  Case 'BackupPath_MustBeAdminControlled' { Assert-Contains $installer 'Recovery backup path must be absolute and outside user profiles.' }
+  Case 'BackupPath_MustBeAdminControlled' { Assert-Contains $installer 'Recovery backup path must be absolute.' }
   Case 'ChildArguments_ArePreQuoted' { Assert-Contains $worker '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File ' }
   Case 'Worker_ModulePinUsesNoCommand' { Assert-True (-not $worker.Contains('(Join-Path ' + [char]36 + 'PSHOME')) 'module pin still resolves a command'; Assert-Contains $worker '"$PSHOME\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules"' }
   Case 'Launcher_PinsComspecBeforeClearing' { Assert-True ($launcher.IndexOf('set "COMSPEC=C:\Windows\System32\cmd.exe"') -ge 0 -and $launcher.IndexOf('set "COMSPEC=C:\Windows\System32\cmd.exe"') -lt $launcher.IndexOf('for /f')) 'COMSPEC not pinned before the clear loop'; Assert-Contains $launcher 'C:\Windows\System32\findstr.exe /r /c:"^[A-Za-z0-9_-]*="' }
@@ -133,6 +133,11 @@ try {
   Case 'Backup_IsAdminOwnedAndChecked' { Assert-Contains $installer 'Assert-NoReparsePoint -LiteralPath $Destination'; Assert-Contains $installer '($Destination,''/setowner''' }
   Case 'ComOverride_IncludesVersionedProgIdShadow' { Assert-Contains $worker 'Schedule.Service.1'; Assert-Contains $installer 'Schedule.Service.1' }
   Case 'Installer_SelfHardensAgainstHostileShell' { Assert-Contains $installer '$env:PSModulePath'; Assert-Contains $installer 'hostile code-loading variable' }
+  Case 'Launcher_RefusesCmdAutoRunOverride' { Assert-True ($launcher.IndexOf('reg.exe query "HKCU\Software\Microsoft\Command Processor" /v AutoRun') -ge 0 -and $launcher.IndexOf('reg.exe query') -lt $launcher.IndexOf('for /f')) 'AutoRun refusal must precede the clear loop'; Assert-Contains $launcher 'HKLM\Software\Microsoft\Command Processor' }
+  Case 'Worker_VerifiesWholeEvidenceNeighbourhood' { Assert-Contains $worker 'Test-Path -LiteralPath $evidencePath -PathType Leaf'; Assert-Contains $worker '"$script:EvidencePath.tmp"' }
+  Case 'Worker_RuntimeBoundaryIncludesTemp' { Assert-Contains $worker "Join-Path `$script:RuntimeRoot 'temp'"; Assert-Contains $worker "'temp'" }
+  Case 'RequestId_RejectsReservedDeviceNames' { Assert-Contains $worker '(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])' }
+  Case 'BackupPath_RestrictedToAdminRoots' { Assert-Contains $installer 'must be under an administrator-managed root' }
   Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue

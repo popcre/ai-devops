@@ -249,10 +249,14 @@ script statement runs. Neither a denylist nor a naive clear loop closes the
 class — `FOR /F` spawns its child through `COMSPEC` and cmd re-parses
 substituted names — so the task action launches through `cmd.exe /d`
 (no per-user AutoRun) running the hash-pinned `launch-worker.cmd` from the
-protected payload. That launcher pins `COMSPEC` to the fixed system cmd
-FIRST, then clears only names filtered by the system findstr down to an
-injection-proof character class (names outside the class survive but
-nothing consumes them as configuration keys), then rebuilds a fixed
+protected payload. That launcher first REFUSES to run when any `cmd`
+AutoRun override exists (per-user or system-wide, queried with the
+full-path `reg.exe` before any `FOR /F`, because a child command
+processor without `/d` would execute AutoRun first), then pins `COMSPEC`
+to the fixed system cmd, then clears only names filtered by the system
+findstr down to an injection-proof character class (names outside the
+class survive but nothing consumes them as configuration keys), then
+rebuilds a fixed
 allowlist of well-known literals — including an administrators-only
 `TEMP`/`TMP` under the protected runtime root, so no standard user can
 squat predictable temp names against the elevated host — before the
@@ -287,7 +291,10 @@ not already Administrators/SYSTEM-owned stops installation instead of
 being adopted, so a forged evidence file or a pre-loaded audit trail can
 never be laundered with an administrator ACL. Existing evidence content
 from a manual elevated preflight is preserved, and the worker re-applies
-the contract to both files after every refresh. The runtime `requests`
+the contract to both files after every refresh. The worker verifies the
+evidence gate, its tmp sibling AND their parent directory with the full
+installer contract before every refresh, and the runtime `temp` directory
+is part of the runtime boundary it checks. The runtime `requests`
 directory is re-verified for junctions before enumeration and again
 immediately before each elevated cleanup delete, and removal re-verifies
 ownership and shape immediately before every elevated recursive delete

@@ -364,10 +364,14 @@ function Remove-MaintenanceInstallation {
   }
   if ((Get-InstalledTaskSnapshot).state -eq 'Running') { throw 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before removal.' }
   if ([string]::IsNullOrWhiteSpace($RecoveryPath)) { $RecoveryPath = Join-Path (Split-Path -Parent $script:RuntimeRoot) ('windows-runner-maintenance-recovery-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')) }
-  # The rollback bundle must land in an admin-only location: an arbitrary
-  # supplied path could otherwise direct task XML and payload copies into
-  # an operator-writable location.
-  if (-not [IO.Path]::IsPathRooted($RecoveryPath) -or $RecoveryPath -match '(?i)[\\/]Users[\\/]') { throw 'Recovery backup path must be absolute and outside user profiles.' }
+  # The rollback bundle must land under an administrator-managed root: task
+  # XML and payload copies never go to user profiles, UNC shares, or other
+  # operator-writable locations. The bundle directory itself is additionally
+  # pinned Administrators/SYSTEM-only after creation.
+  if (-not [IO.Path]::IsPathRooted($RecoveryPath)) { throw 'Recovery backup path must be absolute.' }
+  $normalizedRecovery = [IO.Path]::GetFullPath($RecoveryPath)
+  $adminRoots = @('C:\ProgramData\', 'C:\Program Files\', 'C:\Windows\')
+  if (-not @($adminRoots | Where-Object { $normalizedRecovery.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Recovery backup path must be under an administrator-managed root (ProgramData, Program Files or Windows).' }
   Backup-MaintenanceInstallation -Destination $RecoveryPath
   Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false
   # Re-verify immediately before every elevated recursive delete: the

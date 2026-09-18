@@ -3,15 +3,28 @@ rem Hash-pinned elevated launcher (issue #262). The S4U task runs in the
 rem operator's own logon session, so its inherited environment - including
 rem every HKCU\Environment value the non-elevated operator can write - is
 rem hostile input. A denylist cannot close the class, and neither can a
-rem naive clear loop: FOR /F spawns its child through COMSPEC, and cmd
-rem re-parses substituted names, so a hostile variable NAME containing
-rem quotes or ampersands would execute as commands. This launcher
-rem therefore pins COMSPEC to the fixed system cmd FIRST, then clears
-rem only names filtered by the system findstr down to an injection-proof
-rem character class. Names outside that class survive in the environment
-rem but no host or runtime consumes them as configuration keys. Only
-rem after the clear does it rebuild a fixed allowlist of well-known
-rem literals, then start the machine-wide pwsh worker.
+rem naive clear loop: FOR /F spawns its child through COMSPEC (overridable
+rem in HKCU), cmd re-parses substituted names, and a child cmd without /d
+rem runs the per-user AutoRun script first. This launcher therefore:
+rem   1. refuses to run at all when any cmd AutoRun override exists
+rem      (queried with the full-path reg.exe before any FOR /F),
+rem   2. pins COMSPEC to the fixed system cmd,
+rem   3. clears only names filtered by the system findstr down to an
+rem      injection-proof character class - names outside the class survive
+rem      in the environment but no host or runtime consumes them as
+rem      configuration keys,
+rem   4. rebuilds a fixed allowlist of well-known literals,
+rem then starts the machine-wide pwsh worker.
+C:\Windows\System32\reg.exe query "HKCU\Software\Microsoft\Command Processor" /v AutoRun >nul 2>nul
+if not errorlevel 1 (
+  echo REFUSING: per-user cmd AutoRun override exists 1>&2
+  exit /b 1
+)
+C:\Windows\System32\reg.exe query "HKLM\Software\Microsoft\Command Processor" /v AutoRun >nul 2>nul
+if not errorlevel 1 (
+  echo REFUSING: system-wide cmd AutoRun override exists 1>&2
+  exit /b 1
+)
 set "COMSPEC=C:\Windows\System32\cmd.exe"
 for /f "delims==" %%v in ('set ^| C:\Windows\System32\findstr.exe /r /c:"^[A-Za-z0-9_-]*="') do set "%%v="
 set "SystemRoot=C:\Windows"

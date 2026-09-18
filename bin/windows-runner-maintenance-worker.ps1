@@ -104,7 +104,8 @@ function Test-RuntimeBoundary {
     @{ Path = (Join-Path $script:RuntimeRoot 'requests'); Kind = 'requests' },
     @{ Path = (Join-Path $script:RuntimeRoot 'results'); Kind = 'results' },
     @{ Path = (Join-Path $script:RuntimeRoot 'audit.jsonl'); Kind = 'audit' },
-    @{ Path = (Join-Path $script:RuntimeRoot 'processed-requests.jsonl'); Kind = 'ledger' }
+    @{ Path = (Join-Path $script:RuntimeRoot 'processed-requests.jsonl'); Kind = 'ledger' },
+    @{ Path = (Join-Path $script:RuntimeRoot 'temp'); Kind = 'temp' }
   )
   foreach ($part in $parts) {
     $item = Get-Item -LiteralPath $part.Path -Force
@@ -112,14 +113,16 @@ function Test-RuntimeBoundary {
     $acl = Get-Acl -LiteralPath $part.Path
     $ownerSid = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
     if ($ownerSid -notin @('S-1-5-32-544','S-1-5-18')) { throw 'ACL_DRIFT' }
+    $allowed = @('S-1-5-32-544','S-1-5-18',$ExpectedOperatorSid)
+    if ($part.Kind -eq 'temp') { $allowed = @('S-1-5-32-544','S-1-5-18') }
     $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
-    $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18',$ExpectedOperatorSid) })
+    $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin $allowed })
     if ($unexpected.Count -ne 0) { throw 'ACL_DRIFT' }
     foreach ($required in @('S-1-5-32-544','S-1-5-18')) {
       if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $required -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw 'ACL_DRIFT' }
     }
     $operatorRules = @($rules | Where-Object { $_.IdentityReference.Value -eq $ExpectedOperatorSid })
-    if ($part.Kind -eq 'ledger') { if ($operatorRules.Count -ne 0) { throw 'ACL_DRIFT' }; continue }
+    if ($part.Kind -eq 'ledger' -or $part.Kind -eq 'temp') { if ($operatorRules.Count -ne 0) { throw 'ACL_DRIFT' }; continue }
     if ($operatorRules.Count -eq 0) { throw 'ACL_DRIFT' }
     $operatorRights = $operatorRules | ForEach-Object FileSystemRights
     $mayWrite = @($operatorRights | Where-Object { ($_ -band [Security.AccessControl.FileSystemRights]::Write) -or ($_ -band [Security.AccessControl.FileSystemRights]::Delete) -or ($_ -band [Security.AccessControl.FileSystemRights]::ChangePermissions) }).Count -ne 0
@@ -144,26 +147,41 @@ function Assert-NoPerUserComOverride {
 function Test-EvidenceBoundary {
   # The qualification evidence is the TPM/Secure Boot gate consumed by CI,
   # so the worker refuses to refresh it through any path it does not own
-  # outright: a plain file, owned by Administrators/SYSTEM, whose DACL is
-  # exactly the pinned contract. The operator holds NO grant on this file:
-  # the elevated worker and qualification child write through their
-  # Administrators membership, so any operator ACE is treated as drift.
+  # outright. The whole neighbourhood is verified with the installer's
+  # contract: the gate and its tmp sibling must be plain files owned by
+  # Administrators/SYSTEM with exactly the pinned DACL (no operator grant),
+  # and the parent directory must be Administrators/SYSTEM-owned with
+  # Users limited to inherit-only read.
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid)
-  if (-not (Test-Path -LiteralPath $script:EvidencePath -PathType Leaf)) { throw 'ACL_DRIFT' }
-  $item = Get-Item -LiteralPath $script:EvidencePath -Force
-  if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'REPARSE_POINT' }
-  $acl = Get-Acl -LiteralPath $script:EvidencePath
-  $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-  if ($owner -notin @('S-1-5-32-544','S-1-5-18')) { throw 'ACL_DRIFT' }
-  $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
-  $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18','S-1-1-0') })
-  if ($unexpected.Count -ne 0) { throw 'ACL_DRIFT' }
+  $parent = Split-Path -Parent $script:EvidencePath
+  $parentItem = Get-Item -LiteralPath $parent -Force
+  if (($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'REPARSE_POINT' }
+  $parentAcl = Get-Acl -LiteralPath $parent
+  $parentOwner = $parentAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+  if ($parentOwner -notin @('S-1-5-32-544','S-1-5-18')) { throw 'ACL_DRIFT' }
+  $parentRules = @($parentAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+  if (@($parentRules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18','S-1-5-32-545') }).Count -ne 0) { throw 'ACL_DRIFT' }
   foreach ($required in @('S-1-5-32-544','S-1-5-18')) {
-    if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $required -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw 'ACL_DRIFT' }
+    if (-not ($parentRules | Where-Object { $_.IdentityReference.Value -eq $required -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw 'ACL_DRIFT' }
   }
-  $worldRules = @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-1-0' })
-  if ($worldRules.Count -eq 0 -or @($worldRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -ne 0) { throw 'ACL_DRIFT' }
-  if (@($rules | Where-Object { $_.IdentityReference.Value -eq $ExpectedOperatorSid }).Count -ne 0) { throw 'ACL_DRIFT' }
+  if (@($parentRules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' -and (($_.InheritanceFlags -eq [Security.AccessControl.InheritanceFlags]::None) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write)) }).Count -ne 0) { throw 'ACL_DRIFT' }
+  foreach ($evidencePath in @($script:EvidencePath, "$script:EvidencePath.tmp")) {
+    if (-not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) { throw 'ACL_DRIFT' }
+    $item = Get-Item -LiteralPath $evidencePath -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'REPARSE_POINT' }
+    $acl = Get-Acl -LiteralPath $evidencePath
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin @('S-1-5-32-544','S-1-5-18')) { throw 'ACL_DRIFT' }
+    $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin @('S-1-5-32-544','S-1-5-18','S-1-1-0') })
+    if ($unexpected.Count -ne 0) { throw 'ACL_DRIFT' }
+    foreach ($required in @('S-1-5-32-544','S-1-5-18')) {
+      if (-not ($rules | Where-Object { $_.IdentityReference.Value -eq $required -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) })) { throw 'ACL_DRIFT' }
+    }
+    $worldRules = @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-1-0' })
+    if ($worldRules.Count -eq 0 -or @($worldRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -ne 0) { throw 'ACL_DRIFT' }
+    if (@($rules | Where-Object { $_.IdentityReference.Value -eq $ExpectedOperatorSid }).Count -ne 0) { throw 'ACL_DRIFT' }
+  }
 }
 
 function Set-EvidenceContractAcl {
@@ -282,7 +300,7 @@ function Invoke-MaintenanceWorker {
       foreach ($file in $requestFiles) {
         $started = [DateTime]::UtcNow
         $id = [IO.Path]::GetFileNameWithoutExtension($file.Name)
-        if ($id -notmatch '^[A-Za-z0-9-]{1,80}$') { $id = 'REJECTED' }
+        if ($id -notmatch '^[A-Za-z0-9-]{1,80}$' -or $id -cmatch '^(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])$') { $id = 'REJECTED' }
         $resultCode = if ($null -eq $mutex -or -not $firstRequest) { 'CONCURRENT_EXECUTION' } else { 'REQUEST_REJECTED' }
         $exitCode = 1
         $message = if ($resultCode -eq 'CONCURRENT_EXECUTION') { 'Another maintenance request is already running.' } else { 'The request was rejected.' }
@@ -308,7 +326,12 @@ function Invoke-MaintenanceWorker {
           # so no refresh can leave a foreign-owned or inherit-only gate and
           # no later pre-creation race can start from a missing sibling.
           $tmpSibling = "$script:EvidencePath.tmp"
-          if (-not (Test-Path -LiteralPath $tmpSibling -PathType Leaf)) { [IO.File]::WriteAllBytes($tmpSibling, [byte[]]@()) }
+          if (Test-Path -LiteralPath $tmpSibling -PathType Leaf) {
+            $siblingItem = Get-Item -LiteralPath $tmpSibling -Force
+            if (($siblingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'REPARSE_POINT' }
+          } else {
+            [IO.File]::WriteAllBytes($tmpSibling, [byte[]]@())
+          }
           Set-EvidenceContractAcl -LiteralPath $tmpSibling
           Set-EvidenceContractAcl -LiteralPath $script:EvidencePath
           $resultCode = 'SUCCESS'; $exitCode = 0; $message = 'Windows runner qualification evidence was refreshed.'
