@@ -5,7 +5,7 @@ param(
   [Parameter(ParameterSetName='Verify')][switch]$Verify,
   [Parameter(ParameterSetName='Remove')][switch]$Remove,
   [Parameter(ParameterSetName='Remove')][switch]$RequireManifestMatch,
-  [Parameter(ParameterSetName='Remove')][string]$BackupPath,
+  [Parameter(ParameterSetName='Remove')][Parameter(ParameterSetName='Install')][Parameter(ParameterSetName='Update')][string]$BackupPath,
   [switch]$RecoverPartial,
   [string]$OperatorUser = "$([Environment]::MachineName)\ahazan",
   [switch]$LibraryMode
@@ -446,12 +446,16 @@ function Recover-MaintenanceInstallation {
   # failed mid-run, leaving a registered task or installed trees that fail
   # Test-MaintenanceInstallation and therefore block both -Install and
   # -Remove). This runs INSIDE the hardened installer process - pinned
-  # module path, hostile-variable refusal, per-user COM override refusal -
-  # and uses the same per-delete re-verification as removal. It exports an
+  # module path, hostile-variable refusal - and uses the same per-delete
+  # re-verification as removal. It refuses the per-user COM overrides
+  # before its first task cmdlet, asserts the payload and runtime roots
+  # (and the runtime parent) against reparse points BEFORE any elevated
+  # copy or delete can follow an intermediate junction, exports an
   # administrator-pinned recovery bundle first, refuses a running task,
-  # removes only owned names, and never touches the qualification evidence,
-  # its tmp sibling, or the parent directory.
+  # removes only owned names, and never touches the qualification
+  # evidence, its tmp sibling, or the parent directory.
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid, [string]$RecoveryPath)
+  Assert-NoPerUserComOverride
   $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue
   $payloadPresent = Test-Path -LiteralPath $script:PayloadRoot
   if ($null -eq $task -and -not $payloadPresent) { return 'ABSENT' }
@@ -462,12 +466,24 @@ function Recover-MaintenanceInstallation {
   $adminRoots = @('C:\ProgramData\', 'C:\Program Files\', 'C:\Windows\')
   if (-not @($adminRoots | Where-Object { $normalizedRecovery.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Recovery backup path must be under an administrator-managed root (ProgramData, Program Files or Windows).' }
   Assert-SafeBackupChain -LiteralPath $RecoveryPath
+  # The payload tree is walked recursively BEFORE the backup copies it, so
+  # a child junction cannot be followed into the pinned bundle, and again
+  # guards the recursive delete below.
+  if ($payloadPresent) {
+    Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
+    Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
+  }
+  # An intermediate junction at the runtime root (or its parent) would make
+  # every owned-name path resolve elsewhere while the per-leaf checks still
+  # pass, so the roots themselves are asserted before the loop.
+  $runtimeParent = Split-Path -Parent $script:RuntimeRoot
+  Assert-NoReparsePoint -LiteralPath $runtimeParent -AllowMissing
+  Assert-NoForeignOwnership -LiteralPath $runtimeParent
+  Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot -AllowMissing
+  Assert-NoForeignOwnership -LiteralPath $script:RuntimeRoot
   Backup-MaintenanceInstallation -Destination $RecoveryPath
   if ($null -ne $task) { Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false }
-  if ($payloadPresent) {
-    Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
-    Remove-Item -LiteralPath $script:PayloadRoot -Recurse -Force
-  }
+  if ($payloadPresent) { Remove-Item -LiteralPath $script:PayloadRoot -Recurse -Force }
   foreach ($name in $script:OwnedRuntimeNames) {
     $path = Join-Path $script:RuntimeRoot $name
     if (Test-Path -LiteralPath $path) {
