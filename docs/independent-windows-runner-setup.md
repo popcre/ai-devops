@@ -245,46 +245,62 @@ Because the S4U task runs inside the operator's own logon session, its
 inherited environment is hostile input: the non-elevated operator can write
 `HKCU\Environment`, and .NET startup hooks, CoreCLR profiler variables and
 runtime-root overrides all load operator code into a .NET host before any
-script statement runs. A denylist cannot close that class, so the task
-action launches through `cmd.exe /d` (no per-user AutoRun) running the
-hash-pinned `launch-worker.cmd` from the protected payload, which clears
-the entire inherited environment and rebuilds a fixed allowlist of
-well-known literals before the machine-wide `pwsh.exe` starts. The worker
-then pins module resolution to the two system-owned module directories
-(with a literal, so no command resolves before the pin), refuses any
-per-user (`HKCU`) ProgID or CLSID registration for the Task Scheduler COM
-class — the installer refuses the same overrides before its own elevated
-COM use — and re-checks the payload, runtime, task and evidence contracts
-before every execution. When the audit trail or replay ledger reaches its
-capacity bound, further requests are refused before the operation executes;
-a request file is always consumed exactly once under its canonical GUID
-spelling; and only canonical GUID spellings may enter the replay ledger, so
-a hostile filename can never poison future requests into a permanent
+script statement runs. Neither a denylist nor a naive clear loop closes the
+class — `FOR /F` spawns its child through `COMSPEC` and cmd re-parses
+substituted names — so the task action launches through `cmd.exe /d`
+(no per-user AutoRun) running the hash-pinned `launch-worker.cmd` from the
+protected payload. That launcher pins `COMSPEC` to the fixed system cmd
+FIRST, then clears only names filtered by the system findstr down to an
+injection-proof character class (names outside the class survive but
+nothing consumes them as configuration keys), then rebuilds a fixed
+allowlist of well-known literals — including an administrators-only
+`TEMP`/`TMP` under the protected runtime root, so no standard user can
+squat predictable temp names against the elevated host — before the
+machine-wide `pwsh.exe` starts. The worker then pins module resolution to
+the two system-owned module directories (with a literal, so no command
+resolves before the pin), refuses any per-user (`HKCU`) ProgID, versioned
+ProgID or CLSID registration for the Task Scheduler COM class — the
+installer refuses the same overrides and any hostile code-loading shell
+variables before its own elevated COM use — and re-checks the payload,
+runtime, task and evidence contracts before every execution. Result and
+audit records carry the machine name from the .NET API, never the
+environment. When the audit trail or replay ledger reaches its capacity
+bound, further requests are refused before the operation executes; a
+request file is always consumed exactly once under its canonical GUID
+spelling; and only canonical GUID spellings may enter the replay ledger,
+so a hostile filename can never poison future requests into a permanent
 `REUSED_UUID` lockout. A persistent `CONCURRENT_EXECUTION` with no running
 task can indicate a squatted global mutex and needs administrator
 investigation.
 
-Installation also pins the whole evidence neighbourhood:
-`C:\ProgramData\ai-devops` itself is pinned so only administrators can
-create entries (existing readers keep inherited read-only access), and both
-`C:\ProgramData\ai-devops\windows-runner-security.json` and the
-`windows-runner-security.json.tmp` sibling its atomic refresh uses are
-pinned to a fixed contract — Administrators and SYSTEM full control,
+Installation also pins the whole evidence neighbourhood and adopts
+nothing foreign: `C:\ProgramData\ai-devops` itself is pinned so only
+administrators can create entries (existing readers keep inherited
+read-only access), and both `C:\ProgramData\ai-devops\windows-runner-security.json`
+and the `windows-runner-security.json.tmp` sibling its atomic refresh uses
+are pinned to a fixed contract — Administrators and SYSTEM full control,
 everyone else read-only, and **no operator grant at all**: the elevated
 worker and qualification child write through their Administrators
 membership, so the TPM/Secure Boot gate stays unwritable by the principal
-this boundary distrusts. Existing evidence content from a manual preflight
-is preserved, and the worker re-applies the contract to both files after
-every refresh. The runtime `requests` directory is re-verified for
-junctions before enumeration and again immediately before each elevated
-cleanup delete.
+this boundary distrusts. Any pre-existing path under these roots that is
+not already Administrators/SYSTEM-owned stops installation instead of
+being adopted, so a forged evidence file or a pre-loaded audit trail can
+never be laundered with an administrator ACL. Existing evidence content
+from a manual elevated preflight is preserved, and the worker re-applies
+the contract to both files after every refresh. The runtime `requests`
+directory is re-verified for junctions before enumeration and again
+immediately before each elevated cleanup delete, and removal re-verifies
+ownership and shape immediately before every elevated recursive delete
+into an administrator-owned recovery bundle.
 
 Removal first verifies manifest ownership and drift, then writes a protected
 recovery bundle (the backup path must be absolute and outside user
-profiles). `-RequireManifestMatch` is the stricter rollback gate: removal
-then also requires the installed payload hashes to match the repository
-checkout you are removing from, so a rollback always removes exactly what
-was reviewed. Supply a reviewed protected backup location when required:
+profiles, and the bundle directory is itself pinned to Administrators and
+SYSTEM only). `-RequireManifestMatch` is the stricter rollback gate:
+removal then also requires the installed payload hashes to match the
+repository checkout you are removing from, so a rollback always removes
+exactly what was reviewed. Supply a reviewed protected backup location
+when required:
 
 ```powershell
 pwsh -NoProfile -File .\bin\install-windows-runner-maintenance.ps1 -Remove -RequireManifestMatch -BackupPath C:\ProgramData\ai-devops\reviewed-maintenance-recovery -OperatorUser "$env:COMPUTERNAME\ahazan"

@@ -31,6 +31,7 @@ try {
   $script:EvidencePath = Join-Path $temp 'windows-runner-security.json'
   $script:mockTask = $null
   function Set-ProtectedFilesystemAcl { param($LiteralPath,$OperatorSid,$Kind) Assert-NoReparsePoint -LiteralPath $LiteralPath }
+  function Assert-NoForeignOwnership { param($LiteralPath) }
   function Test-PathAclContract { param($LiteralPath,$OperatorSid,$Kind) }
   function Register-MaintenanceTask { param($OperatorSid) $script:mockTask = [ordered]@{ execute='C:\Windows\System32\cmd.exe'; arguments='/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'; action_count=1; user_id=$OperatorSid; logon_type='S4U'; run_level='Highest'; trigger_count=0; multiple_instances='IgnoreNew'; sddl="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$OperatorSid)"; state='Ready' } }
   function Get-InstalledTaskSnapshot { return $script:mockTask }
@@ -59,7 +60,7 @@ try {
   Case 'ReparsePoint_IsRejected' { Assert-Contains $installer '[IO.FileAttributes]::ReparsePoint'; Assert-Contains $worker '[IO.FileAttributes]::ReparsePoint' }
   Case 'AclDrift_FailsClosed' { Assert-Contains $installer 'Set-ProtectedFilesystemAcl'; Assert-Contains $installer 'STALE_INSTALLATION' }
 
-  Remove-Item Function:\Set-ProtectedFilesystemAcl,Function:\Test-PathAclContract,Function:\Register-MaintenanceTask,Function:\Get-InstalledTaskSnapshot,Function:\Backup-MaintenanceInstallation -ErrorAction SilentlyContinue
+  Remove-Item Function:\Set-ProtectedFilesystemAcl,Function:\Assert-NoForeignOwnership,Function:\Test-PathAclContract,Function:\Register-MaintenanceTask,Function:\Get-InstalledTaskSnapshot,Function:\Backup-MaintenanceInstallation -ErrorAction SilentlyContinue
   . $workerPath
   $requestPath = Join-Path $temp 'request.json'
   function Write-Request($Object) { [IO.File]::WriteAllText($requestPath, ($Object | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false)) }
@@ -104,7 +105,7 @@ try {
   Case 'Acl_EveryIcaclsCallChecksExitCode' { Assert-Contains $installer 'Invoke-ProtectedIcacls'; Assert-Contains $installer "'C:\Windows\System32\icacls.exe'"; Assert-True (@([regex]::Matches($installer, [regex]::Escape("& 'C:\Windows\System32\icacls.exe'"))).Count -eq 1) 'icacls is invoked outside the per-call exit-checked helper' }
   Case 'Operator_MustBeLocalUserNotGroup' { Assert-Contains $installer 'UserPrincipal'; Assert-Contains $installer 'Operator is not a local user account.' }
   Case 'Remove_RequireManifestMatchEnforcesRepositoryMatch' { Assert-Contains $installer 'RECOVERY_MANIFEST_MISMATCH'; Assert-Contains $installer 'RequireManifestMatch:$RequireManifestMatch' }
-  Case 'Launcher_IsAnEnvironmentAllowlist' { Assert-Contains $installer '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'; Assert-Contains $worker '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'; Assert-Contains $launcher 'for /f "delims==" %%v in (''set'') do set "%%v="'; Assert-Contains $launcher 'set "SystemRoot=C:\Windows"'; Assert-True (-not $launcher.Contains('DOTNET_STARTUP_HOOKS')) 'launcher is still a denylist, not an allowlist' }
+  Case 'Launcher_IsAnEnvironmentAllowlist' { Assert-Contains $installer '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'; Assert-Contains $worker '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.cmd"'; Assert-Contains $launcher 'for /f "delims==" %%v in (''set ^| C:\Windows\System32\findstr.exe /r /c:"^[A-Za-z0-9_-]*="'') do set "%%v="'; Assert-Contains $launcher 'set "SystemRoot=C:\Windows"'; Assert-True (-not $launcher.Contains('DOTNET_STARTUP_HOOKS')) 'launcher is still a denylist, not an allowlist' }
   Case 'Task_RefusesAdditionalActions' { Assert-Contains $worker '@($task.Actions).Count -ne 1'; Assert-Contains $installer 'action_count -ne 1' }
   Case 'Worker_RefusesPerUserProgIdOverride' { Assert-Contains $worker 'HKCU:\Software\Classes\Schedule.Service' }
   Case 'Worker_VerifiesRuntimeAclBoundary' { Assert-Contains $worker 'Test-RuntimeBoundary -ExpectedOperatorSid'; Assert-True ($worker.IndexOf('Test-RuntimeBoundary -ExpectedOperatorSid') -lt $worker.IndexOf('Invoke-RefreshQualification -ProtectedQualificationScript')) 'runtime boundary verified after execution' }
@@ -124,6 +125,14 @@ try {
   Case 'BackupPath_MustBeAdminControlled' { Assert-Contains $installer 'Recovery backup path must be absolute and outside user profiles.' }
   Case 'ChildArguments_ArePreQuoted' { Assert-Contains $worker '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File ' }
   Case 'Worker_ModulePinUsesNoCommand' { Assert-True (-not $worker.Contains('(Join-Path ' + [char]36 + 'PSHOME')) 'module pin still resolves a command'; Assert-Contains $worker '"$PSHOME\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules"' }
+  Case 'Launcher_PinsComspecBeforeClearing' { Assert-True ($launcher.IndexOf('set "COMSPEC=C:\Windows\System32\cmd.exe"') -ge 0 -and $launcher.IndexOf('set "COMSPEC=C:\Windows\System32\cmd.exe"') -lt $launcher.IndexOf('for /f')) 'COMSPEC not pinned before the clear loop'; Assert-Contains $launcher 'C:\Windows\System32\findstr.exe /r /c:"^[A-Za-z0-9_-]*="' }
+  Case 'Launcher_TempIsAdminOnly' { Assert-Contains $launcher 'TEMP=C:\ProgramData\ai-devops\windows-runner-maintenance\temp'; Assert-Contains $installer "Set-ProtectedFilesystemAcl -LiteralPath (Join-Path `$script:RuntimeRoot 'temp') -OperatorSid `$OperatorSid -Kind Temp"; Assert-Contains $installer "-Kind Temp" }
+  Case 'Worker_HostIsNotEnvironmentDerived' { Assert-Contains $worker '[Environment]::MachineName'; Assert-True (-not $worker.Contains('$env:COMPUTERNAME')) 'host identity still read from the environment' }
+  Case 'Install_RefusesForeignOwnedState' { Assert-True (@([regex]::Matches($installer, 'Assert-NoForeignOwnership')).Count -ge 9) 'pre-existing state is adopted without ownership refusal'; Assert-Contains $installer 'refusing to adopt foreign-owned path' }
+  Case 'Remove_ReverifiesBeforeEveryElevatedDelete' { Assert-Contains $installer 'Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot'; Assert-True ($installer -match 'Assert-NoReparsePoint -LiteralPath \$path[\s\S]{0,200}Remove-Item -LiteralPath \$path -Recurse -Force') 'runtime deletion not re-verified immediately' }
+  Case 'Backup_IsAdminOwnedAndChecked' { Assert-Contains $installer 'Assert-NoReparsePoint -LiteralPath $Destination'; Assert-Contains $installer '($Destination,''/setowner''' }
+  Case 'ComOverride_IncludesVersionedProgIdShadow' { Assert-Contains $worker 'Schedule.Service.1'; Assert-Contains $installer 'Schedule.Service.1' }
+  Case 'Installer_SelfHardensAgainstHostileShell' { Assert-Contains $installer '$env:PSModulePath'; Assert-Contains $installer 'hostile code-loading variable' }
   Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue

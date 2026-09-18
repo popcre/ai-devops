@@ -137,6 +137,7 @@ function Assert-NoPerUserComOverride {
   # has neither.
   $scheduleServiceClsid = '{148BD52A-A2AB-11CE-B07F-00AA006C7A83}'
   if (Test-Path -LiteralPath 'HKCU:\Software\Classes\Schedule.Service') { throw 'PER_USER_COM_OVERRIDE' }
+  if (Test-Path -LiteralPath 'HKCU:\Software\Classes\Schedule.Service.1') { throw 'PER_USER_COM_OVERRIDE' }
   if (Test-Path -LiteralPath "HKCU:\Software\Classes\CLSID\$scheduleServiceClsid") { throw 'PER_USER_COM_OVERRIDE' }
 }
 
@@ -322,10 +323,10 @@ function Invoke-MaintenanceWorker {
           }
         }
         $ended = [DateTime]::UtcNow
-        $safe = [ordered]@{ schema_version=1; request_id=$id; operation='refresh-qualification'; host=$env:COMPUTERNAME; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result=$resultCode; exit_code=$exitCode; message=$message }
+        $safe = [ordered]@{ schema_version=1; request_id=$id; operation='refresh-qualification'; host=[Environment]::MachineName; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result=$resultCode; exit_code=$exitCode; message=$message }
         try {
           Write-SafeResult -Result $safe -LiteralPath (Join-Path $results "$id.json") -MaximumBytes ([int]$policy.max_result_bytes)
-          Write-AuditEvent -Event ([ordered]@{ schema_version=1; request_id=$id; requester_sid=$ownerSid; host=$env:COMPUTERNAME; operation='refresh-qualification'; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result=$resultCode }) -LiteralPath $auditPath -MaximumFileBytes ([int]$policy.max_audit_bytes)
+          Write-AuditEvent -Event ([ordered]@{ schema_version=1; request_id=$id; requester_sid=$ownerSid; host=[Environment]::MachineName; operation='refresh-qualification'; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result=$resultCode }) -LiteralPath $auditPath -MaximumFileBytes ([int]$policy.max_audit_bytes)
           # Only canonical GUID spellings may enter the replay ledger: a
           # rejected filename stem (or any non-GUID id) would substring-match
           # future request ids through the exact-value lookup and poison the
@@ -341,7 +342,7 @@ function Invoke-MaintenanceWorker {
           $safe.result = 'OPERATION_FAILED'; $safe.exit_code = 1
           $safe.message = 'The request was processed but its integrity record could not be written; administrator attention is required.'
           try { Write-SafeResult -Result $safe -LiteralPath (Join-Path $results "$id.json") -MaximumBytes ([int]$policy.max_result_bytes) } catch { }
-          try { Write-AuditEvent -Event ([ordered]@{ schema_version=1; request_id=$id; requester_sid=$ownerSid; host=$env:COMPUTERNAME; operation='refresh-qualification'; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result='OPERATION_FAILED' }) -LiteralPath $auditPath -MaximumFileBytes ([int]$policy.max_audit_bytes) } catch { }
+          try { Write-AuditEvent -Event ([ordered]@{ schema_version=1; request_id=$id; requester_sid=$ownerSid; host=[Environment]::MachineName; operation='refresh-qualification'; started_at_utc=$started.ToString('o'); ended_at_utc=$ended.ToString('o'); result='OPERATION_FAILED' }) -LiteralPath $auditPath -MaximumFileBytes ([int]$policy.max_audit_bytes) } catch { }
         } finally {
           # Re-verify the parent immediately before the elevated delete: the
           # operator can replace the requests directory with a junction in

@@ -11,6 +11,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Self-hardening: the installer runs elevated under the same account the
+# operator uses, so its inherited console environment is untrusted input
+# too. Module resolution is pinned to system-owned directories before any
+# cmdlet runs, and known code-loading variables refuse the run outright
+# (the pwsh host may already have consumed them before this line, so this
+# is a fail-closed tripwire, not a sanitiser - rerun from a clean shell).
+$env:PSModulePath = "$PSHOME\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules"
+foreach ($hostile in @('DOTNET_STARTUP_HOOKS','DOTNET_ADDITIONAL_DEPS','CORECLR_ENABLE_PROFILING','CORECLR_PROFILER','COR_ENABLE_PROFILING','COR_PROFILER')) {
+  if ([Environment]::GetEnvironmentVariable($hostile)) { throw "Refusing to run: hostile code-loading variable $hostile is set in this shell. Rerun from a clean elevated shell." }
+}
 $script:TaskPath = '\AiDevOps\WindowsRunnerMaintenance'
 $script:TaskFolder = '\AiDevOps\'
 $script:TaskName = 'WindowsRunnerMaintenance'
@@ -18,7 +28,7 @@ $script:PayloadRoot = 'C:\Program Files\ai-devops\windows-runner-maintenance'
 $script:RuntimeRoot = 'C:\ProgramData\ai-devops\windows-runner-maintenance'
 $script:EvidencePath = 'C:\ProgramData\ai-devops\windows-runner-security.json'
 $script:PowerShellPath = 'C:\Program Files\PowerShell\7\pwsh.exe'
-$script:OwnedRuntimeNames = @('requests', 'results', 'audit.jsonl', 'processed-requests.jsonl')
+$script:OwnedRuntimeNames = @('requests', 'results', 'audit.jsonl', 'processed-requests.jsonl', 'temp')
 
 function Assert-Administrator {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -66,6 +76,21 @@ function Assert-NoReparsePoint {
   }
 }
 
+function Assert-NoForeignOwnership {
+  # Nothing this boundary adopts may pre-date it under foreign ownership:
+  # ProgramData defaults let any local user create directories and files
+  # there first, and blessing such state with an administrator ACL would
+  # launder a forged evidence file or a pre-loaded audit trail. Pre-existing
+  # paths are adopted only when Administrators/SYSTEM already own them
+  # (an earlier install or manual elevated preflight); anything else stops.
+  param([Parameter(Mandatory)][string]$LiteralPath)
+  if (-not (Test-Path -LiteralPath $LiteralPath)) { return }
+  $item = Get-Item -LiteralPath $LiteralPath -Force
+  if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Reparse point refused: $LiteralPath" }
+  $owner = (Get-Acl -LiteralPath $LiteralPath).GetOwner([Security.Principal.SecurityIdentifier]).Value
+  if ($owner -notin @('S-1-5-32-544','S-1-5-18')) { throw "STALE_INSTALLATION: refusing to adopt foreign-owned path: $LiteralPath" }
+}
+
 function Get-DesiredPayloadManifest {
   param([Parameter(Mandatory)][string]$SourceRoot, [Parameter(Mandatory)][string]$OperatorSid)
   $sources = [ordered]@{
@@ -87,7 +112,7 @@ function Get-DesiredPayloadManifest {
 }
 
 function Set-ProtectedFilesystemAcl {
-  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Runtime','Evidence','EvidenceParent')][string]$Kind)
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','Runtime','Evidence','EvidenceParent','Temp')][string]$Kind)
   Assert-NoReparsePoint -LiteralPath $LiteralPath
   $admins = '*S-1-5-32-544'
   $system = '*S-1-5-18'
@@ -103,6 +128,11 @@ function Set-ProtectedFilesystemAcl {
   } elseif ($Kind -eq 'EvidenceParent') {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F",'*S-1-5-32-545:(OI)(CI)(IO)(RX)')
+  } elseif ($Kind -eq 'Temp') {
+    # Elevated-worker scratch space: administrators and SYSTEM only, so no
+    # standard user can squat predictable temp names against the host.
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F")
   } else {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins,'/T','/C')
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX")
@@ -136,6 +166,7 @@ function Assert-NoPerUserComOverride {
   # into this elevated process. Both resolution channels are refused.
   $scheduleServiceClsid = '{148BD52A-A2AB-11CE-B07F-00AA006C7A83}'
   if (Test-Path -LiteralPath 'HKCU:\Software\Classes\Schedule.Service') { throw 'PER_USER_COM_OVERRIDE' }
+  if (Test-Path -LiteralPath 'HKCU:\Software\Classes\Schedule.Service.1') { throw 'PER_USER_COM_OVERRIDE' }
   if (Test-Path -LiteralPath "HKCU:\Software\Classes\CLSID\$scheduleServiceClsid") { throw 'PER_USER_COM_OVERRIDE' }
 }
 
@@ -171,13 +202,14 @@ function Get-InstalledTaskSnapshot {
 }
 
 function Test-PathAclContract {
-  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','RuntimeRoot','Requests','Results','Audit','Ledger','Evidence')][string]$Kind)
+  param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][string]$OperatorSid, [ValidateSet('Payload','RuntimeRoot','Requests','Results','Audit','Ledger','Evidence','Temp')][string]$Kind)
   Assert-NoReparsePoint -LiteralPath $LiteralPath
   $acl = Get-Acl -LiteralPath $LiteralPath
   $ownerSid = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
   if ($ownerSid -notin @('S-1-5-32-544','S-1-5-18')) { throw "STALE_INSTALLATION: foreign owner on $Kind." }
   $allowedIdentities = @('S-1-5-32-544','S-1-5-18',$OperatorSid)
   if ($Kind -eq 'Evidence') { $allowedIdentities = @('S-1-5-32-544','S-1-5-18','S-1-1-0') }
+  if ($Kind -eq 'Temp') { $allowedIdentities = @('S-1-5-32-544','S-1-5-18') }
   $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
   $unexpected = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin $allowedIdentities })
   if ($unexpected.Count -ne 0) { throw "STALE_INSTALLATION: unexpected ACL identity on $Kind." }
@@ -193,7 +225,7 @@ function Test-PathAclContract {
     if (@($worldRules | Where-Object { ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete) }).Count -ne 0) { throw 'STALE_INSTALLATION: world access exceeds read on Evidence.' }
   }
   $operatorRules = @($rules | Where-Object { $_.IdentityReference.Value -eq $OperatorSid })
-  if ($Kind -eq 'Ledger' -or $Kind -eq 'Evidence') { if ($operatorRules.Count -ne 0) { throw "STALE_INSTALLATION: operator access must not exist on $Kind." }; return }
+  if ($Kind -eq 'Ledger' -or $Kind -eq 'Evidence' -or $Kind -eq 'Temp') { if ($operatorRules.Count -ne 0) { throw "STALE_INSTALLATION: operator access must not exist on $Kind." }; return }
   if ($operatorRules.Count -eq 0) { throw "STALE_INSTALLATION: operator ACL missing on $Kind." }
   $operatorRights = $operatorRules | ForEach-Object FileSystemRights
   $mayWrite = @($operatorRights | Where-Object { ($_ -band [Security.AccessControl.FileSystemRights]::Write) -or ($_ -band [Security.AccessControl.FileSystemRights]::Delete) -or ($_ -band [Security.AccessControl.FileSystemRights]::ChangePermissions) }).Count -ne 0
@@ -218,6 +250,7 @@ function Test-MaintenanceInstallation {
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'results') -OperatorSid $ExpectedOperatorSid -Kind Results
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'audit.jsonl') -OperatorSid $ExpectedOperatorSid -Kind Audit
   Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'processed-requests.jsonl') -OperatorSid $ExpectedOperatorSid -Kind Ledger
+  Test-PathAclContract -LiteralPath (Join-Path $script:RuntimeRoot 'temp') -OperatorSid $ExpectedOperatorSid -Kind Temp
   Test-PathAclContract -LiteralPath $script:EvidencePath -OperatorSid $ExpectedOperatorSid -Kind Evidence
   Test-PathAclContract -LiteralPath "$script:EvidencePath.tmp" -OperatorSid $ExpectedOperatorSid -Kind Evidence
   $task = Get-InstalledTaskSnapshot
@@ -231,6 +264,11 @@ function Test-MaintenanceInstallation {
 function Backup-MaintenanceInstallation {
   param([Parameter(Mandatory)][string]$Destination)
   New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+  # The recovery bundle must be admin-only wherever it lands, and must not
+  # itself be a redirection target.
+  Assert-NoReparsePoint -LiteralPath $Destination
+  Invoke-ProtectedIcacls -Arguments @($Destination,'/setowner','*S-1-5-32-544')
+  Invoke-ProtectedIcacls -Arguments @($Destination,'/inheritance:r','/grant:r','*S-1-5-32-544:(OI)(CI)F','*S-1-5-18:(OI)(CI)F')
   $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue
   if ($null -ne $task) { Export-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName | Set-Content -LiteralPath (Join-Path $Destination 'task.xml') -Encoding utf8 }
   if (Test-Path -LiteralPath $script:PayloadRoot) { Copy-Item -LiteralPath $script:PayloadRoot -Destination (Join-Path $Destination 'payload') -Recurse }
@@ -248,13 +286,12 @@ function Protect-EvidenceFile {
   param([Parameter(Mandatory)][string]$OperatorSid)
   $parent = Split-Path -Parent $script:EvidencePath
   New-Item -ItemType Directory -Path $parent -Force | Out-Null
-  Assert-NoReparsePoint -LiteralPath $parent
+  Assert-NoForeignOwnership -LiteralPath $parent
   Set-ProtectedFilesystemAcl -LiteralPath $parent -OperatorSid $OperatorSid -Kind EvidenceParent
   $tmpSibling = "$script:EvidencePath.tmp"
   foreach ($path in @($script:EvidencePath, $tmpSibling)) {
-    if (Test-Path -LiteralPath $path) {
-      Assert-NoReparsePoint -LiteralPath $path
-    } else {
+    Assert-NoForeignOwnership -LiteralPath $path
+    if (-not (Test-Path -LiteralPath $path)) {
       [IO.File]::WriteAllBytes($path, [byte[]]@())
     }
     Set-ProtectedFilesystemAcl -LiteralPath $path -OperatorSid $OperatorSid -Kind Evidence
@@ -287,6 +324,13 @@ function Install-MaintenancePayload {
   $runtimeParent = Split-Path -Parent $script:RuntimeRoot
   New-Item -ItemType Directory -Path $runtimeParent -Force | Out-Null
   Assert-NoReparsePoint -LiteralPath $runtimeParent
+  # Nothing pre-existing under the runtime root may be foreign-owned: a
+  # pre-planted audit trail or replay ledger must never be adopted.
+  Assert-NoForeignOwnership -LiteralPath $script:RuntimeRoot
+  Assert-NoForeignOwnership -LiteralPath (Join-Path $script:RuntimeRoot 'requests')
+  Assert-NoForeignOwnership -LiteralPath (Join-Path $script:RuntimeRoot 'results')
+  Assert-NoForeignOwnership -LiteralPath (Join-Path $script:RuntimeRoot 'audit.jsonl')
+  Assert-NoForeignOwnership -LiteralPath (Join-Path $script:RuntimeRoot 'processed-requests.jsonl')
   # Assert the runtime root itself BEFORE anything is created through it:
   # a pre-planted junction at that name would otherwise redirect the
   # requests/results/audit creations outside the intended boundary.
@@ -294,8 +338,11 @@ function Install-MaintenancePayload {
   Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot
   New-Item -ItemType Directory -Path (Join-Path $script:RuntimeRoot 'requests'), (Join-Path $script:RuntimeRoot 'results') -Force | Out-Null
   foreach ($name in @('audit.jsonl','processed-requests.jsonl')) { $p = Join-Path $script:RuntimeRoot $name; if (-not (Test-Path -LiteralPath $p)) { [IO.File]::WriteAllBytes($p, [byte[]]@()) } }
+  Assert-NoForeignOwnership -LiteralPath (Join-Path $script:RuntimeRoot 'temp')
+  New-Item -ItemType Directory -Path (Join-Path $script:RuntimeRoot 'temp') -Force | Out-Null
   Set-ProtectedFilesystemAcl -LiteralPath $script:PayloadRoot -OperatorSid $OperatorSid -Kind Payload
   Set-ProtectedFilesystemAcl -LiteralPath $script:RuntimeRoot -OperatorSid $OperatorSid -Kind Runtime
+  Set-ProtectedFilesystemAcl -LiteralPath (Join-Path $script:RuntimeRoot 'temp') -OperatorSid $OperatorSid -Kind Temp
   Protect-EvidenceFile -OperatorSid $OperatorSid
 }
 
@@ -323,8 +370,20 @@ function Remove-MaintenanceInstallation {
   if (-not [IO.Path]::IsPathRooted($RecoveryPath) -or $RecoveryPath -match '(?i)[\\/]Users[\\/]') { throw 'Recovery backup path must be absolute and outside user profiles.' }
   Backup-MaintenanceInstallation -Destination $RecoveryPath
   Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false
+  # Re-verify immediately before every elevated recursive delete: the
+  # verification at the top of removal is separated from these deletes by
+  # a backup and an unregister, and the operator can plant a junction in
+  # place under the runtime root at any time.
+  Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
   Remove-Item -LiteralPath $script:PayloadRoot -Recurse -Force
-  foreach ($name in $script:OwnedRuntimeNames) { $path = Join-Path $script:RuntimeRoot $name; if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force } }
+  foreach ($name in $script:OwnedRuntimeNames) {
+    $path = Join-Path $script:RuntimeRoot $name
+    if (Test-Path -LiteralPath $path) {
+      Assert-NoReparsePoint -LiteralPath $path
+      Assert-NoForeignOwnership -LiteralPath $path
+      Remove-Item -LiteralPath $path -Recurse -Force
+    }
+  }
   return 'REMOVED'
 }
 
