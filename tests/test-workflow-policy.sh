@@ -67,6 +67,11 @@ check 'skills-to-docs rename paths fail closed' "printf 'skills/shared/example/S
 
 actual_bash="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.sh' ! -name 'test-all.sh' -printf '%f\n' | LC_ALL=C sort)"
 actual_pwsh="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.ps1' ! -name 'test-all.ps1' -printf '%f\n' | LC_ALL=C sort)"
+# A suspended suite is a declared omission from every executing lane, never a
+# coverage hole: the complete-section union below must cover the remainder
+# exactly (Kimi CI suspension, 2026-09-17).
+suspended_bash="$(jq -r '.suspended_bash // [] | .[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
+expected_bash="$(LC_ALL=C comm -23 <(printf '%s\n' "$actual_bash") <(printf '%s\n' "$suspended_bash"))"
 manifest_bash="$(jq -r '.bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 manifest_pwsh="$(jq -r '.powershell[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 windows_sensitive="$(jq -r '.windows_sensitive_bash[]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
@@ -118,7 +123,10 @@ shard_smallest="$(jq '[.windows_offline_shards[] | length] | min' "$manifest" | 
 powershell_owner="$(jq -r '.windows_offline_powershell_shard' "$manifest" | tr -d '\r')"
 deepseek_owner="$(jq -r 'to_entries[] | select(.value | index("test-ai-deepseek-agent.sh")) | .key + 1' < <(jq '.windows_offline_shards' "$manifest") | tr -d '\r')"
 muse_owner="$(jq -r 'to_entries[] | select(.value | index("test-ai-muse.sh")) | .key + 1' < <(jq '.windows_offline_shards' "$manifest") | tr -d '\r')"
-measured_rebalance='[["test-ai-kimi.sh"],["test-ai-claude-review.sh","test-ai-codex-memories.sh","test-ai-deepseek-agent.sh","test-ai-gh.sh","test-bin-cmd-launchers.sh"],["test-ai-adopt-globals.sh","test-ai-install-skills.sh","test-ai-memory-sync.sh","test-ai-muse.sh","test-mcp-launch-lock.sh"],["test-ai-gemini-usage.sh","test-ai-grok-implement.sh","test-ai-machine-tools.sh","test-ai-qwen.sh","test-ai-test-local.sh","test-install-ai-provider-clis.sh","test-installer-parity.sh"],["test-ai-claude-permissions.sh","test-ai-gemini.sh","test-ai-glm.sh","test-ai-muse-code.sh","test-line-endings.sh","test-windows-scripts.sh"]]'
+# Four sections since the Kimi CI suspension (2026-09-17): the indivisible
+# Kimi suite that owned a dedicated section is suspended at runtime by the
+# manifest's suspended_bash list, so the measured rebalance covers the rest.
+measured_rebalance='[["test-ai-claude-review.sh","test-ai-codex-memories.sh","test-ai-deepseek-agent.sh","test-ai-gh.sh","test-bin-cmd-launchers.sh"],["test-ai-adopt-globals.sh","test-ai-install-skills.sh","test-ai-memory-sync.sh","test-ai-muse.sh","test-mcp-launch-lock.sh"],["test-ai-gemini-usage.sh","test-ai-grok-implement.sh","test-ai-machine-tools.sh","test-ai-qwen.sh","test-ai-test-local.sh","test-install-ai-provider-clis.sh","test-installer-parity.sh"],["test-ai-claude-permissions.sh","test-ai-gemini.sh","test-ai-glm.sh","test-ai-muse-code.sh","test-line-endings.sh","test-windows-scripts.sh"]]'
 sections_declared="$(printf '%s\n' "$section_block" | sed -n 's/^[[:space:]]*section:[[:space:]]*//p' | tr -d '\r' | head -1)"
 sections_expected="[$(seq -s ', ' 1 "$shard_count")]"
 check 'declared sections cover the ordinary hosted lane exactly, with no suite twice' \
@@ -129,7 +137,7 @@ check 'the PowerShell suites are owned by exactly one existing section' \
   '[ "$powershell_owner" != null ] && [ "$powershell_owner" -ge 1 ] && [ "$powershell_owner" -le "$shard_count" ]'
 check 'the expanded DeepSeek and Muse suites run in separate sections' \
   '[ -n "$deepseek_owner" ] && [ -n "$muse_owner" ] && [ "$deepseek_owner" -ne "$muse_owner" ]'
-check 'five Windows sections retain the measured-duration rebalance' \
+check 'four Windows sections retain the measured-duration rebalance' \
   '[ "$(jq -c .windows_offline_shards "$manifest")" = "$measured_rebalance" ]'
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
@@ -163,8 +171,8 @@ for ((section=1; section<=complete_count; section++)); do
   fi
 done
 complete_union="$(printf '%s\n' "$complete_union" | sed '/^$/d' | LC_ALL=C sort)"
-check 'complete workflow sections cover actual Bash discovery with no omissions or duplicates' \
-  '[ "$complete_selection_ok" = true ] && [ "$complete_union" = "$actual_bash" ] && [ "$(printf "%s\n" "$complete_union" | LC_ALL=C sort -u)" = "$complete_union" ]'
+check 'complete workflow sections cover runnable Bash discovery exactly, with no omissions or duplicates' \
+  '[ "$complete_selection_ok" = true ] && [ "$complete_union" = "$expected_bash" ] && [ "$(printf "%s\n" "$complete_union" | LC_ALL=C sort -u)" = "$complete_union" ]'
 check 'ordinary hosted and self-hosted assignments are disjoint and complete' \
   '[ -z "$(LC_ALL=C comm -12 <(printf "%s\n" "$hosted_without_reviewer") <(printf "%s\n" "$windows_reviewer"))" ] && [ "$(printf "%s\n%s\n" "$hosted_without_reviewer" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_sensitive" ]'
 
@@ -278,8 +286,8 @@ check 'the aggregate and its sections share one run condition, so a skip is neve
   '[ "$(printf "%s\n" "$linux_shard_block" | grep "^    if:")" = "$(printf "%s\n" "$linux_aggregate_block" | grep "^    if:")" ]'
 check 'measured Linux suite seconds name only discovered suites' \
   '[ -n "$linux_weight_names" ] && [ -z "$(LC_ALL=C comm -23 <(printf "%s\n" "$linux_weight_names") <(printf "%s\n" "$manifest_bash"))" ]'
-check 'the four balanced sections partition every discovered Bash suite exactly once' \
-  '[ "$(for i in 1 2 3 4; do bash "$ROOT/tests/test-all.sh" --balanced --shard "$i/4" --list | grep "^test-"; done | LC_ALL=C sort)" = "$manifest_bash" ]'
+check 'the four balanced sections partition every runnable Bash suite exactly once' \
+  '[ "$(for i in 1 2 3 4; do bash "$ROOT/tests/test-all.sh" --balanced --shard "$i/4" --list | grep "^test-"; done | LC_ALL=C sort)" = "$expected_bash" ]'
 cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
 [ "$cancel_aware_jobs" -eq 11 ] || {
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2

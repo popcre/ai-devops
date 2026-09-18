@@ -104,6 +104,25 @@ $tests = @()
 if ($runPowerShell) {
   $tests = @(Get-ChildItem -LiteralPath $PSScriptRoot -File -Filter 'test-*.ps1' |
     Where-Object Name -ne 'test-all.ps1' | Sort-Object Name)
+  # Suspended suites drop out before running (Kimi CI suspension, 2026-09-17).
+  # Declared in the manifest next to the Bash suspension list; the file stays
+  # for direct runs and returns when its entry is removed.
+  $manifestPath = if ($env:AI_CI_SUITE_MANIFEST) { $env:AI_CI_SUITE_MANIFEST }
+                  else { Join-Path $root 'config/ci-suite-manifest.json' }
+  if (Test-Path -LiteralPath $manifestPath) {
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ($null -ne $manifest.suspended_powershell) {
+      $suspended = @($manifest.suspended_powershell | ForEach-Object { [string]$_ })
+      foreach ($name in $suspended) {
+        if ($tests.Name -contains $name) {
+          $tests = @($tests | Where-Object Name -ne $name)
+          Write-Host "test-all.ps1: suspended suite skipped: $name"
+        } else {
+          Write-Warning "test-all.ps1: suspended_powershell names a suite not on disk: $name"
+        }
+      }
+    }
+  }
 }
 foreach ($test in $tests) {
   Write-Host "`n===== POWERSHELL $($test.Name) ====="

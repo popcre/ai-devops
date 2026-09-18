@@ -110,6 +110,25 @@ fi
 
 mapfile -t all_tests < <(find "$SUITE_DIR" -maxdepth 1 -type f -name 'test-*.sh' ! -name 'test-all.sh' -printf '%f\n' | LC_ALL=C sort)
 
+# Suspended suites drop out of every lane before selection (issue: Kimi CI
+# suspension, 2026-09-17). Suspension is declared in the manifest, never by
+# deleting the file: a suspended suite stays runnable directly by file name
+# (bash tests/test-ai-kimi.sh) and returns to the lanes when its manifest
+# entry is removed.
+if [ -f "$MANIFEST" ] && jq -e 'has("suspended_bash")' "$MANIFEST" >/dev/null 2>&1; then
+  jq -e '.suspended_bash | type == "array" and all(.[]; type == "string")' "$MANIFEST" >/dev/null 2>&1 || {
+    printf 'test-all.sh: suite manifest has an invalid suspended_bash group\n' >&2; exit 2; }
+  mapfile -t suspended_tests < <(jq -r '.suspended_bash[]' "$MANIFEST" | tr -d '\r')
+  for suspended in "${suspended_tests[@]}"; do
+    if printf '%s\n' "${all_tests[@]}" | grep -Fxq "$suspended"; then
+      mapfile -t all_tests < <(printf '%s\n' "${all_tests[@]}" | grep -Fxv "$suspended")
+      printf 'test-all.sh: suspended suite skipped: %s\n' "$suspended" >&2
+    else
+      printf 'test-all.sh: WARNING suspended_bash names a suite not on disk: %s\n' "$suspended" >&2
+    fi
+  done
+fi
+
 reason='every Bash suite'
 if [ -n "$only" ]; then
   mapfile -t tests < <(selection_filter "$only" "${all_tests[@]}")

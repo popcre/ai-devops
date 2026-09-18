@@ -84,6 +84,7 @@
   },
   "bash": [
     "test-ai-adopt-globals.sh",
+    "test-ai-blocker-watch.sh",
     "test-ai-claude-permissions.sh",
     "test-ai-claude-review.sh",
     "test-ai-codex-memories.sh",
@@ -93,10 +94,10 @@
     "test-ai-deepseek-agent.sh",
     "test-ai-devops-doctor-codex-probe.sh",
     "test-ai-devops-doctor-install-state.sh",
-    "test-ai-blocker-watch.sh",
     "test-ai-facts.sh",
     "test-ai-gemini-usage.sh",
     "test-ai-gemini.sh",
+    "test-ai-gh.sh",
     "test-ai-glm.sh",
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
@@ -105,15 +106,13 @@
     "test-ai-kimi.sh",
     "test-ai-machine-tools.sh",
     "test-ai-memory-health.sh",
-    "test-ai-gh.sh",
-    "test-bin-cmd-launchers.sh",
     "test-ai-memory-index-hook.sh",
     "test-ai-memory-sync-fanout.sh",
     "test-ai-memory-sync.sh",
     "test-ai-merge-group-evidence.sh",
     "test-ai-model-call.sh",
-    "test-ai-muse.sh",
     "test-ai-muse-code.sh",
+    "test-ai-muse.sh",
     "test-ai-pr-wait.sh",
     "test-ai-private-config.sh",
     "test-ai-qwen-cli.sh",
@@ -130,24 +129,25 @@
     "test-ai-task-gates.sh",
     "test-ai-test-local.sh",
     "test-ai-verify-run.sh",
-    "test-client-globals-required-phrases.sh",
+    "test-bin-cmd-launchers.sh",
     "test-classify-database-preview.sh",
+    "test-client-globals-required-phrases.sh",
     "test-codex-trigger-eval.sh",
     "test-completion-eval.sh",
     "test-install-ai-provider-clis.sh",
     "test-installer-parity.sh",
     "test-lib-test-harness.sh",
     "test-lib-test-timing.sh",
-    "test-linux-offline-shards.sh",
     "test-line-endings.sh",
+    "test-linux-offline-shards.sh",
     "test-markdown-links.sh",
     "test-mcp-launch-lock.sh",
     "test-muse-opencode-contract.sh",
     "test-pop-business-rules-skill.sh",
     "test-provider-wrapper-common.sh",
     "test-public-boundary.sh",
-    "test-repository-policy.sh",
     "test-repository-coverage.sh",
+    "test-repository-policy.sh",
     "test-reviewer-ci-paths.sh",
     "test-session-conduct-policy.sh",
     "test-setup-credentials-source.sh",
@@ -161,9 +161,9 @@
     "test-transcript-destination-check.sh",
     "test-ubuntu-install-stages.sh",
     "test-uninstall.sh",
-    "test-windows-runner-qualification-workflow.sh",
-    "test-windows-bash-selection.sh",
     "test-verify-closure.sh",
+    "test-windows-bash-selection.sh",
+    "test-windows-runner-qualification-workflow.sh",
     "test-windows-scripts.sh",
     "test-workflow-policy.sh"
   ],
@@ -182,7 +182,6 @@
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
     "test-ai-install-skills.sh",
-    "test-ai-kimi.sh",
     "test-ai-machine-tools.sh",
     "test-ai-memory-sync.sh",
     "test-ai-muse.sh",
@@ -214,7 +213,6 @@
     "test-ai-grok-implement.sh",
     "test-ai-grok-review.sh",
     "test-ai-install-skills.sh",
-    "test-ai-kimi.sh",
     "test-ai-machine-tools.sh",
     "test-ai-memory-sync.sh",
     "test-ai-muse.sh",
@@ -251,9 +249,6 @@
   ],
   "windows_offline_shards": [
     [
-      "test-ai-kimi.sh"
-    ],
-    [
       "test-ai-claude-review.sh",
       "test-ai-codex-memories.sh",
       "test-ai-deepseek-agent.sh",
@@ -285,5 +280,13 @@
       "test-windows-scripts.sh"
     ]
   ],
-  "windows_offline_powershell_shard": 3
+  "windows_offline_powershell_shard": 3,
+  "suspended_bash": [
+    "test-ai-kimi.sh"
+  ],
+  "suspended_powershell": [
+    "test-kimi-windows-execution.ps1",
+    "test-windows-ai-kimi-shim.ps1"
+  ],
+  "_comment_suspended": "Suites suspended from every CI lane (declared here, honored by tests/test-all.sh and tests/test-all.ps1). Kimi suspended 2026-09-17: the provider is out of credit and registry-absent since 2026-09-10; the wrapper, suites, and timing entries are retained for re-entry. Remove the entries from the suspended lists to restore the lanes."
 }
