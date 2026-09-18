@@ -16,7 +16,9 @@
 #   2. Refreshes a tool-owned clone of the repo (~/.ai-devops/reviewer-start-watch/
 #      shared-db) to origin/main; it refuses to touch the clone if it is dirty.
 #   3. Reads DRAWN_SINCE from that checkout's reviewer-start-watch workflow, so the
-#      transition guard has one source of truth, and runs the watcher with --apply.
+#      transition guard has one source of truth, and runs the watcher with --apply
+#      and REVIEWER_DOCTOR_TIMEOUT_MS=preflight_timeout_ms (the replacement draw's
+#      ai-review-preflight run outlasts shared-db's 60-second default here).
 #   4. Appends the pass JSON to tick.log (rotated at log_max_bytes).
 # A tick exits non-zero when the refresh, the preflight check or the watcher
 # failed, so a scheduled run that did not do its work is visible. Overlapping
@@ -32,6 +34,7 @@
 #   AI_REVIEWER_START_WATCH_CONFIG  settings (default <repo>/config/reviewer-start-watch.json)
 #   AI_REVIEWER_START_WATCH_HOST    hostname override (tests)
 #   AI_REVIEWER_START_WATCH_REMOTE  clone source override (tests)
+#   AI_REVIEWER_START_WATCH_PREFLIGHT  preflight command name override (tests)
 set -euo pipefail
 
 _self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
@@ -41,6 +44,7 @@ CONFIG="${AI_REVIEWER_START_WATCH_CONFIG:-$TOOL_ROOT/config/reviewer-start-watch
 CLONE="$HOME_DIR/shared-db"
 LOG="$HOME_DIR/tick.log"
 LOCK="$HOME_DIR/tick.lock"
+PREFLIGHT="${AI_REVIEWER_START_WATCH_PREFLIGHT:-ai-review-preflight}"
 WATCHER='scripts/orchestrator-flow/reviewer-start-watch.mjs'
 WORKFLOW='.github/workflows/reviewer-start-watch.yml'
 
@@ -94,13 +98,13 @@ cmd_tick(){
   fi
   take_lock
   rotate_log
-  command -v ai-review-preflight >/dev/null || die "ai-review-preflight is not on PATH; a replacement reviewer cannot be drawn here"
+  command -v "$PREFLIGHT" >/dev/null || die "$PREFLIGHT is not on PATH; a replacement reviewer cannot be drawn here"
   command -v node >/dev/null || die "node is not on PATH"
   refresh_clone
   local since head rc=0
   since="$(drawn_since)"; head="$(git -C "$CLONE" rev-parse --short HEAD)"
   printf '=== %s main %s drawn-since %s\n' "$(stamp)" "$head" "$since" >> "$LOG"
-  (cd "$CLONE" && node "$WATCHER" --repo "$(cfg .repo)" --apply --drawn-since "$since") >> "$LOG" 2>&1 || rc=$?
+  (cd "$CLONE" && REVIEWER_DOCTOR_TIMEOUT_MS="$(cfg .preflight_timeout_ms)" node "$WATCHER" --repo "$(cfg .repo)" --apply --drawn-since "$since") >> "$LOG" 2>&1 || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '=== %s FAILED exit %s\n' "$(stamp)" "$rc" >> "$LOG"
     die "the watcher pass failed (exit $rc); see $LOG"
@@ -149,6 +153,6 @@ case "${1:-}" in
   tick) cmd_tick ;;
   schedule) cmd_schedule ;;
   unschedule) cmd_unschedule ;;
-  -h|--help|help) sed -n '2,34p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,37p' "$_self" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command; see ai-reviewer-start-watch --help" ;;
 esac

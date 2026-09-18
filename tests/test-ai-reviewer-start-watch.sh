@@ -21,7 +21,7 @@ git -C "$TMP/remote" add -A && git -C "$TMP/remote" -c user.name=t -c user.email
 # Stub node: records its arguments and working directory; FAKE_NODE_EXIT decides the result.
 cat > "$TMP/bin/node" <<'EOF'
 #!/usr/bin/env bash
-printf '%s|%s\n' "$(basename "$PWD")" "$*" >> "$FAKE_CALLS"; echo '{"leases":[]}'; exit "${FAKE_NODE_EXIT:-0}"
+printf '%s|%s|%s\n' "$(basename "$PWD")" "${REVIEWER_DOCTOR_TIMEOUT_MS:-unset}" "$*" >> "$FAKE_CALLS"; echo '{"leases":[]}'; exit "${FAKE_NODE_EXIT:-0}"
 EOF
 printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/ai-review-preflight"
 chmod +x "$TMP/bin/node" "$TMP/bin/ai-review-preflight"
@@ -44,7 +44,7 @@ check 'schedule refuses on another machine' "[ $rc -ne 0 ]"
 echo 'tick'
 run tick 2>/dev/null; rc=$?
 check 'a tick on the watching machine succeeds' "[ $rc -eq 0 ]"
-check 'it runs the watcher from the fresh clone with apply and the guard from main' "grep -qx 'shared-db|scripts/orchestrator-flow/reviewer-start-watch.mjs --repo popcre/shared-db --apply --drawn-since 2026-09-18T02:00:00Z' '$TMP/calls'"
+check 'it runs the watcher from the fresh clone with apply, the guard from main and the long preflight timeout' "grep -qx 'shared-db|240000|scripts/orchestrator-flow/reviewer-start-watch.mjs --repo popcre/shared-db --apply --drawn-since 2026-09-18T02:00:00Z' '$TMP/calls'"
 check 'the pass is logged' "grep -q 'drawn-since 2026-09-18T02:00:00Z' '$TMP/home/tick.log' && grep -q leases '$TMP/home/tick.log'"
 check 'the lock is released' "[ ! -e '$TMP/home/tick.lock' ]"
 
@@ -70,8 +70,7 @@ sed -i '/DRAWN_SINCE/d' "$TMP/remote/.github/workflows/reviewer-start-watch.yml"
 git -C "$TMP/remote" -c user.name=t -c user.email=t@t commit -qam drop
 run tick 2>/dev/null; rc=$?
 check 'a main without the guard fails the tick' "[ $rc -ne 0 ]"
-rm "$TMP/bin/ai-review-preflight"
-run tick 2>/dev/null; rc=$?
+AI_REVIEWER_START_WATCH_PREFLIGHT=no-such-preflight-command run tick 2>/dev/null; rc=$?
 check 'a machine without ai-review-preflight fails the tick' "[ $rc -ne 0 ]"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
