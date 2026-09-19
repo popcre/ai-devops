@@ -1321,6 +1321,8 @@ RUNNER_LINES_BEFORE="$(wc -l < "$POOLTMP/runner-args" 2>/dev/null || echo 0)"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'false' ) > "$POOLTMP/out-tests-bad" 2>&1; RC_TESTS_BAD=$?
 RUNNER_LINES_AFTER="$(wc -l < "$POOLTMP/runner-args" 2>/dev/null || echo 0)"
 check "pool_adapter_executes_the_tests_command_before_dispatch" "[ '$RC_TESTS_OK' -eq 0 ]"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'touch live-probe.txt' ) > "$POOLTMP/out-mutate" 2>&1; RC_MUTATE=$?
+check "pool_adapter_tests_command_cannot_mutate_the_live_tree" "[ '$RC_MUTATE' -eq 0 ] && [ ! -e '$POOLTMP/fakerepo/live-probe.txt' ]"
 check "pool_adapter_refuses_dispatch_when_tests_fail" "[ '$RC_TESTS_BAD' -ne 0 ] && grep -q 'tests command failed' '$POOLTMP/out-tests-bad' && [ '$RUNNER_LINES_AFTER' -eq $(( RUNNER_LINES_BEFORE + 1 )) ]"
 check "pool_adapter_binds_the_verdict_to_the_body_not_chrome" "[ '$RC_CHROME' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-chrome'"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --base HEAD ) > "$POOLTMP/out-fwd" 2>&1; RC_FWD=$?

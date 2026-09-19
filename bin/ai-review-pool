@@ -90,11 +90,12 @@ git check-ignore -q .ai/reviews/ai-review-pool-probe || die '.ai/reviews must be
 mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became a link.'
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="pool-${provider}-${mode}-${RUN_ID}"; STARTED="$(date +%s)"
-STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""
+STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""; TESTS_DIR=""
 cleanup(){
   reviewer_event_cleanup_allowed "$provider" || return 1
   [ -z "$TMP_BRIEF" ] || rm -f "$TMP_BRIEF"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"; [ -z "$TMP_TESTS" ] || rm -f "$TMP_TESTS"
+  [ -z "$TESTS_DIR" ] || "${AI_REVIEW_SANDBOX_BIN:-$ROOT/ai-review-sandbox}" remove-copy "$REPO_ROOT" "$TESTS_TAG" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
@@ -127,14 +128,22 @@ if [ -n "$OPT_BASE" ]; then
     CHANGED_FILES="$(git diff --name-only "$RESOLVED_BASE" "$REVIEW_HEAD" -- 2>/dev/null || true)"
   fi
 fi
-# A --tests command is gate EVIDENCE, so it is executed here, before the paid
-# run, and a nonzero exit refuses the dispatch (the packet builder's --tests
-# does the same for the claude/codex wrappers). Its full output stays local;
-# only the result reaches the brief.
-TESTS_RESULT=""
+# A --tests command is gate EVIDENCE. Like the claude/codex wrappers (packet
+# build --tests), it runs inside a DISPOSABLE SNAPSHOT of the tree, never the
+# live checkout: the copy excludes git-ignored files and hook state, so the
+# command cannot mutate or read anything the operator's tree carries beyond
+# tracked source. A nonzero exit refuses the dispatch; full output stays
+# local and only the result reaches the brief.
+TESTS_RESULT=""; TESTS_DIR=""; TESTS_TAG="pool-tests-$RUN_ID"
 if [ -n "$TESTS_COMMAND" ]; then
+  SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$ROOT/ai-review-sandbox}"
+  [ -x "$SANDBOX" ] || [ -f "$SANDBOX" ] || die 'sandbox tool not found for the tests snapshot.'
+  TESTS_DIR="$("$SANDBOX" ensure-copy "$REPO_ROOT" "$TESTS_TAG")" || {
+    "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure snapshot-failed >/dev/null 2>&1 || true
+    die 'could not snapshot the tree for the tests command.'
+  }
   TMP_TESTS="$(mktemp "$REPORT_DIR/.pool-tests.XXXXXX")"
-  if bash -c "$TESTS_COMMAND" > "$TMP_TESTS" 2>&1; then TESTS_RESULT='exit 0 - passed before dispatch'; else
+  if ( cd "$TESTS_DIR" && bash -c "$TESTS_COMMAND" ) > "$TMP_TESTS" 2>&1; then TESTS_RESULT='exit 0 - passed in a disposable snapshot before dispatch'; else
     rm -f "$TMP_TESTS"
     "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure tests-command-failed >/dev/null 2>&1 || true
     die 'tests command failed; no review was dispatched.'
@@ -160,6 +169,10 @@ reviewer_event_evidence require-report "$provider" || die 'could not reserve dur
 # Forward the caller's comparison so the runner seals ITS packet against the
 # same base and head: a runner left to its own defaults could judge a
 # different diff while this adapter's accounting records the caller's.
+# Only the grok runner accepts this exact argv today; muse/qwen/gemini fail
+# closed on it (unknown flag or name-length limits), which is correct refusal
+# rather than an unreviewed dispatch. Per-provider argv shaping is deliberately
+# NOT guessed here - each runner's own refusal names what it needs.
 RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF" --max-turns "$RUNNER_MAX_TURNS")
 [ -z "$OPT_BASE" ] || RUNNER_ARGS+=(--base "$OPT_BASE")
 [ -z "$OPT_ASSERT_HEAD" ] || RUNNER_ARGS+=(--assert-head "$OPT_ASSERT_HEAD")
