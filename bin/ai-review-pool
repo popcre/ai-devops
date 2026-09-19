@@ -232,9 +232,10 @@ RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF" --max-turns "$RUNNER_MAX_TURN
 # The runner is launched FROM the snapshot so its sealed packet, its model
 # paths and any write it attempts all stay inside the disposable copy. The
 # digest baseline is taken here - after the tests command - so only the
-# MODEL's run can move it.
+# MODEL's run can move it. The wait budget is raised because snapshot-bound
+# reviews read a full tree copy and can outgrow the runner's 900s default.
 SNAPSHOT_DIGEST_BEFORE="$("$SANDBOX" digest "$REVIEW_DIR" 2>/dev/null)" || { die 'could not digest the review snapshot.'; }
-set +e; ( cd "$REVIEW_DIR" && exec "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
+set +e; ( cd "$REVIEW_DIR" && exec env AI_GROK_WAIT_TIMEOUT="${AI_POOL_RUNNER_WAIT:-1800}" "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 if [ "$PROVIDER_RC" -ne 0 ]; then
   sed 's/^/  runner: /' "$TMP_ERR" >&2 2>/dev/null || true
