@@ -1245,6 +1245,99 @@ check "repository_policy_pins_grok_to_a_single_version" \
 check "reviewer_never_uses_blanket_approval" \
   "! grep -v '^[[:space:]]*#' '$SCRIPT' | grep -qE -e '--always-approve' -e 'permission-mode auto' -e 'bypassPermissions'"
 
+
+# --- approval front door: registry-driven pool dispatch -------------------
+# The front door must draw eligibility from config/reviewer-registry.json,
+# never from a hardcoded provider list, and the pool adapter must fail
+# closed on unbound verdicts, missing verdicts, thin reports, and source
+# drift during the review.
+FRONT="$REPO_ROOT/bin/ai-review"
+POOL="$REPO_ROOT/bin/ai-review-pool"
+
+bash "$FRONT" kimi security-review >/dev/null 2>&1; RC_KIMI=$?
+check "front_door_refuses_unregistered_provider" "[ '$RC_KIMI' -eq 2 ]"
+check "front_door_refusal_names_the_registry_state" "bash '$FRONT' kimi security-review 2>&1 | grep -q 'not a registered reviewer'"
+bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
+check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
+
+POOLTMP="$(mktemp -d)"
+mkdir -p "$POOLTMP/fakerepo"
+( cd "$POOLTMP/fakerepo" && git init -q && printf '.ai/\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm init && git remote add origin 'https://user:p@ss@GitHub.com/org/repo.git' )
+FAKE_HEAD="$(git -C "$POOLTMP/fakerepo" rev-parse HEAD)"
+cat > "$POOLTMP/packet" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  resolve) if [ -f "$(dirname "$0")/flip" ]; then printf 'identity-after\n'; else printf 'identity-before\n'; fi ;;
+  *) exit 0 ;;
+esac
+EOF
+cat > "$POOLTMP/lifecycle" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  begin) printf '{"head":"$FAKE_HEAD","source_digest":"deadbeef","stale":false,"verdict":null}\n' > "\$(dirname "\$0")/state.json"; printf '%s\n' "\$(dirname "\$0")/state.json" ;;
+  finish) verdict=''; shift; while [ \$# -gt 0 ]; do [ "\$1" = --verdict ] && verdict="\$2"; shift; done; printf '{"stale":false,"verdict":"%s"}\n' "\$verdict" ;;
+  *) exit 0 ;;
+esac
+EOF
+cat > "$POOLTMP/runner" <<'EOF'
+#!/usr/bin/env bash
+# invoked as: runner new TAG --prompt-file BRIEF --max-turns N
+printf '%s\n' "$*" >> "$(dirname "$0")/runner-args"
+git remote get-url origin > "$(dirname "$0")/origin-url" 2>/dev/null || true
+BRIEF="$4"
+HEAD="$(grep -oE 'head commit is [0-9a-f]{7,40}' "$BRIEF" | head -1 | sed 's/.*is //')"
+case "${POOL_RUNNER_MODE:-approve}" in
+  approve) printf 'Analysis of the change with evidence lines and sibling checks across the full diff, including the boundary, refusal and fail-closed paths the adapter contract requires. Head under review: %s. The review covered the registry eligibility decision at the front door, the evidence packet identity binding before and after the paid run, the lifecycle begin and finish accounting, the verdict-to-head binding rule, the report floor, and every fail-closed refusal path a pool review must keep. Findings are grouped by severity with file and line references, and the sibling-class sweep ran over each guard before this verdict was written, exactly as the harness requires of every pool review.\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+  nounbound) printf 'Some analysis without naming the head under review, deliberately long enough to clear the report floor so that the binding check is the only failure mode exercised by this case, with no other assertion depending on the content of this paragraph.\n\n## Verdict\nAPPROVE\n' ;;
+  noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
+  tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+  drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
+  chrome) printf 'runner progress chrome naming the head %s with enough padding text that a whole-buffer byte floor would pass if chrome were counted toward the analysis floor, which is exactly what this mode must not reward\n' "$HEAD" >&2; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
+esac
+EOF
+chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/runner"
+export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_GROK="$POOLTMP/runner" AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
+
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-approve" 2>&1; RC_APPROVE=$?
+APPROVE_REPORT="$(tail -1 "$POOLTMP/out-approve" 2>/dev/null)"
+check "pool_adapter_approves_a_bound_verdict" "[ '$RC_APPROVE' -eq 0 ] && [ -f '$APPROVE_REPORT' ] && grep -q APPROVE '$APPROVE_REPORT'"
+check "pool_adapter_writes_the_report" "ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '^grok-security-review-'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=nounbound bash "$POOL" grok security-review ) > "$POOLTMP/out-nb" 2>&1; RC_NB=$?
+check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
+check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-nv'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" grok security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
+check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
+rm -f "$POOLTMP/flip"
+check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift'"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok visual-review ) > "$POOLTMP/out-visual" 2>&1; RC_VISUAL=$?
+check "pool_adapter_refuses_unsupported_mode" "[ '$RC_VISUAL' -eq 2 ]"
+check "front_door_registry_comment_pins_the_promise" "grep -q 'registry decides the pool' '$FRONT'"
+check "pool_adapter_guards_as_the_dispatched_provider" "grep -q 'reviewer_event_guard \"\$provider\"' '$POOL'"
+check "pool_adapter_exports_the_caller_identity" "grep -q \"printf -v _pool_caller_var 'AI_%s_CALLER'\" '$POOL' && grep -q '\$_pool_caller_var=\$CALLER' '$POOL'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=chrome bash "$POOL" grok security-review ) > "$POOLTMP/out-chrome" 2>&1; RC_CHROME=$?
+RUNNER_LINES_BEFORE="$(wc -l < "$POOLTMP/runner-args" 2>/dev/null || echo 0)"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'true' ) > "$POOLTMP/out-tests-ok" 2>&1; RC_TESTS_OK=$?
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'false' ) > "$POOLTMP/out-tests-bad" 2>&1; RC_TESTS_BAD=$?
+RUNNER_LINES_AFTER="$(wc -l < "$POOLTMP/runner-args" 2>/dev/null || echo 0)"
+check "pool_adapter_executes_the_tests_command_before_dispatch" "[ '$RC_TESTS_OK' -eq 0 ]"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'touch live-probe.txt' ) > "$POOLTMP/out-mutate" 2>&1; RC_MUTATE=$?
+check "pool_adapter_tests_command_cannot_mutate_the_live_tree" "[ '$RC_MUTATE' -eq 0 ] && [ ! -e '$POOLTMP/fakerepo/live-probe.txt' ]"
+check "pool_adapter_refuses_dispatch_when_tests_fail" "[ '$RC_TESTS_BAD' -ne 0 ] && grep -q 'tests command failed' '$POOLTMP/out-tests-bad' && [ '$RUNNER_LINES_AFTER' -eq $(( RUNNER_LINES_BEFORE + 1 )) ]"
+check "pool_adapter_binds_the_verdict_to_the_body_not_chrome" "[ '$RC_CHROME' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-chrome'"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --base HEAD ) > "$POOLTMP/out-fwd" 2>&1; RC_FWD=$?
+check "pool_adapter_forwards_the_caller_base_to_the_runner" "[ '$RC_FWD' -eq 0 ] && grep -q -- '--base HEAD' '$POOLTMP/runner-args'"
+check "pool_adapter_pins_private_artifact_umask" "grep -q 'umask 077' '$POOL'"
+GUARD_LINE="$(grep -n 'reviewer_event_guard "\$provider"' "$POOL" | head -1 | cut -d: -f1)"
+MODELS_SOURCE_LINE="$(grep -n '\. "$MODELS_ENV"' "$POOL" | head -1 | cut -d: -f1)"
+check "pool_adapter_records_the_invocation_before_sourcing_models_env" "[ -n '$GUARD_LINE' ] && [ -n '$MODELS_SOURCE_LINE' ] && [ '$GUARD_LINE' -lt '$MODELS_SOURCE_LINE' ]"
+SNAPSHOT_ORIGIN="$(cat "$POOLTMP/origin-url" 2>/dev/null)"
+check "pool_adapter_strips_credentials_from_the_snapshot_origin" "[ -n '$SNAPSHOT_ORIGIN' ] && [ "'$SNAPSHOT_ORIGIN'" = "'https://github.com/org/repo.git'" ]" "grep -qF '[^/@]*@#' '$POOL' && grep -q 'UPSTREAM_URL=.*sed' '$POOL' && grep -q 'remote add origin -- ' '$POOL'"
+check "pool_adapter_runner_overrides_require_test_hooks" "grep -q 'AI_POOL_TEST_HOOKS=1 to substitute a runner' '$POOL'"
+check "pool_adapter_refuses_a_non_sha_head" "grep -q 'not a full commit SHA' '$POOL'"
+rm -rf "$POOLTMP"
+
 echo
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
