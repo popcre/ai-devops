@@ -61,7 +61,10 @@ case "$mode" in plan-review|diff-review|security-review|final-check) ;; *) usage
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   reviewer_event_guard "$provider" "$_AI_EVENT_SELF" "$@"
 fi
-export "AI_${provider^^}_CALLER=$CALLER"
+# Single expansion: the value is never re-evaluated, and the name is pinned
+# by the provider case above.
+printf -v _pool_caller_var 'AI_%s_CALLER' "${provider^^}"
+export "$_pool_caller_var=$CALLER"; unset _pool_caller_var
 
 shift 2
 TESTS_COMMAND=""; OPT_BASE=""; OPT_ASSERT_HEAD=""
@@ -87,10 +90,11 @@ git check-ignore -q .ai/reviews/ai-review-pool-probe || die '.ai/reviews must be
 mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became a link.'
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="pool-${provider}-${mode}-${RUN_ID}"; STARTED="$(date +%s)"
-STATE=""; TMP_BRIEF=""; TMP_TEXT=""
+STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""
 cleanup(){
   reviewer_event_cleanup_allowed "$provider" || return 1
   [ -z "$TMP_BRIEF" ] || rm -f "$TMP_BRIEF"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"
+  [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"; [ -z "$TMP_TESTS" ] || rm -f "$TMP_TESTS"
 }
 trap cleanup EXIT INT TERM
 
@@ -112,21 +116,34 @@ if [ -n "${AI_REVIEW_OWNER_REQUEST:-}" ]; then DECISION="$DECISION
 
 Owner request governing this review: $AI_REVIEW_OWNER_REQUEST"; fi
 
-TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"
+TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"; TMP_ERR="$(mktemp "$REPORT_DIR/.pool-stderr.XXXXXX")"
 CHANGED_FILES=""
 if [ -n "$OPT_BASE" ]; then
   # Use the SHA the packet resolver already proved, never the caller's raw
   # ref string, and never let a dashed value reach git as an option.
   RESOLVED_BASE="$(jq -r '.base // empty' <<<"$SOURCE_IDENTITY" 2>/dev/null || true)"
-  [ -n "$RESOLVED_BASE" ] || RESOLVED_BASE="$(git rev-parse --verify --quiet "$OPT_BASE^{commit}" 2>/dev/null || true)"
+  [ -n "$RESOLVED_BASE" ] || RESOLVED_BASE="$(git rev-parse --verify --quiet --end-of-options "$OPT_BASE^{commit}" 2>/dev/null || true)"
   if [ -n "$RESOLVED_BASE" ]; then
     CHANGED_FILES="$(git diff --name-only "$RESOLVED_BASE" "$REVIEW_HEAD" -- 2>/dev/null || true)"
+  fi
+fi
+# A --tests command is gate EVIDENCE, so it is executed here, before the paid
+# run, and a nonzero exit refuses the dispatch (the packet builder's --tests
+# does the same for the claude/codex wrappers). Its full output stays local;
+# only the result reaches the brief.
+TESTS_RESULT=""
+if [ -n "$TESTS_COMMAND" ]; then
+  TMP_TESTS="$(mktemp "$REPORT_DIR/.pool-tests.XXXXXX")"
+  if bash -c "$TESTS_COMMAND" > "$TMP_TESTS" 2>&1; then TESTS_RESULT='exit 0 - passed before dispatch'; else
+    rm -f "$TMP_TESTS"
+    "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure tests-command-failed >/dev/null 2>&1 || true
+    die 'tests command failed; no review was dispatched.'
   fi
 fi
 cat > "$TMP_BRIEF" <<BRIEF
 You are performing a READ-ONLY $mode. Do not edit, create, commit, push, merge, or delete files. Use only your read-only tools (no shell, no web search).
 
-Your session harness announces an evidence packet (a sealed snapshot of the repository with a MANIFEST.md and the patch). THAT PACKET is the review subject, and you may read only files inside it - never the live working checkout, whose ignored files are outside this review's boundary. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report.$(if [ -n "$CHANGED_FILES" ]; then printf '\n\nThe change under review is exactly these files (read the packet manifest and its patch first, then these files, then only what you need inside the packet to confirm a finding):\n%s' "$CHANGED_FILES"; fi)$([ -n "$TESTS_COMMAND" ] && printf '\n\ntests command on record: %s' "$TESTS_COMMAND")
+Your session harness announces an evidence packet (a sealed snapshot of the repository with a MANIFEST.md and the patch). THAT PACKET is the review subject, and you may read only files inside it - never the live working checkout, whose ignored files are outside this review's boundary. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report.$(if [ -n "$CHANGED_FILES" ]; then printf '\n\nThe change under review is exactly these files (read the packet manifest and its patch first, then these files, then only what you need inside the packet to confirm a finding):\n%s' "$CHANGED_FILES"; fi)$([ -n "$TESTS_COMMAND" ] && printf '\n\ntests command on record: %s (executed before dispatch; result: %s)' "$TESTS_COMMAND" "$TESTS_RESULT")
 
 $DECISION
 
@@ -146,16 +163,24 @@ reviewer_event_evidence require-report "$provider" || die 'could not reserve dur
 RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF" --max-turns "$RUNNER_MAX_TURNS")
 [ -z "$OPT_BASE" ] || RUNNER_ARGS+=(--base "$OPT_BASE")
 [ -z "$OPT_ASSERT_HEAD" ] || RUNNER_ARGS+=(--assert-head "$OPT_ASSERT_HEAD")
-set +e; "$RUNNER" "${RUNNER_ARGS[@]}" > "$TMP_TEXT" 2>&1; PROVIDER_RC=$?; set -e
+# The session runners emit the model's final answer on STDOUT and all
+# progress/usage chrome on STDERR (ai-grok-review: note() writes >&2,
+# extract_answer writes the body). Capture is split so every verdict gate
+# below judges the model body alone and can never be satisfied by chrome.
+set +e; "$RUNNER" "${RUNNER_ARGS[@]}" > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
-[ "$PROVIDER_RC" -eq 0 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider runner exited nonzero ($PROVIDER_RC); diagnostic retained in the lifecycle record."; }
+if [ "$PROVIDER_RC" -ne 0 ]; then
+  sed 's/^/  runner: /' "$TMP_ERR" >&2 2>/dev/null || true
+  "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$TMP_TEXT" >/dev/null 2>&1 || true
+  die "$provider runner exited nonzero ($PROVIDER_RC); diagnostic retained in the lifecycle record."
+fi
 [ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
 
 VERDICT="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
 case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
-# Binding and the analysis floor are judged on the MODEL BODY - the text the
-# reviewer wrote BEFORE the verdict heading - not on the runner's mixed
-# stdout+stderr chrome, which never carries the full 40-character head.
+# Binding and the analysis floor are judged on the MODEL BODY - stdout only,
+# captured separately from the runner's stderr chrome, and only the text
+# before the verdict heading counts.
 if ! awk -v h="$REVIEW_HEAD" '/^## Verdict[[:space:]]*$/{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure verdict-not-bound-to-head --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die "$provider verdict did not name the reviewed head; refusing unbound verdict."

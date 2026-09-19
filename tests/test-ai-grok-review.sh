@@ -1291,7 +1291,7 @@ case "${POOL_RUNNER_MODE:-approve}" in
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
   drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
-  chrome) printf 'runner progress chrome line with padding text that would push a whole-file byte floor over four hundred bytes if chrome were counted toward the analysis floor, which is exactly what this mode must not reward %s\n'; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
+  chrome) printf 'runner progress chrome naming the head %s with enough padding text that a whole-buffer byte floor would pass if chrome were counted toward the analysis floor, which is exactly what this mode must not reward\n' "$HEAD" >&2; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
 esac
 EOF
 chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/runner"
@@ -1314,8 +1314,14 @@ check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] &
 check "pool_adapter_refuses_unsupported_mode" "[ '$RC_VISUAL' -eq 2 ]"
 check "front_door_registry_comment_pins_the_promise" "grep -q 'registry decides the pool' '$FRONT'"
 check "pool_adapter_guards_as_the_dispatched_provider" "grep -q 'reviewer_event_guard \"\$provider\"' '$POOL'"
-check "pool_adapter_exports_the_caller_identity" "grep -q 'export \"AI_\${provider^^}_CALLER=\$CALLER\"' '$POOL'"
+check "pool_adapter_exports_the_caller_identity" "grep -q \"printf -v _pool_caller_var 'AI_%s_CALLER'\" '$POOL' && grep -q '\$_pool_caller_var=\$CALLER' '$POOL'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=chrome bash "$POOL" grok security-review ) > "$POOLTMP/out-chrome" 2>&1; RC_CHROME=$?
+RUNNER_LINES_BEFORE="$(wc -l < "$POOLTMP/runner-args" 2>/dev/null || echo 0)"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'true' ) > "$POOLTMP/out-tests-ok" 2>&1; RC_TESTS_OK=$?
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'false' ) > "$POOLTMP/out-tests-bad" 2>&1; RC_TESTS_BAD=$?
+RUNNER_LINES_AFTER="$(wc -l < "$POOLTMP/runner-args" 2>/dev/null || echo 0)"
+check "pool_adapter_executes_the_tests_command_before_dispatch" "[ '$RC_TESTS_OK' -eq 0 ]"
+check "pool_adapter_refuses_dispatch_when_tests_fail" "[ '$RC_TESTS_BAD' -ne 0 ] && grep -q 'tests command failed' '$POOLTMP/out-tests-bad' && [ '$RUNNER_LINES_AFTER' -eq $(( RUNNER_LINES_BEFORE + 1 )) ]"
 check "pool_adapter_binds_the_verdict_to_the_body_not_chrome" "[ '$RC_CHROME' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-chrome'"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --base HEAD ) > "$POOLTMP/out-fwd" 2>&1; RC_FWD=$?
 check "pool_adapter_forwards_the_caller_base_to_the_runner" "[ '$RC_FWD' -eq 0 ] && grep -q -- '--base HEAD' '$POOLTMP/runner-args'"
