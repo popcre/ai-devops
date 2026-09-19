@@ -206,8 +206,11 @@ AI_DEEPSEEK_SOURCE_TESTS_ONLY=1 bash tests/test-ai-deepseek-agent.sh
 `MODEL_TESTS_ONLY` runs the credential-boundary, doctor, and model/flag-operand
 checks (the natural scope for a comment-only or model-adjacent delta);
 `RECOVERY_TESTS_ONLY` runs the retained-turn recovery checks;
-`SOURCE_TESTS_ONLY` runs the formal-review source-identity checks. When more
-than one is set, `SOURCE_TESTS_ONLY` wins and the source-identity path runs.
+`SOURCE_TESTS_ONLY` runs the formal-review source-identity checks. The gates
+fire in file order: the recovery gate is evaluated first and exits before the
+others, so `RECOVERY_TESTS_ONLY` takes precedence over both; `SOURCE_TESTS_ONLY`
+takes precedence over `MODEL_TESTS_ONLY` (the model gate sits inside the
+general block it skips).
 Every subset still syntax-checks the wrapper. The complete
 suite stays the default, stays required once per pull request on the
 merge-candidate head, and CI still runs it in full; a subset is a fast first
