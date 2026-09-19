@@ -78,7 +78,14 @@ MODEL="${AI_GLM_MODEL:-glm-5.3}"
 CALLER="${AI_GLM_CALLER:-claude}"
 TIMEOUT="${AI_GLM_TIMEOUT:-1800}"        # seconds to wait for one GLM turn
 LOCK_TIMEOUT="${AI_GLM_LOCK_TIMEOUT:-300}"
-SERVER_START_TIMEOUT="${AI_GLM_SERVER_START_TIMEOUT:-30}"
+# The default is resolved below, AFTER the canonical IS_WINDOWS detection: a cold
+# OpenCode boot re-checks every registered review directory before it answers
+# /global/health (measured 2026-09-17 on this fleet: 1-2 minutes), so a 30s budget
+# made `server start`/`restart` report failure while the launch was still
+# legitimately in progress — and the "retry" then no-opped, because the task was
+# already running (u2giants/shared-db #2828). Windows waits for a cold boot; Linux
+# systemd starts fast.
+SERVER_START_TIMEOUT="${AI_GLM_SERVER_START_TIMEOUT:-}"
 POLL_SECS=5
 JSON_OUT=0
 WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -90,7 +97,7 @@ ACTIVE_DIAG_REPO=''; ACTIVE_DIAG_RUN=''; ACTIVE_DIAG_SESSION=''; ACTIVE_DIAG_STA
 die()  { printf 'ai-glm: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-glm: warning: %s\n' "$*" >&2; }
 note() { [ "$JSON_OUT" = 1 ] || printf '%s\n' "$*" >&2; }
-case "$SERVER_START_TIMEOUT" in ''|0|*[!0-9]*) die 'AI_GLM_SERVER_START_TIMEOUT must be a positive whole number of seconds.' ;; esac
+
 
 local_service_fatal() {
   printf '%s\n' \
@@ -107,6 +114,12 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
   *) IS_WINDOWS=0 ;;
 esac
 [ "${OS:-}" = "Windows_NT" ] && IS_WINDOWS=1
+# Keyed off the canonical detection above, including its Windows_NT branch, and not
+# off a second uname copy that could disagree with it (review finding, 2026-09-18).
+if [ -z "$SERVER_START_TIMEOUT" ]; then
+  if [ "$IS_WINDOWS" = 1 ]; then SERVER_START_TIMEOUT=150; else SERVER_START_TIMEOUT=30; fi
+fi
+case "$SERVER_START_TIMEOUT" in ''|0|*[!0-9]*) die 'AI_GLM_SERVER_START_TIMEOUT must be a positive whole number of seconds.' ;; esac
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
 need curl; need jq; need git
@@ -2137,7 +2150,7 @@ prune_review() { # prune_review META CUTOFF -> 0 removed, 1 kept (reason warned)
   # The server session is gone, so the record goes too: a record without its session
   # can never be continued. A sandbox that will not delete is left for the orphan sweep.
   if [ "$remove_sandbox" = 1 ] && ! "$SANDBOX_BIN" remove-recorded "glm-$name" "$boundary" >/dev/null 2>&1; then
-    warn "review sandbox for '$name' could not be removed; the orphan sweep will retry: $boundary"; rc=1
+    warn "review sandbox for '$name' could not be removed; it stays until an unbounded ai-glm prune: $boundary"; rc=1
   fi
   sandbox_build_release
   rm -f "$mp"
@@ -2151,6 +2164,40 @@ glm_retention_problem() { # prints why RETENTION_HOURS is unusable; nothing when
     echo "review retention (${RETENTION_HOURS}h) must be longer than the turn timeout (${TIMEOUT}s), or a running turn could be pruned."
 }
 
+# Report (never act on) unrecorded review sandboxes: they are full repository
+# clones, nothing automatic sweeps them any more (doctor no longer acts and `new`'s
+# bounded batch skips the unrecorded sweep by design), and the class was previously
+# invisible in doctor entirely (review finding, 2026-09-18). The count applies the
+# two CHEAP gates prune uses -- idle past the retention cutoff, and not held by a
+# starting session's lock -- but not prune's evidence-reconciliation or per-file
+# marker gates, which cost a subprocess per directory: a sandbox kept for
+# unreconciled evidence stays counted here forever, so the WARN says "present", not
+# "reclaimable". `ai-glm prune` (unbounded) remains the reclamation path and applies
+# every gate before removing anything.
+glm_orphan_sandbox_report() { # CUTOFF
+  local cutoff="$1" recorded_refs="" orphan_count=0 orphan_name orphan_tag
+  if [ ! -d "$GLM_SANDBOX_DIR" ] || [ -z "$SANDBOX_BIN" ]; then return 0; fi
+  if ! recorded_refs="$(sandbox_references 2>/dev/null)"; then
+    printf 'WARN  unrecorded sandbox state could not be verified; run: ai-glm prune\n'
+    return 0
+  fi
+  while IFS= read -r orphan_name; do
+    [ -n "$orphan_name" ] || continue
+    [ "$(stat -c %Y "$GLM_SANDBOX_DIR/$orphan_name" 2>/dev/null || printf '99999999999')" -lt "$cutoff" ] || continue
+    orphan_tag="$(printf '%s' "$orphan_name" | sed -nE 's/^(glm-.+)-[0-9a-f]{12}$/\1/p')"
+    [ -n "$orphan_tag" ] || continue
+    compgen -G "$STATE_DIR/locks/*--${orphan_tag#glm-}.lock.d" >/dev/null && continue
+    orphan_count=$((orphan_count + 1))
+  done < <(comm -23 <(ls "$GLM_SANDBOX_DIR" 2>/dev/null | grep -E '^glm-.+-[0-9a-f]{12}$' | sort) \
+                          <(printf '%s\n' "$recorded_refs" | sort -u))
+  if [ "$orphan_count" -gt 0 ]; then
+    printf 'WARN  %s idle unrecorded review sandbox(es) present; some may be retained for evidence; run: ai-glm prune\n' "$orphan_count"
+  else
+    printf 'PASS  no idle unrecorded review sandboxes\n'
+  fi
+  return 0
+}
+
 cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   local limit="${1:-0}" cutoff mp d tag rc removed=0 kept=0 referenced=""
   case "$limit" in ''|*[!0-9]*) die "the prune removal limit must be a whole number (0 means no limit)." ;; esac
@@ -2160,8 +2207,8 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   cutoff=$(( $(date +%s) - 10#$RETENTION_HOURS * 3600 ))
   # A build lock left behind would make every later snapshot of that name refuse to build.
   # An interrupt is held until the item in hand is finished, then prune stops. Exiting
-  # mid-item could strand a record whose server session is already deleted; releasing the
-  # lock and carrying on would delete unguarded. The build lock stays held throughout.
+  # mid-item could strand a record whose server session is already deleted; releasing
+  # the lock and carrying on would delete unguarded. The build lock stays held throughout.
   PRUNE_SIGNAL=0
   trap 'sandbox_build_release' EXIT
   trap 'PRUNE_SIGNAL=130' INT
@@ -2179,7 +2226,15 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   # Sandboxes whose record is already gone (an interrupted new, or a hand-removed
   # record) register directories just the same. Only managed, tagged, idle ones.
   # An unreadable record may still own a sandbox, so its presence stops the sweep.
-  if [ -d "$GLM_SANDBOX_DIR" ] && [ -n "$SANDBOX_BIN" ] && ! referenced="$(sandbox_references)"; then
+  # The sweep is skipped under a removal limit: every unreferenced candidate costs a
+  # lock claim, a full sandbox_references re-read and an evidence check before it can
+  # be KEPT without consuming the limit, so a bounded batch must not wander into it
+  # (u2giants/shared-db #2828: the sweep alone ran minutes inside doctor's probe
+  # budget). It runs only on an explicitly unbounded `ai-glm prune`; doctor reports
+  # the unrecorded count so a human knows to run it.
+  if [ "$limit" -ne 0 ]; then
+    :
+  elif [ -d "$GLM_SANDBOX_DIR" ] && [ -n "$SANDBOX_BIN" ] && ! referenced="$(sandbox_references)"; then
     kept=$((kept + 1)); warn "a session record could not be read; unrecorded review sandboxes left untouched."
   elif [ -d "$GLM_SANDBOX_DIR" ] && [ -n "$SANDBOX_BIN" ]; then
     for d in "$GLM_SANDBOX_DIR"/glm-*; do
@@ -2264,6 +2319,7 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
   warn "reconciled dead implementation owner for '$name'; terminal record retained."
 }
 
+
 reconcile_implementation_records() {
   local f type newest state rc=0
   # Only implementation records (and any the index could not read) can need recovery;
@@ -2289,7 +2345,7 @@ wait_for_server_health() { # LABEL [ABSOLUTE_DEADLINE]
       printf 'ai-glm: %s was launched but did not become healthy within %ss.\n' "$label" "$SERVER_START_TIMEOUT" >&2
       if [ "$IS_WINDOWS" = 1 ]; then
         schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20 >&2 || true
-        printf 'Inspect: %s\nRetry: ai-glm server start\n' "$OC_HOME/server.log" >&2
+        printf 'The service task may still be working: a cold boot re-checks every registered review directory, and the task retries 3 times at 1 minute.\nCheck: ai-glm server status\nA wedged task (state Running, nothing answering) is cleared by: ai-glm server stop\nInspect: %s\nRetry ONLY once the task is no longer running: ai-glm server start\n' "$OC_HOME/server.log" >&2
       else
         systemctl --user status opencode-glm.service --no-pager 2>/dev/null | tail -20 >&2 || true
         printf 'Inspect: journalctl --user -u opencode-glm -n 50\nRetry: ai-glm server start\n' >&2
@@ -2302,21 +2358,69 @@ wait_for_server_health() { # LABEL [ABSOLUTE_DEADLINE]
   note "$label and healthy"
 }
 
+glm_task_running() { # scheduled task currently Running?
+  # Output is captured whole and compared, not piped into `grep -q`: under
+  # pipefail a SIGPIPE on the upstream command would read as "not running" and
+  # restore the silent `schtasks //Run` no-op this guard exists to prevent.
+  local state
+  state="$(powershell.exe -NoProfile -NonInteractive -Command \
+    '(Get-ScheduledTask -TaskName AiDevOps-OpenCodeGlm -ErrorAction SilentlyContinue).State' \
+    2>/dev/null | tr -d '\r\n ')" || state=""
+  [ "$state" = "Running" ]
+}
+glm_kill_stuck_secret_runs() { # stop op.exe processes OUR launcher spawned (secret resolution)
+  # The launcher resolves its key with `op run` before OpenCode exists. That child can
+  # wedge (seen 2026-09-17: stuck ~25 minutes with 1Password itself answering in under a
+  # second elsewhere), survives `schtasks //End`, and pins the task in Running so every
+  # later `server start` no-ops. Match BOTH the env file and the launcher script so no
+  # other user of the 1Password CLI is ever touched.
+  powershell.exe -NoProfile -NonInteractive -Command \
+    "Get-CimInstance Win32_Process -Filter \"name='op.exe'\" | Where-Object { \$_.CommandLine -like '*run --env-file*mcp.env*opencode-glm-launch*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" \
+    >/dev/null 2>&1 || true
+}
+
+glm_probe_budget() { # start's pre-flight probe budget: never above 10s, never above the startup timeout
+  printf '%s' "$(( SERVER_START_TIMEOUT < 10 ? SERVER_START_TIMEOUT : 10 ))"
+}
+
 cmd_server() {
   local action="${1:-status}" start_deadline=""
   if [ "$action" = start ]; then
     start_deadline=$(( $(date +%s) + SERVER_START_TIMEOUT ))
-    if server_up "$SERVER_START_TIMEOUT"; then
+    # A short probe: this only asks "is a server answering right now", and a
+    # listening-but-wedged server must not eat the whole cold-boot budget before
+    # the task is even queried (review finding, 2026-09-18). The budget never
+    # exceeds the configured startup timeout, so a small test timeout keeps the
+    # whole start operation inside one bounded window.
+    if server_up "$(glm_probe_budget)"; then
       note "already healthy"
       return 0
     fi
   fi
   if [ "$IS_WINDOWS" = 1 ]; then
     case "$action" in
-      start)   schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not start AiDevOps-OpenCodeGlm. Inspect the scheduled task, then retry: ai-glm server start"
+      start)   if glm_task_running; then
+                 # `schtasks //Run` on an already-running task is a silent no-op, so a
+                 # start issued while a cold boot is in flight used to just wait out its
+                 # own timeout and report failure while the task was still working.
+                 note "service task already running; waiting for it to become healthy"
+               else
+                 schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not start AiDevOps-OpenCodeGlm. Inspect the scheduled task, then retry: ai-glm server start"
+               fi
+               # The health-wait budget starts when the wait starts: the task-state
+               # probe above is a real PowerShell call that can take seconds, and the
+               # deadline computed in the preamble would be half-spent before the
+               # first health poll (seen as a fixture-suite flake, 2026-09-17).
+               start_deadline=$(( $(date +%s) + SERVER_START_TIMEOUT ))
                wait_for_server_health "started" "$start_deadline" ;;
-      stop)    schtasks //End    //TN "AiDevOps-OpenCodeGlm" >/dev/null && note "stopped" ;;
+      stop)    glm_kill_stuck_secret_runs
+               if schtasks //End    //TN "AiDevOps-OpenCodeGlm" >/dev/null; then
+                 note "stopped"
+               else
+                 die "could not stop AiDevOps-OpenCodeGlm. Inspect the scheduled task, then retry: ai-glm server stop"
+               fi ;;
       restart) schtasks //End //TN "AiDevOps-OpenCodeGlm" >/dev/null 2>&1 || true
+               glm_kill_stuck_secret_runs
                local waited=0
                # Task Scheduler can stop the Git Bash wrapper while leaving its
                # native OpenCode child alive. Stop only the verified loopback
@@ -2331,8 +2435,16 @@ cmd_server() {
                  [ "$waited" -lt 30 ] || die "port 127.0.0.1:$PORT stayed busy for 30 seconds; the task was not restarted."
                  sleep 1; waited=$((waited + 1))
                done
-               schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not restart AiDevOps-OpenCodeGlm"
-               wait_for_server_health "restarted" ;;
+               # `//End` can return while the task is still tearing down, and a
+               # `//Run` against a Running task is the same silent no-op `start`
+               # guards against above: wait for the running task instead.
+               if glm_task_running; then
+                 note "service task still running after //End; waiting for it to become healthy"
+               else
+                 schtasks //Run //TN "AiDevOps-OpenCodeGlm" >/dev/null || die "could not restart AiDevOps-OpenCodeGlm"
+               fi
+               start_deadline=$(( $(date +%s) + SERVER_START_TIMEOUT ))
+               wait_for_server_health "restarted" "$start_deadline" ;;
       status)  schtasks //Query //TN "AiDevOps-OpenCodeGlm" //V //FO LIST 2>/dev/null | head -20
                printf 'health: %s\n' "$(api GET /global/health 2>/dev/null || echo unreachable)" ;;
       *) die "usage: ai-glm server start|stop|restart|status" ;;
@@ -2344,7 +2456,7 @@ cmd_server() {
              wait_for_server_health "started" "$start_deadline" ;;
     stop)    systemctl --user stop opencode-glm.service;    note "stopped" ;;
     restart) systemctl --user restart opencode-glm.service || die "could not restart opencode-glm.service. Inspect: systemctl --user status opencode-glm.service"
-             wait_for_server_health "restarted" ;;
+             wait_for_server_health "restarted" "$(( $(date +%s) + SERVER_START_TIMEOUT ))" ;;
     status)
       systemctl --user status opencode-glm.service --no-pager || true
       printf 'health: %s\n' "$(api GET /global/health 2>/dev/null || echo unreachable)"
@@ -2390,17 +2502,28 @@ cmd_doctor() {
     chk "server password readable"         test -s "$PW_FILE"
     if server_up; then
       printf 'PASS  health endpoint answers\n'
+      # Same bounded window as the locally-owned branch: doctor runs inside the
+      # governed-review preflight, and one unbounded curl can spend it all.
+      GLM_HTTP_DEADLINE=$(( $(date +%s) + 20 ))
       health_ver="$(api GET /global/health 2>/dev/null | jq -r '.version // empty' || true)"
       chk "health version matches pin ($pinned)" test -n "$health_ver" -a "$health_ver" = "$pinned"
       chk "requires authentication"        test "$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$BASE/global/health")" = "401"
-      local providers; providers="$(api GET /config/providers 2>/dev/null || echo '{}')"
-      printf '%s' "$providers" | jq -e --arg p "$PROVIDER" '.providers[]|select(.id==$p)' >/dev/null 2>&1 \
-        && printf 'PASS  provider %s available\n' "$PROVIDER" \
-        || { printf 'FAIL  provider %s available\n' "$PROVIDER"; FAILS=$((FAILS+1)); }
-      printf '%s' "$providers" | jq -e --arg p "$PROVIDER" --arg m "$MODEL" \
-        '.providers[]|select(.id==$p).models|has($m)' >/dev/null 2>&1 \
-        && printf 'PASS  model %s available\n' "$MODEL" \
-        || { printf 'FAIL  model %s available\n' "$MODEL"; FAILS=$((FAILS+1)); }
+      # Same WARN-not-FAIL treatment as the locally-owned branch: a slow catalog
+      # is not a capability absence.
+      GLM_HTTP_DEADLINE=$(( $(date +%s) + 45 ))
+      local providers; providers="$(api GET /config/providers 2>/dev/null || true)"
+      if printf '%s' "$providers" | jq -e 'type=="object" and (.providers|type=="array")' >/dev/null 2>&1; then
+        printf '%s' "$providers" | jq -e --arg p "$PROVIDER" '.providers[]|select(.id==$p)' >/dev/null 2>&1 \
+          && printf 'PASS  provider %s available\n' "$PROVIDER" \
+          || { printf 'FAIL  provider %s available\n' "$PROVIDER"; FAILS=$((FAILS+1)); }
+        printf '%s' "$providers" | jq -e --arg p "$PROVIDER" --arg m "$MODEL" \
+          '.providers[]|select(.id==$p).models|has($m)' >/dev/null 2>&1 \
+          && printf 'PASS  model %s available\n' "$MODEL" \
+          || { printf 'FAIL  model %s available\n' "$MODEL"; FAILS=$((FAILS+1)); }
+      else
+        printf 'WARN  provider catalog did not answer within its bounded window; a slow catalog is not a capability absence\n'
+      fi
+      unset GLM_HTTP_DEADLINE
     else
       printf 'FAIL  health endpoint answers\n'; FAILS=$((FAILS+1))
       printf '      the server owned by "%s" is not running. Start it there:\n' "$OC_SHARED_FROM"
@@ -2495,6 +2618,13 @@ cmd_doctor() {
   fi
   # A bare "FAIL health endpoint answers" tells you nothing you can act on. When the
   # server is down, say WHY and give the exact next command.
+  # Bound this block's HTTP swings: /config/providers has measured 1-80s on this
+  # fleet depending on the server's background churn, and a probe must not inherit
+  # the turn budget. Each call gets its OWN window: one absolute deadline shared
+  # across the block let a slow first probe consume it, silently skipping the
+  # version and auth checks while still printing "All required checks passed", or
+  # aborting the report mid-line under set -e (review finding, 2026-09-18).
+  GLM_HTTP_DEADLINE=$(( $(date +%s) + 20 ))
   if server_up; then
     printf 'PASS  health endpoint answers\n'
   else
@@ -2524,19 +2654,33 @@ cmd_doctor() {
       fi
     fi
   fi
+  GLM_HTTP_DEADLINE=$(( $(date +%s) + 20 ))
   if server_up; then
-    health_ver="$(api GET /global/health | jq -r .version)"
-    chk "health version matches pin"       test "$health_ver" = "$pinned"
+    # `|| true` inside the substitution: under `set -euo pipefail` a timed-out
+    # pipeline here ended the whole report with no summary line (review finding,
+    # 2026-09-18); an empty version simply FAILs the pin check below.
+    health_ver="$(api GET /global/health 2>/dev/null | jq -r '.version // empty' || true)"
+    chk "health version matches pin"       test -n "$health_ver" -a "$health_ver" = "$pinned"
     chk "requires authentication"          test "$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$BASE/global/health")" = "401"
-    local providers; providers="$(api GET /config/providers 2>/dev/null || echo '{}')"
-    printf '%s' "$providers" | jq -e --arg p "$PROVIDER" '.providers[]|select(.id==$p)' >/dev/null 2>&1 \
-      && printf 'PASS  provider %s available\n' "$PROVIDER" \
-      || { printf 'FAIL  provider %s available\n' "$PROVIDER"; FAILS=$((FAILS+1)); }
-    printf '%s' "$providers" | jq -e --arg p "$PROVIDER" --arg m "$MODEL" \
-      '.providers[]|select(.id==$p).models|has($m)' >/dev/null 2>&1 \
-      && printf 'PASS  model %s available\n' "$MODEL" \
-      || { printf 'FAIL  model %s available\n' "$MODEL"; FAILS=$((FAILS+1)); }
+    # Providers gets its own bounded window, and a timeout here is a WARN, not a
+    # FAIL: the endpoint has measured 1-80s under background churn while the server
+    # stayed fully usable for turns, and a probe timeout is not a capability
+    # absence (review finding, 2026-09-18).
+    GLM_HTTP_DEADLINE=$(( $(date +%s) + 45 ))
+    local providers; providers="$(api GET /config/providers 2>/dev/null || true)"
+    if printf '%s' "$providers" | jq -e 'type=="object" and (.providers|type=="array")' >/dev/null 2>&1; then
+      printf '%s' "$providers" | jq -e --arg p "$PROVIDER" '.providers[]|select(.id==$p)' >/dev/null 2>&1 \
+        && printf 'PASS  provider %s available\n' "$PROVIDER" \
+        || { printf 'FAIL  provider %s available\n' "$PROVIDER"; FAILS=$((FAILS+1)); }
+      printf '%s' "$providers" | jq -e --arg p "$PROVIDER" --arg m "$MODEL" \
+        '.providers[]|select(.id==$p).models|has($m)' >/dev/null 2>&1 \
+        && printf 'PASS  model %s available\n' "$MODEL" \
+        || { printf 'FAIL  model %s available\n' "$MODEL"; FAILS=$((FAILS+1)); }
+    else
+      printf 'WARN  provider catalog did not answer within its bounded window; a slow catalog is not a capability absence\n'
+    fi
   fi
+  unset GLM_HTTP_DEADLINE
   # Loopback only. A public bind would expose GLM (and the repo) to the network.
   if [ "$IS_WINDOWS" = 0 ] && command -v ss >/dev/null 2>&1; then
     if ss -ltn 2>/dev/null | grep -q ":$PORT " && ss -ltn 2>/dev/null | grep ":$PORT " | grep -qvE '127\.0\.0\.1|\[::1\]'; then
@@ -2582,7 +2726,7 @@ cmd_doctor() {
   fi
   # Report, never act: removals belong to `new` (bounded) and `ai-glm prune`. Doctor
   # runs inside the governed-review preflight window, which a prune pass overran.
-  local idle=0 bad
+  local idle=0 bad cutoff
   bad="$(glm_retention_problem)"
   if [ -n "$bad" ]; then
     printf 'FAIL  review retention setting is usable: %s\n' "$bad"; FAILS=$((FAILS+1))
@@ -2601,6 +2745,8 @@ cmd_doctor() {
   else
     printf 'WARN  %s idle review session(s) older than %sh remain (some may be kept for evidence); run: ai-glm prune\n' "$idle" "$RETENTION_HOURS"
   fi
+  cutoff=$(( $(date +%s) - 10#$RETENTION_HOURS * 3600 ))
+  glm_orphan_sandbox_report "$cutoff"
   fi
   if [ -d "$STATE_DIR/wt" ] && [ -n "$(find "$STATE_DIR/wt" -mindepth 2 -maxdepth 2 -type d 2>/dev/null)" ]; then
     printf 'WARN  scratch clones remain under %s/wt; ambiguous or live paths were left untouched\n' "$STATE_DIR"

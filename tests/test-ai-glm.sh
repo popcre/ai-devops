@@ -374,6 +374,53 @@ WINFAIL_OUT="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$GLM_START_D
   wait_for_server_health restarted' 2>&1)"; WINFAIL_RC=$?
 [ "$WINFAIL_RC" -ne 0 ] && printf '%s' "$WINFAIL_OUT" | grep -qF "Inspect: $TMP/cfg/opencode/server.log" && ok "Windows start failure names the real server log" || bad "Windows start failure names the real server log"
 
+# --- server recovery, tested by BEHAVIOUR, not by grep (review round 5, 2026-09-18) ---
+# glm_task_running reads the scheduled task's state through PowerShell; only Running counts.
+tr_state() { AI_GLM_SOURCE="$AI_GLM" bash -c '
+  source "$AI_GLM_SOURCE"; powershell.exe(){ printf "%s\r\n" '"$1"'; }; glm_task_running' >/dev/null 2>&1; }
+check "task probe reports a Running task"         "tr_state 'Running'"
+check "task probe rejects a Ready task"           "! tr_state 'Ready'"
+check "task probe rejects a missing task"         "! tr_state ''"
+# glm_kill_stuck_secret_runs must target only op.exe children of our own launcher.
+PS_CMDS="$TMP/ps-commands"; : > "$PS_CMDS"
+AI_GLM_SOURCE="$AI_GLM" bash -c '
+  source "$AI_GLM_SOURCE"; powershell.exe(){ printf "%s" "$*" >> "'"$PS_CMDS"'"; }; glm_kill_stuck_secret_runs' >/dev/null 2>&1
+check "stuck-secret kill targets only our launcher's op.exe children" \
+  "grep -q \"name='op.exe'\" '$PS_CMDS' && grep -q 'opencode-glm-launch' '$PS_CMDS' && grep -q 'Stop-Process' '$PS_CMDS'"
+# start's pre-flight probe budget: bounded by the startup timeout, capped at 10s.
+pb() { AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT="$1" bash -c 'source "$AI_GLM_SOURCE"; glm_probe_budget' 2>/dev/null; }
+check "pre-flight probe never exceeds the startup timeout" "test \"\$(pb 3)\" = 3"
+check "pre-flight probe is capped at 10s"                  "test \"\$(pb 30)\" = 10"
+# And cmd_server actually spends that budget on its first probe.
+: > "$TMP/probe.args"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+  source "$AI_GLM_SOURCE"; IS_WINDOWS=0; systemctl(){ :; }
+  server_up(){ printf "%s\n" "${1:-}" >> "'"$TMP"'/probe.args"; return 1; }; cmd_server start' >/dev/null 2>&1
+check "start's first health probe uses the bounded budget" "test \"\$(head -1 '$TMP/probe.args')\" = 2"
+# start/restart against an already-running task wait instead of issuing a no-op //Run.
+SR_CMDS="$TMP/sr-commands"
+sr_run() { : > "$SR_CMDS"; AI_GLM_SOURCE="$AI_GLM" AI_GLM_SERVER_START_TIMEOUT=2 AI_DEVOPS_CONFIG_DIR="$TMP/cfg" bash -c '
+  source "$AI_GLM_SOURCE"; IS_WINDOWS=1; sleep(){ :; }
+  powershell.exe(){ case "$*" in
+    *Get-ScheduledTask*) printf "Running\r\n";;
+    *Get-Process*) return 0;;            # restart port inspection: free, exit 0
+    *Get-NetTCPConnection*) return 1;;   # restart port wait: free, loop ends
+  esac; }
+  schtasks(){ printf "%s\n" "$1" >> "'"$SR_CMDS"'"; }; server_up(){ return 1; }
+  cmd_server '"$1"' >/dev/null 2>&1'; }
+sr_run start
+check "start waits for an already-running task instead of //Run"   "! grep -q -- '//Run' '$SR_CMDS'"
+sr_run restart
+check "restart does not //Run a task still tearing down"           "grep -q -- '//End' '$SR_CMDS' && ! grep -q -- '//Run' '$SR_CMDS'"
+
+echo "== server-start budget defaults (source pins) =="
+# Not behaviour: the default is fixed at SOURCE time by the platform probe, so no
+# stub can flip it. Pinned by their two literals instead: a Windows cold boot runs
+# 1-2 minutes and 30s there reported failure mid-boot (#2828); other platforms
+# keep the original 30s.
+check "Windows cold-boot budget defaults to 150s" "grep -q 'IS_WINDOWS\" = 1 ]; then SERVER_START_TIMEOUT=150' '$AI_GLM'"
+check "other platforms keep the 30s budget"       "grep -q 'SERVER_START_TIMEOUT=30; fi' '$AI_GLM'"
+
 echo "== platform-correct doctor checks =="
 # `stat -c %a` reports a synthesised mode on NTFS regardless of the ACL, so the 0600
 # check failed on all three Windows machines even though the installer had locked the
@@ -803,6 +850,30 @@ check "a non-numeric prune batch is refused, not silently skipped" "! pr_batch a
 check "an empty prune batch falls back to the default" "pr_batch ''"
 check "a positive prune batch is accepted" "pr_batch 25"
 check "new validates the prune batch before pruning" "printf '%s' \"\$NEW_FN\" | grep -q 'prune_batch_valid ||'"
+# Doctor's orphan-sandbox report, tested by BEHAVIOUR, not by grep (review finding,
+# 2026-09-18): idle+unrecorded counts; referenced, fresh-mtime and lock-held do not.
+OR_STATE="$TMP/orphan-state"; OR_SB="$TMP/orphan-sandboxes"
+mkdir -p "$OR_STATE/sessions/rid1" "$OR_STATE/locks" "$OR_SB"
+orphan_sb() { mkdir -p "$OR_SB/glm-$1-0123456789ab"; [ "${2:-}" = fresh ] || touch -d '3 days ago' "$OR_SB/glm-$1-0123456789ab"; }
+orphan_rec() { jq -n --arg b "$OR_SB/glm-$1-0123456789ab" '{type:"review",boundary_root:$b}'; }
+orphan_sb counted; orphan_sb referenced; touch -d '3 days ago' "$OR_SB/glm-referenced-0123456789ab"; orphan_sb freshlock fresh
+orphan_sb locked; mkdir -p "$OR_STATE/locks/rid1--claude--locked.lock.d"
+orphan_rec referenced > "$OR_STATE/sessions/rid1/claude--referenced.json"
+orphan_report() { AI_GLM_SOURCE="$AI_GLM" REPO_ROOT="$REPO_ROOT" AI_GLM_STATE_DIR="$OR_STATE" AI_REVIEW_SANDBOX_DIR="$OR_SB" \
+  bash -c 'source "$AI_GLM_SOURCE"; GLM_SANDBOX_DIR="$AI_REVIEW_SANDBOX_DIR"; SANDBOX_BIN="$REPO_ROOT/bin/ai-review-sandbox"; cutoff=$(( $(date +%s) - 24*3600 )); glm_orphan_sandbox_report "$cutoff"'; }
+r_out="$(orphan_report)"
+check "orphan report counts only idle, unlocked, unrecorded sandboxes" \
+  "printf '%s' \"\$r_out\" | grep -q 'WARN  1 idle unrecorded' && ! printf '%s' \"\$r_out\" | grep -q 'PASS'"
+# The due scan, by behaviour: recorded-old + mtime-old is due; either freshness gate excludes.
+SC_STATE="$TMP/scan-state"; mkdir -p "$SC_STATE/sessions/rid1"
+scan_rec() { jq -n --arg ts "$1" '{type:"review",name:"n",caller:"claude",created_at:$ts,last_activity_at:$ts}' > "$SC_STATE/sessions/rid1/claude--$2.json"; }
+scan_old="$(date -u -d '3 days ago' +%FT%TZ)"; scan_now="$(date -u +%FT%TZ)"
+scan_rec "$scan_old" dueold; scan_rec "$scan_now" duenew; touch -d '3 days ago' "$SC_STATE/sessions/rid1/claude--dueold.json"
+scan_cuts=$(( $(date +%s) - 24*3600 ))
+scan_out="$(AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$SC_STATE" bash -c 'source "$AI_GLM_SOURCE"; glm_due_review_records '"$scan_cuts" | tr -d '\r')"
+check "due scan selects recorded-old records only" \
+  "printf '%s' \"\$scan_out\" | grep -q 'claude--dueold' && ! printf '%s' \"\$scan_out\" | grep -q 'claude--duenew' && ! printf '%s' \"\$scan_out\" | grep -q $'\r'"
+
 check "prune refuses a non-numeric removal limit" "AI_GLM_SOURCE='$AI_GLM' AI_GLM_STATE_DIR='$PR_STATE' bash -c 'source \"\$AI_GLM_SOURCE\"; server_up(){ return 0; }; cmd_prune x1' >/dev/null 2>&1; test \$? -ne 0 && test -f '$PR_STATE/sessions/rid1/claude--fresh.json'"
 
 echo "== delete keeps a sandbox shared across callers =="

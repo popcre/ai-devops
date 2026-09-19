@@ -369,10 +369,81 @@ echo "--- starting `$(date) ---"
 # into 0x8007007F/127, which Task Scheduler does not treat as a restartable failure.
 attempt=0
 max_attempts=4
+# The launcher's secret-resolution phase (op run) can wedge while 1Password answers
+# instantly elsewhere (seen 2026-09-17: stuck 25 minutes, pinning this task in Running
+# so every later 'ai-glm server start' no-opped). Attempt health requires a listener
+# this attempt created; a pre-existing listener is either our own healthy orphaned
+# server (task exits 0 -- the service's goal is a serving endpoint, not process
+# ownership) or a foreign port holder (fatal, loudly). A timed-out attempt is killed
+# as a TREE -- the smoke test above proved bash does not take its native children with
+# it, and a stub-only kill strands opencode.exe holding the port, deadlocking every
+# later attempt. The budget is deliberately generous: repository measurements put a
+# loaded cold boot's directory refresh at up to 25 minutes, and killing a legitimately
+# booting server is the failure this wrapper exists to prevent.
+attempt_timeout="`${AI_GLM_ATTEMPT_TIMEOUT:-1500}"
+port="`${AI_GLM_PORT:-$Port}"
+owner_pid() { local p="`$1"; powershell.exe -NoProfile -NonInteractive -Command \
+  "(Get-NetTCPConnection -State Listen -LocalPort `$p -ErrorAction SilentlyContinue | Select-Object -First 1).OwningProcess" 2>/dev/null | tr -d '\r\n '; }
+owner_name() { local p="`$1"; powershell.exe -NoProfile -NonInteractive -Command \
+  "(Get-Process -Id (`$p) -ErrorAction SilentlyContinue).ProcessName" 2>/dev/null | tr -d '\r\n '; }
+kill_secret_children() { powershell.exe -NoProfile -NonInteractive -Command \
+  "Get-CimInstance Win32_Process -Filter \"name='op.exe'\" | Where-Object { \`$_.CommandLine -like '*run --env-file*mcp.env*opencode-glm-launch*' } | ForEach-Object { Stop-Process -Id \`$_.ProcessId -Force -ErrorAction SilentlyContinue }" \
+  >/dev/null 2>&1 || true; }
+kill_attempt_tree() { local c="`$1" w
+  # /proc/<pid>/winpid only resolves while <pid> is OUR OWN live MSYS child, so a
+  # successful read is an identity proof. When it is unreadable the child may be
+  # gone and the number would be a guess: never taskkill a guessed native PID
+  # (ai-grok-review's rule); kill only the bash child we own, by identity.
+  w="`$(cat /proc/`$c/winpid 2>/dev/null || true)"
+  case "`$w" in ''|*[!0-9]*) ;; *) taskkill.exe //PID "`$w" //T //F >/dev/null 2>&1 || true ;; esac
+  kill -9 "`$c" 2>/dev/null || true
+  kill_secret_children
+}
 while [ "`$attempt" -lt "`$max_attempts" ]; do
   attempt=`$((attempt + 1))
-  "$launchBash"
-  status=`$?
+  SECONDS=0
+  before="`$(owner_pid "`$port")"
+  "$launchBash" &
+  child=`$!
+  while :; do
+    if ! kill -0 "`$child" 2>/dev/null; then
+      wait "`$child"; status=`$?; break
+    fi
+    if curl -sS -o /dev/null -m 5 "http://127.0.0.1:`$port/global/health" 2>/dev/null; then
+      now="`$(owner_pid "`$port")"
+      if [ -z "`$before" ] || [ "`$now" != "`$before" ]; then
+        # A listener this attempt created is serving; hold the task open exactly as
+        # the old synchronous run did.
+        wait "`$child"; status=`$?; break
+      fi
+      # The answering listener predates this attempt. If it is our own opencode,
+      # a healthy server is already serving and this task is done; a foreign
+      # holder of our port is fatal and must not be silently retried around.
+      holder="`$(owner_name "`$now")"
+      if [ -z "`$holder" ]; then
+        # The listener exited between the port probe and the name probe; the race
+        # resolved itself. Keep polling: this attempt's child may bind the port next.
+        sleep 5
+        continue
+      fi
+      # A stub-only kill here would strand this attempt's op.exe -> bash ->
+      # opencode.exe tree (the exact trap kill_attempt_tree exists for).
+      kill_attempt_tree "`$child"
+      wait "`$child" 2>/dev/null || true
+      if [ "`$holder" = "opencode" ]; then
+        echo "healthy OpenCode listener predates this task; exiting 0 without owning it."
+        exit 0
+      fi
+      echo "FATAL: port 127.0.0.1:`$port is held by non-OpenCode process '`${holder}'; the task was not restarted."
+      exit 1
+    fi
+    if [ "`$SECONDS" -ge "`$attempt_timeout" ]; then
+      echo "WARN: attempt `$attempt produced no healthy server within `${attempt_timeout}s; killing its tree and retrying."
+      kill_attempt_tree "`$child"
+      wait "`$child" 2>/dev/null; status=124; break
+    fi
+    sleep 5
+  done
   [ "`$status" -eq 0 ] && exit 0
   if [ "`$attempt" -ge "`$max_attempts" ]; then
     echo "FATAL: OpenCode child exited with status `$status; bounded recovery exhausted after `$attempt attempts."
