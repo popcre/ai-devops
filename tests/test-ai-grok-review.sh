@@ -1282,6 +1282,7 @@ EOF
 cat > "$POOLTMP/runner" <<'EOF'
 #!/usr/bin/env bash
 # invoked as: runner new TAG --prompt-file BRIEF --max-turns N
+printf '%s\n' "$*" >> "$(dirname "$0")/runner-args"
 BRIEF="$4"
 HEAD="$(grep -oE 'head commit is [0-9a-f]{7,40}' "$BRIEF" | head -1 | sed 's/.*is //')"
 case "${POOL_RUNNER_MODE:-approve}" in
@@ -1290,6 +1291,7 @@ case "${POOL_RUNNER_MODE:-approve}" in
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
   drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
+  chrome) printf 'runner progress chrome line with padding text that would push a whole-file byte floor over four hundred bytes if chrome were counted toward the analysis floor, which is exactly what this mode must not reward %s\n'; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
 esac
 EOF
 chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/runner"
@@ -1313,6 +1315,15 @@ check "pool_adapter_refuses_unsupported_mode" "[ '$RC_VISUAL' -eq 2 ]"
 check "front_door_registry_comment_pins_the_promise" "grep -q 'registry decides the pool' '$FRONT'"
 check "pool_adapter_guards_as_the_dispatched_provider" "grep -q 'reviewer_event_guard \"\$provider\"' '$POOL'"
 check "pool_adapter_exports_the_caller_identity" "grep -q 'export \"AI_\${provider^^}_CALLER=\$CALLER\"' '$POOL'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=chrome bash "$POOL" grok security-review ) > "$POOLTMP/out-chrome" 2>&1; RC_CHROME=$?
+check "pool_adapter_binds_the_verdict_to_the_body_not_chrome" "[ '$RC_CHROME' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-chrome'"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --base HEAD ) > "$POOLTMP/out-fwd" 2>&1; RC_FWD=$?
+check "pool_adapter_forwards_the_caller_base_to_the_runner" "[ '$RC_FWD' -eq 0 ] && grep -q -- '--base HEAD' '$POOLTMP/runner-args'"
+check "pool_adapter_pins_private_artifact_umask" "grep -q 'umask 077' '$POOL'"
+MODELS_SOURCE_LINE="$(grep -n '\. "$MODELS_ENV"' "$POOL" | head -1 | cut -d: -f1)"
+RUNNER_CHOICE_LINE="$(grep -n 'AI_POOL_RUNNER_GROK' "$POOL" | head -1 | cut -d: -f1)"
+check "pool_adapter_sources_models_env_before_choosing_the_runner" "[ -n '$MODELS_SOURCE_LINE' ] && [ -n '$RUNNER_CHOICE_LINE' ] && [ '$MODELS_SOURCE_LINE' -lt '$RUNNER_CHOICE_LINE' ]"
+check "pool_adapter_refuses_a_non_sha_head" "grep -q 'not a full commit SHA' '$POOL'"
 rm -rf "$POOLTMP"
 
 echo

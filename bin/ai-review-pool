@@ -36,7 +36,14 @@ CALLER="${AI_POOL_CALLER:-zcode}"
 
 die(){ printf 'ai-review-pool: error: %s\n' "$*" >&2; exit 3; }
 
+# Briefs carry owner-request text and reports carry model-quoted source; both
+# stay private on a shared machine (the session runners do the same).
+umask 077
+
 provider="${1:-}"; mode="${2:-}"
+# models.env is sourced BEFORE the runner is chosen so a RUNNER= line in that
+# file can never silently replace the session runner the provider case pins.
+[ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
 case "$provider" in
   grok)  RUNNER="${AI_POOL_RUNNER_GROK:-$ROOT/ai-grok-review}";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
   muse)  RUNNER="${AI_POOL_RUNNER_MUSE:-$ROOT/ai-muse}";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
@@ -47,7 +54,6 @@ case "$provider" in
 esac
 case "$mode" in plan-review|diff-review|security-review|final-check) ;; *) usage >&2; exit 2;; esac
 [ -x "$RUNNER" ] || [ -f "$RUNNER" ] || die "session runner not found for $provider: $RUNNER"
-[ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
 # This adapter is the recorded reviewer wrapper for the dispatched provider
 # (same contract as ai-grok-review): the guard records the invocation, re-execs
 # this script with the event identity, and the runner invoked below inherits it
@@ -92,6 +98,9 @@ SOURCE_IDENTITY="$("$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"
 STATE="$($LIFECYCLE begin --provider "$provider" --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" || die 'provider preflight failed; no review was assigned.'
 REVIEW_HEAD="$(jq -r .head "$STATE")"; REVIEW_DIGEST="$(jq -r .source_digest "$STATE")"
 [ -n "$REVIEW_HEAD" ] && [ "$REVIEW_HEAD" != null ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die 'lifecycle state carries no reviewed head.'; }
+# The head is later used as a fixed-string match for verdict binding; a
+# short or non-hex value would weaken that match to noise, so refuse it here.
+[[ "$REVIEW_HEAD" =~ ^[0-9a-f]{40}$ ]] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "lifecycle state head is not a full commit SHA: $REVIEW_HEAD"; }
 
 case "$mode" in
   plan-review) DECISION='Judge the implementation plan for missing cases, unsafe assumptions, forgotten files, and test gaps.';;
@@ -106,12 +115,18 @@ Owner request governing this review: $AI_REVIEW_OWNER_REQUEST"; fi
 TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"
 CHANGED_FILES=""
 if [ -n "$OPT_BASE" ]; then
-  CHANGED_FILES="$(git diff --name-only "$OPT_BASE" "$REVIEW_HEAD" 2>/dev/null || true)"
+  # Use the SHA the packet resolver already proved, never the caller's raw
+  # ref string, and never let a dashed value reach git as an option.
+  RESOLVED_BASE="$(jq -r '.base // empty' <<<"$SOURCE_IDENTITY" 2>/dev/null || true)"
+  [ -n "$RESOLVED_BASE" ] || RESOLVED_BASE="$(git rev-parse --verify --quiet "$OPT_BASE^{commit}" 2>/dev/null || true)"
+  if [ -n "$RESOLVED_BASE" ]; then
+    CHANGED_FILES="$(git diff --name-only "$RESOLVED_BASE" "$REVIEW_HEAD" -- 2>/dev/null || true)"
+  fi
 fi
 cat > "$TMP_BRIEF" <<BRIEF
 You are performing a READ-ONLY $mode. Do not edit, create, commit, push, merge, or delete files. Use only your read-only tools (no shell, no web search).
 
-The repository checkout under $REPO_ROOT is the review subject. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report.$(if [ -n "$CHANGED_FILES" ]; then printf '\n\nThe change under review is exactly these files (read the evidence packet manifest and its patch first, then these files, then only what you need to confirm a finding):\n%s' "$CHANGED_FILES"; fi)$([ -n "$TESTS_COMMAND" ] && printf '\n\ntests command on record: %s' "$TESTS_COMMAND")
+Your session harness announces an evidence packet (a sealed snapshot of the repository with a MANIFEST.md and the patch). THAT PACKET is the review subject, and you may read only files inside it - never the live working checkout, whose ignored files are outside this review's boundary. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report.$(if [ -n "$CHANGED_FILES" ]; then printf '\n\nThe change under review is exactly these files (read the packet manifest and its patch first, then these files, then only what you need inside the packet to confirm a finding):\n%s' "$CHANGED_FILES"; fi)$([ -n "$TESTS_COMMAND" ] && printf '\n\ntests command on record: %s' "$TESTS_COMMAND")
 
 $DECISION
 
@@ -125,17 +140,28 @@ BRIEF
 # absolute path), so the durable requirement is recorded without a sandbox
 # binding; the runner invoked below records its own nested invocation event.
 reviewer_event_evidence require-report "$provider" || die 'could not reserve durable review evidence.'
-set +e; "$RUNNER" new "$TAG" --prompt-file "$TMP_BRIEF" --max-turns "$RUNNER_MAX_TURNS" > "$TMP_TEXT" 2>&1; PROVIDER_RC=$?; set -e
+# Forward the caller's comparison so the runner seals ITS packet against the
+# same base and head: a runner left to its own defaults could judge a
+# different diff while this adapter's accounting records the caller's.
+RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF" --max-turns "$RUNNER_MAX_TURNS")
+[ -z "$OPT_BASE" ] || RUNNER_ARGS+=(--base "$OPT_BASE")
+[ -z "$OPT_ASSERT_HEAD" ] || RUNNER_ARGS+=(--assert-head "$OPT_ASSERT_HEAD")
+set +e; "$RUNNER" "${RUNNER_ARGS[@]}" > "$TMP_TEXT" 2>&1; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 [ "$PROVIDER_RC" -eq 0 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider runner exited nonzero ($PROVIDER_RC); diagnostic retained in the lifecycle record."; }
 [ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
 
 VERDICT="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
 case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
-MIN_HEAD="${REVIEW_HEAD:0:12}"
-grep -q "$MIN_HEAD" "$TMP_TEXT" || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure verdict-not-bound-to-head --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider verdict did not name the reviewed head; refusing unbound verdict."; }
-REPORT_BYTES="$(wc -c < "$TMP_TEXT")"
-[ "$REPORT_BYTES" -ge 400 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure report-floor --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider report is below the minimum analysis floor."; }
+# Binding and the analysis floor are judged on the MODEL BODY - the text the
+# reviewer wrote BEFORE the verdict heading - not on the runner's mixed
+# stdout+stderr chrome, which never carries the full 40-character head.
+if ! awk -v h="$REVIEW_HEAD" '/^## Verdict[[:space:]]*$/{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
+  "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure verdict-not-bound-to-head --report "$TMP_TEXT" >/dev/null 2>&1 || true
+  die "$provider verdict did not name the reviewed head; refusing unbound verdict."
+fi
+BODY_BYTES="$(awk '/^## Verdict[[:space:]]*$/{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
+[ "$BODY_BYTES" -ge 400 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure report-floor --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider analysis body is below the minimum analysis floor (runner chrome excluded)."; }
 
 OUT="$REPORT_DIR/${provider}-${mode}-${RUN_ID}.md"; [ ! -e "$OUT" ] || die "unique report collision: $OUT"
 TMP_REPORT="$(mktemp "$REPORT_DIR/.pool-report.XXXXXX")"
