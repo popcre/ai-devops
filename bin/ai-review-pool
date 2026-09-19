@@ -128,6 +128,14 @@ REVIEW_DIR="$("$SANDBOX" ensure-copy "$REPO_ROOT" "$TAG")" || {
   "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true
   die 'could not create the review snapshot.'
 }
+# The sandbox copy carries no remotes; the session runners key their shared
+# review locks on the origin URL, so the live origin is propagated into the
+# copy (git internals are outside the snapshot digest by construction).
+UPSTREAM_URL="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
+if [ -n "$UPSTREAM_URL" ]; then
+  git -C "$REVIEW_DIR" remote remove origin >/dev/null 2>&1 || true
+  git -C "$REVIEW_DIR" remote add origin "$UPSTREAM_URL" || { die 'could not propagate the upstream into the review snapshot.'; }
+fi
 REVIEW_HEAD="$(jq -r .head "$STATE")"; REVIEW_DIGEST="$(jq -r .source_digest "$STATE")"
 [ -n "$REVIEW_HEAD" ] && [ "$REVIEW_HEAD" != null ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die 'lifecycle state carries no reviewed head.'; }
 # The head is later used as a fixed-string match for verdict binding; a
