@@ -5,7 +5,8 @@ param(
   [Parameter(ParameterSetName='Verify')][switch]$Verify,
   [Parameter(ParameterSetName='Remove')][switch]$Remove,
   [Parameter(ParameterSetName='Remove')][switch]$RequireManifestMatch,
-  [Parameter(ParameterSetName='Remove')][string]$BackupPath,
+  [Parameter(ParameterSetName='Remove')][Parameter(ParameterSetName='Install')][Parameter(ParameterSetName='Update')][string]$BackupPath,
+  [switch]$RecoverPartial,
   [string]$OperatorUser = "$([Environment]::MachineName)\ahazan",
   [switch]$LibraryMode
 )
@@ -315,7 +316,16 @@ function Backup-MaintenanceInstallation {
   Invoke-ProtectedIcacls -Arguments @($Destination,'/inheritance:r','/grant:r','*S-1-5-32-544:(OI)(CI)F','*S-1-5-18:(OI)(CI)F')
   $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue
   if ($null -ne $task) { Export-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName | Set-Content -LiteralPath (Join-Path $Destination 'task.xml') -Encoding utf8 }
-  if (Test-Path -LiteralPath $script:PayloadRoot) { Copy-Item -LiteralPath $script:PayloadRoot -Destination (Join-Path $Destination 'payload') -Recurse }
+  if (Test-Path -LiteralPath $script:PayloadRoot) {
+    # The copy below is recursive and follows junctions, so the SOURCE tree is
+    # walked here, immediately before the copy, inside this function. Every
+    # caller (install, update, remove, recover) gets the same refusal without
+    # depending on an earlier caller-side check surviving a time window, and a
+    # child junction planted anywhere upstream of the copy is caught at the
+    # copy site.
+    Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
+    Copy-Item -LiteralPath $script:PayloadRoot -Destination (Join-Path $Destination 'payload') -Recurse
+  }
   @{ schema_version=1; task_path=$script:TaskPath; backed_up_at_utc=[DateTime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination 'recovery.json') -Encoding utf8
 }
 
@@ -426,7 +436,8 @@ function Remove-MaintenanceInstallation {
   # Re-verify immediately before every elevated recursive delete: the
   # verification at the top of removal is separated from these deletes by
   # a backup and an unregister, and the operator can plant a junction in
-  # place under the runtime root at any time.
+  # place under the payload root or the runtime root at any time.
+  Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
   Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
   Remove-Item -LiteralPath $script:PayloadRoot -Recurse -Force
   foreach ($name in $script:OwnedRuntimeNames) {
@@ -440,9 +451,88 @@ function Remove-MaintenanceInstallation {
   return 'REMOVED'
 }
 
+function Recover-MaintenanceInstallation {
+  # Recovery of a PARTIAL or drifted installation (for example one that
+  # failed mid-run, leaving a registered task or installed trees that fail
+  # Test-MaintenanceInstallation and therefore block both -Install and
+  # -Remove). This runs INSIDE the hardened installer process - pinned
+  # module path, hostile-variable refusal - and uses the same per-delete
+  # re-verification as removal. It refuses the per-user COM overrides
+  # before its first task cmdlet, asserts the payload and runtime roots
+  # (and the runtime parent) against reparse points both before the
+  # elevated backup AND again immediately before every delete, so no copy
+  # or delete can follow an intermediate junction planted in the backup
+  # window, exports an administrator-pinned recovery bundle first, refuses
+  # a running task, removes only owned names, and never touches the
+  # qualification evidence, its tmp sibling, or the parent directory.
+  param([Parameter(Mandatory)][string]$ExpectedOperatorSid, [string]$RecoveryPath)
+  Assert-NoPerUserComOverride
+  $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue
+  $payloadPresent = Test-Path -LiteralPath $script:PayloadRoot
+  if ($null -eq $task -and -not $payloadPresent) { return 'ABSENT' }
+  if ($null -ne $task -and [string]$task.State -eq 'Running') { throw 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before recovery.' }
+  if ([string]::IsNullOrWhiteSpace($RecoveryPath)) { $RecoveryPath = Join-Path (Split-Path -Parent $script:RuntimeRoot) ('windows-runner-maintenance-recovery-partial-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')) }
+  if (-not [IO.Path]::IsPathRooted($RecoveryPath)) { throw 'Recovery backup path must be absolute.' }
+  $normalizedRecovery = [IO.Path]::GetFullPath($RecoveryPath)
+  $adminRoots = @('C:\ProgramData\', 'C:\Program Files\', 'C:\Windows\')
+  if (-not @($adminRoots | Where-Object { $normalizedRecovery.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Recovery backup path must be under an administrator-managed root (ProgramData, Program Files or Windows).' }
+  Assert-SafeBackupChain -LiteralPath $RecoveryPath
+  # Fail fast: the payload tree is walked recursively BEFORE the backup copies
+  # it, so a child junction cannot be followed into the pinned bundle (the
+  # backup re-walks the source at the copy site itself; this earlier check
+  # only refuses before any elevated work starts). The runtime roots are
+  # likewise asserted early so an already-planted junction never reaches the
+  # backup window at all.
+  if ($payloadPresent) {
+    Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
+    Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
+  }
+  $runtimeParent = Split-Path -Parent $script:RuntimeRoot
+  Assert-NoReparsePoint -LiteralPath $runtimeParent -AllowMissing
+  Assert-NoForeignOwnership -LiteralPath $runtimeParent
+  Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot -AllowMissing
+  Assert-NoForeignOwnership -LiteralPath $script:RuntimeRoot
+  Backup-MaintenanceInstallation -Destination $RecoveryPath
+  if ($null -ne $task) { Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false }
+  # Re-verify immediately before every elevated recursive delete. The asserts
+  # above are separated from these deletes by the backup and the unregister,
+  # which is long enough for the operator to plant a junction - the same gap
+  # removal documents. The payload root is re-asserted at its delete, and the
+  # runtime root AND its parent are re-asserted immediately before any owned
+  # name is resolved through them: -AllowMissing above is exactly what lets a
+  # partial install (runtime never created) reach this point, so a root that
+  # APPEARED during the window must be refused here, and the per-leaf checks
+  # inside the loop can never see an intermediate reparse.
+  if ($payloadPresent) {
+    Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
+    Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
+    Remove-Item -LiteralPath $script:PayloadRoot -Recurse -Force
+  }
+  $runtimeParent = Split-Path -Parent $script:RuntimeRoot
+  Assert-NoReparsePoint -LiteralPath $runtimeParent -AllowMissing
+  Assert-NoForeignOwnership -LiteralPath $runtimeParent
+  Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot -AllowMissing
+  Assert-NoForeignOwnership -LiteralPath $script:RuntimeRoot
+  foreach ($name in $script:OwnedRuntimeNames) {
+    $path = Join-Path $script:RuntimeRoot $name
+    if (Test-Path -LiteralPath $path) {
+      Assert-NoReparsePoint -LiteralPath $path
+      Assert-NoForeignOwnership -LiteralPath $path
+      Remove-Item -LiteralPath $path -Recurse -Force
+    }
+  }
+  return 'RECOVERED'
+}
+
 function Invoke-InstallerMain {
   $sid = Resolve-OperatorSid -User $OperatorUser
   $sourceRoot = Split-Path -Parent $PSScriptRoot
+  if ($RecoverPartial) {
+    Assert-Administrator
+    $result = Recover-MaintenanceInstallation -ExpectedOperatorSid $sid -RecoveryPath $BackupPath
+    Write-Output ("RECOVERY: " + $result)
+    if (-not $Install -and -not $Update) { return }
+  }
   if ($Remove) { Assert-Administrator; Remove-MaintenanceInstallation -ExpectedOperatorSid $sid -RecoveryPath $BackupPath -RequireManifestMatch:$RequireManifestMatch -SourceRoot $sourceRoot; return }
   if ($Verify -or (-not $Install -and -not $Update)) { Test-MaintenanceInstallation -ExpectedOperatorSid $sid | Out-Null; Write-Output 'PASS: Windows runner maintenance installation verified'; return }
   Assert-Administrator

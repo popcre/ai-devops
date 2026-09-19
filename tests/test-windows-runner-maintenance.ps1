@@ -37,6 +37,15 @@ try {
   function Get-InstalledTaskSnapshot { return $script:mockTask }
   function Backup-MaintenanceInstallation { param($Destination) New-Item -ItemType Directory -Path $Destination -Force | Out-Null; 'backup' | Set-Content (Join-Path $Destination 'recovery.json') }
   $sid = 'S-1-5-21-100-200-300-1001'
+  # RecoverPartial contract cases assert against the exact function bodies,
+  # not the whole file: whole-file greps pass even when recovery lacks the
+  # property, because removal carries the same markers.
+  $recoverFnStart = $installer.IndexOf('function Recover-MaintenanceInstallation')
+  $recoverFn = $installer.Substring($recoverFnStart, $installer.IndexOf('function Invoke-InstallerMain', $recoverFnStart) - $recoverFnStart)
+  $removeFnStart = $installer.IndexOf('function Remove-MaintenanceInstallation')
+  $removeFn = $installer.Substring($removeFnStart, $recoverFnStart - $removeFnStart)
+  $backupFnStart = $installer.IndexOf('function Backup-MaintenanceInstallation')
+  $backupFn = $installer.Substring($backupFnStart, $installer.IndexOf('function Protect-EvidenceFile', $backupFnStart) - $backupFnStart)
 
   Case 'Install_IsIdempotent' {
     Install-MaintenancePayload -SourceRoot $sourceRoot -OperatorSid $sid
@@ -145,6 +154,18 @@ try {
   Case 'Installer_MachineNameNotEnvironment' { Assert-Contains $installer '[Environment]::MachineName'; Assert-True (-not $installer.Contains('$env:COMPUTERNAME')) 'installer identity still derived from the environment' }
   Case 'Worker_AcquiresAbandonedMutex' { Assert-Contains $worker 'AbandonedMutexException' }
   Case 'ComFolder_HasNoTrailingSeparator' { Assert-Contains $installer 'GetFolder($script:TaskFolderCom)'; Assert-Contains $worker 'GetFolder(''\AiDevOps'')'; Assert-True (-not ($installer + $worker).Contains('GetFolder(''\AiDevOps\'')')) 'COM folder path ends in a separator (0x8007007B)' }
+  Case 'RecoverPartial_RunsInsideTheHardenedInstaller' { Assert-Contains $installer 'function Recover-MaintenanceInstallation'; Assert-Contains $installer '[switch]$RecoverPartial'; Assert-Contains $installer 'if ($RecoverPartial) {' }
+  Case 'RecoverPartial_RefusesRunningTask' { Assert-Contains $recoverFn 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before recovery.' }
+  Case 'RecoverPartial_ExportsPinnedBundleFirst' { $b = $recoverFn.IndexOf('Backup-MaintenanceInstallation -Destination $RecoveryPath'); $u = $recoverFn.IndexOf('Unregister-ScheduledTask'); Assert-True ($b -gt 0 -and $u -gt $b) 'recovery removes before exporting' }
+  Case 'RecoverPartial_ReverifiesPayloadRootAtItsDelete' { Assert-True ($recoverFn -match 'Assert-NoReparsePoint -LiteralPath \$script:PayloadRoot[\s\S]{0,160}Assert-NoForeignOwnership -LiteralPath \$script:PayloadRoot[\s\S]{0,160}Remove-Item -LiteralPath \$script:PayloadRoot -Recurse -Force') 'payload delete not re-verified immediately' }
+  Case 'RecoverPartial_ReassertsRuntimeRootsAfterTheBackupWindow' { $b = $recoverFn.IndexOf('Backup-MaintenanceInstallation -Destination $RecoveryPath'); $root = $recoverFn.IndexOf('Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot -AllowMissing', $b); $parent = $recoverFn.IndexOf('Assert-NoReparsePoint -LiteralPath $runtimeParent -AllowMissing', $b); $loop = $recoverFn.IndexOf('foreach ($name in $script:OwnedRuntimeNames) {'); Assert-True ($b -ge 0 -and $root -gt $b -and $parent -gt $b -and $loop -gt $root -and $loop -gt $parent) 'runtime roots not re-asserted immediately before the owned-name deletes' }
+  Case 'RecoverPartial_ReverifiesEveryOwnedNameDelete' { Assert-True ($recoverFn -match 'Assert-NoReparsePoint -LiteralPath \$path[\s\S]{0,160}Assert-NoForeignOwnership -LiteralPath \$path[\s\S]{0,160}Remove-Item -LiteralPath \$path -Recurse -Force') 'owned-name delete not re-verified immediately'; Assert-Contains $recoverFn 'RECOVERED' }
+  Case 'RecoverPartial_RemovesOnlyOwnedNamesAndNoEvidence' { Assert-Contains $recoverFn 'foreach ($name in $script:OwnedRuntimeNames) {'; Assert-True (-not $recoverFn.Contains('EvidencePath')) 'recovery touches the qualification evidence' }
+  Case 'RecoverPartial_RefusesComOverridesBeforeFirstTaskCmdlet' { $c = $recoverFn.IndexOf('Assert-NoPerUserComOverride'); $t = $recoverFn.IndexOf('Get-ScheduledTask'); Assert-True ($c -ge 0 -and $t -ge 0 -and $c -lt $t) 'recovery touches task COM before the override refusal' }
+  Case 'RecoverPartial_AssertsPayloadTreeBeforeItsBackup' { Assert-True ($recoverFn -match 'Assert-NoReparsePoint -LiteralPath \$script:PayloadRoot[\s\S]{0,400}Backup-MaintenanceInstallation -Destination \$RecoveryPath') 'recovery does not walk the payload tree before its backup' }
+  Case 'Backup_WalksSourceTreeAtTheCopySite' { Assert-True ($backupFn -match 'Assert-NoReparsePoint -LiteralPath \$script:PayloadRoot[\s\S]{0,400}Copy-Item -LiteralPath \$script:PayloadRoot') 'backup copies the payload without walking the source at the copy site' }
+  Case 'Remove_ReverifiesPayloadRootAtItsDelete' { Assert-True ($removeFn -match 'Unregister-ScheduledTask[\s\S]{0,600}Assert-NoReparsePoint -LiteralPath \$script:PayloadRoot[\s\S]{0,160}Assert-NoForeignOwnership -LiteralPath \$script:PayloadRoot[\s\S]{0,160}Remove-Item -LiteralPath \$script:PayloadRoot -Recurse -Force') 'remove payload delete not re-verified immediately' }
+  Case 'RecoverPartial_BackupPathBindsWithInstallAndUpdate' { Assert-True ($installer -match "ParameterSetName='Remove'\)\]\[Parameter\(ParameterSetName='Install'\)\]\[Parameter\(ParameterSetName='Update'\)\]") 'BackupPath cannot be supplied to -RecoverPartial -Install or -Update' }
   Case 'Contract_HasSingleFixedOperationAndPaths' { Assert-True ($policy.operation -ceq 'refresh-qualification') 'wrong operation'; Assert-True ($policy.task_path -ceq '\AiDevOps\WindowsRunnerMaintenance') 'wrong task'; Assert-True ($policy.PSObject.Properties.Name -notcontains 'commands') 'command catalog found' }
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
