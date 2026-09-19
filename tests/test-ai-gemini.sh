@@ -20,7 +20,7 @@ cat > "$TMP/bin/sandbox" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- ensure-copy) src="$2"; tag="$3"; dst="$MOCK_COPIES/$tag"; cp -a "$src" "$dst"; printf '%s\nevidence_format=1\n' "$src" > "$dst/.ai-review-sandbox"; printf %s "$dst" ;;
+ ensure-copy) [ -z "${MOCK_ENSURE_COPY_SLEEP:-}" ] || sleep "$MOCK_ENSURE_COPY_SLEEP"; src="$2"; tag="$3"; dst="$MOCK_COPIES/$tag"; cp -a "$src" "$dst"; printf '%s\nevidence_format=1\n' "$src" > "$dst/.ai-review-sandbox"; printf %s "$dst" ;;
  remove-copy) rm -rf "$MOCK_COPIES/$3" ;;
  *) exit 2 ;;
 esac
@@ -30,7 +30,7 @@ cat > "$TMP/bin/packet" <<'EOF'
 set -e
 case "$1" in
  resolve) exec "$REAL_REVIEW_PACKET" "$@" ;;
- build) p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
+ build) [ -z "${MOCK_PACKET_BUILD_SLEEP:-}" ] || sleep "$MOCK_PACKET_BUILD_SLEEP"; p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
  verify)
    test -s "$2/MANIFEST.sha256"
    if [ -f "$2/identity.json" ]; then
@@ -223,6 +223,37 @@ kill -TERM "$RUNPID" 2>/dev/null || true; RUNRC=0; wait "$RUNPID" 2>/dev/null ||
 check 'interrupted review returns failure' "test '$RUNRC' -ne 0"
 check 'interrupted work is marked for recovery' "test \"\$(jq -r .status \"\$(meta_for concurrent)\")\" = RECOVERY_REQUIRED"
 check 'interrupted private copy is preserved' "test -d \"\$(jq -r .review_dir \"\$(meta_for concurrent)\")\""
+
+echo '== prepare-phase terminal timeout bounds'
+# 2026-09-18: governed reviews on edge-dev hung for hours BEFORE any session
+# metadata existed. Every prepare pass was unbounded, and the byte inventories
+# spawn one process per file, so a loaded Windows host turns a large snapshot
+# into an indefinite stall. Each prepare step must now die in time, name
+# itself, and leave neither a session record nor a held lock behind.
+SLOW_SNAP="$TMP/repo-slow-snap"; make_repo "$SLOW_SNAP"
+set +e; SLOW_SNAP_START=$SECONDS; SLOW_SNAP_OUT="$(cd "$SLOW_SNAP" && MOCK_ENSURE_COPY_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-snap --prompt review 2>&1)"; SLOW_SNAP_RC=$?; SLOW_SNAP_ELAPSED=$((SECONDS-SLOW_SNAP_START)); set -e
+check 'a stalled snapshot step fails in time instead of hanging' "test '$SLOW_SNAP_RC' -ne 0 && test '$SLOW_SNAP_ELAPSED' -lt $(budget 2 30)"
+check 'the snapshot timeout names the step and the bound' "printf '%s' '$SLOW_SNAP_OUT' | grep -q 'snapshot build failed or timed out after 2s'"
+check 'a timed-out prepare starts no session and holds no lock' "test -z \"\$(meta_for slow-snap)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-snap*' -print -quit 2>/dev/null)\""
+SLOW_PKT="$TMP/repo-slow-pkt"; make_repo "$SLOW_PKT"
+set +e; SLOW_PKT_OUT="$(cd "$SLOW_PKT" && MOCK_PACKET_BUILD_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-pkt --prompt review 2>&1)"; SLOW_PKT_RC=$?; set -e
+check 'a stalled packet build fails in time and names the step' "test '$SLOW_PKT_RC' -ne 0 && printf '%s' '$SLOW_PKT_OUT' | grep -q 'packet build failed or timed out after 2s' && test -z \"\$(meta_for slow-pkt)\""
+SLOW_INV="$TMP/repo-slow-inv"; make_repo "$SLOW_INV"; printf slow > "$SLOW_INV/inventory-slow-trigger"
+mkdir -p "$TMP/slow-bin"
+cat > "$TMP/slow-bin/sha256sum" <<'EOF'
+#!/usr/bin/env bash
+# Stall only the wrapper's review-copy inventory, which hashes the copied
+# trigger as the relative path './inventory-slow-trigger' behind a '--'
+# separator. Absolute-path hashes of the same file (ai-review-packet resolve
+# runs earlier in new() and must NOT stall) do not match this shape.
+case "$*" in *"-- ./inventory-slow-trigger") sleep 15 ;; esac
+exec "$REAL_SHA256SUM_BIN" "$@"
+EOF
+chmod +x "$TMP/slow-bin/sha256sum"
+set +e; SLOW_INV_START=$SECONDS; SLOW_INV_OUT="$(cd "$SLOW_INV" && PATH="$TMP/slow-bin:$PATH" REAL_SHA256SUM_BIN="$REAL_SHA256SUM" AI_GEMINI_PREPARE_TIMEOUT=2s MOCK_MODE=normal "$SCRIPT" new slow-inv --prompt review 2>&1)"; SLOW_INV_RC=$?; SLOW_INV_ELAPSED=$((SECONDS-SLOW_INV_START)); set -e
+check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test '$SLOW_INV_ELAPSED' -lt $(budget 2 30)"
+check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory failed or timed out after 2s'"
+check 'a timed-out inventory starts no session and holds no lock' "test -z \"\$(meta_for slow-inv)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-inv*' -print -quit 2>/dev/null)\""
 R7="$TMP/repo7"; make_repo "$R7"; new_run "$R7" stale normal >/dev/null; printf next >> "$R7/file.txt"; git -C "$R7" add file.txt; git -C "$R7" commit -qm next
 check 'follow-up refuses a changed repository head' "! (cd '$R7' && '$SCRIPT' ask stale --prompt later)"
 check 'stale-head refusal becomes recovery-required' "test \"\$(jq -r .status \"\$(meta_for stale)\")\" = RECOVERY_REQUIRED"
