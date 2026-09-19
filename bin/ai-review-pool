@@ -38,10 +38,10 @@ die(){ printf 'ai-review-pool: error: %s\n' "$*" >&2; exit 3; }
 
 provider="${1:-}"; mode="${2:-}"
 case "$provider" in
-  grok)  RUNNER="${AI_POOL_RUNNER_GROK:-$ROOT/ai-grok-review}";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-20}" ;;
-  muse)  RUNNER="${AI_POOL_RUNNER_MUSE:-$ROOT/ai-muse}";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-20}" ;;
-  qwen)  RUNNER="${AI_POOL_RUNNER_QWEN:-$ROOT/ai-qwen}";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-20}" ;;
-  gemini) RUNNER="${AI_POOL_RUNNER_GEMINI:-$ROOT/ai-gemini}";    RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-20}" ;;
+  grok)  RUNNER="${AI_POOL_RUNNER_GROK:-$ROOT/ai-grok-review}";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  muse)  RUNNER="${AI_POOL_RUNNER_MUSE:-$ROOT/ai-muse}";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  qwen)  RUNNER="${AI_POOL_RUNNER_QWEN:-$ROOT/ai-qwen}";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  gemini) RUNNER="${AI_POOL_RUNNER_GEMINI:-$ROOT/ai-gemini}";    RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
   ''|-h|--help|help) usage; [ -n "$provider" ] || exit 0; exit 2 ;;
   *) printf 'ai-review-pool: error: %s is not a pool provider with a session runner.\n' "$provider" >&2; exit 2 ;;
 esac
@@ -104,10 +104,14 @@ if [ -n "${AI_REVIEW_OWNER_REQUEST:-}" ]; then DECISION="$DECISION
 Owner request governing this review: $AI_REVIEW_OWNER_REQUEST"; fi
 
 TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"
+CHANGED_FILES=""
+if [ -n "$OPT_BASE" ]; then
+  CHANGED_FILES="$(git diff --name-only "$OPT_BASE" "$REVIEW_HEAD" 2>/dev/null || true)"
+fi
 cat > "$TMP_BRIEF" <<BRIEF
 You are performing a READ-ONLY $mode. Do not edit, create, commit, push, merge, or delete files. Use only your read-only tools (no shell, no web search).
 
-The repository checkout under $REPO_ROOT is the review subject. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report. Key evidence of the change: run your read tools over the repository files ($([ -n "$TESTS_COMMAND" ] && printf 'tests command on record: %s; ' "$TESTS_COMMAND")decision: $DECISION).
+The repository checkout under $REPO_ROOT is the review subject. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report.$(if [ -n "$CHANGED_FILES" ]; then printf '\n\nThe change under review is exactly these files (read the evidence packet manifest and its patch first, then these files, then only what you need to confirm a finding):\n%s' "$CHANGED_FILES"; fi)$([ -n "$TESTS_COMMAND" ] && printf '\n\ntests command on record: %s' "$TESTS_COMMAND")
 
 $DECISION
 
