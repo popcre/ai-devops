@@ -242,7 +242,11 @@ SLOW_INV="$TMP/repo-slow-inv"; make_repo "$SLOW_INV"; printf slow > "$SLOW_INV/i
 mkdir -p "$TMP/slow-bin"
 cat > "$TMP/slow-bin/sha256sum" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *"$MOCK_COPIES"*inventory-slow-trigger*) sleep 60 ;; esac
+# Stall only the wrapper's review-copy inventory, which hashes the copied
+# trigger as the relative path './inventory-slow-trigger' behind a '--'
+# separator. Absolute-path hashes of the same file (ai-review-packet resolve
+# runs earlier in new() and must NOT stall) do not match this shape.
+case "$*" in *"-- ./inventory-slow-trigger") sleep 15 ;; esac
 exec "$REAL_SHA256SUM_BIN" "$@"
 EOF
 chmod +x "$TMP/slow-bin/sha256sum"
