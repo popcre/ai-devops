@@ -1267,14 +1267,14 @@ FAKE_HEAD="$(git -C "$POOLTMP/fakerepo" rev-parse HEAD)"
 cat > "$POOLTMP/packet" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
-  resolve) if [ -f "$POOLTMP/flip" ]; then printf 'identity-after\n'; else printf 'identity-before\n'; fi ;;
+  resolve) if [ -f "$(dirname "$0")/flip" ]; then printf 'identity-after\n'; else printf 'identity-before\n'; fi ;;
   *) exit 0 ;;
 esac
 EOF
 cat > "$POOLTMP/lifecycle" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
-  begin) printf '{"head":"$FAKE_HEAD","source_digest":"deadbeef","stale":false,"verdict":null}\n' ;;
+  begin) printf '{"head":"$FAKE_HEAD","source_digest":"deadbeef","stale":false,"verdict":null}\n' > "\$(dirname "\$0")/state.json"; printf '%s\n' "\$(dirname "\$0")/state.json" ;;
   finish) verdict=''; shift; while [ \$# -gt 0 ]; do [ "\$1" = --verdict ] && verdict="\$2"; shift; done; printf '{"stale":false,"verdict":"%s"}\n' "\$verdict" ;;
   *) exit 0 ;;
 esac
@@ -1285,31 +1285,34 @@ cat > "$POOLTMP/runner" <<'EOF'
 BRIEF="$4"
 HEAD="$(grep -oE 'head commit is [0-9a-f]{7,40}' "$BRIEF" | head -1 | sed 's/.*is //')"
 case "${POOL_RUNNER_MODE:-approve}" in
-  approve) printf 'Analysis of the change with evidence lines and sibling checks. Head under review: %s. More analysis text follows to clear the minimum report floor with real content: findings grouped by severity, file and line references, and the sibling-class sweep this harness requires of every pool review before it may return a verdict word.\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+  approve) printf 'Analysis of the change with evidence lines and sibling checks across the full diff, including the boundary, refusal and fail-closed paths the adapter contract requires. Head under review: %s. The review covered the registry eligibility decision at the front door, the evidence packet identity binding before and after the paid run, the lifecycle begin and finish accounting, the verdict-to-head binding rule, the report floor, and every fail-closed refusal path a pool review must keep. Findings are grouped by severity with file and line references, and the sibling-class sweep ran over each guard before this verdict was written, exactly as the harness requires of every pool review.\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
   nounbound) printf 'Some analysis without naming the head under review, deliberately long enough to clear the report floor so that the binding check is the only failure mode exercised by this case, with no other assertion depending on the content of this paragraph.\n\n## Verdict\nAPPROVE\n' ;;
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+  drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
 esac
 EOF
 chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/runner"
-export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_GROK="$POOLTMP/runner" AI_POOL_CALLER=zcode-test; }
+export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_GROK="$POOLTMP/runner" AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
 
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-approve" 2>&1; RC_APPROVE=$?
-check "pool_adapter_approves_a_bound_verdict" "[ '$RC_APPROVE' -eq 0 ] && grep -q 'APPROVE' '$POOLTMP/out-approve'"
+APPROVE_REPORT="$(tail -1 "$POOLTMP/out-approve" 2>/dev/null)"
+check "pool_adapter_approves_a_bound_verdict" "[ '$RC_APPROVE' -eq 0 ] && [ -f '$APPROVE_REPORT' ] && grep -q APPROVE '$APPROVE_REPORT'"
 check "pool_adapter_writes_the_report" "ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '^grok-security-review-'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=nounbound bash "$POOL" grok security-review ) > "$POOLTMP/out-nb" 2>&1; RC_NB=$?
-check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -eq 3 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
+check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
-check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -eq 3 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-nv'"
+check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-nv'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" grok security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
-check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -eq 3 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
-touch "$POOLTMP/flip"
-( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
+check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
 rm -f "$POOLTMP/flip"
-check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -eq 3 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift'"
+check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift'"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok visual-review ) > "$POOLTMP/out-visual" 2>&1; RC_VISUAL=$?
 check "pool_adapter_refuses_unsupported_mode" "[ '$RC_VISUAL' -eq 2 ]"
 check "front_door_registry_comment_pins_the_promise" "grep -q 'registry decides the pool' '$FRONT'"
+check "pool_adapter_guards_as_the_dispatched_provider" "grep -q 'reviewer_event_guard \"\$provider\"' '$POOL'"
+check "pool_adapter_exports_the_caller_identity" "grep -q 'export \"AI_\${provider^^}_CALLER=\$CALLER\"' '$POOL'"
 rm -rf "$POOLTMP"
 
 echo

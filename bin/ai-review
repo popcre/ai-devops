@@ -16,10 +16,12 @@ case "${1:-}" in
   codex) wrapper="${AI_CODEX_REVIEW_BIN:-$ROOT/ai-codex-review}" ;;
   doctor) "$ROOT/ai-claude-review" doctor; "$ROOT/ai-codex-review" doctor; exit 0 ;;
   -h|--help|help|'') usage; exit 0 ;;
-  grok|muse|qwen|gemini)
-    # Eligibility comes from the reviewer registry, never from a hardcoded
-    # list: health is not membership, and membership is not health (the
-    # lifecycle preflight owns health and quarantine).
+  *)
+    # Every other name is a pool candidate. Eligibility comes from the
+    # reviewer registry, never from a hardcoded list: health is not
+    # membership, and membership is not health (the lifecycle preflight
+    # owns health and quarantine). Unknown names land here too, so the
+    # registry — not this case pattern — delivers the refusal.
     REGISTRY=""
     for candidate in "$REAL_DIR/../config/reviewer-registry.json" "$ROOT/../config/reviewer-registry.json"; do
       [ -f "$candidate" ] && REGISTRY="$candidate" && break
@@ -31,7 +33,6 @@ case "${1:-}" in
       exit 2
     fi
     pool_provider="$1"; wrapper="${AI_REVIEW_POOL_BIN:-$ROOT/ai-review-pool}" ;;
-  *) printf 'ai-review: error: %s has no approval-gate wrapper. Use claude, codex, or a reviewer registered in config/reviewer-registry.json.\n' "${1:-unknown}" >&2; exit 2 ;;
 esac
 shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
