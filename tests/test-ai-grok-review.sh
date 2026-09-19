@@ -1262,7 +1262,7 @@ check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 
 POOLTMP="$(mktemp -d)"
 mkdir -p "$POOLTMP/fakerepo"
-( cd "$POOLTMP/fakerepo" && git init -q && printf '.ai/\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm init )
+( cd "$POOLTMP/fakerepo" && git init -q && printf '.ai/\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm init && git remote add origin 'https://user:p@ss@GitHub.com/org/repo.git' )
 FAKE_HEAD="$(git -C "$POOLTMP/fakerepo" rev-parse HEAD)"
 cat > "$POOLTMP/packet" <<'EOF'
 #!/usr/bin/env bash
@@ -1283,6 +1283,7 @@ cat > "$POOLTMP/runner" <<'EOF'
 #!/usr/bin/env bash
 # invoked as: runner new TAG --prompt-file BRIEF --max-turns N
 printf '%s\n' "$*" >> "$(dirname "$0")/runner-args"
+git remote get-url origin > "$(dirname "$0")/origin-url" 2>/dev/null || true
 BRIEF="$4"
 HEAD="$(grep -oE 'head commit is [0-9a-f]{7,40}' "$BRIEF" | head -1 | sed 's/.*is //')"
 case "${POOL_RUNNER_MODE:-approve}" in
@@ -1331,7 +1332,8 @@ check "pool_adapter_pins_private_artifact_umask" "grep -q 'umask 077' '$POOL'"
 GUARD_LINE="$(grep -n 'reviewer_event_guard "\$provider"' "$POOL" | head -1 | cut -d: -f1)"
 MODELS_SOURCE_LINE="$(grep -n '\. "$MODELS_ENV"' "$POOL" | head -1 | cut -d: -f1)"
 check "pool_adapter_records_the_invocation_before_sourcing_models_env" "[ -n '$GUARD_LINE' ] && [ -n '$MODELS_SOURCE_LINE' ] && [ '$GUARD_LINE' -lt '$MODELS_SOURCE_LINE' ]"
-check "pool_adapter_strips_credentials_from_the_snapshot_origin" "grep -qF '[^/@]*@#' '$POOL' && grep -q 'UPSTREAM_URL=.*sed' '$POOL' && grep -q 'remote add origin -- ' '$POOL'"
+SNAPSHOT_ORIGIN="$(cat "$POOLTMP/origin-url" 2>/dev/null)"
+check "pool_adapter_strips_credentials_from_the_snapshot_origin" "[ -n '$SNAPSHOT_ORIGIN' ] && [ "'$SNAPSHOT_ORIGIN'" = "'https://github.com/org/repo.git'" ]" "grep -qF '[^/@]*@#' '$POOL' && grep -q 'UPSTREAM_URL=.*sed' '$POOL' && grep -q 'remote add origin -- ' '$POOL'"
 check "pool_adapter_runner_overrides_require_test_hooks" "grep -q 'AI_POOL_TEST_HOOKS=1 to substitute a runner' '$POOL'"
 check "pool_adapter_refuses_a_non_sha_head" "grep -q 'not a full commit SHA' '$POOL'"
 rm -rf "$POOLTMP"

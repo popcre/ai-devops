@@ -130,14 +130,30 @@ REVIEW_DIR="$("$SANDBOX" ensure-copy "$REPO_ROOT" "$TAG")" || {
 }
 # The sandbox copy carries no remotes; the session runners key their shared
 # review locks on the origin URL, so the live origin is propagated into the
-# copy. `remote get-url` EXPANDS url.*.insteadOf rewrites, which can embed
-# userinfo credentials; the lock needs only host/path, so userinfo is stripped
-# before the URL is stored anywhere the model can read (the lifecycle and the
-# grok wrapper sanitize the same class for the same reason). Git internals sit
-# outside the snapshot digest by construction.
-UPSTREAM_URL="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
-if [ -n "$UPSTREAM_URL" ]; then
-  UPSTREAM_URL="$(printf '%s' "$UPSTREAM_URL" | sed -e 's#^\(https\?://\)[^/@]*@#\1#')"
+# copy. The RAW stored remote is read (`config --get`, never `remote get-url`,
+# which expands url.*.insteadOf rewrites that can embed global credentials),
+# and ALL userinfo is stripped - to the LAST '@' in the authority, so a
+# password containing '@' cannot survive - with the scheme lowercased and
+# scp-like users normalized to the conventional 'git@' the lock matcher
+# expects. Nothing credential-shaped reaches the model-readable snapshot
+# config. Git internals sit outside the snapshot digest by construction.
+UPSTREAM_RAW="$(git -C "$REPO_ROOT" config --get remote.origin.url 2>/dev/null || true)"
+if [ -n "$UPSTREAM_RAW" ]; then
+  case "$UPSTREAM_RAW" in
+    *://*)
+      _scheme="${UPSTREAM_RAW%%://*}"; _rest="${UPSTREAM_RAW#*://}"
+      _authority="${_rest%%/*}"; _path="${_rest#"$_authority"}"
+      _authority="${_authority##*@}"; _authority="${_authority,,}"
+      UPSTREAM_URL="$(printf '%s://%s%s' "${_scheme,,}" "$_authority" "$_path")" ;;
+    *:*)
+      _hostpart="${UPSTREAM_RAW%%:*}"; _pathpart="${UPSTREAM_RAW#*:}"
+      case "$_hostpart" in
+        *@*) UPSTREAM_URL="git@${_hostpart##*@}:$_pathpart" ;;
+        *)   UPSTREAM_URL="${_hostpart}:$_pathpart" ;;
+      esac ;;
+    *) UPSTREAM_URL="$UPSTREAM_RAW" ;;
+  esac
+  unset _scheme _rest _authority _path _hostpart _pathpart
   git -C "$REVIEW_DIR" remote remove origin >/dev/null 2>&1 || true
   git -C "$REVIEW_DIR" remote add origin -- "$UPSTREAM_URL" || { die 'could not propagate the upstream into the review snapshot.'; }
 fi
