@@ -1295,7 +1295,7 @@ case "${POOL_RUNNER_MODE:-approve}" in
 esac
 EOF
 chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/runner"
-export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_GROK="$POOLTMP/runner" AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
+export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_GROK="$POOLTMP/runner" AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
 
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-approve" 2>&1; RC_APPROVE=$?
 APPROVE_REPORT="$(tail -1 "$POOLTMP/out-approve" 2>/dev/null)"
@@ -1328,9 +1328,10 @@ check "pool_adapter_binds_the_verdict_to_the_body_not_chrome" "[ '$RC_CHROME' -n
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --base HEAD ) > "$POOLTMP/out-fwd" 2>&1; RC_FWD=$?
 check "pool_adapter_forwards_the_caller_base_to_the_runner" "[ '$RC_FWD' -eq 0 ] && grep -q -- '--base HEAD' '$POOLTMP/runner-args'"
 check "pool_adapter_pins_private_artifact_umask" "grep -q 'umask 077' '$POOL'"
+GUARD_LINE="$(grep -n 'reviewer_event_guard "\$provider"' "$POOL" | head -1 | cut -d: -f1)"
 MODELS_SOURCE_LINE="$(grep -n '\. "$MODELS_ENV"' "$POOL" | head -1 | cut -d: -f1)"
-RUNNER_CHOICE_LINE="$(grep -n 'AI_POOL_RUNNER_GROK' "$POOL" | head -1 | cut -d: -f1)"
-check "pool_adapter_sources_models_env_before_choosing_the_runner" "[ -n '$MODELS_SOURCE_LINE' ] && [ -n '$RUNNER_CHOICE_LINE' ] && [ '$MODELS_SOURCE_LINE' -lt '$RUNNER_CHOICE_LINE' ]"
+check "pool_adapter_records_the_invocation_before_sourcing_models_env" "[ -n '$GUARD_LINE' ] && [ -n '$MODELS_SOURCE_LINE' ] && [ '$GUARD_LINE' -lt '$MODELS_SOURCE_LINE' ]"
+check "pool_adapter_runner_overrides_require_test_hooks" "grep -q 'AI_POOL_TEST_HOOKS=1 to substitute a runner' '$POOL'"
 check "pool_adapter_refuses_a_non_sha_head" "grep -q 'not a full commit SHA' '$POOL'"
 rm -rf "$POOLTMP"
 

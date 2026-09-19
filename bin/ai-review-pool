@@ -41,26 +41,42 @@ die(){ printf 'ai-review-pool: error: %s\n' "$*" >&2; exit 3; }
 umask 077
 
 provider="${1:-}"; mode="${2:-}"
-# models.env is sourced BEFORE the runner is chosen so a RUNNER= line in that
-# file can never silently replace the session runner the provider case pins.
-[ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
 case "$provider" in
-  grok)  RUNNER="${AI_POOL_RUNNER_GROK:-$ROOT/ai-grok-review}";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
-  muse)  RUNNER="${AI_POOL_RUNNER_MUSE:-$ROOT/ai-muse}";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
-  qwen)  RUNNER="${AI_POOL_RUNNER_QWEN:-$ROOT/ai-qwen}";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
-  gemini) RUNNER="${AI_POOL_RUNNER_GEMINI:-$ROOT/ai-gemini}";    RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  grok)  RUNNER="$ROOT/ai-grok-review";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  muse)  RUNNER="$ROOT/ai-muse";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  qwen)  RUNNER="$ROOT/ai-qwen";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  gemini) RUNNER="$ROOT/ai-gemini";      RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
   ''|-h|--help|help) usage; [ -n "$provider" ] || exit 0; exit 2 ;;
   *) printf 'ai-review-pool: error: %s is not a pool provider with a session runner.\n' "$provider" >&2; exit 2 ;;
 esac
 case "$mode" in plan-review|diff-review|security-review|final-check) ;; *) usage >&2; exit 2;; esac
-[ -x "$RUNNER" ] || [ -f "$RUNNER" ] || die "session runner not found for $provider: $RUNNER"
 # This adapter is the recorded reviewer wrapper for the dispatched provider
 # (same contract as ai-grok-review): the guard records the invocation, re-execs
 # this script with the event identity, and the runner invoked below inherits it
 # through the guard's parent-match re-entry instead of recording a second one.
+# The invocation is recorded BEFORE any shell file is sourced, so unlogged
+# code cannot run ahead of the ledger entry (claude's ordering).
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   reviewer_event_guard "$provider" "$_AI_EVENT_SELF" "$@"
 fi
+# models.env may carry provider endpoints as shell assignments. It is sourced
+# only AFTER the invocation is recorded, and it can never retarget the session
+# runner: AI_POOL_RUNNER_* substitutions are a TEST HOOK and require an
+# explicit AI_POOL_TEST_HOOKS=1, which the offline suites set.
+for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI; do
+  if [ -n "${!_hook_var:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
+    die "$_hook_var is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute a runner."
+  fi
+done
+unset _hook_var
+case "$provider" in
+  grok)   [ -z "${AI_POOL_RUNNER_GROK:-}" ] || RUNNER="$AI_POOL_RUNNER_GROK" ;;
+  muse)   [ -z "${AI_POOL_RUNNER_MUSE:-}" ] || RUNNER="$AI_POOL_RUNNER_MUSE" ;;
+  qwen)   [ -z "${AI_POOL_RUNNER_QWEN:-}" ] || RUNNER="$AI_POOL_RUNNER_QWEN" ;;
+  gemini) [ -z "${AI_POOL_RUNNER_GEMINI:-}" ] || RUNNER="$AI_POOL_RUNNER_GEMINI" ;;
+esac
+[ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
+[ -x "$RUNNER" ] || [ -f "$RUNNER" ] || die "session runner not found for $provider: $RUNNER"
 # Single expansion: the value is never re-evaluated, and the name is pinned
 # by the provider case above.
 printf -v _pool_caller_var 'AI_%s_CALLER' "${provider^^}"
@@ -90,17 +106,28 @@ git check-ignore -q .ai/reviews/ai-review-pool-probe || die '.ai/reviews must be
 mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became a link.'
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="pool-${provider}-${mode}-${RUN_ID}"; STARTED="$(date +%s)"
-STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""; TESTS_DIR=""
+STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""; REVIEW_DIR=""
+SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$ROOT/ai-review-sandbox}"
 cleanup(){
   reviewer_event_cleanup_allowed "$provider" || return 1
   [ -z "$TMP_BRIEF" ] || rm -f "$TMP_BRIEF"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"; [ -z "$TMP_TESTS" ] || rm -f "$TMP_TESTS"
-  [ -z "$TESTS_DIR" ] || "${AI_REVIEW_SANDBOX_BIN:-$ROOT/ai-review-sandbox}" remove-copy "$REPO_ROOT" "$TESTS_TAG" >/dev/null 2>&1 || true
+  [ -z "$REVIEW_DIR" ] || "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
 SOURCE_IDENTITY="$("$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"})" || die 'source identity refused before review dispatch.'
 STATE="$($LIFECYCLE begin --provider "$provider" --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" || die 'provider preflight failed; no review was assigned.'
+# The paid review runs against a DISPOSABLE SNAPSHOT, exactly like the
+# claude/codex wrappers: the copy excludes git-ignored files, the session
+# runner is launched from inside it, and its digest (baselined AFTER the
+# tests command, which may legitimately create artifacts in the copy) is
+# compared after the run so a model write invalidates the verdict.
+[ -x "$SANDBOX" ] || [ -f "$SANDBOX" ] || die 'sandbox tool not found for the review snapshot.'
+REVIEW_DIR="$("$SANDBOX" ensure-copy "$REPO_ROOT" "$TAG")" || {
+  "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true
+  die 'could not create the review snapshot.'
+}
 REVIEW_HEAD="$(jq -r .head "$STATE")"; REVIEW_DIGEST="$(jq -r .source_digest "$STATE")"
 [ -n "$REVIEW_HEAD" ] && [ "$REVIEW_HEAD" != null ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die 'lifecycle state carries no reviewed head.'; }
 # The head is later used as a fixed-string match for verdict binding; a
@@ -128,22 +155,15 @@ if [ -n "$OPT_BASE" ]; then
     CHANGED_FILES="$(git diff --name-only "$RESOLVED_BASE" "$REVIEW_HEAD" -- 2>/dev/null || true)"
   fi
 fi
-# A --tests command is gate EVIDENCE. Like the claude/codex wrappers (packet
-# build --tests), it runs inside a DISPOSABLE SNAPSHOT of the tree, never the
-# live checkout: the copy excludes git-ignored files and hook state, so the
-# command cannot mutate or read anything the operator's tree carries beyond
-# tracked source. A nonzero exit refuses the dispatch; full output stays
-# local and only the result reaches the brief.
-TESTS_RESULT=""; TESTS_DIR=""; TESTS_TAG="pool-tests-$RUN_ID"
+# A --tests command is gate EVIDENCE. It runs inside the SAME disposable
+# snapshot the review will use (the packet builder's contract): git-ignored
+# files and hook state are neither readable nor mutable, a nonzero exit
+# refuses the dispatch, full output stays local, and only the result reaches
+# the brief.
+TESTS_RESULT=""
 if [ -n "$TESTS_COMMAND" ]; then
-  SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$ROOT/ai-review-sandbox}"
-  [ -x "$SANDBOX" ] || [ -f "$SANDBOX" ] || die 'sandbox tool not found for the tests snapshot.'
-  TESTS_DIR="$("$SANDBOX" ensure-copy "$REPO_ROOT" "$TESTS_TAG")" || {
-    "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure snapshot-failed >/dev/null 2>&1 || true
-    die 'could not snapshot the tree for the tests command.'
-  }
   TMP_TESTS="$(mktemp "$REPORT_DIR/.pool-tests.XXXXXX")"
-  if ( cd "$TESTS_DIR" && bash -c "$TESTS_COMMAND" ) > "$TMP_TESTS" 2>&1; then TESTS_RESULT='exit 0 - passed in a disposable snapshot before dispatch'; else
+  if ( cd "$REVIEW_DIR" && bash -c "$TESTS_COMMAND" ) > "$TMP_TESTS" 2>&1; then TESTS_RESULT='exit 0 - passed in the review snapshot before dispatch'; else
     rm -f "$TMP_TESTS"
     "$LIFECYCLE" fail --state "$STATE" --elapsed "$(( $(date +%s)-STARTED ))" --failure tests-command-failed >/dev/null 2>&1 || true
     die 'tests command failed; no review was dispatched.'
@@ -162,9 +182,9 @@ Return ALL findings in one pass, grouped by severity, with file and line evidenc
 APPROVE|REJECT|BLOCKED
 BRIEF
 
-# No sandbox copy is taken (the session runners read the checkout directly by
-# absolute path), so the durable requirement is recorded without a sandbox
-# binding; the runner invoked below records its own nested invocation event.
+# The review runs inside the disposable snapshot (no live-checkout binding),
+# so the durable requirement is recorded without a sandbox ownership marker;
+# the runner invoked below records its own nested invocation event.
 reviewer_event_evidence require-report "$provider" || die 'could not reserve durable review evidence.'
 # Forward the caller's comparison so the runner seals ITS packet against the
 # same base and head: a runner left to its own defaults could judge a
@@ -180,12 +200,26 @@ RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF" --max-turns "$RUNNER_MAX_TURN
 # progress/usage chrome on STDERR (ai-grok-review: note() writes >&2,
 # extract_answer writes the body). Capture is split so every verdict gate
 # below judges the model body alone and can never be satisfied by chrome.
-set +e; "$RUNNER" "${RUNNER_ARGS[@]}" > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
+# The runner is launched FROM the snapshot so its sealed packet, its model
+# paths and any write it attempts all stay inside the disposable copy. The
+# digest baseline is taken here - after the tests command - so only the
+# MODEL's run can move it.
+SNAPSHOT_DIGEST_BEFORE="$("$SANDBOX" digest "$REVIEW_DIR" 2>/dev/null)" || { die 'could not digest the review snapshot.'; }
+set +e; ( cd "$REVIEW_DIR" && exec "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 if [ "$PROVIDER_RC" -ne 0 ]; then
   sed 's/^/  runner: /' "$TMP_ERR" >&2 2>/dev/null || true
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die "$provider runner exited nonzero ($PROVIDER_RC); diagnostic retained in the lifecycle record."
+fi
+# The snapshot digest covers tracked content, tracked drift and non-ignored
+# new files (the runner's gitignored .ai/reports excluded by design), so a
+# model write inside the review invalidates the verdict no matter what the
+# report claims.
+SNAPSHOT_DIGEST_AFTER="$("$SANDBOX" digest "$REVIEW_DIR" 2>/dev/null || true)"
+if [ -z "$SNAPSHOT_DIGEST_AFTER" ] || [ "$SNAPSHOT_DIGEST_AFTER" != "$SNAPSHOT_DIGEST_BEFORE" ]; then
+  "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure snapshot-drifted --report "$TMP_TEXT" >/dev/null 2>&1 || true
+  die 'the review snapshot changed during the review; verdict refused.'
 fi
 [ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
 
