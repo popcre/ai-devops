@@ -39,6 +39,26 @@
 # source files do NOT — they are readable, and inlining them buries the diff.
 # They are referenced BY PATH as pointers instead.
 #
+# IDENTITY vs. THE TARGET REF (2026-09-18, issue #608)
+#
+# The sealed identity binds immutable SHAs — base, head, tree digest, merge
+# base — and those checks stay byte-strict. The target REF (origin/main and
+# friends) is a moving pointer, so a FORWARD move of that ref no longer
+# invalidates a sealed packet: the recorded tip is still an ancestor of the
+# new tip, so the sealed base..head diff is byte-identical and the evidence
+# stays exact. A deleted target ref, or a rewrite that orphans the recorded
+# tip, still refuses loudly. Every build also pins the recorded base at
+# refs/ai-review-packets/<tag> in the real source repository, so a rewrite
+# cannot garbage-collect the base out from under sealed evidence; remove
+# deletes only its own tag's ref.
+#
+# EVIDENCE DURATION (2026-09-18, issue #608)
+#
+# --tests attaches the FOCUSED unit suite — seconds, not minutes. Full suites
+# already run in PR CI and the merge queue. A slow evidence command is met
+# with a warning on stderr and a sealed ⚠️ note in the manifest (threshold
+# AI_REVIEW_TEST_WARN_SECONDS, default 120s); it never fails the build.
+#
 #   ai-review-packet build <review-dir> <tag> [options]   # print the packet dir
 #   ai-review-packet resolve <repo> [--base REF] [--assert-head SHA]
 #   ai-review-packet verify <packet-dir>                  # validate seal and live source identity
@@ -70,7 +90,7 @@
 
 set -euo pipefail
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ONE PACKET PER SESSION, NOT ONE PER DIRECTORY.
@@ -107,6 +127,17 @@ TEST_OUTPUT_TAIL="${AI_REVIEW_TEST_TAIL:-200}"
 # directory pushed the manifest to 33 KB of filenames and buried the one changed
 # file. An overflowing list moves to its own file and the manifest says so.
 LIST_MAX_LINES="${AI_REVIEW_LIST_MAX_LINES:-40}"
+
+# An evidence command slower than this is legal but warned about: --tests is
+# the focused unit suite (seconds), because full suites already run in PR CI
+# and the merge queue, and every extra minute is a window in which the target
+# ref can move under the build. Advisory only; never a build failure.
+TEST_WARN_SECONDS="${AI_REVIEW_TEST_WARN_SECONDS:-120}"
+case "$TEST_WARN_SECONDS" in ''|*[!0-9]*) TEST_WARN_SECONDS=120 ;; esac
+
+# Set by validate_identity when the target ref moved FORWARD since sealing;
+# read by cmd_verify to say so explicitly in its success output.
+FORWARD_REF=""; FORWARD_RECORDED=""; FORWARD_CURRENT=""
 
 die()  { printf 'ai-review-packet: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-review-packet: warning: %s\n' "$*" >&2; }
@@ -234,12 +265,36 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   [ "$(git -C "$source" rev-parse HEAD)" = "$head" ] || die "source-head-mismatch"
   [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$source")" = "$digest" ] || die "source-digest-mismatch"
   ref="$(jq -r .target_ref "$file")"; target="$(jq -r .target "$file")"
+  # The target REF is a moving pointer over an immutable sealed comparison. A
+  # FORWARD move (recorded tip still an ancestor of the live tip) leaves the
+  # sealed base..head diff byte-identical, so it is tolerated with a warning —
+  # this is the fix for the 2026-09-17/18 incident where unrelated work landing
+  # on origin/main mid-review destroyed two complete review rounds. A deleted
+  # ref or a REWRITE that orphans the recorded tip still refuses loudly. HEAD
+  # equality above and the digest, re-resolved base, and merge-base checks
+  # below stay byte-strict. #393's locked direction is preserved: base/head
+  # movement still invalidates, and sealed evidence is never rewritten.
   if [ -n "$ref" ]; then
-    [ "$(git -C "$source" rev-parse --verify "$ref^{commit}" 2>/dev/null)" = "$target" ] || die "source-target-moved"
+    local current_tip preserving_ref="refs/ai-review-packets/<tag>"
+    [ ! -f "$(dirname "$file")/$MARKER" ] || preserving_ref="refs/ai-review-packets/$(sed -n '2p' "$(dirname "$file")/$MARKER")"
+    current_tip="$(git -C "$source" rev-parse --verify --quiet "$ref^{commit}" || true)"
+    [ -n "$current_tip" ] || die "source-target-missing: target ref '$ref' no longer exists in $source. The recorded tip was $target; the recorded base $base is preserved at $preserving_ref. A deleted ref cannot be re-anchored; rebuild the review against a live target."
+    if [ "$current_tip" != "$target" ]; then
+      if git -C "$source" merge-base --is-ancestor "$target" "$current_tip" 2>/dev/null; then
+        warn "target ref '$ref' moved forward since this packet was sealed: recorded tip $target, current tip $current_tip. The recorded tip is still an ancestor of the live tip, so the sealed base..head comparison is unchanged and the evidence stays exact."
+        FORWARD_REF="$ref"; FORWARD_RECORDED="$target"; FORWARD_CURRENT="$current_tip"
+      else
+        die "source-target-rewritten: target ref '$ref' no longer contains the recorded tip $target (current tip $current_tip). History was rewritten under sealed evidence. The recorded base $base is preserved at $preserving_ref — do not re-anchor this packet; rebuild the review against current '$ref'."
+      fi
+    fi
   fi
   BASE_SHA=""; BASE_RULE=""; TARGET_REF=""; TARGET_SHA=""
   resolve_base "$source" "$(jq -r .requested_base "$file")"
-  [ "$BASE_SHA" = "$base" ] && [ "$TARGET_SHA" = "$target" ] && [ "$TARGET_REF" = "$ref" ] || die "source-base-mismatch"
+  # TARGET_SHA is deliberately NOT re-checked here: it is the ref's live tip by
+  # construction, so it legitimately differs after a tolerated forward move.
+  # Tip semantics are enforced by the ancestry check above; the re-resolved
+  # BASE_SHA / TARGET_REF equality and the merge-base equality stay strict.
+  [ "$BASE_SHA" = "$base" ] && [ "$TARGET_REF" = "$ref" ] || die "source-base-mismatch"
   [ "$(git -C "$source" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jq -r .merge_base "$file")" ] || die "source-merge-base-mismatch"
   if [ -n "$review" ]; then
     local review_source="$review"
@@ -353,6 +408,31 @@ cmd_build() {
   fi
   base="$BASE_SHA"
 
+  # The real source checkout, resolved ONCE up front: $root may be a disposable
+  # snapshot built by ai-review-sandbox, whose marker's first line names the
+  # real checkout. Needed here because the recorded base is pinned in the
+  # SOURCE repository below; reused later for the manifest and the identity.
+  # (Naming the throwaway copy as "the repository" misled durable evidence —
+  # reported by an independent Grok review of this script, 2026-08-18.)
+  local real_root="$root" snapshot_note=""
+  if [ -f "$root/.ai-review-sandbox" ]; then
+    real_root="$(head -1 "$root/.ai-review-sandbox")"
+    snapshot_note="
+- This directory is a **disposable snapshot** of that checkout, not the working
+  copy itself. Paths are identical; do not commit or push from here."
+  fi
+
+  # Pin the recorded base under this tag's private ref in the REAL source
+  # repository, BEFORE the evidence window opens. A later history rewrite can
+  # no longer garbage-collect the base out from under this packet's sealed
+  # evidence, and the rewrite refusal in validate_identity can cite the
+  # preserved object. One ref per tag, mirroring the packet ownership rules
+  # below; remove deletes only its own tag's ref. A build that dies after this
+  # point may leave an orphan ref — listable with
+  # `git for-each-ref refs/ai-review-packets/` — never incorrect evidence.
+  git -C "$real_root" update-ref "refs/ai-review-packets/$tag" "$base" \
+    || die "could not pin the recorded base $base at refs/ai-review-packets/$tag in $real_root; no packet was built. Fix the ref write rather than sealing evidence whose base a rewrite could garbage-collect."
+
   pkt="$(packet_path "$root" "$(packet_dir_name "$tag")")"
   # Never rebuild ON TOP of an existing packet. Files that only some runs create
   # (patch.full.diff, *-files.txt) would survive, get hashed into the seal, and
@@ -406,6 +486,19 @@ cmd_build() {
     test_started="$(date +%s)"
     ( cd "$root" && eval "$OPT_TESTS" ) > "$tout" 2>&1 || rc=$?
     test_seconds="$(( $(date +%s) - test_started ))"
+    # Slow evidence is a self-inflicted tax on every review round, and the long
+    # run widens the window in which the target ref can move under the build —
+    # in the 2026-09-17/18 incident a ~20-minute suite destroyed two complete
+    # review rounds. The convention: --tests attaches the FOCUSED unit suite
+    # (seconds); full suites already run in PR CI and the merge queue. This is
+    # advisory only — it must never fail a build (locked 2026-09-18).
+    local slow_note=""
+    if [ "$test_seconds" -ge "$TEST_WARN_SECONDS" ]; then
+      warn "the --tests command took ${test_seconds}s (threshold ${TEST_WARN_SECONDS}s). Attach the focused unit suite — seconds, not minutes; full suites already run in PR CI and the merge queue. Tune with AI_REVIEW_TEST_WARN_SECONDS."
+      slow_note="
+
+⚠️ **The evidence command was slow: ${test_seconds}s (threshold ${TEST_WARN_SECONDS}s).** The convention for \`--tests\` is the focused unit suite — seconds, not minutes. Full suites already run in PR CI and the merge queue, so a slow command here only taxes every review round and widens the window in which the target ref can move while the packet is being built. The recorded results are still valid; the choice of command is what to fix."
+    fi
     test_block="Command: \`$OPT_TESTS\`
 Exit code: \`$rc\` ($([ "$rc" -eq 0 ] && printf 'PASSED' || printf 'FAILED'))
 Measured duration: \`${test_seconds}s\`
@@ -414,7 +507,7 @@ Last $TEST_OUTPUT_TAIL lines of output:
 
 \`\`\`
 $(tail -n "$TEST_OUTPUT_TAIL" "$tout")
-\`\`\`"
+\`\`\`$slow_note"
     rm -f "$tout"
     tree_after="$(git -C "$root" status --porcelain 2>/dev/null | sort)"
     if [ "$tree_before" != "$tree_after" ]; then
@@ -479,17 +572,7 @@ EOF
   test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
 
   # --- identity ---------------------------------------------------------------
-  # $root may be a disposable snapshot built by ai-review-sandbox. Naming the
-  # throwaway copy as "the repository" is misleading in durable evidence, so
-  # read the real checkout out of the snapshot's marker file when there is one.
-  # Reported by an independent Grok review of this script, 2026-08-18.
-  local real_root="$root" snapshot_note=""
-  if [ -f "$root/.ai-review-sandbox" ]; then
-    real_root="$(head -1 "$root/.ai-review-sandbox")"
-    snapshot_note="
-- This directory is a **disposable snapshot** of that checkout, not the working
-  copy itself. Paths are identical; do not commit or push from here."
-  fi
+  # real_root and snapshot_note were resolved up front, before the base pin.
 
   base_subj="$(git -C "$root" log -1 --format=%s "$base" 2>/dev/null || printf '(empty tree)')"
   head_subj="$(git -C "$root" log -1 --format=%s "$head" 2>/dev/null || printf '?')"
@@ -706,6 +789,10 @@ cmd_verify() {
       || { rm -f "$expected_patch"; die "packet-diff-mismatch"; }
     rm -f "$expected_patch"
     publish_receipt "$pkt" "$have"
+    if [ -n "$FORWARD_REF" ]; then
+      printf 'ai-review-packet: note: target ref %s moved forward since this packet was sealed (recorded tip %s, current tip %s); the recorded base is still an ancestor of the live tip and the sealed base..head diff is unchanged.\n' \
+        "$FORWARD_REF" "$FORWARD_RECORDED" "$FORWARD_CURRENT"
+    fi
     printf 'ai-review-packet: %s verified (%s)\n' "$pkt" "$have"
   else
     die "packet hash mismatch in $pkt
@@ -745,7 +832,21 @@ The retained evidence was modified after it was sealed. Keep the paid result blo
 # but a caller that knows its tag must pass it: with no tag this only ever
 # touches the bare `.ai-review` directory, never another session's packet.
 cmd_path()   { printf '%s' "$(packet_path "$(canon "${1:?usage: ai-review-packet path <review-dir> [tag]}")" "${2:+$(packet_dir_name "$2")}")"; }
-cmd_remove() { remove_packet "$(packet_path "$(canon "${1:?usage: ai-review-packet remove <review-dir> [tag]}")" "${2:+$(packet_dir_name "$2")}")"; }
+cmd_remove() {
+  local root tag real_root
+  root="$(canon "${1:?usage: ai-review-packet remove <review-dir> [tag]}")"
+  tag="${2:-}"
+  remove_packet "$(packet_path "$root" "${tag:+$(packet_dir_name "$tag")}")"
+  # Delete this tag's private base ref — from the REAL source repository, which
+  # the snapshot marker names when the review dir is a snapshot — and never
+  # another tag's. A missing ref is not an error: remove stays idempotent, and
+  # the source checkout may itself already be gone when a snapshot is cleared.
+  if [ -n "$tag" ]; then
+    real_root="$root"
+    [ ! -f "$root/.ai-review-sandbox" ] || real_root="$(head -1 "$root/.ai-review-sandbox")"
+    git -C "$real_root" update-ref -d "refs/ai-review-packets/$tag" 2>/dev/null || true
+  fi
+}
 
 need git; need sha256sum; need jq
 

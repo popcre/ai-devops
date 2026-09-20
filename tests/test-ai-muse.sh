@@ -317,7 +317,14 @@ check 'zero heartbeat interval is rejected before provider contact' "cd '$REPO' 
 check 'wrong source head is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/identity-called' '$SCRIPT' new wrong-source-head --assert-head 0000000000000000000000000000000000000000 --prompt test\" && test ! -e '$TMP/identity-called'"
 check 'missing source base is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/identity-called' '$SCRIPT' new wrong-source-base --base missing-source-target --prompt test\" && test ! -e '$TMP/identity-called'"
 git -C "$REPO" update-ref refs/heads/review-target HEAD^
-check 'target movement during paid response rejects acceptance' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MOVE_TARGET='$REPO' '$SCRIPT' new moved-target --base review-target --prompt test\" > '$TMP/moved-target.log' 2>&1 && grep -q source-target-moved '$TMP/moved-target.log'"
+# Re-scoped 2026-09-19 (issue #608) — re-scoped, NEVER deleted: the packet
+# layer now tolerates a pure FORWARD target move that keeps the recorded tip an
+# ancestor AND leaves the merge-base unchanged (test-ai-review-packet.sh covers
+# that tolerance). This fixture's move (review-target HEAD^ -> HEAD) shifts the
+# merge-base, so the reviewed content changes and acceptance must still refuse.
+# Assert the wrapper's own paid-report-retained contract plus the packet's
+# current strict token; the retired source-target-moved token is gone.
+check 'target movement during paid response rejects acceptance' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MOVE_TARGET='$REPO' '$SCRIPT' new moved-target --base review-target --prompt test\" > '$TMP/moved-target.log' 2>&1 && grep -q 'source identity changed; paid report retained' '$TMP/moved-target.log' && grep -q source-base-mismatch '$TMP/moved-target.log'"
 check 'target movement retains the paid report' "find '$REPO/.ai/reviews' -name 'muse-moved-target-*.md' -exec grep -l first {} + | grep -q ."
 git -C "$REPO" update-ref -d refs/heads/review-target
 check 'nonnumeric heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=nope MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat-text --prompt test\" && test ! -e '$TMP/heartbeat-called'"
