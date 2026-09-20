@@ -15,9 +15,11 @@ case "${FAKE_MODE:-ok}" in
   secondary-short) echo 'gh: HTTP 429: Too Many Requests (retry-after: 60)' >&2; exit 1 ;;
   notfound) echo 'HTTP 404: Not Found' >&2; exit 1 ;;
   quota) if [ "$1 $2" = 'api rate_limit' ]; then
+    [ -z "${FAKE_EXTRA_RESOURCE:-}" ] || printf '%s\t%s\t100\t%s\n' "$FAKE_EXTRA_RESOURCE" "${FAKE_EXTRA_REMAINING:-0}" $(( $(date +%s) + 3600 ));
     printf 'core\t%s\t5000\t%s\ngraphql\t%s\t5000\t%s\nsearch\t%s\t30\t%s\ncode_search\t%s\t10\t%s\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )) "${FAKE_GRAPHQL_REMAINING:-$FAKE_REMAINING}" $(( $(date +%s) + 2400 )) "${FAKE_SEARCH_REMAINING:-30}" $(( $(date +%s) + 60 )) "${FAKE_CODE_SEARCH_REMAINING:-10}" $(( $(date +%s) + 60 ));
     else echo "out:$*"; fi ;;
   primary) if [ "$1 $2" = 'api --include' ]; then
+    [ -z "${FAKE_EXTRA_RESOURCE:-}" ] || printf '%s\t0\t100\t%s\n' "$FAKE_EXTRA_RESOURCE" $(( $(date +%s) + 3600 ));
     printf 'HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: %s\nX-Github-Request-Id: F95F:1E2E31\n\ncore\t0\t5000\t%s\ngraphql\t0\t5000\t%s\n' $(( $(date +%s) + 9000 )) $(( $(date +%s) + 3000 )) $(( $(date +%s) + 2000 ));
     elif [ "$1 $2" = 'api rate_limit' ]; then printf 'core\t4000\t5000\t%s\ngraphql\t4000\t5000\t%s\n' $(( $(date +%s) + 3000 )) $(( $(date +%s) + 2000 )); else echo 'gh: API rate limit exceeded for user ID 55610577. (HTTP 403) token ghp_abcdefSECRET123' >&2; exit 1; fi ;;
   missing-resource) if [ "$1 $2" = 'api rate_limit' ]; then printf 'core\t4999\t5000\t%s\n' $(( $(date +%s) + 9000 ));
@@ -140,6 +142,44 @@ fresh_quota
 printf '%s 0 5000 %s\n' "$(date +%s)" "$(( $(date +%s) - 10 ))" > "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1; rc=$?
 check 'a passed resource reset refreshes even a recently timestamped cache' "[ $rc -eq 0 ] && grep -q 'api rate_limit' '$FAKE_LOG'"
+fresh_quota
+
+# Every live sibling resource and a future bucket must be ingested. Unknown
+# endpoints stay conservative without making a hardcoded resource inventory.
+for spec in 'audit_log orgs/o/audit-log' 'scim scim/v2/organizations/o/Users' \
+  'dependency_snapshots repos/o/r/dependency-graph/snapshots' \
+  'dependency_sbom repos/o/r/dependency-graph/sbom' \
+  'actions_runner_registration repos/o/r/actions/runners/registration-token' \
+  'audit_log_streaming enterprises/e/audit-log/streams' \
+  'copilot_usage_records enterprises/e/copilot/metrics' \
+  'enterprise_token_inventory enterprises/e/personal-access-tokens' \
+  'integration_manifest app' 'source_import repos/o/r/import' \
+  'code_scanning_autofix repos/o/r/code-scanning/alerts/1/autofix' \
+  'future_quota future/endpoint'; do
+  read -r resource endpoint <<< "$spec"
+  fresh_quota
+  FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_EXTRA_RESOURCE="$resource" AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api "$endpoint" >/dev/null 2>&1; rc=$?
+  check "$resource exhaustion blocks its REST request before dispatch" "[ $rc -eq 75 ] && ! grep -q 'api $endpoint' '$FAKE_LOG' && grep -q 'resource=$resource' '$TMP/state/refusals.log'"
+done
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_EXTRA_RESOURCE=future_quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r/issues >/dev/null 2>&1; rc=$?
+check 'known core endpoint is not stopped by an unrelated REST quota' "[ $rc -eq 0 ] && grep -q ' 3999 5000 ' '$TMP/state/quota'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_EXTRA_RESOURCE=future_quota FAKE_EXTRA_REMAINING=100 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api future/endpoint >/dev/null 2>&1; rc=$?
+check 'unknown REST cost invalidates newly discovered resource snapshots' "[ $rc -eq 0 ] && grep -q '^0 100 100 ' '$TMP/state/quota.future_quota'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_EXTRA_RESOURCE=future_quota FAKE_EXTRA_REMAINING=malformed AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api future/endpoint >/dev/null 2>"$TMP/malformed"; rc=$?
+check 'malformed new resource is unknown and visibly reported' "[ $rc -eq 0 ] && grep -q 'future_quota quota unknown' '$TMP/malformed'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_EXTRA_RESOURCE=future_quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" extension run custom >/dev/null 2>&1; rc=$?
+check 'unknown CLI command considers the full discovered resource inventory' "[ $rc -eq 75 ] && ! grep -q 'extension run custom' '$FAKE_LOG'"
+fresh_quota
+before=$(date +%s)
+FAKE_MODE=primary FAKE_EXTRA_RESOURCE=future_quota AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api future/endpoint >/dev/null 2>&1; rc=$?
+check 'new resource discovered only after refusal supplies its own reset' "[ $rc -eq 75 ] && [ \$(cat '$TMP/state/backoff_until') -ge $((before + 3500)) ] && [ \$(cat '$TMP/state/backoff_until') -lt $((before + 4000)) ] && grep -q 'exhausted-resource=future_quota' '$TMP/state/refusals.log'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_EXTRA_RESOURCE=future_quota FAKE_EXTRA_REMAINING=100 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api --hostname github.example repos/o/r >/dev/null 2>&1; rc=$?
+check 'explicit host invalidates new resource caches as well as known ones' "[ $rc -eq 0 ] && grep -q '^0 100 100 ' '$TMP/state/quota.future_quota'"
 fresh_quota
 
 # Stale lock is recovered by age; a young lock with a live-looking owner is not stolen.
