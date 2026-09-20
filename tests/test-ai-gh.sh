@@ -319,6 +319,29 @@ printf '{"operation":"FIXTURE_CANARY"}\n' > "$TMP/telemetry-state/measurements/2
 python "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
 check 'request report rejects untrusted labels without reflecting them' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && ! grep -q FIXTURE_CANARY '$TMP/report-error'"
 
+# Reject malformed JSON shapes through the same fixed diagnostic, never a
+# traceback or a reflected input value. Keep a valid row before the bad one
+# to prove the report cannot publish a partial aggregate on later corruption.
+mkdir "$TMP/report-shapes"
+head -n 1 "$TMP/telemetry-state/measurements/$(date -u +%F).jsonl" > "$TMP/report-valid"
+python -c 'print("request report: invalid or unavailable measurement input; no report produced")' > "$TMP/report-expected-error"
+for shape in '[]' '["FIXTURE_CANARY"]' 'null' 'true' '1' '"FIXTURE_CANARY"' \
+  '{"operation":[]}' '{"operation":{}}' '{"operation":true}' \
+  '{"operation":"api.graphql","caller":[]}' '{"operation":"api.graphql","caller":{}}'; do
+  cat "$TMP/report-valid" > "$TMP/report-shapes/2001-01-01.jsonl"
+  printf '%s\n' "$shape" >> "$TMP/report-shapes/2001-01-01.jsonl"
+  python "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+  check 'request report rejects nonobject or wrong-type label without partial output' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"
+done
+for mutation in '.schema=true' '.schema="1"' 'del(.http_requests)' 'del(.graphql_points)' '.utc=[]' '.latency_ms=true'; do
+  jq -c "$mutation" "$TMP/report-valid" > "$TMP/report-shapes/2001-01-01.jsonl"
+  python "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+  check 'request report rejects invalid required field shapes' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"
+done
+python -c 'print("[" * 2000 + "\"FIXTURE_CANARY\"" + "]" * 2000)' > "$TMP/report-shapes/2001-01-01.jsonl"
+python "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+check 'request report rejects excessive JSON nesting with controlled diagnostic' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"
+
 # Reject every non-regular path before opening it; a FIFO must never hold up
 # the original operation or the offline reader. Directories exercise this on
 # Windows too, where the filesystem may not implement mkfifo.

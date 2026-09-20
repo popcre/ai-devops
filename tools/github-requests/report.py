@@ -32,11 +32,17 @@ def summarize(directory):
             for line in stream:
                 digest.update(line)
                 row = json.loads(line)
+                if not isinstance(row, dict):
+                    raise ValueError("invalid measurement object")
                 operation = row.get("operation")
-                if operation not in OPERATIONS or row.get("caller") not in CALLERS:
+                caller = row.get("caller")
+                if (not isinstance(operation, str) or operation not in OPERATIONS
+                        or not isinstance(caller, str) or caller not in CALLERS):
                     raise ValueError("invalid measurement label")
-                if (row.get("schema") != 1 or row.get("measurement") != "opaque_cli_estimate"
-                        or row.get("http_requests") is not None or row.get("graphql_points") is not None):
+                if (type(row.get("schema")) is not int or row["schema"] != 1
+                        or row.get("measurement") != "opaque_cli_estimate"
+                        or "http_requests" not in row or row["http_requests"] is not None
+                        or "graphql_points" not in row or row["graphql_points"] is not None):
                     raise ValueError("unsupported measurement schema")
                 stamp = row.get("utc", "")
                 if not isinstance(stamp, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", stamp):
@@ -86,6 +92,6 @@ if __name__ == "__main__":
         if len(sys.argv) != 2 or not pathlib.Path(sys.argv[1]).is_dir():
             raise ValueError("a measurements directory is required")
         print(json.dumps(summarize(sys.argv[1]), indent=2))
-    except (ValueError, OSError, TypeError, KeyError):
+    except (ValueError, OSError, TypeError, KeyError, RecursionError):
         print("request report: invalid or unavailable measurement input; no report produced", file=sys.stderr)
         sys.exit(1)
