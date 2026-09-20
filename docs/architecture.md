@@ -26,6 +26,11 @@ a script you run from the shell (installed as symlinks in `/usr/local/bin`).
 
 ## Components
 
+GitHub request coordination and source-reduction work is tracked in the
+[GitHub request reduction plan](../plan_github-request-reduction.md). Read its
+STATUS first: current pacing does not establish complete quota coverage or
+account-wide request savings. Preserve the existing workflow while proving both.
+
 | Component | File(s) | Responsibility |
 |---|---|---|
 | Control command | `bin/ai-devops` | `doctor` (health checks), `version`, `paths` |
