@@ -1,6 +1,6 @@
 ---
 issue: 608 — filed 2026-09-18 by the implementing session (plan step 0.2)
-status: OPEN
+status: CLOSED — landed 2026-09-19 (PR-C #611 `52b9f76f`; PR-AB #639 `918866b8`)
 owner: kimi/review-packet-race-plan
 ---
 
@@ -8,8 +8,8 @@ owner: kimi/review-packet-race-plan
 
 The executable plan is
 [`../plan_review-packet-race-and-evidence-speed.md`](../plan_review-packet-race-and-evidence-speed.md).
-**Read its STATUS table first.** All steps are open; no implementation has
-started.
+**Read its STATUS table first.** All steps are done; the plan STATUS table
+carries the merge SHAs and review evidence.
 
 ## What this workstream is
 
@@ -25,11 +25,12 @@ mirrored into the shared skill and the task router.
 
 ## Next exact action
 
-Plan §9 Phase 0 in a fresh worktree cut from then-current `origin/main`:
-overlap re-check via `bin/ai-gh`, file or adopt the tracking issue (0.2), then
-`bin/ai-task-gates start --class reviewer-safety` before touching
-`bin/ai-review-packet`. PR-C (prose, Fix C) and PR-AB (reviewer-safety,
-Fixes A+B) may proceed in parallel after the plan PR lands.
+None — the workstream is complete. PR-C (Fix C, prose) merged 2026-09-18 as
+`52b9f76f` (PR #611). PR-AB (Fixes A+B, reviewer-safety) merged 2026-09-19 as
+`918866b8` (PR #639) after the mandatory independent exact-head final review
+(grok APPROVE on `ff57c04317f494c87b85c29adfdab925e515f0f4`, no findings, with
+`bash tests/test-ai-review-packet.sh` attached as the packet's `--tests`
+evidence). The plan STATUS table and issue #608 carry the full record.
 
 ## Decisions only the owner can make
 

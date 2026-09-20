@@ -2,11 +2,11 @@
 
 | Step | Status | Evidence (artifact, not a bare claim) |
 |---|---|---|
-| 0 — reconcile + tracking issue | ⬜ open | |
-| C — adversarial-cases standard (prose PR) | ⬜ open | |
-| A — slow-evidence warning + docs (reviewer-safety PR) | ⬜ open | |
-| B — forward-move tolerance + base-ref snapshot (same reviewer-safety PR) | ⬜ open | |
-| Landing — reviews, merge queue, origin/main verification | ⬜ open | |
+| 0 — reconcile + tracking issue | ✅ done 2026-09-18 | Overlap re-check via `bin/ai-gh` (16 open PRs, none touching these files); issue [#608](https://github.com/popcre/ai-devops/issues/608) filed; classes declared per worktree (prose→`code` for PR-C after the `skills/**` gate escalation, `reviewer-safety` for PR-AB) |
+| C — adversarial-cases standard (prose PR) | ✅ done 2026-09-18 | PR [#611](https://github.com/popcre/ai-devops/pull/611), squash merge `52b9f76f` on `origin/main` |
+| A — slow-evidence warning + docs (reviewer-safety PR) | ✅ done 2026-09-19 | PR [#639](https://github.com/popcre/ai-devops/pull/639), merge `918866b8` on `origin/main`; `AI_REVIEW_TEST_WARN_SECONDS` (default 120 s, `-ge` comparison), advisory ⚠️ sealed into the manifest test block, focused-suite convention in `docs/development.md` |
+| B — forward-move tolerance + base-ref snapshot (same reviewer-safety PR) | ✅ done 2026-09-19 | Same PR [#639](https://github.com/popcre/ai-devops/pull/639), merge `918866b8`; forward→warn+pass / missing→`source-target-missing` / rewrite→`source-target-rewritten`, per-tag `refs/ai-review-packets/<tag>` pin with prune-gc survival proof, Muse target-movement test re-scoped (never deleted) to the wrapper contract + `source-base-mismatch` |
+| Landing — reviews, merge queue, origin/main verification | ✅ done 2026-09-19 | B.7 exact-head APPROVE by grok on `ff57c04317f494c87b85c29adfdab925e515f0f4` (no findings; packet `--tests` reran the full suite, exit 0); CI 16 pass / 0 fail; merge queue; `918866b8` confirmed tip of `origin/main` |
 
 The plan itself landed 2026-09-18 as PR #600, squash merge `51e680a3`, with
 its handoff and the AGENTS.md router row. No implementation step has started.
