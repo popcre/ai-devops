@@ -23,8 +23,8 @@ Read this table first. Do not re-derive it, and do not re-plan from chat.
 | 6 | `list` shows the parked issue | ✅ done | `cmd_list` sixth column; test "list shows the parked issue column" |
 | 7 | Tests in `tests/test-ai-blocker-watch.sh` | ✅ done | `bash tests/test-ai-blocker-watch.sh` -> **94 passed, 0 failed** (was 71) |
 | 8 | Globals, router, and help text teach the new `wait` | ✅ done | help text (range fixed to `2,96p`), the three global templates, `docs/task-router.md` |
-| 9 | PR, CI green, merge, pull the shared checkout on edge-dev | ⬜ open | — |
-| 10 | Live proof: one real park and one fresh start | ⬜ open | — |
+| 9 | PR, CI green, merge, pull the shared checkout on edge-dev | ✅ done | merged as `eb92356e` via [PR #653](https://github.com/popcre/ai-devops/pull/653), verify run 35521429573 green; `D:eposi-devops` pulled on 916-alien |
+| 10 | Live proof: one real park and one fresh start | 🟨 partly | **partly proved on 916-alien.** Live: `wait` opened parked issue [#655](https://github.com/popcre/ai-devops/issues/655) with the `parked` label and a real blocked-by link to throwaway blocker #654; the worktree was deleted and #654 closed; `tick` chose **fresh** mode and started the new session in `D:/repos/ai-devops`; `find` retrieved #655 from GitHub by plain words. NOT proved: the fresh session doing its own work — this machine has no usable headless agent (Claude CLI 2.1.79 unauthenticated; Codex CLI 0.144.6 too old for any model its account may use, and `codex update` fails). Redo on edge-dev. |
 | 11 | Any kind of wait: pull requests, a time (`--until`), and long-running jobs | ✅ done | pull-request-unmerged notice, `--until`, combined waits; six tests |
 
 **A fresh session starts at step 1.** Steps 1–8 fit in one session and land as
