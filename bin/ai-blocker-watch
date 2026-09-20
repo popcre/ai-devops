@@ -81,6 +81,10 @@
 # max_wake_attempts, then stay in state "failed" for a human. A wake whose
 # harness program is not installed on this machine is skipped once with a
 # visible error and left in state "unrunnable" — it does not burn retries.
+# A wake whose harness reports the session transcript itself is gone (see
+# permanent_wake_errors in the config) is treated the same way: marked
+# "unrunnable" on the first failure, with the outcome written on the parked
+# issue so a person picks the work up.
 # Propagation (commenting), blocked-by link maintenance (link creation) AND
 # the unowned-blocker alarm (request-for-owner comments, the daily digest) run
 # on ONE machine only, named by propagate_on_host in the config; every machine
@@ -345,10 +349,35 @@ Blocker $repo#$n is closed. Whoever owns this issue: recheck it and continue. (a
   if [ "$ok" = 1 ]; then [ "$DRY" = 1 ] || printf '%s' "$start" > "$SCAN"; else FAILED=1; fi
 }
 
+# permanent_wake_error <log>: echo the matched permanent-failure text, or
+# nothing. A harness that reports the session itself is gone will report it the
+# same way on every retry, so the retry is pure noise.
+permanent_wake_error(){
+  local log="$1" pat
+  [ -s "$log" ] || return 0
+  while IFS= read -r pat; do
+    [ -n "$pat" ] || continue
+    if grep -qiF -- "$pat" "$log" 2>/dev/null; then printf '%s' "$pat"; return 0; fi
+  done < <(jq -r '(.permanent_wake_errors // [])[]' "$CONFIG")
+  # `set -e` is on: a while-read loop that ends normally leaves $? at 1, and an
+  # assignment from a non-zero command substitution would kill the whole tick.
+  return 0
+}
+
 parked_comment(){ # parked_comment <wait file> <wait id> <mode> <rc> <log> <final 0|1>
   local f="$1" wid="$2" mode="$3" rc="$4" log="$5" final="$6"
   local pi; pi="$(jq -r '.parked_issue // ""' "$f")"
-  [ -n "$pi" ] || return 0          # old records predate parked issues
+  # Records written before #617 carry no parked issue. A successful wake needs
+  # no comment — the session is running and will speak for itself. A FINAL
+  # failure is different: losing it means the released work is not written
+  # anywhere at all, which is the one thing this tool exists to prevent. So
+  # fall back to the issue the wait was for, then to the blocker itself.
+  if [ -z "$pi" ] && [ "$final" = 1 ]; then
+    pi="$(jq -r '.for // ""' "$f")"
+    [ -n "$pi" ] || pi="$(jq -r '.blocker // ""' "$f")"
+    [ -n "$pi" ] || { note "wait $wid failed for good and names no issue to write it on"; FAILED=1; }
+  fi
+  [ -n "$pi" ] || return 0
   local pr pn; read -r pr pn <<<"$(parse_ref "$pi")"
   local marker="<!-- ai-blocker-watch:woke:$wid -->" existing
   existing="$(gh_api "repos/$pr/issues/$pn/comments" --jq '.[].body' 2>/dev/null || true)"
@@ -497,6 +526,19 @@ The wait was released ($why) but the original $h session and its folder ($cwd) a
     parked_comment "$f" "$wid" "$mode" 0 "$log" 0
   else
     local rc=$?; FAILED=1
+    # A transcript this machine no longer holds is PERMANENT: the session it
+    # names cannot come back, so retrying it three times only makes every tick
+    # exit non-zero and hides real failures. Treat it like a missing harness
+    # program — stop at once, say so, and still write the outcome on the parked
+    # issue so the released work is handed to a person instead of evaporating.
+    local permanent=""
+    permanent="$(permanent_wake_error "$log")"
+    if [ -n "$permanent" ]; then
+      jq --arg log "$log" --argjson rc "$rc" --arg m "$mode" --arg e "$permanent" --arg at "$(now_iso)"         '.state="unrunnable" | .mode=$m | .log=$log | .exit=$rc | .error=$e | .checked_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
+      parked_comment "$f" "$wid" "$mode" "$rc" "$log" 1
+      note "cannot wake $h session $s: $permanent; wait $wid is now unrunnable (a person must restart this work from the parked issue)"
+      return
+    fi
     if [ "$(jq .attempts "$f")" -ge "$(cfg .max_wake_attempts)" ]; then
       jq --arg log "$log" --argjson rc "$rc" --arg m "$mode" '.state="failed" | .mode=$m | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
       parked_comment "$f" "$wid" "$mode" "$rc" "$log" 1
