@@ -169,21 +169,22 @@ BIG_DIGEST="$(provider_wrapper_tree_inventory "$BIG")"
 BIG_ELAPSED=$(( $(date +%s) - BIG_START ))
 check 'inventory_large_tree_bounded' "test -n '$BIG_DIGEST' && test '$BIG_ELAPSED' -le 60"
 printf '  note 4000-file batched inventory took %ss\n' "$BIG_ELAPSED"
-
-# Batch-boundary parity: long names push the argument list past the xargs
-# limit, so the stream is produced by several sha256sum invocations. Order and
-# bytes must still match the per-file reference exactly.
+# Batch-boundary parity: enough long names to push the argument list past this
+# host's own xargs limit, so the stream really is produced by several sha256sum
+# invocations. Order and bytes must still match the per-file reference exactly.
+# The count is derived from the measured limit: a fixed count is a lost bet,
+# because Git Bash allows about 16 KB per exec and Linux about 128 KB.
 SPLIT="$TMPD/split"; mkdir -p "$SPLIT"
+XARGS_LIMIT="$(xargs --show-limits </dev/null 2>&1 | sed -n 's/.*actually use: //p' | head -1 | tr -dc '0-9')"
+[ -n "$XARGS_LIMIT" ] || XARGS_LIMIT=131072
 LONG="$(printf 'n%.0s' $(seq 1 180))"
-i=0; while [ "$i" -lt 300 ]; do printf 's%s\n' "$i" > "$SPLIT/$LONG-$i.txt"; i=$((i + 1)); done
+SPLIT_COUNT=$(( (XARGS_LIMIT * 2) / (${#LONG} + 12) + 1 ))
+i=0; while [ "$i" -lt "$SPLIT_COUNT" ]; do printf 's%s\n' "$i" > "$SPLIT/$LONG-$i.txt"; i=$((i + 1)); done
+SPLIT_BYTES="$(printf '%s\0' "$SPLIT"/*.txt | wc -c)"
+check 'inventory_batch_boundary_splits' "test '$SPLIT_BYTES' -gt '$XARGS_LIMIT'"
 check 'inventory_batch_boundary_parity' \
   "test \"\$(provider_wrapper_tree_inventory '$SPLIT')\" = \"\$(legacy_tree_inventory '$SPLIT')\""
-# Prove the batch really is split: the argument bytes exceed what one exec on
-# this host can carry, so xargs must run sha256sum more than once.
-SPLIT_BYTES="$(printf '%s\n' "$SPLIT"/*.txt | wc -c)"
-XARGS_LIMIT="$(xargs --show-limits </dev/null 2>&1 | sed -n 's/.*actually use: //p' | head -1)"
-check 'inventory_batch_boundary_splits' \
-  "test -n '$XARGS_LIMIT' && test '$SPLIT_BYTES' -gt '$XARGS_LIMIT'"
+printf '  note batch-boundary fixture: %s files, %s argument bytes, host limit %s\n' "$SPLIT_COUNT" "$SPLIT_BYTES" "$XARGS_LIMIT"
 
 printf '\n%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "${SKIP:-0}"
 [ "$FAIL" -eq 0 ]

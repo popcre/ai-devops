@@ -65,6 +65,13 @@ SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$HERE/ai-review-sandbox}"
 PACKET="${AI_REVIEW_PACKET_BIN:-$HERE/ai-review-packet}"
 ACTIVE_META=''; ACTIVE_LOCKS=''; ACTIVE_TERMINAL=0; ACTIVE_CHILD=''
 die(){ printf 'ai-gemini: error: %s\n' "$*" >&2; exit 1; }
+# The shared library is sourced into this wrapper and decides what the byte
+# inventories protect, so qualification must bind it exactly as it binds the
+# wrapper itself. Both files are hashed from their canonical paths: an
+# AI_PROVIDER_WRAPPER_COMMON override can change what a test loads, and it must
+# never change what a qualification record claims.
+CANONICAL_LIB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools" 2>/dev/null && pwd)/lib/provider-wrapper-common.sh"
+wrapper_identity_sha256(){ [ -r "$CANONICAL_LIB" ] || return 1; cat "${BASH_SOURCE[0]}" "$CANONICAL_LIB" 2>/dev/null | sha256sum | awk '{print $1}'; }
 runtime_qualified(){
   local a="$1" expected_wrapper expected_agy expected_agy_sha expected_model actual_wrapper actual_agy actual_agy_sha
   [ -f "$QUALIFICATION_FILE" ] || return 1
@@ -73,7 +80,7 @@ runtime_qualified(){
   expected_agy="$(jq -r .agy_version "$QUALIFICATION_FILE")"
   expected_agy_sha="$(jq -r .agy_sha256 "$QUALIFICATION_FILE")"
   expected_model="$(jq -r .model "$QUALIFICATION_FILE")"
-  actual_wrapper="$(sha256sum "${BASH_SOURCE[0]}" 2>/dev/null | awk '{print $1}')"
+  actual_wrapper="$(wrapper_identity_sha256)" || return 1
   [ "$expected_wrapper" = "$actual_wrapper" ] && [ "$expected_model" = "$MODEL" ] || return 1
   actual_agy="$("$a" --version 2>/dev/null)" || return 1
   actual_agy_sha="$(sha256sum < "$a" 2>/dev/null | awk '{print $1}')"
@@ -88,7 +95,7 @@ record_qualification(){
   mkdir -p "$QUALIFICATION_DIR" || return 1
   chmod 700 "$QUALIFICATION_DIR" 2>/dev/null || true
   tmp="$QUALIFICATION_FILE.$$"
-  jq -n --arg w "$(sha256sum "${BASH_SOURCE[0]}" | awk '{print $1}')"         --arg av "$("$a" --version)"         --arg as "$(sha256sum < "$a" | awk '{print $1}')"         --arg m "$MODEL"         --argjson e "$(date -u +%s)"         '{version:2,provider:"gemini",wrapper_sha256:$w,agy_version:$av,agy_sha256:$as,model:$m,qualified_epoch:$e}' > "$tmp" || { rm -f "$tmp"; return 1; }
+  jq -n --arg w "$(wrapper_identity_sha256)"         --arg av "$("$a" --version)"         --arg as "$(sha256sum < "$a" | awk '{print $1}')"         --arg m "$MODEL"         --argjson e "$(date -u +%s)"         '{version:2,provider:"gemini",wrapper_sha256:$w,agy_version:$av,agy_sha256:$as,model:$m,qualified_epoch:$e}' > "$tmp" || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$QUALIFICATION_FILE"
 }
 QUARANTINED=1

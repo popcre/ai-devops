@@ -113,17 +113,19 @@ provider_wrapper_source_records(){
 }
 
 provider_wrapper_source_inventory(){
-  local d="$1" index rc
-  # The tracked index is materialised first so a git failure is a hard failure,
-  # and so the batch array survives the reading loop instead of dying with a
-  # pipeline subshell.
-  index="$(mktemp)" || return 1
-  git -C "$d" ls-files --stage -z > "$index" || { rm -f "$index"; return 1; }
+  # Everything runs in one subshell that owns the temporary tracked index and
+  # removes it on any exit, including the SIGTERM a bounded caller sends on
+  # timeout: the index holds repository filenames and object ids and must not
+  # outlive the pass.
   ( set -o pipefail
+    local d="$1" index
+    index="$(mktemp)" || exit 1
+    trap 'rm -f "$index"' EXIT HUP INT TERM
+    # The index is materialised first so a git failure is a hard failure, and
+    # so the batch array survives the reading loop instead of dying with a
+    # pipeline subshell.
+    git -C "$d" ls-files --stage -z > "$index" || exit 1
     cd "$d" || exit 1
     { provider_wrapper_source_records "$d" "$index" || exit 1; } \
       | LC_ALL=C sort | sha256sum | cut -d' ' -f1 )
-  rc=$?
-  rm -f "$index"
-  return "$rc"
 }

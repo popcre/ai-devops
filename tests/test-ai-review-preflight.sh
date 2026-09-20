@@ -81,6 +81,11 @@ export AI_REVIEW_GROK_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_CODEX_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_QWEN_WRAPPER="$TMP/bin/good"
+# Gemini qualification binds the wrapper together with the shared inventory
+# library, so the fixture must carry the library exactly as an installation
+# does: "$TMP/bin/gemini" next to "$TMP/tools/lib/".
+mkdir -p "$TMP/tools/lib"
+cp "$ROOT/tools/lib/provider-wrapper-common.sh" "$TMP/tools/lib/"
 export AI_REVIEW_GEMINI_WRAPPER="$TMP/bin/gemini"
 export MOCK_AGY_SHA_FILE="$TMP/gemini-agy-sha"
 export MOCK_GEMINI_LIVE_CONTACT="$TMP/gemini-live-contact"
