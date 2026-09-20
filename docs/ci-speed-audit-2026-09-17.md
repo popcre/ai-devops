@@ -1,5 +1,9 @@
 # CI speed audit — 2026-09-17
 
+For current follow-up work, read the [workflow efficiency plan](../plan_workflow-efficiency.md)
+STATUS first. This is a dated audit; several recommendations below have since
+landed, including Linux sharding. Do not reimplement them from this historical list.
+
 Scope: `.github/workflows/verify.yml`, the last 24 completed Verify runs
 (19 `pull_request`, 4 `merge_group` usable; run IDs from `gh run list -L 60`),
 job timings from the Actions jobs API. The audit originally made recommendations
