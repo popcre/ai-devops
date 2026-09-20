@@ -30,8 +30,14 @@ fi
 
 VERSION="1.0.0"
 MODELS_ENV="${AI_DEVOPS_MODELS_ENV:-/etc/ai-devops/models.env}"
+# Every review-critical binary is pinned HERE, before models.env is sourced
+# (claude/codex pin their tools the same way): the packet resolver, the
+# lifecycle, and the sandbox tool that owns the model's file boundary, the
+# drift digest and the copy's lifetime.
 PACKET="${AI_REVIEW_PACKET_BIN:-$ROOT/ai-review-packet}"
 LIFECYCLE="${AI_REVIEW_LIFECYCLE_BIN:-$ROOT/ai-review-lifecycle}"
+SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$ROOT/ai-review-sandbox}"
+RUNNER_WAIT_BUDGET="${AI_POOL_RUNNER_WAIT:-1800}"
 CALLER="${AI_POOL_CALLER:-zcode}"
 
 die(){ printf 'ai-review-pool: error: %s\n' "$*" >&2; exit 3; }
@@ -60,12 +66,14 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   reviewer_event_guard "$provider" "$_AI_EVENT_SELF" "$@"
 fi
 # models.env may carry provider endpoints as shell assignments. It is sourced
-# only AFTER the invocation is recorded, and it can never retarget the session
-# runner: AI_POOL_RUNNER_* substitutions are a TEST HOOK and require an
-# explicit AI_POOL_TEST_HOOKS=1, which the offline suites set.
-for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI; do
+# only AFTER the invocation is recorded, and it can never retarget a
+# review-critical binary: AI_POOL_RUNNER_* and AI_REVIEW_SANDBOX_BIN
+# substitutions are TEST HOOKS and require an explicit AI_POOL_TEST_HOOKS=1,
+# which the offline suites set. Everything else review-critical was pinned
+# above, before this file is sourced.
+for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_SANDBOX_BIN; do
   if [ -n "${!_hook_var:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
-    die "$_hook_var is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute a runner."
+    die "$_hook_var is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute a review binary."
   fi
 done
 unset _hook_var
@@ -107,7 +115,6 @@ mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="pool-${provider}-${mode}-${RUN_ID}"; STARTED="$(date +%s)"
 STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""; REVIEW_DIR=""
-SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$ROOT/ai-review-sandbox}"
 cleanup(){
   reviewer_event_cleanup_allowed "$provider" || return 1
   [ -z "$TMP_BRIEF" ] || rm -f "$TMP_BRIEF"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"
@@ -146,14 +153,17 @@ if [ -n "$UPSTREAM_RAW" ]; then
       _authority="${_authority##*@}"; _authority="${_authority,,}"
       UPSTREAM_URL="$(printf '%s://%s%s' "${_scheme,,}" "$_authority" "$_path")" ;;
     *:*)
-      _hostpart="${UPSTREAM_RAW%%:*}"; _pathpart="${UPSTREAM_RAW#*:}"
-      case "$_hostpart" in
-        *@*) UPSTREAM_URL="git@${_hostpart##*@}:$_pathpart" ;;
-        *)   UPSTREAM_URL="${_hostpart}:$_pathpart" ;;
+      # scp-like forms. Any '@' anywhere in the value means userinfo may hide
+      # before the host even when it precedes the first colon
+      # (user:token@host:path), so everything through the LAST '@' is dropped
+      # and the conventional git@ user restored; a bare host:path stays as-is.
+      case "$UPSTREAM_RAW" in
+        *@*) UPSTREAM_URL="git@${UPSTREAM_RAW##*@}" ;;
+        *)   UPSTREAM_URL="$UPSTREAM_RAW" ;;
       esac ;;
     *) UPSTREAM_URL="$UPSTREAM_RAW" ;;
   esac
-  unset _scheme _rest _authority _path _hostpart _pathpart
+  unset _scheme _rest _authority _path
   git -C "$REVIEW_DIR" remote remove origin >/dev/null 2>&1 || true
   git -C "$REVIEW_DIR" remote add origin -- "$UPSTREAM_URL" || { die 'could not propagate the upstream into the review snapshot.'; }
 fi
@@ -184,11 +194,14 @@ if [ -n "$OPT_BASE" ]; then
     CHANGED_FILES="$(git diff --name-only "$RESOLVED_BASE" "$REVIEW_HEAD" -- 2>/dev/null || true)"
   fi
 fi
-# A --tests command is gate EVIDENCE. It runs inside the SAME disposable
-# snapshot the review will use (the packet builder's contract): git-ignored
-# files and hook state are neither readable nor mutable, a nonzero exit
-# refuses the dispatch, full output stays local, and only the result reaches
-# the brief.
+# A --tests command is gate EVIDENCE, operator-supplied like the packet
+# builder's --tests. It runs with its WORKING DIRECTORY inside the same
+# disposable snapshot (so relative-path effects - fixtures, logs, artifacts -
+# land in the copy, git-ignored files are absent, and the live tree's tracked
+# state is untouched), but the process itself is an ordinary host shell: it
+# retains the caller's uid and environment, so this is a boundary of
+# CONVENTION for trusted input, not a sandbox. A nonzero exit refuses the
+# dispatch; full output stays local and only the result reaches the brief.
 TESTS_RESULT=""
 if [ -n "$TESTS_COMMAND" ]; then
   TMP_TESTS="$(mktemp "$REPORT_DIR/.pool-tests.XXXXXX")"
@@ -235,10 +248,12 @@ RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF" --max-turns "$RUNNER_MAX_TURN
 # MODEL's run can move it. The wait budget is raised because snapshot-bound
 # reviews read a full tree copy and can outgrow the runner's 900s default.
 SNAPSHOT_DIGEST_BEFORE="$("$SANDBOX" digest "$REVIEW_DIR" 2>/dev/null)" || { die 'could not digest the review snapshot.'; }
-set +e; ( cd "$REVIEW_DIR" && exec env AI_GROK_WAIT_TIMEOUT="${AI_POOL_RUNNER_WAIT:-1800}" "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
+set +e; ( cd "$REVIEW_DIR" && exec env AI_GROK_WAIT_TIMEOUT="$RUNNER_WAIT_BUDGET" "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 if [ "$PROVIDER_RC" -ne 0 ]; then
-  sed 's/^/  runner: /' "$TMP_ERR" >&2 2>/dev/null || true
+  # Provider diagnostics can quote credential-shaped errors (codex's wrapper
+  # redacts the same classes before retaining them); redact before echoing.
+  sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$TMP_ERR" | sed 's/^/  runner: /' >&2 2>/dev/null || true
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die "$provider runner exited nonzero ($PROVIDER_RC); diagnostic retained in the lifecycle record."
 fi
