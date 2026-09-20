@@ -53,7 +53,9 @@ same response. Its latest allowlisted numeric observation is atomically saved as
 bucket-aware protection). This adds no request or quota probe frequency. Snapshot
 deltas describe shared bucket consumption, not attributable managed usage, and
 must not be summed across hosts. Missing/invalid bucket values stay null. Reset
-window samples need bounded archival before the latest snapshot is overwritten.
+window observations are retained in `quota-measurements/YYYY-MM-DD.jsonl` with the
+same seven-day / 4 MiB daily bound, independently of the latest snapshot. Normal
+existing probes supply that history; no additional sampling loop is introduced.
 
 ## Source inventory and coverage
 
@@ -92,6 +94,23 @@ separate bucket observations, visible telemetry failure, retention and
 instrumentation neither advances a waiter's mocked deadline nor contaminates its
 transient failure cause. Existing waiter failure/deadline checks remain intact.
 
+First exact-head independent review of `083d91e` rejected non-regular filesystem
+inputs: a date-named FIFO could block the collector or offline reader. The repair
+rejects all non-regular existing destinations/inputs, including quota snapshots,
+and creates quota temporaries exclusively with `mktemp`. Regression fixtures use
+directories on every host and FIFOs where the filesystem supports them. The new
+head requires a fresh independent review; the first rejection is not approval.
+After that repair and bounded quota history, `tests/test-ai-gh.sh` passed 61/61
+on Windows, including both FIFO cases; no skipped or ignored cases. The quota
+fixture executes the real wrapper-supplied jq projection rather than returning a
+preconstructed projection, so the three-bucket extraction itself is exercised.
+
+An isolated Windows timing comparison ran ten zero-delay fake CLI operations per
+version: prior wrapper 7,362 ms total, instrumented wrapper 9,176 ms total (about
+181 ms additional processing per operation). This is a small offline startup
+sample, not a workflow p95 or acceptance result. Instrumentation makes zero extra
+GitHub requests; ordinary pacing and all networking were excluded from this test.
+
 On ALBT16 the installed `ai-gh.cmd` currently resolves to
 `C:/repos/ai-devops/bin/ai-gh`; the user confirmed C: for this phase because this
 machine has no D: drive. The plan's D: path describes its planning machine 916.
@@ -99,6 +118,16 @@ The public machine atlas delegates topology to protected configuration. Configur
 host names and schedules are not proof of reachability or active installation.
 No remote fleet coverage is claimed. Installed changed hashes and a normal live
 sample must be recorded after merge and installation before accepting this part.
+
+Read-only discovery also checked the protected atlas's current Windows section
+and its dated harness census. That historical census lists seven host roles with
+mixed/unknown authentication and reachability; it is not current fleet proof and
+its private topology is not copied here. On ALBT16, Codex, Claude and GitHub CLI
+resolve to installed executables. Task Scheduler returned no BlockerWatch or
+reviewer-start-watch registration. Therefore a normal local sample cannot be
+assumed to include scheduled BlockerWatch scans. P1 must obtain representative
+ordinary observations from the appropriate already-configured source host, or
+retain that coverage gap and keep attribution acceptance open.
 
 ## Remaining evidence and blockers
 

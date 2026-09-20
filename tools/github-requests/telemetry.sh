@@ -34,7 +34,7 @@ gh_measure_clock(){
 }
 
 gh_measure_finish(){
-  local status="$1" elapsed bucket=unknown result=failed record dir file count
+  local status="$1" elapsed bucket=unknown result=failed record utc
   # Fixed allowlists and integers only: never persist argv, bodies, URLs,
   # arbitrary environment labels, machine names or authentication material.
   [[ "$status" =~ ^[0-9]{1,3}$ ]] || status=1
@@ -46,7 +46,15 @@ gh_measure_finish(){
   [ "$GH_MEASURE_OPERATION" = api.graphql ] && bucket=graphql
   [ "$status" = 0 ] && result=success
   [ "$status" = 75 ] && result=deferred
-  dir="$STATE/measurements"
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":1,"utc":"%s","operation":"%s","caller":"%s","api_host":"unknown","principal":"unknown","machine":"local","repository":"redacted","request_class":"unknown","bucket":"%s","cli_executions":%s,"http_requests":null,"graphql_points":null,"measurement":"opaque_cli_estimate","cache_hit":false,"latency_ms":%s,"result":"%s","exit_status":%s,"reset":null}' \
+    "$utc" "$GH_MEASURE_OPERATION" "$GH_MEASURE_CALLER" "$bucket" "$GH_MEASURE_EXECUTED" "$elapsed" "$result" "$status")
+  gh_measure_append "$STATE/measurements" "$record"
+}
+
+# Both command records and server snapshots share the same filesystem boundary.
+gh_measure_append(){
+  local dir="$1" record="$2" file count
   # Completion must not hold up other callers. Use an
   # independent non-waiting lock; contention is a visible missing sample.
   [ ! -L "$dir" ] || return 1
@@ -57,11 +65,11 @@ gh_measure_finish(){
   day="${utc:0:10}"
   file="$dir/$day.jsonl"
   # Seven daily files, <= 4 MiB each. Never follow a pre-existing symlink.
-  if [ -L "$dir" ] || [ -L "$file" ]; then rmdir "$dir/write.lock"; return 1; fi
+  if [ -L "$dir" ] || [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
+    rmdir "$dir/write.lock"; return 1
+  fi
   count=$(wc -c 2>/dev/null < "$file") || count=0
   if [ "$count" -ge 4193280 ]; then rmdir "$dir/write.lock"; return 1; fi
-  record=$(printf '{"schema":1,"utc":"%s","operation":"%s","caller":"%s","api_host":"unknown","principal":"unknown","machine":"local","repository":"redacted","request_class":"unknown","bucket":"%s","cli_executions":%s,"http_requests":null,"graphql_points":null,"measurement":"opaque_cli_estimate","cache_hit":false,"latency_ms":%s,"result":"%s","exit_status":%s,"reset":null}' \
-    "$utc" "$GH_MEASURE_OPERATION" "$GH_MEASURE_CALLER" "$bucket" "$GH_MEASURE_EXECUTED" "$elapsed" "$result" "$status")
   ( umask 077; printf '%s\n' "$record" >> "$file" )
   local write_rc=$?
   # Retention only touches our fixed date-shaped regular files.
@@ -91,11 +99,14 @@ gh_measure_quota(){
     fi
     [ "$#" -lt 3 ] || shift 3
   done
-  local dest="$STATE/quota-observation.json" temp="$STATE/quota-observation.$$.$RANDOM.tmp" utc
+  local dest="$STATE/quota-observation.json" temp utc
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1
-  [ ! -L "$dest" ] || return 1
-  # One fixed-size latest snapshot; consumers must archive independent bounded
-  # samples for reset windows. Never infer a principal from a token label.
-  ( umask 077; set -o noclobber; printf '{"schema":1,"utc":"%s","principal":"unknown","measurement":"server_bucket_snapshot","buckets":{%s}}\n' "$utc" "$record" > "$temp" ) || return 1
+  if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -f "$dest" ]; }; then return 1; fi
+  temp=$(umask 077; mktemp "$STATE/quota-observation.XXXXXX") || return 1
+  # Retain bounded history as well as the latest observation, so normal probes
+  # can establish reset-window bounds without a new sampling loop.
+  record=$(printf '{"schema":1,"utc":"%s","principal":"unknown","measurement":"server_bucket_snapshot","buckets":{%s}}' "$utc" "$record")
+  printf '%s\n' "$record" > "$temp" || { rm -f -- "$temp"; return 1; }
   mv -f -- "$temp" "$dest" || { rm -f -- "$temp"; return 1; }
+  gh_measure_append "$STATE/quota-measurements" "$record"
 }

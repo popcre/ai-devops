@@ -14,7 +14,7 @@ case "${FAKE_MODE:-ok}" in
   secondary) echo 'HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' >&2; echo 'Retry-After: 900' >&2; echo "end $(date +%s%N)" >> "$FAKE_LOG"; exit 1 ;;
   secondary-short) echo 'gh: HTTP 429: Too Many Requests (retry-after: 60)' >&2; exit 1 ;;
   notfound) echo 'HTTP 404: Not Found' >&2; exit 1 ;;
-  quota) if [ "$1 $2" = "api rate_limit" ]; then printf '%s\t5000\t%s\t1234\t5000\t2000000000\t20\t30\t2000000001\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )); elif [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: %s\r\nX-Github-Request-Id: F95F:TEST\r\n\r\n{}\n' "$FAKE_REMAINING"; else echo "out:$*"; fi ;;
+  quota) if [ "$1 $2" = "api rate_limit" ]; then printf '{"resources":{"core":{"remaining":%s,"limit":5000,"reset":%s},"graphql":{"remaining":1234,"limit":5000,"reset":2000000000},"search":{"remaining":20,"limit":30,"reset":2000000001}}}\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )) | jq -r "$4"; elif [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: %s\r\nX-Github-Request-Id: F95F:TEST\r\n\r\n{}\n' "$FAKE_REMAINING"; else echo "out:$*"; fi ;;
   primary) if [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: %s\nX-Github-Request-Id: F95F:1E2E31\n' $(( $(date +%s) + 3000 )); elif [ "$1 $2" = "api rate_limit" ]; then printf '%s\t5000\t%s\n' "${FAKE_REMAINING:-4000}" $(( $(date +%s) + 3000 )); else echo 'gh: API rate limit exceeded for user ID 55610577. (HTTP 403) token ghp_abcdefSECRET123' >&2; exit 1; fi ;;
   counter) n=$(( $(cat "$FAKE_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE_COUNT"; [ "$n" -ge 2 ] && echo '{"status":"completed"}' || echo '{"status":"in_progress"}' ;;
 esac
@@ -69,6 +69,7 @@ rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
 check 'healthy budget allows the call and caches quota' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q ' 2999 5000 ' '$TMP/state/quota'"
 check 'telemetry observes separate server buckets without changing admission' "jq -e '.buckets.core.remaining == 3000 and .buckets.graphql.remaining == 1234 and .buckets.search.remaining == 20 and .principal == \"unknown\"' '$TMP/state/quota-observation.json'"
+check 'quota observations retain bounded history without another request' "jq -se 'length == 1 and .[0].buckets.graphql.remaining == 1234' '$TMP/state/quota-measurements/'*.jsonl"
 rm -f "$TMP/state/quota"; : > "$FAKE_LOG"
 FAKE_MODE=quota FAKE_REMAINING=900 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_NO_WAIT=1 "$GH" pr view 3 >/dev/null 2>&1; rc=$?
 check 'budget below 20% pauses machine-wide without making the call' "[ $rc -eq 75 ] && ! grep -q 'pr view 3' '$FAKE_LOG' && [ \$(cat '$TMP/state/backoff_until') -gt \$(date +%s) ] && grep -q 'budget-pause remaining=900/5000' '$TMP/state/refusals.log'"
@@ -202,5 +203,29 @@ check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.record
 printf '{"operation":"FIXTURE_CANARY"}\n' > "$TMP/telemetry-state/measurements/2001-01-01.jsonl"
 python "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
 check 'request report rejects untrusted labels without reflecting them' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && ! grep -q FIXTURE_CANARY '$TMP/report-error'"
+
+# Reject every non-regular path before opening it; a FIFO must never hold up
+# the original operation or the offline reader. Directories exercise this on
+# Windows too, where the filesystem may not implement mkfifo.
+export AI_GH_STATE_DIR="$TMP/special-state"
+mkdir -p "$AI_GH_STATE_DIR/measurements/$(date -u +%F).jsonl"
+FAKE_STATUS=8 timeout 15 "$GH" pr checks 1 > "$TMP/special-out" 2> "$TMP/special-err"; rc=$?
+check 'telemetry rejects non-regular daily paths without changing status' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/special-err' && [ ! -d '$AI_GH_STATE_DIR/measurements/write.lock' ]"
+timeout 15 python "$ROOT/tools/github-requests/report.py" "$AI_GH_STATE_DIR/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+check 'report rejects non-regular daily paths before opening' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ]"
+rmdir "$AI_GH_STATE_DIR/measurements/$(date -u +%F).jsonl"
+if mkfifo "$AI_GH_STATE_DIR/measurements/$(date -u +%F).jsonl" 2>/dev/null; then
+  FAKE_STATUS=8 timeout 15 "$GH" pr checks 1 > "$TMP/special-out" 2> "$TMP/special-err"; rc=$?
+  check 'FIFO telemetry path cannot block a failed command' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/special-err'"
+  timeout 15 python "$ROOT/tools/github-requests/report.py" "$AI_GH_STATE_DIR/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+  check 'FIFO report input is rejected without waiting for a writer' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ]"
+else
+  printf '  skip FIFO cases: filesystem does not support named pipes (directory cases passed above)\n'
+fi
+mkdir "$AI_GH_STATE_DIR/quota-observation.json"
+source "$ROOT/tools/github-requests/telemetry.sh"
+STATE="$AI_GH_STATE_DIR"
+gh_measure_quota 1 2 3 4 5 6 7 8 9 >/dev/null 2>&1; rc=$?
+check 'quota observation rejects non-regular destination too' "[ $rc -eq 1 ] && [ -d '$AI_GH_STATE_DIR/quota-observation.json' ] && [ \$(find '$AI_GH_STATE_DIR' -maxdepth 1 -name 'quota-observation.*' -type f | wc -l) -eq 0 ]"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

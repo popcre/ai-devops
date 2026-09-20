@@ -20,8 +20,13 @@ def summarize(directory):
     latency = []
     digest = hashlib.sha256()
     stamps = []
-    for path in sorted(pathlib.Path(directory).glob("????-??-??.jsonl")):
-        if path.is_symlink() or path.stat().st_size > 4194304:
+    directory = pathlib.Path(directory)
+    # MSYS represents FIFOs as .lnk files on NTFS. Native Python must not
+    # silently omit those and present a seemingly valid empty measurement set.
+    if next(directory.glob("????-??-??.jsonl.lnk"), None) is not None:
+        raise ValueError("non-regular measurement input")
+    for path in sorted(directory.glob("????-??-??.jsonl")):
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 4194304:
             raise ValueError("invalid measurement file")
         with path.open("rb") as stream:
             for line in stream:
