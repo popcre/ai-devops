@@ -142,12 +142,17 @@ resumed harnesses, rather than merely searching for a label in source code.
 A local SHA-256 receipt binds the tested scripts, their transport/supervisor/gate
 dependencies, BlockerWatch configuration and all three complete outputs. Its
 source-input manifest digest is
-`68d9db924e8def1deb21d1afaa932d1da3eca63dc96d0bcded136fa26c7e07ea`.
+`141a231836a060db044336b5143b4252d869a5faf4a67d2b9b29e2e3f5bc4835`.
 The first receipt-bearing review of `e43b3ec` rejected the packet: Windows
 rewrote the Python helper to CRLF in the review copy while its test receipt
-described LF. No additional caller, parser or quota-integration defect was found.
+described mixed line endings. No additional caller, parser or quota-integration
+defect was found.
 The helper directory now pins Python files to LF in `.gitattributes`; a fresh
-review-copy preflight must verify the receipt before another paid review starts.
+review-copy preflight verifies the receipt before another paid review starts.
+The canonical-LF helper was retested at `f97953e`: 117 passed, 0 failed, no skips;
+its raw SHA-256 is `375b66b4661a3d3b84a89d480bc51616f920d328e8409cc831e1417598818f95`.
+At 20:49 UTC the fresh review-copy preflight matched all 13 source inputs and
+three full-output hashes, including the updated canonical-byte test receipt.
 The final review packet verifies these input/output hashes and displays the
 recorded results, reusing completed focused tests rather than rerunning them.
 Full required CI remains separate; these results are not installed/live proof.
