@@ -1493,11 +1493,14 @@ cmd_doctor() {
   echo "isolation     : verified before every paid turn (neutral cwd; MCPs, hooks, plugins, compat imports, MCP meta-tools, and subagents disabled)"
   echo "max turns     : $DEFAULT_MAX_TURNS   wait timeout: ${WAIT_TIMEOUT}s"
   echo
-  # Auth: `grok doctor` is a TERMINAL diagnostic and has reported "not
-  # authenticated" while real calls worked. `grok models` is the cheap check.
-  # A billable probe happens only under --live.
-  if "$grok" models >/dev/null 2>&1; then
-    echo "auth          : OK (grok models succeeded)"
+  # The model catalogue can succeed without chat credentials. Check the same
+  # credential source used by the isolated runtime without reading its contents.
+  # Presence is not proof of validity; only --live can prove a chat round trip.
+  if [ ! -s "${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json" ] && [ -z "${XAI_API_KEY:-}" ]; then
+    echo "auth          : MISSING — no cached credentials or XAI_API_KEY. Run 'grok login'."
+    return 1
+  elif "$grok" models >/dev/null 2>&1; then
+    echo "auth          : PRESENT (model catalogue reachable; chat authentication unverified)"
   else
     echo "auth          : AMBIGUOUS — 'grok models' failed."
     echo "                Do NOT conclude a login is needed from 'grok doctor' alone;"
