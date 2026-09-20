@@ -103,8 +103,11 @@ check 'doctor rejects unknown options instead of overstating a live check' "! '$
 IDENTITY_OUT="$("$SCRIPT" doctor --identity)"
 check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
-mkdir -p "$TMP/tools"
+mkdir -p "$TMP/tools" "$TMP/tools/lib"
 cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$TMP/tools/"
+# The wrapper loads its inventory primitives from the shared library, so the
+# relocated copy must carry it exactly as an installation does.
+cp "$ROOT/tools/lib/provider-wrapper-common.sh" "$TMP/tools/lib/"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
 mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
@@ -112,6 +115,9 @@ WRAPPER_SHA="$(sha256sum "$SCRIPT" | awk '{print $1}')"; AGY_SHA="$(sha256sum < 
 write_qualification(){ jq -nc --arg sha "$WRAPPER_SHA" --arg agy "${1:-1.1.14}" --arg agy_sha "${3:-$AGY_SHA}" --arg model "${2:-gemini-3.8-flash-high}" '{version:2,provider:"gemini",wrapper_sha256:$sha,agy_version:$agy,agy_sha256:$agy_sha,model:$model,qualified_epoch:1}' > "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json"; }
 write_qualification
 check 'valid governed record releases the wrapper gate' "$SCRIPT doctor | grep -q '^PASS'"
+set +e; MISSING_LIB_OUT="$(AI_PROVIDER_WRAPPER_COMMON="$TMP/no-such-lib.sh" "$SCRIPT" doctor 2>&1)"; MISSING_LIB_RC=$?; set -e
+check 'a missing shared wrapper library refuses before provider contact' \
+  "test '$MISSING_LIB_RC' -ne 0 && printf '%s' '$MISSING_LIB_OUT' | grep -q 'shared wrapper library missing'"
 RACE_AGY="$TMP/bin/agy-race"; cp "$AI_GEMINI_BIN" "$RACE_AGY"; chmod +x "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"
 write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"
 RACE_REPO="$TMP/race-repo"; make_repo "$RACE_REPO"
@@ -243,10 +249,11 @@ mkdir -p "$TMP/slow-bin"
 cat > "$TMP/slow-bin/sha256sum" <<'EOF'
 #!/usr/bin/env bash
 # Stall only the wrapper's review-copy inventory, which hashes the copied
-# trigger as the relative path './inventory-slow-trigger' behind a '--'
-# separator. Absolute-path hashes of the same file (ai-review-packet resolve
-# runs earlier in new() and must NOT stall) do not match this shape.
-case "$*" in *"-- ./inventory-slow-trigger") sleep 15 ;; esac
+# trigger as a relative './inventory-slow-trigger' path behind a '--'
+# separator, in a batch with the rest of the copy. Absolute-path hashes of the
+# same file (ai-review-packet resolve runs earlier in new() and must NOT stall)
+# do not start with that separator and so do not match.
+case "$*" in "-- "*"./inventory-slow-trigger"*) sleep 15 ;; esac
 exec "$REAL_SHA256SUM_BIN" "$@"
 EOF
 chmod +x "$TMP/slow-bin/sha256sum"

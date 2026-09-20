@@ -53,6 +53,14 @@ TIMEOUT="${AI_GEMINI_PRINT_TIMEOUT:-10m}"
 # governed runner records a terminal failure instead of waiting forever.
 PREPARE_TIMEOUT="${AI_GEMINI_PREPARE_TIMEOUT:-30m}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Batched byte-inventory primitives. The emitted record stream stays
+# byte-identical to the per-file construction; only the number of hashing
+# processes changes (#633).
+WRAPPER_LIB="${AI_PROVIDER_WRAPPER_COMMON:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools" && pwd)/lib/provider-wrapper-common.sh}"
+# An installation that lost the shared library must refuse loudly before any
+# provider contact, never fall back to an unproven inventory.
+[ -r "$WRAPPER_LIB" ] || { printf 'ai-gemini: error: shared wrapper library missing: %s\n' "$WRAPPER_LIB" >&2; exit 1; }
+source "$WRAPPER_LIB"
 SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$HERE/ai-review-sandbox}"
 PACKET="${AI_REVIEW_PACKET_BIN:-$HERE/ai-review-packet}"
 ACTIVE_META=''; ACTIVE_LOCKS=''; ACTIVE_TERMINAL=0; ACTIVE_CHILD=''
@@ -102,34 +110,12 @@ write(){ local f="$1" j="$2" t; mkdir -p "$(dirname "$f")"; t="$(mktemp "$(dirna
 update_state(){ local f="$1" status="$2" detail="${3:-}" j; j="$(jq -c --arg s "$status" --arg d "$detail" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status=$s | .status_detail=$d | .updated_at=$t' "$f")" || die 'invalid session metadata'; write "$f" "$j"; }
 secure_private(){ local p="$1" mode="$2" win sid; chmod "$mode" "$p" 2>/dev/null || return 1; case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1 && command -v powershell.exe >/dev/null 2>&1 || return 1; win="$(cygpath -w "$p")"; sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n')"; case "$sid" in S-1-*) ;; *) return 1;; esac; if [ -d "$p" ]; then icacls "$win" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null 2>&1 || return 1; else icacls "$win" /inheritance:r /grant:r "*${sid}:(F)" >/dev/null 2>&1 || return 1; fi; powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$ExpectedSid) try { if ([IO.Directory]::Exists($Path)) { $Acl = New-Object Security.AccessControl.DirectorySecurity($Path, [Security.AccessControl.AccessControlSections]::Access) } else { $Acl = New-Object Security.AccessControl.FileSecurity($Path, [Security.AccessControl.AccessControlSections]::Access) }; if (-not $Acl.AreAccessRulesProtected) { exit 1 }; $Full = [Security.AccessControl.FileSystemRights]::FullControl; $CurrentHasFull = $false; foreach ($Rule in @($Acl.Access | Where-Object AccessControlType -eq ([Security.AccessControl.AccessControlType]::Allow))) { $RuleSid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($ExpectedSid, "S-1-5-18", "S-1-5-32-544")) { exit 1 }; if ($RuleSid -eq $ExpectedSid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $CurrentHasFull = $true } }; if (-not $CurrentHasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" >/dev/null 2>&1;; esac; }
 preserve_failure(){ local m="$1" out="$2" stage="$3" dir base artifact j f; [ -n "$m" ] && [ -f "$m" ] || return 0; dir="$STATE_DIR/failures"; mkdir -p "$dir" || return 0; secure_private "$dir" 700 || return 0; base="$(basename "$m" .json)-$(date -u +%Y%m%dT%H%M%SZ)-$$-$stage"; artifact="$dir/$base.json"; if [ -f "$out" ]; then cp -- "$out" "$artifact" || return 0; else printf '{"status":"NO_PROVIDER_OUTPUT"}\n' > "$artifact" || return 0; fi; [ -f "$out.stderr" ] && cp -- "$out.stderr" "$dir/$base.stderr" || true; [ -f "$out.model" ] && cp -- "$out.model" "$dir/$base.model.json" || true; [ -f "$out.model.stderr" ] && cp -- "$out.model.stderr" "$dir/$base.model.stderr" || true; for f in "$dir/$base"*; do secure_private "$f" 600 || { rm -f "$dir/$base"*; return 0; }; done; j="$(jq -c --arg a "$artifact" --arg s "$stage" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.failure_artifact=$a | .failure_stage=$s | .updated_at=$t' "$m" 2>/dev/null)" || { rm -f "$dir/$base"*; return 0; }; write "$m" "$j" || { rm -f "$dir/$base"*; return 0; }; }
-inventory(){ local d="$1"; (cd "$d" && find . \( -type f -o -type l \) -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' f; do if [ -L "$f" ]; then printf 'L\t%s\t%s\n' "$f" "$(readlink "$f")"; else sha256sum -- "$f"; fi; done) | sha256sum | cut -d' ' -f1; }
-source_inventory(){ local d="$1" f meta mode object sub; (cd "$d" && {
-  # Tracked bytes are always protected, even if a tracked file happens to live
-  # in a wrapper-owned runtime directory. Only untracked runtime artifacts are
-  # omitted from the second inventory stream.
-  git ls-files --stage -z | while IFS=$'\t' read -r -d '' meta f; do
-    mode="${meta%% *}"; object="${meta#* }"; object="${object%% *}"
-    if [ "$mode" = 160000 ]; then
-      if [ -n "$(git -C "$f" rev-parse --show-superproject-working-tree 2>/dev/null || true)" ]; then sub="$(source_inventory "$d/$f")"; else sub=UNINITIALIZED; fi
-      printf 'T\tGITLINK\t%s\t%s\t%s\n' "$f" "$object" "$sub"
-    elif [ ! -e "$f" ] && [ ! -L "$f" ]; then printf 'T\tMISSING\t%s\n' "$f"
-    elif [ -L "$f" ]; then printf 'T\tL\t%s\t%s\n' "$f" "$(readlink "$f")"
-    else printf 'T\t'; sha256sum -- "$f"; fi
-  done
-  find . \
-    -path './.git' -prune -o \
-    -path './.ai/reviews' -prune -o \
-    -path './.ai/reviewer-issues' -prune -o \
-    -path './.ai/test-runs' -prune -o \
-    -path './.ai/qualification' -prune -o \
-    -path './.ai/qwen-test.*' -prune -o \
-    -path './.ai-review-*' -prune -o \
-    \( -type f -o -type l \) -print0 | while IFS= read -r -d '' f; do
-      if [ -L "$f" ]; then printf 'A\tL\t%s\t%s\n' "$f" "$(readlink "$f")"
-      else printf 'A\t'; sha256sum -- "$f"; fi
-    done
-  } | LC_ALL=C sort) | sha256sum | cut -d' ' -f1; }
-export -f inventory source_inventory
+# The record grammar, exclusion rules and batching live in the shared library
+# so one implementation is proven once; Gemini keeps its own call sites and
+# its own timeout policy.
+inventory(){ provider_wrapper_tree_inventory "$1"; }
+source_inventory(){ provider_wrapper_source_inventory "$1"; }
+export -f inventory source_inventory provider_wrapper_tree_inventory provider_wrapper_source_inventory provider_wrapper_inventory_stream provider_wrapper_flush_batch provider_wrapper_hash_paths provider_wrapper_prefix_lines
 # One hashing pass, bounded. Each pass spawns one process per file; a large
 # review copy on a loaded Windows host can take hours, so a stall must become
 # a terminal timeout (exit 124) that the caller turns into a named failure
