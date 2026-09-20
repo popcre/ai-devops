@@ -85,8 +85,23 @@ gh_measure_append(){
   return "$write_rc"
 }
 
-# Existing admission probe supplies these observations: no extra request and
-# no change to its core-only admission semantics (P2 owns that repair).
+# The existing admission probe supplies named resource rows. Keep telemetry's
+# fixed schema separate from admission's dynamic resource inventory.
+gh_measure_quota_rows(){
+  local bucket remaining limit reset extra
+  local core=(unknown unknown unknown) graphql=(unknown unknown unknown) search=(unknown unknown unknown)
+  while read -r bucket remaining limit reset extra; do
+    [ -z "$extra" ] || continue
+    case "$bucket" in
+      core) core=("$remaining" "$limit" "$reset") ;;
+      graphql) graphql=("$remaining" "$limit" "$reset") ;;
+      search) search=("$remaining" "$limit" "$reset") ;;
+    esac
+  done <<< "${1:-}"
+  gh_measure_quota "${core[@]}" "${graphql[@]}" "${search[@]}"
+}
+
+# No extra request and no change to the upstream resource admission semantics.
 gh_measure_quota(){
   local bucket record=''; local remaining limit reset
   for bucket in core graphql search; do

@@ -5,11 +5,15 @@ Tracking: [P1 #660](https://github.com/popcre/ai-devops/issues/660), parent
 [#658](https://github.com/popcre/ai-devops/issues/658).
 Contract: [request reduction plan](../../../plan_github-request-reduction.md).
 Inventory source: upstream `ae1ace582ca4838ce8a8cc7c59aa23d2384ead0d`, 2026-09-20.
+Integration boundary: upstream `b05d15d` ([PR #662](https://github.com/popcre/ai-devops/pull/662))
+landed during P1 CI and changes quota admission and probe refresh. Its behavior is
+preserved in the P1 integration; this does not establish P2 acceptance.
 
 ## Acceptance status
 
 **Incomplete.** This is instrumentation and an inventory, not an accepted live
 baseline or evidence of request savings. No phase after P1 is claimed here.
+P1 has not merged or been installed, and its live acceptance remains open.
 Acceptance still requires two busy reset windows and twenty comparable completed
 operations including PR waiting, BlockerWatch, dispatch and privacy checks. The
 offline-replay fallback is available only after two business days of insufficient
@@ -47,12 +51,15 @@ GitHub. Its counts are denominated by saved wrapper samples, not account-wide
 requests or completed workflows. An empty sample stays incomplete; no invented
 p95, top request spender, unexplained residual or savings percentage is published.
 
-The existing quota probe now also selects GraphQL and search counters from the
-same response. Its latest allowlisted numeric observation is atomically saved as
-`quota-observation.json`; admission still uses core exactly as before (P2 owns
-bucket-aware protection). This adds no request or quota probe frequency. Snapshot
-deltas describe shared bucket consumption, not attributable managed usage, and
-must not be summed across hosts. Missing/invalid bucket values stay null. Reset
+The existing quota probe supplies numeric counters for the local observation,
+atomically saved as `quota-observation.json`. The original P1 implementation used
+the then-existing core-only admission; upstream PR #662 subsequently changed
+admission and probe refresh independently. Preserve that upstream behavior and
+separate samples from before and after integration. P1 measurement itself adds no
+probe or request. REST counter discrepancies described below mean these snapshots
+cannot currently prove actual account GraphQL consumption or headroom. Even a
+validated shared-bucket delta would not identify managed usage and must not be
+summed across hosts. Missing/invalid bucket values stay null. Reset
 window observations are retained in `quota-measurements/YYYY-MM-DD.jsonl` with the
 same seven-day / 4 MiB daily bound, independently of the latest snapshot. Normal
 existing probes supply that history; no additional sampling loop is introduced.
@@ -99,7 +106,11 @@ inputs: a date-named FIFO could block the collector or offline reader. The repai
 rejects all non-regular existing destinations/inputs, including quota snapshots,
 and creates quota temporaries exclusively with `mktemp`. Regression fixtures use
 directories on every host and FIFOs where the filesystem supports them. The new
-head requires a fresh independent review; the first rejection is not approval.
+head received an independent APPROVE at `ccb6439e5c7bdf17dc5100bb070eb4b6d8813084`
+in `codex-final-check-20260920T192551-52435-14784.md`. Integration of upstream
+`b05d15d` changes that reviewed source; the integrated head requires a fresh
+independent review. Neither the earlier rejection nor the prior-head APPROVE
+approves the new integration.
 After that repair and bounded quota history, `tests/test-ai-gh.sh` passed 61/61
 on Windows, including both FIFO cases; no skipped or ignored cases. The quota
 fixture executes the real wrapper-supplied jq projection rather than returning a
@@ -110,6 +121,8 @@ version: prior wrapper 7,362 ms total, instrumented wrapper 9,176 ms total (abou
 181 ms additional processing per operation). This is a small offline startup
 sample, not a workflow p95 or acceptance result. Instrumentation makes zero extra
 GitHub requests; ordinary pacing and all networking were excluded from this test.
+These tests, timing and development-worktree samples precede the PR #662
+integration; they are historical evidence, not postintegration or installed proof.
 
 On ALBT16 the installed `ai-gh.cmd` currently resolves to
 `C:/repos/ai-devops/bin/ai-gh`; the user confirmed C: for this phase because this
@@ -123,11 +136,30 @@ Read-only discovery also checked the protected atlas's current Windows section
 and its dated harness census. That historical census lists seven host roles with
 mixed/unknown authentication and reachability; it is not current fleet proof and
 its private topology is not copied here. On ALBT16, Codex, Claude and GitHub CLI
-resolve to installed executables. Task Scheduler returned no BlockerWatch or
-reviewer-start-watch registration. Therefore a normal local sample cannot be
-assumed to include scheduled BlockerWatch scans. P1 must obtain representative
+resolve to installed executables. Initial discovery returned no BlockerWatch or
+reviewer-start-watch registration. BlockerWatch was subsequently installed through
+its supported scheduling command: the task is Ready, with last run
+2026-09-20 15:43 local time (ALBT16, UTC-04:00) and result 0. This establishes a
+schedule and successful task exit, not a successful wake or representative scan.
+P1 must obtain representative
 ordinary observations from the appropriate already-configured source host, or
 retain that coverage gap and keep attribution acceptance open.
+
+## Live endpoint discrepancy
+
+A bounded authenticated GraphQL observation at approximately 2026-09-20 19:57 UTC
+reported viewer `u2giants`, numeric identifier `55610577`, and cost 1, with remaining
+4,773, used 227, limit 5,000 and reset 20:48:13 UTC. The immediately following REST
+rate-limit response instead reported GraphQL remaining 5,000, used 0 and reset
+20:57:17 UTC. A no-cache cross-check at 20:02:40 UTC again returned full buckets
+with reset 21:02:40 UTC.
+
+The root cause is unproven. These conflicting REST observations cannot establish
+actual account GraphQL usage, available headroom or busy reset-window evidence.
+The GraphQL viewer is point-in-time identity evidence only; it does not bind all
+earlier metadata, external callers or other hosts to that identity. Retain both
+observations as a measurement limitation rather than calculating false savings
+or treating full REST counters as proof of an idle account.
 
 ## Remaining evidence and blockers
 
