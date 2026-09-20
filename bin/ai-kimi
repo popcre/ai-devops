@@ -958,6 +958,27 @@ DECISION_FOOTER="
 Formatting requirement: answer every requested decision, then finish under a literal
 '## Unresolved objections' heading. Write 'None' there only when no material objection remains."
 
+# Prepend the shared helper standing rules (bin/ai-helper-global). Claude,
+# Codex and ZCode read a global instruction file at startup; a helper model has
+# none, so before 2026-09-20 each call was governed only by whatever the prompt
+# happened to say. Failure here is never fatal: a missing rules file must not
+# stop a review, it just means this call runs on its prompt alone.
+helper_global_prefix() { # helper_global_prefix PROMPT_FILE
+  local f="$1" g tmp
+  if [ "${AI_HELPER_GLOBAL_DISABLE:-0}" = 1 ]; then return 0; fi
+  g="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-helper-global"
+  [ -x "$g" ] || g="$(command -v ai-helper-global 2>/dev/null || true)"
+  [ -n "$g" ] && [ -x "$g" ] || return 0
+  tmp="$(mktemp)" || return 0
+  if "$g" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    printf '
+' >> "$tmp"; cat "$f" >> "$tmp"; mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
 build_prompt_file() {
   local dest="$1" body
   body="$dest.body"
@@ -976,6 +997,7 @@ build_prompt_file() {
   rm -f "$body"
   if [ "${OPT_REVIEW_KIND:-diff}" = diff ]; then printf '%s' "$PROMPT_FOOTER" >> "$dest"
   else printf '%s' "$DECISION_FOOTER" >> "$dest"; fi
+  helper_global_prefix "$dest"
 }
 
 # Defence in depth: the agent profile is the guarantee, this catches a profile

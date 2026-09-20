@@ -1134,6 +1134,27 @@ emit() { # emit NAME KIND SID TEXT TOKENS REPORT
 # --------------------------------------------------------------------------------
 # Prompt input
 # --------------------------------------------------------------------------------
+# Prepend the shared helper standing rules (bin/ai-helper-global). Claude,
+# Codex and ZCode read a global instruction file at startup; a helper model has
+# none, so before 2026-09-20 each call was governed only by whatever the prompt
+# happened to say. Failure here is never fatal: a missing rules file must not
+# stop a review, it just means this call runs on its prompt alone.
+helper_global_prefix() { # helper_global_prefix PROMPT_FILE
+  local f="$1" g tmp
+  if [ "${AI_HELPER_GLOBAL_DISABLE:-0}" = 1 ]; then return 0; fi
+  g="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-helper-global"
+  [ -x "$g" ] || g="$(command -v ai-helper-global 2>/dev/null || true)"
+  [ -n "$g" ] && [ -x "$g" ] || return 0
+  tmp="$(mktemp)" || return 0
+  if "$g" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    printf '
+' >> "$tmp"; cat "$f" >> "$tmp"; mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
 read_prompt() { # read_prompt -> path to a temp file holding the prompt
   local f
   [ -z "$PROMPT_FILE" ] || [ -f "$PROMPT_FILE" ] || die "prompt file not found: $PROMPT_FILE"
@@ -1147,6 +1168,7 @@ read_prompt() { # read_prompt -> path to a temp file holding the prompt
     cat > "$f"
   fi
   [ -s "$f" ] || { rm -f "$f"; die "prompt is empty."; }
+  helper_global_prefix "$f"
   printf '%s' "$f"
 }
 

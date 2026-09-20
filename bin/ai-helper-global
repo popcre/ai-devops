@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# ai-helper-global - print the standing rules prepended to every delegated
+# helper's prompt (Grok, GLM, Gemini, Qwen, DeepSeek, Muse, Kimi).
+#
+# Claude, Codex and ZCode read a global instruction file at startup; a helper
+# model has no such file, so until 2026-09-20 every helper was told only what a
+# single prompt happened to say. This command is the one source. Wrappers
+# prepend its output to the prompt they build, so a rule changed here reaches
+# every provider on the next call, with no per-wrapper text to keep in step.
+#
+# Usage: ai-helper-global            print the rules
+#        ai-helper-global --path     print the source file path
+#        ai-helper-global --check    exit 0 when the source is present and non-empty
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="${AI_HELPER_GLOBAL_FILE:-$ROOT/templates/system/AGENTS-global-helper.md}"
+case "${1:-}" in
+  --path)  printf '%s\n' "$SRC" ;;
+  --check) [ -s "$SRC" ] || { printf 'ai-helper-global: error: missing or empty: %s\n' "$SRC" >&2; exit 1; }
+           printf 'OK helper global present (%s bytes)\n' "$(wc -c < "$SRC" | tr -d ' ')" ;;
+  ''|--print) [ -s "$SRC" ] || { printf 'ai-helper-global: error: missing or empty: %s\n' "$SRC" >&2; exit 1; }
+           cat "$SRC" ;;
+  *) printf 'Usage: ai-helper-global [--print|--path|--check]\n' >&2; exit 2 ;;
+esac
