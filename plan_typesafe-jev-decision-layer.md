@@ -13,6 +13,7 @@
 | 3. Reachability probe from one machine | ✅ complete | 2026-09-18 | `bin/ai-jev-probe` (self-resolves via `op run`, 10s connect / 20s call timeout, fails loudly on empty key). Live on hetz: printed `ok` in 1.1s; the API reported model `jev-1.13.0`, response shape `answers.<id>.noul`. Offline guards: `tests/test-ai-jev-scripts.sh` 6/6 |
 | 4a. Track A: confirm upstream #33/#34 landed, then single-machine compaction trial | ⛔ blocked upstream; NOT installed | 2026-09-18 | Backtests §7, §9, §10: the plugin as-is and with our preview fix (upstream PR #57) both fail Albert's 91% bar (AUC 0.61 → 0.71). #33/#34 fixes (PRs #44/#45) unmerged. Do not install; rerun the §9 replay when #44, #45 and #57 land |
 | 4b. Track B: shadow-mode evaluation on completion-honesty checks | 🟡 shadow tool live-tested, not decisive | 2026-09-18 | `bin/ai-jev-completion-shadow` (PR #592). Real-traffic runs §7 and §9: split questions give sensible proof detection, but the one real unproven "done" scored 0.73 < 0.91. Record-only; next: more real endings and question tuning |
+| 4c. Whole-repository opportunity audit | ✅ complete; advisory candidates only | 2026-09-20 | §11 reviewed the 807-file repository by code area against current TypeSafe documentation. Best new pilot: public-issue duplicate/supersession triage. No candidate may open a gate, omit required evidence, or replace review. |
 | 5. Go/no-go per track on promoting anything to enforcing | ⬜ not started | — | — |
 
 **Where to start (2026-09-18):** read §8–§10 first. Track A waits on upstream (a daily 9 AM scheduled task on Albert's desktop app watches PRs #44, #45, #57). Track B can continue tuning. Track C not started, by design.
@@ -51,14 +52,16 @@ Launched 2026-09-15 by TypeSafe AI. A "System One" decision model: it does not
 generate text, write files, or hold a conversation. It takes state plus a typed
 question and returns a value.
 
-- **Question types:** `Choice` (one of N, with per-option probabilities),
-  `Score` (against ordered descriptive levels), `Noul` (binary, returns the
-  probability of yes). All three return a calibrated confidence.
+- **Question types:** `Choice` (one of N, with per-option probabilities and a
+  confidence statistic), `Score` (against ordered descriptive levels, also
+  with probabilities and confidence), and `Noul` (binary, returning only the
+  probability of yes; it has no separate confidence field).
 - **API:** `POST https://api.typesafe.ai/v1/systemone`, model `jev-latest`.
   Official Python and JavaScript SDKs.
 - **Latency:** 70–500ms end to end, published.
-- **Cost:** $0.042 per 1M input tokens, output unmetered. Roughly $0.0004 per
-  decision.
+- **Cost:** $0.042 per 1M input tokens, output unmetered. A 10,000-token request
+  costs about $0.00042; the cost per decision depends on how much state is sent
+  and how many questions share it.
 
 ### What is verified versus what is vendor marketing
 
@@ -278,3 +281,93 @@ preview. **Still below Albert's bar:** no setting deleted a meaningful share of
 output without also deleting material used later. Track A stays off until
 #44, #45 and #57 land and a rerun passes. A daily 9 AM scheduled check on
 Albert's desktop app reports upstream changes.
+
+## 11. Whole-repository opportunity audit, 2026-09-20
+
+The current `origin/main` inventory contains 807 tracked files. This pass
+reviewed every code area across reviewer paths, general automation,
+CI/configuration, tests, plans, templates, and skills. It also rechecked the
+current TypeSafe documentation and ran the bounded reachability probe
+successfully. Jev remains `jev-1.13.0` at
+`$0.042 / 1M` input tokens, with typed `Choice`, `Score`, and `Noul` answers.
+The vendor's own jaggedness guidance confirms the boundaries already used here:
+keep math, dates, exact rules, and side effects in code; send only relevant
+state; and treat adversarial or indirect text as an evaluated risk, not a
+guarantee.
+
+Upstream compaction safety is unchanged: tamaratran/fast-jev-compaction PRs
+#44, #45, and #57 are all still open. Track A therefore remains off.
+
+### Ranked candidates
+
+1. **Public-issue duplicate and supersession triage — best new pilot.** Work
+   Claims deliberately leaves truly duplicated issue records to human triage
+   (`plan_ai-devops-work-claims.md`, Risks and mitigations). Run one `Choice`
+   over a bounded pair or shortlist: `duplicate`, `supersedes`, `related`,
+   `distinct`, `abstain`. Use only public issue title/body/scope text. Shadow
+   against known historical pairs first. The result may rank a human queue or
+   suggest links; it may never close an issue, transfer ownership, create a
+   dependency, or suppress work. This replaces repeated human reading without
+   weakening a gate and is the cleanest match for Jev's cost profile.
+
+2. **Reviewer-report contradiction sentinel — useful close-only safety.** The
+   reviewer wrappers validate source identity, report size, and a terminal
+   `APPROVE`/`REJECT` token, but they cannot cheaply detect analysis that names
+   a blocking defect while ending `APPROVE` (`bin/ai-claude-review`,
+   `bin/ai-codex-review`, `bin/ai-review-lifecycle`, and `bin/ai-review-pool`).
+   Ask two `Noul` questions: whether the analysis states a blocking defect or
+   missing required evidence, and whether that conflicts with the verdict. A
+   high signal may downgrade to blocked/escalate; it may never create or
+   upgrade an approval. Shadow and label real reports before any behavior
+   change.
+
+3. **Additive pre-review risk hints — measured efficiency experiment.** On the
+   sealed manifest and changed-file list, ask independent risk questions for
+   authentication, secrets, destructive state, concurrency, and missing
+   evidence. Add confident tags to the paid review brief as `inspect first`.
+   Never remove files, narrow the required review mode, or skip a review. Adopt
+   only if the existing reviewer-efficiency gate shows at least 10% lower
+   median elapsed time or known cost with no missed planted defect or retained
+   fact.
+
+4. **Reviewer-maintenance triage — advisory labor saver.** The maintenance
+   engine freezes abnormal outcomes for exact, evidence-backed classification
+   (`tools/reviewer_maintenance.py`). Jev can suggest and prioritize the fixed
+   categories `incident`, `expected refusal`, `quota`, `user cancellation`,
+   `application failure`, `duplicate`, `in progress`, `evidence unavailable`,
+   or `uncertain`. It may not write the durable outcome, resolve an incident,
+   or satisfy completion proof.
+
+5. **Prompt-to-task-class and prompt-to-skill disagreement logging — shadow
+   only.** A typed recommendation can expose prompts whose semantic intent
+   disagrees with the deterministic strongest-path class or installed skill
+   descriptions. It cannot replace `ai-task-gates`, actual-client skill-trigger
+   tests, or protected-class routing. This is a quality signal, not a gate or a
+   current cost-saving priority.
+
+### Limited or rejected candidates
+
+- Completion-honesty remains record-only under Track B and must not revive the
+  closed completion-eval measurement programme without a new owner decision.
+  The existing real-traffic result is still below the 0.91 bar.
+- Unknown diagnostic-text classification may annotate an existing `unknown`
+  result, but cannot mark a doctor healthy or replace deterministic error
+  handling; the savings are negligible.
+- Shared-db intake, transcript mining, and licensed item-description parsing
+  are semantically plausible but excluded from a first pilot because of the
+  governing shared-db boundary or private/licensed-data restrictions.
+- BlockerWatch ownership, GitHub backoff, CI selection, test omission, source
+  identity, packet integrity, provider health/admission, task-stage skipping,
+  permission handling, secrets, database work, and production approval remain
+  deterministic. Jev adds risk or cost and displaces no expensive judgment.
+- Skill-trigger evaluation must run the actual client being tested; Jev cannot
+  stand in for that behavior. Config deduplication and plan retirement retain
+  their exact ownership markers and human review.
+
+### Recommended next step
+
+If a new Jev experiment is authorized, build only the public-issue
+duplicate/supersession shadow harness first. Use a labelled historical set,
+mandatory `abstain`, bounded calls, pinned model version, no mutations, and a
+precision-first acceptance bar. Do not start Tracks C or any enforcing use from
+this audit alone.
