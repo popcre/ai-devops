@@ -14,7 +14,7 @@ case "${FAKE_MODE:-ok}" in
   secondary) echo 'HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' >&2; echo 'Retry-After: 900' >&2; echo "end $(date +%s%N)" >> "$FAKE_LOG"; exit 1 ;;
   secondary-short) echo 'gh: HTTP 429: Too Many Requests (retry-after: 60)' >&2; exit 1 ;;
   notfound) echo 'HTTP 404: Not Found' >&2; exit 1 ;;
-  quota) if [ "$*" = "api rate_limit --jq [.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv" ]; then printf '%s\t5000\t%s\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )); elif [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: %s\r\nX-Github-Request-Id: F95F:TEST\r\n\r\n{}\n' "$FAKE_REMAINING"; else echo "out:$*"; fi ;;
+  quota) if [ "$1 $2" = "api rate_limit" ]; then printf '%s\t5000\t%s\t1234\t5000\t2000000000\t20\t30\t2000000001\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )); elif [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: %s\r\nX-Github-Request-Id: F95F:TEST\r\n\r\n{}\n' "$FAKE_REMAINING"; else echo "out:$*"; fi ;;
   primary) if [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: %s\nX-Github-Request-Id: F95F:1E2E31\n' $(( $(date +%s) + 3000 )); elif [ "$1 $2" = "api rate_limit" ]; then printf '%s\t5000\t%s\n' "${FAKE_REMAINING:-4000}" $(( $(date +%s) + 3000 )); else echo 'gh: API rate limit exceeded for user ID 55610577. (HTTP 403) token ghp_abcdefSECRET123' >&2; exit 1; fi ;;
   counter) n=$(( $(cat "$FAKE_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE_COUNT"; [ "$n" -ge 2 ] && echo '{"status":"completed"}' || echo '{"status":"in_progress"}' ;;
 esac
@@ -68,6 +68,7 @@ rm -f "$TMP/state/backoff_until"
 rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
 check 'healthy budget allows the call and caches quota' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q ' 2999 5000 ' '$TMP/state/quota'"
+check 'telemetry observes separate server buckets without changing admission' "jq -e '.buckets.core.remaining == 3000 and .buckets.graphql.remaining == 1234 and .buckets.search.remaining == 20 and .principal == \"unknown\"' '$TMP/state/quota-observation.json'"
 rm -f "$TMP/state/quota"; : > "$FAKE_LOG"
 FAKE_MODE=quota FAKE_REMAINING=900 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_NO_WAIT=1 "$GH" pr view 3 >/dev/null 2>&1; rc=$?
 check 'budget below 20% pauses machine-wide without making the call' "[ $rc -eq 75 ] && ! grep -q 'pr view 3' '$FAKE_LOG' && [ \$(cat '$TMP/state/backoff_until') -gt \$(date +%s) ] && grep -q 'budget-pause remaining=900/5000' '$TMP/state/refusals.log'"
@@ -172,5 +173,34 @@ check 'wait treats a pending exit (gh pr checks: 8) as not-done, not as failure'
 AI_GH_QUOTA_PAUSE_PCT=abc "$GH" pr view 1 >/dev/null 2>&1; rc=$?
 check 'a non-numeric budget setting is refused, not silently skipped' "[ $rc -eq 2 ]"
 check 'ai-pr-wait routes through the throttle' "grep -q 'ai-gh' '$ROOT/bin/ai-pr-wait'"
+
+# P1: allowlisted metadata is scrubbed before any measurement is persisted.
+cat > "$TMP/telemetry-gh" <<'EOF'
+#!/usr/bin/env bash
+printf 'body ghp_FIXTURE_CANARY query=private\n'
+printf 'stderr password=FIXTURE_CANARY\n' >&2
+exit "${FAKE_STATUS:-0}"
+EOF
+chmod +x "$TMP/telemetry-gh"
+export AI_GH_REAL_GH="$TMP/telemetry-gh" AI_GH_STATE_DIR="$TMP/telemetry-state"
+AI_GH_CALLER=$'FIXTURE_CANARY\ninjected' "$GH" api 'repos/private/FIXTURE_CANARY?secret=value' -f 'query=FIXTURE_CANARY' > "$TMP/tout" 2> "$TMP/terr"; rc=$?
+check 'telemetry_redacts_before_write' "[ $rc -eq 0 ] && ! grep -RqE 'FIXTURE_CANARY|injected|secret=value|password=|private' '$TMP/telemetry-state/measurements' && jq -e '.operation == \"api.unknown\" and .caller == \"unknown\" and .repository == \"redacted\" and .http_requests == null and .graphql_points == null' '$TMP/telemetry-state/measurements/'*.jsonl"
+printf 'body ghp_FIXTURE_CANARY query=private\n' > "$TMP/expected-out"
+printf 'stderr password=FIXTURE_CANARY\n' > "$TMP/expected-err"
+check 'telemetry_preserves_streams_and_status success' "cmp '$TMP/tout' '$TMP/expected-out' && cmp '$TMP/terr' '$TMP/expected-err'"
+FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
+check 'telemetry_preserves_streams_and_status failure' "[ $rc -eq 8 ] && cmp '$TMP/tout' '$TMP/expected-out' && cmp '$TMP/terr' '$TMP/expected-err' && jq -se '.[-1].exit_status == 8' '$TMP/telemetry-state/measurements/'*.jsonl"
+mkdir "$TMP/telemetry-state/measurements/write.lock"
+FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
+check 'telemetry failure is visible and preserves failed command status' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/terr' && cmp '$TMP/tout' '$TMP/expected-out'"
+rmdir "$TMP/telemetry-state/measurements/write.lock"
+touch "$TMP/telemetry-state/measurements/2000-01-01.jsonl"
+"$GH" api graphql > /dev/null 2>/dev/null
+check 'telemetry retention removes only old owned date files' "[ ! -e '$TMP/telemetry-state/measurements/2000-01-01.jsonl' ] && jq -se '.[-1].bucket == \"graphql\" and .[-1].cli_executions == 1 and .[-1].principal == \"unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
+python "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
+check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 3 and .opaque_cli_executions == 3 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+printf '{"operation":"FIXTURE_CANARY"}\n' > "$TMP/telemetry-state/measurements/2001-01-01.jsonl"
+python "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+check 'request report rejects untrusted labels without reflecting them' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && ! grep -q FIXTURE_CANARY '$TMP/report-error'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

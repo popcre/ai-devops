@@ -73,6 +73,23 @@ for a in "$@"; do
 done
 
 self="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+# Request attribution is local metadata only; it makes no extra API requests.
+# Failure to collect is visible but cannot change the command's own status.
+measure_helper="$(dirname "$self")/../tools/github-requests/telemetry.sh"
+MEASURE_READY=0
+if [ -f "$measure_helper" ]; then
+  source "$measure_helper"
+  gh_measure_init "$@"
+  MEASURE_READY=1
+else
+  say "request measurement unavailable: collector missing"
+fi
+measure_exit(){
+  local status="$1"
+  if [ "$MEASURE_READY" = 1 ]; then
+    gh_measure_finish "$status" || say "request measurement unavailable: sample not saved"
+  fi
+}
 REAL="${AI_GH_REAL_GH:-}"
 if [ -z "$REAL" ]; then
   while IFS= read -r cand; do
@@ -141,7 +158,7 @@ release(){
   fi
   HELD=0
 }
-trap release EXIT
+trap 'status=$?; release; measure_exit "$status"' EXIT
 trap 'release; exit 130' INT TERM
 # Lock liveness is age-based only: pid checks are unreliable across Git Bash,
 # MSYS and WSL pid namespaces sharing one state directory.
@@ -235,8 +252,11 @@ safe_args(){
 }
 probe_quota(){
   local q
-  q="$(timeout "$PROBE_TIMEOUT" "$REAL" api rate_limit --jq '[.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv' 2>/dev/null | tr -d '\r')"
+  q="$(timeout "$PROBE_TIMEOUT" "$REAL" api rate_limit --jq '[.resources | .core,.graphql,.search | .remaining,.limit,.reset | if type == "number" and . >= 0 and . == floor and . <= 9999999999 then . else "unknown" end]|@tsv' 2>/dev/null | tr -d '\r')"
   set -- $q
+  if [ "$MEASURE_READY" = 1 ]; then
+    gh_measure_quota "$@" || say "request measurement unavailable: quota snapshot not saved"
+  fi
   isnum "${1:-}" && isnum "${2:-}" && isnum "${3:-}" && [ "$2" -gt 0 ] || return 1
   put "$STATE/quota" "$(now) $1 $2 $3"
 }
@@ -277,10 +297,11 @@ put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
 # long clone or a hung request must never hold every other session hostage, and
 # a supervisor hard-kill during the call can no longer leave the lock behind.
 release
-ERRFILE="$err"; trap 'rm -f "$ERRFILE"' EXIT; trap 'rm -f "$ERRFILE"; exit 130' INT TERM
+ERRFILE="$err"; trap 'status=$?; rm -f "$ERRFILE"; measure_exit "$status"' EXIT; trap 'rm -f "$ERRFILE"; exit 130' INT TERM
 # stderr is passed through live (messages stay visible; gh may hide its spinner
 # because stderr is a pipe) and copied for the failure record.
 exec 4>&1
+GH_MEASURE_EXECUTED=1
 rc="$({ { "$REAL" "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | tee "$err" >&2; } 5>&1)"
 exec 4>&-
 isnum "${rc:-}" || rc=1

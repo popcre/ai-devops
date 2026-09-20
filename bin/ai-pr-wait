@@ -80,7 +80,7 @@ if [ "$INTERVAL" -lt 300 ] && [ "${AI_DEVOPS_TEST_MODE:-0}" != 1 ]; then
 fi
 THROTTLE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)/ai-gh"
 if [ -x "$THROTTLE" ]; then
-  export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
+  export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1 AI_GH_CALLER=ai-pr-wait
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
     if [ -z "${AI_GH_STATE_DIR:-}" ]; then
       AI_GH_STATE_DIR="$(mktemp -d)"; TMP_STATE_DIR="$AI_GH_STATE_DIR"
