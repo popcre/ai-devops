@@ -226,11 +226,23 @@ for a subagent: include it, in these words, every time.
 
 The one exception is a wait on another GitHub issue that has its own owner
 (a shared-db ticket, a gate bug, another repository's work). Run
-`ai-blocker-watch wait <owner/repo#N> --for <owner/repo#M> --note "<what to
-do next>"`, where N is the blocker and M is the issue you are working on, then
-end the turn. The machine watcher records GitHub's "blocked by" link, tells M
-when N closes, and resumes this exact session (Claude, Codex, or ZCode). Never
-hold such a wait open for days.
+`ai-blocker-watch wait <owner/repo#N> --for <owner/repo#M> --brief-file
+<file>`, where N is the blocker and M is the issue you are working on, then end
+the turn. When there is no work issue yet, use `--park "<plain-English title>"`
+instead of `--for` and one is opened for you. The brief is required and is the
+whole point: write, in plain English, what this work is, what is already done,
+and the exact next steps, because a brand-new session may have to continue it
+from that text alone. The watcher publishes the brief as a "parked" GitHub
+issue, records GitHub's "blocked by" link, tells M when N closes, and then
+continues the work by itself — resuming this exact session when it still
+exists, and otherwise starting a fresh session that reads the parked issue,
+makes its own worktree from current upstream, and carries on. Parked work is
+findable months later with `ai-blocker-watch find <plain words>`. The same
+command covers every kind of waiting, not only orchestrator tickets: a pull
+request is just a blocker reference; a point in time is `--until <UTC time>`;
+and a long-running job is an issue that says what "finished" means, waited on
+with `--until` as a safety check-in (whichever comes first releases the wait).
+Never hold such a wait open for days.
 
 A blocker issue gets an owner at birth, and that owner is you. When you open an
 issue whose purpose is to block other work — a gate bug, a shared-db

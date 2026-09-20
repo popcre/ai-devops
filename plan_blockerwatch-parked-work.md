@@ -15,17 +15,17 @@ Read this table first. Do not re-derive it, and do not re-plan from chat.
 
 | # | Step | Status | Evidence (an artifact, never a bare number) |
 |---|---|---|---|
-| 1 | Config: `harness_fresh`, `transcript_glob`, `parked_label`, `resumed_label` | ⬜ open | — |
-| 2 | `wait`: require a brief, create or mark the parked issue, record the main checkout | ⬜ open | — |
-| 3 | `wake`: decide resume or fresh start; fresh start from the parked issue | ⬜ open | — |
-| 4 | `wake`: report the outcome on the parked issue and swap its label | ⬜ open | — |
-| 5 | `find` command: plain-language search of parked work | ⬜ open | — |
-| 6 | `list` shows the parked issue | ⬜ open | — |
-| 7 | Tests in `tests/test-ai-blocker-watch.sh` | ⬜ open | — |
-| 8 | Globals, router, and help text teach the new `wait` | ⬜ open | — |
+| 1 | Config: `harness_fresh`, `transcript_glob`, `parked_label`, `resumed_label` | ✅ done | `config/blocker-watch.json`: `parked_label`, `resumed_label`, `find_owners`, `harness_fresh`, `transcript_glob` |
+| 2 | `wait`: require a brief, create or mark the parked issue, record the main checkout | ✅ done | `bin/ai-blocker-watch` `cmd_wait`: `--brief-file` required, `--park`/`--for`, label creation, `main_checkout` |
+| 3 | `wake`: decide resume or fresh start; fresh start from the parked issue | ✅ done | `wake` picks resumed / fresh / orphaned; tests 7-9 in `tests/test-ai-blocker-watch.sh` |
+| 4 | `wake`: report the outcome on the parked issue and swap its label | ✅ done | `parked_comment()` - one marked comment per wake, `parked` swapped for `resumed` |
+| 5 | `find` command: plain-language search of parked work | ✅ done | `cmd_find` plus the `find` dispatch; test "find prints matching parked work" |
+| 6 | `list` shows the parked issue | ✅ done | `cmd_list` sixth column; test "list shows the parked issue column" |
+| 7 | Tests in `tests/test-ai-blocker-watch.sh` | ✅ done | `bash tests/test-ai-blocker-watch.sh` -> **94 passed, 0 failed** (was 71) |
+| 8 | Globals, router, and help text teach the new `wait` | ✅ done | help text (range fixed to `2,96p`), the three global templates, `docs/task-router.md` |
 | 9 | PR, CI green, merge, pull the shared checkout on edge-dev | ⬜ open | — |
 | 10 | Live proof: one real park and one fresh start | ⬜ open | — |
-| 11 | Any kind of wait: pull requests, a time (`--until`), and long-running jobs | ⬜ open | — |
+| 11 | Any kind of wait: pull requests, a time (`--until`), and long-running jobs | ✅ done | pull-request-unmerged notice, `--until`, combined waits; six tests |
 
 **A fresh session starts at step 1.** Steps 1–8 fit in one session and land as
 one pull request. Step 10 is the single live proof, and it is owned by #617.
