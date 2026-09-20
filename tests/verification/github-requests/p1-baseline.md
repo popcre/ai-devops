@@ -116,6 +116,37 @@ on Windows, including both FIFO cases; no skipped or ignored cases. The quota
 fixture executes the real wrapper-supplied jq projection rather than returning a
 preconstructed projection, so the three-bucket extraction itself is exercised.
 
+### Integrated source verification, 2026-09-20
+
+After integrating PR #662, review of `27a2620` rejected inherited caller labels,
+uncontrolled non-object JSON errors, and stale test evidence. All BlockerWatch
+GitHub transports now receive a command-scoped label; resumed sessions retain
+their own environment. Both waiter paths also scope labels to their transports.
+The report rejects non-object records, wrong-type labels, malformed required
+fields and excessive nesting with a fixed diagnostic and no partial report.
+
+The repaired source passed **243 focused assertions, 0 failures, no skips**:
+
+| Suite | Result | Complete local output SHA-256 |
+|---|---|---|
+| `tests/test-ai-gh.sh` | 117 passed, 0 failed | `b02770245434be3cc169b38890bf254cf05fe24b24704757227d41476e1eeadc` |
+| `tests/test-ai-pr-wait.sh` | 30 passed, 0 failed | `a84071e340d348fa214c3b5bef84aff946ca8ed6a7162f0e0abbc8804a60875c` |
+| `tests/test-ai-blocker-watch.sh` | 96 passed, 0 failed | `e8a436b394529630e9bdd4cb6cc470021aa607b99bcd033d2fe0efc7806c85ec` |
+
+The waiter timing checks were run alone: an earlier concurrent run exceeded two
+strict local timing thresholds, while the unchanged suite passed serially. No
+timeout or assertion was relaxed. The report suite's 18 new cases preserve all
+99 existing assertions. The caller checks exercise real fake transports and both
+resumed harnesses, rather than merely searching for a label in source code.
+
+A local SHA-256 receipt binds the tested scripts, their transport/supervisor/gate
+dependencies, BlockerWatch configuration and all three complete outputs. Its
+source-input manifest digest is
+`68d9db924e8def1deb21d1afaa932d1da3eca63dc96d0bcded136fa26c7e07ea`.
+The final review packet verifies these input/output hashes and displays the
+recorded results, reusing completed focused tests rather than rerunning them.
+Full required CI remains separate; these results are not installed/live proof.
+
 An isolated Windows timing comparison ran ten zero-delay fake CLI operations per
 version: prior wrapper 7,362 ms total, instrumented wrapper 9,176 ms total (about
 181 ms additional processing per operation). This is a small offline startup
