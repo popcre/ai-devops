@@ -866,6 +866,23 @@ PY
   rm -f "$tmp"
 }
 
+# The shared helper standing rules (bin/ai-helper-global). Claude, Codex and
+# ZCode read a global instruction file at startup; a helper model has none, so
+# before 2026-09-20 each call was governed only by whatever the prompt said.
+# These rules go in the USER message, never the system message: review mode
+# owns messages[0] byte for byte and review_system_present checks it. Failure
+# here is never fatal - a missing rules file must not stop a review.
+helper_global_text() {
+  local g
+  if [ "${AI_HELPER_GLOBAL_DISABLE:-0}" = 1 ]; then return 0; fi
+  g="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-helper-global"
+  [ -x "$g" ] || g="$(command -v ai-helper-global 2>/dev/null || true)"
+  if [ -z "$g" ] || [ ! -x "$g" ]; then return 0; fi
+  "$g" 2>/dev/null || true
+  printf '
+'
+}
+
 with_files_appended() {
   # Git Bash owns file reads so its supported Windows filenames remain readable.
   # Length framing transports NUL bytes without ever placing them in a shell var.
@@ -1083,6 +1100,7 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
       esac
     done
     [ -n "$MSG" ] || { echo 'Usage: ai-deepseek-agent send "<message>" [--file FILE]...' >&2; exit 2; }
+    MSG="$(helper_global_text)$MSG"
     case "$MODEL" in deepseek-flash|deepseek-v4-pro) ;; *) refuse_unsupported_model "$MODEL" ;; esac
     [ "$REVIEW" = 1 ] || [ -z "$OPT_BASE$OPT_ASSERT_HEAD" ] || { echo 'Error: --base and --assert-head require --review.' >&2; exit 2; }
     if [ "$REVIEW" = 1 ] && [ -n "$SYSTEM" ]; then echo "Error: --system cannot be combined with --review; the review evidence boundary owns the system prompt. Put your instructions in the review message instead." >&2; exit 2; fi

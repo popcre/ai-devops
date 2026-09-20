@@ -1022,6 +1022,27 @@ assert_governed_review_head() {
     || die "--governed-verdict names $OPT_GOVERNED_VERDICT but the sealed review head is $REVIEW_HEAD."
 }
 
+# Prepend the shared helper standing rules (bin/ai-helper-global). Claude,
+# Codex and ZCode read a global instruction file at startup; a helper model has
+# none, so before 2026-09-20 each call was governed only by whatever the prompt
+# happened to say. Failure here is never fatal: a missing rules file must not
+# stop a review, it just means this call runs on its prompt alone.
+helper_global_prefix() { # helper_global_prefix PROMPT_FILE
+  local f="$1" g tmp
+  if [ "${AI_HELPER_GLOBAL_DISABLE:-0}" = 1 ]; then return 0; fi
+  g="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-helper-global"
+  [ -x "$g" ] || g="$(command -v ai-helper-global 2>/dev/null || true)"
+  [ -n "$g" ] && [ -x "$g" ] || return 0
+  tmp="$(mktemp)" || return 0
+  if "$g" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    printf '
+' >> "$tmp"; cat "$f" >> "$tmp"; mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
 build_prompt_file() {
   local dest="$1" body="$1.body"
   if [ -n "${OPT_PROMPT_FILE:-}" ]; then
@@ -1039,6 +1060,7 @@ build_prompt_file() {
   if [ -n "${OPT_GOVERNED_VERDICT:-}" ]; then governed_prompt_footer >> "$dest"
   else printf '%s' "$STANDARD_PROMPT_FOOTER" >> "$dest"
   fi
+  helper_global_prefix "$dest"
 }
 
 verify_returned_model() { # verify_returned_model STREAM

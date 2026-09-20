@@ -97,7 +97,30 @@ raw_agy(){ local a; for a in "${AI_GEMINI_BIN:-}" "$(command -v agy 2>/dev/null 
 agy(){ local a; a="$(raw_agy)"; if [ "$QUALIFYING" -eq 0 ]; then runtime_qualified "$a" || die 'Gemini qualification no longer matches the exact wrapper, runtime, or model; quarantine restored'; fi; printf %s "$a"; }
 live_qualified && QUARANTINED=0
 require_local_runtime(){ local a; a="$(agy)"; timeout 30s "$a" --version >/dev/null 2>&1 || die 'local_dependency_unavailable: the LOCAL agy runtime cannot start or its version probe timed out. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
-request(){ if [ "${1:-}" = --prompt ]; then printf %s "${2:-}"; elif [ "${1:-}" = --prompt-file ]; then [ -f "${2:-}" ] || die 'prompt file not found'; cat "$2"; elif [ ! -t 0 ]; then cat; else die 'provide --prompt, --prompt-file, or standard input'; fi; }
+# Prepend the shared helper standing rules (bin/ai-helper-global). Claude,
+# Codex and ZCode read a global instruction file at startup; a helper model has
+# none, so before 2026-09-20 each call was governed only by whatever the prompt
+# happened to say. Failure here is never fatal: a missing rules file must not
+# stop a review, it just means this call runs on its prompt alone.
+helper_global_prefix() { # helper_global_prefix PROMPT_FILE
+  local f="$1" g tmp
+  if [ "${AI_HELPER_GLOBAL_DISABLE:-0}" = 1 ]; then return 0; fi
+  g="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-helper-global"
+  [ -x "$g" ] || g="$(command -v ai-helper-global 2>/dev/null || true)"
+  [ -n "$g" ] && [ -x "$g" ] || return 0
+  tmp="$(mktemp)" || return 0
+  if "$g" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    printf '
+' >> "$tmp"; cat "$f" >> "$tmp"; mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
+request(){ local rf; rf="$(mktemp)" || die 'cannot stage the prompt'
+  if [ "${1:-}" = --prompt ]; then printf %s "${2:-}" > "$rf"; elif [ "${1:-}" = --prompt-file ]; then [ -f "${2:-}" ] || { rm -f "$rf"; die 'prompt file not found'; }; cat "$2" > "$rf"; elif [ ! -t 0 ]; then cat > "$rf"; else rm -f "$rf"; die 'provide --prompt, --prompt-file, or standard input'; fi
+  helper_global_prefix "$rf"; cat "$rf"; rm -f "$rf"; }
 write(){ local f="$1" j="$2" t; mkdir -p "$(dirname "$f")"; t="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"; printf '%s\n' "$j" > "$t"; mv -f "$t" "$f"; }
 update_state(){ local f="$1" status="$2" detail="${3:-}" j; j="$(jq -c --arg s "$status" --arg d "$detail" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status=$s | .status_detail=$d | .updated_at=$t' "$f")" || die 'invalid session metadata'; write "$f" "$j"; }
 secure_private(){ local p="$1" mode="$2" win sid; chmod "$mode" "$p" 2>/dev/null || return 1; case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1 && command -v powershell.exe >/dev/null 2>&1 || return 1; win="$(cygpath -w "$p")"; sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n')"; case "$sid" in S-1-*) ;; *) return 1;; esac; if [ -d "$p" ]; then icacls "$win" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null 2>&1 || return 1; else icacls "$win" /inheritance:r /grant:r "*${sid}:(F)" >/dev/null 2>&1 || return 1; fi; powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$ExpectedSid) try { if ([IO.Directory]::Exists($Path)) { $Acl = New-Object Security.AccessControl.DirectorySecurity($Path, [Security.AccessControl.AccessControlSections]::Access) } else { $Acl = New-Object Security.AccessControl.FileSecurity($Path, [Security.AccessControl.AccessControlSections]::Access) }; if (-not $Acl.AreAccessRulesProtected) { exit 1 }; $Full = [Security.AccessControl.FileSystemRights]::FullControl; $CurrentHasFull = $false; foreach ($Rule in @($Acl.Access | Where-Object AccessControlType -eq ([Security.AccessControl.AccessControlType]::Allow))) { $RuleSid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($ExpectedSid, "S-1-5-18", "S-1-5-32-544")) { exit 1 }; if ($RuleSid -eq $ExpectedSid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $CurrentHasFull = $true } }; if (-not $CurrentHasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" >/dev/null 2>&1;; esac; }

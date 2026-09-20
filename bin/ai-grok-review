@@ -1347,8 +1347,29 @@ Formatting requirement: structure your reply so the final answer is last, under 
 literal '## Verdict' heading. Put any narration of what you are reading above it.
 Do not put the verdict anywhere else."
 
+# Prepend the shared helper standing rules (bin/ai-helper-global). Claude,
+# Codex and ZCode read a global instruction file at startup; a helper model has
+# none, so before 2026-09-20 each call was governed only by whatever the prompt
+# happened to say. Failure here is never fatal: a missing rules file must not
+# stop a review, it just means this call runs on its prompt alone.
+helper_global_prefix() { # helper_global_prefix PROMPT_FILE
+  local f="$1" g tmp
+  if [ "${AI_HELPER_GLOBAL_DISABLE:-0}" = 1 ]; then return 0; fi
+  g="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-helper-global"
+  [ -x "$g" ] || g="$(command -v ai-helper-global 2>/dev/null || true)"
+  [ -n "$g" ] && [ -x "$g" ] || return 0
+  tmp="$(mktemp)" || return 0
+  if "$g" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    printf '
+' >> "$tmp"; cat "$f" >> "$tmp"; mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
 build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/stdin)
-  local dest="$1"
+  local dest="$1" hg_out="$1"
   printf 'Your evidence packet is at %s/%s/MANIFEST.md. Read it first.\nIt contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n\nYou may read any other file under %s to confirm a finding; the packet is your starting point, not a boundary. Do not reconstruct the diff because it is already in %s/%s/patch.diff.\n\n---\n\n' \
     "$REVIEW_DIR" "$PACKET_REL" "$REVIEW_DIR" "$REVIEW_DIR" "$PACKET_REL" > "$dest"
   dest="$dest.body"
@@ -1367,6 +1388,7 @@ build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/st
   cat "$dest" >> "${dest%.body}"
   rm -f "$dest"
   printf '%s' "$PROMPT_FOOTER" >> "${dest%.body}"
+  helper_global_prefix "$hg_out"
 }
 
 # Refuse to write review artifacts into a repo that would commit them.
