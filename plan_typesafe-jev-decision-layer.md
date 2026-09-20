@@ -371,3 +371,10 @@ duplicate/supersession shadow harness first. Use a labelled historical set,
 mandatory `abstain`, bounded calls, pinned model version, no mutations, and a
 precision-first acceptance bar. Do not start Tracks C or any enforcing use from
 this audit alone.
+
+The executable, fresh-session implementation sequence for that pilot and the
+four later advisory candidates is
+[`plan_typesafe-jev-advisory-integrations.md`](plan_typesafe-jev-advisory-integrations.md),
+tracked by [issue #643](https://github.com/popcre/ai-devops/issues/643). Its
+STATUS table is authoritative for implementation; this document remains the
+evaluation evidence and decision history.
