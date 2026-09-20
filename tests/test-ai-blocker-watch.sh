@@ -16,6 +16,7 @@ BRIEF
 cat > "$TMP/gh" <<'EOF'
 #!/usr/bin/env bash
 F="$FAKE"; printf '%s\n' "$*" >> "$F/calls"
+printf '%s\n' "${AI_GH_CALLER:-unset}" >> "$F/callers"
 [ -f "$F/fail" ] && exit 1
 jqarg=""; args=("$@"); for i in "${!args[@]}"; do [ "${args[$i]}" = --jq ] && jqarg="${args[$((i+1))]}"; done
 out(){ if [ -n "$jqarg" ]; then jq -r "$jqarg" <<<"$1"; else printf '%s\n' "$1"; fi; }
@@ -52,6 +53,7 @@ EOF
 # Fake harness: records how it was resumed.
 cat > "$TMP/harness" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "${AI_GH_CALLER:-unset}" >> "$FAKE/resumed-callers"
 printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"; [ -f "$FAKE/harness_fail" ] && exit 7; exit 0
 EOF
 chmod +x "$TMP/gh" "$TMP/harness"
@@ -77,7 +79,9 @@ check 'wait detects Claude from its environment' "jq -e '.harness==\"claude\"' '
 check 'tick while the blocker is open resumes nobody' "BW tick && [ ! -f '$FAKE/resumed' ]"
 echo closed > "$FAKE/state5"
 check 'dry run resumes nobody' "BW tick --dry-run && [ ! -f '$FAKE/resumed' ]"
-check 'tick after the blocker closes succeeds' "BW tick"
+check 'tick after the blocker closes succeeds' "AI_GH_CALLER=interactive BW tick"
+check 'every BlockerWatch transport call has its own caller label' "[ -s '$FAKE/callers' ] && ! grep -vx ai-blocker-watch '$FAKE/callers'"
+check 'resumed sessions retain their own caller instead of inheriting BlockerWatch' "[ \"\$(grep -c '^interactive$' '$FAKE/resumed-callers')\" = 2 ] && ! grep -q ai-blocker-watch '$FAKE/resumed-callers'"
 check 'the Codex session was resumed with its own session ID' "grep -q '|codex thread-abc' '$FAKE/resumed'"
 check 'the Claude session got a prompt naming the closed blocker and its note-free wait' "grep -q '|claude claude-1 ai-blocker-watch: the blocker you registered a wait on, o/r#5' '$FAKE/resumed'"
 check 'resume runs in the registered directory' "grep -q \"^$(cd "$TMP/work" && pwd)|\" '$FAKE/resumed' || grep -q 'work|' '$FAKE/resumed'"
