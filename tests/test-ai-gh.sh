@@ -14,8 +14,15 @@ case "${FAKE_MODE:-ok}" in
   secondary) echo 'HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' >&2; echo 'Retry-After: 900' >&2; echo "end $(date +%s%N)" >> "$FAKE_LOG"; exit 1 ;;
   secondary-short) echo 'gh: HTTP 429: Too Many Requests (retry-after: 60)' >&2; exit 1 ;;
   notfound) echo 'HTTP 404: Not Found' >&2; exit 1 ;;
-  quota) if [ "$*" = "api rate_limit --jq [.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv" ]; then printf '%s\t5000\t%s\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )); elif [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: %s\r\nX-Github-Request-Id: F95F:TEST\r\n\r\n{}\n' "$FAKE_REMAINING"; else echo "out:$*"; fi ;;
-  primary) if [ "$1 $2" = "api --include" ]; then printf 'HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: %s\nX-Github-Request-Id: F95F:1E2E31\n' $(( $(date +%s) + 3000 )); elif [ "$1 $2" = "api rate_limit" ]; then printf '%s\t5000\t%s\n' "${FAKE_REMAINING:-4000}" $(( $(date +%s) + 3000 )); else echo 'gh: API rate limit exceeded for user ID 55610577. (HTTP 403) token ghp_abcdefSECRET123' >&2; exit 1; fi ;;
+  quota) if [ "$1 $2" = 'api rate_limit' ]; then
+    printf 'core\t%s\t5000\t%s\ngraphql\t%s\t5000\t%s\nsearch\t%s\t30\t%s\ncode_search\t%s\t10\t%s\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )) "${FAKE_GRAPHQL_REMAINING:-$FAKE_REMAINING}" $(( $(date +%s) + 2400 )) "${FAKE_SEARCH_REMAINING:-30}" $(( $(date +%s) + 60 )) "${FAKE_CODE_SEARCH_REMAINING:-10}" $(( $(date +%s) + 60 ));
+    else echo "out:$*"; fi ;;
+  primary) if [ "$1 $2" = 'api --include' ]; then
+    printf 'HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: %s\nX-Github-Request-Id: F95F:1E2E31\n\ncore\t0\t5000\t%s\ngraphql\t0\t5000\t%s\n' $(( $(date +%s) + 9000 )) $(( $(date +%s) + 3000 )) $(( $(date +%s) + 2000 ));
+    elif [ "$1 $2" = 'api rate_limit' ]; then printf 'core\t4000\t5000\t%s\ngraphql\t4000\t5000\t%s\n' $(( $(date +%s) + 3000 )) $(( $(date +%s) + 2000 )); else echo 'gh: API rate limit exceeded for user ID 55610577. (HTTP 403) token ghp_abcdefSECRET123' >&2; exit 1; fi ;;
+  missing-resource) if [ "$1 $2" = 'api rate_limit' ]; then printf 'core\t4999\t5000\t%s\n' $(( $(date +%s) + 9000 ));
+    elif [ "$1 $2" = 'api --include' ]; then printf 'HTTP/2 200\nX-Ratelimit-Reset: %s\n\ncore\t4999\t5000\t%s\n' $(( $(date +%s) + 9000 )) $(( $(date +%s) + 9000 ));
+    else echo 'gh: API rate limit already exceeded for user ID 55610577. (HTTP 403)' >&2; exit 1; fi ;;
   counter) n=$(( $(cat "$FAKE_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE_COUNT"; [ "$n" -ge 2 ] && echo '{"status":"completed"}' || echo '{"status":"in_progress"}' ;;
 esac
 echo "end $(date +%s%N)" >> "$FAKE_LOG"
@@ -67,7 +74,7 @@ rm -f "$TMP/state/backoff_until"
 # Hourly (primary) budget.
 rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
-check 'healthy budget allows the call and caches quota' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q ' 2999 5000 ' '$TMP/state/quota'"
+check 'mixed CLI cost is unknown and its resource snapshots are invalidated' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q '^0 3000 5000 ' '$TMP/state/quota' && grep -q '^0 3000 5000 ' '$TMP/state/quota.graphql'"
 rm -f "$TMP/state/quota"; : > "$FAKE_LOG"
 FAKE_MODE=quota FAKE_REMAINING=900 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_NO_WAIT=1 "$GH" pr view 3 >/dev/null 2>&1; rc=$?
 check 'budget below 20% pauses machine-wide without making the call' "[ $rc -eq 75 ] && ! grep -q 'pr view 3' '$FAKE_LOG' && [ \$(cat '$TMP/state/backoff_until') -gt \$(date +%s) ] && grep -q 'budget-pause remaining=900/5000' '$TMP/state/refusals.log'"
@@ -82,6 +89,58 @@ rm -f "$TMP/state/backoff_until"
 FAKE_MODE=notfound AI_GH_QUOTA_PROBE_SECONDS=off "$GH" api nope >/dev/null 2>&1
 check 'ordinary failures are logged too' "grep -q 'args=api nope' '$TMP/state/failures.log' && grep -q 'HTTP 404: Not Found' '$TMP/state/failures.log'"
 rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
+
+# Resource classification and accounting: no real credential or API is used.
+fresh_quota(){ rm -f "$TMP/state"/quota* "$TMP/state/backoff_until"; : > "$FAKE_LOG"; }
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_GRAPHQL_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=privatequery >/dev/null 2>"$TMP/resource-err"; rc=$?
+check 'healthy REST cannot conceal exhausted GraphQL before a direct query' "[ $rc -eq 75 ] && ! grep -q 'api graphql' '$FAKE_LOG' && grep -q 'resource=graphql' '$TMP/state/refusals.log'"
+for verb in pr issue; do
+  fresh_quota
+  FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_GRAPHQL_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" "$verb" list >/dev/null 2>&1; rc=$?
+  check "indirect $verb command checks GraphQL as well as REST" "[ $rc -eq 75 ] && ! grep -q '$verb list' '$FAKE_LOG'"
+done
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_GRAPHQL_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1; rc=$?
+check 'single REST call uses core and reserves one request' "[ $rc -eq 0 ] && grep -q ' 3999 5000 ' '$TMP/state/quota'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=0 FAKE_GRAPHQL_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api -X POST /graphql -F query=secretquery >/dev/null 2>&1; rc=$?
+check 'direct GraphQL selects its own bucket even with leading options' "[ $rc -eq 0 ] && grep -q '^0 4000 5000 ' '$TMP/state/quota.graphql'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api --paginate repos/o/r/issues >/dev/null 2>&1; rc=$?
+check 'pagination invalidates the snapshot instead of inventing a one-request cost' "[ $rc -eq 0 ] && grep -q '^0 4000 5000 ' '$TMP/state/quota'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api rate_limit >/dev/null 2>&1; rc=$?
+check 'rate_limit does not decrement the core request budget' "[ $rc -eq 0 ] && grep -q ' 4000 5000 ' '$TMP/state/quota'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_SEARCH_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api search/issues >/dev/null 2>&1; rc=$?
+check 'REST search uses its separate resource rather than healthy core' "[ $rc -eq 75 ] && ! grep -q 'api search/issues' '$FAKE_LOG'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_CODE_SEARCH_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api search/code >/dev/null 2>&1; rc=$?
+check 'code search uses its separate resource' "[ $rc -eq 75 ] && ! grep -q 'api search/code' '$FAKE_LOG'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_GRAPHQL_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api --unknown-option graphql >/dev/null 2>&1; rc=$?
+check 'unknown API options retain conservative resource selection' "[ $rc -eq 75 ] && ! grep -q -- '--unknown-option' '$FAKE_LOG'"
+fresh_quota
+before=$(date +%s)
+FAKE_MODE=primary AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api graphql >/dev/null 2>&1; rc=$?
+check 'GraphQL refusal uses GraphQL reset, never the unrelated core response header' "[ $rc -eq 75 ] && [ \$(cat '$TMP/state/backoff_until') -ge $((before + 1900)) ] && [ \$(cat '$TMP/state/backoff_until') -lt $((before + 2500)) ]"
+fresh_quota
+before=$(date +%s)
+FAKE_MODE=missing-resource AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api graphql -f query=privatevalue >/dev/null 2>"$TMP/unknown-quota"; rc=$?
+check 'missing GraphQL evidence is visible and never borrows core reset' "[ $rc -eq 75 ] && grep -q 'graphql quota unknown' '$TMP/unknown-quota' && [ \$(cat '$TMP/state/backoff_until') -lt $((before + 1000)) ]"
+check 'new resource diagnostics do not expose query values' "! grep -q privatevalue '$TMP/state/failures.log' '$TMP/state/refusals.log'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api --hostname github.example repos/o/r >/dev/null 2>&1; rc=$?
+check 'explicit host is probed and its snapshots cannot leak to default-host cache' "[ $rc -eq 0 ] && grep -q 'rate_limit --hostname github.example' '$FAKE_LOG' && grep -q '^0 ' '$TMP/state/quota' && grep -q '^0 ' '$TMP/state/quota.graphql'"
+fresh_quota
+FAKE_MODE=quota FAKE_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api --hostname github.example repos/o/r >/dev/null 2>&1; rc=$?
+check 'an explicit-host budget refusal also leaves every snapshot invalidated' "[ $rc -eq 75 ] && grep -q '^0 ' '$TMP/state/quota' && grep -q '^0 ' '$TMP/state/quota.graphql'"
+fresh_quota
+printf '%s 0 5000 %s\n' "$(date +%s)" "$(( $(date +%s) - 10 ))" > "$TMP/state/quota"
+FAKE_MODE=quota FAKE_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1; rc=$?
+check 'a passed resource reset refreshes even a recently timestamped cache' "[ $rc -eq 0 ] && grep -q 'api rate_limit' '$FAKE_LOG'"
+fresh_quota
 
 # Stale lock is recovered by age; a young lock with a live-looking owner is not stolen.
 mkdir -p "$TMP/state/lock.d"; echo "999999 $(( $(date +%s) - 400 )) tok" > "$TMP/state/lock.d/owner"
