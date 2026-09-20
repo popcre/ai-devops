@@ -260,6 +260,34 @@ check 'shared-db work is refused a deployment' "rc 3 '$TMP/gate' check --before 
 rm -f "$TMP/gate/x.sql"
 
 printf 'an undeclared task still gets classified\n'
+printf 'private code review keeps evidence and mutation boundaries\n'
+newrepo "$TMP/private" 'u2giants/licensor-source-data'
+mkdir -p "$TMP/private/disney-dcpvault" "$TMP/private/.ai-devops"
+printf '# synthetic loader code only\n' > "$TMP/private/disney-dcpvault/loader.py"
+cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]}}}
+EOF
+( cd "$TMP/private" && "$GATES" start --class private-evidence ) >/dev/null
+check 'private code review needs no owner request or acknowledgement' \
+  "rc 0 '$TMP/private' check --before review"
+check 'review permission retains central and consumer evidence requirements' \
+  "out '$TMP/private' explain --json | jq -e '.effective_class==\"private-evidence\" and ([\"privacy-classification\",\"no-raw-content-read\",\"licensed-row-containment\",\"synthetic-fixtures-only\"] - .required_gates | length==0)'"
+check 'private-evidence remains protected at its existing rank' \
+  "jq -e '.change_classes[\"private-evidence\"] | .protected==true and .rank==90' '$AI_TASK_GATES_FILE'"
+for action in deploy database infrastructure production; do
+  check "private code review cannot authorize $action even with owner override" \
+    "rc 3 '$TMP/private' check --before '$action' --owner-request 'review requested' --acknowledge 'in scope'"
+done
+( cd "$TMP/private" && "$GATES" start --class code ) >/dev/null
+check 'private code still requires honest protected-class declaration' \
+  "rc 3 '$TMP/private' check --before review --acknowledge 'read only'"
+( cd "$TMP/private" && "$GATES" start --class private-evidence ) >/dev/null
+cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"gates":{"private-evidence":{"forbidden_actions":["review"]}}}
+EOF
+check 'an explicit consumer review prohibition remains binding' \
+  "rc 3 '$TMP/private' check --before review --owner-request 'review requested'"
+
 newrepo "$TMP/undeclared"
 printf 'x\n' > "$TMP/undeclared/note.md"
 check 'no declared class falls back to the observed class' "rc 3 '$TMP/undeclared' check --before review"

@@ -242,7 +242,6 @@
           "no-raw-content-read"
         ],
         "forbidden_actions": [
-          "review",
           "deploy",
           "database",
           "infrastructure",

@@ -61,6 +61,16 @@ If the work legitimately grew, declare it again with the stronger class. A
 protected class cannot be argued past: `--acknowledge` and `--owner-request`
 apply only to unprotected classes.
 
+Read-only review of code, tests, and contracts in a private repository does not
+require owner permission merely because its task class is `private-evidence`.
+That class remains protected: `privacy-classification` and `no-raw-content-read`
+still apply. Review packets must exclude licensed records, artwork, raw
+transcripts, credentials, and other private evidence; use the reviewer's
+read-only mode. Allowing the review action authorizes neither writes nor
+publication of private material. Database, deployment, infrastructure, and
+production actions remain forbidden for this class, and a consumer repository
+can still impose a stricter review prohibition.
+
 Changing the policy means changing `config/task-gates.json`, keeping it valid
 against `config/task-gates.schema.json`:
 
