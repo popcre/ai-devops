@@ -613,7 +613,7 @@ cmd_list() {
 
 cmd_doctor() {
   need jq; need git
-  local grok; grok="$(resolve_grok)"
+  local grok rc=0; grok="$(resolve_grok)"
   local want_version have_version
   want_version="$(supported_grok_version 2>/dev/null || true)"
   have_version="$(installed_grok_version "$grok" 2>/dev/null || true)"
@@ -628,8 +628,17 @@ cmd_doctor() {
   fi
   echo "platform     : $(uname -s) (windows=$(is_windows && echo yes || echo no))"
   echo "cygpath      : $(command -v cygpath >/dev/null 2>&1 && echo present || echo absent)"
-  printf 'auth (models): '
-  if "$grok" models >/dev/null 2>&1; then echo OK; else echo "FAILED — run 'grok login'"; fi
+  # Isolated implementation forwards only file-backed authentication, not keys
+  # from the caller's environment. A public model list proves no chat access.
+  if [ ! -s "${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json" ]; then
+    echo "auth         : MISSING — no cached credentials. Run 'grok login'."
+    rc=1
+  elif "$grok" models >/dev/null 2>&1; then
+    echo "auth         : PRESENT (model catalogue reachable; chat authentication unverified)"
+  else
+    echo "auth         : AMBIGUOUS — model catalogue unavailable; chat authentication unverified"
+    rc=1
+  fi
   echo "state dir    : $IMPL_DIR"
   echo "run          : isolated worktree; Bash denied unless --allow-shell"
   echo "investigate  : isolated remote-less copy; Bash + public internet; INVESTIGATION — ADVISORY, NOT FORMAL APPROVAL"
@@ -637,6 +646,7 @@ cmd_doctor() {
   echo "NOTE: 'grok --worktree' creates no worktree in headless mode (-p)."
   echo "      This wrapper creates the worktree with git and passes only --cwd."
   echo "NOTE: investigate is not formal review and is not issue #249."
+  return "$rc"
 }
 
 main() {

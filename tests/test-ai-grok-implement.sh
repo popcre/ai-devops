@@ -25,6 +25,9 @@ trap 'rm -rf "$TMP"' EXIT
 export TMPDIR_FOR_TEST="$TMP"
 export AI_GROK_STATE_DIR="$TMP/state"
 export AI_GROK_CALLER="claude"
+export AI_GROK_AUTH_HOME="$TMP/auth"
+mkdir -p "$AI_GROK_AUTH_HOME"
+printf 'fixture-auth\n' > "$AI_GROK_AUTH_HOME/auth.json"
 
 # --- stub grok ---------------------------------------------------------------
 STUB="$TMP/bin"; mkdir -p "$STUB"
@@ -195,6 +198,14 @@ else
 fi
 
 # --- 12. doctor ----------------------------------------------------------------
+AI_GROK_AUTH_HOME="$TMP/missing-auth" XAI_API_KEY=fixture-key "$SCRIPT" doctor > "$TMP/missing-doctor" 2>&1
+if [ "$?" -ne 0 ] && grep -q 'auth *: MISSING' "$TMP/missing-doctor"; then
+  ok "doctor_refuses_missing_file_auth_even_with_unforwarded_environment_key"
+else
+  bad "doctor_refuses_missing_file_auth_even_with_unforwarded_environment_key"
+fi
+"$SCRIPT" doctor 2>&1 | grep -q 'chat authentication unverified' \
+  && ok "doctor_does_not_infer_chat_auth_from_catalogue" || bad "doctor_does_not_infer_chat_auth_from_catalogue"
 PINNED="$(bash "$REPO_ROOT/bin/ai-provider-version" required grok)"
 "$SCRIPT" doctor 2>&1 | grep -q "$PINNED" && ok "doctor_reports_version" || bad "doctor_reports_version"
 "$SCRIPT" doctor 2>&1 | grep -q "version policy: OK (exactly $PINNED" \
