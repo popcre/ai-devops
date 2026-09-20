@@ -64,7 +64,9 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
   The effective tier is recorded in `retained_turn.reasoning_effort`.
   The OpenCode engine ignores this variable.
 - The key reaches the CLI only as `META_API_KEY` through the credential boundary.
-  Token usage is recorded as unavailable. Sessions never cross engines.
+  Retained usage comes from the durable store; unreadable evidence is explicitly
+  unavailable. Catalog prices produce labeled estimates, never billed cost.
+  Sessions never cross engines.
 - Tests: `tests/test-ai-muse-code.sh` (offline stub). Windows only so far.
 
 ## Safety and evidence
