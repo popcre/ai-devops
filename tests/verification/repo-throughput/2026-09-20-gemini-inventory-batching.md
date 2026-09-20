@@ -56,3 +56,10 @@ The benchmark is a throwaway script, not installed tooling: source
 `tools/lib/provider-wrapper-common.sh`, generate the tree, and time
 `provider_wrapper_tree_inventory` against the per-file reference kept in
 `tests/test-provider-wrapper-common.sh` as `legacy_tree_inventory`.
+
+## What this does not prove
+
+An installed live Gemini exercise. The `agy` runtime is not installed on
+`916-alien`, so no real provider prepare was run. That evidence is owned by
+[#676](https://github.com/popcre/ai-devops/issues/676) and P1 stays open in the
+plan until it is recorded here.

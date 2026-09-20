@@ -9,7 +9,7 @@ Fresh session: read sections 1, 8, 11, then claim **one** row in section 9. Defa
 | Step | One independently accepted outcome | State, 2026-09-20 | Dependency / owner at dispatch | Evidence required for done |
 |---|---|---|---|---|
 | P0 | Reproducible delivery baseline and reconciled scope | open | Each implementer refreshes its own slice; #650 coordinates | Dated baseline and exact live source/run identities |
-| P1 | Gemini inventory is fast and byte-equivalent | landed 2026-09-20, installed live proof outstanding | Landed under #633 by Claude chat c6c24eca-99c8-4d33-b43b-3e453f349d15 on 916-alien; installed proof tracked separately | Parity tests and 30,384-file benchmark recorded; installed Gemini exercise blocked on the agy runtime |
+| P1 | Gemini inventory is fast and byte-equivalent | landed 2026-09-20 under #633; installed live proof open as #676 | Landed by Claude chat c6c24eca on 916-alien; #676 owner: same chat | Parity, fail-closed, library-drift and 30,384-file benchmark recorded; installed Gemini exercise blocked on the missing agy runtime, tracked in #676 |
 | P2 | Other inventory consumers use the proven primitive | open | P1; one consumer outcome/session under #633 | Per-consumer tests and installed proof; no blanket completion |
 | P3 | A known fast-validation failure stops expensive CI | open | P0 slice; independent of P1 | Negative live run plus repaired run and aggregate results |
 | P4 | Dependency selector correctly predicts affected tests | open | P0 slice; shadow only | Complete-inventory checks and dependency/hostile-path fixtures |
