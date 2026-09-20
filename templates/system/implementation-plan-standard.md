@@ -15,6 +15,13 @@ If the implementer would have to ask the planner a single question, that
 question's answer belongs in the plan. Default to TOO MUCH: a long plan costs
 minutes of reading; a thin plan costs a whole session and a wrong build.
 
+Assume a lower-intelligence implementation agent will execute the plan. The
+frontier planner resolves the decisions: chosen approach, exact boundaries,
+ordering, failure handling, and rejected alternatives. Mark a decision OPEN only
+when the implementer can safely choose using stated criteria; otherwise mark it
+LOCKED. The planner retains decomposition, acceptance criteria, integration,
+final review, and every irreversible decision.
+
 Above all: **state the ultimate goal first, in plain business English.** When a
 step turns out to be wrong — and on real work some step always is — the goal is
 the only thing that lets the implementer choose correctly instead of building
@@ -52,7 +59,10 @@ Mark each LOCKED (do not relitigate) or OPEN (implementer's judgment).
 
 ## 9. The plan — numbered, ordered steps
 Per step: target files (file:line/function), intended behavior when done,
-dependencies, and a verification gate — "you'll know it worked when ___."
+dependencies, owned files/interfaces, an explicit "must not change" boundary,
+and a verification gate — "you'll know it worked when ___." Each independently
+delegable slice includes a dispatch-ready brief containing the plan slice, owned
+files, required checks, and a request for conclusions rather than raw transcripts.
 Group into phases for large work; mark the context cut points.
 For trust-boundary work (parsers, pricing/money, files or data coming from
 outside the repo) the plan MUST contain an adversarial-cases table — every
@@ -84,6 +94,11 @@ What could break, the rollback, what's still uncertain and how to decide it.
 - [ ] A fresh session could execute it without asking a single question.
 - [ ] Rejected approaches and failed attempts included, with why.
 - [ ] Every step names concrete files and has a verification gate.
+- [ ] Every independently delegated slice names its owned files/interfaces,
+      required checks, constraints, and what must not change; its dispatch brief
+      requests conclusions rather than raw transcripts.
+- [ ] The planner resolved every decision a lower-cost implementer would have
+      to infer; any OPEN decision has safe stated criteria.
 - [ ] Trust-boundary work carries an adversarial-cases table — every external
       input × its hostile case × the test that proves it, every row naming a test.
 - [ ] Locked vs. open decisions labeled.

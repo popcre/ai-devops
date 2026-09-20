@@ -22,6 +22,22 @@ An implementation plan is a **handoff + a build spec**. Everything the
 `handoff-writer` standard demands about background and dead ends applies here,
 plus the forward-looking build detail below.
 
+## Plan for the lower-cost implementer
+
+Assume the plan will be executed by a lower-intelligence implementation agent,
+not the frontier model that discovered the solution. Resolve decisions while
+planning: state the chosen approach, exact boundaries, ordering, failure
+handling, and rejected alternatives rather than leaving them for the implementer
+to infer. Mark a decision OPEN only when the implementer can safely choose by
+the stated criteria; otherwise make it LOCKED.
+
+Each independently delegable slice must be self-contained: its owned files or
+interfaces, exact required checks, constraints, and explicit "must not change"
+boundaries. Include a dispatch-ready brief for it: the plan slice, owned files,
+required checks, and a request to return conclusions rather than raw transcripts.
+The planning session still owns decomposition, acceptance criteria, integration,
+final review, and every irreversible decision.
+
 ## Two modes
 
 - **Mode A — WRITE:** produce or update an implementation plan. Follow the
@@ -77,6 +93,8 @@ thin plan costs a whole session of rediscovery and a wrong build.
    - How it should behave when done (the intent, not just the edit), so a step
      that's slightly wrong can still be implemented correctly.
    - Dependencies: what must be done first; what can run in parallel.
+   - Owned files/interfaces and explicit "must not change" boundaries, so a
+     lower-cost implementer cannot expand the slice by inference.
    - **Verification gate: "you'll know it worked when ___"** — a command,
      an HTTP check, a test name, or a screenshot of a specific screen.
    - For trust-boundary work (parsers, pricing/money, files or data coming
@@ -116,6 +134,11 @@ could always be more detailed" is NOT an item on this list.
       without reading the planning chat.
 - [ ] Rejected approaches and failed attempts are written down, with why.
 - [ ] Every step names concrete files/functions and has a verification gate.
+- [ ] Every independently delegated slice names its owned files/interfaces,
+      required checks, constraints, and what must not change; its dispatch brief
+      asks for conclusions rather than raw transcripts.
+- [ ] The planner resolved all decisions that a lower-cost implementer would
+      otherwise have to infer; any OPEN decision has safe stated criteria.
 - [ ] Trust-boundary work carries an **adversarial-cases table** — every
       external input × its hostile case × the test that proves it, every row
       naming a test.

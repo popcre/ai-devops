@@ -167,8 +167,9 @@ Shared/client name collisions fail before anything is copied.
   Claude, and delegated-agent linked worktrees or temp clones across Windows,
   Linux, WSL, and macOS, with recovery-before-deletion safeguards.
 - `handoff-writer`, `implementation-plan-writer`, `design-handoff-implement`,
-  and `repo-bug-audit` are repo-owned under `skills/shared/`, so both Claude and
-  Codex use the same handoff, planning, design-implementation, and audit rules.
+  and `repo-bug-audit` are repo-owned under `skills/shared/`, so Claude,
+  Codex/ChatGPT, and ZCode use the same handoff, planning,
+  design-implementation, and audit rules.
 - The 7-stage pipeline (`skills/claude/ai-development-pipeline`,
   `templates/prompts/01–07`) is unchanged and complements these: these skills
   automate the *rituals around* coding sessions; the pipeline governs staged

@@ -319,6 +319,17 @@ conclusion — the log stays in the subagent's context:
 - worktree, branch and stale-file sweeps
 - answering one specific question about a large file
 
+**Frontier-plan delegation.** If a frontier-model session (Opus or Fable) has
+written an implementation-ready plan, delegate every independent, bounded
+implementation slice to a lower-cost model. The planner keeps task decomposition,
+acceptance criteria, integration, final review, and every irreversible decision.
+A slice is implementation-ready only when it names its files or interfaces,
+exact success checks, constraints, and what must not change. For ordinary bounded
+implementation, use Sonnet at Medium reasoning. Escalate to the planner when
+assumptions, architecture, security, shared state, or failed verification require
+judgment. Every dispatch includes the plan slice, owned files, required checks,
+and a request for conclusions rather than raw transcripts.
+
 Do not delegate anything that depends on what was said earlier in this
 conversation, and never delegate a schema change, a merge decision, a production
 command, or a security judgement. A subagent reports a verdict plus the verbatim

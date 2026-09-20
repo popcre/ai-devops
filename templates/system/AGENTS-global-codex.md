@@ -189,6 +189,18 @@ The weekly allowance is consumed by long single turns that make hundreds of
 model calls, not by the number of sessions. Every extra step in a turn re-sends
 the whole turn so far, so cost grows faster than the work does.
 
+- **Frontier-plan delegation.** If a frontier-model session (Astra or Sol at
+  Medium or above) has written an implementation-ready plan, delegate every
+  independent, bounded implementation slice to a lower-cost model. The planner
+  keeps task decomposition, acceptance criteria, integration, final review, and
+  every irreversible decision. A slice is implementation-ready only when it
+  names its files or interfaces, exact success checks, constraints, and what
+  must not change. For ordinary bounded implementation, explicitly spawn
+  `gpt-5.6-terra` (or the current lower-cost equivalent) at `medium` reasoning.
+  Escalate to the planner when assumptions, architecture, security, shared state,
+  or failed verification require judgment. Every dispatch includes the plan
+  slice, owned files, required checks, and a request for conclusions rather than
+  raw transcripts.
 - **Split before you start.** If a task plausibly needs more than ~30 steps,
   break it into independent pieces and `spawn_agent` one per piece. A subagent
   carries its own context; work it does is not re-sent through your turn.
