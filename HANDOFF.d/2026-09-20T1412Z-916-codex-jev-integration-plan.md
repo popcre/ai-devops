@@ -82,11 +82,11 @@ machine installation is part of this session.
 
 ## 3. Current state — what is true right now
 
-- The planning baseline is `origin/main`
+- The planning baseline was `origin/main`
   `211bc94b4861131ad025927516019285e412302f`.
-- The worktree is
-  `C:\Users\ahazan2\.codex\worktrees\jev-integration-plan\ai-devops` on branch
-  `codex/jev-integration-plan`, created directly from that baseline.
+- The isolated planning worktree was
+  `C:\Users\ahazan2\.codex\worktrees\jev-integration-plan\ai-devops`; no shared
+  checkout was edited.
 - Task class `prose` is recorded. Git identity was verified as
   `Albert Hazan <u2giants@users.noreply.github.com>`.
 - Issue #643 is open and names the advisory boundary and completion proof.
@@ -95,9 +95,9 @@ machine installation is part of this session.
 - This handoff is this session's only new `HANDOFF.d/` file. Root `HANDOFF.md`
   remains the static pointer.
 - The plan and router edits are documentation only. Delivery PR
-  [#645](https://github.com/popcre/ai-devops/pull/645) contains commit
-  `815e1c1d0645913e9d9eb0e41f54da3618d63dd9`; this session owns merging it. A
-  later session must verify PR #645 is `MERGED` before starting implementation.
+  [#645](https://github.com/popcre/ai-devops/pull/645) is `MERGED`; its squash
+  commit `d007a39eb1892262a1d5472d130cc3eaaf18757c` is verified on `origin/main` and
+  in the clean canonical checkout.
 - No code, tests, config, secret, installation, or live behavior has changed.
 
 ## 4. Everything we tried that did NOT work
@@ -152,10 +152,11 @@ resolved it; it changed no files or design.
 
 ## 6. Exact next steps
 
-1. **Land planning PR #645.** The plan/handoff self-audits and documentation
-   validation passed; merge it using the documentation-only owner override.
-   **You'll know it worked when:** the PR state is `MERGED`, the intended squash
-   commit is on `origin/main`, and issue #643 links to the plan.
+1. **Verify the planning baseline, already delivered.** Confirm PR #645 is
+   `MERGED` and `origin/main` contains
+   `d007a39eb1892262a1d5472d130cc3eaaf18757c` plus this handoff's later status
+   correction. **You'll know it worked when:** the plan, router link, and this
+   handoff all open from current `origin/main`.
 2. **Wait for owner authorization to implement.** Put all three §0 decisions to
    Albert in one message; do not infer code authorization from this planning
    request. **You'll know it worked when:** Albert explicitly authorizes Phase 0
@@ -217,7 +218,7 @@ resolved it; it changed no files or design.
 - Secret location: 1Password vault `vibe_coding`, item `typesafe.ai API`, field
   `credential`; reference is `TYPESAFE_API_KEY` in `config/mcp.env.example`.
   The value is not in this handoff or repository.
-- Tracking: GitHub issue #643. Planning delivery PR #645 is recorded in §3.
+- Tracking: GitHub issue #643. Merged planning delivery PR #645 is recorded in §3.
 - No production, database, infrastructure, deployment, or app login is involved.
 
 ## 9. Open questions and risks
