@@ -196,9 +196,11 @@ sleep_ms(){ [ "$1" -gt 0 ] && sleep "$(( $1 / 1000 )).$(printf '%03d' $(( $1 % 1
 gap_ms=$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 - $(now_ms) ))
 sleep_ms "$gap_ms"
 
-# Hourly budget (PRIMARY limit: 5000 requests/hour shared by every process on
-# one token). `gh api rate_limit` does not count against the limit. The probe
-# result is cached for QUOTA_PROBE seconds and decremented locally per call.
+# Resource budgets (including GitHub's growing REST sub-resource inventory)
+# have independent limits/resets. A CLI invocation need not cost one request/point.
+# Keep machine-wide back-off, but never infer GraphQL's reset from core headers.
+# Direct single REST requests reserve one request; variable-cost/indirect calls
+# invalidate their snapshots so the next caller refreshes rather than guessing.
 # Below QUOTA_PAUSE_PCT remaining, the machine pauses until the window resets;
 # below QUOTA_SLOW_PCT, calls are spaced QUOTA_SLOW_SPACING seconds apart.
 QUOTA_PROBE="${AI_GH_QUOTA_PROBE_SECONDS:-300}"
@@ -233,29 +235,127 @@ safe_args(){
   done
   printf '%s' "${out# }"
 }
+QUOTA_FILTER='.resources | to_entries[] | [.key,.value.remaining,.value.limit,.value.reset] | @tsv'
+BUCKETS=(core graphql search code_search)
+BUCKET_MODE=all
+COST=unknown
+PROBE_HOST=()
+resource_key(){ [[ "$1" =~ ^[a-z][a-z0-9_]*$ ]]; }
+resource_keys(){
+  { printf '%s\n' core graphql search code_search; cat "$STATE/quota-resources" 2>/dev/null; } | while read -r key; do resource_key "$key" && printf '%s\n' "$key"; done | LC_ALL=C sort -u
+}
+select_buckets(){
+  [ "$BUCKET_MODE" = fixed ] && return
+  BUCKETS=()
+  while read -r key; do
+    [ "$BUCKET_MODE" != rest ] || [ "$key" != graphql ] || continue
+    BUCKETS+=("$key")
+  done < <(resource_keys)
+}
+# Parse only known gh api options. Unknown command/option shapes retain the
+# conservative bucket set; never mistake a field value for an endpoint.
+if [ "${1:-}" = api ]; then
+  endpoint=''; parse_ok=1; variable=0; args=("${@:2}"); i=0
+  while [ "$i" -lt "${#args[@]}" ]; do
+    a="${args[$i]}"
+    case "$a" in
+      --hostname) i=$((i+1)); [ "$i" -lt "${#args[@]}" ] && PROBE_HOST=(--hostname "${args[$i]}") || parse_ok=0 ;;
+      --hostname=*) PROBE_HOST=(--hostname "${a#*=}") ;;
+      -f|-F|-H|-X|-q|-t|--field|--raw-field|--header|--method|--jq|--template|--input|--cache|--preview) i=$((i+1)); [ "$i" -lt "${#args[@]}" ] || parse_ok=0 ;;
+      --paginate) variable=1 ;;
+      --include|-i|--silent|--slurp|--verbose) ;;
+      --field=*|--raw-field=*|--header=*|--method=*|--jq=*|--template=*|--input=*|--cache=*|--preview=*|-f?*|-F?*|-H?*|-X?*|-q?*|-t?*) ;;
+      -*) parse_ok=0 ;;
+      *) if [ -z "$endpoint" ]; then endpoint="$a"; else parse_ok=0; fi ;;
+    esac
+    i=$((i+1))
+  done
+  endpoint="${endpoint#/}"; endpoint="${endpoint%%\?*}"
+  if [ "$parse_ok" = 1 ]; then
+    case "$endpoint" in
+      graphql) BUCKETS=(graphql); BUCKET_MODE=fixed ;;
+      search/code) BUCKETS=(code_search); BUCKET_MODE=fixed; COST=1 ;;
+      search/*) BUCKETS=(search); BUCKET_MODE=fixed; COST=1 ;;
+      rate_limit) BUCKETS=(core); BUCKET_MODE=fixed; COST=0 ;;
+      ''|*://*) ;;
+      *)
+        # Only proven core families get the cheap single-request accounting.
+        # Unknown REST endpoints consult every advertised REST resource rather
+        # than silently borrowing core's allowance/reset (including new APIs).
+        if [[ "$endpoint" =~ ^repos/[^/]+/[^/]+(/(pulls|issues|commits|git|contents|branches)(/.*)?)?$ ]]; then
+          BUCKETS=(core); BUCKET_MODE=fixed; COST=1
+        else BUCKET_MODE=rest; fi ;;
+    esac
+    [ "$variable" = 1 ] && COST=unknown
+  fi
+elif [ "${1:-}" = pr ] || [ "${1:-}" = issue ]; then
+  BUCKETS=(core graphql); BUCKET_MODE=fixed
+fi
+select_buckets
+quota_path(){ if [ "$1" = core ]; then printf '%s/quota' "$STATE"; else printf '%s/quota.%s' "$STATE" "$1"; fi; }
+# Optional failure evidence is a real request too. Run in a subshell so a busy
+# lock or active back-off skips this diagnostic without losing the original
+# failure record. Reserve its start under the same lock as every other call.
+failure_quota_snapshot(){
+  trap release EXIT
+  trap 'release; exit 130' INT TERM
+  AI_GH_NO_WAIT=1 acquire
+  [ "$(now)" -ge "$(readnum "$STATE/backoff_until")" ] || return 75
+  sleep_ms "$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 - $(now_ms) ))"
+  put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
+  release
+  timeout "$PROBE_TIMEOUT" "$REAL" api --include rate_limit "${PROBE_HOST[@]}" --jq "$QUOTA_FILTER"
+}
+read_quota(){
+  qts=0; qrem=unknown; qlim=unknown; qreset=0
+  local path; path="$(quota_path "$1")"
+  [ ! -f "$path" ] || read -r qts qrem qlim qreset < "$path"
+}
 probe_quota(){
-  local q
-  q="$(timeout "$PROBE_TIMEOUT" "$REAL" api rate_limit --jq '[.resources.core.remaining,.resources.core.limit,.resources.core.reset]|@tsv' 2>/dev/null | tr -d '\r')"
-  set -- $q
-  isnum "${1:-}" && isnum "${2:-}" && isnum "${3:-}" && [ "$2" -gt 0 ] || return 1
-  put "$STATE/quota" "$(now) $1 $2 $3"
+  local q bucket remaining limit reset stamp keys
+  stamp="$(now)"
+  q="$(timeout "$PROBE_TIMEOUT" "$REAL" api rate_limit "${PROBE_HOST[@]}" --jq "$QUOTA_FILTER" 2>/dev/null | tr -d '\r')"
+  # Missing/malformed resources are explicitly unknown, not healthy or zero.
+  keys="$(resource_keys)"
+  while read -r bucket; do put "$(quota_path "$bucket")" "$stamp unknown unknown 0"; done <<< "$keys"
+  while read -r bucket remaining limit reset; do
+    resource_key "$bucket" || continue
+    keys="$keys"$'\n'"$bucket"
+    put "$(quota_path "$bucket")" "$stamp unknown unknown 0"
+    isnum "${remaining:-}" && isnum "${limit:-}" && isnum "${reset:-}" && [ "$limit" -gt 0 ] && [ "$remaining" -le "$limit" ] || continue
+    put "$(quota_path "$bucket")" "$stamp $remaining $limit $reset"
+  done <<< "$q"
+  put "$STATE/quota-resources" "$(printf '%s\n' "$keys" | LC_ALL=C sort -u)"
 }
 if [ "$QUOTA_PROBE" != off ]; then
-  { [ -f "$STATE/quota" ] && read -r qts qrem qlim qreset < "$STATE/quota"; } || qts=0
-  if ! isnum "${qts:-}" || [ $(( $(now) - qts )) -ge "$QUOTA_PROBE" ]; then
-    # A failed probe (signed out, other host) is cached as a marker so later
-    # calls do not repeat it and pay the extra spacing sleep every time.
-    probe_quota || put "$STATE/quota" "$(now) unknown unknown 0"
-    { [ -f "$STATE/quota" ] && read -r qts qrem qlim qreset < "$STATE/quota"; } || qts=0
+  refresh=0
+  for bucket in "${BUCKETS[@]}"; do
+    read_quota "$bucket"
+    if ! isnum "${qts:-}" || ! isnum "${qreset:-}" || [ $(( $(now) - qts )) -ge "$QUOTA_PROBE" ] || { [ "$qreset" -gt 0 ] && [ "$qreset" -le "$(now)" ]; }; then refresh=1; fi
+  done
+  # Host-specific snapshots must never be reused for the default host.
+  [ "${#PROBE_HOST[@]}" -eq 0 ] || refresh=1
+  if [ "$refresh" = 1 ]; then
+    probe_quota
+    select_buckets
+    # Invalidate before ANY early exit too: a low-budget explicit-host probe
+    # may pause the machine, but cannot leave a reusable default-host snapshot.
+    if [ "${#PROBE_HOST[@]}" -gt 0 ]; then
+      while read -r bucket; do
+        read_quota "$bucket"; put "$(quota_path "$bucket")" "0 $qrem $qlim $qreset"
+      done < <(resource_keys)
+    fi
     # The probe is a request too: keep normal spacing before the real call.
     [ "$SPACING" -gt 0 ] && sleep "$SPACING"
   fi
-  if isnum "${qrem:-}" && isnum "${qlim:-}" && [ "${qlim:-0}" -gt 0 ]; then
+  for bucket in "${BUCKETS[@]}"; do
+    read_quota "$bucket"
+    if isnum "${qrem:-}" && isnum "${qlim:-}" && [ "${qlim:-0}" -gt 0 ]; then
     pct=$(( qrem * 100 / qlim ))
     if [ "$pct" -lt "$PAUSE_PCT" ] && [ "$(now)" -lt "${qreset:-0}" ]; then
       extend_backoff "$qreset"
-      printf '%s budget-pause remaining=%s/%s reset=%s\n' "$(date -u +%FT%TZ)" "$qrem" "$qlim" "$qreset" >> "$STATE/refusals.log"
-      say "hourly GitHub budget low (${qrem}/${qlim}); machine-wide pause until the window resets in $(( qreset - $(now) ))s."
+      printf '%s budget-pause remaining=%s/%s reset=%s resource=%s\n' "$(date -u +%FT%TZ)" "$qrem" "$qlim" "$qreset" "$bucket" >> "$STATE/refusals.log"
+      say "GitHub $bucket budget low (${qrem}/${qlim}); machine-wide pause until the window resets in $(( qreset - $(now) ))s."
       exit 75
     fi
     if [ "$pct" -lt "$SLOW_PCT" ]; then
@@ -265,11 +365,17 @@ if [ "$QUOTA_PROBE" != off ]; then
       fi
       [ "$gap" -gt 0 ] && sleep "$gap"
     fi
-    put "$STATE/quota" "$qts $(( qrem > 0 ? qrem - 1 : 0 )) $qlim $qreset"
-  fi
+    if [ "$COST" = unknown ]; then
+      put "$(quota_path "$bucket")" "0 $qrem $qlim $qreset"
+    else
+      put "$(quota_path "$bucket")" "$qts $(( qrem > COST ? qrem - COST : 0 )) $qlim $qreset"
+    fi
+    else
+      say "GitHub $bucket quota unknown; retaining spacing and refusal back-off (no healthy-budget claim)."
+    fi
+  done
 fi
 
-qreset_cached="${qreset:-}"
 err="$(mktemp)"
 put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
 # The lock serializes call STARTS (spacing, budget, back-off bookkeeping) and is
@@ -294,7 +400,11 @@ if [ "$rc" -ne 0 ]; then
   # add to the burst GitHub is already refusing).
   secondary=0
   grep -Eiq 'secondary rate limit|abuse detection|HTTP 429|too many requests|retry-after' "$err" && secondary=1
-  [ "$QUOTA_PROBE" != off ] && [ "$secondary" = 0 ] && hdr="$(timeout "$PROBE_TIMEOUT" "$REAL" api --include rate_limit 2>&1 | tr -d '\r' | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)' )"
+  snapshot=''
+  if [ "$QUOTA_PROBE" != off ] && [ "$secondary" = 0 ]; then
+    snapshot="$(failure_quota_snapshot 2>/dev/null | tr -d '\r')"
+    hdr="$(printf '%s\n' "$snapshot" | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)')"
+  fi
   {
     printf '=== %s rc=%s args=%s\n' "$(date -u +%FT%TZ)" "$rc" "$(safe_args "$@")"
     printf -- '--- status: %s\n' "$(grep -Eo 'HTTP [0-9]{3}' "$err" | head -1)"
@@ -308,10 +418,25 @@ if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit
   kind=secondary
   if grep -Eiq 'API rate limit( already)? exceeded|rate limit( already)? exceeded for' "$err"; then
     kind=primary
-    # Window reset from the header snapshot already taken, else the cached quota; no new request.
-    qreset="$(printf '%s\n' "$hdr" | grep -Ei '^x-ratelimit-reset:' | grep -Eo '[0-9]+' | head -1)"
-    isnum "${qreset:-}" || qreset="${qreset_cached:-}"
-    isnum "${qreset:-}" && [ $(( qreset - $(now) )) -gt "$wait" ] && wait=$(( qreset - $(now) ))
+    # rate_limit's response headers describe THAT request, not the failed
+    # GraphQL/search operation. Only matching exhausted resource rows are proof.
+    # A newly advertised resource in the failure response also belongs to an
+    # unknown endpoint's candidate set; never require a code allowlist update.
+    if [ "$BUCKET_MODE" != fixed ]; then
+      while read -r bucket remaining limit reset; do
+        resource_key "$bucket" || continue
+        [ "$BUCKET_MODE" != rest ] || [ "$bucket" != graphql ] || continue
+        BUCKETS+=("$bucket")
+      done <<< "$snapshot"
+    fi
+    for bucket in "${BUCKETS[@]}"; do
+      row="$(printf '%s\n' "$snapshot" | awk -v b="$bucket" '$1==b && NF==4 {print $2, $3, $4; exit}')"
+      read -r remaining limit reset <<< "$row"
+      if isnum "${remaining:-}" && isnum "${limit:-}" && isnum "${reset:-}" && [ "$remaining" -eq 0 ] && [ "$limit" -gt 0 ]; then
+        [ $(( reset - $(now) )) -le "$wait" ] || wait=$(( reset - $(now) ))
+        printf '%s exhausted-resource=%s reset=%s\n' "$(date -u +%FT%TZ)" "$bucket" "$reset" >> "$STATE/refusals.log"
+      fi
+    done
   fi
   new=$(( $(now) + wait ))
   extend_backoff "$new"
