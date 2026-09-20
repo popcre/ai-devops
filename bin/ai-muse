@@ -657,6 +657,14 @@ muse_code_delete_session(){ # the CLI has no delete command; remove both exact p
   ( # Hold the verified root; never follow a linked date component or UUID.
     refuse_store(){ printf 'ai-muse: %s store deletion unconfirmed: %s\n' "$1" "$2" >&2; exit 1; }
     ! linked_below_home "$root" || refuse_store 'projection and durable' 'linked ancestor'
+    # A denied intermediate parent makes -e on sessions look like absence.
+    # runtime_env creates XDG_DATA_HOME, but the CLI owns its muse child.
+    [ -r "$XDG_DATA_HOME" ] && [ -x "$XDG_DATA_HOME" ] || refuse_store 'projection and durable' 'unreadable data home'
+    if [ -e "$XDG_DATA_HOME/muse" ]; then
+      [ -d "$XDG_DATA_HOME/muse" ] && [ -r "$XDG_DATA_HOME/muse" ] && [ -x "$XDG_DATA_HOME/muse" ] || refuse_store 'projection and durable' 'unreadable muse parent'
+    else
+      exit 0
+    fi
     [ -e "$root" ] || exit 0
     cd -P -- "$root" && [ "$(pwd -P)" = "$expected" ] || refuse_store 'projection and durable' 'unexpected parent'
     [ -r . ] && [ -x . ] || refuse_store 'projection and durable' 'unreadable parent'
