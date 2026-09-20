@@ -431,7 +431,7 @@ stale content to Grok on 2026-08-12; this wrapper will not do it silently."
   # Grok's own work when the diff is collected.
   local run_dir="$wt/.grok-run"
   mkdir -p "$run_dir"
-  printf '/.grok-run/\n' >> "$(git -C "$wt" rev-parse --git-path info/exclude)"
+  printf '/.grok-run/\n' >> "$(git -C "$wt" rev-parse --path-format=absolute --git-path info/exclude)"
 
   # Artifacts live in the STATE dir, not the worktree: the diff and the result
   # JSON must outlive the worktree that produced them.

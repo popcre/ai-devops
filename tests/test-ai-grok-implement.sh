@@ -305,8 +305,11 @@ export OP_SERVICE_ACCOUNT_TOKEN='canary-op-service-token'
 export GH_TOKEN='canary-gh-token'
 export GITHUB_TOKEN='canary-github-token'
 export AI_TEST_OPERATOR_SECRET='canary-operator-secret'
-rc="$(inv_case inv1 ok "$R7" --keep)"
+# A caller outside Git must still write the clone's exclude file, never a
+# relative .git path in the caller's directory (also broken in linked worktrees).
+rc="$(cd "$TMP" && inv_case inv1 ok "$R7" --keep)"
 [ "$rc" = 0 ] && ok "investigate_happy_path" || bad "investigate_happy_path (rc=$rc: $(cat "$TMP/err.inv1"))"
+[ ! -e "$TMP/.git" ] && ok "investigate_does_not_create_caller_git_metadata" || bad "investigate_does_not_create_caller_git_metadata"
 grep -q -- '--allow Bash' "$TMP/argv.txt" && ok "investigate_allows_bash" || bad "investigate_allows_bash"
 grep -q -- '--deny Bash' "$TMP/argv.txt" && bad "investigate_does_not_deny_bash" || ok "investigate_does_not_deny_bash"
 grep -q -- '--permission-mode default' "$TMP/argv.txt" && ok "investigate_uses_default_permissions" || bad "investigate_uses_default_permissions"
