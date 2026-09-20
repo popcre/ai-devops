@@ -347,8 +347,16 @@ def bind_sandbox(directory, provider, run_id, sandbox, original_id=None):
             expected_head = original["head"]
         marker, boundary, data, lines, owners = sandbox_marker(sandbox)
         require(physical(lines[0]) == physical(start["repo"]), "sandbox evidence source differs from invocation")
-        require(git_value("-C", str(marker.parent), "rev-parse", "HEAD") == expected_head,
-                "sandbox evidence head differs from invocation")
+        sandbox_head = git_value("-C", str(marker.parent), "rev-parse", "HEAD")
+        # Untracked files are review-visible source, but they cannot alter Git's
+        # commit identity. Keep the exact-head refusal and report the two values:
+        # the only safe diagnosis is that the snapshot was built or refreshed at
+        # another commit (or that its repository identity is unreadable), not that
+        # an unrelated untracked file somehow changed HEAD.
+        require(sandbox_head == expected_head,
+                "sandbox evidence commit differs from invocation: expected " + expected_head +
+                ", observed " + (sandbox_head or "unreadable") +
+                "; untracked files do not change Git commit identity; rebuild the sandbox for the exact invocation commit")
         require((evidence_root(directory, run_id) / "required.json").is_file(),
                 "sandbox evidence requirement was not reserved")
         if original_id is not None:

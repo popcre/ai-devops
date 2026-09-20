@@ -722,6 +722,36 @@ wait "$job"
             with self.assertRaisesRegex(events.Blocked, "source"):
                 events.bind_sandbox(self.root, "grok", rid, checkout)
 
+    def test_sandbox_binding_ignores_foreign_untracked_files_at_the_exact_commit(self):
+        rid = "a" * 32
+        self.invocation(rid=rid, finish=False)
+        events.require_report(self.root, "grok", rid)
+        checkout = self.root / "sandbox-with-foreign-file"
+        subprocess.run(["git", "clone", "-q", str(self.toolkit), str(checkout)], check=True)
+        (checkout / ".ai-review-sandbox").write_text(
+            str(self.toolkit) + "\nsource_digest=synthetic\nevidence_format=1\n")
+        (checkout / "another-session.tmp").write_text("foreign untracked work\n")
+
+        events.bind_sandbox(self.root, "grok", rid, checkout)
+
+        marker = (checkout / ".ai-review-sandbox").read_text()
+        self.assertIn("evidence_owner=grok:" + rid, marker)
+        self.assertEqual(subprocess.check_output(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip(), self.sha)
+
+    def test_sandbox_commit_mismatch_names_both_commits_and_rules_out_untracked_files(self):
+        rid, checkout, _ = self.evidence_fixture()
+        (checkout / ".ai-review-sandbox").write_text(
+            str(self.toolkit) + "\nsource_digest=synthetic\nevidence_format=1\n")
+        other = "f" * 40
+        with patch.object(events, "git_value", return_value=other):
+            with self.assertRaises(events.Blocked) as caught:
+                events.bind_sandbox(self.root, "grok", rid, checkout)
+        message = str(caught.exception)
+        self.assertIn(self.sha, message)
+        self.assertIn(other, message)
+        self.assertIn("untracked files do not change Git commit identity", message)
+
     def test_sandbox_retains_every_followup_invocation_owner(self):
         rid, checkout, report = self.evidence_fixture()
         (checkout / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")
