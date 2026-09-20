@@ -32,7 +32,15 @@ case "${1:-}" in
       printf 'ai-review: error: %s is not a registered reviewer (registry state: %s). The registry decides the pool; never flip a state to make a review succeed.\n' "${1:-unknown}" "${registry_state:-registry-not-found}" >&2
       exit 2
     fi
-    pool_provider="$1"; wrapper="${AI_REVIEW_POOL_BIN:-$ROOT/ai-review-pool}" ;;
+    pool_provider="$1"
+    # The pool adapter substitution is a TEST HOOK on the approval-gate path:
+    # an env swap here would bypass every guarantee the adapter provides, so
+    # it requires an explicit AI_POOL_TEST_HOOKS=1 (offline suites set it).
+    if [ -n "${AI_REVIEW_POOL_BIN:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
+      printf 'ai-review: error: AI_REVIEW_POOL_BIN is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute the pool adapter.\n' >&2
+      exit 2
+    fi
+    wrapper="${AI_REVIEW_POOL_BIN:-$ROOT/ai-review-pool}" ;;
 esac
 shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
