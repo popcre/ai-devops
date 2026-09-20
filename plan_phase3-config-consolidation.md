@@ -1,6 +1,6 @@
 # Implementation plan — Config consolidation **Phase 3**
 
-## ⏱ STATUS (read this first) — updated 2026-07-26
+## ⏱ STATUS (read this first) — updated 2026-09-20
 
 | Step | State |
 |---|---|
@@ -10,7 +10,7 @@
 | 5 · Stub the 3 current Dropbox scripts | ✅ **DONE 2026-08-10.** Master work order supplied approval. Active files are repo pointer stubs; sensitive originals remain beside them as `.pre-phase3.bak`. |
 | 6 · Dropbox credential inventory doc | ✅ **DONE 2026-08-10.** `docs/dropbox-credential-inventory.md` records counts and locations without values. |
 | 7 · Rewrite `docs/restore-from-zero.md` (both OSes) | ✅ **DONE 2026-08-10.** Windows and Ubuntu single-source restore paths are explicit. |
-| 8 · Portable Codex prefs template | ✅ **DONE 2026-08-10.** `config/codex-portable.toml` tracks safe new-machine defaults without hard-coding a model. Established configs are never overwritten. |
+| 8 · Portable Codex prefs template | ✅ **DONE 2026-08-10; UPDATED 2026-09-20.** `config/codex-portable.toml` tracks safe new-machine defaults without hard-coding a model. PR #641 added the documented 20-thread subagent limit plus a backup-first, idempotent reconciler for that one setting on established Windows configs; unrelated machine settings remain untouched. Live proof on 916 showed 21 total slots (the main chat plus 20 subagents), and all PR and merge-queue checks passed. |
 | 9 · `machine-atlas.md` + status rows | ✅ **DONE 2026-08-10.** Atlas points to repo setup and identifies al8960ofc/4837 as one machine. |
 
 **All Phase 3 rows are complete.** Future sessions use this plan only as the
