@@ -33,6 +33,8 @@ is closed; #166 subsequently merged through the protected queue as `d49100a2`.
 | [#169](https://github.com/popcre/ai-devops/issues/169) shared wrapper infrastructure | Installed acceptance complete | 2026-09-11 | [Installed hash, fixture adapter, both migrated launcher checks and incident audit](tests/verification/reviewer-reliability/issue-169-installed-primitives.md); allocation/recovery remain #396/#397 |
 | [#398](https://github.com/popcre/ai-devops/issues/398) integrated qualification and maintenance closure | Complete | 2026-09-15 | Frozen 198/198 accounted; bounded accumulated 617/617 accounted; immediate interval had no new completed failure, with 17 explicit partial carries and one independently active worker; nine adapter rows and three enabled live verdicts recorded |
 
+#393 cross-reference: [issue #608](https://github.com/popcre/ai-devops/issues/608) landed 2026-09-19 as `918866b8` (PR [#639](https://github.com/popcre/ai-devops/pull/639)) — only the target-ref tip check gained forward-move ancestry tolerance; mid-run base/head movement and whole-tree digest checks stay byte-strict, so the locked "a mid-run base/head movement invalidates authorization" direction below is unchanged.
+
 **Fresh-session start:** select one registered child by dependency order below and keep its code/test changes inside that coding boundary. Update this table as each slice lands. An open tracking issue or a passing doctor is not completion evidence. #398 runs only after the component children; #166 remains the final #159 cutover.
 
 **September 14 continuation order:** #397 → #394 → #393 → #271 → #398 →
