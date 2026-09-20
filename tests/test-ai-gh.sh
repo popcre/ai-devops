@@ -14,6 +14,9 @@ case "${FAKE_MODE:-ok}" in
   secondary) echo 'HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' >&2; echo 'Retry-After: 900' >&2; echo "end $(date +%s%N)" >> "$FAKE_LOG"; exit 1 ;;
   secondary-short) echo 'gh: HTTP 429: Too Many Requests (retry-after: 60)' >&2; exit 1 ;;
   notfound) echo 'HTTP 404: Not Found' >&2; exit 1 ;;
+  spaced-failure) if [ "$1 $2" = 'api rate_limit' ] || [ "$1 $2" = 'api --include' ]; then
+    printf 'core\t4000\t5000\t%s\ngraphql\t4000\t5000\t%s\n' $(( $(date +%s) + 3000 )) $(( $(date +%s) + 3000 ));
+    else echo 'HTTP 404: Not Found' >&2; exit 1; fi ;;
   quota) if [ "$1 $2" = 'api rate_limit' ]; then
     [ -z "${FAKE_EXTRA_RESOURCE:-}" ] || printf '%s\t%s\t100\t%s\n' "$FAKE_EXTRA_RESOURCE" "${FAKE_EXTRA_REMAINING:-0}" $(( $(date +%s) + 3600 ));
     printf 'core\t%s\t5000\t%s\ngraphql\t%s\t5000\t%s\nsearch\t%s\t30\t%s\ncode_search\t%s\t10\t%s\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )) "${FAKE_GRAPHQL_REMAINING:-$FAKE_REMAINING}" $(( $(date +%s) + 2400 )) "${FAKE_SEARCH_REMAINING:-30}" $(( $(date +%s) + 60 )) "${FAKE_CODE_SEARCH_REMAINING:-10}" $(( $(date +%s) + 60 ));
@@ -74,6 +77,15 @@ check 'short Retry-After is raised to the 600s floor' "[ $rc -eq 75 ] && [ \$(ca
 rm -f "$TMP/state/backoff_until"
 
 # Hourly (primary) budget.
+# Follow-up probes must share the same start-spacing lock as real requests.
+: > "$FAKE_LOG"
+for i in 1 2; do FAKE_MODE=spaced-failure AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1 & done
+wait
+check 'concurrent ordinary failures serialize and space every probe and request' "[ \$(grep -c 'api --include rate_limit' '$FAKE_LOG') -eq 2 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 1900) exit 1}'"
+: > "$FAKE_LOG"
+FAKE_MODE=primary AI_GH_QUOTA_PROBE_SECONDS=0 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1; rc=$?
+check 'primary refusal snapshot also respects minimum start spacing' "[ $rc -eq 75 ] && [ \$(grep -c 'api --include rate_limit' '$FAKE_LOG') -eq 1 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 1900) exit 1}'"
+rm -f "$TMP/state/backoff_until"
 rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
 check 'mixed CLI cost is unknown and its resource snapshots are invalidated' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q '^0 3000 5000 ' '$TMP/state/quota' && grep -q '^0 3000 5000 ' '$TMP/state/quota.graphql'"

@@ -293,6 +293,19 @@ elif [ "${1:-}" = pr ] || [ "${1:-}" = issue ]; then
 fi
 select_buckets
 quota_path(){ if [ "$1" = core ]; then printf '%s/quota' "$STATE"; else printf '%s/quota.%s' "$STATE" "$1"; fi; }
+# Optional failure evidence is a real request too. Run in a subshell so a busy
+# lock or active back-off skips this diagnostic without losing the original
+# failure record. Reserve its start under the same lock as every other call.
+failure_quota_snapshot(){
+  trap release EXIT
+  trap 'release; exit 130' INT TERM
+  AI_GH_NO_WAIT=1 acquire
+  [ "$(now)" -ge "$(readnum "$STATE/backoff_until")" ] || return 75
+  sleep_ms "$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 - $(now_ms) ))"
+  put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
+  release
+  timeout "$PROBE_TIMEOUT" "$REAL" api --include rate_limit "${PROBE_HOST[@]}" --jq "$QUOTA_FILTER"
+}
 read_quota(){
   qts=0; qrem=unknown; qlim=unknown; qreset=0
   local path; path="$(quota_path "$1")"
@@ -389,7 +402,7 @@ if [ "$rc" -ne 0 ]; then
   grep -Eiq 'secondary rate limit|abuse detection|HTTP 429|too many requests|retry-after' "$err" && secondary=1
   snapshot=''
   if [ "$QUOTA_PROBE" != off ] && [ "$secondary" = 0 ]; then
-    snapshot="$(timeout "$PROBE_TIMEOUT" "$REAL" api --include rate_limit "${PROBE_HOST[@]}" --jq "$QUOTA_FILTER" 2>/dev/null | tr -d '\r')"
+    snapshot="$(failure_quota_snapshot 2>/dev/null | tr -d '\r')"
     hdr="$(printf '%s\n' "$snapshot" | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)')"
   fi
   {
