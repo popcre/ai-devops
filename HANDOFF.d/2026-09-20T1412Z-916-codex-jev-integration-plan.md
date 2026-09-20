@@ -94,9 +94,10 @@ machine installation is part of this session.
   rows are all open because no implementation has started.
 - This handoff is this session's only new `HANDOFF.d/` file. Root `HANDOFF.md`
   remains the static pointer.
-- The plan and router edits are documentation only. The delivery PR is **to be
-  filled before merge**. A later session must verify that PR is merged before
-  starting implementation.
+- The plan and router edits are documentation only. Delivery PR
+  [#645](https://github.com/popcre/ai-devops/pull/645) contains commit
+  `815e1c1d0645913e9d9eb0e41f54da3618d63dd9`; this session owns merging it. A
+  later session must verify PR #645 is `MERGED` before starting implementation.
 - No code, tests, config, secret, installation, or live behavior has changed.
 
 ## 4. Everything we tried that did NOT work
@@ -151,9 +152,8 @@ resolved it; it changed no files or design.
 
 ## 6. Exact next steps
 
-1. **Land this planning PR.** Record the PR URL in §3 after GitHub creates it,
-   finish the plan/handoff self-audits, run documentation validation, commit,
-   push, open the PR, and merge it using the documentation-only owner override.
+1. **Land planning PR #645.** The plan/handoff self-audits and documentation
+   validation passed; merge it using the documentation-only owner override.
    **You'll know it worked when:** the PR state is `MERGED`, the intended squash
    commit is on `origin/main`, and issue #643 links to the plan.
 2. **Wait for owner authorization to implement.** Put all three §0 decisions to
@@ -217,8 +217,7 @@ resolved it; it changed no files or design.
 - Secret location: 1Password vault `vibe_coding`, item `typesafe.ai API`, field
   `credential`; reference is `TYPESAFE_API_KEY` in `config/mcp.env.example`.
   The value is not in this handoff or repository.
-- Tracking: GitHub issue #643. Planning delivery PR is recorded in §3 after it is
-  opened.
+- Tracking: GitHub issue #643. Planning delivery PR #645 is recorded in §3.
 - No production, database, infrastructure, deployment, or app login is involved.
 
 ## 9. Open questions and risks
@@ -286,8 +285,7 @@ resolved it; it changed no files or design.
 3. **Is every relevant execution detail present? Yes.** Background, goal, outcome,
    current state, failures, decisions, constraints, risks, access, exact next
    actions, and proof are covered in §§0–9 and the linked plan. No secret value is
-   present. The only delivery fact still to be updated is the PR URL after GitHub
-   creates it; §3 states that truth explicitly.
+   present. PR #645 and its current commit are explicit in §3.
 4. **Would Albert see every required decision by reading only §0? Yes.** A line-by-
    line sweep of §§1–9 and Part B found three owner judgments: authorization to
    implement, later contradiction promotion, and whether to continue after a
@@ -297,5 +295,4 @@ resolved it; it changed no files or design.
 Checklist result: all 10 required sections exist; §0 contains the complete owner-
 decision sweep; failures and dead ends are explicit; every next step has a
 verification gate; identifiers and access are defined; commit/push/merge state is
-explicit; and secret references name only their protected location. Re-run this
-audit after recording the delivery PR.
+explicit; and secret references name only their protected location.
