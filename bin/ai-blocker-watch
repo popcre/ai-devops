@@ -35,11 +35,26 @@
 #      longer be forgotten, because sessions were never trusted to record them.
 #
 # Usage:
-#   ai-blocker-watch wait <owner/repo#N> [--for <owner/repo#M>] [--note TEXT]
-#       Register this session as waiting on N. --for also records the native
-#       "M is blocked by N" link. Harness and session come from the environment
-#       (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID, ZCODE_SESSION_ID) or
-#       --harness/--session/--cwd.
+#   ai-blocker-watch wait <owner/repo#N> [--until <UTC time>]
+#       (--for <owner/repo#M> | --park "<plain-English title>")
+#       --brief-file PATH [--note TEXT]
+#       Park this work and register this session as waiting. A wait is
+#       released by whichever comes first: blocker N closing, or --until
+#       passing. One of the two is required; both together is the pattern for
+#       a long-running job with a safety check-in.
+#       --brief-file is REQUIRED and is the whole point: in plain English,
+#       what this work is, what is already done, and the exact next steps. A
+#       brand-new session may have to continue the work from that text alone.
+#       The brief is published as a "parked" GitHub issue, so the work is
+#       searchable weeks later and survives the session, the branch and the
+#       worktree being deleted. --for posts it on an existing issue (and
+#       records the native "M is blocked by N" link); --park opens a new issue
+#       in the repository of the current checkout. Harness and session come
+#       from the environment (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID,
+#       ZCODE_SESSION_ID) or --harness/--session/--cwd.
+#   ai-blocker-watch find <words...> [--all]
+#       Plain-language search of parked and resumed work across the configured
+#       owners. --all includes closed issues.
 #   ai-blocker-watch link <blocked owner/repo#M> <blocker owner/repo#N>
 #   ai-blocker-watch list
 #   ai-blocker-watch cancel <wait-id>
@@ -49,6 +64,16 @@
 #       db-work-scope depends_on fences now
 #   ai-blocker-watch schedule | unschedule      (Windows Task Scheduler, or the
 #       user crontab on Linux/macOS; both marked, idempotent, safe to re-run)
+#
+# When a wait is released the watcher picks one of three modes and writes the
+# outcome onto the parked issue, swapping its "parked" label for "resumed":
+#   resumed  — the original folder and the session transcript both still
+#              exist, so that exact session is continued (the most context).
+#   fresh    — they are gone, so a NEW headless session starts in the
+#              recorded MAIN checkout, reads the parked issue, makes its own
+#              worktree from current upstream, and carries on.
+#   orphaned — neither is possible. The issue says so and a person must pick
+#              it up. That tick exits non-zero.
 #
 # tick exits non-zero when any propagation, wake, links or alarm scan failed,
 # so a scheduled run that did not do its work is visible. Finding stalled
@@ -111,12 +136,23 @@ link(){ # link <blocked> <blocker>
   note "recorded: $1 is blocked by $2"
 }
 
+ensure_labels(){ # ensure_labels <owner/repo> — labels are cheap and idempotent
+  local repo="$1"
+  "$GH" label create "$(cfg .parked_label)" -R "$repo" --color FBCA04 \
+    --description "Waiting on a blocker; BlockerWatch restarts it" >/dev/null 2>&1 || true
+  "$GH" label create "$(cfg .resumed_label)" -R "$repo" --color 0E8A16 \
+    --description "BlockerWatch restarted this parked work" >/dev/null 2>&1 || true
+}
+
 cmd_wait(){
-  local ref="" for="" text="" harness="" session="" cwd="$PWD"
+  local ref="" for="" text="" harness="" session="" cwd="$PWD" brief="" park="" until_at=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --for) [ $# -ge 2 ] || die "--for needs a value"; for="$2"; shift 2 ;;
       --note) [ $# -ge 2 ] || die "--note needs a value"; text="$2"; shift 2 ;;
+      --brief-file) [ $# -ge 2 ] || die "--brief-file needs a value"; brief="$2"; shift 2 ;;
+      --park) [ $# -ge 2 ] || die "--park needs a value"; park="$2"; shift 2 ;;
+      --until) [ $# -ge 2 ] || die "--until needs a value"; until_at="$2"; shift 2 ;;
       --harness) [ $# -ge 2 ] || die "--harness needs a value"; harness="$2"; shift 2 ;;
       --session) [ $# -ge 2 ] || die "--session needs a value"; session="$2"; shift 2 ;;
       --cwd) [ $# -ge 2 ] || die "--cwd needs a value"; cwd="$2"; shift 2 ;;
@@ -124,8 +160,18 @@ cmd_wait(){
       *) [ -z "$ref" ] || die "one blocker per wait"; ref="$1"; shift ;;
     esac
   done
-  [ -n "$ref" ] || die "usage: ai-blocker-watch wait <owner/repo#N> [--for owner/repo#M] [--note TEXT]"
-  parse_ref "$ref" >/dev/null
+  [ -n "$ref" ] || [ -n "$until_at" ] || die "usage: ai-blocker-watch wait <owner/repo#N> [--until <UTC time>] (--for owner/repo#M | --park \"title\") --brief-file PATH"
+  [ -z "$ref" ] || parse_ref "$ref" >/dev/null
+  if [ -n "$until_at" ]; then
+    until_at="$(date -u -d "$until_at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" ||
+      die "--until needs a time this machine understands, for example 2026-09-25T09:00:00Z"
+  fi
+  # A wait with no durable brief is exactly the failure this tool exists to fix:
+  # weeks later nobody, human or fresh session, can tell what the work was.
+  [ -n "$brief" ] && [ -s "$brief" ] ||
+    die "a wait needs --brief-file: what this work is, what is done, the exact next steps"
+  [ -n "$for" ] || [ -n "$park" ] ||
+    die "name the parked issue: --for owner/repo#M, or --park \"plain-English title\""
   if [ -z "$harness" ]; then
     if [ -n "${ZCODE_SESSION_ID:-}" ]; then harness=zcode; session="${session:-$ZCODE_SESSION_ID}"
     elif [ -n "${CODEX_THREAD_ID:-}" ]; then harness=codex; session="${session:-$CODEX_THREAD_ID}"
@@ -135,21 +181,102 @@ cmd_wait(){
   [ -n "$session" ] || die "no session ID; pass --session"
   jq -e --arg h "$harness" '.harness[$h]' "$CONFIG" >/dev/null || die "unknown harness: $harness"
   if command -v cygpath >/dev/null 2>&1; then cwd="$(cygpath -m "$cwd")"; fi
-  [ -z "$for" ] || link "$for" "$ref"
-  local id; id="$(date -u +%Y%m%dT%H%M%S)-$harness-${session:0:8}-$(printf '%s' "$ref" | tr '/#' '__')"
+  # The MAIN checkout, not this worktree: a fresh session starts there and makes
+  # its own worktree, exactly as the standing rules require. A deleted worktree
+  # therefore no longer strands the work.
+  local main=""
+  main="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  main="$(printf '%s' "$main" | tr -d '\r')"; main="${main%/}"; main="${main%/.git}"
+  if [ -n "$main" ] && command -v cygpath >/dev/null 2>&1; then main="$(cygpath -m "$main")"; fi
+  local repo=""
+  if [ -n "$for" ]; then
+    parse_ref "$for" >/dev/null; repo="${for%%#*}"
+  else
+    repo="$( (cd "$cwd" && "$GH" repo view --json nameWithOwner --jq .nameWithOwner) | tr -d '\r' )" ||
+      die "cannot tell which repository $cwd belongs to; use --for owner/repo#M instead"
+    [ -n "$repo" ] || die "cannot tell which repository $cwd belongs to; use --for owner/repo#M instead"
+  fi
+  local waiting_on=""
+  if [ -n "$ref" ]; then
+    local br bn btitle
+    read -r br bn <<<"$(parse_ref "$ref")"
+    btitle="$(gh_api "repos/$br/issues/$bn" --jq .title)" || die "cannot read $ref"
+    waiting_on="$ref — $btitle"
+  fi
+  if [ -n "$until_at" ]; then
+    if [ -n "$waiting_on" ]; then waiting_on="$waiting_on
+The time $until_at — whichever comes first."
+    else waiting_on="The time $until_at."; fi
+  fi
+  local tmp="$HOME_DIR/parked-$$.md"
+  { printf '<!-- ai-blocker-watch:parked -->\n## What this is about\n'
+    awk 'NF==0 && seen { exit } { print; seen=1 }' "$brief"
+    printf '\n## Waiting on\n%s\n\n## Resume brief\n' "$waiting_on"
+    cat "$brief"
+    printf '\n\n## Record\nMachine %s, %s session %s, main checkout %s, registered %s.\n' \
+      "$(hostname 2>/dev/null || echo unknown)" "$harness" "$session" "${main:-<not a git checkout>}" "$(now_iso)"
+    printf 'owner: ai-blocker-watch — it continues this work by itself once the wait is released.\n'
+  } > "$tmp"
+  ensure_labels "$repo"
+  local parked_issue="" parked_url=""
+  if [ -n "$park" ]; then
+    parked_url="$("$GH" issue create -R "$repo" -t "$park" --body-file "$tmp" --label "$(cfg .parked_label)" | tr -d '\r' | tail -n1)" ||
+      { rm -f "$tmp"; die "could not open the parked issue in $repo"; }
+    [ -n "$parked_url" ] || { rm -f "$tmp"; die "GitHub returned no issue URL for the parked issue"; }
+    parked_issue="$repo#${parked_url##*/}"
+  else
+    local fr fn; read -r fr fn <<<"$(parse_ref "$for")"
+    "$GH" issue comment "$fn" -R "$fr" --body-file "$tmp" >/dev/null ||
+      { rm -f "$tmp"; die "could not post the resume brief on $for"; }
+    "$GH" issue edit "$fn" -R "$fr" --add-label "$(cfg .parked_label)" >/dev/null ||
+      { rm -f "$tmp"; die "could not mark $for parked"; }
+    parked_issue="$for"; parked_url="https://github.com/$fr/issues/$fn"
+  fi
+  rm -f "$tmp"
+  [ -z "$ref" ] || link "$parked_issue" "$ref"
+  local id; id="$(date -u +%Y%m%dT%H%M%S)-$harness-${session:0:8}-$(printf '%s' "${ref:-until}" | tr '/#' '__')"
   jq -n --arg id "$id" --arg ref "$ref" --arg for "$for" --arg note "$text" --arg h "$harness" \
-    --arg s "$session" --arg cwd "$cwd" --arg at "$(now_iso)" \
+    --arg s "$session" --arg cwd "$cwd" --arg at "$(now_iso)" --arg pi "$parked_issue" \
+    --arg pu "$parked_url" --arg main "$main" --arg until "$until_at" \
     '{id:$id, blocker:$ref, for:$for, note:$note, harness:$h, session:$s, cwd:$cwd,
+      parked_issue:$pi, parked_url:$pu, main_checkout:$main, until:$until,
       registered_at:$at, state:"waiting", attempts:0}' > "$WAITS/$id.json"
   printf '%s\n' "$id"
-  note "this session will be resumed when $ref closes. End the turn; do not hold the wait open."
+  note "parked as $parked_url"
+  note "this session will be continued when the wait is released. End the turn; do not hold the wait open."
 }
 
 cmd_list(){
   local f any=0
   for f in "$WAITS"/*.json; do [ -e "$f" ] || continue; any=1
-    jq -r '[.id, .state, .blocker, .harness, (.for // "")] | @tsv' "$f"; done
+    jq -r '[.id, .state, .blocker, .harness, (.for // ""), (.parked_issue // "")] | @tsv' "$f"; done
   [ "$any" = 1 ] || note "no registered waits"
+}
+
+cmd_find(){
+  local all=0; local -a words=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --all) all=1; shift ;;
+      -*) die "unknown option: $1" ;;
+      *) words+=("$1"); shift ;;
+    esac
+  done
+  [ "${#words[@]}" -gt 0 ] || die "usage: ai-blocker-watch find <words…> [--all]"
+  local q="${words[*]}" o
+  local -a common=()
+  while IFS= read -r o; do [ -z "$o" ] || common+=(--owner "$o"); done < <(cfg '.find_owners[]')
+  common+=(--json repository,number,title,state,updatedAt,url --limit 30)
+  [ "$all" = 1 ] || common+=(--state open)
+  # gh search combines --label with AND, so parked and resumed need one call each.
+  local out1 out2 rows
+  out1="$("$GH" search issues "$q" "${common[@]}" --label "$(cfg .parked_label)" 2>/dev/null || echo '[]')"
+  out2="$("$GH" search issues "$q" "${common[@]}" --label "$(cfg .resumed_label)" 2>/dev/null || echo '[]')"
+  rows="$(printf '%s\n%s\n' "$out1" "$out2" | jq -r -s '
+    (add // []) | unique_by(.url) | sort_by(.updatedAt) | reverse
+    | .[] | "\((.repository.nameWithOwner // .repository.name // "?"))#\(.number)\t\(.state)\t\(.updatedAt[0:10])\t\(.title)"' 2>/dev/null || true)"
+  if [ -z "$rows" ]; then note "no parked work matches \"$q\""; return 0; fi
+  printf '%s\n' "$rows"
 }
 
 cmd_cancel(){ [ $# -eq 1 ] || die "usage: cancel <wait-id>"; rm -f -- "$WAITS/$1.json" || true; note "cancelled $1"; }
@@ -218,28 +345,116 @@ Blocker $repo#$n is closed. Whoever owns this issue: recheck it and continue. (a
   if [ "$ok" = 1 ]; then [ "$DRY" = 1 ] || printf '%s' "$start" > "$SCAN"; else FAILED=1; fi
 }
 
+parked_comment(){ # parked_comment <wait file> <wait id> <mode> <rc> <log> <final 0|1>
+  local f="$1" wid="$2" mode="$3" rc="$4" log="$5" final="$6"
+  local pi; pi="$(jq -r '.parked_issue // ""' "$f")"
+  [ -n "$pi" ] || return 0          # old records predate parked issues
+  local pr pn; read -r pr pn <<<"$(parse_ref "$pi")"
+  local marker="<!-- ai-blocker-watch:woke:$wid -->" existing
+  existing="$(gh_api "repos/$pr/issues/$pn/comments" --jq '.[].body' 2>/dev/null || true)"
+  if printf '%s' "$existing" | grep -qF "$marker"; then return 0; fi
+  local ref what how body
+  ref="$(jq -r '.blocker // ""' "$f")"
+  if [ -n "$ref" ]; then what="Blocker $ref closed."; else what="The wait time $(jq -r '.until // ""' "$f") passed."; fi
+  if [ "$mode" = resumed ]; then how="Resumed the original"; else how="Started a fresh"; fi
+  body="$marker
+$what $how $(jq -r .harness "$f") session on $(hostname 2>/dev/null || echo unknown) (exit $rc). Log: $log."
+  if [ "$final" = 1 ]; then
+    body="$body It failed $(jq -r .attempts "$f") times. A person must restart it from this issue."
+  fi
+  body="$body (ai-blocker-watch)"
+  if "$GH" issue comment "$pn" -R "$pr" --body "$body" >/dev/null; then
+    if [ "$rc" = 0 ]; then
+      "$GH" issue edit "$pn" -R "$pr" --remove-label "$(cfg .parked_label)" --add-label "$(cfg .resumed_label)" >/dev/null ||
+        { note "could not swap the labels on $pi"; FAILED=1; }
+    fi
+  else
+    note "could not write the outcome on $pi"; FAILED=1
+  fi
+}
+
 wake(){ # wake <wait file>
   local f="$1" h s cwd ref r n state title prompt log arg
-  h="$(jq -r .harness "$f")"; s="$(jq -r .session "$f")"; cwd="$(jq -r .cwd "$f")"; ref="$(jq -r .blocker "$f")"
-  read -r r n <<<"$(parse_ref "$ref")"
-  if ! state="$(gh_api "repos/$r/issues/$n" --jq '.state + "\t" + .title')"; then
-    note "could not read $ref"; FAILED=1; return; fi
-  title="${state#*	}"; state="${state%%	*}"
-  [ "$state" = closed ] || return 0
-  prompt="ai-blocker-watch: the blocker you registered a wait on, $ref (\"$title\"), is now closed."
-  [ -z "$(jq -r '.for // ""' "$f")" ] || prompt="$prompt You were waiting on it for $(jq -r .for "$f")."
-  [ -z "$(jq -r '.note // ""' "$f")" ] || prompt="$prompt Your note: $(jq -r .note "$f")."
-  prompt="$prompt Recheck the blocker's final state, then continue the work you were waiting to do. If something else now blocks you, register a new wait with ai-blocker-watch."
+  h="$(jq -r .harness "$f")"; s="$(jq -r .session "$f")"; cwd="$(jq -r .cwd "$f")"
+  ref="$(jq -r '.blocker // ""' "$f")"
+  local until_at parked_issue parked_url main_checkout wid
+  until_at="$(jq -r '.until // ""' "$f")"; parked_issue="$(jq -r '.parked_issue // ""' "$f")"
+  parked_url="$(jq -r '.parked_url // ""' "$f")"; main_checkout="$(jq -r '.main_checkout // ""' "$f")"
+  wid="$(basename "$f" .json)"
+  # Released by whichever comes first: the blocker closing, or the time passing.
+  local released="" why="" ispr="" merged="" meta=""
+  title=""
+  if [ -n "$ref" ]; then
+    read -r r n <<<"$(parse_ref "$ref")"
+    if ! meta="$(gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
+      note "could not read $ref"; FAILED=1; return; fi
+    IFS=$'\t' read -r state ispr title <<<"$meta"
+    if [ "$state" = closed ]; then
+      released=blocker
+      why="the blocker you registered a wait on, $ref (\"$title\"), is now closed."
+      if [ "$ispr" = true ]; then
+        merged="$(gh_api "repos/$r/pulls/$n" --jq .merged 2>/dev/null || echo unknown)"
+        if [ "$merged" = false ]; then
+          why="$why It is a pull request that closed WITHOUT being merged, so decide whether it must be reopened before you continue."
+        fi
+      fi
+    fi
+  fi
+  if [ -z "$released" ] && [ -n "$until_at" ]; then
+    local now_e due_e
+    now_e="$(date -u +%s)"; due_e="$(date -u -d "$until_at" +%s 2>/dev/null || echo 0)"
+    if [ "$due_e" -gt 0 ] && [ "$now_e" -ge "$due_e" ]; then
+      released=time; why="the time you asked to be called back at, $until_at, has passed."
+    fi
+  fi
+  [ -n "$released" ] || return 0
   local home_m="$HOME" zb=""
   command -v cygpath >/dev/null 2>&1 && home_m="$(cygpath -m "$HOME")"
   zb="$(ls -t "$HOME"/.zcode/v2/runtime/provider/*/*/*/zcode-builtin.json 2>/dev/null | head -1 || true)"
   [ -z "$zb" ] || ! command -v cygpath >/dev/null 2>&1 || zb="$(cygpath -m "$zb")"
+  # Resume the exact session when its folder AND its transcript still exist;
+  # otherwise start a fresh session from the parked issue in the main checkout.
+  local tglob g have_transcript=1 mode=resumed
+  tglob="$(jq -r --arg h "$h" '.transcript_glob[$h] // ""' "$CONFIG")"
+  if [ -n "$tglob" ]; then
+    g="${tglob//\{home\}/$home_m}"; g="${g//\{session\}/$s}"
+    compgen -G "$g" >/dev/null 2>&1 || have_transcript=0
+  fi
+  if [ -d "$cwd" ] && [ "$have_transcript" = 1 ]; then mode=resumed
+  elif [ -n "$main_checkout" ] && [ -d "$main_checkout" ] && [ -n "$parked_url" ] &&
+       jq -e --arg h "$h" '.harness_fresh[$h]' "$CONFIG" >/dev/null 2>&1; then mode=fresh
+  else mode=orphaned; fi
+  if [ "$mode" = orphaned ]; then
+    if [ "$DRY" = 1 ]; then note "would mark wait $wid orphaned: nothing on this machine can restart it"; FAILED=1; return; fi
+    local otmp="$f.tmp"
+    jq --arg at "$(now_iso)" '.state="orphaned" | .checked_at=$at' "$f" > "$otmp" && mv "$otmp" "$f"
+    local tgt; tgt="${parked_issue:-$(jq -r '.for // ""' "$f")}"
+    if [ -n "$tgt" ]; then
+      local tr tn; read -r tr tn <<<"$(parse_ref "$tgt")"
+      "$GH" issue comment "$tn" -R "$tr" --body "<!-- ai-blocker-watch:orphaned:$wid -->
+The wait was released ($why) but the original $h session and its folder ($cwd) are both gone, and no usable main checkout was recorded, so BlockerWatch cannot restart the work. A person must pick it up from this issue. (ai-blocker-watch)" >/dev/null ||
+        note "could not comment on $tgt"
+    fi
+    note "wait $wid is orphaned: the $h session and $cwd are gone; restart it from ${tgt:-its brief}"
+    FAILED=1; return
+  fi
+  if [ "$mode" = resumed ]; then
+    prompt="ai-blocker-watch: $why"
+    [ -z "$(jq -r '.for // ""' "$f")" ] || prompt="$prompt You were waiting on it for $(jq -r .for "$f")."
+    [ -z "$(jq -r '.note // ""' "$f")" ] || prompt="$prompt Your note: $(jq -r .note "$f")."
+    prompt="$prompt Recheck the wait's final state, then continue the work you were waiting to do. When you finish, or are blocked again, comment the result on ${parked_issue:-your work issue}. If something else now blocks you, register a new wait with ai-blocker-watch."
+  else
+    local pr pn; read -r pr pn <<<"$(parse_ref "$parked_issue")"
+    prompt="ai-blocker-watch: you are a NEW session picking up parked work, because the session that registered it is gone. The wait was released: $why The full brief is in $parked_url. Read that issue and all of its comments first (gh issue view $pn -R $pr --comments). Follow the repository's AGENTS.md. Create your own worktree from current upstream before you edit anything. Then continue the next steps the brief names. When you finish, or are blocked again, comment the result on that issue. If you are blocked again, register a new wait with: ai-blocker-watch wait <blocker> --for $parked_issue --brief-file <file>."
+    cwd="$main_checkout"
+  fi
+  local cfgkey=harness; [ "$mode" = resumed ] || cfgkey=harness_fresh
   local -a cmd=()
   while IFS= read -r -d '' arg; do
     arg="${arg//\{session\}/$s}"; arg="${arg//\{cwd\}/$cwd}"; arg="${arg//\{prompt\}/$prompt}"
     arg="${arg//\{home\}/$home_m}"; arg="${arg//\{zcode_builtin\}/$zb}"
     cmd+=("$arg")
-  done < <(jq -j --arg h "$h" '.harness[$h][] | . + "\u0000"' "$CONFIG")
+  done < <(jq -j --arg h "$h" --arg k "$cfgkey" '.[$k][$h][] | . + "\u0000"' "$CONFIG")
   [ "${#cmd[@]}" -gt 0 ] || { note "no command for harness $h"; FAILED=1; return; }
   # The harness must exist on THIS machine — wakes are per-machine, and a wait
   # registered for a program this machine does not have (ZCode on a Claude-only
@@ -262,7 +477,6 @@ wake(){ # wake <wait file>
     esac
   fi
   if [ "$resolved" != 1 ]; then
-    local wid; wid="$(basename "$f" .json)"
     if [ "$DRY" = 1 ]; then
       note "would mark $h wait $wid unrunnable: harness program not found on this machine: ${prog:-<empty command>}"
     else
@@ -273,21 +487,23 @@ wake(){ # wake <wait file>
     fi
     FAILED=1; return
   fi
-  if [ "$DRY" = 1 ]; then note "would resume $h session $s in $cwd ($ref closed)"; return; fi
-  log="$LOGS/$(basename "$f" .json)-$(date -u +%Y%m%dT%H%M%S).log"
+  if [ "$DRY" = 1 ]; then note "would start a $mode $h session in $cwd (wait released: $why)"; return; fi
+  log="$LOGS/$wid-$(date -u +%Y%m%dT%H%M%S).log"
   local tmp="$f.tmp"
-  jq --arg at "$(now_iso)" '.state="waking" | .attempts+=1 | .last_attempt_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
-  note "resuming $h session $s ($ref closed); log $log"
+  jq --arg at "$(now_iso)" --arg m "$mode" '.state="waking" | .mode=$m | .attempts+=1 | .last_attempt_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
+  note "$mode $h session $s in $cwd (wait released: $why); log $log"
   if (cd "$cwd" && timeout "$(( $(cfg .wake_timeout_minutes) * 60 ))" "${cmd[@]}") >"$log" 2>&1 </dev/null; then
-    jq --arg at "$(now_iso)" --arg log "$log" '.state="woken" | .woken_at=$at | .log=$log' "$f" > "$tmp" && mv "$tmp" "$f"
+    jq --arg at "$(now_iso)" --arg log "$log" --arg m "$mode" '.state="woken" | .mode=$m | .woken_at=$at | .log=$log' "$f" > "$tmp" && mv "$tmp" "$f"
+    parked_comment "$f" "$wid" "$mode" 0 "$log" 0
   else
     local rc=$?; FAILED=1
     if [ "$(jq .attempts "$f")" -ge "$(cfg .max_wake_attempts)" ]; then
-      jq --arg log "$log" --argjson rc "$rc" '.state="failed" | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
+      jq --arg log "$log" --argjson rc "$rc" --arg m "$mode" '.state="failed" | .mode=$m | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
+      parked_comment "$f" "$wid" "$mode" "$rc" "$log" 1
     else
-      jq --arg log "$log" --argjson rc "$rc" '.state="waiting" | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
+      jq --arg log "$log" --argjson rc "$rc" --arg m "$mode" '.state="waiting" | .mode=$m | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
     fi
-    note "resume of $h session $s failed with exit $rc; see $log"
+    note "$mode $h session $s failed with exit $rc; see $log"
   fi
 }
 
@@ -709,11 +925,12 @@ case "${1:-}" in
   wait) shift; cmd_wait "$@" ;;
   link) shift; [ $# -eq 2 ] || die "usage: link <blocked owner/repo#M> <blocker owner/repo#N>"; link "$1" "$2" ;;
   list) cmd_list ;;
+  find) shift; cmd_find "$@" ;;
   cancel) shift; cmd_cancel "$@" ;;
   tick) shift; cmd_tick "$@" ;;
   alarm) shift; cmd_alarm "$@" ;;
   links) shift; cmd_links "$@" ;;
   schedule) cmd_schedule ;;
   unschedule) cmd_unschedule ;;
-  -h|--help|help) sed -n '2,71p' "$_self" | sed 's/^# \{0,1\}//' ;;  *) die "unknown command; see ai-blocker-watch --help" ;;
+  -h|--help|help) sed -n '2,96p' "$_self" | sed 's/^# \{0,1\}//' ;;  *) die "unknown command; see ai-blocker-watch --help" ;;
 esac

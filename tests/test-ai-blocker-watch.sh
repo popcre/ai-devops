@@ -6,6 +6,11 @@ PASS=0; FAIL=0; ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ pri
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/work" "$TMP/fake"
+cat > "$TMP/brief.md" <<'BRIEF'
+Improve how the product description extractor pulls the specific description out of the full description.
+Done: the parser handles the single-paragraph case.
+Next: handle multi-paragraph descriptions, then add a regression test.
+BRIEF
 
 # Fake GitHub: state files under $TMP/fake decide answers; every call is logged.
 cat > "$TMP/gh" <<'EOF'
@@ -14,7 +19,12 @@ F="$FAKE"; printf '%s\n' "$*" >> "$F/calls"
 [ -f "$F/fail" ] && exit 1
 jqarg=""; args=("$@"); for i in "${!args[@]}"; do [ "${args[$i]}" = --jq ] && jqarg="${args[$((i+1))]}"; done
 out(){ if [ -n "$jqarg" ]; then jq -r "$jqarg" <<<"$1"; else printf '%s\n' "$1"; fi; }
+bodyfile=""; for i in "${!args[@]}"; do [ "${args[$i]}" = --body-file ] && bodyfile="${args[$((i+1))]}"; done
+[ -n "$bodyfile" ] && cp "$bodyfile" "$F/body"
 case "$*" in
+  "label create"*) exit 0 ;;
+  "repo view"*) out '{"nameWithOwner":"o/r"}' ;;
+  "search issues"*--label*) out "$(cat "$F/find.json" 2>/dev/null || echo '[]')" ;;
   "issue comment"*) printf '%s\n' "$*" >> "$F/comments"; exit 0 ;;
   "issue create"*) printf '%s\n' "$*" >> "$F/created"; echo 'https://github.com/o/r/issues/31'; exit 0 ;;
   "issue edit"*) printf '%s\n' "$*" >> "$F/edited"; echo '{}'; exit 0 ;;
@@ -33,7 +43,9 @@ case "$*" in
   *dependencies/blocking*) out "$(cat "$F/blocking.json" 2>/dev/null || echo '[]')" ;;
   *"-X POST"*blocked_by*) printf 'linked\n' >> "$F/links"; echo '{}' ;;
   *dependencies/blocked_by*) out '[]' ;;
-  *repos/o/r/issues/5*) out "{\"id\":55,\"state\":\"$(cat "$F/state5" 2>/dev/null || echo open)\",\"title\":\"gate bug\"}" ;;
+  *issues/31/comments*) out "$(cat "$F/comments31.json" 2>/dev/null || echo '[]')" ;;
+  *repos/o/r/pulls/5*) out "$(cat "$F/pull5.json" 2>/dev/null || echo '{"merged":true}')" ;;
+  *repos/o/r/issues/5*) pr=null; [ -f "$F/is_pr" ] && pr='{"url":"x"}'; out "{\"id\":55,\"state\":\"$(cat "$F/state5" 2>/dev/null || echo open)\",\"title\":\"gate bug\",\"pull_request\":$pr}" ;;
   *) out '{"id":1,"state":"open","title":"x"}' ;;
 esac
 EOF
@@ -46,7 +58,7 @@ chmod +x "$TMP/gh" "$TMP/harness"
 # The fixture config drops propagate_on_host so the suite is machine-independent:
 # the shipped value names one real machine, and on any other host (CI runners)
 # propagation would be skipped and every propagation check below would fail.
-jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2' \
+jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2 | .transcript_glob={claude:"",codex:"",zcode:""}' \
   "$ROOT/config/blocker-watch.json" > "$TMP/config.json"
 export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_BLOCKER_WATCH_GH="$TMP/gh"
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID ZCODE_SESSION_ID
@@ -55,11 +67,11 @@ BW(){ "$SCRIPT" "$@"; }
 check 'shipped config is valid and names all three programs' "jq -e '.harness|has(\"claude\") and has(\"codex\") and has(\"zcode\")' '$ROOT/config/blocker-watch.json'"
 check 'shipped config names exactly one propagating machine' "jq -e '(.propagate_on_host | type == \"string\" and length > 0)' '$ROOT/config/blocker-watch.json'"
 check 'wait refuses a malformed reference' "! BW wait 'not-a-ref' --harness claude --session s1"
-check 'wait refuses when the program cannot be detected' "! (cd '$TMP/work' && BW wait o/r#5)"
-id="$(cd "$TMP/work" && CODEX_THREAD_ID=thread-abc BW wait o/r#5 --for o/r#9 --note 'finish the loader' 2>/dev/null)"
+check 'wait refuses when the program cannot be detected' "! (cd '$TMP/work' && BW wait o/r#5 --park 'x' --brief-file '$TMP/brief.md')"
+id="$(cd "$TMP/work" && CODEX_THREAD_ID=thread-abc BW wait o/r#5 --for o/r#7 --note 'finish the loader' --brief-file "$TMP/brief.md" 2>/dev/null)"
 check 'wait detects Codex from its environment' "jq -e '.harness==\"codex\" and .session==\"thread-abc\" and .state==\"waiting\"' '$TMP/home/waits/$id.json'"
 check 'wait --for records the native blocked-by link' "grep -q linked '$FAKE/links'"
-id2="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=claude-1 BW wait o/r#5 2>/dev/null)"
+id2="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=claude-1 BW wait o/r#5 --park 'claude one' --brief-file "$TMP/brief.md" 2>/dev/null)"
 check 'wait detects Claude from its environment' "jq -e '.harness==\"claude\"' '$TMP/home/waits/$id2.json'"
 
 check 'tick while the blocker is open resumes nobody' "BW tick && [ ! -f '$FAKE/resumed' ]"
@@ -92,7 +104,10 @@ check 'one search query per tick covers every configured repo' "[ \"\$(grep -c '
 
 # Exactly one machine propagates; every machine still wakes its own sessions.
 : > "$FAKE/calls"; : > "$FAKE/comments"
-id4="$(cd "$TMP/work" && BW wait o/r#5 --harness claude --session s9 2>/dev/null)"
+id4="$(cd "$TMP/work" && BW wait o/r#5 --harness claude --session s9 --park 's nine' --brief-file "$TMP/brief.md" 2>/dev/null)"
+# The outcome comment on a parked issue is a separate mechanism (#617);
+# mark it already posted so this check sees only propagation's own writes.
+jq -n --arg m "<!-- ai-blocker-watch:woke:$id4 -->" '[{body:$m}]' > "$FAKE/comments31.json"
 jq '.propagate_on_host="some-other-machine"' "$TMP/config.json" > "$TMP/config-off.json"
 rm -f "$TMP/home/last-scan"
 # Run to completion into a file: `BW tick | grep -q` would SIGPIPE the tick at
@@ -101,6 +116,7 @@ AI_BLOCKER_WATCH_CONFIG="$TMP/config-off.json" BW tick >"$TMP/off-tick.out" 2>&1
 check 'a non-propagating machine says so and still exits zero' "grep -q 'only local wakes run here' '$TMP/off-tick.out'"
 check 'a non-propagating machine never searches or comments' "[ \"\$(grep -c 'search/issues' '$FAKE/calls')\" = 0 ] && [ ! -s '$FAKE/comments' ]"
 check 'a non-propagating machine still wakes its own sessions' "grep -q '|claude s9' '$FAKE/resumed'"
+rm -f "$FAKE/comments31.json"
 this_host="$(hostname | tr '[:upper:]' '[:lower:]' | cut -d. -f1)"
 : > "$FAKE/calls"; : > "$FAKE/resumed"
 jq --arg h "$this_host" '.propagate_on_host=($h | ascii_upcase)' "$TMP/config.json" > "$TMP/config-host.json"
@@ -109,7 +125,7 @@ AI_BLOCKER_WATCH_CONFIG="$TMP/config-host.json" BW tick >/dev/null 2>&1
 check 'the propagating machine is matched case-insensitively' "[ \"\$(grep -c 'search/issues' '$FAKE/calls')\" -ge 1 ]"
 
 # Failures must be loud and bounded.
-id3="$(cd "$TMP/work" && BW wait o/r#5 --harness claude --session broken 2>/dev/null)"
+id3="$(cd "$TMP/work" && BW wait o/r#5 --harness claude --session broken --park 'broken one' --brief-file "$TMP/brief.md" 2>/dev/null)"
 touch "$FAKE/harness_fail"
 check 'a failed resume makes tick exit non-zero' "! BW tick"
 check 'a failed resume is retried later' "jq -e '.state==\"waiting\" and .attempts==1' '$TMP/home/waits/$id3.json'"
@@ -119,7 +135,7 @@ check 'after max attempts the wait is left failed for a human' "jq -e '.state==\
 # A harness program this machine does not have is skipped with a visible error,
 # never retried, and never starts a session (issue #549).
 jq '.harness.claude=["/nonexistent-machines/claude-bin","{session}"]' "$TMP/config.json" > "$TMP/config-noharness.json"
-id5="$(cd "$TMP/work" && AI_BLOCKER_WATCH_CONFIG="$TMP/config-noharness.json" BW wait o/r#5 --harness claude --session s10 2>/dev/null)"
+id5="$(cd "$TMP/work" && AI_BLOCKER_WATCH_CONFIG="$TMP/config-noharness.json" BW wait o/r#5 --harness claude --session s10 --park 's ten' --brief-file "$TMP/brief.md" 2>/dev/null)"
 : > "$FAKE/resumed"
 check 'a missing harness program makes tick exit non-zero' "! AI_BLOCKER_WATCH_CONFIG='$TMP/config-noharness.json' BW tick"
 check 'the wait is marked unrunnable without burning attempts' "jq -e '.state==\"unrunnable\" and .attempts==0 and (.error | contains(\"not found on this machine\"))' '$TMP/home/waits/$id5.json'"
@@ -163,6 +179,7 @@ check 'owned or active blockers stay out of the digest' "! grep -qE 'o/r#(6|8|9|
 alarmcmt="$(jq -n --arg at "$(date -u -d '2 hours ago' +%Y-%m-%dT%H:%M:%SZ)" '[{body:"<!-- ai-blocker-watch:unowned:o/r#7 --> take it",createdAt:$at}]')"
 mkissue 7 "gate bug" "$alarmcmt" '[{"source":{"number":1,"state":"CLOSED"}}]' '[{"number":20,"state":"OPEN","repository":{"nameWithOwner":"o/r"}}]' "$(date -u -d '2 hours ago' +%Y-%m-%dT%H:%M:%SZ)"
 echo "[{\"number\":31,\"title\":\"ai-blocker-watch digest $day\"}]" > "$FAKE/digest_search.json"
+rm -f "$FAKE/edited"
 c_before="$(grep -c 'issue comment' "$FAKE/comments")"
 la_before="$(cat "$TMP/home/last-alarm")"
 # The scan clock has whole-second resolution; without this sleep the second
@@ -255,6 +272,138 @@ check 'a foreign host neither reads nor posts links' "AI_BLOCKER_WATCH_CONFIG='$
 touch "$FAKE/fail"
 check 'an unreachable GitHub fails the links run and writes no clock' "! BW links && [ \"\$(cat "$TMP/home/last-links")\" = \"\$ll_gate\" ]"
 rm -f "$FAKE/fail"
+
+mkdir -p "$TMP/transcripts" "$TMP/mainco" "$TMP/gone"
+jq --arg t "$TMP/transcripts/{session}.jsonl" --arg h "$TMP/harness" \
+  '.transcript_glob.claude=$t | .transcript_glob.codex=$t
+   | .harness_fresh.claude=[$h,"fresh-claude","{prompt}"]
+   | .harness_fresh.codex=[$h,"fresh-codex","{prompt}"]
+   | .alarm_enabled=false | .links_enabled=false' \
+  "$TMP/config.json" > "$TMP/config-modes.json"
+BW2(){ AI_BLOCKER_WATCH_HOME="$TMP/home2" AI_BLOCKER_WATCH_CONFIG="$TMP/config-modes.json" "$SCRIPT" "$@"; }
+W2="$TMP/home2/waits"
+
+check 'shipped config carries the parked labels, fresh commands and transcript globs' \
+  "jq -e '.parked_label and .resumed_label and (.find_owners|length>0) and (.harness_fresh|has(\"claude\") and has(\"codex\") and has(\"zcode\")) and (.transcript_glob|has(\"claude\"))' '$ROOT/config/blocker-watch.json'"
+check 'wait refuses without a brief file' \
+  "! (cd '$TMP/work' && BW2 wait o/r#5 --harness claude --session nobrief --park 'no brief' >/dev/null 2>&1) && (cd '$TMP/work' && BW2 wait o/r#5 --harness claude --session nobrief --park 'no brief' 2>&1 | grep -q 'needs --brief-file')"
+check 'wait refuses with neither --for nor --park' \
+  "! (cd '$TMP/work' && BW2 wait o/r#5 --harness claude --session nopark --brief-file '$TMP/brief.md' >/dev/null 2>&1) && (cd '$TMP/work' && BW2 wait o/r#5 --harness claude --session nopark --brief-file '$TMP/brief.md' 2>&1 | grep -q 'name the parked issue')"
+
+: > "$FAKE/calls"; rm -f "$FAKE/created" "$FAKE/body"
+pid="$(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session parked-1 --park 'product description extraction' --brief-file "$TMP/brief.md" 2>/dev/null)"
+check 'wait --park opens a labelled parked issue and records it' \
+  "grep -q 'issue create' '$FAKE/created' && grep -q -- '--label parked' '$FAKE/created' && jq -e '.parked_issue==\"o/r#31\" and .parked_url!=\"\"' '$W2/$pid.json'"
+check 'the parked issue body carries the plain-English summary, the blocker and an owner line' \
+  "grep -q 'What this is about' '$FAKE/body' && grep -q 'description extractor' '$FAKE/body' && grep -q 'gate bug' '$FAKE/body' && grep -q '^owner: ai-blocker-watch' '$FAKE/body'"
+check 'wait --park labels the repository so the label always exists' "grep -q 'label create parked' '$FAKE/calls'"
+check 'the parked issue is recorded as blocked by the blocker' "grep -q linked '$FAKE/links'"
+
+: > "$FAKE/comments"; : > "$FAKE/edited"
+fid="$(cd "$TMP/work" && BW2 wait o/r#5 --for o/r#9 --harness claude --session parked-2 --brief-file "$TMP/brief.md" 2>/dev/null)"
+check 'wait --for marks the existing issue parked and comments the brief' \
+  "grep -q 'issue comment 9' '$FAKE/comments' && grep -q 'issue edit 9' '$FAKE/edited' && grep -q -- '--add-label parked' '$FAKE/edited' && jq -e '.parked_issue==\"o/r#9\"' '$W2/$fid.json'"
+
+touch "$FAKE/fail"
+(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session failcrea --park 'never lands' --brief-file "$TMP/brief.md") >/dev/null 2>&1 || true
+rm -f "$FAKE/fail"
+check 'a GitHub failure leaves no half-registered wait' "! ls '$W2' | grep -q failcrea"
+
+check 'wait records the main checkout of the current repository' \
+  "mid=\"\$(cd '$ROOT' && BW2 wait o/r#5 --harness claude --session maincheck --park 'main checkout' --brief-file '$TMP/brief.md' 2>/dev/null)\" && jq -e '.main_checkout != \"\"' \"$W2/\$mid.json\" && BW2 cancel \"\$mid\""
+
+# Mode 1: the folder and the transcript are both still there.
+rm -f "$W2/$pid.json" "$W2/$fid.json"
+echo closed > "$FAKE/state5"
+rid="$(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session live-1 --park 'resumable work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+touch "$TMP/transcripts/live-1.jsonl"
+: > "$FAKE/resumed"; : > "$FAKE/comments"; : > "$FAKE/edited"
+BW2 tick >/dev/null 2>&1
+check 'wake resumes the original session when the folder and transcript exist' \
+  "grep -q '|claude live-1' '$FAKE/resumed' && jq -e '.mode==\"resumed\" and .state==\"woken\"' '$W2/$rid.json'"
+check 'a wake writes one outcome comment on the parked issue and swaps its label' \
+  "[ \"\$(grep -c 'issue comment 31' '$FAKE/comments')\" = 1 ] && grep -q 'Resumed the original claude session' '$FAKE/comments' && grep -q -- '--remove-label parked' '$FAKE/edited' && grep -q -- '--add-label resumed' '$FAKE/edited'"
+
+# Mode 2: the worktree was deleted, so a brand-new session starts in the main checkout.
+gid="$(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session gone-1 --park 'fresh start work' --brief-file "$TMP/brief.md" --cwd "$TMP/gone" 2>/dev/null)"
+jq --arg m "$TMP/mainco" '.main_checkout=$m' "$W2/$gid.json" > "$W2/$gid.new" && mv "$W2/$gid.new" "$W2/$gid.json"
+rm -rf "$TMP/gone"
+: > "$FAKE/resumed"; : > "$FAKE/comments"
+BW2 tick >/dev/null 2>&1
+check 'wake starts a fresh session in the main checkout when the folder is gone' \
+  "grep -q 'fresh-claude' '$FAKE/resumed' && grep -q \"^$TMP/mainco|\" '$FAKE/resumed' && jq -e '.mode==\"fresh\" and .state==\"woken\"' '$W2/$gid.json'"
+check 'the fresh session is told to read the parked issue and make its own worktree' \
+  "grep -q 'issues/31' '$FAKE/resumed' && grep -q 'own worktree from current upstream' '$FAKE/resumed'"
+check 'the fresh outcome is reported on the parked issue' \
+  "grep -q 'Started a fresh claude session' '$FAKE/comments'"
+
+# The same outcome is never posted twice.
+jq '.state="waiting"' "$W2/$gid.json" > "$W2/$gid.new" && mv "$W2/$gid.new" "$W2/$gid.json"
+jq -n --arg m "<!-- ai-blocker-watch:woke:$gid -->" '[{body:$m}]' > "$FAKE/comments31.json"
+: > "$FAKE/comments"
+BW2 tick >/dev/null 2>&1
+check 'an outcome already on the parked issue is never posted twice' "[ ! -s '$FAKE/comments' ]"
+rm -f "$FAKE/comments31.json" "$W2/$gid.json"
+
+# Mode 3: nothing can restart it — say so on the issue and fail the tick.
+mkdir -p "$TMP/vanished"
+oid="$(cd "$TMP/vanished" && BW2 wait o/r#5 --harness claude --session orph-1 --park 'orphaned work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+jq '.main_checkout=""' "$W2/$oid.json" > "$W2/$oid.new" && mv "$W2/$oid.new" "$W2/$oid.json"
+rm -rf "$TMP/vanished"
+: > "$FAKE/comments"; : > "$FAKE/resumed"
+check 'a wait nothing can restart fails the tick' "! BW2 tick"
+check 'an orphaned wait is marked and explained on its parked issue' \
+  "jq -e '.state==\"orphaned\"' '$W2/$oid.json' && grep -q 'A person must pick it up' '$FAKE/comments' && [ ! -s '$FAKE/resumed' ]"
+rm -f "$W2/$oid.json"
+
+# An old record, registered before parked issues existed, still resumes as before.
+jq -n --arg cwd "$TMP/work" '{id:"old-1",blocker:"o/r#5",for:"",note:"",harness:"claude",session:"old-1",cwd:$cwd,registered_at:"2026-01-01T00:00:00Z",state:"waiting",attempts:0}' > "$W2/old-1.json"
+touch "$TMP/transcripts/old-1.jsonl"
+: > "$FAKE/resumed"; : > "$FAKE/comments"
+BW2 tick >/dev/null 2>&1
+check 'an old record without a parked issue still resumes and comments nowhere' \
+  "grep -q '|claude old-1' '$FAKE/resumed' && [ ! -s '$FAKE/comments' ] && jq -e '.state==\"woken\"' '$W2/old-1.json'"
+
+# A wait on a time, and a wait released by whichever comes first.
+echo open > "$FAKE/state5"
+soon="$(date -u -d '+2 hours' +%Y-%m-%dT%H:%M:%SZ)"; past="$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)"
+tid="$(cd "$TMP/work" && BW2 wait --until "$soon" --harness claude --session time-1 --park 'check back later' --brief-file "$TMP/brief.md" 2>/dev/null)"
+touch "$TMP/transcripts/time-1.jsonl"
+: > "$FAKE/resumed"
+check 'wait --until registers a wait with no blocker' "jq -e '.blocker==\"\" and .until!=\"\"' '$W2/$tid.json'"
+check 'a time wait does not wake early' "BW2 tick && [ ! -s '$FAKE/resumed' ]"
+jq --arg u "$past" '.until=$u' "$W2/$tid.json" > "$W2/$tid.new" && mv "$W2/$tid.new" "$W2/$tid.json"
+BW2 tick >/dev/null 2>&1
+check 'a time wait wakes once its time has passed' \
+  "grep -q '|claude time-1' '$FAKE/resumed' && grep -q 'called back at' '$FAKE/resumed'"
+cid="$(cd "$TMP/work" && BW2 wait o/r#5 --until "$soon" --harness claude --session both-1 --park 'job with a check-in' --brief-file "$TMP/brief.md" 2>/dev/null)"
+touch "$TMP/transcripts/both-1.jsonl"
+: > "$FAKE/resumed"
+check 'a combined wait waits for whichever comes first' "BW2 tick && [ ! -s '$FAKE/resumed' ]"
+echo closed > "$FAKE/state5"
+BW2 tick >/dev/null 2>&1
+check 'a combined wait wakes when the blocker closes first' \
+  "grep -q '|claude both-1' '$FAKE/resumed' && jq -e '.state==\"woken\"' '$W2/$cid.json'"
+
+# A blocking pull request that closed unmerged must say so.
+echo '{"merged":false}' > "$FAKE/pull5.json"
+echo pr > "$FAKE/is_pr"
+prid="$(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session pr-1 --park 'waiting on a pull request' --brief-file "$TMP/brief.md" 2>/dev/null)"
+touch "$TMP/transcripts/pr-1.jsonl"
+: > "$FAKE/resumed"
+BW2 tick >/dev/null 2>&1
+check 'wake says when a blocking pull request closed unmerged' \
+  "grep -q 'WITHOUT being merged' '$FAKE/resumed'"
+rm -f "$FAKE/is_pr"
+
+# Plain-language search across the configured owners.
+jq -n '[{repository:{nameWithOwner:"o/r"},number:31,title:"product description extraction",state:"OPEN",updatedAt:"2026-09-18T10:00:00Z",url:"https://github.com/o/r/issues/31"}]' > "$FAKE/find.json"
+check 'find prints matching parked work' "BW2 find description extraction | grep -q 'o/r#31'"
+check 'find searches the configured owners and both labels' \
+  "[ \"\$(BW2 find description extraction >/dev/null 2>&1; grep -c 'search issues' '$FAKE/calls')\" -ge 2 ]"
+echo '[]' > "$FAKE/find.json"
+check 'find reports no match plainly' "BW2 find nothing here 2>&1 | grep -q 'no parked work matches'"
+check 'list shows the parked issue column' "BW2 list | awk -F'\t' '\$6==\"o/r#9\" || \$6==\"o/r#5\" || \$6!=\"\"' | grep -q ."
 
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"
