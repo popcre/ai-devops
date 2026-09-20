@@ -21,7 +21,6 @@ record merely to reduce the file count.
 | [`plan_grok_integration-review-access.md`](../plan_grok_integration-review-access.md) | [#249](https://github.com/popcre/ai-devops/issues/249) | Step 0; no implementation has landed |
 | [`plan_windows-runner-maintenance-elevation.md`](../plan_windows-runner-maintenance-elevation.md) | [#262](https://github.com/popcre/ai-devops/issues/262) | Source landed (PR #560, `bdb44193`, eight exact-head reviews); installation and per-host live proofs (Steps 6-8) remain |
 | [`plan_repo-throughput-restructure.md`](../plan_repo-throughput-restructure.md) | [#159](https://github.com/popcre/ai-devops/issues/159) | #212 is complete; #169 source is merged but Kimi removal from the shared-db allocator is awaiting its active owner; #166 remains last and needs explicit owner authority for the live ruleset cutover |
-| [`plan_shared-db-complete-throughput-repair.md`](../plan_shared-db-complete-throughput-repair.md) | [#401](https://github.com/popcre/ai-devops/issues/401) | Step 0; consume independently owned #2705/#2709/#2715/#2716 work, then enforce two-sided structural admission and request-to-live delivery |
 | [`plan_reviewer-assisted-problem-solving.md`](../plan_reviewer-assisted-problem-solving.md) | [#198](https://github.com/popcre/ai-devops/issues/198) | Step 0; no implementation has started |
 | [`plan_reviewer-cache-efficiency.md`](../plan_reviewer-cache-efficiency.md) | [#333](https://github.com/popcre/ai-devops/issues/333) | Step 2.1; only provider-returned cache reporting remains |
 | [`plan_reviewer-investigation-mode-option-b.md`](../plan_reviewer-investigation-mode-option-b.md) | [#253](https://github.com/popcre/ai-devops/issues/253) | Step 0 still open. Grok #513 landed `7f0f8f6c` 2026-09-16 — do not redo. Remaining children #254–#257. No CLI upgrades; #249 stays separate |
@@ -50,6 +49,7 @@ approach.
 | `plan_reviewer-log-repair-checkpoints.md` | Closed issue #308; issue #322 is a separate Qwen limitation |
 | `plan_reviewer-system-repair.md` | Closed issue #34 and complete STATUS |
 | `plan_live-proof-session-sizing.md` | Closed issue #511 and PR #515; one unproven live-proof outcome per session |
+| `plan_shared-db-complete-throughput-repair.md` | Closed issue #401; every in-scope row is live-proven, and repository transfer/merge-queue work remains separately owned by popcre/shared-db#2530 |
 
 ## Superseded or reference-only records
 

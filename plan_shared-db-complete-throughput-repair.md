@@ -1,8 +1,8 @@
 # Implementation plan — complete shared-db throughput repair
 
-Paired handoff: [`HANDOFF.d/2026-09-16T0030Z-edge-dev-claude-programme-401-final-acceptance.md`](HANDOFF.d/2026-09-16T0030Z-edge-dev-claude-programme-401-final-acceptance.md) (2026-09-15 final acceptance audit; retires the earlier `-401` handoffs)
+Closeout: the programme handoffs were retired in the closing change after their remaining work and evidence were consolidated into this STATUS table.
 
-Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401)
+Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401) — closed 2026-09-20 after every in-scope step was live-proven.
 
 ## STATUS — read first
 
@@ -18,21 +18,23 @@ Tracking issue: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issu
 | 6. Add the governed approved-migration train | ✅ live-proven | 2026-09-16 | Canary train `20260916160617` + `20260916184821` (PRs #3073, #3090): merged-main preview run 35138814669 added both; production dry-run 35139306332 listed exactly both; a variant including an applied version was refused by name (`REFUSED: migration 20260916120643 is already applied on the exact target`); one production dispatch [35140328371](https://github.com/u2giants/shared-db/actions/runs/35140328371) with the train ref applied both; the train closed with passing assertions. Both versions are in the production ledger. Evidence: shared-db `tests/verification/shared-db-throughput/2026-09-16-live-acceptance-steps-1-3-6.md` and `…-steps-2-2a-4-7.md`; re-verified 2026-09-18 against live runs, refs and the production ledger. |
 | 7. Bound reviewer and runner waits with truthful fallback | ✅ live-proven | 2026-09-18 | Runner: staged non-pickup run 35108728953 was rerouted at 10 m 23 s to replacement run [35109943926](https://github.com/u2giants/shared-db/actions/runs/35109943926) (success), while healthy run 35108725806 ran to completion uncancelled. Reviewer: `reviewer-start-watch.mjs` now runs unattended every 2 minutes from the edge-dev scheduled task `i-devopseviewer-start-watch` (#599; a GitHub-hosted runner lacks `ai-review-preflight`). On staged shared-db PR #3286, unstarted slot 2 (seq 3319, grok-4.6, drawn 22:37:41Z) was reserved for reroute at 22:48:34Z, 53 s after its 10-minute SLO, and the replacement (seq 3323, muse-spark-1.3-contributor) was acknowledged at 22:49:55Z by the first edge-dev pass after the SLO. The slot 1 lease (seq 3318) was not touched. Accepted reading: "within 10 minutes" means the first watcher pass after the 10-minute SLO. Enabling fixes: shared-db #3272 and #3284 (`c9d50300`). Evidence: shared-db `tests/verification/shared-db-throughput/2026-09-18-step-7-unattended-reroute.md` (merge `b406395a`). Live proof owner: [shared-db#3242](https://github.com/u2giants/shared-db/issues/3242). |
 | 7A. Remove every numeric concurrency ceiling on sub-agents, runners, and same-reviewer reviews | ✅ live-proven on both sides (ai-devops [#531](https://github.com/popcre/ai-devops/pull/531); shared-db [u2giants/shared-db#3132](https://github.com/u2giants/shared-db/pull/3132), proof issue u2giants/shared-db#3239) | 2026-09-18 | Added by Albert's ruling 2026-09-16 (locked decisions 20–21). ai-devops: `ai-kimi`/`ai-qwen` review locks re-keyed per review session, `ai-gemini` repository lock removed, orchestrator skill cap/slot/reviewer-busy text removed; workflows had no serializing cap. Live proof 2026-09-17: three Kimi reviews ran at once on PRs #529, #520, #486 (all `running` at 08:23:12Z; finished 08:27:58–08:28:18Z), each with its own verdict (APPROVE, REJECT, REJECT). Unrelated PRs' `linux-offline` runner jobs overlapped without waiting (#529-branch 01:44–02:05Z, #530 01:52–02:13Z, queue #524 01:59–02:19Z). shared-db live proof (read 2026-09-18 from the live `refs/db-review-active-v2` and `refs/db-review-started` refs; shared-db reviews run as recorded review sequences, not Actions runs): after #3132 merged at 2026-09-17T05:50:48Z, `grok-4.6` held three live exact-head review leases at once — sequence 3133 (issue 3173 / PR 3172, started 11:13:26Z, lease `cb7cf682` still held), 3181 (2406 / PR 3215, started 17:03:09Z) and 3211 (3235 / PR 3236, started 2026-09-18T00:55:52Z) — and started sequences 3193, 3198 and 3204 in between without any busy wait or refusal. `glm-5.3` likewise held 3104, 3182, 3194 and 3200 at once, and `muse-spark-1.3-contributor` held 3190, 3201 and 3207. Non-orchestrator tooling (no database structure change). |
-| 8. Transfer to `popcre` and activate GitHub’s native merge queue | ➡️ moved out of #401 | 2026-09-16 | Albert ruled on 2026-09-16 that the transfer is its own workstream. It is owned by [u2giants/shared-db #2530](https://github.com/u2giants/shared-db/issues/2530) and its plan `plan_shared_db_popcre_transfer_merge_queue.md` (12 steps, all open). It is no longer a #401 closure condition. Nothing was transferred and no setting changed. |
+| 8. Transfer to `popcre` and activate GitHub’s native merge queue | ➡️ moved out of #401 | 2026-09-18 | Albert ruled on 2026-09-16 that the transfer is its own workstream. The repository transfer completed on 2026-09-18; merge-queue activation remains separately owned by [popcre/shared-db #2530](https://github.com/popcre/shared-db/issues/2530). It is not a #401 closure condition. |
 | 9. Rewrite and install the operating rules without a flag day | ✅ complete | 2026-09-16 | Canonical and installed rules agree; legacy in-flight work remains safely executable. PR #412 (`9d02b382`) removed the canonical contrary evidence and its drift tests now guard every copy. 2026-09-16 fleet proof (`tests/verification/shared-db-throughput/2026-09-16-step9-installed-rules-fleet.md`): edge-dev, al8960ofc, 916, hetz `ai` and hetz `root` all drifted, were repaired through the supported sync route, and now equal main `ece11e45`. EDGE-ALIEN and EDGE-RUNN-ENVY are not applicable (CI runners without Claude/Codex, owner ruling 2026-09-16). NOT ACCEPTED: t16 is on Tailscale but its SSH port 22 times out, so it is unmeasured. Live proof owner (routed 2026-09-16): [popcre/ai-devops#496](https://github.com/popcre/ai-devops/issues/496). Albert ruled 2026-09-16 that t16 is out of scope; every in-scope machine matches. |
-| 10. Run a five-outcome live acceptance trial and close the programme | ⬜ open | 2026-09-15 | Five application outcomes meet §13 with timestamps and live behavior evidence. ENTIRELY UNPROVEN: no committed report exists, so dispatch targets, unchanged polling, manual state rebuild, repeated authorization, reviewer selection validity, safety regressions, live-proof timeliness, idle periods and the required ≥ 50% median request-to-live improvement (with raw `n` and exceptions) all lack evidence. Live proof owner (routed 2026-09-16): [shared-db#3029](https://github.com/u2giants/shared-db/issues/3029). |
+| 10. Run a five-outcome live acceptance trial and close the programme | ✅ live-proven | 2026-09-18 | The [five-outcome report](https://github.com/popcre/shared-db/blob/31a1fe725059502caf620d005c82f7fd832dd498/tests/verification/shared-db-throughput/2026-09-16-live-acceptance-step10-five-outcome-trial.md) and [acceptance addendum](https://github.com/popcre/shared-db/blob/579f8fe0c88fdd288cfa9c0eb9453318ae1cf7ec/tests/verification/shared-db-throughput/2026-09-18-live-acceptance-step10-addendum-targets-1-2-11.md) provide live evidence for all 11 targets. The addendum records the small-sample limitations rather than hiding them. Proof issue [popcre/shared-db#3029](https://github.com/popcre/shared-db/issues/3029) closed 2026-09-18. |
 
 **Legend.** ✅ complete — accepted with live evidence. 🟨 code landed, not accepted — the
 implementation merged on `main` but the plan’s live behavior gate has no linked proof.
 ⬜ open. ➡️ moved to its own issue and no longer gates #401.
 A Live proof owner cell names at most one unproven step and one issue. Do not route a new unproven step onto an issue that already owns a different unproven step. Session job-sizing: plan_live-proof-session-sizing.md (#511).
 
-**Acceptance audit of 2026-09-15** (recorded on popcre/ai-devops#401) rechecked every row
-against live GitHub. `u2giants/shared-db` main was `921fef3a`. Merged programme work proves
-landed implementation only; it does not satisfy the five-outcome live gate in Step 10.
-**Do not close #401** until every row above is ✅.
+The 2026-09-15 acceptance audit correctly refused to treat merged code as live proof. From
+2026-09-16 through 2026-09-19, each remaining row was rechecked against live runs, refs,
+ledgers, fleet state, and the five-outcome trial. Every in-scope row is now complete; Step 8
+is explicitly owned by its separate workstream.
 
-**Fresh-session starting point:** begin at Step 1 and consume the completed Step 0 ledger rather than rebuilding it. Before every later phase, re-read the downstream steps and this STATUS table, then update the table in the same commit as implementation evidence. A row is never complete merely because an issue or pull request exists.
+**Programme closed:** there is no implementation restart point. Keep this plan as the
+decision and evidence record; route any new defect to its own issue rather than reopening
+#401.
 
 ## 1. Ultimate goal
 
@@ -420,6 +422,9 @@ Land shared-db code first, then ai-devops canonical rules. Install through suppo
 
 #### Step 10 — five-outcome acceptance trial
 
+**Completed 2026-09-18.** The committed report and addendum linked in the STATUS table
+cover all 11 acceptance targets with live evidence and preserve the small-sample caveats.
+
 For five consecutive structural application outcomes, generate a committed report from the existing event ledger containing request-to-dispatch, dispatch-to-implementation, implementation-to-review, review/CI wait, merge, production-decision wait, production apply, and live-verification time. Separate owner waits and external outages.
 
 Acceptance targets:
@@ -436,9 +441,13 @@ Acceptance targets:
 - the no-progress alarm fired or was not needed, and no two-hour idle stretch went unreported (2026-09-15);
 - median request-to-live time improves by at least 50% from the Step 0 comparable baseline, with raw `n` and exceptions shown.
 
-If a target fails, keep #401 open, classify the exact stage, and repair that stage. Do not lower a safety gate or redefine completion.
+The repair rule during the trial was to keep #401 open, classify the exact failed stage,
+and repair that stage without lowering a safety gate or redefining completion. The addendum
+records how the initially unproven targets were closed.
 
-**Verification gate:** the five-outcome report links exact live evidence, all targets are met or explicitly owner-accepted, #401 closes, and the paired handoff is retired in the closing commit.
+**Verification gate met:** the five-outcome report and addendum link exact live evidence,
+all targets are met, #401 is closed, and the programme handoffs were retired in the closing
+commit.
 
 ## 10. Tests required
 
@@ -510,30 +519,30 @@ If a target fails, keep #401 open, classify the exact stage, and repair that sta
 
 ### Definition of done
 
-- [ ] Every STATUS row cites an artifact, commit, live run, or rerunnable command.
-- [ ] #2705, #2709, #2715, and #2716 are genuinely repaired by their independent owners, not merely closed.
-- [ ] Sending sessions and the orchestrator independently reject non-structural work; misclassification cannot consume a lane or shared stage.
-- [ ] The no-database-preview fast lane is machine-enforced, records a reproducible exemption reason/digest, keeps every applicable non-database check, fails closed on uncertainty, and meets its ten-minute qualified-capacity target in a live canary.
-- [ ] Urgent and finish-first scheduling is enforced and tested.
-- [ ] No numeric author-capacity limit remains; at least 100 concurrent non-conflicting claims are admitted, while the next conflicting claim is refused for its exact object conflict.
-- [ ] One outcome card remains open through live application verification.
-- [ ] Polling and manual state reconstruction are replaced by durable events/snapshots.
-- [ ] Dispatched agents report only completion or genuine blockage; routine progress check-ins consume zero shared-db orchestrator messages.
-- [ ] Early preflight catches all named late bookkeeping failures.
-- [ ] Live proof is produced by the outcome owner's own agent; no outcome waits on another session or on Albert relaying a request.
-- [ ] Holds name an exact lease or conflict; a claimed version re-reserves without closing its PR.
-- [ ] Pass-2 rebuild, pre-merge preview evidence, and recovery-to-automatic-production handle the 2026-09-15 edge histories with regression fixtures.
-- [ ] Evidence-only commits keep review; reviewer turn-limit and local-preflight failures reroute.
-- [ ] The two-hour no-progress alarm and transition-only owner reports are live in the installed orchestrator skill.
-- [ ] The answer-from-the-record rule (locked decision 18) is in the installed orchestrator skill, and the #2802 fixture passes.
-- [ ] Compatible approved migrations can move as one governed train and, after #2716 policy activation, promote automatically only when every existing machine gate passes.
-- [ ] Reviewer and runner non-start waits reroute within the tested SLO.
-- [ ] Shared-db is in the organization with its native merge queue proven, after explicit authorization.
-- [ ] Canonical and installed operating rules agree.
-- [ ] All existing and new tests pass; exact-head review approves affected safety code.
-- [ ] Five live outcomes meet the acceptance trial without weakened safety.
-- [ ] Both repositories are committed, pushed, merged, and verified on `origin/main`.
-- [ ] #401 closes and this handoff retires only after the whole outcome is complete.
+- [x] Every STATUS row cites an artifact, commit, live run, or rerunnable command.
+- [x] #2705, #2709, #2715, and #2716 are genuinely repaired by their independent owners, not merely closed.
+- [x] Sending sessions and the orchestrator independently reject non-structural work; misclassification cannot consume a lane or shared stage.
+- [x] The no-database-preview fast lane is machine-enforced, records a reproducible exemption reason/digest, keeps every applicable non-database check, fails closed on uncertainty, and meets its ten-minute qualified-capacity target in a live canary.
+- [x] Urgent and finish-first scheduling is enforced and tested.
+- [x] No numeric author-capacity limit remains; at least 100 concurrent non-conflicting claims are admitted, while the next conflicting claim is refused for its exact object conflict.
+- [x] One outcome card remains open through live application verification.
+- [x] Polling and manual state reconstruction are replaced by durable events/snapshots.
+- [x] Dispatched agents report only completion or genuine blockage; routine progress check-ins consume zero shared-db orchestrator messages.
+- [x] Early preflight catches all named late bookkeeping failures.
+- [x] Live proof is produced by the outcome owner's own agent; no outcome waits on another session or on Albert relaying a request.
+- [x] Holds name an exact lease or conflict; a claimed version re-reserves without closing its PR.
+- [x] Pass-2 rebuild, pre-merge preview evidence, and recovery-to-automatic-production handle the 2026-09-15 edge histories with regression fixtures.
+- [x] Evidence-only commits keep review; reviewer turn-limit and local-preflight failures reroute.
+- [x] The two-hour no-progress alarm and transition-only owner reports are live in the installed orchestrator skill.
+- [x] The answer-from-the-record rule (locked decision 18) is in the installed orchestrator skill, and the #2802 fixture passes.
+- [x] Compatible approved migrations can move as one governed train and, after #2716 policy activation, promote automatically only when every existing machine gate passes.
+- [x] Reviewer and runner non-start waits reroute within the tested SLO.
+- [x] Repository transfer moved to #2530 and no longer gates #401; native merge-queue activation remains in that separate workstream.
+- [x] Canonical and installed operating rules agree.
+- [x] All existing and new tests pass; exact-head review approves affected safety code.
+- [x] Five live outcomes meet the acceptance trial without weakened safety.
+- [x] Both repositories are committed, pushed, merged, and verified on `origin/main`.
+- [x] #401 closed and its programme handoffs retired after the whole outcome completed.
 
 ### Principal risks and rollback
 
