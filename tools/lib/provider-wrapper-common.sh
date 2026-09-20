@@ -67,36 +67,63 @@ provider_wrapper_flush_batch() {
 # Grammar note: the two streams below are the byte record formats stored as
 # review_tree_sha256 / source_tree_sha256. Never change a record without
 # versioning the stored digest.
-provider_wrapper_tree_inventory(){ local d="$1"; (cd "$d" && find . \( -type f -o -type l \) -print0 | LC_ALL=C sort -z | provider_wrapper_inventory_stream $'L\t' '') | sha256sum | cut -d' ' -f1; }
-provider_wrapper_source_inventory(){ local d="$1" f meta mode object sub index rc; local -a tracked=();
-  # The tracked index is materialised first so a git failure is still a hard
-  # failure, and so the batch array below survives the reading loop instead of
-  # dying with a pipeline subshell.
-  index="$(mktemp)" || return 1
-  git -C "$d" ls-files --stage -z > "$index" || { rm -f "$index"; return 1; }
-  (cd "$d" && {
+#
+# Both public functions are fail-closed regardless of the caller's shell
+# options: every stage runs under an explicit `pipefail` subshell and a failing
+# stage returns non-zero, so a truncated stream can never be accepted as a
+# complete digest just because the final sha256sum succeeded.
+provider_wrapper_tree_inventory(){
+  local d="$1"
+  ( set -o pipefail
+    cd "$d" || exit 1
+    find . \( -type f -o -type l \) -print0 | LC_ALL=C sort -z \
+      | provider_wrapper_inventory_stream $'L\t' '' | sha256sum | cut -d' ' -f1 )
+}
+
+# Emits the protected-source records. Assumes the caller has already entered
+# "$1" and materialised the tracked index at "$2".
+provider_wrapper_source_records(){
+  local d="$1" index="$2" f meta mode object sub
+  local -a tracked=()
   # Tracked bytes are always protected, even if a tracked file happens to live
   # in a wrapper-owned runtime directory. Only untracked runtime artifacts are
   # omitted from the second inventory stream.
   while IFS=$'\t' read -r -d '' meta f; do
     mode="${meta%% *}"; object="${meta#* }"; object="${object%% *}"
     if [ "$mode" = 160000 ]; then
-      if [ -n "$(git -C "$f" rev-parse --show-superproject-working-tree 2>/dev/null || true)" ]; then sub="$(provider_wrapper_source_inventory "$d/$f")"; else sub=UNINITIALIZED; fi
+      if [ -n "$(git -C "$f" rev-parse --show-superproject-working-tree 2>/dev/null || true)" ]; then sub="$(provider_wrapper_source_inventory "$d/$f")" || return 1; else sub=UNINITIALIZED; fi
       printf 'T\tGITLINK\t%s\t%s\t%s\n' "$f" "$object" "$sub"
     elif [ ! -e "$f" ] && [ ! -L "$f" ]; then printf 'T\tMISSING\t%s\n' "$f"
     elif [ -L "$f" ]; then printf 'T\tL\t%s\t%s\n' "$f" "$(readlink "$f")"
     else tracked+=("$f"); fi
   done < "$index"
-  # The tracked and untracked streams are sorted together below, so batching
-  # the regular tracked files at the end cannot change the digest.
-  provider_wrapper_flush_batch $'T\t' ${tracked[@]+"${tracked[@]}"}
-  find . \
-    -path './.git' -prune -o \
-    -path './.ai/reviews' -prune -o \
-    -path './.ai/reviewer-issues' -prune -o \
-    -path './.ai/test-runs' -prune -o \
-    -path './.ai/qualification' -prune -o \
-    -path './.ai/qwen-test.*' -prune -o \
-    -path './.ai-review-*' -prune -o \
-    \( -type f -o -type l \) -print0 | provider_wrapper_inventory_stream $'A\tL\t' $'A\t'
-  } | LC_ALL=C sort) | sha256sum | cut -d' ' -f1; rc=$?; rm -f "$index"; return "$rc"; }
+  # The tracked and untracked streams are sorted together by the caller, so
+  # batching the regular tracked files at the end cannot change the digest.
+  provider_wrapper_flush_batch $'T\t' ${tracked[@]+"${tracked[@]}"} || return 1
+  ( set -o pipefail
+    find . \
+      -path './.git' -prune -o \
+      -path './.ai/reviews' -prune -o \
+      -path './.ai/reviewer-issues' -prune -o \
+      -path './.ai/test-runs' -prune -o \
+      -path './.ai/qualification' -prune -o \
+      -path './.ai/qwen-test.*' -prune -o \
+      -path './.ai-review-*' -prune -o \
+      \( -type f -o -type l \) -print0 | provider_wrapper_inventory_stream $'A\tL\t' $'A\t' ) || return 1
+}
+
+provider_wrapper_source_inventory(){
+  local d="$1" index rc
+  # The tracked index is materialised first so a git failure is a hard failure,
+  # and so the batch array survives the reading loop instead of dying with a
+  # pipeline subshell.
+  index="$(mktemp)" || return 1
+  git -C "$d" ls-files --stage -z > "$index" || { rm -f "$index"; return 1; }
+  ( set -o pipefail
+    cd "$d" || exit 1
+    { provider_wrapper_source_records "$d" "$index" || exit 1; } \
+      | LC_ALL=C sort | sha256sum | cut -d' ' -f1 )
+  rc=$?
+  rm -f "$index"
+  return "$rc"
+}

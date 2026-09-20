@@ -102,6 +102,51 @@ DISAPPEARED="$(provider_wrapper_inventory_stream $'L\t' '' < <(printf '%s\000' "
 set -e
 check 'inventory_failure_never_emits_success_digest' "test '$DISAPPEARED_RC' -ne 0"
 
+# The public functions must fail closed for a caller that has neither errexit
+# nor pipefail set: a truncated stream must never be accepted just because the
+# final sha256sum succeeded. A stub sha256sum that always fails stands in for
+# an unreadable file, a disappeared file, and a tool failure.
+mkdir -p "$TMPD/failbin"
+cat > "$TMPD/failbin/sha256sum" <<'STUB'
+#!/usr/bin/env bash
+printf 'stub sha256sum: forced failure\n' >&2
+exit 1
+STUB
+chmod +x "$TMPD/failbin/sha256sum"
+cat > "$TMPD/fail-probe.sh" <<'PROBE'
+#!/usr/bin/env bash
+# Deliberately no errexit and no pipefail: this is the hostile caller.
+. "$1"
+PATH="$2:$PATH"
+"$3" "$4" >/dev/null 2>&1
+exit $?
+PROBE
+chmod +x "$TMPD/fail-probe.sh"
+LIB_PATH="$ROOT/tools/lib/provider-wrapper-common.sh"
+set +e
+"$TMPD/fail-probe.sh" "$LIB_PATH" "$TMPD/failbin" provider_wrapper_tree_inventory "$REPO"; TREE_FAIL_RC=$?
+"$TMPD/fail-probe.sh" "$LIB_PATH" "$TMPD/failbin" provider_wrapper_source_inventory "$REPO"; SOURCE_FAIL_RC=$?
+set -e
+check 'tree_inventory_fails_closed_for_a_plain_caller' "test '$TREE_FAIL_RC' -ne 0"
+check 'source_inventory_fails_closed_for_a_plain_caller' "test '$SOURCE_FAIL_RC' -ne 0"
+
+# A removed tracked file is a MISSING record, but a file that vanishes after
+# the walk and before the hash must fail the whole pass.
+VANISH="$TMPD/vanish"; mkdir -p "$VANISH"
+printf 'here\n' > "$VANISH/present.txt"; printf 'gone\n' > "$VANISH/gone.txt"
+mkdir -p "$TMPD/vanishbin"
+cat > "$TMPD/vanishbin/sha256sum" <<'STUB'
+#!/usr/bin/env bash
+rm -f ./gone.txt 2>/dev/null || true
+exec "$REAL_SHA256SUM_BIN" "$@"
+STUB
+chmod +x "$TMPD/vanishbin/sha256sum"
+set +e
+VANISH_RC=0
+REAL_SHA256SUM_BIN="$(command -v sha256sum)" "$TMPD/fail-probe.sh" "$LIB_PATH" "$TMPD/vanishbin" provider_wrapper_tree_inventory "$VANISH" || VANISH_RC=$?
+set -e
+check 'inventory_disappearing_file_fails_the_pass' "test '$VANISH_RC' -ne 0"
+
 BEFORE="$(provider_wrapper_tree_inventory "$REPO")"
 printf 'mutated\n' >> "$REPO/plain.txt"
 check 'inventory_mutation_detected' "test \"\$(provider_wrapper_tree_inventory '$REPO')\" != '$BEFORE'"

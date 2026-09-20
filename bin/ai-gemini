@@ -115,7 +115,7 @@ preserve_failure(){ local m="$1" out="$2" stage="$3" dir base artifact j f; [ -n
 # its own timeout policy.
 inventory(){ provider_wrapper_tree_inventory "$1"; }
 source_inventory(){ provider_wrapper_source_inventory "$1"; }
-export -f inventory source_inventory provider_wrapper_tree_inventory provider_wrapper_source_inventory provider_wrapper_inventory_stream provider_wrapper_flush_batch provider_wrapper_hash_paths provider_wrapper_prefix_lines
+export -f inventory source_inventory provider_wrapper_tree_inventory provider_wrapper_source_inventory provider_wrapper_source_records provider_wrapper_inventory_stream provider_wrapper_flush_batch provider_wrapper_hash_paths provider_wrapper_prefix_lines
 # One hashing pass, bounded. Each pass spawns one process per file; a large
 # review copy on a loaded Windows host can take hours, so a stall must become
 # a terminal timeout (exit 124) that the caller turns into a named failure
