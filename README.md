@@ -131,6 +131,10 @@ come from `ai-private-config`, never this repository.
 
 ## The model workflow
 
+For reducing delivery delays, repeated tests and reviews, read the
+[workflow efficiency implementation plan](plan_workflow-efficiency.md) STATUS
+first. It distinguishes completed repairs from the next measured improvements.
+
 | Stage | Model | Role |
 |-------|-------|------|
 | Plan / architecture | **GPT-5.6 / Codex (medium)** | Implementation plans, architecture design |
