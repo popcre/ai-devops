@@ -1070,8 +1070,15 @@ check "delete removes the record"  "run delete t1 && ! run show t1"
 
 # 15 ------------------------------------------------------------------------
 echo "== doctor =="
-check "doctor is free (no billable probe by default)" "run doctor | grep -q 'auth *: OK'"
+check "doctor is free and does not claim chat auth from the catalogue" "run doctor | grep -q 'chat authentication unverified'"
 check "doctor reports the resolved binary"            "run doctor | grep -q 'grok binary'"
+MISSING_AUTH_OUT="$(AI_GROK_AUTH_HOME="$TMP/missing-auth" XAI_API_KEY= run doctor 2>&1)"; MISSING_AUTH_RC=$?
+check "catalogue success cannot hide missing credentials" "[ '$MISSING_AUTH_RC' -ne 0 ] && printf '%s' \"\$MISSING_AUTH_OUT\" | grep -q 'auth *: MISSING'"
+EMPTY_AUTH_HOME="$TMP/empty-auth"; mkdir -p "$EMPTY_AUTH_HOME"; : > "$EMPTY_AUTH_HOME/auth.json"
+EMPTY_AUTH_OUT="$(AI_GROK_AUTH_HOME="$EMPTY_AUTH_HOME" XAI_API_KEY= run doctor --live 2>&1)"; EMPTY_AUTH_RC=$?
+check "empty credentials refuse before a live probe" "[ '$EMPTY_AUTH_RC' -ne 0 ] && ! printf '%s' \"\$EMPTY_AUTH_OUT\" | grep -q 'live probe'"
+KEY_AUTH_OUT="$(AI_GROK_AUTH_HOME="$TMP/missing-auth" XAI_API_KEY=fixture-key run doctor 2>&1)"; KEY_AUTH_RC=$?
+check "environment key remains supported without printing its value" "[ '$KEY_AUTH_RC' -eq 0 ] && ! printf '%s' \"\$KEY_AUTH_OUT\" | grep -q 'fixture-key'"
 echo noauth > "$TMP/mode"
 OUT="$(run doctor 2>&1)"
 check "ambiguous auth does not blame grok doctor" "printf '%s' \"\$OUT\" | grep -qi 'terminal/clipboard'"

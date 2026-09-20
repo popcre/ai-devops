@@ -162,7 +162,9 @@ The wrapper tells you which case you are in and what to do. The one thing to int
 
 ## Verifying the install
 
-`ai-grok-review doctor` resolves the binary, prints the version, and checks auth for free.
+`ai-grok-review doctor` resolves the binary, prints the version, and checks credential
+presence for free. A successful model-catalogue listing does not prove chat
+authentication. Only the protected `doctor --live` round trip proves that.
 It also reports the installed version against the one this repository qualifies
 (`config/provider-cli-versions.json`). Both wrappers refuse paid work against any
 other build, before the provider is contacted. If the doctor reports
