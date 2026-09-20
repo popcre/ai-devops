@@ -209,6 +209,16 @@ write_catalog "$(printf '%s' "$CATALOG_ROW" | jq '.reasoning_effort_variants=["m
 phase_c_check 'unset reasoning omits the flag and retains the effective high default' phase_c_turn effort-default UNSET high
 phase_c_check 'empty reasoning omits the flag and retains the effective high default' phase_c_turn effort-empty '' high
 phase_c_check 'explicit catalog reasoning is sent once and retained' phase_c_turn effort-explicit medium medium
+phase_c_invalid_ask(){
+  cd "$REPO" || return 1
+  local before after
+  before="$(eval "$ENV '$SCRIPT' show effort-explicit")" || return 1
+  rm -f "$TMP/provider-args"
+  ! eval "$ENV AI_MUSE_REASONING_EFFORT=bogus '$SCRIPT' ask effort-explicit --prompt test" >"$TMP/effort-refusal.log" 2>&1 || return 1
+  after="$(eval "$ENV '$SCRIPT' show effort-explicit")" || return 1
+  [ "$before" = "$after" ] && test ! -e "$TMP/provider-args" && grep -q start_failed "$TMP/effort-refusal.log"
+}
+phase_c_check 'invalid follow-up reasoning preserves the complete active session unchanged' phase_c_invalid_ask
 phase_c_check 'ask can override the preceding reasoning choice' phase_c_turn effort-explicit low low ask
 phase_c_check 'ask without an override restores the effective high default' phase_c_turn effort-explicit UNSET high ask
 phase_c_check 'invalid reasoning refuses before provider contact' phase_c_refusal effort-invalid bogus
