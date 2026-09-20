@@ -240,6 +240,7 @@
     "test-build-private-memory-hub.ps1",
     "test-codex-github-cli-access.ps1",
     "test-configure-claude-desktop-chrome-devtools.ps1",
+    "test-configure-codex-agent-limit.ps1",
     "test-configure-codex-chrome-devtools.ps1",
     "test-configure-codex-mcps.ps1",
     "test-configure-codex-statusline.ps1",

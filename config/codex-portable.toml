@@ -6,6 +6,10 @@ model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 
+[agents]
+# Compatibility spelling accepted by Codex 0.144.x and current releases.
+max_threads = 20
+
 # Bound the always-loaded skill catalog in the Windows GUI without removing
 # installed skills or their explicit invocation paths.
 [skills]
