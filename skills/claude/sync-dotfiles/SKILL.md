@@ -30,6 +30,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
 | Global instructions (`CLAUDE.md`, Codex `AGENTS.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
 | Claude tool permissions (`~/.claude/settings.json` allow list) | repo → machine, **checked every run (step 5b)**; merged in when missing, never removed | `bin/ai-claude-permissions` (list: `config/claude-permissions.allow`) |
+| Blocker-watch timer (wakes parked cross-issue waits) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
 | Auto-memory | machine ↔ private memory hub (lossless transaction) | `bin/ai-memory-sync` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
@@ -100,6 +101,17 @@ clone + `./install.sh` (Ubuntu) first.
    "Local AI commands already current" or name what was installed. On Windows,
    update this process PATH and run `hash -r` in Git Bash after repair. Never
    use the broad machine setup for this repair.
+1c. **Schedule the blocker watch, because a pull cannot start a timer.** Run
+   `bin/ai-blocker-watch schedule`. It is idempotent on both platforms (Windows
+   `schtasks /F` re-points the existing task; Linux/macOS rewrites one marked
+   user-crontab line), so run it every sync rather than probing first. This is
+   NOT cosmetic: the globals tell every Claude, Codex and ZCode session to park a
+   cross-issue wait with `ai-blocker-watch wait` and end the turn, and only this
+   scheduled `tick` ever wakes that session again. The command and the rule text
+   arrive with a plain `git pull`; the timer does not, so a machine onboarded
+   before the blocker watch existed would park work that nothing resumes. Report
+   the verdict out loud. If it dies because neither `schtasks` nor `crontab` is
+   available, say so plainly — waits on that machine must not be parked.
 2. **Check the Phase 2 wiring (secrets, MCP, SSH) — never skip this.** Report each
    item as present or missing:
    - `~/.config/ai-devops/op-service-account` (the vault-locked 1Password
