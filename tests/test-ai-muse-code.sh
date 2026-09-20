@@ -274,7 +274,8 @@ phase_c_link(){
   else
     MSYS=winsymlinks:nativestrict ln -s "$decoy" "$target" || { mv "$decoy" "$target"; return 1; }
   fi
-  ! eval "$ENV '$SCRIPT' delete '$name'" || rc=1
+  ! eval "$ENV '$SCRIPT' delete '$name'" >"$TMP/delete-refusal.log" 2>&1 || rc=1
+  grep -q 'durable store deletion unconfirmed' "$TMP/delete-refusal.log" || rc=1
   # Refusal must precede deletion of either store and preserve recovery metadata.
   test -f "$STORE/$sid/HEAD.json" || rc=1
   if [ "$position" = parent ]; then test -f "$decoy/$sid/session.jsonl" || rc=1
