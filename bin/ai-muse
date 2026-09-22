@@ -693,9 +693,12 @@ muse_code_delete_session(){ # the CLI has no delete command; remove both exact p
         done
       done
     done
-    [ ! -L ./.msp-view-v1 ] && [ ! -L "./.msp-view-v1/$sid" ] || refuse_store projection 'linked parent or session UUID'
+    [ ! -L ./.msp-view-v1 ] || refuse_store projection 'linked parent'
     if [ -e ./.msp-view-v1 ]; then
       [ -d ./.msp-view-v1 ] || refuse_store projection 'parent is not a directory'
+      [ -r ./.msp-view-v1 ] && [ -x ./.msp-view-v1 ] || refuse_store projection 'unreadable parent'
+      [ ! -L "./.msp-view-v1/$sid" ] || refuse_store projection 'linked session UUID'
+      [ ! -e "./.msp-view-v1/$sid" ] || [ -d "./.msp-view-v1/$sid" ] || refuse_store projection 'session UUID is not a directory'
       parents+=(./.msp-view-v1); stores+=(projection)
     fi
     local i

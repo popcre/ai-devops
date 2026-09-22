@@ -24,7 +24,7 @@ denied=""
   fi
   builtin [ "$@"
 }
-for denied in "$XDG_DATA_HOME" "$XDG_DATA_HOME/muse" . ./2026 ./2026/09 ./2026/09/19; do
+for denied in "$XDG_DATA_HOME" "$XDG_DATA_HOME/muse" . ./2026 ./2026/09 ./2026/09/19 ./.msp-view-v1; do
   if muse_code_delete_session "$sid" > "$TMP/refusal" 2>&1; then
     printf 'FAIL: access denial was accepted: %s\n' "$denied"; exit 1
   fi
@@ -37,6 +37,26 @@ if muse_code_delete_session ../escape > "$TMP/refusal" 2>&1; then
   printf 'FAIL: non-UUID deletion was accepted\n'; exit 1
 fi
 [[ -f "$root/.msp-view-v1/$sid/HEAD.json" && -f "$root/2026/09/19/$sid/session.jsonl" ]]
+# A UUID parked as a regular file must be refused at preflight for EITHER store
+# while its sibling store survives untouched.
+rm -f -- "$root/.msp-view-v1/$sid/HEAD.json"; rmdir -- "$root/.msp-view-v1/$sid"
+printf file > "$root/.msp-view-v1/$sid"
+if muse_code_delete_session "$sid" > "$TMP/refusal" 2>&1; then
+  printf 'FAIL: projection file UUID deletion was accepted\n'; exit 1
+fi
+grep -q 'projection store deletion unconfirmed' "$TMP/refusal"
+builtin [ -f "$root/2026/09/19/$sid/session.jsonl" ]
+rm -f -- "$root/.msp-view-v1/$sid"; mkdir -p -- "$root/.msp-view-v1/$sid"
+printf keep > "$root/.msp-view-v1/$sid/HEAD.json"
+rm -f -- "$root/2026/09/19/$sid/session.jsonl"; rmdir -- "$root/2026/09/19/$sid"
+printf file > "$root/2026/09/19/$sid"
+if muse_code_delete_session "$sid" > "$TMP/refusal" 2>&1; then
+  printf 'FAIL: durable file UUID deletion was accepted\n'; exit 1
+fi
+grep -q 'durable store deletion unconfirmed' "$TMP/refusal"
+builtin [ -f "$root/.msp-view-v1/$sid/HEAD.json" ]
+rm -f -- "$root/2026/09/19/$sid"; mkdir -p -- "$root/2026/09/19/$sid"
+printf keep > "$root/2026/09/19/$sid/session.jsonl"
 muse_code_delete_session "$sid"
 [[ ! -e "$root/.msp-view-v1/$sid" && ! -e "$root/2026/09/19/$sid" ]]
-printf 'Muse deletion admission: 8 passed, 0 failed, 0 skipped\n'
+printf 'Muse deletion admission: 11 passed, 0 failed, 0 skipped\n'
