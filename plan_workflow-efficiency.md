@@ -9,7 +9,7 @@ Fresh session: read sections 1, 8, 11, then claim **one** row in section 9. Defa
 | Step | One independently accepted outcome | State, 2026-09-20 | Dependency / owner at dispatch | Evidence required for done |
 |---|---|---|---|---|
 | P0 | Reproducible delivery baseline and reconciled scope | open | Each implementer refreshes its own slice; #650 coordinates | Dated baseline and exact live source/run identities |
-| P1 | Gemini inventory is fast and byte-equivalent | open | Reuse #633; named implementation session claims before edits | Parity tests, large-tree timing, installed Gemini proof |
+| P1 | Gemini inventory is fast and byte-equivalent | landed 2026-09-20 under #633; installed live proof open as #676 | Landed by Claude chat c6c24eca on 916-alien; #676 owner: same chat | Parity, fail-closed, library-drift and 30,384-file benchmark recorded; installed Gemini exercise blocked on the missing agy runtime, tracked in #676 |
 | P2 | Other inventory consumers use the proven primitive | open | P1; one consumer outcome/session under #633 | Per-consumer tests and installed proof; no blanket completion |
 | P3 | A known fast-validation failure stops expensive CI | open | P0 slice; independent of P1 | Negative live run plus repaired run and aggregate results |
 | P4 | Dependency selector correctly predicts affected tests | open | P0 slice; shadow only | Complete-inventory checks and dependency/hostile-path fixtures |
@@ -22,7 +22,7 @@ Fresh session: read sections 1, 8, 11, then claim **one** row in section 9. Defa
 
 Current implementation owner for unclaimed rows: #650 roadmap owner, **not an active worker**. Transfer a row explicitly before work; do not infer that someone is monitoring it. Reuse existing owner issues where listed; create a scoped child only when dispatching genuinely new work. No blanket dependency chain across independent rows. Any landed-but-unproved row must name exactly one proof issue opened by the landing session, with a named owner.
 
-Discovery handoff: [planning-session handoff](HANDOFF.d/2026-09-20T1515Z-916-codex-workflow-efficiency.md). Evidence: [September 20 baseline](tests/verification/repo-throughput/2026-09-20-workflow-efficiency-baseline.md). Historical completed work: [throughput restructure](plan_repo-throughput-restructure.md), [September 17 audit](docs/ci-speed-audit-2026-09-17.md). This plan is the current efficiency roadmap, not a reopening of that completed programme.
+Discovery handoff: [planning-session handoff](HANDOFF.d/2026-09-20T1515Z-916-codex-workflow-efficiency.md). Evidence: [September 20 baseline](tests/verification/repo-throughput/2026-09-20-workflow-efficiency-baseline.md), [P1 inventory benchmark](tests/verification/repo-throughput/2026-09-20-gemini-inventory-batching.md). Historical completed work: [throughput restructure](plan_repo-throughput-restructure.md), [September 17 audit](docs/ci-speed-audit-2026-09-17.md). This plan is the current efficiency roadmap, not a reopening of that completed programme.
 
 ## 1. Ultimate goal — what we are trying to achieve
 
