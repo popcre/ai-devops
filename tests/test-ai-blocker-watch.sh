@@ -52,7 +52,9 @@ EOF
 # Fake harness: records how it was resumed.
 cat > "$TMP/harness" <<'EOF'
 #!/usr/bin/env bash
-printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"; [ -f "$FAKE/harness_fail" ] && exit 7; exit 0
+printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"
+if [ -f "$FAKE/harness_gone" ]; then echo "No conversation found with session ID: $2" >&2; exit 1; fi
+[ -f "$FAKE/harness_fail" ] && exit 7; exit 0
 EOF
 chmod +x "$TMP/gh" "$TMP/harness"
 # The fixture config drops propagate_on_host so the suite is machine-independent:
@@ -131,6 +133,30 @@ check 'a failed resume makes tick exit non-zero' "! BW tick"
 check 'a failed resume is retried later' "jq -e '.state==\"waiting\" and .attempts==1' '$TMP/home/waits/$id3.json'"
 BW tick >/dev/null 2>&1
 check 'after max attempts the wait is left failed for a human' "jq -e '.state==\"failed\" and .attempts==2 and .exit==7' '$TMP/home/waits/$id3.json'"
+
+# A transcript this machine no longer holds is PERMANENT — the session named
+# cannot come back. One failure marks the wait unrunnable, the outcome is
+# written on the parked issue, and later ticks never retry it. Six waits for
+# one deleted session once burned every retry and made every tick exit
+# non-zero, which hid real failures.
+rm -f "$FAKE/harness_fail"; touch "$FAKE/harness_gone"; : > "$FAKE/comments"
+id6="$(cd "$TMP/work" && BW wait o/r#5 --harness claude --session dead --park 'dead one' --brief-file "$TMP/brief.md" 2>/dev/null)"
+check 'a permanently failed wake makes tick exit non-zero' "! BW tick"
+check 'a gone session is unrunnable after ONE failure, not three' "jq -e '.state==\"unrunnable\" and .attempts==1 and (.error | contains(\"No conversation found\"))' '$TMP/home/waits/$id6.json'"
+check 'a gone session writes its outcome on the parked issue' "grep -q 'A person must restart it' '$FAKE/comments'"
+: > "$FAKE/resumed"
+BW tick >/dev/null 2>&1
+check 'an unrunnable wake is never retried on a later tick' "! grep -q '|claude dead' '$FAKE/resumed'"
+rm -f "$FAKE/harness_gone"
+
+# An outcome must never evaporate: a record written before parked issues
+# existed still gets its outcome, on the issue it was waiting for.
+touch "$FAKE/harness_fail"; : > "$FAKE/comments"
+id7="$(cd "$TMP/work" && BW wait o/r#5 --harness claude --session legacy --for o/r#31 --brief-file "$TMP/brief.md" 2>/dev/null)"
+jq 'del(.parked_issue)' "$TMP/home/waits/$id7.json" > "$TMP/legacy.json" && mv "$TMP/legacy.json" "$TMP/home/waits/$id7.json"
+BW tick >/dev/null 2>&1; BW tick >/dev/null 2>&1
+check 'a record with no parked issue still writes its outcome somewhere' "grep -q 'A person must restart it' '$FAKE/comments'"
+rm -f "$FAKE/harness_fail"
 
 # A harness program this machine does not have is skipped with a visible error,
 # never retried, and never starts a session (issue #549).

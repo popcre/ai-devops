@@ -23,6 +23,13 @@
   ],
   "propagate_on_host": "edge-dev",
   "first_scan_lookback_minutes": 60,
+  "permanent_wake_errors": [
+    "No conversation found with session ID",
+    "no conversation found with session id",
+    "session not found",
+    "No such thread",
+    "thread not found"
+  ],
   "max_wake_attempts": 3,
   "wake_timeout_minutes": 45,
   "schedule_every_minutes": 10,
