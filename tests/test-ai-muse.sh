@@ -197,6 +197,33 @@ muse_recovery_cases(){
   if [ "$(jq -r .status "$m")" != provider_outcome_uncertain ]; then printf 'final fixture status=%s provider-calls=%s\n' "$(jq -r .status "$m")" "$(wc -l < "$calls")"; cat "$TMP/failed-followup.log"; fi
   rm -f "$TMP/bin/jq"
 }
+muse_turn_identity_cases(){
+  local name m prior archive before calls="$TMP/identity-calls" field
+  : > "$calls"
+  for name in identity-same-head identity-new-head; do
+    check "$name creates a completed first turn" "cd '$REPO' && eval \"$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' new $name --prompt first\""
+    m="$(find "$TMP/state" -name "codex--$name.json" -type f -print -quit)"
+    prior="$(jq -r .retained_turn.original_invocation_id "$m")"
+    cp "$m" "$TMP/$name.before"
+    for field in active_invocation_id head packet_sha256 review_dir; do
+      jq --arg field "$field" '.[$field]="different"|.status="completed_pending_local_checks"' "$TMP/$name.before" > "$m"
+      before="$(sha256sum "$m")"
+      check "$name rejects mismatched $field without mutating metadata" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/identity-refusal.log' 2>&1 && grep -q 'different invocation or source' '$TMP/identity-refusal.log' && test \"\$(sha256sum '$m')\" = '$before'"
+    done
+    cp "$TMP/$name.before" "$m"
+    if [ "$name" = identity-new-head ]; then
+      printf 'new reviewed source\n' >> "$REPO/a.txt"; git -C "$REPO" add a.txt; git -C "$REPO" commit -qm 'identity regression source change'
+    fi
+    check "$name interrupts the next provider before retention" "cd '$REPO' && ! eval \"$ENV AI_MUSE_TEST_INTERRUPT_AT=post_launch MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 '$SCRIPT' ask $name --prompt followup\" > '$TMP/identity-interrupt.log' 2>&1"
+    archive="${m%.json}.$prior.metadata.json"
+    check "$name archives previous completion before replacing source" "cmp -s '$TMP/$name.before' '$archive' && jq -e 'has(\"retained_turn\")|not' '$m' && jq -e '.active_invocation_id!=\"$prior\" and .status==\"provider_outcome_uncertain\"' '$m'"
+    before="$(sha256sum "$m")"
+    check "$name cannot use the old successful completion to unlock new work" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/identity-reconcile.log' 2>&1 && grep -q 'no exact successful retained Muse process' '$TMP/identity-reconcile.log' && test \"\$(sha256sum '$m')\" = '$before' && ! eval \"$ENV '$SCRIPT' ask $name --prompt duplicate\" > /dev/null 2>&1"
+    jq --slurpfile prior "$archive" 'del(.active_invocation_id)|.retained_turn=$prior[0].retained_turn' "$m" > "$m.legacy"; mv "$m.legacy" "$m"
+    before="$(sha256sum "$m")"
+    check "$name refuses legacy stale completion before any metadata mutation" "cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile $name\" > '$TMP/identity-legacy.log' 2>&1 && grep -q 'could not reserve exact recovered Muse evidence' '$TMP/identity-legacy.log' && test \"\$(sha256sum '$m')\" = '$before'"
+  done
+}
 failure_phase_cases(){
   local calls="$TMP/phase-calls" mode rc count m raw digest lock metadata_digest command
   local management_calls="$TMP/phase-management-calls"
@@ -228,12 +255,17 @@ failure_phase_cases(){
   if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' reconcile phase-retained") > "$TMP/phase-reconcile.log" 2>&1; then rc=0; else rc=$?; fi
   if [ "$rc" -ne 0 ] && grep -q 'retained Muse evidence bytes changed' "$TMP/phase-reconcile.log" && ! grep -q start_failed "$TMP/phase-reconcile.log" && [ "$digest" = "$(sha256sum "$raw")" ] && [ "$count" -eq "$(wc -l < "$calls")" ] && jq -e '.status=="active"' "$m" >/dev/null; then ok 'retained evidence failure preserves ownership and never claims startup'; else bad 'retained evidence failure preserves ownership and never claims startup'; fi
 }
+if [ "${AI_MUSE_IDENTITY_TESTS_ONLY:-0}" = 1 ]; then
+  muse_turn_identity_cases
+  printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
+fi
 failure_phase_cases
 if [ "${AI_MUSE_PHASE_TESTS_ONLY:-0}" = 1 ]; then
   printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
 fi
 if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   muse_recovery_cases
+  muse_turn_identity_cases
   printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
 fi
 mkdir -p "$TMP/link-probe-target"
@@ -468,5 +500,6 @@ check 'a held credential lock fails closed with a clear message after the wait b
 rm -rf "$TMP/state/credential.lock.d"
 
 muse_recovery_cases
+muse_turn_identity_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
