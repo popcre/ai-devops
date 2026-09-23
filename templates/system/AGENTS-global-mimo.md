@@ -134,6 +134,11 @@ the task needs the detail.
   wait, shipment, deployment, database or infrastructure change, or production
   action, run `ai-task-gates check --before <action>`. If the change set outgrew
   the declared class, redeclare it and say so; never work around a refusal.
+- **Quote every time in EST (New York City).** All human-facing clock times in
+  replies, issues, comments, plans, handoffs, and status notes use EST/EDT
+  (America/New_York) and name the zone — e.g. `3:45 PM EST`. Never leave a
+  time unlabeled or in another zone. Machine filenames and ISO machine keys
+  may stay UTC.
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
   or protected files — never chat, command arguments, output, logs, or commits.
   Serialize 1Password access and load `secrets-to-1password`. Report leaks
@@ -174,10 +179,6 @@ the task needs the detail.
 - **Sign everything posted to GitHub** with `Posted by MiMo chat <id> on
   <machine>`, where `<id>` is `$MIMO_SESSION_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.
-- **Quote every time in EST (New York City).** All human-facing clock times in
-  replies, issues, comments, plans, handoffs, and status notes use EST/EDT
-  (America/New_York) and name the zone — e.g. `3:45 PM EST`. Never leave a
-  time unlabeled or in another zone. Machine filenames may stay UTC.
 - **Reviewer rotation:** the shared-db allocator is the one source of truth
   for who reviews. Never retry one out of rotation. Reviewer wrappers never call
   1Password during a review. Details: `ai-devops/docs/reviewer-rotation-rules.md`.
