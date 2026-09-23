@@ -523,7 +523,7 @@ run_turn(){
   [ -x "$bash_bin" ] && [ -x "$env_bin" ] || die 'trusted absolute Bash/env executables are required for the Muse credential boundary.'
   test_interrupt_at pre_launch
   set +e
-  clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME""XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
+  clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
   [ "$ENGINE" != muse-code ] || clean_env+=("AI_MUSE_KEY_ENV=META_API_KEY")
   for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
     [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
