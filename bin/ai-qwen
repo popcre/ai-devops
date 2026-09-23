@@ -317,7 +317,7 @@ release_boundary() { # release_boundary ROOT TAG
 }
 
 resolve_trusted_op() {
-  local candidate physical
+  local candidate physical local_app package found=""
   if [ -n "${AI_QWEN_TEST_DIR:-}" ] && [ -n "${AI_QWEN_OP_BIN:-}" ]; then candidate="$AI_QWEN_OP_BIN"
   else candidate="$(command -v op 2>/dev/null || true)"; fi
   [ -n "$candidate" ] || return 1; physical="$(readlink -f "$candidate" 2>/dev/null || true)"
@@ -327,7 +327,22 @@ resolve_trusted_op() {
   elif [ -n "${LOCALAPPDATA:-}" ]; then
     # Git Bash may omit .exe from command -v/readlink even for the WinGet binary.
     case "$physical" in */op) physical="$physical.exe";; esac
-    case "$physical" in "$(cygpath -u "$LOCALAPPDATA")"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe) ;; *) return 1;; esac
+    local_app="$(cygpath -u "$LOCALAPPDATA")"
+    case "$physical" in
+      "$local_app"/Microsoft/WinGet/Links/op.exe)
+        # WinGet exposes its installed executable through Links. Execute the
+        # package copy, never the PATH hit, and refuse ambiguous installations.
+        for package in "$local_app"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe; do
+          [ -f "$package" ] && [ -x "$package" ] || continue
+          [ -z "$found" ] || return 1
+          found="$package"
+        done
+        [ -n "$found" ] || return 1
+        physical="$found"
+        ;;
+      "$local_app"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe) ;;
+      *) return 1 ;;
+    esac
   else [ "$physical" = /usr/bin/op ] || return 1; fi
   [ -f "$physical" ] && [ -x "$physical" ] && printf '%s' "$physical"
 }
