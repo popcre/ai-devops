@@ -341,11 +341,13 @@ write_key_store(){
   printf '%s\n' "$1" > "$tmp" || { rm -f "$tmp"; die 'could not write the Muse key store.'; }
   mv -f "$tmp" "$KEY_STORE" || { rm -f "$tmp"; die 'could not install the Muse key store.'; }
 }
-# 0 = accepted or unknown (network trouble never forces a 1Password read);
-# 1 = Meta answered 401/403, so the stored key is rejected.
+# Succeeds (0) only when Meta answered 401/403, so the stored key is rejected;
+# fails (1) when accepted or unknown (network trouble never forces a 1Password read).
+# The header file uses the muse-key.* name so cleanup() removes it on any signal.
 probe_key_rejected(){
   local hdr code; command -v curl >/dev/null 2>&1 || return 1
-  hdr="$(mktemp "$RUN_TMP/muse-probe.XXXXXX")" || return 1; chmod 600 "$hdr" 2>/dev/null
+  hdr="$(mktemp "$RUN_TMP/muse-key.probe.XXXXXX")" || return 1; chmod 600 "$hdr" 2>/dev/null
+  protect_windows_path "$hdr" file || { rm -f "$hdr"; die 'could not enforce the private Muse key-probe ACL.'; }
   printf 'Authorization: Bearer %s\n' "$1" > "$hdr"
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "${AI_MUSE_KEY_PROBE_TIMEOUT:-15}" -H @"$hdr" "$KEY_PROBE_URL" 2>/dev/null || true)"; rm -f "$hdr"
   case "$code" in 401|403) return 0;; *) return 1;; esac
