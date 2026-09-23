@@ -33,6 +33,8 @@ diagnose the failure first.
 
 ## Required behavior
 
+- Before recording a reviewer as missing or not on PATH, run `ai-review-preflight usable <provider>`; its output names the exact resolved wrapper (`wrapper_command`, e.g. grok -> `ai-grok-review`). Never hand-type a guessed wrapper name: a 2026-09 report of "ai-grok not on PATH" was wrong because the real wrapper is `ai-grok-review`.
+
 - Do not make Albert type command options or repeat the error.
 - Do not reduce the details to one sentence.
 - Do not invent a log path, command, duration, or retry.

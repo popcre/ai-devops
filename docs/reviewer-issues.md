@@ -5,6 +5,10 @@ the STATUS in [the reviewer reliability and efficiency plan](../plan_reviewer-re
 first. It reuses the completed checkpoint/diagnostic tooling and existing provider
 work; it does not replace this incident lifecycle or authorize closing unexplained failures.
 
+## Before recording a missing reviewer
+
+Before recording a reviewer as missing or not on PATH, run `ai-review-preflight usable <provider>`; its output names the exact resolved wrapper (`wrapper_command`, e.g. grok -> `ai-grok-review`). Never hand-type a guessed wrapper name: a 2026-09 report of "ai-grok not on PATH" was wrong because the real wrapper is `ai-grok-review`.
+
 ## Repair-round checkpoints
 
 Begin a maintenance sweep with `ai-reviewer-issue maintenance show`, then
