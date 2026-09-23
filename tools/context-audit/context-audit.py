@@ -129,6 +129,7 @@ PARITY_RULES = {
     "never replace system binaries": r"system binaries|operating-system binaries",
     "one unproven outcome per session": r"one unproven live-behavior outcome",
     "do not defer live-proof dumps": r"Never save several unproven steps",
+    "quote every time in EST": r"Quote every time in EST",
 }
 
 # Client-only text that is allowed to appear in exactly one global. If one of
