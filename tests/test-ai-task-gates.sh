@@ -85,6 +85,18 @@ check 'bulk path classification preserves every class and count' \
     ([.changes[]|select(.path|startswith(\"docs/bulk-\"))]|all(.class==\"prose\")) and
     ([.changes[]|select(.path==\"bin/ai-review-lifecycle\")][0].class)==\"reviewer-safety\" and
     ([.changes[]|select(.path==\"random/bulk.bin\")][0].class)==\"code\"' <<<\"\$bulk\""
+# A 100-path sample took more than six minutes with per-match command
+# substitutions on Windows; compiled rules finished it in under 15 seconds.
+# Keep a broad deadline so CI machine load does not turn ordinary variance into
+# a failure, while the original implementation still fails this regression.
+command -v timeout >/dev/null 2>&1 || { bad 'timeout is required for bulk classification regression'; exit 1; }
+sed -n '1,100p' "$bulk_paths" > "$TMP/bulk-performance-paths.txt"
+if timed_bulk="$(cd "$TMP/class" && timeout 180 "$GATES" explain --json --paths-from "$TMP/bulk-performance-paths.txt")"; then
+  check '100-path classification completes within 180 seconds without losing prose matches' \
+    "jq -e '.changed_count==100 and .observed_class==\"prose\" and ([.changes[]]|all(.class==\"prose\"))' <<<\"\$timed_bulk\""
+else
+  bad '100-path classification completes within 180 seconds without losing prose matches'
+fi
 
 printf 'consumer declarations\n'
 mkdir -p "$TMP/class/.ai-devops"
