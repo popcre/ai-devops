@@ -268,7 +268,7 @@ BOUND_ID="$(printf '%s
 ' "$BOUND_OUT"|sed -n 's/^SESSION_ID: //p')"
 BOUND_MSG="$TMP/bound-msg.txt"
 jq -r '[.[]|select(.role=="user")]|last|.content' "$TMP/repo/.ai/deepseek-sessions/$BOUND_ID.json" > "$BOUND_MSG" 2>/dev/null || : > "$BOUND_MSG"
-check "a review tells the model it has no repository access"   "grep -q 'You have NO access to this repository' '$BOUND_MSG'"
+check "a review states the read-only repository boundary"   "grep -q 'read-only access to a snapshot of the reviewed repository' '$BOUND_MSG'"
 check "a review forbids asserting presence or absence of unquoted evidence"   "grep -q 'Absence from this conversation is NOT evidence of absence' '$BOUND_MSG' && grep -q 'return BLOCKED instead of inferring it' '$BOUND_MSG'"
 check "a review still demands the terminal verdict heading"   "grep -q 'literal ## Verdict heading' '$BOUND_MSG'"
 check "repeated --file attaches every evidence file, not just the last"   "grep -q 'alpha-evidence' '$BOUND_MSG' && grep -q 'beta-evidence' '$BOUND_MSG'"
@@ -332,7 +332,7 @@ check "a review refuses a caller system prompt before any provider contact" "tes
 check "the refused review never reached the provider" "test '$CALLS_BEFORE_SYS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 BOUND_SYS="$TMP/boundary-system.txt"
 jq -r '.[0]|select(.role=="system")|.content' "$TMP/repo/.ai/deepseek-sessions/$BOUND_ID.json" > "$BOUND_SYS" 2>/dev/null || : > "$BOUND_SYS"
-check "the review boundary is carried by the system message, not only the user turn" "grep -q 'You have NO access to this repository' '$BOUND_SYS'"
+check "the review boundary is carried by the system message, not only the user turn" "grep -q 'read-only access to a snapshot of the reviewed repository' '$BOUND_SYS'"
 PLAIN_OUT="$(DEEPSEEK_STUB_REPLY='chat' run send plain-chat --system "You are terse.")"
 PLAIN_ID="$(printf '%s\n' "$PLAIN_OUT"|sed -n 's/^SESSION_ID: //p')"
 check "a non-review conversation still honours its caller system prompt" "jq -e '.[0].role==\"system\" and .[0].content==\"You are terse.\"' '$TMP/repo/.ai/deepseek-sessions/$PLAIN_ID.json'"
@@ -379,7 +379,7 @@ check "governed mode requires explicit formal review" "test '$gov_bad_rc' -ne 0 
 DEEPSEEK_STUB_REPLY=$'Findings complete.\nVERDICT: APPROVE '"$GOV_HEAD" run send governed --review --governed-verdict="$GOV_HEAD" >"$TMP/gov.out" 2>"$TMP/gov.err"; gov_rc=$?
 GOV_ID="$(sed -n 's/^SESSION_ID: //p' "$TMP/gov.err")"
 check "governed send emits exact terminal contract without a stdout session header" "test '$gov_rc' -eq 0 && test -n '$GOV_ID' && tail -1 '$TMP/gov.out' | grep -qx 'VERDICT: APPROVE $GOV_HEAD' && ! grep -q '^SESSION_ID:' '$TMP/gov.out'"
-check "governed transcript retains its fixed head and evidence boundary" "jq -e '.[0].content | contains(\"You have NO access to this repository\") and contains(\"VERDICT: APPROVE $GOV_HEAD\")' '$TMP/repo/.ai/deepseek-sessions/$GOV_ID.json'"
+check "governed transcript retains its fixed head and evidence boundary" "jq -e '.[0].content | contains(\"read-only access to a snapshot of the reviewed repository\") and contains(\"VERDICT: APPROVE $GOV_HEAD\")' '$TMP/repo/.ai/deepseek-sessions/$GOV_ID.json'"
 DEEPSEEK_STUB_REPLY=$'Further findings.\nVERDICT: REVISE '"$GOV_HEAD" run reply "$GOV_ID" --review --governed-verdict "$GOV_HEAD" continuation >"$TMP/gov-reply.out" 2>"$TMP/gov-reply.err"; gov_rc=$?
 check "governed continuation preserves exact mode and supports REVISE" "test '$gov_rc' -eq 0 && tail -1 '$TMP/gov-reply.out' | grep -qx 'VERDICT: REVISE $GOV_HEAD'"
 gov_calls="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
@@ -494,5 +494,9 @@ DEEPSEEK_TOOLS_MAX_ROUNDS=2 DEEPSEEK_STUB_TOOLCALL_ALWAYS=1 DEEPSEEK_STUB_REQUES
 check "tool loop is bounded and the last request withholds tools" "test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq \$(( CALLS_BEFORE + 3 )) && jq -e '(has(\"tools\")|not) and (.messages[-1].content|contains(\"budget exhausted\"))' '$TOOL_REQ'"
 DEEPSEEK_STUB_REQUEST="$TOOL_REQ" run send 'no tools' > /dev/null 2>&1
 check "an ordinary send offers no repository tools" "jq -e 'has(\"tools\")|not' '$TOOL_REQ'"
+TOOLS_SID="$(sed -n 's/^SESSION_ID: //p' "$TMP/tools-send.out" | head -1)"
+check "the turn intent records repository access so recovery keeps it" "test -n '$TOOLS_SID' && jq -es 'length>0 and all(.repository_access==true)' '$TMP/repo/.ai/deepseek-sessions/$TOOLS_SID'.*/intent.json"
+check "wrapper runs each tool step under the wall-budget timeout" "grep -q 'timeout -k 5 \"\$max_time\" \"\$PYTHON\" \"\$SOURCE_TOOLS/../tools/deepseek_repo_tools.py\" step' '$SCRIPT'"
+check "repo-tools helper offline cases (case, trailing dot, streams, large files, budgets)" "python '$ROOT/tests/test_deepseek_repo_tools.py' >/dev/null"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]

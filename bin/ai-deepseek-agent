@@ -387,8 +387,14 @@ PY
 }
 
 pending_hash() { sha256sum "$1" | awk '{print $1}'; }
+repo_tools_root() { # the directory the read-only tools may read, or nothing
+  if [ "${REVIEW:-0}" = 1 ] && [ -n "$REVIEW_SOURCE_WORKSPACE" ]; then printf '%s' "$REVIEW_SOURCE_WORKSPACE"
+  elif [ "$REPO_TOOLS" = 1 ]; then printf '%s' "$REPO_ROOT"; fi
+}
+
 pending_begin() {
   local candidate="$1" ledger before=absent file tmp
+  if [ -n "$(repo_tools_root)" ]; then REPO_TOOLS_USED=1; else REPO_TOOLS_USED=0; fi
   PENDING_DIR="$(session_path "$ID" .pending)" || return 1
   mkdir "$PENDING_DIR" || return 1
   chmod 0700 "$PENDING_DIR" || return 1
@@ -409,12 +415,12 @@ pending_begin() {
     --arg files "$(pending_hash "$PENDING_DIR/files.nul")" --arg identity "${REVIEW_SOURCE_IDENTITY:-}" \
     --arg source_files_hash "$(if [ "$REVIEW" = 1 ]; then pending_hash "$REVIEW_SOURCE_IDENTITY.files"; fi)" \
     --arg packet "${REVIEW_SOURCE_PACKET:-}" --arg packet_hash "${REVIEW_SOURCE_HASH:-}" \
-    --arg workspace "$REVIEW_SOURCE_WORKSPACE" --arg tag "${REVIEW_SOURCE_TAG:-}" \
+    --arg workspace "$REVIEW_SOURCE_WORKSPACE" --arg tag "${REVIEW_SOURCE_TAG:-}" --argjson repo_access "$REPO_TOOLS_USED" \
     '{schema_version:1,provider:"deepseek",session_id:$id,caller:$caller,model:$model,repository_root:$repo,
       event_run_id:$run,review:$review,head:$head,governed_head:$governed,before_transcript_sha256:$before,
       request_sha256:$request,ledger_before_sha256:$ledger_before,ledger_after_sha256:$ledger_after,
       files_sha256:$files,source_identity_file:$identity,source_files_sha256:$source_files_hash,source_packet:$packet,packet_sha256:$packet_hash,
-      source_workspace:$workspace,source_tag:$tag}' > "$PENDING_DIR/intent.json" || return 1
+      source_workspace:$workspace,source_tag:$tag,repository_access:($repo_access==1)}' > "$PENDING_DIR/intent.json" || return 1
   pending_hash "$PENDING_DIR/intent.json" > "$PENDING_DIR/intent.sha256" || return 1
   chmod 0600 "$PENDING_DIR/"* || return 1
   rm -f "$candidate"
@@ -557,8 +563,7 @@ messages = json.load(open(sys.argv[1], encoding="utf-8"))
 print(json.dumps({"model": os.environ["MODEL"], "messages": messages, "stream": False}))
 PY
   local tools_root="" tools_round=0 tools_deadline=0 step_rc max_time="$CALL_TIMEOUT"
-  if [ "${REVIEW:-0}" = 1 ] && [ -n "$REVIEW_SOURCE_WORKSPACE" ]; then tools_root="$REVIEW_SOURCE_WORKSPACE"
-  elif [ "$REPO_TOOLS" = 1 ]; then tools_root="$REPO_ROOT"; fi
+  tools_root="$(repo_tools_root)"
   if [ -n "$tools_root" ]; then
     # Read-only repository access: list_dir/read_file/grep confined to
     # tools_root. The helper never sees the key; this wrapper still owns every
@@ -582,9 +587,11 @@ PY
     rc=0; wait "$ACTIVE_API_PID" || rc=$?
     ACTIVE_API_PID=""
     [ -n "$tools_root" ] && [ "$rc" -eq 0 ] && [ "$(cat "$status_file" 2>/dev/null)" = 200 ] || break
-    step_rc=0
-    "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" step "$tools_root" "$req_file" "$resp_file" "$REPO_TOOLS_LOG" "$tools_round" || step_rc=$?
-    [ "$step_rc" = 10 ] || { [ "$step_rc" = 0 ] || rc=1; break; }
+    step_rc=0; max_time=$(( tools_deadline - SECONDS )); [ "$max_time" -gt 0 ] || max_time=1
+    # The wall budget covers tool execution too; a hard timeout bounds even a
+    # pathological regular expression.
+    timeout -k 5 "$max_time" "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" step "$tools_root" "$req_file" "$resp_file" "$REPO_TOOLS_LOG" "$tools_round" || step_rc=$?
+    [ "$step_rc" = 10 ] || { [ "$step_rc" = 0 ] || { rc=1; echo "Error: repository tool step failed (exit $step_rc; 124 means the ${DEEPSEEK_TOOLS_MAX_WALL:-900}s wall budget ran out)." >&2; }; break; }
     cp "$resp_file" "$resp_file.round-$tools_round" 2>/dev/null || true
     tools_round=$(( tools_round + 1 ))
   done
@@ -941,25 +948,28 @@ if stream.read(1): raise ValueError("unexpected attachment bytes")
 ' "$@"
 }
 
-# DeepSeek reaches this wrapper over a plain text API: no repository, no
-# filesystem, no tools. Unless it is told so it answers as though it had
-# inspected the code, and reports files it was never shown as "absent". On
+# DeepSeek reaches this wrapper over an API. A review gives it read-only
+# list_dir/read_file/grep tools over the exact review snapshot and nothing else.
+# Unless the boundary is stated it answers as though it had inspected code it
+# never opened, and reports files it was never shown as "absent". On
 # 2026-08-24 a --review run against issue #62 declared the CI workflow and both
 # test runners missing; all of them exist. A verdict is bound to an exact commit
 # in durable metadata, so that fabrication reads as an exact-source finding.
 # This contract is the fix: state the evidence boundary, and require BLOCKED
 # rather than a guess. A reply resends the whole conversation, so the boundary is
 # worded around the conversation rather than one message.
-REVIEW_INSTRUCTION='Evidence boundary - read this before answering. You are
-being consulted through a text-only API. You have NO access to this repository,
-its files, its commit history, the network, or any tool. The ONLY evidence
-available to you is this conversation: the text of this message, any earlier
-turns in it, and any files quoted in them.
+REVIEW_INSTRUCTION='Evidence boundary - read this before answering. You have
+read-only access to a snapshot of the reviewed repository at the commit under
+review, through the list_dir, read_file, and grep tools, and nothing else: no
+commit history, no network, and no way to run commands or tests. Your evidence
+is this conversation (this message, any earlier turns, any files quoted in
+them) plus what those tools return.
 
 Therefore: do not state that any file, test, workflow, directory, commit, or
 setting exists, is missing, or has particular contents unless it is quoted in
-this conversation. Absence from this conversation is NOT evidence of absence
-from the repository.
+this conversation or you opened it with a tool; cite path:line.
+Absence from this conversation is NOT evidence of absence from the repository;
+check with the tools.
 If a conclusion would need evidence you were not given, name the missing
 evidence and return BLOCKED instead of inferring it.
 
@@ -992,6 +1002,7 @@ case "$SUBCMD" in
     REVIEW_SOURCE_PACKET="$(jq -r .source_packet "$PENDING_DIR/intent.json")"; REVIEW_SOURCE_SAVED="$REVIEW_SOURCE_PACKET"
     REVIEW_SOURCE_HASH="$(jq -r .packet_sha256 "$PENDING_DIR/intent.json")"
     REVIEW_SOURCE_WORKSPACE="$(jq -r .source_workspace "$PENDING_DIR/intent.json")"; REVIEW_SOURCE_TAG="$(jq -r .source_tag "$PENDING_DIR/intent.json")"
+    REPO_TOOLS_USED="$(jq -r 'if .repository_access == true then 1 else 0 end' "$PENDING_DIR/intent.json")"
     REVIEW_FILES=(); while IFS= read -r -d '' file; do REVIEW_FILES+=("$file"); done < "$PENDING_DIR/files.nul"
     DEEPSEEK_RECOVERY_EVENT_RUN_ID="$(jq -r .event_run_id "$PENDING_DIR/intent.json")"
     STALE=0

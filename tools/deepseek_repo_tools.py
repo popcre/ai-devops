@@ -16,7 +16,8 @@ response, runs the requested tools and writes the next request (step).
 Guards: relative paths only, no '..' escape, no symlink or reparse point
 anywhere on the path, no .git/.ai/node_modules internals, secret-looking files
 refused, per-file size cap, binary refusal, output truncation, and a bounded
-tool-call, round, and wall budget.
+tool-call, round, per-grep time, and wall budget. The wrapper also runs each
+step under a hard timeout, which bounds a pathological regular expression.
 """
 import fnmatch
 import json
@@ -24,10 +25,13 @@ import os
 import re
 import stat
 import sys
+import time
 
 MAX_TOOL_CALLS = int(os.environ.get("DEEPSEEK_TOOLS_MAX_CALLS", "40"))
 MAX_ROUNDS = int(os.environ.get("DEEPSEEK_TOOLS_MAX_ROUNDS", "16"))
-MAX_FILE_BYTES = 256 * 1024
+MAX_FILE_BYTES = 256 * 1024          # whole-file read without a range
+MAX_SCAN_BYTES = 16 * 1024 * 1024    # ranged read or grep of one file
+GREP_SECONDS = float(os.environ.get("DEEPSEEK_TOOLS_GREP_SECONDS", "30"))
 MAX_OUTPUT_CHARS = 60000
 MAX_GREP_MATCHES = 200
 MAX_LIST_ENTRIES = 500
@@ -63,8 +67,18 @@ class Refused(Exception):
     pass
 
 
+def norm(name):
+    # Windows resolves names case-insensitively and ignores trailing dots and
+    # spaces, so '.GIT' and '.git.' must be treated exactly like '.git'.
+    return name.rstrip(" .").lower()
+
+
+def is_denied(name):
+    return norm(name) in DENY_DIRS
+
+
 def is_secret(name):
-    low = name.lower()
+    low = norm(name)
     return any(fnmatch.fnmatch(low, g) for g in SECRET_GLOBS)
 
 
@@ -85,7 +99,9 @@ def resolve(root, rel):
         raise Refused("'..' is not allowed")
     cur = root
     for p in parts:
-        if p in DENY_DIRS:
+        if ":" in p or norm(p) == "":
+            raise Refused("path component is not allowed")
+        if is_denied(p):
             raise Refused(f"'{p}' is not readable")
         cur = os.path.join(cur, p)
         try:
@@ -98,22 +114,34 @@ def resolve(root, rel):
     real = os.path.realpath(cur)
     if real != real_root and not real.startswith(real_root.rstrip(os.sep) + os.sep):
         raise Refused("path escapes the repository root")
-    if parts and is_secret(parts[-1]):
+    # Check the resolved spelling too (real case, long names), not only the
+    # spelling the model sent.
+    real_parts = [] if real == real_root else os.path.relpath(real, real_root).replace(os.sep, "/").split("/")
+    if any(is_denied(p) for p in real_parts):
+        raise Refused("path is not readable")
+    if (parts and is_secret(parts[-1])) or (real_parts and is_secret(real_parts[-1])):
         raise Refused("secret-looking files are not readable")
     return cur, "/".join(parts) or "."
 
 
-def read_text(path):
+def text_lines(path):
+    """Return (line iterator, size) for a regular text file of at most MAX_SCAN_BYTES."""
     st = os.lstat(path)
     if not stat.S_ISREG(st.st_mode) or is_link(st):
         raise Refused("not a regular file")
-    if st.st_size > MAX_FILE_BYTES:
-        raise Refused(f"file is larger than {MAX_FILE_BYTES} bytes; use grep or a line range")
-    with open(path, "rb") as fh:
-        data = fh.read(MAX_FILE_BYTES + 1)
-    if b"\0" in data[:8192]:
+    if st.st_size > MAX_SCAN_BYTES:
+        raise Refused(f"file is larger than {MAX_SCAN_BYTES} bytes")
+    fh = open(path, "rb")
+    if b"\0" in fh.read(8192):
+        fh.close()
         raise Refused("binary file")
-    return data.decode("utf-8", errors="replace")
+    fh.seek(0)
+
+    def gen():
+        with fh:
+            for raw in fh:
+                yield raw.decode("utf-8", errors="replace").rstrip("\r\n")
+    return gen(), st.st_size
 
 
 def tool_list_dir(root, args):
@@ -122,7 +150,7 @@ def tool_list_dir(root, args):
         raise Refused("not a directory")
     out = []
     for e in sorted(os.scandir(path), key=lambda e: e.name):
-        if e.name in DENY_DIRS:
+        if is_denied(e.name):
             continue
         if is_link(e.stat(follow_symlinks=False)):
             out.append(e.name + "@ (link, not followed)")
@@ -138,14 +166,21 @@ def tool_list_dir(root, args):
 
 def tool_read_file(root, args):
     path, rel = resolve(root, args.get("path"))
-    lines = read_text(path).splitlines()
     try:
         start = max(1, int(args.get("start_line") or 1))
-        end = min(len(lines), int(args.get("end_line") or len(lines)))
+        end = int(args["end_line"]) if args.get("end_line") else None
     except (TypeError, ValueError):
         raise Refused("start_line and end_line must be integers")
-    body = "\n".join(f"{i}: {lines[i - 1]}" for i in range(start, end + 1))
-    return f"{rel} (lines {start}-{end} of {len(lines)})\n{body}"
+    lines, size = text_lines(path)
+    if end is None and start == 1 and size > MAX_FILE_BYTES:
+        raise Refused(f"file is larger than {MAX_FILE_BYTES} bytes; pass start_line and end_line, or use grep")
+    body, total, chars = [], 0, 0
+    for total, line in enumerate(lines, 1):
+        if total >= start and (end is None or total <= end) and chars <= MAX_OUTPUT_CHARS:
+            body.append(f"{total}: {line}")
+            chars += len(line) + 8
+    shown_end = total if end is None else min(total, end)
+    return f"{rel} (lines {start}-{shown_end} of {total})\n" + "\n".join(body)
 
 
 def tool_grep(root, args):
@@ -155,14 +190,17 @@ def tool_grep(root, args):
         raise Refused(f"invalid regular expression: {exc}")
     base, _ = resolve(root, args.get("path", "."))
     matches = []
+    deadline = time.monotonic() + GREP_SECONDS
 
     def scan(fp):
         try:
-            text = read_text(fp)
+            lines, _ = text_lines(fp)
         except (Refused, OSError):
             return
         relp = os.path.relpath(fp, root).replace(os.sep, "/")
-        for n, line in enumerate(text.splitlines(), 1):
+        for n, line in enumerate(lines, 1):
+            if n % 1000 == 0 and time.monotonic() > deadline:
+                return
             if rx.search(line):
                 matches.append(f"{relp}:{n}:{line[:300]}")
                 if len(matches) >= MAX_GREP_MATCHES:
@@ -173,16 +211,19 @@ def tool_grep(root, args):
     else:
         for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
             dirnames[:] = sorted(d for d in dirnames
-                                 if d not in DENY_DIRS and not is_link(os.lstat(os.path.join(dirpath, d))))
+                                 if not is_denied(d) and not is_link(os.lstat(os.path.join(dirpath, d))))
             for f in sorted(filenames):
                 fp = os.path.join(dirpath, f)
                 if is_secret(f) or is_link(os.lstat(fp)):
                     continue
                 scan(fp)
-                if len(matches) >= MAX_GREP_MATCHES:
+                if len(matches) >= MAX_GREP_MATCHES or time.monotonic() > deadline:
                     break
             if len(matches) >= MAX_GREP_MATCHES:
                 matches.append("... match limit reached")
+                break
+            if time.monotonic() > deadline:
+                matches.append(f"... search stopped after {GREP_SECONDS:g}s; narrow the path")
                 break
     return "\n".join(matches) if matches else "no matches"
 
