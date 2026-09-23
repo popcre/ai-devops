@@ -1311,6 +1311,18 @@ export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE
 APPROVE_REPORT="$(tail -1 "$POOLTMP/out-approve" 2>/dev/null)"
 check "pool_adapter_approves_a_bound_verdict" "[ '$RC_APPROVE' -eq 0 ] && [ -f '$APPROVE_REPORT' ] && grep -q APPROVE '$APPROVE_REPORT'"
 check "pool_adapter_writes_the_report" "ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '^grok-security-review-'"
+# The adapter's generated name must fit every registered runner, including
+# Muse's 40-character limit and Gemini's caller-qualified 64-character tag.
+# Keep the provider names distinct while the full run ID stays in the report.
+export AI_POOL_RUNNER_MUSE="$POOLTMP/runner" AI_POOL_RUNNER_GEMINI="$POOLTMP/runner"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" muse final-check ) > "$POOLTMP/out-muse" 2>&1; RC_MUSE=$?
+MUSE_TAG="$(grep '^new ' "$POOLTMP/runner-args" | tail -1 | awk '{print $2}')"
+check "pool_muse_session_name_fits_native_limit" "[ '$RC_MUSE' -eq 0 ] && [ -n '$MUSE_TAG' ] && [ '${#MUSE_TAG}' -le 40 ] && [[ '$MUSE_TAG' == pool-muse-* ]]"
+MUSE_REPORT="$(tail -1 "$POOLTMP/out-muse")"
+check "pool_muse_report_retains_full_run_identity" "[ -f '$MUSE_REPORT' ] && grep -Fq '| run |' '$MUSE_REPORT' && grep -Eq '20[0-9]{6}T[0-9]{6}-[0-9]+-[0-9]+' '$MUSE_REPORT'"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" gemini final-check ) > "$POOLTMP/out-gemini" 2>&1; RC_GEMINI=$?
+GEMINI_TAG="$(grep '^new ' "$POOLTMP/runner-args" | tail -1 | awk '{print $2}')"
+check "pool_gemini_session_name_fits_derived_sandbox_limit" "[ '$RC_GEMINI' -eq 0 ] && [ -n '$GEMINI_TAG' ] && [ $(( 7 + 12 + 1 + 10 + 1 + ${#GEMINI_TAG} )) -le 64 ] && [[ '$GEMINI_TAG' == pool-gemini-* ]]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=nounbound bash "$POOL" grok security-review ) > "$POOLTMP/out-nb" 2>&1; RC_NB=$?
 check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
