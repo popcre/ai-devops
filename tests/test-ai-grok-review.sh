@@ -645,7 +645,7 @@ wait $BGPID 2>/dev/null
 # 7/8 -----------------------------------------------------------------------
 terminal_reason_cases(){
   local reason expected output status
-  source <(sed -n '/^terminal_reason() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  source <(sed -n '/^grok_isolated_home() {/,/^}/p; /^terminal_reason() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
   note(){ printf '%s\n' "$*" >&2; }
   for reason in cancelled max_turns max_turns_reached max-turns-exhausted PRIVATE_UNKNOWN_STOP; do
     case "$reason" in cancelled) expected=provider_cancelled;; max*) expected=turn_limit_cancelled;; *) expected=unknown_terminal_reason;; esac
@@ -691,7 +691,7 @@ terminal_reason_cases(){
 
 native_terminal_reason_cases(){
   local STATE_DIR="$TMP/native-terminal-state" fixture="$TMP/native-result.json" stream category output
-  source <(sed -n '/^terminal_reason() {/,/^}/p; /^capture_terminal_evidence() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  source <(sed -n '/^grok_isolated_home() {/,/^}/p; /^terminal_reason() {/,/^}/p; /^capture_terminal_evidence() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
   note(){ printf '%s\n' "$*" >&2; }
   stream="$STATE_DIR/isolated-home/sessions/encoded-cwd/native-session/updates.jsonl"
   mkdir -p "$(dirname "$stream")"
