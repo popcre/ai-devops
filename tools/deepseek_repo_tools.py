@@ -233,22 +233,32 @@ def tool_grep(root, args):
     matches = []
     deadline = time.monotonic() + GREP_SECONDS
 
+    skipped = []  # files the search could not cover, always reported
+    state = {"limit": False, "stopped": False}
+
     def scan(fp):
         relp = os.path.relpath(fp, root).replace(os.sep, "/")
         try:
             lines, _ = text_lines(root, relp)
-        except (Refused, OSError):
+        except Refused as exc:
+            skipped.append(f"{relp} ({exc})")
+            return
+        except OSError as exc:
+            skipped.append(f"{relp} ({exc.strerror or 'unreadable'})")
             return
         found = []
         try:
             for n, line in enumerate(lines, 1):
                 if n % 1000 == 0 and time.monotonic() > deadline:
+                    state["stopped"] = True
                     break
                 if rx.search(line):
                     found.append(f"{relp}:{n}:{line[:300]}")
                     if len(matches) + len(found) >= MAX_GREP_MATCHES:
+                        state["limit"] = True
                         break
-        except (Refused, OSError):
+        except (Refused, OSError) as exc:
+            skipped.append(f"{relp} ({getattr(exc, 'strerror', None) or exc})")
             return  # binary part found mid-file: report nothing from it
         matches.extend(found)
 
@@ -263,15 +273,25 @@ def tool_grep(root, args):
                 if is_secret(f) or is_link(os.lstat(fp)):
                     continue
                 scan(fp)
-                if len(matches) >= MAX_GREP_MATCHES or time.monotonic() > deadline:
+                if state["limit"] or state["stopped"] or time.monotonic() > deadline:
                     break
-            if len(matches) >= MAX_GREP_MATCHES:
-                matches.append("... match limit reached")
+            if state["limit"]:
                 break
             if time.monotonic() > deadline:
-                matches.append(f"... search stopped after {GREP_SECONDS:g}s; narrow the path")
+                state["stopped"] = True
                 break
-    return "\n".join(matches) if matches else "no matches"
+    # Never let a partial search read as a complete one.
+    out = list(matches) or ["no matches"]
+    if state["limit"]:
+        out.append(f"... match limit ({MAX_GREP_MATCHES}) reached; results are incomplete")
+    if state["stopped"]:
+        out.append(f"... search stopped after {GREP_SECONDS:g}s; results are incomplete; narrow the path")
+    if skipped:
+        out.append(f"... {len(skipped)} file(s) not searched, so results are incomplete for them:")
+        out.extend("    " + x for x in skipped[:20])
+        if len(skipped) > 20:
+            out.append(f"    ... and {len(skipped) - 20} more")
+    return "\n".join(out)
 
 
 HANDLERS = {"list_dir": tool_list_dir, "read_file": tool_read_file, "grep": tool_grep}

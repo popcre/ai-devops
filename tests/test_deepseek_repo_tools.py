@@ -94,7 +94,11 @@ with tempfile.TemporaryDirectory() as tmp:
         fh.write(b"text needle\n" * 2000 + b"x\0y needle\n")
     check("binary content after the first 8 KB is refused",
           run(root, "read_file", {"path": "late.bin", "start_line": 1, "end_line": 3}).startswith("Error: binary"))
-    check("grep reports nothing from a late-binary file", "late.bin" not in run(root, "grep", {"pattern": "needle"}))
+    out = run(root, "grep", {"pattern": "needle"})
+    check("grep reports no lines from a late-binary file", "late.bin:" not in out)
+    check("grep names a file it could not search", "late.bin (binary file)" in out and "incomplete" in out)
+    one = run(root, "grep", {"pattern": "needle", "path": "late.bin"})
+    check("direct-file grep on an unsearchable file is not a clean 'no matches'", "not searched" in one)
     check("non-string grep pattern is a tool error", run(root, "grep", {"pattern": 5}).startswith("Error: pattern"))
     check("non-string path is a tool error", run(root, "read_file", {"path": ["a"]}).startswith("Error:"))
 
@@ -142,6 +146,8 @@ with tempfile.TemporaryDirectory() as tmp:
     saved = t.GREP_SECONDS
     t.GREP_SECONDS = 0
     check("grep stops at its time budget", "search stopped after" in run(root, "grep", {"pattern": "zzz-no-match"}))
+    check("direct-file grep reports its time stop",
+          "results are incomplete" in run(root, "grep", {"pattern": "zzz-no-match", "path": "big.txt"}))
     with open(os.path.join(root, "evil.txt"), "w") as fh:
         fh.write("a" * 40 + "!\n")
     t.GREP_SECONDS = 1
