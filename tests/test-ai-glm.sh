@@ -24,6 +24,8 @@ GLM_START_WALL=$(( GLM_START_DEADLINE * 5 / 2 ))
 [ "$GLM_START_WALL" -lt 5 ] && GLM_START_WALL=5
 
 TMP="$(mktemp -d)"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 glm_recovery_cases(){
   local fixture="$TMP/recovery"
   mkdir -p "$fixture/repo" "$fixture/state/sessions/fixture" "$fixture/packet"
