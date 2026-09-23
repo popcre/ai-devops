@@ -1,6 +1,7 @@
 ---
 name: designflow-human-qa
 description: Test DesignFlow PLM as real business roles. Use for human QA, role access, customer journeys, RFQ pricing, Item Library, Art Piece, licensing, production, samples, factory workflows, or requests to click through alsand.designflow.app.
+disable-model-invocation: true
 ---
 
 # DesignFlow Human QA
