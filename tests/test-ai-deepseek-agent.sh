@@ -304,12 +304,16 @@ HOSTILE_NL="$(printf 'two
 line.md')"
 if printf 'newline
 ' > "$TMP/repo/$HOSTILE_NL" 2>/dev/null; then
-  NL_OUT="$(DEEPSEEK_STUB_REPLY=$'x
-## Verdict
-APPROVE' run send newline-review --review --file "$HOSTILE_NL")"
+  NL_OUT="$(DEEPSEEK_STUB_REPLY='x' run send newline-review --file "$HOSTILE_NL")"
   NL_ID="$(printf '%s
 ' "$NL_OUT"|sed -n 's/^SESSION_ID: //p')"
   check "an attachment name containing a newline is recorded as one exact entry" "jq -e --arg f \"$HOSTILE_NL\" '(.attached_files|length)==1 and .attached_files==[\$f]' '$TMP/repo/.ai/deepseek-sessions/$NL_ID.meta.json'"
+  NL_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  set +e
+  run send newline-source --review --file "$HOSTILE_NL" > "$TMP/newline-refusal.out" 2>&1
+  NL_RC=$?
+  set -e
+  check "formal source review refuses a newline path before provider contact" "test '$NL_RC' -ne 0 && grep -q 'source privacy classification unavailable' '$TMP/newline-refusal.out' && test '$NL_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
   # The later source-identity review requires a line-safe complete path inventory.
   rm -f -- "$TMP/repo/$HOSTILE_NL"
 else
