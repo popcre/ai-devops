@@ -195,6 +195,8 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   retry one out of rotation, and move to the next registered reviewer within
   minutes. Reviewer policy changes land in code, config and docs together. A
   newer reviewer CLI version is accepted after one live well-formed review.
+  Reviewer wrappers never call 1Password during a review, reviewer state never
+  leaves its home drive, and reviewer paths never grow with names.
   Details: `ai-devops/docs/reviewer-rotation-rules.md`.
 - **Shared-db orchestrator sessions only:** when opening or running the sole
   orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
