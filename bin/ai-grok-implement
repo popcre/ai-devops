@@ -276,7 +276,7 @@ investigation_home_parent() { # print where the throwaway GROK_HOME may live
   parent="$(dirname "$auth_dir")/.ai-grok-implement-homes"
   [ ! -L "$parent" ] || { printf 'refusing a linked investigation home parent: %s\n' "$parent" >&2; return 1; }
   (umask 077; mkdir -p -- "$parent") || return 1
-  [ -O "$parent" ] || { echo "refusing an investigation home parent owned by another account: $parent" >&2; return 1; }
+  case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) ;; *) [ -O "$parent" ] || { echo "refusing an investigation home parent owned by another account: $parent" >&2; return 1; } ;; esac
   chmod 700 "$parent" 2>/dev/null || true
   printf '%s\n' "$parent"
 }

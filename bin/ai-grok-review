@@ -1003,7 +1003,9 @@ grok_isolated_home() { # print the isolated GROK_HOME; it must share a volume wi
     (umask 077; mkdir -p -- "$alt") || die "could not create the isolated Grok home beside the credential: $alt"
     warn "state directory is on another volume than $auth_dir; isolated Grok home is $alt (earlier Grok session history stays under $default)"
   fi
-  [ -O "$alt" ] || die "refusing an isolated Grok home owned by another account: $alt"
+  # POSIX ownership is meaningful only off Windows; there an elevated account's
+  # files belong to the Administrators group and the profile ACL governs access.
+  case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) ;; *) [ -O "$alt" ] || die "refusing an isolated Grok home owned by another account: $alt" ;; esac
   chmod 700 "$alt" 2>/dev/null || warn "could not restrict the isolated Grok home: $alt"
   printf '%s\n' "$alt"
 }
