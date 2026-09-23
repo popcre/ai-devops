@@ -524,10 +524,10 @@ find_meta_optional() {
       [ "$(jq -r '.repo_remote // ""' "$cand")" = "$remote" ] || continue
       [ -z "$found" ] || die "multiple moved-checkout records match session '$2'; refusing an ambiguous migration."
       found="$cand"
-    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -path "*/$CALLER--$2.d/metadata.json" \) 2>/dev/null)
+    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -path "*/$CALLER--$2.d/metadata.json" -o -name "$(short_name "$CALLER--$2" 96).json" -o -path "*/$(short_name "$CALLER--$2" 96).d/metadata.json" \) 2>/dev/null)
     if [ -n "$found" ]; then
       case "$found" in
-        */"$CALLER--$2.d/metadata.json") f="$found" ;; # Keep the rid: Qwen binds resume to its stable workspace path.
+        */"$CALLER--$2.d/metadata.json"|*/"$(short_name "$CALLER--$2" 96).d/metadata.json") f="$found" ;; # Keep the rid: Qwen binds resume to its stable workspace path.
         *) mkdir -p "$(dirname "$f")"; mv "$found" "$f" ;;
       esac
     fi
@@ -1657,9 +1657,9 @@ start_session() { # start_session NAME MODE
     [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_SNAPSHOT_MARKER"
     [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_SNAPSHOT_DELAY"
     resolve_review_identity "$repo"
-    workdir="$(review_boundary "$repo" "qwen-$name")"
+    workdir="$(review_boundary "$repo" "$(short_name "qwen-$name" 64)")"
     LIFECYCLE_REVIEW_DIR="$workdir"
-    prepare_review_identity "$repo" "$workdir" "qwen-$CALLER-$name"
+    prepare_review_identity "$repo" "$workdir" "$(short_name "qwen-$CALLER-$name" 64)"
     assert_governed_review_head
     if [ "$source_head_before" != "$(git -C "$repo" rev-parse HEAD)" ] || [ "$source_tree_before" != "$(tree_state "$repo")" ]; then
       die "the source repository changed while Qwen evidence was being prepared; no provider call was made. Start a new named Qwen review."
@@ -1795,7 +1795,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   workdir="$(jq -r '.review_dir // empty' "$meta")"
   if [ -z "$workdir" ]; then
     if [ -f "$repo/.git" ]; then
-      workdir="$($SANDBOX_BIN ensure "$repo" "qwen-$name")"
+      workdir="$($SANDBOX_BIN ensure "$repo" "$(short_name "qwen-$name" 64)")"
     else
       workdir="$repo"
     fi
@@ -1804,10 +1804,10 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   fi
   source_head_before="$current_head"; source_tree_before="$current_tree"
   resolve_review_identity "$repo"
-  workdir="$(refresh_review_boundary "$repo" "qwen-$name" "$workdir")"
+  workdir="$(refresh_review_boundary "$repo" "$(short_name "qwen-$name" 64)" "$workdir")"
   [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER"
   [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY"
-  prepare_review_identity "$repo" "$workdir" "qwen-$CALLER-$name"
+  prepare_review_identity "$repo" "$workdir" "$(short_name "qwen-$CALLER-$name" 64)"
   assert_governed_review_head
   [ "$source_head_before" = "$(git -C "$repo" rev-parse HEAD)" ] && [ "$source_tree_before" = "$(tree_state "$repo")" ] \
     || die "the source repository changed while rebuilding the sealed Qwen evidence; no provider call was made. Start a new named Qwen review."
@@ -1946,7 +1946,7 @@ cmd_finalize() { # local-only completion of one sealed provider turn
   jq -e --arg caller "$CALLER" --arg name "$name" --arg model "$QWEN_MODEL" '.mode=="review" and .caller==$caller and .name==$name and .model==$model' "$meta" >/dev/null || die 'recovery identity differs from the exact requested review.'
   same_path "$(jq -r .repo "$meta")" "$repo" || die 'recovery belongs to a different repository.'
   [ "$(git -C "$repo" rev-parse HEAD)" = "$(jq -r .head "$meta")" ] && [ "$(tree_state "$repo")" = "$(jq -r .working_tree_sha256 "$meta")" ] || die 'source changed; retained response cannot be finalized against different code.'
-  packet="$($PACKET_BIN path "$(jq -r .review_dir "$meta")" "qwen-$CALLER-$name")"
+  packet="$($PACKET_BIN path "$(jq -r .review_dir "$meta")" "$(short_name "qwen-$CALLER-$name" 64)")"
   [ "$(cat "$packet/MANIFEST.sha256" 2>/dev/null)" = "$(jq -r .packet_sha256 "$meta")" ] && "$PACKET_BIN" verify "$packet" >/dev/null || die 'the original sealed packet no longer verifies.'
   [ -z "$OPT_GOVERNED_VERDICT" ] || [ "$OPT_GOVERNED_VERDICT" = "$(jq -r '.governed_head // empty' "$meta")" ] || die 'finalize cannot change the original terminal verdict contract.'
   OPT_GOVERNED_VERDICT="$(jq -r '.governed_head // empty' "$meta")"
@@ -2046,7 +2046,7 @@ cmd_delete() {
     [ ! -d "$dir/recovery" ] || rmdir "$dir/recovery" || die 'unexpected recovery files were preserved.'
     rmdir "$dir" || die "implementation state directory contains unowned files and was left in place: $dir"
   else
-    release_boundary "$(repo_root)" "qwen-$1" || die "review evidence cleanup refused; session metadata preserved."
+    release_boundary "$(repo_root)" "$(short_name "qwen-$1" 64)" || die "review evidence cleanup refused; session metadata preserved."
     rm -f "$meta"
   fi
   note "deleted local session record '$1'. Human-facing review and patch files were kept."

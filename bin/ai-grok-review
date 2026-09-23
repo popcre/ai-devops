@@ -902,7 +902,7 @@ find_meta() {
       [ "$(jq -r '.repo_remote // ""' "$cand")" = "$remote" ] || continue
       [ -z "$found" ] || die "multiple moved-checkout records match session '$2'; refusing an ambiguous migration."
       found="$cand"
-    done < <(find "$STATE_DIR/sessions" -type f -name "$CALLER--$2.json" 2>/dev/null)
+    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -name "$(short_name "$CALLER--$2" 96).json" \) 2>/dev/null)
     [ -z "$found" ] || { mkdir -p "$(dirname "$f")"; mv "$found" "$f"; }
   fi
   [ -f "$f" ] || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-grok-review list"
@@ -1430,7 +1430,7 @@ preflight_review_file() { # preflight_review_file REPO NAME
 
 write_review_file() { # write_review_file REPO NAME FILE -> prints path or nothing
   local repo="$1" name="$2" f="$3" dir ts out base tmp
-  ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="${PENDING_REVIEW_BASE:-grok-${name}-${ts}.md}"; dir="$(reviews_dir "$repo" "$base")"
+  ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"; base="${PENDING_REVIEW_BASE:-grok-$(short_name "$name" 64)-${ts}.md}"; dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "refusing Grok review: exact report destination is unsafe in $repo. Add '.ai/reviews/' to .gitignore and remove any exact destination from Git tracking before retrying."
     return 1
@@ -1603,13 +1603,13 @@ cmd_new() {
 
   note "Grok review '$name' starting (model $GROK_MODEL, max-turns $turns, read-only)…"
   preflight_review_file "$repo" "$name"
-  prepare_review "$repo" "grok-$name"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
+  prepare_review "$repo" "$(short_name "grok-$name" 64)"   # sets REVIEW_DIR/BASE/HEAD/PACKET_HASH
   build_prompt_file "$pf"
   prompt_digest="$PROMPT_BODY_DIGEST"; options_digest="$(printf '%s\n%s\n%s\n%s' "$OPT_BASE" "$OPT_TESTS" "$OPT_DECISION" "$OPT_ASSERT_HEAD" | sha256sum | awk '{print $1}')"
   source_id="${REVIEW_HEAD}:$(sha256sum "$REVIEW_DIR/$PACKET_REL/patch.diff" | awk '{print $1}'):${options_digest}"
   workid="$(work_identity "$upstream" "$CALLER" new "$name" "$GROK_MODEL" "$source_id" "$prompt_digest" 1)"; rid_lock="$(work_lock_path "$workid")"
   ACTIVE_DIAG_STARTED_EPOCH="$(date +%s)"
-  if ! capacity_gate; then release_boundary "$repo" "grok-$name"; rm -f "$pf" "$out"; lock_release "$sess_lock"; return 1; fi
+  if ! capacity_gate; then release_boundary "$repo" "$(short_name "grok-$name" 64)"; rm -f "$pf" "$out"; lock_release "$sess_lock"; return 1; fi
   record_diagnostic "$repo" "$workid" "$name" preflight capacity-checked
   if ! reserve_new_session "$upstream" "$name" "$workid" "$source_id" "$prompt_digest"; then lock_release "$sess_lock"; exit 1; fi
   if ! legacy_paid_lock_guard "$upstream" "$CALLER" "$name"; then lock_release "$sess_lock"; die "an earlier Grok review using this exact session name ended without a confirmed result, so it is held for reconciliation. Grok is available; other reviews in this repository are unaffected. Use a different session name, or reconcile the held one first."; fi
@@ -1715,14 +1715,14 @@ cmd_ask() {
     # Sessions created before issue #53 used the live checkout for ordinary
     # clones and the deterministic snapshot for linked worktrees.
     if [ -f "$repo/.git" ]; then
-      boundary="$($SANDBOX_BIN ensure "$repo" "grok-$name")"
+      boundary="$($SANDBOX_BIN ensure "$repo" "$(short_name "grok-$name" 64)")"
     else
       boundary="$repo"
     fi
     write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq --arg d "$boundary" '.review_dir=$d | .boundary_migration_warned=true' "$meta")"
     warn "session '$name' predates recorded private snapshots and remains bound to its original review directory. Delete and recreate it when convenient; until then, do not move or update an ordinary checkout during a turn."
   fi
-  prepare_review "$repo" "grok-$name" "$boundary"
+  prepare_review "$repo" "$(short_name "grok-$name" 64)" "$boundary"
   # A continuation that silently moved to a different commit would let a verdict
   # about one head be recorded against another. Say so rather than proceed.
   local prev_head; prev_head="$(jq -r '.head // ""' "$meta")"
@@ -1900,7 +1900,7 @@ cmd_delete() {
     fi
   done
   meta="$(find_meta "$rid" "$name")"
-  release_boundary "$(repo_root)" "grok-$name" || die 'review evidence cleanup refused; session metadata preserved.'
+  release_boundary "$(repo_root)" "$(short_name "grok-$name" 64)" || die 'review evidence cleanup refused; session metadata preserved.'
   rm -f "$meta"
   record="$(session_record_path "$upstream" "$CALLER" "$name")"
   [ ! -d "$record" ] || rm -rf -- "$record"
