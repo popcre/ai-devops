@@ -18,6 +18,7 @@ mock_dir="$(cd "$(dirname "$mock_path")" && pwd -P)" || exit 2
 fixture_root="$(cd "$mock_dir/.." && pwd -P)" || exit 2
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 2
 repo="$(cd "$repo" && pwd -P)" || exit 2
+printf 'repo=%s fixture=%s\n' "$repo" "$fixture_root" >> "$mock_dir/classification.trace"
 case "$repo/" in
   "$fixture_root/"*)
     printf '{"identity_resolved":true,"effective_class":"code","observed_class":"code"}\n'

@@ -13,7 +13,7 @@ PASS=0; FAIL=0; SKIP=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
 ai_test_measure_spawn_baseline
 # A case the filesystem cannot host is not a passing check.
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'rc=$?; if [ "$rc" -ne 0 ]; then printf "synthetic classifier: %s\n" "$(command -v ai-task-gates 2>/dev/null || true)"; tail -n 8 "$TMP/public-identity-bin/classification.trace" 2>/dev/null || true; fi; rm -rf "$TMP"' EXIT
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
