@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""Read-only repository tool loop for ai-deepseek-agent.
+
+DeepSeek's chat API cannot open files on its own. This helper runs an
+OpenAI-compatible tool-calling loop that exposes three read-only tools
+(list_dir, read_file, grep) confined to one root directory.
+
+The wrapper owns every HTTP request (curl, key on curl's stdin); this helper
+never sees the key. It only builds the first request (init) and, after each
+response, runs the requested tools and writes the next request (step).
+  deepseek_repo_tools.py init MESSAGES_JSON MODEL REQUEST_OUT
+  deepseek_repo_tools.py step ROOT REQUEST RESPONSE LOG ROUND
+      exit 10: next request written; exit 0: RESPONSE is the final answer
+  deepseek_repo_tools.py --run-tool ROOT NAME ARGS_JSON   (offline test hook)
+
+Guards: relative paths only, no '..' escape, no symlink or reparse point
+anywhere on the path, no .git/.ai/node_modules internals, secret-looking files
+refused, per-file size cap, binary refusal, output truncation, and a bounded
+tool-call, round, and wall budget.
+"""
+import fnmatch
+import json
+import os
+import re
+import stat
+import sys
+
+MAX_TOOL_CALLS = int(os.environ.get("DEEPSEEK_TOOLS_MAX_CALLS", "40"))
+MAX_ROUNDS = int(os.environ.get("DEEPSEEK_TOOLS_MAX_ROUNDS", "16"))
+MAX_FILE_BYTES = 256 * 1024
+MAX_OUTPUT_CHARS = 60000
+MAX_GREP_MATCHES = 200
+MAX_LIST_ENTRIES = 500
+
+DENY_DIRS = {".git", "node_modules", ".ai"}
+SECRET_GLOBS = [
+    ".env", ".env.*", "*.env", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks",
+    "*.kdbx", "id_rsa*", "id_ed25519*", "id_ecdsa*", "*.ppk", ".npmrc",
+    ".pypirc", ".netrc", "_netrc", ".git-credentials", "credentials",
+    "credentials.*", "*.token", "auth.json",
+]
+
+TOOLS = [
+    {"type": "function", "function": {
+        "name": "list_dir",
+        "description": "List entries of a directory in the repository (read-only). Path is relative to the repository root; use '.' for the root.",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "read_file",
+        "description": "Read a text file from the repository (read-only). Optional 1-based start_line and end_line select a range. Output lines are prefixed with their line numbers.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}},
+            "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "grep",
+        "description": "Search repository text files for a Python regular expression. Optional path limits the search to a file or directory. Returns path:line:text matches.",
+        "parameters": {"type": "object", "properties": {
+            "pattern": {"type": "string"}, "path": {"type": "string"}}, "required": ["pattern"]}}},
+]
+
+
+class Refused(Exception):
+    pass
+
+
+def is_secret(name):
+    low = name.lower()
+    return any(fnmatch.fnmatch(low, g) for g in SECRET_GLOBS)
+
+
+def is_link(st):
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
+def resolve(root, rel):
+    if rel is None or rel == "":
+        rel = "."
+    if not isinstance(rel, str):
+        raise Refused("path must be a string")
+    rel = rel.replace("\\", "/")
+    if rel.startswith("/") or re.match(r"^[A-Za-z]:", rel) or "\0" in rel:
+        raise Refused("absolute paths are not allowed; use a path relative to the repository root")
+    parts = [p for p in rel.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        raise Refused("'..' is not allowed")
+    cur = root
+    for p in parts:
+        if p in DENY_DIRS:
+            raise Refused(f"'{p}' is not readable")
+        cur = os.path.join(cur, p)
+        try:
+            st = os.lstat(cur)
+        except OSError:
+            raise Refused("path does not exist")
+        if is_link(st):
+            raise Refused("symbolic links and reparse points are not followed")
+    real_root = os.path.realpath(root)
+    real = os.path.realpath(cur)
+    if real != real_root and not real.startswith(real_root.rstrip(os.sep) + os.sep):
+        raise Refused("path escapes the repository root")
+    if parts and is_secret(parts[-1]):
+        raise Refused("secret-looking files are not readable")
+    return cur, "/".join(parts) or "."
+
+
+def read_text(path):
+    st = os.lstat(path)
+    if not stat.S_ISREG(st.st_mode) or is_link(st):
+        raise Refused("not a regular file")
+    if st.st_size > MAX_FILE_BYTES:
+        raise Refused(f"file is larger than {MAX_FILE_BYTES} bytes; use grep or a line range")
+    with open(path, "rb") as fh:
+        data = fh.read(MAX_FILE_BYTES + 1)
+    if b"\0" in data[:8192]:
+        raise Refused("binary file")
+    return data.decode("utf-8", errors="replace")
+
+
+def tool_list_dir(root, args):
+    path, rel = resolve(root, args.get("path", "."))
+    if not stat.S_ISDIR(os.lstat(path).st_mode):
+        raise Refused("not a directory")
+    out = []
+    for e in sorted(os.scandir(path), key=lambda e: e.name):
+        if e.name in DENY_DIRS:
+            continue
+        if is_link(e.stat(follow_symlinks=False)):
+            out.append(e.name + "@ (link, not followed)")
+        elif e.is_dir(follow_symlinks=False):
+            out.append(e.name + "/")
+        else:
+            out.append(e.name + (" (secret, unreadable)" if is_secret(e.name) else ""))
+        if len(out) >= MAX_LIST_ENTRIES:
+            out.append("... truncated")
+            break
+    return f"{rel}:\n" + "\n".join(out)
+
+
+def tool_read_file(root, args):
+    path, rel = resolve(root, args.get("path"))
+    lines = read_text(path).splitlines()
+    try:
+        start = max(1, int(args.get("start_line") or 1))
+        end = min(len(lines), int(args.get("end_line") or len(lines)))
+    except (TypeError, ValueError):
+        raise Refused("start_line and end_line must be integers")
+    body = "\n".join(f"{i}: {lines[i - 1]}" for i in range(start, end + 1))
+    return f"{rel} (lines {start}-{end} of {len(lines)})\n{body}"
+
+
+def tool_grep(root, args):
+    try:
+        rx = re.compile(args.get("pattern") or "")
+    except re.error as exc:
+        raise Refused(f"invalid regular expression: {exc}")
+    base, _ = resolve(root, args.get("path", "."))
+    matches = []
+
+    def scan(fp):
+        try:
+            text = read_text(fp)
+        except (Refused, OSError):
+            return
+        relp = os.path.relpath(fp, root).replace(os.sep, "/")
+        for n, line in enumerate(text.splitlines(), 1):
+            if rx.search(line):
+                matches.append(f"{relp}:{n}:{line[:300]}")
+                if len(matches) >= MAX_GREP_MATCHES:
+                    return
+
+    if stat.S_ISREG(os.lstat(base).st_mode):
+        scan(base)
+    else:
+        for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+            dirnames[:] = sorted(d for d in dirnames
+                                 if d not in DENY_DIRS and not is_link(os.lstat(os.path.join(dirpath, d))))
+            for f in sorted(filenames):
+                fp = os.path.join(dirpath, f)
+                if is_secret(f) or is_link(os.lstat(fp)):
+                    continue
+                scan(fp)
+                if len(matches) >= MAX_GREP_MATCHES:
+                    break
+            if len(matches) >= MAX_GREP_MATCHES:
+                matches.append("... match limit reached")
+                break
+    return "\n".join(matches) if matches else "no matches"
+
+
+HANDLERS = {"list_dir": tool_list_dir, "read_file": tool_read_file, "grep": tool_grep}
+
+
+def run_tool(root, name, raw_args):
+    try:
+        args = json.loads(raw_args or "{}")
+        if not isinstance(args, dict):
+            raise ValueError
+    except ValueError:
+        return "Error: tool arguments must be a JSON object"
+    handler = HANDLERS.get(name)
+    if handler is None:
+        return f"Error: unknown tool {name}"
+    try:
+        out = handler(os.path.abspath(root), args)
+    except Refused as exc:
+        return f"Error: {exc}"
+    except OSError as exc:
+        return f"Error: {exc.strerror or 'unreadable'}"
+    if len(out) > MAX_OUTPUT_CHARS:
+        out = out[:MAX_OUTPUT_CHARS] + "\n... output truncated"
+    return out
+
+
+NOTICE = ("You have read-only access to the repository through the list_dir, read_file, and grep tools. "
+          "Paths are relative to the repository root. Open the files you need to verify claims before "
+          "concluding and cite path:line for evidence. Your tool budget is {n} calls.")
+
+
+def cmd_init(msgs_file, model, req_file):
+    with open(msgs_file, encoding="utf-8") as fh:
+        messages = json.load(fh)
+    notice = NOTICE.format(n=MAX_TOOL_CALLS)
+    if messages and messages[0].get("role") == "system":
+        messages = [{"role": "system", "content": messages[0]["content"] + "\n\n" + notice}] + messages[1:]
+    else:
+        messages = [{"role": "system", "content": notice}] + messages
+    body = {"model": model, "messages": messages, "stream": False, "tools": TOOLS}
+    with open(req_file, "w", encoding="utf-8") as fh:
+        json.dump(body, fh)
+    return 0
+
+
+def cmd_step(root, req_file, resp_file, log_file, rnd):
+    """Exit 10 with the next request written to req_file when the model asked
+    for tools; exit 0 when resp_file holds the final answer."""
+    rnd = int(rnd)
+    with open(req_file, encoding="utf-8") as fh:
+        body = json.load(fh)
+    try:
+        with open(resp_file, encoding="utf-8") as fh:
+            msg = json.load(fh)["choices"][0]["message"]
+    except (ValueError, KeyError, IndexError, TypeError, OSError):
+        return 0
+    tcs = msg.get("tool_calls") or []
+    if not tcs or "tools" not in body:
+        return 0
+    calls = 0
+    if os.path.exists(log_file):
+        with open(log_file, encoding="utf-8") as fh:
+            calls = sum(1 for line in fh if '"counted": true' in line)
+    messages = body["messages"]
+    messages.append({k: v for k, v in msg.items() if k in ("role", "content", "tool_calls", "reasoning_content")})
+    with open(log_file, "a", encoding="utf-8") as log:
+        for tc in tcs:
+            fn = tc.get("function") or {}
+            counted = calls < MAX_TOOL_CALLS
+            if counted:
+                calls += 1
+                result = run_tool(root, fn.get("name"), fn.get("arguments"))
+            else:
+                result = "Error: tool budget exhausted; answer from what you have"
+            log.write(json.dumps({"round": rnd, "tool": fn.get("name"), "arguments": fn.get("arguments"),
+                                  "result_chars": len(result), "refused": result.startswith("Error:"),
+                                  "counted": counted}) + "\n")
+            messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": result})
+    if calls >= MAX_TOOL_CALLS or rnd + 1 >= MAX_ROUNDS:
+        # Last round: no tools offered, so the model must answer.
+        body.pop("tools", None)
+        messages.append({"role": "user", "content": "Tool budget exhausted. Give your final answer now."})
+    with open(req_file + ".next", "w", encoding="utf-8") as fh:
+        json.dump(body, fh)
+    os.replace(req_file + ".next", req_file)
+    return 10
+
+
+def main():
+    a = sys.argv[1:]
+    if len(a) == 4 and a[0] == "--run-tool":
+        print(run_tool(a[1], a[2], a[3]))
+        return 0
+    if len(a) == 4 and a[0] == "init":
+        return cmd_init(a[1], a[2], a[3])
+    if len(a) == 6 and a[0] == "step":
+        return cmd_step(*a[1:])
+    print("usage: deepseek_repo_tools.py init MSGS MODEL REQ | step ROOT REQ RESP LOG ROUND | --run-tool ROOT NAME ARGS",
+          file=sys.stderr)
+    return 3
+
+
+if __name__ == "__main__":
+    sys.exit(main())

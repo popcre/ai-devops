@@ -40,6 +40,9 @@ out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -d) [ -z "
   sleep "$DEEPSEEK_STUB_DELAY"
 }
 if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"private-provider-error-body"}' > "$out"; printf 500
+elif [ -n "${DEEPSEEK_STUB_TOOLCALL:-}" ] && { [ "${DEEPSEEK_STUB_TOOLCALL_ALWAYS:-0}" = 1 ] || [ ! -e "$DEEPSEEK_STUB_TOOLCALL_MARK" ]; }; then
+  : > "$DEEPSEEK_STUB_TOOLCALL_MARK"
+  python -c 'import json,os,sys; json.dump({"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":os.environ["DEEPSEEK_STUB_TOOLCALL"]}}]}}]},open(sys.argv[1],"w"))' "$out"; printf 200
 elif [ "${DEEPSEEK_STUB_INVALID:-0}" = 1 ]; then printf '{"choices":[{"message":{"content":null}}]}' > "$out"; printf 200
 else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
@@ -269,7 +272,7 @@ check "a review tells the model it has no repository access"   "grep -q 'You hav
 check "a review forbids asserting presence or absence of unquoted evidence"   "grep -q 'Absence from this conversation is NOT evidence of absence' '$BOUND_MSG' && grep -q 'return BLOCKED instead of inferring it' '$BOUND_MSG'"
 check "a review still demands the terminal verdict heading"   "grep -q 'literal ## Verdict heading' '$BOUND_MSG'"
 check "repeated --file attaches every evidence file, not just the last"   "grep -q 'alpha-evidence' '$BOUND_MSG' && grep -q 'beta-evidence' '$BOUND_MSG'"
-check "review metadata records the evidence scope instead of implying repository inspection"   "jq -e '.evidence_scope==\"attached-materials-only\" and .repository_access==false and (.attached_files|length)==2 and .schema_version==2' '$TMP/repo/.ai/deepseek-sessions/$BOUND_ID.meta.json'"
+check "review metadata records read-only repository tool access"   "jq -e '.evidence_scope==\"repository-read-tools\" and .repository_access==true and (.attached_files|length)==2 and .schema_version==2' '$TMP/repo/.ai/deepseek-sessions/$BOUND_ID.meta.json'"
 # A reply resends the whole conversation, so files attached on an earlier turn are
 # still in front of DeepSeek. Recording only the latest turn understated the
 # evidence behind a continued review verdict (2026-08-24 independent review).
@@ -454,5 +457,42 @@ check "source movement refuses authorization after retaining the paid response" 
 check "source movement marks only the completed turn non-authorizing" "jq -e '.status==\"source_changed\" and .verdict==null' '$SOURCE_META' && test ! -f '$TMP/repo/.ai/deepseek-sessions/$SOURCE_ID.recovery-required'"
 check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >'$TMP/continue-current-source.log' 2>&1 && jq -e '.status==\"complete\"' '$SOURCE_META'"
 [ "$FAIL" -eq 0 ] || cat "$SOURCE_MOVE_LOG" "$TMP/continue-current-source.log" 2>/dev/null || true
+
+# --- Read-only repository tools (list_dir / read_file / grep) ---
+TOOLS_PY="$ROOT/tools/deepseek_repo_tools.py"
+FX="$TMP/tools-fixture"; mkdir -p "$FX/sub" "$FX/.git"
+printf 'alpha line\nbeta needle line\n' > "$FX/sub/a.txt"
+printf 'SECRET=needle\n' > "$FX/.env"; printf 'k' > "$FX/deploy.pem"; printf 'x' > "$FX/.git/config"
+printf 'outside needle\n' > "$TMP/outside.txt"
+python -c 'import sys; open(sys.argv[1],"wb").write(b"a\0b")' "$FX/bin.dat"
+python -c 'import sys; open(sys.argv[1],"w").write("y"*300000)' "$FX/big.txt"
+tool(){ python "$TOOLS_PY" --run-tool "$FX" "$1" "$2"; }
+check "repo tools read a file with line numbers" "tool read_file '{\"path\":\"sub/a.txt\"}' | grep -qx '2: beta needle line'"
+check "repo tools honor a line range" "tool read_file '{\"path\":\"sub/a.txt\",\"start_line\":2,\"end_line\":2}' | grep -q '(lines 2-2 of 2)'"
+check "repo tools refuse parent escapes" "tool read_file '{\"path\":\"../outside.txt\"}' | grep -q \"^Error: '..' is not allowed\""
+check "repo tools refuse absolute paths" "tool read_file '{\"path\":\"$TMP/outside.txt\"}' | grep -q '^Error: absolute paths' && tool read_file '{\"path\":\"C:/Windows/win.ini\"}' | grep -q '^Error: absolute paths'"
+check "repo tools refuse .git internals" "tool read_file '{\"path\":\".git/config\"}' | grep -q '^Error:' && ! tool list_dir '{\"path\":\".\"}' | grep -q '^.git'"
+check "repo tools refuse secret-looking files" "tool read_file '{\"path\":\".env\"}' | grep -q '^Error: secret' && tool read_file '{\"path\":\"deploy.pem\"}' | grep -q '^Error: secret'"
+check "repo tools grep skips secret files and finds ordinary matches" "out=\$(tool grep '{\"pattern\":\"needle\"}') && printf '%s' \"\$out\" | grep -qx 'sub/a.txt:2:beta needle line' && ! printf '%s' \"\$out\" | grep -q 'SECRET\|outside'"
+check "repo tools refuse binary and oversized files" "tool read_file '{\"path\":\"bin.dat\"}' | grep -q '^Error: binary' && tool read_file '{\"path\":\"big.txt\"}' | grep -q '^Error: file is larger'"
+check "repo tools reject unknown tools and malformed arguments" "tool write_file '{}' | grep -q '^Error: unknown tool' && tool read_file 'not-json' | grep -q '^Error: tool arguments'"
+if ln -s "$TMP/outside.txt" "$FX/link.txt" 2>/dev/null && [ -L "$FX/link.txt" ]; then
+  check "repo tools do not follow symbolic links" "tool read_file '{\"path\":\"link.txt\"}' | grep -q '^Error: symbolic links' && ! tool grep '{\"pattern\":\"outside\"}' | grep -q outside"
+else
+  skip "repo tools do not follow symbolic links (this filesystem cannot create a real symlink)"
+fi
+check "repo-tools helper never handles the provider key" "! grep -qi 'bearer\|api_key\|stdin' '$TOOLS_PY'"
+printf 'tool-proof line 1\nquote me: deepseek-can-read\n' > "$TMP/repo/proof.txt"
+TOOL_REQ="$TMP/tool-request.json"; export DEEPSEEK_STUB_TOOLCALL_MARK="$TMP/toolcall-mark"
+CALLS_BEFORE="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+DEEPSEEK_STUB_REQUEST="$TOOL_REQ" DEEPSEEK_STUB_TOOLCALL='{"path":"proof.txt"}' DEEPSEEK_STUB_REPLY='quoted: deepseek-can-read' run send 'quote proof.txt' --repo-tools > "$TMP/tools-send.out" 2>&1
+check "--repo-tools runs a tool round and returns the final answer" "grep -q 'quoted: deepseek-can-read' '$TMP/tools-send.out' && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq \$(( CALLS_BEFORE + 2 ))"
+check "--repo-tools sends the file content back as a tool message" "jq -e '.tools and (.messages|map(select(.role==\"tool\"))|.[0].content|contains(\"2: quote me: deepseek-can-read\"))' '$TOOL_REQ'"
+rm -f "$DEEPSEEK_STUB_TOOLCALL_MARK"
+CALLS_BEFORE="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+DEEPSEEK_TOOLS_MAX_ROUNDS=2 DEEPSEEK_STUB_TOOLCALL_ALWAYS=1 DEEPSEEK_STUB_REQUEST="$TOOL_REQ" DEEPSEEK_STUB_TOOLCALL='{"path":"proof.txt"}' run send 'loop forever' --repo-tools > "$TMP/tools-budget.out" 2>&1
+check "tool loop is bounded and the last request withholds tools" "test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq \$(( CALLS_BEFORE + 3 )) && jq -e '(has(\"tools\")|not) and (.messages[-1].content|contains(\"budget exhausted\"))' '$TOOL_REQ'"
+DEEPSEEK_STUB_REQUEST="$TOOL_REQ" run send 'no tools' > /dev/null 2>&1
+check "an ordinary send offers no repository tools" "jq -e 'has(\"tools\")|not' '$TOOL_REQ'"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]
