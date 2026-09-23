@@ -109,7 +109,9 @@ caller_ok(){ name_ok "$1" && [ "${#1}" -le 40 ]; }
 caller_ok "$CALLER" || { printf 'ai-muse: error: start_failed: invalid_caller_identity.\n' >&2; exit 1; }
 repo_root(){ git -C "${1:-$PWD}" rev-parse --show-toplevel 2>/dev/null || die "not a Git repository: ${1:-$PWD}"; }
 repo_id(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
-meta_path(){ printf '%s/sessions/%s/%s.json' "$STATE" "$1" "$(short_name "$CALLER--$2" 96)"; }
+# A session saved before names were bounded keeps its full-name file; find it first.
+state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 96)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
+meta_path(){ state_leaf "$STATE/sessions/$1" "$CALLER--$2" .json; }
 tag(){ short_name "muse-$CALLER-$1" 64; }
 LOCK=""; LOCK_TOKEN=""; CRED_LOCK=""; CRED_TOKEN=""; TURN_PID=""; ACTIVE_META=""; PUBLISH_TMP=""; PUBLISH_FD=""; PUBLISH_ID=""; PUBLISH_FD_ID=""; PUBLISH_DIR_PHYSICAL=""; PUBLISH_ROOT=""; PUBLISH_BASENAME=""
 release_lock(){ [ -z "$LOCK" ] && return 0; [ "$(cat "$LOCK/token" 2>/dev/null || true)" != "$LOCK_TOKEN" ] || rm -rf "$LOCK"; LOCK=""; LOCK_TOKEN=""; }

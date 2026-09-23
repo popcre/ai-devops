@@ -42,6 +42,8 @@ VERSION=0.2.3
 QUALIFICATION_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
 CALLER="${AI_GEMINI_CALLER:-codex}"
+case "$CALLER" in ''|.*|*[!A-Za-z0-9._-]*) printf 'ai-gemini: error: caller name %s is not path-safe (letters, digits, . _ - only; no leading dot).
+' "${CALLER:-<empty>}" >&2; exit 2;; esac
 MODEL="${AI_GEMINI_MODEL:-gemini-3.8-flash-high}"
 GOVERNED_HEAD=''
 TIMEOUT="${AI_GEMINI_PRINT_TIMEOUT:-10m}"
@@ -97,7 +99,9 @@ tag_ok(){ [ "${#1}" -le 64 ]; }
 sandbox_tag(){ short_name "gemini-$1-$CALLER-$2" 64; }
 root(){ git rev-parse --show-toplevel 2>/dev/null || die 'run inside a Git repository'; }
 rid(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
-meta(){ printf '%s/sessions/%s/%s.json' "$STATE_DIR" "$1" "$(short_name "$CALLER--$2" 96)"; }
+# A session saved before names were bounded keeps its full-name file; find it first.
+state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 96)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
+meta(){ state_leaf "$STATE_DIR/sessions/$1" "$CALLER--$2" .json; }
 lock_path(){ printf '%s/locks/%s' "$STATE_DIR" "$(short_name "$1" 96)"; }
 raw_agy(){ local a; for a in "${AI_GEMINI_BIN:-}" "$(command -v agy 2>/dev/null || true)" "$HOME/.local/bin/agy" "${LOCALAPPDATA:-}/agy/bin/agy.exe"; do [ -n "$a" ] && [ -x "$a" ] && { printf %s "$a"; return; }; done; die 'local_dependency_unavailable: the LOCAL agy runtime is not installed. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 agy(){ local a; a="$(raw_agy)"; if [ "$QUALIFYING" -eq 0 ]; then runtime_qualified "$a" || die 'Gemini qualification no longer matches the exact wrapper, runtime, or model; quarantine restored'; fi; printf %s "$a"; }

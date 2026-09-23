@@ -329,6 +329,17 @@ check 'long worktree path: worktree path is over 200 characters' "test ${#LP_REP
 check 'long worktree path, name and caller still review' "test '$LP_RC' -eq 0"
 check 'every derived state, sandbox and report name stays bounded' "test -z \"\$(find '$TMP/state' '$TMP/lp-sbx' '$LP_REPO/.ai' -mindepth 1 2>/dev/null | awk -F/ 'length(\$NF)>110')\""
 check 'metadata keeps the full name, completes, and bounds the tag' "test -n '$LP_META' && jq -e '.status==\"COMPLETE\" and (.sandbox_tag|length<=64)' '$LP_META' >/dev/null"
+# A session saved before names were bounded keeps its full-name file and must
+# still be found (no duplicate paid session, no lost history).
+LG_NAME="$(printf %.0sg $(seq 1 100))"
+set +e; (cd "$LONGREPO" && MOCK_MODE=normal "$SCRIPT" new "$LG_NAME" --prompt review) >/dev/null 2>&1; set -e
+LG_META="$(grep -rl "\"name\":\"$LG_NAME\"" "$TMP/state/sessions" 2>/dev/null | head -1)"
+LG_LEGACY="$(dirname "$LG_META")/test--$LG_NAME.json"; mv "$LG_META" "$LG_LEGACY"
+set +e; (cd "$LONGREPO" && MOCK_MODE=normal "$SCRIPT" ask "$LG_NAME" --prompt later) > "$TMP/lg.out" 2>&1; LG_RC=$?; set -e
+[ "$LG_RC" -eq 0 ] || sed -n '1,20p' "$TMP/lg.out" >&2
+check 'a legacy full-name session is still found and continued' "test '$LG_RC' -eq 0 && test -f '$LG_LEGACY' && test ! -e '$LG_META'"
+LP_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'a caller name that could leave its directory is refused before provider contact' "! (cd '$LP_REPO' && AI_GEMINI_CALLER='../escape' '$SCRIPT' new unsafe-caller --prompt x) >/dev/null 2>&1 && test '$LP_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\" && test ! -e '$TMP/state/sessions/escape--unsafe-caller.json'"
 
 # 2026-09-18: live qualification recorded the caller's checkout as the invoked
 # repository while it reviewed its private fixture, so sandbox evidence binding
