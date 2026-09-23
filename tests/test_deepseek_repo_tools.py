@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HELPER = os.path.join(HERE, "..", "tools", "deepseek_repo_tools.py")
@@ -129,12 +130,36 @@ with tempfile.TemporaryDirectory() as tmp:
         brc = subprocess.run([sys.executable, HELPER, "step", root, breq, bresp, blog, "0"],
                              capture_output=True).returncode
         check(f"malformed tool call handled: {json.dumps(bad)[:40]}", brc == 10)
+        sent = json.load(open(breq))["messages"]
+        asst = [m for m in sent if m.get("role") == "assistant"][-1]
+        good = all(isinstance(c.get("id"), str) and c["id"] and isinstance(c["function"]["name"], str)
+                   and isinstance(c["function"]["arguments"], str) for c in asst["tool_calls"])
+        replies = [m["tool_call_id"] for m in sent if m.get("role") == "tool"]
+        check(f"forwarded tool calls are well-formed: {json.dumps(bad)[:40]}",
+              good and replies == [c["id"] for c in asst["tool_calls"]])
 
     # Grep time budget stops a long search instead of running unbounded.
     saved = t.GREP_SECONDS
     t.GREP_SECONDS = 0
     check("grep stops at its time budget", "search stopped after" in run(root, "grep", {"pattern": "zzz-no-match"}))
+    with open(os.path.join(root, "evil.txt"), "w") as fh:
+        fh.write("a" * 40 + "!\n")
+    t.GREP_SECONDS = 1
+    began = time.monotonic()
+    out = run(root, "grep", {"pattern": r"^(a+)+$", "path": "evil.txt"})
+    check("catastrophic regular expression stops at the grep budget",
+          out.startswith("Error: search stopped") and time.monotonic() - began < 20)
     t.GREP_SECONDS = saved
+
+    # A handle that is not the checked file (swapped between check and open) is refused.
+    def swapping_open(path, *a, **k):
+        return open(os.path.join(tmp, "outside.txt"), *a, **k)
+    t.open = swapping_open
+    try:
+        check("handle that is not the checked file is refused",
+              run(root, "read_file", {"path": "sub/a.txt"}).startswith("Error: file changed"))
+    finally:
+        del t.open
 
     # Symbolic links are never followed (skipped where the OS cannot make one).
     link = os.path.join(root, "link.txt")

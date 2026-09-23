@@ -26,6 +26,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import time
 
@@ -130,14 +131,37 @@ def resolve(root, rel):
     return cur, "/".join(parts) or "."
 
 
-def text_lines(path):
-    """Return (line iterator, size) for a regular text file of at most MAX_SCAN_BYTES."""
-    st = os.lstat(path)
-    if not stat.S_ISREG(st.st_mode) or is_link(st):
+def same_file(a, b):
+    return (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino) and a.st_ino != 0
+
+
+def open_checked(root, rel):
+    """Open rel under root race-safely. The path is checked, opened, and then
+    checked again; the open handle must be the very file both checks saw, so a
+    symlink or reparse point swapped in between cannot redirect the read."""
+    path, _ = resolve(root, rel)
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode) or is_link(before):
         raise Refused("not a regular file")
-    if st.st_size > MAX_SCAN_BYTES:
-        raise Refused(f"file is larger than {MAX_SCAN_BYTES} bytes")
     fh = open(path, "rb")
+    try:
+        opened = os.fstat(fh.fileno())
+        again, _ = resolve(root, rel)
+        after = os.lstat(again)
+        if not (same_file(before, opened) and same_file(opened, after)):
+            raise Refused("file changed while it was being opened")
+    except BaseException:
+        fh.close()
+        raise
+    return fh, opened
+
+
+def text_lines(root, rel):
+    """Return (line iterator, size) for a regular text file of at most MAX_SCAN_BYTES."""
+    fh, st = open_checked(root, rel)
+    if st.st_size > MAX_SCAN_BYTES:
+        fh.close()
+        raise Refused(f"file is larger than {MAX_SCAN_BYTES} bytes")
     # Scan the whole file (bounded by MAX_SCAN_BYTES), not only its head.
     for chunk in iter(lambda: fh.read(1 << 20), b""):
         if b"\0" in chunk:
@@ -156,10 +180,15 @@ def text_lines(path):
 
 def tool_list_dir(root, args):
     path, rel = resolve(root, args.get("path", "."))
-    if not stat.S_ISDIR(os.lstat(path).st_mode):
+    before = os.lstat(path)
+    if not stat.S_ISDIR(before.st_mode):
         raise Refused("not a directory")
+    entries = sorted(os.scandir(path), key=lambda e: e.name)
+    # Only names are listed; still refuse if the directory was swapped meanwhile.
+    if not same_file(before, os.lstat(resolve(root, args.get("path", "."))[0])):
+        raise Refused("directory changed while it was being listed")
     out = []
-    for e in sorted(os.scandir(path), key=lambda e: e.name):
+    for e in entries:
         if is_denied(e.name):
             continue
         if is_link(e.stat(follow_symlinks=False)):
@@ -175,13 +204,13 @@ def tool_list_dir(root, args):
 
 
 def tool_read_file(root, args):
-    path, rel = resolve(root, args.get("path"))
+    _, rel = resolve(root, args.get("path"))
     try:
         start = max(1, int(args.get("start_line") or 1))
         end = int(args["end_line"]) if args.get("end_line") else None
     except (TypeError, ValueError):
         raise Refused("start_line and end_line must be integers")
-    lines, size = text_lines(path)
+    lines, size = text_lines(root, rel)
     if end is None and start == 1 and size > MAX_FILE_BYTES:
         raise Refused(f"file is larger than {MAX_FILE_BYTES} bytes; pass start_line and end_line, or use grep")
     body, total, chars = [], 0, 0
@@ -205,11 +234,11 @@ def tool_grep(root, args):
     deadline = time.monotonic() + GREP_SECONDS
 
     def scan(fp):
+        relp = os.path.relpath(fp, root).replace(os.sep, "/")
         try:
-            lines, _ = text_lines(fp)
+            lines, _ = text_lines(root, relp)
         except (Refused, OSError):
             return
-        relp = os.path.relpath(fp, root).replace(os.sep, "/")
         found = []
         try:
             for n, line in enumerate(lines, 1):
@@ -258,6 +287,18 @@ def run_tool(root, name, raw_args):
     handler = HANDLERS.get(name)
     if handler is None:
         return f"Error: unknown tool {name}"
+    if name == "grep" and os.environ.get("DEEPSEEK_TOOLS_IN_CHILD") != "1":
+        env = dict(os.environ, DEEPSEEK_TOOLS_IN_CHILD="1", DEEPSEEK_TOOLS_GREP_SECONDS=repr(GREP_SECONDS))
+        try:
+            done = subprocess.run([sys.executable, os.path.abspath(__file__), "--run-tool",
+                                   os.path.abspath(root), "grep", json.dumps(args)],
+                                  capture_output=True, env=env, timeout=GREP_SECONDS + 5)
+        except subprocess.TimeoutExpired:
+            return (f"Error: search stopped after {GREP_SECONDS:g}s (grep time budget); "
+                    "simplify the pattern or narrow the path")
+        if done.returncode != 0:
+            return "Error: grep failed"
+        return done.stdout.decode("utf-8", errors="replace").rstrip("\r\n")
     try:
         out = handler(os.path.abspath(root), args)
     except Refused as exc:
@@ -307,7 +348,17 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
     if not isinstance(tcs, list):
         tcs = []
     # A malformed call becomes a tool error, never a helper crash.
-    tcs = [tc if isinstance(tc, dict) else {} for tc in tcs]
+    clean = []
+    for i, tc in enumerate(tcs):
+        tc = tc if isinstance(tc, dict) else {}
+        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+        name = fn.get("name") if isinstance(fn.get("name"), str) else ""
+        arguments = fn.get("arguments")
+        if not isinstance(arguments, str):
+            arguments = "{}" if arguments is None else json.dumps(arguments)
+        cid = tc.get("id") if isinstance(tc.get("id"), str) and tc.get("id") else f"call_{rnd}_{i}"
+        clean.append({"id": cid, "type": "function", "function": {"name": name, "arguments": arguments}})
+    tcs = clean
     if not tcs or "tools" not in body:
         return 0
     calls = 0
@@ -315,12 +366,12 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
         with open(log_file, encoding="utf-8") as fh:
             calls = sum(1 for line in fh if '"counted": true' in line)
     messages = body["messages"]
-    messages.append({k: v for k, v in msg.items() if k in ("role", "content", "tool_calls", "reasoning_content")})
+    assistant = {k: v for k, v in msg.items() if k in ("content", "reasoning_content")}
+    assistant.update(role="assistant", tool_calls=tcs)
+    messages.append(assistant)
     with open(log_file, "a", encoding="utf-8") as log:
         for tc in tcs:
-            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
-            if not isinstance(fn.get("arguments"), (str, type(None))):
-                fn = dict(fn, arguments=json.dumps(fn.get("arguments")))
+            fn = tc["function"]
             counted = calls < MAX_TOOL_CALLS
             if counted:
                 calls += 1
@@ -330,7 +381,7 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
             log.write(json.dumps({"round": rnd, "tool": fn.get("name"), "arguments": fn.get("arguments"),
                                   "result_chars": len(result), "refused": result.startswith("Error:"),
                                   "counted": counted}) + "\n")
-            messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": result})
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
     if calls >= MAX_TOOL_CALLS or rnd + 1 >= MAX_ROUNDS:
         # Last round: no tools offered, so the model must answer.
         body.pop("tools", None)
