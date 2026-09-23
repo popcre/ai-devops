@@ -36,13 +36,13 @@ permissions:
 jobs:
   windows-offline-blacksmith-section:
     strategy:
-      # One failing section must not hide the other three - same reasoning as
+      # One failing section must not hide the other five - same reasoning as
       # the free lane's windows-offline-section in verify.yml.
       fail-fast: false
       matrix:
-        section: [1, 2, 3, 4]
+        section: [1, 2, 3, 4, 5, 6]
     runs-on: blacksmith-4vcpu-windows-2025
-    # The free hosted lane bounds the same work at 35 minutes (verify.yml).
+    # The free hosted lane bounds the same work at 40 minutes (verify.yml).
     # Blacksmith measured roughly 2x faster per suite on 2026-09-10 evidence
     # (tests/verification/repo-throughput/issue-210-blacksmith-baseline-20260910.md),
     # so this keeps headroom without paying for a much longer ceiling.
@@ -75,10 +75,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path C:\t | Out-Null
           "TEMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
           "TMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Windows-sensitive section ${{ matrix.section }} of 4 (Blacksmith)
+      - name: Windows-sensitive section ${{ matrix.section }} of 6 (Blacksmith)
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/4'
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/6'
 
   windows-offline-blacksmith:
     needs: [windows-offline-blacksmith-section]
@@ -92,7 +92,7 @@ jobs:
         run: |
           set -uo pipefail
           if [ "$RESULT" = 'success' ]; then
-            printf 'windows-offline-blacksmith: all four Blacksmith sections succeeded.\n'
+            printf 'windows-offline-blacksmith: all six Blacksmith sections succeeded.\n'
             exit 0
           fi
           printf 'windows-offline-blacksmith: sections reported %s; failing closed.\n' "$RESULT" >&2

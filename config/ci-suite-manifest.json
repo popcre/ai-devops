@@ -267,7 +267,6 @@
       "test-ai-codex-memories.sh",
       "test-ai-deepseek-agent.sh",
       "test-ai-gh.sh",
-      "test-ai-glm.sh",
       "test-bin-cmd-launchers.sh",
       "test-worktree-reap-tool.sh"
     ],
@@ -290,10 +289,15 @@
     ],
     [
       "test-ai-claude-permissions.sh",
-      "test-ai-gemini.sh",
-      "test-ai-muse-code.sh",
+      "test-ai-glm.sh",
       "test-line-endings.sh",
       "test-windows-scripts.sh"
+    ],
+    [
+      "test-ai-gemini.sh"
+    ],
+    [
+      "test-ai-muse-code.sh"
     ]
   ],
   "windows_offline_powershell_shard": 3,
