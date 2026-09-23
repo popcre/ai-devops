@@ -113,7 +113,12 @@ REPORT_DIR="$REPO_ROOT/.ai/reviews"
 git check-ignore -q .ai/reviews/ai-review-pool-probe || die '.ai/reviews must be Git-ignored.'
 mkdir -p "$REPORT_DIR"; [ ! -L "$REPORT_DIR" ] || die 'report destination became a link.'
 
-RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; TAG="pool-${provider}-${mode}-${RUN_ID}"; STARTED="$(date +%s)"
+RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; STARTED="$(date +%s)"
+# Runner name limits differ (Muse: 40 characters; Gemini's derived sandbox
+# tag: 64). Keep the full run ID in lifecycle/report evidence, but derive a
+# short name from the provider, mode, caller and that exact run ID. A rare
+# collision still fails closed in the runner's own session reservation.
+TAG="pool-${provider}-$(printf '%s' "${provider}-${mode}-${CALLER}-${RUN_ID}" | git hash-object --stdin | cut -c1-16)"
 STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""; REVIEW_DIR=""
 cleanup(){
   reviewer_event_cleanup_allowed "$provider" || return 1
