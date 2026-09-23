@@ -264,8 +264,19 @@ create_investigate_copy() { # create_investigate_copy REPO WT BASE_SHA
 launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
   local grok="$1"; shift
   local tmp_root user_home grok_home auth_src rc=0
+  local home_parent="$IMPL_DIR" auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" src_dev state_dev
   mkdir -p "$IMPL_DIR"
-  tmp_root="$(mktemp -d "$IMPL_DIR/investigate-home.XXXXXX")"
+  # A hard link cannot cross volumes: when the state directory lives on another
+  # drive than the credential (#709), build the throwaway home beside the
+  # credential instead. The credential is still only ever hard-linked.
+  src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
+  state_dev="$(stat -L -c %d "$IMPL_DIR" 2>/dev/null || true)"
+  if [ -n "$src_dev" ] && [ -n "$state_dev" ] && [ "$src_dev" != "$state_dev" ]; then
+    home_parent="$(dirname "$auth_dir")/.ai-grok-implement-homes"
+    [ ! -L "$home_parent" ] || die "refusing a symbolic link or junction as the investigation home parent: $home_parent"
+    (umask 077; mkdir -p -- "$home_parent") || die "could not create the investigation home parent: $home_parent"
+  fi
+  tmp_root="$(mktemp -d "$home_parent/investigate-home.XXXXXX")"
   user_home="$tmp_root/user"
   grok_home="$tmp_root/grok"
   mkdir -p "$user_home" "$grok_home"

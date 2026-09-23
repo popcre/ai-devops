@@ -95,25 +95,31 @@ grep -qx 23 "$TMP/diagnostics"
 grep -qx 'fixture initialization failed' "$TMP/diagnostics"
 test ! -d "$TMP/failed-suite"
 echo 'ok failing concurrency fixture preserves owner diagnostics before cleanup'
-echo '7 passed, 0 failed, 0 skipped'
 
 # Cross-volume state directory: the isolated home must follow the credential's
-# volume (a hard link cannot cross drives), seeded once without auth.json.
+# volume (a hard link cannot cross drives), and nothing is ever copied into it.
 sed -n '/^grok_isolated_home()/,/^}/p' "$ROOT/bin/ai-grok-review" > "$TMP/home.sh"
 . "$TMP/home.sh"
 mkdir -p "$TMP/xv/user/.grok" "$TMP/xv/state/isolated-home/sessions"
-printf 'fixture-auth\n' > "$TMP/xv/user/.grok/auth.json"
-printf 'copy\n' > "$TMP/xv/state/isolated-home/auth.json"
-printf 'kept\n' > "$TMP/xv/state/isolated-home/sessions/s1"
+printf 'fixture-auth
+' > "$TMP/xv/user/.grok/auth.json"
+printf 'kept
+' > "$TMP/xv/state/isolated-home/sessions/s1"
 (
-  STATE_DIR="$TMP/xv/state" HOME="$TMP/xv/user"; unset AI_GROK_AUTH_HOME AI_GROK_ISOLATED_HOME
+  STATE_DIR="$TMP/xv/state" HOME="$TMP/xv/user"; unset AI_GROK_AUTH_HOME
+  die() { printf 'die: %s
+' "$*" >&2; exit 1; }; warn() { :; }
   test "$(grok_isolated_home)" = "$STATE_DIR/isolated-home"   # same device: unchanged
   stat() { case "$*" in *"$STATE_DIR"*) echo 2;; *) echo 1;; esac; }
   got="$(grok_isolated_home)"
   test "$got" = "$HOME/.ai-grok-review-isolated-home"
-  test "$(cat "$got/sessions/s1")" = kept
-  test ! -e "$got/auth.json"
+  test -z "$(find "$got" -mindepth 1 -print -quit)"   # nothing copied
   prepare_auth_link "$HOME/.grok/auth.json" "$got"
   test "$HOME/.grok/auth.json" -ef "$got/auth.json"
+  rm -rf "$got"; mkdir -p "$TMP/xv/elsewhere"
+  if ln -s "$TMP/xv/elsewhere" "$got" 2>/dev/null && [ -L "$got" ]; then
+    ! (grok_isolated_home) 2>/dev/null
+  fi
 )
 echo 'ok cross-volume state keeps the isolated home on the credential volume'
+echo '8 passed, 0 failed, 0 skipped'

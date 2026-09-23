@@ -982,23 +982,26 @@ prepare_auth_link() { # SOURCE ISOLATED-HOME; publish without unlinking a live r
 
 grok_isolated_home() { # print the isolated GROK_HOME; it must share a volume with auth.json
   # A hard link cannot cross volumes and Windows usually refuses native
-  # symlinks, so when the state directory was relocated to another drive the
-  # credential link could never be made and every paid turn died at start-up.
-  # Keep the isolated home beside the credential source in that case; never
-  # copy the credential itself.
-  if [ -n "${AI_GROK_ISOLATED_HOME:-}" ]; then printf '%s
-' "$AI_GROK_ISOLATED_HOME"; return 0; fi
+  # symlinks, so when the state directory lives on another drive (for example
+  # a junction to D:) the credential link could never be made and every paid
+  # turn died at start-up. Keep the isolated home beside the credential source
+  # in that case. Nothing is copied: the credential is only ever hard-linked.
   local default="$STATE_DIR/isolated-home" auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" alt src_dev state_dev
   mkdir -p "$STATE_DIR" 2>/dev/null || true
   src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
   state_dev="$(stat -L -c %d "$STATE_DIR" 2>/dev/null || true)"
-  if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then printf '%s
-' "$default"; return 0; fi
-  alt="$(dirname "$auth_dir")/.ai-grok-review-isolated-home"
-  if [ ! -d "$alt" ] && [ -d "$default" ]; then
-    # One-time seed so existing named sessions keep their Grok history.
-    mkdir -p "$alt.seed.$$" && (cd "$default" && tar --exclude=./auth.json -cf - .) | (cd "$alt.seed.$$" && tar -xf -)       && mv -T -- "$alt.seed.$$" "$alt" 2>/dev/null || rm -rf -- "$alt.seed.$$"
+  if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then
+    printf '%s
+' "$default"; return 0
   fi
+  alt="$(dirname "$auth_dir")/.ai-grok-review-isolated-home"
+  case "$alt" in /*|[A-Za-z]:*) ;; *) die "credential directory must be an absolute path to place the isolated Grok home: $auth_dir" ;; esac
+  [ ! -L "$alt" ] || die "refusing a symbolic link or junction as the isolated Grok home: $alt"
+  if [ ! -d "$alt" ]; then
+    (umask 077; mkdir -p -- "$alt") || die "could not create the isolated Grok home beside the credential: $alt"
+    warn "state directory is on another volume than $auth_dir; isolated Grok home is $alt (earlier Grok session history stays under $default)"
+  fi
+  chmod 700 "$alt" 2>/dev/null || true
   printf '%s
 ' "$alt"
 }
