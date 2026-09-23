@@ -26,3 +26,18 @@ allocator but stayed registered here, and a session spent an hour trying it.
 5. **CLI versions: a floor, not a pin.** Wrappers enforce a minimum version and
    accept newer ones. A new CLI version is proven by one live, well-formed
    review. It needs no full qualification suite and no Windows run.
+6. **No 1Password during a review.** A reviewer wrapper never calls `op`
+   while running a review. The installer stores each reviewer secret once in
+   a per-user protected store (Windows Credential Manager, or an owner-only
+   file); the wrapper reads only that store. `op` is used solely to refresh
+   the store at install time or after the stored key is rejected. As of
+   2026-09-23 Muse is the one wrapper still calling `op` per run; its fix is
+   tracked separately.
+7. **Reviewer state stays on its home drive.** `~/.local/state/ai-devops` and
+   everything under it must never be moved, junctioned, symlinked, or
+   redirected to another drive, and disk cleanup must skip it. A junction to
+   `D:` broke Grok's credential hard link on 2026-09-23.
+8. **Paths must not grow with names.** Reviewer state, temp, and session paths
+   use fixed-length identifiers (hashes or short IDs), never the repository,
+   worktree, branch, or session name, so a long name cannot push a path past
+   Windows limits.

@@ -688,10 +688,14 @@ Install-GlobalFile `
     -Source (Join-Path $RepoPath "templates\system\AGENTS-global-zcode.md") `
     -Dest (Join-Path $ZCodeHome "AGENTS.md") `
     -Label "ZCode global instructions"
-Install-GlobalFile `
-    -Source (Join-Path $RepoPath "templates\system\AGENTS-global-mimo.md") `
-    -Dest (Join-Path $MimoHome "AGENTS.md") `
-    -Label "MiMo global instructions"
+# Xiaomi MiMo reads its global AGENTS.md beside its config file. Install it only
+# where MiMo has created that folder, so machines without MiMo stay untouched.
+if (Test-Path -LiteralPath $MimoHome) {
+    Install-GlobalFile `
+        -Source (Join-Path $RepoPath "templates\system\AGENTS-global-mimo.md") `
+        -Dest (Join-Path $MimoHome "AGENTS.md") `
+        -Label "Xiaomi MiMo global instructions"
+}
 
 # A dry run is a preview of everything, globals included, and stops before the
 # environment checks that would otherwise look like part of the plan.
