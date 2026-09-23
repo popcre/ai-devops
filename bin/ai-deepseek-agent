@@ -111,9 +111,10 @@ Add --governed-verdict SHA (or --governed-verdict=SHA) with --review to emit one
 final VERDICT: APPROVE|REVISE|REJECT SHA line for a governed recorder. The exact
 current commit is required; BLOCKED is retained but returns nonzero. This mode
 prints a new session ID on stderr and keeps stdout for the review only.
-It also tells DeepSeek that it has NO repository access, so it must not claim
-that anything exists or is missing unless the text quotes it, and must return
-BLOCKED when a conclusion would need evidence it was not given. --file may be
+It also tells DeepSeek that the review snapshot, read through those tools, and
+the conversation are its only evidence: it must not claim that anything exists or
+is missing unless it opened or was shown it, and must return BLOCKED when a
+conclusion would need evidence it could not obtain. --file may be
 repeated to attach all the evidence a real judgement needs.
 It writes a metadata sidecar bound to this repository's exact HEAD commit.
 EOF

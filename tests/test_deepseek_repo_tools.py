@@ -109,6 +109,27 @@ with tempfile.TemporaryDirectory() as tmp:
     check("usage-sum drops a counter one round lacks", "prompt_cache_hit_tokens" not in summed["usage"])
     check("usage-sum keeps the final answer", summed["choices"][0]["message"]["content"] == "done")
 
+    for name in ("client_secret.json", "password.txt", "terraform.tfstate", "prod.tfvars",
+                 "db-credentials.yaml", "service-account-prod.json"):
+        with open(os.path.join(root, name), "w") as fh:
+            fh.write("needle\n")
+        check(f"secret-looking name refused: {name}",
+              run(root, "read_file", {"path": name}).startswith("Error: secret"))
+    check("grep skips secret-looking names",
+          not any(n in run(root, "grep", {"pattern": "needle"}) for n in ("client_secret", "password.txt", "tfstate")))
+
+    # Malformed tool-call structures become tool errors, not helper crashes.
+    for bad in ([{"id": "x", "function": "not-a-dict"}], ["not-a-dict"],
+                [{"id": "y", "function": {"name": "read_file", "arguments": {"path": "sub/a.txt"}}}]):
+        breq, bresp, blog = (os.path.join(tmp, n) for n in ("breq.json", "bresp.json", "blog.jsonl"))
+        with open(breq, "w") as fh:
+            json.dump({"model": "m", "messages": [{"role": "user", "content": "q"}], "tools": t.TOOLS}, fh)
+        with open(bresp, "w") as fh:
+            json.dump({"choices": [{"message": {"role": "assistant", "tool_calls": bad}}]}, fh)
+        brc = subprocess.run([sys.executable, HELPER, "step", root, breq, bresp, blog, "0"],
+                             capture_output=True).returncode
+        check(f"malformed tool call handled: {json.dumps(bad)[:40]}", brc == 10)
+
     # Grep time budget stops a long search instead of running unbounded.
     saved = t.GREP_SECONDS
     t.GREP_SECONDS = 0

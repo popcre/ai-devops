@@ -44,6 +44,10 @@ SECRET_GLOBS = [
     "*.kdbx", "id_rsa*", "id_ed25519*", "id_ecdsa*", "*.ppk", ".npmrc",
     ".pypirc", ".netrc", "_netrc", ".git-credentials", "credentials",
     "credentials.*", "*.token", "auth.json",
+    # Name-based catch-alls: anything that looks like it holds a secret.
+    "*secret*", "*password*", "*passwd*", "*credential*", "*private*key*",
+    "*.tfstate", "*.tfstate.*", "*.tfvars", "*.keystore", "*.gpg", "*.asc",
+    "service-account*.json", "*serviceaccount*.json",
 ]
 
 TOOLS = [
@@ -297,7 +301,13 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
             msg = json.load(fh)["choices"][0]["message"]
     except (ValueError, KeyError, IndexError, TypeError, OSError):
         return 0
+    if not isinstance(msg, dict):
+        return 0
     tcs = msg.get("tool_calls") or []
+    if not isinstance(tcs, list):
+        tcs = []
+    # A malformed call becomes a tool error, never a helper crash.
+    tcs = [tc if isinstance(tc, dict) else {} for tc in tcs]
     if not tcs or "tools" not in body:
         return 0
     calls = 0
@@ -308,7 +318,9 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
     messages.append({k: v for k, v in msg.items() if k in ("role", "content", "tool_calls", "reasoning_content")})
     with open(log_file, "a", encoding="utf-8") as log:
         for tc in tcs:
-            fn = tc.get("function") or {}
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+            if not isinstance(fn.get("arguments"), (str, type(None))):
+                fn = dict(fn, arguments=json.dumps(fn.get("arguments")))
             counted = calls < MAX_TOOL_CALLS
             if counted:
                 calls += 1
