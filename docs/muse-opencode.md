@@ -84,7 +84,7 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
   and is never stored in Git or session metadata.
 
 Contributor data-use terms were accepted by the owner on 2026-08-18. Do not
-substitute the standard tier. A measured follow-up call reused the exact session and
+substitute the standard tier, except the owner-authorized two-hour stopgap of 2026-09-23 (17:09-19:09 EDT) recorded in the Muse incident. Never use 1.2. A measured follow-up call reused the exact session and
 recalled the prior turn; it also reported a large cache read. Provider cost is still
 reported only when OpenCode supplies it.
 

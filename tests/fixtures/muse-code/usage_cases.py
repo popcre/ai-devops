@@ -24,7 +24,7 @@ DECOY = '99999999-9999-4999-8999-999999999999'
 def completed(run, i, o, cr, cw, r):
     return {'payload_type': 'runtime.session',
             'payload': {'run_id': run,
-                        'event': {'kind': 'model_completed', 'model': 'muse-spark-1.3-contributor',
+                        'event': {'kind': 'model_completed', 'model': 'muse-spark-1.3',
                                   'usage': {'input_tokens': i, 'output_tokens': o, 'cached_tokens': cr,
                                             'cache_write_tokens': cw, 'cache_read_tokens': cr,
                                             'reasoning_tokens': r}}}}
@@ -32,7 +32,7 @@ def completed(run, i, o, cr, cw, r):
 
 # Mirrors the first-party catalog row verified live on 2026-09-17 (plan
 # ai-muse-native-engine-parity §6c); prices are per-million strings.
-CATALOG_ROW = {'model_id': 'muse-spark-1.3-contributor', 'provider_id': 'meta',
+CATALOG_ROW = {'model_id': 'muse-spark-1.3', 'provider_id': 'meta',
                'visibility': 'visible',
                'context_limit': 1007997, 'output_limit': 128000, 'is_current': True,
                'cost': {'input': '0.10', 'output': '0.20', 'cached': '0.002', 'currency': 'USD'}}
@@ -47,7 +47,7 @@ def catalog_json(rows=None, source='provider_catalog', provider='meta'):
 
 class MuseCodeUsageCases(unittest.TestCase):
     def result(self, events, version=PINNED, run=RUN, catalog_row=None,
-               model='muse-spark-1.3-contributor'):
+               model='muse-spark-1.3'):
         return usage.muse_code(events, version, run, catalog_row=catalog_row, model=model)
 
     def test_maps_sums_and_scopes_model_completed_rows(self):
@@ -179,7 +179,7 @@ class MuseCodeUsageCases(unittest.TestCase):
             # Any *.json name must do: the real file name is a provider/profile
             # encoding that changes between builds.
             (catalog / 'teststub__glob.json').write_text(catalog_json(), encoding='utf-8')
-            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3')
         self.assertEqual(result['catalog_cost_estimate'], 0.001238922)
         self.assertEqual(result['catalog_cost_currency'], 'USD')
 
@@ -189,7 +189,7 @@ class MuseCodeUsageCases(unittest.TestCase):
             log = root / 'muse' / 'sessions' / '2026' / '09' / '17' / RUN / 'session.jsonl'
             log.parent.mkdir(parents=True)
             log.write_text(json.dumps(completed(RUN, 1, 2, 0, 0, 0)) + '\n', encoding='utf-8')
-            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3')
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')
 
@@ -203,7 +203,7 @@ class MuseCodeUsageCases(unittest.TestCase):
             catalog.mkdir()
             catalog.joinpath('a__file.json').write_text(catalog_json(), encoding='utf-8')
             catalog.joinpath('b__file.json').write_text(catalog_json(), encoding='utf-8')
-            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3')
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')
 
@@ -223,7 +223,7 @@ class MuseCodeUsageCases(unittest.TestCase):
             catalog.mkdir()
             catalog.joinpath('manual__file.json').write_text(
                 catalog_json(source='manual'), encoding='utf-8')
-            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3')
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')
 
@@ -259,7 +259,7 @@ class MuseCodeUsageCases(unittest.TestCase):
             catalog.mkdir()
             catalog.joinpath('good__file.json').write_text(catalog_json(), encoding='utf-8')
             catalog.joinpath('broken__sibling.json').write_text('not-json', encoding='utf-8')
-            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3')
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')
 
@@ -272,7 +272,7 @@ class MuseCodeUsageCases(unittest.TestCase):
             catalog = root / 'muse' / 'model-catalog'
             catalog.mkdir()
             (catalog / 'broken__file.json').write_text('not-json', encoding='utf-8')
-            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3')
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')
 
@@ -293,7 +293,7 @@ class MuseCodeUsageCases(unittest.TestCase):
                 link.symlink_to(real)
             except (OSError, NotImplementedError):
                 self.skipTest('symlinks unavailable on this filesystem')
-            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+            result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3')
         self.assertIsNone(result['catalog_cost_estimate'])
         self.assertEqual(result['completeness'], 'core-complete')
 
@@ -340,7 +340,7 @@ class MuseCodeUsageCases(unittest.TestCase):
                         linked = junction.returncode == 0 and link.exists()
                     if not linked:
                         self.skipTest('no symlink or junction support on this filesystem')
-                    result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3-contributor')
+                    result = usage.muse_code_read(str(log), PINNED, RUN, 'muse-spark-1.3')
                 self.assertIsNone(result['catalog_cost_estimate'])
                 self.assertEqual(result['completeness'], 'core-complete')
 

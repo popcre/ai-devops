@@ -32,9 +32,7 @@ OC_CFG="$CFG/opencode-xdg/opencode"
 # Sessions never cross engines: each engine records its own model identifier.
 ENGINE="${AI_MUSE_ENGINE:-opencode}"
 # The Muse model id lives in config/tool-versions.json (.models.muse), not here.
-MUSE_MODEL_ID="$(jq -r '.models.muse // empty' "$ROOT/config/tool-versions.json" 2>/dev/null | tr -d '')"
-[ -n "$MUSE_MODEL_ID" ] || { printf 'ai-muse: error: start_failed: config/tool-versions.json has no .models.muse
-' >&2; exit 1; }
+MUSE_MODEL_ID="$({ jq -r '.models.muse // empty' "$ROOT/config/tool-versions.json" 2>/dev/null || true; } | tr -d ' \r\n')"
 case "$ENGINE" in
   opencode)
     VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
@@ -265,6 +263,7 @@ linked_below_home(){ # true when the path or any ancestor below the profile home
   local p="$1"; while [ -n "$p" ] && [ "$p" != "$PROFILE_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do [ ! -L "$p" ] || return 0; p="$(dirname "$p")"; done; return 1
 }
 require_runtime(){
+  [ -n "$MUSE_MODEL_ID" ] || die "local_dependency_unavailable: cannot read .models.muse from config/tool-versions.json (jq is required)."
   if [ "$ENGINE" = muse-code ]; then
     [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL Muse Code $VERSION is not installed at $BIN."
     { muse_code_stage && muse_code_pinned; } || die "local_dependency_unavailable: LOCAL Muse Code cannot start or is not the pinned $VERSION. Run: AI_MUSE_CALLER=$CALLER AI_MUSE_ENGINE=muse-code ai-muse doctor"
