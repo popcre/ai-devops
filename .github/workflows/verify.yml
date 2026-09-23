@@ -415,7 +415,10 @@ jobs:
         shell: pwsh
         run: |
           $bash = 'C:\Program Files\Git\bin\bash.exe'
-          $command = 'failures=0; for test in tests/test-ai-codex-review.sh tests/test-ai-grok-review.sh; do bash "$test" || failures=$((failures+1)); done; exit "$failures"'
+          # The two suites run side by side (#736): each spends most of its
+          # ~22 minutes in wall-clock waits, so one after the other no longer
+          # fits the 30 minute bound on the 16-thread qualified host.
+          $command = 'logs="$(cygpath -u "$RUNNER_TEMP")/reviewer-logs"; mkdir -p "$logs"; pids=""; for test in tests/test-ai-codex-review.sh tests/test-ai-grok-review.sh; do bash "$test" >"$logs/$(basename "$test").log" 2>&1 & pids="$pids $!"; done; failures=0; for pid in $pids; do wait "$pid" || failures=$((failures+1)); done; for log in "$logs"/*.log; do printf "::group::%s\n" "$log"; cat "$log"; printf "::endgroup::\n"; done; exit "$failures"'
           $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
           $startInfo.FileName = $bash
           $startInfo.UseShellExecute = $false
@@ -429,6 +432,7 @@ jobs:
               Write-Error 'Preferred reviewer timed out, but its process tree could not be proven stopped. Refusing overlapping fallback.'
               exit 0
             }
+            Get-ChildItem (Join-Path $env:RUNNER_TEMP reviewer-logs) -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { "::group::$($_.Name)"; Get-Content $_.FullName -Tail 200; '::endgroup::' }
             "proof_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             Write-Warning 'Preferred reviewer proof reached its 30-minute bound; hosted fallback is required.'
             exit 0
