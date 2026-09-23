@@ -5,11 +5,13 @@ description: Use xAI Grok Build through ai-grok-review for repository analysis, 
 
 # Grok CLI
 
-This repository qualifies exactly one Grok Build version, recorded in
-`config/provider-cli-versions.json` (currently 1.0.13). Both wrappers refuse
-paid work against any other build. Changing it means editing that policy file
-and re-qualifying against `docs/grok-build-1.0.13-release-disposition.md` — never
-relaxing the check.
+This repository sets a minimum Grok Build version, recorded in
+`config/provider-cli-versions.json` (currently 1.0.13 with `version_match:
+minimum`). Both wrappers accept that build or any newer build of the same major
+version (owner ruling, issue #686: Grok auto-updates), and refuse an older build
+or a new major release. Moving the floor or the major means editing that policy
+file and re-qualifying against `docs/grok-build-1.0.13-release-disposition.md` —
+never relaxing the check.
 
 While [ai-devops issue #56](https://github.com/popcre/ai-devops/issues/56) is open, read the STATUS table in `plan_grok-review-concurrency-cancellation-observability.md` before changing concurrency, cancellation, active-run listing, progress output, or reviewer-issue evidence capture.
 
@@ -165,11 +167,11 @@ The wrapper tells you which case you are in and what to do. The one thing to int
 `ai-grok-review doctor` resolves the binary, prints the version, and checks credential
 presence for free. A successful model-catalogue listing does not prove chat
 authentication. Only the protected `doctor --live` round trip proves that.
-It also reports the installed version against the one this repository qualifies
-(`config/provider-cli-versions.json`). Both wrappers refuse paid work against any
-other build, before the provider is contacted. If the doctor reports
-`UNQUALIFIED`, run the provider installer to bring the CLI to exactly the
-qualified version; do not work around the refusal.
+It also reports the installed version against the policy in
+`config/provider-cli-versions.json`. Both wrappers refuse paid work against a
+build outside it (older than the floor, or a new major), before the provider is
+contacted. If the doctor reports `UNQUALIFIED`, run the provider installer to
+bring the CLI to the policy version; do not work around the refusal.
 
 **`grok doctor` is not an auth check.** It checks "terminal, clipboard, color, and input
 support" — which is why it once reported "You are not authenticated" while `grok models`

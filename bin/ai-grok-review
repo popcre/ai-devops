@@ -543,13 +543,22 @@ lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE] [WORK_ID
 
 logical_session_meta() { # logical_session_meta UPSTREAM CALLER NAME
   local wanted_upstream="$1" wanted_caller="$2" wanted_name="$3" f remote identity
-  local -a all=() candidates=()
-  # One grep narrows hundreds of records to those that mention the name; the
-  # per-record jq checks below stay authoritative. Spawning jq for every
-  # record made startup take many minutes on Windows (issue #686).
-  for f in "$STATE_DIR"/sessions/*/*.json; do [ -f "$f" ] && all+=("$f"); done
-  [ "${#all[@]}" -gt 0 ] || return 1
-  mapfile -t candidates < <(grep -lF -- "$wanted_name" "${all[@]}" 2>/dev/null || true)
+  local -a candidates=() found=() rc=0
+  # One recursive grep narrows hundreds of records to those that mention the
+  # name; the per-record jq checks below stay authoritative. Spawning jq for
+  # every record made startup take many minutes on Windows (issue #686). A
+  # recursive grep takes no per-file arguments, so it cannot hit a command-line
+  # limit; any grep error (status 2+) falls back to checking every record.
+  [ -d "$STATE_DIR/sessions" ] || return 1
+  mapfile -t found < <(grep -rlF --include='*.json' -- "$wanted_name" "$STATE_DIR/sessions" 2>/dev/null; printf '%s\n' "rc=$?")
+  rc="${found[${#found[@]}-1]#rc=}"; unset 'found[${#found[@]}-1]'
+  if [ "$rc" -ge 2 ]; then
+    for f in "$STATE_DIR"/sessions/*/*.json; do candidates+=("$f"); done
+  else
+    for f in "${found[@]}"; do
+      case "${f#"$STATE_DIR"/sessions/}" in */*/*) continue ;; */*.json) candidates+=("$f") ;; esac
+    done
+  fi
   for f in "${candidates[@]}"; do
     [ -f "$f" ] || continue
     [ "$(jq -r '.caller // empty' "$f" 2>/dev/null)" = "$wanted_caller" ] || continue

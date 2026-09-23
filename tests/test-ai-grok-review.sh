@@ -1363,6 +1363,17 @@ check "pool_adapter_runner_overrides_require_test_hooks" "grep -q 'AI_POOL_TEST_
 check "pool_adapter_refuses_a_non_sha_head" "grep -q 'not a full commit SHA' '$POOL'"
 rm -rf "$POOLTMP"
 
+# Issue #686: session lookup must not spawn jq per record (it took ~15 minutes
+# over 817 records on Windows). It narrows with one recursive grep, ignores
+# records nested deeper than sessions/<repo>/<file>.json, and still matches.
+LSM="$(mktemp -d)"; mkdir -p "$LSM/sessions/a" "$LSM/sessions/b/deep"
+printf '{"caller":"claude","name":"lsm-foo","repo_remote":"R"}' > "$LSM/sessions/a/x.json"
+printf '{"caller":"claude","name":"lsm-foo","repo_remote":"R"}' > "$LSM/sessions/b/deep/y.json"
+printf '{"caller":"codex","name":"lsm-foo","repo_remote":"R"}' > "$LSM/sessions/b/z.json"
+LSM_OUT="$(STATE_DIR="$LSM"; normalize_remote() { printf '%s' "$1"; }; eval "$(sed -n '/^logical_session_meta() {/,/^}/p' "$SCRIPT")"; logical_session_meta R claude lsm-foo; printf ' rc=%s|' "$?"; logical_session_meta R claude lsm-bar; printf ' rc=%s' "$?")"
+check "session_lookup_finds_the_record_via_one_grep" "[ '$LSM_OUT' = '$LSM/sessions/a/x.json rc=0| rc=1' ]"
+rm -rf "$LSM"
+
 echo
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

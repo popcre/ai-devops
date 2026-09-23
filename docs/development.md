@@ -84,10 +84,11 @@ fails a build.
 
 For Grok, GLM, or Kimi debate changes, keep the shared field contract in
 `templates/delegation/debate-turn.md`. Test headings and safety guidance
-offline in `tests/test-ai-grok-review.sh`. Grok is pinned to one exact CLI build
-in `config/provider-cli-versions.json`; the wrappers refuse paid work against any
-other build, so a Grok CLI upgrade means changing that policy file and
-re-qualifying, not relaxing the check. Do not add runtime parsing for
+offline in `tests/test-ai-grok-review.sh`. Grok has a minimum CLI version
+in `config/provider-cli-versions.json` (a floor within one major version, issue
+#686); the wrappers refuse paid work against an older build or a new major, so a
+new major or a higher floor means changing that policy file and re-qualifying,
+not relaxing the check. Do not add runtime parsing for
 semantic fields: missing evidence is a skill review failure, while the wrapper
 continues to enforce terminal completion, fixed permissions, session reuse,
 cache reporting, and cost reporting.
