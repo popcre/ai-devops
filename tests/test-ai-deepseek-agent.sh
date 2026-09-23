@@ -481,7 +481,7 @@ if ln -s "$TMP/outside.txt" "$FX/link.txt" 2>/dev/null && [ -L "$FX/link.txt" ];
 else
   skip "repo tools do not follow symbolic links (this filesystem cannot create a real symlink)"
 fi
-check "repo-tools helper never handles the provider key" "! grep -qi 'bearer\|api_key\|stdin' '$TOOLS_PY'"
+check "repo-tools helper never handles the provider key" "! grep -qiE 'bearer|api_key|sys\.stdin|PROVIDER_KEY' '$TOOLS_PY'"
 printf 'tool-proof line 1\nquote me: deepseek-can-read\n' > "$TMP/repo/proof.txt"
 TOOL_REQ="$TMP/tool-request.json"; export DEEPSEEK_STUB_TOOLCALL_MARK="$TMP/toolcall-mark"
 CALLS_BEFORE="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
