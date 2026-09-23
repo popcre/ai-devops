@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+// Fail when ai-devops config/reviewer-registry.json and the shared-db reviewer
+// allocator (scripts/manage-migration-author-lanes.mjs on main) disagree about
+// which providers are in the review rotation. The allocator is the source of
+// truth; the registry must mirror it. Providers that review outside the
+// allocator are listed in config/reviewer-membership-scope.json.
+// Usage: ai-reviewer-membership-drift [--lanes-file PATH] [--registry PATH] [--scope PATH]
+'use strict'
+const fs = require('fs'); const path = require('path'); const { execFileSync } = require('child_process')
+const root = path.resolve(__dirname, '..')
+const args = process.argv.slice(2); const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d }
+const registryPath = opt('--registry', path.join(root, 'config/reviewer-registry.json'))
+const scopePath = opt('--scope', path.join(root, 'config/reviewer-membership-scope.json'))
+const lanesFile = opt('--lanes-file', null)
+let src
+try {
+  src = lanesFile ? fs.readFileSync(lanesFile, 'utf8')
+    : execFileSync('gh', ['api', 'repos/u2giants/shared-db/contents/scripts/manage-migration-author-lanes.mjs?ref=main', '-H', 'Accept: application/vnd.github.raw'], { encoding: 'utf8', maxBuffer: 64 << 20 })
+} catch (e) { console.error('ERROR could not read the shared-db allocator: ' + e.message.split('\n')[0]); process.exit(2) }
+const block = (name, open, close) => { const i = src.indexOf(`export const ${name} = Object.freeze(${open}`); if (i < 0) { console.error(`ERROR allocator has no ${name}`); process.exit(2) } return src.slice(i, src.indexOf(close, i)) }
+const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1])
+const rows = [...block('REVIEWERS', '[', '\n])').matchAll(/name:'([^']+)',\s*provider:'([^']+)'/g)].map((m) => ({ name: m[1], provider: m[2] }))
+const off = new Set([...quoted(block('RETIRED_REVIEWERS', '[', '])')), ...quoted(block('QUARANTINED_REVIEWERS', '[', '])'))])
+if (!rows.length) { console.error('ERROR allocator REVIEWERS parsed empty'); process.exit(2) }
+const allocator = new Set(rows.filter((r) => !off.has(r.name)).map((r) => r.provider))
+const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8')).providers
+const outside = new Set(Object.keys(JSON.parse(fs.readFileSync(scopePath, 'utf8')).outside_allocator || {}))
+const problems = []
+for (const [p, v] of Object.entries(registry)) {
+  if (outside.has(p)) continue
+  const reg = v.registry_state === 'registered'
+  if (reg && !allocator.has(p)) problems.push(`${p}: registered in ai-devops but retired, quarantined, or missing in the shared-db allocator`)
+  if (!reg && allocator.has(p)) problems.push(`${p}: ${v.registry_state} in ai-devops but active in the shared-db allocator`)
+}
+for (const p of allocator) if (!registry[p]) problems.push(`${p}: active in the shared-db allocator but missing from ai-devops registry`)
+if (problems.length) { console.log('DRIFT reviewer membership differs (fix both in one change; see docs/reviewer-rotation-rules.md):'); problems.forEach((l) => console.log('  ' + l)); process.exit(1) }
+console.log('OK reviewer membership matches the shared-db allocator: ' + [...allocator].sort().join(', '))
