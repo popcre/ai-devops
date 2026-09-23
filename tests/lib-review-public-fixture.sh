@@ -5,19 +5,20 @@
 ai_test_public_sources() {
   local fixture_root="$1" mock_dir
   [ -d "$fixture_root" ] || return 2
-  AI_REVIEW_TEST_PUBLIC_ROOT="$(cd "$fixture_root" && pwd -P)" || return 2
-  export AI_REVIEW_TEST_PUBLIC_ROOT
-  mock_dir="$AI_REVIEW_TEST_PUBLIC_ROOT/public-identity-bin"
+  fixture_root="$(cd "$fixture_root" && pwd -P)" || return 2
+  mock_dir="$fixture_root/public-identity-bin"
   mkdir -p "$mock_dir" || return 2
   cat > "$mock_dir/ai-task-gates" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 [ "${1:-}" = explain ] || exit 2
-[ -n "${AI_REVIEW_TEST_PUBLIC_ROOT:-}" ] || exit 2
+mock_dir="$(cd "$(dirname "$0")" && pwd -P)" || exit 2
+[ "${mock_dir##*/}" = public-identity-bin ] || exit 2
+fixture_root="$(cd "$mock_dir/.." && pwd -P)" || exit 2
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 2
 repo="$(cd "$repo" && pwd -P)" || exit 2
 case "$repo/" in
-  "$AI_REVIEW_TEST_PUBLIC_ROOT/"*)
+  "$fixture_root/"*)
     printf '{"identity_resolved":true,"effective_class":"code","observed_class":"code"}\n'
     ;;
   *) exit 2 ;;

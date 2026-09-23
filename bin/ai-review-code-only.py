@@ -45,7 +45,7 @@ def digest(data):
 
 def source_digest(source):
     script = Path(__file__).with_name("ai-review-sandbox")
-    proc = subprocess.run(["sh", str(script), "digest", str(source)], stdout=subprocess.PIPE,
+    proc = subprocess.run(["bash", str(script), "digest", str(source)], stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, check=False)
     if proc.returncode:
         fail("source digest unavailable")
