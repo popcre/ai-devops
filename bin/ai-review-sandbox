@@ -431,10 +431,12 @@ cmd_clone_code_only() {
   if ! "$python" "$SCRIPT_DIR/ai-review-code-only.py" clone "$root" "$build"; then
     [ ! -e "$build" ] || rm -rf -- "$build"
     rm -f -- "$build.source.json"
+    rm -f -- "$build.owners.json"
     die "could not clone sanitized code-only export."
   fi
   mv "$build" "$stage" || die "could not publish sanitized code-only clone."
   mv "$build.source.json" "$stage.source.json" || die "could not publish host-only source binding."
+  mv "$build.owners.json" "$stage.owners.json" || die "could not publish host-only evidence ownership."
   cmd_verify_code_only "$stage"
   printf '%s' "$stage"
 }
@@ -460,10 +462,12 @@ cmd_ensure_code_only() {
   if ! "$python" "$SCRIPT_DIR/ai-review-code-only.py" "${create_args[@]}"; then
     [ ! -e "$build" ] || rm -rf -- "$build"
     rm -f -- "$build.source.json"
+    rm -f -- "$build.owners.json"
     die "code-only export failed; no reviewer directory was published."
   fi
   mv "$build" "$stage" || die "could not publish code-only export."
   mv "$build.source.json" "$stage.source.json" || die "could not publish host-only source binding."
+  mv "$build.owners.json" "$stage.owners.json" || die "could not publish host-only evidence ownership."
   "$python" "$SCRIPT_DIR/ai-review-code-only.py" verify "$stage" >/dev/null \
     || die "published code-only export failed verification."
   printf '%s' "$stage"
@@ -478,7 +482,9 @@ cmd_remove_code_only() {
   python="$(command -v python3 || command -v python)" || die "Python is required for code-only removal."
   "$python" "$SCRIPT_DIR/ai-review-code-only.py" verify "$stage" >/dev/null \
     || die "code-only export could not be verified; retained for recovery."
-  rm -rf -- "$stage" && rm -f -- "$stage.source.json"
+  remove_sandbox "$stage"
+  [ ! -e "$stage" ] || die "code-only snapshot retained after cleanup failure."
+  rm -f -- "$stage.source.json" "$stage.owners.json"
 }
 
 cmd_verify_code_only() {

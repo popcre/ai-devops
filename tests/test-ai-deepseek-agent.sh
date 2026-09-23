@@ -14,6 +14,8 @@ PASS=0; FAIL=0; SKIP=0
 ai_test_measure_spawn_baseline
 # A case the filesystem cannot host is not a passing check.
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_DEEPSEEK_TEST_DIR="$TMP"
 mkdir -p "$TMP/bin" "$TMP/home/.config/ai-devops" "$TMP/repo"
