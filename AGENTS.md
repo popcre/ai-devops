@@ -67,6 +67,7 @@ pipeline. The recovery procedure lives in
 |---|---|---|
 | GitHub API limits, request volume, quota coverage or duplicate polling | [GitHub request reduction plan](plan_github-request-reduction.md) STATUS, [issue #658](https://github.com/popcre/ai-devops/issues/658) | Measure and reduce sources; preserve workflow and separate quota buckets; one phase outcome per session |
 | Quick orientation | [`README.md`](README.md) | Do not bulk-load docs |
+| Tools or skills loading per session, per-repository scoping, MCP membership drift | [Tool and skill scoping plan](plan_tool-and-skill-scoping.md) STATUS, [issue #707](https://github.com/popcre/ai-devops/issues/707) | Measure before/after; never remove a constrained server; protected skills stay global; passthrough gateways only |
 | Context size or routing ownership | [`docs/context-spec.md`](docs/context-spec.md), relevant STATUS in [`plan_context-engineering-consolidation.md`](plan_context-engineering-consolidation.md) | One owner per rule; measure before and after |
 | Standing behavior, trigger quality, false completion, “instructions not working,” or transcript work | Matching row in [`docs/task-router.md`](docs/task-router.md) | Preserve client parity, safety gates, and private-data boundaries |
 | Tool, workflow, prompt, install, model, secret, or machine setup | The matching row in [`docs/task-router.md`](docs/task-router.md) | Read the affected verification header before edits |

@@ -4,6 +4,9 @@ This document records the measured baseline and the context ownership map for
 reducing repeated Claude and Codex context safely. The active implementation and
 decisions remain in
 [`../plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
+Per-session tool and skill scoping (MCP membership per project, repository-scoped
+skills, drift checks) is planned in
+[`../plan_tool-and-skill-scoping.md`](../plan_tool-and-skill-scoping.md).
 
 ## Claude and Codex behavior correction on 2026-08-21
 
