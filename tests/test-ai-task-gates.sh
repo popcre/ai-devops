@@ -72,6 +72,20 @@ check 'every changed path is still classified individually' "jq -e '.changes|len
 check 'unmatched path falls back to code, not to the strongest class' \
   "[ \"\$(class_of 'random/thing.bin')\" = code ]"
 
+# Reviewer source classification passes hundreds of tracked paths at once.
+# Every individual decision must survive the bulk path, including the stronger
+# reviewer class and the ordinary unmatched fallback.
+bulk_paths="$TMP/bulk-paths.txt"
+for ((n=1; n<=840; n++)); do printf 'docs/bulk-%03d.md\n' "$n"; done > "$bulk_paths"
+printf 'bin/ai-review-lifecycle\nrandom/bulk.bin\n' >> "$bulk_paths"
+bulk="$(cd "$TMP/class" && "$GATES" explain --json --paths-from "$bulk_paths")"
+check 'bulk path classification preserves every class and count' \
+  "jq -e '.changed_count==842 and .observed_class==\"reviewer-safety\" and
+    ([.changes[]|select(.path|startswith(\"docs/bulk-\"))]|length)==840 and
+    ([.changes[]|select(.path|startswith(\"docs/bulk-\"))]|all(.class==\"prose\")) and
+    ([.changes[]|select(.path==\"bin/ai-review-lifecycle\")][0].class)==\"reviewer-safety\" and
+    ([.changes[]|select(.path==\"random/bulk.bin\")][0].class)==\"code\"' <<<\"\$bulk\""
+
 printf 'consumer declarations\n'
 mkdir -p "$TMP/class/.ai-devops"
 cat > "$TMP/class/.ai-devops/task-gates.json" <<'EOF'
