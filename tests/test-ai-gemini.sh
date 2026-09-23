@@ -313,6 +313,21 @@ check 'the derived sandbox tag fits the 64-character limit' "jq -e '.sandbox_tag
 check 'two long names sharing a prefix get distinct tags' "(cd '$LONGREPO' && '$SCRIPT' new '${LONG_NAME}y' --prompt x) && test \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\")\" != \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"${LONG_NAME}y\"' '$TMP/state/sessions')\")\""
 check 'a name that fits is still accepted' "(cd '$LONGREPO' && '$SCRIPT' new fits-fine --prompt x)"
 
+# 2026-09-23 (whole path-length class): long worktree paths, session names and
+# caller names must never make a derived path component grow with the input.
+# Real sandbox, fake provider; worktree path over 200 characters.
+LP_SEG="$(printf %.0sw $(seq 1 90))"
+LP_REPO="$TMP/$LP_SEG/$LP_SEG-worktree-with-a-very-long-descriptive-name"
+make_repo "$LP_REPO"
+LP_NAME="$(printf %.0sn $(seq 1 150))"; LP_CALLER="$(printf %.0sc $(seq 1 70))"
+set +e; (cd "$LP_REPO" && AI_REVIEW_SANDBOX_BIN="$ROOT/bin/ai-review-sandbox" AI_REVIEW_SANDBOX_DIR="$TMP/lp-sbx" AI_GEMINI_CALLER="$LP_CALLER" MOCK_MODE=normal "$SCRIPT" new "$LP_NAME" --prompt review) > "$TMP/lp.out" 2>&1; LP_RC=$?; set -e
+[ "$LP_RC" -eq 0 ] || sed -n '1,20p' "$TMP/lp.out" >&2
+LP_META="$(grep -rl "\"name\":\"$LP_NAME\"" "$TMP/state/sessions" 2>/dev/null | head -1)"
+check 'long worktree path: worktree path is over 200 characters' "test ${#LP_REPO} -gt 200"
+check 'long worktree path, name and caller still review' "test '$LP_RC' -eq 0"
+check 'every derived state, sandbox and report name stays bounded' "test -z \"\$(find '$TMP/state' '$TMP/lp-sbx' '$LP_REPO/.ai' -mindepth 1 2>/dev/null | awk -F/ 'length(\$NF)>110')\""
+check 'metadata keeps the full name, completes, and bounds the tag' "test -n '$LP_META' && jq -e '.status==\"COMPLETE\" and (.sandbox_tag|length<=64)' '$LP_META' >/dev/null"
+
 # 2026-09-18: live qualification recorded the caller's checkout as the invoked
 # repository while it reviewed its private fixture, so sandbox evidence binding
 # refused every requalification. It must pass from any unrelated checkout and
