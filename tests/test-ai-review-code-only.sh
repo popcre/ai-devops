@@ -27,6 +27,7 @@ git -C "$R" config user.name Test
 git -C "$R" config user.email test@example.invalid
 git -C "$R" config core.autocrlf false
 printf 'print("allowed base")\n' > "$R/src/app.py"
+printf '#!/bin/sh\nprintf safe\\n\n' > "$R/src/tool.sh"
 printf 'def test_ok(): assert True\n' > "$R/tests/test_app.py"
 printf '{"schema":"safe"}\n' > "$R/contracts/schema.json"
 printf 'PRIVATE_TRACKED_SENTINEL\n' > "$R/data/tracked.txt"
@@ -34,6 +35,7 @@ printf 'PRIVATE_DIRTY_BASE_SENTINEL\n' > "$R/data/modified.txt"
 printf 'PRIVATE_DELETED_HISTORY_SENTINEL\n' > "$R/data/deleted.txt"
 printf 'data/ignored.txt\n' > "$R/.gitignore"
 git -C "$R" add --all
+git -C "$R" update-index --chmod=-x -- src/tool.sh
 git -C "$R" commit -qm baseline
 BASE="$(git -C "$R" rev-parse HEAD)"
 git -C "$R" update-ref refs/remotes/origin/main "$BASE"
@@ -41,12 +43,18 @@ git -C "$R" checkout -q -b feature
 printf 'print("allowed changed")\n' > "$R/src/app.py"
 rm "$R/data/deleted.txt"
 git -C "$R" add --all
+git -C "$R" update-index --chmod=+x -- src/tool.sh
+chmod +x "$R/src/tool.sh"
 git -C "$R" commit -qm feature
 ORIGINAL_HEAD="$(git -C "$R" rev-parse HEAD)"
 printf 'PRIVATE_DIRTY_CURRENT_SENTINEL\n' > "$R/data/modified.txt"
 printf 'PRIVATE_UNTRACKED_SENTINEL\n' > "$R/data/untracked.txt"
 printf 'PRIVATE_IGNORED_SENTINEL\n' > "$R/data/ignored.txt"
-printf '["src/app.py","tests/test_app.py","contracts/schema.json"]\n' > "$TMP/approved.json"
+printf '#!/bin/sh\nprintf staged\\n\n' > "$R/src/staged.sh"
+git -C "$R" add -- src/staged.sh
+git -C "$R" update-index --chmod=+x -- src/staged.sh
+chmod +x "$R/src/staged.sh"
+printf '["src/app.py","src/tool.sh","src/staged.sh","tests/test_app.py","contracts/schema.json"]\n' > "$TMP/approved.json"
 
 "$SANDBOX" is-private "$R" || fail 'complete private inventory was not classified'
 must_fail "$SANDBOX" ensure-copy "$R" ordinary
@@ -61,6 +69,11 @@ EXPORT="$("$SANDBOX" ensure-code-only "$R" codeonly --paths-file "$TMP/approved.
 [ "$(git -C "$EXPORT" rev-parse HEAD^)" != "$BASE" ] || fail 'source history leaked into synthetic history'
 [ ! -e "$EXPORT.source.json/." ] || fail 'host-only sidecar is under the export'
 [ -f "$EXPORT.source.json" ] || fail 'host-only source binding absent'
+[ "$(git -C "$EXPORT" ls-tree HEAD^ src/tool.sh | cut -d ' ' -f1)" = 100644 ] || fail 'baseline executable mode changed'
+[ "$(git -C "$EXPORT" ls-tree HEAD src/tool.sh | cut -d ' ' -f1)" = 100755 ] || fail 'mode-only change omitted from synthetic head'
+[ "$(git -C "$EXPORT" ls-tree HEAD src/staged.sh | cut -d ' ' -f1)" = 100755 ] || fail 'staged executable mode omitted'
+git -C "$EXPORT" diff --summary HEAD^ HEAD | grep -q 'mode change 100644 => 100755 src/tool.sh' \
+  || fail 'mode-only change omitted from reviewer diff'
 if rg -a -q 'PRIVATE_(TRACKED|DIRTY|UNTRACKED|IGNORED|DELETED)_.*SENTINEL' "$EXPORT"; then
   fail 'private evidence appeared in exported working tree or synthetic Git history'
 fi
@@ -74,6 +87,13 @@ jq -e --arg head "$ORIGINAL_HEAD" '.code_only.original_head == $head and .code_o
 SNAP="$("$SANDBOX" ensure-copy "$EXPORT" deepseek)"
 PKT="$("$PACKET" build "$SNAP" deepseek --identity "$IDENTITY")"
 "$PACKET" verify "$PKT" --identity "$IDENTITY" > /dev/null
+git -C "$SNAP" update-index --chmod=-x -- src/tool.sh
+must_fail "$SANDBOX" verify-code-only "$SNAP" --assert-head "$ORIGINAL_HEAD"
+must_fail "$PACKET" verify "$PKT" --identity "$IDENTITY"
+git -C "$SNAP" update-index --chmod=+x -- src/tool.sh
+"$SANDBOX" verify-code-only "$SNAP" --assert-head "$ORIGINAL_HEAD"
+"$PACKET" verify "$PKT" --identity "$IDENTITY" > /dev/null
+pass 'mode-only and staged executable changes survive export; index tampering refuses'
 mkdir -p "$EXPORT/.ai/deepseek-sessions"
 printf 'local provider receipt\n' > "$EXPORT/.ai/deepseek-sessions/receipt.json"
 "$SANDBOX" verify-code-only "$EXPORT" --assert-head "$ORIGINAL_HEAD"
