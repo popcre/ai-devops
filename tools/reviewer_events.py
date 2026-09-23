@@ -336,17 +336,15 @@ def write_sandbox_owner(marker, boundary, data, owner):
 
 
 def head_mismatch_detail(repo, expected_head, sandbox_head):
-    """Name the likely cause of a refused binding; never relaxes the refusal (shared-db#2829)."""
+    """Name which side moved when binding is refused; never relaxes the refusal (shared-db#2829)."""
+    current = git_value("-C", str(repo), "rev-parse", "HEAD")
     message = ("sandbox evidence head differs from invocation (invocation " + (expected_head or "unknown") +
-               ", sandbox " + (sandbox_head or "unreadable") + ")")
-    result = subprocess.run(["git", "-C", str(repo), "ls-files", "--others", "--exclude-standard", "-z"],
-                            capture_output=True, text=True, encoding="utf-8", errors="replace")
-    untracked = [p for p in result.stdout.split("\0") if p] if result.returncode == 0 else []
-    if untracked:
-        shown = ", ".join(untracked[:10]) + (" and " + str(len(untracked) - 10) + " more" if len(untracked) > 10 else "")
-        message += ("; the source worktree holds " + str(len(untracked)) + " untracked file(s) that may belong to "
-                    "another session: " + shown + ". Move them out of the worktree or review from a clean "
-                    "worktree, then rerun; the reviewer and the head are not at fault")
+               ", sandbox " + (sandbox_head or "unreadable") + ", source now " + (current or "unreadable") + ")")
+    if current and current != expected_head:
+        message += ("; the source worktree HEAD moved after the review started (a commit, checkout or merge "
+                    "landed mid-review). Rerun the review at the current head; the reviewer is not at fault")
+    elif current:
+        message += "; the source did not move, so the sandbox snapshot is at the wrong commit. Rerun the review"
     return message
 
 

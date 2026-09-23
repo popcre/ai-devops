@@ -722,26 +722,29 @@ wait "$job"
             with self.assertRaisesRegex(events.Blocked, "source"):
                 events.bind_sandbox(self.root, "grok", rid, checkout)
 
-    def test_sandbox_head_mismatch_names_foreign_untracked_files(self):
-        # shared-db#2829: the refusal stays, but it must name its real cause.
+    def test_sandbox_head_mismatch_names_moved_source_head(self):
+        # shared-db#2829: the refusal stays, but it must name which side moved.
         rid, checkout, _ = self.evidence_fixture()
         (checkout / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")
-        foreign = self.toolkit / "foreign-session-note-2829.txt"
-        foreign.write_text("another session's scratch file\n")
-        try:
-            with patch.object(events, "git_value", return_value="f" * 40):
-                with self.assertRaisesRegex(events.Blocked,
-                                            r"(?s)head differs from invocation.*untracked.*foreign-session-note-2829\.txt"):
-                    events.bind_sandbox(self.root, "grok", rid, checkout)
-            self.assertNotIn("grok:" + rid, (checkout / ".ai-review-sandbox").read_text())
-        finally:
-            foreign.unlink()
+        with patch.object(events, "git_value", return_value="f" * 40):
+            with self.assertRaisesRegex(events.Blocked,
+                                        r"(?s)head differs from invocation.*source now f{40}.*HEAD moved after the review started"):
+                events.bind_sandbox(self.root, "grok", rid, checkout)
+        self.assertNotIn("grok:" + rid, (checkout / ".ai-review-sandbox").read_text())
 
-    def test_matching_sandbox_head_never_scans_source_untracked_files(self):
+    def test_sandbox_head_mismatch_with_unmoved_source_blames_snapshot(self):
+        rid, checkout, _ = self.evidence_fixture()
+        (checkout / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")
+        heads = iter(["f" * 40, self.sha])
+        with patch.object(events, "git_value", side_effect=lambda *a: next(heads)):
+            with self.assertRaisesRegex(events.Blocked, r"sandbox snapshot is at the wrong commit"):
+                events.bind_sandbox(self.root, "grok", rid, checkout)
+
+    def test_matching_sandbox_head_never_runs_mismatch_diagnosis(self):
         rid, checkout, _ = self.evidence_fixture()
         (checkout / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")
         with patch.object(events, "git_value", return_value=self.sha), \
-                patch.object(events, "head_mismatch_detail", side_effect=AssertionError("scanned on match")):
+                patch.object(events, "head_mismatch_detail", side_effect=AssertionError("diagnosed on match")):
             events.bind_sandbox(self.root, "grok", rid, checkout)
         self.assertIn("grok:" + rid, (checkout / ".ai-review-sandbox").read_text())
 
