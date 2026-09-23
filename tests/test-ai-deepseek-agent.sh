@@ -307,14 +307,9 @@ if printf 'newline
   NL_OUT="$(DEEPSEEK_STUB_REPLY='x' run send newline-review --file "$HOSTILE_NL")"
   NL_ID="$(printf '%s
 ' "$NL_OUT"|sed -n 's/^SESSION_ID: //p')"
-  if python - "$TMP/repo/.ai/deepseek-sessions/$NL_ID.attachments" "$HOSTILE_NL" <<'PY'
-import os
-from pathlib import Path
-import sys
-
-assert Path(sys.argv[1]).read_bytes() == os.fsencode(sys.argv[2]) + b"\0"
-PY
-  then ok "an attachment name containing a newline is recorded as one exact entry"
+  if python -c 'import os, sys; assert sys.stdin.buffer.read() == os.fsencode(sys.argv[1]) + b"\0"' \
+      "$HOSTILE_NL" < "$TMP/repo/.ai/deepseek-sessions/$NL_ID.attachments"; then
+    ok "an attachment name containing a newline is recorded as one exact entry"
   else bad "an attachment name containing a newline is recorded as one exact entry"
   fi
   NL_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
