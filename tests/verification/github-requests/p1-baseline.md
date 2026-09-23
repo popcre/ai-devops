@@ -26,8 +26,8 @@ volume; a quiet sample today cannot satisfy it.
 and a 4 MiB daily ceiling. It does not request additional GitHub data. An
 independent non-waiting write lock protects complete records; lock contention,
 disk failure or capacity exhaustion emits a warning and leaves the command's
-status unchanged. A crash may leave that measurement lock and requires inspection
-and removal of that exact empty directory before collection resumes. This never
+status unchanged. A lock older than one minute is treated as left by a crash
+and cleared once, so collection resumes without manual repair. This never
 blocks request execution. Do not interpret missing samples as zero consumption.
 
 Labels are fixed allowlists. Bodies, arguments, query values, identifiers and

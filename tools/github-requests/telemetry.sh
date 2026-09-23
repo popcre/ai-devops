@@ -59,7 +59,13 @@ gh_measure_append(){
   # independent non-waiting lock; contention is a visible missing sample.
   [ ! -L "$dir" ] || return 1
   ( umask 077; mkdir -p "$dir" ) || return 1
-  mkdir "$dir/write.lock" 2>/dev/null || return 1
+  if ! mkdir "$dir/write.lock" 2>/dev/null; then
+    # A writer holds the lock for milliseconds; one older than a minute was
+    # left by a crash. Clear it once so measurement does not stop for good.
+    [ -n "$(find "$dir/write.lock" -maxdepth 0 -type d -mmin +1 2>/dev/null)" ] || return 1
+    rmdir "$dir/write.lock" 2>/dev/null
+    mkdir "$dir/write.lock" 2>/dev/null || return 1
+  fi
   local utc day
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1
   day="${utc:0:10}"

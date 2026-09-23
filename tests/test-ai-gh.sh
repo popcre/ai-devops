@@ -327,12 +327,14 @@ check 'telemetry_preserves_streams_and_status failure' "[ $rc -eq 8 ] && cmp '$T
 mkdir "$TMP/telemetry-state/measurements/write.lock"
 FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
 check 'telemetry failure is visible and preserves failed command status' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/terr' && cmp '$TMP/tout' '$TMP/expected-out'"
-rmdir "$TMP/telemetry-state/measurements/write.lock"
+touch -d '5 minutes ago' "$TMP/telemetry-state/measurements/write.lock"
+FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
+check 'a lock left by a crash is cleared and measurement resumes' "[ $rc -eq 8 ] && ! grep -q 'request measurement unavailable' '$TMP/terr' && [ ! -d '$TMP/telemetry-state/measurements/write.lock' ]"
 touch "$TMP/telemetry-state/measurements/2000-01-01.jsonl"
 "$GH" api graphql > /dev/null 2>/dev/null
 check 'telemetry retention removes only old owned date files' "[ ! -e '$TMP/telemetry-state/measurements/2000-01-01.jsonl' ] && jq -se '.[-1].bucket == \"graphql\" and .[-1].cli_executions == 1 and .[-1].principal == \"unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 python "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
-check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 3 and .opaque_cli_executions == 3 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 4 and .opaque_cli_executions == 4 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
 printf '{"operation":"FIXTURE_CANARY"}\n' > "$TMP/telemetry-state/measurements/2001-01-01.jsonl"
 python "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
 check 'request report rejects untrusted labels without reflecting them' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && ! grep -q FIXTURE_CANARY '$TMP/report-error'"
