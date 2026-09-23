@@ -605,6 +605,7 @@ LONG_NEW_OUT="$(run new "$LONG_NAME" --prompt "review this" 2>&1)"; LONG_NEW_RC=
 check "a 155-character session name completes a review" "test '$LONG_NEW_RC' -eq 0"
 LONG_ASK_OUT="$(run ask "$LONG_NAME" --prompt "follow up" 2>&1)"; LONG_ASK_RC=$?
 check "the long-name session resumes on ask" "test '$LONG_ASK_RC' -eq 0 && grep -q -- '--resume' '$TMP/argv.txt'"
+find "$AI_GROK_STATE_DIR" "$AI_REVIEW_SANDBOX_DIR" "$REPO/.ai" -print 2>/dev/null | awk -F/ 'length($NF)>110' | sed 's/^/  diagnostic: over-long name: /' | head -5 || true
 check "no state, sandbox, or report name exceeds 110 characters" "! find '$AI_GROK_STATE_DIR' '$AI_REVIEW_SANDBOX_DIR' '$REPO/.ai' -print 2>/dev/null | awk -F/ 'length(\$NF)>110{f=1} END{exit !f}'"
 
 # 4 -------------------------------------------------------------------------

@@ -336,6 +336,7 @@ check 'optional usage failure preserves successful paid response' "cd '$REPO' &&
 MUSE_LONG_NAME="long-$(printf 'n%.0s' $(seq 1 150))"
 check 'a 155-character session name completes a review' "cd '$REPO' && eval \"$ENV '$SCRIPT' new '$MUSE_LONG_NAME' --prompt test\" > '$TMP/long-name.log' 2>&1"
 check 'the long-name session resumes on ask' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask '$MUSE_LONG_NAME' --prompt again\" > '$TMP/long-name-ask.log' 2>&1"
+find "$TMP/state" "$TMP/sandboxes" "$REPO/.ai" -print 2>/dev/null | awk -F/ 'length($NF)>110' | sed 's/^/  diagnostic: over-long name: /' | head -5 || true
 check 'no state, sandbox, or report name exceeds 110 characters' "! find '$TMP/state' '$TMP/sandboxes' '$REPO/.ai' -print 2>/dev/null | awk -F/ 'length(\$NF)>110{f=1} END{exit !f}'"
 check 'invalid heartbeat creates no stuck new-session metadata' "test -z \"\$(find '$TMP/state' -type f -name '*invalid-heartbeat*' -print -quit 2>/dev/null)\""
 printf '\nbash: true\n' >> "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md"

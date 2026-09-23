@@ -432,6 +432,7 @@ LONG_ASK_OUT="$(run ask "$LONG_NAME" --prompt 'follow up' 2>&1)"; LONG_ASK_RC=$?
 [ "$LONG_ASK_RC" -eq 0 ] || printf '  diagnostic: long-name ask: %s
 ' "$LONG_ASK_OUT" | head -5
 check 'the long-name session resumes on ask' "test '$LONG_ASK_RC' -eq 0"
+find "$AI_QWEN_STATE_DIR" "${AI_REVIEW_SANDBOX_DIR:-$AI_QWEN_STATE_DIR}" "$REPO/.ai" -print 2>/dev/null | awk -F/ 'length($NF)>110' | sed 's/^/  diagnostic: over-long name: /' | head -5 || true
 check 'no state, sandbox, or report name exceeds 110 characters' "! find '$AI_QWEN_STATE_DIR' '${AI_REVIEW_SANDBOX_DIR:-$AI_QWEN_STATE_DIR}' '$REPO/.ai' -print 2>/dev/null | awk -F/ 'length(\$NF)>110{f=1} END{exit !f}'"
 
 echo publication-failure > "$TMP/mode"
