@@ -980,6 +980,29 @@ prepare_auth_link() { # SOURCE ISOLATED-HOME; publish without unlinking a live r
   [ "$source" -ef "$auth_home/auth.json" ]
 }
 
+grok_isolated_home() { # print the isolated GROK_HOME; it must share a volume with auth.json
+  # A hard link cannot cross volumes and Windows usually refuses native
+  # symlinks, so when the state directory was relocated to another drive the
+  # credential link could never be made and every paid turn died at start-up.
+  # Keep the isolated home beside the credential source in that case; never
+  # copy the credential itself.
+  if [ -n "${AI_GROK_ISOLATED_HOME:-}" ]; then printf '%s
+' "$AI_GROK_ISOLATED_HOME"; return 0; fi
+  local default="$STATE_DIR/isolated-home" auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" alt src_dev state_dev
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
+  state_dev="$(stat -L -c %d "$STATE_DIR" 2>/dev/null || true)"
+  if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then printf '%s
+' "$default"; return 0; fi
+  alt="$(dirname "$auth_dir")/.ai-grok-review-isolated-home"
+  if [ ! -d "$alt" ] && [ -d "$default" ]; then
+    # One-time seed so existing named sessions keep their Grok history.
+    mkdir -p "$alt.seed.$$" && (cd "$default" && tar --exclude=./auth.json -cf - .) | (cd "$alt.seed.$$" && tar -xf -)       && mv -T -- "$alt.seed.$$" "$alt" 2>/dev/null || rm -rf -- "$alt.seed.$$"
+  fi
+  printf '%s
+' "$alt"
+}
+
 run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   local repo="$1" out="$2" pf="$3" turns="$4" sid="${5:-}"
   local grok supervisor python_bin bash_bin; local -a grok_command; grok="$(resolve_grok)"
@@ -1020,7 +1043,8 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
       [ -n "$bash_bin" ] || die 'could not translate the current Bash executable for the Grok script launcher.'
       grok_command=("$bash_bin" "$grok") ;;
   esac
-  local isolated_home="$STATE_DIR/isolated-home" auth_source="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
+  local isolated_home auth_source="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
+  isolated_home="$(grok_isolated_home)"
   mkdir -p "$isolated_home"; chmod 700 "$isolated_home" 2>/dev/null || true
   if [ -f "$auth_source" ]; then
     prepare_auth_link "$auth_source" "$isolated_home" || die 'could not create a same-inode authentication link for the isolated Grok runtime; refusing to copy or persist credentials.'
@@ -1200,7 +1224,7 @@ terminal_reason() { # provider stop token -> stable diagnostic, without inferenc
 capture_terminal_evidence() { # bind native terminal metadata to this paid JSON result
   [ "$(jq -r '.stopReason // ""' "$1")" = cancelled ] || return 0
   local runtime; runtime="$(command -v python3 || command -v python)" || return 1
-  "$runtime" - "$1" "$STATE_DIR/isolated-home/sessions" <<'PY'
+  "$runtime" - "$1" "$(grok_isolated_home)/sessions" <<'PY'
 import hashlib,json,os,pathlib,re,sys
 result_path=pathlib.Path(sys.argv[1]); raw=result_path.read_bytes(); result=json.loads(raw)
 sid,request=result.get('sessionId'),result.get('requestId')
@@ -1877,7 +1901,7 @@ cmd_transcript() {
   rid="$(repo_id "$(repo_root)")"
   sid="$(jq -r .grok_session_id "$(find_meta "$rid" "$1")")"
   grok="$(resolve_grok)"
-  GROK_HOME="$STATE_DIR/isolated-home" env "${GROK_ISOLATION_ENV[@]}" "$grok" export "$sid" 2>/dev/null \
+  GROK_HOME="$(grok_isolated_home)" env "${GROK_ISOLATION_ENV[@]}" "$grok" export "$sid" 2>/dev/null \
     || die "'grok export $sid' failed. Verify the subcommand with: grok export --help"
 }
 
