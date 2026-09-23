@@ -6,6 +6,8 @@ SCRIPT="$ROOT/bin/ai-review-preflight"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 export AI_REVIEW_QUARANTINE_DIR="$TMP/state"
 # Wrapper mechanics are tested against a registry that carries every provider,
 # so these checks measure install health only. Registry membership itself is
