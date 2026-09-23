@@ -994,8 +994,7 @@ grok_isolated_home() { # print the isolated GROK_HOME; it must share a volume wi
   src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
   state_dev="$(stat -L -c %d "$STATE_DIR" 2>/dev/null || true)"
   if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then
-    printf '%s
-' "$default"; return 0
+    printf '%s\n' "$default"; return 0
   fi
   alt="$(dirname "$auth_dir")/.ai-grok-review-isolated-home"
   case "$alt" in /*|[A-Za-z]:*) ;; *) die "credential directory must be an absolute path to place the isolated Grok home: $auth_dir" ;; esac
@@ -1004,9 +1003,23 @@ grok_isolated_home() { # print the isolated GROK_HOME; it must share a volume wi
     (umask 077; mkdir -p -- "$alt") || die "could not create the isolated Grok home beside the credential: $alt"
     warn "state directory is on another volume than $auth_dir; isolated Grok home is $alt (earlier Grok session history stays under $default)"
   fi
-  chmod 700 "$alt" 2>/dev/null || true
-  printf '%s
-' "$alt"
+  [ -O "$alt" ] || die "refusing an isolated Grok home owned by another account: $alt"
+  chmod 700 "$alt" || die "could not restrict the isolated Grok home: $alt"
+  printf '%s\n' "$alt"
+}
+
+scrub_unselected_auth_links() { # scrub_unselected_auth_links CHOSEN_HOME
+  # Only one isolated home is live at a time. A credential link left in the
+  # other candidate (from before the volumes changed) is removed so no stale
+  # credential name outlives its use. Removing a hard link never touches the
+  # original credential.
+  local chosen="$1" auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" candidate
+  if [ -d "$auth_dir" ]; then auth_dir="$(cd -P -- "$auth_dir" && pwd -P)" || return 0; fi
+  for candidate in "$STATE_DIR/isolated-home" "$(dirname "$auth_dir")/.ai-grok-review-isolated-home"; do
+    [ -d "$candidate" ] && [ ! -L "$candidate" ] || continue
+    [ "$candidate" -ef "$chosen" ] && continue
+    rm -f -- "$candidate/auth.json"
+  done
 }
 
 run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
@@ -1057,6 +1070,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   else
     rm -f -- "$isolated_home/auth.json"
   fi
+  scrub_unselected_auth_links "$isolated_home"
   ACTIVE_ISOLATED_CWD="$(mktemp -d "${TMPDIR:-/tmp}/ai-grok-review-cwd.XXXXXX")"
   ACTIVE_ISOLATED_HOME="$(mktemp -d "$STATE_DIR/runtime-home.XXXXXX")"
   chmod 700 "$ACTIVE_ISOLATED_HOME" 2>/dev/null || true

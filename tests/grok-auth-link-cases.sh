@@ -104,7 +104,7 @@ make_link() { # TARGET LINK: symlink, or an NTFS junction on Git Bash without sy
 
 # Cross-volume state directory: the isolated home must follow the credential's
 # volume (a hard link cannot cross drives), and nothing is ever copied into it.
-sed -n '/^grok_isolated_home()/,/^}/p' "$ROOT/bin/ai-grok-review" > "$TMP/home.sh"
+sed -n '/^grok_isolated_home()/,/^}/p; /^scrub_unselected_auth_links()/,/^}/p' "$ROOT/bin/ai-grok-review" > "$TMP/home.sh"
 . "$TMP/home.sh"
 mkdir -p "$TMP/xv/user/.grok" "$TMP/xv/state/isolated-home/sessions"
 printf 'fixture-auth
@@ -122,10 +122,18 @@ printf 'kept
   test -z "$(find "$got" -mindepth 1 -print -quit)"   # nothing copied
   prepare_auth_link "$HOME/.grok/auth.json" "$got"
   test "$HOME/.grok/auth.json" -ef "$got/auth.json"
+  # A credential link stranded in the unselected home is scrubbed; the
+  # original and the live link are untouched.
+  ln "$HOME/.grok/auth.json" "$STATE_DIR/isolated-home/auth.json"
+  scrub_unselected_auth_links "$got"
+  test ! -e "$STATE_DIR/isolated-home/auth.json"
+  test "$HOME/.grok/auth.json" -ef "$got/auth.json"
+  test -f "$STATE_DIR/isolated-home/sessions/s1"
   rm -rf "$got"; mkdir -p "$TMP/xv/elsewhere"
   make_link "$TMP/xv/elsewhere" "$got"
   test -L "$got"
-  if (grok_isolated_home) >/dev/null 2>&1; then exit 1; fi
+  if (grok_isolated_home) >/dev/null 2>"$TMP/xv/err"; then exit 1; fi
+  grep -q 'refusing a symbolic link or junction' "$TMP/xv/err"
 )
 echo 'ok cross-volume state keeps the isolated home on the credential volume'
 

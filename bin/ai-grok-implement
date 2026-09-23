@@ -267,22 +267,17 @@ investigation_home_parent() { # print where the throwaway GROK_HOME may live
   # credential instead. The credential is still only ever hard-linked.
   local auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" parent src_dev state_dev
   mkdir -p "$IMPL_DIR" || return 1
-  [ ! -L "$IMPL_DIR" ] || { printf 'refusing a linked state directory: %s
-' "$IMPL_DIR" >&2; return 1; }
+  [ ! -L "$IMPL_DIR" ] || { printf 'refusing a linked state directory: %s\n' "$IMPL_DIR" >&2; return 1; }
   if [ -d "$auth_dir" ]; then auth_dir="$(cd -P -- "$auth_dir" && pwd -P)" || return 1; fi
   src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
   state_dev="$(stat -L -c %d "$IMPL_DIR" 2>/dev/null || true)"
-  if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then printf '%s
-' "$IMPL_DIR"; return 0; fi
-  case "$auth_dir" in /*|[A-Za-z]:*) ;; *) printf 'credential directory must be absolute: %s
-' "$auth_dir" >&2; return 1 ;; esac
+  if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then printf '%s\n' "$IMPL_DIR"; return 0; fi
+  case "$auth_dir" in /*|[A-Za-z]:*) ;; *) printf 'credential directory must be absolute: %s\n' "$auth_dir" >&2; return 1 ;; esac
   parent="$(dirname "$auth_dir")/.ai-grok-implement-homes"
-  [ ! -L "$parent" ] || { printf 'refusing a linked investigation home parent: %s
-' "$parent" >&2; return 1; }
+  [ ! -L "$parent" ] || { printf 'refusing a linked investigation home parent: %s\n' "$parent" >&2; return 1; }
   (umask 077; mkdir -p -- "$parent") || return 1
   chmod 700 "$parent" 2>/dev/null || true
-  printf '%s
-' "$parent"
+  printf '%s\n' "$parent"
 }
 
 investigation_home_root() { # create and print a fresh private investigation home
