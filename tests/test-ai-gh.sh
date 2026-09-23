@@ -208,7 +208,7 @@ rm -rf "$TMP/state/lock.d"
 # the owner record. A spacing timer can expire before a loaded Windows runner
 # observes the lock, making the old test overwrite an already-released lock.
 rm -f "$TMP/state/backoff_until"
-mkfifo "$TMP/state/backoff_until"
+mkfifo "$TMP/state/backoff_until" || { bad 'release test created its acquisition barrier'; exit 1; }
 AI_GH_MIN_SPACING_SECONDS=0 "$GH" relcheck >/dev/null 2>&1 & rp=$!
 held=0
 for i in $(seq 1 600); do
@@ -223,7 +223,7 @@ if [ "$held" -eq 1 ]; then
   check 'release (real script) leaves a lock that another owner now holds' "grep -q newowner '$TMP/state/lock.d/owner'"
 else
   bad 'release (real script) acquired its own lock before owner replacement'
-  kill "$rp" 2>/dev/null || true
+  kill -KILL "$rp" 2>/dev/null || true
   wait "$rp" 2>/dev/null || true
 fi
 rm -f "$TMP/state/backoff_until"
@@ -278,7 +278,10 @@ check 'wait exits 0 when the state matches' "[ $rc -eq 0 ] && grep -q completed 
 check 'wait default interval is at least 300 seconds' "grep -q '^INTERVAL=300' '$WAIT' && grep -q '^MIN=300' '$WAIT'"
 "$GH" pr checks 1 --watch=true >/dev/null 2>&1; rc=$?
 check '--watch=VALUE is refused too' "[ $rc -eq 2 ]"
-: > "$FAKE_LOG"; echo 0 > "$FAKE_COUNT"; echo $(( $(date +%s) + 3 )) > "$TMP/state/backoff_until"
+: > "$FAKE_LOG"; echo 0 > "$FAKE_COUNT"
+# Leave enough lead for a loaded Windows runner to start ai-gh-wait before
+# this artificial back-off expires; otherwise the test never exercises it.
+echo $(( $(date +%s) + 15 )) > "$TMP/state/backoff_until"
 AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 FAKE_MODE=counter timeout 60 "$WAIT" --until-regex completed --interval 1 --timeout-minutes 1 -- run view 1 > "$TMP/wout" 2> "$TMP/werr"; rc=$?
 check 'wait stretches its delay through a recorded back-off, then succeeds' "[ $rc -eq 0 ] && grep -q 'back-off active' '$TMP/werr'"
 rm -f "$TMP/state/backoff_until"
