@@ -29,13 +29,17 @@ cat > "$TMP/bin/packet" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- resolve) exec "$REAL_REVIEW_PACKET" "$@" ;;
+ resolve) if [ -n "${MOCK_RESOLVE_JSON:-}" ]; then printf '%s\n' "$MOCK_RESOLVE_JSON"; else exec "$REAL_REVIEW_PACKET" "$@"; fi ;;
  build) [ -z "${MOCK_PACKET_BUILD_SLEEP:-}" ] || sleep "$MOCK_PACKET_BUILD_SLEEP"; p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
  verify)
    test -s "$2/MANIFEST.sha256"
    if [ -f "$2/identity.json" ]; then
      root="$(jq -r .repository "$2/identity.json")"
-     current="$("$REAL_REVIEW_PACKET" resolve "$root" --assert-head "$(jq -r .head "$2/identity.json")")"
+     if [ -n "${MOCK_RESOLVE_JSON:-}" ]; then
+       current="$MOCK_RESOLVE_JSON"
+     else
+       current="$("$REAL_REVIEW_PACKET" resolve "$root" --assert-head "$(jq -r .head "$2/identity.json")")"
+     fi
      jq -e --argjson current "$current" '.repository==$current.repository and .head==$current.head and .source_digest==$current.source_digest' "$2/identity.json" >/dev/null
    fi ;;
  path) printf %s "$2/.ai-review-$3" ;;
@@ -231,14 +235,23 @@ echo '== prepare-phase terminal timeout bounds'
 # into an indefinite stall. Each prepare step must now die in time, name
 # itself, and leave neither a session record nor a held lock behind.
 SLOW_SNAP="$TMP/repo-slow-snap"; make_repo "$SLOW_SNAP"
-set +e; SLOW_SNAP_START=$SECONDS; SLOW_SNAP_OUT="$(cd "$SLOW_SNAP" && MOCK_ENSURE_COPY_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-snap --prompt review 2>&1)"; SLOW_SNAP_RC=$?; SLOW_SNAP_ELAPSED=$((SECONDS-SLOW_SNAP_START)); set -e
+SLOW_SNAP_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_SNAP")"
+set +e; SLOW_SNAP_START=$SECONDS; SLOW_SNAP_OUT="$(cd "$SLOW_SNAP" && MOCK_RESOLVE_JSON="$SLOW_SNAP_IDENTITY" MOCK_ENSURE_COPY_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-snap --prompt review 2>&1)"; SLOW_SNAP_RC=$?; SLOW_SNAP_ELAPSED=$((SECONDS-SLOW_SNAP_START)); set -e
 check 'a stalled snapshot step fails in time instead of hanging' "test '$SLOW_SNAP_RC' -ne 0 && test '$SLOW_SNAP_ELAPSED' -lt $(budget 2 30)"
 check 'the snapshot timeout names the step and the bound' "printf '%s' '$SLOW_SNAP_OUT' | grep -q 'snapshot build failed or timed out after 2s'"
 check 'a timed-out prepare starts no session and holds no lock' "test -z \"\$(meta_for slow-snap)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-snap*' -print -quit 2>/dev/null)\""
 SLOW_PKT="$TMP/repo-slow-pkt"; make_repo "$SLOW_PKT"
-set +e; SLOW_PKT_OUT="$(cd "$SLOW_PKT" && MOCK_PACKET_BUILD_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-pkt --prompt review 2>&1)"; SLOW_PKT_RC=$?; set -e
+# Resolve the fixture's real source identity before the 2s build assertion.
+# On a loaded Windows host, an earlier prepare stage can consume that entire
+# bound before the deliberate stall starts; other cases exercise live resolve.
+SLOW_PKT_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_PKT")"
+set +e; SLOW_PKT_OUT="$(cd "$SLOW_PKT" && MOCK_RESOLVE_JSON="$SLOW_PKT_IDENTITY" MOCK_PACKET_BUILD_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-pkt --prompt review 2>&1)"; SLOW_PKT_RC=$?; set -e
+if [ "$SLOW_PKT_RC" -eq 0 ] || ! grep -q 'packet build failed or timed out after 2s' <<<"$SLOW_PKT_OUT" || [ -n "$(meta_for slow-pkt)" ]; then
+  printf 'slow-pkt diagnostic: rc=%s meta=%s output=%s\n' "$SLOW_PKT_RC" "$(meta_for slow-pkt)" "$SLOW_PKT_OUT" >&2
+fi
 check 'a stalled packet build fails in time and names the step' "test '$SLOW_PKT_RC' -ne 0 && printf '%s' '$SLOW_PKT_OUT' | grep -q 'packet build failed or timed out after 2s' && test -z \"\$(meta_for slow-pkt)\""
 SLOW_INV="$TMP/repo-slow-inv"; make_repo "$SLOW_INV"; printf slow > "$SLOW_INV/inventory-slow-trigger"
+SLOW_INV_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_INV")"
 mkdir -p "$TMP/slow-bin"
 cat > "$TMP/slow-bin/sha256sum" <<'EOF'
 #!/usr/bin/env bash
@@ -250,7 +263,10 @@ case "$*" in *"-- ./inventory-slow-trigger") sleep 15 ;; esac
 exec "$REAL_SHA256SUM_BIN" "$@"
 EOF
 chmod +x "$TMP/slow-bin/sha256sum"
-set +e; SLOW_INV_START=$SECONDS; SLOW_INV_OUT="$(cd "$SLOW_INV" && PATH="$TMP/slow-bin:$PATH" REAL_SHA256SUM_BIN="$REAL_SHA256SUM" AI_GEMINI_PREPARE_TIMEOUT=2s MOCK_MODE=normal "$SCRIPT" new slow-inv --prompt review 2>&1)"; SLOW_INV_RC=$?; SLOW_INV_ELAPSED=$((SECONDS-SLOW_INV_START)); set -e
+set +e; SLOW_INV_START=$SECONDS; SLOW_INV_OUT="$(cd "$SLOW_INV" && PATH="$TMP/slow-bin:$PATH" REAL_SHA256SUM_BIN="$REAL_SHA256SUM" MOCK_RESOLVE_JSON="$SLOW_INV_IDENTITY" AI_GEMINI_PREPARE_TIMEOUT=2s MOCK_MODE=normal "$SCRIPT" new slow-inv --prompt review 2>&1)"; SLOW_INV_RC=$?; SLOW_INV_ELAPSED=$((SECONDS-SLOW_INV_START)); set -e
+if [ "$SLOW_INV_RC" -eq 0 ] || ! grep -q 'inventory failed or timed out after 2s' <<<"$SLOW_INV_OUT" || [ -n "$(meta_for slow-inv)" ]; then
+  printf 'slow-inv diagnostic: rc=%s meta=%s output=%s\n' "$SLOW_INV_RC" "$(meta_for slow-inv)" "$SLOW_INV_OUT" >&2
+fi
 check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test '$SLOW_INV_ELAPSED' -lt $(budget 2 30)"
 check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory failed or timed out after 2s'"
 check 'a timed-out inventory starts no session and holds no lock' "test -z \"\$(meta_for slow-inv)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-inv*' -print -quit 2>/dev/null)\""

@@ -121,6 +121,15 @@ ai-install-skills --keep-orphans
 ai-install-skills --adopt-globals
 ```
 
+For a narrow refresh, use `ai-install-skills --only shared-db-orchestrator
+--only shared-db-handover` (Git Bash on Windows). Repeat `--only` for each exact
+skill name; unknown names and selected shared/client collisions fail before any
+writes. `--dry-run` previews the same selection. Scoped refresh retains normal
+local-edit backups and the install audit log, but does not touch unrelated
+skills, retired skills, globals, Git identity, or command launchers. Codex is
+still skipped when its home directory is absent. `--adopt-globals` and `--log`
+cannot be combined with `--only`. Omitting `--only` retains full installation.
+
 On Windows, `bin/install-ai-devops-windows.ps1 -SkillsDryRun` previews skill and
 global operations and skips repository, tool, and login work. Both installers
 retire skills automatically: any skill they previously installed (marked with a
