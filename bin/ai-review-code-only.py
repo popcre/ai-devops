@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -118,6 +119,39 @@ def current_bytes(source, path):
     return value
 
 
+def index_mode(source, path):
+    rows = [row for row in git(source, "ls-files", "--stage", "-z", "--", path).split(b"\0") if row]
+    if len(rows) > 1:
+        fail("unmerged approved path refused")
+    if rows:
+        metadata, name = rows[0].split(b"\t", 1)
+        if name.decode("utf-8", "surrogateescape") != path:
+            fail("nonexact approved index path")
+        mode, _, stage = metadata.split(b" ")
+        if stage != b"0" or mode not in {b"100644", b"100755"}:
+            fail("invalid approved index mode")
+        return mode.decode()
+    return None
+
+
+def current_mode(source, path):
+    """Use Git's staged mode, except for filesystem mode changes Git can observe."""
+    item = source.joinpath(*path.split("/"))
+    if not item.exists():
+        return None
+    if item.is_symlink() or not item.is_file():
+        fail("nonfile approved path refused")
+    staged_mode = index_mode(source, path)
+    # On Windows Git commonly has core.filemode=false. Its index is then the
+    # only trustworthy executable bit for tracked paths; on other filesystems
+    # a dirty chmod can be read from the file itself.
+    filemode = git(source, "config", "--bool", "core.filemode", check=False)
+    filesystem_mode = "100755" if item.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH) else "100644"
+    if staged_mode and (os.name == "nt" or filemode.stdout.strip() != b"true"):
+        return staged_mode
+    return filesystem_mode
+
+
 def validate_text(value):
     if len(value) > 1_048_576 or b"\0" in value:
         fail("oversized or binary approved path refused")
@@ -142,17 +176,21 @@ def manifest_for(source, paths, head, base):
         if base_mode:
             validate_text(git(source, "show", f"{base}:{path}"))
         entries.append({"path": path, "current_sha256": digest(value) if value is not None else None,
+                        "current_mode": current_mode(source, path) if value is not None else None,
                         "base_mode": base_mode.decode() if base_mode else None,
                         "head_mode": head_mode.decode() if head_mode else None})
     return entries
 
 
 def write_tree(stage, source, paths, base=None):
+    modes = {}
     for path in paths:
         if base is None:
             value = current_bytes(source, path)
+            mode = current_mode(source, path) if value is not None else None
         else:
-            value = git(source, "show", f"{base}:{path}") if tree_mode(source, base, path) else None
+            mode = tree_mode(source, base, path)
+            value = git(source, "show", f"{base}:{path}") if mode else None
         target = stage.joinpath(*path.split("/"))
         if value is None:
             if target.exists():
@@ -160,10 +198,15 @@ def write_tree(stage, source, paths, base=None):
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(value)
+        modes[path] = mode.decode() if isinstance(mode, bytes) else mode
+        target.chmod(0o755 if modes[path] == "100755" else 0o644)
+    return modes
 
 
-def commit(stage, label):
+def commit(stage, label, modes):
     git(stage, "add", "--all")
+    for path, mode in modes.items():
+        git(stage, "update-index", "--chmod=" + ("+x" if mode == "100755" else "-x"), "--", path)
     env = dict(os.environ, GIT_AUTHOR_NAME="Code Review Export", GIT_AUTHOR_EMAIL="export@invalid.local",
                GIT_COMMITTER_NAME="Code Review Export", GIT_COMMITTER_EMAIL="export@invalid.local")
     proc = subprocess.run(["git", "-C", str(stage), "commit", "--quiet", "--allow-empty", "-m", label],
@@ -247,8 +290,17 @@ def validate_snapshot(stage, expected=None):
         expected_value = current_bytes(source, path)
         if value != expected_value:
             fail("synthetic file content mismatch")
-        tree_mode(stage, "HEAD", path)
-        tree_mode(stage, "HEAD^", path)
+        actual_head_mode = tree_mode(stage, "HEAD", path)
+        actual_base_mode = tree_mode(stage, "HEAD^", path)
+        expected_head_mode = current_mode(source, path).encode() if value is not None else None
+        if actual_head_mode != expected_head_mode:
+            fail("synthetic current file mode mismatch")
+        if (index_mode(stage, path) or "").encode() != (expected_head_mode or b""):
+            fail("synthetic index file mode mismatch")
+        if value is not None and current_mode(stage, path).encode() != expected_head_mode:
+            fail("synthetic working file mode mismatch")
+        if actual_base_mode != tree_mode(source, base, path):
+            fail("synthetic baseline file mode mismatch")
         source_base = git(source, "show", f"{base}:{path}") if tree_mode(source, base, path) else None
         export_base = git(stage, "show", f"HEAD^:{path}") if tree_mode(stage, "HEAD^", path) else None
         if source_base != export_base:
@@ -296,10 +348,10 @@ def create(args):
     stage.mkdir(parents=True)
     git(stage, "init", "--quiet")
     git(stage, "config", "--local", "core.autocrlf", "false")
-    write_tree(stage, source, paths, base)
-    commit(stage, "Approved code baseline")
-    write_tree(stage, source, paths)
-    commit(stage, "Approved code under review")
+    baseline_modes = write_tree(stage, source, paths, base)
+    commit(stage, "Approved code baseline", baseline_modes)
+    current_modes = write_tree(stage, source, paths)
+    commit(stage, "Approved code under review", current_modes)
     if git(source, "rev-parse", "HEAD").decode().strip() != head or source_digest(source) != source_before:
         fail("original source changed during export")
     record = {"schema_version": 1, "mode": "code-only", "source_id": digest(str(source).encode()), "original_head": head,
