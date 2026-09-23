@@ -199,10 +199,13 @@ jobs:
     # Four sections since the Kimi CI suspension (2026-09-17): the indivisible
     # Kimi suite that owned a dedicated section is suspended in
     # config/ci-suite-manifest.json while the provider is out of credit, so the
-    # lane is rebalanced over the remaining four sections under the same
-    # 40-minute ceiling. The suite file is retained and returns by removing its
+    # lane is rebalanced over the remaining four sections. The former
+    # 40-minute ceiling no longer fits section 4: PR #678's Phase C additions
+    # took its slowest Bash suite to ~40 minutes alone (run 35800378021 hit
+    # the wall twice on 2026-09-23, the first time with failures=0 printed at
+    # the wire). The suite file is retained and returns by removing its
     # suspended_bash entry.
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
