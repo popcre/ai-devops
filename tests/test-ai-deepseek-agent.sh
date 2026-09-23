@@ -13,7 +13,7 @@ PASS=0; FAIL=0; SKIP=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
 ai_test_measure_spawn_baseline
 # A case the filesystem cannot host is not a passing check.
-TMP="$(mktemp -d)"; trap 'rc=$?; if [ "$rc" -ne 0 ]; then printf "synthetic classifier: %s\n" "$(command -v ai-task-gates 2>/dev/null || true)"; tail -n 8 "$TMP/public-identity-bin/classification.trace" 2>/dev/null || true; fi; rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
@@ -310,6 +310,8 @@ APPROVE' run send newline-review --review --file "$HOSTILE_NL")"
   NL_ID="$(printf '%s
 ' "$NL_OUT"|sed -n 's/^SESSION_ID: //p')"
   check "an attachment name containing a newline is recorded as one exact entry" "jq -e --arg f \"$HOSTILE_NL\" '(.attached_files|length)==1 and .attached_files==[\$f]' '$TMP/repo/.ai/deepseek-sessions/$NL_ID.meta.json'"
+  # The later source-identity review requires a line-safe complete path inventory.
+  rm -f -- "$TMP/repo/$HOSTILE_NL"
 else
   skip "attachment name containing a newline unsupported by this filesystem"
 fi
