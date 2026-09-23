@@ -204,14 +204,29 @@ AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 "$GH" z >/dev/null 2>&1; rc=$?
 check 'a fresh lock is not stolen even if its pid looks dead; NO_WAIT gives up with 75' "[ $rc -eq 75 ] && grep -q other '$TMP/state/lock.d/owner'"
 rm -rf "$TMP/state/lock.d"
 # Behavioural: a holder's release must not remove a lock that now belongs to another owner.
-# Real script: while it holds the lock during its spacing sleep, the owner record
-# is replaced; its release must leave that other owner's lock in place.
-echo $(( $(date +%s%3N) )) > "$TMP/state/last_call_ms"
-AI_GH_MIN_SPACING_SECONDS=5 "$GH" relcheck >/dev/null 2>&1 & rp=$!
-for i in $(seq 1 200); do [ -s "$TMP/state/lock.d/owner" ] && break; sleep 0.05; done
-echo "1 $(date +%s) newowner" > "$TMP/state/lock.d/owner"
-wait "$rp"
-check 'release (real script) leaves a lock that another owner now holds' "grep -q newowner '$TMP/state/lock.d/owner'"
+# Real script: hold its post-acquisition back-off read at a FIFO, then replace
+# the owner record. A spacing timer can expire before a loaded Windows runner
+# observes the lock, making the old test overwrite an already-released lock.
+rm -f "$TMP/state/backoff_until"
+mkfifo "$TMP/state/backoff_until" || { bad 'release test created its acquisition barrier'; exit 1; }
+AI_GH_MIN_SPACING_SECONDS=0 "$GH" relcheck >/dev/null 2>&1 & rp=$!
+held=0
+for i in $(seq 1 600); do
+  if [ -s "$TMP/state/lock.d/owner" ] && [ "$(awk '{print $1}' "$TMP/state/lock.d/owner")" = "$rp" ]; then held=1; break; fi
+  kill -0 "$rp" 2>/dev/null || break
+  sleep 0.05
+done
+if [ "$held" -eq 1 ]; then
+  echo "1 $(date +%s) newowner" > "$TMP/state/lock.d/owner"
+  printf '0\n' > "$TMP/state/backoff_until"
+  wait "$rp"
+  check 'release (real script) leaves a lock that another owner now holds' "grep -q newowner '$TMP/state/lock.d/owner'"
+else
+  bad 'release (real script) acquired its own lock before owner replacement'
+  kill -KILL "$rp" 2>/dev/null || true
+  wait "$rp" 2>/dev/null || true
+fi
+rm -f "$TMP/state/backoff_until"
 # A lock that keeps looking abandoned but cannot be reclaimed must not trap a NO_WAIT caller.
 mkdir -p "$TMP/state/lock.d" "$TMP/state/lock.d.reclaim"; echo "1 $(( $(date +%s) - 400 )) stuck" > "$TMP/state/lock.d/owner"
 AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 timeout 30 "$GH" z >/dev/null 2>&1; rc=$?
@@ -263,7 +278,10 @@ check 'wait exits 0 when the state matches' "[ $rc -eq 0 ] && grep -q completed 
 check 'wait default interval is at least 300 seconds' "grep -q '^INTERVAL=300' '$WAIT' && grep -q '^MIN=300' '$WAIT'"
 "$GH" pr checks 1 --watch=true >/dev/null 2>&1; rc=$?
 check '--watch=VALUE is refused too' "[ $rc -eq 2 ]"
-: > "$FAKE_LOG"; echo 0 > "$FAKE_COUNT"; echo $(( $(date +%s) + 3 )) > "$TMP/state/backoff_until"
+: > "$FAKE_LOG"; echo 0 > "$FAKE_COUNT"
+# Leave enough lead for a loaded Windows runner to start ai-gh-wait before
+# this artificial back-off expires; otherwise the test never exercises it.
+echo $(( $(date +%s) + 15 )) > "$TMP/state/backoff_until"
 AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 FAKE_MODE=counter timeout 60 "$WAIT" --until-regex completed --interval 1 --timeout-minutes 1 -- run view 1 > "$TMP/wout" 2> "$TMP/werr"; rc=$?
 check 'wait stretches its delay through a recorded back-off, then succeeds' "[ $rc -eq 0 ] && grep -q 'back-off active' '$TMP/werr'"
 rm -f "$TMP/state/backoff_until"

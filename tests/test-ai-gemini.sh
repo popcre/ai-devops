@@ -32,6 +32,9 @@ case "$1" in
  resolve) if [ -n "${MOCK_RESOLVE_JSON:-}" ]; then printf '%s\n' "$MOCK_RESOLVE_JSON"; else exec "$REAL_REVIEW_PACKET" "$@"; fi ;;
  build) [ -z "${MOCK_PACKET_BUILD_SLEEP:-}" ] || sleep "$MOCK_PACKET_BUILD_SLEEP"; p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
  verify)
+   # The slow-inventory fixture isolates its own 2s bound. Packet verification
+   # is exercised by the other cases and can exceed 2s on a loaded Windows host.
+   [ "$MOCK_PACKET_VERIFY_FAST" != 1 ] || exit 0
    test -s "$2/MANIFEST.sha256"
    if [ -f "$2/identity.json" ]; then
      root="$(jq -r .repository "$2/identity.json")"
@@ -120,14 +123,17 @@ RACE_AGY="$TMP/bin/agy-race"; cp "$AI_GEMINI_BIN" "$RACE_AGY"; chmod +x "$RACE_A
 write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"
 RACE_REPO="$TMP/race-repo"; make_repo "$RACE_REPO"
 check 'runtime replacement after startup gate is refused before provider contact' "! (cd '$RACE_REPO' && AI_GEMINI_BIN='$RACE_AGY' MOCK_MUTATE_RUNTIME_AFTER_GATE=1 '$SCRIPT' new runtime-race --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
-REAL_SHA256SUM="$(command -v sha256sum)"; mkdir -p "$TMP/race-bin"; printf inventory-trigger > "$RACE_REPO/inventory-race-trigger"
-cat > "$TMP/race-bin/sha256sum" <<'EOF'
+REAL_PYTHON3="$(command -v python3)"; mkdir -p "$TMP/race-bin"; printf inventory-trigger > "$RACE_REPO/inventory-race-trigger"
+cat > "$TMP/race-bin/python3" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *inventory-race-trigger*) if [ ! -e "$MOCK_INVENTORY_RACE_DONE" ]; then printf '\n# changed during inventory\n' >> "$AI_GEMINI_BIN"; : > "$MOCK_INVENTORY_RACE_DONE"; fi;; esac
-exec "$REAL_SHA256SUM" "$@"
+if [ "$1:$2" = "-:review" ] && [ ! -e "$0.done" ]; then
+  printf '\n# changed during inventory\n' >> "$AI_GEMINI_BIN"
+  : > "$0.done"
+fi
 EOF
-chmod +x "$TMP/race-bin/sha256sum"; cp "$TMP/bin/agy" "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"; write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"; : > "$MOCK_AGY_CALLS"
-check 'runtime replacement during inventory is refused before provider contact' "! (cd '$RACE_REPO' && PATH='$TMP/race-bin':\"\$PATH\" REAL_SHA256SUM='$REAL_SHA256SUM' MOCK_INVENTORY_RACE_DONE='$TMP/inventory-race-done' AI_GEMINI_BIN='$RACE_AGY' '$SCRIPT' new inventory-runtime-race --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
+printf 'exec %q "$@"\n' "$REAL_PYTHON3" >> "$TMP/race-bin/python3"
+chmod +x "$TMP/race-bin/python3"; cp "$TMP/bin/agy" "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"; write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"; : > "$MOCK_AGY_CALLS"
+check 'runtime replacement during inventory is refused before provider contact' "! (cd '$RACE_REPO' && PATH='$TMP/race-bin':\"\$PATH\" AI_GEMINI_BIN='$RACE_AGY' '$SCRIPT' new inventory-runtime-race --prompt review) && test -f '$TMP/race-bin/python3.done' && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.15
 check 'agy version drift re-quarantines before provider contact' "! '$SCRIPT' new stale-runtime --prompt review && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.14 gemini-other
@@ -230,9 +236,8 @@ check 'interrupted private copy is preserved' "test -d \"\$(jq -r .review_dir \"
 
 echo '== prepare-phase terminal timeout bounds'
 # 2026-09-18: governed reviews on edge-dev hung for hours BEFORE any session
-# metadata existed. Every prepare pass was unbounded, and the byte inventories
-# spawn one process per file, so a loaded Windows host turns a large snapshot
-# into an indefinite stall. Each prepare step must now die in time, name
+# metadata existed. Every prepare pass was unbounded. Each prepare step must
+# still die in time, name
 # itself, and leave neither a session record nor a held lock behind.
 SLOW_SNAP="$TMP/repo-slow-snap"; make_repo "$SLOW_SNAP"
 SLOW_SNAP_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_SNAP")"
@@ -253,21 +258,24 @@ check 'a stalled packet build fails in time and names the step' "test '$SLOW_PKT
 SLOW_INV="$TMP/repo-slow-inv"; make_repo "$SLOW_INV"; printf slow > "$SLOW_INV/inventory-slow-trigger"
 SLOW_INV_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_INV")"
 mkdir -p "$TMP/slow-bin"
-cat > "$TMP/slow-bin/sha256sum" <<'EOF'
+cat > "$TMP/slow-bin/python3" <<'EOF'
 #!/usr/bin/env bash
-# Stall only the wrapper's review-copy inventory, which hashes the copied
-# trigger as the relative path './inventory-slow-trigger' behind a '--'
-# separator. Absolute-path hashes of the same file (ai-review-packet resolve
-# runs earlier in new() and must NOT stall) do not match this shape.
-case "$*" in *"-- ./inventory-slow-trigger") sleep 15 ;; esac
-exec "$REAL_SHA256SUM_BIN" "$@"
+# Stall only the batched review-copy inventory. Packet resolution may also
+# invoke Python, but never with the exact "- review" inventory arguments.
+if [ "$1:$2" = "-:review" ]; then
+  printf '%(%s)T\n' -1 > "$0.start"
+  sleep 120
+fi
 EOF
-chmod +x "$TMP/slow-bin/sha256sum"
-set +e; SLOW_INV_START=$SECONDS; SLOW_INV_OUT="$(cd "$SLOW_INV" && PATH="$TMP/slow-bin:$PATH" REAL_SHA256SUM_BIN="$REAL_SHA256SUM" MOCK_RESOLVE_JSON="$SLOW_INV_IDENTITY" AI_GEMINI_PREPARE_TIMEOUT=2s MOCK_MODE=normal "$SCRIPT" new slow-inv --prompt review 2>&1)"; SLOW_INV_RC=$?; SLOW_INV_ELAPSED=$((SECONDS-SLOW_INV_START)); set -e
+printf 'exec %q "$@"\n' "$REAL_PYTHON3" >> "$TMP/slow-bin/python3"
+chmod +x "$TMP/slow-bin/python3"
+set +e; SLOW_INV_OUT="$(cd "$SLOW_INV" && PATH="$TMP/slow-bin:$PATH" MOCK_PACKET_VERIFY_FAST=1 MOCK_RESOLVE_JSON="$SLOW_INV_IDENTITY" AI_GEMINI_PREPARE_TIMEOUT=2s MOCK_MODE=normal "$SCRIPT" new slow-inv --prompt review 2>&1)"; SLOW_INV_RC=$?; set -e
+SLOW_INV_STAGE_START="$(cat "$TMP/slow-bin/python3.start" 2>/dev/null || printf 0)"
+SLOW_INV_STAGE_ELAPSED=$(( $(date +%s) - SLOW_INV_STAGE_START ))
 if [ "$SLOW_INV_RC" -eq 0 ] || ! grep -q 'inventory failed or timed out after 2s' <<<"$SLOW_INV_OUT" || [ -n "$(meta_for slow-inv)" ]; then
   printf 'slow-inv diagnostic: rc=%s meta=%s output=%s\n' "$SLOW_INV_RC" "$(meta_for slow-inv)" "$SLOW_INV_OUT" >&2
 fi
-check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test '$SLOW_INV_ELAPSED' -lt $(budget 2 30)"
+check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test -s '$TMP/slow-bin/python3.start' && test '$SLOW_INV_STAGE_ELAPSED' -lt $(budget 2 30)"
 check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory failed or timed out after 2s'"
 check 'a timed-out inventory starts no session and holds no lock' "test -z \"\$(meta_for slow-inv)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-inv*' -print -quit 2>/dev/null)\""
 R7="$TMP/repo7"; make_repo "$R7"; new_run "$R7" stale normal >/dev/null; printf next >> "$R7/file.txt"; git -C "$R7" add file.txt; git -C "$R7" commit -qm next
@@ -283,6 +291,10 @@ R10="$TMP/repo10"; make_repo "$R10"; new_run "$R10" source-ignored normal >/dev/
 check 'follow-up refuses ignored protected-source drift' "! (cd '$R10' && '$SCRIPT' ask source-ignored --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 R11="$TMP/repo11"; make_repo "$R11"; new_run "$R11" source-runtime normal >/dev/null; mkdir -p "$R11/.ai/reviews" "$R11/.ai/test-runs" "$R11/.ai/qwen-test.123"; printf report > "$R11/.ai/reviews/other-review.md"; printf log > "$R11/.ai/test-runs/test.log"; printf runtime > "$R11/.ai/qwen-test.123/state"
 check 'wrapper-owned .ai runtime evidence does not create false source drift' "cd '$R11' && '$SCRIPT' ask source-runtime --prompt later"
+mkdir -p "$R11/.ai-review-generated"
+printf 'packet\n' > "$R11/.ai-review-generated/.ai-review-packet"
+printf 'generated\n' > "$R11/.ai-review-generated/MANIFEST.md"
+check 'marked review packet does not create false source drift' "cd '$R11' && '$SCRIPT' ask source-runtime --prompt later"
 mkdir -p "$R11/.ai-review-user-source"; printf source > "$R11/.ai-review-user-source/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'similarly prefixed user source refuses before provider contact' "! (cd '$R11' && '$SCRIPT' ask source-runtime --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 SUBSOURCE="$TMP/subsource"; make_repo "$SUBSOURCE"; SUBPARENT="$TMP/subparent"; make_repo "$SUBPARENT"; git -C "$SUBPARENT" -c protocol.file.allow=always submodule add -q "$SUBSOURCE" module; git -C "$SUBPARENT" commit -qam gitlink; new_run "$SUBPARENT" source-gitlink normal >/dev/null; printf changed >> "$SUBPARENT/module/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"

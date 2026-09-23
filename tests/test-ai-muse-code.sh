@@ -81,6 +81,7 @@ write_catalog
 
 check 'unknown engine refuses before any work' "cd '$REPO' && ! eval \"$ENV AI_MUSE_ENGINE=bogus '$SCRIPT' doctor\" 2>&1 | grep -q PASS"
 check 'reviewer_usage muse-code adapter unit cases' "'$PYTHON' '$ROOT/tests/fixtures/muse-code/usage_cases.py' -q"
+check 'deletion admission refuses inaccessible parents without claiming absent stores' "bash '$ROOT/tests/fixtures/muse-code/delete_cases.sh'"
 check 'default engine stays OpenCode' "cd '$REPO' && eval \"USERPROFILE='$HOME_FIX' PATH='$TMP/bin:$PATH' AI_MUSE_CALLER=claude '$SCRIPT' doctor\" 2>&1 | grep -q 'engine: opencode'"
 check 'doctor proves the pinned Muse Code version' "cd '$REPO' && eval \"$ENV '$SCRIPT' doctor\" | grep -q 'PASS  Muse Code is the pinned'"
 check 'doctor refuses an unpinned Muse Code version' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' doctor\""
@@ -171,6 +172,132 @@ if (mkdir -p "$TMP/jt" && cmd //c mklink //J "$(cygpath -w "$TMP/jt-link")" "$(c
 else printf 'SKIP  delete refuses a session store behind a linked ancestor (no junctions)
 '; fi
 check 'source repository is untouched' "test -z \"\$(git -C '$REPO' status --porcelain)\""
+
+# Phase C exercises the public commands against the stub, including metadata.
+phase_c_check(){
+  local label="$1"; shift
+  if ("$@") >"$TMP/phase-c.log" 2>&1; then
+    printf 'PASS  %s\n' "$label"; PASS=$((PASS+1))
+  else
+    printf 'FAIL  %s\n' "$label"; tail -n 8 "$TMP/phase-c.log" | sed 's/^/      /'; FAIL=$((FAIL+1))
+  fi
+}
+phase_c_turn(){
+  local name="$1" effort="$2" expected="$3" command="${4:-new}"
+  cd "$REPO" || return 1
+  rm -f "$TMP/provider-args"
+  if [ "$effort" = UNSET ]; then
+    unset AI_MUSE_REASONING_EFFORT
+    eval "$ENV '$SCRIPT' $command '$name' --prompt test" >/dev/null || return 1
+  else
+    eval "$ENV AI_MUSE_REASONING_EFFORT='$effort' '$SCRIPT' $command '$name' --prompt test" >/dev/null || return 1
+  fi
+  eval "$ENV '$SCRIPT' show '$name'" | jq -e --arg effort "$expected" '.retained_turn.reasoning_effort==$effort' >/dev/null || return 1
+  if [ "$effort" = UNSET ] || [ -z "$effort" ]; then
+    ! grep -qx -- --reasoning-effort "$TMP/provider-args"
+  else
+    awk -v expected="$effort" '$0=="--reasoning-effort" {getline; if ($0==expected) found++} END {exit found!=1}' "$TMP/provider-args"
+  fi
+}
+phase_c_refusal(){
+  local name="$1" effort="$2"
+  cd "$REPO" || return 1
+  rm -f "$TMP/provider-args"
+  ! eval "$ENV AI_MUSE_REASONING_EFFORT='$effort' '$SCRIPT' new '$name' --prompt test" >"$TMP/effort-refusal.log" 2>&1 &&
+    test ! -e "$TMP/provider-args" && grep -q start_failed "$TMP/effort-refusal.log"
+}
+write_catalog "$(printf '%s' "$CATALOG_ROW" | jq '.reasoning_effort_variants=["minimal","low","medium","high","max"]')"
+phase_c_check 'unset reasoning omits the flag and retains the effective high default' phase_c_turn effort-default UNSET high
+phase_c_check 'empty reasoning omits the flag and retains the effective high default' phase_c_turn effort-empty '' high
+phase_c_check 'explicit catalog reasoning is sent once and retained' phase_c_turn effort-explicit medium medium
+phase_c_invalid_ask(){
+  cd "$REPO" || return 1
+  local before after
+  before="$(eval "$ENV '$SCRIPT' show effort-explicit")" || return 1
+  rm -f "$TMP/provider-args"
+  ! eval "$ENV AI_MUSE_REASONING_EFFORT=bogus '$SCRIPT' ask effort-explicit --prompt test" >"$TMP/effort-refusal.log" 2>&1 || return 1
+  after="$(eval "$ENV '$SCRIPT' show effort-explicit")" || return 1
+  [ "$before" = "$after" ] && test ! -e "$TMP/provider-args" && grep -q start_failed "$TMP/effort-refusal.log"
+}
+phase_c_check 'invalid follow-up reasoning preserves the complete active session unchanged' phase_c_invalid_ask
+phase_c_check 'ask can override the preceding reasoning choice' phase_c_turn effort-explicit low low ask
+phase_c_check 'ask without an override restores the effective high default' phase_c_turn effort-explicit UNSET high ask
+phase_c_check 'invalid reasoning refuses before provider contact' phase_c_refusal effort-invalid bogus
+phase_c_check 'catalog exclusions override the fixed CLI list' phase_c_refusal effort-excluded ultra
+write_catalog "$(printf '%s' "$CATALOG_ROW" | jq '.reasoning_effort_variants=[]')"
+phase_c_check 'a readable empty variants list refuses explicit reasoning' phase_c_refusal effort-no-variants high
+write_catalog
+phase_c_check 'a readable row missing variants refuses explicit reasoning' phase_c_refusal effort-missing-variants high
+write_catalog "$(printf '%s' "$CATALOG_ROW" | jq '.reasoning_effort_variants="high"')"
+phase_c_check 'a readable malformed variants field refuses explicit reasoning' phase_c_refusal effort-malformed-variants high
+write_catalog "$(printf '%s' "$CATALOG_ROW" | jq '.reasoning_effort_variants=["high",4]')"
+phase_c_check 'a readable mixed-type variants list refuses explicit reasoning' phase_c_refusal effort-mixed-variants high
+rm -f "$CATALOG"/*.json
+for effort in none minimal low medium high xhigh max ultra; do
+  phase_c_check "unavailable catalog accepts fixed-list reasoning $effort" phase_c_turn "effort-fallback-$effort" "$effort" "$effort"
+done
+phase_c_check 'unavailable catalog still rejects invalid reasoning' phase_c_refusal effort-fallback-invalid bogus
+write_catalog
+
+phase_c_delete(){
+  local name="$1" missing="${2:-no}" sid base other=99999999-2222-4333-8444-555555555555
+  cd "$REPO" || return 1
+  eval "$ENV '$SCRIPT' new '$name' --prompt test" >/dev/null || return 1
+  sid="$(eval "$ENV '$SCRIPT' show '$name'" | jq -er .session_id)" || return 1
+  base="${STORE%/.msp-view-v1}"
+  # Multiple date buckets prove cleanup is UUID-scoped, not today's path only.
+  mkdir -p "$base/2001/02/03/$sid" "$base/2001/02/03/$other" "$STORE/$other"
+  printf keep > "$base/2001/02/03/$other/session.jsonl"
+  printf keep > "$STORE/$other/HEAD.json"
+  [ "$missing" != yes ] || rm -rf "$STORE/$sid"
+  eval "$ENV '$SCRIPT' delete '$name'" || return 1
+  test ! -e "$STORE/$sid" &&
+    test ! -e "$base/$(date +%Y/%m/%d)/$sid" &&
+    test ! -e "$base/2001/02/03/$sid" &&
+    test "$(cat "$base/2001/02/03/$other/session.jsonl")" = keep &&
+    test "$(cat "$STORE/$other/HEAD.json")" = keep &&
+    ! eval "$ENV '$SCRIPT' show '$name'" >/dev/null 2>&1
+}
+phase_c_check 'delete removes projection and every durable date bucket, preserving other UUIDs' phase_c_delete delete-both
+phase_c_check 'missing projection does not skip durable deletion' phase_c_delete delete-durable-only yes
+
+phase_c_link(){
+  local kind="$1" position="$2" name="delete-$1-$2" sid target decoy rc=0
+  cd "$REPO" || return 1
+  eval "$ENV '$SCRIPT' new '$name' --prompt test" >/dev/null || return 1
+  sid="$(eval "$ENV '$SCRIPT' show '$name'" | jq -er .session_id)" || return 1
+  target="${STORE%/.msp-view-v1}/$(date +%Y/%m/%d)/$sid"
+  [ "$position" != parent ] || target="${target%/$sid}"
+  decoy="$TMP/decoy-$kind-$position"
+  mv "$target" "$decoy" || return 1
+  if [ "$kind" = junction ]; then
+    cmd //c mklink //J "$(cygpath -w "$target")" "$(cygpath -w "$decoy")" >/dev/null || { mv "$decoy" "$target"; return 1; }
+  else
+    MSYS=winsymlinks:nativestrict ln -s "$decoy" "$target" || { mv "$decoy" "$target"; return 1; }
+  fi
+  ! eval "$ENV '$SCRIPT' delete '$name'" >"$TMP/delete-refusal.log" 2>&1 || rc=1
+  grep -q 'durable store deletion unconfirmed' "$TMP/delete-refusal.log" || rc=1
+  # Refusal must precede deletion of either store and preserve recovery metadata.
+  test -f "$STORE/$sid/HEAD.json" || rc=1
+  if [ "$position" = parent ]; then test -f "$decoy/$sid/session.jsonl" || rc=1
+  else test -f "$decoy/session.jsonl" || rc=1; fi
+  eval "$ENV '$SCRIPT' show '$name'" | jq -e '.status=="active"' >/dev/null || rc=1
+  if [ "$kind" = junction ]; then cmd //c rmdir "$(cygpath -w "$target")" >/dev/null
+  else rm "$target"; fi
+  mv "$decoy" "$target" || rc=1
+  return "$rc"
+}
+mkdir -p "$TMP/link-probe-target"
+if MSYS=winsymlinks:nativestrict ln -s "$TMP/link-probe-target" "$TMP/link-probe" 2>/dev/null && [ -L "$TMP/link-probe" ]; then
+  rm "$TMP/link-probe"
+  phase_c_check 'delete refuses a symlink at a durable UUID leaf before deleting any store' phase_c_link symlink leaf
+  phase_c_check 'delete refuses a symlink at a durable date parent before deleting any store' phase_c_link symlink parent
+else printf 'SKIP  durable symlink refusal (native symlinks unavailable)\n'; fi
+if command -v cygpath >/dev/null && cmd //c mklink //J "$(cygpath -w "$TMP/junction-probe")" "$(cygpath -w "$TMP/link-probe-target")" >/dev/null 2>&1; then
+  cmd //c rmdir "$(cygpath -w "$TMP/junction-probe")" >/dev/null
+  phase_c_check 'delete refuses a junction at a durable UUID leaf before deleting any store' phase_c_link junction leaf
+  phase_c_check 'delete refuses a junction at a durable date parent before deleting any store' phase_c_link junction parent
+else printf 'SKIP  durable junction refusal (junctions unavailable)\n'; fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

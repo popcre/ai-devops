@@ -19,8 +19,8 @@ at every cut point.
 | B1 | Doctor catalog checks (exists / `is_current` / `visibility`, report limits + cost) | ✅ done | PR #574 (merge `85df6d6e`): `muse_code_catalog_dir/_parseable/_row/_row_visible` + doctor muse-code branch — catalog present+parseable / unique row / `visibility=="visible"` as `PASS `/`FAIL ` lines (missing row, invisible, unparseable, malformed sibling, linked dir → FAIL); limits, per-million price, currency and `is_current` report-only; `is_current:false` prints a loud `WARN  ` and still exits 0. Nothing pinned: `*.json` glob + `model_id` selection, `source=="provider_catalog"`, unique `provider_id=="meta"` row across files. |
 | B2 | Catalog-priced cost estimate in the adapter (provenance-labeled) | ✅ done | PR #574: `muse_code_catalog_row/_cost`, `catalog_price`, `muse_code_is_link` in `tools/reviewer_usage.py` — `catalog_cost_estimate` + `catalog_cost_currency` from summed counters (input−cache_read at input rate, cache_read at cached rate — never twice), `cost_provenance:"first-party model catalog price; estimate, not billed cost"`; exact-decimal arithmetic with overflow/non-finite refusal; same-model gate (every `model_completed` row must name the requested model); unreadable/foreign/linked catalog → estimate null, completeness untouched. |
 | B3 | Catalog + doctor tests | ✅ done | PR #574: `tests/fixtures/muse-code/usage_cases.py` 10→27 cases (exact pricing fixture 19,835 in/8,561 cached/472 out @ $0.10/$0.20/$0.002 = 0.001238922 USD; catalog absent; bad/extreme prices; linked file/dir incl. junction; duplicate rows; foreign provider; wrong source; mixed/absent model); `tests/test-ai-muse-code.sh` 42→57 checks (healthy/missing-model/invisible/unparseable/not-current WARN/malformed rows-object/duplicate across files/foreign provider/manual source/unreadable sibling/linked catalog directory junction + wrapper-level priced turn, absent-catalog turn, foreign-model turn; the suite also strips inherited `AI_REVIEW_EVENT_*` vars so it runs green as a review packet's `--tests`). Suites at the reviewed head: muse-code **57/0**, `test-ai-muse.sh` **168/0**, opencode contract pass (Git Bash). Independent **Grok 4.6** diff-review APPROVE with coverage at exact head `6994f02a` (`.ai/reviews/grok-muse-phase-b-diff-542-20260918T205712Z-1037953.md`; Codex quota-exhausted, Claude account gone — owner, chat 2026-09-18); installed-route proof `cmd.exe /c bin\ai-muse.cmd doctor` PASS. |
-| C1 | `AI_MUSE_REASONING_EFFORT` support + metadata record + tests | ⬜ open | — |
-| C2 | `delete` also removes the date-bucketed durable log + tests | ⬜ open | — |
+| C1 | `AI_MUSE_REASONING_EFFORT` support + metadata record + tests | ✅ done | PR #678 (merge `57170b62`): `muse_code_reasoning_effort` in `cmd_new`/`cmd_ask`/`run_turn` validates the tier against the catalog row's `reasoning_effort_variants` when readable (non-empty all-string array containing the tier) else the fixed CLI list `none|minimal|low|medium|high|xhigh|max|ultra`, refusing `start_failed` before any provider contact; `--reasoning-effort` appended only when the env is non-empty (unset/empty args byte-identical); effective tier recorded in `retained_turn.reasoning_effort`; OpenCode ignores the variable (documented + `test-ai-muse.sh` case). `bash tests/test-ai-muse-code.sh` 90 PASS/0 FAIL and `python tests/fixtures/muse-code/usage_cases.py -q` 27 OK at merged head `926da622`. |
+| C2 | `delete` also removes the date-bucketed durable log + tests | ✅ done | PR #678 (merge `57170b62`): `muse_code_delete_session` removes `<XDG_DATA_HOME>/muse/sessions/*/*/*/<sid>` plus the `.msp-view-v1` projection under one preflight — verified physical root, no linked ancestors/date-buckets/UUID, every parent readable+searchable, UUID strictly a directory (the projection parent gained the same bar after round-1 Grok REJECT, fix `566846bd`) — then deletes each store from its verified parent and requires positive confirmation, naming the surviving store otherwise. `tests/fixtures/muse-code/delete_cases.sh` 11 passed; full suites green (`test-ai-muse-code.sh` 90/0, `test-ai-muse.sh` 168/0, opencode contract pass); independent Grok 4.6 APPROVE at exact head `926da622` (round 1 REJECT fixed, rounds 2-5 APPROVE); installed-route doctor PASS. |
 | D1 | Live qualification turns on the muse-code engine | ⬜ open | — |
 | D2 | shared-db `REVIEWERS` evidence update (scripts/docs PR) | ⬜ open | — |
 | D3 | Default flip to `muse-code` + docs + test expectation flip | ⬜ open | — |
@@ -139,11 +139,14 @@ investigation that established:
 
 ### 5. Current state of the code
 
-All `bin/ai-muse` line numbers are as of `origin/main` `19acf49b` (2026-09-18,
-after Phase B landed in PR #574, merge `85df6d6e`).
+All `bin/ai-muse` line numbers are as of `origin/main` `57170b62` (2026-09-23,
+after Phase C landed in PR #678).
 Re-grep before editing; function names are the stable anchors.
 Phase B added the catalog helpers after `muse_code_pinned` (~:228) and the
-doctor muse-code catalog checks in `cmd_doctor` (~:707).
+doctor muse-code catalog checks in `cmd_doctor` (~:707). Phase C added
+`muse_code_reasoning_effort` after the catalog helpers (~:232), the effective
+tier in `retain_turn` metadata, and rewrote `muse_code_delete_session`
+(~:652) into the dual-store preflight + verified-parent removal.
 
 - Engine selection: `bin/ai-muse:24-34` — `ENGINE="${AI_MUSE_ENGINE:-opencode}"`;
   each engine pins its `VERSION`, `BIN`, `MODEL`. The flip is one default change

@@ -232,6 +232,22 @@ muse_code_catalog_row(){ # the model's unique row; every sibling must be a valid
   printf '%s' "$hits"
 }
 muse_code_row_visible(){ printf '%s' "$1" | jq -e '.visibility=="visible"' >/dev/null 2>&1; }
+muse_code_reasoning_effort(){
+  EFFECTIVE_REASONING_EFFORT=high
+  local tier="${AI_MUSE_REASONING_EFFORT:-}" row
+  [ -n "$tier" ] || return 0
+  row="$(muse_code_catalog_row "$(muse_code_catalog_dir)" "$MODEL" || true)"
+  if [ -n "$row" ]; then
+    printf '%s' "$row" | jq -e --arg tier "$tier" '
+      .reasoning_effort_variants | type=="array" and length>0 and
+      all(.[]; type=="string" and length>0) and index($tier)!=null
+    ' >/dev/null 2>&1 || die 'unknown or unsupported AI_MUSE_REASONING_EFFORT for the readable model catalog.'
+  else
+    case "$tier" in none|minimal|low|medium|high|xhigh|max|ultra) ;;
+      *) die 'unknown AI_MUSE_REASONING_EFFORT (no readable model catalog).';; esac
+  fi
+  EFFECTIVE_REASONING_EFFORT="$tier"
+}
 linked_below_home(){ # true when the path or any ancestor below the profile home is a link or junction
   local p="$1"; while [ -n "$p" ] && [ "$p" != "$PROFILE_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do [ ! -L "$p" ] || return 0; p="$(dirname "$p")"; done; return 1
 }
@@ -445,13 +461,15 @@ retain_turn(){ # retain exact bytes and optional observations in one metadata wr
   observed_sid="$(jq -sr "[.[]|$(sid_filter)]|last//empty" "$stem.jsonl" 2>/dev/null || true)"
   usage="$(turn_usage "$stem.jsonl" "$observed_sid" "$event")"
   tmp="$(tmp_file)"
-  jq --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage}' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
+  jq --arg effort "${EFFECTIVE_REASONING_EFFORT:-}" --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage} | if $effort!="" then .retained_turn.reasoning_effort=$effort else . end' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
 run_turn(){
   local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text prompt_arg=() timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
   local bash_bin=/usr/bin/bash key_file
   local -a clean_env
   validate_heartbeat
+  EFFECTIVE_REASONING_EFFORT=""
+  [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
   TURN_SID=""; FINISH=""; TEXT=""; TOKENS=null; TURN_ERROR=""
   runtime_env; [ -x "$timeout_bin" ] || die "local_dependency_unavailable: trusted timeout executable is unavailable: $timeout_bin"; case "$timeout_bin" in /*) ;; *) die 'trusted timeout executable path must be absolute.';; esac
   prompt_text="$(cat "$prompt")"; load_key; provider_key="$MODEL_API_KEY"; unset MODEL_API_KEY
@@ -464,6 +482,7 @@ run_turn(){
     # The prompt travels in a private file, never as an argument the CLI could parse as options.
     chmod 600 "$prompt" 2>/dev/null && protect_windows_path "$prompt" file || die 'could not make the Muse Code prompt file private.'
     if command -v cygpath >/dev/null 2>&1; then args+=(--prompt-file "$(cygpath -w "$prompt")"); else args+=(--prompt-file "$prompt"); fi
+    [ -z "${AI_MUSE_REASONING_EFFORT:-}" ] || args+=(--reasoning-effort "$EFFECTIVE_REASONING_EFFORT")
   else
     prompt_arg=("$prompt_text"); args=(run --dir "$dir" --agent muse-review --model "$MODEL" --format json); [ -z "$sid" ] || args+=(--session "$sid")
   fi
@@ -585,6 +604,7 @@ cmd_new(){
   local name="$1"; shift; local root rid meta prompt out rep before after tmp report_path now
   name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; need git
   root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; prompt="$(read_prompt "$@")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: AI_MUSE_CALLER=$CALLER ai-muse ask $name"; validate_heartbeat
+  [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
   mkdir -p "$(dirname "$meta")"; now="$(date -u +%FT%TZ)"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg now "$now" '{schema_version:1,status:"preparing",turn_kind:"new",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:null,review_dir:null,sandbox_tag:$tag,model:$model,head:null,packet_sha256:null,last_report:null,created_at:$now,updated_at:$now,last_heartbeat_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true; ACTIVE_META="$meta"
   printf 'Muse session started: %s\nState: %s\n' "$name" "$meta" >&2
   test_interrupt_at preparing
@@ -605,6 +625,7 @@ cmd_ask(){
   status="$(jq -r '.status//"active"' "$meta")"; [ "$status" = active ] || die "session '$name' requires reconciliation ($status). Inspect: AI_MUSE_CALLER=$CALLER ai-muse transcript $name ; then run: AI_MUSE_CALLER=$CALLER ai-muse reconcile $name"
   stored_model="$(jq -r '.model//""' "$meta")"; [ "$stored_model" = "$MODEL" ] || die "session '$name' belongs to model '${stored_model:-unknown}', not '$MODEL'. Preserve its transcript, then delete it and start a new Spark 1.3 conversation."
   validate_heartbeat
+  [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
   sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
   printf 'Muse session continuing: %s\nState: %s\n' "$name" "$meta" >&2
   report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
@@ -628,17 +649,71 @@ cmd_transcript(){
     muse_code_run export --session "$sid" --out "$xd/transcript.json" >/dev/null && [ -f "$xd/transcript.json" ] && [ ! -L "$xd/transcript.json" ] && cat "$xd/transcript.json"; rc=$?; rm -rf -- "$xd"; return "$rc"; fi
   "$BIN" export "$sid"
 }
-muse_code_delete_session(){ # the CLI has no delete command; remove only this exact private session store
-  local sid="$1" dir
+muse_code_delete_session(){ # the CLI has no delete command; remove both exact private stores
+  local sid="$1"
   [[ "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
-  local base="$XDG_DATA_HOME" part parent
-  parent="$base/muse/sessions/.msp-view-v1"; ! linked_below_home "$parent" || return 1; [ -d "$parent" ] || return 0
-  # Enter the verified parent once, then delete relative to it: a later swap of any
-  # ancestor path cannot redirect the removal outside this directory.
-  ( cd -P -- "$parent" || exit 1
-    [ "$(pwd -P)" = "$(cd -P -- "$PROFILE_HOME" && pwd -P)/.local/share/ai-devops/muse-code/muse/sessions/.msp-view-v1" ] || exit 1
-    [ ! -L "./$sid" ] || exit 1
-    rm -rf -- "./$sid" && [ ! -e "./$sid" ] )
+  local root="$XDG_DATA_HOME/muse/sessions" expected
+  expected="$(cd -P -- "$PROFILE_HOME" && pwd -P)/.local/share/ai-devops/muse-code/muse/sessions" || return 1
+  ( # Hold the verified root; never follow a linked date component or UUID.
+    refuse_store(){ printf 'ai-muse: %s store deletion unconfirmed: %s\n' "$1" "$2" >&2; exit 1; }
+    ! linked_below_home "$root" || refuse_store 'projection and durable' 'linked ancestor'
+    # A denied intermediate parent makes -e on sessions look like absence.
+    # runtime_env creates XDG_DATA_HOME, but the CLI owns its muse child.
+    [ -r "$XDG_DATA_HOME" ] && [ -x "$XDG_DATA_HOME" ] || refuse_store 'projection and durable' 'unreadable data home'
+    if [ -e "$XDG_DATA_HOME/muse" ]; then
+      [ -d "$XDG_DATA_HOME/muse" ] && [ -r "$XDG_DATA_HOME/muse" ] && [ -x "$XDG_DATA_HOME/muse" ] || refuse_store 'projection and durable' 'unreadable muse parent'
+    else
+      exit 0
+    fi
+    [ -e "$root" ] || exit 0
+    cd -P -- "$root" && [ "$(pwd -P)" = "$expected" ] || refuse_store 'projection and durable' 'unexpected parent'
+    [ -r . ] && [ -x . ] || refuse_store 'projection and durable' 'unreadable parent'
+    local year month day parent store
+    local -a parents=() stores=()
+    shopt -s nullglob
+    # Preflight every parent before deleting either store. A linked date bucket
+    # could conceal this UUID, so absence cannot be positively proved through it.
+    for year in ./*; do
+      [ ! -L "$year" ] || refuse_store durable 'linked year bucket'
+      [ -d "$year" ] || continue
+      [ -r "$year" ] && [ -x "$year" ] || refuse_store durable 'unreadable year bucket'
+      for month in "$year"/*; do
+        [ ! -L "$month" ] || refuse_store durable 'linked month bucket'
+        [ -d "$month" ] || continue
+        [ -r "$month" ] && [ -x "$month" ] || refuse_store durable 'unreadable month bucket'
+        for day in "$month"/*; do
+          [ ! -L "$day" ] || refuse_store durable 'linked day bucket'
+          [ -d "$day" ] || continue
+          [ -r "$day" ] && [ -x "$day" ] || refuse_store durable 'unreadable day bucket'
+          [ ! -L "$day/$sid" ] || refuse_store durable 'linked session UUID'
+          if [ -e "$day/$sid" ]; then
+            [ -d "$day/$sid" ] || refuse_store durable 'session UUID is not a directory'
+            parents+=("$day"); stores+=(durable)
+          fi
+        done
+      done
+    done
+    [ ! -L ./.msp-view-v1 ] || refuse_store projection 'linked parent'
+    if [ -e ./.msp-view-v1 ]; then
+      [ -d ./.msp-view-v1 ] || refuse_store projection 'parent is not a directory'
+      [ -r ./.msp-view-v1 ] && [ -x ./.msp-view-v1 ] || refuse_store projection 'unreadable parent'
+      [ ! -L "./.msp-view-v1/$sid" ] || refuse_store projection 'linked session UUID'
+      [ ! -e "./.msp-view-v1/$sid" ] || [ -d "./.msp-view-v1/$sid" ] || refuse_store projection 'session UUID is not a directory'
+      parents+=(./.msp-view-v1); stores+=(projection)
+    fi
+    local i
+    for i in "${!parents[@]}"; do
+      parent="${parents[$i]}"; store="${stores[$i]}"
+      # Enter each verified parent and remove only the validated UUID relative
+      # to it, so replacing an ancestor cannot redirect recursive deletion.
+      ( ! linked_below_home "$parent" && cd -P -- "$parent" &&
+        [ "$(pwd -P)" = "$expected/${parent#./}" ] &&
+        [ ! -L "./$sid" ] &&
+        { [ ! -e "./$sid" ] || [ -d "./$sid" ]; } &&
+        rm -rf -- "./$sid" && [ ! -e "./$sid" ] && [ ! -L "./$sid" ]
+      ) || refuse_store "$store" 'session survived or parent changed'
+    done
+  )
 }
 cmd_reconcile(){
   local name="$1" m rid tmp status sid root event stem out prompt rep stale=0 item path expected

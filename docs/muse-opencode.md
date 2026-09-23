@@ -51,10 +51,22 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
   in any other session is rejected. Only a final `run.terminal.completed` event with
   `terminal: completed` proves completion.
 - Private stores under `~/.local/share|state|cache/ai-devops/muse-code` keep personal
-  skills, settings, and sessions separate. `delete` removes only that exact session
-  directory, because the CLI has no delete command.
+  skills, settings, and sessions separate. `delete` removes that exact UUID from
+  both the `.msp-view-v1` projection and every date-bucketed durable session
+  directory. Linked parents or UUID paths are refused; an error names the store
+  whose deletion could not be confirmed, and the local session record is kept.
+- `AI_MUSE_REASONING_EFFORT` sets the native CLI's `--reasoning-effort` for each
+  turn. A nonempty value must occur in the readable first-party model row's
+  `reasoning_effort_variants`; missing or malformed variants in a readable row
+  refuse launch. If no row is readable, the pinned CLI's fixed list applies:
+  `none|minimal|low|medium|high|xhigh|max|ultra`. Unknown values fail before provider
+  contact. Unset or empty sends no flag (the pinned CLI defaults to `high`).
+  The effective tier is recorded in `retained_turn.reasoning_effort`.
+  The OpenCode engine ignores this variable.
 - The key reaches the CLI only as `META_API_KEY` through the credential boundary.
-  Token usage is recorded as unavailable. Sessions never cross engines.
+  Retained usage comes from the durable store; unreadable evidence is explicitly
+  unavailable. Catalog prices produce labeled estimates, never billed cost.
+  Sessions never cross engines.
 - Tests: `tests/test-ai-muse-code.sh` (offline stub). Windows only so far.
 
 ## Safety and evidence
