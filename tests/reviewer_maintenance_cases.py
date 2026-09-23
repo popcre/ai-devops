@@ -737,6 +737,14 @@ wait "$job"
         finally:
             foreign.unlink()
 
+    def test_matching_sandbox_head_never_scans_source_untracked_files(self):
+        rid, checkout, _ = self.evidence_fixture()
+        (checkout / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")
+        with patch.object(events, "git_value", return_value=self.sha), \
+                patch.object(events, "head_mismatch_detail", side_effect=AssertionError("scanned on match")):
+            events.bind_sandbox(self.root, "grok", rid, checkout)
+        self.assertIn("grok:" + rid, (checkout / ".ai-review-sandbox").read_text())
+
     def test_sandbox_retains_every_followup_invocation_owner(self):
         rid, checkout, report = self.evidence_fixture()
         (checkout / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")

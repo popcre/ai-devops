@@ -340,7 +340,7 @@ def head_mismatch_detail(repo, expected_head, sandbox_head):
     message = ("sandbox evidence head differs from invocation (invocation " + (expected_head or "unknown") +
                ", sandbox " + (sandbox_head or "unreadable") + ")")
     result = subprocess.run(["git", "-C", str(repo), "ls-files", "--others", "--exclude-standard", "-z"],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
     untracked = [p for p in result.stdout.split("\0") if p] if result.returncode == 0 else []
     if untracked:
         shown = ", ".join(untracked[:10]) + (" and " + str(len(untracked) - 10) + " more" if len(untracked) > 10 else "")
@@ -363,7 +363,9 @@ def bind_sandbox(directory, provider, run_id, sandbox, original_id=None):
         marker, boundary, data, lines, owners = sandbox_marker(sandbox)
         require(physical(lines[0]) == physical(start["repo"]), "sandbox evidence source differs from invocation")
         sandbox_head = git_value("-C", str(marker.parent), "rev-parse", "HEAD")
-        require(sandbox_head == expected_head, head_mismatch_detail(start["repo"], expected_head, sandbox_head))
+        if sandbox_head != expected_head:
+            # Diagnose only on the refusal path; a matching head never scans the source.
+            raise Blocked(head_mismatch_detail(start["repo"], expected_head, sandbox_head))
         require((evidence_root(directory, run_id) / "required.json").is_file(),
                 "sandbox evidence requirement was not reserved")
         if original_id is not None:
