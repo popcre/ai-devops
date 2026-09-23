@@ -254,6 +254,7 @@
     "test-context-audit.ps1",
     "test-install-ai-devops-windows.ps1",
     "test-kimi-windows-execution.ps1",
+    "test-mcp-skill-drift.ps1",
     "test-mcp-env-launch.ps1",
     "test-memory-sync-scheduled-task.ps1",
     "test-qualify-windows-runner.ps1",
