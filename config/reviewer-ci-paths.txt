@@ -15,6 +15,7 @@ config/reviewer-capacity.json
 config/reviewer-registry.json
 config/task-gates.json
 config/task-gates.schema.json
+config/tool-versions.json
 config/reviewer-ci-paths.txt
 skills/shared/ask-glm/**
 skills/shared/grok-cli/**
