@@ -18,12 +18,12 @@
 #   - Authentication stays interactive and manual, exactly as on Windows. This
 #     script installs binaries; it never touches a login.
 #   - Idempotent: an already-installed provider is skipped unless --force.
-#   - Version-pinned where the repository qualifies an exact build. Grok is
-#     qualified against exactly one version (config/provider-cli-versions.json)
+#   - Version-checked where the repository sets a policy. Grok is
+#     held to a version floor within one major version (config/provider-cli-versions.json)
 #     because our wrappers parse that build's JSON, stop reasons, usage keys and
 #     session behaviour. "A runnable grok" is NOT good enough: presence-based
 #     skipping is what left machines on 1.0.5 indefinitely (issue #251). An
-#     off-policy Grok is upgraded to the exact supported version, the resulting
+#     older Grok is upgraded to the floor version, a newer same-major build is kept, the resulting
 #     version is verified, and a failed upgrade restores the original binary.
 #     Credentials under ~/.grok are never read, copied or backed up.
 #   - Fails loudly. A provider that installs but does not produce a working

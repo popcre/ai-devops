@@ -5,10 +5,10 @@ Installs the official Windows Grok Build, Kimi Code, and Qwen Code command-line 
 Authentication deliberately remains interactive. The installers only put the
 programs on this computer; each provider opens its own login on first use.
 
-Grok is version-pinned. config/provider-cli-versions.json holds the one exact
-build this repository qualifies, because the Grok wrappers parse that build's
+Grok has a version floor. config/provider-cli-versions.json holds the lowest
+build this repository accepts (newer builds of the same major version pass), because the Grok wrappers parse that build's
 JSON, stop reasons, usage keys and session behaviour. A present-but-off-policy
-Grok is upgraded to that exact version, the result is verified, and a failed
+Grok below the floor is upgraded to it, the result is verified, and a failed
 upgrade restores the previous executable. Credentials under ~/.grok are never
 read, copied or backed up.
 #>

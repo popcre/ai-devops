@@ -39,7 +39,7 @@ Before this issue, a Grok binary that merely *ran* counted as installed. That wa
 the defect: both wrappers parse one build's terminal JSON, stop reasons, usage
 and cost keys, and session behaviour, and that parsing was never version-checked.
 
-Now the exact qualified version is a repository fact in
+Now the qualified version floor (that build or a newer one within the same major version) is a repository fact in
 [`config/provider-cli-versions.json`](../config/provider-cli-versions.json).
 That file is the single source of truth. Two readers consume it, because the
 Windows installer cannot depend on Bash or `jq`: `bin/ai-provider-version` on
@@ -50,14 +50,14 @@ through their own reader and assert the same answer, so a divergence that would
 qualify a build on one platform and refuse it on the other fails a test. It is
 enforced in four places:
 
-- both installers upgrade a wrong build to exactly the pinned version with
+- both installers keep any build at or above the floor within the same major version, and upgrade an older build to the floor with
   `grok update --version <VERSION>`, keeping a restorable backup of the previous
   executable and rolling back on a failed update, on a wrong resulting version,
   and on an unexpected error part-way through — the Windows path restores from
   a `finally` block and the Unix path runs the whole risky sequence in a
   subshell, so on either platform a throwing, locked, or unparseable `update`
   still ends with the backup restored rather than a worse binary in place;
-- both wrappers refuse paid work against any other build, before the provider is
+- both wrappers refuse paid work against a build below the floor or on a different major version, before the provider is
   contacted, naming the installed and the required version;
 - both doctors report the installed version against the required one;
 - the Windows verification path reports a wrong build as `STALE` and exits 2.
