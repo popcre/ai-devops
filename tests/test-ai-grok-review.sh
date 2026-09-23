@@ -1213,7 +1213,7 @@ printf '%s
 version_gate_probe vg-min-newer "$MIN_POLICY" 1.0.41
 check "minimum_policy_accepts_a_newer_grok" "[ \"\$(cat '$TMP/vg.rc')\" = 0 ] && [ -f '$TMP/provider-contacted' ]"
 version_gate_probe vg-min-older "$MIN_POLICY" 1.0.9
-check "minimum_policy_refuses_an_older_grok" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ] && grep -q 'requires 1.0.13 or newer' '$TMP/vg.out'"
+check "minimum_policy_refuses_an_older_grok" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ] && grep -q 'requires 1.0.13 or a newer 1.x' '$TMP/vg.out'"
 
 # A refusal must leave nothing behind. If the sandbox, evidence packet or the
 # durable session record were created first, the obvious retry under the same

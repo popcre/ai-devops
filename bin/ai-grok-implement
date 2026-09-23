@@ -135,7 +135,7 @@ grok_version_satisfies() { # grok_version_satisfies BARE-VERSION
 grok_version_rule() { # grok_version_rule WANT - human wording of the policy
   local tool mode; tool="$(version_tool)"
   mode="$(bash "$tool" match grok 2>/dev/null || printf exact)"
-  if [ "$mode" = minimum ]; then printf '%s or newer' "$1"; else printf 'exactly %s' "$1"; fi
+  if [ "$mode" = minimum ]; then printf '%s or a newer %s.x' "$1" "${1%%.*}"; else printf 'exactly %s' "$1"; fi
 }
 
 require_supported_grok_version() { # require_supported_grok_version BINARY

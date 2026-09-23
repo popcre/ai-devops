@@ -320,7 +320,7 @@ foreach ($providerDefinition in $providerCatalog) {
     if ($present -and $required) {
       $have = Get-ReportedProviderVersion -Path $probe
       if (-not (Test-ProviderVersionSatisfied -Provider $provider.Command -Version $have)) { $status = 'STALE'; $detail = "$probe reports '$have', policy requires $required" }
-      else { $detail = "$probe ($required)" }
+      else { $detail = "$probe ($have; policy $required)" }
     }
     Result $provider.Name $status $detail
     continue

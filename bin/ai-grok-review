@@ -250,7 +250,7 @@ grok_version_satisfies() { # grok_version_satisfies BARE-VERSION
 grok_version_rule() { # grok_version_rule WANT - human wording of the policy
   local tool mode; tool="$(version_tool)"
   mode="$(bash "$tool" match grok 2>/dev/null || printf exact)"
-  if [ "$mode" = minimum ]; then printf '%s or newer' "$1"; else printf 'exactly %s' "$1"; fi
+  if [ "$mode" = minimum ]; then printf '%s or a newer %s.x' "$1" "${1%%.*}"; else printf 'exactly %s' "$1"; fi
 }
 
 require_supported_grok_version() { # require_supported_grok_version BINARY
@@ -543,7 +543,14 @@ lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE] [WORK_ID
 
 logical_session_meta() { # logical_session_meta UPSTREAM CALLER NAME
   local wanted_upstream="$1" wanted_caller="$2" wanted_name="$3" f remote identity
-  for f in "$STATE_DIR"/sessions/*/*.json; do
+  local -a all=() candidates=()
+  # One grep narrows hundreds of records to those that mention the name; the
+  # per-record jq checks below stay authoritative. Spawning jq for every
+  # record made startup take many minutes on Windows (issue #686).
+  for f in "$STATE_DIR"/sessions/*/*.json; do [ -f "$f" ] && all+=("$f"); done
+  [ "${#all[@]}" -gt 0 ] || return 1
+  mapfile -t candidates < <(grep -lF -- "$wanted_name" "${all[@]}" 2>/dev/null || true)
+  for f in "${candidates[@]}"; do
     [ -f "$f" ] || continue
     [ "$(jq -r '.caller // empty' "$f" 2>/dev/null)" = "$wanted_caller" ] || continue
     [ "$(jq -r '.name // empty' "$f" 2>/dev/null)" = "$wanted_name" ] || continue

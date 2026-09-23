@@ -208,7 +208,7 @@ fi
   && ok "doctor_does_not_infer_chat_auth_from_catalogue" || bad "doctor_does_not_infer_chat_auth_from_catalogue"
 PINNED="$(bash "$REPO_ROOT/bin/ai-provider-version" required grok)"
 "$SCRIPT" doctor 2>&1 | grep -q "$PINNED" && ok "doctor_reports_version" || bad "doctor_reports_version"
-"$SCRIPT" doctor 2>&1 | grep -q "version policy: OK (installed $PINNED; requires $PINNED or newer)" \
+"$SCRIPT" doctor 2>&1 | grep -q "version policy: OK (installed $PINNED; requires $PINNED or a newer ${PINNED%%.*}.x)" \
   && ok "doctor_confirms_the_qualified_version" || bad "doctor_confirms_the_qualified_version"
 AI_GROK_TEST_VERSION=1.0.5 "$SCRIPT" doctor 2>&1 | grep -q "UNQUALIFIED .*1\.0\.5.*$PINNED" \
   && ok "doctor_reports_installed_versus_required_version" || bad "doctor_reports_installed_versus_required_version"
