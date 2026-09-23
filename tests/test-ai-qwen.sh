@@ -423,6 +423,17 @@ check 'first follow-up completes successfully' "test '$FIRST_ASK_RC' -eq 0"
 check 'follow-up resumes exact session' "grep -q -- '--resume qwen-session-1' '$TMP/argv.txt'"
 check 'follow-up keeps the recorded review copy' "[ \"\$(run show review-1 | jq -r .review_dir)\" = '$REVIEW_DIR' ]"
 
+LONG_NAME="long-$(printf 'n%.0s' $(seq 1 150))"
+LONG_NEW_OUT="$(run new "$LONG_NAME" --prompt 'review this' 2>&1)"; LONG_NEW_RC=$?
+[ "$LONG_NEW_RC" -eq 0 ] || printf '  diagnostic: long-name new: %s
+' "$LONG_NEW_OUT" | head -5
+check 'a 155-character session name completes a review' "test '$LONG_NEW_RC' -eq 0"
+LONG_ASK_OUT="$(run ask "$LONG_NAME" --prompt 'follow up' 2>&1)"; LONG_ASK_RC=$?
+[ "$LONG_ASK_RC" -eq 0 ] || printf '  diagnostic: long-name ask: %s
+' "$LONG_ASK_OUT" | head -5
+check 'the long-name session resumes on ask' "test '$LONG_ASK_RC' -eq 0"
+check 'no state, sandbox, or report name exceeds 110 characters' "! find '$AI_QWEN_STATE_DIR' '${AI_REVIEW_SANDBOX_DIR:-$AI_QWEN_STATE_DIR}' '$REPO/.ai' -print 2>/dev/null | awk -F/ 'length(\$NF)>110{f=1} END{exit !f}'"
+
 echo publication-failure > "$TMP/mode"
 run new publication-failed --prompt 'retain this completed result' > "$TMP/publication-failed.out" 2>&1; PUBLICATION_RC=$?
 check 'publication failure cannot become an active accepted review' "test '$PUBLICATION_RC' -ne 0 && run show publication-failed | jq -e '.status!=\"active\"'"
