@@ -170,17 +170,18 @@ cmd_doctor() {
   local cfg="$MIMO_HOME/mimocode.jsonc"
   [ -f "$cfg" ] || cfg="$MIMO_HOME/mimocode.json"
   if [ -f "$cfg" ]; then
-    # JSONC: strip // comments before jq. Writer emits pure JSON.
-    if sed 's|//.*||g' "$cfg" | jq -e 'type=="object"' >/dev/null 2>&1; then
+    # Pure JSON (what configure-mimocode-mcps.ps1 emits). Do NOT strip // here:
+    # that also eats https:// inside strings and false-fails a valid config.
+    if jq -e 'type=="object"' "$cfg" >/dev/null 2>&1; then
       echo "  config        : parses ok ($cfg)"
       local mcp_count
-      mcp_count="$(sed 's|//.*||g' "$cfg" | jq '(.mcp // {}) | length')"
-      echo "    mcp servers  : $mcp_count ($(sed 's|//.*||g' "$cfg" | jq -r '(.mcp // {}) | keys | join(", ")'))"
+      mcp_count="$(jq '(.mcp // {}) | length' "$cfg")"
+      echo "    mcp servers  : $mcp_count ($(jq -r '(.mcp // {}) | keys | join(", ")' "$cfg"))"
       local instr
-      instr="$(sed 's|//.*||g' "$cfg" | jq -r 'try (.instructions // []) | if type=="array" then join(", ") else tostring end')"
+      instr="$(jq -r 'try (.instructions // []) | if type=="array" then join(", ") else tostring end' "$cfg")"
       echo "    instructions : ${instr:-none}"
     else
-      echo "  config        : DOES NOT PARSE ($cfg)"
+      echo "  config        : DOES NOT PARSE ($cfg) — run bin/configure-mimocode-mcps.ps1 to rewrite as pure JSON"
       fail=1
     fi
   else
