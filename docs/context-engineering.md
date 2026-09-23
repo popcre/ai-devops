@@ -52,8 +52,8 @@ and the audit's safety/parity markers stays present and unwrapped. Long
 procedures moved to [`standing-rules-details.md`](standing-rules-details.md),
 loaded only when the task needs them.
 
-Measured after the rewrite: always-loaded 28,659 bytes (about 7,166 tokens), a
-**44% cut** and about **5,600 fewer tokens on every turn** before a word of
+Measured after the rewrite: always-loaded 29,518 bytes (about 7,380 tokens), a
+**42% cut** and about **5,400 fewer tokens on every turn** before a word of
 work. Strict audit: 0 missing safety markers, 0 parity mismatches, 0 overlaps.
 The full `test-context-audit.ps1` suite passes. The 12,449-byte warning budget
 is left as-is rather than raised to silence the remaining warning; the honest

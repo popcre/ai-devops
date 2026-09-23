@@ -172,8 +172,12 @@ the task needs the detail.
   appears in a reply, say beside it whether it is orchestrator work (it changes
   database structure) or non-orchestrator work (it does not).
 - **Sign everything posted to GitHub** with `Posted by MiMo chat <id> on
-  <machine>` (use `unknown` if the id is empty). When editing a body, keep
-  existing signatures and add yours.
+  <machine>`, where `<id>` is `$MIMO_SESSION_ID` (or `unknown` when
+  empty). When editing a body, keep existing signatures and add yours.
+- **Quote every time in EST (New York City).** All human-facing clock times in
+  replies, issues, comments, plans, handoffs, and status notes use EST/EDT
+  (America/New_York) and name the zone — e.g. `3:45 PM EST`. Never leave a
+  time unlabeled or in another zone. Machine filenames may stay UTC.
 - **Reviewer rotation:** the shared-db allocator is the one source of truth
   for who reviews. Never retry one out of rotation. Reviewer wrappers never call
   1Password during a review. Details: `ai-devops/docs/reviewer-rotation-rules.md`.
@@ -200,8 +204,10 @@ the task needs the detail.
   must show `Albert Hazan <u2giants@users.noreply.github.com>`. Stage only owned
   files.
 - **Never push directly to a protected `main`.** Work on a branch, open a pull
-  request. `config/repository-policy.json` in `ai-devops` is authoritative;
-  DesignFlow uses Albert's sandbox branch to `develop`, never a self-merge.
+  request, and let the repository's checks and merge queue decide.
+  `config/repository-policy.json` in `ai-devops` is authoritative;
+  `feature-branch-pr` is the default. DesignFlow uses Albert's sandbox branch
+  to `develop`, never a self-merge.
 - **Albert does not merge — you do.** Merge every pull request you were
   authorized to create, except DesignFlow and a PR Albert explicitly said he
   wants to review first.
