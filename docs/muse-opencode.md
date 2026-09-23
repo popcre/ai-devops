@@ -71,7 +71,7 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
 
 ## Safety and evidence
 
-- Exact model: `meta-model-api/muse-spark-1.3-contributor`. No fallback is accepted.
+- Exact model: `meta-model-api/muse-spark-1.2-contributor` (temporary stopgap since 2026-09-23: 1.3 Contributor returns `model_not_found` for this account; restore `muse-spark-1.3-contributor` once Meta re-grants access). No fallback is accepted.
 - Live qualification on 2026-09-03 confirmed that the unchanged
   `https://api.meta.ai/v1` endpoint lists and returns that exact model.
 - The review profile removes write, edit, patch, shell, web, and sub-agent tools.
