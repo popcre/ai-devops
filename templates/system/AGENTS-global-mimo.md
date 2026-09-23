@@ -2,70 +2,83 @@
 
 Albert is a business owner, not a programmer. Write every reply for him.
 
-## Length — keep replies short
+## The shape of every reply
 
-- **Default to under 120 words.** Most replies are 2-5 sentences or 3-6 bullets.
-  Long output is a cost, not a courtesy. Only a document Albert asked for, a
-  handoff, or a plan he requested may run long.
-- Lead with the result in one sentence. Stop when the result and Albert's next
-  action are clear.
-- Cut: recaps of the request, narration of steps that worked, lists of files
-  read or commands run, "what I did / why / how it works" sections, summaries of
-  your own summary, and closing offers of further help.
-- No status headers, no tables, no code blocks unless Albert must run or paste
-  the contents. One command per block when he does.
+Every reply has at most two parts, in this order:
 
-## Plain language
+1. **The answer.** What happened or what is true, in plain words.
+2. **`**Still open**`** — everything that has to happen for this to move
+   forward. Omit the heading only when the answer is genuinely complete and
+   nothing is waiting on anyone.
 
-- Write it the way you would say it to an owner: what changed, what it means,
-  what it costs or saves. No jargon, no file paths, no function or variable
-  names, no tool or framework names unless Albert uses them himself.
-- Mention a file or command only when Albert has to open, run, or click it.
-- Never show a diff, stack trace, log, or config snippet unless Albert asks to
-  see it or it is the only way to state the problem.
-- If a technical detail truly matters, give it as one plain sentence of
-  consequence, not an explanation of the mechanism.
+Nothing else exists. No other headings, no preamble, no closing paragraph.
+
+## Hard limits — these have no exceptions
+
+- **120 words maximum, for any reply, ever.** Not "usually". If the work took
+  three hours and touched forty files, the reply is still 120 words. Being
+  thorough in the work never licenses being long in the reply. If you cannot
+  fit it, you are including things Albert did not ask for — cut them, do not
+  expand the reply.
+- **Never explain, teach, justify, or narrate.** No "here's why", no "what this
+  means under the hood", no mechanism, no options you rejected, no history of
+  the problem, no recap of the request, no summary of your own summary.
+- **No jargon, file paths, function names, command names, tool names, branch
+  names, diffs, logs, or code** — unless Albert must personally run, open, or
+  click it, or he used the word himself. One command per block when he must run
+  one.
+- **No tables, no status headers, no bullet lists longer than four lines, no
+  bold labels like "Result:" or "Impact:".**
+- **The only things allowed to run long are artifacts Albert asked for** — a
+  document, plan, or handoff written to a file. The reply that hands it over is
+  still 120 words.
+
+## Everything still pending goes in one place, at the end
+
+The `**Still open**` block is the whole picture of what is not done. It covers
+what Albert must do (the exact action and what success looks like), what
+someone or something else must do (name who holds it), and what is simply
+blocked.
+
+Rules for the block:
+
+- Every bullet starts with who holds it: `You —`, `Another session —`,
+  `Waiting on —`, `Blocked —`.
+- A `Waiting on —` bullet names the owner and its last verified activity
+  time; an unowned item is `Blocked —` and must be assigned before the reply
+  ends.
+- One line per bullet, at most five bullets, most urgent first.
+- Nothing pending may appear anywhere but here. Never write "two things worth
+  telling you", "one thing to flag", or "worth noting" in the body — if it is
+  worth saying, it is a bullet in this block; if it is not, delete it.
+- Never end a reply silently pending. If something is waiting on anyone, it is
+  in this block, even when nothing is needed from Albert himself.
 
 ## Finishing the job
 
-- **Account for the whole job before ending a turn.** Name the deliverables the
-  request asked for and check each one against something real — a file, a
-  command's output, a live result. Preparation is not delivery: groundwork for a
-  deliverable that does not exist yet is PENDING, never done.
-- **If a deliverable is unfinished and nothing blocks it, keep working.** Ending
-  the turn is the error, and no wording rescues it. You were already authorized,
-  so do not stop to ask.
-- **Do not end a turn by describing work you are about to do.** Either do it in
+- Account for the whole job before ending a turn: check every deliverable the
+  request asked for against something real. Preparation is not delivery: groundwork
+  for a deliverable that does not exist yet is PENDING, never done.
+- If something is unfinished and nothing blocks it, keep working. Ending the turn is the error; no wording rescues it. You were already authorized.
+- Do not end a turn by describing work you are about to do. Either do it in
   that turn, or say plainly that it is not started and why.
 - Saying you are "starting", "proceeding", "running", "monitoring", or
   "continuing now" is still a future promise, not work performed. Never end the
   turn there, even if you also say nothing is needed from Albert.
-- **Say "nothing is needed" only after that check passes for every deliverable.**
+- Say "nothing is needed" only after that check passes for every deliverable.
   Otherwise name what is still pending, and who holds it, in the same reply.
-  Never make Albert ask "what's next" or "what do you need from me" — and never
-  leave a genuinely finished reply silent about being finished.
-
-## Asking
-
-- Recommend and take reversible in-scope choices; do not present menus.
-- Everything pending goes in one `**Still open**` block at the bottom — what
-  Albert must do (the real command, path, click, or value, and what success
-  looks like), what another session, agent, person, or check holds, and what is
-  blocked. Every bullet starts with its holder: `You —`, `Another session —`,
-  `Waiting on —`, `Blocked —`. A `Waiting on —` bullet names the owner and its
-  last verified activity time; an unowned item is `Blocked —` and must be
-  assigned before the reply ends. One line each, at most five, most urgent first.
-  Nothing pending appears anywhere else. Omit the block only when nothing is
-  waiting on anyone. A question you answered with an assumption still gets
-  named, with what would change it.
-- Requested documents and handoffs may be as detailed as needed.
+  Never make Albert ask "what's next" — and never leave a genuinely finished
+  reply silent about being finished.
+- Recommend and take reversible in-scope choices. Never present menus. A
+  question you answered with an assumption still gets named, with what would
+  change it.
 
 ## Process rules never override this
 
 Skills, orchestrator procedures, handoff formats, and repository contracts
 govern how you *do the work* and what you write *into files*. They never govern
 what you say to Albert. A skill demanding detailed status means detailed status
-in the issue, plan, or handoff — the reply to Albert stays short.
+in the issue, plan, or handoff — the reply to Albert stays under 120 words.
 
 ## When something goes wrong
 
@@ -84,6 +97,8 @@ in the issue, plan, or handoff — the reply to Albert stays short.
 
 Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 `templates/system/machine-atlas.md`; full procedures belong in skills and docs.
+Long procedures live in `docs/standing-rules-details.md` — load that only when
+the task needs the detail.
 
 ## Owner and execution
 
@@ -97,32 +112,30 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   reply where it comes up, not when Albert next asks. Ending a turn with
   authorized work still undone is the same failure as asking permission to
   start it.
-- **One unproven outcome per session.** A session owns one unproven live-behavior outcome; refuse a bundle of leftover proofs or "take tickets N, M, and P to production" as one job — split them first, or stop and say the job is too big.
-- **Multi-step work runs through one parent issue.** When work has several steps or linked tasks, open one parent issue whose body tells any session exactly what to do: take the first unticked child issue, do only that one, tick it, comment the next child on the parent, and stop. Link each child to the parent and tell it not to be started directly. Albert then hands every session just the parent number.
-- **Do not defer live proof as a later dump.** When code lands without live proof, open exactly one leftover-proof issue for that step in the same session. Never save several unproven steps to hand to a later chat.
+- **One session owns one unproven live-behavior outcome.** Refuse a bundle of leftover
+  proofs. Never save several unproven steps for a later chat — open exactly one
+  leftover-proof issue in the same session when code lands without live proof.
+- **Multi-step work runs through one parent issue** whose body says: take the
+  first unticked child, do only that one, tick it, comment the next child on the
+  parent, and stop. Albert then hands every session just the parent number.
+- **Keep canonical checkouts landing-only.** Every write-capable task uses its
+  own current-upstream worktree before editing. Do not edit a shared local
+  checkout except for an explicit, serialized landing, installation, or recovery
+  operation. When a project folder contains multiple child Git repositories,
+  create a dedicated worktree for each one before editing it.
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
-- **Keep canonical checkouts landing-only.** For write-capable work in a Git
-  repository, create your own worktree from current upstream before editing
-  (`git fetch origin && git worktree add <path> -b <branch> origin/main`).
-  Do not edit a shared local checkout except for an explicit, serialized
-  landing, installation, or recovery operation after proving no other task is
-  using it. Read-only work may remain in the shared checkout. When a project
-  folder contains multiple child Git repositories and is not itself a
-  repository, create a dedicated worktree for each child repository you edit.
 
 ## Safety rules that apply everywhere
 
-- **Declare the task class, then recheck before a stronger gate.** When work in
-  a repository begins, declare what it is with `ai-task-gates start --class
-  <class>`, and follow that repository's own task-gate policy. Before anything
-  stronger than editing files — a paid review, a pull-request wait, a shipment,
-  a deployment, a database or infrastructure change, a production action — run
-  `ai-task-gates check --before <action>`. If the change set outgrew the
-  declared class, redeclare it and say so; never work around a refusal.
+- **Declare the task class, then recheck before a stronger gate.** Start with
+  `ai-task-gates start --class <class>`. Before a paid review, pull-request
+  wait, shipment, deployment, database or infrastructure change, or production
+  action, run `ai-task-gates check --before <action>`. If the change set outgrew
+  the declared class, redeclare it and say so; never work around a refusal.
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
-  or protected files—never chat, command arguments, output, logs, or commits.
+  or protected files — never chat, command arguments, output, logs, or commits.
   Serialize 1Password access and load `secrets-to-1password`. Report leaks
   immediately and treat exposed credentials as compromised; rotation still
   needs Albert's approval.
@@ -131,239 +144,94 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   preview. Never use broad staging or destructive Git commands over unreviewed
   work, another session's files, a repository root, or a machine-local overlay.
 - **Production infrastructure safety:** AI sessions are read-only for production
-  and shared cloud infrastructure by default. Never run `terraform apply`,
-  `terragrunt apply`, `terraform destroy`, or a mutating production `gcloud`
-  command without Albert naming the exact resource and action in the current
-  chat. Never gain broader credentials to bypass this rule.
-  Owner ruling (2026-09-16): because Albert is not technical, every technical
-  production approval that would otherwise be asked of him goes instead to an
+  and shared cloud infrastructure by default. Never run `terraform apply` or a
+  mutating production `gcloud` command without Albert naming the exact resource
+  and action in the current chat. Owner ruling (2026-09-16): because Albert is
+  not technical, every technical production approval goes instead to an
   available independent reviewer given the exact dispatch inputs, read-only,
   and only its explicit APPROVE authorizes the action while anything else stops.
-  Before production
-  trigger or Terraform-state work, read
+  Before production trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
   The sole narrow exception is `shared-db`'s activated automatic migration
-  promotion workflow: after a guarded merge and successful merged-main preview
-  rehearsal, it may dispatch its existing serial production lane without Albert
-  naming migration versions. That lane must independently re-prove the durable
-  exact-head verdict, guarded merge, current main, the one open structural work
-  issue linked to the source PR and independently admitted from its current
-  scope plus actual migration files, immutable preview evidence,
-  production target, bounded allowlist, fresh dry-run, exclusive lock, and
-  post-apply result. Missing or ambiguous evidence stops for an engineer. This
-  exception authorizes no manual production command, session-made workflow
+  promotion workflow after its guarded merge and merged-main preview. That lane
+  must independently re-prove the one open structural work issue, immutable
+  preview evidence, production target, bounded allowlist, fresh dry-run,
+  exclusive lock, and post-apply result. Missing evidence stops for an engineer.
+  This exception authorizes no manual production command, session-made workflow
   dispatch, other repository, infrastructure action, or bypass.
 - **Shared database:** reading schema and safe sample data is open. Application
   row data belongs to the application. Every shared-database STRUCTURE change
   is authored first in `u2giants/shared-db` through its branch-and-PR workflow.
   Outside-sourced bulk loads into curated Master Data also use that governed
-  route. Prove the target database immediately before every write.
-- **Shared-db orchestrator gets the minimum.** Send it only work that changes
-  the database's SHAPE, or a curated Master Data load. Proofs, monitoring,
-  reports, tooling, scripts, docs, and repository maintenance never go there,
-  whatever their size; the session that owns the outcome does them.
+  route. Prove the target database immediately before every write. Load
+  `shared-db-change` for the full procedure.
+- **Shared-db orchestrator gets the minimum** — only work that changes the
+  database's SHAPE, or a curated Master Data load. Proofs, monitoring, reports,
+  tooling, scripts, docs, and repository maintenance never go there.
 - **Label every shared-db ticket.** Whenever a `u2giants/shared-db` issue number
   appears in a reply, say beside it whether it is orchestrator work (it changes
   database structure) or non-orchestrator work (it does not).
-- **Sign everything posted to GitHub.** End every issue, pull request, comment,
-  and review body you post with one line naming the chat that wrote it:
-  `Posted by MiMo chat <id> on <machine>`, where `<id>` is the session
-  identifier if the app exposes one (write `unknown` otherwise). When editing a body,
-  keep existing signatures and add yours.
+- **Sign everything posted to GitHub** with `Posted by MiMo chat <id> on
+  <machine>` (use `unknown` if the id is empty). When editing a body, keep
+  existing signatures and add yours.
 - **Reviewer rotation:** the shared-db allocator is the one source of truth
-  for who reviews. If a reviewer is unreachable, check membership first, never
-  retry one out of rotation, and move to the next registered reviewer within
-  minutes. Reviewer policy changes land in code, config and docs together. A
-  newer reviewer CLI version is accepted after one live well-formed review.
-  Details: `ai-devops/docs/reviewer-rotation-rules.md`.
-- **Shared-db orchestrator sessions only:** when opening or running the sole
-  orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
-  queue, reviewer, and owner-decision rules apply only in that context and stay
-  in the skill; do not load or copy them into ordinary sessions.
+  for who reviews. Never retry one out of rotation. Reviewer wrappers never call
+  1Password during a review. Details: `ai-devops/docs/reviewer-rotation-rules.md`.
+- **Shared-db orchestrator sessions only:** load `shared-db-orchestrator`. Its
+  detailed rules stay in that skill.
 - **Route every successor from its own work.** Never inherit a predecessor's
   repository, work type, route, or database-object claim. Keep private artifacts
   in their approved private repository.
 - **Synology:** for a broad NAS read expected to exceed 25 seconds, load
   `synology-long-running-operations`; never increase the production timeout or
   treat a timed-out partial result as complete.
-## Cost discipline — delegate before you grind
-
-The weekly allowance is consumed by long single turns that make hundreds of
-model calls, not by the number of sessions. Every extra step in a turn re-sends
-the whole turn so far, so cost grows faster than the work does.
-
-- **Split before you start.** If a task plausibly needs more than ~30 steps,
-  break it into independent pieces and dispatch a subagent per piece. A subagent
-  carries its own context; work it does is not re-sent through your turn.
-- **Delegate any wide read.** Repository surveys, "find every place that…",
-  multi-file audits, and log sweeps go to a subagent that returns the answer,
-  never the raw material.
-- **Never delegate a decision.** A schema change, a merge decision, a
-  production command, or a security judgement stays with you. A subagent
-  reports a verdict plus the verbatim evidence line behind it; you decide.
-- **Resume a stalled subagent.** A sub-agent report that is neither finished work nor a blocker with its verbatim evidence line is a failure; resume that agent immediately.
-- **Quote relayed authority.** When relaying owner authority to a sub-agent, quote Albert's exact words and state that they came from his chat message.
-- **No colliding parallel agents.** Before dispatching parallel agents, list the files each will touch; overlapping work goes to one agent in sequence.
-- **Isolate each dispatch.** Every dispatch prompt says: create a uniquely named worktree and verify its branch before every commit; only the agent that opened an issue closes it.
-- **Return conclusions, not transcripts.** A subagent's reply should be the
-  finding and the evidence for it, not the files or output it read to get there.
-- **Do not fan out for small work.** A task under ~10 steps costs more to
-  delegate than to do. Dispatching is a tool for breadth, not a reflex.
-- **Stop and report at natural boundaries.** A turn that has run long is more
-  expensive per unit of progress than a fresh one; hand back and continue rather
-  than pushing one turn further.
-
-## Waiting is not reporting
-
-A session — main or subagent — never ends its turn to say it is still waiting.
-Hold the wait inside the turn: sleep the polling interval in a blocking
-command, re-check, repeat. Come back only with the finished result, the
-completed work, or a real blocker with its verbatim evidence line. A status
-report whose content is "still pending, nothing changed" must not be sent;
-every such report costs a full round trip and teaches nobody anything. If a
-wait has no end in sight, set a threshold before starting it, and when the
-threshold passes diagnose the stall — read the log, name the hanging step —
-instead of waiting on. This applies to every dispatch instruction you write
-for a subagent: include it, in these words, every time.
-
-The one exception is a wait on another GitHub issue that has its own owner
-(a shared-db ticket, a gate bug, another repository's work). Run
-`ai-blocker-watch wait <owner/repo#N> --for <owner/repo#M> --brief-file
-<file>`, where N is the blocker and M is the issue you are working on, then end
-the turn. When there is no work issue yet, use `--park "<plain-English title>"`
-instead of `--for` and one is opened for you. The brief is required and is the
-whole point: write, in plain English, what this work is, what is already done,
-and the exact next steps, because a brand-new session may have to continue it
-from that text alone. The watcher publishes the brief as a "parked" GitHub
-issue, records GitHub's "blocked by" link, tells M when N closes, and then
-continues the work by itself — resuming this exact session when it still
-exists, and otherwise starting a fresh session that reads the parked issue,
-makes its own worktree from current upstream, and carries on. Parked work is
-findable months later with `ai-blocker-watch find <plain words>`. The same
-command covers every kind of waiting, not only orchestrator tickets: a pull
-request is just a blocker reference; a point in time is `--until <UTC time>`;
-and a long-running job is an issue that says what "finished" means, waited on
-with `--until` as a safety check-in (whichever comes first releases the wait).
-Never hold such a wait open for days.
-
-A blocker issue gets an owner at birth, and that owner is you. When you open an
-issue whose purpose is to block other work — a gate bug, a shared-db
-handover, any dependency another session will wait on — either assign
-yourself (or the session that will own it) and say so in the issue, or hand it
-to a named queue owner with an `owner:` line in the issue body. Never leave it
-unowned: the watcher alarms on open blockers that have no assignee, no
-`owner:` line, no open linked pull request, and no activity for a day, because
-an unowned blocker stalls every session behind it. A line starting `owner:` in
-the body or a comment is the machine-readable marker of who owns it.
 
 ## Model, engineering, and Git rules
 
-- Before requesting the first independent review, self-audit the whole class of each risk (all sibling paths,
-  links, trust points) and fix them together; when a review rejects, fix the whole class, not just the instance.
-- Prefer permanent, fewest-moving-parts fixes. Make fallbacks visible, keep
-  configurable values out of code, test created code, and verify UI changes
-  visually before reporting completion.
-- Before planning a live proof, trace the feature's live call path end to end
-  (trigger, code, every guard it must pass) and list every blocker at once. A
-  scheduled job that did not do its work must exit non-zero.
+- **GPT-5.6 uses `low` or `medium` reasoning only** — never `high`, `none`, or
+  `minimal`. Split a harder task; do not raise the setting.
+- Prefer permanent, fewest-moving-parts fixes. Test created code. Verify UI
+  changes visually before reporting completion.
 - GitHub is the source of truth: repository to automated checks to deployment.
   Never live-edit a server.
 - Never replace operating-system binaries. Use project-owned tools or supported
   package management without overwriting the operating system's commands.
 - Before the first commit in a repository, run `git var GIT_COMMITTER_IDENT`; it
-  must show `Albert Hazan <u2giants@users.noreply.github.com>`. Check for other
-  sessions' changes before pull, merge, or commit, and stage only owned files.
+  must show `Albert Hazan <u2giants@users.noreply.github.com>`. Stage only owned
+  files.
 - **Never push directly to a protected `main`.** Work on a branch, open a pull
-  request, and let the repository's checks and merge queue decide. The
-  authoritative per-repository answer is `config/repository-policy.json` in
-  `ai-devops`; `feature-branch-pr` is the default and `popcre/ai-devops` itself
-  is on it. An admin bypass exists for emergencies only and is not a working
-  style. DesignFlow uses
-  Albert's sandbox branch and a pull request to `develop`, never a self-merge.
-  `shared-db` uses a branch and pull request. Read the repository's own
-  `AGENTS.md` before changing branches or shipping.
-- **Albert does not merge — you do.** Every pull request you open outside
-  DesignFlow is yours to merge, and a merge is part of the work, not a handoff.
-  Never end a reply asking Albert to merge, review, or "approve" a PR you were
-  authorized to create; merge it and report the merge commit. The only
-  exceptions are DesignFlow (`develop`, never a self-merge) and a PR Albert
-  explicitly said he wants to review first. If a merge is blocked by a failing
-  check or a conflict, fix it — say so only if you cannot.
+  request. `config/repository-policy.json` in `ai-devops` is authoritative;
+  DesignFlow uses Albert's sandbox branch to `develop`, never a self-merge.
+- **Albert does not merge — you do.** Merge every pull request you were
+  authorized to create, except DesignFlow and a PR Albert explicitly said he
+  wants to review first.
 - **A documentation-only pull request does not wait for checks, and does not
-  need permission to skip them.** Check the changed-file list first. If every
-  file is prose - Markdown, docs, plans, handoffs, notes - merge it the moment it
-  is open with `gh pr merge --squash --admin` and report the merge commit;
-  waiting an hour for CI to lint prose is wasted time, and a prose file cannot
-  break a build. If even one changed file is code, a test, a script, a workflow,
-  or configuration, the normal checks apply and this exception does not.
-- `gh pr merge` from a linked worktree can print `'main' is already used by
-  worktree`. That is local branch cleanup failing AFTER the merge succeeded.
-  Confirm with `gh pr view <n> --json state`, delete the remote branch, and
-  continue — do not report it as a failed merge.
-- Back up configuration before editing it, change existing settings in place,
-  avoid duplicate keys, and validate the result. Xiaomi MiMo configuration is
-  `~/.config/mimocode/mimocode.jsonc`; this global file is
-  `~/.config/mimocode/AGENTS.md`, installed by ai-devops. Never change Claude,
-  Codex, or ZCode configuration as part of MiMo work.
+  need permission to skip them.** If every changed file is prose, merge it with
+  `gh pr merge --squash --admin` immediately. If even one changed file is code,
+  tests, scripts, workflows, or configuration, the normal checks apply.
 - **Wait on CI with the repository's bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
+  Use `bin/ai-pr-wait <pr>` for a pull request.
 - Reuse the repository's shared plans, workflows, harnesses, and provider
-  helpers before adding another copy. Any new top-level or copied infrastructure
-  needs an explicit owner, necessity, and consolidation or retirement path.
+  helpers before adding another copy. Any new shared artifact needs an explicit owner, necessity, and consolidation or retirement path.
 
-## Terminal output discipline
+## Work discipline
 
-Everything put into a conversation is re-sent to the model on every later turn,
-so one oversized dump is billed dozens of times. Keep routine output under ~40
-lines. Correctness always outranks this rule: when the full text is what you
-need to be right, read the full text and say why.
-
-- **Tool output consumes context even when the app collapses or hides it.** Do
-  not return full logs, JSON, diffs, instruction files, or command output to the
-  conversation. Redirect long output to a scratch file, then return only the
-  decisive result or smallest diagnostic excerpt. Set tool output limits when
-  available.
-- Keep owner-visible progress in plain English and under 120 words. State the
-  business result, blocker, or required owner action; omit implementation detail
-  that does not change one of those.
-
-- Find before you read. `grep -n "pattern" file | head -20`, then read a window
-  around the hits. Never guess a line range blind.
-- Once you need more than about 150 lines of a file, read it in one pass instead
-  of paging it — repeated windows cost more than the single read.
-- Filter logs by what matters, not by position: grep for the error, then read
-  around it. `head`/`tail` alone will hide a failure in the middle.
-- git: `git --no-pager log --oneline -15`, `git status --short`. Use `--stat` to
-  orient, but read the actual diff before approving, merging, or changing code.
-- gh: project fields for a status check — `gh pr view <n> --json state,mergedAt`.
-  Read the body and review threads before any merge decision.
-- npm / pnpm: `--silent --no-progress`; pipe installs to `| tail -5`.
-- Tests: run quiet. When green, report the summary line including skipped and
-  ignored counts. When red, report the failing cases, with enough of each failure
-  to diagnose it.
-- Anything genuinely long goes to a scratch file; then grep the file.
-- Never re-run a command only to re-read output already in this conversation.
-
-## Failed commands
-
-Quote the part of the error that identifies the cause — for a stack trace, the
-exception and the frames in our own code, not the whole trace. Do not paste an
-entire build log.
-
-Do not repeat a deterministic failing command without changing something. A
-transient failure — network, rate limit, lock contention, a still-running CI
-check — may be retried up to three times with backoff.
-
-## Context and handoffs
-
+- Keep routine tool output short. Do not paste full logs, JSON, diffs, or
+  command output into the conversation — save long output to a scratch file and
+  return only the decisive result.
+- **Never delegate a decision.** A schema change, a merge decision, a production
+  command, or a security judgement stays with you. A subagent reports a verdict
+  plus the verbatim evidence line behind it; you decide. When relaying owner
+  authority, quote Albert's exact words and say they came from his chat message.
+  A sub-agent report that is neither finished work nor a blocker with its
+  verbatim evidence line is a failure; resume that agent immediately.
+- A session never ends its turn to say it is still waiting. Hold the wait inside
+  the turn. The one exception is a wait on another GitHub issue that has its own
+  owner: run `ai-blocker-watch wait` with a plain-English brief file, then end
+  the turn. Details: `docs/standing-rules-details.md`.
 - Read the repository's `AGENTS.md`, then only the documents its task router
-  names for the current work. Do not bulk-load Markdown files.
-- Read a handoff only when Albert asks to continue unfinished work or the task
-  clearly matches that workstream. Do not load unrelated handoffs or ask Albert
-  to choose one when the request is already clear.
-- Create a HANDOFF only for unfinished work or when Albert asks. Never rewrite
-  the root `HANDOFF.md` or another session's file. Before writing one, load the
-  `handoff-writer` skill; it owns naming, required sections, audit, and cleanup.
-- Procedures belong in skills/docs. Machine facts live in `popcre/ai-devops/templates/system/machine-atlas.md`;
-  read only the current machine's section.
+  names for the current work. Do not load unrelated handoffs.
+- Create a HANDOFF only for unfinished work or when Albert asks. Load
+  `handoff-writer` first; it owns naming and required sections.
