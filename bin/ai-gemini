@@ -112,6 +112,11 @@ import sys
 
 mode = sys.argv[1]
 root = os.getcwd()
+checksum_probe = subprocess.run(['sha256sum'], input=b'', check=True,
+                                stdout=subprocess.PIPE).stdout
+checksum_marker = checksum_probe[65:66]
+if checksum_marker not in (b' ', b'*'):
+    raise SystemExit('unrecognized sha256sum output mode')
 
 def raw(value):
     return os.fsencode(value)
@@ -126,8 +131,7 @@ def digest_file(path):
 def sha_line(path, name):
     escaped = b'\\' in name or b'\n' in name
     shown = name.replace(b'\\', b'\\\\').replace(b'\n', b'\\n') if escaped else name
-    marker = b'*' if os.name == 'nt' else b' '
-    return (b'\\' if escaped else b'') + digest_file(path) + b' ' + marker + shown + b'\n'
+    return (b'\\' if escaped else b'') + digest_file(path) + b' ' + checksum_marker + shown + b'\n'
 
 def link(path):
     return subprocess.run(['readlink', path], check=True,
@@ -159,8 +163,9 @@ def paths(directory, source=False):
             rel = name if prefix == '.' else prefix + '/' + name
             if os.sep == '\\':
                 rel = rel.replace('\\', '/')
-            if not source or not omitted(rel):
-                result.append(('./' + rel, os.path.join(base, name)))
+            path = os.path.join(base, name)
+            if (not source or not omitted(rel)) and (os.path.isfile(path) or os.path.islink(path)):
+                result.append(('./' + rel, path))
     return sorted(result, key=lambda pair: raw(pair[0]))
 
 def source_digest(directory):

@@ -123,14 +123,17 @@ RACE_AGY="$TMP/bin/agy-race"; cp "$AI_GEMINI_BIN" "$RACE_AGY"; chmod +x "$RACE_A
 write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"
 RACE_REPO="$TMP/race-repo"; make_repo "$RACE_REPO"
 check 'runtime replacement after startup gate is refused before provider contact' "! (cd '$RACE_REPO' && AI_GEMINI_BIN='$RACE_AGY' MOCK_MUTATE_RUNTIME_AFTER_GATE=1 '$SCRIPT' new runtime-race --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
-REAL_SHA256SUM="$(command -v sha256sum)"; mkdir -p "$TMP/race-bin"; printf inventory-trigger > "$RACE_REPO/inventory-race-trigger"
-cat > "$TMP/race-bin/sha256sum" <<'EOF'
+REAL_PYTHON3="$(command -v python3)"; mkdir -p "$TMP/race-bin"; printf inventory-trigger > "$RACE_REPO/inventory-race-trigger"
+cat > "$TMP/race-bin/python3" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *inventory-race-trigger*) if [ ! -e "$MOCK_INVENTORY_RACE_DONE" ]; then printf '\n# changed during inventory\n' >> "$AI_GEMINI_BIN"; : > "$MOCK_INVENTORY_RACE_DONE"; fi;; esac
-exec "$REAL_SHA256SUM" "$@"
+if [ "$1:$2" = "-:review" ] && [ ! -e "$0.done" ]; then
+  printf '\n# changed during inventory\n' >> "$AI_GEMINI_BIN"
+  : > "$0.done"
+fi
 EOF
-chmod +x "$TMP/race-bin/sha256sum"; cp "$TMP/bin/agy" "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"; write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"; : > "$MOCK_AGY_CALLS"
-check 'runtime replacement during inventory is refused before provider contact' "! (cd '$RACE_REPO' && PATH='$TMP/race-bin':\"\$PATH\" REAL_SHA256SUM='$REAL_SHA256SUM' MOCK_INVENTORY_RACE_DONE='$TMP/inventory-race-done' AI_GEMINI_BIN='$RACE_AGY' '$SCRIPT' new inventory-runtime-race --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
+printf 'exec %q "$@"\n' "$REAL_PYTHON3" >> "$TMP/race-bin/python3"
+chmod +x "$TMP/race-bin/python3"; cp "$TMP/bin/agy" "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"; write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"; : > "$MOCK_AGY_CALLS"
+check 'runtime replacement during inventory is refused before provider contact' "! (cd '$RACE_REPO' && PATH='$TMP/race-bin':\"\$PATH\" AI_GEMINI_BIN='$RACE_AGY' '$SCRIPT' new inventory-runtime-race --prompt review) && test -f '$TMP/race-bin/python3.done' && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.15
 check 'agy version drift re-quarantines before provider contact' "! '$SCRIPT' new stale-runtime --prompt review && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.14 gemini-other
@@ -254,7 +257,6 @@ fi
 check 'a stalled packet build fails in time and names the step' "test '$SLOW_PKT_RC' -ne 0 && printf '%s' '$SLOW_PKT_OUT' | grep -q 'packet build failed or timed out after 2s' && test -z \"\$(meta_for slow-pkt)\""
 SLOW_INV="$TMP/repo-slow-inv"; make_repo "$SLOW_INV"; printf slow > "$SLOW_INV/inventory-slow-trigger"
 SLOW_INV_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_INV")"
-REAL_PYTHON3="$(command -v python3)"
 mkdir -p "$TMP/slow-bin"
 cat > "$TMP/slow-bin/python3" <<'EOF'
 #!/usr/bin/env bash
@@ -262,7 +264,7 @@ cat > "$TMP/slow-bin/python3" <<'EOF'
 # invoke Python, but never with the exact "- review" inventory arguments.
 if [ "$1:$2" = "-:review" ]; then
   printf '%(%s)T\n' -1 > "$0.start"
-  sleep 15
+  sleep 120
 fi
 EOF
 printf 'exec %q "$@"\n' "$REAL_PYTHON3" >> "$TMP/slow-bin/python3"
