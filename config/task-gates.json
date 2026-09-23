@@ -74,7 +74,7 @@
     "private-tooling": {
       "rank": 95,
       "protected": true,
-      "description": "Explicit tooling and docs inside a private-evidence repository that carry no licensed rows. Ranked above private-evidence so a named tooling path can be reviewed without opening raw evidence; containment proofs still apply."
+      "description": "Explicit tooling inside a private-evidence repository that is named as carrying no licensed rows. Ranked above private-evidence only so those paths can demand local-tests; review stays forbidden because a formal review snapshots the whole private repository. One licensed path still forces the change set to private-evidence."
     }
   },
   "default": {
@@ -261,6 +261,7 @@
           "local-tests"
         ],
         "forbidden_actions": [
+          "review",
           "deploy",
           "database",
           "infrastructure",
@@ -507,9 +508,10 @@
       "match": "u2giants/licensor-source-data",
       "_comment": [
         "Licensed rows and captures stay private-evidence under the ** catch-all.",
-        "Named tooling and docs are an explicit exception: they contain no licensed",
-        "rows, so they may be reviewed. private-tooling outranks private-evidence",
-        "so those paths win the catch-all without weakening evidence containment."
+        "Named tooling paths are a narrow exception: they demand local-tests, but",
+        "review stays forbidden because a formal review snapshots the whole private",
+        "repository. Classification is still path-based — never put licensed rows",
+        "under scripts/ or scraper/."
       ],
       "paths": [
         {
@@ -521,27 +523,11 @@
           "class": "private-tooling"
         },
         {
-          "glob": "**/*.md",
-          "class": "private-tooling"
-        },
-        {
           "glob": "**/*.mjs",
           "class": "private-tooling"
         },
         {
-          "glob": "**/*.js",
-          "class": "private-tooling"
-        },
-        {
           "glob": "**/*.py",
-          "class": "private-tooling"
-        },
-        {
-          "glob": "**/*.sh",
-          "class": "private-tooling"
-        },
-        {
-          "glob": "**/*.ps1",
           "class": "private-tooling"
         },
         {
@@ -550,14 +536,6 @@
         },
         {
           "glob": "**/package-lock.json",
-          "class": "private-tooling"
-        },
-        {
-          "glob": "**/.gitignore",
-          "class": "private-tooling"
-        },
-        {
-          "glob": "**/.gitattributes",
           "class": "private-tooling"
         },
         {

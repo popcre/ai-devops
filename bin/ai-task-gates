@@ -385,6 +385,16 @@ cmd_explain(){
       effective="$declared"
     fi
   fi
+  # Same sticky rule as check: one licensed path keeps private-evidence.
+  local contributor
+  for contributor in "${CONTRIBUTORS[@]+"${CONTRIBUTORS[@]}"}"; do
+    case "$contributor" in
+      private-evidence$'\t'*)
+        effective=private-evidence
+        break
+        ;;
+    esac
+  done
   required_gate="$({
     [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"
     [ -z "$declared" ] || [ "$declared" = "$OBSERVED_CLASS" ] || merged_gate "$IDENTITY" "$declared"
@@ -470,6 +480,18 @@ cmd_check(){
   if [ "$effective" = none ] || [ "$declared_rank" -gt "$effective_rank" ]; then
     effective="$declared"; effective_rank="$declared_rank"
   fi
+  # One licensed path keeps the change set in private-evidence even when a
+  # higher-ranked declaration or tooling exception would otherwise win.
+  local contributor
+  for contributor in "${CONTRIBUTORS[@]}"; do
+    case "$contributor" in
+      private-evidence$'\t'*)
+        effective=private-evidence
+        effective_rank="${TG_RANK[private-evidence]}"
+        break
+        ;;
+    esac
+  done
   protected="$(class_protected "$effective")"
 
   # 1. Scope drift: the work grew past what was declared.

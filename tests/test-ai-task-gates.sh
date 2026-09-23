@@ -269,25 +269,27 @@ while IFS='|' read -r path want; do
 done <<'TABLE'
 warner-bros/scripts/check-weekly-capture.mjs|private-tooling
 warner-bros/scripts/test-check-weekly-capture.mjs|private-tooling
-warner-bros/README.md|private-tooling
+warner-bros/README.md|private-evidence
 warner-bros/assets.csv|private-evidence
 warner-bros/capture-state.json|private-evidence
 warner-bros/contracts/inventory-private.json|private-evidence
 warner-bros/manifest/assets.csv|private-evidence
 warner-bros/deltas/2026-08-20T0445Z/summary.json|private-evidence
 TABLE
-check 'tooling plus docs still take the tooling exception' \
-  "[ \"\$( ( cd '$TMP/lsd' && printf '%s\n' warner-bros/README.md warner-bros/scripts/check-weekly-capture.mjs | \"$GATES\" explain --json --paths-from - ) | jq -r .observed_class )\" = private-tooling ]"
+check 'tooling-only change set is private-tooling' \
+  "[ \"\$( ( cd '$TMP/lsd' && printf '%s\n' warner-bros/scripts/check-weekly-capture.mjs warner-bros/scripts/test-check-weekly-capture.mjs | \"$GATES\" explain --json --paths-from - ) | jq -r .observed_class )\" = private-tooling ]"
 check 'one licensed row pulls the whole change set back to private-evidence' \
-  "[ \"\$( ( cd '$TMP/lsd' && printf '%s\n' warner-bros/README.md warner-bros/assets.csv | \"$GATES\" explain --json --paths-from - ) | jq -r .observed_class )\" = private-evidence ]"
+  "[ \"\$( ( cd '$TMP/lsd' && printf '%s\n' warner-bros/scripts/check-weekly-capture.mjs warner-bros/assets.csv | \"$GATES\" explain --json --paths-from - ) | jq -r .observed_class )\" = private-evidence ]"
 ( cd "$TMP/lsd" && "$GATES" start --class private-tooling ) >/dev/null
 mkdir -p "$TMP/lsd/warner-bros/scripts"
 printf '#!/usr/bin/env node\n' > "$TMP/lsd/warner-bros/scripts/check-weekly-capture.mjs"
-check 'tooling-only Warner work may start a review' \
-  "rc 0 '$TMP/lsd' check --before review"
-printf 'id,name\n1,secret\n' > "$TMP/lsd/warner-bros/assets.csv"
-check 'licensed rows still refuse a review' \
+check 'tooling-only Warner work still refuses a formal review' \
   "rc 3 '$TMP/lsd' check --before review"
+check 'tooling-only Warner work may ship without that review' \
+  "rc 0 '$TMP/lsd' check --before ship"
+printf 'id,name\n1,secret\n' > "$TMP/lsd/warner-bros/assets.csv"
+check 'a higher-ranked declaration cannot outrank licensed rows' \
+  "out '$TMP/lsd' explain --json | jq -e '.effective_class==\"private-evidence\"'"
 check 'and the refusal still names the protected class' \
   "out '$TMP/lsd' check --before review | grep -Fq 'private-evidence'"
 check 'the protected stop does not claim an owner resource unlock' \

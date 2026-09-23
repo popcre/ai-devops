@@ -65,10 +65,11 @@ installer to run. It must not be modelled as protected `deployment`, because a
 forbidden action on a protected class has no authorization path and would make
 the installer permanently unusable.
 
-Inside a private-evidence repository, named tooling and docs that carry no
-licensed rows use `private-tooling`. It outranks `private-evidence` so those
-paths can be reviewed, while any licensed row in the change set pulls the
-effective class back to `private-evidence` and review stays refused.
+Inside a private-evidence repository, named tooling paths may use
+`private-tooling` so local-tests are required. Review stays refused for both
+private classes: a formal review snapshots the whole private repository. Any
+licensed path in the change set forces `private-evidence` even if a higher-ranked
+class was declared.
 
 `bin/ai-task-gates` records the declared class at the start of work and
 rechecks the complete change set before any expensive or risky action. The
