@@ -1205,6 +1205,16 @@ version_gate_probe() { # version_gate_probe NAME POLICY_FILE REPORTED_VERSION
 version_gate_probe vg-exact "$VERSION_POLICY" 1.0.13
 check "grok_1_0_13_contract_is_accepted" "[ \"\$(cat '$TMP/vg.rc')\" = 0 ] && [ -f '$TMP/provider-contacted' ]"
 
+# Issue #686: a "minimum" policy is a floor, so an auto-updated Grok keeps working
+# while an older build is still refused before any paid turn.
+MIN_POLICY="$TMP/min-policy.json"
+printf '%s
+' '{"schema_version":1,"providers":{"grok":{"command":"grok","supported_version":"1.0.13","version_match":"minimum"}}}' > "$MIN_POLICY"
+version_gate_probe vg-min-newer "$MIN_POLICY" 1.0.41
+check "minimum_policy_accepts_a_newer_grok" "[ \"\$(cat '$TMP/vg.rc')\" = 0 ] && [ -f '$TMP/provider-contacted' ]"
+version_gate_probe vg-min-older "$MIN_POLICY" 1.0.9
+check "minimum_policy_refuses_an_older_grok" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ] && grep -q 'requires 1.0.13 or a newer 1.x' '$TMP/vg.out'"
+
 # A refusal must leave nothing behind. If the sandbox, evidence packet or the
 # durable session record were created first, the obvious retry under the same
 # name would be rejected for a run that never contacted the provider.
@@ -1219,7 +1229,7 @@ check "refused_version_can_be_retried_under_the_same_name"   "[ \"\$(cat '$TMP/v
 version_gate_probe vg-old "$VERSION_POLICY" 1.0.5
 check "stale_grok_version_fails_before_paid_turn" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ]"
 check "stale_version_refusal_names_both_versions" \
-  "grep -q '1.0.5' '$TMP/vg.out' && grep -q 'qualifies exactly 1.0.13' '$TMP/vg.out'"
+  "grep -q '1.0.5' '$TMP/vg.out' && grep -q 'requires exactly 1.0.13' '$TMP/vg.out'"
 
 version_gate_probe vg-new "$VERSION_POLICY" 1.0.14
 check "newer_unqualified_grok_version_is_not_accepted" "[ \"\$(cat '$TMP/vg.rc')\" != 0 ] && [ ! -f '$TMP/provider-contacted' ]"
@@ -1240,7 +1250,7 @@ check "doctor_reports_installed_versus_required_version" \
   "printf '%s' \"\$DOCTOR_UNQUALIFIED\" | grep -q UNQUALIFIED"
 DOCTOR_OK="$( cd "$REPO" && AI_PROVIDER_VERSIONS_FILE="$VERSION_POLICY" AI_GROK_TEST_VERSION=1.0.13 bash "$SCRIPT" doctor 2>&1 )"
 check "doctor_confirms_the_qualified_version" \
-  "printf '%s' \"\$DOCTOR_OK\" | grep -q 'version policy: OK (exactly 1.0.13'"
+  "printf '%s' \"\$DOCTOR_OK\" | grep -q 'version policy: OK (installed 1.0.13; requires exactly 1.0.13'"
 
 # The repository's real policy must be the one the wrapper enforces, and the
 # reviewer must never gain blanket approval just because 1.0.11 added a headless
@@ -1264,6 +1274,8 @@ POOL="$REPO_ROOT/bin/ai-review-pool"
 bash "$FRONT" kimi security-review >/dev/null 2>&1; RC_KIMI=$?
 check "front_door_refuses_unregistered_provider" "[ '$RC_KIMI' -eq 2 ]"
 check "front_door_refusal_names_the_registry_state" "bash '$FRONT' kimi security-review 2>&1 | grep -q 'not a registered reviewer'"
+bash "$FRONT" glm security-review >/dev/null 2>&1; RC_GLM=$?
+check "front_door_refuses_glm_out_of_rotation" "[ '$RC_GLM' -eq 2 ]"
 bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
 check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 
@@ -1309,6 +1321,18 @@ export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE
 APPROVE_REPORT="$(tail -1 "$POOLTMP/out-approve" 2>/dev/null)"
 check "pool_adapter_approves_a_bound_verdict" "[ '$RC_APPROVE' -eq 0 ] && [ -f '$APPROVE_REPORT' ] && grep -q APPROVE '$APPROVE_REPORT'"
 check "pool_adapter_writes_the_report" "ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '^grok-security-review-'"
+# The adapter's generated name must fit every registered runner, including
+# Muse's 40-character limit and Gemini's caller-qualified 64-character tag.
+# Keep the provider names distinct while the full run ID stays in the report.
+export AI_POOL_RUNNER_MUSE="$POOLTMP/runner" AI_POOL_RUNNER_GEMINI="$POOLTMP/runner"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" muse final-check ) > "$POOLTMP/out-muse" 2>&1; RC_MUSE=$?
+MUSE_TAG="$(grep '^new ' "$POOLTMP/runner-args" | tail -1 | awk '{print $2}')"
+check "pool_muse_session_name_fits_native_limit" "[ '$RC_MUSE' -eq 0 ] && [ -n '$MUSE_TAG' ] && [ '${#MUSE_TAG}' -le 40 ] && [[ '$MUSE_TAG' == pool-muse-* ]]"
+MUSE_REPORT="$(tail -1 "$POOLTMP/out-muse")"
+check "pool_muse_report_retains_full_run_identity" "[ -f '$MUSE_REPORT' ] && grep -Fq '| run |' '$MUSE_REPORT' && grep -Eq '20[0-9]{6}T[0-9]{6}-[0-9]+-[0-9]+' '$MUSE_REPORT'"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" gemini final-check ) > "$POOLTMP/out-gemini" 2>&1; RC_GEMINI=$?
+GEMINI_TAG="$(grep '^new ' "$POOLTMP/runner-args" | tail -1 | awk '{print $2}')"
+check "pool_gemini_session_name_fits_derived_sandbox_limit" "[ '$RC_GEMINI' -eq 0 ] && [ -n '$GEMINI_TAG' ] && [ $(( 7 + 12 + 1 + 10 + 1 + ${#GEMINI_TAG} )) -le 64 ] && [[ '$GEMINI_TAG' == pool-gemini-* ]]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=nounbound bash "$POOL" grok security-review ) > "$POOLTMP/out-nb" 2>&1; RC_NB=$?
 check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
@@ -1350,6 +1374,17 @@ check "pool_adapter_redacts_credential_shaped_diagnostics" "grep -q 'REDACTED' '
 check "pool_adapter_runner_overrides_require_test_hooks" "grep -q 'AI_POOL_TEST_HOOKS=1 to substitute a review binary' '$POOL'"
 check "pool_adapter_refuses_a_non_sha_head" "grep -q 'not a full commit SHA' '$POOL'"
 rm -rf "$POOLTMP"
+
+# Issue #686: session lookup must not spawn jq per record (it took ~15 minutes
+# over 817 records on Windows). It narrows with one recursive grep, ignores
+# records nested deeper than sessions/<repo>/<file>.json, and still matches.
+LSM="$(mktemp -d)"; mkdir -p "$LSM/sessions/a" "$LSM/sessions/b/deep"
+printf '{"caller":"claude","name":"lsm-foo","repo_remote":"R"}' > "$LSM/sessions/a/x.json"
+printf '{"caller":"claude","name":"lsm-foo","repo_remote":"R"}' > "$LSM/sessions/b/deep/y.json"
+printf '{"caller":"codex","name":"lsm-foo","repo_remote":"R"}' > "$LSM/sessions/b/z.json"
+LSM_OUT="$(STATE_DIR="$LSM"; normalize_remote() { printf '%s' "$1"; }; eval "$(sed -n '/^logical_session_meta() {/,/^}/p' "$SCRIPT")"; logical_session_meta R claude lsm-foo; printf ' rc=%s|' "$?"; logical_session_meta R claude lsm-bar; printf ' rc=%s' "$?")"
+check "session_lookup_finds_the_record_via_one_grep" "[ '$LSM_OUT' = '$LSM/sessions/a/x.json rc=0| rc=1' ]"
+rm -rf "$LSM"
 
 echo
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"

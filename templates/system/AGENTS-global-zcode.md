@@ -98,6 +98,7 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   authorized work still undone is the same failure as asking permission to
   start it.
 - **One unproven outcome per session.** A session owns one unproven live-behavior outcome; refuse a bundle of leftover proofs or "take tickets N, M, and P to production" as one job — split them first, or stop and say the job is too big.
+- **Multi-step work runs through one parent issue.** When work has several steps or linked tasks, open one parent issue whose body tells any session exactly what to do: take the first unticked child issue, do only that one, tick it, comment the next child on the parent, and stop. Link each child to the parent and tell it not to be started directly. Albert then hands every session just the parent number.
 - **Do not defer live proof as a later dump.** When code lands without live proof, open exactly one leftover-proof issue for that step in the same session. Never save several unproven steps to hand to a later chat.
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
@@ -174,6 +175,14 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   `Posted by ZCode chat <id> on <machine>`, where `<id>` is
   `$ZCODE_SESSION_ID` (write `unknown` if it is empty). When editing a body,
   keep existing signatures and add yours.
+- **Reviewer rotation:** the shared-db allocator is the one source of truth
+  for who reviews. If a reviewer is unreachable, check membership first, never
+  retry one out of rotation, and move to the next registered reviewer within
+  minutes. Reviewer policy changes land in code, config and docs together. A
+  newer reviewer CLI version is accepted after one live well-formed review.
+  Reviewer wrappers never call 1Password during a review, reviewer state never
+  leaves its home drive, and reviewer paths never grow with names.
+  Details: `ai-devops/docs/reviewer-rotation-rules.md`.
 - **Shared-db orchestrator sessions only:** when opening or running the sole
   orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
   queue, reviewer, and owner-decision rules apply only in that context and stay

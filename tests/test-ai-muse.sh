@@ -120,6 +120,7 @@ case "${1:-}" in
     fi
     [ -z "${MUSE_STUB_CALLS_FILE:-}" ] || printf 'run\n' >> "$MUSE_STUB_CALLS_FILE"
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
+    [ -z "${MUSE_STUB_ARGS_FILE:-}" ] || printf '%s\n' "$@" > "$MUSE_STUB_ARGS_FILE"
     if [ -n "${MUSE_STUB_CMDLINE_FILE:-}" ]; then
       { tr '\0' ' ' < "/proc/$$/cmdline" 2>/dev/null || true; printf '\n'; tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null || true; } > "$MUSE_STUB_CMDLINE_FILE"
     fi
@@ -368,6 +369,7 @@ NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)"
 check 'tracked historic reports do not block a new exact destination' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
 check 'old credential lock without an owner is reconciled' "test ! -e '$TMP/state/credential.lock.d'"
 check 'new returns first response' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
+check 'OpenCode ignores an invalid native reasoning knob without passing a flag' "cd '$REPO' && eval \"$ENV AI_MUSE_REASONING_EFFORT=not-a-native-tier MUSE_STUB_ARGS_FILE='$TMP/opencode-reasoning-args' '$SCRIPT' new ignored-reasoning --prompt test\" >/dev/null && test -s '$TMP/opencode-reasoning-args' && ! grep -qx -- --reasoning-effort '$TMP/opencode-reasoning-args'"
 check 'provider child never inherits the writable report descriptor' "test ! -e '$TMP/provider-fd-leak'"
 META="$(find "$TMP/state" -name 'codex--debate.json' -type f)"
 check 'new stores exact session id' "jq -e '.session_id==\"ses_new\" and .name==\"debate\"' '$META'"
@@ -468,5 +470,12 @@ check 'a held credential lock fails closed with a clear message after the wait b
 rm -rf "$TMP/state/credential.lock.d"
 
 muse_recovery_cases
+# op missing from PATH on Windows: the wrapper finds the WinGet package copy.
+if command -v cygpath >/dev/null 2>&1; then
+  fake_op_dir="$TMP/la/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_test"; mkdir -p "$fake_op_dir"
+  printf '#!/bin/sh\necho ok\n' > "$fake_op_dir/op.exe"; chmod +x "$fake_op_dir/op.exe"
+  sed -n '/^# Windows: WinGet installs the 1Password CLI/,/^fi$/p' "$SCRIPT" > "$TMP/opfallback.sh"
+  check 'op missing from PATH resolves to the WinGet package folder' "env -i PATH=/usr/bin LOCALAPPDATA='$(cygpath -w "$TMP/la")' bash -c '. \"$TMP/opfallback.sh\"; command -v op'"
+fi
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

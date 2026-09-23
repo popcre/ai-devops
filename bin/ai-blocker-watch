@@ -127,10 +127,11 @@ parse_ref(){ # owner/repo#N -> "owner/repo N"
 }
 gh_api(){ gh_call api "$@" | tr -d '\r'; }
 
-link(){ # link <blocked> <blocker>
-  local br bn kr kn id
+link(){ # link <blocked> <blocker> [blocker id, when already read]
+  local br bn kr kn id="${3:-}"
   read -r br bn <<<"$(parse_ref "$1")"; read -r kr kn <<<"$(parse_ref "$2")"
-  id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
+  [ -n "$id" ] || id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
+  note "linking $1 as blocked by $2 on GitHub"
   if gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
     note "$1 is already blocked by $2"; return 0
   fi
@@ -199,12 +200,23 @@ cmd_wait(){
       die "cannot tell which repository $cwd belongs to; use --for owner/repo#M instead"
     [ -n "$repo" ] || die "cannot tell which repository $cwd belongs to; use --for owner/repo#M instead"
   fi
-  local waiting_on=""
+  local waiting_on="" bid="" bispr=""
   if [ -n "$ref" ]; then
-    local br bn btitle
+    local br bn btitle bmeta
     read -r br bn <<<"$(parse_ref "$ref")"
-    btitle="$(gh_api "repos/$br/issues/$bn" --jq .title)" || die "cannot read $ref"
+    # ONE read gives the title, the id the link needs, and whether the blocker
+    # is a pull request. Every ai-gh call is throttled and, on a loaded Windows
+    # machine, can take a minute or more; each avoided call is real time.
+    note "reading blocker $ref"
+    bmeta="$(gh_api "repos/$br/issues/$bn" --jq '[(.id|tostring), ((.pull_request != null) | tostring), .title] | @tsv')" ||
+      die "cannot read $ref"
+    IFS=$'\t' read -r bid bispr btitle <<<"$bmeta"
+    [ -n "$bid" ] || die "cannot read $ref"
     waiting_on="$ref — $btitle"
+    # GitHub's "blocked by" link accepts only issues and refuses a pull request.
+    # A PR blocker is still watched: every tick reads its state and wakes this
+    # session when it merges or closes (and says so if it closed unmerged).
+    [ "$bispr" != true ] || note "$ref is a pull request; GitHub cannot link a pull request as a blocker, so this wait watches the pull request directly"
   fi
   if [ -n "$until_at" ]; then
     if [ -n "$waiting_on" ]; then waiting_on="$waiting_on
@@ -220,23 +232,29 @@ The time $until_at — whichever comes first."
       "$(hostname 2>/dev/null || echo unknown)" "$harness" "$session" "${main:-<not a git checkout>}" "$(now_iso)"
     printf 'owner: ai-blocker-watch — it continues this work by itself once the wait is released.\n'
   } > "$tmp"
-  ensure_labels "$repo"
   local parked_issue="" parked_url=""
   if [ -n "$park" ]; then
+    note "opening the parked issue in $repo"
+    # Labels exist after the first wait in a repository; create them only when
+    # GitHub refuses the label, instead of spending two calls every time.
     parked_url="$(gh_call issue create -R "$repo" -t "$park" --body-file "$tmp" --label "$(cfg .parked_label)" | tr -d '\r' | tail -n1)" ||
+      { ensure_labels "$repo"
+        parked_url="$(gh_call issue create -R "$repo" -t "$park" --body-file "$tmp" --label "$(cfg .parked_label)" | tr -d '\r' | tail -n1)"; } ||
       { rm -f "$tmp"; die "could not open the parked issue in $repo"; }
     [ -n "$parked_url" ] || { rm -f "$tmp"; die "GitHub returned no issue URL for the parked issue"; }
     parked_issue="$repo#${parked_url##*/}"
   else
     local fr fn; read -r fr fn <<<"$(parse_ref "$for")"
+    note "posting the resume brief on $for"
     gh_call issue comment "$fn" -R "$fr" --body-file "$tmp" >/dev/null ||
       { rm -f "$tmp"; die "could not post the resume brief on $for"; }
     gh_call issue edit "$fn" -R "$fr" --add-label "$(cfg .parked_label)" >/dev/null ||
+      { ensure_labels "$repo"; gh_call issue edit "$fn" -R "$fr" --add-label "$(cfg .parked_label)" >/dev/null; } ||
       { rm -f "$tmp"; die "could not mark $for parked"; }
     parked_issue="$for"; parked_url="https://github.com/$fr/issues/$fn"
   fi
   rm -f "$tmp"
-  [ -z "$ref" ] || link "$parked_issue" "$ref"
+  [ -z "$ref" ] || [ "$bispr" = true ] || link "$parked_issue" "$ref" "$bid"
   local id; id="$(date -u +%Y%m%dT%H%M%S)-$harness-${session:0:8}-$(printf '%s' "${ref:-until}" | tr '/#' '__')"
   jq -n --arg id "$id" --arg ref "$ref" --arg for "$for" --arg note "$text" --arg h "$harness" \
     --arg s "$session" --arg cwd "$cwd" --arg at "$(now_iso)" --arg pi "$parked_issue" \

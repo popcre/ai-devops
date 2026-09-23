@@ -46,10 +46,8 @@ MODEL="${AI_GEMINI_MODEL:-gemini-3.8-flash-high}"
 GOVERNED_HEAD=''
 TIMEOUT="${AI_GEMINI_PRINT_TIMEOUT:-10m}"
 # Bound every prepare-phase pass before a session exists. The sandbox, packet,
-# and inventory steps below walk or copy the whole tree; the two inventory
-# passes spawn one sha256sum process per file, which on a loaded Windows host
-# turns a large snapshot into hours (governed reviews hung before session start
-# on edge-dev, 2026-09-18). A stall must die in time, naming its step, so the
+# and inventory steps below walk or copy the whole tree. A stall must die in
+# time, naming its step, so the
 # governed runner records a terminal failure instead of waiting forever.
 PREPARE_TIMEOUT="${AI_GEMINI_PREPARE_TIMEOUT:-30m}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,6 +87,10 @@ guard_quarantine(){ [ "$QUARANTINED" -eq 0 ] || die 'Gemini reviews are quaranti
 need(){ command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 name_ok(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) return 0;; esac; }
 tag_ok(){ [ "${#1}" -le 64 ]; }  # ai-review-sandbox rejects a tag over 64 chars
+# sandbox_tag ID NAME: the readable tag when it fits; otherwise a truncated name
+# plus a hash of the full name, so a long worktree-derived session name still
+# gets a unique tag within the sandbox's 64-character limit (issue #686).
+sandbox_tag(){ local base="gemini-$1-$CALLER-" n="$2" room h; if tag_ok "$base$n"; then printf %s "$base$n"; return; fi; h="$(printf %s "$n" | sha256sum | cut -c1-10)"; room=$((64 - ${#base} - 11)); [ "$room" -ge 1 ] || die "caller name too long for a sandbox tag: $CALLER"; printf '%s%s-%s' "$base" "${n:0:$room}" "$h"; }
 root(){ git rev-parse --show-toplevel 2>/dev/null || die 'run inside a Git repository'; }
 rid(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
 meta(){ printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
@@ -102,38 +104,130 @@ write(){ local f="$1" j="$2" t; mkdir -p "$(dirname "$f")"; t="$(mktemp "$(dirna
 update_state(){ local f="$1" status="$2" detail="${3:-}" j; j="$(jq -c --arg s "$status" --arg d "$detail" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status=$s | .status_detail=$d | .updated_at=$t' "$f")" || die 'invalid session metadata'; write "$f" "$j"; }
 secure_private(){ local p="$1" mode="$2" win sid; chmod "$mode" "$p" 2>/dev/null || return 1; case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1 && command -v powershell.exe >/dev/null 2>&1 || return 1; win="$(cygpath -w "$p")"; sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n')"; case "$sid" in S-1-*) ;; *) return 1;; esac; if [ -d "$p" ]; then icacls "$win" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null 2>&1 || return 1; else icacls "$win" /inheritance:r /grant:r "*${sid}:(F)" >/dev/null 2>&1 || return 1; fi; powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$ExpectedSid) try { if ([IO.Directory]::Exists($Path)) { $Acl = New-Object Security.AccessControl.DirectorySecurity($Path, [Security.AccessControl.AccessControlSections]::Access) } else { $Acl = New-Object Security.AccessControl.FileSecurity($Path, [Security.AccessControl.AccessControlSections]::Access) }; if (-not $Acl.AreAccessRulesProtected) { exit 1 }; $Full = [Security.AccessControl.FileSystemRights]::FullControl; $CurrentHasFull = $false; foreach ($Rule in @($Acl.Access | Where-Object AccessControlType -eq ([Security.AccessControl.AccessControlType]::Allow))) { $RuleSid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($ExpectedSid, "S-1-5-18", "S-1-5-32-544")) { exit 1 }; if ($RuleSid -eq $ExpectedSid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $CurrentHasFull = $true } }; if (-not $CurrentHasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" >/dev/null 2>&1;; esac; }
 preserve_failure(){ local m="$1" out="$2" stage="$3" dir base artifact j f; [ -n "$m" ] && [ -f "$m" ] || return 0; dir="$STATE_DIR/failures"; mkdir -p "$dir" || return 0; secure_private "$dir" 700 || return 0; base="$(basename "$m" .json)-$(date -u +%Y%m%dT%H%M%SZ)-$$-$stage"; artifact="$dir/$base.json"; if [ -f "$out" ]; then cp -- "$out" "$artifact" || return 0; else printf '{"status":"NO_PROVIDER_OUTPUT"}\n' > "$artifact" || return 0; fi; [ -f "$out.stderr" ] && cp -- "$out.stderr" "$dir/$base.stderr" || true; [ -f "$out.model" ] && cp -- "$out.model" "$dir/$base.model.json" || true; [ -f "$out.model.stderr" ] && cp -- "$out.model.stderr" "$dir/$base.model.stderr" || true; for f in "$dir/$base"*; do secure_private "$f" 600 || { rm -f "$dir/$base"*; return 0; }; done; j="$(jq -c --arg a "$artifact" --arg s "$stage" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.failure_artifact=$a | .failure_stage=$s | .updated_at=$t' "$m" 2>/dev/null)" || { rm -f "$dir/$base"*; return 0; }; write "$m" "$j" || { rm -f "$dir/$base"*; return 0; }; }
-inventory(){ local d="$1"; (cd "$d" && find . \( -type f -o -type l \) -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' f; do if [ -L "$f" ]; then printf 'L\t%s\t%s\n' "$f" "$(readlink "$f")"; else sha256sum -- "$f"; fi; done) | sha256sum | cut -d' ' -f1; }
-source_inventory(){ local d="$1" f meta mode object sub; (cd "$d" && {
-  # Tracked bytes are always protected, even if a tracked file happens to live
-  # in a wrapper-owned runtime directory. Only untracked runtime artifacts are
-  # omitted from the second inventory stream.
-  git ls-files --stage -z | while IFS=$'\t' read -r -d '' meta f; do
-    mode="${meta%% *}"; object="${meta#* }"; object="${object%% *}"
-    if [ "$mode" = 160000 ]; then
-      if [ -n "$(git -C "$f" rev-parse --show-superproject-working-tree 2>/dev/null || true)" ]; then sub="$(source_inventory "$d/$f")"; else sub=UNINITIALIZED; fi
-      printf 'T\tGITLINK\t%s\t%s\t%s\n' "$f" "$object" "$sub"
-    elif [ ! -e "$f" ] && [ ! -L "$f" ]; then printf 'T\tMISSING\t%s\n' "$f"
-    elif [ -L "$f" ]; then printf 'T\tL\t%s\t%s\n' "$f" "$(readlink "$f")"
-    else printf 'T\t'; sha256sum -- "$f"; fi
-  done
-  find . \
-    -path './.git' -prune -o \
-    -path './.ai/reviews' -prune -o \
-    -path './.ai/reviewer-issues' -prune -o \
-    -path './.ai/test-runs' -prune -o \
-    -path './.ai/qualification' -prune -o \
-    -path './.ai/qwen-test.*' -prune -o \
-    -path './.ai-review-*' -prune -o \
-    \( -type f -o -type l \) -print0 | while IFS= read -r -d '' f; do
-      if [ -L "$f" ]; then printf 'A\tL\t%s\t%s\n' "$f" "$(readlink "$f")"
-      else printf 'A\t'; sha256sum -- "$f"; fi
-    done
-  } | LC_ALL=C sort) | sha256sum | cut -d' ' -f1; }
-export -f inventory source_inventory
-# One hashing pass, bounded. Each pass spawns one process per file; a large
-# review copy on a loaded Windows host can take hours, so a stall must become
-# a terminal timeout (exit 124) that the caller turns into a named failure
-# instead of an indefinite hang before the session starts.
+
+# Preserve the complete tracked and review-copy identity streams while hashing
+# in one process. The former shell loops launched sha256sum once per file.
+inventory_digest_batched(){ local d="$1" mode="$2"; (cd "$d" && python3 - "$mode" <<'PY'
+import fnmatch
+import hashlib
+import os
+import subprocess
+import sys
+
+mode = sys.argv[1]
+root = os.getcwd()
+checksum_probe = subprocess.run(['sha256sum'], input=b'', check=True,
+                                stdout=subprocess.PIPE).stdout
+checksum_marker = checksum_probe[65:66]
+if checksum_marker not in (b' ', b'*'):
+    raise SystemExit('unrecognized sha256sum output mode')
+
+def raw(value):
+    return os.fsencode(value)
+
+def digest_file(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as file:
+        for chunk in iter(lambda: file.read(1048576), b''):
+            h.update(chunk)
+    return h.hexdigest().encode()
+
+def sha_line(path, name):
+    escaped = b'\\' in name or b'\n' in name
+    shown = name.replace(b'\\', b'\\\\').replace(b'\n', b'\\n') if escaped else name
+    return (b'\\' if escaped else b'') + digest_file(path) + b' ' + checksum_marker + shown + b'\n'
+
+def link(path):
+    return subprocess.run(['readlink', path], check=True,
+                          stdout=subprocess.PIPE).stdout.rstrip(b'\n')
+
+def omitted(directory, rel):
+    if (rel == '.git' or rel in ('.ai/reviews', '.ai/reviewer-issues',
+            '.ai/test-runs', '.ai/qualification') or
+            fnmatch.fnmatchcase(rel, '.ai/qwen-test.*')):
+        return True
+    top = rel.split('/', 1)[0]
+    return (top.startswith('.ai-review-') and
+            os.path.isfile(os.path.join(directory, top, '.ai-review-packet')))
+
+def paths(directory, source=False):
+    result = []
+    def fail(error):
+        raise error
+    for base, dirs, files in os.walk(directory, followlinks=False, onerror=fail):
+        prefix = os.path.relpath(base, directory)
+        for name in list(dirs):
+            rel = name if prefix == '.' else prefix + '/' + name
+            if os.sep == '\\':
+                rel = rel.replace('\\', '/')
+            path = os.path.join(base, name)
+            if source and omitted(directory, rel):
+                dirs.remove(name)
+            elif os.path.islink(path):
+                result.append(('./' + rel, path))
+                dirs.remove(name)
+        for name in files:
+            rel = name if prefix == '.' else prefix + '/' + name
+            if os.sep == '\\':
+                rel = rel.replace('\\', '/')
+            path = os.path.join(base, name)
+            if (not source or not omitted(directory, rel)) and (os.path.isfile(path) or os.path.islink(path)):
+                result.append(('./' + rel, path))
+    return sorted(result, key=lambda pair: raw(pair[0]))
+
+def source_digest(directory):
+    lines = []
+    staged = subprocess.run(['git', 'ls-files', '--stage', '-z'], cwd=directory,
+                            check=True, stdout=subprocess.PIPE).stdout
+    for item in staged.split(b'\0'):
+        if not item:
+            continue
+        meta, name = item.split(b'\t', 1)
+        kind, obj, _ = meta.split(b' ', 2)
+        path = os.path.join(directory, os.fsdecode(name))
+        if kind == b'160000':
+            probe = subprocess.run(['git', '-C', path, 'rev-parse',
+                                    '--show-superproject-working-tree'],
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            child = source_digest(path) if probe.returncode == 0 and probe.stdout.strip() else b'UNINITIALIZED'
+            lines.append(b'T\tGITLINK\t' + name + b'\t' + obj + b'\t' + child + b'\n')
+        elif not os.path.lexists(path):
+            lines.append(b'T\tMISSING\t' + name + b'\n')
+        elif os.path.islink(path):
+            lines.append(b'T\tL\t' + name + b'\t' + link(path) + b'\n')
+        else:
+            lines.append(b'T\t' + sha_line(path, name))
+    for name, path in paths(directory, source=True):
+        shown = raw(name)
+        if os.path.islink(path):
+            lines.append(b'A\tL\t' + shown + b'\t' + link(path) + b'\n')
+        else:
+            lines.append(b'A\t' + sha_line(path, shown))
+    # Match LC_ALL=C sort of the original line stream.
+    unmerged = b''.join(lines)
+    payload = (b'\n'.join(sorted(unmerged.split(b'\n')[:-1])) + b'\n'
+               if unmerged else b'')
+    return hashlib.sha256(payload).hexdigest().encode()
+
+if mode == 'source':
+    answer = source_digest(root)
+elif mode == 'review':
+    h = hashlib.sha256()
+    for name, path in paths(root):
+        shown = raw(name)
+        h.update((b'L\t' + shown + b'\t' + link(path) + b'\n')
+                 if os.path.islink(path) else sha_line(path, shown))
+    answer = h.hexdigest().encode()
+else:
+    raise SystemExit('invalid inventory mode')
+sys.stdout.buffer.write(answer + b'\n')
+PY
+); }
+inventory(){ inventory_digest_batched "$1" review; }
+source_inventory(){ inventory_digest_batched "$1" source; }
+export -f inventory_digest_batched inventory source_inventory
+# Each pass remains bounded. A stall becomes a terminal timeout (exit 124)
+# with a named failure instead of hanging before the session starts.
 bounded_inventory(){ timeout "$PREPARE_TIMEOUT" bash -euo pipefail -c 'inventory "$1"' _ "$1"; }
 bounded_source_inventory(){ timeout "$PREPARE_TIMEOUT" bash -euo pipefail -c 'source_inventory "$1"' _ "$1"; }
 sentinel_state(){ local s out=''; IFS=';' read -r -a paths <<< "${AI_GEMINI_OUTSIDE_SENTINELS:-}"; for s in "${paths[@]}"; do [ -n "$s" ] || continue; [ -e "$s" ] || die "outside sentinel missing: $s"; out+="$(sha256sum -- "$s")"$'\n'; done; printf %s "$out" | sha256sum | cut -d' ' -f1; }
@@ -180,7 +274,7 @@ finish(){
   timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$("$PACKET" path "$directory" "$tag")" >/dev/null || die "source identity changed, or verification timed out after $PREPARE_TIMEOUT; paid report and conversation retained"
   update_state "$m" COMPLETE accepted; ACTIVE_TERMINAL=1; release_locks; ACTIVE_META=''
 }
-new(){ local n="${1:-}" r id m tag d p q out c h ph tree source_tree rep now identity; guard_quarantine; shift || true; name_ok "$n" || die 'invalid session name'; require_local_runtime; r="$(root)"; id="$(rid "$r")"; tag="gemini-$id-$CALLER-$n"; tag_ok "$tag" || die "review name too long: sandbox tag is ${#tag} characters and the limit is 64; use a session name of at most $((43 - ${#CALLER})) characters"; m="$(meta "$id" "$n")"; identity="$(mktemp)" || die 'cannot reserve source identity'; timeout "$PREPARE_TIMEOUT" "$PACKET" resolve "$r" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" || { rm -f "$identity"; die "source identity refused before snapshot creation, or identity resolution timed out after $PREPARE_TIMEOUT"; }; begin_new "$m" "$(lock_path "session-$id-$CALLER-$n")"; d="$(timeout "$PREPARE_TIMEOUT" "$SANDBOX" ensure-copy "$r" "$tag")" || die "source snapshot build failed or timed out after $PREPARE_TIMEOUT; no review session was started"; p="$(timeout "$PREPARE_TIMEOUT" "$PACKET" build "$d" "$tag" --identity "$identity")" || { rm -f "$identity"; die "source packet build failed or timed out after $PREPARE_TIMEOUT"; }; timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$p" --identity "$identity" >/dev/null || { rm -f "$identity"; die "source packet verification failed or timed out after $PREPARE_TIMEOUT"; }; rm -f "$identity"; h="$(git -C "$d" rev-parse HEAD)"; ph="$(cat "$p/MANIFEST.sha256")"; tree="$(bounded_inventory "$d")" || die "review copy inventory failed or timed out after $PREPARE_TIMEOUT; no review session was started"; source_tree="$(bounded_source_inventory "$r")" || die "source inventory failed or timed out after $PREPARE_TIMEOUT; no review session was started"; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; write "$m" "$(jq -nc --arg name "$n" --arg caller "$CALLER" --arg root "$r" --arg dir "$d" --arg tag "$tag" --arg model "$MODEL" --arg head "$h" --arg packet "$ph" --arg tree "$tree" --arg source_tree "$source_tree" --arg now "$now" '{name:$name,caller:$caller,repository_root:$root,review_dir:$dir,sandbox_tag:$tag,conversation_id:null,model:$model,head:$head,packet_sha256:$packet,review_tree_sha256:$tree,source_tree_sha256:$source_tree,status:"PREPARED",created_at:$now,updated_at:$now}')"; update_state "$m" RUNNING 'provider request in progress'; q="$(brief "$(request "$@")" "$(basename "$p")")"; out="$(mktemp)"; call "$d" "$r" '' "$q" "$out"; verify_turn "$out"; c="$(jq -r .conversation_id "$out")"; update_state "$m" VERIFYING 'turn returned; checking exact model and report'; write "$m" "$(jq -c --arg c "$c" '.conversation_id=$c' "$m")"; verify_model "$d" "$r" "$c" "$out.model"; rep="$(report "$r" "$n" "$m" "$out")"; finish "$m"; if [ -n "$GOVERNED_HEAD" ]; then jq -r .response "$out"; else printf 'PASS session=%s report=%s\n' "$n" "$rep"; fi; rm -f "$out" "$out.stderr" "$out.model" "$out.model.stderr"; }
+new(){ local n="${1:-}" r id m tag d p q out c h ph tree source_tree rep now identity; guard_quarantine; shift || true; name_ok "$n" || die 'invalid session name'; require_local_runtime; r="$(root)"; id="$(rid "$r")"; tag="$(sandbox_tag "$id" "$n")" || exit 1; tag_ok "$tag" || die "internal error: derived sandbox tag is ${#tag} characters"; m="$(meta "$id" "$n")"; identity="$(mktemp)" || die 'cannot reserve source identity'; timeout "$PREPARE_TIMEOUT" "$PACKET" resolve "$r" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" || { rm -f "$identity"; die "source identity refused before snapshot creation, or identity resolution timed out after $PREPARE_TIMEOUT"; }; begin_new "$m" "$(lock_path "session-$id-$CALLER-$n")"; d="$(timeout "$PREPARE_TIMEOUT" "$SANDBOX" ensure-copy "$r" "$tag")" || die "source snapshot build failed or timed out after $PREPARE_TIMEOUT; no review session was started"; p="$(timeout "$PREPARE_TIMEOUT" "$PACKET" build "$d" "$tag" --identity "$identity")" || { rm -f "$identity"; die "source packet build failed or timed out after $PREPARE_TIMEOUT"; }; timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$p" --identity "$identity" >/dev/null || { rm -f "$identity"; die "source packet verification failed or timed out after $PREPARE_TIMEOUT"; }; rm -f "$identity"; h="$(git -C "$d" rev-parse HEAD)"; ph="$(cat "$p/MANIFEST.sha256")"; tree="$(bounded_inventory "$d")" || die "review copy inventory failed or timed out after $PREPARE_TIMEOUT; no review session was started"; source_tree="$(bounded_source_inventory "$r")" || die "source inventory failed or timed out after $PREPARE_TIMEOUT; no review session was started"; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; write "$m" "$(jq -nc --arg name "$n" --arg caller "$CALLER" --arg root "$r" --arg dir "$d" --arg tag "$tag" --arg model "$MODEL" --arg head "$h" --arg packet "$ph" --arg tree "$tree" --arg source_tree "$source_tree" --arg now "$now" '{name:$name,caller:$caller,repository_root:$root,review_dir:$dir,sandbox_tag:$tag,conversation_id:null,model:$model,head:$head,packet_sha256:$packet,review_tree_sha256:$tree,source_tree_sha256:$source_tree,status:"PREPARED",created_at:$now,updated_at:$now}')"; update_state "$m" RUNNING 'provider request in progress'; q="$(brief "$(request "$@")" "$(basename "$p")")"; out="$(mktemp)"; call "$d" "$r" '' "$q" "$out"; verify_turn "$out"; c="$(jq -r .conversation_id "$out")"; update_state "$m" VERIFYING 'turn returned; checking exact model and report'; write "$m" "$(jq -c --arg c "$c" '.conversation_id=$c' "$m")"; verify_model "$d" "$r" "$c" "$out.model"; rep="$(report "$r" "$n" "$m" "$out")"; finish "$m"; if [ -n "$GOVERNED_HEAD" ]; then jq -r .response "$out"; else printf 'PASS session=%s report=%s\n' "$n" "$rep"; fi; rm -f "$out" "$out.stderr" "$out.model" "$out.model.stderr"; }
 ask_existing(){ local n="${1:-}" r id m d c q out rep actual tag frozen_model expected_tree expected_source actual_source actual_tree; guard_quarantine; shift || true; name_ok "$n" || die 'invalid session name'; require_local_runtime; r="$(root)"; id="$(rid "$r")"; m="$(meta "$id" "$n")"; [ -f "$m" ] || die 'session not found'; [ "$(jq -r .status "$m")" = COMPLETE ] || die 'session requires recovery before reuse'; frozen_model="$(jq -r '.model // empty' "$m")"; [ -n "$frozen_model" ] && [ "$MODEL" = "$frozen_model" ] || die 'configured model differs from this session; restore the frozen model or start a new review'; begin "$m" "$(lock_path "session-$id-$CALLER-$n")"; d="$(jq -r .review_dir "$m")"; c="$(jq -r .conversation_id "$m")"; actual="$(git -C "$r" rev-parse HEAD)"; [ "$actual" = "$(jq -r .head "$m")" ] || die 'working checkout changed; start a new review'; expected_source="$(jq -r '.source_tree_sha256 // empty' "$m")"; if [ -n "$expected_source" ]; then actual_source="$(bounded_source_inventory "$r")" || die "source inventory failed or timed out after $PREPARE_TIMEOUT; session left for recovery"; [ "$actual_source" = "$expected_source" ] || die 'working checkout files changed between turns; start a new review'; fi; expected_tree="$(jq -r '.review_tree_sha256 // empty' "$m")"; if [ -n "$expected_tree" ]; then actual_tree="$(bounded_inventory "$d")" || die "review copy inventory failed or timed out after $PREPARE_TIMEOUT; session left for recovery"; [ "$actual_tree" = "$expected_tree" ] || die 'disposable review copy changed between turns; evidence preserved for recovery'; fi; tag="$(jq -r .sandbox_tag "$m")"; timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$("$PACKET" path "$d" "$tag")" >/dev/null || die "evidence packet verification failed or timed out after $PREPARE_TIMEOUT"; update_state "$m" RUNNING 'follow-up provider request in progress'; q="$(brief "$(request "$@")" "$(basename "$("$PACKET" path "$d" "$tag")")")"; out="$(mktemp)"; call "$d" "$r" "$c" "$q" "$out"; verify_turn "$out" "$c"; update_state "$m" VERIFYING 'turn returned; checking exact model and report'; verify_model "$d" "$r" "$c" "$out.model"; rep="$(report "$r" "$n" "$m" "$out")"; finish "$m"; if [ -n "$GOVERNED_HEAD" ]; then jq -r .response "$out"; else printf 'PASS session=%s report=%s\n' "$n" "$rep"; fi; rm -f "$out" "$out.stderr" "$out.model" "$out.model.stderr"; }
 ask(){
   local repo_path session_file packet_dir requested

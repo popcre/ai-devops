@@ -226,4 +226,51 @@ grep -Fq 'machine-specific section' "$claude/globals-backup/CLAUDE.md" || fail "
 grep -Fq 'machine-specific section' "$claude/CLAUDE.md" && fail "--adopt-globals did not replace the global"
 grep -Fq 'restore with' "$TMP_ROOT/g3.out" || fail "restore hint missing"
 
+echo "scoped install preserves all unrelated state"
+fixture="$TMP_ROOT/scoped/repo"; claude="$TMP_ROOT/scoped/claude"; codex="$TMP_ROOT/scoped/codex"
+make_fixture "$fixture"
+export AI_INSTALL_LOG="$TMP_ROOT/scoped/install.tsv"
+mkdir -p "$claude/skills/retired" "$codex/skills/retired"
+for client_home in "$claude" "$codex"; do
+  printf 'retired\n' > "$client_home/skills/retired/SKILL.md"
+  touch "$client_home/skills/retired/.ai-devops-managed"
+done
+printf 'exit 99\n' > "$fixture/bin/ai-git-identity"
+snapshot() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum); }
+before="$(snapshot "$TMP_ROOT/scoped")"
+run_installer "$fixture" "$claude" "$codex" --only shared-one --dry-run >/dev/null
+[[ "$before" == "$(snapshot "$TMP_ROOT/scoped")" ]] || fail 'scoped dry run wrote files'
+for invalid in missing '../shared-one' 'shared-*'; do
+  if run_installer "$fixture" "$claude" "$codex" --only shared-one --only "$invalid" >/dev/null 2>&1; then
+    fail "accepted invalid selection $invalid"
+  fi
+  [[ "$before" == "$(snapshot "$TMP_ROOT/scoped")" ]] || fail 'invalid selection wrote files'
+done
+if run_installer "$fixture" "$claude" "$codex" --only >/dev/null 2>&1; then fail 'accepted missing name'; fi
+if run_installer "$fixture" "$claude" "$codex" --only shared-one --adopt-globals >/dev/null 2>&1; then fail 'accepted globals'; fi
+# Do not set the test bootstrap bypass: scoped mode must avoid that gate itself.
+CLAUDE_HOME="$claude" CODEX_HOME="$codex" bash "$fixture/bin/ai-install-skills" --only shared-one --only client-codex --only shared-one > "$TMP_ROOT/scoped.out"
+assert_file "$claude/skills/shared-one/SKILL.md"
+assert_file "$codex/skills/shared-one/SKILL.md"
+assert_file "$codex/skills/client-codex/SKILL.md"
+assert_absent "$claude/skills/client-codex"
+assert_absent "$claude/skills/client-claude"
+assert_absent "$codex/skills/synology-sharesync-triage"
+assert_absent "$claude/CLAUDE.md"
+assert_absent "$codex/AGENTS.md"
+assert_absent "$claude/skills-quarantine"
+assert_absent "$codex/skills-quarantine"
+grep -q 'identity' "$TMP_ROOT/scoped.out" && fail 'ran identity step'
+printf 'local edit\n' > "$claude/skills/shared-one/SKILL.md"
+unrelated_before="$(snapshot "$codex")"
+run_installer "$fixture" "$claude" "$codex" --only shared-one >/dev/null
+grep -q 'local edit' "$claude/skills-backup/shared-one/SKILL.md" || fail 'missing local edit backup'
+[[ "$unrelated_before" == "$(snapshot "$codex")" ]] || fail 'unchanged client mutated'
+[[ "$(find "$claude/skills-backup" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ]] || fail 'unrelated backup created'
+mkdir -p "$fixture/skills/claude/shared-one"
+cp "$fixture/skills/shared/shared-one/SKILL.md" "$fixture/skills/claude/shared-one/SKILL.md"
+before="$(snapshot "$TMP_ROOT/scoped")"
+if run_installer "$fixture" "$claude" "$codex" --only shared-one >/dev/null 2>&1; then fail 'accepted selected collision'; fi
+[[ "$before" == "$(snapshot "$TMP_ROOT/scoped")" ]] || fail 'collision wrote files'
+
 echo "PASS: ai-install-skills"

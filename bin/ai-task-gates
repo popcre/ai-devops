@@ -220,7 +220,8 @@ OBSERVED_CLASS=""; OBSERVED_RANK=0; CHANGED_PATHS=""; CHANGED_COUNT=0
 declare -a CONTRIBUTORS=()
 
 classify_paths(){
-  local identity="$1" paths="$2" fallback rules path glob class rank best best_rank
+  local identity="$1" paths="$2" fallback rules path glob class rank best best_rank i compiled=0
+  local -a rule_regexes=() rule_classes=() rule_ranks=()
   fallback="$(jqr '.default.fallback_class' "$POLICY_FILE")"
   valid_class "$fallback" || fail_closed "fallback_class '$fallback' is not a declared change class"
   rules="$(applicable_path_rules "$identity")"
@@ -229,20 +230,48 @@ classify_paths(){
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     CHANGED_COUNT=$((CHANGED_COUNT + 1))
+    # Compile the applicable rules once for the complete path set. Calling
+    # tg_glob_match for every path/rule pair starts a Bash command substitution
+    # for each comparison, which dominates large --paths-from inputs on Windows.
+    # Keep rule order and strongest-class resolution exactly as before.
+    if [ "$compiled" -eq 0 ]; then
+      while IFS=$'\t' read -r glob class; do
+        [ -n "$glob" ] || continue
+        valid_class "$class" || fail_closed "path rule '$glob' names undeclared class '$class'"
+        rule_regexes+=("$(tg_glob_regex "$glob")")
+        rule_classes+=("$class")
+        rule_ranks+=("${TG_RANK[$class]}")
+      done <<< "$rules"
+      compiled=1
+    fi
     # The fallback applies only when nothing matched. Seeding `best` with it
     # would silently swallow every class weaker than the fallback.
     best=""; best_rank=-1
-    while IFS=$'\t' read -r glob class; do
-      [ -n "$glob" ] || continue
-      valid_class "$class" || fail_closed "path rule '$glob' names undeclared class '$class'"
-      tg_glob_match "$glob" "$path" || continue
-      rank="${TG_RANK[$class]}"
+    for ((i=0; i<${#rule_regexes[@]}; i++)); do
+      [[ "$path" =~ ${rule_regexes[$i]} ]] || continue
+      class="${rule_classes[$i]}"
+      rank="${rule_ranks[$i]}"
       if [ "$rank" -gt "$best_rank" ]; then best="$class"; best_rank="$rank"; fi
-    done <<< "$rules"
+    done
     if [ -z "$best" ]; then best="$fallback"; best_rank="${TG_RANK[$fallback]}"; fi
     CONTRIBUTORS+=("$best	$path")
     if [ "$best_rank" -gt "$OBSERVED_RANK" ]; then OBSERVED_CLASS="$best"; OBSERVED_RANK="$best_rank"; fi
   done <<< "$paths"
+
+  # private-evidence is sticky across a change set: one licensed path means the
+  # whole change set stays inside private-evidence, even when a higher-ranked
+  # tooling exception matched other paths. Without this, a tooling-plus-rows
+  # change would resolve to the tooling class and could start a review.
+  # Keep the highest path rank so a real scope escalation is still reported.
+  local contributor
+  for contributor in "${CONTRIBUTORS[@]}"; do
+    case "$contributor" in
+      private-evidence$'\t'*)
+        OBSERVED_CLASS=private-evidence
+        break
+        ;;
+    esac
+  done
 
   if [ "$CHANGED_COUNT" -eq 0 ]; then
     OBSERVED_CLASS="none"; OBSERVED_RANK=0
@@ -356,6 +385,16 @@ cmd_explain(){
       effective="$declared"
     fi
   fi
+  # Same sticky rule as check: one licensed path keeps private-evidence.
+  local contributor
+  for contributor in "${CONTRIBUTORS[@]+"${CONTRIBUTORS[@]}"}"; do
+    case "$contributor" in
+      private-evidence$'\t'*)
+        effective=private-evidence
+        break
+        ;;
+    esac
+  done
   required_gate="$({
     [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"
     [ -z "$declared" ] || [ "$declared" = "$OBSERVED_CLASS" ] || merged_gate "$IDENTITY" "$declared"
@@ -441,6 +480,18 @@ cmd_check(){
   if [ "$effective" = none ] || [ "$declared_rank" -gt "$effective_rank" ]; then
     effective="$declared"; effective_rank="$declared_rank"
   fi
+  # One licensed path keeps the change set in private-evidence even when a
+  # higher-ranked declaration or tooling exception would otherwise win.
+  local contributor
+  for contributor in "${CONTRIBUTORS[@]}"; do
+    case "$contributor" in
+      private-evidence$'\t'*)
+        effective=private-evidence
+        effective_rank="${TG_RANK[private-evidence]}"
+        break
+        ;;
+    esac
+  done
   protected="$(class_protected "$effective")"
 
   # 1. Scope drift: the work grew past what was declared.
@@ -452,7 +503,7 @@ cmd_check(){
       detail="$detail  ${line#*	}"$'\n'
     done
     if [ "$protected" = true ]; then
-      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged away. Re-declare the task with `ai-task-gates start --class %s` and do what that class requires, ask Albert for the missing authority, or take these files out of the change set.' \
+      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged or owner-requested away. Re-declare the task with `ai-task-gates start --class %s` and do what that class requires, or take these files out of the change set.' \
         "$action" "$declared" "$OBSERVED_CLASS" "$detail" "$OBSERVED_CLASS")"
     fi
     if [ -z "$acknowledge" ]; then
@@ -474,7 +525,7 @@ cmd_check(){
   required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
   if printf '%s\n' "$forbidden" | grep -qx -- "$action"; then
     if [ "$protected" = true ]; then
-      blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nThis cannot be overridden here. It needs Albert naming the exact resource and action.' \
+      blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no owner-request and no acknowledge path.\nNarrow the change set out of protected paths, or change this policy through its own reviewed path.' \
         "$action" "$effective" "$IDENTITY")"
     fi
     if [ -z "$owner_request" ]; then

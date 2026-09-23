@@ -29,13 +29,20 @@ cat > "$TMP/bin/packet" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- resolve) exec "$REAL_REVIEW_PACKET" "$@" ;;
+ resolve) if [ -n "${MOCK_RESOLVE_JSON:-}" ]; then printf '%s\n' "$MOCK_RESOLVE_JSON"; else exec "$REAL_REVIEW_PACKET" "$@"; fi ;;
  build) [ -z "${MOCK_PACKET_BUILD_SLEEP:-}" ] || sleep "$MOCK_PACKET_BUILD_SLEEP"; p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
  verify)
+   # The slow-inventory fixture isolates its own 2s bound. Packet verification
+   # is exercised by the other cases and can exceed 2s on a loaded Windows host.
+   [ "$MOCK_PACKET_VERIFY_FAST" != 1 ] || exit 0
    test -s "$2/MANIFEST.sha256"
    if [ -f "$2/identity.json" ]; then
      root="$(jq -r .repository "$2/identity.json")"
-     current="$("$REAL_REVIEW_PACKET" resolve "$root" --assert-head "$(jq -r .head "$2/identity.json")")"
+     if [ -n "${MOCK_RESOLVE_JSON:-}" ]; then
+       current="$MOCK_RESOLVE_JSON"
+     else
+       current="$("$REAL_REVIEW_PACKET" resolve "$root" --assert-head "$(jq -r .head "$2/identity.json")")"
+     fi
      jq -e --argjson current "$current" '.repository==$current.repository and .head==$current.head and .source_digest==$current.source_digest' "$2/identity.json" >/dev/null
    fi ;;
  path) printf %s "$2/.ai-review-$3" ;;
@@ -116,14 +123,17 @@ RACE_AGY="$TMP/bin/agy-race"; cp "$AI_GEMINI_BIN" "$RACE_AGY"; chmod +x "$RACE_A
 write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"
 RACE_REPO="$TMP/race-repo"; make_repo "$RACE_REPO"
 check 'runtime replacement after startup gate is refused before provider contact' "! (cd '$RACE_REPO' && AI_GEMINI_BIN='$RACE_AGY' MOCK_MUTATE_RUNTIME_AFTER_GATE=1 '$SCRIPT' new runtime-race --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
-REAL_SHA256SUM="$(command -v sha256sum)"; mkdir -p "$TMP/race-bin"; printf inventory-trigger > "$RACE_REPO/inventory-race-trigger"
-cat > "$TMP/race-bin/sha256sum" <<'EOF'
+REAL_PYTHON3="$(command -v python3)"; mkdir -p "$TMP/race-bin"; printf inventory-trigger > "$RACE_REPO/inventory-race-trigger"
+cat > "$TMP/race-bin/python3" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *inventory-race-trigger*) if [ ! -e "$MOCK_INVENTORY_RACE_DONE" ]; then printf '\n# changed during inventory\n' >> "$AI_GEMINI_BIN"; : > "$MOCK_INVENTORY_RACE_DONE"; fi;; esac
-exec "$REAL_SHA256SUM" "$@"
+if [ "$1:$2" = "-:review" ] && [ ! -e "$0.done" ]; then
+  printf '\n# changed during inventory\n' >> "$AI_GEMINI_BIN"
+  : > "$0.done"
+fi
 EOF
-chmod +x "$TMP/race-bin/sha256sum"; cp "$TMP/bin/agy" "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"; write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"; : > "$MOCK_AGY_CALLS"
-check 'runtime replacement during inventory is refused before provider contact' "! (cd '$RACE_REPO' && PATH='$TMP/race-bin':\"\$PATH\" REAL_SHA256SUM='$REAL_SHA256SUM' MOCK_INVENTORY_RACE_DONE='$TMP/inventory-race-done' AI_GEMINI_BIN='$RACE_AGY' '$SCRIPT' new inventory-runtime-race --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
+printf 'exec %q "$@"\n' "$REAL_PYTHON3" >> "$TMP/race-bin/python3"
+chmod +x "$TMP/race-bin/python3"; cp "$TMP/bin/agy" "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"; write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"; : > "$MOCK_AGY_CALLS"
+check 'runtime replacement during inventory is refused before provider contact' "! (cd '$RACE_REPO' && PATH='$TMP/race-bin':\"\$PATH\" AI_GEMINI_BIN='$RACE_AGY' '$SCRIPT' new inventory-runtime-race --prompt review) && test -f '$TMP/race-bin/python3.done' && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.15
 check 'agy version drift re-quarantines before provider contact' "! '$SCRIPT' new stale-runtime --prompt review && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.14 gemini-other
@@ -226,32 +236,46 @@ check 'interrupted private copy is preserved' "test -d \"\$(jq -r .review_dir \"
 
 echo '== prepare-phase terminal timeout bounds'
 # 2026-09-18: governed reviews on edge-dev hung for hours BEFORE any session
-# metadata existed. Every prepare pass was unbounded, and the byte inventories
-# spawn one process per file, so a loaded Windows host turns a large snapshot
-# into an indefinite stall. Each prepare step must now die in time, name
+# metadata existed. Every prepare pass was unbounded. Each prepare step must
+# still die in time, name
 # itself, and leave neither a session record nor a held lock behind.
 SLOW_SNAP="$TMP/repo-slow-snap"; make_repo "$SLOW_SNAP"
-set +e; SLOW_SNAP_START=$SECONDS; SLOW_SNAP_OUT="$(cd "$SLOW_SNAP" && MOCK_ENSURE_COPY_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-snap --prompt review 2>&1)"; SLOW_SNAP_RC=$?; SLOW_SNAP_ELAPSED=$((SECONDS-SLOW_SNAP_START)); set -e
+SLOW_SNAP_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_SNAP")"
+set +e; SLOW_SNAP_START=$SECONDS; SLOW_SNAP_OUT="$(cd "$SLOW_SNAP" && MOCK_RESOLVE_JSON="$SLOW_SNAP_IDENTITY" MOCK_ENSURE_COPY_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-snap --prompt review 2>&1)"; SLOW_SNAP_RC=$?; SLOW_SNAP_ELAPSED=$((SECONDS-SLOW_SNAP_START)); set -e
 check 'a stalled snapshot step fails in time instead of hanging' "test '$SLOW_SNAP_RC' -ne 0 && test '$SLOW_SNAP_ELAPSED' -lt $(budget 2 30)"
 check 'the snapshot timeout names the step and the bound' "printf '%s' '$SLOW_SNAP_OUT' | grep -q 'snapshot build failed or timed out after 2s'"
 check 'a timed-out prepare starts no session and holds no lock' "test -z \"\$(meta_for slow-snap)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-snap*' -print -quit 2>/dev/null)\""
 SLOW_PKT="$TMP/repo-slow-pkt"; make_repo "$SLOW_PKT"
-set +e; SLOW_PKT_OUT="$(cd "$SLOW_PKT" && MOCK_PACKET_BUILD_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-pkt --prompt review 2>&1)"; SLOW_PKT_RC=$?; set -e
+# Resolve the fixture's real source identity before the 2s build assertion.
+# On a loaded Windows host, an earlier prepare stage can consume that entire
+# bound before the deliberate stall starts; other cases exercise live resolve.
+SLOW_PKT_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_PKT")"
+set +e; SLOW_PKT_OUT="$(cd "$SLOW_PKT" && MOCK_RESOLVE_JSON="$SLOW_PKT_IDENTITY" MOCK_PACKET_BUILD_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-pkt --prompt review 2>&1)"; SLOW_PKT_RC=$?; set -e
+if [ "$SLOW_PKT_RC" -eq 0 ] || ! grep -q 'packet build failed or timed out after 2s' <<<"$SLOW_PKT_OUT" || [ -n "$(meta_for slow-pkt)" ]; then
+  printf 'slow-pkt diagnostic: rc=%s meta=%s output=%s\n' "$SLOW_PKT_RC" "$(meta_for slow-pkt)" "$SLOW_PKT_OUT" >&2
+fi
 check 'a stalled packet build fails in time and names the step' "test '$SLOW_PKT_RC' -ne 0 && printf '%s' '$SLOW_PKT_OUT' | grep -q 'packet build failed or timed out after 2s' && test -z \"\$(meta_for slow-pkt)\""
 SLOW_INV="$TMP/repo-slow-inv"; make_repo "$SLOW_INV"; printf slow > "$SLOW_INV/inventory-slow-trigger"
+SLOW_INV_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_INV")"
 mkdir -p "$TMP/slow-bin"
-cat > "$TMP/slow-bin/sha256sum" <<'EOF'
+cat > "$TMP/slow-bin/python3" <<'EOF'
 #!/usr/bin/env bash
-# Stall only the wrapper's review-copy inventory, which hashes the copied
-# trigger as the relative path './inventory-slow-trigger' behind a '--'
-# separator. Absolute-path hashes of the same file (ai-review-packet resolve
-# runs earlier in new() and must NOT stall) do not match this shape.
-case "$*" in *"-- ./inventory-slow-trigger") sleep 15 ;; esac
-exec "$REAL_SHA256SUM_BIN" "$@"
+# Stall only the batched review-copy inventory. Packet resolution may also
+# invoke Python, but never with the exact "- review" inventory arguments.
+if [ "$1:$2" = "-:review" ]; then
+  printf '%(%s)T\n' -1 > "$0.start"
+  sleep 120
+fi
 EOF
-chmod +x "$TMP/slow-bin/sha256sum"
-set +e; SLOW_INV_START=$SECONDS; SLOW_INV_OUT="$(cd "$SLOW_INV" && PATH="$TMP/slow-bin:$PATH" REAL_SHA256SUM_BIN="$REAL_SHA256SUM" AI_GEMINI_PREPARE_TIMEOUT=2s MOCK_MODE=normal "$SCRIPT" new slow-inv --prompt review 2>&1)"; SLOW_INV_RC=$?; SLOW_INV_ELAPSED=$((SECONDS-SLOW_INV_START)); set -e
-check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test '$SLOW_INV_ELAPSED' -lt $(budget 2 30)"
+printf 'exec %q "$@"\n' "$REAL_PYTHON3" >> "$TMP/slow-bin/python3"
+chmod +x "$TMP/slow-bin/python3"
+set +e; SLOW_INV_OUT="$(cd "$SLOW_INV" && PATH="$TMP/slow-bin:$PATH" MOCK_PACKET_VERIFY_FAST=1 MOCK_RESOLVE_JSON="$SLOW_INV_IDENTITY" AI_GEMINI_PREPARE_TIMEOUT=2s MOCK_MODE=normal "$SCRIPT" new slow-inv --prompt review 2>&1)"; SLOW_INV_RC=$?; set -e
+SLOW_INV_STAGE_START="$(cat "$TMP/slow-bin/python3.start" 2>/dev/null || printf 0)"
+SLOW_INV_STAGE_ELAPSED=$(( $(date +%s) - SLOW_INV_STAGE_START ))
+if [ "$SLOW_INV_RC" -eq 0 ] || ! grep -q 'inventory failed or timed out after 2s' <<<"$SLOW_INV_OUT" || [ -n "$(meta_for slow-inv)" ]; then
+  printf 'slow-inv diagnostic: rc=%s meta=%s output=%s\n' "$SLOW_INV_RC" "$(meta_for slow-inv)" "$SLOW_INV_OUT" >&2
+fi
+check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test -s '$TMP/slow-bin/python3.start' && test '$SLOW_INV_STAGE_ELAPSED' -lt $(budget 2 30)"
 check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory failed or timed out after 2s'"
 check 'a timed-out inventory starts no session and holds no lock' "test -z \"\$(meta_for slow-inv)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-inv*' -print -quit 2>/dev/null)\""
 R7="$TMP/repo7"; make_repo "$R7"; new_run "$R7" stale normal >/dev/null; printf next >> "$R7/file.txt"; git -C "$R7" add file.txt; git -C "$R7" commit -qm next
@@ -267,6 +291,10 @@ R10="$TMP/repo10"; make_repo "$R10"; new_run "$R10" source-ignored normal >/dev/
 check 'follow-up refuses ignored protected-source drift' "! (cd '$R10' && '$SCRIPT' ask source-ignored --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 R11="$TMP/repo11"; make_repo "$R11"; new_run "$R11" source-runtime normal >/dev/null; mkdir -p "$R11/.ai/reviews" "$R11/.ai/test-runs" "$R11/.ai/qwen-test.123"; printf report > "$R11/.ai/reviews/other-review.md"; printf log > "$R11/.ai/test-runs/test.log"; printf runtime > "$R11/.ai/qwen-test.123/state"
 check 'wrapper-owned .ai runtime evidence does not create false source drift' "cd '$R11' && '$SCRIPT' ask source-runtime --prompt later"
+mkdir -p "$R11/.ai-review-generated"
+printf 'packet\n' > "$R11/.ai-review-generated/.ai-review-packet"
+printf 'generated\n' > "$R11/.ai-review-generated/MANIFEST.md"
+check 'marked review packet does not create false source drift' "cd '$R11' && '$SCRIPT' ask source-runtime --prompt later"
 mkdir -p "$R11/.ai-review-user-source"; printf source > "$R11/.ai-review-user-source/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'similarly prefixed user source refuses before provider contact' "! (cd '$R11' && '$SCRIPT' ask source-runtime --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 SUBSOURCE="$TMP/subsource"; make_repo "$SUBSOURCE"; SUBPARENT="$TMP/subparent"; make_repo "$SUBPARENT"; git -C "$SUBPARENT" -c protocol.file.allow=always submodule add -q "$SUBSOURCE" module; git -C "$SUBPARENT" commit -qam gitlink; new_run "$SUBPARENT" source-gitlink normal >/dev/null; printf changed >> "$SUBPARENT/module/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
@@ -274,15 +302,15 @@ check 'initialized gitlink content drift is fingerprinted before provider contac
 
 
 # ai-review-sandbox rejects a tag over 64 characters. The tag is
-# "gemini-<12>-<caller>-<name>", so a name that fits on Windows can overflow on
-# Linux, where PIDs are wider. On 2026-08-24 the Ubuntu qualification failed that
-# way AFTER its paid turn. The guard must refuse before any provider contact.
+# "gemini-<12>-<caller>-<name>", and callers derive names from worktree names,
+# so a long name must still review: the wrapper shortens the tag with a hash of
+# the full name instead of refusing (issue #686; earlier refusal cost the
+# 2026-08-24 Ubuntu qualification and the 2026-09-23 rotation).
 LONGREPO="$TMP/longname"; make_repo "$LONGREPO"
 LONG_NAME="$(printf %.0sx $(seq 1 60))"
-LONG_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
-check 'an over-long review name is refused before any provider contact' "! (cd '$LONGREPO' && '$SCRIPT' new '$LONG_NAME' --prompt x) && test '$LONG_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
-LONG_OUT="$TMP/longname.out"; (cd "$LONGREPO" && "$SCRIPT" new "$LONG_NAME" --prompt x) > "$LONG_OUT" 2>&1 || true
-check 'the refusal names the limit so the caller can shorten the name' "grep -q 'limit is 64' '$LONG_OUT'"
+check 'an over-long review name still reviews with a derived tag' "(cd '$LONGREPO' && '$SCRIPT' new '$LONG_NAME' --prompt x)"
+check 'the derived sandbox tag fits the 64-character limit' "jq -e '.sandbox_tag|length<=64' \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\" >/dev/null"
+check 'two long names sharing a prefix get distinct tags' "(cd '$LONGREPO' && '$SCRIPT' new '${LONG_NAME}y' --prompt x) && test \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\")\" != \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"${LONG_NAME}y\"' '$TMP/state/sessions')\")\""
 check 'a name that fits is still accepted' "(cd '$LONGREPO' && '$SCRIPT' new fits-fine --prompt x)"
 
 # 2026-09-18: live qualification recorded the caller's checkout as the invoked

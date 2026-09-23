@@ -23,12 +23,12 @@ out(){ if [ -n "$jqarg" ]; then jq -r "$jqarg" <<<"$1"; else printf '%s\n' "$1";
 bodyfile=""; for i in "${!args[@]}"; do [ "${args[$i]}" = --body-file ] && bodyfile="${args[$((i+1))]}"; done
 [ -n "$bodyfile" ] && cp "$bodyfile" "$F/body"
 case "$*" in
-  "label create"*) exit 0 ;;
+  "label create"*) rm -f "$F/nolabel"; exit 0 ;;
   "repo view"*) out '{"nameWithOwner":"o/r"}' ;;
   "search issues"*--label*) out "$(cat "$F/find.json" 2>/dev/null || echo '[]')" ;;
   "issue comment"*) printf '%s\n' "$*" >> "$F/comments"; exit 0 ;;
-  "issue create"*) printf '%s\n' "$*" >> "$F/created"; echo 'https://github.com/o/r/issues/31'; exit 0 ;;
-  "issue edit"*) printf '%s\n' "$*" >> "$F/edited"; echo '{}'; exit 0 ;;
+  "issue create"*) [ -f "$F/nolabel" ] && exit 1; printf '%s\n' "$*" >> "$F/created"; echo 'https://github.com/o/r/issues/31'; exit 0 ;;
+  "issue edit"*) [ -f "$F/nolabel" ] && exit 1; printf '%s\n' "$*" >> "$F/edited"; echo '{}'; exit 0 ;;
   "search issues"*) out "$(cat "$F/digest_search.json" 2>/dev/null || echo '[]')" ;;
   *graphql*databaseId*) out "$(cat "$F/gql_links.json" 2>/dev/null || echo '{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}')" ;;
   *graphql*states:OPEN*) out "$(cat "$F/gql_parents.json" 2>/dev/null || echo '{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}')" ;;
@@ -300,13 +300,27 @@ check 'wait --park opens a labelled parked issue and records it' \
   "grep -q 'issue create' '$FAKE/created' && grep -q -- '--label parked' '$FAKE/created' && jq -e '.parked_issue==\"o/r#31\" and .parked_url!=\"\"' '$W2/$pid.json'"
 check 'the parked issue body carries the plain-English summary, the blocker and an owner line' \
   "grep -q 'What this is about' '$FAKE/body' && grep -q 'description extractor' '$FAKE/body' && grep -q 'gate bug' '$FAKE/body' && grep -q '^owner: ai-blocker-watch' '$FAKE/body'"
-check 'wait --park labels the repository so the label always exists' "grep -q 'label create parked' '$FAKE/calls'"
+check 'wait --park spends no calls creating a label that already exists' "! grep -q 'label create' '$FAKE/calls'"
+check 'wait --park reads the blocker exactly once' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 1 ]"
+: > "$FAKE/calls"; touch "$FAKE/nolabel"
+lid="$(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session nolabel1 --park 'label missing' --brief-file "$TMP/brief.md" 2>/dev/null)"
+check 'wait --park creates the label when GitHub refuses a missing one, then parks'   "grep -q 'label create parked' '$FAKE/calls' && jq -e '.parked_issue==\"o/r#31\"' '$W2/$lid.json'"
+rm -f "$W2/$lid.json"  # keep later wake counts about the original waits
 check 'the parked issue is recorded as blocked by the blocker' "grep -q linked '$FAKE/links'"
 
 : > "$FAKE/comments"; : > "$FAKE/edited"
 fid="$(cd "$TMP/work" && BW2 wait o/r#5 --for o/r#9 --harness claude --session parked-2 --brief-file "$TMP/brief.md" 2>/dev/null)"
 check 'wait --for marks the existing issue parked and comments the brief' \
   "grep -q 'issue comment 9' '$FAKE/comments' && grep -q 'issue edit 9' '$FAKE/edited' && grep -q -- '--add-label parked' '$FAKE/edited' && jq -e '.parked_issue==\"o/r#9\"' '$W2/$fid.json'"
+
+# A pull request blocker: GitHub refuses a "blocked by" link to a PR, so the
+# wait must register without trying one (it used to die after parking).
+touch "$FAKE/is_pr"; rm -f "$FAKE/links"; : > "$FAKE/calls"
+prid="$(cd "$TMP/work" && BW2 wait o/r#5 --for o/r#9 --harness claude --session prblock1 --brief-file "$TMP/brief.md" 2>"$TMP/prerr")"
+check 'a pull-request blocker registers a wait without a GitHub link'   "[ ! -f '$FAKE/links' ] && ! grep -q blocked_by '$FAKE/calls' && jq -e '.blocker==\"o/r#5\" and .state==\"waiting\"' '$W2/$prid.json'"
+check 'a pull-request blocker is explained, not silent' "grep -q 'is a pull request' '$TMP/prerr'"
+check 'a wait --for costs at most five GitHub calls' "[ \"\$(grep -c . '$FAKE/calls')\" -le 5 ]"
+rm -f "$FAKE/is_pr" "$W2/$prid.json"
 
 touch "$FAKE/fail"
 (cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session failcrea --park 'never lands' --brief-file "$TMP/brief.md") >/dev/null 2>&1 || true
@@ -398,7 +412,7 @@ touch "$TMP/transcripts/pr-1.jsonl"
 BW2 tick >/dev/null 2>&1
 check 'wake says when a blocking pull request closed unmerged' \
   "grep -q 'WITHOUT being merged' '$FAKE/resumed'"
-rm -f "$FAKE/is_pr"
+rm -f "$FAKE/is_pr" "$W2/$prid.json"
 
 # Plain-language search across the configured owners.
 jq -n '[{repository:{nameWithOwner:"o/r"},number:31,title:"product description extraction",state:"OPEN",updatedAt:"2026-09-18T10:00:00Z",url:"https://github.com/o/r/issues/31"}]' > "$FAKE/find.json"

@@ -18,12 +18,12 @@
 #   - Authentication stays interactive and manual, exactly as on Windows. This
 #     script installs binaries; it never touches a login.
 #   - Idempotent: an already-installed provider is skipped unless --force.
-#   - Version-pinned where the repository qualifies an exact build. Grok is
-#     qualified against exactly one version (config/provider-cli-versions.json)
+#   - Version-checked where the repository sets a policy. Grok is
+#     held to a version floor within one major version (config/provider-cli-versions.json)
 #     because our wrappers parse that build's JSON, stop reasons, usage keys and
 #     session behaviour. "A runnable grok" is NOT good enough: presence-based
 #     skipping is what left machines on 1.0.5 indefinitely (issue #251). An
-#     off-policy Grok is upgraded to the exact supported version, the resulting
+#     older Grok is upgraded to the floor version, a newer same-major build is kept, the resulting
 #     version is verified, and a failed upgrade restores the original binary.
 #     Credentials under ~/.grok are never read, copied or backed up.
 #   - Fails loudly. A provider that installs but does not produce a working
@@ -251,7 +251,9 @@ for entry in "${PROVIDERS[@]}"; do
   if existing="$(resolve "$cmd" "$home_rel")" && ((FORCE == 0)); then
     if [ -n "$want" ]; then
       have="$(reported_version "$existing")"
-      if [ "$have" != "$want" ]; then
+      # A "minimum" policy accepts any build at or above the floor (issue #686);
+      # only a build that does not satisfy policy is moved to the floor version.
+      if ! bash "$VERSION_TOOL" satisfies "$name" "${have:-none}"; then
         if ((DRY_RUN)); then
           echo "DRY-RUN would upgrade $name from ${have:-unknown} to exactly $want"
           continue
@@ -261,7 +263,7 @@ for entry in "${PROVIDERS[@]}"; do
         link_into_local_bin "$cmd" "$existing"
         continue
       fi
-      echo "SKIP $name already installed at the exact supported version $want ($existing)"
+      echo "SKIP $name already installed at supported version $have (policy: $want, $(bash "$VERSION_TOOL" match "$name")) ($existing)"
     else
       echo "SKIP $name already installed ($existing)"
     fi
@@ -300,7 +302,7 @@ for entry in "${PROVIDERS[@]}"; do
   if resolved="$(resolve "$cmd" "$home_rel")"; then
     if [ -n "$want" ]; then
       have="$(reported_version "$resolved")"
-      if [ "$have" != "$want" ]; then
+      if ! bash "$VERSION_TOOL" satisfies "$name" "${have:-none}"; then
         echo "==> $name installed ${have:-unknown}; pinning to the supported version $want"
         if ! upgrade_to_exact_version "$name" "$resolved" "$want"; then failed=1; continue; fi
       fi

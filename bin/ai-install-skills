@@ -75,10 +75,14 @@ DRY_RUN=false
 SHOW_LOG=false
 KEEP_ORPHANS=false
 ADOPT_GLOBALS=false
+ONLY_SKILLS=()
 
 usage() {
   cat <<'EOF'
 Usage: ai-install-skills [--dry-run] [--keep-orphans] [--adopt-globals]
+
+  --only NAME      Install this exact skill only (repeat for multiple skills).
+                   Skips globals, orphan cleanup, identity and launcher work.
 
   --dry-run        Show every planned action without changing files.
   --log            Print this machine's install run log and exit. The log
@@ -95,6 +99,11 @@ EOF
 
 while (($#)); do
   case "$1" in
+    --only)
+      [[ $# -ge 2 && "$2" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || {
+        echo 'ERROR: --only requires an exact skill name.' >&2; exit 2;
+      }
+      ONLY_SKILLS+=("$2"); shift ;;
     --dry-run) DRY_RUN=true ;;
     --log) SHOW_LOG=true ;;
     --keep-orphans) KEEP_ORPHANS=true ;;
@@ -107,6 +116,27 @@ while (($#)); do
   esac
   shift
 done
+
+# Validate the complete selection before any writes (including the run log).
+if ((${#ONLY_SKILLS[@]})); then
+  if $ADOPT_GLOBALS || $SHOW_LOG; then
+    echo 'ERROR: --only cannot be combined with --adopt-globals or --log.' >&2
+    exit 2
+  fi
+  for name in "${ONLY_SKILLS[@]}"; do
+    found=false
+    for client in claude codex shared; do
+      [[ ! -f "$REPO_ROOT/skills/$client/$name/SKILL.md" ]] || found=true
+    done
+    $found || { echo "ERROR: unknown skill '$name'." >&2; exit 2; }
+    for client in claude codex; do
+      if [[ -f "$REPO_ROOT/skills/shared/$name/SKILL.md" && -f "$REPO_ROOT/skills/$client/$name/SKILL.md" ]]; then
+        echo "ERROR: shared skill '$name' also exists in skills/$client; refusing to overwrite it." >&2
+        exit 2
+      fi
+    done
+  done
+fi
 
 # One-time first-sync bridge for the global-adoption rollout. A sync session
 # loads its installed skill BEFORE `git pull`, so the first run after this
@@ -392,6 +422,30 @@ install_skill_tree() {
     reconcile_skill "${d%/}" "$dst_root" "$name" "$label" "$client_home"
   done
 }
+
+# Reuse reconciliation, but never enter the full-machine maintenance path.
+if ((${#ONLY_SKILLS[@]})); then
+  declare -A selected_done=()
+  for name in "${ONLY_SKILLS[@]}"; do
+    [[ -z "${selected_done[$name]:-}" ]] || continue
+    selected_done[$name]=1
+    for client in claude codex; do
+      client_home="$CLAUDE_HOME"
+      if [[ "$client" == codex ]]; then
+        client_home="$CODEX_HOME"
+        [[ -d "$client_home" ]] || { echo "No $client_home directory — skipping Codex skills."; continue; }
+      fi
+      for source_client in "$client" shared; do
+        source_dir="$REPO_ROOT/skills/$source_client/$name"
+        [[ -f "$source_dir/SKILL.md" ]] || continue
+        reconcile_skill "$source_dir" "$client_home/skills" "$name" "$client" "$client_home"
+      done
+    done
+  done
+  log_event run-end "completed scoped skills=${ONLY_SKILLS[*]}"
+  trim_log
+  exit 0
+fi
 
 echo "Installing skills from $REPO_ROOT/skills/claude -> $CLAUDE_HOME/skills"
 check_shared_collisions

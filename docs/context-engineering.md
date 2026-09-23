@@ -4,6 +4,9 @@ This document records the measured baseline and the context ownership map for
 reducing repeated Claude and Codex context safely. The active implementation and
 decisions remain in
 [`../plan_context-engineering-consolidation.md`](../plan_context-engineering-consolidation.md).
+Per-session tool and skill scoping (MCP membership per project, repository-scoped
+skills, drift checks) is planned in
+[`../plan_tool-and-skill-scoping.md`](../plan_tool-and-skill-scoping.md).
 
 ## Claude and Codex behavior correction on 2026-08-21
 
@@ -112,12 +115,15 @@ startup skill listing entirely.
 Nothing was moved, renamed, or deleted. A manual-only skill is still installed,
 still appears in the slash-command menu, and still runs in full when invoked by
 name. To put one back in the automatic index, delete its
-`disable-model-invocation` line and reinstall. The fourteen are:
+`disable-model-invocation` line and reinstall. The fifteen are:
 `ai-development-pipeline`, `cicd-rules-audit`, `design-handoff-implement`,
 `designflow-human-qa`, `human-app-qa`, `item-description-taxonomy`,
+`kimi-code-delegation` (while suspended),
 `licensor-incremental-capture`, `new-app-setup`,
 `paramount-creative-library-scrape`, `peanuts-scrape`, `repo-bug-audit`,
 `repo-docs-overhaul`, `sesame-workshop-scrape`, `strawberry-shortcake-scrape`.
+`tests/test-mcp-skill-drift.ps1` fails if this list and the skills carrying the
+flag ever disagree; `designflow-human-qa` silently lost its flag once (#703).
 
 Measured: Claude skill manifest 15,293 -> 11,091 bytes (about 3,824 -> 2,773
 tokens, a 27% cut); Codex manifest 13,214 -> 10,595 bytes, which clears the

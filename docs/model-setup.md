@@ -12,8 +12,9 @@ roles, adapting CLI flags, and how the scripts use the commands.
   and fixing. Only implementation and testing receive workspace write access.
 - **Claude Opus 5** — independent plan, diff, security, and final approval
   reviews through a tool-limited, digest-bound adapter.
-- **GLM-5.3** — optional independent second opinion invoked by either Claude or
-  Codex through `ai-glm`, in named persistent sessions; defaults to read-only review.
+- **GLM-5.3** — out of reviewer rotation (owner instruction; registry `absent`).
+  Usable only as an explicitly requested second opinion through `ai-glm`; never
+  assigned a formal review. The rotation pool is Muse, Grok, Qwen, and Gemini.
 - **Grok Build 4.6** — optional independent review through `ai-grok-review`
   (read-only) and isolated edits through `ai-grok-implement`. Advisory
   look-into-this work uses `ai-grok-implement investigate`; that is not a formal
@@ -52,8 +53,9 @@ copy credentials.
 
 ## Grok Build
 
-Grok is pinned to one exact CLI build in `config/provider-cli-versions.json`
-(currently 1.0.13). Both wrappers refuse paid work against any other build.
+Grok has a minimum CLI version in `config/provider-cli-versions.json`
+(currently 1.0.13, `version_match: minimum`). Both wrappers accept that build or
+a newer build of the same major version (issue #686) and refuse anything else.
 
 - Formal review: `ai-grok-review`. Bash and web search stay denied. Investigation
   is not added to this command.

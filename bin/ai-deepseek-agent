@@ -208,6 +208,8 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && { [ "$SUBCMD" = "send" ] || [ "$SUBCMD" = "
   fi
   OP_BIN="$(command -v op 2>/dev/null || true)"; [ -n "$OP_BIN" ] || { echo "Error: 1Password CLI (op) is required." >&2; exit 1; }
   OP_PHYSICAL="$(readlink -f "$OP_BIN" 2>/dev/null || true)"
+  # WinGet's PATH fallback (no Links symlink) makes Git Bash name op without .exe (issue #686).
+  case "$OP_PHYSICAL" in *.exe) ;; *) [ -z "$OP_PHYSICAL" ] || [ ! -f "$OP_PHYSICAL.exe" ] || OP_PHYSICAL="$OP_PHYSICAL.exe" ;; esac
   if [ -n "${AI_DEEPSEEK_TEST_DIR:-}" ]; then case "$OP_PHYSICAL" in "$AI_DEEPSEEK_TEST_DIR"/*) ;; *) echo 'Error: test 1Password executable escaped its fixture directory.' >&2; exit 1;; esac
   elif [ -n "${LOCALAPPDATA:-}" ]; then case "$OP_PHYSICAL" in "$(cygpath -u "$LOCALAPPDATA")"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe) ;; *) echo 'Error: 1Password CLI is not the expected WinGet installation.' >&2; exit 1;; esac
   else [ "$OP_PHYSICAL" = /usr/bin/op ] || { echo 'Error: 1Password CLI is not the trusted system installation.' >&2; exit 1; }; fi

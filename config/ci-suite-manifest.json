@@ -42,8 +42,10 @@
     "test-ai-review-sandbox.sh": 5,
     "test-ai-review-scoreboard.sh": 1,
     "test-ai-reviewer-issue.sh": 7,
+    "test-ai-reviewer-membership-drift.sh": 1,
     "test-ai-run-task.sh": 1,
     "test-ai-sync-memory-public-containment.sh": 1,
+    "test-ai-task-gates-bulk.sh": 10,
     "test-ai-task-gates.sh": 8,
     "test-ai-test-local.sh": 12,
     "test-ai-verify-run.sh": 1,
@@ -128,9 +130,11 @@
     "test-ai-review-sandbox.sh",
     "test-ai-review-scoreboard.sh",
     "test-ai-reviewer-issue.sh",
+    "test-ai-reviewer-membership-drift.sh",
     "test-ai-reviewer-start-watch.sh",
     "test-ai-run-task.sh",
     "test-ai-sync-memory-public-containment.sh",
+    "test-ai-task-gates-bulk.sh",
     "test-ai-task-gates.sh",
     "test-ai-test-local.sh",
     "test-ai-verify-run.sh",
@@ -193,6 +197,7 @@
     "test-ai-muse-code.sh",
     "test-ai-muse.sh",
     "test-ai-qwen.sh",
+    "test-ai-task-gates-bulk.sh",
     "test-ai-test-local.sh",
     "test-ai-zcode.sh",
     "test-bin-cmd-launchers.sh",
@@ -226,6 +231,7 @@
     "test-ai-muse-code.sh",
     "test-ai-muse.sh",
     "test-ai-qwen.sh",
+    "test-ai-task-gates-bulk.sh",
     "test-ai-test-local.sh",
     "test-ai-zcode.sh",
     "test-bin-cmd-launchers.sh",
@@ -248,6 +254,7 @@
     "test-context-audit.ps1",
     "test-install-ai-devops-windows.ps1",
     "test-kimi-windows-execution.ps1",
+    "test-mcp-skill-drift.ps1",
     "test-mcp-env-launch.ps1",
     "test-memory-sync-scheduled-task.ps1",
     "test-qualify-windows-runner.ps1",
@@ -289,11 +296,16 @@
     ],
     [
       "test-ai-claude-permissions.sh",
-      "test-ai-gemini.sh",
       "test-ai-glm.sh",
-      "test-ai-muse-code.sh",
+      "test-ai-task-gates-bulk.sh",
       "test-line-endings.sh",
       "test-windows-scripts.sh"
+    ],
+    [
+      "test-ai-gemini.sh"
+    ],
+    [
+      "test-ai-muse-code.sh"
     ]
   ],
   "windows_offline_powershell_shard": 3,
