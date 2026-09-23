@@ -335,6 +335,19 @@ def write_sandbox_owner(marker, boundary, data, owner):
             os.unlink(tmp)
 
 
+def head_mismatch_detail(repo, expected_head, sandbox_head):
+    """Name which side moved when binding is refused; never relaxes the refusal (shared-db#2829)."""
+    current = git_value("-C", str(repo), "rev-parse", "HEAD")
+    message = ("sandbox evidence head differs from invocation (invocation " + (expected_head or "unknown") +
+               ", sandbox " + (sandbox_head or "unreadable") + ", source now " + (current or "unreadable") + ")")
+    if current and current != expected_head:
+        message += ("; the source worktree HEAD moved after the review started (a commit, checkout or merge "
+                    "landed mid-review). Rerun the review at the current head; the reviewer is not at fault")
+    elif current:
+        message += "; the source did not move, so the sandbox snapshot is at the wrong commit. Rerun the review"
+    return message
+
+
 def bind_sandbox(directory, provider, run_id, sandbox, original_id=None):
     with event_lock(directory):
         start = invocation(directory, provider, run_id, active=True)
@@ -347,8 +360,10 @@ def bind_sandbox(directory, provider, run_id, sandbox, original_id=None):
             expected_head = original["head"]
         marker, boundary, data, lines, owners = sandbox_marker(sandbox)
         require(physical(lines[0]) == physical(start["repo"]), "sandbox evidence source differs from invocation")
-        require(git_value("-C", str(marker.parent), "rev-parse", "HEAD") == expected_head,
-                "sandbox evidence head differs from invocation")
+        sandbox_head = git_value("-C", str(marker.parent), "rev-parse", "HEAD")
+        if sandbox_head != expected_head:
+            # Diagnose only on the refusal path; a matching head never scans the source.
+            raise Blocked(head_mismatch_detail(start["repo"], expected_head, sandbox_head))
         require((evidence_root(directory, run_id) / "required.json").is_file(),
                 "sandbox evidence requirement was not reserved")
         if original_id is not None:
