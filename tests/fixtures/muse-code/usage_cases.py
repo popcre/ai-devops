@@ -232,7 +232,7 @@ class MuseCodeUsageCases(unittest.TestCase):
         # the requested model's price for another model's tokens would be a
         # false estimate.
         foreign = completed(RUN, 100, 28, 0, 0, 3)
-        foreign['payload']['event']['model'] = 'muse-spark-1.3'
+        foreign['payload']['event']['model'] = 'muse-spark-1.3-contributor'
         result = self.result([completed(RUN, 19835, 472, 8561, 0, 387), foreign],
                              catalog_row=CATALOG_ROW)
         self.assertIsNone(result['catalog_cost_estimate'])
