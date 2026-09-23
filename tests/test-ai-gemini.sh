@@ -316,9 +316,11 @@ check 'a name that fits is still accepted' "(cd '$LONGREPO' && '$SCRIPT' new fit
 # 2026-09-23 (whole path-length class): long worktree paths, session names and
 # caller names must never make a derived path component grow with the input.
 # Real sandbox, fake provider; worktree path over 200 characters.
-LP_SEG="$(printf %.0sw $(seq 1 90))"
-LP_REPO="$TMP/$LP_SEG/$LP_SEG-worktree-with-a-very-long-descriptive-name"
-make_repo "$LP_REPO"
+# Exactly 201 characters: over the 200 target, yet still usable as a working
+# directory on a Windows host without LongPathsEnabled (260-character limit).
+LP_BASE="$TMP/long-worktree"; LP_PAD=$((201 - ${#LP_BASE} - 1))
+LP_REPO="$LP_BASE/$(printf %.0sw $(seq 1 "$LP_PAD"))"
+make_repo "$LP_REPO"; git -C "$LP_REPO" config core.longpaths true
 LP_NAME="$(printf %.0sn $(seq 1 150))"; LP_CALLER="$(printf %.0sc $(seq 1 70))"
 set +e; (cd "$LP_REPO" && AI_REVIEW_SANDBOX_BIN="$ROOT/bin/ai-review-sandbox" AI_REVIEW_SANDBOX_DIR="$TMP/lp-sbx" AI_GEMINI_CALLER="$LP_CALLER" MOCK_MODE=normal "$SCRIPT" new "$LP_NAME" --prompt review) > "$TMP/lp.out" 2>&1; LP_RC=$?; set -e
 [ "$LP_RC" -eq 0 ] || sed -n '1,20p' "$TMP/lp.out" >&2

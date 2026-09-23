@@ -714,7 +714,7 @@ check 'multiple verdict sections are rejected' "printf '%s' \"\$MULTIPLE\" | gre
 printf '%s\n' '{"type":"result","is_error":false,"result":"## Verdict\nAPPROVE\ntrailing text"}' > "$TMP/nonfinal-verdict.jsonl"
 NONFINAL="$(probe "$TMP/nonfinal-verdict.jsonl")"
 check 'a non-final verdict is rejected' "printf '%s' \"\$NONFINAL\" | grep -q 'final two nonblank lines'"
-check 'raw JSON output cannot bypass verdict validation' "grep -q 'extract_answer \"\$out\" >/dev/null; cat \"\$out\"' '$SCRIPT' && grep -q 'qwen-\${name}-incomplete-' '$SCRIPT'"
+check 'raw JSON output cannot bypass verdict validation' "grep -q 'extract_answer \"\$out\" >/dev/null; cat \"\$out\"' '$SCRIPT' && grep -q 'qwen-\$(short_name \"\$name\" 64)-incomplete-' '$SCRIPT'"
 
 BODY="$(bash -c '. "$1"; extract_answer "$2"' _ "$TMP/extract.sh" "$TMP/good.jsonl")"
 check 'the text above the verdict is still emitted' "printf '%s' \"\$BODY\" | grep -q 'finding one'"
