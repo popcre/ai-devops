@@ -659,7 +659,7 @@ Invoke-OrphanSkillPruning -ClientHome $ZCodeHome -Label "ZCode" -Root $RepoPath 
 
 Write-Step "Installing MiMo skills"
 # MiMoCode write root is ~/.config/mimocode/skills only (Desktop installs/imports
-# here). Never install into ~/.agents/skills — that is a read-only compat scan.
+# here). Never install into ~/.agents/skills -- that is a read-only compat scan.
 $mimoCount = Install-SkillFolder `
     -SourceRoot (Join-Path $RepoPath "skills\mimo") `
     -DestRoot (Join-Path $MimoHome "skills") `

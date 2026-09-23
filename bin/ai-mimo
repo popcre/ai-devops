@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ai-mimo — governed headless driver for the Xiaomi MiMoCode CLI (`mimo`).
+# ai-mimo -- governed headless driver for the Xiaomi MiMoCode CLI (`mimo`).
 #
 # This is the ONLY supported way for another session to drive MiMo headlessly.
 # Never start "Xiaomi MiMo AI.exe" (the Desktop GUI) as a headless fallback.
@@ -16,7 +16,7 @@
 # be added (interactive client only; formal review stays Claude/Codex).
 #
 # ---------------------------------------------------------------------------
-# STEP 0 VERIFICATION — baseline 2026-09-23 on edge-dev.
+# STEP 0 VERIFICATION -- baseline 2026-09-23 on edge-dev.
 #   Desktop app PRESENT: C:/Program Files/Xiaomi MiMo AI/Xiaomi MiMo AI.exe
 #   Standalone `mimo` CLI ABSENT on PATH. Headless `mimo run` is the documented
 #   entry (MiMoCode commands reference) but the exact flag set is UNQUALIFIED
@@ -29,7 +29,7 @@
 #   command, key `timeout` (ms), and `type: local|remote`. Do not reuse the
 #   ZCode writer (string command / timeoutMs).
 #   No hooks surface exists (permissions cannot be modified by custom
-#   tools/hooks) — there is no completion-check hook installer for MiMo.
+#   tools/hooks) -- there is no completion-check hook installer for MiMo.
 #   Skills write root: ~/.config/mimocode/skills/ only (never ~/.agents/skills).
 # ---------------------------------------------------------------------------
 #
@@ -70,7 +70,7 @@ GUI and is never used as a headless fallback. Presence probe: ai-mimo doctor"
 }
 
 # ---------------------------------------------------------------------------
-# ask — one-shot headless prompt via `mimo run`.
+# ask -- one-shot headless prompt via `mimo run`.
 # ---------------------------------------------------------------------------
 cmd_ask() {
   local prompt="" agent="$DEFAULT_AGENT" json_out=0 cwd="" arg
@@ -139,7 +139,7 @@ cmd_ask() {
 }
 
 # ---------------------------------------------------------------------------
-# doctor — presence, config, managed state. Warn-only on Desktop absence.
+# doctor -- presence, config, managed state. Warn-only on Desktop absence.
 # ---------------------------------------------------------------------------
 cmd_doctor() {
   local live=0
@@ -154,9 +154,9 @@ cmd_doctor() {
     desktop_version="$(powershell.exe -NoProfile -Command "(Get-Item -LiteralPath 'C:\\Program Files\\Xiaomi MiMo AI\\Xiaomi MiMo AI.exe').VersionInfo.ProductVersion" 2>/dev/null | tr -d '\r' || true)"
     echo "  desktop       : ok ($MIMO_DESKTOP_EXE) ver=${desktop_version:-unknown}"
   else
-    # Presence-only policy (D8): an absent Desktop is a warning, not a failure —
+    # Presence-only policy (D8): an absent Desktop is a warning, not a failure --
     # managed skills/MCP/globals can still be correct without the GUI installed.
-    echo "  desktop       : not found (warning) — install Xiaomi MiMo AI (Desktop)"
+    echo "  desktop       : not found (warning) -- install Xiaomi MiMo AI (Desktop)"
     echo "    absent: $MIMO_DESKTOP_EXE"
   fi
 
@@ -181,11 +181,11 @@ cmd_doctor() {
       instr="$(jq -r 'try (.instructions // []) | if type=="array" then join(", ") else tostring end' "$cfg")"
       echo "    instructions : ${instr:-none}"
     else
-      echo "  config        : DOES NOT PARSE ($cfg) — run bin/configure-mimocode-mcps.ps1 to rewrite as pure JSON"
+      echo "  config        : DOES NOT PARSE ($cfg) -- run bin/configure-mimocode-mcps.ps1 to rewrite as pure JSON"
       fail=1
     fi
   else
-    echo "  config        : absent ($cfg) — run bin/configure-mimocode-mcps.ps1"
+    echo "  config        : absent ($cfg) -- run bin/configure-mimocode-mcps.ps1"
     fail=1
   fi
 
@@ -194,25 +194,25 @@ cmd_doctor() {
     managed_count="$(find "$skills_dir" -maxdepth 2 -name .ai-devops-managed -type f 2>/dev/null | wc -l | tr -d ' ')"
     echo "  skills        : managed dir with $managed_count managed marker(s)"
   else
-    echo "  skills        : no $skills_dir — re-run install-ai-devops-windows.ps1"
+    echo "  skills        : no $skills_dir -- re-run install-ai-devops-windows.ps1"
     fail=1
   fi
 
   if [ -f "$MIMO_HOME/AGENTS.md" ]; then
     echo "  globals       : $MIMO_HOME/AGENTS.md present"
   else
-    echo "  globals       : missing $MIMO_HOME/AGENTS.md — re-run install-ai-devops-windows.ps1 (or ai-adopt-globals)"
+    echo "  globals       : missing $MIMO_HOME/AGENTS.md -- re-run install-ai-devops-windows.ps1 (or ai-adopt-globals)"
     fail=1
   fi
 
   if command -v mimo >/dev/null 2>&1 || [ -x "$HOME/.local/bin/mimo" ]; then
     echo "  shim          : mimo on PATH"
   else
-    echo "  shim          : absent — re-run setup-machine.ps1 when the CLI is installed"
+    echo "  shim          : absent -- re-run setup-machine.ps1 when the CLI is installed"
   fi
 
   if [ "$live" = 1 ]; then
-    echo "  live probe    : running one bounded ask…"
+    echo "  live probe    : running one bounded ask..."
     if cmd_ask "Reply with the single word OK" >/dev/null; then
       echo "  live probe    : ok (authenticated, model answered)"
     else

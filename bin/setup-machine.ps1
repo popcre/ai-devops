@@ -830,7 +830,7 @@ if (Test-Path -LiteralPath $MiMoAppExe) {
     Note "Verify the full integration when needed with: ai-mimo doctor"
     Note "First-run login when needed: mimo account login"
   } else {
-    Note "MiMoCode CLI 'mimo' not on PATH — headless ai-mimo ask unavailable; Desktop remains fully managed."
+    Note "MiMoCode CLI 'mimo' not on PATH -- headless ai-mimo ask unavailable; Desktop remains fully managed."
     Note "Verify when needed with: ai-mimo doctor"
   }
 } else {
