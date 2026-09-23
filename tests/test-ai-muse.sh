@@ -481,7 +481,8 @@ check 'store-key writes the key without printing it' "grep -qx fake-key '$KS' &&
 command -v cygpath >/dev/null 2>&1 || check 'stored key is owner-only' "[ \"\$(stat -c %a '$KS')\" = 600 ] && [ \"\$(stat -c %a '$TMP/keystore')\" = 700 ]"
 printf 'stored-key\n' > "$KS"; chmod 600 "$KS"
 check 'a stored key is used instead of 1Password' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=stored-key' '$TMP/provider-env'"
-check 'doctor reports the protected key store' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' doctor\" | grep -q 'PASS  protected Muse key store is present'"
+DOCTOR_KS_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' doctor" 2>&1 || true)"
+if printf '%s\n' "$DOCTOR_KS_OUT" | grep -q 'PASS  protected Muse key store is present'; then ok 'doctor reports the protected key store'; else bad 'doctor reports the protected key store'; printf '%s\n' "$DOCTOR_KS_OUT" | sed 's/^/    doctor: /' | head -40; fi
 mkdir -p "$TMP/curl401"; printf '#!/usr/bin/env bash\nprintf 401\n' > "$TMP/curl401/curl"; chmod +x "$TMP/curl401/curl"
 REJ_OUT="$(cd "$REPO" && eval "$ENV PATH='$TMP/curl401:$TMP/bin:$PATH' AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live" 2>&1)"
 check 'a rejected stored key is refreshed from 1Password and rewritten' "grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && grep -qx fake-key '$KS' && printf '%s' \"\$REJ_OUT\" | grep -q 'stored key was rejected'"
