@@ -174,6 +174,12 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   `Posted by ZCode chat <id> on <machine>`, where `<id>` is
   `$ZCODE_SESSION_ID` (write `unknown` if it is empty). When editing a body,
   keep existing signatures and add yours.
+- **Reviewer rotation:** the shared-db allocator is the one source of truth
+  for who reviews. If a reviewer is unreachable, check membership first, never
+  retry one out of rotation, and move to the next registered reviewer within
+  minutes. Reviewer policy changes land in code, config and docs together. A
+  newer reviewer CLI version is accepted after one live well-formed review.
+  Details: `ai-devops/docs/reviewer-rotation-rules.md`.
 - **Shared-db orchestrator sessions only:** when opening or running the sole
   orchestrator, load `shared-db-orchestrator`. Its detailed blocker, worker,
   queue, reviewer, and owner-decision rules apply only in that context and stay
