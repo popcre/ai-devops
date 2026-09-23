@@ -45,6 +45,8 @@ case "$ENGINE" in
 esac
 CALLER="${AI_MUSE_CALLER:-}"
 STATE="${AI_MUSE_STATE_DIR:-$PROFILE_HOME/.local/state/ai-devops/muse}"
+KEY_STORE="${AI_MUSE_KEY_STORE:-$PROFILE_HOME/.config/ai-devops/secrets/muse-api-key}"
+KEY_PROBE_URL="${AI_MUSE_KEY_PROBE_URL:-https://api.meta.ai/v1/models}"
 TIMEOUT="${AI_MUSE_TIMEOUT:-1800}"
 SANDBOX="$ROOT/bin/ai-review-sandbox"
 PACKET="$ROOT/bin/ai-review-packet"
@@ -300,7 +302,7 @@ prepare(){
   # Muse reads the sealed evidence but keeps its own verdict contract.
   printf '\n\nRead %s/MANIFEST.md first for the exact change and test evidence; ignore its answer-format section and use the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning.\n' "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
 }
-load_key(){
+read_key_from_op(){
   # Serialize every 1Password read behind one machine-wide lock. Concurrent
   # turns wait their turn (bounded, with backoff) instead of refusing.
   need op; local candidate="$STATE/credential.lock.d" owner token budget deadline delay=1 waited=0; token="$$-$RANDOM-$(date +%s)"; mkdir -p "$STATE"
@@ -322,6 +324,42 @@ load_key(){
   done
   MODEL_API_KEY="$(op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"; release_credential_lock; [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
 }
+# The installer stores the Muse key once in a per-user protected file so a
+# turn does not need 1Password. 1Password is only the fallback: when the
+# store is missing (read, not written - storing is the installer's job) or
+# when Meta rejects the stored key (read and rewrite the store).
+key_store_ok(){
+  [ -f "$KEY_STORE" ] && [ ! -L "$KEY_STORE" ] && [ -s "$KEY_STORE" ] || return 1
+  [ -n "${SYSTEMROOT:-}" ] && return 0
+  [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
+}
+write_key_store(){
+  local dir tmp; dir="$(dirname "$KEY_STORE")"
+  mkdir -p "$dir" && chmod 700 "$dir" 2>/dev/null && protect_windows_path "$dir" directory || die 'could not protect the Muse key store directory.'
+  tmp="$(mktemp "$dir/.muse-api-key.XXXXXX")" || die 'could not reserve the Muse key store.'
+  chmod 600 "$tmp" 2>/dev/null && protect_windows_path "$tmp" file || { rm -f "$tmp"; die 'could not protect the Muse key store.'; }
+  printf '%s\n' "$1" > "$tmp" || { rm -f "$tmp"; die 'could not write the Muse key store.'; }
+  mv -f "$tmp" "$KEY_STORE" || { rm -f "$tmp"; die 'could not install the Muse key store.'; }
+}
+# 0 = accepted or unknown (network trouble never forces a 1Password read);
+# 1 = Meta answered 401/403, so the stored key is rejected.
+probe_key_rejected(){
+  local hdr code; command -v curl >/dev/null 2>&1 || return 1
+  hdr="$(mktemp "$RUN_TMP/muse-probe.XXXXXX")" || return 1; chmod 600 "$hdr" 2>/dev/null
+  printf 'Authorization: Bearer %s\n' "$1" > "$hdr"
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "${AI_MUSE_KEY_PROBE_TIMEOUT:-15}" -H @"$hdr" "$KEY_PROBE_URL" 2>/dev/null || true)"; rm -f "$hdr"
+  case "$code" in 401|403) return 0;; *) return 1;; esac
+}
+load_key(){
+  if key_store_ok; then
+    IFS= read -r MODEL_API_KEY < "$KEY_STORE" || MODEL_API_KEY=""
+    if [ -n "$MODEL_API_KEY" ] && ! probe_key_rejected "$MODEL_API_KEY"; then return 0; fi
+    printf 'Muse: stored key was rejected; refreshing it from 1Password.\n' >&2
+    read_key_from_op; write_key_store "$MODEL_API_KEY"; return 0
+  fi
+  read_key_from_op
+}
+cmd_store_key(){ read_key_from_op; write_key_store "$MODEL_API_KEY"; unset MODEL_API_KEY; printf 'Muse key stored in the protected per-user store: %s\n' "$KEY_STORE"; }
 tree_state(){
   local root="$1" rel
   { git -C "$root" rev-parse HEAD; git -C "$root" diff --binary HEAD; while IFS= read -r -d '' rel; do printf '%s\0' "$rel"; sha256sum "$root/$rel"; done < <(git -C "$root" ls-files --others --exclude-standard -z); } | sha256sum | cut -d' ' -f1
@@ -826,7 +864,13 @@ cmd_doctor(){
     check 'trusted provider configuration is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/opencode.json" "$OC_CFG/opencode.json"
     check 'trusted review profile is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/agent/muse-review.md" "$OC_CFG/agent/muse-review.md"
   fi
-  check '1Password command is available' command -v op
+  if key_store_ok; then
+    printf 'PASS  protected Muse key store is present\n'
+    command -v op >/dev/null 2>&1 && printf 'PASS  1Password command is available (refresh fallback)\n' || printf 'WARN  1Password command is unavailable; the stored key is used and cannot be refreshed if Meta rejects it\n'
+  else
+    printf 'WARN  protected Muse key store is missing; every turn reads 1Password. Run: AI_MUSE_CALLER=%s ai-muse store-key\n' "$CALLER"
+    check '1Password command is available' command -v op
+  fi
   [ "$failures" -eq 0 ] || exit 1
   if [ "$live" -eq 1 ]; then
     require_runtime; need jq
@@ -843,7 +887,7 @@ cmd_doctor(){
     printf 'PASS  live provider response\n'
   fi
 }
-usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }
+usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor | store-key' 'ai-muse review [repository] [request]  (compatibility command)'; }
 
 OPT_BASE=""; OPT_ASSERT_HEAD=""
 if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then
@@ -865,7 +909,7 @@ fi
 case "${1:-}" in
   new) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
   ask) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;
-  list) cmd_list;; show) shift; cmd_show "${1:-}";; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; cmd_reconcile "${1:-}";; delete) shift; cmd_delete "${1:-}";; doctor) shift; cmd_doctor "$@";;
+  list) cmd_list;; show) shift; cmd_show "${1:-}";; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; cmd_reconcile "${1:-}";; delete) shift; cmd_delete "${1:-}";; store-key) cmd_store_key;; doctor) shift; cmd_doctor "$@";;
   review) shift; repo="${1:-$PWD}"; request="${2:-}"; if [ -z "$request" ] && [ ! -t 0 ]; then request="$(cat)"; fi; request="${request:-Review the current changes for correctness, security, and missing tests.}"; printf '%s' "$request" | grep -Eqi 'VERDICT:' || request="$request
 
 Finish with exactly one final line: VERDICT: FINDINGS or VERDICT: NO FINDINGS."; (cd "$(repo_root "$repo")" && REQUIRE_VERDICT=1 cmd_new "review-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM" --prompt "$request");;
