@@ -137,11 +137,14 @@ def link(path):
     return subprocess.run(['readlink', path], check=True,
                           stdout=subprocess.PIPE).stdout.rstrip(b'\n')
 
-def omitted(rel):
-    return (rel == '.git' or rel in ('.ai/reviews', '.ai/reviewer-issues',
+def omitted(directory, rel):
+    if (rel == '.git' or rel in ('.ai/reviews', '.ai/reviewer-issues',
             '.ai/test-runs', '.ai/qualification') or
-            fnmatch.fnmatchcase(rel, '.ai/qwen-test.*') or
-            fnmatch.fnmatchcase(rel, '.ai-review-*'))
+            fnmatch.fnmatchcase(rel, '.ai/qwen-test.*')):
+        return True
+    top = rel.split('/', 1)[0]
+    return (top.startswith('.ai-review-') and
+            os.path.isfile(os.path.join(directory, top, '.ai-review-packet')))
 
 def paths(directory, source=False):
     result = []
@@ -154,7 +157,7 @@ def paths(directory, source=False):
             if os.sep == '\\':
                 rel = rel.replace('\\', '/')
             path = os.path.join(base, name)
-            if source and omitted(rel):
+            if source and omitted(directory, rel):
                 dirs.remove(name)
             elif os.path.islink(path):
                 result.append(('./' + rel, path))
@@ -164,7 +167,7 @@ def paths(directory, source=False):
             if os.sep == '\\':
                 rel = rel.replace('\\', '/')
             path = os.path.join(base, name)
-            if (not source or not omitted(rel)) and (os.path.isfile(path) or os.path.islink(path)):
+            if (not source or not omitted(directory, rel)) and (os.path.isfile(path) or os.path.islink(path)):
                 result.append(('./' + rel, path))
     return sorted(result, key=lambda pair: raw(pair[0]))
 

@@ -293,6 +293,10 @@ R11="$TMP/repo11"; make_repo "$R11"; new_run "$R11" source-runtime normal >/dev/
 check 'wrapper-owned .ai runtime evidence does not create false source drift' "cd '$R11' && '$SCRIPT' ask source-runtime --prompt later"
 mkdir -p "$R11/.ai-review-user-source"; printf source > "$R11/.ai-review-user-source/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'similarly prefixed user source refuses before provider contact' "! (cd '$R11' && '$SCRIPT' ask source-runtime --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
+rm -rf "$R11/.ai-review-user-source"; mkdir -p "$R11/.ai-review-generated"
+printf 'packet\n' > "$R11/.ai-review-generated/.ai-review-packet"
+printf 'generated\n' > "$R11/.ai-review-generated/MANIFEST.md"
+check 'marked review packet does not create false source drift' "cd '$R11' && '$SCRIPT' ask source-runtime --prompt later"
 SUBSOURCE="$TMP/subsource"; make_repo "$SUBSOURCE"; SUBPARENT="$TMP/subparent"; make_repo "$SUBPARENT"; git -C "$SUBPARENT" -c protocol.file.allow=always submodule add -q "$SUBSOURCE" module; git -C "$SUBPARENT" commit -qam gitlink; new_run "$SUBPARENT" source-gitlink normal >/dev/null; printf changed >> "$SUBPARENT/module/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'initialized gitlink content drift is fingerprinted before provider contact' "! (cd '$SUBPARENT' && '$SCRIPT' ask source-gitlink --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
 
