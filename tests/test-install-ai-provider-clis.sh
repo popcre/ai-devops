@@ -88,7 +88,7 @@ FAKEGROK
 fake="$tmp/fakebin"; mkdir -p "$fake"
 make_fake_grok "$fake/grok" "$WANT"
 PATH="$fake:$PATH" bash "$script" --dry-run grok >"$tmp/skip" 2>&1
-grep -q "SKIP grok already installed at the exact supported version $WANT" "$tmp/skip"
+grep -q "SKIP grok already installed at supported version $WANT" "$tmp/skip"
 
 # --force overrides that skip.
 PATH="$fake:$PATH" bash "$script" --dry-run --force grok >"$tmp/force" 2>&1
@@ -122,7 +122,7 @@ env HOME="$dry" PATH="$minimal_path" bash "$script" --dry-run grok >/dev/null 2>
 
 # --- exact version policy (issue #251) -------------------------------------
 # "A runnable grok" is not the contract. Both wrappers are qualified against one
-# exact build, so an older OR newer build must be brought to exactly that
+# floor build (exact pin until #686), so an older build must be brought to that
 # version, and a failed or wrong-version upgrade must restore what was there.
 
 # grok_older_version_triggers_exact_upgrade
@@ -137,12 +137,12 @@ grep -q -- "update --version $WANT" "$oldhome/.grok/bin/.fake-grok-update"
 grep -q "is now exactly $WANT" "$tmp/old"
 grep -q 'backed up' "$tmp/old"
 
-# grok_newer_unqualified_version_is_not_accepted
+# grok_newer_version_above_the_minimum_is_kept (issue #686: Grok's floor, not an exact pin)
 newhome="$tmp/new-home"; mkdir -p "$newhome/.grok/bin"
 make_fake_grok "$newhome/.grok/bin/grok" '99.0.0'
 env HOME="$newhome" PATH="$minimal_path" bash "$script" grok >"$tmp/newer" 2>&1
-grep -q "grok reports 99.0.0; this repository qualifies exactly $WANT" "$tmp/newer"
-grep -q -- "update --version $WANT" "$newhome/.grok/bin/.fake-grok-update"
+grep -q "SKIP grok already installed at supported version 99.0.0" "$tmp/newer"
+[ ! -e "$newhome/.grok/bin/.fake-grok-update" ] || { echo "FAIL: a newer Grok was downgraded"; exit 1; }
 
 # grok_failed_upgrade_restores_original_binary
 failhome="$tmp/fail-home"; mkdir -p "$failhome/.grok/bin"
@@ -185,6 +185,15 @@ for p in kimi qwen; do
   jq -e --arg p "$p" '.providers[$p].supported_version == null' "$policy" >/dev/null || {
     echo "FAIL: $p must stay unpinned; Grok work must not force its upgrade"; exit 1; }
 done
+# Issue #686: Grok's pin is a floor. The comparison is numeric per part, so
+# 1.0.100 is newer than 1.0.13 and 1.0.9 is older.
+jq -e '.providers.grok.version_match == "minimum"' "$policy" >/dev/null
+pv="$repo/bin/ai-provider-version"
+[ "$(bash "$pv" match grok)" = minimum ] && [ "$(bash "$pv" match kimi)" = exact ]
+for v in "$WANT" 1.0.41 1.0.100 1.1.0 2.0.0; do bash "$pv" satisfies grok "$v" || { echo "FAIL: $v must satisfy the Grok floor"; exit 1; }; done
+for v in 1.0.9 0.9.99 1.0 garbage ''; do ! bash "$pv" satisfies grok "$v" || { echo "FAIL: '$v' must not satisfy the Grok floor"; exit 1; }; done
+bash "$pv" check grok 'grok 1.0.41 (abc) [stable]' >/dev/null
+! bash "$pv" check grok 'grok 1.0.5 (abc) [stable]' >/dev/null
 # Secret-free by contract.
 ! grep -Eqi '"(token|api[_-]?key|password|secret)"' "$policy"
 

@@ -126,13 +126,24 @@ installed_grok_version() { # installed_grok_version BINARY
   bash "$tool" parse "$raw"
 }
 
+grok_version_satisfies() { # grok_version_satisfies BARE-VERSION
+  local tool; tool="$(version_tool)"
+  [ -n "$tool" ] && [ -f "$tool" ] && bash "$tool" satisfies grok "$1"
+}
+
+grok_version_rule() { # grok_version_rule WANT - human wording of the policy
+  local tool mode; tool="$(version_tool)"
+  mode="$(bash "$tool" match grok 2>/dev/null || printf exact)"
+  if [ "$mode" = minimum ]; then printf '%s or newer' "$1"; else printf 'exactly %s' "$1"; fi
+}
+
 require_supported_grok_version() { # require_supported_grok_version BINARY
   local want have; want="$(supported_grok_version)"
   [ -n "$want" ] || die 'the provider version policy pins no Grok version; refusing paid work against an unqualified build.'
   have="$(installed_grok_version "$1")"
   [ -n "$have" ] || die "could not read a version from the Grok binary ($1); refusing paid work against an unidentified build."
-  [ "$have" = "$want" ] && return 0
-  die "unqualified Grok version: installed $have, this repository qualifies exactly $want. Run the provider installer (or 'grok update --version $want') before paid implementation work."
+  grok_version_satisfies "$have" && return 0
+  die "unqualified Grok version: installed $have, this repository requires $(grok_version_rule "$want"). Run the provider installer (or 'grok update --version $want') before paid implementation work."
 }
 
 resolve_grok() {
@@ -621,10 +632,10 @@ cmd_doctor() {
   echo "version      : $("$grok" --version 2>&1 | head -1)"
   if [ -z "$want_version" ]; then
     echo "version policy: UNREADABLE — config/provider-cli-versions.json is missing or malformed; paid work will refuse to start."
-  elif [ "$have_version" = "$want_version" ]; then
-    echo "version policy: OK (exactly $want_version, the qualified build)"
+  elif [ -n "$have_version" ] && grok_version_satisfies "$have_version"; then
+    echo "version policy: OK (installed $have_version; requires $(grok_version_rule "$want_version"))"
   else
-    echo "version policy: UNQUALIFIED — installed ${have_version:-unknown}, requires exactly $want_version; paid work will refuse to start."
+    echo "version policy: UNQUALIFIED — installed ${have_version:-unknown}, requires $(grok_version_rule "$want_version"); paid work will refuse to start."
   fi
   echo "platform     : $(uname -s) (windows=$(is_windows && echo yes || echo no))"
   echo "cygpath      : $(command -v cygpath >/dev/null 2>&1 && echo present || echo absent)"

@@ -98,6 +98,23 @@ function Get-RequiredProviderVersion {
   return $entry.supported_version
 }
 
+function Test-ProviderVersionSatisfied {
+  # Mirrors bin/ai-provider-version satisfies: "exact" (default) needs the same
+  # version; "minimum" accepts that version or newer, compared numerically per
+  # part (issue #686: Grok auto-updates past its floor).
+  param([Parameter(Mandatory)][string]$Provider, [AllowNull()][AllowEmptyString()][string]$Version)
+  $required = Get-RequiredProviderVersion -Provider $Provider
+  if (-not $required) { return $true }
+  if ([string]::IsNullOrEmpty($Version) -or $Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { return $false }
+  $policyPath = if ($env:AI_PROVIDER_VERSIONS_FILE) { $env:AI_PROVIDER_VERSIONS_FILE }
+                else { Join-Path $PSScriptRoot '..\config\provider-cli-versions.json' }
+  $mode = (Get-Content -Raw -LiteralPath $policyPath | ConvertFrom-Json).providers.$Provider.version_match
+  if (-not $mode) { $mode = 'exact' }
+  if ($mode -eq 'exact') { return $Version -eq $required }
+  if ($mode -ne 'minimum') { throw "Unknown version_match '$mode' for $Provider" }
+  return ([version]$Version) -ge ([version]$required)
+}
+
 function Get-ReportedProviderVersion {
   param([Parameter(Mandatory)][string]$Path)
   try { $raw = & $Path --version 2>&1 | Select-Object -First 1 } catch { return $null }
@@ -301,7 +318,7 @@ foreach ($providerDefinition in $providerCatalog) {
     $detail = $probe
     if ($present -and $required) {
       $have = Get-ReportedProviderVersion -Path $probe
-      if ($have -ne $required) { $status = 'STALE'; $detail = "$probe reports '$have', requires exactly $required" }
+      if (-not (Test-ProviderVersionSatisfied -Provider $provider.Command -Version $have)) { $status = 'STALE'; $detail = "$probe reports '$have', policy requires $required" }
       else { $detail = "$probe ($required)" }
     }
     Result $provider.Name $status $detail
@@ -348,8 +365,8 @@ foreach ($providerDefinition in $providerCatalog) {
     $resolved = if ($command -and $provider.Id -ne 'qwen') { $command.Source } else { $provider.ExpectedPath }
     if ($required) {
       $have = Get-ReportedProviderVersion -Path $resolved
-      if ($have -ne $required) {
-        Write-Host "$($provider.Name) reports '$have'; this repository qualifies exactly $required."
+      if (-not (Test-ProviderVersionSatisfied -Provider $provider.Command -Version $have)) {
+        Write-Host "$($provider.Name) reports '$have'; this repository's policy requires $required."
         Update-ProviderToExactVersion -Provider $provider -Path $resolved -Version $required
       }
     }

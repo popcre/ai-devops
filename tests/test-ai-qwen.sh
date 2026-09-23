@@ -834,6 +834,13 @@ if printf '%s' "$HANG_OUT" | grep -q 'no output within 3s of starting' && printf
 echo review > "$TMP/mode"
 if (cd "$REPO" && AI_QWEN_STARTUP_TIMEOUT_SECONDS=soon bash "$SCRIPT" new bad-deadline --prompt review) >/dev/null 2>&1; then bad 'a non-numeric startup deadline is refused'; else ok 'a non-numeric startup deadline is refused'; fi
 
+# Issue #686: when WinGet cannot create its Links symlink it puts the package
+# directory on PATH, and Git Bash names the binary "op" (no .exe). The trusted
+# resolver must still find the real op.exe instead of refusing the credential.
+OPX="$TMP/op-exe-only"; mkdir -p "$OPX"; printf '#!/bin/sh\n' > "$OPX/op.exe"; chmod +x "$OPX/op.exe"
+eval "$(sed -n '/^resolve_trusted_op() {/,/^}/p' "$SCRIPT")"
+if [ "$(AI_QWEN_TEST_DIR="$OPX" AI_QWEN_OP_BIN="$OPX/op" resolve_trusted_op)" = "$OPX/op.exe" ]; then ok 'op named without .exe resolves to the trusted op.exe'; else bad 'op named without .exe resolves to the trusted op.exe'; fi
+
 recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))
