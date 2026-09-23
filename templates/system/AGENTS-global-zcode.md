@@ -98,6 +98,7 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   authorized work still undone is the same failure as asking permission to
   start it.
 - **One unproven outcome per session.** A session owns one unproven live-behavior outcome; refuse a bundle of leftover proofs or "take tickets N, M, and P to production" as one job — split them first, or stop and say the job is too big.
+- **Multi-step work runs through one parent issue.** When work has several steps or linked tasks, open one parent issue whose body tells any session exactly what to do: take the first unticked child issue, do only that one, tick it, comment the next child on the parent, and stop. Link each child to the parent and tell it not to be started directly. Albert then hands every session just the parent number.
 - **Do not defer live proof as a later dump.** When code lands without live proof, open exactly one leftover-proof issue for that step in the same session. Never save several unproven steps to hand to a later chat.
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or

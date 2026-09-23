@@ -34,6 +34,7 @@ function New-Fixture {
     "# test Claude global" | Set-Content -LiteralPath (Join-Path $templates "CLAUDE-global.md")
     "# test Codex global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-codex.md")
     "# test ZCode global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-zcode.md")
+    "# test MiMo global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-mimo.md")
 
     git -C $root init -b main | Out-Null
     git -C $root config user.name "AI DevOps Test"
@@ -53,6 +54,7 @@ function Invoke-Installer {
         [string]$ClaudeHome,
         [string]$CodexHome,
         [string]$ZCodeHome = "",
+        [string]$MimoHome = "",
         [switch]$SkillsDryRun,
         [switch]$MigrateObsolete,
         [switch]$AdoptGlobals
@@ -64,6 +66,7 @@ function Invoke-Installer {
         CodexHome = $CodexHome
         SkipGitInstall = $true
         ZCodeHome = $(if ($ZCodeHome) { $ZCodeHome } else { Join-Path $TempRoot "no-zcode-home" })
+        MimoHome = $(if ($MimoHome) { $MimoHome } else { Join-Path $TempRoot "no-mimo-home" })
         SkillsDryRun = [bool]$SkillsDryRun
         MigrateObsolete = [bool]$MigrateObsolete
         AdoptGlobals = [bool]$AdoptGlobals
@@ -292,6 +295,17 @@ try {
     try { Invoke-Installer $fixture $claude $codex -ZCodeHome $zcode | Out-Null } catch { $failed = $_.Exception.Message -match "skills/zcode" }
     Assert-True $failed "ZCode collision did not fail loudly"
     Assert-True (-not (Test-Path (Join-Path $zcode "skills"))) "ZCode collision partially changed the ZCode home"
+
+    # Xiaomi MiMo: seeded only where its config folder exists.
+    $fixture = New-Fixture "mimo"
+    $claude = Join-Path $TempRoot "mimo\claude"
+    $codex = Join-Path $TempRoot "mimo\codex"
+    $mimo = Join-Path $TempRoot "mimo\mimo-home"
+    Invoke-Installer $fixture $claude $codex | Out-Null
+    Assert-True (-not (Test-Path (Join-Path $TempRoot "no-mimo-home"))) "MiMo home created where MiMo is not installed"
+    New-Item -ItemType Directory -Force -Path $mimo | Out-Null
+    Invoke-Installer $fixture $claude $codex -MimoHome $mimo | Out-Null
+    Assert-True (((Get-Content -LiteralPath (Join-Path $mimo "AGENTS.md")) -join "`n") -match "test MiMo global") "MiMo global not installed"
 
     # Every machine must schedule the blocker watch, or its waiting sessions are
     # never woken. The test must not touch the real scheduler.
