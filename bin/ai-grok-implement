@@ -261,22 +261,39 @@ create_investigate_copy() { # create_investigate_copy REPO WT BASE_SHA
 # Operator secrets must not reach Grok's process or its Bash children. Grok
 # auth stays file-based in an isolated GROK_HOME (same contract as review):
 # never as an environment value, argument, report, or patch.
+investigation_home_parent() { # print where the throwaway GROK_HOME may live
+  # A hard link cannot cross volumes: when the state directory is on another
+  # drive than the credential (#709), build the throwaway home beside the
+  # credential instead. The credential is still only ever hard-linked.
+  local auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" parent src_dev state_dev
+  mkdir -p "$IMPL_DIR" || return 1
+  [ ! -L "$IMPL_DIR" ] || { printf 'refusing a linked state directory: %s
+' "$IMPL_DIR" >&2; return 1; }
+  if [ -d "$auth_dir" ]; then auth_dir="$(cd -P -- "$auth_dir" && pwd -P)" || return 1; fi
+  src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
+  state_dev="$(stat -L -c %d "$IMPL_DIR" 2>/dev/null || true)"
+  if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then printf '%s
+' "$IMPL_DIR"; return 0; fi
+  case "$auth_dir" in /*|[A-Za-z]:*) ;; *) printf 'credential directory must be absolute: %s
+' "$auth_dir" >&2; return 1 ;; esac
+  parent="$(dirname "$auth_dir")/.ai-grok-implement-homes"
+  [ ! -L "$parent" ] || { printf 'refusing a linked investigation home parent: %s
+' "$parent" >&2; return 1; }
+  (umask 077; mkdir -p -- "$parent") || return 1
+  chmod 700 "$parent" 2>/dev/null || true
+  printf '%s
+' "$parent"
+}
+
+investigation_home_root() { # create and print a fresh private investigation home
+  local parent; parent="$(investigation_home_parent)" && [ -n "$parent" ] || return 1
+  mktemp -d "$parent/investigate-home.XXXXXX"
+}
+
 launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
   local grok="$1"; shift
   local tmp_root user_home grok_home auth_src rc=0
-  local home_parent="$IMPL_DIR" auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" src_dev state_dev
-  mkdir -p "$IMPL_DIR"
-  # A hard link cannot cross volumes: when the state directory lives on another
-  # drive than the credential (#709), build the throwaway home beside the
-  # credential instead. The credential is still only ever hard-linked.
-  src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
-  state_dev="$(stat -L -c %d "$IMPL_DIR" 2>/dev/null || true)"
-  if [ -n "$src_dev" ] && [ -n "$state_dev" ] && [ "$src_dev" != "$state_dev" ]; then
-    home_parent="$(dirname "$auth_dir")/.ai-grok-implement-homes"
-    [ ! -L "$home_parent" ] || die "refusing a symbolic link or junction as the investigation home parent: $home_parent"
-    (umask 077; mkdir -p -- "$home_parent") || die "could not create the investigation home parent: $home_parent"
-  fi
-  tmp_root="$(mktemp -d "$home_parent/investigate-home.XXXXXX")"
+  tmp_root="$(investigation_home_root)" && [ -n "$tmp_root" ] || die "could not create the isolated investigation home."
   user_home="$tmp_root/user"
   grok_home="$tmp_root/grok"
   mkdir -p "$user_home" "$grok_home"

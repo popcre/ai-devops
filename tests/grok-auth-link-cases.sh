@@ -96,6 +96,12 @@ grep -qx 'fixture initialization failed' "$TMP/diagnostics"
 test ! -d "$TMP/failed-suite"
 echo 'ok failing concurrency fixture preserves owner diagnostics before cleanup'
 
+make_link() { # TARGET LINK: symlink, or an NTFS junction on Git Bash without symlink rights
+  ln -s "$1" "$2" 2>/dev/null && [ -L "$2" ] && return 0
+  rm -rf -- "$2"
+  command -v cygpath >/dev/null && MSYS2_ARG_CONV_EXCL="*" cmd /c mklink /J "$(cygpath -w "$2")" "$(cygpath -w "$1")" >/dev/null
+}
+
 # Cross-volume state directory: the isolated home must follow the credential's
 # volume (a hard link cannot cross drives), and nothing is ever copied into it.
 sed -n '/^grok_isolated_home()/,/^}/p' "$ROOT/bin/ai-grok-review" > "$TMP/home.sh"
@@ -117,9 +123,26 @@ printf 'kept
   prepare_auth_link "$HOME/.grok/auth.json" "$got"
   test "$HOME/.grok/auth.json" -ef "$got/auth.json"
   rm -rf "$got"; mkdir -p "$TMP/xv/elsewhere"
-  if ln -s "$TMP/xv/elsewhere" "$got" 2>/dev/null && [ -L "$got" ]; then
-    ! (grok_isolated_home) 2>/dev/null
-  fi
+  make_link "$TMP/xv/elsewhere" "$got"
+  test -L "$got"
+  if (grok_isolated_home) >/dev/null 2>&1; then exit 1; fi
 )
 echo 'ok cross-volume state keeps the isolated home on the credential volume'
-echo '8 passed, 0 failed, 0 skipped'
+
+# The same rule for ai-grok-implement's throwaway investigation home.
+sed -n '/^investigation_home_parent()/,/^}/p; /^investigation_home_root()/,/^}/p' "$ROOT/bin/ai-grok-implement" > "$TMP/impl.sh"
+. "$TMP/impl.sh"
+(
+  HOME="$TMP/xv/user" IMPL_DIR="$TMP/xv/state/implement"; unset AI_GROK_AUTH_HOME
+  test "$(investigation_home_parent)" = "$IMPL_DIR"          # same device: unchanged
+  stat() { case "$*" in *"$IMPL_DIR"*) echo 2;; *) echo 1;; esac; }
+  root="$(investigation_home_root)"
+  case "$root" in "$HOME/.ai-grok-implement-homes/investigate-home."*) ;; *) exit 1 ;; esac
+  test -d "$root"
+  rel="$(cd "$TMP" && mkdir -p rel/.grok && AI_GROK_AUTH_HOME=rel/.grok investigation_home_parent)"
+  case "$rel" in /*) ;; *) exit 1 ;; esac                     # a relative credential path is resolved
+  rm -rf "$HOME/.ai-grok-implement-homes"; make_link "$TMP/xv/elsewhere" "$HOME/.ai-grok-implement-homes"
+  if (investigation_home_parent) >/dev/null 2>&1; then exit 1; fi
+)
+echo 'ok cross-volume investigation home follows the credential volume'
+echo '9 passed, 0 failed, 0 skipped'

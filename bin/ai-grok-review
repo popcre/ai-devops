@@ -988,6 +988,9 @@ grok_isolated_home() { # print the isolated GROK_HOME; it must share a volume wi
   # in that case. Nothing is copied: the credential is only ever hard-linked.
   local default="$STATE_DIR/isolated-home" auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" alt src_dev state_dev
   mkdir -p "$STATE_DIR" 2>/dev/null || true
+  [ ! -L "$default" ] || die "refusing a symbolic link or junction as the isolated Grok home: $default"
+  # Resolve a linked credential directory so the home lands on its real volume.
+  if [ -d "$auth_dir" ]; then auth_dir="$(cd -P -- "$auth_dir" && pwd -P)" || die "could not resolve the credential directory: $auth_dir"; fi
   src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
   state_dev="$(stat -L -c %d "$STATE_DIR" 2>/dev/null || true)"
   if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then
@@ -1047,7 +1050,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
       grok_command=("$bash_bin" "$grok") ;;
   esac
   local isolated_home auth_source="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
-  isolated_home="$(grok_isolated_home)"
+  isolated_home="$(grok_isolated_home)" && [ -n "$isolated_home" ] || die 'could not choose the isolated Grok home; refusing to run without credential isolation.'
   mkdir -p "$isolated_home"; chmod 700 "$isolated_home" 2>/dev/null || true
   if [ -f "$auth_source" ]; then
     prepare_auth_link "$auth_source" "$isolated_home" || die 'could not create a same-inode authentication link for the isolated Grok runtime; refusing to copy or persist credentials.'
@@ -1227,7 +1230,8 @@ terminal_reason() { # provider stop token -> stable diagnostic, without inferenc
 capture_terminal_evidence() { # bind native terminal metadata to this paid JSON result
   [ "$(jq -r '.stopReason // ""' "$1")" = cancelled ] || return 0
   local runtime; runtime="$(command -v python3 || command -v python)" || return 1
-  "$runtime" - "$1" "$(grok_isolated_home)/sessions" <<'PY'
+  local home; home="$(grok_isolated_home)" && [ -n "$home" ] || return 1
+  "$runtime" - "$1" "$home/sessions" <<'PY'
 import hashlib,json,os,pathlib,re,sys
 result_path=pathlib.Path(sys.argv[1]); raw=result_path.read_bytes(); result=json.loads(raw)
 sid,request=result.get('sessionId'),result.get('requestId')
@@ -1904,7 +1908,8 @@ cmd_transcript() {
   rid="$(repo_id "$(repo_root)")"
   sid="$(jq -r .grok_session_id "$(find_meta "$rid" "$1")")"
   grok="$(resolve_grok)"
-  GROK_HOME="$(grok_isolated_home)" env "${GROK_ISOLATION_ENV[@]}" "$grok" export "$sid" 2>/dev/null \
+  local home; home="$(grok_isolated_home)" && [ -n "$home" ] || die 'could not choose the isolated Grok home.'
+  GROK_HOME="$home" env "${GROK_ISOLATION_ENV[@]}" "$grok" export "$sid" 2>/dev/null \
     || die "'grok export $sid' failed. Verify the subcommand with: grok export --help"
 }
 
