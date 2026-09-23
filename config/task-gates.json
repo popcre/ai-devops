@@ -70,6 +70,11 @@
       "rank": 90,
       "protected": true,
       "description": "Licensed rows, raw transcripts, and other private evidence."
+    },
+    "private-tooling": {
+      "rank": 95,
+      "protected": true,
+      "description": "Explicit tooling and docs inside a private-evidence repository that carry no licensed rows. Ranked above private-evidence so a named tooling path can be reviewed without opening raw evidence; containment proofs still apply."
     }
   },
   "default": {
@@ -243,6 +248,19 @@
         ],
         "forbidden_actions": [
           "review",
+          "deploy",
+          "database",
+          "infrastructure",
+          "production"
+        ]
+      },
+      "private-tooling": {
+        "required": [
+          "privacy-classification",
+          "no-raw-content-read",
+          "local-tests"
+        ],
+        "forbidden_actions": [
           "deploy",
           "database",
           "infrastructure",
@@ -487,7 +505,61 @@
     },
     {
       "match": "u2giants/licensor-source-data",
+      "_comment": [
+        "Licensed rows and captures stay private-evidence under the ** catch-all.",
+        "Named tooling and docs are an explicit exception: they contain no licensed",
+        "rows, so they may be reviewed. private-tooling outranks private-evidence",
+        "so those paths win the catch-all without weakening evidence containment."
+      ],
       "paths": [
+        {
+          "glob": "**/scripts/**",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/scraper/**",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/*.md",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/*.mjs",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/*.js",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/*.py",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/*.sh",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/*.ps1",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/package.json",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/package-lock.json",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/.gitignore",
+          "class": "private-tooling"
+        },
+        {
+          "glob": "**/.gitattributes",
+          "class": "private-tooling"
+        },
         {
           "glob": "**",
           "class": "private-evidence"
@@ -495,6 +567,12 @@
       ],
       "gates": {
         "private-evidence": {
+          "required": [
+            "licensed-row-containment"
+          ],
+          "forbidden_actions": []
+        },
+        "private-tooling": {
           "required": [
             "licensed-row-containment"
           ],

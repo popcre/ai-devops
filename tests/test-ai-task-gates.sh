@@ -259,6 +259,43 @@ printf 'select 1;\n' > "$TMP/gate/x.sql"
 check 'shared-db work is refused a deployment' "rc 3 '$TMP/gate' check --before deploy"
 rm -f "$TMP/gate/x.sql"
 
+printf 'licensor-source-data tooling exception\n'
+newrepo "$TMP/lsd" u2giants/licensor-source-data
+lsd_class_of(){ ( cd "$TMP/lsd" && printf '%s\n' "$1" | "$GATES" explain --json --paths-from - ) | jq -r .observed_class; }
+while IFS='|' read -r path want; do
+  [ -n "$path" ] || continue
+  got="$(lsd_class_of "$path")"
+  if [ "$got" = "$want" ]; then ok "lsd $path -> $want"; else bad "lsd $path -> $want (got ${got:-<empty>})"; fi
+done <<'TABLE'
+warner-bros/scripts/check-weekly-capture.mjs|private-tooling
+warner-bros/scripts/test-check-weekly-capture.mjs|private-tooling
+warner-bros/README.md|private-tooling
+warner-bros/assets.csv|private-evidence
+warner-bros/capture-state.json|private-evidence
+warner-bros/contracts/inventory-private.json|private-evidence
+warner-bros/manifest/assets.csv|private-evidence
+warner-bros/deltas/2026-08-20T0445Z/summary.json|private-evidence
+TABLE
+check 'tooling plus docs still take the tooling exception' \
+  "[ \"\$( ( cd '$TMP/lsd' && printf '%s\n' warner-bros/README.md warner-bros/scripts/check-weekly-capture.mjs | \"$GATES\" explain --json --paths-from - ) | jq -r .observed_class )\" = private-tooling ]"
+check 'one licensed row pulls the whole change set back to private-evidence' \
+  "[ \"\$( ( cd '$TMP/lsd' && printf '%s\n' warner-bros/README.md warner-bros/assets.csv | \"$GATES\" explain --json --paths-from - ) | jq -r .observed_class )\" = private-evidence ]"
+( cd "$TMP/lsd" && "$GATES" start --class private-tooling ) >/dev/null
+mkdir -p "$TMP/lsd/warner-bros/scripts"
+printf '#!/usr/bin/env node\n' > "$TMP/lsd/warner-bros/scripts/check-weekly-capture.mjs"
+check 'tooling-only Warner work may start a review' \
+  "rc 0 '$TMP/lsd' check --before review"
+printf 'id,name\n1,secret\n' > "$TMP/lsd/warner-bros/assets.csv"
+check 'licensed rows still refuse a review' \
+  "rc 3 '$TMP/lsd' check --before review"
+check 'and the refusal still names the protected class' \
+  "out '$TMP/lsd' check --before review | grep -Fq 'private-evidence'"
+check 'the protected stop does not claim an owner resource unlock' \
+  "! out '$TMP/lsd' check --before review --owner-request 'please' | grep -Fq 'exact resource and action'"
+check 'the protected stop says there is no owner-request path' \
+  "out '$TMP/lsd' check --before review --owner-request 'please' | grep -Fq 'no owner-request'"
+rm -f "$TMP/lsd/warner-bros/assets.csv"
+
 printf 'an undeclared task still gets classified\n'
 newrepo "$TMP/undeclared"
 printf 'x\n' > "$TMP/undeclared/note.md"
