@@ -150,6 +150,22 @@ export AI_QWEN_BIN="$STUB/qwen"
 printf 'BAILIAN_CODING_PLAN_API_KEY=op://test/qwen/key\n' > "$TMP/managed.env"
 export AI_QWEN_OP_ENV_FILE="$TMP/managed.env" AI_QWEN_OP_BIN="$STUB/op"
 unset BAILIAN_CODING_PLAN_API_KEY
+
+# MSYS may report a WinGet .exe as an extensionless /op path. The wrapper must
+# still return the actual trusted package executable and reject a lone /op.
+if (
+  source <(sed -n '/^resolve_trusted_op() {/,/^}/p' "$SCRIPT")
+  package="$TMP/localappdata/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_test"
+  mkdir -p "$package"
+  printf '#!/bin/sh\n' > "$package/op"
+  printf '#!/bin/sh\n' > "$package/op.exe"
+  chmod +x "$package/op" "$package/op.exe"
+  export LOCALAPPDATA="$TMP/localappdata" PATH="$package:$PATH" AI_QWEN_TEST_DIR= AI_QWEN_OP_BIN=
+  [ "$(resolve_trusted_op)" = "$package/op.exe" ] || exit 1
+  rm "$package/op.exe"
+  ! resolve_trusted_op >/dev/null
+); then ok 'WinGet op extension elision resolves only its trusted op.exe'; else bad 'WinGet op extension elision resolves only its trusted op.exe'; fi
+
 printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"
 run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
