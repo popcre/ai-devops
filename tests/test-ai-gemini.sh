@@ -218,8 +218,9 @@ R5C="$TMP/repo5c"; make_repo "$R5C"; R5C_ID="$(printf '%s\n%s' "$(cd "$R5C" && p
 check 'concurrent stale-lock reclaimers cannot both enter a review' "test \$(( (RA == 0) + (RB == 0) )) -eq 1"
 R6="$TMP/repo6"; make_repo "$R6"
 (cd "$R6" && exec env MOCK_MODE=sleep "$SCRIPT" new concurrent --prompt wait) >/dev/null 2>&1 & RUNPID=$!
-for _ in $(seq 1 "$(scale_ticks 100)"); do [ -n "$(meta_for concurrent 2>/dev/null || true)" ] && break; sleep .05; done
-CONCURRENT_COPY="$(jq -r .review_dir "$(meta_for concurrent)")"; printf owner-evidence > "$CONCURRENT_COPY/concurrency-owner"
+poll_until "$(budget 10 30)" 'concurrent review metadata' 'test -n "$(meta_for concurrent 2>/dev/null || true)"'
+CONCURRENT_META="$(meta_for concurrent)"
+CONCURRENT_COPY="$(jq -r .review_dir "$CONCURRENT_META")"; printf owner-evidence > "$CONCURRENT_COPY/concurrency-owner"
 check 'concurrent new is refused before touching evidence' "! (cd '$R6' && '$SCRIPT' new concurrent --prompt collide) && grep -qx owner-evidence '$CONCURRENT_COPY/concurrency-owner'"
 check 'concurrent delete is refused while review runs' "! (cd '$R6' && '$SCRIPT' delete concurrent)"
 check 'concurrent follow-up is refused while review runs' "! (cd '$R6' && '$SCRIPT' ask concurrent --prompt collide)"
