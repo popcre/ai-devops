@@ -710,6 +710,17 @@ failure without its logs.
   request back to Nexustek is narrow: exclude process creation for the runner
   tree and its toolchain. The counter measurement above is the evidence, and
   1.32x is the target to aim at.
+- **Re-measured 2026-09-23 after the fourth round of SentinelOne exclusions.**
+  Nexustek reported a "partial" rule and declined some items, naming PowerShell
+  commands. `EDGE-ALIEN` idle, no runner job live, three consecutive runs:
+  100 `cmd.exe` spawns 3458-3489 ms (round three: 3535-3552), 30 `git --version`
+  spawns 2350-2546 ms (round three: 2384-2440), and `SentinelAgent` at **79-81%**
+  of a core during the spawn loop (round three: 73%). File writes and the
+  compiled control were unchanged. **Round four had no measurable effect**: the
+  process-creation hook is still active on the runner toolchain. `EDGE-ALIEN`
+  keeps `ai-devops-windows-paused`. `EDGE-DEV` was busy with interactive
+  sessions, so no fresh cross-host ratio was taken; the comparison is against
+  `EDGE-ALIEN`'s own round-three numbers.
 - Second qualified host, failover proof and EDGE-DEV retirement remain open
   under #209.
 
