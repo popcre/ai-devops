@@ -29,6 +29,7 @@ param(
     [string]$ClaudeHome = (Join-Path $HOME ".claude"),
     [string]$CodexHome = (Join-Path $HOME ".codex"),
     [string]$ZCodeHome = (Join-Path $HOME ".zcode"),
+    [string]$MimoHome = (Join-Path $HOME ".config\mimocode"),
     [switch]$SkillsDryRun,
     # Replace an installed global that differs from the repo copy. Without this
     # switch a differing global is reported and left alone. The old file is
@@ -169,7 +170,7 @@ function Assert-NoSharedSkillCollisions {
     param([string]$Root)
 
     $sharedNames = @(Get-SkillNames (Join-Path $Root "skills\shared"))
-    foreach ($client in @("claude", "codex", "zcode")) {
+    foreach ($client in @("claude", "codex", "zcode", "mimo")) {
         $clientRoot = Join-Path $Root "skills\$client"
         foreach ($name in $sharedNames) {
             if (Test-Path -LiteralPath (Join-Path $clientRoot "$name\SKILL.md")) {
@@ -656,6 +657,24 @@ Write-Note "$sharedZCodeCount shared skills installed for ZCode."
 Invoke-OrphanSkillPruning -ClientHome $ZCodeHome -Label "ZCode" -Root $RepoPath -SourceRoots @(
     (Join-Path $RepoPath "skills\zcode"), (Join-Path $RepoPath "skills\shared"))
 
+Write-Step "Installing MiMo skills"
+# MiMoCode write root is ~/.config/mimocode/skills only (Desktop installs/imports
+# here). Never install into ~/.agents/skills — that is a read-only compat scan.
+$mimoCount = Install-SkillFolder `
+    -SourceRoot (Join-Path $RepoPath "skills\mimo") `
+    -DestRoot (Join-Path $MimoHome "skills") `
+    -Label "MiMo" `
+    -ClientHome $MimoHome
+Write-Note "$mimoCount MiMo-specific skills installed."
+$sharedMimoCount = Install-SkillFolder `
+    -SourceRoot (Join-Path $RepoPath "skills\shared") `
+    -DestRoot (Join-Path $MimoHome "skills") `
+    -Label "shared" `
+    -ClientHome $MimoHome
+Write-Note "$sharedMimoCount shared skills installed for MiMo."
+Invoke-OrphanSkillPruning -ClientHome $MimoHome -Label "MiMo" -Root $RepoPath -SourceRoots @(
+    (Join-Path $RepoPath "skills\mimo"), (Join-Path $RepoPath "skills\shared"))
+
 Write-Step "Installing global instruction files"
 Install-GlobalFile `
     -Source (Join-Path $RepoPath "templates\system\CLAUDE-global.md") `
@@ -669,6 +688,10 @@ Install-GlobalFile `
     -Source (Join-Path $RepoPath "templates\system\AGENTS-global-zcode.md") `
     -Dest (Join-Path $ZCodeHome "AGENTS.md") `
     -Label "ZCode global instructions"
+Install-GlobalFile `
+    -Source (Join-Path $RepoPath "templates\system\AGENTS-global-mimo.md") `
+    -Dest (Join-Path $MimoHome "AGENTS.md") `
+    -Label "MiMo global instructions"
 
 # A dry run is a preview of everything, globals included, and stops before the
 # environment checks that would otherwise look like part of the plan.

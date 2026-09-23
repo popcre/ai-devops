@@ -58,13 +58,13 @@ chmod +x "$TMP/gh" "$TMP/harness"
 # The fixture config drops propagate_on_host so the suite is machine-independent:
 # the shipped value names one real machine, and on any other host (CI runners)
 # propagation would be skipped and every propagation check below would fail.
-jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2 | .transcript_glob={claude:"",codex:"",zcode:""}' \
+jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2 | .transcript_glob={claude:"",codex:"",zcode:"",mimo:""}' \
   "$ROOT/config/blocker-watch.json" > "$TMP/config.json"
 export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_BLOCKER_WATCH_GH="$TMP/gh"
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID ZCODE_SESSION_ID
 BW(){ "$SCRIPT" "$@"; }
 
-check 'shipped config is valid and names all three programs' "jq -e '.harness|has(\"claude\") and has(\"codex\") and has(\"zcode\")' '$ROOT/config/blocker-watch.json'"
+check 'shipped config is valid and names all four programs' "jq -e '.harness|has(\"claude\") and has(\"codex\") and has(\"zcode\") and has(\"mimo\")' '$ROOT/config/blocker-watch.json'"
 check 'shipped config names exactly one propagating machine' "jq -e '(.propagate_on_host | type == \"string\" and length > 0)' '$ROOT/config/blocker-watch.json'"
 check 'wait refuses a malformed reference' "! BW wait 'not-a-ref' --harness claude --session s1"
 check 'wait refuses when the program cannot be detected' "! (cd '$TMP/work' && BW wait o/r#5 --park 'x' --brief-file '$TMP/brief.md')"
@@ -284,7 +284,7 @@ BW2(){ AI_BLOCKER_WATCH_HOME="$TMP/home2" AI_BLOCKER_WATCH_CONFIG="$TMP/config-m
 W2="$TMP/home2/waits"
 
 check 'shipped config carries the parked labels, fresh commands and transcript globs' \
-  "jq -e '.parked_label and .resumed_label and (.find_owners|length>0) and (.harness_fresh|has(\"claude\") and has(\"codex\") and has(\"zcode\")) and (.transcript_glob|has(\"claude\"))' '$ROOT/config/blocker-watch.json'"
+  "jq -e '.parked_label and .resumed_label and (.find_owners|length>0) and (.harness_fresh|has(\"claude\") and has(\"codex\") and has(\"zcode\") and has(\"mimo\")) and (.transcript_glob|has(\"claude\"))' '$ROOT/config/blocker-watch.json'"
 check 'wait refuses without a brief file' \
   "! (cd '$TMP/work' && BW2 wait o/r#5 --harness claude --session nobrief --park 'no brief' >/dev/null 2>&1) && (cd '$TMP/work' && BW2 wait o/r#5 --harness claude --session nobrief --park 'no brief' 2>&1 | grep -q 'needs --brief-file')"
 check 'wait refuses with neither --for nor --park' \

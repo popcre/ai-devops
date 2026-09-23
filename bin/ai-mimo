@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# ai-mimo — governed headless driver for the Xiaomi MiMoCode CLI (`mimo`).
+#
+# This is the ONLY supported way for another session to drive MiMo headlessly.
+# Never start "Xiaomi MiMo AI.exe" (the Desktop GUI) as a headless fallback.
+# This script owns the read-only default agent pin, the wall-clock ceiling, the
+# yolo refusal, and the completion honesty check.
+#
+#   ai-mimo ask "<prompt>" [--agent plan|build] [--cwd DIR] [--json-output]
+#   ai-mimo doctor [--live]
+#   ai-mimo version
+#
+# Deliberately NO session management and NO wrapper state directory: MiMo
+# persists sessions in its own store (~/.local/share/mimocode/) and
+# blocker-watch owns interactive resume wakes. No MiMo REVIEWER exists or will
+# be added (interactive client only; formal review stays Claude/Codex).
+#
+# ---------------------------------------------------------------------------
+# STEP 0 VERIFICATION — baseline 2026-09-23 on edge-dev.
+#   Desktop app PRESENT: C:/Program Files/Xiaomi MiMo AI/Xiaomi MiMo AI.exe
+#   Standalone `mimo` CLI ABSENT on PATH. Headless `mimo run` is the documented
+#   entry (MiMoCode commands reference) but the exact flag set is UNQUALIFIED
+#   until the CLI is installed (plan D10). This wrapper therefore:
+#     - fails closed with local_dependency_unavailable when `mimo` is missing
+#     - never launches the Desktop GUI
+#     - never passes --yolo / --dangerously-skip-permissions from caller input
+#     - defaults to --agent plan (read-only) plus a wall-clock ceiling
+#   MCP config: ~/.config/mimocode/mimocode.jsonc -> mcp.<name> uses an ARRAY
+#   command, key `timeout` (ms), and `type: local|remote`. Do not reuse the
+#   ZCode writer (string command / timeoutMs).
+#   No hooks surface exists (permissions cannot be modified by custom
+#   tools/hooks) — there is no completion-check hook installer for MiMo.
+#   Skills write root: ~/.config/mimocode/skills/ only (never ~/.agents/skills).
+# ---------------------------------------------------------------------------
+#
+# Re-run and update this block on any version bump or first live `mimo run`
+# qualification; evidence: tests/verification/mimo-windows-2026-09-23/.
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+MIMO_HOME="${AI_MIMO_HOME:-$HOME/.config/mimocode}"
+MIMO_DATA="${AI_MIMO_DATA:-$HOME/.local/share/mimocode}"
+MIMO_DESKTOP_EXE="${AI_MIMO_DESKTOP_EXE:-/c/Program Files/Xiaomi MiMo AI/Xiaomi MiMo AI.exe}"
+MIMO_CLI="${AI_MIMO_CLI:-mimo}"
+ASK_TIMEOUT="${AI_MIMO_ASK_TIMEOUT:-900}"
+DEFAULT_AGENT="${AI_MIMO_AGENT:-plan}"
+
+die()  { printf 'ai-mimo: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'ai-mimo: warning: %s\n' "$*" >&2; }
+note() { printf '%s\n' "$*" >&2; }
+
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+need jq
+need timeout
+
+resolve_cli() {
+  if [ "$MIMO_CLI" != "mimo" ]; then
+    [ -x "$MIMO_CLI" ] || die "local_dependency_unavailable: AI_MIMO_CLI is not executable: $MIMO_CLI"
+    printf '%s' "$MIMO_CLI"; return 0
+  fi
+  if command -v mimo >/dev/null 2>&1; then
+    command -v mimo; return 0
+  fi
+  die "local_dependency_unavailable: standalone MiMoCode CLI 'mimo' not found on PATH.
+This is not a model-provider fault. Install the MiMoCode CLI (or set AI_MIMO_CLI
+to its absolute path), then re-run. The Desktop app at $MIMO_DESKTOP_EXE is a
+GUI and is never used as a headless fallback. Presence probe: ai-mimo doctor"
+}
+
+# ---------------------------------------------------------------------------
+# ask — one-shot headless prompt via `mimo run`.
+# ---------------------------------------------------------------------------
+cmd_ask() {
+  local prompt="" agent="$DEFAULT_AGENT" json_out=0 cwd="" arg
+  while [ $# -gt 0 ]; do
+    arg="$1"; shift
+    case "$arg" in
+      --agent)
+        [ $# -gt 0 ] || die "--agent requires a value"
+        agent="$1"; shift
+        ;;
+      --json-output) json_out=1 ;;
+      --cwd)
+        [ $# -gt 0 ] || die "--cwd requires a value"
+        cwd="$1"; shift
+        ;;
+      --yolo|--dangerously-skip-permissions|--never-ask)
+        die "$arg is refused: this wrapper never auto-approves from caller input. Use --agent plan (default, read-only) or --agent build."
+        ;;
+      -*) die "unknown ask option: $arg (accepted: --agent, --cwd, --json-output)" ;;
+      *)  [ -z "$prompt" ] || die "only one positional prompt is allowed"
+          prompt="$arg" ;;
+    esac
+  done
+  [ -n "$prompt" ] || die "no prompt given. Usage: ai-mimo ask \"<prompt>\" [--agent plan|build] [--cwd DIR] [--json-output]"
+
+  case "$agent" in
+    plan|build) ;;
+    *) die "unknown --agent: $agent (accepted: plan, build)" ;;
+  esac
+
+  local cli rc
+  cli="$(resolve_cli)"
+  local -a argv=(run --agent "$agent")
+  [ -n "$cwd" ] && argv+=(--cwd "$cwd")
+  argv+=("$prompt")
+
+  out="$(mktemp)"; err="$(mktemp)"
+  trap 'rm -f "$out" "$err"' EXIT
+  rc=0
+  ( cd "${cwd:-$(pwd)}" && timeout "$ASK_TIMEOUT"s "$cli" "${argv[@]}" ) >"$out" 2>"$err" || rc=$?
+
+  if [ "$rc" -eq 124 ]; then
+    die "ask timed out after ${ASK_TIMEOUT}s (ceiling: AI_MIMO_ASK_TIMEOUT). The provider may still be running; no answer was parsed."
+  fi
+  if [ "$rc" -ne 0 ]; then
+    cat "$err" >&2 || true
+    die "mimo CLI exited $rc. First stderr lines above; full stderr was kept out of the answer stream."
+  fi
+
+  # Completion honesty: empty stdout is a failed run, not a silent success.
+  if ! [ -s "$out" ]; then
+    head -5 "$err" >&2 || true
+    die "mimo produced an empty answer. Treat as incomplete."
+  fi
+
+  if [ "$json_out" = 1 ]; then
+    # Prefer a JSON document when the CLI emitted one; otherwise wrap text.
+    if jq -e 'type=="object"' "$out" >/dev/null 2>&1; then
+      cat "$out"
+    else
+      jq -n --rawfile r "$out" '{response:$r}'
+    fi
+  else
+    cat "$out"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# doctor — presence, config, managed state. Warn-only on Desktop absence.
+# ---------------------------------------------------------------------------
+cmd_doctor() {
+  local live=0
+  [ "${1:-}" = "--live" ] && live=1
+  [ $# -eq 0 ] || [ "$live" = 1 ] || die "unknown doctor argument: $1 (accepted: --live)"
+
+  local fail=0
+  echo "ai-mimo doctor"
+
+  if [ -f "$MIMO_DESKTOP_EXE" ]; then
+    local desktop_version
+    desktop_version="$(powershell.exe -NoProfile -Command "(Get-Item -LiteralPath 'C:\\Program Files\\Xiaomi MiMo AI\\Xiaomi MiMo AI.exe').VersionInfo.ProductVersion" 2>/dev/null | tr -d '\r' || true)"
+    echo "  desktop       : ok ($MIMO_DESKTOP_EXE) ver=${desktop_version:-unknown}"
+  else
+    # Presence-only policy (D8): an absent Desktop is a warning, not a failure —
+    # managed skills/MCP/globals can still be correct without the GUI installed.
+    echo "  desktop       : not found (warning) — install Xiaomi MiMo AI (Desktop)"
+    echo "    absent: $MIMO_DESKTOP_EXE"
+  fi
+
+  if command -v "${MIMO_CLI}" >/dev/null 2>&1 || { [ "$MIMO_CLI" != "mimo" ] && [ -x "$MIMO_CLI" ]; }; then
+    echo "  cli           : ok ($(command -v "${MIMO_CLI}" 2>/dev/null || printf '%s' "$MIMO_CLI"))"
+  else
+    echo "  cli           : absent (headless ai-mimo ask unavailable until the MiMoCode CLI is on PATH)"
+    echo "    managed skills/MCP/globals still work through the Desktop engine"
+  fi
+
+  local cfg="$MIMO_HOME/mimocode.jsonc"
+  [ -f "$cfg" ] || cfg="$MIMO_HOME/mimocode.json"
+  if [ -f "$cfg" ]; then
+    # JSONC: strip // comments before jq. Writer emits pure JSON.
+    if sed 's|//.*||g' "$cfg" | jq -e 'type=="object"' >/dev/null 2>&1; then
+      echo "  config        : parses ok ($cfg)"
+      local mcp_count
+      mcp_count="$(sed 's|//.*||g' "$cfg" | jq '(.mcp // {}) | length')"
+      echo "    mcp servers  : $mcp_count ($(sed 's|//.*||g' "$cfg" | jq -r '(.mcp // {}) | keys | join(", ")'))"
+      local instr
+      instr="$(sed 's|//.*||g' "$cfg" | jq -r 'try (.instructions // []) | if type=="array" then join(", ") else tostring end')"
+      echo "    instructions : ${instr:-none}"
+    else
+      echo "  config        : DOES NOT PARSE ($cfg)"
+      fail=1
+    fi
+  else
+    echo "  config        : absent ($cfg) — run bin/configure-mimocode-mcps.ps1"
+    fail=1
+  fi
+
+  local skills_dir="$MIMO_HOME/skills" managed_count=""
+  if [ -d "$skills_dir" ]; then
+    managed_count="$(find "$skills_dir" -maxdepth 2 -name .ai-devops-managed -type f 2>/dev/null | wc -l | tr -d ' ')"
+    echo "  skills        : managed dir with $managed_count managed marker(s)"
+  else
+    echo "  skills        : no $skills_dir — re-run install-ai-devops-windows.ps1"
+    fail=1
+  fi
+
+  if [ -f "$MIMO_HOME/AGENTS.md" ]; then
+    echo "  globals       : $MIMO_HOME/AGENTS.md present"
+  else
+    echo "  globals       : missing $MIMO_HOME/AGENTS.md — re-run install-ai-devops-windows.ps1 (or ai-adopt-globals)"
+    fail=1
+  fi
+
+  if command -v mimo >/dev/null 2>&1 || [ -x "$HOME/.local/bin/mimo" ]; then
+    echo "  shim          : mimo on PATH"
+  else
+    echo "  shim          : absent — re-run setup-machine.ps1 when the CLI is installed"
+  fi
+
+  if [ "$live" = 1 ]; then
+    echo "  live probe    : running one bounded ask…"
+    if cmd_ask "Reply with the single word OK" >/dev/null; then
+      echo "  live probe    : ok (authenticated, model answered)"
+    else
+      echo "  live probe    : FAILED"
+      fail=1
+    fi
+  fi
+
+  [ "$fail" = 0 ] || { note "doctor: at least one check failed."; exit 1; }
+  echo "  all checks green"
+}
+
+cmd_version() {
+  local cli_v="unknown"
+  if command -v "${MIMO_CLI}" >/dev/null 2>&1 || { [ "$MIMO_CLI" != "mimo" ] && [ -x "$MIMO_CLI" ]; }; then
+    cli_v="$("${MIMO_CLI}" --version 2>/dev/null | head -1 || echo unknown)"
+  fi
+  printf 'ai-mimo %s; cli: %s\n' "$VERSION" "$cli_v"
+}
+
+usage() {
+  sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+main() {
+  local cmd="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "$cmd" in
+    ask)    cmd_ask "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    version|--version|-V) cmd_version ;;
+    -h|--help|help|"") usage; [ -n "$cmd" ] || exit 2 ;;
+    *) die "unknown command: $cmd (accepted: ask, doctor, version)" ;;
+  esac
+}
+
+main "$@"

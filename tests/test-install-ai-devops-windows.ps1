@@ -25,6 +25,7 @@ function New-Fixture {
     New-TestSkill $root "claude" "client-claude"
     New-TestSkill $root "codex" "client-codex"
     New-TestSkill $root "zcode" "client-zcode"
+    New-TestSkill $root "mimo" "client-mimo"
     if (-not $NoShared) {
         New-TestSkill $root "shared" "shared-one"
         New-TestSkill $root "shared" "synology-sharesync-triage"
@@ -34,6 +35,7 @@ function New-Fixture {
     "# test Claude global" | Set-Content -LiteralPath (Join-Path $templates "CLAUDE-global.md")
     "# test Codex global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-codex.md")
     "# test ZCode global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-zcode.md")
+    "# test MiMo global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-mimo.md")
 
     git -C $root init -b main | Out-Null
     git -C $root config user.name "AI DevOps Test"
@@ -53,6 +55,7 @@ function Invoke-Installer {
         [string]$ClaudeHome,
         [string]$CodexHome,
         [string]$ZCodeHome = "",
+        [string]$MimoHome = "",
         [switch]$SkillsDryRun,
         [switch]$MigrateObsolete,
         [switch]$AdoptGlobals
@@ -64,6 +67,7 @@ function Invoke-Installer {
         CodexHome = $CodexHome
         SkipGitInstall = $true
         ZCodeHome = $(if ($ZCodeHome) { $ZCodeHome } else { Join-Path $TempRoot "no-zcode-home" })
+        MimoHome = $(if ($MimoHome) { $MimoHome } else { Join-Path $TempRoot "no-mimo-home" })
         SkillsDryRun = [bool]$SkillsDryRun
         MigrateObsolete = [bool]$MigrateObsolete
         AdoptGlobals = [bool]$AdoptGlobals

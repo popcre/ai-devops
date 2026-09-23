@@ -17,6 +17,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLAUDE_GLOBAL="$REPO_ROOT/templates/system/CLAUDE-global.md"
 CODEX_GLOBAL="$REPO_ROOT/templates/system/AGENTS-global-codex.md"
+MIMO_GLOBAL="$REPO_ROOT/templates/system/AGENTS-global-mimo.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -36,7 +37,7 @@ required_phrases=(
   "Never save several unproven steps"
 )
 
-for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL"; do
+for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$MIMO_GLOBAL"; do
   [[ -f "$client_file" ]] || fail "missing global file: $client_file"
   for phrase in "${required_phrases[@]}"; do
     grep -qzF "$phrase" "$client_file" \
@@ -44,4 +45,4 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL"; do
   done
 done
 
-echo "PASS: Claude and Codex globals carry the required autonomy phrases, unwrapped"
+echo "PASS: Claude, Codex, and MiMo globals carry the required autonomy phrases, unwrapped"

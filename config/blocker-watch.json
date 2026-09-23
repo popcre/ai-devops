@@ -66,6 +66,17 @@
       "{cwd}",
       "--prompt",
       "{prompt}"
+    ],
+    "mimo": [
+      "mimo",
+      "run",
+      "--agent",
+      "build",
+      "--session",
+      "{session}",
+      "--cwd",
+      "{cwd}",
+      "{prompt}"
     ]
   },
   "parked_label": "parked",
@@ -77,7 +88,8 @@
   "transcript_glob": {
     "claude": "{home}/.claude/projects/*/{session}.jsonl",
     "codex": "{home}/.codex/sessions/*/*/*/*{session}*.jsonl",
-    "zcode": ""
+    "zcode": "",
+    "mimo": "{home}/.local/share/mimocode/memory/sessions/{session}"
   },
   "harness_fresh": {
     "claude": [
@@ -104,6 +116,15 @@
       "--cwd",
       "{cwd}",
       "--prompt",
+      "{prompt}"
+    ],
+    "mimo": [
+      "mimo",
+      "run",
+      "--agent",
+      "build",
+      "--cwd",
+      "{cwd}",
       "{prompt}"
     ]
   }

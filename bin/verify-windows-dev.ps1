@@ -35,6 +35,19 @@ $checks.Add([pscustomobject]@{
   })
 })
 
+# MiMo Desktop (Xiaomi MiMo AI). Presence only -- self-updating, never pinned.
+$mimoAppExe = Join-Path $env:ProgramFiles 'Xiaomi MiMo AI\Xiaomi MiMo AI.exe'
+$mimoPassed = Test-Path -LiteralPath $mimoAppExe
+$checks.Add([pscustomobject]@{
+  Check='app:MiMo'; Passed=$mimoPassed
+  Detail=$(if($mimoPassed){
+    $v = (Get-Item -LiteralPath $mimoAppExe).VersionInfo.ProductVersion
+    "desktop $v"
+  }else{
+    "not found at $mimoAppExe (install Xiaomi MiMo AI)"
+  })
+})
+
 $config = Join-Path $RepoPath '.config\configuration.winget'
 $checks.Add([pscustomobject]@{ Check='configuration:file'; Passed=(Test-Path $config); Detail=$config })
 $setup = Join-Path $RepoPath 'bin\setup-machine.ps1'

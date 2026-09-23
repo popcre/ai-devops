@@ -17,6 +17,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 TEMPLATE_CLAUDE=$'# Global rules\n\nBody line one.\nBody line two.\n'
 TEMPLATE_CODEX=$'# Codex global rules\n\nCodex body.\n'
 TEMPLATE_ZCODE=$'# ZCode global rules\n\nZCode body.\n'
+TEMPLATE_MIMO=$'# MiMo global rules\n\nMiMo body.\n'
 SECTION_CLAUDE=$'## testbox — dev machine (machine-specific; not from the hub template)\n\n- A fact that exists nowhere else.\n- Another one.\n'
 SECTION_CODEX=$'# Machine facts — testbox\n\n- Codex-side machine fact.\n'
 
@@ -32,13 +33,14 @@ make_fixture() {
   printf '%s' "$TEMPLATE_CLAUDE" > "$fixture/templates/system/CLAUDE-global.md"
   printf '%s' "$TEMPLATE_CODEX"  > "$fixture/templates/system/AGENTS-global-codex.md"
   printf '%s' "$TEMPLATE_ZCODE"  > "$fixture/templates/system/AGENTS-global-zcode.md"
+  printf '%s' "$TEMPLATE_MIMO"   > "$fixture/templates/system/AGENTS-global-mimo.md"
 }
 
 run_adopt() {
-  local fixture=$1 claude_home=$2 codex_home=$3; shift 3
-  mkdir -p "$claude_home" "$codex_home"
+  local fixture=$1 claude_home=$2 codex_home=$3 zcode_home=$4 mimo_home=$5; shift 5
+  mkdir -p "$claude_home" "$codex_home" "$zcode_home" "$mimo_home"
   AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 HOME="$BASE_BACKUP_HOME" USERPROFILE= \
-  CLAUDE_HOME="$claude_home" CODEX_HOME="$codex_home" \
+  CLAUDE_HOME="$claude_home" CODEX_HOME="$codex_home" ZCODE_HOME="$zcode_home" MIMO_HOME="$mimo_home" \
     bash "$fixture/bin/ai-adopt-globals" "$@" 2>&1
 }
 
@@ -53,11 +55,11 @@ chmod +x "$STUB_BIN/hostname"
 export PATH="$STUB_BIN:$PATH"
 
 echo "1/8 machine section is detected, saved and restored byte-identically"
-fixture="$TMP_ROOT/keep/repo"; claude="$TMP_ROOT/keep/claude"; codex="$TMP_ROOT/keep/codex"
-make_fixture "$fixture"; mkdir -p "$claude" "$codex"
+fixture="$TMP_ROOT/keep/repo"; claude="$TMP_ROOT/keep/claude"; codex="$TMP_ROOT/keep/codex"; zcode="$TMP_ROOT/keep/zcode"; mimo="$TMP_ROOT/keep/mimo"
+make_fixture "$fixture"; mkdir -p "$claude" "$codex" "$zcode" "$mimo"
 printf '%s\n---\n\n%s' "$TEMPLATE_CLAUDE" "$SECTION_CLAUDE" > "$claude/CLAUDE.md"
 printf '%s\n---\n\n%s' "$TEMPLATE_CODEX"  "$SECTION_CODEX"  > "$codex/AGENTS.md"
-output="$(run_adopt "$fixture" "$claude" "$codex")" || fail "adopt exited non-zero: $output"
+output="$(run_adopt "$fixture" "$claude" "$codex" "$zcode" "$mimo")" || fail "adopt exited non-zero: $output"
 grep -Fq 'machine section restored and diffs CLEAN' <<<"$output" \
   || fail "no clean-restore line: $output"
 grep -Fq 'A fact that exists nowhere else.' "$claude/CLAUDE.md" \
@@ -71,11 +73,11 @@ grep -Fq 'installed body matches the repo template exactly' <<<"$output" \
   || fail "body verification did not run or did not pass: $output"
 
 echo "3/8 a machine with no machine section is handled without inventing one"
-fixture="$TMP_ROOT/none/repo"; claude="$TMP_ROOT/none/claude"; codex="$TMP_ROOT/none/codex"
-make_fixture "$fixture"; mkdir -p "$claude" "$codex"
+fixture="$TMP_ROOT/none/repo"; claude="$TMP_ROOT/none/claude"; codex="$TMP_ROOT/none/codex"; zcode="$TMP_ROOT/none/zcode"; mimo="$TMP_ROOT/none/mimo"
+make_fixture "$fixture"; mkdir -p "$claude" "$codex" "$zcode" "$mimo"
 printf '%s\nAn old locally-edited line.\n' "$TEMPLATE_CLAUDE" > "$claude/CLAUDE.md"
 printf '%s' "$TEMPLATE_CODEX" > "$codex/AGENTS.md"
-output="$(run_adopt "$fixture" "$claude" "$codex")" || fail "adopt exited non-zero: $output"
+output="$(run_adopt "$fixture" "$claude" "$codex" "$zcode" "$mimo")" || fail "adopt exited non-zero: $output"
 grep -Fq 'no machine section found' <<<"$output" || fail "did not report the absent section: $output"
 grep -Fq 'An old locally-edited line.' <<<"$output" \
   || fail "did not show the tail so a human can judge it: $output"
@@ -84,11 +86,11 @@ diff "$claude/CLAUDE.md" "$fixture/templates/system/CLAUDE-global.md" >/dev/null
   || fail "installed global is not exactly the template when there is no section"
 
 echo "4/8 --dry-run changes nothing"
-fixture="$TMP_ROOT/dry/repo"; claude="$TMP_ROOT/dry/claude"; codex="$TMP_ROOT/dry/codex"
-make_fixture "$fixture"; mkdir -p "$claude" "$codex"
+fixture="$TMP_ROOT/dry/repo"; claude="$TMP_ROOT/dry/claude"; codex="$TMP_ROOT/dry/codex"; zcode="$TMP_ROOT/dry/zcode"; mimo="$TMP_ROOT/dry/mimo"
+make_fixture "$fixture"; mkdir -p "$claude" "$codex" "$zcode" "$mimo"
 printf '%s\n---\n\n%s' "$TEMPLATE_CLAUDE" "$SECTION_CLAUDE" > "$claude/CLAUDE.md"
 before="$(cat "$claude/CLAUDE.md")"
-output="$(run_adopt "$fixture" "$claude" "$codex" --dry-run)" || fail "dry-run exited non-zero: $output"
+output="$(run_adopt "$fixture" "$claude" "$codex" "$zcode" "$mimo" --dry-run)" || fail "dry-run exited non-zero: $output"
 grep -Fq 'Nothing was changed.' <<<"$output" || fail "dry-run did not say so: $output"
 [[ "$(cat "$claude/CLAUDE.md")" == "$before" ]] || fail "dry-run modified the global"
 [[ ! -d "$claude/skills" ]] || fail "dry-run installed skills"

@@ -371,6 +371,51 @@ cmd_doctor() {
     esac
   fi
 
+  c_head "MiMo (Xiaomi MiMo Desktop / MiMoCode)"
+  mimo_app="/c/Program Files/Xiaomi MiMo AI/Xiaomi MiMo AI.exe"
+  mimo_home="$HOME/.config/mimocode"
+  case "${OSTYPE:-}" in
+    msys*|cygwin*) if [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
+      mh="$(cygpath -u "$USERPROFILE")/.config/mimocode"; [ -d "$mh" ] && mimo_home="$mh"
+    fi ;;
+  esac
+  if [ -f "$mimo_app" ]; then
+    c_ok "MiMo Desktop present ($mimo_app)"
+    if command -v mimo >/dev/null 2>&1; then
+      c_ok "MiMoCode CLI on PATH"
+    else
+      c_warn "MiMoCode CLI 'mimo' not on PATH — headless ai-mimo ask unavailable (Desktop still managed)"
+    fi
+    mimo_cfg="$mimo_home/mimocode.jsonc"; [ -f "$mimo_cfg" ] || mimo_cfg="$mimo_home/mimocode.json"
+    if [ -f "$mimo_cfg" ]; then
+      if sed 's|//.*||g' "$mimo_cfg" | jq -e 'type=="object"' >/dev/null 2>&1; then
+        c_ok "MiMoCode config parses ($mimo_cfg)"
+        mimo_mcp_count="$(sed 's|//.*||g' "$mimo_cfg" | jq '(.mcp // {}) | length' 2>/dev/null || echo 0)"
+        c_ok "MiMoCode managed MCP servers configured: $mimo_mcp_count"
+      else
+        c_warn "MiMoCode config DOES NOT PARSE"
+      fi
+    else
+      c_warn "no mimocode.jsonc yet — re-run setup-machine.ps1 (MiMo MCP stage)"
+    fi
+    if [ -d "$mimo_home/skills" ]; then
+      mimo_managed="$(find "$mimo_home/skills" -maxdepth 2 -name .ai-devops-managed -type f 2>/dev/null | wc -l | tr -d ' ')"
+      c_ok "~/.config/mimocode/skills managed (markers: $mimo_managed)"
+    else
+      c_warn "no ~/.config/mimocode/skills — re-run install-ai-devops-windows.ps1"
+    fi
+    if [ -f "$mimo_home/AGENTS.md" ]; then
+      c_ok "MiMo global instructions present"
+    else
+      c_warn "no ~/.config/mimocode/AGENTS.md — re-run install-ai-devops-windows.ps1 or ai-adopt-globals"
+    fi
+  else
+    case "${OSTYPE:-}" in
+      msys*|cygwin*) c_warn "MiMo Desktop not found — install Xiaomi MiMo AI" ;;
+      *) c_warn "MiMo not present (Windows-only client; expected on this platform)" ;;
+    esac
+  fi
+
   c_head "Paths & config"
   check_file "$AI_DEVOPS_HOME/README.md" "toolkit repo" req
   if [ -d "$AI_DEVOPS_HOME" ]; then c_ok "repo dir exists ($AI_DEVOPS_HOME)"; else c_fail "repo dir missing ($AI_DEVOPS_HOME)"; FAILED=1; fi
