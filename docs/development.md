@@ -61,15 +61,26 @@ If the work legitimately grew, declare it again with the stronger class. A
 protected class cannot be argued past: `--acknowledge` and `--owner-request`
 apply only to unprotected classes.
 
-Read-only review of code, tests, and contracts in a private repository does not
-require owner permission merely because its task class is `private-evidence`.
-That class remains protected: `privacy-classification` and `no-raw-content-read`
-still apply. Review packets must exclude licensed records, artwork, raw
-transcripts, credentials, and other private evidence; use the reviewer's
-read-only mode. Allowing the review action authorizes neither writes nor
-publication of private material. Database, deployment, infrastructure, and
-production actions remain forbidden for this class, and a consumer repository
-can still impose a stricter review prohibition.
+Read-only review of selected code, tests, and contracts in a private repository
+does not require owner permission merely because its task class is
+`private-evidence`. First write a JSON array of exact repository-relative file
+paths to a private temporary file, then use
+`ai-review deepseek diff-review --code-only --paths-file <file> --base <ref>`.
+The same route accepts `security-review` and `final-check`. It creates a fresh
+two-commit synthetic repository containing only those approved paths, checks
+the original HEAD and complete source digest before and after the provider,
+and seals the approved-path hashes. DeepSeek receives only the synthetic packet
+as text attachments and has no filesystem tools. CLI reviewers lack a proven
+path-constrained read profile for private source, so this route refuses them.
+Ordinary and plan reviews of private source are refused before provider launch.
+The default private snapshot and packet routes also refuse private source.
+`--tests` is unavailable on this route because
+arbitrary commands could expose raw evidence. The `private-evidence` class
+remains protected: `privacy-classification` and `no-raw-content-read` apply;
+licensed records, artwork, raw transcripts, credentials, and other evidence
+cannot enter the export. This permission authorizes no writes or publication
+of private material. Database, deployment, infrastructure, and production
+actions remain forbidden, and a consumer repository can still forbid review.
 
 Changing the policy means changing `config/task-gates.json`, keeping it valid
 against `config/task-gates.schema.json`:
