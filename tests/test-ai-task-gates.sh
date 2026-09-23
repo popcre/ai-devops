@@ -72,30 +72,10 @@ check 'every changed path is still classified individually' "jq -e '.changes|len
 check 'unmatched path falls back to code, not to the strongest class' \
   "[ \"\$(class_of 'random/thing.bin')\" = code ]"
 
-# Reviewer source classification passes hundreds of tracked paths at once.
-# Every individual decision must survive the bulk path, including the stronger
-# reviewer class and the ordinary unmatched fallback.
-bulk_paths="$TMP/bulk-paths.txt"
-for ((n=1; n<=840; n++)); do printf 'docs/bulk-%03d.md\n' "$n"; done > "$bulk_paths"
-printf 'bin/ai-review-lifecycle\nrandom/bulk.bin\n' >> "$bulk_paths"
-bulk="$(cd "$TMP/class" && "$GATES" explain --json --paths-from "$bulk_paths")"
-check 'bulk path classification preserves every class and count' \
-  "jq -e '.changed_count==842 and .observed_class==\"reviewer-safety\" and
-    ([.changes[]|select(.path|startswith(\"docs/bulk-\"))]|length)==840 and
-    ([.changes[]|select(.path|startswith(\"docs/bulk-\"))]|all(.class==\"prose\")) and
-    ([.changes[]|select(.path==\"bin/ai-review-lifecycle\")][0].class)==\"reviewer-safety\" and
-    ([.changes[]|select(.path==\"random/bulk.bin\")][0].class)==\"code\"' <<<\"\$bulk\""
-# A 100-path sample took more than six minutes with per-match command
-# substitutions on Windows; compiled rules finished it in under 15 seconds.
-# Keep a broad deadline so CI machine load does not turn ordinary variance into
-# a failure, while the original implementation still fails this regression.
-command -v timeout >/dev/null 2>&1 || { bad 'timeout is required for bulk classification regression'; exit 1; }
-sed -n '1,100p' "$bulk_paths" > "$TMP/bulk-performance-paths.txt"
-if timed_bulk="$(cd "$TMP/class" && timeout 180 "$GATES" explain --json --paths-from "$TMP/bulk-performance-paths.txt")"; then
-  check '100-path classification completes within 180 seconds without losing prose matches' \
-    "jq -e '.changed_count==100 and .observed_class==\"prose\" and ([.changes[]]|all(.class==\"prose\"))' <<<\"\$timed_bulk\""
+if bash "$ROOT/tests/test-ai-task-gates-bulk.sh"; then
+  ok 'bounded bulk path classification preserves every class'
 else
-  bad '100-path classification completes within 180 seconds without losing prose matches'
+  bad 'bounded bulk path classification preserves every class'
 fi
 
 printf 'consumer declarations\n'
