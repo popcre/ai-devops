@@ -1,6 +1,6 @@
 ---
 name: deepseek-second-opinion
-description: Debate a plan, diagnosis, design, diff, or configuration with DeepSeek through ai-deepseek-agent. Use for "ask DeepSeek", "run this by DeepSeek", "what does DeepSeek think", "debate DeepSeek", or a DeepSeek second opinion. Report its view and push back when needed.
+description: Informal second opinion only - DeepSeek is NOT a formal or assigned reviewer (retired from the pool; it cannot open repository files). Debate a plan, diagnosis, design, diff, or configuration with DeepSeek through ai-deepseek-agent. Use for "ask DeepSeek", "run this by DeepSeek", "what does DeepSeek think", "debate DeepSeek", or a DeepSeek second opinion. Report its view and push back when needed.
 ---
 
 # deepseek-second-opinion

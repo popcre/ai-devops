@@ -145,8 +145,10 @@ never overwrites them. See [`configuration.md`](configuration.md).
 
 ## Shared reviewer evidence contract
 
-Every active reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex, and
-DeepSeek—is registered with preflight and the scoreboard. Unsupported metadata
+Every known reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex, and
+DeepSeek—is known to preflight and the scoreboard so historical evidence stays
+readable; only providers `registered` in `config/reviewer-registry.json` (today
+Muse, Grok, Qwen, Gemini, plus the Claude approval gate) receive reviews. Unsupported metadata
 is represented as missing, never invented. Scoreboard evidence is
 `current`, `stale`, or `unknown`; only a current verdict is usable. Packets seal
 each relative file name, byte length, and digest. `ai-review-sandbox` publishes
