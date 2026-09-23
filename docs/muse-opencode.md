@@ -1,6 +1,6 @@
 # Muse Spark persistent conversations
 
-`ai-muse` gives Codex and Claude named, persistent Muse Spark 1.3 Contributor
+`ai-muse` gives Codex and Claude named, persistent Muse Spark 1.2 Contributor (temporary stopgap for 1.3 Contributor)
 conversations. It uses OpenCode's proven direct-session mode rather than a background
 server: server mode previously failed Meta authorization, while direct mode supports
 an exact session ID and survives separate command calls.

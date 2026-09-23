@@ -632,7 +632,7 @@ cmd_ask(){
   local name="$1"; shift; local root rid meta sid status stored_model prompt out rep tmp before after report_path
   name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; lock_session "$rid" "$name"; [ -f "$meta" ] || die "no session '$name' for caller '$CALLER' in this repository."
   status="$(jq -r '.status//"active"' "$meta")"; [ "$status" = active ] || die "session '$name' requires reconciliation ($status). Inspect: AI_MUSE_CALLER=$CALLER ai-muse transcript $name ; then run: AI_MUSE_CALLER=$CALLER ai-muse reconcile $name"
-  stored_model="$(jq -r '.model//""' "$meta")"; [ "$stored_model" = "$MODEL" ] || die "session '$name' belongs to model '${stored_model:-unknown}', not '$MODEL'. Preserve its transcript, then delete it and start a new Spark 1.3 conversation."
+  stored_model="$(jq -r '.model//""' "$meta")"; [ "$stored_model" = "$MODEL" ] || die "session '$name' belongs to model '${stored_model:-unknown}', not '$MODEL'. Preserve its transcript, then delete it and start a new conversation on the configured model."
   validate_heartbeat
   [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
   sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
