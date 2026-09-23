@@ -118,4 +118,15 @@ printf '["data/ignored.txt"]\n' > "$TMP/rejected.json"
 must_fail "$SANDBOX" ensure-code-only "$R" rejected-ignored --paths-file "$TMP/rejected.json" --base "$BASE"
 pass 'ambiguous, evidence, and ignored paths refuse before publication'
 
-printf '5 passed; 0 failed\n'
+LINK_BLOB="$(printf 'data/tracked.txt' | git -C "$R" hash-object -w --stdin)"
+git -C "$R" update-index --add --cacheinfo "120000,$LINK_BLOB,src/linked.py"
+git -C "$R" commit -qm linked-code-path
+printf '["src/linked.py"]\n' > "$TMP/rejected.json"
+must_fail "$SANDBOX" ensure-code-only "$R" rejected-link --paths-file "$TMP/rejected.json" --base "$BASE"
+git -C "$R" update-index --add --cacheinfo "160000,$BASE,src/submodule.py"
+git -C "$R" commit -qm submodule-code-path
+printf '["src/submodule.py"]\n' > "$TMP/rejected.json"
+must_fail "$SANDBOX" ensure-code-only "$R" rejected-submodule --paths-file "$TMP/rejected.json" --base "$BASE"
+pass 'symlink and submodule objects refuse before publication'
+
+printf '6 passed; 0 failed\n'
