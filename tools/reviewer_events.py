@@ -335,6 +335,21 @@ def write_sandbox_owner(marker, boundary, data, owner):
             os.unlink(tmp)
 
 
+def head_mismatch_detail(repo, expected_head, sandbox_head):
+    """Name the likely cause of a refused binding; never relaxes the refusal (shared-db#2829)."""
+    message = ("sandbox evidence head differs from invocation (invocation " + (expected_head or "unknown") +
+               ", sandbox " + (sandbox_head or "unreadable") + ")")
+    result = subprocess.run(["git", "-C", str(repo), "ls-files", "--others", "--exclude-standard", "-z"],
+                            capture_output=True, text=True)
+    untracked = [p for p in result.stdout.split("\0") if p] if result.returncode == 0 else []
+    if untracked:
+        shown = ", ".join(untracked[:10]) + (" and " + str(len(untracked) - 10) + " more" if len(untracked) > 10 else "")
+        message += ("; the source worktree holds " + str(len(untracked)) + " untracked file(s) that may belong to "
+                    "another session: " + shown + ". Move them out of the worktree or review from a clean "
+                    "worktree, then rerun; the reviewer and the head are not at fault")
+    return message
+
+
 def bind_sandbox(directory, provider, run_id, sandbox, original_id=None):
     with event_lock(directory):
         start = invocation(directory, provider, run_id, active=True)
@@ -347,8 +362,8 @@ def bind_sandbox(directory, provider, run_id, sandbox, original_id=None):
             expected_head = original["head"]
         marker, boundary, data, lines, owners = sandbox_marker(sandbox)
         require(physical(lines[0]) == physical(start["repo"]), "sandbox evidence source differs from invocation")
-        require(git_value("-C", str(marker.parent), "rev-parse", "HEAD") == expected_head,
-                "sandbox evidence head differs from invocation")
+        sandbox_head = git_value("-C", str(marker.parent), "rev-parse", "HEAD")
+        require(sandbox_head == expected_head, head_mismatch_detail(start["repo"], expected_head, sandbox_head))
         require((evidence_root(directory, run_id) / "required.json").is_file(),
                 "sandbox evidence requirement was not reserved")
         if original_id is not None:

@@ -722,6 +722,21 @@ wait "$job"
             with self.assertRaisesRegex(events.Blocked, "source"):
                 events.bind_sandbox(self.root, "grok", rid, checkout)
 
+    def test_sandbox_head_mismatch_names_foreign_untracked_files(self):
+        # shared-db#2829: the refusal stays, but it must name its real cause.
+        rid, checkout, _ = self.evidence_fixture()
+        (checkout / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")
+        foreign = self.toolkit / "foreign-session-note-2829.txt"
+        foreign.write_text("another session's scratch file\n")
+        try:
+            with patch.object(events, "git_value", return_value="f" * 40):
+                with self.assertRaisesRegex(events.Blocked,
+                                            r"(?s)head differs from invocation.*untracked.*foreign-session-note-2829\.txt"):
+                    events.bind_sandbox(self.root, "grok", rid, checkout)
+            self.assertNotIn("grok:" + rid, (checkout / ".ai-review-sandbox").read_text())
+        finally:
+            foreign.unlink()
+
     def test_sandbox_retains_every_followup_invocation_owner(self):
         rid, checkout, report = self.evidence_fixture()
         (checkout / ".ai-review-sandbox").write_text(str(self.toolkit) + "\nevidence_format=1\n")
