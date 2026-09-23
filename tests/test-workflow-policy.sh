@@ -123,10 +123,10 @@ shard_smallest="$(jq '[.windows_offline_shards[] | length] | min' "$manifest" | 
 powershell_owner="$(jq -r '.windows_offline_powershell_shard' "$manifest" | tr -d '\r')"
 deepseek_owner="$(jq -r 'to_entries[] | select(.value | index("test-ai-deepseek-agent.sh")) | .key + 1' < <(jq '.windows_offline_shards' "$manifest") | tr -d '\r')"
 muse_owner="$(jq -r 'to_entries[] | select(.value | index("test-ai-muse.sh")) | .key + 1' < <(jq '.windows_offline_shards' "$manifest") | tr -d '\r')"
-# Four sections since the Kimi CI suspension (2026-09-17): the indivisible
-# Kimi suite that owned a dedicated section is suspended at runtime by the
-# manifest's suspended_bash list, so the measured rebalance covers the rest.
-measured_rebalance='[["test-ai-claude-review.sh","test-ai-codex-memories.sh","test-ai-deepseek-agent.sh","test-ai-gh.sh","test-bin-cmd-launchers.sh","test-worktree-reap-tool.sh"],["test-ai-adopt-globals.sh","test-ai-install-skills.sh","test-ai-memory-sync.sh","test-ai-muse.sh","test-ai-zcode.sh","test-mcp-launch-lock.sh"],["test-ai-gemini-usage.sh","test-ai-grok-implement.sh","test-ai-machine-tools.sh","test-ai-qwen.sh","test-ai-test-local.sh","test-install-ai-provider-clis.sh","test-installer-parity.sh"],["test-ai-claude-permissions.sh","test-ai-gemini.sh","test-ai-glm.sh","test-ai-muse-code.sh","test-line-endings.sh","test-windows-scripts.sh"]]'
+# The three suites that exceeded section 4's combined 40-minute budget on
+# PR #666 must stay on separate hosts. The union check below protects every
+# suite even when future timing measurements rebalance the lighter sections.
+heavy_owners="$(jq -r '. as $manifest | ["test-ai-gemini.sh","test-ai-glm.sh","test-ai-muse-code.sh"] as $heavy | [$heavy[] | . as $suite | ($manifest.windows_offline_shards | to_entries[] | select(.value | index($suite)) | .key)] | @json' "$manifest" | tr -d '\r')"
 sections_declared="$(printf '%s\n' "$section_block" | sed -n 's/^[[:space:]]*section:[[:space:]]*//p' | tr -d '\r' | head -1)"
 sections_expected="[$(seq -s ', ' 1 "$shard_count")]"
 check 'declared sections cover the ordinary hosted lane exactly, with no suite twice' \
@@ -137,8 +137,8 @@ check 'the PowerShell suites are owned by exactly one existing section' \
   '[ "$powershell_owner" != null ] && [ "$powershell_owner" -ge 1 ] && [ "$powershell_owner" -le "$shard_count" ]'
 check 'the expanded DeepSeek and Muse suites run in separate sections' \
   '[ -n "$deepseek_owner" ] && [ -n "$muse_owner" ] && [ "$deepseek_owner" -ne "$muse_owner" ]'
-check 'four Windows sections retain the measured-duration rebalance' \
-  '[ "$(jq -c .windows_offline_shards "$manifest")" = "$measured_rebalance" ]'
+check 'Gemini, GLM and Muse Code run in different sections within the same 40-minute bound' \
+  '[ "$shard_count" -ge 6 ] && [ "$(printf "%s" "$heavy_owners" | jq "length")" -eq 3 ] && [ "$(printf "%s" "$heavy_owners" | jq "unique | length")" -eq 3 ] && [ "$section_timeout" -eq 40 ]'
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 # Sections run at the same time on independent hosted machines, and one failing
