@@ -324,11 +324,18 @@ jobs:
 
   reviewer-runner-availability:
     needs: [fast-classifier, manual-preflight]
+    # Samples the qualified pool for every event that runs the reviewer lane
+    # (#736). Until 2026-09-23 this ran only on workflow_dispatch, so every
+    # pull request skipped the idle qualified host and paid the ~50 minute
+    # hosted fallback.
     if: >-
-      !cancelled() && github.event_name == 'workflow_dispatch' &&
+      !cancelled() && github.event_name != 'merge_group' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.reviewer == 'true') &&
-      needs.manual-preflight.outputs.run_expensive_jobs == 'true'
+      (github.event_name != 'workflow_dispatch' ||
+       needs.manual-preflight.outputs.run_expensive_jobs == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
@@ -371,10 +378,11 @@ jobs:
       needs.reviewer-runner-availability.outputs.preferred_available == 'true' &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    # Deliberate manual diagnostic on the qualified pool. Pull requests and
-    # schedules use the independent hosted proof below, so a runner that turns
-    # busy after this availability sample can delay only its explicitly chosen
-    # manual run, never a required repository check. Moving this job
+    # Preferred lane on the qualified pool for pull requests, schedules and
+    # manual runs (#736). A host that turns busy after the availability sample
+    # delays this run by at most one queued reviewer proof: the concurrency
+    # group below keeps a single waiter and cancels older pending ones, and a
+    # cancelled or failed preferred lane releases the hosted fallback. Moving this job
     # to the GitHub-hosted windows-2025 image was tried on 2026-09-02 and
     # stalled (#204), so this is not a return to hosted runners: it is a move
     # to a dedicated, qualified, otherwise idle machine. The reviewer suite
@@ -382,6 +390,9 @@ jobs:
     # 33571202823 - well inside the 30 minute ceiling it exceeded while
     # sharing the edge-dev desktop with windows-offline.
     runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]
+    concurrency:
+      group: ai-devops-windows-reviewer-preferred
+      cancel-in-progress: false
     # This lane is preferred evidence, not the required result. A timeout or
     # assertion failure must release the identical hosted fallback, whose
     # stable aggregate below remains fail-closed.

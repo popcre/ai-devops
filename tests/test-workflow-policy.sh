@@ -323,7 +323,9 @@ reviewer_aggregate="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled
 reviewer_preferred="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow")"
 reviewer_fallback="$(sed -n '/^  windows-reviewer-fallback:/,/^  windows-reviewer-safety:/p' "$workflow")"
 reviewer_availability="$(sed -n '/^  reviewer-runner-availability:/,/^  windows-reviewer-preferred:/p' "$workflow")"
-printf '%s' "$reviewer_availability" | grep -Fq "github.event_name == 'workflow_dispatch'" &&
+! printf '%s' "$reviewer_availability" | grep -Fq "github.event_name == 'workflow_dispatch' &&" &&
+printf '%s' "$reviewer_availability" | grep -Fq "github.event.pull_request.head.repo.full_name == github.repository" &&
+printf '%s' "$reviewer_preferred" | grep -Fq "group: ai-devops-windows-reviewer-preferred" &&
 printf '%s' "$reviewer_preferred" | grep -q '^[[:space:]]*continue-on-error:[[:space:]]*true' &&
 printf '%s' "$reviewer_preferred" | grep -Fq "needs.reviewer-runner-availability.outputs.preferred_available == 'true'" &&
 grep -Fq "runner.status === 'online' && !runner.busy" "$workflow" &&
