@@ -302,6 +302,7 @@ mkdir -p "$TMP/private-mock-bin" "$TMP/private-mock-home"
 cat > "$TMP/private-mock-bin/curl" <<'EOF'
 #!/usr/bin/env bash
 out=""; body=""
+fixture_root="$(cd "$(dirname "$0")/.." && pwd -P)"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
@@ -309,8 +310,8 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
-cp "$body" "$DEEPSEEK_STUB_REQUEST"
-pwd -P > "$DEEPSEEK_STUB_CWD"
+cp "$body" "$fixture_root/private-request.json"
+pwd -P > "$fixture_root/private-review-cwd"
 synthetic_head="$(git rev-parse HEAD)"
 python3 - "$out" "$synthetic_head" <<'PY'
 import json, sys
