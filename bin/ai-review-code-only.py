@@ -80,7 +80,7 @@ def approved_paths(path):
     if not isinstance(parsed, list) or not parsed or not all(isinstance(p, str) for p in parsed):
         fail("approved path file must be a nonempty JSON string array")
     paths = [safe_path(p) for p in parsed]
-    if len(set(paths)) != len(paths):
+    if len(set(paths)) != len(paths) or len({p.casefold() for p in paths}) != len(paths):
         fail("duplicate approved path")
     return sorted(paths)
 
@@ -113,7 +113,18 @@ def current_bytes(source, path):
     # can otherwise escape the source repository without itself being a link.
     if not item.resolve().is_relative_to(source.resolve()):
         fail("approved path escapes source")
-    return item.read_bytes()
+    value = item.read_bytes()
+    validate_text(value)
+    return value
+
+
+def validate_text(value):
+    if len(value) > 1_048_576 or b"\0" in value:
+        fail("oversized or binary approved path refused")
+    try:
+        value.decode("utf-8")
+    except UnicodeDecodeError:
+        fail("non-UTF-8 approved path refused")
 
 
 def manifest_for(source, paths, head, base):
@@ -128,6 +139,8 @@ def manifest_for(source, paths, head, base):
         value = current_bytes(source, path)
         if head_mode is None and base_mode is None and value is None:
             fail("approved path is absent from base, head, and worktree")
+        if base_mode:
+            validate_text(git(source, "show", f"{base}:{path}"))
         entries.append({"path": path, "current_sha256": digest(value) if value is not None else None,
                         "base_mode": base_mode.decode() if base_mode else None,
                         "head_mode": head_mode.decode() if head_mode else None})
