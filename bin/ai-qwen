@@ -321,8 +321,13 @@ resolve_trusted_op() {
   if [ -n "${AI_QWEN_TEST_DIR:-}" ] && [ -n "${AI_QWEN_OP_BIN:-}" ]; then candidate="$AI_QWEN_OP_BIN"
   else candidate="$(command -v op 2>/dev/null || true)"; fi
   [ -n "$candidate" ] || return 1; physical="$(readlink -f "$candidate" 2>/dev/null || true)"
+  # Git Bash reports a PATH-directory hit as ".../op"; the real file is op.exe.
+  case "$physical" in *.exe) ;; *) [ -z "${LOCALAPPDATA:-}" ] || [ ! -f "$physical.exe" ] || physical="$physical.exe" ;; esac
   if [ -n "${AI_QWEN_TEST_DIR:-}" ]; then case "$physical" in "$AI_QWEN_TEST_DIR"/*) ;; *) return 1;; esac
-  elif [ -n "${LOCALAPPDATA:-}" ]; then case "$physical" in "$(cygpath -u "$LOCALAPPDATA")"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe) ;; *) return 1;; esac
+  elif [ -n "${LOCALAPPDATA:-}" ]; then
+    # Git Bash may omit .exe from command -v/readlink even for the WinGet binary.
+    case "$physical" in */op) physical="$physical.exe";; esac
+    case "$physical" in "$(cygpath -u "$LOCALAPPDATA")"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe) ;; *) return 1;; esac
   else [ "$physical" = /usr/bin/op ] || return 1; fi
   [ -f "$physical" ] && [ -x "$physical" ] && printf '%s' "$physical"
 }

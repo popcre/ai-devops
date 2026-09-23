@@ -21,22 +21,19 @@ durable-store deletion hygiene), live-qualify the engine, update shared-db's
 
 ## Next exact action
 
-Phase C (native extras), in a fresh session and worktree under
-`ai-task-gates start --class reviewer-safety`: C1 `AI_MUSE_REASONING_EFFORT`
-support in `run_turn` (validate against the catalog's
-`reasoning_effort_variants` when readable, refuse unknown tiers before any
-provider contact, record the effective tier in `retained_turn`, args
-byte-identical when unset) and C2 deletion hygiene
-(`muse_code_delete_session` also removes the date-bucketed durable dir with
-the same enter-verified-parent discipline) — all per the plan's §9 Phase C.
-Phases A and B have landed: A as PR #554 (merge `8e1426f5`), B as PR #574
-(merge `85df6d6e`; independent Grok 4.6 exact-head APPROVE, Codex quota
-exhausted and the Claude reviewer account no longer exists — owner, chat
-2026-09-18). For the pre-merge independent review use an available reviewer
-(`bin/ai-grok-review` is proven; `ai-qwen` carries `--governed-verdict`), pin
-the packet base with `--base <origin/main SHA>` so a concurrent fetch cannot
-invalidate it, and keep the `--tests` command fast (the unit suite, not a
-20-minute shell suite).
+Phase D (qualification, evidence, flip), in a fresh session and worktree under
+`ai-task-gates start --class reviewer-safety`, strictly D1-D4 in order per the
+plan's Phase D. Phases A, B and C have landed: A as PR #554 (merge `8e1426f5`),
+B as PR #574 (merge `85df6d6e`), C as PR #678 (merge `57170b62`, 2026-09-23;
+independent Grok 4.6 exact-head APPROVE after one fixed REJECT round). D1 runs
+real paid muse-code turns with a real review brief (the pattern of #2285);
+use the wrapper's supported verdict option and note issue #622 if the review
+tooling misbehaves. For independent reviews only `bin/ai-grok-review` (proven)
+and `ai-qwen --governed-verdict` are available; pin the packet base with
+`--base <origin/main SHA>` and keep `--tests` fast. Machine note (2026-09-23):
+the 1Password `op` CLI alias disappeared from this machine (doctor fails that
+line identically on main) and the Grok CLI auto-updated past the qualified
+1.0.13 (restore with `grok update --version 1.0.13`).
 
 ## Decisions only the owner can make
 

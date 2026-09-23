@@ -225,6 +225,9 @@ check "shipped reviewer registry is valid JSON" "jq -e '.version==1 and (.provid
 check "Gemini is carried in the shipped reviewer registry after live re-qualification"   "jq -e '.providers.gemini.registry_state==\"registered\"' '$REAL_REGISTRY'"
 check "the Gemini entry still records why the empty report mattered"   "jq -e '.providers.gemini.reason|test(\"empty report\")' '$REAL_REGISTRY'"
 check "Kimi is removed from the shipped reviewer registry while credit is exhausted" "jq -e '.providers.kimi.registry_state==\"absent\" and (.providers.kimi.reason|test(\"out of credit\"))' '$REAL_REGISTRY'"
+check "GLM is out of rotation in the shipped reviewer registry (owner instruction 2026-09-22)" "jq -e '.providers.glm.registry_state==\"absent\" and (.providers.glm.reason|test(\"2026-09-22\"))' '$REAL_REGISTRY'"
+check "DeepSeek mirrors shared-db RETIRED_REVIEWERS and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"absent\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
+check "the shipped rotation pool is exactly Muse, Grok, Qwen, Gemini plus the Claude and Codex gates" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"claude\",\"codex\",\"gemini\",\"grok\",\"muse\",\"qwen\"]' '$REAL_REGISTRY'"
 # Health alone must still never mean allocatable. Proved against a fixture that
 # omits a provider, so the guard survives any future registry membership change.
 printf '{"version":1,"providers":{"codex":{"registry_state":"absent","reason":"omitted for this fixture"}}}
