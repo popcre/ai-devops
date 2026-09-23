@@ -289,11 +289,15 @@
     ],
     [
       "test-ai-claude-permissions.sh",
-      "test-ai-gemini.sh",
       "test-ai-glm.sh",
-      "test-ai-muse-code.sh",
       "test-line-endings.sh",
       "test-windows-scripts.sh"
+    ],
+    [
+      "test-ai-gemini.sh"
+    ],
+    [
+      "test-ai-muse-code.sh"
     ]
   ],
   "windows_offline_powershell_shard": 3,

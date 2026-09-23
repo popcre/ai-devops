@@ -167,10 +167,10 @@ jobs:
           fi
           bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety
 
-  # Ordinary pull requests divide the Windows-sensitive lane into four declared,
-  # balanced sections that run at the same time on four independent GitHub-hosted
+  # Ordinary pull requests divide the Windows-sensitive lane into six declared
+  # sections that run at the same time on independent GitHub-hosted
   # machines (#210). Hosted concurrency is unmetered on a public repository, so
-  # this is real parallelism on separate hardware, not four processes competing
+  # this is real parallelism on separate hardware, not several processes competing
   # for one desktop - the failure mode the issue explicitly forbids. The section
   # boundaries live in config/ci-suite-manifest.json and are sized from the
   # measured per-suite timings of runs 35200063547 and 35189676116;
@@ -189,19 +189,17 @@ jobs:
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.run_long == 'true')
     strategy:
-      # One failing section must never hide the result of the other four:
+      # One failing section must never hide the result of the other five:
       # the whole point of sectioning is that a useful failure arrives early
       # and the rest of the evidence still lands.
       fail-fast: false
       matrix:
-        section: [1, 2, 3, 4]
+        section: [1, 2, 3, 4, 5, 6]
     runs-on: windows-2025
-    # Four sections since the Kimi CI suspension (2026-09-17): the indivisible
-    # Kimi suite that owned a dedicated section is suspended in
-    # config/ci-suite-manifest.json while the provider is out of credit, so the
-    # lane is rebalanced over the remaining four sections under the same
-    # 40-minute ceiling. The suite file is retained and returns by removing its
-    # suspended_bash entry.
+    # Six sections after PR #666's serial Gemini, GLM and Muse Code section
+    # reached the 40-minute ceiling. Those three long suites now have distinct
+    # sections; GLM shares only three short suites. Kimi stays declared and
+    # suspended for re-entry, and every other runnable suite remains assigned.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -213,10 +211,10 @@ jobs:
           if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
             throw 'The pinned Windows runner image does not provide jq.'
           }
-      - name: Windows-sensitive section ${{ matrix.section }} of 4
+      - name: Windows-sensitive section ${{ matrix.section }} of 6
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/4'
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/6'
 
   # Scheduled, manual and qualification verification stay complete and
   # unsectioned. Sectioning is a wall-clock lever for the pull-request lane; the
@@ -307,7 +305,7 @@ jobs:
 
           if [ "$EVENT" = 'pull_request' ]; then
             lane_result="$SECTION_RESULT"
-            lane_name='the five Windows sections'
+            lane_name='the six Windows sections'
           else
             lane_result="$COMPLETE_RESULT"
             lane_name='the complete Windows matrix'
