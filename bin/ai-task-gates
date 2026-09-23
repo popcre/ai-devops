@@ -258,6 +258,21 @@ classify_paths(){
     if [ "$best_rank" -gt "$OBSERVED_RANK" ]; then OBSERVED_CLASS="$best"; OBSERVED_RANK="$best_rank"; fi
   done <<< "$paths"
 
+  # private-evidence is sticky across a change set: one licensed path means the
+  # whole change set stays inside private-evidence, even when a higher-ranked
+  # tooling exception matched other paths. Without this, a tooling-plus-rows
+  # change would resolve to the tooling class and could start a review.
+  # Keep the highest path rank so a real scope escalation is still reported.
+  local contributor
+  for contributor in "${CONTRIBUTORS[@]}"; do
+    case "$contributor" in
+      private-evidence$'\t'*)
+        OBSERVED_CLASS=private-evidence
+        break
+        ;;
+    esac
+  done
+
   if [ "$CHANGED_COUNT" -eq 0 ]; then
     OBSERVED_CLASS="none"; OBSERVED_RANK=0
   fi
@@ -370,6 +385,16 @@ cmd_explain(){
       effective="$declared"
     fi
   fi
+  # Same sticky rule as check: one licensed path keeps private-evidence.
+  local contributor
+  for contributor in "${CONTRIBUTORS[@]+"${CONTRIBUTORS[@]}"}"; do
+    case "$contributor" in
+      private-evidence$'\t'*)
+        effective=private-evidence
+        break
+        ;;
+    esac
+  done
   required_gate="$({
     [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"
     [ -z "$declared" ] || [ "$declared" = "$OBSERVED_CLASS" ] || merged_gate "$IDENTITY" "$declared"
@@ -455,6 +480,18 @@ cmd_check(){
   if [ "$effective" = none ] || [ "$declared_rank" -gt "$effective_rank" ]; then
     effective="$declared"; effective_rank="$declared_rank"
   fi
+  # One licensed path keeps the change set in private-evidence even when a
+  # higher-ranked declaration or tooling exception would otherwise win.
+  local contributor
+  for contributor in "${CONTRIBUTORS[@]}"; do
+    case "$contributor" in
+      private-evidence$'\t'*)
+        effective=private-evidence
+        effective_rank="${TG_RANK[private-evidence]}"
+        break
+        ;;
+    esac
+  done
   protected="$(class_protected "$effective")"
 
   # 1. Scope drift: the work grew past what was declared.
@@ -466,7 +503,7 @@ cmd_check(){
       detail="$detail  ${line#*	}"$'\n'
     done
     if [ "$protected" = true ]; then
-      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged away. Re-declare the task with `ai-task-gates start --class %s` and do what that class requires, ask Albert for the missing authority, or take these files out of the change set.' \
+      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged or owner-requested away. Re-declare the task with `ai-task-gates start --class %s` and do what that class requires, or take these files out of the change set.' \
         "$action" "$declared" "$OBSERVED_CLASS" "$detail" "$OBSERVED_CLASS")"
     fi
     if [ -z "$acknowledge" ]; then
@@ -488,7 +525,7 @@ cmd_check(){
   required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
   if printf '%s\n' "$forbidden" | grep -qx -- "$action"; then
     if [ "$protected" = true ]; then
-      blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nThis cannot be overridden here. It needs Albert naming the exact resource and action.' \
+      blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no owner-request and no acknowledge path.\nNarrow the change set out of protected paths, or change this policy through its own reviewed path.' \
         "$action" "$effective" "$IDENTITY")"
     fi
     if [ -z "$owner_request" ]; then
