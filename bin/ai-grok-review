@@ -1004,22 +1004,21 @@ grok_isolated_home() { # print the isolated GROK_HOME; it must share a volume wi
     warn "state directory is on another volume than $auth_dir; isolated Grok home is $alt (earlier Grok session history stays under $default)"
   fi
   [ -O "$alt" ] || die "refusing an isolated Grok home owned by another account: $alt"
-  chmod 700 "$alt" || die "could not restrict the isolated Grok home: $alt"
+  chmod 700 "$alt" 2>/dev/null || warn "could not restrict the isolated Grok home: $alt"
   printf '%s\n' "$alt"
 }
 
 scrub_unselected_auth_links() { # scrub_unselected_auth_links CHOSEN_HOME
-  # Only one isolated home is live at a time. A credential link left in the
-  # other candidate (from before the volumes changed) is removed so no stale
-  # credential name outlives its use. Removing a hard link never touches the
-  # original credential.
-  local chosen="$1" auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" candidate
-  if [ -d "$auth_dir" ]; then auth_dir="$(cd -P -- "$auth_dir" && pwd -P)" || return 0; fi
-  for candidate in "$STATE_DIR/isolated-home" "$(dirname "$auth_dir")/.ai-grok-review-isolated-home"; do
-    [ -d "$candidate" ] && [ ! -L "$candidate" ] || continue
-    [ "$candidate" -ef "$chosen" ] && continue
-    rm -f -- "$candidate/auth.json"
-  done
+  # When the cross-volume home is chosen, the state-scoped default home of this
+  # same state directory is no longer used by any run (every run sharing this
+  # state directory makes the same choice), so a credential link stranded
+  # there is removed. The credential-scoped home beside auth.json is shared
+  # by other state directories and is never scrubbed here. Removing a hard
+  # link never touches the original credential.
+  local chosen="$1" default="$STATE_DIR/isolated-home"
+  [ -d "$default" ] && [ ! -L "$default" ] || return 0
+  [ "$default" -ef "$chosen" ] && return 0
+  rm -f -- "$default/auth.json"
 }
 
 run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
@@ -1070,7 +1069,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   else
     rm -f -- "$isolated_home/auth.json"
   fi
-  scrub_unselected_auth_links "$isolated_home"
+  scrub_unselected_auth_links "$isolated_home" || warn "could not remove a stale credential link from $STATE_DIR/isolated-home"
   ACTIVE_ISOLATED_CWD="$(mktemp -d "${TMPDIR:-/tmp}/ai-grok-review-cwd.XXXXXX")"
   ACTIVE_ISOLATED_HOME="$(mktemp -d "$STATE_DIR/runtime-home.XXXXXX")"
   chmod 700 "$ACTIVE_ISOLATED_HOME" 2>/dev/null || true

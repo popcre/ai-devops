@@ -129,6 +129,9 @@ printf 'kept
   test ! -e "$STATE_DIR/isolated-home/auth.json"
   test "$HOME/.grok/auth.json" -ef "$got/auth.json"
   test -f "$STATE_DIR/isolated-home/sessions/s1"
+  # The shared home beside the credential is never scrubbed by another choice.
+  scrub_unselected_auth_links "$STATE_DIR/isolated-home"
+  test "$HOME/.grok/auth.json" -ef "$got/auth.json"
   rm -rf "$got"; mkdir -p "$TMP/xv/elsewhere"
   make_link "$TMP/xv/elsewhere" "$got"
   test -L "$got"
@@ -150,7 +153,8 @@ sed -n '/^investigation_home_parent()/,/^}/p; /^investigation_home_root()/,/^}/p
   rel="$(cd "$TMP" && mkdir -p rel/.grok && AI_GROK_AUTH_HOME=rel/.grok investigation_home_parent)"
   case "$rel" in /*) ;; *) exit 1 ;; esac                     # a relative credential path is resolved
   rm -rf "$HOME/.ai-grok-implement-homes"; make_link "$TMP/xv/elsewhere" "$HOME/.ai-grok-implement-homes"
-  if (investigation_home_parent) >/dev/null 2>&1; then exit 1; fi
+  if (investigation_home_parent) >/dev/null 2>"$TMP/xv/ierr"; then exit 1; fi
+  grep -q 'refusing a linked investigation home parent' "$TMP/xv/ierr"
 )
 echo 'ok cross-volume investigation home follows the credential volume'
 echo '9 passed, 0 failed, 0 skipped'

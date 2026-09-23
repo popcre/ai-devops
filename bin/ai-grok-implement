@@ -276,6 +276,7 @@ investigation_home_parent() { # print where the throwaway GROK_HOME may live
   parent="$(dirname "$auth_dir")/.ai-grok-implement-homes"
   [ ! -L "$parent" ] || { printf 'refusing a linked investigation home parent: %s\n' "$parent" >&2; return 1; }
   (umask 077; mkdir -p -- "$parent") || return 1
+  [ -O "$parent" ] || { echo "refusing an investigation home parent owned by another account: $parent" >&2; return 1; }
   chmod 700 "$parent" 2>/dev/null || true
   printf '%s\n' "$parent"
 }
@@ -283,6 +284,10 @@ investigation_home_parent() { # print where the throwaway GROK_HOME may live
 investigation_home_root() { # create and print a fresh private investigation home
   local parent; parent="$(investigation_home_parent)" && [ -n "$parent" ] || return 1
   mktemp -d "$parent/investigate-home.XXXXXX"
+}
+
+remove_investigation_home() { # remove only a throwaway investigation home
+  case "$1" in */investigate-home.?*) rm -rf -- "$1" ;; *) echo "refusing to remove unexpected investigation home path: $1" >&2 ;; esac
 }
 
 launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
@@ -297,7 +302,7 @@ launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
   if [ -f "$auth_src" ]; then
     ln "$auth_src" "$grok_home/auth.json" 2>/dev/null || true
     if ! [ "$auth_src" -ef "$grok_home/auth.json" ]; then
-      rm -rf "$tmp_root"
+      remove_investigation_home "$tmp_root"
       die "could not create a same-inode authentication link for the isolated investigation home; refusing to copy or persist credentials."
     fi
   fi
@@ -341,7 +346,7 @@ launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
     env_args+=("XDG_DATA_HOME=$native_home\\.local\\share")
   fi
   env -i "${env_args[@]}" "$grok" "$@" || rc=$?
-  rm -rf "$tmp_root"
+  remove_investigation_home "$tmp_root"
   return "$rc"
 }
 
