@@ -1,7 +1,7 @@
 ---
 description: Read-only Muse reviewer
 mode: primary
-model: meta-model-api/muse-spark-1.3-contributor
+model: meta-model-api/muse-spark-1.3
 tools:
   write: false
   edit: false

@@ -1,6 +1,6 @@
 # Muse Spark persistent conversations
 
-`ai-muse` gives Codex and Claude named, persistent Muse Spark 1.3 Contributor
+`ai-muse` gives Codex and Claude named, persistent Muse Spark 1.3 (standard; temporary stopgap for 1.3 Contributor)
 conversations. It uses OpenCode's proven direct-session mode rather than a background
 server: server mode previously failed Meta authorization, while direct mode supports
 an exact session ID and survives separate command calls.
@@ -71,7 +71,7 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
 
 ## Safety and evidence
 
-- Exact model: `meta-model-api/muse-spark-1.3-contributor`. No fallback is accepted.
+- Exact model: `meta-model-api/muse-spark-1.3` (temporary stopgap since 2026-09-23: 1.3 Contributor returns `model_not_found` for this account; restore `muse-spark-1.3-contributor` by changing `.models.muse` in `config/tool-versions.json` and the matching OpenCode config). Owner rule: never 1.2. No fallback is accepted.
 - Live qualification on 2026-09-03 confirmed that the unchanged
   `https://api.meta.ai/v1` endpoint lists and returns that exact model.
 - The review profile removes write, edit, patch, shell, web, and sub-agent tools.
