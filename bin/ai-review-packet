@@ -237,8 +237,16 @@ resolve_base() { # resolve_base REPO [REQUESTED_REF]
 # Resolve against the caller before cloning: the disposable clone is not an
 # authority for either the requested target or the current source checkout.
 cmd_resolve() {
-  local root want="" expected="" head merge digest
+  local root want="" expected="" head merge digest code_only=0
   root="$(canon "${1:?resolve requires a repository}")"; shift
+  if [ -f "$root/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' "$root/.ai-review-sandbox" >/dev/null 2>&1; then
+    code_only=1
+    "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$root" || die "code-only source export invalid."
+  else
+    local classify_root="$root"
+    [ ! -f "$root/.ai-review-sandbox" ] || classify_root="$(head -1 "$root/.ai-review-sandbox")"
+    "$SCRIPT_DIR/ai-review-sandbox" assert-public "$classify_root" || die "private source resolution requires explicit code-only export."
+  fi
   while [ $# -gt 0 ]; do
     case "$1" in
       --base) want="${2:?--base needs a ref}"; shift 2 ;;
@@ -251,10 +259,16 @@ cmd_resolve() {
   resolve_base "$root" "$want"
   merge="$(git -C "$root" merge-base "$BASE_SHA" "$head" 2>/dev/null || true)"
   digest="$("$SCRIPT_DIR/ai-review-sandbox" digest "$root")" || die "source-digest-unavailable"
-  jq -n --arg repository "$root" --arg base "$BASE_SHA" --arg head "$head" \
+  local resolved
+  resolved="$(jq -n --arg repository "$root" --arg base "$BASE_SHA" --arg head "$head" \
     --arg target "$TARGET_SHA" --arg target_ref "$TARGET_REF" --arg merge_base "$merge" \
     --arg source_digest "$digest" --arg rule "$BASE_RULE" --arg requested_base "$want" \
-    '{schema_version:1,repository:$repository,base:$base,head:$head,target:$target,target_ref:$target_ref,merge_base:$merge_base,source_digest:$source_digest,rule:$rule,requested_base:$requested_base}'
+    '{schema_version:1,repository:$repository,base:$base,head:$head,target:$target,target_ref:$target_ref,merge_base:$merge_base,source_digest:$source_digest,rule:$rule,requested_base:$requested_base}')"
+  if [ "$code_only" = 1 ]; then
+    printf '%s' "$resolved" | jq --slurpfile marker "$root/.ai-review-sandbox" '. + {code_only:$marker[0]}'
+  else
+    printf '%s\n' "$resolved"
+  fi
 }
 
 validate_identity() { # validate_identity JSON [REVIEW_ROOT]
@@ -262,6 +276,24 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   validate_identity_schema "$file"
   source="$(jq -r .repository "$file")"; head="$(jq -r .head "$file")"
   base="$(jq -r .base "$file")"; digest="$(jq -r .source_digest "$file")"
+  if jq -e '.code_only.mode == "code-only"' "$file" >/dev/null 2>&1; then
+    [ -n "$review" ] && [ -f "$source/.ai-review-sandbox" ] && [ -f "$review/.ai-review-sandbox" ] \
+      || die "code-only source and review markers required."
+    local sealed; sealed="$(jq -Sc .code_only "$file")"
+    [ "$(jq -Sc . "$source/.ai-review-sandbox")" = "$sealed" ] \
+      && [ "$(jq -Sc . "$review/.ai-review-sandbox")" = "$sealed" ] \
+      || die "code-only marker and packet identity differ."
+    "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$source" \
+      --assert-head "$(jq -r .code_only.original_head "$file")" \
+      || die "code-only source export changed."
+    "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$review" \
+      --assert-head "$(jq -r .code_only.original_head "$file")" \
+      || die "code-only source or export changed."
+  elif [ -f "$source/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' "$source/.ai-review-sandbox" >/dev/null 2>&1; then
+    die "code-only export lacks a sealed code-only packet identity."
+  else
+    "$SCRIPT_DIR/ai-review-sandbox" assert-public "$source" || die "ordinary private review identity refused."
+  fi
   [ "$(git -C "$source" rev-parse HEAD)" = "$head" ] || die "source-head-mismatch"
   [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$source")" = "$digest" ] || die "source-digest-mismatch"
   ref="$(jq -r .target_ref "$file")"; target="$(jq -r .target "$file")"
@@ -298,7 +330,11 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   [ "$(git -C "$source" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jq -r .merge_base "$file")" ] || die "source-merge-base-mismatch"
   if [ -n "$review" ]; then
     local review_source="$review"
-    [ ! -f "$review/.ai-review-sandbox" ] || review_source="$(head -1 "$review/.ai-review-sandbox")"
+    if jq -e '.code_only.mode == "code-only"' "$file" >/dev/null 2>&1; then
+      review_source="$source"
+    elif [ -f "$review/.ai-review-sandbox" ]; then
+      review_source="$(head -1 "$review/.ai-review-sandbox")"
+    fi
     [ "$(canon "$review_source")" = "$(canon "$source")" ] || die "source-repository-mismatch"
     [ "$(git -C "$review" rev-parse HEAD)" = "$head" ] || die "snapshot-head-mismatch"
     if [ "$(canon "$review")" != "$(canon "$source")" ]; then
@@ -320,6 +356,14 @@ validate_retained_identity() { # validate sealed snapshot without trusting moved
   validate_identity_schema "$file"
   source="$(jq -r .repository "$file")"; head="$(jq -r .head "$file")"
   base="$(jq -r .base "$file")"; digest="$(jq -r .source_digest "$file")"
+  if jq -e '.code_only.mode == "code-only"' "$file" >/dev/null 2>&1; then
+    [ "$(jq -Sc . "$review/.ai-review-sandbox")" = "$(jq -Sc .code_only "$file")" ] \
+      || die "retained code-only marker mismatch"
+    [ "$(git -C "$review" rev-parse HEAD)" = "$head" ] || die "snapshot-head-mismatch"
+    [ "$($SCRIPT_DIR/ai-review-sandbox digest "$review")" = "$digest" ] || die "snapshot-digest-mismatch"
+    git -C "$review" cat-file -e "$base" || die "snapshot-base-missing"
+    return 0
+  fi
   [ "$(canon "$review")" != "$(canon "$source")" ] || die "retained-verification-requires-isolated-snapshot"
   review_source="$review"
   [ ! -f "$review/.ai-review-sandbox" ] || review_source="$(head -1 "$review/.ai-review-sandbox")"
@@ -371,7 +415,7 @@ list_block() { # list_block PACKET_DIR FILENAME EMPTY_TEXT CONTENT
 }
 
 cmd_build() {
-  local root tag pkt base head base_subj head_subj base_date head_date source_digest_before source_digest_after marker_digest
+  local root tag pkt base head base_subj head_subj base_date head_date source_digest_before source_digest_after marker_digest code_only=0
   root="$(canon "${1:?usage: ai-review-packet build <review-dir> <tag> [options]}")"; shift
   tag="${1:?usage: ai-review-packet build <review-dir> <tag> [options]}"; shift
 
@@ -390,6 +434,23 @@ cmd_build() {
   done
 
   git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || die "$root is not a Git repository."
+  if [ -f "$root/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' "$root/.ai-review-sandbox" >/dev/null 2>&1; then
+    code_only=1
+    [ -z "$OPT_TESTS" ] || die "code-only review refuses test output that could expose private evidence."
+    if [ -n "$OPT_IDENTITY" ]; then
+      jq -e '.code_only.mode == "code-only"' "$OPT_IDENTITY" >/dev/null 2>&1 \
+        || die "code-only review identity lacks export attestation."
+    fi
+    [ -z "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || die "code-only review refuses original-source receipt routing."
+    "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$root" || die "code-only export verification failed."
+    [ -z "$OPT_BASE" ] || [ "$OPT_BASE" = HEAD~1 ] || die "code-only packet base must be synthetic HEAD~1."
+    OPT_BASE=HEAD~1
+  else
+    local classify_root="$root"
+    [ ! -f "$root/.ai-review-sandbox" ] || classify_root="$(head -1 "$root/.ai-review-sandbox")"
+    "$SCRIPT_DIR/ai-review-sandbox" assert-public "$classify_root" \
+      || die "ordinary packet build refused for private or unclassified source."
+  fi
 
   # Enforce the standing worktree rule at the door rather than producing a
   # packet a reviewer will die trying to read.
@@ -416,10 +477,18 @@ cmd_build() {
   # reported by an independent Grok review of this script, 2026-08-18.)
   local real_root="$root" snapshot_note=""
   if [ -f "$root/.ai-review-sandbox" ]; then
-    real_root="$(head -1 "$root/.ai-review-sandbox")"
-    snapshot_note="
+    if [ "$code_only" = 1 ]; then
+      real_root="$root"
+      snapshot_note="
+- This is a **two-commit synthetic code-only export**. Its Git history contains
+  only approved paths and no original source history. The source identity is
+  sealed separately in the packet."
+    else
+      real_root="$(head -1 "$root/.ai-review-sandbox")"
+      snapshot_note="
 - This directory is a **disposable snapshot** of that checkout, not the working
   copy itself. Paths are identical; do not commit or push from here."
+    fi
   fi
 
   # Pin the recorded base under this tag's private ref in the REAL source
@@ -526,7 +595,7 @@ as a pass. If the change needs test evidence to judge, say so in your verdict."
 
   source_digest_before="$($SCRIPT_DIR/ai-review-sandbox digest "$root")" \
     || { rm -rf "$pkt"; die "could not bind the packet to a complete source digest."; }
-  if [ -f "$root/.ai-review-sandbox" ]; then
+  if [ -f "$root/.ai-review-sandbox" ] && [ "$code_only" = 0 ]; then
     marker_digest="$(sed -n 's/^source_digest=//p' "$root/.ai-review-sandbox")"
     [ -n "$marker_digest" ] && [ "$marker_digest" = "$source_digest_before" ] \
       || { rm -rf "$pkt"; die "review snapshot digest does not match its source marker; rebuild the snapshot before reviewing."; }
@@ -716,7 +785,15 @@ EOF
     || { rm -rf "$pkt"; die "could not re-read the complete source after packet creation."; }
   [ "$source_digest_before" = "$source_digest_after" ] \
     || { rm -rf "$pkt"; die "source changed while the evidence packet was being built; no mixed packet was published."; }
-  if [ -n "$OPT_IDENTITY" ]; then
+  if [ "$code_only" = 1 ]; then
+    "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$root" || die "code-only source moved during packet build."
+    if [ -n "$OPT_IDENTITY" ]; then
+      cp "$OPT_IDENTITY" "$pkt/identity.json"
+    else
+      cmd_resolve "$root" --base HEAD~1 > "$pkt/identity.json"
+    fi
+    validate_identity "$pkt/identity.json" "$root"
+  elif [ -n "$OPT_IDENTITY" ]; then
     validate_identity "$OPT_IDENTITY" "$root"
     cp "$OPT_IDENTITY" "$pkt/identity.json"
   else
