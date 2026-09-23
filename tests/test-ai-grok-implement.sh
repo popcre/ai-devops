@@ -208,7 +208,7 @@ fi
   && ok "doctor_does_not_infer_chat_auth_from_catalogue" || bad "doctor_does_not_infer_chat_auth_from_catalogue"
 PINNED="$(bash "$REPO_ROOT/bin/ai-provider-version" required grok)"
 "$SCRIPT" doctor 2>&1 | grep -q "$PINNED" && ok "doctor_reports_version" || bad "doctor_reports_version"
-"$SCRIPT" doctor 2>&1 | grep -q "version policy: OK (exactly $PINNED" \
+"$SCRIPT" doctor 2>&1 | grep -q "version policy: OK (installed $PINNED; requires $PINNED or a newer ${PINNED%%.*}.x)" \
   && ok "doctor_confirms_the_qualified_version" || bad "doctor_confirms_the_qualified_version"
 AI_GROK_TEST_VERSION=1.0.5 "$SCRIPT" doctor 2>&1 | grep -q "UNQUALIFIED .*1\.0\.5.*$PINNED" \
   && ok "doctor_reports_installed_versus_required_version" || bad "doctor_reports_installed_versus_required_version"
@@ -262,10 +262,18 @@ else
   [ -s "$TMP/argv.txt" ] && bad "malformed_version_policy_fails_closed" || ok "malformed_version_policy_fails_closed"
 fi
 : > "$TMP/argv.txt"
-if AI_GROK_TEST_VERSION=1.0.14 "$SCRIPT" run vg5 --repo "$R6" --prompt-file "$BRIEF" >/dev/null 2>&1; then
-  bad "newer_unqualified_version_is_not_accepted"
+printf '%s
+' '{"schema_version":1,"providers":{"grok":{"command":"grok","supported_version":"1.0.13"}}}' > "$TMP/exact.json"
+if AI_PROVIDER_VERSIONS_FILE="$TMP/exact.json" AI_GROK_TEST_VERSION=1.0.14 "$SCRIPT" run vg5 --repo "$R6" --prompt-file "$BRIEF" >/dev/null 2>&1; then
+  bad "newer_version_refused_under_an_exact_policy"
 else
-  [ -s "$TMP/argv.txt" ] && bad "newer_unqualified_version_is_not_accepted" || ok "newer_unqualified_version_is_not_accepted"
+  [ -s "$TMP/argv.txt" ] && bad "newer_version_refused_under_an_exact_policy" || ok "newer_version_refused_under_an_exact_policy"
+fi
+: > "$TMP/argv.txt"
+if AI_GROK_TEST_VERSION=0.9.99 "$SCRIPT" run vg6 --repo "$R6" --prompt-file "$BRIEF" >/dev/null 2>&1; then
+  bad "version_below_the_minimum_is_refused"
+else
+  [ -s "$TMP/argv.txt" ] && bad "version_below_the_minimum_is_refused" || ok "version_below_the_minimum_is_refused"
 fi
 
 # Comments explain why blanket approval is refused, so assert on real code only.

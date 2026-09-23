@@ -472,5 +472,12 @@ check 'a held credential lock fails closed with a clear message after the wait b
 rm -rf "$TMP/state/credential.lock.d"
 
 muse_recovery_cases
+# op missing from PATH on Windows: the wrapper finds the WinGet package copy.
+if command -v cygpath >/dev/null 2>&1; then
+  fake_op_dir="$TMP/la/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_test"; mkdir -p "$fake_op_dir"
+  printf '#!/bin/sh\necho ok\n' > "$fake_op_dir/op.exe"; chmod +x "$fake_op_dir/op.exe"
+  sed -n '/^# Windows: WinGet installs the 1Password CLI/,/^fi$/p' "$SCRIPT" > "$TMP/opfallback.sh"
+  check 'op missing from PATH resolves to the WinGet package folder' "env -i PATH=/usr/bin LOCALAPPDATA='$(cygpath -w "$TMP/la")' bash -c '. \"$TMP/opfallback.sh\"; command -v op'"
+fi
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

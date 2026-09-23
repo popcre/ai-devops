@@ -220,7 +220,8 @@ OBSERVED_CLASS=""; OBSERVED_RANK=0; CHANGED_PATHS=""; CHANGED_COUNT=0
 declare -a CONTRIBUTORS=()
 
 classify_paths(){
-  local identity="$1" paths="$2" fallback rules path glob class rank best best_rank
+  local identity="$1" paths="$2" fallback rules path glob class rank best best_rank i compiled=0
+  local -a rule_regexes=() rule_classes=() rule_ranks=()
   fallback="$(jqr '.default.fallback_class' "$POLICY_FILE")"
   valid_class "$fallback" || fail_closed "fallback_class '$fallback' is not a declared change class"
   rules="$(applicable_path_rules "$identity")"
@@ -229,16 +230,29 @@ classify_paths(){
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     CHANGED_COUNT=$((CHANGED_COUNT + 1))
+    # Compile the applicable rules once for the complete path set. Calling
+    # tg_glob_match for every path/rule pair starts a Bash command substitution
+    # for each comparison, which dominates large --paths-from inputs on Windows.
+    # Keep rule order and strongest-class resolution exactly as before.
+    if [ "$compiled" -eq 0 ]; then
+      while IFS=$'\t' read -r glob class; do
+        [ -n "$glob" ] || continue
+        valid_class "$class" || fail_closed "path rule '$glob' names undeclared class '$class'"
+        rule_regexes+=("$(tg_glob_regex "$glob")")
+        rule_classes+=("$class")
+        rule_ranks+=("${TG_RANK[$class]}")
+      done <<< "$rules"
+      compiled=1
+    fi
     # The fallback applies only when nothing matched. Seeding `best` with it
     # would silently swallow every class weaker than the fallback.
     best=""; best_rank=-1
-    while IFS=$'\t' read -r glob class; do
-      [ -n "$glob" ] || continue
-      valid_class "$class" || fail_closed "path rule '$glob' names undeclared class '$class'"
-      tg_glob_match "$glob" "$path" || continue
-      rank="${TG_RANK[$class]}"
+    for ((i=0; i<${#rule_regexes[@]}; i++)); do
+      [[ "$path" =~ ${rule_regexes[$i]} ]] || continue
+      class="${rule_classes[$i]}"
+      rank="${rule_ranks[$i]}"
       if [ "$rank" -gt "$best_rank" ]; then best="$class"; best_rank="$rank"; fi
-    done <<< "$rules"
+    done
     if [ -z "$best" ]; then best="$fallback"; best_rank="${TG_RANK[$fallback]}"; fi
     CONTRIBUTORS+=("$best	$path")
     if [ "$best_rank" -gt "$OBSERVED_RANK" ]; then OBSERVED_CLASS="$best"; OBSERVED_RANK="$best_rank"; fi

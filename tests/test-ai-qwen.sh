@@ -165,9 +165,22 @@ if (
   chmod +x "$package/op" "$package/op.exe"
   export LOCALAPPDATA="$TMP/localappdata" PATH="$package:$PATH" AI_QWEN_TEST_DIR= AI_QWEN_OP_BIN=
   [ "$(resolve_trusted_op)" = "$package/op.exe" ] || exit 1
+  links="$LOCALAPPDATA/Microsoft/WinGet/Links"
+  mkdir -p "$links"
+  printf '#!/bin/sh\n' > "$links/op"
+  printf '#!/bin/sh\n' > "$links/op.exe"
+  chmod +x "$links/op" "$links/op.exe"
+  PATH="$links:$PATH"
+  [ "$(resolve_trusted_op)" = "$package/op.exe" ] || exit 1
+  other="$LOCALAPPDATA/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_other"
+  mkdir -p "$other"
+  printf '#!/bin/sh\n' > "$other/op.exe"
+  chmod +x "$other/op.exe"
+  ! resolve_trusted_op >/dev/null || exit 1
+  rm "$other/op.exe"
   rm "$package/op.exe"
   ! resolve_trusted_op >/dev/null
-); then ok 'WinGet op extension elision resolves only its trusted op.exe'; else bad 'WinGet op extension elision resolves only its trusted op.exe'; fi
+); then ok 'WinGet package and Links op resolve one trusted package executable'; else bad 'WinGet package and Links op resolve one trusted package executable'; fi
 
 printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"

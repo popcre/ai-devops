@@ -53,8 +53,9 @@ copy credentials.
 
 ## Grok Build
 
-Grok is pinned to one exact CLI build in `config/provider-cli-versions.json`
-(currently 1.0.13). Both wrappers refuse paid work against any other build.
+Grok has a minimum CLI version in `config/provider-cli-versions.json`
+(currently 1.0.13, `version_match: minimum`). Both wrappers accept that build or
+a newer build of the same major version (issue #686) and refuse anything else.
 
 - Formal review: `ai-grok-review`. Bash and web search stay denied. Investigation
   is not added to this command.

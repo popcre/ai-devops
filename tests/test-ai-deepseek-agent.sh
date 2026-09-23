@@ -70,6 +70,11 @@ chmod +x "$TMP/boundary-probe"
 DEEPSEEK_API_KEY=fd-key AI_REVIEW_EVENT_RUN_ID=governed-run AI_REVIEW_EVENT_DIR="$TMP/reviewer-events" DEEPSEEK_RECOVERY_EVENT_RUN_ID=recovery-run TMP="$TMP" bash -c "$BOUNDARY_BODY" deepseek-credential-boundary "$TMP/boundary-probe"
 check "managed credential re-exec preserves governed lifecycle identity" "grep -qxF 'governed-run|$TMP/reviewer-events|recovery-run|fd-key|absent' '$TMP/boundary-probe.out'"
 if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then check "Windows re-exec uses explicit Git Bash" "grep -Eqi 'Git.*bash.exe$' '$TMP/args'"; else check "POSIX re-exec keeps script path" "grep -q ai-deepseek-agent '$TMP/args'"; fi
+# Issue #686: WinGet can put the op package directory on PATH, and Git Bash then
+# names the binary without .exe. The trusted-path check must see the real op.exe.
+mkdir -p "$TMP/op-exe-only"; : > "$TMP/op-exe-only/op.exe"
+OP_EXE_RESULT="$(OP_PHYSICAL="$TMP/op-exe-only/op"; eval "$(grep -F 'case "$OP_PHYSICAL" in *.exe)' "$SCRIPT")"; printf '%s' "$OP_PHYSICAL")"
+check "op named without .exe resolves to the real op.exe" "[ '$OP_EXE_RESULT' = '$TMP/op-exe-only/op.exe' ]"
 check "help succeeds" "bash '$SCRIPT' --help"; check "unknown command fails" "! bash '$SCRIPT' unknown"
 run(){ (cd "$TMP/repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test "$SCRIPT" "$@"); }
 if [ "${AI_DEEPSEEK_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
