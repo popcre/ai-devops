@@ -10,7 +10,7 @@ branch: `sandbox-mimo-client-integration`
 
 Implementation plan (read its STATUS table first — do not re-derive or re-plan):
 
-- [`../../plan_mimo-windows-support.md`](../../plan_mimo-windows-support.md)
+- [`../plan_mimo-windows-support.md`](../plan_mimo-windows-support.md)
 
 ## What this session is for
 
