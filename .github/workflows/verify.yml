@@ -196,10 +196,10 @@ jobs:
       matrix:
         section: [1, 2, 3, 4, 5, 6]
     runs-on: windows-2025
-    # Six sections since the Kimi CI suspension (2026-09-17): the suspended
-    # suite remains declared for re-entry. Gemini, GLM and Muse Code each run
-    # in a separate section after their serial section reached the 40-minute
-    # ceiling on PR #666, with every other suite still assigned once.
+    # Six sections after PR #666's serial Gemini, GLM and Muse Code section
+    # reached the 40-minute ceiling. Those three long suites now have distinct
+    # sections; GLM shares only three short suites. Kimi stays declared and
+    # suspended for re-entry, and every other runnable suite remains assigned.
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
