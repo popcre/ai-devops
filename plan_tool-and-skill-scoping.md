@@ -12,10 +12,10 @@ Session record: [`HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-
 | Step | State | Date | Evidence |
 |---|---|---|---|
 | 0. Plan written, issues opened, gateway handoff folded in | ✅ done | 2026-09-23 | this file; issues #703–#707 |
-| 1.1 Record live-vs-declared MCP drift on every Windows machine | ⬜ open | | |
-| 1.2 Make setup prune undeclared Claude Desktop servers; re-run on edge-dev | ⬜ open | | |
-| 1.3 Restore `disable-model-invocation` on `designflow-human-qa`; take suspended `kimi-code-delegation` out of the index | ⬜ open | | |
-| 1.4 Add a drift check that fails when installed ≠ declared | ⬜ open | | |
+| 1.1 Record live-vs-declared MCP drift on every Windows machine | ✅ done | 2026-09-23 | table on #703; cause: a running Desktop rewrites its config |
+| 1.2 Make setup prune undeclared Claude Desktop servers; re-run on edge-dev | 🟡 code merged; live proof open | 2026-09-23 | #718 (8e22150c); proof #731 |
+| 1.3 Restore `disable-model-invocation` on `designflow-human-qa`; take suspended `kimi-code-delegation` out of the index | ✅ done | 2026-09-23 | #718 (8e22150c) |
+| 1.4 Add a drift check that fails when installed ≠ declared | ✅ done | 2026-09-23 | #718; `bin/check-mcp-drift.ps1` |
 | 2.1 Confirm each client's repository-skill location | ⬜ open | | |
 | 2.2 Add per-repository skill membership to the installer | ⬜ open | | |
 | 2.3 Move the owned skills; measure manifest before/after | ⬜ open | | |
