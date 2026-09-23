@@ -312,6 +312,7 @@ check 'an over-long review name still reviews with a derived tag' "(cd '$LONGREP
 check 'the derived sandbox tag fits the 64-character limit' "jq -e '.sandbox_tag|length<=64' \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\" >/dev/null"
 check 'two long names sharing a prefix get distinct tags' "(cd '$LONGREPO' && '$SCRIPT' new '${LONG_NAME}y' --prompt x) && test \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\")\" != \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"${LONG_NAME}y\"' '$TMP/state/sessions')\")\""
 check 'a name that fits is still accepted' "(cd '$LONGREPO' && '$SCRIPT' new fits-fine --prompt x)"
+check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok|gemini|muse|qwen)-[$][{]?(1|2|name|n)([^A-Za-z_]|$)' '$SCRIPT' | grep -v short_name | grep -q ."
 
 # 2026-09-23 (whole path-length class): long worktree paths, session names and
 # caller names must never make a derived path component grow with the input.
