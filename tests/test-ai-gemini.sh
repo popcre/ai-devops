@@ -302,15 +302,15 @@ check 'initialized gitlink content drift is fingerprinted before provider contac
 
 
 # ai-review-sandbox rejects a tag over 64 characters. The tag is
-# "gemini-<12>-<caller>-<name>", so a name that fits on Windows can overflow on
-# Linux, where PIDs are wider. On 2026-08-24 the Ubuntu qualification failed that
-# way AFTER its paid turn. The guard must refuse before any provider contact.
+# "gemini-<12>-<caller>-<name>", and callers derive names from worktree names,
+# so a long name must still review: the wrapper shortens the tag with a hash of
+# the full name instead of refusing (issue #686; earlier refusal cost the
+# 2026-08-24 Ubuntu qualification and the 2026-09-23 rotation).
 LONGREPO="$TMP/longname"; make_repo "$LONGREPO"
 LONG_NAME="$(printf %.0sx $(seq 1 60))"
-LONG_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
-check 'an over-long review name is refused before any provider contact' "! (cd '$LONGREPO' && '$SCRIPT' new '$LONG_NAME' --prompt x) && test '$LONG_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
-LONG_OUT="$TMP/longname.out"; (cd "$LONGREPO" && "$SCRIPT" new "$LONG_NAME" --prompt x) > "$LONG_OUT" 2>&1 || true
-check 'the refusal names the limit so the caller can shorten the name' "grep -q 'limit is 64' '$LONG_OUT'"
+check 'an over-long review name still reviews with a derived tag' "(cd '$LONGREPO' && '$SCRIPT' new '$LONG_NAME' --prompt x)"
+check 'the derived sandbox tag fits the 64-character limit' "jq -e '.sandbox_tag|length<=64' \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\" >/dev/null"
+check 'two long names sharing a prefix get distinct tags' "(cd '$LONGREPO' && '$SCRIPT' new '${LONG_NAME}y' --prompt x) && test \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\")\" != \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"${LONG_NAME}y\"' '$TMP/state/sessions')\")\""
 check 'a name that fits is still accepted' "(cd '$LONGREPO' && '$SCRIPT' new fits-fine --prompt x)"
 
 # 2026-09-18: live qualification recorded the caller's checkout as the invoked

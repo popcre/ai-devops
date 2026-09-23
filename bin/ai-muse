@@ -15,6 +15,15 @@ SELF="${BASH_SOURCE[0]}"
 REAL_SELF="$(readlink -f "$SELF" 2>/dev/null || true)"
 [ -z "$REAL_SELF" ] || SELF="$REAL_SELF"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+# Windows: WinGet installs the 1Password CLI into its own package folder and only
+# sometimes links it into WinGet\Links. A shell started before that PATH entry
+# existed cannot see op, so fall back to the supported WinGet package folder.
+if ! command -v op >/dev/null 2>&1 && [ -n "${LOCALAPPDATA:-}" ] && command -v cygpath >/dev/null 2>&1; then
+  for op_dir in "$(cygpath -u "$LOCALAPPDATA")"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*; do
+    [ -x "$op_dir/op.exe" ] && { PATH="$PATH:$op_dir"; export PATH; break; }
+  done
+  unset op_dir
+fi
 PROFILE_HOME="${USERPROFILE:-$HOME}"
 case "$PROFILE_HOME" in [A-Za-z]:*) PROFILE_HOME="/$(printf '%s' "$PROFILE_HOME" | sed 's#\\#/#g; s#:#/#')";; esac
 CFG="${AI_MUSE_CONFIG_DIR:-$PROFILE_HOME/.config/ai-devops-muse}"

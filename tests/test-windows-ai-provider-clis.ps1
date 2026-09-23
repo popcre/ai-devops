@@ -101,6 +101,24 @@ Assert ($policyText -notmatch '(?i)"(token|api[_-]?key|password|secret)"') 'the 
 
 $pinned = $policy.providers.grok.supported_version
 
+# --- minimum version policy (issue #686) -----------------------------------
+# Grok's policy is a floor within its major version: newer builds of the same
+# major are kept, an older build or a new major release is refused.
+foreach ($fn in @('Get-RequiredProviderVersion', 'Test-ProviderVersionSatisfied')) {
+  $fnAst = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $fn }, $true)
+  Assert ($null -ne $fnAst) "could not load $fn"
+  Invoke-Expression ($fnAst.Extent.Text.Replace('$PSScriptRoot', "'$($root.Replace("'", "''"))\bin'"))
+}
+Assert ($policy.providers.grok.version_match -eq 'minimum') 'grok must use the minimum (floor) policy'
+$major = ([version]$pinned).Major
+foreach ($v in @($pinned, "$major.99.0", "$major.$(([version]$pinned).Minor).999")) {
+  Assert (Test-ProviderVersionSatisfied -Provider grok -Version $v) "grok $v must satisfy the floor"
+}
+foreach ($v in @("$($major + 1).0.0", '0.0.1', '', 'garbage')) {
+  Assert (-not (Test-ProviderVersionSatisfied -Provider grok -Version $v)) "grok '$v' must not satisfy the floor"
+}
+Assert (Test-ProviderVersionSatisfied -Provider kimi -Version '') 'an unpinned provider is always satisfied'
+
 Assert ($installerText -match 'Get-RequiredProviderVersion') 'installer must read the repository version policy'
 Assert ($installerText -match 'Update-ProviderToExactVersion') 'installer must have an exact-version upgrade path'
 Assert ($installerText -match "update --version") 'installer must use the documented exact-version install command'

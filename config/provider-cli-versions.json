@@ -1,13 +1,14 @@
 {
   "schema_version": 1,
-  "description": "Exact third-party AI provider CLI versions this repository qualifies. A provider with a non-null supported_version must report exactly that version; anything else is unqualified and fails closed before paid work. Secret-free by contract: never add credentials, hosts, or account identifiers here.",
+  "description": "Exact third-party AI provider CLI versions this repository qualifies. A provider with a non-null supported_version must report exactly that version, or, when version_match is \"minimum\", that version or newer within the same major version; anything else is unqualified and fails closed before paid work. Secret-free by contract: never add credentials, hosts, or account identifiers here.",
   "providers": {
     "grok": {
       "command": "grok",
       "supported_version": "1.0.13",
+      "version_match": "minimum",
       "qualified_on": "2026-09-03",
       "exact_install_command": "grok update --version 1.0.13",
-      "notes": "Qualified by issue #251. ai-grok-review and ai-grok-implement parse this build's terminal JSON, stop reasons, usage/cost keys and session behaviour; a different build is not covered by that qualification."
+      "notes": "Minimum supported version (floor). Grok auto-updates, so any build at or above the floor within the same major version is accepted (a new major release still needs qualification); owner ruling 2026-09-23 (issue #686) replaced the exact pin, which blocked every review whenever Grok updated itself. Qualified originally by issue #251; the wrappers still refuse a build below the floor or one that reports no version."
     },
     "kimi": {
       "command": "kimi",

@@ -213,8 +213,9 @@ resolve_grok() {
 # this wrapper claimed a contract verified against a different one (issue #251).
 # Everything below — the single terminal JSON object, the accepted stop reasons,
 # the modelUsage-keyed model identity, the usage/cost fields, session resume —
-# is qualified against exactly one build, so an off-policy build fails BEFORE a
-# paid turn rather than producing results nobody qualified.
+# was qualified against one build. Policy may be an exact pin or a floor within
+# that major version (issue #686), so an off-policy build (older, or a new major
+# release) fails BEFORE a paid turn rather than producing unqualified results.
 # ---------------------------------------------------------------------------
 version_tool() {
   local self real dir
@@ -241,13 +242,24 @@ installed_grok_version() { # installed_grok_version BINARY
   bash "$tool" parse "$raw"
 }
 
+grok_version_satisfies() { # grok_version_satisfies BARE-VERSION
+  local tool; tool="$(version_tool)"
+  [ -n "$tool" ] && [ -f "$tool" ] && bash "$tool" satisfies grok "$1"
+}
+
+grok_version_rule() { # grok_version_rule WANT - human wording of the policy
+  local tool mode; tool="$(version_tool)"
+  mode="$(bash "$tool" match grok 2>/dev/null || printf exact)"
+  if [ "$mode" = minimum ]; then printf '%s or a newer %s.x' "$1" "${1%%.*}"; else printf 'exactly %s' "$1"; fi
+}
+
 require_supported_grok_version() { # require_supported_grok_version BINARY
   local want have; want="$(supported_grok_version)"
   [ -n "$want" ] || die 'the provider version policy pins no Grok version; refusing paid work against an unqualified build.'
   have="$(installed_grok_version "$1")"
   [ -n "$have" ] || die "could not read a version from the Grok binary ($1); refusing paid work against an unidentified build."
-  [ "$have" = "$want" ] && return 0
-  die "unqualified Grok version: installed $have, this repository qualifies exactly $want. Run the provider installer (or 'grok update --version $want') before paid reviewer work. Refusing to spend money against a contract nobody verified."
+  grok_version_satisfies "$have" && return 0
+  die "unqualified Grok version: installed $have, this repository requires $(grok_version_rule "$want"). Run the provider installer (or 'grok update --version $want') before paid reviewer work. Refusing to spend money against a contract nobody verified."
 }
 
 # Process diagnostics only — NEVER a completion signal.
@@ -531,7 +543,23 @@ lock_acquire() { # lock_acquire DIR LABEL [UPSTREAM] [SESSION] [SOURCE] [WORK_ID
 
 logical_session_meta() { # logical_session_meta UPSTREAM CALLER NAME
   local wanted_upstream="$1" wanted_caller="$2" wanted_name="$3" f remote identity
-  for f in "$STATE_DIR"/sessions/*/*.json; do
+  local -a candidates=() found=() rc=0
+  # One recursive grep narrows hundreds of records to those that mention the
+  # name; the per-record jq checks below stay authoritative. Spawning jq for
+  # every record made startup take many minutes on Windows (issue #686). A
+  # recursive grep takes no per-file arguments, so it cannot hit a command-line
+  # limit; any grep error (status 2+) falls back to checking every record.
+  [ -d "$STATE_DIR/sessions" ] || return 1
+  mapfile -t found < <(grep -rlF --include='*.json' -- "$wanted_name" "$STATE_DIR/sessions" 2>/dev/null; printf '%s\n' "rc=$?")
+  rc="${found[${#found[@]}-1]#rc=}"; unset 'found[${#found[@]}-1]'
+  if [ "$rc" -ge 2 ]; then
+    for f in "$STATE_DIR"/sessions/*/*.json; do candidates+=("$f"); done
+  else
+    for f in "${found[@]}"; do
+      case "${f#"$STATE_DIR"/sessions/}" in */*/*) continue ;; */*.json) candidates+=("$f") ;; esac
+    done
+  fi
+  for f in "${candidates[@]}"; do
     [ -f "$f" ] || continue
     [ "$(jq -r '.caller // empty' "$f" 2>/dev/null)" = "$wanted_caller" ] || continue
     [ "$(jq -r '.name // empty' "$f" 2>/dev/null)" = "$wanted_name" ] || continue
@@ -1478,10 +1506,10 @@ cmd_doctor() {
   if [ -z "$want_version" ]; then
     echo "version policy: UNREADABLE — config/provider-cli-versions.json is missing or malformed; paid work will refuse to start."
     rc=1
-  elif [ "$have_version" = "$want_version" ]; then
-    echo "version policy: OK (exactly $want_version, the qualified build)"
+  elif [ -n "$have_version" ] && grok_version_satisfies "$have_version"; then
+    echo "version policy: OK (installed $have_version; requires $(grok_version_rule "$want_version"))"
   else
-    echo "version policy: UNQUALIFIED — installed ${have_version:-unknown}, requires exactly $want_version."
+    echo "version policy: UNQUALIFIED — installed ${have_version:-unknown}, requires $(grok_version_rule "$want_version")."
     echo "                Paid reviewer work will refuse to start. Fix with the provider"
     echo "                installer, or 'grok update --version $want_version'."
     rc=1
