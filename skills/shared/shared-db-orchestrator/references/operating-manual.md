@@ -209,8 +209,12 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
   --issue <issue> --pr <pr> --head-sha <exact-head>
 ```
 
-The GitHub-backed cursor rotates Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3
-Contributor, and Gemini 3.8 Flash, then repeats across machines and restarts.
+The GitHub-backed cursor rotates the four active reviewers -- Muse Spark 1.3
+Contributor, Grok 4.6, Qwen 3.8 Max, and Gemini 3.8 Flash -- then repeats across
+machines and restarts. GLM 5.3, Kimi K3, DeepSeek, and Codex are out of rotation
+(owner instruction; `RETIRED_REVIEWERS` in the allocator and `absent` in
+`config/reviewer-registry.json`): never route a review to them and never wait
+for one of them.
 Gemini is eligible only where `ai-review-preflight usable gemini` exits zero;
 otherwise the selector skips it. `usable` is the only command that reconciles
 install health, quarantine, live qualification, and reviewer-registry
@@ -223,19 +227,18 @@ carrying the head SHA above a substantive report. Registry re-entry is always a
 reviewed shared-db change backed by that evidence; it is never an edit made to
 unblock an allocation. Retrying the same
 issue/PR/head returns the same assignment. Use only the returned wrapper:
-`ai-grok-review`, `ai-glm`, `ai-kimi`, `ai-muse`, `ai-gemini`, or — for the
-overflow provider below — `ai-codex-review`. Never override its model or
+`ai-muse`, `ai-grok-review`, `ai-qwen`, or `ai-gemini`. Never override its model or
 reasoning pin, and never call `agy` directly.
 
-The five rotation wrappers are **persistent**: they hold named sessions, so the
+The rotation wrappers are **persistent**: they hold named sessions, so the
 same session can be reused for rebuttals. `ai-codex-review` is **not**. It
 exposes five one-shot modes only — `plan-review`, `diff-review`,
 `security-review`, `visual-review`, `final-check` — with no session, resume, or
 continuation of any kind, and `bin/ai-review` whitelists exactly those five.
 
-**Codex is overflow, not rotation.** `codex-gpt-5.6-sol` is assigned only when
-every rotation provider has refused (quota, rate limit, auth, crash, non-start) or
-already failed on the exact head. A rotation provider that is already running
+**Codex is retired, not overflow.** `codex-gpt-5.6-sol` has been in
+`RETIRED_REVIEWERS` since 2026-09-06 and receives no assignments; the text below
+about Codex verdicts applies only to reading historical evidence. A rotation provider that is already running
 other reviews is not busy: it takes the new review concurrently in its own
 session (decision 21). It never takes an
 ordinary turn. An unreadable GitHub keeps the ordinary rotation rather than
@@ -257,7 +260,7 @@ Never spend an overflow review on work you expect to argue about. Overflow exist
 only for the case where every rotation provider has genuinely refused, not to
 review contentious work.
 
-**The retired `glm-5.2` label receives no new work** until an explicit owner
+**The retired `glm-5.2` and `glm-5.3` labels receive no new work** until an explicit owner
 instruction restores it. Qwen 3.8 Max is no longer retired (owner instruction,
 2026-09-04); it is gated only by its own preflight qualification. Historical
 assignments, failures, and replacement evidence stay readable and must be
@@ -265,8 +268,7 @@ recovered through `scripts/manage-migration-author-lanes.mjs`, never
 hand-edited.
 
 **No reviewer review ever blocks another independent review.** Every reviewer
-wrapper (`ai-grok-review`, `ai-kimi`, `ai-qwen`, `ai-gemini`, `ai-glm`, `ai-muse`,
-`ai-deepseek-agent`) locks only the exact review session or submission, never the
+wrapper (`ai-muse`, `ai-grok-review`, `ai-qwen`, `ai-gemini`) locks only the exact review session or submission, never the
 repository or the provider, so any number of reviews by one provider run at once
 in the same or different repositories (plan Step 7A, decision 21). Never skip a
 provider because it is already reviewing, and never read a provider running other
