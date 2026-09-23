@@ -26,9 +26,10 @@ Session record: [`HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-
 | 4.2 Try Claude Desktop On-demand tool access; measure | ⬜ open | | |
 | 4.3 Gateway decision (passthrough only) | ⬜ open | | |
 
-**Start here:** Phase 1, issue #703. Each phase is one session and one unproven
-outcome. Before each phase, re-read every later phase and fix anything the
-previous phase made untrue.
+**Start here:** Albert hands sessions only the parent issue #707. Follow the
+steps in #707's body: take the first unticked phase, do only that phase, tick it,
+comment the next child issue on #707, and stop. Before each phase, re-read every
+later phase and fix anything the previous phase made untrue.
 
 ---
 
