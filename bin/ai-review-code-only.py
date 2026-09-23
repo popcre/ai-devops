@@ -45,7 +45,7 @@ def digest(data):
 
 def source_digest(source):
     script = Path(__file__).with_name("ai-review-sandbox")
-    proc = subprocess.run(["sh", str(script), "digest", str(source)], stdout=subprocess.PIPE,
+    proc = subprocess.run(["bash", str(script), "digest", str(source)], stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, check=False)
     if proc.returncode:
         fail("source digest unavailable")
@@ -180,6 +180,24 @@ def validate_snapshot(stage, expected=None):
     if len(lines) != 1:
         fail("code-only marker malformed")
     record = json.loads(lines[0])
+    if not isinstance(record, dict):
+        fail("code-only marker malformed")
+    owner_file = stage.with_name(stage.name + ".owners.json")
+    if not owner_file.is_file() or owner_file.is_symlink():
+        fail("host-only evidence ownership is missing")
+    ownership = json.loads(owner_file.read_text(encoding="utf-8"))
+    if (not isinstance(ownership, dict) or ownership.get("schema_version") != 1 or
+            ownership.get("mode") != "code-only" or
+            ownership.get("marker_sha256") != digest(marker.read_bytes()) or
+            ownership.get("source_id") != record.get("source_id") or
+            ownership.get("export_head") != record.get("export_head") or
+            not isinstance(ownership.get("review_source"), str) or
+            not isinstance(ownership.get("owners"), list) or
+            any(not isinstance(owner, str) or not re.fullmatch(r"[a-z]+:[0-9a-f]{32}", owner)
+                for owner in ownership["owners"]) or
+            len(ownership["owners"]) != len(set(ownership["owners"]))):
+        fail("host-only evidence ownership is invalid")
+    Path(ownership["review_source"]).resolve(strict=True)
     sidecar = stage.with_name(stage.name + ".source.json")
     if not sidecar.is_file() or sidecar.is_symlink():
         fail("host-only source binding missing")
@@ -294,6 +312,13 @@ def create(args):
     sidecar = stage.with_name(stage.name + ".source.json")
     sidecar.write_text(json.dumps({"source": str(source)}, sort_keys=True) + "\n", encoding="utf-8")
     sidecar.chmod(0o600)
+    owner_file = stage.with_name(stage.name + ".owners.json")
+    owner_file.write_text(json.dumps({"schema_version": 1, "mode": "code-only",
+                                      "marker_sha256": digest((stage / ".ai-review-sandbox").read_bytes()),
+                                      "source_id": record["source_id"], "export_head": record["export_head"],
+                                      "review_source": str(source), "owners": []}, sort_keys=True) + "\n",
+                          encoding="utf-8")
+    owner_file.chmod(0o600)
     with (stage / ".git" / "info" / "exclude").open("a", encoding="utf-8") as out:
         out.write("\n/.ai-review-sandbox\n/AI-REVIEW-SANDBOX.md\n/.ai-review-*/\n/.ai/deepseek-sessions/\n")
     (stage / "AI-REVIEW-SANDBOX.md").write_text(
@@ -318,6 +343,13 @@ def clone_export(args):
     shutil.copyfile(source_export / ".ai-review-sandbox", stage / ".ai-review-sandbox")
     shutil.copyfile(source_export.with_name(source_export.name + ".source.json"),
                     stage.with_name(stage.name + ".source.json"))
+    owner_file = stage.with_name(stage.name + ".owners.json")
+    owner_file.write_text(json.dumps({"schema_version": 1, "mode": "code-only",
+                                      "marker_sha256": digest((stage / ".ai-review-sandbox").read_bytes()),
+                                      "source_id": record["source_id"], "export_head": record["export_head"],
+                                      "review_source": str(source_export), "owners": []}, sort_keys=True) + "\n",
+                          encoding="utf-8")
+    owner_file.chmod(0o600)
     (stage / "AI-REVIEW-SANDBOX.md").write_text(
         "# Sanitized code review export\n\nOnly explicitly approved code and contract paths are present. "
         "The two Git commits are synthetic and carry no source history. Review this directory only.\n", encoding="utf-8")
