@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Focused bulk classifier regression. Also runs from test-ai-task-gates.sh.
+# Focused bulk classifier regression for the Linux and Windows CI lanes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"

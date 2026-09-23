@@ -72,12 +72,6 @@ check 'every changed path is still classified individually' "jq -e '.changes|len
 check 'unmatched path falls back to code, not to the strongest class' \
   "[ \"\$(class_of 'random/thing.bin')\" = code ]"
 
-if bash "$ROOT/tests/test-ai-task-gates-bulk.sh"; then
-  ok 'bounded bulk path classification preserves every class'
-else
-  bad 'bounded bulk path classification preserves every class'
-fi
-
 printf 'consumer declarations\n'
 mkdir -p "$TMP/class/.ai-devops"
 cat > "$TMP/class/.ai-devops/task-gates.json" <<'EOF'

@@ -197,6 +197,7 @@
     "test-ai-muse-code.sh",
     "test-ai-muse.sh",
     "test-ai-qwen.sh",
+    "test-ai-task-gates-bulk.sh",
     "test-ai-test-local.sh",
     "test-ai-zcode.sh",
     "test-bin-cmd-launchers.sh",
@@ -230,6 +231,7 @@
     "test-ai-muse-code.sh",
     "test-ai-muse.sh",
     "test-ai-qwen.sh",
+    "test-ai-task-gates-bulk.sh",
     "test-ai-test-local.sh",
     "test-ai-zcode.sh",
     "test-bin-cmd-launchers.sh",
@@ -294,6 +296,7 @@
     [
       "test-ai-claude-permissions.sh",
       "test-ai-glm.sh",
+      "test-ai-task-gates-bulk.sh",
       "test-line-endings.sh",
       "test-windows-scripts.sh"
     ],
