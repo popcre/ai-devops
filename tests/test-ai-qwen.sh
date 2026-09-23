@@ -155,6 +155,7 @@ unset BAILIAN_CODING_PLAN_API_KEY
 # still return the actual trusted package executable and reject a lone /op.
 if (
   source <(sed -n '/^resolve_trusted_op() {/,/^}/p' "$SCRIPT")
+  cygpath(){ [ "$1" = -u ] && printf '%s\n' "$2"; }
   package="$TMP/localappdata/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_test"
   mkdir -p "$package"
   printf '#!/bin/sh\n' > "$package/op"
