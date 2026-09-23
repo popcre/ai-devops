@@ -296,5 +296,41 @@ rm -f "$AI_TEST_PRIVATE_ARGS"
 RAW_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/raw-paths.json" 2>&1)"; RAW_RC=$?
 check "private code-only route refuses a raw-evidence selection before provider" "[ '$RAW_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ]"
 
+# Exercise the real attachment-only DeepSeek wrapper without a network call.
+# The mock transport captures the complete JSON body that would be transmitted.
+mkdir -p "$TMP/private-mock-bin" "$TMP/private-mock-home"
+cat > "$TMP/private-mock-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+out=""; body=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -d) body="${2#@}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cp "$body" "$DEEPSEEK_STUB_REQUEST"
+pwd -P > "$DEEPSEEK_STUB_CWD"
+synthetic_head="$(git rev-parse HEAD)"
+python3 - "$out" "$synthetic_head" <<'PY'
+import json, sys
+json.dump({"choices":[{"message":{"content":"The selected code change was reviewed against its attached packet.\nVERDICT: APPROVE " + sys.argv[2]}}],"usage":None}, open(sys.argv[1], "w", encoding="utf-8"))
+PY
+printf 200
+EOF
+chmod +x "$TMP/private-mock-bin/curl"
+DEEPSEEK_STUB_REQUEST="$TMP/private-request.json"; export DEEPSEEK_STUB_REQUEST
+DEEPSEEK_STUB_CWD="$TMP/private-review-cwd"; export DEEPSEEK_STUB_CWD
+NETWORK_OUT="$(cd "$PRIVATE" && HOME="$TMP/private-mock-home" PATH="$TMP/private-mock-bin:$PATH" DEEPSEEK_API_KEY=synthetic-test-key AI_REVIEW_EVENT_DIR="$TMP/private-review-events" AI_REVIEW_SANDBOX_DIR="$TMP/private-sandboxes" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; NETWORK_RC=$?
+[ "$NETWORK_RC" -eq 0 ] || printf 'private DeepSeek fixture: %s\n' "$(printf '%s' "$NETWORK_OUT" | grep -Ei 'error:|refused|failed|invalid|verdict|packet' | tail -8)" >&2
+check "real private DeepSeek route completes with no network" "[ '$NETWORK_RC' -eq 0 ] && [ -s '$DEEPSEEK_STUB_REQUEST' ] && [ -s '$DEEPSEEK_STUB_CWD' ]"
+check "outbound DeepSeek payload includes approved code only" "jq -e '.messages | map(.content) | join(\"\\n\") | contains(\"print(\\\"changed\\\")\") and (contains(\"raw-row-sentinel\")|not) and (contains(\"history-raw-sentinel\")|not) and (contains(\"untracked-prompt-sentinel\")|not)' '$DEEPSEEK_STUB_REQUEST' >/dev/null && ! grep -Fq '$PRIVATE' '$DEEPSEEK_STUB_REQUEST'"
+if [ -s "$DEEPSEEK_STUB_CWD" ]; then
+  NETWORK_SNAPSHOT="$(cat "$DEEPSEEK_STUB_CWD")"
+  NETWORK_SYNTHETIC_HEAD="$(git -C "$NETWORK_SNAPSHOT" rev-parse HEAD 2>/dev/null || true)"
+  NETWORK_META="$(find "$NETWORK_SNAPSHOT/.ai/deepseek-sessions" -maxdepth 1 -name '*.meta.json' -print -quit 2>/dev/null)"
+  check "retained DeepSeek verdict binds original and synthetic source identity" "[ -n '$NETWORK_META' ] && jq -e --arg original '$PRIVATE_HEAD' --arg export '$NETWORK_SYNTHETIC_HEAD' --slurpfile marker '$NETWORK_SNAPSHOT/.ai-review-sandbox' '.status==\"complete\" and .verdict==\"APPROVE\" and .governed_head==\$export and .source_identity.code_only==\$marker[0] and .source_identity.code_only.original_head==\$original and .source_identity.code_only.export_head==\$export and (.source_identity.code_only.source_digest|length)==64 and (.source_identity.code_only.path_manifest_sha256|length)==64' '$NETWORK_META' >/dev/null"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
