@@ -12,7 +12,8 @@ ai_test_public_sources() {
 #!/usr/bin/env bash
 set -euo pipefail
 [ "${1:-}" = explain ] || exit 2
-mock_dir="$(cd "$(dirname "$0")" && pwd -P)" || exit 2
+mock_path="$(command -v ai-task-gates)" || exit 2
+mock_dir="$(cd "$(dirname "$mock_path")" && pwd -P)" || exit 2
 [ "${mock_dir##*/}" = public-identity-bin ] || exit 2
 fixture_root="$(cd "$mock_dir/.." && pwd -P)" || exit 2
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 2
