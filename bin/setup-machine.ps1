@@ -664,23 +664,32 @@ if ($SkipDesktopMcp) {
     Warn "Expected (MSIX): $msix"
   } else {
     New-Item -ItemType Directory -Force -Path (Split-Path $cfgPath) | Out-Null
-    $desktopResult = Update-AiDevOpsJsonFileAtomic -Path $cfgPath -Depth 12 -Update {
-      param($cfg)
-      if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
-      foreach ($name in $ManagedMcpServerNames) {
-        if (-not $ClaudeDesktopMcpServers.Contains($name)) { $null = $cfg["mcpServers"].Remove($name) }
-      }
-      foreach ($name in $ClaudeDesktopMcpServers.Keys) { $cfg["mcpServers"][$name] = $ClaudeDesktopMcpServers[$name] }
-      $null = $cfg["mcpServers"].Remove("vercel")
-      return $cfg
-    }
-    Ok "Updated $cfgPath atomically"
-    if ($desktopResult.Backup) {
-      Ok "  protected prior JSON: $($desktopResult.Backup)"
-      Note "  recovery: Copy-Item -LiteralPath '$($desktopResult.Backup)' -Destination '$cfgPath' -Force"
-    }
+    # A running Claude Desktop writes its in-memory server list back over this
+    # file (#703), so the sync script defers while the app is open and a
+    # detached waiter applies the change once Albert quits the app.
+    $desktopStateDir = Join-Path $CfgDir "state"
+    New-Item -ItemType Directory -Force -Path $desktopStateDir | Out-Null
+    $desktopDesired = Join-Path $desktopStateDir "claude-desktop-mcp-desired.json"
+    @{ servers = $ClaudeDesktopMcpServers; managed = $ManagedMcpServerNames } |
+      ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $desktopDesired -Encoding utf8
+    $desktopSync = Join-Path $RepoPath "bin\sync-claude-desktop-mcp.ps1"
+    $shellExe = (Get-Process -Id $PID).Path
+    & $shellExe -NoProfile -File $desktopSync -ConfigPath $cfgPath -DesiredPath $desktopDesired
+    $desktopExit = $LASTEXITCODE
     $desktopMcpList = ($ClaudeDesktopMcpServers.Keys -join ", ")
-    Ok "Wired token-free: $desktopMcpList - no tokens in the file"
+    if ($desktopExit -eq 3) {
+      $desktopLog = Join-Path $desktopStateDir "claude-desktop-mcp-sync.log"
+      Start-Process -FilePath $shellExe -WindowStyle Hidden -RedirectStandardOutput $desktopLog -ArgumentList @(
+        "-NoProfile", "-File", "`"$desktopSync`"", "-ConfigPath", "`"$cfgPath`"",
+        "-DesiredPath", "`"$desktopDesired`"", "-WaitForDesktopExit") | Out-Null
+      Warn "Claude Desktop is open, so its MCP list was NOT changed yet."
+      Warn "  Fully quit Claude Desktop (tray icon > Quit); the change applies then."
+      Warn "  Result is written to $desktopLog"
+    } elseif ($desktopExit -ne 0) {
+      Warn "Claude Desktop MCP sync failed (exit $desktopExit); the file is unchanged."
+    } else {
+      Ok "Wired token-free: $desktopMcpList - no tokens in the file"
+    }
     Warn "KNOWN FAULT (seen 2026-08-20): the app itself rewrites this file and"
     Warn "  DELETES the whole mcpServers block - every other key survives, no error,"
     Warn "  no org blocklist involved. Settings > Developer (not Connectors) is the"

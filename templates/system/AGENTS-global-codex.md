@@ -123,6 +123,11 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   a deployment, a database or infrastructure change, a production action — run
   `ai-task-gates check --before <action>`. If the change set outgrew the
   declared class, redeclare it and say so; never work around a refusal.
+- **Quote every time in EST (New York City).** All human-facing clock times in
+  replies, issues, comments, plans, handoffs, and status notes use EST/EDT
+  (America/New_York) and name the zone — e.g. `3:45 PM EST`. Never leave a
+  time unlabeled or in another zone. Machine filenames and ISO machine keys
+  may stay UTC.
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
   or protected files—never chat, command arguments, output, logs, or commits.
   Serialize 1Password access and load `secrets-to-1password`. Report leaks
