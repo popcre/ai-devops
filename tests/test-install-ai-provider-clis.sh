@@ -139,9 +139,9 @@ grep -q 'backed up' "$tmp/old"
 
 # grok_newer_version_above_the_minimum_is_kept (issue #686: Grok's floor, not an exact pin)
 newhome="$tmp/new-home"; mkdir -p "$newhome/.grok/bin"
-make_fake_grok "$newhome/.grok/bin/grok" '99.0.0'
+make_fake_grok "$newhome/.grok/bin/grok" '1.9.0'
 env HOME="$newhome" PATH="$minimal_path" bash "$script" grok >"$tmp/newer" 2>&1
-grep -q "SKIP grok already installed at supported version 99.0.0" "$tmp/newer"
+grep -q "SKIP grok already installed at supported version 1.9.0" "$tmp/newer"
 [ ! -e "$newhome/.grok/bin/.fake-grok-update" ] || { echo "FAIL: a newer Grok was downgraded"; exit 1; }
 
 # grok_failed_upgrade_restores_original_binary
@@ -190,8 +190,8 @@ done
 jq -e '.providers.grok.version_match == "minimum"' "$policy" >/dev/null
 pv="$repo/bin/ai-provider-version"
 [ "$(bash "$pv" match grok)" = minimum ] && [ "$(bash "$pv" match kimi)" = exact ]
-for v in "$WANT" 1.0.41 1.0.100 1.1.0 2.0.0; do bash "$pv" satisfies grok "$v" || { echo "FAIL: $v must satisfy the Grok floor"; exit 1; }; done
-for v in 1.0.9 0.9.99 1.0 garbage ''; do ! bash "$pv" satisfies grok "$v" || { echo "FAIL: '$v' must not satisfy the Grok floor"; exit 1; }; done
+for v in "$WANT" 1.0.41 1.0.100 1.1.0; do bash "$pv" satisfies grok "$v" || { echo "FAIL: $v must satisfy the Grok floor"; exit 1; }; done
+for v in 1.0.9 0.9.99 2.0.0 99.0.0 1.0 garbage ''; do ! bash "$pv" satisfies grok "$v" || { echo "FAIL: '$v' must not satisfy the Grok floor"; exit 1; }; done
 bash "$pv" check grok 'grok 1.0.41 (abc) [stable]' >/dev/null
 ! bash "$pv" check grok 'grok 1.0.5 (abc) [stable]' >/dev/null
 # Secret-free by contract.

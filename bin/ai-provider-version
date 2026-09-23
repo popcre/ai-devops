@@ -16,8 +16,10 @@
 #       Print the bare x.y.z found in a provider `--version` line.
 #   ai-provider-version match <provider>
 #       Print the policy's match mode: "exact" (default) or "minimum". A
-#       minimum entry treats supported_version as a floor, so a provider CLI
-#       that auto-updates past the floor stays usable (issue #686).
+#       minimum entry treats supported_version as a floor within its major
+#       version, so a provider CLI that auto-updates past the floor stays
+#       usable (issue #686) while a new major release is still refused until
+#       it is qualified.
 #   ai-provider-version satisfies <provider> <x.y.z>
 #       Exit 0 when the bare version satisfies policy, 1 when it does not.
 #   ai-provider-version check <provider> <version-text>
@@ -79,7 +81,7 @@ satisfies() { # satisfies PROVIDER BARE-VERSION
   local want mode got="$2"; want="$(required_version "$1")"; mode="$(match_mode "$1")"
   [ -n "$want" ] || return 0
   [[ "$got" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] || return 1
-  if [ "$mode" = minimum ]; then version_ge "$got" "$want"; else [ "$got" = "$want" ]; fi
+  if [ "$mode" = minimum ]; then [ "${got%%.*}" = "${want%%.*}" ] && version_ge "$got" "$want"; else [ "$got" = "$want" ]; fi
 }
 
 parse_version() { # parse_version TEXT - the FIRST x.y.z in the text

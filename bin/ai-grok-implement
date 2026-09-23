@@ -98,8 +98,9 @@ native_path() { # native_path POSIX_PATH
 # Exact supported Grok version — one source of truth in
 # config/provider-cli-versions.json (issue #251). This wrapper's contract
 # (headless result JSON, worktree behaviour, patch export) is qualified against
-# exactly one build, so an off-policy build is refused before paid work rather
-# than trusted silently.
+# one build; policy is an exact pin or a floor within that major version
+# (issue #686), so an older build or a new major release is refused before
+# paid work rather than trusted silently.
 # ---------------------------------------------------------------------------
 version_tool() {
   local self real dir

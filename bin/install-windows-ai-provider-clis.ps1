@@ -100,7 +100,7 @@ function Get-RequiredProviderVersion {
 
 function Test-ProviderVersionSatisfied {
   # Mirrors bin/ai-provider-version satisfies: "exact" (default) needs the same
-  # version; "minimum" accepts that version or newer, compared numerically per
+  # version; "minimum" accepts that version or newer within the same major, compared numerically per
   # part (issue #686: Grok auto-updates past its floor).
   param([Parameter(Mandatory)][string]$Provider, [AllowNull()][AllowEmptyString()][string]$Version)
   $required = Get-RequiredProviderVersion -Provider $Provider
@@ -112,7 +112,8 @@ function Test-ProviderVersionSatisfied {
   if (-not $mode) { $mode = 'exact' }
   if ($mode -eq 'exact') { return $Version -eq $required }
   if ($mode -ne 'minimum') { throw "Unknown version_match '$mode' for $Provider" }
-  return ([version]$Version) -ge ([version]$required)
+  # Same major version only: a new major release needs its own qualification.
+  return (([version]$Version).Major -eq ([version]$required).Major) -and (([version]$Version) -ge ([version]$required))
 }
 
 function Get-ReportedProviderVersion {

@@ -213,8 +213,9 @@ resolve_grok() {
 # this wrapper claimed a contract verified against a different one (issue #251).
 # Everything below — the single terminal JSON object, the accepted stop reasons,
 # the modelUsage-keyed model identity, the usage/cost fields, session resume —
-# is qualified against exactly one build, so an off-policy build fails BEFORE a
-# paid turn rather than producing results nobody qualified.
+# was qualified against one build. Policy may be an exact pin or a floor within
+# that major version (issue #686), so an off-policy build (older, or a new major
+# release) fails BEFORE a paid turn rather than producing unqualified results.
 # ---------------------------------------------------------------------------
 version_tool() {
   local self real dir
