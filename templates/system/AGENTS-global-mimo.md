@@ -80,7 +80,7 @@ in the issue, plan, or handoff — the reply to Albert stays short.
 
 ---
 
-# Global operating rules — Albert's standing instructions (Codex edition)
+# Global operating rules — Albert's standing instructions (Xiaomi MiMo edition)
 
 Project facts belong in each repository's `AGENTS.md`; machine facts belong in
 `templates/system/machine-atlas.md`; full procedures belong in skills and docs.
@@ -104,15 +104,13 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
 - **Keep canonical checkouts landing-only.** For write-capable work in a Git
-  repository, start the task in its own worktree from current upstream. In the
-  Codex app, select **Worktree** under the composer; if a task already started
-  in Local, use Handoff to move it before editing. Do not edit a shared local
-  checkout except for an explicit, serialized landing, installation, or
-  recovery operation after proving no other task is using it. Read-only work
-  may remain Local. When a project folder contains multiple child Git
-  repositories and is not itself a repository, Codex cannot offer one managed
-  worktree for the container; create a dedicated current-upstream worktree for
-  each child repository before editing it.
+  repository, create your own worktree from current upstream before editing
+  (`git fetch origin && git worktree add <path> -b <branch> origin/main`).
+  Do not edit a shared local checkout except for an explicit, serialized
+  landing, installation, or recovery operation after proving no other task is
+  using it. Read-only work may remain in the shared checkout. When a project
+  folder contains multiple child Git repositories and is not itself a
+  repository, create a dedicated worktree for each child repository you edit.
 
 ## Safety rules that apply everywhere
 
@@ -159,8 +157,7 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   row data belongs to the application. Every shared-database STRUCTURE change
   is authored first in `u2giants/shared-db` through its branch-and-PR workflow.
   Outside-sourced bulk loads into curated Master Data also use that governed
-  route. Prove the target database immediately before every write. Load
-  `codex-shared-db-change` for the full procedure.
+  route. Prove the target database immediately before every write.
 - **Shared-db orchestrator gets the minimum.** Send it only work that changes
   the database's SHAPE, or a curated Master Data load. Proofs, monitoring,
   reports, tooling, scripts, docs, and repository maintenance never go there,
@@ -170,9 +167,8 @@ Project facts belong in each repository's `AGENTS.md`; machine facts belong in
   database structure) or non-orchestrator work (it does not).
 - **Sign everything posted to GitHub.** End every issue, pull request, comment,
   and review body you post with one line naming the chat that wrote it:
-  `Posted by <Claude|Codex> chat <id> on <machine>`, where `<id>` is
-  `$CLAUDE_CODE_SESSION_ID` (Claude) or `$CODEX_THREAD_ID` (Codex). If the ID
-  is empty, write `unknown` rather than omit the line. When editing a body,
+  `Posted by MiMo chat <id> on <machine>`, where `<id>` is the session
+  identifier if the app exposes one (write `unknown` otherwise). When editing a body,
   keep existing signatures and add yours.
 - **Reviewer rotation:** the shared-db allocator is the one source of truth
   for who reviews. If a reviewer is unreachable, check membership first, never
@@ -197,7 +193,7 @@ model calls, not by the number of sessions. Every extra step in a turn re-sends
 the whole turn so far, so cost grows faster than the work does.
 
 - **Split before you start.** If a task plausibly needs more than ~30 steps,
-  break it into independent pieces and `spawn_agent` one per piece. A subagent
+  break it into independent pieces and dispatch a subagent per piece. A subagent
   carries its own context; work it does is not re-sent through your turn.
 - **Delegate any wide read.** Repository surveys, "find every place that…",
   multi-file audits, and log sweeps go to a subagent that returns the answer,
@@ -212,7 +208,7 @@ the whole turn so far, so cost grows faster than the work does.
 - **Return conclusions, not transcripts.** A subagent's reply should be the
   finding and the evidence for it, not the files or output it read to get there.
 - **Do not fan out for small work.** A task under ~10 steps costs more to
-  delegate than to do. Spawning is a tool for breadth, not a reflex.
+  delegate than to do. Dispatching is a tool for breadth, not a reflex.
 - **Stop and report at natural boundaries.** A turn that has run long is more
   expensive per unit of progress than a fresh one; hand back and continue rather
   than pushing one turn further.
@@ -250,8 +246,8 @@ and a long-running job is an issue that says what "finished" means, waited on
 with `--until` as a safety check-in (whichever comes first releases the wait).
 Never hold such a wait open for days.
 
-A blocker issue gets an owner at birth, and that owner is you. When you open
-an issue whose purpose is to block other work — a gate bug, a shared-db
+A blocker issue gets an owner at birth, and that owner is you. When you open an
+issue whose purpose is to block other work — a gate bug, a shared-db
 handover, any dependency another session will wait on — either assign
 yourself (or the session that will own it) and say so in the issue, or hand it
 to a named queue owner with an `owner:` line in the issue body. Never leave it
@@ -262,9 +258,6 @@ the body or a comment is the machine-readable marker of who owns it.
 
 ## Model, engineering, and Git rules
 
-- **GPT-5.6 uses `low` or `medium` reasoning only**—never `high`, `none`, or
-  `minimal`. Set it explicitly and verify the run header. Split a harder task;
-  do not raise the setting.
 - Before requesting the first independent review, self-audit the whole class of each risk (all sibling paths,
   links, trust points) and fix them together; when a review rejects, fix the whole class, not just the instance.
 - Prefer permanent, fewest-moving-parts fixes. Make fallbacks visible, keep
@@ -296,14 +289,6 @@ the body or a comment is the machine-readable marker of who owns it.
   exceptions are DesignFlow (`develop`, never a self-merge) and a PR Albert
   explicitly said he wants to review first. If a merge is blocked by a failing
   check or a conflict, fix it — say so only if you cannot.
-- **Documentation-only merges do not need Albert's permission to skip checks.**
-  When every changed file in a PR you own is prose — Markdown, plans, handoffs,
-  notes, comments — and no code, test, script, workflow, or configuration file is
-  touched, merge it with the owner override immediately rather than waiting on
-  required checks or asking. Verify the file list first; if even one file is
-  executable or configuration, the normal checks apply and this exception does
-  not. Do not present this as a safety tradeoff — a prose file cannot break a
-  build.
 - **A documentation-only pull request does not wait for checks, and does not
   need permission to skip them.** Check the changed-file list first. If every
   file is prose - Markdown, docs, plans, handoffs, notes - merge it the moment it
@@ -316,9 +301,10 @@ the body or a comment is the machine-readable marker of who owns it.
   Confirm with `gh pr view <n> --json state`, delete the remote branch, and
   continue — do not report it as a failed merge.
 - Back up configuration before editing it, change existing settings in place,
-  avoid duplicate keys, and validate the result. Codex configuration is
-  `~/.codex/config.toml`; never change Claude configuration as part of Codex
-  setup.
+  avoid duplicate keys, and validate the result. Xiaomi MiMo configuration is
+  `~/.config/mimocode/mimocode.jsonc`; this global file is
+  `~/.config/mimocode/AGENTS.md`, installed by ai-devops. Never change Claude,
+  Codex, or ZCode configuration as part of MiMo work.
 - **Wait on CI with the repository's bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.

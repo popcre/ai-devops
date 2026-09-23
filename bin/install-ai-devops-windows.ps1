@@ -29,6 +29,7 @@ param(
     [string]$ClaudeHome = (Join-Path $HOME ".claude"),
     [string]$CodexHome = (Join-Path $HOME ".codex"),
     [string]$ZCodeHome = (Join-Path $HOME ".zcode"),
+    [string]$MimoHome = (Join-Path $HOME ".config\mimocode"),
     [switch]$SkillsDryRun,
     # Replace an installed global that differs from the repo copy. Without this
     # switch a differing global is reported and left alone. The old file is
@@ -669,6 +670,14 @@ Install-GlobalFile `
     -Source (Join-Path $RepoPath "templates\system\AGENTS-global-zcode.md") `
     -Dest (Join-Path $ZCodeHome "AGENTS.md") `
     -Label "ZCode global instructions"
+# Xiaomi MiMo reads its global AGENTS.md beside its config file. Install it only
+# where MiMo has created that folder, so machines without MiMo stay untouched.
+if (Test-Path -LiteralPath $MimoHome) {
+    Install-GlobalFile `
+        -Source (Join-Path $RepoPath "templates\system\AGENTS-global-mimo.md") `
+        -Dest (Join-Path $MimoHome "AGENTS.md") `
+        -Label "Xiaomi MiMo global instructions"
+}
 
 # A dry run is a preview of everything, globals included, and stops before the
 # environment checks that would otherwise look like part of the plan.
