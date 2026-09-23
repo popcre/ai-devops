@@ -61,7 +61,7 @@ A turn is valid only when the wrapper proves OpenCode's structured stop event, t
 exact session ID, and non-empty response text. Do not substitute GLM, another model,
 or your own opinion without stating that Muse did not complete.
 
-Muse Code engine trial: prefix a command with `AI_MUSE_ENGINE=muse-code` to run the
-same conversation through Meta's pinned Muse Code CLI instead of OpenCode. Proof is
-its final `run.terminal.completed` event in the wrapper-chosen session. Keep one
-engine per named session; the default engine remains OpenCode.
+Native Muse Code engine is the default. Prefix a command with `AI_MUSE_ENGINE=opencode`
+to run the same conversation through the pinned OpenCode harness instead. Muse Code
+proof is its final `run.terminal.completed` event in the wrapper-chosen session. Keep
+one engine per named session.
