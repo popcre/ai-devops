@@ -221,7 +221,8 @@ if grep -q '\$McpServerCatalog\["chrome-devtools"\]' bin/setup-machine.ps1 &&
    grep -Fq '$ClaudeCodeMcpNames = @("1password")' bin/setup-machine.ps1 &&
    grep -Fq '$ClaudeDesktopMcpNames = @("1password", "ag-grid", "playwright", "recall-ai", "synology-monitor", "trigger")' bin/setup-machine.ps1 &&
    grep -Fq 'if (-not $ClaudeCodeMcpServers.Contains($name))' bin/setup-machine.ps1 &&
-   grep -Fq 'if (-not $ClaudeDesktopMcpServers.Contains($name))' bin/setup-machine.ps1; then
+   grep -Fq '@{ servers = $ClaudeDesktopMcpServers; managed = $ManagedMcpServerNames }' bin/setup-machine.ps1 &&
+   grep -Fq 'if (-not $servers.ContainsKey($name)) { $null = $cfg["mcpServers"].Remove($name)' bin/sync-claude-desktop-mcp.ps1; then
   ok "Claude Code user scope stays lean and cannot restore Chrome DevTools or codex-cli"
 else bad "Claude Code user scope is not explicitly frozen"; fi
 if grep -q 'configure-codex-mcps.ps1' bin/setup-machine.ps1 &&
