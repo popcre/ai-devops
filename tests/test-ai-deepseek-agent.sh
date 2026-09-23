@@ -42,7 +42,7 @@ out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -d) [ -z "
 if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"private-provider-error-body"}' > "$out"; printf 500
 elif [ -n "${DEEPSEEK_STUB_TOOLCALL:-}" ] && { [ "${DEEPSEEK_STUB_TOOLCALL_ALWAYS:-0}" = 1 ] || [ ! -e "$DEEPSEEK_STUB_TOOLCALL_MARK" ]; }; then
   : > "$DEEPSEEK_STUB_TOOLCALL_MARK"
-  python -c 'import json,os,sys; json.dump({"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":os.environ["DEEPSEEK_STUB_TOOLCALL"]}}]}}]},open(sys.argv[1],"w"))' "$out"; printf 200
+  python -c 'import json,os,sys; json.dump({"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":os.environ["DEEPSEEK_STUB_TOOLCALL"]}}]}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200
 elif [ "${DEEPSEEK_STUB_INVALID:-0}" = 1 ]; then printf '{"choices":[{"message":{"content":null}}]}' > "$out"; printf 200
 else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
@@ -485,7 +485,7 @@ check "repo-tools helper never handles the provider key" "! grep -qiE 'bearer|ap
 printf 'tool-proof line 1\nquote me: deepseek-can-read\n' > "$TMP/repo/proof.txt"
 TOOL_REQ="$TMP/tool-request.json"; export DEEPSEEK_STUB_TOOLCALL_MARK="$TMP/toolcall-mark"
 CALLS_BEFORE="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
-DEEPSEEK_STUB_REQUEST="$TOOL_REQ" DEEPSEEK_STUB_TOOLCALL='{"path":"proof.txt"}' DEEPSEEK_STUB_REPLY='quoted: deepseek-can-read' run send 'quote proof.txt' --repo-tools > "$TMP/tools-send.out" 2>&1
+DEEPSEEK_STUB_USAGE='{"prompt_tokens":100,"completion_tokens":7,"total_tokens":107}' DEEPSEEK_STUB_REQUEST="$TOOL_REQ" DEEPSEEK_STUB_TOOLCALL='{"path":"proof.txt"}' DEEPSEEK_STUB_REPLY='quoted: deepseek-can-read' run send 'quote proof.txt' --repo-tools > "$TMP/tools-send.out" 2>&1
 check "--repo-tools runs a tool round and returns the final answer" "grep -q 'quoted: deepseek-can-read' '$TMP/tools-send.out' && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq \$(( CALLS_BEFORE + 2 ))"
 check "--repo-tools sends the file content back as a tool message" "jq -e '.tools and (.messages|map(select(.role==\"tool\"))|.[0].content|contains(\"2: quote me: deepseek-can-read\"))' '$TOOL_REQ'"
 rm -f "$DEEPSEEK_STUB_TOOLCALL_MARK"
@@ -495,6 +495,7 @@ check "tool loop is bounded and the last request withholds tools" "test \"\$(wc 
 DEEPSEEK_STUB_REQUEST="$TOOL_REQ" run send 'no tools' > /dev/null 2>&1
 check "an ordinary send offers no repository tools" "jq -e 'has(\"tools\")|not' '$TOOL_REQ'"
 TOOLS_SID="$(sed -n 's/^SESSION_ID: //p' "$TMP/tools-send.out" | head -1)"
+check "usage counts every paid round of a tool turn" "test -n '$TOOLS_SID' && jq -es '.[-1].counters.input==200 and .[-1].counters.output==14 and .[-1].counters.total==214' '$TMP/repo/.ai/deepseek-sessions/$TOOLS_SID.usage.jsonl'"
 check "the turn intent records repository access so recovery keeps it" "test -n '$TOOLS_SID' && jq -es 'length>0 and all(.repository_access==true)' '$TMP/repo/.ai/deepseek-sessions/$TOOLS_SID'.*/intent.json"
 check "wrapper runs each tool step under the wall-budget timeout" "grep -q 'timeout -k 5 \"\$max_time\" \"\$PYTHON\" \"\$SOURCE_TOOLS/../tools/deepseek_repo_tools.py\" step' '$SCRIPT'"
 check "repo-tools helper offline cases (case, trailing dot, streams, large files, budgets)" "python '$ROOT/tests/test_deepseek_repo_tools.py' >/dev/null"

@@ -11,6 +11,8 @@ response, runs the requested tools and writes the next request (step).
   deepseek_repo_tools.py init MESSAGES_JSON MODEL REQUEST_OUT
   deepseek_repo_tools.py step ROOT REQUEST RESPONSE LOG ROUND
       exit 10: next request written; exit 0: RESPONSE is the final answer
+  deepseek_repo_tools.py usage-sum OUT FINAL_RESPONSE [ROUND_RESPONSE...]
+      one usage record summed over every paid round of a tool turn
   deepseek_repo_tools.py --run-tool ROOT NAME ARGS_JSON   (offline test hook)
 
 Guards: relative paths only, no '..' escape, no symlink or reparse point
@@ -119,7 +121,7 @@ def resolve(root, rel):
     real_parts = [] if real == real_root else os.path.relpath(real, real_root).replace(os.sep, "/").split("/")
     if any(is_denied(p) for p in real_parts):
         raise Refused("path is not readable")
-    if (parts and is_secret(parts[-1])) or (real_parts and is_secret(real_parts[-1])):
+    if any(is_secret(p) for p in parts) or any(is_secret(p) for p in real_parts):
         raise Refused("secret-looking files are not readable")
     return cur, "/".join(parts) or "."
 
@@ -132,14 +134,18 @@ def text_lines(path):
     if st.st_size > MAX_SCAN_BYTES:
         raise Refused(f"file is larger than {MAX_SCAN_BYTES} bytes")
     fh = open(path, "rb")
-    if b"\0" in fh.read(8192):
-        fh.close()
-        raise Refused("binary file")
+    # Scan the whole file (bounded by MAX_SCAN_BYTES), not only its head.
+    for chunk in iter(lambda: fh.read(1 << 20), b""):
+        if b"\0" in chunk:
+            fh.close()
+            raise Refused("binary file")
     fh.seek(0)
 
     def gen():
         with fh:
             for raw in fh:
+                if b"\0" in raw:
+                    raise Refused("binary file")
                 yield raw.decode("utf-8", errors="replace").rstrip("\r\n")
     return gen(), st.st_size
 
@@ -184,8 +190,10 @@ def tool_read_file(root, args):
 
 
 def tool_grep(root, args):
+    if not isinstance(args.get("pattern"), str):
+        raise Refused("pattern must be a string")
     try:
-        rx = re.compile(args.get("pattern") or "")
+        rx = re.compile(args["pattern"])
     except re.error as exc:
         raise Refused(f"invalid regular expression: {exc}")
     base, _ = resolve(root, args.get("path", "."))
@@ -198,20 +206,25 @@ def tool_grep(root, args):
         except (Refused, OSError):
             return
         relp = os.path.relpath(fp, root).replace(os.sep, "/")
-        for n, line in enumerate(lines, 1):
-            if n % 1000 == 0 and time.monotonic() > deadline:
-                return
-            if rx.search(line):
-                matches.append(f"{relp}:{n}:{line[:300]}")
-                if len(matches) >= MAX_GREP_MATCHES:
-                    return
+        found = []
+        try:
+            for n, line in enumerate(lines, 1):
+                if n % 1000 == 0 and time.monotonic() > deadline:
+                    break
+                if rx.search(line):
+                    found.append(f"{relp}:{n}:{line[:300]}")
+                    if len(matches) + len(found) >= MAX_GREP_MATCHES:
+                        break
+        except (Refused, OSError):
+            return  # binary part found mid-file: report nothing from it
+        matches.extend(found)
 
     if stat.S_ISREG(os.lstat(base).st_mode):
         scan(base)
     else:
         for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
             dirnames[:] = sorted(d for d in dirnames
-                                 if not is_denied(d) and not is_link(os.lstat(os.path.join(dirpath, d))))
+                                 if not is_denied(d) and not is_secret(d) and not is_link(os.lstat(os.path.join(dirpath, d))))
             for f in sorted(filenames):
                 fp = os.path.join(dirpath, f)
                 if is_secret(f) or is_link(os.lstat(fp)):
@@ -247,6 +260,8 @@ def run_tool(root, name, raw_args):
         return f"Error: {exc}"
     except OSError as exc:
         return f"Error: {exc.strerror or 'unreadable'}"
+    except Exception as exc:  # a malformed request must never end the paid turn
+        return f"Error: tool failed ({type(exc).__name__})"
     if len(out) > MAX_OUTPUT_CHARS:
         out = out[:MAX_OUTPUT_CHARS] + "\n... output truncated"
     return out
@@ -314,8 +329,39 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
     return 10
 
 
+USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens",
+                "prompt_cache_hit_tokens", "prompt_cache_miss_tokens")
+
+
+def cmd_usage_sum(out_file, final_file, *round_files):
+    """Write final_file with its usage replaced by the sum over every paid
+    round. A counter missing from any round is dropped, never guessed."""
+    with open(final_file, encoding="utf-8") as fh:
+        final = json.load(fh)
+    usages = []
+    for path in list(round_files) + [final_file]:
+        with open(path, encoding="utf-8") as fh:
+            u = json.load(fh).get("usage")
+        usages.append(u if isinstance(u, dict) else {})
+    total = {}
+    for key in USAGE_FIELDS:
+        vals = [u.get(key) for u in usages]
+        if all(isinstance(v, int) and not isinstance(v, bool) for v in vals):
+            total[key] = sum(vals)
+    reasoning = [(u.get("completion_tokens_details") or {}).get("reasoning_tokens") for u in usages]
+    if all(isinstance(v, int) and not isinstance(v, bool) for v in reasoning):
+        total["completion_tokens_details"] = {"reasoning_tokens": sum(reasoning)}
+    final["usage"] = total
+    final["tool_rounds_summed"] = len(usages)
+    with open(out_file, "w", encoding="utf-8") as fh:
+        json.dump(final, fh)
+    return 0
+
+
 def main():
     a = sys.argv[1:]
+    if len(a) >= 3 and a[0] == "usage-sum":
+        return cmd_usage_sum(*a[1:])
     if len(a) == 4 and a[0] == "--run-tool":
         print(run_tool(a[1], a[2], a[3]))
         return 0
@@ -323,7 +369,8 @@ def main():
         return cmd_init(a[1], a[2], a[3])
     if len(a) == 6 and a[0] == "step":
         return cmd_step(*a[1:])
-    print("usage: deepseek_repo_tools.py init MSGS MODEL REQ | step ROOT REQ RESP LOG ROUND | --run-tool ROOT NAME ARGS",
+    print("usage: deepseek_repo_tools.py init MSGS MODEL REQ | step ROOT REQ RESP LOG ROUND | "
+          "usage-sum OUT FINAL [ROUND...] | --run-tool ROOT NAME ARGS",
           file=sys.stderr)
     return 3
 

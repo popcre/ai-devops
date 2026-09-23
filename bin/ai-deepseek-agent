@@ -592,7 +592,9 @@ PY
     # pathological regular expression.
     timeout -k 5 "$max_time" "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" step "$tools_root" "$req_file" "$resp_file" "$REPO_TOOLS_LOG" "$tools_round" || step_rc=$?
     [ "$step_rc" = 10 ] || { [ "$step_rc" = 0 ] || { rc=1; echo "Error: repository tool step failed (exit $step_rc; 124 means the ${DEEPSEEK_TOOLS_MAX_WALL:-900}s wall budget ran out)." >&2; }; break; }
-    cp "$resp_file" "$resp_file.round-$tools_round" 2>/dev/null || true
+    # Every paid round is retained: usage sums them, and a later failure
+    # leaves them as private evidence behind the pending fence.
+    cp "$resp_file" "$resp_file.round-$tools_round" || { rc=1; break; }
     tools_round=$(( tools_round + 1 ))
   done
   http_code="$(cat "$status_file" 2>/dev/null || true)"
@@ -628,7 +630,15 @@ record_usage() {
   # Optional accounting runs only after the conversation is durably published.
   local usage_record usage_run="${DEEPSEEK_RECOVERY_EVENT_RUN_ID:-${AI_REVIEW_EVENT_RUN_ID:-}}"
   if [ -f "$SESS_DIR/$ID.usage.jsonl" ] && jq -se --arg run "$usage_run" 'any(.[]; .run_id==$run)' "$SESS_DIR/$ID.usage.jsonl" >/dev/null 2>&1; then return 0; fi
-  if usage_record="$("$PYTHON" "$SOURCE_TOOLS/../tools/reviewer_usage.py" deepseek "$API_RESPONSE_FILE" --provider deepseek --model "$MODEL" --session "$ID" --run "$usage_run")"; then
+  local usage_src="$API_RESPONSE_FILE" rounds=() round
+  for round in "$API_RESPONSE_FILE".round-*; do [ -f "$round" ] && [ ! -L "$round" ] && rounds+=("$round"); done
+  if [ "${#rounds[@]}" -gt 0 ]; then
+    # A repository-tool turn made several paid requests; count all of them.
+    usage_src="$API_RESPONSE_FILE.usage-sum.json"
+    "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" usage-sum "$usage_src" "$API_RESPONSE_FILE" "${rounds[@]}" \
+      || { echo 'Warning: tool-round usage could not be summed; paid responses preserved.' >&2; return 0; }
+  fi
+  if usage_record="$("$PYTHON" "$SOURCE_TOOLS/../tools/reviewer_usage.py" deepseek "$usage_src" --provider deepseek --model "$MODEL" --session "$ID" --run "$usage_run")"; then
     { [ ! -L "$SESS_DIR/$ID.usage.jsonl" ] && printf '%s\n' "$usage_record" >> "$SESS_DIR/$ID.usage.jsonl"; } \
       || echo 'Warning: usage publication unavailable; paid response preserved.' >&2
   else

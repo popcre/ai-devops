@@ -82,6 +82,33 @@ with tempfile.TemporaryDirectory() as tmp:
           ".env" not in out and ".git" not in out and "node_modules" not in out and "outside" not in out)
     check("invalid regular expression is refused", run(root, "grep", {"pattern": "("}).startswith("Error: invalid"))
 
+    # Secret-named directories, late binary content, non-string arguments.
+    os.makedirs(os.path.join(root, "credentials"))
+    with open(os.path.join(root, "credentials", "plain.txt"), "w") as fh:
+        fh.write("needle-in-secret-dir\n")
+    check("secret-named directory is not readable",
+          run(root, "read_file", {"path": "credentials/plain.txt"}).startswith("Error: secret"))
+    check("grep skips secret-named directories", "secret-dir" not in run(root, "grep", {"pattern": "needle"}))
+    with open(os.path.join(root, "late.bin"), "wb") as fh:
+        fh.write(b"text needle\n" * 2000 + b"x\0y needle\n")
+    check("binary content after the first 8 KB is refused",
+          run(root, "read_file", {"path": "late.bin", "start_line": 1, "end_line": 3}).startswith("Error: binary"))
+    check("grep reports nothing from a late-binary file", "late.bin" not in run(root, "grep", {"pattern": "needle"}))
+    check("non-string grep pattern is a tool error", run(root, "grep", {"pattern": 5}).startswith("Error: pattern"))
+    check("non-string path is a tool error", run(root, "read_file", {"path": ["a"]}).startswith("Error:"))
+
+    # usage-sum counts every paid round; a missing counter is dropped.
+    r1, r2, fin, out_u = (os.path.join(tmp, n) for n in ("r1.json", "r2.json", "fin.json", "sum.json"))
+    json.dump({"usage": {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11}}, open(r1, "w"))
+    json.dump({"usage": {"prompt_tokens": 20, "completion_tokens": 2, "total_tokens": 22, "prompt_cache_hit_tokens": 5}}, open(r2, "w"))
+    json.dump({"choices": [{"message": {"content": "done"}}],
+               "usage": {"prompt_tokens": 30, "completion_tokens": 3, "total_tokens": 33}}, open(fin, "w"))
+    subprocess.run([sys.executable, HELPER, "usage-sum", out_u, fin, r1, r2], check=True)
+    summed = json.load(open(out_u))
+    check("usage-sum adds every round", summed["usage"].get("prompt_tokens") == 60 and summed["usage"].get("total_tokens") == 66)
+    check("usage-sum drops a counter one round lacks", "prompt_cache_hit_tokens" not in summed["usage"])
+    check("usage-sum keeps the final answer", summed["choices"][0]["message"]["content"] == "done")
+
     # Grep time budget stops a long search instead of running unbounded.
     saved = t.GREP_SECONDS
     t.GREP_SECONDS = 0
