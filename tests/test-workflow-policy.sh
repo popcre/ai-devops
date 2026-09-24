@@ -246,7 +246,7 @@ if grep -F 'ai-devops-windows-qualified]' "$workflow" | grep -q 'runs-on'; then
 ' >&2
   exit 1
 fi
-blacksmith_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*$' "$workflow" | tr -d '')"
+blacksmith_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*$' "$workflow" | tr -d '\r')"
 [ "$blacksmith_pool" -eq 4 ] || {
   printf 'FAIL: all four Windows verify jobs must run on Blacksmith
 ' >&2

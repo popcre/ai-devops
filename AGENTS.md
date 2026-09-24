@@ -99,7 +99,7 @@ pipeline. The recovery procedure lives in
 - Never overlap a local full test series with a GitHub job on the same physical
   Windows host or a shared installed runtime. Check that boundary with
   `bin/ai-test-local --check-collision`; a busy remote self-hosted runner does
-  not create a machine-wide stop, and the Blacksmith lanes (all CI since 2026-09-23) remain
+  not create a machine-wide stop, and GitHub-hosted and Blacksmith lanes remain
   usable. For runner or CI work, follow [`docs/task-router.md`](docs/task-router.md).
 - Do not verify the same commit twice. The merge queue tests the exact landing
   commit; rerun only a failed or changed result.
