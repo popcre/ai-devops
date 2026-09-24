@@ -980,6 +980,49 @@ prepare_auth_link() { # SOURCE ISOLATED-HOME; publish without unlinking a live r
   [ "$source" -ef "$auth_home/auth.json" ]
 }
 
+grok_isolated_home() { # print the isolated GROK_HOME; it must share a volume with auth.json
+  # A hard link cannot cross volumes and Windows usually refuses native
+  # symlinks, so when the state directory lives on another drive (for example
+  # a junction to D:) the credential link could never be made and every paid
+  # turn died at start-up. Keep the isolated home beside the credential source
+  # in that case. Nothing is copied: the credential is only ever hard-linked.
+  local default="$STATE_DIR/isolated-home" auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" alt src_dev state_dev
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  [ ! -L "$default" ] || die "refusing a symbolic link or junction as the isolated Grok home: $default"
+  # Resolve a linked credential directory so the home lands on its real volume.
+  if [ -d "$auth_dir" ]; then auth_dir="$(cd -P -- "$auth_dir" && pwd -P)" || die "could not resolve the credential directory: $auth_dir"; fi
+  src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
+  state_dev="$(stat -L -c %d "$STATE_DIR" 2>/dev/null || true)"
+  if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then
+    printf '%s\n' "$default"; return 0
+  fi
+  alt="$(dirname "$auth_dir")/.ai-grok-review-isolated-home"
+  case "$alt" in /*|[A-Za-z]:*) ;; *) die "credential directory must be an absolute path to place the isolated Grok home: $auth_dir" ;; esac
+  [ ! -L "$alt" ] || die "refusing a symbolic link or junction as the isolated Grok home: $alt"
+  if [ ! -d "$alt" ]; then
+    (umask 077; mkdir -p -- "$alt") || die "could not create the isolated Grok home beside the credential: $alt"
+    warn "state directory is on another volume than $auth_dir; isolated Grok home is $alt (earlier Grok session history stays under $default)"
+  fi
+  # POSIX ownership is meaningful only off Windows; there an elevated account's
+  # files belong to the Administrators group and the profile ACL governs access.
+  case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) ;; *) [ -O "$alt" ] || die "refusing an isolated Grok home owned by another account: $alt" ;; esac
+  chmod 700 "$alt" 2>/dev/null || warn "could not restrict the isolated Grok home: $alt"
+  printf '%s\n' "$alt"
+}
+
+scrub_unselected_auth_links() { # scrub_unselected_auth_links CHOSEN_HOME
+  # When the cross-volume home is chosen, the state-scoped default home of this
+  # same state directory is no longer used by any run (every run sharing this
+  # state directory makes the same choice), so a credential link stranded
+  # there is removed. The credential-scoped home beside auth.json is shared
+  # by other state directories and is never scrubbed here. Removing a hard
+  # link never touches the original credential.
+  local chosen="$1" default="$STATE_DIR/isolated-home"
+  [ -d "$default" ] && [ ! -L "$default" ] || return 0
+  [ "$default" -ef "$chosen" ] && return 0
+  rm -f -- "$default/auth.json"
+}
+
 run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   local repo="$1" out="$2" pf="$3" turns="$4" sid="${5:-}"
   local grok supervisor python_bin bash_bin; local -a grok_command; grok="$(resolve_grok)"
@@ -1020,13 +1063,15 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
       [ -n "$bash_bin" ] || die 'could not translate the current Bash executable for the Grok script launcher.'
       grok_command=("$bash_bin" "$grok") ;;
   esac
-  local isolated_home="$STATE_DIR/isolated-home" auth_source="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
+  local isolated_home auth_source="${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json"
+  isolated_home="$(grok_isolated_home)" && [ -n "$isolated_home" ] || die 'could not choose the isolated Grok home; refusing to run without credential isolation.'
   mkdir -p "$isolated_home"; chmod 700 "$isolated_home" 2>/dev/null || true
   if [ -f "$auth_source" ]; then
     prepare_auth_link "$auth_source" "$isolated_home" || die 'could not create a same-inode authentication link for the isolated Grok runtime; refusing to copy or persist credentials.'
   else
     rm -f -- "$isolated_home/auth.json"
   fi
+  scrub_unselected_auth_links "$isolated_home" || warn "could not remove a stale credential link from $STATE_DIR/isolated-home"
   ACTIVE_ISOLATED_CWD="$(mktemp -d "${TMPDIR:-/tmp}/ai-grok-review-cwd.XXXXXX")"
   ACTIVE_ISOLATED_HOME="$(mktemp -d "$STATE_DIR/runtime-home.XXXXXX")"
   chmod 700 "$ACTIVE_ISOLATED_HOME" 2>/dev/null || true
@@ -1200,7 +1245,8 @@ terminal_reason() { # provider stop token -> stable diagnostic, without inferenc
 capture_terminal_evidence() { # bind native terminal metadata to this paid JSON result
   [ "$(jq -r '.stopReason // ""' "$1")" = cancelled ] || return 0
   local runtime; runtime="$(command -v python3 || command -v python)" || return 1
-  "$runtime" - "$1" "$STATE_DIR/isolated-home/sessions" <<'PY'
+  local home; home="$(grok_isolated_home)" && [ -n "$home" ] || return 1
+  "$runtime" - "$1" "$home/sessions" <<'PY'
 import hashlib,json,os,pathlib,re,sys
 result_path=pathlib.Path(sys.argv[1]); raw=result_path.read_bytes(); result=json.loads(raw)
 sid,request=result.get('sessionId'),result.get('requestId')
@@ -1877,7 +1923,8 @@ cmd_transcript() {
   rid="$(repo_id "$(repo_root)")"
   sid="$(jq -r .grok_session_id "$(find_meta "$rid" "$1")")"
   grok="$(resolve_grok)"
-  GROK_HOME="$STATE_DIR/isolated-home" env "${GROK_ISOLATION_ENV[@]}" "$grok" export "$sid" 2>/dev/null \
+  local home; home="$(grok_isolated_home)" && [ -n "$home" ] || die 'could not choose the isolated Grok home.'
+  GROK_HOME="$home" env "${GROK_ISOLATION_ENV[@]}" "$grok" export "$sid" 2>/dev/null \
     || die "'grok export $sid' failed. Verify the subcommand with: grok export --help"
 }
 

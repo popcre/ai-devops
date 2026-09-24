@@ -261,11 +261,39 @@ create_investigate_copy() { # create_investigate_copy REPO WT BASE_SHA
 # Operator secrets must not reach Grok's process or its Bash children. Grok
 # auth stays file-based in an isolated GROK_HOME (same contract as review):
 # never as an environment value, argument, report, or patch.
+investigation_home_parent() { # print where the throwaway GROK_HOME may live
+  # A hard link cannot cross volumes: when the state directory is on another
+  # drive than the credential (#709), build the throwaway home beside the
+  # credential instead. The credential is still only ever hard-linked.
+  local auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" parent src_dev state_dev
+  mkdir -p "$IMPL_DIR" || return 1
+  [ ! -L "$IMPL_DIR" ] || { printf 'refusing a linked state directory: %s\n' "$IMPL_DIR" >&2; return 1; }
+  if [ -d "$auth_dir" ]; then auth_dir="$(cd -P -- "$auth_dir" && pwd -P)" || return 1; fi
+  src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
+  state_dev="$(stat -L -c %d "$IMPL_DIR" 2>/dev/null || true)"
+  if [ -z "$src_dev" ] || [ -z "$state_dev" ] || [ "$src_dev" = "$state_dev" ]; then printf '%s\n' "$IMPL_DIR"; return 0; fi
+  case "$auth_dir" in /*|[A-Za-z]:*) ;; *) printf 'credential directory must be absolute: %s\n' "$auth_dir" >&2; return 1 ;; esac
+  parent="$(dirname "$auth_dir")/.ai-grok-implement-homes"
+  [ ! -L "$parent" ] || { printf 'refusing a linked investigation home parent: %s\n' "$parent" >&2; return 1; }
+  (umask 077; mkdir -p -- "$parent") || return 1
+  case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) ;; *) [ -O "$parent" ] || { echo "refusing an investigation home parent owned by another account: $parent" >&2; return 1; } ;; esac
+  chmod 700 "$parent" 2>/dev/null || true
+  printf '%s\n' "$parent"
+}
+
+investigation_home_root() { # create and print a fresh private investigation home
+  local parent; parent="$(investigation_home_parent)" && [ -n "$parent" ] || return 1
+  mktemp -d "$parent/investigate-home.XXXXXX"
+}
+
+remove_investigation_home() { # remove only a throwaway investigation home
+  case "$1" in */investigate-home.?*) rm -rf -- "$1" ;; *) echo "refusing to remove unexpected investigation home path: $1" >&2 ;; esac
+}
+
 launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
   local grok="$1"; shift
   local tmp_root user_home grok_home auth_src rc=0
-  mkdir -p "$IMPL_DIR"
-  tmp_root="$(mktemp -d "$IMPL_DIR/investigate-home.XXXXXX")"
+  tmp_root="$(investigation_home_root)" && [ -n "$tmp_root" ] || die "could not create the isolated investigation home."
   user_home="$tmp_root/user"
   grok_home="$tmp_root/grok"
   mkdir -p "$user_home" "$grok_home"
@@ -274,7 +302,7 @@ launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
   if [ -f "$auth_src" ]; then
     ln "$auth_src" "$grok_home/auth.json" 2>/dev/null || true
     if ! [ "$auth_src" -ef "$grok_home/auth.json" ]; then
-      rm -rf "$tmp_root"
+      remove_investigation_home "$tmp_root"
       die "could not create a same-inode authentication link for the isolated investigation home; refusing to copy or persist credentials."
     fi
   fi
@@ -318,7 +346,7 @@ launch_grok_allowlisted() { # launch_grok_allowlisted GROK [args...]
     env_args+=("XDG_DATA_HOME=$native_home\\.local\\share")
   fi
   env -i "${env_args[@]}" "$grok" "$@" || rc=$?
-  rm -rf "$tmp_root"
+  remove_investigation_home "$tmp_root"
   return "$rc"
 }
 
