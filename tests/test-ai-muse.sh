@@ -90,7 +90,7 @@ if MSYS=winsymlinks:nativestrict ln -s "$ROOT/bin/setup-opencode-muse.sh" "$TMP/
 printf setup-key
 ' > "$TMP/setup-opbin/op"; chmod +x "$TMP/setup-opbin/op"
   check 'installed setup symlink locates repository configuration' "USERPROFILE= AI_MUSE_CONFIG_DIR= HOME='$SETUP_HOME' PATH='$TMP/setup-opbin:$PATH' '$TMP/installed/bin/setup-opencode-muse.sh' >/dev/null && cmp -s '$ROOT/config/opencode-muse/opencode.json' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json' && cmp -s '$ROOT/config/opencode-muse/agent/muse-review.md' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md'"
-  check 'installer stores the Muse key once in the protected per-user store' "grep -qx setup-key '$SETUP_HOME/.config/ai-devops/secrets/muse-api-key'"
+  check 'profile setup leaves the key store to the install.sh stage' "[ ! -e '$SETUP_HOME/.config/ai-devops/secrets/muse-api-key' ]"
 else
   rm -f -- "$TMP/installed/bin/setup-opencode-muse.sh"
   ok 'installed setup symlink fixture unavailable on this host'
