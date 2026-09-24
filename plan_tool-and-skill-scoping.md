@@ -19,9 +19,9 @@ Session record: [`HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-
 | 2.1 Confirm each client's repository-skill location | ✅ done | 2026-09-24 | Claude `<repo>/.claude/skills` (live `designflow-e2e-tester` + throwaway-proof); Codex `<repo>/.agents/skills` (OpenAI "Build skills" docs; throwaway fixture) |
 | 2.2 Add per-repository skill membership to the installer | ✅ done | 2026-09-24 | `config/skill-scope.json`; `ai-install-skills` repo path; tests 10–13 |
 | 2.3 Move the owned skills; measure manifest before/after | ✅ done | 2026-09-24 | 8 licensor scrapes scoped to `licensor-source-data`; installed Claude 48→40; see `docs/context-engineering.md` |
-| 3.1 Add per-project MCP membership to the Windows catalog | ⬜ open | | |
-| 3.2 Write project `.mcp.json` entries and shrink global membership | ⬜ open | | |
-| 3.3 Linux parity (only if a Linux client still carries a single-project server) | ⬜ open | | |
+| 3.1 Add per-project MCP membership to the Windows catalog | ✅ done | 2026-09-24 | `$McpProjectScope` beside the catalog (#763 `27269b5a`, fix #766 `095d9300`); roots via `Get-AiDevOpsCloneRoots` (+4 identity keys); globals derived per machine |
+| 3.2 Write project `.mcp.json` entries and shrink global membership | ✅ done | 2026-09-24 | Desktop 6→3 on edge-dev (1password, playwright, synology-monitor); tracked files untouched; popdam3 roots get project entries; drift check PASS exit 0 with per-root validation — proof on #705 |
+| 3.3 Linux parity (only if a Linux client still carries a single-project server) | ✅ done | 2026-09-24 | hetz: railway out of Claude globals (popdam3 tracked file delivers it); trigger/recall-ai/ag-grid stay global (owners not cloned there) — evidence on #705 |
 | 4.1 Measure the remaining Claude Desktop tool prefix | ⬜ open | | |
 | 4.2 Try Claude Desktop On-demand tool access; measure | ⬜ open | | |
 | 4.3 Gateway decision (passthrough only) | ⬜ open | | |
