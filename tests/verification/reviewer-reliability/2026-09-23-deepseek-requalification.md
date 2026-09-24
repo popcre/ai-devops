@@ -16,7 +16,7 @@ Target: merged commit `e2e41104735a0c3e1981dabccbdc9089f109d970` (PR #740), revi
 detached checkout of that commit with
 `ai-deepseek-agent send --review --governed-verdict <sha> --model deepseek-flash`.
 Session `20260923-232833-112369`, exit 0, 9,196-character report that cites
-`.github/workflows/verify.yml` and `tools/ci/runner-router.cjs` line numbers obtained through
+`.github/workflows/verify.yml` and the CI runner-router script (`runner-router.cjs`) line numbers obtained through
 the read-only repository tools. Terminal line:
 
     VERDICT: REVISE e2e41104735a0c3e1981dabccbdc9089f109d970
@@ -24,9 +24,9 @@ the read-only repository tools. Terminal line:
 ## Failure found and fixed on the way
 
 An earlier run ended `invalid-terminal-verdict` because in round 15 the model returned its
-tool call as DSML markup in plain message text. `tools/deepseek_repo_tools.py` now recovers
+tool call as DSML markup in plain message text. The DeepSeek repository-tools module (`deepseek_repo_tools.py`) now recovers
 and runs such calls and refuses unparseable markup as a final answer (tests in
-`tests/test_deepseek_repo_tools.py`).
+`test_deepseek_repo_tools.py`).
 
 The review's substantive finding about PR #740 routing is owned by the coordinator's #740
 security follow-up, not by this change.
