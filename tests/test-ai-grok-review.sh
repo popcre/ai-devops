@@ -1279,6 +1279,7 @@ check "front_door_refuses_glm_out_of_rotation" "[ '$RC_GLM' -eq 2 ]"
 bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
 check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 
+check "pool_passes_max_turns_only_to_grok" "grep -q 'qwen)  RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -q 'gemini) RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -q 'muse)  RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -Fq '[ -z \"\$RUNNER_MAX_TURNS\" ] || RUNNER_ARGS+=(--max-turns' '$POOL'"
 POOLTMP="$(mktemp -d)"
 mkdir -p "$POOLTMP/fakerepo"
 ( cd "$POOLTMP/fakerepo" && git init -q && printf '.ai/\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm init && git remote add origin 'https://user:p@ss@GitHub.com/org/repo.git' )

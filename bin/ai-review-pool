@@ -49,9 +49,9 @@ umask 077
 provider="${1:-}"; mode="${2:-}"
 case "$provider" in
   grok)  RUNNER="$ROOT/ai-grok-review";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
-  muse)  RUNNER="$ROOT/ai-muse";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
-  qwen)  RUNNER="$ROOT/ai-qwen";         RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
-  gemini) RUNNER="$ROOT/ai-gemini";      RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  muse)  RUNNER="$ROOT/ai-muse";         RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
+  qwen)  RUNNER="$ROOT/ai-qwen";         RUNNER_MAX_TURNS="" ;; # ai-qwen owns its 120-turn/60m review budget and rejects --max-turns
+  gemini) RUNNER="$ROOT/ai-gemini";      RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
   ''|-h|--help|help) usage; [ -n "$provider" ] || exit 0; exit 2 ;;
   *) printf 'ai-review-pool: error: %s is not a pool provider with a session runner.\n' "$provider" >&2; exit 2 ;;
 esac
@@ -240,7 +240,9 @@ reviewer_event_evidence require-report "$provider" || die 'could not reserve dur
 # closed on it (unknown flag or name-length limits), which is correct refusal
 # rather than an unreviewed dispatch. Per-provider argv shaping is deliberately
 # NOT guessed here - each runner's own refusal names what it needs.
-RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF" --max-turns "$RUNNER_MAX_TURNS")
+RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF")
+# Only runners that accept --max-turns (grok) get one; the others reject it.
+[ -z "$RUNNER_MAX_TURNS" ] || RUNNER_ARGS+=(--max-turns "$RUNNER_MAX_TURNS")
 [ -z "$OPT_BASE" ] || RUNNER_ARGS+=(--base "$OPT_BASE")
 [ -z "$OPT_ASSERT_HEAD" ] || RUNNER_ARGS+=(--assert-head "$OPT_ASSERT_HEAD")
 # The session runners emit the model's final answer on STDOUT and all
