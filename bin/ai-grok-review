@@ -172,7 +172,13 @@ PENDING_REVIEW_DIR=''
 PROMPT_BODY_DIGEST=''
 CAPACITY_JSON=''
 WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/reviewer_event_guard.sh"
+# Executed runs already loaded the guard above; a sourced function library
+# (test harnesses) loads it only when it sits beside the script.
+if ! declare -F reviewer_credit_scan >/dev/null; then
+  _AI_CREDIT_GUARD="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/reviewer_event_guard.sh"
+  if [ -f "$_AI_CREDIT_GUARD" ]; then source "$_AI_CREDIT_GUARD"; fi
+  unset _AI_CREDIT_GUARD
+fi
 
 # grok_credit_scan RC OUT: after a finished, resultless turn, classify xAI's
 # stderr for billing exhaustion so the caller stops now with exit 92 instead of
