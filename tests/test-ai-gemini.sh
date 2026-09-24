@@ -74,7 +74,10 @@ case "${MOCK_MODE:-normal}" in
  concurrent-reviewers-and-source) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions"; printf session > "$MOCK_PROTECTED/.ai/deepseek-sessions/2.json"; printf changed >> "$MOCK_PROTECTED/file.txt" ;;
  concurrent-lookalike) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions-other"; printf source > "$MOCK_PROTECTED/.ai/deepseek-sessions-other/x.txt" ;;
  concurrent-tracked-session) printf changed >> "$MOCK_PROTECTED/.ai/deepseek-sessions/tracked.json" ;;
- sleep) sleep 30 ;;
+ # Runs until the test interrupts it: a fixed 30s nap raced the checks in
+ # between on a loaded machine and finished before the TERM. The 1s steps
+ # let bash act on TERM promptly; 600s is only a hang guard.
+ sleep) for _ in $(seq 1 600); do sleep 1; done ;;
  reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
 esac
