@@ -647,7 +647,7 @@ a follow-up plan can pin cache keys — do not stuff it into this one).
 ## Registration
 
 - Tracking issue: [#542](https://github.com/popcre/ai-devops/issues/542).
-- Handoff: [`HANDOFF.d/2026-09-17T1416Z-edge-dev-claude-muse-native-parity-plan.md`](HANDOFF.d/2026-09-17T1416Z-edge-dev-claude-muse-native-parity-plan.md).
+- Handoff: `HANDOFF.d/2026-09-17T1416Z-edge-dev-claude-muse-native-parity-plan.md` (retired in #749 after Phases D1-D4 landed).
 - Router row added to [`docs/task-router.md`](docs/task-router.md) (same PR as this plan).
 - Operational memory belongs in the **private** hub (`u2giants/ai-devops-memory`),
   never this public tree — a fact pointing here may be unioned there by its own
