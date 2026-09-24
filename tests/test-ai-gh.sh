@@ -62,9 +62,9 @@ check 'lock is released after calls' "[ ! -d '$TMP/state/lock.d' ]"
 # Prove ordering, not speed: the quick call must START before the slow call
 # ENDS. A wall-clock ceiling failed on loaded machines even before P1 (#775).
 FAKE_SLEEP=20 "$GH" slow >/dev/null & sp=$!
-for _ in $(seq 1 100); do grep -q '^start .* slow$' "$FAKE_LOG" && break; sleep 0.2; done
+for _ in $(seq 1 300); do grep -q '^start .* slow$' "$FAKE_LOG" && break; sleep 0.2; done
 timeout 60 "$GH" quick >/dev/null; qrc=$?; wait "$sp"
-check 'a slow call does not block the next caller' "[ $qrc -eq 0 ] && awk '/^start .* quick$/{q=NR} /^end/{if(!e)e=NR} END{exit !(q && e && q<e)}' '$FAKE_LOG'"
+check 'a slow call does not block the next caller' "[ $qrc -eq 0 ] && awk '/^start .* slow$/{if(!s)s=NR} /^start .* quick$/{q=NR} /^end/{if(!e)e=NR} END{exit !(s && q && e && s<q && q<e)}' '$FAKE_LOG'"
 
 # Secondary rate limit: back-off uses Retry-After, no retry, and blocks later calls.
 : > "$FAKE_LOG"
