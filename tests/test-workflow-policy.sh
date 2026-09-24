@@ -43,7 +43,7 @@ check 'scheduled failures create or update an issue' "grep -q '^  report-schedul
 # `ai-devops-windows` is the qualification-only label: a host carrying it has
 # been registered, not proven.
 check 'reviewer Windows job runs on Blacksmith, not the self-hosted pool' "! grep -qF 'ai-devops-windows-qualified]' '$workflow'"
-check 'every Windows job in verify runs on Blacksmith' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*\$' '$workflow')\" -eq 4 ]"
+check 'every fixed Windows job in verify runs on Blacksmith; routed sections fall back to it' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*\$' '$workflow')\" -eq 3 ] && grep -qF 'needs.runner-router.outputs.windows_matrix ||' '$workflow'"
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
@@ -251,8 +251,8 @@ if grep -F 'ai-devops-windows-qualified]' "$workflow" | grep -q 'runs-on'; then
   exit 1
 fi
 blacksmith_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*$' "$workflow" | tr -d '\r')"
-[ "$blacksmith_pool" -eq 4 ] || {
-  printf 'FAIL: all four Windows verify jobs must run on Blacksmith
+[ "$blacksmith_pool" -eq 3 ] || {
+  printf 'FAIL: the three fixed Windows verify jobs must run on Blacksmith (sections are routed, Blacksmith fallback)
 ' >&2
   exit 1
 }
