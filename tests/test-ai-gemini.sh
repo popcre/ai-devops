@@ -78,6 +78,10 @@ case "${MOCK_MODE:-normal}" in
  # between on a loaded machine and finished before the TERM. The 1s steps
  # let bash act on TERM promptly; 600s is only a hang guard.
  sleep) for _ in $(seq 1 600); do sleep 1; done ;;
+ mutate-protected-nested) printf changed >> "$MOCK_PROTECTED/.ai/wt/other/work.txt" ;;
+ mutate-protected-new-nested) mkdir -p "$MOCK_PROTECTED/.ai/wt/hidden" && printf 'gitdir: x
+' > "$MOCK_PROTECTED/.ai/wt/hidden/.git" && printf x > "$MOCK_PROTECTED/.ai/wt/hidden/f" ;;
+ mutate-protected-nested-plain) printf changed >> "$MOCK_PROTECTED/.ai/wt/plain/work.txt" ;;
  reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
 esac
@@ -173,6 +177,12 @@ R3G="$TMP/repo3g"; make_repo "$R3G"; export MOCK_PROTECTED="$R3G"
 check 'a look-alike sibling of a reviewer-owned path stays protected' "! new_run '$R3G' concurrent-lookalike concurrent-lookalike"
 R3H="$TMP/repo3h"; make_repo "$R3H"; mkdir -p "$R3H/.ai/deepseek-sessions"; printf tracked > "$R3H/.ai/deepseek-sessions/tracked.json"; git -C "$R3H" add -f .ai/deepseek-sessions/tracked.json; git -C "$R3H" commit -qm tracked-session; export MOCK_PROTECTED="$R3H"
 check 'tracked files inside the DeepSeek session directory remain protected' "! new_run '$R3H' concurrent-tracked concurrent-tracked-session"
+# 2026-09-24 (#780): other sessions' ignored nested checkouts (.claude/worktrees/*)
+# change during a review from the main checkout; they are not this source.
+R3I="$TMP/repo3i"; make_repo "$R3I"; mkdir -p "$R3I/.ai/wt/other" "$R3I/.ai/wt/plain"; git -C "$R3I/.ai/wt/other" init -q; printf a > "$R3I/.ai/wt/other/work.txt"; printf a > "$R3I/.ai/wt/plain/work.txt"; export MOCK_PROTECTED="$R3I"
+check 'another session changing its ignored nested checkout is tolerated' "new_run '$R3I' protected-nested mutate-protected-nested"
+check 'a new ignored nested checkout appearing is still rejected' "! new_run '$R3I' protected-new-nested mutate-protected-new-nested"
+check 'an ignored plain folder (not a checkout) stays protected' "! new_run '$R3I' protected-nested-plain mutate-protected-nested-plain"
 GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }

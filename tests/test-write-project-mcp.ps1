@@ -130,6 +130,27 @@ try {
   & $writer -Scope $scope3 -Roots (@{ "beta" = @($rootB) }) -Catalog $catalog -ClaudeCodeConfig $claudeJson
   $after3 = [IO.File]::ReadAllBytes($claudeJson)
   Assert-True (@(Compare-Object $before3 $after3).Count -eq 0) "a scope key missing from Roots is skipped and the run completes"
+
+  # ---- Codex: scoped names with a Codex definition go to .codex/config.toml
+  $rootE = Join-Path $testRoot "epsilon"
+  New-Item -ItemType Directory -Force -Path $rootE | Out-Null
+  git -C $rootE init -q 2>$null
+  $codex = [ordered]@{ "vercel" = [ordered]@{ url = "https://mcp.vercel.com"; startup_timeout_sec = 20 } }
+  $catalogE = @{ "trigger" = @{ command = "catA" }; "vercel" = @{ type = "http"; url = "https://mcp.vercel.com" } }
+  & $writer -Scope ([ordered]@{ "epsilon" = @("trigger", "vercel") }) -Roots (@{ "epsilon" = @($rootE) }) `
+    -Catalog $catalogE -ClaudeCodeConfig $claudeJson -CodexServers $codex
+  $toml = Get-Content -Raw -LiteralPath (Join-Path $rootE ".codex\config.toml")
+  Assert-True ($toml.Contains('[mcp_servers."vercel"]') -and $toml.Contains("url = 'https://mcp.vercel.com'") -and
+    $toml.Contains("startup_timeout_sec = 20")) "E: Codex project config carries vercel natively"
+  Assert-True (-not $toml.Contains("trigger")) "E: names without a Codex definition stay out of the Codex file"
+  $e = Read-Json (Join-Path $rootE ".mcp.json")
+  Assert-True ($e["mcpServers"]["vercel"]["type"] -eq "http") "E: Claude Code gets vercel as native http"
+  git -C $rootE check-ignore -q .codex/config.toml 2>$null
+  Assert-True ($LASTEXITCODE -eq 0) "E: .codex/config.toml is locally excluded"
+  Set-Content -LiteralPath (Join-Path $rootE ".codex\config.toml") -Value "hand = 1"
+  & $writer -Scope ([ordered]@{ "epsilon" = @("vercel") }) -Roots (@{ "epsilon" = @($rootE) }) `
+    -Catalog $catalogE -ClaudeCodeConfig $claudeJson -CodexServers $codex
+  Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $rootE ".codex\config.toml")).Trim() -eq "hand = 1") "E: a hand-written Codex file is never overwritten"
 } finally {
   Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

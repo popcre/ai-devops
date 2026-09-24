@@ -247,11 +247,13 @@ if grep -Fq 'op://vibe_coding/recall-ai MCP/password' bin/setup-machine.ps1 &&
    ! grep -Fq 'dwvlpanu4odty3bjnmb5my5esy' bin/setup-secrets.sh; then
   ok "Recall.ai uses one portable 1Password reference on Windows and Linux"
 else bad "Recall.ai 1Password references differ across installers"; fi
-if ! grep -Fq '$McpServerCatalog["vercel"]' bin/setup-machine.ps1 &&
-   grep -Fq "\$CodexMcpServers['vercel']" bin/setup-machine.ps1; then
-  ok "Vercel is Codex-only and cannot trigger Claude browser-auth loops"
+if grep -Fq '"oracle"              = @("trigger", "recall-ai", "vercel")' bin/setup-machine.ps1 &&
+   grep -A3 -F '$McpServerCatalog["vercel"]' bin/setup-machine.ps1 | grep -Fq 'type = "http"' &&
+   ! grep -A3 -F '$McpServerCatalog["vercel"]' bin/setup-machine.ps1 | grep -Fq 'mcp-remote' &&
+   grep -Fq -- '-RemoveNames $CodexScopedHere' bin/setup-machine.ps1; then
+  ok "Vercel is Oracle-scoped, native HTTP, and never behind the mcp-remote bridge"
 else
-  bad "Vercel must be absent from Claude and native in Codex"
+  bad "Vercel must be Oracle-scoped native HTTP for Claude Code and Codex"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

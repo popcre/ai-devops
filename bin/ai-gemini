@@ -161,6 +161,15 @@ def omitted(directory, rel):
     return (top.startswith('.ai-review-') and
             os.path.isfile(os.path.join(directory, top, '.ai-review-packet')))
 
+def nested_checkout(directory, rel, path):
+    # A git-ignored directory that is its own checkout (for example
+    # .claude/worktrees/<name>) belongs to another session, not this source.
+    if os.path.islink(path) or not os.path.lexists(os.path.join(path, '.git')):
+        return False
+    return subprocess.run(['git', 'check-ignore', '-q', '--', rel + '/'],
+                          cwd=directory, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode == 0
+
 def paths(directory, source=False):
     result = []
     def fail(error):
@@ -173,6 +182,10 @@ def paths(directory, source=False):
                 rel = rel.replace('\\', '/')
             path = os.path.join(base, name)
             if source and omitted(directory, rel):
+                dirs.remove(name)
+            elif source and nested_checkout(directory, rel, path):
+                # Another session's ignored checkout: record only its presence.
+                result.append(('./' + rel, None))
                 dirs.remove(name)
             elif os.path.islink(path):
                 result.append(('./' + rel, path))
@@ -210,7 +223,9 @@ def source_digest(directory):
             lines.append(b'T\t' + sha_line(path, name))
     for name, path in paths(directory, source=True):
         shown = raw(name)
-        if os.path.islink(path):
+        if path is None:
+            lines.append(b'A\tNESTED\t' + shown.replace(b'\\', b'\\\\').replace(b'\n', b'\\n') + b'\n')
+        elif os.path.islink(path):
             lines.append(b'A\tL\t' + shown + b'\t' + link(path) + b'\n')
         else:
             lines.append(b'A\t' + sha_line(path, shown))
