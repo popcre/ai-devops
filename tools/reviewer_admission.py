@@ -27,18 +27,18 @@ CREDIT_SCAN_BYTES = 1 << 20
 CREDIT_PATTERNS = tuple(re.compile(p) for p in (
     r'insufficient[ _-]?(balance|credits?|funds)',
     r'insufficient_quota',
-    r'out of credits?',
+    r'out of credits?\b',
     r'credit balance is too low',
     r'(used|exhausted|depleted|spent) (all )?(of )?(your |its |the )?(available )?credits?',
     r'credits? (are|have been|has been|is) (depleted|exhausted|used up|exceeded)',
-    r'payment required',
+    r'\bpayment required\b',
     r'monthly spending limit',
     r'(purchase|buy|add) (more )?credits',
-    r'arrearage',
+    r'\barrearage\b',
     r'account is (not )?in good standing',
-    r'freetieronly',
+    r'\bfreetieronly\b',
     r'free tier of the model has been exhausted',
-    r'out_of_service',
+    r'\bout_of_service\b',
     r'prepayment credits',
 ))
 CREDIT_MESSAGES = {

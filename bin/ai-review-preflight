@@ -282,7 +282,7 @@ active_quarantine() { # PROVIDER -> 0 active, 1 absent/expired
 classify_failure() { # OUTPUT
   local text; text="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$text" in
-    *insufficient*balance*|*insufficient_quota*|*out.of.credit*|*credits*depleted*|*monthly.spending.limit*|*arrearage*) printf out-of-credit ;;
+    *insufficient*balance*|*insufficient_quota*|*out?of?credit*|*credits*depleted*|*monthly?spending?limit*|*arrearage*) printf out-of-credit ;;
     *403*|*429*|*allowance*|*usage.limit*|*quota*) printf allowance-exhausted ;;
     *not.authenticated*|*login*required*|*credential*|*unauthorized*|*401*) printf authentication-failed ;;
     *timed.out*|*timeout*) printf provider-timeout ;;

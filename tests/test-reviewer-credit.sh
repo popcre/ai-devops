@@ -40,6 +40,12 @@ check "no quarantine is recorded without a match" "[ \"\$(\"$PY\" \"$TOOL\" glob
 out="$(classify grok "$TMP/missing-file")"; rc=$?
 check "missing evidence is no match, not an error" "[ '$rc' = 3 ]"
 check "an unsupported provider is refused" "! \"$PY\" \"$TOOL\" credit kimi --directory '$Q' --scan '$FIX/deepseek-402.json' >/dev/null 2>&1"
+check "the classifier source has no control characters" "! LC_ALL=C grep -q '[[:cntrl:]]' <(tr -d '\r\t\n' < '$TOOL')"
+for phrase in 'Payment Required' 'Arrearage' 'FreeTierOnly' 'OUT_OF_SERVICE' 'out of credits.' 'monthly spending limit'; do
+  printf '%s\n' "$phrase" > "$TMP/phrase.txt"
+  classify grok "$TMP/phrase.txt" >/dev/null; rc=$?
+  check "each signature matches on its own: $phrase" "[ '$rc' = 0 ]"
+done
 
 # A quarantine write failure must never hide the diagnosis or change the code.
 printf 'not a directory' > "$TMP/blocked"
@@ -70,7 +76,7 @@ check "the wrapper stop is a no-op without a credit failure" "[ '$rc' = 1 ] && g
 echo '== preflight reports the provider unusable'
 PREFLIGHT="$ROOT/bin/ai-review-preflight"
 check "preflight explains the out-of-credit class" "bash '$PREFLIGHT' explain out-of-credit | grep -q 'Tell Albert in this same reply'"
-check "preflight classifies billing text as out-of-credit" "bash -c 'source <(sed -n \"/^classify_failure()/,/^}/p\" \"$PREFLIGHT\"); [ \"\$(classify_failure \"Insufficient Balance\")\" = out-of-credit ] && [ \"\$(classify_failure \"429 rate limit\")\" = allowance-exhausted ]'"
+check "preflight classifies billing text as out-of-credit" "bash -c 'source <(sed -n \"/^classify_failure()/,/^}/p\" \"$PREFLIGHT\"); [ \"\$(classify_failure \"Insufficient Balance\")\" = out-of-credit ] && [ \"\$(classify_failure \"429 rate limit\")\" = allowance-exhausted ] && [ \"\$(classify_failure \"HTTP 403 monthly spending limit\")\" = out-of-credit ] && [ \"\$(classify_failure \"403 out of credits\")\" = out-of-credit ]'"
 AI_REVIEW_QUARANTINE_DIR="$Q" bash "$TMP/stop.sh" deepseek "$FIX/deepseek-402.json" >/dev/null 2>&1
 check "preflight clear removes the out-of-credit quarantine" "AI_REVIEW_QUARANTINE_DIR='$Q' bash '$PREFLIGHT' clear deepseek >/dev/null 2>&1 && [ \"\$(\"$PY\" \"$TOOL\" global deepseek --directory '$Q')\" = null ]"
 
