@@ -70,6 +70,14 @@ case "${MOCK_MODE:-normal}" in
  mutate-protected) printf changed >> "$MOCK_PROTECTED/file.txt" ;;
  mutate-protected-ignored) printf changed >> "$MOCK_PROTECTED/.ignored" ;;
  mutate-protected-tracked-runtime) printf changed >> "$MOCK_PROTECTED/.ai/reviews/tracked.md" ;;
+ concurrent-reviewers) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions/.ai-review-deepseek-x" "$MOCK_PROTECTED/.ai/reviews"; printf session > "$MOCK_PROTECTED/.ai/deepseek-sessions/1.json"; printf packet > "$MOCK_PROTECTED/.ai/deepseek-sessions/.ai-review-deepseek-x/patch.diff"; printf report > "$MOCK_PROTECTED/.ai/reviews/muse-concurrent.md" ;;
+ concurrent-reviewers-and-source) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions"; printf session > "$MOCK_PROTECTED/.ai/deepseek-sessions/2.json"; printf changed >> "$MOCK_PROTECTED/file.txt" ;;
+ concurrent-lookalike) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions-other"; printf source > "$MOCK_PROTECTED/.ai/deepseek-sessions-other/x.txt" ;;
+ concurrent-tracked-session) printf changed >> "$MOCK_PROTECTED/.ai/deepseek-sessions/tracked.json" ;;
+ # Runs until the test interrupts it: a fixed 30s nap raced the checks in
+ # between on a loaded machine and finished before the TERM. The 1s steps
+ # let bash act on TERM promptly; 600s is only a hang guard.
+ sleep) for _ in $(seq 1 600); do sleep 1; done ;;
  mutate-protected-nested) printf changed >> "$MOCK_PROTECTED/.ai/wt/other/work.txt" ;;
  mutate-protected-new-nested) mkdir -p "$MOCK_PROTECTED/.ai/wt/hidden" && printf 'gitdir: x
 ' > "$MOCK_PROTECTED/.ai/wt/hidden/.git" && printf x > "$MOCK_PROTECTED/.ai/wt/hidden/f" ;;
@@ -77,7 +85,6 @@ case "${MOCK_MODE:-normal}" in
  mutate-protected-root-tmp) printf changed >> "$MOCK_PROTECTED/.tmp-scratch.json" && printf new > "$MOCK_PROTECTED/.tmp-new.log" ;;
  mutate-protected-tracked-tmp) printf changed >> "$MOCK_PROTECTED/.tmp-tracked.txt" ;;
  mutate-protected-deep-tmp) printf changed >> "$MOCK_PROTECTED/sub/.tmp-deep" ;;
- sleep) sleep 30 ;;
  reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
  credit) cat "$MOCK_CREDIT_FILE"; exit 1 ;;
@@ -166,17 +173,25 @@ R3C="$TMP/repo3c"; make_repo "$R3C"; export MOCK_PROTECTED="$R3C"
 check 'same-turn protected ignored-file mutation is rejected' "! new_run '$R3C' protected-ignored mutate-protected-ignored"
 R3D="$TMP/repo3d"; make_repo "$R3D"; mkdir -p "$R3D/.ai/reviews"; printf tracked > "$R3D/.ai/reviews/tracked.md"; git -C "$R3D" add -f .ai/reviews/tracked.md; git -C "$R3D" commit -qm tracked-runtime; export MOCK_PROTECTED="$R3D"
 check 'tracked files inside runtime directories remain protected' "! new_run '$R3D' protected-tracked-runtime mutate-protected-tracked-runtime"
+R3E="$TMP/repo3e"; make_repo "$R3E"; export MOCK_PROTECTED="$R3E"
+check 'concurrent reviewer output (DeepSeek sessions, reports) during the turn is not source drift' "new_run '$R3E' concurrent-reviewers concurrent-reviewers | grep -q '^PASS'"
+R3F="$TMP/repo3f"; make_repo "$R3F"; export MOCK_PROTECTED="$R3F"
+check 'a real source edit alongside concurrent reviewer output is still rejected' "! new_run '$R3F' concurrent-source concurrent-reviewers-and-source"
+R3G="$TMP/repo3g"; make_repo "$R3G"; export MOCK_PROTECTED="$R3G"
+check 'a look-alike sibling of a reviewer-owned path stays protected' "! new_run '$R3G' concurrent-lookalike concurrent-lookalike"
+R3H="$TMP/repo3h"; make_repo "$R3H"; mkdir -p "$R3H/.ai/deepseek-sessions"; printf tracked > "$R3H/.ai/deepseek-sessions/tracked.json"; git -C "$R3H" add -f .ai/deepseek-sessions/tracked.json; git -C "$R3H" commit -qm tracked-session; export MOCK_PROTECTED="$R3H"
+check 'tracked files inside the DeepSeek session directory remain protected' "! new_run '$R3H' concurrent-tracked concurrent-tracked-session"
 # 2026-09-24 (#780): other sessions' ignored nested checkouts (.claude/worktrees/*)
 # change during a review from the main checkout; they are not this source.
-R3E="$TMP/repo3e"; make_repo "$R3E"; mkdir -p "$R3E/.ai/wt/other" "$R3E/.ai/wt/plain"; git -C "$R3E/.ai/wt/other" init -q; printf a > "$R3E/.ai/wt/other/work.txt"; printf a > "$R3E/.ai/wt/plain/work.txt"; export MOCK_PROTECTED="$R3E"
-check 'another session changing its ignored nested checkout is tolerated' "new_run '$R3E' protected-nested mutate-protected-nested"
-check 'a new ignored nested checkout appearing is still rejected' "! new_run '$R3E' protected-new-nested mutate-protected-new-nested"
-check 'an ignored plain folder (not a checkout) stays protected' "! new_run '$R3E' protected-nested-plain mutate-protected-nested-plain"
+R3I="$TMP/repo3i"; make_repo "$R3I"; mkdir -p "$R3I/.ai/wt/other" "$R3I/.ai/wt/plain"; git -C "$R3I/.ai/wt/other" init -q; printf a > "$R3I/.ai/wt/other/work.txt"; printf a > "$R3I/.ai/wt/plain/work.txt"; export MOCK_PROTECTED="$R3I"
+check 'another session changing its ignored nested checkout is tolerated' "new_run '$R3I' protected-nested mutate-protected-nested"
+check 'a new ignored nested checkout appearing is still rejected' "! new_run '$R3I' protected-new-nested mutate-protected-new-nested"
+check 'an ignored plain folder (not a checkout) stays protected' "! new_run '$R3I' protected-nested-plain mutate-protected-nested-plain"
 # 2026-09-24 (#795): another session's untracked root `.tmp-*` scratch changes during reviews.
-R3F="$TMP/repo3f"; make_repo "$R3F"; printf '/.tmp-*\n' >> "$R3F/.gitignore"; git -C "$R3F" add .gitignore; git -C "$R3F" commit -qm ignore-tmp; printf a > "$R3F/.tmp-scratch.json"; mkdir -p "$R3F/sub"; printf a > "$R3F/sub/.tmp-deep"; printf a > "$R3F/.tmp-tracked.txt"; git -C "$R3F" add -f .tmp-tracked.txt; git -C "$R3F" commit -qm tracked-tmp; export MOCK_PROTECTED="$R3F"
-check 'untracked root .tmp-* scratch churn is tolerated' "new_run '$R3F' protected-root-tmp mutate-protected-root-tmp"
-check 'a tracked root .tmp-* file stays protected' "! new_run '$R3F' protected-tracked-tmp mutate-protected-tracked-tmp"
-check 'a .tmp-* file below the root stays protected' "! new_run '$R3F' protected-deep-tmp mutate-protected-deep-tmp"
+R3J="$TMP/repo3j"; make_repo "$R3J"; printf '/.tmp-*\n' >> "$R3J/.gitignore"; git -C "$R3J" add .gitignore; git -C "$R3J" commit -qm ignore-tmp; printf a > "$R3J/.tmp-scratch.json"; mkdir -p "$R3J/sub"; printf a > "$R3J/sub/.tmp-deep"; printf a > "$R3J/.tmp-tracked.txt"; git -C "$R3J" add -f .tmp-tracked.txt; git -C "$R3J" commit -qm tracked-tmp; export MOCK_PROTECTED="$R3J"
+check 'untracked root .tmp-* scratch churn is tolerated' "new_run '$R3J' protected-root-tmp mutate-protected-root-tmp"
+check 'a tracked root .tmp-* file stays protected' "! new_run '$R3J' protected-tracked-tmp mutate-protected-tracked-tmp"
+check 'a .tmp-* file below the root stays protected' "! new_run '$R3J' protected-deep-tmp mutate-protected-deep-tmp"
 GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }
