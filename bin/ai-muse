@@ -228,9 +228,9 @@ muse_code_stage(){ # run only a private copy verified after it was made, so swap
     rm -f -- "$dir/muse-$want.exe"; tmp="$(mktemp "$dir/copy.XXXXXXXX")" || return 1
     cp -- "$BIN" "$tmp" && chmod 700 "$tmp" && protect_windows_path "$tmp" file && got="$(sha256sum "$tmp" | cut -d' ' -f1)" && [ "$got" = "$want" ] && mv -f -- "$tmp" "$dir/muse-$want.exe" || { rm -f -- "$tmp"; return 1; }
   fi
-  BIN="$dir/muse-$want.exe"
+  BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds (#773)
 }
-muse_code_pinned(){ local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
+muse_code_pinned(){ local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] && { [ "${MUSE_CODE_VERIFIED:-}" = "$BIN:$want" ] || [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ]; } && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
 muse_code_catalog_dir(){ # the engine's private data store keeps Meta's first-party model catalog
   printf '%s' "$PROFILE_HOME/.local/share/ai-devops/muse-code/muse/model-catalog"
 }
@@ -244,21 +244,22 @@ muse_code_catalog_parseable(){ # at least one non-linked first-party catalog fil
   return 1
 }
 muse_code_catalog_row(){ # the model's unique row; every sibling must be a valid first-party file, exactly one may carry it
-  local dir="$1" model="$2" f hits=""
+  local dir="$1" model="$2" f row hits=""
   ! linked_below_home "$dir" || return 1
   for f in "$dir"/*.json; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
     # An unreadable or foreign sibling could hide a duplicate row: uniqueness
     # is unprovable, so refuse rather than silently skip it.
-    jq -e 'type=="object" and (.rows|type=="array") and .source=="provider_catalog"' "$f" >/dev/null 2>&1 || return 1
-    hits+="$(jq -c --arg m "$model" '.rows[]|select(type=="object" and .model_id==$m)' "$f" 2>/dev/null || true)"$'\n'
+    # One jq pass validates the file and extracts its rows (#773: each jq
+    # launch can cost ~1s on Windows); an invalid file fails the lookup.
+    row="$(jq -c --arg m "$model" 'if type=="object" and (.rows|type=="array") and .source=="provider_catalog" then .rows[]|select(type=="object" and .model_id==$m) else error("not a first-party catalog") end' "$f" 2>/dev/null)" || return 1
+    hits+="$row"$'\n'
   done
   hits="$(printf '%s\n' "$hits" | sed '/^$/d')"
   [ "$(printf '%s\n' "$hits" | sed '/^$/d' | wc -l)" -eq 1 ] || return 1
   [ "$(printf '%s' "$hits" | jq -r '.provider_id//""' 2>/dev/null)" = meta ] || return 1
   printf '%s' "$hits"
 }
-muse_code_row_visible(){ printf '%s' "$1" | jq -e '.visibility=="visible"' >/dev/null 2>&1; }
 muse_code_reasoning_effort(){
   EFFECTIVE_REASONING_EFFORT=high
   local tier="${AI_MUSE_REASONING_EFFORT:-}" row
@@ -903,18 +904,17 @@ cmd_doctor(){
     catalog_row="$(muse_code_catalog_row "$catalog_dir" "$MODEL" || true)"
     check "model catalog has a row for $MODEL" test -n "$catalog_row"
     if [ -n "$catalog_row" ]; then
-      check "model row for $MODEL is visible" muse_code_row_visible "$catalog_row"
+      # One jq pass for the visibility check and every displayed field: each jq
+      # launch costs up to ~1s on some Windows hosts, and the review preflight
+      # allows this whole doctor 10s (#773).
+      local visible ctx outl cin cout ccached ccur cur_shown cur_raw cur_flag
+      IFS=$'\x1f' read -r visible ctx outl cin cout ccached ccur cur_shown cur_raw cur_flag < <(printf '%s' "$catalog_row" | jq -r '[(.visibility=="visible"), (.context_limit//"unknown"), (.output_limit//"unknown"), (.cost.input//"unknown"), (.cost.output//"unknown"), (.cost.cached//"unknown"), (.cost.currency//"unknown"), (if .is_current==null then "unknown" else .is_current end), (if .is_current==null then "absent" else .is_current end), (.is_current//false)] | map(tostring|gsub("[\t\r\n]";" ")) | join("\u001f")' 2>/dev/null | tr -d '\r') || true
+      check "model row for $MODEL is visible" test "$visible" = true
       printf '  model %s: context_limit=%s output_limit=%s cost per million: input=%s output=%s cached=%s %s; is_current=%s\n' "$MODEL" \
-        "$(printf '%s' "$catalog_row" | jq -r '.context_limit//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.output_limit//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.cost.input//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.cost.output//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.cost.cached//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.cost.currency//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r 'if .is_current==null then "unknown" else (.is_current|tostring) end')"
-      if [ "$(printf '%s' "$catalog_row" | jq -r '.is_current//false')" != true ]; then
+        "${ctx:-unknown}" "${outl:-unknown}" "${cin:-unknown}" "${cout:-unknown}" "${ccached:-unknown}" "${ccur:-unknown}" "${cur_shown:-unknown}"
+      if [ "$cur_flag" != true ]; then
         printf 'WARN  model catalog does not mark %s current (is_current: %s); capability drift alarm - verify the engine still fits before relying on it\n' \
-          "$MODEL" "$(printf '%s' "$catalog_row" | jq -r 'if .is_current==null then "absent" else (.is_current|tostring) end')"
+          "$MODEL" "${cur_raw:-absent}"
       fi
     fi
   else
