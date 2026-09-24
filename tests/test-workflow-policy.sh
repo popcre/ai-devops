@@ -42,8 +42,8 @@ check 'scheduled failures create or update an issue' "grep -q '^  report-schedul
 # to the daily-use EDGE-DEV computer or a bare candidate host.
 # `ai-devops-windows` is the qualification-only label: a host carrying it has
 # been registered, not proven.
-check 'reviewer Windows job runs on Blacksmith, not the self-hosted pool' "! grep -qF 'ai-devops-windows-qualified]' '$workflow'"
-check 'every fixed Windows job in verify runs on Blacksmith; routed sections fall back to it' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*\$' '$workflow')\" -eq 3 ] && grep -qF 'needs.runner-router.outputs.windows_matrix ||' '$workflow'"
+check 'reviewer Windows job prefers the qualified pool (ENVY)' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 1 ]"
+check 'every fixed non-preferred Windows job runs on Blacksmith; routed sections fall back to it' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*\$' '$workflow')\" -eq 2 ] && grep -qF 'needs.runner-router.outputs.windows_matrix ||' '$workflow'"
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
@@ -213,7 +213,7 @@ grep -Fq '|| github.sha' "$workflow" || {
 # and the long suite holds a qualified pool host for the better part of an hour.
 windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | tr -d '
 ')"
-[ "$windows_skips" -eq 4 ] || {
+[ "$windows_skips" -eq 5 ] || {
   printf 'FAIL: physical Windows routing and fallback jobs must be skipped on merge_group
 ' >&2
   exit 1
@@ -245,14 +245,17 @@ sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | gre
 # and the pool may hold any number of qualified hosts.
 # 2026-09-23: Albert moved every verify job to Blacksmith ("send everything
 # to blacksmith"); the self-hosted pool and GitHub-hosted queue both stalled.
-if grep -F 'ai-devops-windows-qualified]' "$workflow" | grep -q 'runs-on'; then
-  printf 'FAIL: verify jobs must run on Blacksmith, not the self-hosted pool
+# Albert then clarified he wanted Blacksmith added, not ENVY removed (#736):
+# the reviewer lane prefers idle ENVY and falls back to Blacksmith otherwise.
+[ "$(grep -F 'ai-devops-windows-qualified]' "$workflow" | grep -c 'runs-on' | tr -d '
+')" -eq 1 ] || {
+  printf 'FAIL: only the preferred reviewer job may use the qualified self-hosted pool
 ' >&2
   exit 1
-fi
+}
 blacksmith_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*$' "$workflow" | tr -d '\r')"
-[ "$blacksmith_pool" -eq 3 ] || {
-  printf 'FAIL: the three fixed Windows verify jobs must run on Blacksmith (sections are routed, Blacksmith fallback)
+[ "$blacksmith_pool" -eq 2 ] || {
+  printf 'FAIL: the two fixed non-preferred Windows verify jobs must run on Blacksmith (sections are routed, Blacksmith fallback)
 ' >&2
   exit 1
 }
@@ -318,7 +321,7 @@ grep -Fq "github.event.pull_request.head.repo.full_name == github.repository" "$
   printf 'FAIL: untrusted fork pull requests must never reach the persistent self-hosted runner\n' >&2
   exit 1
 }
-grep -Fq '$process.WaitForExit(30 * 60 * 1000)' "$workflow" &&
+grep -Fq '$process.WaitForExit(55 * 60 * 1000)' "$workflow" &&
 grep -Fq 'proof_result=timed_out' "$workflow" &&
 grep -Fq 'proof_result=failure' "$workflow" &&
 grep -Fq 'proof_result=success' "$workflow" &&
@@ -335,7 +338,9 @@ reviewer_aggregate="$(sed -n '/^  windows-reviewer-safety:/,/^  report-scheduled
 reviewer_preferred="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow")"
 reviewer_fallback="$(sed -n '/^  windows-reviewer-fallback:/,/^  windows-reviewer-safety:/p' "$workflow")"
 reviewer_availability="$(sed -n '/^  reviewer-runner-availability:/,/^  windows-reviewer-preferred:/p' "$workflow")"
-printf '%s' "$reviewer_availability" | grep -Fq "github.event_name == 'workflow_dispatch'" &&
+! printf '%s' "$reviewer_availability" | grep -Fq "github.event_name == 'workflow_dispatch' &&" &&
+printf '%s' "$reviewer_availability" | grep -Fq "github.event.pull_request.head.repo.full_name == github.repository" &&
+printf '%s' "$reviewer_preferred" | grep -Fq "group: ai-devops-windows-reviewer-preferred" &&
 printf '%s' "$reviewer_preferred" | grep -q '^[[:space:]]*continue-on-error:[[:space:]]*true' &&
 printf '%s' "$reviewer_preferred" | grep -Fq "needs.reviewer-runner-availability.outputs.preferred_available == 'true'" &&
 grep -Fq "runner.status === 'online' && !runner.busy" "$workflow" &&
@@ -405,7 +410,7 @@ if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
   assert_rejected reviewer-gap
   sed "/needs\['reviewer-safety-start-deadline'\].result != 'success'/d" "$workflow" >"$mutation_dir/watchdog-error-gap.yml"
   assert_rejected watchdog-error-gap
-  sed '/\$process\.WaitForExit(30 \* 60 \* 1000)/d' "$workflow" >"$mutation_dir/unbounded-reviewer-execution.yml"
+  sed '/\$process\.WaitForExit(55 \* 60 \* 1000)/d' "$workflow" >"$mutation_dir/unbounded-reviewer-execution.yml"
   assert_rejected unbounded-reviewer-execution
   sed '/continue-on-error: true/d' "$workflow" >"$mutation_dir/fatal-preferred-reviewer.yml"
   assert_rejected fatal-preferred-reviewer

@@ -372,11 +372,16 @@ jobs:
 
   reviewer-runner-availability:
     needs: [fast-classifier, manual-preflight]
+    # Samples ENVY (the qualified pool) for every event that runs the reviewer
+    # lane (#736). Busy or offline -> the fallback goes straight to Blacksmith.
     if: >-
-      !cancelled() && github.event_name == 'workflow_dispatch' &&
+      !cancelled() && github.event_name != 'merge_group' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.reviewer == 'true') &&
-      needs.manual-preflight.outputs.run_expensive_jobs == 'true'
+      (github.event_name != 'workflow_dispatch' ||
+       needs.manual-preflight.outputs.run_expensive_jobs == 'true')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
     outputs:
@@ -429,12 +434,15 @@ jobs:
     # passed 199 of 199 checks in 538s on EDGE-RUNN-ENVY in qualification run
     # 33571202823 - well inside the 30 minute ceiling it exceeded while
     # sharing the edge-dev desktop with windows-offline.
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]
+    concurrency:
+      group: ai-devops-windows-reviewer-preferred
+      cancel-in-progress: false
     # This lane is preferred evidence, not the required result. A timeout or
     # assertion failure must release the identical hosted fallback, whose
     # stable aggregate below remains fail-closed.
     continue-on-error: true
-    timeout-minutes: 35
+    timeout-minutes: 60
     outputs:
       proof_result: ${{ steps.proof.outputs.proof_result }}
     steps:
@@ -459,7 +467,7 @@ jobs:
           $startInfo.ArgumentList.Add('-lc')
           $startInfo.ArgumentList.Add($command)
           $process = [System.Diagnostics.Process]::Start($startInfo)
-          if (-not $process.WaitForExit(30 * 60 * 1000)) {
+          if (-not $process.WaitForExit(55 * 60 * 1000)) {
             & .\tools\ci\stop-process-tree.ps1 -TargetProcessId $process.Id -WaitMilliseconds 10000
             if ($LASTEXITCODE -ne 0) {
               "proof_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -467,7 +475,7 @@ jobs:
               exit 0
             }
             "proof_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Warning 'Preferred reviewer proof reached its 30-minute bound; hosted fallback is required.'
+            Write-Warning 'Preferred reviewer proof reached its 55-minute bound; hosted fallback is required.'
             exit 0
           }
           if ($process.ExitCode -eq 0) {
