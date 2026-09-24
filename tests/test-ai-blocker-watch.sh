@@ -467,6 +467,23 @@ if [ -n "$AI_BLOCKER_WATCH_OLD" ]; then # compare against a previous build
   printf '  replay calls: previous %s, now %s\n' "$(wc -l < "$FAKE/calls")" "$new_calls"
 fi
 
+# A link created this tick is seen by the same tick's alarm without a re-read.
+lnodes "[$(lnode 50 250 "$(fence 51)" '[]'), {\"number\":51,\"databaseId\":251,\"title\":\"new unowned blocker\",\"assignees\":{\"totalCount\":0},\"body\":\"\",\"blockedBy\":{\"nodes\":[]}}]"
+replay "$SCRIPT"
+check 'a new link to an unowned blocker is alarmed in the same tick' "grep -q linked '$FAKE/links' && grep -q 'ai-blocker-watch:unowned:o/r#51' '$FAKE/comments' && [ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 1 ]"
+check 'a failed snapshot edit drops the copy instead of crashing' "grep -q '^snapshot_drop()' '$SCRIPT'"
+
+# Scans share a tick: a due scan pulls the other forward from half its interval, never sooner.
+mkdir -p "$TMP/home"; rm -f "$FAKE/links"
+date -u -d '70 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home/last-alarm"
+date -u -d '35 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home/last-links"; ll="$(cat "$TMP/home/last-links")"
+AI_BLOCKER_WATCH_CONFIG="$TMP/config-replay.json" BW tick >/dev/null 2>&1
+check 'a due alarm pulls the links scan forward past half its interval' "[ \"\$(cat '$TMP/home/last-links')\" != \"$ll\" ]"
+date -u -d '70 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home/last-alarm"
+date -u -d '20 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home/last-links"; ll="$(cat "$TMP/home/last-links")"
+AI_BLOCKER_WATCH_CONFIG="$TMP/config-replay.json" BW tick >/dev/null 2>&1
+check 'a links scan inside half its interval is not pulled forward' "[ \"\$(cat '$TMP/home/last-links')\" = \"$ll\" ]"
+
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"
 rmdir "$TMP/home/tick.lock"

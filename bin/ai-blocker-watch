@@ -560,6 +560,7 @@ open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|
   for ((i=1; i<=pages; i++)); do unset "SNAP[$repo|$i]"; done
   note "$pfx: ${SNAPERR[$repo]}"; return 1
 }
+snapshot_drop(){ local i; for ((i=1; i<=${SNAPN[$1]:-0}; i++)); do unset "SNAP[$1|$i]"; done; unset "SNAPN[$1]"; }
 snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a new same-repo link in the snapshot
   local repo="$1" i node="" pg
   [ -n "${SNAPN[$repo]+set}" ] || return 0
