@@ -43,6 +43,9 @@ PROVIDER_CREDIT_PATTERNS = {'qwen': tuple(re.compile(p) for p in (
     r'free tier of the model has been exhausted',
     r'\bout_of_service\b',
 ))}
+# DashScope uses insufficient_quota for rate limiting too, so it proves nothing
+# about Qwen's balance; Qwen relies on its own status codes above.
+PROVIDER_EXCLUDED_PATTERNS = {'qwen': ('insufficient_quota',)}
 CREDIT_MESSAGES = {
     'grok': 'the xAI (Grok) account has run out of credits or hit its monthly spending limit - add credits at https://console.x.ai',
     'muse': 'the Meta (Muse) API account has run out of credits - add credits at https://dev.meta.ai',
@@ -65,6 +68,8 @@ def credit_match(paths, provider=None):
         except OSError:
             continue
         for pattern in CREDIT_PATTERNS + PROVIDER_CREDIT_PATTERNS.get(provider, ()):
+            if pattern.pattern in PROVIDER_EXCLUDED_PATTERNS.get(provider, ()):
+                continue
             if pattern.search(text):
                 return pattern.pattern
     return None

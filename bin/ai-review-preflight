@@ -267,6 +267,8 @@ write_atomic() { # FILE JSON
 
 quarantine() { # PROVIDER CLASS [SECONDS]
   local provider="$1" class="$2" seconds="${3:-$COOLDOWN}" now expires f
+  # Out of credit matches the wrapper classifier's one-hour hold (CREDIT_SECONDS).
+  [ -n "${3:-}" ] || [ "$class" != out-of-credit ] || seconds=3600
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$seconds" in ''|*[!0-9]*) die "quarantine seconds must be a positive integer." ;; esac
   [ "$seconds" -gt 0 ] || die "quarantine seconds must be greater than zero."

@@ -53,7 +53,15 @@ for phrase in 'Arrearage' 'FreeTierOnly' 'OUT_OF_SERVICE'; do
   rm -rf "$Q"; classify grok "$TMP/phrase.txt" >/dev/null; rc=$?
   check "a Qwen status code is not a credit failure for another provider: $phrase" "[ '$rc' = 3 ]"
 done
-check "muse keeps failed-terminal text for the credit scan" "grep 'muse_credit_stop(){' -A4 '$ROOT/bin/ai-muse' | grep -qF 'terminal[.]failed'"
+printf 'insufficient_quota\n' > "$TMP/phrase.txt"
+rm -rf "$Q"; classify qwen "$TMP/phrase.txt" >/dev/null; rc=$?
+check "insufficient_quota is not a credit failure for Qwen" "[ '$rc' = 3 ]"
+MUSE_FILTER="$(grep -o "jq -c '[^']*'" "$ROOT/bin/ai-muse" | grep 'terminal\[' | head -1 | sed "s/^jq -c '//; s/'\$//")"
+LONG="$(head -c 600 /dev/zero | tr '\0' 'r') out of credits"
+{ jq -cn '{payload_type:"run.terminal.failed",payload:{terminal:"failed",text:"Error: insufficient_quota"}}'
+  jq -cn --arg t "$LONG" '{payload_type:"run.terminal.failed",payload:{terminal:"failed",text:$t}}'; } | jq -c "$MUSE_FILTER" > "$TMP/muse-ev.txt"
+check "muse scans a short terminal failure message" "grep -q insufficient_quota '$TMP/muse-ev.txt'"
+check "muse does not scan a long partial review in a terminal failure" "! grep -q 'out of credits' '$TMP/muse-ev.txt'"
 for phrase in 'Your account is in good standing.' 'Prepayment credits are available for this project.'; do
   printf '%s\n' "$phrase" > "$TMP/phrase.txt"
   classify grok "$TMP/phrase.txt" >/dev/null; rc=$?
@@ -95,6 +103,7 @@ echo '== preflight reports the provider unusable'
 PREFLIGHT="$ROOT/bin/ai-review-preflight"
 check "preflight explains the out-of-credit class" "bash '$PREFLIGHT' explain out-of-credit | grep -q 'Tell Albert in this same reply'"
 check "preflight classifies billing text as out-of-credit" "bash -c 'source <(sed -n \"/^classify_failure()/,/^}/p\" \"$PREFLIGHT\"); [ \"\$(classify_failure \"Insufficient Balance\")\" = out-of-credit ] && [ \"\$(classify_failure \"429 rate limit\")\" = allowance-exhausted ] && [ \"\$(classify_failure \"HTTP 403 monthly spending limit\")\" = out-of-credit ] && [ \"\$(classify_failure \"403 out of credits\")\" = out-of-credit ]'"
+check "preflight holds an out-of-credit doctor failure for the classifier's hour" "grep -q 'class\" != out-of-credit ] || seconds=3600' '$PREFLIGHT'"
 AI_REVIEW_QUARANTINE_DIR="$Q" bash "$TMP/stop.sh" deepseek "$FIX/deepseek-402.json" >/dev/null 2>&1
 check "preflight clear removes the out-of-credit quarantine" "AI_REVIEW_QUARANTINE_DIR='$Q' bash '$PREFLIGHT' clear deepseek >/dev/null 2>&1 && [ \"\$(\"$PY\" \"$TOOL\" global deepseek --directory '$Q')\" = null ]"
 
