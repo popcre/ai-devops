@@ -5,7 +5,7 @@ description: Open or run the single u2giants/shared-db orchestrator and route st
 
 # Shared DB Orchestrator
 
-> Replacement work is planned in [`../../../plan_shared-db-complete-throughput-repair.md`](../../../plan_shared-db-complete-throughput-repair.md). Read its STATUS table before changing this skill or the lane model. The older 1+1 proposal is superseded. Until the replacement is implemented, the safety rules below remain binding; do not partially remove them.
+> The earlier throughput repair is complete; its [STATUS and evidence](../../../plan_shared-db-complete-throughput-repair.md) are historical. Before selecting the current route, read [shared-db current workflow](https://github.com/popcre/shared-db/blob/main/docs/agents/current-workflow.md). Preserve the implemented safety rules below.
 
 Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep the full map of claims, branches, preview state, merges and owner decisions.
 

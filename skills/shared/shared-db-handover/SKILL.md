@@ -5,6 +5,8 @@ description: Hand over, wrap up, close out, or stop any shared-db or shared Supa
 
 # shared-db-handover
 
+Before routing or closing work, read [shared-db current workflow](https://github.com/popcre/shared-db/blob/main/docs/agents/current-workflow.md); it identifies current scope, evidence and completion ownership.
+
 ## FIRST: are you the orchestrator? Answer this before anything else
 
 `popcre/shared-db` runs **ONE orchestrator session at a time**. It takes
