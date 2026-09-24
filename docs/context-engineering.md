@@ -237,14 +237,23 @@ Codex keeps the complete catalog in its own config (decision from PR #114: it
 does not spawn a server stack per session), so project scoping applies to the
 Claude clients only.
 
-Measured on edge-dev: **28 node processes / 2,077 MB across 12 Desktop
-processes with the 6-server Desktop set before (2026-09-24 9:17 AM EST); the
-live-proof numbers after applying phase 3 are recorded on #705.**
+Measured on edge-dev (proof and full numbers on #705, 2026-09-24): the Desktop
+global set went 6 -> 3 servers; `bin/check-mcp-drift.ps1` passes with exit 0
+including per-root delivery validation over all 34 clone/worktree roots. A
+same-conditions raw node count was not reproducible at proof time (7 live Code
+sessions vs 0 at the 9:17 AM EST baseline), so the honest comparison is the
+per-server process census at 11:26 AM EST: **zero trigger / recall-ai / railway
+/ chrome-devtools MCP processes machine-wide, and ag-grid running only inside
+4 designflow-frontend sessions** (loaded by their tracked `.mcp.json`), while
+playwright (13) and supabase (12) run as designed (global / per-repo). Linux
+parity: railway left hetz's Claude global set (backup kept); owners not cloned
+there keep their servers global by rule.
 
 Enforcement: `tests/test-mcp-skill-drift.ps1` (project-scope drift cases) and
 `tests/test-write-project-mcp.ps1` (writer semantics: tracked files untouched,
 missing names via project entries, stale pruning, foreign preservation, dry
-run).
+run; a scope key with no resolved roots is skipped — the regression that
+aborted the first live run).
 
 ## Baseline frozen on 2026-08-12
 
