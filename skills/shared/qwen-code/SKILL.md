@@ -120,6 +120,13 @@ occurs after changes, the command stays unsuccessful and writes clearly marked
 finished. Inspect every change and rerun tests. If artifact export itself fails,
 the wrapper preserves the exact recovery worktree and prints its path.
 
+A review routinely runs longer than a 10-minute tool-call limit (packet build
+plus a multi-minute provider turn). Run `ai-qwen new` as a background command,
+never under a foreground command timeout: that timeout sends TERM and the
+report is never published. If the signal landed after Qwen had already returned
+its complete answer, the wrapper says so and `ai-qwen finalize <name>` publishes
+that exact answer with no new provider call; otherwise start a new named review.
+
 Ignored dependencies, downloads, caches, build output, and secrets do not persist
 between implementation turns. Recreate what is needed and rerun tests.
 
