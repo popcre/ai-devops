@@ -37,7 +37,12 @@ if command -v cmd.exe >/dev/null 2>&1; then
   for tool in ai-task-gates ai-doc-reachability; do
     [ -f "$REPO_ROOT/bin/$tool.cmd" ] || continue
     win="$(cygpath -w "$REPO_ROOT/bin/$tool.cmd")"
-    MSYS_NO_PATHCONV=1 cmd.exe /d /c "$win" --help >/dev/null 2>&1       || { echo "FAIL: bin/$tool.cmd --help did not run cleanly" >&2; fail=1; }
+    if ! out="$(MSYS_NO_PATHCONV=1 cmd.exe /d /c "$win" --help 2>&1)"; then
+      echo "FAIL: bin/$tool.cmd --help did not run cleanly" >&2
+      printf '%s
+' "$out" | tail -n 15 | sed 's/^/  | /' >&2
+      fail=1
+    fi
   done
 fi
 [ "$fail" -eq 0 ] && echo "PASS: bin launchers"
