@@ -42,8 +42,86 @@ $ClaudeDesktopMcpNames = @("1password", "trigger")
   Assert-True ($LASTEXITCODE -eq 0) "matching sets pass the drift check"
 
   $realSetup = Join-Path $repoRoot "bin\setup-machine.ps1"
-  $null = & $shell -NoProfile -File $drift -SetupScript $realSetup -DesktopConfigPaths (Join-Path $testRoot "absent.json") -ClaudeCodeConfigPath $code
+  $null = & $shell -NoProfile -File $drift -SetupScript $realSetup -DesktopConfigPaths (Join-Path $testRoot "absent.json") -ClaudeCodeConfigPath $code -SkipProjectScope
   Assert-True ($LASTEXITCODE -eq 0) "declared lists parse from the real setup-machine.ps1"
+
+  # ------------------------------------------- project-scoped MCP drift (#705)
+  $scanRoot = Join-Path $testRoot "scan"
+  New-Item -ItemType Directory -Force -Path $scanRoot | Out-Null
+  $identityFile = Join-Path $testRoot "identities.tsv"
+  @'
+fixtureproj	github.com/example/fixtureproj
+trackedproj	github.com/example/trackedproj
+absentproj	github.com/example/absentproj
+'@ | Set-Content -LiteralPath $identityFile -Encoding utf8
+
+  foreach ($name in @("fixtureproj", "trackedproj")) {
+    $r = Join-Path $scanRoot $name
+    New-Item -ItemType Directory -Force -Path $r | Out-Null
+    git -C $r init -q 2>$null
+    git -C $r remote add origin https://github.com/example/$name.git 2>$null
+  }
+  Write-Json (Join-Path $scanRoot "fixtureproj\.mcp.json") @{
+    mcpServers = @{ "trigger" = @{ command = "x" } } }
+  Write-Json (Join-Path $scanRoot "trackedproj\.mcp.json") @{
+    mcpServers = @{ "repo-owned" = @{ command = "x" } } }
+  git -C (Join-Path $scanRoot "trackedproj") add .mcp.json 2>$null
+  $trackedFull = [IO.Path]::GetFullPath((Join-Path $scanRoot "trackedproj"))
+  $codeProjects = Join-Path $testRoot "claude-projects.json"
+  Write-Json $codeProjects @{
+    mcpServers = @{ "1password" = @{ command = "x" } }
+    projects = @{ $trackedFull = @{ mcpServers = @{ "trigger" = @{ command = "x" } } } } }
+
+  $setupScoped = Join-Path $testRoot "setup-scoped.ps1"
+  @'
+$ClaudeCodeMcpNames = @("1password")
+$ClaudeDesktopMcpNames = @("1password", "trigger", "recall-ai")
+$McpProjectScope = [ordered]@{
+  "fixtureproj" = @("trigger")
+  "trackedproj" = @("trigger")
+  "absentproj"  = @("recall-ai")
+}
+$McpServerCatalog["trigger"] = @{ command = "x" }
+'@ | Set-Content -LiteralPath $setupScoped -Encoding utf8
+
+  $oldIdFile = $env:AI_REPO_IDENTITY_FILE
+  $oldCloneRoots = $env:AI_REPO_CLONE_ROOTS
+  $env:AI_REPO_IDENTITY_FILE = $identityFile
+  $env:AI_REPO_CLONE_ROOTS = $scanRoot
+  try {
+    # absentproj is not cloned, so recall-ai stays declared; trigger is scoped
+    # away from the globals on this machine (fixtureproj + trackedproj exist).
+    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" }; "recall-ai" = @{ command = "x" } } }
+    $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
+    Assert-True ($LASTEXITCODE -eq 0) "scoped-away trigger leaves globals; delivery via untracked file and project entry passes"
+    Assert-True (($out -join "`n") -match "absentproj.*stay global: recall-ai") "a not-cloned project keeps its server global"
+
+    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" }; "recall-ai" = @{ command = "x" }; "trigger" = @{ command = "x" } } }
+    $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
+    Assert-True ($LASTEXITCODE -eq 1) "a scoped server still installed globally fails the check"
+    Assert-True (($out -join "`n") -match "installed but not declared: trigger") "the report names the scoped global server"
+
+    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" }; "recall-ai" = @{ command = "x" } } }
+    Write-Json $codeProjects @{
+      mcpServers = @{ "1password" = @{ command = "x" } } }
+    $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
+    Assert-True ($LASTEXITCODE -eq 1) "a tracked repo whose project entry lost the scoped server fails the check"
+    Assert-True (($out -join "`n") -match "scoped but not delivered: trigger") "the report names the undelivered scoped server"
+
+    Write-Json (Join-Path $scanRoot "fixtureproj\.mcp.json") @{
+      mcpServers = @{ "hand-added" = @{ command = "x" } } }
+    $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
+    Assert-True ($LASTEXITCODE -eq 1) "an untracked .mcp.json missing its scoped managed names fails the check"
+    Assert-True (($out -join "`n") -match "declared but not installed: trigger") "the untracked-file drift names the missing managed name"
+
+    Write-Json (Join-Path $scanRoot "fixtureproj\.mcp.json") @{
+      mcpServers = @{ "hand-added" = @{ command = "x" }; "trigger" = @{ command = "x" } } }
+    $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
+    Assert-True ($LASTEXITCODE -eq 1) "still failing while the tracked repo entry is absent"
+  } finally {
+    if ($null -ne $oldIdFile) { $env:AI_REPO_IDENTITY_FILE = $oldIdFile } else { Remove-Item Env:\AI_REPO_IDENTITY_FILE -ErrorAction SilentlyContinue }
+    if ($null -ne $oldCloneRoots) { $env:AI_REPO_CLONE_ROOTS = $oldCloneRoots } else { Remove-Item Env:\AI_REPO_CLONE_ROOTS -ErrorAction SilentlyContinue }
+  }
 
   # ------------------------------------------------ desktop sync and deferral
   $desired = Join-Path $testRoot "desired.json"

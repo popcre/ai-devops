@@ -74,3 +74,65 @@ function Assert-AiDevOpsRepoIdentity {
         throw "$Message (accepted: $($accepted -join ', '))"
     }
 }
+
+# --- clone-root resolution (project-scoped MCP, #705) ------------------------
+# Mirrors find_repo_clone_roots in bin/ai-install-skills: a directory named
+# after the identity key, at a scan root or one level nested
+# (dflow_plm/designflow-frontend), whose origin matches an accepted identity,
+# plus every worktree of that clone. Fail-closed: an origin that is not
+# accepted is skipped, and a key with no accepted identity returns no roots
+# (callers treat that as "not cloned here", which keeps servers global).
+
+function Get-AiDevOpsCloneScanRoots {
+    # AI_REPO_CLONE_ROOTS (path-list, ';' separated) overrides the standard
+    # locations for tests and non-standard layouts. No scheme or drive magic.
+    if ($env:AI_REPO_CLONE_ROOTS) {
+        return @($env:AI_REPO_CLONE_ROOTS -split ';' | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+    }
+    $roots = @()
+    foreach ($base in @(
+        (Join-Path $env:SystemDrive 'repos'),
+        (Join-Path $env:SystemDrive 'worksp'),
+        (Join-Path $HOME 'repos'))) {
+        if ($base -and (Test-Path -LiteralPath $base)) { $roots += $base }
+    }
+    return $roots
+}
+
+function Get-AiDevOpsCloneRoots {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [string]$Path
+    )
+    $accepted = @(Get-AiDevOpsAcceptedIdentity -Key $Key -Path $Path)
+    if ($accepted.Count -eq 0) { return ,@() }
+    $found = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($scanRoot in (Get-AiDevOpsCloneScanRoots)) {
+        $candidates = @(Join-Path $scanRoot $Key)
+        Get-ChildItem -LiteralPath $scanRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $nested = Join-Path $_.FullName $Key
+            if (Test-Path -LiteralPath $nested) { $candidates += $nested }
+        }
+        foreach ($clone in ($candidates | Sort-Object -Unique)) {
+            if (-not (Test-Path -LiteralPath (Join-Path $clone '.git'))) { continue }
+            $url = git -C $clone remote get-url origin 2>$null
+            if (-not $url) { continue }
+            $identity = Get-AiDevOpsCanonicalRemote ([string]$url)
+            if ($accepted -cnotcontains $identity) { continue }
+            # git prints forward slashes; Join-Path yields backslashes. One
+            # canonical form so a worktree's main entry is not added twice.
+            if (-not $found.Contains(($clone -replace '/', '\'))) { [void]$found.Add($clone) }
+            $listing = git -C $clone worktree list --porcelain 2>$null
+            foreach ($line in @($listing)) {
+                if ($line -like 'worktree *') {
+                    $wt = $line.Substring(8).Trim()
+                    if ($wt -and (Test-Path -LiteralPath $wt) -and -not $found.Contains(($wt -replace '/', '\'))) {
+                        [void]$found.Add($wt)
+                    }
+                }
+            }
+        }
+    }
+    return $found
+}

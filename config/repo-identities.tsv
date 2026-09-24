@@ -20,3 +20,12 @@ ai-devops-memory	github.com/u2giants/ai-devops-memory
 ai-devops-transcripts	github.com/u2giants/ai-devops-transcripts
 ai-devops-private-config	github.com/u2giants/ai-devops-private-config
 licensor-source-data	github.com/u2giants/licensor-source-data
+#
+# Project-scoped MCP ownership (#705, added 2026-09-24). These keys resolve
+# every clone and worktree root whose servers must start only in sessions
+# opened in that repository.
+oracle	github.com/u2giants/theoracle
+popdam3	github.com/u2giants/popdam3
+designflow-frontend	github.com/popcre/designflow-frontend
+synology-monitor	github.com/u2giants/synology-monitor
+
