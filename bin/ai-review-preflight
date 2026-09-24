@@ -420,7 +420,11 @@ check_provider() { # PROVIDER REPO LIVE BASE
   fi
   set -e
   if [ "$rc" -ne 0 ]; then
-    class="$(classify_failure "$out")"; quarantine "$provider" "$class"
+    # A doctor killed by the check budget is a timeout, whatever its partial
+    # output says: Qwen's doctor prints "credential" before any auth step, and
+    # reading that as authentication-failed quarantined a healthy Qwen (#720).
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then class=provider-timeout; else class="$(classify_failure "$out")"; fi
+    quarantine "$provider" "$class"
     printf 'ai-review-preflight: %s failed: %s\n' "$provider" "$class" >&2
     printf '%s\n' "$out" | tail -12 >&2
     return 1
