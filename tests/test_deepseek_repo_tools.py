@@ -200,5 +200,33 @@ with tempfile.TemporaryDirectory() as tmp:
     entry = json.loads(open(log).read().splitlines()[0])
     check("tool call is logged", entry["tool"] == "read_file" and entry["refused"] is False)
 
+    # step: tool calls leaked as DSML markup in the text (live 2026-09-23) are
+    # recovered and run; unparseable markup is never taken as the final answer.
+    bar = "｜｜"
+    leak = (f"<{bar}DSML{bar} calls>\n<{bar}DSML{bar} invoke name=\"read_file\">\n"
+            f"<{bar}DSML{bar} parameter name=\"path\" string=\"true\">sub/a.txt</{bar}DSML{bar} parameter>\n"
+            f"<{bar}DSML{bar} parameter name=\"end_line\" string=\"false\">1</{bar}DSML{bar} parameter>\n"
+            f"</{bar}DSML{bar} invoke>\n</{bar}DSML{bar} calls>")
+    for label, content, want_tool in (("parsed", leak, True), ("unparseable", f"<{bar}DSML{bar} calls> half", False)):
+        os.remove(log)
+        subprocess.run([sys.executable, HELPER, "init", msgs, "m", req], check=True)
+        with open(resp, "w", encoding="utf-8") as fh:
+            json.dump({"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": content}}]}, fh)
+        rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "0"]).returncode
+        body = json.load(open(req, encoding="utf-8"))
+        last = body["messages"][-1]
+        if want_tool:
+            check("leaked DSML tool call is recovered and run",
+                  rc == 10 and last["role"] == "tool" and "tools" in body
+                  and body["messages"][-2]["tool_calls"][0]["function"]["name"] == "read_file"
+                  and body["messages"][-2]["content"] == "")
+        else:
+            check("unparseable DSML markup is not a final answer",
+                  rc == 10 and last["role"] == "user" and "markup" in last["content"])
+    with open(resp, "w", encoding="utf-8") as fh:
+        json.dump({"choices": [{"message": {"role": "assistant", "content": "## Verdict\nAPPROVE"}}]}, fh)
+    rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "1"]).returncode
+    check("a plain answer is still final", rc == 0)
+
 print(f"{'FAILED ' + str(len(FAILED)) if FAILED else 'all passed'}")
 sys.exit(1 if FAILED else 0)
