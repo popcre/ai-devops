@@ -74,6 +74,9 @@ case "${MOCK_MODE:-normal}" in
  mutate-protected-new-nested) mkdir -p "$MOCK_PROTECTED/.ai/wt/hidden" && printf 'gitdir: x
 ' > "$MOCK_PROTECTED/.ai/wt/hidden/.git" && printf x > "$MOCK_PROTECTED/.ai/wt/hidden/f" ;;
  mutate-protected-nested-plain) printf changed >> "$MOCK_PROTECTED/.ai/wt/plain/work.txt" ;;
+ mutate-protected-root-tmp) printf changed >> "$MOCK_PROTECTED/.tmp-scratch.json" && printf new > "$MOCK_PROTECTED/.tmp-new.log" ;;
+ mutate-protected-tracked-tmp) printf changed >> "$MOCK_PROTECTED/.tmp-tracked.txt" ;;
+ mutate-protected-deep-tmp) printf changed >> "$MOCK_PROTECTED/sub/.tmp-deep" ;;
  sleep) sleep 30 ;;
  reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
@@ -168,6 +171,11 @@ R3E="$TMP/repo3e"; make_repo "$R3E"; mkdir -p "$R3E/.ai/wt/other" "$R3E/.ai/wt/p
 check 'another session changing its ignored nested checkout is tolerated' "new_run '$R3E' protected-nested mutate-protected-nested"
 check 'a new ignored nested checkout appearing is still rejected' "! new_run '$R3E' protected-new-nested mutate-protected-new-nested"
 check 'an ignored plain folder (not a checkout) stays protected' "! new_run '$R3E' protected-nested-plain mutate-protected-nested-plain"
+# 2026-09-24 (#795): another session's untracked root `.tmp-*` scratch changes during reviews.
+R3F="$TMP/repo3f"; make_repo "$R3F"; printf '/.tmp-*\n' >> "$R3F/.gitignore"; git -C "$R3F" add .gitignore; git -C "$R3F" commit -qm ignore-tmp; printf a > "$R3F/.tmp-scratch.json"; mkdir -p "$R3F/sub"; printf a > "$R3F/sub/.tmp-deep"; printf a > "$R3F/.tmp-tracked.txt"; git -C "$R3F" add -f .tmp-tracked.txt; git -C "$R3F" commit -qm tracked-tmp; export MOCK_PROTECTED="$R3F"
+check 'untracked root .tmp-* scratch churn is tolerated' "new_run '$R3F' protected-root-tmp mutate-protected-root-tmp"
+check 'a tracked root .tmp-* file stays protected' "! new_run '$R3F' protected-tracked-tmp mutate-protected-tracked-tmp"
+check 'a .tmp-* file below the root stays protected' "! new_run '$R3F' protected-deep-tmp mutate-protected-deep-tmp"
 GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }
