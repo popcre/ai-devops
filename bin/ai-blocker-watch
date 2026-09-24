@@ -534,7 +534,8 @@ The wait was released ($why) but the original $h session and its folder ($cwd) a
 # largest source of BlockerWatch GitHub traffic. A failed read is remembered
 # for the rest of the tick so the second scan fails the same way instead of
 # re-sending the request; a link created this tick is added to the copy so
-# the alarm still sees it without a second read.
+# the alarm still sees it without a second read (or, if that edit fails, the
+# copy is dropped and the alarm re-reads the repo).
 SNAP_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number databaseId title assignees(first:10){totalCount} body blockedBy(first:50){nodes{number state title repository{nameWithOwner} assignees(first:10){totalCount}}}}}}}'
 declare -A SNAP=() SNAPN=() SNAPERR=()
 open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|i], count in SNAPN[repo]; rc 1 on failure
@@ -563,13 +564,15 @@ snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a 
   local repo="$1" i node="" pg
   [ -n "${SNAPN[$repo]+set}" ] || return 0
   for ((i=1; i<=SNAPN[$repo]; i++)); do
-    node="$(printf '%s' "${SNAP[$repo|$i]}" | jq -c --argjson k "$3" --arg r "$repo" 'first(.data.repository.issues.nodes[] | select(.number==$k) | {number, state:"OPEN", title, repository:{nameWithOwner:$r}, assignees}) // empty')"
+    node="$(printf '%s' "${SNAP[$repo|$i]}" | jq -c --argjson k "$3" --arg r "$repo" 'first(.data.repository.issues.nodes[] | select(.number==$k) | {number, state:"OPEN", title, repository:{nameWithOwner:$r}, assignees}) // empty')" || return 1
     [ -z "$node" ] || break
   done
   [ -n "$node" ] || return 0 # the blocker is not open, so no scan here reads it
+  local new
   for ((pg=1; pg<=SNAPN[$repo]; pg++)); do # rewrite only the page holding the issue
     printf '%s' "${SNAP[$repo|$pg]}" | jq -e --argjson n "$2" 'any(.data.repository.issues.nodes[]; .number==$n)' >/dev/null || continue
-    SNAP["$repo|$pg"]="$(printf '%s' "${SNAP[$repo|$pg]}" | jq -c --argjson n "$2" --argjson b "$node" '(.data.repository.issues.nodes[] | select(.number==$n) | .blockedBy.nodes) += [$b]')"
+    new="$(printf '%s' "${SNAP[$repo|$pg]}" | jq -c --argjson n "$2" --argjson b "$node" '(.data.repository.issues.nodes[] | select(.number==$n) | .blockedBy.nodes) += [$b]')" || return 1
+    SNAP["$repo|$pg"]="$new"
     break
   done
 }
@@ -599,7 +602,7 @@ depth_of(){ # depth_of <owner/repo> <n> <seen>: longest open chain this issue ho
   local repo="$1" n="$2" seen="$3" j rc d best=0 kr kn st key
   key="$repo#$n"
   case ",$seen," in *",$key,"*) printf '%s' 1; return 0 ;; esac
-  j="$(issue_json "$repo" "$n")"; rc=$?
+  rc=0; j="$(issue_json "$repo" "$n")" || rc=$?
   if [ "$rc" -eq 1 ]; then note "alarm: node budget reached while measuring the chain behind $key"; printf '%s' 1; return 0; fi
   [ "$rc" -eq 0 ] || { printf '%s' 1; return 0; }
   while IFS=$'\t' read -r kr kn st; do
@@ -652,7 +655,7 @@ alarm_scan(){ # alarm_scan <dry 0|1>
   # open linked pull request, prior alarm comment, and real last activity.
   for key in "${!seen[@]}"; do
     kr="${key%#*}"; kn="${key#*#}"
-    j="$(issue_json "$kr" "$kn")"; rc=$?
+    rc=0; j="$(issue_json "$kr" "$kn")" || rc=$?
     if [ "$rc" -eq 1 ]; then note "alarm: node budget reached before $key; raise alarm_max_nodes"; afail=1; continue; fi
     if [ "$rc" -ne 0 ]; then note "alarm: could not read $key"; afail=1; continue; fi
     marker="$(printf '%s' "$j" | jq -r '[(.data.repository.issue.comments.nodes[].body // ""), (.data.repository.issue.body // "")] | join("\n") | test("(?im)^[[:space:]]*owner[[:space:]]*[:=]")')"
@@ -871,7 +874,7 @@ maintain_links(){ # maintain_links <dry 0|1>
     fi
     if [ "$dry" = 1 ]; then note "links: would record $bref is blocked by $br#$dep (from its db-work-scope depends_on)"; continue; fi
     if gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
-      created=$((created+1)); snapshot_addlink "$br" "$bn" "$dep"; note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
+      created=$((created+1)); snapshot_addlink "$br" "$bn" "$dep" || snapshot_drop "$br"; note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
     else
       note "links: GitHub refused the link $bref blocked by $br#$dep"; lfail=1
     fi

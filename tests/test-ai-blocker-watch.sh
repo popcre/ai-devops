@@ -441,9 +441,11 @@ check 'list shows the parked issue column' "BW2 list | awk -F'\t' '\$6==\"o/r#9\
 # issues once, create every link, and alarm on every unowned blocker. Set
 # AI_BLOCKER_WATCH_OLD to a previous build to compare outcomes and calls.
 AI_BLOCKER_WATCH_OLD="${AI_BLOCKER_WATCH_OLD:-}"
+# The node budget is raised so every candidate is read; the budget has its own path.
+jq '.alarm_max_nodes = 500' "$TMP/config.json" > "$TMP/config-replay.json"
 replay(){ # replay <script>: fresh state, both scans due, one tick
   rm -rf "$TMP/home" "$FAKE/links" "$FAKE/comments" "$FAKE/created" "$FAKE/edited" "$FAKE"/gql_issue_*.json "$FAKE/digest_search.json"; : > "$FAKE/calls"
-  "$1" tick > "$TMP/replay.out" 2>&1
+  AI_BLOCKER_WATCH_CONFIG="$TMP/config-replay.json" "$1" tick > "$TMP/replay.out" 2>&1
 }
 rnodes=""; pnodes=""
 for i in $(seq 101 220); do
