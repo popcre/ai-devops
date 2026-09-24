@@ -259,6 +259,7 @@ check 'live doctor contacts Muse and proves its exact verdict' "cd '$REPO' && ev
 check 'live doctor accepts provider progress before the exact final verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_PREAMBLE=checking MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" | grep -q 'live provider response'"
 export DEVOPS_MCP_TOKEN=must-not-reach-muse OP_SERVICE_ACCOUNT_TOKEN=must-not-reach-muse SUPABASE_ACCESS_TOKEN=must-not-reach-muse
 check 'Muse provider receives only its own key and the minimal runtime environment' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && ! grep -Eq 'DEVOPS_MCP_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|SUPABASE_ACCESS_TOKEN' '$TMP/provider-env'"
+check 'Muse provider keeps the PowerShell module cache out of the checkout (#754)' "grep -q '^PSModuleAnalysisCachePath=.*ai-muse-ps-module-cache$' '$TMP/provider-env'"
 check 'Muse key is absent from the provider process chain arguments' "cd '$REPO' && eval \"$ENV MUSE_STUB_CMDLINE_FILE='$TMP/provider-cmdline' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && ! grep -q 'fake-key' '$TMP/provider-cmdline'"
 unset DEVOPS_MCP_TOKEN OP_SERVICE_ACCOUNT_TOKEN SUPABASE_ACCESS_TOKEN
 check 'live doctor rejects unexpected provider text' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=unexpected '$SCRIPT' doctor --live\""
