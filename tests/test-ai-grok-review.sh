@@ -74,6 +74,8 @@ export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 # Keep every fixture, progress fingerprint, and saved review path in one
 # canonical namespace so service-account activity is observed truthfully.
 TMP="$(cd "$TMP" && pwd -P)"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 mkdir -p "$TMP/system-tmp"
 export TMPDIR="$TMP/system-tmp"
 cleanup() {

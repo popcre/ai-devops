@@ -72,6 +72,8 @@ check 'report refusal explains the exact remedies' "grep -q 'Add .ai/reviews/ to
 check 'private Windows ACL is revalidated even when a marker already exists' "! grep -Fq 'if [ ! -f \"\$dir/.ai-devops-private-reviews-v1\" ]' '$SCRIPT'"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_MUSE_TEST_DIR="$TMP"
 startup_reason_cases

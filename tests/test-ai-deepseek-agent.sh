@@ -14,6 +14,8 @@ PASS=0; FAIL=0; SKIP=0
 ai_test_measure_spawn_baseline
 # A case the filesystem cannot host is not a passing check.
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_DEEPSEEK_TEST_DIR="$TMP"
 mkdir -p "$TMP/bin" "$TMP/home/.config/ai-devops" "$TMP/repo"
@@ -311,12 +313,22 @@ HOSTILE_NL="$(printf 'two
 line.md')"
 if printf 'newline
 ' > "$TMP/repo/$HOSTILE_NL" 2>/dev/null; then
-  NL_OUT="$(DEEPSEEK_STUB_REPLY=$'x
-## Verdict
-APPROVE' run send newline-review --review --file "$HOSTILE_NL")"
+  NL_OUT="$(DEEPSEEK_STUB_REPLY='x' run send newline-review --file "$HOSTILE_NL")"
   NL_ID="$(printf '%s
 ' "$NL_OUT"|sed -n 's/^SESSION_ID: //p')"
-  check "an attachment name containing a newline is recorded as one exact entry" "jq -e --arg f \"$HOSTILE_NL\" '(.attached_files|length)==1 and .attached_files==[\$f]' '$TMP/repo/.ai/deepseek-sessions/$NL_ID.meta.json'"
+  if python -c 'import os, sys; assert sys.stdin.buffer.read() == os.fsencode(sys.argv[1]) + b"\0"' \
+      "$HOSTILE_NL" < "$TMP/repo/.ai/deepseek-sessions/$NL_ID.attachments"; then
+    ok "an attachment name containing a newline is recorded as one exact entry"
+  else bad "an attachment name containing a newline is recorded as one exact entry"
+  fi
+  NL_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+  set +e
+  run send newline-source --review --file "$HOSTILE_NL" > "$TMP/newline-refusal.out" 2>&1
+  NL_RC=$?
+  set -e
+  check "formal source review refuses a newline path before provider contact" "test '$NL_RC' -ne 0 && grep -q 'source privacy classification unavailable' '$TMP/newline-refusal.out' && test '$NL_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
+  # The later source-identity review requires a line-safe complete path inventory.
+  rm -f -- "$TMP/repo/$HOSTILE_NL"
 else
   skip "attachment name containing a newline unsupported by this filesystem"
 fi

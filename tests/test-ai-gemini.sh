@@ -13,6 +13,8 @@ PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
 ai_test_measure_spawn_baseline
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 mkdir -p "$TMP/bin" "$TMP/state" "$TMP/copies"
 
@@ -70,7 +72,7 @@ case "${MOCK_MODE:-normal}" in
  mutate-protected) printf changed >> "$MOCK_PROTECTED/file.txt" ;;
  mutate-protected-ignored) printf changed >> "$MOCK_PROTECTED/.ignored" ;;
  mutate-protected-tracked-runtime) printf changed >> "$MOCK_PROTECTED/.ai/reviews/tracked.md" ;;
- sleep) sleep 30 ;;
+ sleep) for _ in $(seq 1 300); do [ -f "${MOCK_SLEEP_HOLD:-}" ] || break; sleep 1; done ;;
  reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
 esac
@@ -221,15 +223,19 @@ R5C="$TMP/repo5c"; make_repo "$R5C"; R5C_ID="$(printf '%s\n%s' "$(cd "$R5C" && p
 (new_run "$R5C" reclaim reclaim-slow >/dev/null 2>&1) & RECLAIM_A=$!; (new_run "$R5C" reclaim reclaim-slow >/dev/null 2>&1) & RECLAIM_B=$!; RA=0; RB=0; wait "$RECLAIM_A" || RA=$?; wait "$RECLAIM_B" || RB=$?
 check 'concurrent stale-lock reclaimers cannot both enter a review' "test \$(( (RA == 0) + (RB == 0) )) -eq 1"
 R6="$TMP/repo6"; make_repo "$R6"
+export MOCK_SLEEP_HOLD="$TMP/concurrent-review-hold"
+: > "$MOCK_SLEEP_HOLD"
 (cd "$R6" && exec env MOCK_MODE=sleep "$SCRIPT" new concurrent --prompt wait) >/dev/null 2>&1 & RUNPID=$!
-for _ in $(seq 1 "$(scale_ticks 100)"); do [ -n "$(meta_for concurrent 2>/dev/null || true)" ] && break; sleep .05; done
-CONCURRENT_COPY="$(jq -r .review_dir "$(meta_for concurrent)")"; printf owner-evidence > "$CONCURRENT_COPY/concurrency-owner"
+poll_until "$(budget 10 30)" 'concurrent review metadata' 'test -n "$(meta_for concurrent 2>/dev/null || true)"'
+CONCURRENT_META="$(meta_for concurrent)"
+CONCURRENT_COPY="$(jq -r .review_dir "$CONCURRENT_META")"; printf owner-evidence > "$CONCURRENT_COPY/concurrency-owner"
 check 'concurrent new is refused before touching evidence' "! (cd '$R6' && '$SCRIPT' new concurrent --prompt collide) && grep -qx owner-evidence '$CONCURRENT_COPY/concurrency-owner'"
 check 'concurrent delete is refused while review runs' "! (cd '$R6' && '$SCRIPT' delete concurrent)"
 check 'concurrent follow-up is refused while review runs' "! (cd '$R6' && '$SCRIPT' ask concurrent --prompt collide)"
 check 'a second same-repository review is admitted while the first runs' "new_run '$R6' concurrent-two normal >/dev/null && test \"\$(jq -r .status \"\$(meta_for concurrent-two)\")\" = COMPLETE"
 check 'concurrent same-provider reviews share no copy, sandbox tag, or session record' "test \"\$(jq -r .review_dir \"\$(meta_for concurrent-two)\")\" != '$CONCURRENT_COPY' && test \"\$(jq -r .sandbox_tag \"\$(meta_for concurrent-two)\")\" != \"\$(jq -r .sandbox_tag \"\$(meta_for concurrent)\")\" && test \"\$(meta_for concurrent-two)\" != \"\$(meta_for concurrent)\""
 kill -TERM "$RUNPID" 2>/dev/null || true; RUNRC=0; wait "$RUNPID" 2>/dev/null || RUNRC=$?
+rm -f -- "$MOCK_SLEEP_HOLD"
 check 'interrupted review returns failure' "test '$RUNRC' -ne 0"
 check 'interrupted work is marked for recovery' "test \"\$(jq -r .status \"\$(meta_for concurrent)\")\" = RECOVERY_REQUIRED"
 check 'interrupted private copy is preserved' "test -d \"\$(jq -r .review_dir \"\$(meta_for concurrent)\")\""
