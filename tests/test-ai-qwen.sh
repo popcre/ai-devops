@@ -423,6 +423,18 @@ check 'first follow-up completes successfully' "test '$FIRST_ASK_RC' -eq 0"
 check 'follow-up resumes exact session' "grep -q -- '--resume qwen-session-1' '$TMP/argv.txt'"
 check 'follow-up keeps the recorded review copy' "[ \"\$(run show review-1 | jq -r .review_dir)\" = '$REVIEW_DIR' ]"
 
+LONG_NAME="long-$(printf 'n%.0s' $(seq 1 150))"
+LONG_NEW_OUT="$(run new "$LONG_NAME" --prompt 'review this' 2>&1)"; LONG_NEW_RC=$?
+[ "$LONG_NEW_RC" -eq 0 ] || printf '  diagnostic: long-name new: %s
+' "$LONG_NEW_OUT" | head -5
+check 'a 155-character session name completes a review' "test '$LONG_NEW_RC' -eq 0"
+LONG_ASK_OUT="$(run ask "$LONG_NAME" --prompt 'follow up' 2>&1)"; LONG_ASK_RC=$?
+[ "$LONG_ASK_RC" -eq 0 ] || printf '  diagnostic: long-name ask: %s
+' "$LONG_ASK_OUT" | head -5
+check 'the long-name session resumes on ask' "test '$LONG_ASK_RC' -eq 0"
+find "$AI_QWEN_STATE_DIR" "${AI_REVIEW_SANDBOX_DIR:-$AI_QWEN_STATE_DIR}" "$REPO/.ai" -print 2>/dev/null | awk -F/ 'length($NF)>110' | sed 's/^/  diagnostic: over-long name: /' | head -5 || true
+check 'no state, sandbox, or report name exceeds 110 characters' "! find '$AI_QWEN_STATE_DIR' '${AI_REVIEW_SANDBOX_DIR:-$AI_QWEN_STATE_DIR}' '$REPO/.ai' -print 2>/dev/null | awk -F/ 'length(\$NF)>110{f=1} END{exit !f}'"
+
 echo publication-failure > "$TMP/mode"
 run new publication-failed --prompt 'retain this completed result' > "$TMP/publication-failed.out" 2>&1; PUBLICATION_RC=$?
 check 'publication failure cannot become an active accepted review' "test '$PUBLICATION_RC' -ne 0 && run show publication-failed | jq -e '.status!=\"active\"'"
@@ -718,7 +730,12 @@ check 'multiple verdict sections are rejected' "printf '%s' \"\$MULTIPLE\" | gre
 printf '%s\n' '{"type":"result","is_error":false,"result":"## Verdict\nAPPROVE\ntrailing text"}' > "$TMP/nonfinal-verdict.jsonl"
 NONFINAL="$(probe "$TMP/nonfinal-verdict.jsonl")"
 check 'a non-final verdict is rejected' "printf '%s' \"\$NONFINAL\" | grep -q 'final two nonblank lines'"
-check 'raw JSON output cannot bypass verdict validation' "grep -q 'extract_answer \"\$out\" >/dev/null; cat \"\$out\"' '$SCRIPT' && grep -q 'qwen-\${name}-incomplete-' '$SCRIPT'"
+check 'raw JSON output cannot bypass verdict validation' "grep -q 'extract_answer \"\$out\" >/dev/null; cat \"\$out\"' '$SCRIPT' && grep -q 'qwen-\$(short_name \"\$name\" 64)-incomplete-' '$SCRIPT'"
+# Path-length class: no session-derived sandbox tag, state file, or report
+# name may grow with the session name or caller.
+check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok|gemini|muse|qwen)-[$][{]?(1|2|name|n)([^A-Za-z_]|$)' '$SCRIPT' | grep -v short_name | grep -q ."
+check "short_name bounds a 300-character name deterministically and keeps short names" "eval \"\$(grep -m1 -E '^short_name\(\) *\{' '$SCRIPT')\"; l=\"\$(printf %.0sq \$(seq 1 300))\"; a=\"\$(short_name \"\$l\" 64)\"; test \${#a} -eq 64 && test \"\$a\" = \"\$(short_name \"\$l\" 64)\" && test \"\$(short_name abc 64)\" = abc && test \"\$a\" != \"\$(short_name \"\${l}x\" 64)\""
+check "moved-checkout discovery also finds bounded session files" "grep -q 'short_name \"\$CALLER--\$2\" 56).json' '$SCRIPT'"
 
 BODY="$(bash -c '. "$1"; extract_answer "$2"' _ "$TMP/extract.sh" "$TMP/good.jsonl")"
 check 'the text above the verdict is still emitted' "printf '%s' \"\$BODY\" | grep -q 'finding one'"

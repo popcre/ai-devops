@@ -67,7 +67,11 @@ foreach ($key in $Scope.Keys) {
   $desired = @($Scope[$key])
   # NOT $roots: PowerShell variables are case-insensitive, so that would
   # clobber the type-constrained $Roots parameter on the first iteration.
-  $rootList = @($Roots[$key])
+  # A scope key the caller left out of $Roots (project not cloned here) is
+  # skipped: @($null).Count is 1 in PowerShell, so indexing alone would
+  # iterate once with a null root and die at GetFullPath (#705 live run).
+  $rootList = @()
+  if ($Roots.Contains($key)) { $rootList = @($Roots[$key] | Where-Object { $_ }) }
   if ($rootList.Count -eq 0) { continue }
   foreach ($root in $rootList) {
     $rootPath = [IO.Path]::GetFullPath($root)

@@ -41,3 +41,12 @@ allocator but stayed registered here, and a session spent an hour trying it.
    use fixed-length identifiers (hashes or short IDs), never the repository,
    worktree, branch, or session name, so a long name cannot push a path past
    Windows limits.
+9. **A Muse Contributor 404 is capacity, not a missing model.** Meta reports
+   the shared team's Contributor capacity limit as `model_not_found` (HTTP
+   404). `ai-muse` relaunches only an answer-free rejection of that kind: at
+   most `AI_MUSE_CAPACITY_RETRIES` extra launches (default 6, so 7 attempts
+   in all), waiting a jittered, growing delay based on
+   `AI_MUSE_CAPACITY_BACKOFF` (default 20 seconds) before each, and it logs a
+   `capacity` line on stderr for each relaunch. The code is `bin/ai-muse` and
+   its checks are in `tests/test-ai-muse.sh`. Every other failure still stops the
+   review; never switch Muse's model or disable it to get past a 404.

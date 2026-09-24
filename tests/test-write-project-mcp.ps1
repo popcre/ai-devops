@@ -120,6 +120,16 @@ try {
   & $writer -Scope $scope2 -Roots (@{ "beta" = @($rootB) }) -Catalog $catalog -ClaudeCodeConfig $claudeJson
   $b2 = Read-Json (Join-Path $rootB ".mcp.json")
   Assert-True (@($b2["mcpServers"].Keys | Sort-Object) -join "," -eq "hand-added,railway") "B2: scope change swaps managed names, foreign still kept"
+
+  # ---- a scope key with no Roots entry (project not cloned) is skipped ----
+  # Regression for the 2026-09-24 live run: @($null).Count is 1, so indexing
+  # alone iterated once with a null root and died at GetFullPath before the
+  # save, silently dropping every project entry written earlier.
+  $scope3 = [ordered]@{ "beta" = @("railway"); "notcloned" = @("trigger") }
+  $before3 = [IO.File]::ReadAllBytes($claudeJson)
+  & $writer -Scope $scope3 -Roots (@{ "beta" = @($rootB) }) -Catalog $catalog -ClaudeCodeConfig $claudeJson
+  $after3 = [IO.File]::ReadAllBytes($claudeJson)
+  Assert-True (@(Compare-Object $before3 $after3).Count -eq 0) "a scope key missing from Roots is skipped and the run completes"
 } finally {
   Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

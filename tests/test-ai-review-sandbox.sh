@@ -405,5 +405,16 @@ check "deepseek_hands_over_no_directory"      "! grep -qE -- '--cd |--cwd ' '$RE
 check "invalid_tag_rejected"                  "! '$SCRIPT' ensure '$WT' 'bad tag'"
 check "unknown_subcommand_rejected"           "! '$SCRIPT' nonsense"
 
+# Path-length class: a tag of any length maps to a bounded directory name, two
+# long tags sharing a prefix never collide, and a short tag keeps its name.
+LONG_TAG_A="gemini-$(printf 'x%.0s' $(seq 1 200))-a"; LONG_TAG_B="gemini-$(printf 'x%.0s' $(seq 1 200))-b"
+LONG_PATH_A="$("$SCRIPT" path "$WT" "$LONG_TAG_A")"; LONG_PATH_B="$("$SCRIPT" path "$WT" "$LONG_TAG_B")"
+check "long_tag_directory_name_is_bounded"    "test \"\$(basename '$LONG_PATH_A' | wc -c)\" -le 78"
+check "long_tags_with_shared_prefix_differ"   "test '$LONG_PATH_A' != '$LONG_PATH_B'"
+check "short_tag_directory_name_unchanged"    "basename \"\$('$SCRIPT' path '$WT' short-tag)\" | grep -Eq '^short-tag-[0-9a-f]{12}\$'"
+LONG_COPY="$("$SCRIPT" ensure-copy "$WT" "$LONG_TAG_A")"
+check "long_tag_copy_builds_and_records_full_tag" "test -f '$LONG_COPY/AI-REVIEW-SANDBOX.md' && grep -Fqx 'Snapshot tag: $LONG_TAG_A' '$LONG_COPY/AI-REVIEW-SANDBOX.md'"
+check "long_tag_copy_removes_by_recorded_tag"     "'$SCRIPT' remove-recorded '$LONG_TAG_A' '$LONG_COPY' && test ! -e '$LONG_COPY'"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
