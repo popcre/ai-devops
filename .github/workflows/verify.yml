@@ -38,7 +38,7 @@ permissions:
 env:
   # Issue #742: how long a hosted Windows job may sit queued before its lane is
   # diverted to the equivalent Blacksmith jobs.
-  HOSTED_WINDOWS_START_DEADLINE_SECONDS: 300
+  HOSTED_WINDOWS_START_DEADLINE_SECONDS: 0
 
 jobs:
   manual-preflight:
