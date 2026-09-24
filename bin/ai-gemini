@@ -150,8 +150,11 @@ def link(path):
                           stdout=subprocess.PIPE).stdout.rstrip(b'\n')
 
 def omitted(directory, rel):
+    # Reviewer-owned output only: parallel reviewers (Muse, Grok, Qwen, Codex,
+    # DeepSeek's .ai/deepseek-sessions) write here while Gemini's turn runs.
+    # Tracked files anywhere, including under these paths, stay protected.
     if (rel == '.git' or rel in ('.ai/reviews', '.ai/reviewer-issues',
-            '.ai/test-runs', '.ai/qualification') or
+            '.ai/test-runs', '.ai/qualification', '.ai/deepseek-sessions') or
             fnmatch.fnmatchcase(rel, '.ai/qwen-test.*')):
         return True
     top = rel.split('/', 1)[0]

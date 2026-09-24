@@ -70,6 +70,10 @@ case "${MOCK_MODE:-normal}" in
  mutate-protected) printf changed >> "$MOCK_PROTECTED/file.txt" ;;
  mutate-protected-ignored) printf changed >> "$MOCK_PROTECTED/.ignored" ;;
  mutate-protected-tracked-runtime) printf changed >> "$MOCK_PROTECTED/.ai/reviews/tracked.md" ;;
+ concurrent-reviewers) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions/.ai-review-deepseek-x" "$MOCK_PROTECTED/.ai/reviews"; printf session > "$MOCK_PROTECTED/.ai/deepseek-sessions/1.json"; printf packet > "$MOCK_PROTECTED/.ai/deepseek-sessions/.ai-review-deepseek-x/patch.diff"; printf report > "$MOCK_PROTECTED/.ai/reviews/muse-concurrent.md" ;;
+ concurrent-reviewers-and-source) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions"; printf session > "$MOCK_PROTECTED/.ai/deepseek-sessions/2.json"; printf changed >> "$MOCK_PROTECTED/file.txt" ;;
+ concurrent-lookalike) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions-other"; printf source > "$MOCK_PROTECTED/.ai/deepseek-sessions-other/x.txt" ;;
+ concurrent-tracked-session) printf changed >> "$MOCK_PROTECTED/.ai/deepseek-sessions/tracked.json" ;;
  sleep) sleep 30 ;;
  reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
@@ -158,6 +162,14 @@ R3C="$TMP/repo3c"; make_repo "$R3C"; export MOCK_PROTECTED="$R3C"
 check 'same-turn protected ignored-file mutation is rejected' "! new_run '$R3C' protected-ignored mutate-protected-ignored"
 R3D="$TMP/repo3d"; make_repo "$R3D"; mkdir -p "$R3D/.ai/reviews"; printf tracked > "$R3D/.ai/reviews/tracked.md"; git -C "$R3D" add -f .ai/reviews/tracked.md; git -C "$R3D" commit -qm tracked-runtime; export MOCK_PROTECTED="$R3D"
 check 'tracked files inside runtime directories remain protected' "! new_run '$R3D' protected-tracked-runtime mutate-protected-tracked-runtime"
+R3E="$TMP/repo3e"; make_repo "$R3E"; export MOCK_PROTECTED="$R3E"
+check 'concurrent reviewer output (DeepSeek sessions, reports) during the turn is not source drift' "new_run '$R3E' concurrent-reviewers concurrent-reviewers | grep -q '^PASS'"
+R3F="$TMP/repo3f"; make_repo "$R3F"; export MOCK_PROTECTED="$R3F"
+check 'a real source edit alongside concurrent reviewer output is still rejected' "! new_run '$R3F' concurrent-source concurrent-reviewers-and-source"
+R3G="$TMP/repo3g"; make_repo "$R3G"; export MOCK_PROTECTED="$R3G"
+check 'a look-alike sibling of a reviewer-owned path stays protected' "! new_run '$R3G' concurrent-lookalike concurrent-lookalike"
+R3H="$TMP/repo3h"; make_repo "$R3H"; mkdir -p "$R3H/.ai/deepseek-sessions"; printf tracked > "$R3H/.ai/deepseek-sessions/tracked.json"; git -C "$R3H" add -f .ai/deepseek-sessions/tracked.json; git -C "$R3H" commit -qm tracked-session; export MOCK_PROTECTED="$R3H"
+check 'tracked files inside the DeepSeek session directory remain protected' "! new_run '$R3H' concurrent-tracked concurrent-tracked-session"
 GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }
