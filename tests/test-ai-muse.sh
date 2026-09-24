@@ -86,7 +86,11 @@ if MSYS=winsymlinks:nativestrict ln -s "$ROOT/bin/setup-opencode-muse.sh" "$TMP/
   SETUP_HOME="$TMP/setup-home"; SETUP_VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
   SETUP_BIN="$SETUP_HOME/.local/lib/ai-devops/opencode/$SETUP_VERSION/node_modules/opencode-ai/bin"
   mkdir -p "$SETUP_BIN"; printf '#!/usr/bin/env bash\nexit 0\n' > "$SETUP_BIN/opencode.exe"; chmod +x "$SETUP_BIN/opencode.exe"
-  check 'installed setup symlink locates repository configuration' "USERPROFILE= AI_MUSE_CONFIG_DIR= HOME='$SETUP_HOME' '$TMP/installed/bin/setup-opencode-muse.sh' >/dev/null && cmp -s '$ROOT/config/opencode-muse/opencode.json' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json' && cmp -s '$ROOT/config/opencode-muse/agent/muse-review.md' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md'"
+  mkdir -p "$TMP/setup-opbin"; printf '#!/usr/bin/env bash
+printf setup-key
+' > "$TMP/setup-opbin/op"; chmod +x "$TMP/setup-opbin/op"
+  check 'installed setup symlink locates repository configuration' "USERPROFILE= AI_MUSE_CONFIG_DIR= HOME='$SETUP_HOME' PATH='$TMP/setup-opbin:$PATH' '$TMP/installed/bin/setup-opencode-muse.sh' >/dev/null && cmp -s '$ROOT/config/opencode-muse/opencode.json' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json' && cmp -s '$ROOT/config/opencode-muse/agent/muse-review.md' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md'"
+  check 'installer stores the Muse key once in the protected per-user store' "grep -qx setup-key '$SETUP_HOME/.config/ai-devops/secrets/muse-api-key'"
 else
   rm -f -- "$TMP/installed/bin/setup-opencode-muse.sh"
   ok 'installed setup symlink fixture unavailable on this host'
@@ -477,6 +481,34 @@ CRED_TIMEOUT_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_CREDENTIAL_WAIT_SECONDS=2 '
 check 'a held credential lock fails closed with a clear message after the wait budget' "printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q 'credential lock still held by another Muse turn after 2s' && ! printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q fake-key"
 rm -rf "$TMP/state/credential.lock.d"
 
+# Protected key store: the installer's copy is used before 1Password, and
+# 1Password is only the refresh path when Meta rejects the stored key (#720).
+KS="$TMP/keystore/muse-api-key"
+STORE_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' store-key" 2>&1)"
+check 'store-key writes the key without printing it' "grep -qx fake-key '$KS' && ! printf '%s' \"\$STORE_OUT\" | grep -q fake-key"
+command -v cygpath >/dev/null 2>&1 || check 'stored key is owner-only' "[ \"\$(stat -c %a '$KS')\" = 600 ] && [ \"\$(stat -c %a '$TMP/keystore')\" = 700 ]"
+printf 'stored-key\n' > "$KS"; chmod 600 "$KS"
+check 'a stored key is used instead of 1Password' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=stored-key' '$TMP/provider-env'"
+DOCTOR_KS_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' doctor" 2>&1 || true)"
+if printf '%s\n' "$DOCTOR_KS_OUT" | grep -q 'PASS  protected Muse key store is present'; then ok 'doctor reports the protected key store'; else bad 'doctor reports the protected key store'; printf '%s\n' "$DOCTOR_KS_OUT" | sed 's/^/    doctor: /' | head -40; fi
+mkdir -p "$TMP/curl401"; printf '#!/usr/bin/env bash\nprintf 401\n' > "$TMP/curl401/curl"; chmod +x "$TMP/curl401/curl"
+REJ_OUT="$(cd "$REPO" && eval "$ENV PATH='$TMP/curl401:$TMP/bin:$PATH' AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live" 2>&1)"
+check 'a rejected stored key is refreshed from 1Password and rewritten' "grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && grep -qx fake-key '$KS' && printf '%s' \"\$REJ_OUT\" | grep -q 'stored key was rejected'"
+check 'a missing key store falls back to 1Password without writing a store' "rm -f '$KS' && cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && test ! -e '$KS'"
+# The protections that make the store "protected" fail closed to 1Password.
+mkdir -p "$TMP/keystore-real"; printf 'linked-key\n' > "$TMP/keystore-real/muse-api-key"; chmod 600 "$TMP/keystore-real/muse-api-key"
+if MSYS=winsymlinks:nativestrict ln -s "$TMP/keystore-real" "$TMP/keystore-link" 2>/dev/null && [ -L "$TMP/keystore-link" ]; then
+  check 'a key store behind a linked directory is refused' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$TMP/keystore-link/muse-api-key' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env'"
+  check 'store-key refuses to write through a linked directory' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$TMP/keystore-link/muse-api-key' '$SCRIPT' store-key\" >/dev/null 2>&1 && grep -qx linked-key '$TMP/keystore-real/muse-api-key'"
+else
+  skip 'linked key store checks need symlink support'
+fi
+if ! command -v cygpath >/dev/null 2>&1; then
+  printf 'loose-key\n' > "$KS"; chmod 644 "$KS"
+  check 'a key store that is not owner-only is refused' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env'"
+fi
+check 'the key probe sends the key from a header file, never argv' "grep -q 'curl .*-H @\"\$hdr\"' '$SCRIPT' && ! grep -q 'Bearer \$MODEL_API_KEY' '$SCRIPT'"
+check 'only a test run may redirect the key probe' "grep -q '^KEY_PROBE_URL=\"https://api.meta.ai/v1/models\"\$' '$SCRIPT' && grep -q 'AI_MUSE_TEST_DIR:-}\" \] || KEY_PROBE_URL=' '$SCRIPT'"
 muse_recovery_cases
 # op missing from PATH on Windows: the wrapper finds the WinGet package copy.
 if command -v cygpath >/dev/null 2>&1; then

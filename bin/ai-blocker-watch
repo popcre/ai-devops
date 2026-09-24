@@ -107,6 +107,9 @@ TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
 HOME_DIR="${AI_BLOCKER_WATCH_HOME:-${HOME:?HOME is unavailable}/.ai-devops/blocker-watch}"
 CONFIG="${AI_BLOCKER_WATCH_CONFIG:-$TOOL_ROOT/config/blocker-watch.json}"
 GH="${AI_BLOCKER_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
+# Label only the transport subprocess. Resumed AI sessions are independent
+# callers and must not inherit BlockerWatch's attribution.
+gh_call(){ AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; }
 WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
 LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
 LOGS="$HOME_DIR/logs"
@@ -122,7 +125,7 @@ parse_ref(){ # owner/repo#N -> "owner/repo N"
   [[ "$1" =~ ^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)$ ]] || die "expected owner/repo#N, got: $1"
   printf '%s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 }
-gh_api(){ "$GH" api "$@" | tr -d '\r'; }
+gh_api(){ gh_call api "$@" | tr -d '\r'; }
 
 link(){ # link <blocked> <blocker> [blocker id, when already read]
   local br bn kr kn id="${3:-}"
@@ -139,9 +142,9 @@ link(){ # link <blocked> <blocker> [blocker id, when already read]
 
 ensure_labels(){ # ensure_labels <owner/repo> — labels are cheap and idempotent
   local repo="$1"
-  "$GH" label create "$(cfg .parked_label)" -R "$repo" --color FBCA04 \
+  gh_call label create "$(cfg .parked_label)" -R "$repo" --color FBCA04 \
     --description "Waiting on a blocker; BlockerWatch restarts it" >/dev/null 2>&1 || true
-  "$GH" label create "$(cfg .resumed_label)" -R "$repo" --color 0E8A16 \
+  gh_call label create "$(cfg .resumed_label)" -R "$repo" --color 0E8A16 \
     --description "BlockerWatch restarted this parked work" >/dev/null 2>&1 || true
 }
 
@@ -193,7 +196,7 @@ cmd_wait(){
   if [ -n "$for" ]; then
     parse_ref "$for" >/dev/null; repo="${for%%#*}"
   else
-    repo="$( (cd "$cwd" && "$GH" repo view --json nameWithOwner --jq .nameWithOwner) | tr -d '\r' )" ||
+    repo="$( (cd "$cwd" && gh_call repo view --json nameWithOwner --jq .nameWithOwner) | tr -d '\r' )" ||
       die "cannot tell which repository $cwd belongs to; use --for owner/repo#M instead"
     [ -n "$repo" ] || die "cannot tell which repository $cwd belongs to; use --for owner/repo#M instead"
   fi
@@ -234,19 +237,19 @@ The time $until_at — whichever comes first."
     note "opening the parked issue in $repo"
     # Labels exist after the first wait in a repository; create them only when
     # GitHub refuses the label, instead of spending two calls every time.
-    parked_url="$("$GH" issue create -R "$repo" -t "$park" --body-file "$tmp" --label "$(cfg .parked_label)" | tr -d '\r' | tail -n1)" ||
+    parked_url="$(gh_call issue create -R "$repo" -t "$park" --body-file "$tmp" --label "$(cfg .parked_label)" | tr -d '\r' | tail -n1)" ||
       { ensure_labels "$repo"
-        parked_url="$("$GH" issue create -R "$repo" -t "$park" --body-file "$tmp" --label "$(cfg .parked_label)" | tr -d '\r' | tail -n1)"; } ||
+        parked_url="$(gh_call issue create -R "$repo" -t "$park" --body-file "$tmp" --label "$(cfg .parked_label)" | tr -d '\r' | tail -n1)"; } ||
       { rm -f "$tmp"; die "could not open the parked issue in $repo"; }
     [ -n "$parked_url" ] || { rm -f "$tmp"; die "GitHub returned no issue URL for the parked issue"; }
     parked_issue="$repo#${parked_url##*/}"
   else
     local fr fn; read -r fr fn <<<"$(parse_ref "$for")"
     note "posting the resume brief on $for"
-    "$GH" issue comment "$fn" -R "$fr" --body-file "$tmp" >/dev/null ||
+    gh_call issue comment "$fn" -R "$fr" --body-file "$tmp" >/dev/null ||
       { rm -f "$tmp"; die "could not post the resume brief on $for"; }
-    "$GH" issue edit "$fn" -R "$fr" --add-label "$(cfg .parked_label)" >/dev/null ||
-      { ensure_labels "$repo"; "$GH" issue edit "$fn" -R "$fr" --add-label "$(cfg .parked_label)" >/dev/null; } ||
+    gh_call issue edit "$fn" -R "$fr" --add-label "$(cfg .parked_label)" >/dev/null ||
+      { ensure_labels "$repo"; gh_call issue edit "$fn" -R "$fr" --add-label "$(cfg .parked_label)" >/dev/null; } ||
       { rm -f "$tmp"; die "could not mark $for parked"; }
     parked_issue="$for"; parked_url="https://github.com/$fr/issues/$fn"
   fi
@@ -288,8 +291,8 @@ cmd_find(){
   [ "$all" = 1 ] || common+=(--state open)
   # gh search combines --label with AND, so parked and resumed need one call each.
   local out1 out2 rows
-  out1="$("$GH" search issues "$q" "${common[@]}" --label "$(cfg .parked_label)" 2>/dev/null || echo '[]')"
-  out2="$("$GH" search issues "$q" "${common[@]}" --label "$(cfg .resumed_label)" 2>/dev/null || echo '[]')"
+  out1="$(gh_call search issues "$q" "${common[@]}" --label "$(cfg .parked_label)" 2>/dev/null || echo '[]')"
+  out2="$(gh_call search issues "$q" "${common[@]}" --label "$(cfg .resumed_label)" 2>/dev/null || echo '[]')"
   rows="$(printf '%s\n%s\n' "$out1" "$out2" | jq -r -s '
     (add // []) | unique_by(.url) | sort_by(.updatedAt) | reverse
     | .[] | "\((.repository.nameWithOwner // .repository.name // "?"))#\(.number)\t\(.state)\t\(.updatedAt[0:10])\t\(.title)"' 2>/dev/null || true)"
@@ -353,7 +356,7 @@ propagate(){
         grep -qxF "$key" "$NOTIFIED" && continue
         read -r dr dn <<<"$(parse_ref "$dep")"
         if [ "$DRY" = 1 ]; then note "would tell $dep that $repo#$n closed"; continue; fi
-        if "$GH" issue comment "$dn" -R "$dr" --body "<!-- ai-blocker-watch:$repo#$n -->
+        if gh_call issue comment "$dn" -R "$dr" --body "<!-- ai-blocker-watch:$repo#$n -->
 Blocker $repo#$n is closed. Whoever owns this issue: recheck it and continue. (ai-blocker-watch)" >/dev/null; then
           printf '%s\n' "$key" >> "$NOTIFIED"; note "told $dep that $repo#$n closed"
         else note "could not comment on $dep"; ok=0; fi
@@ -381,9 +384,9 @@ $what $how $(jq -r .harness "$f") session on $(hostname 2>/dev/null || echo unkn
     body="$body It failed $(jq -r .attempts "$f") times. A person must restart it from this issue."
   fi
   body="$body (ai-blocker-watch)"
-  if "$GH" issue comment "$pn" -R "$pr" --body "$body" >/dev/null; then
+  if gh_call issue comment "$pn" -R "$pr" --body "$body" >/dev/null; then
     if [ "$rc" = 0 ]; then
-      "$GH" issue edit "$pn" -R "$pr" --remove-label "$(cfg .parked_label)" --add-label "$(cfg .resumed_label)" >/dev/null ||
+      gh_call issue edit "$pn" -R "$pr" --remove-label "$(cfg .parked_label)" --add-label "$(cfg .resumed_label)" >/dev/null ||
         { note "could not swap the labels on $pi"; FAILED=1; }
     fi
   else
@@ -449,7 +452,7 @@ wake(){ # wake <wait file>
     local tgt; tgt="${parked_issue:-$(jq -r '.for // ""' "$f")}"
     if [ -n "$tgt" ]; then
       local tr tn; read -r tr tn <<<"$(parse_ref "$tgt")"
-      "$GH" issue comment "$tn" -R "$tr" --body "<!-- ai-blocker-watch:orphaned:$wid -->
+      gh_call issue comment "$tn" -R "$tr" --body "<!-- ai-blocker-watch:orphaned:$wid -->
 The wait was released ($why) but the original $h session and its folder ($cwd) are both gone, and no usable main checkout was recorded, so BlockerWatch cannot restart the work. A person must pick it up from this issue. (ai-blocker-watch)" >/dev/null ||
         note "could not comment on $tgt"
     fi
@@ -669,7 +672,7 @@ alarm_scan(){ # alarm_scan <dry 0|1>
   for key in $sorted; do
     [ "${salarmed[$key]}" = true ] && continue
     if [ "$dry" = 1 ]; then note "would ask $key for an owner (no owner, no activity for ${sage[$key]})"; continue; fi
-    if "$GH" issue comment "${key#*#}" -R "${key%#*}" --body "<!-- ai-blocker-watch:unowned:$key -->
+    if gh_call issue comment "${key#*#}" -R "${key%#*}" --body "<!-- ai-blocker-watch:unowned:$key -->
 This open issue blocks ${spar[$key]} and has gone ${sage[$key]} with no owner: no assignee, no \`owner:\` line, no open linked pull request, no activity.
 Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand it to a named queue owner. Listed in today's ai-blocker-watch digest. (ai-blocker-watch)" >/dev/null; then
       note "asked $key for an owner"
@@ -680,7 +683,7 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
     if [ "$dry" = 1 ]; then
       note "would update the digest in $drepo: $title"
     else
-      if dnum="$("$GH" search issues "$title" --repo "$drepo" --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null)"; then
+      if dnum="$(gh_call search issues "$title" --repo "$drepo" --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null)"; then
         dnum="$(printf '%s' "$dnum" | head -1)"
       else
         note "alarm: could not search $drepo for today's digest"; dnum=""; afail=1
@@ -688,12 +691,12 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
       if [ -n "$dnum" ]; then
         touch "$HOME_DIR/digest-$day.done"
         if ! cmp -s "$body" "$HOME_DIR/digest-$day.prev" 2>/dev/null; then
-          if "$GH" issue edit "$dnum" -R "$drepo" --body-file "$body" >/dev/null; then
+          if gh_call issue edit "$dnum" -R "$drepo" --body-file "$body" >/dev/null; then
             cp "$body" "$HOME_DIR/digest-$day.prev"; note "updated digest $drepo#$dnum"
           else note "alarm: could not update digest $drepo#$dnum"; afail=1; fi
         fi
       else
-        if "$GH" issue create -R "$drepo" -t "$title" --body-file "$body" >/dev/null; then
+        if gh_call issue create -R "$drepo" -t "$title" --body-file "$body" >/dev/null; then
           cp "$body" "$HOME_DIR/digest-$day.prev"; touch "$HOME_DIR/digest-$day.done"; note "opened digest in $drepo: $title"
         else note "alarm: could not open today's digest in $drepo"; afail=1; fi
       fi

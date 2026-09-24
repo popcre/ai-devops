@@ -24,6 +24,17 @@ make_fixture() {
   cp "$REPO_ROOT/config/retired-skills.txt" "$fixture/config/retired-skills.txt"
   printf '%s\n' '# test Claude global' > "$fixture/templates/system/CLAUDE-global.md"
   printf '%s\n' '# test Codex global' > "$fixture/templates/system/AGENTS-global-codex.md"
+  # Default: no repository-scoped skills. Individual tests opt in.
+  printf '%s\n' '{' '  "schema_version": 1,' '  "skills": {}' '}' > "$fixture/config/skill-scope.json"
+  printf '%s\n' '{' '  "schema_version": 1,' '  "protected_skills": ["handoff-writer"]' '}' > "$fixture/config/skill-trigger-policy.json"
+  printf '%s\n' 'demo-app	github.com/example/demo-app' > "$fixture/config/repo-identities.tsv"
+}
+
+make_demo_clone() {
+  local root="$1"
+  mkdir -p "$root/demo-app"
+  git -C "$root/demo-app" init -q
+  git -C "$root/demo-app" remote add origin https://github.com/example/demo-app.git
 }
 
 run_installer() {
@@ -34,7 +45,7 @@ run_installer() {
     bash "$fixture/bin/ai-install-skills" "$@"
 }
 
-echo "1/9 shared directory absent"
+echo "1/13 shared directory absent"
 fixture="$TMP_ROOT/absent/repo"; claude="$TMP_ROOT/absent/claude"; codex="$TMP_ROOT/absent/codex"
 make_fixture "$fixture"
 rm -rf "$fixture/skills/shared"
@@ -43,7 +54,7 @@ assert_file "$claude/skills/client-claude/SKILL.md"
 assert_file "$codex/skills/client-codex/SKILL.md"
 grep -Fq '1 Claude skills + 0 shared skills installed for Claude.' <<<"$output" || fail "wrong absent-shared count"
 
-echo "2/9 dual-client install and counts"
+echo "2/13 dual-client install and counts"
 fixture="$TMP_ROOT/dual/repo"; claude="$TMP_ROOT/dual/claude"; codex="$TMP_ROOT/dual/codex"
 make_fixture "$fixture"
 output="$(run_installer "$fixture" "$claude" "$codex")"
@@ -52,7 +63,7 @@ assert_file "$codex/skills/shared-one/SKILL.md"
 grep -Fq '1 Claude skills + 2 shared skills installed for Claude.' <<<"$output" || fail "wrong Claude count"
 grep -Fq '1 Codex skills + 2 shared skills installed for Codex.' <<<"$output" || fail "wrong Codex count"
 
-echo "3/9 dry-run makes no changes"
+echo "3/13 dry-run makes no changes"
 fixture="$TMP_ROOT/dry/repo"; claude="$TMP_ROOT/dry/claude"; codex="$TMP_ROOT/dry/codex"
 make_fixture "$fixture"
 mkdir -p "$codex"
@@ -61,7 +72,7 @@ assert_absent "$claude/skills"
 assert_absent "$codex/skills"
 grep -Fq '[dry-run]' <<<"$output" || fail "dry-run actions not reported"
 
-echo "4/9 collision fails before mutation"
+echo "4/13 collision fails before mutation"
 fixture="$TMP_ROOT/collision/repo"; claude="$TMP_ROOT/collision/claude"; codex="$TMP_ROOT/collision/codex"
 make_fixture "$fixture"
 mkdir -p "$fixture/skills/shared/client-claude"
@@ -85,7 +96,7 @@ assert_absent "$claude/skills"
 assert_absent "$codex/skills"
 grep -Fq "skills/codex" "$TMP_ROOT/collision-codex.out" || fail "Codex collision error missing"
 
-echo "5/9 orphans quarantine by default, marker-scoped"
+echo "5/13 orphans quarantine by default, marker-scoped"
 fixture="$TMP_ROOT/migrate/repo"; claude="$TMP_ROOT/migrate/claude"; codex="$TMP_ROOT/migrate/codex"
 make_fixture "$fixture"
 # Three kinds of installed skill the repo no longer ships:
@@ -139,7 +150,7 @@ for home in "$claude" "$codex"; do
   assert_file "$home/skills/vendor-skill/SKILL.md"
 done
 
-echo "6/9 reconciliation fixture matrix: absent, identical, extended, conflicting"
+echo "6/13 reconciliation fixture matrix: absent, identical, extended, conflicting"
 fixture="$TMP_ROOT/matrix/repo"; claude="$TMP_ROOT/matrix/claude"; codex="$TMP_ROOT/matrix/codex"
 make_fixture "$fixture"
 # absent: nothing installed yet -> full install, and the marker records hashes.
@@ -176,7 +187,7 @@ grep -Fq 'hand edited' "$claude/skills-backup/client-claude/SKILL.md" || fail "l
 grep -Fq 'description: test v3' "$claude/skills/client-claude/SKILL.md" || fail "conflicting update did not land"
 assert_file "$claude/skills-backup/client-claude/LOCAL-NOTES.md"
 
-echo "7/9 unmanaged directory is backed up before adoption, dropped files removed"
+echo "7/13 unmanaged directory is backed up before adoption, dropped files removed"
 fixture="$TMP_ROOT/unmanaged/repo"; claude="$TMP_ROOT/unmanaged/claude"; codex="$TMP_ROOT/unmanaged/codex"
 make_fixture "$fixture"
 mkdir -p "$claude/skills/client-claude"
@@ -194,7 +205,7 @@ run_installer "$fixture" "$claude" "$codex" >/dev/null 2>&1
 assert_absent "$claude/skills/client-claude/EXTRA.md"
 assert_file "$claude/skills/client-claude/UNOWNED.md"
 
-echo "8/9 dry-run previews the classification and writes nothing"
+echo "8/13 dry-run previews the classification and writes nothing"
 fixture="$TMP_ROOT/preview2/repo"; claude="$TMP_ROOT/preview2/claude"; codex="$TMP_ROOT/preview2/codex"
 make_fixture "$fixture"
 run_installer "$fixture" "$claude" "$codex" >/dev/null 2>&1
@@ -209,7 +220,7 @@ after="$(find "$claude" -type f -exec sha256sum {} + | sort)"
 [[ "$before" == "$after" ]] || fail "dry-run wrote to disk"
 assert_absent "$claude/skills-backup"
 
-echo "9/9 globals: never clobbered without --adopt-globals, backed up with it"
+echo "9/13 globals: never clobbered without --adopt-globals, backed up with it"
 fixture="$TMP_ROOT/globals/repo"; claude="$TMP_ROOT/globals/claude"; codex="$TMP_ROOT/globals/codex"
 make_fixture "$fixture"
 run_installer "$fixture" "$claude" "$codex" >/dev/null 2>&1
@@ -272,5 +283,77 @@ cp "$fixture/skills/shared/shared-one/SKILL.md" "$fixture/skills/claude/shared-o
 before="$(snapshot "$TMP_ROOT/scoped")"
 if run_installer "$fixture" "$claude" "$codex" --only shared-one >/dev/null 2>&1; then fail 'accepted selected collision'; fi
 [[ "$before" == "$(snapshot "$TMP_ROOT/scoped")" ]] || fail 'collision wrote files'
+
+echo "10/13 repository-scoped skill lands only in the owning repo"
+fixture="$TMP_ROOT/reposcope/repo"; claude="$TMP_ROOT/reposcope/claude"; codex="$TMP_ROOT/reposcope/codex"
+clones="$TMP_ROOT/reposcope/clones"
+make_fixture "$fixture"
+make_demo_clone "$clones"
+mkdir -p "$fixture/skills/shared/repo-only-skill"
+printf '%s\n' '---' 'name: repo-only-skill' 'description: test' '---' > "$fixture/skills/shared/repo-only-skill/SKILL.md"
+printf '%s\n' '{' '  "schema_version": 1,' '  "skills": {' '    "repo-only-skill": ["demo-app"]' '  }' '}' > "$fixture/config/skill-scope.json"
+AI_SKILL_CLONE_ROOTS="$clones" run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/reposcope.out"
+assert_absent "$claude/skills/repo-only-skill"
+assert_absent "$codex/skills/repo-only-skill"
+assert_file "$clones/demo-app/.claude/skills/repo-only-skill/SKILL.md"
+assert_file "$clones/demo-app/.agents/skills/repo-only-skill/SKILL.md"
+grep -qxF '.claude/skills/' "$clones/demo-app/.git/info/exclude" || fail "claude skills not excluded from git"
+grep -qxF '.agents/skills/' "$clones/demo-app/.git/info/exclude" || fail "codex skills not excluded from git"
+grep -Fq 'repo-scoped' "$TMP_ROOT/reposcope.out" || fail "repo-scoped install not reported"
+
+echo "11/13 protected skill in the scope file is rejected"
+fixture="$TMP_ROOT/protect/repo"; claude="$TMP_ROOT/protect/claude"; codex="$TMP_ROOT/protect/codex"
+make_fixture "$fixture"
+printf '%s\n' '{' '  "schema_version": 1,' '  "skills": {' '    "handoff-writer": ["demo-app"]' '  }' '}' > "$fixture/config/skill-scope.json"
+if run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/protect.out" 2>&1; then
+  fail "protected skill in scope was accepted"
+fi
+grep -Eqi 'protected' "$TMP_ROOT/protect.out" || fail "protected-scope error missing"
+assert_absent "$claude/skills"
+
+echo "12/13 global copy of a repo-scoped skill is quarantined, not deleted"
+fixture="$TMP_ROOT/quar/repo"; claude="$TMP_ROOT/quar/claude"; codex="$TMP_ROOT/quar/codex"
+clones="$TMP_ROOT/quar/clones"
+make_fixture "$fixture"
+make_demo_clone "$clones"
+mkdir -p "$fixture/skills/shared/repo-only-skill"
+printf '%s\n' '---' 'name: repo-only-skill' 'description: test' '---' > "$fixture/skills/shared/repo-only-skill/SKILL.md"
+# Seed a previously global install of the same skill.
+for home in "$claude" "$codex"; do
+  mkdir -p "$home/skills/repo-only-skill"
+  echo 'old global copy' > "$home/skills/repo-only-skill/SKILL.md"
+  : > "$home/skills/repo-only-skill/.ai-devops-managed"
+done
+printf '%s\n' '{' '  "schema_version": 1,' '  "skills": {' '    "repo-only-skill": ["demo-app"]' '  }' '}' > "$fixture/config/skill-scope.json"
+AI_SKILL_CLONE_ROOTS="$clones" run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/quar.out"
+for home in "$claude" "$codex"; do
+  assert_absent "$home/skills/repo-only-skill"
+  assert_file "$home/skills-quarantine/repo-only-skill/SKILL.md"
+  grep -Fq 'old global copy' "$home/skills-quarantine/repo-only-skill/SKILL.md" || fail "quarantined copy lost content"
+done
+assert_file "$clones/demo-app/.claude/skills/repo-only-skill/SKILL.md"
+
+echo "13/13 repo-scoped dry-run writes nothing and reports the planned move"
+fixture="$TMP_ROOT/repodry/repo"; claude="$TMP_ROOT/repodry/claude"; codex="$TMP_ROOT/repodry/codex"
+clones="$TMP_ROOT/repodry/clones"
+make_fixture "$fixture"
+make_demo_clone "$clones"
+mkdir -p "$fixture/skills/shared/repo-only-skill"
+printf '%s\n' '---' 'name: repo-only-skill' 'description: test' '---' > "$fixture/skills/shared/repo-only-skill/SKILL.md"
+for home in "$claude" "$codex"; do
+  mkdir -p "$home/skills/repo-only-skill"
+  echo 'old global copy' > "$home/skills/repo-only-skill/SKILL.md"
+  : > "$home/skills/repo-only-skill/.ai-devops-managed"
+done
+printf '%s\n' '{' '  "schema_version": 1,' '  "skills": {' '    "repo-only-skill": ["demo-app"]' '  }' '}' > "$fixture/config/skill-scope.json"
+snapshot() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum); }
+before="$(snapshot "$TMP_ROOT/repodry")"
+AI_SKILL_CLONE_ROOTS="$clones" run_installer "$fixture" "$claude" "$codex" --dry-run >"$TMP_ROOT/repodry.out"
+after="$(snapshot "$TMP_ROOT/repodry")"
+[[ "$before" == "$after" ]] || fail "repo-scoped dry-run wrote files"
+grep -Fq 'repo-scoped repo-only-skill' "$TMP_ROOT/repodry.out" || fail "repo-scoped plan not reported"
+grep -Fq 'repo-only-skill' "$TMP_ROOT/repodry.out" || fail "scoped skill name missing from dry-run"
+assert_absent "$clones/demo-app/.claude/skills/repo-only-skill"
+assert_file "$claude/skills/repo-only-skill/SKILL.md"
 
 echo "PASS: ai-install-skills"

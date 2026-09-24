@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "Repository-scoped skills. Skill name maps to repository identity keys from config/repo-identities.tsv. A skill absent from this file installs globally. Protected skills (config/skill-trigger-policy.json) must never appear here — their automatic trigger is the enforcement. DesignFlow skills stay global because sessions run from the non-git dflow_plm parent.",
+  "skills": {
+    "disney-source-data-scrape": ["licensor-source-data"],
+    "licensor-incremental-capture": ["licensor-source-data"],
+    "nbcu-creative-assets-scrape": ["licensor-source-data"],
+    "paramount-creative-library-scrape": ["licensor-source-data"],
+    "peanuts-scrape": ["licensor-source-data"],
+    "sesame-workshop-scrape": ["licensor-source-data"],
+    "strawberry-shortcake-scrape": ["licensor-source-data"],
+    "wb-starlabs-scrape": ["licensor-source-data"]
+  }
+}

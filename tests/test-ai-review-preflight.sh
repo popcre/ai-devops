@@ -260,5 +260,11 @@ check "different model remains allocatable" "AI_REVIEW_ADMISSION_PROFILE=profile
 check "capacity remains unknown during policy backoff" "$SCRIPT capacity kimi --json | jq -e '.state==\"unknown\" and .reset_at==null'"
 check "global quarantine update preserves scoped refusal" "$SCRIPT quarantine kimi authentication-failed --seconds 30 && $SCRIPT admission kimi --profile profile-a --model model-a --json | jq -e '.state==\"backoff\"'"
 
+# A doctor cut off by the check budget is a timeout, even when its partial
+# output mentions a credential (#720).
+printf '#!/usr/bin/env bash\necho "credential    : managed 1Password reference"\nsleep 5\n' > "$TMP/bin/slow-cred"; chmod +x "$TMP/bin/slow-cred"
+SLOW_OUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/slow-cred" $SCRIPT check deepseek "$REPO" 2>&1)"
+printf '%s' "$SLOW_OUT" | grep -q 'deepseek failed: provider-timeout' && ok "timed-out doctor is classified as a timeout, not an auth failure" || bad "timed-out doctor is classified as a timeout, not an auth failure"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

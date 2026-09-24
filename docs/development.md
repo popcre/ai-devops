@@ -171,7 +171,12 @@ success. Since 2026-09-23 every CI job (Linux and Windows) runs on Blacksmith
 GitHub-hosted queue or the self-hosted pool; only the manual runner
 qualification workflow still targets self-hosted machines. Required check names
 are unchanged, so a green Blacksmith run is the required `verification-closure`
-merge check (Albert, 2026-09-23). Scheduled and manual
+merge check (Albert, 2026-09-23). One addition: on pull requests the
+`runner-router` job gives ordinary Windows sections to idle qualified self-hosted
+hosts (EDGE-RUNN-ENVY and any host labelled `ai-devops-windows-qualified`) as
+extra capacity. Any section it cannot place there stays on Blacksmith. It never
+routes to GitHub-hosted runners (`config/ci-runner-routing.json`,
+`tools/ci/runner-router.cjs`). Scheduled and manual
 Windows jobs split the complete Bash set across independent sections; PowerShell runs once in its declared
 section. Qualification and local no-argument runs keep the complete Bash plus
 PowerShell matrix. The exact assignment and
