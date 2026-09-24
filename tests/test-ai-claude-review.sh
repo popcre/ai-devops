@@ -65,7 +65,7 @@ check 'report contains exact verdict' "grep -A1 '^## Verdict' '$OUT' | tail -1 |
 check 'provider saw complete untracked snapshot' "grep -q 'review saw complete snapshot' '$OUT'"
 check 'provider receives only read grep glob tools' "grep -Rzq -- 'Read,Grep,Glob' '$TMP/args' && ! grep -Rzq -- 'Bash,\|Write,\|Edit,' '$TMP/args'"
 check 'source remains unchanged' "[ '$BEFORE' = \"\$('$ROOT/bin/ai-review-sandbox' digest '$R')\" ]"
-check 'lifecycle records Claude completion' "find '$TMP/lifecycle/runs' -name '*.json' -exec jq -e 'select(.provider==\"claude\" and .status==\"completed\" and .verdict==\"APPROVE\")' {} \; | grep -q APPROVE"
+check 'lifecycle records Claude completion' "find '$TMP/lifecycle/runs' -name '*.json' -exec jq -e 'select(.provider==\"claude\" and .status==\"completed\" and .verdict==\"APPROVE\")' {} \; | grep APPROVE >/dev/null"
 check 'scoreboard records Claude current result' "jq -e 'select(.provider==\"claude\" and .evidence_state==\"current\" and .verdict==\"APPROVE\")' '$TMP/scoreboard/reviews.jsonl'"
 NO_CANONICAL_OUT="$(cd "$R" && AI_CLAUDE_STUB_MODE=no-canonical "$SCRIPT" security-review)"
 check 'review accepts the current exact-key envelope without canonicalModel' "test -s '$NO_CANONICAL_OUT' && grep -A1 '^## Verdict' '$NO_CANONICAL_OUT' | tail -1 | grep -qx APPROVE"
