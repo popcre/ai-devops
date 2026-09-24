@@ -207,9 +207,10 @@ grep -Fq '|| github.sha' "$workflow" || {
 }
 # No physical Windows or fallback job may run on merge_group; a queue rebuild restarts them,
 # and the long suite holds a qualified pool host for the better part of an hour.
+# Five since #736: the qualified-pool availability probe now runs on pull requests too.
 windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | tr -d '
 ')"
-[ "$windows_skips" -eq 4 ] || {
+[ "$windows_skips" -eq 5 ] || {
   printf 'FAIL: physical Windows routing and fallback jobs must be skipped on merge_group
 ' >&2
   exit 1
@@ -306,7 +307,7 @@ grep -Fq "github.event.pull_request.head.repo.full_name == github.repository" "$
   printf 'FAIL: untrusted fork pull requests must never reach the persistent self-hosted runner\n' >&2
   exit 1
 }
-grep -Fq '$process.WaitForExit(30 * 60 * 1000)' "$workflow" &&
+grep -Fq '$process.WaitForExit(55 * 60 * 1000)' "$workflow" &&
 grep -Fq 'proof_result=timed_out' "$workflow" &&
 grep -Fq 'proof_result=failure' "$workflow" &&
 grep -Fq 'proof_result=success' "$workflow" &&
@@ -395,7 +396,7 @@ if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
   assert_rejected reviewer-gap
   sed "/needs\['reviewer-safety-start-deadline'\].result != 'success'/d" "$workflow" >"$mutation_dir/watchdog-error-gap.yml"
   assert_rejected watchdog-error-gap
-  sed '/\$process\.WaitForExit(30 \* 60 \* 1000)/d' "$workflow" >"$mutation_dir/unbounded-reviewer-execution.yml"
+  sed '/\$process\.WaitForExit(55 \* 60 \* 1000)/d' "$workflow" >"$mutation_dir/unbounded-reviewer-execution.yml"
   assert_rejected unbounded-reviewer-execution
   sed '/continue-on-error: true/d' "$workflow" >"$mutation_dir/fatal-preferred-reviewer.yml"
   assert_rejected fatal-preferred-reviewer

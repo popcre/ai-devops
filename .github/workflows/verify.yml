@@ -397,7 +397,10 @@ jobs:
     # assertion failure must release the identical hosted fallback, whose
     # stable aggregate below remains fail-closed.
     continue-on-error: true
-    timeout-minutes: 35
+    # Raised from 30 to 55 minutes on 2026-09-23 (#736): the codex and grok
+    # suites grew to ~45 minutes serial on EDGE-RUNN-ENVY (run 35926594340), so
+    # every preferred run since 2026-09-14 timed out and fell back to hosted.
+    timeout-minutes: 60
     outputs:
       proof_result: ${{ steps.proof.outputs.proof_result }}
     steps:
@@ -415,26 +418,22 @@ jobs:
         shell: pwsh
         run: |
           $bash = 'C:\Program Files\Git\bin\bash.exe'
-          # The two suites run side by side (#736): each spends most of its
-          # ~22 minutes in wall-clock waits, so one after the other no longer
-          # fits the 30 minute bound on the 16-thread qualified host.
-          $command = 'logs="$(cygpath -u "$RUNNER_TEMP")/reviewer-logs"; mkdir -p "$logs"; pids=""; for test in tests/test-ai-codex-review.sh tests/test-ai-grok-review.sh; do bash "$test" >"$logs/$(basename "$test").log" 2>&1 & pids="$pids $!"; done; failures=0; for pid in $pids; do wait "$pid" || failures=$((failures+1)); done; for log in "$logs"/*.log; do printf "::group::%s\n" "$log"; cat "$log"; printf "::endgroup::\n"; done; exit "$failures"'
+          $command = 'failures=0; for test in tests/test-ai-codex-review.sh tests/test-ai-grok-review.sh; do bash "$test" || failures=$((failures+1)); done; exit "$failures"'
           $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
           $startInfo.FileName = $bash
           $startInfo.UseShellExecute = $false
           $startInfo.ArgumentList.Add('-lc')
           $startInfo.ArgumentList.Add($command)
           $process = [System.Diagnostics.Process]::Start($startInfo)
-          if (-not $process.WaitForExit(30 * 60 * 1000)) {
+          if (-not $process.WaitForExit(55 * 60 * 1000)) {
             & .\tools\ci\stop-process-tree.ps1 -TargetProcessId $process.Id -WaitMilliseconds 10000
             if ($LASTEXITCODE -ne 0) {
               "proof_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
               Write-Error 'Preferred reviewer timed out, but its process tree could not be proven stopped. Refusing overlapping fallback.'
               exit 0
             }
-            Get-ChildItem (Join-Path $env:RUNNER_TEMP reviewer-logs) -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object { "::group::$($_.Name)"; Get-Content $_.FullName -Tail 200; '::endgroup::' }
             "proof_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Warning 'Preferred reviewer proof reached its 30-minute bound; hosted fallback is required.'
+            Write-Warning 'Preferred reviewer proof reached its 55-minute bound; hosted fallback is required.'
             exit 0
           }
           if ($process.ExitCode -eq 0) {
