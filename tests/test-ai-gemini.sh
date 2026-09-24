@@ -321,7 +321,7 @@ check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok
 # directory on a Windows host without LongPathsEnabled (260-character limit).
 LP_BASE="$TMP/long-worktree"; LP_PAD=$((201 - ${#LP_BASE} - 1))
 LP_REPO="$LP_BASE/$(printf %.0sw $(seq 1 "$LP_PAD"))"
-make_repo "$LP_REPO"; git -C "$LP_REPO" config core.longpaths true
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true make_repo "$LP_REPO"; git -C "$LP_REPO" config core.longpaths true
 LP_NAME="$(printf %.0sn $(seq 1 150))"; LP_CALLER="$(printf %.0sc $(seq 1 70))"
 set +e; (cd "$LP_REPO" && AI_REVIEW_SANDBOX_BIN="$ROOT/bin/ai-review-sandbox" AI_REVIEW_SANDBOX_DIR="$TMP/lp-sbx" AI_GEMINI_CALLER="$LP_CALLER" MOCK_MODE=normal "$SCRIPT" new "$LP_NAME" --prompt review) > "$TMP/lp.out" 2>&1; LP_RC=$?; set -e
 [ "$LP_RC" -eq 0 ] || sed -n '1,20p' "$TMP/lp.out" >&2
