@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+set -E; trap 'echo "grok-auth-link-cases: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 sed -n '/^prepare_auth_link()/,/^}/p' "$ROOT/bin/ai-grok-review" > "$TMP/auth.sh"
 . "$TMP/auth.sh"
 printf 'fixture-auth\n' > "$TMP/source"
@@ -118,7 +119,7 @@ printf 'kept
   test "$(grok_isolated_home)" = "$STATE_DIR/isolated-home"   # same device: unchanged
   stat() { case "$*" in *"$STATE_DIR"*) echo 2;; *) echo 1;; esac; }
   got="$(grok_isolated_home)"
-  test "$got" = "$HOME/.ai-grok-review-isolated-home"
+  test "$got" -ef "$HOME/.ai-grok-review-isolated-home"   # -ef: the resolved path may be spelled differently
   test -z "$(find "$got" -mindepth 1 -print -quit)"   # nothing copied
   prepare_auth_link "$HOME/.grok/auth.json" "$got"
   test "$HOME/.grok/auth.json" -ef "$got/auth.json"
@@ -148,7 +149,8 @@ sed -n '/^investigation_home_parent()/,/^}/p; /^investigation_home_root()/,/^}/p
   test "$(investigation_home_parent)" = "$IMPL_DIR"          # same device: unchanged
   stat() { case "$*" in *"$IMPL_DIR"*) echo 2;; *) echo 1;; esac; }
   root="$(investigation_home_root)"
-  case "$root" in "$HOME/.ai-grok-implement-homes/investigate-home."*) ;; *) exit 1 ;; esac
+  test "$(dirname "$root")" -ef "$HOME/.ai-grok-implement-homes"
+  case "$(basename "$root")" in investigate-home.?*) ;; *) exit 1 ;; esac
   test -d "$root"
   rel="$(cd "$TMP" && mkdir -p rel/.grok && AI_GROK_AUTH_HOME=rel/.grok investigation_home_parent)"
   case "$rel" in /*) ;; *) exit 1 ;; esac                     # a relative credential path is resolved
