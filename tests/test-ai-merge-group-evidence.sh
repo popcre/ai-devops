@@ -224,5 +224,26 @@ printf '%s|changed-group|%s\n' "$GOOD_HEAD" "$BASE_SHA" > "$TMP/queue-after"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
 check "fallback proof rechecks exact queue identity" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'changed during fallback verification'"
 
+# #742: hosted Windows jobs still queued past their start deadline were
+# diverted to Blacksmith; the aggregates passed on the Blacksmith lane while
+# the hosted jobs keep the run open.
+DIVERTED_JOBS="$(printf 'windows-offline\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nfast-classifier / classify\tsuccess\tcompleted\nwindows-reviewer-safety\tsuccess\tcompleted\nverification-closure\tsuccess\tcompleted\nwindows-offline-section (1)\tpending\tqueued\nwindows-offline-section (2)\tsuccess\tcompleted\nwindows-offline-section-blacksmith (1)\tsuccess\tcompleted\nwindows-offline-section-blacksmith (2)\tsuccess\tcompleted\nwindows-reviewer-fallback\tpending\tqueued\nwindows-reviewer-blacksmith\tsuccess\tcompleted\n')"
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tin_progress\t\n')" "$DIVERTED_JOBS"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+check "a Blacksmith-diverted run with queued hosted jobs is usable evidence" "test '$RC' -eq 0"
+for mutation in blacksmith-failed blacksmith-missing hosted-failed closure-missing other-pending; do
+  jobs="$DIVERTED_JOBS"
+  case "$mutation" in
+    blacksmith-failed) jobs="$(printf '%s' "$jobs" | sed 's/windows-offline-section-blacksmith (2)\tsuccess/windows-offline-section-blacksmith (2)\tfailure/')" ;;
+    blacksmith-missing) jobs="$(printf '%s' "$jobs" | sed '/windows-reviewer-blacksmith/d')" ;;
+    hosted-failed) jobs="$(printf '%s' "$jobs" | sed 's/windows-offline-section (2)\tsuccess/windows-offline-section (2)\tfailure/')" ;;
+    closure-missing) jobs="$(printf '%s' "$jobs" | sed '/verification-closure/d')" ;;
+    other-pending) jobs="$(printf '%s' "$jobs" | sed 's/linux-offline\tsuccess\tcompleted/linux-offline\tpending\tin_progress/')" ;;
+  esac
+  set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tin_progress\t\n')" "$jobs"
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  check "Blacksmith diversion remains fail-closed for $mutation" "test '$RC' -eq 1"
+done
+
 printf '\n%s passed, %s failed, 0 skipped\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -165,6 +165,52 @@ $jobs
 EOF
 }
 
+# Issue #742: a hosted Windows job still queued past its start deadline is
+# diverted to an equivalent Blacksmith job, and the stable aggregates accept the
+# Blacksmith result. The diverted hosted job may stay queued (or later be
+# cancelled) and keep the run open, so a run is usable while unfinished only
+# when every stable aggregate already succeeded, every other job finished
+# cleanly, and each unfinished hosted Windows job has a fully successful
+# Blacksmith counterpart. A hosted job that ran and failed is never overridden.
+blacksmith_lane_for() {
+  case "$1" in
+    'windows-offline-section ('*) printf 'windows-offline-section-blacksmith' ;;
+    'windows-offline-complete ('*) printf 'windows-offline-complete-blacksmith' ;;
+    windows-reviewer-fallback) printf 'windows-reviewer-blacksmith' ;;
+    *) return 1 ;;
+  esac
+}
+
+blacksmith_lane_succeeded() { # every job of the named lane completed success, and at least one exists
+  printf '%s\n' "$1" | awk -F'\t' -v lane="$2" '
+    $1 == lane || index($1, lane " (") == 1 { seen=1; if ($2 != "success" || $3 != "completed") bad=1 }
+    END { exit !(seen && !bad) }'
+}
+
+diverted_run_proven() {
+  local jobs job conclusion status lane diverted=false
+  jobs="$(printf '%s\n' "$1" | sed 's/\r$//')"
+  for job in windows-offline windows-reviewer-safety linux-offline verification-closure 'fast-classifier / classify'; do
+    printf '%s\n' "$jobs" | awk -F'\t' -v want="$job" '$1==want && $2=="success" && $3=="completed" {found=1} END {exit !found}' || return 1
+  done
+  while IFS="$(printf '\t')" read -r job conclusion status; do
+    [ -n "$job" ] || continue
+    if [ "$status" = completed ]; then
+      case "$conclusion" in success|skipped) continue ;; esac
+    fi
+    lane="$(blacksmith_lane_for "$job")" || return 1
+    case "$status:$conclusion" in
+      queued:pending|waiting:pending|pending:pending|in_progress:pending|completed:cancelled) ;;
+      *) return 1 ;;
+    esac
+    blacksmith_lane_succeeded "$jobs" "$lane" || return 1
+    diverted=true
+  done <<EOF
+$jobs
+EOF
+  [ "$diverted" = true ]
+}
+
 RUN_ID=''
 FALLBACK_RUNS=' '
 while IFS="$(printf '\t')" read -r id status conclusion; do
@@ -174,7 +220,7 @@ while IFS="$(printf '\t')" read -r id status conclusion; do
     # cancellation. A failed run or assertion is never overridden.
     case "$status:$conclusion" in queued:*|in_progress:*|completed:cancelled)
       candidate_jobs="$(read_jobs "$id")"
-      if equivalent_fallback_proven "$candidate_jobs"; then
+      if equivalent_fallback_proven "$candidate_jobs" || diverted_run_proven "$candidate_jobs"; then
         [ "$(read_queue_state)" = "$QUEUE_STATE" ] || reject 'the queued source or base changed during fallback verification'
         FALLBACK_RUNS="$FALLBACK_RUNS$id "
         RUN_ID="$id"
@@ -195,7 +241,7 @@ if [ "${#REQUIRED_JOBS[@]}" -gt 0 ]; then
   JOBS="$(read_jobs "$RUN_ID")"
   [ -n "$JOBS" ] || reject "run $RUN_ID reports no jobs; its coverage cannot be confirmed"
   if [[ "$FALLBACK_RUNS" = *" $RUN_ID "* ]]; then
-    equivalent_fallback_proven "$JOBS" || reject 'the qualified fallback or other exact-head job evidence changed'
+    equivalent_fallback_proven "$JOBS" || diverted_run_proven "$JOBS" || reject 'the qualified fallback or other exact-head job evidence changed'
   fi
   for job in "${REQUIRED_JOBS[@]}"; do
     line="$(printf '%s\n' "$JOBS" | awk -F'\t' -v want="$job" '$1 == want { print $2; exit }')"

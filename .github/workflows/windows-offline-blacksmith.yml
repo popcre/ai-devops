@@ -1,13 +1,14 @@
 name: windows-offline-blacksmith
 
-# Opt-in, paid alternative to the free windows-offline-section lane in
-# verify.yml (issue #210). This workflow never runs on its own: it exists so
-# that when the free GitHub-hosted lane is unusually slow to start, someone
-# can deliberately choose to pay for near-instant Blacksmith-hosted machines
-# instead. It must never be wired into any automatic trigger (pull_request,
-# schedule, merge_group, workflow_run) - Albert decided (2026-09-10) that
-# Blacksmith is a manual "I'm willing to pay for speed right now" choice, not
-# a fallback GitHub routes to on its own.
+# Manual, paid run of the Windows-sensitive sections on Blacksmith (issue #210).
+# The 2026-09-10 manual-only rule is superseded by issue #742. Albert,
+# 2026-09-23: "anything that's queued and not actually running, send to
+# blacksmith. the merge rules are hereby changed: a Blacksmith run produces a
+# main check". verify.yml now diverts every hosted Windows lane that has not
+# started within its start deadline to the same Blacksmith runner label and
+# steps used here, and its required aggregates accept that result. This
+# workflow stays as the deliberate on-demand path for any ref, so it keeps
+# only its workflow_dispatch trigger.
 on:
   workflow_dispatch:
     inputs:

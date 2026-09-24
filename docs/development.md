@@ -298,6 +298,22 @@ Three properties matter and are deliberate:
   failures. The symptom looked exactly like load-induced flakiness and was not.
   `tests/test-ai-test-local.sh` now asserts the path budget.
 
+### Queued hosted Windows jobs divert to Blacksmith
+
+Since issue #742 (Albert, 2026-09-23: "anything that's queued and not actually
+running, send to blacksmith. the merge rules are hereby changed: a Blacksmith
+run produces a main check"), every GitHub-hosted Windows lane in
+`.github/workflows/verify.yml` has a watch job (`tools/ci/hosted-start-watch.sh`).
+If any of the lane's hosted jobs has not started within
+`HOSTED_WINDOWS_START_DEADLINE_SECONDS` (300), the identical job runs on
+`blacksmith-4vcpu-windows-2025`, and the required `windows-offline` and
+`windows-reviewer-safety` aggregates accept its success. A hosted job that
+started and failed is never diverted. The diverted hosted job may stay queued
+and keep the run open; `bin/ai-merge-group-evidence` accepts that open run only
+when every stable aggregate succeeded and each unfinished hosted Windows job has
+a fully successful Blacksmith counterpart. No ruleset change was needed: the
+required context names are unchanged.
+
 ### When a suite looks flaky
 
 A suite that fails in a harness and passes on its own looks like a timing

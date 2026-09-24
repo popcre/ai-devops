@@ -29,8 +29,8 @@ check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ]
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
-check 'long and reviewer jobs use their separate classifier outputs' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -c \"needs.fast-classifier.outputs.reviewer == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
-check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 8 ]"
+check 'long and reviewer jobs use their separate classifier outputs' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 6 ] && [ \"\$(grep -c \"needs.fast-classifier.outputs.reviewer == 'true'\" '$workflow')\" -eq 5 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 6 ]"
+check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 11 ]"
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
@@ -112,7 +112,7 @@ check 'Windows groups are unique subsets of Bash discovery' \
   '[ "$(printf "%s\n" "$windows_sensitive" | LC_ALL=C sort -u)" = "$windows_sensitive" ] && [ "$(printf "%s\n" "$windows_offline" | LC_ALL=C sort -u)" = "$windows_offline" ] && [ "$(printf "%s\n" "$windows_reviewer" | LC_ALL=C sort -u)" = "$windows_reviewer" ] && [ -z "$(LC_ALL=C comm -13 <(printf "%s\n" "$manifest_bash") <(printf "%s\n" "$windows_sensitive"))" ]'
 check 'manifest Windows coverage is complete before the reviewer split' '[ "$windows_offline" = "$windows_sensitive" ]'
 check 'reviewer lane owns exactly Codex and Grok safety suites' \
-  '[ "$windows_reviewer" = "$(printf "%s\n" test-ai-codex-review.sh test-ai-grok-review.sh | LC_ALL=C sort)" ] && [ "$reviewer_workflow_count" -eq 2 ] && [ -z "$(LC_ALL=C comm -23 <(printf "%s\n" "$windows_reviewer") <(printf "%s\n" "$windows_offline"))" ]'
+  '[ "$windows_reviewer" = "$(printf "%s\n" test-ai-codex-review.sh test-ai-grok-review.sh | LC_ALL=C sort)" ] && [ "$reviewer_workflow_count" -eq 3 ] && [ -z "$(LC_ALL=C comm -23 <(printf "%s\n" "$windows_reviewer") <(printf "%s\n" "$windows_offline"))" ]'
 # Inputs are byte-sorted; comm under a UTF-8 locale (Git Bash) collates
 # differently and silently misreports membership, so every comm is C-locale.
 check 'every set comparison uses byte order on every platform'   "! grep -nE '(^|[^_=A-Z])comm -' '$0' | grep -v 'LC_ALL=C comm -'"
@@ -144,7 +144,12 @@ check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 check 'manual Blacksmith lane runs the same complete section mapping' \
   'grep -qF "section: $sections_expected" "$blacksmith_workflow" && grep -qF "matrix.section }} of $shard_count" "$blacksmith_workflow" && grep -qF "matrix.section }}/$shard_count" "$blacksmith_workflow" && grep -qF -- "-Shard" "$blacksmith_workflow" && grep -qF "all six Blacksmith sections succeeded" "$blacksmith_workflow"'
-check 'Blacksmith stays manual, bounded, independently hosted and fail-closed' \
+# #742: every hosted Windows lane is watched and diverted to the identical
+# Blacksmith jobs when it does not start in time; the aggregates never wait on
+# the hosted jobs directly.
+check 'queued hosted Windows lanes divert to Blacksmith after a short deadline'   'grep -qE "^  HOSTED_WINDOWS_START_DEADLINE_SECONDS: [0-9]+$" "$workflow" && grep -qF "hosted-start-watch.sh windows-offline-section 6 " "$workflow" && grep -qF "hosted-start-watch.sh windows-offline-complete 5 " "$workflow" && grep -qF "hosted-start-watch.sh windows-reviewer-fallback 1 " "$workflow" && [ "$(grep -c "runs-on: blacksmith-4vcpu-windows-2025" "$workflow")" -eq 3 ] && [ "$(grep -cF ".outputs.divert == " "$workflow")" -eq 3 ]'
+check 'Blacksmith section lane runs the same section mapping as hosted'   'awk "/^  windows-offline-section-blacksmith:/{f=1;next} f&&/^  [a-z]/{exit} f" "$workflow" | grep -qF "section: $sections_expected"'
+check 'the manual Blacksmith workflow stays manual, bounded, independently hosted and fail-closed' \
   'grep -q "^  workflow_dispatch:" "$blacksmith_workflow" && ! grep -Eq "^  (pull_request|schedule|merge_group|workflow_run):" "$blacksmith_workflow" && grep -qF "runs-on: blacksmith-4vcpu-windows-2025" "$blacksmith_workflow" && grep -qF "timeout-minutes: 20" "$blacksmith_workflow" && grep -qF "fail-fast: false" "$blacksmith_workflow" && grep -qF "failing closed" "$blacksmith_workflow"'
 # Sections run at the same time on independent hosted machines, and one failing
 # section must never hide the other sections.
@@ -154,7 +159,7 @@ check 'sections run on independent hosted machines and all keep reporting' \
 # exact name and stay fail-closed: any lane result other than success, or a skip
 # the classifier did not justify, fails the aggregate.
 check 'one stable aggregate publishes the whole Windows lane' \
-  '[ -n "$aggregate_block" ] && printf "%s" "$aggregate_block" | grep -qF "needs: [fast-classifier, manual-preflight, windows-offline-section, windows-offline-complete]"'
+  '[ -n "$aggregate_block" ] && printf "%s" "$aggregate_block" | grep -qF "needs: [fast-classifier, manual-preflight, windows-offline-section-watch, windows-offline-section-blacksmith, windows-offline-complete-watch, windows-offline-complete-blacksmith]"'
 check 'the aggregate fails closed on anything but a justified skip' \
   'printf "%s" "$aggregate_block" | grep -qF "failing closed" && printf "%s" "$aggregate_block" | grep -qF "exit 1"'
 # The scheduled backstop must watch the complete matrix, never a section of it.
@@ -217,7 +222,8 @@ windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | t
 # Pull requests use the hosted Windows-sensitive assignment. Schedule and
 # workflow_dispatch keep the complete sharded runner as the backstop.
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' "$workflow" &&
-[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
+# Four since #742: each hosted lane has an identical Blacksmith diversion.
+[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 4 ] &&
 printf '%s' "$complete_block" | grep -Fq '.\tests\test-all.ps1 -Shard' &&
 sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -Fq "github.event_name == 'pull_request'" &&
 sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -Fq "github.event_name != 'pull_request'" || {
@@ -294,7 +300,8 @@ check 'measured Linux suite seconds name only discovered suites' \
 check 'the four balanced sections partition every runnable Bash suite exactly once' \
   '[ "$(for i in 1 2 3 4; do bash "$ROOT/tests/test-all.sh" --balanced --shard "$i/4" --list | grep "^test-"; done | LC_ALL=C sort)" = "$expected_bash" ]'
 cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
-[ "$cancel_aware_jobs" -eq 11 ] || {
+# Seventeen since #742: three watch jobs and three Blacksmith lanes.
+[ "$cancel_aware_jobs" -eq 17 ] || {
   printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
   exit 1
 }
@@ -329,7 +336,7 @@ printf '%s' "$reviewer_preferred" | grep -Fq "needs.reviewer-runner-availability
 grep -Fq "runner.status === 'online' && !runner.busy" "$workflow" &&
 grep -Fq "core.setOutput('preferred_available', 'false')" "$workflow" &&
 ! printf '%s' "$reviewer_fallback" | grep -Fq 'github.event.pull_request.head.repo.full_name == github.repository' &&
-printf '%s' "$reviewer_aggregate" | grep -Fq 'needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback]' &&
+printf '%s' "$reviewer_aggregate" | grep -Fq 'needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-watch, windows-reviewer-blacksmith]' &&
 ! printf '%s' "$reviewer_aggregate" | grep -Fq 'needs.windows-reviewer-preferred' || {
   printf 'FAIL: preferred reviewer failure or scheduling must not block the stable aggregate\n' >&2
   exit 1
@@ -360,13 +367,19 @@ check_reviewer_result() {
 common_reviewer_env='EVENT=pull_request CLASSIFIER_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=true WATCHDOG_RESULT=success'
 # Regression: a timed-out or cancelled preferred host is not a global stop when
 # the independent hosted runner completed every identical reviewer assertion.
-check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=success
-check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=failure FALLBACK_RESULT=success
-check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=failure
-check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=skipped
-check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cleanup_failure FALLBACK_RESULT=skipped
-check_reviewer_result 0 EVENT=pull_request CLASSIFIER_RESULT=success RUN_REVIEWER=false RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
-check_reviewer_result 0 EVENT=workflow_dispatch CLASSIFIER_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=false WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_WATCH=success FALLBACK_HOSTED=success
+check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=failure FALLBACK_WATCH=success FALLBACK_HOSTED=success
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_WATCH=success FALLBACK_HOSTED=failure
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_WATCH=skipped
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cleanup_failure FALLBACK_WATCH=skipped
+check_reviewer_result 0 EVENT=pull_request CLASSIFIER_RESULT=success RUN_REVIEWER=false RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_WATCH=skipped
+check_reviewer_result 0 EVENT=workflow_dispatch CLASSIFIER_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=false WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_WATCH=skipped
+# #742: a diverted hosted fallback is judged only on its Blacksmith equivalent.
+check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=unavailable FALLBACK_WATCH=success FALLBACK_HOSTED=diverted FALLBACK_BLACKSMITH=success
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=unavailable FALLBACK_WATCH=success FALLBACK_HOSTED=diverted FALLBACK_BLACKSMITH=failure
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=unavailable FALLBACK_WATCH=success FALLBACK_HOSTED=diverted FALLBACK_BLACKSMITH=skipped
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=unavailable FALLBACK_WATCH=failure FALLBACK_HOSTED= FALLBACK_BLACKSMITH=skipped
+check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=unavailable FALLBACK_WATCH=success FALLBACK_HOSTED=failure FALLBACK_BLACKSMITH=success
 rm -f "$aggregate_script"
 
 if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then

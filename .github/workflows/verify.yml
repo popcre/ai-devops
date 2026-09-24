@@ -35,6 +35,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Issue #742: how long a hosted Windows job may sit queued before its lane is
+  # diverted to the equivalent Blacksmith jobs.
+  HOSTED_WINDOWS_START_DEADLINE_SECONDS: 300
+
 jobs:
   manual-preflight:
     if: github.event_name == 'workflow_dispatch'
@@ -267,6 +272,126 @@ jobs:
         run: |
           .\tests\test-all.ps1 -Shard '${{ matrix.section }}/5'
 
+  # Issue #742. Albert, 2026-09-23: "anything that's queued and not actually
+  # running, send to blacksmith. the merge rules are hereby changed: a
+  # Blacksmith run produces a main check". Each hosted Windows lane has a watch
+  # job that starts with it. If any of the lane's hosted jobs has not started
+  # within HOSTED_WINDOWS_START_DEADLINE_SECONDS, the watch diverts the lane
+  # and the identical Blacksmith jobs below run instead; otherwise it waits
+  # for the hosted jobs and reports their real result. The stable aggregates
+  # read the watch and the Blacksmith lane, never the hosted jobs directly, so a
+  # hosted job left queued cannot hold a required check. A hosted job that
+  # started and failed is never diverted: the aggregate fails closed.
+  windows-offline-section-watch:
+    needs: [fast-classifier, manual-preflight]
+    if: >-
+      !cancelled() && github.event_name == 'pull_request' &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true')
+    runs-on: ubuntu-24.04
+    # Covers the hosted lane's 40-minute bound plus its start deadline.
+    timeout-minutes: 55
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      divert: ${{ steps.watch.outputs.divert }}
+      hosted_result: ${{ steps.watch.outputs.hosted_result }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Divert the six hosted sections to Blacksmith if they do not start
+        id: watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/hosted-start-watch.sh windows-offline-section 6 "$HOSTED_WINDOWS_START_DEADLINE_SECONDS"
+
+  # Same runner label and steps as the manual windows-offline-blacksmith.yml.
+  windows-offline-section-blacksmith:
+    needs: [windows-offline-section-watch]
+    if: ${{ !cancelled() && needs.windows-offline-section-watch.outputs.divert == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        section: [1, 2, 3, 4, 5, 6]
+    runs-on: blacksmith-4vcpu-windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Verify offline test dependencies
+        shell: pwsh
+        run: |
+          if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+            throw 'The Blacksmith Windows runner image does not provide jq.'
+          }
+      - name: Shorten TEMP so nested mktemp trees stay under the Windows path limit
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\t | Out-Null
+          "TEMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Windows-sensitive section ${{ matrix.section }} of 6 (Blacksmith)
+        shell: pwsh
+        run: |
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/6'
+
+  windows-offline-complete-watch:
+    needs: [fast-classifier, manual-preflight]
+    if: >-
+      !cancelled() &&
+      !contains(fromJSON('["merge_group","pull_request"]'), github.event_name) &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.run_long == 'true') &&
+      (github.event_name != 'workflow_dispatch' ||
+       needs.manual-preflight.outputs.run_expensive_jobs == 'true')
+    runs-on: ubuntu-24.04
+    # Covers the hosted matrix's 105-minute bound plus its start deadline.
+    timeout-minutes: 120
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      divert: ${{ steps.watch.outputs.divert }}
+      hosted_result: ${{ steps.watch.outputs.hosted_result }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Divert the complete hosted matrix to Blacksmith if it does not start
+        id: watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/hosted-start-watch.sh windows-offline-complete 5 "$HOSTED_WINDOWS_START_DEADLINE_SECONDS"
+
+  windows-offline-complete-blacksmith:
+    needs: [windows-offline-complete-watch]
+    if: ${{ !cancelled() && needs.windows-offline-complete-watch.outputs.divert == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        section: [1, 2, 3, 4, 5]
+    runs-on: blacksmith-4vcpu-windows-2025
+    timeout-minutes: 105
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Verify offline test dependencies
+        shell: pwsh
+        run: |
+          if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+            throw 'The Blacksmith Windows runner image does not provide jq.'
+          }
+      - name: Shorten TEMP so nested mktemp trees stay under the Windows path limit
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\t | Out-Null
+          "TEMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Complete offline Windows and Bash suites (Blacksmith)
+        shell: pwsh
+        run: |
+          .\tests\test-all.ps1 -Shard '${{ matrix.section }}/5'
+
   # One stable aggregate result for the whole Windows offline lane, whatever
   # shape that lane took for this event. The name is deliberately unchanged so
   # #166 can restore `windows-offline` as a required context without having to
@@ -274,7 +399,7 @@ jobs:
   # report success fails the aggregate, and `skipped` is accepted only when the
   # fast classifier actually proved the change was prose-only.
   windows-offline:
-    needs: [fast-classifier, manual-preflight, windows-offline-section, windows-offline-complete]
+    needs: [fast-classifier, manual-preflight, windows-offline-section-watch, windows-offline-section-blacksmith, windows-offline-complete-watch, windows-offline-complete-blacksmith]
     if: >-
       !cancelled() && github.event_name != 'merge_group'
     runs-on: ubuntu-24.04
@@ -286,10 +411,30 @@ jobs:
           CLASSIFIER_RESULT: ${{ needs.fast-classifier.result }}
           RUN_LONG: ${{ needs.fast-classifier.outputs.run_long }}
           RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
-          SECTION_RESULT: ${{ needs.windows-offline-section.result }}
-          COMPLETE_RESULT: ${{ needs.windows-offline-complete.result }}
+          SECTION_WATCH: ${{ needs.windows-offline-section-watch.result }}
+          SECTION_HOSTED: ${{ needs.windows-offline-section-watch.outputs.hosted_result }}
+          SECTION_BLACKSMITH: ${{ needs.windows-offline-section-blacksmith.result }}
+          COMPLETE_WATCH: ${{ needs.windows-offline-complete-watch.result }}
+          COMPLETE_HOSTED: ${{ needs.windows-offline-complete-watch.outputs.hosted_result }}
+          COMPLETE_BLACKSMITH: ${{ needs.windows-offline-complete-blacksmith.result }}
         run: |
           set -uo pipefail
+          # A lane's result is its hosted jobs' real result, or - only when the
+          # watch diverted them for not starting (#742) - the Blacksmith lane's.
+          lane_of() { # watch-result hosted-result blacksmith-result
+            if [ "$1" = skipped ]; then printf skipped; return; fi
+            if [ "$1" != success ]; then printf 'watch-%s' "$1"; return; fi
+            case "$2" in
+              success) printf success ;;
+              diverted) if [ "$3" = success ]; then printf success; else printf 'blacksmith-%s' "$3"; fi ;;
+              *) printf 'hosted-%s' "${2:-missing}" ;;
+            esac
+          }
+          SECTION_RESULT="$(lane_of "$SECTION_WATCH" "$SECTION_HOSTED" "$SECTION_BLACKSMITH")"
+          COMPLETE_RESULT="$(lane_of "$COMPLETE_WATCH" "$COMPLETE_HOSTED" "$COMPLETE_BLACKSMITH")"
+          if [ "$SECTION_HOSTED" = diverted ] || [ "$COMPLETE_HOSTED" = diverted ]; then
+            printf 'windows-offline: hosted Windows did not start in time; judged on the Blacksmith lane.\n'
+          fi
           printf 'event=%s classifier=%s run_long=%s sections=%s complete=%s\n' \
             "$EVENT" "$CLASSIFIER_RESULT" "$RUN_LONG" "$SECTION_RESULT" "$COMPLETE_RESULT"
 
@@ -491,11 +636,68 @@ jobs:
           }
           if ($failures -ne 0) { exit 1 }
 
+  # Issue #742: the hosted reviewer fallback is diverted to Blacksmith when it
+  # has not started within the start deadline. Same run condition as the
+  # hosted fallback, so the watch exists exactly when the fallback does.
+  windows-reviewer-fallback-watch:
+    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
+    if: >-
+      always() && !cancelled() &&
+      !contains(fromJSON('["merge_group"]'), github.event_name) &&
+      (needs.fast-classifier.result != 'success' ||
+       needs.fast-classifier.outputs.reviewer == 'true') &&
+      (github.event_name != 'workflow_dispatch' ||
+       needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
+      (needs['reviewer-safety-start-deadline'].result != 'success' ||
+       needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true')
+    runs-on: ubuntu-24.04
+    # Covers the hosted fallback's 60-minute bound plus its start deadline.
+    timeout-minutes: 75
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      divert: ${{ steps.watch.outputs.divert }}
+      hosted_result: ${{ steps.watch.outputs.hosted_result }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Divert the hosted reviewer fallback to Blacksmith if it does not start
+        id: watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/hosted-start-watch.sh windows-reviewer-fallback 1 "$HOSTED_WINDOWS_START_DEADLINE_SECONDS"
+
+  windows-reviewer-blacksmith:
+    needs: [windows-reviewer-fallback-watch]
+    if: ${{ !cancelled() && needs.windows-reviewer-fallback-watch.outputs.divert == 'true' }}
+    runs-on: blacksmith-4vcpu-windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Shorten TEMP so nested mktemp trees stay under the Windows path limit
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\t | Out-Null
+          "TEMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Run reviewer suites omitted from the hosted matrix (Blacksmith)
+        shell: pwsh
+        run: |
+          $bash = 'C:\Program Files\Git\bin\bash.exe'
+          $failures = 0
+          foreach ($test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh')) {
+            & $bash $test
+            if ($LASTEXITCODE -ne 0) { $failures++ }
+          }
+          if ($failures -ne 0) { exit 1 }
+
   # Stable required result for reviewer safety. The qualified self-hosted lane
   # remains preferred, but it is not a machine-wide stop: an independent hosted
   # fallback that runs every identical assertion is equally valid proof.
   windows-reviewer-safety:
-    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback]
+    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-watch, windows-reviewer-blacksmith]
     if: >-
       !cancelled() && github.event_name != 'merge_group'
     runs-on: ubuntu-24.04
@@ -509,9 +711,25 @@ jobs:
           RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
           PREFERRED_RESULT: ${{ needs.reviewer-safety-start-deadline.outputs.preferred_result }}
           WATCHDOG_RESULT: ${{ needs.reviewer-safety-start-deadline.result }}
-          FALLBACK_RESULT: ${{ needs.windows-reviewer-fallback.result }}
+          FALLBACK_WATCH: ${{ needs.windows-reviewer-fallback-watch.result }}
+          FALLBACK_HOSTED: ${{ needs.windows-reviewer-fallback-watch.outputs.hosted_result }}
+          FALLBACK_BLACKSMITH: ${{ needs.windows-reviewer-blacksmith.result }}
         run: |
           set -uo pipefail
+          # The fallback's result is the hosted job's real result, or - only
+          # when the watch diverted it for not starting (#742) - Blacksmith's.
+          if [ "$FALLBACK_WATCH" = skipped ]; then
+            FALLBACK_RESULT=skipped
+          elif [ "$FALLBACK_WATCH" != success ]; then
+            FALLBACK_RESULT="watch-$FALLBACK_WATCH"
+          elif [ "$FALLBACK_HOSTED" = success ]; then
+            FALLBACK_RESULT=success
+          elif [ "$FALLBACK_HOSTED" = diverted ]; then
+            FALLBACK_RESULT="$FALLBACK_BLACKSMITH"
+            printf 'windows-reviewer-safety: hosted fallback did not start in time; Blacksmith result=%s.\n' "$FALLBACK_BLACKSMITH"
+          else
+            FALLBACK_RESULT="hosted-${FALLBACK_HOSTED:-missing}"
+          fi
           printf 'event=%s classifier=%s reviewer=%s preferred=%s watchdog=%s fallback=%s\n' \
             "$EVENT" "$CLASSIFIER_RESULT" "$RUN_REVIEWER" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT"
 
