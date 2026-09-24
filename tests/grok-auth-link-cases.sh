@@ -159,4 +159,43 @@ sed -n '/^investigation_home_parent()/,/^}/p; /^investigation_home_root()/,/^}/p
   grep -q 'refusing a linked investigation home parent' "$TMP/xv/ierr"
 )
 echo 'ok cross-volume investigation home follows the credential volume'
-echo '9 passed, 0 failed, 0 skipped'
+
+# Default state dir (#765): after a bulk move the conventional `grok` path is a
+# junction onto another volume and must not win over the real `grok-c` sibling.
+sed -n '/^grok_default_state_dir()/,/^}/p' "$ROOT/bin/ai-grok-review" > "$TMP/state-dir.sh"
+. "$TMP/state-dir.sh"
+(
+  unset AI_GROK_STATE_DIR AI_GROK_AUTH_HOME
+  HOME="$TMP/def/user"; mkdir -p "$HOME/.grok" "$HOME/.local/state/ai-devops/grok-c" "$HOME/.local/state/ai-devops/grok"
+  printf 'fixture-auth\n' > "$HOME/.grok/auth.json"
+  # Real conventional directory stays the default.
+  got="$(grok_default_state_dir)"
+  test "$got" = "$HOME/.local/state/ai-devops/grok"
+  # Explicit override always wins.
+  got="$(AI_GROK_STATE_DIR=/tmp/override-state grok_default_state_dir)"
+  test "$got" = /tmp/override-state
+  # Linked conventional directory (bulk C:→D: move) yields the real grok-c sibling.
+  rm -rf "$HOME/.local/state/ai-devops/grok"
+  make_link "$TMP/def/bulk-on-other-volume" "$HOME/.local/state/ai-devops/grok"
+  mkdir -p "$TMP/def/bulk-on-other-volume"
+  test -L "$HOME/.local/state/ai-devops/grok"
+  got="$(grok_default_state_dir)"
+  test "$got" = "$HOME/.local/state/ai-devops/grok-c"
+  # Same rule in ai-grok-implement.
+  sed -n '/^grok_default_state_dir()/,/^}/p' "$ROOT/bin/ai-grok-implement" > "$TMP/state-dir-impl.sh"
+  . "$TMP/state-dir-impl.sh"
+  got="$(grok_default_state_dir)"
+  test "$got" = "$HOME/.local/state/ai-devops/grok-c"
+  # Cross-volume real directory (junction that is not -L) also yields grok-c.
+  # Match the auth path by its `/.grok` suffix: pwd -P may rewrite $HOME under
+  # mktemp (MSYS /tmp vs the Windows TEMP path), so a literal $HOME/.grok
+  # substring match is not portable across Git Bash hosts.
+  rm -rf "$HOME/.local/state/ai-devops/grok"
+  mkdir -p "$HOME/.local/state/ai-devops/grok"
+  stat() { local p="${*: -1}"; case "$p" in */.grok|*/.grok/) echo 2;; *) echo 1;; esac; }
+  got="$(grok_default_state_dir)"
+  unset -f stat
+  test "$got" = "$HOME/.local/state/ai-devops/grok-c"
+)
+echo 'ok default state dir prefers grok-c when grok is linked or cross-volume'
+echo '10 passed, 0 failed, 0 skipped'
