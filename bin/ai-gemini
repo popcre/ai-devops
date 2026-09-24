@@ -221,7 +221,7 @@ def source_digest(directory):
     for name, path in paths(directory, source=True):
         shown = raw(name)
         if path is None:
-            lines.append(b'A\tNESTED\t' + shown + b'\n')
+            lines.append(b'A\tNESTED\t' + shown.replace(b'\\', b'\\\\').replace(b'\n', b'\\n') + b'\n')
         elif os.path.islink(path):
             lines.append(b'A\tL\t' + shown + b'\t' + link(path) + b'\n')
         else:
