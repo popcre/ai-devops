@@ -1336,8 +1336,8 @@ GEMINI_TAG="$(grep '^new ' "$POOLTMP/runner-args" | tail -1 | awk '{print $2}')"
 check "pool_gemini_session_name_fits_derived_sandbox_limit" "[ '$RC_GEMINI' -eq 0 ] && [ -n '$GEMINI_TAG' ] && [ $(( 7 + 12 + 1 + 10 + 1 + ${#GEMINI_TAG} )) -le 64 ] && [[ '$GEMINI_TAG' == pool-gemini-* ]]"
 # Only grok's runner takes --max-turns; muse/qwen/gemini refuse unknown flags,
 # so the pool must not pass it to them (#720).
-check "pool_gemini_argv_omits_max_turns" "! grep '^new pool-gemini-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
-check "pool_muse_argv_omits_max_turns" "! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
+check "pool_gemini_argv_omits_max_turns" "grep -q '^new pool-gemini-' '$POOLTMP/runner-args' && ! grep '^new pool-gemini-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
+check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runner-args' && ! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
 check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
 check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 32'"

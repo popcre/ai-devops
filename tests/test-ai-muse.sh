@@ -487,6 +487,20 @@ mkdir -p "$TMP/curl401"; printf '#!/usr/bin/env bash\nprintf 401\n' > "$TMP/curl
 REJ_OUT="$(cd "$REPO" && eval "$ENV PATH='$TMP/curl401:$TMP/bin:$PATH' AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live" 2>&1)"
 check 'a rejected stored key is refreshed from 1Password and rewritten' "grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && grep -qx fake-key '$KS' && printf '%s' \"\$REJ_OUT\" | grep -q 'stored key was rejected'"
 check 'a missing key store falls back to 1Password without writing a store' "rm -f '$KS' && cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && test ! -e '$KS'"
+# The protections that make the store "protected" fail closed to 1Password.
+mkdir -p "$TMP/keystore-real"; printf 'linked-key\n' > "$TMP/keystore-real/muse-api-key"; chmod 600 "$TMP/keystore-real/muse-api-key"
+if MSYS=winsymlinks:nativestrict ln -s "$TMP/keystore-real" "$TMP/keystore-link" 2>/dev/null && [ -L "$TMP/keystore-link" ]; then
+  check 'a key store behind a linked directory is refused' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$TMP/keystore-link/muse-api-key' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env'"
+  check 'store-key refuses to write through a linked directory' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$TMP/keystore-link/muse-api-key' '$SCRIPT' store-key\" >/dev/null 2>&1 && grep -qx linked-key '$TMP/keystore-real/muse-api-key'"
+else
+  skip 'linked key store checks need symlink support'
+fi
+if ! command -v cygpath >/dev/null 2>&1; then
+  printf 'loose-key\n' > "$KS"; chmod 644 "$KS"
+  check 'a key store that is not owner-only is refused' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env'"
+fi
+check 'the key probe sends the key from a header file, never argv' "grep -q 'curl .*-H @\"\$hdr\"' '$SCRIPT' && ! grep -q 'Bearer \$MODEL_API_KEY' '$SCRIPT'"
+check 'only a test run may redirect the key probe' "grep -q '^KEY_PROBE_URL=\"https://api.meta.ai/v1/models\"\$' '$SCRIPT' && grep -q 'AI_MUSE_TEST_DIR:-}\" \] || KEY_PROBE_URL=' '$SCRIPT'"
 muse_recovery_cases
 # op missing from PATH on Windows: the wrapper finds the WinGet package copy.
 if command -v cygpath >/dev/null 2>&1; then

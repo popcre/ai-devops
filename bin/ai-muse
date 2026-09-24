@@ -46,7 +46,9 @@ esac
 CALLER="${AI_MUSE_CALLER:-}"
 STATE="${AI_MUSE_STATE_DIR:-$PROFILE_HOME/.local/state/ai-devops/muse}"
 KEY_STORE="${AI_MUSE_KEY_STORE:-$PROFILE_HOME/.config/ai-devops/secrets/muse-api-key}"
-KEY_PROBE_URL="${AI_MUSE_KEY_PROBE_URL:-https://api.meta.ai/v1/models}"
+# The probe carries the live key, so only a test run may redirect it.
+KEY_PROBE_URL="https://api.meta.ai/v1/models"
+[ -z "${AI_MUSE_TEST_DIR:-}" ] || KEY_PROBE_URL="${AI_MUSE_KEY_PROBE_URL:-$KEY_PROBE_URL}"
 TIMEOUT="${AI_MUSE_TIMEOUT:-1800}"
 SANDBOX="$ROOT/bin/ai-review-sandbox"
 PACKET="$ROOT/bin/ai-review-packet"
@@ -329,12 +331,14 @@ read_key_from_op(){
 # store is missing (read, not written - storing is the installer's job) or
 # when Meta rejects the stored key (read and rewrite the store).
 key_store_ok(){
-  [ -f "$KEY_STORE" ] && [ ! -L "$KEY_STORE" ] && [ -s "$KEY_STORE" ] || return 1
-  [ -n "${SYSTEMROOT:-}" ] && return 0
+  [ -f "$KEY_STORE" ] && [ -s "$KEY_STORE" ] && ! linked_below_home "$KEY_STORE" || return 1
+  # Windows permissions can drift, so the ACL is re-enforced on every use.
+  if [ -n "${SYSTEMROOT:-}" ]; then protect_windows_path "$KEY_STORE" file; return; fi
   [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
 }
 write_key_store(){
   local dir tmp; dir="$(dirname "$KEY_STORE")"
+  ! linked_below_home "$KEY_STORE" || die "Muse key store path is a link; refusing to write through it: $KEY_STORE"
   mkdir -p "$dir" && chmod 700 "$dir" 2>/dev/null && protect_windows_path "$dir" directory || die 'could not protect the Muse key store directory.'
   tmp="$(mktemp "$dir/.muse-api-key.XXXXXX")" || die 'could not reserve the Muse key store.'
   chmod 600 "$tmp" 2>/dev/null && protect_windows_path "$tmp" file || { rm -f "$tmp"; die 'could not protect the Muse key store.'; }
