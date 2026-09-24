@@ -90,7 +90,7 @@ if MSYS=winsymlinks:nativestrict ln -s "$ROOT/bin/setup-opencode-muse.sh" "$TMP/
 printf setup-key
 ' > "$TMP/setup-opbin/op"; chmod +x "$TMP/setup-opbin/op"
   check 'installed setup symlink locates repository configuration' "USERPROFILE= AI_MUSE_CONFIG_DIR= HOME='$SETUP_HOME' PATH='$TMP/setup-opbin:$PATH' '$TMP/installed/bin/setup-opencode-muse.sh' >/dev/null && cmp -s '$ROOT/config/opencode-muse/opencode.json' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json' && cmp -s '$ROOT/config/opencode-muse/agent/muse-review.md' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md'"
-  check 'installer stores the Muse key once in the protected per-user store' "grep -qx setup-key '$SETUP_HOME/.config/ai-devops/secrets/muse-api-key'"
+  check 'profile setup leaves the key store to the install.sh stage' "[ ! -e '$SETUP_HOME/.config/ai-devops/secrets/muse-api-key' ]"
 else
   rm -f -- "$TMP/installed/bin/setup-opencode-muse.sh"
   ok 'installed setup symlink fixture unavailable on this host'
@@ -259,6 +259,7 @@ check 'live doctor contacts Muse and proves its exact verdict' "cd '$REPO' && ev
 check 'live doctor accepts provider progress before the exact final verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_PREAMBLE=checking MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" | grep -q 'live provider response'"
 export DEVOPS_MCP_TOKEN=must-not-reach-muse OP_SERVICE_ACCOUNT_TOKEN=must-not-reach-muse SUPABASE_ACCESS_TOKEN=must-not-reach-muse
 check 'Muse provider receives only its own key and the minimal runtime environment' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && ! grep -Eq 'DEVOPS_MCP_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|SUPABASE_ACCESS_TOKEN' '$TMP/provider-env'"
+check 'Muse provider keeps the PowerShell module cache out of the checkout (#754)' "grep -q '^PSModuleAnalysisCachePath=.*ai-muse-ps-module-cache$' '$TMP/provider-env'"
 check 'Muse key is absent from the provider process chain arguments' "cd '$REPO' && eval \"$ENV MUSE_STUB_CMDLINE_FILE='$TMP/provider-cmdline' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && ! grep -q 'fake-key' '$TMP/provider-cmdline'"
 unset DEVOPS_MCP_TOKEN OP_SERVICE_ACCOUNT_TOKEN SUPABASE_ACCESS_TOKEN
 check 'live doctor rejects unexpected provider text' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=unexpected '$SCRIPT' doctor --live\""
@@ -489,6 +490,11 @@ check 'store-key writes the key without printing it' "grep -qx fake-key '$KS' &&
 command -v cygpath >/dev/null 2>&1 || check 'stored key is owner-only' "[ \"\$(stat -c %a '$KS')\" = 600 ] && [ \"\$(stat -c %a '$TMP/keystore')\" = 700 ]"
 printf 'stored-key\n' > "$KS"; chmod 600 "$KS"
 check 'a stored key is used instead of 1Password' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=stored-key' '$TMP/provider-env'"
+check 'store-key --if-missing leaves a valid store untouched' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' store-key --if-missing\" | grep -q 'already present' && grep -qx stored-key '$KS'"
+KS2="$TMP/keystore2/muse-api-key"
+check 'store-key --if-missing fills a missing store without printing the key' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$KS2' '$SCRIPT' store-key --if-missing\" 2>&1 | grep -q fake-key && grep -qx fake-key '$KS2'"
+check 'store-key rejects an unknown option' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$KS2' '$SCRIPT' store-key --bogus\" >/dev/null 2>&1"
+check 'installer stores the Muse key idempotently when 1Password is present' "grep -q 'store-key --if-missing' '$ROOT/install.sh'"
 DOCTOR_KS_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' doctor" 2>&1 || true)"
 if printf '%s\n' "$DOCTOR_KS_OUT" | grep -q 'PASS  protected Muse key store is present'; then ok 'doctor reports the protected key store'; else bad 'doctor reports the protected key store'; printf '%s\n' "$DOCTOR_KS_OUT" | sed 's/^/    doctor: /' | head -40; fi
 mkdir -p "$TMP/curl401"; printf '#!/usr/bin/env bash\nprintf 401\n' > "$TMP/curl401/curl"; chmod +x "$TMP/curl401/curl"

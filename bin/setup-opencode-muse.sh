@@ -20,10 +20,5 @@ mkdir -p "$CFG/opencode-xdg/opencode/agent"
 cp "$ROOT/config/opencode-muse/opencode.json" "$CFG/opencode-xdg/opencode/opencode.json"
 cp "$ROOT/config/opencode-muse/agent/muse-review.md" "$CFG/opencode-xdg/opencode/agent/muse-review.md"
 chmod 700 "$CFG" "$CFG/opencode-xdg" 2>/dev/null || true
-# Store the Muse key once in the per-user protected store so turns do not
-# need 1Password. A missing 1Password here is a warning: ai-muse still falls
-# back to 1Password per turn, and doctor names the fix.
-if AI_MUSE_CALLER=installer "$ROOT/bin/ai-muse" store-key; then :; else
-  echo "WARN: Muse key was not stored (1Password unavailable?). Re-run: AI_MUSE_CALLER=codex ai-muse store-key" >&2
-fi
+# The Muse key store is filled by install.sh's own stage (store-key --if-missing).
 echo "Muse persistent conversation profile installed. Check: AI_MUSE_CALLER=codex ai-muse doctor"
