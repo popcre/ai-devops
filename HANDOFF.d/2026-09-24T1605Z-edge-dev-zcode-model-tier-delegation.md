@@ -12,7 +12,7 @@ their lower tiers (GPT-6 Luna, GLM 5.3 Flash, Mimo v2.6 flash) from plans that
 pass the implementation-plan standard, with the frontier session keeping the
 verification duty. Plans stay implementer-agnostic — that ruling is locked.
 
-**The full brief is the plan file:** [`plan_model_tier_delegation.md`](../../plan_model_tier_delegation.md)
+**The full brief is the plan file:** [`plan_model_tier_delegation.md`](../plan_model_tier_delegation.md)
 (repo root). Read its STATUS table first — Step 0 is done (this plan + parent
 issue #782); a fresh session starts at Step 1 (verify the three lower-tier
 dispatch paths, read-only).
