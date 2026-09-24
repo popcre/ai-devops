@@ -1347,6 +1347,7 @@ case "${POOL_RUNNER_MODE:-approve}" in
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
   drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
+  credit) printf 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota\nOUT OF CREDIT: stub - then run: ai-review-preflight clear grok\n' >&2; exit 92 ;;
   chrome) printf 'runner progress chrome naming the head %s with enough padding text that a whole-buffer byte floor would pass if chrome were counted toward the analysis floor, which is exactly what this mode must not reward\n' "$HEAD" >&2; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
 esac
 EOF
@@ -1385,6 +1386,8 @@ check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
 rm -f "$POOLTMP/flip"
 check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=credit bash "$POOL" grok security-review ) > "$POOLTMP/out-credit" 2>&1; RC_CREDIT=$?
+check "pool_adapter_passes_out_of_credit_through" "[ '$RC_CREDIT' -eq 92 ] && grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota' '$POOLTMP/out-credit' && grep -q '^OUT OF CREDIT: ' '$POOLTMP/out-credit'"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok visual-review ) > "$POOLTMP/out-visual" 2>&1; RC_VISUAL=$?
 check "pool_adapter_refuses_unsupported_mode" "[ '$RC_VISUAL' -eq 2 ]"
 check "front_door_registry_comment_pins_the_promise" "grep -q 'registry decides the pool' '$FRONT'"

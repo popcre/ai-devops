@@ -126,7 +126,10 @@ cleanup(){
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"; [ -z "$TMP_TESTS" ] || rm -f "$TMP_TESTS"
   [ -z "$REVIEW_DIR" ] || "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT INT TERM
+# Under set -e a refused cleanup would replace the real exit code (for
+# example out-of-credit 92) with 1; on EXIT keep the code the run chose.
+trap 'cleanup || true' EXIT
+trap cleanup INT TERM
 
 SOURCE_IDENTITY="$("$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"})" || die 'source identity refused before review dispatch.'
 STATE="$($LIFECYCLE begin --provider "$provider" --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" || die 'provider preflight failed; no review was assigned.'
@@ -261,6 +264,13 @@ if [ "$PROVIDER_RC" -ne 0 ]; then
   # Provider diagnostics can quote credential-shaped errors (codex's wrapper
   # redacts the same classes before retaining them); redact before echoing.
   sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$TMP_ERR" | sed 's/^/  runner: /' >&2 2>/dev/null || true
+  # Out of credit (docs/reviewer-rotation-rules.md rule 10) keeps its exit code
+  # and both contract lines, unprefixed, so the session tells Albert at once.
+  if [ "$PROVIDER_RC" -eq 92 ] && grep -q '^AI_REVIEWER_OUT_OF_CREDIT ' "$TMP_ERR" 2>/dev/null; then
+    grep -E '^(AI_REVIEWER_OUT_OF_CREDIT |OUT OF CREDIT: )' "$TMP_ERR" >&2 || true
+    "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure out-of-credit --report "$TMP_TEXT" >/dev/null 2>&1 || true
+    exit 92
+  fi
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die "$provider runner exited nonzero ($PROVIDER_RC); diagnostic retained in the lifecycle record."
 fi
