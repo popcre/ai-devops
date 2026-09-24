@@ -57,6 +57,11 @@ isolation_homes_match(){
 }
 check "missing local runtime is named distinctly" "grep -q 'local_dependency_unavailable: grok binary not found' '$SCRIPT'"
 check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider fault' '$SCRIPT'"
+# Path-length class: no session-derived sandbox tag, state file, or report
+# name may grow with the session name or caller.
+check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok|gemini|muse|qwen)-[$][{]?(1|2|name|n)([^A-Za-z_]|$)' '$SCRIPT' | grep -v short_name | grep -q ."
+check "short_name bounds a 300-character name deterministically and keeps short names" "eval \"\$(grep -m1 -E '^short_name\(\) *\{' '$SCRIPT')\"; l=\"\$(printf %.0sq \$(seq 1 300))\"; a=\"\$(short_name \"\$l\" 64)\"; test \${#a} -eq 64 && test \"\$a\" = \"\$(short_name \"\$l\" 64)\" && test \"\$(short_name abc 64)\" = abc && test \"\$a\" != \"\$(short_name \"\${l}x\" 64)\""
+check "moved-checkout discovery also finds bounded session files" "grep -q 'short_name \"\$CALLER--\$2\" 56).json' '$SCRIPT'"
 check "both Grok dispatches gate capacity before exact-work reservation" "test \"\$(grep -c 'if ! capacity_gate' '$SCRIPT')\" -eq 2 && test \"\$(grep -c 'record_diagnostic.*capacity-checked' '$SCRIPT')\" -eq 2 && grep -q \"exhausted).*return 3\" '$SCRIPT'"
 check "Grok signal handling records unconfirmed remote cancellation" "sed -n '/on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'cancellation-confirmation unconfirmed'"
 check "Grok diagnostic write failure cannot skip paid-work shutdown" "sed -n '/record_diagnostic()/,/^}/p' '$SCRIPT' | grep -q 'return 0'"
@@ -590,6 +595,18 @@ run ask t1 --prompt "follow up" >/dev/null 2>&1
 check "ask passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
 check "ask resumes the session"           "grep -q -- '--resume 019fd4e9' '$TMP/argv.txt'"
 check "ask keeps the frozen permissions"  "grep -q -- '--deny Bash' '$TMP/argv.txt'"
+
+# Long session names must review, resume, and leave only bounded file names.
+LONG_NAME="long-$(printf 'n%.0s' $(seq 1 150))"
+: > "$TMP/argv.txt"
+LONG_NEW_OUT="$(run new "$LONG_NAME" --prompt "review this" 2>&1)"; LONG_NEW_RC=$?
+[ "$LONG_NEW_RC" -eq 0 ] || printf '  diagnostic: long-name new: %s
+' "$LONG_NEW_OUT" | head -5
+check "a 155-character session name completes a review" "test '$LONG_NEW_RC' -eq 0"
+LONG_ASK_OUT="$(run ask "$LONG_NAME" --prompt "follow up" 2>&1)"; LONG_ASK_RC=$?
+check "the long-name session resumes on ask" "test '$LONG_ASK_RC' -eq 0 && grep -q -- '--resume' '$TMP/argv.txt'"
+find "$AI_GROK_STATE_DIR" "$AI_REVIEW_SANDBOX_DIR" "$REPO/.ai" -print 2>/dev/null | awk -F/ 'length($NF)>110' | sed 's/^/  diagnostic: over-long name: /' | head -5 || true
+check "no state, sandbox, or report name exceeds 110 characters" "! find '$AI_GROK_STATE_DIR' '$AI_REVIEW_SANDBOX_DIR' '$REPO/.ai' -print 2>/dev/null | awk -F/ 'length(\$NF)>110{f=1} END{exit !f}'"
 
 # 4 -------------------------------------------------------------------------
 echo "== no_flag_passthrough =="

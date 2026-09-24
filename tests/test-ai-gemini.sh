@@ -312,6 +312,35 @@ check 'an over-long review name still reviews with a derived tag' "(cd '$LONGREP
 check 'the derived sandbox tag fits the 64-character limit' "jq -e '.sandbox_tag|length<=64' \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\" >/dev/null"
 check 'two long names sharing a prefix get distinct tags' "(cd '$LONGREPO' && '$SCRIPT' new '${LONG_NAME}y' --prompt x) && test \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\")\" != \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"${LONG_NAME}y\"' '$TMP/state/sessions')\")\""
 check 'a name that fits is still accepted' "(cd '$LONGREPO' && '$SCRIPT' new fits-fine --prompt x)"
+check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok|gemini|muse|qwen)-[$][{]?(1|2|name|n)([^A-Za-z_]|$)' '$SCRIPT' | grep -v short_name | grep -q ."
+
+# 2026-09-23 (whole path-length class): long worktree paths, session names and
+# caller names must never make a derived path component grow with the input.
+# Real sandbox, fake provider; worktree path over 200 characters.
+# Exactly 201 characters: over the 200 target, yet still usable as a working
+# directory on a Windows host without LongPathsEnabled (260-character limit).
+LP_BASE="$TMP/long-worktree"; LP_PAD=$((201 - ${#LP_BASE} - 1))
+LP_REPO="$LP_BASE/$(printf %.0sw $(seq 1 "$LP_PAD"))"
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true make_repo "$LP_REPO"; git -C "$LP_REPO" config core.longpaths true
+LP_NAME="$(printf %.0sn $(seq 1 150))"; LP_CALLER="$(printf %.0sc $(seq 1 70))"
+set +e; (cd "$LP_REPO" && AI_REVIEW_SANDBOX_BIN="$ROOT/bin/ai-review-sandbox" AI_REVIEW_SANDBOX_DIR="$TMP/lp-sbx" AI_GEMINI_CALLER="$LP_CALLER" MOCK_MODE=normal "$SCRIPT" new "$LP_NAME" --prompt review) > "$TMP/lp.out" 2>&1; LP_RC=$?; set -e
+[ "$LP_RC" -eq 0 ] || sed -n '1,20p' "$TMP/lp.out" >&2
+LP_META="$(grep -rl "\"name\":\"$LP_NAME\"" "$TMP/state/sessions" 2>/dev/null | head -1)"
+check 'long worktree path: worktree path is over 200 characters' "test ${#LP_REPO} -gt 200"
+check 'long worktree path, name and caller still review' "test '$LP_RC' -eq 0"
+check 'every derived state, sandbox and report name stays bounded' "test -z \"\$(find '$TMP/state' '$TMP/lp-sbx' '$LP_REPO/.ai' -mindepth 1 2>/dev/null | awk -F/ 'length(\$NF)>110')\""
+check 'metadata keeps the full name, completes, and bounds the tag' "test -n '$LP_META' && jq -e '.status==\"COMPLETE\" and (.sandbox_tag|length<=64)' '$LP_META' >/dev/null"
+# A session saved before names were bounded keeps its full-name file and must
+# still be found (no duplicate paid session, no lost history).
+LG_NAME="$(printf %.0sg $(seq 1 100))"
+set +e; (cd "$LONGREPO" && MOCK_MODE=normal "$SCRIPT" new "$LG_NAME" --prompt review) >/dev/null 2>&1; set -e
+LG_META="$(grep -rl "\"name\":\"$LG_NAME\"" "$TMP/state/sessions" 2>/dev/null | head -1)"
+LG_LEGACY="$(dirname "$LG_META")/test--$LG_NAME.json"; mv "$LG_META" "$LG_LEGACY"
+set +e; (cd "$LONGREPO" && MOCK_MODE=normal "$SCRIPT" ask "$LG_NAME" --prompt later) > "$TMP/lg.out" 2>&1; LG_RC=$?; set -e
+[ "$LG_RC" -eq 0 ] || sed -n '1,20p' "$TMP/lg.out" >&2
+check 'a legacy full-name session is still found and continued' "test '$LG_RC' -eq 0 && test -f '$LG_LEGACY' && test ! -e '$LG_META'"
+LP_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'a caller name that could leave its directory is refused before provider contact' "! (cd '$LP_REPO' && AI_GEMINI_CALLER='../escape' '$SCRIPT' new unsafe-caller --prompt x) >/dev/null 2>&1 && test '$LP_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\" && test ! -e '$TMP/state/sessions/escape--unsafe-caller.json'"
 
 # 2026-09-18: live qualification recorded the caller's checkout as the invoked
 # repository while it reviewed its private fixture, so sandbox evidence binding

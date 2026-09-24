@@ -97,18 +97,27 @@ secure_review_directory(){
   chmod 600 "$dir/.ai-devops-private-reviews-v1" 2>/dev/null || return 1
 }
 need(){ command -v "$1" >/dev/null 2>&1 || die "$1 is required."; }
-name_ok(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) [ "${#1}" -le 40 ];; esac; }
+# short_name TEXT MAX: TEXT when it fits in MAX characters; otherwise a prefix
+# plus a 12-hex hash of the whole TEXT, exactly MAX long. Every path component
+# built from a session name, caller, or tag goes through this, so no derived
+# path grows with the length of a worktree-derived name.
+short_name() { local s="$1" max="$2"; if [ "${#s}" -le "$max" ]; then printf %s "$s"; else printf '%s-%s' "${s:0:$((max-13))}" "$(printf %s "$s" | sha256sum | cut -c1-12)"; fi; }
+# A session name may be any length; every path built from it is bounded below.
+name_ok(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) return 0;; esac; }
+caller_ok(){ name_ok "$1" && [ "${#1}" -le 40 ]; }
 [ -n "$CALLER" ] || { printf '%s\n' \
   'ai-muse: error: start_failed: caller_identity_missing; Muse did not start.' \
   '  Muse itself is fine - this is local setup, not a Muse outage.' \
   '  Set AI_MUSE_CALLER to the assistant running this command, then rerun:' \
   '    export AI_MUSE_CALLER=claude   # or: codex' \
   '    AI_MUSE_CALLER=claude ai-muse doctor' >&2; exit 1; }
-name_ok "$CALLER" || { printf 'ai-muse: error: start_failed: invalid_caller_identity.\n' >&2; exit 1; }
+caller_ok "$CALLER" || { printf 'ai-muse: error: start_failed: invalid_caller_identity.\n' >&2; exit 1; }
 repo_root(){ git -C "${1:-$PWD}" rev-parse --show-toplevel 2>/dev/null || die "not a Git repository: ${1:-$PWD}"; }
 repo_id(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
-meta_path(){ printf '%s/sessions/%s/%s--%s.json' "$STATE" "$1" "$CALLER" "$2"; }
-tag(){ printf 'muse-%s-%s' "$CALLER" "$1"; }
+# A session saved before names were bounded keeps its full-name file; find it first.
+state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 56)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
+meta_path(){ state_leaf "$STATE/sessions/$1" "$CALLER--$2" .json; }
+tag(){ short_name "muse-$CALLER-$1" 64; }
 LOCK=""; LOCK_TOKEN=""; CRED_LOCK=""; CRED_TOKEN=""; TURN_PID=""; ACTIVE_META=""; PUBLISH_TMP=""; PUBLISH_FD=""; PUBLISH_ID=""; PUBLISH_FD_ID=""; PUBLISH_DIR_PHYSICAL=""; PUBLISH_ROOT=""; PUBLISH_BASENAME=""
 release_lock(){ [ -z "$LOCK" ] && return 0; [ "$(cat "$LOCK/token" 2>/dev/null || true)" != "$LOCK_TOKEN" ] || rm -rf "$LOCK"; LOCK=""; LOCK_TOKEN=""; }
 release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK/token" 2>/dev/null || true)" != "$CRED_TOKEN" ] || rm -rf "$CRED_LOCK"; CRED_LOCK=""; CRED_TOKEN=""; }
@@ -160,7 +169,7 @@ trap on_signal HUP INT TERM
 tmp_file(){ mktemp "$RUN_TMP/file.XXXXXX"; }
 test_interrupt_at(){ [ "${AI_MUSE_TEST_INTERRUPT_AT:-}" != "$1" ] || kill -TERM "$$"; }
 lock_session(){
-  local candidate="$STATE/locks/$1--$CALLER--$2.lock.d" owner stale quarantine attempt token; mkdir -p "$(dirname "$candidate")"; token="$$-$RANDOM-$(date +%s)"
+  local candidate="$STATE/locks/$(short_name "$1--$CALLER--$2" 64).lock.d" owner stale quarantine attempt token; mkdir -p "$(dirname "$candidate")"; token="$$-$RANDOM-$(date +%s)"
   for attempt in 1 2 3; do
     if mkdir "$candidate" 2>/dev/null; then printf '%s\n' "$token" > "$candidate/token"; printf '%s\n' "$$" > "$candidate/pid"; LOCK="$candidate"; LOCK_TOKEN="$token"; return 0; fi
     stale=0; owner="$(cat "$candidate/pid" 2>/dev/null || true)"
@@ -379,7 +388,7 @@ tree_state(){
   local root="$1" rel
   { git -C "$root" rev-parse HEAD; git -C "$root" diff --binary HEAD; while IFS= read -r -d '' rel; do printf '%s\0' "$rel"; sha256sum "$root/$rel"; done < <(git -C "$root" ls-files --others --exclude-standard -z); } | sha256sum | cut -d' ' -f1
 }
-new_report_path(){ printf '%s/.ai/reviews/muse-%s-%s-%s-%s.md' "$1" "$2" "$(date -u +%Y%m%dT%H%M%SZ)" "$$" "$RANDOM"; }
+new_report_path(){ printf '%s/.ai/reviews/muse-%s-%s-%s-%s.md' "$1" "$(short_name "$2" 64)" "$(date -u +%Y%m%dT%H%M%SZ)" "$$" "$RANDOM"; }
 ensure_report_destination(){
   local root="$1" path="$2" dir="$root/.ai/reviews" rel
   case "$path" in "$dir"/*) ;; *) die "refusing Muse report outside $dir: $path" ;; esac
@@ -665,7 +674,7 @@ parse_turn(){ # shared terminal parser; never launches the provider
 }
 preserve_failure(){
   local root="$1" name="$2" prompt="$3" out="$4" meta="$5" mode="$6" path tmp now sid
-  path="$root/.ai/reviews/muse-$name-incomplete-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.md"; ensure_report_destination "$root" "$path"
+  path="$root/.ai/reviews/muse-$(short_name "$name" 64)-incomplete-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.md"; ensure_report_destination "$root" "$path"
   [ -n "$PUBLISH_FD" ] || return 1
   { printf '# Muse incomplete turn\n\nThis is not an accepted review result. Raw provider and error bodies are deliberately omitted.\n\n## Failure\n\n%s\n\n## Request\n\n%s\n\n## Recoverable identity\n\n- requested session: `%s`\n- returned session: `%s`\n- completion reason: `%s`\n- process result: `%s`\n' "$TURN_ERROR" "$(cat "$prompt")" "$( [ -f "$meta" ] && jq -r '.session_id//""' "$meta" || true)" "$TURN_SID" "$FINISH" "${RUN_RC:-unknown}"; [ -z "$TEXT" ] || printf '\n## Partial response\n\n%s\n' "$TEXT"; } >&"$PUBLISH_FD" || return 1
   finish_report_staging "$root" "$path"

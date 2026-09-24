@@ -42,6 +42,8 @@ VERSION=0.2.3
 QUALIFICATION_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
 CALLER="${AI_GEMINI_CALLER:-codex}"
+case "$CALLER" in ''|.*|*[!A-Za-z0-9._-]*) printf 'ai-gemini: error: caller name %s is not path-safe (letters, digits, . _ - only; no leading dot).
+' "${CALLER:-<empty>}" >&2; exit 2;; esac
 MODEL="${AI_GEMINI_MODEL:-gemini-3.8-flash-high}"
 GOVERNED_HEAD=''
 TIMEOUT="${AI_GEMINI_PRINT_TIMEOUT:-10m}"
@@ -86,15 +88,21 @@ QUALIFYING=0
 guard_quarantine(){ [ "$QUARANTINED" -eq 0 ] || die 'Gemini reviews are quarantined until live safety qualification is complete'; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 name_ok(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) return 0;; esac; }
-tag_ok(){ [ "${#1}" -le 64 ]; }  # ai-review-sandbox rejects a tag over 64 chars
-# sandbox_tag ID NAME: the readable tag when it fits; otherwise a truncated name
-# plus a hash of the full name, so a long worktree-derived session name still
-# gets a unique tag within the sandbox's 64-character limit (issue #686).
-sandbox_tag(){ local base="gemini-$1-$CALLER-" n="$2" room h; if tag_ok "$base$n"; then printf %s "$base$n"; return; fi; h="$(printf %s "$n" | sha256sum | cut -c1-10)"; room=$((64 - ${#base} - 11)); [ "$room" -ge 1 ] || die "caller name too long for a sandbox tag: $CALLER"; printf '%s%s-%s' "$base" "${n:0:$room}" "$h"; }
+# short_name TEXT MAX: TEXT when it fits in MAX characters; otherwise a prefix
+# plus a 12-hex hash of the whole TEXT, exactly MAX long. Every path component
+# built from a session name, caller, or tag goes through this, so no derived
+# path grows with the length of a worktree-derived name.
+short_name(){ local s="$1" max="$2"; if [ "${#s}" -le "$max" ]; then printf %s "$s"; else printf '%s-%s' "${s:0:$((max-13))}" "$(printf %s "$s" | sha256sum | cut -c1-12)"; fi; }
+tag_ok(){ [ "${#1}" -le 64 ]; }
+# sandbox_tag ID NAME: never longer than 64 characters, whatever the caller or
+# session name length; short tags stay readable and unchanged.
+sandbox_tag(){ short_name "gemini-$1-$CALLER-$2" 64; }
 root(){ git rev-parse --show-toplevel 2>/dev/null || die 'run inside a Git repository'; }
 rid(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
-meta(){ printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
-lock_path(){ printf '%s/locks/%s' "$STATE_DIR" "$1"; }
+# A session saved before names were bounded keeps its full-name file; find it first.
+state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 56)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
+meta(){ state_leaf "$STATE_DIR/sessions/$1" "$CALLER--$2" .json; }
+lock_path(){ printf '%s/locks/%s' "$STATE_DIR" "$(short_name "$1" 64)"; }
 raw_agy(){ local a; for a in "${AI_GEMINI_BIN:-}" "$(command -v agy 2>/dev/null || true)" "$HOME/.local/bin/agy" "${LOCALAPPDATA:-}/agy/bin/agy.exe"; do [ -n "$a" ] && [ -x "$a" ] && { printf %s "$a"; return; }; done; die 'local_dependency_unavailable: the LOCAL agy runtime is not installed. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 agy(){ local a; a="$(raw_agy)"; if [ "$QUALIFYING" -eq 0 ]; then runtime_qualified "$a" || die 'Gemini qualification no longer matches the exact wrapper, runtime, or model; quarantine restored'; fi; printf %s "$a"; }
 live_qualified && QUARANTINED=0
@@ -262,7 +270,7 @@ $1
 EOF
 fi
 }
-report(){ local r="$1" n="$2" m="$3" o="$4" rel p physical tmp; rel=".ai/reviews/gemini-$n-$(date -u +%Y%m%dT%H%M%SZ)-$$.md"; p="$r/$rel"; [ ! -L "$r/.ai" ] && [ ! -L "$r/.ai/reviews" ] || die 'review report destination uses a link'; git -C "$r" check-ignore --no-index -q -- "$rel" 2>/dev/null || die 'review report destination is not safely Git-ignored'; git -C "$r" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 && die 'review report destination is tracked'; mkdir -p "$r/.ai/reviews" || die 'cannot create review report directory'; physical="$(cd "$r/.ai/reviews" && pwd -P)"; case "$physical" in "$(cd "$r" && pwd -P)"/*) ;; *) die 'review report destination escapes repository' ;; esac; tmp="$(mktemp "$r/.ai/reviews/.gemini-report.XXXXXX")" || die 'cannot create review report'; { jq -er .response "$o"; printf '\n\n---\n'; jq -er '"Provider: Gemini\\nModel: " + .model + "\\nConversation: " + .conversation_id + "\\nHead: " + .head + "\\nPacket: " + .packet_sha256' "$m"; } > "$tmp" || { rm -f "$tmp"; die 'cannot render review report'; }; mv -f "$tmp" "$p" || { rm -f "$tmp"; die 'cannot publish review report'; }; [ -s "$p" ] || die 'review report is empty'; reviewer_event_publish_report gemini "$p" || die 'durable publication failed; local evidence retained'; printf %s "$p"; }
+report(){ local r="$1" n="$2" m="$3" o="$4" rel p physical tmp; rel=".ai/reviews/gemini-$(short_name "$n" 64)-$(date -u +%Y%m%dT%H%M%SZ)-$$.md"; p="$r/$rel"; [ ! -L "$r/.ai" ] && [ ! -L "$r/.ai/reviews" ] || die 'review report destination uses a link'; git -C "$r" check-ignore --no-index -q -- "$rel" 2>/dev/null || die 'review report destination is not safely Git-ignored'; git -C "$r" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 && die 'review report destination is tracked'; mkdir -p "$r/.ai/reviews" || die 'cannot create review report directory'; physical="$(cd "$r/.ai/reviews" && pwd -P)"; case "$physical" in "$(cd "$r" && pwd -P)"/*) ;; *) die 'review report destination escapes repository' ;; esac; tmp="$(mktemp "$r/.ai/reviews/.gemini-report.XXXXXX")" || die 'cannot create review report'; { jq -er .response "$o"; printf '\n\n---\n'; jq -er '"Provider: Gemini\\nModel: " + .model + "\\nConversation: " + .conversation_id + "\\nHead: " + .head + "\\nPacket: " + .packet_sha256' "$m"; } > "$tmp" || { rm -f "$tmp"; die 'cannot render review report'; }; mv -f "$tmp" "$p" || { rm -f "$tmp"; die 'cannot publish review report'; }; [ -s "$p" ] || die 'review report is empty'; reviewer_event_publish_report gemini "$p" || die 'durable publication failed; local evidence retained'; printf %s "$p"; }
 # Each review owns its session lock, sandbox tag, packet, and metadata, so no
 # repository-wide lock exists: same-repository Gemini reviews run concurrently
 # (plan Step 7A, decisions 20-21).
