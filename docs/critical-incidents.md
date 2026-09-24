@@ -415,3 +415,70 @@ automatically superseded. Manual starts require a task and purpose, same-SHA
 requests cannot cancel active proof, and a complete successful exact-SHA manual
 run is reused. `ai-verify-run` refuses known active duplicates; cancellation is
 a separate exact-run operation requiring explicit destructive confirmation.
+
+## 2026-09-23 — C: fell to 5 GB free because AI reviews stored full Git history
+
+**Impact:** EDGE-DEV's system disk dropped to **5 GB free** (C: was ~469 GB used).
+Albert could not rely on the machine until space was recovered. Cleanup freed
+**~229 GB** the same day. No live code or secrets were lost.
+
+**Symptom:** `C:\Users\ahazan\.local` and `C:\Users\ahazan\.codex` looked like
+they "took the entire C drive." Ordinary tooling started failing for lack of
+space. No single app reported a leak; the space was spread across thousands of
+AI working copies.
+
+**Root cause:** every AI review sandbox under
+`…\.local\state\ai-devops\review-sandboxes\` was a **full Git clone including
+`.git` history** — about 50–80 MB each. On 2026-09-23 that directory held
+**3,950 copies / ~192 GB**. A second pile lived in `…\.codex\worktrees\`
+(160 groups / ~34 GB). Each sandbox's own `AI-REVIEW-SANDBOX.md` already said
+the copy was disposable and should be deleted when the review ended. That
+deletion was **specified in prose and never enforced in code** (no trap/finally,
+no parent sweep, no scheduled task until this date). A prior manual sweep on
+2026-09-11 had already removed 14,664 items — this is a recurring leak, not a
+one-off.
+
+A review does **not** need full history. It needs the files at the review
+revision plus the patch under review (owner ruling, 2026-09-23).
+
+**Fix (same day):**
+
+1. Deleted disposable review sandboxes older than 24 hours and clean/empty
+   Codex worktree groups (154 groups). Six dirty work folders were **kept** —
+   unique uncommitted work; tracked as
+   [issue #713](https://github.com/popcre/ai-devops/issues/713).
+2. Moved growth paths to the HDD with directory junctions so tools keep working:
+   `D:\ai-data\…` for review sandboxes, worktrees, sessions, archives. Live
+   repos and tool programs stay on the SSD.
+3. Installed daily backup task `AI-Debris-Housekeeping` (03:30) via
+   [`scripts/ai-housekeeping/`](../scripts/ai-housekeeping/) —
+   [issue #714](https://github.com/popcre/ai-devops/issues/714), PR #715.
+4. Wrote the emergency runbook [`disk-space.md`](disk-space.md) and the
+   prevention plan [`plan_agent-self-cleanup.md`](../plan_agent-self-cleanup.md)
+   ([issue #711](https://github.com/popcre/ai-devops/issues/711), PR #712).
+
+**Prevention:**
+
+- **Open [`disk-space.md`](disk-space.md) first when C: is full.** It is the
+  runbook: measure, recover, what never to delete, how to move bulk to D:.
+- **The run that creates a temporary copy must delete it before returning**
+  (issue #711). Daily sweep is **backup only**; do not retire it until
+  self-cleanup has been live-proven for 14 days (owner ruling 2026-09-23).
+- **Stop copying full Git history into review snapshots** —
+  [`prompt_fix-review-full-history.md`](../prompt_fix-review-full-history.md).
+- Keep speed-sensitive data on the SSD (live `C:\repos`, tool binaries, auth).
+  Put growth/bulk on the HDD (review copies, worktrees, session logs, archives).
+- Never delete dirty working copies without proof (`cleanup-worktree`). Age is
+  not proof of safety.
+
+**Why the diagnosis was slow:** the space was not in one obvious cache. Recursive
+directory sizing timed out on millions of tiny Git object files, so the first
+measurements looked hung. `robocopy /L` sizing and `robocopy /MIR` wipes were
+required to see and clear the pile. Cross-volume `Move-Item` of 23 GB of Git
+objects also timed out; rename-aside plus junctions was the workable move.
+
+**Related:** [issue #768](https://github.com/popcre/ai-devops/issues/768) (this
+write-up), [issue #711](https://github.com/popcre/ai-devops/issues/711)
+(prevention), [issue #713](https://github.com/popcre/ai-devops/issues/713)
+(dirty work folders), [issue #714](https://github.com/popcre/ai-devops/issues/714)
+(housekeeping scripts).
