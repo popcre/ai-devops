@@ -41,11 +41,19 @@ out="$(classify grok "$TMP/missing-file")"; rc=$?
 check "missing evidence is no match, not an error" "[ '$rc' = 3 ]"
 check "an unsupported provider is refused" "! \"$PY\" \"$TOOL\" credit kimi --directory '$Q' --scan '$FIX/deepseek-402.json' >/dev/null 2>&1"
 check "the classifier source has no control characters" "! LC_ALL=C grep -q '[[:cntrl:]]' <(tr -d '\r\t\n' < '$TOOL')"
-for phrase in 'Payment Required' 'Arrearage' 'FreeTierOnly' 'OUT_OF_SERVICE' 'out of credits.' 'monthly spending limit'; do
+for phrase in 'Payment Required' 'out of credits.' 'monthly spending limit'; do
   printf '%s\n' "$phrase" > "$TMP/phrase.txt"
   classify grok "$TMP/phrase.txt" >/dev/null; rc=$?
   check "each signature matches on its own: $phrase" "[ '$rc' = 0 ]"
 done
+for phrase in 'Arrearage' 'FreeTierOnly' 'OUT_OF_SERVICE'; do
+  printf '%s\n' "$phrase" > "$TMP/phrase.txt"
+  classify qwen "$TMP/phrase.txt" >/dev/null; rc=$?
+  check "a Qwen status code matches for Qwen: $phrase" "[ '$rc' = 0 ]"
+  rm -rf "$Q"; classify grok "$TMP/phrase.txt" >/dev/null; rc=$?
+  check "a Qwen status code is not a credit failure for another provider: $phrase" "[ '$rc' = 3 ]"
+done
+check "muse keeps failed-terminal text for the credit scan" "grep 'muse_credit_stop(){' -A4 '$ROOT/bin/ai-muse' | grep -qF 'terminal[.]failed'"
 for phrase in 'Your account is in good standing.' 'Prepayment credits are available for this project.'; do
   printf '%s\n' "$phrase" > "$TMP/phrase.txt"
   classify grok "$TMP/phrase.txt" >/dev/null; rc=$?

@@ -34,12 +34,15 @@ CREDIT_PATTERNS = tuple(re.compile(p) for p in (
     r'\bpayment required\b',
     r'monthly spending limit',
     r'(purchase|buy|add) (more )?credits',
-    r'\barrearage\b',
     r'make sure your account is in good standing|account is not in good standing',
+))
+# DashScope (Qwen) status codes are meaningful only in Qwen's own errors.
+PROVIDER_CREDIT_PATTERNS = {'qwen': tuple(re.compile(p) for p in (
+    r'\barrearage\b',
     r'\bfreetieronly\b',
     r'free tier of the model has been exhausted',
     r'\bout_of_service\b',
-))
+))}
 CREDIT_MESSAGES = {
     'grok': 'the xAI (Grok) account has run out of credits or hit its monthly spending limit - add credits at https://console.x.ai',
     'muse': 'the Meta (Muse) API account has run out of credits - add credits at https://dev.meta.ai',
@@ -49,7 +52,7 @@ CREDIT_MESSAGES = {
 }
 
 
-def credit_match(paths):
+def credit_match(paths, provider=None):
     """Return the first matching evidence line, or None. Reads each file's tail only."""
     for path in paths:
         try:
@@ -61,7 +64,7 @@ def credit_match(paths):
                 text = source.read().decode('utf-8', 'replace').lower()
         except OSError:
             continue
-        for pattern in CREDIT_PATTERNS:
+        for pattern in CREDIT_PATTERNS + PROVIDER_CREDIT_PATTERNS.get(provider, ()):
             if pattern.search(text):
                 return pattern.pattern
     return None
@@ -71,7 +74,7 @@ def credit(directory, provider, paths, record, seconds):
     """Exit 0 with the two contract lines on a match, 3 on no match."""
     if provider not in CREDIT_MESSAGES:
         raise ValueError('no out-of-credit message for provider')
-    if credit_match(paths) is None:
+    if credit_match(paths, provider) is None:
         return 3
     machine = 'AI_REVIEWER_OUT_OF_CREDIT provider=%s code=insufficient_quota' % provider
     human = 'OUT OF CREDIT: %s - then run: ai-review-preflight clear %s' % (CREDIT_MESSAGES[provider], provider)
