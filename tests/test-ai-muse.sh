@@ -128,6 +128,11 @@ case "${1:-}" in
       for fd_path in /proc/$$/fd/*; do case "$(readlink "$fd_path" 2>/dev/null || true)" in *.muse-stage.*) printf leaked > "$MUSE_STUB_FD_LEAK_FILE";; esac; done
     fi
     [ "${MUSE_STUB_MODE:-}" = fail ] && exit 7
+    if [ "${MUSE_STUB_MODE:-}" = capacity ]; then
+      n="$(cat "$MUSE_STUB_CAPACITY_FILE" 2>/dev/null || echo 0)"; n=$((n+1)); printf '%s' "$n" > "$MUSE_STUB_CAPACITY_FILE"
+      [ "$n" -gt "${MUSE_STUB_CAPACITY_FAILS:-1}" ] || { printf '{"type":"error","sessionID":"ses_new","error":{"name":"APIError","data":{"message":"model_not_found: The requested model was not found."}}}
+'; exit 1; }
+    fi
     [ "${MUSE_STUB_MODE:-}" = malformed ] && { printf 'not-json\n'; exit 0; }
     [ "${MUSE_STUB_MODE:-}" = partialmalformed ] && { printf '{"type":"step_start","sessionID":"ses_partial","part":{}}\nnot-json\n'; exit 0; }
     [ "${MUSE_STUB_MODE:-}" = slow ] && { [ -z "${MUSE_STUB_PID_FILE:-}" ] || printf '%s\n' "$$" > "$MUSE_STUB_PID_FILE"; trap '[ -z "${MUSE_STUB_TERM_MARKER:-}" ] || printf stopped > "$MUSE_STUB_TERM_MARKER"; exit 143' HUP INT TERM; sleep "${MUSE_STUB_DELAY:-2}"; }
@@ -415,6 +420,9 @@ check 'pending session cannot continue without reconciliation' "cd '$REPO' && ! 
 check 'reconciliation cannot clear missing durable evidence' "cp '$STALE_META' '$TMP/stale-before-missing-proof'; jq 'del(.retained_turn)' '$STALE_META' > '$TMP/stale-without-proof'; mv '$TMP/stale-without-proof' '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\"; proof_rc=\$?; jq -e '.status==\"completed_pending_local_checks\"' '$STALE_META'; state_rc=\$?; mv '$TMP/stale-before-missing-proof' '$STALE_META'; test \"\$proof_rc:\$state_rc\" = 0:0"
 check 'unsafe caller names are rejected' "cd '$REPO' && ! eval \"$ENV AI_MUSE_CALLER='../unsafe' '$SCRIPT' list\""
 check 'unsafe names are rejected by every metadata command' "cd '$REPO' && for cmd in show transcript delete; do ! eval \"$ENV '$SCRIPT' \$cmd '../unsafe'\" || exit 1; done"
+check 'capacity 404 is relaunched and then succeeds' "cd '$REPO' && rm -f '$TMP/cap1' && eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 MUSE_STUB_MODE=capacity MUSE_STUB_CAPACITY_FILE='$TMP/cap1' MUSE_STUB_CAPACITY_FAILS=2 '$SCRIPT' new capacity-ok --prompt test\" >/dev/null && test \"\$(cat '$TMP/cap1')\" = 3"
+check 'capacity 404 stops after the retry budget' "cd '$REPO' && rm -f '$TMP/cap2' && ! eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 AI_MUSE_CAPACITY_RETRIES=1 MUSE_STUB_MODE=capacity MUSE_STUB_CAPACITY_FILE='$TMP/cap2' MUSE_STUB_CAPACITY_FAILS=5 '$SCRIPT' new capacity-fail --prompt test\" >/dev/null 2>&1 && test \"\$(cat '$TMP/cap2')\" = 2"
+check 'ordinary provider failure is never relaunched' "cd '$REPO' && : > '$TMP/fail-calls' && ! eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 MUSE_STUB_CALLS_FILE='$TMP/fail-calls' MUSE_STUB_MODE=fail '$SCRIPT' new fail-once --prompt test\" >/dev/null 2>&1 && test \"\$(grep -c run '$TMP/fail-calls')\" = 1"
 check 'provider failure is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' new provider-fail --prompt test\""
 check 'malformed provider output is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=malformed '$SCRIPT' new malformed --prompt test\""
 check 'partly malformed output preserves a recoverable session' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=partialmalformed '$SCRIPT' new partial --prompt test\"; meta=\$(find '$TMP/state' -name 'codex--partial.json' -type f); jq -e '.session_id==\"ses_partial\" and .status==\"provider_outcome_uncertain\"' \"\$meta\""
