@@ -30,8 +30,16 @@ case "$*" in
   "issue create"*) [ -f "$F/nolabel" ] && exit 1; printf '%s\n' "$*" >> "$F/created"; echo 'https://github.com/o/r/issues/31'; exit 0 ;;
   "issue edit"*) [ -f "$F/nolabel" ] && exit 1; printf '%s\n' "$*" >> "$F/edited"; echo '{}'; exit 0 ;;
   "search issues"*) out "$(cat "$F/digest_search.json" 2>/dev/null || echo '[]')" ;;
-  *graphql*databaseId*) out "$(cat "$F/gql_links.json" 2>/dev/null || echo '{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}')" ;;
-  *graphql*states:OPEN*) out "$(cat "$F/gql_parents.json" 2>/dev/null || echo '{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}')" ;;
+  *graphql*states:OPEN*)
+    # One open-issue query serves both scans: merge the links and parents
+    # fixtures by issue number, as GitHub would answer the combined query.
+    empty='{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}'
+    [ -f "$F/gql_links.json" ] && lf="$F/gql_links.json" || { lf="$F/empty.json"; echo "$empty" > "$lf"; }
+    [ -f "$F/gql_parents.json" ] && pf="$F/gql_parents.json" || { pf="$F/empty.json"; echo "$empty" > "$pf"; }
+    out "$(jq -cn --slurpfile l "$lf" --slurpfile p "$pf" '$l[0] as $l | $p[0] as $p |
+      $l * {data:{repository:{issues:{nodes:
+        ([$l.data.repository.issues.nodes[], $p.data.repository.issues.nodes[]] | group_by(.number)
+         | map(reduce .[] as $x ({}; . + ($x | del(.blockedBy)) | .blockedBy.nodes = ((.blockedBy.nodes // []) + ($x.blockedBy.nodes // []) | group_by(.number) | map(add)))))}}}}')" ;;
   *graphql*)
     n=""
     for i in "${!args[@]}"; do
@@ -224,7 +232,7 @@ check 'a foreign host runs no alarm posting and advances no clock' "AI_BLOCKER_W
 fence(){ printf '```db-work-scope\nstatus: ready\nwork_type: repo-maintenance\nroute: repo-maintenance\npriority: 100\ndepends_on: %s\nobjects:\n```\n' "$1"; }
 lnode(){ jq -n --argjson n "$1" --argjson did "$2" --arg body "$3" --argjson bb "$4" \
   '{number:$n,databaseId:$did,body:$body,blockedBy:{nodes:($bb|map({number:.}))}}'; }
-lnodes(){ jq -n --argjson nodes "$1" '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:$nodes}}}}' > "$FAKE/gql_links.json"; }
+lnodes(){ rm -f "$FAKE/gql_parents.json"; jq -n --argjson nodes "$1" '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:$nodes}}}}' > "$FAKE/gql_links.json"; }
 check 'shipped config enables link maintenance' "jq -e '.links_enabled == true and (.links_interval_minutes | type == \"number\" and . > 0)' '$ROOT/config/blocker-watch.json'"
 : > "$FAKE/calls"; rm -f "$FAKE/links" "$TMP/home/last-links"
 lnodes "[$(lnode 20 220 "$(fence 7)" '[]'), $(lnode 7 207 'gate bug' '[]')]"
@@ -422,6 +430,34 @@ check 'find searches the configured owners and both labels' \
 echo '[]' > "$FAKE/find.json"
 check 'find reports no match plainly' "BW2 find nothing here 2>&1 | grep -q 'no parked work matches'"
 check 'list shows the parked issue column' "BW2 list | awk -F'\t' '\$6==\"o/r#9\" || \$6==\"o/r#5\" || \$6!=\"\"' | grep -q ."
+
+# Replay (#658 P5): 180 open issues, 60 missing depends_on links (to owned
+# blockers, which the alarm must skip) and 60 parents of unowned blockers. One tick with both scans due must read each repo's open
+# issues once, create every link, and alarm on every unowned blocker.
+AI_BLOCKER_WATCH_OLD="${AI_BLOCKER_WATCH_OLD:-}"
+replay(){ # replay <script>: fresh state, both scans due, one tick
+  rm -rf "$TMP/home" "$FAKE/links" "$FAKE/comments" "$FAKE/created" "$FAKE/edited" "$FAKE"/gql_issue_*.json "$FAKE/digest_search.json"; : > "$FAKE/calls"
+  "$1" tick > "$TMP/replay.out" 2>&1
+}
+rnodes=""; pnodes=""
+for i in $(seq 101 220); do
+  if [ "$i" -le 160 ]; then rnodes="$rnodes$(lnode "$i" "$((i+1000))" "$(fence "$((i+120))")" '[]'),"
+    rnodes="$rnodes{\"number\":$((i+120)),\"databaseId\":$((i+1120)),\"title\":\"owned $((i+120))\",\"assignees\":{\"totalCount\":1},\"body\":\"\",\"blockedBy\":{\"nodes\":[]}},"
+  else rnodes="$rnodes$(lnode "$i" "$((i+1000))" "blocker $i" '[]'),"
+    pnodes="$pnodes{\"number\":$((i-120)),\"blockedBy\":{\"nodes\":[{\"number\":$i,\"state\":\"OPEN\",\"title\":\"blocker $i\",\"repository\":{\"nameWithOwner\":\"o/r\"},\"assignees\":{\"totalCount\":0}}]}},"; fi
+done
+lnodes "[${rnodes%,}]"
+jq -n --argjson nodes "[${pnodes%,}]" '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:$nodes}}}}' > "$FAKE/gql_parents.json"
+replay "$SCRIPT"
+check 'replay: every one of 60 missing links is created once' "[ \"\$(grep -c linked '$FAKE/links')\" = 60 ]"
+check 'replay: every one of 60 unowned blockers gets its owner request' "[ \"\$(grep -c 'ai-blocker-watch:unowned:' '$FAKE/comments')\" = 60 ]"
+check 'replay: both scans share one open-issue read' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 1 ]"
+if [ -n "$AI_BLOCKER_WATCH_OLD" ]; then # compare against a previous build
+  sort "$FAKE/comments" > "$TMP/new.comments"; cp "$FAKE/links" "$TMP/new.links"; new_calls="$(wc -l < "$FAKE/calls")"
+  replay "$AI_BLOCKER_WATCH_OLD"; sort "$FAKE/comments" > "$TMP/old.comments"
+  check 'replay: outcomes match the previous build' "cmp -s '$TMP/new.comments' '$TMP/old.comments' && cmp -s '$TMP/new.links' '$FAKE/links'"
+  printf '  replay calls: previous %s, now %s\n' "$(wc -l < "$FAKE/calls")" "$new_calls"
+fi
 
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"
