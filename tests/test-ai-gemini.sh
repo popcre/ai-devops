@@ -70,6 +70,10 @@ case "${MOCK_MODE:-normal}" in
  mutate-protected) printf changed >> "$MOCK_PROTECTED/file.txt" ;;
  mutate-protected-ignored) printf changed >> "$MOCK_PROTECTED/.ignored" ;;
  mutate-protected-tracked-runtime) printf changed >> "$MOCK_PROTECTED/.ai/reviews/tracked.md" ;;
+ mutate-protected-nested) printf changed >> "$MOCK_PROTECTED/.ai/wt/other/work.txt" ;;
+ mutate-protected-new-nested) mkdir -p "$MOCK_PROTECTED/.ai/wt/hidden" && printf 'gitdir: x
+' > "$MOCK_PROTECTED/.ai/wt/hidden/.git" && printf x > "$MOCK_PROTECTED/.ai/wt/hidden/f" ;;
+ mutate-protected-nested-plain) printf changed >> "$MOCK_PROTECTED/.ai/wt/plain/work.txt" ;;
  sleep) sleep 30 ;;
  reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
@@ -158,6 +162,12 @@ R3C="$TMP/repo3c"; make_repo "$R3C"; export MOCK_PROTECTED="$R3C"
 check 'same-turn protected ignored-file mutation is rejected' "! new_run '$R3C' protected-ignored mutate-protected-ignored"
 R3D="$TMP/repo3d"; make_repo "$R3D"; mkdir -p "$R3D/.ai/reviews"; printf tracked > "$R3D/.ai/reviews/tracked.md"; git -C "$R3D" add -f .ai/reviews/tracked.md; git -C "$R3D" commit -qm tracked-runtime; export MOCK_PROTECTED="$R3D"
 check 'tracked files inside runtime directories remain protected' "! new_run '$R3D' protected-tracked-runtime mutate-protected-tracked-runtime"
+# 2026-09-24 (#780): other sessions' ignored nested checkouts (.claude/worktrees/*)
+# change during a review from the main checkout; they are not this source.
+R3E="$TMP/repo3e"; make_repo "$R3E"; mkdir -p "$R3E/.ai/wt/other" "$R3E/.ai/wt/plain"; git -C "$R3E/.ai/wt/other" init -q; printf a > "$R3E/.ai/wt/other/work.txt"; printf a > "$R3E/.ai/wt/plain/work.txt"; export MOCK_PROTECTED="$R3E"
+check 'another session changing its ignored nested checkout is tolerated' "new_run '$R3E' protected-nested mutate-protected-nested"
+check 'a new ignored nested checkout appearing is still rejected' "! new_run '$R3E' protected-new-nested mutate-protected-new-nested"
+check 'an ignored plain folder (not a checkout) stays protected' "! new_run '$R3E' protected-nested-plain mutate-protected-nested-plain"
 GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }
