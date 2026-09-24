@@ -27,7 +27,7 @@ section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-com
 check 'complete Windows sections retain the existing timeout bound' '[ "$windows_timeout" = 105 ]'
 check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 30 ]'
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
-check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
+check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: blacksmith-4vcpu-ubuntu-2404' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
 check 'long and reviewer jobs use their separate classifier outputs' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -c \"needs.fast-classifier.outputs.reviewer == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -cF 'needs: [fast-classifier, manual-preflight]' '$workflow')\" -eq 4 ]"
 check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 8 ]"
@@ -42,8 +42,8 @@ check 'scheduled failures create or update an issue' "grep -q '^  report-schedul
 # to the daily-use EDGE-DEV computer or a bare candidate host.
 # `ai-devops-windows` is the qualification-only label: a host carrying it has
 # been registered, not proven.
-check 'reviewer Windows job runs on the qualified independent pool' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 1 ]"
-check 'sections, complete matrix and reviewer fallback keep the hosted lane' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*\$' '$workflow')\" -eq 3 ]"
+check 'reviewer Windows job runs on Blacksmith, not the self-hosted pool' "! grep -qF 'ai-devops-windows-qualified]' '$workflow'"
+check 'every Windows job in verify runs on Blacksmith' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*\$' '$workflow')\" -eq 4 ]"
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
@@ -149,7 +149,7 @@ check 'Blacksmith stays manual, bounded, independently hosted and fail-closed' \
 # Sections run at the same time on independent hosted machines, and one failing
 # section must never hide the other sections.
 check 'sections run on independent hosted machines and all keep reporting' \
-  '[ -n "$section_timeout" ] && [ "$section_timeout" -le 40 ] && printf "%s" "$section_block" | grep -qF "fail-fast: false" && printf "%s" "$section_block" | grep -qE "^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*$"'
+  '[ -n "$section_timeout" ] && [ "$section_timeout" -le 40 ] && printf "%s" "$section_block" | grep -qF "fail-fast: false" && printf "%s" "$section_block" | grep -qE "^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*$"'
 # #166 restores `windows-offline` as a required context, so it must keep that
 # exact name and stay fail-closed: any lane result other than success, or a skip
 # the classifier did not justify, fails the aggregate.
@@ -239,16 +239,24 @@ sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | gre
 # been registered, not proven. Membership in `ai-devops-windows-qualified`
 # requires a green `qualify Windows runner` job on that exact physical host,
 # and the pool may hold any number of qualified hosts.
-windows_pool="$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' "$workflow" | tr -d '\r')"
-[ "$windows_pool" -eq 1 ] || {
-  printf 'FAIL: the reviewer safety suites must run on the qualified self-hosted pool\n' >&2
+# 2026-09-23: Albert moved every verify job to Blacksmith ("send everything
+# to blacksmith"); the self-hosted pool and GitHub-hosted queue both stalled.
+if grep -F 'ai-devops-windows-qualified]' "$workflow" | grep -q 'runs-on'; then
+  printf 'FAIL: verify jobs must run on Blacksmith, not the self-hosted pool
+' >&2
+  exit 1
+fi
+blacksmith_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*$' "$workflow" | tr -d '\r')"
+[ "$blacksmith_pool" -eq 4 ] || {
+  printf 'FAIL: all four Windows verify jobs must run on Blacksmith
+' >&2
   exit 1
 }
-hosted_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*windows-2025[[:space:]]*$' "$workflow" | tr -d '\r')"
-[ "$hosted_pool" -eq 3 ] || {
-  printf "FAIL: the sections, the complete matrix and the reviewer fallback must all keep GitHub's hosted lane\n" >&2
+if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ubuntu-24\.04|ubuntu-latest|^[[:space:]]*runs-on:[[:space:]]*windows-2025'; then
+  printf 'FAIL: verify jobs must not use GitHub-hosted runners
+' >&2
   exit 1
-}
+fi
 if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ai-devops-windows\]|edge-dev\]'; then
   printf 'FAIL: verification must never route to the daily-use desktop or an unqualified candidate host\n' >&2
   exit 1

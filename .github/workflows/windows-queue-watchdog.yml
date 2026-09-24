@@ -21,7 +21,7 @@ permissions:
 jobs:
   watch-section-pickup:
     if: github.event.workflow_run.event == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # Bounded well under the 35-minute section ceiling: this only needs to
     # catch a slow *start*, not watch the run to completion.
     timeout-minutes: 8
