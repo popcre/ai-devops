@@ -61,6 +61,33 @@ mention_msg="A turn ending on the phrase nothing is needed gets stopped once.\n\
 mention_out="$(fire m3 "$mention_msg")"
 check "a MENTION of the trigger phrase mid-reply is NOT caught" "[ -z \"\$mention_out\" ]"
 
+# --- a turn that ends HOLDING a machine wait must be registered (#723) -------
+# A wait over ~10 minutes is registered with ai-blocker-watch and only then does
+# the turn end; a short wait is held inside the turn while the session keeps
+# working. A human wait ("Waiting on — Albert: …") is a different thing: the
+# still-open block owns it, and the hook must stay silent.
+export AI_BLOCKER_WATCH_HOME="$TMP/bw-home"; mkdir -p "$AI_BLOCKER_WATCH_HOME/waits"
+wait_out="$(fire w1 'The PR checks need 40 more minutes.\n\nI will keep polling and report back.')"
+check "'keep polling' at the close is stopped" "[ -n \"\$wait_out\" ]"
+check "the wait block names ai-blocker-watch registration" "printf '%s' \"\$wait_out\" | grep -q 'ai-blocker-watch wait'"
+check "the wait block quotes the held-wait phrase back" "printf '%s' \"\$wait_out\" | grep -q 'keep polling'"
+check "'still waiting for the review' at the close is stopped" \
+  "[ -n \"\$(fire w2 'The reviewer has the branch.\n\nStill waiting for the review to finish.')\" ]"
+check "'watching until' at the close is stopped" \
+  "[ -n \"\$(fire w3 'The merge queue is moving.\n\nWatching until 15:03.')\" ]"
+check "a human wait in the still-open shape is NOT stopped" \
+  "[ -z \"\$(fire w4 'The budget ruling is with Albert.\n\nWaiting on — Albert: the fall-line budget ruling.')\" ]"
+jq -n '{id:"reg-1",blocker:"o/r#5",harness:"zcode",session:"sess-1",state:"waiting",attempts:0}' > "$AI_BLOCKER_WATCH_HOME/waits/reg-1.json"
+check "a REGISTERED wait lets the same close end the turn" \
+  "[ -z \"\$(fire w5 'The PR checks need 40 more minutes.\n\nI will keep polling and report back.')\" ]"
+jq '.state="woken"' "$AI_BLOCKER_WATCH_HOME/waits/reg-1.json" > "$AI_BLOCKER_WATCH_HOME/waits/reg-1.new" && mv "$AI_BLOCKER_WATCH_HOME/waits/reg-1.new" "$AI_BLOCKER_WATCH_HOME/waits/reg-1.json"
+check "a finished (woken) wait does not license the same close" \
+  "[ -n \"\$(fire w6 'The PR checks need 40 more minutes.\n\nI will keep polling and report back.')\" ]"
+jq -n '{id:"reg-2",blocker:"o/r#5",harness:"zcode",session:"some-other-session",state:"waiting",attempts:0}' > "$AI_BLOCKER_WATCH_HOME/waits/reg-2.json"
+check "another session's registration does not license this close" \
+  "[ -n \"\$(fire w7 'The PR checks need 40 more minutes.\n\nI will keep polling and report back.')\" ]"
+unset AI_BLOCKER_WATCH_HOME
+
 # --- a promise of action must be backed by action in this turn -----------------
 fire init '' '{"hook_event_name":"UserPromptSubmit"}' >/dev/null
 future_out="$(fire f1 "I am going to proceed now.")"

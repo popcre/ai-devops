@@ -150,6 +150,25 @@ check 'a failed scan does not advance the scan window' "[ ! -f '$TMP/home/last-s
 rm -f "$FAKE/fail"
 check 'list shows registered waits' "BW list | grep -q \"$id\""
 check 'cancel removes a wait' "BW cancel '$id3' && [ ! -f '$TMP/home/waits/$id3.json' ]"
+
+# has-wait: the closeout hook's local registration check (#723). A wait the
+# watcher still owes a wake for (waiting/waking) counts; every finished state
+# does not, because a turn may not end on waiting language for a USED wait.
+# The fixture only stubs the claude/codex harness commands, so these files use
+# harness "claude" — a zcode/mimo file would make every later tick launch the
+# REAL headless wake command and hang the suite. And the blocker must be one
+# the fake leaves OPEN (o/r#12): a waiting wait on the closed o/r#5 would be
+# woken by every later tick with no cwd or parked issue, turn orphaned, and
+# fail the whole rest of the suite.
+BW has-wait thread-abc >/dev/null 2>&1; hw_rc=$?
+check 'has-wait answers 1 for a woken (finished) wait' "[ \"\$hw_rc\" = 1 ]"
+jq -n '{id:"hw-1",blocker:"o/r#12",harness:"claude",session:"zs-1",state:"waiting",attempts:0}' > "$TMP/home/waits/hw-1.json"
+jq -n '{id:"hw-2",blocker:"o/r#12",harness:"claude",session:"cs-1",state:"waking",attempts:1}' > "$TMP/home/waits/hw-2.json"
+check 'has-wait answers 0 for a waiting wait of that session' "BW has-wait zs-1 >/dev/null 2>&1"
+check 'has-wait answers 0 for a waking wait (a wake is owed right now)' "BW has-wait cs-1 >/dev/null 2>&1"
+check 'has-wait answers 1 for a session with no wait' "! BW has-wait nobody-at-all"
+check 'has-wait says so in plain words' "BW has-wait nobody-at-all 2>&1 | grep -q 'no wait in flight'"
+check 'has-wait refuses a missing session argument' "! BW has-wait"
 # Unowned-blocker alarm (#550).
 old3d="$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)"
 fresh="$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"

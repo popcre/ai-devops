@@ -234,10 +234,15 @@ the task needs the detail.
   authority, quote Albert's exact words and say they came from his chat message.
   A sub-agent report that is neither finished work nor a blocker with its
   verbatim evidence line is a failure; resume that agent immediately.
-- A session never ends its turn to say it is still waiting. Hold the wait inside
-  the turn. The one exception is a wait on another GitHub issue that has its own
-  owner: run `ai-blocker-watch wait` with a plain-English brief file, then end
-  the turn. Details: `docs/standing-rules-details.md`.
+- **A wait over ~10 minutes is registered, never polled.** Any wait on an
+  issue, pull request, CI run, or another session's work that may exceed ~10
+  minutes: write a plain-English brief file, run `ai-blocker-watch wait`, then
+  end the turn — the watcher wakes this session when it releases. Subagents
+  register the same way; a wait with no issue of its own uses `--park`. Holding
+  a poll open inside the turn is the exception, for short waits only. A turn
+  never ends by saying it is still waiting: the wait is registered, or the work
+  continues in this turn. Waiting on a person is named in the reply's
+  Still-open block, not registered. Details: `docs/standing-rules-details.md`.
 - Read the repository's `AGENTS.md`, then only the documents its task router
   names for the current work. Do not load unrelated handoffs.
 - Create a HANDOFF only for unfinished work or when Albert asks. Load

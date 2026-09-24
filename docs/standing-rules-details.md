@@ -4,29 +4,38 @@ The always-loaded client globals keep the short rule. This file holds the long
 procedure behind each one. Load it when the task needs the detail — it is not
 startup context.
 
-## BlockerWatch (waiting on another issue)
+## BlockerWatch (waiting on anything machine-checkable)
 
-A session never ends its turn to say it is still waiting. Hold the wait inside
-the turn: sleep, re-check, repeat. Come back only with the finished result or a
-real blocker with its verbatim evidence line.
-
-The one exception is a wait on another GitHub issue that has its own owner (a
-shared-db ticket, a gate bug, another repository's work):
+**Registration is the default; polling is the exception.** A wait that may
+exceed ~10 minutes — on an issue, a pull request, a CI run, or another
+session's work — is registered with BlockerWatch and only then does the turn
+end. The scheduled watcher wakes the session when the wait releases. Holding a
+poll open inside the turn is for short waits only, while the session keeps
+working; a turn never ends by saying it is still waiting.
 
 ```text
-ai-blocker-watch wait <owner/repo#N> --for <owner/repo#M> --brief-file <file>
+ai-blocker-watch wait <owner/repo#N> [--until <UTC>] (--for <owner/repo#M> | --park "<title>") --brief-file <file>
 ```
 
-- `N` is the blocker, `M` is the issue you are working on.
-- When there is no work issue yet, use `--park "<plain-English title>"` instead
-  of `--for` and one is opened for you.
+- `N` is the blocker — an issue or a pull request. A pull request is watched
+  directly (GitHub cannot link a PR as a blocker; the wake says so if it closed
+  unmerged). A CI run is its pull request, or `--until` as a check-in.
+- `M` is the issue this work belongs to. No issue of your own, or the issue is
+  already closed? Use `--park "<plain-English title>"` and one is opened.
 - The brief is required. Write, in plain English, what this work is, what is
   already done, and the exact next steps — a brand-new session may have to
   continue from that text alone.
-- A pull request is just a blocker reference. A point in time is `--until <UTC>`.
-  A long job is an issue that says what "finished" means, waited on with
-  `--until` as a check-in.
-- Never hold such a wait open for days.
+- Subagents register too (#723). A dispatched headless agent registers its own
+  session; an in-chat subagent inherits the parent session's ID, and that is
+  the correct wake target, because the parent chat owns the work. A session
+  with no session ID passes `--harness` and `--session` explicitly.
+- Combine a blocker and `--until` for a long job: the wake rechecks and
+  re-registers if it is still running. Never hold such a wait open for days.
+- A registered wait makes ending the turn correct. The closeout hook accepts a
+  turn that ends on waiting language only when the session holds a wait still
+  in flight (`ai-blocker-watch has-wait <session-id>`).
+- Waiting on a PERSON is not a BlockerWatch wait: name who holds it and what
+  you need in the reply's Still-open block instead.
 
 A blocker issue gets an owner at birth. Assign yourself (or the session that
 will own it) and say so, or hand it to a named queue owner with an `owner:`
@@ -49,7 +58,11 @@ Parked work is findable later with `ai-blocker-watch find <plain words>`.
 - Before parallel agents, list the files each will touch; overlapping work goes
   to one agent in sequence.
 - Every dispatch prompt says: create a uniquely named worktree and verify its
-  branch before every commit; only the agent that opened an issue closes it.
+  branch before every commit; only the agent that opened an issue closes it;
+  and any wait that may exceed ~10 minutes is REGISTERED with ai-blocker-watch
+  — by the subagent itself unless the dispatcher holds it — never polled
+  ad hoc. Name the blocker and the owning/parked issue in the prompt so the
+  subagent can register without guessing.
 
 ## Quiet tool output
 

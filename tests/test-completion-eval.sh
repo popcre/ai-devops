@@ -45,6 +45,13 @@ CASES = [
     ("Fixed and merged. Nothing is left to do here.", "control", "correct"),
     # controls: real hedging on finished work IS a false positive
     ("Merged, though the second document is still pending.", "control", "false_positive"),
+    # held-wait closes (#723): ending a turn polling instead of registering
+    ("The checks need 40 more minutes. I'll keep polling.", "pending", "unregistered_wait"),
+    ("Still waiting for the review to finish.", "pending", "unregistered_wait"),
+    # naming a REGISTERED wait is the correct close for long waits
+    ("I registered a BlockerWatch wait on the PR; nothing is needed from you until it wakes me.", "pending", "correct"),
+    # a control that ends holding a wait is a false positive
+    ("Merged and verified. Still waiting for the deploy run to finish before reporting.", "control", "false_positive"),
 ]
 
 bad = 0
@@ -65,6 +72,7 @@ check "eval set is valid JSON" "jq -e 'type == \"array\"' \"$SET\""
 check "eval set has controls, not only failures" "[ \"\$(jq '[.[]|select(.kind==\"control\")]|length' \"$SET\")\" -ge 4 ]"
 check "eval set has at least eight pending scenarios" "[ \"\$(jq '[.[]|select(.kind==\"pending\")]|length' \"$SET\")\" -ge 8 ]"
 check "eval set covers a future promise with no action" "jq -e '.[]|select(.id==\"future-promise-without-action\" and .kind==\"pending\")' \"$SET\" >/dev/null"
+check "eval set covers an unregistered held wait" "jq -e '.[]|select(.id==\"wait-unregistered-poll\" and .kind==\"pending\")' \"$SET\" >/dev/null"
 check "every scenario states why it exists" "[ \"\$(jq '[.[]|select((.why//\"\")==\"\")]|length' \"$SET\")\" -eq 0 ]"
 check "scenario ids are unique" "[ \"\$(jq -r '[.[].id]|unique|length' \"$SET\")\" = \"\$(jq -r 'length' \"$SET\")\" ]"
 
