@@ -33,11 +33,13 @@ The older `ai-muse review [repository] [request]` command remains available. It 
 creates a timestamped named conversation, so the result is not trapped in a one-off
 call.
 
-## Muse Code engine (trial)
+## Native Muse Code engine (default)
 
-`AI_MUSE_ENGINE=muse-code` runs the same commands through Meta's Muse Code CLI
-instead of OpenCode. The default stays `opencode` until the new engine has earned
-it. Everything shared is unchanged: the disposable review copy, evidence packet,
+`ai-muse` defaults to Meta's native Muse Code CLI. Decision: Albert, 2026-09-17;
+live-qualified 2026-09-23 (issue #542 Phase D1) and flipped the same day (Phase D3).
+Rollback: `AI_MUSE_ENGINE=opencode` selects the pinned OpenCode harness. OpenCode
+stays installed, selectable, and fully functional. Sessions never cross engines.
+Everything shared is unchanged: the disposable review copy, evidence packet,
 locks, private reports, credential handoff, retained turns, and `reconcile`.
 
 - Pinned build: `config/muse-code/version`, installed by Meta's Windows installer at

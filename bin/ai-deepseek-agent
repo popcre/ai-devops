@@ -69,7 +69,7 @@ CALL_TIMEOUT="${AI_DEEPSEEK_CALL_TIMEOUT:-300}"
 usage() {
   cat <<'EOF'
 Usage:
-  ai-deepseek-agent send "<message>" [--file FILE]... [--model deepseek-flash|deepseek-v4-pro] [--system "<prompt>"] [--review]
+  ai-deepseek-agent send "<message>" [--file FILE]... [--model deepseek-flash|deepseek-v4-pro] [--system "<prompt>"] [--review] [--repo-tools]
       Start a NEW conversation. Prints SESSION_ID: <id>, then the reply.
       Default model: deepseek-flash (DeepSeek V4.1 Flash). DEEPSEEK_MODEL overrides.
       --model and DEEPSEEK_MODEL accept exactly deepseek-flash or
@@ -101,14 +101,20 @@ A genuine back-and-forth: DeepSeek sees the whole thread on every reply, the
 same as resuming a Codex session. Use it for plans, code, environment/config
 questions, debugging theories, or a second-opinion debate -- not just diffs.
 
+--review gives DeepSeek read-only repository tools (list_dir, read_file, grep)
+confined to the exact-head review snapshot; --repo-tools gives the same tools
+over the current repository for an ordinary conversation. Paths cannot escape
+the root, links are not followed, .git/.ai/secret files are refused, and the
+loop is bounded (DEEPSEEK_TOOLS_MAX_CALLS, _MAX_ROUNDS, _MAX_WALL).
 --review requires a final ## Verdict heading and APPROVE, REJECT, or BLOCKED.
 Add --governed-verdict SHA (or --governed-verdict=SHA) with --review to emit one
 final VERDICT: APPROVE|REVISE|REJECT SHA line for a governed recorder. The exact
 current commit is required; BLOCKED is retained but returns nonzero. This mode
 prints a new session ID on stderr and keeps stdout for the review only.
-It also tells DeepSeek that it has NO repository access, so it must not claim
-that anything exists or is missing unless the text quotes it, and must return
-BLOCKED when a conclusion would need evidence it was not given. --file may be
+It also tells DeepSeek that the review snapshot, read through those tools, and
+the conversation are its only evidence: it must not claim that anything exists or
+is missing unless it opened or was shown it, and must return BLOCKED when a
+conclusion would need evidence it could not obtain. --file may be
 repeated to attach all the evidence a real judgement needs.
 It writes a metadata sidecar bound to this repository's exact HEAD commit.
 EOF
@@ -306,7 +312,7 @@ PY
 }
 
 LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
-ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""; ID=""; GOVERNED_HEAD=""; PENDING_DIR=""
+REPO_TOOLS=0; REPO_TOOLS_LOG=""; REPO_TOOLS_USED=0; ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""; ID=""; GOVERNED_HEAD=""; PENDING_DIR=""
 REVIEW_SOURCE_TAG=""; REVIEW_SOURCE_PACKET=""; REVIEW_SOURCE_IDENTITY=""; REVIEW_SOURCE_HASH=""; REVIEW_SOURCE_SAVED=""
 SOURCE_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 release_lock() {
@@ -382,8 +388,14 @@ PY
 }
 
 pending_hash() { sha256sum "$1" | awk '{print $1}'; }
+repo_tools_root() { # the directory the read-only tools may read, or nothing
+  if [ "${REVIEW:-0}" = 1 ] && [ -n "$REVIEW_SOURCE_WORKSPACE" ]; then printf '%s' "$REVIEW_SOURCE_WORKSPACE"
+  elif [ "$REPO_TOOLS" = 1 ]; then printf '%s' "$REPO_ROOT"; fi
+}
+
 pending_begin() {
   local candidate="$1" ledger before=absent file tmp
+  if [ -n "$(repo_tools_root)" ]; then REPO_TOOLS_USED=1; else REPO_TOOLS_USED=0; fi
   PENDING_DIR="$(session_path "$ID" .pending)" || return 1
   mkdir "$PENDING_DIR" || return 1
   chmod 0700 "$PENDING_DIR" || return 1
@@ -404,12 +416,12 @@ pending_begin() {
     --arg files "$(pending_hash "$PENDING_DIR/files.nul")" --arg identity "${REVIEW_SOURCE_IDENTITY:-}" \
     --arg source_files_hash "$(if [ "$REVIEW" = 1 ]; then pending_hash "$REVIEW_SOURCE_IDENTITY.files"; fi)" \
     --arg packet "${REVIEW_SOURCE_PACKET:-}" --arg packet_hash "${REVIEW_SOURCE_HASH:-}" \
-    --arg workspace "$REVIEW_SOURCE_WORKSPACE" --arg tag "${REVIEW_SOURCE_TAG:-}" \
+    --arg workspace "$REVIEW_SOURCE_WORKSPACE" --arg tag "${REVIEW_SOURCE_TAG:-}" --argjson repo_access "$REPO_TOOLS_USED" \
     '{schema_version:1,provider:"deepseek",session_id:$id,caller:$caller,model:$model,repository_root:$repo,
       event_run_id:$run,review:$review,head:$head,governed_head:$governed,before_transcript_sha256:$before,
       request_sha256:$request,ledger_before_sha256:$ledger_before,ledger_after_sha256:$ledger_after,
       files_sha256:$files,source_identity_file:$identity,source_files_sha256:$source_files_hash,source_packet:$packet,packet_sha256:$packet_hash,
-      source_workspace:$workspace,source_tag:$tag}' > "$PENDING_DIR/intent.json" || return 1
+      source_workspace:$workspace,source_tag:$tag,repository_access:($repo_access==1)}' > "$PENDING_DIR/intent.json" || return 1
   pending_hash "$PENDING_DIR/intent.json" > "$PENDING_DIR/intent.sha256" || return 1
   chmod 0600 "$PENDING_DIR/"* || return 1
   rm -f "$candidate"
@@ -551,14 +563,41 @@ import json, os, sys
 messages = json.load(open(sys.argv[1], encoding="utf-8"))
 print(json.dumps({"model": os.environ["MODEL"], "messages": messages, "stream": False}))
 PY
-  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$DEEPSEEK_PROVIDER_KEY" | curl -sS -o "$resp_file" -w '%{http_code}' \
-    --connect-timeout "$CONNECT_TIMEOUT" --max-time "$CALL_TIMEOUT" \
-    "$BASE_URL/chat/completions" \
-    -H @- \
-    -d @"$req_file" >"$status_file" &
-  ACTIVE_API_PID=$!
-  rc=0; wait "$ACTIVE_API_PID" || rc=$?
-  ACTIVE_API_PID=""
+  local tools_root="" tools_round=0 tools_deadline=0 step_rc max_time="$CALL_TIMEOUT"
+  tools_root="$(repo_tools_root)"
+  if [ -n "$tools_root" ]; then
+    # Read-only repository access: list_dir/read_file/grep confined to
+    # tools_root. The helper never sees the key; this wrapper still owns every
+    # request, so the lock, signal, and transport rules below are unchanged.
+    REPO_TOOLS_LOG="$resp_file.tools.jsonl"; REPO_TOOLS_USED=1
+    "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" init "$msgs_file" "$MODEL" "$req_file" || return 1
+    tools_deadline=$(( SECONDS + ${DEEPSEEK_TOOLS_MAX_WALL:-900} ))
+  fi
+  while :; do
+    if [ -n "$tools_root" ]; then
+      max_time=$(( tools_deadline - SECONDS ))
+      [ "$max_time" -le "$CALL_TIMEOUT" ] || max_time="$CALL_TIMEOUT"
+      [ "$max_time" -gt 0 ] || { echo "Error: repository tool loop exceeded its ${DEEPSEEK_TOOLS_MAX_WALL:-900}s wall budget." >&2; rc=1; break; }
+    fi
+    printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$DEEPSEEK_PROVIDER_KEY" | curl -sS -o "$resp_file" -w '%{http_code}' \
+      --connect-timeout "$CONNECT_TIMEOUT" --max-time "$max_time" \
+      "$BASE_URL/chat/completions" \
+      -H @- \
+      -d @"$req_file" >"$status_file" &
+    ACTIVE_API_PID=$!
+    rc=0; wait "$ACTIVE_API_PID" || rc=$?
+    ACTIVE_API_PID=""
+    [ -n "$tools_root" ] && [ "$rc" -eq 0 ] && [ "$(cat "$status_file" 2>/dev/null)" = 200 ] || break
+    step_rc=0; max_time=$(( tools_deadline - SECONDS )); [ "$max_time" -gt 0 ] || max_time=1
+    # The wall budget covers tool execution too; a hard timeout bounds even a
+    # pathological regular expression.
+    timeout -k 5 "$max_time" "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" step "$tools_root" "$req_file" "$resp_file" "$REPO_TOOLS_LOG" "$tools_round" || step_rc=$?
+    [ "$step_rc" = 10 ] || { [ "$step_rc" = 0 ] || { rc=1; echo "Error: repository tool step failed (exit $step_rc; 124 means the ${DEEPSEEK_TOOLS_MAX_WALL:-900}s wall budget ran out)." >&2; }; break; }
+    # Every paid round is retained: usage sums them, and a later failure
+    # leaves them as private evidence behind the pending fence.
+    cp "$resp_file" "$resp_file.round-$tools_round" || { rc=1; break; }
+    tools_round=$(( tools_round + 1 ))
+  done
   http_code="$(cat "$status_file" 2>/dev/null || true)"
   pending_observed "$resp_file" "$rc" "$http_code" || return 1
   if [ "$rc" -ne 0 ]; then
@@ -592,7 +631,15 @@ record_usage() {
   # Optional accounting runs only after the conversation is durably published.
   local usage_record usage_run="${DEEPSEEK_RECOVERY_EVENT_RUN_ID:-${AI_REVIEW_EVENT_RUN_ID:-}}"
   if [ -f "$SESS_DIR/$ID.usage.jsonl" ] && jq -se --arg run "$usage_run" 'any(.[]; .run_id==$run)' "$SESS_DIR/$ID.usage.jsonl" >/dev/null 2>&1; then return 0; fi
-  if usage_record="$("$PYTHON" "$SOURCE_TOOLS/../tools/reviewer_usage.py" deepseek "$API_RESPONSE_FILE" --provider deepseek --model "$MODEL" --session "$ID" --run "$usage_run")"; then
+  local usage_src="$API_RESPONSE_FILE" rounds=() round
+  for round in "$API_RESPONSE_FILE".round-*; do [ -f "$round" ] && [ ! -L "$round" ] && rounds+=("$round"); done
+  if [ "${#rounds[@]}" -gt 0 ]; then
+    # A repository-tool turn made several paid requests; count all of them.
+    usage_src="$API_RESPONSE_FILE.usage-sum.json"
+    "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" usage-sum "$usage_src" "$API_RESPONSE_FILE" "${rounds[@]}" \
+      || { echo 'Warning: tool-round usage could not be summed; paid responses preserved.' >&2; return 0; }
+  fi
+  if usage_record="$("$PYTHON" "$SOURCE_TOOLS/../tools/reviewer_usage.py" deepseek "$usage_src" --provider deepseek --model "$MODEL" --session "$ID" --run "$usage_run")"; then
     { [ ! -L "$SESS_DIR/$ID.usage.jsonl" ] && printf '%s\n' "$usage_record" >> "$SESS_DIR/$ID.usage.jsonl"; } \
       || echo 'Warning: usage publication unavailable; paid response preserved.' >&2
   else
@@ -847,7 +894,7 @@ write_review_metadata() { # id verdict [status]
   # inspection at that commit.
   # Paths travel as argv and as NUL-delimited bytes, never as newline-joined
   # text, so a name containing spaces or newlines is recorded exactly as given.
-  REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" MODEL_NAME="$MODEL" GOVERNED_HEAD="$GOVERNED_HEAD" REVIEW_STATUS="$status" \
+  REPO_TOOLS_USED="$REPO_TOOLS_USED" REPO="$repo" HEAD_SHA="$head" SESSION_ID="$id" VERDICT="$verdict" CALLER_NAME="$CALLER" MODEL_NAME="$MODEL" GOVERNED_HEAD="$GOVERNED_HEAD" REVIEW_STATUS="$status" \
   SOURCE_IDENTITY_FILE="$REVIEW_SOURCE_IDENTITY" SOURCE_PACKET_HASH="$REVIEW_SOURCE_HASH" SOURCE_PACKET_DIRECTORY="$REVIEW_SOURCE_SAVED" \
   "$PYTHON" - "$tmp" "$ledger" ${REVIEW_FILES[@]+"${REVIEW_FILES[@]}"} <<'PY'
 import json, os, sys
@@ -861,7 +908,7 @@ for part in raw.split(b"\0"):
     if name not in attached: attached.append(name)
 identity = json.load(open(os.environ["SOURCE_IDENTITY_FILE"], encoding="utf-8"))
 source_files = [os.fsdecode(part) for part in open(os.environ["SOURCE_IDENTITY_FILE"] + '.files', 'rb').read().split(b'\0') if part]
-json.dump({"schema_version":2,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"model":os.environ["MODEL_NAME"],"verdict":os.environ["VERDICT"],"verdict_mode":"governed" if os.environ["GOVERNED_HEAD"] else "ordinary","governed_head":os.environ["GOVERNED_HEAD"] or None,"evidence_scope":"attached-materials-only","repository_access":False,"attached_files":attached,"attached_files_this_turn":attached_turn,"source_identity":identity,"source_attached_files":source_files,"packet_sha256":os.environ["SOURCE_PACKET_HASH"],"source_packet_directory":os.environ["SOURCE_PACKET_DIRECTORY"],"status":os.environ["REVIEW_STATUS"]},open(out,"w",encoding="utf-8"),indent=2)
+json.dump({"schema_version":2,"provider":"deepseek","repository_root":os.environ["REPO"],"head":os.environ["HEAD_SHA"] or None,"session_id":os.environ["SESSION_ID"],"caller":os.environ["CALLER_NAME"],"model":os.environ["MODEL_NAME"],"verdict":os.environ["VERDICT"],"verdict_mode":"governed" if os.environ["GOVERNED_HEAD"] else "ordinary","governed_head":os.environ["GOVERNED_HEAD"] or None,"evidence_scope":"repository-read-tools" if os.environ.get("REPO_TOOLS_USED")=="1" else "attached-materials-only","repository_access":os.environ.get("REPO_TOOLS_USED")=="1","attached_files":attached,"attached_files_this_turn":attached_turn,"source_identity":identity,"source_attached_files":source_files,"packet_sha256":os.environ["SOURCE_PACKET_HASH"],"source_packet_directory":os.environ["SOURCE_PACKET_DIRECTORY"],"status":os.environ["REVIEW_STATUS"]},open(out,"w",encoding="utf-8"),indent=2)
 PY
   if [ "${AI_DEEPSEEK_TEST_METADATA_FAILURE:-0}" = publish ]; then mkdir -p "$meta" || return 1; fi
   if ! write_atomic "$meta" "$tmp"; then rm -f "$tmp"; return 1; fi
@@ -912,25 +959,28 @@ if stream.read(1): raise ValueError("unexpected attachment bytes")
 ' "$@"
 }
 
-# DeepSeek reaches this wrapper over a plain text API: no repository, no
-# filesystem, no tools. Unless it is told so it answers as though it had
-# inspected the code, and reports files it was never shown as "absent". On
+# DeepSeek reaches this wrapper over an API. A review gives it read-only
+# list_dir/read_file/grep tools over the exact review snapshot and nothing else.
+# Unless the boundary is stated it answers as though it had inspected code it
+# never opened, and reports files it was never shown as "absent". On
 # 2026-08-24 a --review run against issue #62 declared the CI workflow and both
 # test runners missing; all of them exist. A verdict is bound to an exact commit
 # in durable metadata, so that fabrication reads as an exact-source finding.
 # This contract is the fix: state the evidence boundary, and require BLOCKED
 # rather than a guess. A reply resends the whole conversation, so the boundary is
 # worded around the conversation rather than one message.
-REVIEW_INSTRUCTION='Evidence boundary - read this before answering. You are
-being consulted through a text-only API. You have NO access to this repository,
-its files, its commit history, the network, or any tool. The ONLY evidence
-available to you is this conversation: the text of this message, any earlier
-turns in it, and any files quoted in them.
+REVIEW_INSTRUCTION='Evidence boundary - read this before answering. You have
+read-only access to a snapshot of the reviewed repository at the commit under
+review, through the list_dir, read_file, and grep tools, and nothing else: no
+commit history, no network, and no way to run commands or tests. Your evidence
+is this conversation (this message, any earlier turns, any files quoted in
+them) plus what those tools return.
 
 Therefore: do not state that any file, test, workflow, directory, commit, or
 setting exists, is missing, or has particular contents unless it is quoted in
-this conversation. Absence from this conversation is NOT evidence of absence
-from the repository.
+this conversation or you opened it with a tool; cite path:line.
+Absence from this conversation is NOT evidence of absence from the repository;
+check with the tools.
 If a conclusion would need evidence you were not given, name the missing
 evidence and return BLOCKED instead of inferring it.
 
@@ -963,6 +1013,7 @@ case "$SUBCMD" in
     REVIEW_SOURCE_PACKET="$(jq -r .source_packet "$PENDING_DIR/intent.json")"; REVIEW_SOURCE_SAVED="$REVIEW_SOURCE_PACKET"
     REVIEW_SOURCE_HASH="$(jq -r .packet_sha256 "$PENDING_DIR/intent.json")"
     REVIEW_SOURCE_WORKSPACE="$(jq -r .source_workspace "$PENDING_DIR/intent.json")"; REVIEW_SOURCE_TAG="$(jq -r .source_tag "$PENDING_DIR/intent.json")"
+    REPO_TOOLS_USED="$(jq -r 'if .repository_access == true then 1 else 0 end' "$PENDING_DIR/intent.json")"
     REVIEW_FILES=(); while IFS= read -r -d '' file; do REVIEW_FILES+=("$file"); done < "$PENDING_DIR/files.nul"
     DEEPSEEK_RECOVERY_EVENT_RUN_ID="$(jq -r .event_run_id "$PENDING_DIR/intent.json")"
     STALE=0
@@ -1075,6 +1126,7 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
           [ -n "${1#--model=}" ] || { echo 'Error: --model requires a non-empty value.' >&2; usage >&2; exit 2; }
           MODEL="${1#--model=}"; shift ;;
         --review) REVIEW=1; shift ;;
+        --repo-tools) REPO_TOOLS=1; shift ;;
         --governed-verdict) take_governed_head "${2:-}" || exit 2; shift 2 ;;
         --governed-verdict=*) take_governed_head "${1#*=}" || exit 2; shift ;;
         --base|--assert-head)
@@ -1151,6 +1203,7 @@ $REVIEW_INSTRUCTION"
           [ -n "${1#--file=}" ] || { echo 'Error: --file requires a non-empty value.' >&2; usage >&2; exit 2; }
           REVIEW_FILES+=("${1#--file=}"); shift ;;
         --review) REVIEW=1; shift ;;
+        --repo-tools) REPO_TOOLS=1; shift ;;
         --governed-verdict) take_governed_head "${2:-}" || exit 2; shift 2 ;;
         --governed-verdict=*) take_governed_head "${1#*=}" || exit 2; shift ;;
         --base|--assert-head)

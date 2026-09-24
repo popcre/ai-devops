@@ -117,6 +117,9 @@ check "live review packet is never touched" "grep -qx 'live-review-evidence' '$R
 check "disposable preflight snapshot is cleaned" "test -z \"\$(find '$TMP/sandboxes' -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)\""
 check "bad base is refused before provider" "! $SCRIPT check grok '$REPO' --base deadbeef"
 check "unknown provider is refused" "! $SCRIPT check nope '$REPO'"
+check "status names the exact resolved wrapper command per provider" "env -u AI_REVIEW_GROK_WRAPPER $SCRIPT status grok | jq -e '.wrapper_command==\"ai-grok-review\" and (.wrapper_path|endswith(\"/ai-grok-review\"))' && env -u AI_REVIEW_QWEN_WRAPPER $SCRIPT status qwen | jq -e '.wrapper_command==\"ai-qwen\"' && env -u AI_REVIEW_CODEX_WRAPPER $SCRIPT status codex | jq -e '.wrapper_command==\"ai-codex-review\"' && $SCRIPT status grok | jq -e '.wrapper_command==\"good\"'"
+check "check prints the exact resolved wrapper command" "$SCRIPT check grok '$REPO' 2>&1 | grep -qF 'grok wrapper command: good ($TMP/bin/good)'"
+check "a crashing provider check still emits an unusable row and later providers still report" "mkdir -p '$TMP/crashq'; printf 'not json' > '$TMP/crashq/grok.json'; out=\$(AI_REVIEW_QUARANTINE_DIR='$TMP/crashq' $SCRIPT usable 2>/dev/null); printf '%s\n' \"\$out\" | jq -se 'map(select(.provider==\"grok\"))[0].usable==false and (map(.provider)|index(\"deepseek\"))!=null'"
 check "all active providers are registered" "for p in claude grok kimi glm muse gemini qwen codex deepseek; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
 check "Gemini status enforces built-in quarantine" "$SCRIPT status gemini | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check gemini '$REPO' 2>&1 | grep -q 'health=ok'"
@@ -256,6 +259,12 @@ check "different profile remains allocatable" "AI_REVIEW_ADMISSION_PROFILE=profi
 check "different model remains allocatable" "AI_REVIEW_ADMISSION_PROFILE=profile-a AI_REVIEW_ADMISSION_MODEL=model-b $SCRIPT usable kimi | jq -e '.usable==true'"
 check "capacity remains unknown during policy backoff" "$SCRIPT capacity kimi --json | jq -e '.state==\"unknown\" and .reset_at==null'"
 check "global quarantine update preserves scoped refusal" "$SCRIPT quarantine kimi authentication-failed --seconds 30 && $SCRIPT admission kimi --profile profile-a --model model-a --json | jq -e '.state==\"backoff\"'"
+
+# A doctor cut off by the check budget is a timeout, even when its partial
+# output mentions a credential (#720).
+printf '#!/usr/bin/env bash\necho "credential    : managed 1Password reference"\nsleep 5\n' > "$TMP/bin/slow-cred"; chmod +x "$TMP/bin/slow-cred"
+SLOW_OUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/slow-cred" $SCRIPT check deepseek "$REPO" 2>&1)"
+printf '%s' "$SLOW_OUT" | grep -q 'deepseek failed: provider-timeout' && ok "timed-out doctor is classified as a timeout, not an auth failure" || bad "timed-out doctor is classified as a timeout, not an auth failure"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -88,7 +88,11 @@ if MSYS=winsymlinks:nativestrict ln -s "$ROOT/bin/setup-opencode-muse.sh" "$TMP/
   SETUP_HOME="$TMP/setup-home"; SETUP_VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
   SETUP_BIN="$SETUP_HOME/.local/lib/ai-devops/opencode/$SETUP_VERSION/node_modules/opencode-ai/bin"
   mkdir -p "$SETUP_BIN"; printf '#!/usr/bin/env bash\nexit 0\n' > "$SETUP_BIN/opencode.exe"; chmod +x "$SETUP_BIN/opencode.exe"
-  check 'installed setup symlink locates repository configuration' "USERPROFILE= AI_MUSE_CONFIG_DIR= HOME='$SETUP_HOME' '$TMP/installed/bin/setup-opencode-muse.sh' >/dev/null && cmp -s '$ROOT/config/opencode-muse/opencode.json' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json' && cmp -s '$ROOT/config/opencode-muse/agent/muse-review.md' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md'"
+  mkdir -p "$TMP/setup-opbin"; printf '#!/usr/bin/env bash
+printf setup-key
+' > "$TMP/setup-opbin/op"; chmod +x "$TMP/setup-opbin/op"
+  check 'installed setup symlink locates repository configuration' "USERPROFILE= AI_MUSE_CONFIG_DIR= HOME='$SETUP_HOME' PATH='$TMP/setup-opbin:$PATH' '$TMP/installed/bin/setup-opencode-muse.sh' >/dev/null && cmp -s '$ROOT/config/opencode-muse/opencode.json' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/opencode.json' && cmp -s '$ROOT/config/opencode-muse/agent/muse-review.md' '$SETUP_HOME/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md'"
+  check 'installer stores the Muse key once in the protected per-user store' "grep -qx setup-key '$SETUP_HOME/.config/ai-devops/secrets/muse-api-key'"
 else
   rm -f -- "$TMP/installed/bin/setup-opencode-muse.sh"
   ok 'installed setup symlink fixture unavailable on this host'
@@ -130,6 +134,11 @@ case "${1:-}" in
       for fd_path in /proc/$$/fd/*; do case "$(readlink "$fd_path" 2>/dev/null || true)" in *.muse-stage.*) printf leaked > "$MUSE_STUB_FD_LEAK_FILE";; esac; done
     fi
     [ "${MUSE_STUB_MODE:-}" = fail ] && exit 7
+    if [ "${MUSE_STUB_MODE:-}" = capacity ]; then
+      n="$(cat "$MUSE_STUB_CAPACITY_FILE" 2>/dev/null || echo 0)"; n=$((n+1)); printf '%s' "$n" > "$MUSE_STUB_CAPACITY_FILE"
+      [ "$n" -gt "${MUSE_STUB_CAPACITY_FAILS:-1}" ] || { printf '{"type":"error","sessionID":"ses_new","error":{"name":"APIError","data":{"message":"model_not_found: The requested model was not found."}}}
+'; exit 1; }
+    fi
     [ "${MUSE_STUB_MODE:-}" = malformed ] && { printf 'not-json\n'; exit 0; }
     [ "${MUSE_STUB_MODE:-}" = partialmalformed ] && { printf '{"type":"step_start","sessionID":"ses_partial","part":{}}\nnot-json\n'; exit 0; }
     [ "${MUSE_STUB_MODE:-}" = slow ] && { [ -z "${MUSE_STUB_PID_FILE:-}" ] || printf '%s\n' "$$" > "$MUSE_STUB_PID_FILE"; trap '[ -z "${MUSE_STUB_TERM_MARKER:-}" ] || printf stopped > "$MUSE_STUB_TERM_MARKER"; exit 143' HUP INT TERM; sleep "${MUSE_STUB_DELAY:-2}"; }
@@ -158,7 +167,7 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$TMP/bin/op" "$BIN/opencode.exe"
-ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
+ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
 muse_recovery_cases(){
   local calls="$TMP/recovery-calls" m raw rep before tmp report_inode
   local real_jq
@@ -255,13 +264,13 @@ check 'Muse provider receives only its own key and the minimal runtime environme
 check 'Muse key is absent from the provider process chain arguments' "cd '$REPO' && eval \"$ENV MUSE_STUB_CMDLINE_FILE='$TMP/provider-cmdline' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && ! grep -q 'fake-key' '$TMP/provider-cmdline'"
 unset DEVOPS_MCP_TOKEN OP_SERVICE_ACCOUNT_TOKEN SUPABASE_ACCESS_TOKEN
 check 'live doctor rejects unexpected provider text' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TEXT=unexpected '$SCRIPT' doctor --live\""
-rm -f "$TMP/muse-post-open"; (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_POST_OPEN_MARKER="$TMP/muse-post-open" AI_MUSE_TEST_POST_OPEN_DELAY=3 "$SCRIPT" new post-open-swap --prompt test >/dev/null 2>&1) & MUSE_POST_OPEN_PID=$!
+rm -f "$TMP/muse-post-open"; (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_POST_OPEN_MARKER="$TMP/muse-post-open" AI_MUSE_TEST_POST_OPEN_DELAY=3 "$SCRIPT" new post-open-swap --prompt test >/dev/null 2>&1) & MUSE_POST_OPEN_PID=$!
 poll_worker_until "$MUSE_POST_OPEN_PID" "$(budget 30 30)" 'post-open staging was reserved' '[ -s "$TMP/muse-post-open" ]' || true
 MUSE_POST_OPEN="$(cat "$TMP/muse-post-open" 2>/dev/null || true)"; if [ -n "$MUSE_POST_OPEN" ]; then mv "$MUSE_POST_OPEN" "$MUSE_POST_OPEN.held"; printf attacker-preserved > "$MUSE_POST_OPEN"; fi
 MUSE_POST_OPEN_RC=0; wait "$MUSE_POST_OPEN_PID" || MUSE_POST_OPEN_RC=$?
 check 'post-open staging substitution is rejected against the held descriptor' "test '$MUSE_POST_OPEN_RC' -ne 0 && grep -qx attacker-preserved '$MUSE_POST_OPEN' && test ! -e '$MUSE_POST_OPEN.held'"
 rm -f -- "$MUSE_POST_OPEN" "$MUSE_POST_OPEN.held" "$TMP/muse-pre-open"; printf 'must-not-truncate\n' > "$TMP/muse-pre-open-target"
-(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_OPEN_MARKER="$TMP/muse-pre-open" AI_MUSE_TEST_PRE_OPEN_DELAY=3 "$SCRIPT" new pre-open-substitution --prompt test >/dev/null 2>&1) & MUSE_PRE_OPEN_PID=$!
+(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_PRE_OPEN_MARKER="$TMP/muse-pre-open" AI_MUSE_TEST_PRE_OPEN_DELAY=3 "$SCRIPT" new pre-open-substitution --prompt test >/dev/null 2>&1) & MUSE_PRE_OPEN_PID=$!
 poll_worker_until "$MUSE_PRE_OPEN_PID" "$(budget 30 30)" 'pre-open staging path was published' '[ -s "$TMP/muse-pre-open" ]' || true
 MUSE_PRE_OPEN="$(cat "$TMP/muse-pre-open" 2>/dev/null || true)"
 if [ -n "$MUSE_PRE_OPEN" ]; then MSYS=winsymlinks:nativestrict ln -s "$TMP/muse-pre-open-target" "$MUSE_PRE_OPEN" 2>/dev/null || cp "$TMP/muse-pre-open-target" "$MUSE_PRE_OPEN"; fi
@@ -269,30 +278,30 @@ MUSE_PRE_OPEN_RC=0; wait "$MUSE_PRE_OPEN_PID" || MUSE_PRE_OPEN_RC=$?
 check 'exclusive pre-open staging reservation rejects an attacker path without truncation' "test '$MUSE_PRE_OPEN_RC' -ne 0 && grep -qx must-not-truncate '$TMP/muse-pre-open-target'"
 rm -f -- "$MUSE_PRE_OPEN"
 rm -f -- "$MUSE_POST_OPEN"
-POST_LOG="$TMP/post-process.log"; (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_POST_PROCESS_MARKER="$TMP/post-process-reached" AI_MUSE_TEST_POST_PROCESS_DELAY=20 "$SCRIPT" new post-process-interrupt --prompt test >"$POST_LOG" 2>&1) & POST_PID=$!
+POST_LOG="$TMP/post-process.log"; (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_POST_PROCESS_MARKER="$TMP/post-process-reached" AI_MUSE_TEST_POST_PROCESS_DELAY=20 "$SCRIPT" new post-process-interrupt --prompt test >"$POST_LOG" 2>&1) & POST_PID=$!
 poll_worker_until "$POST_PID" "$(budget 30 30)" 'the turn reached post-provider processing' '[ -s "$TMP/post-process-reached" ]' || true
 POST_META="$(find "$TMP/state" -name 'codex--post-process-interrupt.json' -type f -print -quit)"
 kill -TERM "$POST_PID" 2>/dev/null || true; wait "$POST_PID" 2>/dev/null || true
 check 'interrupt after provider exit but before classification marks outcome uncertain' "test -f '$POST_META' && jq -e '.status==\"provider_outcome_uncertain\"' '$POST_META'"
 rm -f "$TMP/muse-child-pid" "$TMP/muse-child-stopped"
-(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 MUSE_STUB_PID_FILE="$TMP/muse-child-pid" MUSE_STUB_TERM_MARKER="$TMP/muse-child-stopped" "$SCRIPT" new hup-turn --prompt test >/dev/null 2>&1) & MUSE_HUP_PID=$!
+(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 MUSE_STUB_PID_FILE="$TMP/muse-child-pid" MUSE_STUB_TERM_MARKER="$TMP/muse-child-stopped" "$SCRIPT" new hup-turn --prompt test >/dev/null 2>&1) & MUSE_HUP_PID=$!
 poll_worker_until "$MUSE_HUP_PID" "$(budget 30 30)" 'the provider child announced itself' '[ -s "$TMP/muse-child-pid" ]' || true
 MUSE_CHILD_PID="$(cat "$TMP/muse-child-pid" 2>/dev/null || echo 0)"; kill -HUP "$MUSE_HUP_PID" 2>/dev/null || true; wait "$MUSE_HUP_PID" 2>/dev/null || true
 MUSE_HUP_META="$(find "$TMP/state" -name 'codex--hup-turn.json' -type f -print -quit)"
 check 'HUP stops and waits for the provider child before releasing an uncertain session' "test -f '$TMP/muse-child-stopped' && ! kill -0 '$MUSE_CHILD_PID' 2>/dev/null && jq -e '.status==\"provider_outcome_uncertain\"' '$MUSE_HUP_META'"
 rm -f "$TMP/muse-publish-target"
-(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-publish-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new no-clobber --prompt test >/dev/null 2>&1) & MUSE_TARGET_PID=$!
+(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-publish-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new no-clobber --prompt test >/dev/null 2>&1) & MUSE_TARGET_PID=$!
 poll_worker_until "$MUSE_TARGET_PID" "$(budget 30 30)" 'the publication target was published' '[ -s "$TMP/muse-publish-target" ]' || true
 MUSE_TARGET="$(cat "$TMP/muse-publish-target" 2>/dev/null || true)"; printf owner-target > "$MUSE_TARGET"; MUSE_TARGET_RC=0; wait "$MUSE_TARGET_PID" || MUSE_TARGET_RC=$?
 check 'exact Muse report target creation is refused without overwrite' "test '$MUSE_TARGET_RC' -ne 0 && grep -qx owner-target '$MUSE_TARGET'"
 rm -f "$TMP/muse-late-target"
-(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-late-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=20 "$SCRIPT" new late-interrupt --prompt test >/dev/null 2>&1) & MUSE_LATE_PID=$!
+(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-late-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=20 "$SCRIPT" new late-interrupt --prompt test >/dev/null 2>&1) & MUSE_LATE_PID=$!
 poll_worker_until "$MUSE_LATE_PID" "$(budget 30 30)" 'the late publication target was published' '[ -s "$TMP/muse-late-target" ]' || true
 MUSE_LATE_TARGET="$(cat "$TMP/muse-late-target" 2>/dev/null || true)"; kill -TERM "$MUSE_LATE_PID" 2>/dev/null || true; wait "$MUSE_LATE_PID" 2>/dev/null || true
 MUSE_LATE_META="$(find "$TMP/state" -name 'codex--late-interrupt.json' -type f -print -quit)"
 check 'interruption during final publication keeps session uncertain and publishes no report' "jq -e '.status==\"provider_outcome_uncertain\"' '$MUSE_LATE_META' && test -n '$MUSE_LATE_TARGET' && test ! -e '$MUSE_LATE_TARGET'"
 OUTSIDE_FINAL="$TMP/outside-final"; mkdir -p "$OUTSIDE_FINAL"; printf safe > "$OUTSIDE_FINAL/sentinel"; rm -f "$TMP/muse-final-swap-target"
-(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-final-swap-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new final-dir-swap --prompt test >/dev/null 2>&1) & MUSE_FINAL_SWAP_PID=$!
+(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-final-swap-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new final-dir-swap --prompt test >/dev/null 2>&1) & MUSE_FINAL_SWAP_PID=$!
 poll_worker_until "$MUSE_FINAL_SWAP_PID" "$(budget 30 30)" 'the final-swap target was published' '[ -s "$TMP/muse-final-swap-target" ]' || true
 if mv "$REPO/.ai/reviews" "$REPO/.ai/reviews.final-safe" 2>/dev/null && ln -s "$OUTSIDE_FINAL" "$REPO/.ai/reviews" 2>/dev/null; then
   MUSE_FINAL_SWAP_RC=0; wait "$MUSE_FINAL_SWAP_PID" || MUSE_FINAL_SWAP_RC=$?
@@ -304,7 +313,7 @@ else
   [ ! -e "$REPO/.ai/reviews.final-safe" ] || { rm -f "$REPO/.ai/reviews"; mv "$REPO/.ai/reviews.final-safe" "$REPO/.ai/reviews"; }
 fi
 rm -f "$TMP/muse-staging-path" "$TMP/muse-staging-target"
-(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_TEST_STAGING_MARKER="$TMP/muse-staging-path" AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-staging-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new staging-replacement --prompt test >/dev/null 2>&1) & MUSE_STAGING_PID=$!
+(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_STAGING_MARKER="$TMP/muse-staging-path" AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-staging-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new staging-replacement --prompt test >/dev/null 2>&1) & MUSE_STAGING_PID=$!
 poll_worker_until "$MUSE_STAGING_PID" "$(budget 30 30)" 'staging path and target were published' '[ -s "$TMP/muse-staging-path" ] && [ -s "$TMP/muse-staging-target" ]' || true
 MUSE_STAGING="$(cat "$TMP/muse-staging-path" 2>/dev/null || true)"; MUSE_STAGING_TARGET="$(cat "$TMP/muse-staging-target" 2>/dev/null || true)"
 if [ -n "$MUSE_STAGING" ] && mv "$MUSE_STAGING" "$MUSE_STAGING.held" 2>/dev/null; then printf attacker > "$MUSE_STAGING"; fi
@@ -422,6 +431,9 @@ check 'pending session cannot continue without reconciliation' "cd '$REPO' && ! 
 check 'reconciliation cannot clear missing durable evidence' "cp '$STALE_META' '$TMP/stale-before-missing-proof'; jq 'del(.retained_turn)' '$STALE_META' > '$TMP/stale-without-proof'; mv '$TMP/stale-without-proof' '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' reconcile stale\"; proof_rc=\$?; jq -e '.status==\"completed_pending_local_checks\"' '$STALE_META'; state_rc=\$?; mv '$TMP/stale-before-missing-proof' '$STALE_META'; test \"\$proof_rc:\$state_rc\" = 0:0"
 check 'unsafe caller names are rejected' "cd '$REPO' && ! eval \"$ENV AI_MUSE_CALLER='../unsafe' '$SCRIPT' list\""
 check 'unsafe names are rejected by every metadata command' "cd '$REPO' && for cmd in show transcript delete; do ! eval \"$ENV '$SCRIPT' \$cmd '../unsafe'\" || exit 1; done"
+check 'capacity 404 is relaunched and then succeeds' "cd '$REPO' && rm -f '$TMP/cap1' && eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 MUSE_STUB_MODE=capacity MUSE_STUB_CAPACITY_FILE='$TMP/cap1' MUSE_STUB_CAPACITY_FAILS=2 '$SCRIPT' new capacity-ok --prompt test\" >/dev/null && test \"\$(cat '$TMP/cap1')\" = 3"
+check 'capacity 404 stops after the retry budget' "cd '$REPO' && rm -f '$TMP/cap2' && ! eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 AI_MUSE_CAPACITY_RETRIES=1 MUSE_STUB_MODE=capacity MUSE_STUB_CAPACITY_FILE='$TMP/cap2' MUSE_STUB_CAPACITY_FAILS=5 '$SCRIPT' new capacity-fail --prompt test\" >/dev/null 2>&1 && test \"\$(cat '$TMP/cap2')\" = 2"
+check 'ordinary provider failure is never relaunched' "cd '$REPO' && : > '$TMP/fail-calls' && ! eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 MUSE_STUB_CALLS_FILE='$TMP/fail-calls' MUSE_STUB_MODE=fail '$SCRIPT' new fail-once --prompt test\" >/dev/null 2>&1 && test \"\$(grep -c run '$TMP/fail-calls')\" = 1"
 check 'provider failure is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' new provider-fail --prompt test\""
 check 'malformed provider output is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=malformed '$SCRIPT' new malformed --prompt test\""
 check 'partly malformed output preserves a recoverable session' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=partialmalformed '$SCRIPT' new partial --prompt test\"; meta=\$(find '$TMP/state' -name 'codex--partial.json' -type f); jq -e '.session_id==\"ses_partial\" and .status==\"provider_outcome_uncertain\"' \"\$meta\""
@@ -476,6 +488,34 @@ CRED_TIMEOUT_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_CREDENTIAL_WAIT_SECONDS=2 '
 check 'a held credential lock fails closed with a clear message after the wait budget' "printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q 'credential lock still held by another Muse turn after 2s' && ! printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q fake-key"
 rm -rf "$TMP/state/credential.lock.d"
 
+# Protected key store: the installer's copy is used before 1Password, and
+# 1Password is only the refresh path when Meta rejects the stored key (#720).
+KS="$TMP/keystore/muse-api-key"
+STORE_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' store-key" 2>&1)"
+check 'store-key writes the key without printing it' "grep -qx fake-key '$KS' && ! printf '%s' \"\$STORE_OUT\" | grep -q fake-key"
+command -v cygpath >/dev/null 2>&1 || check 'stored key is owner-only' "[ \"\$(stat -c %a '$KS')\" = 600 ] && [ \"\$(stat -c %a '$TMP/keystore')\" = 700 ]"
+printf 'stored-key\n' > "$KS"; chmod 600 "$KS"
+check 'a stored key is used instead of 1Password' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=stored-key' '$TMP/provider-env'"
+DOCTOR_KS_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' doctor" 2>&1 || true)"
+if printf '%s\n' "$DOCTOR_KS_OUT" | grep -q 'PASS  protected Muse key store is present'; then ok 'doctor reports the protected key store'; else bad 'doctor reports the protected key store'; printf '%s\n' "$DOCTOR_KS_OUT" | sed 's/^/    doctor: /' | head -40; fi
+mkdir -p "$TMP/curl401"; printf '#!/usr/bin/env bash\nprintf 401\n' > "$TMP/curl401/curl"; chmod +x "$TMP/curl401/curl"
+REJ_OUT="$(cd "$REPO" && eval "$ENV PATH='$TMP/curl401:$TMP/bin:$PATH' AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live" 2>&1)"
+check 'a rejected stored key is refreshed from 1Password and rewritten' "grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && grep -qx fake-key '$KS' && printf '%s' \"\$REJ_OUT\" | grep -q 'stored key was rejected'"
+check 'a missing key store falls back to 1Password without writing a store' "rm -f '$KS' && cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && test ! -e '$KS'"
+# The protections that make the store "protected" fail closed to 1Password.
+mkdir -p "$TMP/keystore-real"; printf 'linked-key\n' > "$TMP/keystore-real/muse-api-key"; chmod 600 "$TMP/keystore-real/muse-api-key"
+if MSYS=winsymlinks:nativestrict ln -s "$TMP/keystore-real" "$TMP/keystore-link" 2>/dev/null && [ -L "$TMP/keystore-link" ]; then
+  check 'a key store behind a linked directory is refused' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$TMP/keystore-link/muse-api-key' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env'"
+  check 'store-key refuses to write through a linked directory' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$TMP/keystore-link/muse-api-key' '$SCRIPT' store-key\" >/dev/null 2>&1 && grep -qx linked-key '$TMP/keystore-real/muse-api-key'"
+else
+  skip 'linked key store checks need symlink support'
+fi
+if ! command -v cygpath >/dev/null 2>&1; then
+  printf 'loose-key\n' > "$KS"; chmod 644 "$KS"
+  check 'a key store that is not owner-only is refused' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env'"
+fi
+check 'the key probe sends the key from a header file, never argv' "grep -q 'curl .*-H @\"\$hdr\"' '$SCRIPT' && ! grep -q 'Bearer \$MODEL_API_KEY' '$SCRIPT'"
+check 'only a test run may redirect the key probe' "grep -q '^KEY_PROBE_URL=\"https://api.meta.ai/v1/models\"\$' '$SCRIPT' && grep -q 'AI_MUSE_TEST_DIR:-}\" \] || KEY_PROBE_URL=' '$SCRIPT'"
 muse_recovery_cases
 # op missing from PATH on Windows: the wrapper finds the WinGet package copy.
 if command -v cygpath >/dev/null 2>&1; then

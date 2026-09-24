@@ -34,6 +34,32 @@ Verification on 2026-08-21 against the exact combined tree on current
 the strict context audit, and `git diff --check` all pass. The audit reports zero
 missing safety markers and zero cross-client parity mismatches.
 
+## Harness quieting and always-loaded slim on 2026-09-24
+
+Albert asked to make the harnesses less verbose for a non-technical vibe coder
+and save tokens. The always-loaded Claude and Codex globals had grown to 51,037
+bytes (about 12,760 estimated tokens re-sent every turn) — more than four times
+the 12,449-byte warning budget — mostly technical procedure detail he does not
+need in front of him on every reply.
+
+All four client globals (`CLAUDE-global`, `AGENTS-global-codex`, `-mimo`,
+`-zcode`) were rewritten to one shared slim body: the strict Response Style
+(120-word hard cap, no jargon, two-part reply, `**Still open**` block) plus
+condensed standing and safety rules. Every load-bearing phrase required by
+`tests/test-client-globals-required-phrases.sh`,
+`tests/test-session-conduct-policy.sh`, `tests/test-shared-db-routing-rules.sh`,
+and the audit's safety/parity markers stays present and unwrapped. Long
+procedures moved to [`standing-rules-details.md`](standing-rules-details.md),
+loaded only when the task needs them.
+
+Measured after the rewrite: always-loaded 29,518 bytes (about 7,380 tokens), a
+**42% cut** and about **5,400 fewer tokens on every turn** before a word of
+work. Strict audit: 0 missing safety markers, 0 parity mismatches, 0 overlaps.
+The full `test-context-audit.ps1` suite passes. The 12,449-byte warning budget
+is left as-is rather than raised to silence the remaining warning; the honest
+floor with today's required-phrase set is well above it, and raising a budget
+to hide that would break the ratchet rule.
+
 ## Reply verbosity and jargon correction on 2026-08-26
 
 Albert reported that replies were too long and too technical, wasting tokens and
@@ -138,6 +164,42 @@ They are the workflow and safety rituals - shipping, deploying, closing out,
 handing off, and the Synology procedures - where automatic triggering is what
 enforces the rule. Trading a governed procedure for about a thousand tokens a
 turn is the wrong trade.
+
+## Repository-scoped skills on 2026-09-24 (#704)
+
+Rarely used licensor scraper skills no longer install into every session's
+global skill tree. `config/skill-scope.json` maps each one to
+`licensor-source-data`; `bin/ai-install-skills` installs them only into each
+cloned owning repository's client skill folders and quarantines any global
+copy (never deletes it).
+
+Client repository-skill locations (phase 2.1):
+
+| Client | Location | Proof |
+|---|---|---|
+| Claude Code | `<repo>/.claude/skills/` | live `designflow-frontend/.claude/skills/designflow-e2e-tester`; throwaway-proof listed by `claude -p` in a scratch repo |
+| Codex | `<repo>/.agents/skills/` | OpenAI "Build skills" docs (`$REPO_ROOT/.agents/skills`); throwaway fixture created |
+
+Scoped skills (all non-protected, repository-bound): `disney-source-data-scrape`,
+`licensor-incremental-capture`, `nbcu-creative-assets-scrape`,
+`paramount-creative-library-scrape`, `peanuts-scrape`, `sesame-workshop-scrape`,
+`strawberry-shortcake-scrape`, `wb-starlabs-scrape`. DesignFlow skills stay
+global because sessions run from the non-git `dflow_plm` parent.
+
+Measured on edge-dev (installed trees, not source):
+
+| Metric | Before | After |
+|---|---:|---:|
+| Installed Claude global skills | 48 | 40 |
+| Installed Codex global skills | 50 | 42 |
+| Claude `skills-quarantine` (recoverable) | 0 | 8 |
+| Codex `skills-quarantine` (recoverable) | 5 | 13 |
+| Skills listed in `licensor-source-data` via `claude -p` | 0 | 8 |
+| Source `skills/` tree (context-audit manifest) | 31 Claude / 35 Codex | unchanged (source is not the startup index) |
+
+`tests/test-ai-install-skills.sh` cases 10–13 cover: scoped skill lands only in
+the owning repo, protected skill in the scope file is rejected, a global copy is
+quarantined not deleted, and `--dry-run` writes nothing.
 
 ## Baseline frozen on 2026-08-12
 
@@ -608,6 +670,7 @@ The table is the audit trail for anyone who misses text.
 | Claude global | The Git-identity mechanics beyond the check itself | `bin/ai-git-identity` | Before the first commit in an unfamiliar repo |
 | Both globals | The 9 handoff sections, the self-audit gate, legacy `HANDOFF.md` migration, and the `merge=union` ban | `templates/system/handoff-standard.md` and `skills/shared/handoff-writer/` | Before writing any handoff |
 | Both globals (step 5) | The long response-style contract, replaced by a six-bullet version | Nothing: Albert shortened it by decision on 2026-08-12. The full former text is in git history at commit `24f709e` | Not applicable |
+| All four globals (2026-09-24) | BlockerWatch command syntax, subagent dispatch rules, quiet-tool-output recipes, failed-command guidance, the production-incident narrative, reviewer-rotation detail, and the worktree merge quirk | [`standing-rules-details.md`](standing-rules-details.md) (plus the named skills/docs already pointed at) | When the task needs that procedure |
 | `AGENTS.md` (step 5) | The ten "looks like / actually / why / do not change" narratives | [`design-decisions.md`](design-decisions.md) | Before changing, simplifying, or "fixing" any listed behavior |
 | `AGENTS.md` (step 5) | The two incident narratives with their root causes and lessons | [`critical-incidents.md`](critical-incidents.md) | When a tool reports success but changes nothing, on any Codex Windows sandbox failure, or on any 1Password rate limit |
 | `AGENTS.md` (step 5) | The GLM, Grok, and Kimi constraint paragraphs in the documentation map | `docs/glm-opencode.md` section 5, and the STEP 0 VERIFICATION headers in `bin/ai-grok-review`, `bin/ai-grok-implement`, `bin/ai-kimi` | Before touching that wrapper, its permissions, or its completion check |

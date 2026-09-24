@@ -14,6 +14,14 @@ on:
     workflows: [verify]
     types: [in_progress]
 
+# One watcher per pull-request branch. Every verify start fired a fresh
+# eight-minute watcher, so a busy branch stacked several of them in the queue
+# they were meant to watch. A newer verify run makes the older watcher
+# obsolete, so it is cancelled rather than left queued behind.
+concurrency:
+  group: windows-queue-watchdog-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   pull-requests: write
@@ -21,7 +29,7 @@ permissions:
 jobs:
   watch-section-pickup:
     if: github.event.workflow_run.event == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # Bounded well under the 35-minute section ceiling: this only needs to
     # catch a slow *start*, not watch the run to completion.
     timeout-minutes: 8

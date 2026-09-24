@@ -407,7 +407,7 @@ check 'review pins the stable Qwen 3.8 Max model' "grep -q -- '--model qwen3.8-m
 check 'review uses safe mode' "grep -q -- '--safe-mode' '$TMP/argv.txt'"
 check 'review uses plan mode' "grep -q -- '--approval-mode plan' '$TMP/argv.txt'"
 check 'review excludes mutation tools' "grep -q -- '--exclude-tools shell,write,edit' '$TMP/argv.txt'"
-check 'review has measured governed-review budgets' "grep -q -- '--max-session-turns 120' '$TMP/argv.txt' && grep -q -- '--max-tool-calls 120' '$TMP/argv.txt' && grep -q -- '--max-wall-time 30m' '$TMP/argv.txt'"
+check 'review has measured governed-review budgets' "grep -q -- '--max-session-turns 120' '$TMP/argv.txt' && grep -q -- '--max-tool-calls 120' '$TMP/argv.txt' && grep -q -- '--max-wall-time 60m' '$TMP/argv.txt'"
 check 'review never uses yolo or continue' "! grep -qE -- '--approval-mode yolo|--continue' '$TMP/argv.txt'"
 check 'review record stores exact session' "run show review-1 | jq -e '.qwen_session_id==\"qwen-session-1\" and .caller==\"codex\"'"
 check 'review record binds exact evidence identity' "run show review-1 | jq -e '(.base|length)==40 and (.head|length)==40 and (.packet_sha256|length)==64 and (.working_tree_sha256|length)==64 and .evidence_generation==1'"
@@ -472,7 +472,11 @@ CALLS_BEFORE_BLOCKED="$(wc -l < "$TMP/argv.txt")"; run ask wrong-model-followup 
 [ "$RC" -ne 0 ] && [ "$CALLS_BEFORE_BLOCKED" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'recovery-required Qwen session cannot contact provider again' || bad 'recovery-required Qwen session cannot contact provider again'
 echo review > "$TMP/mode"
 
-for budget_mode in tool-budget wall-budget turn-budget; do
+echo wall-budget > "$TMP/mode"
+WALL_OUT="$(run new wall-budget --prompt review 2>&1)"; WALL_RC=$?
+WALL_META="$(find "$TMP/state/sessions" -name "codex--wall-budget.json" -print -quit)"
+[ "$WALL_RC" -ne 0 ] && printf '%s' "$WALL_OUT" | grep -q 'terminal reason: timed-out'   && jq -e '.status=="recovery-required" and .failure_reason=="timed-out"' "$WALL_META" >/dev/null   && ok 'wall-clock budget stop is classified as timed-out, not a turn limit'   || bad 'wall-clock budget stop is classified as timed-out, not a turn limit'
+for budget_mode in tool-budget turn-budget; do
   echo "$budget_mode" > "$TMP/mode"
   BUDGET_OUT="$(run new "$budget_mode" --prompt review 2>&1)"; BUDGET_RC=$?
   BUDGET_META="$(find "$TMP/state/sessions" -name "codex--$budget_mode.json" -print -quit)"
@@ -481,7 +485,7 @@ for budget_mode in tool-budget wall-budget turn-budget; do
     && ok "$budget_mode is immediately classified as turn_limit_cancelled" \
     || bad "$budget_mode is immediately classified as turn_limit_cancelled"
 done
-check 'budget-limited recovery reports explain the typed terminal reason' "sed -n '/^safe_report_detail()/,/^}/p' '$SCRIPT' | grep -Fq 'Qwen stopped at a bounded session-turn, tool-call, or wall-clock limit.'"
+check 'budget-limited recovery reports explain the typed terminal reason' "sed -n '/^safe_report_detail()/,/^}/p' '$SCRIPT' | grep -Fq 'Qwen stopped at a bounded session-turn or tool-call limit.'"
 terminal_filter_cases
 
 run new budget-followup --prompt review >/dev/null 2>&1
@@ -625,7 +629,7 @@ DOCTOR_ONE="$(run doctor)"
 check 'doctor checks installed interface without a model call' "printf '%s\\n' \"\$DOCTOR_ONE\" | grep -Eq '^qwen runtime sha256: [0-9a-f]{64}$'"
 check 'doctor secures a fresh Qwen home before checking its session store' "sed -n '/^cmd_doctor()/,/^}/p' '$SCRIPT' | grep -q 'secure_qwen_home'"
 check 'doctor fingerprints the repository credential preloader' "printf '%s\\n' \"\$DOCTOR_ONE\" | grep -Eq '^qwen preloader sha256: [0-9a-f]{64}$'"
-check 'doctor reports distinct read-only review and write-run budgets' "printf '%s\\n' \"\$DOCTOR_ONE\" | grep -q '^review budgets: turns=120 tools=120 wall=30m$' && printf '%s\\n' \"\$DOCTOR_ONE\" | grep -q '^write budgets : turns=30 tools=80 wall=15m$'"
+check 'doctor reports distinct read-only review and write-run budgets' "printf '%s\\n' \"\$DOCTOR_ONE\" | grep -q '^review budgets: turns=120 tools=120 wall=60m$' && printf '%s\\n' \"\$DOCTOR_ONE\" | grep -q '^write budgets : turns=30 tools=80 wall=15m$'"
 DOCTOR_IDENTITY="$(AI_QWEN_BIN="$TMP/missing-qwen" run doctor --identity)"
 check 'identity doctor returns one strict runtime and preloader fingerprint record without starting Qwen' "test \"\$(printf '%s\\n' \"\$DOCTOR_IDENTITY\" | wc -l)\" -eq 1 && printf '%s\\n' \"\$DOCTOR_IDENTITY\" | grep -Eq '^IDENTITY runtime_sha256=[0-9a-f]{64} preloader_sha256=[0-9a-f]{64}$'"
 check 'runtime fingerprint declares its GNU tar prerequisite' "sed -n '/^qwen_runtime_sha256()/,/^}/p' '$SCRIPT' | grep -q 'GNU tar is required'"

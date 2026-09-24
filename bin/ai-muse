@@ -28,9 +28,10 @@ PROFILE_HOME="${USERPROFILE:-$HOME}"
 case "$PROFILE_HOME" in [A-Za-z]:*) PROFILE_HOME="/$(printf '%s' "$PROFILE_HOME" | sed 's#\\#/#g; s#:#/#')";; esac
 CFG="${AI_MUSE_CONFIG_DIR:-$PROFILE_HOME/.config/ai-devops-muse}"
 OC_CFG="$CFG/opencode-xdg/opencode"
-# Runtime engine: the pinned OpenCode harness (default) or Meta's Muse Code CLI.
-# Sessions never cross engines: each engine records its own model identifier.
-ENGINE="${AI_MUSE_ENGINE:-opencode}"
+# Runtime engine: Meta's Muse Code CLI (default) or the pinned OpenCode harness.
+# Rollback: AI_MUSE_ENGINE=opencode. Sessions never cross engines: each engine
+# records its own model identifier.
+ENGINE="${AI_MUSE_ENGINE:-muse-code}"
 case "$ENGINE" in
   opencode)
     VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
@@ -44,6 +45,10 @@ case "$ENGINE" in
 esac
 CALLER="${AI_MUSE_CALLER:-}"
 STATE="${AI_MUSE_STATE_DIR:-$PROFILE_HOME/.local/state/ai-devops/muse}"
+KEY_STORE="${AI_MUSE_KEY_STORE:-$PROFILE_HOME/.config/ai-devops/secrets/muse-api-key}"
+# The probe carries the live key, so only a test run may redirect it.
+KEY_PROBE_URL="https://api.meta.ai/v1/models"
+[ -z "${AI_MUSE_TEST_DIR:-}" ] || KEY_PROBE_URL="${AI_MUSE_KEY_PROBE_URL:-$KEY_PROBE_URL}"
 TIMEOUT="${AI_MUSE_TIMEOUT:-1800}"
 SANDBOX="$ROOT/bin/ai-review-sandbox"
 PACKET="$ROOT/bin/ai-review-packet"
@@ -119,6 +124,7 @@ release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK
 cleanup(){
   local accepted_path="" accepted_id="" active_status="" active_tmp="" evidence_durable=1
   rm -f -- "$RUN_TMP"/muse-key.*
+  release_provider_slot
   release_credential_lock
   reviewer_event_cleanup_allowed muse || evidence_durable=0
   if [ -n "$ACTIVE_META" ] && [ -f "$ACTIVE_META" ]; then
@@ -308,7 +314,7 @@ prepare(){
   # Muse reads the sealed evidence but keeps its own verdict contract.
   printf '\n\nRead %s/MANIFEST.md first for the exact change and test evidence; ignore its answer-format section and use the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning.\n' "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
 }
-load_key(){
+read_key_from_op(){
   # Serialize every 1Password read behind one machine-wide lock. Concurrent
   # turns wait their turn (bounded, with backoff) instead of refusing.
   need op; local candidate="$STATE/credential.lock.d" owner token budget deadline delay=1 waited=0; token="$$-$RANDOM-$(date +%s)"; mkdir -p "$STATE"
@@ -330,6 +336,46 @@ load_key(){
   done
   MODEL_API_KEY="$(op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"; release_credential_lock; [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
 }
+# The installer stores the Muse key once in a per-user protected file so a
+# turn does not need 1Password. 1Password is only the fallback: when the
+# store is missing (read, not written - storing is the installer's job) or
+# when Meta rejects the stored key (read and rewrite the store).
+key_store_ok(){
+  [ -f "$KEY_STORE" ] && [ -s "$KEY_STORE" ] && ! linked_below_home "$KEY_STORE" || return 1
+  # Windows permissions can drift, so the ACL is re-enforced on every use.
+  if [ -n "${SYSTEMROOT:-}" ]; then protect_windows_path "$KEY_STORE" file; return; fi
+  [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
+}
+write_key_store(){
+  local dir tmp; dir="$(dirname "$KEY_STORE")"
+  ! linked_below_home "$KEY_STORE" || die "Muse key store path is a link; refusing to write through it: $KEY_STORE"
+  mkdir -p "$dir" && chmod 700 "$dir" 2>/dev/null && protect_windows_path "$dir" directory || die 'could not protect the Muse key store directory.'
+  tmp="$(mktemp "$dir/.muse-api-key.XXXXXX")" || die 'could not reserve the Muse key store.'
+  chmod 600 "$tmp" 2>/dev/null && protect_windows_path "$tmp" file || { rm -f "$tmp"; die 'could not protect the Muse key store.'; }
+  printf '%s\n' "$1" > "$tmp" || { rm -f "$tmp"; die 'could not write the Muse key store.'; }
+  mv -f "$tmp" "$KEY_STORE" || { rm -f "$tmp"; die 'could not install the Muse key store.'; }
+}
+# Succeeds (0) only when Meta answered 401/403, so the stored key is rejected;
+# fails (1) when accepted or unknown (network trouble never forces a 1Password read).
+# The header file uses the muse-key.* name so cleanup() removes it on any signal.
+probe_key_rejected(){
+  local hdr code; command -v curl >/dev/null 2>&1 || return 1
+  hdr="$(mktemp "$RUN_TMP/muse-key.probe.XXXXXX")" || return 1; chmod 600 "$hdr" 2>/dev/null
+  protect_windows_path "$hdr" file || { rm -f "$hdr"; die 'could not enforce the private Muse key-probe ACL.'; }
+  printf 'Authorization: Bearer %s\n' "$1" > "$hdr"
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "${AI_MUSE_KEY_PROBE_TIMEOUT:-15}" -H @"$hdr" "$KEY_PROBE_URL" 2>/dev/null || true)"; rm -f "$hdr"
+  case "$code" in 401|403) return 0;; *) return 1;; esac
+}
+load_key(){
+  if key_store_ok; then
+    IFS= read -r MODEL_API_KEY < "$KEY_STORE" || MODEL_API_KEY=""
+    if [ -n "$MODEL_API_KEY" ] && ! probe_key_rejected "$MODEL_API_KEY"; then return 0; fi
+    printf 'Muse: stored key was rejected; refreshing it from 1Password.\n' >&2
+    read_key_from_op; write_key_store "$MODEL_API_KEY"; return 0
+  fi
+  read_key_from_op
+}
+cmd_store_key(){ read_key_from_op; write_key_store "$MODEL_API_KEY"; unset MODEL_API_KEY; printf 'Muse key stored in the protected per-user store: %s\n' "$KEY_STORE"; }
 tree_state(){
   local root="$1" rel
   { git -C "$root" rev-parse HEAD; git -C "$root" diff --binary HEAD; while IFS= read -r -d '' rel; do printf '%s\0' "$rel"; sha256sum "$root/$rel"; done < <(git -C "$root" ls-files --others --exclude-standard -z); } | sha256sum | cut -d' ' -f1
@@ -481,9 +527,32 @@ retain_turn(){ # retain exact bytes and optional observations in one metadata wr
   tmp="$(tmp_file)"
   jq --arg effort "${EFFECTIVE_REASONING_EFFORT:-}" --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage} | if $effort!="" then .retained_turn.reasoning_effort=$effort else . end' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
+capacity_rejection(){ # an answer-free rejection naming model_not_found; any produced text or step means a real turn
+  local out="$1"
+  grep -Fq model_not_found "$out" "$out.stderr" 2>/dev/null || return 1
+  ! jq -e 'select(.type=="text" or .type=="step_finish" or ((.payload_type//"")=="run.terminal.completed"))' "$out" >/dev/null 2>&1
+}
+acquire_provider_slot(){ # optional machine-wide cap on simultaneous Muse turns; 0 (default) means no cap
+  local max="${AI_MUSE_MAX_CONCURRENT:-0}" dir="$STATE/provider-slots" i owner waited=0
+  [ "$max" != 0 ] || return 0
+  case "$max" in ''|*[!0-9]*) die 'AI_MUSE_MAX_CONCURRENT must be a whole number (0 means no cap).';; esac
+  mkdir -p "$dir"
+  while :; do
+    for i in $(seq 1 "$max"); do
+      if mkdir "$dir/$i.d" 2>/dev/null; then printf '%s\n' "$$" > "$dir/$i.d/pid"; PROVIDER_SLOT="$dir/$i.d"; return 0; fi
+      owner="$(cat "$dir/$i.d/pid" 2>/dev/null || true)"
+      case "$owner" in ''|*[!0-9]*) [ -z "$(find "$dir/$i.d" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ] || rm -rf "$dir/$i.d";; *) kill -0 "$owner" 2>/dev/null || rm -rf "$dir/$i.d";; esac
+    done
+    [ $((waited % 30)) -ne 0 ] || printf 'Muse waiting for a free provider slot (%s in use)\n' "$max" >&2
+    sleep 2; waited=$((waited+2))
+  done
+}
+release_provider_slot(){ [ -z "${PROVIDER_SLOT:-}" ] || { [ "$(cat "$PROVIDER_SLOT/pid" 2>/dev/null)" != "$$" ] || rm -rf "$PROVIDER_SLOT"; PROVIDER_SLOT=""; }; }
 run_turn(){
   local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text prompt_arg=() timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
-  local bash_bin=/usr/bin/bash key_file
+  local bash_bin=/usr/bin/bash key_file attempt=0 delay retries="${AI_MUSE_CAPACITY_RETRIES:-6}" backoff="${AI_MUSE_CAPACITY_BACKOFF:-20}"
+  case "$retries" in ''|*[!0-9]*) die 'AI_MUSE_CAPACITY_RETRIES must be a whole number.';; esac
+  case "$backoff" in ''|*[!0-9]*) die 'AI_MUSE_CAPACITY_BACKOFF must be a whole number.';; esac
   local -a clean_env
   validate_heartbeat
   EFFECTIVE_REASONING_EFFORT=""
@@ -506,14 +575,9 @@ run_turn(){
   fi
   EXPECTED_SID="$sid"
   [ -x "$bash_bin" ] && [ -x "$env_bin" ] || die 'trusted absolute Bash/env executables are required for the Muse credential boundary.'
-  key_file="$(mktemp "$RUN_TMP/muse-key.XXXXXX")" || die 'could not reserve the private Muse credential handoff.'
-  printf '%s\n' "$provider_key" > "$key_file" || die 'could not write the private Muse credential handoff.'
-  chmod 600 "$key_file" 2>/dev/null || die 'could not protect the private Muse credential handoff.'
-  protect_windows_path "$key_file" file || die 'could not enforce the private Muse credential-handoff ACL.'
-  provider_key=""
   test_interrupt_at pre_launch
   set +e
-  clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "AI_MUSE_SECRET_FILE=$key_file" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
+  clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
   [ "$ENGINE" != muse-code ] || clean_env+=("AI_MUSE_KEY_ENV=META_API_KEY")
   for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
     [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
@@ -527,15 +591,31 @@ run_turn(){
     local launch_tmp; launch_tmp="$(tmp_file)"
     jq --arg now "$(date -u +%FT%TZ)" '.status="provider_launching"|.updated_at=$now' "$meta" > "$launch_tmp" && mv -f "$launch_tmp" "$meta"
   fi
-  ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
-  MUSE_FAILURE_PHASE=provider-turn
-  ACTIVE_META="$meta"; test_interrupt_at post_launch
-  [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
-  while kill -0 "$TURN_PID" 2>/dev/null; do
-    sleep 1; waited=$((waited+1))
-    [ -z "$meta" ] || [ $((waited % heartbeat)) -ne 0 ] || { heartbeat_meta "$meta" "$TURN_PID"; printf 'Muse turn active: %ss\n' "$waited" >&2; }
+  acquire_provider_slot
+  while :; do
+    attempt=$((attempt+1))
+    key_file="$(mktemp "$RUN_TMP/muse-key.XXXXXX")" || die 'could not reserve the private Muse credential handoff.'
+    printf '%s\n' "$provider_key" > "$key_file" || die 'could not write the private Muse credential handoff.'
+    chmod 600 "$key_file" 2>/dev/null || die 'could not protect the private Muse credential handoff.'
+    protect_windows_path "$key_file" file || die 'could not enforce the private Muse credential-handoff ACL.'
+    ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
+    MUSE_FAILURE_PHASE=provider-turn
+    ACTIVE_META="$meta"; test_interrupt_at post_launch
+    [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
+    while kill -0 "$TURN_PID" 2>/dev/null; do
+      sleep 1; waited=$((waited+1))
+      [ -z "$meta" ] || [ $((waited % heartbeat)) -ne 0 ] || { heartbeat_meta "$meta" "$TURN_PID"; printf 'Muse turn active: %ss\n' "$waited" >&2; }
+    done
+    wait "$TURN_PID"; rc=$?; RUN_RC="$rc"; TURN_PID=""; rm -f -- "$key_file"
+    # Meta reports its team-wide Contributor concurrency cap as an unbilled
+    # 404 model_not_found (#683); only that answer-free rejection is relaunched.
+    [ "$rc" -ne 0 ] && [ "$attempt" -le "$retries" ] && capacity_rejection "$out" || break
+    mv -f "$out" "$out.capacity-$attempt"; mv -f "$out.stderr" "$out.stderr.capacity-$attempt" 2>/dev/null || true
+    delay=$(( backoff * attempt + RANDOM % (backoff + 1) ))
+    printf 'Muse provider capacity rejection (model_not_found, nothing answered); retry %s/%s in %ss\n' "$attempt" "$retries" "$delay" >&2
+    sleep "$delay"
   done
-  wait "$TURN_PID"; rc=$?; RUN_RC="$rc"; TURN_PID=""
+  provider_key=""; release_provider_slot
   if [ -n "$meta" ] && ! retain_turn "$meta" "$out" "$prompt" "$rc" "$sid"; then
     printf 'Muse completion evidence could not be published; private runtime evidence retained at %s\n' "$RUN_TMP" >&2
     RETAIN_FAILED=1; TURN_ERROR='Muse completion preservation failed; do not replay the provider turn.'; return 1
@@ -834,7 +914,13 @@ cmd_doctor(){
     check 'trusted provider configuration is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/opencode.json" "$OC_CFG/opencode.json"
     check 'trusted review profile is installed byte-for-byte' cmp -s "$ROOT/config/opencode-muse/agent/muse-review.md" "$OC_CFG/agent/muse-review.md"
   fi
-  check '1Password command is available' command -v op
+  if key_store_ok; then
+    printf 'PASS  protected Muse key store is present\n'
+    command -v op >/dev/null 2>&1 && printf 'PASS  1Password command is available (refresh fallback)\n' || printf 'WARN  1Password command is unavailable; the stored key is used and cannot be refreshed if Meta rejects it\n'
+  else
+    printf 'WARN  protected Muse key store is missing; every turn reads 1Password. Run: AI_MUSE_CALLER=%s ai-muse store-key\n' "$CALLER"
+    check '1Password command is available' command -v op
+  fi
   [ "$failures" -eq 0 ] || exit 1
   if [ "$live" -eq 1 ]; then
     require_runtime; need jq
@@ -851,7 +937,7 @@ cmd_doctor(){
     printf 'PASS  live provider response\n'
   fi
 }
-usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor' 'ai-muse review [repository] [request]  (compatibility command)'; }
+usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor | store-key' 'ai-muse review [repository] [request]  (compatibility command)'; }
 
 OPT_BASE=""; OPT_ASSERT_HEAD=""
 if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then
@@ -873,7 +959,7 @@ fi
 case "${1:-}" in
   new) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
   ask) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;
-  list) cmd_list;; show) shift; cmd_show "${1:-}";; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; cmd_reconcile "${1:-}";; delete) shift; cmd_delete "${1:-}";; doctor) shift; cmd_doctor "$@";;
+  list) cmd_list;; show) shift; cmd_show "${1:-}";; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; cmd_reconcile "${1:-}";; delete) shift; cmd_delete "${1:-}";; store-key) cmd_store_key;; doctor) shift; cmd_doctor "$@";;
   review) shift; repo="${1:-$PWD}"; request="${2:-}"; if [ -z "$request" ] && [ ! -t 0 ]; then request="$(cat)"; fi; request="${request:-Review the current changes for correctness, security, and missing tests.}"; printf '%s' "$request" | grep -Eqi 'VERDICT:' || request="$request
 
 Finish with exactly one final line: VERDICT: FINDINGS or VERDICT: NO FINDINGS."; (cd "$(repo_root "$repo")" && REQUIRE_VERDICT=1 cmd_new "review-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM" --prompt "$request");;

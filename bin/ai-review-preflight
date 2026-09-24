@@ -228,11 +228,16 @@ health_status() { # PROVIDER
 reconciled_status() { # PROVIDER
   local health healthy=0 state reason usable admission
   health="$(health_status "$1")" || healthy=1
-  admission="$(default_admission "$1")" || return 1
+  # A provider whose admission record cannot be read is unusable, but it must
+  # still emit a row: a silent provider made callers refuse EVERY reviewer draw.
+  if ! admission="$(default_admission "$1")" || ! printf '%s' "$admission" | jq -e 'type=="object"' >/dev/null 2>&1; then
+    admission='{"state":"unknown","reason":"admission-unreadable"}'; healthy=1
+  fi
   state="$(registry_state "$1")"; reason="$(registry_reason "$1")"
+  local wrapper_path; wrapper_path="$(provider_wrapper "$1")"
   if [ "$healthy" = 0 ] && [ "$state" = registered ] && [ "$(printf '%s' "$admission" | jq -r .state)" != backoff ]; then usable=true; else usable=false; fi
   printf '%s
-' "$health" | jq -c --arg state "$state" --arg reason "$reason" --argjson usable "$usable" --argjson admission "$admission" '. + {registry_state:$state, registry_reason:$reason, usable:$usable, admission:$admission}'
+' "$health" | jq -c --arg state "$state" --arg reason "$reason" --argjson usable "$usable" --argjson admission "$admission" --arg wrapper_path "$wrapper_path" --arg wrapper_command "${wrapper_path##*/}" '. + {wrapper_command:$wrapper_command, wrapper_path:$wrapper_path, registry_state:$state, registry_reason:$reason, usable:$usable, admission:$admission}'
   [ "$usable" = true ]
 }
 
@@ -355,12 +360,30 @@ qualify_gemini() {
   note "ai-review-preflight: Gemini live qualification recorded for wrapper $sha, agy $agy_version, and model $model."
 }
 
+# emit_status PROVIDER runs one provider's reconciled check in isolation. A
+# provider whose check crashes still yields an explicit unusable row, so one
+# provider's fault never drops the providers after it or blocks other draws.
+emit_status() {
+  local row rc=0
+  row="$(reconciled_status "$1")" || rc=$?
+  if [ -z "$row" ]; then
+    jq -nc --arg p "$1" '{provider:$p,status:"check-failed",failure_class:"preflight-check-crashed",usable:false,admission:{state:"unknown",reason:"check-failed"}}'
+    return 1
+  fi
+  printf '%s
+' "$row"; return "$rc"
+}
+
 check_provider() { # PROVIDER REPO LIVE BASE
   local provider="$1" repo="$2" live="$3" base="$4" wrapper sandbox packet tag out rc class
   valid_provider "$provider" || die "unknown provider '$provider'."
   [ -d "$repo" ] || die "review directory does not exist: $repo"
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   need jq; need git; need timeout
+  # Always name the exact resolved wrapper so nobody reports a guessed name.
+  wrapper="$(provider_wrapper "$provider")"
+  printf 'ai-review-preflight: %s wrapper command: %s (%s)
+' "$provider" "${wrapper##*/}" "$wrapper" >&2
   if active_quarantine "$provider"; then
     printf '%s\n' "$ACTIVE_QUARANTINE" | jq -r '"ai-review-preflight: " + .provider + " is quarantined until epoch " + (.expires_epoch|tostring) + " (" + .failure_class + ")."' >&2
     return 3
@@ -397,7 +420,11 @@ check_provider() { # PROVIDER REPO LIVE BASE
   fi
   set -e
   if [ "$rc" -ne 0 ]; then
-    class="$(classify_failure "$out")"; quarantine "$provider" "$class"
+    # A doctor killed by the check budget is a timeout, whatever its partial
+    # output says: Qwen's doctor prints "credential" before any auth step, and
+    # reading that as authentication-failed quarantined a healthy Qwen (#720).
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then class=provider-timeout; else class="$(classify_failure "$out")"; fi
+    quarantine "$provider" "$class"
     printf 'ai-review-preflight: %s failed: %s\n' "$provider" "$class" >&2
     printf '%s\n' "$out" | tail -12 >&2
     return 1
@@ -477,13 +504,13 @@ case "$cmd" in
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
     else providers=(claude grok kimi glm muse gemini qwen codex deepseek); fi
-    for provider in "${providers[@]}"; do reconciled_status "$provider" || true; done ;;
+    for provider in "${providers[@]}"; do emit_status "$provider" || true; done ;;
   usable)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
     else providers=(claude grok kimi glm muse gemini qwen codex deepseek); fi
     usable_rc=0
-    for provider in "${providers[@]}"; do reconciled_status "$provider" || usable_rc=3; done
+    for provider in "${providers[@]}"; do emit_status "$provider" || usable_rc=3; done
     exit "$usable_rc" ;;
   explain) explain_failure "${1:-}" ;;
   --version) printf 'ai-review-preflight %s\n' "$VERSION" ;;

@@ -164,10 +164,20 @@ pwsh -NoProfile -File tests/test-all.ps1
 On Ubuntu, run `bash tests/test-all.sh`. The GitHub `verify` workflow runs the
 complete deterministic Bash set on Linux. For ordinary pull requests, Windows
 runs every PowerShell suite plus the Bash suites classified as Windows-sensitive;
-the separate `windows-reviewer-safety` lane owns Codex and Grok. A hosted
-watchdog runs those omitted suites on `windows-2025` if the qualified lane does
-not report success. Scheduled and manual Windows jobs split the complete Bash
-set across independent hosted sections; PowerShell runs once in its declared
+the separate `windows-reviewer-safety` lane owns Codex and Grok. A fallback
+watchdog reruns those omitted suites if the preferred lane does not report
+success. Since 2026-09-23 every CI job (Linux and Windows) runs on Blacksmith
+(`blacksmith-4vcpu-ubuntu-2404`, `blacksmith-4vcpu-windows-2025`), not the
+GitHub-hosted queue or the self-hosted pool; only the manual runner
+qualification workflow still targets self-hosted machines. Required check names
+are unchanged, so a green Blacksmith run is the required `verification-closure`
+merge check (Albert, 2026-09-23). One addition: on pull requests the
+`runner-router` job gives ordinary Windows sections to idle qualified self-hosted
+hosts (EDGE-RUNN-ENVY and any host labelled `ai-devops-windows-qualified`) as
+extra capacity. Any section it cannot place there stays on Blacksmith. It never
+routes to GitHub-hosted runners (`config/ci-runner-routing.json`,
+`tools/ci/runner-router.cjs`). Scheduled and manual
+Windows jobs split the complete Bash set across independent sections; PowerShell runs once in its declared
 section. Qualification and local no-argument runs keep the complete Bash plus
 PowerShell matrix. The exact assignment and
 fallback are fail-closed in `config/ci-suite-manifest.json` and the workflow
