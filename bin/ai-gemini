@@ -55,9 +55,10 @@ PREPARE_TIMEOUT="${AI_GEMINI_PREPARE_TIMEOUT:-30m}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/reviewer_event_guard.sh"
 # gemini_credit_stop OUT: on a failed request, classify stderr and the error
-# fields of a non-SUCCESS result (never a successful answer) for billing
+# field of a non-SUCCESS result (never response text, which can quote billing
+# phrases) for billing
 # exhaustion; on a match print the diagnosis and exit 92 so the caller stops now.
-gemini_credit_stop(){ local o="$1" ev="$1.credit"; [ ! -f "$o" ] || jq -r 'select(type=="object" and .status!="SUCCESS")|[(.response//""|tostring),(.error//""|tostring)]|join("\n")' "$o" > "$ev" 2>/dev/null || true; reviewer_credit_scan gemini "$o.stderr" "$ev" || true; rm -f "$ev"; reviewer_credit_exit; }
+gemini_credit_stop(){ local o="$1" ev="$1.credit"; [ ! -f "$o" ] || jq -r 'select(type=="object" and .status!="SUCCESS")|(.error//""|tostring)' "$o" > "$ev" 2>/dev/null || true; reviewer_credit_scan gemini "$o.stderr" "$ev" || true; rm -f "$ev"; reviewer_credit_exit; }
 SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$HERE/ai-review-sandbox}"
 PACKET="${AI_REVIEW_PACKET_BIN:-$HERE/ai-review-packet}"
 ACTIVE_META=''; ACTIVE_LOCKS=''; ACTIVE_TERMINAL=0; ACTIVE_CHILD=''

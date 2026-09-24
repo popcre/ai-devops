@@ -675,13 +675,13 @@ parse_turn(){ # shared terminal parser; never launches the provider
   USAGE_JSON="$(turn_usage "$out" "$TURN_SID" "$usage_event")"
 }
 # muse_credit_stop OUT: on a failed turn, classify only provider error channels
-# (stderr, error events, short terminal-failure details, other failed-run
-# payloads without their text; long text is a partial review) for billing
+# (stderr, error events, failed-run payloads without their text, which is
+# response content that can quote billing phrases) for billing
 # exhaustion; on a match print the diagnosis and exit 92 so the caller stops now.
 muse_credit_stop(){
   local out="$1" ev
   ev="$(tmp_file)" || return 0
-  [ ! -f "$out" ] || jq -c 'select(type=="object")|if (.type//"")=="error" then .error elif ((.payload_type//"")|test("terminal[.]failed")) then (.payload|objects|if ((.text//"")|length) > 400 then del(.text) else . end) elif ((.payload_type//"")|test("error|fail";"i")) then (.payload|objects|del(.text)) else empty end' "$out" > "$ev" 2>/dev/null || true
+  [ ! -f "$out" ] || jq -c 'select(type=="object")|if (.type//"")=="error" then .error elif ((.payload_type//"")|test("terminal[.]failed")) then (.payload|objects|del(.text)) elif ((.payload_type//"")|test("error|fail";"i")) then (.payload|objects|del(.text)) else empty end' "$out" > "$ev" 2>/dev/null || true
   printf 'ai-muse: error: %s\n' "$TURN_ERROR" > "$ev.note"
   reviewer_credit_scan muse "$out.stderr" "$ev" || true
   [ -z "${REVIEWER_CREDIT_HIT:-}" ] || cat "$ev.note" >&2

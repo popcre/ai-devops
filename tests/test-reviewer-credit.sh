@@ -60,8 +60,10 @@ MUSE_FILTER="$(grep -o "jq -c '[^']*'" "$ROOT/bin/ai-muse" | grep 'terminal\[' |
 LONG="$(head -c 600 /dev/zero | tr '\0' 'r') out of credits"
 { jq -cn '{payload_type:"run.terminal.failed",payload:{terminal:"failed",text:"Error: insufficient_quota"}}'
   jq -cn --arg t "$LONG" '{payload_type:"run.terminal.failed",payload:{terminal:"failed",text:$t}}'; } | jq -c "$MUSE_FILTER" > "$TMP/muse-ev.txt"
-check "muse scans a short terminal failure message" "grep -q insufficient_quota '$TMP/muse-ev.txt'"
-check "muse does not scan a long partial review in a terminal failure" "! grep -q 'out of credits' '$TMP/muse-ev.txt'"
+check "muse never scans response text quoted in a terminal failure" "[ -s '$TMP/muse-ev.txt' ] && ! grep -q 'insufficient_quota\|out of credits' '$TMP/muse-ev.txt'"
+GEM_FILTER="$(grep -o "jq -r '[^']*'" "$ROOT/bin/ai-gemini" | grep SUCCESS | head -1 | sed "s/^jq -r '//; s/'\$//")"
+jq -cn '{status:"ERROR",response:"The diff mentions insufficient_quota and out of credits.",error:{code:"INTERNAL"}}' | jq -r "$GEM_FILTER" > "$TMP/gem-ev.txt"
+check "gemini never scans failed response text" "[ -s '$TMP/gem-ev.txt' ] && ! grep -q 'out of credits' '$TMP/gem-ev.txt'"
 for phrase in 'Your account is in good standing.' 'Prepayment credits are available for this project.'; do
   printf '%s\n' "$phrase" > "$TMP/phrase.txt"
   classify grok "$TMP/phrase.txt" >/dev/null; rc=$?
