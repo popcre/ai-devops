@@ -1,0 +1,11 @@
+{
+  "_comment": "Where verify.yml runs its Windows sections (tools/ci/runner-router.cjs). Owner decisions 2026-09-23: every verify job runs on Blacksmith ('anything that's queued and not actually running, send to blacksmith'; 'a Blacksmith run produces a main check'), and idle qualified self-hosted Windows hosts (EDGE-RUNN-ENVY and any other host carrying ai-devops-windows-qualified) are used as extra capacity ('why are we saving ENVY? WE NEED TO SPEED THINGS UP!!!'). A section goes to a qualified host only when one is online and idle at routing time; otherwise it runs on Blacksmith. GitHub-hosted runners are never a routing target.",
+  "schema_version": 2,
+  "max_active_runs_sampled": 15,
+  "windows_sections": 6,
+  "blacksmith_windows": "blacksmith-4vcpu-windows-2025",
+  "qualified_windows": ["self-hosted", "Windows", "X64", "ai-devops-windows-qualified"],
+  "qualified_label": "ai-devops-windows-qualified",
+  "reserve_qualified_for_reviewer_events": ["workflow_dispatch"],
+  "reserved_qualified_hosts": 1
+}
