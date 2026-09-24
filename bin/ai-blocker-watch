@@ -567,8 +567,10 @@ snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a 
     [ -z "$node" ] || break
   done
   [ -n "$node" ] || return 0 # the blocker is not open, so no scan here reads it
-  for ((pg=1; pg<=SNAPN[$repo]; pg++)); do
+  for ((pg=1; pg<=SNAPN[$repo]; pg++)); do # rewrite only the page holding the issue
+    printf '%s' "${SNAP[$repo|$pg]}" | jq -e --argjson n "$2" 'any(.data.repository.issues.nodes[]; .number==$n)' >/dev/null || continue
     SNAP["$repo|$pg"]="$(printf '%s' "${SNAP[$repo|$pg]}" | jq -c --argjson n "$2" --argjson b "$node" '(.data.repository.issues.nodes[] | select(.number==$n) | .blockedBy.nodes) += [$b]')"
+    break
   done
 }
 
@@ -609,7 +611,7 @@ depth_of(){ # depth_of <owner/repo> <n> <seen>: longest open chain this issue ho
 }
 
 alarm_scan(){ # alarm_scan <dry 0|1>
-  local dry="$1" start repo out pages cursor cutoff afail=0
+  local dry="$1" start repo out cutoff afail=0
   local pr pn kr kn ac ti k key j rc marker pr_open alarmed lastact la_ep
   # The alarm POSTS (request-for-owner comments, the digest issue), so it is
   # owned by the same single machine as propagation: without this gate N
@@ -816,7 +818,7 @@ parse_depends_on(){ # stdin: issue body -> dep numbers, one per line; rc 1 = mal
 }
 
 maintain_links(){ # maintain_links <dry 0|1>
-  local dry="$1" start repo out pages cursor lfail=0
+  local dry="$1" start repo out lfail=0
   # Link creation POSTs to GitHub, so posting is owned by the same single
   # machine as propagation and the alarm — without this gate N scheduled
   # machines race to create the same links. A dry run only reads, so it stays

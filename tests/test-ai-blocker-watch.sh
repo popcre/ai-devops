@@ -32,14 +32,18 @@ case "$*" in
   "search issues"*) out "$(cat "$F/digest_search.json" 2>/dev/null || echo '[]')" ;;
   *graphql*states:OPEN*)
     # One open-issue query serves both scans: merge the links and parents
-    # fixtures by issue number, as GitHub would answer the combined query.
+    # fixtures by issue number, as GitHub would answer the combined query, and
+    # page it 100 at a time (the cursor is the next offset).
+    after=0; for i in "${!args[@]}"; do case "${args[$i]}" in after=*) after="${args[$i]#after=}" ;; esac; done
     empty='{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}'
     [ -f "$F/gql_links.json" ] && lf="$F/gql_links.json" || { lf="$F/empty.json"; echo "$empty" > "$lf"; }
     [ -f "$F/gql_parents.json" ] && pf="$F/gql_parents.json" || { pf="$F/empty.json"; echo "$empty" > "$pf"; }
-    out "$(jq -cn --slurpfile l "$lf" --slurpfile p "$pf" '$l[0] as $l | $p[0] as $p |
+    out "$(jq -cn --argjson off "$after" --slurpfile l "$lf" --slurpfile p "$pf" '$l[0] as $l | $p[0] as $p |
       $l * {data:{repository:{issues:{nodes:
         ([$l.data.repository.issues.nodes[], $p.data.repository.issues.nodes[]] | group_by(.number)
-         | map(reduce .[] as $x ({}; . + ($x | del(.blockedBy)) | .blockedBy.nodes = ((.blockedBy.nodes // []) + ($x.blockedBy.nodes // []) | group_by(.number) | map(add)))))}}}}')" ;;
+         | map(reduce .[] as $x ({}; . + ($x | del(.blockedBy)) | .blockedBy.nodes = ((.blockedBy.nodes // []) + ($x.blockedBy.nodes // []) | group_by(.number) | map(add)))))}}}}
+      | .data.repository.issues |= (.nodes as $all | .nodes = $all[$off:$off+100]
+          | .pageInfo = {hasNextPage: ($all | length > $off+100), endCursor: (if ($all | length > $off+100) then ($off+100 | tostring) else null end)})')" ;;
   *graphql*)
     n=""
     for i in "${!args[@]}"; do
@@ -431,9 +435,11 @@ echo '[]' > "$FAKE/find.json"
 check 'find reports no match plainly' "BW2 find nothing here 2>&1 | grep -q 'no parked work matches'"
 check 'list shows the parked issue column' "BW2 list | awk -F'\t' '\$6==\"o/r#9\" || \$6==\"o/r#5\" || \$6!=\"\"' | grep -q ."
 
-# Replay (#658 P5): 180 open issues, 60 missing depends_on links (to owned
-# blockers, which the alarm must skip) and 60 parents of unowned blockers. One tick with both scans due must read each repo's open
-# issues once, create every link, and alarm on every unowned blocker.
+# Replay (#658 P5): 240 open issues over three pages, 60 missing depends_on
+# links (to owned blockers, which the alarm must skip) and 60 parents of
+# unowned blockers. One tick with both scans due must walk each repo's open
+# issues once, create every link, and alarm on every unowned blocker. Set
+# AI_BLOCKER_WATCH_OLD to a previous build to compare outcomes and calls.
 AI_BLOCKER_WATCH_OLD="${AI_BLOCKER_WATCH_OLD:-}"
 replay(){ # replay <script>: fresh state, both scans due, one tick
   rm -rf "$TMP/home" "$FAKE/links" "$FAKE/comments" "$FAKE/created" "$FAKE/edited" "$FAKE"/gql_issue_*.json "$FAKE/digest_search.json"; : > "$FAKE/calls"
@@ -451,7 +457,7 @@ jq -n --argjson nodes "[${pnodes%,}]" '{data:{repository:{issues:{pageInfo:{hasN
 replay "$SCRIPT"
 check 'replay: every one of 60 missing links is created once' "[ \"\$(grep -c linked '$FAKE/links')\" = 60 ]"
 check 'replay: every one of 60 unowned blockers gets its owner request' "[ \"\$(grep -c 'ai-blocker-watch:unowned:' '$FAKE/comments')\" = 60 ]"
-check 'replay: both scans share one open-issue read' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 1 ]"
+check 'replay: both scans share one three-page open-issue walk' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 3 ] && grep -q 'after=200' '$FAKE/calls'"
 if [ -n "$AI_BLOCKER_WATCH_OLD" ]; then # compare against a previous build
   sort "$FAKE/comments" > "$TMP/new.comments"; cp "$FAKE/links" "$TMP/new.links"; new_calls="$(wc -l < "$FAKE/calls")"
   replay "$AI_BLOCKER_WATCH_OLD"; sort "$FAKE/comments" > "$TMP/old.comments"
