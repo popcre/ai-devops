@@ -46,6 +46,12 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
     grep -qzF "$phrase" "$client_file" \
       || fail "$(basename "$client_file") lost or line-wrapped the autonomy rule: $phrase"
   done
+  # The canonical home since the 2026-09-18 transfer (#634): no client global
+  # may keep teaching the pre-transfer slug as where structure work is authored.
+  grep -qF 'popcre/shared-db' "$client_file" \
+    || fail "$(basename "$client_file") no longer names popcre/shared-db as the canonical home"
+  ! grep -qF 'u2giants/shared-db' "$client_file" \
+    || fail "$(basename "$client_file") still routes live prose to u2giants/shared-db"
 done
 
 echo "PASS: Claude, Codex, ZCode, and MiMo globals carry the required autonomy phrases, unwrapped"
