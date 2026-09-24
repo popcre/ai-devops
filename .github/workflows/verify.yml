@@ -38,7 +38,7 @@ permissions:
 jobs:
   manual-preflight:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       actions: read
       contents: read
@@ -89,7 +89,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -123,7 +123,7 @@ jobs:
   linux-offline:
     needs: [fast-classifier, manual-preflight, linux-offline-shard]
     if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -147,7 +147,7 @@ jobs:
     # merge group waits out the 120-minute response timeout, or a pull request
     # can never satisfy a context that never reports. Outside the queue this job
     # says so and passes in seconds, so one stable context covers both.
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
       actions: read
@@ -195,7 +195,7 @@ jobs:
       fail-fast: false
       matrix:
         section: [1, 2, 3, 4, 5, 6]
-    runs-on: windows-2025
+    runs-on: blacksmith-4vcpu-windows-2025
     # Six sections after PR #666's serial Gemini, GLM and Muse Code section
     # reached the 40-minute ceiling. Those three long suites now have distinct
     # sections; GLM shares only three short suites. Kimi stays declared and
@@ -242,7 +242,7 @@ jobs:
     # repository behind one desktop and left fourteen verify runs queued at
     # once. The self-hosted lane keeps windows-reviewer-safety below, where a
     # timing flake can be reproduced on a known physical machine.
-    runs-on: windows-2025
+    runs-on: blacksmith-4vcpu-windows-2025
     # Run 34856869730 reached the existing 105-minute bound in Bash suite
     # 19/74, before PowerShell started. Partition the complete dynamic inventory
     # across independent hosts instead of extending that bound or dropping tests.
@@ -277,7 +277,7 @@ jobs:
     needs: [fast-classifier, manual-preflight, windows-offline-section, windows-offline-complete]
     if: >-
       !cancelled() && github.event_name != 'merge_group'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - name: Aggregate the Windows offline lane
@@ -329,7 +329,7 @@ jobs:
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.reviewer == 'true') &&
       needs.manual-preflight.outputs.run_expensive_jobs == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
     outputs:
       preferred_available: ${{ steps.runners.outputs.preferred_available }}
@@ -381,7 +381,7 @@ jobs:
     # passed 199 of 199 checks in 538s on EDGE-RUNN-ENVY in qualification run
     # 33571202823 - well inside the 30 minute ceiling it exceeded while
     # sharing the edge-dev desktop with windows-offline.
-    runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]
+    runs-on: blacksmith-4vcpu-windows-2025
     # This lane is preferred evidence, not the required result. A timeout or
     # assertion failure must release the identical hosted fallback, whose
     # stable aggregate below remains fail-closed.
@@ -439,7 +439,7 @@ jobs:
        needs.fast-classifier.outputs.reviewer == 'true') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
     outputs:
       fallback_required: ${{ steps.watch.outputs.fallback_required }}
@@ -470,7 +470,7 @@ jobs:
        needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
        needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true')
-    runs-on: windows-2025
+    runs-on: blacksmith-4vcpu-windows-2025
     # This is an emergency hosted path, not the qualified timing signal. Run
     # 34387666739 reached Grok but was killed by the original 30-minute bound;
     # prior hosted evidence measured Grok alone at 41m20s. Sixty minutes keeps
@@ -498,7 +498,7 @@ jobs:
     needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback]
     if: >-
       !cancelled() && github.event_name != 'merge_group'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - name: Aggregate reviewer safety proof
@@ -550,7 +550,7 @@ jobs:
     if: >-
       always() && !cancelled() &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group')
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -568,7 +568,7 @@ jobs:
   report-scheduled-failure:
     needs: [fast-classifier, linux-offline, windows-offline-complete, windows-reviewer-safety]
     if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
     permissions:
       contents: read
