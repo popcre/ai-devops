@@ -11,8 +11,8 @@
       "reason": "Approval-gate wrapper only (ai-codex-review one-shot modes, like the Claude gate); NOT a rotation or overflow reviewer. u2giants/shared-db RETIRED_REVIEWERS carries codex-gpt-5.6-sol since 2026-09-06 (shared-db issue #2485), so the allocator never assigns it; owner confirmed on 2026-09-22 that the rotation pool is Muse, Grok, Qwen, Gemini."
     },
     "deepseek": {
-      "registry_state": "absent",
-      "reason": "Out of the reviewer pool: u2giants/shared-db RETIRED_REVIEWERS carries deepseek-chat since 2026-09-01 (shared-db issue #2078: it cannot open repository files, so its verdicts are not evidence). Owner confirmed on 2026-09-22 that the pool is Muse, Grok, Qwen, Gemini."
+      "registry_state": "registered",
+      "reason": "Rotation reviewer (deepseek-flash = DeepSeek V4.1 Flash). Re-entered the pool by owner instruction on 2026-09-23 (\"put DeepSeek back on the reviewer list\") after PR #730 gave it read-only repository tools, a recorded live preflight qualification, and a live formal review of a merged commit that returned a well-formed VERDICT line with the head SHA; see the 2026-09-23 deepseek-requalification record under reviewer-reliability verification. Mirrors the shared-db allocator row deepseek-v4.1-flash (shared-db #3469); the old deepseek-chat name stays retired there."
     },
     "gemini": {
       "registry_state": "registered",

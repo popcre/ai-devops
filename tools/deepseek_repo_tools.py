@@ -337,6 +337,41 @@ NOTICE = ("You have read-only access to the repository through the list_dir, rea
           "concluding and cite path:line for evidence. Your tool budget is {n} calls.")
 
 
+# DeepSeek sometimes writes its tool calls as raw DSML markup in the message
+# text (finish_reason "stop", no tool_calls) instead of structured calls. Read
+# as a final answer, that markup ended a live review with no verdict
+# (2026-09-23). Recover the calls it names; markup that cannot be parsed is
+# still never a final answer -- the model is asked to call the tool properly.
+_DSML_ANY = re.compile(r"<\s*/?\s*[｜|]{1,2}\s*DSML\s*[｜|]{1,2}")
+_DSML_INVOKE = re.compile(r"<\s*[｜|]{1,2}\s*DSML\s*[｜|]{1,2}\s*invoke\s+name\s*=\s*\"([^\"]+)\"\s*>(.*?)"
+                          r"<\s*/\s*[｜|]{1,2}\s*DSML\s*[｜|]{1,2}\s*invoke\s*>", re.S)
+_DSML_PARAM = re.compile(r"<\s*[｜|]{1,2}\s*DSML\s*[｜|]{1,2}\s*parameter\s+name\s*=\s*\"([^\"]+)\""
+                         r"(?:\s+string\s*=\s*\"(true|false)\")?\s*>(.*?)"
+                         r"<\s*/\s*[｜|]{1,2}\s*DSML\s*[｜|]{1,2}\s*parameter\s*>", re.S)
+LEAK_NUDGE = ("Your last message contained tool-call markup as plain text, which is not a tool call "
+              "and not an answer. Call the tool through the tools interface, or give your final answer.")
+
+
+def leaked_tool_calls(content, rnd):
+    """Return (tool_calls, leaked) recovered from DSML markup in message text."""
+    if not isinstance(content, str) or not _DSML_ANY.search(content):
+        return [], False
+    calls = []
+    for i, m in enumerate(_DSML_INVOKE.finditer(content)):
+        args = {}
+        for p in _DSML_PARAM.finditer(m.group(2)):
+            value = p.group(3)
+            if p.group(2) == "false":
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    pass
+            args[p.group(1)] = value
+        calls.append({"id": f"call_{rnd}_dsml_{i}", "type": "function",
+                      "function": {"name": m.group(1), "arguments": json.dumps(args)}})
+    return calls, True
+
+
 def cmd_init(msgs_file, model, req_file):
     with open(msgs_file, encoding="utf-8") as fh:
         messages = json.load(fh)
@@ -379,7 +414,10 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
         cid = tc.get("id") if isinstance(tc.get("id"), str) and tc.get("id") else f"call_{rnd}_{i}"
         clean.append({"id": cid, "type": "function", "function": {"name": name, "arguments": arguments}})
     tcs = clean
-    if not tcs or "tools" not in body:
+    leaked = False
+    if not tcs and "tools" in body:
+        tcs, leaked = leaked_tool_calls(msg.get("content"), rnd)
+    if not leaked and (not tcs or "tools" not in body):
         return 0
     calls = 0
     if os.path.exists(log_file):
@@ -387,8 +425,16 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
             calls = sum(1 for line in fh if '"counted": true' in line)
     messages = body["messages"]
     assistant = {k: v for k, v in msg.items() if k in ("content", "reasoning_content")}
-    assistant.update(role="assistant", tool_calls=tcs)
+    if leaked:
+        # The markup is not an answer; never replay it as one.
+        assistant["content"] = ""
+    if tcs:
+        assistant.update(role="assistant", tool_calls=tcs)
+    else:
+        assistant["role"] = "assistant"
     messages.append(assistant)
+    if leaked and not tcs:
+        messages.append({"role": "user", "content": LEAK_NUDGE})
     with open(log_file, "a", encoding="utf-8") as log:
         for tc in tcs:
             fn = tc["function"]
