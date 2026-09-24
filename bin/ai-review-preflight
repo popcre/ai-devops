@@ -436,7 +436,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
   # Always isolate preflight. Ordinary wrappers keep their packet in an
   # ordinary clone while a reviewer reads it; a preflight packet must never
   # replace or delete that live evidence.
-  sandbox="$(${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox} ensure-copy "$repo" "$tag")"
+  sandbox="$(AI_REVIEW_SANDBOX_BASE="${base:-}" ${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox} ensure-copy "$repo" "$tag")"
   PREFLIGHT_REPO="$repo"; PREFLIGHT_TAG="$tag"; PREFLIGHT_SANDBOX="$sandbox"
   trap cleanup_check EXIT
   packet="$(${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet} build "$sandbox" "$tag" ${base:+--base "$base"})"
