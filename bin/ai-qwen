@@ -96,7 +96,7 @@ else
 fi
 REVIEW_MAX_TURNS="${AI_QWEN_MAX_TURNS:-120}"
 REVIEW_MAX_TOOL_CALLS="${AI_QWEN_MAX_TOOL_CALLS:-120}"
-REVIEW_MAX_WALL_TIME="${AI_QWEN_MAX_WALL_TIME:-30m}"
+REVIEW_MAX_WALL_TIME="${AI_QWEN_MAX_WALL_TIME:-60m}"
 IMPLEMENT_MAX_TURNS="${AI_QWEN_MAX_TURNS:-30}"
 IMPLEMENT_MAX_TOOL_CALLS="${AI_QWEN_MAX_TOOL_CALLS:-80}"
 IMPLEMENT_MAX_WALL_TIME="${AI_QWEN_MAX_WALL_TIME:-15m}"
@@ -1370,7 +1370,10 @@ classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_RE
   [ "$LIFECYCLE_STATE" = cancelled ] && { printf 'cancelled'; return; }
   if provider_content_filter "$out" "$err"; then
     printf 'content-filter'
-  elif [ -s "$err" ] && grep -Eqi 'Reached max session turns|Run aborted: (tool-call|wall-clock) budget .* exceeded' "$err"; then
+  elif [ -s "$err" ] && grep -Eqi 'Run aborted: wall-clock budget .* exceeded' "$err"; then
+    # A wall-clock stop is a timeout, not a turn limit: report it as one.
+    printf 'timed-out'
+  elif [ -s "$err" ] && grep -Eqi 'Reached max session turns|Run aborted: tool-call budget .* exceeded' "$err"; then
     printf 'turn_limit_cancelled'
   elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
     || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$err"; }; then
@@ -1420,8 +1423,8 @@ safe_report_detail() { # safe_report_detail TERMINAL_STATE
   case "$1" in
     content-filter) printf 'Qwen rejected the request with provider content inspection; no review was accepted.' ;;
     usage-limit) printf 'Qwen reported a usage or billing limit.' ;;
-    turn_limit_cancelled) printf 'Qwen stopped at a bounded session-turn, tool-call, or wall-clock limit.' ;;
-    timed-out)   printf 'The wrapper deadline passed without the required terminal record.' ;;
+    turn_limit_cancelled) printf 'Qwen stopped at a bounded session-turn or tool-call limit.' ;;
+    timed-out)   printf 'Qwen hit its wall-clock budget or the wrapper deadline passed without the required terminal record.' ;;
     cancelled)   printf 'The wrapper received an interrupt or termination request.' ;;
     *)           printf 'Qwen did not emit the required terminal completion record.' ;;
   esac

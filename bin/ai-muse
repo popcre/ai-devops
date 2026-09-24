@@ -28,9 +28,10 @@ PROFILE_HOME="${USERPROFILE:-$HOME}"
 case "$PROFILE_HOME" in [A-Za-z]:*) PROFILE_HOME="/$(printf '%s' "$PROFILE_HOME" | sed 's#\\#/#g; s#:#/#')";; esac
 CFG="${AI_MUSE_CONFIG_DIR:-$PROFILE_HOME/.config/ai-devops-muse}"
 OC_CFG="$CFG/opencode-xdg/opencode"
-# Runtime engine: the pinned OpenCode harness (default) or Meta's Muse Code CLI.
-# Sessions never cross engines: each engine records its own model identifier.
-ENGINE="${AI_MUSE_ENGINE:-opencode}"
+# Runtime engine: Meta's Muse Code CLI (default) or the pinned OpenCode harness.
+# Rollback: AI_MUSE_ENGINE=opencode. Sessions never cross engines: each engine
+# records its own model identifier.
+ENGINE="${AI_MUSE_ENGINE:-muse-code}"
 case "$ENGINE" in
   opencode)
     VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
@@ -110,6 +111,7 @@ release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK
 cleanup(){
   local accepted_path="" accepted_id="" active_status="" active_tmp="" evidence_durable=1
   rm -f -- "$RUN_TMP"/muse-key.*
+  release_provider_slot
   release_credential_lock
   reviewer_event_cleanup_allowed muse || evidence_durable=0
   if [ -n "$ACTIVE_META" ] && [ -f "$ACTIVE_META" ]; then
@@ -472,9 +474,32 @@ retain_turn(){ # retain exact bytes and optional observations in one metadata wr
   tmp="$(tmp_file)"
   jq --arg effort "${EFFECTIVE_REASONING_EFFORT:-}" --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage} | if $effort!="" then .retained_turn.reasoning_effort=$effort else . end' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
+capacity_rejection(){ # an answer-free rejection naming model_not_found; any produced text or step means a real turn
+  local out="$1"
+  grep -Fq model_not_found "$out" "$out.stderr" 2>/dev/null || return 1
+  ! jq -e 'select(.type=="text" or .type=="step_finish" or ((.payload_type//"")=="run.terminal.completed"))' "$out" >/dev/null 2>&1
+}
+acquire_provider_slot(){ # optional machine-wide cap on simultaneous Muse turns; 0 (default) means no cap
+  local max="${AI_MUSE_MAX_CONCURRENT:-0}" dir="$STATE/provider-slots" i owner waited=0
+  [ "$max" != 0 ] || return 0
+  case "$max" in ''|*[!0-9]*) die 'AI_MUSE_MAX_CONCURRENT must be a whole number (0 means no cap).';; esac
+  mkdir -p "$dir"
+  while :; do
+    for i in $(seq 1 "$max"); do
+      if mkdir "$dir/$i.d" 2>/dev/null; then printf '%s\n' "$$" > "$dir/$i.d/pid"; PROVIDER_SLOT="$dir/$i.d"; return 0; fi
+      owner="$(cat "$dir/$i.d/pid" 2>/dev/null || true)"
+      case "$owner" in ''|*[!0-9]*) [ -z "$(find "$dir/$i.d" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ] || rm -rf "$dir/$i.d";; *) kill -0 "$owner" 2>/dev/null || rm -rf "$dir/$i.d";; esac
+    done
+    [ $((waited % 30)) -ne 0 ] || printf 'Muse waiting for a free provider slot (%s in use)\n' "$max" >&2
+    sleep 2; waited=$((waited+2))
+  done
+}
+release_provider_slot(){ [ -z "${PROVIDER_SLOT:-}" ] || { [ "$(cat "$PROVIDER_SLOT/pid" 2>/dev/null)" != "$$" ] || rm -rf "$PROVIDER_SLOT"; PROVIDER_SLOT=""; }; }
 run_turn(){
   local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text prompt_arg=() timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
-  local bash_bin=/usr/bin/bash key_file
+  local bash_bin=/usr/bin/bash key_file attempt=0 delay retries="${AI_MUSE_CAPACITY_RETRIES:-6}" backoff="${AI_MUSE_CAPACITY_BACKOFF:-20}"
+  case "$retries" in ''|*[!0-9]*) die 'AI_MUSE_CAPACITY_RETRIES must be a whole number.';; esac
+  case "$backoff" in ''|*[!0-9]*) die 'AI_MUSE_CAPACITY_BACKOFF must be a whole number.';; esac
   local -a clean_env
   validate_heartbeat
   EFFECTIVE_REASONING_EFFORT=""
@@ -497,14 +522,9 @@ run_turn(){
   fi
   EXPECTED_SID="$sid"
   [ -x "$bash_bin" ] && [ -x "$env_bin" ] || die 'trusted absolute Bash/env executables are required for the Muse credential boundary.'
-  key_file="$(mktemp "$RUN_TMP/muse-key.XXXXXX")" || die 'could not reserve the private Muse credential handoff.'
-  printf '%s\n' "$provider_key" > "$key_file" || die 'could not write the private Muse credential handoff.'
-  chmod 600 "$key_file" 2>/dev/null || die 'could not protect the private Muse credential handoff.'
-  protect_windows_path "$key_file" file || die 'could not enforce the private Muse credential-handoff ACL.'
-  provider_key=""
   test_interrupt_at pre_launch
   set +e
-  clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "AI_MUSE_SECRET_FILE=$key_file" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
+  clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
   [ "$ENGINE" != muse-code ] || clean_env+=("AI_MUSE_KEY_ENV=META_API_KEY")
   for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
     [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
@@ -518,15 +538,31 @@ run_turn(){
     local launch_tmp; launch_tmp="$(tmp_file)"
     jq --arg now "$(date -u +%FT%TZ)" '.status="provider_launching"|.updated_at=$now' "$meta" > "$launch_tmp" && mv -f "$launch_tmp" "$meta"
   fi
-  ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
-  MUSE_FAILURE_PHASE=provider-turn
-  ACTIVE_META="$meta"; test_interrupt_at post_launch
-  [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
-  while kill -0 "$TURN_PID" 2>/dev/null; do
-    sleep 1; waited=$((waited+1))
-    [ -z "$meta" ] || [ $((waited % heartbeat)) -ne 0 ] || { heartbeat_meta "$meta" "$TURN_PID"; printf 'Muse turn active: %ss\n' "$waited" >&2; }
+  acquire_provider_slot
+  while :; do
+    attempt=$((attempt+1))
+    key_file="$(mktemp "$RUN_TMP/muse-key.XXXXXX")" || die 'could not reserve the private Muse credential handoff.'
+    printf '%s\n' "$provider_key" > "$key_file" || die 'could not write the private Muse credential handoff.'
+    chmod 600 "$key_file" 2>/dev/null || die 'could not protect the private Muse credential handoff.'
+    protect_windows_path "$key_file" file || die 'could not enforce the private Muse credential-handoff ACL.'
+    ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
+    MUSE_FAILURE_PHASE=provider-turn
+    ACTIVE_META="$meta"; test_interrupt_at post_launch
+    [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
+    while kill -0 "$TURN_PID" 2>/dev/null; do
+      sleep 1; waited=$((waited+1))
+      [ -z "$meta" ] || [ $((waited % heartbeat)) -ne 0 ] || { heartbeat_meta "$meta" "$TURN_PID"; printf 'Muse turn active: %ss\n' "$waited" >&2; }
+    done
+    wait "$TURN_PID"; rc=$?; RUN_RC="$rc"; TURN_PID=""; rm -f -- "$key_file"
+    # Meta reports its team-wide Contributor concurrency cap as an unbilled
+    # 404 model_not_found (#683); only that answer-free rejection is relaunched.
+    [ "$rc" -ne 0 ] && [ "$attempt" -le "$retries" ] && capacity_rejection "$out" || break
+    mv -f "$out" "$out.capacity-$attempt"; mv -f "$out.stderr" "$out.stderr.capacity-$attempt" 2>/dev/null || true
+    delay=$(( backoff * attempt + RANDOM % (backoff + 1) ))
+    printf 'Muse provider capacity rejection (model_not_found, nothing answered); retry %s/%s in %ss\n' "$attempt" "$retries" "$delay" >&2
+    sleep "$delay"
   done
-  wait "$TURN_PID"; rc=$?; RUN_RC="$rc"; TURN_PID=""
+  provider_key=""; release_provider_slot
   if [ -n "$meta" ] && ! retain_turn "$meta" "$out" "$prompt" "$rc" "$sid"; then
     printf 'Muse completion evidence could not be published; private runtime evidence retained at %s\n' "$RUN_TMP" >&2
     RETAIN_FAILED=1; TURN_ERROR='Muse completion preservation failed; do not replay the provider turn.'; return 1
