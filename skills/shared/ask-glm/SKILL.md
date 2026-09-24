@@ -1,13 +1,13 @@
 ---
 name: ask-glm
-description: NOT a rotation reviewer (out of rotation since 2026-09-18) - never route an assigned or formal review here, and never wait for GLM; the pool is Muse, Grok, Qwen, Gemini. Use only when Albert explicitly asks for GLM. Delegate a repository analysis, code review, debate, second opinion, or scoped implementation to Z.ai GLM through the persistent `ai-glm` session harness. Use when the user says "ask GLM," "run this by GLM," "get GLM's opinion," requests GLM-5.3, wants an independent GLM review, or explicitly delegates repository work to GLM.
+description: NOT a rotation reviewer (out of rotation since 2026-09-18) - never route an assigned or formal review here, and never wait for GLM; the pool is Muse, Grok, Qwen, Gemini, DeepSeek. Use only when Albert explicitly asks for GLM. Delegate a repository analysis, code review, debate, second opinion, or scoped implementation to Z.ai GLM through the persistent `ai-glm` session harness. Use when the user says "ask GLM," "run this by GLM," "get GLM's opinion," requests GLM-5.3, wants an independent GLM review, or explicitly delegates repository work to GLM.
 ---
 
 # Ask GLM
 
 **GLM is out of reviewer rotation** (owner instruction; `absent` in
 `config/reviewer-registry.json`, `glm-5.3` in shared-db `RETIRED_REVIEWERS`).
-Formal and assigned reviews go to Muse, Grok, Qwen, or Gemini. Use GLM only when
+Formal and assigned reviews go to Muse, Grok, Qwen, Gemini, or DeepSeek. Use GLM only when
 Albert asks for it by name; never hold a review open waiting for GLM.
 
 GLM runs in **named, persistent sessions** hosted by a local OpenCode server. A session
