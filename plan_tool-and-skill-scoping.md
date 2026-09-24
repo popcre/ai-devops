@@ -16,9 +16,9 @@ Session record: [`HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-
 | 1.2 Make setup prune undeclared Claude Desktop servers; re-run on edge-dev | 🟡 code merged; live proof open | 2026-09-23 | #718 (8e22150c); proof #731 |
 | 1.3 Restore `disable-model-invocation` on `designflow-human-qa`; take suspended `kimi-code-delegation` out of the index | ✅ done | 2026-09-23 | #718 (8e22150c) |
 | 1.4 Add a drift check that fails when installed ≠ declared | ✅ done | 2026-09-23 | #718; `bin/check-mcp-drift.ps1` |
-| 2.1 Confirm each client's repository-skill location | ⬜ open | | |
-| 2.2 Add per-repository skill membership to the installer | ⬜ open | | |
-| 2.3 Move the owned skills; measure manifest before/after | ⬜ open | | |
+| 2.1 Confirm each client's repository-skill location | ✅ done | 2026-09-24 | Claude `<repo>/.claude/skills` (live `designflow-e2e-tester` + throwaway-proof); Codex `<repo>/.agents/skills` (OpenAI "Build skills" docs; throwaway fixture) |
+| 2.2 Add per-repository skill membership to the installer | ✅ done | 2026-09-24 | `config/skill-scope.json`; `ai-install-skills` repo path; tests 10–13 |
+| 2.3 Move the owned skills; measure manifest before/after | ✅ done | 2026-09-24 | 8 licensor scrapes scoped to `licensor-source-data`; installed Claude 48→40; see `docs/context-engineering.md` |
 | 3.1 Add per-project MCP membership to the Windows catalog | ⬜ open | | |
 | 3.2 Write project `.mcp.json` entries and shrink global membership | ⬜ open | | |
 | 3.3 Linux parity (only if a Linux client still carries a single-project server) | ⬜ open | | |
