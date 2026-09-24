@@ -34,3 +34,4 @@ ai-transcript-destination-check	bin/ai-transcript-destination-check	bash+cmd	yes
 ai-blocker-watch	bin/ai-blocker-watch	bash+cmd	yes	none	install-machine-tools.ps1
 ai-reap-shared-db-worktrees	bin/ai-reap-shared-db-worktrees	bash+cmd	yes	none	install-machine-tools.ps1
 ai-zcode	bin/ai-zcode	bash+cmd	none	zcode	install-machine-tools.ps1
+ai-mimo	bin/ai-mimo	bash+cmd	none	mimo	install-machine-tools.ps1

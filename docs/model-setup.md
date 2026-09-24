@@ -99,6 +99,31 @@ preservation), MCP servers in `~/.zcode/cli/config.json` via
   rollout JSONL; back them up and mine them by SQL with the
   `zcode-transcript-backup` skill (private repo destination only).
 
+## MiMo (Windows)
+
+MiMo is the fourth INTERACTIVE client (Xiaomi MiMo Desktop / MiMoCode),
+not a reviewer and not a pipeline stage. It receives the Claude/Codex
+per-client treatment on Windows only: managed skills
+(`~/.config/mimocode/skills/` from `skills/mimo` + `skills/shared`), a seeded
+`~/.config/mimocode/AGENTS.md` (`ai-adopt-globals` replaces it with machine-section
+preservation), MCP servers in `~/.config/mimocode/mimocode.jsonc` via
+`bin/configure-mimocode-mcps.ps1`, and no completion-check hook (MiMoCode has
+no config-file hook surface).
+
+- **Headless driving:** `ai-mimo ask "<prompt>"` — the governed wrapper
+  (`bin/ai-mimo`). Never launch `Xiaomi MiMo AI.exe` (the Desktop GUI) as a
+  headless fallback. Never pass `--yolo` / `--dangerously-skip-permissions`
+  from caller input. Health: `ai-mimo doctor [--live]`.
+- **No MiMo reviewer.** Interactive client only (ZCode pattern).
+- **Traps:** MCP `command` is an **array** of argv strings and the timeout key
+  is `timeout` (ms), not ZCode's string command / `timeoutMs`; the atomic JSON
+  writer does not preserve `//` comments in `mimocode.jsonc`; skills write root
+  is `~/.config/mimocode/skills/` only (never `~/.agents/skills`). Qualification
+  facts: `tests/verification/mimo-windows-2026-09-23/README.md`.
+- **Transcripts:** MiMoCode keeps sessions in SQLite
+  (`~/.local/share/mimocode/mimocode.db`); back them up and mine them by SQL
+  with the `mimo-transcript-backup` skill (private repo destination only).
+
 ## Important: the exact flags may differ on your machine
 
 The Claude/Codex CLIs evolve. The installed configuration is validated against
