@@ -2,7 +2,7 @@
 
 | Step | Status | Evidence |
 |------|--------|----------|
-| 1. Shrink what a review copies | ✅ done (bounded shallow snapshots, not files-only: the packet/lifecycle tools run git inside the snapshot, so a no-`.git` shape cannot work — `tests/test-ai-review-snapshot-bounded-history.sh`, `tests/test-ai-review-sandbox.sh`) | real-worktree dry run: 15 MB / 13 commits / 17 s vs old full clone 461 MB / 1,206 commits / 63 s |
+| 1. Shrink what a review copies | ✅ done — merged `af80fcf0f11b66f99fa794ad159b4b6f110eae2d` (PR #797, Muse APPROVE at exact head; bounded shallow snapshots, not files-only: the packet/lifecycle tools run git inside the snapshot, so a no-`.git` shape cannot work — `tests/test-ai-review-snapshot-bounded-history.sh`, `tests/test-ai-review-sandbox.sh` 108/108, packet 138/138) | real-worktree dry run: 15 MB / 13 commits / 17 s vs old full clone 461 MB / 1,206 commits / 63 s; a real Muse review of PR #797 ran entirely inside a bounded snapshot |
 | 2. Delete the copy when the review ends | ⬜ open | |
 | 3. Parent process sweeps orphans | ⬜ open | |
 | 4. Daily sweep as backup only | ⬜ open (task already installed on this machine) | `AI-Debris-Housekeeping` scheduled task, 03:30 daily |
