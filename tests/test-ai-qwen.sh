@@ -735,7 +735,7 @@ check 'raw JSON output cannot bypass verdict validation' "grep -q 'extract_answe
 # name may grow with the session name or caller.
 check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok|gemini|muse|qwen)-[$][{]?(1|2|name|n)([^A-Za-z_]|$)' '$SCRIPT' | grep -v short_name | grep -q ."
 check "short_name bounds a 300-character name deterministically and keeps short names" "eval \"\$(grep -m1 -E '^short_name\(\) *\{' '$SCRIPT')\"; l=\"\$(printf %.0sq \$(seq 1 300))\"; a=\"\$(short_name \"\$l\" 64)\"; test \${#a} -eq 64 && test \"\$a\" = \"\$(short_name \"\$l\" 64)\" && test \"\$(short_name abc 64)\" = abc && test \"\$a\" != \"\$(short_name \"\${l}x\" 64)\""
-check "moved-checkout discovery also finds bounded session files" "grep -q 'short_name \"\$CALLER--\$2\" 96).json' '$SCRIPT'"
+check "moved-checkout discovery also finds bounded session files" "grep -q 'short_name \"\$CALLER--\$2\" 56).json' '$SCRIPT'"
 
 BODY="$(bash -c '. "$1"; extract_answer "$2"' _ "$TMP/extract.sh" "$TMP/good.jsonl")"
 check 'the text above the verdict is still emitted' "printf '%s' \"\$BODY\" | grep -q 'finding one'"

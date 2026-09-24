@@ -100,9 +100,9 @@ sandbox_tag(){ short_name "gemini-$1-$CALLER-$2" 64; }
 root(){ git rev-parse --show-toplevel 2>/dev/null || die 'run inside a Git repository'; }
 rid(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
 # A session saved before names were bounded keeps its full-name file; find it first.
-state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 96)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
+state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 56)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
 meta(){ state_leaf "$STATE_DIR/sessions/$1" "$CALLER--$2" .json; }
-lock_path(){ printf '%s/locks/%s' "$STATE_DIR" "$(short_name "$1" 96)"; }
+lock_path(){ printf '%s/locks/%s' "$STATE_DIR" "$(short_name "$1" 64)"; }
 raw_agy(){ local a; for a in "${AI_GEMINI_BIN:-}" "$(command -v agy 2>/dev/null || true)" "$HOME/.local/bin/agy" "${LOCALAPPDATA:-}/agy/bin/agy.exe"; do [ -n "$a" ] && [ -x "$a" ] && { printf %s "$a"; return; }; done; die 'local_dependency_unavailable: the LOCAL agy runtime is not installed. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 agy(){ local a; a="$(raw_agy)"; if [ "$QUALIFYING" -eq 0 ]; then runtime_qualified "$a" || die 'Gemini qualification no longer matches the exact wrapper, runtime, or model; quarantine restored'; fi; printf %s "$a"; }
 live_qualified && QUARANTINED=0

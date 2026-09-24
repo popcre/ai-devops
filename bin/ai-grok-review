@@ -439,7 +439,7 @@ valid_name() {
 # path grows with the length of a worktree-derived name.
 short_name() { local s="$1" max="$2"; if [ "${#s}" -le "$max" ]; then printf %s "$s"; else printf '%s-%s' "${s:0:$((max-13))}" "$(printf %s "$s" | sha256sum | cut -c1-12)"; fi; }
 # A session saved before names were bounded keeps its full-name file; find it first.
-state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 96)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
+state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 56)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
 meta_path() { state_leaf "$STATE_DIR/sessions/$1" "$CALLER--$2" .json; }
 
 # Checkout-local legacy session lock path (read compatibility only).
@@ -902,7 +902,7 @@ find_meta() {
       [ "$(jq -r '.repo_remote // ""' "$cand")" = "$remote" ] || continue
       [ -z "$found" ] || die "multiple moved-checkout records match session '$2'; refusing an ambiguous migration."
       found="$cand"
-    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -name "$(short_name "$CALLER--$2" 96).json" \) 2>/dev/null)
+    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -name "$(short_name "$CALLER--$2" 56).json" \) 2>/dev/null)
     [ -z "$found" ] || { mkdir -p "$(dirname "$f")"; mv "$found" "$f"; }
   fi
   [ -f "$f" ] || die "no session '$2' for caller '$CALLER' in this repository. Try: ai-grok-review list"

@@ -399,7 +399,7 @@ valid_name() { provider_wrapper_valid_name "$1"; }
 # path grows with the length of a worktree-derived name.
 short_name() { local s="$1" max="$2"; if [ "${#s}" -le "$max" ]; then printf %s "$s"; else printf '%s-%s' "${s:0:$((max-13))}" "$(printf %s "$s" | sha256sum | cut -c1-12)"; fi; }
 # A session saved before names were bounded keeps its full-name file; find it first.
-state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 96)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
+state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 56)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
 meta_path()     { state_leaf "$STATE_DIR/sessions/$1" "$CALLER--$2" .json; }
 impl_dir()      { state_leaf "$STATE_DIR/sessions/$1" "$CALLER--$2" .d; }
 impl_meta_path(){ printf '%s/metadata.json' "$(impl_dir "$1" "$2")"; }
@@ -524,10 +524,10 @@ find_meta_optional() {
       [ "$(jq -r '.repo_remote // ""' "$cand")" = "$remote" ] || continue
       [ -z "$found" ] || die "multiple moved-checkout records match session '$2'; refusing an ambiguous migration."
       found="$cand"
-    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -path "*/$CALLER--$2.d/metadata.json" -o -name "$(short_name "$CALLER--$2" 96).json" -o -path "*/$(short_name "$CALLER--$2" 96).d/metadata.json" \) 2>/dev/null)
+    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -path "*/$CALLER--$2.d/metadata.json" -o -name "$(short_name "$CALLER--$2" 56).json" -o -path "*/$(short_name "$CALLER--$2" 56).d/metadata.json" \) 2>/dev/null)
     if [ -n "$found" ]; then
       case "$found" in
-        */"$CALLER--$2.d/metadata.json"|*/"$(short_name "$CALLER--$2" 96).d/metadata.json") f="$found" ;; # Keep the rid: Qwen binds resume to its stable workspace path.
+        */"$CALLER--$2.d/metadata.json"|*/"$(short_name "$CALLER--$2" 56).d/metadata.json") f="$found" ;; # Keep the rid: Qwen binds resume to its stable workspace path.
         *) mkdir -p "$(dirname "$f")"; mv "$found" "$f" ;;
       esac
     fi

@@ -61,7 +61,7 @@ check "local runtime failure does not blame Grok" "grep -q 'not a Grok provider 
 # name may grow with the session name or caller.
 check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok|gemini|muse|qwen)-[$][{]?(1|2|name|n)([^A-Za-z_]|$)' '$SCRIPT' | grep -v short_name | grep -q ."
 check "short_name bounds a 300-character name deterministically and keeps short names" "eval \"\$(grep -m1 -E '^short_name\(\) *\{' '$SCRIPT')\"; l=\"\$(printf %.0sq \$(seq 1 300))\"; a=\"\$(short_name \"\$l\" 64)\"; test \${#a} -eq 64 && test \"\$a\" = \"\$(short_name \"\$l\" 64)\" && test \"\$(short_name abc 64)\" = abc && test \"\$a\" != \"\$(short_name \"\${l}x\" 64)\""
-check "moved-checkout discovery also finds bounded session files" "grep -q 'short_name \"\$CALLER--\$2\" 96).json' '$SCRIPT'"
+check "moved-checkout discovery also finds bounded session files" "grep -q 'short_name \"\$CALLER--\$2\" 56).json' '$SCRIPT'"
 check "both Grok dispatches gate capacity before exact-work reservation" "test \"\$(grep -c 'if ! capacity_gate' '$SCRIPT')\" -eq 2 && test \"\$(grep -c 'record_diagnostic.*capacity-checked' '$SCRIPT')\" -eq 2 && grep -q \"exhausted).*return 3\" '$SCRIPT'"
 check "Grok signal handling records unconfirmed remote cancellation" "sed -n '/on_paid_signal()/,/^}/p' '$SCRIPT' | grep -q 'cancellation-confirmation unconfirmed'"
 check "Grok diagnostic write failure cannot skip paid-work shutdown" "sed -n '/record_diagnostic()/,/^}/p' '$SCRIPT' | grep -q 'return 0'"
