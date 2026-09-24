@@ -1,0 +1,1 @@
+{"conversation_id":"","status":"ERROR","response":"[429 RESOURCE_EXHAUSTED] Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billing.","error":{"code":"RESOURCE_EXHAUSTED","message":"Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billing."}}

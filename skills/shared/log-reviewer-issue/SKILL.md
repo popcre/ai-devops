@@ -35,6 +35,10 @@ diagnose the failure first.
 
 - Before recording a reviewer as missing or not on PATH, run `ai-review-preflight usable <provider>`; its output names the exact resolved wrapper (`wrapper_command`, e.g. grok -> `ai-grok-review`). Never hand-type a guessed wrapper name: a 2026-09 report of "ai-grok not on PATH" was wrong because the real wrapper is `ai-grok-review`.
 
+- If the reviewer exited 92 or printed `OUT OF CREDIT:`, tell Albert in the same
+  reply which provider needs credits and where, quoting that line, then rotate
+  to another reviewer. It is an account balance problem, not a wrapper defect;
+  do not retry that provider. See `docs/reviewer-rotation-rules.md` rule 10.
 - Do not make Albert type command options or repeat the error.
 - Do not reduce the details to one sentence.
 - Do not invent a log path, command, duration, or retry.

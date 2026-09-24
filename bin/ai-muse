@@ -15,6 +15,7 @@ SELF="${BASH_SOURCE[0]}"
 REAL_SELF="$(readlink -f "$SELF" 2>/dev/null || true)"
 [ -z "$REAL_SELF" ] || SELF="$REAL_SELF"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+declare -F reviewer_credit_scan >/dev/null || source "$ROOT/tools/reviewer_event_guard.sh"
 # Windows: WinGet installs the 1Password CLI into its own package folder and only
 # sometimes links it into WinGet\Links. A shell started before that PATH entry
 # existed cannot see op, so fall back to the supported WinGet package folder.
@@ -673,6 +674,19 @@ parse_turn(){ # shared terminal parser; never launches the provider
   [ -z "$meta" ] || usage_event="$(jq -r '.retained_turn.original_invocation_id // empty' "$meta")"
   USAGE_JSON="$(turn_usage "$out" "$TURN_SID" "$usage_event")"
 }
+# muse_credit_stop OUT: on a failed turn, classify only provider error channels
+# (stderr, error events, failed-run payloads without their text) for billing
+# exhaustion; on a match print the diagnosis and exit 92 so the caller stops now.
+muse_credit_stop(){
+  local out="$1" ev
+  ev="$(tmp_file)" || return 0
+  [ ! -f "$out" ] || jq -c 'select(type=="object")|if (.type//"")=="error" then .error elif ((.payload_type//"")|test("error|fail";"i")) then (.payload|objects|del(.text)) else empty end' "$out" > "$ev" 2>/dev/null || true
+  printf 'ai-muse: error: %s\n' "$TURN_ERROR" > "$ev.note"
+  reviewer_credit_scan muse "$out.stderr" "$ev" || true
+  [ -z "${REVIEWER_CREDIT_HIT:-}" ] || cat "$ev.note" >&2
+  rm -f "$ev" "$ev.note"
+  reviewer_credit_exit
+}
 preserve_failure(){
   local root="$1" name="$2" prompt="$3" out="$4" meta="$5" mode="$6" path tmp now sid
   path="$root/.ai/reviews/muse-$(short_name "$name" 64)-incomplete-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.md"; ensure_report_destination "$root" "$path"
@@ -719,7 +733,7 @@ cmd_new(){
   [ -z "${AI_MUSE_TEST_PREPARE_MARKER:-}" ] || { printf 'ready\n' > "$AI_MUSE_TEST_PREPARE_MARKER"; sleep "${AI_MUSE_TEST_PREPARE_DELAY:-3}"; }
   report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"
   tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
-  if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" new; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved."; fi; fi
+  if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" new; then muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence could not be saved."; fi; fi
   # Preserve the provider session immediately after proven completion. A later
   # local failure remains recoverable through show, ask, transcript, or delete.
   tmp="$(tmp_file)"; jq --arg sid "$TURN_SID" --arg now "$(date -u +%FT%TZ)" '.status="completed_pending_local_checks"|.session_id=$sid|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
@@ -737,7 +751,7 @@ cmd_ask(){
   sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
   printf 'Muse session continuing: %s\nState: %s\n' "$name" "$meta" >&2
   report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
-  if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "$sid" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved; the session remains blocked."; fi; fi
+  if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "$sid" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence could not be saved; the session remains blocked."; fi; fi
   if [ "$TURN_SID" != "$sid" ]; then TURN_ERROR="Muse resumed a different session ($TURN_SID instead of $sid)."; if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then die "$TURN_ERROR Response rejected and evidence preserved."; else die "$TURN_ERROR Response rejected; evidence could not be saved and the session remains blocked."; fi; fi
   tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="completed_pending_local_checks"|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
   after="$(tree_state "$root")"; [ "$before" = "$after" ] || die "the source repository changed during the Muse turn; stale response rejected. The advanced session was preserved; inspect it with AI_MUSE_CALLER=$CALLER ai-muse transcript $name before continuing."; rep="$(report "$root" "$name" "$prompt" "$report_path")"

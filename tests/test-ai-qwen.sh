@@ -707,6 +707,18 @@ cat "$TMP/good.jsonl" >> "$TMP/assistant-api-error.jsonl"
 ASSISTANT_API_ERROR="$(probe "$TMP/assistant-api-error.jsonl")"
 check 'an assistant provider refusal cannot become an approved review' "printf '%s' \"\$ASSISTANT_API_ERROR\" | grep -q 'provider refused the call'"
 
+# Out of credit (Albert, 2026-09-24): a DashScope Arrearage refusal must stop
+# the run with exit 92, both contract lines, and a recorded quarantine.
+sed -n '/^qwen_credit_stop() {/,/^}/p; /^provider_api_error() {/,/^}/p' "$SCRIPT" > "$TMP/credit-stop.sh"
+cp "$REPO_ROOT/tests/fixtures/reviewer-credit/qwen-arrearage.jsonl" "$TMP/credit-turn"; : > "$TMP/credit-turn.err"
+QWEN_CREDIT_RC=0; AI_REVIEW_QUARANTINE_DIR="$TMP/credit-q" bash -c 'source "$1"; source "$2"; qwen_credit_stop "$3"; echo not-stopped' _ "$REPO_ROOT/tools/reviewer_event_guard.sh" "$TMP/credit-stop.sh" "$TMP/credit-turn" > "$TMP/credit.out" 2> "$TMP/credit.err" || QWEN_CREDIT_RC=$?
+check 'out of credit exits 92' "test '$QWEN_CREDIT_RC' -eq 92 && ! grep -q not-stopped '$TMP/credit.out'"
+check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=qwen code=insufficient_quota' '$TMP/credit.err'"
+check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: ' '$TMP/credit.err'"
+check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' global qwen --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'an ordinary provider refusal is not out of credit' "AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' bash -c 'source \"\$1\"; source \"\$2\"; qwen_credit_stop \"\$3\"; echo not-stopped' _ '$REPO_ROOT/tools/reviewer_event_guard.sh' '$TMP/credit-stop.sh' '$TMP/api-error.jsonl' 2>/dev/null | grep -q not-stopped"
+check 'every failed-turn exit runs the credit stop' "test \"\$(grep -c 'qwen_credit_stop \"\$out\"' '$SCRIPT')\" -eq 6"
+
 printf '%s\n' '{"type":"result","is_error":false,"result":"finding\n## Verdict\nMAYBE"}' > "$TMP/invalid-verdict.jsonl"
 INVALID="$(probe "$TMP/invalid-verdict.jsonl")"
 check 'an invalid verdict word is rejected' "printf '%s' \"\$INVALID\" | grep -q 'APPROVE, REJECT, or BLOCKED'"

@@ -40,6 +40,7 @@ out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -d) [ -z "
   sleep "$DEEPSEEK_STUB_DELAY"
 }
 if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"private-provider-error-body"}' > "$out"; printf 500
+elif [ -n "${DEEPSEEK_STUB_CREDIT:-}" ]; then cp "$DEEPSEEK_STUB_CREDIT" "$out"; printf 402
 elif [ -n "${DEEPSEEK_STUB_TOOLCALL:-}" ] && { [ "${DEEPSEEK_STUB_TOOLCALL_ALWAYS:-0}" = 1 ] || [ ! -e "$DEEPSEEK_STUB_TOOLCALL_MARK" ]; }; then
   : > "$DEEPSEEK_STUB_TOOLCALL_MARK"
   python -c 'import json,os,sys; json.dump({"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":os.environ["DEEPSEEK_STUB_TOOLCALL"]}}]}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200
@@ -201,6 +202,14 @@ HTTP_FAILURE_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 check "HTTP failure exposes stable reason without printing private response body" "test '$http_rc' -ne 0 && grep -q provider-http-failure '$TMP/http.err' && ! grep -q private-provider-error-body '$TMP/http.err'"
 check "HTTP failure finalizes locally without replay and remains incomplete" "! run finalize '$HTTP_FAILURE_SESSION' >'$TMP/http-finalize.out' 2>&1 && grep -q retained-http-500 '$TMP/http-finalize.out' && test '$HTTP_FAILURE_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 check "provider failure leaves the ordinary conversation unchanged" "test '$history_before' = \"\$(sha256sum '$history'|cut -d' ' -f1)\""
+# Out of credit (Albert, 2026-09-24): a 402 "Insufficient Balance" must say so
+# in this run with exit 92, both contract lines, and a recorded quarantine.
+AI_REVIEW_QUARANTINE_DIR="$TMP/credit-q" DEEPSEEK_STUB_CREDIT="$ROOT/tests/fixtures/reviewer-credit/deepseek-402.json" run send credit-fail >"$TMP/credit.out" 2>"$TMP/credit.err"; credit_rc=$?
+check "out of credit exits 92" "test '$credit_rc' -eq 92"
+check "out of credit prints the machine line" "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=deepseek code=insufficient_quota' '$TMP/credit.err'"
+check "out of credit prints the human line with the top-up page" "grep -q '^OUT OF CREDIT: .*platform.deepseek.com' '$TMP/credit.err'"
+check "out of credit records the quarantine" "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global deepseek --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check "an ordinary HTTP failure is not reported as out of credit" "! grep -q 'OUT OF CREDIT' '$TMP/http.err'"
 DEEPSEEK_STUB_INVALID=1 run send malformed >"$TMP/malformed.out" 2>"$TMP/malformed.err"; malformed_rc=$?
 MALFORMED_SESSION="$(sed -n 's/^Retained turn session: //p' "$TMP/malformed.err")"
 MALFORMED_CALLS="$(wc -l < "$DEEPSEEK_CURL_ARGS")"

@@ -43,6 +43,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   unset _AI_EVENT_SELF
 fi
 
+declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/reviewer_event_guard.sh"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
@@ -609,6 +610,9 @@ PY
   fi
   if [ "$http_code" != "200" ]; then
     echo "Error: provider-http-failure: DeepSeek returned HTTP $http_code; private response: $resp_file" >&2
+    # A 402 "Insufficient Balance" (or any billing body) stops the caller with
+    # exit 92 and the out-of-credit diagnosis instead of a generic failure.
+    reviewer_credit_scan deepseek "$resp_file" || true
     publish_failure_evidence "http-$http_code" || return 1
     rm -f "$req_file" "$status_file"
     ACTIVE_API_TMP=""
@@ -1085,7 +1089,7 @@ case "$SUBCMD" in
     if [ "$LIVE" -eq 1 ]; then
       MSGS="$(mktemp)"; REPLY_FILE="$(mktemp)"
       printf '[{"role":"user","content":"Reply exactly DEEPSEEK_REVIEWER_HEALTHY"}]\n' > "$MSGS"
-      call_api "$MSGS" "$REPLY_FILE" || { rm -f "$MSGS" "$REPLY_FILE"; exit 1; }
+      call_api "$MSGS" "$REPLY_FILE" || { rm -f "$MSGS" "$REPLY_FILE"; reviewer_credit_exit; exit 1; }
       grep -qx 'DEEPSEEK_REVIEWER_HEALTHY' "$REPLY_FILE" || { rm -f "$MSGS" "$REPLY_FILE"; echo 'Error: DeepSeek live probe returned unexpected text.' >&2; exit 1; }
       rm -f "$MSGS" "$REPLY_FILE"; printf 'PASS  live provider response\n'
     fi
@@ -1155,7 +1159,7 @@ $REVIEW_INSTRUCTION"
     if [ "$REVIEW" = 1 ]; then build_candidate "" "$CANDIDATE" system "$REVIEW_INSTRUCTION" user "$MSG"; elif [ -n "$SYSTEM" ]; then build_candidate "" "$CANDIDATE" system "$SYSTEM" user "$MSG"; else build_candidate "" "$CANDIDATE" user "$MSG"; fi
     rm -f "$REPLY_FILE"
     pending_begin "$CANDIDATE" || exit 1
-    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and conversation was not created." >&2; exit 1; }
+    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and conversation was not created." >&2; reviewer_credit_exit; exit 1; }
     REPLY="$(<"$REPLY_FILE")"
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; conversation was not created. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
@@ -1235,7 +1239,7 @@ $REVIEW_INSTRUCTION"
     build_candidate "$F" "$CANDIDATE" user "$MSG"
     rm -f "$REPLY_FILE"
     pending_begin "$CANDIDATE" || exit 1
-    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and canonical conversation is unchanged." >&2; exit 1; }
+    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and canonical conversation is unchanged." >&2; reviewer_credit_exit; exit 1; }
     REPLY="$(<"$REPLY_FILE")"
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; canonical conversation is unchanged. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi

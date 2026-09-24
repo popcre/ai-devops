@@ -187,6 +187,7 @@ case "$mode" in
   weird)     cat "$TMPDIR_FOR_TEST/weird.json" ;;
   nosession) cat "$TMPDIR_FOR_TEST/no-session.json" ;;
   empty)     : ;;
+  nocredit)  cat "$TMPDIR_FOR_TEST/xai-credit.err" >&2; exit 1 ;;
   slow)      # exit immediately leaving an empty file, then complete later:
              # this is the early-return bug, reproduced.
              ( sleep 3; cat "$TMPDIR_FOR_TEST/fixture.json" > "$TMPDIR_FOR_TEST/late_target" ) &
@@ -491,6 +492,23 @@ echo ok > "$TMP/mode"
 AFTER_MARK_FAIL="$( cd "$CLONE" && bash "$SCRIPT" new marker-write-fails --prompt x 2>&1 )"; AFTER_MARK_FAIL_RC=$?
 check "marker_write_failure_still_blocks_second_paid_turn" "[ \"$AFTER_MARK_FAIL_RC\" -ne 0 ] && printf '%s' \"$AFTER_MARK_FAIL\" | grep -q 'remote completion is unconfirmed' && test -f '$MARK_FAIL_LOCK/remote-uncertain'"
 rm -rf "$MARK_FAIL_LOCK"
+echo ok > "$TMP/mode"
+
+# Out of credit (Albert, 2026-09-24): the real xAI 403 must stop this run at
+# once with exit 92, both contract lines, and a recorded quarantine - never a
+# wait for the result deadline and never a "retry once" hint.
+cp "$REPO_ROOT/tests/fixtures/reviewer-credit/grok-xai-403.stderr" "$TMP/xai-credit.err"
+echo nocredit > "$TMP/mode"
+CREDIT_START=$SECONDS
+( cd "$REPO" && AI_REVIEW_QUARANTINE_DIR="$TMP/credit-quarantine" AI_GROK_WAIT_TIMEOUT=900 bash "$SCRIPT" new out-of-credit --prompt x ) > "$TMP/credit.out" 2> "$TMP/credit.err"; CREDIT_RC=$?
+CREDIT_ELAPSED=$((SECONDS - CREDIT_START))
+check "out_of_credit_exits_92" "test '$CREDIT_RC' -eq 92"
+check "out_of_credit_prints_machine_line" "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota' '$TMP/credit.err'"
+check "out_of_credit_prints_human_line" "grep -q '^OUT OF CREDIT: .*console.x.ai' '$TMP/credit.err'"
+check "out_of_credit_gives_no_retry_hint" "! grep -q 'Retry once' '$TMP/credit.err'"
+check "out_of_credit_does_not_wait_for_the_result_deadline" "test '$CREDIT_ELAPSED' -lt 450"
+check "out_of_credit_records_quarantine" "\"$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' global grok --directory '$TMP/credit-quarantine' | jq -e '.failure_class==\"out-of-credit\"'"
+rm -rf "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
 echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }

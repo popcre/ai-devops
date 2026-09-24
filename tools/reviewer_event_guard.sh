@@ -120,3 +120,36 @@ reviewer_event_guard(){
   fi
   exit "$result"
 }
+
+# Out-of-credit stop (Albert, 2026-09-24): the session that hits a billing or
+# credit failure must learn it from this run, not from a later investigation.
+# reviewer_credit_scan PROVIDER FILE... classifies provider error evidence with
+# the one shared classifier; on a match it records the out-of-credit quarantine
+# and keeps the two contract lines in REVIEWER_CREDIT_HIT. Call it only on a
+# failure path with provider error channels, never on assistant content.
+reviewer_credit_scan(){
+  local provider="$1" python tool dir out rc=0 file
+  local -a scan=()
+  shift
+  for file in "$@"; do
+    if [ -n "$file" ] && [ -f "$file" ]; then scan+=(--scan "$file"); fi
+  done
+  [ "${#scan[@]}" -gt 0 ] || return 3
+  python="$(command -v python3 || command -v python)" || return 1
+  tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_admission.py"
+  dir="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
+  out="$("$python" "$tool" credit "$provider" --directory "$dir" "${scan[@]}" --record)" || rc=$?
+  [ "$rc" = 0 ] || return "$rc"
+  [ -n "$out" ] || return 1
+  REVIEWER_CREDIT_HIT="$out"
+}
+
+# reviewer_credit_exit prints the recorded diagnosis and exits 92; it returns
+# without effect when no out-of-credit failure was classified.
+reviewer_credit_exit(){
+  [ -n "${REVIEWER_CREDIT_HIT:-}" ] || return 0
+  printf '%s\n' "$REVIEWER_CREDIT_HIT" >&2
+  exit 92
+}
+
+reviewer_credit_stop(){ reviewer_credit_scan "$@" || true; reviewer_credit_exit; }

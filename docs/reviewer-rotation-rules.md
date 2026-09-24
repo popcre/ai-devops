@@ -50,3 +50,26 @@ allocator but stayed registered here, and a session spent an hour trying it.
    `capacity` line on stderr for each relaunch. The code is `bin/ai-muse` and
    its checks are in `tests/test-ai-muse.sh`. Every other failure still stops the
    review; never switch Muse's model or disable it to get past a 404.
+10. **Out of credit is told to Albert in the same session.** Owner rule,
+    2026-09-24: "the session that hit that error should A) know that that's
+    why it failed, and B) tell me in that same session." When a provider
+    refuses a run for lack of paid credit, the Grok, Muse, Qwen, Gemini and
+    DeepSeek wrappers stop at once and exit **92**, printing on stderr:
+
+    ```
+    AI_REVIEWER_OUT_OF_CREDIT provider=<provider> code=insufficient_quota
+    OUT OF CREDIT: <which account, where to add credits> - then run: ai-review-preflight clear <provider>
+    ```
+
+    They also record a one-hour `out-of-credit` quarantine, so
+    `ai-review-preflight usable <provider>` refuses the provider until it is
+    cleared. The session that sees exit 92 or either line must, in its very
+    next reply to Albert, quote the `OUT OF CREDIT:` line (which provider needs
+    credits and where), then rotate to the next reviewer. Never retry the same
+    provider, never report it as a generic failure, and never leave the news
+    for another session. The shared-db governed-review runner reports the line
+    verbatim in its `REFUSED` result with replacement code
+    `insufficient_quota`. The classifier is `tools/reviewer_admission.py credit`;
+    its fixtures are `tests/fixtures/reviewer-credit/` and its checks are in
+    `tests/test-reviewer-credit.sh`. Rate limits and a bare
+    `RESOURCE_EXHAUSTED` are not credit failures.

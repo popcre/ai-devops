@@ -134,6 +134,7 @@ case "${1:-}" in
       for fd_path in /proc/$$/fd/*; do case "$(readlink "$fd_path" 2>/dev/null || true)" in *.muse-stage.*) printf leaked > "$MUSE_STUB_FD_LEAK_FILE";; esac; done
     fi
     [ "${MUSE_STUB_MODE:-}" = fail ] && exit 7
+    [ "${MUSE_STUB_MODE:-}" = credit ] && { cat "$MUSE_STUB_CREDIT_FILE"; exit 1; }
     if [ "${MUSE_STUB_MODE:-}" = capacity ]; then
       n="$(cat "$MUSE_STUB_CAPACITY_FILE" 2>/dev/null || echo 0)"; n=$((n+1)); printf '%s' "$n" > "$MUSE_STUB_CAPACITY_FILE"
       [ "$n" -gt "${MUSE_STUB_CAPACITY_FAILS:-1}" ] || { printf '{"type":"error","sessionID":"ses_new","error":{"name":"APIError","data":{"message":"model_not_found: The requested model was not found."}}}
@@ -436,6 +437,14 @@ check 'capacity 404 is relaunched and then succeeds' "cd '$REPO' && rm -f '$TMP/
 check 'capacity 404 stops after the retry budget' "cd '$REPO' && rm -f '$TMP/cap2' && ! eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 AI_MUSE_CAPACITY_RETRIES=1 MUSE_STUB_MODE=capacity MUSE_STUB_CAPACITY_FILE='$TMP/cap2' MUSE_STUB_CAPACITY_FAILS=5 '$SCRIPT' new capacity-fail --prompt test\" >/dev/null 2>&1 && test \"\$(cat '$TMP/cap2')\" = 2"
 check 'ordinary provider failure is never relaunched' "cd '$REPO' && : > '$TMP/fail-calls' && ! eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 MUSE_STUB_CALLS_FILE='$TMP/fail-calls' MUSE_STUB_MODE=fail '$SCRIPT' new fail-once --prompt test\" >/dev/null 2>&1 && test \"\$(grep -c run '$TMP/fail-calls')\" = 1"
 check 'provider failure is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' new provider-fail --prompt test\""
+# Out of credit (Albert, 2026-09-24): the run itself must say so, exit 92, and
+# record the quarantine; an ordinary failure must not be called out of credit.
+set +e; (cd "$REPO" && eval "$ENV AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q' MUSE_STUB_MODE=credit MUSE_STUB_CREDIT_FILE='$ROOT/tests/fixtures/reviewer-credit/muse-insufficient-quota.jsonl' '$SCRIPT' new out-of-credit --prompt test") >"$TMP/credit.out" 2>"$TMP/credit.err"; MUSE_CREDIT_RC=$?; set -e
+check 'out of credit exits 92' "test '$MUSE_CREDIT_RC' -eq 92"
+check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=muse code=insufficient_quota' '$TMP/credit.err'"
+check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: .*dev.meta.ai' '$TMP/credit.err'"
+check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global muse --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'ordinary failure is not reported as out of credit' "cd '$REPO' && ! eval \"$ENV AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' MUSE_STUB_MODE=fail '$SCRIPT' new plain-fail --prompt test\" 2>'$TMP/plain.err'; ! grep -q 'OUT OF CREDIT' '$TMP/plain.err'"
 check 'malformed provider output is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=malformed '$SCRIPT' new malformed --prompt test\""
 check 'partly malformed output preserves a recoverable session' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=partialmalformed '$SCRIPT' new partial --prompt test\"; meta=\$(find '$TMP/state' -name 'codex--partial.json' -type f); jq -e '.session_id==\"ses_partial\" and .status==\"provider_outcome_uncertain\"' \"\$meta\""
 check 'missing completion is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=nostop '$SCRIPT' new nostop --prompt test\""
