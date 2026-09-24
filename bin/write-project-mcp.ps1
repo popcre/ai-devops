@@ -169,9 +169,27 @@ foreach ($key in $Scope.Keys) {
       # The repository tracks its own .mcp.json: never modify it. Deliver only
       # the names it lacks through the Claude Code project entry.
       $missing = @($desired | Where-Object { $fileNames -notcontains $_ })
+      # Claude Code keys projects by the FORWARD-slash path (C:/repos/oracle);
+      # a backslash key is never read. Earlier runs wrote backslash keys, so
+      # managed names are migrated out of that legacy entry (live proof,
+      # 2026-09-24: vercel under the backslash key for C:/repos/oracle never appeared).
+      $entryKey = $rootPath.Replace([string][char]92, '/')
+      if ($entryKey -cne $rootPath -and $codeConfig["projects"].ContainsKey($rootPath)) {
+        $legacy = $codeConfig["projects"][$rootPath]
+        if ($legacy -and $legacy.ContainsKey("mcpServers") -and $legacy["mcpServers"]) {
+          $legacyManaged = @($legacy["mcpServers"].Keys | Where-Object { $Catalog.Contains($_) })
+          if ($legacyManaged.Count -gt 0 -and -not $DryRun) {
+            foreach ($name in $legacyManaged) { $null = $legacy["mcpServers"].Remove($name) }
+            if ($legacy["mcpServers"].Count -eq 0) { $null = $legacy.Remove("mcpServers") }
+            if ($legacy.Count -eq 0) { $null = $codeConfig["projects"].Remove($rootPath) }
+            $codeDirty = $true
+            Write-Host "  ok   $rootPath legacy backslash project entry: -$($legacyManaged -join ', ')"
+          }
+        }
+      }
       $entry = $null
-      if ($codeConfig["projects"].ContainsKey($rootPath) -and $codeConfig["projects"][$rootPath]) {
-        $entry = $codeConfig["projects"][$rootPath]
+      if ($codeConfig["projects"].ContainsKey($entryKey) -and $codeConfig["projects"][$entryKey]) {
+        $entry = $codeConfig["projects"][$entryKey]
       }
       $entryNames = @()
       if ($entry -and $entry.ContainsKey("mcpServers") -and $entry["mcpServers"]) {
@@ -191,7 +209,7 @@ foreach ($key in $Scope.Keys) {
       }
       if (-not $entry) {
         $entry = @{}
-        $codeConfig["projects"][$rootPath] = $entry
+        $codeConfig["projects"][$entryKey] = $entry
       }
       if (-not $entry.ContainsKey("mcpServers") -or $null -eq $entry["mcpServers"]) {
         $entry["mcpServers"] = @{}

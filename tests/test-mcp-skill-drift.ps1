@@ -66,7 +66,8 @@ absentproj	github.com/example/absentproj
   Write-Json (Join-Path $scanRoot "trackedproj\.mcp.json") @{
     mcpServers = @{ "repo-owned" = @{ command = "x" } } }
   git -C (Join-Path $scanRoot "trackedproj") add .mcp.json 2>$null
-  $trackedFull = [IO.Path]::GetFullPath((Join-Path $scanRoot "trackedproj"))
+  # Claude Code reads the forward-slash project key.
+  $trackedFull = [IO.Path]::GetFullPath((Join-Path $scanRoot "trackedproj")).Replace([string][char]92, "/")
   $codeProjects = Join-Path $testRoot "claude-projects.json"
   Write-Json $codeProjects @{
     mcpServers = @{ "1password" = @{ command = "x" } }

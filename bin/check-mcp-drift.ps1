@@ -144,10 +144,12 @@ if (-not $SkipProjectScope -and $scope.Count -gt 0) {
         Compare-Set "$label (untracked .mcp.json, managed names)" $desired $managed
       } else {
         $entryNames = @()
+        # Claude Code reads only the forward-slash project key (C:/repos/x).
+        $entryKey = $rootPath.Replace([string][char]92, '/')
         if ($codeJson -and $codeJson.ContainsKey("projects") -and $codeJson["projects"] -and
-            $codeJson["projects"].ContainsKey($rootPath) -and $codeJson["projects"][$rootPath] -and
-            $codeJson["projects"][$rootPath].ContainsKey("mcpServers") -and $codeJson["projects"][$rootPath]["mcpServers"]) {
-          $entryNames = @($codeJson["projects"][$rootPath]["mcpServers"].Keys)
+            $codeJson["projects"].ContainsKey($entryKey) -and $codeJson["projects"][$entryKey] -and
+            $codeJson["projects"][$entryKey].ContainsKey("mcpServers") -and $codeJson["projects"][$entryKey]["mcpServers"]) {
+          $entryNames = @($codeJson["projects"][$entryKey]["mcpServers"].Keys)
         }
         $delivered = @(@($fileNames) + @($entryNames) | Sort-Object -Unique)
         $missing = @($desired | Where-Object { $delivered -notcontains $_ })
