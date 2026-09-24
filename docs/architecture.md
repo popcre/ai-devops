@@ -154,6 +154,11 @@ is represented as missing, never invented. Scoreboard evidence is
 each relative file name, byte length, and digest. `ai-review-sandbox` publishes
 only after the committed tree, tracked binary diff, and NUL-safe untracked-file
 inventory produce the same whole-source digest before and after the copy.
+Since issue #711 the snapshot is bounded: a measured-depth shallow fetch
+carries the change under review, the base-ref candidates the packet resolver
+reads, and the connecting ancestry — never full repository history — and
+wrappers forward an explicit `--base` into the build via
+`AI_REVIEW_SANDBOX_BASE` so an explicitly requested comparison is never narrowed.
 `ai-review-lifecycle` owns normalized upstream identity, one assignment lock,
 preflight, running/terminal state, stale-source rejection, report hashing, and
 scoreboard append. Provider adapters own only their provider call and response

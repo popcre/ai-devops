@@ -351,7 +351,7 @@ review_boundary() { # review_boundary ROOT TAG [RECORDED-DIRECTORY] -> directory
   if [ -n "${3:-}" ]; then
     "$SANDBOX_BIN" refresh-copy "$1" "$2" "$3" || die "could not refresh the recorded private review snapshot for $1"
   else
-    "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
+    AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
   fi
 }
 release_boundary() { # release_boundary ROOT TAG

@@ -330,7 +330,7 @@ prepare(){
   identity="$(tmp_file)"
   "$PACKET" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
     || die "source identity refused before snapshot creation"
-  REVIEW_DIR="$("$SANDBOX" ensure-copy "$root" "$t")"
+  REVIEW_DIR="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX" ensure-copy "$root" "$t")"
   # jq on Windows stores native paths; render the same identity before and
   # after local recovery so an identical report remains byte-identical.
   if command -v cygpath >/dev/null 2>&1; then REVIEW_DIR="$(cygpath -am "$REVIEW_DIR")"; fi

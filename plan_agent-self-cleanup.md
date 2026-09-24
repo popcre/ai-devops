@@ -2,13 +2,13 @@
 
 | Step | Status | Evidence |
 |------|--------|----------|
-| 1. Shrink what a review copies | ⬜ open | |
+| 1. Shrink what a review copies | ✅ done (bounded shallow snapshots, not files-only: the packet/lifecycle tools run git inside the snapshot, so a no-`.git` shape cannot work — `tests/test-ai-review-snapshot-bounded-history.sh`, `tests/test-ai-review-sandbox.sh`) | real-worktree dry run: 15 MB / 13 commits / 17 s vs old full clone 461 MB / 1,206 commits / 63 s |
 | 2. Delete the copy when the review ends | ⬜ open | |
 | 3. Parent process sweeps orphans | ⬜ open | |
 | 4. Daily sweep as backup only | ⬜ open (task already installed on this machine) | `AI-Debris-Housekeeping` scheduled task, 03:30 daily |
 | 5. Prove it live with one real review | ⬜ open | |
 
-**Where a fresh session starts:** Phase 1. Re-read this STATUS table before each phase.
+**Where a fresh session starts:** Phase 2. Re-read this STATUS table before each phase.
 
 Related handoff: [HANDOFF.d/2026-09-23T1820Z-edge-dev-claude-agent-self-cleanup.md](HANDOFF.d/2026-09-23T1820Z-edge-dev-claude-agent-self-cleanup.md) (issue [#711](https://github.com/popcre/ai-devops/issues/711)). Do not rewrite root `HANDOFF.md`.
 

@@ -15,14 +15,23 @@
 #
 # None of those tools accept a second directory, so the boundary cannot simply be
 # widened. Instead this script hands the reviewer a SELF-CONTAINED, disposable
-# snapshot of the worktree: a real clone (its own `.git/` inside the boundary),
-# checked out at the worktree's HEAD, with the worktree's uncommitted edits and
-# untracked files reproduced on top. The reviewer sees exactly the code under
-# review and never needs to look outside its own directory.
+# snapshot of the worktree: its own `.git/` inside the boundary, checked out at
+# the worktree's HEAD, with the worktree's uncommitted edits and untracked files
+# reproduced on top. The reviewer sees exactly the code under review and never
+# needs to look outside its own directory.
 #
-# The recipe is the one already proven by ai-glm's implementation clone
-# (clone --no-hardlinks, detach at base, apply `diff HEAD`), plus untracked
-# files, which a review needs because brand-new files are usually the point.
+# Since v1.5.0 the snapshot is BOUNDED (issue #711): instead of a full clone
+# carrying the repository's entire history (~50 MB × thousands of copies filled
+# the disk), it is built by a shallow `git fetch --depth N` over file://, where
+# N is measured from the source so the fetch covers exactly the ancestry the
+# evidence tools read back: the chain from HEAD down past the fork point of
+# every base-ref candidate ai-review-packet's resolver considers
+# (origin/main, origin/master, main, master, plus the caller's explicit
+# AI_REVIEW_SANDBOX_BASE hint). Every want is a SHA pinned BEFORE the fetch, so
+# ref identities are frozen against concurrent commits exactly as the old
+# captured-refs transaction was, and every carried ref's merge-base is re-proved
+# in the snapshot after the fetch: any mismatch aborts the build rather than
+# publishing evidence whose comparison could be silently mis-scoped.
 #
 #   ai-review-sandbox ensure <repo-root> <tag>   # print the directory to review; create/refresh it
 #   ai-review-sandbox ensure-copy <repo-root> <tag> # always create a disposable snapshot
@@ -41,10 +50,17 @@
 
 set -euo pipefail
 
-VERSION="1.4.0"
+VERSION="1.5.0"
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
+
+# Optional caller hint naming the explicit --base ref a packet build will pass
+# inside the snapshot (ai-review-packet resolve's `--base`). The snapshot then
+# carries that ref too, so an explicit comparison never dies on a bounded
+# snapshot. Empty or unresolvable values are ignored with a warning; the packet
+# build itself fails loudly if the ref truly matters and is missing.
+BASE_HINT="${AI_REVIEW_SANDBOX_BASE:-}"
 
 die()  { printf 'ai-review-sandbox: %s\n' "$1" >&2; exit 1; }
 warn() { printf 'ai-review-sandbox: %s\n' "$1" >&2; }
@@ -228,55 +244,151 @@ validate_snapshot_links() { # validate_snapshot_links STAGE
   done < <(find "$stage" -path "$stage/.git" -prune -o -type l -print0 2>/dev/null)
 }
 
-build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
-  local root="$1" tag="$2" build="$3" before="$4" attempt="$5" base carry captured_refs
-  base="$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
-    || die "worktree $root has no commits yet; there is nothing to snapshot."
-  # Capture refs before copying objects. Another worktree can commit while the
-  # clone runs; reading its newer ref afterward names an object we never copied.
-  captured_refs="$(git -C "$root" for-each-ref --format='update %(refname) %(objectname)' refs/heads refs/remotes)" || return 1
+# --- bounded snapshot construction (issue #711) ------------------------------
+#
+# A snapshot needs exactly the ancestry the evidence tools read back inside it:
+# HEAD's tree (checkout), each carried base ref's tip tree (packet diff), the
+# fork point and the connecting commit chains (packet merge-base, `log -1`),
+# and HEAD~1 (the packet's no-base fallback). Everything older is dead weight —
+# full history is what made 3,950 leftover copies occupy ~192 GB.
 
+source_url() { # source_url ROOT -> file:// URL for the local smart transport
+  case "$(uname -s)" in
+    CYGWIN*|MINGW*|MSYS*) printf 'file:///%s' "$(cygpath -m "$1")" ;;
+    *) printf 'file://%s' "$1" ;;
+  esac
+}
+
+copy_source_behavior_config() { # copy_source_behavior_config SRC BUILD
+  # A local `git clone` copied the source's repo-local config, and the
+  # checked-out bytes depend on it (core.autocrlf, eol, filter drivers). An
+  # init+fetch build must reproduce those settings or the snapshot's working
+  # tree stops matching the source digest. Remotes are deliberately NOT
+  # copied: the old flow removed origin but left every other remote behind,
+  # while this build starts with none — strictly less exposure.
+  local src="$1" dst="$2" line key value
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    key="${line%% *}"; value="${line#"$key"}"; value="${value# }"
+    case "$key" in core.bare|core.worktree) continue ;; esac
+    git -C "$dst" config "$key" "$value" 2>/dev/null || true
+  done < <(git -C "$src" config --local --get-regexp '^(core|filter|user)\.' 2>/dev/null || true)
+}
+
+# Filled by plan_snapshot: parallel arrays — ref path in the snapshot ("" for a
+# SHA-only want), pinned tip SHA, and the fork point proven in the source —
+# plus the measured fetch depth. plan_snapshot must NEVER be called inside a
+# command substitution: the subshell would throw all of this state away and
+# the build would fetch nothing (the trap source_digest already avoids for the
+# same reason).
+SNAP_REFNAMES=() SNAP_REFTIPS=() SNAP_FORKS=() SNAP_DEPTH=5
+plan_snapshot() { # plan_snapshot ROOT HEAD -> sets SNAP_* arrays and SNAP_DEPTH
+  local root="$1" head="$2" want tip fork m n chain i
+  SNAP_REFNAMES=(); SNAP_REFTIPS=(); SNAP_FORKS=(); SNAP_DEPTH=5
+  # The explicit hint first: an explicitly requested comparison outranks every
+  # default candidate, exactly as the packet resolver orders them.
+  if [ -n "$BASE_HINT" ]; then
+    tip="$(git -C "$root" rev-parse --verify --quiet "$BASE_HINT^{commit}" 2>/dev/null || true)"
+    if [ -z "$tip" ]; then
+      warn "ignoring AI_REVIEW_SANDBOX_BASE='$BASE_HINT': it does not resolve in $root"
+    else
+      fork="$(git -C "$root" merge-base "$head" "$tip" 2>/dev/null || true)"
+      if [[ "$BASE_HINT" =~ ^[0-9a-f]{40}$ ]] || [[ "$BASE_HINT" == HEAD* ]]; then
+        # A raw SHA or HEAD~N spelling has no ref to recreate; fetching the
+        # object is enough for the packet's rev-parse of the same spelling.
+        SNAP_REFNAMES+=(""); SNAP_REFTIPS+=("$tip"); SNAP_FORKS+=("$fork")
+      else
+        case "$BASE_HINT" in
+          refs/*) m="$BASE_HINT" ;;
+          */*)    m="refs/remotes/$BASE_HINT" ;;
+          *)      m="refs/heads/$BASE_HINT" ;;
+        esac
+        SNAP_REFNAMES+=("$m"); SNAP_REFTIPS+=("$tip"); SNAP_FORKS+=("$fork")
+      fi
+    fi
+  fi
+  for want in origin/main origin/master main master; do
+    tip="$(git -C "$root" rev-parse --verify --quiet "$want^{commit}" 2>/dev/null || true)"
+    [ -n "$tip" ] || continue
+    case "$want" in origin/*) m="refs/remotes/$want" ;; *) m="refs/heads/$want" ;; esac
+    for i in "${!SNAP_REFNAMES[@]}"; do [ "${SNAP_REFNAMES[$i]}" = "$m" ] && continue 2; done
+    fork="$(git -C "$root" merge-base "$head" "$tip" 2>/dev/null || true)"
+    # An unrelated candidate is skipped: the packet resolver skips it too (no
+    # merge-base means it can never be the comparison base), so resolution in
+    # the snapshot stays identical to resolution in the source.
+    [ -n "$fork" ] || continue
+    SNAP_REFNAMES+=("$m"); SNAP_REFTIPS+=("$tip"); SNAP_FORKS+=("$fork")
+  done
+  for i in "${!SNAP_FORKS[@]}"; do
+    [ -n "${SNAP_FORKS[$i]}" ] || continue
+    chain="$(git -C "$root" rev-list --count "${SNAP_FORKS[$i]}..$head" 2>/dev/null || echo 0)"
+    n="$(git -C "$root" rev-list --count "${SNAP_FORKS[$i]}..${SNAP_REFTIPS[$i]}" 2>/dev/null || echo 0)"
+    [ "$n" -gt "$chain" ] && chain="$n"
+    [ "$(( chain + 5 ))" -gt "$SNAP_DEPTH" ] && SNAP_DEPTH="$(( chain + 5 ))"
+  done
+}
+
+build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
+  local root="$1" tag="$2" build="$3" before="$4" attempt="$5"
+  local head refspecs=() i carry probe
+  head="$(git -C "$root" rev-parse HEAD 2>/dev/null)" \
+    || die "worktree $root has no commits yet; there is nothing to snapshot."
+  plan_snapshot "$root" "$head"
+  # The review head comes first and unconditionally: a linked worktree checked
+  # out on a topic branch is on none of the candidate base refs, and without
+  # this want the checkout below has nothing to detach at.
+  refspecs=("$head")
+  for i in "${!SNAP_REFTIPS[@]}"; do
+    if [ -n "${SNAP_REFNAMES[$i]}" ]; then
+      refspecs+=("+${SNAP_REFTIPS[$i]}:${SNAP_REFNAMES[$i]}")
+    else
+      refspecs+=("${SNAP_REFTIPS[$i]}")
+    fi
+  done
+
+  git -c core.longpaths=true init -q "$build" || return 1
+  # Park the unborn HEAD on a process-unique branch: fetching a candidate ref
+  # into the branch HEAD points at is refused by git, and the default branch
+  # name (main/master) is exactly what the candidates are. The name is never
+  # fetched into and vanishes when HEAD is detached below.
+  git -C "$build" symbolic-ref HEAD "refs/heads/snapshot-workspace-$$" || return 1
+  copy_source_behavior_config "$root" "$build"
+  # SHA-pinned wants freeze every ref identity against concurrent commits — the
+  # property the old captured-refs transaction provided — and
+  # uploadpack.allowAnySHA1InWant covers a detached worktree HEAD that sits on
+  # no ref at all.
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ]; then
-    git -c core.longpaths=true clone --progress --no-hardlinks "$root" "$build" \
-      2>> "$AI_REVIEW_SANDBOX_PROGRESS_FILE" || return 1
+    git -c core.longpaths=true -c uploadpack.allowAnySHA1InWant=true \
+      -C "$build" fetch --progress --depth "$SNAP_DEPTH" --no-tags \
+      "$(source_url "$root")" "${refspecs[@]}" 2>> "$AI_REVIEW_SANDBOX_PROGRESS_FILE" || return 1
   else
-    git -c core.longpaths=true clone --quiet --no-hardlinks "$root" "$build" 2>/dev/null \
-      || return 1
+    git -c core.longpaths=true -c uploadpack.allowAnySHA1InWant=true \
+      -C "$build" fetch --quiet --depth "$SNAP_DEPTH" --no-tags \
+      "$(source_url "$root")" "${refspecs[@]}" 2>/dev/null || return 1
   fi
   run_test_hook after-clone "$root" "$attempt"
   printf '%s\nsource_digest=%s\nevidence_format=1\n' "$root" "$before" > "$build/$MARKER" || return 1
-  git -C "$build" remote remove origin >/dev/null 2>&1 || true
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_REVIEW_SANDBOX_PROGRESS_FILE:-}" ]; then
-    git -C "$build" checkout --progress --detach "$base" \
+    git -C "$build" checkout --progress --detach "$head" \
       2>> "$AI_REVIEW_SANDBOX_PROGRESS_FILE" || return 1
   else
-    git -C "$build" checkout --quiet --detach "$base" 2>/dev/null || return 1
+    git -C "$build" checkout --quiet --detach "$head" 2>/dev/null || return 1
   fi
 
-  # CARRY THE BASE BRANCHES ACROSS. `git clone` puts the source's branches under
-  # refs/remotes/origin/, and `remote remove origin` deletes every one of them, so
-  # the snapshot ends up with NO refs at all. ai-review-packet's base resolution
-  # prefers fetched `origin/main`/`origin/master`, then local `main`/`master`, and --
-  # because none of them can exist here -- silently falls through to HEAD~1.
-  #
-  # On an ordinary linear branch that is merely narrow. On a MERGE commit it is
-  # wrong in a way that looks completely normal: HEAD~1 is the first parent, so
-  # the packet's "what changed" becomes everything the merge brought IN from the
-  # base branch, and the reviewer confidently judges files the change never
-  # touched. Observed live on shared-db PR #2155 (head c337a6d5, a
-  # "Merge main into ..." commit): two Codex runs REJECTed the change over a
-  # handoff document that came from main and was not part of the pull request.
-  #
-  # Preserve remote-tracking refs as remote-tracking refs. They remain useful
-  # evidence even though this disposable copy has no network remote: packet
-  # resolution deliberately prefers a fetched origin/main to a stale local
-  # main. Local branches remain the offline fallback. This only ADDS refs:
-  # HEAD stays detached at $base and the reviewed tree is untouched.
-  # Batch the ref transaction: spawning Git once per branch is especially
-  # expensive on Windows. update-ref rejects unavailable objects atomically.
-  if [ -n "$captured_refs" ]; then
-    printf '%s\n' "$captured_refs" | git -C "$build" update-ref --stdin || return 1
-  fi
+  # Re-prove every frozen ref identity and fork inside the snapshot. A source
+  # history rewrite mid-build would otherwise hand the packet a different
+  # comparison than the one planned: refuse rather than publish evidence whose
+  # scope silently moved.
+  for i in "${!SNAP_REFTIPS[@]}"; do
+    probe="${SNAP_REFNAMES[$i]}"
+    [ -n "$probe" ] || probe="${SNAP_REFTIPS[$i]}"
+    [ "$(git -C "$build" rev-parse --verify --quiet "${probe}^{commit}")" = "${SNAP_REFTIPS[$i]}" ] \
+      || { warn "snapshot ref $probe is not at the captured tip; refusing."; return 1; }
+    if [ -n "${SNAP_FORKS[$i]}" ]; then
+      [ "$(git -C "$build" merge-base "$head" "$probe" 2>/dev/null || true)" = "${SNAP_FORKS[$i]}" ] \
+        || { warn "snapshot merge-base for $probe moved against the plan; refusing."; return 1; }
+    fi
+  done
 
   # Uncommitted edits, then untracked files: together these make the snapshot
   # byte-identical to what a human sees in the worktree.
@@ -314,8 +426,11 @@ This directory is a disposable, self-contained snapshot of:
 
 That path is a linked Git worktree, so its Git control files live outside any
 single-directory review boundary. Reviewing it directly fails before any code is
-read. This snapshot carries its own \`.git/\`, is checked out at \`$base\`, and
-reproduces the worktree's uncommitted edits and untracked files.
+read. This snapshot carries its own \`.git/\` with BOUNDED history — a shallow
+fetch covering exactly the change under review, its base branch, and the commits
+between them — is checked out at \`$head\`, and reproduces the worktree's
+uncommitted edits and untracked files. Repository history older than the change
+under review may be absent.
 
 Review the code here as if it were the real worktree. Do not commit, push, or
 treat this path as the source of truth: it is rebuilt on demand and deleted when
