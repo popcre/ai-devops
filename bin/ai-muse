@@ -28,9 +28,10 @@ PROFILE_HOME="${USERPROFILE:-$HOME}"
 case "$PROFILE_HOME" in [A-Za-z]:*) PROFILE_HOME="/$(printf '%s' "$PROFILE_HOME" | sed 's#\\#/#g; s#:#/#')";; esac
 CFG="${AI_MUSE_CONFIG_DIR:-$PROFILE_HOME/.config/ai-devops-muse}"
 OC_CFG="$CFG/opencode-xdg/opencode"
-# Runtime engine: the pinned OpenCode harness (default) or Meta's Muse Code CLI.
-# Sessions never cross engines: each engine records its own model identifier.
-ENGINE="${AI_MUSE_ENGINE:-opencode}"
+# Runtime engine: Meta's Muse Code CLI (default) or the pinned OpenCode harness.
+# Rollback: AI_MUSE_ENGINE=opencode. Sessions never cross engines: each engine
+# records its own model identifier.
+ENGINE="${AI_MUSE_ENGINE:-muse-code}"
 case "$ENGINE" in
   opencode)
     VERSION="$(tr -d ' \r\n' < "$ROOT/config/opencode/version")"
