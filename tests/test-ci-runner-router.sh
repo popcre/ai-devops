@@ -83,6 +83,13 @@ const lanesOut = core => lanes(JSON.parse(core.out.windows_matrix));
     await run({ ...deps, context: ctx, core, cfg });
     check(label, () => assert.strictEqual(lanesOut(core), expected));
   }
+  for (const [label, head] of [['a fork pull request never reaches a self-hosted host', { repo: { full_name: 'stranger/ai-devops' } }],
+                               ['a pull request from a deleted fork never reaches a self-hosted host', { repo: null }]]) {
+    const core = fakeCore();
+    const forkCtx = { ...ctx, payload: { pull_request: { head } } };
+    await run({ github: fakeGithub(), poolGithub: fakePool([envy(false)]), context: forkCtx, core, cfg });
+    check(label, () => assert.strictEqual(lanesOut(core), allBlacksmith));
+  }
   if (failures) { console.error(`${failures} runner-router check(s) failed`); process.exit(1); }
   console.log('runner-router: all checks passed');
 })();
