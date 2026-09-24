@@ -198,7 +198,7 @@ muse_code_run(){ # every non-turn Muse Code call gets the same minimal environme
   local -a e=(/usr/bin/env -i "PATH=$PATH" "HOME=$PROFILE_HOME") ; local n
   # LOCALAPPDATA is stripped, so a PowerShell child would drop its module cache
   # into the working checkout (#754). Point that cache at private temp space.
-  [ -z "${TEMP:-}" ] || e+=("PSModuleAnalysisCachePath=$TEMP/ai-muse-ps-module-cache")
+  e+=("PSModuleAnalysisCachePath=${TEMP:-${TMPDIR:-/tmp}}/ai-muse-ps-module-cache")
   for n in XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
     [ -z "${!n:-}" ] || e+=("$n=${!n}")
   done
@@ -578,7 +578,7 @@ run_turn(){
   set +e
   clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
   [ "$ENGINE" != muse-code ] || clean_env+=("AI_MUSE_KEY_ENV=META_API_KEY")
-  [ -z "${TEMP:-}" ] || clean_env+=("PSModuleAnalysisCachePath=$TEMP/ai-muse-ps-module-cache") # #754: never into the checkout
+  clean_env+=("PSModuleAnalysisCachePath=${TEMP:-${TMPDIR:-/tmp}}/ai-muse-ps-module-cache") # #754: never into the checkout
   for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
     [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
   done
