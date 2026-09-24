@@ -189,6 +189,20 @@ grok_credit_scan() {
   ! jq -e 'has("stopReason")' "$2" >/dev/null 2>&1 || return 0
   reviewer_credit_scan grok "$2.err" || true
 }
+
+# grok_credit_release RID_LOCK SESSION_LOCK OUT: xAI refused the turn for lack
+# of credit and the CLI has exited, so no paid work is outstanding. Release the
+# work locks (never mark them remote-uncertain), print the stderr, and exit 92
+# so topping up plus `ai-review-preflight clear grok` fully restores Grok.
+grok_credit_release() {
+  [ -n "${REVIEWER_CREDIT_HIT:-}" ] || return 0
+  trap - EXIT
+  stop_active_grok_tree || true
+  [ -z "$2" ] || lock_release "$2"
+  lock_release "$1"
+  [ -s "$3.err" ] && { note "  stderr:"; sed 's/^/    /' "$3.err" >&2; }
+  reviewer_credit_exit
+}
 REVIEW_PREFLIGHT_BIN="${AI_REVIEW_PREFLIGHT_BIN:-$WRAPPER_DIR/ai-review-preflight}"
 REVIEW_LIFECYCLE_BIN="${AI_REVIEW_LIFECYCLE_BIN:-$WRAPPER_DIR/ai-review-lifecycle}"
 
@@ -1659,12 +1673,14 @@ cmd_doctor() {
         ACTIVE_PAID_LOCK=''; trap - INT TERM; keep_result=1; rc=1
       fi
     else
-      echo "FAILED — no terminal JSON"; trap - EXIT INT TERM; mark_remote_uncertain "$live_lock"; ACTIVE_PAID_LOCK=''; rc=1
+      echo "FAILED — no terminal JSON"; trap - EXIT INT TERM
       grok_credit_scan "$RUN_TURN_RC" "$tmp"
       if [ -n "${REVIEWER_CREDIT_HIT:-}" ]; then
+        lock_release "$live_lock"; ACTIVE_PAID_LOCK=''
         clear_active_grok; rm -f "$tmp" "$tmp.err" "$tmp.prompt" 2>/dev/null || true
         reviewer_credit_exit
       fi
+      mark_remote_uncertain "$live_lock"; ACTIVE_PAID_LOCK=''; rc=1
     fi
     clear_active_grok
     [ "$keep_result" = 1 ] || rm -f "$tmp" "$tmp.err" 2>/dev/null || true
@@ -1726,6 +1742,7 @@ cmd_new() {
     else
       record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
     fi
+    grok_credit_release "$rid_lock" "$sess_lock" "$out"
     preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
     note "  grok exit status was $rc - which proves nothing; see the note above."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }
@@ -1860,6 +1877,7 @@ $REVIEW_HEAD only."
     else
       record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
     fi
+    grok_credit_release "$rid_lock" "$sess_lock" "$out"
     preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
     note "  grok exit status was $rc - which proves nothing."
     [ -s "$out.err" ] && { note "  stderr:"; sed 's/^/    /' "$out.err" >&2; }

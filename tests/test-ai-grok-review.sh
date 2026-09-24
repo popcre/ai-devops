@@ -508,7 +508,7 @@ check "out_of_credit_prints_human_line" "grep -q '^OUT OF CREDIT: .*console.x.ai
 check "out_of_credit_gives_no_retry_hint" "! grep -q 'Retry once' '$TMP/credit.err'"
 check "out_of_credit_does_not_wait_for_the_result_deadline" "test '$CREDIT_ELAPSED' -lt 450"
 check "out_of_credit_records_quarantine" "\"$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' global grok --directory '$TMP/credit-quarantine' | jq -e '.failure_class==\"out-of-credit\"'"
-rm -rf "$(find "$AI_GROK_STATE_DIR/locks" -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)"
+check "out_of_credit_leaves_no_stranded_work_lock" "test -z \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\""
 echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
