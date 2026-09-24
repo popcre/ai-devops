@@ -154,6 +154,12 @@ def omitted(directory, rel):
             '.ai/test-runs', '.ai/qualification') or
             fnmatch.fnmatchcase(rel, '.ai/qwen-test.*')):
         return True
+    # Git-ignored root-level `.tmp-*` is session scratch (#795). Tracked files
+    # of that name stay protected through the git ls-files stream.
+    if '/' not in rel and rel.startswith('.tmp-'):
+        return subprocess.run(['git', 'check-ignore', '-q', '--', rel],
+                              cwd=directory, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode == 0
     top = rel.split('/', 1)[0]
     return (top.startswith('.ai-review-') and
             os.path.isfile(os.path.join(directory, top, '.ai-review-packet')))
