@@ -277,7 +277,7 @@ muse_code_reasoning_effort(){
   EFFECTIVE_REASONING_EFFORT="$tier"
 }
 linked_below_home(){ # true when the path or any ancestor below the profile home is a link or junction
-  local p="$1"; while [ -n "$p" ] && [ "$p" != "$PROFILE_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do [ ! -L "$p" ] || return 0; p="$(dirname "$p")"; done; return 1
+  local p="$1"; while [ -n "$p" ] && [ "$p" != "$PROFILE_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do [ ! -L "$p" ] || return 0; case "$p" in */*) p="${p%/*}"; p="${p:-/}";; *) p=.;; esac; done; return 1 # no dirname fork per level: under load each costs about a second (#773)
 }
 require_runtime(){
   if [ "$ENGINE" = muse-code ]; then
