@@ -80,6 +80,7 @@ case "${MOCK_MODE:-normal}" in
  sleep) sleep 30 ;;
  reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
+ credit) cat "$MOCK_CREDIT_FILE"; exit 1 ;;
 esac
 cid=conv-good
 if [[ "$args" == *"--conversation"* ]] && [ "${MOCK_MODE:-normal}" = wrongid ]; then cid=conv-wrong; fi
@@ -118,7 +119,7 @@ IDENTITY_OUT="$("$SCRIPT" doctor --identity)"
 check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
 mkdir -p "$TMP/tools"
-cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$TMP/tools/"
+cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$ROOT/tools/reviewer_admission.py" "$TMP/tools/"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
 mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
@@ -207,6 +208,15 @@ printf before-model > "$R4/dirty.txt"
 check 'write during model verification is rejected' "! new_run '$R4' modelwrite mutate-model"
 check 'empty response is rejected' "! new_run '$R4' empty empty"
 check 'invalid verdict word is rejected' "! new_run '$R4' badverdict badverdict"
+# Out of credit (Albert, 2026-09-24): its own quarantine directory, so the
+# recorded global quarantine cannot refuse the later tests in this file.
+cp -a "$AI_REVIEW_QUARANTINE_DIR" "$TMP/credit-q"; cp -a "$AI_REVIEW_QUARANTINE_DIR" "$TMP/credit-q2"
+set +e; AI_REVIEW_QUARANTINE_DIR="$TMP/credit-q" MOCK_CREDIT_FILE="$ROOT/tests/fixtures/reviewer-credit/gemini-prepay.json" new_run "$R4" out-of-credit credit >"$TMP/credit.out" 2>"$TMP/credit.err"; GEMINI_CREDIT_RC=$?; set -e
+check 'out of credit exits 92' "test '$GEMINI_CREDIT_RC' -eq 92"
+check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=gemini code=insufficient_quota' '$TMP/credit.err'"
+check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: .*ai.studio/projects' '$TMP/credit.err'"
+check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global gemini --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'ordinary provider failure is not reported as out of credit' "! AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' new_run '$R4' plain-fail fail 2>'$TMP/plain.err'; ! grep -q 'OUT OF CREDIT' '$TMP/plain.err'"
 BAD_META="$(meta_for badverdict)"
 check 'rejected provider output is durably linked from session state' "jq -e '.failure_stage==\"turn\" and (.failure_artifact|length>0)' '$BAD_META' && test -s \"\$(jq -r .failure_artifact '$BAD_META')\""
 if case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then

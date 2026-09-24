@@ -187,6 +187,7 @@ case "$mode" in
   weird)     cat "$TMPDIR_FOR_TEST/weird.json" ;;
   nosession) cat "$TMPDIR_FOR_TEST/no-session.json" ;;
   empty)     : ;;
+  nocredit)  cat "$TMPDIR_FOR_TEST/xai-credit.err" >&2; exit 1 ;;
   slow)      # exit immediately leaving an empty file, then complete later:
              # this is the early-return bug, reproduced.
              ( sleep 3; cat "$TMPDIR_FOR_TEST/fixture.json" > "$TMPDIR_FOR_TEST/late_target" ) &
@@ -493,6 +494,23 @@ check "marker_write_failure_still_blocks_second_paid_turn" "[ \"$AFTER_MARK_FAIL
 rm -rf "$MARK_FAIL_LOCK"
 echo ok > "$TMP/mode"
 
+# Out of credit (Albert, 2026-09-24): the real xAI 403 must stop this run at
+# once with exit 92, both contract lines, and a recorded quarantine - never a
+# wait for the result deadline and never a "retry once" hint.
+cp "$REPO_ROOT/tests/fixtures/reviewer-credit/grok-xai-403.stderr" "$TMP/xai-credit.err"
+echo nocredit > "$TMP/mode"
+CREDIT_START=$SECONDS
+( cd "$REPO" && AI_REVIEW_QUARANTINE_DIR="$TMP/credit-quarantine" AI_GROK_WAIT_TIMEOUT=900 bash "$SCRIPT" new out-of-credit --prompt x ) > "$TMP/credit.out" 2> "$TMP/credit.err"; CREDIT_RC=$?
+CREDIT_ELAPSED=$((SECONDS - CREDIT_START))
+check "out_of_credit_exits_92" "test '$CREDIT_RC' -eq 92"
+check "out_of_credit_prints_machine_line" "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota' '$TMP/credit.err'"
+check "out_of_credit_prints_human_line" "grep -q '^OUT OF CREDIT: .*console.x.ai' '$TMP/credit.err'"
+check "out_of_credit_gives_no_retry_hint" "! grep -q 'Retry once' '$TMP/credit.err'"
+check "out_of_credit_does_not_wait_for_the_result_deadline" "test '$CREDIT_ELAPSED' -lt 450"
+check "out_of_credit_records_quarantine" "\"$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' global grok --directory '$TMP/credit-quarantine' | jq -e '.failure_class==\"out-of-credit\"'"
+check "out_of_credit_leaves_no_stranded_work_lock" "test -z \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\""
+echo ok > "$TMP/mode"
+
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
 
 CAP_NOW="$(date -u +%FT%TZ)"
@@ -648,7 +666,7 @@ START=$(date +%s)
 # shellcheck disable=SC1090
 ( set +e
   # Source just enough of the script to reach await_result without executing main.
-  sed '/^CMD=/,$d' "$SCRIPT" > "$TMP/lib.sh"
+  { printf 'source %q\n' "$REPO_ROOT/tools/reviewer_event_guard.sh"; sed '/^CMD=/,$d' "$SCRIPT"; } > "$TMP/lib.sh"
   . "$TMP/lib.sh"
   await_result "$AWAIT_OUT" "test"
 ) >/dev/null 2>&1
@@ -1329,6 +1347,7 @@ case "${POOL_RUNNER_MODE:-approve}" in
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
   drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
+  credit) printf 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota\nOUT OF CREDIT: stub - then run: ai-review-preflight clear grok\n' >&2; exit 92 ;;
   chrome) printf 'runner progress chrome naming the head %s with enough padding text that a whole-buffer byte floor would pass if chrome were counted toward the analysis floor, which is exactly what this mode must not reward\n' "$HEAD" >&2; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
 esac
 EOF
@@ -1367,6 +1386,8 @@ check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
 rm -f "$POOLTMP/flip"
 check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=credit bash "$POOL" grok security-review ) > "$POOLTMP/out-credit" 2>&1; RC_CREDIT=$?
+check "pool_adapter_passes_out_of_credit_through" "[ '$RC_CREDIT' -eq 92 ] && grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota' '$POOLTMP/out-credit' && grep -q '^OUT OF CREDIT: ' '$POOLTMP/out-credit'"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok visual-review ) > "$POOLTMP/out-visual" 2>&1; RC_VISUAL=$?
 check "pool_adapter_refuses_unsupported_mode" "[ '$RC_VISUAL' -eq 2 ]"
 check "front_door_registry_comment_pins_the_promise" "grep -q 'registry decides the pool' '$FRONT'"

@@ -267,6 +267,8 @@ write_atomic() { # FILE JSON
 
 quarantine() { # PROVIDER CLASS [SECONDS]
   local provider="$1" class="$2" seconds="${3:-$COOLDOWN}" now expires f
+  # Out of credit matches the wrapper classifier's one-hour hold (CREDIT_SECONDS).
+  [ -n "${3:-}" ] || [ "$class" != out-of-credit ] || seconds=3600
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$seconds" in ''|*[!0-9]*) die "quarantine seconds must be a positive integer." ;; esac
   [ "$seconds" -gt 0 ] || die "quarantine seconds must be greater than zero."
@@ -282,7 +284,8 @@ active_quarantine() { # PROVIDER -> 0 active, 1 absent/expired
 classify_failure() { # OUTPUT
   local text; text="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$text" in
-    *403*|*429*|*allowance*|*usage.limit*|*quota*|*out.of.credit*) printf allowance-exhausted ;;
+    *insufficient*balance*|*insufficient_quota*|*out?of?credit*|*credits*depleted*|*monthly?spending?limit*|*arrearage*) printf out-of-credit ;;
+    *403*|*429*|*allowance*|*usage.limit*|*quota*) printf allowance-exhausted ;;
     *not.authenticated*|*login*required*|*credential*|*unauthorized*|*401*) printf authentication-failed ;;
     *timed.out*|*timeout*) printf provider-timeout ;;
     *unreachable*|*connection.refused*|*health.endpoint*failed*|*service*unavailable*) printf service-unavailable ;;
@@ -293,6 +296,7 @@ classify_failure() { # OUTPUT
 explain_failure() {
   case "$1" in
     allowance-exhausted) printf 'Quarantine this provider. Do not assign another review until the cooling period expires.\n' ;;
+    out-of-credit) printf 'The provider account has run out of paid credit. Tell Albert in this same reply which provider needs credits and where to add them, then rotate to another reviewer. After credits are added, run: ai-review-preflight clear <provider>\n' ;;
     broken-snapshot) printf 'Rebuild once with ai-review-sandbox. If it still fails, quarantine the provider; never use a raw linked worktree.\n' ;;
     empty-assistant-turns) printf 'Stop within 2-3 minutes and report no usable answer. Do not keep retrying empty turns.\n' ;;
     turn-exhaustion) printf 'Do not increase the turn ceiling automatically. Check for a vague brief, an oversized change, or reviewer wandering, then narrow the work.\n' ;;

@@ -11,8 +11,91 @@ import json
 import os
 import pathlib
 import re
+import sys
 import tempfile
 import time
+
+CREDIT_EXIT = 92
+CREDIT_SECONDS = 3600
+CREDIT_SCAN_BYTES = 1 << 20
+# Billing/credit exhaustion only. A plain rate limit, a bare RESOURCE_EXHAUSTED
+# or "quota exhausted" is not proof the account needs money, so it never matches.
+# Sources: real provider error bodies (xAI 403 team-credit text, OpenAI-style
+# insufficient_quota used by Meta and DeepSeek-compatible APIs, DeepSeek 402
+# "Insufficient Balance", DashScope Arrearage / FreeTierOnly / prepayment, and
+# Gemini "prepayment credits are depleted").
+CREDIT_PATTERNS = tuple(re.compile(p) for p in (
+    r'insufficient[ _-]?(balance|credits?|funds)',
+    r'insufficient_quota',
+    r'out of credits?\b',
+    r'credit balance is too low',
+    r'(used|exhausted|depleted|spent) (all )?(of )?(your |its |the )?(available )?credits?',
+    r'credits? (are|have been|has been|is) (depleted|exhausted|used up|exceeded)',
+    r'\bpayment required\b',
+    r'monthly spending limit',
+    r'(purchase|buy|add) (more )?credits',
+    r'make sure your account is in good standing|account is not in good standing',
+))
+# DashScope (Qwen) status codes are meaningful only in Qwen's own errors.
+PROVIDER_CREDIT_PATTERNS = {'qwen': tuple(re.compile(p) for p in (
+    r'\barrearage\b',
+    r'\bfreetieronly\b',
+    r'free tier of the model has been exhausted',
+    r'\bout_of_service\b',
+))}
+# DashScope uses insufficient_quota for rate limiting too, so it proves nothing
+# about Qwen's balance; Qwen relies on its own status codes above.
+PROVIDER_EXCLUDED_PATTERNS = {'qwen': ('insufficient_quota',)}
+CREDIT_MESSAGES = {
+    'grok': 'the xAI (Grok) account has run out of credits or hit its monthly spending limit - add credits at https://console.x.ai',
+    'muse': 'the Meta (Muse) API account has run out of credits - add credits at https://dev.meta.ai',
+    'qwen': 'the Alibaba Model Studio (Qwen) account is out of balance or its free quota is used up - top up at https://usercenter2-intl.console.alibabacloud.com/billing/#/account/overview',
+    'gemini': 'the Google Gemini API project has run out of prepaid credits - add credits at https://ai.studio/projects',
+    'deepseek': 'the DeepSeek account balance is used up - top up at https://platform.deepseek.com/top_up',
+}
+
+
+def credit_match(paths, provider=None):
+    """Return the first matching evidence line, or None. Reads each file's tail only."""
+    for path in paths:
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            with path.open('rb') as source:
+                size = source.seek(0, os.SEEK_END)
+                source.seek(max(0, size - CREDIT_SCAN_BYTES))
+                text = source.read().decode('utf-8', 'replace').lower()
+        except OSError:
+            continue
+        for pattern in CREDIT_PATTERNS + PROVIDER_CREDIT_PATTERNS.get(provider, ()):
+            if pattern.pattern in PROVIDER_EXCLUDED_PATTERNS.get(provider, ()):
+                continue
+            if pattern.search(text):
+                return pattern.pattern
+    return None
+
+
+def credit(directory, provider, paths, record, seconds):
+    """Exit 0 with the two contract lines on a match, 3 on no match."""
+    if provider not in CREDIT_MESSAGES:
+        raise ValueError('no out-of-credit message for provider')
+    if credit_match(paths, provider) is None:
+        return 3
+    machine = 'AI_REVIEWER_OUT_OF_CREDIT provider=%s code=insufficient_quota' % provider
+    human = 'OUT OF CREDIT: %s - then run: ai-review-preflight clear %s' % (CREDIT_MESSAGES[provider], provider)
+    print(machine); print(human)
+    if record:
+        # A recording failure must never hide the diagnosis or delay the stop.
+        try:
+            with locked(directory, provider):
+                data = load(directory, provider)
+                now = int(time.time())
+                data['global'] = {'version': 1, 'provider': provider, 'failure_class': 'out-of-credit',
+                                  'created_epoch': now, 'expires_epoch': now + seconds}
+                publish(directory, provider, data)
+        except (OSError, ValueError, TypeError) as error:
+            print('reviewer admission: out-of-credit quarantine not recorded: ' + str(error), file=sys.stderr)
+    return 0
 
 
 def scope_key(profile, model):
@@ -181,7 +264,7 @@ def observe(directory, provider, profile, model, run_id, observed, now, seconds,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear'))
+    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear', 'credit'))
     parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen'))
     parser.add_argument('--directory', type=pathlib.Path, required=True)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
@@ -189,8 +272,15 @@ def main():
     parser.add_argument('--run-id', default=''); parser.add_argument('--observed', type=int)
     parser.add_argument('--seconds', type=int, default=1800); parser.add_argument('--reason', default='')
     parser.add_argument('--evidence', type=pathlib.Path)
+    parser.add_argument('--scan', type=pathlib.Path, action='append', default=[])
+    parser.add_argument('--record', action='store_true')
     args = parser.parse_args()
     now = int(time.time())
+    if args.action == 'credit':
+        seconds = args.seconds if args.seconds != 1800 else CREDIT_SECONDS
+        if not 1 <= seconds <= 86400:
+            raise ValueError('out-of-credit quarantine must be between one second and one day')
+        raise SystemExit(credit(args.directory, args.provider, args.scan, args.record, seconds))
     if args.action == 'profile':
         result = home_profile(args.home)
     elif args.action == 'observe':

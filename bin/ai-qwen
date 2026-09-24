@@ -555,6 +555,18 @@ has_result() { # has_result FILE
 session_id_from() { tail -5 "$1" | jq -r 'select(.type=="result")|.session_id // empty' 2>/dev/null | tail -1; }
 model_from() { jq -r 'select(.type=="assistant")|.message.model // empty' "$1" 2>/dev/null | tail -1; }
 
+declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/reviewer_event_guard.sh"
+# qwen_credit_stop OUT: on a failed turn, classify stderr and the provider's own
+# "[API Error: ...]" line (never the review text) for billing exhaustion; on a
+# match print the diagnosis and exit 92 so the caller stops now.
+qwen_credit_stop() {
+  local out="$1" ev="$1.credit"
+  provider_api_error "$out" > "$ev" 2>/dev/null || : > "$ev"
+  reviewer_credit_scan qwen "$out.err" "$ev" || true
+  rm -f "$ev"
+  reviewer_credit_exit
+}
+
 # Qwen reports transport-layer refusals (401, quota, capacity) as ordinary
 # assistant text inside an otherwise successful terminal record. That must never
 # reach a reviewer as an answer, and it must be named as a provider outage.
@@ -1321,6 +1333,7 @@ cmd_doctor() {
     echo "session store : FAILED"; rc=1
   fi
   if [ "$live" = 1 ]; then
+    REVIEWER_CREDIT_HIT=''
     local tmp diagnostic provider_rc post_runtime_sha post_preloader_sha failure_override=""
     tmp="$(mktemp)"; printf 'Reply with exactly: OK\n' > "$tmp.p"
     QUALIFICATION_ACTIVE=1; QUALIFICATION_STREAM="$tmp"
@@ -1352,9 +1365,13 @@ cmd_doctor() {
         return 1
       fi
       rc=1
+      # A billing refusal stops the doctor with exit 92 and the top-up line.
+      provider_api_error "$tmp" > "$tmp.credit" 2>/dev/null || : > "$tmp.credit"
+      reviewer_credit_scan qwen "$tmp.err" "$tmp.credit" || true
     fi
-    rm -f "$tmp" "$tmp.p" "$tmp.err" 2>/dev/null || true
+    rm -f "$tmp" "$tmp.p" "$tmp.err" "$tmp.credit" 2>/dev/null || true
     QUALIFICATION_STREAM=""
+    reviewer_credit_exit
   fi
   doctor_worktrees
   return $rc
@@ -1740,6 +1757,7 @@ start_session() { # start_session NAME MODE
     note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
     note "  $(safe_report_detail "$LIFECYCLE_STATE")"
+    qwen_credit_stop "$out"
     exit 1
   fi
   verify_returned_model "$out"
@@ -1767,7 +1785,7 @@ start_session() { # start_session NAME MODE
     complete_review_metadata "$meta" "$sid" || die 'Qwen report was preserved but completion metadata could not be published; use finalize for this exact turn.'
   fi
   lifecycle_finalize 0
-  [ "${FINISH_RC:-0}" = 0 ] || exit "$FINISH_RC"
+  [ "${FINISH_RC:-0}" = 0 ] || { qwen_credit_stop "$out"; exit "$FINISH_RC"; }
 }
 
 cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
@@ -1864,6 +1882,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
     note "  $(safe_report_detail "$LIFECYCLE_STATE")"
+    qwen_credit_stop "$out"
     rm -f "$pf" "$out" "$out.err"; exit 1
   fi
   verify_returned_model "$out"
@@ -1885,6 +1904,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     # #1220: report_answer_defect just named "$out" as the place the review body
     # can still be recovered from. Deleting it here would destroy the only copy.
     rm -f "$pf"
+    qwen_credit_stop "$out"
     exit "$FINISH_RC"
   fi
 }
@@ -1938,6 +1958,7 @@ continue_implementation() { # NAME RID META [RESET]
   if ! await_result "$out" "implementation continuation '$name'"; then
     LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"
     note "  terminal reason: $LIFECYCLE_STATE"
+    qwen_credit_stop "$out"
     exit 1
   fi
   verify_returned_model "$out"
@@ -1948,7 +1969,7 @@ continue_implementation() { # NAME RID META [RESET]
   LIFECYCLE_STATE=completed
   FINISH_RC=0; finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   lifecycle_finalize 0
-  [ "$FINISH_RC" = 0 ] || exit "$FINISH_RC"
+  [ "$FINISH_RC" = 0 ] || { qwen_credit_stop "$out"; exit "$FINISH_RC"; }
 }
 
 QWEN_LAST_REPORT=""; QWEN_REPORT_KEY=""

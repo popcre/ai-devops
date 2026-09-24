@@ -165,7 +165,10 @@ Albert approved concurrent migration authoring on 2026-08-14.
   safety qualification and a live review that returned a well-formed verdict above a
   substantive report; it is now gated by the same one command as every other provider.
   Never add a provider to the registry to make an allocation succeed. Qwen is treated
-  like any other reviewer, gated by the same one command.
+  like any other reviewer, gated by the same one command. A review refused with
+  replacement code `insufficient_quota` (wrapper exit 92, `OUT OF CREDIT:` line) means
+  that provider's account needs credits: quote the line to Albert in the same reply,
+  then replace the reviewer; never retry it or leave the news for another session.
 - One reviewer provider may run any number of independent reviews at once, each in
   its own session, worktree, and verdict record (decision 21). "Reviewer busy" is
   never a reason to wait or reroute; only a real provider refusal (quota, rate
