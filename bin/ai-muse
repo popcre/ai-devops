@@ -163,7 +163,7 @@ trap on_signal HUP INT TERM
 tmp_file(){ mktemp "$RUN_TMP/file.XXXXXX"; }
 test_interrupt_at(){ [ "${AI_MUSE_TEST_INTERRUPT_AT:-}" != "$1" ] || kill -TERM "$$"; }
 lock_session(){
-  local candidate="$STATE/locks/$1--$(short_name "$CALLER--$2" 96).lock.d" owner stale quarantine attempt token; mkdir -p "$(dirname "$candidate")"; token="$$-$RANDOM-$(date +%s)"
+  local candidate="$STATE/locks/$(short_name "$1--$CALLER--$2" 64).lock.d" owner stale quarantine attempt token; mkdir -p "$(dirname "$candidate")"; token="$$-$RANDOM-$(date +%s)"
   for attempt in 1 2 3; do
     if mkdir "$candidate" 2>/dev/null; then printf '%s\n' "$token" > "$candidate/token"; printf '%s\n' "$$" > "$candidate/pid"; LOCK="$candidate"; LOCK_TOKEN="$token"; return 0; fi
     stale=0; owner="$(cat "$candidate/pid" 2>/dev/null || true)"

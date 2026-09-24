@@ -443,7 +443,7 @@ state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 96)"; i
 meta_path() { state_leaf "$STATE_DIR/sessions/$1" "$CALLER--$2" .json; }
 
 # Checkout-local legacy session lock path (read compatibility only).
-lock_path()      { printf '%s/locks/%s--%s.lock.d' "$STATE_DIR" "$1" "$(short_name "$CALLER--$2" 96)"; }
+lock_path()      { printf '%s/locks/%s.lock.d' "$STATE_DIR" "$(short_name "$1--$CALLER--$2" 64)"; }
 # Legacy repository-wide paid-work lock path (read compatibility only).
 repolock_path()  { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
 # Current locks deliberately separate mutable session ownership from exact-work
