@@ -201,6 +201,51 @@ Measured on edge-dev (installed trees, not source):
 the owning repo, protected skill in the scope file is rejected, a global copy is
 quarantined not deleted, and `--dry-run` writes nothing.
 
+## Project-scoped MCP on 2026-09-24 (#705)
+
+Single-project MCP servers now start only in sessions opened in the owning
+repository. `$McpProjectScope` in `bin/setup-machine.ps1` is the single data
+source; roots are resolved by repository identity
+(`config/repo-identities.tsv`) to every clone and worktree on the machine, and
+`bin/write-project-mcp.ps1` delivers the scoped servers per root: an untracked
+`.mcp.json` is managed by us (foreign entries preserved, timestamped backup),
+while a repository that **tracks** its own `.mcp.json` is never modified — names
+it lacks arrive as Claude Code project entries in `~/.claude.json`
+(`projects[<path>].mcpServers`). A project with no clone on the machine keeps
+its servers global. `bin/check-mcp-drift.ps1` now applies the same subtraction
+to the global lists and validates per-root delivery, so scoped servers can
+never silently return to a global set.
+
+Ownership (Albert 2026-08-26, PR #114's table) plus the 2026-09-24 evidence
+calls:
+
+| Server | Project | Basis |
+|---|---|---|
+| `trigger`, `recall-ai` | `oracle` | owner ruling 2026-08-26 |
+| `railway` | `popdam3` | owner ruling 2026-08-26 |
+| `ag-grid` | `designflow-frontend` | owner ruling 2026-08-26 |
+| `chrome-devtools` | `popdam3` | 30-day transcripts: one 7-call shared-db worktree doing DB Data Admin UI work, and that app moved to popdam3 2026-09-16 |
+| `devops-mcp`, `synology-monitor` | `synology-monitor` repo | owner ruling; **stay global on machines without that clone** (edge-dev: 0 roots) |
+
+`supabase` (shared-db, licensor-source-data, dflow_plm, popdam, popcrm-web = 5
+repos) and `playwright` (popdam + popcrm-web sessions on hetz, plus the
+ai-devops skill-trigger eval harness) met the ≥3-repository bar from
+`plan_tool-and-skill-scoping.md` §8 and stay global-eligible, so they are not
+in the scope map. `codex-cli` stays suspended out of every membership list.
+
+Codex keeps the complete catalog in its own config (decision from PR #114: it
+does not spawn a server stack per session), so project scoping applies to the
+Claude clients only.
+
+Measured on edge-dev: **28 node processes / 2,077 MB across 12 Desktop
+processes with the 6-server Desktop set before (2026-09-24 9:17 AM EST); the
+live-proof numbers after applying phase 3 are recorded on #705.**
+
+Enforcement: `tests/test-mcp-skill-drift.ps1` (project-scope drift cases) and
+`tests/test-write-project-mcp.ps1` (writer semantics: tracked files untouched,
+missing names via project entries, stale pruning, foreign preservation, dry
+run).
+
 ## Baseline frozen on 2026-08-12
 
 The dependency-free audit at

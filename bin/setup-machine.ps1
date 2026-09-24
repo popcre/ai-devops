@@ -557,6 +557,46 @@ $ZCodeMcpNames = @("1password")
 # Expanding later is a one-line membership change here.
 $MimoMcpNames = @("1password")
 
+# Phase 3 (#705): single-project servers start only in sessions opened in the
+# owning repository. Keys are repository identities from
+# config/repo-identities.tsv, resolved to every clone and worktree root on this
+# machine; a project with no clone here keeps its servers GLOBAL (PR #114's
+# rule: synology-monitor is not cloned on edge-dev, so devops-mcp and
+# synology-monitor stay global there). Ownership per Albert 2026-08-26.
+# 30-day transcript evidence (2026-09-24, #705): supabase (shared-db,
+# licensor-source-data, dflow_plm, popdam, popcrm-web = 5 repos) and playwright
+# (popdam + popcrm-web on hetz, ai-devops skill-trigger evals) meet the
+# >=3-repository bar and stay OUT of this map. chrome-devtools had one 7-call
+# shared-db worktree doing DB Data Admin UI work, and that app moved to popdam3
+# (2026-09-16), so it is scoped to popdam3; revisit with fresh evidence.
+$McpProjectScope = [ordered]@{
+  "oracle"              = @("trigger", "recall-ai")
+  "popdam3"             = @("railway", "chrome-devtools")
+  "designflow-frontend" = @("ag-grid")
+  "synology-monitor"    = @("devops-mcp", "synology-monitor")
+}
+
+. (Join-Path $PSScriptRoot "repo-identity.ps1")
+$McpProjectRoots = @{}
+$McpScopedHere = @()
+foreach ($key in $McpProjectScope.Keys) {
+  $roots = @(Get-AiDevOpsCloneRoots -Key $key)
+  if ($roots.Count -gt 0) {
+    $McpProjectRoots[$key] = $roots
+    $McpScopedHere += $McpProjectScope[$key]
+    Note "project '$key' cloned here ($($roots.Count) root(s)): scope $($McpProjectScope[$key] -join ', ')"
+  } else {
+    Note "project '$key' not cloned here; its servers stay global: $($McpProjectScope[$key] -join ', ')"
+  }
+}
+$McpScopedHere = @($McpScopedHere | Sort-Object -Unique)
+# Effective global membership = the declared lists above minus servers already
+# delivered per project on THIS machine. bin/check-mcp-drift.ps1 parses the
+# literal lists FIRST (do not move them below this block) and applies the same
+# subtraction, so the two can never disagree.
+$ClaudeCodeMcpNames    = @($ClaudeCodeMcpNames    | Where-Object { $McpScopedHere -notcontains $_ })
+$ClaudeDesktopMcpNames = @($ClaudeDesktopMcpNames | Where-Object { $McpScopedHere -notcontains $_ })
+
 function Select-McpServers([string[]]$Names) {
   $selected = [ordered]@{}
   foreach ($name in $Names) {
@@ -977,6 +1017,21 @@ if ($ccResult.Backup) {
       }
     }
   }
+
+# --------------------------------------------------------------------------
+# 7b. Project-scoped MCP (#705): single-project servers live in each owning
+# repository, not in any global set. .mcp.json is written only where it is
+# untracked or absent; a repository that tracks its own .mcp.json gets the
+# names it lacks as Claude Code project entries in ~/.claude.json instead.
+# --------------------------------------------------------------------------
+Step "Project-scoped MCP servers (#705)"
+$projectMcpWriter = Join-Path $RepoPath "bin\write-project-mcp.ps1"
+if (Test-Path -LiteralPath $projectMcpWriter) {
+  & $projectMcpWriter -Scope $McpProjectScope -Roots $McpProjectRoots `
+    -Catalog $McpServerCatalog -ClaudeCodeConfig (Join-Path $HOME ".claude.json")
+} else {
+  Warn "Missing $projectMcpWriter - project MCP entries left as-is."
+}
 
 # --------------------------------------------------------------------------
 # 8. Memory auto-sync - keep Claude memories in sync across machines
