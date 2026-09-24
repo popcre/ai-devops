@@ -115,7 +115,7 @@ else
   check "review_storage_is_private" "test \"\$(stat -c %a '$R/.ai/reviews')\" = 700 && test \"\$(stat -c %a '$OUT')\" = 600"
 fi
 check "lifecycle_records_completed_verdict" \
-  "find '$TMP/lifecycle/runs' -name '*.json' -exec jq -e 'select(.status==\"completed\" and .verdict==\"APPROVE\")' {} \; | grep -q APPROVE"
+  "find '$TMP/lifecycle/runs' -name '*.json' -exec jq -e 'select(.status==\"completed\" and .verdict==\"APPROVE\")' {} \; | grep APPROVE >/dev/null"
 check "scoreboard_records_current_result" "jq -e 'select(.provider==\"codex\" and .evidence_state==\"current\")' '$TMP/scoreboard/reviews.jsonl'"
 
 REPORT_COUNT="$(find "$R/.ai/reviews" -type f -name 'codex-*.md' | wc -l | tr -d ' ')"
@@ -146,7 +146,7 @@ else
   bad "signal_stops_and_reaps_the_provider"
 fi
 fi
-check "signal_finalizes_the_lifecycle_as_failed" "find '$TMP/lifecycle/runs' -name '*.json' -exec jq -e 'select(.status==\"failed\" and .failure_class==\"interrupted\")' {} \; | grep -q BLOCKED"
+check "signal_finalizes_the_lifecycle_as_failed" "find '$TMP/lifecycle/runs' -name '*.json' -exec jq -e 'select(.status==\"failed\" and .failure_class==\"interrupted\")' {} \; | grep BLOCKED >/dev/null"
 
 check "provider_write_to_snapshot_is_rejected" "cd '$R' && ! AI_CODEX_STUB_MODE=mutate '$SCRIPT' diff-review >/dev/null 2>&1"
 check "provider_write_does_not_touch_source" "[ \"$BEFORE\" = \"\$('$REPO_ROOT/bin/ai-review-sandbox' digest '$R')\" ]"

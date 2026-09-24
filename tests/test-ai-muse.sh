@@ -335,7 +335,7 @@ git -C "$REPO" update-ref refs/heads/review-target HEAD^
 # Assert the wrapper's own paid-report-retained contract plus the packet's
 # current strict token; the retired source-target-moved token is gone.
 check 'target movement during paid response rejects acceptance' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MOVE_TARGET='$REPO' '$SCRIPT' new moved-target --base review-target --prompt test\" > '$TMP/moved-target.log' 2>&1 && grep -q 'source identity changed; paid report retained' '$TMP/moved-target.log' && grep -q source-base-mismatch '$TMP/moved-target.log'"
-check 'target movement retains the paid report' "find '$REPO/.ai/reviews' -name 'muse-moved-target-*.md' -exec grep -l first {} + | grep -q ."
+check 'target movement retains the paid report' "find '$REPO/.ai/reviews' -name 'muse-moved-target-*.md' -exec grep -l first {} + | grep . >/dev/null"
 git -C "$REPO" update-ref -d refs/heads/review-target
 check 'nonnumeric heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=nope MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat-text --prompt test\" && test ! -e '$TMP/heartbeat-called'"
 check 'multi-step usage report sums unique observed parts and labels provenance' "cd '$REPO' && eval \"$ENV MUSE_STUB_USAGE_FIXTURE='$ROOT/tests/fixtures/muse-opencode/usage-1.18.12.json' '$SCRIPT' new usage-turn --prompt test\" > '$TMP/usage-turn.log' && grep -q '\"input\": 35602' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'provider-missingness-unknown' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'usage-proven-response' '$TMP/usage-turn.log'"
