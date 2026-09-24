@@ -165,6 +165,42 @@ handing off, and the Synology procedures - where automatic triggering is what
 enforces the rule. Trading a governed procedure for about a thousand tokens a
 turn is the wrong trade.
 
+## Repository-scoped skills on 2026-09-24 (#704)
+
+Rarely used licensor scraper skills no longer install into every session's
+global skill tree. `config/skill-scope.json` maps each one to
+`licensor-source-data`; `bin/ai-install-skills` installs them only into each
+cloned owning repository's client skill folders and quarantines any global
+copy (never deletes it).
+
+Client repository-skill locations (phase 2.1):
+
+| Client | Location | Proof |
+|---|---|---|
+| Claude Code | `<repo>/.claude/skills/` | live `designflow-frontend/.claude/skills/designflow-e2e-tester`; throwaway-proof listed by `claude -p` in a scratch repo |
+| Codex | `<repo>/.agents/skills/` | OpenAI "Build skills" docs (`$REPO_ROOT/.agents/skills`); throwaway fixture created |
+
+Scoped skills (all non-protected, repository-bound): `disney-source-data-scrape`,
+`licensor-incremental-capture`, `nbcu-creative-assets-scrape`,
+`paramount-creative-library-scrape`, `peanuts-scrape`, `sesame-workshop-scrape`,
+`strawberry-shortcake-scrape`, `wb-starlabs-scrape`. DesignFlow skills stay
+global because sessions run from the non-git `dflow_plm` parent.
+
+Measured on edge-dev (installed trees, not source):
+
+| Metric | Before | After |
+|---|---:|---:|
+| Installed Claude global skills | 48 | 40 |
+| Installed Codex global skills | 50 | 42 |
+| Claude `skills-quarantine` (recoverable) | 0 | 8 |
+| Codex `skills-quarantine` (recoverable) | 5 | 13 |
+| Skills listed in `licensor-source-data` via `claude -p` | 0 | 8 |
+| Source `skills/` tree (context-audit manifest) | 31 Claude / 35 Codex | unchanged (source is not the startup index) |
+
+`tests/test-ai-install-skills.sh` cases 10–13 cover: scoped skill lands only in
+the owning repo, protected skill in the scope file is rejected, a global copy is
+quarantined not deleted, and `--dry-run` writes nothing.
+
 ## Baseline frozen on 2026-08-12
 
 The dependency-free audit at
