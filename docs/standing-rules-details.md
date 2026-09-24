@@ -69,7 +69,14 @@ you need to be right, read it and say why.
 
 Before production trigger or Terraform-state work, read
 `docs/cloud-build-prod-trigger-incident-2026-07-20.md`. The sole narrow
-exception is `shared-db`'s activated automatic migration promotion workflow;
+exception is `shared-db`'s activated automatic migration promotion workflow,
+running only after its guarded merge and merged-main preview. That lane must
+independently re-prove the one open structural work issue, immutable preview
+evidence, production target, bounded allowlist, fresh dry-run, exclusive lock,
+and post-apply result; missing evidence stops for an engineer. Owner ruling
+(2026-09-16): because Albert is not technical, a production approval comes
+only from an available independent read-only reviewer's explicit APPROVE;
+anything else stops. Workflow detail:
 its full checklist lives in `skills/shared/shared-db-orchestrator/` and
 `skills/shared/shared-db-change/`. That exception authorizes no manual
 production command.
