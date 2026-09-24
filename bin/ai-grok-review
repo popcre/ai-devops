@@ -1654,6 +1654,11 @@ cmd_doctor() {
       fi
     else
       echo "FAILED — no terminal JSON"; trap - EXIT INT TERM; mark_remote_uncertain "$live_lock"; ACTIVE_PAID_LOCK=''; rc=1
+      grok_credit_scan "$RUN_TURN_RC" "$tmp"
+      if [ -n "${REVIEWER_CREDIT_HIT:-}" ]; then
+        clear_active_grok; rm -f "$tmp" "$tmp.err" "$tmp.prompt" 2>/dev/null || true
+        reviewer_credit_exit
+      fi
     fi
     clear_active_grok
     [ "$keep_result" = 1 ] || rm -f "$tmp" "$tmp.err" 2>/dev/null || true

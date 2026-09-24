@@ -1306,6 +1306,7 @@ cmd_doctor() {
     echo "session store : FAILED"; rc=1
   fi
   if [ "$live" = 1 ]; then
+    REVIEWER_CREDIT_HIT=''
     local tmp diagnostic provider_rc post_runtime_sha post_preloader_sha failure_override=""
     tmp="$(mktemp)"; printf 'Reply with exactly: OK\n' > "$tmp.p"
     QUALIFICATION_ACTIVE=1; QUALIFICATION_STREAM="$tmp"
@@ -1337,9 +1338,13 @@ cmd_doctor() {
         return 1
       fi
       rc=1
+      # A billing refusal stops the doctor with exit 92 and the top-up line.
+      provider_api_error "$tmp" > "$tmp.credit" 2>/dev/null || : > "$tmp.credit"
+      reviewer_credit_scan qwen "$tmp.err" "$tmp.credit" || true
     fi
-    rm -f "$tmp" "$tmp.p" "$tmp.err" 2>/dev/null || true
+    rm -f "$tmp" "$tmp.p" "$tmp.err" "$tmp.credit" 2>/dev/null || true
     QUALIFICATION_STREAM=""
+    reviewer_credit_exit
   fi
   doctor_worktrees
   return $rc

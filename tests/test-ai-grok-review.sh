@@ -666,7 +666,7 @@ START=$(date +%s)
 # shellcheck disable=SC1090
 ( set +e
   # Source just enough of the script to reach await_result without executing main.
-  sed '/^CMD=/,$d' "$SCRIPT" > "$TMP/lib.sh"
+  { printf 'source %q\n' "$REPO_ROOT/tools/reviewer_event_guard.sh"; sed '/^CMD=/,$d' "$SCRIPT"; } > "$TMP/lib.sh"
   . "$TMP/lib.sh"
   await_result "$AWAIT_OUT" "test"
 ) >/dev/null 2>&1

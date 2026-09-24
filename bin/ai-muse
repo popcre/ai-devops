@@ -952,7 +952,7 @@ cmd_doctor(){
     printf '%s' 'Perform an independent read-only health review of this empty fixture. Finish with exactly one final line: VERDICT: APPROVE' > "$prompt"
     prior_timeout="$TIMEOUT"; TIMEOUT="${AI_MUSE_DOCTOR_TIMEOUT:-90}"
     case "$TIMEOUT" in ''|0|*[!0-9]*) die 'AI_MUSE_DOCTOR_TIMEOUT must be a positive whole number of seconds.';; esac
-    if ! run_turn "$fixture" "$prompt" "$out"; then TIMEOUT="$prior_timeout"; die "$TURN_ERROR"; fi
+    if ! run_turn "$fixture" "$prompt" "$out"; then TIMEOUT="$prior_timeout"; muse_credit_stop "$out"; die "$TURN_ERROR"; fi
     TIMEOUT="$prior_timeout"
     if [ "$ENGINE" = muse-code ]; then final_text="$TEXT"; else final_text="$(jq -sr '[.[]|select(.type=="text")|.part.text//empty]|last//empty' "$out")"; fi
     final_line="$(printf '%s\n' "$final_text" | awk 'NF { line=$0 } END { print line }')"

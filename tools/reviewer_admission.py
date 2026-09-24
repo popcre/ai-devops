@@ -35,11 +35,10 @@ CREDIT_PATTERNS = tuple(re.compile(p) for p in (
     r'monthly spending limit',
     r'(purchase|buy|add) (more )?credits',
     r'\barrearage\b',
-    r'account is (not )?in good standing',
+    r'make sure your account is in good standing|account is not in good standing',
     r'\bfreetieronly\b',
     r'free tier of the model has been exhausted',
     r'\bout_of_service\b',
-    r'prepayment credits',
 ))
 CREDIT_MESSAGES = {
     'grok': 'the xAI (Grok) account has run out of credits or hit its monthly spending limit - add credits at https://console.x.ai',

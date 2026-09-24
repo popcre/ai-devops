@@ -46,6 +46,11 @@ for phrase in 'Payment Required' 'Arrearage' 'FreeTierOnly' 'OUT_OF_SERVICE' 'ou
   classify grok "$TMP/phrase.txt" >/dev/null; rc=$?
   check "each signature matches on its own: $phrase" "[ '$rc' = 0 ]"
 done
+for phrase in 'Your account is in good standing.' 'Prepayment credits are available for this project.'; do
+  printf '%s\n' "$phrase" > "$TMP/phrase.txt"
+  classify grok "$TMP/phrase.txt" >/dev/null; rc=$?
+  check "a positive billing statement is not a credit failure: $phrase" "[ '$rc' = 3 ]"
+done
 
 # A quarantine write failure must never hide the diagnosis or change the code.
 printf 'not a directory' > "$TMP/blocked"
@@ -72,6 +77,11 @@ check "the wrapper stop exits 92 on a credit failure" "[ '$rc' = 92 ]"
 check "the wrapper stop prints both contract lines on stderr" "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=muse code=insufficient_quota' '$TMP/stop.err' && grep -q '^OUT OF CREDIT: .*dev.meta.ai' '$TMP/stop.err' && ! grep -q not-stopped '$TMP/stop.out'"
 AI_REVIEW_QUARANTINE_DIR="$Q" bash "$TMP/stop.sh" muse "$FIX/negative-rate-limit.txt" > "$TMP/stop.out" 2> "$TMP/stop.err"; rc=$?
 check "the wrapper stop is a no-op without a credit failure" "[ '$rc' = 1 ] && grep -q not-stopped '$TMP/stop.out' && [ ! -s '$TMP/stop.err' ]"
+
+echo '== live health probes report credit failures too'
+check "grok doctor live probe stops on a credit failure" "grep -A2 'FAILED — no terminal JSON' '$ROOT/bin/ai-grok-review' | grep -q 'grok_credit_scan \"\$RUN_TURN_RC\" \"\$tmp\"'"
+check "muse doctor live probe stops on a credit failure" "grep 'run_turn \"\$fixture\"' '$ROOT/bin/ai-muse' | grep -q 'muse_credit_stop \"\$out\"'"
+check "qwen doctor live probe stops on a credit failure" "grep -q 'reviewer_credit_scan qwen \"\$tmp.err\" \"\$tmp.credit\"' '$ROOT/bin/ai-qwen'"
 
 echo '== preflight reports the provider unusable'
 PREFLIGHT="$ROOT/bin/ai-review-preflight"
