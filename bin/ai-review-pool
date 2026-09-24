@@ -136,7 +136,7 @@ STATE="$($LIFECYCLE begin --provider "$provider" --repo "$REPO_ROOT" --run-id "$
 # tests command, which may legitimately create artifacts in the copy) is
 # compared after the run so a model write invalidates the verdict.
 [ -x "$SANDBOX" ] || [ -f "$SANDBOX" ] || die 'sandbox tool not found for the review snapshot.'
-REVIEW_DIR="$("$SANDBOX" ensure-copy "$REPO_ROOT" "$TAG")" || {
+REVIEW_DIR="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX" ensure-copy "$REPO_ROOT" "$TAG")" || {
   "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true
   die 'could not create the review snapshot.'
 }

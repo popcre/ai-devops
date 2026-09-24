@@ -311,7 +311,7 @@ SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 [ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
 review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
-  "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
+  AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
@@ -933,9 +933,36 @@ preserve_review_stream() {
   cp "$source" "$temporary" && chmod 600 "$temporary" && mv -f "$temporary" "$destination" \
     || { rm -f "$temporary"; return 1; }
 }
+# One terminal success record for one exact session, with every assistant turn
+# on the pinned model. `finalize` requires exactly this before it will publish.
+stream_proves_terminal_success() { # STREAM SESSION_ID
+  [ -f "$1" ] && [ -n "$2" ] && [ "$2" != unavailable ] || return 1
+  jq -se --arg sid "$2" --arg model "$QWEN_MODEL" '([.[]|select(.type=="result")]|length)==1 and .[-1].type=="result" and .[-1].subtype=="success" and .[-1].is_error==false and .[-1].session_id==$sid and ($sid|length)>0 and $sid!="unavailable" and ([.[]|select(.session_id!=null)|.session_id]|all(.==$sid)) and ([.[]|select(.type=="assistant")|.message.model]|length>0 and all(.==$model))' "$1" >/dev/null 2>&1
+}
+# A signal that lands after the provider already wrote its terminal success
+# record (for example a caller's command timeout) interrupts only local
+# publication, not the paid turn. Record that exact state so `finalize` can
+# publish the retained bytes without a second provider call; anything short of
+# a proven terminal success stays an uncertain interrupted turn.
+interrupted_review_reason() { # STREAM
+  if stream_proves_terminal_success "$1" "$(session_id_from "$1")"; then
+    printf provider_turn_pending_local_validation
+  else
+    printf interrupted-provider-turn
+  fi
+}
+note_interrupted_review() { # REASON NAME
+  [ "$1" = provider_turn_pending_local_validation ] || return 0
+  note "ai-qwen: interrupted after Qwen had already returned its complete answer; no report was published."
+  note "  recover it without a new provider call: ai-qwen finalize $2"
+}
 cancel_plain_turn() {
+  local reason
   stop_run_turn
-  [ -z "$PLAIN_REVIEW_META" ] || record_existing_review_recovery "$PLAIN_REVIEW_META" "$PLAIN_REVIEW_OUT" interrupted-provider-turn || true
+  if [ -n "$PLAIN_REVIEW_META" ]; then
+    reason="$(interrupted_review_reason "$PLAIN_REVIEW_OUT")"
+    record_existing_review_recovery "$PLAIN_REVIEW_META" "$PLAIN_REVIEW_OUT" "$reason" && note_interrupted_review "$reason" "$(jq -r '.name // empty' "$PLAIN_REVIEW_META" 2>/dev/null)" || true
+  fi
   exit 130
 }
 trap 'cleanup_qualification_probe; cleanup_run_turn_env' EXIT
@@ -1628,7 +1655,10 @@ lifecycle_cancel() {
   LIFECYCLE_COMMAND_RC=130
   stop_run_turn
   if [ "$LIFECYCLE_MODE" = review ] && [ -n "$LIFECYCLE_META" ]; then
-    record_new_review_recovery "$LIFECYCLE_META" "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_REVIEW_DIR" "$LIFECYCLE_OUT" interrupted-provider-turn || true
+    local reason
+    reason="$(interrupted_review_reason "$LIFECYCLE_OUT")"
+    record_new_review_recovery "$LIFECYCLE_META" "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_REVIEW_DIR" "$LIFECYCLE_OUT" "$reason" \
+      && note_interrupted_review "$reason" "$LIFECYCLE_NAME" || true
   fi
   exit 130
 }
@@ -1799,7 +1829,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   workdir="$(jq -r '.review_dir // empty' "$meta")"
   if [ -z "$workdir" ]; then
     if [ -f "$repo/.git" ]; then
-      workdir="$($SANDBOX_BIN ensure "$repo" "$(short_name "qwen-$name" 64)")"
+      workdir="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" $SANDBOX_BIN ensure "$repo" "$(short_name "qwen-$name" 64)")"
     else
       workdir="$repo"
     fi
@@ -1973,7 +2003,7 @@ cmd_finalize() { # local-only completion of one sealed provider turn
     legacy_stderr=1
   fi
   sid="$(jq -r .qwen_session_id "$meta")"
-  jq -se --arg sid "$sid" --arg model "$QWEN_MODEL" '([.[]|select(.type=="result")]|length)==1 and .[-1].type=="result" and .[-1].subtype=="success" and .[-1].is_error==false and .[-1].session_id==$sid and ($sid|length)>0 and $sid!="unavailable" and ([.[]|select(.session_id!=null)|.session_id]|all(.==$sid)) and ([.[]|select(.type=="assistant")|.message.model]|length>0 and all(.==$model))' "$pending" >/dev/null || die 'the retained stream does not prove one terminal result for this exact session.'
+  stream_proves_terminal_success "$pending" "$sid" || die 'the retained stream does not prove one terminal result for this exact session.'
   verify_returned_model "$pending"
   QWEN_RECOVERY_EVENT_RUN_ID="$(jq -r '.recovery_event_run_id // empty' "$meta")"
   [ -n "$QWEN_RECOVERY_EVENT_RUN_ID" ] || die 'retained completion lacks its original invocation identity.'

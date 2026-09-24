@@ -88,6 +88,15 @@ if (mode === 'publication-failure') {
 fs.writeFileSync(path.join(root, 'prompt-copy'), fs.readFileSync(0));
 const repo = path.join(root, 'repo');
 if (mode === 'slow') { fs.writeFileSync(path.join(root, 'slow-pid'), `${process.pid}\n`); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000); }
+if (mode === 'complete-then-hang') {
+  // The paid turn is finished; only the local process has not exited yet when
+  // a caller's own command timeout signals the wrapper.
+  fs.writeSync(1, JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:'qwen3.8-max',content:[]}}) + '\n');
+  fs.writeSync(1, JSON.stringify({type:'result',subtype:'success',session_id:'qwen-session-1',is_error:false,num_turns:2,result:'late signal review\n\n## Verdict\nAPPROVE',usage:{input_tokens:11,output_tokens:7},permission_denials:[]}) + '\n');
+  fs.writeFileSync(path.join(root, 'complete-pid'), `${process.pid}\n`);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000);
+  process.exit(0);
+}
 if (mode === 'authentication') { console.error('HTTP 401 authentication failed API_KEY=must-not-survive'); process.exit(1); }
 if (mode === 'allowance') { console.error('HTTP 429 allowance exhausted raw-payload=must-not-survive'); process.exit(1); }
 if (mode === 'model-unavailable') { console.error('requested model unavailable: qwen3.8-max'); process.exit(1); }
@@ -593,6 +602,28 @@ INTERRUPT_META="$(find "$TMP/state/sessions" -name 'codex--interrupt-followup.js
 check 'interrupted follow-up becomes recovery-required with a preserved stream' "jq -e '.status==\"recovery-required\" and .failure_reason==\"interrupted-provider-turn\"' '$INTERRUPT_META' && test -e \"\$(jq -r .recovery_stream '$INTERRUPT_META')\""
 CALLS_AFTER_INTERRUPT="$(wc -l < "$TMP/argv.txt")"; run ask interrupt-followup --prompt retry >/dev/null 2>&1; RC=$?
 [ "$RC" -ne 0 ] && [ "$CALLS_AFTER_INTERRUPT" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'interrupted follow-up cannot be resumed again' || bad 'interrupted follow-up cannot be resumed again'
+
+# A caller's command timeout (TERM) that lands after Qwen already returned its
+# complete answer must leave that paid answer locally finalizable, not an
+# uncertain interrupted turn that forces a second paid review.
+qwen_late_signal_case(){ # NAME COMMAND
+  local name="$1" command="$2" pid meta calls python event
+  echo complete-then-hang > "$TMP/mode"; rm -f "$TMP/complete-pid"; calls="$(wc -l < "$TMP/argv.txt")"
+  (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" "$command" "$name" --prompt review > "$TMP/late-$name.log" 2>&1) & pid=$!
+  for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/complete-pid" ] && break; sleep .05; done
+  kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  echo review > "$TMP/mode"
+  meta="$(find "$TMP/state/sessions" -name "codex--$name.json" -print -quit)"
+  check "$command: signal after a complete answer records a locally finalizable turn" "jq -e '.status==\"recovery-required\" and .failure_reason==\"provider_turn_pending_local_validation\"' '$meta' && grep -q 'ai-qwen finalize $name' '$TMP/late-$name.log'"
+  event="$(jq -r .recovery_event_run_id "$meta")"; python="$(command -v python3 || command -v python)"
+  check "$command: the interrupted invocation is still not durable before finalize" "! '$python' '$REPO_ROOT/tools/reviewer_events.py' verify-reports qwen '$event' >/dev/null 2>&1"
+  check "$command: late-signal answer finalizes locally with a verdict" "run finalize '$name' > '$TMP/late-$name-finalize.log' 2>&1 && jq -e '.status==\"active\"' '$meta' && grep -l 'late signal review' '$REPO/.ai/reviews'/qwen-$name-*.md >/dev/null"
+  check "$command: finalize makes the interrupted invocation durable" "'$python' '$REPO_ROOT/tools/reviewer_events.py' verify-reports qwen '$event' >/dev/null"
+  check "$command: late-signal recovery spends zero additional provider turns" "test \"\$(( calls + 1 ))\" -eq \"\$(wc -l < '$TMP/argv.txt')\""
+}
+qwen_late_signal_case late-signal-new new
+run new late-signal-ask --prompt review >/dev/null 2>&1 || bad 'late-signal follow-up fixture must start'
+qwen_late_signal_case late-signal-ask ask
 
 echo mutate-review > "$TMP/mode"
 if run new hostile --prompt 'write a file' >/dev/null 2>&1; then bad 'review mutation fails loudly'; else ok 'review mutation fails loudly'; fi

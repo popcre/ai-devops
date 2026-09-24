@@ -65,9 +65,15 @@ try {
   git -C $rootC add .mcp.json 2>$null
   $bytesBefore = [IO.File]::ReadAllBytes((Join-Path $rootC ".mcp.json"))
   $rootCfull = [IO.Path]::GetFullPath($rootC)
+  # Claude Code reads only the forward-slash project key; the backslash key is
+  # the legacy form earlier runs wrote, and its managed names must migrate out.
+  $rootCkey = $rootCfull.Replace([string][char]92, '/')
   Write-Json $claudeJson @{
     mcpServers = @{ "1password" = @{ command = "x" } }
-    projects = @{ $rootCfull = @{ mcpServers = @{ "railway" = @{ command = "stale-entry" } } } }
+    projects = @{
+      $rootCfull = @{ mcpServers = @{ "railway" = @{ command = "stale-legacy" }; "own" = @{ command = "foreign" } } }
+      $rootCkey  = @{ mcpServers = @{ "railway" = @{ command = "stale-entry" } } }
+    }
   }
 
   $scope = [ordered]@{
@@ -96,7 +102,9 @@ try {
   $bytesAfter = [IO.File]::ReadAllBytes((Join-Path $rootC ".mcp.json"))
   Assert-True (@(Compare-Object $bytesBefore $bytesAfter).Count -eq 0) "C: tracked .mcp.json bytes unchanged"
   $cfg = Read-Json $claudeJson
-  $entry = $cfg["projects"][$rootCfull]["mcpServers"]
+  $entry = $cfg["projects"][$rootCkey]["mcpServers"]
+  $legacyEntry = $cfg["projects"][$rootCfull]["mcpServers"]
+  Assert-True (@($legacyEntry.Keys) -join "," -eq "own") "C: managed names migrate out of the legacy backslash key, foreign kept"
   Assert-True (@($entry.Keys | Sort-Object) -join "," -eq "recall-ai") "C: project entry gains only the missing name and prunes the stale one"
   Assert-True ($cfg["mcpServers"]["1password"]["command"] -eq "x") "C: global mcpServers in claude.json untouched"
   $backups = @(Get-ChildItem -LiteralPath $testRoot -Filter "claude.json.aidevops.*.bak" -ErrorAction SilentlyContinue)

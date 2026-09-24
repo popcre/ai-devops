@@ -61,6 +61,8 @@ node_modules/
 # === AI run/tmp artifacts (generated inside app repos, never here) ===
 .ai/runs/
 .ai/tmp/
+# Session scratch written at the checkout root; reviewers ignore it (#795).
+/.tmp-*
 .ai/reviews/
 .ai/
 

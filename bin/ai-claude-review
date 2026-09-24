@@ -96,7 +96,7 @@ trap cleanup EXIT INT TERM
 SOURCE_IDENTITY="$(mktemp)" || die 'could not reserve source identity'
 "$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$SOURCE_IDENTITY" || die 'source identity refused before snapshot creation'
 STATE="$($LIFECYCLE begin --provider claude --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" || die 'provider preflight failed; no review was assigned.'
-REVIEW_DIR="$($SANDBOX ensure-copy "$REPO_ROOT" "$TAG")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true; die 'could not create review snapshot.'; }
+REVIEW_DIR="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" $SANDBOX ensure-copy "$REPO_ROOT" "$TAG")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true; die 'could not create review snapshot.'; }
 case "$MODE" in
   plan-review) DECISION='Judge the implementation plan for missing cases, unsafe assumptions, forgotten files, and test gaps.';;
   diff-review) DECISION='Judge the complete change for correctness, regressions, data exposure, and missing tests.';;
