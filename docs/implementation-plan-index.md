@@ -45,7 +45,7 @@ approach.
 | `plan_progress-wait-misuse-guard.md` | Closed issue #89 and current wait-policy tests |
 | `plan_pop-business-rules-skill.md` | PR #492, installed live trigger evidence, and closed issue #35 |
 | `plan_reintegrate-gemini-flash-3-8-qwen-3-8-max.md` | Closed issue #261; Gemini 2026-09-04; Qwen EDGE-DEV restore 2026-09-16 in `docs/verification/qwen-rotation-restore-2026-09-16.md` |
-| `plan_reviewer_lease_liveness.md` | Closed issue #283; implementation lives in `u2giants/shared-db` |
+| `plan_reviewer_lease_liveness.md` | Closed issue #283; implementation lives in `popcre/shared-db` |
 | `plan_reviewer-diagnostics-quota-preflight.md` | Closed issue #312 and merged evidence |
 | `plan_reviewer-log-repair-checkpoints.md` | Closed issue #308; issue #322 is a separate Qwen limitation |
 | `plan_reviewer-system-repair.md` | Closed issue #34 and complete STATUS |

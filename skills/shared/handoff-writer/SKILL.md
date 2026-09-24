@@ -71,7 +71,7 @@ owner: codex/wb-scrape-schema-925     # the branch or session that owns this fil
 
 **Why it is worth four lines.** Without it, "is this workstream finished?" can only
 be answered by reading the whole nine-section essay against live GitHub. Nobody
-does that, so nothing is ever retired. In `u2giants/shared-db` that produced **30
+does that, so nothing is ever retired. In `popcre/shared-db` that produced **30
 files, 27 of them finished** (issue #658, cleaned 2026-08-13). With the block, the
 question is one `gh issue view`.
 
@@ -82,7 +82,7 @@ one that says nothing.
 **If your work has no issue, open one.** A workstream worth a handoff is worth an
 issue; without one, nothing can ever tell that the handoff is finished.
 
-**Enforced in `u2giants/shared-db`** by the `Handoff Contract Guard` (added 2026-08-13,
+**Enforced in `popcre/shared-db`** by the `Handoff Contract Guard` (added 2026-08-13,
 issue #658). It fails a pull request only for a handoff file **that pull request
 touches**, never for anybody else's, and it asks you to retire your file in the same
 pull request that closes its issue.
@@ -222,7 +222,7 @@ fresh session then meets them one at a time, days apart, and makes the owner
 re-load the same context five times. Worse, anything discovered *in passing* gets
 filed as a **finding** rather than an **ask**, and is never raised at all.
 
-**Measured, 2026-08-07 (`u2giants/shared-db`).** A handoff that passed the full
+**Measured, 2026-08-07 (`popcre/shared-db`).** A handoff that passed the full
 checklist was audited against this exact question. Of eight items needing the
 owner: three would have been raised (they physically blocked the work), two would
 have been silently decided by the session itself (both were phrased "decide during
@@ -276,7 +276,7 @@ missing one is indistinguishable from a forgotten sweep.
 ---
 
 **Coordinator sessions that used sub-agents need a second half.** If this session
-dispatched sub-agents (typically `u2giants/shared-db`), the 10 sections above are
+dispatched sub-agents (typically `popcre/shared-db`), the 10 sections above are
 only part (a). Part (b) — one clearly headed block **per sub-agent**: what it was
 asked to do, what it actually did, what it found, its PR/branch, whether its
 worktree is live or finished, and what it deliberately did NOT do and why — is

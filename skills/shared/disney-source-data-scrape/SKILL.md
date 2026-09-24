@@ -221,7 +221,7 @@ Capture detail metadata only when the portal exposes it safely. Preserve source 
 
 ## Supabase landing
 
-Scrape-data rows belong to the application session. They do not require a shared-db issue, branch, migration, or handoff. Database **structure** changes still go through `u2giants/shared-db` first.
+Scrape-data rows belong to the application session. They do not require a shared-db issue, branch, migration, or handoff. Database **structure** changes still go through `popcre/shared-db` first.
 
 Never load Disney scrape rows into `core.*`. Use the dedicated source-landing tables:
 

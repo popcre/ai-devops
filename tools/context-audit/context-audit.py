@@ -326,7 +326,7 @@ def open_handoffs(root: Path) -> list[dict]:
     contract block naming the issue that would prove it done. That is checkable
     offline, which this audit must be. Whether the named issue is actually
     CLOSED is checked where GitHub is reachable: the Handoff Contract Guard on
-    every pull request, and the weekly stale report (u2giants/shared-db, #658).
+    every pull request, and the weekly stale report (popcre/shared-db, #658).
     """
     folder = root / "HANDOFF.d"
     if not folder.is_dir():
@@ -777,7 +777,7 @@ def summary(report: dict) -> str:
         lines.append(
             f"HANDOFF WARNING: {len(uncontracted)} file(s) in HANDOFF.d/ carry no contract block, so "
             "nothing can ever tell whether their work is finished — the failure that left 27 finished "
-            "files in u2giants/shared-db (#658). Add `issue:`, `status:` and `owner:` frontmatter, or "
+            "files in popcre/shared-db (#658). Add `issue:`, `status:` and `owner:` frontmatter, or "
             "retire the file. This is a warning, not a failure. "
             f"Files: {', '.join(h['path'] for h in uncontracted)}"
         )

@@ -823,7 +823,7 @@ check "verdict section is emitted"     "printf '%s' \"\$OUT\" | grep -q 'APPROVE
 # findings -- a real measured review produced 42 lines of evidenced defects and
 # the caller saw two words. A verdict with no reasons cannot be acted on.
 # Contract changed again 2026-09-01: the verdict section must come LAST. Governed
-# review in u2giants/shared-db reads only the FINAL non-empty line of our stdout
+# review in popcre/shared-db reads only the FINAL non-empty line of our stdout
 # and records nothing unless it is the verdict, so a verdict-first report was
 # silently unrecordable. Findings first, verdict last -- both still kept.
 check "verdict section comes last"     "[ \"\$(printf '%s' \"\$OUT\" | grep -n '^## Verdict' | cut -d: -f1)\" -gt 1 ] && printf '%s' \"\$OUT\" | grep -v '^[[:space:]]*\$' | tail -1 | grep -q 'APPROVE'"

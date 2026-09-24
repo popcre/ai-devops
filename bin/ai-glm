@@ -83,7 +83,7 @@ LOCK_TIMEOUT="${AI_GLM_LOCK_TIMEOUT:-300}"
 # /global/health (measured 2026-09-17 on this fleet: 1-2 minutes), so a 30s budget
 # made `server start`/`restart` report failure while the launch was still
 # legitimately in progress — and the "retry" then no-opped, because the task was
-# already running (u2giants/shared-db #2828). Windows waits for a cold boot; Linux
+# already running (popcre/shared-db #2828). Windows waits for a cold boot; Linux
 # systemd starts fast.
 SERVER_START_TIMEOUT="${AI_GLM_SERVER_START_TIMEOUT:-}"
 POLL_SECS=5
@@ -1967,7 +1967,7 @@ newest_epoch() { # newest_epoch PATH -> newest of the file mtime and every recor
 # One jq pass (per bounded chunk) classifies every session record, instead of the
 # jq/stat/date spawns per record that cost ~0.1s each on Windows: at ~150 records the
 # per-record scans alone made `ai-glm doctor` overrun the 60s governed-review preflight
-# (u2giants/shared-db PR 3243, 2026-09-18). This is a PRE-FILTER only: it may say a
+# (popcre/shared-db PR 3243, 2026-09-18). This is a PRE-FILTER only: it may say a
 # record is "not a review" or "active since CUTOFF" solely when that is proven; every
 # other record -- empty, malformed, several JSON values, unparseable timestamp, not
 # statted -- is "?" and takes the original per-record path, which re-proves everything
@@ -2229,7 +2229,7 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   # The sweep is skipped under a removal limit: every unreferenced candidate costs a
   # lock claim, a full sandbox_references re-read and an evidence check before it can
   # be KEPT without consuming the limit, so a bounded batch must not wander into it
-  # (u2giants/shared-db #2828: the sweep alone ran minutes inside doctor's probe
+  # (popcre/shared-db #2828: the sweep alone ran minutes inside doctor's probe
   # budget). It runs only on an explicitly unbounded `ai-glm prune`; doctor reports
   # the unrecorded count so a human knows to run it.
   if [ "$limit" -ne 0 ]; then

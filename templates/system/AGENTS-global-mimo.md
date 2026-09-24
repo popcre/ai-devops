@@ -166,14 +166,14 @@ the task needs the detail.
   dispatch, other repository, infrastructure action, or bypass.
 - **Shared database:** reading schema and safe sample data is open. Application
   row data belongs to the application. Every shared-database STRUCTURE change
-  is authored first in `u2giants/shared-db` through its branch-and-PR workflow.
+  is authored first in `popcre/shared-db` through its branch-and-PR workflow.
   Outside-sourced bulk loads into curated Master Data also use that governed
   route. Prove the target database immediately before every write. Load
   `shared-db-change` for the full procedure.
 - **Shared-db orchestrator gets the minimum** — only work that changes the
   database's SHAPE, or a curated Master Data load. Proofs, monitoring, reports,
   tooling, scripts, docs, and repository maintenance never go there.
-- **Label every shared-db ticket.** Whenever a `u2giants/shared-db` issue number
+- **Label every shared-db ticket.** Whenever a `popcre/shared-db` issue number
   appears in a reply, say beside it whether it is orchestrator work (it changes
   database structure) or non-orchestrator work (it does not).
 - **Sign everything posted to GitHub** with `Posted by MiMo chat <id> on

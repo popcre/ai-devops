@@ -1,6 +1,6 @@
 ---
 name: shared-db-orchestrator
-description: Open or run the single u2giants/shared-db orchestrator and route structural database work through its governed issues. Use for shared-db sessions, migrations, schema changes, promotion, database handovers, parallel database agents, or curated Master Data loads.
+description: Open or run the single popcre/shared-db orchestrator and route structural database work through its governed issues. Use for shared-db sessions, migrations, schema changes, promotion, database handovers, parallel database agents, or curated Master Data loads.
 ---
 
 # Shared DB Orchestrator
@@ -39,7 +39,7 @@ Treat reviewer, allocator, tooling, and rate-limit failures as urgent operationa
 blockers. Preserve the capability, use bounded API calls, read the provider's
 rate-limit status, and report the reset time in Eastern Time. Do not repeatedly
 invoke a path already known to be unsafe. The reviewer-allocator redesign is
-tracked in [u2giants/shared-db#1767](https://github.com/u2giants/shared-db/issues/1767).
+tracked in [popcre/shared-db#1767](https://github.com/popcre/shared-db/issues/1767).
 
 ## The admission test — protect your own context window (AGENTS.md 0.0-C)
 
@@ -82,7 +82,7 @@ Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rul
 
 ## Start
 
-1. Check the open `orchestrator-marker` issue in `u2giants/shared-db`. Fail closed if GitHub cannot be read. Never open a second active orchestrator. If `gh` reports `GitHub CLI\\config.yml: Access is denied`, report a **Codex task-profile configuration failure**, not “GitHub is unavailable.” Run `pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`, then retry the same read. This grants the Codex sandbox read-only access to that settings folder and does not expose or copy a token.
+1. Check the open `orchestrator-marker` issue in `popcre/shared-db`. Fail closed if GitHub cannot be read. Never open a second active orchestrator. If `gh` reports `GitHub CLI\\config.yml: Access is denied`, report a **Codex task-profile configuration failure**, not “GitHub is unavailable.” Run `pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`, then retry the same read. This grants the Codex sandbox read-only access to that settings folder and does not expose or copy a token.
 
    **Run the check rather than eyeballing the issue list** — `node scripts/check-orchestrator-marker.mjs`. Hand-querying the label has printed empty while a marker existed, and an empty result reads as permission to start.
 

@@ -25,11 +25,11 @@ MUST explicitly say when a change does not require documentation updates.
 SHARED DATABASE / BACKEND SOURCE OF TRUTH
 If the session made any database, Supabase, migration, API contract, backend data-flow, auth/RLS, realtime, worker, or shared-backend change, MUST also update the canonical shared database repo:
 ```text
-u2giants/shared-db
-https://github.com/u2giants/shared-db
+popcre/shared-db
+https://github.com/popcre/shared-db
 ```
-This applies even when the implementation happened inside an app repo. App repos may contain generated types, frontend adapters, workers, or local notes, but durable backend truth belongs in `u2giants/shared-db`.
-For backend-relevant work, MUST document in `u2giants/shared-db`:
+This applies even when the implementation happened inside an app repo. App repos may contain generated types, frontend adapters, workers, or local notes, but durable backend truth belongs in `popcre/shared-db`.
+For backend-relevant work, MUST document in `popcre/shared-db`:
 - What changed: tables, columns, views, RPCs, triggers, functions, RLS policies, realtime publications, storage assumptions, worker/backend behavior, generated database types, app-facing API contracts, or data-flow changes.
 - Why it changed: product need, collision risk, bug, migration constraint, compatibility reason, operational assumption, or cross-app dependency.
 - Who is affected: CRM, DAM, PM/PIM, PLM, workers, scripts, shared admin tooling, or more than one app.
@@ -42,7 +42,7 @@ Use the existing `shared-db` structure:
 - Put app migration handoffs under `docs/app-migration-notes/<app>-YYYYMMDD.md`.
 - Put reusable database or preview-branch verification evidence under `docs/verification/`.
 - Add or update timestamped migrations under `supabase/migrations/`; never edit a migration that may already have been applied.
-If a backend-relevant change was intentionally not documented in `u2giants/shared-db`, MUST state that explicitly in the final report and explain why.
+If a backend-relevant change was intentionally not documented in `popcre/shared-db`, MUST state that explicitly in the final report and explain why.
 
 REQUIRED DOCUMENTATION FILE ROLES
 Use these roles exactly:

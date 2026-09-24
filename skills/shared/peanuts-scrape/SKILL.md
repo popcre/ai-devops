@@ -223,7 +223,7 @@ peanuts/derived/   aggregates.json, character-counts.json,
 
 The landing schema is **built and live in production**: 19 `plm.peanuts_*` tables
 plus `plm.begin_peanuts_capture` / `plm.finalize_peanuts_capture`, authored and
-applied through `u2giants/shared-db` issue #1217 on 2026-08-19. Do not propose it
+applied through `popcre/shared-db` issue #1217 on 2026-08-19. Do not propose it
 again, and never write Peanuts *structure* from the extract repo — that is
 shared-db's job (see the `shared-db-change` skill). The *rows* belong to this
 application, so loading them needs no issue and no dispatch.

@@ -355,7 +355,7 @@ if os.path.exists(path):
 servers = {
     # stdio + secrets: launched under `op run`, which injects the mcp.env refs.
     # --read-only is mandatory: all shared-DB schema work goes through the
-    # u2giants/shared-db repo (branch + PR), never through this MCP.
+    # popcre/shared-db repo (branch + PR), never through this MCP.
     "supabase": {"command": launch, "args": [
         "npx", "-y", "@supabase/mcp-server-supabase@0.11.0",
         "--read-only", "--project-ref", supa_ref]},

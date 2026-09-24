@@ -15,7 +15,7 @@ const lanesFile = opt('--lanes-file', null)
 let src
 try {
   src = lanesFile ? fs.readFileSync(lanesFile, 'utf8')
-    : execFileSync('gh', ['api', 'repos/u2giants/shared-db/contents/scripts/manage-migration-author-lanes.mjs?ref=main', '-H', 'Accept: application/vnd.github.raw'], { encoding: 'utf8', maxBuffer: 64 << 20 })
+    : execFileSync('gh', ['api', 'repos/popcre/shared-db/contents/scripts/manage-migration-author-lanes.mjs?ref=main', '-H', 'Accept: application/vnd.github.raw'], { encoding: 'utf8', maxBuffer: 64 << 20 })
 } catch (e) { console.error('ERROR could not read the shared-db allocator: ' + e.message.split('\n')[0]); process.exit(2) }
 const block = (name, open, close) => { const i = src.indexOf(`export const ${name} = Object.freeze(${open}`); if (i < 0) { console.error(`ERROR allocator has no ${name}`); process.exit(2) } return src.slice(i, src.indexOf(close, i)) }
 const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1])

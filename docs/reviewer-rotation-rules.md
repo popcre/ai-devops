@@ -4,7 +4,7 @@ Owner rules, 2026-09-22. They exist because GLM was retired in the shared-db
 allocator but stayed registered here, and a session spent an hour trying it.
 
 1. **One source of truth for membership.** The shared-db allocator
-   (`u2giants/shared-db` `scripts/manage-migration-author-lanes.mjs`:
+   (`popcre/shared-db` `scripts/manage-migration-author-lanes.mjs`:
    `REVIEWERS` minus `RETIRED_REVIEWERS` and `QUARANTINED_REVIEWERS`) decides
    who is in rotation. `config/reviewer-registry.json` only mirrors it.
    `bin/ai-reviewer-membership-drift` compares the two and fails on any

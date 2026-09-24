@@ -148,7 +148,7 @@ a specific missing checklist item — fix exactly that, re-grade, answer "Yes."
   repo's verification/tests tree, a commit SHA, a CI run id, or the exact command to
   re-run. A count, percentage, or row total with no artifact behind it is not evidence,
   and neither is an issue or PR number on its own — those say where a discussion
-  happened, not what was proven. Real failure it prevents: in `u2giants/shared-db` a
+  happened, not what was proven. Real failure it prevents: in `popcre/shared-db` a
   cell claiming "86 object / 38 behavior assertions" was restated as fact in a plan, an
   approval note, and a handoff before anyone checked. The source said 86 object and
   **33** behaviour tests, and it was a pull-request description rather than a run. The

@@ -14,7 +14,7 @@ Concrete project identifiers are protected configuration. Resolve them with
 `ai-private-config value supabase_shared_preview_ref`; never copy a value into
 this public skill. Prove the live link immediately before every write.
 
-`u2giants/shared-db` is the canonical repo for the shared supabase.com backend
+`popcre/shared-db` is the canonical repo for the shared supabase.com backend
 (project `<protected-shared-prod-ref>`) used by CRM / DAM / PM-PIM / PLM. Albert had to
 say "pull the repo again and re-read the .md files to see the proper way to make
 db changes" in at least three separate sessions — this skill is that protocol.
@@ -22,7 +22,7 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > **Working IN the shared-db repo and you were not started as the orchestrator?
 > STOP.** `AGENTS.md` runs one orchestrator session; every other session opens a
 > GitHub issue and stops —
-> `gh issue create --repo u2giants/shared-db --label db-work --title "HANDOVER: …" --body-file <file>`.
+> `gh issue create --repo popcre/shared-db --label db-work --title "HANDOVER: …" --body-file <file>`.
 > This skill tells you how to author a correct change once you have been
 > dispatched; it is not permission to start one. **This STOP is about changing
 > STRUCTURE.** It is not about looking — read-only inspection of the schema is
@@ -64,7 +64,7 @@ db changes" in at least three separate sessions — this skill is that protocol.
 
 > ## ⚠️ Two corrections, 2026-08-07. Read before rule 1.
 >
-> **`AGENTS.md` in `u2giants/shared-db` WINS over this file wherever they disagree.** It is
+> **`AGENTS.md` in `popcre/shared-db` WINS over this file wherever they disagree.** It is
 > the live rulebook; this skill is a portable summary and it has already drifted once.
 >
 > **1. Rule 1 below is STALE and following it literally is dangerous.** It says to apply
@@ -78,7 +78,7 @@ db changes" in at least three separate sessions — this skill is that protocol.
 > **2. Requesting the work has changed.** `COORDINATOR_INTAKE.md` was retired on
 > 2026-08-07 and is now a 37-line pointer. If you need database work done and have not
 > started it, **open a GitHub issue**:
-> `gh issue create --repo u2giants/shared-db --label db-work --title "…" --body-file <file>`.
+> `gh issue create --repo popcre/shared-db --label db-work --title "…" --body-file <file>`.
 > A required check fails any PR that writes work back into the old file.
 
 ## Rule 0 — read-only inspection is ALLOWED, from every repo, always
@@ -122,7 +122,7 @@ starts the moment the answer is "and now change the SHAPE of it".
 > creating, changing, or deleting the data inside the database. That should be done by
 > the sessions working on the actual application."
 
-Recorded as `AGENTS.md` §0.0-B in `u2giants/shared-db`, which is the controlling text.
+Recorded as `AGENTS.md` §0.0-B in `popcre/shared-db`, which is the controlling text.
 This skill governs the **shape** of the shared database, not its **contents**.
 
 **No issue, no dispatch, no handover, no branch, no migration** for:
