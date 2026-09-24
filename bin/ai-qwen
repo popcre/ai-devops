@@ -1129,6 +1129,7 @@ write_review_file() {
   ts="${QWEN_REPORT_KEY:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
   if [ -n "${QWEN_REPORT_KEY:-}" ]; then
     [[ "$QWEN_REPORT_KEY" =~ ^[0-9a-f]{64}$ ]] || return 1
+    ts="${QWEN_REPORT_KEY:0:24}"   # keeps the report file name within the path bound
   fi
   if [ "$status" = accepted ]; then base="qwen-$(short_name "$name" 64)-${ts}.md"; else base="qwen-$(short_name "$name" 64)-incomplete-${ts}.md"; fi
   dir="$(reviews_dir "$repo" "$base")"
