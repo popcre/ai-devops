@@ -227,8 +227,8 @@ check "Gemini is carried in the shipped reviewer registry after live re-qualific
 check "the Gemini entry still records why the empty report mattered"   "jq -e '.providers.gemini.reason|test(\"empty report\")' '$REAL_REGISTRY'"
 check "Kimi is removed from the shipped reviewer registry while credit is exhausted" "jq -e '.providers.kimi.registry_state==\"absent\" and (.providers.kimi.reason|test(\"out of credit\"))' '$REAL_REGISTRY'"
 check "GLM is out of rotation in the shipped reviewer registry (owner instruction 2026-09-22)" "jq -e '.providers.glm.registry_state==\"absent\" and (.providers.glm.reason|test(\"2026-09-22\"))' '$REAL_REGISTRY'"
-check "DeepSeek mirrors shared-db RETIRED_REVIEWERS and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"absent\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
-check "the shipped rotation pool is exactly Muse, Grok, Qwen, Gemini plus the Claude and Codex gates" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"claude\",\"codex\",\"gemini\",\"grok\",\"muse\",\"qwen\"]' '$REAL_REGISTRY'"
+check "DeepSeek V4.1 Flash is registered (shared-db REVIEWERS) and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"registered\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
+check "the shipped rotation pool is exactly Muse, Grok, Qwen, Gemini, DeepSeek plus the Claude and Codex gates" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"claude\",\"codex\",\"deepseek\",\"gemini\",\"grok\",\"muse\",\"qwen\"]' '$REAL_REGISTRY'"
 # Health alone must still never mean allocatable. Proved against a fixture that
 # omits a provider, so the guard survives any future registry membership change.
 printf '{"version":1,"providers":{"codex":{"registry_state":"absent","reason":"omitted for this fixture"}}}
@@ -259,6 +259,12 @@ check "different profile remains allocatable" "AI_REVIEW_ADMISSION_PROFILE=profi
 check "different model remains allocatable" "AI_REVIEW_ADMISSION_PROFILE=profile-a AI_REVIEW_ADMISSION_MODEL=model-b $SCRIPT usable kimi | jq -e '.usable==true'"
 check "capacity remains unknown during policy backoff" "$SCRIPT capacity kimi --json | jq -e '.state==\"unknown\" and .reset_at==null'"
 check "global quarantine update preserves scoped refusal" "$SCRIPT quarantine kimi authentication-failed --seconds 30 && $SCRIPT admission kimi --profile profile-a --model model-a --json | jq -e '.state==\"backoff\"'"
+
+# A doctor cut off by the check budget is a timeout, even when its partial
+# output mentions a credential (#720).
+printf '#!/usr/bin/env bash\necho "credential    : managed 1Password reference"\nsleep 5\n' > "$TMP/bin/slow-cred"; chmod +x "$TMP/bin/slow-cred"
+SLOW_OUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/slow-cred" $SCRIPT check deepseek "$REPO" 2>&1)"
+printf '%s' "$SLOW_OUT" | grep -q 'deepseek failed: provider-timeout' && ok "timed-out doctor is classified as a timeout, not an auth failure" || bad "timed-out doctor is classified as a timeout, not an auth failure"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

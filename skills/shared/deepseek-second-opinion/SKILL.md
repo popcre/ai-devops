@@ -1,11 +1,11 @@
 ---
 name: deepseek-second-opinion
-description: Informal second opinion only - DeepSeek is NOT a formal or assigned reviewer (retired from the pool; it cannot open repository files). Debate a plan, diagnosis, design, diff, or configuration with DeepSeek through ai-deepseek-agent. Use for "ask DeepSeek", "run this by DeepSeek", "what does DeepSeek think", "debate DeepSeek", or a DeepSeek second opinion. Report its view and push back when needed.
+description: Rotation reviewer since 2026-09-23 (DeepSeek V4.1 Flash, model pin deepseek-flash, read-only repository tools) and a second-opinion debater. Take formal reviews only when the allocator assigns DeepSeek. Debate a plan, diagnosis, design, diff, or configuration with DeepSeek through ai-deepseek-agent. Use for "ask DeepSeek", "run this by DeepSeek", "what does DeepSeek think", "debate DeepSeek", or a DeepSeek second opinion. Report its view and push back when needed.
 ---
 
 # deepseek-second-opinion
 
-A **debate**, not a delegation, and not a diff-only reviewer. DeepSeek is a
+A **debate**, not a delegation. DeepSeek is a
 genuinely independent model family with a clean context window on every new
 session, so it is a real check on Claude's or Codex's reasoning -- but only if
 the calling agent commits to its own position first and then argues honestly.
@@ -67,24 +67,27 @@ literal `## Verdict` section with `APPROVE`, `REJECT`, or `BLOCKED`, and writes 
 metadata sidecar bound to the session and exact Git HEAD. It refuses before
 provider contact when no Git commit can be resolved.
 
-**DeepSeek cannot read the repository.** It sees only what you send it, so
-`--review` states that boundary in the SYSTEM prompt: DeepSeek must not claim
-anything exists or is missing unless the conversation quotes it, and must return
-`BLOCKED` rather than infer. Because that boundary is not negotiable:
+**DeepSeek reads the repository through read-only tools.** Inside a Git
+repository it gets `list_dir`, `read_file`, and `grep`, confined to the
+repository root and bounded by `DEEPSEEK_TOOLS_MAX_CALLS`, `_MAX_ROUNDS`, and
+`_MAX_WALL`. The review metadata records `repository_access` and
+`evidence_scope` (`repository-read-tools` or `attached-materials-only`), so a
+verdict states which evidence it rested on. Tool calls the model leaks as DSML
+markup in its message text are recovered and run; unparseable markup is never
+accepted as a final answer.
 
 - `--system` cannot be combined with `--review`; put your instructions in the
-  review message instead. Ordinary non-review conversations still accept it.
-- Start a review with `send --review`. `reply --review` refuses, before provider
-  contact, in a conversation that did not begin as a review, because its system
-  prompt would not carry the boundary.
-- Attach the evidence a real judgement needs: `--file` may be repeated, and the
-  metadata records every file sent across the conversation in `attached_files`,
-  the current turn in `attached_files_this_turn`, and `repository_access: false`.
+  review message instead.
+- Start a review with `send --review`; `reply --review` refuses in a
+  conversation that did not begin as a review.
+- A formal assigned review adds `--governed-verdict <exact-head-sha>` and
+  `--model deepseek-flash`, and must end in one `VERDICT: <word> <sha>` line.
+- `--file` still attaches material the tools cannot reach.
 
-This exists because on 2026-08-24 a `--review` of open issue #62 returned a
-confident verdict reporting four files as absent that were present. The HEAD
-binding made a text-only opinion read as exact-source inspection. Never quote a
-DeepSeek finding about repository contents unless the material was attached. A nonzero result is
+History: on 2026-08-24 a text-only `--review` reported present files as absent,
+and DeepSeek left the pool. It re-entered on 2026-09-23 after repository tools
+landed (PR #730), a recorded live qualification, and a live governed review of a
+merged commit. A nonzero result is
 incomplete evidence, never approval. Set `AI_DEEPSEEK_CALLER` to the client
 running the review (`codex` or `claude`) so later incident evidence can match the
 exact caller instead of recording it as `unknown`.

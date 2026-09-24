@@ -43,6 +43,10 @@
 #
 # - Claude skills:  skills/claude/<name>/ + skills/shared/<name>/ -> ~/.claude/skills/<name>/
 # - Codex skills:   skills/codex/<name>/ + skills/shared/<name>/ -> ~/.codex/skills/<name>/
+# - Repo-scoped:    config/skill-scope.json names install only into each cloned
+#                   owning repository's .claude/skills/ and .agents/skills/
+#                   (Claude Code / Codex project skill folders). Global copies
+#                   of those names are quarantined, never deleted.
 # - Global:  templates/system/CLAUDE-global.md -> ~/.claude/CLAUDE.md
 #   (only if ~/.claude/CLAUDE.md is absent; otherwise prints a diff hint —
 #   never clobbers local edits, same philosophy as install.sh)
@@ -312,12 +316,32 @@ sync_skill_files() {
 #   local-edits an installed file no longer hashes to what we wrote (or the
 #               marker is legacy, so nothing can prove otherwise)
 #   unmanaged   a directory of that name exists that we never installed
+declare -A _SRC_HASH_CACHE=()
+
+# Hash a source skill tree once per install run. Repo-scoped skills install
+# into many worktrees; re-hashing the same source per destination exhausted
+# Windows process slots.
+source_hashes_cached() {
+  local src="$1" dump
+  if [[ -z "${_SRC_HASH_CACHE[$src]:-}" ]]; then
+    _SRC_HASH_CACHE[$src]="$(hash_tree "$src")"
+  fi
+  printf '%s\n' "${_SRC_HASH_CACHE[$src]}"
+}
+
 classify_skill() {
   local src="$1" dst="$2" path edited=0
-  load_hashes SRC_HASHES < <(hash_tree "$src")
+  # Fast path: a missing destination does not need source hashes yet.
+  if [[ ! -d "$dst" ]]; then
+    load_hashes SRC_HASHES < <(source_hashes_cached "$src")
+    CHANGED=("${!SRC_HASHES[@]}")
+    RECORDS=()
+    STATE=absent
+    return
+  fi
+  load_hashes SRC_HASHES < <(source_hashes_cached "$src")
   CHANGED=()
   RECORDS=()
-  [[ -d "$dst" ]] || { STATE=absent; return; }
   [[ -f "$dst/$MARKER" ]] || { STATE=unmanaged; return; }
   load_hashes DST_HASHES < <(hash_tree "$dst")
   load_marker RECORDS "$dst/$MARKER"
@@ -357,7 +381,11 @@ reconcile_skill() {
     absent)
       echo "  + $name ($label) install"
       CHANGED=("${!SRC_HASHES[@]}")
-      sync_skill_files "$src" "$dst"
+      # One directory copy is far cheaper than per-file writes on Windows.
+      do_write mkdir -p "$dst"
+      do_write cp -a "$src/." "$dst/"
+      # Drop any marker the source might carry; the real one is written below.
+      do_write rm -f "$dst/$MARKER"
       ;;
     update)
       echo "  ~ $name ($label) update, ${#CHANGED[@]} file(s): ${CHANGED[*]}"
@@ -412,6 +440,191 @@ check_shared_collisions() {
 
 count_skills() { skill_names "$1" | awk 'END { print NR + 0 }'; }
 
+# --- repository-scoped skills ------------------------------------------------
+# config/skill-scope.json maps skill name -> repository identity keys from
+# config/repo-identities.tsv. Those skills install only into each cloned owning
+# repository's client skill folders and are quarantined from the global trees.
+# Protected skills must stay global (their automatic trigger is the enforcement).
+SKILL_SCOPE_FILE="$REPO_ROOT/config/skill-scope.json"
+REPO_IDENTITIES_FILE="$REPO_ROOT/config/repo-identities.tsv"
+declare -A SKILL_SCOPE_KEYS=()
+SCOPED_SKILL_NAMES=()
+
+is_protected_skill() {
+  local name="$1" policy="$REPO_ROOT/config/skill-trigger-policy.json"
+  [[ -f "$policy" ]] || return 1
+  awk -v n="$name" '
+    /"protected_skills"[[:space:]]*:/ { grab=1 }
+    grab && index($0, "\"" n "\"") { found=1 }
+    grab && /^[[:space:]]*]/ { grab=0 }
+    END { exit(found ? 0 : 1) }
+  ' "$policy"
+}
+
+load_skill_scope() {
+  [[ -f "$SKILL_SCOPE_FILE" ]] || return 0
+  local line name keys_csv
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Controlled format: "skill-name": ["key", "key2"]
+    [[ "$line" =~ \"([a-zA-Z0-9][a-zA-Z0-9_-]*)\"[[:space:]]*:[[:space:]]*\[(.*)\] ]] || continue
+    name="${BASH_REMATCH[1]}"
+    keys_csv="${BASH_REMATCH[2]}"
+    keys_csv="${keys_csv//\"/}"
+    keys_csv="${keys_csv// /}"
+    keys_csv="${keys_csv//,/ }"
+    [[ -n "$keys_csv" ]] || {
+      echo "ERROR: skill-scope.json entry '$name' has no repository keys." >&2
+      exit 2
+    }
+    if is_protected_skill "$name"; then
+      echo "ERROR: skill-scope.json lists protected skill '$name'; it must stay global." >&2
+      exit 2
+    fi
+    SKILL_SCOPE_KEYS["$name"]="${keys_csv// /,}"
+    SCOPED_SKILL_NAMES+=("$name")
+  done < "$SKILL_SCOPE_FILE"
+}
+
+is_repo_scoped_skill() {
+  [[ -n "${SKILL_SCOPE_KEYS[$1]:-}" ]]
+}
+
+skill_scope_key_list() {
+  local keys="${SKILL_SCOPE_KEYS[$1]:-}"
+  [[ -n "$keys" ]] || return 0
+  printf '%s\n' "${keys//,/ }" | tr ' ' '\n'
+}
+
+normalize_git_identity() {
+  local url="${1:-}"
+  url="${url%.git}"
+  url="${url#https://}"
+  url="${url#http://}"
+  url="${url#git@}"
+  url="${url//:/\/}"
+  url="${url#ssh://}"
+  printf '%s\n' "$url" | tr '[:upper:]' '[:lower:]'
+}
+
+repo_identity_accepted() {
+  local key="$1" identity="$2"
+  [[ -f "$REPO_IDENTITIES_FILE" ]] || return 1
+  awk -F'\t' -v k="$key" -v id="$identity" '
+    $1 == k && $2 == id { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$REPO_IDENTITIES_FILE"
+}
+
+skill_clone_roots() {
+  if [[ -n "${AI_SKILL_CLONE_ROOTS:-}" ]]; then
+    printf '%s\n' "${AI_SKILL_CLONE_ROOTS//:/$'\n'}"
+    return 0
+  fi
+  local roots=("/c/repos" "/c/worksp" "/worksp" "$BASE_HOME/repos")
+  local r
+  for r in "${roots[@]}"; do
+    [[ -d "$r" ]] && printf '%s\n' "$r"
+  done
+}
+
+# Print every local clone/worktree root for a repository identity key.
+# Cached per key: git worktree list is slow and 10 skills must not re-scan.
+declare -A _CLONE_ROOTS_CACHE=()
+find_repo_clone_roots() {
+  local key="$1"
+  if [[ -n "${_CLONE_ROOTS_CACHE[$key]:-}" ]]; then
+    printf '%s\n' "${_CLONE_ROOTS_CACHE[$key]}"
+    return 0
+  fi
+  local root clone url identity wt collected=""
+  while IFS= read -r root; do
+    [[ -n "$root" && -d "$root/$key" ]] || continue
+    clone="$root/$key"
+    [[ -d "$clone/.git" || -f "$clone/.git" ]] || continue
+    url="$(git -C "$clone" remote get-url origin 2>/dev/null || true)"
+    [[ -n "$url" ]] || continue
+    identity="$(normalize_git_identity "$url")"
+    if ! repo_identity_accepted "$key" "$identity"; then
+      echo "  ! skip $clone — origin $identity is not an accepted identity for '$key'" >&2
+      continue
+    fi
+    collected+="$clone"$'\n'
+    while IFS= read -r wt; do
+      [[ -n "$wt" && -d "$wt" ]] && collected+="$wt"$'\n'
+    done < <(git -C "$clone" worktree list --porcelain 2>/dev/null | awk '/^worktree /{ $1=""; sub(/^ /,""); print }')
+  done < <(skill_clone_roots)
+  _CLONE_ROOTS_CACHE["$key"]="$collected"
+  printf '%s' "$collected"
+}
+
+git_exclude_file() {
+  local clone="$1" path
+  path="$(git -C "$clone" rev-parse --git-path info/exclude 2>/dev/null)" || return 1
+  [[ -n "$path" ]] || return 1
+  case "$path" in
+    /*|[A-Za-z]:*) ;;
+    *) path="$clone/$path" ;;
+  esac
+  printf '%s\n' "$path"
+}
+
+ensure_git_exclude() {
+  local clone="$1" pattern="$2" exclude
+  exclude="$(git_exclude_file "$clone")" || return 0
+  [[ -n "$exclude" ]] || return 0
+  do_write mkdir -p "$(dirname "$exclude")"
+  if [[ -f "$exclude" ]] && grep -qxF "$pattern" "$exclude" 2>/dev/null; then
+    return 0
+  fi
+  echo "  exclude $pattern in $clone/.git/info/exclude"
+  $DRY_RUN && return 0
+  printf '%s\n' "$pattern" >> "$exclude"
+}
+
+source_dir_for_skill() {
+  local name="$1" client
+  for client in claude codex shared; do
+    if [[ -f "$REPO_ROOT/skills/$client/$name/SKILL.md" ]]; then
+      printf '%s\n' "$REPO_ROOT/skills/$client/$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Install one repository-scoped skill into each owning clone's client folders.
+install_repo_scoped_skill() {
+  local name="$1" src key clone
+  src="$(source_dir_for_skill "$name")" || return 0
+  echo "repo-scoped $name -> ${SKILL_SCOPE_KEYS[$name]}"
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    while IFS= read -r clone; do
+      [[ -n "$clone" ]] || continue
+      ensure_git_exclude "$clone" ".claude/skills/"
+      ensure_git_exclude "$clone" ".agents/skills/"
+      run mkdir -p "$clone/.claude/skills" "$clone/.agents/skills"
+      # Claude Code: <repo>/.claude/skills (proven by designflow-frontend).
+      # Codex:       <repo>/.agents/skills (OpenAI "Build skills" docs).
+      reconcile_skill "$src" "$clone/.claude/skills" "$name" "repo-claude" "$clone"
+      reconcile_skill "$src" "$clone/.agents/skills" "$name" "repo-codex" "$clone"
+    done < <(find_repo_clone_roots "$key")
+  done < <(skill_scope_key_list "$name")
+}
+
+install_all_repo_scoped_skills() {
+  ((${#SCOPED_SKILL_NAMES[@]})) || return 0
+  local name
+  for name in "${SCOPED_SKILL_NAMES[@]}"; do
+    if ((${#ONLY_SKILLS[@]})) && [[ " ${ONLY_SKILLS[*]} " != *" $name "* ]]; then
+      continue
+    fi
+    install_repo_scoped_skill "$name"
+  done
+}
+
+load_skill_scope
+
 install_skill_tree() {
   local src_root="$1" dst_root="$2" label="$3" client_home="$4"
   [[ -d "$src_root" ]] || return 0
@@ -419,6 +632,11 @@ install_skill_tree() {
     [[ -f "$d/SKILL.md" ]] || continue
     local name
     name="$(basename "$d")"
+    # Repository-scoped skills never land in the global trees.
+    if is_repo_scoped_skill "$name"; then
+      echo "  > $name ($label) repo-scoped — not installed globally"
+      continue
+    fi
     reconcile_skill "${d%/}" "$dst_root" "$name" "$label" "$client_home"
   done
 }
@@ -429,6 +647,10 @@ if ((${#ONLY_SKILLS[@]})); then
   for name in "${ONLY_SKILLS[@]}"; do
     [[ -z "${selected_done[$name]:-}" ]] || continue
     selected_done[$name]=1
+    if is_repo_scoped_skill "$name"; then
+      install_repo_scoped_skill "$name"
+      continue
+    fi
     for client in claude codex; do
       client_home="$CLAUDE_HOME"
       if [[ "$client" == codex ]]; then
@@ -442,7 +664,7 @@ if ((${#ONLY_SKILLS[@]})); then
       done
     done
   done
-  log_event run-end "completed scoped skills=${ONLY_SKILLS[*]}"
+  log_event run-end "completed --only skills=${ONLY_SKILLS[*]}"
   trim_log
   exit 0
 fi
@@ -471,7 +693,12 @@ prune_orphan_skills() {
   [[ -d "$dst_root" ]] || return 0
 
   for root in "${src_roots[@]}"; do
-    while IFS= read -r name; do expected+=("$name"); done < <(skill_names "$root")
+    while IFS= read -r name; do
+      # Repo-scoped skills are not expected globally; leave them out so an old
+      # global copy is quarantined (not deleted) like any other orphan.
+      if is_repo_scoped_skill "$name"; then continue; fi
+      expected+=("$name")
+    done < <(skill_names "$root")
   done
   # Safety net: an empty repo set means a broken/partial checkout, not that
   # every skill was retired. Refuse to quarantine the whole tree.
@@ -487,9 +714,10 @@ prune_orphan_skills() {
     [[ -f "$d/SKILL.md" ]] || continue
     name="$(basename "$d")"
     if printf '%s\n' "${expected[@]}" | grep -qxF "$name"; then continue; fi
-    # Only ours: a marker from a previous install, or a pre-marker name we
-    # know ai-devops put there. Anything else belongs to the client/vendor.
+    # Ours when: a marker from a previous install, a pre-marker name on the
+    # migration list, or a repository-scoped skill (the scope file owns it).
     if [[ ! -f "$d/$MARKER" ]] &&
+       ! is_repo_scoped_skill "$name" &&
        ! { ((${#retired[@]})) && printf '%s\n' "${retired[@]}" | grep -qxF "$name"; }; then
       continue
     fi
@@ -561,6 +789,12 @@ if [[ -d "$CODEX_HOME" ]]; then
                  "$CODEX_HOME/AGENTS.md" "Codex global instructions"
 else
   echo "No $CODEX_HOME directory — skipping Codex global instructions."
+fi
+
+echo
+if ((${#SCOPED_SKILL_NAMES[@]})); then
+  echo "Installing ${#SCOPED_SKILL_NAMES[@]} repository-scoped skill(s) into owning clones."
+  install_all_repo_scoped_skills
 fi
 
 # ---------------------------------------------------------------------------

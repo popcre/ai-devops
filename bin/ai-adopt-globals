@@ -66,6 +66,7 @@ fi
 CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
 ZCODE_HOME="${ZCODE_HOME:-$BASE_HOME/.zcode}"
+MIMO_HOME="${MIMO_HOME:-$BASE_HOME/.config/mimocode}"
 
 SHORT_HOST="$(hostname 2>/dev/null | cut -d. -f1 | tr '[:upper:]' '[:lower:]')"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -168,6 +169,7 @@ TARGETS=(
   "Claude|$CLAUDE_HOME/CLAUDE.md|$REPO_ROOT/templates/system/CLAUDE-global.md"
   "Codex|$CODEX_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-codex.md"
   "ZCode|$ZCODE_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-zcode.md"
+  "MiMo|$MIMO_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-mimo.md"
 )
 
 say "==> machine: ${SHORT_HOST:-unknown}"

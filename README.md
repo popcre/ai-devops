@@ -67,7 +67,9 @@ The first Grok and Kimi use each open their provider's sign-in page; that login
 is not automated or stored by AI DevOps. The ZCode desktop agent (GLM-5.3) is
 installed the same way and, once signed in inside the app, is fully managed —
 skills, global instructions, MCP servers, hooks, and the `ai-zcode` headless
-wrapper (see [docs/model-setup.md](docs/model-setup.md)).
+wrapper (see [docs/model-setup.md](docs/model-setup.md)). Xiaomi MiMo Desktop
+(MiMoCode) is managed the same way — skills, global instructions, MCP servers,
+and the `ai-mimo` headless wrapper.
 
 ### Ubuntu server (hetz and others) — Claude Code
 

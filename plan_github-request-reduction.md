@@ -4,12 +4,24 @@
 
 Tracking: [ai-devops #658](https://github.com/popcre/ai-devops/issues/658).
 Planning owner: Codex chat `01a0bfd7-ed81-76a1-bf4a-44763532a435`, machine 916.
-Date: 2026-09-20. Implementation has not started. This is a new defect programme;
+Date: 2026-09-20. P1 is claimed under [#660](https://github.com/popcre/ai-devops/issues/660)
+by Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114` on ALBT16. This is a new defect programme;
 do not reopen the completed #401 throughput programme or claim its proofs cover this work.
+
+P1 implementation PR [#663](https://github.com/popcre/ai-devops/pull/663) remains
+unmerged and uninstalled. Upstream `b05d15d` / PR #662 changed quota admission and
+probe refresh during P1 CI; preserve it, separate pre/postintegration samples and
+obtain fresh review of the integrated head. This is not P2 acceptance. The
+[working baseline](tests/verification/github-requests/p1-baseline.md) records a
+live GraphQL/REST counter discrepancy whose root cause remains unproven; the REST
+snapshots cannot establish GraphQL headroom or busy windows. P1 still requires
+two busy reset windows and 20 completed comparable operations, including PR
+waiting, BlockerWatch, dispatch and privacy checks; the provisional replay option
+remains conditional on two business days of insufficient normal workload.
 
 | Step | State | Owner / dependency | Evidence required to accept |
 |---|---|---|---|
-| P1. Attribute consumption and freeze a comparable baseline | Open, 2026-09-20 | #658 planning owner; successor claims P1 | Sanitized caller inventory, measured bucket usage, coverage and baseline report |
+| P1. Attribute consumption and freeze a comparable baseline | In progress, 2026-09-20; live acceptance NOT complete | #660, Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114` on ALBT16 | [Inventory and measurement boundaries](tests/verification/github-requests/p1-baseline.md); two busy reset windows and 20 completed operations still required |
 | P2. Protect the actual quota and preserve command behavior | Open, 2026-09-20 | P1; one claimed implementation owner | Mixed-bucket fixtures and installed quota-mismatch proof |
 | P3. Route all managed request sources through the shared policy | Open, 2026-09-20 | P2 | Caller inventory reconciled, regression guard and installed representative paths |
 | P4. Coalesce duplicate status reads and waiters | Open, 2026-09-20 | P1–P3 | Same-target multi-session trace with one upstream refresh and unchanged outcomes |

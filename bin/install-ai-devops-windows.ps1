@@ -170,7 +170,7 @@ function Assert-NoSharedSkillCollisions {
     param([string]$Root)
 
     $sharedNames = @(Get-SkillNames (Join-Path $Root "skills\shared"))
-    foreach ($client in @("claude", "codex", "zcode")) {
+    foreach ($client in @("claude", "codex", "zcode", "mimo")) {
         $clientRoot = Join-Path $Root "skills\$client"
         foreach ($name in $sharedNames) {
             if (Test-Path -LiteralPath (Join-Path $clientRoot "$name\SKILL.md")) {
@@ -656,6 +656,30 @@ $sharedZCodeCount = Install-SkillFolder `
 Write-Note "$sharedZCodeCount shared skills installed for ZCode."
 Invoke-OrphanSkillPruning -ClientHome $ZCodeHome -Label "ZCode" -Root $RepoPath -SourceRoots @(
     (Join-Path $RepoPath "skills\zcode"), (Join-Path $RepoPath "skills\shared"))
+
+Write-Step "Installing MiMo skills"
+# MiMoCode write root is ~/.config/mimocode/skills only (Desktop installs/imports
+# here). Never install into ~/.agents/skills -- that is a read-only compat scan.
+# Install only where MiMo has already created its home, so machines without
+# MiMo stay untouched (same policy as the globals install below).
+if (Test-Path -LiteralPath $MimoHome) {
+    $mimoCount = Install-SkillFolder `
+        -SourceRoot (Join-Path $RepoPath "skills\mimo") `
+        -DestRoot (Join-Path $MimoHome "skills") `
+        -Label "MiMo" `
+        -ClientHome $MimoHome
+    Write-Note "$mimoCount MiMo-specific skills installed."
+    $sharedMimoCount = Install-SkillFolder `
+        -SourceRoot (Join-Path $RepoPath "skills\shared") `
+        -DestRoot (Join-Path $MimoHome "skills") `
+        -Label "shared" `
+        -ClientHome $MimoHome
+    Write-Note "$sharedMimoCount shared skills installed for MiMo."
+    Invoke-OrphanSkillPruning -ClientHome $MimoHome -Label "MiMo" -Root $RepoPath -SourceRoots @(
+        (Join-Path $RepoPath "skills\mimo"), (Join-Path $RepoPath "skills\shared"))
+} else {
+    Write-Note "MiMo home not present - MiMo skills stage was skipped."
+}
 
 Write-Step "Installing global instruction files"
 Install-GlobalFile `

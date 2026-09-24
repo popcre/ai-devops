@@ -209,9 +209,10 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
   --issue <issue> --pr <pr> --head-sha <exact-head>
 ```
 
-The GitHub-backed cursor rotates the four active reviewers -- Muse Spark 1.3
-Contributor, Grok 4.6, Qwen 3.8 Max, and Gemini 3.8 Flash -- then repeats across
-machines and restarts. GLM 5.3, Kimi K3, DeepSeek, and Codex are out of rotation
+The GitHub-backed cursor rotates the five active reviewers -- Muse Spark 1.3
+Contributor, Grok 4.6, Qwen 3.8 Max, Gemini 3.8 Flash, and DeepSeek V4.1 Flash
+(re-entered 2026-09-23 with read-only repository tools) -- then repeats across
+machines and restarts. GLM 5.3, Kimi K3, the old text-only `deepseek-chat`, and Codex are out of rotation
 (owner instruction; `RETIRED_REVIEWERS` in the allocator and `absent` in
 `config/reviewer-registry.json`): never route a review to them and never wait
 for one of them.
@@ -227,7 +228,8 @@ carrying the head SHA above a substantive report. Registry re-entry is always a
 reviewed shared-db change backed by that evidence; it is never an edit made to
 unblock an allocation. Retrying the same
 issue/PR/head returns the same assignment. Use only the returned wrapper:
-`ai-muse`, `ai-grok-review`, `ai-qwen`, or `ai-gemini`. Never override its model or
+`ai-muse`, `ai-grok-review`, `ai-qwen`, `ai-gemini`, or
+`ai-deepseek-agent send --review --governed-verdict <sha> --model deepseek-flash`. Never override its model or
 reasoning pin, and never call `agy` directly.
 
 The rotation wrappers are **persistent**: they hold named sessions, so the

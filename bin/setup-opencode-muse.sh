@@ -20,4 +20,5 @@ mkdir -p "$CFG/opencode-xdg/opencode/agent"
 cp "$ROOT/config/opencode-muse/opencode.json" "$CFG/opencode-xdg/opencode/opencode.json"
 cp "$ROOT/config/opencode-muse/agent/muse-review.md" "$CFG/opencode-xdg/opencode/agent/muse-review.md"
 chmod 700 "$CFG" "$CFG/opencode-xdg" 2>/dev/null || true
+# The Muse key store is filled by install.sh's own stage (store-key --if-missing).
 echo "Muse persistent conversation profile installed. Check: AI_MUSE_CALLER=codex ai-muse doctor"

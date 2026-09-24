@@ -4,6 +4,7 @@
 .gitattributes
 bin/ai-codex-review*
 bin/ai-grok-review*
+bin/ai-grok-implement*
 bin/ai-muse*
 bin/ai-process-supervisor*
 bin/ai-provider-version*

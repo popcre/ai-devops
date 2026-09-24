@@ -18,8 +18,12 @@ case "${FAKE_MODE:-ok}" in
     printf 'core\t4000\t5000\t%s\ngraphql\t4000\t5000\t%s\n' $(( $(date +%s) + 3000 )) $(( $(date +%s) + 3000 ));
     else echo 'HTTP 404: Not Found' >&2; exit 1; fi ;;
   quota) if [ "$1 $2" = 'api rate_limit' ]; then
+    filter='.'; previous=''
+    for arg in "$@"; do [ "$previous" != --jq ] || filter="$arg"; previous="$arg"; done
+    {
     [ -z "${FAKE_EXTRA_RESOURCE:-}" ] || printf '%s\t%s\t100\t%s\n' "$FAKE_EXTRA_RESOURCE" "${FAKE_EXTRA_REMAINING:-0}" $(( $(date +%s) + 3600 ));
     printf 'core\t%s\t5000\t%s\ngraphql\t%s\t5000\t%s\nsearch\t%s\t30\t%s\ncode_search\t%s\t10\t%s\n' "$FAKE_REMAINING" $(( $(date +%s) + 1800 )) "${FAKE_GRAPHQL_REMAINING:-$FAKE_REMAINING}" $(( $(date +%s) + 2400 )) "${FAKE_SEARCH_REMAINING:-30}" $(( $(date +%s) + 60 )) "${FAKE_CODE_SEARCH_REMAINING:-10}" $(( $(date +%s) + 60 ));
+    } | jq -Rn '[inputs | split("\t") | {key:.[0],value:{remaining:(.[1]|tonumber? // .),limit:(.[2]|tonumber),reset:(.[3]|tonumber)}}] | {resources:from_entries}' | jq -r "$filter"
     else echo "out:$*"; fi ;;
   primary) if [ "$1 $2" = 'api --include' ]; then
     [ -z "${FAKE_EXTRA_RESOURCE:-}" ] || printf '%s\t0\t100\t%s\n' "$FAKE_EXTRA_RESOURCE" $(( $(date +%s) + 3600 ));
@@ -89,6 +93,8 @@ rm -f "$TMP/state/backoff_until"
 rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
 check 'mixed CLI cost is unknown and its resource snapshots are invalidated' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q '^0 3000 5000 ' '$TMP/state/quota' && grep -q '^0 3000 5000 ' '$TMP/state/quota.graphql'"
+check 'telemetry observes named server buckets without changing admission' "jq -e '.buckets.core.remaining == 3000 and .buckets.graphql.remaining == 3000 and .buckets.search.remaining == 30 and .principal == \"unknown\"' '$TMP/state/quota-observation.json'"
+check 'quota observations retain bounded history without another request' "jq -se 'length >= 1 and .[-1].buckets.graphql.remaining == 3000' '$TMP/state/quota-measurements/'*.jsonl"
 rm -f "$TMP/state/quota"; : > "$FAKE_LOG"
 FAKE_MODE=quota FAKE_REMAINING=900 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_NO_WAIT=1 "$GH" pr view 3 >/dev/null 2>&1; rc=$?
 check 'budget below 20% pauses machine-wide without making the call' "[ $rc -eq 75 ] && ! grep -q 'pr view 3' '$FAKE_LOG' && [ \$(cat '$TMP/state/backoff_until') -gt \$(date +%s) ] && grep -q 'budget-pause remaining=900/5000' '$TMP/state/refusals.log'"
@@ -105,7 +111,7 @@ check 'ordinary failures are logged too' "grep -q 'args=api nope' '$TMP/state/fa
 rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
 
 # Resource classification and accounting: no real credential or API is used.
-fresh_quota(){ rm -f "$TMP/state"/quota* "$TMP/state/backoff_until"; : > "$FAKE_LOG"; }
+fresh_quota(){ rm -f "$TMP/state/quota" "$TMP/state"/quota.* "$TMP/state/quota-resources" "$TMP/state/backoff_until"; : > "$FAKE_LOG"; }
 fresh_quota
 FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_GRAPHQL_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=privatequery >/dev/null 2>"$TMP/resource-err"; rc=$?
 check 'healthy REST cannot conceal exhausted GraphQL before a direct query' "[ $rc -eq 75 ] && ! grep -q 'api graphql' '$FAKE_LOG' && grep -q 'resource=graphql' '$TMP/state/refusals.log'"
@@ -301,5 +307,89 @@ check 'wait treats a pending exit (gh pr checks: 8) as not-done, not as failure'
 AI_GH_QUOTA_PAUSE_PCT=abc "$GH" pr view 1 >/dev/null 2>&1; rc=$?
 check 'a non-numeric budget setting is refused, not silently skipped' "[ $rc -eq 2 ]"
 check 'ai-pr-wait routes through the throttle' "grep -q 'ai-gh' '$ROOT/bin/ai-pr-wait'"
+
+# P1: allowlisted metadata is scrubbed before any measurement is persisted.
+cat > "$TMP/telemetry-gh" <<'EOF'
+#!/usr/bin/env bash
+printf 'body ghp_FIXTURE_CANARY query=private\n'
+printf 'stderr password=FIXTURE_CANARY\n' >&2
+exit "${FAKE_STATUS:-0}"
+EOF
+chmod +x "$TMP/telemetry-gh"
+export AI_GH_REAL_GH="$TMP/telemetry-gh" AI_GH_STATE_DIR="$TMP/telemetry-state"
+AI_GH_CALLER=$'FIXTURE_CANARY\ninjected' "$GH" api 'repos/private/FIXTURE_CANARY?secret=value' -f 'query=FIXTURE_CANARY' > "$TMP/tout" 2> "$TMP/terr"; rc=$?
+check 'telemetry_redacts_before_write' "[ $rc -eq 0 ] && ! grep -RqE 'FIXTURE_CANARY|injected|secret=value|password=|private' '$TMP/telemetry-state/measurements' && jq -e '.operation == \"api.unknown\" and .caller == \"unknown\" and .repository == \"redacted\" and .http_requests == null and .graphql_points == null' '$TMP/telemetry-state/measurements/'*.jsonl"
+printf 'body ghp_FIXTURE_CANARY query=private\n' > "$TMP/expected-out"
+printf 'stderr password=FIXTURE_CANARY\n' > "$TMP/expected-err"
+check 'telemetry_preserves_streams_and_status success' "cmp '$TMP/tout' '$TMP/expected-out' && cmp '$TMP/terr' '$TMP/expected-err'"
+FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
+check 'telemetry_preserves_streams_and_status failure' "[ $rc -eq 8 ] && cmp '$TMP/tout' '$TMP/expected-out' && cmp '$TMP/terr' '$TMP/expected-err' && jq -se '.[-1].exit_status == 8' '$TMP/telemetry-state/measurements/'*.jsonl"
+mkdir "$TMP/telemetry-state/measurements/write.lock"
+FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
+check 'telemetry failure is visible and preserves failed command status' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/terr' && cmp '$TMP/tout' '$TMP/expected-out'"
+touch -d '5 minutes ago' "$TMP/telemetry-state/measurements/write.lock"
+FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
+check 'a lock left by a crash is cleared and measurement resumes' "[ $rc -eq 8 ] && ! grep -q 'request measurement unavailable' '$TMP/terr' && [ ! -d '$TMP/telemetry-state/measurements/write.lock' ]"
+touch "$TMP/telemetry-state/measurements/2000-01-01.jsonl"
+"$GH" api graphql > /dev/null 2>/dev/null
+check 'telemetry retention removes only old owned date files' "[ ! -e '$TMP/telemetry-state/measurements/2000-01-01.jsonl' ] && jq -se '.[-1].bucket == \"graphql\" and .[-1].cli_executions == 1 and .[-1].principal == \"unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
+python "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
+check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 4 and .opaque_cli_executions == 4 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+printf '{"operation":"FIXTURE_CANARY"}\n' > "$TMP/telemetry-state/measurements/2001-01-01.jsonl"
+python "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+check 'request report rejects untrusted labels without reflecting them' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && ! grep -q FIXTURE_CANARY '$TMP/report-error'"
+
+# Reject malformed JSON shapes through the same fixed diagnostic, never a
+# traceback or a reflected input value. Keep a valid row before the bad one
+# to prove the report cannot publish a partial aggregate on later corruption.
+mkdir "$TMP/report-shapes"
+head -n 1 "$TMP/telemetry-state/measurements/$(date -u +%F).jsonl" > "$TMP/report-valid"
+python -c 'print("request report: invalid or unavailable measurement input; no report produced")' > "$TMP/report-expected-error"
+for shape in '[]' '["FIXTURE_CANARY"]' 'null' 'true' '1' '"FIXTURE_CANARY"' \
+  '{"operation":[]}' '{"operation":{}}' '{"operation":true}' \
+  '{"operation":"api.graphql","caller":[]}' '{"operation":"api.graphql","caller":{}}'; do
+  cat "$TMP/report-valid" > "$TMP/report-shapes/2001-01-01.jsonl"
+  printf '%s\n' "$shape" >> "$TMP/report-shapes/2001-01-01.jsonl"
+  python "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+  check 'request report rejects nonobject or wrong-type label without partial output' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"
+done
+for mutation in '.schema=true' '.schema="1"' 'del(.http_requests)' 'del(.graphql_points)' '.utc=[]' '.latency_ms=true'; do
+  jq -c "$mutation" "$TMP/report-valid" > "$TMP/report-shapes/2001-01-01.jsonl"
+  python "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+  check 'request report rejects invalid required field shapes' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"
+done
+python -c 'print("[" * 2000 + "\"FIXTURE_CANARY\"" + "]" * 2000)' > "$TMP/report-shapes/2001-01-01.jsonl"
+python "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+check 'request report rejects excessive JSON nesting with controlled diagnostic' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"
+
+# Reject every non-regular path before opening it; a FIFO must never hold up
+# the original operation or the offline reader. Directories exercise this on
+# Windows too, where the filesystem may not implement mkfifo.
+export AI_GH_STATE_DIR="$TMP/special-state"
+mkdir -p "$AI_GH_STATE_DIR/measurements/$(date -u +%F).jsonl"
+FAKE_STATUS=8 timeout 15 "$GH" pr checks 1 > "$TMP/special-out" 2> "$TMP/special-err"; rc=$?
+check 'telemetry rejects non-regular daily paths without changing status' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/special-err' && [ ! -d '$AI_GH_STATE_DIR/measurements/write.lock' ]"
+timeout 15 python "$ROOT/tools/github-requests/report.py" "$AI_GH_STATE_DIR/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+check 'report rejects non-regular daily paths before opening' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ]"
+rmdir "$AI_GH_STATE_DIR/measurements/$(date -u +%F).jsonl"
+if mkfifo "$AI_GH_STATE_DIR/measurements/$(date -u +%F).jsonl" 2>/dev/null; then
+  FAKE_STATUS=8 timeout 15 "$GH" pr checks 1 > "$TMP/special-out" 2> "$TMP/special-err"; rc=$?
+  check 'FIFO telemetry path cannot block a failed command' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/special-err'"
+  timeout 15 python "$ROOT/tools/github-requests/report.py" "$AI_GH_STATE_DIR/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+  check 'FIFO report input is rejected without waiting for a writer' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ]"
+else
+  printf '  skip FIFO cases: filesystem does not support named pipes (directory cases passed above)\n'
+fi
+mkdir "$AI_GH_STATE_DIR/quota-observation.json"
+source "$ROOT/tools/github-requests/telemetry.sh"
+STATE="$AI_GH_STATE_DIR"
+gh_measure_quota 1 2 3 4 5 6 7 8 9 >/dev/null 2>&1; rc=$?
+check 'quota observation rejects non-regular destination too' "[ $rc -eq 1 ] && [ -d '$AI_GH_STATE_DIR/quota-observation.json' ] && [ \$(find '$AI_GH_STATE_DIR' -maxdepth 1 -name 'quota-observation.*' -type f | wc -l) -eq 0 ]"
+
+STATE="$TMP/named-row-state"; mkdir -p "$STATE"
+gh_measure_quota_rows $'future_resource\t9\t10\t30\nsearch\t7\t30\t40\ncore\t80\t100\t50\ngraphql\t61\t200\t60'
+check 'named quota telemetry ignores row order and extra resource names' "jq -e '.buckets.core.remaining == 80 and .buckets.graphql.remaining == 61 and .buckets.search.remaining == 7 and (.buckets|keys|length) == 3' '$STATE/quota-observation.json'"
+gh_measure_quota_rows $'core\tbad\t100\t50\nsearch\t7\t30\t40\textra'
+check 'missing malformed and overlong quota rows remain unknown' "jq -e '.buckets.core == null and .buckets.graphql == null and .buckets.search == null' '$STATE/quota-observation.json'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

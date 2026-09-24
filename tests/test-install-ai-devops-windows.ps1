@@ -25,6 +25,7 @@ function New-Fixture {
     New-TestSkill $root "claude" "client-claude"
     New-TestSkill $root "codex" "client-codex"
     New-TestSkill $root "zcode" "client-zcode"
+    New-TestSkill $root "mimo" "client-mimo"
     if (-not $NoShared) {
         New-TestSkill $root "shared" "shared-one"
         New-TestSkill $root "shared" "synology-sharesync-triage"

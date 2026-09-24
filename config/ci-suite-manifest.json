@@ -28,6 +28,7 @@
     "test-ai-memory-sync-fanout.sh": 1,
     "test-ai-memory-sync.sh": 3,
     "test-ai-merge-group-evidence.sh": 1,
+    "test-ai-mimo.sh": 3,
     "test-ai-model-call.sh": 1,
     "test-ai-muse-code.sh": 34,
     "test-ai-muse.sh": 195,
@@ -85,7 +86,8 @@
     "test-windows-runner-qualification-workflow.sh": 1,
     "test-windows-scripts.sh": 1,
     "test-workflow-policy.sh": 4,
-    "test-worktree-reap-tool.sh": 2
+    "test-worktree-reap-tool.sh": 2,
+    "test-ci-runner-router.sh": 1
   },
   "bash": [
     "test-ai-adopt-globals.sh",
@@ -139,7 +141,9 @@
     "test-ai-test-local.sh",
     "test-ai-verify-run.sh",
     "test-ai-zcode.sh",
+    "test-ai-mimo.sh",
     "test-bin-cmd-launchers.sh",
+    "test-ci-runner-router.sh",
     "test-classify-database-preview.sh",
     "test-client-globals-required-phrases.sh",
     "test-codex-trigger-eval.sh",
@@ -251,6 +255,7 @@
     "test-configure-codex-mcps.ps1",
     "test-configure-codex-statusline.ps1",
     "test-configure-zcode-mcps.ps1",
+    "test-configure-mimocode-mcps.ps1",
     "test-context-audit.ps1",
     "test-install-ai-devops-windows.ps1",
     "test-kimi-windows-execution.ps1",

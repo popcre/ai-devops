@@ -290,7 +290,7 @@ if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE 'cp -P .*auth\.json|cp .*auth\.
 else
   ok "investigate_never_copies_auth"
 fi
-grep -q 'rm -rf "$tmp_root"' "$SCRIPT" && ok "investigate_removes_temp_home" || bad "investigate_removes_temp_home"
+grep -q 'remove_investigation_home "$tmp_root"' "$SCRIPT" && grep -q '\*/investigate-home.?\*) rm -rf -- "$1"' "$SCRIPT" && ok "investigate_removes_temp_home" || bad "investigate_removes_temp_home"
 grep -q 'env -i' "$SCRIPT" && ok "investigate_launches_allowlisted_env" || bad "investigate_launches_allowlisted_env"
 grep -q 'auth_src" -ef "$grok_home/auth.json"' "$SCRIPT" && ok "investigate_proves_same_inode_auth" || bad "investigate_proves_same_inode_auth"
 

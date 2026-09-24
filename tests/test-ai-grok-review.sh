@@ -500,7 +500,7 @@ GROK_AVAILABLE="$(jq -nc --arg now "$(date -u +%FT%TZ)" '{schema_version:1,provi
 rm -f "$TMP/provider-contacted"
 AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_AVAILABLE" run new capacity-available --prompt review >/dev/null 2>&1
 check "available Grok capacity submits one intended model turn" "test -e '$TMP/provider-contacted'"
-check "available Grok capacity is retained in exact-run diagnostics" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.provider==\"grok\" and .session_id==\"capacity-available\" and .quota_result.state==\"available\")' {} + | grep -q available"
+check "available Grok capacity is retained in exact-run diagnostics" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.provider==\"grok\" and .session_id==\"capacity-available\" and .quota_result.state==\"available\")' {} + | grep available >/dev/null"
 
 echo "ai-grok-review tests"
 
@@ -691,7 +691,7 @@ terminal_reason_cases(){
 
 native_terminal_reason_cases(){
   local STATE_DIR="$TMP/native-terminal-state" fixture="$TMP/native-result.json" stream category output
-  source <(sed -n '/^terminal_reason() {/,/^}/p; /^capture_terminal_evidence() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
+  source <(sed -n '/^grok_isolated_home() {/,/^}/p; /^scrub_unselected_auth_links() {/,/^}/p; /^terminal_reason() {/,/^}/p; /^capture_terminal_evidence() {/,/^}/p; /^terminal_reason_for_result() {/,/^}/p; /^handle_stop_reason() {/,/^}/p' "$SCRIPT")
   note(){ printf '%s\n' "$*" >&2; }
   stream="$STATE_DIR/isolated-home/sessions/encoded-cwd/native-session/updates.jsonl"
   mkdir -p "$(dirname "$stream")"
@@ -750,8 +750,8 @@ terminal_provider_cases(){
   cp "$TMP/typed-fixture-original.json" "$TMP/fixture.json"
   meta="$(find "$AI_GROK_STATE_DIR/sessions" -name '*--typed-stop-followup.json' -print -quit)"
   if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -Fq 'reason: turn_limit_cancelled' && jq -e '.last_terminal_reason=="turn_limit_cancelled"' "$meta" >/dev/null; then ok 'turn-limit continuation agrees with durable metadata'; else bad 'turn-limit continuation agrees with durable metadata'; fi
-  if find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' -exec jq -e 'select(.session_id=="typed-stop-followup" and .terminal_summary.provider_terminal_reason=="turn_limit_cancelled")' {} + | grep -q turn_limit_cancelled; then ok 'durable terminal diagnostic retains the same turn-limit reason'; else bad 'durable terminal diagnostic retains the same turn-limit reason'; fi
-  if find "$AI_REVIEW_EVENT_DIR" -name '*.report.json' -type f -exec jq -r '.report_text // empty' {} + | grep -Fq '"category": "max_turns_reached"'; then ok 'private incomplete publication retains the bound native category witness'; else bad 'private incomplete publication retains the bound native category witness'; fi
+  if find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' -exec jq -e 'select(.session_id=="typed-stop-followup" and .terminal_summary.provider_terminal_reason=="turn_limit_cancelled")' {} + | grep turn_limit_cancelled >/dev/null; then ok 'durable terminal diagnostic retains the same turn-limit reason'; else bad 'durable terminal diagnostic retains the same turn-limit reason'; fi
+  if find "$AI_REVIEW_EVENT_DIR" -name '*.report.json' -type f -exec jq -r '.report_text // empty' {} + | grep -F '"category": "max_turns_reached"' >/dev/null; then ok 'private incomplete publication retains the bound native category witness'; else bad 'private incomplete publication retains the bound native category witness'; fi
 }
 terminal_provider_cases
 
@@ -785,17 +785,17 @@ jq 'del(.usage, .total_cost_usd)' "$TMP/usage-full.json" > "$TMP/fixture.json"
 run new usage-unknown --prompt x >/dev/null 2>&1
 ERR="$(run ask usage-unknown --prompt x 2>&1 >/dev/null)"
 check "missing usage is reported as unknown" "printf '%s' \"\$ERR\" | grep -q 'cached: unknown' && printf '%s' \"\$ERR\" | grep -Fq 'cost: \$unknown'"
-check "unknown usage remains null in session totals" "find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+check "unknown usage remains null in session totals" "find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep true >/dev/null"
 jq '.usage={total_tokens:0,cache_read_input_tokens:0} | .total_cost_usd=0' "$TMP/usage-full.json" > "$TMP/fixture.json"
 ERR="$(run ask usage-unknown --prompt x 2>&1 >/dev/null)"
-check "observed zero is retained without repairing earlier missingness" "printf '%s' \"\$ERR\" | grep -q 'cached: 0' && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+check "observed zero is retained without repairing earlier missingness" "printf '%s' \"\$ERR\" | grep 'cached: 0' >/dev/null && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-unknown.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep true >/dev/null"
 jq '.usage={total_tokens:"malformed",cache_read_input_tokens:-1} | .total_cost_usd={bad:true}' "$TMP/usage-full.json" > "$TMP/fixture.json"
 ERR="$(run new usage-invalid --prompt x 2>&1 >/dev/null)"; USAGE_INVALID_RC=$?
-check "malformed counters preserve successful response with unknown accounting" "test '$USAGE_INVALID_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-invalid.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+check "malformed counters preserve successful response with unknown accounting" "test '$USAGE_INVALID_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-invalid.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep true >/dev/null"
 check "live doctor keeps malformed cost unknown" "run doctor --live | grep -Fq 'cost \$unknown'"
 jq '.usage={total_tokens:1e999,cache_read_input_tokens:1e999} | .total_cost_usd=1e999' "$TMP/usage-full.json" > "$TMP/fixture.json"
 OVERFLOW_OUT="$(run new usage-overflow --prompt x 2>&1)"; OVERFLOW_RC=$?
-check "overflowed counters stay unknown without losing paid response" "test '$OVERFLOW_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-overflow.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep -q true"
+check "overflowed counters stay unknown without losing paid response" "test '$OVERFLOW_RC' -eq 0 && find '$AI_GROK_STATE_DIR/sessions' -name '*usage-overflow.json' -exec jq -e '.total_tokens==null and .total_cost_usd==null' {} \\; | grep true >/dev/null"
 cp "$TMP/usage-full.json" "$TMP/fixture.json"
 
 # 11 ------------------------------------------------------------------------
@@ -1334,6 +1334,13 @@ check "pool_muse_report_retains_full_run_identity" "[ -f '$MUSE_REPORT' ] && gre
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" gemini final-check ) > "$POOLTMP/out-gemini" 2>&1; RC_GEMINI=$?
 GEMINI_TAG="$(grep '^new ' "$POOLTMP/runner-args" | tail -1 | awk '{print $2}')"
 check "pool_gemini_session_name_fits_derived_sandbox_limit" "[ '$RC_GEMINI' -eq 0 ] && [ -n '$GEMINI_TAG' ] && [ $(( 7 + 12 + 1 + 10 + 1 + ${#GEMINI_TAG} )) -le 64 ] && [[ '$GEMINI_TAG' == pool-gemini-* ]]"
+# Only grok's runner takes --max-turns; muse/qwen/gemini refuse unknown flags,
+# so the pool must not pass it to them (#720).
+check "pool_gemini_argv_omits_max_turns" "grep -q '^new pool-gemini-' '$POOLTMP/runner-args' && ! grep '^new pool-gemini-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
+check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runner-args' && ! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
+check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
+check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 32'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=nounbound bash "$POOL" grok security-review ) > "$POOLTMP/out-nb" 2>&1; RC_NB=$?
 check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
