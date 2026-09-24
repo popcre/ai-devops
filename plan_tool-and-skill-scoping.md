@@ -13,7 +13,7 @@ Session record: [`HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-
 |---|---|---|---|
 | 0. Plan written, issues opened, gateway handoff folded in | ✅ done | 2026-09-23 | this file; issues #703–#707 |
 | 1.1 Record live-vs-declared MCP drift on every Windows machine | ✅ done | 2026-09-23 | table on #703; cause: a running Desktop rewrites its config |
-| 1.2 Make setup prune undeclared Claude Desktop servers; re-run on edge-dev | 🟡 code merged; live proof open | 2026-09-23 | #718 (8e22150c); proof #731 |
+| 1.2 Make setup prune undeclared Claude Desktop servers; re-run on edge-dev | ✅ done | 2026-09-24 | #718 (8e22150c); live proof on #731 — drift check exit 0 twice (before and after Desktop reopen), Claude Code set clean too |
 | 1.3 Restore `disable-model-invocation` on `designflow-human-qa`; take suspended `kimi-code-delegation` out of the index | ✅ done | 2026-09-23 | #718 (8e22150c) |
 | 1.4 Add a drift check that fails when installed ≠ declared | ✅ done | 2026-09-23 | #718; `bin/check-mcp-drift.ps1` |
 | 2.1 Confirm each client's repository-skill location | ✅ done | 2026-09-24 | Claude `<repo>/.claude/skills` (live `designflow-e2e-tester` + throwaway-proof); Codex `<repo>/.agents/skills` (OpenAI "Build skills" docs; throwaway fixture) |
