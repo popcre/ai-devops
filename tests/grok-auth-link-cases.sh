@@ -187,9 +187,12 @@ sed -n '/^grok_default_state_dir()/,/^}/p' "$ROOT/bin/ai-grok-review" > "$TMP/st
   got="$(grok_default_state_dir)"
   test "$got" = "$HOME/.local/state/ai-devops/grok-c"
   # Cross-volume real directory (junction that is not -L) also yields grok-c.
+  # Match the auth path by its `/.grok` suffix: pwd -P may rewrite $HOME under
+  # mktemp (MSYS /tmp vs the Windows TEMP path), so a literal $HOME/.grok
+  # substring match is not portable across Git Bash hosts.
   rm -rf "$HOME/.local/state/ai-devops/grok"
   mkdir -p "$HOME/.local/state/ai-devops/grok"
-  stat() { case "$*" in *"$HOME/.grok"*) echo 2;; *) echo 1;; esac; }
+  stat() { local p="${*: -1}"; case "$p" in */.grok|*/.grok/) echo 2;; *) echo 1;; esac; }
   got="$(grok_default_state_dir)"
   unset -f stat
   test "$got" = "$HOME/.local/state/ai-devops/grok-c"
