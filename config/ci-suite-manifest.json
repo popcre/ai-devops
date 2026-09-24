@@ -85,7 +85,8 @@
     "test-windows-runner-qualification-workflow.sh": 1,
     "test-windows-scripts.sh": 1,
     "test-workflow-policy.sh": 4,
-    "test-worktree-reap-tool.sh": 2
+    "test-worktree-reap-tool.sh": 2,
+    "test-ci-runner-router.sh": 1
   },
   "bash": [
     "test-ai-adopt-globals.sh",
@@ -140,6 +141,7 @@
     "test-ai-verify-run.sh",
     "test-ai-zcode.sh",
     "test-bin-cmd-launchers.sh",
+    "test-ci-runner-router.sh",
     "test-classify-database-preview.sh",
     "test-client-globals-required-phrases.sh",
     "test-codex-trigger-eval.sh",

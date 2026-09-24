@@ -177,8 +177,39 @@ jobs:
   # tests/test-all.sh refuses to run a section unless the declared sections
   # reconstitute the whole lane exactly, so a coverage gap is a configuration
   # error rather than a quiet pass.
+  # Extra Windows capacity (owner, 2026-09-23: "why are we saving ENVY? WE
+  # NEED TO SPEED THINGS UP!!!"). Idle qualified self-hosted hosts take
+  # ordinary Windows sections; everything else stays on Blacksmith. Any lookup
+  # failure, or this job failing outright, leaves every section on Blacksmith.
+  runner-router:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 3
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      windows_matrix: ${{ steps.route.outputs.windows_matrix }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            config/ci-runner-routing.json
+            tools/ci/runner-router.cjs
+          sparse-checkout-cone-mode: false
+      - id: route
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          POOL_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
+        with:
+          script: |
+            const router = require(`${process.env.GITHUB_WORKSPACE}/tools/ci/runner-router.cjs`);
+            const cfg = require(`${process.env.GITHUB_WORKSPACE}/config/ci-runner-routing.json`);
+            const poolGithub = process.env.POOL_TOKEN ? new github.constructor({ auth: process.env.POOL_TOKEN }) : null;
+            await router.run({ github, poolGithub, context, core, cfg });
+
   windows-offline-section:
-    needs: [fast-classifier, manual-preflight]
+    needs: [fast-classifier, manual-preflight, runner-router]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     # Also skipped when the fast classifier proves the change is prose-only.
@@ -188,14 +219,17 @@ jobs:
       !cancelled() && github.event_name == 'pull_request' &&
       (needs.fast-classifier.result != 'success' ||
        needs.fast-classifier.outputs.run_long == 'true')
+    name: windows-offline-section (${{ matrix.section }}, ${{ matrix.lane }})
     strategy:
       # One failing section must never hide the result of the other five:
       # the whole point of sectioning is that a useful failure arrives early
       # and the rest of the evidence still lands.
       fail-fast: false
+      # The router's plan; the literal fallback is the all-Blacksmith plan used
+      # when the router produced nothing.
       matrix:
-        section: [1, 2, 3, 4, 5, 6]
-    runs-on: blacksmith-4vcpu-windows-2025
+        include: ${{ fromJSON(needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
+    runs-on: ${{ matrix.runs_on }}
     # Six sections after PR #666's serial Gemini, GLM and Muse Code section
     # reached the 40-minute ceiling. Those three long suites now have distinct
     # sections; GLM shares only three short suites. Kimi stays declared and
@@ -211,10 +245,24 @@ jobs:
           if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
             throw 'The pinned Windows runner image does not provide jq.'
           }
+      - name: Shorten TEMP on a reused self-hosted machine
+        # The self-hosted profile puts TEMP deep enough that nested suite temp
+        # trees cross the 260-char Windows path limit.
+        if: ${{ matrix.lane == 'qualified-self-hosted' }}
+        shell: pwsh
+        run: |
+          $short = Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}'
+          New-Item -ItemType Directory -Force -Path $short | Out-Null
+          "TEMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Windows-sensitive section ${{ matrix.section }} of 6
         shell: pwsh
         run: |
           .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/6'
+      - name: Remove the short TEMP tree on a reused machine
+        if: ${{ always() && matrix.lane == 'qualified-self-hosted' }}
+        shell: pwsh
+        run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}')
 
   # Scheduled, manual and qualification verification stay complete and
   # unsectioned. Sectioning is a wall-clock lever for the pull-request lane; the
