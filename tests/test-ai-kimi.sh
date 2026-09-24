@@ -148,7 +148,7 @@ if [ "${AI_KIMI_DURABILITY_TEST_ONLY:-0}" = 1 ]; then
   check "no-change failure creates no empty patch" "! find '$REPO/.ai/reviews' -name '*.patch' | grep -q ."
   echo usagepartial > "$TMP/mode"
   run implement binary-evidence --prompt work > "$TMP/binary.log" 2>&1; binary_rc=$?
-  check "incomplete binary work is published before disposal" "test '$binary_rc' -ne 0 && test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1 && find '$AI_REVIEW_EVENT_DIR/evidence' -name '*.report.json' -exec jq -e 'select(.artifact_kind==\"git-binary-patch\" and (.report_text|contains(\"GIT binary patch\")))' {} + | grep -q git-binary-patch"
+  check "incomplete binary work is published before disposal" "test '$binary_rc' -ne 0 && test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1 && find '$AI_REVIEW_EVENT_DIR/evidence' -name '*.report.json' -exec jq -e 'select(.artifact_kind==\"git-binary-patch\" and (.report_text|contains(\"GIT binary patch\")))' {} + | grep git-binary-patch >/dev/null"
   echo ok > "$TMP/mode"
   AI_KIMI_TEST_DIRECT_WORKER=1 AI_KIMI_TEST_FAIL_ARTIFACT=1 run new publication-failure --prompt review > "$TMP/publication.log" 2>&1
   failure_meta="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--publication-failure/job.json' -print -quit)"
@@ -309,7 +309,7 @@ check "available Kimi capacity submits exactly one model turn" "test '$KIMI_AVAI
 check "available Kimi capacity is retained with the job" "run status capacity-available | jq -e '.quota_result.state==\"available\" and .quota_result.credential_profile_scope==\"fixture-profile\"'"
 KIMI_AVAILABLE_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--capacity-available/job.json' -print -quit)"
 check "Kimi diagnostics use a unique exact-run id instead of the reusable job id" "jq -e '.diagnostic_run_id | test(\"^[0-9a-f]{32}$\")' '$KIMI_AVAILABLE_META' && test \"\$(jq -r .diagnostic_run_id '$KIMI_AVAILABLE_META')\" != \"\$(jq -r .job_id '$KIMI_AVAILABLE_META')\""
-check "Kimi exact-run diagnostics retain measured nonnegative elapsed time" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.run_id==\"'\"\$(jq -r .diagnostic_run_id '$KIMI_AVAILABLE_META')\"'\" and any(.events[]; .last_observation_type==\"capacity-checked\" and .elapsed_seconds>=0))' {} + | grep -q capacity-checked"
+check "Kimi exact-run diagnostics retain measured nonnegative elapsed time" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.run_id==\"'\"\$(jq -r .diagnostic_run_id '$KIMI_AVAILABLE_META')\"'\" and any(.events[]; .last_observation_type==\"capacity-checked\" and .elapsed_seconds>=0))' {} + | grep capacity-checked >/dev/null"
 
 # --- measured timing budgets --------------------------------------------------
 # Every wait ceiling below is derived from one measured wrapper round trip
@@ -475,7 +475,7 @@ OUT="$(AI_KIMI_TEST_FAIL_WORKER_START=1 run start worker-start-failure --prompt 
 [ $RC -ne 0 ] && ok "detached launch failure refuses immediately" || bad "detached launch failure refuses immediately"
 check "detached launch failure is durable and typed" "run status worker-start-failure | jq -e '.phase == \"failed\" and .terminal_reason == \"worker-start-failed\"'"
 WORKER_FAIL_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--worker-start-failure/job.json' -print -quit)"
-check "detached launch failure retains its exact terminal diagnostic" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.run_id==\"'\"\$(jq -r .diagnostic_run_id '$WORKER_FAIL_META')\"'\" and .terminal_summary.phase==\"terminal\" and .terminal_summary.failure_class==\"worker-start-failed\")' {} + | grep -q worker-start-failed"
+check "detached launch failure retains its exact terminal diagnostic" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.run_id==\"'\"\$(jq -r .diagnostic_run_id '$WORKER_FAIL_META')\"'\" and .terminal_summary.phase==\"terminal\" and .terminal_summary.failure_class==\"worker-start-failed\")' {} + | grep worker-start-failed >/dev/null"
 check "detached launch failure removes its private prompt and launchers" "! find '$AI_KIMI_STATE_DIR' -maxdepth 1 -name '.kimi-prompt.*' | grep -q . && ! find \"\$(dirname '$WORKER_FAIL_META')\" -maxdepth 1 -name 'launch-*.ps1' | grep -q ."
 check "pre-worker shell errors are covered by the transient cleanup trap" "grep -A6 'pf=.*mktemp.*.kimi-prompt' '$SCRIPT' | grep -q 'trap.*cleanup_review_transients'"
 OUT="$(run start missing-prompt-file --prompt-file "$TMP/not-present" 2>&1)"; RC=$?

@@ -88,6 +88,21 @@ check "test-mode digest exposes real inventory progress" "test -f '$PROGRESS_FIL
 rm -f "$PROGRESS_FILE"
 AI_REVIEW_SANDBOX_PROGRESS_FILE="$PROGRESS_FILE" "$SCRIPT" digest "$WT" >/dev/null
 check "production digest ignores test progress instrumentation" "test ! -e '$PROGRESS_FILE'"
+# #754: a stray PowerShell module cache at the checkout root is tool state, not
+# source. It must not change the digest, must not be copied, and the snapshot
+# built while it exists must still match the source digest.
+PS_BEFORE="$("$SCRIPT" digest "$MAIN")"
+mkdir -p "$MAIN/Microsoft/Windows/PowerShell"
+printf 'cache\n' > "$MAIN/Microsoft/Windows/PowerShell/ModuleAnalysisCache"
+check "powershell_cache_does_not_change_source_digest" "[ '$PS_BEFORE' = \"\$('$SCRIPT' digest '$MAIN')\" ]"
+PS_STAGE="$("$SCRIPT" ensure-copy "$MAIN" pscache)"
+check "powershell_cache_is_not_copied_into_snapshot" "[ ! -e '$PS_STAGE/Microsoft/Windows/PowerShell/ModuleAnalysisCache' ]"
+check "snapshot_digest_matches_with_powershell_cache_present" \
+  "grep -qx \"source_digest=\$('$SCRIPT' digest '$MAIN')\" '$PS_STAGE/.ai-review-sandbox'"
+printf 'nested\n' > "$MAIN/Microsoft/Windows/PowerShell/other.txt"
+check "other_files_beside_the_cache_still_count" "[ '$PS_BEFORE' != \"\$('$SCRIPT' digest '$MAIN')\" ]"
+"$SCRIPT" remove-copy "$MAIN" pscache
+rm -rf "$MAIN/Microsoft"
 check "head_matches_the_worktree" \
   "[ \"\$(git -C '$WT' rev-parse HEAD)\" = \"\$(git -C '$STAGE' rev-parse HEAD)\" ]"
 

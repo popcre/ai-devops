@@ -124,6 +124,12 @@ test_progress() { # test_progress — observable work for loaded fixture waits o
 generated_review_path() { # ROOT RELATIVE_PATH; never exclude source by prefix alone
   case "$2" in
     .ai-review/*|.ai-review-sandbox|AI-REVIEW-SANDBOX.md) return 0 ;;
+    # Windows PowerShell writes this module-analysis cache into its CURRENT
+    # DIRECTORY whenever LOCALAPPDATA is missing from its environment. It is a
+    # tool cache, never source: counting it made the source digest and the
+    # snapshot digest disagree, so every review failed snapshot-digest-mismatch
+    # while the file sat in a checkout (#754). Exact root path only.
+    Microsoft/Windows/PowerShell/ModuleAnalysisCache) [ -f "$1/$2" ] && [ ! -L "$1/$2" ] && return 0 ;;
     .ai-review-*/*)
       [ -f "$1/${2%%/*}/.ai-review-packet" ] && return 0 ;;
   esac

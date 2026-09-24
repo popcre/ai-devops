@@ -552,6 +552,10 @@ $ClaudeDesktopMcpNames = @("1password", "ag-grid", "playwright", "recall-ai", "s
 # is unproven), ZCode starts with 1password only. Expanding later is a one-line
 # membership change here.
 $ZCodeMcpNames = @("1password")
+# MiMo (Xiaomi MiMo Desktop / MiMoCode) gets the same minimal default as
+# Claude Code and ZCode: 1password only, through the shared launcher.
+# Expanding later is a one-line membership change here.
+$MimoMcpNames = @("1password")
 
 function Select-McpServers([string[]]$Names) {
   $selected = [ordered]@{}
@@ -822,6 +826,27 @@ if ($ZCodeInstall) {
   Warn "  Install it with: winget install ZhipuAI.ZCode   (then 'zcode login' once inside the app), and re-run this script."
 }
 
+# MiMo Desktop (Xiaomi MiMo AI). Presence-only policy: the app self-updates, so
+# nothing is version-pinned. Standalone `mimo` CLI is optional (headless
+# ai-mimo ask); Desktop alone still gets managed skills/MCP/globals.
+$MiMoAppExe = Join-Path $env:ProgramFiles "Xiaomi MiMo AI\Xiaomi MiMo AI.exe"
+$MiMoCliCmd = Get-Command mimo -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $MiMoAppExe) {
+  $mimoVer = (Get-Item -LiteralPath $MiMoAppExe).VersionInfo.ProductVersion
+  Ok "MiMo Desktop found: $mimoVer"
+  if ($MiMoCliCmd) {
+    Ok "MiMoCode CLI on PATH: $($MiMoCliCmd.Source)"
+    Note "Verify the full integration when needed with: ai-mimo doctor"
+    Note "First-run login when needed: mimo account login"
+  } else {
+    Note "MiMoCode CLI 'mimo' not on PATH -- headless ai-mimo ask unavailable; Desktop remains fully managed."
+    Note "Verify when needed with: ai-mimo doctor"
+  }
+} else {
+  Warn "MiMo Desktop not found at $MiMoAppExe"
+  Warn "  Install Xiaomi MiMo AI, then re-run this script."
+}
+
 # Raw `zcode` launcher on PATH (interactive TUI + direct CLI subcommands), giving
 # PATH parity with `claude`/`codex`. The governed HEADLESS driver is bin/ai-zcode;
 # this shim is for interactive use and for the wrapper's own convenience. The
@@ -1090,6 +1115,42 @@ if ($ZCodeInstall -and (Test-Path -LiteralPath $zcodeMcpSetup)) {
   Note "ZCode not present - its MCP config stage was skipped."
 } else {
   Warn "Missing $zcodeMcpSetup - ZCode MCP server set left as-is."
+}
+
+# --------------------------------------------------------------------------
+# 6e. MiMoCode's OWN config (~/.config/mimocode/mimocode.jsonc -> mcp).
+# MiMo schema: command is an ARRAY of argv strings, timeout is milliseconds
+# (not ZCode's timeoutMs / string command). The dedicated writer transforms
+# the shared catalog and preserves every other config key untouched.
+# --------------------------------------------------------------------------
+Step "Wiring the MCP server set into MiMoCode"
+$mimoMcpSetup = Join-Path $RepoPath "bin\configure-mimocode-mcps.ps1"
+$mimoHome = Join-Path $HOME ".config\mimocode"
+$mimoCfg = Join-Path $mimoHome "mimocode.jsonc"
+if (-not (Test-Path -LiteralPath $mimoCfg)) { $mimoCfg = Join-Path $mimoHome "mimocode.json" }
+$mimoPresent = (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "Xiaomi MiMo AI\Xiaomi MiMo AI.exe")) -or (Test-Path -LiteralPath $mimoCfg)
+if ($mimoPresent -and (Test-Path -LiteralPath $mimoMcpSetup)) {
+  $MimoMcpServers = [ordered]@{}
+  foreach ($name in $MimoMcpNames) {
+    if (-not $McpServerCatalog.Contains($name)) { continue }
+    $src = $McpServerCatalog[$name]
+    # Flatten command+args into MiMo's single argv array.
+    $argv = [System.Collections.Generic.List[string]]::new()
+    $argv.Add([string]$src['command'])
+    foreach ($a in @($src['args'])) { $argv.Add([string]$a) }
+    $MimoMcpServers[$name] = [ordered]@{
+      type = 'local'
+      command = $argv.ToArray()
+      enabled = $true
+      timeout = 120000
+    }
+  }
+  $instructions = Join-Path $mimoHome "AGENTS.md"
+  & $mimoMcpSetup -Servers $MimoMcpServers -ManagedNames @($ManagedMcpServerNames) -ConfigPath $mimoCfg -InstructionsPath $instructions
+} elseif (-not $mimoPresent) {
+  Note "MiMo Desktop not present - its MCP config stage was skipped."
+} else {
+  Warn "Missing $mimoMcpSetup - MiMoCode MCP server set left as-is."
 }
 
 # --------------------------------------------------------------------------

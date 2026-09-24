@@ -205,6 +205,9 @@ runtime_env(){
 }
 muse_code_run(){ # every non-turn Muse Code call gets the same minimal environment as a turn, minus the key
   local -a e=(/usr/bin/env -i "PATH=$PATH" "HOME=$PROFILE_HOME") ; local n
+  # LOCALAPPDATA is stripped, so a PowerShell child would drop its module cache
+  # into the working checkout (#754). Point that cache at private temp space.
+  e+=("PSModuleAnalysisCachePath=${TEMP:-${TMPDIR:-/tmp}}/ai-muse-ps-module-cache")
   for n in XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
     [ -z "${!n:-}" ] || e+=("$n=${!n}")
   done
@@ -375,7 +378,12 @@ load_key(){
   fi
   read_key_from_op
 }
-cmd_store_key(){ read_key_from_op; write_key_store "$MODEL_API_KEY"; unset MODEL_API_KEY; printf 'Muse key stored in the protected per-user store: %s\n' "$KEY_STORE"; }
+# store-key --if-missing is the installer's idempotent form: a valid store is
+# left untouched and 1Password is not read at all.
+cmd_store_key(){
+  case "${1:-}" in --if-missing) if key_store_ok; then printf 'Muse key store already present: %s\n' "$KEY_STORE"; return 0; fi;; '') ;; *) die "store-key: unknown option $1";; esac
+  read_key_from_op; write_key_store "$MODEL_API_KEY"; unset MODEL_API_KEY; printf 'Muse key stored in the protected per-user store: %s\n' "$KEY_STORE"
+}
 tree_state(){
   local root="$1" rel
   { git -C "$root" rev-parse HEAD; git -C "$root" diff --binary HEAD; while IFS= read -r -d '' rel; do printf '%s\0' "$rel"; sha256sum "$root/$rel"; done < <(git -C "$root" ls-files --others --exclude-standard -z); } | sha256sum | cut -d' ' -f1
@@ -579,6 +587,7 @@ run_turn(){
   set +e
   clean_env=("$env_bin" -i "PATH=$PATH" "HOME=$PROFILE_HOME" "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" "XDG_DATA_HOME=$XDG_DATA_HOME" "XDG_STATE_HOME=$XDG_STATE_HOME" "XDG_CACHE_HOME=$XDG_CACHE_HOME")
   [ "$ENGINE" != muse-code ] || clean_env+=("AI_MUSE_KEY_ENV=META_API_KEY")
+  clean_env+=("PSModuleAnalysisCachePath=${TEMP:-${TMPDIR:-/tmp}}/ai-muse-ps-module-cache") # #754: never into the checkout
   for safe_name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS; do
     [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
   done
@@ -937,7 +946,7 @@ cmd_doctor(){
     printf 'PASS  live provider response\n'
   fi
 }
-usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor | store-key' 'ai-muse review [repository] [request]  (compatibility command)'; }
+usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor | store-key [--if-missing]' 'ai-muse review [repository] [request]  (compatibility command)'; }
 
 OPT_BASE=""; OPT_ASSERT_HEAD=""
 if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then
@@ -959,7 +968,7 @@ fi
 case "${1:-}" in
   new) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
   ask) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;
-  list) cmd_list;; show) shift; cmd_show "${1:-}";; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; cmd_reconcile "${1:-}";; delete) shift; cmd_delete "${1:-}";; store-key) cmd_store_key;; doctor) shift; cmd_doctor "$@";;
+  list) cmd_list;; show) shift; cmd_show "${1:-}";; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; cmd_reconcile "${1:-}";; delete) shift; cmd_delete "${1:-}";; store-key) shift; cmd_store_key "$@";; doctor) shift; cmd_doctor "$@";;
   review) shift; repo="${1:-$PWD}"; request="${2:-}"; if [ -z "$request" ] && [ ! -t 0 ]; then request="$(cat)"; fi; request="${request:-Review the current changes for correctness, security, and missing tests.}"; printf '%s' "$request" | grep -Eqi 'VERDICT:' || request="$request
 
 Finish with exactly one final line: VERDICT: FINDINGS or VERDICT: NO FINDINGS."; (cd "$(repo_root "$repo")" && REQUIRE_VERDICT=1 cmd_new "review-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM" --prompt "$request");;

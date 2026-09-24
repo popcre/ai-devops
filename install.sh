@@ -351,6 +351,18 @@ else
   info "  No 1Password service-account token yet — skipping. Run: setup-opencode-glm.sh"
 fi
 
+# Muse key store: every machine gets the protected per-user copy of the Muse
+# key automatically, so review turns do not depend on 1Password. Idempotent:
+# a valid store is left alone. The key moves op -> ai-muse -> file inside one
+# process; it never appears in argv or in this installer's output.
+if [ "$(id -u)" -eq 0 ]; then
+  stage_results+=("SKIP\toptional\tMuse key store (root install)")
+elif command -v op >/dev/null 2>&1; then
+  run_stage optional "Muse key store" env AI_MUSE_CALLER=installer "$REPO_ROOT/bin/ai-muse" store-key --if-missing
+else
+  stage_results+=("SKIP\toptional\tMuse key store (1Password CLI not on PATH)")
+fi
+
 # --------------------------------------------------------------------------
 # 5. Doctor
 # --------------------------------------------------------------------------

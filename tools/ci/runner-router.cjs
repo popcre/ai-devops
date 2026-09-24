@@ -39,8 +39,20 @@ async function countIdleQualified(poolGithub, context, cfg) {
   return runners.filter(r => r.status === 'online' && !r.busy && r.labels.some(l => l.name === cfg.qualified_label)).length;
 }
 
+// Code from another repository (a fork pull request) never runs on our own
+// machines. Missing secrets already hide the pool from forks; this makes the
+// rule explicit instead of incidental.
+function isForeignHead(context) {
+  const head = context.payload && context.payload.pull_request && context.payload.pull_request.head;
+  return !!head && (!head.repo || head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`);
+}
+
 async function run({ github, poolGithub, context, core, cfg }) {
   let idle = 0;
+  if (isForeignHead(context)) {
+    core.info('Pull request head is outside this repository; every Windows section stays on Blacksmith.');
+    poolGithub = null;
+  }
   try {
     if (poolGithub) idle = Math.max(0, (await countIdleQualified(poolGithub, context, cfg)) - (await queuedQualifiedJobs(github, context, cfg)));
   } catch (error) {
@@ -57,4 +69,4 @@ async function run({ github, poolGithub, context, core, cfg }) {
   return plan;
 }
 
-module.exports = { decide, run };
+module.exports = { decide, run, isForeignHead };
