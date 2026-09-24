@@ -12,7 +12,10 @@
 param(
   [Parameter(Mandatory = $true)]
   [System.Collections.IDictionary]$Servers,
-  [string]$ConfigPath = (Join-Path $env:USERPROFILE ".codex\config.toml")
+  [string]$ConfigPath = (Join-Path $env:USERPROFILE ".codex\config.toml"),
+  # Managed servers now delivered per project (.codex/config.toml in the owning
+  # repository): their global table and every subtable are removed.
+  [string[]]$RemoveNames = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -104,6 +107,9 @@ foreach ($segment in $segments) {
   }
 
   $managedName = Get-McpHeaderName $segment.Header
+  $subName = Get-McpSubtableName $segment.Header
+  if (($managedName -and $RemoveNames -contains $managedName) -or
+      ($subName -and $RemoveNames -contains $subName)) { continue }
   if ($managedName -and $Servers.Contains($managedName)) {
     if (-not $written.ContainsKey($managedName)) {
       foreach ($newLine in (New-McpBlock $managedName $Servers[$managedName])) { $out.Add($newLine) | Out-Null }

@@ -255,6 +255,73 @@ missing names via project entries, stale pruning, foreign preservation, dry
 run; a scope key with no resolved roots is skipped — the regression that
 aborted the first live run).
 
+## Remaining tool prefix and gateway decision on 2026-09-24 (#706)
+
+Phase 4 of `plan_tool-and-skill-scoping.md` measures what is still loaded on a
+session's first turn after phases 1–3, then decides whether a passthrough
+gateway is worth piloting. Method: `~/.claude/projects/**/*.jsonl` first
+assistant `message.usage`, plus the session's `prompt_snapshot.tools` and
+`deferred_tools_delta` inventory. Schema estimates are characters/4 and are
+comparison-only, not billing claims.
+
+### 4.1 First-turn prefix (edge-dev, after phases 1–3)
+
+| Client / repo | Billed first-turn input* | Wire tools | Deferred | Skills | Wire MCP schema (est. tokens) |
+|---|---:|---:|---:|---:|---:|
+| Claude Desktop Code tab, ai-devops worktree | 87,611 | 47 (18 core + 29 MCP) | 443 | 69 | ~11,700 |
+| Claude Desktop Code tab, shared-db worktree | 141,793 | 47 (same shape) | 443 | 69 | ~11,700 |
+| Claude Code CLI, licensor-source-data | 26,875 | 328 snapshot (31 core + 297 MCP) | 0 recorded | 65 | see note |
+| Claude Code CLI, scratch-skill-proof | 27,767 | 328 snapshot | 0 recorded | 66 | see note |
+
+\* `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` on the
+first assistant message (the no-op-shaped opening turn's full prompt).
+
+**Desktop wire tool names (the remaining prefix).** Core: `Agent`, `Artifact`,
+`AskUserQuestion`, `Bash`, `Edit`, `Glob`, `Grep`, `ListAgents`, `PowerShell`,
+`Read`, `ReportFindings`, `ScheduleWakeup`, `SendUserFile`, `Skill`,
+`SuggestSkills`, `ToolSearch`, `Workflow`, `Write`. MCP: `Claude_Browser`
+(15 tools), `ccd_session` (4), connector `1a59c906-…` (3: batch/guide/update),
+`terminal__read_terminal`, `visualize` (2). Project MCP (`context7`,
+`devops-mcp`, `synology-monitor`) is in `pendingMcpServers` — deferred, not on
+the wire. The 443 deferred names include account connectors (Vercel ~212,
+Microsoft 365 ~43) and the pruned/project sets.
+
+**CLI note.** `prompt_snapshot.tools` lists 328 names including account
+connectors, but billed first turn is only ~27k tokens, so those schemas are not
+all on the first request (ToolSearch / deferred load). CLI does not write a
+`deferred_tools_delta` the way Desktop does; treat the Desktop wire/deferred
+split as the trustworthy inventory.
+
+### 4.2 On-demand / deferred tool access
+
+Already on by default. Claude Code enables MCP tool search auto mode (changelog:
+descriptions over 10% of the context window defer to ToolSearch). Desktop
+sessions show `ToolSearch` on the wire and 443 deferred names. No separate
+"off" switch appeared in `~/.claude/settings.json` or the Desktop feature
+store; 4.1's Desktop rows are therefore already the On-demand measurement.
+Turning it off was not attempted (it would only raise cost).
+
+### 4.3 Gateway decision — no pilot
+
+The plan's pilot bar: a material remainder of **≥5,000 tokens of MCP
+definitions** *and* a gateway that can front the Desktop surface.
+
+Desktop wire MCP is ~11,700 estimated schema tokens (≥5,000), so the first half
+of the bar is met. The second half is not:
+
+- The remainder is **Desktop platform surface** (`Claude_Browser`, `ccd_session`,
+  `visualize`, `terminal`), not catalog MCP servers. A passthrough gateway in
+  front of two or three low-risk servers cannot front those.
+- Low-risk catalog servers are already deferred (search-then-invoke /
+  ToolSearch). `1password` must never be fronted (locked). `devops-mcp` and
+  `synology-monitor` already hide behind `tool_search`/`invoke_tool`.
+- Account connectors (Vercel, M365, Docs) are out of this plan's write scope
+  (Albert: Settings → Connectors only) and are already deferred on Desktop.
+
+**Decision:** close #706 with these numbers. Do not pilot a passthrough
+gateway. Any further cut is a Desktop connector / account-connector settings
+decision for Albert, not a repo MCP change.
+
 ## Baseline frozen on 2026-08-12
 
 The dependency-free audit at

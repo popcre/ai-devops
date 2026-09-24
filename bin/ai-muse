@@ -218,20 +218,44 @@ muse_code_run(){ # every non-turn Muse Code call gets the same minimal environme
   fi
   "${e[@]}" "$BIN" "$@"
 }
-muse_code_sha256(){ tr -d ' \r\n' < "$ROOT/config/muse-code/sha256"; } # the exact pinned file, checked before it runs or sees a key; no override
+muse_code_sha256(){ local v=""; read -r v < "$ROOT/config/muse-code/sha256" || [ -n "$v" ]; v="${v%$'\r'}"; printf '%s' "${v// /}"; } # the exact pinned file, checked before it runs or sees a key; no override
+# Identity cache (#773): hashing two 400 MB files, re-protecting the directory,
+# and asking the binary for its version cost 5-40s on a saturated Windows host,
+# where every process spawn takes about a second. After a full verification we
+# record size, mtime and inode of both files; while one stat of both still
+# matches that record, the verified result is reused. Any replacement, copy,
+# or touch of either file changes the record and forces the full check again.
+muse_code_identity(){ local o; o="$(stat --printf '%s:%Y:%i ' -- "$@" 2>/dev/null)" || return 1; printf '%s' "${o% }"; }
 muse_code_stage(){ # run only a private copy verified after it was made, so swapping the installed file later changes nothing
-  local want dir tmp got; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] || return 1
-  [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] || return 1
-  dir="$PROFILE_HOME/.local/share/ai-devops/muse-code-bin"
+  local want dir tmp got cache id rec=""; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] || return 1
+  [ ! -L "$BIN" ] || return 1
+  dir="$PROFILE_HOME/.local/share/ai-devops/muse-code-bin"; cache="$dir/.verified-$want"
   ! linked_below_home "$dir" || return 1
+  if [ -d "$dir" ] && [ -f "$dir/muse-$want.exe" ] && [ ! -L "$dir/muse-$want.exe" ] && [ -f "$cache" ] && [ ! -L "$cache" ]; then
+    id="$(muse_code_identity "$BIN" "$dir/muse-$want.exe")"; read -r rec < "$cache" || true
+    if [ -n "$id" ] && [ "$rec" = "$VERSION $id" ]; then
+      BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want"; MUSE_CODE_VERSION_OK="$BIN:$want"; return 0
+    fi
+  fi
+  [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] || return 1
   mkdir -p "$dir" && chmod 700 "$dir" && protect_windows_path "$dir" directory || return 1
   if [ ! -f "$dir/muse-$want.exe" ] || [ -L "$dir/muse-$want.exe" ] || [ "$(sha256sum "$dir/muse-$want.exe" | cut -d' ' -f1)" != "$want" ]; then
     rm -f -- "$dir/muse-$want.exe"; tmp="$(mktemp "$dir/copy.XXXXXXXX")" || return 1
     cp -- "$BIN" "$tmp" && chmod 700 "$tmp" && protect_windows_path "$tmp" file && got="$(sha256sum "$tmp" | cut -d' ' -f1)" && [ "$got" = "$want" ] && mv -f -- "$tmp" "$dir/muse-$want.exe" || { rm -f -- "$tmp"; return 1; }
   fi
-  BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds (#773)
+  rm -f -- "$cache"; MUSE_CODE_CACHE_FILE="$cache"; MUSE_CODE_CACHE_ID="$(muse_code_identity "$BIN" "$dir/muse-$want.exe")"
+  BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds
 }
-muse_code_pinned(){ local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] && { [ "${MUSE_CODE_VERIFIED:-}" = "$BIN:$want" ] || [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ]; } && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
+muse_code_pinned(){
+  local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] || return 1
+  [ "${MUSE_CODE_VERSION_OK:-}" = "$BIN:$want" ] && return 0 # identity cache hit: this exact file already passed both checks
+  { [ "${MUSE_CODE_VERIFIED:-}" = "$BIN:$want" ] || [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ]; } && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)" || return 1
+  if [ -n "${MUSE_CODE_CACHE_FILE:-}" ] && [ -n "${MUSE_CODE_CACHE_ID:-}" ]; then # record only after hash and version both passed
+    printf '%s %s\n' "$VERSION" "$MUSE_CODE_CACHE_ID" > "$MUSE_CODE_CACHE_FILE.tmp.$$" 2>/dev/null && mv -f -- "$MUSE_CODE_CACHE_FILE.tmp.$$" "$MUSE_CODE_CACHE_FILE" 2>/dev/null || rm -f -- "$MUSE_CODE_CACHE_FILE.tmp.$$" 2>/dev/null
+    MUSE_CODE_CACHE_FILE=""; MUSE_CODE_CACHE_ID=""
+  fi
+  MUSE_CODE_VERSION_OK="$BIN:$want"
+}
 muse_code_catalog_dir(){ # the engine's private data store keeps Meta's first-party model catalog
   printf '%s' "$PROFILE_HOME/.local/share/ai-devops/muse-code/muse/model-catalog"
 }
@@ -307,7 +331,7 @@ prepare(){
   identity="$(tmp_file)"
   "$PACKET" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
     || die "source identity refused before snapshot creation"
-  REVIEW_DIR="$("$SANDBOX" ensure-copy "$root" "$t")"
+  REVIEW_DIR="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX" ensure-copy "$root" "$t")"
   # jq on Windows stores native paths; render the same identity before and
   # after local recovery so an identical report remains byte-identical.
   if command -v cygpath >/dev/null 2>&1; then REVIEW_DIR="$(cygpath -am "$REVIEW_DIR")"; fi

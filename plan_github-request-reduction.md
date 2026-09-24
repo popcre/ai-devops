@@ -8,20 +8,19 @@ Date: 2026-09-20. P1 is claimed under [#660](https://github.com/popcre/ai-devops
 by Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114` on ALBT16. This is a new defect programme;
 do not reopen the completed #401 throughput programme or claim its proofs cover this work.
 
-P1 implementation PR [#663](https://github.com/popcre/ai-devops/pull/663) remains
-unmerged and uninstalled. Upstream `b05d15d` / PR #662 changed quota admission and
-probe refresh during P1 CI; preserve it, separate pre/postintegration samples and
-obtain fresh review of the integrated head. This is not P2 acceptance. The
-[working baseline](tests/verification/github-requests/p1-baseline.md) records a
-live GraphQL/REST counter discrepancy whose root cause remains unproven; the REST
-snapshots cannot establish GraphQL headroom or busy windows. P1 still requires
-two busy reset windows and 20 completed comparable operations, including PR
-waiting, BlockerWatch, dispatch and privacy checks; the provisional replay option
-remains conditional on two business days of insufficient normal workload.
+P1 update 2026-09-24 2:58 PM EDT (Claude chat, edge-dev): PR #663 merged
+10:31 PM EDT 2026-09-23 and installed on edge-dev. Live data: 2,205 records over
+15 hourly windows, zero privacy violations, 1,577 quota snapshots
+([evidence](https://github.com/popcre/ai-devops/issues/660#issuecomment-5817155903)).
+BlockerWatch is about 95% of measured traffic, so P5 has the largest payoff.
+Exact-head review of merged P1 rejected only a load-sensitive test; that test was
+rebuilt as a handshake and approved in #776 (#775). Dispatch and privacy-proof
+callers are not wrapped by design (P3). Acceptance still needs the other active
+hosts (ALBT16, 916, hetz) installed and sampled; #660 stays open for its owner.
 
 | Step | State | Owner / dependency | Evidence required to accept |
 |---|---|---|---|
-| P1. Attribute consumption and freeze a comparable baseline | In progress, 2026-09-20; live acceptance NOT complete | #660, Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114` on ALBT16 | [Inventory and measurement boundaries](tests/verification/github-requests/p1-baseline.md); two busy reset windows and 20 completed operations still required |
+| P1. Attribute consumption and freeze a comparable baseline | Merged and live on edge-dev 2026-09-23; multi-host acceptance NOT complete | #660, Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114` on ALBT16 | [Inventory and measurement boundaries](tests/verification/github-requests/p1-baseline.md); two busy reset windows and 20 completed operations still required |
 | P2. Protect the actual quota and preserve command behavior | Open, 2026-09-20 | P1; one claimed implementation owner | Mixed-bucket fixtures and installed quota-mismatch proof |
 | P3. Route all managed request sources through the shared policy | Open, 2026-09-20 | P2 | Caller inventory reconciled, regression guard and installed representative paths |
 | P4. Coalesce duplicate status reads and waiters | Open, 2026-09-20 | P1–P3 | Same-target multi-session trace with one upstream refresh and unchanged outcomes |

@@ -36,7 +36,8 @@ What it does (idempotent - safe to re-run):
      - stdio via the op launcher : supabase (--read-only), trigger, 1password
        - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
        - no secret, pinned runtime : playwright, chrome-devtools, ag-grid
-       - Codex-only native HTTP    : vercel (browser OAuth)
+       - native HTTP, Oracle-only  : vercel (browser OAuth; Claude Code project
+                                      entry + Oracle .codex/config.toml, never global)
        - codex-cli                 : native `codex mcp-server`, absolute exe
                                       (definition kept; suspended 2026-09-17 -
                                       out of Claude membership, enabled=false in Codex)
@@ -468,9 +469,15 @@ $McpServerCatalog["1password"] = @{
 }
 
 # playwright / chrome-devtools / ag-grid - pinned local stdio servers, no secret.
-# Vercel is intentionally absent from Claude. Claude requires the mcp-remote
-# OAuth bridge, whose failed/expired refresh loop repeatedly opens browser login
-# windows. Codex adds Vercel below using its supported native HTTP transport.
+# vercel (native Streamable HTTP + OAuth). Never through the mcp-remote bridge:
+# its failed/expired refresh loop reopened browser login windows (0.1.38). Claude
+# Code reads {type=http,url} natively and owns the OAuth itself. It is scoped to
+# Oracle only (see $McpProjectScope); it is in no global membership list, and
+# Claude Desktop cannot express native HTTP, so Desktop never carries it.
+$McpServerCatalog["vercel"] = [ordered]@{
+  type = "http"
+  url = "https://mcp.vercel.com"
+}
 $McpServerCatalog["playwright"] = @{
   command = "cmd"
   args = @("/c", $McpCommands.playwright)
@@ -570,7 +577,7 @@ $MimoMcpNames = @("1password")
 # shared-db worktree doing DB Data Admin UI work, and that app moved to popdam3
 # (2026-09-16), so it is scoped to popdam3; revisit with fresh evidence.
 $McpProjectScope = [ordered]@{
-  "oracle"              = @("trigger", "recall-ai")
+  "oracle"              = @("trigger", "recall-ai", "vercel")
   "popdam3"             = @("railway", "chrome-devtools")
   "designflow-frontend" = @("ag-grid")
   "synology-monitor"    = @("devops-mcp", "synology-monitor")
@@ -590,6 +597,14 @@ foreach ($key in $McpProjectScope.Keys) {
   }
 }
 $McpScopedHere = @($McpScopedHere | Sort-Object -Unique)
+# Codex honours a project .codex/config.toml in trusted projects (verified
+# against codex-cli 0.153.2, 2026-09-24). Only servers listed here are moved out
+# of Codex's global config into the owning repository; the others in
+# $McpProjectScope stay global in Codex until they are moved deliberately.
+$CodexProjectMcpServers = [ordered]@{
+  "vercel" = [ordered]@{ url = "https://mcp.vercel.com"; startup_timeout_sec = 20 }
+}
+$CodexScopedHere = @($CodexProjectMcpServers.Keys | Where-Object { $McpScopedHere -contains $_ })
 # Effective global membership = the declared lists above minus servers already
 # delivered per project on THIS machine. bin/check-mcp-drift.ps1 parses the
 # literal lists FIRST (do not move them below this block) and applies the same
@@ -1028,7 +1043,8 @@ Step "Project-scoped MCP servers (#705)"
 $projectMcpWriter = Join-Path $RepoPath "bin\write-project-mcp.ps1"
 if (Test-Path -LiteralPath $projectMcpWriter) {
   & $projectMcpWriter -Scope $McpProjectScope -Roots $McpProjectRoots `
-    -Catalog $McpServerCatalog -ClaudeCodeConfig (Join-Path $HOME ".claude.json")
+    -Catalog $McpServerCatalog -ClaudeCodeConfig (Join-Path $HOME ".claude.json") `
+    -CodexServers $CodexProjectMcpServers
 } else {
   Warn "Missing $projectMcpWriter - project MCP entries left as-is."
 }
@@ -1109,12 +1125,13 @@ if (Test-Path -LiteralPath $codexMcpSetup) {
     $CodexMcpServers[$name] = $copy
   }
 
-  # Codex supports native Streamable HTTP and OAuth. Keep Vercel native so its
-  # stored Codex OAuth session works; mcp-remote is only for Claude consumers.
-  $CodexMcpServers['vercel'] = [ordered]@{
-    url = 'https://mcp.vercel.com'
-    startup_timeout_sec = 20
+  # Codex-project-capable servers (vercel) are delivered per repository in 7b
+  # and removed from the global config wherever their owner is cloned here. A
+  # machine without the owning clone keeps them global, the #705 rule.
+  foreach ($name in $CodexProjectMcpServers.Keys) {
+    $CodexMcpServers[$name] = $CodexProjectMcpServers[$name]
   }
+  foreach ($name in $CodexScopedHere) { $null = $CodexMcpServers.Remove($name) }
   # Railway CLI 5.41.2 configures Codex's remote mode through its authenticated
   # CLI proxy. Match the official installer output so `railway login` owns OAuth.
   # Claude consumers retain the shared mcp-remote definition above.
@@ -1140,7 +1157,7 @@ if (Test-Path -LiteralPath $codexMcpSetup) {
     $CodexMcpServers['codex-cli']['enabled'] = $false
   }
 
-  & $codexMcpSetup -Servers $CodexMcpServers
+  & $codexMcpSetup -Servers $CodexMcpServers -RemoveNames $CodexScopedHere
 } else {
   Warn "Missing $codexMcpSetup - Codex MCP server set left as-is."
 }

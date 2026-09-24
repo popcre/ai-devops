@@ -74,6 +74,16 @@ notifications = true
   $codexCliBlock = [regex]::Match($second, '(?s)\[mcp_servers\."codex-cli"\].*?(?=\n\[mcp_servers\.|\z)').Value
   Assert-True ($codexCliBlock.Contains('enabled = false')) "parks codex-cli inside its own table"
   Assert-True ((Get-ChildItem $testRoot -Filter 'config.toml.aidevops-*.bak').Count -eq 1) "creates one recoverable backup only when changed"
+
+  # Project-scoped servers leave the global config with every subtable (#705).
+  "`n[mcp_servers.vercel.tools.deploy]`napproval_mode = `"approve`"`n" | Add-Content -LiteralPath $configPath
+  $scoped = [ordered]@{}
+  foreach ($name in $servers.Keys) { if ($name -ne 'vercel') { $scoped[$name] = $servers[$name] } }
+  & $scriptPath -Servers $scoped -ConfigPath $configPath -RemoveNames @('vercel') | Out-Null
+  $third = Get-Content -Raw -LiteralPath $configPath
+  Assert-True (-not $third.Contains('mcp.vercel.com')) "RemoveNames drops the global vercel table"
+  Assert-True (-not $third.Contains('mcp_servers.vercel.tools')) "RemoveNames drops the vercel subtables"
+  Assert-True ($third.Contains('[mcp_servers.keep-me]')) "RemoveNames keeps unrelated servers"
 } finally {
   $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)
   $resolvedTemp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())

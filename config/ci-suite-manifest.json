@@ -88,7 +88,11 @@
     "test-workflow-policy.sh": 4,
     "test-worktree-reap-tool.sh": 2,
     "test-ci-runner-router.sh": 1,
+<<<<<<< HEAD
     "test-reviewer-credit.sh": 1
+=======
+    "test-ai-review-snapshot-bounded-history.sh": 8
+>>>>>>> origin/main
   },
   "bash": [
     "test-ai-adopt-globals.sh",
@@ -132,6 +136,7 @@
     "test-ai-review-preflight.sh",
     "test-ai-review-sandbox.sh",
     "test-ai-review-scoreboard.sh",
+    "test-ai-review-snapshot-bounded-history.sh",
     "test-ai-reviewer-issue.sh",
     "test-ai-reviewer-membership-drift.sh",
     "test-ai-reviewer-start-watch.sh",

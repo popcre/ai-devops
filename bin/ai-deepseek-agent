@@ -667,7 +667,7 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
   "$SOURCE_TOOLS/ai-review-packet" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$REVIEW_SOURCE_IDENTITY" || return 1
   REVIEW_HEAD="$(jq -r .head "$REVIEW_SOURCE_IDENTITY")" || return 1
   REVIEW_SOURCE_TAG="deepseek-$(printf '%s' "$REVIEW_SOURCE_IDENTITY" | sha256sum | cut -c1-24)"
-  snapshot="$("$SOURCE_TOOLS/ai-review-sandbox" ensure-copy "$REPO_ROOT" "$REVIEW_SOURCE_TAG")" || return 1
+  snapshot="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SOURCE_TOOLS/ai-review-sandbox" ensure-copy "$REPO_ROOT" "$REVIEW_SOURCE_TAG")" || return 1
   REVIEW_SOURCE_WORKSPACE="$snapshot"
   REVIEW_SOURCE_PACKET="$("$SOURCE_TOOLS/ai-review-packet" build "$snapshot" "$REVIEW_SOURCE_TAG" --identity "$REVIEW_SOURCE_IDENTITY")" || return 1
   REVIEW_SOURCE_HASH="$(cat "$REVIEW_SOURCE_PACKET/MANIFEST.sha256")"

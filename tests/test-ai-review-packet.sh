@@ -255,12 +255,15 @@ check "stale_base_packet_excludes_target_branch_work" "! grep -q 'target-only.tx
 
 # The caller resolves once, before the snapshot, and the sealed packet must
 # preserve that identity. Wrong or moved input is refused before any provider.
+# The snapshot request forwards the explicit base exactly as the wrappers do
+# (issue #711: bounded snapshots carry the base-ref candidates plus the
+# caller's AI_REVIEW_SANDBOX_BASE hint, and no longer every branch).
 git -C "$STALE" branch release "$STALE_REMOTE_SHA"
 IDENTITY="$TMP/source-identity.json"
 mkdir -p "$STALE/.ai-review-notes"
 printf 'legitimate untracked source\n' > "$STALE/.ai-review-notes/feature.txt"
 "$SCRIPT" resolve "$STALE" --base release --assert-head "$(git -C "$STALE" rev-parse HEAD)" > "$IDENTITY"
-IDENTITY_SNAPSHOT="$("$REPO_ROOT/bin/ai-review-sandbox" ensure-copy "$STALE" identity-contract)"
+IDENTITY_SNAPSHOT="$(AI_REVIEW_SANDBOX_BASE=release "$REPO_ROOT/bin/ai-review-sandbox" ensure-copy "$STALE" identity-contract)"
 IDENTITY_PACKET="$("$SCRIPT" build "$IDENTITY_SNAPSHOT" identity-contract --identity "$IDENTITY")"
 check "non_main_target_survives_snapshot" "git -C '$IDENTITY_SNAPSHOT' rev-parse release >/dev/null && '$SCRIPT' verify '$IDENTITY_PACKET' --identity '$IDENTITY'"
 check "packet_seals_original_repository_identity" "cmp -s '$IDENTITY' '$IDENTITY_PACKET/identity.json'"
