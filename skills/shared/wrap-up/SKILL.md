@@ -72,10 +72,10 @@ exact repository name are the gate.
 ## Step 1 — the shared-database gate
 
 Before anything else, answer this out loud in the session: **did this session
-touch the shared Supabase database or `u2giants/shared-db`, dispatch sub-agents,
+touch the shared Supabase database or `popcre/shared-db`, dispatch sub-agents,
 or hold an `orchestrator-marker` issue?**
 
-Check rather than assume — `gh issue list --repo u2giants/shared-db --label
+Check rather than assume — `gh issue list --repo popcre/shared-db --label
 orchestrator-marker --state open` and the session's own history. If the answer
 to ANY of those is yes, **stop and run the `shared-db-handover` skill now**; it
 owns the whole close-out for this session, including the marker, the `db-work`

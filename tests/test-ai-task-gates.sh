@@ -72,6 +72,15 @@ check 'every changed path is still classified individually' "jq -e '.changes|len
 check 'unmatched path falls back to code, not to the strongest class' \
   "[ \"\$(class_of 'random/thing.bin')\" = code ]"
 
+newrepo "$TMP/db-canonical" popcre/shared-db
+newrepo "$TMP/db-redirected" u2giants/shared-db
+db_canonical="$(cd "$TMP/db-canonical" && printf 'migrations/001.sql\n' | "$GATES" explain --json --paths-from -)"
+db_redirected="$(cd "$TMP/db-redirected" && printf 'migrations/001.sql\n' | "$GATES" explain --json --paths-from -)"
+check 'canonical shared-db identity retains the structural class and gates' \
+  "jq -e '.observed_class==\"shared-db\" and ([\"governed-issue-claim\",\"preview-target-proof\",\"production-promotion-authorization\"]- .required_gates|length==0)' <<<\"\$db_canonical\""
+check 'redirected pre-transfer shared-db identity retains identical structural gates' \
+  "[ \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_canonical\")\" = \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_redirected\")\" ]"
+
 printf 'consumer declarations\n'
 mkdir -p "$TMP/class/.ai-devops"
 cat > "$TMP/class/.ai-devops/task-gates.json" <<'EOF'

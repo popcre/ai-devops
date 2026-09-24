@@ -1403,7 +1403,7 @@ VERDICT_MARKER='## Verdict'
 # THE ORDER WAS INVERTED AND THE COMMENT ABOVE WAS THE ONLY THING THAT SAID SO
 # (fixed 2026-09-01). The verdict section printed FIRST and the findings after it,
 # so the terminal line of stdout was never the verdict. run-governed-review.mjs in
-# u2giants/shared-db requires the verdict to be the LAST non-empty line and records
+# popcre/shared-db requires the verdict to be the LAST non-empty line and records
 # nothing otherwise, so every governed review assigned to this wrapper failed with
 # "did not produce a recordable terminal verdict (exit 0)" while the review itself
 # had completed correctly. Observed twice on shared-db PR #2068 and reproduced with

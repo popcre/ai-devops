@@ -155,7 +155,7 @@ park an owner decision. Reviewer, tooling, allocator, and rate-limit failures ar
 urgent operational blockers: preserve capability, use bounded API calls, read
 and report the provider reset time in Eastern Time, and do not repeatedly invoke
 a path already known to be unsafe. The reviewer-allocator redesign blocker is
-[u2giants/shared-db#1767](https://github.com/u2giants/shared-db/issues/1767).
+[popcre/shared-db#1767](https://github.com/popcre/shared-db/issues/1767).
 
 ### Close what you supersede, in the same turn
 

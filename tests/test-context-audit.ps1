@@ -418,7 +418,7 @@ try {
     # not a finding, because a file's own session is what retires it. What the
     # audit warns about now is a handoff carrying NO contract block, since
     # without one nothing can ever tell whether that workstream is finished -
-    # the failure that left 27 finished files behind in u2giants/shared-db.
+    # the failure that left 27 finished files behind in popcre/shared-db.
     foreach ($n in 1..5) { Write-Utf8 (Join-Path $handoffDir "2026-01-0${n}Z-m-a-s.md") "# handoff $n" }
     $result = Invoke-Audit -Path $fixture -Strict
     if (@($result.report.openHandoffs).Count -ne 5) { throw "Five handoffs were not all counted." }

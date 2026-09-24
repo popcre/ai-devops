@@ -409,7 +409,7 @@ $McpServerCatalog = [ordered]@{}
 # SUPABASE_ACCESS_TOKEN (from mcp.env) into the server's environment.
 #
 # --read-only is NOT optional. Every schema/DDL/RLS change to the shared DB is
-# authored in u2giants/shared-db (branch + PR), never through this MCP. The flag
+# authored in popcre/shared-db (branch + PR), never through this MCP. The flag
 # enforces that rule; --project-ref caps the blast radius to the one project.
 # The legacy Dropbox script had --read-only; it was dropped when this script took
 # over, leaving the MCP write-capable against shared production.

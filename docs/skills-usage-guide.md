@@ -25,7 +25,7 @@ absent. Then append the machine's section from
 
 `pop-business-rules` is a shared Skill for both clients. It routes business-rule
 questions and changes to the canonical companywide library in
-`u2giants/shared-db/docs/business-rules/`; it never stores a second copy of the rules.
+`popcre/shared-db/docs/business-rules/`; it never stores a second copy of the rules.
 
 ### Replacing an installed global that already exists — use `bin/ai-adopt-globals`
 

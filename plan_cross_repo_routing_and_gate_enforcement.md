@@ -52,8 +52,8 @@ GitHub repositories, not every local clone or worktree.
 | Group | Canonical repositories | Required local distinction |
 |---|---|---|
 | Shared tooling | `popcre/ai-devops` | Public toolkit; reviewer-safety paths retain exact-head independent review; documentation-only changes retain the immediate merge path |
-| DesignFlow | `popcre/designflow-backend`, `designflow-bff`, `designflow-data-syncing`, `designflow-frontend`, `designflow-item-master`, `designflow-tracking` | Normal product delivery remains sandbox branch and PR to `develop`; for the #335 rollout Albert selected direct, live `sandbox-albert` acceptance without a `develop`/Uma wait. Frontend/UI work retains visual and authenticated workflow proof; shared schema changes route to `u2giants/shared-db` |
-| Shared database | `u2giants/shared-db` | Structural changes keep orchestrator, claim, reviewer, preview, target-identity, and production-promotion gates |
+| DesignFlow | `popcre/designflow-backend`, `designflow-bff`, `designflow-data-syncing`, `designflow-frontend`, `designflow-item-master`, `designflow-tracking` | Normal product delivery remains sandbox branch and PR to `develop`; for the #335 rollout Albert selected direct, live `sandbox-albert` acceptance without a `develop`/Uma wait. Frontend/UI work retains visual and authenticated workflow proof; shared schema changes route to `popcre/shared-db` |
+| Shared database | `popcre/shared-db` | Structural changes keep orchestrator, claim, reviewer, preview, target-identity, and production-promotion gates |
 | Oracle | `u2giants/theoracle` | Release, migration, licensed-fixture, and live production gates remain explicit; no production mutation without current authorization |
 | Licensed/private evidence | `u2giants/licensor-source-data`, `u2giants/ai-devops-transcripts` | Licensed rows and raw transcripts remain private; the routing audit must not open raw transcript archives |
 | Applications | `u2giants/popcrm-web`, `poppim-web`, `popdam3`, `backrest-wiz` | Each repo keeps its own tests, UI proof, deployment, and database ownership boundaries |
@@ -358,7 +358,7 @@ committed under `tests/verification/task-gates/`.
 Pilot one repository from each materially different risk family:
 
 1. `popcre/ai-devops`: prose fast path plus reviewer-safety exact-head review.
-2. `u2giants/shared-db`: structure/data/orchestrator and target-proof rules.
+2. `popcre/shared-db`: structure/data/orchestrator and target-proof rules.
 3. `popcre/designflow-frontend`: DesignFlow branch ownership, no self-merge,
    shared-db boundary, UI visual/authenticated proof.
 4. `u2giants/theoracle`: release, migration, licensed fixture, and production

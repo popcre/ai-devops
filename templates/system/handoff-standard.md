@@ -159,7 +159,7 @@ owner: codex/wb-scrape-schema-925     # the branch or session that owns this fil
 
 **Why it is worth four lines.** Without it, "is this workstream finished?" can only
 be answered by reading the whole nine-section essay against live GitHub. Nobody
-does that, so nothing is ever retired. In `u2giants/shared-db` that produced **30
+does that, so nothing is ever retired. In `popcre/shared-db` that produced **30
 files, 27 of them finished** (issue #658, cleaned 2026-08-13). With the block, the
 question is one `gh issue view`.
 
@@ -170,7 +170,7 @@ one that says nothing.
 **If your work has no issue, open one.** A workstream worth a handoff is worth an
 issue; without one, nothing can ever tell that the handoff is finished.
 
-**Enforced in `u2giants/shared-db`** by the `Handoff Contract Guard` (added 2026-08-13,
+**Enforced in `popcre/shared-db`** by the `Handoff Contract Guard` (added 2026-08-13,
 issue #658). It fails a pull request only for a handoff file **that pull request
 touches**, never for anybody else's, and it asks you to retire your file in the same
 pull request that closes its issue.
@@ -318,7 +318,7 @@ Then ask and answer these **four** final synthesis questions exactly:
    and confirm each appears in §0. **Do not answer from memory or from intent.**
    The failure this catches is a decision correctly written down somewhere else
    and never promoted, so it reaches him days late or never. Measured on
-   2026-08-07 in `u2giants/shared-db`: of eight items needing Albert, three
+   2026-08-07 in `popcre/shared-db`: of eight items needing Albert, three
    would have been raised, two silently self-decided, and **three never raised
    at all** — and those three had been waiting the longest.
 
