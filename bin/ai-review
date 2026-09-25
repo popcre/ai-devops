@@ -118,9 +118,15 @@ export AI_REVIEW_OWNER_REQUEST="$owner_request"
 # the work is. Gating it on the class of a change set that has not been
 # written yet would refuse the very step that sets the class.
 if [ "$mode" = plan-review ]; then exec "$wrapper" "${wrapper_args[@]}"; fi
+# The sealed attachment-only route is its own gate action: the formal review
+# action stays forbidden for private classes, while code-only-review opens only
+# when the repository's own declaration carries the synthetic-fixtures-only
+# boundary that route promises.
+gate_action=review
+[ "$code_only" -eq 0 ] || gate_action=code-only-review
 gate_args=()
 [ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
-tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }
+tg_preflight_gate "$gate_action" "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }
 if [ "$code_only" -eq 1 ]; then
   # The private source never becomes a provider working directory. The exporter
   # admits only explicitly selected code and binds it to the full source state.

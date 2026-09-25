@@ -9,10 +9,18 @@
     "the file already belongs to one repository. Resolution takes the STRONGEST",
     "class over every changed path across both central and local",
     "matches, so a local declaration can strengthen a gate and can never weaken",
-    "one. See docs/context-spec.md for the full contract."
+    "one. See docs/context-spec.md for the full contract.",
+    "",
+    "code-only-review is the sealed attachment-only route (bin/ai-review --code-only):",
+    "the only review action a private class may start without an owner request.",
+    "It refuses to start on a private class unless that repository's own",
+    ".ai-devops/task-gates.json declares the synthetic-fixtures-only gate for",
+    "that class, so opening the route is each private repository's own reviewed",
+    "decision. The formal review action stays forbidden for both private classes."
   ],
   "actions": [
     "review",
+    "code-only-review",
     "pr-wait",
     "ship",
     "deploy",
@@ -20,6 +28,14 @@
     "infrastructure",
     "production"
   ],
+  "action_gates": {
+    "code-only-review": {
+      "require_gate": {
+        "private-evidence": "synthetic-fixtures-only",
+        "private-tooling": "synthetic-fixtures-only"
+      }
+    }
+  },
   "change_classes": {
     "prose": {
       "rank": 10,
@@ -247,6 +263,7 @@
           "no-raw-content-read"
         ],
         "forbidden_actions": [
+          "review",
           "deploy",
           "database",
           "infrastructure",

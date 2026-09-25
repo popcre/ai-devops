@@ -85,6 +85,19 @@ load_policy(){
   jq -e '.schema_version == 1 and (.change_classes|type=="object") and (.rules|type=="array") and (.default|type=="object")' \
     "$POLICY_FILE" >/dev/null 2>&1 || fail_closed "invalid task-gate contract: $POLICY_FILE"
   load_class_table
+  validate_action_gates
+}
+
+# Per-action proof bindings must name real actions and real classes before any
+# check consults them: an entry that silently never matches would quietly drop
+# the requirement it was written to carry.
+validate_action_gates(){
+  local line action class
+  while IFS=$'\t' read -r action class; do
+    [ -n "$action" ] || continue
+    valid_action "$action" || fail_closed "action_gates names undeclared action '$action'."
+    valid_class "$class" || fail_closed "action_gates names undeclared class '$class' for action '$action'."
+  done < <(jqr '.action_gates // {} | to_entries[] | .key as $a | (.value.require_gate // {}) | keys[] | [$a,.] | @tsv' "$POLICY_FILE")
 }
 
 # The class table is read once. Classification asks for a rank on every rule of
@@ -535,6 +548,18 @@ cmd_check(){
     state_record_override owner-request "$action" "$owner_request" "$effective"
     printf 'ai-task-gates: "%s" allowed by explicit owner request: %s\n' "$action" "$owner_request"
     return 0
+  fi
+
+  # 3. Per-action proof binding. The sealed code-only review route is an
+  # action a private class may start without an owner request, but only while
+  # the repository's own declaration carries the fixtures boundary the route
+  # promises. Consult the observed and declared classes' merged proofs, the
+  # same set printed as the required gates.
+  local needs_gate
+  needs_gate="$(jqr --arg a "$action" --arg c "$effective" '.action_gates[$a].require_gate[$c] // empty' "$POLICY_FILE")"
+  if [ -n "$needs_gate" ] && ! printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | grep -qx -- "$needs_gate"; then
+    blocked "$(printf 'ai-task-gates: STOP. "%s" needs the "%s" gate for the class "%s" in %s.\nThis repository has not declared that gate in its own .ai-devops/task-gates.json for that class, so the sealed route is not opened here. Add the declaration through that repository\x27s own reviewed path.' \
+      "$action" "$needs_gate" "$effective" "$IDENTITY")"
   fi
 
   printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"

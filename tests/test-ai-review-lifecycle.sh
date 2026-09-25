@@ -242,7 +242,9 @@ git -C "$PRIVATE" config user.name Test; git -C "$PRIVATE" config user.email t@e
 git -C "$PRIVATE" remote add origin https://github.com/u2giants/licensor-source-data.git
 printf 'print("base")\n' > "$PRIVATE/src/loader.py"
 printf 'raw-row-sentinel\n' > "$PRIVATE/evidence/raw.csv"
-printf '{"schema_version":1,"paths":[{"glob":"**","class":"private-evidence"}]}\n' > "$PRIVATE/.ai-devops/task-gates.json"
+# The sealed route only opens for a repository whose own declaration carries
+# the synthetic-fixtures-only boundary, so the fixture models that opt-in.
+printf '{"schema_version":1,"paths":[{"glob":"**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"]},"private-tooling":{"required":["synthetic-fixtures-only"]}}}\n' > "$PRIVATE/.ai-devops/task-gates.json"
 git -C "$PRIVATE" add src/loader.py evidence/raw.csv .ai-devops/task-gates.json
 git -C "$PRIVATE" commit -qm 'history-raw-sentinel'
 printf 'print("changed")\n' > "$PRIVATE/src/loader.py"
