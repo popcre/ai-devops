@@ -29,6 +29,11 @@ or ambiguous terminal evidence stays blocked. If the source moved, reconciliatio
 retains a clearly non-authorizing report and permits a fresh same-session `ask`.
 An unchanged existing report is reused; different bytes are never overwritten.
 
+If the source repository changes during a turn, the completed review is rejected as
+stale. The message names the paths that appeared or vanished (capped at 10) and
+points at `reconcile` as the recovery step — the paid review is kept. `delete`
+discards it and is not the default next action.
+
 The older `ai-muse review [repository] [request]` command remains available. It now
 creates a timestamped named conversation, so the result is not trapped in a one-off
 call.

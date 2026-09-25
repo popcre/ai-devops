@@ -10,15 +10,15 @@
 
 ## STATUS — read this first
 
-Nothing has been implemented. A fresh session starts at **Step 1**.
+Steps 1–4 landed; Step 5 (exact-head review + publish) is the remaining gate.
 
 | # | Step | Status | Evidence |
 |---|---|---|---|
 | 0.1 | Incident that triggered this | ✅ 2026-08-25 | § 3; reproducible with the command in that section |
-| 1 | Capture a before/after path inventory alongside the existing hash | ⬜ open | — |
-| 2 | Name the changed paths in both rejection messages | ⬜ open | — |
-| 3 | Name `reconcile` in both rejection messages | ⬜ open | — |
-| 4 | Tests | ⬜ open | — |
+| 1 | Capture a before/after path inventory alongside the existing hash | ✅ done | `tree_paths` / `path_delta_summary` in `bin/ai-muse`; inventory failure is survivable (`\|\| : >`) |
+| 2 | Name the changed paths in both rejection messages | ✅ done | `Changed paths:` with cap 10 + remainder; tests `stale_rejection_names_*` |
+| 3 | Name `reconcile` in both rejection messages | ✅ done | both messages use the `transcript` then `reconcile` pattern; `stale_rejection_names_reconcile_*` |
+| 4 | Tests | ✅ done | `tests/test-ai-muse.sh` stale-rejection block |
 | 5 | Finish every edit, prove it live, then review the exact final state and publish | ⬜ open | — |
 
 **Rule for this table:** ✅ requires an artifact — a commit SHA, a test name, or
