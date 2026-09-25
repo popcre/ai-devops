@@ -12,8 +12,8 @@ Fresh session: read sections 1, 8, 11, then claim **one** row in section 9. Defa
 | P1 | Gemini inventory is fast and byte-equivalent | open | Reuse #633; named implementation session claims before edits | Parity tests, large-tree timing, installed Gemini proof |
 | P2 | Other inventory consumers use the proven primitive | open | P1; one consumer outcome/session under #633 | Per-consumer tests and installed proof; no blanket completion |
 | P3 | A known fast-validation failure stops expensive CI | open | P0 slice; independent of P1 | Negative live run plus repaired run and aggregate results |
-| P4 | Dependency selector correctly predicts affected tests | open | P0 slice; shadow only | Complete-inventory checks and dependency/hostile-path fixtures |
-| P5 | PR checks use the proven selector on both platforms | open | P3 + P4 | Representative narrowed PRs, injected dependency failure, complete backstop |
+| P4 | Dependency selector correctly predicts affected tests | landed via #805/#820 `18d30395`; shadow/complete-inventory acceptance still open | #650 coordinates remaining P4 gate | Complete-inventory checks and dependency/hostile-path fixtures beyond the unit suite |
+| P5 | PR checks use the proven selector on both platforms | PR activation landed via #805/#820 `18d30395`; merge queue stays full | P3 remaining + P4 acceptance | Representative narrowed one-file PR, injected dependency failure, complete backstop, p90 measure |
 | P6 | Reviewer suites run independently without losing coverage | open | P3; serialize overlap with P5 | Full suite union, failure aggregation, before/after timing |
 | P7 | Transient health timeouts no longer masquerade as bad reviewers | open | Reconcile #622 and #637; separate issues/outcomes | Timeout/identity tests and one scoped installed live proof |
 | P8 | One consistent, proportionate delivery procedure is installed | open | P0 slice; coordinate #335 | Cross-client instruction checks and scoped installed task exercise |
@@ -21,6 +21,8 @@ Fresh session: read sections 1, 8, 11, then claim **one** row in section 9. Defa
 | P10 | End-to-end delivery improvement is measured and accepted | open | Earlier applicable rows accepted | Comparable samples, safety evidence, residual-owner list |
 
 Current implementation owner for unclaimed rows: #650 roadmap owner, **not an active worker**. Transfer a row explicitly before work; do not infer that someone is monitoring it. Reuse existing owner issues where listed; create a scoped child only when dispatching genuinely new work. No blanket dependency chain across independent rows. Any landed-but-unproved row must name exactly one proof issue opened by the landing session, with a named owner.
+
+2026-09-25: issue #805 / PR #820 landed PR path-to-suite selection (`config/ci-suite-manifest.json` `affected_suite_rules`, `tests/lib-selection.sh` `selection_affected_suites`, `tests/test-all.sh --changed-since` composed with `--shard`). Unknown and shared paths still select every suite. Merge queue, schedule, and manual runs stay complete. Do not rebuild this selector; extend its maps and finish the P4/P5 acceptance rows above.
 
 Discovery handoff: [planning-session handoff](HANDOFF.d/2026-09-20T1515Z-916-codex-workflow-efficiency.md). Evidence: [September 20 baseline](tests/verification/repo-throughput/2026-09-20-workflow-efficiency-baseline.md). Historical completed work: [throughput restructure](plan_repo-throughput-restructure.md), [September 17 audit](docs/ci-speed-audit-2026-09-17.md). This plan is the current efficiency roadmap, not a reopening of that completed programme.
 
