@@ -10,6 +10,10 @@ if command -v readlink >/dev/null 2>&1; then
   REAL_DIR_SOURCE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
   [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
 fi
+# Phase 3 orphan sweep (issue #711): parents drop abandoned review snapshots
+# before starting a new one. Bounded (sandbox root only) and best-effort —
+# never fails or delays the approval path.
+"${AI_REVIEW_SANDBOX_BIN:-$REAL_DIR/ai-review-sandbox}" sweep-orphans || true
 pool_provider=""
 case "${1:-}" in
   claude) wrapper="${AI_CLAUDE_REVIEW_BIN:-$ROOT/ai-claude-review}" ;;

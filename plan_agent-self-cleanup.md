@@ -4,11 +4,11 @@
 |------|--------|----------|
 | 1. Shrink what a review copies | ✅ done — merged `af80fcf0f11b66f99fa794ad159b4b6f110eae2d` (PR #797, Muse APPROVE at exact head; bounded shallow snapshots, not files-only: the packet/lifecycle tools run git inside the snapshot, so a no-`.git` shape cannot work — `tests/test-ai-review-snapshot-bounded-history.sh`, `tests/test-ai-review-sandbox.sh` 108/108, packet 138/138) | real-worktree dry run: 15 MB / 13 commits / 17 s vs old full clone 461 MB / 1,206 commits / 63 s; a real Muse review of PR #797 ran entirely inside a bounded snapshot |
 | 2. Delete the copy when the review ends | ✅ done — merged `41f8e75ab4e2ad0a496547fffec427fe110ed956` (PR #823, Muse final APPROVE at exact head 6026815b): `with-copy` run wrapper in `bin/ai-review-sandbox` deletes on success/failure/abort via EXIT/INT/TERM trap; `AI_KEEP_SANDBOX=1` debugging exception; path-guarded delete unchanged; kimi start-failure paths release the snapshot (`tests/test-ai-review-sandbox-self-cleanup.sh` 22/22, `tests/test-ai-review-sandbox-delete-guard.sh` 9/9 + 4 symlink skips where `ln -s` is unavailable, `tests/test-ai-review-sandbox.sh` 108/108). Issue #802 one-line kimi refresh-copy base-hint fix landed here (`tests/test-ai-review-snapshot-bounded-history.sh` 23/23) | creating run deletes before returning; `AI_KEEP_SANDBOX=1` keeps |
-| 3. Parent process sweeps orphans | ⬜ open | |
+| 3. Parent process sweeps orphans | ✅ done — `tests/test-orphan-sweep-age.sh` 17/17: fake >2h sandbox removed at `bin/ai-review` parent start; 10-minute-old kept; dead owner PID + ≥15 min removed; live owner PID kept past 2h. `bin/ai-review-sandbox sweep-orphans` + `sandbox.pid` (Phase 3). Parents `ai-review`, `ai-review-pool`, `ai-review-preflight check` sweep at start. Session wrappers export `AI_REVIEW_SANDBOX_OWNER_PID=$$`. Suites stay green: self-cleanup 22/22, delete-guard 9/9 + 4 skips, bounded-history 23/23, sandbox 108/108 | orphan rule: never <15 min; dead PID + ≥15 min; else ≥2h and no live PID |
 | 4. Daily sweep as backup only | ⬜ open (task already installed on this machine) | `AI-Debris-Housekeeping` scheduled task, 03:30 daily |
 | 5. Prove it live with one real review | ⬜ open | |
 
-**Where a fresh session starts:** Phase 3 (parent orphan sweep; plan §9 Phase 3). Re-read this STATUS table before each phase.
+**Where a fresh session starts:** Phase 4 (daily sweep tighten only if paths/markers changed) then Phase 5 (live proof). Re-read this STATUS table before each phase.
 
 Related handoff: [HANDOFF.d/2026-09-23T1820Z-edge-dev-claude-agent-self-cleanup.md](HANDOFF.d/2026-09-23T1820Z-edge-dev-claude-agent-self-cleanup.md) (issue [#711](https://github.com/popcre/ai-devops/issues/711)). Do not rewrite root `HANDOFF.md`.
 

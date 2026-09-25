@@ -539,7 +539,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
   # Always isolate preflight. Ordinary wrappers keep their packet in an
   # ordinary clone while a reviewer reads it; a preflight packet must never
   # replace or delete that live evidence.
-  sandbox="$(AI_REVIEW_SANDBOX_BASE="${base:-}" ${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox} ensure-copy "$repo" "$tag")"
+  sandbox="$(AI_REVIEW_SANDBOX_OWNER_PID=$$ AI_REVIEW_SANDBOX_BASE="${base:-}" ${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox} ensure-copy "$repo" "$tag")"
   PREFLIGHT_REPO="$repo"; PREFLIGHT_TAG="$tag"; PREFLIGHT_SANDBOX="$sandbox"
   trap cleanup_check EXIT
   packet="$(${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet} build "$sandbox" "$tag" ${base:+--base "$base"})"
@@ -592,6 +592,9 @@ case "$cmd" in
   check)
     provider="${1:-}"; repo="${2:-}"; shift 2 || true; live=0; base=""
     while [ "$#" -gt 0 ]; do case "$1" in --live) live=1; shift ;; --base) base="${2:-}"; shift 2 ;; *) die "unknown option '$1'." ;; esac; done
+    # Phase 3 orphan sweep (issue #711): parents drop abandoned snapshots
+    # before building a new sandbox. Bounded and best-effort.
+    "${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}" sweep-orphans || true
     check_provider "$provider" "$repo" "$live" "$base" ;;
   quarantine)
     provider="${1:-}"; class="${2:-}"; shift 2 || true; seconds="$COOLDOWN"

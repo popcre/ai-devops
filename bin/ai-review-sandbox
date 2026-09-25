@@ -41,6 +41,7 @@
 #   ai-review-sandbox path   <repo-root> <tag>   # print it without creating anything
 #   ai-review-sandbox remove <repo-root> <tag>   # delete the snapshot, if any
 #   ai-review-sandbox is-worktree <dir>          # exit 0 when <dir> is a linked worktree
+#   ai-review-sandbox sweep-orphans              # parent-start orphan sweep (Phase 3)
 #
 # SELF-CLEANUP (issue #711 Phase 2): the run that creates a snapshot deletes it
 # before returning. `with-copy` is the guaranteed form: it arms an EXIT/INT/TERM
@@ -51,6 +52,16 @@
 # AI_KEEP_SANDBOX=1 skips every delete and prints the retained path on stderr —
 # debugging only. Never leave it set in production.
 #
+# ORPHAN SWEEP (issue #711 Phase 3): parent wrappers call `sweep-orphans` before
+# starting a review. It lists only the sandbox root (never recursive) and removes
+# managed snapshots that are clearly abandoned:
+#   - marker age >= 2h AND no live owner PID (legacy sandboxes have no PID file)
+#   - OR owner PID is not running AND marker age >= 15 min
+# Anything younger than 15 minutes is never touched (concurrent reviews). A live
+# owner PID keeps the snapshot even past 2h. Session wrappers that call
+# `ensure-copy` must export AI_REVIEW_SANDBOX_OWNER_PID=$$ so a killed wrapper's
+# copy can be swept after 15 minutes; `with-copy` records its own PID.
+#
 # In an ordinary clone every command is a no-op and `ensure`/`path` simply echo
 # <repo-root>, so callers can wire this in unconditionally.
 #
@@ -60,7 +71,7 @@
 
 set -euo pipefail
 
-VERSION="1.6.0"
+VERSION="1.7.0"
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
@@ -140,6 +151,58 @@ remove_sandbox() {
   warn "deleted review snapshot $d"
 }
 
+# Owner PID for the Phase 3 orphan rule. `with-copy` is its own owner for the
+# whole wrapped command. `ensure-copy` is short-lived (prints a path and exits),
+# so it only records an owner when the long-lived session wrapper exports
+# AI_REVIEW_SANDBOX_OWNER_PID=$$. Without that, the 2-hour rule alone applies.
+write_sandbox_pid() { # write_sandbox_pid DIR KIND
+  local d="$1" kind="$2" owner winpid now
+  case "$kind" in
+    with-copy) owner="$$" ;;
+    *)
+      owner="${AI_REVIEW_SANDBOX_OWNER_PID:-}"
+      case "$owner" in ''|*[!0-9]*) owner="" ;; esac
+      ;;
+  esac
+  winpid="$(cat "/proc/$$/winpid" 2>/dev/null || true)"
+  now="$(date +%s)"
+  {
+    printf 'kind=%s\n' "$kind"
+    printf 'pid=%s\n' "${owner:-}"
+    printf 'winpid=%s\n' "${winpid:--}"
+    printf 'started_at=%s\n' "$now"
+  } > "$d/sandbox.pid" || warn "could not record sandbox.pid in $d"
+}
+
+# Portable owner-liveness check (same shape as the session wrappers): MSYS
+# kill -0 /proc, then the Windows pid table for a sibling runtime's shell.
+pid_alive() { # pid_alive PID WINPID
+  local pid="$1" winpid="$2"
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  if kill -0 "$pid" 2>/dev/null || [ -d "/proc/$pid" ]; then return 0; fi
+  case "$winpid" in ''|-|*[!0-9]*) return 1 ;; esac
+  ps -W 2>/dev/null | awk -v w="$winpid" '$4 == w { f = 1 } END { exit !f }'
+}
+
+sandbox_marker_epoch() { # sandbox_marker_epoch DIR -> mtime of the marker, or empty
+  local d="$1" t
+  t="$(stat -c %Y "$d/$MARKER" 2>/dev/null || true)"
+  case "$t" in ''|*[!0-9]*) return 1 ;; esac
+  printf %s "$t"
+}
+
+sandbox_owner_record() { # sandbox_owner_record DIR -> "pid winpid" from sandbox.pid (may be empty pid)
+  local d="$1" pid="" winpid="" line
+  [ -f "$d/sandbox.pid" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      pid=*) pid="${line#pid=}" ;;
+      winpid=*) winpid="${line#winpid=}" ;;
+    esac
+  done < "$d/sandbox.pid"
+  printf '%s %s' "$pid" "${winpid:--}"
+}
+
 remove_partial() { # remove_partial BUILD FINAL — only a uniquely named child beside FINAL
   local build="$1" final="$2"
   [ -e "$build" ] || return 0
@@ -154,7 +217,7 @@ test_progress() { # test_progress — observable work for loaded fixture waits o
 
 generated_review_path() { # ROOT RELATIVE_PATH; never exclude source by prefix alone
   case "$2" in
-    .ai-review/*|.ai-review-sandbox|AI-REVIEW-SANDBOX.md) return 0 ;;
+    .ai-review/*|.ai-review-sandbox|AI-REVIEW-SANDBOX.md|sandbox.pid) return 0 ;;
     # Windows PowerShell writes this module-analysis cache into its CURRENT
     # DIRECTORY whenever LOCALAPPDATA is missing from its environment. It is a
     # tool cache, never source: counting it made the source digest and the
@@ -424,6 +487,7 @@ build_snapshot() { # build_snapshot ROOT TAG BUILD DIGEST ATTEMPT
 
   printf '%s\n' "$MARKER" >> "$build/.git/info/exclude"
   printf 'AI-REVIEW-SANDBOX.md\n' >> "$build/.git/info/exclude"
+  printf 'sandbox.pid\n' >> "$build/.git/info/exclude"
   # Windows PowerShell drops its module-analysis cache into the CURRENT DIRECTORY
   # when it cannot resolve LocalApplicationData, which is what a reviewer's stripped
   # environment produces. That file is a Windows tool cache, not repository content,
@@ -469,6 +533,10 @@ cleanup_snapshot() {
   SNAPSHOT_LOCK="" SNAPSHOT_BUILD=""
 }
 
+# Phase 3: which run owns this snapshot for the orphan-sweep PID rule.
+# `with-copy` records its own live shell; `ensure-copy` records an owner only
+# when the long-lived wrapper exported AI_REVIEW_SANDBOX_OWNER_PID.
+SANDBOX_PID_KIND="ensure-copy"
 create_or_refresh() { # create_or_refresh ROOT TAG STAGE
   local root="$1" tag="$2" stage="$3" lock="$3.lock" before after attempt
   mkdir -p "$SANDBOX_DIR"
@@ -500,6 +568,7 @@ create_or_refresh() { # create_or_refresh ROOT TAG STAGE
       if [ -e "$stage" ]; then remove_sandbox "$stage"; fi
       mv "$SNAPSHOT_BUILD" "$stage" || die "could not publish the complete review snapshot."
       SNAPSHOT_BUILD=""
+      write_sandbox_pid "$stage" "${SANDBOX_PID_KIND:-ensure-copy}"
       cleanup_snapshot
       trap - EXIT INT TERM
       return 0
@@ -546,6 +615,7 @@ cmd_with_copy() { # with-copy ROOT TAG -- COMMAND [ARGS...]
   [ "$#" -ge 1 ] || die "usage: ai-review-sandbox with-copy <repo-root> <tag> -- <command>..."
   # Arm the trap BEFORE create so a signal cannot land between publish and
   # trap install. with_copy_cleanup no-ops while WITH_COPY_SNAP is empty.
+  SANDBOX_PID_KIND="with-copy"
   trap with_copy_cleanup EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
@@ -615,6 +685,56 @@ cmd_remove() {
   remove_sandbox "$(sandbox_path "$root" "$tag")"
 }
 
+# Phase 3 parent-start orphan sweep (issue #711). Bounded: list the sandbox
+# root only. Never touches anything younger than 15 minutes. Never fails the
+# calling parent — each delete is best-effort and an unreconciled-evidence
+# sandbox is retained (remove_sandbox's evidence gate).
+#
+# Age thresholds (seconds), overridable for tests:
+#   AI_REVIEW_SWEEP_PID_DEAD_AGE  default 900   (15 min — dead-PID floor)
+#   AI_REVIEW_SWEEP_HARD_AGE      default 7200  (2h — no-PID / legacy floor)
+cmd_sweep_orphans() {
+  local now hard_age pid_dead_age d age marker_epoch owner_pid owner_winpid
+  hard_age="${AI_REVIEW_SWEEP_HARD_AGE:-7200}"
+  pid_dead_age="${AI_REVIEW_SWEEP_PID_DEAD_AGE:-900}"
+  case "$hard_age" in ''|*[!0-9]*) die "AI_REVIEW_SWEEP_HARD_AGE must be a non-negative integer" ;; esac
+  case "$pid_dead_age" in ''|*[!0-9]*) die "AI_REVIEW_SWEEP_PID_DEAD_AGE must be a non-negative integer" ;; esac
+  [ -d "$SANDBOX_DIR" ] || return 0
+  now="$(date +%s)"
+  for d in "$SANDBOX_DIR"/*; do
+    [ -d "$d" ] || continue
+    # Staging/lock names are not published snapshots.
+    case "$d" in
+      *.building.*|*.lock|*.lock.d|*.stale.*) continue ;;
+    esac
+    [ -f "$d/$MARKER" ] || continue
+    marker_epoch="$(sandbox_marker_epoch "$d")" || continue
+    age=$(( now - marker_epoch ))
+    # Concurrent reviews and freshly published copies are never candidates.
+    [ "$age" -ge "$pid_dead_age" ] || continue
+    owner_pid=""; owner_winpid="-"
+    if sandbox_owner_record "$d" >/dev/null 2>&1; then
+      read -r owner_pid owner_winpid <<EOF
+$(sandbox_owner_record "$d")
+EOF
+    fi
+    if [ -n "$owner_pid" ] && pid_alive "$owner_pid" "$owner_winpid"; then
+      # A live owner keeps the snapshot even past the hard age (long reviews).
+      continue
+    fi
+    if [ -n "$owner_pid" ]; then
+      # Recorded owner is gone: eligible as soon as the 15-minute floor passed.
+      ( remove_sandbox "$d" ) || warn "retained unreconciled orphan $d"
+      continue
+    fi
+    # No owner PID (legacy ensure-copy, or wrapper did not export one):
+    # only the hard 2-hour rule may remove it.
+    [ "$age" -ge "$hard_age" ] || continue
+    ( remove_sandbox "$d" ) || warn "retained unreconciled orphan $d"
+  done
+  return 0
+}
+
 case "${1:-}" in
   ensure)      shift; cmd_ensure "$@" ;;
   ensure-copy) shift; cmd_ensure "${1:-}" "${2:-}" 1 ;;
@@ -624,8 +744,9 @@ case "${1:-}" in
   path)        shift; cmd_path "$@" ;;
   remove)      shift; cmd_remove "$@" ;;
   remove-copy) shift; cmd_remove "${1:-}" "${2:-}" 1 ;;
+  sweep-orphans) shift; cmd_sweep_orphans "$@" ;;
   is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
   digest)      shift; source_digest "$(canon "${1:?usage: ai-review-sandbox digest <dir>}")" ;;
   --version)   printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
+  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|remove-recorded|path|remove|remove-copy|sweep-orphans|is-worktree|digest} ..." ;;
 esac

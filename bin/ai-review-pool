@@ -37,6 +37,9 @@ MODELS_ENV="${AI_DEVOPS_MODELS_ENV:-/etc/ai-devops/models.env}"
 PACKET="${AI_REVIEW_PACKET_BIN:-$ROOT/ai-review-packet}"
 LIFECYCLE="${AI_REVIEW_LIFECYCLE_BIN:-$ROOT/ai-review-lifecycle}"
 SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$ROOT/ai-review-sandbox}"
+# Phase 3 orphan sweep (issue #711): drop abandoned snapshots before this
+# parent builds a new one. Bounded and best-effort.
+"$SANDBOX" sweep-orphans || true
 RUNNER_WAIT_BUDGET="${AI_POOL_RUNNER_WAIT:-1800}"
 CALLER="${AI_POOL_CALLER:-zcode}"
 
@@ -139,7 +142,7 @@ STATE="$($LIFECYCLE begin --provider "$provider" --repo "$REPO_ROOT" --run-id "$
 # tests command, which may legitimately create artifacts in the copy) is
 # compared after the run so a model write invalidates the verdict.
 [ -x "$SANDBOX" ] || [ -f "$SANDBOX" ] || die 'sandbox tool not found for the review snapshot.'
-REVIEW_DIR="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX" ensure-copy "$REPO_ROOT" "$TAG")" || {
+REVIEW_DIR="$(AI_REVIEW_SANDBOX_OWNER_PID=$$ AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX" ensure-copy "$REPO_ROOT" "$TAG")" || {
   "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true
   die 'could not create the review snapshot.'
 }

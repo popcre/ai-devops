@@ -357,7 +357,7 @@ SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 [ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
 review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
-  AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
+  AI_REVIEW_SANDBOX_OWNER_PID=$$ AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
