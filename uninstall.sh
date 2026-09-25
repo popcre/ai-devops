@@ -65,23 +65,14 @@ while IFS=$'\t' read -r type path source hash; do
   fi
 done < "$manifest"
 
-# Remove the managed post-merge reviewer hook (#804) when this repo owns it.
-# A foreign hook (no managed marker) is preserved, and so is a managed hook
-# whose bytes drifted: removal is ownership-gated, not name-gated.
-managed_hook_target() {
-  local git_dir
-  git_dir="$(git -C "$resolved_repo" rev-parse --git-common-dir 2>/dev/null)" || return 1
-  case "$git_dir" in /*) ;; *) git_dir="$resolved_repo/$git_dir" ;; esac
-  printf '%s/hooks/post-merge' "$git_dir"
-}
-if hook_target="$(managed_hook_target)" && [ -f "$hook_target" ] \
-   && grep -q '^# ai-devops-managed: reviewer auto-requalification' "$hook_target" \
-   && cmp -s "$resolved_repo/hooks/post-merge" "$hook_target"; then
-  echo "REMOVE owned post-merge hook $hook_target"
-  [ "$DRY_RUN" -eq 1 ] || rm -f -- "$hook_target" || exit 1
-elif [ -n "${hook_target:-}" ] && [ -f "$hook_target" ] \
-   && grep -q '^# ai-devops-managed: reviewer auto-requalification' "$hook_target"; then
-  warn "PRESERVE drifted managed post-merge hook $hook_target"
+# Remove the managed post-merge reviewer hook (#804) through the one script
+# that owns the marker rules: foreign hooks are preserved, and so is a
+# managed hook whose bytes drifted — removal is ownership-gated, not
+# name-gated.
+if [ "$DRY_RUN" -eq 1 ]; then
+  "$REPO_ROOT/bin/ai-install-post-merge-hook" --remove --dry-run || exit 1
+else
+  "$REPO_ROOT/bin/ai-install-post-merge-hook" --remove || exit 1
 fi
 
 if [ "$PURGE" -eq 1 ]; then

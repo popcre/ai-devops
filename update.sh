@@ -18,11 +18,18 @@ cd "$REPO_ROOT" || { echo "Cannot cd to $REPO_ROOT" >&2; exit 1; }
 
 if [ -d .git ]; then
   info "Pulling latest changes in $REPO_ROOT"
-  if ! git pull --ff-only; then
+  # Hooks stay disabled for this pull on purpose: the post-merge reviewer
+  # hook would requalify against the OLD checkout mid-update, and a failed
+  # canary would read as a pull failure before install.sh ever ran. The
+  # explicit requalify below is the one gate for this update.
+  empty_hooks="$(mktemp -d)"
+  if ! git -c core.hooksPath="$empty_hooks" pull --ff-only; then
+    rmdir "$empty_hooks" 2>/dev/null || true
     warn "git pull --ff-only failed (local changes or diverged history)."
     warn "Resolve manually, then re-run ./update.sh"
     exit 1
   fi
+  rmdir "$empty_hooks" 2>/dev/null || true
 else
   warn "$REPO_ROOT is not a git checkout; skipping pull."
 fi

@@ -13,7 +13,7 @@
 # A merge whose result is NOT on origin/main (a session merging main into a
 # feature branch or worktree) is skipped: work-in-progress bytes are not the
 # installed reviewer and must not be live-qualified by automation.
-set -uo pipefail
+set -euo pipefail
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 [ -n "$root" ] && [ -x "$root/bin/ai-review-preflight" ] || exit 0
 git merge-base --is-ancestor HEAD origin/main 2>/dev/null || exit 0

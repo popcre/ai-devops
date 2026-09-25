@@ -136,8 +136,19 @@ function Assert-ReadyRepository([string]$Path) {
         if ($script:LastGitExitCode -ne 0) { throw 'Could not compare ai-devops source state.' }
         $parts = @($counts -split '\s+') | Where-Object { $_ }
         if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) { throw 'ai-devops is ahead of or diverged from origin/main.' }
-        Invoke-GitCommand @('-C', $Path, 'merge', '--ff-only', 'origin/main') | Out-Host
-        if ($script:LastGitExitCode -ne 0) { throw 'Fast-forwarding ai-devops failed.' }
+        # Hooks stay disabled for this fast-forward on purpose: the post-merge
+        # reviewer hook would requalify against the old checkout mid-install,
+        # and a failed canary would read as a fast-forward failure before any
+        # later stage ran. The explicit requalify near the end of this script
+        # is the one gate for this update.
+        $emptyHooks = Join-Path ([System.IO.Path]::GetTempPath()) ("ai-devops-no-hooks-" + [System.IO.Path]::GetRandomFileName())
+        New-Item -ItemType Directory -Path $emptyHooks -Force | Out-Null
+        try {
+            Invoke-GitCommand @('-C', $Path, '-c', "core.hooksPath=$emptyHooks", 'merge', '--ff-only', 'origin/main') | Out-Host
+            if ($script:LastGitExitCode -ne 0) { throw 'Fast-forwarding ai-devops failed.' }
+        } finally {
+            Remove-Item -LiteralPath $emptyHooks -Force -Recurse -ErrorAction SilentlyContinue
+        }
         $head = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
         if ($script:LastGitExitCode -ne 0 -or $head.Trim() -ne $remoteHead.Trim()) { throw 'ai-devops did not converge exactly to origin/main.' }
     }
@@ -156,35 +167,34 @@ function Ensure-Directory {
 
 # Reviewer auto-requalification post-merge hook (#804). Pulling new reviewer
 # wrapper code invalidates the affected reviewer's live qualification; the
-# hook re-qualifies it automatically. Managed by marker: a hook without the
-# marker is foreign and stays untouched; a managed hook is refreshed.
-function Install-PostMergeHook {
-    param([string]$Root)
+# hook re-qualifies it automatically. bin/ai-install-post-merge-hook owns the
+# marker rules (foreign hooks are never touched); this runs it through Git
+# Bash so both installers share one implementation. Returns the located bash
+# (or $null), because the later requalify step needs the same interpreter.
+function Get-GitBash {
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($gitCmd) {
+        $gitRoot = Split-Path (Split-Path $gitCmd.Source -Parent) -Parent
+        $gitBashPath = Join-Path $gitRoot 'bin\bash.exe'
+        if (Test-Path $gitBashPath) { return Get-Command $gitBashPath -ErrorAction SilentlyContinue }
+    }
+    return Get-Command bash -ErrorAction SilentlyContinue
+}
 
-    $source = Join-Path $Root "hooks\post-merge"
-    if (-not (Test-Path -LiteralPath $source)) {
-        Write-Note "hooks/post-merge is missing from the checkout; skipping hook install."
+function Install-PostMergeHook {
+    param([string]$Root, [object]$Bash)
+
+    if (-not $Bash) {
+        Write-Note "Git Bash not found; the post-merge reviewer hook was not installed. Install Git for Windows and rerun this script."
         return
     }
-    $gitDirOutput = Invoke-GitCommand @('-C', $Root, 'rev-parse', '--git-common-dir')
-    if ($script:LastGitExitCode -ne 0) {
-        Write-Note "Not a git checkout; skipping hook install."
-        return
+    $tool = (Join-Path $Root 'bin\ai-install-post-merge-hook') -replace '\\', '/'
+    $probe = Invoke-NativeProbe -Command $Bash.Source -Arguments @('-lc', "'$tool'")
+    if ($probe.ExitCode -eq 0) {
+        Write-Note "Installed post-merge reviewer auto-requalification hook."
+    } else {
+        Write-Note "Could not install the post-merge reviewer hook: $($probe.Output -join ' ')"
     }
-    $gitDir = $gitDirOutput.Trim()
-    if (-not [System.IO.Path]::IsPathRooted($gitDir)) { $gitDir = Join-Path $Root $gitDir }
-    $hooksDir = Join-Path $gitDir "hooks"
-    $target = Join-Path $hooksDir "post-merge"
-    if (Test-Path -LiteralPath $target) {
-        $firstLine = Get-Content -LiteralPath $target -TotalCount 5 | Where-Object { $_ -match '^# ai-devops-managed: reviewer auto-requalification' }
-        if (-not $firstLine) {
-            Write-Note "$target exists and is not managed by this toolkit; leaving it untouched."
-            return
-        }
-    }
-    New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null
-    Copy-Item -LiteralPath $source -Destination $target -Force
-    Write-Note "Installed post-merge reviewer auto-requalification hook."
 }
 
 function Get-SkillNames {
@@ -744,9 +754,27 @@ if ($SkillsDryRun) {
     exit 0
 }
 
-# Repo-level managed hook; runs on every real install so rerunning this script
-# (the documented Windows update path) also repairs or refreshes the hook.
-Install-PostMergeHook -Root $RepoPath
+# Repo-level managed hook plus the update's one reviewer-requalification gate.
+# Rerunning this script is the documented Windows update path, so every real
+# run repairs or refreshes the hook and then requalifies any reviewer whose
+# qualification the pulled code invalidated. The fast-forward above ran with
+# hooks disabled, so this is the only requalify for this run.
+$installBash = Get-GitBash
+Install-PostMergeHook -Root $RepoPath -Bash $installBash
+if ($installBash) {
+    $requalify = (Join-Path $RepoPath 'bin\ai-review-preflight') -replace '\\', '/'
+    Write-Step "Re-qualifying reviewers whose qualification the update invalidated"
+    if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+        Write-Note "Test mode: not running live reviewer qualification."
+    } else {
+        $probe = Invoke-NativeProbe -Command $installBash.Source -Arguments @('-lc', "'$requalify' requalify")
+        if ($probe.ExitCode -eq 0) {
+            Write-Note "Reviewer qualifications are current."
+        } else {
+            Write-Note "Automatic reviewer requalification failed; it is recorded as a reviewer issue and the reviewer stays quarantined."
+        }
+    }
+}
 
 # Blocker notices and session wake-ups only happen on a machine that runs the
 # tick, so every machine installs the task. `schedule` uses schtasks /F, so
