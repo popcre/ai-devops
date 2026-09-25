@@ -227,6 +227,8 @@ check "the shipped hook fails hard when its exec target is missing" "grep -q '^s
 
 echo '== managed hook installer (#804)'
 HOOK_INSTALL="$ROOT/bin/ai-install-post-merge-hook"
+check "the hook installer is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- bin/ai-install-post-merge-hook | awk '{print \$1}')\" = 100755"
+check "the shipped hook is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- hooks/post-merge | awk '{print \$1}')\" = 100755"
 FIXTURE="$TMP/hook-fixture"
 git init -q -b main "$FIXTURE"
 git -C "$FIXTURE" config user.name Test; git -C "$FIXTURE" config user.email t@example.com

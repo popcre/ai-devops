@@ -165,6 +165,25 @@ function Ensure-Directory {
     }
 }
 
+# Runs a bash gate command with BOTH streams visible: unlike
+# Invoke-NativeProbe (optional informational probes, stderr discarded), these
+# gates must print their diagnostics: a failed requalification names the
+# recorded reviewer issue on stderr and may not be swallowed.
+function Invoke-BashGate {
+    param([object]$Bash, [string]$CommandText)
+
+    $priorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $Bash.Source -lc $CommandText 2>&1 | ForEach-Object { $_.ToString() })
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $priorPreference
+    }
+    if ($output) { $output | Write-Host }
+    return $exitCode
+}
+
 # Reviewer auto-requalification post-merge hook (#804). Pulling new reviewer
 # wrapper code invalidates the affected reviewer's live qualification; the
 # hook re-qualifies it automatically. bin/ai-install-post-merge-hook owns the
@@ -189,11 +208,11 @@ function Install-PostMergeHook {
         return
     }
     $tool = (Join-Path $Root 'bin\ai-install-post-merge-hook') -replace '\\', '/'
-    $probe = Invoke-NativeProbe -Command $Bash.Source -Arguments @('-lc', "'$tool'")
-    if ($probe.ExitCode -eq 0) {
+    $exitCode = Invoke-BashGate -Bash $Bash -CommandText "'$tool'"
+    if ($exitCode -eq 0) {
         Write-Note "Installed post-merge reviewer auto-requalification hook."
     } else {
-        Write-Note "Could not install the post-merge reviewer hook: $($probe.Output -join ' ')"
+        Write-Note "Installing the post-merge reviewer hook failed (exit $exitCode); see the output above."
     }
 }
 
@@ -767,11 +786,11 @@ if ($installBash) {
     if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
         Write-Note "Test mode: not running live reviewer qualification."
     } else {
-        $probe = Invoke-NativeProbe -Command $installBash.Source -Arguments @('-lc', "'$requalify' requalify")
-        if ($probe.ExitCode -eq 0) {
+        $exitCode = Invoke-BashGate -Bash $installBash -CommandText "'$requalify' requalify"
+        if ($exitCode -eq 0) {
             Write-Note "Reviewer qualifications are current."
         } else {
-            Write-Note "Automatic reviewer requalification failed; it is recorded as a reviewer issue and the reviewer stays quarantined."
+            Write-Note "Automatic reviewer requalification failed (exit $exitCode); it is recorded as a reviewer issue and the reviewer stays quarantined. See the output above."
         }
     }
 }

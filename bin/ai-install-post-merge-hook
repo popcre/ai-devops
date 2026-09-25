@@ -48,8 +48,10 @@ done
 
 hook_source="$REPO_ROOT/hooks/post-merge"
 [ -f "$hook_source" ] || die "shipped hooks/post-merge is missing from $REPO_ROOT."
-git_dir="$(git -C "$REPO" rev-parse --git-common-dir 2>/dev/null)" || die "not a git repository: $REPO"
-case "$git_dir" in /*) ;; *) git_dir="$REPO/$git_dir" ;; esac
+# --path-format=absolute returns a usable absolute path on every platform,
+# including Git-for-Windows drive letters and linked worktrees, whose
+# common dir otherwise needs joining and can be reported as C:/... .
+git_dir="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || die "not a git repository: $REPO"
 hooks_dir="$git_dir/hooks"
 hook_target="$hooks_dir/post-merge"
 marker='^# ai-devops-managed: reviewer auto-requalification'

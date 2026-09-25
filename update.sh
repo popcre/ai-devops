@@ -41,9 +41,11 @@ if ! "$REPO_ROOT/install.sh" "$@"; then
   exit 1
 fi
 
-# The pull above ran with the previously installed post-merge hook (or none,
-# on the first update after #804), so re-qualify explicitly here too. On a
-# host with no live-qualification records this is a no-op.
+# One explicit requalification gate closes this update: the pull above ran
+# with hooks disabled so a mid-update canary could not masquerade as a pull
+# failure, and install.sh just refreshed the hook and preflight that will
+# gate every later ordinary pull. On a host with no live-qualification
+# records this is a no-op.
 info "Re-qualifying reviewers whose qualification the pull invalidated"
 if ! "$REPO_ROOT/bin/ai-review-preflight" requalify; then
   warn "automatic reviewer requalification failed for source SHA $source_sha; it is recorded as a reviewer issue"
