@@ -85,7 +85,11 @@ allocator but stayed registered here, and a session spent an hour trying it.
     /run and a cleared environment, so the model never sees SSH keys or the
     agent socket, git or gh credentials, the 1Password token, or the Docker
     socket; with no credential inside, it cannot push anywhere. The
-    commit/remote refusal is an extra end-state check on top of that.
+    commit/remote refusal is an extra end-state check on top of that. Only
+    /usr, /etc, StepCode and the run's own folder are mounted. Accepted
+    exposure: the network is shared (the StepFun API needs it), so an
+    implement run can reach loopback services and the internet without any
+    of the caller's credentials.
     `ai-stepfun` refuses to run without bubblewrap. The shared-db allocator has no platform field,
     so StepFun is listed in `config/reviewer-membership-scope.json` and is
     never assigned by the allocator.

@@ -83,6 +83,7 @@ check "the key reaches step through the environment, never argv" "mode ok; '$SCR
 
 check "review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
 check "every turn runs inside the sandbox with an empty home and /tmp" "grep -qx -- --unshare-all '$STUB_ARGS.bwrap' && grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx '$HOME' && grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx /tmp"
+check "the sandbox never mounts the whole filesystem, only system trees" "! grep -x -A1 -- --ro-bind '$STUB_ARGS.bwrap' | grep -qx / && grep -x -A1 -- --ro-bind '$STUB_ARGS.bwrap' | grep -qx /usr"
 check "the sandbox also hides /run (agent, D-Bus, and Docker sockets)" "grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx /run"
 check "the user's StepCode settings tree is not remounted" "! grep -qx '$HOME/.stepcode' '$STUB_ARGS.bwrap'"
 check "the review copy is mounted read-only" "grep -x -A1 -- --ro-bind '$STUB_ARGS.bwrap' | grep -q 'stepfun-'"
