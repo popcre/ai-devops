@@ -105,14 +105,33 @@ def current_bytes(source, path):
     item = source.joinpath(*path.split("/"))
     if item.is_symlink():
         fail("symlink refused")
+    # A linked PARENT that stays inside the repository can smuggle a denied
+    # directory under an approved spelling (src -> data plus an approved
+    # src/tracked.txt), so every parent below the source root must be a real
+    # directory, not a link (exact-head review, 2026-09-25).
+    walked = source.resolve()
+    for part in path.split("/")[:-1]:
+        walked = walked / part
+        if walked.is_symlink():
+            fail("linked parent directory refused")
+        if not walked.exists():
+            break
     if not item.exists():
         return None
     if not item.is_file():
         fail("nonfile approved path refused")
     # Resolve every parent as well: an ordinary file under a linked directory
     # can otherwise escape the source repository without itself being a link.
-    if not item.resolve().is_relative_to(source.resolve()):
+    resolved_root = source.resolve()
+    resolved = item.resolve()
+    if not resolved.is_relative_to(resolved_root):
         fail("approved path escapes source")
+    # The approved spelling passed the denied-parts check; the resolved
+    # location must pass it too, or a link could rename a denied directory
+    # into an approved-looking one.
+    lowered = [part.lower() for part in resolved.relative_to(resolved_root).parts]
+    if any(part in DENIED_PARTS or part.startswith(".") for part in lowered):
+        fail("approved path resolves into a refused location")
     value = item.read_bytes()
     validate_text(value)
     return value
@@ -166,7 +185,12 @@ def commit(stage, label):
     git(stage, "add", "--all")
     env = dict(os.environ, GIT_AUTHOR_NAME="Code Review Export", GIT_AUTHOR_EMAIL="export@invalid.local",
                GIT_COMMITTER_NAME="Code Review Export", GIT_COMMITTER_EMAIL="export@invalid.local")
-    proc = subprocess.run(["git", "-C", str(stage), "commit", "--quiet", "--allow-empty", "-m", label],
+    # The synthetic export is machine-generated evidence, never a signed or
+    # hooked commit: inherit neither commit.gpgsign nor commit hooks from the
+    # user's global config, which would fail closed with a generic refusal
+    # (exact-head review, 2026-09-25).
+    proc = subprocess.run(["git", "-C", str(stage), "-c", "commit.gpgsign=false",
+                           "commit", "--quiet", "--allow-empty", "--no-verify", "-m", label],
                           env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if proc.returncode:
         fail("could not commit synthetic export")

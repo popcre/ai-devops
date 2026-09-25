@@ -132,4 +132,18 @@ printf '["src/submodule.py"]\n' > "$TMP/rejected.json"
 must_fail "$SANDBOX" ensure-code-only "$R" rejected-submodule --paths-file "$TMP/rejected.json" --base "$BASE"
 pass 'symlink and submodule objects refuse before publication'
 
+# A linked PARENT inside the repository can smuggle a denied directory under
+# an approved spelling: an in-repo src -> data link plus an approved
+# src/tracked.txt reads data/tracked.txt while the spelling still looks like
+# code (exact-head review, 2026-09-25). Needs a filesystem with real links.
+rm -rf "$TMP/linkcap"; if ln -s data "$TMP/linkcap" 2>/dev/null && [ -L "$TMP/linkcap" ]; then
+  rm -rf "$R/src"
+  ln -s data "$R/src"
+  printf '["src/tracked.txt"]\n' > "$TMP/rejected.json"
+  must_fail "$SANDBOX" ensure-code-only "$R" rejected-linked-parent --paths-file "$TMP/rejected.json" --base "$BASE"
+  pass 'a linked parent directory refuses before publication'
+else
+  echo 'SKIP: linked parent refused (filesystem symlinks unsupported)'
+fi
+
 printf '6 passed; 0 failed\n'

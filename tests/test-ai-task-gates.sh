@@ -355,16 +355,22 @@ check 'and the stop says which gate is missing' \
 check 'the formal review is still refused there' \
   "rc 3 '$TMP/private-closed' check --before review"
 
-# A clean private checkout with no recorded class has an EMPTY change set; the
-# empty-set exit must not skip the proof binding the sealed route hangs on
-# (found by an exact-head review of the reconciliation head, 2026-09-25).
+# A clean private checkout has an EMPTY change set, so the sealed route's
+# proof binding must be judged against the complete repository inventory,
+# never against an absent or leftover declaration (two exact-head review
+# findings on the reconciliation head, 2026-09-25).
 newrepo "$TMP/private-clean" 'u2giants/licensor-source-data'
 check 'a clean undeclared private tree refuses the sealed route' \
-  "rc 4 '$TMP/private-clean' check --before code-only-review"
-check 'and names the proof binding as the reason' \
-  "out '$TMP/private-clean' check --before code-only-review | grep -Fq 'proof binding'"
+  "rc 3 '$TMP/private-clean' check --before code-only-review"
+check 'and the stop names the missing fixtures boundary' \
+  "out '$TMP/private-clean' check --before code-only-review | grep -Fq 'synthetic-fixtures-only'"
 check 'while an unbound action still starts on the same clean tree' \
   "rc 0 '$TMP/private-clean' check --before pr-wait"
+( cd "$TMP/private-clean" && "$GATES" start --class code ) >/dev/null
+check 'a leftover plain-code declaration does not open the sealed route' \
+  "rc 3 '$TMP/private-clean' check --before code-only-review"
+check 'that stop is the protected-class escalation, not a fixtures pass' \
+  "out '$TMP/private-clean' check --before code-only-review | grep -Fq 'escalated'"
 
 printf 'a public repository may use the sealed route freely\n'
 newrepo "$TMP/public-code"

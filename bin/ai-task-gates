@@ -476,6 +476,22 @@ cmd_check(){
 
   local declared declared_rank effective effective_rank protected
   declared="$(state_field declared_class)"
+  # An action bound to per-action proofs is a property of the whole repository,
+  # not of one change set. With nothing observed, judging it against a leftover
+  # or absent declaration alone would let a plain `start --class code` open the
+  # sealed route in a private repository that never opted in (exact-head review,
+  # 2026-09-25). Classify the COMPLETE inventory instead — the same set the
+  # private-source front door classifies — so the proof binding is checked
+  # against what the repository is, not against what nothing changed into.
+  if [ "$OBSERVED_CLASS" = none ] && [ -n "$(jqr --arg a "$action" '.action_gates[$a] // empty' "$POLICY_FILE")" ]; then
+    # The inventory feeds a line-based classifier, so a name carrying a CR or LF
+    # byte (unrepresentable here) must refuse rather than silently mis-split.
+    if git -C "$TOPLEVEL" ls-files -co --exclude-standard -z | od -An -v -tx1 | grep -qE ' 0a| 0d'; then
+      fail_closed "the repository inventory contains file names this gate cannot represent; refusing to start '$action'."
+    fi
+    printf 'ai-task-gates: note: no change set observed; classifying the complete inventory for the proof-bound action "%s".\n' "$action" >&2
+    classify_paths "$IDENTITY" "$(git -C "$TOPLEVEL" ls-files -co --exclude-standard | LC_ALL=C sort -u)"
+  fi
   if [ -z "$declared" ]; then
     if [ "$OBSERVED_CLASS" = none ]; then
       case "$action" in
