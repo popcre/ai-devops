@@ -205,6 +205,7 @@ mkdir -p "$HOOK_CLONE/bin"
 printf '#!/usr/bin/env bash\nprintf "called\\n" >> "%s/hook-called"\nexit 0\n' "$TMP" > "$HOOK_CLONE/bin/ai-review-preflight"
 chmod +x "$HOOK_CLONE/bin/ai-review-preflight"
 cp "$ROOT/hooks/post-merge" "$HOOK_CLONE/.git/hooks/post-merge"
+chmod +x "$HOOK_CLONE/.git/hooks/post-merge"
 echo a > "$HOOK_CLONE/a"; git -C "$HOOK_CLONE" add a; git -C "$HOOK_CLONE" commit -qm one; git -C "$HOOK_CLONE" push -q origin main
 echo b > "$HOOK_CLONE/b"; git -C "$HOOK_CLONE" add b; git -C "$HOOK_CLONE" commit -qm two; git -C "$HOOK_CLONE" push -q origin main
 git -C "$HOOK_CLONE" reset -q --hard HEAD~1
