@@ -161,10 +161,9 @@ single-variable temporary environment file, and pass the real value through one
 private, self-deleting handoff file to the repository-owned Node preloader. Qwen itself
 launches in an explicit allowlisted OS environment with no provider key and
 `QWEN_HOME` as its only home directory.
-The supported model is `qwen3.8-max`. The Coding Plan subscription key is
-dead (401 as of 2026-09-07); live EDGE-DEV reviews use the Model Studio
-pay-per-token endpoint selected by `~/.config/ai-devops/qwen-endpoint`, with
-the same env-var name. Never paste the key into Qwen
+The supported model is `qwen3.8-max`, on the Model Studio Token Plan
+subscription (pinned endpoint, `sk-sp-` key, same env-var name). The old Coding
+Plan and pay-per-token lanes are retired; `qwen-endpoint` files are ignored. Never paste the key into Qwen
 settings, prompts, command arguments, or logs. If the managed reference is
 missing, repair the ai-devops machine installation instead of configuring an
 unmanaged plaintext key.
