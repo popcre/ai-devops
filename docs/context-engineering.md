@@ -211,8 +211,9 @@ source; roots are resolved by repository identity
 `.mcp.json` is managed by us (foreign entries preserved, timestamped backup),
 while a repository that **tracks** its own `.mcp.json` is never modified — names
 it lacks arrive as Claude Code project entries in `~/.claude.json`
-(`projects[<path>].mcpServers`). A project with no clone on the machine keeps
-its servers global. `bin/check-mcp-drift.ps1` now applies the same subtraction
+(`projects[<path>].mcpServers`). Since the 2026-09-24 owner ruling a scoped
+server is never global: on a machine without the owning clone it loads nowhere.
+`bin/check-mcp-drift.ps1` now applies the same subtraction
 to the global lists and validates per-root delivery, so scoped servers can
 never silently return to a global set.
 
@@ -221,11 +222,14 @@ calls:
 
 | Server | Project | Basis |
 |---|---|---|
-| `trigger`, `recall-ai` | `oracle` | owner ruling 2026-08-26 |
+| `trigger` | `oracle` | owner ruling 2026-08-26 |
 | `railway` | `popdam3` | owner ruling 2026-08-26 |
 | `ag-grid` | `designflow-frontend` | owner ruling 2026-08-26 |
 | `chrome-devtools` | `popdam3` | 30-day transcripts: one 7-call shared-db worktree doing DB Data Admin UI work, and that app moved to popdam3 2026-09-16 |
-| `devops-mcp`, `synology-monitor` | `synology-monitor` repo | owner ruling; **stay global on machines without that clone** (edge-dev: 0 roots) |
+| `devops-mcp`, `synology-monitor` | `synology-monitor` repo | owner ruling; never global since 2026-09-24 |
+
+`recall-ai` is retired on every machine (owner ruling 2026-09-24):
+`$RetiredMcpServerNames` keeps it managed so every consumer deletes old entries.
 
 `supabase` (shared-db, licensor-source-data, dflow_plm, popdam, popcrm-web = 5
 repos) and `playwright` (popdam + popcrm-web sessions on hetz, plus the
@@ -233,9 +237,11 @@ ai-devops skill-trigger eval harness) met the ≥3-repository bar from
 `plan_tool-and-skill-scoping.md` §8 and stay global-eligible, so they are not
 in the scope map. `codex-cli` stays suspended out of every membership list.
 
-Codex keeps the complete catalog in its own config (decision from PR #114: it
-does not spawn a server stack per session), so project scoping applies to the
-Claude clients only.
+Codex follows the same rule since 2026-09-24: scoped servers leave its global
+config and arrive through a marked, untracked `.codex/config.toml` in each
+owning root. Linux reads these same lists from `setup-machine.ps1` through
+`bin/mcp_policy.py` (Claude Code, Codex, and Claude Desktop via
+`bin/setup-desktop-apps.sh`).
 
 Measured on edge-dev (proof and full numbers on #705, 2026-09-24): the Desktop
 global set went 6 -> 3 servers; `bin/check-mcp-drift.ps1` passes with exit 0

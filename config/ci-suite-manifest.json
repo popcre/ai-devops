@@ -89,7 +89,8 @@
     "test-worktree-reap-tool.sh": 2,
     "test-ci-runner-router.sh": 1,
     "test-reviewer-credit.sh": 1,
-    "test-ai-review-snapshot-bounded-history.sh": 8
+    "test-ai-review-snapshot-bounded-history.sh": 8,
+    "test-setup-desktop-apps.sh": 1
   },
   "bash": [
     "test-ai-adopt-globals.sh",
@@ -169,6 +170,7 @@
     "test-reviewer-credit.sh",
     "test-session-conduct-policy.sh",
     "test-setup-credentials-source.sh",
+    "test-setup-desktop-apps.sh",
     "test-shared-db-fast-close-skill.sh",
     "test-shared-db-routing-rules.sh",
     "test-skill-trigger-eval-auth.sh",

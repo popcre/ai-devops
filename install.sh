@@ -266,6 +266,9 @@ else
   stage_results+=("SKIP\toptional\tSecrets wiring (no interactive input or protected token)")
   info "Secrets wiring skipped: no interactive input or protected token"
 fi
+# Desktop GUI apps (Claude Desktop, ChatGPT/Codex). Skips any app not installed
+# and does nothing without the catalog the secrets stage writes.
+run_stage optional "Desktop app MCP wiring" "$REPO_ROOT/bin/setup-desktop-apps.sh"
 
 # --------------------------------------------------------------------------
 # 4c. Memory auto-sync (keep Claude memories in sync across machines)

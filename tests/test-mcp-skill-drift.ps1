@@ -76,11 +76,11 @@ absentproj	github.com/example/absentproj
   $setupScoped = Join-Path $testRoot "setup-scoped.ps1"
   @'
 $ClaudeCodeMcpNames = @("1password")
-$ClaudeDesktopMcpNames = @("1password", "trigger", "recall-ai")
+$ClaudeDesktopMcpNames = @("1password", "trigger", "gadget")
 $McpProjectScope = [ordered]@{
   "fixtureproj" = @("trigger")
   "trackedproj" = @("trigger")
-  "absentproj"  = @("recall-ai")
+  "absentproj"  = @("gadget")
 }
 $McpServerCatalog["trigger"] = @{ command = "x" }
 '@ | Set-Content -LiteralPath $setupScoped -Encoding utf8
@@ -90,19 +90,23 @@ $McpServerCatalog["trigger"] = @{ command = "x" }
   $env:AI_REPO_IDENTITY_FILE = $identityFile
   $env:AI_REPO_CLONE_ROOTS = $scanRoot
   try {
-    # absentproj is not cloned, so recall-ai stays declared; trigger is scoped
-    # away from the globals on this machine (fixtureproj + trackedproj exist).
-    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" }; "recall-ai" = @{ command = "x" } } }
+    # Scoped servers are never global: trigger (cloned here) and gadget
+    # (absentproj, not cloned) both leave the globals.
+    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" } } }
     $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
     Assert-True ($LASTEXITCODE -eq 0) "scoped-away trigger leaves globals; delivery via untracked file and project entry passes"
-    Assert-True (($out -join "`n") -match "absentproj.*stay global: recall-ai") "a not-cloned project keeps its server global"
+    Assert-True (($out -join "`n") -match "absentproj.*load nowhere: gadget") "a not-cloned project's server loads nowhere"
 
-    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" }; "recall-ai" = @{ command = "x" }; "trigger" = @{ command = "x" } } }
+    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" }; "gadget" = @{ command = "x" } } }
+    $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
+    Assert-True ($LASTEXITCODE -eq 1) "a not-cloned project's server installed globally fails the check"
+
+    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" }; "trigger" = @{ command = "x" } } }
     $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
     Assert-True ($LASTEXITCODE -eq 1) "a scoped server still installed globally fails the check"
     Assert-True (($out -join "`n") -match "installed but not declared: trigger") "the report names the scoped global server"
 
-    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" }; "recall-ai" = @{ command = "x" } } }
+    Write-Json $desktop @{ mcpServers = @{ "1password" = @{ command = "x" } } }
     Write-Json $codeProjects @{
       mcpServers = @{ "1password" = @{ command = "x" } } }
     $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
