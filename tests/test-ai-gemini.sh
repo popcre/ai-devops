@@ -53,7 +53,7 @@ EOF
 cat > "$TMP/bin/agy" <<'EOF'
 #!/usr/bin/env bash
 set -e
-case "${1:-}" in --version) echo 1.1.14; exit;; --help) echo --sandbox; exit;; models) echo 'gemini-3.8-flash-high'; exit;; esac
+case "${1:-}" in --version) if [ "${MOCK_VERSION_HANG:-0}" = 1 ]; then for _ in $(seq 1 600); do sleep 1; done; fi; echo 1.1.14; exit;; --help) echo --sandbox; exit;; models) echo 'gemini-3.8-flash-high'; exit;; esac
 printf '%s\n' "$*" >> "$MOCK_AGY_CALLS"
 args=" $* "
 if [[ "$args" == *" /model "* ]]; then
@@ -397,6 +397,13 @@ check 'the recorded invocation reviews the private fixture, not the caller' "tes
 check 'qualification made exactly the new and resumed provider turns' "test \"\$(grep -Ec '^--(new-project|conversation) .* --model gemini' '$MOCK_AGY_CALLS')\" -eq 2"
 set +e; (cd "$QUAL_CALLER" && "$SCRIPT" doctor --live) > "$TMP/qual-doctor.out" 2>&1; QUAL_DOCTOR_RC=$?; set -e
 check 'doctor --live qualifies through the same fixture path' "test '$QUAL_DOCTOR_RC' -eq 0 && grep -q '^QUALIFIED ' '$TMP/qual-doctor.out'"
+# #637 gap 2: the startup qualification check probes the runtime version with
+# no deadline; a hung runtime hung the whole wrapper. The probe is now bounded
+# and fails closed, so a hung runtime cannot stall the wrapper.
+HANG_START=$(date +%s)
+set +e; (cd "$QUAL_CALLER" && MOCK_VERSION_HANG=1 AI_GEMINI_VERSION_TIMEOUT=2 "$SCRIPT" new hang-check --prompt x) > "$TMP/qual-hang.out" 2>&1; HANG_RC=$?; set -e
+HANG_ELAPSED=$(( $(date +%s) - HANG_START ))
+check 'a hung runtime version probe fails closed inside its bound' "test '$HANG_RC' -ne 0 && test '$HANG_ELAPSED' -lt 30 && grep -q 'quarantine' '$TMP/qual-hang.out'"
 set +e; (cd "$QUAL_CALLER" && AI_GEMINI_QUALIFY_FIXTURE="$QUAL_CALLER" "$SCRIPT" qualify-live) > "$TMP/qual-spoof.out" 2>&1; QUAL_SPOOF_RC=$?; set -e
 check 'a caller-supplied fixture path is replaced by a fresh private fixture' "test '$QUAL_SPOOF_RC' -eq 0 && grep -q '^QUALIFIED .* fixture=.*qualification-fixtures/qual-' '$TMP/qual-spoof.out' && test ! -e '$QUAL_CALLER/.ai'"
 # 2026-09-18: the installed Windows launcher exports HOME as /C/... while Git

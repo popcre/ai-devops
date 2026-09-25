@@ -73,7 +73,7 @@ runtime_qualified(){
   expected_model="$(jq -r .model "$QUALIFICATION_FILE")"
   actual_wrapper="$(sha256sum "${BASH_SOURCE[0]}" 2>/dev/null | awk '{print $1}')"
   [ "$expected_wrapper" = "$actual_wrapper" ] && [ "$expected_model" = "$MODEL" ] || return 1
-  actual_agy="$("$a" --version 2>/dev/null)" || return 1
+  actual_agy="$(timeout "${AI_GEMINI_VERSION_TIMEOUT:-30}s" "$a" --version 2>/dev/null)" || return 1
   actual_agy_sha="$(sha256sum < "$a" 2>/dev/null | awk '{print $1}')"
   [ "$expected_agy" = "$actual_agy" ] && [ "$expected_agy_sha" = "$actual_agy_sha" ]
 }
