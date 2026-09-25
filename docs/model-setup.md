@@ -57,12 +57,14 @@ Grok has a minimum CLI version in `config/provider-cli-versions.json`
 (currently 1.0.13, `version_match: minimum`). Both wrappers accept that build or
 a newer build of the same major version (issue #686) and refuse anything else.
 
-The model is locked to Grok 4.6 (owner ruling 2026-09-25; `model_pin` in the
-same policy file). xAI's remote settings push a newer default that beats
-`config.toml`, so both provider installers write `models.default` into
-`~/.grok/requirements.toml` (Grok's admin layer) and
-`allowed_models = ["grok-4.6*"]` into `~/.grok/config.toml`. Never set
-`allowed_models` without the requirements pin: it then refuses every session.
+The model is locked to Grok 4.6 (owner ruling 2026-09-25; `model_pin` and
+`dismiss_campaigns` in the same policy file). xAI's remote "launch campaigns"
+replace the default model and beat `config.toml`, so both provider installers
+mark those campaigns dismissed in `~/.grok/campaigns_state.json` and set
+`models.default` and `allowed_models = ["grok-4.6*"]` in `~/.grok/config.toml`.
+`~/.grok/requirements.toml` cannot hold the pin: Grok's deployment sync deletes
+it. If xAI launches a new campaign, Grok refuses to start (never runs another
+model) until the provider installer is rerun.
 
 - Formal review: `ai-grok-review`. Bash and web search stay denied. Investigation
   is not added to this command.

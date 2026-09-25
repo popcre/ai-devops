@@ -233,12 +233,15 @@ upgrade_to_exact_version() { # upgrade_to_exact_version NAME BINARY WANT
 }
 
 # ---------------------------------------------------------------------------
-# Model lock (Grok). Owner ruling 2026-09-25: Grok 4.6 only, never 4.7. xAI's
-# remote settings push a newer default that beats config.toml and
-# GROK_DEFAULT_MODEL, so the pin goes into Grok's admin layer,
-# ~/.grok/requirements.toml, and allowed_models in config.toml refuses any
-# other model. Order matters: allowed_models without the requirements pin
-# refuses every session, even `--model <pin>`.
+# Model lock (Grok). Owner ruling 2026-09-25: Grok 4.6 only, never 4.7. xAI
+# pushes new models through "launch campaigns" in its remote settings; an
+# undismissed campaign replaces the default model and beats config.toml and
+# GROK_DEFAULT_MODEL. So the lock (1) sets models.default and allowed_models in
+# config.toml and (2) marks every known campaign that names another default as
+# dismissed in campaigns_state.json, which is what Grok records when a user
+# dismisses one. ~/.grok/requirements.toml is NOT usable: Grok's deployment
+# sync deletes it on every start. allowed_models while a campaign is active
+# refuses every session, even `--model <pin>`, so dismissal is not optional.
 # ---------------------------------------------------------------------------
 set_toml_key() { # set_toml_key FILE SECTION KEY VALUE  (VALUE is raw TOML)
   local file="$1" tmp
@@ -258,15 +261,34 @@ set_toml_key() { # set_toml_key FILE SECTION KEY VALUE  (VALUE is raw TOML)
   mv "$tmp" "$file"
 }
 
+dismiss_grok_campaigns() { # dismiss_grok_campaigns HOME MODEL
+  local home="$1" model="$2" state="$1/campaigns_state.json" policy cached ids tmp
+  policy="$(bash "$VERSION_TOOL" policy-file)" || return 1
+  # Campaigns Grok has already fetched, when it has run before; unreadable
+  # caches just contribute nothing.
+  cached="$(jq -r --arg m "$model" '.payload | fromjson | .settings.campaigns // [] | .[]
+    | select((.models.default // $m) != $m) | .id' "$home/settings_cache.json" 2>/dev/null || true)"
+  ids="$( { jq -r '.providers.grok.dismiss_campaigns // [] | .[]' "$policy"; printf '%s\n' "$cached"; } \
+    | grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*$' | sort -u | jq -R . | jq -s .)" || return 1
+  mkdir -p "$home"
+  tmp="$(mktemp "$state.ai-devops.XXXXXX")" || return 1
+  if ! { if [ -s "$state" ]; then cat "$state"; else echo '{}'; fi; } \
+      | jq -c --argjson add "$ids" '.dismissed_ids = (((.dismissed_ids // []) + $add) | unique)' >"$tmp"; then
+    rm -f "$tmp"; return 1
+  fi
+  mv "$tmp" "$state"
+}
+
 pin_grok_model() {
   local model home="${GROK_HOME:-$HOME/.grok}"
   model="$(bash "$VERSION_TOOL" model grok)" || return 1
   [ -n "$model" ] || return 0
   if ((DRY_RUN)); then echo "DRY-RUN would lock grok to $model"; return 0; fi
-  set_toml_key "$home/requirements.toml" models default "\"$model\"" \
+  dismiss_grok_campaigns "$home" "$model" \
+    && set_toml_key "$home/config.toml" models default "\"$model\"" \
     && set_toml_key "$home/config.toml" models allowed_models "[\"$model*\"]" \
     || { echo "ERROR grok: could not write the $model model lock under $home" >&2; return 1; }
-  echo "OK   grok locked to $model ($home/requirements.toml, allowed_models in config.toml)"
+  echo "OK   grok locked to $model (config.toml default + allowed_models; other-model campaigns dismissed)"
 }
 
 failed=0

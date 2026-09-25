@@ -160,18 +160,44 @@ function Set-TomlKey {
 }
 
 function Set-GrokModelLock {
-  # Owner ruling 2026-09-25: Grok 4.6 only, never 4.7. xAI's remote settings
-  # push a newer default that beats config.toml, so the pin goes into Grok's
-  # admin layer (requirements.toml) and allowed_models refuses anything else.
-  # Order matters: allowed_models without the pin refuses every session.
+  # Owner ruling 2026-09-25: Grok 4.6 only, never 4.7. Mirrors pin_grok_model in
+  # bin/install-ai-provider-clis.sh. xAI launch campaigns replace the default
+  # model and beat config.toml, so every known campaign naming another default
+  # is marked dismissed in campaigns_state.json, then models.default and
+  # allowed_models are set in config.toml. requirements.toml is unusable: Grok's
+  # deployment sync deletes it on start. allowed_models with an undismissed
+  # campaign refuses every session, even --model <pin>.
   param([string]$GrokHome = $(if ($env:GROK_HOME) { $env:GROK_HOME } else { Join-Path $HOME '.grok' }))
   $policyPath = if ($env:AI_PROVIDER_VERSIONS_FILE) { $env:AI_PROVIDER_VERSIONS_FILE }
                 else { Join-Path $PSScriptRoot '..\config\provider-cli-versions.json' }
-  $model = (Get-Content -Raw -LiteralPath $policyPath | ConvertFrom-Json).providers.grok.model_pin
+  $grokPolicy = (Get-Content -Raw -LiteralPath $policyPath | ConvertFrom-Json).providers.grok
+  $model = $grokPolicy.model_pin
   if (-not $model) { return $null }
   if ($model -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Malformed grok model_pin '$model' in $policyPath" }
-  Set-TomlKey -Path (Join-Path $GrokHome 'requirements.toml') -Section models -Key default -Value "`"$model`""
-  Set-TomlKey -Path (Join-Path $GrokHome 'config.toml') -Section models -Key allowed_models -Value "[`"$model*`"]"
+  $ids = [Collections.Generic.List[string]]::new()
+  foreach ($id in @($grokPolicy.dismiss_campaigns)) { if ($id) { $ids.Add([string]$id) } }
+  $cache = Join-Path $GrokHome 'settings_cache.json'
+  try {
+    $settings = ((Get-Content -Raw -LiteralPath $cache -ErrorAction Stop | ConvertFrom-Json).payload | ConvertFrom-Json).settings
+    foreach ($c in @($settings.campaigns)) {
+      if ($c -and $c.id -and $c.models.default -and $c.models.default -ne $model) { $ids.Add([string]$c.id) }
+    }
+  } catch { }  # no or unreadable cache: only the policy's campaigns apply
+  $statePath = Join-Path $GrokHome 'campaigns_state.json'
+  [void](New-Item -ItemType Directory -Force -Path $GrokHome)
+  $state = if (Test-Path -LiteralPath $statePath) { Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json } else { $null }
+  if ($null -eq $state) { $state = [pscustomobject]@{} }
+  foreach ($old in @($state.dismissed_ids)) { if ($old) { $ids.Add([string]$old) } }
+  $dismissed = @($ids | Where-Object { $_ -match '^[A-Za-z0-9][A-Za-z0-9._-]*$' } | Sort-Object -Unique -CaseSensitive)
+  $state | Add-Member -Force -NotePropertyName dismissed_ids -NotePropertyValue $dismissed
+  $temp = "$statePath.ai-devops.$PID.tmp"
+  try {
+    [IO.File]::WriteAllText($temp, ($state | ConvertTo-Json -Compress -Depth 10), [Text.UTF8Encoding]::new($false))
+    Move-Item -Force -LiteralPath $temp -Destination $statePath
+  } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -Force -LiteralPath $temp } }
+  $config = Join-Path $GrokHome 'config.toml'
+  Set-TomlKey -Path $config -Section models -Key default -Value "`"$model`""
+  Set-TomlKey -Path $config -Section models -Key allowed_models -Value "[`"$model*`"]"
   return $model
 }
 
@@ -420,7 +446,7 @@ foreach ($providerDefinition in $providerCatalog) {
     }
     if ($provider.Command -eq 'grok') {
       $lockedModel = Set-GrokModelLock
-      if ($lockedModel) { Write-Host "Grok locked to $lockedModel (requirements.toml, allowed_models in config.toml)." }
+      if ($lockedModel) { Write-Host "Grok locked to $lockedModel (config.toml default + allowed_models; other-model campaigns dismissed)." }
     }
     if ($provider.Command -eq 'qwen') {
       # Hardening patches the live bundle even when no install ran. Only when a

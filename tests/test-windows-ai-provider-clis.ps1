@@ -132,16 +132,20 @@ $lockHome = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-grok-lock-{0}" -f [
 [void](New-Item -ItemType Directory -Path $lockHome)
 try {
   [IO.File]::WriteAllText((Join-Path $lockHome 'config.toml'), "[ui]`nyolo = false`n`n[models]`ndefault = `"grok-4.7`"`nallowed_models = [`"grok-4.7`"]`n")
+  [IO.File]::WriteAllText((Join-Path $lockHome 'campaigns_state.json'), '{"dismissed_ids":["older"]}')
+  $payload = @{ settings = @{ campaigns = @(@{ id = 'grok-9-launch'; models = @{ default = 'grok-9' } }, @{ id = 'same-model'; models = @{ default = $model } }) } } | ConvertTo-Json -Compress -Depth 10
+  [IO.File]::WriteAllText((Join-Path $lockHome 'settings_cache.json'), (@{ payload = $payload } | ConvertTo-Json -Compress))
   Assert ((Set-GrokModelLock -GrokHome $lockHome) -eq $model) 'the lock must report the pinned model'
   $cfg = [IO.File]::ReadAllLines((Join-Path $lockHome 'config.toml'))
-  $req = [IO.File]::ReadAllLines((Join-Path $lockHome 'requirements.toml'))
-  Assert ($req -contains "default = `"$model`"") 'requirements.toml must pin the model'
+  Assert ($cfg -contains "default = `"$model`"") 'config.toml must pin the default model'
   Assert ($cfg -contains "allowed_models = [`"$model*`"]") 'config.toml must allow only the pinned model'
   Assert ($cfg -contains 'yolo = false') 'the lock must keep unrelated settings'
   Assert (@($cfg | Where-Object { $_ -match '^allowed_models' }).Count -eq 1) 'allowed_models must not be duplicated'
-  $before = (Get-Content -Raw (Join-Path $lockHome 'config.toml')) + (Get-Content -Raw (Join-Path $lockHome 'requirements.toml'))
+  $dismissed = @((Get-Content -Raw (Join-Path $lockHome 'campaigns_state.json') | ConvertFrom-Json).dismissed_ids)
+  Assert (($dismissed -join ',') -eq 'grok-4.7-launch,grok-9-launch,older') "wrong dismissed campaigns: $($dismissed -join ',')"
+  $before = (Get-Content -Raw (Join-Path $lockHome 'config.toml')) + (Get-Content -Raw (Join-Path $lockHome 'campaigns_state.json'))
   [void](Set-GrokModelLock -GrokHome $lockHome)
-  $after = (Get-Content -Raw (Join-Path $lockHome 'config.toml')) + (Get-Content -Raw (Join-Path $lockHome 'requirements.toml'))
+  $after = (Get-Content -Raw (Join-Path $lockHome 'config.toml')) + (Get-Content -Raw (Join-Path $lockHome 'campaigns_state.json'))
   Assert ($before -eq $after) 'the model lock must be idempotent'
 } finally { Remove-Item -Recurse -Force -LiteralPath $lockHome }
 
