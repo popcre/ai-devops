@@ -37,6 +37,9 @@
 #   and the Desktop login does NOT carry over. `mimo providers whoami` said
 #   "Not logged in" on 2026-09-25; the one-time interactive login is
 #   `mimo providers login -p xiaomi` (browser OAuth + pasted code).
+#   Owner rule (2026-09-25): SUBSCRIPTION-ONLY -- no pay-per-token API keys.
+#   If the login demands an API key instead of the Xiaomi subscription
+#   account, abort; the manual Desktop path remains the dispatch route.
 #   MCP config: ~/.config/mimocode/mimocode.jsonc -> mcp.<name> uses an ARRAY
 #   command, key `timeout` (ms), and `type: local|remote`. Do not reuse the
 #   ZCode writer (string command / timeoutMs).

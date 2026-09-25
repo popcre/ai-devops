@@ -156,6 +156,15 @@ This one-time step belongs to the owner (Xiaomi account credentials); it cannot
 be done headlessly by a session. Until it runs, an end-to-end flash answer
 stays unproven, which is why #829 stays open.
 
+**Owner rule (Albert, relayed 2026-09-25): subscription-only.** Nothing may go
+through pay-per-token APIs — only his subscriptions (Xiaomi MiMo included). No
+API key was created or used anywhere in this qualification. The login above is
+browser account sign-in (OAuth), not an API-key paste. Abort condition: if the
+login flow demands creating/paying for a platform API key instead of signing in
+with the existing Xiaomi subscription account, the headless path is forbidden
+by this rule — the manual Desktop path remains the MiMo dispatch route and that
+becomes the recorded verdict on #829.
+
 ## Agents (verbatim names, `mimo agent list`)
 
 ```text
