@@ -254,8 +254,12 @@ check "an owned matching hook is removed" "'$HOOK_INSTALL' --remove --repo '$FIX
 check "remove without an owned hook is a no-op" "'$HOOK_INSTALL' --remove --repo '$FIXTURE'"
 check "a non-repository target is refused for install" "! '$HOOK_INSTALL' --repo '$TMP/not-a-repo'"
 check "a non-repository target has nothing to remove" "'$HOOK_INSTALL' --remove --repo '$TMP/not-a-repo'"
-ln -s "$HOOK_INSTALL" "$TMP/bin/hook-tool-link" 2>/dev/null
-check "the installer resolves a PATH symlink to its shipped hook" "[ ! -L '$TMP/bin/hook-tool-link' ] || ('$TMP/bin/hook-tool-link' --repo '$FIXTURE' && cmp -s '$ROOT/hooks/post-merge' '$FIXTURE/.git/hooks/post-merge')"
+ln -s "$HOOK_INSTALL" "$TMP/bin/hook-tool-link" 2>/dev/null || true
+if [ -L "$TMP/bin/hook-tool-link" ]; then
+  check "the installer resolves a PATH symlink to its shipped hook" "'$TMP/bin/hook-tool-link' --repo '$FIXTURE' && cmp -s '$ROOT/hooks/post-merge' '$FIXTURE/.git/hooks/post-merge'"
+else
+  echo "SKIP: the installer resolves a PATH symlink to its shipped hook (ln -s cannot create symlinks here; readlink contract unexercised)"
+fi
 check "install.sh runs the shared hook installer" "grep -q 'ai-install-post-merge-hook' '$ROOT/install.sh'"
 check "the Windows installer runs the shared hook installer" "grep -q 'ai-install-post-merge-hook' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "the Windows installer disables hooks on its own fast-forward" "grep -q 'core.hooksPath' '$ROOT/bin/install-ai-devops-windows.ps1'"
