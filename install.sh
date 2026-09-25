@@ -216,6 +216,30 @@ install_entrypoints() {
 run_stage required "Unix entrypoints" install_entrypoints
 
 # --------------------------------------------------------------------------
+# 4.1 Reviewer auto-requalification post-merge hook (#804). Pulling new
+#     reviewer wrapper code invalidates the affected reviewer's live
+#     qualification; without this hook it stays quarantined until a person
+#     re-qualifies by hand. Managed by marker: a hook without the marker is
+#     foreign and stays untouched; a managed hook is refreshed.
+# --------------------------------------------------------------------------
+install_post_merge_hook() {
+  local source="$REPO_ROOT/hooks/post-merge" git_dir target
+  [ -f "$source" ] || { warn "hooks/post-merge is missing from this checkout; skipping hook install"; return 0; }
+  git_dir="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null)" || { warn "not a git checkout; skipping hook install"; return 0; }
+  case "$git_dir" in /*) ;; *) git_dir="$REPO_ROOT/$git_dir" ;; esac
+  target="$git_dir/hooks/post-merge"
+  mkdir -p "$git_dir/hooks" || return 1
+  if [ -e "$target" ] && ! grep -q '^# ai-devops-managed: reviewer auto-requalification' "$target" 2>/dev/null; then
+    warn "  $target exists and is not managed by this toolkit; leaving it untouched"
+    return 0
+  fi
+  cp "$source" "$target" || return 1
+  chmod +x "$target" || return 1
+  info "  installed post-merge reviewer auto-requalification hook"
+}
+run_stage required "Reviewer auto-requalification hook" install_post_merge_hook
+
+# --------------------------------------------------------------------------
 # 4.5 Claude + Codex skills and global instruction files. Delegate to the one
 #     tested installer so client-specific skills, shared skills, collision
 #     protection, and recoverable obsolete-skill handling cannot drift here.

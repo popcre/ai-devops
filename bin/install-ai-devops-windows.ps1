@@ -154,6 +154,39 @@ function Ensure-Directory {
     }
 }
 
+# Reviewer auto-requalification post-merge hook (#804). Pulling new reviewer
+# wrapper code invalidates the affected reviewer's live qualification; the
+# hook re-qualifies it automatically. Managed by marker: a hook without the
+# marker is foreign and stays untouched; a managed hook is refreshed.
+function Install-PostMergeHook {
+    param([string]$Root)
+
+    $source = Join-Path $Root "hooks\post-merge"
+    if (-not (Test-Path -LiteralPath $source)) {
+        Write-Note "hooks/post-merge is missing from the checkout; skipping hook install."
+        return
+    }
+    $gitDirOutput = Invoke-GitCommand @('-C', $Root, 'rev-parse', '--git-common-dir')
+    if ($script:LastGitExitCode -ne 0) {
+        Write-Note "Not a git checkout; skipping hook install."
+        return
+    }
+    $gitDir = $gitDirOutput.Trim()
+    if (-not [System.IO.Path]::IsPathRooted($gitDir)) { $gitDir = Join-Path $Root $gitDir }
+    $hooksDir = Join-Path $gitDir "hooks"
+    $target = Join-Path $hooksDir "post-merge"
+    if (Test-Path -LiteralPath $target) {
+        $firstLine = Get-Content -LiteralPath $target -TotalCount 5 | Where-Object { $_ -match '^# ai-devops-managed: reviewer auto-requalification' }
+        if (-not $firstLine) {
+            Write-Note "$target exists and is not managed by this toolkit; leaving it untouched."
+            return
+        }
+    }
+    New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null
+    Copy-Item -LiteralPath $source -Destination $target -Force
+    Write-Note "Installed post-merge reviewer auto-requalification hook."
+}
+
 function Get-SkillNames {
     param([string]$SourceRoot)
 
@@ -710,6 +743,10 @@ if ($SkillsDryRun) {
     Write-Host "No files were changed."
     exit 0
 }
+
+# Repo-level managed hook; runs on every real install so rerunning this script
+# (the documented Windows update path) also repairs or refreshes the hook.
+Install-PostMergeHook -Root $RepoPath
 
 # Blocker notices and session wake-ups only happen on a machine that runs the
 # tick, so every machine installs the task. `schedule` uses schtasks /F, so

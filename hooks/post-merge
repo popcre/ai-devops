@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# ai-devops-managed: reviewer auto-requalification post-merge hook (#804).
+# Installed into .git/hooks/post-merge by install.sh and
+# bin/install-ai-devops-windows.ps1; never edit by hand (the installers
+# refresh managed hooks and leave foreign ones alone).
+#
+# After a pull merges new upstream code, any reviewer whose live
+# qualification no longer matches its installed wrapper, runtime, or
+# preloader bytes is re-qualified automatically. A failed requalification is
+# recorded with ai-reviewer-issue and the hook exits nonzero, so a pull that
+# leaves a reviewer unqualified is loudly incomplete, never silent.
+#
+# A merge whose result is NOT on origin/main (a session merging main into a
+# feature branch or worktree) is skipped: work-in-progress bytes are not the
+# installed reviewer and must not be live-qualified by automation.
+set -uo pipefail
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -n "$root" ] && [ -x "$root/bin/ai-review-preflight" ] || exit 0
+git merge-base --is-ancestor HEAD origin/main 2>/dev/null || exit 0
+exec "$root/bin/ai-review-preflight" requalify

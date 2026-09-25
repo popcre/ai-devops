@@ -168,6 +168,64 @@ printf '\n# version changed\n' >> "$TMP/bin/good"
 check "Qwen wrapper changes invalidate prior live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 sed -i '$d' "$TMP/bin/good"
 check "Qwen can be requalified after a wrapper change" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+
+echo '== automatic requalification (#804)'
+MOCK_QWEN_MODE_LOG="$TMP/qwen-requalify-mode-log"; export MOCK_QWEN_MODE_LOG
+check "explain covers live-qualification-required" "$SCRIPT explain live-qualification-required | grep -q requalify"
+check "requalify refuses a provider without a live-qualification contract" "! $SCRIPT requalify grok"
+check "requalify on a host with no records is a no-op that still passes" "AI_REVIEW_QUARANTINE_DIR='$TMP/no-records-state' $SCRIPT requalify && test ! -e '$TMP/no-records-state/qwen-live-qualified.json' && test ! -e '$TMP/no-records-state/gemini-live-qualified.json'"
+: > "$MOCK_QWEN_MODE_LOG"
+check "requalify leaves a current qualification alone without a canary" "$SCRIPT requalify qwen && grep -qx -- --identity '$MOCK_QWEN_MODE_LOG' && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+printf '%064d\n' 1 | tr 0 b > "$AI_QWEN_TEST_RUNTIME_FILE"
+: > "$MOCK_QWEN_MODE_LOG"
+check "requalify refreshes a stale qualification after runtime drift" "$SCRIPT requalify qwen && grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+printf '%064d\n' 2 | tr 0 b > "$AI_QWEN_TEST_RUNTIME_FILE"
+rm -rf "$TMP/reviewer-issues"
+export MOCK_QWEN_FAIL=1 AI_REVIEWER_ISSUE_DIR="$TMP/reviewer-issues"
+REQUALIFY_OUT="$($SCRIPT requalify qwen 2>&1)"; REQUALIFY_RC=$?
+unset MOCK_QWEN_FAIL
+[ "$REQUALIFY_RC" -ne 0 ] && printf '%s' "$REQUALIFY_OUT" | grep -q 'reviewer issue:' && ok "failed automatic requalification is recorded and fails the command" || bad "failed automatic requalification is recorded and fails the command"
+REQUALIFY_ID="$(printf '%s\n' "$REQUALIFY_OUT" | sed -n 's/.*reviewer issue: //p' | tail -n1)"
+[ -n "$REQUALIFY_ID" ] && [ -f "$TMP/reviewer-issues/$REQUALIFY_ID/issue.json" ] \
+  && jq -e --arg p qwen '.provider==$p and (.reported_command|test("requalify qwen")) and .evidence.complete_error_log==null and .evidence.session_details=="details.redacted.txt"' "$TMP/reviewer-issues/$REQUALIFY_ID/issue.json" >/dev/null \
+  && ok "the recorded failure names the provider and the requalify command" || bad "the recorded failure names the provider and the requalify command"
+check "a failed automatic requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+check "a failed requalification is retried, not silently abandoned" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+printf '{"version":1,"providers":{"qwen":{"registry_state":"absent","reason":"retired for this fixture"}}}\n' > "$TMP/qwen-omitted.json"
+check "an unregistered reviewer is skipped without a canary" ": > '$MOCK_QWEN_MODE_LOG'; printf '%064d\n' 3 | tr 0 b > '$AI_QWEN_TEST_RUNTIME_FILE'; AI_REVIEW_REGISTRY_FILE='$TMP/qwen-omitted.json' $SCRIPT requalify qwen && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+unset AI_REVIEWER_ISSUE_DIR
+check "requalify recovers the reviewer on the next successful run" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+
+echo '== post-merge reviewer hook (#804)'
+HOOKTEST="$TMP/hooktest"; HOOK_ORIGIN="$HOOKTEST/origin.git"; HOOK_CLONE="$HOOKTEST/clone"
+git init -q --bare -b main "$HOOK_ORIGIN"
+git clone -q "$HOOK_ORIGIN" "$HOOK_CLONE" 2>/dev/null
+git -C "$HOOK_CLONE" config user.name Test; git -C "$HOOK_CLONE" config user.email t@example.com
+mkdir -p "$HOOK_CLONE/bin"
+printf '#!/usr/bin/env bash\nprintf "called\\n" >> "%s/hook-called"\nexit 0\n' "$TMP" > "$HOOK_CLONE/bin/ai-review-preflight"
+chmod +x "$HOOK_CLONE/bin/ai-review-preflight"
+cp "$ROOT/hooks/post-merge" "$HOOK_CLONE/.git/hooks/post-merge"
+echo a > "$HOOK_CLONE/a"; git -C "$HOOK_CLONE" add a; git -C "$HOOK_CLONE" commit -qm one; git -C "$HOOK_CLONE" push -q origin main
+echo b > "$HOOK_CLONE/b"; git -C "$HOOK_CLONE" add b; git -C "$HOOK_CLONE" commit -qm two; git -C "$HOOK_CLONE" push -q origin main
+git -C "$HOOK_CLONE" reset -q --hard HEAD~1
+git -C "$HOOK_CLONE" pull -q --ff-only
+check "the managed hook fires after a main pull" "test -f '$TMP/hook-called'"
+rm -f "$TMP/hook-called"
+git -C "$HOOK_CLONE" checkout -qb feature HEAD~1
+echo c > "$HOOK_CLONE/c"; git -C "$HOOK_CLONE" add c; git -C "$HOOK_CLONE" commit -qm three
+git -C "$HOOK_CLONE" fetch -q origin
+git -C "$HOOK_CLONE" merge -q origin/main -m "merge main into feature" >/dev/null 2>&1
+check "the hook skips a development branch merge" "test ! -e '$TMP/hook-called'"
+rm -rf "$HOOK_CLONE/bin"
+git -C "$HOOK_CLONE" checkout -q main
+git -C "$HOOK_CLONE" reset -q --hard HEAD~1
+HOOK_SILENT="$(git -C "$HOOK_CLONE" pull -q --ff-only 2>&1)"; HOOK_RC=$?
+[ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_SILENT" ] && ok "the hook stays silent when the toolkit command is absent" || bad "the hook stays silent when the toolkit command is absent"
+check "the shipped hook carries the managed marker" "grep -q '^# ai-devops-managed: reviewer auto-requalification' '$ROOT/hooks/post-merge'"
+check "install.sh installs the managed hook" "grep -q 'install_post_merge_hook' '$ROOT/install.sh'"
+check "the Windows installer installs the managed hook" "grep -q 'Install-PostMergeHook' '$ROOT/bin/install-ai-devops-windows.ps1'"
+check "update.sh requalifies after installing" "grep -q 'bin/ai-review-preflight\" requalify' '$ROOT/update.sh'"
+check "uninstall removes only an owned managed hook" "grep -q 'ai-devops-managed: reviewer auto-requalification' '$ROOT/uninstall.sh'"
 check "Codex status is available with its doctor contract" "$SCRIPT status codex | jq -e '.status==\"installed-healthy\"'"
 check "Codex preflight uses its doctor contract" "$SCRIPT check codex '$REPO' | grep -q 'health=ok'"
 check "DeepSeek status is available with its doctor contract" "$SCRIPT status deepseek | jq -e '.status==\"installed-healthy\"'"

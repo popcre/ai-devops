@@ -59,7 +59,15 @@ cd /worksp/ai-devops
    `ai-private-config`.
 5. Symlinks executable Unix entrypoints in `bin/` into `/usr/local/bin/`.
    Windows-only `.ps1`/`.bat` files are not chmodded or linked, so an update
-   leaves the Git checkout clean.
+   leaves the Git checkout clean. The same stage installs the managed
+   `hooks/post-merge` reviewer auto-requalification hook (#804) into the
+   checkout's Git hooks: after a pull merges new reviewer wrapper code, any
+   reviewer whose live qualification no longer matches its installed wrapper,
+   runtime, or preloader bytes is re-qualified automatically
+   (`ai-review-preflight requalify`); a failed requalification is recorded
+   with `ai-reviewer-issue record` and printed. A hook without the managed
+   marker is foreign and left untouched. The Windows installer installs the
+   same hook on its real (non-dry-run) path.
 6. Runs the canonical `ai-install-skills` installer so client-specific and shared
    skills use the same collision-safe behavior on Ubuntu and Windows. The shared
    `ask-glm` skill reaches both Claude and Codex. Secret setup injects
@@ -187,6 +195,17 @@ cd /worksp/ai-devops
 `update.sh` never overwrites `/etc/ai-devops/*.env`. It returns nonzero if the
 installer has any required failure and reports the exact source SHA attempted.
 
+Reviewer hosts do not need `update.sh` for requalification: the managed
+`post-merge` hook runs `ai-review-preflight requalify` on every pull whose
+result is on `origin/main` (development-branch merges are skipped), and
+`update.sh` additionally requalifies explicitly after installing. A failed
+automatic requalification is recorded with `ai-reviewer-issue record` and
+fails `update.sh`; on hosts where a plain `git pull` fired the hook, the
+failure is printed by the pull and the reviewer stays quarantined
+(`live-qualification-required`) until it is fixed. A live canary can take up
+to its qualification timeout (default 30 minutes per reviewer), so a pull
+shortly after a merged wrapper change may pause while requalification runs.
+
 ## Rollback
 
 - **Code:** `git -C /worksp/ai-devops checkout <previous-sha>` then
@@ -198,13 +217,14 @@ installer has any required failure and reports the exact source SHA attempted.
 
 ```bash
 ./uninstall.sh --dry-run      # exact read-only ownership/removal preview
-./uninstall.sh                # minimal: owned symlinks only
+./uninstall.sh                # minimal: owned symlinks and the managed hook
 ./uninstall.sh --purge        # minimal + archive/remove config
 ./uninstall.sh --full         # archive/remove config and clean checkout
 ```
 
 `uninstall.sh` removes only manifest-owned symlinks whose target and hash still
-match. Destructive modes first create and verify a protected config archive and
+match, plus the managed post-merge hook while its bytes still match the
+shipped `hooks/post-merge`. Destructive modes first create and verify a protected config archive and
 Git bundle, refuse broad paths or a dirty checkout, and never touch
 Claude/Codex/gh login state.
 
