@@ -268,6 +268,15 @@ run_stage required "Git commit identity" "$REPO_ROOT/bin/ai-git-identity"
 run_stage required "Claude tool permissions" "$REPO_ROOT/bin/ai-claude-permissions"
 
 # --------------------------------------------------------------------------
+# 4.8 Claude closeout (completion-check) hook. The Stop hook is what makes a
+#     session that ends on waiting language hold an `ai-blocker-watch wait`;
+#     without it that rule is honor-system only (issue #878: edge-dev3 had no
+#     hook and a session skipped BlockerWatch registration). Idempotent and
+#     strictly additive to ~/.claude/settings.json.
+# --------------------------------------------------------------------------
+run_stage required "Claude closeout hook" "$REPO_ROOT/bin/ai-install-completion-check-hook" --client claude
+
+# --------------------------------------------------------------------------
 # 4b. Secrets + Claude launcher (interactive only)
 # --------------------------------------------------------------------------
 # Wires the vault-locked 1Password service-account token, the central mcp.env

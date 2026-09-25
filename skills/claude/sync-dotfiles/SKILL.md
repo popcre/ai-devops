@@ -36,6 +36,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
 | Codex's own memory feature (separate store from Claude's; OFF by default) | enabled on machine, **checked every run (step 6c)** | `bin/ai-codex-memories` |
 | Memory-index hook (blocks a memory from going unindexed) | installed on machine, **checked every run (step 6c2)** | `bin/ai-install-memory-hook` |
+| Claude closeout hook (forces BlockerWatch registration on waiting language) | installed on machine, **checked every run (step 6c2b)** | `bin/ai-install-completion-check-hook` |
 | ZCode skills, globals, and completion-check hook | repo → machine (Windows only), **checked every run (step 6c3)** | `bin/install-ai-devops-windows.ps1` (skills/globals), `bin/ai-install-completion-check-hook --client zcode` |
 | Weekly read-only memory-health report | per-machine task, **checked every run (step 6d)** | `bin/install-memory-health-task.ps1` → `bin/ai-memory-health` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
@@ -284,6 +285,12 @@ clone + `./install.sh` (Ubuntu) first.
    that state, including owner rulings Albert had made himself. The weekly report
    detects that after the fact; this hook catches it in the same turn the file is
    written. Report the verdict out loud.
+6c2b. **Install the Claude closeout hook:** `bin/ai-install-completion-check-hook`
+   (Claude is the default client; `--check` reports drift). Idempotent; strictly
+   additive to `~/.claude/settings.json`. Without it, a session that ends on
+   waiting language is never forced to hold an `ai-blocker-watch wait`, so the
+   BlockerWatch rule is honor-system only (issue #878). `ai-devops doctor` fails
+   when it is missing. Report the verdict out loud.
 6c3. **Register the ZCode completion-check hook (Windows, when ZCode is
    installed):** `bin/ai-install-completion-check-hook --client zcode`. Idempotent;
    prints `OK completion-check hook already registered for zcode` when there is
