@@ -2,25 +2,28 @@
 # ai-deepseek — DeepSeek as a real coding agent, hosted by the pinned OpenCode.
 #
 # This is the WRITE-CAPABLE DeepSeek path: DeepSeek edits files, runs the build
-# and tests, and commits, inside a dedicated git worktree on its own branch.
-# The caller (Claude or Codex) reviews the branch and opens the pull request.
+# and tests, and commits, inside a private clone of the repository on branch
+# deepseek/<name>. The caller (Claude or Codex) lands that branch into the real
+# repository, reviews it, and opens the pull request.
 # Formal rotation reviews stay on the read-only `ai-deepseek-agent`.
 #
 #   ai-deepseek implement <name> --repo <path> [--ref <ref>] [--model M] (--prompt T | --prompt-file F | stdin)
-#       Create worktree <state>/work/<name> on branch deepseek/<name> from <ref>
-#       (default: the repository's origin default branch) and run DeepSeek there.
+#       Clone <repo> at <ref> (default: origin's default branch, else HEAD) into
+#       <state>/work/<name>, remove the clone's remote, and run DeepSeek there.
 #   ai-deepseek ask <name> (--prompt T | --prompt-file F | stdin)
-#       Continue the same DeepSeek conversation in the same worktree.
+#       Continue the same DeepSeek conversation in the same clone.
 #   ai-deepseek diff <name>       Commits and uncommitted changes versus the base.
-#   ai-deepseek show <name>       Task metadata (worktree, branch, session).
+#   ai-deepseek land <name>       Fetch the clone's committed branch into <repo> as deepseek/<name>.
+#   ai-deepseek show <name>       Task metadata (clone, branch, session).
 #   ai-deepseek list              Known tasks, newest first.
 #   ai-deepseek cleanup <name> [--force]
-#                                 Remove the worktree; keeps the branch unless --force.
+#                                 Delete the clone; refuses unlanded commits unless --force.
 #   ai-deepseek doctor [--live]   Check OpenCode, profile, key reference; --live runs one turn.
 #
-# Guardrails live in config/opencode-deepseek/agent/deepseek-implement.md:
-# pushing, changing remotes, `gh`, and `op` are denied to DeepSeek's shell.
-# The API key is read from 1Password and exists only in OpenCode's environment.
+# The control is the clone having NO remote: nothing DeepSeek does there can
+# reach GitHub. docs/glm-opencode.md records that OpenCode's bash deny map is
+# not a reliable control; the deny entries in the agent file are only a backstop.
+# The API key crosses from 1Password into OpenCode's environment, never argv.
 set -euo pipefail
 
 SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
@@ -37,7 +40,7 @@ AGENT=deepseek-implement
 PROVIDER=deepseek-api
 
 die() { echo "Error: $*" >&2; exit 1; }
-usage() { sed -n '2,23p' "$SELF" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,26p' "$SELF" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 valid_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || die "invalid task name '$1' (letters, digits, . _ -)"; }
 task_dir() { printf '%s/tasks/%s' "$STATE_DIR" "$1"; }
@@ -57,8 +60,8 @@ resolve_key() { # exports DEEPSEEK_KEY without it touching argv or output
   command -v op >/dev/null || die "1Password CLI (op) is required"
   [ -s "$TOKEN_FILE" ] || die "missing 1Password service-account token file: $TOKEN_FILE"
   local ref
-  ref="$(grep -m1 '^DEEPSEEK_API_KEY=op://' "$MCP_ENV" 2>/dev/null | cut -d= -f2-)" || true
-  [ -n "$ref" ] || die "no DEEPSEEK_API_KEY=op:// reference in $MCP_ENV"
+  [ "$(grep -c '^DEEPSEEK_API_KEY=op://' "$MCP_ENV" 2>/dev/null || true)" = 1 ] || die "$MCP_ENV must hold exactly one DEEPSEEK_API_KEY=op:// reference"
+  ref="$(grep '^DEEPSEEK_API_KEY=op://' "$MCP_ENV" | cut -d= -f2-)"
   DEEPSEEK_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$(<"$TOKEN_FILE")" op read "$ref")" || die "1Password could not read the DeepSeek key"
   [ -n "$DEEPSEEK_KEY" ] || die "DeepSeek key resolved empty"
 }
@@ -71,19 +74,24 @@ install_profile() { # the repository copy always wins, like the GLM/Muse agents
   chmod 700 "$STATE_DIR" 2>/dev/null || true
 }
 
+run_opencode() { # command... ; the key is exported, so it never appears in any argv
+  ( unset OP_SERVICE_ACCOUNT_TOKEN
+    export DEEPSEEK_API_KEY="$DEEPSEEK_KEY"
+    export XDG_CONFIG_HOME="$STATE_DIR/xdg/config" XDG_DATA_HOME="$STATE_DIR/xdg/data" XDG_STATE_HOME="$STATE_DIR/xdg/state"
+    exec "$@" )
+}
+
 run_turn() { # name model session-or-empty
   local name="$1" model="$2" session="$3" dir log rc
-  dir="$(meta "$name" worktree)"; [ -d "$dir" ] || die "worktree for '$name' is gone: $dir"
+  dir="$(meta "$name" clone)"; [ -d "$dir" ] || die "clone for '$name' is gone: $dir"
+  [ -z "$(git -C "$dir" remote)" ] || die "clone for '$name' has a remote; refusing to run DeepSeek there"
   [ -x "$OC_BIN" ] || die "OpenCode $OC_VERSION is not installed. Run bin/setup-opencode-glm.sh first."
   install_profile; resolve_key
-  log="$(task_dir "$name")/turn-$(date -u +%Y%m%dT%H%M%SZ).jsonl"
+  log="$(task_dir "$name")/turn-$(date -u +%Y%m%dT%H%M%SZ)-$$.jsonl"
   local args=(run --agent "$AGENT" --auto --format json --model "$PROVIDER/$model" --dir "$dir")
   [ -z "$session" ] || args+=(--session "$session")
   set +e
-  printf '%s' "$PROMPT" | env -u OP_SERVICE_ACCOUNT_TOKEN \
-    DEEPSEEK_API_KEY="$DEEPSEEK_KEY" \
-    XDG_CONFIG_HOME="$STATE_DIR/xdg/config" XDG_DATA_HOME="$STATE_DIR/xdg/data" XDG_STATE_HOME="$STATE_DIR/xdg/state" \
-    timeout "$TIMEOUT" "$OC_BIN" "${args[@]}" > "$log" 2> "$log.stderr"
+  printf '%s' "$PROMPT" | run_opencode timeout "$TIMEOUT" "$OC_BIN" "${args[@]}" > "$log" 2> "$log.stderr"
   rc=$?; set -e
   DEEPSEEK_KEY=""
   if [ -z "$session" ]; then
@@ -96,7 +104,7 @@ run_turn() { # name model session-or-empty
   tools="$(jq -s '[.[] | select(.type=="tool_use")] | length' "$log" 2>/dev/null || echo 0)"
   errs="$(jq -s '[.[] | select(.type=="tool_use" and .part.state.status=="error")] | length' "$log" 2>/dev/null || echo 0)"
   echo
-  echo "TASK: $name  SESSION: ${session:-unknown}  TOOL_CALLS: $tools  TOOL_ERRORS: $errs  WORKTREE: $dir"
+  echo "TASK: $name  SESSION: ${session:-unknown}  TOOL_CALLS: $tools  TOOL_ERRORS: $errs  CLONE: $dir"
   echo "LOG: $log"
   if [ "$rc" -ne 0 ]; then
     [ "$rc" -eq 124 ] && echo "Error: DeepSeek turn timed out after ${TIMEOUT}s" >&2
@@ -135,16 +143,21 @@ cmd_implement() {
   local repo td wt branch
   repo="$(git -C "$REPO" rev-parse --show-toplevel)" || die "not a git repository: $REPO"
   td="$(task_dir "$name")"; [ ! -e "$td" ] || die "task '$name' already exists; use 'ask' or 'cleanup'"
-  git -C "$repo" fetch --quiet origin || die "git fetch failed in $repo"
+  git -C "$repo" fetch --quiet origin 2>/dev/null || echo "Warning: git fetch failed in $repo; using local refs" >&2
   if [ -z "${REF:-}" ]; then
-    REF="$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
+    REF="$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo HEAD)"
   fi
+  local base; base="$(git -C "$repo" rev-parse --verify "$REF^{commit}")" || die "unknown ref: $REF"
   wt="$STATE_DIR/work/$name"; branch="deepseek/$name"
+  [ ! -e "$wt" ] || die "clone path already exists: $wt"
   mkdir -p "$td" "$STATE_DIR/work"
-  git -C "$repo" worktree add --quiet -b "$branch" "$wt" "$REF" || { rmdir "$td"; die "could not create worktree from $REF"; }
+  git clone --quiet --no-hardlinks --no-checkout "$repo" "$wt" || { rm -rf "$td" "$wt"; die "could not clone $repo"; }
+  git -C "$wt" remote remove origin
+  git -C "$wt" checkout --quiet -b "$branch" "$base" || { rm -rf "$td" "$wt"; die "could not check out $REF"; }
+  printf '%s\n' __pycache__/ '*.py[cod]' .pytest_cache/ node_modules/ .venv/ >> "$wt/.git/info/exclude"
   jq -n --arg repo "$repo" --arg wt "$wt" --arg br "$branch" --arg ref "$REF" \
-        --arg base "$(git -C "$wt" rev-parse HEAD)" --arg model "$MODEL" --arg at "$(date -u +%FT%TZ)" \
-        '{repo:$repo, worktree:$wt, branch:$br, ref:$ref, base:$base, model:$model, created:$at, session:""}' > "$td/meta.json"
+        --arg base "$base" --arg model "$MODEL" --arg at "$(date -u +%FT%TZ)" \
+        '{repo:$repo, clone:$wt, branch:$br, ref:$ref, base:$base, model:$model, created:$at, session:""}' > "$td/meta.json"
   run_turn "$name" "$MODEL" ""
 }
 
@@ -159,7 +172,7 @@ cmd_ask() {
 
 cmd_diff() {
   local name="${1:?task name}"; valid_name "$name"
-  local wt base; wt="$(meta "$name" worktree)"; base="$(meta "$name" base)"
+  local wt base; wt="$(meta "$name" clone)"; base="$(meta "$name" base)"
   git -C "$wt" log --oneline "$base..HEAD"
   git -C "$wt" status --short
   git -C "$wt" diff "$base"
@@ -170,24 +183,31 @@ cmd_list() {
   local d
   for d in $(ls -1t "$STATE_DIR/tasks"); do
     [ -f "$STATE_DIR/tasks/$d/meta.json" ] || continue
-    jq -r --arg n "$d" '"\($n)\t\(.branch)\t\(.model)\t\(.created)\t\(.worktree)"' "$STATE_DIR/tasks/$d/meta.json"
+    jq -r --arg n "$d" '"\($n)\t\(.branch)\t\(.model)\t\(.created)\t\(.clone)"' "$STATE_DIR/tasks/$d/meta.json"
   done
+}
+
+cmd_land() {
+  local name="${1:?task name}"; valid_name "$name"
+  local repo wt branch; repo="$(meta "$name" repo)"; wt="$(meta "$name" clone)"; branch="$(meta "$name" branch)"
+  [ -z "$(git -C "$wt" status --porcelain)" ] || echo "Warning: uncommitted changes in the clone are not landed" >&2
+  git -C "$repo" fetch --quiet "$wt" "+refs/heads/$branch:refs/heads/$branch" || die "could not fetch $branch from the clone"
+  echo "Landed $branch at $(git -C "$repo" rev-parse --short "$branch") in $repo"
 }
 
 cmd_cleanup() {
   parse_prompt_opts "$@"; [ ${#REST[@]} -eq 1 ] || usage 2
   local name="${REST[0]}"; valid_name "$name"
-  local td repo wt branch; td="$(task_dir "$name")"; [ -f "$td/meta.json" ] || die "no task named '$name'"
-  repo="$(meta "$name" repo)"; wt="$(meta "$name" worktree)"; branch="$(meta "$name" branch)"
-  if [ -d "$wt" ]; then
-    if [ -z "${FORCE:-}" ] && [ -n "$(git -C "$wt" status --porcelain --untracked-files=no)" ]; then
-      die "worktree has uncommitted changes; commit them or pass --force"
-    fi
-    git -C "$repo" worktree remove ${FORCE:+--force} "$wt"
+  local td repo wt branch tip; td="$(task_dir "$name")"; [ -f "$td/meta.json" ] || die "no task named '$name'"
+  repo="$(meta "$name" repo)"; wt="$(meta "$name" clone)"; branch="$(meta "$name" branch)"
+  if [ -d "$wt" ] && [ -z "${FORCE:-}" ]; then
+    tip="$(git -C "$wt" rev-parse HEAD)"
+    [ "$tip" = "$(meta "$name" base)" ] || git -C "$repo" merge-base --is-ancestor "$tip" "$branch" 2>/dev/null \
+      || die "clone has commits not landed in $repo; run 'ai-deepseek land $name' or pass --force"
+    [ -z "$(git -C "$wt" status --porcelain --untracked-files=no)" ] || die "clone has uncommitted changes; commit them or pass --force"
   fi
-  [ -z "${FORCE:-}" ] || git -C "$repo" branch -D "$branch" >/dev/null 2>&1 || true
-  rm -rf "$td"
-  if [ -n "${FORCE:-}" ]; then echo "Removed task '$name' and branch $branch"; else echo "Removed task '$name'; branch $branch kept"; fi
+  rm -rf "$wt" "$td"
+  echo "Removed task '$name'"
 }
 
 cmd_doctor() {
@@ -202,9 +222,7 @@ cmd_doctor() {
   if [ -n "${LIVE:-}" ] && [ "$ok" = 1 ]; then
     local tmp; tmp="$(mktemp -d)"; git -C "$tmp" init -q
     install_profile; resolve_key
-    if printf 'Reply with exactly: DEEPSEEK_OK' | env -u OP_SERVICE_ACCOUNT_TOKEN DEEPSEEK_API_KEY="$DEEPSEEK_KEY" \
-         XDG_CONFIG_HOME="$STATE_DIR/xdg/config" XDG_DATA_HOME="$STATE_DIR/xdg/data" XDG_STATE_HOME="$STATE_DIR/xdg/state" \
-         timeout 300 "$OC_BIN" run --agent "$AGENT" --format json --model "$PROVIDER/deepseek-flash" --dir "$tmp" 2>/dev/null \
+    if printf 'Reply with exactly: DEEPSEEK_OK' | run_opencode timeout 300 "$OC_BIN" run --agent "$AGENT" --format json --model "$PROVIDER/deepseek-flash" --dir "$tmp" 2>/dev/null \
          | jq -r 'select(.type=="text") | .part.text' | grep -q DEEPSEEK_OK; then
       echo "PASS live turn"
     else echo "FAIL live turn"; ok=0; fi
@@ -219,6 +237,7 @@ case "$SUB" in
   implement) cmd_implement "$@";;
   ask) cmd_ask "$@";;
   diff) cmd_diff "$@";;
+  land) cmd_land "$@";;
   show) valid_name "${1:?task name}"; cat "$(task_dir "$1")/meta.json";;
   list) cmd_list;;
   cleanup) cmd_cleanup "$@";;
