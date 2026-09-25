@@ -14,7 +14,16 @@
 # review, rotation rule 6); `store-key` refreshes it from 1Password.
 set -euo pipefail
 
-VERSION="1.0.0"
+# Record every invocation in the durable reviewer event ledger, like every
+# other reviewer wrapper (tools/reviewer_maintenance.py requires this line).
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+  source "$(dirname "$_AI_EVENT_SELF")/../tools/reviewer_event_guard.sh"
+  reviewer_event_guard stepfun "$_AI_EVENT_SELF" "$@"
+  unset _AI_EVENT_SELF
+fi
+
+VERSION="1.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REAL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../tools/reviewer_event_guard.sh
@@ -39,11 +48,16 @@ require_platform(){
   platform_ok || { printf 'ai-stepfun: unsupported-platform: StepFun Step 5 reviews run on Ubuntu/Linux only; StepCode is not yet available on Windows. Use another reviewer.\n' >&2; exit 2; }
 }
 
+# `step` is a generic name (Smallstep's CLI uses it too), so prefer StepCode's
+# own install path and accept any binary only if it identifies as StepCode.
 step_bin(){
-  local b="${AI_STEPFUN_STEP_BIN:-}"
-  [ -n "$b" ] || b="$(command -v step 2>/dev/null || true)"
-  [ -n "$b" ] || b="$HOME/.stepcode/bin/step"
-  [ -x "$b" ] || return 1
+  local b c
+  for c in "${AI_STEPFUN_STEP_BIN:-}" "$HOME/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
+    [ -n "$c" ] && [ -x "$c" ] || continue
+    "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || continue
+    b="$c"; break
+  done
+  [ -n "${b:-}" ] || return 1
   printf '%s' "$b"
 }
 
@@ -79,7 +93,7 @@ load_key(){
 # StepFun's lower account tiers allow about 10 requests a minute (HTTP 429
 # rate_limited). STEP_AUTOPILOT=1 lets StepCode retry and resume inside a run;
 # read-only turns are also re-run whole, after a pause, when a 429 still ends
-# the run. Implementation runs are never re-run blindly: the worktree is kept.
+# the run. Implementation runs are never re-run blindly: the clone is kept.
 RATE_RETRIES="${AI_STEPFUN_RATE_RETRIES:-2}"
 RATE_PAUSE="${AI_STEPFUN_RATE_PAUSE:-65}"
 rate_limited(){ grep -q '^429: {.*rate_limited' "$1" 2>/dev/null; }
@@ -163,6 +177,7 @@ $prompt
 Write your analysis first, citing files and line numbers. End your answer with exactly one final line of the form:
 VERDICT: APPROVE $head
 or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line."
+  reviewer_event_evidence require-report stepfun || die 'could not reserve durable review evidence.'
   if ! run_step_retry "$copy" "$out" "$full" "$READ_ONLY_TOOLS"; then
     credit_stop "$out"; die "StepFun request failed or timed out; output kept at $out"
   fi
@@ -174,22 +189,30 @@ or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line
   fi
   body="$(printf '%s\n' "$report" | grep -Ev '^[[:space:]]*VERDICT:' | tr -d '[:space:]')"
   [ "${#body}" -ge "$REPORT_FLOOR" ] || die "verdict came with under $REPORT_FLOOR characters of analysis; treated as malformed (empty-report); output kept at $out"
+  reviewer_event_publish_report stepfun "$out" || die "review evidence could not be made durable; output kept at $out"
   cat "$out"
   note "report saved: $out (model $MODEL, head $head)"
 }
 
 # ask [--repo DIR] PROMPT: second-opinion turn with the same read-only tools.
 cmd_ask(){
-  local repo="." out tmp
+  local repo="." out tmp copy before after
   [ "${1:-}" != --repo ] || { repo="${2:?--repo needs a value}"; shift 2; }
   [ "$#" -gt 0 ] || die 'ask needs a prompt.'
   require_platform
+  repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   load_key
-  repo="$(cd "$repo" && pwd)"
+  REVIEW_REPO="$repo"; REVIEW_TAG="stepfun-ask-$$"
+  trap cleanup_copy EXIT
+  copy="$("$SANDBOX_BIN" ensure-copy "$repo" "$REVIEW_TAG")" || die 'could not build the disposable copy.'
+  REVIEW_COPY="$copy"
+  before="$("$SANDBOX_BIN" digest "$copy")"
   tmp="$(mktemp -d)"; out="$tmp/out"
-  if ! run_step_retry "$repo" "$out" "Read-only consultation; never change files. $*" "$READ_ONLY_TOOLS" || ! [ -s "$out" ]; then
+  if ! run_step_retry "$copy" "$out" "Read-only consultation; never change files. $*" "$READ_ONLY_TOOLS" || ! [ -s "$out" ]; then
     credit_stop "$out"; die 'StepFun request failed.'
   fi
+  after="$("$SANDBOX_BIN" digest "$copy")"
+  [ "$before" = "$after" ] || die 'the disposable copy changed during a read-only consultation; answer rejected.'
   if grep -q '^4[0-9][0-9]: {' "$out"; then credit_stop "$out"; die "StepFun returned an error: $(head -c 300 "$out")"; fi
   cat "$out"; rm -rf "$tmp"
 }
@@ -197,8 +220,9 @@ cmd_ask(){
 # implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
 # Owner instruction 2026-09-25: StepFun may write, implement, and execute code.
 # That power lives here only, never in review: StepCode gets its full tool set
-# (read, bash, edit, write) inside a NEW git worktree on a new branch cut from
-# REF, never in the caller's checkout. The caller inspects the diff, tests it,
+# (read, bash, edit, write) inside a NEW remote-less clone on a new branch cut
+# from REF, never in the caller's checkout. Afterwards HEAD must not have moved
+# and no remote may exist, or the run is refused. The caller inspects the diff, tests it,
 # and decides whether to commit; this command never commits, pushes, or merges.
 cmd_implement(){
   local repo="." ref="HEAD" prompt="" base id branch wt out
@@ -217,23 +241,31 @@ cmd_implement(){
   # Fixed-length identifiers only (rotation rule 8): never the repo or task name.
   id="$(date -u +%Y%m%d%H%M%S)-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
   branch="stepfun/impl-$id"
-  wt="$STATE_DIR/worktrees/$id"
-  mkdir -p "$STATE_DIR/worktrees" "$STATE_DIR/reports"; chmod 700 "$STATE_DIR" 2>/dev/null || true
-  git -C "$repo" worktree add -q -b "$branch" "$wt" "$base" || die 'could not create the isolated implementation worktree.'
+  wt="$STATE_DIR/implement/$id"
+  mkdir -p "$STATE_DIR/implement" "$STATE_DIR/reports"; chmod 700 "$STATE_DIR" 2>/dev/null || true
+  # A remote-less clone, not a linked worktree: a worktree shares the parent's
+  # remotes and refs, and StepCode has a shell with auto-approval here.
+  git clone -q --no-hardlinks --no-checkout "$repo" "$wt" || die 'could not create the isolated implementation clone.'
+  git -C "$wt" fetch -q "$repo" "$base" 2>/dev/null || true  # a detached base may be on no branch
+  git -C "$wt" remote remove origin
+  git -C "$wt" checkout -q -b "$branch" "$base" || die 'could not check out the base in the implementation clone.'
+  [ -z "$(git -C "$wt" remote)" ] || die 'implementation clone still has a remote; refusing to run.'
   out="$STATE_DIR/reports/impl-$id.md"
-  if ! run_step "$wt" "$out" "You are implementing a change in this git worktree (branch $branch, based on $base). You may read, edit, write files and run commands, but stay inside this directory, do not commit, push, or touch any remote, and never print secrets. Task:
+  if ! run_step "$wt" "$out" "You are implementing a change in this git checkout (branch $branch, based on $base). You may read, edit, write files and run commands, but stay inside this directory, do not commit, push, or touch any remote, and never print secrets. Task:
 
 $prompt
 
 When done, summarise what you changed and which commands you ran and their results." "read,bash,edit,write,grep,find,ls" write; then
-    credit_stop "$out"; die "StepFun implementation run failed or timed out; worktree kept at $wt, output at $out"
+    credit_stop "$out"; die "StepFun implementation run failed or timed out; clone kept at $wt, output at $out"
   fi
-  if grep -q '^4[0-9][0-9]: {' "$out"; then credit_stop "$out"; die "StepFun returned an error: $(head -c 300 "$out"); worktree kept at $wt"; fi
-  if grep -q '^Blocked ' "$out"; then die "StepCode blocked a tool call: $(grep -m1 '^Blocked ' "$out"); worktree kept at $wt"; fi
+  if grep -q '^4[0-9][0-9]: {' "$out"; then credit_stop "$out"; die "StepFun returned an error: $(head -c 300 "$out"); clone kept at $wt"; fi
+  [ "$(git -C "$wt" rev-parse HEAD)" = "$base" ] || die "StepFun committed in the implementation clone despite instructions; nothing was taken. Clone kept at $wt"
+  [ -z "$(git -C "$wt" remote)" ] || die "StepFun added a remote to the implementation clone; nothing was taken. Clone kept at $wt"
+  if grep -q '^Blocked ' "$out"; then die "StepCode blocked a tool call: $(grep -m1 '^Blocked ' "$out"); clone kept at $wt"; fi
   cat "$out"
-  printf '\nWORKTREE %s\nBRANCH %s\nBASE %s\n' "$wt" "$branch" "$base"
+  printf '\nCLONE %s\nBRANCH %s\nBASE %s\n' "$wt" "$branch" "$base"
   git -C "$wt" status --short
-  note "nothing was committed. Review the diff in $wt; remove it with: git -C '$repo' worktree remove '$wt' && git -C '$repo' branch -D '$branch'"
+  note "nothing was committed. Review the changes in $wt (git -C '$wt' diff; git -C '$wt' status); delete the folder when done."
 }
 
 usage(){
@@ -241,7 +273,7 @@ usage(){
 ai-stepfun review [--repo DIR] --prompt TEXT|--prompt-file FILE   formal read-only review ending in VERDICT: <APPROVE|REVISE|REJECT> <head>
 ai-stepfun ask [--repo DIR] PROMPT                               read-only second opinion
 ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
-                                                                 write and run code in a new isolated worktree (never commits)
+                                                                 write and run code in a new remote-less clone (never commits)
 ai-stepfun doctor [--live]                                        install, version floor, key store (and one live call)
 ai-stepfun store-key [--if-missing]                               refresh the protected key store from 1Password
 Ubuntu/Linux only.

@@ -10,7 +10,7 @@
     "test-ai-config-migrate.sh": 1,
     "test-ai-deepseek-agent.sh": 90,
     "test-ai-deepseek.sh": 5,
-    "test-ai-stepfun.sh": 3,
+    "test-ai-stepfun.sh": 5,
     "test-ai-devops-doctor-codex-probe.sh": 1,
     "test-ai-devops-doctor-install-state.sh": 1,
     "test-ai-facts.sh": 1,

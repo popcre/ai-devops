@@ -21,7 +21,8 @@ cat > "$AI_REVIEW_REGISTRY_FILE" <<'REGEOF'
  "grok":{"registry_state":"registered","reason":"test"},
  "kimi":{"registry_state":"registered","reason":"test"},
  "muse":{"registry_state":"registered","reason":"test"},
- "qwen":{"registry_state":"registered","reason":"test"}}}
+ "qwen":{"registry_state":"registered","reason":"test"},
+ "stepfun":{"registry_state":"registered","reason":"test"}}}
 REGEOF
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_PREFLIGHT_TIMEOUT=3
@@ -80,6 +81,7 @@ chmod +x "$TMP/bin/"*
 export AI_REVIEW_GROK_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_CODEX_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good"
+export AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_QWEN_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_GEMINI_WRAPPER="$TMP/bin/gemini"
 export MOCK_AGY_SHA_FILE="$TMP/gemini-agy-sha"
@@ -273,6 +275,11 @@ check "Codex status is available with its doctor contract" "$SCRIPT status codex
 check "Codex preflight uses its doctor contract" "$SCRIPT check codex '$REPO' | grep -q 'health=ok'"
 check "DeepSeek status is available with its doctor contract" "$SCRIPT status deepseek | jq -e '.status==\"installed-healthy\"'"
 check "DeepSeek preflight uses its doctor contract" "$SCRIPT check deepseek '$REPO' | grep -q 'health=ok'"
+check "StepFun is usable on Linux with its doctor contract" "AI_STEPFUN_PLATFORM=Linux $SCRIPT status stepfun | jq -e '.status==\"installed-healthy\" and .usable==true'"
+check "StepFun preflight passes on Linux" "AI_STEPFUN_PLATFORM=Linux $SCRIPT check stepfun '$REPO' | grep -q 'health=ok'"
+check "StepFun is unsupported-platform and unusable on Windows" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
+check "StepFun preflight refuses on Windows without contacting the provider" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
+check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux only'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
 NOAUTH_OUT="$(env -u DEEPSEEK_API_KEY HOME="$TMP/noauth-home" AI_DEVOPS_CONFIG_DIR="$TMP/noauth-config" AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" check deepseek "$REPO" 2>&1)"; NOAUTH_RC=$?
 [ "$NOAUTH_RC" -ne 0 ] && ! printf '%s' "$NOAUTH_OUT" | grep -q 'health=ok' && ok "DeepSeek without key or governed reference cannot pass offline preflight" || bad "DeepSeek without key or governed reference cannot pass offline preflight"

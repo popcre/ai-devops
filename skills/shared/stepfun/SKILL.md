@@ -1,6 +1,6 @@
 ---
 name: stepfun
-description: Use StepFun Step 5 (step-5-preview) through ai-stepfun on Ubuntu/Linux only. Formal read-only reviews with a VERDICT line, read-only second opinions, and implementation runs that write and execute code in an isolated worktree. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion. Not available on Windows.
+description: Use StepFun Step 5 (step-5-preview) through ai-stepfun on Ubuntu/Linux only. Formal read-only reviews with a VERDICT line, read-only second opinions, and implementation runs that write and execute code in an isolated remote-less clone. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion. Not available on Windows.
 ---
 
 # stepfun
@@ -27,16 +27,17 @@ ai-stepfun review --repo . --prompt-file brief.md
 ai-stepfun ask --repo . "Is this retry loop bounded?"
 
 # Implementation: StepFun may read, edit, write, and run commands, in a NEW
-# worktree on branch stepfun/impl-<id>. It never commits, pushes, or merges.
+# remote-less clone on branch stepfun/impl-<id>. A run that commits or adds a
+# remote is refused.
 ai-stepfun implement --repo . --prompt-file task.md
 ```
 
 - Reviews and `ask` stay read-only by design: an independent review must not
   change what it reviews. The power to write and execute is `implement`.
-- After `implement`, inspect the diff in the printed `WORKTREE`, run the tests
+- After `implement`, inspect the diff in the printed `CLONE` folder, run the tests
   yourself, and only then carry the change into your own branch. StepFun's
   output is work to verify, not a finished change.
-- Remove a finished implementation worktree with the command it prints.
+- Delete the clone folder when you are done with it.
 
 ## Membership
 

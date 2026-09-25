@@ -305,6 +305,7 @@ explain_failure() {
     service-unavailable) printf 'Retry the service check once after a short delay, then wait. Do not misclassify an outage as a code verdict.\n' ;;
     substantive-finding) printf 'Stop and fix the finding. Never rotate providers to shop for a friendlier verdict.\n' ;;
     empty-report) printf 'The provider returned a decision with no analysis behind it. Treat it as malformed, not as an approval. Re-run the review and require a report; never relax the report floor to let the verdict through.\n' ;;
+    unsupported-platform) printf 'This provider does not run on this operating system (StepFun is Ubuntu/Linux only). Use another registered reviewer; never emulate or force it.\n' ;;
     not-registered) printf 'The provider is not carried in the reviewer registry, so it cannot receive a review no matter how healthy its local install is. Re-entry is a reviewed registry change backed by a live well-formed verdict, never an edit made to unblock an allocation.\n' ;;
     live-qualification-required) printf 'The reviewer live qualification no longer matches its wrapper, runtime, or preloader bytes. A pull of new toolkit code re-qualifies it automatically via the repository post-merge hook; to restore it now run: ai-review-preflight requalify\n' ;;
     authentication-failed|provider-timeout|provider-unhealthy) printf 'Quarantine this provider and correct the named health failure before assigning a review.\n' ;;

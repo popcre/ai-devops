@@ -53,8 +53,8 @@ allocator but stayed registered here, and a session spent an hour trying it.
 10. **Out of credit is told to Albert in the same session.** Owner rule,
     2026-09-24: "the session that hit that error should A) know that that's
     why it failed, and B) tell me in that same session." When a provider
-    refuses a run for lack of paid credit, the Grok, Muse, Qwen, Gemini and
-    DeepSeek wrappers stop at once and exit **92**, printing on stderr:
+    refuses a run for lack of paid credit, the Grok, Muse, Qwen, Gemini,
+    DeepSeek and StepFun wrappers stop at once and exit **92**, printing on stderr:
 
     ```
     AI_REVIEWER_OUT_OF_CREDIT provider=<provider> code=insufficient_quota
@@ -80,6 +80,6 @@ allocator but stayed registered here, and a session spent an hour trying it.
     code. `bin/ai-stepfun` refuses to run off Linux and preflight reports
     `unsupported-platform` there. Its formal reviews stay read-only; writing
     and executing happens only in `ai-stepfun implement`, inside a new
-    worktree, with no commit. The shared-db allocator has no platform field,
+    remote-less clone; a run that commits or adds a remote is refused. The shared-db allocator has no platform field,
     so StepFun is listed in `config/reviewer-membership-scope.json` and is
     never assigned by the allocator.

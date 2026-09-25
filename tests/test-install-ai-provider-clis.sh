@@ -45,6 +45,18 @@ for p in grok kimi qwen; do grep -q "would install $p" "$tmp/all" || {
   echo "FAIL: dry run skipped $p"; exit 1; }
 done
 
+# StepCode (StepFun) is offered on Linux only; elsewhere the name is refused.
+if [ "$(uname -s)" = Linux ]; then
+  grep -q 'would install stepfun' "$tmp/all" || { echo "FAIL: Linux dry run skipped stepfun"; exit 1; }
+fi
+mkdir -p "$tmp/fake-windows"; printf '#!/bin/sh\necho MINGW64_NT-10.0\n' > "$tmp/fake-windows/uname"; chmod +x "$tmp/fake-windows/uname"
+if env HOME="$clean" PATH="$tmp/fake-windows:$minimal_path" bash "$script" --dry-run stepfun >"$tmp/win" 2>&1; then
+  echo "FAIL: stepfun was accepted on a non-Linux platform"; exit 1
+fi
+grep -q "unknown provider 'stepfun'" "$tmp/win" || { echo "FAIL: non-Linux stepfun refusal is not explicit"; exit 1; }
+env HOME="$clean" PATH="$tmp/fake-windows:$minimal_path" bash "$script" --dry-run >"$tmp/winall" 2>&1
+! grep -q 'would install stepfun' "$tmp/winall" || { echo "FAIL: non-Linux dry run offered stepfun"; exit 1; }
+
 # Naming one provider must not touch the others.
 clean_run --dry-run qwen >"$tmp/one" 2>&1
 grep -q 'would install qwen' "$tmp/one"
