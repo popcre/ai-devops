@@ -147,14 +147,16 @@ link(){ # link <blocked> <blocker> [blocker id, when already read]
   local br bn kr kn id="${3:-}"
   read -r br bn <<<"$(parse_ref "$1")"; read -r kr kn <<<"$(parse_ref "$2")"
   # The open-issue snapshot already holds open issues' ids and blocked-by lists
-  # (#658 P5). A separate process (wait registration) loads the saved index.
+  # (#658 P5). Same-tick SNAPN means the snapshot is fresh; a saved index from a
+  # later process may be up to one scan interval old, so only trust it for the
+  # stable issue id — never to skip the existing-link REST check.
   [ "${#SNAPIDX[@]}" -gt 0 ] || snapshot_index_load || true
   if [ -z "$id" ]; then
     id="$(snapshot_id "$kr" "$kn")" ||
       id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
   fi
   note "linking $1 as blocked by $2 on GitHub"
-  if snapshot_has_link "$br" "$bn" "$kr" "$kn"; then
+  if [ -n "${SNAPN[$br]:-}" ] && snapshot_has_link "$br" "$bn" "$kr" "$kn"; then
     note "$1 is already blocked by $2"; return 0
   fi
   if gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
@@ -630,7 +632,8 @@ snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a 
   [ -n "${SNAPN[$repo]+set}" ] || return 0
   rec="${SNAPIDX[$repo#$3]:-}"
   [ -n "$rec" ] || return 0 # the blocker is not open, so no scan here reads it
-  ac="${rec#*|}"; ac="${ac%%|*}"; title="${rec#*|*|}"
+  ac="${rec#*|}"; ac="${ac%%|*}"
+  title="$(printf '%s' "${rec#*|*|}" | base64 -d 2>/dev/null || true)"
   node="$(printf '{"number":%s,"state":"OPEN","title":%s,"repository":{"nameWithOwner":%s},"assignees":{"totalCount":%s}}' \
     "$3" "$(printf '%s' "$title" | jq -Rs .)" "$(printf '%s' "$repo" | jq -Rs .)" "${ac:-0}")"
   local existing="${SNAPBB[$repo#$2]:-}"
@@ -661,13 +664,14 @@ snapshot_index_build(){ # rebuild SNAPIDX/SNAPBB from the in-memory SNAP pages
   if [ -n "$repo" ]; then
     # incremental: only this repo's pages
     for ((pg=1; pg<=${SNAPN[$repo]:-0}; pg++)); do
-      while IFS='|' read -r num did title ac bb; do
+      while IFS='|' read -r num did ac t64 bb; do
         [ -n "$num" ] || continue
-        snapshot_index_set "$repo" "$num" "$did|$ac|$title" "$bb"
+        snapshot_index_set "$repo" "$num" "$did|$ac|$t64" "$bb"
       done < <(printf '%s' "${SNAP[$repo|$pg]}" | jq -r '
         .data.repository.issues.nodes[]
-        | [(.number|tostring), (.databaseId|tostring), (.title // ""),
+        | [(.number|tostring), (.databaseId|tostring),
            ((.assignees.totalCount // 0)|tostring),
+           ((.title // "") | @base64),
            ([.blockedBy.nodes[] | (.repository.nameWithOwner + "#" + (.number|tostring))] | join(" "))]
         | join("|")')
     done
@@ -711,9 +715,9 @@ snapshot_index_load(){ # load a saved index; age must stay inside one scan inter
   limit=$(( $(cfgd .links_interval_minutes 60) * 60 ))
   [ "$age" -ge 0 ] && [ "$age" -le "$limit" ] || return 1
   SNAPIDX=(); SNAPBB=()
-  while IFS='|' read -r k id ac title; do
+  while IFS='|' read -r k id ac t64; do
     [ -n "$k" ] || continue
-    SNAPIDX["$k"]="$id|$ac|$title"
+    SNAPIDX["$k"]="$id|$ac|$t64"
   done < <(jq -r '.issues | to_entries[] | [.key, .value.id, ((.value.assignees // .value.ac // 0)|tostring), (.value.title // "")] | join("|")' "$file")
   while IFS='|' read -r k v; do
     [ -n "$k" ] || continue
@@ -722,10 +726,11 @@ snapshot_index_load(){ # load a saved index; age must stay inside one scan inter
   return 0
 }
 snapshot_open_hit(){ # snapshot_open_hit <owner/repo> <n>: print "open\tfalse\t<title>" when the snapshot holds it open
-  local key="$1#$2" rec
+  local key="$1#$2" rec t64
   rec="${SNAPIDX[$key]:-}"
   [ -n "$rec" ] || return 1
-  printf 'open\tfalse\t%s\n' "${rec#*|*|}"
+  t64="${rec#*|*|}"
+  printf 'open\tfalse\t%s\n' "$(printf '%s' "$t64" | base64 -d 2>/dev/null || printf '%s' "$t64")"
 }
 snapshot_id(){ # snapshot_id <owner/repo> <n>: databaseId when the snapshot holds it open
   local rec="${SNAPIDX[$1#$2]:-}"
@@ -748,7 +753,7 @@ snapshot_title_number(){ # snapshot_title_number <owner/repo> <exact title>: iss
   local repo="$1" want="$2" k title
   for k in "${!SNAPIDX[@]}"; do
     case "$k" in "$repo#"*) ;; *) continue ;; esac
-    title="${SNAPIDX[$k]#*|*|}"
+    title="$(printf '%s' "${SNAPIDX[$k]#*|*|}" | base64 -d 2>/dev/null || true)"
     [ "$title" = "$want" ] || continue
     printf '%s' "${k##*#}"
     return 0
