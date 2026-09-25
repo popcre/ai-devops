@@ -431,7 +431,7 @@ if [ "$(uname -s)" = Linux ] && [ "$(id -u)" -ne 0 ]; then
   run_stage optional "Muse Code (Linux)" install_muse_code_linux
 fi
 
-# Reviewer provider CLIs (Grok Build, Kimi Code, Qwen Code, and StepCode on Linux). Per-user and
+# Reviewer provider CLIs (Grok Build, Kimi Code, Qwen Code, Antigravity for Gemini, and StepCode on Linux). Per-user and
 # idempotent: current installs are skipped. Sign-in stays manual.
 if [ "$(id -u)" -eq 0 ]; then
   stage_results+=("SKIP\toptional\tReviewer provider CLIs (root install)")
