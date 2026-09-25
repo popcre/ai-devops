@@ -37,6 +37,7 @@
 #   ai-review-sandbox ensure-copy <repo-root> <tag> # always create a disposable snapshot
 #   ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy> # refresh a recorded stable path
 #   ai-review-sandbox with-copy <repo-root> <tag> -- <command>... # create, run command, delete before return
+#   ai-review-sandbox sweep-orphans [--max-age-seconds N] [--max-removals N] # remove managed snapshots past the orphan age
 #   ai-review-sandbox remove-recorded <tag> <managed-copy> # remove that exact recorded stable path
 #   ai-review-sandbox path   <repo-root> <tag>   # print it without creating anything
 #   ai-review-sandbox remove <repo-root> <tag>   # delete the snapshot, if any
@@ -47,6 +48,16 @@
 # trap that removes the snapshot on success, failure, and abort. One-shot
 # wrappers that call `ensure-copy` themselves must mirror that trap (see
 # bin/ai-claude-review). Session wrappers delete at session end.
+#
+# ORPHAN SWEEP (issue #711 Phase 3): a killed wrapper never runs its trap, so
+# every parent review start (wired once at the bin/ai-review front door, which
+# every supported dispatch passes through) runs `sweep-orphans`: it lists the
+# sandbox root once and removes only managed snapshots whose marker is older
+# than the orphan age (default 2 hours), at most a bounded handful per run so
+# a review start never blocks behind a mass cleanup. Deletion goes through the
+# same path-guarded, evidence-checking remove the creating run uses, so a
+# snapshot held for unreconciled evidence is retained and reported, never
+# force-deleted.
 #
 # AI_KEEP_SANDBOX=1 skips every delete and prints the retained path on stderr —
 # debugging only. Never leave it set in production.
@@ -60,10 +71,22 @@
 
 set -euo pipefail
 
-VERSION="1.6.0"
+VERSION="1.7.0"
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
+
+# Orphan age (issue #711 Phase 3): a managed snapshot whose marker has not been
+# touched for this long is removable by the parent sweep. Younger snapshots are
+# never touched, so a concurrent review is safe by construction; the marker is
+# rewritten whenever a reviewer binds to the snapshot, so a live session that
+# recently started or refreshed also stays protected. Both numbers are locked in
+# code (owner-approved plan): an environment override of the age could be
+# injected to shrink it and delete a concurrent review's live snapshot, and an
+# override of the removal cap could park a review start behind an unbounded
+# cleanup. Tests override them only through the explicit flags.
+ORPHAN_MAX_AGE_SECONDS=7200
+ORPHAN_SWEEP_MAX_REMOVALS=16
 
 # Optional caller hint naming the explicit --base ref a packet build will pass
 # inside the snapshot (ai-review-packet resolve's `--base`). The snapshot then
@@ -615,11 +638,57 @@ cmd_remove() {
   remove_sandbox "$(sandbox_path "$root" "$tag")"
 }
 
+# Phase 3 parent sweep (issue #711): the bounded startup net for snapshots a
+# killed wrapper left behind. One listing of the sandbox root, no recursion into
+# repositories; only directories carrying a managed marker past the orphan age
+# are considered, and each delete goes through remove_sandbox so containment,
+# AI_KEEP_SANDBOX, and the evidence rules all keep applying. At most
+# ORPHAN_SWEEP_MAX_REMOVALS entries are removed per run, so a review start
+# never blocks behind a mass cleanup — the rest wait for the next parent run
+# and the daily housekeeping task. Best-effort by design: an entry
+# remove_sandbox refuses (unreconciled evidence) is reported on stderr and left
+# for reconciliation, and the sweep continues with the rest.
+cmd_sweep_orphans() { # sweep-orphans [--max-age-seconds N] [--max-removals N]
+  local max_age="$ORPHAN_MAX_AGE_SECONDS" max_removals="$ORPHAN_SWEEP_MAX_REMOVALS"
+  local entry marker mtime age now removed=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --max-age-seconds)
+        [ "$#" -ge 2 ] || die "usage: ai-review-sandbox sweep-orphans [--max-age-seconds N] [--max-removals N]"
+        max_age="$2"; shift 2 ;;
+      --max-removals)
+        [ "$#" -ge 2 ] || die "usage: ai-review-sandbox sweep-orphans [--max-age-seconds N] [--max-removals N]"
+        max_removals="$2"; shift 2 ;;
+      *) die "usage: ai-review-sandbox sweep-orphans [--max-age-seconds N] [--max-removals N]" ;;
+    esac
+  done
+  case "$max_age" in ''|*[!0-9]*) die "orphan age must be a whole number of seconds." ;; esac
+  case "$max_removals" in ''|*[!0-9]*) die "removal cap must be a whole number." ;; esac
+  [ -d "$SANDBOX_DIR" ] || return 0
+  now="$(date +%s)"
+  while IFS= read -r -d '' entry; do
+    [ "$removed" -lt "$max_removals" ] || {
+      warn "$(( max_removals )) orphan removal cap reached; remaining orphans wait for the next parent run"
+      return 0
+    }
+    marker="$entry/$MARKER"
+    [ -f "$marker" ] || continue
+    mtime="$(stat -c %Y "$marker" 2>/dev/null)" || continue
+    age=$(( now - mtime ))
+    [ "$age" -gt "$max_age" ] || continue
+    # Subshell: remove_sandbox dies on unreconciled evidence by design, and
+    # that one refusal must not end the sweep of the remaining orphans.
+    if ( remove_sandbox "$entry" ); then removed=$(( removed + 1 )); fi
+  done < <(find "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+  return 0
+}
+
 case "${1:-}" in
   ensure)      shift; cmd_ensure "$@" ;;
   ensure-copy) shift; cmd_ensure "${1:-}" "${2:-}" 1 ;;
   refresh-copy) shift; cmd_refresh_copy "$@" ;;
   with-copy)   shift; cmd_with_copy "$@" ;;
+  sweep-orphans) shift; cmd_sweep_orphans "$@" ;;
   remove-recorded) shift; cmd_remove_recorded "$@" ;;
   path)        shift; cmd_path "$@" ;;
   remove)      shift; cmd_remove "$@" ;;
@@ -627,5 +696,5 @@ case "${1:-}" in
   is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
   digest)      shift; source_digest "$(canon "${1:?usage: ai-review-sandbox digest <dir>}")" ;;
   --version)   printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
+  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|sweep-orphans|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
 esac
