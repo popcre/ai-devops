@@ -56,7 +56,9 @@ def clone_roots(key):
             if not os.path.exists(os.path.join(clone, ".git")):
                 continue
             url = (_git(clone, "remote", "get-url", "origin") or "").strip()
-            ok = url and subprocess.run([os.path.join(BIN, "ai-repo-identity"), "accepts", key, url],
+            # The helper is a shebang script; Windows CreateProcess cannot run
+            # one directly, so invoke it through bash like the shell callers do.
+            ok = url and subprocess.run(["bash", os.path.join(BIN, "ai-repo-identity"), "accepts", key, url],
                                         capture_output=True).returncode == 0
             if not ok:
                 continue
