@@ -14,7 +14,7 @@ Linked handoff (this session):
 
 | Step | State | Owner / dependency | Evidence required to accept |
 |---|---|---|---|
-| S1. Land BlockerWatch snapshot reuse (P5 REST savings) | ⬜ open — WIP exists uncommitted in another worktree (see §5) | one implementation session; do not bundle | replay + tick tests green; live tick with fewer REST reads |
+| S1. Land BlockerWatch snapshot reuse (P5 REST savings) | 🟡 code in PR (branch `claude/pr-860-6b49fd`, 2026-09-25) — reimplemented on edge-dev3 because the Windows WIP was unreachable; `link()` left on REST (it runs only in `wait`, where no snapshot exists); due scans now run before propagate/wake so their snapshot is reused. Live edge-dev tick proof pending in its leftover-proof issue | one implementation session; do not bundle | replay + tick tests green; live tick with fewer REST reads |
 | S2. Share one PR status read across waiters (P4) | ⬜ open | after S1 helper edits settle | multi-waiter fixture: one upstream refresh, unchanged terminal outcomes |
 | S3. Route leftover direct callers through `ai-gh` (P3) | ⬜ open | after S2 | caller inventory disposition + focused bypass regression test |
 | S4. Before/after traffic sample + de-stale parent STATUS | ⬜ open | after S1–S3 installed | dated report under `tests/verification/github-requests/` |
