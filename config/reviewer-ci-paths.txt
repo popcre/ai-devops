@@ -29,6 +29,8 @@ tests/test-all.ps1
 tests/test-all.sh
 tests/test-ai-codex-review.sh
 tests/test-ai-grok-review.sh
+tests/test-ai-review-code-only.sh
+tests/lib-review-public-fixture.sh
 tests/test-ai-review-lifecycle.sh
 tests/test-ai-review-packet.sh
 tests/test-ai-review-preflight.sh

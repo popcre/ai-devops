@@ -146,4 +146,23 @@ else
   echo 'SKIP: linked parent refused (filesystem symlinks unsupported)'
 fi
 
+# A retained export stands in for a private source: a directory-bound CLI
+# reviewer launched inside it must be refused exactly like the private
+# checkout, and the export's sidecars must not outlive any removal path
+# (exact-head review, 2026-09-25).
+FRONT="$ROOT/bin/ai-review"
+if ( cd "$EXPORT" && AI_CLAUDE_REVIEW_BIN=/bin/true "$FRONT" claude diff-review ) > "$TMP/cli-in-export.out" 2>&1; then
+  fail 'a CLI reviewer started inside a retained code-only export'
+fi
+grep -Fq 'private source requires the code-only attachment route' "$TMP/cli-in-export.out" \
+  || fail 'the in-export refusal did not name the attachment route'
+# The earlier fixtures moved the source HEAD after the first export, so a
+# drift-clean export is created fresh before proving cleanup removes it.
+EXPORT2="$("$SANDBOX" ensure-code-only "$R" cleanupcheck --paths-file "$TMP/approved.json" --base HEAD)"
+"$SANDBOX" remove "$R" cleanupcheck
+[ ! -e "$EXPORT2" ] || fail 'ordinary-clone remove left the code-only stage'
+[ ! -e "$EXPORT2.source.json" ] || fail 'ordinary-clone remove left the source sidecar'
+[ ! -e "$EXPORT2.owners.json" ] || fail 'ordinary-clone remove left the owners sidecar'
+pass 'retained exports refuse CLI reviewers and clean up with their sidecars'
+
 printf '6 passed; 0 failed\n'

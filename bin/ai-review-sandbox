@@ -140,6 +140,10 @@ remove_sandbox() {
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
   "$python" "$event_tool" verify-sandbox "$d" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
   rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
+  # A code-only stage carries host-only sidecars beside the snapshot; leaving
+  # them behind after any deletion path leaks the original source pointer
+  # (exact-head review, 2026-09-25).
+  rm -f -- "$d.source.json" "$d.owners.json" 2>/dev/null || warn "could not remove sidecars for $d"
   warn "deleted review snapshot $d"
 }
 
@@ -564,7 +568,7 @@ cmd_ensure() {
   root="$(canon "${1:?usage: ai-review-sandbox ensure <repo-root> <tag>}")"
   tag="${2:?usage: ai-review-sandbox ensure <repo-root> <tag>}"
   valid_tag "$tag" || die "invalid tag '$tag' (use letters, numbers, . _ -)"
-  if [ -f "$root/$MARKER" ] && grep -q '"mode": "code-only"' "$root/$MARKER"; then
+  if [ -f "$root/$MARKER" ] && jq -e '.mode == "code-only"' "$root/$MARKER" >/dev/null 2>&1; then
     [ "$force_copy" = 1 ] || { cmd_verify_code_only "$root"; printf '%s' "$root"; return 0; }
     cmd_clone_code_only "$root" "$tag"
     return 0
@@ -743,9 +747,16 @@ cmd_remove() {
   root="$(canon "${1:?usage: ai-review-sandbox remove <repo-root> <tag>}")"
   tag="${2:?usage: ai-review-sandbox remove <repo-root> <tag>}"
   valid_tag "$tag" || die "invalid tag '$tag'"
-  [ "$force_copy" = 1 ] || is_worktree "$root" || return 0
   local stage="$(sandbox_path "$root" "$tag")"
-  if [ -f "$stage/$MARKER" ] && grep -q '"mode": "code-only"' "$stage/$MARKER"; then
+  # ensure-code-only publishes under the managed sandbox root even for an
+  # ordinary clone, so the usual not-a-worktree shortcut must not skip a
+  # code-only stage recorded for this tag (exact-head review, 2026-09-25).
+  if [ "$force_copy" != 1 ] && ! is_worktree "$root"     && [ -f "$stage/$MARKER" ] && jq -e '.mode == "code-only"' "$stage/$MARKER" >/dev/null 2>&1; then
+    cmd_remove_code_only "$stage"
+    return 0
+  fi
+  [ "$force_copy" = 1 ] || is_worktree "$root" || return 0
+  if [ -f "$stage/$MARKER" ] && jq -e '.mode == "code-only"' "$stage/$MARKER" >/dev/null 2>&1; then
     cmd_remove_code_only "$stage"
   else
     remove_sandbox "$stage"

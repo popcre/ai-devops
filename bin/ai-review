@@ -93,6 +93,15 @@ else
   [ "$private_rc" -eq 1 ] || { printf 'ai-review: private-source classification failed; no reviewer was started.\n' >&2; exit 3; }
   private_source=0
 fi
+# A retained code-only export contains only approved code, so it classifies
+# public — but it stands in for a private source and its sidecars point back
+# at the original tree, so a directory-bound CLI reviewer launched inside it
+# is refused exactly like the private source it represents (exact-head
+# review, 2026-09-25).
+if [ "$private_source" -eq 0 ] && [ -f "$source_root/.ai-review-sandbox" ] \
+  && jq -e '.mode == "code-only"' "$source_root/.ai-review-sandbox" >/dev/null 2>&1; then
+  private_source=1
+fi
 if [ "$private_source" -eq 1 ] && [ "$code_only" -ne 1 ]; then
   printf 'ai-review: private source requires the code-only attachment route; no reviewer was started.\n' >&2
   exit 3
