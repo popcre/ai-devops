@@ -205,6 +205,7 @@
     "test-ai-codex-memories.sh",
     "test-ai-codex-review.sh",
     "test-ai-deepseek-agent.sh",
+    "test-ai-deepseek.sh",
     "test-ai-gemini-usage.sh",
     "test-ai-gemini.sh",
     "test-ai-gh.sh",
@@ -240,6 +241,7 @@
     "test-ai-codex-memories.sh",
     "test-ai-codex-review.sh",
     "test-ai-deepseek-agent.sh",
+    "test-ai-deepseek.sh",
     "test-ai-gemini-usage.sh",
     "test-ai-gemini.sh",
     "test-ai-gh.sh",
@@ -330,6 +332,7 @@
       "test-reviewer-credit.sh"
     ],
     [
+      "test-ai-deepseek.sh",
       "test-ai-muse-code.sh"
     ]
   ],
