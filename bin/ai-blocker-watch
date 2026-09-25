@@ -630,7 +630,8 @@ ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,nam
 ALARM_TICK=""
 issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node budget, 2 failed
   local repo="$1" n="$2" out key="$1#$2" spent budget cachef
-  cachef="$ALARM_TICK/cache/${key//\//_}"
+  # '@' cannot appear in a GitHub owner or repo name, so owner/repo cannot collide.
+  cachef="$ALARM_TICK/cache/${key//\//@}"
   if [ -f "$cachef" ]; then cat "$cachef"; return 0; fi
   budget="$(cfgd .alarm_max_nodes 40)"
   spent="$(cat "$ALARM_TICK/agql" 2>/dev/null || printf 0)"
@@ -677,8 +678,7 @@ alarm_scan(){ # alarm_scan <dry 0|1>
   start="$(now_iso)"
   ALARM_TICK="$HOME_DIR/alarm-tick"
   rm -rf "$ALARM_TICK"
-  mkdir -p "$ALARM_TICK/cache"
-  printf '0' > "$ALARM_TICK/agql"
+  (umask 077; mkdir -p "$ALARM_TICK/cache"; printf '0' > "$ALARM_TICK/agql")
   local -A seen=() sttl=() spar=() stall=() sage=() salarmed=() sdepth=() sact=()
   cutoff="$(date -u -d "-$(cfgd .alarm_stall_hours 24) hours" +%Y-%m-%dT%H:%M:%SZ)"
   # Pass 1: the shared open-issue snapshot gives every OPEN blocker of an
@@ -789,6 +789,8 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
   if [ "$afail" = 0 ]; then
     [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_ALARM"
   else FAILED=1; fi
+  # ISSUE_Q payloads include comment bodies; never leave them on disk past the scan.
+  rm -rf "$ALARM_TICK"
 }
 
 # scan_due <clock file> <interval minutes> [early]: the scan is due after its
