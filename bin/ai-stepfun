@@ -7,8 +7,8 @@
 # ai-review-preflight reports it as unsupported-platform there.
 #
 # Sandbox: every StepCode turn runs under bubblewrap with the filesystem
-# read-only, an empty home and /tmp (no SSH, git, gh, or 1Password secrets),
-# and only its own directory visible (read-only for review/ask, writable for
+# read-only, an empty home, /tmp, and /run, a cleared environment (no SSH, git,
+# gh, or 1Password secrets or sockets), and only its own directory visible (read-only for review/ask, writable for
 # implement). Extensions, skills, prompt templates, project-local .stepcode
 # files, and session storage are disabled.
 #
@@ -118,11 +118,15 @@ run_step_retry(){ # same arguments as run_step; read-only turns only
 # StepCode turn. StepCode's strict approval mode is read-only (it blocks bash,
 # edit, and write); only implement passes "write", which selects auto approval.
 #
-# Every turn runs inside bubblewrap: the whole filesystem read-only, an empty
-# home (no ~/.ssh, git or gh credentials, 1Password token, or other secrets),
-# an empty /tmp, and only DIR visible from the real home. DIR is writable for
-# implement and read-only for review/ask. A private agent directory holds
-# StepCode's own settings. Network stays on: the model API needs it.
+# Every turn runs inside bubblewrap: the whole filesystem read-only; an empty
+# home, /tmp, and /run (no SSH keys or agent socket, git or gh credentials,
+# 1Password token file, user D-Bus, or Docker socket); only DIR visible from
+# the real home. DIR is writable for implement and read-only for review/ask.
+# The environment is cleared to an allowlist, so tokens held in environment
+# variables (OP_SERVICE_ACCOUNT_TOKEN, GH_TOKEN, SSH_AUTH_SOCK, ...) never
+# reach the model. The API key moves by export, never through argv. Network
+# stays on: the model API needs it, but no credential reaches the sandbox.
+STEP_ENV_ALLOW=" LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR "
 run_step(){
   local dir="$1" out="$2" prompt="$3" tools="${4:-}" bin rc=0 approval=strict fallback=deny dir_bind=--ro-bind bwrap agent
   [ "${5:-}" != write ] || { approval=auto; fallback=allow; dir_bind=--bind; }
@@ -132,18 +136,25 @@ run_step(){
   bwrap="$(bwrap_bin)" || die 'bubblewrap (bwrap) is required to sandbox StepFun. Install: sudo apt-get install bubblewrap'
   mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR" 2>/dev/null || true
   agent="$(mktemp -d "$STATE_DIR/agent.XXXXXX")"; chmod 700 "$agent"
-  env STEP_API_KEY="$STEP_KEY" STEP_BASE_URL="$BASE_URL" STEP_AUTOPILOT=1 \
-    timeout "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
-      --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --tmpfs "$HOME" \
+  (
+    local name home="$HOME"
+    for name in $(compgen -e); do
+      case "$STEP_ENV_ALLOW" in *" $name "*) ;; *) unset "$name" 2>/dev/null || true ;; esac
+    done
+    export HOME="$home" PATH="$home/.stepcode/agent/bin:/usr/local/bin:/usr/bin:/bin"
+    export STEP_API_KEY="$STEP_KEY" STEP_BASE_URL="$BASE_URL" STEP_AUTOPILOT=1 STEP_CODING_AGENT_DIR="$agent"
+    exec timeout "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
+      --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
+      --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
+      --tmpfs "$home" \
       --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
-      --ro-bind-try "$HOME/.stepcode" "$HOME/.stepcode" \
-      --bind "$agent" "$agent" "$dir_bind" "$dir" "$dir" --chdir "$dir" \
-      --setenv HOME "$HOME" --setenv STEP_CODING_AGENT_DIR "$agent" \
-      --setenv PATH "$HOME/.stepcode/agent/bin:/usr/local/bin:/usr/bin:/bin" -- \
+      --ro-bind-try "$home/.stepcode/agent/bin" "$home/.stepcode/agent/bin" \
+      --bind "$agent" "$agent" "$dir_bind" "$dir" "$dir" --chdir "$dir" -- \
       "$bin" -p --no-session --model "$MODEL" "${tool_args[@]}" \
       --approval-mode "$approval" --non-interactive-approval "$fallback" \
       --no-extensions --no-skills --no-prompt-templates --no-themes \
-      --no-approve --no-update-check -- "$prompt" < /dev/null > "$out" 2>"$out.stderr" || rc=$?
+      --no-approve --no-update-check -- "$prompt"
+  ) < /dev/null > "$out" 2>"$out.stderr" || rc=$?
   rm -rf "$agent"
   return "$rc"
 }

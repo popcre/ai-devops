@@ -19,7 +19,8 @@ not try to install or emulate StepCode.
 ## Sandbox
 
 Every StepFun turn runs under bubblewrap: the model sees only its own folder,
-with an empty home (no SSH keys, git or gh logins, or 1Password token). If
+with an empty home, /tmp and /run and a cleared environment (no SSH keys or
+agent, git or gh logins, 1Password token, or Docker socket). If
 `bwrap` is missing, `ai-stepfun` refuses to run; install it with
 `sudo apt-get install bubblewrap`.
 

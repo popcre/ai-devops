@@ -55,6 +55,8 @@ if [ "$(uname -s)" = Linux ]; then
   env HOME="$clean" PATH="$tmp/decoy:$minimal_path" bash "$script" --dry-run stepfun >"$tmp/decoy.out" 2>&1
   grep -q 'would install stepfun' "$tmp/decoy.out" || { echo "FAIL: a decoy step on PATH was taken for StepCode"; exit 1; }
 fi
+grep -q '\[ "\$cmd" != step \] || return 0' "$script" || { echo "FAIL: the installer may claim ~/.local/bin/step"; exit 1; }
+grep -q 'ai-stepfun store-key' "$script" || { echo "FAIL: install output never names the StepFun key step"; exit 1; }
 mkdir -p "$tmp/fake-windows"; printf '#!/bin/sh\necho MINGW64_NT-10.0\n' > "$tmp/fake-windows/uname"; chmod +x "$tmp/fake-windows/uname"
 if env HOME="$clean" PATH="$tmp/fake-windows:$minimal_path" bash "$script" --dry-run stepfun >"$tmp/win" 2>&1; then
   echo "FAIL: stepfun was accepted on a non-Linux platform"; exit 1

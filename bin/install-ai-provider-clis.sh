@@ -135,6 +135,9 @@ resolve() {
 LOCAL_BIN="$HOME/.local/bin"
 link_into_local_bin() {
   local cmd="$1" real="$2" dst="$LOCAL_BIN/$1"
+  # `step` is a generic name (Smallstep's CLI uses it too) and ai-stepfun finds
+  # StepCode at ~/.stepcode/bin/step itself, so never claim ~/.local/bin/step.
+  [ "$cmd" != step ] || return 0
   [ "$real" = "$dst" ] && return 0
   mkdir -p "$LOCAL_BIN"
   if [ -e "$dst" ] && [ ! -L "$dst" ]; then
@@ -343,6 +346,7 @@ if ((installed_any)) && ((DRY_RUN == 0)); then
   echo "NEXT sign in once per provider (interactive, deliberately not automated):"
   echo "  grok            # follow the sign-in prompt"
   echo "  kimi login"
+  [ "$(uname -s)" != Linux ] || echo "  ai-stepfun store-key   # StepFun key from 1Password into the protected store"
   echo "  qwen            # configure Alibaba Coding Plan authentication"
   echo "Then prove the full path:  ai-qwen doctor --live"
 fi
