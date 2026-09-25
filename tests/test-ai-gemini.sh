@@ -198,6 +198,13 @@ gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$
 check 'governed mode emits the terminal verdict on standard output' "gov_run govok governed | tail -1 | grep -qx 'VERDICT: APPROVE $GH'"
 check 'governed mode rejects the non-governed heading verdict' "! gov_run govbad governed-heading"
 check 'governed mode refuses a malformed head SHA' "! (cd '$RG' && MOCK_MODE=governed '$SCRIPT' new --governed-verdict not-a-sha govsha --prompt review)"
+# #821: ai-review-pool judges the verdict on the runner's STDOUT, so its pool
+# contract must put the model body there (and the PASS chrome on stderr).
+RP="$TMP/repo-pool"; make_repo "$RP"
+POOL_OUT="$( (cd "$RP" && MOCK_MODE=normal AI_GEMINI_BODY_STDOUT=1 "$SCRIPT" new poolbody --prompt review) 2>"$TMP/pool.err")"
+check 'pool contract emits the model verdict body on stdout for the pool gate' "printf '%s\n' \"\$POOL_OUT\" | awk '/^## Verdict[[:space:]]*\$/{getline; gsub(/^[[:space:]]+|[[:space:]]+\$/,\"\"); print; exit}' | grep -Eqx 'APPROVE|REJECT|BLOCKED'"
+check 'pool contract keeps the PASS line off stdout and on stderr' "! printf '%s\n' \"\$POOL_OUT\" | grep -q '^PASS session=' && grep -q '^PASS session=poolbody' '$TMP/pool.err'"
+check 'ai-review-pool sets the gemini body-on-stdout contract' "grep -q 'AI_GEMINI_BODY_STDOUT=1' '$ROOT/bin/ai-review-pool'"
 R4="$TMP/repo4"; make_repo "$R4"; check 'normal review writes a durable report' "new_run '$R4' good normal && find '$R4/.ai/reviews' -type f -size +0c | grep -q ."
 check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for good)\""
 GOOD_META="$(meta_for good)"; GOOD_COPY="$(jq -r .review_dir "$GOOD_META")"
