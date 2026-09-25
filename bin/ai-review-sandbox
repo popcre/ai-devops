@@ -217,11 +217,23 @@ names=[n.decode("utf-8", "surrogateescape") for n in sys.stdin.buffer.read().spl
 if any("\n" in n or "\r" in n for n in names): sys.exit(2)
 sys.stdout.write("\n".join(names+["bin/ai-review-sandbox"]) + "\n")
 ' > "$paths"; then rm -f "$paths"; return 2; fi
-  decision="$(cd "$root" && ai-task-gates explain --json --paths-from "$paths" 2>/dev/null)" \
+  # Resolve the gate explicitly, then by PATH (the offline suites stub it
+  # there), then beside this script: a review started where bin/ is not on PATH
+  # must still classify with its own tree's contract instead of failing closed.
+  local gates_bin="${AI_TASK_GATES_BIN:-}"
+  [ -n "$gates_bin" ] || gates_bin="$(command -v ai-task-gates 2>/dev/null || true)"
+  [ -n "$gates_bin" ] || gates_bin="$SCRIPT_DIR/ai-task-gates"
+  [ -x "$gates_bin" ] || return 2
+  decision="$(cd "$root" && "$gates_bin" explain --json --paths-from "$paths" 2>/dev/null)" \
     || { rm -f "$paths"; return 2; }
   rm -f "$paths"
-  printf '%s' "$decision" | jq -e '.identity_resolved == true and .effective_class == "private-evidence"' >/dev/null 2>&1 && return 0
-  printf '%s' "$decision" | jq -e '.identity_resolved == true and (.effective_class|type=="string")' >/dev/null 2>&1 && return 1
+  # The privacy verdict is the classified change set, not the remote's shape:
+  # both private classes are private (#702 — a formal review snapshots the whole
+  # private repository), and an unresolved remote (local path, ssh alias, none)
+  # classifies on default paths plus the repository's own declaration, exactly
+  # as the task gate itself does for the review action.
+  printf '%s' "$decision" | jq -e '.effective_class == "private-evidence" or .effective_class == "private-tooling"' >/dev/null 2>&1 && return 0
+  printf '%s' "$decision" | jq -e '(.effective_class|type=="string")' >/dev/null 2>&1 && return 1
   return 2
 }
 
