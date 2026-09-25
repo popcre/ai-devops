@@ -29,7 +29,7 @@ cat > "$TMP/bin/packet" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- resolve) if [ -n "${MOCK_RESOLVE_JSON:-}" ]; then printf '%s\n' "$MOCK_RESOLVE_JSON"; else exec "$REAL_REVIEW_PACKET" "$@"; fi ;;
+ resolve) [ -z "${MOCK_RESOLVE_SLEEP:-}" ] || sleep "$MOCK_RESOLVE_SLEEP"; if [ -n "${MOCK_RESOLVE_JSON:-}" ]; then printf '%s\n' "$MOCK_RESOLVE_JSON"; else exec "$REAL_REVIEW_PACKET" "$@"; fi ;;
  build) [ -z "${MOCK_PACKET_BUILD_SLEEP:-}" ] || sleep "$MOCK_PACKET_BUILD_SLEEP"; p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
  verify)
    # The slow-inventory fixture isolates its own 2s bound. Packet verification
@@ -286,7 +286,7 @@ SLOW_SNAP="$TMP/repo-slow-snap"; make_repo "$SLOW_SNAP"
 SLOW_SNAP_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_SNAP")"
 set +e; SLOW_SNAP_START=$SECONDS; SLOW_SNAP_OUT="$(cd "$SLOW_SNAP" && MOCK_RESOLVE_JSON="$SLOW_SNAP_IDENTITY" MOCK_ENSURE_COPY_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-snap --prompt review 2>&1)"; SLOW_SNAP_RC=$?; SLOW_SNAP_ELAPSED=$((SECONDS-SLOW_SNAP_START)); set -e
 check 'a stalled snapshot step fails in time instead of hanging' "test '$SLOW_SNAP_RC' -ne 0 && test '$SLOW_SNAP_ELAPSED' -lt $(budget 2 30)"
-check 'the snapshot timeout names the step and the bound' "printf '%s' '$SLOW_SNAP_OUT' | grep -q 'snapshot build failed or timed out after 2s'"
+check 'the snapshot timeout names the step and the bound' "printf '%s' '$SLOW_SNAP_OUT' | grep -q 'snapshot build timed out after 2s'"
 check 'a timed-out prepare starts no session and holds no lock' "test -z \"\$(meta_for slow-snap)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-snap*' -print -quit 2>/dev/null)\""
 SLOW_PKT="$TMP/repo-slow-pkt"; make_repo "$SLOW_PKT"
 # Resolve the fixture's real source identity before the 2s build assertion.
@@ -294,10 +294,10 @@ SLOW_PKT="$TMP/repo-slow-pkt"; make_repo "$SLOW_PKT"
 # bound before the deliberate stall starts; other cases exercise live resolve.
 SLOW_PKT_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_PKT")"
 set +e; SLOW_PKT_OUT="$(cd "$SLOW_PKT" && MOCK_RESOLVE_JSON="$SLOW_PKT_IDENTITY" MOCK_PACKET_BUILD_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-pkt --prompt review 2>&1)"; SLOW_PKT_RC=$?; set -e
-if [ "$SLOW_PKT_RC" -eq 0 ] || ! grep -q 'packet build failed or timed out after 2s' <<<"$SLOW_PKT_OUT" || [ -n "$(meta_for slow-pkt)" ]; then
+if [ "$SLOW_PKT_RC" -eq 0 ] || ! grep -q 'packet build timed out after 2s' <<<"$SLOW_PKT_OUT" || [ -n "$(meta_for slow-pkt)" ]; then
   printf 'slow-pkt diagnostic: rc=%s meta=%s output=%s\n' "$SLOW_PKT_RC" "$(meta_for slow-pkt)" "$SLOW_PKT_OUT" >&2
 fi
-check 'a stalled packet build fails in time and names the step' "test '$SLOW_PKT_RC' -ne 0 && printf '%s' '$SLOW_PKT_OUT' | grep -q 'packet build failed or timed out after 2s' && test -z \"\$(meta_for slow-pkt)\""
+check 'a stalled packet build fails in time and names the step' "test '$SLOW_PKT_RC' -ne 0 && printf '%s' '$SLOW_PKT_OUT' | grep -q 'packet build timed out after 2s' && test -z \"\$(meta_for slow-pkt)\""
 SLOW_INV="$TMP/repo-slow-inv"; make_repo "$SLOW_INV"; printf slow > "$SLOW_INV/inventory-slow-trigger"
 SLOW_INV_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_INV")"
 mkdir -p "$TMP/slow-bin"
@@ -321,6 +321,12 @@ fi
 check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test -s '$TMP/slow-bin/python3.start' && test '$SLOW_INV_STAGE_ELAPSED' -lt $(budget 2 30)"
 check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory failed or timed out after 2s'"
 check 'a timed-out inventory starts no session and holds no lock' "test -z \"\$(meta_for slow-inv)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-inv*' -print -quit 2>/dev/null)\""
+# #637 gaps 1 and 3: ask() resolve is bounded, and a genuine refusal never says "timed out".
+SLOW_ASK="$TMP/repo-slow-ask"; make_repo "$SLOW_ASK"; new_run "$SLOW_ASK" slow-ask normal >/dev/null
+set +e; SLOW_ASK_START=$SECONDS; SLOW_ASK_OUT="$(cd "$SLOW_ASK" && MOCK_RESOLVE_JSON='{}' MOCK_RESOLVE_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" ask slow-ask --assert-head "$(git -C "$SLOW_ASK" rev-parse HEAD)" --prompt later 2>&1)"; SLOW_ASK_RC=$?; SLOW_ASK_ELAPSED=$((SECONDS-SLOW_ASK_START)); set -e
+check 'a stalled ask() identity resolve fails in time and names the bound' "test '$SLOW_ASK_RC' -ne 0 && test '$SLOW_ASK_ELAPSED' -lt $(budget 2 30) && printf '%s' '$SLOW_ASK_OUT' | grep -q 'identity resolution timed out after 2s'"
+set +e; REFUSE_OUT="$(cd "$SLOW_ASK" && "$SCRIPT" new refused --assert-head 0000000000000000000000000000000000000000 --prompt review 2>&1)"; set -e
+check 'a genuine identity refusal is not worded as a timeout' "printf '%s' '$REFUSE_OUT' | grep -q 'source identity refused' && ! printf '%s' '$REFUSE_OUT' | grep -qiE 'timed out|deadline|time limit'"
 R7="$TMP/repo7"; make_repo "$R7"; new_run "$R7" stale normal >/dev/null; printf next >> "$R7/file.txt"; git -C "$R7" add file.txt; git -C "$R7" commit -qm next
 check 'follow-up refuses a changed repository head' "! (cd '$R7' && '$SCRIPT' ask stale --prompt later)"
 check 'stale-head refusal becomes recovery-required' "test \"\$(jq -r .status \"\$(meta_for stale)\")\" = RECOVERY_REQUIRED"
