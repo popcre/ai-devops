@@ -77,6 +77,7 @@ STUB
 chmod +x "$TMP/bin/other-step"
 check "a different program named step is not accepted as StepCode" "! AI_STEPFUN_STEP_BIN='$TMP/bin/other-step' HOME='$TMP/nohome' '$SCRIPT' doctor >/dev/null 2>&1"
 check "doctor passes with the stub and a protected key store" "'$SCRIPT' doctor | grep -q '^OK step=0.1.1'"
+check "doctor prints one PASS line per check for the shared-db allocator" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 3 ] && mode ok && [ \"\$('$SCRIPT' doctor --live | grep -c '^PASS  ')\" = 4 ]"
 check "doctor refuses a key store that is not owner-only" "chmod 644 '$AI_STEPFUN_KEY_STORE'; ! '$SCRIPT' doctor >/dev/null; rc=\$?; chmod 600 '$AI_STEPFUN_KEY_STORE'; [ \$rc = 0 ]"
 check "live doctor makes one call and sees the answer" "mode ok; '$SCRIPT' doctor --live | grep -q 'live=verified'"
 check "the key reaches step through the environment, never argv" "mode ok; '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key' && ! grep -q stub-key '$STUB_ARGS'"
@@ -93,6 +94,11 @@ OP_SERVICE_ACCOUNT_TOKEN=planted-op GH_TOKEN=planted-gh SSH_AUTH_SOCK=/planted.s
 OP_SERVICE_ACCOUNT_TOKEN=planted-op GH_TOKEN=planted-gh SSH_AUTH_SOCK=/planted.sock "$SCRIPT" doctor --live >/dev/null 2>&1
 check "host timeout is resolved from /usr/bin, never a user path" "grep -q 'timeout_bin=\"\$(PATH=/usr/bin:/bin command -v timeout)\"' '$SCRIPT' && ! grep -qE '^[[:space:]]*exec timeout ' '$SCRIPT'"
 check "caller secrets in the environment never reach the model" "grep -q '^STEP_API_KEY=' '$STUB_ARGS.env' && ! grep -q planted '$STUB_ARGS.env'"
+printf '.ai/\n' >> "$TMP/repo/.git/info/exclude"; mkdir -p "$TMP/repo/.ai/reviews"
+mode verdict
+AI_REVIEW_SOURCE_RECEIPT_FILE="$TMP/repo/.ai/reviews/governed-source-test.json" "$SCRIPT" review --repo "$TMP/repo" --base "$HEAD_SHA" --assert-head "$HEAD_SHA" --prompt-file "$TMP/repo/f" > "$TMP/gov.out" 2>/dev/null; rc=$?
+check "a governed run writes the source receipt the shared-db runner validates" "[ $rc = 0 ] && jq -e --arg h '$HEAD_SHA' '.schema_version==1 and .identity.head==\$h and (.packet_sha256|test(\"^[0-9a-f]{64}\$\"))' '$TMP/repo/.ai/reviews/governed-source-test.json'"
+check "a governed run ends in exactly one terminal VERDICT line for the head" "[ \"\$(grep -c '^VERDICT:' '$TMP/gov.out')\" = 1 ] && tail -n1 '$TMP/gov.out' | grep -qx 'VERDICT: APPROVE $HEAD_SHA'"
 check "review rejects an answer with no verdict" "mode noverdict; ! '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1"
 check "review rejects a verdict with no analysis behind it" "mode short; ! AI_STEPFUN_REPORT_FLOOR=400 '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1"
 check "review rejects any change to the review copy" "mode write; ! '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1 && [ ! -e '$TMP/repo/MUTATED' ]"

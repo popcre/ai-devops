@@ -1,6 +1,6 @@
 ---
 name: stepfun
-description: Use StepFun Step 5 (step-5-preview) through ai-stepfun on Ubuntu/Linux only. Formal read-only reviews with a VERDICT line, read-only second opinions, and implementation runs that write and execute code in an isolated remote-less clone. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion. Not available on Windows.
+description: Rotation reviewer since 2026-09-25 on Ubuntu/Linux only. Use StepFun Step 5 (step-5-preview) through ai-stepfun on Ubuntu/Linux only. Formal read-only reviews with a VERDICT line, read-only second opinions, and implementation runs that write and execute code in an isolated remote-less clone. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion. Not available on Windows.
 ---
 
 # stepfun
@@ -49,10 +49,10 @@ ai-stepfun implement --repo . --prompt-file task.md
 
 ## Membership
 
-`stepfun` is registered in `config/reviewer-registry.json` and listed as
-outside the shared-db allocator: the allocator has no platform awareness, so it
-never assigns StepFun. Use it when a session on Ubuntu wants a reviewer, or when
-Albert asks for StepFun.
+StepFun is in the reviewer rotation (shared-db allocator row
+`stepfun-step-5-preview`, owner instruction 2026-09-25). Take a formal review
+when the allocator assigns it; on Windows the allocator never draws it, because
+preflight reports it `unsupported-platform` there.
 
 ## Failures
 
