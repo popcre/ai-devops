@@ -33,6 +33,7 @@ tests/test-ai-review-preflight.sh
 tests/test-ai-review-sandbox.sh
 tests/test-ai-review-sandbox-delete-guard.sh
 tests/test-ai-review-sandbox-self-cleanup.sh
+tests/test-orphan-sweep-age.sh
 tests/test-ai-review-scoreboard.sh
 tests/test-provider-wrapper-common.sh
 tests/test-verify-closure.sh
