@@ -91,6 +91,7 @@ check "review hands the model the sealed MANIFEST.md" "grep -q 'MANIFEST.md firs
 check "review runs with only read-only tools and strict approval" "grep -qx 'read,grep,find,ls' '$STUB_ARGS' && grep -qx strict '$STUB_ARGS' && grep -qx deny '$STUB_ARGS' && grep -qx -- --no-extensions '$STUB_ARGS' && grep -qx -- --no-approve '$STUB_ARGS'"
 OP_SERVICE_ACCOUNT_TOKEN=planted-op GH_TOKEN=planted-gh SSH_AUTH_SOCK=/planted.sock mode ok
 OP_SERVICE_ACCOUNT_TOKEN=planted-op GH_TOKEN=planted-gh SSH_AUTH_SOCK=/planted.sock "$SCRIPT" doctor --live >/dev/null 2>&1
+check "host timeout is resolved from /usr/bin, never a user path" "grep -q 'timeout_bin=\"\$(PATH=/usr/bin:/bin command -v timeout)\"' '$SCRIPT' && ! grep -qE '^[[:space:]]*exec timeout ' '$SCRIPT'"
 check "caller secrets in the environment never reach the model" "grep -q '^STEP_API_KEY=' '$STUB_ARGS.env' && ! grep -q planted '$STUB_ARGS.env'"
 check "review rejects an answer with no verdict" "mode noverdict; ! '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1"
 check "review rejects a verdict with no analysis behind it" "mode short; ! AI_STEPFUN_REPORT_FLOOR=400 '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1"
@@ -119,8 +120,8 @@ check "doctor refuses to run without bubblewrap" "AI_STEPFUN_BWRAP='$TMP/missing
 
 # Real sandbox: when bubblewrap works here, prove the model's side cannot see
 # the caller's home secrets or write outside its directory.
-REAL_BWRAP="$(command -v bwrap 2>/dev/null || true)"
-if [ -n "$REAL_BWRAP" ] && "$REAL_BWRAP" --ro-bind / / --tmpfs /tmp true 2>/dev/null; then
+REAL_BWRAP="$(PATH=/usr/bin:/bin command -v bwrap 2>/dev/null || true)"
+if [ -n "$REAL_BWRAP" ] && "$REAL_BWRAP" --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --tmpfs /tmp /usr/bin/true 2>/dev/null; then
   # A home outside /tmp, so only the sandbox's empty-home mount can hide it.
   mkdir -p "$ROOT/.ai"; RH="$(mktemp -d "$ROOT/.ai/stepfun-test-home.XXXXXX")"
   mkdir -p "$RH/.ssh" "$RH/probe-bin" "$RH/.config/ai-devops/secrets"; printf 'secret\n' > "$RH/.ssh/id_test"

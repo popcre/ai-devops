@@ -84,7 +84,9 @@ allocator but stayed registered here, and a session spent an hour trying it.
     Every StepFun turn runs under bubblewrap with an empty home, /tmp and
     /run and a cleared environment, so the model never sees SSH keys or the
     agent socket, git or gh credentials, the 1Password token, or the Docker
-    socket; with no credential inside, it cannot push anywhere. The
+    socket; with no caller credential inside, it cannot push anywhere (the
+    only credential inside is StepFun's own API key, which StepCode needs
+    and could expose; it spends only StepFun credit). The
     commit/remote refusal is an extra end-state check on top of that. Only
     /usr, /etc, StepCode and the run's own folder are mounted. Accepted
     exposure: the network is shared (the StepFun API needs it), so an

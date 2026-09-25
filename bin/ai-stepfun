@@ -126,6 +126,9 @@ run_step_retry(){ # same arguments as run_step; read-only turns only
 # environment is cleared to an allowlist, so tokens held in environment
 # variables (OP_SERVICE_ACCOUNT_TOKEN, GH_TOKEN, SSH_AUTH_SOCK, ...) never
 # reach the model; the API key moves by export, never through argv.
+# The one credential inside is StepFun's own API key: StepCode needs it in its
+# environment and cannot start without /proc, so the model could read it. It
+# only spends StepFun credit; no caller credential is inside.
 # Accepted exposure: the network is shared (the model API needs it), so an
 # implement run can reach loopback services and the internet, but it holds no
 # credential of the caller's with which to act on them.
@@ -147,6 +150,9 @@ run_step(){
     if [ -L "$top" ]; then sys_binds+=(--symlink "$(readlink "$top")" "$top")
     elif [ -d "$top" ]; then sys_binds+=(--ro-bind "$top" "$top"); fi
   done
+  # Resolve host programs before the environment is cleared, so a file planted
+  # in a user-writable PATH entry can never run outside the sandbox.
+  local timeout_bin; timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)" || die 'timeout is missing from /usr/bin.'
   (
     local name home="$HOME"
     for name in $(compgen -e); do
@@ -154,7 +160,7 @@ run_step(){
     done
     export HOME="$home" PATH="$home/.stepcode/agent/bin:/usr/local/bin:/usr/bin:/bin"
     export STEP_API_KEY="$STEP_KEY" STEP_BASE_URL="$BASE_URL" STEP_AUTOPILOT=1 STEP_CODING_AGENT_DIR="$agent"
-    exec timeout "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
+    exec "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
       "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
       --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
       --tmpfs "$home" \
@@ -171,7 +177,7 @@ run_step(){
 }
 
 bwrap_bin(){
-  local b="${AI_STEPFUN_BWRAP:-$(command -v bwrap 2>/dev/null || true)}"
+  local b="${AI_STEPFUN_BWRAP:-$(PATH=/usr/bin:/bin command -v bwrap 2>/dev/null || true)}"
   [ -n "$b" ] && [ -x "$b" ] || return 1
   printf '%s' "$b"
 }
