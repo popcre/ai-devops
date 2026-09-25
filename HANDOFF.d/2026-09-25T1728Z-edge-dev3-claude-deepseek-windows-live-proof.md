@@ -54,7 +54,7 @@ NOT done: the live proof on a real Windows machine (section 6 below).
 ## 4. What was tried and did not work
 
 - Reaching a Windows machine from edge-dev3: `ssh 4837`, `ssh al8960ofc`, and
-  `ssh 100.123.87.44` all timed out or failed host-key verification. edge-dev3
+  `ssh <4837 Tailscale address>` all timed out or failed host-key verification. edge-dev3
   has no `~/.ssh/config`, no Windows key, and no `tailscale` command. So no live
   Windows run was possible from this session.
 - First CI push failed `tests/test-workflow-policy.sh`: my manifest edit hit
@@ -102,7 +102,7 @@ then close.
 
 ## 8. Access and environment
 
-- Windows: 4837/al8960ofc (Tailscale 100.123.87.44); 916 (100.110.219.31, user
+- Windows: 4837/al8960ofc (Tailscale address in the private machine atlas); 916 (Tailscale address in the private machine atlas, user
   `ahazan2`, key `~/.ssh/916-alien`, often offline).
 - 1Password service-account token file: `%USERPROFILE%\.config\ai-devops\op-service-account`.
 
