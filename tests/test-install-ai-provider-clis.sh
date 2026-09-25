@@ -7,6 +7,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="$repo/bin/install-ai-provider-clis.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+unset GROK_HOME  # the model lock honors GROK_HOME; never let a test reach a real one
 
 [[ -x "$script" ]] || { echo "FAIL: installer is not executable"; exit 1; }
 
@@ -106,6 +107,31 @@ grep -q 'SKIP grok already installed' "$tmp/link"
 [[ -x "$linkhome/.local/bin/grok" ]] || { echo "FAIL: did not link grok into ~/.local/bin"; exit 1; }
 grep -q "linked $linkhome/.local/bin/grok" "$tmp/link"
 
+# --- grok model lock (owner ruling 2026-09-25: 4.6 only) --------------------
+# xAI launch campaigns replace the default model, so the lock must dismiss the
+# policy's campaigns plus any cached one naming another default, and set the
+# default and allowed_models in config.toml, keeping unrelated settings, and a
+# rerun must change nothing.
+MODEL="$(bash "$repo/bin/ai-provider-version" model grok)"
+[[ -n "$MODEL" ]] || { echo "FAIL: the policy has no grok model_pin"; exit 1; }
+grep -q "OK   grok locked to $MODEL" "$tmp/link"
+jq -e '.dismissed_ids | index("grok-4.7-launch")' "$linkhome/.grok/campaigns_state.json" >/dev/null || { echo "FAIL: policy campaign not dismissed"; exit 1; }
+lockhome="$tmp/lock-home"; mkdir -p "$lockhome/.grok/bin"
+make_fake_grok "$lockhome/.grok/bin/grok" "$WANT"
+printf '[ui]\nyolo = false\n\n[models]\ndefault = "grok-4.7"\nallowed_models = ["grok-4.7"]\n' >"$lockhome/.grok/config.toml"
+printf '{"dismissed_ids":["older"]}' >"$lockhome/.grok/campaigns_state.json"
+jq -n --arg m "$MODEL" '{payload: ({settings: {campaigns: [{id: "grok-9-launch", models: {default: "grok-9"}}, {id: "same-model", models: {default: $m}}]}} | tojson)}' >"$lockhome/.grok/settings_cache.json"
+env HOME="$lockhome" PATH="$minimal_path" bash "$script" grok >/dev/null 2>&1
+cfg="$lockhome/.grok/config.toml"; st="$lockhome/.grok/campaigns_state.json"
+grep -qx "default = \"$MODEL\"" "$cfg" || { echo "FAIL: config.toml default not pinned"; exit 1; }
+grep -qx "allowed_models = \[\"$MODEL\*\"\]" "$cfg" || { echo "FAIL: config.toml lacks allowed_models"; exit 1; }
+grep -qx 'yolo = false' "$cfg" || { echo "FAIL: model lock dropped an unrelated setting"; exit 1; }
+[[ "$(grep -c '^allowed_models' "$cfg")" == 1 && "$(grep -c '^default = ' "$cfg")" == 1 ]] || { echo "FAIL: lock duplicated a key"; exit 1; }
+[[ "$(jq -c '.dismissed_ids' "$st")" == '["grok-4.7-launch","grok-9-launch","older"]' ]] || { echo "FAIL: wrong dismissed campaigns: $(cat "$st")"; exit 1; }
+cp "$cfg" "$tmp/cfg-before"; cp "$st" "$tmp/st-before"
+env HOME="$lockhome" PATH="$minimal_path" bash "$script" grok >/dev/null 2>&1
+cmp -s "$tmp/cfg-before" "$cfg" && cmp -s "$tmp/st-before" "$st" || { echo "FAIL: model lock is not idempotent"; exit 1; }
+
 # An unrelated real file in ~/.local/bin must never be clobbered.
 guard="$tmp/guard-home"; mkdir -p "$guard/.grok/bin" "$guard/.local/bin"
 make_fake_grok "$guard/.grok/bin/grok" "$WANT"
@@ -119,6 +145,7 @@ dry="$tmp/dry-home"; mkdir -p "$dry/.grok/bin"
 make_fake_grok "$dry/.grok/bin/grok" "$WANT"
 env HOME="$dry" PATH="$minimal_path" bash "$script" --dry-run grok >/dev/null 2>&1
 [[ -e "$dry/.local/bin/grok" ]] && { echo "FAIL: dry run created a link"; exit 1; }
+[[ -e "$dry/.grok/campaigns_state.json" ]] && { echo "FAIL: dry run wrote the model lock"; exit 1; }
 
 # --- exact version policy (issue #251) -------------------------------------
 # "A runnable grok" is not the contract. Both wrappers are qualified against one
