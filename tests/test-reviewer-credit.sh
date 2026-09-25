@@ -19,7 +19,7 @@ classify() { # PROVIDER FILE... -> stdout lines, status
 }
 
 echo '== reviewer credit classifier'
-for pair in grok:grok-xai-403.stderr muse:muse-insufficient-quota.jsonl qwen:qwen-arrearage.jsonl gemini:gemini-prepay.json deepseek:deepseek-402.json; do
+for pair in grok:grok-xai-403.stderr muse:muse-insufficient-quota.jsonl qwen:qwen-arrearage.jsonl gemini:gemini-prepay.json deepseek:deepseek-402.json stepfun:stepfun-402.txt; do
   provider="${pair%%:*}"; file="$FIX/${pair#*:}"
   out="$(classify "$provider" "$file")"; rc=$?
   check "$provider fixture is classified as out of credit" "[ '$rc' = 0 ]"

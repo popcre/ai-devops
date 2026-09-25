@@ -73,3 +73,13 @@ allocator but stayed registered here, and a session spent an hour trying it.
     its fixtures are `tests/fixtures/reviewer-credit/` and its checks are in
     `tests/test-reviewer-credit.sh`. Rate limits and a bare
     `RESOURCE_EXHAUSTED` are not credit failures.
+
+11. **StepFun is Ubuntu-only and outside the allocator.** Owner instruction,
+    2026-09-25: add StepFun Step 5 as a reviewer on Ubuntu only (StepCode is
+    not yet available on Windows) and let it write, implement, and execute
+    code. `bin/ai-stepfun` refuses to run off Linux and preflight reports
+    `unsupported-platform` there. Its formal reviews stay read-only; writing
+    and executing happens only in `ai-stepfun implement`, inside a new
+    worktree, with no commit. The shared-db allocator has no platform field,
+    so StepFun is listed in `config/reviewer-membership-scope.json` and is
+    never assigned by the allocator.

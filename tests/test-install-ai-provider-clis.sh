@@ -11,7 +11,7 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 [[ -x "$script" ]] || { echo "FAIL: installer is not executable"; exit 1; }
 
 # --- help and argument validation -----------------------------------------
-bash "$script" --help | grep -q 'Providers: grok kimi qwen'
+bash "$script" --help | grep -q 'Providers: grok kimi qwen stepfun'
 
 if bash "$script" --dry-run bogus >"$tmp/bogus" 2>&1; then
   echo "FAIL: unknown provider was accepted"; exit 1

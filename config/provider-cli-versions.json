@@ -23,6 +23,13 @@
       "qualified_on": null,
       "exact_install_command": null,
       "notes": "Not version-pinned. Presence is sufficient; do not force an upgrade from Grok work."
+    },
+    "stepfun": {
+      "command": "step",
+      "supported_version": null,
+      "qualified_on": null,
+      "exact_install_command": null,
+      "notes": "StepCode CLI for StepFun Step 5 reviews, Ubuntu/Linux only (not yet available on Windows). Not pinned here; bin/ai-stepfun enforces its own minimum version floor (0.1.1)."
     }
   }
 }

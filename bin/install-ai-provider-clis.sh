@@ -40,7 +40,7 @@ Usage: install-ai-provider-clis.sh [options] [provider ...]
 Installs the third-party AI provider CLIs used by this repo's wrappers.
 With no provider named, installs all of them.
 
-Providers: grok kimi qwen
+Providers: grok kimi qwen stepfun (stepfun: Linux only)
 
 Options:
   --force        Reinstall even if the command already works.
@@ -53,6 +53,7 @@ deliberately does not automate:
   grok            # then follow the sign-in prompt
   kimi login
   qwen            # then configure Alibaba Coding Plan authentication
+  ai-stepfun store-key   # StepFun key from 1Password into the protected store
 USAGE
 }
 
@@ -62,6 +63,10 @@ PROVIDERS=(
   "kimi|kimi|https://code.kimi.com/kimi-code/install.sh|.kimi-code/bin/kimi"
   "qwen|qwen|https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh|.local/bin/qwen"
 )
+# StepCode (StepFun Step 5) ships no Windows build yet; offer it on Linux only.
+if [ "$(uname -s)" = Linux ]; then
+  PROVIDERS+=("stepfun|step|https://static-openapi.stepfun.com/stepcode/install.sh|.stepcode/bin/step")
+fi
 
 FORCE=0
 DRY_RUN=0

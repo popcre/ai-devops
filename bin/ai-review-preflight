@@ -38,7 +38,7 @@ die()  { printf 'ai-review-preflight: error: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
 
-valid_provider() { case "$1" in claude|grok|kimi|glm|muse|gemini|qwen|codex|deepseek) return 0 ;; *) return 1 ;; esac; }
+valid_provider() { case "$1" in claude|grok|kimi|glm|muse|gemini|qwen|codex|deepseek|stepfun) return 0 ;; *) return 1 ;; esac; }
 provider_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
 qualification_file() { printf '%s/%s-live-qualified.json' "$STATE_DIR" "$1"; }
 now_epoch() { date +%s; }
@@ -245,6 +245,8 @@ static_status() {
   case "$1" in
     gemini) gemini_live_qualified && return 1; printf '{"provider":"gemini","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
     qwen) qwen_live_qualified && return 1; printf '{"provider":"qwen","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
+    # StepCode is Ubuntu/Linux only (owner instruction 2026-09-25).
+    stepfun) [ "${AI_STEPFUN_PLATFORM:-$(uname -s)}" = Linux ] && return 1; printf '{"provider":"stepfun","status":"unsupported-platform","failure_class":"unsupported-platform"}\n'; return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -321,6 +323,7 @@ provider_wrapper() {
     qwen) printf '%s' "${AI_REVIEW_QWEN_WRAPPER:-$SCRIPT_DIR/ai-qwen}" ;;
     codex) printf '%s' "${AI_REVIEW_CODEX_WRAPPER:-$SCRIPT_DIR/ai-codex-review}" ;;
     deepseek) printf '%s' "${AI_REVIEW_DEEPSEEK_WRAPPER:-$SCRIPT_DIR/ai-deepseek-agent}" ;;
+    stepfun) printf '%s' "${AI_REVIEW_STEPFUN_WRAPPER:-$SCRIPT_DIR/ai-stepfun}" ;;
   esac
 }
 
@@ -608,12 +611,12 @@ case "$cmd" in
   status)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
-    else providers=(claude grok kimi glm muse gemini qwen codex deepseek); fi
+    else providers=(claude grok kimi glm muse gemini qwen codex deepseek stepfun); fi
     for provider in "${providers[@]}"; do emit_status "$provider" || true; done ;;
   usable)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")
-    else providers=(claude grok kimi glm muse gemini qwen codex deepseek); fi
+    else providers=(claude grok kimi glm muse gemini qwen codex deepseek stepfun); fi
     usable_rc=0
     for provider in "${providers[@]}"; do emit_status "$provider" || usable_rc=3; done
     exit "$usable_rc" ;;
