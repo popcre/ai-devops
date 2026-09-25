@@ -136,19 +136,23 @@ is_managed() {
 }
 
 remove_sandbox() {
-  local d="$1"
+  local d="$1" physical
   [ -e "$d" ] || return 0
   is_managed "$d" || die "refusing to delete $d: it is not a managed review snapshot."
+  # Evidence tools reject junction/reparse components. The managed root is a
+  # junction to D: on this machine, so delete via the canonical spelling.
+  physical="$(canon_quiet "$d")" || die "refusing to delete $d: it cannot be canonicalized."
+  is_managed "$physical" || die "refusing to delete $physical: it is not a managed review snapshot."
   if [ "${AI_KEEP_SANDBOX:-0}" = 1 ]; then
-    warn "AI_KEEP_SANDBOX=1: retaining $d"
+    warn "AI_KEEP_SANDBOX=1: retaining $physical"
     return 0
   fi
   local python event_tool
   python="$(command -v python3 || command -v python)" || die 'sandbox evidence verification requires Python'
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
-  "$python" "$event_tool" verify-sandbox "$d" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
-  rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
-  warn "deleted review snapshot $d"
+  "$python" "$event_tool" verify-sandbox "$physical" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
+  rm -rf "$physical" 2>/dev/null || { sleep 1; rm -rf "$physical"; } || warn "could not fully remove $physical"
+  warn "deleted review snapshot $physical"
 }
 
 # Owner PID for the Phase 3 orphan rule. `with-copy` is its own owner for the
@@ -693,21 +697,32 @@ cmd_remove() {
 # Age thresholds (seconds), overridable for tests:
 #   AI_REVIEW_SWEEP_PID_DEAD_AGE  default 900   (15 min — dead-PID floor)
 #   AI_REVIEW_SWEEP_HARD_AGE      default 7200  (2h — no-PID / legacy floor)
+#   AI_REVIEW_SWEEP_MAX_ATTEMPTS  default 3    (delete attempts per parent start;
+#                                          the daily sweeper drains the backlog)
 cmd_sweep_orphans() {
-  local now hard_age pid_dead_age d age marker_epoch owner_pid owner_winpid
+  local now hard_age pid_dead_age max_attempts attempts root d age marker_epoch owner_pid owner_winpid
   hard_age="${AI_REVIEW_SWEEP_HARD_AGE:-7200}"
   pid_dead_age="${AI_REVIEW_SWEEP_PID_DEAD_AGE:-900}"
+  max_attempts="${AI_REVIEW_SWEEP_MAX_ATTEMPTS:-3}"
   case "$hard_age" in ''|*[!0-9]*) die "AI_REVIEW_SWEEP_HARD_AGE must be a non-negative integer" ;; esac
   case "$pid_dead_age" in ''|*[!0-9]*) die "AI_REVIEW_SWEEP_PID_DEAD_AGE must be a non-negative integer" ;; esac
+  case "$max_attempts" in ''|*[!0-9]*) die "AI_REVIEW_SWEEP_MAX_ATTEMPTS must be a non-negative integer" ;; esac
   [ -d "$SANDBOX_DIR" ] || return 0
+  # List the canonical root: the managed path is a junction on this machine, and
+  # evidence tools reject junction components in the delete path.
+  root="$(canon_quiet "$SANDBOX_DIR")" || return 0
   now="$(date +%s)"
-  for d in "$SANDBOX_DIR"/*; do
+  attempts=0
+  for d in "$root"/*; do
     [ -d "$d" ] || continue
     # Staging/lock names are not published snapshots.
     case "$d" in
       *.building.*|*.lock|*.lock.d|*.stale.*) continue ;;
     esac
     [ -f "$d/$MARKER" ] || continue
+    # Only the text review-snapshot marker is auto-deletable. JSON/code-only
+    # markers and legacy shapes are retained for reconcile or the daily task.
+    grep -q 'evidence_format=1' "$d/$MARKER" 2>/dev/null || continue
     marker_epoch="$(sandbox_marker_epoch "$d")" || continue
     age=$(( now - marker_epoch ))
     # Concurrent reviews and freshly published copies are never candidates.
@@ -724,12 +739,16 @@ EOF
     fi
     if [ -n "$owner_pid" ]; then
       # Recorded owner is gone: eligible as soon as the 15-minute floor passed.
+      [ "$attempts" -lt "$max_attempts" ] || break
+      attempts=$((attempts + 1))
       ( remove_sandbox "$d" ) || warn "retained unreconciled orphan $d"
       continue
     fi
     # No owner PID (legacy ensure-copy, or wrapper did not export one):
     # only the hard 2-hour rule may remove it.
     [ "$age" -ge "$hard_age" ] || continue
+    [ "$attempts" -lt "$max_attempts" ] || break
+    attempts=$((attempts + 1))
     ( remove_sandbox "$d" ) || warn "retained unreconciled orphan $d"
   done
   return 0
