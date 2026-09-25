@@ -395,6 +395,15 @@ else
   run_stage optional "Muse key store" muse_key_store
 fi
 
+# Reviewer provider CLIs (Grok Build, Kimi Code, Qwen Code). Per-user and
+# idempotent: current installs are skipped. Sign-in stays manual.
+if [ "$(id -u)" -eq 0 ]; then
+  stage_results+=("SKIP\toptional\tReviewer provider CLIs (root install)")
+else
+  install_provider_clis() { "$REPO_ROOT/bin/install-ai-provider-clis.sh" </dev/null; }
+  run_stage optional "Reviewer provider CLIs" install_provider_clis
+fi
+
 # --------------------------------------------------------------------------
 # 5. Doctor
 # --------------------------------------------------------------------------
