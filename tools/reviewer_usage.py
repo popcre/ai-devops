@@ -246,12 +246,17 @@ def muse_code(events, version, run, catalog_row=None, model=''):
     row names the requested model: a fallback or mixed-model run has no single
     catalog price, and attributing one model's price to another's tokens would
     be a false estimate."""
-    pin = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'muse-code' / 'version'
-    try:
-        pinned = pin.read_text(encoding='utf-8-sig').strip()
-    except OSError:
-        return muse_code_unavailable('unqualified-muse-code-version')
-    if not pinned or version != pinned:
+    # Windows pins config/muse-code/version; each Linux architecture pins
+    # config/muse-code/linux-<arch>/version. Any shipped pin qualifies.
+    base = pathlib.Path(__file__).resolve().parents[1] / 'config' / 'muse-code'
+    pinned = set()
+    for pin in [base / 'version'] + sorted(base.glob('linux-*/version')):
+        try:
+            pinned.add(pin.read_text(encoding='utf-8-sig').strip())
+        except OSError:
+            pass
+    pinned.discard('')
+    if version not in pinned:
         return muse_code_unavailable('unqualified-muse-code-version')
     if not run:
         return muse_code_unavailable('no-model-completed-for-run')

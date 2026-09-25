@@ -39,8 +39,15 @@ case "$ENGINE" in
     BIN="$PROFILE_HOME/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin/opencode.exe"
     MODEL="meta-model-api/muse-spark-1.3-contributor";;
   muse-code)
-    VERSION="$(tr -d ' \r\n' < "$ROOT/config/muse-code/version")"
-    BIN="$PROFILE_HOME/AppData/Local/Programs/muse/muse-bin-$VERSION.exe"
+    # Windows (USERPROFILE set): Meta's installer under AppData. Linux: Meta's
+    # launcher keeps versioned binaries beside itself in ~/.local/bin. Each
+    # platform has its own pin; the binaries differ.
+    if [ -n "${USERPROFILE:-}" ]; then MUSE_PIN="$ROOT/config/muse-code"; MUSE_EXE=.exe
+    else MUSE_PIN="$ROOT/config/muse-code/linux-$(uname -m)"; MUSE_EXE=""; fi
+    VERSION="$(tr -d ' \r\n' < "$MUSE_PIN/version" 2>/dev/null || true)"
+    [ -n "$VERSION" ] || { printf 'ai-muse: error: local_dependency_unavailable: no Muse Code pin for this platform (%s)\n' "$MUSE_PIN" >&2; exit 1; }
+    if [ -n "$MUSE_EXE" ]; then BIN="$PROFILE_HOME/AppData/Local/Programs/muse/muse-bin-$VERSION.exe"
+    else BIN="$PROFILE_HOME/.local/bin/muse-bin-$VERSION"; fi
     MODEL="muse-spark-1.3-contributor";;
   *) printf 'ai-muse: error: start_failed: unknown AI_MUSE_ENGINE: %s (use opencode or muse-code)\n' "$ENGINE" >&2; exit 1;;
 esac
@@ -218,7 +225,7 @@ muse_code_run(){ # every non-turn Muse Code call gets the same minimal environme
   fi
   "${e[@]}" "$BIN" "$@"
 }
-muse_code_sha256(){ local v=""; read -r v < "$ROOT/config/muse-code/sha256" || [ -n "$v" ]; v="${v%$'\r'}"; printf '%s' "${v// /}"; } # the exact pinned file, checked before it runs or sees a key; no override
+muse_code_sha256(){ local v=""; read -r v < "$MUSE_PIN/sha256" || [ -n "$v" ]; v="${v%$'\r'}"; printf '%s' "${v// /}"; } # the exact pinned file, checked before it runs or sees a key; no override
 # Identity cache (#773): hashing two 400 MB files, re-protecting the directory,
 # and asking the binary for its version cost 5-40s on a saturated Windows host,
 # where every process spawn takes about a second. After a full verification we
@@ -231,20 +238,20 @@ muse_code_stage(){ # run only a private copy verified after it was made, so swap
   [ ! -L "$BIN" ] || return 1
   dir="$PROFILE_HOME/.local/share/ai-devops/muse-code-bin"; cache="$dir/.verified-$want"
   ! linked_below_home "$dir" || return 1
-  if [ -d "$dir" ] && [ -f "$dir/muse-$want.exe" ] && [ ! -L "$dir/muse-$want.exe" ] && [ -f "$cache" ] && [ ! -L "$cache" ]; then
-    id="$(muse_code_identity "$BIN" "$dir/muse-$want.exe")"; read -r rec < "$cache" || true
+  if [ -d "$dir" ] && [ -f "$dir/muse-$want$MUSE_EXE" ] && [ ! -L "$dir/muse-$want$MUSE_EXE" ] && [ -f "$cache" ] && [ ! -L "$cache" ]; then
+    id="$(muse_code_identity "$BIN" "$dir/muse-$want$MUSE_EXE")"; read -r rec < "$cache" || true
     if [ -n "$id" ] && [ "$rec" = "$VERSION $id" ]; then
-      BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want"; MUSE_CODE_VERSION_OK="$BIN:$want"; return 0
+      BIN="$dir/muse-$want$MUSE_EXE"; MUSE_CODE_VERIFIED="$BIN:$want"; MUSE_CODE_VERSION_OK="$BIN:$want"; return 0
     fi
   fi
   [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] || return 1
   mkdir -p "$dir" && chmod 700 "$dir" && protect_windows_path "$dir" directory || return 1
-  if [ ! -f "$dir/muse-$want.exe" ] || [ -L "$dir/muse-$want.exe" ] || [ "$(sha256sum "$dir/muse-$want.exe" | cut -d' ' -f1)" != "$want" ]; then
-    rm -f -- "$dir/muse-$want.exe"; tmp="$(mktemp "$dir/copy.XXXXXXXX")" || return 1
-    cp -- "$BIN" "$tmp" && chmod 700 "$tmp" && protect_windows_path "$tmp" file && got="$(sha256sum "$tmp" | cut -d' ' -f1)" && [ "$got" = "$want" ] && mv -f -- "$tmp" "$dir/muse-$want.exe" || { rm -f -- "$tmp"; return 1; }
+  if [ ! -f "$dir/muse-$want$MUSE_EXE" ] || [ -L "$dir/muse-$want$MUSE_EXE" ] || [ "$(sha256sum "$dir/muse-$want$MUSE_EXE" | cut -d' ' -f1)" != "$want" ]; then
+    rm -f -- "$dir/muse-$want$MUSE_EXE"; tmp="$(mktemp "$dir/copy.XXXXXXXX")" || return 1
+    cp -- "$BIN" "$tmp" && chmod 700 "$tmp" && protect_windows_path "$tmp" file && got="$(sha256sum "$tmp" | cut -d' ' -f1)" && [ "$got" = "$want" ] && mv -f -- "$tmp" "$dir/muse-$want$MUSE_EXE" || { rm -f -- "$tmp"; return 1; }
   fi
-  rm -f -- "$cache"; MUSE_CODE_CACHE_FILE="$cache"; MUSE_CODE_CACHE_ID="$(muse_code_identity "$BIN" "$dir/muse-$want.exe")"
-  BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds
+  rm -f -- "$cache"; MUSE_CODE_CACHE_FILE="$cache"; MUSE_CODE_CACHE_ID="$(muse_code_identity "$BIN" "$dir/muse-$want$MUSE_EXE")"
+  BIN="$dir/muse-$want$MUSE_EXE"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds
 }
 muse_code_pinned(){
   local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] || return 1
