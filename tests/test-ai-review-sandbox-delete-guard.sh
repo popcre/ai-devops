@@ -114,5 +114,37 @@ rm -rf "$REAL" 2>/dev/null
 "$SCRIPT" remove-copy "$MAIN" guardlink >/dev/null 2>&1
 set -e
 
+# --- managed root reached through a link is still deletable ------------------
+# The managed sandbox root is a Windows junction to D: in production. Evidence
+# tools reject link components, so remove_sandbox must delete via the canonical
+# spelling or every real orphan is retained forever.
+LINK_ROOT="$TMP/linked-sandboxes"
+REAL_ROOT="$TMP/real-sandboxes"
+mkdir -p "$REAL_ROOT"
+linked=0
+if command -v cmd >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+  win_link="$(cygpath -w "$LINK_ROOT")"
+  win_real="$(cygpath -w "$REAL_ROOT")"
+  # Windows directory junction: the production sandbox root is one of these.
+  cmd //c "mklink /J $win_link $win_real" >/dev/null 2>&1 || true
+fi
+if [ -e "$LINK_ROOT" ] && [ "$(cd "$LINK_ROOT" 2>/dev/null && pwd -P)" = "$(cd "$REAL_ROOT" 2>/dev/null && pwd -P)" ]; then
+  # A real symlink or a Windows junction both expose the linked root.
+  linked=1
+fi
+if [ "$linked" = 1 ]; then
+  SNAP_LINK_DIR="$TMP/linked-sandboxes"
+  OLD_SANDBOX_DIR="$AI_REVIEW_SANDBOX_DIR"
+  export AI_REVIEW_SANDBOX_DIR="$SNAP_LINK_DIR"
+  LINKED_SNAP="$("$SCRIPT" ensure-copy "$MAIN" guardlinkroot)"
+  check "linked_root_snapshot_is_created"      "[ -d '$LINKED_SNAP' ] && [ -f '$LINKED_SNAP/.ai-review-sandbox' ]"
+  "$SCRIPT" remove-copy "$MAIN" guardlinkroot
+  check "linked_root_snapshot_is_removable"    "[ ! -e '$LINKED_SNAP' ]"
+  export AI_REVIEW_SANDBOX_DIR="$OLD_SANDBOX_DIR"
+else
+  skip "linked_root_snapshot_is_created (no usable symlink/junction)"
+  skip "linked_root_snapshot_is_removable (no usable symlink/junction)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
