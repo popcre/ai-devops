@@ -6,7 +6,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$REPO_ROOT/bin/ai-review-lifecycle"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 
 # The existing cases below are about lifecycle ownership, not task gates, so the
 # gate is switched off for them. The gate has its own cases at the end of this
@@ -15,12 +14,6 @@ export AI_DEVOPS_TEST_MODE=1
 export AI_TASK_GATES_MODE=none
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-# The front door classifies every source through `ai-task-gates explain`, which
-# CI runners cannot resolve (no installed engine on PATH). Answer explain from
-# each fixture's own declaration: undeclared fixtures stay public code, and the
-# private fixture below declares itself private-evidence. Gate decisions still
-# run the real engine through AI_TASK_GATES_BIN / the sourced gate library.
-ai_test_declared_sources "$TMP"
 R="$TMP/repo"; mkdir -p "$R"; git -C "$R" init -q
 git -C "$R" config user.name Test; git -C "$R" config user.email t@example.com
 printf 'base\n' > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm init
