@@ -213,7 +213,9 @@ shortly after a merged wrapper change may pause while requalification runs.
 ## Rollback
 
 - **Code:** `git -C /worksp/ai-devops checkout <previous-sha>` then
-  `./install.sh`.
+  `./install.sh`, then `ai-review-preflight requalify`. The rolled-back
+  wrapper hashes no longer match the live qualification records, and the
+  post-merge hook only requalifies `origin/main` results, so requalify by hand.
 - **Symlinks only:** `./uninstall.sh` removes the `/usr/local/bin/ai-*` symlinks.
 - Config in `/etc/ai-devops/` is preserved by both paths.
 

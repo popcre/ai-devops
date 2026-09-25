@@ -29,6 +29,11 @@ or ambiguous terminal evidence stays blocked. If the source moved, reconciliatio
 retains a clearly non-authorizing report and permits a fresh same-session `ask`.
 An unchanged existing report is reused; different bytes are never overwritten.
 
+If the source repository changes during a turn, the completed review is rejected as
+stale. The message names the paths that appeared or vanished (capped at 10) and
+points at `reconcile` as the recovery step — the paid review is kept. `delete`
+discards it and is not the default next action.
+
 The older `ai-muse review [repository] [request]` command remains available. It now
 creates a timestamped named conversation, so the result is not trapped in a one-off
 call.
@@ -46,6 +51,18 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
   `%LOCALAPPDATA%\Programs\muse\muse-bin-<version>.exe`. `doctor` refuses any other
   version; the auto-updating `muse` launcher is never used. The file must also match
   the SHA-256 in `config/muse-code/sha256` before it runs; update both together.
+- Linux: pinned per architecture in `config/muse-code/linux-<arch>/{version,sha256}`
+  (x86_64: `1.4.0-R4161.1`). `install.sh` runs Meta's official installer when the
+  pinned `~/.local/bin/muse-bin-<version>` is absent, then verifies version and
+  SHA-256; the wrapper runs only that hashed file, never the launcher. When Meta
+  ships a newer build, re-pin both files together. The model catalog appears
+  after the first live turn, so a fresh machine's plain `doctor` fails the catalog
+  checks until one `ai-muse new` turn has run.
+- Implementation: `ai-muse implement <name> [--base REF] --prompt ...` lets Muse
+  write files and run a sandboxed shell (no web, no approval prompts) in a
+  disposable worktree. Its work is committed on branch `muse/<name>`; the
+  caller's checkout is untouched. Repeating the name continues the same branch
+  and conversation. Reviews (`new`/`ask`/`review`) stay read-only.
 - Read-only launch: `exec --json --disable-write --disable-shell --disable-web-tools
   --no-foreign-personal-context --user-input-auto-resolve`. The shell stays disabled,
   so the Windows sandbox is not needed and the model cannot pretend to run commands.

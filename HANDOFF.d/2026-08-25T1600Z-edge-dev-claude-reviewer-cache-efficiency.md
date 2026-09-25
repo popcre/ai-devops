@@ -16,7 +16,7 @@ owner: claude/reviewer-setup-audit-23cef2 (edge-dev Claude session, 2026-08-25)
   branch `claude/reviewer-setup-audit-23cef2`)
 - **Base commit:** `722c2a4e577ccd9f0cfd99094f81c84f360b5744`
 - **The plan:** [`plan_reviewer-cache-efficiency.md`](../plan_reviewer-cache-efficiency.md)
-- **Spun off from this workstream:** [`2026-08-25T1700Z-edge-dev-claude-muse-wrapper-reject.md`](2026-08-25T1700Z-edge-dev-claude-muse-wrapper-reject.md)
+- **Spun off from this workstream:** `2026-08-25T1700Z-edge-dev-claude-muse-wrapper-reject.md` (retired 2026-09-25 after the stale-turn rejection messages landed)
   → [`fix_muse_wrapper_reject.md`](../fix_muse_wrapper_reject.md). `ai-muse`'s
   stale-turn rejection names neither the changed path nor the `reconcile`
   recovery command. Found when it rejected a completed Muse review during this

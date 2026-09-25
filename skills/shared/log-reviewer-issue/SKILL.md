@@ -12,6 +12,8 @@ diagnose the failure first.
 ## Procedure
 
 1. Infer from the current session:
+   - the computer that saw the problem (run `hostname`; when the failure was
+     relayed from another machine, use that machine's name instead);
    - reviewer/provider name;
    - short title;
    - exact reviewer command when known;
@@ -26,10 +28,13 @@ diagnose the failure first.
    exact values are known. Without them, the recorder deliberately captures no
    nearby provider evidence instead of guessing.
    Details must be comprehensive; `--summary` is only the short index title.
+   Begin `--details` with `Computer: <name>` and state that the failure is
+   observed only on that computer; do not assume other machines share it.
+   Put the computer name in `--summary` too, e.g. `[4837] grok timed out`.
 3. If the command is not on PATH, locate the installed launcher or the canonical
    ai-devops checkout and invoke its `bin/ai-reviewer-issue`. Do not claim the
    recorder is missing until both were checked.
-4. Report only the resulting issue ID and saved path to Albert.
+4. Report only the computer name, resulting issue ID, and saved path to Albert.
 
 ## Required behavior
 
@@ -40,6 +45,7 @@ diagnose the failure first.
   to another reviewer. It is an account balance problem, not a wrapper defect;
   do not retry that provider. See `docs/reviewer-rotation-rules.md` rule 10.
 - Do not make Albert type command options or repeat the error.
+- Never record a problem without naming the computer it happened on.
 - Do not reduce the details to one sentence.
 - Do not invent a log path, command, duration, or retry.
 - Do not include secrets. The recorder also redacts common credential forms.

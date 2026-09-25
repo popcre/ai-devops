@@ -144,6 +144,7 @@ check_provider_registry() {
         installed-healthy:true) c_ok "review provider $provider is usable: healthy and in the reviewer registry" ;;
         installed-healthy:false) c_warn "review provider $provider is installed and healthy but not in the reviewer registry, so it cannot be assigned a review" ;;
         quarantined:*) c_warn "review provider $provider registered but quarantined" ;;
+        unsupported-platform:*) c_ok "review provider $provider is not offered on this platform (Ubuntu/Linux only)" ;;
         unknown:*) c_warn "review provider $provider live doctor unsupported" ;;
         *) c_fail "review provider $provider status invalid"; FAILED=1 ;;
       esac
@@ -156,6 +157,7 @@ gemini
 qwen
 codex
 deepseek
+stepfun
 EOF
   else c_fail 'ai-review-preflight missing'; FAILED=1
   fi

@@ -21,7 +21,7 @@ Assert ($installerText -match 'https://code\.kimi\.com/kimi-code/install\.ps1') 
 Assert ($installerText -match 'https://qwen-code-assets\.oss-cn-hangzhou\.aliyuncs\.com/installation/install-qwen-standalone\.ps1') 'must use the official Qwen standalone installer'
 Assert ($installerText -match 'qwen-code\\bin\\qwen\.cmd') 'must verify the Qwen standalone shim'
 Assert ($installerText -match 'TestOnly') 'must support a non-installing verification path'
-Assert ($installerText -match "ValidateSet\('grok', 'kimi', 'qwen'\)") 'must support a provider-scoped installation'
+Assert ($installerText -match "ValidateSet\('grok', 'kimi', 'qwen', 'gemini'\)") 'must support a provider-scoped installation'
 Assert ($installerText -match 'QwenVersion') 'must support an explicit Qwen version'
 Assert ($installerText -match 'QWEN_INSTALL_VERSION') 'must pass the exact Qwen version through the official installer contract'
 Assert ($installerText -match 'Backup-QwenRuntime') 'must preserve an existing Qwen runtime before an upgrade'
@@ -118,6 +118,36 @@ foreach ($v in @("$($major + 1).0.0", '0.0.1', '', 'garbage')) {
   Assert (-not (Test-ProviderVersionSatisfied -Provider grok -Version $v)) "grok '$v' must not satisfy the floor"
 }
 Assert (Test-ProviderVersionSatisfied -Provider kimi -Version '') 'an unpinned provider is always satisfied'
+
+# --- grok model lock (owner ruling 2026-09-25: 4.6 only) --------------------
+foreach ($fn in @('Set-TomlKey', 'Set-GrokModelLock')) {
+  $fnAst = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $fn }, $true)
+  Assert ($null -ne $fnAst) "could not load $fn"
+  Invoke-Expression ($fnAst.Extent.Text.Replace('$PSScriptRoot', "'$($root.Replace("'", "''"))\bin'"))
+}
+$model = $policy.providers.grok.model_pin
+Assert ([bool]$model) 'the policy must name a grok model_pin'
+Assert ($installerText -notmatch [regex]::Escape("`"$model`"")) 'the installer must read the model pin from the policy, not hard-code it'
+$lockHome = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-grok-lock-{0}" -f [Guid]::NewGuid().ToString('N'))
+[void](New-Item -ItemType Directory -Path $lockHome)
+try {
+  [IO.File]::WriteAllText((Join-Path $lockHome 'config.toml'), "[ui]`nyolo = false`n`n[models]`ndefault = `"grok-4.7`"`nallowed_models = [`"grok-4.7`"]`n")
+  [IO.File]::WriteAllText((Join-Path $lockHome 'campaigns_state.json'), '{"dismissed_ids":["older"]}')
+  $payload = @{ settings = @{ campaigns = @(@{ id = 'grok-9-launch'; models = @{ default = 'grok-9' } }, @{ id = 'same-model'; models = @{ default = $model } }) } } | ConvertTo-Json -Compress -Depth 10
+  [IO.File]::WriteAllText((Join-Path $lockHome 'settings_cache.json'), (@{ payload = $payload } | ConvertTo-Json -Compress))
+  Assert ((Set-GrokModelLock -GrokHome $lockHome) -eq $model) 'the lock must report the pinned model'
+  $cfg = [IO.File]::ReadAllLines((Join-Path $lockHome 'config.toml'))
+  Assert ($cfg -contains "default = `"$model`"") 'config.toml must pin the default model'
+  Assert ($cfg -contains "allowed_models = [`"$model*`"]") 'config.toml must allow only the pinned model'
+  Assert ($cfg -contains 'yolo = false') 'the lock must keep unrelated settings'
+  Assert (@($cfg | Where-Object { $_ -match '^allowed_models' }).Count -eq 1) 'allowed_models must not be duplicated'
+  $dismissed = @((Get-Content -Raw (Join-Path $lockHome 'campaigns_state.json') | ConvertFrom-Json).dismissed_ids)
+  Assert (($dismissed -join ',') -eq 'grok-4.7-launch,grok-9-launch,older') "wrong dismissed campaigns: $($dismissed -join ',')"
+  $before = (Get-Content -Raw (Join-Path $lockHome 'config.toml')) + (Get-Content -Raw (Join-Path $lockHome 'campaigns_state.json'))
+  [void](Set-GrokModelLock -GrokHome $lockHome)
+  $after = (Get-Content -Raw (Join-Path $lockHome 'config.toml')) + (Get-Content -Raw (Join-Path $lockHome 'campaigns_state.json'))
+  Assert ($before -eq $after) 'the model lock must be idempotent'
+} finally { Remove-Item -Recurse -Force -LiteralPath $lockHome }
 
 Assert ($installerText -match 'Get-RequiredProviderVersion') 'installer must read the repository version policy'
 Assert ($installerText -match 'Update-ProviderToExactVersion') 'installer must have an exact-version upgrade path'

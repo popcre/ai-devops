@@ -643,7 +643,7 @@ def configuration(toolkit):
     events = physical(os.environ.get("AI_REVIEW_EVENT_DIR", str(base / "reviewer-events")))
     wrappers = {"claude": "ai-claude-review", "codex": "ai-codex-review", "deepseek": "ai-deepseek-agent",
                 "gemini": "ai-gemini", "glm": "ai-glm", "grok": "ai-grok-review", "kimi": "ai-kimi",
-                "muse": "ai-muse", "qwen": "ai-qwen"}
+                "muse": "ai-muse", "qwen": "ai-qwen", "stepfun": "ai-stepfun"}
     unsupported = []
     for provider in providers:
         path = physical(toolkit / "bin" / wrappers.get(provider, "unsupported-provider"))

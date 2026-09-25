@@ -935,7 +935,7 @@ def main():
         print(json.dumps({"references": verify_sandbox(location(), sys.argv[2])}))
         return
     operation, provider = sys.argv[1:3]
-    require(provider in {"claude", "codex", "deepseek", "gemini", "glm", "grok", "kimi", "muse", "qwen"},
+    require(provider in {"claude", "codex", "deepseek", "gemini", "glm", "grok", "kimi", "muse", "qwen", "stepfun"},
             "unknown reviewer provider")
     directory = location()
     if operation in {"archive-implementation-state", "verify-implementation-archive"}:

@@ -2,6 +2,7 @@
   "description": "Providers in config/reviewer-registry.json that review outside the shared-db allocator rotation, so bin/ai-reviewer-membership-drift does not compare them.",
   "outside_allocator": {
     "claude": "Approval-gate reviewer, not drawn by the allocator.",
-    "codex": "Overflow one-shot reviewer, not drawn by the allocator."
+    "codex": "Overflow one-shot reviewer, not drawn by the allocator.",
+    "stepfun": "Ubuntu/Linux-only reviewer (owner instruction 2026-09-25); the shared-db allocator has no platform awareness, so it is not drawn there and never assigned to a Windows session."
   }
 }

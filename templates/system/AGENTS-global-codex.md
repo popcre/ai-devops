@@ -127,6 +127,14 @@ the task needs the detail.
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
 
+### Model-tier delegation
+
+- When you hold an implementation plan that passes the standard and the remaining
+  steps are mechanical, dispatch them to your harness's lower tier per
+  `templates/system/model-tier-delegation.md`; the rule, do-not list, dispatch
+  commands, and verification duty all live there. You keep the verification duty;
+  plans never name their implementer.
+
 ## Safety rules that apply everywhere
 
 - **Declare the task class, then recheck before a stronger gate.** Start with
