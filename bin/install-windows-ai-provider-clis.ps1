@@ -128,6 +128,79 @@ function Get-ReportedProviderVersion {
   return $null
 }
 
+function Set-TomlKey {
+  # Mirrors set_toml_key in bin/install-ai-provider-clis.sh: replace KEY inside
+  # [SECTION], add it to that section, or append the section. $Value is raw TOML.
+  param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Section,
+        [Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][string]$Value)
+  [void](New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path))
+  $lines = if (Test-Path -LiteralPath $Path) { @([IO.File]::ReadAllLines($Path)) } else { @() }
+  $out = [Collections.Generic.List[string]]::new()
+  $header = "[$Section]"; $inSection = $false; $seen = $false; $done = $false
+  $keyPattern = '^\s*' + [regex]::Escape($Key) + '\s*='
+  foreach ($line in $lines) {
+    if ($line -match '^\s*\[') {
+      if ($inSection -and -not $done) { $out.Add("$Key = $Value"); $done = $true }
+      $inSection = (($line -replace '\s', '') -eq $header); if ($inSection) { $seen = $true }
+      $out.Add($line); continue
+    }
+    if ($inSection -and $line -match $keyPattern) {
+      if (-not $done) { $out.Add("$Key = $Value"); $done = $true }
+      continue
+    }
+    $out.Add($line)
+  }
+  if ($inSection -and -not $done) { $out.Add("$Key = $Value"); $done = $true }
+  if (-not $seen) { $out.Add(''); $out.Add($header); $out.Add("$Key = $Value") }
+  $temp = "$Path.ai-devops.$PID.tmp"
+  try {
+    [IO.File]::WriteAllText($temp, (($out -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+    Move-Item -Force -LiteralPath $temp -Destination $Path
+  } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -Force -LiteralPath $temp } }
+}
+
+function Set-GrokModelLock {
+  # Owner ruling 2026-09-25: Grok 4.6 only, never 4.7. Mirrors pin_grok_model in
+  # bin/install-ai-provider-clis.sh. xAI launch campaigns replace the default
+  # model and beat config.toml, so every known campaign naming another default
+  # is marked dismissed in campaigns_state.json, then models.default and
+  # allowed_models are set in config.toml. requirements.toml is unusable: Grok's
+  # deployment sync deletes it on start. allowed_models with an undismissed
+  # campaign refuses every session, even --model <pin>.
+  param([string]$GrokHome = $(if ($env:GROK_HOME) { $env:GROK_HOME } else { Join-Path $HOME '.grok' }))
+  $policyPath = if ($env:AI_PROVIDER_VERSIONS_FILE) { $env:AI_PROVIDER_VERSIONS_FILE }
+                else { Join-Path $PSScriptRoot '..\config\provider-cli-versions.json' }
+  $grokPolicy = (Get-Content -Raw -LiteralPath $policyPath | ConvertFrom-Json).providers.grok
+  $model = $grokPolicy.model_pin
+  if (-not $model) { return $null }
+  if ($model -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Malformed grok model_pin '$model' in $policyPath" }
+  $ids = [Collections.Generic.List[string]]::new()
+  foreach ($id in @($grokPolicy.dismiss_campaigns)) { if ($id) { $ids.Add([string]$id) } }
+  $cache = Join-Path $GrokHome 'settings_cache.json'
+  try {
+    $settings = ((Get-Content -Raw -LiteralPath $cache -ErrorAction Stop | ConvertFrom-Json).payload | ConvertFrom-Json).settings
+    foreach ($c in @($settings.campaigns)) {
+      if ($c -and $c.id -and $c.models.default -and $c.models.default -ne $model) { $ids.Add([string]$c.id) }
+    }
+  } catch { }  # no or unreadable cache: only the policy's campaigns apply
+  $statePath = Join-Path $GrokHome 'campaigns_state.json'
+  [void](New-Item -ItemType Directory -Force -Path $GrokHome)
+  $state = if (Test-Path -LiteralPath $statePath) { Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json } else { $null }
+  if ($null -eq $state) { $state = [pscustomobject]@{} }
+  foreach ($old in @($state.dismissed_ids)) { if ($old) { $ids.Add([string]$old) } }
+  $dismissed = @($ids | Where-Object { $_ -match '^[A-Za-z0-9][A-Za-z0-9._-]*$' } | Sort-Object -Unique -CaseSensitive)
+  $state | Add-Member -Force -NotePropertyName dismissed_ids -NotePropertyValue $dismissed
+  $temp = "$statePath.ai-devops.$PID.tmp"
+  try {
+    [IO.File]::WriteAllText($temp, ($state | ConvertTo-Json -Compress -Depth 10), [Text.UTF8Encoding]::new($false))
+    Move-Item -Force -LiteralPath $temp -Destination $statePath
+  } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -Force -LiteralPath $temp } }
+  $config = Join-Path $GrokHome 'config.toml'
+  Set-TomlKey -Path $config -Section models -Key default -Value "`"$model`""
+  Set-TomlKey -Path $config -Section models -Key allowed_models -Value "[`"$model*`"]"
+  return $model
+}
+
 function Update-ProviderToExactVersion {
   param([Parameter(Mandatory)]$Provider, [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Version)
@@ -370,6 +443,10 @@ foreach ($providerDefinition in $providerCatalog) {
         Write-Host "$($provider.Name) reports '$have'; this repository's policy requires $required."
         Update-ProviderToExactVersion -Provider $provider -Path $resolved -Version $required
       }
+    }
+    if ($provider.Command -eq 'grok') {
+      $lockedModel = Set-GrokModelLock
+      if ($lockedModel) { Write-Host "Grok locked to $lockedModel (config.toml default + allowed_models; other-model campaigns dismissed)." }
     }
     if ($provider.Command -eq 'qwen') {
       # Hardening patches the live bundle even when no install ran. Only when a

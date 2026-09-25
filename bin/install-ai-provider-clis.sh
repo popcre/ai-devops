@@ -40,7 +40,7 @@ Usage: install-ai-provider-clis.sh [options] [provider ...]
 Installs the third-party AI provider CLIs used by this repo's wrappers.
 With no provider named, installs all of them.
 
-Providers: grok kimi qwen
+Providers: grok kimi qwen stepfun (stepfun: Linux only)
 
 Options:
   --force        Reinstall even if the command already works.
@@ -53,6 +53,7 @@ deliberately does not automate:
   grok            # then follow the sign-in prompt
   kimi login
   qwen            # then configure Alibaba Coding Plan authentication
+  ai-stepfun store-key   # StepFun key from 1Password into the protected store
 USAGE
 }
 
@@ -62,6 +63,10 @@ PROVIDERS=(
   "kimi|kimi|https://code.kimi.com/kimi-code/install.sh|.kimi-code/bin/kimi"
   "qwen|qwen|https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh|.local/bin/qwen"
 )
+# StepCode (StepFun Step 5) ships no Windows build yet; offer it on Linux only.
+if [ "$(uname -s)" = Linux ]; then
+  PROVIDERS+=("stepfun|step|https://static-openapi.stepfun.com/stepcode/install.sh|.stepcode/bin/step")
+fi
 
 FORCE=0
 DRY_RUN=0
@@ -107,7 +112,15 @@ wants() {
 
 resolve() {
   # A provider counts as installed if it is on PATH or at its known home path.
-  local cmd="$1" home_rel="$2"
+  local cmd="$1" home_rel="$2" c
+  if [ "$cmd" = step ]; then
+    # `step` is a generic name (Smallstep's CLI uses it too). Only a binary that
+    # identifies as StepCode counts, and StepCode's own install path wins.
+    for c in "$HOME/$home_rel" "$(command -v step 2>/dev/null || true)"; do
+      [ -n "$c" ] && [ -x "$c" ] && "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' && { echo "$c"; return 0; }
+    done
+    return 1
+  fi
   if command -v "$cmd" >/dev/null 2>&1; then echo "$(command -v "$cmd")"; return 0; fi
   if [ -x "$HOME/$home_rel" ]; then echo "$HOME/$home_rel"; return 0; fi
   return 1
@@ -122,6 +135,9 @@ resolve() {
 LOCAL_BIN="$HOME/.local/bin"
 link_into_local_bin() {
   local cmd="$1" real="$2" dst="$LOCAL_BIN/$1"
+  # `step` is a generic name (Smallstep's CLI uses it too) and ai-stepfun finds
+  # StepCode at ~/.stepcode/bin/step itself, so never claim ~/.local/bin/step.
+  [ "$cmd" != step ] || return 0
   [ "$real" = "$dst" ] && return 0
   mkdir -p "$LOCAL_BIN"
   if [ -e "$dst" ] && [ ! -L "$dst" ]; then
@@ -232,6 +248,65 @@ upgrade_to_exact_version() { # upgrade_to_exact_version NAME BINARY WANT
   echo "OK   $name is now exactly $want (previous binary kept at $backup)"
 }
 
+# ---------------------------------------------------------------------------
+# Model lock (Grok). Owner ruling 2026-09-25: Grok 4.6 only, never 4.7. xAI
+# pushes new models through "launch campaigns" in its remote settings; an
+# undismissed campaign replaces the default model and beats config.toml and
+# GROK_DEFAULT_MODEL. So the lock (1) sets models.default and allowed_models in
+# config.toml and (2) marks every known campaign that names another default as
+# dismissed in campaigns_state.json, which is what Grok records when a user
+# dismisses one. ~/.grok/requirements.toml is NOT usable: Grok's deployment
+# sync deletes it on every start. allowed_models while a campaign is active
+# refuses every session, even `--model <pin>`, so dismissal is not optional.
+# ---------------------------------------------------------------------------
+set_toml_key() { # set_toml_key FILE SECTION KEY VALUE  (VALUE is raw TOML)
+  local file="$1" tmp
+  mkdir -p "$(dirname "$file")"
+  [ -e "$file" ] || : >"$file"
+  tmp="$(mktemp "$file.ai-devops.XXXXXX")" || return 1
+  if ! awk -v sec="[$2]" -v key="$3" -v val="$4" '
+    function emit() { print key " = " val; done = 1 }
+    /^[[:space:]]*\[/ { h = $0; gsub(/[[:space:]]/, "", h)
+      if (insec && !done) emit()
+      insec = (h == sec); seen = seen || insec; print; next }
+    insec && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" { if (!done) emit(); next }
+    { print }
+    END { if (insec && !done) emit(); if (!seen) { print ""; print sec; emit() } }
+  ' "$file" >"$tmp"; then rm -f "$tmp"; return 1; fi
+  chmod --reference="$file" "$tmp" 2>/dev/null || true
+  mv "$tmp" "$file"
+}
+
+dismiss_grok_campaigns() { # dismiss_grok_campaigns HOME MODEL
+  local home="$1" model="$2" state="$1/campaigns_state.json" policy cached ids tmp
+  policy="$(bash "$VERSION_TOOL" policy-file)" || return 1
+  # Campaigns Grok has already fetched, when it has run before; unreadable
+  # caches just contribute nothing.
+  cached="$(jq -r --arg m "$model" '.payload | fromjson | .settings.campaigns // [] | .[]
+    | select((.models.default // $m) != $m) | .id' "$home/settings_cache.json" 2>/dev/null || true)"
+  ids="$( { jq -r '.providers.grok.dismiss_campaigns // [] | .[]' "$policy"; printf '%s\n' "$cached"; } \
+    | grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*$' | sort -u | jq -R . | jq -s .)" || return 1
+  mkdir -p "$home"
+  tmp="$(mktemp "$state.ai-devops.XXXXXX")" || return 1
+  if ! { if [ -s "$state" ]; then cat "$state"; else echo '{}'; fi; } \
+      | jq -c --argjson add "$ids" '.dismissed_ids = (((.dismissed_ids // []) + $add) | unique)' >"$tmp"; then
+    rm -f "$tmp"; return 1
+  fi
+  mv "$tmp" "$state"
+}
+
+pin_grok_model() {
+  local model home="${GROK_HOME:-$HOME/.grok}"
+  model="$(bash "$VERSION_TOOL" model grok)" || return 1
+  [ -n "$model" ] || return 0
+  if ((DRY_RUN)); then echo "DRY-RUN would lock grok to $model"; return 0; fi
+  dismiss_grok_campaigns "$home" "$model" \
+    && set_toml_key "$home/config.toml" models default "\"$model\"" \
+    && set_toml_key "$home/config.toml" models allowed_models "[\"$model*\"]" \
+    || { echo "ERROR grok: could not write the $model model lock under $home" >&2; return 1; }
+  echo "OK   grok locked to $model (config.toml default + allowed_models; other-model campaigns dismissed)"
+}
+
 failed=0
 installed_any=0
 needs_path=()
@@ -261,6 +336,7 @@ for entry in "${PROVIDERS[@]}"; do
         echo "==> $name reports ${have:-unknown}; this repository qualifies exactly $want"
         if ! upgrade_to_exact_version "$name" "$existing" "$want"; then failed=1; continue; fi
         link_into_local_bin "$cmd" "$existing"
+        pin_grok_model || failed=1
         continue
       fi
       echo "SKIP $name already installed at supported version $have (policy: $want, $(bash "$VERSION_TOOL" match "$name")) ($existing)"
@@ -270,6 +346,7 @@ for entry in "${PROVIDERS[@]}"; do
     # Still repair reachability: "installed but not on PATH" is the exact state
     # that makes the doctor report the provider unavailable.
     ((DRY_RUN)) || link_into_local_bin "$cmd" "$existing"
+    if [ "$name" = grok ]; then pin_grok_model || failed=1; fi
     if [ "$name" = qwen ] && ((DRY_RUN == 0)); then harden_qwen_child_env || failed=1; fi
     continue
   fi
@@ -310,6 +387,7 @@ for entry in "${PROVIDERS[@]}"; do
     echo "OK   $name installed ($resolved)"
     installed_any=1
     link_into_local_bin "$cmd" "$resolved"
+    if [ "$name" = grok ]; then pin_grok_model || failed=1; fi
     if [ "$name" = qwen ]; then harden_qwen_child_env || failed=1; fi
     command -v "$cmd" >/dev/null 2>&1 || needs_path+=("$LOCAL_BIN")
   else
@@ -330,6 +408,7 @@ if ((installed_any)) && ((DRY_RUN == 0)); then
   echo "NEXT sign in once per provider (interactive, deliberately not automated):"
   echo "  grok            # follow the sign-in prompt"
   echo "  kimi login"
+  [ "$(uname -s)" != Linux ] || echo "  ai-stepfun store-key   # StepFun key from 1Password into the protected store"
   echo "  qwen            # configure Alibaba Coding Plan authentication"
   echo "Then prove the full path:  ai-qwen doctor --live"
 fi

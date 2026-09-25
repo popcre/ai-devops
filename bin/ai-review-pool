@@ -248,7 +248,8 @@ RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF")
 [ -z "$RUNNER_MAX_TURNS" ] || RUNNER_ARGS+=(--max-turns "$RUNNER_MAX_TURNS")
 [ -z "$OPT_BASE" ] || RUNNER_ARGS+=(--base "$OPT_BASE")
 [ -z "$OPT_ASSERT_HEAD" ] || RUNNER_ARGS+=(--assert-head "$OPT_ASSERT_HEAD")
-# The session runners emit the model's final answer on STDOUT and all
+# The session runners emit the model's final answer on STDOUT (ai-gemini only
+# under its pool contract AI_GEMINI_BODY_STDOUT=1, set below; issue #821) and all
 # progress/usage chrome on STDERR (ai-grok-review: note() writes >&2,
 # extract_answer writes the body). Capture is split so every verdict gate
 # below judges the model body alone and can never be satisfied by chrome.
@@ -258,7 +259,7 @@ RUNNER_ARGS=(new "$TAG" --prompt-file "$TMP_BRIEF")
 # MODEL's run can move it. The wait budget is raised because snapshot-bound
 # reviews read a full tree copy and can outgrow the runner's 900s default.
 SNAPSHOT_DIGEST_BEFORE="$("$SANDBOX" digest "$REVIEW_DIR" 2>/dev/null)" || { die 'could not digest the review snapshot.'; }
-set +e; ( cd "$REVIEW_DIR" && exec env AI_GROK_WAIT_TIMEOUT="$RUNNER_WAIT_BUDGET" "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
+set +e; ( cd "$REVIEW_DIR" && exec env AI_GROK_WAIT_TIMEOUT="$RUNNER_WAIT_BUDGET" AI_GEMINI_BODY_STDOUT=1 "$RUNNER" "${RUNNER_ARGS[@]}" ) > "$TMP_TEXT" 2> "$TMP_ERR"; PROVIDER_RC=$?; set -e
 ELAPSED="$(( $(date +%s)-STARTED ))"
 if [ "$PROVIDER_RC" -ne 0 ]; then
   # Provider diagnostics can quote credential-shaped errors (codex's wrapper

@@ -181,6 +181,7 @@ function Invoke-BashGate {
         $ErrorActionPreference = $priorPreference
     }
     if ($output) { $output | Write-Host }
+    $script:LastBashGateOutput = $output
     return $exitCode
 }
 
@@ -209,7 +210,9 @@ function Install-PostMergeHook {
     }
     $tool = (Join-Path $Root 'bin\ai-install-post-merge-hook') -replace '\\', '/'
     $exitCode = Invoke-BashGate -Bash $Bash -CommandText "'$tool'"
-    if ($exitCode -eq 0) {
+    if ($exitCode -eq 0 -and ($script:LastBashGateOutput -match 'leaving foreign post-merge hook untouched')) {
+        Write-Note "A foreign post-merge hook was preserved; reviewer auto-requalification hook NOT installed."
+    } elseif ($exitCode -eq 0) {
         Write-Note "Installed post-merge reviewer auto-requalification hook."
     } else {
         Write-Note "Installing the post-merge reviewer hook failed (exit $exitCode); see the output above."

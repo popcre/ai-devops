@@ -8,6 +8,9 @@
       "version_match": "minimum",
       "qualified_on": "2026-09-03",
       "exact_install_command": "grok update --version 1.0.13",
+      "model_pin": "grok-4.6",
+      "dismiss_campaigns": ["grok-4.7-launch"],
+      "model_pin_notes": "Owner ruling 2026-09-25: Grok 4.6 only, never 4.7. xAI remote launch campaigns replace the default model and beat config.toml, so the installers set models.default and allowed_models = [\"<pin>*\"] in ~/.grok/config.toml and add dismiss_campaigns (plus any cached campaign naming another default) to ~/.grok/campaigns_state.json. ~/.grok/requirements.toml cannot be used: Grok's deployment sync deletes it on start. allowed_models with an undismissed campaign refuses every session, even --model <pin>.",
       "notes": "Minimum supported version (floor). Grok auto-updates, so any build at or above the floor within the same major version is accepted (a new major release still needs qualification); owner ruling 2026-09-23 (issue #686) replaced the exact pin, which blocked every review whenever Grok updated itself. Qualified originally by issue #251; the wrappers still refuse a build below the floor or one that reports no version."
     },
     "kimi": {
@@ -23,6 +26,13 @@
       "qualified_on": null,
       "exact_install_command": null,
       "notes": "Not version-pinned. Presence is sufficient; do not force an upgrade from Grok work."
+    },
+    "stepfun": {
+      "command": "step",
+      "supported_version": null,
+      "qualified_on": null,
+      "exact_install_command": null,
+      "notes": "StepCode CLI for StepFun Step 5 reviews, Ubuntu/Linux only (not yet available on Windows). Not pinned here; bin/ai-stepfun enforces its own minimum version floor (0.1.1)."
     }
   }
 }

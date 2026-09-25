@@ -145,10 +145,10 @@ never overwrites them. See [`configuration.md`](configuration.md).
 
 ## Shared reviewer evidence contract
 
-Every known reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex, and
-DeepSeek—is known to preflight and the scoreboard so historical evidence stays
+Every known reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex,
+DeepSeek, and StepFun—is known to preflight and the scoreboard so historical evidence stays
 readable; only providers `registered` in `config/reviewer-registry.json` (today
-Muse, Grok, Qwen, Gemini, DeepSeek, plus the Claude and Codex approval-gate wrappers) receive reviews. Unsupported metadata
+Muse, Grok, Qwen, Gemini, DeepSeek, plus the Claude and Codex approval-gate wrappers, and StepFun on Ubuntu/Linux only, outside the allocator) receive reviews. Unsupported metadata
 is represented as missing, never invented. Scoreboard evidence is
 `current`, `stale`, or `unknown`; only a current verdict is usable. Packets seal
 each relative file name, byte length, and digest. `ai-review-sandbox` publishes

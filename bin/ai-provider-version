@@ -25,6 +25,9 @@
 #   ai-provider-version check <provider> <version-text>
 #       Exit 0 when the reported version satisfies policy (or the provider is
 #       unpinned), 1 when it does not. Prints the required version to stdout.
+#   ai-provider-version model <provider>
+#       Print the model family the provider CLI must be locked to (model_pin),
+#       or empty when the provider has no model lock.
 #   ai-provider-version policy-file
 #       Print the resolved policy path.
 #
@@ -111,7 +114,12 @@ case "${1:-}" in
 ' ;;
   satisfies) [ $# -eq 3 ] || die 'usage: ai-provider-version satisfies <provider> <x.y.z>'
             satisfies "$2" "$3" ;;
+  model)    [ $# -eq 2 ] || die 'usage: ai-provider-version model <provider>'
+            required_version "$2" >/dev/null
+            f="$(load_policy)"; m="$(jq -r --arg p "$2" '.providers[$p].model_pin // ""' "$f")"
+            [[ -z "$m" || "$m" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "malformed model_pin '$m' for $2"
+            printf '%s\n' "$m" ;;
   policy-file) load_policy >/dev/null; policy_file; printf '\n' ;;
-  -h|--help|'') sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|'') sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$1'" ;;
 esac
