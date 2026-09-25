@@ -15,7 +15,7 @@ session that wrote the plan is the one checking the result.
 
 | Harness | Frontier (plans, verifies) | Lower tier (implements) |
 |---|---|---|
-| Codex | GPT-Sol-6 (medium) | GPT-6 Luna |
+| Codex | GPT-5.6-Sol (medium) | GPT-5.6-Luna (`gpt-5.6-luna`) |
 | ZCode | GLM 5.3 MAX | GLM 5.3 Flash |
 | MiMo | Mimo v2.6 pro | Mimo v2.6 flash |
 
@@ -69,13 +69,14 @@ The frontier session verifies; the lower tier never grades its own work.
 
 ## Per-harness dispatch table
 
-Rows verified read-only 2026-09-25; evidence quoted in
+Rows verified 2026-09-25 (read-only review; Codex slug live-probed the same
+day); evidence quoted in
 [issue #782](https://github.com/popcre/ai-devops/issues/782#issuecomment-5827260474).
 Anything not proven stays marked unverified — never guess a command.
 
 | Harness | How to dispatch | Status |
 |---|---|---|
-| Codex → GPT-6 Luna | `codex exec -m <MODEL>` (also `-c model="…"`). `~/.codex/config.toml` pins `gpt-6-sol`, so pass `-m` explicitly | Supported selector (codex-cli 0.153.2 help, quoted on #782). **Unverified:** the exact Luna model slug and whether the ChatGPT plan exposes Luna headlessly — run one bounded live probe at first dispatch |
+| Codex → GPT-5.6-Luna | `codex exec -m gpt-5.6-luna` (also `-c model="…"`). `~/.codex/config.toml` pins a frontier default, so pass `-m` explicitly | Verified live 2026-09-25 (codex-cli 0.153.2, [probe quote](https://github.com/popcre/ai-devops/issues/782#issuecomment-5834620657)): slug `gpt-5.6-luna` accepted headlessly on the ChatGPT plan — probe returned `PONG`; reasoning levels up to `max`, no `ultra` |
 | ZCode → GLM 5.3 Flash | Manual: open the ZCode app, switch the model to GLM 5.3 Flash, hand it the plan file path | No headless model selector; gap tracked in [#828](https://github.com/popcre/ai-devops/issues/828) |
 | MiMo → Mimo v2.6 flash | Manual: open the Xiaomi MiMo AI app, select Mimo v2.6 flash, hand it the plan file path | No `mimo` CLI on PATH; gap tracked in [#829](https://github.com/popcre/ai-devops/issues/829) |
 
