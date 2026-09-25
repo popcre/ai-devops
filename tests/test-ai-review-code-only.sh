@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PY3="$(command -v python3 || command -v python)"
 SANDBOX="$ROOT/bin/ai-review-sandbox"
 PACKET="$ROOT/bin/ai-review-packet"
 TMP="$(mktemp -d)"
@@ -86,7 +87,7 @@ printf 'local provider receipt\n' > "$EXPORT/.ai/deepseek-sessions/receipt.json"
 # snapshot files. Its Git exclusion must keep generated metadata out.
 find "$PKT" -type f -print0 > "$TMP/attachments.z"
 git -C "$SNAP" ls-files --others --exclude-standard -z >> "$TMP/attachments.z"
-python3 - "$PKT" "$SNAP" "$TMP/attachments.z" "$R" "$EXPORT.source.json" <<'PY'
+"$PY3" - "$PKT" "$SNAP" "$TMP/attachments.z" "$R" "$EXPORT.source.json" <<'PY'
 import pathlib, sys
 packet, snap, manifest, source, binding = map(pathlib.Path, sys.argv[1:])
 import json

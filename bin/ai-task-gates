@@ -495,7 +495,7 @@ cmd_check(){
   if [ -z "$declared" ]; then
     if [ "$OBSERVED_CLASS" = none ]; then
       case "$action" in
-        deploy|database|infrastructure|production)
+        deploy|database|infrastructure|production|code-only-review)
           fail_closed "no changes and no task class were found; refusing to start '$action' without an explicit declaration." ;;
       esac
       # An action bound to per-action proofs can never take the empty-change-set
@@ -576,11 +576,13 @@ cmd_check(){
   # 3. Per-action proof binding. The sealed code-only review route is an
   # action a private class may start without an owner request, but only while
   # the repository's own declaration carries the fixtures boundary the route
-  # promises. Consult the observed and declared classes' merged proofs, the
-  # same set printed as the required gates.
-  local needs_gate
+  # promises. The binding is proven by the EFFECTIVE class's own merged
+  # proofs, never by a stronger declared class's: a private-tooling
+  # declaration must not open the route for a sticky private-evidence change.
+  local needs_gate effective_required
   needs_gate="$(jqr --arg a "$action" --arg c "$effective" '.action_gates[$a].require_gate[$c] // empty' "$POLICY_FILE")"
-  if [ -n "$needs_gate" ] && ! printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | grep -qx -- "$needs_gate"; then
+  effective_required="$(printf '%s\n' "$effective_gate" | sed -n 's/^required\t//p')"
+  if [ -n "$needs_gate" ] && ! printf '%s\n' "$effective_required" | grep -qx -- "$needs_gate"; then
     blocked "$(printf 'ai-task-gates: STOP. "%s" needs the "%s" gate for the class "%s" in %s.\nThis repository has not declared that gate in its own .ai-devops/task-gates.json for that class, so the sealed route is not opened here. Add the declaration through that repository\x27s own reviewed path.' \
       "$action" "$needs_gate" "$effective" "$IDENTITY")"
   fi
