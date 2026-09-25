@@ -78,8 +78,21 @@ export AI_REVIEW_OWNER_REQUEST="$owner_request"
 # A plan review runs before the work exists and is how a session decides what
 # the work is. Gating it on the class of a change set that has not been
 # written yet would refuse the very step that sets the class.
-if [ "$mode" = plan-review ]; then exec "$wrapper" "${wrapper_args[@]}"; fi
+sweep_orphans() {
+  # Parent orphan sweep (issue #711 Phase 3): a killed wrapper never runs its
+  # cleanup trap, so every supported dispatch sweeps managed review snapshots
+  # past the orphan age on its way in. Bounded, best-effort (it cannot refuse
+  # or delay the review), logged on stderr, and never run under
+  # AI_DEVOPS_TEST_MODE so offline suites keep the machine-global sandbox root
+  # untouched. Hard-pinned here, not env-substitutable: this is the
+  # approval-gate path, and a swapped sweep binary must not be reachable by an
+  # environment variable.
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && return 0
+  "$REAL_DIR/ai-review-sandbox" sweep-orphans || true
+}
+if [ "$mode" = plan-review ]; then sweep_orphans; exec "$wrapper" "${wrapper_args[@]}"; fi
 gate_args=()
 [ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
 tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }
+sweep_orphans
 exec "$wrapper" "${wrapper_args[@]}"
