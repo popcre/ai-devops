@@ -484,13 +484,25 @@ cmd_check(){
   # private-source front door classifies — so the proof binding is checked
   # against what the repository is, not against what nothing changed into.
   if [ "$OBSERVED_CLASS" = none ] && [ -n "$(jqr --arg a "$action" '.action_gates[$a] // empty' "$POLICY_FILE")" ]; then
-    # The inventory feeds a line-based classifier, so a name carrying a CR or LF
-    # byte (unrepresentable here) must refuse rather than silently mis-split.
-    if git -C "$TOPLEVEL" ls-files -co --exclude-standard -z | od -An -v -tx1 | grep -qE ' 0a| 0d'; then
+    # The inventory feeds a line-based classifier, and Git's display quoting
+    # rewrites non-ASCII and special-character names into spellings no path
+    # rule matches, which would drop them to the fallback class and silently
+    # skip the proof binding (exact-head review, 2026-09-25). Convert the NUL
+    # stream exactly as the sandbox does; a name carrying a CR or LF byte still
+    # refuses rather than mis-splitting.
+    local inv_python inv_names
+    inv_python="$(command -v python3 || command -v python)" \
+      || fail_closed "python is required to classify the repository inventory for '$action'."
+    if ! inv_names="$(git -C "$TOPLEVEL" ls-files -co --exclude-standard -z | "$inv_python" -c '
+import sys
+names=[n.decode("utf-8", "surrogateescape") for n in sys.stdin.buffer.read().split(b"\0") if n]
+if any("\n" in n or "\r" in n for n in names): sys.exit(2)
+sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateescape"))
+')"; then
       fail_closed "the repository inventory contains file names this gate cannot represent; refusing to start '$action'."
     fi
     printf 'ai-task-gates: note: no change set observed; classifying the complete inventory for the proof-bound action "%s".\n' "$action" >&2
-    classify_paths "$IDENTITY" "$(git -C "$TOPLEVEL" ls-files -co --exclude-standard | LC_ALL=C sort -u)"
+    classify_paths "$IDENTITY" "$(printf '%s\n' "$inv_names" | LC_ALL=C sort -u)"
   fi
   if [ -z "$declared" ]; then
     if [ "$OBSERVED_CLASS" = none ]; then

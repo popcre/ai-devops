@@ -11,7 +11,8 @@ trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
-pass() { printf 'PASS: %s\n' "$1"; }
+PASS=0
+pass() { printf 'PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
 # The sentinel scans below run inside `if rg ...; then fail; fi`, which a
 # missing rg would silently skip instead of failing.
 command -v rg >/dev/null 2>&1 || fail 'ripgrep (rg) is required for the export scans'
@@ -142,6 +143,8 @@ rm -rf "$TMP/linkcap"; if ln -s data "$TMP/linkcap" 2>/dev/null && [ -L "$TMP/li
   ln -s data "$R/src"
   printf '["src/tracked.txt"]\n' > "$TMP/rejected.json"
   must_fail "$SANDBOX" ensure-code-only "$R" rejected-linked-parent --paths-file "$TMP/rejected.json" --base "$BASE"
+  rm -f "$R/src"
+  mkdir "$R/src"
   pass 'a linked parent directory refuses before publication'
 else
   echo 'SKIP: linked parent refused (filesystem symlinks unsupported)'
@@ -166,4 +169,30 @@ EXPORT2="$("$SANDBOX" ensure-code-only "$R" cleanupcheck --paths-file "$TMP/appr
 [ ! -e "$EXPORT2.owners.json" ] || fail 'ordinary-clone remove left the owners sidecar'
 pass 'retained exports refuse CLI reviewers and clean up with their sidecars'
 
-printf '6 passed; 0 failed\n'
+# A hardlink shares its bytes with a denied location while the approved
+# spelling stays clean, and resolve() cannot see it; only the link count can
+# (exact-head review, 2026-09-25). os.link works on NTFS and the Linux
+# runners alike.
+if "$PY3" -c 'import os,sys; os.link(sys.argv[1], sys.argv[2])' "$R/data/tracked.txt" "$R/src/smuggled.py" 2>/dev/null; then
+  printf '["src/smuggled.py"]\n' > "$TMP/rejected.json"
+  must_fail "$SANDBOX" ensure-code-only "$R" rejected-hardlink --paths-file "$TMP/rejected.json" --base "$BASE"
+  rm -f "$R/src/smuggled.py"
+  pass 'a hardlinked approved path refuses before publication'
+else
+  echo 'SKIP: hardlink refused (filesystem hardlinks unsupported)'
+fi
+
+# Absolute GIT_DIR/GIT_WORK_TREE in the inherited environment override
+# `git -C`, which would aim the synthetic export's own git calls at the
+# private source instead of the stage; the exporter strips them, so the
+# export stays isolated and verifiable (exact-head review, 2026-09-25).
+if GIT_DIR="$R/.git" GIT_WORK_TREE="$R" "$SANDBOX" ensure-code-only "$R" envdir --paths-file "$TMP/approved.json" --base "$BASE" > "$TMP/envdir.out" 2>&1 \
+   && "$SANDBOX" verify-code-only "$(cat "$TMP/envdir.out")" >/dev/null 2>&1 \
+   && [ "$(git -C "$(cat "$TMP/envdir.out")" log --all --format=%s | wc -l)" -eq 2 ] \
+   && ! git -C "$(cat "$TMP/envdir.out")" log --all --format=%s | grep -Fqx feature; then
+  pass 'inherited GIT_DIR cannot redirect the synthetic export'
+else
+  fail 'inherited GIT_DIR redirected or broke the synthetic export'
+fi
+
+printf '%d passed; 0 failed\n' "$PASS"
