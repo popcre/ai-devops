@@ -25,9 +25,10 @@
 #   5. Installs two MCP launchers (~/.config/ai-devops/mcp-launch.sh and
 #      mcp-remote-launch.sh) so each MCP server resolves its own secrets at
 #      launch, independent of whether the session sourced .bashrc.
-#   6. Merges the FULL MCP server set into ~/.claude.json — the same set
-#      bin/setup-machine.ps1 installs on Windows, so every machine and both
-#      surfaces agree. Only our own mcpServers keys are touched; every other
+#   6. Writes the user-scope MCP set ($ClaudeCodeMcpNames in
+#      bin/setup-machine.ps1, i.e. 1password) into ~/.claude.json, removes
+#      every other managed server, and delivers project-scoped servers to their
+#      owning repositories. Only our own mcpServers keys are touched; every other
 #      key in that file is preserved untouched. It also strips any stale copy
 #      of those same keys out of ~/.claude/settings.json (see step 4c).
 #   7. Comments out any legacy RAW `export OP_SERVICE_ACCOUNT_TOKEN=ops_...`
@@ -286,7 +287,6 @@ URL="\$1"; REF="\$2"; shift 2
 case "\$REF" in
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token) TOK="\${DEVOPS_MCP_TOKEN:-}" ;;
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
-  "op://vibe_coding/recall-ai MCP/password") TOK="\${RECALL_AI_MCP_TOKEN:-}" ;;
   *) TOK= ;;
 esac
 [ -n "\$TOK" ] || TOK="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
@@ -335,7 +335,7 @@ elif [ "$DRY_RUN" -eq 1 ]; then
 else
   mkdir -p "$(dirname "$CLAUDE_MCP_CONFIG")"
   [ -f "$CLAUDE_MCP_CONFIG" ] && cp "$CLAUDE_MCP_CONFIG" "$CLAUDE_MCP_CONFIG.aidevops.bak"
-  AI_DEVOPS_OWNED_OUT="$OWNED_FILE" python3 - "$CLAUDE_MCP_CONFIG" "$LAUNCH_SH" "$REMOTE_SH" "$SUPABASE_PROJECT_REF" "$CODEX_BIN" <<'PY'
+  AI_DEVOPS_OWNED_OUT="$OWNED_FILE" AI_DEVOPS_CATALOG_OUT="$CFG_DIR/state/mcp-catalog.json" AI_DEVOPS_BIN="$REPO_ROOT/bin" python3 - "$CLAUDE_MCP_CONFIG" "$LAUNCH_SH" "$REMOTE_SH" "$SUPABASE_PROJECT_REF" "$CODEX_BIN" <<'PY'
 import json, os, sys
 
 path, launch, remote, supa_ref, codex = sys.argv[1:6]
@@ -372,10 +372,6 @@ servers = {
     "synology-monitor": {"command": remote, "args": [
         "https://nas-mcp.designflow.app/mcp",
         "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token"]},
-    "recall-ai": {"command": remote, "args": [
-        "https://us-east-1.recall.ai/mcp",
-        "op://vibe_coding/recall-ai MCP/password",
-        "--transport", "http-first"]},
 
     # no secret at all. railway authenticates via mcp-remote's browser OAuth
     # flow, so it must NOT go through the remote launcher (that would force a
@@ -396,16 +392,34 @@ if codex:
         "env": {"MCP_TOOL_TIMEOUT": "3600000"},
     }
 
-cfg.setdefault("mcpServers", {}).update(servers)
-# Retired from the global set (Oracle-only since 2026-09-24): remove the old
-# mcp-remote vercel entry this script used to write.
-cfg["mcpServers"].pop("vercel", None)
+# bin/setup-desktop-apps.sh reads this catalog, so the desktop apps get the same
+# pinned definitions without a second copy of the pins.
+catalog = os.environ.get("AI_DEVOPS_CATALOG_OUT")
+if catalog:
+    os.makedirs(os.path.dirname(catalog), exist_ok=True)
+    with open(catalog + ".tmp", "w") as fh:
+        json.dump(servers, fh, indent=2)
+        fh.write("\n")
+    os.replace(catalog + ".tmp", catalog)
+
+# Membership lives in bin/setup-machine.ps1: single-project servers are never
+# global (delivered per repository by mcp_policy.py deliver) and retired ones
+# are deleted.
+sys.path.insert(0, os.environ["AI_DEVOPS_BIN"])
+import mcp_policy
+pol = mcp_policy.policy()
+drop = set(pol["scoped"]) | set(pol["retired"]) | {"vercel"}
+# User scope carries only $ClaudeCodeMcpNames (1password), matching Windows.
+glob_servers = {n: servers[n] for n in pol["code"] if n in servers and n not in drop}
+cfg.setdefault("mcpServers", {}).update(glob_servers)
+for n in (set(servers) | drop) - set(glob_servers):
+    cfg["mcpServers"].pop(n, None)
 with open(path, "w") as fh:
     json.dump(cfg, fh, indent=2)
     fh.write("\n")
 with open(os.environ["AI_DEVOPS_OWNED_OUT"], "w") as fh:
-    fh.write(",".join(sorted(servers)))
-print("  ok wired: " + ", ".join(servers))
+    fh.write(",".join(sorted(set(servers) | drop)))
+print("  ok wired: " + ", ".join(glob_servers))
 PY
   rc=$?
   if [ "$rc" -eq 0 ]; then
@@ -415,6 +429,9 @@ PY
   else
     warn "Did NOT wire MCP servers (see the error above). Nothing was changed."
   fi
+  info "Project-scoped MCP servers (owning repositories only)"
+  python3 "$REPO_ROOT/bin/mcp_policy.py" deliver --catalog "$CFG_DIR/state/mcp-catalog.json" \
+    --claude-json "$CLAUDE_MCP_CONFIG" || warn "Project-scoped MCP delivery failed; see above."
 fi
 
 # --------------------------------------------------------------------------

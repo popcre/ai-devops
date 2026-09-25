@@ -6,8 +6,8 @@
   Declared membership is read from the literal lists in setup-machine.ps1
   ($ClaudeDesktopMcpNames, $ClaudeCodeMcpNames), so there is no second copy.
   Project-scoped servers (#705, $McpProjectScope in the same file) are
-  subtracted from those lists when their owning repository is cloned on this
-  machine, and each clone/worktree root is then checked for delivery: an
+  always subtracted from those lists, and each clone/worktree root of an
+  owning repository is then checked for delivery: an
   untracked .mcp.json must carry exactly the scoped catalog names (foreign
   entries are not ours and are ignored), and a repository that tracks its own
   .mcp.json must cover the scoped names through that file plus its Claude Code
@@ -85,7 +85,6 @@ $codeDeclared = Get-DeclaredNames "ClaudeCodeMcpNames"
 $scope = Get-ProjectScope "McpProjectScope"
 
 # --- resolve which scoped projects are cloned here (same rule as setup) ------
-$scopedHere = @()
 $projectRoots = @{}
 if (-not $SkipProjectScope -and $scope.Count -gt 0) {
   . (Join-Path $PSScriptRoot "repo-identity.ps1")
@@ -93,18 +92,18 @@ if (-not $SkipProjectScope -and $scope.Count -gt 0) {
     $roots = @(Get-AiDevOpsCloneRoots -Key $key)
     if ($roots.Count -gt 0) {
       $projectRoots[$key] = $roots
-      $scopedHere += $scope[$key]
     } else {
-      Write-Host "skip  project '$key' not cloned here; its servers stay global: $($scope[$key] -join ', ')"
+      Write-Host "skip  project '$key' not cloned here; its servers load nowhere: $($scope[$key] -join ', ')"
     }
   }
-  $scopedHere = @($scopedHere | Sort-Object -Unique)
-  if ($scopedHere.Count -gt 0) {
-    Write-Host "info  project-scoped on this machine (subtracted from globals): $($scopedHere -join ', ')"
-  }
 }
-$desktopDeclared = @($desktopDeclared | Where-Object { $scopedHere -notcontains $_ })
-$codeDeclared = @($codeDeclared | Where-Object { $scopedHere -notcontains $_ })
+# Scoped servers are never global, cloned here or not (same rule as setup).
+$scopedAll = @($scope.Values | ForEach-Object { $_ } | Sort-Object -Unique)
+if ($scopedAll.Count -gt 0) {
+  Write-Host "info  project-scoped (subtracted from globals): $($scopedAll -join ', ')"
+}
+$desktopDeclared = @($desktopDeclared | Where-Object { $scopedAll -notcontains $_ })
+$codeDeclared = @($codeDeclared | Where-Object { $scopedAll -notcontains $_ })
 
 $seen = 0
 foreach ($path in $DesktopConfigPaths) {
