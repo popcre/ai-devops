@@ -47,13 +47,17 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
   version; the auto-updating `muse` launcher is never used. The file must also match
   the SHA-256 in `config/muse-code/sha256` before it runs; update both together.
 - Linux: pinned per architecture in `config/muse-code/linux-<arch>/{version,sha256}`
-  (x86_64: `1.4.0-R4161.1`). Install once with Meta's installer,
-  `curl -fsSL https://dev.meta.ai/install.sh | bash`, which leaves
-  `~/.local/bin/muse-bin-<version>`; the wrapper runs only that hashed file, never
-  the launcher. When Meta ships a newer build, re-pin both files together.
-  `install.sh` verifies the pin but does not download. The model catalog appears
+  (x86_64: `1.4.0-R4161.1`). `install.sh` runs Meta's official installer when the
+  pinned `~/.local/bin/muse-bin-<version>` is absent, then verifies version and
+  SHA-256; the wrapper runs only that hashed file, never the launcher. When Meta
+  ships a newer build, re-pin both files together. The model catalog appears
   after the first live turn, so a fresh machine's plain `doctor` fails the catalog
   checks until one `ai-muse new` turn has run.
+- Implementation: `ai-muse implement <name> [--base REF] --prompt ...` lets Muse
+  write files and run a sandboxed shell (no web, no approval prompts) in a
+  disposable worktree. Its work is committed on branch `muse/<name>`; the
+  caller's checkout is untouched. Repeating the name continues the same branch
+  and conversation. Reviews (`new`/`ask`/`review`) stay read-only.
 - Read-only launch: `exec --json --disable-write --disable-shell --disable-web-tools
   --no-foreign-personal-context --user-input-auto-resolve`. The shell stays disabled,
   so the Windows sandbox is not needed and the model cannot pretend to run commands.

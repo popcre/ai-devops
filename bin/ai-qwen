@@ -67,27 +67,12 @@ QWEN_MODEL="${AI_QWEN_MODEL:-qwen3.8-max}"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="${AI_QWEN_OP_ENV_FILE:-$CFG_DIR/mcp.env}"
-QWEN_CODING_PLAN_ENDPOINT='https://coding-intl.dashscope.aliyuncs.com/v1'
-QWEN_MODELSTUDIO_ENDPOINT='https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
-# Which international Alibaba endpoint the managed credential belongs to. The
-# subscription Coding Plan and the pay-per-token Model Studio plan use the same
-# governed 1Password reference and the same hardened environment variable; only
-# the endpoint differs, so the credential pipeline is never duplicated.
-QWEN_ENDPOINT_FILE="$CFG_DIR/qwen-endpoint"
-if [ -n "${AI_QWEN_CODING_PLAN_BASE_URL:-}" ]; then
-  QWEN_CODING_PLAN_BASE_URL="$AI_QWEN_CODING_PLAN_BASE_URL"
-elif [ -s "$QWEN_ENDPOINT_FILE" ]; then
-  QWEN_CODING_PLAN_BASE_URL="$(tr -d " 	
-" < "$QWEN_ENDPOINT_FILE")"
-else
-  QWEN_CODING_PLAN_BASE_URL="$QWEN_CODING_PLAN_ENDPOINT"
-fi
-case "$QWEN_CODING_PLAN_BASE_URL" in
-  "$QWEN_CODING_PLAN_ENDPOINT") QWEN_PLAN_LABEL='Coding Plan (subscription)' ;;
-  "$QWEN_MODELSTUDIO_ENDPOINT") QWEN_PLAN_LABEL='Model Studio (pay per token)' ;;
-  *) printf 'ai-qwen: error: the Qwen endpoint must be one of the two pinned international Alibaba endpoints.
-' >&2; exit 1 ;;
-esac
+# Alibaba Model Studio Token Plan (subscription, sk-sp- key). Owner ruling
+# 2026-09-25: it replaces both the dead Coding Plan and pay-per-token Model
+# Studio. A legacy ~/.config/ai-devops/qwen-endpoint file is ignored.
+QWEN_TOKEN_PLAN_ENDPOINT='https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1'
+QWEN_CODING_PLAN_BASE_URL="$QWEN_TOKEN_PLAN_ENDPOINT"
+QWEN_PLAN_LABEL='Token Plan (subscription)'
 QWEN_HOME_DIR="${AI_QWEN_HOME:-${QWEN_HOME:-$HOME/.qwen}}"
 if [ -n "${AI_QWEN_TEST_DIR:-}" ]; then
   QWEN_BASH_BIN="${AI_QWEN_BASH_BIN:-/usr/bin/bash}"; QWEN_ENV_BIN="${AI_QWEN_ENV_BIN:-/usr/bin/env}"
@@ -837,10 +822,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   case "$QWEN_BASH_BIN:$QWEN_ENV_BIN" in /*:/*) ;; *) die 'trusted Bash/env executable paths must be absolute.' ;; esac
   secure_qwen_home || die 'could not enforce private permissions on the dedicated Qwen home before credential resolution.'
   : > "$out"
-  case "$QWEN_CODING_PLAN_BASE_URL" in
-    "$QWEN_CODING_PLAN_ENDPOINT"|"$QWEN_MODELSTUDIO_ENDPOINT") ;;
-    *) die 'Qwen endpoint must be one of the two pinned international Alibaba endpoints.' ;;
-  esac
+  [ "$QWEN_CODING_PLAN_BASE_URL" = "$QWEN_TOKEN_PLAN_ENDPOINT" ] || die 'Qwen endpoint must be the pinned Token Plan endpoint.'
   ensure_qwen_auth_settings || die 'could not install the governed Qwen auth selection in the private Qwen home; no provider call was made.'
   preload="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools" 2>/dev/null && pwd)/qwen-provider-env-preload.cjs"
   [ -f "$preload" ] || die 'repository-owned Qwen secret-environment preloader is missing.'

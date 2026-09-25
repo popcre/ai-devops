@@ -412,17 +412,23 @@ else
   run_stage optional "StepFun key store" stepfun_key_store
 fi
 
-# Muse Code on Linux: Meta's installer (run once by hand: see docs/muse-opencode.md)
-# puts versioned binaries in ~/.local/bin. This stage only verifies the pin.
+# Muse Code on Linux: when the pinned binary is absent, run Meta's official
+# installer (Albert approved automatic install, 2026-09-25), then verify the
+# pinned version and SHA-256. ai-muse runs only that hashed file.
 if [ "$(uname -s)" = Linux ] && [ "$(id -u)" -ne 0 ]; then
-  check_muse_code_linux() {
+  install_muse_code_linux() {
     local pin="$REPO_ROOT/config/muse-code/linux-$(uname -m)" ver want bin
     [ -f "$pin/version" ] || { echo "no Muse Code pin for $(uname -m)"; return 1; }
     ver="$(tr -d ' \r\n' < "$pin/version")"; want="$(tr -d ' \r\n' < "$pin/sha256")"; bin="$HOME/.local/bin/muse-bin-$ver"
-    [ -f "$bin" ] || { echo "Muse Code $ver is not installed; see docs/muse-opencode.md (Linux)"; return 1; }
+    if [ ! -f "$bin" ]; then
+      local script; script="$(mktemp)" || return 1
+      curl -fsSL https://dev.meta.ai/install.sh -o "$script" </dev/null && bash "$script" </dev/null >/dev/null
+      local rc=$?; rm -f -- "$script"; [ "$rc" -eq 0 ] || { echo "Meta's Muse Code installer failed"; return 1; }
+    fi
+    [ -f "$bin" ] || { echo "Meta installed a different Muse Code than the pinned $ver; re-pin $pin"; return 1; }
     [ "$(sha256sum "$bin" | cut -d' ' -f1)" = "$want" ] || { echo "Muse Code $ver does not match the pinned SHA-256"; return 1; }
   }
-  run_stage optional "Muse Code (Linux)" check_muse_code_linux
+  run_stage optional "Muse Code (Linux)" install_muse_code_linux
 fi
 
 # Reviewer provider CLIs (Grok Build, Kimi Code, Qwen Code, and StepCode on Linux). Per-user and
