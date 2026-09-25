@@ -616,4 +616,20 @@ BW tick >/dev/null 2>&1 || true
 check 'digest_lookup_uses_snapshot_not_search' "! grep -q 'search issues' '$FAKE/calls' && grep -q 'issue edit 31' '$FAKE/edited'"
 check 'link_id_comes_from_snapshot' "grep -q 'issue_id=207' '$FAKE/calls' && ! grep -q 'repos/o/r/issues/7' '$FAKE/calls'"
 
+# An edge already in the snapshot skips both the GET and the POST.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap6"
+mkdir -p "$TMP/home-snap6"
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:20,databaseId:220,title:"work",assignees:{totalCount:0},body:"",blockedBy:{nodes:[{number:7,state:"OPEN",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}},
+  {number:7,databaseId:207,title:"gate bug",assignees:{totalCount:0},body:"",blockedBy:{nodes:[]}}
+]}}}}' > "$FAKE/gql_links.json"
+rm -f "$FAKE/gql_parents.json"
+: > "$FAKE/calls"; rm -f "$FAKE/links"
+date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap6/last-links"
+date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap6/last-alarm"
+# Force the links scan only (alarm not due) via standalone command.
+AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" BW links >/dev/null 2>&1 || true
+check 'an edge already in the snapshot is not re-fetched or re-posted' \
+  "[ ! -f '$FAKE/links' ] && ! grep -q 'dependencies/blocked_by' '$FAKE/calls' && ! grep -q 'issue_id=' '$FAKE/calls'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

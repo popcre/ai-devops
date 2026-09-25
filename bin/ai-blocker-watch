@@ -153,8 +153,9 @@ link(){ # link <blocked> <blocker> [blocker id, when already read]
   fi
   [ -n "$id" ] || id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
   note "linking $1 as blocked by $2 on GitHub"
+  # SNAPDEP is keyed by blocker: SNAPDEP[blocker] lists the issues it blocks.
   if [ -n "${SNAPREPO[$br]+set}" ]; then
-    case "${SNAPDEP[$br#$bn]:- }" in *" $kr#$kn "*)
+    case "${SNAPDEP[$kr#$kn]:- }" in *" $br#$bn "*)
       note "$1 is already blocked by $2"; return 0 ;;
     esac
   fi
@@ -824,14 +825,16 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
       # read (#658 P5) — look there before spending a search request.
       dnum=""
       if [ -n "${SNAPREPO[$drepo]+set}" ]; then
-        local k t
+        local k t best=""
         for k in "${!SNAPIDX[@]}"; do
           case "$k" in "$drepo#"*) ;; *) continue ;; esac
           t="${SNAPIDX[$k]#*$'\t'}"
           [ "$t" = "$title" ] || continue
-          dnum="${k##*#}"
-          break
+          # Lowest number wins if a raced duplicate digest exists.
+          [ -z "$best" ] || [ "${k##*#}" -ge "${best##*#}" ] || continue
+          best="$k"
         done
+        [ -z "$best" ] || dnum="${best##*#}"
       fi
       if [ -n "$dnum" ]; then
         :
