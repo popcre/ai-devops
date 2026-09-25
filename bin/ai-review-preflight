@@ -593,8 +593,10 @@ case "$cmd" in
     provider="${1:-}"; repo="${2:-}"; shift 2 || true; live=0; base=""
     while [ "$#" -gt 0 ]; do case "$1" in --live) live=1; shift ;; --base) base="${2:-}"; shift 2 ;; *) die "unknown option '$1'." ;; esac; done
     # Phase 3 orphan sweep (issue #711): parents drop abandoned snapshots
-    # before building a new sandbox. Bounded and best-effort.
-    "${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}" sweep-orphans || true
+    # before building a new sandbox. Housekeeping only — never the evidence
+    # path, so it must not go through AI_REVIEW_SANDBOX_BIN (tests observe
+    # that hook to prove unhealthy providers never prepare review evidence).
+    "$SCRIPT_DIR/ai-review-sandbox" sweep-orphans || true
     check_provider "$provider" "$repo" "$live" "$base" ;;
   quarantine)
     provider="${1:-}"; class="${2:-}"; shift 2 || true; seconds="$COOLDOWN"
