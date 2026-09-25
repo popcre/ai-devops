@@ -89,8 +89,12 @@ command -v cygpath >/dev/null 2>&1 && oracle_key="$(cygpath -m "$oracle_key")"
 echo '{"mcpServers":{},"projects":{"'"$oracle_key"'":{"mcpServers":{"recall-ai":{"command":"x"},"mine":{"command":"y"}}}}}' > "$T/claude.json"
 AI_REPO_CLONE_ROOTS="$clones" "$PY3" "$ROOT/bin/mcp_policy.py" deliver --catalog "$T/cfg/state/mcp-catalog.json" --claude-json "$T/claude.json" >/dev/null
 "$PY3" - "$T/claude.json" "$oracle_key" <<'PY' && ok "oracle clone gets trigger; retired pruned; foreign kept" || bad "project delivery wrong"
-import json, sys, tomllib
-e = json.load(open(sys.argv[1]))["projects"][sys.argv[2]]["mcpServers"]
+import json, os, sys, tomllib
+# Temp paths on the Windows runners can appear long, short, slashed or
+# backslashed depending on who produced them; normalize both sides.
+want = os.path.normcase(os.path.normpath(sys.argv[2]))
+e = next(v["mcpServers"] for k, v in json.load(open(sys.argv[1]))["projects"].items()
+         if os.path.normcase(os.path.normpath(k)) == want)
 assert sorted(e) == ["mine", "trigger"], e
 t = tomllib.load(open(sys.argv[2] + "/.codex/config.toml", "rb"))
 assert list(t["mcp_servers"]) == ["trigger"], t
