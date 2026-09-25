@@ -685,7 +685,10 @@ cmd_sweep_orphans() { # sweep-orphans [--max-age-seconds N] [--max-removals N]
     # Subshell: remove_sandbox dies on unreconciled evidence by design, and
     # that one refusal must not end the sweep of the remaining orphans.
     if ( remove_sandbox "$entry" ); then removed=$(( removed + 1 )); fi
-  done < <(find "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+  # find -L follows the managed root when it is a junction/symlink (production
+  # root is a Windows junction to D:). Without -L, find sees no children and
+  # the sweep is a no-op on this machine.
+  done < <(find -L "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
   return 0
 }
 
