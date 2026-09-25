@@ -215,7 +215,10 @@ source_is_private() { # source_is_private ROOT; 0 private, 1 public, 2 unknown
 import sys
 names=[n.decode("utf-8", "surrogateescape") for n in sys.stdin.buffer.read().split(b"\0") if n]
 if any("\n" in n or "\r" in n for n in names): sys.exit(2)
-sys.stdout.write("\n".join(names+["bin/ai-review-sandbox"]) + "\n")
+# Write bytes: a name outside the console code page (observed as U+F00A from
+# MSYS filename mangling on Windows) must not crash classification, whose only
+# two answers are a complete paths file and a refusal.
+sys.stdout.buffer.write(b"\n".join([n.encode("utf-8", "surrogateescape") for n in names+["bin/ai-review-sandbox"]]) + b"\n")
 ' > "$paths"; then rm -f "$paths"; return 2; fi
   decision="$(cd "$root" && ai-task-gates explain --json --paths-from "$paths" 2>/dev/null)" \
     || { rm -f "$paths"; return 2; }

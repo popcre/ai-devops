@@ -318,16 +318,22 @@ APPROVE' run send spaced-review --review --file "$HOSTILE_SPACE")"
 else
   skip "attachment name with leading/trailing spaces unsupported by this filesystem"
 fi
-HOSTILE_NL="$(printf 'two
-line.md')"
+HOSTILE_NL=".ai/hostile-two
+line.md"
 if printf 'newline
 ' > "$TMP/repo/$HOSTILE_NL" 2>/dev/null; then
+  # Under the excluded .ai/ prefix on purpose: source classification is
+  # fail-closed about names a line-based paths file cannot represent, so a
+  # LISTED file with this name must refuse every review snapshot (PR #666).
+  # The ledger property — one verbatim entry — is unaffected by where the
+  # attachment lives, and .ai/ stays out of the classifier's path scan.
   NL_OUT="$(DEEPSEEK_STUB_REPLY=$'x
 ## Verdict
 APPROVE' run send newline-review --review --file "$HOSTILE_NL")"
   NL_ID="$(printf '%s
 ' "$NL_OUT"|sed -n 's/^SESSION_ID: //p')"
   check "an attachment name containing a newline is recorded as one exact entry" "jq -e --arg f \"$HOSTILE_NL\" '(.attached_files|length)==1 and .attached_files==[\$f]' '$TMP/repo/.ai/deepseek-sessions/$NL_ID.meta.json'"
+  rm -f -- "$TMP/repo/$HOSTILE_NL"
 else
   skip "attachment name containing a newline unsupported by this filesystem"
 fi
