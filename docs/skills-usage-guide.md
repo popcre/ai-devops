@@ -47,6 +47,11 @@ current global already carries, printing every KEPT/DROPPED decision, and keeps
 the untouched original in `~/.ai-globals-backup/<UTC>/`. If it cannot identify
 the section boundary it prints the file's tail and stops rather than guessing.
 
+It covers all four client globals — Claude and Codex via the Bash installer, and
+the ZCode and MiMo bodies directly: those are refreshed from their templates even
+when the file already exists (#810), so a changed template reaches machines that
+already have the file, not only the ones that never did.
+
 ### Do not finish `ai-adopt-globals` from a linked worktree
 
 What changed:

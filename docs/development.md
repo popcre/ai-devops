@@ -357,8 +357,10 @@ bash tests/test-ai-adopt-globals.sh
 replaces a machine's always-loaded globals **without losing its machine
 section**. It proves the section is detected, saved and restored
 byte-identically, that a machine with no section is handled without one being
-invented, that `--dry-run` writes nothing, and that a timestamped copy of the
-original is always recoverable.
+invented, that an existing ZCode or MiMo global with a stale body is refreshed
+from the template instead of failing the body check (#810), that `--dry-run`
+writes nothing, and that a timestamped copy of the original is always
+recoverable.
 
 `tests/test-installer-parity.sh` runs BOTH installers against one fixture and
 compares the result: same files, byte-identical `.ai-devops-managed` markers, and

@@ -162,14 +162,16 @@ filter_section() {
   ' "$WORK/template-headings.txt" "$section"
 }
 
-# Files that will be replaced, as "label|installed path|repo template".
-# ZCode's global is adopted only when it exists (it is seeded, not always
-# present); the template must always exist in the repo.
+# Files that will be replaced, as "label|installed path|repo template|owner".
+# "installer" targets are replaced by ai-install-skills --adopt-globals below;
+# "self" targets are replaced by this script itself. ZCode's global is adopted
+# only when it exists (it is seeded, not always present); the template must
+# always exist in the repo.
 TARGETS=(
-  "Claude|$CLAUDE_HOME/CLAUDE.md|$REPO_ROOT/templates/system/CLAUDE-global.md"
-  "Codex|$CODEX_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-codex.md"
-  "ZCode|$ZCODE_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-zcode.md"
-  "MiMo|$MIMO_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-mimo.md"
+  "Claude|$CLAUDE_HOME/CLAUDE.md|$REPO_ROOT/templates/system/CLAUDE-global.md|installer"
+  "Codex|$CODEX_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-codex.md|installer"
+  "ZCode|$ZCODE_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-zcode.md|self"
+  "MiMo|$MIMO_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-mimo.md|self"
 )
 
 say "==> machine: ${SHORT_HOST:-unknown}"
@@ -181,7 +183,7 @@ mkdir -p "$WORK"
 HAVE_SECTION=()
 
 for entry in "${TARGETS[@]}"; do
-  IFS='|' read -r label installed template <<<"$entry"
+  IFS='|' read -r label installed template _ <<<"$entry"
   [[ -f "$template" ]] || fail "repo template missing: $template"
 
   if [[ ! -f "$installed" ]]; then
@@ -236,17 +238,24 @@ say
 
 bash "$REPO_ROOT/bin/ai-install-skills" --adopt-globals
 
-# The Bash installer owns the Claude and Codex globals only. The ZCode global is
-# a Windows-only client installed by install-ai-devops-windows.ps1, which this
-# Bash flow cannot call — so a still-missing non-bash target is installed here
-# from the same template, keeping the adopt/verify cycle complete on every
-# platform instead of failing at the verification diff below.
+# The Bash installer owns the Claude and Codex globals only. The ZCode and MiMo
+# globals are Windows-only clients installed by install-ai-devops-windows.ps1,
+# which this Bash flow cannot call — so every "self" target is replaced here
+# from its template, whether it is missing (install) or already present
+# (refresh), exactly as the installer refreshes Claude and Codex. Without the
+# refresh, a changed template never reached a machine that already had the file
+# (#810). The original was backed up above and any machine section is
+# re-appended and verified below, so nothing local is lost.
 for entry in "${TARGETS[@]}"; do
-  IFS='|' read -r label installed template <<<"$entry"
+  IFS='|' read -r label installed template owner <<<"$entry"
+  [[ "$owner" == "self" ]] || continue
+  mkdir -p "$(dirname "$installed")"
   if [[ ! -f "$installed" ]]; then
-    mkdir -p "$(dirname "$installed")"
     cp "$template" "$installed"
     say "$label: installed $installed directly from the repo template (the Bash installer does not own this client)."
+  else
+    cp "$template" "$installed"
+    say "$label: refreshed existing $installed from the repo template (the Bash installer does not own this client)."
   fi
 done
 
@@ -278,7 +287,7 @@ done
 say
 say "==> verifying the installed bodies against the repo"
 for entry in "${TARGETS[@]}"; do
-  IFS='|' read -r label installed template <<<"$entry"
+  IFS='|' read -r label installed template _ <<<"$entry"
   section=""
   for h in "${HAVE_SECTION[@]}"; do
     IFS='|' read -r l s <<<"$h"
@@ -301,9 +310,10 @@ for entry in "${TARGETS[@]}"; do
 done
 
 say
-say "DONE. Both globals adopted and both machine sections proven intact."
+say "DONE. All present globals adopted and every machine section proven intact."
 say "Backups: $BACKUP_DIR (and <client>/globals-backup/ written by the installer)."
 say
-say "NEXT, and it is not optional: fully restart Claude Code and Codex on this"
-say "machine, then re-check that both files are still intact. Exit 0 here means"
-say "the files are right on disk, never that a running session picked them up."
+say "NEXT, and it is not optional: fully restart Claude Code, Codex, ZCode, and"
+say "MiMo on this machine, then re-check that the files are still intact. Exit 0"
+say "here means the files are right on disk, never that a running session picked"
+say "them up."
