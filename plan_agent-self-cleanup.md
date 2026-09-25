@@ -10,7 +10,7 @@
 
 **Where a fresh session starts:** Phase 3 (parent orphan sweep; plan §9 Phase 3). Re-read this STATUS table before each phase.
 
-Related handoff: [HANDOFF.d/2026-09-23T1820Z-edge-dev-claude-agent-self-cleanup.md](HANDOFF.d/2026-09-23T1820Z-edge-dev-claude-agent-self-cleanup.md) (issue [#711](https://github.com/popcre/ai-devops/issues/711)). Do not rewrite root `HANDOFF.md`.
+Related handoff: [HANDOFF.d/2026-09-25T1343Z-edge-dev-mimo-agent-self-cleanup-phase3.md](HANDOFF.d/2026-09-25T1343Z-edge-dev-mimo-agent-self-cleanup-phase3.md) (issue [#711](https://github.com/popcre/ai-devops/issues/711)). Do not rewrite root `HANDOFF.md`.
 
 ---
 
