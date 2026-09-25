@@ -1,6 +1,6 @@
 ---
 name: codex-shared-db-change
-description: Read before any shared Supabase schema question or structural change. Use for tables, columns, views, RPCs, triggers, RLS, indexes, migrations, cross-app contracts, "make db changes properly", "mirror to shared-db", schema review, or data-shape comparison. Structural work routes through u2giants/shared-db; ordinary application row data does not.
+description: Read before any shared Supabase schema question or structural change. Use for tables, columns, views, RPCs, triggers, RLS, indexes, migrations, cross-app contracts, "make db changes properly", "mirror to shared-db", schema review, or data-shape comparison. Structural work routes through popcre/shared-db; ordinary application row data does not.
 ---
 
 # codex-shared-db-change
@@ -15,7 +15,7 @@ SHARED_PREVIEW_REF="$(ai-private-config value supabase_shared_preview_ref)"
 The angle-bracketed names below are explanatory labels, never literal command
 arguments. Prove the live link again immediately before every write.
 
-`u2giants/shared-db` is the **canonical** repo for the shared supabase.com backend
+`popcre/shared-db` is the **canonical** repo for the shared supabase.com backend
 (production project `<protected-shared-prod-ref>`) used by CRM, DAM, PM/PIM, and PLM
 (designflow). Every app reads/writes the same tables, so a schema change made in
 one app repo can silently break another. All durable DB **structure** lives in shared-db.
@@ -39,7 +39,7 @@ one app repo can silently break another. All durable DB **structure** lives in s
 
 > ## ⚠️ Read this before anything below. Corrected 2026-08-09 (issue #574).
 >
-> **`AGENTS.md` in `u2giants/shared-db` is the live rulebook and WINS over this file
+> **`AGENTS.md` in `popcre/shared-db` is the live rulebook and WINS over this file
 > wherever they disagree.** This skill is a portable summary and it had drifted badly.
 >
 > 1. **The preview project ref in this file was WRONG.** It said
@@ -48,7 +48,7 @@ one app repo can silently break another. All durable DB **structure** lives in s
 >    production is `<protected-shared-prod-ref>`. Fixed throughout.
 > 2. **You almost certainly may not do this work yourself.** `shared-db` runs **one
 >    orchestrator session** and every other session **stops and opens a GitHub issue**:
->    `gh issue create --repo u2giants/shared-db --label db-work --title "…" --body-file <file>`.
+>    `gh issue create --repo popcre/shared-db --label db-work --title "…" --body-file <file>`.
 >    Read the procedure below as *how a dispatched agent authors the change*, never as
 >    permission to start one.
 > 3. **Prove which database you are on before every write** — `AGENTS.md` §4.2, an owner
@@ -93,7 +93,7 @@ against the shared database.** That means: do NOT add `ALTER TABLE`/`CREATE
 TABLE`/`CREATE INDEX`/`CREATE POLICY`/seed/backfill SQL to app code (e.g. a
 Sequelize `models/db.js` startup migration), do NOT `execute_sql`/`psql` a
 `ALTER`/`CREATE`/`DROP` against `<protected-shared-prod-ref>`, and do NOT rely on an
-app-repo-only migration. **Author it in `u2giants/shared-db` first.** App repos
+app-repo-only migration. **Author it in `popcre/shared-db` first.** App repos
 only get updated (models, generated types, adapters, API code) AFTER the shared-db
 change is applied.
 
@@ -110,7 +110,7 @@ the correct route. A predecessor's repository is context, not routing proof.
 
 ## Procedure (local Supabase CLI — the working path)
 
-1. **Stop and switch to `u2giants/shared-db`** (local clone, e.g. `C:\repos\shared-db`
+1. **Stop and switch to `popcre/shared-db`** (local clone, e.g. `C:\repos\shared-db`
    or `/worksp/shared-db`). Read its `AGENTS.md`. Check for in-flight work first:
    `gh pr list`, `git branch -a`, `ls supabase/migrations`, `git status` — if
    another DB change is in flight, serialize (finish/land it or coordinate) before
@@ -177,4 +177,4 @@ Never leave shared-db with untracked migrations or an open PR: finish
 branch → PR → merge, or write your own
 `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file stating the exact next action
 (never rewrite the shared root `HANDOFF.md`).
-Full reference: `u2giants/shared-db/AGENTS.md`.
+Full reference: `popcre/shared-db/AGENTS.md`.

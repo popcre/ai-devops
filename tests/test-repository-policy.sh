@@ -28,4 +28,14 @@ check 'main-only status never recommends a feature branch' "! grep -Fqi 'create 
 git -C "$TMP/work" switch -qc wrong
 check 'main-only status warns on the wrong branch' "cd '$TMP/work' && AI_REPO_POLICY_BIN='$POLICY' '$STATUS' 2>&1 | grep -Fq \"return to 'main'\""
 
+export AI_REPO_POLICY_FILE="$ROOT/config/repository-policy.json"
+git -C "$TMP/work" remote set-url origin https://github.com/popcre/shared-db.git
+canonical="$(cd "$TMP/work" && "$POLICY")"
+git -C "$TMP/work" remote set-url origin https://github.com/u2giants/shared-db.git
+redirected="$(cd "$TMP/work" && "$POLICY")"
+check 'canonical shared-db identity keeps the branch-and-PR policy' \
+  "jq -e '.workflow==\"feature-branch-pr\" and .main_branch==\"main\"' <<<\"\$canonical\""
+check 'redirected pre-transfer shared-db identity keeps the same policy' \
+  "jq -e '.workflow==\"feature-branch-pr\" and .main_branch==\"main\"' <<<\"\$redirected\""
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

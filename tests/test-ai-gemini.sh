@@ -70,9 +70,24 @@ case "${MOCK_MODE:-normal}" in
  mutate-protected) printf changed >> "$MOCK_PROTECTED/file.txt" ;;
  mutate-protected-ignored) printf changed >> "$MOCK_PROTECTED/.ignored" ;;
  mutate-protected-tracked-runtime) printf changed >> "$MOCK_PROTECTED/.ai/reviews/tracked.md" ;;
- sleep) sleep 30 ;;
+ concurrent-reviewers) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions/.ai-review-deepseek-x" "$MOCK_PROTECTED/.ai/reviews"; printf session > "$MOCK_PROTECTED/.ai/deepseek-sessions/1.json"; printf packet > "$MOCK_PROTECTED/.ai/deepseek-sessions/.ai-review-deepseek-x/patch.diff"; printf report > "$MOCK_PROTECTED/.ai/reviews/muse-concurrent.md" ;;
+ concurrent-reviewers-and-source) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions"; printf session > "$MOCK_PROTECTED/.ai/deepseek-sessions/2.json"; printf changed >> "$MOCK_PROTECTED/file.txt" ;;
+ concurrent-lookalike) mkdir -p "$MOCK_PROTECTED/.ai/deepseek-sessions-other"; printf source > "$MOCK_PROTECTED/.ai/deepseek-sessions-other/x.txt" ;;
+ concurrent-tracked-session) printf changed >> "$MOCK_PROTECTED/.ai/deepseek-sessions/tracked.json" ;;
+ # Runs until the test interrupts it: a fixed 30s nap raced the checks in
+ # between on a loaded machine and finished before the TERM. The 1s steps
+ # let bash act on TERM promptly; 600s is only a hang guard.
+ sleep) for _ in $(seq 1 600); do sleep 1; done ;;
+ mutate-protected-nested) printf changed >> "$MOCK_PROTECTED/.ai/wt/other/work.txt" ;;
+ mutate-protected-new-nested) mkdir -p "$MOCK_PROTECTED/.ai/wt/hidden" && printf 'gitdir: x
+' > "$MOCK_PROTECTED/.ai/wt/hidden/.git" && printf x > "$MOCK_PROTECTED/.ai/wt/hidden/f" ;;
+ mutate-protected-nested-plain) printf changed >> "$MOCK_PROTECTED/.ai/wt/plain/work.txt" ;;
+ mutate-protected-root-tmp) printf changed >> "$MOCK_PROTECTED/.tmp-scratch.json" && printf new > "$MOCK_PROTECTED/.tmp-new.log" ;;
+ mutate-protected-tracked-tmp) printf changed >> "$MOCK_PROTECTED/.tmp-tracked.txt" ;;
+ mutate-protected-deep-tmp) printf changed >> "$MOCK_PROTECTED/sub/.tmp-deep" ;;
  reclaim-slow) sleep 2 ;;
  fail) exit 70 ;;
+ credit) cat "$MOCK_CREDIT_FILE"; exit 1 ;;
 esac
 cid=conv-good
 if [[ "$args" == *"--conversation"* ]] && [ "${MOCK_MODE:-normal}" = wrongid ]; then cid=conv-wrong; fi
@@ -111,7 +126,7 @@ IDENTITY_OUT="$("$SCRIPT" doctor --identity)"
 check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
 mkdir -p "$TMP/tools"
-cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$TMP/tools/"
+cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$ROOT/tools/reviewer_admission.py" "$TMP/tools/"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
 mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
@@ -158,6 +173,25 @@ R3C="$TMP/repo3c"; make_repo "$R3C"; export MOCK_PROTECTED="$R3C"
 check 'same-turn protected ignored-file mutation is rejected' "! new_run '$R3C' protected-ignored mutate-protected-ignored"
 R3D="$TMP/repo3d"; make_repo "$R3D"; mkdir -p "$R3D/.ai/reviews"; printf tracked > "$R3D/.ai/reviews/tracked.md"; git -C "$R3D" add -f .ai/reviews/tracked.md; git -C "$R3D" commit -qm tracked-runtime; export MOCK_PROTECTED="$R3D"
 check 'tracked files inside runtime directories remain protected' "! new_run '$R3D' protected-tracked-runtime mutate-protected-tracked-runtime"
+R3E="$TMP/repo3e"; make_repo "$R3E"; export MOCK_PROTECTED="$R3E"
+check 'concurrent reviewer output (DeepSeek sessions, reports) during the turn is not source drift' "new_run '$R3E' concurrent-reviewers concurrent-reviewers | grep -q '^PASS'"
+R3F="$TMP/repo3f"; make_repo "$R3F"; export MOCK_PROTECTED="$R3F"
+check 'a real source edit alongside concurrent reviewer output is still rejected' "! new_run '$R3F' concurrent-source concurrent-reviewers-and-source"
+R3G="$TMP/repo3g"; make_repo "$R3G"; export MOCK_PROTECTED="$R3G"
+check 'a look-alike sibling of a reviewer-owned path stays protected' "! new_run '$R3G' concurrent-lookalike concurrent-lookalike"
+R3H="$TMP/repo3h"; make_repo "$R3H"; mkdir -p "$R3H/.ai/deepseek-sessions"; printf tracked > "$R3H/.ai/deepseek-sessions/tracked.json"; git -C "$R3H" add -f .ai/deepseek-sessions/tracked.json; git -C "$R3H" commit -qm tracked-session; export MOCK_PROTECTED="$R3H"
+check 'tracked files inside the DeepSeek session directory remain protected' "! new_run '$R3H' concurrent-tracked concurrent-tracked-session"
+# 2026-09-24 (#780): other sessions' ignored nested checkouts (.claude/worktrees/*)
+# change during a review from the main checkout; they are not this source.
+R3I="$TMP/repo3i"; make_repo "$R3I"; mkdir -p "$R3I/.ai/wt/other" "$R3I/.ai/wt/plain"; git -C "$R3I/.ai/wt/other" init -q; printf a > "$R3I/.ai/wt/other/work.txt"; printf a > "$R3I/.ai/wt/plain/work.txt"; export MOCK_PROTECTED="$R3I"
+check 'another session changing its ignored nested checkout is tolerated' "new_run '$R3I' protected-nested mutate-protected-nested"
+check 'a new ignored nested checkout appearing is still rejected' "! new_run '$R3I' protected-new-nested mutate-protected-new-nested"
+check 'an ignored plain folder (not a checkout) stays protected' "! new_run '$R3I' protected-nested-plain mutate-protected-nested-plain"
+# 2026-09-24 (#795): another session's untracked root `.tmp-*` scratch changes during reviews.
+R3J="$TMP/repo3j"; make_repo "$R3J"; printf '/.tmp-*\n' >> "$R3J/.gitignore"; git -C "$R3J" add .gitignore; git -C "$R3J" commit -qm ignore-tmp; printf a > "$R3J/.tmp-scratch.json"; mkdir -p "$R3J/sub"; printf a > "$R3J/sub/.tmp-deep"; printf a > "$R3J/.tmp-tracked.txt"; git -C "$R3J" add -f .tmp-tracked.txt; git -C "$R3J" commit -qm tracked-tmp; export MOCK_PROTECTED="$R3J"
+check 'untracked root .tmp-* scratch churn is tolerated' "new_run '$R3J' protected-root-tmp mutate-protected-root-tmp"
+check 'a tracked root .tmp-* file stays protected' "! new_run '$R3J' protected-tracked-tmp mutate-protected-tracked-tmp"
+check 'a .tmp-* file below the root stays protected' "! new_run '$R3J' protected-deep-tmp mutate-protected-deep-tmp"
 GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }
@@ -189,6 +223,15 @@ printf before-model > "$R4/dirty.txt"
 check 'write during model verification is rejected' "! new_run '$R4' modelwrite mutate-model"
 check 'empty response is rejected' "! new_run '$R4' empty empty"
 check 'invalid verdict word is rejected' "! new_run '$R4' badverdict badverdict"
+# Out of credit (Albert, 2026-09-24): its own quarantine directory, so the
+# recorded global quarantine cannot refuse the later tests in this file.
+cp -a "$AI_REVIEW_QUARANTINE_DIR" "$TMP/credit-q"; cp -a "$AI_REVIEW_QUARANTINE_DIR" "$TMP/credit-q2"
+set +e; AI_REVIEW_QUARANTINE_DIR="$TMP/credit-q" MOCK_CREDIT_FILE="$ROOT/tests/fixtures/reviewer-credit/gemini-prepay.json" new_run "$R4" out-of-credit credit >"$TMP/credit.out" 2>"$TMP/credit.err"; GEMINI_CREDIT_RC=$?; set -e
+check 'out of credit exits 92' "test '$GEMINI_CREDIT_RC' -eq 92"
+check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=gemini code=insufficient_quota' '$TMP/credit.err'"
+check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: .*ai.studio/projects' '$TMP/credit.err'"
+check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global gemini --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'ordinary provider failure is not reported as out of credit' "! AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' new_run '$R4' plain-fail fail 2>'$TMP/plain.err'; ! grep -q 'OUT OF CREDIT' '$TMP/plain.err'"
 BAD_META="$(meta_for badverdict)"
 check 'rejected provider output is durably linked from session state' "jq -e '.failure_stage==\"turn\" and (.failure_artifact|length>0)' '$BAD_META' && test -s \"\$(jq -r .failure_artifact '$BAD_META')\""
 if case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then
@@ -312,6 +355,35 @@ check 'an over-long review name still reviews with a derived tag' "(cd '$LONGREP
 check 'the derived sandbox tag fits the 64-character limit' "jq -e '.sandbox_tag|length<=64' \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\" >/dev/null"
 check 'two long names sharing a prefix get distinct tags' "(cd '$LONGREPO' && '$SCRIPT' new '${LONG_NAME}y' --prompt x) && test \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"$LONG_NAME\"' '$TMP/state/sessions')\")\" != \"\$(jq -r .sandbox_tag \"\$(grep -rl '\"name\":\"${LONG_NAME}y\"' '$TMP/state/sessions')\")\""
 check 'a name that fits is still accepted' "(cd '$LONGREPO' && '$SCRIPT' new fits-fine --prompt x)"
+check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok|gemini|muse|qwen)-[$][{]?(1|2|name|n)([^A-Za-z_]|$)' '$SCRIPT' | grep -v short_name | grep -q ."
+
+# 2026-09-23 (whole path-length class): long worktree paths, session names and
+# caller names must never make a derived path component grow with the input.
+# Real sandbox, fake provider; worktree path over 200 characters.
+# Exactly 201 characters: over the 200 target, yet still usable as a working
+# directory on a Windows host without LongPathsEnabled (260-character limit).
+LP_BASE="$TMP/long-worktree"; LP_PAD=$((201 - ${#LP_BASE} - 1))
+LP_REPO="$LP_BASE/$(printf %.0sw $(seq 1 "$LP_PAD"))"
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true make_repo "$LP_REPO"; git -C "$LP_REPO" config core.longpaths true
+LP_NAME="$(printf %.0sn $(seq 1 150))"; LP_CALLER="$(printf %.0sc $(seq 1 70))"
+set +e; (cd "$LP_REPO" && AI_REVIEW_SANDBOX_BIN="$ROOT/bin/ai-review-sandbox" AI_REVIEW_SANDBOX_DIR="$TMP/lp-sbx" AI_GEMINI_CALLER="$LP_CALLER" MOCK_MODE=normal "$SCRIPT" new "$LP_NAME" --prompt review) > "$TMP/lp.out" 2>&1; LP_RC=$?; set -e
+[ "$LP_RC" -eq 0 ] || sed -n '1,20p' "$TMP/lp.out" >&2
+LP_META="$(grep -rl "\"name\":\"$LP_NAME\"" "$TMP/state/sessions" 2>/dev/null | head -1)"
+check 'long worktree path: worktree path is over 200 characters' "test ${#LP_REPO} -gt 200"
+check 'long worktree path, name and caller still review' "test '$LP_RC' -eq 0"
+check 'every derived state, sandbox and report name stays bounded' "test -z \"\$(find '$TMP/state' '$TMP/lp-sbx' '$LP_REPO/.ai' -mindepth 1 2>/dev/null | awk -F/ 'length(\$NF)>110')\""
+check 'metadata keeps the full name, completes, and bounds the tag' "test -n '$LP_META' && jq -e '.status==\"COMPLETE\" and (.sandbox_tag|length<=64)' '$LP_META' >/dev/null"
+# A session saved before names were bounded keeps its full-name file and must
+# still be found (no duplicate paid session, no lost history).
+LG_NAME="$(printf %.0sg $(seq 1 100))"
+set +e; (cd "$LONGREPO" && MOCK_MODE=normal "$SCRIPT" new "$LG_NAME" --prompt review) >/dev/null 2>&1; set -e
+LG_META="$(grep -rl "\"name\":\"$LG_NAME\"" "$TMP/state/sessions" 2>/dev/null | head -1)"
+LG_LEGACY="$(dirname "$LG_META")/test--$LG_NAME.json"; mv "$LG_META" "$LG_LEGACY"
+set +e; (cd "$LONGREPO" && MOCK_MODE=normal "$SCRIPT" ask "$LG_NAME" --prompt later) > "$TMP/lg.out" 2>&1; LG_RC=$?; set -e
+[ "$LG_RC" -eq 0 ] || sed -n '1,20p' "$TMP/lg.out" >&2
+check 'a legacy full-name session is still found and continued' "test '$LG_RC' -eq 0 && test -f '$LG_LEGACY' && test ! -e '$LG_META'"
+LP_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'a caller name that could leave its directory is refused before provider contact' "! (cd '$LP_REPO' && AI_GEMINI_CALLER='../escape' '$SCRIPT' new unsafe-caller --prompt x) >/dev/null 2>&1 && test '$LP_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\" && test ! -e '$TMP/state/sessions/escape--unsafe-caller.json'"
 
 # 2026-09-18: live qualification recorded the caller's checkout as the invoked
 # repository while it reviewed its private fixture, so sandbox evidence binding

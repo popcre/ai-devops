@@ -87,7 +87,9 @@
     "test-windows-scripts.sh": 1,
     "test-workflow-policy.sh": 4,
     "test-worktree-reap-tool.sh": 2,
-    "test-ci-runner-router.sh": 1
+    "test-ci-runner-router.sh": 1,
+    "test-reviewer-credit.sh": 1,
+    "test-ai-review-snapshot-bounded-history.sh": 8
   },
   "bash": [
     "test-ai-adopt-globals.sh",
@@ -131,6 +133,7 @@
     "test-ai-review-preflight.sh",
     "test-ai-review-sandbox.sh",
     "test-ai-review-scoreboard.sh",
+    "test-ai-review-snapshot-bounded-history.sh",
     "test-ai-reviewer-issue.sh",
     "test-ai-reviewer-membership-drift.sh",
     "test-ai-reviewer-start-watch.sh",
@@ -163,6 +166,7 @@
     "test-repository-coverage.sh",
     "test-repository-policy.sh",
     "test-reviewer-ci-paths.sh",
+    "test-reviewer-credit.sh",
     "test-session-conduct-policy.sh",
     "test-setup-credentials-source.sh",
     "test-shared-db-fast-close-skill.sh",
@@ -209,6 +213,7 @@
     "test-installer-parity.sh",
     "test-line-endings.sh",
     "test-mcp-launch-lock.sh",
+    "test-reviewer-credit.sh",
     "test-windows-scripts.sh",
     "test-worktree-reap-tool.sh"
   ],
@@ -243,6 +248,7 @@
     "test-installer-parity.sh",
     "test-line-endings.sh",
     "test-mcp-launch-lock.sh",
+    "test-reviewer-credit.sh",
     "test-windows-scripts.sh",
     "test-worktree-reap-tool.sh"
   ],
@@ -308,7 +314,8 @@
       "test-windows-scripts.sh"
     ],
     [
-      "test-ai-gemini.sh"
+      "test-ai-gemini.sh",
+      "test-reviewer-credit.sh"
     ],
     [
       "test-ai-muse-code.sh"

@@ -10,7 +10,7 @@ cat > "$FAKE" <<'EOF'
 #!/usr/bin/env bash
 echo "start $(date +%s%N) $*" >> "$FAKE_LOG"
 case "${FAKE_MODE:-ok}" in
-  ok) sleep "${FAKE_SLEEP:-0}"; echo "out:$*" ;;
+  ok) sleep "${FAKE_SLEEP:-0}"; if [ -n "${FAKE_HOLD:-}" ] && [ -e "$FAKE_HOLD" ]; then echo "held $*" >> "$FAKE_LOG"; while [ -e "$FAKE_HOLD" ]; do sleep 0.1; done; fi; echo "out:$*" ;;
   secondary) echo 'HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' >&2; echo 'Retry-After: 900' >&2; echo "end $(date +%s%N)" >> "$FAKE_LOG"; exit 1 ;;
   secondary-short) echo 'gh: HTTP 429: Too Many Requests (retry-after: 60)' >&2; exit 1 ;;
   notfound) echo 'HTTP 404: Not Found' >&2; exit 1 ;;
@@ -59,10 +59,12 @@ for i in 1 2 3; do AI_GH_MIN_SPACING_SECONDS=1 FAKE_SLEEP=3 "$GH" p$i >/dev/null
 check 'concurrent processes space their GitHub call starts' "[ \$(grep -c '^start' '$FAKE_LOG') -eq 3 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 900) exit 1}'"
 check 'lock is released after calls' "[ ! -d '$TMP/state/lock.d' ]"
 : > "$FAKE_LOG"
-FAKE_SLEEP=4 "$GH" slow >/dev/null & sp=$!
-sleep 1
-start=$(date +%s); timeout 3 "$GH" quick >/dev/null; qrc=$?; wait "$sp"
-check 'a slow call does not block the next caller' "[ $qrc -eq 0 ]"
+# Prove ordering, not speed: the slow call is held open until the quick call
+# has finished, so no timing window exists however loaded the machine is (#775).
+touch "$TMP/hold"; FAKE_HOLD="$TMP/hold" "$GH" slow >/dev/null & sp=$!
+for _ in $(seq 1 600); do grep -q '^held slow$' "$FAKE_LOG" && break; sleep 0.2; done
+timeout 120 "$GH" quick >/dev/null; qrc=$?; rm -f "$TMP/hold"; wait "$sp"
+check 'a slow call does not block the next caller' "[ $qrc -eq 0 ] && awk '/^held slow$/{if(!s)s=NR} /^start .* quick$/{q=NR} /^end/{if(!e)e=NR} END{exit !(s && q && e && s<q && q<e)}' '$FAKE_LOG'"
 
 # Secondary rate limit: back-off uses Retry-After, no retry, and blocks later calls.
 : > "$FAKE_LOG"

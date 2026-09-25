@@ -88,6 +88,15 @@ if (mode === 'publication-failure') {
 fs.writeFileSync(path.join(root, 'prompt-copy'), fs.readFileSync(0));
 const repo = path.join(root, 'repo');
 if (mode === 'slow') { fs.writeFileSync(path.join(root, 'slow-pid'), `${process.pid}\n`); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000); }
+if (mode === 'complete-then-hang') {
+  // The paid turn is finished; only the local process has not exited yet when
+  // a caller's own command timeout signals the wrapper.
+  fs.writeSync(1, JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:'qwen3.8-max',content:[]}}) + '\n');
+  fs.writeSync(1, JSON.stringify({type:'result',subtype:'success',session_id:'qwen-session-1',is_error:false,num_turns:2,result:'late signal review\n\n## Verdict\nAPPROVE',usage:{input_tokens:11,output_tokens:7},permission_denials:[]}) + '\n');
+  fs.writeFileSync(path.join(root, 'complete-pid'), `${process.pid}\n`);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000);
+  process.exit(0);
+}
 if (mode === 'authentication') { console.error('HTTP 401 authentication failed API_KEY=must-not-survive'); process.exit(1); }
 if (mode === 'allowance') { console.error('HTTP 429 allowance exhausted raw-payload=must-not-survive'); process.exit(1); }
 if (mode === 'model-unavailable') { console.error('requested model unavailable: qwen3.8-max'); process.exit(1); }
@@ -423,6 +432,18 @@ check 'first follow-up completes successfully' "test '$FIRST_ASK_RC' -eq 0"
 check 'follow-up resumes exact session' "grep -q -- '--resume qwen-session-1' '$TMP/argv.txt'"
 check 'follow-up keeps the recorded review copy' "[ \"\$(run show review-1 | jq -r .review_dir)\" = '$REVIEW_DIR' ]"
 
+LONG_NAME="long-$(printf 'n%.0s' $(seq 1 150))"
+LONG_NEW_OUT="$(run new "$LONG_NAME" --prompt 'review this' 2>&1)"; LONG_NEW_RC=$?
+[ "$LONG_NEW_RC" -eq 0 ] || printf '  diagnostic: long-name new: %s
+' "$LONG_NEW_OUT" | head -5
+check 'a 155-character session name completes a review' "test '$LONG_NEW_RC' -eq 0"
+LONG_ASK_OUT="$(run ask "$LONG_NAME" --prompt 'follow up' 2>&1)"; LONG_ASK_RC=$?
+[ "$LONG_ASK_RC" -eq 0 ] || printf '  diagnostic: long-name ask: %s
+' "$LONG_ASK_OUT" | head -5
+check 'the long-name session resumes on ask' "test '$LONG_ASK_RC' -eq 0"
+find "$AI_QWEN_STATE_DIR" "${AI_REVIEW_SANDBOX_DIR:-$AI_QWEN_STATE_DIR}" "$REPO/.ai" -print 2>/dev/null | awk -F/ 'length($NF)>110' | sed 's/^/  diagnostic: over-long name: /' | head -5 || true
+check 'no state, sandbox, or report name exceeds 110 characters' "! find '$AI_QWEN_STATE_DIR' '${AI_REVIEW_SANDBOX_DIR:-$AI_QWEN_STATE_DIR}' '$REPO/.ai' -print 2>/dev/null | awk -F/ 'length(\$NF)>110{f=1} END{exit !f}'"
+
 echo publication-failure > "$TMP/mode"
 run new publication-failed --prompt 'retain this completed result' > "$TMP/publication-failed.out" 2>&1; PUBLICATION_RC=$?
 check 'publication failure cannot become an active accepted review' "test '$PUBLICATION_RC' -ne 0 && run show publication-failed | jq -e '.status!=\"active\"'"
@@ -582,6 +603,28 @@ check 'interrupted follow-up becomes recovery-required with a preserved stream' 
 CALLS_AFTER_INTERRUPT="$(wc -l < "$TMP/argv.txt")"; run ask interrupt-followup --prompt retry >/dev/null 2>&1; RC=$?
 [ "$RC" -ne 0 ] && [ "$CALLS_AFTER_INTERRUPT" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'interrupted follow-up cannot be resumed again' || bad 'interrupted follow-up cannot be resumed again'
 
+# A caller's command timeout (TERM) that lands after Qwen already returned its
+# complete answer must leave that paid answer locally finalizable, not an
+# uncertain interrupted turn that forces a second paid review.
+qwen_late_signal_case(){ # NAME COMMAND
+  local name="$1" command="$2" pid meta calls python event
+  echo complete-then-hang > "$TMP/mode"; rm -f "$TMP/complete-pid"; calls="$(wc -l < "$TMP/argv.txt")"
+  (cd "$REPO" && exec env AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" "$SCRIPT" "$command" "$name" --prompt review > "$TMP/late-$name.log" 2>&1) & pid=$!
+  for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/complete-pid" ] && break; sleep .05; done
+  kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  echo review > "$TMP/mode"
+  meta="$(find "$TMP/state/sessions" -name "codex--$name.json" -print -quit)"
+  check "$command: signal after a complete answer records a locally finalizable turn" "jq -e '.status==\"recovery-required\" and .failure_reason==\"provider_turn_pending_local_validation\"' '$meta' && grep -q 'ai-qwen finalize $name' '$TMP/late-$name.log'"
+  event="$(jq -r .recovery_event_run_id "$meta")"; python="$(command -v python3 || command -v python)"
+  check "$command: the interrupted invocation is still not durable before finalize" "! '$python' '$REPO_ROOT/tools/reviewer_events.py' verify-reports qwen '$event' >/dev/null 2>&1"
+  check "$command: late-signal answer finalizes locally with a verdict" "run finalize '$name' > '$TMP/late-$name-finalize.log' 2>&1 && jq -e '.status==\"active\"' '$meta' && grep -l 'late signal review' '$REPO/.ai/reviews'/qwen-$name-*.md >/dev/null"
+  check "$command: finalize makes the interrupted invocation durable" "'$python' '$REPO_ROOT/tools/reviewer_events.py' verify-reports qwen '$event' >/dev/null"
+  check "$command: late-signal recovery spends zero additional provider turns" "test \"\$(( calls + 1 ))\" -eq \"\$(wc -l < '$TMP/argv.txt')\""
+}
+qwen_late_signal_case late-signal-new new
+run new late-signal-ask --prompt review >/dev/null 2>&1 || bad 'late-signal follow-up fixture must start'
+qwen_late_signal_case late-signal-ask ask
+
 echo mutate-review > "$TMP/mode"
 if run new hostile --prompt 'write a file' >/dev/null 2>&1; then bad 'review mutation fails loudly'; else ok 'review mutation fails loudly'; fi
 git -C "$REPO" checkout -q -- a.txt
@@ -695,6 +738,18 @@ cat "$TMP/good.jsonl" >> "$TMP/assistant-api-error.jsonl"
 ASSISTANT_API_ERROR="$(probe "$TMP/assistant-api-error.jsonl")"
 check 'an assistant provider refusal cannot become an approved review' "printf '%s' \"\$ASSISTANT_API_ERROR\" | grep -q 'provider refused the call'"
 
+# Out of credit (Albert, 2026-09-24): a DashScope Arrearage refusal must stop
+# the run with exit 92, both contract lines, and a recorded quarantine.
+sed -n '/^qwen_credit_stop() {/,/^}/p; /^provider_api_error() {/,/^}/p' "$SCRIPT" > "$TMP/credit-stop.sh"
+cp "$REPO_ROOT/tests/fixtures/reviewer-credit/qwen-arrearage.jsonl" "$TMP/credit-turn"; : > "$TMP/credit-turn.err"
+QWEN_CREDIT_RC=0; AI_REVIEW_QUARANTINE_DIR="$TMP/credit-q" bash -c 'source "$1"; source "$2"; qwen_credit_stop "$3"; echo not-stopped' _ "$REPO_ROOT/tools/reviewer_event_guard.sh" "$TMP/credit-stop.sh" "$TMP/credit-turn" > "$TMP/credit.out" 2> "$TMP/credit.err" || QWEN_CREDIT_RC=$?
+check 'out of credit exits 92' "test '$QWEN_CREDIT_RC' -eq 92 && ! grep -q not-stopped '$TMP/credit.out'"
+check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=qwen code=insufficient_quota' '$TMP/credit.err'"
+check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: ' '$TMP/credit.err'"
+check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' global qwen --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'an ordinary provider refusal is not out of credit' "AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' bash -c 'source \"\$1\"; source \"\$2\"; qwen_credit_stop \"\$3\"; echo not-stopped' _ '$REPO_ROOT/tools/reviewer_event_guard.sh' '$TMP/credit-stop.sh' '$TMP/api-error.jsonl' 2>/dev/null | grep -q not-stopped"
+check 'every failed-turn exit runs the credit stop' "test \"\$(grep -c 'qwen_credit_stop \"\$out\"' '$SCRIPT')\" -eq 6"
+
 printf '%s\n' '{"type":"result","is_error":false,"result":"finding\n## Verdict\nMAYBE"}' > "$TMP/invalid-verdict.jsonl"
 INVALID="$(probe "$TMP/invalid-verdict.jsonl")"
 check 'an invalid verdict word is rejected' "printf '%s' \"\$INVALID\" | grep -q 'APPROVE, REJECT, or BLOCKED'"
@@ -718,7 +773,12 @@ check 'multiple verdict sections are rejected' "printf '%s' \"\$MULTIPLE\" | gre
 printf '%s\n' '{"type":"result","is_error":false,"result":"## Verdict\nAPPROVE\ntrailing text"}' > "$TMP/nonfinal-verdict.jsonl"
 NONFINAL="$(probe "$TMP/nonfinal-verdict.jsonl")"
 check 'a non-final verdict is rejected' "printf '%s' \"\$NONFINAL\" | grep -q 'final two nonblank lines'"
-check 'raw JSON output cannot bypass verdict validation' "grep -q 'extract_answer \"\$out\" >/dev/null; cat \"\$out\"' '$SCRIPT' && grep -q 'qwen-\${name}-incomplete-' '$SCRIPT'"
+check 'raw JSON output cannot bypass verdict validation' "grep -q 'extract_answer \"\$out\" >/dev/null; cat \"\$out\"' '$SCRIPT' && grep -q 'qwen-\$(short_name \"\$name\" 64)-incomplete-' '$SCRIPT'"
+# Path-length class: no session-derived sandbox tag, state file, or report
+# name may grow with the session name or caller.
+check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok|gemini|muse|qwen)-[$][{]?(1|2|name|n)([^A-Za-z_]|$)' '$SCRIPT' | grep -v short_name | grep -q ."
+check "short_name bounds a 300-character name deterministically and keeps short names" "eval \"\$(grep -m1 -E '^short_name\(\) *\{' '$SCRIPT')\"; l=\"\$(printf %.0sq \$(seq 1 300))\"; a=\"\$(short_name \"\$l\" 64)\"; test \${#a} -eq 64 && test \"\$a\" = \"\$(short_name \"\$l\" 64)\" && test \"\$(short_name abc 64)\" = abc && test \"\$a\" != \"\$(short_name \"\${l}x\" 64)\""
+check "moved-checkout discovery also finds bounded session files" "grep -q 'short_name \"\$CALLER--\$2\" 56).json' '$SCRIPT'"
 
 BODY="$(bash -c '. "$1"; extract_answer "$2"' _ "$TMP/extract.sh" "$TMP/good.jsonl")"
 check 'the text above the verdict is still emitted' "printf '%s' \"\$BODY\" | grep -q 'finding one'"

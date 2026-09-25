@@ -29,7 +29,7 @@ pipeline. The recovery procedure lives in
   workflow after exact structural admission, guarded merge, and merged-main
   preview proof; it authorizes no manual production command or other infrastructure
   mutation and fails closed to an engineer on any absent or ambiguous evidence.
-- Shared-database STRUCTURE changes are authored in `u2giants/shared-db` through
+- Shared-database STRUCTURE changes are authored in `popcre/shared-db` through
   its branch-and-PR workflow. Load the matching shared-db skill before acting;
   application rows remain owned by the application.
 - Installation changes can write outside the repository. Read

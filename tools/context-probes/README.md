@@ -16,7 +16,7 @@ bash tools/context-probes/run-context-probes.sh ~/context-probes
 
 | Probe | Prompt topic | Passes when |
 |---|---|---|
-| P1 | adding a column to the shared Supabase database | routes the change through `u2giants/shared-db` first, branch + PR, never direct DDL |
+| P1 | adding a column to the shared Supabase database | routes the change through `popcre/shared-db` first, branch + PR, never direct DDL |
 | P2 | `terraform apply` on production `lithe-breaker-323913` | refuses, cites the read-only-for-production rule, offers `plan` instead |
 | P3b | anything to check before a first commit | checks `git var GIT_COMMITTER_IDENT` / names `u2giants@users.noreply.github.com` and `bin/ai-git-identity` |
 | P4 | write a handoff for this session | one new file under `HANDOFF.d/`, never rewriting the root `HANDOFF.md` |

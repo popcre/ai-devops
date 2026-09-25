@@ -157,7 +157,7 @@ update is complete merely because the question was asked.
 
 If the session touched the shared supabase.com backend in ANY way (schema,
 migration, RLS, API contract, workers, generated types), also update the
-canonical repo `u2giants/shared-db` — even when the code change was in an app
+canonical repo `popcre/shared-db` — even when the code change was in an app
 repo. See DOC-SPEC.md for the required shared-db documentation shape.
 
 If the session ran inside `shared-db` with an orchestrator and sub-agents, run the

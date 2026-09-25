@@ -363,20 +363,23 @@ git -C "$MERGE_SRC" update-ref refs/remotes/origin/main "$MERGE_MAIN_SHA"
 REMOTE_SNAP="$("$SCRIPT" ensure-copy "$MERGE_SRC" remote-wins)"
 check "snapshot_preserves_current_origin_and_explicit_local_main" "[ \"$(git -C "$REMOTE_SNAP" rev-parse origin/main)\" = '$MERGE_MAIN_SHA' ] && [ \"$(git -C "$REMOTE_SNAP" rev-parse main)\" = '$STALE_LOCAL_MAIN' ] && [ '$STALE_LOCAL_MAIN' != '$MERGE_MAIN_SHA' ]"
 
-# Another worktree can publish a new branch tip after the object copy. Snapshot
-# refs must describe the captured objects, never a later live ref transaction.
-git -C "$MERGE_SRC" update-ref refs/heads/concurrent-topic "$MERGE_HEAD_SHA"
+# Another worktree can publish a new ref tip after the objects are fetched.
+# Snapshot refs must describe the tips captured BEFORE the fetch, never a
+# later live ref transaction. (Since the bounded-snapshot change, issue #711,
+# the snapshot carries only the base-ref candidates ai-review-packet resolves,
+# so the freeze is proven on origin/main — a ref it does carry — rather than on
+# an unrelated topic branch it no longer carries.)
 REF_HOOK="$TMP/advance-ref-after-clone.sh"
 cat > "$REF_HOOK" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = after-clone ] || exit 0
 tree="$(git -C "$2" rev-parse HEAD^{tree})"
 new="$(printf 'concurrent snapshot regression\n' | git -C "$2" commit-tree "$tree" -p HEAD)" || exit 1
-git -C "$2" update-ref refs/heads/concurrent-topic "$new"
+git -C "$2" update-ref refs/remotes/origin/main "$new"
 EOF
 chmod +x "$REF_HOOK"
 REF_SNAP="$(AI_DEVOPS_TEST_MODE=1 AI_REVIEW_SANDBOX_TEST_HOOK="$REF_HOOK" "$SCRIPT" ensure-copy "$MERGE_SRC" concurrent-refs)"
-check "snapshot freezes ref identities before copying objects" "test -n '$REF_SNAP' && test \"$(git -C "$REF_SNAP" rev-parse concurrent-topic 2>/dev/null)\" = '$MERGE_HEAD_SHA' && test \"$(git -C "$MERGE_SRC" rev-parse concurrent-topic)\" != '$MERGE_HEAD_SHA'"
+check "snapshot freezes ref identities before copying objects" "test -n '$REF_SNAP' && test \"$(git -C "$REF_SNAP" rev-parse origin/main 2>/dev/null)\" = '$MERGE_MAIN_SHA' && test \"$(git -C "$MERGE_SRC" rev-parse origin/main)\" != '$MERGE_MAIN_SHA'"
 
 # --- wiring contract ----------------------------------------------------------
 # The snapshot only helps if the reviewer wrappers actually route their review
@@ -401,6 +404,17 @@ check "deepseek_hands_over_no_directory"      "! grep -qE -- '--cd |--cwd ' '$RE
 
 check "invalid_tag_rejected"                  "! '$SCRIPT' ensure '$WT' 'bad tag'"
 check "unknown_subcommand_rejected"           "! '$SCRIPT' nonsense"
+
+# Path-length class: a tag of any length maps to a bounded directory name, two
+# long tags sharing a prefix never collide, and a short tag keeps its name.
+LONG_TAG_A="gemini-$(printf 'x%.0s' $(seq 1 200))-a"; LONG_TAG_B="gemini-$(printf 'x%.0s' $(seq 1 200))-b"
+LONG_PATH_A="$("$SCRIPT" path "$WT" "$LONG_TAG_A")"; LONG_PATH_B="$("$SCRIPT" path "$WT" "$LONG_TAG_B")"
+check "long_tag_directory_name_is_bounded"    "test \"\$(basename '$LONG_PATH_A' | wc -c)\" -le 78"
+check "long_tags_with_shared_prefix_differ"   "test '$LONG_PATH_A' != '$LONG_PATH_B'"
+check "short_tag_directory_name_unchanged"    "basename \"\$('$SCRIPT' path '$WT' short-tag)\" | grep -Eq '^short-tag-[0-9a-f]{12}\$'"
+LONG_COPY="$("$SCRIPT" ensure-copy "$WT" "$LONG_TAG_A")"
+check "long_tag_copy_builds_and_records_full_tag" "test -f '$LONG_COPY/AI-REVIEW-SANDBOX.md' && grep -Fqx 'Snapshot tag: $LONG_TAG_A' '$LONG_COPY/AI-REVIEW-SANDBOX.md'"
+check "long_tag_copy_removes_by_recorded_tag"     "'$SCRIPT' remove-recorded '$LONG_TAG_A' '$LONG_COPY' && test ! -e '$LONG_COPY'"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

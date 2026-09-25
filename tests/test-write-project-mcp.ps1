@@ -65,9 +65,15 @@ try {
   git -C $rootC add .mcp.json 2>$null
   $bytesBefore = [IO.File]::ReadAllBytes((Join-Path $rootC ".mcp.json"))
   $rootCfull = [IO.Path]::GetFullPath($rootC)
+  # Claude Code reads only the forward-slash project key; the backslash key is
+  # the legacy form earlier runs wrote, and its managed names must migrate out.
+  $rootCkey = $rootCfull.Replace([string][char]92, '/')
   Write-Json $claudeJson @{
     mcpServers = @{ "1password" = @{ command = "x" } }
-    projects = @{ $rootCfull = @{ mcpServers = @{ "railway" = @{ command = "stale-entry" } } } }
+    projects = @{
+      $rootCfull = @{ mcpServers = @{ "railway" = @{ command = "stale-legacy" }; "own" = @{ command = "foreign" } } }
+      $rootCkey  = @{ mcpServers = @{ "railway" = @{ command = "stale-entry" } } }
+    }
   }
 
   $scope = [ordered]@{
@@ -96,7 +102,9 @@ try {
   $bytesAfter = [IO.File]::ReadAllBytes((Join-Path $rootC ".mcp.json"))
   Assert-True (@(Compare-Object $bytesBefore $bytesAfter).Count -eq 0) "C: tracked .mcp.json bytes unchanged"
   $cfg = Read-Json $claudeJson
-  $entry = $cfg["projects"][$rootCfull]["mcpServers"]
+  $entry = $cfg["projects"][$rootCkey]["mcpServers"]
+  $legacyEntry = $cfg["projects"][$rootCfull]["mcpServers"]
+  Assert-True (@($legacyEntry.Keys) -join "," -eq "own") "C: managed names migrate out of the legacy backslash key, foreign kept"
   Assert-True (@($entry.Keys | Sort-Object) -join "," -eq "recall-ai") "C: project entry gains only the missing name and prunes the stale one"
   Assert-True ($cfg["mcpServers"]["1password"]["command"] -eq "x") "C: global mcpServers in claude.json untouched"
   $backups = @(Get-ChildItem -LiteralPath $testRoot -Filter "claude.json.aidevops.*.bak" -ErrorAction SilentlyContinue)
@@ -120,6 +128,37 @@ try {
   & $writer -Scope $scope2 -Roots (@{ "beta" = @($rootB) }) -Catalog $catalog -ClaudeCodeConfig $claudeJson
   $b2 = Read-Json (Join-Path $rootB ".mcp.json")
   Assert-True (@($b2["mcpServers"].Keys | Sort-Object) -join "," -eq "hand-added,railway") "B2: scope change swaps managed names, foreign still kept"
+
+  # ---- a scope key with no Roots entry (project not cloned) is skipped ----
+  # Regression for the 2026-09-24 live run: @($null).Count is 1, so indexing
+  # alone iterated once with a null root and died at GetFullPath before the
+  # save, silently dropping every project entry written earlier.
+  $scope3 = [ordered]@{ "beta" = @("railway"); "notcloned" = @("trigger") }
+  $before3 = [IO.File]::ReadAllBytes($claudeJson)
+  & $writer -Scope $scope3 -Roots (@{ "beta" = @($rootB) }) -Catalog $catalog -ClaudeCodeConfig $claudeJson
+  $after3 = [IO.File]::ReadAllBytes($claudeJson)
+  Assert-True (@(Compare-Object $before3 $after3).Count -eq 0) "a scope key missing from Roots is skipped and the run completes"
+
+  # ---- Codex: scoped names with a Codex definition go to .codex/config.toml
+  $rootE = Join-Path $testRoot "epsilon"
+  New-Item -ItemType Directory -Force -Path $rootE | Out-Null
+  git -C $rootE init -q 2>$null
+  $codex = [ordered]@{ "vercel" = [ordered]@{ url = "https://mcp.vercel.com"; startup_timeout_sec = 20 } }
+  $catalogE = @{ "trigger" = @{ command = "catA" }; "vercel" = @{ type = "http"; url = "https://mcp.vercel.com" } }
+  & $writer -Scope ([ordered]@{ "epsilon" = @("trigger", "vercel") }) -Roots (@{ "epsilon" = @($rootE) }) `
+    -Catalog $catalogE -ClaudeCodeConfig $claudeJson -CodexServers $codex
+  $toml = Get-Content -Raw -LiteralPath (Join-Path $rootE ".codex\config.toml")
+  Assert-True ($toml.Contains('[mcp_servers."vercel"]') -and $toml.Contains("url = 'https://mcp.vercel.com'") -and
+    $toml.Contains("startup_timeout_sec = 20")) "E: Codex project config carries vercel natively"
+  Assert-True (-not $toml.Contains("trigger")) "E: names without a Codex definition stay out of the Codex file"
+  $e = Read-Json (Join-Path $rootE ".mcp.json")
+  Assert-True ($e["mcpServers"]["vercel"]["type"] -eq "http") "E: Claude Code gets vercel as native http"
+  git -C $rootE check-ignore -q .codex/config.toml 2>$null
+  Assert-True ($LASTEXITCODE -eq 0) "E: .codex/config.toml is locally excluded"
+  Set-Content -LiteralPath (Join-Path $rootE ".codex\config.toml") -Value "hand = 1"
+  & $writer -Scope ([ordered]@{ "epsilon" = @("vercel") }) -Roots (@{ "epsilon" = @($rootE) }) `
+    -Catalog $catalogE -ClaudeCodeConfig $claudeJson -CodexServers $codex
+  Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $rootE ".codex\config.toml")).Trim() -eq "hand = 1") "E: a hand-written Codex file is never overwritten"
 } finally {
   Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

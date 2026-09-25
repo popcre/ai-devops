@@ -198,7 +198,7 @@ SOURCE_IDENTITY="$(mktemp)" || die 'could not reserve source identity'
   || die 'source identity refused before snapshot creation'
 STATE="$($LIFECYCLE begin --provider codex --repo "$REPO_ROOT" --run-id "$RUN_ID" --caller "$CALLER" --preflight standard)" \
   || die 'provider preflight failed; no review was assigned.'
-REVIEW_DIR="$($SANDBOX ensure-copy "$REPO_ROOT" "$TAG")" \
+REVIEW_DIR="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" $SANDBOX ensure-copy "$REPO_ROOT" "$TAG")" \
   || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure snapshot-failed >/dev/null 2>&1 || true; die 'could not create the review snapshot.'; }
 
 case "$MODE" in

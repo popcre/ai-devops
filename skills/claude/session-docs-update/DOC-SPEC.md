@@ -43,15 +43,15 @@ If this session made any database, Supabase, migration, API contract, backend da
 
 ```text
 
-u2giants/shared-db
+popcre/shared-db
 
-https://github.com/u2giants/shared-db
+https://github.com/popcre/shared-db
 
 ```
 
 This applies even when the code change was made inside an app repo. App repos may contain generated types, frontend adapters, workers, or local notes, but durable backend truth belongs in `shared-db`.
 
-At minimum, document in `u2giants/shared-db`:
+At minimum, document in `popcre/shared-db`:
 
 - What changed, including tables, columns, views, RPCs, triggers, functions, RLS policies, realtime publications, storage assumptions, worker/backend behavior, generated database types, or app-facing API contracts.
 

@@ -15,6 +15,7 @@ SELF="${BASH_SOURCE[0]}"
 REAL_SELF="$(readlink -f "$SELF" 2>/dev/null || true)"
 [ -z "$REAL_SELF" ] || SELF="$REAL_SELF"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+declare -F reviewer_credit_scan >/dev/null || source "$ROOT/tools/reviewer_event_guard.sh"
 # Windows: WinGet installs the 1Password CLI into its own package folder and only
 # sometimes links it into WinGet\Links. A shell started before that PATH entry
 # existed cannot see op, so fall back to the supported WinGet package folder.
@@ -97,18 +98,27 @@ secure_review_directory(){
   chmod 600 "$dir/.ai-devops-private-reviews-v1" 2>/dev/null || return 1
 }
 need(){ command -v "$1" >/dev/null 2>&1 || die "$1 is required."; }
-name_ok(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) [ "${#1}" -le 40 ];; esac; }
+# short_name TEXT MAX: TEXT when it fits in MAX characters; otherwise a prefix
+# plus a 12-hex hash of the whole TEXT, exactly MAX long. Every path component
+# built from a session name, caller, or tag goes through this, so no derived
+# path grows with the length of a worktree-derived name.
+short_name() { local s="$1" max="$2"; if [ "${#s}" -le "$max" ]; then printf %s "$s"; else printf '%s-%s' "${s:0:$((max-13))}" "$(printf %s "$s" | sha256sum | cut -c1-12)"; fi; }
+# A session name may be any length; every path built from it is bounded below.
+name_ok(){ case "$1" in ''|*[!A-Za-z0-9._-]*) return 1;; *) return 0;; esac; }
+caller_ok(){ name_ok "$1" && [ "${#1}" -le 40 ]; }
 [ -n "$CALLER" ] || { printf '%s\n' \
   'ai-muse: error: start_failed: caller_identity_missing; Muse did not start.' \
   '  Muse itself is fine - this is local setup, not a Muse outage.' \
   '  Set AI_MUSE_CALLER to the assistant running this command, then rerun:' \
   '    export AI_MUSE_CALLER=claude   # or: codex' \
   '    AI_MUSE_CALLER=claude ai-muse doctor' >&2; exit 1; }
-name_ok "$CALLER" || { printf 'ai-muse: error: start_failed: invalid_caller_identity.\n' >&2; exit 1; }
+caller_ok "$CALLER" || { printf 'ai-muse: error: start_failed: invalid_caller_identity.\n' >&2; exit 1; }
 repo_root(){ git -C "${1:-$PWD}" rev-parse --show-toplevel 2>/dev/null || die "not a Git repository: ${1:-$PWD}"; }
 repo_id(){ local r="$1" u; u="$(git -C "$r" config --get remote.origin.url 2>/dev/null || true)"; printf '%s\n%s' "$(cd "$r" && pwd -P)" "$u" | sha256sum | cut -c1-12; }
-meta_path(){ printf '%s/sessions/%s/%s--%s.json' "$STATE" "$1" "$CALLER" "$2"; }
-tag(){ printf 'muse-%s-%s' "$CALLER" "$1"; }
+# A session saved before names were bounded keeps its full-name file; find it first.
+state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 56)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
+meta_path(){ state_leaf "$STATE/sessions/$1" "$CALLER--$2" .json; }
+tag(){ short_name "muse-$CALLER-$1" 64; }
 LOCK=""; LOCK_TOKEN=""; CRED_LOCK=""; CRED_TOKEN=""; TURN_PID=""; ACTIVE_META=""; PUBLISH_TMP=""; PUBLISH_FD=""; PUBLISH_ID=""; PUBLISH_FD_ID=""; PUBLISH_DIR_PHYSICAL=""; PUBLISH_ROOT=""; PUBLISH_BASENAME=""
 release_lock(){ [ -z "$LOCK" ] && return 0; [ "$(cat "$LOCK/token" 2>/dev/null || true)" != "$LOCK_TOKEN" ] || rm -rf "$LOCK"; LOCK=""; LOCK_TOKEN=""; }
 release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK/token" 2>/dev/null || true)" != "$CRED_TOKEN" ] || rm -rf "$CRED_LOCK"; CRED_LOCK=""; CRED_TOKEN=""; }
@@ -160,7 +170,7 @@ trap on_signal HUP INT TERM
 tmp_file(){ mktemp "$RUN_TMP/file.XXXXXX"; }
 test_interrupt_at(){ [ "${AI_MUSE_TEST_INTERRUPT_AT:-}" != "$1" ] || kill -TERM "$$"; }
 lock_session(){
-  local candidate="$STATE/locks/$1--$CALLER--$2.lock.d" owner stale quarantine attempt token; mkdir -p "$(dirname "$candidate")"; token="$$-$RANDOM-$(date +%s)"
+  local candidate="$STATE/locks/$(short_name "$1--$CALLER--$2" 64).lock.d" owner stale quarantine attempt token; mkdir -p "$(dirname "$candidate")"; token="$$-$RANDOM-$(date +%s)"
   for attempt in 1 2 3; do
     if mkdir "$candidate" 2>/dev/null; then printf '%s\n' "$token" > "$candidate/token"; printf '%s\n' "$$" > "$candidate/pid"; LOCK="$candidate"; LOCK_TOKEN="$token"; return 0; fi
     stale=0; owner="$(cat "$candidate/pid" 2>/dev/null || true)"
@@ -208,20 +218,44 @@ muse_code_run(){ # every non-turn Muse Code call gets the same minimal environme
   fi
   "${e[@]}" "$BIN" "$@"
 }
-muse_code_sha256(){ tr -d ' \r\n' < "$ROOT/config/muse-code/sha256"; } # the exact pinned file, checked before it runs or sees a key; no override
+muse_code_sha256(){ local v=""; read -r v < "$ROOT/config/muse-code/sha256" || [ -n "$v" ]; v="${v%$'\r'}"; printf '%s' "${v// /}"; } # the exact pinned file, checked before it runs or sees a key; no override
+# Identity cache (#773): hashing two 400 MB files, re-protecting the directory,
+# and asking the binary for its version cost 5-40s on a saturated Windows host,
+# where every process spawn takes about a second. After a full verification we
+# record size, mtime and inode of both files; while one stat of both still
+# matches that record, the verified result is reused. Any replacement, copy,
+# or touch of either file changes the record and forces the full check again.
+muse_code_identity(){ local o; o="$(stat --printf '%s:%Y:%i ' -- "$@" 2>/dev/null)" || return 1; printf '%s' "${o% }"; }
 muse_code_stage(){ # run only a private copy verified after it was made, so swapping the installed file later changes nothing
-  local want dir tmp got; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] || return 1
-  [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] || return 1
-  dir="$PROFILE_HOME/.local/share/ai-devops/muse-code-bin"
+  local want dir tmp got cache id rec=""; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] || return 1
+  [ ! -L "$BIN" ] || return 1
+  dir="$PROFILE_HOME/.local/share/ai-devops/muse-code-bin"; cache="$dir/.verified-$want"
   ! linked_below_home "$dir" || return 1
+  if [ -d "$dir" ] && [ -f "$dir/muse-$want.exe" ] && [ ! -L "$dir/muse-$want.exe" ] && [ -f "$cache" ] && [ ! -L "$cache" ]; then
+    id="$(muse_code_identity "$BIN" "$dir/muse-$want.exe")"; read -r rec < "$cache" || true
+    if [ -n "$id" ] && [ "$rec" = "$VERSION $id" ]; then
+      BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want"; MUSE_CODE_VERSION_OK="$BIN:$want"; return 0
+    fi
+  fi
+  [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] || return 1
   mkdir -p "$dir" && chmod 700 "$dir" && protect_windows_path "$dir" directory || return 1
   if [ ! -f "$dir/muse-$want.exe" ] || [ -L "$dir/muse-$want.exe" ] || [ "$(sha256sum "$dir/muse-$want.exe" | cut -d' ' -f1)" != "$want" ]; then
     rm -f -- "$dir/muse-$want.exe"; tmp="$(mktemp "$dir/copy.XXXXXXXX")" || return 1
     cp -- "$BIN" "$tmp" && chmod 700 "$tmp" && protect_windows_path "$tmp" file && got="$(sha256sum "$tmp" | cut -d' ' -f1)" && [ "$got" = "$want" ] && mv -f -- "$tmp" "$dir/muse-$want.exe" || { rm -f -- "$tmp"; return 1; }
   fi
-  BIN="$dir/muse-$want.exe"
+  rm -f -- "$cache"; MUSE_CODE_CACHE_FILE="$cache"; MUSE_CODE_CACHE_ID="$(muse_code_identity "$BIN" "$dir/muse-$want.exe")"
+  BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds
 }
-muse_code_pinned(){ local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] && [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)"; }
+muse_code_pinned(){
+  local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] || return 1
+  [ "${MUSE_CODE_VERSION_OK:-}" = "$BIN:$want" ] && return 0 # identity cache hit: this exact file already passed both checks
+  { [ "${MUSE_CODE_VERIFIED:-}" = "$BIN:$want" ] || [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ]; } && muse_code_run --version 2>/dev/null | grep -Fq "($VERSION)" || return 1
+  if [ -n "${MUSE_CODE_CACHE_FILE:-}" ] && [ -n "${MUSE_CODE_CACHE_ID:-}" ]; then # record only after hash and version both passed
+    printf '%s %s\n' "$VERSION" "$MUSE_CODE_CACHE_ID" > "$MUSE_CODE_CACHE_FILE.tmp.$$" 2>/dev/null && mv -f -- "$MUSE_CODE_CACHE_FILE.tmp.$$" "$MUSE_CODE_CACHE_FILE" 2>/dev/null || rm -f -- "$MUSE_CODE_CACHE_FILE.tmp.$$" 2>/dev/null
+    MUSE_CODE_CACHE_FILE=""; MUSE_CODE_CACHE_ID=""
+  fi
+  MUSE_CODE_VERSION_OK="$BIN:$want"
+}
 muse_code_catalog_dir(){ # the engine's private data store keeps Meta's first-party model catalog
   printf '%s' "$PROFILE_HOME/.local/share/ai-devops/muse-code/muse/model-catalog"
 }
@@ -235,21 +269,22 @@ muse_code_catalog_parseable(){ # at least one non-linked first-party catalog fil
   return 1
 }
 muse_code_catalog_row(){ # the model's unique row; every sibling must be a valid first-party file, exactly one may carry it
-  local dir="$1" model="$2" f hits=""
+  local dir="$1" model="$2" f row hits=""
   ! linked_below_home "$dir" || return 1
   for f in "$dir"/*.json; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
     # An unreadable or foreign sibling could hide a duplicate row: uniqueness
     # is unprovable, so refuse rather than silently skip it.
-    jq -e 'type=="object" and (.rows|type=="array") and .source=="provider_catalog"' "$f" >/dev/null 2>&1 || return 1
-    hits+="$(jq -c --arg m "$model" '.rows[]|select(type=="object" and .model_id==$m)' "$f" 2>/dev/null || true)"$'\n'
+    # One jq pass validates the file and extracts its rows (#773: each jq
+    # launch can cost ~1s on Windows); an invalid file fails the lookup.
+    row="$(jq -c --arg m "$model" 'if type=="object" and (.rows|type=="array") and .source=="provider_catalog" then .rows[]|select(type=="object" and .model_id==$m) else error("not a first-party catalog") end' "$f" 2>/dev/null)" || return 1
+    hits+="$row"$'\n'
   done
   hits="$(printf '%s\n' "$hits" | sed '/^$/d')"
   [ "$(printf '%s\n' "$hits" | sed '/^$/d' | wc -l)" -eq 1 ] || return 1
   [ "$(printf '%s' "$hits" | jq -r '.provider_id//""' 2>/dev/null)" = meta ] || return 1
   printf '%s' "$hits"
 }
-muse_code_row_visible(){ printf '%s' "$1" | jq -e '.visibility=="visible"' >/dev/null 2>&1; }
 muse_code_reasoning_effort(){
   EFFECTIVE_REASONING_EFFORT=high
   local tier="${AI_MUSE_REASONING_EFFORT:-}" row
@@ -267,7 +302,7 @@ muse_code_reasoning_effort(){
   EFFECTIVE_REASONING_EFFORT="$tier"
 }
 linked_below_home(){ # true when the path or any ancestor below the profile home is a link or junction
-  local p="$1"; while [ -n "$p" ] && [ "$p" != "$PROFILE_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do [ ! -L "$p" ] || return 0; p="$(dirname "$p")"; done; return 1
+  local p="$1"; while [ -n "$p" ] && [ "$p" != "$PROFILE_HOME" ] && [ "$p" != / ] && [ "$p" != . ]; do [ ! -L "$p" ] || return 0; case "$p" in */*) p="${p%/*}"; p="${p:-/}";; *) p=.;; esac; done; return 1 # no dirname fork per level: under load each costs about a second (#773)
 }
 require_runtime(){
   if [ "$ENGINE" = muse-code ]; then
@@ -296,7 +331,7 @@ prepare(){
   identity="$(tmp_file)"
   "$PACKET" resolve "$root" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" \
     || die "source identity refused before snapshot creation"
-  REVIEW_DIR="$("$SANDBOX" ensure-copy "$root" "$t")"
+  REVIEW_DIR="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX" ensure-copy "$root" "$t")"
   # jq on Windows stores native paths; render the same identity before and
   # after local recovery so an identical report remains byte-identical.
   if command -v cygpath >/dev/null 2>&1; then REVIEW_DIR="$(cygpath -am "$REVIEW_DIR")"; fi
@@ -379,7 +414,7 @@ tree_state(){
   local root="$1" rel
   { git -C "$root" rev-parse HEAD; git -C "$root" diff --binary HEAD; while IFS= read -r -d '' rel; do printf '%s\0' "$rel"; sha256sum "$root/$rel"; done < <(git -C "$root" ls-files --others --exclude-standard -z); } | sha256sum | cut -d' ' -f1
 }
-new_report_path(){ printf '%s/.ai/reviews/muse-%s-%s-%s-%s.md' "$1" "$2" "$(date -u +%Y%m%dT%H%M%SZ)" "$$" "$RANDOM"; }
+new_report_path(){ printf '%s/.ai/reviews/muse-%s-%s-%s-%s.md' "$1" "$(short_name "$2" 64)" "$(date -u +%Y%m%dT%H%M%SZ)" "$$" "$RANDOM"; }
 ensure_report_destination(){
   local root="$1" path="$2" dir="$root/.ai/reviews" rel
   case "$path" in "$dir"/*) ;; *) die "refusing Muse report outside $dir: $path" ;; esac
@@ -663,9 +698,23 @@ parse_turn(){ # shared terminal parser; never launches the provider
   [ -z "$meta" ] || usage_event="$(jq -r '.retained_turn.original_invocation_id // empty' "$meta")"
   USAGE_JSON="$(turn_usage "$out" "$TURN_SID" "$usage_event")"
 }
+# muse_credit_stop OUT: on a failed turn, classify only provider error channels
+# (stderr, error events, failed-run payloads without their text, which is
+# response content that can quote billing phrases) for billing
+# exhaustion; on a match print the diagnosis and exit 92 so the caller stops now.
+muse_credit_stop(){
+  local out="$1" ev
+  ev="$(tmp_file)" || return 0
+  [ ! -f "$out" ] || jq -c 'select(type=="object")|if (.type//"")=="error" then .error elif ((.payload_type//"")|test("terminal[.]failed")) then (.payload|objects|del(.text)) elif ((.payload_type//"")|test("error|fail";"i")) then (.payload|objects|del(.text)) else empty end' "$out" > "$ev" 2>/dev/null || true
+  printf 'ai-muse: error: %s\n' "$TURN_ERROR" > "$ev.note"
+  reviewer_credit_scan muse "$out.stderr" "$ev" || true
+  [ -z "${REVIEWER_CREDIT_HIT:-}" ] || cat "$ev.note" >&2
+  rm -f "$ev" "$ev.note"
+  reviewer_credit_exit
+}
 preserve_failure(){
   local root="$1" name="$2" prompt="$3" out="$4" meta="$5" mode="$6" path tmp now sid
-  path="$root/.ai/reviews/muse-$name-incomplete-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.md"; ensure_report_destination "$root" "$path"
+  path="$root/.ai/reviews/muse-$(short_name "$name" 64)-incomplete-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.md"; ensure_report_destination "$root" "$path"
   [ -n "$PUBLISH_FD" ] || return 1
   { printf '# Muse incomplete turn\n\nThis is not an accepted review result. Raw provider and error bodies are deliberately omitted.\n\n## Failure\n\n%s\n\n## Request\n\n%s\n\n## Recoverable identity\n\n- requested session: `%s`\n- returned session: `%s`\n- completion reason: `%s`\n- process result: `%s`\n' "$TURN_ERROR" "$(cat "$prompt")" "$( [ -f "$meta" ] && jq -r '.session_id//""' "$meta" || true)" "$TURN_SID" "$FINISH" "${RUN_RC:-unknown}"; [ -z "$TEXT" ] || printf '\n## Partial response\n\n%s\n' "$TEXT"; } >&"$PUBLISH_FD" || return 1
   finish_report_staging "$root" "$path"
@@ -709,7 +758,7 @@ cmd_new(){
   [ -z "${AI_MUSE_TEST_PREPARE_MARKER:-}" ] || { printf 'ready\n' > "$AI_MUSE_TEST_PREPARE_MARKER"; sleep "${AI_MUSE_TEST_PREPARE_DELAY:-3}"; }
   report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"
   tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
-  if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" new; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved."; fi; fi
+  if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" new; then muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence could not be saved."; fi; fi
   # Preserve the provider session immediately after proven completion. A later
   # local failure remains recoverable through show, ask, transcript, or delete.
   tmp="$(tmp_file)"; jq --arg sid "$TURN_SID" --arg now "$(date -u +%FT%TZ)" '.status="completed_pending_local_checks"|.session_id=$sid|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
@@ -727,7 +776,7 @@ cmd_ask(){
   sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
   printf 'Muse session continuing: %s\nState: %s\n' "$name" "$meta" >&2
   report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
-  if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "$sid" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else die "$TURN_ERROR Incomplete evidence could not be saved; the session remains blocked."; fi; fi
+  if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "$sid" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence could not be saved; the session remains blocked."; fi; fi
   if [ "$TURN_SID" != "$sid" ]; then TURN_ERROR="Muse resumed a different session ($TURN_SID instead of $sid)."; if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then die "$TURN_ERROR Response rejected and evidence preserved."; else die "$TURN_ERROR Response rejected; evidence could not be saved and the session remains blocked."; fi; fi
   tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="completed_pending_local_checks"|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
   after="$(tree_state "$root")"; [ "$before" = "$after" ] || die "the source repository changed during the Muse turn; stale response rejected. The advanced session was preserved; inspect it with AI_MUSE_CALLER=$CALLER ai-muse transcript $name before continuing."; rep="$(report "$root" "$name" "$prompt" "$report_path")"
@@ -894,18 +943,17 @@ cmd_doctor(){
     catalog_row="$(muse_code_catalog_row "$catalog_dir" "$MODEL" || true)"
     check "model catalog has a row for $MODEL" test -n "$catalog_row"
     if [ -n "$catalog_row" ]; then
-      check "model row for $MODEL is visible" muse_code_row_visible "$catalog_row"
+      # One jq pass for the visibility check and every displayed field: each jq
+      # launch costs up to ~1s on some Windows hosts, and the review preflight
+      # allows this whole doctor 10s (#773).
+      local visible ctx outl cin cout ccached ccur cur_shown cur_raw cur_flag
+      IFS=$'\x1f' read -r visible ctx outl cin cout ccached ccur cur_shown cur_raw cur_flag < <(printf '%s' "$catalog_row" | jq -r '[(.visibility=="visible"), (.context_limit//"unknown"), (.output_limit//"unknown"), (.cost.input//"unknown"), (.cost.output//"unknown"), (.cost.cached//"unknown"), (.cost.currency//"unknown"), (if .is_current==null then "unknown" else .is_current end), (if .is_current==null then "absent" else .is_current end), (.is_current//false)] | map(tostring|gsub("[\t\r\n]";" ")) | join("\u001f")' 2>/dev/null | tr -d '\r') || true
+      check "model row for $MODEL is visible" test "$visible" = true
       printf '  model %s: context_limit=%s output_limit=%s cost per million: input=%s output=%s cached=%s %s; is_current=%s\n' "$MODEL" \
-        "$(printf '%s' "$catalog_row" | jq -r '.context_limit//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.output_limit//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.cost.input//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.cost.output//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.cost.cached//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r '.cost.currency//"unknown"')" \
-        "$(printf '%s' "$catalog_row" | jq -r 'if .is_current==null then "unknown" else (.is_current|tostring) end')"
-      if [ "$(printf '%s' "$catalog_row" | jq -r '.is_current//false')" != true ]; then
+        "${ctx:-unknown}" "${outl:-unknown}" "${cin:-unknown}" "${cout:-unknown}" "${ccached:-unknown}" "${ccur:-unknown}" "${cur_shown:-unknown}"
+      if [ "$cur_flag" != true ]; then
         printf 'WARN  model catalog does not mark %s current (is_current: %s); capability drift alarm - verify the engine still fits before relying on it\n' \
-          "$MODEL" "$(printf '%s' "$catalog_row" | jq -r 'if .is_current==null then "absent" else (.is_current|tostring) end')"
+          "$MODEL" "${cur_raw:-absent}"
       fi
     fi
   else
@@ -929,7 +977,7 @@ cmd_doctor(){
     printf '%s' 'Perform an independent read-only health review of this empty fixture. Finish with exactly one final line: VERDICT: APPROVE' > "$prompt"
     prior_timeout="$TIMEOUT"; TIMEOUT="${AI_MUSE_DOCTOR_TIMEOUT:-90}"
     case "$TIMEOUT" in ''|0|*[!0-9]*) die 'AI_MUSE_DOCTOR_TIMEOUT must be a positive whole number of seconds.';; esac
-    if ! run_turn "$fixture" "$prompt" "$out"; then TIMEOUT="$prior_timeout"; die "$TURN_ERROR"; fi
+    if ! run_turn "$fixture" "$prompt" "$out"; then TIMEOUT="$prior_timeout"; muse_credit_stop "$out"; die "$TURN_ERROR"; fi
     TIMEOUT="$prior_timeout"
     if [ "$ENGINE" = muse-code ]; then final_text="$TEXT"; else final_text="$(jq -sr '[.[]|select(.type=="text")|.part.text//empty]|last//empty' "$out")"; fi
     final_line="$(printf '%s\n' "$final_text" | awk 'NF { line=$0 } END { print line }')"

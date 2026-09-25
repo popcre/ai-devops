@@ -7,7 +7,7 @@ look like boilerplate are the ones that have actually prevented incidents.
 
 ## 1. Who you are and where you work
 
-You are sub-agent **`<agent-name>`** in a coordinated `u2giants/shared-db`
+You are sub-agent **`<agent-name>`** in a coordinated `popcre/shared-db`
 session. There is ONE orchestrator; it dispatched you and it reads your reports.
 
 - Work **only** in your worktree: `<C:\repos\shared-db\.claude\worktrees\...>`

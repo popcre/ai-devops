@@ -24,7 +24,9 @@ check 'persistent ask command exists' "grep -q 'cmd_ask' '$SCRIPT'"
 check 'ask resumes exact session' "grep -q -- '--session \"\$sid\"' '$SCRIPT'"
 check 'same named session is locked across turns' "grep -q 'lock_session \"\$rid\" \"\$name\"' '$SCRIPT'"
 check 'failed lock acquisition cannot remove its owner' "grep -q 'LOCK=\"\$candidate\"' '$SCRIPT'"
-check 'caller names are path-safe' "grep -q 'name_ok \"\$CALLER\"' '$SCRIPT'"
+check 'caller names are path-safe' "grep -q 'caller_ok \"\$CALLER\"' '$SCRIPT'"
+check 'session-name path components are bounded (path-length class)' "grep -q 'short_name \"muse-\$CALLER-\$1\" 64' '$SCRIPT' && grep -q 'short_name \"\$1--\$CALLER--\$2\" 64' '$SCRIPT'"
+check "no unbounded session-derived tag or file name remains" "! grep -nE '(grok|gemini|muse|qwen)-[$][{]?(1|2|name|n)([^A-Za-z_]|$)' '$SCRIPT' | grep -v short_name | grep -q ."
 check 'completion requires stop' "grep -q '\[ \"\$FINISH\" != stop \]' '$SCRIPT'"
 check 'source state is checked after every turn' "test \"\$(grep -c 'stale response rejected' '$SCRIPT')\" -eq 2"
 check 'temporary files use a securely created directory' "grep -q 'mktemp -d' '$SCRIPT' && grep -q 'trap cleanup EXIT' '$SCRIPT'"
@@ -132,6 +134,7 @@ case "${1:-}" in
       for fd_path in /proc/$$/fd/*; do case "$(readlink "$fd_path" 2>/dev/null || true)" in *.muse-stage.*) printf leaked > "$MUSE_STUB_FD_LEAK_FILE";; esac; done
     fi
     [ "${MUSE_STUB_MODE:-}" = fail ] && exit 7
+    [ "${MUSE_STUB_MODE:-}" = credit ] && { cat "$MUSE_STUB_CREDIT_FILE"; exit 1; }
     if [ "${MUSE_STUB_MODE:-}" = capacity ]; then
       n="$(cat "$MUSE_STUB_CAPACITY_FILE" 2>/dev/null || echo 0)"; n=$((n+1)); printf '%s' "$n" > "$MUSE_STUB_CAPACITY_FILE"
       [ "$n" -gt "${MUSE_STUB_CAPACITY_FAILS:-1}" ] || { printf '{"type":"error","sessionID":"ses_new","error":{"name":"APIError","data":{"message":"model_not_found: The requested model was not found."}}}
@@ -341,6 +344,11 @@ git -C "$REPO" update-ref -d refs/heads/review-target
 check 'nonnumeric heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=nope MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat-text --prompt test\" && test ! -e '$TMP/heartbeat-called'"
 check 'multi-step usage report sums unique observed parts and labels provenance' "cd '$REPO' && eval \"$ENV MUSE_STUB_USAGE_FIXTURE='$ROOT/tests/fixtures/muse-opencode/usage-1.18.12.json' '$SCRIPT' new usage-turn --prompt test\" > '$TMP/usage-turn.log' && grep -q '\"input\": 35602' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'provider-missingness-unknown' '$REPO'/.ai/reviews/muse-usage-turn-*.md && grep -q 'usage-proven-response' '$TMP/usage-turn.log'"
 check 'optional usage failure preserves successful paid response' "cd '$REPO' && eval \"$ENV AI_MUSE_TEST_USAGE_FAILURE=1 MUSE_STUB_TOUCH='$TMP/usage-paid-count' '$SCRIPT' new usage-failure --prompt test\" > '$TMP/usage-failure.log' 2>&1 && grep -q usage-formatting-failed '$REPO'/.ai/reviews/muse-usage-failure-*.md && grep -q first '$TMP/usage-failure.log' && test \"\$(wc -c < '$TMP/usage-paid-count')\" -eq 7"
+MUSE_LONG_NAME="long-$(printf 'n%.0s' $(seq 1 150))"
+check 'a 155-character session name completes a review' "cd '$REPO' && eval \"$ENV '$SCRIPT' new '$MUSE_LONG_NAME' --prompt test\" > '$TMP/long-name.log' 2>&1"
+check 'the long-name session resumes on ask' "cd '$REPO' && eval \"$ENV '$SCRIPT' ask '$MUSE_LONG_NAME' --prompt again\" > '$TMP/long-name-ask.log' 2>&1"
+find "$TMP/state" "$TMP/sandboxes" "$REPO/.ai" -print 2>/dev/null | awk -F/ 'length($NF)>110' | sed 's/^/  diagnostic: over-long name: /' | head -5 || true
+check 'no state, sandbox, or report name exceeds 110 characters' "! find '$TMP/state' '$TMP/sandboxes' '$REPO/.ai' -print 2>/dev/null | awk -F/ 'length(\$NF)>110{f=1} END{exit !f}'"
 check 'invalid heartbeat creates no stuck new-session metadata' "test -z \"\$(find '$TMP/state' -type f -name '*invalid-heartbeat*' -print -quit 2>/dev/null)\""
 printf '\nbash: true\n' >> "$HOME_FIX/.config/ai-devops-muse/opencode-xdg/opencode/agent/muse-review.md"
 check 'hostile installed profile is rejected before a turn' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' new hostile --prompt test\""
@@ -429,6 +437,14 @@ check 'capacity 404 is relaunched and then succeeds' "cd '$REPO' && rm -f '$TMP/
 check 'capacity 404 stops after the retry budget' "cd '$REPO' && rm -f '$TMP/cap2' && ! eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 AI_MUSE_CAPACITY_RETRIES=1 MUSE_STUB_MODE=capacity MUSE_STUB_CAPACITY_FILE='$TMP/cap2' MUSE_STUB_CAPACITY_FAILS=5 '$SCRIPT' new capacity-fail --prompt test\" >/dev/null 2>&1 && test \"\$(cat '$TMP/cap2')\" = 2"
 check 'ordinary provider failure is never relaunched' "cd '$REPO' && : > '$TMP/fail-calls' && ! eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 MUSE_STUB_CALLS_FILE='$TMP/fail-calls' MUSE_STUB_MODE=fail '$SCRIPT' new fail-once --prompt test\" >/dev/null 2>&1 && test \"\$(grep -c run '$TMP/fail-calls')\" = 1"
 check 'provider failure is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' new provider-fail --prompt test\""
+# Out of credit (Albert, 2026-09-24): the run itself must say so, exit 92, and
+# record the quarantine; an ordinary failure must not be called out of credit.
+set +e; (cd "$REPO" && eval "$ENV AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q' MUSE_STUB_MODE=credit MUSE_STUB_CREDIT_FILE='$ROOT/tests/fixtures/reviewer-credit/muse-insufficient-quota.jsonl' '$SCRIPT' new out-of-credit --prompt test") >"$TMP/credit.out" 2>"$TMP/credit.err"; MUSE_CREDIT_RC=$?; set -e
+check 'out of credit exits 92' "test '$MUSE_CREDIT_RC' -eq 92"
+check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=muse code=insufficient_quota' '$TMP/credit.err'"
+check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: .*dev.meta.ai' '$TMP/credit.err'"
+check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global muse --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'ordinary failure is not reported as out of credit' "cd '$REPO' && ! eval \"$ENV AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' MUSE_STUB_MODE=fail '$SCRIPT' new plain-fail --prompt test\" 2>'$TMP/plain.err'; ! grep -q 'OUT OF CREDIT' '$TMP/plain.err'"
 check 'malformed provider output is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=malformed '$SCRIPT' new malformed --prompt test\""
 check 'partly malformed output preserves a recoverable session' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=partialmalformed '$SCRIPT' new partial --prompt test\"; meta=\$(find '$TMP/state' -name 'codex--partial.json' -type f); jq -e '.session_id==\"ses_partial\" and .status==\"provider_outcome_uncertain\"' \"\$meta\""
 check 'missing completion is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=nostop '$SCRIPT' new nostop --prompt test\""

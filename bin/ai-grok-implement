@@ -64,7 +64,35 @@ set -euo pipefail
 
 VERSION="1.1.0"
 
-STATE_DIR="${AI_GROK_STATE_DIR:-$HOME/.local/state/ai-devops/grok}"
+# Default Grok state directory (#765). AI_GROK_STATE_DIR wins. Otherwise pick a
+# real directory that can hold same-inode credential hard links: after the bulk
+# C:→D: move, `.../grok` is a junction onto another volume while credentials
+# stay on the profile volume, so the default becomes the real `.../grok-c`
+# sibling instead of the linked bulk home.
+grok_default_state_dir() {
+  if [ -n "${AI_GROK_STATE_DIR:-}" ]; then
+    printf '%s\n' "$AI_GROK_STATE_DIR"
+    return 0
+  fi
+  local conventional="$HOME/.local/state/ai-devops/grok" sibling="$HOME/.local/state/ai-devops/grok-c"
+  local auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}" src_dev conv_dev
+  if [ -L "$conventional" ]; then
+    printf '%s\n' "$sibling"
+    return 0
+  fi
+  if [ -d "$auth_dir" ] && [ -e "$conventional" ]; then
+    auth_dir="$(cd -P -- "$auth_dir" 2>/dev/null && pwd -P)" || auth_dir="${AI_GROK_AUTH_HOME:-$HOME/.grok}"
+    src_dev="$(stat -L -c %d "$auth_dir" 2>/dev/null || true)"
+    conv_dev="$(stat -L -c %d "$conventional" 2>/dev/null || true)"
+    if [ -n "$src_dev" ] && [ -n "$conv_dev" ] && [ "$src_dev" != "$conv_dev" ]; then
+      printf '%s\n' "$sibling"
+      return 0
+    fi
+  fi
+  printf '%s\n' "$conventional"
+}
+
+STATE_DIR="$(grok_default_state_dir)"
 IMPL_DIR="$STATE_DIR/implement"
 CALLER="${AI_GROK_CALLER:-claude}"
 

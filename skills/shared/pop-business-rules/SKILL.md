@@ -6,17 +6,17 @@ description: Find, explain, change, reconcile, or audit POP Creations rules thro
 # POP Business Rules
 
 The Skill is the procedure. The rules themselves live only in the canonical
-`u2giants/shared-db/docs/business-rules/` library.
+`popcre/shared-db/docs/business-rules/` library.
 
 ## Start here
 
-1. Locate `u2giants/shared-db`. Prefer a current canonical checkout. A consumer
+1. Locate `popcre/shared-db`. Prefer a current canonical checkout. A consumer
    repo's `shared-db/` directory is a read-only mirror and may lag `main`.
 2. Open `docs/business-rules/application-map.md`.
 3. Load only the topics touched by the application, task, or business object.
    Cross-topic work must load every applicable topic.
 4. If the local map or a required topic is missing or stale, read canonical
-   `https://github.com/u2giants/shared-db/tree/main/docs/business-rules` and say
+   `https://github.com/popcre/shared-db/tree/main/docs/business-rules` and say
    that the canonical source was used.
 
 Never infer a Settled business rule from code, database shape, screens, or old

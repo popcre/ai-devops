@@ -278,7 +278,7 @@ Three passes, and then a fourth that is just honesty:
    merged branch is indistinguishable from one a live sub-agent just pushed from.
 
    Remote branches now delete themselves — `delete-branch-on-merge` was turned on
-   for `u2giants/shared-db` on 2026-08-13.
+   for `popcre/shared-db` on 2026-08-13.
 
 2a. **Retire the `HANDOFF.d/` file of every workstream you finished, in the same
    pull request that closes its issue.** You are the session that did the work and

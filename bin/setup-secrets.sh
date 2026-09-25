@@ -355,7 +355,7 @@ if os.path.exists(path):
 servers = {
     # stdio + secrets: launched under `op run`, which injects the mcp.env refs.
     # --read-only is mandatory: all shared-DB schema work goes through the
-    # u2giants/shared-db repo (branch + PR), never through this MCP.
+    # popcre/shared-db repo (branch + PR), never through this MCP.
     "supabase": {"command": launch, "args": [
         "npx", "-y", "@supabase/mcp-server-supabase@0.11.0",
         "--read-only", "--project-ref", supa_ref]},
@@ -377,12 +377,12 @@ servers = {
         "op://vibe_coding/recall-ai MCP/password",
         "--transport", "http-first"]},
 
-    # no secret at all. vercel authenticates via mcp-remote's browser OAuth flow,
-    # so it must NOT go through the remote launcher (that would force a header).
+    # no secret at all. railway authenticates via mcp-remote's browser OAuth
+    # flow, so it must NOT go through the remote launcher (that would force a
+    # header). vercel is NOT global: it is Oracle-only (setup-machine.ps1
+    # $McpProjectScope) and native HTTP, never behind mcp-remote; see below.
     "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp@0.0.79"]},
     "ag-grid":    {"command": "npx", "args": ["-y", "ag-mcp"]},
-    "vercel":     {"command": "npx", "args": ["-y", "mcp-remote@0.1.38",
-                                              "https://mcp.vercel.com"]},
     "railway":    {"command": "npx", "args": ["-y", "mcp-remote@0.1.38",
                                               "https://mcp.railway.com"]},
 }
@@ -397,6 +397,9 @@ if codex:
     }
 
 cfg.setdefault("mcpServers", {}).update(servers)
+# Retired from the global set (Oracle-only since 2026-09-24): remove the old
+# mcp-remote vercel entry this script used to write.
+cfg["mcpServers"].pop("vercel", None)
 with open(path, "w") as fh:
     json.dump(cfg, fh, indent=2)
     fh.write("\n")

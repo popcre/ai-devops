@@ -61,6 +61,8 @@ VERSION="0.1.0"
 
 STATE_DIR="${AI_QWEN_STATE_DIR:-$HOME/.local/state/ai-devops/qwen}"
 CALLER="${AI_QWEN_CALLER:-claude}"
+case "$CALLER" in ''|.*|*[!A-Za-z0-9._-]*) printf 'ai-qwen: error: caller name %s is not path-safe (letters, digits, . _ - only; no leading dot).
+' "${CALLER:-<empty>}" >&2; exit 2;; esac
 QWEN_MODEL="${AI_QWEN_MODEL:-qwen3.8-max}"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
@@ -309,7 +311,7 @@ SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 [ -x "$SANDBOX_BIN" ] || SANDBOX_BIN="$(command -v ai-review-sandbox 2>/dev/null || true)"
 review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
-  "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
+  AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
 }
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
@@ -391,17 +393,24 @@ repo_id() {
 repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; }
 valid_name() { provider_wrapper_valid_name "$1"; }
 
-meta_path()     { printf '%s/sessions/%s/%s--%s.json' "$STATE_DIR" "$1" "$CALLER" "$2"; }
-impl_dir()      { printf '%s/sessions/%s/%s--%s.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+# short_name TEXT MAX: TEXT when it fits in MAX characters; otherwise a prefix
+# plus a 12-hex hash of the whole TEXT, exactly MAX long. Every path component
+# built from a session name, caller, or tag goes through this, so no derived
+# path grows with the length of a worktree-derived name.
+short_name() { local s="$1" max="$2"; if [ "${#s}" -le "$max" ]; then printf %s "$s"; else printf '%s-%s' "${s:0:$((max-13))}" "$(printf %s "$s" | sha256sum | cut -c1-12)"; fi; }
+# A session saved before names were bounded keeps its full-name file; find it first.
+state_leaf(){ local d="$1" full="$2" ext="$3" s; s="$(short_name "$full" 56)"; if [ "$s" != "$full" ] && [ -e "$d/$full$ext" ]; then printf '%s/%s%s' "$d" "$full" "$ext"; else printf '%s/%s%s' "$d" "$s" "$ext"; fi; }
+meta_path()     { state_leaf "$STATE_DIR/sessions/$1" "$CALLER--$2" .json; }
+impl_dir()      { state_leaf "$STATE_DIR/sessions/$1" "$CALLER--$2" .d; }
 impl_meta_path(){ printf '%s/metadata.json' "$(impl_dir "$1" "$2")"; }
-lock_path()     { printf '%s/locks/%s--%s--%s.lock.d' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+lock_path()     { printf '%s/locks/%s.lock.d' "$STATE_DIR" "$(short_name "$1--$CALLER--$2" 64)"; }
 repolock_path() { printf '%s/locks/repo--%s.lock.d' "$STATE_DIR" "$1"; }
 # Reviews are isolated per session (own snapshot qwen-$CALLER-$name, Qwen
 # session, verdict record), so their lock is keyed by the review, not the
 # repository: any number of same-repository Qwen reviews may run at once
 # (plan Step 7A, decisions 20-21). Implementation keeps the repository lock.
-reviewlock_path() { printf '%s/locks/review--%s--%s.lock.d' "$STATE_DIR" "$1" "$2"; }
-workspace_path(){ printf '%s/worktrees/qwen.%s-%s-%s/wt' "$STATE_DIR" "$1" "$CALLER" "$2"; }
+reviewlock_path() { printf '%s/locks/review--%s.lock.d' "$STATE_DIR" "$(short_name "$1--$2" 64)"; }
+workspace_path(){ printf '%s/worktrees/qwen.%s-%s/wt' "$STATE_DIR" "$1" "$(short_name "$CALLER-$2" 64)"; }
 
 # Portable mutex (flock does not exist in Git Bash); stale locks are reclaimed.
 lock_owner_alive() {
@@ -515,10 +524,10 @@ find_meta_optional() {
       [ "$(jq -r '.repo_remote // ""' "$cand")" = "$remote" ] || continue
       [ -z "$found" ] || die "multiple moved-checkout records match session '$2'; refusing an ambiguous migration."
       found="$cand"
-    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -path "*/$CALLER--$2.d/metadata.json" \) 2>/dev/null)
+    done < <(find "$STATE_DIR/sessions" -type f \( -name "$CALLER--$2.json" -o -path "*/$CALLER--$2.d/metadata.json" -o -name "$(short_name "$CALLER--$2" 56).json" -o -path "*/$(short_name "$CALLER--$2" 56).d/metadata.json" \) 2>/dev/null)
     if [ -n "$found" ]; then
       case "$found" in
-        */"$CALLER--$2.d/metadata.json") f="$found" ;; # Keep the rid: Qwen binds resume to its stable workspace path.
+        */"$CALLER--$2.d/metadata.json"|*/"$(short_name "$CALLER--$2" 56).d/metadata.json") f="$found" ;; # Keep the rid: Qwen binds resume to its stable workspace path.
         *) mkdir -p "$(dirname "$f")"; mv "$found" "$f" ;;
       esac
     fi
@@ -545,6 +554,18 @@ has_result() { # has_result FILE
 }
 session_id_from() { tail -5 "$1" | jq -r 'select(.type=="result")|.session_id // empty' 2>/dev/null | tail -1; }
 model_from() { jq -r 'select(.type=="assistant")|.message.model // empty' "$1" 2>/dev/null | tail -1; }
+
+declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/reviewer_event_guard.sh"
+# qwen_credit_stop OUT: on a failed turn, classify stderr and the provider's own
+# "[API Error: ...]" line (never the review text) for billing exhaustion; on a
+# match print the diagnosis and exit 92 so the caller stops now.
+qwen_credit_stop() {
+  local out="$1" ev="$1.credit"
+  provider_api_error "$out" > "$ev" 2>/dev/null || : > "$ev"
+  reviewer_credit_scan qwen "$out.err" "$ev" || true
+  rm -f "$ev"
+  reviewer_credit_exit
+}
 
 # Qwen reports transport-layer refusals (401, quota, capacity) as ordinary
 # assistant text inside an otherwise successful terminal record. That must never
@@ -924,9 +945,36 @@ preserve_review_stream() {
   cp "$source" "$temporary" && chmod 600 "$temporary" && mv -f "$temporary" "$destination" \
     || { rm -f "$temporary"; return 1; }
 }
+# One terminal success record for one exact session, with every assistant turn
+# on the pinned model. `finalize` requires exactly this before it will publish.
+stream_proves_terminal_success() { # STREAM SESSION_ID
+  [ -f "$1" ] && [ -n "$2" ] && [ "$2" != unavailable ] || return 1
+  jq -se --arg sid "$2" --arg model "$QWEN_MODEL" '([.[]|select(.type=="result")]|length)==1 and .[-1].type=="result" and .[-1].subtype=="success" and .[-1].is_error==false and .[-1].session_id==$sid and ($sid|length)>0 and $sid!="unavailable" and ([.[]|select(.session_id!=null)|.session_id]|all(.==$sid)) and ([.[]|select(.type=="assistant")|.message.model]|length>0 and all(.==$model))' "$1" >/dev/null 2>&1
+}
+# A signal that lands after the provider already wrote its terminal success
+# record (for example a caller's command timeout) interrupts only local
+# publication, not the paid turn. Record that exact state so `finalize` can
+# publish the retained bytes without a second provider call; anything short of
+# a proven terminal success stays an uncertain interrupted turn.
+interrupted_review_reason() { # STREAM
+  if stream_proves_terminal_success "$1" "$(session_id_from "$1")"; then
+    printf provider_turn_pending_local_validation
+  else
+    printf interrupted-provider-turn
+  fi
+}
+note_interrupted_review() { # REASON NAME
+  [ "$1" = provider_turn_pending_local_validation ] || return 0
+  note "ai-qwen: interrupted after Qwen had already returned its complete answer; no report was published."
+  note "  recover it without a new provider call: ai-qwen finalize $2"
+}
 cancel_plain_turn() {
+  local reason
   stop_run_turn
-  [ -z "$PLAIN_REVIEW_META" ] || record_existing_review_recovery "$PLAIN_REVIEW_META" "$PLAIN_REVIEW_OUT" interrupted-provider-turn || true
+  if [ -n "$PLAIN_REVIEW_META" ]; then
+    reason="$(interrupted_review_reason "$PLAIN_REVIEW_OUT")"
+    record_existing_review_recovery "$PLAIN_REVIEW_META" "$PLAIN_REVIEW_OUT" "$reason" && note_interrupted_review "$reason" "$(jq -r '.name // empty' "$PLAIN_REVIEW_META" 2>/dev/null)" || true
+  fi
   exit 130
 }
 trap 'cleanup_qualification_probe; cleanup_run_turn_env' EXIT
@@ -1120,8 +1168,9 @@ write_review_file() {
   ts="${QWEN_REPORT_KEY:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
   if [ -n "${QWEN_REPORT_KEY:-}" ]; then
     [[ "$QWEN_REPORT_KEY" =~ ^[0-9a-f]{64}$ ]] || return 1
+    ts="${QWEN_REPORT_KEY:0:24}"   # keeps the report file name within the path bound
   fi
-  if [ "$status" = accepted ]; then base="qwen-${name}-${ts}.md"; else base="qwen-${name}-incomplete-${ts}.md"; fi
+  if [ "$status" = accepted ]; then base="qwen-$(short_name "$name" 64)-${ts}.md"; else base="qwen-$(short_name "$name" 64)-incomplete-${ts}.md"; fi
   dir="$(reviews_dir "$repo" "$base")"
   if [ -z "$dir" ]; then
     warn "not writing a review file: '.ai/reviews' is not git-ignored in $repo. Add '.ai/reviews/' to .gitignore."
@@ -1284,6 +1333,7 @@ cmd_doctor() {
     echo "session store : FAILED"; rc=1
   fi
   if [ "$live" = 1 ]; then
+    REVIEWER_CREDIT_HIT=''
     local tmp diagnostic provider_rc post_runtime_sha post_preloader_sha failure_override=""
     tmp="$(mktemp)"; printf 'Reply with exactly: OK\n' > "$tmp.p"
     QUALIFICATION_ACTIVE=1; QUALIFICATION_STREAM="$tmp"
@@ -1315,9 +1365,13 @@ cmd_doctor() {
         return 1
       fi
       rc=1
+      # A billing refusal stops the doctor with exit 92 and the top-up line.
+      provider_api_error "$tmp" > "$tmp.credit" 2>/dev/null || : > "$tmp.credit"
+      reviewer_credit_scan qwen "$tmp.err" "$tmp.credit" || true
     fi
-    rm -f "$tmp" "$tmp.p" "$tmp.err" 2>/dev/null || true
+    rm -f "$tmp" "$tmp.p" "$tmp.err" "$tmp.credit" 2>/dev/null || true
     QUALIFICATION_STREAM=""
+    reviewer_credit_exit
   fi
   doctor_worktrees
   return $rc
@@ -1452,9 +1506,9 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
   }
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   [ "$kind" = incomplete ] && suffix=.incomplete || suffix=""
-  dir="$(artifact_dir "$repo" "qwen-${name}-${ts}${suffix}.patch")" || return 1
-  patch="$dir/qwen-${name}-${ts}${suffix}.patch"
-  report="$dir/qwen-${name}-${ts}.incomplete.md"
+  dir="$(artifact_dir "$repo" "qwen-$(short_name "$name" 64)-${ts}${suffix}.patch")" || return 1
+  patch="$dir/qwen-$(short_name "$name" 64)-${ts}${suffix}.patch"
+  report="$dir/qwen-$(short_name "$name" 64)-${ts}.incomplete.md"
   patch_tmp="$(mktemp "$dir/.qwen-patch.XXXXXX")" || return 1
   chmod 0600 "$patch_tmp" 2>/dev/null || true
   ( cd "$wt" && git add -A >/dev/null 2>&1 && git diff --binary "$base" ) > "$patch_tmp" 2>/dev/null \
@@ -1481,7 +1535,7 @@ emit_implementation_artifact() { # REPO NAME WT BASE OWNER KIND STATE RC OUT [PR
   fi
   if [ "$kind" = incomplete ]; then
     if [ "$prior" != "$base" ]; then
-      turn_patch="$dir/qwen-${name}-${ts}.turn.incomplete.patch"
+      turn_patch="$dir/qwen-$(short_name "$name" 64)-${ts}.turn.incomplete.patch"
       turn_tmp="$(mktemp "$dir/.qwen-turn-patch.XXXXXX")" || { rm -f "$patch_tmp"; return 1; }
       ( cd "$wt" && git diff --binary "$prior" ) > "$turn_tmp" 2>/dev/null || { rm -f "$patch_tmp" "$turn_tmp"; return 1; }
       [ -s "$turn_tmp" ] || { rm -f "$turn_tmp"; turn_patch=""; }
@@ -1618,7 +1672,10 @@ lifecycle_cancel() {
   LIFECYCLE_COMMAND_RC=130
   stop_run_turn
   if [ "$LIFECYCLE_MODE" = review ] && [ -n "$LIFECYCLE_META" ]; then
-    record_new_review_recovery "$LIFECYCLE_META" "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_REVIEW_DIR" "$LIFECYCLE_OUT" interrupted-provider-turn || true
+    local reason
+    reason="$(interrupted_review_reason "$LIFECYCLE_OUT")"
+    record_new_review_recovery "$LIFECYCLE_META" "$LIFECYCLE_REPO" "$LIFECYCLE_NAME" "$LIFECYCLE_REVIEW_DIR" "$LIFECYCLE_OUT" "$reason" \
+      && note_interrupted_review "$reason" "$LIFECYCLE_NAME" || true
   fi
   exit 130
 }
@@ -1651,9 +1708,9 @@ start_session() { # start_session NAME MODE
     [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_SNAPSHOT_MARKER"
     [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_SNAPSHOT_DELAY"
     resolve_review_identity "$repo"
-    workdir="$(review_boundary "$repo" "qwen-$name")"
+    workdir="$(review_boundary "$repo" "$(short_name "qwen-$name" 64)")"
     LIFECYCLE_REVIEW_DIR="$workdir"
-    prepare_review_identity "$repo" "$workdir" "qwen-$CALLER-$name"
+    prepare_review_identity "$repo" "$workdir" "$(short_name "qwen-$CALLER-$name" 64)"
     assert_governed_review_head
     if [ "$source_head_before" != "$(git -C "$repo" rev-parse HEAD)" ] || [ "$source_tree_before" != "$(tree_state "$repo")" ]; then
       die "the source repository changed while Qwen evidence was being prepared; no provider call was made. Start a new named Qwen review."
@@ -1700,6 +1757,7 @@ start_session() { # start_session NAME MODE
     note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
     note "  $(safe_report_detail "$LIFECYCLE_STATE")"
+    qwen_credit_stop "$out"
     exit 1
   fi
   verify_returned_model "$out"
@@ -1727,7 +1785,7 @@ start_session() { # start_session NAME MODE
     complete_review_metadata "$meta" "$sid" || die 'Qwen report was preserved but completion metadata could not be published; use finalize for this exact turn.'
   fi
   lifecycle_finalize 0
-  [ "${FINISH_RC:-0}" = 0 ] || exit "$FINISH_RC"
+  [ "${FINISH_RC:-0}" = 0 ] || { qwen_credit_stop "$out"; exit "$FINISH_RC"; }
 }
 
 cleanup_wt() { # cleanup_wt REPO WORKTREE OWNER
@@ -1789,7 +1847,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   workdir="$(jq -r '.review_dir // empty' "$meta")"
   if [ -z "$workdir" ]; then
     if [ -f "$repo/.git" ]; then
-      workdir="$($SANDBOX_BIN ensure "$repo" "qwen-$name")"
+      workdir="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" $SANDBOX_BIN ensure "$repo" "$(short_name "qwen-$name" 64)")"
     else
       workdir="$repo"
     fi
@@ -1798,10 +1856,10 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   fi
   source_head_before="$current_head"; source_tree_before="$current_tree"
   resolve_review_identity "$repo"
-  workdir="$(refresh_review_boundary "$repo" "qwen-$name" "$workdir")"
+  workdir="$(refresh_review_boundary "$repo" "$(short_name "qwen-$name" 64)" "$workdir")"
   [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER"
   [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_DELAY"
-  prepare_review_identity "$repo" "$workdir" "qwen-$CALLER-$name"
+  prepare_review_identity "$repo" "$workdir" "$(short_name "qwen-$CALLER-$name" 64)"
   assert_governed_review_head
   [ "$source_head_before" = "$(git -C "$repo" rev-parse HEAD)" ] && [ "$source_tree_before" = "$(tree_state "$repo")" ] \
     || die "the source repository changed while rebuilding the sealed Qwen evidence; no provider call was made. Start a new named Qwen review."
@@ -1824,6 +1882,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     note "  terminal reason: $LIFECYCLE_STATE"
     note "  qwen exit status was $rc — which proves nothing on its own."
     note "  $(safe_report_detail "$LIFECYCLE_STATE")"
+    qwen_credit_stop "$out"
     rm -f "$pf" "$out" "$out.err"; exit 1
   fi
   verify_returned_model "$out"
@@ -1845,6 +1904,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     # #1220: report_answer_defect just named "$out" as the place the review body
     # can still be recovered from. Deleting it here would destroy the only copy.
     rm -f "$pf"
+    qwen_credit_stop "$out"
     exit "$FINISH_RC"
   fi
 }
@@ -1898,6 +1958,7 @@ continue_implementation() { # NAME RID META [RESET]
   if ! await_result "$out" "implementation continuation '$name'"; then
     LIFECYCLE_STATE="$(classify_incomplete_state "$out" "$out.err" "$AWAIT_RESULT_REASON")"
     note "  terminal reason: $LIFECYCLE_STATE"
+    qwen_credit_stop "$out"
     exit 1
   fi
   verify_returned_model "$out"
@@ -1908,7 +1969,7 @@ continue_implementation() { # NAME RID META [RESET]
   LIFECYCLE_STATE=completed
   FINISH_RC=0; finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   lifecycle_finalize 0
-  [ "$FINISH_RC" = 0 ] || exit "$FINISH_RC"
+  [ "$FINISH_RC" = 0 ] || { qwen_credit_stop "$out"; exit "$FINISH_RC"; }
 }
 
 QWEN_LAST_REPORT=""; QWEN_REPORT_KEY=""
@@ -1940,7 +2001,7 @@ cmd_finalize() { # local-only completion of one sealed provider turn
   jq -e --arg caller "$CALLER" --arg name "$name" --arg model "$QWEN_MODEL" '.mode=="review" and .caller==$caller and .name==$name and .model==$model' "$meta" >/dev/null || die 'recovery identity differs from the exact requested review.'
   same_path "$(jq -r .repo "$meta")" "$repo" || die 'recovery belongs to a different repository.'
   [ "$(git -C "$repo" rev-parse HEAD)" = "$(jq -r .head "$meta")" ] && [ "$(tree_state "$repo")" = "$(jq -r .working_tree_sha256 "$meta")" ] || die 'source changed; retained response cannot be finalized against different code.'
-  packet="$($PACKET_BIN path "$(jq -r .review_dir "$meta")" "qwen-$CALLER-$name")"
+  packet="$($PACKET_BIN path "$(jq -r .review_dir "$meta")" "$(short_name "qwen-$CALLER-$name" 64)")"
   [ "$(cat "$packet/MANIFEST.sha256" 2>/dev/null)" = "$(jq -r .packet_sha256 "$meta")" ] && "$PACKET_BIN" verify "$packet" >/dev/null || die 'the original sealed packet no longer verifies.'
   [ -z "$OPT_GOVERNED_VERDICT" ] || [ "$OPT_GOVERNED_VERDICT" = "$(jq -r '.governed_head // empty' "$meta")" ] || die 'finalize cannot change the original terminal verdict contract.'
   OPT_GOVERNED_VERDICT="$(jq -r '.governed_head // empty' "$meta")"
@@ -1963,7 +2024,7 @@ cmd_finalize() { # local-only completion of one sealed provider turn
     legacy_stderr=1
   fi
   sid="$(jq -r .qwen_session_id "$meta")"
-  jq -se --arg sid "$sid" --arg model "$QWEN_MODEL" '([.[]|select(.type=="result")]|length)==1 and .[-1].type=="result" and .[-1].subtype=="success" and .[-1].is_error==false and .[-1].session_id==$sid and ($sid|length)>0 and $sid!="unavailable" and ([.[]|select(.session_id!=null)|.session_id]|all(.==$sid)) and ([.[]|select(.type=="assistant")|.message.model]|length>0 and all(.==$model))' "$pending" >/dev/null || die 'the retained stream does not prove one terminal result for this exact session.'
+  stream_proves_terminal_success "$pending" "$sid" || die 'the retained stream does not prove one terminal result for this exact session.'
   verify_returned_model "$pending"
   QWEN_RECOVERY_EVENT_RUN_ID="$(jq -r '.recovery_event_run_id // empty' "$meta")"
   [ -n "$QWEN_RECOVERY_EVENT_RUN_ID" ] || die 'retained completion lacks its original invocation identity.'
@@ -2040,7 +2101,7 @@ cmd_delete() {
     [ ! -d "$dir/recovery" ] || rmdir "$dir/recovery" || die 'unexpected recovery files were preserved.'
     rmdir "$dir" || die "implementation state directory contains unowned files and was left in place: $dir"
   else
-    release_boundary "$(repo_root)" "qwen-$1" || die "review evidence cleanup refused; session metadata preserved."
+    release_boundary "$(repo_root)" "$(short_name "qwen-$1" 64)" || die "review evidence cleanup refused; session metadata preserved."
     rm -f "$meta"
   fi
   note "deleted local session record '$1'. Human-facing review and patch files were kept."
@@ -2050,7 +2111,7 @@ cmd_transcript() {
   local sid qwen repo dir out tmp source base; repo="$(repo_root)"
   sid="$(jq -r .qwen_session_id "$(find_meta "$(repo_id "$repo")" "$1")")"
   qwen="$(resolve_qwen)"
-  base="qwen-$1-$(date -u +%Y%m%dT%H%M%SZ)-$$.jsonl"; dir="$(reviews_dir "$repo" "$base")"; [ -n "$dir" ] || die "cannot export: exact destination is not safely git-ignored."
+  base="qwen-$(short_name "$1" 64)-$(date -u +%Y%m%dT%H%M%SZ)-$$.jsonl"; dir="$(reviews_dir "$repo" "$base")"; [ -n "$dir" ] || die "cannot export: exact destination is not safely git-ignored."
   mkdir -p "$dir"; out="$dir/$base"; tmp="$out.partial"
   [ ! -e "$out" ] || die "refusing to replace existing archive: $out"
   source="$(qwen_local "$qwen" sessions list --json --limit 1000 2>/dev/null | jq -r --arg sid "$sid" 'select(.sessionId==$sid)|.filePath' | tail -1)"

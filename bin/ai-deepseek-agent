@@ -43,6 +43,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   unset _AI_EVENT_SELF
 fi
 
+declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/reviewer_event_guard.sh"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
@@ -217,7 +218,24 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && { [ "$SUBCMD" = "send" ] || [ "$SUBCMD" = "
   # WinGet's PATH fallback (no Links symlink) makes Git Bash name op without .exe (issue #686).
   case "$OP_PHYSICAL" in *.exe) ;; *) [ -z "$OP_PHYSICAL" ] || [ ! -f "$OP_PHYSICAL.exe" ] || OP_PHYSICAL="$OP_PHYSICAL.exe" ;; esac
   if [ -n "${AI_DEEPSEEK_TEST_DIR:-}" ]; then case "$OP_PHYSICAL" in "$AI_DEEPSEEK_TEST_DIR"/*) ;; *) echo 'Error: test 1Password executable escaped its fixture directory.' >&2; exit 1;; esac
-  elif [ -n "${LOCALAPPDATA:-}" ]; then case "$OP_PHYSICAL" in "$(cygpath -u "$LOCALAPPDATA")"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe) ;; *) echo 'Error: 1Password CLI is not the expected WinGet installation.' >&2; exit 1;; esac
+  elif [ -n "${LOCALAPPDATA:-}" ]; then
+    _op_local="$(cygpath -u "$LOCALAPPDATA")"
+    case "$OP_PHYSICAL" in
+      "$_op_local"/Microsoft/WinGet/Links/op.exe)
+        # WinGet exposes its installed executable through Links. Execute the
+        # package copy, never the PATH hit, and refuse ambiguous installations.
+        _op_found=""
+        for _op_pkg in "$_op_local"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe; do
+          [ -f "$_op_pkg" ] && [ -x "$_op_pkg" ] || continue
+          [ -z "$_op_found" ] || { echo 'Error: 1Password CLI WinGet installation is ambiguous.' >&2; exit 1; }
+          _op_found="$_op_pkg"
+        done
+        [ -n "$_op_found" ] || { echo 'Error: 1Password CLI WinGet package copy not found.' >&2; exit 1; }
+        OP_PHYSICAL="$_op_found"
+        ;;
+      "$_op_local"/Microsoft/WinGet/Packages/AgileBits.1Password.CLI_*/op.exe) ;;
+      *) echo 'Error: 1Password CLI is not the expected WinGet installation.' >&2; exit 1;;
+    esac
   else [ "$OP_PHYSICAL" = /usr/bin/op ] || { echo 'Error: 1Password CLI is not the trusted system installation.' >&2; exit 1; }; fi
   OP_BIN="$OP_PHYSICAL"
   case "$OP_BIN" in /*) ;; *) echo 'Error: resolved 1Password executable path must be absolute.' >&2; exit 1;; esac
@@ -609,6 +627,9 @@ PY
   fi
   if [ "$http_code" != "200" ]; then
     echo "Error: provider-http-failure: DeepSeek returned HTTP $http_code; private response: $resp_file" >&2
+    # A 402 "Insufficient Balance" (or any billing body) stops the caller with
+    # exit 92 and the out-of-credit diagnosis instead of a generic failure.
+    reviewer_credit_scan deepseek "$resp_file" || true
     publish_failure_evidence "http-$http_code" || return 1
     rm -f "$req_file" "$status_file"
     ACTIVE_API_TMP=""
@@ -663,7 +684,7 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
   "$SOURCE_TOOLS/ai-review-packet" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$REVIEW_SOURCE_IDENTITY" || return 1
   REVIEW_HEAD="$(jq -r .head "$REVIEW_SOURCE_IDENTITY")" || return 1
   REVIEW_SOURCE_TAG="deepseek-$(printf '%s' "$REVIEW_SOURCE_IDENTITY" | sha256sum | cut -c1-24)"
-  snapshot="$("$SOURCE_TOOLS/ai-review-sandbox" ensure-copy "$REPO_ROOT" "$REVIEW_SOURCE_TAG")" || return 1
+  snapshot="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SOURCE_TOOLS/ai-review-sandbox" ensure-copy "$REPO_ROOT" "$REVIEW_SOURCE_TAG")" || return 1
   REVIEW_SOURCE_WORKSPACE="$snapshot"
   REVIEW_SOURCE_PACKET="$("$SOURCE_TOOLS/ai-review-packet" build "$snapshot" "$REVIEW_SOURCE_TAG" --identity "$REVIEW_SOURCE_IDENTITY")" || return 1
   REVIEW_SOURCE_HASH="$(cat "$REVIEW_SOURCE_PACKET/MANIFEST.sha256")"
@@ -1085,7 +1106,7 @@ case "$SUBCMD" in
     if [ "$LIVE" -eq 1 ]; then
       MSGS="$(mktemp)"; REPLY_FILE="$(mktemp)"
       printf '[{"role":"user","content":"Reply exactly DEEPSEEK_REVIEWER_HEALTHY"}]\n' > "$MSGS"
-      call_api "$MSGS" "$REPLY_FILE" || { rm -f "$MSGS" "$REPLY_FILE"; exit 1; }
+      call_api "$MSGS" "$REPLY_FILE" || { rm -f "$MSGS" "$REPLY_FILE"; reviewer_credit_exit; exit 1; }
       grep -qx 'DEEPSEEK_REVIEWER_HEALTHY' "$REPLY_FILE" || { rm -f "$MSGS" "$REPLY_FILE"; echo 'Error: DeepSeek live probe returned unexpected text.' >&2; exit 1; }
       rm -f "$MSGS" "$REPLY_FILE"; printf 'PASS  live provider response\n'
     fi
@@ -1155,7 +1176,7 @@ $REVIEW_INSTRUCTION"
     if [ "$REVIEW" = 1 ]; then build_candidate "" "$CANDIDATE" system "$REVIEW_INSTRUCTION" user "$MSG"; elif [ -n "$SYSTEM" ]; then build_candidate "" "$CANDIDATE" system "$SYSTEM" user "$MSG"; else build_candidate "" "$CANDIDATE" user "$MSG"; fi
     rm -f "$REPLY_FILE"
     pending_begin "$CANDIDATE" || exit 1
-    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and conversation was not created." >&2; exit 1; }
+    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and conversation was not created." >&2; reviewer_credit_exit; exit 1; }
     REPLY="$(<"$REPLY_FILE")"
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; conversation was not created. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
@@ -1235,7 +1256,7 @@ $REVIEW_INSTRUCTION"
     build_candidate "$F" "$CANDIDATE" user "$MSG"
     rm -f "$REPLY_FILE"
     pending_begin "$CANDIDATE" || exit 1
-    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and canonical conversation is unchanged." >&2; exit 1; }
+    call_api "$CANDIDATE" "$REPLY_FILE" || { echo "Error: provider or publication failed; local evidence retained and canonical conversation is unchanged." >&2; reviewer_credit_exit; exit 1; }
     REPLY="$(<"$REPLY_FILE")"
     VERDICT=""
     if [ "$REVIEW" = 1 ]; then VERDICT="$(review_verdict "$REPLY")" || { echo "Error: invalid-terminal-verdict: DeepSeek review ended without one final usable verdict; canonical conversation is unchanged. Private response: $API_RESPONSE_FILE" >&2; exit 1; }; fi
