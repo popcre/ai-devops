@@ -3,6 +3,9 @@
 #
 #   - git pull (fast-forward) inside /worksp/ai-devops
 #   - re-run install.sh
+#   - re-qualify any reviewer whose wrapper, runtime, or preloader changed
+#     in the pull (#804); a failed requalification is recorded with
+#     ai-reviewer-issue and fails this script, never silently skipped
 #   - never overwrites /etc/ai-devops/*.env (install.sh handles that)
 
 set -uo pipefail
@@ -15,20 +18,37 @@ cd "$REPO_ROOT" || { echo "Cannot cd to $REPO_ROOT" >&2; exit 1; }
 
 if [ -d .git ]; then
   info "Pulling latest changes in $REPO_ROOT"
-  if ! git pull --ff-only; then
+  # Hooks stay disabled for this pull on purpose: the post-merge reviewer
+  # hook would requalify against the OLD checkout mid-update, and a failed
+  # canary would read as a pull failure before install.sh ever ran. The
+  # explicit requalify below is the one gate for this update.
+  empty_hooks="$(mktemp -d)"
+  if ! git -c core.hooksPath="$empty_hooks" pull --ff-only; then
+    rmdir "$empty_hooks" 2>/dev/null || true
     warn "git pull --ff-only failed (local changes or diverged history)."
     warn "Resolve manually, then re-run ./update.sh"
     exit 1
   fi
+  rmdir "$empty_hooks" 2>/dev/null || true
 else
   warn "$REPO_ROOT is not a git checkout; skipping pull."
 fi
 
 info "Re-running install.sh"
 source_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
-if "$REPO_ROOT/install.sh" "$@"; then
-  info "update.sh installed source SHA $source_sha"
-  exit 0
+if ! "$REPO_ROOT/install.sh" "$@"; then
+  warn "update.sh failed while installing source SHA $source_sha"
+  exit 1
 fi
-warn "update.sh failed while installing source SHA $source_sha"
-exit 1
+
+# One explicit requalification gate closes this update: the pull above ran
+# with hooks disabled so a mid-update canary could not masquerade as a pull
+# failure, and install.sh just refreshed the hook and preflight that will
+# gate every later ordinary pull. On a host with no live-qualification
+# records this is a no-op.
+info "Re-qualifying reviewers whose qualification the pull invalidated"
+if ! "$REPO_ROOT/bin/ai-review-preflight" requalify; then
+  warn "automatic reviewer requalification failed for source SHA $source_sha; it is recorded as a reviewer issue"
+  exit 1
+fi
+info "update.sh installed source SHA $source_sha"

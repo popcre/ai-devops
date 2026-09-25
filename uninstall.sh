@@ -65,6 +65,18 @@ while IFS=$'\t' read -r type path source hash; do
   fi
 done < "$manifest"
 
+# Remove the managed post-merge reviewer hook (#804) through the one script
+# that owns the marker rules: foreign hooks are preserved, and so is a
+# managed hook whose bytes drifted; removal is ownership-gated, not
+# name-gated. The tool always comes from THIS script's checkout, while the
+# target repo is the (possibly overridden) --repo-root.
+hook_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/ai-install-post-merge-hook"
+if [ "$DRY_RUN" -eq 1 ]; then
+  "$hook_tool" --remove --dry-run --repo "$resolved_repo" || exit 1
+else
+  "$hook_tool" --remove --repo "$resolved_repo" || exit 1
+fi
+
 if [ "$PURGE" -eq 1 ]; then
   echo "ARCHIVE config $resolved_etc -> $archive/etc-ai-devops.tar.gz"
   if [ "$DRY_RUN" -eq 0 ]; then

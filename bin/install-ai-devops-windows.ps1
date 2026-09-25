@@ -136,8 +136,19 @@ function Assert-ReadyRepository([string]$Path) {
         if ($script:LastGitExitCode -ne 0) { throw 'Could not compare ai-devops source state.' }
         $parts = @($counts -split '\s+') | Where-Object { $_ }
         if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) { throw 'ai-devops is ahead of or diverged from origin/main.' }
-        Invoke-GitCommand @('-C', $Path, 'merge', '--ff-only', 'origin/main') | Out-Host
-        if ($script:LastGitExitCode -ne 0) { throw 'Fast-forwarding ai-devops failed.' }
+        # Hooks stay disabled for this fast-forward on purpose: the post-merge
+        # reviewer hook would requalify against the old checkout mid-install,
+        # and a failed canary would read as a fast-forward failure before any
+        # later stage ran. The explicit requalify near the end of this script
+        # is the one gate for this update.
+        $emptyHooks = Join-Path ([System.IO.Path]::GetTempPath()) ("ai-devops-no-hooks-" + [System.IO.Path]::GetRandomFileName())
+        New-Item -ItemType Directory -Path $emptyHooks -Force | Out-Null
+        try {
+            Invoke-GitCommand @('-C', $Path, '-c', "core.hooksPath=$emptyHooks", 'merge', '--ff-only', 'origin/main') | Out-Host
+            if ($script:LastGitExitCode -ne 0) { throw 'Fast-forwarding ai-devops failed.' }
+        } finally {
+            Remove-Item -LiteralPath $emptyHooks -Force -Recurse -ErrorAction SilentlyContinue
+        }
         $head = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
         if ($script:LastGitExitCode -ne 0 -or $head.Trim() -ne $remoteHead.Trim()) { throw 'ai-devops did not converge exactly to origin/main.' }
     }
@@ -151,6 +162,57 @@ function Ensure-Directory {
         } else {
             New-Item -ItemType Directory -Path $Path | Out-Null
         }
+    }
+}
+
+# Runs a bash gate command with BOTH streams visible: unlike
+# Invoke-NativeProbe (optional informational probes, stderr discarded), these
+# gates must print their diagnostics: a failed requalification names the
+# recorded reviewer issue on stderr and may not be swallowed.
+function Invoke-BashGate {
+    param([object]$Bash, [string]$CommandText)
+
+    $priorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $Bash.Source -lc $CommandText 2>&1 | ForEach-Object { $_.ToString() })
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $priorPreference
+    }
+    if ($output) { $output | Write-Host }
+    return $exitCode
+}
+
+# Reviewer auto-requalification post-merge hook (#804). Pulling new reviewer
+# wrapper code invalidates the affected reviewer's live qualification; the
+# hook re-qualifies it automatically. bin/ai-install-post-merge-hook owns the
+# marker rules (foreign hooks are never touched); this runs it through Git
+# Bash so both installers share one implementation. Returns the located bash
+# (or $null), because the later requalify step needs the same interpreter.
+function Get-GitBash {
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($gitCmd) {
+        $gitRoot = Split-Path (Split-Path $gitCmd.Source -Parent) -Parent
+        $gitBashPath = Join-Path $gitRoot 'bin\bash.exe'
+        if (Test-Path $gitBashPath) { return Get-Command $gitBashPath -ErrorAction SilentlyContinue }
+    }
+    return Get-Command bash -ErrorAction SilentlyContinue
+}
+
+function Install-PostMergeHook {
+    param([string]$Root, [object]$Bash)
+
+    if (-not $Bash) {
+        Write-Note "Git Bash not found; the post-merge reviewer hook was not installed. Install Git for Windows and rerun this script."
+        return
+    }
+    $tool = (Join-Path $Root 'bin\ai-install-post-merge-hook') -replace '\\', '/'
+    $exitCode = Invoke-BashGate -Bash $Bash -CommandText "'$tool'"
+    if ($exitCode -eq 0) {
+        Write-Note "Installed post-merge reviewer auto-requalification hook."
+    } else {
+        Write-Note "Installing the post-merge reviewer hook failed (exit $exitCode); see the output above."
     }
 }
 
@@ -709,6 +771,28 @@ if ($SkillsDryRun) {
     Write-Step "Skills dry-run complete"
     Write-Host "No files were changed."
     exit 0
+}
+
+# Repo-level managed hook plus the update's one reviewer-requalification gate.
+# Rerunning this script is the documented Windows update path, so every real
+# run repairs or refreshes the hook and then requalifies any reviewer whose
+# qualification the pulled code invalidated. The fast-forward above ran with
+# hooks disabled, so this is the only requalify for this run.
+$installBash = Get-GitBash
+Install-PostMergeHook -Root $RepoPath -Bash $installBash
+if ($installBash) {
+    $requalify = (Join-Path $RepoPath 'bin\ai-review-preflight') -replace '\\', '/'
+    Write-Step "Re-qualifying reviewers whose qualification the update invalidated"
+    if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+        Write-Note "Test mode: not running live reviewer qualification."
+    } else {
+        $exitCode = Invoke-BashGate -Bash $installBash -CommandText "'$requalify' requalify"
+        if ($exitCode -eq 0) {
+            Write-Note "Reviewer qualifications are current."
+        } else {
+            Write-Note "Automatic reviewer requalification failed (exit $exitCode); it is recorded as a reviewer issue and the reviewer stays quarantined. See the output above."
+        }
+    }
 }
 
 # Blocker notices and session wake-ups only happen on a machine that runs the

@@ -168,6 +168,103 @@ printf '\n# version changed\n' >> "$TMP/bin/good"
 check "Qwen wrapper changes invalidate prior live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 sed -i '$d' "$TMP/bin/good"
 check "Qwen can be requalified after a wrapper change" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+
+echo '== automatic requalification (#804)'
+MOCK_QWEN_MODE_LOG="$TMP/qwen-requalify-mode-log"; export MOCK_QWEN_MODE_LOG
+check "explain covers live-qualification-required" "$SCRIPT explain live-qualification-required | grep -q requalify"
+check "requalify refuses a provider without a live-qualification contract" "! $SCRIPT requalify grok"
+check "requalify on a host with no records is a no-op that still passes" "AI_REVIEW_QUARANTINE_DIR='$TMP/no-records-state' $SCRIPT requalify && test ! -e '$TMP/no-records-state/qwen-live-qualified.json' && test ! -e '$TMP/no-records-state/gemini-live-qualified.json'"
+: > "$MOCK_QWEN_MODE_LOG"
+check "requalify leaves a current qualification alone without a canary" "$SCRIPT requalify qwen && grep -qx -- --identity '$MOCK_QWEN_MODE_LOG' && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+printf '%064d\n' 1 | tr 0 b > "$AI_QWEN_TEST_RUNTIME_FILE"
+: > "$MOCK_QWEN_MODE_LOG"
+check "requalify refreshes a stale qualification after runtime drift" "$SCRIPT requalify qwen && grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+printf '%064d\n' 2 | tr 0 b > "$AI_QWEN_TEST_RUNTIME_FILE"
+rm -rf "$TMP/reviewer-issues"
+export MOCK_QWEN_FAIL=1 AI_REVIEWER_ISSUE_DIR="$TMP/reviewer-issues"
+REQUALIFY_OUT="$($SCRIPT requalify qwen 2>&1)"; REQUALIFY_RC=$?
+unset MOCK_QWEN_FAIL
+[ "$REQUALIFY_RC" -ne 0 ] && printf '%s' "$REQUALIFY_OUT" | grep -q 'reviewer issue:' && ok "failed automatic requalification is recorded and fails the command" || bad "failed automatic requalification is recorded and fails the command"
+REQUALIFY_ID="$(printf '%s\n' "$REQUALIFY_OUT" | sed -n 's/.*reviewer issue: //p' | tail -n1)"
+[ -n "$REQUALIFY_ID" ] && [ -f "$TMP/reviewer-issues/$REQUALIFY_ID/issue.json" ] \
+  && jq -e --arg p qwen '.provider==$p and (.reported_command|test("requalify qwen")) and .evidence.complete_error_log==null and .evidence.session_details=="details.redacted.txt"' "$TMP/reviewer-issues/$REQUALIFY_ID/issue.json" >/dev/null \
+  && ok "the recorded failure names the provider and the requalify command" || bad "the recorded failure names the provider and the requalify command"
+check "a failed automatic requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+check "a failed requalification is retried, not silently abandoned" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+printf '{"version":1,"providers":{"qwen":{"registry_state":"absent","reason":"retired for this fixture"}}}\n' > "$TMP/qwen-omitted.json"
+check "an unregistered reviewer is skipped without a canary" ": > '$MOCK_QWEN_MODE_LOG'; printf '%064d\n' 3 | tr 0 b > '$AI_QWEN_TEST_RUNTIME_FILE'; AI_REVIEW_REGISTRY_FILE='$TMP/qwen-omitted.json' $SCRIPT requalify qwen && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+unset AI_REVIEWER_ISSUE_DIR
+check "requalify recovers the reviewer on the next successful run" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+
+echo '== post-merge reviewer hook (#804)'
+HOOKTEST="$TMP/hooktest"; HOOK_ORIGIN="$HOOKTEST/origin.git"; HOOK_CLONE="$HOOKTEST/clone"
+git init -q --bare -b main "$HOOK_ORIGIN"
+git clone -q "$HOOK_ORIGIN" "$HOOK_CLONE" 2>/dev/null
+git -C "$HOOK_CLONE" config user.name Test; git -C "$HOOK_CLONE" config user.email t@example.com
+mkdir -p "$HOOK_CLONE/bin"
+printf '#!/usr/bin/env bash\nprintf "gitdir=[%%s]\\n" "${GIT_DIR:-}" >> "%s/hook-called"\nexit 0\n' "$TMP" > "$HOOK_CLONE/bin/ai-review-preflight"
+chmod +x "$HOOK_CLONE/bin/ai-review-preflight"
+cp "$ROOT/hooks/post-merge" "$HOOK_CLONE/.git/hooks/post-merge"
+chmod +x "$HOOK_CLONE/.git/hooks/post-merge"
+echo a > "$HOOK_CLONE/a"; git -C "$HOOK_CLONE" add a; git -C "$HOOK_CLONE" commit -qm one; git -C "$HOOK_CLONE" push -q origin main
+echo b > "$HOOK_CLONE/b"; git -C "$HOOK_CLONE" add b; git -C "$HOOK_CLONE" commit -qm two; git -C "$HOOK_CLONE" push -q origin main
+git -C "$HOOK_CLONE" reset -q --hard HEAD~1
+git -C "$HOOK_CLONE" pull -q --ff-only
+check "the managed hook fires after a main pull" "test -f '$TMP/hook-called'"
+check "the hook strips git hook environment before requalify" "grep -q 'gitdir=\[\]' '$TMP/hook-called'"
+rm -f "$TMP/hook-called"
+git -C "$HOOK_CLONE" reset -q --hard HEAD~1
+"$HOOK_CLONE/.git/hooks/post-merge"
+check "the hook skips an older mainline commit" "test ! -e '$TMP/hook-called'"
+git -C "$HOOK_CLONE" pull -q --ff-only
+rm -f "$TMP/hook-called"
+git -C "$HOOK_CLONE" checkout -qb feature HEAD~1
+echo c > "$HOOK_CLONE/c"; git -C "$HOOK_CLONE" add c; git -C "$HOOK_CLONE" commit -qm three
+git -C "$HOOK_CLONE" fetch -q origin
+git -C "$HOOK_CLONE" merge -q origin/main -m "merge main into feature" >/dev/null 2>&1
+check "the hook skips a development branch merge" "test ! -e '$TMP/hook-called'"
+rm -rf "$HOOK_CLONE/bin"
+git -C "$HOOK_CLONE" checkout -q main
+git -C "$HOOK_CLONE" reset -q --hard HEAD~1
+HOOK_SILENT="$(git -C "$HOOK_CLONE" pull -q --ff-only 2>&1)"; HOOK_RC=$?
+[ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_SILENT" ] && ok "the hook stays silent when the toolkit command is absent" || bad "the hook stays silent when the toolkit command is absent"
+check "the shipped hook carries the managed marker" "grep -q '^# ai-devops-managed: reviewer auto-requalification' '$ROOT/hooks/post-merge'"
+check "the shipped hook fails hard when its exec target is missing" "grep -q '^set -euo pipefail' '$ROOT/hooks/post-merge'"
+
+echo '== managed hook installer (#804)'
+HOOK_INSTALL="$ROOT/bin/ai-install-post-merge-hook"
+check "the hook installer is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- bin/ai-install-post-merge-hook | awk '{print \$1}')\" = 100755"
+check "the shipped hook is committed executable" "test \"\$(git -C '$ROOT' ls-files -s -- hooks/post-merge | awk '{print \$1}')\" = 100755"
+FIXTURE="$TMP/hook-fixture"
+git init -q -b main "$FIXTURE"
+git -C "$FIXTURE" config user.name Test; git -C "$FIXTURE" config user.email t@example.com
+printf 'x\n' > "$FIXTURE/x"; git -C "$FIXTURE" add x; git -C "$FIXTURE" commit -qm one
+check "dry-run install writes nothing" "'$HOOK_INSTALL' --repo '$FIXTURE' --dry-run && test ! -e '$FIXTURE/.git/hooks/post-merge'"
+check "install places an executable managed hook" "'$HOOK_INSTALL' --repo '$FIXTURE' && test -x '$FIXTURE/.git/hooks/post-merge' && cmp -s '$ROOT/hooks/post-merge' '$FIXTURE/.git/hooks/post-merge'"
+check "reinstall over a managed hook is idempotent" "'$HOOK_INSTALL' --repo '$FIXTURE' && cmp -s '$ROOT/hooks/post-merge' '$FIXTURE/.git/hooks/post-merge'"
+printf '#!/bin/sh\n# local customization\ntrue\n' > "$FIXTURE/.git/hooks/post-merge"
+check "a foreign hook is never touched" "'$HOOK_INSTALL' --repo '$FIXTURE' && grep -q 'local customization' '$FIXTURE/.git/hooks/post-merge'"
+cp "$ROOT/hooks/post-merge" "$FIXTURE/.git/hooks/post-merge"
+check "dry-run remove writes nothing" "'$HOOK_INSTALL' --remove --repo '$FIXTURE' --dry-run && test -e '$FIXTURE/.git/hooks/post-merge'"
+printf '\n# drifted\n' >> "$FIXTURE/.git/hooks/post-merge"
+check "a drifted managed hook is preserved on remove" "'$HOOK_INSTALL' --remove --repo '$FIXTURE' && test -e '$FIXTURE/.git/hooks/post-merge'"
+cp "$ROOT/hooks/post-merge" "$FIXTURE/.git/hooks/post-merge"
+chmod +x "$FIXTURE/.git/hooks/post-merge"
+check "an owned matching hook is removed" "'$HOOK_INSTALL' --remove --repo '$FIXTURE' && test ! -e '$FIXTURE/.git/hooks/post-merge'"
+check "remove without an owned hook is a no-op" "'$HOOK_INSTALL' --remove --repo '$FIXTURE'"
+check "a non-repository target is refused for install" "! '$HOOK_INSTALL' --repo '$TMP/not-a-repo'"
+check "a non-repository target has nothing to remove" "'$HOOK_INSTALL' --remove --repo '$TMP/not-a-repo'"
+ln -s "$HOOK_INSTALL" "$TMP/bin/hook-tool-link" 2>/dev/null
+check "the installer resolves a PATH symlink to its shipped hook" "[ ! -L '$TMP/bin/hook-tool-link' ] || ('$TMP/bin/hook-tool-link' --repo '$FIXTURE' && cmp -s '$ROOT/hooks/post-merge' '$FIXTURE/.git/hooks/post-merge')"
+check "install.sh runs the shared hook installer" "grep -q 'ai-install-post-merge-hook' '$ROOT/install.sh'"
+check "the Windows installer runs the shared hook installer" "grep -q 'ai-install-post-merge-hook' '$ROOT/bin/install-ai-devops-windows.ps1'"
+check "the Windows installer disables hooks on its own fast-forward" "grep -q 'core.hooksPath' '$ROOT/bin/install-ai-devops-windows.ps1'"
+check "update.sh disables hooks on its own pull" "grep -q 'core.hooksPath' '$ROOT/update.sh'"
+check "update.sh requalifies after installing" "grep -q 'bin/ai-review-preflight\" requalify' '$ROOT/update.sh'"
+check "the Windows installer requalifies after installing the hook" "grep -q 'requalify' '$ROOT/bin/install-ai-devops-windows.ps1'"
+check "uninstall removes the hook through the shared script" "grep -q 'bin/ai-install-post-merge-hook' '$ROOT/uninstall.sh' && grep -q -- '--remove.*--repo' '$ROOT/uninstall.sh'"
+check "the hook tree is pinned to LF" "grep -q '^hooks/.*text eol=lf' '$ROOT/.gitattributes'"
+check "line-ending checks scan the hook tree" "grep -q \"'hooks/\*'\" '$ROOT/tests/test-line-endings.sh'"
 check "Codex status is available with its doctor contract" "$SCRIPT status codex | jq -e '.status==\"installed-healthy\"'"
 check "Codex preflight uses its doctor contract" "$SCRIPT check codex '$REPO' | grep -q 'health=ok'"
 check "DeepSeek status is available with its doctor contract" "$SCRIPT status deepseek | jq -e '.status==\"installed-healthy\"'"

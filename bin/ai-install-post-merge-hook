@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# ai-install-post-merge-hook - install or remove the managed reviewer
+# auto-requalification post-merge hook (#804).
+#
+# WHY THIS EXISTS
+# Pulling new reviewer wrapper code invalidates the affected reviewer's live
+# qualification; without the hook it stays quarantined until a person
+# re-qualifies by hand. Both installers and uninstall.sh call this one script
+# so the ownership rules exist exactly once and can be behaviorally tested:
+#
+#   - a hook carrying the managed marker is refreshed (or removed) by us;
+#   - a hook without the marker is foreign and is never touched;
+#   - removal additionally requires the bytes to still match the shipped
+#     hooks/post-merge, so a drifted managed hook is preserved for review.
+#
+# Exit status is nonzero whenever an owned action fails; --dry-run writes
+# nothing and only prints what it would do.
+set -euo pipefail
+
+VERSION="1.0.0"
+# bin/* is symlinked onto PATH (install.sh links executable entries into
+# /usr/local/bin), so resolve the real script location before looking for
+# the repository's shipped hook; a naive dirname/.. points into /usr/local.
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  RESOLVED_SOURCE="$(readlink -f "$SCRIPT_SOURCE" 2>/dev/null || true)"
+  [ -z "$RESOLVED_SOURCE" ] || SCRIPT_SOURCE="$RESOLVED_SOURCE"
+fi
+REPO_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
+MODE=install
+REPO=""
+DRY_RUN=0
+
+die() { printf 'ai-install-post-merge-hook: error: %s\n' "$*" >&2; exit 1; }
+note() { printf 'ai-install-post-merge-hook: %s\n' "$*"; }
+
+usage() {
+  cat <<EOF
+Usage:
+  ai-install-post-merge-hook [--repo PATH]            install or refresh
+  ai-install-post-merge-hook --remove [--repo PATH]   remove when owned
+  ai-install-post-merge-hook --dry-run [--remove] [--repo PATH]
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo) REPO="${2:-}"; shift 2 ;;
+    --remove) MODE=remove; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown option '$1'." ;;
+  esac
+done
+[ -n "$REPO" ] || REPO="$REPO_ROOT"
+
+hook_source="$REPO_ROOT/hooks/post-merge"
+[ -f "$hook_source" ] || die "shipped hooks/post-merge is missing from $REPO_ROOT."
+# --path-format=absolute returns a usable absolute path on every platform,
+# including Git-for-Windows drive letters and linked worktrees, whose
+# common dir otherwise needs joining and can be reported as C:/... .
+if ! git_dir="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  # Removal must stay safe on a non-repository target (uninstall.sh accepts a
+  # --repo-root that is not a git checkout): with no repository there is no
+  # owned hook, so removal is complete. Installation genuinely needs one.
+  [ "$MODE" = remove ] || die "not a git repository: $REPO"
+  note "not a git repository, so there is no owned post-merge hook: $REPO"
+  exit 0
+fi
+hooks_dir="$git_dir/hooks"
+hook_target="$hooks_dir/post-merge"
+marker='^# ai-devops-managed: reviewer auto-requalification'
+
+managed() {
+  [ -f "$hook_target" ] && grep -q "$marker" "$hook_target" 2>/dev/null
+}
+
+act() { # DESCRIPTION COMMAND...
+  local description="$1"; shift
+  if [ "$DRY_RUN" -eq 1 ]; then
+    note "[dry-run] $description"
+  else
+    "$@"
+    note "$description"
+  fi
+}
+
+case "$MODE" in
+  install)
+    if [ -e "$hook_target" ] && ! managed; then
+      note "leaving foreign post-merge hook untouched: $hook_target"
+      exit 0
+    fi
+    [ "$DRY_RUN" -eq 1 ] || mkdir -p "$hooks_dir"
+    act "installed post-merge reviewer auto-requalification hook: $hook_target" \
+      cp "$hook_source" "$hook_target"
+    [ "$DRY_RUN" -eq 1 ] || chmod +x "$hook_target"
+    ;;
+  remove)
+    if ! managed; then
+      note "no owned post-merge hook present at $hook_target"
+      exit 0
+    fi
+    if ! cmp -s "$hook_source" "$hook_target"; then
+      note "preserving drifted managed post-merge hook for review: $hook_target"
+      exit 0
+    fi
+    act "removed owned post-merge hook: $hook_target" \
+      rm -f -- "$hook_target"
+    ;;
+esac

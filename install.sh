@@ -224,6 +224,16 @@ install_entrypoints() {
 run_stage required "Unix entrypoints" install_entrypoints
 
 # --------------------------------------------------------------------------
+# 4.1 Reviewer auto-requalification post-merge hook (#804). Pulling new
+#     reviewer wrapper code invalidates the affected reviewer's live
+#     qualification; without this hook it stays quarantined until a person
+#     re-qualifies by hand. bin/ai-install-post-merge-hook owns the marker
+#     rules (foreign hooks are never touched) so both installers and
+#     uninstall.sh share one implementation.
+# --------------------------------------------------------------------------
+run_stage required "Reviewer auto-requalification hook" "$REPO_ROOT/bin/ai-install-post-merge-hook"
+
+# --------------------------------------------------------------------------
 # 4.5 Claude + Codex skills and global instruction files. Delegate to the one
 #     tested installer so client-specific skills, shared skills, collision
 #     protection, and recoverable obsolete-skill handling cannot drift here.
