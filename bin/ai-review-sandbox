@@ -148,19 +148,25 @@ is_managed() {
 }
 
 remove_sandbox() {
-  local d="$1"
+  local d="$1" physical
   [ -e "$d" ] || return 0
   is_managed "$d" || die "refusing to delete $d: it is not a managed review snapshot."
+  # Evidence tools reject junction/reparse components (reviewer_maintenance
+  # physical()). The managed sandbox root is a junction to D: on this machine,
+  # so every delete must go through the canonical spelling or verify-sandbox
+  # always refuses and the copy is retained forever.
+  physical="$(canon_quiet "$d")" || die "refusing to delete $d: it cannot be canonicalized."
+  is_managed "$physical" || die "refusing to delete $physical: it is not a managed review snapshot."
   if [ "${AI_KEEP_SANDBOX:-0}" = 1 ]; then
-    warn "AI_KEEP_SANDBOX=1: retaining $d"
+    warn "AI_KEEP_SANDBOX=1: retaining $physical"
     return 0
   fi
   local python event_tool
   python="$(command -v python3 || command -v python)" || die 'sandbox evidence verification requires Python'
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
-  "$python" "$event_tool" verify-sandbox "$d" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
-  rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
-  warn "deleted review snapshot $d"
+  "$python" "$event_tool" verify-sandbox "$physical" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
+  rm -rf "$physical" 2>/dev/null || { sleep 1; rm -rf "$physical"; } || warn "could not fully remove $physical"
+  warn "deleted review snapshot $physical"
 }
 
 remove_partial() { # remove_partial BUILD FINAL — only a uniquely named child beside FINAL
@@ -679,7 +685,10 @@ cmd_sweep_orphans() { # sweep-orphans [--max-age-seconds N] [--max-removals N]
     # Subshell: remove_sandbox dies on unreconciled evidence by design, and
     # that one refusal must not end the sweep of the remaining orphans.
     if ( remove_sandbox "$entry" ); then removed=$(( removed + 1 )); fi
-  done < <(find "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+  # find -L follows the managed root when it is a junction/symlink (production
+  # root is a Windows junction to D:). Without -L, find sees no children and
+  # the sweep is a no-op on this machine.
+  done < <(find -L "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
   return 0
 }
 
