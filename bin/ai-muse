@@ -561,10 +561,16 @@ retain_turn(){ # retain exact bytes and optional observations in one metadata wr
   tmp="$(tmp_file)"
   jq --arg effort "${EFFECTIVE_REASONING_EFFORT:-}" --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage} | if $effort!="" then .retained_turn.reasoning_effort=$effort else . end' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
-capacity_rejection(){ # an answer-free rejection naming model_not_found; any produced text or step means a real turn
+capacity_rejection(){ # an answer-free model 404; any produced text, step, or output means a real turn
   local out="$1"
-  grep -Fq model_not_found "$out" "$out.stderr" 2>/dev/null || return 1
-  ! jq -e 'select(.type=="text" or .type=="step_finish" or ((.payload_type//"")=="run.terminal.completed"))' "$out" >/dev/null 2>&1
+  # Meta reports the team Contributor capacity limit as HTTP 404 model_not_found
+  # (#683/#743). Accept both the structured code and the human message OpenCode
+  # and Muse Code surface, including a statusCode-only 404 body.
+  { grep -Fq model_not_found "$out" "$out.stderr" 2>/dev/null ||
+    grep -Fq 'The requested model was not found' "$out" "$out.stderr" 2>/dev/null ||
+    grep -Eqi 'model[_ -]?not[_ -]?found' "$out" "$out.stderr" 2>/dev/null; } || return 1
+  # run.model.configured is setup, not an answer; text/delta/step/completion are.
+  ! jq -e 'select(.type=="text" or .type=="step_finish" or ((.payload_type//"")|IN("run.terminal.completed","run.output.delta")))' "$out" >/dev/null 2>&1
 }
 acquire_provider_slot(){ # optional machine-wide cap on simultaneous Muse turns; 0 (default) means no cap
   local max="${AI_MUSE_MAX_CONCURRENT:-0}" dir="$STATE/provider-slots" i owner waited=0
@@ -688,6 +694,19 @@ parse_turn(){ # shared terminal parser; never launches the provider
   if [ -z "$TURN_SID" ]; then TURN_ERROR='Muse completed without a session ID.'; return 1; fi
   if [ "$FINISH" != stop ]; then TURN_ERROR="Muse did not prove completion (reason: ${FINISH:-missing})."; return 1; fi
   if [ -z "$TEXT" ]; then TURN_ERROR='Muse completed without a usable response.'; return 1; fi
+  if [ "$ENGINE" = muse-code ]; then
+    # Prove the request pin actually ran: no silent default/policy fallback alias (#743).
+    local configured_model
+    configured_model="$(jq -sr '[.[]|select(.payload_type=="run.model.configured")|.payload.model_id//empty]|last//empty' "$out" 2>/dev/null || true)"
+    if [ -z "$configured_model" ]; then
+      TURN_ERROR="Muse Code did not report which model it configured; cannot prove the requested pin $MODEL."
+      return 1
+    fi
+    if [ "$configured_model" != "$MODEL" ]; then
+      TURN_ERROR="Muse Code configured model '$configured_model' instead of the requested pin '$MODEL'."
+      return 1
+    fi
+  fi
   if [ "${REQUIRE_VERDICT:-0}" = 1 ] && ! printf '%s\n' "$TEXT" | sed '/^[[:space:]]*$/d' | tail -n 1 | grep -Eq '^VERDICT:[[:space:]]+(FINDINGS|NO FINDINGS)$'; then TURN_ERROR='Muse stopped without an allowed final VERDICT line.'; return 1; fi
   # Optional accounting must never invalidate a paid completion or request replay.
   if [ -n "$meta" ] && jq -e '.retained_turn.usage_json | fromjson | type=="object"' "$meta" >/dev/null 2>&1; then

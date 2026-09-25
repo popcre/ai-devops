@@ -137,8 +137,11 @@ case "${1:-}" in
     [ "${MUSE_STUB_MODE:-}" = credit ] && { cat "$MUSE_STUB_CREDIT_FILE"; exit 1; }
     if [ "${MUSE_STUB_MODE:-}" = capacity ]; then
       n="$(cat "$MUSE_STUB_CAPACITY_FILE" 2>/dev/null || echo 0)"; n=$((n+1)); printf '%s' "$n" > "$MUSE_STUB_CAPACITY_FILE"
-      [ "$n" -gt "${MUSE_STUB_CAPACITY_FAILS:-1}" ] || { printf '{"type":"error","sessionID":"ses_new","error":{"name":"APIError","data":{"message":"model_not_found: The requested model was not found."}}}
-'; exit 1; }
+      [ "$n" -gt "${MUSE_STUB_CAPACITY_FAILS:-1}" ] || {
+        # Exact production shape from shared-db PR #3446 (#743).
+        printf '%s\n' '{"type":"error","timestamp":1790198613452,"sessionID":"ses_new","error":{"name":"APIError","data":{"message":"The requested model was not found.","statusCode":404,"isRetryable":false,"responseBody":"{\"error\":{\"code\":\"model_not_found\",\"message\":\"The requested model was not found.\",\"param\":null,\"type\":\"invalid_request_error\"}}"}}}'
+        exit 1
+      }
     fi
     [ "${MUSE_STUB_MODE:-}" = malformed ] && { printf 'not-json\n'; exit 0; }
     [ "${MUSE_STUB_MODE:-}" = partialmalformed ] && { printf '{"type":"step_start","sessionID":"ses_partial","part":{}}\nnot-json\n'; exit 0; }
