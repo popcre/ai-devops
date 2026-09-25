@@ -37,6 +37,10 @@
     "qwen": {
       "registry_state": "registered",
       "reason": "Live-qualified 2026-09-07: live probe OK and a real bounded review returned a valid verdict on qwen3.8-max. Runs on the Model Studio pay-per-token lane; the Coding Plan subscription key is dead."
+    },
+    "stepfun": {
+      "registry_state": "registered",
+      "reason": "StepFun Step 5 (step/step-5-preview through the StepCode CLI, bin/ai-stepfun). Added by owner instruction on 2026-09-25 as a reviewer on Ubuntu/Linux only: StepCode is not yet available on Windows, so ai-review-preflight reports it unsupported-platform there. Reviews outside the shared-db allocator rotation (listed in the membership scope file); read-only tools read/grep/find/ls in a disposable review copy."
     }
   }
 }

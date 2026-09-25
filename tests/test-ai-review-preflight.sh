@@ -21,7 +21,8 @@ cat > "$AI_REVIEW_REGISTRY_FILE" <<'REGEOF'
  "grok":{"registry_state":"registered","reason":"test"},
  "kimi":{"registry_state":"registered","reason":"test"},
  "muse":{"registry_state":"registered","reason":"test"},
- "qwen":{"registry_state":"registered","reason":"test"}}}
+ "qwen":{"registry_state":"registered","reason":"test"},
+ "stepfun":{"registry_state":"registered","reason":"test"}}}
 REGEOF
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_PREFLIGHT_TIMEOUT=3
@@ -80,6 +81,7 @@ chmod +x "$TMP/bin/"*
 export AI_REVIEW_GROK_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_CODEX_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good"
+export AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_QWEN_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_GEMINI_WRAPPER="$TMP/bin/gemini"
 export MOCK_AGY_SHA_FILE="$TMP/gemini-agy-sha"
@@ -120,7 +122,7 @@ check "unknown provider is refused" "! $SCRIPT check nope '$REPO'"
 check "status names the exact resolved wrapper command per provider" "env -u AI_REVIEW_GROK_WRAPPER $SCRIPT status grok | jq -e '.wrapper_command==\"ai-grok-review\" and (.wrapper_path|endswith(\"/ai-grok-review\"))' && env -u AI_REVIEW_QWEN_WRAPPER $SCRIPT status qwen | jq -e '.wrapper_command==\"ai-qwen\"' && env -u AI_REVIEW_CODEX_WRAPPER $SCRIPT status codex | jq -e '.wrapper_command==\"ai-codex-review\"' && $SCRIPT status grok | jq -e '.wrapper_command==\"good\"'"
 check "check prints the exact resolved wrapper command" "$SCRIPT check grok '$REPO' 2>&1 | grep -qF 'grok wrapper command: good ($TMP/bin/good)'"
 check "a crashing provider check still emits an unusable row and later providers still report" "mkdir -p '$TMP/crashq'; printf 'not json' > '$TMP/crashq/grok.json'; out=\$(AI_REVIEW_QUARANTINE_DIR='$TMP/crashq' $SCRIPT usable 2>/dev/null); printf '%s\n' \"\$out\" | jq -se 'map(select(.provider==\"grok\"))[0].usable==false and (map(.provider)|index(\"deepseek\"))!=null'"
-check "all active providers are registered" "for p in claude grok kimi glm muse gemini qwen codex deepseek; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
+check "all active providers are registered" "for p in claude grok kimi glm muse gemini qwen codex deepseek stepfun; do $SCRIPT status \"\$p\" | grep -q \"\\\"provider\\\":\\\"\$p\\\"\" || exit 1; done"
 check "Gemini status enforces built-in quarantine" "$SCRIPT status gemini | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check gemini '$REPO' 2>&1 | grep -q 'health=ok'"
 check "tampered Gemini qualification record fails closed" "mkdir -p '$AI_REVIEW_QUARANTINE_DIR'; printf '{\"version\":2,\"provider\":\"gemini\",\"wrapper_sha256\":\"bad\",\"agy_sha256\":\"bad\",\"agy_version\":\"1.1.19\",\"model\":\"gemini-3.8-flash-high\",\"qualified_epoch\":1}\n' > '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'; $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
@@ -273,6 +275,11 @@ check "Codex status is available with its doctor contract" "$SCRIPT status codex
 check "Codex preflight uses its doctor contract" "$SCRIPT check codex '$REPO' | grep -q 'health=ok'"
 check "DeepSeek status is available with its doctor contract" "$SCRIPT status deepseek | jq -e '.status==\"installed-healthy\"'"
 check "DeepSeek preflight uses its doctor contract" "$SCRIPT check deepseek '$REPO' | grep -q 'health=ok'"
+check "StepFun is usable on Linux with its doctor contract" "AI_STEPFUN_PLATFORM=Linux $SCRIPT status stepfun | jq -e '.status==\"installed-healthy\" and .usable==true'"
+check "StepFun preflight passes on Linux" "AI_STEPFUN_PLATFORM=Linux $SCRIPT check stepfun '$REPO' | grep -q 'health=ok'"
+check "StepFun is unsupported-platform and unusable on Windows" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
+check "StepFun preflight refuses on Windows without contacting the provider" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
+check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux only'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
 NOAUTH_OUT="$(env -u DEEPSEEK_API_KEY HOME="$TMP/noauth-home" AI_DEVOPS_CONFIG_DIR="$TMP/noauth-config" AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" check deepseek "$REPO" 2>&1)"; NOAUTH_RC=$?
 [ "$NOAUTH_RC" -ne 0 ] && ! printf '%s' "$NOAUTH_OUT" | grep -q 'health=ok' && ok "DeepSeek without key or governed reference cannot pass offline preflight" || bad "DeepSeek without key or governed reference cannot pass offline preflight"
@@ -329,7 +336,7 @@ check "the Gemini entry still records why the empty report mattered"   "jq -e '.
 check "Kimi is removed from the shipped reviewer registry while credit is exhausted" "jq -e '.providers.kimi.registry_state==\"absent\" and (.providers.kimi.reason|test(\"out of credit\"))' '$REAL_REGISTRY'"
 check "GLM is out of rotation in the shipped reviewer registry (owner instruction 2026-09-22)" "jq -e '.providers.glm.registry_state==\"absent\" and (.providers.glm.reason|test(\"2026-09-22\"))' '$REAL_REGISTRY'"
 check "DeepSeek V4.1 Flash is registered (shared-db REVIEWERS) and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"registered\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
-check "the shipped rotation pool is exactly Muse, Grok, Qwen, Gemini, DeepSeek plus the Claude and Codex gates" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"claude\",\"codex\",\"deepseek\",\"gemini\",\"grok\",\"muse\",\"qwen\"]' '$REAL_REGISTRY'"
+check "the shipped registry is Muse, Grok, Qwen, Gemini, DeepSeek, the Claude and Codex gates, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"claude\",\"codex\",\"deepseek\",\"gemini\",\"grok\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
 # Health alone must still never mean allocatable. Proved against a fixture that
 # omits a provider, so the guard survives any future registry membership change.
 printf '{"version":1,"providers":{"codex":{"registry_state":"absent","reason":"omitted for this fixture"}}}

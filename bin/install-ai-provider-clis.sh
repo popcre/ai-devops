@@ -40,7 +40,7 @@ Usage: install-ai-provider-clis.sh [options] [provider ...]
 Installs the third-party AI provider CLIs used by this repo's wrappers.
 With no provider named, installs all of them.
 
-Providers: grok kimi qwen
+Providers: grok kimi qwen stepfun (stepfun: Linux only)
 
 Options:
   --force        Reinstall even if the command already works.
@@ -53,6 +53,7 @@ deliberately does not automate:
   grok            # then follow the sign-in prompt
   kimi login
   qwen            # then configure Alibaba Coding Plan authentication
+  ai-stepfun store-key   # StepFun key from 1Password into the protected store
 USAGE
 }
 
@@ -62,6 +63,10 @@ PROVIDERS=(
   "kimi|kimi|https://code.kimi.com/kimi-code/install.sh|.kimi-code/bin/kimi"
   "qwen|qwen|https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh|.local/bin/qwen"
 )
+# StepCode (StepFun Step 5) ships no Windows build yet; offer it on Linux only.
+if [ "$(uname -s)" = Linux ]; then
+  PROVIDERS+=("stepfun|step|https://static-openapi.stepfun.com/stepcode/install.sh|.stepcode/bin/step")
+fi
 
 FORCE=0
 DRY_RUN=0
@@ -107,7 +112,15 @@ wants() {
 
 resolve() {
   # A provider counts as installed if it is on PATH or at its known home path.
-  local cmd="$1" home_rel="$2"
+  local cmd="$1" home_rel="$2" c
+  if [ "$cmd" = step ]; then
+    # `step` is a generic name (Smallstep's CLI uses it too). Only a binary that
+    # identifies as StepCode counts, and StepCode's own install path wins.
+    for c in "$HOME/$home_rel" "$(command -v step 2>/dev/null || true)"; do
+      [ -n "$c" ] && [ -x "$c" ] && "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' && { echo "$c"; return 0; }
+    done
+    return 1
+  fi
   if command -v "$cmd" >/dev/null 2>&1; then echo "$(command -v "$cmd")"; return 0; fi
   if [ -x "$HOME/$home_rel" ]; then echo "$HOME/$home_rel"; return 0; fi
   return 1
@@ -122,6 +135,9 @@ resolve() {
 LOCAL_BIN="$HOME/.local/bin"
 link_into_local_bin() {
   local cmd="$1" real="$2" dst="$LOCAL_BIN/$1"
+  # `step` is a generic name (Smallstep's CLI uses it too) and ai-stepfun finds
+  # StepCode at ~/.stepcode/bin/step itself, so never claim ~/.local/bin/step.
+  [ "$cmd" != step ] || return 0
   [ "$real" = "$dst" ] && return 0
   mkdir -p "$LOCAL_BIN"
   if [ -e "$dst" ] && [ ! -L "$dst" ]; then
@@ -392,6 +408,7 @@ if ((installed_any)) && ((DRY_RUN == 0)); then
   echo "NEXT sign in once per provider (interactive, deliberately not automated):"
   echo "  grok            # follow the sign-in prompt"
   echo "  kimi login"
+  [ "$(uname -s)" != Linux ] || echo "  ai-stepfun store-key   # StepFun key from 1Password into the protected store"
   echo "  qwen            # configure Alibaba Coding Plan authentication"
   echo "Then prove the full path:  ai-qwen doctor --live"
 fi

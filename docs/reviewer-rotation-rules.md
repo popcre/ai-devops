@@ -53,8 +53,8 @@ allocator but stayed registered here, and a session spent an hour trying it.
 10. **Out of credit is told to Albert in the same session.** Owner rule,
     2026-09-24: "the session that hit that error should A) know that that's
     why it failed, and B) tell me in that same session." When a provider
-    refuses a run for lack of paid credit, the Grok, Muse, Qwen, Gemini and
-    DeepSeek wrappers stop at once and exit **92**, printing on stderr:
+    refuses a run for lack of paid credit, the Grok, Muse, Qwen, Gemini,
+    DeepSeek and StepFun wrappers stop at once and exit **92**, printing on stderr:
 
     ```
     AI_REVIEWER_OUT_OF_CREDIT provider=<provider> code=insufficient_quota
@@ -73,3 +73,25 @@ allocator but stayed registered here, and a session spent an hour trying it.
     its fixtures are `tests/fixtures/reviewer-credit/` and its checks are in
     `tests/test-reviewer-credit.sh`. Rate limits and a bare
     `RESOURCE_EXHAUSTED` are not credit failures.
+
+11. **StepFun is Ubuntu-only and outside the allocator.** Owner instruction,
+    2026-09-25: add StepFun Step 5 as a reviewer on Ubuntu only (StepCode is
+    not yet available on Windows) and let it write, implement, and execute
+    code. `bin/ai-stepfun` refuses to run off Linux and preflight reports
+    `unsupported-platform` there. Its formal reviews stay read-only; writing
+    and executing happens only in `ai-stepfun implement`, inside a new
+    remote-less clone; a run that commits or adds a remote is refused.
+    Every StepFun turn runs under bubblewrap with an empty home, /tmp and
+    /run and a cleared environment, so the model never sees SSH keys or the
+    agent socket, git or gh credentials, the 1Password token, or the Docker
+    socket; with no caller credential inside, it cannot push anywhere (the
+    only credential inside is StepFun's own API key, which StepCode needs
+    and could expose; it spends only StepFun credit). The
+    commit/remote refusal is an extra end-state check on top of that. Only
+    /usr, /etc, StepCode and the run's own folder are mounted. Accepted
+    exposure: the network is shared (the StepFun API needs it), so an
+    implement run can reach loopback services and the internet without any
+    of the caller's credentials.
+    `ai-stepfun` refuses to run without bubblewrap. The shared-db allocator has no platform field,
+    so StepFun is listed in `config/reviewer-membership-scope.json` and is
+    never assigned by the allocator.
