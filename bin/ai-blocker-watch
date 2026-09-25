@@ -52,9 +52,25 @@
 #       in the repository of the current checkout. Harness and session come
 #       from the environment (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID,
 #       ZCODE_SESSION_ID) or --harness/--session/--cwd.
+#
+#       REGISTRATION IS THE DEFAULT (#723): any wait that may exceed ~10
+#       minutes — on an issue, a pull request, a CI run (its pull request, or
+#       --until as a check-in), or another session's work — is registered
+#       here, then the turn ends; the scheduled watcher wakes this session.
+#       Polling inside the turn is the exception, for short waits only.
+#       Subagents register the same way: a dispatched headless agent passes
+#       its own --harness/--session, and an in-chat subagent inherits the
+#       parent session's ID from the environment — which is the correct wake
+#       target, because the parent chat owns the work. A session with no
+#       issue of its own, or whose issue is already closed, uses --park.
 #   ai-blocker-watch find <words...> [--all]
 #       Plain-language search of parked and resumed work across the configured
 #       owners. --all includes closed issues.
+#   ai-blocker-watch has-wait <session-id>
+#       Exit 0 when that session holds a registered wait still in flight
+#       (state waiting or waking), exit 1 when it does not. The closeout hook
+#       asks this before letting a turn end on waiting language; a session
+#       may ask it directly ("am I registered?").
 #   ai-blocker-watch link <blocked owner/repo#M> <blocker owner/repo#N>
 #   ai-blocker-watch list
 #   ai-blocker-watch cancel <wait-id>
@@ -301,6 +317,25 @@ cmd_find(){
 }
 
 cmd_cancel(){ [ $# -eq 1 ] || die "usage: cancel <wait-id>"; rm -f -- "$WAITS/$1.json" || true; note "cancelled $1"; }
+
+cmd_has_wait(){
+  # The closeout hook's cheap local question: does THIS session hold a wait the
+  # watcher still owes a wake for? A finished (woken/failed/orphaned/unrunnable)
+  # wait owes nothing, so it does not count — a turn may not end on waiting
+  # language because a wait USED to exist.
+  [ $# -eq 1 ] || die "usage: has-wait <session-id>"
+  local f
+  for f in "$WAITS"/*.json; do
+    [ -e "$f" ] || continue
+    case "$(jq -r '.state // ""' "$f" 2>/dev/null)" in waiting|waking) ;; *) continue ;; esac
+    if [ "$(jq -r '.session // ""' "$f" 2>/dev/null)" = "$1" ]; then
+      note "session $1 holds wait $(basename "$f" .json) ($(jq -r .state "$f"))"
+      exit 0
+    fi
+  done
+  note "session $1 holds no wait in flight"
+  exit 1
+}
 
 # --- tick -------------------------------------------------------------------
 DRY=0; FAILED=0
@@ -985,11 +1020,12 @@ case "${1:-}" in
   link) shift; [ $# -eq 2 ] || die "usage: link <blocked owner/repo#M> <blocker owner/repo#N>"; link "$1" "$2" ;;
   list) cmd_list ;;
   find) shift; cmd_find "$@" ;;
+  has-wait) shift; cmd_has_wait "$@" ;;
   cancel) shift; cmd_cancel "$@" ;;
   tick) shift; cmd_tick "$@" ;;
   alarm) shift; cmd_alarm "$@" ;;
   links) shift; cmd_links "$@" ;;
   schedule) cmd_schedule ;;
   unschedule) cmd_unschedule ;;
-  -h|--help|help) sed -n '2,96p' "$_self" | sed 's/^# \{0,1\}//' ;;  *) die "unknown command; see ai-blocker-watch --help" ;;
+  -h|--help|help) sed -n '2,112p' "$_self" | sed 's/^# \{0,1\}//' ;;  *) die "unknown command; see ai-blocker-watch --help" ;;
 esac

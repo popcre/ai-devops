@@ -17,6 +17,12 @@
 #   * it fires at most once per user prompt (see the re-entry guard below), so it
 #     cannot loop
 #
+# A third shape was added 2026-09-24 (#723): a turn that ends holding a
+# machine wait ("I'll keep polling the PR") is stopped unless that session
+# holds a REGISTERED ai-blocker-watch wait — registration is the default for
+# any wait over ~10 minutes, and polling inside the turn is the exception for
+# short ones. Human waits ("waiting on Albert") never match.
+#
 # Full context: plan_completion-honesty-enforcement.md in u2giants/ai-devops.
 
 set -u
@@ -137,6 +143,54 @@ FUTURE_COMMITMENTS=(
   "let me now"
 )
 
+# A turn that ENDS holding a machine wait (#723). Under the standing rules a
+# wait that may exceed ~10 minutes is REGISTERED with ai-blocker-watch and only
+# then does the turn end; a short wait is held inside the turn while the session
+# keeps working. A close like "I'll keep polling the PR" is therefore always one
+# of two failures: an unregistered wait the wake machinery cannot resume, or a
+# turn that should not have ended. Human waits are deliberately NOT here —
+# "waiting on Albert" is a named owner in the still-open block, not a pollable
+# thing — so every phrase names a machine object or a polling cadence.
+WAITING_CLAIMS=(
+  "still waiting for the"
+  "still waiting on the"
+  "keep waiting"
+  "keep polling"
+  "still polling"
+  "polling every"
+  "poll again"
+  "i'll poll"
+  "i will poll"
+  "check again in"
+  "checking again in"
+  "recheck in"
+  "rechecking in"
+  "checking every"
+  "watching until"
+  "waiting on the pr"
+  "waiting for the pr"
+  "waiting on the pull request"
+  "waiting for the pull request"
+  "waiting on the check"
+  "waiting for the check"
+  "waiting on ci"
+  "waiting for ci"
+  "waiting on the review"
+  "waiting for the review"
+  "waiting on the merge"
+  "waiting for the merge"
+  "waiting on the queue"
+  "waiting for the queue"
+  "waiting on the run"
+  "waiting for the run"
+  "waiting on the workflow"
+  "waiting for the workflow"
+  "waiting for it to merge"
+  "waiting for it to close"
+  "waiting for it to land"
+  "waiting for it to finish"
+)
+
 # Judge how the reply CLOSES, not the whole essay. A completion claim is a way of
 # ENDING a turn; the same words in the middle of an explanation are prose. This
 # is why the mention-of-itself false positive happened, and it is the same fix
@@ -156,15 +210,40 @@ if [[ -z "$matched" ]]; then
   for commitment in "${FUTURE_COMMITMENTS[@]}"; do
     if [[ "$lower" == *"$commitment"* ]]; then matched="$commitment"; break; fi
   done
-  [[ -n "$matched" ]] || exit 0
-  match_kind="future"
+  if [[ -n "$matched" ]]; then
+    match_kind="future"
 
-  # UserPromptSubmit starts each turn with no action. Read-only inspection does
-  # not fulfil a promise to proceed with implementation, while any unknown
-  # older-client tool event stays fail-open. Missing event evidence also stays
-  # fail-open. Unknown tool kinds are inspection, so adding a connector cannot
-  # silently bypass the promise guard.
-  [[ -f "$action_file" ]] && [[ ! -f "$action_marker" ]] || exit 0
+    # UserPromptSubmit starts each turn with no action. Read-only inspection does
+    # not fulfil a promise to proceed with implementation, while any unknown
+    # older-client tool event stays fail-open. Missing event evidence also stays
+    # fail-open. Unknown tool kinds are inspection, so adding a connector cannot
+    # silently bypass the promise guard.
+    [[ -f "$action_file" ]] && [[ ! -f "$action_marker" ]] || exit 0
+  else
+    for held in "${WAITING_CLAIMS[@]}"; do
+      if [[ "$lower" == *"$held"* ]]; then matched="$held"; break; fi
+    done
+    [[ -n "$matched" ]] || exit 0
+    match_kind="waiting"
+
+    # A REGISTERED wait makes this close correct — the watcher owes this
+    # session a wake, so the turn SHOULD end. Ask BlockerWatch, locally and
+    # without any network call: has-wait exits 0 when the session holds a wait
+    # still in flight, 1 when it does not. Anything else (tool absent on this
+    # machine, cannot check) fails open — a broken hook must never wedge a
+    # session. The sibling script covers a repo checkout; command -v covers
+    # the installed copy, which lives without its repo siblings.
+    bw_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    bw="${AI_BLOCKER_WATCH_BIN:-$bw_dir/ai-blocker-watch}"
+    [ -x "$bw" ] || bw="$(command -v ai-blocker-watch 2>/dev/null || true)"
+    if [ -n "$bw" ]; then
+      "$bw" has-wait "$session" >/dev/null 2>&1
+      brc=$?
+      [ "$brc" -eq 1 ] || exit 0
+    else
+      exit 0
+    fi
+  fi
 fi
 
 # Re-entry guard. One block per user prompt: after firing, the same prompt_id is
@@ -188,6 +267,8 @@ tail -n 50 "$state_file" >"$state_file.tmp" 2>/dev/null && mv "$state_file.tmp" 
 
 if [[ "$match_kind" == "future" ]]; then
   reason="You committed to an action in this reply (\"$matched\") but the turn shows no implementation, test, or other execution action. Either perform it now, or state plainly that it is not started and why."
+elif [[ "$match_kind" == "waiting" ]]; then
+  reason="This turn ends holding a wait (\"$matched\"). A wait that may exceed ~10 minutes is REGISTERED — ai-blocker-watch wait <owner/repo#N> (--for <owner/repo#M> | --park \"<title>\") --brief-file <file> — and only then does the turn end; the watcher wakes this session when it releases. A short wait is held inside the turn while you KEEP WORKING, never ended on. Subagents register the same way with the session they run in. Waiting on a person instead? Name who and what you need in the still-open block; that is not a registered wait."
 else
   reason="This turn ends by claiming completion (\"$matched\"). Before it does: name every deliverable this request asked for and check each one against something real — a file that exists, a command's output, a live result. Preparation is not delivery: groundwork for a deliverable that does not exist yet is PENDING. If any deliverable is unfinished and nothing blocks it, you are already authorized — keep working instead of ending the turn. If everything genuinely checks out, say so again and this will not fire twice."
 fi

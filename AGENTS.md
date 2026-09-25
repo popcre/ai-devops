@@ -54,7 +54,9 @@ pipeline. The recovery procedure lives in
   migrated; other waits use `bin/ai-gh-wait`. At most one
   GitHub call every 5 minutes per waiter; never `gh run watch`, and never an
   open-ended `until`/`while` loop around `gh` — every wait needs a deadline or
-  iteration cap (#401).
+  iteration cap (#401). Any wait that may exceed ~10 minutes is REGISTERED with
+  `ai-blocker-watch wait` and the turn ends; polling is the exception for short
+  waits (#723, `docs/standing-rules-details.md`).
 - Reuse before adding another plan, workflow, harness, or provider copy. Every
   new shared artifact needs an owner, a reason the
   shared home cannot serve the need, and a retirement or consolidation path.
