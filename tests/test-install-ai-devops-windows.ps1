@@ -36,6 +36,15 @@ function New-Fixture {
     "# test Codex global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-codex.md")
     "# test ZCode global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-zcode.md")
     "# test MiMo global" | Set-Content -LiteralPath (Join-Path $templates "AGENTS-global-mimo.md")
+    # The managed post-merge reviewer hook scenario (#804) needs the real
+    # installer pieces inside the fixture so Install-PostMergeHook exercises
+    # the actual shared script.
+    $hooksDir = Join-Path $root "hooks"
+    New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null
+    Copy-Item -LiteralPath (Join-Path $RepoRoot "hooks\post-merge") -Destination (Join-Path $hooksDir "post-merge")
+    $fixtureBin = Join-Path $root "bin"
+    New-Item -ItemType Directory -Force -Path $fixtureBin | Out-Null
+    Copy-Item -LiteralPath (Join-Path $RepoRoot "bin\ai-install-post-merge-hook") -Destination (Join-Path $fixtureBin "ai-install-post-merge-hook")
 
     git -C $root init -b main | Out-Null
     git -C $root config user.name "AI DevOps Test"
@@ -316,6 +325,18 @@ try {
     # (seen on 916-alien): the schedule step must prefer Git's bundled bash.
     Assert-True ($installerText.Contains("'bin\bash.exe'")) "schedule step no longer prefers Git for Windows bash"
     Assert-True ($output -match "not touching this computer's scheduled tasks") "schedule step did not honour test mode"
+
+    # The managed post-merge reviewer hook (#804): a skills dry run must not
+    # install it, a real run must, and test mode must never run a live
+    # reviewer canary.
+    $fixture = New-Fixture "hook"
+    $claude = Join-Path $TempRoot "hook\claude"
+    $codex = Join-Path $TempRoot "hook\codex"
+    Invoke-Installer $fixture $claude $codex -SkillsDryRun | Out-Null
+    Assert-True (-not (Test-Path (Join-Path $fixture ".git\hooks\post-merge"))) "skills dry run installed the managed hook"
+    $output = Invoke-Installer $fixture $claude $codex
+    Assert-True (Test-Path (Join-Path $fixture ".git\hooks\post-merge")) "managed post-merge hook was not installed into the fixture"
+    Assert-True ($output -match "Test mode: not running live reviewer qualification") "requalify step did not honour test mode"
 
     Write-Host "PASS: install-ai-devops-windows"
 } finally {

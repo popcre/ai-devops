@@ -224,6 +224,16 @@ install_entrypoints() {
 run_stage required "Unix entrypoints" install_entrypoints
 
 # --------------------------------------------------------------------------
+# 4.1 Reviewer auto-requalification post-merge hook (#804). Pulling new
+#     reviewer wrapper code invalidates the affected reviewer's live
+#     qualification; without this hook it stays quarantined until a person
+#     re-qualifies by hand. bin/ai-install-post-merge-hook owns the marker
+#     rules (foreign hooks are never touched) so both installers and
+#     uninstall.sh share one implementation.
+# --------------------------------------------------------------------------
+run_stage required "Reviewer auto-requalification hook" "$REPO_ROOT/bin/ai-install-post-merge-hook"
+
+# --------------------------------------------------------------------------
 # 4.5 Claude + Codex skills and global instruction files. Delegate to the one
 #     tested installer so client-specific skills, shared skills, collision
 #     protection, and recoverable obsolete-skill handling cannot drift here.
@@ -368,10 +378,43 @@ fi
 # process; it never appears in argv or in this installer's output.
 if [ "$(id -u)" -eq 0 ]; then
   stage_results+=("SKIP\toptional\tMuse key store (root install)")
-elif command -v op >/dev/null 2>&1; then
-  run_stage optional "Muse key store" env AI_MUSE_CALLER=installer "$REPO_ROOT/bin/ai-muse" store-key --if-missing
-else
+elif ! command -v op >/dev/null 2>&1; then
   stage_results+=("SKIP\toptional\tMuse key store (1Password CLI not on PATH)")
+elif [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] && [ ! -s "$HOME/.config/ai-devops/op-service-account" ]; then
+  stage_results+=("SKIP\toptional\tMuse key store (no 1Password service-account token yet)")
+else
+  # Hand op the protected service-account token and no terminal: without a
+  # token, an interactive op offers to add a personal 1Password account, which
+  # this setup never uses.
+  muse_key_store() {
+    local token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+    [ -n "$token" ] || token="$(cat "$HOME/.config/ai-devops/op-service-account")"
+    OP_SERVICE_ACCOUNT_TOKEN="$token" AI_MUSE_CALLER=installer \
+      "$REPO_ROOT/bin/ai-muse" store-key --if-missing </dev/null
+  }
+  run_stage optional "Muse key store" muse_key_store
+fi
+
+# Muse Code on Linux: Meta's installer (run once by hand: see docs/muse-opencode.md)
+# puts versioned binaries in ~/.local/bin. This stage only verifies the pin.
+if [ "$(uname -s)" = Linux ] && [ "$(id -u)" -ne 0 ]; then
+  check_muse_code_linux() {
+    local pin="$REPO_ROOT/config/muse-code/linux-$(uname -m)" ver want bin
+    [ -f "$pin/version" ] || { echo "no Muse Code pin for $(uname -m)"; return 1; }
+    ver="$(tr -d ' \r\n' < "$pin/version")"; want="$(tr -d ' \r\n' < "$pin/sha256")"; bin="$HOME/.local/bin/muse-bin-$ver"
+    [ -f "$bin" ] || { echo "Muse Code $ver is not installed; see docs/muse-opencode.md (Linux)"; return 1; }
+    [ "$(sha256sum "$bin" | cut -d' ' -f1)" = "$want" ] || { echo "Muse Code $ver does not match the pinned SHA-256"; return 1; }
+  }
+  run_stage optional "Muse Code (Linux)" check_muse_code_linux
+fi
+
+# Reviewer provider CLIs (Grok Build, Kimi Code, Qwen Code). Per-user and
+# idempotent: current installs are skipped. Sign-in stays manual.
+if [ "$(id -u)" -eq 0 ]; then
+  stage_results+=("SKIP\toptional\tReviewer provider CLIs (root install)")
+else
+  install_provider_clis() { "$REPO_ROOT/bin/install-ai-provider-clis.sh" </dev/null; }
+  run_stage optional "Reviewer provider CLIs" install_provider_clis
 fi
 
 # --------------------------------------------------------------------------

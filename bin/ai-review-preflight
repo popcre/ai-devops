@@ -8,7 +8,7 @@
 # assigning the same unhealthy provider again.
 set -euo pipefail
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 STATE_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 CHECK_TIMEOUT="${AI_REVIEW_PREFLIGHT_TIMEOUT:-10}"
 COOLDOWN="${AI_REVIEW_QUARANTINE_SECONDS:-1800}"
@@ -304,6 +304,7 @@ explain_failure() {
     substantive-finding) printf 'Stop and fix the finding. Never rotate providers to shop for a friendlier verdict.\n' ;;
     empty-report) printf 'The provider returned a decision with no analysis behind it. Treat it as malformed, not as an approval. Re-run the review and require a report; never relax the report floor to let the verdict through.\n' ;;
     not-registered) printf 'The provider is not carried in the reviewer registry, so it cannot receive a review no matter how healthy its local install is. Re-entry is a reviewed registry change backed by a live well-formed verdict, never an edit made to unblock an allocation.\n' ;;
+    live-qualification-required) printf 'The reviewer live qualification no longer matches its wrapper, runtime, or preloader bytes. A pull of new toolkit code re-qualifies it automatically via the repository post-merge hook; to restore it now run: ai-review-preflight requalify\n' ;;
     authentication-failed|provider-timeout|provider-unhealthy) printf 'Quarantine this provider and correct the named health failure before assigning a review.\n' ;;
     *) die "unknown failure class '$1'." ;;
   esac
@@ -362,6 +363,104 @@ qualify_gemini() {
   write_atomic "$file" "$(jq -nc --arg provider gemini --arg sha "$sha" --arg agy "$agy_version" --arg agy_sha "$agy_sha" --arg model "$model" --argjson at "$now" '{version:2,provider:$provider,wrapper_sha256:$sha,agy_version:$agy,agy_sha256:$agy_sha,model:$model,qualified_epoch:$at}')"
   gemini_live_qualified || { rm -f "$file"; printf 'ai-review-preflight: Gemini qualification record did not validate after writing; quarantine remains.\n' >&2; return 1; }
   note "ai-review-preflight: Gemini live qualification recorded for wrapper $sha, agy $agy_version, and model $model."
+}
+
+# LIVE_QUALIFIED_PROVIDERS names every provider whose usability is bound to a
+# live qualification record. requalify iterates exactly these; adding a live
+# qualification contract for another provider means adding it here and a
+# stale-check case in requalify_provider.
+LIVE_QUALIFIED_PROVIDERS="gemini qwen"
+
+# record_requalify_failure PROVIDER OUTPUT_FILE persists a failed automatic
+# requalification as a reviewer issue (#804). A failure that cannot be
+# recorded is still printed, so it is never silently skipped.
+record_requalify_failure() { # PROVIDER OUTPUT_FILE
+  local provider="$1" output="$2" issue_bin="${AI_REVIEWER_ISSUE_BIN:-$SCRIPT_DIR/ai-reviewer-issue}" out id
+  if [ -x "$issue_bin" ]; then
+    out="$("$issue_bin" record --provider "$provider" \
+      --summary "automatic $provider requalification failed after a pulled wrapper, runtime, or preloader change" \
+      --details-file "$output" \
+      --command "ai-review-preflight requalify $provider" \
+      --repo "$REGISTRY_REAL_DIR/.." \
+      --caller requalify 2>&1)" || out="$out
+ai-reviewer-issue record itself failed."
+    printf '%s\n' "$out" >&2
+    id="$(printf '%s\n' "$out" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+  else
+    id=""
+    printf 'ai-review-preflight: ai-reviewer-issue is unavailable at %s; failure NOT recorded.\n' "$issue_bin" >&2
+  fi
+  [ -n "$id" ] || id=unrecorded
+  printf 'ai-review-preflight: %s automatic requalification FAILED; it stays quarantined (live-qualification-required). reviewer issue: %s\n' "$provider" "$id" >&2
+}
+
+# requalify_expected_file PROVIDER is the marker that says this host HAS
+# held a live qualification for the provider. qualify_* deletes the record
+# before its canary, so a failed requalification leaves no record; without
+# this marker the next automatic run would see "no record" and silently
+# stop retrying (#804 requires the opposite).
+requalify_expected_file() { printf '%s/%s-requalify-marker.json' "$STATE_DIR" "$1"; }
+
+# requalify_provider PROVIDER returns 0 when the provider's live qualification
+# is current or was just re-established, and 1 when a requalification attempt
+# failed (already recorded and surfaced by then).
+requalify_provider() { # PROVIDER
+  local provider="$1" file marker output rc qualify_output
+  if [ "$(registry_state "$provider")" != registered ]; then
+    note "ai-review-preflight: $provider is not carried in the reviewer registry; automatic requalification skips it."
+    return 0
+  fi
+  file="$(qualification_file "$provider")"
+  marker="$(requalify_expected_file "$provider")"
+  if [ ! -f "$file" ]; then
+    if [ ! -f "$marker" ]; then
+      # The first qualification is a deliberate act (a live canary on live
+      # credentials); automation only refreshes an existing qualification.
+      note "ai-review-preflight: $provider has no prior live-qualification record; nothing to re-qualify."
+      return 0
+    fi
+    note "ai-review-preflight: $provider qualification record was revoked by a failed requalification; retrying."
+  else
+    write_atomic "$marker" "$(jq -nc --arg provider "$provider" --argjson at "$(now_epoch)" '{version:1,provider:$provider,expected_epoch:$at}')"
+    case "$provider" in
+      gemini) gemini_live_qualified && { note "ai-review-preflight: gemini live qualification is current."; return 0; } ;;
+      qwen)   qwen_live_qualified   && { note "ai-review-preflight: qwen live qualification is current."; return 0; } ;;
+      *) die "requalify has no stale check for provider '$provider'." ;;
+    esac
+    note "ai-review-preflight: $provider live qualification is stale (wrapper, runtime, or preloader changed); re-qualifying."
+  fi
+  output="$(mktemp "${TMPDIR:-/tmp}/requalify.XXXXXX")"
+  set +e
+  qualify_output="$(case "$provider" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; esac 2>&1)"
+  rc=$?
+  set -e
+  printf '%s\n' "$qualify_output" >&2
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$output"
+    return 0
+  fi
+  printf '%s\n' "$qualify_output" > "$output"
+  record_requalify_failure "$provider" "$output"
+  rm -f "$output"
+  return 1
+}
+
+# requalify re-runs the live qualification for every named provider (default:
+# all LIVE_QUALIFIED_PROVIDERS) whose qualification record no longer matches
+# the installed bytes. Called automatically by the repository's post-merge
+# hook and by update.sh after a pull; safe to run by hand at any time.
+requalify() { # [PROVIDER...]
+  local provider failed=0
+  local providers=("$@")
+  [ "$#" -gt 0 ] || read -r -a providers <<< "$LIVE_QUALIFIED_PROVIDERS"
+  for provider in "${providers[@]}"; do
+    case " $LIVE_QUALIFIED_PROVIDERS " in
+      *" $provider "*) ;;
+      *) die "requalify only knows: $LIVE_QUALIFIED_PROVIDERS (got '$provider')." ;;
+    esac
+    requalify_provider "$provider" || failed=1
+  done
+  return "$failed"
 }
 
 # emit_status PROVIDER runs one provider's reconciled check in isolation. A
@@ -456,6 +555,7 @@ Usage:
   ai-review-preflight quarantine <provider> <failure-class> [--seconds N]
   ai-review-preflight clear <provider>
   ai-review-preflight qualify gemini|qwen
+  ai-review-preflight requalify [provider]
   ai-review-preflight status [provider]
   ai-review-preflight usable [provider]
   ai-review-preflight explain <failure-class>
@@ -504,6 +604,7 @@ case "$cmd" in
   qualify)
     [ "$#" -eq 1 ] || die 'usage: ai-review-preflight qualify gemini|qwen'
     case "${1:-}" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; *) die 'usage: ai-review-preflight qualify gemini|qwen' ;; esac ;;
+  requalify) requalify "$@" ;;
   status)
     provider="${1:-}"
     if [ -n "$provider" ]; then valid_provider "$provider" || die "unknown provider '$provider'."; providers=("$provider")

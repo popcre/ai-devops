@@ -39,8 +39,15 @@ case "$ENGINE" in
     BIN="$PROFILE_HOME/.local/lib/ai-devops/opencode/$VERSION/node_modules/opencode-ai/bin/opencode.exe"
     MODEL="meta-model-api/muse-spark-1.3-contributor";;
   muse-code)
-    VERSION="$(tr -d ' \r\n' < "$ROOT/config/muse-code/version")"
-    BIN="$PROFILE_HOME/AppData/Local/Programs/muse/muse-bin-$VERSION.exe"
+    # Windows (USERPROFILE set): Meta's installer under AppData. Linux: Meta's
+    # launcher keeps versioned binaries beside itself in ~/.local/bin. Each
+    # platform has its own pin; the binaries differ.
+    if [ -n "${USERPROFILE:-}" ]; then MUSE_PIN="$ROOT/config/muse-code"; MUSE_EXE=.exe
+    else MUSE_PIN="$ROOT/config/muse-code/linux-$(uname -m)"; MUSE_EXE=""; fi
+    VERSION="$(tr -d ' \r\n' < "$MUSE_PIN/version" 2>/dev/null || true)"
+    [ -n "$VERSION" ] || { printf 'ai-muse: error: local_dependency_unavailable: no Muse Code pin for this platform (%s)\n' "$MUSE_PIN" >&2; exit 1; }
+    if [ -n "$MUSE_EXE" ]; then BIN="$PROFILE_HOME/AppData/Local/Programs/muse/muse-bin-$VERSION.exe"
+    else BIN="$PROFILE_HOME/.local/bin/muse-bin-$VERSION"; fi
     MODEL="muse-spark-1.3-contributor";;
   *) printf 'ai-muse: error: start_failed: unknown AI_MUSE_ENGINE: %s (use opencode or muse-code)\n' "$ENGINE" >&2; exit 1;;
 esac
@@ -218,7 +225,7 @@ muse_code_run(){ # every non-turn Muse Code call gets the same minimal environme
   fi
   "${e[@]}" "$BIN" "$@"
 }
-muse_code_sha256(){ local v=""; read -r v < "$ROOT/config/muse-code/sha256" || [ -n "$v" ]; v="${v%$'\r'}"; printf '%s' "${v// /}"; } # the exact pinned file, checked before it runs or sees a key; no override
+muse_code_sha256(){ local v=""; read -r v < "$MUSE_PIN/sha256" || [ -n "$v" ]; v="${v%$'\r'}"; printf '%s' "${v// /}"; } # the exact pinned file, checked before it runs or sees a key; no override
 # Identity cache (#773): hashing two 400 MB files, re-protecting the directory,
 # and asking the binary for its version cost 5-40s on a saturated Windows host,
 # where every process spawn takes about a second. After a full verification we
@@ -231,20 +238,20 @@ muse_code_stage(){ # run only a private copy verified after it was made, so swap
   [ ! -L "$BIN" ] || return 1
   dir="$PROFILE_HOME/.local/share/ai-devops/muse-code-bin"; cache="$dir/.verified-$want"
   ! linked_below_home "$dir" || return 1
-  if [ -d "$dir" ] && [ -f "$dir/muse-$want.exe" ] && [ ! -L "$dir/muse-$want.exe" ] && [ -f "$cache" ] && [ ! -L "$cache" ]; then
-    id="$(muse_code_identity "$BIN" "$dir/muse-$want.exe")"; read -r rec < "$cache" || true
+  if [ -d "$dir" ] && [ -f "$dir/muse-$want$MUSE_EXE" ] && [ ! -L "$dir/muse-$want$MUSE_EXE" ] && [ -f "$cache" ] && [ ! -L "$cache" ]; then
+    id="$(muse_code_identity "$BIN" "$dir/muse-$want$MUSE_EXE")"; read -r rec < "$cache" || true
     if [ -n "$id" ] && [ "$rec" = "$VERSION $id" ]; then
-      BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want"; MUSE_CODE_VERSION_OK="$BIN:$want"; return 0
+      BIN="$dir/muse-$want$MUSE_EXE"; MUSE_CODE_VERIFIED="$BIN:$want"; MUSE_CODE_VERSION_OK="$BIN:$want"; return 0
     fi
   fi
   [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$want" ] || return 1
   mkdir -p "$dir" && chmod 700 "$dir" && protect_windows_path "$dir" directory || return 1
-  if [ ! -f "$dir/muse-$want.exe" ] || [ -L "$dir/muse-$want.exe" ] || [ "$(sha256sum "$dir/muse-$want.exe" | cut -d' ' -f1)" != "$want" ]; then
-    rm -f -- "$dir/muse-$want.exe"; tmp="$(mktemp "$dir/copy.XXXXXXXX")" || return 1
-    cp -- "$BIN" "$tmp" && chmod 700 "$tmp" && protect_windows_path "$tmp" file && got="$(sha256sum "$tmp" | cut -d' ' -f1)" && [ "$got" = "$want" ] && mv -f -- "$tmp" "$dir/muse-$want.exe" || { rm -f -- "$tmp"; return 1; }
+  if [ ! -f "$dir/muse-$want$MUSE_EXE" ] || [ -L "$dir/muse-$want$MUSE_EXE" ] || [ "$(sha256sum "$dir/muse-$want$MUSE_EXE" | cut -d' ' -f1)" != "$want" ]; then
+    rm -f -- "$dir/muse-$want$MUSE_EXE"; tmp="$(mktemp "$dir/copy.XXXXXXXX")" || return 1
+    cp -- "$BIN" "$tmp" && chmod 700 "$tmp" && protect_windows_path "$tmp" file && got="$(sha256sum "$tmp" | cut -d' ' -f1)" && [ "$got" = "$want" ] && mv -f -- "$tmp" "$dir/muse-$want$MUSE_EXE" || { rm -f -- "$tmp"; return 1; }
   fi
-  rm -f -- "$cache"; MUSE_CODE_CACHE_FILE="$cache"; MUSE_CODE_CACHE_ID="$(muse_code_identity "$BIN" "$dir/muse-$want.exe")"
-  BIN="$dir/muse-$want.exe"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds
+  rm -f -- "$cache"; MUSE_CODE_CACHE_FILE="$cache"; MUSE_CODE_CACHE_ID="$(muse_code_identity "$BIN" "$dir/muse-$want$MUSE_EXE")"
+  BIN="$dir/muse-$want$MUSE_EXE"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds
 }
 muse_code_pinned(){
   local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] || return 1
@@ -561,10 +568,16 @@ retain_turn(){ # retain exact bytes and optional observations in one metadata wr
   tmp="$(tmp_file)"
   jq --arg effort "${EFFECTIVE_REASONING_EFFORT:-}" --arg usage "$usage" --arg event "$event" --arg stream "$stem.jsonl" --arg prompt "$stem.prompt" --arg stderr "$stem.stderr" --arg sid "$sid" --arg model "$MODEL" --arg version "$VERSION" --arg report "${report_path:-}" --arg sha "$(sha256sum "$stem.jsonl" | cut -d' ' -f1)" --arg psha "$(sha256sum "$stem.prompt" | cut -d' ' -f1)" --argjson rc "$rc" --argjson verdict "${REQUIRE_VERDICT:-0}" '.retained_turn={original_invocation_id:$event,stream:$stream,prompt:$prompt,stderr:$stderr,stream_sha256:$sha,prompt_sha256:$psha,process_exit:$rc,expected_session_id:$sid,model:$model,runtime_version:$version,require_verdict:$verdict,report_path:$report,usage_json:$usage} | if $effort!="" then .retained_turn.reasoning_effort=$effort else . end' "$meta" > "$tmp" && mv -f "$tmp" "$meta"
 }
-capacity_rejection(){ # an answer-free rejection naming model_not_found; any produced text or step means a real turn
+capacity_rejection(){ # an answer-free model 404; any produced text, step, or output means a real turn
   local out="$1"
-  grep -Fq model_not_found "$out" "$out.stderr" 2>/dev/null || return 1
-  ! jq -e 'select(.type=="text" or .type=="step_finish" or ((.payload_type//"")=="run.terminal.completed"))' "$out" >/dev/null 2>&1
+  # Meta reports the team Contributor capacity limit as HTTP 404 model_not_found
+  # (#683/#743). Accept both the structured code and the human message OpenCode
+  # and Muse Code surface, including a statusCode-only 404 body.
+  { grep -Fq model_not_found "$out" "$out.stderr" 2>/dev/null ||
+    grep -Fq 'The requested model was not found' "$out" "$out.stderr" 2>/dev/null ||
+    grep -Eqi 'model[_ -]?not[_ -]?found' "$out" "$out.stderr" 2>/dev/null; } || return 1
+  # run.model.configured is setup, not an answer; text/delta/step/completion are.
+  ! jq -e 'select(.type=="text" or .type=="step_finish" or ((.payload_type//"")|IN("run.terminal.completed","run.output.delta")))' "$out" >/dev/null 2>&1
 }
 acquire_provider_slot(){ # optional machine-wide cap on simultaneous Muse turns; 0 (default) means no cap
   local max="${AI_MUSE_MAX_CONCURRENT:-0}" dir="$STATE/provider-slots" i owner waited=0
@@ -688,6 +701,19 @@ parse_turn(){ # shared terminal parser; never launches the provider
   if [ -z "$TURN_SID" ]; then TURN_ERROR='Muse completed without a session ID.'; return 1; fi
   if [ "$FINISH" != stop ]; then TURN_ERROR="Muse did not prove completion (reason: ${FINISH:-missing})."; return 1; fi
   if [ -z "$TEXT" ]; then TURN_ERROR='Muse completed without a usable response.'; return 1; fi
+  if [ "$ENGINE" = muse-code ]; then
+    # Prove the request pin actually ran: no silent default/policy fallback alias (#743).
+    local configured_model
+    configured_model="$(jq -sr '[.[]|select(.payload_type=="run.model.configured")|.payload.model_id//empty]|last//empty' "$out" 2>/dev/null || true)"
+    if [ -z "$configured_model" ]; then
+      TURN_ERROR="Muse Code did not report which model it configured; cannot prove the requested pin $MODEL."
+      return 1
+    fi
+    if [ "$configured_model" != "$MODEL" ]; then
+      TURN_ERROR="Muse Code configured model '$configured_model' instead of the requested pin '$MODEL'."
+      return 1
+    fi
+  fi
   if [ "${REQUIRE_VERDICT:-0}" = 1 ] && ! printf '%s\n' "$TEXT" | sed '/^[[:space:]]*$/d' | tail -n 1 | grep -Eq '^VERDICT:[[:space:]]+(FINDINGS|NO FINDINGS)$'; then TURN_ERROR='Muse stopped without an allowed final VERDICT line.'; return 1; fi
   # Optional accounting must never invalidate a paid completion or request replay.
   if [ -n "$meta" ] && jq -e '.retained_turn.usage_json | fromjson | type=="object"' "$meta" >/dev/null 2>&1; then

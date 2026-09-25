@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# ai-devops-managed: reviewer auto-requalification post-merge hook (#804).
+# Installed into .git/hooks/post-merge by the installers through
+# bin/ai-install-post-merge-hook; never edit by hand (the installer refreshes
+# managed hooks and leaves foreign ones alone).
+#
+# After a pull merges new upstream code, any reviewer whose live
+# qualification no longer matches its installed wrapper, runtime, or
+# preloader bytes is re-qualified automatically. A failed requalification is
+# recorded with ai-reviewer-issue and the hook exits nonzero, so a pull that
+# leaves a reviewer unqualified is loudly incomplete, never silent.
+#
+# Only a result exactly on origin/main is requalified: development-branch
+# merges and checkouts of older mainline commits are skipped, because
+# work-in-progress or stale bytes are not the installed reviewer.
+set -euo pipefail
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -n "$root" ] && [ -x "$root/bin/ai-review-preflight" ] || exit 0
+[ "$(git rev-parse HEAD 2>/dev/null)" = "$(git rev-parse origin/main 2>/dev/null)" ] || exit 0
+# Git exports GIT_DIR/GIT_WORK_TREE (and friends) to hooks. The requalify
+# tree runs its own git commands (qualification fixtures, identity checks);
+# an inherited GIT_DIR would point them at THIS repository and can clobber
+# the toolkit's git identity or build fixtures in the wrong place.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+unset GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+exec "$root/bin/ai-review-preflight" requalify

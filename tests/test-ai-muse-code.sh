@@ -31,6 +31,15 @@ case "${1:-}" in
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
     [ -z "${MUSE_STUB_ARGS_FILE:-}" ] || printf '%s\n' "$@" > "$MUSE_STUB_ARGS_FILE"
     [ "${MUSE_STUB_MODE:-}" = fail ] && exit 7
+    if [ "${MUSE_STUB_MODE:-}" = capacity ]; then
+      n="$(cat "$MUSE_STUB_CAPACITY_FILE" 2>/dev/null || echo 0)"; n=$((n+1)); printf '%s' "$n" > "$MUSE_STUB_CAPACITY_FILE"
+      [ "$n" -gt "${MUSE_STUB_CAPACITY_FAILS:-1}" ] || {
+        # Exact production shape from shared-db PR #3446 (#743): HTTP 404 body
+        # carries model_not_found only inside responseBody.
+        printf '%s\n' '{"type":"error","timestamp":1790198613452,"sessionID":"ses_stub","error":{"name":"APIError","data":{"message":"The requested model was not found.","statusCode":404,"isRetryable":false,"responseBody":"{\"error\":{\"code\":\"model_not_found\",\"message\":\"The requested model was not found.\",\"param\":null,\"type\":\"invalid_request_error\"}}"}}}'
+        exit 1
+      }
+    fi
     [ "${MUSE_STUB_MODE:-}" = malformed ] && { printf 'not-json\n'; exit 0; }
     sid=''; prev=''; for a in "$@"; do [ "$prev" = --session-id ] && sid="$a"; prev="$a"; done
     [ "${MUSE_STUB_MODE:-}" = wrongsid ] && sid=00000000-0000-4000-8000-000000000000
@@ -51,6 +60,7 @@ case "${1:-}" in
     fi
     ev(){ jq -cn --arg sid "$1" --arg t "$2" --argjson p "$3" '{stream:{kind:"session",id:$sid},payload_type:$t,payload:$p}'; }
     [ -n "${MUSE_STUB_NO_RUN_ID:-}" ] || ev "$sid" runtime.command.accepted "$(jq -cn --arg cid "$run" '{kind:"command_accepted",command_id:$cid,command_kind:"exec"}')"
+    [ -n "${MUSE_STUB_NO_MODEL_CONFIG:-}" ] || ev "$sid" run.model.configured "$(jq -cn --arg m "${MUSE_STUB_CONFIGURED_MODEL:-muse-spark-1.3-contributor}" '{kind:"run_model_configured",model_id:$m,provider_id:"meta",profile_id:"tbh",display_label:$m,source:"startup"}')"
     ev "$sid" task.lifecycle.started '{}'
     [ "${MUSE_STUB_MODE:-}" = mixed ] && ev 11111111-1111-4111-8111-111111111111 task.lifecycle.started '{}'
     [ "${MUSE_STUB_MODE:-}" = nostream ] && printf '{"payload_type":"note","payload":{}}\n'
@@ -308,6 +318,13 @@ if command -v cygpath >/dev/null && cmd //c mklink //J "$(cygpath -w "$TMP/junct
   phase_c_check 'delete refuses a junction at a durable UUID leaf before deleting any store' phase_c_link junction leaf
   phase_c_check 'delete refuses a junction at a durable date parent before deleting any store' phase_c_link junction parent
 else printf 'SKIP  durable junction refusal (junctions unavailable)\n'; fi
+
+# #743: prove the request pin ran, and retry the production capacity 404 shape.
+check 'a completed turn proves the configured model is the requested pin' "cd '$REPO' && eval \"$ENV '$SCRIPT' new pinproof --prompt test\" >/dev/null && grep -qx 'muse-spark-1.3-contributor' '$TMP/provider-args'"
+check 'a turn that configured another model is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_CONFIGURED_MODEL=muse-spark-1.3 '$SCRIPT' new wrongpin --prompt test\" >/dev/null 2>&1"
+check 'a turn without run.model.configured is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_NO_MODEL_CONFIG=1 '$SCRIPT' new nomodelcfg --prompt test\" >/dev/null 2>&1"
+check 'production model_not_found 404 is relaunched on muse-code and then succeeds' "cd '$REPO' && rm -f '$TMP/cap-mc1' && eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 MUSE_STUB_MODE=capacity MUSE_STUB_CAPACITY_FILE='$TMP/cap-mc1' MUSE_STUB_CAPACITY_FAILS=2 '$SCRIPT' new capacity-mc --prompt test\" >/dev/null && test \"\$(cat '$TMP/cap-mc1')\" = 3"
+check 'production model_not_found 404 stops after the retry budget' "cd '$REPO' && rm -f '$TMP/cap-mc2' && ! eval \"$ENV AI_MUSE_CAPACITY_BACKOFF=0 AI_MUSE_CAPACITY_RETRIES=1 MUSE_STUB_MODE=capacity MUSE_STUB_CAPACITY_FILE='$TMP/cap-mc2' MUSE_STUB_CAPACITY_FAILS=5 '$SCRIPT' new capacity-mc-fail --prompt test\" >/dev/null 2>&1 && test \"\$(cat '$TMP/cap-mc2')\" = 2"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

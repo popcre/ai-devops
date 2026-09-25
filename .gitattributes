@@ -19,6 +19,7 @@
 # extensionless, so a `*.sh` rule alone would miss them.
 *.sh          text eol=lf
 bin/**        text eol=lf
+hooks/**      text eol=lf
 tests/**      text eol=lf
 mcp/**        text eol=lf
 

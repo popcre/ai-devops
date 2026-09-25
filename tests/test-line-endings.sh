@@ -36,7 +36,7 @@ while IFS= read -r f; do
   case "$(head -c 60 "$f" 2>/dev/null | head -n 1)" in
     '#!'*bash*|'#!'*/sh|'#!'*"env sh") shell_files+=("$f") ;;
   esac
-done < <(git ls-files '*.sh' 'bin/*' 'tests/*' 'tools/*' 'mcp/*')
+done < <(git ls-files '*.sh' 'bin/*' 'hooks/*' 'tests/*' 'tools/*' 'mcp/*')
 
 if [ "${#shell_files[@]}" -eq 0 ]; then
   bad "found at least one shell script to check"

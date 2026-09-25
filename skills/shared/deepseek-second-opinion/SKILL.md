@@ -19,6 +19,9 @@ answer, finds it plausible, and folds. Two models agreeing because the second
 one anchored on the first is worth nothing. The value is in genuine
 independence, then genuine argument.
 
+To have DeepSeek actually write and commit code, use `deepseek-code-delegation`
+(the `ai-deepseek` OpenCode harness). This skill stays read-only.
+
 ## Trigger phrases
 
 - "run this by deepseek", "what does deepseek think", "see if deepseek agrees"
