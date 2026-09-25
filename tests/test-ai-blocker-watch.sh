@@ -593,4 +593,27 @@ jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},no
 BW tick >/dev/null 2>&1 || true
 check 'blocker_snapshot_pagination_indexes_every_page' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 2 ] && [ \"\$(grep -c 'ai-blocker-watch:o/r#5' '$FAKE/comments')\" = 150 ] && ! grep -q 'dependencies/blocking' '$FAKE/calls'"
 
+# Digest lookup and link() ids come from the same snapshot (#658 P5 REST savings).
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap5"
+day="$(date -u +%Y-%m-%d)"
+mkdir -p "$TMP/home-snap5"
+jq '.alarm_digest_repo="o/r" | .alarm_max_nodes=500' "$TMP/config.json" > "$TMP/config-snap5.json"
+export AI_BLOCKER_WATCH_CONFIG="$TMP/config-snap5.json"
+# digest already open in the snapshot; a depends_on edge to an open blocker.
+jq -n --arg t "ai-blocker-watch digest $day" '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:31,databaseId:231,title:$t,assignees:{totalCount:0},body:"",blockedBy:{nodes:[]}},
+  {number:20,databaseId:220,title:"work",assignees:{totalCount:0},body:"```db-work-scope\ndepends_on: 7\nobjects:\n```",blockedBy:{nodes:[]}},
+  {number:7,databaseId:207,title:"gate bug",assignees:{totalCount:0},body:"",blockedBy:{nodes:[]}}
+]}}}}' > "$FAKE/gql_links.json"
+rm -f "$FAKE/gql_parents.json" "$FAKE/digest_search.json"
+: > "$FAKE/calls"; rm -f "$FAKE/links" "$FAKE/edited"
+date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap5/last-alarm"
+date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap5/last-links"
+# Stall #7 so the digest path runs, and let the links scan create the missing edge.
+jq -n --arg old "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" '{data:{repository:{issue:{updatedAt:$old,createdAt:$old,body:"",comments:{nodes:[]},timelineItems:{nodes:[]},blocking:{nodes:[]}}}}}' > "$FAKE/gql_issue_7.json"
+echo '[]' > "$FAKE/digest_search.json"
+BW tick >/dev/null 2>&1 || true
+check 'digest_lookup_uses_snapshot_not_search' "! grep -q 'search issues' '$FAKE/calls' && grep -q 'issue edit 31' '$FAKE/edited'"
+check 'link_id_comes_from_snapshot' "grep -q 'issue_id=207' '$FAKE/calls' && ! grep -q 'repos/o/r/issues/7' '$FAKE/calls'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

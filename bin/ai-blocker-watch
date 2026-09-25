@@ -146,8 +146,18 @@ gh_api(){ gh_call api "$@" | tr -d '\r'; }
 link(){ # link <blocked> <blocker> [blocker id, when already read]
   local br bn kr kn id="${3:-}"
   read -r br bn <<<"$(parse_ref "$1")"; read -r kr kn <<<"$(parse_ref "$2")"
+  # Same-tick snapshot already holds open issues' ids and blocked-by edges
+  # (#658 P5). A miss is not proof of anything — fall back to REST.
+  if [ -z "$id" ] && [ -n "${SNAPIDX[$kr#$kn]+set}" ]; then
+    id="${SNAPIDX[$kr#$kn]%%$'\t'*}"
+  fi
   [ -n "$id" ] || id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
   note "linking $1 as blocked by $2 on GitHub"
+  if [ -n "${SNAPREPO[$br]+set}" ]; then
+    case "${SNAPDEP[$br#$bn]:- }" in *" $kr#$kn "*)
+      note "$1 is already blocked by $2"; return 0 ;;
+    esac
+  fi
   if gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
     note "$1 is already blocked by $2"; return 0
   fi
@@ -810,7 +820,22 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
     if [ "$dry" = 1 ]; then
       note "would update the digest in $drepo: $title"
     else
-      if dnum="$(gh_call search issues "$title" --repo "$drepo" --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null)"; then
+      # Today's digest, once open, is just another open issue this tick already
+      # read (#658 P5) — look there before spending a search request.
+      dnum=""
+      if [ -n "${SNAPREPO[$drepo]+set}" ]; then
+        local k t
+        for k in "${!SNAPIDX[@]}"; do
+          case "$k" in "$drepo#"*) ;; *) continue ;; esac
+          t="${SNAPIDX[$k]#*$'\t'}"
+          [ "$t" = "$title" ] || continue
+          dnum="${k##*#}"
+          break
+        done
+      fi
+      if [ -n "$dnum" ]; then
+        :
+      elif dnum="$(gh_call search issues "$title" --repo "$drepo" --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null)"; then
         dnum="$(printf '%s' "$dnum" | head -1)"
       else
         note "alarm: could not search $drepo for today's digest"; dnum=""; afail=1
