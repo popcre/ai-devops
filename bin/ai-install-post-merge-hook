@@ -18,7 +18,15 @@
 set -euo pipefail
 
 VERSION="1.0.0"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# bin/* is symlinked onto PATH (install.sh links executable entries into
+# /usr/local/bin), so resolve the real script location before looking for
+# the repository's shipped hook; a naive dirname/.. points into /usr/local.
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  RESOLVED_SOURCE="$(readlink -f "$SCRIPT_SOURCE" 2>/dev/null || true)"
+  [ -z "$RESOLVED_SOURCE" ] || SCRIPT_SOURCE="$RESOLVED_SOURCE"
+fi
+REPO_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
 MODE=install
 REPO=""
 DRY_RUN=0
@@ -51,7 +59,14 @@ hook_source="$REPO_ROOT/hooks/post-merge"
 # --path-format=absolute returns a usable absolute path on every platform,
 # including Git-for-Windows drive letters and linked worktrees, whose
 # common dir otherwise needs joining and can be reported as C:/... .
-git_dir="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || die "not a git repository: $REPO"
+if ! git_dir="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  # Removal must stay safe on a non-repository target (uninstall.sh accepts a
+  # --repo-root that is not a git checkout): with no repository there is no
+  # owned hook, so removal is complete. Installation genuinely needs one.
+  [ "$MODE" = remove ] || die "not a git repository: $REPO"
+  note "not a git repository, so there is no owned post-merge hook: $REPO"
+  exit 0
+fi
 hooks_dir="$git_dir/hooks"
 hook_target="$hooks_dir/post-merge"
 marker='^# ai-devops-managed: reviewer auto-requalification'

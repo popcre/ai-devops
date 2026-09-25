@@ -202,7 +202,7 @@ git init -q --bare -b main "$HOOK_ORIGIN"
 git clone -q "$HOOK_ORIGIN" "$HOOK_CLONE" 2>/dev/null
 git -C "$HOOK_CLONE" config user.name Test; git -C "$HOOK_CLONE" config user.email t@example.com
 mkdir -p "$HOOK_CLONE/bin"
-printf '#!/usr/bin/env bash\nprintf "called\\n" >> "%s/hook-called"\nexit 0\n' "$TMP" > "$HOOK_CLONE/bin/ai-review-preflight"
+printf '#!/usr/bin/env bash\nprintf "gitdir=[%%s]\\n" "${GIT_DIR:-}" >> "%s/hook-called"\nexit 0\n' "$TMP" > "$HOOK_CLONE/bin/ai-review-preflight"
 chmod +x "$HOOK_CLONE/bin/ai-review-preflight"
 cp "$ROOT/hooks/post-merge" "$HOOK_CLONE/.git/hooks/post-merge"
 chmod +x "$HOOK_CLONE/.git/hooks/post-merge"
@@ -211,6 +211,12 @@ echo b > "$HOOK_CLONE/b"; git -C "$HOOK_CLONE" add b; git -C "$HOOK_CLONE" commi
 git -C "$HOOK_CLONE" reset -q --hard HEAD~1
 git -C "$HOOK_CLONE" pull -q --ff-only
 check "the managed hook fires after a main pull" "test -f '$TMP/hook-called'"
+check "the hook strips git hook environment before requalify" "grep -q 'gitdir=\[\]' '$TMP/hook-called'"
+rm -f "$TMP/hook-called"
+git -C "$HOOK_CLONE" reset -q --hard HEAD~1
+"$HOOK_CLONE/.git/hooks/post-merge"
+check "the hook skips an older mainline commit" "test ! -e '$TMP/hook-called'"
+git -C "$HOOK_CLONE" pull -q --ff-only
 rm -f "$TMP/hook-called"
 git -C "$HOOK_CLONE" checkout -qb feature HEAD~1
 echo c > "$HOOK_CLONE/c"; git -C "$HOOK_CLONE" add c; git -C "$HOOK_CLONE" commit -qm three
@@ -246,14 +252,17 @@ cp "$ROOT/hooks/post-merge" "$FIXTURE/.git/hooks/post-merge"
 chmod +x "$FIXTURE/.git/hooks/post-merge"
 check "an owned matching hook is removed" "'$HOOK_INSTALL' --remove --repo '$FIXTURE' && test ! -e '$FIXTURE/.git/hooks/post-merge'"
 check "remove without an owned hook is a no-op" "'$HOOK_INSTALL' --remove --repo '$FIXTURE'"
-check "a non-repository target is refused" "! '$HOOK_INSTALL' --repo '$TMP/not-a-repo'"
+check "a non-repository target is refused for install" "! '$HOOK_INSTALL' --repo '$TMP/not-a-repo'"
+check "a non-repository target has nothing to remove" "'$HOOK_INSTALL' --remove --repo '$TMP/not-a-repo'"
+ln -s "$HOOK_INSTALL" "$TMP/bin/hook-tool-link" 2>/dev/null
+check "the installer resolves a PATH symlink to its shipped hook" "[ ! -L '$TMP/bin/hook-tool-link' ] || ('$TMP/bin/hook-tool-link' --repo '$FIXTURE' && cmp -s '$ROOT/hooks/post-merge' '$FIXTURE/.git/hooks/post-merge')"
 check "install.sh runs the shared hook installer" "grep -q 'ai-install-post-merge-hook' '$ROOT/install.sh'"
 check "the Windows installer runs the shared hook installer" "grep -q 'ai-install-post-merge-hook' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "the Windows installer disables hooks on its own fast-forward" "grep -q 'core.hooksPath' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "update.sh disables hooks on its own pull" "grep -q 'core.hooksPath' '$ROOT/update.sh'"
 check "update.sh requalifies after installing" "grep -q 'bin/ai-review-preflight\" requalify' '$ROOT/update.sh'"
 check "the Windows installer requalifies after installing the hook" "grep -q 'requalify' '$ROOT/bin/install-ai-devops-windows.ps1'"
-check "uninstall removes the hook through the shared script" "grep -q 'ai-install-post-merge-hook.*--remove' '$ROOT/uninstall.sh'"
+check "uninstall removes the hook through the shared script" "grep -q 'bin/ai-install-post-merge-hook' '$ROOT/uninstall.sh' && grep -q -- '--remove.*--repo' '$ROOT/uninstall.sh'"
 check "the hook tree is pinned to LF" "grep -q '^hooks/.*text eol=lf' '$ROOT/.gitattributes'"
 check "line-ending checks scan the hook tree" "grep -q \"'hooks/\*'\" '$ROOT/tests/test-line-endings.sh'"
 check "Codex status is available with its doctor contract" "$SCRIPT status codex | jq -e '.status==\"installed-healthy\"'"

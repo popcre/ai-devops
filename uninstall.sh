@@ -67,12 +67,14 @@ done < "$manifest"
 
 # Remove the managed post-merge reviewer hook (#804) through the one script
 # that owns the marker rules: foreign hooks are preserved, and so is a
-# managed hook whose bytes drifted — removal is ownership-gated, not
-# name-gated.
+# managed hook whose bytes drifted; removal is ownership-gated, not
+# name-gated. The tool always comes from THIS script's checkout, while the
+# target repo is the (possibly overridden) --repo-root.
+hook_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/ai-install-post-merge-hook"
 if [ "$DRY_RUN" -eq 1 ]; then
-  "$REPO_ROOT/bin/ai-install-post-merge-hook" --remove --dry-run || exit 1
+  "$hook_tool" --remove --dry-run --repo "$resolved_repo" || exit 1
 else
-  "$REPO_ROOT/bin/ai-install-post-merge-hook" --remove || exit 1
+  "$hook_tool" --remove --repo "$resolved_repo" || exit 1
 fi
 
 if [ "$PURGE" -eq 1 ]; then
