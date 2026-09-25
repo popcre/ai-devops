@@ -81,6 +81,10 @@ jobs:
   # exactly one section by the measured seconds in config/ci-suite-manifest.json
   # (runs 35227802085, 35227474047, 35224512570: about 21 minutes serial); an
   # unmeasured suite still lands in a section at a default weight.
+  #
+  # Issue #805: a pull request runs only the suites its files can break. The
+  # merge queue, schedule, and manual runs keep the complete inventory, so
+  # main's safety does not change. Unknown paths still select every suite.
   linux-offline-shard:
     needs: [fast-classifier, manual-preflight]
     if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
@@ -91,6 +95,8 @@ jobs:
         shard: [1, 2, 3, 4]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
+    env:
+      SELECTION_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -114,7 +120,12 @@ jobs:
             bash -n "$file"
           done
       - name: Offline Bash suite section ${{ matrix.shard }} of 4
-        run: bash tests/test-all.sh --balanced --shard '${{ matrix.shard }}/4'
+        run: |
+          if [ -n "${SELECTION_BASE:-}" ]; then
+            bash tests/test-all.sh --changed-since "$SELECTION_BASE" --balanced --shard '${{ matrix.shard }}/4'
+          else
+            bash tests/test-all.sh --balanced --shard '${{ matrix.shard }}/4'
+          fi
 
   # The required check keeps its name. It passes only when every section passed
   # and the four sections reconstitute the whole suite exactly once; a failed,
@@ -125,12 +136,19 @@ jobs:
     if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
+    env:
+      SELECTION_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Aggregate the offline Bash sections
         env:
           SHARD_RESULT: ${{ needs.linux-offline-shard.result }}
-        run: bash tools/ci/linux-offline-aggregate.sh "$SHARD_RESULT" 4
+        run: |
+          if [ -n "${SELECTION_BASE:-}" ]; then
+            bash tools/ci/linux-offline-aggregate.sh "$SHARD_RESULT" 4 --changed-since "$SELECTION_BASE"
+          else
+            bash tools/ci/linux-offline-aggregate.sh "$SHARD_RESULT" 4
+          fi
 
   # The queue gate is deliberately light: #204 took the long Windows jobs off
   # merge_group because a required check that never reports on a merge group
@@ -235,6 +253,8 @@ jobs:
     # sections; GLM shares only three short suites. Kimi stays declared and
     # suspended for re-entry, and every other runnable suite remains assigned.
     timeout-minutes: 40
+    env:
+      SELECTION_BASE: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -258,7 +278,7 @@ jobs:
       - name: Windows-sensitive section ${{ matrix.section }} of 6
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/6'
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/6' -ChangedSince $env:SELECTION_BASE
       - name: Remove the short TEMP tree on a reused machine
         if: ${{ always() && matrix.lane == 'qualified-self-hosted' }}
         shell: pwsh
