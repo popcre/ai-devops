@@ -10,7 +10,7 @@
 
 **Where a fresh session starts:** Phase 4 (daily-sweep verification; plan §9 Phase 4 — no code change is expected there: Phase 3 changed no paths or marker names, so only the verification gate remains), then Phase 5 (one live review with zero leftovers). Re-read this STATUS table before each phase.
 
-Related handoff: [HANDOFF.d/2026-09-25T2010Z-edge-dev-zcode-agent-self-cleanup-phase4.md](HANDOFF.d/2026-09-25T2010Z-edge-dev-zcode-agent-self-cleanup-phase4.md) (issue [#711](https://github.com/popcre/ai-devops/issues/711)). Do not rewrite root `HANDOFF.md`.
+Related handoff: [HANDOFF.d/2026-09-25T1720Z-edge-dev-zcode-agent-self-cleanup-phase4.md](HANDOFF.d/2026-09-25T1720Z-edge-dev-zcode-agent-self-cleanup-phase4.md) (issue [#711](https://github.com/popcre/ai-devops/issues/711)). Do not rewrite root `HANDOFF.md`.
 
 ---
 
