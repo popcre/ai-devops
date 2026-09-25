@@ -100,6 +100,8 @@ echo '== live health probes report credit failures too'
 check "grok doctor live probe stops on a credit failure" "grep -A2 'FAILED — no terminal JSON' '$ROOT/bin/ai-grok-review' | grep -q 'grok_credit_scan \"\$RUN_TURN_RC\" \"\$tmp\"'"
 check "muse doctor live probe stops on a credit failure" "grep 'run_turn \"\$fixture\"' '$ROOT/bin/ai-muse' | grep -q 'muse_credit_stop \"\$out\"'"
 check "qwen doctor live probe stops on a credit failure" "grep -q 'reviewer_credit_scan qwen \"\$tmp.err\" \"\$tmp.credit\"' '$ROOT/bin/ai-qwen'"
+check "stepfun doctor live probe stops on a credit failure" "grep -A2 'STEPFUN-OK' '$ROOT/bin/ai-stepfun' | grep -q 'credit_stop \"\$tmp/out\"'"
+check "stepfun scans only provider error channels, never assistant text" "sed -n '/^credit_stop()/,/^}/p' '$ROOT/bin/ai-stepfun' | grep -q \"grep -E '\\^4\\[0-9\\]\\[0-9\\]: \""
 
 echo '== preflight reports the provider unusable'
 PREFLIGHT="$ROOT/bin/ai-review-preflight"

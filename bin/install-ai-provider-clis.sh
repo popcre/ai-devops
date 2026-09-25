@@ -112,7 +112,15 @@ wants() {
 
 resolve() {
   # A provider counts as installed if it is on PATH or at its known home path.
-  local cmd="$1" home_rel="$2"
+  local cmd="$1" home_rel="$2" c
+  if [ "$cmd" = step ]; then
+    # `step` is a generic name (Smallstep's CLI uses it too). Only a binary that
+    # identifies as StepCode counts, and StepCode's own install path wins.
+    for c in "$HOME/$home_rel" "$(command -v step 2>/dev/null || true)"; do
+      [ -n "$c" ] && [ -x "$c" ] && "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' && { echo "$c"; return 0; }
+    done
+    return 1
+  fi
   if command -v "$cmd" >/dev/null 2>&1; then echo "$(command -v "$cmd")"; return 0; fi
   if [ -x "$HOME/$home_rel" ]; then echo "$HOME/$home_rel"; return 0; fi
   return 1

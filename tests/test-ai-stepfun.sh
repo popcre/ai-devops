@@ -35,11 +35,30 @@ case "$STUB_MODE" in
   impl) printf 'print(1)\n' > new.py; echo 'Created new.py and ran it.' ;;
   implcommit) printf 'x\n' > c.txt; git add c.txt; git -c user.name=m -c user.email=m@m commit -qm sneaky; echo done ;;
   askwrite) touch ASKED; echo 'answer' ;;
+  quote) echo 'StepFun replies "You exceeded your current quota, please check your plan and billing details" when unpaid.' ;;
   askok) echo 'The loop is bounded by RATE_RETRIES.' ;;
 esac
 STUB
 chmod +x "$TMP/bin/step"
 export STUB_ARGS="$TMP/args"
+
+# A recording stand-in for bubblewrap: it keeps the sandbox arguments for the
+# checks below and runs the command with only --chdir and --setenv applied.
+cat > "$TMP/bin/bwrap" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$STUB_ARGS.bwrap"
+while [ "$#" -gt 0 ]; do case "$1" in
+  --) shift; break ;;
+  --chdir) cd "$2" || exit 97; shift 2 ;;
+  --setenv) [ "$2" = HOME ] || export "$2=$3"; shift 3 ;;
+  --die-with-parent|--unshare-all|--share-net) shift ;;
+  --dev|--proc|--tmpfs) shift 2 ;;
+  *) shift 3 ;;
+esac; done
+exec "$@"
+STUB
+chmod +x "$TMP/bin/bwrap"
+export AI_STEPFUN_BWRAP="$TMP/bin/bwrap"
 
 echo '== ai-stepfun'
 out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 "$SCRIPT" doctor 2>&1)"; rc=$?
@@ -56,6 +75,9 @@ check "live doctor makes one call and sees the answer" "STUB_MODE=ok '$SCRIPT' d
 check "the key reaches step through the environment, never argv" "STUB_MODE=ok '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key' && ! grep -q stub-key '$STUB_ARGS'"
 
 check "review accepts a well-formed verdict naming the head" "STUB_MODE=verdict '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
+check "every turn runs inside the sandbox with an empty home and /tmp" "grep -qx -- --unshare-all '$STUB_ARGS.bwrap' && grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx '$HOME' && grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx /tmp"
+check "the review copy is mounted read-only" "grep -x -A1 -- --ro-bind '$STUB_ARGS.bwrap' | grep -q 'stepfun-'"
+check "review hands the model the sealed MANIFEST.md" "grep -q 'MANIFEST.md first' '$STUB_ARGS'"
 check "review runs with only read-only tools and strict approval" "grep -qx 'read,grep,find,ls' '$STUB_ARGS' && grep -qx strict '$STUB_ARGS' && grep -qx deny '$STUB_ARGS' && grep -qx -- --no-extensions '$STUB_ARGS' && grep -qx -- --no-approve '$STUB_ARGS'"
 check "review rejects an answer with no verdict" "! STUB_MODE=noverdict '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1"
 check "review rejects a verdict with no analysis behind it" "! STUB_MODE=short AI_STEPFUN_REPORT_FLOOR=400 '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1"
@@ -67,6 +89,8 @@ check "out of credit exits 92 with the contract line" "[ $rc = 92 ] && printf '%
 out="$(STUB_MODE=impl "$SCRIPT" implement --repo "$TMP/repo" --prompt 'add new.py' 2>&1)"
 wt="$(printf '%s\n' "$out" | sed -n 's/^CLONE //p')"
 check "implement works in a new clone and leaves the caller's checkout alone" "[ -n '$wt' ] && [ -f '$wt/new.py' ] && [ ! -e '$TMP/repo/new.py' ] && [ -z \"\$(git -C '$TMP/repo' status --porcelain)\" ]"
+check "the implementation clone is the only writable mount from the real home" "[ \"\$(grep -c -x -- --bind '$STUB_ARGS.bwrap')\" = 2 ] && grep -x -A1 -- --bind '$STUB_ARGS.bwrap' | grep -q '/implement/' && grep -x -A1 -- --bind '$STUB_ARGS.bwrap' | grep -q '/agent[.]'"
+check "implement leaves no caller path in FETCH_HEAD" "[ ! -e '$wt/.git/FETCH_HEAD' ]"
 check "implement grants write and shell tools with auto approval" "grep -qx 'read,bash,edit,write,grep,find,ls' '$STUB_ARGS' && grep -qx auto '$STUB_ARGS' && grep -qx allow '$STUB_ARGS'"
 check "the implementation clone has no remote" "[ -z \"\$(git -C '$wt' remote)\" ]"
 check "implement never commits" "[ \"\$(git -C '$wt' rev-parse HEAD)\" = '$HEAD_SHA' ]"
@@ -75,6 +99,34 @@ check "implement uses a fixed-length branch name" "printf '%s\n' \"\$out\" | gre
 check "implement refuses a run in which the model committed" "! STUB_MODE=implcommit '$SCRIPT' implement --repo '$TMP/repo' --prompt x >/dev/null 2>&1 && [ \"\$(git -C '$TMP/repo' rev-parse HEAD)\" = '$HEAD_SHA' ]"
 check "ask answers from a disposable copy" "STUB_MODE=askok '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES"
 check "ask rejects any change to its copy and never touches the checkout" "! STUB_MODE=askwrite '$SCRIPT' ask --repo '$TMP/repo' x >/dev/null 2>&1 && [ ! -e '$TMP/repo/ASKED' ]"
+STUB_MODE=quote "$SCRIPT" review --repo "$TMP/repo" --prompt x >/dev/null 2>&1; rc=$?
+check "a review that only quotes a billing message is not treated as out of credit" "[ $rc != 0 ] && [ $rc != 92 ]"
+check "live doctor stops with exit 92 when StepFun is out of credit" "STUB_MODE=credit '$SCRIPT' doctor --live >/dev/null 2>&1; [ \$? = 92 ]"
+check "doctor refuses to run without bubblewrap" "AI_STEPFUN_BWRAP='$TMP/missing' '$SCRIPT' doctor 2>&1 | grep -q 'FAIL bubblewrap'"
+
+# Real sandbox: when bubblewrap works here, prove the model's side cannot see
+# the caller's home secrets or write outside its directory.
+REAL_BWRAP="$(command -v bwrap 2>/dev/null || true)"
+if [ -n "$REAL_BWRAP" ] && "$REAL_BWRAP" --ro-bind / / --tmpfs /tmp true 2>/dev/null; then
+  # A home outside /tmp, so only the sandbox's empty-home mount can hide it.
+  mkdir -p "$ROOT/.ai"; RH="$(mktemp -d "$ROOT/.ai/stepfun-test-home.XXXXXX")"
+  mkdir -p "$RH/.ssh" "$RH/probe-bin" "$RH/.config/ai-devops/secrets"; printf 'secret\n' > "$RH/.ssh/id_test"
+  cp "$AI_STEPFUN_KEY_STORE" "$RH/.config/ai-devops/secrets/stepfun-api-key"; chmod 600 "$RH/.config/ai-devops/secrets/stepfun-api-key"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+[ "${1:-}" = --version ] && { echo 0.1.1; exit 0; }
+touch "$HOME/escape" 2>/dev/null
+[ -e "$HOME/.ssh/id_test" ] || echo STEPFUN-OK
+STUB
+  chmod +x "$RH/probe-bin/step"
+  out="$(HOME="$RH" AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STATE_DIR="$RH/state" AI_STEPFUN_BWRAP="$REAL_BWRAP" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" "$SCRIPT" doctor --live 2>&1)"
+  check "real sandbox: the model cannot see home secrets" "printf '%s' \"\$out\" | grep -q 'live=verified'"
+  check "real sandbox: writes to the real home do not escape" "[ ! -e '$RH/escape' ]"
+  rm -rf "$RH"
+else
+  skip "real sandbox checks (bubblewrap unavailable here)"; skip "real sandbox escape check"
+fi
 check "invocations are recorded in the durable reviewer event ledger" "grep -rqs stepfun '$TMP/events'"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"

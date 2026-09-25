@@ -6,10 +6,16 @@
 # supported on Windows, so this wrapper refuses to run anywhere else and
 # ai-review-preflight reports it as unsupported-platform there.
 #
-# Review safety: `review` and `ask` run `step` with exactly the read-only tools read,grep,find,ls, with
-# extensions, skills, prompt templates, project-local .stepcode files, and
-# session storage all disabled, inside a disposable ai-review-sandbox copy. The
-# copy's digest is compared before and after; any change rejects the review.
+# Sandbox: every StepCode turn runs under bubblewrap with the filesystem
+# read-only, an empty home and /tmp (no SSH, git, gh, or 1Password secrets),
+# and only its own directory visible (read-only for review/ask, writable for
+# implement). Extensions, skills, prompt templates, project-local .stepcode
+# files, and session storage are disabled.
+#
+# Review safety: `review` and `ask` allow only read,grep,find,ls under strict
+# approval, in a disposable ai-review-sandbox copy whose digest is compared
+# before and after. `review` also builds and re-verifies the shared sealed
+# evidence packet (MANIFEST.md) and binds its VERDICT line to the exact head.
 # The API key is read from a protected per-user store (never 1Password during a
 # review, rotation rule 6); `store-key` refreshes it from 1Password.
 set -euo pipefail
@@ -38,6 +44,7 @@ OP_REF="${AI_STEPFUN_OP_REF:-op://vibe_coding/stepfun step5 ai api key/credentia
 TIMEOUT="${AI_STEPFUN_TIMEOUT:-1800}"
 REPORT_FLOOR="${AI_STEPFUN_REPORT_FLOOR:-400}"
 SANDBOX_BIN="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
+PACKET_BIN="${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}"
 READ_ONLY_TOOLS="read,grep,find,ls"
 
 die(){ printf 'ai-stepfun: error: %s\n' "$*" >&2; exit 1; }
@@ -110,21 +117,53 @@ run_step_retry(){ # same arguments as run_step; read-only turns only
 # run_step DIR OUT PROMPT [TOOLS] [write]: one non-interactive, sessionless
 # StepCode turn. StepCode's strict approval mode is read-only (it blocks bash,
 # edit, and write); only implement passes "write", which selects auto approval.
+#
+# Every turn runs inside bubblewrap: the whole filesystem read-only, an empty
+# home (no ~/.ssh, git or gh credentials, 1Password token, or other secrets),
+# an empty /tmp, and only DIR visible from the real home. DIR is writable for
+# implement and read-only for review/ask. A private agent directory holds
+# StepCode's own settings. Network stays on: the model API needs it.
 run_step(){
-  local dir="$1" out="$2" prompt="$3" tools="${4:-}" bin rc=0 approval=strict fallback=deny
-  [ "${5:-}" != write ] || { approval=auto; fallback=allow; }
+  local dir="$1" out="$2" prompt="$3" tools="${4:-}" bin rc=0 approval=strict fallback=deny dir_bind=--ro-bind bwrap agent
+  [ "${5:-}" != write ] || { approval=auto; fallback=allow; dir_bind=--bind; }
   local -a tool_args=(--no-tools)
   [ -z "$tools" ] || tool_args=(--tools "$tools")
   bin="$(step_bin)" || die 'StepCode CLI (step) is not installed. Install: curl -fsSL https://static-openapi.stepfun.com/stepcode/install.sh | bash'
-  ( cd "$dir" && exec env STEP_API_KEY="$STEP_KEY" STEP_BASE_URL="$BASE_URL" STEP_AUTOPILOT=1 \
-      timeout "$TIMEOUT" "$bin" -p --no-session --model "$MODEL" "${tool_args[@]}" \
+  bwrap="$(bwrap_bin)" || die 'bubblewrap (bwrap) is required to sandbox StepFun. Install: sudo apt-get install bubblewrap'
+  mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR" 2>/dev/null || true
+  agent="$(mktemp -d "$STATE_DIR/agent.XXXXXX")"; chmod 700 "$agent"
+  env STEP_API_KEY="$STEP_KEY" STEP_BASE_URL="$BASE_URL" STEP_AUTOPILOT=1 \
+    timeout "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
+      --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --tmpfs "$HOME" \
+      --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
+      --ro-bind-try "$HOME/.stepcode" "$HOME/.stepcode" \
+      --bind "$agent" "$agent" "$dir_bind" "$dir" "$dir" --chdir "$dir" \
+      --setenv HOME "$HOME" --setenv STEP_CODING_AGENT_DIR "$agent" \
+      --setenv PATH "$HOME/.stepcode/agent/bin:/usr/local/bin:/usr/bin:/bin" -- \
+      "$bin" -p --no-session --model "$MODEL" "${tool_args[@]}" \
       --approval-mode "$approval" --non-interactive-approval "$fallback" \
       --no-extensions --no-skills --no-prompt-templates --no-themes \
-      --no-approve --no-update-check -- "$prompt" ) < /dev/null > "$out" 2>"$out.stderr" || rc=$?
+      --no-approve --no-update-check -- "$prompt" < /dev/null > "$out" 2>"$out.stderr" || rc=$?
+  rm -rf "$agent"
   return "$rc"
 }
 
-credit_stop(){ reviewer_credit_stop stepfun "$1" "$1.stderr"; }
+bwrap_bin(){
+  local b="${AI_STEPFUN_BWRAP:-$(command -v bwrap 2>/dev/null || true)}"
+  [ -n "$b" ] && [ -x "$b" ] || return 1
+  printf '%s' "$b"
+}
+
+# Scan only provider error channels, never assistant content: stderr, plus the
+# "4xx: {json}" lines StepCode prints on stdout for an HTTP error. A review
+# that merely quotes a billing message must not be read as out of credit.
+credit_stop(){
+  local ev="$1.provider-errors"
+  grep -E '^4[0-9][0-9]: \{' "$1" > "$ev" 2>/dev/null || true
+  reviewer_credit_scan stepfun "$1.stderr" "$ev" || true
+  rm -f "$ev"
+  reviewer_credit_exit
+}
 
 cmd_doctor(){
   local live=0 bin ver
@@ -134,8 +173,9 @@ cmd_doctor(){
   ver="$("$bin" --version 2>/dev/null | tr -d '\r' | tail -n1)"
   version_ge "$ver" "$STEP_MIN_VERSION" || { printf 'FAIL step %s is older than the %s floor\n' "$ver" "$STEP_MIN_VERSION"; exit 1; }
   key_store_ok || { printf 'FAIL protected StepFun key store missing (run: ai-stepfun store-key)\n'; exit 1; }
+  bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed (sudo apt-get install bubblewrap)\n'; exit 1; }
   if [ "$live" = 1 ]; then
-    local tmp; tmp="$(mktemp -d)"; load_key
+    local tmp; mkdir -p "$STATE_DIR"; tmp="$(mktemp -d "$STATE_DIR/doctor.XXXXXX")"; load_key
     if ! run_step "$tmp" "$tmp/out" 'Reply with exactly the text STEPFUN-OK and nothing else.' || ! grep -q 'STEPFUN-OK' "$tmp/out"; then
       credit_stop "$tmp/out"
       printf 'FAIL live StepFun call did not answer\n'; sed -n 1,5p "$tmp/out" "$tmp/out.stderr" 2>/dev/null; rm -rf "$tmp"; exit 1
@@ -145,14 +185,23 @@ cmd_doctor(){
   printf 'OK step=%s model=%s live=%s\n' "$ver" "$MODEL" "$([ "$live" = 1 ] && echo verified || echo not-run)"
 }
 
-REVIEW_COPY=""; REVIEW_REPO=""; REVIEW_TAG=""
-cleanup_copy(){ [ -z "$REVIEW_COPY" ] || "$SANDBOX_BIN" remove-copy "$REVIEW_REPO" "$REVIEW_TAG" >/dev/null 2>&1 || true; }
+REVIEW_COPY=""; REVIEW_REPO=""; REVIEW_TAG=""; REVIEW_PACKET=""
+cleanup_copy(){
+  [ -z "$REVIEW_PACKET" ] || "$PACKET_BIN" remove "$REVIEW_COPY" "$REVIEW_TAG" >/dev/null 2>&1 || true
+  [ -z "$REVIEW_COPY" ] || "$SANDBOX_BIN" remove-copy "$REVIEW_REPO" "$REVIEW_TAG" >/dev/null 2>&1 || true
+}
 
-# review [--repo DIR] --prompt TEXT|--prompt-file FILE
+# review [--repo DIR] [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE
+# Uses the shared evidence contract: ai-review-packet resolves the exact
+# identity, the snapshot is taken against the same base, a sealed packet
+# (MANIFEST.md, identity, patch) is built inside it, and the packet is
+# re-verified after the model answers.
 cmd_review(){
-  local repo="." prompt="" head copy before after out report body
+  local repo="." prompt="" base="" assert="" head identity copy packet rel before after out report body
   while [ "$#" -gt 0 ]; do case "$1" in
     --repo) repo="${2:?--repo needs a value}"; shift 2 ;;
+    --base) base="${2:?--base needs a value}"; shift 2 ;;
+    --assert-head) assert="${2:?--assert-head needs a value}"; shift 2 ;;
     --prompt) prompt="${2:?--prompt needs a value}"; shift 2 ;;
     --prompt-file) prompt="$(cat "${2:?--prompt-file needs a value}")"; shift 2 ;;
     *) die "review: unknown argument $1" ;;
@@ -160,21 +209,27 @@ cmd_review(){
   [ -n "$prompt" ] || die 'review needs --prompt or --prompt-file.'
   require_platform
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
-  head="$(git -C "$repo" rev-parse --verify HEAD^{commit})" || die 'repository has no readable HEAD commit.'
   load_key
-  REVIEW_REPO="$repo"; REVIEW_TAG="stepfun-$$"
-  trap cleanup_copy EXIT
-  copy="$("$SANDBOX_BIN" ensure-copy "$repo" "$REVIEW_TAG")" || die 'could not build the disposable review copy.'
-  REVIEW_COPY="$copy"
-  before="$("$SANDBOX_BIN" digest "$copy")"
   mkdir -p "$STATE_DIR/reports"; chmod 700 "$STATE_DIR" "$STATE_DIR/reports" 2>/dev/null || true
+  identity="$(mktemp "$STATE_DIR/identity.XXXXXX")"
+  "$PACKET_BIN" resolve "$repo" ${base:+--base "$base"} ${assert:+--assert-head "$assert"} > "$identity" || die 'could not resolve the exact review identity.'
+  head="$(jq -r .head "$identity")"
+  REVIEW_REPO="$repo"; REVIEW_TAG="stepfun-$(sha256sum < "$identity" | cut -c1-24)"
+  trap cleanup_copy EXIT
+  copy="$(AI_REVIEW_SANDBOX_BASE="$base" "$SANDBOX_BIN" ensure-copy "$repo" "$REVIEW_TAG")" || die 'could not build the disposable review copy.'
+  REVIEW_COPY="$copy"
+  packet="$("$PACKET_BIN" build "$copy" "$REVIEW_TAG" --identity "$identity")" || die 'could not build the sealed review packet.'
+  REVIEW_PACKET="$packet"
+  "$PACKET_BIN" verify "$packet" --identity "$identity" >/dev/null || die 'the sealed review packet did not verify.'
+  rel="${packet#"$copy"/}"
+  before="$("$SANDBOX_BIN" digest "$copy")"
   out="$STATE_DIR/reports/$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}-$$.md"
   local full="You are an independent, read-only code reviewer. You can only read files (tools: read, grep, find, ls); never try to change anything.
-Review the repository at commit $head.
+Read $rel/MANIFEST.md first: it states the exact base, the head $head, and the patch under review. You may open any other file to confirm a finding.
 
 $prompt
 
-Write your analysis first, citing files and line numbers. End your answer with exactly one final line of the form:
+Return ALL findings, each citing files and line numbers. End your answer with exactly one final line of the form:
 VERDICT: APPROVE $head
 or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line."
   reviewer_event_evidence require-report stepfun || die 'could not reserve durable review evidence.'
@@ -183,6 +238,7 @@ or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line
   fi
   after="$("$SANDBOX_BIN" digest "$copy")"
   [ "$before" = "$after" ] || die "the review copy changed during the review; response rejected (copy: $copy)"
+  "$PACKET_BIN" verify "$packet" --identity "$identity" >/dev/null || die 'the sealed review packet changed during the review; response rejected.'
   report="$(tr -d '\r' < "$out")"
   if ! printf '%s\n' "$report" | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}' | tail -n1 | grep -Eq "^[[:space:]]*VERDICT:[[:space:]]*(APPROVE|REVISE|REJECT)[[:space:]]+$head[[:space:]]*$"; then
     credit_stop "$out"; die "no well-formed final VERDICT line naming $head; output kept at $out"
@@ -190,6 +246,7 @@ or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line
   body="$(printf '%s\n' "$report" | grep -Ev '^[[:space:]]*VERDICT:' | tr -d '[:space:]')"
   [ "${#body}" -ge "$REPORT_FLOOR" ] || die "verdict came with under $REPORT_FLOOR characters of analysis; treated as malformed (empty-report); output kept at $out"
   reviewer_event_publish_report stepfun "$out" || die "review evidence could not be made durable; output kept at $out"
+  rm -f "$identity"
   cat "$out"
   note "report saved: $out (model $MODEL, head $head)"
 }
@@ -207,7 +264,7 @@ cmd_ask(){
   copy="$("$SANDBOX_BIN" ensure-copy "$repo" "$REVIEW_TAG")" || die 'could not build the disposable copy.'
   REVIEW_COPY="$copy"
   before="$("$SANDBOX_BIN" digest "$copy")"
-  tmp="$(mktemp -d)"; out="$tmp/out"
+  mkdir -p "$STATE_DIR"; tmp="$(mktemp -d "$STATE_DIR/ask.XXXXXX")"; out="$tmp/out"
   if ! run_step_retry "$copy" "$out" "Read-only consultation; never change files. $*" "$READ_ONLY_TOOLS" || ! [ -s "$out" ]; then
     credit_stop "$out"; die 'StepFun request failed.'
   fi
@@ -248,6 +305,7 @@ cmd_implement(){
   git clone -q --no-hardlinks --no-checkout "$repo" "$wt" || die 'could not create the isolated implementation clone.'
   git -C "$wt" fetch -q "$repo" "$base" 2>/dev/null || true  # a detached base may be on no branch
   git -C "$wt" remote remove origin
+  rm -f "$wt/.git/FETCH_HEAD"  # holds the caller's path
   git -C "$wt" checkout -q -b "$branch" "$base" || die 'could not check out the base in the implementation clone.'
   [ -z "$(git -C "$wt" remote)" ] || die 'implementation clone still has a remote; refusing to run.'
   out="$STATE_DIR/reports/impl-$id.md"
@@ -270,7 +328,8 @@ When done, summarise what you changed and which commands you ran and their resul
 
 usage(){
   cat <<'EOF'
-ai-stepfun review [--repo DIR] --prompt TEXT|--prompt-file FILE   formal read-only review ending in VERDICT: <APPROVE|REVISE|REJECT> <head>
+ai-stepfun review [--repo DIR] [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE
+                                                                 formal read-only review ending in VERDICT: <APPROVE|REVISE|REJECT> <head>
 ai-stepfun ask [--repo DIR] PROMPT                               read-only second opinion
 ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
                                                                  write and run code in a new remote-less clone (never commits)

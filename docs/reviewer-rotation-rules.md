@@ -80,6 +80,9 @@ allocator but stayed registered here, and a session spent an hour trying it.
     code. `bin/ai-stepfun` refuses to run off Linux and preflight reports
     `unsupported-platform` there. Its formal reviews stay read-only; writing
     and executing happens only in `ai-stepfun implement`, inside a new
-    remote-less clone; a run that commits or adds a remote is refused. The shared-db allocator has no platform field,
+    remote-less clone; a run that commits or adds a remote is refused.
+    Every StepFun turn runs under bubblewrap with an empty home, so the
+    model never sees SSH keys, git or gh credentials, or the 1Password
+    token; `ai-stepfun` refuses to run without bubblewrap. The shared-db allocator has no platform field,
     so StepFun is listed in `config/reviewer-membership-scope.json` and is
     never assigned by the allocator.

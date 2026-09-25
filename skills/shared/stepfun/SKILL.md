@@ -16,12 +16,19 @@ exits 2 with `unsupported-platform` there and `ai-review-preflight status
 stepfun` reports `unsupported-platform`. On Windows, pick another reviewer; do
 not try to install or emulate StepCode.
 
+## Sandbox
+
+Every StepFun turn runs under bubblewrap: the model sees only its own folder,
+with an empty home (no SSH keys, git or gh logins, or 1Password token). If
+`bwrap` is missing, `ai-stepfun` refuses to run; install it with
+`sudo apt-get install bubblewrap`.
+
 ## Commands
 
 ```bash
 # Formal review: read-only tools, disposable copy, ends in
 # "VERDICT: APPROVE|REVISE|REJECT <head sha>"
-ai-stepfun review --repo . --prompt-file brief.md
+ai-stepfun review --repo . --base origin/main --prompt-file brief.md
 
 # Second opinion, read-only
 ai-stepfun ask --repo . "Is this retry loop bounded?"

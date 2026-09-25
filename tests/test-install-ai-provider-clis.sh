@@ -49,6 +49,12 @@ done
 if [ "$(uname -s)" = Linux ]; then
   grep -q 'would install stepfun' "$tmp/all" || { echo "FAIL: Linux dry run skipped stepfun"; exit 1; }
 fi
+# A different program named step on PATH is not StepCode: still "would install".
+if [ "$(uname -s)" = Linux ]; then
+  mkdir -p "$tmp/decoy"; printf '#!/bin/sh\necho "step 0.28.2 (Smallstep CLI)"\n' > "$tmp/decoy/step"; chmod +x "$tmp/decoy/step"
+  env HOME="$clean" PATH="$tmp/decoy:$minimal_path" bash "$script" --dry-run stepfun >"$tmp/decoy.out" 2>&1
+  grep -q 'would install stepfun' "$tmp/decoy.out" || { echo "FAIL: a decoy step on PATH was taken for StepCode"; exit 1; }
+fi
 mkdir -p "$tmp/fake-windows"; printf '#!/bin/sh\necho MINGW64_NT-10.0\n' > "$tmp/fake-windows/uname"; chmod +x "$tmp/fake-windows/uname"
 if env HOME="$clean" PATH="$tmp/fake-windows:$minimal_path" bash "$script" --dry-run stepfun >"$tmp/win" 2>&1; then
   echo "FAIL: stepfun was accepted on a non-Linux platform"; exit 1
