@@ -349,7 +349,7 @@ SANDBOX_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-sandbox"
 review_boundary() { # review_boundary ROOT TAG [RECORDED-DIRECTORY] -> directory to hand the reviewer
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
   if [ -n "${3:-}" ]; then
-    "$SANDBOX_BIN" refresh-copy "$1" "$2" "$3" || die "could not refresh the recorded private review snapshot for $1"
+    AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX_BIN" refresh-copy "$1" "$2" "$3" || die "could not refresh the recorded private review snapshot for $1"
   else
     AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
   fi
@@ -1397,9 +1397,11 @@ start_review_job() { # NAME [CONTINUE]
   prep_seconds="$(( $(date +%s) - prep_started ))"
   pf="$(mktemp "$STATE_DIR/.kimi-prompt.XXXXXX")"
   # From this point until a worker is proven started, every shell error must
-  # remove the private prompt and fixed-name launchers as well as the repo lock.
-  # The worker takes ownership only after the startup acknowledgement below.
-  trap "cleanup_review_transients '$dir' '$pf'; lock_release '$repo_lock'" EXIT
+  # remove the private prompt and fixed-name launchers as well as the repo lock
+  # and the disposable review snapshot (Phase 2 self-cleanup). The worker takes
+  # ownership only after the startup acknowledgement below; until then this run
+  # created the snapshot and must delete it before returning.
+  trap "cleanup_review_transients '$dir' '$pf'; release_boundary '$repo' 'kimi-$CALLER-$name' || true; lock_release '$repo_lock'" EXIT
   chmod 0600 "$pf" 2>/dev/null || true; build_prompt_file "$pf"
   create_review_job "$name" "$repo" "$rid" review "$sid" "$pf"
   write_job_state "$dir/job.json" --argjson quota "$CAPACITY_JSON" '.quota_result=$quota'

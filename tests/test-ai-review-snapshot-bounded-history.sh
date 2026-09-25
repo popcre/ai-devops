@@ -108,5 +108,20 @@ IGNORED_SNAP="$(AI_REVIEW_SANDBOX_BASE=no-such-ref "$SCRIPT" ensure-copy "$MAIN"
 check "unresolvable_hint_is_ignored"        "test -n '$IGNORED_SNAP' && grep -q 'ignoring AI_REVIEW_SANDBOX_BASE' '$TMP/hint.err'"
 "$SCRIPT" remove-copy "$MAIN" ignoredbad
 
+# Issue #802: the explicit base hint must also reach the recorded-directory
+# refresh path (refresh-copy), not only a fresh ensure-copy. A Kimi session
+# created with --base that later refreshes a recorded snapshot must rebuild it
+# with the same hinted ref, or the following packet build with --base fails.
+NEAR_BASE2="$(git -C "$MAIN" rev-parse 'origin/main~2')"
+git -C "$MAIN" branch refresh-hint "$NEAR_BASE2"
+RECORDED_HINT="$(AI_REVIEW_SANDBOX_BASE=refresh-hint "$SCRIPT" ensure-copy "$MAIN" refreshhint)"
+check "refresh_hint_baseline_is_carried"    "test \"\$(git -C '$RECORDED_HINT' rev-parse refresh-hint 2>/dev/null)\" = '$NEAR_BASE2'"
+# Refresh the recorded path WITHOUT a new ensure-copy; the hint must still land.
+REFRESHED_HINT="$(AI_REVIEW_SANDBOX_BASE=refresh-hint "$SCRIPT" refresh-copy "$MAIN" refreshhint "$RECORDED_HINT")"
+check "refresh_copy_path_is_stable"         "test '$REFRESHED_HINT' = '$RECORDED_HINT'"
+check "refresh_copy_forwards_base_hint"     "test \"\$(git -C '$REFRESHED_HINT' rev-parse refresh-hint 2>/dev/null)\" = '$NEAR_BASE2'"
+"$SCRIPT" remove-recorded refreshhint "$RECORDED_HINT"
+git -C "$MAIN" branch -q -D refresh-hint
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
