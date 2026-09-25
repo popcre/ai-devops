@@ -1,6 +1,6 @@
 ---
 name: ask-muse
-description: Start or continue a persistent protected Muse Spark 1.3 Contributor review or debate. Use when the user says "review with Muse", "ask Muse", "debate Muse", "Muse review", or requests a Muse Spark second opinion.
+description: Start or continue a persistent protected Muse Spark 1.3 Contributor review, debate, or implementation. Use when the user says "review with Muse", "ask Muse", "debate Muse", "Muse review", "have Muse implement/build/fix X", or requests a Muse Spark second opinion.
 ---
 
 # Persistent Muse review and debate
@@ -8,7 +8,12 @@ description: Start or continue a persistent protected Muse Spark 1.3 Contributor
 Use `ai-muse` only. Do not call OpenCode, the Meta API, or 1Password directly.
 
 Muse uses named persistent conversations in a disposable, self-contained copy of the
-target repository. It has no write or shell tools. No other model is used if Muse fails.
+target repository. Reviews have no write or shell tools. No other model is used if Muse fails.
+
+To have Muse write code, use `ai-muse implement <name> [--base REF] --prompt-file <brief>`.
+Muse edits a disposable worktree with a sandboxed shell; its work is committed on
+branch `muse/<name>`. Repeat the name to continue. Review that branch before
+landing it; it is never pushed or merged automatically.
 
 First select the actual current client. Never reuse the other client's value:
 
