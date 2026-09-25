@@ -140,6 +140,10 @@ jobs:
       SELECTION_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The aggregate re-derives the selected inventory from the PR base
+          # SHA, so it needs the same full history the sections already fetch.
+          fetch-depth: 0
       - name: Aggregate the offline Bash sections
         env:
           SHARD_RESULT: ${{ needs.linux-offline-shard.result }}
