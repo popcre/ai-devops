@@ -6,7 +6,7 @@ Paired handoff: [`HANDOFF.d/2026-09-23T1856Z-edge-dev-mimo-client-integration.md
 
 | Step | State | Date | Evidence |
 |---|---|---|---|
-| 1. Freeze the MiMo Windows baseline (qualification facts) | ✅ done | 2026-09-23 | `tests/verification/mimo-windows-2026-09-23/README.md` — Desktop path, CLI-absent fact, MCP array-command schema, no-hooks fact, session/memory layout. Full `mimo run` flag qualification remains OPEN (D10) until the CLI is installed. |
+| 1. Freeze the MiMo Windows baseline (qualification facts) | ✅ done | 2026-09-23 | `tests/verification/mimo-windows-2026-09-23/README.md` — Desktop path, CLI-absent fact, MCP array-command schema, no-hooks fact, session/memory layout. `mimo run` flag qualification completed 2026-09-25 after the CLI install (#829): `tests/verification/mimo-cli-2026-09-25/README.md` (D10 LOCKED). |
 | 2. Install policy and presence checks | ✅ done | 2026-09-23 | `bin/setup-machine.ps1` MiMo presence block (`$MiMoAppExe` / `Get-Command mimo`); `bin/verify-windows-dev.ps1` `app:MiMo` check. Desktop presence-only. |
 | 3. `mimo` launcher shim + `bin/ai-mimo` governed wrapper | ✅ done | 2026-09-23 | `bin/ai-mimo` (ask/doctor/version; yolo refused; wall-clock ceiling; `local_dependency_unavailable` when CLI missing) + `bin/ai-mimo.cmd`, `config/machine-tools.tsv` row. Offline: `tests/test-ai-mimo.sh` 14/14. |
 | 4. Managed skills: `skills/mimo/` tree + installer | ✅ done | 2026-09-23 | `skills/mimo/mimo-transcript-backup/`; `bin/install-ai-devops-windows.ps1` installs `skills/mimo`+`skills/shared` to `~/.config/mimocode/skills/`; collision assert includes `mimo`. `tests/test-install-ai-devops-windows.ps1` PASS. |
@@ -52,7 +52,7 @@ Clients it manages today: **Claude Code** (CLI), **Claude Desktop**, **Codex**, 
 | Surface | Path / identity | Notes |
 |---|---|---|
 | **MiMo Desktop** (Xiaomi MiMo AI) | `C:\Program Files\Xiaomi MiMo AI\Xiaomi MiMo AI.exe` | Electron desktop app; self-updates; machine-wide. Engine is embedded MiMoCode. |
-| **MiMoCode CLI (`mimo`)** | expected on PATH after standalone install | Fork of OpenCode. Headless entry is `mimo run`. **Not on PATH on edge-dev 2026-09-23** — only the Desktop embed is present. |
+| **MiMoCode CLI (`mimo`)** | on PATH since 2026-09-25 (`@mimo-ai/cli` 0.1.15 via npm; #829) | Fork of OpenCode. Headless entry is `mimo run`. Absent on edge-dev until 2026-09-25 — only the Desktop embed was present. |
 | User config | `~/.config/mimocode/mimocode.jsonc` | JSONC. `mcp` map, `instructions`, `permission`, `skills.paths`, providers. |
 | Data | `~/.local/share/mimocode/` | `mimocode.db` (SQLite sessions, ~120 MB observed), `memory/`, `log/`, `builtin_skills/`. |
 | Skills write roots | `~/.config/mimocode/skills/`, project `.mimocode/skills/` | Desktop **installs/imports only** here. |
@@ -149,7 +149,7 @@ file:line evidence and non-obvious discoveries:
 | D7 | Global template is `templates/system/AGENTS-global-mimo.md` → `~/.config/mimocode/AGENTS.md`, adopted by `ai-adopt-globals`, referenced via `instructions`. | **LOCKED** 2026-09-23 |
 | D8 | Desktop presence-only; never version-pin; absence is a warning. CLI absence is a warning for managed-config surfaces and a hard fail only for `ai-mimo ask`. | **LOCKED** 2026-09-23 |
 | D9 | Windows-only. | **LOCKED** 2026-09-23 |
-| D10 | Exact `mimo run` flag set stays **OPEN** until live qualification (Step 1). Wrapper pins only documented flags and fail-closes on unknown ones. | **OPEN** |
+| D10 | Exact `mimo run` flag set qualified live 2026-09-25 (mimo 0.1.15, #829): `-m/--model provider/model`, `--agent`, `--dir` (never `--cwd`), `--format`, `--yolo` aliasing skip-permissions. Wrapper pins only documented flags and fail-closes on unknown ones. Evidence: `tests/verification/mimo-cli-2026-09-25/README.md`. | **LOCKED** 2026-09-25 |
 | D11 | BlockerWatch resume argv is **OPEN** until first live wake; ship a documented best-effort shape and re-qualify. | **OPEN** |
 | D12 | Whether `instructions` paths are absolute or config-relative is **OPEN**; prefer absolute path to `~/.config/mimocode/AGENTS.md`. | **OPEN** |
 
@@ -283,7 +283,7 @@ Register every new test in `config/ci-suite-manifest.json`.
 
 **Open questions:**
 
-- D10 exact `mimo run` flag set (needs CLI).
+- ~~D10 exact `mimo run` flag set (needs CLI).~~ Resolved 2026-09-25: qualified live, `tests/verification/mimo-cli-2026-09-25/README.md`; one-time interactive `mimo providers login -p xiaomi` (browser) still pending before end-to-end runs.
 - D11 BlockerWatch resume argv (needs live wake).
 - D12 whether `instructions` should be force-ensured or only seeded once (default: ensure).
 - Whether a `mimo` shim should wrap only the CLI or also print "use Desktop for interactive" when CLI is missing (default: shim requires CLI; doctor explains Desktop).

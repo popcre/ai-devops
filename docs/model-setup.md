@@ -119,16 +119,23 @@ preservation), MCP servers in `~/.config/mimocode/mimocode.jsonc` via
 `bin/configure-mimocode-mcps.ps1`, and no completion-check hook (MiMoCode has
 no config-file hook surface).
 
-- **Headless driving:** `ai-mimo ask "<prompt>"` — the governed wrapper
-  (`bin/ai-mimo`). Never launch `Xiaomi MiMo AI.exe` (the Desktop GUI) as a
-  headless fallback. Never pass `--yolo` / `--dangerously-skip-permissions`
-  from caller input. Health: `ai-mimo doctor [--live]`.
+- **CLI:** on PATH since 2026-09-25 — official npm package
+  `npm install -g @mimo-ai/cli` (Xiaomi MiMo Team; Desktop login does NOT
+  carry over: one-time `mimo providers login -p xiaomi`, interactive browser).
+- **Headless driving:** `ai-mimo ask "<prompt>" [--model provider/model]` —
+  the governed wrapper (`bin/ai-mimo`). Lower tier: `--model
+  xiaomi/mimo-v2.6-flash` (list with `mimo models`). Never launch
+  `Xiaomi MiMo AI.exe` (the Desktop GUI) as a headless fallback. Never pass
+  `--yolo` / `--dangerously-skip-permissions` from caller input. Health:
+  `ai-mimo doctor [--live]`.
 - **No MiMo reviewer.** Interactive client only (ZCode pattern).
 - **Traps:** MCP `command` is an **array** of argv strings and the timeout key
   is `timeout` (ms), not ZCode's string command / `timeoutMs`; the atomic JSON
   writer does not preserve `//` comments in `mimocode.jsonc`; skills write root
-  is `~/.config/mimocode/skills/` only (never `~/.agents/skills`). Qualification
-  facts: `tests/verification/mimo-windows-2026-09-23/README.md`.
+  is `~/.config/mimocode/skills/` only (never `~/.agents/skills`); a failed
+  `mimo run` can exit 0 with the error on stderr and empty stdout. Desktop
+  baseline: `tests/verification/mimo-windows-2026-09-23/README.md`; CLI
+  qualification: `tests/verification/mimo-cli-2026-09-25/README.md`.
 - **Transcripts:** MiMoCode keeps sessions in SQLite
   (`~/.local/share/mimocode/mimocode.db`); back them up and mine them by SQL
   with the `mimo-transcript-backup` skill (private repo destination only).

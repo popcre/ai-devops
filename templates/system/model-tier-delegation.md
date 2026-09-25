@@ -78,7 +78,7 @@ Anything not proven stays marked unverified — never guess a command.
 |---|---|---|
 | Codex → Luna | `codex exec -m gpt-5.6-luna` — the only Luna the ChatGPT plan accepts today (probe returned `PONG`). Also `-c model="…"`. `~/.codex/config.toml` pins a frontier default, so pass `-m` explicitly | Two live probes 2026-09-25 (quotes on #782): `gpt-6-luna` (new generation) rejected — "not supported when using Codex with a ChatGPT account"; `gpt-5.6-luna` works headlessly (levels up to `max`, no `ultra`). Re-probe `gpt-6-luna` when the lineup updates; never guess slugs |
 | ZCode → GLM 5.3 Flash | Manual: open the ZCode app, switch the model to GLM 5.3 Flash, hand it the plan file path | No headless model selector; gap tracked in [#828](https://github.com/popcre/ai-devops/issues/828) |
-| MiMo → Mimo v2.6 flash | Manual: open the Xiaomi MiMo AI app, select Mimo v2.6 flash, hand it the plan file path | No `mimo` CLI on PATH; gap tracked in [#829](https://github.com/popcre/ai-devops/issues/829) |
+| MiMo → Mimo v2.6 flash | `ai-mimo ask "<prompt>" --model xiaomi/mimo-v2.6-flash` (or directly `mimo run -m xiaomi/mimo-v2.6-flash --agent plan "<prompt>"`) | CLI on PATH since 2026-09-25 (`@mimo-ai/cli` 0.1.15); selector verified live — `-m xiaomi/mimo-v2.6-flash` accepted, header `> plan · mimo-v2.6-flash` ([evidence](https://github.com/popcre/ai-devops/issues/829), `tests/verification/mimo-cli-2026-09-25/README.md`). One-time `mimo providers login -p xiaomi` (interactive browser) still pending, so an end-to-end flash answer is unproven until it runs — [#829](https://github.com/popcre/ai-devops/issues/829) |
 
 When a gap issue closes with a supported selector, update this table in the
 same change that lands it.
