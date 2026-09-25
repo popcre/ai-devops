@@ -388,6 +388,21 @@ check 'a leftover plain-code declaration does not open the sealed route' \
 check 'that stop is the protected-class escalation, not a fixtures pass' \
   "out '$TMP/private-clean' check --before code-only-review | grep -Fq 'escalated'"
 
+printf 'a quoted inventory name cannot hide a private path from the binding\n'
+newrepo "$TMP/private-quoted"
+mkdir -p "$TMP/private-quoted/outputs" "$TMP/private-quoted/.ai-devops"
+printf 'x\n' > "$TMP/private-quoted/outputs/report.txt"
+printf 'cafe row\n' > "$TMP/private-quoted/outputs/caf$(printf '\303\251').csv"
+cat > "$TMP/private-quoted/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"paths":[{"glob":"outputs/**","class":"private-evidence"}]}
+EOF
+git -C "$TMP/private-quoted" add -A
+git -C "$TMP/private-quoted" commit -qm private-outputs
+check 'the non-ASCII inventory name still binds the sealed route to its class' \
+  "rc 3 '$TMP/private-quoted' check --before code-only-review"
+check 'and the stop still names the missing fixtures boundary' \
+  "out '$TMP/private-quoted' check --before code-only-review | grep -Fq 'synthetic-fixtures-only'"
+
 printf 'a public repository may use the sealed route freely\n'
 newrepo "$TMP/public-code"
 mkdir -p "$TMP/public-code/bin"

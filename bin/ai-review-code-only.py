@@ -31,9 +31,27 @@ def fail(message):
     raise ValueError(message)
 
 
+# Absolute repository-location variables in the inherited environment (set by
+# git hooks and some wrappers) override `git -C`, which would point the
+# synthetic export's git calls at the private source instead of the stage.
+# Every git subprocess below runs with these stripped (exact-head review,
+# 2026-09-25).
+GIT_ENV_BLOCK = frozenset((
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+))
+
+
+def git_env(extra=None):
+    env = {k: v for k, v in os.environ.items() if k not in GIT_ENV_BLOCK}
+    if extra:
+        env.update(extra)
+    return env
+
+
 def git(root, *args, data=None, check=True):
     proc = subprocess.run(["git", "-C", str(root), *args], input=data, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, check=False)
+                          stderr=subprocess.PIPE, check=False, env=git_env())
     if check and proc.returncode:
         fail("git operation failed: " + " ".join(args[:2]))
     return proc.stdout if check else proc
@@ -46,7 +64,7 @@ def digest(data):
 def source_digest(source):
     script = Path(__file__).with_name("ai-review-sandbox")
     proc = subprocess.run(["bash", str(script), "digest", str(source)], stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, check=False)
+                          stderr=subprocess.PIPE, check=False, env=git_env())
     if proc.returncode:
         fail("source digest unavailable")
     result = proc.stdout.decode("ascii").strip()
@@ -124,6 +142,11 @@ def current_bytes(source, path):
     # can otherwise escape the source repository without itself being a link.
     resolved_root = source.resolve()
     resolved = item.resolve()
+    # A hardlink keeps the approved spelling while its bytes are shared with a
+    # denied location, and resolve() cannot see it; the link count is the only
+    # witness (exact-head review, 2026-09-25).
+    if item.stat().st_nlink != 1 or resolved.stat().st_nlink != 1:
+        fail("hardlinked approved path refused")
     if not resolved.is_relative_to(resolved_root):
         fail("approved path escapes source")
     # The approved spelling passed the denied-parts check; the resolved
@@ -183,8 +206,10 @@ def write_tree(stage, source, paths, base=None):
 
 def commit(stage, label):
     git(stage, "add", "--all")
-    env = dict(os.environ, GIT_AUTHOR_NAME="Code Review Export", GIT_AUTHOR_EMAIL="export@invalid.local",
-               GIT_COMMITTER_NAME="Code Review Export", GIT_COMMITTER_EMAIL="export@invalid.local")
+    env = git_env({
+        "GIT_AUTHOR_NAME": "Code Review Export", "GIT_AUTHOR_EMAIL": "export@invalid.local",
+        "GIT_COMMITTER_NAME": "Code Review Export", "GIT_COMMITTER_EMAIL": "export@invalid.local",
+    })
     # The synthetic export is machine-generated evidence, never a signed or
     # hooked commit: inherit neither commit.gpgsign nor commit hooks from the
     # user's global config, which would fail closed with a generic refusal
@@ -358,7 +383,7 @@ def clone_export(args):
     if stage.exists() or stage.is_symlink():
         fail("export copy destination already exists")
     proc = subprocess.run(["git", "-c", "core.autocrlf=false", "clone", "--quiet", "--no-hardlinks", str(source_export), str(stage)],
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, env=git_env())
     if proc.returncode:
         fail("could not clone synthetic export")
     git(stage, "config", "--local", "core.autocrlf", "false")
