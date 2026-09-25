@@ -76,21 +76,43 @@ set +e
 set -e
 check "with_copy_leaves_source_untouched"     "[ \"\$(find '$MAIN' | wc -l | tr -d ' ')\" = '$BEFORE_SRC' ] && [ -d '$MAIN/.git' ]"
 
-# 5. A symlink into the sandbox root cannot redirect deletion outside it.
+# 5. A symlink standing in for a managed snapshot cannot redirect deletion
+#    outside the sandbox root. is_managed canonicalizes both sides (pwd -P),
+#    so a link that resolves outside the sandbox root must be refused.
 LINK_TARGET="$TMP/link-target"
 mkdir -p "$LINK_TARGET"
 echo precious > "$LINK_TARGET/keep-me.txt"
-# Build a real managed snapshot, then replace its contents' parent via a
-# recorded path that resolves outside — remove-recorded must still refuse
-# because is_managed compares physical paths under the sandbox root.
 REAL="$("$SCRIPT" ensure-copy "$MAIN" guardlink)"
 check "link_guard_snapshot_exists"            "[ -d '$REAL' ]"
-# The only deletion path is remove_*/with-copy cleanup; both call is_managed.
-# Direct remove-recorded on a path whose physical location left the sandbox
-# root is already covered by case 1. Clean up the real snapshot normally.
-"$SCRIPT" remove-copy "$MAIN" guardlink
-check "real_snapshot_cleaned"                 "[ ! -d '$REAL' ]"
-check "link_target_untouched"                 "[ -f '$LINK_TARGET/keep-me.txt' ]"
+# Swap the managed directory for a symlink to an outside tree. On Windows,
+# ln -s may fall back to a copy; only run the escape checks on a real link.
+set +e
+rm -rf "$REAL" 2>/dev/null
+ln -s "$LINK_TARGET" "$REAL" 2>/dev/null
+set -e
+if [ -L "$REAL" ]; then
+  set +e
+  "$SCRIPT" remove-recorded guardlink "$REAL" >/dev/null 2>&1
+  RC4=$?
+  set -e
+  check "remove_recorded_refuses_symlink_escape" "[ '$RC4' -ne 0 ]"
+  check "symlink_target_survives"               "[ -f '$LINK_TARGET/keep-me.txt' ]"
+  set +e
+  "$SCRIPT" remove-copy "$MAIN" guardlink >/dev/null 2>&1
+  RC5=$?
+  set -e
+  check "remove_copy_refuses_symlink_escape"    "[ '$RC5' -ne 0 ] && [ -L '$REAL' ]"
+  check "symlink_target_survives_remove_copy"   "[ -f '$LINK_TARGET/keep-me.txt' ]"
+else
+  skip "remove_recorded_refuses_symlink_escape (ln -s unavailable)"
+  skip "symlink_target_survives (ln -s unavailable)"
+  skip "remove_copy_refuses_symlink_escape (ln -s unavailable)"
+  skip "symlink_target_survives_remove_copy (ln -s unavailable)"
+fi
+set +e
+rm -rf "$REAL" 2>/dev/null
+"$SCRIPT" remove-copy "$MAIN" guardlink >/dev/null 2>&1
+set -e
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

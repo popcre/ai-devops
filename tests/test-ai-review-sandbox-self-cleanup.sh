@@ -51,13 +51,18 @@ check "failure_path_propagates_command_rc"   "[ '$FAIL_RC' -eq 7 ]"
 check "failure_path_exposed_snapshot"        "[ -n '$SNAP_FAIL' ]"
 check "failure_path_deletes_snapshot"        "[ ! -d '$SNAP_FAIL' ]"
 
-# --- abort path: the command is killed mid-run; trap must still delete --------
+# --- abort path: signal the with-copy WRAPPER itself; trap must still delete --
+# kill -TERM $$ inside a plain sh -c only kills the child. The guarantee is
+# about INT/TERM delivered to the creating run, so the wrapped command TERMs
+# its parent (the with-copy shell) after publishing the snapshot path.
 ABORT_OUT="$TMP/abort.out"
+rm -f "$ABORT_OUT"
 set +e
-"$SCRIPT" with-copy "$MAIN" selfcabort -- sh -c 'printf %s "$AI_REVIEW_SNAPSHOT" > "$1"; kill -TERM $$; sleep 30' sh "$ABORT_OUT"
+"$SCRIPT" with-copy "$MAIN" selfcabort -- bash -c 'printf %s "$AI_REVIEW_SNAPSHOT" > "$1"; kill -TERM "$PPID"; sleep 30' bash "$ABORT_OUT"
 ABORT_RC=$?
 set -e
 SNAP_ABORT="$(cat "$ABORT_OUT" 2>/dev/null || true)"
+check "abort_path_exposed_snapshot"          "[ -n '$SNAP_ABORT' ]"
 check "abort_path_deletes_snapshot"          "[ -n '$SNAP_ABORT' ] && [ ! -d '$SNAP_ABORT' ]"
 
 # --- AI_KEEP_SANDBOX=1 keeps the snapshot (debugging only) -------------------
@@ -88,6 +93,20 @@ set -e
 check "keep_flag_blocks_remove_copy"         "[ -d '$KEEP2' ]"
 "$SCRIPT" remove-copy "$MAIN" selfckeep2 >/dev/null 2>&1 || true
 check "keep2_removable_without_flag"         "[ ! -d '$KEEP2' ]"
+
+# --- AI_KEEP_SANDBOX must be exactly 1; other values still delete ------------
+for flagval in 0 empty yes true; do
+  case "$flagval" in
+    empty) KEEPENV="" ;;
+    *) KEEPENV="$flagval" ;;
+  esac
+  OUT_F="$TMP/flag-$flagval.out"
+  set +e
+  AI_KEEP_SANDBOX="$KEEPENV" "$SCRIPT" with-copy "$MAIN" "selfcflag$flagval" -- sh -c 'printf %s "$AI_REVIEW_SNAPSHOT" > "$1"' sh "$OUT_F"
+  set -e
+  SNAP_F="$(cat "$OUT_F" 2>/dev/null || true)"
+  check "keep_flag_rejects_${flagval}"        "[ -n '$SNAP_F' ] && [ ! -d '$SNAP_F' ]"
+done
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

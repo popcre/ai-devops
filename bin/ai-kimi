@@ -1389,19 +1389,30 @@ start_review_job() { # NAME [CONTINUE]
     warn "use a focused command for an ordinary review; broad suites belong to an explicit final check."
   fi
   OPT_REVIEW_KIND="${OPT_REVIEW_KIND:-diff}"
+  # Arm snapshot self-cleanup BEFORE prepare_review creates the copy. A die
+  # inside prepare_review (HEAD read, assert-head, packet build/verify) or in
+  # the window before the worker takes ownership must delete the snapshot this
+  # run created. On the continue path the live copy is the recorded directory,
+  # not the name derived from the current checkout (which may have moved).
+  if [ -n "$recorded_workspace" ]; then
+    trap "cleanup_review_transients '$dir' ''; release_recorded_boundary 'kimi-$CALLER-$name' '$recorded_workspace' || true; lock_release '$repo_lock'" EXIT
+  else
+    trap "cleanup_review_transients '$dir' ''; release_boundary '$repo' 'kimi-$CALLER-$name' || true; lock_release '$repo_lock'" EXIT
+  fi
   prepare_review "$repo" "kimi-$CALLER-$name" "$recorded_workspace"
   if [ "$source_before_prepare" != "$(tree_state "$repo")" ]; then
-    release_boundary "$repo" "kimi-$CALLER-$name"
+    release_boundary "$repo" "kimi-$CALLER-$name" || release_recorded_boundary "kimi-$CALLER-$name" "$recorded_workspace" || true
     die "source-checkout-changed while the private review snapshot was being prepared; retry from a stable checkout."
   fi
   prep_seconds="$(( $(date +%s) - prep_started ))"
   pf="$(mktemp "$STATE_DIR/.kimi-prompt.XXXXXX")"
-  # From this point until a worker is proven started, every shell error must
-  # remove the private prompt and fixed-name launchers as well as the repo lock
-  # and the disposable review snapshot (Phase 2 self-cleanup). The worker takes
-  # ownership only after the startup acknowledgement below; until then this run
-  # created the snapshot and must delete it before returning.
-  trap "cleanup_review_transients '$dir' '$pf'; release_boundary '$repo' 'kimi-$CALLER-$name' || true; lock_release '$repo_lock'" EXIT
+  # The worker takes ownership only after the startup acknowledgement below;
+  # until then this run created the snapshot and must delete it before returning.
+  if [ -n "$recorded_workspace" ]; then
+    trap "cleanup_review_transients '$dir' '$pf'; release_recorded_boundary 'kimi-$CALLER-$name' '$recorded_workspace' || true; lock_release '$repo_lock'" EXIT
+  else
+    trap "cleanup_review_transients '$dir' '$pf'; release_boundary '$repo' 'kimi-$CALLER-$name' || true; lock_release '$repo_lock'" EXIT
+  fi
   chmod 0600 "$pf" 2>/dev/null || true; build_prompt_file "$pf"
   create_review_job "$name" "$repo" "$rid" review "$sid" "$pf"
   write_job_state "$dir/job.json" --argjson quota "$CAPACITY_JSON" '.quota_result=$quota'

@@ -544,13 +544,13 @@ cmd_with_copy() { # with-copy ROOT TAG -- COMMAND [ARGS...]
   [ "${1:-}" = -- ] || die "usage: ai-review-sandbox with-copy <repo-root> <tag> -- <command>..."
   shift
   [ "$#" -ge 1 ] || die "usage: ai-review-sandbox with-copy <repo-root> <tag> -- <command>..."
-  stage="$(cmd_ensure "$root" "$tag" 1)" || die "could not create a disposable review snapshot for $root"
-  # cmd_ensure prints the path; capture it from the same process (not a
-  # subshell) so the trap can see WITH_COPY_SNAP after set -u.
-  WITH_COPY_SNAP="$stage" WITH_COPY_ROOT="$root" WITH_COPY_TAG="$tag"
+  # Arm the trap BEFORE create so a signal cannot land between publish and
+  # trap install. with_copy_cleanup no-ops while WITH_COPY_SNAP is empty.
   trap with_copy_cleanup EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  stage="$(cmd_ensure "$root" "$tag" 1)" || die "could not create a disposable review snapshot for $root"
+  WITH_COPY_SNAP="$stage" WITH_COPY_ROOT="$root" WITH_COPY_TAG="$tag"
   if [ "${AI_KEEP_SANDBOX:-0}" = 1 ]; then
     warn "AI_KEEP_SANDBOX=1: snapshot kept at $stage"
     export AI_REVIEW_SNAPSHOT="$stage"
