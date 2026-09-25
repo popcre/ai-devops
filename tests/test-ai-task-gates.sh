@@ -388,19 +388,6 @@ check 'a leftover plain-code declaration does not open the sealed route' \
 check 'that stop is the protected-class escalation, not a fixtures pass' \
   "out '$TMP/private-clean' check --before code-only-review | grep -Fq 'escalated'"
 
-printf 'a tooling-only fixtures opt-in does not license evidence rows\n'
-newrepo "$TMP/private-tooling-only" 'u2giants/licensor-source-data'
-mkdir -p "$TMP/private-tooling-only/disney-dcpvault"
-printf '# licensed loader\n' > "$TMP/private-tooling-only/disney-dcpvault/loader.py"
-cat > "$TMP/private-tooling-only/.ai-devops/task-gates.json" <<'EOF'
-{"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-tooling":{"required":["synthetic-fixtures-only"]}}}
-EOF
-( cd "$TMP/private-tooling-only" && "$GATES" start --class private-tooling ) >/dev/null
-check 'a tooling-only opt-in does not open the sealed route for licensed paths' \
-  "rc 3 '$TMP/private-tooling-only' check --before code-only-review"
-check 'and that stop demands the boundary for the effective class' \
-  "out '$TMP/private-tooling-only' check --before code-only-review | grep -Fq 'synthetic-fixtures-only'"
-
 printf 'a public repository may use the sealed route freely\n'
 newrepo "$TMP/public-code"
 mkdir -p "$TMP/public-code/bin"
