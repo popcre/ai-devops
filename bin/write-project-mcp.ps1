@@ -32,10 +32,16 @@ param(
   [Parameter(Mandatory)][System.Collections.IDictionary]$Catalog,
   [Parameter(Mandatory)][string]$ClaudeCodeConfig,
   [System.Collections.IDictionary]$CodexServers = @{},
+  # Removed from the catalog but still to be deleted wherever an earlier run wrote them.
+  [string[]]$RetiredNames = @(),
   [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
+
+function Test-ManagedName([string]$Name) {
+  return ($Catalog.Contains($Name) -or $RetiredNames -contains $Name)
+}
 
 function Backup-Path([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path)) { return $null }
@@ -151,11 +157,11 @@ foreach ($key in $Scope.Keys) {
       $newServers = [ordered]@{}
       if (Test-Path -LiteralPath $mcpJson) {
         foreach ($name in $fileNames) {
-          if (-not $Catalog.Contains($name)) { $newServers[$name] = $fileJson["mcpServers"][$name] }
+          if (-not (Test-ManagedName $name)) { $newServers[$name] = $fileJson["mcpServers"][$name] }
         }
       }
       foreach ($name in $desired) { $newServers[$name] = $Catalog[$name] }
-      $dropped = @($fileNames | Where-Object { $Catalog.Contains($_) -and $desired -notcontains $_ })
+      $dropped = @($fileNames | Where-Object { (Test-ManagedName $_) -and $desired -notcontains $_ })
       $added   = @($desired | Where-Object { $fileNames -notcontains $_ })
       if ($DryRun) {
         Write-Host "  plan $rootPath .mcp.json (untracked): +$($added -join ',') -$($dropped -join ',')"
@@ -177,7 +183,7 @@ foreach ($key in $Scope.Keys) {
       if ($entryKey -cne $rootPath -and $codeConfig["projects"].ContainsKey($rootPath)) {
         $legacy = $codeConfig["projects"][$rootPath]
         if ($legacy -and $legacy.ContainsKey("mcpServers") -and $legacy["mcpServers"]) {
-          $legacyManaged = @($legacy["mcpServers"].Keys | Where-Object { $Catalog.Contains($_) })
+          $legacyManaged = @($legacy["mcpServers"].Keys | Where-Object { Test-ManagedName $_ })
           if ($legacyManaged.Count -gt 0 -and -not $DryRun) {
             foreach ($name in $legacyManaged) { $null = $legacy["mcpServers"].Remove($name) }
             if ($legacy["mcpServers"].Count -eq 0) { $null = $legacy.Remove("mcpServers") }
@@ -198,7 +204,7 @@ foreach ($key in $Scope.Keys) {
       # Stale = managed names we previously delivered that are no longer scoped
       # for this root and are not provided by the tracked file either.
       $stale = @($entryNames | Where-Object {
-        $Catalog.Contains($_) -and $desired -notcontains $_ -and $fileNames -notcontains $_ })
+        (Test-ManagedName $_) -and $desired -notcontains $_ -and $fileNames -notcontains $_ })
       if ($missing.Count -eq 0 -and $stale.Count -eq 0) {
         Write-Host "  ok   ${rootPath}: tracked .mcp.json already carries $($desired -join ', ')"
         continue

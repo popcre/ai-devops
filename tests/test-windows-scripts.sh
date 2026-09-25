@@ -219,7 +219,7 @@ fi
 echo "== MCP catalog has explicit per-client membership =="
 if grep -q '\$McpServerCatalog\["chrome-devtools"\]' bin/setup-machine.ps1 &&
    grep -Fq '$ClaudeCodeMcpNames = @("1password")' bin/setup-machine.ps1 &&
-   grep -Fq '$ClaudeDesktopMcpNames = @("1password", "ag-grid", "playwright", "recall-ai", "synology-monitor", "trigger")' bin/setup-machine.ps1 &&
+   grep -Fq '$ClaudeDesktopMcpNames = @("1password", "playwright")' bin/setup-machine.ps1 &&
    grep -Fq 'if (-not $ClaudeCodeMcpServers.Contains($name))' bin/setup-machine.ps1 &&
    grep -Fq '@{ servers = $ClaudeDesktopMcpServers; managed = $ManagedMcpServerNames }' bin/setup-machine.ps1 &&
    grep -Fq 'if (-not $servers.ContainsKey($name)) { $null = $cfg["mcpServers"].Remove($name)' bin/sync-claude-desktop-mcp.ps1; then
@@ -229,28 +229,27 @@ if grep -q 'configure-codex-mcps.ps1' bin/setup-machine.ps1 &&
    grep -q '\$CodexMcpServers' bin/setup-machine.ps1; then
   ok "Windows setup configures the complete MCP set for Codex"
 else bad "Windows setup leaves the Codex MCP set incomplete"; fi
-if grep -Fq "\$CodexMcpServers['railway']" bin/setup-machine.ps1 &&
+if grep -Fq "\$CodexProjectMcpServers['railway']" bin/setup-machine.ps1 &&
    grep -Fq 'https://mcp.railway.com' bin/setup-machine.ps1 &&
    grep -Fq '@railway/cli@5.43.1' bin/reconcile-windows-package-exceptions.ps1; then
   ok "Windows setup installs Railway CLI and configures Railway MCP for Codex"
 else bad "Windows setup does not fully manage Railway"; fi
-for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway trigger recall-ai 1password supabase; do
+for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway trigger 1password supabase; do
   if grep -Fq "\$McpServerCatalog[\"$server\"]" bin/setup-machine.ps1; then
     ok "MCP catalog includes $server"
   else
     bad "MCP catalog is missing $server"
   fi
 done
-if grep -Fq 'op://vibe_coding/recall-ai MCP/password' bin/setup-machine.ps1 &&
-   grep -Fq 'op://vibe_coding/recall-ai MCP/password' bin/setup-secrets.sh &&
-   grep -Fq 'op://vibe_coding/recall-ai MCP/password' config/mcp.env.example &&
-   ! grep -Fq 'dwvlpanu4odty3bjnmb5my5esy' bin/setup-secrets.sh; then
-  ok "Recall.ai uses one portable 1Password reference on Windows and Linux"
-else bad "Recall.ai 1Password references differ across installers"; fi
-if grep -Fq '"oracle"              = @("trigger", "recall-ai", "vercel")' bin/setup-machine.ps1 &&
+if ! grep -Fq '$McpServerCatalog["recall-ai"]' bin/setup-machine.ps1 &&
+   grep -Fq '$RetiredMcpServerNames = @("recall-ai")' bin/setup-machine.ps1 &&
+   ! grep -Fq 'recall' bin/setup-secrets.sh config/mcp.env.example; then
+  ok "Recall.ai is retired on Windows and Linux and deleted wherever it was written"
+else bad "Recall.ai is still installed somewhere"; fi
+if grep -Fq '"oracle"              = @("trigger", "vercel")' bin/setup-machine.ps1 &&
    grep -A3 -F '$McpServerCatalog["vercel"]' bin/setup-machine.ps1 | grep -Fq 'type = "http"' &&
    ! grep -A3 -F '$McpServerCatalog["vercel"]' bin/setup-machine.ps1 | grep -Fq 'mcp-remote' &&
-   grep -Fq -- '-RemoveNames $CodexScopedHere' bin/setup-machine.ps1; then
+   grep -Fq -- '-RemoveNames @($McpScopedAll + $RetiredMcpServerNames)' bin/setup-machine.ps1; then
   ok "Vercel is Oracle-scoped, native HTTP, and never behind the mcp-remote bridge"
 else
   bad "Vercel must be Oracle-scoped native HTTP for Claude Code and Codex"

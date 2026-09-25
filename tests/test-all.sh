@@ -4,12 +4,17 @@
 # Usage:
 #   test-all.sh                        run every Bash suite (unchanged default)
 #   test-all.sh --only <pattern>       run only suites whose name contains <pattern>
-#   test-all.sh --changed-since <ref>  select by coarse change category vs <ref>
+#   test-all.sh --changed-since <ref>  select suites affected by changes vs <ref>
+#   test-all.sh --changed-since <ref> --shard <i>/<n>
+#                                      run only the selected suites that land
+#                                      in section <i> of <n> (issue #805)
 #   test-all.sh --windows-offline      run the manifest's ordinary Windows set
 #   test-all.sh --windows-offline --exclude-reviewer-safety
 #                                      omit suites assigned to the reviewer lane
 #   test-all.sh --windows-offline --exclude-reviewer-safety --shard <i>/<n>
 #                                      run only declared section <i> of <n> (#210)
+#   test-all.sh --windows-offline --changed-since <ref>
+#                                      narrow the Windows lane to affected suites
 #   test-all.sh --list                 print the selection and exit without running
 #   test-all.sh --shard <i>/<n>         partition every discovered suite round-robin
 #   test-all.sh --shard <i>/<n> --balanced
@@ -67,7 +72,7 @@ while [ $# -gt 0 ]; do
       shard="$2"; shift 2 ;;
     --balanced) balanced=true; shift ;;
     --list) list_only=true; shift ;;
-    -h|--help) sed -n '2,17p' "$ROOT/tests/test-all.sh"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$ROOT/tests/test-all.sh"; exit 0 ;;
     *) printf 'test-all.sh: unknown argument %s\n' "$1" >&2; exit 2 ;;
   esac
 done
@@ -81,8 +86,10 @@ shard_index=''; shard_total=''
 if [ "$shard_requested" = true ]; then
   [ "$windows_offline" = false ] || [ "$exclude_reviewer_safety" = true ] || {
     printf 'test-all.sh: Windows --shard requires --exclude-reviewer-safety\n' >&2; exit 2; }
-  [ -z "$only$changed_since" ] || {
-    printf 'test-all.sh: --shard cannot be combined with --only or --changed-since\n' >&2; exit 2; }
+  [ -z "$only" ] || {
+    printf 'test-all.sh: --shard cannot be combined with --only\n' >&2; exit 2; }
+  # --changed-since may share a section with --shard: the section still owns a
+  # complete balanced assignment, and the change filter narrows inside it.
   # Exactly one slash. Splitting on the first and last slash independently
   # would read `1/2/4` as section 1 of 4 and run a real, wrong selection.
   [[ "$shard" =~ ^[0-9]+/[0-9]+$ ]] || {
@@ -100,13 +107,13 @@ if [ "$shard_requested" = true ]; then
   [ "$shard_index" -ge 1 ] && [ "$shard_index" -le "$shard_total" ] || {
     printf 'test-all.sh: --shard index %s is outside 1..%s\n' "$shard_index" "$shard_total" >&2; exit 2; }
 fi
-selection_modes=0
-[ -n "$only" ] && selection_modes=$((selection_modes + 1))
-[ -n "$changed_since" ] && selection_modes=$((selection_modes + 1))
-[ "$windows_offline" = true ] && selection_modes=$((selection_modes + 1))
-if [ "$selection_modes" -gt 1 ]; then
-  printf 'test-all.sh: --only, --changed-since, and --windows-offline are mutually exclusive\n' >&2; exit 2
+if [ -n "$only" ] && [ -n "$changed_since" ]; then
+  printf 'test-all.sh: --only and --changed-since are mutually exclusive\n' >&2; exit 2
 fi
+if [ -n "$only" ] && [ "$windows_offline" = true ]; then
+  printf 'test-all.sh: --only and --windows-offline are mutually exclusive\n' >&2; exit 2
+fi
+# --changed-since composes with --windows-offline and with --shard (issue #805).
 
 mapfile -t all_tests < <(find "$SUITE_DIR" -maxdepth 1 -type f -name 'test-*.sh' ! -name 'test-all.sh' -printf '%f\n' | LC_ALL=C sort)
 
@@ -129,6 +136,44 @@ if [ -f "$MANIFEST" ] && jq -e 'has("suspended_bash")' "$MANIFEST" >/dev/null 2>
   done
 fi
 
+# Affected-suite filter (issue #805). When --changed-since is set, only the
+# suites a change can break stay in the run. Fail-closed: an unknown path keeps
+# every suite. An empty filter result is a justified empty set, not a gap.
+affected_filter=false
+mapfile -t affected_tests < <(:)
+if [ -n "$changed_since" ]; then
+  if ! git -C "$ROOT" rev-parse --verify --quiet "$changed_since^{commit}" >/dev/null; then
+    printf 'test-all.sh: --changed-since %s is not a commit in this repository\n' "$changed_since" >&2
+    exit 2
+  fi
+  changed_paths="$(git -C "$ROOT" diff --no-renames --name-only "$changed_since"...HEAD)" || {
+    printf 'test-all.sh: could not list changes since %s\n' "$changed_since" >&2; exit 2; }
+  selected_out="$(printf '%s\n' "$changed_paths" | selection_affected_suites "$ROOT" "${all_tests[@]}")" || {
+    printf 'test-all.sh: could not map changes since %s to suites\n' "$changed_since" >&2
+    exit 2
+  }
+  affected_tests=()
+  while IFS= read -r line; do
+    case "$line" in test-*) affected_tests+=("$line") ;; esac
+  done <<<"${selected_out:-}"
+  affected_filter=true
+fi
+
+# selection_intersect <suite>...
+# Prints only suites kept by the active affected filter (or all when inactive).
+selection_intersect() {
+  local suite
+  if [ "$affected_filter" = false ]; then
+    printf '%s\n' "$@"
+    return 0
+  fi
+  [ "${#affected_tests[@]}" -gt 0 ] || return 0
+  for suite in "$@"; do
+    printf '%s\n' "${affected_tests[@]}" | grep -Fxq "$suite" && printf '%s\n' "$suite"
+  done
+  return 0
+}
+
 reason='every Bash suite'
 if [ -n "$only" ]; then
   mapfile -t tests < <(selection_filter "$only" "${all_tests[@]}")
@@ -136,24 +181,6 @@ if [ -n "$only" ]; then
   if [ "${#tests[@]}" -eq 0 ]; then
     printf 'test-all.sh: --only %s matched no suite of %s\n' "$only" "${#all_tests[@]}" >&2
     exit 2
-  fi
-elif [ -n "$changed_since" ]; then
-  if ! git -C "$ROOT" rev-parse --verify --quiet "$changed_since^{commit}" >/dev/null; then
-    printf 'test-all.sh: --changed-since %s is not a commit in this repository\n' "$changed_since" >&2
-    exit 2
-  fi
-  categories="$(git -C "$ROOT" diff --no-renames --name-only "$changed_since"...HEAD | selection_categories_for_paths "$ROOT")" || {
-    printf 'test-all.sh: could not classify changes since %s\n' "$changed_since" >&2; exit 2; }
-  mapfile -t tests < <(selection_by_categories "$categories" "${all_tests[@]}")
-  reason="--changed-since $changed_since categories=${categories:-none}"
-  case " $categories " in
-    *' powershell '*) printf 'NOTE PowerShell changes are not covered by this runner; run tests/test-all.ps1\n' ;;
-  esac
-  if [ "${#tests[@]}" -eq 0 ]; then
-    printf 'BASH SELECTION %s selected=0 of %s\n' "$reason" "${#all_tests[@]}"
-    printf 'No Bash suite is relevant to these changes; skipping the long suite by design.\n'
-    printf '\nOFFLINE BASH SUMMARY tests=0 failures=0\n'
-    exit 0
   fi
 elif [ "$windows_offline" = true ]; then
   [ -f "$MANIFEST" ] || { printf 'test-all.sh: Windows suite manifest is missing: %s\n' "$MANIFEST" >&2; exit 2; }
@@ -195,9 +222,21 @@ elif [ "$windows_offline" = true ]; then
     [ "$(printf '%s\n' "${shard_union[@]}" | LC_ALL=C sort)" = "$(printf '%s\n' "${tests[@]}" | LC_ALL=C sort)" ] || {
       printf 'test-all.sh: declared sections do not cover the Windows lane exactly\n' >&2; exit 2; }
     mapfile -t tests < <(jq -r --argjson i "$((shard_index - 1))" '.windows_offline_shards[$i][]' "$MANIFEST" | tr -d '\r')
-    [ "${#tests[@]}" -gt 0 ] || {
-      printf 'test-all.sh: section %s of %s is empty\n' "$shard_index" "$shard_total" >&2; exit 2; }
     reason="$reason section $shard_index of $shard_total"
+  fi
+  if [ "$affected_filter" = true ]; then
+    mapfile -t tests < <(selection_intersect ${tests[@]+"${tests[@]}"})
+    reason="$reason affected-since $changed_since"
+    if [ "${#tests[@]}" -eq 0 ]; then
+      printf 'BASH SELECTION %s selected=0 of %s\n' "$reason" "${#all_tests[@]}"
+      printf 'No Windows-sensitive Bash suite is affected; justifying an empty section.\n'
+      printf '\nOFFLINE BASH SUMMARY tests=0 failures=0\n'
+      exit 0
+    fi
+  fi
+  if [ -n "$shard" ] && [ "${#tests[@]}" -eq 0 ] && [ "$affected_filter" = false ]; then
+    printf 'test-all.sh: section %s of %s is empty\n' "$shard_index" "$shard_total" >&2
+    exit 2
   fi
 else
   tests=("${all_tests[@]}")
@@ -241,8 +280,20 @@ else
       done
       reason="every Bash suite, complete section $shard_index of $shard_total"
     fi
-    [ "${#tests[@]}" -gt 0 ] || {
-      printf 'test-all.sh: section %s of %s is empty\n' "$shard_index" "$shard_total" >&2; exit 2; }
+    if [ "${#tests[@]}" -eq 0 ] && [ "$affected_filter" = false ]; then
+      printf 'test-all.sh: section %s of %s is empty\n' "$shard_index" "$shard_total" >&2
+      exit 2
+    fi
+  fi
+  if [ "$affected_filter" = true ]; then
+    mapfile -t tests < <(selection_intersect ${tests[@]+"${tests[@]}"})
+    reason="changes since $changed_since, ${reason}"
+    if [ "${#tests[@]}" -eq 0 ]; then
+      printf 'BASH SELECTION %s selected=0 of %s\n' "$reason" "${#all_tests[@]}"
+      printf 'No Bash suite is affected by these changes; skipping the long suite by design.\n'
+      printf '\nOFFLINE BASH SUMMARY tests=0 failures=0\n'
+      exit 0
+    fi
   fi
 fi
 

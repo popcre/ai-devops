@@ -30,11 +30,11 @@ What it does (idempotent - safe to re-run):
      immediately. Uses cloudflared so it works on any network without Tailscale.
   7. Builds one MCP catalog, then writes an explicit server set for each client
      (each backed up first). Claude Code stays lean at user scope; repository
-     MCP files add project tools. Claude Desktop and Codex retain their own
-     deliberately broader sets. A setup rerun also removes retired managed
+     MCP files add project tools; single-project servers load only inside
+     their owning repository, never globally. A setup rerun also removes retired managed
      entries instead of silently restoring them.
      - stdio via the op launcher : supabase (--read-only), trigger, 1password
-       - remote via mcp-remote shim: devops-mcp, synology-monitor, recall-ai
+       - remote via mcp-remote shim: devops-mcp, synology-monitor
        - no secret, pinned runtime : playwright, chrome-devtools, ag-grid
        - native HTTP, Oracle-only  : vercel (browser OAuth; Claude Code project
                                       entry + Oracle .codex/config.toml, never global)
@@ -384,9 +384,7 @@ Ok "Wrote $Launcher"
 # token itself is never written to disk or into claude_desktop_config.json.
 #   %1 = server URL,  %2 = op:// reference to the bearer token,
 #   %3+ = optional extra flags passed straight through to mcp-remote
-#         (recall-ai needs --transport http-first; devops/synology pass none,
-#          for which EXTRA stays empty and the command is byte-identical to
-#          the previous two-argument form).
+#         (devops/synology pass none, so EXTRA stays empty).
 $remoteBody = @"
 @echo off
 rem No `--`: PowerShell -File mis-parses it. -Url/-SecretRef bind by name; any
@@ -432,25 +430,6 @@ $McpServerCatalog["synology-monitor"] = @{
   command = "cmd"
   args = @("/c", $RemoteLauncher, "https://nas-mcp.designflow.app/mcp",
            "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token")
-}
-
-# recall-ai (remote/HTTP). Same treatment. Until 2026-07-17 this token was
-# hard-coded in plaintext in claude_desktop_config.json - the LAST plaintext
-# secret left after the Phase 2 token-free pass, which missed it because nothing
-# ever rewrote the recall-ai entry. --transport preserves the flag the working
-# config used; the launcher passes %3+ through to mcp-remote untouched.
-#
-# The reference MUST be byte-identical to the one in config/mcp.env.example.
-# Remote mode looks the ref up in mcp.env by exact string match and throws
-# "Secret reference is not managed by ..." on any difference. This entry used the
-# item UUID while mcp.env used the title, so recall-ai could never start; the
-# mismatch stayed hidden until 2026-08-24 because an earlier failure in the shared
-# refresh killed the server before this check ran.
-$McpServerCatalog["recall-ai"] = @{
-  command = "cmd"
-  args = @("/c", $RemoteLauncher, "https://us-east-1.recall.ai/mcp",
-           "op://vibe_coding/recall-ai MCP/password",
-           "--transport", "http-first")
 }
 
 # trigger (stdio). Wrapped in the launcher so `op` injects
@@ -544,14 +523,17 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   Warn "  Install Codex, run: codex login, then re-run this script."
 }
 
-$ManagedMcpServerNames = @($McpServerCatalog.Keys)
+# Retired everywhere (2026-09-24, owner ruling): still treated as managed so every
+# consumer deletes the entry an earlier run wrote.
+$RetiredMcpServerNames = @("recall-ai")
+$ManagedMcpServerNames = @(@($McpServerCatalog.Keys) + $RetiredMcpServerNames)
 # codex-cli is suspended from Claude Code and Claude Desktop (2026-09-17):
 # transcript mining on edge-dev found ~34 real invocations in 1,489 Claude
 # sessions and none after 2026-09-10, while every session still paid the
 # server's startup. The catalog definition is retained; restoring the entry
 # here re-wires both clients on the next setup run.
 $ClaudeCodeMcpNames = @("1password")
-$ClaudeDesktopMcpNames = @("1password", "ag-grid", "playwright", "recall-ai", "synology-monitor", "trigger")
+$ClaudeDesktopMcpNames = @("1password", "playwright")
 # ZCode gets the same minimal default as Claude Code. The plan's illustrative
 # "@("1password","codex-cli")" predates PR #573 (2026-09-17), which suspended
 # the dormant codex-cli server from both Claude clients after transcript mining
@@ -567,9 +549,9 @@ $MimoMcpNames = @("1password")
 # Phase 3 (#705): single-project servers start only in sessions opened in the
 # owning repository. Keys are repository identities from
 # config/repo-identities.tsv, resolved to every clone and worktree root on this
-# machine; a project with no clone here keeps its servers GLOBAL (PR #114's
-# rule: synology-monitor is not cloned on edge-dev, so devops-mcp and
-# synology-monitor stay global there). Ownership per Albert 2026-08-26.
+# machine. A scoped server is NEVER global, cloned here or not (owner ruling
+# 2026-09-24, replacing PR #114's keep-global rule). Ownership per Albert
+# 2026-08-26 and 2026-09-24.
 # 30-day transcript evidence (2026-09-24, #705): supabase (shared-db,
 # licensor-source-data, dflow_plm, popdam, popcrm-web = 5 repos) and playwright
 # (popdam + popcrm-web on hetz, ai-devops skill-trigger evals) meet the
@@ -577,7 +559,7 @@ $MimoMcpNames = @("1password")
 # shared-db worktree doing DB Data Admin UI work, and that app moved to popdam3
 # (2026-09-16), so it is scoped to popdam3; revisit with fresh evidence.
 $McpProjectScope = [ordered]@{
-  "oracle"              = @("trigger", "recall-ai", "vercel")
+  "oracle"              = @("trigger", "vercel")
   "popdam3"             = @("railway", "chrome-devtools")
   "designflow-frontend" = @("ag-grid")
   "synology-monitor"    = @("devops-mcp", "synology-monitor")
@@ -585,32 +567,48 @@ $McpProjectScope = [ordered]@{
 
 . (Join-Path $PSScriptRoot "repo-identity.ps1")
 $McpProjectRoots = @{}
-$McpScopedHere = @()
 foreach ($key in $McpProjectScope.Keys) {
   $roots = @(Get-AiDevOpsCloneRoots -Key $key)
   if ($roots.Count -gt 0) {
     $McpProjectRoots[$key] = $roots
-    $McpScopedHere += $McpProjectScope[$key]
     Note "project '$key' cloned here ($($roots.Count) root(s)): scope $($McpProjectScope[$key] -join ', ')"
   } else {
-    Note "project '$key' not cloned here; its servers stay global: $($McpProjectScope[$key] -join ', ')"
+    Note "project '$key' not cloned here; its servers load nowhere on this machine: $($McpProjectScope[$key] -join ', ')"
   }
 }
-$McpScopedHere = @($McpScopedHere | Sort-Object -Unique)
+$McpScopedAll = @($McpProjectScope.Values | ForEach-Object { $_ } | Sort-Object -Unique)
 # Codex honours a project .codex/config.toml in trusted projects (verified
-# against codex-cli 0.153.2, 2026-09-24). Only servers listed here are moved out
-# of Codex's global config into the owning repository; the others in
-# $McpProjectScope stay global in Codex until they are moved deliberately.
-$CodexProjectMcpServers = [ordered]@{
-  "vercel" = [ordered]@{ url = "https://mcp.vercel.com"; startup_timeout_sec = 20 }
+# against codex-cli 0.153.2, 2026-09-24), so every scoped server is delivered
+# to Codex per repository too and removed from its global config.
+$CodexProjectMcpServers = [ordered]@{}
+foreach ($name in $McpScopedAll) {
+  if (-not $McpServerCatalog.Contains($name)) { continue }
+  $copy = [ordered]@{}
+  foreach ($key in $McpServerCatalog[$name].Keys) { $copy[$key] = $McpServerCatalog[$name][$key] }
+  $CodexProjectMcpServers[$name] = $copy
 }
-$CodexScopedHere = @($CodexProjectMcpServers.Keys | Where-Object { $McpScopedHere -contains $_ })
-# Effective global membership = the declared lists above minus servers already
-# delivered per project on THIS machine. bin/check-mcp-drift.ps1 parses the
-# literal lists FIRST (do not move them below this block) and applies the same
-# subtraction, so the two can never disagree.
-$ClaudeCodeMcpNames    = @($ClaudeCodeMcpNames    | Where-Object { $McpScopedHere -notcontains $_ })
-$ClaudeDesktopMcpNames = @($ClaudeDesktopMcpNames | Where-Object { $McpScopedHere -notcontains $_ })
+if ($CodexProjectMcpServers.Contains('vercel')) {
+  $CodexProjectMcpServers['vercel'] = [ordered]@{ url = "https://mcp.vercel.com"; startup_timeout_sec = 20 }
+}
+# Railway CLI 5.41.2 configures Codex's remote mode through its authenticated
+# CLI proxy. Match the official installer output so `railway login` owns OAuth.
+if ($CodexProjectMcpServers.Contains('railway')) {
+  $CodexProjectMcpServers['railway'] = [ordered]@{ command = 'railway'; args = @('mcp', 'proxy'); startup_timeout_sec = 20 }
+}
+if ($CodexProjectMcpServers.Contains('chrome-devtools')) {
+  $CodexProjectMcpServers['chrome-devtools']['env'] = [ordered]@{
+    SystemRoot = $(if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' })
+    PROGRAMFILES = $(if ($env:ProgramFiles) { $env:ProgramFiles } else { 'C:\Program Files' })
+  }
+  $CodexProjectMcpServers['chrome-devtools']['startup_timeout_sec'] = 20
+  # Parked: not in the first-turn tool list per the Codex prefix census.
+  $CodexProjectMcpServers['chrome-devtools']['enabled'] = $false
+}
+# Effective global membership = the declared lists above minus every scoped
+# server. bin/check-mcp-drift.ps1 parses the literal lists FIRST (do not move
+# them below this block) and applies the same subtraction.
+$ClaudeCodeMcpNames    = @($ClaudeCodeMcpNames    | Where-Object { $McpScopedAll -notcontains $_ })
+$ClaudeDesktopMcpNames = @($ClaudeDesktopMcpNames | Where-Object { $McpScopedAll -notcontains $_ })
 
 function Select-McpServers([string[]]$Names) {
   $selected = [ordered]@{}
@@ -1044,7 +1042,7 @@ $projectMcpWriter = Join-Path $RepoPath "bin\write-project-mcp.ps1"
 if (Test-Path -LiteralPath $projectMcpWriter) {
   & $projectMcpWriter -Scope $McpProjectScope -Roots $McpProjectRoots `
     -Catalog $McpServerCatalog -ClaudeCodeConfig (Join-Path $HOME ".claude.json") `
-    -CodexServers $CodexProjectMcpServers
+    -CodexServers $CodexProjectMcpServers -RetiredNames $RetiredMcpServerNames
 } else {
   Warn "Missing $projectMcpWriter - project MCP entries left as-is."
 }
@@ -1112,8 +1110,8 @@ WScript.Quit exitCode
 }
 
 # --------------------------------------------------------------------------
-# 6c. Codex's OWN config (~/.codex/config.toml). Codex receives the complete
-# catalog, independently of the two Claude membership lists.
+# 6c. Codex's OWN config (~/.codex/config.toml). Codex receives the catalog
+# minus scoped servers, independently of the two Claude membership lists.
 # --------------------------------------------------------------------------
 Step "Wiring the complete MCP server set into Codex"
 $codexMcpSetup = Join-Path $RepoPath "bin\configure-codex-mcps.ps1"
@@ -1125,29 +1123,8 @@ if (Test-Path -LiteralPath $codexMcpSetup) {
     $CodexMcpServers[$name] = $copy
   }
 
-  # Codex-project-capable servers (vercel) are delivered per repository in 7b
-  # and removed from the global config wherever their owner is cloned here. A
-  # machine without the owning clone keeps them global, the #705 rule.
-  foreach ($name in $CodexProjectMcpServers.Keys) {
-    $CodexMcpServers[$name] = $CodexProjectMcpServers[$name]
-  }
-  foreach ($name in $CodexScopedHere) { $null = $CodexMcpServers.Remove($name) }
-  # Railway CLI 5.41.2 configures Codex's remote mode through its authenticated
-  # CLI proxy. Match the official installer output so `railway login` owns OAuth.
-  # Claude consumers retain the shared mcp-remote definition above.
-  $CodexMcpServers['railway'] = [ordered]@{
-    command = 'railway'
-    args = @('mcp', 'proxy')
-    startup_timeout_sec = 20
-  }
-  $CodexMcpServers['chrome-devtools']['env'] = [ordered]@{
-    SystemRoot = $(if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' })
-    PROGRAMFILES = $(if ($env:ProgramFiles) { $env:ProgramFiles } else { 'C:\Program Files' })
-  }
-  $CodexMcpServers['chrome-devtools']['startup_timeout_sec'] = 20
-  # Kept recoverable but parked: the Codex prefix census showed it is not in the
-  # first-turn tool list, and setup must not undo the live disabled state.
-  $CodexMcpServers['chrome-devtools']['enabled'] = $false
+  # Scoped servers are delivered per repository in 7b and never global.
+  foreach ($name in $McpScopedAll) { $null = $CodexMcpServers.Remove($name) }
   if ($CodexMcpServers.Contains('codex-cli')) {
     $CodexMcpServers['codex-cli']['tool_timeout_sec'] = 3600
     # Parked like chrome-devtools (2026-09-17): mining found no meaningful
@@ -1157,7 +1134,7 @@ if (Test-Path -LiteralPath $codexMcpSetup) {
     $CodexMcpServers['codex-cli']['enabled'] = $false
   }
 
-  & $codexMcpSetup -Servers $CodexMcpServers -RemoveNames $CodexScopedHere
+  & $codexMcpSetup -Servers $CodexMcpServers -RemoveNames @($McpScopedAll + $RetiredMcpServerNames)
 } else {
   Warn "Missing $codexMcpSetup - Codex MCP server set left as-is."
 }

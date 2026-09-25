@@ -5,7 +5,10 @@ param(
   # balanced sections that run on independent hosted machines (issue #210).
   # Without WindowsPullRequest, sections partition the complete Bash inventory.
   # No-argument runs remain the complete serial backstop.
-  [string]$Shard = ''
+  [string]$Shard = '',
+  # Issue #805: narrow this run to suites the change can break. Empty keeps
+  # the complete inventory. A justified empty selection is a pass, not a gap.
+  [string]$ChangedSince = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -81,6 +84,7 @@ if ($ExcludeReviewerSafety) {
   if (-not $WindowsPullRequest) { throw '-ExcludeReviewerSafety requires -WindowsPullRequest.' }
   $bashArgs += '--exclude-reviewer-safety'
 }
+if ($ChangedSince) { $bashArgs += @('--changed-since', $ChangedSince) }
 if ($Shard) { $bashArgs += @('--shard', $Shard) }
 if ($Shard) {
   # Validate the complete selection before either language executes a suite.
@@ -121,6 +125,46 @@ if ($runPowerShell) {
           Write-Warning "test-all.ps1: suspended_powershell names a suite not on disk: $name"
         }
       }
+    }
+  }
+
+  # Issue #805: skip PowerShell when the change cannot touch it. Unknown or
+  # shared surfaces keep the complete PowerShell inventory (fail-closed).
+  if ($ChangedSince) {
+    $changedPaths = @(& git -C $root diff --no-renames --name-only "$ChangedSince...HEAD" 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+      throw "test-all.ps1: could not list changes since $ChangedSince"
+    }
+    $needsPowerShell = $false
+    foreach ($path in $changedPaths) {
+      if (-not $path) { continue }
+      if ($path -match '(^|/)(README\.md|AGENTS\.md|bugs\.md|plan_.*\.md)$' -or
+          $path -match '^HANDOFF\.d/' -or $path -match '^docs/' -or $path -match '^tests/verification/') {
+        continue
+      }
+      if ($path -match '\.(ps1|psm1|psd1)$' -or
+          $path -match '^bin/.*\.ps1$' -or
+          $path -match '^tests/.*\.ps1$' -or
+          $path -match '^tools/.*\.ps1$' -or
+          $path -match '^config/' -or
+          $path -match '^tools/lib/' -or
+          $path -match '^tools/ci/' -or
+          $path -match '^\.github/workflows/' -or
+          $path -match '^tests/fixtures/' -or
+          $path -eq 'tests/test-all.ps1' -or
+          $path -eq 'tests/test-all.sh' -or
+          $path -eq 'config/ci-suite-manifest.json') {
+        $needsPowerShell = $true
+        break
+      }
+      if ($path -notmatch '^(bin/[^/]+(\.cmd)?|tests/test-[^/]+\.sh|skills/|\.github/workflows/)') {
+        $needsPowerShell = $true
+        break
+      }
+    }
+    if (-not $needsPowerShell) {
+      Write-Host "test-all.ps1: no PowerShell-capable path changed since $ChangedSince; skipping PowerShell suites."
+      $tests = @()
     }
   }
 }

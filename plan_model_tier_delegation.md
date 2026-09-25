@@ -8,14 +8,14 @@ Registered handoff: [`HANDOFF.d/2026-09-24T1605Z-edge-dev-zcode-model-tier-deleg
 | # | Step | Status | Evidence |
 |---|------|--------|----------|
 | 0 | Plan written, registered in `HANDOFF.d/`, parent issue opened | ✅ done 2026-09-24 | This file merged on `main` (see git log for `plan_model_tier_delegation.md`); [issue #782](https://github.com/popcre/ai-devops/issues/782) first comment links it |
-| 1 | Verify the three lower-tier dispatch paths (read-only) | ⬜ open | — |
+| 1 | Verify the three lower-tier dispatch paths (read-only) | ✅ done 2026-09-25 | Codex: `codex exec -m <MODEL>` supported (0.153.2 help quoted; Luna slug + plan exposure unverified — bounded live probe at first dispatch). ZCode: no headless model selector; manual path + gap [#828](https://github.com/popcre/ai-devops/issues/828). MiMo: CLI absent, `mimo run` flags unqualified (D10); manual path + gap [#829](https://github.com/popcre/ai-devops/issues/829). [Step 1 comment on #782](https://github.com/popcre/ai-devops/issues/782#issuecomment-5827260474) |
 | 2 | Write `templates/system/model-tier-delegation.md` | ⬜ open | — |
 | 3 | Add the identical routing block to the three client globals | ⬜ open | — |
 | 4 | Point `CHATGPT-codex-cost-efficient.md` and `implementation-plan-standard.md` at the sheet | ⬜ open | — |
 | 5 | Re-adopt globals on edge-dev and grep-verify installed copies | ⬜ open | — |
 | 6 | Land the PR, add the router row, update issue #782 and this STATUS | ⬜ open | — |
 
-**A fresh session starts at: Step 1.** Work through the steps in order; after each
+**A fresh session starts at: Step 2.** Work through the steps in order; after each
 step, set its STATUS row to done with real evidence, commit, and comment the next
 step on issue #782. Re-read this plan before starting each step (drift check).
 

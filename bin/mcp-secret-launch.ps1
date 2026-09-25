@@ -81,7 +81,7 @@ Import-Cache
 # was restarted. Observed mid-session 2026-07-26.
 #
 # Inject it explicitly, and ONLY for that MCP: handing the vault's service-account token
-# to every MCP child (supabase, trigger, recall-ai, nas, ...) would widen its blast radius
+# to every MCP child (supabase, trigger, nas, ...) would widen its blast radius
 # for no reason.
 if (($CommandArgs -join ' ') -match '1password-mcp') {
   if (-not (Test-Path -LiteralPath $tokenFile)) { throw "Missing 1Password token file: $tokenFile" }

@@ -174,6 +174,14 @@ install_config() {
 install_configs() {
   install_config "$REPO_ROOT/config/models.env.example" "$ETC_DIR/models.env" || return 1
   install_config "$REPO_ROOT/config/server.env.example" "$ETC_DIR/server.env" || return 1
+  # The example names the server layout (/worksp/ai-devops). A machine with the
+  # checkout elsewhere (e.g. ~/repos on a desktop) records where it really is.
+  local home
+  home="$(. "$ETC_DIR/server.env" 2>/dev/null; echo "${AI_DEVOPS_HOME:-}")"
+  if [ ! -d "$home" ] && [ "$home" != "$REPO_ROOT" ]; then
+    info "AI_DEVOPS_HOME $home does not exist; recording $REPO_ROOT"
+    $SUDO sed -i "s#^AI_DEVOPS_HOME=.*#AI_DEVOPS_HOME=\"$REPO_ROOT\"#" "$ETC_DIR/server.env" || return 1
+  fi
 }
 run_stage required "Configuration seed" install_configs
 migrate_configuration() {
@@ -266,6 +274,9 @@ else
   stage_results+=("SKIP\toptional\tSecrets wiring (no interactive input or protected token)")
   info "Secrets wiring skipped: no interactive input or protected token"
 fi
+# Desktop GUI apps (Claude Desktop, ChatGPT/Codex). Skips any app not installed
+# and does nothing without the catalog the secrets stage writes.
+run_stage optional "Desktop app MCP wiring" "$REPO_ROOT/bin/setup-desktop-apps.sh"
 
 # --------------------------------------------------------------------------
 # 4c. Memory auto-sync (keep Claude memories in sync across machines)
