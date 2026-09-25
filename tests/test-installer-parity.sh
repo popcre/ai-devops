@@ -55,7 +55,7 @@ git -C "$fixture" push -q -u origin main
 remote_url="$(git -C "$fixture" remote get-url origin)"
 
 echo "1/2 fresh install: Bash and PowerShell agree file for file"
-mkdir -p "$TMP_ROOT/bash/codex" "$TMP_ROOT/ps/codex"
+mkdir -p "$TMP_ROOT/bash/codex" "$TMP_ROOT/ps/codex" "$TMP_ROOT/ps/mimo" "$TMP_ROOT/bash/mimo"
 # The fixture repo holds skills and templates only, not bin/ai-git-identity, so
 # the installer's machine-tools gate must be skipped here — exactly as
 # tests/test-ai-install-skills.sh does. Without it the installer correctly exits
@@ -69,6 +69,7 @@ pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/ps/claude" 2>/dev/null || echo "$TMP_ROOT/ps/claude")" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/ps/codex" 2>/dev/null || echo "$TMP_ROOT/ps/codex")" \
   -ZCodeHome "$(cygpath -w "$TMP_ROOT/ps/zcode" 2>/dev/null || echo "$TMP_ROOT/ps/zcode")" \
+  -MimoHome "$(cygpath -w "$TMP_ROOT/ps/mimo" 2>/dev/null || echo "$TMP_ROOT/ps/mimo")" \
   -SkipGitInstall >/dev/null 2>&1
 
 listing() { (cd "$1" && find skills -type f | LC_ALL=C sort); }
@@ -106,6 +107,7 @@ out="$(GH_CONFIG_DIR="$gh_config_native" GH_TOKEN= GITHUB_TOKEN= \
   -ClaudeHome "$(cygpath -w "$TMP_ROOT/bash/claude" 2>/dev/null || echo "$TMP_ROOT/bash/claude")" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \
   -ZCodeHome "$(cygpath -w "$TMP_ROOT/bash/zcode" 2>/dev/null || echo "$TMP_ROOT/bash/zcode")" \
+  -MimoHome "$(cygpath -w "$TMP_ROOT/bash/mimo" 2>/dev/null || echo "$TMP_ROOT/bash/mimo")" \
   -SkipGitInstall 2>&1)"
 cross_rc=$?
 set -e
