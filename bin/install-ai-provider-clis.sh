@@ -232,6 +232,43 @@ upgrade_to_exact_version() { # upgrade_to_exact_version NAME BINARY WANT
   echo "OK   $name is now exactly $want (previous binary kept at $backup)"
 }
 
+# ---------------------------------------------------------------------------
+# Model lock (Grok). Owner ruling 2026-09-25: Grok 4.6 only, never 4.7. xAI's
+# remote settings push a newer default that beats config.toml and
+# GROK_DEFAULT_MODEL, so the pin goes into Grok's admin layer,
+# ~/.grok/requirements.toml, and allowed_models in config.toml refuses any
+# other model. Order matters: allowed_models without the requirements pin
+# refuses every session, even `--model <pin>`.
+# ---------------------------------------------------------------------------
+set_toml_key() { # set_toml_key FILE SECTION KEY VALUE  (VALUE is raw TOML)
+  local file="$1" tmp
+  mkdir -p "$(dirname "$file")"
+  [ -e "$file" ] || : >"$file"
+  tmp="$(mktemp "$file.ai-devops.XXXXXX")" || return 1
+  if ! awk -v sec="[$2]" -v key="$3" -v val="$4" '
+    function emit() { print key " = " val; done = 1 }
+    /^[[:space:]]*\[/ { h = $0; gsub(/[[:space:]]/, "", h)
+      if (insec && !done) emit()
+      insec = (h == sec); seen = seen || insec; print; next }
+    insec && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" { if (!done) emit(); next }
+    { print }
+    END { if (insec && !done) emit(); if (!seen) { print ""; print sec; emit() } }
+  ' "$file" >"$tmp"; then rm -f "$tmp"; return 1; fi
+  chmod --reference="$file" "$tmp" 2>/dev/null || true
+  mv "$tmp" "$file"
+}
+
+pin_grok_model() {
+  local model home="${GROK_HOME:-$HOME/.grok}"
+  model="$(bash "$VERSION_TOOL" model grok)" || return 1
+  [ -n "$model" ] || return 0
+  if ((DRY_RUN)); then echo "DRY-RUN would lock grok to $model"; return 0; fi
+  set_toml_key "$home/requirements.toml" models default "\"$model\"" \
+    && set_toml_key "$home/config.toml" models allowed_models "[\"$model*\"]" \
+    || { echo "ERROR grok: could not write the $model model lock under $home" >&2; return 1; }
+  echo "OK   grok locked to $model ($home/requirements.toml, allowed_models in config.toml)"
+}
+
 failed=0
 installed_any=0
 needs_path=()
@@ -261,6 +298,7 @@ for entry in "${PROVIDERS[@]}"; do
         echo "==> $name reports ${have:-unknown}; this repository qualifies exactly $want"
         if ! upgrade_to_exact_version "$name" "$existing" "$want"; then failed=1; continue; fi
         link_into_local_bin "$cmd" "$existing"
+        pin_grok_model || failed=1
         continue
       fi
       echo "SKIP $name already installed at supported version $have (policy: $want, $(bash "$VERSION_TOOL" match "$name")) ($existing)"
@@ -270,6 +308,7 @@ for entry in "${PROVIDERS[@]}"; do
     # Still repair reachability: "installed but not on PATH" is the exact state
     # that makes the doctor report the provider unavailable.
     ((DRY_RUN)) || link_into_local_bin "$cmd" "$existing"
+    if [ "$name" = grok ]; then pin_grok_model || failed=1; fi
     if [ "$name" = qwen ] && ((DRY_RUN == 0)); then harden_qwen_child_env || failed=1; fi
     continue
   fi
@@ -310,6 +349,7 @@ for entry in "${PROVIDERS[@]}"; do
     echo "OK   $name installed ($resolved)"
     installed_any=1
     link_into_local_bin "$cmd" "$resolved"
+    if [ "$name" = grok ]; then pin_grok_model || failed=1; fi
     if [ "$name" = qwen ]; then harden_qwen_child_env || failed=1; fi
     command -v "$cmd" >/dev/null 2>&1 || needs_path+=("$LOCAL_BIN")
   else

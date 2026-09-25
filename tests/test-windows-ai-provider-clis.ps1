@@ -119,6 +119,32 @@ foreach ($v in @("$($major + 1).0.0", '0.0.1', '', 'garbage')) {
 }
 Assert (Test-ProviderVersionSatisfied -Provider kimi -Version '') 'an unpinned provider is always satisfied'
 
+# --- grok model lock (owner ruling 2026-09-25: 4.6 only) --------------------
+foreach ($fn in @('Set-TomlKey', 'Set-GrokModelLock')) {
+  $fnAst = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $fn }, $true)
+  Assert ($null -ne $fnAst) "could not load $fn"
+  Invoke-Expression ($fnAst.Extent.Text.Replace('$PSScriptRoot', "'$($root.Replace("'", "''"))\bin'"))
+}
+$model = $policy.providers.grok.model_pin
+Assert ([bool]$model) 'the policy must name a grok model_pin'
+Assert ($installerText -notmatch [regex]::Escape("`"$model`"")) 'the installer must read the model pin from the policy, not hard-code it'
+$lockHome = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-grok-lock-{0}" -f [Guid]::NewGuid().ToString('N'))
+[void](New-Item -ItemType Directory -Path $lockHome)
+try {
+  [IO.File]::WriteAllText((Join-Path $lockHome 'config.toml'), "[ui]`nyolo = false`n`n[models]`ndefault = `"grok-4.7`"`nallowed_models = [`"grok-4.7`"]`n")
+  Assert ((Set-GrokModelLock -GrokHome $lockHome) -eq $model) 'the lock must report the pinned model'
+  $cfg = [IO.File]::ReadAllLines((Join-Path $lockHome 'config.toml'))
+  $req = [IO.File]::ReadAllLines((Join-Path $lockHome 'requirements.toml'))
+  Assert ($req -contains "default = `"$model`"") 'requirements.toml must pin the model'
+  Assert ($cfg -contains "allowed_models = [`"$model*`"]") 'config.toml must allow only the pinned model'
+  Assert ($cfg -contains 'yolo = false') 'the lock must keep unrelated settings'
+  Assert (@($cfg | Where-Object { $_ -match '^allowed_models' }).Count -eq 1) 'allowed_models must not be duplicated'
+  $before = (Get-Content -Raw (Join-Path $lockHome 'config.toml')) + (Get-Content -Raw (Join-Path $lockHome 'requirements.toml'))
+  [void](Set-GrokModelLock -GrokHome $lockHome)
+  $after = (Get-Content -Raw (Join-Path $lockHome 'config.toml')) + (Get-Content -Raw (Join-Path $lockHome 'requirements.toml'))
+  Assert ($before -eq $after) 'the model lock must be idempotent'
+} finally { Remove-Item -Recurse -Force -LiteralPath $lockHome }
+
 Assert ($installerText -match 'Get-RequiredProviderVersion') 'installer must read the repository version policy'
 Assert ($installerText -match 'Update-ProviderToExactVersion') 'installer must have an exact-version upgrade path'
 Assert ($installerText -match "update --version") 'installer must use the documented exact-version install command'

@@ -7,6 +7,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="$repo/bin/install-ai-provider-clis.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+unset GROK_HOME  # the model lock honors GROK_HOME; never let a test reach a real one
 
 [[ -x "$script" ]] || { echo "FAIL: installer is not executable"; exit 1; }
 
@@ -106,6 +107,25 @@ grep -q 'SKIP grok already installed' "$tmp/link"
 [[ -x "$linkhome/.local/bin/grok" ]] || { echo "FAIL: did not link grok into ~/.local/bin"; exit 1; }
 grep -q "linked $linkhome/.local/bin/grok" "$tmp/link"
 
+# --- grok model lock (owner ruling 2026-09-25: 4.6 only) --------------------
+# The pin must land in Grok's admin layer and allowed_models must name only it,
+# while unrelated user settings survive and a rerun changes nothing.
+MODEL="$(bash "$repo/bin/ai-provider-version" model grok)"
+[[ -n "$MODEL" ]] || { echo "FAIL: the policy has no grok model_pin"; exit 1; }
+grep -q "OK   grok locked to $MODEL" "$tmp/link"
+grep -qx "default = \"$MODEL\"" "$linkhome/.grok/requirements.toml" || { echo "FAIL: requirements.toml lacks the model pin"; exit 1; }
+grep -qx "allowed_models = \[\"$MODEL\*\"\]" "$linkhome/.grok/config.toml" || { echo "FAIL: config.toml lacks allowed_models"; exit 1; }
+lockhome="$tmp/lock-home"; mkdir -p "$lockhome/.grok/bin"
+make_fake_grok "$lockhome/.grok/bin/grok" "$WANT"
+printf '[ui]\nyolo = false\n\n[models]\ndefault = "grok-4.7"\nallowed_models = ["grok-4.7"]\n' >"$lockhome/.grok/config.toml"
+env HOME="$lockhome" PATH="$minimal_path" bash "$script" grok >/dev/null 2>&1
+grep -qx 'yolo = false' "$lockhome/.grok/config.toml" || { echo "FAIL: model lock dropped an unrelated setting"; exit 1; }
+[[ "$(grep -c '^allowed_models' "$lockhome/.grok/config.toml")" == 1 ]] || { echo "FAIL: allowed_models duplicated"; exit 1; }
+grep -q 'grok-4.7' "$lockhome/.grok/config.toml" && grep -q 'allowed_models.*4.7' "$lockhome/.grok/config.toml" && { echo "FAIL: 4.7 still allowed"; exit 1; }
+cp "$lockhome/.grok/config.toml" "$tmp/lock-before"; cp "$lockhome/.grok/requirements.toml" "$tmp/req-before"
+env HOME="$lockhome" PATH="$minimal_path" bash "$script" grok >/dev/null 2>&1
+cmp -s "$tmp/lock-before" "$lockhome/.grok/config.toml" && cmp -s "$tmp/req-before" "$lockhome/.grok/requirements.toml" || { echo "FAIL: model lock is not idempotent"; exit 1; }
+
 # An unrelated real file in ~/.local/bin must never be clobbered.
 guard="$tmp/guard-home"; mkdir -p "$guard/.grok/bin" "$guard/.local/bin"
 make_fake_grok "$guard/.grok/bin/grok" "$WANT"
@@ -119,6 +139,7 @@ dry="$tmp/dry-home"; mkdir -p "$dry/.grok/bin"
 make_fake_grok "$dry/.grok/bin/grok" "$WANT"
 env HOME="$dry" PATH="$minimal_path" bash "$script" --dry-run grok >/dev/null 2>&1
 [[ -e "$dry/.local/bin/grok" ]] && { echo "FAIL: dry run created a link"; exit 1; }
+[[ -e "$dry/.grok/requirements.toml" ]] && { echo "FAIL: dry run wrote the model lock"; exit 1; }
 
 # --- exact version policy (issue #251) -------------------------------------
 # "A runnable grok" is not the contract. Both wrappers are qualified against one

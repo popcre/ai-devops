@@ -128,6 +128,53 @@ function Get-ReportedProviderVersion {
   return $null
 }
 
+function Set-TomlKey {
+  # Mirrors set_toml_key in bin/install-ai-provider-clis.sh: replace KEY inside
+  # [SECTION], add it to that section, or append the section. $Value is raw TOML.
+  param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Section,
+        [Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][string]$Value)
+  [void](New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path))
+  $lines = if (Test-Path -LiteralPath $Path) { @([IO.File]::ReadAllLines($Path)) } else { @() }
+  $out = [Collections.Generic.List[string]]::new()
+  $header = "[$Section]"; $inSection = $false; $seen = $false; $done = $false
+  $keyPattern = '^\s*' + [regex]::Escape($Key) + '\s*='
+  foreach ($line in $lines) {
+    if ($line -match '^\s*\[') {
+      if ($inSection -and -not $done) { $out.Add("$Key = $Value"); $done = $true }
+      $inSection = (($line -replace '\s', '') -eq $header); if ($inSection) { $seen = $true }
+      $out.Add($line); continue
+    }
+    if ($inSection -and $line -match $keyPattern) {
+      if (-not $done) { $out.Add("$Key = $Value"); $done = $true }
+      continue
+    }
+    $out.Add($line)
+  }
+  if ($inSection -and -not $done) { $out.Add("$Key = $Value"); $done = $true }
+  if (-not $seen) { $out.Add(''); $out.Add($header); $out.Add("$Key = $Value") }
+  $temp = "$Path.ai-devops.$PID.tmp"
+  try {
+    [IO.File]::WriteAllText($temp, (($out -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+    Move-Item -Force -LiteralPath $temp -Destination $Path
+  } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -Force -LiteralPath $temp } }
+}
+
+function Set-GrokModelLock {
+  # Owner ruling 2026-09-25: Grok 4.6 only, never 4.7. xAI's remote settings
+  # push a newer default that beats config.toml, so the pin goes into Grok's
+  # admin layer (requirements.toml) and allowed_models refuses anything else.
+  # Order matters: allowed_models without the pin refuses every session.
+  param([string]$GrokHome = $(if ($env:GROK_HOME) { $env:GROK_HOME } else { Join-Path $HOME '.grok' }))
+  $policyPath = if ($env:AI_PROVIDER_VERSIONS_FILE) { $env:AI_PROVIDER_VERSIONS_FILE }
+                else { Join-Path $PSScriptRoot '..\config\provider-cli-versions.json' }
+  $model = (Get-Content -Raw -LiteralPath $policyPath | ConvertFrom-Json).providers.grok.model_pin
+  if (-not $model) { return $null }
+  if ($model -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Malformed grok model_pin '$model' in $policyPath" }
+  Set-TomlKey -Path (Join-Path $GrokHome 'requirements.toml') -Section models -Key default -Value "`"$model`""
+  Set-TomlKey -Path (Join-Path $GrokHome 'config.toml') -Section models -Key allowed_models -Value "[`"$model*`"]"
+  return $model
+}
+
 function Update-ProviderToExactVersion {
   param([Parameter(Mandatory)]$Provider, [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Version)
@@ -370,6 +417,10 @@ foreach ($providerDefinition in $providerCatalog) {
         Write-Host "$($provider.Name) reports '$have'; this repository's policy requires $required."
         Update-ProviderToExactVersion -Provider $provider -Path $resolved -Version $required
       }
+    }
+    if ($provider.Command -eq 'grok') {
+      $lockedModel = Set-GrokModelLock
+      if ($lockedModel) { Write-Host "Grok locked to $lockedModel (requirements.toml, allowed_models in config.toml)." }
     }
     if ($provider.Command -eq 'qwen') {
       # Hardening patches the live bundle even when no install ran. Only when a
