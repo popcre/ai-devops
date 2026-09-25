@@ -382,8 +382,11 @@ propagate(){
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       repo="${line%%#*}"; n="${line##*#}"
-      local deps
-      if ! deps="$(gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
+      local deps=""
+      # The tick's open-issue snapshot already says which OPEN issues wait on
+      # this one; REST only when it has none (a miss is not "no dependents").
+      snapshot_all_indexed && deps="$(snapshot_dependents_of "$repo" "$n")"
+      if [ -z "$deps" ] && ! deps="$(gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
         note "could not read what $repo#$n was blocking"; ok=0; continue
       fi
       for dep in $deps; do
@@ -442,7 +445,10 @@ wake(){ # wake <wait file>
   title=""
   if [ -n "$ref" ]; then
     read -r r n <<<"$(parse_ref "$ref")"
-    if ! meta="$(gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
+    # Still OPEN in this tick's snapshot → no REST read. A miss (closed, a pull
+    # request, a repo outside the scan) always falls through to REST.
+    if meta="$(snapshot_open_hit "$ref")"; then :
+    elif ! meta="$(gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
       note "could not read $ref"; FAILED=1; return; fi
     IFS=$'\t' read -r state ispr title <<<"$meta"
     if [ "$state" = closed ]; then
@@ -590,10 +596,47 @@ open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|
     if [ "$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.hasNextPage')" = true ]; then
       cursor="$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.endCursor')"; continue
     fi
-    SNAPN[$repo]="$pages"; return 0
+    SNAPN[$repo]="$pages"; snapshot_index_build "$repo"; return 0
   done
   for ((i=1; i<=pages; i++)); do unset "SNAP[$repo|$i]"; done
   note "$pfx: ${SNAPERR[$repo]}"; return 1
+}
+# Snapshot index (P5 REST savings): the same pages, keyed for the tick's other
+# readers so propagate, wake and link stop asking GitHub what this tick already
+# read. SNAPIDX[repo#n] = "id<TAB>title" for every OPEN issue; SNAPDEP[repo#n]
+# lists the OPEN issues blocked by repo#n (" a#1 b#2 "), including links the
+# links scan created this tick. An
+# index is a cache of relationships, never authority for a mutation, and a
+# miss is never proof of closure: callers fall back to REST. SNAPREPO marks the
+# configured repos indexed this tick; dependents are trusted only when all are.
+declare -A SNAPIDX=() SNAPDEP=() SNAPREPO=()
+snapshot_index_set(){ # snapshot_index_set <blocked repo#n> <blocker repo#n>: record one edge
+  case "${SNAPDEP[$2]:- }" in *" $1 "*) ;; *) SNAPDEP[$2]="${SNAPDEP[$2]:- }$1 " ;; esac
+}
+snapshot_index_build(){ # snapshot_index_build <owner/repo>: index the pages open_snapshot just read
+  local repo="$1" pg kind a b c
+  for ((pg=1; pg<=SNAPN[$repo]; pg++)); do
+    while IFS=$'\t' read -r kind a b c; do
+      case "$kind" in
+        I) SNAPIDX["$a"]="$b"$'\t'"$c" ;;
+        B) snapshot_index_set "$a" "$b" ;;
+      esac
+    done < <(printf '%s' "${SNAP[$repo|$pg]}" | jq -r --arg r "$repo" '.data.repository.issues.nodes[] | ("\($r)#\(.number)") as $k |
+      (["I", $k, (.databaseId // "" | tostring), ((.title // "") | gsub("[\t\n\r]"; " "))] | @tsv),
+      ((.blockedBy.nodes // [])[] | ["B", $k, "\(.repository.nameWithOwner // $r)#\(.number)", ""] | @tsv)')
+  done
+  SNAPREPO[$repo]=1
+}
+snapshot_open_hit(){ # snapshot_open_hit <repo#n>: prints "open<TAB>false<TAB>title" when this tick saw it OPEN
+  local r="${1%#*}"
+  [ -n "${SNAPREPO[$r]+set}" ] && [ -n "${SNAPIDX[$1]+set}" ] || return 1
+  printf 'open\tfalse\t%s' "${SNAPIDX[$1]#*$'\t'}"
+}
+snapshot_dependents_of(){ # snapshot_dependents_of <repo> <n>: OPEN issues this tick saw blocked by repo#n
+  local d; for d in ${SNAPDEP[$1#$2]:-}; do printf '%s\n' "$d"; done
+}
+snapshot_all_indexed(){
+  local r; while read -r r; do [ -z "$r" ] || [ -n "${SNAPREPO[$r]+set}" ] || return 1; done < <(cfg '.repos[]'); return 0
 }
 snapshot_drop(){ local i; for ((i=1; i<=${SNAPN[$1]:-0}; i++)); do unset "SNAP[$1|$i]"; done; unset "SNAPN[$1]"; }
 snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a new same-repo link in the snapshot
@@ -925,7 +968,7 @@ maintain_links(){ # maintain_links <dry 0|1>
     fi
     if [ "$dry" = 1 ]; then note "links: would record $bref is blocked by $br#$dep (from its db-work-scope depends_on)"; continue; fi
     if gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
-      created=$((created+1)); snapshot_addlink "$br" "$bn" "$dep" || snapshot_drop "$br"; note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
+      created=$((created+1)); snapshot_index_set "$bref" "$br#$dep"; snapshot_addlink "$br" "$bn" "$dep" || snapshot_drop "$br"; note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
     else
       note "links: GitHub refused the link $bref blocked by $br#$dep"; lfail=1
     fi
@@ -972,6 +1015,13 @@ cmd_links(){
 cmd_tick(){
   [ "${1:-}" != --dry-run ] || DRY=1
   lock_take || return 0
+  # Scans that are due run first, so their open-issue snapshot also answers
+  # propagate and wake this tick instead of per-item REST reads.
+  local early=""
+  if { links_on && scan_due "$LAST_LINKS" "$(cfgd .links_interval_minutes 60)"; } ||
+     { alarm_on && scan_due "$LAST_ALARM" "$(cfgd .alarm_interval_minutes 60)"; }; then early=early; fi
+  maybe_links "$early"
+  maybe_alarm "$early"
   propagate
   local f
   for f in "$WAITS"/*.json; do
@@ -979,11 +1029,6 @@ cmd_tick(){
     [ "$(jq -r .state "$f")" = waiting ] || continue
     wake "$f"
   done
-  local early=""
-  if { links_on && scan_due "$LAST_LINKS" "$(cfgd .links_interval_minutes 60)"; } ||
-     { alarm_on && scan_due "$LAST_ALARM" "$(cfgd .alarm_interval_minutes 60)"; }; then early=early; fi
-  maybe_links "$early"
-  maybe_alarm "$early"
   [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
 }
 

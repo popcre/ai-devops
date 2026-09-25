@@ -31,6 +31,7 @@ case "$*" in
   "issue edit"*) [ -f "$F/nolabel" ] && exit 1; printf '%s\n' "$*" >> "$F/edited"; echo '{}'; exit 0 ;;
   "search issues"*) out "$(cat "$F/digest_search.json" 2>/dev/null || echo '[]')" ;;
   *graphql*states:OPEN*)
+    [ -f "$F/gql_errors" ] && { out '{"data":{"repository":null},"errors":[{"type":"RATE_LIMITED","message":"x"}]}'; exit 0; }
     # One open-issue query serves both scans: merge the links and parents
     # fixtures by issue number, as GitHub would answer the combined query, and
     # page it 100 at a time (the cursor is the next offset).
@@ -548,5 +549,48 @@ AI_BLOCKER_WATCH_CONFIG="$TMP/config-budget.json" BW alarm >"$TMP/budget.out" 2>
 check 'the budget stops reads when exhausted' "[ \"\$(grep -c -- '-F n=' '$FAKE/calls')\" = 1 ]"
 check 'a budget below the candidate count posts only what it read' "[ \"\$(grep -c 'ai-blocker-watch:unowned:' '$FAKE/comments' 2>/dev/null || echo 0)\" = 1 ]"
 check 'the rest of the candidates are noted, not silently dropped' "[ \"\$(grep -c 'node budget reached before' '$TMP/budget.err')\" = 2 ]"
+
+# P5 snapshot reuse: a tick whose scans are due reads the open-issue snapshot
+# first, then propagate and wake answer from it instead of per-item REST.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap"
+rm -f "$FAKE/gql_links.json" "$FAKE/comments" "$FAKE/resumed" "$FAKE/state5" "$FAKE/is_pr"
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:9,databaseId:909,title:"waits on 5",assignees:{totalCount:1},body:"",blockedBy:{nodes:[{number:5,state:"CLOSED",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:1}}]}},
+  {number:40,databaseId:4040,title:"still open blocker",assignees:{totalCount:1},body:"",blockedBy:{nodes:[]}}
+]}}}}' > "$FAKE/gql_parents.json"
+snapid="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=snap-1 BW wait o/r#40 --park 'snap open' --brief-file "$TMP/brief.md" 2>/dev/null)"
+missid="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=snap-2 BW wait o/r#5 --park 'snap miss' --brief-file "$TMP/brief.md" 2>/dev/null)"
+echo '{"items":[{"number":5,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+echo closed > "$FAKE/state5"; : > "$FAKE/calls"
+BW tick >/dev/null 2>&1 || true
+check 'propagate_snapshot_dependents_no_rest' "grep -q 'issue comment 9 -R o/r' '$FAKE/comments' && ! grep -q 'dependencies/blocking' '$FAKE/calls'"
+check 'wake_open_snapshot_hit_skips_rest_but_stays_waiting' "! grep -q 'repos/o/r/issues/40' '$FAKE/calls' && jq -e '.state==\"waiting\"' '$AI_BLOCKER_WATCH_HOME/waits/$snapid.json'"
+check 'wake_snapshot_miss_falls_back_to_rest' "grep -q 'repos/o/r/issues/5 ' '$FAKE/calls' && grep -q '|claude snap-2' '$FAKE/resumed'"
+check 'the open-issue snapshot is read once per repo per tick' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 1 ]"
+
+# The closed issue has no dependents in the index → REST is still asked.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap2"
+echo '{"items":[{"number":6,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+: > "$FAKE/calls"
+BW tick >/dev/null 2>&1 || true
+check 'propagate_snapshot_empty_falls_back_to_rest' "[ \"\$(grep -c 'issues/6/dependencies/blocking' '$FAKE/calls')\" = 1 ]"
+
+# GraphQL 200 with errors is not a snapshot: nothing is indexed, REST answers.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap3"
+touch "$FAKE/gql_errors"
+echo '{"items":[{"number":5,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+snapid3="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=snap-3 BW wait o/r#40 --park 'snap err' --brief-file "$TMP/brief.md" 2>/dev/null)"
+: > "$FAKE/calls"
+BW tick >/dev/null 2>&1 || true
+check 'snapshot_graphql_errors_are_not_success' "grep -q 'issues/5/dependencies/blocking' '$FAKE/calls' && grep -q 'repos/o/r/issues/40' '$FAKE/calls'"
+rm -f "$FAKE/gql_errors"
+
+# Two pages (150 open issues, all waiting on #5): every page is indexed, every
+# dependent is told, and no per-issue REST read is spent.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap4"
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[range(100;250) | {number:.,databaseId:.,title:"d",assignees:{totalCount:1},body:"",blockedBy:{nodes:[{number:5,state:"CLOSED",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:1}}]}}]}}}}' > "$FAKE/gql_parents.json"
+: > "$FAKE/calls"; rm -f "$FAKE/comments"
+BW tick >/dev/null 2>&1 || true
+check 'blocker_snapshot_pagination_indexes_every_page' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 2 ] && [ \"\$(grep -c 'ai-blocker-watch:o/r#5' '$FAKE/comments')\" = 150 ] && ! grep -q 'dependencies/blocking' '$FAKE/calls'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
