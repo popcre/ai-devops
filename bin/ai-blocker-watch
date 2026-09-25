@@ -146,8 +146,17 @@ gh_api(){ gh_call api "$@" | tr -d '\r'; }
 link(){ # link <blocked> <blocker> [blocker id, when already read]
   local br bn kr kn id="${3:-}"
   read -r br bn <<<"$(parse_ref "$1")"; read -r kr kn <<<"$(parse_ref "$2")"
-  [ -n "$id" ] || id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
+  # The open-issue snapshot already holds open issues' ids and blocked-by lists
+  # (#658 P5). A separate process (wait registration) loads the saved index.
+  [ "${#SNAPIDX[@]}" -gt 0 ] || snapshot_index_load || true
+  if [ -z "$id" ]; then
+    id="$(snapshot_id "$kr" "$kn")" ||
+      id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
+  fi
   note "linking $1 as blocked by $2 on GitHub"
+  if snapshot_has_link "$br" "$bn" "$kr" "$kn"; then
+    note "$1 is already blocked by $2"; return 0
+  fi
   if gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
     note "$1 is already blocked by $2"; return 0
   fi
@@ -355,6 +364,8 @@ propagate(){
   fi
   local start since repo n dep dr dn key
   start="$(now_iso)"
+  # Non-scan ticks still get the last scan's dependency edges (#658 P5).
+  [ "${#SNAPBB[@]}" -gt 0 ] || snapshot_index_load || true
   if [ -s "$SCAN" ]; then since="$(cat "$SCAN")"
   else since="$(date -u -d "-$(cfg .first_scan_lookback_minutes) minutes" +%Y-%m-%dT%H:%M:%SZ)"; fi
   # One search query per BATCH of repos, never one per repo: ai-gh already
@@ -383,8 +394,16 @@ propagate(){
       [ -n "$line" ] || continue
       repo="${line%%#*}"; n="${line##*#}"
       local deps
-      if ! deps="$(gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
-        note "could not read what $repo#$n was blocking"; ok=0; continue
+      # The open-issue snapshot already lists, for every OPEN issue, the
+      # blockers it is waiting on (#658 P5). Invert that instead of asking
+      # GitHub what this closed issue blocks. Fall back to the REST read only
+      # when the closed issue is absent from every snapshot blocked-by list
+      # (its dependents are unknown, or none are in the scanned repos).
+      deps="$(snapshot_dependents_of "$repo" "$n")"
+      if [ -z "$deps" ]; then
+        if ! deps="$(gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
+          note "could not read what $repo#$n was blocking"; ok=0; continue
+        fi
       fi
       for dep in $deps; do
         key="$repo#$n	$dep"
@@ -442,9 +461,17 @@ wake(){ # wake <wait file>
   title=""
   if [ -n "$ref" ]; then
     read -r r n <<<"$(parse_ref "$ref")"
-    if ! meta="$(gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
-      note "could not read $ref"; FAILED=1; return; fi
-    IFS=$'\t' read -r state ispr title <<<"$meta"
+    # Same-tick open-issue snapshot: if the blocker is still OPEN there, skip
+    # the REST re-read (it is an Issue, not a pull request, and has its title).
+    # A snapshot miss is not proof of closure — fall through to REST, which
+    # also covers pull requests and repos outside the configured scan set.
+    if [ -n "${SNAPN[$r]:-}" ] && meta="$(snapshot_open_hit "$r" "$n")"; then
+      IFS=$'\t' read -r state ispr title <<<"$meta"
+    elif ! meta="$(gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
+      note "could not read $ref"; FAILED=1; return
+    else
+      IFS=$'\t' read -r state ispr title <<<"$meta"
+    fi
     if [ "$state" = closed ]; then
       released=blocker
       why="the blocker you registered a wait on, $ref (\"$title\"), is now closed."
@@ -590,27 +617,143 @@ open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|
     if [ "$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.hasNextPage')" = true ]; then
       cursor="$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.endCursor')"; continue
     fi
-    SNAPN[$repo]="$pages"; return 0
+    SNAPN[$repo]="$pages"
+    snapshot_index_build "$repo"
+    return 0
   done
   for ((i=1; i<=pages; i++)); do unset "SNAP[$repo|$i]"; done
   note "$pfx: ${SNAPERR[$repo]}"; return 1
 }
 snapshot_drop(){ local i; for ((i=1; i<=${SNAPN[$1]:-0}; i++)); do unset "SNAP[$1|$i]"; done; unset "SNAPN[$1]"; }
 snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a new same-repo link in the snapshot
-  local repo="$1" i node="" pg
+  local repo="$1" rec ac title node
   [ -n "${SNAPN[$repo]+set}" ] || return 0
-  for ((i=1; i<=SNAPN[$repo]; i++)); do
-    node="$(printf '%s' "${SNAP[$repo|$i]}" | jq -c --argjson k "$3" --arg r "$repo" 'first(.data.repository.issues.nodes[] | select(.number==$k) | {number, state:"OPEN", title, repository:{nameWithOwner:$r}, assignees}) // empty')" || return 1
-    [ -z "$node" ] || break
+  rec="${SNAPIDX[$repo#$3]:-}"
+  [ -n "$rec" ] || return 0 # the blocker is not open, so no scan here reads it
+  ac="${rec#*|}"; ac="${ac%%|*}"; title="${rec#*|*|}"
+  node="$(printf '{"number":%s,"state":"OPEN","title":%s,"repository":{"nameWithOwner":%s},"assignees":{"totalCount":%s}}' \
+    "$3" "$(printf '%s' "$title" | jq -Rs .)" "$(printf '%s' "$repo" | jq -Rs .)" "${ac:-0}")"
+  local existing="${SNAPBB[$repo#$2]:-}"
+  snapshot_index_set "$repo" "$2" "${SNAPIDX[$repo#$2]:-}" "${existing:+$existing }$repo#$3"
+  # Keep new edges out of the large SNAP pages (rewriting them per link is
+  # quadratic on Windows); the alarm merges SNAPNEWBB once per scan.
+  if [ -z "${SNAPNEWBB[$repo#$2]:-}" ]; then
+    SNAPNEWBB["$repo#$2"]="[$node]"
+  else
+    SNAPNEWBB["$repo#$2"]="${SNAPNEWBB[$repo#$2]%]},$node]"
+  fi
+}
+
+# --- compact index of the open-issue snapshot (#658 P5 REST savings) ------
+# SNAP pages hold every OPEN issue (id, title, body, blockedBy). Wake checks,
+# digest lookup, parked-work propagation and link() previously re-read that
+# same data over REST. SNAPIDX/SNAPBB are the lookup form; they are saved after
+# a scan so a later process (link at wait registration) can use them too.
+# Presence in SNAPIDX means the issue was OPEN when the snapshot was built.
+declare -A SNAPIDX=() SNAPBB=() SNAPNEWBB=()   # "repo#n" -> "id|title" | "blocker refs" | new blockedBy JSON nodes
+SNAP_INDEX="$HOME_DIR/snap-index.json"
+snapshot_index_set(){ # snapshot_index_set <repo> <n> <id|title> <blocker refs>
+  SNAPIDX["$1#$2"]="$3"
+  SNAPBB["$1#$2"]="$4"
+}
+snapshot_index_build(){ # rebuild SNAPIDX/SNAPBB from the in-memory SNAP pages
+  local repo="${1:-}" pg
+  if [ -n "$repo" ]; then
+    # incremental: only this repo's pages
+    for ((pg=1; pg<=${SNAPN[$repo]:-0}; pg++)); do
+      while IFS='|' read -r num did title ac bb; do
+        [ -n "$num" ] || continue
+        snapshot_index_set "$repo" "$num" "$did|$ac|$title" "$bb"
+      done < <(printf '%s' "${SNAP[$repo|$pg]}" | jq -r '
+        .data.repository.issues.nodes[]
+        | [(.number|tostring), (.databaseId|tostring), (.title // ""),
+           ((.assignees.totalCount // 0)|tostring),
+           ([.blockedBy.nodes[] | (.repository.nameWithOwner + "#" + (.number|tostring))] | join(" "))]
+        | join("|")')
+    done
+    return 0
+  fi
+  SNAPIDX=(); SNAPBB=()
+  for repo in "${!SNAPN[@]}"; do
+    snapshot_index_build "$repo"
   done
-  [ -n "$node" ] || return 0 # the blocker is not open, so no scan here reads it
-  local new
-  for ((pg=1; pg<=SNAPN[$repo]; pg++)); do # rewrite only the page holding the issue
-    printf '%s' "${SNAP[$repo|$pg]}" | jq -e --argjson n "$2" 'any(.data.repository.issues.nodes[]; .number==$n)' >/dev/null || continue
-    new="$(printf '%s' "${SNAP[$repo|$pg]}" | jq -c --argjson n "$2" --argjson b "$node" '(.data.repository.issues.nodes[] | select(.number==$n) | .blockedBy.nodes) += [$b]')" || return 1
-    SNAP["$repo|$pg"]="$new"
-    break
+}
+snapshot_index_save(){
+  local tsv json k
+  [ "${#SNAPIDX[@]}" -gt 0 ] || return 0
+  tsv="$(mktemp "$HOME_DIR/snap-index.XXXXXX")" || return 0
+  json="$tsv.json"
+  {
+    for k in "${!SNAPIDX[@]}"; do
+      printf 'I|%s|%s\n' "$k" "${SNAPIDX[$k]}"
+    done
+    for k in "${!SNAPBB[@]}"; do
+      printf 'B|%s|%s\n' "$k" "${SNAPBB[$k]}"
+    done
+  } > "$tsv"
+  jq -n --arg t "$(now_iso)" --rawfile tsv "$tsv" '
+    ($tsv | split("\n") | map(select(length>0) | split("|"))
+      | map(select(.[0]=="I") | {key:.[1], value:{id:.[2], assignees:.[3], title:.[4]}})
+      | from_entries) as $issues
+    | ($tsv | split("\n") | map(select(length>0) | split("|"))
+      | map(select(.[0]=="B") | {key:.[1], value:((.[2] // "") | split(" ") | map(select(length>0)))})
+      | from_entries) as $bb
+    | {built_at:$t, issues:$issues, blocked_by:$bb}
+  ' > "$json" && mv "$json" "$SNAP_INDEX"
+  rm -f "$tsv"
+}
+snapshot_index_load(){ # load a saved index; age must stay inside one scan interval
+  local file="${1:-$SNAP_INDEX}" built age limit
+  [ -f "$file" ] || return 1
+  built="$(jq -r '.built_at // ""' "$file" 2>/dev/null)" || return 1
+  [ -n "$built" ] || return 1
+  age=$(( $(date -u +%s) - $(date -u -d "$built" +%s 2>/dev/null || printf 0) ))
+  limit=$(( $(cfgd .links_interval_minutes 60) * 60 ))
+  [ "$age" -ge 0 ] && [ "$age" -le "$limit" ] || return 1
+  SNAPIDX=(); SNAPBB=()
+  while IFS='|' read -r k id ac title; do
+    [ -n "$k" ] || continue
+    SNAPIDX["$k"]="$id|$ac|$title"
+  done < <(jq -r '.issues | to_entries[] | [.key, .value.id, ((.value.assignees // .value.ac // 0)|tostring), (.value.title // "")] | join("|")' "$file")
+  while IFS='|' read -r k v; do
+    [ -n "$k" ] || continue
+    SNAPBB["$k"]="$v"
+  done < <(jq -r '.blocked_by | to_entries[] | [.key, (.value | join(" "))] | join("|")' "$file")
+  return 0
+}
+snapshot_open_hit(){ # snapshot_open_hit <owner/repo> <n>: print "open\tfalse\t<title>" when the snapshot holds it open
+  local key="$1#$2" rec
+  rec="${SNAPIDX[$key]:-}"
+  [ -n "$rec" ] || return 1
+  printf 'open\tfalse\t%s\n' "${rec#*|*|}"
+}
+snapshot_id(){ # snapshot_id <owner/repo> <n>: databaseId when the snapshot holds it open
+  local rec="${SNAPIDX[$1#$2]:-}"
+  [ -n "$rec" ] || return 1
+  printf '%s' "${rec%%|*}"
+}
+snapshot_has_link(){ # snapshot_has_link <blocked repo> <blocked n> <blocker repo> <blocker n>
+  local bb="${SNAPBB[$1#$2]:-}" ref="$3#$4"
+  case " $bb " in *" $ref "*) return 0 ;; *) return 1 ;; esac
+}
+snapshot_dependents_of(){ # snapshot_dependents_of <owner/repo> <n>: open issues in the snapshot this blocker holds up
+  local want="$1#$2" k ref
+  for k in "${!SNAPBB[@]}"; do
+    for ref in ${SNAPBB[$k]:-}; do
+      [ "$ref" = "$want" ] && printf '%s\n' "$k"
+    done
   done
+}
+snapshot_title_number(){ # snapshot_title_number <owner/repo> <exact title>: issue number when the snapshot holds it open
+  local repo="$1" want="$2" k title
+  for k in "${!SNAPIDX[@]}"; do
+    case "$k" in "$repo#"*) ;; *) continue ;; esac
+    title="${SNAPIDX[$k]#*|*|}"
+    [ "$title" = "$want" ] || continue
+    printf '%s' "${k##*#}"
+    return 0
+  done
+  return 1
 }
 
 # --- alarm: unowned open blockers (#550) ------------------------------------
@@ -687,6 +830,18 @@ alarm_scan(){ # alarm_scan <dry 0|1>
       done < <(printf '%s' "$out" | jq -r --arg pr "$repo" '.data.repository.issues.nodes[] | .number as $p | .blockedBy.nodes[] | select(.state=="OPEN") | [$pr, ($p|tostring), .repository.nameWithOwner, (.number|tostring), (.assignees.totalCount|tostring), .title] | @tsv')
     done
   done
+  # Edges created this tick live in SNAPNEWBB, not in the SNAP pages.
+  local nkey
+  for key in "${!SNAPNEWBB[@]}"; do
+    pr="${key%#*}"; pn="${key#*#}"
+    while IFS=$'\t' read -r kr kn ac ti; do
+      [ -n "$kr" ] || continue
+      [ "$ac" -gt 0 ] && continue
+      nkey="$kr#$kn"
+      if [ -z "${seen[$nkey]+set}" ]; then seen[$nkey]=1; sttl[$nkey]="$ti"; fi
+      spar[$nkey]="${spar[$nkey]:-}$pr#$pn "
+    done < <(printf '%s' "${SNAPNEWBB[$key]}" | jq -r '.[] | [.repository.nameWithOwner, (.number|tostring), (.assignees.totalCount|tostring), .title] | @tsv')
+  done
   # Pass 2: per unassigned candidate, one cached query decides owner marker,
   # open linked pull request, prior alarm comment, and real last activity.
   for key in "${!seen[@]}"; do
@@ -757,7 +912,12 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
     if [ "$dry" = 1 ]; then
       note "would update the digest in $drepo: $title"
     else
-      if dnum="$(gh_call search issues "$title" --repo "$drepo" --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null)"; then
+      # Today's digest, once open, is just another open issue in the snapshot
+      # (#658 P5) — look there before spending a search request.
+      dnum="$(snapshot_title_number "$drepo" "$title")" || dnum=""
+      if [ -n "$dnum" ]; then
+        :
+      elif dnum="$(gh_call search issues "$title" --repo "$drepo" --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null)"; then
         dnum="$(printf '%s' "$dnum" | head -1)"
       else
         note "alarm: could not search $drepo for today's digest"; dnum=""; afail=1
@@ -777,6 +937,8 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
     fi
   fi
   if [ "$afail" = 0 ]; then
+    # Index save happens in maintain_links (same tick). Doing it here too
+    # interfered with the alarm-interval test's last-links clock on Windows.
     [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_ALARM"
   else FAILED=1; fi
 }
@@ -858,6 +1020,7 @@ parse_depends_on(){ # stdin: issue body -> dep numbers, one per line; rc 1 = mal
 
 maintain_links(){ # maintain_links <dry 0|1>
   local dry="$1" start repo out lfail=0
+  SNAPNEWBB=()
   # Link creation POSTs to GitHub, so posting is owned by the same single
   # machine as propagation and the alarm — without this gate N scheduled
   # machines race to create the same links. A dry run only reads, so it stays
@@ -883,17 +1046,21 @@ maintain_links(){ # maintain_links <dry 0|1>
     open_snapshot "$repo" links || { lfail=1; continue; }
     for ((pg=1; pg<=SNAPN[$repo]; pg++)); do
       out="${SNAP[$repo|$pg]}"
-      while IFS=$'\t' read -r num did b64 blocked; do
+      while IFS='|' read -r num did b64 blocked; do
         [ -n "$num" ] || continue
         [ "$did" = null ] || idmap["$repo#$num"]="$did"
+        # Empty body is not a malformed fence. An empty field still needs a
+        # non-whitespace separator (tab collapses in bash read), hence '|'.
+        if [ -z "$b64" ] || [ "$b64" = "=" ]; then deps=""; else
         deps="$(printf '%s' "$b64" | base64 -d 2>/dev/null | tr -d '\r' | parse_depends_on)" || { malformed=$((malformed+1)); note "links: $repo#$num has a malformed db-work-scope fence; skipped"; continue; }
+        fi
         for dep in $deps; do
           if [ "$dep" = "$num" ]; then note "links: $repo#$num depends_on names itself; skipped"; malformed=$((malformed+1)); continue; fi
           case " $blocked " in *" $dep "*) continue ;; esac # link present → nothing to do
           [ -z "${eseen[$repo#$num>$dep]+set}" ] || continue
           eseen["$repo#$num>$dep"]=1; edges+=("$repo#$num $dep")
         done
-      done < <(printf '%s' "$out" | jq -r '.data.repository.issues.nodes[] | [(.number|tostring), (.databaseId|tostring), ((.body // "") | @base64), ([.blockedBy.nodes[].number | tostring] | join(" "))] | @tsv')
+      done < <(printf '%s' "$out" | jq -r '.data.repository.issues.nodes[] | [(.number|tostring), (.databaseId|tostring), ((.body // "") | @base64), ([.blockedBy.nodes[].number | tostring] | join(" "))] | join("|")')
     done
   done
   # Pass 2: create each missing link. The blocker's id comes from the
@@ -920,7 +1087,10 @@ maintain_links(){ # maintain_links <dry 0|1>
   done
   [ "$malformed" -eq 0 ] || note "links: skipped $malformed malformed db-work-scope fence(s) this scan"
   [ "$unresolvable" -eq 0 ] || note "links: skipped $unresolvable unreadable depends_on target(s) this scan"
-  if [ "$lfail" = 0 ]; then [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_LINKS"; else FAILED=1; fi
+  if [ "$lfail" = 0 ]; then
+    snapshot_index_save
+    [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_LINKS"
+  else FAILED=1; fi
 }
 
 maybe_links(){
@@ -960,6 +1130,16 @@ cmd_links(){
 cmd_tick(){
   [ "${1:-}" != --dry-run ] || DRY=1
   lock_take || return 0
+  # When either hourly scan is due, run the scans first so the shared
+  # open-issue snapshot is in memory for this tick's wake checks, digest
+  # lookup and parked-work propagation (#658 P5). Wakes still run every tick;
+  # only their order moves on scan ticks, and a scan must stay inside the
+  # ten-minute detection ceiling.
+  local early=""
+  if { links_on && scan_due "$LAST_LINKS" "$(cfgd .links_interval_minutes 60)"; } ||
+     { alarm_on && scan_due "$LAST_ALARM" "$(cfgd .alarm_interval_minutes 60)"; }; then early=early; fi
+  maybe_links "$early"
+  maybe_alarm "$early"
   propagate
   local f
   for f in "$WAITS"/*.json; do
@@ -967,11 +1147,6 @@ cmd_tick(){
     [ "$(jq -r .state "$f")" = waiting ] || continue
     wake "$f"
   done
-  local early=""
-  if { links_on && scan_due "$LAST_LINKS" "$(cfgd .links_interval_minutes 60)"; } ||
-     { alarm_on && scan_due "$LAST_ALARM" "$(cfgd .alarm_interval_minutes 60)"; }; then early=early; fi
-  maybe_links "$early"
-  maybe_alarm "$early"
   [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
 }
 

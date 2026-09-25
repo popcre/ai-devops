@@ -510,6 +510,41 @@ lnodes "[$(lnode 24 224 "$(fence 5)" '[]')]"
 check 'a pull request named in depends_on is skipped without failing the scan' "BW tick 2>'$TMP/pr-links.err' && [ ! -f '$FAKE/links' ] && [ -f '$TMP/home/last-links' ] && grep -q 'is a pull request' '$TMP/pr-links.err'"
 rm -f "$FAKE/is_pr"
 
+# REST savings through the shared open-issue snapshot (#658 P5): wake checks,
+# digest lookup and parked-work propagation no longer re-read data the snapshot
+# already holds. Compare call counts against AI_BLOCKER_WATCH_OLD when set.
+rest_savings(){ # rest_savings <script>: one tick with snapshot-visible wake+digest+closed-blocker
+  rm -rf "$TMP/home" "$FAKE/links" "$FAKE/comments" "$FAKE/created" "$FAKE/edited" "$FAKE/closed.json" "$FAKE/blocking.json"
+  : > "$FAKE/calls"
+  mkdir -p "$TMP/home/waits" "$TMP/home/logs"
+  # Waiting on o/r#7, which the snapshot lists as OPEN.
+  jq -n '{id:"rs-1",blocker:"o/r#7",harness:"claude",session:"rs-1",state:"waiting",attempts:0,cwd:"'$TMP/work'",until:"",parked_issue:"",parked_url:"",main_checkout:""}' > "$TMP/home/waits/rs-1.json"
+  # Today's digest already open in the snapshot under drepo title.
+  day="$(date -u +%Y-%m-%d)"
+  # Snapshot: #20 blocked by CLOSED #5 (parked-work path), #7 open (wake), #31 digest.
+  lnodes "[{\"number\":20,\"databaseId\":220,\"title\":\"parked work\",\"assignees\":{\"totalCount\":0},\"body\":\"\",\"blockedBy\":{\"nodes\":[{\"number\":5,\"state\":\"CLOSED\",\"title\":\"gate bug\",\"repository\":{\"nameWithOwner\":\"o/r\"},\"assignees\":{\"totalCount\":0}}]}}, {\"number\":7,\"databaseId\":207,\"title\":\"gate bug\",\"assignees\":{\"totalCount\":0},\"body\":\"\",\"blockedBy\":{\"nodes\":[]}}, {\"number\":31,\"databaseId\":231,\"title\":\"ai-blocker-watch digest $day\",\"assignees\":{\"totalCount\":0},\"body\":\"\",\"blockedBy\":{\"nodes\":[]}}]"
+  # Closed issue #5 from search; dependents come from the snapshot, not dependencies/blocking.
+  echo '{"items":[{"number":5,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+  echo '[]' > "$FAKE/blocking.json"
+  date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home/last-alarm"
+  date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home/last-links"
+  echo '[{"number":31,"title":"ai-blocker-watch digest '"$day"'"}]' > "$FAKE/digest_search.json"
+  AI_BLOCKER_WATCH_CONFIG="$TMP/config-replay.json" "$1" tick > "$TMP/rest.out" 2>&1
+}
+if [ -n "$AI_BLOCKER_WATCH_OLD" ]; then
+  rest_savings "$SCRIPT"
+  new_calls="$(wc -l < "$FAKE/calls")"
+  new_rest="$(grep -cE 'repos/.*issues/|search/issues|dependencies/blocking' "$FAKE/calls" || true)"
+  cp "$FAKE/comments" "$TMP/new.rest.comments" 2>/dev/null || : > "$TMP/new.rest.comments"
+  rest_savings "$AI_BLOCKER_WATCH_OLD"
+  old_calls="$(wc -l < "$FAKE/calls")"
+  old_rest="$(grep -cE 'repos/.*issues/|search/issues|dependencies/blocking' "$FAKE/calls" || true)"
+  cp "$FAKE/comments" "$TMP/old.rest.comments" 2>/dev/null || : > "$TMP/old.rest.comments"
+  printf '  rest-savings calls: previous %s (%s REST), now %s (%s REST)\n' "$old_calls" "$old_rest" "$new_calls" "$new_rest"
+  check 'rest: fewer REST re-reads than the previous build' "[ \"$new_rest\" -lt \"$old_rest\" ]"
+  check 'rest: the parked-work comment still appears' "grep -q 'o/r#5' '$TMP/new.rest.comments'"
+fi
+
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"
 rmdir "$TMP/home/tick.lock"
