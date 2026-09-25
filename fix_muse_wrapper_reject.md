@@ -3,7 +3,7 @@
 **Repository:** `u2giants/ai-devops` (public)
 **Authored:** 2026-08-25 by Claude (Opus 5) on machine `edge-dev`
 **Base commit:** `5b562d19b0e0e9e3c81d5fc23f0e6dbcb43c1e6f` (`origin/main`)
-**Handoff:** [`HANDOFF.d/2026-08-25T1700Z-edge-dev-claude-muse-wrapper-reject.md`](HANDOFF.d/2026-08-25T1700Z-edge-dev-claude-muse-wrapper-reject.md)
+**Handoff:** retired 2026-09-25 (was `HANDOFF.d/2026-08-25T1700Z-edge-dev-claude-muse-wrapper-reject.md`)
 **Sibling plan:** [`plan_reviewer-cache-efficiency.md`](plan_reviewer-cache-efficiency.md) — independent; neither blocks the other.
 
 ---
