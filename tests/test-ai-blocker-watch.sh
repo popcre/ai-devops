@@ -513,4 +513,40 @@ rm -f "$FAKE/is_pr"
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"
 rmdir "$TMP/home/tick.lock"
+
+# Per-tick read cache and node budget (#809). issue_json runs under $(...), so
+# both must survive that subshell: a repeated read is served from the cache, and
+# a budget below the candidate count reads up to the budget and notes the rest.
+rm -f "$FAKE"/gql_issue_*.json "$FAKE/gql_links.json" "$FAKE/gql_parents.json" "$FAKE/comments" "$FAKE/created" "$FAKE/edited"
+rm -f "$TMP/home/last-alarm"
+mkissue 7 "gate bug" '[]' '[{"source":{"number":1,"state":"CLOSED"}}]' '[{"number":20,"state":"OPEN","repository":{"nameWithOwner":"o/r"}}]'
+mkissue 20 "" '[]' '[]' '[{"number":25,"state":"OPEN","repository":{"nameWithOwner":"o/r"}}]'
+mkissue 25 "" '[]' '[]' '[]'
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:40,blockedBy:{nodes:[{number:7,state:"OPEN",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}}
+]}}}}' > "$FAKE/gql_parents.json"
+: > "$FAKE/calls"
+BW alarm >/dev/null 2>&1 || true
+check 'a repeated issue read is served from the per-tick cache' "[ \"\$(grep -c -- '-F n=7$' '$FAKE/calls')\" = 1 ]"
+check 'the chain still reads each uncached issue once' "[ \"\$(grep -c -- '-F n=20$' '$FAKE/calls')\" = 1 ] && [ \"\$(grep -c -- '-F n=25$' '$FAKE/calls')\" = 1 ]"
+check 'the cache hit is what unblocks the depth walk' "grep -q 'chain 3 deep' '$TMP/home/digest-$(date -u +%Y-%m-%d).md'"
+
+# Three unowned candidates, budget 1: one read (and one owner request), the
+# other two are noted and never read.
+mkissue 8 "" '[]' '[]' '[]'
+mkissue 11 "" '[]' '[]' '[]'
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:41,blockedBy:{nodes:[{number:7,state:"OPEN",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}},
+  {number:42,blockedBy:{nodes:[{number:8,state:"OPEN",title:"b8",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}},
+  {number:43,blockedBy:{nodes:[{number:11,state:"OPEN",title:"b11",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}}
+]}}}}' > "$FAKE/gql_parents.json"
+# Rewrite #7/#8/#11 with no blocking children so depth_of spends no extra reads.
+mkissue 7 "gate bug" '[]' '[{"source":{"number":1,"state":"CLOSED"}}]' '[]'
+jq '.alarm_max_nodes = 1' "$TMP/config.json" > "$TMP/config-budget.json"
+: > "$FAKE/calls"; rm -f "$FAKE/comments" "$TMP/home/last-alarm"
+AI_BLOCKER_WATCH_CONFIG="$TMP/config-budget.json" BW alarm >"$TMP/budget.out" 2>"$TMP/budget.err" || true
+check 'the budget stops reads when exhausted' "[ \"\$(grep -c -- '-F n=' '$FAKE/calls')\" = 1 ]"
+check 'a budget below the candidate count posts only what it read' "[ \"\$(grep -c 'ai-blocker-watch:unowned:' '$FAKE/comments' 2>/dev/null || echo 0)\" = 1 ]"
+check 'the rest of the candidates are noted, not silently dropped' "[ \"\$(grep -c 'node budget reached before' '$TMP/budget.err')\" = 2 ]"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

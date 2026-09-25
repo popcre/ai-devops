@@ -624,15 +624,23 @@ snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a 
 cfgd(){ local v; v="$(cfg "$1")"; if [ "$v" != null ] && [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "$2"; fi; }
 alarm_on(){ [ "$(cfgd .alarm_enabled true)" = true ]; }
 ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){updatedAt createdAt body comments(last:30){nodes{body createdAt}} timelineItems(first:50,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{... on PullRequest{number state}}}}} blocking(first:50){nodes{number state repository{nameWithOwner}}}}}}'
-declare -A ACACHE; AGQL=0
+# Per-tick read cache and node budget live in files under ALARM_TICK: issue_json
+# is always called as j="$(issue_json ...)", so shell variables would die with
+# that subshell and the cache/budget would never take effect (#809).
+ALARM_TICK=""
 issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node budget, 2 failed
-  local repo="$1" n="$2" out key="$1#$2"
-  [ -n "${ACACHE[$key]:-}" ] && { printf '%s' "${ACACHE[$key]}"; return 0; }
-  [ "$AGQL" -lt "$(cfgd .alarm_max_nodes 40)" ] || return 1
-  AGQL=$((AGQL+1))
+  local repo="$1" n="$2" out key="$1#$2" spent budget cachef
+  # '@' cannot appear in a GitHub owner or repo name, so owner/repo cannot collide.
+  cachef="$ALARM_TICK/cache/${key//\//@}"
+  if [ -f "$cachef" ]; then cat "$cachef"; return 0; fi
+  budget="$(cfgd .alarm_max_nodes 40)"
+  spent="$(cat "$ALARM_TICK/agql" 2>/dev/null || printf 0)"
+  [ "$spent" -lt "$budget" ] || return 1
+  printf '%s' "$((spent+1))" > "$ALARM_TICK/agql"
   out="$(gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || return 2
   printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository.issue != null)' >/dev/null || return 2
-  ACACHE[$key]="$out"; printf '%s' "$out"
+  printf '%s' "$out" > "$cachef"
+  printf '%s' "$out"
 }
 depth_of(){ # depth_of <owner/repo> <n> <seen>: longest open chain this issue holds up; best effort
   local repo="$1" n="$2" seen="$3" j rc d best=0 kr kn st key
@@ -668,7 +676,9 @@ alarm_scan(){ # alarm_scan <dry 0|1>
     fi
   fi
   start="$(now_iso)"
-  ACACHE=(); AGQL=0
+  ALARM_TICK="$HOME_DIR/alarm-tick"
+  rm -rf "$ALARM_TICK"
+  (umask 077; mkdir -p "$ALARM_TICK/cache"; printf '0' > "$ALARM_TICK/agql")
   local -A seen=() sttl=() spar=() stall=() sage=() salarmed=() sdepth=() sact=()
   cutoff="$(date -u -d "-$(cfgd .alarm_stall_hours 24) hours" +%Y-%m-%dT%H:%M:%SZ)"
   # Pass 1: the shared open-issue snapshot gives every OPEN blocker of an
@@ -779,6 +789,8 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
   if [ "$afail" = 0 ]; then
     [ "$dry" = 1 ] || printf '%s' "$start" > "$LAST_ALARM"
   else FAILED=1; fi
+  # ISSUE_Q payloads include comment bodies; never leave them on disk past the scan.
+  rm -rf "$ALARM_TICK"
 }
 
 # scan_due <clock file> <interval minutes> [early]: the scan is due after its
