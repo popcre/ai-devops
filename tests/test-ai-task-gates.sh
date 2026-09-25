@@ -329,6 +329,22 @@ for action in deploy database infrastructure production; do
   check "private code review cannot authorize $action even with owner override" \
     "rc 3 '$TMP/private' check --before '$action' --owner-request 'review requested' --acknowledge 'in scope'"
 done
+# A declaration on the weaker tooling class must not open the route for a
+# sticky private-evidence change set: the opt-in is proven by the effective
+# class's own gates.
+printf 'id,name\n1,secret\n' > "$TMP/private/disney-dcpvault/rows.csv"
+cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-tooling":{"required":["synthetic-fixtures-only"]}}}
+EOF
+( cd "$TMP/private" && "$GATES" start --class private-tooling ) >/dev/null
+check 'a tooling-only declaration cannot open the route for licensed rows' \
+  "rc 3 '$TMP/private' check --before code-only-review"
+check 'and that stop still names the missing fixtures boundary' \
+  "out '$TMP/private' check --before code-only-review | grep -Fq 'synthetic-fixtures-only'"
+rm -f "$TMP/private/disney-dcpvault/rows.csv"
+cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]},"private-tooling":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]}}}
+EOF
 ( cd "$TMP/private" && "$GATES" start --class code ) >/dev/null
 check 'private code still requires honest protected-class declaration' \
   "rc 3 '$TMP/private' check --before review --acknowledge 'read only'"

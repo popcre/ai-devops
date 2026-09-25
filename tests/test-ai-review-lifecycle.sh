@@ -3,6 +3,7 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY3="$(command -v python3 || command -v python)"
 SCRIPT="$REPO_ROOT/bin/ai-review-lifecycle"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
@@ -315,7 +316,8 @@ done
 cp "$body" "$fixture_root/private-request.json"
 pwd -P > "$fixture_root/private-review-cwd"
 synthetic_head="$(git rev-parse HEAD)"
-python3 - "$out" "$synthetic_head" <<'PY'
+PY3="$(command -v python3 || command -v python)"
+"$PY3" - "$out" "$synthetic_head" <<'PY'
 import json, sys
 json.dump({"choices":[{"message":{"content":"The selected code change was reviewed against its attached packet.\nVERDICT: APPROVE " + sys.argv[2]}}],"usage":None}, open(sys.argv[1], "w", encoding="utf-8"))
 PY
