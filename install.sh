@@ -412,6 +412,19 @@ else
   run_stage optional "StepFun key store" stepfun_key_store
 fi
 
+# Muse Code on Linux: Meta's installer (run once by hand: see docs/muse-opencode.md)
+# puts versioned binaries in ~/.local/bin. This stage only verifies the pin.
+if [ "$(uname -s)" = Linux ] && [ "$(id -u)" -ne 0 ]; then
+  check_muse_code_linux() {
+    local pin="$REPO_ROOT/config/muse-code/linux-$(uname -m)" ver want bin
+    [ -f "$pin/version" ] || { echo "no Muse Code pin for $(uname -m)"; return 1; }
+    ver="$(tr -d ' \r\n' < "$pin/version")"; want="$(tr -d ' \r\n' < "$pin/sha256")"; bin="$HOME/.local/bin/muse-bin-$ver"
+    [ -f "$bin" ] || { echo "Muse Code $ver is not installed; see docs/muse-opencode.md (Linux)"; return 1; }
+    [ "$(sha256sum "$bin" | cut -d' ' -f1)" = "$want" ] || { echo "Muse Code $ver does not match the pinned SHA-256"; return 1; }
+  }
+  run_stage optional "Muse Code (Linux)" check_muse_code_linux
+fi
+
 # Reviewer provider CLIs (Grok Build, Kimi Code, Qwen Code, and StepCode on Linux). Per-user and
 # idempotent: current installs are skipped. Sign-in stays manual.
 if [ "$(id -u)" -eq 0 ]; then
