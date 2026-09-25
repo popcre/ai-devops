@@ -2,7 +2,7 @@
 # ai-review — the only supported approval-gate front door.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --owner-request "<why Albert asked for it>" [review options]' '       Providers: claude|codex (full mode wrappers) plus every reviewer registered in config/reviewer-registry.json (grok, muse, qwen, gemini; pool adapter, read-only session runners).' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --owner-request "<why Albert asked for it>" [review options]' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       ai-review doctor'; }
 # bin/* is symlinked onto PATH, so resolve the real script location before
 # looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
 REAL_DIR="$ROOT"
@@ -11,9 +11,13 @@ if command -v readlink >/dev/null 2>&1; then
   [ -z "$REAL_DIR_SOURCE" ] || REAL_DIR="$(cd "$(dirname "$REAL_DIR_SOURCE")" && pwd)"
 fi
 pool_provider=""
+review_provider="${1:-}"
 case "${1:-}" in
   claude) wrapper="${AI_CLAUDE_REVIEW_BIN:-$ROOT/ai-claude-review}" ;;
   codex) wrapper="${AI_CODEX_REVIEW_BIN:-$ROOT/ai-codex-review}" ;;
+  deepseek)
+    [ -z "${AI_DEEPSEEK_REVIEW_BIN:-}" ] || [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || { printf 'ai-review: private reviewer substitution is a test hook only.\n' >&2; exit 2; }
+    wrapper="${AI_DEEPSEEK_REVIEW_BIN:-$REAL_DIR/ai-deepseek-agent}" ;;
   doctor) "$ROOT/ai-claude-review" doctor; "$ROOT/ai-codex-review" doctor; exit 0 ;;
   -h|--help|help|'') usage; exit 0 ;;
   *)
@@ -44,7 +48,7 @@ case "${1:-}" in
 esac
 shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
-owner_request=""; wrapper_args=()
+owner_request=""; code_only=0; paths_file=""; review_base=""; review_head=""; tests_command=""; wrapper_args=()
 [ -n "$pool_provider" ] && wrapper_args+=("$pool_provider")
 wrapper_args+=("$mode")
 while [ "$#" -gt 0 ]; do
@@ -52,12 +56,47 @@ while [ "$#" -gt 0 ]; do
     --owner-request)
       [ "$#" -ge 2 ] && [ -n "$2" ] || { usage >&2; exit 2; }
       owner_request="$2"; shift 2 ;;
+    --code-only)
+      [ "$code_only" -eq 0 ] || { usage >&2; exit 2; }
+      code_only=1; shift ;;
+    --paths-file)
+      [ "$#" -ge 2 ] && [ -n "$2" ] && [ -z "$paths_file" ] || { usage >&2; exit 2; }
+      paths_file="$2"; shift 2 ;;
     --tests|--base|--assert-head)
       [ "$#" -ge 2 ] && [ -n "$2" ] || { usage >&2; exit 2; }
+      case "$1" in --tests) tests_command="$2" ;; --base) review_base="$2" ;; --assert-head) review_head="$2" ;; esac
       wrapper_args+=("$1" "$2"); shift 2 ;;
     *) usage >&2; exit 2 ;;
   esac
 done
+[ "$code_only" -eq 1 ] || { [ -z "$paths_file" ] || { usage >&2; exit 2; }; }
+if [ "$review_provider" = deepseek ] && [ "$code_only" -ne 1 ]; then
+  printf 'ai-review: DeepSeek uses the explicit code-only route; supply --code-only and --paths-file.\n' >&2
+  exit 2
+fi
+if [ "$code_only" -eq 1 ]; then
+  [ "$review_provider" = deepseek ] || { printf 'ai-review: code-only mode requires the attachment-only DeepSeek reviewer.\n' >&2; exit 2; }
+  jq -e '.providers.deepseek.registry_state == "registered"' "$REAL_DIR/../config/reviewer-registry.json" >/dev/null 2>&1 || { printf 'ai-review: DeepSeek is not currently registered for review.\n' >&2; exit 3; }
+  case "$mode" in diff-review|security-review|final-check) ;; *) usage >&2; exit 2 ;; esac
+  [ -n "$paths_file" ] && [ -f "$paths_file" ] && [ -z "$tests_command" ] || {
+    printf 'ai-review: code-only review requires an exact JSON paths file and does not accept a tests command.\n' >&2
+    exit 2
+  }
+  paths_file="$(cd "$(dirname "$paths_file")" && pwd -P)/$(basename "$paths_file")"
+fi
+SANDBOX="$REAL_DIR/ai-review-sandbox"
+source_root="$(git rev-parse --show-toplevel 2>/dev/null)" || { printf 'ai-review: cannot resolve the source repository.\n' >&2; exit 3; }
+if "$SANDBOX" is-private "$source_root" >/dev/null; then
+  private_source=1
+else
+  private_rc=$?
+  [ "$private_rc" -eq 1 ] || { printf 'ai-review: private-source classification failed; no reviewer was started.\n' >&2; exit 3; }
+  private_source=0
+fi
+if [ "$private_source" -eq 1 ] && [ "$code_only" -ne 1 ]; then
+  printf 'ai-review: private source requires the code-only attachment route; no reviewer was started.\n' >&2
+  exit 3
+fi
 # The approval gate is the front door, so the task gate belongs here: a review
 # the change set does not call for must not reach a provider wrapper at all.
 GATE_LIB=""
@@ -82,4 +121,35 @@ if [ "$mode" = plan-review ]; then exec "$wrapper" "${wrapper_args[@]}"; fi
 gate_args=()
 [ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
 tg_preflight_gate review "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }
+if [ "$code_only" -eq 1 ]; then
+  # The private source never becomes a provider working directory. The exporter
+  # admits only explicitly selected code and binds it to the full source state.
+  source_head="$(git -C "$source_root" rev-parse HEAD 2>/dev/null)" || { printf 'ai-review: cannot resolve the source HEAD.\n' >&2; exit 3; }
+  [ -z "$review_head" ] || [ "$review_head" = "$source_head" ] || { printf 'ai-review: original HEAD differs from --assert-head.\n' >&2; exit 3; }
+  tag="code-only-$(date +%s)-$$-$RANDOM"
+  export_args=(ensure-code-only "$source_root" "$tag" --paths-file "$paths_file")
+  [ -z "$review_base" ] || export_args+=(--base "$review_base")
+  snapshot="$("$SANDBOX" "${export_args[@]}")" || { printf 'ai-review: code-only export refused; no reviewer was started.\n' >&2; exit 3; }
+  "$SANDBOX" verify-code-only "$snapshot" --assert-head "$source_head" >/dev/null || { "$SANDBOX" remove-code-only "$snapshot" >/dev/null 2>&1 || true; printf 'ai-review: code-only source verification refused; no reviewer was started.\n' >&2; exit 3; }
+  synthetic_head="$(git -C "$snapshot" rev-parse HEAD 2>/dev/null)" || { "$SANDBOX" remove-code-only "$snapshot" >/dev/null 2>&1 || true; printf 'ai-review: code-only export has no HEAD.\n' >&2; exit 3; }
+  case "$mode" in
+    diff-review) code_prompt='Review the exact selected code change for correctness and regressions. Use only the attached synthetic packet. State concrete findings with file and line evidence.' ;;
+    security-review) code_prompt='Review the exact selected code change for security, data leakage, permissions, and trust-boundary defects. Use only the attached synthetic packet. State concrete findings with file and line evidence.' ;;
+    final-check) code_prompt='Perform a final correctness and security check of the exact selected code change. Use only the attached synthetic packet. State concrete findings with file and line evidence.' ;;
+  esac
+  code_prompt="$code_prompt Original source HEAD: $source_head. Synthetic review HEAD: $synthetic_head. Cite both identities in your findings."
+  result_file="$(mktemp)" || { printf 'ai-review: cannot reserve private review output.\n' >&2; exit 3; }
+  if ( cd "$snapshot" && "$wrapper" send "$code_prompt" --review --model deepseek-v4-pro --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file"; then provider_rc=0; else provider_rc=$?; fi
+  # DeepSeek retains its packet and transcript under this sanitized repository.
+  # Keep it after dispatch, including a failed or stale response, for recovery.
+  "$SANDBOX" verify-code-only "$snapshot" --assert-head "$source_head" >/dev/null || { rm -f "$result_file"; printf 'ai-review: source or export changed during code-only review; verdict refused. Retained evidence: %s\n' "$snapshot" >&2; exit 3; }
+  if [ "$provider_rc" -ne 0 ]; then
+    rm -f "$result_file"
+    printf 'ai-review: reviewer did not return an authorizing verdict. Retained evidence: %s\n' "$snapshot" >&2
+    exit "$provider_rc"
+  fi
+  cat "$result_file" || { rm -f "$result_file"; printf 'ai-review: could not publish verified review output.\n' >&2; exit 3; }
+  rm -f "$result_file"
+  exit 0
+fi
 exec "$wrapper" "${wrapper_args[@]}"

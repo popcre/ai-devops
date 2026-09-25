@@ -35,6 +35,8 @@
 #
 #   ai-review-sandbox ensure <repo-root> <tag>   # print the directory to review; create/refresh it
 #   ai-review-sandbox ensure-copy <repo-root> <tag> # always create a disposable snapshot
+#   ai-review-sandbox ensure-code-only <repo-root> <tag> --paths-file <JSON> [--base REF]
+#   ai-review-sandbox verify-code-only <snapshot> [--assert-head <original-SHA>]
 #   ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy> # refresh a recorded stable path
 #   ai-review-sandbox remove-recorded <tag> <managed-copy> # remove that exact recorded stable path
 #   ai-review-sandbox path   <repo-root> <tag>   # print it without creating anything
@@ -50,7 +52,8 @@
 
 set -euo pipefail
 
-VERSION="1.5.0"
+VERSION="1.6.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
@@ -198,6 +201,38 @@ source_digest() { # source_digest ROOT
   digest="$(sha256sum "$inventory" | cut -d' ' -f1)"
   rm -f "$inventory"
   printf '%s' "$digest"
+}
+
+# The complete tracked and untracked path inventory is classified before any
+# clone, copy, or packet builder can expose a licensed repository. An empty or
+# unclassifiable inventory fails closed; Git's quoted display names are never
+# parsed as paths.
+source_is_private() { # source_is_private ROOT; 0 private, 1 public, 2 unknown
+  local root="$1" paths decision python
+  python="$(command -v python3 || command -v python)" || return 2
+  paths="$(mktemp)" || return 2
+  if ! git -C "$root" ls-files -co --exclude-standard -z | "$python" -c '
+import sys
+names=[n.decode("utf-8", "surrogateescape") for n in sys.stdin.buffer.read().split(b"\0") if n]
+if any("\n" in n or "\r" in n for n in names): sys.exit(2)
+sys.stdout.write("\n".join(names+["bin/ai-review-sandbox"]) + "\n")
+' > "$paths"; then rm -f "$paths"; return 2; fi
+  decision="$(cd "$root" && ai-task-gates explain --json --paths-from "$paths" 2>/dev/null)" \
+    || { rm -f "$paths"; return 2; }
+  rm -f "$paths"
+  printf '%s' "$decision" | jq -e '.identity_resolved == true and .effective_class == "private-evidence"' >/dev/null 2>&1 && return 0
+  printf '%s' "$decision" | jq -e '.identity_resolved == true and (.effective_class|type=="string")' >/dev/null 2>&1 && return 1
+  return 2
+}
+
+require_public_source() { # ROOT
+  local rc=0
+  source_is_private "$1" || rc=$?
+  case "$rc" in
+    0) die "private source requires explicit ensure-code-only export; ordinary review snapshot refused." ;;
+    1) return 0 ;;
+    *) die "source privacy classification unavailable; review snapshot refused." ;;
+  esac
 }
 
 run_test_hook() { # deterministic hostile tests; never evaluates text from an environment variable
@@ -499,11 +534,92 @@ cmd_ensure() {
   root="$(canon "${1:?usage: ai-review-sandbox ensure <repo-root> <tag>}")"
   tag="${2:?usage: ai-review-sandbox ensure <repo-root> <tag>}"
   valid_tag "$tag" || die "invalid tag '$tag' (use letters, numbers, . _ -)"
+  if [ -f "$root/$MARKER" ] && grep -q '"mode": "code-only"' "$root/$MARKER"; then
+    [ "$force_copy" = 1 ] || { cmd_verify_code_only "$root"; printf '%s' "$root"; return 0; }
+    cmd_clone_code_only "$root" "$tag"
+    return 0
+  fi
+  require_public_source "$root"
   if [ "$force_copy" != 1 ] && ! is_worktree "$root"; then printf '%s' "$root"; return 0; fi
   mkdir -p "$SANDBOX_DIR"
   stage="$(sandbox_path "$root" "$tag")"
   create_or_refresh "$root" "$tag" "$stage"
   printf '%s' "$stage"
+}
+
+cmd_clone_code_only() {
+  local root="$1" tag="$2" stage build python
+  python="$(command -v python3 || command -v python)" || die "Python is required for code-only export."
+  "$python" "$SCRIPT_DIR/ai-review-code-only.py" verify "$root" >/dev/null \
+    || die "code-only source export is stale."
+  mkdir -p "$SANDBOX_DIR"
+  stage="$(sandbox_path "$root" "$tag")"
+  [ ! -e "$stage" ] || die "code-only snapshot tag already exists."
+  build="$stage.building.$$"
+  if ! "$python" "$SCRIPT_DIR/ai-review-code-only.py" clone "$root" "$build"; then
+    [ ! -e "$build" ] || rm -rf -- "$build"
+    rm -f -- "$build.source.json"
+    rm -f -- "$build.owners.json"
+    die "could not clone sanitized code-only export."
+  fi
+  mv "$build" "$stage" || die "could not publish sanitized code-only clone."
+  mv "$build.source.json" "$stage.source.json" || die "could not publish host-only source binding."
+  mv "$build.owners.json" "$stage.owners.json" || die "could not publish host-only evidence ownership."
+  cmd_verify_code_only "$stage"
+  printf '%s' "$stage"
+}
+
+cmd_ensure_code_only() {
+  local root tag stage paths python build base=""
+  root="$(canon "${1:?usage: ensure-code-only <repo> <tag> --paths-file <JSON>}")"
+  tag="${2:?usage: ensure-code-only <repo> <tag> --paths-file <JSON>}"
+  [ "${3:-}" = --paths-file ] && [ -f "${4:-}" ] \
+    || die "usage: ensure-code-only <repo> <tag> --paths-file <JSON> [--base REF]"
+  if [ "$#" -eq 6 ] && [ "$5" = --base ]; then base="$6"
+  elif [ "$#" -ne 4 ]; then die "usage: ensure-code-only <repo> <tag> --paths-file <JSON> [--base REF]"; fi
+  paths="$(canon "$(dirname "$4")")/$(basename "$4")"
+  valid_tag "$tag" || die "invalid tag '$tag'"
+  python="$(command -v python3 || command -v python)" || die "Python is required for code-only export."
+  mkdir -p "$SANDBOX_DIR"
+  stage="$(sandbox_path "$root" "$tag")"
+  [ ! -e "$stage" ] || die "code-only export tag already exists; use a fresh tag."
+  build="$stage.building.$$"
+  [ ! -e "$build" ] || die "partial code-only export already exists."
+  local create_args=(create "$root" "$build" "$paths")
+  [ -z "$base" ] || create_args+=(--base "$base")
+  if ! "$python" "$SCRIPT_DIR/ai-review-code-only.py" "${create_args[@]}"; then
+    [ ! -e "$build" ] || rm -rf -- "$build"
+    rm -f -- "$build.source.json"
+    rm -f -- "$build.owners.json"
+    die "code-only export failed; no reviewer directory was published."
+  fi
+  mv "$build" "$stage" || die "could not publish code-only export."
+  mv "$build.source.json" "$stage.source.json" || die "could not publish host-only source binding."
+  mv "$build.owners.json" "$stage.owners.json" || die "could not publish host-only evidence ownership."
+  "$python" "$SCRIPT_DIR/ai-review-code-only.py" verify "$stage" >/dev/null \
+    || die "published code-only export failed verification."
+  printf '%s' "$stage"
+}
+
+cmd_remove_code_only() {
+  local stage python sandbox_root
+  stage="$(canon "${1:?usage: remove-code-only <snapshot>}")"
+  [ "$#" -eq 1 ] || die "usage: remove-code-only <snapshot>"
+  sandbox_root="$(canon "$SANDBOX_DIR")"
+  case "$stage" in "$sandbox_root"/*) ;; *) die "code-only export is outside managed storage." ;; esac
+  python="$(command -v python3 || command -v python)" || die "Python is required for code-only removal."
+  "$python" "$SCRIPT_DIR/ai-review-code-only.py" verify "$stage" >/dev/null \
+    || die "code-only export could not be verified; retained for recovery."
+  remove_sandbox "$stage"
+  [ ! -e "$stage" ] || die "code-only snapshot retained after cleanup failure."
+  rm -f -- "$stage.source.json" "$stage.owners.json"
+}
+
+cmd_verify_code_only() {
+  local stage python
+  stage="$(canon "${1:?usage: verify-code-only <snapshot> [--assert-head SHA]}")"; shift
+  python="$(command -v python3 || command -v python)" || die "Python is required for code-only verification."
+  "$python" "$SCRIPT_DIR/ai-review-code-only.py" verify "$stage" "$@" >/dev/null
 }
 
 cmd_refresh_copy() { # refresh an exact, already-recorded directory for directory-bound reviewer sessions
@@ -512,6 +628,7 @@ cmd_refresh_copy() { # refresh an exact, already-recorded directory for director
   tag="${2:?usage: ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy>}"
   stage="${3:?usage: ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy>}"
   valid_tag "$tag" || die "invalid tag '$tag' (use letters, numbers, . _ -)"
+  require_public_source "$root"
   mkdir -p "$SANDBOX_DIR"; sandbox_root="$(canon "$SANDBOX_DIR")"; stage="$(canon "$stage")"
   case "$stage" in "$sandbox_root"/*) ;; *) die "refusing to refresh $stage: it is outside managed review storage." ;; esac
   is_managed "$stage" || die "refusing to refresh $stage: it is not a managed review snapshot."
@@ -549,12 +666,22 @@ cmd_remove() {
   tag="${2:?usage: ai-review-sandbox remove <repo-root> <tag>}"
   valid_tag "$tag" || die "invalid tag '$tag'"
   [ "$force_copy" = 1 ] || is_worktree "$root" || return 0
-  remove_sandbox "$(sandbox_path "$root" "$tag")"
+  local stage="$(sandbox_path "$root" "$tag")"
+  if [ -f "$stage/$MARKER" ] && grep -q '"mode": "code-only"' "$stage/$MARKER"; then
+    cmd_remove_code_only "$stage"
+  else
+    remove_sandbox "$stage"
+  fi
 }
 
 case "${1:-}" in
   ensure)      shift; cmd_ensure "$@" ;;
   ensure-copy) shift; cmd_ensure "${1:-}" "${2:-}" 1 ;;
+  ensure-code-only) shift; cmd_ensure_code_only "$@" ;;
+  verify-code-only) shift; cmd_verify_code_only "$@" ;;
+  remove-code-only) shift; cmd_remove_code_only "$@" ;;
+  assert-public) shift; require_public_source "$(canon "${1:?usage: assert-public <repo>}")" ;;
+  is-private) shift; source_is_private "$(canon "${1:?usage: is-private <repo>}")" ;;
   refresh-copy) shift; cmd_refresh_copy "$@" ;;
   remove-recorded) shift; cmd_remove_recorded "$@" ;;
   path)        shift; cmd_path "$@" ;;

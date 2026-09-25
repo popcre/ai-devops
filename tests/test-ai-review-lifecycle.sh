@@ -234,5 +234,104 @@ FRONT_OWNER="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=stan
 check "an owner request reaches the gate the lifecycle runs" \
   "[ '$OWNER_RC' -eq 0 ] && [ -f \"\$FRONT_OWNER\" ]"
 
+# The private review front door must hand a provider only the explicitly
+# approved code export, while binding the result to the whole original source.
+PRIVATE="$TMP/private-code"; mkdir -p "$PRIVATE/src" "$PRIVATE/evidence" "$PRIVATE/.ai-devops"
+git -C "$PRIVATE" init -q
+git -C "$PRIVATE" config user.name Test; git -C "$PRIVATE" config user.email t@example.com
+git -C "$PRIVATE" remote add origin https://github.com/u2giants/licensor-source-data.git
+printf 'print("base")\n' > "$PRIVATE/src/loader.py"
+printf 'raw-row-sentinel\n' > "$PRIVATE/evidence/raw.csv"
+printf '{"schema_version":1,"paths":[{"glob":"**","class":"private-evidence"}]}\n' > "$PRIVATE/.ai-devops/task-gates.json"
+git -C "$PRIVATE" add src/loader.py evidence/raw.csv .ai-devops/task-gates.json
+git -C "$PRIVATE" commit -qm 'history-raw-sentinel'
+printf 'print("changed")\n' > "$PRIVATE/src/loader.py"
+git -C "$PRIVATE" add src/loader.py; git -C "$PRIVATE" commit -qm code-change
+printf 'untracked-prompt-sentinel\n' > "$PRIVATE/prompt.txt"
+printf '["src/loader.py"]\n' > "$TMP/approved-paths.json"
+export AI_TASK_GATES_FILE="$REPO_ROOT/config/task-gates.json"
+export AI_TASK_GATES_DIR="$TMP/private-gates"
+( cd "$PRIVATE" && "$AI_TASK_GATES_BIN" start --class private-evidence ) >/dev/null
+PRIVATE_STUB="$TMP/private-review-stub"
+cat > "$PRIVATE_STUB" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$AI_TEST_PRIVATE_ARGS"
+git ls-files > "$AI_TEST_PRIVATE_TRACKED"
+if git log --all -p --format=%B | grep -Eq 'raw-row-sentinel|history-raw-sentinel|untracked-prompt-sentinel'; then
+  printf 'exposed\n' > "$AI_TEST_PRIVATE_EXPOSURE"
+fi
+if grep -Fq "$AI_TEST_PRIVATE_SOURCE" .ai-review-sandbox; then
+  printf 'source-path-exposed\n' > "$AI_TEST_PRIVATE_EXPOSURE"
+fi
+if [ "${AI_TEST_MUTATE_SOURCE:-0}" = 1 ]; then
+  printf 'drift\n' >> "$AI_TEST_PRIVATE_SOURCE/evidence/raw.csv"
+fi
+printf 'VERDICT: APPROVE %s\n' "$(git rev-parse HEAD)"
+EOF
+chmod +x "$PRIVATE_STUB"
+export AI_TEST_PRIVATE_ARGS="$TMP/private-review-args"
+export AI_TEST_PRIVATE_TRACKED="$TMP/private-review-tracked"
+export AI_TEST_PRIVATE_EXPOSURE="$TMP/private-review-exposure"
+export AI_TEST_PRIVATE_SOURCE="$PRIVATE"
+PRIVATE_HEAD="$(git -C "$PRIVATE" rev-parse HEAD)"
+PRIVATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; PRIVATE_RC=$?
+check "private code-only review reaches the provider through an exact export" "[ '$PRIVATE_RC' -eq 0 ] && grep -qx 'src/loader.py' '$AI_TEST_PRIVATE_TRACKED' && [ \"\$(wc -l < '$AI_TEST_PRIVATE_TRACKED')\" -eq 1 ]"
+check "private export hides raw rows, untracked prompts, Git history, and source path" "[ ! -e '$AI_TEST_PRIVATE_EXPOSURE' ]"
+check "private review compares synthetic base and exact synthetic head" "grep -qx -- '--base' '$AI_TEST_PRIVATE_ARGS' && grep -qx 'HEAD~1' '$AI_TEST_PRIVATE_ARGS' && grep -qx -- '--assert-head' '$AI_TEST_PRIVATE_ARGS'"
+MUTATE_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TEST_MUTATE_SOURCE=1 AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; MUTATE_RC=$?
+check "private review refuses a verdict when unselected source changes during provider work" "[ '$MUTATE_RC' -ne 0 ] && printf '%s' \"\$MUTATE_OUT\" | grep -q 'verdict refused'"
+check "a stale private result never prints an APPROVE token" "! printf '%s' \"\$MUTATE_OUT\" | grep -q 'VERDICT: APPROVE'"
+TESTS_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --tests 'cat evidence/raw.csv' 2>&1)"; TESTS_RC=$?
+check "private code-only route refuses arbitrary tests commands before provider" "[ '$TESTS_RC' -ne 0 ] && printf '%s' \"\$TESTS_OUT\" | grep -q 'does not accept a tests command'"
+CLI_OUT="$(cd "$PRIVATE" && AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --code-only --paths-file "$TMP/approved-paths.json" 2>&1)"; CLI_RC=$?
+check "private code-only route refuses tool-capable CLI reviewers before provider" "[ '$CLI_RC' -ne 0 ] && printf '%s' \"\$CLI_OUT\" | grep -q 'attachment-only DeepSeek'"
+rm -f "$AI_TEST_PRIVATE_ARGS"
+for provider_mode in 'claude diff-review' 'claude plan-review' 'codex diff-review' 'grok diff-review'; do
+  set -- $provider_mode
+  RAW_CLI_OUT="$(cd "$PRIVATE" && AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_CODEX_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" "$1" "$2" 2>&1)"; RAW_CLI_RC=$?
+  check "ordinary $provider_mode refuses private source before provider" "[ '$RAW_CLI_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ] && printf '%s' \"\$RAW_CLI_OUT\" | grep -q 'private source requires'"
+done
+printf '["evidence/raw.csv"]\n' > "$TMP/raw-paths.json"
+rm -f "$AI_TEST_PRIVATE_ARGS"
+RAW_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/raw-paths.json" 2>&1)"; RAW_RC=$?
+check "private code-only route refuses a raw-evidence selection before provider" "[ '$RAW_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ]"
+
+# Exercise the real attachment-only DeepSeek wrapper without a network call.
+# The mock transport captures the complete JSON body that would be transmitted.
+mkdir -p "$TMP/private-mock-bin" "$TMP/private-mock-home"
+cat > "$TMP/private-mock-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+out=""; body=""
+fixture_root="$(cd "$(dirname "$0")/.." && pwd -P)"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -d) body="${2#@}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cp "$body" "$fixture_root/private-request.json"
+pwd -P > "$fixture_root/private-review-cwd"
+synthetic_head="$(git rev-parse HEAD)"
+python3 - "$out" "$synthetic_head" <<'PY'
+import json, sys
+json.dump({"choices":[{"message":{"content":"The selected code change was reviewed against its attached packet.\nVERDICT: APPROVE " + sys.argv[2]}}],"usage":None}, open(sys.argv[1], "w", encoding="utf-8"))
+PY
+printf 200
+EOF
+chmod +x "$TMP/private-mock-bin/curl"
+DEEPSEEK_STUB_REQUEST="$TMP/private-request.json"; export DEEPSEEK_STUB_REQUEST
+DEEPSEEK_STUB_CWD="$TMP/private-review-cwd"; export DEEPSEEK_STUB_CWD
+NETWORK_OUT="$(cd "$PRIVATE" && HOME="$TMP/private-mock-home" PATH="$TMP/private-mock-bin:$PATH" DEEPSEEK_API_KEY=synthetic-test-key AI_REVIEW_EVENT_DIR="$TMP/private-review-events" AI_REVIEW_SANDBOX_DIR="$TMP/private-sandboxes" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; NETWORK_RC=$?
+[ "$NETWORK_RC" -eq 0 ] || printf 'private DeepSeek fixture: %s\n' "$(printf '%s' "$NETWORK_OUT" | grep -Ei 'error:|refused|failed|invalid|verdict|packet' | tail -8)" >&2
+check "real private DeepSeek route completes with no network" "[ '$NETWORK_RC' -eq 0 ] && [ -s '$DEEPSEEK_STUB_REQUEST' ] && [ -s '$DEEPSEEK_STUB_CWD' ]"
+check "outbound DeepSeek payload includes approved code only" "jq -e '.messages | map(.content) | join(\"\\n\") | contains(\"print(\\\"changed\\\")\") and (contains(\"raw-row-sentinel\")|not) and (contains(\"history-raw-sentinel\")|not) and (contains(\"untracked-prompt-sentinel\")|not)' '$DEEPSEEK_STUB_REQUEST' >/dev/null && ! grep -Fq '$PRIVATE' '$DEEPSEEK_STUB_REQUEST'"
+if [ -s "$DEEPSEEK_STUB_CWD" ]; then
+  NETWORK_SNAPSHOT="$(cat "$DEEPSEEK_STUB_CWD")"
+  NETWORK_SYNTHETIC_HEAD="$(git -C "$NETWORK_SNAPSHOT" rev-parse HEAD 2>/dev/null || true)"
+  NETWORK_META="$(find "$NETWORK_SNAPSHOT/.ai/deepseek-sessions" -maxdepth 1 -name '*.meta.json' -print -quit 2>/dev/null)"
+  check "retained DeepSeek verdict binds original and synthetic source identity" "[ -n '$NETWORK_META' ] && jq -e --arg original '$PRIVATE_HEAD' --arg export '$NETWORK_SYNTHETIC_HEAD' --slurpfile marker '$NETWORK_SNAPSHOT/.ai-review-sandbox' '.status==\"complete\" and .verdict==\"APPROVE\" and .governed_head==\$export and .source_identity.code_only==\$marker[0] and .source_identity.code_only.original_head==\$original and .source_identity.code_only.export_head==\$export and (.source_identity.code_only.source_digest|length)==64 and (.source_identity.code_only.path_manifest_sha256|length)==64' '$NETWORK_META' >/dev/null"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
