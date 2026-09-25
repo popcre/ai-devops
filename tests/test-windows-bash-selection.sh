@@ -174,10 +174,15 @@ for invalid_shard in '' 1 1/2/3 /2 1/ 0/2 3/2 1/0 1/7 999999999999999999999/2; d
   check "complete section refuses malformed or empty assignment: $invalid_shard" '[ "$invalid_complete_rc" -eq 2 ]'
 done
 run --shard 1/3 --only sec --list >/dev/null 2>&1; complete_only_rc=$?
-run --shard 1/3 --changed-since HEAD --list >/dev/null 2>&1; complete_changed_rc=$?
 run --shard 1/3 --shard 2/3 --list >/dev/null 2>&1; complete_duplicate_rc=$?
-check 'complete sectioning rejects filtered and duplicate selections' \
-  '[ "$complete_only_rc" -eq 2 ] && [ "$complete_changed_rc" -eq 2 ] && [ "$complete_duplicate_rc" -eq 2 ]'
+check 'complete sectioning rejects --only and duplicate --shard' \
+  '[ "$complete_only_rc" -eq 2 ] && [ "$complete_duplicate_rc" -eq 2 ]'
+# Issue #805: --changed-since composes with --shard so a section runs only
+# the affected suites that land in it. An empty section is justified, not an
+# error, when the filter is active.
+run --shard 1/3 --changed-since HEAD --list >/dev/null 2>&1; complete_changed_rc=$?
+check 'complete sectioning accepts an affected-suite filter' \
+  '[ "$complete_changed_rc" -eq 0 ]'
 check 'complete sections leave ordinary declared PR sections unchanged' \
   '[ "$(run --windows-offline --exclude-reviewer-safety --shard 1/2 --list | grep "^test-")" = test-sec-a.sh ]'
 
