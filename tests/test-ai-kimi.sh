@@ -23,6 +23,10 @@ check "worker launch failure records a terminal diagnostic" "grep -q 'terminal w
 check "every Kimi startup failure path records terminal evidence" "test \"\$(grep -c 'terminal worker-start-failed' '$SCRIPT')\" -eq 3"
 check "Kimi diagnostics measure elapsed time" "grep -q 'elapsed=.*ACTIVE_DIAG_STARTED_EPOCH' '$SCRIPT' && ! grep -q -- '--elapsed 0' '$SCRIPT'"
 check "Kimi delegates only pure adapter primitives to the shared helper" "grep -q 'provider-wrapper-common.sh' '$SCRIPT' && grep -q 'provider_wrapper_valid_name' '$SCRIPT' && grep -q 'provider_wrapper_sha256_file' '$SCRIPT'"
+# Issue #802: the explicit base hint must reach refresh-copy too, matching
+# the ensure-copy line in review_boundary. Without it a Kimi session created
+# with --base that later refreshes a recorded snapshot rebuilds it unhinted.
+check "review_boundary_refresh_forwards_base_hint" "grep -n 'refresh-copy' '$SCRIPT' | grep -q 'AI_REVIEW_SANDBOX_BASE' && sed -n '/review_boundary()/,/^}/p' '$SCRIPT' | grep -c 'AI_REVIEW_SANDBOX_BASE' | grep -qx 2"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"

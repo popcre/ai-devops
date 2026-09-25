@@ -36,10 +36,20 @@
 #   ai-review-sandbox ensure <repo-root> <tag>   # print the directory to review; create/refresh it
 #   ai-review-sandbox ensure-copy <repo-root> <tag> # always create a disposable snapshot
 #   ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy> # refresh a recorded stable path
+#   ai-review-sandbox with-copy <repo-root> <tag> -- <command>... # create, run command, delete before return
 #   ai-review-sandbox remove-recorded <tag> <managed-copy> # remove that exact recorded stable path
 #   ai-review-sandbox path   <repo-root> <tag>   # print it without creating anything
 #   ai-review-sandbox remove <repo-root> <tag>   # delete the snapshot, if any
 #   ai-review-sandbox is-worktree <dir>          # exit 0 when <dir> is a linked worktree
+#
+# SELF-CLEANUP (issue #711 Phase 2): the run that creates a snapshot deletes it
+# before returning. `with-copy` is the guaranteed form: it arms an EXIT/INT/TERM
+# trap that removes the snapshot on success, failure, and abort. One-shot
+# wrappers that call `ensure-copy` themselves must mirror that trap (see
+# bin/ai-claude-review). Session wrappers delete at session end.
+#
+# AI_KEEP_SANDBOX=1 skips every delete and prints the retained path on stderr —
+# debugging only. Never leave it set in production.
 #
 # In an ordinary clone every command is a no-op and `ensure`/`path` simply echo
 # <repo-root>, so callers can wire this in unconditionally.
@@ -50,7 +60,7 @@
 
 set -euo pipefail
 
-VERSION="1.5.0"
+VERSION="1.6.0"
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
@@ -118,11 +128,16 @@ remove_sandbox() {
   local d="$1"
   [ -e "$d" ] || return 0
   is_managed "$d" || die "refusing to delete $d: it is not a managed review snapshot."
+  if [ "${AI_KEEP_SANDBOX:-0}" = 1 ]; then
+    warn "AI_KEEP_SANDBOX=1: retaining $d"
+    return 0
+  fi
   local python event_tool
   python="$(command -v python3 || command -v python)" || die 'sandbox evidence verification requires Python'
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
   "$python" "$event_tool" verify-sandbox "$d" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
   rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
+  warn "deleted review snapshot $d"
 }
 
 remove_partial() { # remove_partial BUILD FINAL — only a uniquely named child beside FINAL
@@ -506,6 +521,54 @@ cmd_ensure() {
   printf '%s' "$stage"
 }
 
+# Phase 2 self-cleanup: the creating run deletes its snapshot before returning.
+# `with-copy` owns the full create → use → delete lifecycle in one process so an
+# EXIT/INT/TERM trap is guaranteed. The wrapped command sees the snapshot path
+# in AI_REVIEW_SNAPSHOT (and as the first argument after --, when one is given).
+WITH_COPY_SNAP="" WITH_COPY_ROOT="" WITH_COPY_TAG=""
+with_copy_cleanup() {
+  local rc=$?
+  trap - EXIT INT TERM
+  if [ -n "$WITH_COPY_SNAP" ]; then
+    # remove_sandbox is path-guarded and idempotent; never rm -rf a free path.
+    ( remove_sandbox "$WITH_COPY_SNAP" ) || true
+    WITH_COPY_SNAP=""
+  fi
+  return "$rc"
+}
+cmd_with_copy() { # with-copy ROOT TAG -- COMMAND [ARGS...]
+  local root tag stage cmd_rc=0
+  root="${1:?usage: ai-review-sandbox with-copy <repo-root> <tag> -- <command>...}"
+  tag="${2:?usage: ai-review-sandbox with-copy <repo-root> <tag> -- <command>...}"
+  shift 2
+  [ "${1:-}" = -- ] || die "usage: ai-review-sandbox with-copy <repo-root> <tag> -- <command>..."
+  shift
+  [ "$#" -ge 1 ] || die "usage: ai-review-sandbox with-copy <repo-root> <tag> -- <command>..."
+  # Arm the trap BEFORE create so a signal cannot land between publish and
+  # trap install. with_copy_cleanup no-ops while WITH_COPY_SNAP is empty.
+  trap with_copy_cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  stage="$(cmd_ensure "$root" "$tag" 1)" || die "could not create a disposable review snapshot for $root"
+  WITH_COPY_SNAP="$stage" WITH_COPY_ROOT="$root" WITH_COPY_TAG="$tag"
+  if [ "${AI_KEEP_SANDBOX:-0}" = 1 ]; then
+    warn "AI_KEEP_SANDBOX=1: snapshot kept at $stage"
+    export AI_REVIEW_SNAPSHOT="$stage"
+    "$@" || cmd_rc=$?
+    # Keep the snapshot; disarm trap so cleanup does not try to delete it.
+    trap - EXIT INT TERM
+    WITH_COPY_SNAP=""
+    return "$cmd_rc"
+  fi
+  export AI_REVIEW_SNAPSHOT="$stage"
+  "$@" || cmd_rc=$?
+  # Explicit success-path delete; the trap covers aborts and early exits.
+  ( remove_sandbox "$stage" ) || true
+  WITH_COPY_SNAP=""
+  trap - EXIT INT TERM
+  return "$cmd_rc"
+}
+
 cmd_refresh_copy() { # refresh an exact, already-recorded directory for directory-bound reviewer sessions
   local root tag stage sandbox_root
   root="$(canon "${1:?usage: ai-review-sandbox refresh-copy <repo-root> <tag> <managed-copy>}")"
@@ -556,6 +619,7 @@ case "${1:-}" in
   ensure)      shift; cmd_ensure "$@" ;;
   ensure-copy) shift; cmd_ensure "${1:-}" "${2:-}" 1 ;;
   refresh-copy) shift; cmd_refresh_copy "$@" ;;
+  with-copy)   shift; cmd_with_copy "$@" ;;
   remove-recorded) shift; cmd_remove_recorded "$@" ;;
   path)        shift; cmd_path "$@" ;;
   remove)      shift; cmd_remove "$@" ;;
@@ -563,5 +627,5 @@ case "${1:-}" in
   is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
   digest)      shift; source_digest "$(canon "${1:?usage: ai-review-sandbox digest <dir>}")" ;;
   --version)   printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
+  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
 esac
