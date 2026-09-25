@@ -143,6 +143,10 @@ rm -rf "$TMP/linkcap"; if ln -s data "$TMP/linkcap" 2>/dev/null && [ -L "$TMP/li
   printf '["src/tracked.txt"]\n' > "$TMP/rejected.json"
   must_fail "$SANDBOX" ensure-code-only "$R" rejected-linked-parent --paths-file "$TMP/rejected.json" --base "$BASE"
   pass 'a linked parent directory refuses before publication'
+  # The link replaced the fixture's src directory; restore it from the index
+  # so the later export and cleanup proofs keep a real code directory.
+  rm -f "$R/src"
+  git -C "$R" checkout -- src
 else
   echo 'SKIP: linked parent refused (filesystem symlinks unsupported)'
 fi
