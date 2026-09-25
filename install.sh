@@ -378,10 +378,21 @@ fi
 # process; it never appears in argv or in this installer's output.
 if [ "$(id -u)" -eq 0 ]; then
   stage_results+=("SKIP\toptional\tMuse key store (root install)")
-elif command -v op >/dev/null 2>&1; then
-  run_stage optional "Muse key store" env AI_MUSE_CALLER=installer "$REPO_ROOT/bin/ai-muse" store-key --if-missing
-else
+elif ! command -v op >/dev/null 2>&1; then
   stage_results+=("SKIP\toptional\tMuse key store (1Password CLI not on PATH)")
+elif [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] && [ ! -s "$HOME/.config/ai-devops/op-service-account" ]; then
+  stage_results+=("SKIP\toptional\tMuse key store (no 1Password service-account token yet)")
+else
+  # Hand op the protected service-account token and no terminal: without a
+  # token, an interactive op offers to add a personal 1Password account, which
+  # this setup never uses.
+  muse_key_store() {
+    local token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+    [ -n "$token" ] || token="$(cat "$HOME/.config/ai-devops/op-service-account")"
+    OP_SERVICE_ACCOUNT_TOKEN="$token" AI_MUSE_CALLER=installer \
+      "$REPO_ROOT/bin/ai-muse" store-key --if-missing </dev/null
+  }
+  run_stage optional "Muse key store" muse_key_store
 fi
 
 # --------------------------------------------------------------------------
