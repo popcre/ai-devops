@@ -65,7 +65,7 @@ chmod 700 "$RUN_TMP" 2>/dev/null || true
 # Management commands cannot fail to launch a review turn. Select their phase
 # before metadata lookup, locking or runtime validation can refuse the command.
 case "${1:-}" in
-  new|ask|review|doctor) MUSE_FAILURE_PHASE=startup ;;
+  new|ask|implement|review|doctor) MUSE_FAILURE_PHASE=startup ;;
   reconcile) MUSE_FAILURE_PHASE=retained-turn ;;
   *) MUSE_FAILURE_PHASE=management ;;
 esac
@@ -611,8 +611,13 @@ run_turn(){
     # The caller chooses the conversation identity, so a new turn is provable too.
     [ -n "$sid" ] || sid="$(new_session_uuid)" || die 'could not choose a Muse Code session identity.'
     local workspace="$dir"; if command -v cygpath >/dev/null 2>&1; then workspace="$(cygpath -w "$dir")"; fi
-    # Read-only review: no writes, no shell, no web, no personal context, no prompts.
-    args=(exec --json --model "$MODEL" --session-id "$sid" --workspace "$workspace" --disable-write --disable-shell --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve)
+    if [ "${MUSE_IMPLEMENT:-0}" = 1 ]; then
+      # Implementation: writes and a sandboxed shell inside a disposable worktree; no approval prompts, no web.
+      args=(exec --json --model "$MODEL" --session-id "$sid" --workspace "$workspace" --disable-approval --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve)
+    else
+      # Read-only review: no writes, no shell, no web, no personal context, no prompts.
+      args=(exec --json --model "$MODEL" --session-id "$sid" --workspace "$workspace" --disable-write --disable-shell --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve)
+    fi
     # The prompt travels in a private file, never as an argument the CLI could parse as options.
     chmod 600 "$prompt" 2>/dev/null && protect_windows_path "$prompt" file || die 'could not make the Muse Code prompt file private.'
     if command -v cygpath >/dev/null 2>&1; then args+=(--prompt-file "$(cygpath -w "$prompt")"); else args+=(--prompt-file "$prompt"); fi
@@ -772,6 +777,36 @@ report(){
     "$PACKET" verify "$PACKET_DIR" >/dev/null || die "source identity changed; paid report retained: $path"
   fi
   [ -s "$path" ] || die "Muse report was empty: $path"; printf '%s' "$path"
+}
+# Implementation (#842 follow-up): Muse edits a disposable worktree on branch
+# muse/<name>; its work is committed there and the worktree is removed. The
+# caller's checkout is never touched. Repeating the name continues the same
+# branch and Muse conversation.
+cmd_implement(){
+  local name="$1"; shift; local root rid prompt out wt branch base sidf sid="" state dirty
+  [ "$ENGINE" = muse-code ] || die 'implement requires AI_MUSE_ENGINE=muse-code.'
+  name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; need git
+  root="$(repo_root)"; rid="$(repo_id "$root")"; prompt="$(read_prompt "$@")"; lock_session "$rid" "impl-$name"
+  branch="muse/$name"; state="$STATE/implement/$rid"; mkdir -p "$state"; chmod 700 "$state" 2>/dev/null || true; sidf="$state/$name.sid"
+  if git -C "$root" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then
+    base="$branch"; [ ! -f "$sidf" ] || read -r sid < "$sidf" || true
+  else base="${OPT_BASE:-HEAD}"; git -C "$root" rev-parse --verify -q "$base^{commit}" >/dev/null || die "base ref does not resolve: $base"; fi
+  # A stable path: Muse Code ties a conversation to its workspace path.
+  wt="$state/$name.wt"; git -C "$root" worktree prune >/dev/null 2>&1 || true
+  [ ! -e "$wt" ] || git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf -- "$wt"
+  if [ "$base" = "$branch" ]; then git -C "$root" worktree add -q "$wt" "$branch" || die 'could not create the implementation worktree.'
+  else git -C "$root" worktree add -q -b "$branch" "$wt" "$base" || die 'could not create the implementation worktree.'; fi
+  out="$(tmp_file)"; printf 'Muse implementation: %s (branch %s)\n' "$name" "$branch" >&2
+  MUSE_IMPLEMENT=1
+  if ! run_turn "$wt" "$prompt" "$out" "$sid" ""; then git -C "$wt" add -A >/dev/null 2>&1; git -C "$wt" -c user.name="Muse (ai-muse)" -c user.email=muse@ai-devops.invalid commit -qm "muse: incomplete $name" >/dev/null 2>&1 || true; git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true; muse_credit_stop "$out"; die "$TURN_ERROR Partial work (if any) is on branch $branch."; fi
+  MUSE_IMPLEMENT=0
+  [ -z "$TURN_SID" ] || printf '%s\n' "$TURN_SID" > "$sidf"
+  git -C "$wt" add -A && dirty="$(git -C "$wt" diff --cached --name-only)"
+  [ -z "$dirty" ] || git -C "$wt" -c user.name="Muse (ai-muse)" -c user.email=muse@ai-devops.invalid commit -qm "muse: $name" || die "could not commit Muse's work; worktree kept at $wt"
+  git -C "$root" worktree remove --force "$wt" || printf 'ai-muse: warning: could not remove worktree %s\n' "$wt" >&2
+  printf '%s\n' "$TEXT"
+  if [ -n "$dirty" ]; then printf 'Muse branch: %s\n' "$branch" >&2; git -C "$root" diff --stat "$branch~1" "$branch" >&2
+  else printf 'Muse branch: %s (no changes this turn)\n' "$branch" >&2; fi
 }
 cmd_new(){
   local name="$1"; shift; local root rid meta prompt out rep before after tmp report_path now
@@ -1011,10 +1046,10 @@ cmd_doctor(){
     printf 'PASS  live provider response\n'
   fi
 }
-usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor | store-key [--if-missing]' 'ai-muse review [repository] [request]  (compatibility command)'; }
+usage(){ printf '%s\n' 'ai-muse new <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse ask <name> [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE|stdin' 'ai-muse implement <name> [--base REF] --prompt TEXT|--prompt-file FILE|stdin  (writes on branch muse/<name>)' 'ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name> | doctor | store-key [--if-missing]' 'ai-muse review [repository] [request]  (compatibility command)'; }
 
 OPT_BASE=""; OPT_ASSERT_HEAD=""
-if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then
+if [ "${1:-}" = new ] || [ "${1:-}" = ask ] || [ "${1:-}" = implement ]; then
   source_args=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -1033,6 +1068,7 @@ fi
 case "${1:-}" in
   new) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse new <name> ...'; shift; cmd_new "$n" "$@";;
   ask) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse ask <name> ...'; shift; cmd_ask "$n" "$@";;
+  implement) shift; n="${1:-}"; [ -n "$n" ] || die 'usage: ai-muse implement <name> ...'; shift; cmd_implement "$n" "$@";;
   list) cmd_list;; show) shift; cmd_show "${1:-}";; transcript) shift; cmd_transcript "${1:-}";; reconcile) shift; cmd_reconcile "${1:-}";; delete) shift; cmd_delete "${1:-}";; store-key) shift; cmd_store_key "$@";; doctor) shift; cmd_doctor "$@";;
   review) shift; repo="${1:-$PWD}"; request="${2:-}"; if [ -z "$request" ] && [ ! -t 0 ]; then request="$(cat)"; fi; request="${request:-Review the current changes for correctness, security, and missing tests.}"; printf '%s' "$request" | grep -Eqi 'VERDICT:' || request="$request
 
