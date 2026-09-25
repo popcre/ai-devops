@@ -195,6 +195,12 @@ clone + `./install.sh` on Ubuntu).
    It catches a memory written without a `MEMORY.md` index line in the same turn —
    the failure that left 20 of 34 shared-db memories unreachable until 2026-08-21.
    Run it from a Codex sync too: the machine, not the client, is what is missing it.
+5c3. **Install the Claude closeout hook:** `bin/ai-install-completion-check-hook`
+   (Claude is the default client; `--check` reports drift). Idempotent; strictly
+   additive to `~/.claude/settings.json`. Without it, a session that ends on
+   waiting language is never forced to hold an `ai-blocker-watch wait`, so the
+   BlockerWatch rule is honor-system only (issue #878). `ai-devops doctor` fails
+   when it is missing. Run it from a Codex sync too.
 5d. Check the weekly read-only memory audit exists (`ai-memory-health` scheduled
    task on Windows, registered by `bin/install-memory-health-task.ps1`). If absent,
    say so and offer to register it. Never schedule anything that EDITS memory
