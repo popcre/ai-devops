@@ -11,6 +11,9 @@ export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$1"; }
+# The sentinel scans below run inside `if rg ...; then fail; fi`, which a
+# missing rg would silently skip instead of failing.
+command -v rg >/dev/null 2>&1 || fail 'ripgrep (rg) is required for the export scans'
 must_fail() { if "$@" > "$TMP/refusal.out" 2>&1; then fail "unexpected success: $*"; fi; }
 
 mkdir -p "$TMP/mockbin" "$TMP/private/src" "$TMP/private/tests" "$TMP/private/contracts" "$TMP/private/data"

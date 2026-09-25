@@ -70,7 +70,7 @@ usage: ai-task-gates <command> [options]
         Legacy coarse CI classification; reads paths on stdin.
   version
 
-ACTION is one of: review pr-wait ship deploy database infrastructure production
+ACTION is one of: review code-only-review pr-wait ship deploy database infrastructure production
 EOF
 }
 
@@ -481,8 +481,15 @@ cmd_check(){
       case "$action" in
         deploy|database|infrastructure|production)
           fail_closed "no changes and no task class were found; refusing to start '$action' without an explicit declaration." ;;
-        *) printf 'ai-task-gates: no changes observed; "%s" may start.\n' "$action"; return 0 ;;
       esac
+      # An action bound to per-action proofs can never take the empty-change-set
+      # exit: its action_gates requirement is checked against a classified
+      # change set's required proofs, so with nothing observed the binding must
+      # refuse instead of silently skipping past the opt-in it exists to enforce.
+      if [ -n "$(jqr --arg a "$action" '.action_gates[$a] // empty' "$POLICY_FILE")" ]; then
+        fail_closed "no changes and no task class were found; refusing to start '$action': its action_gates proof binding can only be checked against a classified change set."
+      fi
+      printf 'ai-task-gates: no changes observed; "%s" may start.\n' "$action"; return 0
     fi
     declared="$OBSERVED_CLASS"
     printf 'ai-task-gates: note: no task class was declared; using the observed class "%s".\n' "$OBSERVED_CLASS" >&2

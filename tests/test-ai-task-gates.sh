@@ -355,6 +355,17 @@ check 'and the stop says which gate is missing' \
 check 'the formal review is still refused there' \
   "rc 3 '$TMP/private-closed' check --before review"
 
+# A clean private checkout with no recorded class has an EMPTY change set; the
+# empty-set exit must not skip the proof binding the sealed route hangs on
+# (found by an exact-head review of the reconciliation head, 2026-09-25).
+newrepo "$TMP/private-clean" 'u2giants/licensor-source-data'
+check 'a clean undeclared private tree refuses the sealed route' \
+  "rc 4 '$TMP/private-clean' check --before code-only-review"
+check 'and names the proof binding as the reason' \
+  "out '$TMP/private-clean' check --before code-only-review | grep -Fq 'proof binding'"
+check 'while an unbound action still starts on the same clean tree' \
+  "rc 0 '$TMP/private-clean' check --before pr-wait"
+
 printf 'a public repository may use the sealed route freely\n'
 newrepo "$TMP/public-code"
 mkdir -p "$TMP/public-code/bin"

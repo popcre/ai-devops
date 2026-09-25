@@ -69,8 +69,10 @@ paths to a private temporary file, then use
 The same route accepts `security-review` and `final-check`. It creates a fresh
 two-commit synthetic repository containing only those approved paths, checks
 the original HEAD and complete source digest before and after the provider,
-and seals the approved-path hashes. DeepSeek receives only the synthetic packet
-as text attachments and has no filesystem tools. CLI reviewers lack a proven
+and seals the approved-path hashes. DeepSeek sees only the synthetic packet:
+text attachments plus read-only repository tools (`list_dir`, `read_file`,
+`grep`) whose root is the synthetic snapshot, never the private checkout.
+CLI reviewers lack a proven
 path-constrained read profile for private source, so this route refuses them.
 Ordinary and plan reviews of private source are refused before provider launch.
 The default private snapshot and packet routes also refuse private source.
