@@ -484,6 +484,13 @@ date -u -d '20 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home/last-links"; ll="$(
 AI_BLOCKER_WATCH_CONFIG="$TMP/config-replay.json" BW tick >/dev/null 2>&1
 check 'a links scan inside half its interval is not pulled forward' "[ \"\$(cat '$TMP/home/last-links')\" = \"$ll\" ]"
 
+# A depends_on naming a pull request is skipped, never a failed scan (the
+# refused link otherwise re-ran the full scan every tick).
+: > "$FAKE/calls"; rm -f "$FAKE/links" "$TMP/home/last-links"; touch "$FAKE/is_pr"
+lnodes "[$(lnode 24 224 "$(fence 5)" '[]')]"
+check 'a pull request named in depends_on is skipped without failing the scan' "BW tick 2>'$TMP/pr-links.err' && [ ! -f '$FAKE/links' ] && [ -f '$TMP/home/last-links' ] && grep -q 'is a pull request' '$TMP/pr-links.err'"
+rm -f "$FAKE/is_pr"
+
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"
 rmdir "$TMP/home/tick.lock"

@@ -870,8 +870,11 @@ maintain_links(){ # maintain_links <dry 0|1>
     bref="${edge%% *}"; dep="${edge##* }"; br="${bref%#*}"; bn="${bref#*#}"
     id="${idmap[$br#$dep]:-}"
     if [ -z "$id" ]; then
-      id="$(gh_api "repos/$br/issues/$dep" --jq '.id' 2>/dev/null)" || id=""
+      id="$(gh_api "repos/$br/issues/$dep" --jq 'if .pull_request then "pr" else .id end' 2>/dev/null)" || id=""
       if [ -z "$id" ]; then note "links: cannot read $br#$dep (named in $bref's depends_on); skipped"; unresolvable=$((unresolvable+1)); continue; fi
+      # GitHub only links issues to issues; a pull request target is refused
+      # every scan and kept the links clock from ever advancing.
+      if [ "$id" = pr ]; then note "links: $br#$dep (named in $bref's depends_on) is a pull request, which GitHub cannot link; skipped"; unresolvable=$((unresolvable+1)); continue; fi
     fi
     if [ "$dry" = 1 ]; then note "links: would record $bref is blocked by $br#$dep (from its db-work-scope depends_on)"; continue; fi
     if gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
