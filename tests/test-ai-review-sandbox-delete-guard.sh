@@ -129,6 +129,10 @@ if command -v cmd >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
   # Windows directory junction: the production sandbox root is one of these.
   cmd //c "mklink /J $win_link $win_real" >/dev/null 2>&1 || true
 fi
+# Linux/macOS: a real symlink is the same class (evidence tools reject it).
+if [ ! -e "$LINK_ROOT" ]; then
+  ln -s "$REAL_ROOT" "$LINK_ROOT" 2>/dev/null || true
+fi
 if [ -e "$LINK_ROOT" ] && [ "$(cd "$LINK_ROOT" 2>/dev/null && pwd -P)" = "$(cd "$REAL_ROOT" 2>/dev/null && pwd -P)" ]; then
   linked=1
 fi
