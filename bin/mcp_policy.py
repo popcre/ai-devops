@@ -92,6 +92,22 @@ def _write(path, text, dry):
     os.replace(path + ".tmp", path)
 
 
+
+def _project_key(projects, root):
+    """Reuse an existing project key that denotes the same directory: temp
+    roots arrive long, short, slashed or backslashed depending on which tool
+    produced the spelling, and a second spelling would fork the project."""
+    for k in projects:
+        try:
+            if os.path.samefile(k, root):
+                return k
+        except OSError:
+            pass
+        if os.path.normcase(os.path.normpath(k)) == os.path.normcase(os.path.normpath(root)):
+            return k
+    return root
+
+
 def deliver(catalog_path, claude_json, dry):
     pol = policy()
     catalog = json.load(open(catalog_path))
@@ -105,7 +121,7 @@ def deliver(catalog_path, claude_json, dry):
         if not roots:
             print("  skip %s not cloned here; loads nowhere: %s" % (key, ", ".join(names)))
         for root in roots:
-            entry = projects.setdefault(root, {})
+            entry = projects.setdefault(_project_key(projects, root), {})
             servers = entry.setdefault("mcpServers", {})
             before = dict(servers)
             for n in [n for n in servers if n in managed and n not in wanted]:
