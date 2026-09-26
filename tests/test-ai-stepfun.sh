@@ -76,6 +76,14 @@ echo 'step 0.28.2 (Smallstep CLI)'
 STUB
 chmod +x "$TMP/bin/other-step"
 check "a different program named step is not accepted as StepCode" "! AI_STEPFUN_STEP_BIN='$TMP/bin/other-step' HOME='$TMP/nohome' '$SCRIPT' doctor >/dev/null 2>&1"
+
+# The checks below drive the stubbed Linux path, whose key-store proof
+# (stat mode 600) and bubblewrap sandbox only exist on Linux filesystems;
+# on Windows the wrapper is correctly refused above and nothing here could
+# pass for filesystem reasons rather than code reasons.
+if [ "$(uname -s)" != Linux ]; then
+  SKIP=$((SKIP + 1)); echo 'SKIP  stubbed Linux path (not a Linux filesystem)'
+else
 check "doctor passes with the stub and a protected key store" "'$SCRIPT' doctor | grep -q '^OK step=0.1.1'"
 check "doctor prints one PASS line per check for the shared-db allocator" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 3 ] && mode ok && [ \"\$('$SCRIPT' doctor --live | grep -c '^PASS  ')\" = 4 ]"
 check "doctor refuses a key store that is not owner-only" "chmod 644 '$AI_STEPFUN_KEY_STORE'; ! '$SCRIPT' doctor >/dev/null; rc=\$?; chmod 600 '$AI_STEPFUN_KEY_STORE'; [ \$rc = 0 ]"
@@ -149,5 +157,7 @@ else
 fi
 check "invocations are recorded in the durable reviewer event ledger" "grep -rqs stepfun '$TMP/events'"
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
+fi
+
+printf '\n%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
