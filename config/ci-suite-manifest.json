@@ -10,6 +10,7 @@
     "test-ai-config-migrate.sh": 1,
     "test-ai-deepseek-agent.sh": 90,
     "test-ai-deepseek.sh": 5,
+    "test-ai-stepfun.sh": 5,
     "test-ai-devops-doctor-codex-probe.sh": 1,
     "test-ai-devops-doctor-install-state.sh": 1,
     "test-ai-facts.sh": 1,
@@ -68,6 +69,7 @@
     "test-markdown-links.sh": 1,
     "test-mcp-launch-lock.sh": 1,
     "test-muse-opencode-contract.sh": 1,
+    "test-orphan-sweep-age.sh": 29,
     "test-pop-business-rules-skill.sh": 1,
     "test-provider-wrapper-common.sh": 1,
     "test-public-boundary.sh": 1,
@@ -107,6 +109,7 @@
     "test-ai-config-migrate.sh",
     "test-ai-deepseek-agent.sh",
     "test-ai-deepseek.sh",
+    "test-ai-stepfun.sh",
     "test-ai-devops-doctor-codex-probe.sh",
     "test-ai-devops-doctor-install-state.sh",
     "test-ai-facts.sh",
@@ -169,6 +172,7 @@
     "test-markdown-links.sh",
     "test-mcp-launch-lock.sh",
     "test-muse-opencode-contract.sh",
+    "test-orphan-sweep-age.sh",
     "test-pop-business-rules-skill.sh",
     "test-provider-wrapper-common.sh",
     "test-public-boundary.sh",
@@ -203,6 +207,7 @@
     "test-ai-codex-memories.sh",
     "test-ai-codex-review.sh",
     "test-ai-deepseek-agent.sh",
+    "test-ai-deepseek.sh",
     "test-ai-gemini-usage.sh",
     "test-ai-gemini.sh",
     "test-ai-gh.sh",
@@ -238,6 +243,7 @@
     "test-ai-codex-memories.sh",
     "test-ai-codex-review.sh",
     "test-ai-deepseek-agent.sh",
+    "test-ai-deepseek.sh",
     "test-ai-gemini-usage.sh",
     "test-ai-gemini.sh",
     "test-ai-gh.sh",
@@ -328,6 +334,7 @@
       "test-reviewer-credit.sh"
     ],
     [
+      "test-ai-deepseek.sh",
       "test-ai-muse-code.sh"
     ]
   ],

@@ -315,6 +315,10 @@
           "class": "reviewer-safety"
         },
         {
+          "glob": "bin/ai-stepfun*",
+          "class": "reviewer-safety"
+        },
+        {
           "glob": "bin/ai-gemini*",
           "class": "reviewer-safety"
         },

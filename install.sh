@@ -268,6 +268,15 @@ run_stage required "Git commit identity" "$REPO_ROOT/bin/ai-git-identity"
 run_stage required "Claude tool permissions" "$REPO_ROOT/bin/ai-claude-permissions"
 
 # --------------------------------------------------------------------------
+# 4.8 Claude closeout (completion-check) hook. The Stop hook is what makes a
+#     session that ends on waiting language hold an `ai-blocker-watch wait`;
+#     without it that rule is honor-system only (issue #878: edge-dev3 had no
+#     hook and a session skipped BlockerWatch registration). Idempotent and
+#     strictly additive to ~/.claude/settings.json.
+# --------------------------------------------------------------------------
+run_stage required "Claude closeout hook" "$REPO_ROOT/bin/ai-install-completion-check-hook" --client claude
+
+# --------------------------------------------------------------------------
 # 4b. Secrets + Claude launcher (interactive only)
 # --------------------------------------------------------------------------
 # Wires the vault-locked 1Password service-account token, the central mcp.env
@@ -395,20 +404,43 @@ else
   run_stage optional "Muse key store" muse_key_store
 fi
 
-# Muse Code on Linux: Meta's installer (run once by hand: see docs/muse-opencode.md)
-# puts versioned binaries in ~/.local/bin. This stage only verifies the pin.
+# StepFun key store (Linux only; StepCode has no Windows build yet). Same
+# pattern as the Muse store: op -> ai-stepfun -> owner-only file, never argv.
+if [ "$(uname -s)" != Linux ] || [ "$(id -u)" -eq 0 ]; then
+  stage_results+=("SKIP\toptional\tStepFun key store (Linux user install only)")
+elif ! command -v op >/dev/null 2>&1; then
+  stage_results+=("SKIP\toptional\tStepFun key store (1Password CLI not on PATH)")
+elif [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] && [ ! -s "$HOME/.config/ai-devops/op-service-account" ]; then
+  stage_results+=("SKIP\toptional\tStepFun key store (no 1Password service-account token yet)")
+else
+  stepfun_key_store() {
+    local token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+    [ -n "$token" ] || token="$(cat "$HOME/.config/ai-devops/op-service-account")"
+    OP_SERVICE_ACCOUNT_TOKEN="$token" "$REPO_ROOT/bin/ai-stepfun" store-key --if-missing </dev/null
+  }
+  run_stage optional "StepFun key store" stepfun_key_store
+fi
+
+# Muse Code on Linux: when the pinned binary is absent, run Meta's official
+# installer (Albert approved automatic install, 2026-09-25), then verify the
+# pinned version and SHA-256. ai-muse runs only that hashed file.
 if [ "$(uname -s)" = Linux ] && [ "$(id -u)" -ne 0 ]; then
-  check_muse_code_linux() {
+  install_muse_code_linux() {
     local pin="$REPO_ROOT/config/muse-code/linux-$(uname -m)" ver want bin
     [ -f "$pin/version" ] || { echo "no Muse Code pin for $(uname -m)"; return 1; }
     ver="$(tr -d ' \r\n' < "$pin/version")"; want="$(tr -d ' \r\n' < "$pin/sha256")"; bin="$HOME/.local/bin/muse-bin-$ver"
-    [ -f "$bin" ] || { echo "Muse Code $ver is not installed; see docs/muse-opencode.md (Linux)"; return 1; }
+    if [ ! -f "$bin" ]; then
+      local script; script="$(mktemp)" || return 1
+      curl -fsSL https://dev.meta.ai/install.sh -o "$script" </dev/null && bash "$script" </dev/null >/dev/null
+      local rc=$?; rm -f -- "$script"; [ "$rc" -eq 0 ] || { echo "Meta's Muse Code installer failed"; return 1; }
+    fi
+    [ -f "$bin" ] || { echo "Meta installed a different Muse Code than the pinned $ver; re-pin $pin"; return 1; }
     [ "$(sha256sum "$bin" | cut -d' ' -f1)" = "$want" ] || { echo "Muse Code $ver does not match the pinned SHA-256"; return 1; }
   }
-  run_stage optional "Muse Code (Linux)" check_muse_code_linux
+  run_stage optional "Muse Code (Linux)" install_muse_code_linux
 fi
 
-# Reviewer provider CLIs (Grok Build, Kimi Code, Qwen Code). Per-user and
+# Reviewer provider CLIs (Grok Build, Kimi Code, Qwen Code, Antigravity for Gemini, and StepCode on Linux). Per-user and
 # idempotent: current installs are skipped. Sign-in stays manual.
 if [ "$(id -u)" -eq 0 ]; then
   stage_results+=("SKIP\toptional\tReviewer provider CLIs (root install)")

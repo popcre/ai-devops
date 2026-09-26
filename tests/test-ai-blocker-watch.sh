@@ -31,6 +31,7 @@ case "$*" in
   "issue edit"*) [ -f "$F/nolabel" ] && exit 1; printf '%s\n' "$*" >> "$F/edited"; echo '{}'; exit 0 ;;
   "search issues"*) out "$(cat "$F/digest_search.json" 2>/dev/null || echo '[]')" ;;
   *graphql*states:OPEN*)
+    [ -f "$F/gql_errors" ] && { out '{"data":{"repository":null},"errors":[{"type":"RATE_LIMITED","message":"x"}]}'; exit 0; }
     # One open-issue query serves both scans: merge the links and parents
     # fixtures by issue number, as GitHub would answer the combined query, and
     # page it 100 at a time (the cursor is the next offset).
@@ -513,4 +514,122 @@ rm -f "$FAKE/is_pr"
 mkdir "$TMP/home/tick.lock"
 check 'a running tick blocks a second one without doing work' "BW tick 2>&1 | grep -q 'another tick is running'"
 rmdir "$TMP/home/tick.lock"
+
+# Per-tick read cache and node budget (#809). issue_json runs under $(...), so
+# both must survive that subshell: a repeated read is served from the cache, and
+# a budget below the candidate count reads up to the budget and notes the rest.
+rm -f "$FAKE"/gql_issue_*.json "$FAKE/gql_links.json" "$FAKE/gql_parents.json" "$FAKE/comments" "$FAKE/created" "$FAKE/edited"
+rm -f "$TMP/home/last-alarm"
+mkissue 7 "gate bug" '[]' '[{"source":{"number":1,"state":"CLOSED"}}]' '[{"number":20,"state":"OPEN","repository":{"nameWithOwner":"o/r"}}]'
+mkissue 20 "" '[]' '[]' '[{"number":25,"state":"OPEN","repository":{"nameWithOwner":"o/r"}}]'
+mkissue 25 "" '[]' '[]' '[]'
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:40,blockedBy:{nodes:[{number:7,state:"OPEN",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}}
+]}}}}' > "$FAKE/gql_parents.json"
+: > "$FAKE/calls"
+BW alarm >/dev/null 2>&1 || true
+check 'a repeated issue read is served from the per-tick cache' "[ \"\$(grep -c -- '-F n=7$' '$FAKE/calls')\" = 1 ]"
+check 'the chain still reads each uncached issue once' "[ \"\$(grep -c -- '-F n=20$' '$FAKE/calls')\" = 1 ] && [ \"\$(grep -c -- '-F n=25$' '$FAKE/calls')\" = 1 ]"
+check 'the cache hit is what unblocks the depth walk' "grep -q 'chain 3 deep' '$TMP/home/digest-$(date -u +%Y-%m-%d).md'"
+
+# Three unowned candidates, budget 1: one read (and one owner request), the
+# other two are noted and never read.
+mkissue 8 "" '[]' '[]' '[]'
+mkissue 11 "" '[]' '[]' '[]'
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:41,blockedBy:{nodes:[{number:7,state:"OPEN",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}},
+  {number:42,blockedBy:{nodes:[{number:8,state:"OPEN",title:"b8",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}},
+  {number:43,blockedBy:{nodes:[{number:11,state:"OPEN",title:"b11",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}}
+]}}}}' > "$FAKE/gql_parents.json"
+# Rewrite #7/#8/#11 with no blocking children so depth_of spends no extra reads.
+mkissue 7 "gate bug" '[]' '[{"source":{"number":1,"state":"CLOSED"}}]' '[]'
+jq '.alarm_max_nodes = 1' "$TMP/config.json" > "$TMP/config-budget.json"
+: > "$FAKE/calls"; rm -f "$FAKE/comments" "$TMP/home/last-alarm"
+AI_BLOCKER_WATCH_CONFIG="$TMP/config-budget.json" BW alarm >"$TMP/budget.out" 2>"$TMP/budget.err" || true
+check 'the budget stops reads when exhausted' "[ \"\$(grep -c -- '-F n=' '$FAKE/calls')\" = 1 ]"
+check 'a budget below the candidate count posts only what it read' "[ \"\$(grep -c 'ai-blocker-watch:unowned:' '$FAKE/comments' 2>/dev/null || echo 0)\" = 1 ]"
+check 'the rest of the candidates are noted, not silently dropped' "[ \"\$(grep -c 'node budget reached before' '$TMP/budget.err')\" = 2 ]"
+
+# P5 snapshot reuse: a tick whose scans are due reads the open-issue snapshot
+# first, then propagate and wake answer from it instead of per-item REST.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap"
+rm -f "$FAKE/gql_links.json" "$FAKE/comments" "$FAKE/resumed" "$FAKE/state5" "$FAKE/is_pr"
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:9,databaseId:909,title:"waits on 5",assignees:{totalCount:1},body:"",blockedBy:{nodes:[{number:5,state:"CLOSED",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:1}}]}},
+  {number:40,databaseId:4040,title:"still open blocker",assignees:{totalCount:1},body:"",blockedBy:{nodes:[]}}
+]}}}}' > "$FAKE/gql_parents.json"
+snapid="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=snap-1 BW wait o/r#40 --park 'snap open' --brief-file "$TMP/brief.md" 2>/dev/null)"
+missid="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=snap-2 BW wait o/r#5 --park 'snap miss' --brief-file "$TMP/brief.md" 2>/dev/null)"
+echo '{"items":[{"number":5,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+echo closed > "$FAKE/state5"; : > "$FAKE/calls"
+BW tick >/dev/null 2>&1 || true
+check 'propagate_snapshot_dependents_no_rest' "grep -q 'issue comment 9 -R o/r' '$FAKE/comments' && ! grep -q 'dependencies/blocking' '$FAKE/calls'"
+check 'wake_open_snapshot_hit_skips_rest_but_stays_waiting' "! grep -q 'repos/o/r/issues/40' '$FAKE/calls' && jq -e '.state==\"waiting\"' '$AI_BLOCKER_WATCH_HOME/waits/$snapid.json'"
+check 'wake_snapshot_miss_falls_back_to_rest' "grep -q 'repos/o/r/issues/5 ' '$FAKE/calls' && grep -q '|claude snap-2' '$FAKE/resumed'"
+check 'the open-issue snapshot is read once per repo per tick' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 1 ]"
+
+# The closed issue has no dependents in the index → REST is still asked.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap2"
+echo '{"items":[{"number":6,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+: > "$FAKE/calls"
+BW tick >/dev/null 2>&1 || true
+check 'propagate_snapshot_empty_falls_back_to_rest' "[ \"\$(grep -c 'issues/6/dependencies/blocking' '$FAKE/calls')\" = 1 ]"
+
+# GraphQL 200 with errors is not a snapshot: nothing is indexed, REST answers.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap3"
+touch "$FAKE/gql_errors"
+echo '{"items":[{"number":5,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+snapid3="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=snap-3 BW wait o/r#40 --park 'snap err' --brief-file "$TMP/brief.md" 2>/dev/null)"
+: > "$FAKE/calls"
+BW tick >/dev/null 2>&1 || true
+check 'snapshot_graphql_errors_are_not_success' "grep -q 'issues/5/dependencies/blocking' '$FAKE/calls' && grep -q 'repos/o/r/issues/40' '$FAKE/calls'"
+rm -f "$FAKE/gql_errors"
+
+# Two pages (150 open issues, all waiting on #5): every page is indexed, every
+# dependent is told, and no per-issue REST read is spent.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap4"
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[range(100;250) | {number:.,databaseId:.,title:"d",assignees:{totalCount:1},body:"",blockedBy:{nodes:[{number:5,state:"CLOSED",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:1}}]}}]}}}}' > "$FAKE/gql_parents.json"
+: > "$FAKE/calls"; rm -f "$FAKE/comments"
+BW tick >/dev/null 2>&1 || true
+check 'blocker_snapshot_pagination_indexes_every_page' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 2 ] && [ \"\$(grep -c 'ai-blocker-watch:o/r#5' '$FAKE/comments')\" = 150 ] && ! grep -q 'dependencies/blocking' '$FAKE/calls'"
+
+# Digest lookup and link() ids come from the same snapshot (#658 P5 REST savings).
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap5"
+day="$(date -u +%Y-%m-%d)"
+mkdir -p "$TMP/home-snap5"
+jq '.alarm_digest_repo="o/r" | .alarm_max_nodes=500' "$TMP/config.json" > "$TMP/config-snap5.json"
+export AI_BLOCKER_WATCH_CONFIG="$TMP/config-snap5.json"
+# digest already open in the snapshot; a depends_on edge to an open blocker.
+jq -n --arg t "ai-blocker-watch digest $day" '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:31,databaseId:231,title:$t,assignees:{totalCount:0},body:"",blockedBy:{nodes:[]}},
+  {number:20,databaseId:220,title:"work",assignees:{totalCount:0},body:"```db-work-scope\ndepends_on: 7\nobjects:\n```",blockedBy:{nodes:[]}},
+  {number:7,databaseId:207,title:"gate bug",assignees:{totalCount:0},body:"",blockedBy:{nodes:[]}}
+]}}}}' > "$FAKE/gql_links.json"
+rm -f "$FAKE/gql_parents.json" "$FAKE/digest_search.json"
+: > "$FAKE/calls"; rm -f "$FAKE/links" "$FAKE/edited"
+date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap5/last-alarm"
+date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap5/last-links"
+# Stall #7 so the digest path runs, and let the links scan create the missing edge.
+jq -n --arg old "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" '{data:{repository:{issue:{updatedAt:$old,createdAt:$old,body:"",comments:{nodes:[]},timelineItems:{nodes:[]},blocking:{nodes:[]}}}}}' > "$FAKE/gql_issue_7.json"
+echo '[]' > "$FAKE/digest_search.json"
+BW tick >/dev/null 2>&1 || true
+check 'digest_lookup_uses_snapshot_not_search' "! grep -q 'search issues' '$FAKE/calls' && grep -q 'issue edit 31' '$FAKE/edited'"
+check 'link_id_comes_from_snapshot' "grep -q 'issue_id=207' '$FAKE/calls' && ! grep -q 'repos/o/r/issues/7' '$FAKE/calls'"
+
+# An edge already in the snapshot skips both the GET and the POST.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap6"
+mkdir -p "$TMP/home-snap6"
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:20,databaseId:220,title:"work",assignees:{totalCount:0},body:"",blockedBy:{nodes:[{number:7,state:"OPEN",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}},
+  {number:7,databaseId:207,title:"gate bug",assignees:{totalCount:0},body:"",blockedBy:{nodes:[]}}
+]}}}}' > "$FAKE/gql_links.json"
+rm -f "$FAKE/gql_parents.json"
+: > "$FAKE/calls"; rm -f "$FAKE/links"
+date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap6/last-links"
+date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap6/last-alarm"
+# Force the links scan only (alarm not due) via standalone command.
+AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" BW links >/dev/null 2>&1 || true
+check 'an edge already in the snapshot is not re-fetched or re-posted' \
+  "[ ! -f '$FAKE/links' ] && ! grep -q 'dependencies/blocked_by' '$FAKE/calls' && ! grep -q 'issue_id=' '$FAKE/calls'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

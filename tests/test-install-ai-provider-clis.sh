@@ -7,11 +7,12 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="$repo/bin/install-ai-provider-clis.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+unset GROK_HOME  # the model lock honors GROK_HOME; never let a test reach a real one
 
 [[ -x "$script" ]] || { echo "FAIL: installer is not executable"; exit 1; }
 
 # --- help and argument validation -----------------------------------------
-bash "$script" --help | grep -q 'Providers: grok kimi qwen'
+bash "$script" --help | grep -q 'Providers: grok kimi qwen gemini stepfun'
 
 if bash "$script" --dry-run bogus >"$tmp/bogus" 2>&1; then
   echo "FAIL: unknown provider was accepted"; exit 1
@@ -34,16 +35,36 @@ clean="$tmp/clean-home"; mkdir -p "$clean"
 minimal_path="$(dirname "$(command -v curl)"):$(dirname "$(command -v bash)"):$(dirname "$(command -v jq)"):/usr/bin:/bin"
 clean_run() { env HOME="$clean" PATH="$minimal_path" bash "$script" "$@"; }
 
-for p in grok kimi qwen; do
+for p in grok kimi qwen gemini; do
   if env PATH="$minimal_path" command -v "$p" >/dev/null 2>&1; then
     echo "FAIL: test PATH is not clean, it still resolves $p"; exit 1
   fi
 done
 
 clean_run --dry-run >"$tmp/all" 2>&1
-for p in grok kimi qwen; do grep -q "would install $p" "$tmp/all" || {
+for p in grok kimi qwen gemini; do grep -q "would install $p" "$tmp/all" || {
   echo "FAIL: dry run skipped $p"; exit 1; }
 done
+
+# StepCode (StepFun) is offered on Linux only; elsewhere the name is refused.
+if [ "$(uname -s)" = Linux ]; then
+  grep -q 'would install stepfun' "$tmp/all" || { echo "FAIL: Linux dry run skipped stepfun"; exit 1; }
+fi
+# A different program named step on PATH is not StepCode: still "would install".
+if [ "$(uname -s)" = Linux ]; then
+  mkdir -p "$tmp/decoy"; printf '#!/bin/sh\necho "step 0.28.2 (Smallstep CLI)"\n' > "$tmp/decoy/step"; chmod +x "$tmp/decoy/step"
+  env HOME="$clean" PATH="$tmp/decoy:$minimal_path" bash "$script" --dry-run stepfun >"$tmp/decoy.out" 2>&1
+  grep -q 'would install stepfun' "$tmp/decoy.out" || { echo "FAIL: a decoy step on PATH was taken for StepCode"; exit 1; }
+fi
+grep -q '\[ "\$cmd" != step \] || return 0' "$script" || { echo "FAIL: the installer may claim ~/.local/bin/step"; exit 1; }
+grep -q 'ai-stepfun store-key' "$script" || { echo "FAIL: install output never names the StepFun key step"; exit 1; }
+mkdir -p "$tmp/fake-windows"; printf '#!/bin/sh\necho MINGW64_NT-10.0\n' > "$tmp/fake-windows/uname"; chmod +x "$tmp/fake-windows/uname"
+if env HOME="$clean" PATH="$tmp/fake-windows:$minimal_path" bash "$script" --dry-run stepfun >"$tmp/win" 2>&1; then
+  echo "FAIL: stepfun was accepted on a non-Linux platform"; exit 1
+fi
+grep -q "unknown provider 'stepfun'" "$tmp/win" || { echo "FAIL: non-Linux stepfun refusal is not explicit"; exit 1; }
+env HOME="$clean" PATH="$tmp/fake-windows:$minimal_path" bash "$script" --dry-run >"$tmp/winall" 2>&1
+! grep -q 'would install stepfun' "$tmp/winall" || { echo "FAIL: non-Linux dry run offered stepfun"; exit 1; }
 
 # Naming one provider must not touch the others.
 clean_run --dry-run qwen >"$tmp/one" 2>&1
@@ -106,6 +127,31 @@ grep -q 'SKIP grok already installed' "$tmp/link"
 [[ -x "$linkhome/.local/bin/grok" ]] || { echo "FAIL: did not link grok into ~/.local/bin"; exit 1; }
 grep -q "linked $linkhome/.local/bin/grok" "$tmp/link"
 
+# --- grok model lock (owner ruling 2026-09-25: 4.6 only) --------------------
+# xAI launch campaigns replace the default model, so the lock must dismiss the
+# policy's campaigns plus any cached one naming another default, and set the
+# default and allowed_models in config.toml, keeping unrelated settings, and a
+# rerun must change nothing.
+MODEL="$(bash "$repo/bin/ai-provider-version" model grok)"
+[[ -n "$MODEL" ]] || { echo "FAIL: the policy has no grok model_pin"; exit 1; }
+grep -q "OK   grok locked to $MODEL" "$tmp/link"
+jq -e '.dismissed_ids | index("grok-4.7-launch")' "$linkhome/.grok/campaigns_state.json" >/dev/null || { echo "FAIL: policy campaign not dismissed"; exit 1; }
+lockhome="$tmp/lock-home"; mkdir -p "$lockhome/.grok/bin"
+make_fake_grok "$lockhome/.grok/bin/grok" "$WANT"
+printf '[ui]\nyolo = false\n\n[models]\ndefault = "grok-4.7"\nallowed_models = ["grok-4.7"]\n' >"$lockhome/.grok/config.toml"
+printf '{"dismissed_ids":["older"]}' >"$lockhome/.grok/campaigns_state.json"
+jq -n --arg m "$MODEL" '{payload: ({settings: {campaigns: [{id: "grok-9-launch", models: {default: "grok-9"}}, {id: "same-model", models: {default: $m}}]}} | tojson)}' >"$lockhome/.grok/settings_cache.json"
+env HOME="$lockhome" PATH="$minimal_path" bash "$script" grok >/dev/null 2>&1
+cfg="$lockhome/.grok/config.toml"; st="$lockhome/.grok/campaigns_state.json"
+grep -qx "default = \"$MODEL\"" "$cfg" || { echo "FAIL: config.toml default not pinned"; exit 1; }
+grep -qx "allowed_models = \[\"$MODEL\*\"\]" "$cfg" || { echo "FAIL: config.toml lacks allowed_models"; exit 1; }
+grep -qx 'yolo = false' "$cfg" || { echo "FAIL: model lock dropped an unrelated setting"; exit 1; }
+[[ "$(grep -c '^allowed_models' "$cfg")" == 1 && "$(grep -c '^default = ' "$cfg")" == 1 ]] || { echo "FAIL: lock duplicated a key"; exit 1; }
+[[ "$(jq -c '.dismissed_ids' "$st")" == '["grok-4.7-launch","grok-9-launch","older"]' ]] || { echo "FAIL: wrong dismissed campaigns: $(cat "$st")"; exit 1; }
+cp "$cfg" "$tmp/cfg-before"; cp "$st" "$tmp/st-before"
+env HOME="$lockhome" PATH="$minimal_path" bash "$script" grok >/dev/null 2>&1
+cmp -s "$tmp/cfg-before" "$cfg" && cmp -s "$tmp/st-before" "$st" || { echo "FAIL: model lock is not idempotent"; exit 1; }
+
 # An unrelated real file in ~/.local/bin must never be clobbered.
 guard="$tmp/guard-home"; mkdir -p "$guard/.grok/bin" "$guard/.local/bin"
 make_fake_grok "$guard/.grok/bin/grok" "$WANT"
@@ -119,6 +165,7 @@ dry="$tmp/dry-home"; mkdir -p "$dry/.grok/bin"
 make_fake_grok "$dry/.grok/bin/grok" "$WANT"
 env HOME="$dry" PATH="$minimal_path" bash "$script" --dry-run grok >/dev/null 2>&1
 [[ -e "$dry/.local/bin/grok" ]] && { echo "FAIL: dry run created a link"; exit 1; }
+[[ -e "$dry/.grok/campaigns_state.json" ]] && { echo "FAIL: dry run wrote the model lock"; exit 1; }
 
 # --- exact version policy (issue #251) -------------------------------------
 # "A runnable grok" is not the contract. Both wrappers are qualified against one

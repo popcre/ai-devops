@@ -418,6 +418,7 @@ fi
 check 'reports bind the exact reviewed code' "grep -Rq 'reviewed commit.*[0-9a-f]' '$REPO/.ai/reviews' && grep -Rq 'evidence fingerprint' '$REPO/.ai/reviews'"
 STALE_ASK_OUT="$(cd "$REPO" && eval "$ENV MUSE_STUB_TOUCH='$REPO/a.txt' '$SCRIPT' ask debate --prompt changed" 2>&1 || true)"
 check 'source changes reject an advanced follow-up' "printf '%s' \"\$STALE_ASK_OUT\" | grep -q 'advanced session was preserved'"
+check 'stale_rejection_names_reconcile_from_ask' "printf '%s' \"\$STALE_ASK_OUT\" | grep -q 'ai-muse reconcile debate'"
 check 'rejected follow-up is marked for recovery' "jq -e '.status==\"completed_pending_local_checks\"' '$META'"
 git -C "$REPO" checkout -q -- a.txt
 LOCK="$TMP/state/locks/$(jq -r .repository_id "$META")--codex--debate.lock.d"; mkdir -p "$LOCK"
@@ -432,6 +433,17 @@ MISSING_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new missing-owner --prompt tes
 check 'old lock with missing owner is reconciled' "cd '$REPO' && eval \"$ENV '$SCRIPT' delete missing-owner\""
 STALE_OUT="$(cd "$REPO" && eval "$ENV MUSE_STUB_TOUCH='$REPO/a.txt' '$SCRIPT' new stale --prompt test" 2>&1 || true)"
 check 'source changes during a turn reject stale output' "printf '%s' \"\$STALE_OUT\" | grep -q 'stale response rejected'"
+check 'stale_rejection_names_the_changed_tracked_path' "printf '%s' \"\$STALE_OUT\" | grep -q 'a.txt'"
+check 'stale_rejection_names_reconcile_from_new' "printf '%s' \"\$STALE_OUT\" | grep -q 'ai-muse reconcile stale'"
+check 'stale_rejection_does_not_steer_to_delete' "! printf '%s' \"\$STALE_OUT\" | grep -q 'show, ask, transcript, or delete'"
+# §3 incident: an untracked non-ignored file appears mid-turn and is named.
+printf 'SENTINEL-FILE-CONTENTS-DO-NOT-PRINT\n' > "$REPO/mid-turn-secret.txt"
+UNTRACKED_OUT="$(cd "$REPO" && rm -f mid-turn-untracked.txt && eval "$ENV MUSE_STUB_TOUCH='$REPO/mid-turn-untracked.txt' '$SCRIPT' new stale-untracked --prompt test" 2>&1 || true)"
+check 'stale_rejection_names_a_new_untracked_path' "printf '%s' \"\$UNTRACKED_OUT\" | grep -q 'mid-turn-untracked.txt'"
+check 'stale_rejection_prints_no_file_contents' "! printf '%s' \"\$UNTRACKED_OUT\" | grep -q SENTINEL-FILE-CONTENTS-DO-NOT-PRINT"
+check 'stale_rejection_path_list_is_capped' "grep -q 'head -n 10' '$SCRIPT' && grep -q 'and %s more' '$SCRIPT'"
+check 'guard_still_fires_without_an_inventory' "printf '%s' \"\$STALE_OUT\" | grep -q 'stale response rejected' && grep -q 'tree_paths \"\\\$root\" > \"\\\$before_paths\" 2>/dev/null || : > \"\\\$before_paths\"' '$SCRIPT'"
+git -C "$REPO" checkout -q -- a.txt 2>/dev/null || true
 STALE_META="$(find "$TMP/state" -name 'codex--stale.json' -type f)"
 check 'rejected stale turn preserves its Muse session' "jq -e '.status==\"completed_pending_local_checks\" and .session_id==\"ses_new\"' '$STALE_META'"
 check 'pending session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""

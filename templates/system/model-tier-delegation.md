@@ -15,7 +15,7 @@ session that wrote the plan is the one checking the result.
 
 | Harness | Frontier (plans, verifies) | Lower tier (implements) |
 |---|---|---|
-| Codex | GPT-5.6-Sol (medium) | GPT-5.6-Luna (`gpt-5.6-luna`) |
+| Codex | GPT-5.6-Sol (medium) | GPT-6 Luna when the plan exposes it; today `gpt-5.6-luna` |
 | ZCode | GLM 5.3 MAX | GLM 5.3 Flash |
 | MiMo | Mimo v2.6 pro | Mimo v2.6 flash |
 
@@ -76,8 +76,8 @@ Anything not proven stays marked unverified — never guess a command.
 
 | Harness | How to dispatch | Status |
 |---|---|---|
-| Codex → GPT-5.6-Luna | `codex exec -m gpt-5.6-luna` (also `-c model="…"`). `~/.codex/config.toml` pins a frontier default, so pass `-m` explicitly | Verified live 2026-09-25 (codex-cli 0.153.2, [probe quote](https://github.com/popcre/ai-devops/issues/782#issuecomment-5834620657)): slug `gpt-5.6-luna` accepted headlessly on the ChatGPT plan — probe returned `PONG`; reasoning levels up to `max`, no `ultra` |
-| ZCode → GLM 5.3 Flash | Manual: open the ZCode app, switch the model to GLM 5.3 Flash, hand it the plan file path | No headless model selector; gap tracked in [#828](https://github.com/popcre/ai-devops/issues/828) |
+| Codex → Luna | `codex exec -m gpt-5.6-luna` — the only Luna the ChatGPT plan accepts today (probe returned `PONG`). Also `-c model="…"`. `~/.codex/config.toml` pins a frontier default, so pass `-m` explicitly | Two live probes 2026-09-25 (quotes on #782): `gpt-6-luna` (new generation) rejected — "not supported when using Codex with a ChatGPT account"; `gpt-5.6-luna` works headlessly (levels up to `max`, no `ultra`). Re-probe `gpt-6-luna` when the lineup updates; never guess slugs |
+| ZCode → GLM 5.3 Flash | Manual: open the ZCode app, switch the model to GLM 5.3 Flash, hand it the plan file path | Verified impossible 2026-09-25 on the newest CLI core (0.16.9): no `--model` flag, config `defaultModelSelection` ignored in headless runs, app-server registry has no subscription provider (evidence on [#828](https://github.com/popcre/ai-devops/issues/828#issuecomment-5837096435)). Retest when a newer core advertises a model flag |
 | MiMo → Mimo v2.6 flash | Manual: open the Xiaomi MiMo AI app, select Mimo v2.6 flash, hand it the plan file path | No `mimo` CLI on PATH; gap tracked in [#829](https://github.com/popcre/ai-devops/issues/829) |
 
 When a gap issue closes with a supported selector, update this table in the

@@ -14,8 +14,11 @@ cat > "$T/opencode" <<'FAKE'
 dir=""; session=""
 while [ $# -gt 0 ]; do case "$1" in --dir) dir="$2"; shift 2;; --session) session="$2"; shift 2;; *) shift;; esac; done
 prompt="$(cat)"
-# Every process argv in this run's tree must be free of the key.
-for c in /proc/[0-9]*/cmdline; do tr '\0' ' ' < "$c" 2>/dev/null; echo; done | grep "test-key-[s]ecret" >> "$FAKE_LOG.argv" && echo "ARGV_LEAK" >> "$FAKE_LOG"
+# Every process argv in this run's tree must be free of the key. Git Bash has
+# /proc too; a host without it records that the scan could not run.
+if compgen -G '/proc/[0-9]*/cmdline' >/dev/null; then
+  for c in /proc/[0-9]*/cmdline; do tr '\0' ' ' < "$c" 2>/dev/null; echo; done | grep "test-key-[s]ecret" >> "$FAKE_LOG.argv" && echo "ARGV_LEAK" >> "$FAKE_LOG"
+else echo "ARGV_UNCHECKED" >> "$FAKE_LOG"; fi
 printf '%s\n' "remote=$(git -C "$dir" remote | wc -l) key=${DEEPSEEK_API_KEY:-} op=${OP_SERVICE_ACCOUNT_TOKEN:-unset} xdg=$XDG_CONFIG_HOME session=$session" >> "$FAKE_LOG"
 if [ -z "$session" ]; then
   echo change > "$dir/file.txt"; git -C "$dir" add file.txt; git -C "$dir" -c user.name=t -c user.email=t@t commit -qm change
@@ -26,7 +29,8 @@ printf '{"type":"tool_use","sessionID":"%s","part":{"state":{"status":"completed
 printf '{"type":"text","sessionID":"%s","part":{"text":"reply to: %s"}}\n' "$sid" "$prompt"
 FAKE
 chmod +x "$T/opencode"
-export AI_DEEPSEEK_OPENCODE="$T/opencode" AI_DEEPSEEK_STATE_DIR="$T/state" FAKE_LOG="$T/fake.log"
+# AI_DEEPSEEK_TEST_DIR lets the Windows trusted-op check accept the fixture op.
+export AI_DEEPSEEK_OPENCODE="$T/opencode" AI_DEEPSEEK_STATE_DIR="$T/state" FAKE_LOG="$T/fake.log" AI_DEEPSEEK_TEST_DIR="$T"
 # Fake 1Password: the real resolution path runs, reading the managed reference.
 mkdir -p "$T/fakebin" "$T/cfg"
 cat > "$T/fakebin/op" <<'OP'
@@ -55,7 +59,8 @@ check "implement records session" '[ "$(jq -r .session "$T/state/tasks/t1/meta.j
 check "clone is on its own branch" '[ "$(git -C "$T/state/work/t1" branch --show-current)" = deepseek/t1 ]'
 check "real repository untouched before land" '! git -C "$T/src" rev-parse -q --verify deepseek/t1 >/dev/null'
 check "key from 1Password reaches OpenCode" 'grep -q "key=test-key-secret" "$FAKE_LOG"'
-check "key never appears in any argv" '! grep -q ARGV_LEAK "$FAKE_LOG"'
+if grep -q ARGV_UNCHECKED "$FAKE_LOG"; then echo "SKIP: key never appears in any argv (no /proc on this host)"
+else check "key never appears in any argv" '! grep -q ARGV_LEAK "$FAKE_LOG"'; fi
 check "1Password token withheld from OpenCode" 'grep -q "op=unset" "$FAKE_LOG" && ! grep -q must-not-leak "$FAKE_LOG"'
 check "DeepSeek runs in a clone with no remote" 'grep -q "remote=0" "$FAKE_LOG" && [ -z "$(git -C "$T/state/work/t1" remote)" ]'
 check "profile installed from repository" 'cmp -s "$REPO_ROOT/config/opencode-deepseek/agent/deepseek-implement.md" "$T/state/xdg/config/opencode/agent/deepseek-implement.md"'
