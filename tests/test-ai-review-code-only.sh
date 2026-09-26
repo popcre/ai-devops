@@ -195,4 +195,24 @@ else
   fail 'inherited GIT_DIR redirected or broke the synthetic export'
 fi
 
+# The export tool itself enforces the repository opt-in: a direct
+# ensure-code-only call on a private repository that never declared the
+# fixtures boundary refuses exactly where the gate would (fourth exact-head
+# review of #666, 2026-09-26). The mockbin stub is bypassed with the real
+# gate for this one invocation.
+PRIV="$TMP/undeclared"; mkdir -p "$PRIV/src"
+git -C "$PRIV" init -q -b main
+git -C "$PRIV" config user.email t@e.invalid; git -C "$PRIV" config user.name T
+git -C "$PRIV" remote add origin https://github.com/u2giants/licensor-source-data.git
+printf 'print("x")'+BS+'n' > "$PRIV/src/loader.py"
+git -C "$PRIV" add -A; git -C "$PRIV" commit -qm base
+printf '["src/loader.py"]'+BS+'n' > "$TMP/priv-paths.json"
+if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$TMP/gates-state" \
+   "$SANDBOX" ensure-code-only "$PRIV" undeclared --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/undeclared.out" 2>&1; then
+  fail 'a direct code-only export started without the fixtures opt-in'
+fi
+grep -Fq 'synthetic-fixtures-only' "$TMP/undeclared.out" \
+  || fail 'the refusal did not name the missing fixtures boundary'
+pass 'a direct code-only export requires the repository opt-in'
+
 printf '%d passed; 0 failed\n' "$PASS"
