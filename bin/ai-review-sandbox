@@ -873,5 +873,5 @@ case "${1:-}" in
   is-worktree) shift; is_worktree "$(canon "${1:?usage: ai-review-sandbox is-worktree <dir>}")" ;;
   digest)      shift; source_digest "$(canon "${1:?usage: ai-review-sandbox digest <dir>}")" ;;
   --version)   printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|sweep-orphans|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
+  *) die "usage: ai-review-sandbox {ensure|ensure-copy|refresh-copy|with-copy|sweep-orphans|ensure-code-only|verify-code-only|remove-code-only|assert-public|is-private|remove-recorded|path|remove|remove-copy|is-worktree|digest} ..." ;;
 esac

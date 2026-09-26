@@ -204,9 +204,11 @@ PRIV="$TMP/undeclared"; mkdir -p "$PRIV/src"
 git -C "$PRIV" init -q -b main
 git -C "$PRIV" config user.email t@e.invalid; git -C "$PRIV" config user.name T
 git -C "$PRIV" remote add origin https://github.com/u2giants/licensor-source-data.git
-printf 'print("x")'+BS+'n' > "$PRIV/src/loader.py"
+printf 'print("x")
+' > "$PRIV/src/loader.py"
 git -C "$PRIV" add -A; git -C "$PRIV" commit -qm base
-printf '["src/loader.py"]'+BS+'n' > "$TMP/priv-paths.json"
+printf '["src/loader.py"]
+' > "$TMP/priv-paths.json"
 if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$TMP/gates-state" \
    "$SANDBOX" ensure-code-only "$PRIV" undeclared --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/undeclared.out" 2>&1; then
   fail 'a direct code-only export started without the fixtures opt-in'
@@ -229,5 +231,36 @@ if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/
 fi
 grep -Fq 'synthetic-fixtures-only' "$TMP/undeclared-env.out"   || fail 'the decoy refusal did not name the missing fixtures boundary'
 pass 'an inherited GIT_DIR cannot decoy the export opt-in'
+
+# The front door itself must strip inherited Git location variables: with
+# GIT_DIR/GIT_WORK_TREE aimed at the private tree, the synthetic HEAD capture
+# and the provider launch would otherwise bind to the private repository and
+# hand DeepSeek the private work tree instead of the stage (exact-head
+# review, 2026-09-25).
+STUB_DEEPSEEK="$TMP/stub-deepseek"
+cat > "$STUB_DEEPSEEK" <<'STUB'
+#!/usr/bin/env bash
+pwd -P > "$STUB_DEEPSEEK_CWD"
+printf 'GIT_DIR=%s\n' "${GIT_DIR:-<stripped>}" > "$STUB_DEEPSEEK_ENV"
+sha=""
+while [ "$#" -gt 0 ]; do
+  [ "$1" = "--governed-verdict" ] && sha="$2"
+  shift
+done
+printf 'VERDICT: APPROVE %s\n' "$sha"
+STUB
+chmod +x "$STUB_DEEPSEEK"
+export STUB_DEEPSEEK_CWD="$TMP/stub-deepseek-cwd" STUB_DEEPSEEK_ENV="$TMP/stub-deepseek-env"
+if ( cd "$R" && GIT_DIR="$R/.git" GIT_WORK_TREE="$R" AI_DEVOPS_TEST_MODE=1 AI_DEEPSEEK_REVIEW_BIN="$STUB_DEEPSEEK" \
+       "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved.json" --base "$BASE" ) > "$TMP/gitdir-route.out" 2>&1; then
+  STAGE_CWD="$(cat "$TMP/stub-deepseek-cwd")"
+  case "$STAGE_CWD" in "$TMP"/sandboxes/*) : ;; *) fail "provider launched in $STAGE_CWD, not the synthetic stage" ;; esac
+  grep -Fq 'GIT_DIR=<stripped>' "$TMP/stub-deepseek-env" || fail 'GIT_DIR reached the provider environment'
+  grep -Fq 'VERDICT: APPROVE' "$TMP/gitdir-route.out" || fail 'sealed route did not publish its verdict'
+  pass 'inherited GIT_DIR cannot redirect the front-door sealed route'
+else
+  cat "$TMP/gitdir-route.out" >&2
+  fail 'inherited GIT_DIR broke the front-door sealed route'
+fi
 
 printf '%d passed; 0 failed\n' "$PASS"
