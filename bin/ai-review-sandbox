@@ -245,6 +245,17 @@ source_digest() { # source_digest ROOT
   printf '%s' "$digest"
 }
 
+# Resolve the task gate explicitly, then by PATH (the offline suites stub it
+# there), then beside this script: a review started where bin/ is not on PATH
+# must still classify with its own tree's contract instead of failing closed.
+gates_bin() {
+  local candidate="${AI_TASK_GATES_BIN:-}"
+  [ -n "$candidate" ] || candidate="$(command -v ai-task-gates 2>/dev/null || true)"
+  [ -n "$candidate" ] || candidate="$SCRIPT_DIR/ai-task-gates"
+  printf '%s
+' "$candidate"
+}
+
 # The complete tracked and untracked path inventory is classified before any
 # clone, copy, or packet builder can expose a licensed repository. An empty or
 # unclassifiable inventory fails closed; Git's quoted display names are never
@@ -264,12 +275,7 @@ if any("\n" in n or "\r" in n for n in names): sys.exit(2)
 # repository classifies as none and fails closed below.
 sys.stdout.buffer.write(b"\n".join([n.encode("utf-8", "surrogateescape") for n in names]) + b"\n")
 ' > "$paths"; then rm -f "$paths"; return 2; fi
-  # Resolve the gate explicitly, then by PATH (the offline suites stub it
-  # there), then beside this script: a review started where bin/ is not on PATH
-  # must still classify with its own tree's contract instead of failing closed.
-  local gates_bin="${AI_TASK_GATES_BIN:-}"
-  [ -n "$gates_bin" ] || gates_bin="$(command -v ai-task-gates 2>/dev/null || true)"
-  [ -n "$gates_bin" ] || gates_bin="$SCRIPT_DIR/ai-task-gates"
+  local gates_bin; gates_bin="$(gates_bin)"
   [ -x "$gates_bin" ] || return 2
   decision="$(cd "$root" && "$gates_bin" explain --json --paths-from "$paths" 2>/dev/null)" \
     || { rm -f "$paths"; return 2; }
@@ -639,6 +645,20 @@ cmd_ensure_code_only() {
   if [ "$#" -eq 6 ] && [ "$5" = --base ]; then base="$6"
   elif [ "$#" -ne 4 ]; then die "usage: ensure-code-only <repo> <tag> --paths-file <JSON> [--base REF]"; fi
   paths="$(canon "$(dirname "$4")")/$(basename "$4")"
+  # The sealed route's repository opt-in is enforced here too, not only at the
+  # bin/ai-review front door: the export itself is the capability, so a direct
+  # ensure-code-only call must refuse exactly where the gate would (fourth
+  # exact-head review of #666, 2026-09-26).
+  local gate_check
+  # The gate resolves identity through git, so inherited Git location
+  # variables would classify a decoy repository instead; strip the same set
+  # the exporter strips (plus GIT_PREFIX) inside this subshell only.
+  if ! gate_check="$(
+      unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
+      cd "$root" && "$(gates_bin)" check --before code-only-review 2>&1)"; then
+    die "$(printf 'code-only export refused by the task gate:
+%s' "$(printf '%s' "$gate_check" | sed 's/^/  /')")"
+  fi
   valid_tag "$tag" || die "invalid tag '$tag'"
   python="$(command -v python3 || command -v python)" || die "Python is required for code-only export."
   mkdir -p "$SANDBOX_DIR"

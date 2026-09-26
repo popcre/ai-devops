@@ -195,6 +195,43 @@ else
   fail 'inherited GIT_DIR redirected or broke the synthetic export'
 fi
 
+# The export tool itself enforces the repository opt-in: a direct
+# ensure-code-only call on a private repository that never declared the
+# fixtures boundary refuses exactly where the gate would (fourth exact-head
+# review of #666, 2026-09-26). The mockbin stub is bypassed with the real
+# gate for this one invocation.
+PRIV="$TMP/undeclared"; mkdir -p "$PRIV/src"
+git -C "$PRIV" init -q -b main
+git -C "$PRIV" config user.email t@e.invalid; git -C "$PRIV" config user.name T
+git -C "$PRIV" remote add origin https://github.com/u2giants/licensor-source-data.git
+printf 'print("x")
+' > "$PRIV/src/loader.py"
+git -C "$PRIV" add -A; git -C "$PRIV" commit -qm base
+printf '["src/loader.py"]
+' > "$TMP/priv-paths.json"
+if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$TMP/gates-state" \
+   "$SANDBOX" ensure-code-only "$PRIV" undeclared --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/undeclared.out" 2>&1; then
+  fail 'a direct code-only export started without the fixtures opt-in'
+fi
+grep -Fq 'synthetic-fixtures-only' "$TMP/undeclared.out" \
+  || fail 'the refusal did not name the missing fixtures boundary'
+pass 'a direct code-only export requires the repository opt-in'
+# The same refusal must hold when inherited Git location variables point the
+# gate's own git calls at a decoy PUBLIC repository: the opt-in classifies
+# the tree being exported, never the environment's idea of a repository
+# (exact-head review of this follow-up, 2026-09-26).
+DECOY="$TMP/decoy-public"; mkdir -p "$DECOY"
+git -C "$DECOY" init -q -b main
+git -C "$DECOY" config user.email t@e.invalid; git -C "$DECOY" config user.name T
+printf 'plain
+' > "$DECOY/plain.txt"
+git -C "$DECOY" add -A; git -C "$DECOY" commit -qm base
+if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$TMP/gates-state"    GIT_DIR="$DECOY/.git" GIT_WORK_TREE="$DECOY"    "$SANDBOX" ensure-code-only "$PRIV" undeclared-env --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/undeclared-env.out" 2>&1; then
+  fail 'an inherited GIT_DIR opened the sealed route without the opt-in'
+fi
+grep -Fq 'synthetic-fixtures-only' "$TMP/undeclared-env.out"   || fail 'the decoy refusal did not name the missing fixtures boundary'
+pass 'an inherited GIT_DIR cannot decoy the export opt-in'
+
 # The front door itself must strip inherited Git location variables: with
 # GIT_DIR/GIT_WORK_TREE aimed at the private tree, the synthetic HEAD capture
 # and the provider launch would otherwise bind to the private repository and
