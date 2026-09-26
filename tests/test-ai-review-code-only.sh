@@ -267,7 +267,11 @@ export STUB_DEEPSEEK_CWD="$TMP/stub-deepseek-cwd" STUB_DEEPSEEK_ENV="$TMP/stub-d
 if ( cd "$R" && GIT_DIR="$R/.git" GIT_WORK_TREE="$R" AI_DEVOPS_TEST_MODE=1 AI_DEEPSEEK_REVIEW_BIN="$STUB_DEEPSEEK" \
        "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved.json" --base "$BASE" ) > "$TMP/gitdir-route.out" 2>&1; then
   STAGE_CWD="$(cat "$TMP/stub-deepseek-cwd")"
-  case "$STAGE_CWD" in "$TMP"/sandboxes/*) : ;; *) fail "provider launched in $STAGE_CWD, not the synthetic stage" ;; esac
+  # The stub reports its physical directory (pwd -P); the temp root can be a
+  # junction whose physical spelling differs from the logical $TMP, so the
+  # expectation is normalized with the same pwd -P.
+  TMP_PHYS="$(cd "$TMP" && pwd -P)"
+  case "$STAGE_CWD" in "$TMP_PHYS"/sandboxes/*) : ;; *) fail "provider launched in $STAGE_CWD, not the synthetic stage" ;; esac
   grep -Fq 'GIT_DIR=<stripped>' "$TMP/stub-deepseek-env" || fail 'GIT_DIR reached the provider environment'
   grep -Fq 'VERDICT: APPROVE' "$TMP/gitdir-route.out" || fail 'sealed route did not publish its verdict'
   pass 'inherited GIT_DIR cannot redirect the front-door sealed route'
