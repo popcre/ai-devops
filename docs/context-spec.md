@@ -71,6 +71,16 @@ private classes: a formal review snapshots the whole private repository. Any
 licensed path in the change set forces `private-evidence` even if a higher-ranked
 class was declared.
 
+The one exception is the sealed attachment-only route, `code-only-review`,
+requested solely by `bin/ai-review --code-only` (DeepSeek with an exact paths
+file; the exporter admits only the selected code and the source never becomes a
+provider working directory). It is a separate action, not a permission loop
+around `review`: the formal review action stays forbidden, and the sealed action
+refuses to start on a private class unless that repository's own
+`.ai-devops/task-gates.json` declares the `synthetic-fixtures-only` gate for
+that class. Opening the route is therefore each private repository's own
+reviewed decision, made once in its own policy file rather than per review.
+
 `bin/ai-task-gates` records the declared class at the start of work and
 rechecks the complete change set before any expensive or risky action. The
 stronger of the declared and observed classes is the effective class whose

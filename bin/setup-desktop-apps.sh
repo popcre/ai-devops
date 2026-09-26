@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+PY3="$(command -v python3 || command -v python)"
 # setup-desktop-apps.sh — wire the ai-devops MCP servers into the Linux GUI
 # apps: Claude Desktop (~/.config/Claude/claude_desktop_config.json) and the
 # ChatGPT desktop app, whose Codex agent reads ~/.codex/config.toml.
@@ -56,7 +57,7 @@ claude_desktop_running() {
 }
 
 apply_claude_desktop() {
-  python3 - "$CLAUDE_DESKTOP_CONFIG" "$CATALOG" "$DRY_RUN" "$BIN" <<'PY'
+  "$PY3" - "$CLAUDE_DESKTOP_CONFIG" "$CATALOG" "$DRY_RUN" "$BIN" <<'PY'
 import json, os, sys, time
 path, catalog_path, dry = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 sys.path.insert(0, sys.argv[4]); import mcp_policy
@@ -121,7 +122,7 @@ claude_desktop_step() {
 }
 
 apply_codex() {
-  python3 - "$CODEX_CONFIG" "$CATALOG" "$DRY_RUN" "$BIN" <<'PY'
+  "$PY3" - "$CODEX_CONFIG" "$CATALOG" "$DRY_RUN" "$BIN" <<'PY'
 import json, os, re, sys, time
 path, catalog_path, dry = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 sys.path.insert(0, sys.argv[4]); import mcp_policy

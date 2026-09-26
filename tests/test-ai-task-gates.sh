@@ -307,7 +307,112 @@ check 'the protected stop says there is no owner-request path' \
   "out '$TMP/lsd' check --before review --owner-request 'please' | grep -Fq 'no owner-request'"
 rm -f "$TMP/lsd/warner-bros/assets.csv"
 
+printf 'private code review keeps evidence and mutation boundaries\n'
+newrepo "$TMP/private" 'u2giants/licensor-source-data'
+mkdir -p "$TMP/private/disney-dcpvault" "$TMP/private/.ai-devops"
+printf '# synthetic loader code only\n' > "$TMP/private/disney-dcpvault/loader.py"
+cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]},"private-tooling":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]}}}
+EOF
+( cd "$TMP/private" && "$GATES" start --class private-tooling ) >/dev/null
+check 'the sealed route needs no owner request or acknowledgement' \
+  "rc 0 '$TMP/private' check --before code-only-review"
+check 'the formal review stays forbidden on the same change set' \
+  "rc 3 '$TMP/private' check --before review"
+check 'and that refusal still has no owner-request path' \
+  "out '$TMP/private' check --before review --owner-request 'please' | grep -Fq 'no owner-request'"
+check 'the sealed route retains central and consumer evidence requirements' \
+  "out '$TMP/private' explain --json | jq -e '.effective_class==\"private-evidence\" and ([\"privacy-classification\",\"no-raw-content-read\",\"licensed-row-containment\",\"synthetic-fixtures-only\"] - .required_gates | length==0)'"
+check 'private-evidence remains protected at its existing rank' \
+  "jq -e '.change_classes[\"private-evidence\"] | .protected==true and .rank==90' '$AI_TASK_GATES_FILE'"
+for action in deploy database infrastructure production; do
+  check "private code review cannot authorize $action even with owner override" \
+    "rc 3 '$TMP/private' check --before '$action' --owner-request 'review requested' --acknowledge 'in scope'"
+done
+# A declaration on the weaker tooling class must not open the route for a
+# sticky private-evidence change set: the opt-in is proven by the effective
+# class's own gates.
+printf 'id,name\n1,secret\n' > "$TMP/private/disney-dcpvault/rows.csv"
+cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-tooling":{"required":["synthetic-fixtures-only"]}}}
+EOF
+( cd "$TMP/private" && "$GATES" start --class private-tooling ) >/dev/null
+check 'a tooling-only declaration cannot open the route for licensed rows' \
+  "rc 3 '$TMP/private' check --before code-only-review"
+check 'and that stop still names the missing fixtures boundary' \
+  "out '$TMP/private' check --before code-only-review | grep -Fq 'synthetic-fixtures-only'"
+rm -f "$TMP/private/disney-dcpvault/rows.csv"
+cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]},"private-tooling":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]}}}
+EOF
+( cd "$TMP/private" && "$GATES" start --class code ) >/dev/null
+check 'private code still requires honest protected-class declaration' \
+  "rc 3 '$TMP/private' check --before review --acknowledge 'read only'"
+( cd "$TMP/private" && "$GATES" start --class private-tooling ) >/dev/null
+cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"gates":{"private-evidence":{"forbidden_actions":["review"]}}}
+EOF
+check 'an explicit consumer review prohibition remains binding' \
+  "rc 3 '$TMP/private' check --before review --owner-request 'review requested'"
+check 'the sealed route closes once the fixtures declaration is gone' \
+  "rc 3 '$TMP/private' check --before code-only-review"
+check 'and the stop names the missing fixtures boundary' \
+  "out '$TMP/private' check --before code-only-review | grep -Fq 'synthetic-fixtures-only'"
+
+printf 'a private repository that never declared the boundary stays closed\n'
+newrepo "$TMP/private-closed" 'u2giants/licensor-source-data'
+mkdir -p "$TMP/private-closed/scripts"
+printf '#!/bin/sh\n' > "$TMP/private-closed/scripts/check.sh"
+( cd "$TMP/private-closed" && "$GATES" start --class private-tooling ) >/dev/null
+check 'no local declaration means no sealed code-only review' \
+  "rc 3 '$TMP/private-closed' check --before code-only-review"
+check 'and the stop says which gate is missing' \
+  "out '$TMP/private-closed' check --before code-only-review | grep -Fq 'synthetic-fixtures-only'"
+check 'the formal review is still refused there' \
+  "rc 3 '$TMP/private-closed' check --before review"
+
+# A clean private checkout has an EMPTY change set, so the sealed route's
+# proof binding must be judged against the complete repository inventory,
+# never against an absent or leftover declaration (two exact-head review
+# findings on the reconciliation head, 2026-09-25).
+newrepo "$TMP/private-clean" 'u2giants/licensor-source-data'
+check 'a clean undeclared private tree refuses the sealed route' \
+  "rc 3 '$TMP/private-clean' check --before code-only-review"
+check 'and the stop names the missing fixtures boundary' \
+  "out '$TMP/private-clean' check --before code-only-review | grep -Fq 'synthetic-fixtures-only'"
+check 'while an unbound action still starts on the same clean tree' \
+  "rc 0 '$TMP/private-clean' check --before pr-wait"
+( cd "$TMP/private-clean" && "$GATES" start --class code ) >/dev/null
+check 'a leftover plain-code declaration does not open the sealed route' \
+  "rc 3 '$TMP/private-clean' check --before code-only-review"
+check 'that stop is the protected-class escalation, not a fixtures pass' \
+  "out '$TMP/private-clean' check --before code-only-review | grep -Fq 'escalated'"
+
+printf 'a quoted inventory name cannot hide a private path from the binding\n'
+newrepo "$TMP/private-quoted"
+mkdir -p "$TMP/private-quoted/outputs" "$TMP/private-quoted/.ai-devops"
+printf 'x\n' > "$TMP/private-quoted/outputs/report.txt"
+printf 'cafe row\n' > "$TMP/private-quoted/outputs/caf$(printf '\303\251').csv"
+cat > "$TMP/private-quoted/.ai-devops/task-gates.json" <<'EOF'
+{"schema_version":1,"paths":[{"glob":"outputs/**","class":"private-evidence"}]}
+EOF
+git -C "$TMP/private-quoted" add -A
+git -C "$TMP/private-quoted" commit -qm private-outputs
+check 'the non-ASCII inventory name still binds the sealed route to its class' \
+  "rc 3 '$TMP/private-quoted' check --before code-only-review"
+check 'and the stop still names the missing fixtures boundary' \
+  "out '$TMP/private-quoted' check --before code-only-review | grep -Fq 'synthetic-fixtures-only'"
+
+printf 'a public repository may use the sealed route freely\n'
+newrepo "$TMP/public-code"
+mkdir -p "$TMP/public-code/bin"
+printf '#!/bin/sh\n' > "$TMP/public-code/bin/tool.sh"
+( cd "$TMP/public-code" && "$GATES" start --class code ) >/dev/null
+check 'a public code change may start a sealed code-only review' \
+  "rc 0 '$TMP/public-code' check --before code-only-review"
+
 printf 'an undeclared task still gets classified\n'
+
 newrepo "$TMP/undeclared"
 printf 'x\n' > "$TMP/undeclared/note.md"
 check 'no declared class falls back to the observed class' "rc 3 '$TMP/undeclared' check --before review"
@@ -378,6 +483,15 @@ check 'a path rule naming an undeclared class is rejected' \
   "! '$PY_BIN' '$VALIDATE' '$SCHEMA_TMP/ghost.json'"
 check 'an unrecognised top-level key is rejected' \
   "! '$PY_BIN' '$VALIDATE' '$SCHEMA_TMP/stray.json'"
+jq '.action_gates = {"teleport": {"require_gate": {"prose": "whatever"}}}' \
+  "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-action.json"
+jq '.action_gates["code-only-review"].require_gate["made-up-class"] = "whatever"' \
+  "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-class.json"
+newrepo "$TMP/schema-repo"
+check 'an action-gate naming an unknown action fails closed' \
+  "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-action.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
+check 'an action-gate naming an undeclared class fails closed' \
+  "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-class.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
 
 # A flag given without its value must fail fast, never spin: on 2026-09-17 an
 # orphaned `start --class` burned 11 CPU-hours and starved the local GLM server.

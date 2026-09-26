@@ -15,6 +15,8 @@ config/provider-cli-versions.json
 config/reviewer-capacity.json
 config/reviewer-registry.json
 config/task-gates.json
+bin/ai-repo-policy
+config/repository-policy.json
 config/task-gates.schema.json
 config/reviewer-ci-paths.txt
 skills/shared/ask-glm/**
@@ -27,9 +29,13 @@ tests/test-all.ps1
 tests/test-all.sh
 tests/test-ai-codex-review.sh
 tests/test-ai-grok-review.sh
+tests/test-ai-review-code-only.sh
+tests/lib-review-public-fixture.sh
 tests/test-ai-review-lifecycle.sh
 tests/test-ai-review-packet.sh
 tests/test-ai-review-preflight.sh
+tests/lib-review-public-fixture.sh
+tests/test_reviewer_admission.py
 tests/test-ai-review-sandbox.sh
 tests/test-ai-review-sandbox-delete-guard.sh
 tests/test-ai-review-sandbox-self-cleanup.sh

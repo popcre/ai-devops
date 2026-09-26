@@ -70,7 +70,7 @@ usage: ai-task-gates <command> [options]
         Legacy coarse CI classification; reads paths on stdin.
   version
 
-ACTION is one of: review pr-wait ship deploy database infrastructure production
+ACTION is one of: review code-only-review pr-wait ship deploy database infrastructure production
 EOF
 }
 
@@ -85,6 +85,19 @@ load_policy(){
   jq -e '.schema_version == 1 and (.change_classes|type=="object") and (.rules|type=="array") and (.default|type=="object")' \
     "$POLICY_FILE" >/dev/null 2>&1 || fail_closed "invalid task-gate contract: $POLICY_FILE"
   load_class_table
+  validate_action_gates
+}
+
+# Per-action proof bindings must name real actions and real classes before any
+# check consults them: an entry that silently never matches would quietly drop
+# the requirement it was written to carry.
+validate_action_gates(){
+  local line action class
+  while IFS=$'\t' read -r action class; do
+    [ -n "$action" ] || continue
+    valid_action "$action" || fail_closed "action_gates names undeclared action '$action'."
+    valid_class "$class" || fail_closed "action_gates names undeclared class '$class' for action '$action'."
+  done < <(jqr '.action_gates // {} | to_entries[] | .key as $a | (.value.require_gate // {}) | keys[] | [$a,.] | @tsv' "$POLICY_FILE")
 }
 
 # The class table is read once. Classification asks for a rank on every rule of
@@ -463,13 +476,48 @@ cmd_check(){
 
   local declared declared_rank effective effective_rank protected
   declared="$(state_field declared_class)"
+  # An action bound to per-action proofs is a property of the whole repository,
+  # not of one change set. With nothing observed, judging it against a leftover
+  # or absent declaration alone would let a plain `start --class code` open the
+  # sealed route in a private repository that never opted in (exact-head review,
+  # 2026-09-25). Classify the COMPLETE inventory instead — the same set the
+  # private-source front door classifies — so the proof binding is checked
+  # against what the repository is, not against what nothing changed into.
+  if [ "$OBSERVED_CLASS" = none ] && [ -n "$(jqr --arg a "$action" '.action_gates[$a] // empty' "$POLICY_FILE")" ]; then
+    # The inventory feeds a line-based classifier, and Git's display quoting
+    # rewrites non-ASCII and special-character names into spellings no path
+    # rule matches, which would drop them to the fallback class and silently
+    # skip the proof binding (exact-head review, 2026-09-25). Convert the NUL
+    # stream exactly as the sandbox does; a name carrying a CR or LF byte still
+    # refuses rather than mis-splitting.
+    local inv_python inv_names
+    inv_python="$(command -v python3 || command -v python)" \
+      || fail_closed "python is required to classify the repository inventory for '$action'."
+    if ! inv_names="$(git -C "$TOPLEVEL" ls-files -co --exclude-standard -z | "$inv_python" -c '
+import sys
+names=[n.decode("utf-8", "surrogateescape") for n in sys.stdin.buffer.read().split(b"\0") if n]
+if any("\n" in n or "\r" in n for n in names): sys.exit(2)
+sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateescape"))
+')"; then
+      fail_closed "the repository inventory contains file names this gate cannot represent; refusing to start '$action'."
+    fi
+    printf 'ai-task-gates: note: no change set observed; classifying the complete inventory for the proof-bound action "%s".\n' "$action" >&2
+    classify_paths "$IDENTITY" "$(printf '%s\n' "$inv_names" | LC_ALL=C sort -u)"
+  fi
   if [ -z "$declared" ]; then
     if [ "$OBSERVED_CLASS" = none ]; then
       case "$action" in
-        deploy|database|infrastructure|production)
+        deploy|database|infrastructure|production|code-only-review)
           fail_closed "no changes and no task class were found; refusing to start '$action' without an explicit declaration." ;;
-        *) printf 'ai-task-gates: no changes observed; "%s" may start.\n' "$action"; return 0 ;;
       esac
+      # An action bound to per-action proofs can never take the empty-change-set
+      # exit: its action_gates requirement is checked against a classified
+      # change set's required proofs, so with nothing observed the binding must
+      # refuse instead of silently skipping past the opt-in it exists to enforce.
+      if [ -n "$(jqr --arg a "$action" '.action_gates[$a] // empty' "$POLICY_FILE")" ]; then
+        fail_closed "no changes and no task class were found; refusing to start '$action': its action_gates proof binding can only be checked against a classified change set."
+      fi
+      printf 'ai-task-gates: no changes observed; "%s" may start.\n' "$action"; return 0
     fi
     declared="$OBSERVED_CLASS"
     printf 'ai-task-gates: note: no task class was declared; using the observed class "%s".\n' "$OBSERVED_CLASS" >&2
@@ -535,6 +583,20 @@ cmd_check(){
     state_record_override owner-request "$action" "$owner_request" "$effective"
     printf 'ai-task-gates: "%s" allowed by explicit owner request: %s\n' "$action" "$owner_request"
     return 0
+  fi
+
+  # 3. Per-action proof binding. The sealed code-only review route is an
+  # action a private class may start without an owner request, but only while
+  # the repository's own declaration carries the fixtures boundary the route
+  # promises. The binding is proven by the EFFECTIVE class's own merged
+  # proofs, never by a stronger declared class's: a private-tooling
+  # declaration must not open the route for a sticky private-evidence change.
+  local needs_gate effective_required
+  needs_gate="$(jqr --arg a "$action" --arg c "$effective" '.action_gates[$a].require_gate[$c] // empty' "$POLICY_FILE")"
+  effective_required="$(printf '%s\n' "$effective_gate" | sed -n 's/^required\t//p')"
+  if [ -n "$needs_gate" ] && ! printf '%s\n' "$effective_required" | grep -qx -- "$needs_gate"; then
+    blocked "$(printf 'ai-task-gates: STOP. "%s" needs the "%s" gate for the class "%s" in %s.\nThis repository has not declared that gate in its own .ai-devops/task-gates.json for that class, so the sealed route is not opened here. Add the declaration through that repository\x27s own reviewed path.' \
+      "$action" "$needs_gate" "$effective" "$IDENTITY")"
   fi
 
   printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"

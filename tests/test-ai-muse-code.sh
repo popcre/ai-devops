@@ -12,6 +12,8 @@ SCRIPT="$ROOT/bin/ai-muse"
 PASS=0; FAIL=0
 check(){ local label="$1" out; shift; if out="$(bash -c "$1" 2>&1)"; then printf 'PASS  %s\n' "$label"; PASS=$((PASS+1)); else printf 'FAIL  %s\n' "$label"; printf '%s\n' "$out" | tail -n 8 | sed 's/^/      /'; FAIL=$((FAIL+1)); fi; }
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/muse-code-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 command -v jq >/dev/null 2>&1 || { printf 'SKIP  jq unavailable\n'; exit 0; }
 PYTHON="$(command -v python3 || command -v python)" || { printf 'SKIP  python unavailable\n'; exit 0; }
 

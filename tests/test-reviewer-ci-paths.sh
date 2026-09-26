@@ -21,7 +21,11 @@ tg_reviewer_ci_path() { tg_legacy_classify pull_request <<<"$1" | grep -qx 'revi
 #    ai-review-preflight names every provider wrapper in its dispatch table but
 #    runs only the one requested; the suites never request these, so they are
 #    mentions, not dependencies. A new edge anywhere else fails this test.
-MENTION_ONLY=' bin/ai-claude-review bin/ai-deepseek-agent bin/ai-gemini bin/ai-glm bin/ai-kimi bin/ai-qwen bin/ai-stepfun '
+# tests/lib-selection.sh is named in a task-gates.sh header comment, and this
+# suite's own policy file is read (not loaded-from) by the classifier at runtime;
+# following either as an edge would pull the whole CI selection layer into the
+# reviewer lane. The policy file itself stays required below.
+MENTION_ONLY=' bin/ai-claude-review bin/ai-deepseek-agent bin/ai-gemini bin/ai-glm bin/ai-kimi bin/ai-qwen bin/ai-stepfun tests/lib-selection.sh config/reviewer-ci-paths.txt '
 tracked() { [ -f "$1" ] && git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }
 references() {
   local file="$1" dir r

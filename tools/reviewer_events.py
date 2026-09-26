@@ -305,6 +305,40 @@ def sandbox_marker(sandbox):
     marker = physical(Path(sandbox) / ".ai-review-sandbox")
     boundary, data = snapshot(marker, "log")
     require(boundary["exists"] and data, "sandbox ownership marker is unavailable")
+    try:
+        sealed = json.loads(data)
+    except (ValueError, UnicodeDecodeError):
+        sealed = None
+    if isinstance(sealed, dict) and sealed.get("mode") == "code-only":
+        require(not (Path(sandbox) / ".ai-review-sandbox").is_symlink() and
+                sealed.get("schema_version") == 1 and
+                isinstance(sealed.get("source_id"), str) and
+                re.fullmatch(r"[0-9a-f]{64}", sealed["source_id"]) and
+                isinstance(sealed.get("export_head"), str) and
+                re.fullmatch(r"[0-9a-f]{40}", sealed["export_head"]),
+                "code-only sealed marker is invalid")
+        owner_file = marker.parent.with_name(marker.parent.name + ".owners.json")
+        require(not owner_file.is_symlink(), "code-only ownership sidecar is linked")
+        side_boundary, side_data = snapshot(owner_file, "json")
+        require(side_boundary["exists"] and side_data, "code-only ownership sidecar is missing")
+        try:
+            ownership = json.loads(side_data)
+        except (ValueError, UnicodeDecodeError):
+            raise Blocked("code-only ownership sidecar is malformed")
+        require(isinstance(ownership, dict) and ownership.get("schema_version") == 1 and
+                ownership.get("mode") == "code-only" and ownership.get("marker_sha256") == digest(data) and
+                ownership.get("source_id") == sealed.get("source_id") and
+                ownership.get("export_head") == sealed.get("export_head"),
+                "code-only ownership binding differs from sealed marker")
+        source = ownership.get("review_source")
+        require(isinstance(source, str) and source and Path(source).is_dir(),
+                "code-only review source is unavailable")
+        owners = ownership.get("owners")
+        require(isinstance(owners, list) and
+                all(isinstance(owner, str) and re.fullmatch(r"[a-z]+:[0-9a-f]{32}", owner)
+                    for owner in owners) and len(owners) == len(set(owners)),
+                "code-only ownership list is invalid")
+        return marker, boundary, data, [str(physical(source))], owners
     lines = data.decode("utf-8").splitlines()
     require(lines.count("evidence_format=1") == 1,
             "legacy sandbox ownership is unknown; use ai-reviewer-issue evidence reconcile-sandbox PROVIDER SANDBOX METADATA REPORT with exact private evidence")
@@ -321,6 +355,41 @@ def sandbox_marker(sandbox):
 def write_sandbox_owner(marker, boundary, data, owner):
     current, current_data = snapshot(marker, "log")
     require(current == boundary and current_data == data, "sandbox ownership changed during binding")
+    try:
+        sealed = json.loads(data)
+    except (ValueError, UnicodeDecodeError):
+        sealed = None
+    if isinstance(sealed, dict) and sealed.get("mode") == "code-only":
+        owner_file = marker.parent.with_name(marker.parent.name + ".owners.json")
+        require(not owner_file.is_symlink(), "code-only ownership sidecar is linked")
+        side_boundary, side_data = snapshot(owner_file, "json")
+        require(side_boundary["exists"] and side_data, "code-only ownership sidecar is missing")
+        ownership = json.loads(side_data)
+        require(isinstance(ownership, dict) and isinstance(ownership.get("owners"), list) and
+                ownership.get("marker_sha256") == digest(data) and
+                ownership.get("source_id") == sealed.get("source_id") and
+                ownership.get("export_head") == sealed.get("export_head"),
+                "code-only ownership changed during binding")
+        value = owner.removeprefix("evidence_owner=")
+        require(re.fullmatch(r"[a-z]+:[0-9a-f]{32}", value), "invalid sandbox evidence owner")
+        require(value not in ownership["owners"], "duplicate sandbox evidence owner")
+        ownership["owners"].append(value)
+        fd, tmp = tempfile.mkstemp(prefix=".evidence-owner.", dir=owner_file.parent)
+        try:
+            with os.fdopen(fd, "wb") as output:
+                output.write(encoded(ownership) + b"\n")
+                output.flush()
+                os.fsync(output.fileno())
+            current, current_data = snapshot(marker, "log")
+            later, later_data = snapshot(owner_file, "json")
+            require(current == boundary and current_data == data and
+                    later == side_boundary and later_data == side_data,
+                    "code-only ownership changed during binding")
+            os.replace(tmp, owner_file)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        return
     fd, tmp = tempfile.mkstemp(prefix=".evidence-owner.", dir=marker.parent)
     try:
         with os.fdopen(fd, "wb") as output:

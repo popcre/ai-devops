@@ -24,6 +24,16 @@ PASS=0; FAIL=0
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Synthetic test repositories are intentionally unregistered. Declare only
+# these fixtures public; the production path still fails closed on unknowns.
+mkdir -p "$TMP/mockbin"
+cat > "$TMP/mockbin/ai-task-gates" <<'EOF'
+#!/usr/bin/env bash
+printf '{"identity_resolved":true,"effective_class":"code","observed_class":"code"}\n'
+EOF
+chmod +x "$TMP/mockbin/ai-task-gates"
+export PATH="$TMP/mockbin:$PATH"
+
 # --- a repo with a main branch, a feature branch, edits and an untracked file --
 R="$TMP/repo"
 mkdir -p "$R"
