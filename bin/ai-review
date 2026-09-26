@@ -85,6 +85,13 @@ if [ "$code_only" -eq 1 ]; then
   paths_file="$(cd "$(dirname "$paths_file")" && pwd -P)/$(basename "$paths_file")"
 fi
 SANDBOX="$REAL_DIR/ai-review-sandbox"
+# Git location variables override `git -C` and would aim every later Git call —
+# source resolution, the synthetic export's head capture, the packet build, and
+# the provider launch — at whatever repository a hook or wrapper inherited,
+# binding the sealed verdict to the wrong tree. This front door reviews the
+# checkout it was invoked in; inherited locations are stripped whole
+# (exact-head review, 2026-09-25).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_ALTERNATE_OBJECT_DIRECTORIES
 source_root="$(git rev-parse --show-toplevel 2>/dev/null)" || { printf 'ai-review: cannot resolve the source repository.\n' >&2; exit 3; }
 if "$SANDBOX" is-private "$source_root" >/dev/null; then
   private_source=1
