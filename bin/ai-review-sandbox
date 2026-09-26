@@ -250,7 +250,13 @@ source_digest() { # source_digest ROOT
 # must still classify with its own tree's contract instead of failing closed.
 gates_bin() {
   local candidate="${AI_TASK_GATES_BIN:-}"
-  [ -n "$candidate" ] || candidate="$(command -v ai-task-gates 2>/dev/null || true)"
+  if [ -z "$candidate" ]; then
+    candidate="$(command -v ai-task-gates 2>/dev/null || true)"
+    # A relative PATH entry (for example '.') resolves against whatever
+    # directory the caller stands in, which here is the tree being
+    # classified or exported; only an absolute resolution may answer.
+    case "$candidate" in /*) ;; *) candidate="" ;; esac
+  fi
   [ -n "$candidate" ] || candidate="$SCRIPT_DIR/ai-task-gates"
   printf '%s
 ' "$candidate"
@@ -649,13 +655,18 @@ cmd_ensure_code_only() {
   # bin/ai-review front door: the export itself is the capability, so a direct
   # ensure-code-only call must refuse exactly where the gate would (fourth
   # exact-head review of #666, 2026-09-26).
-  local gate_check
-  # The gate resolves identity through git, so inherited Git location
-  # variables would classify a decoy repository instead; strip the same set
-  # the exporter strips (plus GIT_PREFIX) inside this subshell only.
+  local gate_check gate_bin_path
+  # Resolve the gate BEFORE entering the tree: a PATH entry relative to the
+  # directory being exported must not answer the gate after cd, and the
+  # resolved path must be executable (exact-head review, 2026-09-26). The
+  # gate resolves identity through git, so inherited Git location variables
+  # would classify a decoy repository instead; strip the set the exporter
+  # strips (plus GIT_PREFIX) inside this subshell only.
+  gate_bin_path="$(gates_bin)"
+  [ -x "$gate_bin_path" ] || die "code-only export refused: task gate is not executable."
   if ! gate_check="$(
-      unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
-      cd "$root" && "$(gates_bin)" check --before code-only-review 2>&1)"; then
+      unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX GIT_ALTERNATE_OBJECT_DIRECTORIES
+      cd "$root" && "$gate_bin_path" check --before code-only-review 2>&1)"; then
     die "$(printf 'code-only export refused by the task gate:
 %s' "$(printf '%s' "$gate_check" | sed 's/^/  /')")"
   fi

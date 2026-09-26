@@ -231,6 +231,19 @@ if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/
 fi
 grep -Fq 'synthetic-fixtures-only' "$TMP/undeclared-env.out"   || fail 'the decoy refusal did not name the missing fixtures boundary'
 pass 'an inherited GIT_DIR cannot decoy the export opt-in'
+# The gate binary is resolved BEFORE entering the tree: a planted
+# ai-task-gates on a relative PATH entry must not answer the opt-in check
+# for the tree being exported (exact-head review, 2026-09-26).
+mkdir -p "$PRIV"
+printf '#!/usr/bin/env bash
+exit 0
+' > "$PRIV/ai-task-gates"
+chmod +x "$PRIV/ai-task-gates"
+if (unset AI_TASK_GATES_BIN; cd "$PRIV" && PATH=".:$PATH" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$TMP/gates-state"     "$SANDBOX" ensure-code-only "$PRIV" planted-gate --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/planted.out" 2>&1); then
+  fail 'a planted PATH gate opened the sealed route without the opt-in'
+fi
+grep -Fq 'synthetic-fixtures-only' "$TMP/planted.out"   || fail 'the planted-gate refusal did not name the missing fixtures boundary'
+pass 'a planted PATH gate cannot answer the export opt-in'
 
 # The front door itself must strip inherited Git location variables: with
 # GIT_DIR/GIT_WORK_TREE aimed at the private tree, the synthetic HEAD capture
@@ -254,7 +267,11 @@ export STUB_DEEPSEEK_CWD="$TMP/stub-deepseek-cwd" STUB_DEEPSEEK_ENV="$TMP/stub-d
 if ( cd "$R" && GIT_DIR="$R/.git" GIT_WORK_TREE="$R" AI_DEVOPS_TEST_MODE=1 AI_DEEPSEEK_REVIEW_BIN="$STUB_DEEPSEEK" \
        "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved.json" --base "$BASE" ) > "$TMP/gitdir-route.out" 2>&1; then
   STAGE_CWD="$(cat "$TMP/stub-deepseek-cwd")"
-  case "$STAGE_CWD" in "$TMP"/sandboxes/*) : ;; *) fail "provider launched in $STAGE_CWD, not the synthetic stage" ;; esac
+  # The stub reports its physical directory (pwd -P); the temp root can be a
+  # junction whose physical spelling differs from the logical $TMP, so the
+  # expectation is normalized with the same pwd -P.
+  TMP_PHYS="$(cd "$TMP" && pwd -P)"
+  case "$STAGE_CWD" in "$TMP_PHYS"/sandboxes/*) : ;; *) fail "provider launched in $STAGE_CWD, not the synthetic stage" ;; esac
   grep -Fq 'GIT_DIR=<stripped>' "$TMP/stub-deepseek-env" || fail 'GIT_DIR reached the provider environment'
   grep -Fq 'VERDICT: APPROVE' "$TMP/gitdir-route.out" || fail 'sealed route did not publish its verdict'
   pass 'inherited GIT_DIR cannot redirect the front-door sealed route'
