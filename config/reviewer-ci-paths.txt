@@ -34,7 +34,6 @@ tests/lib-review-public-fixture.sh
 tests/test-ai-review-lifecycle.sh
 tests/test-ai-review-packet.sh
 tests/test-ai-review-preflight.sh
-tests/lib-review-public-fixture.sh
 tests/test_reviewer_admission.py
 tests/test-ai-review-sandbox.sh
 tests/test-ai-review-sandbox-delete-guard.sh
