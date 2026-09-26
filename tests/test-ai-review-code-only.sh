@@ -214,5 +214,20 @@ fi
 grep -Fq 'synthetic-fixtures-only' "$TMP/undeclared.out" \
   || fail 'the refusal did not name the missing fixtures boundary'
 pass 'a direct code-only export requires the repository opt-in'
+# The same refusal must hold when inherited Git location variables point the
+# gate's own git calls at a decoy PUBLIC repository: the opt-in classifies
+# the tree being exported, never the environment's idea of a repository
+# (exact-head review of this follow-up, 2026-09-26).
+DECOY="$TMP/decoy-public"; mkdir -p "$DECOY"
+git -C "$DECOY" init -q -b main
+git -C "$DECOY" config user.email t@e.invalid; git -C "$DECOY" config user.name T
+printf 'plain
+' > "$DECOY/plain.txt"
+git -C "$DECOY" add -A; git -C "$DECOY" commit -qm base
+if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$TMP/gates-state"    GIT_DIR="$DECOY/.git" GIT_WORK_TREE="$DECOY"    "$SANDBOX" ensure-code-only "$PRIV" undeclared-env --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/undeclared-env.out" 2>&1; then
+  fail 'an inherited GIT_DIR opened the sealed route without the opt-in'
+fi
+grep -Fq 'synthetic-fixtures-only' "$TMP/undeclared-env.out"   || fail 'the decoy refusal did not name the missing fixtures boundary'
+pass 'an inherited GIT_DIR cannot decoy the export opt-in'
 
 printf '%d passed; 0 failed\n' "$PASS"

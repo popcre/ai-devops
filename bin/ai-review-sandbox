@@ -650,7 +650,12 @@ cmd_ensure_code_only() {
   # ensure-code-only call must refuse exactly where the gate would (fourth
   # exact-head review of #666, 2026-09-26).
   local gate_check
-  if ! gate_check="$(cd "$root" && "$(gates_bin)" check --before code-only-review 2>&1)"; then
+  # The gate resolves identity through git, so inherited Git location
+  # variables would classify a decoy repository instead; strip the same set
+  # the exporter strips (plus GIT_PREFIX) inside this subshell only.
+  if ! gate_check="$(
+      unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
+      cd "$root" && "$(gates_bin)" check --before code-only-review 2>&1)"; then
     die "$(printf 'code-only export refused by the task gate:
 %s' "$(printf '%s' "$gate_check" | sed 's/^/  /')")"
   fi
