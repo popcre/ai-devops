@@ -17,6 +17,7 @@ command result, a path on GitHub, or an issue number.
 | Where | What it was | Size seen |
 |-------|-------------|-----------|
 | `C:\Users\<user>\.local\state\ai-devops\review-sandboxes\` | Full Git clones of repos made for AI reviews (history included) | **~192 GB / 3,950 folders** |
+| `C:\Users\<user>\.zcode\cli\exec\` | ZCode exec session stdout logs — one runaway log hit **197 GB** | **~198 GB / 1 file** (2026-09-27) |
 | `C:\Users\<user>\.codex\worktrees\` | Codex task working copies | **~34 GB / 160 folders** |
 | `C:\Users\<user>\.codex\` root | Chat/thread SQLite logs + `.bak` leftovers | several GB |
 | `C:\Users\<user>\.codex\archived_sessions\` | Old chat archives | several GB |
@@ -35,11 +36,12 @@ never enforced in code.
 
 Do these in order. Stop when you have enough free space to work.
 
-1. **Measure — do not guess.**
+1. **Measure — do not guess.** Use `Win32_LogicalDisk`, not `Get-PSDrive` (PSDrive free space can read stale on Windows):
    ```powershell
-   Get-PSDrive C | Select-Object @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}},@{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}}
+   Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" |
+     Select-Object @{n='FreeGB';e={[math]::Round($_.FreeSpace/1GB,1)}},@{n='SizeGB';e={[math]::Round($_.Size/1GB,1)}}
    ```
-2. **Size the known debris roots** (fast size via `robocopy /L`, not recursive `Get-ChildItem` — those time out):
+2. **Size the known debris roots** (fast size via `robocopy /L`, not recursive `Get-ChildItem` — those time out). Include **ZCode exec logs** first — a single file can be 100 GB+:
    ```powershell
    function Get-FastSize($path) {
      if (-not (Test-Path -LiteralPath $path)) { return 0 }
@@ -50,6 +52,7 @@ Do these in order. Stop when you have enough free space to work.
      return 0
    }
    Get-FastSize "$env:USERPROFILE\.local\state\ai-devops\review-sandboxes"
+   Get-FastSize "$env:USERPROFILE\.zcode\cli\exec"
    Get-FastSize "$env:USERPROFILE\.codex\worktrees"
    Get-FastSize "$env:USERPROFILE\.codex\archived_sessions"
    Get-FastSize "$env:USERPROFILE\.codex"
