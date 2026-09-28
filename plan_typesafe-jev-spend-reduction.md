@@ -12,6 +12,8 @@
 | 4. Trial the substitution on eligible public work | open | 2026-09-27 | Paired before/after token and quality report |
 | 5. Keep or retire, then install and verify if kept | open | 2026-09-27 | Merged commit, checks, installed proof or no-go record |
 
+**Exploratory Jevgrep check (2026-09-28):** A separate search-tool trial did not identify a displaced paid model call or establish net token savings. Transcript command counts are only an upper bound on candidate searches; five-file Jevgrep comparisons were too small to establish a workflow saving, and broader searches did not complete within the trial limits. Step 1 remains open and must meet its billable-baseline acceptance criteria. See the [Jevgrep evaluation handoff](HANDOFF.d/2026-09-28T1123Z-edge-dev3-codex-jevgrep-search-evaluation.md) for the exact attempts, privacy boundary, and next test.
+
 **Fresh-session start:** read `AGENTS.md`, this STATUS table, §1, §5–§9, and the existing [Jev advisory plan](plan_typesafe-jev-advisory-integrations.md) STATUS. Claim only the first open row. Recheck live state; a dated plan is not proof of installed state. At each phase boundary use `fresh-session`, reread downstream steps, and update STATUS/current state in the same PR.
 
 ## 1. The ultimate goal — what we are actually trying to achieve
