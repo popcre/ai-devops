@@ -431,12 +431,12 @@ if [ "$QUOTA_ACTIVE" != off ] && [[ "$API_HOST" =~ ^[a-z0-9][a-z0-9.-]*$ ]] && c
       sleep_ms "$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 + JITTER_MS - $(now_ms) ))"
       put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
       principal="$(timeout "$PROBE_TIMEOUT" "$REAL" api user "${PROBE_HOST[@]}" --jq .id 2>/dev/null | tr -d '\r\n')"
-      IDENTITY_REQUESTED=1
       lookup_status=$?
+      IDENTITY_REQUESTED=1
       if [ "$MEASURE_READY" = 1 ]; then
         gh_measure_identity_lookup "$lookup_status" "$principal" || say "request measurement unavailable: identity lookup not saved"
       fi
-      if isnum "$principal"; then CONTEXT="$context_hint $principal"; IDENTITY_VERIFIED=1; else principal=unknown; fi
+      if [ "$lookup_status" -eq 0 ] && isnum "$principal"; then CONTEXT="$context_hint $principal"; IDENTITY_VERIFIED=1; else principal=unknown; fi
       put "$identity_file" "$principal $(now)" || { say "cannot save GitHub identity cache"; exit 3; }
     fi
     if [ "$IDENTITY_VERIFIED" = 1 ] && [ "$credential_class" = pat ]; then
@@ -602,6 +602,12 @@ if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ]; then
     case "$a" in --jq|-q|-q?*|--jq=*|--template|-t|-t?*|--template=*|--silent|--include|-i) GRAPH_TRANSFORMED=1 ;; esac
   done
 fi
+if [ "$GRAPH_TRANSFORMED" = 1 ]; then
+  # gh has already transformed or suppressed the body before this wrapper can
+  # inspect it. Keep the original CLI result and record that HTTP-200 GraphQL
+  # application errors could not be classified from this output shape.
+  GH_MEASURE_REQUEST_CLASS=graphql_transformed_unobservable
+fi
 if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED" = 0 ] && command -v jq >/dev/null 2>&1; then
   GRAPH_DIR="$(umask 077; mktemp -d "$STATE/graphql-class.XXXXXX")" || { say "cannot prepare private GraphQL classifier"; exit 3; }
   GRAPH_META="$GRAPH_DIR/result"; GRAPH_FIFO="$GRAPH_DIR/stream"
@@ -647,16 +653,20 @@ if [ -n "$GRAPH_PID" ]; then
 fi
 put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
 if [ "$rc" -ne 0 ]; then
-  # Exact failure record: HTTP status, rate-limit headers, and message body,
-  # credentials redacted. gh does not surface response headers on failure, so
-  # the header snapshot comes from a free `rate_limit` request made right after.
+  # Exact failure record: status and stderr, with credentials redacted. gh
+  # does not surface failed-call headers; a primary-limit refusal alone earns
+  # a separate, paced rate_limit diagnostic request.
   hdr=''
   # Header snapshot: one request, never after a SECONDARY limit refusal (it would
   # add to the burst GitHub is already refusing).
   secondary=0
   grep -Eiq 'secondary rate limit|abuse detection|HTTP 429|too many requests|retry-after' "$err" && secondary=1
   snapshot=''
-  if [ "$QUOTA_ACTIVE" != off ] && [ "$secondary" = 0 ]; then
+  # A diagnostic read is useful only for a primary-limit refusal. Ordinary
+  # failures and GraphQL application errors must not cause another request.
+  primary_evidence=0
+  grep -Eiq 'API rate limit( already)? exceeded|rate limit( already)? exceeded for' "$err" && primary_evidence=1
+  if [ "$QUOTA_ACTIVE" != off ] && [ "$secondary" = 0 ] && [ "$primary_evidence" = 1 ]; then
     snapshot="$(failure_quota_snapshot 2>/dev/null | tr -d '\r')"
     hdr="$(printf '%s\n' "$snapshot" | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)')"
   fi

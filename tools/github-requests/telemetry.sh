@@ -27,6 +27,7 @@ gh_measure_init(){
   fi
   GH_MEASURE_EXECUTED=0
   GH_MEASURE_PRINCIPAL=unknown
+  GH_MEASURE_REQUEST_CLASS=unknown
 }
 
 gh_measure_clock(){
@@ -54,8 +55,8 @@ gh_measure_finish(){
   [ "$status" = 0 ] && result=success
   [ "$status" = 75 ] && result=deferred
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1
-  record=$(printf '{"schema":1,"utc":"%s","operation":"%s","caller":"%s","api_host":"unknown","principal":"%s","machine":"local","repository":"redacted","request_class":"unknown","bucket":"%s","cli_executions":%s,"http_requests":null,"graphql_points":null,"measurement":"opaque_cli_estimate","cache_hit":false,"latency_ms":%s,"result":"%s","exit_status":%s,"reset":null}' \
-    "$utc" "$GH_MEASURE_OPERATION" "$GH_MEASURE_CALLER" "$GH_MEASURE_PRINCIPAL" "$bucket" "$GH_MEASURE_EXECUTED" "$elapsed" "$result" "$status")
+  record=$(printf '{"schema":1,"utc":"%s","operation":"%s","caller":"%s","api_host":"unknown","principal":"%s","machine":"local","repository":"redacted","request_class":"%s","bucket":"%s","cli_executions":%s,"http_requests":null,"graphql_points":null,"measurement":"opaque_cli_estimate","cache_hit":false,"latency_ms":%s,"result":"%s","exit_status":%s,"reset":null}' \
+    "$utc" "$GH_MEASURE_OPERATION" "$GH_MEASURE_CALLER" "$GH_MEASURE_PRINCIPAL" "$GH_MEASURE_REQUEST_CLASS" "$bucket" "$GH_MEASURE_EXECUTED" "$elapsed" "$result" "$status")
   gh_measure_append "$STATE/measurements" "$record"
 }
 
@@ -66,7 +67,7 @@ gh_measure_identity_lookup(){
   local status="$1" principal="${2:-}" result=failed utc record
   [[ "$status" =~ ^[0-9]{1,3}$ ]] || status=1
   if [ "$status" = 0 ]; then result=success; fi
-  gh_measure_set_principal "$principal"
+  if [ "$status" = 0 ]; then gh_measure_set_principal "$principal"; fi
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1
   record=$(printf '{"schema":1,"utc":"%s","operation":"api.identity","caller":"%s","api_host":"unknown","principal":"%s","machine":"local","repository":"redacted","request_class":"identity_probe","bucket":"core","cli_executions":1,"http_requests":null,"graphql_points":null,"measurement":"direct_api_invocation_estimate","cache_hit":false,"latency_ms":null,"result":"%s","exit_status":%s,"reset":null}' \
     "$utc" "$GH_MEASURE_CALLER" "$GH_MEASURE_PRINCIPAL" "$result" "$status")

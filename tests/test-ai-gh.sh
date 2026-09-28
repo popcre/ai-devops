@@ -14,7 +14,7 @@ FAKE="$TMP/fake-gh"
 cat > "$FAKE" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-} ${2:-}" = 'auth token' ]; then printf '%s\n' "${FAKE_TOKEN:-fixture-token}"; exit 0; fi
-if [ "${1:-} ${2:-}" = 'api user' ]; then [ -z "${FAKE_IDENTITY_LOG:-}" ] || printf 'lookup\n' >> "$FAKE_IDENTITY_LOG"; printf '%s\n' "${FAKE_PRINCIPAL:-55610577}"; exit 0; fi
+if [ "${1:-} ${2:-}" = 'api user' ]; then [ -z "${FAKE_IDENTITY_LOG:-}" ] || printf 'lookup\n' >> "$FAKE_IDENTITY_LOG"; printf '%s\n' "${FAKE_PRINCIPAL:-55610577}"; exit "${FAKE_IDENTITY_STATUS:-0}"; fi
 echo "start $(date +%s%N) $*" >> "$FAKE_LOG"
 case "${FAKE_MODE:-ok}" in
   ok) sleep "${FAKE_SLEEP:-0}"; if [ -n "${FAKE_HOLD:-}" ] && [ -e "$FAKE_HOLD" ]; then echo "held $*" >> "$FAKE_LOG"; while [ -e "$FAKE_HOLD" ]; do sleep 0.1; done; fi; echo "out:$*" ;;
@@ -130,9 +130,9 @@ rm -f "$TMP/state/backoff_until"
 : > "$FAKE_LOG"
 for i in 1 2; do FAKE_MODE=spaced-failure AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1 & done
 wait
-# Four reservations (two commands and two failure probes) must not collapse
-# into a burst, while process launch after the lock can reorder under load.
-check 'concurrent ordinary failures serialize and space every probe and request' "[ \$(grep -c 'api --include rate_limit' '$FAKE_LOG') -eq 2 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{if(n!=4 || (t[4]-t[1])/1000000 < 5000) exit 1; for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 1000) exit 1}'"
+# Ordinary failures need no diagnostic quota request. Both commands still
+# reserve separate starts even when their processes launch in either order.
+check 'concurrent ordinary failures retain spacing without diagnostic probes' "! grep -q 'api --include rate_limit' '$FAKE_LOG' && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{if(n!=2 || (t[2]-t[1])/1000000 < 1000) exit 1}'"
 : > "$FAKE_LOG"
 FAKE_MODE=primary AI_GH_QUOTA_PROBE_SECONDS=0 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1; rc=$?
 check 'primary refusal snapshot also respects minimum start spacing' "[ $rc -eq 75 ] && [ \$(grep -c 'api --include rate_limit' '$FAKE_LOG') -eq 1 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 1900) exit 1}'"
@@ -298,6 +298,10 @@ FAKE_TOKEN=ghp_PAT_A FAKE_MODE=quota FAKE_REMAINING=4000 AI_GH_QUOTA_PROBE_SECON
 : > "$FAKE_LOG"; : > "$TMP/pat-identity-log"
 FAKE_IDENTITY_LOG="$TMP/pat-identity-log" FAKE_TOKEN=ghp_PAT_B FAKE_MODE=quota FAKE_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1; rc=$?
 check 'verified PATs for one principal share guarded local quota without another rate-limit probe' "[ $rc -eq 0 ] && ! grep -q 'api rate_limit' '$FAKE_LOG' && grep -q 'api repos/o/r' '$FAKE_LOG' && [ \$(wc -l < '$TMP/pat-identity-log') -eq 1 ]"
+fresh_quota
+FAKE_TOKEN=ghp_PAT_FAILED FAKE_IDENTITY_STATUS=1 FAKE_PRINCIPAL=55610577 FAKE_MODE=quota FAKE_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1; rc=$?
+check 'failed identity lookup with numeric output never verifies or shares principal quota' "[ $rc -eq 75 ] && grep -q 'api rate_limit' '$FAKE_LOG' && ! grep -q 'api repos/o/r' '$FAKE_LOG' && jq -se '[.[] | select(.operation == \"api.identity\")][-1].exit_status == 1' '$TMP/state/measurements/'*.jsonl"
+fresh_quota
 FAKE_MODE=graphql-200-primary AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/partial-primary" 2>/dev/null; rc=$?
 check 'GraphQL HTTP-200 primary error preserves partial output and records its own pause' "[ $rc -eq 75 ] && jq -e '.data.viewer.login == \"partial\"' '$TMP/partial-primary' && [ \$(cat '$TMP/state/quota-pause.graphql') -gt \$(date +%s) ]"
 fresh_quota
@@ -306,6 +310,7 @@ check 'GraphQL HTTP-200 secondary error preserves partial output and uses shared
 fresh_quota
 FAKE_MODE=graphql-200-partial AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/partial-other" 2>/dev/null; rc=$?
 check 'GraphQL partial non-limit result returns failure and preserves output' "[ $rc -eq 1 ] && jq -e '.errors[0].message == \"field unavailable\" and .data.viewer.login == \"partial\"' '$TMP/partial-other'"
+check 'GraphQL application error adds no diagnostic quota request' "! grep -q 'api --include rate_limit' '$FAKE_LOG'"
 fresh_quota
 FAKE_MODE=graphql-cli-error AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/graphql-cli-error-out" 2> "$TMP/graphql-cli-error-err"; rc=$?
 check 'failed GraphQL command keeps its original error without a shape warning' "[ $rc -eq 1 ] && [ ! -s '$TMP/graphql-cli-error-out' ] && grep -q 'temporary upstream reset' '$TMP/graphql-cli-error-err' && ! grep -q 'result unclassified' '$TMP/graphql-cli-error-err'"
@@ -318,6 +323,7 @@ check 'malformed GraphQL errors field fails closed without losing output' "[ $rc
 fresh_quota
 FAKE_MODE=graphql-jq-scalar AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql --jq .data.viewer.login > "$TMP/graphql-scalar" 2>/dev/null; rc=$?
 check 'valid GraphQL jq scalar keeps original output and success status' "[ $rc -eq 0 ] && [ \$(cat '$TMP/graphql-scalar') = scalar ]"
+check 'transformed GraphQL scalar is explicitly unobservable in request report' "jq -se '[.[] | select(.operation == \"api.graphql\")][-1].request_class == \"graphql_transformed_unobservable\"' '$TMP/state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/state/measurements' | jq -e '.graphql_transformed_unobservable >= 1'"
 fresh_quota
 FAKE_MODE=graphql-jq-empty AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql --jq .data.missing > "$TMP/graphql-empty" 2>/dev/null; rc=$?
 check 'valid GraphQL jq empty result keeps original success status' "[ $rc -eq 0 ] && [ ! -s '$TMP/graphql-empty' ]"

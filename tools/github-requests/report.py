@@ -16,7 +16,7 @@ import sys
 
 def summarize(directory):
     counts = collections.Counter()
-    failures = deferred = executions = records = unknown_callers = identity_probes = 0
+    failures = deferred = executions = records = unknown_callers = identity_probes = transformed_graphql = 0
     latency = []
     digest = hashlib.sha256()
     stamps = []
@@ -40,8 +40,11 @@ def summarize(directory):
                         or not isinstance(caller, str) or caller not in CALLERS):
                     raise ValueError("invalid measurement label")
                 direct = row.get("measurement") == "direct_api_invocation_estimate"
+                request_class = row.get("request_class")
                 if (type(row.get("schema")) is not int or row["schema"] != 1
                         or row.get("measurement") not in ("opaque_cli_estimate", "direct_api_invocation_estimate")
+                        or request_class not in ("unknown", "identity_probe", "graphql_transformed_unobservable")
+                        or (request_class == "graphql_transformed_unobservable" and operation != "api.graphql")
                         or "http_requests" not in row
                         or (direct and operation != "api.identity")
                         or row["http_requests"] is not None
@@ -64,6 +67,7 @@ def summarize(directory):
                 records += 1
                 executions += calls if not direct else 0
                 identity_probes += calls if direct else 0
+                transformed_graphql += calls if request_class == "graphql_transformed_unobservable" else 0
                 deferred += status == 75
                 failures += status not in (0, 75)
                 unknown_callers += row["caller"] == "unknown"
@@ -72,7 +76,8 @@ def summarize(directory):
         "schema": 1,
         "acceptance": "incomplete: busy windows, workflow outcomes, identities and quota observations required",
         "records": records, "opaque_cli_executions": executions,
-        "http_requests": None, "identity_probe_invocations": identity_probes, "graphql_points": None,
+        "http_requests": None, "identity_probe_invocations": identity_probes,
+        "graphql_transformed_unobservable": transformed_graphql, "graphql_points": None,
         "failed": failures, "deferred": deferred,
         "unknown_caller_records": unknown_callers,
         "first_utc": min(stamps) if stamps else None,
@@ -83,7 +88,8 @@ def summarize(directory):
         "raw_artifact_sha256": digest.hexdigest(),
         "coverage_gaps": ["unwrapped managed callers", "external clients and other hosts",
                           "HTTP pagination and GraphQL point costs", "authenticated principal and API host",
-                          "probe requests", "telemetry warnings or interrupted processes may omit records"],
+                          "probe requests", "transformed GraphQL output hides HTTP-200 errors",
+                          "telemetry warnings or interrupted processes may omit records"],
     }
 
 
