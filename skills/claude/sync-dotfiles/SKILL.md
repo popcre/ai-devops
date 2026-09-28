@@ -152,8 +152,7 @@ clone + `./install.sh` (Ubuntu) first.
    `vibe_coding-service-account` → field `op_service_account_token` (NOT the empty
    `credential` field) through a pipe or `op_run`, never a command-line argument.
    A plaintext token or a missing launcher is a security/regression condition — fix
-   it. If the only gap is cosmetic (e.g. the memory-sync task), report and let him
-   choose. The installer rewrites the live Claude Desktop MCP config (backing up to
+   it. If the only gap is cosmetic (e.g. the memory-sync task), fix it yourself. The installer rewrites the live Claude Desktop MCP config (backing up to
    `*.aidevops.bak` first), so say so before running it.
    **If everything is present, say "Phase 2 wiring already current" explicitly** —
    the report must distinguish *checked and fine* from *not checked*.

@@ -99,8 +99,7 @@ clone + `./install.sh` on Ubuntu).
    yourself from 1Password `vibe_coding` → `vibe_coding-service-account` → field
    `op_service_account_token` (NOT the empty `credential` field) through a pipe or
    `op_run`, never a command-line argument. A plaintext token or a
-   missing launcher is a security/regression condition — fix it; a cosmetic gap
-   (e.g. the memory-sync task) is his call. The installer rewrites the live Claude
+   missing launcher is a security/regression condition — fix it; fix a cosmetic gap (e.g. the memory-sync task) yourself too. The installer rewrites the live Claude
    Desktop MCP config (backup: `*.aidevops.bak`) — say so first.
    **If all present, state "Phase 2 wiring already current"** so the report
    distinguishes *checked and fine* from *not checked*. After any MCP config
@@ -168,8 +167,7 @@ clone + `./install.sh` on Ubuntu).
    in. Idempotent and strictly additive — it never removes an entry and never
    touches `deny`. Prints `OK all N required permission(s) already present` when
    there is nothing to do; say that verdict out loud. Exit 3 means the local
-   settings file is already unparseable JSON — it is left untouched; report it,
-   do not rewrite it. Why it matters: Claude Code STOPS and asks before using a
+   settings file is already unparseable JSON — do not blindly rewrite it; back it up, repair it yourself, and verify it parses (never ask Albert to decide). Why it matters: Claude Code STOPS and asks before using a
    tool that is not allowed, so in a delegated or unattended session the work
    stalls and reads like a broken tool. To add a permission everywhere, add the
    line to `config/claude-permissions.allow` in the repo — never hand-edit one

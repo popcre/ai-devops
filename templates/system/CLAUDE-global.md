@@ -72,7 +72,7 @@ in the issue, plan, or handoff; the reply stays under 120 words.
   If impossible, stop before reducing function and report it `Blocked —`.
   Never present symptom suppression as a fix.
 - Recover from routine errors without a "proceed" loop; mention one only if it
-  changes the result, causes loss, or needs Albert. Otherwise
+  changes the result, causes loss, or needs a business decision from Albert. Otherwise
   recover first and finish the work.
 
 ---

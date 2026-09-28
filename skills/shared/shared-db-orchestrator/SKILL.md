@@ -11,8 +11,7 @@ Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep t
 
 **Reporting to Albert.** Every status, queue, audit, marker and dispatch record
 in this skill is written into GitHub issues, plans and handoffs — never into the
-chat reply. Replies to Albert obey the global 150-word limit, and anything he
-must decide or approve, and every issue, agent, check or merge this session is
+chat reply. Replies to Albert obey the global 150-word limit, and any business-meaning question only he can answer, and every issue, agent, check or merge this session is
 waiting on, appears only in the closing `**Still open**` block. Never paste a queue listing, marker block, audit result or per-agent
 status roll-up into chat.
 
@@ -32,8 +31,7 @@ another repository. Immediately start the appropriate separate task or session;
 do not perform non-structural work in the orchestrator context. Keep every
 independent structural stream moving, disclose the blocker and owner-facing
 consequence immediately, and follow the repair task until the capability is
-restored. Record any required owner authorization at once in plain business
-language with one exact request; never park it silently.
+restored. Never request owner authorization for a technical step (owner ruling 2026-09-28): get an assigned AI reviewer's APPROVE instead, or report it `Blocked —`; never park it silently.
 
 Treat reviewer, allocator, tooling, and rate-limit failures as urgent operational
 blockers. Preserve the capability, use bounded API calls, read the provider's
@@ -305,7 +303,7 @@ and the investigation would block itself.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Phase 2 is active. Protected claims never disappear when an author lease is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations record one review per exact head and session for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek; they never serialize independent reviews by the same provider and never create a wait because a provider is already reviewing. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
+Phase 2 is active. Protected claims never disappear when an author lease is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops without mutation and goes to an assigned AI reviewer, never to Albert. Reviewer reservations record one review per exact head and session for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek; they never serialize independent reviews by the same provider and never create a wait because a provider is already reviewing. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
 
 ## Before preview and merge
 
