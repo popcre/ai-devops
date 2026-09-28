@@ -71,6 +71,12 @@ cat > "$TMP/bin/requires-muse-caller" <<'EOF'
 [ "${AI_MUSE_CALLER:-}" = preflight ] || { echo missing-caller >&2; exit 1; }
 echo health ok
 EOF
+cat > "$TMP/bin/slow-muse-live" <<'EOF'
+#!/usr/bin/env bash
+[ "${AI_MUSE_CALLER:-}" = preflight ] || { echo missing-caller >&2; exit 1; }
+[ "${2:-}" = --live ] && sleep 2
+echo health ok
+EOF
 cat > "$TMP/bin/gemini" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -268,7 +274,7 @@ check "install.sh runs the shared hook installer" "grep -q 'ai-install-post-merg
 check "the Windows installer runs the shared hook installer" "grep -q 'ai-install-post-merge-hook' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "the Windows installer disables hooks on its own fast-forward" "grep -q 'core.hooksPath' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "update.sh disables hooks on its own pull" "grep -q 'core.hooksPath' '$ROOT/update.sh'"
-check "update.sh requalifies after installing" "grep -q 'bin/ai-review-preflight\" requalify' '$ROOT/update.sh'"
+check "Linux installer requires requalification before finalization" "grep -q 'run_stage required \"Reviewer requalification\".*ai-review-preflight' '$ROOT/install.sh' && grep -q 'install-verify --phase finalize' '$ROOT/update.sh'"
 check "the Windows installer requalifies after installing the hook" "grep -q 'requalify' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "uninstall removes the hook through the shared script" "grep -q 'bin/ai-install-post-merge-hook' '$ROOT/uninstall.sh' && grep -q -- '--remove.*--repo' '$ROOT/uninstall.sh'"
 check "the hook tree is pinned to LF" "grep -q '^hooks/.*text eol=lf' '$ROOT/.gitattributes'"
@@ -288,6 +294,9 @@ NOAUTH_OUT="$(env -u DEEPSEEK_API_KEY HOME="$TMP/noauth-home" AI_DEVOPS_CONFIG_D
 "$SCRIPT" clear deepseek >/dev/null 2>&1 || true
 export AI_REVIEW_MUSE_WRAPPER="$TMP/bin/requires-muse-caller"
 check "Muse preflight supplies its mandatory caller identity" "$SCRIPT check muse '$REPO' | grep -q 'health=ok'"
+check "Muse live preflight outlasts the short check budget" "AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-live' $SCRIPT check muse '$REPO' --live | grep -q 'health=ok'"
+check "Muse live preflight still times out past its own budget" "AI_REVIEW_MUSE_QUALIFY_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-live' $SCRIPT check muse '$REPO' --live 2>&1 | grep -q 'provider-timeout'"
+"$SCRIPT" clear muse >/dev/null 2>&1 || true
 
 export AI_REVIEW_KIMI_WRAPPER="$TMP/bin/noauth"
 export MOCK_PREFLIGHT_EVIDENCE_LOG="$TMP/evidence-operations"

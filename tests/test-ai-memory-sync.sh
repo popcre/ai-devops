@@ -153,6 +153,33 @@ git --git-dir="$REMOTE" show main:memory/sample/MEMORY.md | grep -Fq '(hub.md)' 
 git --git-dir="$REMOTE" show main:memory/sample/MEMORY.md | grep -Fq '(local.md)' || fail "local entry did not reach hub"
 
 converged_head="$(git --git-dir="$REMOTE" rev-parse main)"
+# A private hub must be checked again on every sync through the shared
+# transport. The fixture remote is local; only the fake visibility read runs.
+cat > "$TMP/fake-gh" <<'GH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_LOG"
+[ "$*" = 'api repos/u2giants/ai-devops-memory --jq .private' ] || exit 2
+case "${FAKE_VISIBILITY:-}" in true|false) printf '%s\n' "$FAKE_VISIBILITY" ;; *) exit 1 ;; esac
+GH
+chmod +x "$TMP/fake-gh"
+private_sync() {
+  HOME="$HOME_A" CLAUDE_HOME="$CLAUDE_A" \
+  AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=0 \
+  AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_REMOTE="$REMOTE" \
+  AI_MEMORY_HUB="$HUB_A" AI_MEMORY_LOG="$LOG_A" \
+  AI_GH_REAL_GH="$TMP/fake-gh" AI_GH_STATE_DIR="$TMP/gh-state" \
+  AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off \
+  GH_LOG="$TMP/gh.log" FAKE_VISIBILITY="$1" \
+    bash "$ROOT/bin/ai-memory-sync" sync
+}
+private_sync true >/dev/null || fail 'fresh private hub proof failed through shared admission'
+[ -f "$TMP/gh-state/last_call_ms" ] || fail 'private hub read bypassed shared admission'
+if private_sync false >/dev/null 2>&1; then
+  fail 'newly public memory hub was accepted'
+fi
+[ "$(wc -l < "$TMP/gh.log")" -eq 2 ] || fail 'private hub visibility proof reused stale response'
+[[ "$(git --git-dir="$REMOTE" rev-parse main)" == "$converged_head" ]] ||
+  fail 'private hub proof altered the repository'
 sync_a sync >/dev/null
 [[ "$(git --git-dir="$REMOTE" rev-parse main)" == "$converged_head" ]] ||
   fail "second CRLF sync created another commit"

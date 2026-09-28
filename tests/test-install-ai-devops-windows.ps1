@@ -83,14 +83,19 @@ function Invoke-Installer {
     }
     $oldMode = $env:AI_DEVOPS_INSTALL_TEST_MODE
     $oldRemote = $env:AI_DEVOPS_TEST_EXPECTED_REMOTE
+    $oldSkipMachineTools = $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE
     try {
         $env:AI_DEVOPS_INSTALL_TEST_MODE = '1'
         $env:AI_DEVOPS_TEST_EXPECTED_REMOTE = (git -C $Fixture remote get-url origin)
         if ($LASTEXITCODE -ne 0) { throw 'Could not read fixture remote.' }
+        # This disposable skills fixture has no managed launcher catalog.
+        # The installer accepts this exception only for a local test origin.
+        $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE = '1'
         return (& $Installer @parameters *>&1 | Out-String)
     } finally {
         $env:AI_DEVOPS_INSTALL_TEST_MODE = $oldMode
         $env:AI_DEVOPS_TEST_EXPECTED_REMOTE = $oldRemote
+        $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE = $oldSkipMachineTools
     }
 }
 
@@ -342,14 +347,21 @@ try {
     # a marker only when store-key --if-missing is actually invoked by Git Bash.
     $fixture = New-Fixture "qwen-key-store"
     $fixtureQwen = Join-Path $fixture "bin\ai-qwen"
+    $fixtureDeepSeek = Join-Path $fixture "bin\ai-deepseek-agent"
     $qwenFixtureScript = @'
 #!/usr/bin/env bash
 [ "$1" = store-key ] && [ "$2" = --if-missing ] || exit 17
 printf ready > "$(dirname "$0")/qwen-store-called"
 '@
     [IO.File]::WriteAllText($fixtureQwen, $qwenFixtureScript + "`n")
-    git -C $fixture add bin/ai-qwen
-    git -C $fixture commit -m "add Qwen key-store fixture" | Out-Null
+    $deepseekFixtureScript = @'
+#!/usr/bin/env bash
+[ "$1" = store-key ] && [ "$2" = --if-missing ] || exit 18
+printf ready > "$(dirname "$0")/deepseek-store-called"
+'@
+    [IO.File]::WriteAllText($fixtureDeepSeek, $deepseekFixtureScript + "`n")
+    git -C $fixture add bin/ai-qwen bin/ai-deepseek-agent
+    git -C $fixture commit -m "add reviewer key-store fixtures" | Out-Null
     git -C $fixture push | Out-Null
     $fakeBin = Join-Path $TempRoot "qwen-key-store\fake-bin"
     New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
@@ -363,6 +375,8 @@ printf ready > "$(dirname "$0")/qwen-store-called"
     }
     Assert-True (Test-Path (Join-Path $fixture "bin\qwen-store-called")) "Qwen install stage did not invoke store-key --if-missing"
     Assert-True ($output -match "Qwen protected per-user key store is ready") "Qwen install stage did not report protected key-store readiness"
+    Assert-True (Test-Path (Join-Path $fixture "bin\deepseek-store-called")) "DeepSeek install stage did not invoke store-key --if-missing"
+    Assert-True ($output -match "DeepSeek protected per-user key store is ready") "DeepSeek install stage did not report protected key-store readiness"
 
     # Muse reviews cannot fetch from 1Password. The Windows install must
     # populate the protected store explicitly, even before Muse Code exists.

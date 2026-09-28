@@ -87,7 +87,7 @@ chmod +x "$TMP/gh" "$TMP/harness"
 # propagation would be skipped and every propagation check below would fail.
 jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2 | .transcript_glob={claude:"",codex:"",zcode:"",mimo:""}' \
   "$ROOT/config/blocker-watch.json" > "$TMP/config.json"
-export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_BLOCKER_WATCH_GH="$TMP/gh"
+export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_DEVOPS_TEST_MODE=1 AI_BLOCKER_WATCH_TEST_GH="$TMP/gh"
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID ZCODE_SESSION_ID
 BW(){ "$SCRIPT" "$@"; }
 
@@ -101,12 +101,23 @@ esac
 exit 2
 EOF
 chmod +x "$TMP/charged-error-gh"
-env -u AI_BLOCKER_WATCH_GH AI_BLOCKER_WATCH_HOME="$TMP/charged-error-home" \
+env -u AI_BLOCKER_WATCH_TEST_GH AI_BLOCKER_WATCH_HOME="$TMP/charged-error-home" \
   AI_GH_REAL_GH="$TMP/charged-error-gh" AI_GH_STATE_DIR="$TMP/charged-error-state" \
   AI_GH_QUOTA_PROBE_SECONDS=off AI_GH_MIN_SPACING_SECONDS=0 \
   "$SCRIPT" alarm --dry-run > "$TMP/charged-error-out" 2> "$TMP/charged-error-err"; charged_rc=$?
 check 'failed alarm GraphQL read still records the charged upstream response' \
   "[ $charged_rc -eq 1 ] && jq -se 'any(.[]; .measurement == \"observed_graphql_cost\" and .workflow == \"blocker_watch_alarm\" and .graphql_points == 3)' '$TMP/charged-error-state/measurements/'*.jsonl && grep -q 'could not list open issues' '$TMP/charged-error-err'"
+check 'legacy GitHub command override fails visibly before any work' \
+  "! AI_BLOCKER_WATCH_GH='$TMP/gh' BW list"
+check 'fake transport cannot be selected by a normal scheduler' \
+  "! AI_DEVOPS_TEST_MODE=0 AI_BLOCKER_WATCH_TEST_GH='$TMP/gh' BW list"
+mkdir -p "$TMP/default-fake"
+default_out="$(FAKE="$TMP/default-fake" AI_BLOCKER_WATCH_TEST_GH= AI_DEVOPS_TEST_MODE=0 \
+  AI_GH_REAL_GH="$TMP/gh" AI_GH_STATE_DIR="$TMP/default-gate" \
+  AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off \
+  "$SCRIPT" find no-such-work 2>&1)"; default_rc=$?
+check 'normal default source uses shared admission with a fake real CLI' \
+  '[ "$default_rc" -eq 0 ] && [ -f "$TMP/default-gate/last_call_ms" ] && [ -s "$TMP/default-fake/calls" ]'
 
 check 'shipped config is valid and names all four programs' "jq -e '.harness|has(\"claude\") and has(\"codex\") and has(\"zcode\") and has(\"mimo\")' '$ROOT/config/blocker-watch.json'"
 check 'shipped config names exactly one propagating machine' "jq -e '(.propagate_on_host | type == \"string\" and length > 0)' '$ROOT/config/blocker-watch.json'"

@@ -12,7 +12,9 @@ usage() {
 }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GH="$ROOT/bin/ai-gh"
+gh_call() { AI_GH_CALLER=ai-verify-run "$GH" "$@"; }
 
 [ "$#" -gt 0 ] || { usage >&2; exit 2; }
 command_name="$1"; shift
@@ -32,7 +34,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-need gh
+[ -x "$GH" ] || die 'the shared GitHub transport is required'
 [ -n "$repo" ] || die '--repo is required'
 
 case "$command_name" in
@@ -40,9 +42,9 @@ case "$command_name" in
     [ -n "$ref" ] || die '--ref is required'
     [ -n "$task" ] || die '--task is required'
     [ -n "$purpose" ] || die '--purpose is required'
-    sha="$(gh api "repos/$repo/commits/$ref" --jq .sha)" || exit 1
+    sha="$(gh_call api "repos/$repo/commits/$ref" --jq .sha)" || exit 1
     [ -n "$sha" ] || die 'could not resolve the requested ref'
-    active="$(gh run list --repo "$repo" --workflow verify.yml --event workflow_dispatch --limit 100 \
+    active="$(gh_call run list --repo "$repo" --workflow verify.yml --event workflow_dispatch --limit 100 \
       --json databaseId,status,headSha,url --jq ".[] | select(.headSha == \"$sha\" and (.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\" or .status == \"requested\")) | [.databaseId,.status,.url] | @tsv")" || exit 1
     if [ -n "$active" ]; then
       printf 'SAFE REFUSAL: exact-SHA manual verification is already active:\n%s\n' "$active" >&2
@@ -51,22 +53,22 @@ case "$command_name" in
     dispatch_ref="ai-verify-${sha}"
     # gh may write an error JSON body to stdout on a missing ref. A failed
     # lookup is not a SHA; discard its payload before the guarded creation.
-    tag_sha="$(gh api "repos/$repo/git/ref/tags/$dispatch_ref" --jq .object.sha 2>/dev/null)" || tag_sha=''
+    tag_sha="$(gh_call api "repos/$repo/git/ref/tags/$dispatch_ref" --jq .object.sha 2>/dev/null)" || tag_sha=''
     if [ -z "$tag_sha" ]; then
-      gh api --method POST "repos/$repo/git/refs" \
+      gh_call api --method POST "repos/$repo/git/refs" \
         -f "ref=refs/tags/$dispatch_ref" -f "sha=$sha" >/dev/null || exit 1
-      tag_sha="$(gh api "repos/$repo/git/ref/tags/$dispatch_ref" --jq .object.sha)" || exit 1
+      tag_sha="$(gh_call api "repos/$repo/git/ref/tags/$dispatch_ref" --jq .object.sha)" || exit 1
     fi
     [ "$tag_sha" = "$sha" ] || die "immutable dispatch tag points to unexpected SHA: $tag_sha"
     before="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    gh workflow run verify.yml --repo "$repo" --ref "$dispatch_ref" \
+    gh_call workflow run verify.yml --repo "$repo" --ref "$dispatch_ref" \
       -f "requester_task=$task" -f "purpose=$purpose" || exit 1
     printf 'Dispatched %s at %s for %s (%s). No run was cancelled.\n' "$sha" "$before" "$task" "$purpose"
     ;;
   status)
     filter='.[]'
     [ -z "$sha" ] || filter=".[] | select(.headSha == \"$sha\")"
-    gh run list --repo "$repo" --workflow verify.yml --limit 100 \
+    gh_call run list --repo "$repo" --workflow verify.yml --limit 100 \
       --json databaseId,event,status,conclusion,headSha,createdAt,url \
       --jq "$filter | [.databaseId,.event,.status,(.conclusion // \"\"),.headSha,.createdAt,.url] | @tsv"
     ;;
@@ -74,14 +76,14 @@ case "$command_name" in
     [ -n "$run_id" ] || die '--run-id is required'
     [ -n "$reason" ] || die '--reason is required'
     [ "$confirm" = true ] || die '--confirm-discard-running-proof is required'
-    event_and_workflow="$(gh run view "$run_id" --repo "$repo" --json event,workflowName \
+    event_and_workflow="$(gh_call run view "$run_id" --repo "$repo" --json event,workflowName \
       --jq '[.event,.workflowName] | @tsv')" || exit 1
     [ "$event_and_workflow" = $'workflow_dispatch\tverify' ] ||
       die 'refusing to cancel: target is not a manual verify workflow run'
-    details="$(gh run view "$run_id" --repo "$repo" --json databaseId,event,status,headSha,createdAt,url \
+    details="$(gh_call run view "$run_id" --repo "$repo" --json databaseId,event,status,headSha,createdAt,url \
       --jq '[.databaseId,.event,.status,.headSha,.createdAt,.url] | @tsv')" || exit 1
     printf 'Explicitly discarding run proof: %s\nReason: %s\n' "$details" "$reason" >&2
-    gh run cancel "$run_id" --repo "$repo"
+    gh_call run cancel "$run_id" --repo "$repo"
     ;;
   *) usage >&2; exit 2 ;;
 esac

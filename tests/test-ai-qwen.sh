@@ -195,6 +195,34 @@ if [ -z "${SYSTEMROOT:-}" ]; then
 fi
 OP_CALLS_AFTER_STORE="$(wc -l < "$TMP/op-calls" | tr -d ' ')"
 if (
+  source <(sed -n '/^qwen_shared_credential_lock_path() {/,/^}/p' "$SCRIPT")
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    PROFILE_PS="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+    [ -n "$PROFILE_PS" ] || exit 1
+    OS_PROFILE="$("$PROFILE_PS" -NoProfile -NonInteractive -Command '[Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)' | tr -d '\r')"
+    case "$OS_PROFILE" in [A-Za-z]:*) OS_PROFILE="/$(printf '%s' "$OS_PROFILE" | sed 's#\\#/#g; s#:#/#')";; esac
+    EXPECTED_LOCK="$OS_PROFILE/.local/state/ai-devops/muse/credential.lock.d"
+  else
+    OS_PROFILE="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | cut -d: -f6)"
+    EXPECTED_LOCK="$OS_PROFILE/.config/ai-devops/op-refresh.lock"
+  fi
+  test "$(AI_QWEN_TEST_DIR= HOME="$TMP/redirect-home" USERPROFILE="$TMP/redirect-home" \
+      AI_DEVOPS_CONFIG_DIR="$TMP/redirect-config" AI_MUSE_STATE_DIR="$TMP/redirect-state" \
+      CFG_DIR="$TMP/redirect-config" qwen_shared_credential_lock_path)" = "$EXPECTED_LOCK"
+); then ok 'production Qwen 1Password lock ignores inherited home and state redirects'; else bad 'production Qwen 1Password lock ignores inherited home and state redirects'; fi
+if (
+  source <(sed -n '/^lock_publish() {/,/^}/p' "$SCRIPT")
+  lock_owner_record(){ cat "$1/owner" 2>/dev/null || true; }
+  declare -A LOCK_TOKENS=()
+  holder_pid="$BASHPID"
+  lock_publish "$TMP/qwen-owner-fixture.lock.d" fixture || exit 1
+  read -r owner winpid token < "$TMP/qwen-owner-fixture.lock.d/owner"
+  [ "$owner" = "$holder_pid" ] || exit 1
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    [ "$winpid" = "$(cat "/proc/$holder_pid/winpid")" ] || exit 1
+  fi
+); then ok 'Qwen credential lock records its actual shell and Windows process'; else bad 'Qwen credential lock records its actual shell and Windows process'; fi
+if (
   source <(sed -n '/^lock_acquire() {/,/^}/p' "$SCRIPT")
   lock_owner_record(){ cat "$1/owner" 2>/dev/null || true; }
   lock_owner_alive(){ return 1; } # Simulate an MSYS pid invisible to this runtime.
