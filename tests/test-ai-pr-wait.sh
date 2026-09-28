@@ -248,6 +248,55 @@ wait "$shared_b"; shared_b_rc=$?
 check "two simultaneous first waiters share one complete upstream read and keep independent deadlines" \
   "test '$shared_a_rc' -eq 2 && test '$shared_b_rc' -eq 2 && test \"\$(wc -l < '$TMP/shared-calls')\" -eq 1 && grep -q 'still in progress' '$TMP/shared-a.out' && grep -q 'still in progress' '$TMP/shared-b.out'"
 
+# After both waiters have seen queue membership, their next concurrent demand
+# must use one fresh complete response. Each still decides its own terminal
+# result; a queued snapshot from the previous poll cannot prove ejection.
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf 'x\n' >> "${AI_PR_WAIT_TEST_MARKER:?}"
+count="$(wc -l < "$AI_PR_WAIT_TEST_MARKER")"
+/bin/sleep 0.3
+if [ "$count" -eq 1 ]; then
+  state=OPEN; queued=true; merge=null
+else
+  state="${AI_PR_WAIT_TEST_TERMINAL:?}"; queued=false; merge=null
+  [ "$state" != MERGED ] || merge='{"oid":"done"}'
+  [ "$state" != EJECTED ] || state=OPEN
+fi
+printf '{"data":{"repository":{"pullRequest":{"state":"%s","headRefOid":"h1","isInMergeQueue":%s,"mergeCommit":%s,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[]}}}}]}}}}}\n' "$state" "$queued" "$merge"
+EOF
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+state="${AI_PR_WAIT_TEST_CLOCK:?}"
+count="$(cat "$state" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
+if [ "$count" -lt 40 ]; then printf '1000\n'; else printf '1060\n'; fi
+EOF
+cat > "$TMP/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+/bin/sleep 0.1
+EOF
+chmod +x "$TMP/bin/gh" "$TMP/bin/date" "$TMP/bin/sleep"
+for terminal in MERGED CLOSED EJECTED; do
+  rm -f "$TMP/queued-$terminal-calls" "$TMP/queued-$terminal-a.clock" "$TMP/queued-$terminal-b.clock"
+  AI_PR_WAIT_TEST_CONTEXT_KEY='host credential principal scopes-a' \
+    AI_PR_WAIT_SNAPSHOT_DIR="$TMP/queued-$terminal-snapshots" AI_GH_STATE_DIR="$TMP/queued-$terminal-throttle" \
+    AI_PR_WAIT_TEST_TERMINAL="$terminal" AI_PR_WAIT_TEST_MARKER="$TMP/queued-$terminal-calls" \
+    AI_PR_WAIT_TEST_CLOCK="$TMP/queued-$terminal-a.clock" PATH="$TMP/bin:$PATH" \
+    bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 >"$TMP/queued-$terminal-a.out" 2>&1 & queued_a=$!
+  AI_PR_WAIT_TEST_CONTEXT_KEY='host credential principal scopes-a' \
+    AI_PR_WAIT_SNAPSHOT_DIR="$TMP/queued-$terminal-snapshots" AI_GH_STATE_DIR="$TMP/queued-$terminal-throttle" \
+    AI_PR_WAIT_TEST_TERMINAL="$terminal" AI_PR_WAIT_TEST_MARKER="$TMP/queued-$terminal-calls" \
+    AI_PR_WAIT_TEST_CLOCK="$TMP/queued-$terminal-b.clock" PATH="$TMP/bin:$PATH" \
+    bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 >"$TMP/queued-$terminal-b.out" 2>&1 & queued_b=$!
+  wait "$queued_a"; queued_a_rc=$?
+  wait "$queued_b"; queued_b_rc=$?
+  expected_rc=1; [ "$terminal" != MERGED ] || expected_rc=0
+  check "two queued waiters share one fresh $terminal read and retain terminal outcomes" \
+    "test '$queued_a_rc' -eq '$expected_rc' && test '$queued_b_rc' -eq '$expected_rc' && test \"\$(wc -l < '$TMP/queued-$terminal-calls')\" -eq 2 && grep -q '$terminal' '$TMP/queued-$terminal-a.out' && grep -q '$terminal' '$TMP/queued-$terminal-b.out'"
+done
+rm -f "$TMP/bin/sleep"
+
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
 state="${AI_PR_WAIT_TEST_CLOCK:?}"

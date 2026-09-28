@@ -46,7 +46,7 @@ class SingleFlight(unittest.TestCase):
 with open(os.environ['COUNT'], 'a') as f: f.write('x\\n')
 time.sleep(float(os.environ.get('DELAY', '0')))
 mode = os.environ.get('MODE', 'open')
-pr = {'state': 'MERGED' if mode == 'merged' else 'OPEN',
+pr = {'state': 'MERGED' if mode == 'merged' else 'CLOSED' if mode == 'closed' else 'OPEN',
       'headRefOid': os.environ.get('HEAD', 'h1'),
       'isInMergeQueue': mode == 'queued', 'mergeCommit': None,
       'commits': {'nodes': [{'commit': {'statusCheckRollup': {
@@ -60,13 +60,15 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
 """
         )
 
-    def call(self, key="scope-a", head="h1", mode="open", delay="0", suffix="a"):
+    def call(self, key="scope-a", head="h1", mode="open", delay="0", suffix="a", force=False):
         env = dict(os.environ, COUNT=str(self.count), HEAD=head, MODE=mode, DELAY=delay)
         argv = [sys.executable, str(HELPER), "--state-dir", str(self.base / "state"),
                 "--key", key, "--expected-head", head, "--ttl", "10",
                 "--wait-seconds", "4", "--age-file", str(self.base / (suffix + ".age")),
                 "--source-file", str(self.base / (suffix + ".source")),
                 "--", sys.executable, str(self.fake)]
+        if force:
+            argv.insert(argv.index("--"), "--force-refresh")
         return subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
     def calls(self):
@@ -89,8 +91,38 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
         else:
             self.assertEqual((self.base / "state").stat().st_mode & 0o077, 0)
 
+    def test_queued_waiters_share_one_fresh_terminal_or_ejection_read(self):
+        for mode in ("merged", "closed", "ejected"):
+            key = "queued-" + mode
+            seed = self.call(key=key, mode="queued", suffix=mode + "-seed")
+            seed_out, seed_err = seed.communicate(timeout=6)
+            self.assertEqual(seed.returncode, 0, seed_err)
+            self.assertTrue(json.loads(seed_out)["data"]["repository"]["pullRequest"]["isInMergeQueue"])
+            before = self.calls()
+            first = self.call(key=key, mode=mode, delay="0.6", suffix=mode + "-first", force=True)
+            started = time.monotonic()
+            while self.calls() == before and time.monotonic() - started < 4:
+                time.sleep(0.01)
+            self.assertEqual(self.calls(), before + 1)
+            second = self.call(key=key, mode=mode, suffix=mode + "-second", force=True)
+            results = []
+            for process in (first, second):
+                out, err = process.communicate(timeout=7)
+                self.assertEqual(process.returncode, 0, err)
+                results.append(json.loads(out)["data"]["repository"]["pullRequest"])
+            self.assertEqual(self.calls(), before + 1)
+            self.assertEqual(results[0]["state"], results[1]["state"])
+            self.assertEqual(results[0]["isInMergeQueue"], results[1]["isInMergeQueue"])
+            self.assertEqual((self.base / (mode + "-second.source")).read_text(), "cache")
+            # A later queued waiter must re-read: the shared result is scoped
+            # to subscribers present before the response was written.
+            later = self.call(key=key, mode=mode, suffix=mode + "-later", force=True)
+            _, later_err = later.communicate(timeout=6)
+            self.assertEqual(later.returncode, 0, later_err)
+            self.assertEqual(self.calls(), before + 2)
+
     def test_lock_wait_and_upstream_share_one_deadline(self):
-        leader = self.call(key="deadline", delay="1.2", suffix="leader")
+        leader = self.call(key="deadline", mode="partial", delay="1.2", suffix="leader")
         start = time.monotonic()
         while self.calls() == 0 and time.monotonic() - start < 3:
             time.sleep(0.01)
@@ -116,7 +148,7 @@ sys.exit(124)
         follower = subprocess.run(argv, capture_output=True, env=env, timeout=7)
         elapsed = time.monotonic() - started
         _, leader_err = leader.communicate(timeout=5)
-        self.assertEqual(leader.returncode, 0, leader_err)
+        self.assertEqual(leader.returncode, 4, leader_err)
         self.assertEqual(follower.returncode, 124, follower.stderr)
         self.assertLess(elapsed, 5.8)
         self.assertTrue(limit_file.exists())

@@ -163,6 +163,7 @@ def main():
         return 3
     command = args.command[1:]
     deadline = time.monotonic() + args.wait_seconds
+    joined_ns = time.time_ns()
 
     def upstream(cache_path):
         return run(command, cache_path, args.age_file, args.source_file, args.expected_head,
@@ -206,15 +207,19 @@ def main():
                     return 75
                 time.sleep(0.05)
         try:
-            if not args.force_refresh and cache.is_file() and not cache.is_symlink():
-                wall_age = time.time() - cache.stat().st_mtime
-                if 0 <= wall_age < args.ttl:
-                    age = int(wall_age)
-                    if cache.stat().st_size > 1048576:
-                        raw = b""
-                    else:
-                        raw = cache.read_bytes()
-                    if cacheable(raw, args.expected_head):
+            if cache.is_file() and not cache.is_symlink():
+                stat_result = cache.stat()
+                wall_age = time.time() - stat_result.st_mtime
+                if stat_result.st_size <= 1048576 and (stat_result.st_mtime_ns >= joined_ns or
+                        (not args.force_refresh and 0 <= wall_age < args.ttl)):
+                    raw = cache.read_bytes()
+                    # The first condition shares only a response completed
+                    # after this subscriber joined the in-flight refresh.
+                    # Older terminal/failed/queue results are never replayed.
+                    same_flight = joined_ns <= stat_result.st_mtime_ns <= time.time_ns()
+                    if (same_flight and complete(raw)) or (not args.force_refresh and
+                            0 <= wall_age < args.ttl and cacheable(raw, args.expected_head)):
+                        age = 0 if same_flight else int(wall_age)
                         Path(args.age_file).write_text(str(age))
                         Path(args.source_file).write_text("cache")
                         sys.stdout.buffer.write(raw)
@@ -251,7 +256,7 @@ def run(command, cache, age_file, source_file, expected_head=None,
     if not complete(result.stdout):
         print("ai-pr-wait: incomplete or invalid pull-request status; refusing cached success", file=sys.stderr)
         return 4
-    if cache is not None and len(result.stdout) <= 1048576 and cacheable(result.stdout, expected_head):
+    if cache is not None and len(result.stdout) <= 1048576 and complete(result.stdout):
         try:
             atomic_write(cache, result.stdout)
         except OSError:
