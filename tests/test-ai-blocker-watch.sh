@@ -391,9 +391,9 @@ jq --arg m "$TMP/mainco" '.main_checkout=$m' "$W2/$child_id.json" > "$W2/$child_
 : > "$FAKE/resumed"; : > "$FAKE/comments"
 BW2 tick >/dev/null 2>&1
 check 'Codex child starts a fresh session with its parked context' \
-  "grep -q '^$TMP/mainco|fresh-codex' '$FAKE/resumed' && grep -q 'issues/31' '$FAKE/resumed' && grep -q 'cannot be resumed independently' '$FAKE/resumed' && jq -e '.mode==\"fresh\" and .state==\"woken\" and .attempts==1' '$W2/$child_id.json'"
+  "grep -q '^$TMP/mainco|fresh-codex' '$FAKE/resumed' && grep -q 'issues/31' '$FAKE/resumed' && grep -q 'Read that issue and all of its comments first' '$FAKE/resumed' && grep -q 'own worktree from current upstream before you edit anything' '$FAKE/resumed' && grep -q 'comment the result on that issue' '$FAKE/resumed' && grep -q 'cannot be resumed independently' '$FAKE/resumed' && jq -e '.mode==\"fresh\" and .state==\"woken\" and .attempts==1' '$W2/$child_id.json'"
 check 'Codex child is never falsely resumed or invoked twice' \
-  "! grep -q '|codex child-1' '$FAKE/resumed' && [ \"\$(wc -l < '$FAKE/resumed')\" = 1 ] && [ \"\$(grep -c 'issue comment 31' '$FAKE/comments')\" = 1 ]"
+  "! grep -q '|codex child-1' '$FAKE/resumed' && [ \"\$(wc -l < '$FAKE/resumed')\" = 1 ] && [ \"\$(grep -c 'issue comment 31' '$FAKE/comments')\" = 1 ] && grep -q 'Started a fresh codex session' '$FAKE/comments' && ! grep -q 'Resumed the original codex session' '$FAKE/comments'"
 rm -f "$W2/$child_id.json"
 
 top_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session top-1 --park 'top-level Codex work' --brief-file "$TMP/brief.md" 2>/dev/null)"
