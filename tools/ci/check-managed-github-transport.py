@@ -3,8 +3,8 @@
 
 P3/#931 owns this guard. User-facing command examples have narrow literal
 exceptions; the P4/S2 ai-pr-wait direct fallback has been removed.
-This is a static syntax guard for known CLI forms, not a proof about computed
-executables or future gh subcommands; those require source review.
+This is a static syntax guard for recognizable CLI forms regardless of verb,
+not a proof about computed executable names; those require source review.
 """
 
 import pathlib
@@ -13,13 +13,36 @@ import sys
 
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) == 2 else pathlib.Path(__file__).resolve().parents[2])
-API_VERBS = r"(?:api|run|repo|pr|issue|workflow|release|search|cache|label|gist|project|codespace|secret|variable|ruleset|status)"
-DIRECT = re.compile(rf"(?<![\w$.-])(?:['\"])?gh(?:\.exe)?(?:['\"])?\s+(?:{API_VERBS}\b|auth\s+status\b)", re.IGNORECASE)
+DIRECT = re.compile(r"(?<![\w$.-])(?:['\"])?gh(?:\.exe)?(?:['\"])?\s+[a-z][\w-]*\b", re.IGNORECASE)
 SDK = re.compile(r"(?:execFileSync|spawnSync|execFile|spawn)\s*\(\s*['\"](?:[^'\"]*[/\\])?gh(?:\.exe)?['\"]", re.IGNORECASE)
-ARG_ARRAY = re.compile(rf"[\[(,]\s*['\"](?:[^'\"]*[/\\])?gh(?:\.exe)?['\"]\s*,\s*['\"]{API_VERBS}\b", re.IGNORECASE)
+ARG_ARRAY = re.compile(r"[\[(,]\s*['\"](?:[^'\"]*[/\\])?gh(?:\.exe)?['\"]\s*,\s*['\"][a-z][\w-]*\b", re.IGNORECASE)
 POWERSHELL_START = re.compile(r"\bStart-Process\s+(?:-FilePath\s+)?['\"]?(?:[^'\"]+[/\\])?gh(?:\.exe)?['\"]?(?=\s|$)", re.IGNORECASE)
 HTTP = re.compile(r"(?:api\.github\.com|github\.getOctokit|@octokit)")
 CLI_ALIAS = re.compile(r"\b[A-Za-z_]\w*\s*=\s*['\"]?gh(?:\.exe)?['\"]?(?=\s|;|$)", re.IGNORECASE)
+LOCAL_OR_TEXT = {
+    "ai-devops": {
+        'c_ok "gh installed ($(command -v gh))"',
+        'c_ok "gh authenticated"',
+        'c_warn "gh authentication check deferred by shared GitHub admission"',
+        'c_warn "gh not authenticated — run: gh auth login"',
+        'c_fail "gh not found (required)"',
+    },
+    "ai-gh-wait": {
+        '[ $# -gt 0 ] || { say "gh arguments are required after --"; exit 3; }',
+        'fails=$((fails+1)); say "gh failed (rc=$rc, attempt $fails)"',
+    },
+    "ai-pr-wait": {'command -v gh >/dev/null 2>&1 || { printf \'ai-pr-wait: gh is not installed\\n\' >&2; exit 3; }'},
+    "ai-private-config": {
+        "[ -r /dev/tty ] || die 'GitHub CLI is not authenticated; run: gh auth login'",
+        "gh auth login --web --git-protocol https </dev/tty || die 'GitHub authorization did not complete.'",
+    },
+    "install-ai-devops-windows.ps1": {
+        'Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login"',
+        'Write-Note "GitHub CLI not found. Install when needed: winget install GitHub.cli"',
+    },
+    "promote-windows-runner-to-service.ps1": {"foreach ($tool in @('git', 'gh', 'jq', 'pwsh', 'node', 'python')) {"},
+    "verify-windows-dev.ps1": {"@('winget','git','pwsh','node','python','gh','op','gcloud','az','cloudflared','wsl','claude','grok','kimi','vercel','trigger.dev','railway','supabase') | ForEach-Object { Check-Command $_ }"},
+}
 
 
 def inspect(path: pathlib.Path) -> list[str]:
@@ -48,6 +71,8 @@ def inspect(path: pathlib.Path) -> list[str]:
         stripped = line.lstrip()
         if stripped.startswith(("#", "//", "*")):
             continue
+        if stripped in LOCAL_OR_TEXT.get(path.name, ()):
+            continue  # Exact non-network text, local checks, or interactive bootstrap.
         if path.name == "ai-private-config" and stripped == 'mkdir -p "$(dirname "$ROOT")"; gh repo clone "$REPOSITORY" "$ROOT" >/dev/null':
             continue  # Bootstrap Git clone; separate Git transport, not an API read.
         if path.name == "ai-private-config" and stripped == 'if ! gh auth status >/dev/null 2>&1; then':
