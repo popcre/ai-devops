@@ -155,18 +155,19 @@ exact wrapper, runtime, and preloader hashes. Any of those changing
 automatically restores quarantine. Registry membership is not usability:
 check `ai-review-preflight status qwen`.
 
-Provider turns extract only the `BAILIAN_CODING_PLAN_API_KEY` 1Password
-reference from managed `~/.config/ai-devops/mcp.env`, resolve it through a
-single-variable temporary environment file, and pass the real value through one
-private, self-deleting handoff file to the repository-owned Node preloader. Qwen itself
+Installation copies only the `BAILIAN_CODING_PLAN_API_KEY` value from the managed
+1Password reference into an owner-only per-user store. `ai-qwen store-key`
+explicitly refreshes it. Reviews and implementation turns never invoke 1Password;
+they read the protected store and pass the value through one private,
+self-deleting handoff file to the repository-owned Node preloader. Qwen itself
 launches in an explicit allowlisted OS environment with no provider key and
 `QWEN_HOME` as its only home directory.
 The supported model is `qwen3.8-max`, on the Model Studio Token Plan
 subscription (pinned endpoint, `sk-sp-` key, same env-var name). The old Coding
 Plan and pay-per-token lanes are retired; `qwen-endpoint` files are ignored. Never paste the key into Qwen
 settings, prompts, command arguments, or logs. If the managed reference is
-missing, repair the ai-devops machine installation instead of configuring an
-unmanaged plaintext key.
+missing, run `ai-qwen store-key` outside a review or repair the ai-devops
+machine installation instead of configuring an unmanaged plaintext key.
 
 For every review or implementation:
 

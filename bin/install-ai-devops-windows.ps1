@@ -907,6 +907,18 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
     } else {
         Write-Note "Qwen Code CLI found: $qwenVersion"
     }
+    $qwenBash = Get-Command bash -ErrorAction SilentlyContinue
+    if ($qwenBash) {
+        $qwenWrapper = (Join-Path $RepoPath 'bin\ai-qwen') -replace '\\', '/'
+        $keyProbe = Invoke-NativeProbe -Command $qwenBash.Source -Arguments @('--noprofile', '--norc', $qwenWrapper, 'store-key', '--if-missing')
+        if ($keyProbe.ExitCode -eq 0) {
+            Write-Note 'Qwen protected per-user key store is ready.'
+        } else {
+            Write-Note 'Qwen key store setup failed; review qualification remains unavailable until ai-qwen store-key succeeds.'
+        }
+    } else {
+        Write-Note 'Git Bash is needed to prepare the Qwen key store.'
+    }
     Write-Note "Verify model access and completion with: ai-qwen doctor --live"
 } else {
     Write-Note "Qwen Code CLI not found. Install/login separately if you want the qwen-code skill to run local Qwen jobs."
