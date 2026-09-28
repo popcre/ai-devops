@@ -317,7 +317,8 @@ clone + `./install.sh` (Ubuntu) first.
    so and offer to register it. Never register an unattended job that EDITS
    memory: `ai-sync-memory` tombstones make a deletion propagate everywhere and
    survive a later pull, so a wrong automated delete is unrecoverable. The audit
-   reports; a human approves every change.
+   reports; an interactive AI session reviews and applies every change,
+   never an unattended job and never a request for Albert's approval.
 7. **Capture and publish local memory transactionally:**
    `bin/ai-memory-sync sync-if-stale`. This command alone owns the private clone,
    privacy proof, union, health gate, commit, push, retry state, and success

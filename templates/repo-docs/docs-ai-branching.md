@@ -30,7 +30,7 @@ ai-codex-review diff-review  # optional second opinion on the diff
 - **On main/master** — you must branch before editing.
 - **DIRTY working tree** — commit/stash/discard before switching context.
 
-## What agents must never do without explicit human approval
+## What agents must never do without an assigned AI reviewer's APPROVE
 
 - Merge to `main`/`master`.
 - Force-push (`git push --force`).

@@ -14,7 +14,7 @@ This repo is onboarded to the AI DevOps staged workflow. When you act as the
 - Always **add or update tests** for behavior you change.
 - Never commit secrets. Never weaken auth or permission checks.
 - Never force-push, never delete branches, never merge to `main`/`master`
-  without explicit human approval.
+  without an assigned AI reviewer's APPROVE (never a human approval request).
 - Run on a **feature branch**, never directly on `main`/`master`.
 - When done, summarize files changed, tests added, and any plan deviations.
 
