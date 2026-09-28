@@ -414,6 +414,7 @@ probe_key_rejected(){
 load_key(){
   key_store_ok || die 'protected Muse key store is unavailable; run ai-muse store-key outside a review.'
   IFS= read -r MODEL_API_KEY < "$KEY_STORE" || MODEL_API_KEY=""
+  export -n MODEL_API_KEY
   [ -n "$MODEL_API_KEY" ] || die 'protected Muse key store is empty; run ai-muse store-key outside a review.'
   probe_key_rejected "$MODEL_API_KEY" && die 'stored Muse key was rejected; run ai-muse store-key outside a review.'
   return 0
@@ -638,7 +639,7 @@ run_turn(){
   [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
   TURN_SID=""; FINISH=""; TEXT=""; TOKENS=null; TURN_ERROR=""
   runtime_env; [ -x "$timeout_bin" ] || die "local_dependency_unavailable: trusted timeout executable is unavailable: $timeout_bin"; case "$timeout_bin" in /*) ;; *) die 'trusted timeout executable path must be absolute.';; esac
-  prompt_text="$(cat "$prompt")"; load_key; provider_key="$MODEL_API_KEY"; unset MODEL_API_KEY
+  prompt_text="$(cat "$prompt")"; [ -n "${MODEL_API_KEY:-}" ] || load_key; provider_key="$MODEL_API_KEY"; unset MODEL_API_KEY
   if [ "$ENGINE" = muse-code ]; then
     # The caller chooses the conversation identity, so a new turn is provable too.
     [ -n "$sid" ] || sid="$(new_session_uuid)" || die 'could not choose a Muse Code session identity.'
@@ -845,6 +846,7 @@ cmd_new(){
   name_ok "$name" || die "invalid session name '$name'."; require_runtime; need jq; need git
   root="$(repo_root)"; rid="$(repo_id "$root")"; meta="$(meta_path "$rid" "$name")"; prompt="$(read_prompt "$@")"; lock_session "$rid" "$name"; [ ! -e "$meta" ] || die "session '$name' exists. Use: AI_MUSE_CALLER=$CALLER ai-muse ask $name"; validate_heartbeat
   [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
+  load_key
   mkdir -p "$(dirname "$meta")"; now="$(date -u +%FT%TZ)"; tmp="$(tmp_file)"; jq -n --arg name "$name" --arg caller "$CALLER" --arg root "$root" --arg rid "$rid" --arg tag "$(tag "$name")" --arg model "$MODEL" --arg now "$now" '{schema_version:1,status:"preparing",turn_kind:"new",name:$name,caller:$caller,repository_root:$root,repository_id:$rid,session_id:null,review_dir:null,sandbox_tag:$tag,model:$model,head:null,packet_sha256:null,last_report:null,created_at:$now,updated_at:$now,last_heartbeat_at:$now}' > "$tmp"; mv -f "$tmp" "$meta"; chmod 600 "$meta" 2>/dev/null || true; ACTIVE_META="$meta"
   printf 'Muse session started: %s\nState: %s\n' "$name" "$meta" >&2
   test_interrupt_at preparing
@@ -872,7 +874,7 @@ cmd_ask(){
   stored_model="$(jq -r '.model//""' "$meta")"; [ "$stored_model" = "$MODEL" ] || die "session '$name' belongs to model '${stored_model:-unknown}', not '$MODEL'. Preserve its transcript, then delete it and start a new Spark 1.3 conversation."
   validate_heartbeat
   [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
-  sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
+  sid="$(jq -r .session_id "$meta")"; prompt="$(read_prompt "$@")"; load_key; tmp="$(tmp_file)"; jq --arg now "$(date -u +%FT%TZ)" '.status="preparing_followup"|.turn_kind="ask"|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"; ACTIVE_META="$meta"
   printf 'Muse session continuing: %s\nState: %s\n' "$name" "$meta" >&2
   report_path="$(new_report_path "$root" "$name")"; ensure_report_destination "$root" "$report_path"; reserve_report_staging "$root"; before="$(tree_state "$root")"; before_paths="$(tmp_file)"; tree_paths "$root" > "$before_paths" 2>/dev/null || : > "$before_paths"; prepare "$root" "$name" "$prompt"; out="$(tmp_file)"; tmp="$(tmp_file)"; jq --arg dir "$REVIEW_DIR" --arg head "$HEAD_SHA" --arg packet "$PACKET_HASH" --arg now "$(date -u +%FT%TZ)" '.review_dir=$dir|.head=$head|.packet_sha256=$packet|.last_heartbeat_at=$now|.updated_at=$now' "$meta" > "$tmp"; mv -f "$tmp" "$meta"
   if ! run_turn "$REVIEW_DIR" "$prompt" "$out" "$sid" "$meta"; then if preserve_failure "$root" "$name" "$prompt" "$out" "$meta" ask; then muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence was saved under .ai/reviews/."; else muse_credit_stop "$out"; die "$TURN_ERROR Incomplete evidence could not be saved; the session remains blocked."; fi; fi
