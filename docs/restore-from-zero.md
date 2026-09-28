@@ -132,3 +132,8 @@ All **required** checks should pass. Warnings about optional tools are fine.
   installers restore required machine-local values from 1Password.
 - Claude/Codex/gh login state — recreated by the `login` steps above.
 - Application source code — cloned separately per project.
+
+## Machine-specific records
+
+- [edge-dev3 Remote Desktop over Tailscale (2026-09-28)](edge-dev3-rdp-over-tailscale-2026-09-28.md)
+  — what a rebuilt edge-dev3 and each Windows client need for `mstsc` by name.
