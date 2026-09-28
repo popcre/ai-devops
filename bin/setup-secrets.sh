@@ -248,6 +248,7 @@ else
 # Resolve secrets while holding the refresh lock, then release it BEFORE the
 # long-running MCP server starts. Holding this lock around the server leaves
 # every later MCP waiting until Codex times out.
+# Do not pass the lock descriptor to op; its children may outlive the read.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
   export OP_SERVICE_ACCOUNT_TOKEN
@@ -256,7 +257,7 @@ if [ -n "\${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "\${TRIGGER_ACCESS_TOKEN:-}" ]; 
   exec "\$@"
 fi
 _aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
-_aidev_exports="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
+_aidev_exports="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
 import os, shlex, sys
 for name in sys.argv[1:]:
     value = os.environ.get(name, "")
@@ -279,6 +280,7 @@ EOF
 # \$1 = server URL, \$2 = op:// ref to the bearer token, \$3+ = extra mcp-remote flags.
 # mcp-remote does NOT expand \\\${VAR} in --header, so the token must be a real value
 # before it runs: resolve it in memory here and pass it straight through.
+# Keep the refresh lock through op's exit, not through its children.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
   export OP_SERVICE_ACCOUNT_TOKEN
@@ -289,7 +291,7 @@ case "\$REF" in
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
   *) TOK= ;;
 esac
-[ -n "\$TOK" ] || TOK="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
+[ -n "\$TOK" ] || TOK="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
   echo "ai-devops: serialized fallback FAILED for \$REF — not starting \$URL" >&2
   exit 1
 }
