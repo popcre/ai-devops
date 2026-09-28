@@ -447,8 +447,16 @@ BOOTSTRAP
   check 'an absolute Python CLI array cannot bypass admission' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
   rm -f "$mutation_dir/bin/ai-bypass.py"
+  printf '#!/usr/bin/env python3\nimport subprocess\nsubprocess.run([\n    "gh",\n    "status",\n])\n' > "$mutation_dir/bin/ai-bypass.py"
+  check 'a multiline Python status call cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.py"
   printf '#!/usr/bin/env node\nrequire("child_process").execFileSync("/usr/local/bin/gh", ["api", "rate_limit"]);\n' > "$mutation_dir/bin/ai-bypass"
   check 'an absolute Node CLI argument cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env node\nrequire("child_process").execFileSync(\n  "gh", ["api", "rate_limit"]\n);\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a multiline Node call cannot bypass admission' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
   rm -f "$mutation_dir/bin/ai-bypass"
   printf 'Start-Process -FilePath "gh.exe" -ArgumentList "api", "rate_limit"\n' > "$mutation_dir/bin/ai-bypass.ps1"

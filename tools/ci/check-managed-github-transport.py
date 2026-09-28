@@ -13,7 +13,7 @@ import sys
 
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) == 2 else pathlib.Path(__file__).resolve().parents[2])
-API_VERBS = r"(?:api|run|repo|pr|issue|workflow|release|search|cache|label|gist|project|codespace|secret|variable|ruleset)"
+API_VERBS = r"(?:api|run|repo|pr|issue|workflow|release|search|cache|label|gist|project|codespace|secret|variable|ruleset|status)"
 DIRECT = re.compile(rf"(?<![\w$.-])(?:['\"])?gh(?:\.exe)?(?:['\"])?\s+{API_VERBS}\b", re.IGNORECASE)
 SDK = re.compile(r"(?:execFileSync|spawnSync|execFile|spawn)\s*\(\s*['\"](?:[^'\"]*[/\\])?gh(?:\.exe)?['\"]", re.IGNORECASE)
 ARG_ARRAY = re.compile(rf"[\[(,]\s*['\"](?:[^'\"]*[/\\])?gh(?:\.exe)?['\"]\s*,\s*['\"]{API_VERBS}\b", re.IGNORECASE)
@@ -27,13 +27,14 @@ def inspect(path: pathlib.Path) -> list[str]:
     if path.name == "ai-gh":
         return []  # The shared admission command must invoke the real CLI.
     raw = path.read_bytes()
+    source = raw.decode("utf-8", errors="replace")
     problems = []
     # Preserve the first physical line for diagnostics while joining shell,
     # PowerShell, and CMD continuations, which split CLI from subcommand.
     logical_lines = []
     pending = ""
     start = 1
-    for number, physical in enumerate(raw.decode("utf-8", errors="replace").splitlines(), 1):
+    for number, physical in enumerate(source.splitlines(), 1):
         if not pending:
             start = number
         if physical.rstrip().endswith(("\\", "`", "^")):
@@ -58,6 +59,17 @@ def inspect(path: pathlib.Path) -> list[str]:
             continue  # Exact user-facing guidance; S2 removed its direct fallback.
         if DIRECT.search(line) or SDK.search(line) or ARG_ARRAY.search(line) or POWERSHELL_START.search(line) or HTTP.search(line) or CLI_ALIAS.search(line):
             problems.append(f"{relative}:{number}: unmanaged GitHub transport")
+    # Python and Node argument arrays may span several physical lines. The
+    # same bounded literal patterns apply after comment-only lines are masked.
+    scan_text = "\n".join(
+        "" if line.lstrip().startswith(("#", "//", "*")) else line
+        for line in source.splitlines()
+    )
+    for pattern in (SDK, ARG_ARRAY):
+        for match in pattern.finditer(scan_text):
+            if "\n" in match.group():
+                number = scan_text.count("\n", 0, match.start()) + 1
+                problems.append(f"{relative}:{number}: unmanaged GitHub transport")
     if path.name == "ai-pr-wait" and b"calling gh directly" in raw:
         problems.append(f"{relative}: unpaced fallback after shared transport failure")
     return problems
