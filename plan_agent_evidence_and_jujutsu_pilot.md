@@ -10,7 +10,7 @@ Planning date: 2026-09-27 EDT. Parent: [ai-devops #903](https://github.com/popcr
 | 1 | Finish shared-db task-evidence isolation under its existing owner | Open; existing work partially landed | Existing [shared-db workflow refactor](https://github.com/popcre/shared-db/blob/main/plan_shared_db_workflow_refactor.md) Step 1 gate and live PR traces |
 | 2 | Remove avoidable evidence-only commit/review loops left after Step 1 | Open | Positive and refusal fixtures; two independent real PRs land without an evidence-only refresh |
 | 3 | Close only proven unrelated-main review invalidation gaps | Open | Exact content/policy identity tests and current-main integration proof; actual implementation changes still invalidate |
-| 4 | Run a reversible Jujutsu pilot in disposable clones | Open | Dated side-by-side task trials, recovery and GitHub export proofs |
+| 4 | Run a reversible Jujutsu pilot in disposable clones | Complete, 2026-09-27 EDT; no-go for rollout | [Six paired offline trials, migration refusal, bare Git export and privacy stop](tests/verification/repo-throughput/2026-09-27-jujutsu-pilot.md); #911. No live/default switch. |
 | 5 | Decide adoption from measured results and verify GitHub continuity | Open | Published go/no-go report, rollback drill, and owner-approved rollout only if warranted |
 
 Fresh session: re-read §1, §5, §8, §9 and the live STATUS of each referenced plan, then take **only the first unticked child** on parent #903. Finish that child, tick it with an artifact, comment the next child on the parent, and stop. Do not bundle unproven live outcomes. At each phase boundary use `fresh-session` and re-read downstream steps against current `origin/main`.
