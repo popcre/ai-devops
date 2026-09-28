@@ -59,11 +59,13 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { warn 'not a Git checkou
 # requalification, and finalization. The child installer checks this exact fd.
 install_lock_dir="$HOME/.local/state/ai-devops/task-gates"
 install_lock_name="install-$(printf '%s' "$REPO_ROOT" | sha256sum | cut -c1-16).lock"
+install_original_umask="$(umask)"
 umask 077
 mkdir -p "$install_lock_dir" || exit 1
 install_lock_file="$install_lock_dir/$install_lock_name"
 exec 9>"$install_lock_file" || exit 1
 flock -n 9 || { warn 'another installation is active for this checkout'; exit 1; }
+umask "$install_original_umask"
 if [ -n "$(git status --porcelain)" ]; then
   warn 'checkout has local changes; preserve and reconcile them before updating'
   exit 1

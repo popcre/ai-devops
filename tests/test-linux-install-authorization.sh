@@ -33,7 +33,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 printf '%s\n' "$phase" >> "$TEST_LOG"
-if [ "$phase" = resume ] && [ -n "${TEST_CAPTURE_UMASK_FILE:-}" ]; then
+if [ -n "${TEST_CAPTURE_UMASK_FILE:-}" ]; then
   umask > "$TEST_CAPTURE_UMASK_FILE"
 fi
 [ "$phase" != preflight ] || [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || exit 48
@@ -226,7 +226,12 @@ if grep -q '^finalize$' "$TEST_LOG"; then fail 'failed direct retry finalized'; 
   fail 'successful direct retry did not finalize exactly once'
 
 : > "$TEST_LOG"
-"$TMP/installed/update.sh" --expected-head "$target" --owner-request 'fixture approval' >/dev/null
+(
+  umask 022
+  TEST_CAPTURE_UMASK_FILE="$TMP/updater-umask" "$TMP/installed/update.sh" --expected-head "$target" \
+    --owner-request 'fixture approval' >/dev/null
+)
+[ "$(cat "$TMP/updater-umask")" = 0022 ] || fail 'updater leaked private lock umask into installation stages'
 check_head "$target"
 [ "$(paste -sd, "$TEST_LOG")" = 'start,preflight,install,resume,requalify,stages-complete,finalize' ] ||
   fail 'update did not run gate/install/requalification in order'
