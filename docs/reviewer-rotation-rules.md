@@ -10,7 +10,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
    `bin/ai-reviewer-membership-drift` compares the two and fails on any
    difference; the `Reviewer membership drift` workflow runs it every six hours
    and on registry changes. Providers that review outside the allocator
-   (Claude approval gate, Codex overflow) are listed in
+   (Claude and Codex one-shot approval gates) are listed in
    `config/reviewer-membership-scope.json`.
 2. **Unreachable reviewer: check membership, then move on.** Run
    `bin/ai-reviewer-membership-drift` or read the registry first. If the
@@ -94,7 +94,10 @@ allocator but stayed registered here, and a session spent an hour trying it.
     of the caller's credentials.
     `ai-stepfun` refuses to run without bubblewrap. The allocator draws it only
     when local `ai-review-preflight` reports it usable; Windows reports
-    `unsupported-platform`, so no Windows assignment is made.
+    `unsupported-platform`, so no Windows assignment is made. The platform
+    override is available only when `AI_STEPFUN_TEST_MODE=1` for offline tests.
+    The 2026-09-27 membership change mirrors shared-db PR #3556's allocator row
+    `stepfun-step-5-preview`; that pull request must land before this mirror.
 
 12. **Prefer other reviewers before Grok.** Owner instruction, 2026-09-27: StepFun
     joins the rotation. The allocator rotates among all active reviewers other
@@ -102,3 +105,5 @@ allocator but stayed registered here, and a session spent an hour trying it.
     the exact review. A reviewer that failed, lacks local support, conflicts
     with the orchestrator, or already holds another slot for this head remains
     excluded by the existing safety checks. Preference never bypasses them.
+    The ordering is implemented and tested in shared-db PR #3593; this repository
+    mirrors the policy and does not allocate governed shared-db reviewers.

@@ -8,7 +8,7 @@
     },
     "codex": {
       "registry_state": "registered",
-      "reason": "Approval-gate wrapper only (ai-codex-review one-shot modes, like the Claude gate); NOT a rotation or overflow reviewer. popcre/shared-db RETIRED_REVIEWERS carries codex-gpt-5.6-sol since 2026-09-06 (shared-db issue #2485), so the allocator never assigns it; owner confirmed on 2026-09-22 that the rotation pool is Muse, Grok, Qwen, Gemini."
+      "reason": "Approval-gate wrapper only (ai-codex-review one-shot modes, like the Claude gate); NOT a rotation or overflow reviewer. popcre/shared-db RETIRED_REVIEWERS carries codex-gpt-5.6-sol since 2026-09-06 (shared-db issue #2485), so the allocator never assigns it."
     },
     "deepseek": {
       "registry_state": "registered",
@@ -40,7 +40,7 @@
     },
     "stepfun": {
       "registry_state": "registered",
-      "reason": "Rotation reviewer on Ubuntu/Linux only (StepFun Step 5 via StepCode). ai-review-preflight excludes it on Windows as unsupported-platform. Formal reviews use read-only tools and a sealed exact-head evidence packet in a disposable copy."
+      "reason": "Rotation reviewer on Ubuntu/Linux only (StepFun Step 5 via StepCode), added by owner instruction on 2026-09-25 and mirrored from popcre/shared-db PR #3556 allocator row stepfun-step-5-preview. It was previously outside the allocator. ai-review-preflight excludes it on Windows as unsupported-platform. Formal reviews use read-only tools and a sealed exact-head evidence packet in a disposable copy."
     }
   }
 }

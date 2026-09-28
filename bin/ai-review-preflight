@@ -242,11 +242,12 @@ reconciled_status() { # PROVIDER
 }
 
 static_status() {
+  local platform
   case "$1" in
     gemini) gemini_live_qualified && return 1; printf '{"provider":"gemini","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
     qwen) qwen_live_qualified && return 1; printf '{"provider":"qwen","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
     # StepCode is Ubuntu/Linux only (owner instruction 2026-09-25).
-    stepfun) [ "${AI_STEPFUN_PLATFORM:-$(uname -s)}" = Linux ] && return 1; printf '{"provider":"stepfun","status":"unsupported-platform","failure_class":"unsupported-platform"}\n'; return 0 ;;
+    stepfun) platform="$(uname -s)"; [ "${AI_STEPFUN_TEST_MODE:-}" != 1 ] || platform="${AI_STEPFUN_PLATFORM:-$platform}"; [ "$platform" = Linux ] && return 1; printf '{"provider":"stepfun","status":"unsupported-platform","failure_class":"unsupported-platform"}\n'; return 0 ;;
     *) return 1 ;;
   esac
 }

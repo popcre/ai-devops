@@ -9,7 +9,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" AI_STEPFUN_STATE_DIR="$TMP/state" AI_STEPFUN_KEY_STORE="$TMP/home/key"
 export AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_STEPFUN_STEP_BIN="$TMP/bin/step"
 export AI_REVIEW_EVENT_DIR="$TMP/events"
-export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_RATE_PAUSE=0 AI_STEPFUN_REPORT_FLOOR=20
+export AI_STEPFUN_TEST_MODE=1 AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_RATE_PAUSE=0 AI_STEPFUN_REPORT_FLOOR=20
 mkdir -p "$TMP/bin" "$HOME"
 printf 'stub-key\n' > "$AI_STEPFUN_KEY_STORE"; chmod 600 "$AI_STEPFUN_KEY_STORE"
 git -C "$TMP" init -q repo; git -C "$TMP/repo" config user.email t@example.com; git -C "$TMP/repo" config user.name T
@@ -70,12 +70,15 @@ export AI_STEPFUN_BWRAP="$TMP/bin/bwrap"
 echo '== ai-stepfun'
 out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 "$SCRIPT" doctor 2>&1)"; rc=$?
 check "refuses to run on Windows" "[ $rc = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform"
+check "platform override alone cannot simulate Windows" "AI_STEPFUN_TEST_MODE=0 AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor | grep -q '^PASS  StepCode CLI'"
 cat > "$TMP/bin/other-step" <<'STUB'
 #!/usr/bin/env bash
 echo 'step 0.28.2 (Smallstep CLI)'
 STUB
 chmod +x "$TMP/bin/other-step"
 check "a different program named step is not accepted as StepCode" "! AI_STEPFUN_STEP_BIN='$TMP/bin/other-step' HOME='$TMP/nohome' '$SCRIPT' doctor >/dev/null 2>&1"
+out="$(AI_STEPFUN_STEP_BIN="$TMP/bin/other-step" "$SCRIPT" doctor 2>&1)"; rc=$?
+check "invalid explicit StepCode path names the bad override" "[ $rc = 1 ] && printf '%s' \"\$out\" | grep -q 'FAIL AI_STEPFUN_STEP_BIN'"
 
 # The checks below drive the stubbed Linux path, whose key-store proof
 # (stat mode 600) and bubblewrap sandbox only exist on Linux filesystems;
