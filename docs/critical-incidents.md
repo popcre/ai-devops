@@ -482,3 +482,44 @@ write-up), [issue #711](https://github.com/popcre/ai-devops/issues/711)
 (prevention), [issue #713](https://github.com/popcre/ai-devops/issues/713)
 (dirty work folders), [issue #714](https://github.com/popcre/ai-devops/issues/714)
 (housekeeping scripts).
+
+## 2026-09-25 — the installer parity test wiped the real MiMo skills folder
+
+**Impact:** all 36 managed skills in `~/.config/mimocode/skills` were quarantined
+in one run. Every MiMo skill load failed — the shared-db orchestrator session
+could not open `shared-db-handover` and stopped at its handover gate. Nothing
+was deleted: quarantine is recoverable, and the repair (move the skills back,
+evict the fixture's fake `shared-one`) took minutes once the cause was found.
+
+**Symptom:** `shared-db-handover` and every other skill failing to load from
+`C:\Users\<user>\.config\mimocode\skills\…` while copies still existed in the
+read-only `~/.agents/skills` compat root. The live folder held exactly one
+skill: `shared-one`, `description: test`.
+
+**Root cause:** `tests/test-installer-parity.sh` invoked
+`bin/install-ai-devops-windows.ps1` without `-MimoHome`. The installer defaults
+`$MimoHome` to `$HOME\.config\mimocode` — the real, populated home — while
+`-ClaudeHome/-CodexHome/-ZCodeHome` were correctly pinned to temp directories.
+With the fixture repo as `-RepoPath`, orphan pruning compared the real 36
+skills against a fixture expected set of one and retired every real skill to
+`skills-quarantine/`, then installed the fixture's fake `shared-one`. CI never
+caught it: on runners `$HOME\.config\mimocode` does not exist, so the stage
+silently skips. The same fingerprint is in the quarantine from 2026-09-23 — the
+wipe had happened before.
+
+**Fix:** [PR #874](https://github.com/popcre/ai-devops/pull/874) (merge
+`1f5e289d`) passes an explicit temp `-MimoHome` on both PowerShell invocations,
+matching the other three homes. Proven by running the suite twice with the real
+folder verified at 36 skills before and after each run.
+
+**Prevention:** every installer invocation in a test must pass ALL FOUR home
+overrides — a missing one is a write to the real home, not a skip. When the
+installer gains a new home parameter, audit every test caller the same day.
+
+**Why the diagnosis was slow:** the read-only `~/.agents/skills` copies made it
+look like the skills existed and the loader was broken, instead of the write
+root having been emptied. The fixture skill's `description: test` and the
+`skills-quarantine/` contents were what named the parity test as the writer.
+
+**Related:** [PR #874](https://github.com/popcre/ai-devops/pull/874) (this
+write-up and fix).

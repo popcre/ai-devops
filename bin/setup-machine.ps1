@@ -133,6 +133,29 @@ if ([string]::IsNullOrWhiteSpace($RepoPath)) {
   }
 }
 
+# Direct setup is also an entry point. The only package permitted before the
+# source gate is the fixed Git prerequisite needed to inspect the checkout.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'Git and WinGet are unavailable for source verification.' }
+  winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Git prerequisite installation failed.' }
+  $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git prerequisite is not available after installation.' }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $RepoPath '.git'))) {
+  if (Test-Path -LiteralPath $RepoPath) { throw 'RepoPath exists but is not a Git checkout.' }
+  & git clone -q --branch main --single-branch https://github.com/popcre/ai-devops.git $RepoPath 2>$null
+  if ($LASTEXITCODE -ne 0) { throw 'Canonical ai-devops clone failed before machine setup.' }
+}
+& git -C $RepoPath fetch -q origin main 2>$null
+if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch ai-devops origin/main before machine setup.' }
+$sourceTarget=(& git -C $RepoPath rev-parse origin/main 2>$null).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceTarget -notmatch '^[0-9a-f]{40}$') { throw 'Cannot pin ai-devops target before machine setup.' }
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoPath 'bin\install-ai-devops-windows.ps1') `
+  -RepoPath $RepoPath -SourceGateOnly -ExpectedHead $sourceTarget
+if ($LASTEXITCODE -ne 0) { throw 'Guarded ai-devops source update refused direct machine setup.' }
+if ((& git -C $RepoPath rev-parse HEAD 2>$null).Trim() -ne $sourceTarget) { throw 'Machine setup source differs from pinned target.' }
+
 # Seed portable Codex defaults only on a brand-new Codex home. Existing TOML is
 # never rewritten or appended to: duplicate keys have broken Codex before, and
 # machine-specific paths, plugins, and trust entries must remain local.
@@ -152,7 +175,7 @@ $codexAgentLimitSetup = Join-Path $RepoPath "bin\configure-codex-agent-limit.ps1
 if (-not (Test-Path -LiteralPath $codexAgentLimitSetup)) {
   throw "Missing Codex agent-limit reconciler: $codexAgentLimitSetup"
 }
-& $codexAgentLimitSetup -ConfigPath $codexConfigPath -MaxConcurrentThreads 20
+& $codexAgentLimitSetup -ConfigPath $codexConfigPath
 # %USERPROFILE%, never $HOME: on a machine with a roaming profile $HOME can point at a
 # network drive (Z:) that nothing reads back, which has silently misplaced installs here
 # before.
@@ -298,13 +321,11 @@ if (Get-Command uv -ErrorAction SilentlyContinue) { Ok "uv" } else { Warn "uv no
 Step "Installing ai-devops repo, skills and global instruction files"
 $existingInstaller = Join-Path $RepoPath "bin\install-ai-devops-windows.ps1"
 if (Test-Path $existingInstaller) {
-  & powershell -ExecutionPolicy Bypass -File $existingInstaller -RepoPath $RepoPath
+  & powershell -ExecutionPolicy Bypass -File $existingInstaller -RepoPath $RepoPath -ExpectedHead $sourceTarget
 } else {
-  # Repo not present yet: clone, then run its installer.
-  Note "Repo not found at $RepoPath; cloning."
-  git clone https://github.com/popcre/ai-devops.git $RepoPath
-  & powershell -ExecutionPolicy Bypass -File (Join-Path $RepoPath "bin\install-ai-devops-windows.ps1") -RepoPath $RepoPath
+  throw 'Guarded ai-devops installer disappeared after source verification.'
 }
+if ($LASTEXITCODE -ne 0) { throw 'Guarded ai-devops installation failed; machine setup cannot continue.' }
 
 # --------------------------------------------------------------------------
 # 2b. Git commit identity.
@@ -1215,12 +1236,6 @@ if (Test-Path -LiteralPath $glmSetup) {
     & $glmSetup -RepoPath $RepoPath
     if ($LASTEXITCODE -ne 0) { throw "setup-opencode-glm.ps1 exited $LASTEXITCODE" }
     Ok "GLM runs locally: ai-glm is on PATH and the OpenCode server is healthy"
-    $museSetup = Join-Path $RepoPath "bin\setup-opencode-muse.sh"
-    if (Test-Path -LiteralPath $museSetup) {
-      & $gitBash $museSetup
-      if ($LASTEXITCODE -ne 0) { throw "setup-opencode-muse.sh exited $LASTEXITCODE" }
-      Ok "Muse persistent protected conversations are installed: `$env:AI_MUSE_CALLER='codex'; ai-muse doctor"
-    }
   } catch {
     # Loud, not silent: say what broke and what still works.
     Warn "Local GLM setup did not complete: $($_.Exception.Message)"
@@ -1230,6 +1245,47 @@ if (Test-Path -LiteralPath $glmSetup) {
 } else {
   Warn "Missing $glmSetup - pull the latest ai-devops and re-run."
 }
+
+# The Windows installer runs before the one-time service-account token exists.
+# Complete Muse's credential setup here, after the token and runtime are ready.
+# Keep Muse independent of GLM so a GLM setup failure cannot skip this stage.
+Step "Muse protected reviewer"
+$museSetup = Join-Path $RepoPath "bin\setup-opencode-muse.sh"
+$museWrapper = Join-Path $RepoPath "bin\ai-muse"
+$preflight = Join-Path $RepoPath "bin\ai-review-preflight"
+foreach ($required in @($museSetup, $museWrapper, $preflight)) {
+  if (-not (Test-Path -LiteralPath $required)) { throw "Missing Muse setup component: $required" }
+}
+& $gitBash $museSetup
+if ($LASTEXITCODE -ne 0) { throw "setup-opencode-muse.sh exited $LASTEXITCODE" }
+$oldMuseCaller = $env:AI_MUSE_CALLER
+try {
+  $env:AI_MUSE_CALLER = 'installer'
+  & $gitBash $museWrapper store-key --if-missing
+  $storeExit = $LASTEXITCODE
+} finally {
+  $env:AI_MUSE_CALLER = $oldMuseCaller
+}
+if ($storeExit -ne 0) { throw "ai-muse store-key exited $storeExit" }
+# Muse has no requalify record; a live preflight is its supported health proof.
+$museRepo = @(& $gitBash -c 'cygpath -u -- "$1"' -- $RepoPath 2>$null)
+if ($LASTEXITCODE -ne 0 -or $museRepo.Count -ne 1 -or [string]::IsNullOrWhiteSpace($museRepo[0])) {
+  throw "Could not translate Muse repository path for Git Bash."
+}
+& $gitBash $preflight check muse ($museRepo[0]) --live
+if ($LASTEXITCODE -ne 0) { throw "Muse live preflight exited $LASTEXITCODE" }
+Ok "Muse protected reviewer is ready"
+
+# The Windows installer precedes service-account token setup. Seed DeepSeek's
+# protected store now, outside a review turn, using the wrapper's shared lock.
+Step "DeepSeek protected reviewer"
+$deepseekWrapper = Join-Path $RepoPath "bin\ai-deepseek-agent"
+if (-not (Test-Path -LiteralPath $deepseekWrapper)) { throw "Missing DeepSeek wrapper: $deepseekWrapper" }
+& $gitBash $deepseekWrapper store-key --if-missing
+if ($LASTEXITCODE -ne 0) { throw "ai-deepseek-agent store-key exited $LASTEXITCODE" }
+& $gitBash $deepseekWrapper doctor --live
+if ($LASTEXITCODE -ne 0) { throw "DeepSeek live doctor exited $LASTEXITCODE" }
+Ok "DeepSeek protected reviewer is ready"
 
 # Retired: bin\ai-glm-agent.ps1 (GLM inside a Claude Code child process). Remove any
 # leftover PATH shim so a stale command cannot linger.

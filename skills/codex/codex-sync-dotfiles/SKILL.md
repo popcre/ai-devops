@@ -44,12 +44,19 @@ checkout exists, onboard first (`bin/install-ai-devops-windows.ps1` on Windows,
 clone + `./install.sh` on Ubuntu).
 
 ## Procedure
-1. `git pull --ff-only` in the repo. On failure (local changes/diverged), STOP
-   and report — never force or reset.
+1. On Windows, run `powershell -ExecutionPolicy Bypass -File
+   <repo>\bin\install-ai-devops-windows.ps1 -RepoPath <repo> -SourceGateOnly`
+   before the remaining steps. It checks the installed source receipt before
+   advancing the checkout and stops protected updates for task gate preflight.
+   On Ubuntu, run `git pull --ff-only` in the repo. On failure (local
+   changes/diverged), STOP and report — never force or reset.
 1b. **Reconcile local AI commands before installing skills.** Run
    `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
    Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\install-machine-tools.ps1 -RepoPath <repo>`
-   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. If
+   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. The
+   Windows launcher installer validates the source gate before stamping a
+   receipt; a protected update first needs the reviewed pinned route in
+   `docs/deployment.md`. If
    only `ai-glm` is missing, use the existing GLM installer in step 2b because
    it owns that command and service. Stop if the final doctor is nonzero. Say
    "Local AI commands already current" or name the launchers installed. On
@@ -80,7 +87,9 @@ clone + `./install.sh` on Ubuntu).
      legitimate ref `op://vibe_coding/designflow-mcp/devops_token` contains `ops_`
      and produced a false positive on 2026-07-26. A real SA token is ~866 chars.
    - Windows: `~/.ssh/ai-devops.conf` exists and `~/.ssh/config` `Include`s it.
-     Ubuntu: `~/.config/ai-devops/shellrc` exists and `.bashrc` sources it.
+     Ubuntu: `~/.config/ai-devops/shellrc` exists and `.bashrc` sources it, and
+     `<repo>/bin/ai-ssh-setup` reports the 916-alien key and `ai-devops.conf`
+     Include as current (it is idempotent; run it directly to repair only SSH).
    **If anything is missing or a real token is found**, run the per-OS installer:
    `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\setup-machine.ps1 -RepoPath <repo>`
    or `<repo>/bin/setup-secrets.sh`. Preconditions: **pwsh 7** (the Windows script
@@ -195,6 +204,12 @@ clone + `./install.sh` on Ubuntu).
    It catches a memory written without a `MEMORY.md` index line in the same turn —
    the failure that left 20 of 34 shared-db memories unreachable until 2026-08-21.
    Run it from a Codex sync too: the machine, not the client, is what is missing it.
+5c3. **Install the Claude closeout hook:** `bin/ai-install-completion-check-hook`
+   (Claude is the default client; `--check` reports drift). Idempotent; strictly
+   additive to `~/.claude/settings.json`. Without it, a session that ends on
+   waiting language is never forced to hold an `ai-blocker-watch wait`, so the
+   BlockerWatch rule is honor-system only (issue #878). `ai-devops doctor` fails
+   when it is missing. Run it from a Codex sync too.
 5d. Check the weekly read-only memory audit exists (`ai-memory-health` scheduled
    task on Windows, registered by `bin/install-memory-health-task.ps1`). If absent,
    say so and offer to register it. Never schedule anything that EDITS memory

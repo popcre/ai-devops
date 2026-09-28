@@ -89,7 +89,11 @@ evidence, production target, bounded allowlist, fresh dry-run, exclusive lock,
 and post-apply result; missing evidence stops for an engineer. Owner ruling
 (2026-09-16): because Albert is not technical, a production approval comes
 only from an available independent read-only reviewer's explicit APPROVE;
-anything else stops. Workflow detail:
+anything else stops. Owner ruling (2026-09-28, Albert Hazan, verbatim: "i don't
+need an independent production reviewer. remove that requirement"; popcre/shared-db
+#3656): no separately registered independent reviewer identity is required for
+shared-db manual production recovery; the allocator-assigned exact-head AI review
+APPROVE and every other evidence gate still apply. Workflow detail:
 its full checklist lives in `skills/shared/shared-db-orchestrator/` and
 `skills/shared/shared-db-change/`. That exception authorizes no manual
 production command.

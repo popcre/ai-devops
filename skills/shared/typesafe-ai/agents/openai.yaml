@@ -1,0 +1,6 @@
+interface:
+  display_name: "TypeSafe"
+  short_description: "Use only when selected by name"
+
+policy:
+  allow_implicit_invocation: false

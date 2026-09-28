@@ -42,7 +42,13 @@ PROVIDER_CREDIT_PATTERNS = {'qwen': tuple(re.compile(p) for p in (
     r'\bfreetieronly\b',
     r'free tier of the model has been exhausted',
     r'\bout_of_service\b',
-))}
+)),
+    # StepFun: HTTP 402 with type quota_exceeded is its unpaid-balance reply.
+    'stepfun': tuple(re.compile(p) for p in (
+        r'\b402\b.*quota_exceeded',
+        r'exceeded your current quota, please check your plan and billing details',
+    )),
+}
 # DashScope uses insufficient_quota for rate limiting too, so it proves nothing
 # about Qwen's balance; Qwen relies on its own status codes above.
 PROVIDER_EXCLUDED_PATTERNS = {'qwen': ('insufficient_quota',)}
@@ -52,6 +58,7 @@ CREDIT_MESSAGES = {
     'qwen': 'the Alibaba Model Studio (Qwen) account is out of balance or its free quota is used up - top up at https://usercenter2-intl.console.alibabacloud.com/billing/#/account/overview',
     'gemini': 'the Google Gemini API project has run out of prepaid credits - add credits at https://ai.studio/projects',
     'deepseek': 'the DeepSeek account balance is used up - top up at https://platform.deepseek.com/top_up',
+    'stepfun': 'the StepFun (Step 5) API account is out of credit - add credits at https://platform.stepfun.ai',
 }
 
 
@@ -265,7 +272,7 @@ def observe(directory, provider, profile, model, run_id, observed, now, seconds,
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear', 'credit'))
-    parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen'))
+    parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen','stepfun'))
     parser.add_argument('--directory', type=pathlib.Path, required=True)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
     parser.add_argument('--home')

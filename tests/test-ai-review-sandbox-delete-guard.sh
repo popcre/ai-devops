@@ -114,5 +114,43 @@ rm -rf "$REAL" 2>/dev/null
 "$SCRIPT" remove-copy "$MAIN" guardlink >/dev/null 2>&1
 set -e
 
+# --- managed root reached through a link is still deletable via sweep -------
+# Production root is a Windows junction. sweep-orphans enumerates that linked
+# spelling and hands it to remove_sandbox. Evidence tools reject link
+# components, so the delete must canonicalize first or every real orphan is
+# retained forever. Age a marker and sweep through the linked root.
+LINK_ROOT="$TMP/linked-sandboxes"
+REAL_ROOT="$TMP/real-sandboxes"
+mkdir -p "$REAL_ROOT"
+linked=0
+if command -v cmd >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+  win_link="$(cygpath -w "$LINK_ROOT")"
+  win_real="$(cygpath -w "$REAL_ROOT")"
+  # Windows directory junction: the production sandbox root is one of these.
+  cmd //c "mklink /J $win_link $win_real" >/dev/null 2>&1 || true
+fi
+# Linux/macOS: a real symlink is the same class (evidence tools reject it).
+if [ ! -e "$LINK_ROOT" ]; then
+  ln -s "$REAL_ROOT" "$LINK_ROOT" 2>/dev/null || true
+fi
+if [ -e "$LINK_ROOT" ] && [ "$(cd "$LINK_ROOT" 2>/dev/null && pwd -P)" = "$(cd "$REAL_ROOT" 2>/dev/null && pwd -P)" ]; then
+  linked=1
+fi
+if [ "$linked" = 1 ]; then
+  OLD_SANDBOX_DIR="$AI_REVIEW_SANDBOX_DIR"
+  export AI_REVIEW_SANDBOX_DIR="$LINK_ROOT"
+  LINKED_SNAP="$("$SCRIPT" ensure-copy "$MAIN" guardlinkroot)"
+  check "linked_root_snapshot_is_created"      "[ -d '$LINKED_SNAP' ] && [ -f '$LINKED_SNAP/.ai-review-sandbox' ]"
+  # Age the marker past the sweep threshold, then sweep using the LINKED root
+  # spelling — exactly what production passes from AI_REVIEW_SANDBOX_DIR.
+  touch -d '2 hours ago' "$LINKED_SNAP/.ai-review-sandbox" 2>/dev/null || true
+  "$SCRIPT" sweep-orphans --max-age-seconds 60 --max-removals 5 >/dev/null 2>&1 || true
+  check "linked_root_sweep_removes_orphan"     "[ ! -e '$LINKED_SNAP' ]"
+  export AI_REVIEW_SANDBOX_DIR="$OLD_SANDBOX_DIR"
+else
+  skip "linked_root_snapshot_is_created (no usable symlink/junction)"
+  skip "linked_root_sweep_removes_orphan (no usable symlink/junction)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

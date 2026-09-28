@@ -31,6 +31,7 @@ esac
 GH
 chmod +x "$TMP/bin/gh"
 export PATH="$TMP/bin:$PATH" GH_LOG="$LOG"
+export AI_GH_STATE_DIR="$TMP/gh-state" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
@@ -47,6 +48,7 @@ if "$ROOT/bin/ai-verify-run" start --repo acme/tool --ref main --task issue-246 
   fail 'start accepted an active exact-SHA duplicate'
 fi
 grep -q 'workflow run' "$LOG" && fail 'safe refusal dispatched a workflow'
+[ -f "$AI_GH_STATE_DIR/last_call_ms" ] || fail 'exact-SHA read bypassed the shared gate'
 
 : >"$LOG"
 unset FAKE_ACTIVE

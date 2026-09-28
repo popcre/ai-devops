@@ -23,4 +23,19 @@ grep -q 'qwen: active in the shared-db allocator but missing' <<<"$out" || { ech
 printf 'nothing here' > "$T/empty.mjs"
 set +e; node "$BIN" --lanes-file "$T/empty.mjs" --scope "$T/scope.json" --registry "$T/ok.json" >/dev/null 2>&1; rc=$?; set -e
 [ "$rc" = 2 ] || { echo "FAIL: unparseable allocator exit $rc"; exit 1; }
+# The default allocator read is fresh and admitted; fixture file mode above
+# remains wholly offline. A fake real CLI proves the installed command route.
+cat > "$T/gh" <<'GH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_LOG"
+cat "$LANES_FIXTURE"
+GH
+chmod +x "$T/gh"
+GH_LOG="$T/gh.log" LANES_FIXTURE="$T/lanes.mjs" \
+AI_GH_REAL_GH="$T/gh" AI_GH_STATE_DIR="$T/gh-state" \
+AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off \
+  node "$BIN" --scope "$T/scope.json" --registry "$T/ok.json" | grep -q '^OK' ||
+  { echo 'FAIL: shared transport did not read allocator'; exit 1; }
+[ -f "$T/gh-state/last_call_ms" ] || { echo 'FAIL: allocator read bypassed shared admission'; exit 1; }
+[ "$(wc -l < "$T/gh.log")" -eq 1 ] || { echo 'FAIL: unexpected allocator reads'; exit 1; }
 echo 'PASS test-ai-reviewer-membership-drift'

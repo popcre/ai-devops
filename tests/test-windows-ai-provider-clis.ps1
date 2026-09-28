@@ -21,7 +21,7 @@ Assert ($installerText -match 'https://code\.kimi\.com/kimi-code/install\.ps1') 
 Assert ($installerText -match 'https://qwen-code-assets\.oss-cn-hangzhou\.aliyuncs\.com/installation/install-qwen-standalone\.ps1') 'must use the official Qwen standalone installer'
 Assert ($installerText -match 'qwen-code\\bin\\qwen\.cmd') 'must verify the Qwen standalone shim'
 Assert ($installerText -match 'TestOnly') 'must support a non-installing verification path'
-Assert ($installerText -match "ValidateSet\('grok', 'kimi', 'qwen'\)") 'must support a provider-scoped installation'
+Assert ($installerText -match "ValidateSet\('grok', 'kimi', 'qwen', 'gemini'\)") 'must support a provider-scoped installation'
 Assert ($installerText -match 'QwenVersion') 'must support an explicit Qwen version'
 Assert ($installerText -match 'QWEN_INSTALL_VERSION') 'must pass the exact Qwen version through the official installer contract'
 Assert ($installerText -match 'Backup-QwenRuntime') 'must preserve an existing Qwen runtime before an upgrade'

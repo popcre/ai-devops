@@ -86,8 +86,8 @@ command -v git >/dev/null 2>&1 || fail "git is unavailable"
 if [[ "${AI_MEMORY_TEST_MODE:-}" == "1" && "${AI_MEMORY_TEST_PRIVATE:-}" == "1" ]]; then
   :
 else
-  command -v gh >/dev/null 2>&1 || fail "GitHub CLI is required to verify private visibility"
-  private="$(gh api repos/u2giants/ai-devops-memory --jq '.private' 2>/dev/null)" ||
+  [[ -x "$TOOL_ROOT/bin/ai-gh" ]] || fail "shared GitHub transport is required to verify private visibility"
+  private="$(AI_GH_CALLER=ai-memory-sync "$TOOL_ROOT/bin/ai-gh" api repos/u2giants/ai-devops-memory --jq '.private' 2>/dev/null)" ||
     fail "could not verify private hub visibility"
   [[ "$private" == "true" ]] || fail "memory hub is not private"
 fi

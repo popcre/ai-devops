@@ -83,14 +83,19 @@ function Invoke-Installer {
     }
     $oldMode = $env:AI_DEVOPS_INSTALL_TEST_MODE
     $oldRemote = $env:AI_DEVOPS_TEST_EXPECTED_REMOTE
+    $oldSkipMachineTools = $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE
     try {
         $env:AI_DEVOPS_INSTALL_TEST_MODE = '1'
         $env:AI_DEVOPS_TEST_EXPECTED_REMOTE = (git -C $Fixture remote get-url origin)
         if ($LASTEXITCODE -ne 0) { throw 'Could not read fixture remote.' }
+        # This disposable skills fixture has no managed launcher catalog.
+        # The installer accepts this exception only for a local test origin.
+        $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE = '1'
         return (& $Installer @parameters *>&1 | Out-String)
     } finally {
         $env:AI_DEVOPS_INSTALL_TEST_MODE = $oldMode
         $env:AI_DEVOPS_TEST_EXPECTED_REMOTE = $oldRemote
+        $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE = $oldSkipMachineTools
     }
 }
 
@@ -337,6 +342,72 @@ try {
     $output = Invoke-Installer $fixture $claude $codex
     Assert-True (Test-Path (Join-Path $fixture ".git\hooks\post-merge")) "managed post-merge hook was not installed into the fixture"
     Assert-True ($output -match "Test mode: not running live reviewer qualification") "requalify step did not honour test mode"
+
+    # Exercise the Qwen install stage with a fixture wrapper. The stub leaves
+    # a marker only when store-key --if-missing is actually invoked by Git Bash.
+    $fixture = New-Fixture "qwen-key-store"
+    $fixtureQwen = Join-Path $fixture "bin\ai-qwen"
+    $fixtureDeepSeek = Join-Path $fixture "bin\ai-deepseek-agent"
+    $qwenFixtureScript = @'
+#!/usr/bin/env bash
+[ "$1" = store-key ] && [ "$2" = --if-missing ] || exit 17
+printf ready > "$(dirname "$0")/qwen-store-called"
+'@
+    [IO.File]::WriteAllText($fixtureQwen, $qwenFixtureScript + "`n")
+    $deepseekFixtureScript = @'
+#!/usr/bin/env bash
+[ "$1" = store-key ] && [ "$2" = --if-missing ] || exit 18
+printf ready > "$(dirname "$0")/deepseek-store-called"
+'@
+    [IO.File]::WriteAllText($fixtureDeepSeek, $deepseekFixtureScript + "`n")
+    git -C $fixture add bin/ai-qwen bin/ai-deepseek-agent
+    git -C $fixture commit -m "add reviewer key-store fixtures" | Out-Null
+    git -C $fixture push | Out-Null
+    $fakeBin = Join-Path $TempRoot "qwen-key-store\fake-bin"
+    New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
+    [IO.File]::WriteAllText((Join-Path $fakeBin "qwen.cmd"), "@echo off`r`necho fixture-qwen`r`n")
+    $oldPath = $env:PATH
+    try {
+        $env:PATH = "$fakeBin;$oldPath"
+        $output = Invoke-Installer $fixture (Join-Path $TempRoot "qwen-key-store\claude") (Join-Path $TempRoot "qwen-key-store\codex")
+    } finally {
+        $env:PATH = $oldPath
+    }
+    Assert-True (Test-Path (Join-Path $fixture "bin\qwen-store-called")) "Qwen install stage did not invoke store-key --if-missing"
+    Assert-True ($output -match "Qwen protected per-user key store is ready") "Qwen install stage did not report protected key-store readiness"
+    Assert-True (Test-Path (Join-Path $fixture "bin\deepseek-store-called")) "DeepSeek install stage did not invoke store-key --if-missing"
+    Assert-True ($output -match "DeepSeek protected per-user key store is ready") "DeepSeek install stage did not report protected key-store readiness"
+
+    # Muse reviews cannot fetch from 1Password. The Windows install must
+    # populate the protected store explicitly, even before Muse Code exists.
+    $fixture = New-Fixture "muse-key-store"
+    $fixtureMuse = Join-Path $fixture "bin\ai-muse"
+    $museFixtureScript = @'
+#!/usr/bin/env bash
+[ "$1" = store-key ] && [ "$2" = --if-missing ] && [ "$AI_MUSE_CALLER" = installer ] || exit 17
+printf ready > "$(dirname "$0")/muse-store-called"
+'@
+    [IO.File]::WriteAllText($fixtureMuse, $museFixtureScript + "`n")
+    git -C $fixture add bin/ai-muse
+    git -C $fixture commit -m "add Muse key-store fixture" | Out-Null
+    git -C $fixture push | Out-Null
+    Invoke-Installer $fixture (Join-Path $TempRoot "muse-key-store\dry-claude") (Join-Path $TempRoot "muse-key-store\dry-codex") -SkillsDryRun | Out-Null
+    Assert-True (-not (Test-Path (Join-Path $fixture "bin\muse-store-called"))) "skills dry-run prepared the Muse key store"
+    $oldMuseCaller = $env:AI_MUSE_CALLER
+    try {
+        $env:AI_MUSE_CALLER = 'prior-caller'
+        $output = Invoke-Installer $fixture (Join-Path $TempRoot "muse-key-store\claude") (Join-Path $TempRoot "muse-key-store\codex")
+        Assert-True ($env:AI_MUSE_CALLER -eq 'prior-caller') "Muse install stage did not restore the caller identity"
+    } finally {
+        $env:AI_MUSE_CALLER = $oldMuseCaller
+    }
+    Assert-True (Test-Path (Join-Path $fixture "bin\muse-store-called")) "Muse install stage did not invoke store-key --if-missing"
+    Assert-True ($output -match "Muse protected per-user key store is ready") "Muse install stage did not report protected key-store readiness"
+    $keyReadyAt = $output.IndexOf("Muse protected per-user key store is ready")
+    $requalifyAt = $output.IndexOf("Re-qualifying reviewers whose qualification the update invalidated")
+    $qualificationAt = $output.IndexOf("Test mode: not running live reviewer qualification")
+    Assert-True ($keyReadyAt -ge 0 -and $requalifyAt -gt $keyReadyAt -and $qualificationAt -gt $requalifyAt) `
+        "Muse key store was not prepared before the reviewer requalification path"
 
     Write-Host "PASS: install-ai-devops-windows"
 } finally {

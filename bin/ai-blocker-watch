@@ -109,7 +109,7 @@
 # Environment:
 #   AI_BLOCKER_WATCH_HOME    state (default ~/.ai-devops/blocker-watch)
 #   AI_BLOCKER_WATCH_CONFIG  settings (default <repo>/config/blocker-watch.json)
-#   AI_BLOCKER_WATCH_GH      GitHub command (default ai-gh from this checkout)
+#   AI_BLOCKER_WATCH_TEST_GH  fake GitHub command for explicit test mode only
 set -euo pipefail
 die(){ printf 'ai-blocker-watch: error: %s\n' "$*" >&2; exit 2; }
 note(){ printf 'ai-blocker-watch: %s\n' "$*" >&2; }
@@ -122,10 +122,35 @@ done
 TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
 HOME_DIR="${AI_BLOCKER_WATCH_HOME:-${HOME:?HOME is unavailable}/.ai-devops/blocker-watch}"
 CONFIG="${AI_BLOCKER_WATCH_CONFIG:-$TOOL_ROOT/config/blocker-watch.json}"
-GH="${AI_BLOCKER_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
+GH="$TOOL_ROOT/bin/ai-gh"
+# A production override could silently send every scheduled read/write around
+# the shared quota gate. Only the offline suite may inject a fake transport.
+[ -z "${AI_BLOCKER_WATCH_GH:-}" ] || die 'AI_BLOCKER_WATCH_GH is retired; the scheduled transport must use ai-gh'
+if [ -n "${AI_BLOCKER_WATCH_TEST_GH:-}" ]; then
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || die 'AI_BLOCKER_WATCH_TEST_GH requires AI_DEVOPS_TEST_MODE=1'
+  [ -x "$AI_BLOCKER_WATCH_TEST_GH" ] || die 'test GitHub transport is not executable'
+  GH="$AI_BLOCKER_WATCH_TEST_GH"
+fi
+[ -x "$GH" ] || die 'shared GitHub transport is not executable'
+GH_COST_READY=0
+if [ "$GH" = "$TOOL_ROOT/bin/ai-gh" ] && [ -f "$TOOL_ROOT/tools/github-requests/telemetry.sh" ]; then
+  source "$TOOL_ROOT/tools/github-requests/telemetry.sh"
+  GH_COST_READY=1
+fi
+record_graphql_cost(){
+  [ "$GH_COST_READY" = 1 ] || return 0
+  printf '%s' "$2" | gh_measure_graphql_cost ai-blocker-watch "$1" "${BW_WORKFLOW:-blocker_watch_manual}" "${BW_TICK_RECEIPT_ID:-}" direct "${BW_TICK_CONTEXT:-}" ||
+    note 'request measurement unavailable: GraphQL cost not saved'
+}
 # Label only the transport subprocess. Resumed AI sessions are independent
 # callers and must not inherit BlockerWatch's attribution.
 gh_call(){ AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; }
+# Only call sites below set this fixed telemetry label; a parent shell must not
+# be able to misclassify unrelated BlockerWatch requests.
+unset AI_GH_OPERATION
+BW_WORKFLOW=''
+BW_TICK_RECEIPT_ID=''
+BW_TICK_CONTEXT=''
 WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
 LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
 LOGS="$HOME_DIR/logs"
@@ -146,12 +171,23 @@ gh_api(){ gh_call api "$@" | tr -d '\r'; }
 link(){ # link <blocked> <blocker> [blocker id, when already read]
   local br bn kr kn id="${3:-}"
   read -r br bn <<<"$(parse_ref "$1")"; read -r kr kn <<<"$(parse_ref "$2")"
-  [ -n "$id" ] || id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
+  # Same-tick snapshot already holds open issues' ids and blocked-by edges
+  # (#658 P5). A miss is not proof of anything — fall back to REST.
+  if [ -z "$id" ] && [ -n "${SNAPIDX[$kr#$kn]+set}" ]; then
+    id="${SNAPIDX[$kr#$kn]%%$'\t'*}"
+  fi
+  [ -n "$id" ] || id="$(AI_GH_OPERATION=bw.link_issue gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
   note "linking $1 as blocked by $2 on GitHub"
-  if gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
+  # SNAPDEP is keyed by blocker: SNAPDEP[blocker] lists the issues it blocks.
+  if [ -n "${SNAPREPO[$br]+set}" ]; then
+    case "${SNAPDEP[$kr#$kn]:- }" in *" $br#$bn "*)
+      note "$1 is already blocked by $2"; return 0 ;;
+    esac
+  fi
+  if AI_GH_OPERATION=bw.link_issue gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
     note "$1 is already blocked by $2"; return 0
   fi
-  gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null ||
+  AI_GH_OPERATION=bw.link_issue gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null ||
     die "GitHub refused the link $1 blocked by $2"
   note "recorded: $1 is blocked by $2"
 }
@@ -382,8 +418,11 @@ propagate(){
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       repo="${line%%#*}"; n="${line##*#}"
-      local deps
-      if ! deps="$(gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
+      local deps=""
+      # The tick's open-issue snapshot already says which OPEN issues wait on
+      # this one; REST only when it has none (a miss is not "no dependents").
+      snapshot_all_indexed && deps="$(snapshot_dependents_of "$repo" "$n")"
+      if [ -z "$deps" ] && ! deps="$(AI_GH_OPERATION=bw.dependents gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
         note "could not read what $repo#$n was blocking"; ok=0; continue
       fi
       for dep in $deps; do
@@ -442,7 +481,10 @@ wake(){ # wake <wait file>
   title=""
   if [ -n "$ref" ]; then
     read -r r n <<<"$(parse_ref "$ref")"
-    if ! meta="$(gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
+    # Still OPEN in this tick's snapshot → no REST read. A miss (closed, a pull
+    # request, a repo outside the scan) always falls through to REST.
+    if meta="$(snapshot_open_hit "$ref")"; then :
+    elif ! meta="$(AI_GH_OPERATION=bw.wake_miss gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
       note "could not read $ref"; FAILED=1; return; fi
     IFS=$'\t' read -r state ispr title <<<"$meta"
     if [ "$state" = closed ]; then
@@ -470,13 +512,26 @@ wake(){ # wake <wait file>
   [ -z "$zb" ] || ! command -v cygpath >/dev/null 2>&1 || zb="$(cygpath -m "$zb")"
   # Resume the exact session when its folder AND its transcript still exist;
   # otherwise start a fresh session from the parked issue in the main checkout.
-  local tglob g have_transcript=1 mode=resumed
+  local tglob g have_transcript=1 mode=resumed codex_child=0 transcript first_line
   tglob="$(jq -r --arg h "$h" '.transcript_glob[$h] // ""' "$CONFIG")"
   if [ -n "$tglob" ]; then
     g="${tglob//\{home\}/$home_m}"; g="${g//\{session\}/$s}"
     compgen -G "$g" >/dev/null 2>&1 || have_transcript=0
+    # Codex cannot resume a multi-agent v2 child through the CLI. Its session
+    # metadata identifies that case; the parked issue is the durable context
+    # for a fresh independent session instead. Never inspect transcript body.
+    if [ "$h" = codex ] && [ "$have_transcript" = 1 ]; then
+      while IFS= read -r transcript; do
+        IFS= read -r first_line < "$transcript" || :
+        if printf '%s\n' "$first_line" | jq -e --arg s "$s" \
+          '.type == "session_meta" and .payload.id == $s and
+           (.payload.source.subagent.thread_spawn.parent_thread_id // "") != ""' >/dev/null 2>&1; then
+          codex_child=1; break
+        fi
+      done < <(compgen -G "$g")
+    fi
   fi
-  if [ -d "$cwd" ] && [ "$have_transcript" = 1 ]; then mode=resumed
+  if [ -d "$cwd" ] && [ "$have_transcript" = 1 ] && [ "$codex_child" = 0 ]; then mode=resumed
   elif [ -n "$main_checkout" ] && [ -d "$main_checkout" ] && [ -n "$parked_url" ] &&
        jq -e --arg h "$h" '.harness_fresh[$h]' "$CONFIG" >/dev/null 2>&1; then mode=fresh
   else mode=orphaned; fi
@@ -487,11 +542,13 @@ wake(){ # wake <wait file>
     local tgt; tgt="${parked_issue:-$(jq -r '.for // ""' "$f")}"
     if [ -n "$tgt" ]; then
       local tr tn; read -r tr tn <<<"$(parse_ref "$tgt")"
+      local orphan_reason="the original $h session or its folder ($cwd) is gone"
+      [ "$codex_child" = 0 ] || orphan_reason="the original Codex subagent cannot be resumed independently"
       gh_call issue comment "$tn" -R "$tr" --body "<!-- ai-blocker-watch:orphaned:$wid -->
-The wait was released ($why) but the original $h session and its folder ($cwd) are both gone, and no usable main checkout was recorded, so BlockerWatch cannot restart the work. A person must pick it up from this issue. (ai-blocker-watch)" >/dev/null ||
+The wait was released ($why) but $orphan_reason, and no usable fresh continuation was available, so BlockerWatch cannot restart the work. A person must pick it up from this issue. (ai-blocker-watch)" >/dev/null ||
         note "could not comment on $tgt"
     fi
-    note "wait $wid is orphaned: the $h session and $cwd are gone; restart it from ${tgt:-its brief}"
+    note "wait $wid is orphaned: no safe continuation is available; restart it from ${tgt:-its brief}"
     FAILED=1; return
   fi
   if [ "$mode" = resumed ]; then
@@ -501,7 +558,9 @@ The wait was released ($why) but the original $h session and its folder ($cwd) a
     prompt="$prompt Recheck the wait's final state, then continue the work you were waiting to do. When you finish, or are blocked again, comment the result on ${parked_issue:-your work issue}. If something else now blocks you, register a new wait with ai-blocker-watch."
   else
     local pr pn; read -r pr pn <<<"$(parse_ref "$parked_issue")"
-    prompt="ai-blocker-watch: you are a NEW session picking up parked work, because the session that registered it is gone. The wait was released: $why The full brief is in $parked_url. Read that issue and all of its comments first (gh issue view $pn -R $pr --comments). Follow the repository's AGENTS.md. Create your own worktree from current upstream before you edit anything. Then continue the next steps the brief names. When you finish, or are blocked again, comment the result on that issue. If you are blocked again, register a new wait with: ai-blocker-watch wait <blocker> --for $parked_issue --brief-file <file>."
+    local fresh_reason="the session that registered it is gone"
+    [ "$codex_child" = 0 ] || fresh_reason="the original Codex subagent cannot be resumed independently"
+    prompt="ai-blocker-watch: you are a NEW session picking up parked work, because $fresh_reason. The wait was released: $why The full brief is in $parked_url. Read that issue and all of its comments first (gh issue view $pn -R $pr --comments). Follow the repository's AGENTS.md. Create your own worktree from current upstream before you edit anything. Then continue the next steps the brief names. When you finish, or are blocked again, comment the result on that issue. If you are blocked again, register a new wait with: ai-blocker-watch wait <blocker> --for $parked_issue --brief-file <file>."
     cwd="$main_checkout"
   fi
   local cfgkey=harness; [ "$mode" = resumed ] || cfgkey=harness_fresh
@@ -552,7 +611,17 @@ The wait was released ($why) but the original $h session and its folder ($cwd) a
     jq --arg at "$(now_iso)" --arg log "$log" --arg m "$mode" '.state="woken" | .mode=$m | .woken_at=$at | .log=$log' "$f" > "$tmp" && mv "$tmp" "$f"
     parked_comment "$f" "$wid" "$mode" 0 "$log" 0
   else
-    local rc=$?; FAILED=1
+    local rc=$?
+    # The desktop may still own this Codex thread. Its resume command rejects
+    # a second writer before running the prompt; keep the wait for a later tick
+    # without spending a wake attempt or reporting a failed continuation.
+    if [ "$h" = codex ] && [ "$mode" = resumed ] &&
+       grep -Fq 'already has an active writer (code -32600)' "$log"; then
+      jq --arg at "$(now_iso)" '.state="waiting" | .attempts-=1 | .active_writer_at=$at | del(.last_attempt_at)' "$f" > "$tmp" && mv "$tmp" "$f" || { FAILED=1; return; }
+      note "Codex session $s is still active; wait $wid remains queued"
+      return
+    fi
+    FAILED=1
     if [ "$(jq .attempts "$f")" -ge "$(cfg .max_wake_attempts)" ]; then
       jq --arg log "$log" --argjson rc "$rc" --arg m "$mode" '.state="failed" | .mode=$m | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
       parked_comment "$f" "$wid" "$mode" "$rc" "$log" 1
@@ -571,29 +640,69 @@ The wait was released ($why) but the original $h session and its folder ($cwd) a
 # re-sending the request; a link created this tick is added to the copy so
 # the alarm still sees it without a second read (or, if that edit fails, the
 # copy is dropped and the alarm re-reads the repo).
-SNAP_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number databaseId title assignees(first:10){totalCount} body blockedBy(first:50){nodes{number state title repository{nameWithOwner} assignees(first:10){totalCount}}}}}}}'
+SNAP_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number databaseId title assignees(first:10){totalCount} body blockedBy(first:50){nodes{number state title repository{nameWithOwner} assignees(first:10){totalCount}}}}}}rateLimit{cost remaining resetAt}}'
 declare -A SNAP=() SNAPN=() SNAPERR=()
 open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|i], count in SNAPN[repo]; rc 1 on failure
-  local repo="$1" pfx="$2" pages=0 cursor="" out i
+  local repo="$1" pfx="$2" pages=0 cursor="" out i read_rc
   if [ -n "${SNAPERR[$repo]+set}" ]; then note "$pfx: ${SNAPERR[$repo]} (not retried this tick)"; return 1; fi
   [ -z "${SNAPN[$repo]+set}" ] || return 0
   while :; do
     pages=$((pages+1))
     if [ "$pages" -gt 10 ]; then SNAPERR[$repo]="$repo has more open issues than one scan reads (1000)"; break; fi
+    read_rc=0
     if [ -n "$cursor" ]; then
-      out="$(gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || read_rc=$?
     else
-      out="$(gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || read_rc=$?
     fi
+    record_graphql_cost graphql.open_issue_snapshot "$out"
+    if [ "$read_rc" -ne 0 ]; then SNAPERR[$repo]="could not list open issues in $repo"; break; fi
     printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository != null)' >/dev/null || { SNAPERR[$repo]="unreadable answer from $repo"; break; }
     SNAP["$repo|$pages"]="$out"
     if [ "$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.hasNextPage')" = true ]; then
       cursor="$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.endCursor')"; continue
     fi
-    SNAPN[$repo]="$pages"; return 0
+    SNAPN[$repo]="$pages"; snapshot_index_build "$repo"; return 0
   done
   for ((i=1; i<=pages; i++)); do unset "SNAP[$repo|$i]"; done
   note "$pfx: ${SNAPERR[$repo]}"; return 1
+}
+# Snapshot index (P5 REST savings): the same pages, keyed for the tick's other
+# readers so propagate, wake and link stop asking GitHub what this tick already
+# read. SNAPIDX[repo#n] = "id<TAB>title" for every OPEN issue; SNAPDEP[repo#n]
+# lists the OPEN issues blocked by repo#n (" a#1 b#2 "), including links the
+# links scan created this tick. An
+# index is a cache of relationships, never authority for a mutation, and a
+# miss is never proof of closure: callers fall back to REST. SNAPREPO marks the
+# configured repos indexed this tick; dependents are trusted only when all are.
+declare -A SNAPIDX=() SNAPDEP=() SNAPREPO=()
+snapshot_index_set(){ # snapshot_index_set <blocked repo#n> <blocker repo#n>: record one edge
+  case "${SNAPDEP[$2]:- }" in *" $1 "*) ;; *) SNAPDEP[$2]="${SNAPDEP[$2]:- }$1 " ;; esac
+}
+snapshot_index_build(){ # snapshot_index_build <owner/repo>: index the pages open_snapshot just read
+  local repo="$1" pg kind a b c
+  for ((pg=1; pg<=SNAPN[$repo]; pg++)); do
+    while IFS=$'\t' read -r kind a b c; do
+      case "$kind" in
+        I) SNAPIDX["$a"]="$b"$'\t'"$c" ;;
+        B) snapshot_index_set "$a" "$b" ;;
+      esac
+    done < <(printf '%s' "${SNAP[$repo|$pg]}" | jq -r --arg r "$repo" '.data.repository.issues.nodes[] | ("\($r)#\(.number)") as $k |
+      (["I", $k, (.databaseId // "" | tostring), ((.title // "") | gsub("[\t\n\r]"; " "))] | @tsv),
+      ((.blockedBy.nodes // [])[] | ["B", $k, "\(.repository.nameWithOwner // $r)#\(.number)", ""] | @tsv)')
+  done
+  SNAPREPO[$repo]=1
+}
+snapshot_open_hit(){ # snapshot_open_hit <repo#n>: prints "open<TAB>false<TAB>title" when this tick saw it OPEN
+  local r="${1%#*}"
+  [ -n "${SNAPREPO[$r]+set}" ] && [ -n "${SNAPIDX[$1]+set}" ] || return 1
+  printf 'open\tfalse\t%s' "${SNAPIDX[$1]#*$'\t'}"
+}
+snapshot_dependents_of(){ # snapshot_dependents_of <repo> <n>: OPEN issues this tick saw blocked by repo#n
+  local d; for d in ${SNAPDEP[$1#$2]:-}; do printf '%s\n' "$d"; done
+}
+snapshot_all_indexed(){
+  local r; while read -r r; do [ -z "$r" ] || [ -n "${SNAPREPO[$r]+set}" ] || return 1; done < <(cfg '.repos[]'); return 0
 }
 snapshot_drop(){ local i; for ((i=1; i<=${SNAPN[$1]:-0}; i++)); do unset "SNAP[$1|$i]"; done; unset "SNAPN[$1]"; }
 snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a new same-repo link in the snapshot
@@ -623,13 +732,13 @@ snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a 
 # Stalls are findings, not failures: only a failed read or post fails the tick.
 cfgd(){ local v; v="$(cfg "$1")"; if [ "$v" != null ] && [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "$2"; fi; }
 alarm_on(){ [ "$(cfgd .alarm_enabled true)" = true ]; }
-ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){updatedAt createdAt body comments(last:30){nodes{body createdAt}} timelineItems(first:50,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{... on PullRequest{number state}}}}} blocking(first:50){nodes{number state repository{nameWithOwner}}}}}}'
+ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){updatedAt createdAt body comments(last:30){nodes{body createdAt}} timelineItems(first:50,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{... on PullRequest{number state}}}}} blocking(first:50){nodes{number state repository{nameWithOwner}}}}}rateLimit{cost remaining resetAt}}'
 # Per-tick read cache and node budget live in files under ALARM_TICK: issue_json
 # is always called as j="$(issue_json ...)", so shell variables would die with
 # that subshell and the cache/budget would never take effect (#809).
 ALARM_TICK=""
 issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node budget, 2 failed
-  local repo="$1" n="$2" out key="$1#$2" spent budget cachef
+  local repo="$1" n="$2" out key="$1#$2" spent budget cachef read_rc=0
   # '@' cannot appear in a GitHub owner or repo name, so owner/repo cannot collide.
   cachef="$ALARM_TICK/cache/${key//\//@}"
   if [ -f "$cachef" ]; then cat "$cachef"; return 0; fi
@@ -637,7 +746,9 @@ issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node
   spent="$(cat "$ALARM_TICK/agql" 2>/dev/null || printf 0)"
   [ "$spent" -lt "$budget" ] || return 1
   printf '%s' "$((spent+1))" > "$ALARM_TICK/agql"
-  out="$(gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || return 2
+  out="$(AI_GH_OPERATION=bw.alarm_issue gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || read_rc=$?
+  record_graphql_cost graphql.issue_detail "$out"
+  [ "$read_rc" -eq 0 ] || return 2
   printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository.issue != null)' >/dev/null || return 2
   printf '%s' "$out" > "$cachef"
   printf '%s' "$out"
@@ -767,7 +878,24 @@ Take it (assign yourself, or add an \`owner:\` line naming who owns it) or hand 
     if [ "$dry" = 1 ]; then
       note "would update the digest in $drepo: $title"
     else
-      if dnum="$(gh_call search issues "$title" --repo "$drepo" --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null)"; then
+      # Today's digest, once open, is just another open issue this tick already
+      # read (#658 P5) — look there before spending a search request.
+      dnum=""
+      if [ -n "${SNAPREPO[$drepo]+set}" ]; then
+        local k t best=""
+        for k in "${!SNAPIDX[@]}"; do
+          case "$k" in "$drepo#"*) ;; *) continue ;; esac
+          t="${SNAPIDX[$k]#*$'\t'}"
+          [ "$t" = "$title" ] || continue
+          # Lowest number wins if a raced duplicate digest exists.
+          [ -z "$best" ] || [ "${k##*#}" -ge "${best##*#}" ] || continue
+          best="$k"
+        done
+        [ -z "$best" ] || dnum="${best##*#}"
+      fi
+      if [ -n "$dnum" ]; then
+        :
+      elif dnum="$(gh_call search issues "$title" --repo "$drepo" --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null)"; then
         dnum="$(printf '%s' "$dnum" | head -1)"
       else
         note "alarm: could not search $drepo for today's digest"; dnum=""; afail=1
@@ -917,15 +1045,15 @@ maintain_links(){ # maintain_links <dry 0|1>
     bref="${edge%% *}"; dep="${edge##* }"; br="${bref%#*}"; bn="${bref#*#}"
     id="${idmap[$br#$dep]:-}"
     if [ -z "$id" ]; then
-      id="$(gh_api "repos/$br/issues/$dep" --jq 'if .pull_request then "pr" else .id end' 2>/dev/null)" || id=""
+      id="$(AI_GH_OPERATION=bw.link_issue gh_api "repos/$br/issues/$dep" --jq 'if .pull_request then "pr" else .id end' 2>/dev/null)" || id=""
       if [ -z "$id" ]; then note "links: cannot read $br#$dep (named in $bref's depends_on); skipped"; unresolvable=$((unresolvable+1)); continue; fi
       # GitHub only links issues to issues; a pull request target is refused
       # every scan and kept the links clock from ever advancing.
       if [ "$id" = pr ]; then note "links: $br#$dep (named in $bref's depends_on) is a pull request, which GitHub cannot link; skipped"; unresolvable=$((unresolvable+1)); continue; fi
     fi
     if [ "$dry" = 1 ]; then note "links: would record $bref is blocked by $br#$dep (from its db-work-scope depends_on)"; continue; fi
-    if gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
-      created=$((created+1)); snapshot_addlink "$br" "$bn" "$dep" || snapshot_drop "$br"; note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
+    if AI_GH_OPERATION=bw.link_issue gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
+      created=$((created+1)); snapshot_index_set "$bref" "$br#$dep"; snapshot_addlink "$br" "$bn" "$dep" || snapshot_drop "$br"; note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
     else
       note "links: GitHub refused the link $bref blocked by $br#$dep"; lfail=1
     fi
@@ -954,6 +1082,7 @@ lock_take(){
 }
 
 cmd_alarm(){
+  BW_WORKFLOW=blocker_watch_alarm
   [ "${1:-}" != --dry-run ] || DRY=1
   alarm_on || die "the unowned-blocker alarm is disabled in the config"
   lock_take || return 0
@@ -962,6 +1091,7 @@ cmd_alarm(){
 }
 
 cmd_links(){
+  BW_WORKFLOW=blocker_watch_links
   [ "${1:-}" != --dry-run ] || DRY=1
   links_on || die "blocked-by link maintenance is disabled in the config"
   lock_take || return 0
@@ -970,8 +1100,27 @@ cmd_links(){
 }
 
 cmd_tick(){
+  BW_WORKFLOW=blocker_watch_tick
   [ "${1:-}" != --dry-run ] || DRY=1
   lock_take || return 0
+  local tick_started_ms='' tick_elapsed_ms=''
+  BW_TICK_RECEIPT_ID=''
+  BW_TICK_CONTEXT=''
+  if [ "$GH_COST_READY" = 1 ] && [ "$DRY" != 1 ]; then
+    BW_TICK_RECEIPT_ID="$(gh_measure_workflow_id)" || note 'request measurement unavailable: tick ID not created'
+    gh_measure_clock; tick_started_ms="$GH_MEASURE_CLOCK"
+    # One read-only local lookup per tick; unknown identity stays unattributed.
+    if [ -x "$TOOL_ROOT/tools/github-requests/pr-status-context" ]; then
+      BW_TICK_CONTEXT="$("$TOOL_ROOT/tools/github-requests/pr-status-context" 2>/dev/null || true)"
+    fi
+  fi
+  # Scans that are due run first, so their open-issue snapshot also answers
+  # propagate and wake this tick instead of per-item REST reads.
+  local early=""
+  if { links_on && scan_due "$LAST_LINKS" "$(cfgd .links_interval_minutes 60)"; } ||
+     { alarm_on && scan_due "$LAST_ALARM" "$(cfgd .alarm_interval_minutes 60)"; }; then early=early; fi
+  maybe_links "$early"
+  maybe_alarm "$early"
   propagate
   local f
   for f in "$WAITS"/*.json; do
@@ -979,12 +1128,14 @@ cmd_tick(){
     [ "$(jq -r .state "$f")" = waiting ] || continue
     wake "$f"
   done
-  local early=""
-  if { links_on && scan_due "$LAST_LINKS" "$(cfgd .links_interval_minutes 60)"; } ||
-     { alarm_on && scan_due "$LAST_ALARM" "$(cfgd .alarm_interval_minutes 60)"; }; then early=early; fi
-  maybe_links "$early"
-  maybe_alarm "$early"
   [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
+  if [ -n "$BW_TICK_RECEIPT_ID" ]; then
+    gh_measure_clock
+    tick_elapsed_ms=$(( GH_MEASURE_CLOCK - tick_started_ms ))
+    [ "$tick_elapsed_ms" -ge 0 ] || tick_elapsed_ms=0
+    gh_measure_workflow_outcome ai-blocker-watch blocker_watch_tick "$BW_TICK_RECEIPT_ID" completed "$tick_elapsed_ms" ||
+      note 'request measurement unavailable: tick outcome not saved'
+  fi
 }
 
 

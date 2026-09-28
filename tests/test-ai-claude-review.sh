@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-cl
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 R="$TMP/repo"; mkdir -p "$R"; git -C "$R" init -q; git -C "$R" config user.name Test; git -C "$R" config user.email t@example.com
 printf '.ai/\n' > "$R/.gitignore"; printf 'base\n' > "$R/a.txt"; git -C "$R" add .gitignore a.txt; git -C "$R" commit -qm init

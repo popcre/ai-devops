@@ -17,6 +17,13 @@ cat > "$TMP/gh" <<'EOF'
 #!/usr/bin/env bash
 F="$FAKE"; printf '%s\n' "$*" >> "$F/calls"
 printf '%s\n' "${AI_GH_CALLER:-unset}" >> "$F/callers"
+printf '%s\n' "${AI_GH_OPERATION:-unset}" >> "$F/operations"
+kind=other
+case "$*" in
+  *graphql*states:OPEN*) kind=snapshot ;;
+  *dependencies/blocking*) kind=dependents ;;
+esac
+printf '%s\t%s\n' "${AI_GH_OPERATION:-unset}" "$kind" >> "$F/operation-kinds"
 [ -f "$F/fail" ] && exit 1
 jqarg=""; args=("$@"); for i in "${!args[@]}"; do [ "${args[$i]}" = --jq ] && jqarg="${args[$((i+1))]}"; done
 out(){ if [ -n "$jqarg" ]; then jq -r "$jqarg" <<<"$1"; else printf '%s\n' "$1"; fi; }
@@ -31,6 +38,7 @@ case "$*" in
   "issue edit"*) [ -f "$F/nolabel" ] && exit 1; printf '%s\n' "$*" >> "$F/edited"; echo '{}'; exit 0 ;;
   "search issues"*) out "$(cat "$F/digest_search.json" 2>/dev/null || echo '[]')" ;;
   *graphql*states:OPEN*)
+    [ -f "$F/gql_errors" ] && { out '{"data":{"repository":null},"errors":[{"type":"RATE_LIMITED","message":"x"}]}'; exit 0; }
     # One open-issue query serves both scans: merge the links and parents
     # fixtures by issue number, as GitHub would answer the combined query, and
     # page it 100 at a time (the cursor is the next offset).
@@ -66,7 +74,12 @@ EOF
 cat > "$TMP/harness" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "${AI_GH_CALLER:-unset}" >> "$FAKE/resumed-callers"
-printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"; [ -f "$FAKE/harness_fail" ] && exit 7; exit 0
+printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"
+if [ -f "$FAKE/active_writer" ] && [ "${1:-}" = codex ]; then
+  printf 'Error: the thread already has an active writer (code -32600)\n' >&2
+  exit 1
+fi
+[ -f "$FAKE/harness_fail" ] && exit 7; exit 0
 EOF
 chmod +x "$TMP/gh" "$TMP/harness"
 # The fixture config drops propagate_on_host so the suite is machine-independent:
@@ -74,9 +87,37 @@ chmod +x "$TMP/gh" "$TMP/harness"
 # propagation would be skipped and every propagation check below would fail.
 jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2 | .transcript_glob={claude:"",codex:"",zcode:"",mimo:""}' \
   "$ROOT/config/blocker-watch.json" > "$TMP/config.json"
-export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_BLOCKER_WATCH_GH="$TMP/gh"
+export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_DEVOPS_TEST_MODE=1 AI_BLOCKER_WATCH_TEST_GH="$TMP/gh"
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID ZCODE_SESSION_ID
 BW(){ "$SCRIPT" "$@"; }
+
+# A failed GraphQL command can still carry a charged rateLimit observation.
+# Exercise the real ai-gh transport here; the regular suite uses a direct stub.
+cat > "$TMP/charged-error-gh" <<'EOF'
+#!/usr/bin/env bash
+case " $* " in
+  *' graphql '*) printf '%s\n' '{"data":{"rateLimit":{"cost":3,"remaining":4997,"resetAt":"2026-09-28T05:00:00Z"}},"errors":[{"message":"fixture failure"}]}' ; exit 1 ;;
+esac
+exit 2
+EOF
+chmod +x "$TMP/charged-error-gh"
+env -u AI_BLOCKER_WATCH_TEST_GH AI_BLOCKER_WATCH_HOME="$TMP/charged-error-home" \
+  AI_GH_REAL_GH="$TMP/charged-error-gh" AI_GH_STATE_DIR="$TMP/charged-error-state" \
+  AI_GH_QUOTA_PROBE_SECONDS=off AI_GH_MIN_SPACING_SECONDS=0 \
+  "$SCRIPT" alarm --dry-run > "$TMP/charged-error-out" 2> "$TMP/charged-error-err"; charged_rc=$?
+check 'failed alarm GraphQL read still records the charged upstream response' \
+  "[ $charged_rc -eq 1 ] && jq -se 'any(.[]; .measurement == \"observed_graphql_cost\" and .workflow == \"blocker_watch_alarm\" and .graphql_points == 3)' '$TMP/charged-error-state/measurements/'*.jsonl && grep -q 'could not list open issues' '$TMP/charged-error-err'"
+check 'legacy GitHub command override fails visibly before any work' \
+  "! AI_BLOCKER_WATCH_GH='$TMP/gh' BW list"
+check 'fake transport cannot be selected by a normal scheduler' \
+  "! AI_DEVOPS_TEST_MODE=0 AI_BLOCKER_WATCH_TEST_GH='$TMP/gh' BW list"
+mkdir -p "$TMP/default-fake"
+default_out="$(FAKE="$TMP/default-fake" AI_BLOCKER_WATCH_TEST_GH= AI_DEVOPS_TEST_MODE=0 \
+  AI_GH_REAL_GH="$TMP/gh" AI_GH_STATE_DIR="$TMP/default-gate" \
+  AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off \
+  "$SCRIPT" find no-such-work 2>&1)"; default_rc=$?
+check 'normal default source uses shared admission with a fake real CLI' \
+  '[ "$default_rc" -eq 0 ] && [ -f "$TMP/default-gate/last_call_ms" ] && [ -s "$TMP/default-fake/calls" ]'
 
 check 'shipped config is valid and names all four programs' "jq -e '.harness|has(\"claude\") and has(\"codex\") and has(\"zcode\") and has(\"mimo\")' '$ROOT/config/blocker-watch.json'"
 check 'shipped config names exactly one propagating machine' "jq -e '(.propagate_on_host | type == \"string\" and length > 0)' '$ROOT/config/blocker-watch.json'"
@@ -364,6 +405,47 @@ check 'wait records the main checkout of the current repository' \
 # Mode 1: the folder and the transcript are both still there.
 rm -f "$W2/$pid.json" "$W2/$fid.json"
 echo closed > "$FAKE/state5"
+busy_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session busy-1 --park 'active Codex task' --brief-file "$TMP/brief.md" 2>/dev/null)"
+touch "$TMP/transcripts/busy-1.jsonl" "$FAKE/active_writer"
+: > "$FAKE/comments"
+check 'active Codex writer leaves the wait queued without spending an attempt' \
+  "BW2 tick && jq -e '.state==\"waiting\" and .attempts==0 and .active_writer_at!=null' '$W2/$busy_id.json' && ! grep -q 'issue comment 31' '$FAKE/comments'"
+check 'repeated active writer responses remain queued' \
+  "BW2 tick && jq -e '.state==\"waiting\" and .attempts==0' '$W2/$busy_id.json'"
+rm -f "$FAKE/active_writer"
+check 'queued Codex wait resumes after the writer releases' \
+  "BW2 tick && jq -e '.state==\"woken\" and .attempts==1' '$W2/$busy_id.json'"
+rm -f "$W2/$busy_id.json"
+
+# A Codex multi-agent v2 child has a real transcript and folder, but the CLI
+# refuses to resume it through its parent. The parked brief must start a new
+# independent session in the main checkout instead.
+child_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session child-1 --park 'Codex child work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+printf '%s\n' '{"type":"session_meta","payload":{"id":"child-1","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-1"}}}}}' > "$TMP/transcripts/child-1.jsonl"
+jq --arg m "$TMP/mainco" '.main_checkout=$m' "$W2/$child_id.json" > "$W2/$child_id.new" && mv "$W2/$child_id.new" "$W2/$child_id.json"
+: > "$FAKE/resumed"; : > "$FAKE/comments"
+BW2 tick >/dev/null 2>&1
+check 'Codex child starts a fresh session with its parked context' \
+  "grep -q '^$TMP/mainco|fresh-codex' '$FAKE/resumed' && grep -q 'issues/31' '$FAKE/resumed' && grep -q 'Read that issue and all of its comments first' '$FAKE/resumed' && grep -q 'own worktree from current upstream before you edit anything' '$FAKE/resumed' && grep -q 'comment the result on that issue' '$FAKE/resumed' && grep -q 'cannot be resumed independently' '$FAKE/resumed' && jq -e '.mode==\"fresh\" and .state==\"woken\" and .attempts==1' '$W2/$child_id.json'"
+check 'Codex child is never falsely resumed or invoked twice' \
+  "! grep -q '|codex child-1' '$FAKE/resumed' && [ \"\$(wc -l < '$FAKE/resumed')\" = 1 ] && [ \"\$(grep -c 'issue comment 31' '$FAKE/comments')\" = 1 ] && grep -q 'Started a fresh codex session' '$FAKE/comments' && ! grep -q 'Resumed the original codex session' '$FAKE/comments'"
+rm -f "$W2/$child_id.json"
+
+top_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session top-1 --park 'top-level Codex work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+printf '%s\n' '{"type":"session_meta","payload":{"id":"top-1","source":{"cli":{}}}}' > "$TMP/transcripts/top-1.jsonl"
+: > "$FAKE/resumed"
+BW2 tick >/dev/null 2>&1
+check 'top-level Codex still resumes its exact session' \
+  "grep -q '|codex top-1' '$FAKE/resumed' && jq -e '.mode==\"resumed\" and .state==\"woken\"' '$W2/$top_id.json'"
+rm -f "$W2/$top_id.json"
+
+unsafe_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session child-no-fresh --park 'unrunnable child work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+printf '%s\n' '{"type":"session_meta","payload":{"id":"child-no-fresh","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-1"}}}}}' > "$TMP/transcripts/child-no-fresh.jsonl"
+: > "$FAKE/resumed"; : > "$FAKE/comments"
+check 'Codex child without a safe fresh route fails visibly' \
+  "! BW2 tick && jq -e '.state==\"orphaned\" and .attempts==0' '$W2/$unsafe_id.json' && grep -q 'cannot be resumed independently' '$FAKE/comments' && [ ! -s '$FAKE/resumed' ]"
+rm -f "$W2/$unsafe_id.json"
+
 rid="$(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session live-1 --park 'resumable work' --brief-file "$TMP/brief.md" 2>/dev/null)"
 touch "$TMP/transcripts/live-1.jsonl"
 : > "$FAKE/resumed"; : > "$FAKE/comments"; : > "$FAKE/edited"
@@ -548,5 +630,100 @@ AI_BLOCKER_WATCH_CONFIG="$TMP/config-budget.json" BW alarm >"$TMP/budget.out" 2>
 check 'the budget stops reads when exhausted' "[ \"\$(grep -c -- '-F n=' '$FAKE/calls')\" = 1 ]"
 check 'a budget below the candidate count posts only what it read' "[ \"\$(grep -c 'ai-blocker-watch:unowned:' '$FAKE/comments' 2>/dev/null || echo 0)\" = 1 ]"
 check 'the rest of the candidates are noted, not silently dropped' "[ \"\$(grep -c 'node budget reached before' '$TMP/budget.err')\" = 2 ]"
+
+# P5 snapshot reuse: a tick whose scans are due reads the open-issue snapshot
+# first, then propagate and wake answer from it instead of per-item REST.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap"
+rm -f "$FAKE/gql_links.json" "$FAKE/comments" "$FAKE/resumed" "$FAKE/state5" "$FAKE/is_pr"
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:9,databaseId:909,title:"waits on 5",assignees:{totalCount:1},body:"",blockedBy:{nodes:[{number:5,state:"CLOSED",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:1}}]}},
+  {number:40,databaseId:4040,title:"still open blocker",assignees:{totalCount:1},body:"",blockedBy:{nodes:[]}}
+]}}}}' > "$FAKE/gql_parents.json"
+snapid="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=snap-1 BW wait o/r#40 --park 'snap open' --brief-file "$TMP/brief.md" 2>/dev/null)"
+missid="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=snap-2 BW wait o/r#5 --park 'snap miss' --brief-file "$TMP/brief.md" 2>/dev/null)"
+echo '{"items":[{"number":5,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+echo closed > "$FAKE/state5"; : > "$FAKE/calls"
+BW tick >/dev/null 2>&1 || true
+check 'propagate_snapshot_dependents_no_rest' "grep -q 'issue comment 9 -R o/r' '$FAKE/comments' && ! grep -q 'dependencies/blocking' '$FAKE/calls'"
+check 'wake_open_snapshot_hit_skips_rest_but_stays_waiting' "! grep -q 'repos/o/r/issues/40' '$FAKE/calls' && jq -e '.state==\"waiting\"' '$AI_BLOCKER_WATCH_HOME/waits/$snapid.json'"
+check 'wake_snapshot_miss_falls_back_to_rest' "grep -q 'repos/o/r/issues/5 ' '$FAKE/calls' && grep -q '|claude snap-2' '$FAKE/resumed'"
+check 'the open-issue snapshot is read once per repo per tick' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 1 ]"
+
+# The closed issue has no dependents in the index → REST is still asked.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap2"
+echo '{"items":[{"number":6,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+: > "$FAKE/calls"
+BW tick >/dev/null 2>&1 || true
+check 'propagate_snapshot_empty_falls_back_to_rest' "[ \"\$(grep -c 'issues/6/dependencies/blocking' '$FAKE/calls')\" = 1 ]"
+
+# GraphQL 200 with errors is not a snapshot: nothing is indexed, REST answers.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap3"
+touch "$FAKE/gql_errors"
+echo '{"items":[{"number":5,"repository_url":"https://api.github.com/repos/o/r"}]}' > "$FAKE/closed.json"
+snapid3="$(cd "$TMP/work" && CLAUDE_CODE_SESSION_ID=snap-3 BW wait o/r#40 --park 'snap err' --brief-file "$TMP/brief.md" 2>/dev/null)"
+: > "$FAKE/calls"
+BW tick >/dev/null 2>&1 || true
+check 'snapshot_graphql_errors_are_not_success' "grep -q 'issues/5/dependencies/blocking' '$FAKE/calls' && grep -q 'repos/o/r/issues/40' '$FAKE/calls'"
+rm -f "$FAKE/gql_errors"
+
+# Two pages (150 open issues, all waiting on #5): every page is indexed, every
+# dependent is told, and no per-issue REST read is spent.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap4"
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[range(100;250) | {number:.,databaseId:.,title:"d",assignees:{totalCount:1},body:"",blockedBy:{nodes:[{number:5,state:"CLOSED",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:1}}]}}]}}}}' > "$FAKE/gql_parents.json"
+: > "$FAKE/calls"; rm -f "$FAKE/comments"
+BW tick >/dev/null 2>&1 || true
+check 'blocker_snapshot_pagination_indexes_every_page' "[ \"\$(grep -c 'states:OPEN' '$FAKE/calls')\" = 2 ] && [ \"\$(grep -c 'ai-blocker-watch:o/r#5' '$FAKE/comments')\" = 150 ] && ! grep -q 'dependencies/blocking' '$FAKE/calls'"
+
+# Digest lookup and link() ids come from the same snapshot (#658 P5 REST savings).
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap5"
+day="$(date -u +%Y-%m-%d)"
+mkdir -p "$TMP/home-snap5"
+jq '.alarm_digest_repo="o/r" | .alarm_max_nodes=500' "$TMP/config.json" > "$TMP/config-snap5.json"
+export AI_BLOCKER_WATCH_CONFIG="$TMP/config-snap5.json"
+# digest already open in the snapshot; a depends_on edge to an open blocker.
+jq -n --arg t "ai-blocker-watch digest $day" '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:31,databaseId:231,title:$t,assignees:{totalCount:0},body:"",blockedBy:{nodes:[]}},
+  {number:20,databaseId:220,title:"work",assignees:{totalCount:0},body:"```db-work-scope\ndepends_on: 7\nobjects:\n```",blockedBy:{nodes:[]}},
+  {number:7,databaseId:207,title:"gate bug",assignees:{totalCount:0},body:"",blockedBy:{nodes:[]}}
+]}}}}' > "$FAKE/gql_links.json"
+rm -f "$FAKE/gql_parents.json" "$FAKE/digest_search.json"
+: > "$FAKE/calls"; rm -f "$FAKE/links" "$FAKE/edited"
+date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap5/last-alarm"
+date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap5/last-links"
+# Stall #7 so the digest path runs, and let the links scan create the missing edge.
+jq -n --arg old "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" '{data:{repository:{issue:{updatedAt:$old,createdAt:$old,body:"",comments:{nodes:[]},timelineItems:{nodes:[]},blocking:{nodes:[]}}}}}' > "$FAKE/gql_issue_7.json"
+echo '[]' > "$FAKE/digest_search.json"
+BW tick >/dev/null 2>&1 || true
+check 'digest_lookup_uses_snapshot_not_search' "! grep -q 'search issues' '$FAKE/calls' && grep -q 'issue edit 31' '$FAKE/edited'"
+check 'link_id_comes_from_snapshot' "grep -q 'issue_id=207' '$FAKE/calls' && ! grep -q 'repos/o/r/issues/7' '$FAKE/calls'"
+
+# An edge already in the snapshot skips both the GET and the POST.
+export AI_BLOCKER_WATCH_HOME="$TMP/home-snap6"
+mkdir -p "$TMP/home-snap6"
+jq -n '{data:{repository:{issues:{pageInfo:{hasNextPage:false,endCursor:null},nodes:[
+  {number:20,databaseId:220,title:"work",assignees:{totalCount:0},body:"",blockedBy:{nodes:[{number:7,state:"OPEN",title:"gate bug",repository:{nameWithOwner:"o/r"},assignees:{totalCount:0}}]}},
+  {number:7,databaseId:207,title:"gate bug",assignees:{totalCount:0},body:"",blockedBy:{nodes:[]}}
+]}}}}' > "$FAKE/gql_links.json"
+rm -f "$FAKE/gql_parents.json"
+: > "$FAKE/calls"; rm -f "$FAKE/links"
+date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap6/last-links"
+date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap6/last-alarm"
+# Force the links scan only (alarm not due) via standalone command.
+AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" BW links >/dev/null 2>&1 || true
+check 'an edge already in the snapshot is not re-fetched or re-posted' \
+  "[ ! -f '$FAKE/links' ] && ! grep -q 'dependencies/blocked_by' '$FAKE/calls' && ! grep -q 'issue_id=' '$FAKE/calls'"
+
+# Fixed telemetry labels must reach the CLI subprocess across gh_api/gh_call,
+# and each may identify only its intended request category.
+for op in bw.snapshot bw.dependents bw.wake_miss bw.alarm_issue bw.link_issue; do
+  check "fixed telemetry label $op reaches the CLI" "grep -qx '$op' '$FAKE/operations'"
+done
+check 'snapshot label identifies only open-issue GraphQL walks' \
+  "awk -F '\t' '\$2 == \"snapshot\" && \$1 != \"bw.snapshot\" { bad=1 } \$2 != \"snapshot\" && \$1 == \"bw.snapshot\" { bad=1 } END { exit bad }' '$FAKE/operation-kinds'"
+check 'dependent label identifies only blocking REST reads' \
+  "awk -F '\t' '\$2 == \"dependents\" && \$1 != \"bw.dependents\" { bad=1 } \$2 != \"dependents\" && \$1 == \"bw.dependents\" { bad=1 } END { exit bad }' '$FAKE/operation-kinds'"
+AI_GH_OPERATION=bw.snapshot BW find no-such-wait >/dev/null 2>&1 || true
+check 'an inherited label does not classify unrelated calls' \
+  "[ \"\$(tail -2 '$FAKE/operation-kinds' | cut -f1 | sort -u)\" = unset ]"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

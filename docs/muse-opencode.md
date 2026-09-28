@@ -29,6 +29,11 @@ or ambiguous terminal evidence stays blocked. If the source moved, reconciliatio
 retains a clearly non-authorizing report and permits a fresh same-session `ask`.
 An unchanged existing report is reused; different bytes are never overwritten.
 
+If the source repository changes during a turn, the completed review is rejected as
+stale. The message names the paths that appeared or vanished (capped at 10) and
+points at `reconcile` as the recovery step — the paid review is kept. `delete`
+discards it and is not the default next action.
+
 The older `ai-muse review [repository] [request]` command remains available. It now
 creates a timestamped named conversation, so the result is not trapped in a one-off
 call.
@@ -94,8 +99,10 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
 - Completion requires OpenCode's structured `step_finish` reason `stop`, a session
   ID, and non-empty response text. Exit status or text alone is not success.
 - Reports are written under `.ai/reviews/`; local metadata contains no prompt or key.
-- The key is read at launch from `vibe_coding / Meta ai Muse Spark API Key / api key`
-  and is never stored in Git or session metadata.
+- Each turn reads the protected local Muse key store. Installation or an explicit
+  `ai-muse store-key` maintenance command refreshes that store from
+  `vibe_coding / Meta ai Muse Spark API Key / api key`; review turns never read
+  1Password. The key is never stored in Git or session metadata.
 
 Contributor data-use terms were accepted by the owner on 2026-08-18. Do not
 substitute the standard tier. A measured follow-up call reused the exact session and

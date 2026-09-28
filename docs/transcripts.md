@@ -15,7 +15,10 @@ git submodule update --init transcripts
 Skip it and the rest of ai-devops works normally — the submodule is opt-in.
 
 ## Backing up new transcripts
-Back them up **into the submodule / private repo**, never into ai-devops.
+Since 2026-09-27 new transcripts go to Albert's private Dropbox folder
+`ai\chat_transcripts\<machine>\`, uncompressed (see the
+`claude-transcript-backup` skill). The private repository is a frozen
+historical archive. Never put transcripts into ai-devops.
 `.gitignore` blocks `/claude_chats/` and `/codex_chats/` here on purpose. The
 transcript skills run `ai-transcript-destination-check` before copying; it
 accepts only the canonical private remote and rejects public or lookalike paths.

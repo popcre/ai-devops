@@ -61,6 +61,35 @@ If the work legitimately grew, declare it again with the stronger class. A
 protected class cannot be argued past: `--acknowledge` and `--owner-request`
 apply only to unprotected classes.
 
+Read-only review of selected code, tests, and contracts in a private repository
+does not require owner permission merely because its task class is
+`private-evidence`. First write a JSON array of exact repository-relative file
+paths to a private temporary file, then use
+`ai-review deepseek diff-review --code-only --paths-file <file> --base <ref>`.
+The same route accepts `security-review` and `final-check`. It creates a fresh
+two-commit synthetic repository containing only those approved paths, checks
+the original HEAD and complete source digest before and after the provider,
+and seals the approved-path hashes. DeepSeek sees only the synthetic packet:
+text attachments plus read-only repository tools (`list_dir`, `read_file`,
+`grep`) whose root is the synthetic snapshot, never the private checkout.
+CLI reviewers lack a proven
+path-constrained read profile for private source, so this route refuses them.
+Ordinary and plan reviews of private source are refused before provider launch.
+The default private snapshot and packet routes also refuse private source.
+All registered reviewers may review an aggregate that has been checked for
+private content and written to a public repository worktree. Declare the public
+artifact's actual task class there and use the ordinary review route from that
+worktree. A discretionary prose review needs `--owner-request` with an actual
+request from Albert. The private checkout's `private-evidence` gate remains in force; it
+does not grant reviewers access to raw transcripts or other private records.
+`--tests` is unavailable on this route because
+arbitrary commands could expose raw evidence. The `private-evidence` class
+remains protected: `privacy-classification` and `no-raw-content-read` apply;
+licensed records, artwork, raw transcripts, credentials, and other evidence
+cannot enter the export. This permission authorizes no writes or publication
+of private material. Database, deployment, infrastructure, and production
+actions remain forbidden, and a consumer repository can still forbid review.
+
 Changing the policy means changing `config/task-gates.json`, keeping it valid
 against `config/task-gates.schema.json`:
 

@@ -127,7 +127,7 @@ if [ -f "$MANIFEST" ] && jq -e 'has("suspended_bash")' "$MANIFEST" >/dev/null 2>
     printf 'test-all.sh: suite manifest has an invalid suspended_bash group\n' >&2; exit 2; }
   mapfile -t suspended_tests < <(jq -r '.suspended_bash[]' "$MANIFEST" | tr -d '\r')
   for suspended in "${suspended_tests[@]}"; do
-    if printf '%s\n' "${all_tests[@]}" | grep -Fxq "$suspended"; then
+    if printf '%s\n' "${all_tests[@]}" | grep -Fx "$suspended" >/dev/null; then
       mapfile -t all_tests < <(printf '%s\n' "${all_tests[@]}" | grep -Fxv "$suspended")
       printf 'test-all.sh: suspended suite skipped: %s\n' "$suspended" >&2
     else
@@ -169,7 +169,7 @@ selection_intersect() {
   fi
   [ "${#affected_tests[@]}" -gt 0 ] || return 0
   for suite in "$@"; do
-    printf '%s\n' "${affected_tests[@]}" | grep -Fxq "$suite" && printf '%s\n' "$suite"
+    printf '%s\n' "${affected_tests[@]}" | grep -Fx "$suite" >/dev/null && printf '%s\n' "$suite"
   done
   return 0
 }
@@ -198,7 +198,7 @@ elif [ "$windows_offline" = true ]; then
       <(printf '%s\n' "${reviewer_tests[@]}" | LC_ALL=C sort))
   fi
   for name in "${tests[@]}"; do
-    printf '%s\n' "${all_tests[@]}" | grep -Fxq "$name" || {
+    printf '%s\n' "${all_tests[@]}" | grep -Fx "$name" >/dev/null || {
       printf 'test-all.sh: windows_offline_bash names an undiscovered suite: %s\n' "$name" >&2; exit 2; }
   done
   if [ "$exclude_reviewer_safety" = true ]; then

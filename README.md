@@ -54,6 +54,10 @@ passes, use `-TestOnly` on an established machine such as 4837 and do not apply
 it there merely to test it. See
 [the Windows desired-state guide](docs/windows-winget-configuration.md) for
 ownership, expected changes, recovery, and rollout gates.
+For the first update of an existing checkout whose older bootstrap predates the
+reviewed source gate, use the pinned candidate-worktree installation route in
+[deployment.md](docs/deployment.md). The older bootstrap cannot validate a
+protected release before it replaces its own source.
 
 It installs the complete Windows dev-tool set, including Grok Build and Kimi
 Code, configures Tailscale-only
@@ -136,6 +140,12 @@ come from `ai-private-config`, never this repository.
 For reducing delivery delays, repeated tests and reviews, read the
 [workflow efficiency implementation plan](plan_workflow-efficiency.md) STATUS
 first. It distinguishes completed repairs from the next measured improvements.
+For evidence-only commit churn, unrelated-`main` review invalidation, and the
+reversible Jujutsu trial, read the [agent evidence and Jujutsu plan](plan_agent_evidence_and_jujutsu_pilot.md)
+STATUS first.
+For the proposed Jev decision pilot that must prove actual paid model savings,
+read the [measured Jev spend-reduction plan](plan_typesafe-jev-spend-reduction.md)
+STATUS first.
 
 | Stage | Model | Role |
 |-------|-------|------|
@@ -214,11 +224,13 @@ Full step-by-step: [`docs/restore-from-zero.md`](docs/restore-from-zero.md).
 
 ## Windows computer install
 
-On any Windows vibe-coding computer, run this in PowerShell. It handles both
-new computers and computers where the repo already exists:
+On an already managed Windows computer, run this in PowerShell for ordinary
+updates where the managed source receipt matches the checkout. A new computer,
+protected update, missing or partial launcher receipt, or legacy launcher uses
+the pinned, reviewed route in [deployment.md](docs/deployment.md):
 
 ```powershell
-if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/popcre/ai-devops.git $p} else {git -C $p pull --ff-only}; powershell -ExecutionPolicy Bypass -File "$p\bin\install-ai-devops-windows.ps1"
+if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/popcre/ai-devops.git $p}; powershell -ExecutionPolicy Bypass -File "$p\bin\install-ai-devops-windows.ps1"
 ```
 
 Codex prompt version:

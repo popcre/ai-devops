@@ -12,6 +12,8 @@ SCRIPT="$ROOT/bin/ai-muse"
 PASS=0; FAIL=0
 check(){ local label="$1" out; shift; if out="$(bash -c "$1" 2>&1)"; then printf 'PASS  %s\n' "$label"; PASS=$((PASS+1)); else printf 'FAIL  %s\n' "$label"; printf '%s\n' "$out" | tail -n 8 | sed 's/^/      /'; FAIL=$((FAIL+1)); fi; }
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/muse-code-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 command -v jq >/dev/null 2>&1 || { printf 'SKIP  jq unavailable\n'; exit 0; }
 PYTHON="$(command -v python3 || command -v python)" || { printf 'SKIP  python unavailable\n'; exit 0; }
 
@@ -81,6 +83,9 @@ mkdir -p "$TMP/tool"; cp -R "$ROOT/bin" "$ROOT/config" "$ROOT/tools" "$TMP/tool/
 sha256sum "$MBIN/muse-bin-$VERSION.exe" | cut -d' ' -f1 > "$TMP/tool/config/muse-code/sha256"
 STORE="$HOME_FIX/.local/share/ai-devops/muse-code/muse/sessions/.msp-view-v1"
 ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=claude AI_MUSE_ENGINE=muse-code AI_MUSE_TEST_DIR='$TMP' MUSE_STUB_ENV_FILE='$TMP/provider-env' MUSE_STUB_ARGS_FILE='$TMP/provider-args'"
+KEY_DIR="$HOME_FIX/.config/ai-devops/secrets"; mkdir -p "$KEY_DIR"; chmod 700 "$HOME_FIX/.config" "$HOME_FIX/.config/ai-devops" "$KEY_DIR"
+printf 'fake-key\n' > "$KEY_DIR/muse-api-key"; chmod 600 "$KEY_DIR/muse-api-key"
+ENV="$ENV AI_MUSE_KEY_STORE='$KEY_DIR/muse-api-key' AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe"
 # First-party model catalog (#542 Phase B): the healthy row is the default state;
 # the drift checks below mutate it per case. Any *.json name must do - the real
 # file name is a provider/profile encoding the wrapper must not depend on.

@@ -36,6 +36,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
 | Codex's own memory feature (separate store from Claude's; OFF by default) | enabled on machine, **checked every run (step 6c)** | `bin/ai-codex-memories` |
 | Memory-index hook (blocks a memory from going unindexed) | installed on machine, **checked every run (step 6c2)** | `bin/ai-install-memory-hook` |
+| Claude closeout hook (forces BlockerWatch registration on waiting language) | installed on machine, **checked every run (step 6c2b)** | `bin/ai-install-completion-check-hook` |
 | ZCode skills, globals, and completion-check hook | repo → machine (Windows only), **checked every run (step 6c3)** | `bin/install-ai-devops-windows.ps1` (skills/globals), `bin/ai-install-completion-check-hook --client zcode` |
 | Weekly read-only memory-health report | per-machine task, **checked every run (step 6d)** | `bin/install-memory-health-task.ps1` → `bin/ai-memory-health` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
@@ -89,13 +90,19 @@ clone + `./install.sh` (Ubuntu) first.
 
 ## Procedure
 
-1. **Pull the hub.** In the repo: `git pull --ff-only`. If it fails (local
-   changes / diverged history), STOP and report — do not force, do not `git
-   reset`. Tell the user to resolve or ask to inspect.
+1. **Update the hub.** On Windows, run `powershell -ExecutionPolicy Bypass
+   -File <repo>\bin\install-ai-devops-windows.ps1 -RepoPath <repo>
+   -SourceGateOnly`; it checks the installed source receipt before advancing
+   the checkout and stops protected updates for task gate preflight. On Ubuntu,
+   run `git pull --ff-only`. If the update fails (local changes / diverged
+   history), STOP and report — do not force, do not `git reset`.
 1b. **Reconcile local AI commands before installing skills.** Run
    `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
    Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\install-machine-tools.ps1 -RepoPath <repo>`
-   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. If
+   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. The
+   Windows launcher installer validates the source gate before stamping a
+   receipt; a protected update first needs the reviewed pinned route in
+   `docs/deployment.md`. If
    only `ai-glm` is missing, use the existing GLM installer in step 2b because
    it owns that command and service. Stop if the final doctor is nonzero. Say
    "Local AI commands already current" or name what was installed. On Windows,
@@ -131,7 +138,9 @@ clone + `./install.sh` (Ubuntu) first.
      substring `ops_` and produced a false "plaintext token found" on 2026-07-26.
      A real service-account token is ~866 characters.
    - Windows: `~/.ssh/ai-devops.conf` exists and `~/.ssh/config` `Include`s it.
-     Ubuntu: `~/.config/ai-devops/shellrc` exists and `.bashrc` sources it.
+     Ubuntu: `~/.config/ai-devops/shellrc` exists and `.bashrc` sources it, and
+     `<repo>/bin/ai-ssh-setup` reports the 916-alien key and `ai-devops.conf`
+     Include as current (it is idempotent; run it directly to repair only SSH).
    **If anything is missing or a real token is found**, run the per-OS installer —
    `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\setup-machine.ps1 -RepoPath <repo>`
    or `<repo>/bin/setup-secrets.sh`. Two hard preconditions:
@@ -284,6 +293,12 @@ clone + `./install.sh` (Ubuntu) first.
    that state, including owner rulings Albert had made himself. The weekly report
    detects that after the fact; this hook catches it in the same turn the file is
    written. Report the verdict out loud.
+6c2b. **Install the Claude closeout hook:** `bin/ai-install-completion-check-hook`
+   (Claude is the default client; `--check` reports drift). Idempotent; strictly
+   additive to `~/.claude/settings.json`. Without it, a session that ends on
+   waiting language is never forced to hold an `ai-blocker-watch wait`, so the
+   BlockerWatch rule is honor-system only (issue #878). `ai-devops doctor` fails
+   when it is missing. Report the verdict out loud.
 6c3. **Register the ZCode completion-check hook (Windows, when ZCode is
    installed):** `bin/ai-install-completion-check-hook --client zcode`. Idempotent;
    prints `OK completion-check hook already registered for zcode` when there is

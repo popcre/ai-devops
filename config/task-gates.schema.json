@@ -20,6 +20,23 @@
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1 }
     },
+    "action_gates": {
+      "description": "Central only: extra per-action proof bindings. An action mapped here refuses to start while the effective class's merged required gates lack the named gate. It can only add a requirement; it can never allow a forbidden action.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["require_gate"],
+        "additionalProperties": false,
+        "properties": {
+          "require_gate": {
+            "description": "Class name to gate name: the action needs that gate present in that class's required proofs.",
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
     "change_classes": {
       "description": "What a change can be. Central file only. `rank` orders strength and the strongest matching class always wins; a `protected` class can never be acknowledged or owner-requested away.",
       "type": "object",
