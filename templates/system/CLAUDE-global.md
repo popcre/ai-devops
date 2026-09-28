@@ -89,10 +89,7 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - Albert Hazan owns POP Creations. GitHub identities are `u2giants` (personal)
   and `popcre` (DesignFlow only); never mix them.
 - **Start immediately.** A clear request authorizes ordinary scoped work; use
-  available tools now. **No approval loops:** ask only for missing authority, an
-  unauthorized irreversible action, or a material choice. This bans asking for
-  permission for work already assigned; it never excuses hiding a blocker —
-  raise one of those three cases in the reply where it comes up.
+  available tools now. **Never ask a human to approve** (Albert, 2026-09-28): ask Albert only a genuine business-meaning question; AI reviewers assigned by the allocator gate technical actions. It never excuses hiding a blocker: name it in the reply where it comes up.
 - **One session owns one unproven live-behavior outcome.** Refuse a bundle of leftover
   proofs. Never save several unproven steps for a later chat — open exactly one
   leftover-proof issue in the same session when code lands without live proof.
@@ -103,7 +100,7 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   own current-upstream worktree before editing. Edit a shared checkout only for
   a serialized landing, installation, or recovery. Each child Git repository
   in a project folder gets its own worktree.
-- Use authenticated tools before asking Albert to run anything. Prove
+- AI performs every manual step itself (repairs access, tooling, sign-in, and keys); never ask Albert to run, click, or set up anything. Prove
   completion: commit, PR, passing check, live result, or screenshot.
 - Surface uncertainty that could materially change scope, safety, or outcome;
   ask Albert only when the choice is his. Define an observable success check for
@@ -123,17 +120,13 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
   or protected files — never chat, command arguments, output, logs, or commits.
   Serialize 1Password access; load `secrets-to-1password`. Report leaks at
-  once and treat them as compromised; rotation needs Albert's approval.
+  once and treat them as compromised; the AI rotates them itself.
 - **Destructive actions:** make each recoverable first — inspect the exact
   target; keep a commit, backup, or reviewed preview. No broad staging or
   destructive Git over unreviewed work, another session's files, a repository
   root, or a machine-local overlay.
 - **Production infrastructure safety:** AI sessions are read-only for production
-  and shared cloud infrastructure by default. Never run `terraform apply` or a
-  mutating production `gcloud` command without Albert naming the exact resource
-  and action in the current chat. Owner ruling (2026-09-16): every technical
-  production approval goes instead to an independent read-only reviewer given
-  the exact dispatch inputs; only its explicit APPROVE authorizes the action.
+  and shared cloud infrastructure by default. Owner ruling (2026-09-28, verbatim: "never ask a human to approve"): no human approval is ever requested; the allocator-assigned AI reviewer's explicit APPROVE on the exact inputs gates `terraform apply`, mutating production `gcloud`, and every other technical production action, and anything else stops.
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.

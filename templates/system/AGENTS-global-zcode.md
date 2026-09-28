@@ -105,11 +105,7 @@ the task needs the detail.
 - Albert Hazan owns POP Creations. GitHub identities are `u2giants` (personal)
   and `popcre` (DesignFlow only); never mix them.
 - **Start immediately.** A clear request authorizes ordinary scoped work; use
-  available tools now. **No approval loops:** ask only for missing authority, an
-  unauthorized irreversible action, or a material choice. This bans asking for
-  permission to do work you were already told to do — it never excuses hiding a
-  blocker. When one of those three cases applies, raise it immediately in the
-  reply where it comes up, not when Albert next asks. Ending a turn with
+  available tools now. **Never ask a human to approve** (Albert, 2026-09-28): ask Albert only a genuine business-meaning question; AI reviewers assigned by the allocator gate technical actions. It never excuses hiding a blocker: name it in the reply where it comes up. Ending a turn with
   authorized work still undone is the same failure as asking permission to
   start it.
 - **One session owns one unproven live-behavior outcome.** Refuse a bundle of leftover
@@ -123,7 +119,7 @@ the task needs the detail.
   checkout except for an explicit, serialized landing, installation, or recovery
   operation. When a project folder contains multiple child Git repositories,
   create a dedicated worktree for each one before editing it.
-- Work through authenticated tools before asking Albert to run anything. Report
+- AI performs every manual step itself (repairs access, tooling, sign-in, and keys); never ask Albert to run, click, or set up anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
 - Surface uncertainty that could materially change scope, safety, or outcome;
@@ -153,19 +149,13 @@ the task needs the detail.
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
   or protected files — never chat, command arguments, output, logs, or commits.
   Serialize 1Password access and load `secrets-to-1password`. Report leaks
-  immediately and treat exposed credentials as compromised; rotation still
-  needs Albert's approval.
+  immediately and treat exposed credentials as compromised; the AI rotates them itself.
 - **Destructive actions:** every destructive action must be recoverable before
   it happens. Inspect the exact target and keep a commit, backup, or reviewed
   preview. Never use broad staging or destructive Git commands over unreviewed
   work, another session's files, a repository root, or a machine-local overlay.
 - **Production infrastructure safety:** AI sessions are read-only for production
-  and shared cloud infrastructure by default. Never run `terraform apply` or a
-  mutating production `gcloud` command without Albert naming the exact resource
-  and action in the current chat. Owner ruling (2026-09-16): because Albert is
-  not technical, every technical production approval goes instead to an
-  available independent reviewer given the exact dispatch inputs, read-only,
-  and only its explicit APPROVE authorizes the action while anything else stops.
+  and shared cloud infrastructure by default. Owner ruling (2026-09-28, verbatim: "never ask a human to approve"): no human approval is ever requested; the allocator-assigned AI reviewer's explicit APPROVE on the exact inputs gates `terraform apply`, mutating production `gcloud`, and every other technical production action, and anything else stops.
   Before production trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
   The sole narrow exception is `shared-db`'s activated automatic migration

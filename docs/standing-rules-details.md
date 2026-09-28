@@ -86,10 +86,7 @@ exception is `shared-db`'s activated automatic migration promotion workflow,
 running only after its guarded merge and merged-main preview. That lane must
 independently re-prove the one open structural work issue, immutable preview
 evidence, production target, bounded allowlist, fresh dry-run, exclusive lock,
-and post-apply result; missing evidence stops for an engineer. Owner ruling
-(2026-09-16): because Albert is not technical, a production approval comes
-only from an available independent read-only reviewer's explicit APPROVE;
-anything else stops. Owner ruling (2026-09-28, Albert Hazan, verbatim: "i don't
+and post-apply result; missing evidence stops for an engineer. Owner ruling (2026-09-28, Albert Hazan, verbatim: "never ask a human to approve. as i have said at least 1000 times, i am a solo vibe coder with no technical knowledge. ai has to do everything for me without asking me to do manual things. institute that."; also "none of the reviewers should be read-only"): the 2026-09-16 independent read-only reviewer rule is withdrawn. AI reviewers assigned by the allocator gate every technical production action through an explicit exact-input APPROVE; anything else stops. No human approval is ever requested, and AI performs every manual step itself (access, tooling, sign-in, keys). Only genuine business-meaning questions go to Albert; platform-level safety limits outside the repository still apply. Owner ruling (2026-09-28, Albert Hazan, verbatim: "i don't
 need an independent production reviewer. remove that requirement"; popcre/shared-db
 #3656): no separately registered independent reviewer identity is required for
 shared-db manual production recovery; the allocator-assigned exact-head AI review

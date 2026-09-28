@@ -487,7 +487,7 @@ owner: claude/fixture-$n
     foreach ($client in $clientGlobals.Keys) {
         foreach ($required in @(
             "Start immediately",
-            "No approval loops",
+            "Never ask a human to approve",
             "recover first and finish",
             "Preserve the capability",
             "reported problem is gone",

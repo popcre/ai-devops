@@ -25,7 +25,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 required_phrases=(
   "Start immediately"
-  "No approval loops"
+  "Never ask a human to approve"
   "recover first and finish"
   "Preserve the capability"
   "reported problem is gone"
@@ -34,7 +34,7 @@ required_phrases=(
   "Do not load unrelated handoffs"
   "resume that agent immediately"
   "quote Albert's exact words"
-  "only its explicit APPROVE authorizes the action"
+  "no human approval is ever requested"
   "one unproven live-behavior outcome"
   "Never save several unproven steps"
   "Quote every time in EST"

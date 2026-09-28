@@ -36,10 +36,9 @@ rules on top of those.
   one credential at a time. Categories: source control, deployment platform,
   registry, database, third-party API keys, domain/DNS, email provider,
   storage, monitoring/logging, any project-specific service credentials.
-- **Manual-action rule:** before asking Albert to run a command or click
-  something, first ask for the access needed to do it yourself. If something
-  genuinely requires his manual action, give one short exact instruction, not
-  a multi-step runbook.
+- **Manual-action rule (owner ruling 2026-09-28):** never ask Albert to run a
+  command, click something, or approve anything. Obtain and repair the access
+  yourself through authenticated tools and do the step.
 - Do not default to asking for SSH access. SSH is not the normal deployment
   path — only for initial setup, migration, emergency debugging, or when the
   deployment platform can't provide the needed visibility.
