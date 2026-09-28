@@ -22,8 +22,10 @@
 #      the lock is free, exit 3 when any holder exists;
 #   5. with --recover: TERM, then KILL after a bounded wait, ONLY our-tool
 #      holders at least --older-than seconds old (default 120, the shared
-#      credential wait). Younger our-tool holders, holders whose start time
-#      cannot be proven, and every foreign holder are left alone and reported.
+#      credential wait), and only when /proc/locks proves an advisory lock
+#      actually sits on the inode (an open descriptor alone is not a lock).
+#      Younger our-tool holders, holders whose start time cannot be proven,
+#      and every foreign holder are left alone and reported.
 #
 # Age semantics: --older-than is a PROCESS-age floor, not the lock-hold time
 # (flock records no hold time). The primary proof of a stuck lock is the
@@ -102,8 +104,13 @@ norm(){
 }
 LOCK_DEV_N="$(norm "$lock_dev")"; LOCK_INO_N="$(norm "$lock_ino")"
 
-# Informational only: the /proc/locks pid is not trusted (#940). The lock id
-# there is hex (major:minor:inode) while stat prints decimal, so convert.
+# Informational for the report, AUTHORITATIVE for recovery: /proc/locks is
+# the kernel's list of advisory locks actually held. The pid column is still
+# never trusted (#940), but the ENTRY's existence proves a real flock sits on
+# the inode — an open descriptor alone (an editor, a stale fd) is not a lock,
+# and recovery must not signal anyone for it. The lock id there is hex
+# (major:minor:inode) while stat prints decimal, so convert.
+locks_seen=false
 locks_pid=''
 if [ -r /proc/locks ]; then
   while IFS=' ' read -r _ _ _ _ lpid lid _ _; do
@@ -111,13 +118,13 @@ if [ -r /proc/locks ]; then
     ldev="${lid%%:*}"; resto="${lid#*:}"; lino="${resto##*:}"
     case "$ldev$lino" in ''|*[!0-9a-fA-F]*) continue ;; esac
     [ "$((16#$lino))" = "$((10#$lock_ino))" ] || continue
-    locks_pid="$lpid"
+    locks_seen=true; locks_pid="$lpid"
   done < /proc/locks
 fi
-if [ -n "$locks_pid" ]; then
-  info "/proc/locks reports pid $locks_pid for inode $lock_id (advisory; the fd scan decides)"
+if [ "$locks_seen" = true ]; then
+  info "/proc/locks reports an advisory lock on inode $lock_id (reported pid $locks_pid is advisory; the fd scan decides)"
 else
-  info "/proc/locks has no entry for inode $lock_id; scanning every process's descriptors"
+  info "/proc/locks reports no advisory lock on inode $lock_id; scanning descriptors anyway (diagnosis is informational)"
 fi
 
 # --- process facts -----------------------------------------------------------
@@ -271,6 +278,13 @@ if [ "$recover" = false ]; then
 fi
 
 # --- recovery: TERM then KILL, our-tool holders of age only -------------------
+# Signalling requires the kernel to prove an advisory lock exists on the
+# inode: open descriptors without a flock are reported, never signalled.
+
+if [ "$locks_seen" != true ]; then
+  info "no advisory lock on inode $lock_id: open descriptors alone are not a stuck lock; nothing is signalled"
+  exit 3
+fi
 
 kill_holder(){
   local pid="$1" waited

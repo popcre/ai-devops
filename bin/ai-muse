@@ -474,11 +474,14 @@ read_key_from_op(){
     candidate="$credential_home/.config/ai-devops/op-refresh.lock"
     mkdir -p "$(dirname "$candidate")" || die 'could not create the shared 1Password lock directory.'
     muse_doctor() { # sweep this toolkit's own stuck holders via ai-lock-doctor (#1002)
+      # The kill floor is a CONSTANT, never the caller-settable wait budget:
+      # a small AI_MUSE_CREDENTIAL_WAIT_SECONDS must not lower the minimum
+      # age at which a holder may be signalled (third exact-head review).
       local doctor
       doctor="$(dirname "$(readlink -f "$SELF")")/ai-lock-doctor"
       [ -x "$doctor" ] || doctor="$(command -v ai-lock-doctor 2>/dev/null || true)"
       [ -n "$doctor" ] || return 0
-      "$doctor" --recover --older-than "$budget" "$candidate" || true
+      "$doctor" --recover --older-than 120 "$candidate" || true
     }
     muse_locked_read() {
       flock --close -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key'

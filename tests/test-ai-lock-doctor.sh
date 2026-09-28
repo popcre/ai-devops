@@ -53,7 +53,7 @@ if ( source /dev/stdin
      lock_owner_alive(){ return 1; } # MSYS pid invisible across Git Bash runtimes
      warn(){ :; }
      declare -A LOCK_TOKENS=()
-     [ -z "${SYSTEMROOT:-}" ] || SYSTEMROOT=Windows
+     [ -n "${SYSTEMROOT:-}" ] || SYSTEMROOT=Windows   # force the Windows branch on Linux too
      export SYSTEMROOT
      ! lock_acquire "$legacy_young" test && [ -f "$legacy_young/pid" ] && [ ! -f "$legacy_young/owner" ]
    ) <<< "$FUNCS" >/dev/null 2>&1; then
