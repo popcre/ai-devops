@@ -103,6 +103,8 @@ export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
 THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + 2 * ${AI_GH_MIN_SPACING_SECONDS:-3} + ${AI_GH_PROBE_TIMEOUT_SECONDS:-15} ))
 SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
 [ -x "$SUPERVISOR" ] || { printf 'ai-pr-wait: ai-process-supervisor is not installed\n' >&2; exit 3; }
+PAGER_SCRIPT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")/.." && pwd)/tools/github-requests/pr-status-complete.sh"
+[ -f "$PAGER_SCRIPT" ] || { printf 'ai-pr-wait: complete status reader is not installed\n' >&2; exit 3; }
 BASH_RUNNER="$(command -v bash 2>/dev/null || true)"
 [ -n "$BASH_RUNNER" ] || { printf 'ai-pr-wait: bash is not installed\n' >&2; exit 3; }
 PYTHON_RUNNER=''
@@ -119,6 +121,7 @@ case "$(uname -s 2>/dev/null || true)" in
     GH_RUNNER="$(cygpath -w "$GH_RUNNER")"
     PYTHON_RUNNER="$(cygpath -w "$PYTHON_RUNNER")"
     SUPERVISOR="$(cygpath -w "$SUPERVISOR")"
+    PAGER_SCRIPT="$(cygpath -w "$PAGER_SCRIPT")"
     ;;
 esac
 
@@ -126,7 +129,8 @@ DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
 WAIT_STARTED_SECONDS=$SECONDS
 
 bounded_gh() {
-  local now remaining limit
+  local now remaining limit complete_status=0
+  if [ "${1:-}" = --complete-status ]; then complete_status=1; shift; fi
   now="$(date +%s)"
   remaining=$(( DEADLINE - now ))
   # 125 means the overall deadline expired before any GitHub process started;
@@ -136,13 +140,22 @@ bounded_gh() {
   # spacing before gh even starts; add that allowance so a healthy call is never
   # killed as hung (a kill would leave the shared lock behind).
   limit=$(( API_TIMEOUT_SECONDS + THROTTLE_ALLOWANCE_SECONDS ))
+  [ "$complete_status" -eq 0 ] || limit="$remaining"
   [ "$limit" -le "$remaining" ] || limit="$remaining"
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
     printf '%s\n' "$GH_RUNNER" > "$AI_PR_WAIT_TEST_TRACE.resolved"
   fi
-  local -a command=("$PYTHON_RUNNER" "$SUPERVISOR" --timeout-seconds "$limit" -- \
-    "$BASH_RUNNER" -c 'runner="$1"; shift; command -v cygpath >/dev/null 2>&1 && runner="$(cygpath -u "$runner")"; if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then printf "%s\n" "$runner" > "$AI_PR_WAIT_TEST_TRACE.child"; fi; exec "$runner" "$@"' bash "$GH_RUNNER" "$@")
-  if [ -n "${SNAP_CONTEXT:-}" ] && [ "${SNAP_SHARE:-1}" = 1 ] && [ "${1:-} ${2:-}" = 'api graphql' ]; then
+  local -a command
+  if [ "$complete_status" -eq 1 ]; then
+    command=("$PYTHON_RUNNER" "$SUPERVISOR" --timeout-seconds "$limit" -- \
+      "$BASH_RUNNER" -c 'runner="$1"; shift; command -v cygpath >/dev/null 2>&1 && runner="$(cygpath -u "$runner")"; exec "$runner" "$@"' bash \
+      "$PAGER_SCRIPT" "$GH_RUNNER" "$PYTHON_RUNNER" "$SUPERVISOR" "$BASH_RUNNER" \
+      "$OWNER" "$NAME" "$PR" "$DEADLINE" "$API_TIMEOUT_SECONDS" "$THROTTLE_ALLOWANCE_SECONDS" "$SNAP_SOURCE_ARG")
+  else
+    command=("$PYTHON_RUNNER" "$SUPERVISOR" --timeout-seconds "$limit" -- \
+      "$BASH_RUNNER" -c 'runner="$1"; shift; command -v cygpath >/dev/null 2>&1 && runner="$(cygpath -u "$runner")"; if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then printf "%s\n" "$runner" > "$AI_PR_WAIT_TEST_TRACE.child"; fi; exec "$runner" "$@"' bash "$GH_RUNNER" "$@")
+  fi
+  if [ -n "${SNAP_CONTEXT:-}" ] && [ "$complete_status" -eq 1 ]; then
     local force=()
     local expected_head="${LAST_HEAD:-any}"
     local cache_target="${LAST_HEAD:-discover}"
@@ -151,7 +164,7 @@ bounded_gh() {
     [ "$WAS_QUEUED" -eq 0 ] || force=(--force-refresh)
     AI_GH_CALLER=ai-pr-wait "$PYTHON_RUNNER" "$SNAP_HELPER_ARG" \
       --state-dir "$SNAP_STATE_ARG" --key "v1 $SNAP_CONTEXT $REPO $PR $cache_target" \
-      --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" --cap-supervisor-timeout \
+      --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" --cap-supervisor-timeout --defer-source-mark \
       --age-file "$SNAP_AGE_ARG" --source-file "$SNAP_SOURCE_ARG" "${force[@]+"${force[@]}"}" -- "${command[@]}"
   else
     AI_GH_CALLER=ai-pr-wait "${command[@]}"
@@ -290,39 +303,13 @@ while :; do
   # One GraphQL call carries everything that decides the outcome, including the
   # merge-queue membership that `gh pr view` does not report.
   GH_RC=0
-  Q="$(bounded_gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state headRefOid isInMergeQueue mergeCommit{oid} commits(last:1){nodes{commit{statusCheckRollup{state contexts(last:100){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name conclusion} ... on StatusContext{context state}}}}}}}}}}" 2>"$API_STDERR")"
+  Q="$(bounded_gh --complete-status 2>"$API_STDERR")"
   GH_RC=$?
   # A fresh throttle state has no verified identity before its first call.
   # Recheck only the local token/cache after a successful response so later
   # polls can share; an unknown identity stays unshared without another API hit.
   if [ "$GH_RC" -eq 0 ] && [ -z "$SNAP_CONTEXT" ] && [ -n "$SNAP_CONTEXT_HELPER" ]; then
     SNAP_CONTEXT="$("$SNAP_CONTEXT_HELPER" 2>/dev/null || true)"
-  fi
-
-  # GitHub returns only the last 100 check contexts in the first response.
-  # Pull earlier pages before making any success/failure decision. A changing
-  # head or partial page leaves the first response marked incomplete.
-  if printf '%s' "$Q" | jq -e '(.errors | not) and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage == true)' >/dev/null 2>&1; then
-    SNAP_SHARE=0
-    pages=0
-    first_head="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.headRefOid // empty')"
-    while printf '%s' "$Q" | jq -e '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage == true' >/dev/null 2>&1; do
-      pages=$(( pages + 1 ))
-      [ "$pages" -le 20 ] || { GH_RC=4; break; }
-      cursor="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.startCursor // empty')"
-      [ -n "$cursor" ] || { GH_RC=4; break; }
-      quoted_cursor="$(jq -nr --arg value "$cursor" '$value|@json')"
-      PAGE="$(bounded_gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){headRefOid commits(last:1){nodes{commit{statusCheckRollup{contexts(last:100,before:$quoted_cursor){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name conclusion} ... on StatusContext{context state}}}}}}}}}}" 2>>"$API_STDERR")"
-      page_rc=$?
-      first_total="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount // empty')"
-      if [ "$page_rc" -ne 0 ] || ! printf '%s' "$PAGE" | jq -e --arg head "$first_head" --argjson total "$first_total" '(.errors | not) and (.data.repository.pullRequest.headRefOid == $head) and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount == $total) and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes | type == "array") and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage | type == "boolean")' >/dev/null 2>&1; then
-        GH_RC=4
-        break
-      fi
-      Q="$(printf '%s\n%s\n' "$Q" "$PAGE" | jq -sc '.[0] as $first | .[1] as $older | $first | .data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes += $older.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes | .data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo = $older.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo')" || { GH_RC=4; break; }
-    done
-    SNAP_SHARE=1
-    if [ "$GH_RC" -eq 4 ] && printf '%s' "$Q" | jq -e '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage == false' >/dev/null 2>&1; then GH_RC=0; fi
   fi
 
   if [ -z "$Q" ] || ! printf '%s' "$Q" | jq -e '.data.repository.pullRequest and (.errors | not) and ((.data.repository.pullRequest.state != "OPEN") or (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup == null) or ((.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage == false) and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount == (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes | length))))' >/dev/null 2>&1; then

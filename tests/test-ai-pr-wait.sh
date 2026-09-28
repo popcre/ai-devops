@@ -59,7 +59,7 @@ cat > "$TMP/bin/date" <<'EOF'
 state="${AI_PR_WAIT_TEST_CLOCK:?}"
 count="$(cat "$state" 2>/dev/null || printf 0)"
 count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
-if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
+if [ "$count" -le 3 ]; then printf '1000\n'; else printf '1060\n'; fi
 EOF
 chmod +x "$TMP/bin/gh" "$TMP/bin/date"
 check "fixture resolves its exact gh stub" \
@@ -120,7 +120,7 @@ cat > "$TMP/bin/date" <<'EOF'
 state="${AI_PR_WAIT_TEST_CLOCK:?}"
 count="$(cat "$state" 2>/dev/null || printf 0)"
 count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
-if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
+if [ "$count" -le 3 ]; then printf '1000\n'; else printf '1060\n'; fi
 EOF
 rm -f "$TMP/bin/sleep"
 rm -f "$TMP/clock"
@@ -231,7 +231,7 @@ cat > "$TMP/bin/date" <<'EOF'
 state="${AI_PR_WAIT_TEST_CLOCK:?}"
 count="$(cat "$state" 2>/dev/null || printf 0)"
 count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
-if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
+if [ "$count" -le 3 ]; then printf '1000\n'; else printf '1060\n'; fi
 EOF
 chmod +x "$TMP/bin/gh" "$TMP/bin/date"
 rm -f "$TMP/shared-calls" "$TMP/shared-clock-a" "$TMP/shared-clock-b"
@@ -307,8 +307,10 @@ EOF
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf 'x\n' >> "${AI_PR_WAIT_TEST_MARKER:?}"
+[ -z "${AI_PR_WAIT_TEST_PAGED_DELAY:-}" ] || /bin/sleep "$AI_PR_WAIT_TEST_PAGED_DELAY"
 if [[ "$*" == *'before:"older"'* ]]; then
-  printf '%s\n' '{"data":{"repository":{"pullRequest":{"headRefOid":"h1","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[{"name":"older failure","conclusion":"FAILURE"}]}}}}]}}}}}'
+  head=h1; [ "${AI_PR_WAIT_TEST_BAD_PAGE:-0}" != 1 ] || head=h2
+  printf '{"data":{"repository":{"pullRequest":{"headRefOid":"%s","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[{"name":"older failure","conclusion":"FAILURE"}]}}}}]}}}}}\n' "$head"
 elif [[ "$*" == *before:* ]]; then
   printf '%s\n' 'unexpected GraphQL cursor encoding' >&2
   exit 9
@@ -321,6 +323,44 @@ rm -f "$TMP/paged-calls" "$TMP/paged-clock"
 OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/paged-calls" AI_PR_WAIT_TEST_CLOCK="$TMP/paged-clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
 check "a failure on a previous check page remains terminal after complete pagination" \
   "test '$RC' -eq 1 && test \"\$(wc -l < '$TMP/paged-calls')\" -eq 2 && printf '%s' \"$OUT\" | grep -q 'older failure' && ! printf '%s' \"$OUT\" | grep -q 'unexpected GraphQL cursor encoding'"
+
+rm -f "$TMP/paged-shared-calls" "$TMP/paged-shared-a.clock" "$TMP/paged-shared-b.clock"
+AI_PR_WAIT_TEST_CONTEXT_KEY='host credential principal scopes-a' \
+  AI_PR_WAIT_SNAPSHOT_DIR="$TMP/paged-shared-snapshots" AI_GH_STATE_DIR="$TMP/paged-shared-throttle" \
+  AI_PR_WAIT_TEST_PAGED_DELAY=0.3 AI_PR_WAIT_TEST_MARKER="$TMP/paged-shared-calls" \
+  AI_PR_WAIT_TEST_CLOCK="$TMP/paged-shared-a.clock" PATH="$TMP/bin:$PATH" \
+  bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 >"$TMP/paged-shared-a.out" 2>&1 & paged_a=$!
+AI_PR_WAIT_TEST_CONTEXT_KEY='host credential principal scopes-a' \
+  AI_PR_WAIT_SNAPSHOT_DIR="$TMP/paged-shared-snapshots" AI_GH_STATE_DIR="$TMP/paged-shared-throttle" \
+  AI_PR_WAIT_TEST_PAGED_DELAY=0.3 AI_PR_WAIT_TEST_MARKER="$TMP/paged-shared-calls" \
+  AI_PR_WAIT_TEST_CLOCK="$TMP/paged-shared-b.clock" PATH="$TMP/bin:$PATH" \
+  bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 >"$TMP/paged-shared-b.out" 2>&1 & paged_b=$!
+wait "$paged_a"; paged_a_rc=$?
+wait "$paged_b"; paged_b_rc=$?
+check "two waiters share one complete multi-page failure read" \
+  "test '$paged_a_rc' -eq 1 && test '$paged_b_rc' -eq 1 && test \"\$(wc -l < '$TMP/paged-shared-calls')\" -eq 2 && grep -q 'older failure' '$TMP/paged-shared-a.out' && grep -q 'older failure' '$TMP/paged-shared-b.out'"
+
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+state="${AI_PR_WAIT_TEST_CLOCK:?}"
+count="$(cat "$state" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
+if [ "$count" -lt 30 ]; then printf '1000\n'; else printf '1060\n'; fi
+EOF
+cat > "$TMP/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/bin/date" "$TMP/bin/sleep"
+rm -f "$TMP/paged-bad-clock" "$TMP/paged-bad-calls"
+OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='host credential principal scopes-a' \
+  AI_PR_WAIT_SNAPSHOT_DIR="$TMP/paged-bad-snapshots" AI_GH_STATE_DIR="$TMP/paged-bad-throttle" \
+  AI_PR_WAIT_TEST_BAD_PAGE=1 AI_PR_WAIT_TEST_MARKER="$TMP/paged-bad-calls" \
+  AI_PR_WAIT_TEST_CLOCK="$TMP/paged-bad-clock" PATH="$TMP/bin:$PATH" \
+  bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a mismatched earlier page never publishes a complete snapshot" \
+  "test '$RC' -eq 2 && test \"\$(wc -l < '$TMP/paged-bad-calls')\" -ge 2 && test -z \"\$(find '$TMP/paged-bad-snapshots' -name '*.json' -print 2>/dev/null)\" && printf '%s' \"$OUT\" | grep -q 'could not read PR'"
+rm -f "$TMP/bin/sleep"
 
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
@@ -410,7 +450,7 @@ cat > "$TMP/bin/date" <<'EOF'
 state="${AI_PR_WAIT_TEST_CLOCK:?}"
 count="$(cat "$state" 2>/dev/null || printf 0)"
 count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
-if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
+if [ "$count" -le 3 ]; then printf '1000\n'; else printf '1060\n'; fi
 EOF
 chmod +x "$TMP/bin/date"
 rm -f "$TMP/cold-shared-calls" "$TMP/cold-clock-a" "$TMP/cold-clock-b"

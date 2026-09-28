@@ -157,6 +157,7 @@ def main():
     parser.add_argument("--expected-head", required=True)
     parser.add_argument("--force-refresh", action="store_true")
     parser.add_argument("--cap-supervisor-timeout", action="store_true")
+    parser.add_argument("--defer-source-mark", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if not args.command or args.command[0] != "--" or args.ttl < 1 or args.wait_seconds < 1 or not args.expected_head:
@@ -167,7 +168,7 @@ def main():
 
     def upstream(cache_path):
         return run(command, cache_path, args.age_file, args.source_file, args.expected_head,
-                   deadline, args.cap_supervisor_timeout)
+                   deadline, args.cap_supervisor_timeout, args.defer_source_mark)
 
     directory = Path(args.state_dir)
     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
@@ -230,7 +231,7 @@ def main():
 
 
 def run(command, cache, age_file, source_file, expected_head=None,
-        deadline=None, cap_supervisor_timeout=False):
+        deadline=None, cap_supervisor_timeout=False, defer_source_mark=False):
     if cap_supervisor_timeout:
         try:
             index = command.index("--timeout-seconds")
@@ -246,7 +247,8 @@ def run(command, cache, age_file, source_file, expected_head=None,
         command[index + 1] = str(min(original_limit, remaining))
     # Mark the actual transport before it starts. A completed cache read never
     # reports upstream spend, even when its age rounds down to zero seconds.
-    Path(source_file).write_text("upstream")
+    if not defer_source_mark:
+        Path(source_file).write_text("upstream")
     result = subprocess.run(command, capture_output=True, check=False)
     sys.stderr.buffer.write(result.stderr)
     sys.stdout.buffer.write(result.stdout)
