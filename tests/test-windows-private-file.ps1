@@ -33,6 +33,13 @@ try {
   Assert (Test-Path -LiteralPath $backup) 'unique protected backup missing'
   Assert (([IO.File]::ReadAllText($backup)) -eq 'first-value') 'backup is not the prior value'
   Assert-AiDevOpsPrivateAcl $backup
+  function icacls.exe { Write-Error 'simulated native launch failure' }
+  $ErrorActionPreference = 'Continue'
+  $launchFailed = $false
+  try { Invoke-AiDevOpsIcacls -Path $path -Arguments @('/inheritance:r') } catch { $launchFailed = $true }
+  $ErrorActionPreference = 'Stop'
+  Remove-Item Function:\icacls.exe
+  Assert $launchFailed 'native launch failure did not fail closed under Continue'
   Write-Host 'PASS: Windows private files stage, verify ACL, publish atomically, and preserve prior state'
 } finally {
   $env:AI_DEVOPS_TEST_ICACLS_FAIL = $null
