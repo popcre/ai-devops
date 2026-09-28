@@ -202,9 +202,9 @@ if grep -q 'configure-codex-statusline.ps1' bin/setup-machine.ps1 &&
   ok "Windows setup standardizes the Codex context status line"
 else bad "Windows setup does not standardize the Codex context status line"; fi
 if grep -q 'configure-codex-agent-limit.ps1' bin/setup-machine.ps1 &&
-   grep -A2 '^\[agents\]$' config/codex-portable.toml | grep -q '^max_threads = 20$'; then
-  ok "Windows setup standardizes the Codex concurrent subagent limit"
-else bad "Windows setup does not standardize the Codex concurrent subagent limit"; fi
+   ! grep -Eq '^max_(threads|concurrent_threads_per_session)\s*=' config/codex-portable.toml; then
+  ok "Windows setup removes the managed Codex subagent limit"
+else bad "Windows setup still imposes a Codex subagent limit"; fi
 if grep -q '^model = "gpt-5.6-sol"' config/codex-portable.toml &&
    grep -q 'model_reasoning_effort = "medium"' config/codex-portable.toml; then
   ok "portable Codex defaults pin safe effort without hard-coding a model"

@@ -17,6 +17,13 @@ cat > "$TMP/gh" <<'EOF'
 #!/usr/bin/env bash
 F="$FAKE"; printf '%s\n' "$*" >> "$F/calls"
 printf '%s\n' "${AI_GH_CALLER:-unset}" >> "$F/callers"
+printf '%s\n' "${AI_GH_OPERATION:-unset}" >> "$F/operations"
+kind=other
+case "$*" in
+  *graphql*states:OPEN*) kind=snapshot ;;
+  *dependencies/blocking*) kind=dependents ;;
+esac
+printf '%s\t%s\n' "${AI_GH_OPERATION:-unset}" "$kind" >> "$F/operation-kinds"
 [ -f "$F/fail" ] && exit 1
 jqarg=""; args=("$@"); for i in "${!args[@]}"; do [ "${args[$i]}" = --jq ] && jqarg="${args[$((i+1))]}"; done
 out(){ if [ -n "$jqarg" ]; then jq -r "$jqarg" <<<"$1"; else printf '%s\n' "$1"; fi; }
@@ -67,7 +74,12 @@ EOF
 cat > "$TMP/harness" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "${AI_GH_CALLER:-unset}" >> "$FAKE/resumed-callers"
-printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"; [ -f "$FAKE/harness_fail" ] && exit 7; exit 0
+printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"
+if [ -f "$FAKE/active_writer" ] && [ "${1:-}" = codex ]; then
+  printf 'Error: the thread already has an active writer (code -32600)\n' >&2
+  exit 1
+fi
+[ -f "$FAKE/harness_fail" ] && exit 7; exit 0
 EOF
 chmod +x "$TMP/gh" "$TMP/harness"
 # The fixture config drops propagate_on_host so the suite is machine-independent:
@@ -365,6 +377,47 @@ check 'wait records the main checkout of the current repository' \
 # Mode 1: the folder and the transcript are both still there.
 rm -f "$W2/$pid.json" "$W2/$fid.json"
 echo closed > "$FAKE/state5"
+busy_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session busy-1 --park 'active Codex task' --brief-file "$TMP/brief.md" 2>/dev/null)"
+touch "$TMP/transcripts/busy-1.jsonl" "$FAKE/active_writer"
+: > "$FAKE/comments"
+check 'active Codex writer leaves the wait queued without spending an attempt' \
+  "BW2 tick && jq -e '.state==\"waiting\" and .attempts==0 and .active_writer_at!=null' '$W2/$busy_id.json' && ! grep -q 'issue comment 31' '$FAKE/comments'"
+check 'repeated active writer responses remain queued' \
+  "BW2 tick && jq -e '.state==\"waiting\" and .attempts==0' '$W2/$busy_id.json'"
+rm -f "$FAKE/active_writer"
+check 'queued Codex wait resumes after the writer releases' \
+  "BW2 tick && jq -e '.state==\"woken\" and .attempts==1' '$W2/$busy_id.json'"
+rm -f "$W2/$busy_id.json"
+
+# A Codex multi-agent v2 child has a real transcript and folder, but the CLI
+# refuses to resume it through its parent. The parked brief must start a new
+# independent session in the main checkout instead.
+child_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session child-1 --park 'Codex child work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+printf '%s\n' '{"type":"session_meta","payload":{"id":"child-1","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-1"}}}}}' > "$TMP/transcripts/child-1.jsonl"
+jq --arg m "$TMP/mainco" '.main_checkout=$m' "$W2/$child_id.json" > "$W2/$child_id.new" && mv "$W2/$child_id.new" "$W2/$child_id.json"
+: > "$FAKE/resumed"; : > "$FAKE/comments"
+BW2 tick >/dev/null 2>&1
+check 'Codex child starts a fresh session with its parked context' \
+  "grep -q '^$TMP/mainco|fresh-codex' '$FAKE/resumed' && grep -q 'issues/31' '$FAKE/resumed' && grep -q 'Read that issue and all of its comments first' '$FAKE/resumed' && grep -q 'own worktree from current upstream before you edit anything' '$FAKE/resumed' && grep -q 'comment the result on that issue' '$FAKE/resumed' && grep -q 'cannot be resumed independently' '$FAKE/resumed' && jq -e '.mode==\"fresh\" and .state==\"woken\" and .attempts==1' '$W2/$child_id.json'"
+check 'Codex child is never falsely resumed or invoked twice' \
+  "! grep -q '|codex child-1' '$FAKE/resumed' && [ \"\$(wc -l < '$FAKE/resumed')\" = 1 ] && [ \"\$(grep -c 'issue comment 31' '$FAKE/comments')\" = 1 ] && grep -q 'Started a fresh codex session' '$FAKE/comments' && ! grep -q 'Resumed the original codex session' '$FAKE/comments'"
+rm -f "$W2/$child_id.json"
+
+top_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session top-1 --park 'top-level Codex work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+printf '%s\n' '{"type":"session_meta","payload":{"id":"top-1","source":{"cli":{}}}}' > "$TMP/transcripts/top-1.jsonl"
+: > "$FAKE/resumed"
+BW2 tick >/dev/null 2>&1
+check 'top-level Codex still resumes its exact session' \
+  "grep -q '|codex top-1' '$FAKE/resumed' && jq -e '.mode==\"resumed\" and .state==\"woken\"' '$W2/$top_id.json'"
+rm -f "$W2/$top_id.json"
+
+unsafe_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session child-no-fresh --park 'unrunnable child work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+printf '%s\n' '{"type":"session_meta","payload":{"id":"child-no-fresh","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-1"}}}}}' > "$TMP/transcripts/child-no-fresh.jsonl"
+: > "$FAKE/resumed"; : > "$FAKE/comments"
+check 'Codex child without a safe fresh route fails visibly' \
+  "! BW2 tick && jq -e '.state==\"orphaned\" and .attempts==0' '$W2/$unsafe_id.json' && grep -q 'cannot be resumed independently' '$FAKE/comments' && [ ! -s '$FAKE/resumed' ]"
+rm -f "$W2/$unsafe_id.json"
+
 rid="$(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session live-1 --park 'resumable work' --brief-file "$TMP/brief.md" 2>/dev/null)"
 touch "$TMP/transcripts/live-1.jsonl"
 : > "$FAKE/resumed"; : > "$FAKE/comments"; : > "$FAKE/edited"
@@ -631,5 +684,18 @@ date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap6/last-alarm"
 AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" BW links >/dev/null 2>&1 || true
 check 'an edge already in the snapshot is not re-fetched or re-posted' \
   "[ ! -f '$FAKE/links' ] && ! grep -q 'dependencies/blocked_by' '$FAKE/calls' && ! grep -q 'issue_id=' '$FAKE/calls'"
+
+# Fixed telemetry labels must reach the CLI subprocess across gh_api/gh_call,
+# and each may identify only its intended request category.
+for op in bw.snapshot bw.dependents bw.wake_miss bw.alarm_issue bw.link_issue; do
+  check "fixed telemetry label $op reaches the CLI" "grep -qx '$op' '$FAKE/operations'"
+done
+check 'snapshot label identifies only open-issue GraphQL walks' \
+  "awk -F '\t' '\$2 == \"snapshot\" && \$1 != \"bw.snapshot\" { bad=1 } \$2 != \"snapshot\" && \$1 == \"bw.snapshot\" { bad=1 } END { exit bad }' '$FAKE/operation-kinds'"
+check 'dependent label identifies only blocking REST reads' \
+  "awk -F '\t' '\$2 == \"dependents\" && \$1 != \"bw.dependents\" { bad=1 } \$2 != \"dependents\" && \$1 == \"bw.dependents\" { bad=1 } END { exit bad }' '$FAKE/operation-kinds'"
+AI_GH_OPERATION=bw.snapshot BW find no-such-wait >/dev/null 2>&1 || true
+check 'an inherited label does not classify unrelated calls' \
+  "[ \"\$(tail -2 '$FAKE/operation-kinds' | cut -f1 | sort -u)\" = unset ]"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

@@ -106,7 +106,7 @@ tools run via git-bash on Windows).
 | **`~/.claude.json`** | Claude Code's local MCP server list. **This is the only file Claude Code reads MCP servers from** — an `mcpServers` block in `~/.claude/settings.json` is silently ignored (fixed 2026-08-20; before that both setup scripts wrote to the wrong file, so machines had zero working servers while looking configured). | ✅ `bin/setup-machine.ps1` (Windows), `bin/setup-secrets.sh` (Ubuntu) | No — only `op://` references and launcher paths |
 | **`~/.claude/settings.json`** | Claude Code prefs: permissions, hooks, theme, push-notif / auto-update. **Not** MCP servers. | ✅ `bin/ai-claude-permissions` merges the permission allow-list | No |
 | **Claude Desktop config** | Claude Desktop settings + local MCP servers | ✅ `bin/setup-machine.ps1` manages the full MCP set; `bin/configure-claude-desktop-chrome-devtools.ps1` safely installs or repairs only Chrome DevTools MCP | Existing settings and hand-added extensions are preserved; a backup is written before changes |
-| **`~/.codex/config.toml`** | Codex prefs + machine-specific runtime paths + MCP server list | ✅ new configs seed from `config/codex-portable.toml`; `setup-machine.ps1` reconciles the 20-thread subagent limit and the complete repo-owned MCP set while preserving unrelated machine settings and tool approval guards | Machine-specific paths/plugins remain local; managed MCP blocks are token-free |
+| **`~/.codex/config.toml`** | Codex prefs + machine-specific runtime paths + MCP server list | ✅ new configs seed from `config/codex-portable.toml`; `setup-machine.ps1` removes previously managed subagent limits and reconciles the complete repo-owned MCP set while preserving unrelated machine settings and tool approval guards | Machine-specific paths/plugins remain local; managed MCP blocks are token-free |
 | **ZCode home** (`~/.zcode` — Windows only) | ZCode (GLM-5.3 desktop agent) managed state: `skills/` (real managed dir from `skills/zcode`+`skills/shared`, migrating the old junction away non-recursively), seeded `AGENTS.md`, `cli/config.json` → `mcp.servers` (STRICT schema, absolute paths, token-free via the shared launcher) + `hooks` (completion-check, `hooks.enabled: true`), launcher shim `~/.local/bin/zcode` | ✅ `bin/install-ai-devops-windows.ps1`, `bin/setup-machine.ps1`, `bin/configure-zcode-mcps.ps1`, `bin/ai-install-completion-check-hook --client zcode`; health via `ai-zcode doctor` | No token in config — `1password` routes through `mcp-launch.cmd`; `~/.zcode/v2/credentials.json` is checked by existence only and never read |
 | **MiMoCode home** (`~/.config/mimocode` — Windows only) | MiMo (Xiaomi MiMo Desktop / MiMoCode) managed state: `skills/` (real managed dir from `skills/mimo`+`skills/shared`; never `~/.agents/skills`), seeded `AGENTS.md` + `instructions` pointer, `mimocode.jsonc` → `mcp` (ARRAY `command`, `timeout` ms, token-free via the shared launcher). No hooks surface. Data at `~/.local/share/mimocode/` (`mimocode.db`, `memory/`) | ✅ `bin/install-ai-devops-windows.ps1`, `bin/setup-machine.ps1`, `bin/configure-mimocode-mcps.ps1`, `bin/ai-adopt-globals`; health via `ai-mimo doctor` | No token in config — `1password` routes through `mcp-launch.cmd`; account login is interactive and never read |
 | **MCP secret launcher** (`~/.config/ai-devops/mcp-launch.cmd` + `mcp-remote-launch.cmd` → `bin/mcp-secret-launch.ps1`) | Injects `op://` secrets into MCP servers via **one single-flight refresh + 15-min DPAPI cache** (`mcp-secrets.dpapi.json`), not a per-launch `op run`. Caps the shared service account to ≤1 refresh/15 min/machine | ✅ `bin/setup-machine.ps1` writes the `.cmd`s; `bin/mcp-secret-launch.ps1` is repo-owned | No secret on disk except the user-only `op-service-account` token file; cache is DPAPI-encrypted. See [mcp-1password-rate-limit-hardening.md](mcp-1password-rate-limit-hardening.md) |
@@ -120,7 +120,7 @@ tools run via git-bash on Windows).
 | **Railway CLI + hosted MCP** | Manages Railway projects from the terminal and gives Claude/Codex OAuth-based Railway tools at `https://mcp.railway.com` | ✅ Windows bootstrap installs `@railway/cli`; `bin/setup-machine.ps1` adds Railway to the shared MCP set and gives Codex Railway's authenticated CLI proxy | No repo secret — CLI and MCP use Railway's interactive login/OAuth |
 | **Kimi Code CLI** (`kimi`) | Optional local delegation target used by the shared `kimi-code-delegation` skill | ⚠️ Skill is synced by `ai-devops`; CLI install/auth are per-machine. Windows setup installs `ai-kimi` launchers in `%USERPROFILE%\.local\bin` for both PowerShell and Git Bash | No repo secret — Kimi carries its own interactive login |
 | **Grok Build CLI** (`grok`) | Optional xAI coding-agent target used by the shared `grok-cli` skill | ⚠️ Skill is synced by `ai-devops`; this machine's native install, docs, config, sessions, and login live under `%USERPROFILE%\.grok`; `%USERPROFILE%\.grok\bin` is on User PATH. Windows setup also installs `ai-grok-review` and `ai-grok-implement` launchers in `%USERPROFILE%\.local\bin` for both PowerShell and Git Bash, so neither wrapper depends on the repo `bin/` being on PATH | No repo secret — never read or sync machine-local `.grok/auth.json` |
-| **Qwen Code CLI** (`qwen`) | Qwen coding-agent target used by the shared `qwen-code` skill | ⚠️ The repo-owned wrapper, governed 1Password path, isolation, exact named sessions, model pin, and offline safety suite are configured. Write turns retain the full shell/write/edit toolset inside Qwen's sandbox and a disposable worktree. The real provider key crosses one mode-0600 handoff inside Qwen's private runtime directory into a repository-owned Node preloader; the file is deleted before application code starts, the key is available only through Qwen's direct non-enumerable in-memory lookup, and it is absent from Qwen/tool-child OS environments. After every install or upgrade, the repo installer also backs up, patches, and behaviorally proves Qwen's child sanitizer as defense in depth. Live-qualified on EDGE-DEV 2026-09-07 and re-qualified 2026-09-16 after the official standalone install was missing. An npm `qwen` on PATH is not accepted: the wrapper only uses the vendor standalone (`%LOCALAPPDATA%\qwen-code\bin\qwen.cmd` on Windows). The Windows installer ignores any npm `qwen` and checks the standalone itself (both launchers non-empty and a non-empty bundle), so `-SelectedProvider qwen` repairs a missing or hollow runtime; installs are serialized machine-wide and a failed install restores the previous runtime. `ai-review-preflight status qwen` is the live answer; registry membership is not usability. Proof is bound to the exact wrapper, runtime, and preloader hashes and invalidates automatically after a change | The live key, injected as `BAILIAN_CODING_PLAN_API_KEY`, is (since 2026-09-25) the `credential` field of `qwen coder alibaba token plan api key` on the pinned Token Plan endpoint; `qwen-endpoint` files are ignored. Qwen sessions stay under a private-permission `~/.qwen` |
+| **Qwen Code CLI** (`qwen`) | Qwen coding-agent target used by the shared `qwen-code` skill | ⚠️ The repo-owned wrapper, protected per-user key store, isolation, exact named sessions, model pin, and offline safety suite are configured. Installation or explicit `ai-qwen store-key` refreshes the store from 1Password; reviewer turns never call `op`. Write turns retain the full shell/write/edit toolset inside Qwen's sandbox and a disposable worktree. The real provider key crosses one mode-0600 handoff inside Qwen's private runtime directory into a repository-owned Node preloader; the file is deleted before application code starts, the key is available only through Qwen's direct non-enumerable in-memory lookup, and it is absent from Qwen/tool-child OS environments. After every install or upgrade, the repo installer also backs up, patches, and behaviorally proves Qwen's child sanitizer as defense in depth. An npm `qwen` on PATH is not accepted: the wrapper only uses the vendor standalone (`%LOCALAPPDATA%\qwen-code\bin\qwen.cmd` on Windows). `ai-review-preflight status qwen` is the live answer; proof is bound to the exact wrapper, runtime, and preloader hashes and invalidates automatically after a change | The live key is sourced from the `credential` field of `qwen coder alibaba token plan api key` in `vibe_coding`, then held at `~/.config/ai-devops/secrets/qwen-token-plan-key` with owner-only permissions. `qwen-endpoint` files are ignored. Qwen sessions stay under a private-permission `~/.qwen` |
 | **GLM sessions** (`ai-glm`) | Named, persistent GLM-5.3 sessions on a loopback-only OpenCode server; read-only reviews and worktree-isolated implementation | ✅ repo-owned client, pinned OpenCode, canonical agents, systemd user service, `ai-glm doctor` | Z.ai key stays in 1Password; only an `op://` reference is distributed |
 | **Muse conversations** (`ai-muse`) | Named, persistent Muse Spark 1.3 Contributor reviews and debates in a disposable self-contained copy | ✅ repo-owned direct-session runner, exact session resume, pinned OpenCode, evidence packet, 1M-token context with caching-aware compaction, `AI_MUSE_CALLER=codex ai-muse doctor` | Meta key is read from the `vibe_coding` 1Password item at turn time; persistence uses the exact session ID and needs no long-running Muse service |
 | **DeepSeek debates** (`ai-deepseek-agent`) | Bounded text-and-file debates used by the shared `deepseek-second-opinion` skill | ✅ repo-owned wrapper and skill; each turn resends the stored conversation | DeepSeek key stays in 1Password; only its `op://` reference is distributed |
@@ -287,21 +287,21 @@ machine-local; only the required-permissions list is synced.
 
 ### 5. `~/.codex/config.toml`
 Portable Codex CLI settings pin `model = "gpt-5.6-sol"`,
-`model_reasoning_effort = "medium"`, and 20 concurrently open subagent threads
-per session. Established machine files also contain
+`model_reasoning_effort = "medium"`. Established machine files also contain
 `[windows] sandbox = "elevated"`, `[desktop]` UI prefs, enabled plugins
 (chrome, documents, spreadsheets, pdf, browser, visualize, …), a local
 `node_repl` MCP server, and marketplaces. **Most of the file is machine-specific
 runtime paths** (hashed cache dirs, per-install exe paths). Only ~5 lines are
 portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
 `[desktop]` prefs). **Do not sync wholesale.** The setup workflow reconciles
-only the subagent limit and other explicitly managed sections, with a backup
+only explicitly managed sections, with a backup
 before each change.
 
-The portable file uses Codex's documented `agents.max_threads` compatibility
-alias because the installed 0.144.x desktop generation rejects the newer
-`agents.max_concurrent_threads_per_session` spelling; current releases accept
-both.
+Machine setup removes previously managed `agents.max_threads` and
+`agents.max_concurrent_threads_per_session` values. When unset, Codex chooses
+its own default concurrency. An already-running chat host keeps the slot limit
+it loaded; changing this file does not change that host's limit. A host restart
+only picks up a separately changed host setting.
 
 ### 6. Gaps
 - **Memory** — handled by `bin/ai-memory-sync` as a private, lossless Git
@@ -315,9 +315,9 @@ both.
   attempt to automate authentication inside a delegated coding prompt.
 - **Qwen Code CLI** — the skill and `ai-qwen` wrapper are repo-owned. Install the
   official **standalone** CLI (not the npm package) and the managed central
-  reference file. The wrapper resolves `BAILIAN_CODING_PLAN_API_KEY` from
-  1Password at provider-call time: the Model Studio Token Plan subscription
-  key on its pinned endpoint. Prove the full path
+  reference file. Installation prepares the owner-only Qwen key store from
+  1Password; `ai-qwen store-key` refreshes it outside review turns. The Model
+  Studio Token Plan subscription uses its pinned endpoint. Prove the full path
   with `ai-qwen doctor --live` then `ai-review-preflight qualify qwen`. A version
   string, or `qwen` resolving from npm, is not enough. A missing or hollow
   Windows standalone is repaired with
@@ -364,7 +364,8 @@ both.
   never Albert's personal Owner/Editor or Terraform-admin credentials.
 - **Portable Codex prefs** — seeded for new machines from
   `config/codex-portable.toml`; established Windows configs receive only the
-  explicitly managed status-line, MCP, and 20-thread subagent settings through
+  explicitly managed status-line and MCP settings, plus removal of previously
+  managed subagent limits, through
   backup-first reconcilers. Phase 3 is complete; do not copy the whole config.
 
 ## Where secrets live (1Password `vibe_coding` — titles only)

@@ -76,6 +76,12 @@ CLI reviewers lack a proven
 path-constrained read profile for private source, so this route refuses them.
 Ordinary and plan reviews of private source are refused before provider launch.
 The default private snapshot and packet routes also refuse private source.
+All registered reviewers may review an aggregate that has been checked for
+private content and written to a public repository worktree. Declare the public
+artifact's actual task class there and use the ordinary review route from that
+worktree. A discretionary prose review needs `--owner-request` with an actual
+request from Albert. The private checkout's `private-evidence` gate remains in force; it
+does not grant reviewers access to raw transcripts or other private records.
 `--tests` is unavailable on this route because
 arbitrary commands could expose raw evidence. The `private-evidence` class
 remains protected: `privacy-classification` and `no-raw-content-read` apply;

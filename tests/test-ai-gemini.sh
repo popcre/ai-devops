@@ -58,6 +58,18 @@ set -e
 case "${1:-}" in --version) if [ "${MOCK_VERSION_HANG:-0}" = 1 ]; then for _ in $(seq 1 600); do sleep 1; done; fi; echo 1.1.14; exit;; --help) echo --sandbox; exit;; models) echo 'gemini-3.8-flash-high'; exit;; esac
 printf '%s\n' "$*" >> "$MOCK_AGY_CALLS"
 args=" $* "
+if [[ "$args" == *"--input-format stream-json"* ]]; then
+  stream_input="$(cat)"
+  printf '%s' "$stream_input" | jq -r '.message.content[0].text' | wc -c > "$MOCK_STREAM_BYTES"
+  [ "${MOCK_MODE:-normal}" != stream-mutate-protected ] || printf changed >> "$MOCK_PROTECTED/file.txt"
+  printf '%s\n' '{"event":"init","conversation_id":"conv-good"}'
+  if [ "${MOCK_MODE:-normal}" = stream-wrong-conversation ]; then
+    printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","conversation_id":"conv-wrong","response":"## Verdict\nAPPROVE"}}'
+  else
+    printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","conversation_id":"conv-good","response":"## Verdict\nAPPROVE"}}'
+  fi
+  exit
+fi
 if [[ "$args" == *" /model "* ]]; then
   [ "${MOCK_MODE:-normal}" = mutate-model ] && printf model-changed > dirty.txt
   cid='conv-good'; [[ "$args" == *"--conversation conv-good"* ]] || cid='wrong-model-conversation'
@@ -101,7 +113,7 @@ APPROVE'; fi
 printf '{"status":"SUCCESS","conversation_id":"%s","response":%s}\n' "$cid" "$(printf %s "$response" | jq -Rs .)"
 EOF
 chmod +x "$TMP/bin/"*
-export MOCK_COPIES="$TMP/copies" MOCK_AGY_CALLS="$TMP/agy-calls" AI_GEMINI_BIN="$TMP/bin/agy" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox" AI_REVIEW_PACKET_BIN="$TMP/bin/packet" AI_GEMINI_STATE_DIR="$TMP/state" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_GEMINI_CALLER=test
+export MOCK_COPIES="$TMP/copies" MOCK_AGY_CALLS="$TMP/agy-calls" MOCK_STREAM_BYTES="$TMP/stream-bytes" AI_GEMINI_BIN="$TMP/bin/agy" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox" AI_REVIEW_PACKET_BIN="$TMP/bin/packet" AI_GEMINI_STATE_DIR="$TMP/state" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_GEMINI_CALLER=test
 : > "$MOCK_AGY_CALLS"
 
 make_repo(){ local d="$1" ignored="${2:-yes}"; mkdir -p "$d"; git -C "$d" init -q; git -C "$d" config user.email test@example.com; git -C "$d" config user.name test; printf base > "$d/file.txt"; if [ "$ignored" = yes ]; then printf '.ai/\n.ignored\n' > "$d/.gitignore"; else printf '.ignored\n' > "$d/.gitignore"; fi; git -C "$d" add file.txt .gitignore; git -C "$d" commit -qm base; }
@@ -111,7 +123,7 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.8-flash-high\"' '$FIXTURES/model-mismatch.json'"
-check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.3'"
+check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.4'"
 mkdir -p "$TMP/fallback-home/.local/bin"
 cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
 FALLBACK_PATH="/mingw64/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
@@ -208,6 +220,15 @@ check 'pool contract emits the model verdict body on stdout for the pool gate' "
 check 'pool contract keeps the PASS line off stdout and on stderr' "! printf '%s\n' \"\$POOL_OUT\" | grep -q '^PASS session=' && grep -q '^PASS session=poolbody' '$TMP/pool.err'"
 check 'ai-review-pool sets the gemini body-on-stdout contract' "grep -q 'AI_GEMINI_BODY_STDOUT=1' '$ROOT/bin/ai-review-pool'"
 R4="$TMP/repo4"; make_repo "$R4"; check 'normal review writes a durable report' "new_run '$R4' good normal && find '$R4/.ai/reviews' -type f -size +0c | grep -q ."
+RLARGE="$TMP/repo-large"; make_repo "$RLARGE"
+python3 -c 'import sys; open(sys.argv[1], "w").write("A" * 150000)' "$TMP/large-prompt.txt"
+check 'large prompt reaches Gemini intact without a single oversized argument' "(cd '$RLARGE' && '$SCRIPT' new large-prompt --prompt-file '$TMP/large-prompt.txt') && test \"\$(cat '$MOCK_STREAM_BYTES')\" -ge 150000"
+check 'large streamed review retains the exact conversation and completes' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for large-prompt)\""
+check 'streamed result with a different conversation is refused' "! (cd '$RLARGE' && MOCK_MODE=stream-wrong-conversation '$SCRIPT' new large-wrong --prompt-file '$TMP/large-prompt.txt') && test \"\$(jq -r .status \"\$(meta_for large-wrong)\")\" = RECOVERY_REQUIRED"
+export MOCK_PROTECTED="$RLARGE"
+check 'streamed source mutation refuses the review' "! (cd '$RLARGE' && MOCK_MODE=stream-mutate-protected '$SCRIPT' new large-drift --prompt-file '$TMP/large-prompt.txt')"
+STREAM_FAILURE="$(jq -r .failure_artifact "$(meta_for large-drift)")"
+check 'source-drift failure preserves raw stream evidence' "test -s '${STREAM_FAILURE%.json}.stream.ndjson'"
 check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for good)\""
 GOOD_META="$(meta_for good)"; GOOD_COPY="$(jq -r .review_dir "$GOOD_META")"
 GOOD_BEFORE="$( { sha256sum "$GOOD_META"; (cd "$R4" && find .ai/reviews -type f -print0 | sort -z | xargs -0 sha256sum); (cd "$GOOD_COPY" && find . -type f -print0 | sort -z | xargs -0 sha256sum); } | sha256sum | cut -d' ' -f1 )"

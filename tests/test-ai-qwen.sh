@@ -136,31 +136,66 @@ console.log(JSON.stringify({type:'result',subtype:'success',session_id:mode==='w
 STUBEOF
 cat > "$STUB/op" <<'STUBEOF'
 #!/usr/bin/env bash
-env_file=''
-[ "${1:-}" = run ] || exit 2; shift
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --env-file) env_file="$2"; shift 2 ;;
-    --) shift; break ;;
-    *) shift ;;
-  esac
-done
-[ -f "$env_file" ] || exit 80
-[ "$(wc -l < "$env_file" | tr -d ' ')" = 1 ] || exit 81
-grep -q '^BAILIAN_CODING_PLAN_API_KEY=op://' "$env_file" || exit 82
-cp "$env_file" "$TMPDIR_FOR_TEST/op-env-file"
-printf '%s\n' "$env_file" > "$TMPDIR_FOR_TEST/op-env-source"
-export BAILIAN_CODING_PLAN_API_KEY=fake-qwen-only
-export DEVOPS_MCP_TOKEN=must-not-reach-qwen OP_SERVICE_ACCOUNT_TOKEN=must-not-reach-qwen
-export SUPABASE_ACCESS_TOKEN=must-not-reach-qwen RANDOM_API_KEY=must-not-reach-qwen
-exec "$@"
+[ "${1:-}" = read ] || exit 2
+case "${2:-}" in op://vibe_coding/*) ;; *) exit 2;; esac
+printf 'read\n' >> "$TMPDIR_FOR_TEST/op-calls"
+printf 'fake-qwen-only\n'
 STUBEOF
 chmod +x "$STUB/qwen"
 chmod +x "$STUB/op"
 export AI_QWEN_BIN="$STUB/qwen"
-printf 'BAILIAN_CODING_PLAN_API_KEY=op://test/qwen/key\n' > "$TMP/managed.env"
+printf 'BAILIAN_CODING_PLAN_API_KEY=op://vibe_coding/qwen-test/credential\n' > "$TMP/managed.env"
 export AI_QWEN_OP_ENV_FILE="$TMP/managed.env" AI_QWEN_OP_BIN="$STUB/op"
+export AI_QWEN_KEY_STORE="$TMP/config/secrets/qwen-token-plan-key"
 unset BAILIAN_CODING_PLAN_API_KEY
+"$SCRIPT" store-key >/dev/null
+if [ -n "${SYSTEMROOT:-}" ]; then
+  # Git Bash mode bits do not describe the Windows ACL used by the wrapper.
+  PRIVATE_HELPER="$(cygpath -w "$REPO_ROOT/bin/windows-private-file.ps1")"
+  PRIVATE_KEY="$(cygpath -w "$AI_QWEN_KEY_STORE")"
+  PRIVATE_DIR="$(cygpath -w "$(dirname "$AI_QWEN_KEY_STORE")")"
+  PRIVATE_PS="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+  if [ -n "$PRIVATE_PS" ] && [ -s "$AI_QWEN_KEY_STORE" ] && \
+    AI_DEVOPS_PRIVATE_HELPER="$PRIVATE_HELPER" AI_DEVOPS_PRIVATE_TARGET="$PRIVATE_KEY" AI_DEVOPS_PRIVATE_PARENT="$PRIVATE_DIR" \
+      "$PRIVATE_PS" -NoProfile -ExecutionPolicy Bypass -Command \
+        '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' \
+        >"$TMP/private-acl.stdout" 2>"$TMP/private-acl.stderr"; then
+    ok 'install-time Qwen key store is owner-only'
+  else
+    [ ! -s "$TMP/private-acl.stderr" ] || sed -n '1,8p' "$TMP/private-acl.stderr" >&2
+    bad 'install-time Qwen key store is owner-only'
+  fi
+else
+  check 'install-time Qwen key store is owner-only' "test -s '$AI_QWEN_KEY_STORE' && test \"\$(stat -c %a '$AI_QWEN_KEY_STORE')\" = 600 && test \"\$(stat -c %a '$(dirname "$AI_QWEN_KEY_STORE")')\" = 700"
+fi
+if [ -z "${SYSTEMROOT:-}" ]; then
+  LOCK_READY="$TMP/op-lock-ready"
+  flock "$AI_DEVOPS_CONFIG_DIR/op-refresh.lock" bash -c 'touch "$1"; sleep 2' _ "$LOCK_READY" & LOCK_PID=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -e "$LOCK_READY" ] && break; sleep 0.1; done
+  OP_CALLS_BEFORE="$(wc -l < "$TMP/op-calls")"
+  "$SCRIPT" store-key >/dev/null 2>&1 & STORE_PID=$!
+  sleep 0.3
+  check 'Qwen key refresh waits for the shared 1Password lock' "test '$(wc -l < "$TMP/op-calls")' = '$OP_CALLS_BEFORE' && kill -0 '$STORE_PID' 2>/dev/null"
+  wait "$LOCK_PID"; wait "$STORE_PID"
+fi
+OP_CALLS_AFTER_STORE="$(wc -l < "$TMP/op-calls" | tr -d ' ')"
+if (
+  source <(sed -n '/^lock_acquire() {/,/^}/p' "$SCRIPT")
+  lock_owner_record(){ cat "$1/owner" 2>/dev/null || true; }
+  lock_owner_alive(){ return 1; } # Simulate an MSYS pid invisible to this runtime.
+  legacy_lock="$TMP/muse-credential.lock.d"; mkdir "$legacy_lock"
+  printf '424242\n' > "$legacy_lock/pid"
+  SYSTEMROOT=Windows lock_acquire "$legacy_lock" test && exit 1
+  [ -d "$legacy_lock" ] && [ "$(cat "$legacy_lock/pid")" = 424242 ]
+); then ok 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; else bad 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; fi
+if [ -z "${SYSTEMROOT:-}" ]; then
+  if (
+    source <(sed -n '/^key_store_path_safe() {/,/^}/p; /^key_store_ok() {/,/^}/p' "$SCRIPT")
+    KEY_STORE="$AI_QWEN_KEY_STORE"
+    stat(){ [ "$1" = -f ] || return 1; case "$2" in %Lp) command stat -c %a "$3";; %u) command stat -c %u "$3";; esac; }
+    key_store_ok
+  ); then ok 'BSD stat fallback validates an owner-only Qwen key store'; else bad 'BSD stat fallback validates an owner-only Qwen key store'; fi
+fi
 
 # MSYS may report a WinGet .exe as an extensionless /op path. The wrapper must
 # still return the actual trusted package executable and reject a lone /op.
@@ -194,6 +229,16 @@ if (
 printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"
 run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
+chmod 644 "$AI_QWEN_KEY_STORE"
+BEFORE_INSECURE="$(if [ -e "$TMP/argv.txt" ]; then wc -l < "$TMP/argv.txt"; else printf 0; fi)"
+run new insecure-key-store --prompt review >/dev/null 2>&1; INSECURE_RC=$?
+check 'review refuses an insecure key store before provider contact' "test '$INSECURE_RC' -ne 0 && test '$BEFORE_INSECURE' = \"\$(if [ -e '$TMP/argv.txt' ]; then wc -l < '$TMP/argv.txt'; else printf 0; fi)\""
+chmod 600 "$AI_QWEN_KEY_STORE"
+ORIGINAL_KEY_HASH="$(sha256sum "$AI_QWEN_KEY_STORE" | cut -d' ' -f1)"
+printf 'BAILIAN_CODING_PLAN_API_KEY=op://wrong-vault/key\n' > "$TMP/managed.env"
+"$SCRIPT" store-key >/dev/null 2>&1; INVALID_REF_RC=$?
+check 'invalid managed reference cannot replace the protected key' "test '$INVALID_REF_RC' -ne 0 && test '$ORIGINAL_KEY_HASH' = \"\$(sha256sum '$AI_QWEN_KEY_STORE' | cut -d' ' -f1)\""
+printf 'BAILIAN_CODING_PLAN_API_KEY=op://vibe_coding/qwen-test/credential\n' > "$TMP/managed.env"
 qualification_retention_cases(){
   local dir="$REPO/.ai/reviews/qwen-qualification" retained rc
   mkdir -p "$REPO/.ai/reviews" "$TMP/qualification-private-temp"
@@ -389,6 +434,7 @@ check 'syntax is valid' "bash -n '$SCRIPT'"
 check 'private Windows ACL is revalidated even when a marker already exists' "! grep -Fq 'if [ ! -f \"\$QWEN_HOME_DIR/.ai-devops-private-home-v1\" ]' '$SCRIPT'"
 check 'help exits zero' 'run --help'
 check 'production Qwen executable overrides are refused' "! env -u AI_QWEN_TEST_DIR AI_QWEN_BIN='$STUB/qwen' bash '$SCRIPT' --help"
+check 'production Qwen key-store path override is refused' "! env -u AI_QWEN_TEST_DIR AI_QWEN_KEY_STORE='$TMP/alternate-key' bash '$SCRIPT' --help"
 check 'Windows official Qwen path comparison normalizes drive-letter paths' "grep -Fq 'physical=\"\$(cygpath -u \"\$physical\"' '$SCRIPT'"
 INSTALL_OUT="$(env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen 2>&1)"; INSTALL_RC=$?
 [ "$INSTALL_RC" -eq 0 ] && grep -q '"BAILIAN_CODING_PLAN_API_KEY"' "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js" && ok 'provider installer applies Qwen child-process credential hardening' || { printf '  diagnostic: installer: %s\n' "$INSTALL_OUT"; bad 'provider installer applies Qwen child-process credential hardening'; }
@@ -673,10 +719,10 @@ DOCTOR_TWO="$(run doctor)"
 RUNTIME_HASH_TWO="$(printf '%s\n' "$DOCTOR_TWO" | sed -n 's/^qwen runtime sha256: //p')"
 check 'doctor fingerprint changes with installed runtime content' "test -n '$RUNTIME_HASH_ONE' && test -n '$RUNTIME_HASH_TWO' && test '$RUNTIME_HASH_ONE' != '$RUNTIME_HASH_TWO'"
 check 'offline doctor commands receive no provider credential' "! grep -qx BAILIAN_CODING_PLAN_API_KEY '$TMP/qwen-credential-names'"
-GOVERNED_ENV="$AI_QWEN_OP_ENV_FILE"; export AI_QWEN_OP_ENV_FILE="$TMP/missing-managed.env"
+mv "$AI_QWEN_KEY_STORE" "$TMP/held-qwen-key"
 CALLS_BEFORE_MISSING_AUTH="$(wc -l < "$TMP/argv.txt")"; run new missing-governed-auth --prompt review >/dev/null 2>&1; RC=$?
-[ "$RC" -ne 0 ] && [ "$CALLS_BEFORE_MISSING_AUTH" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'missing governed authentication blocks before provider contact' || bad 'missing governed authentication blocks before provider contact'
-export AI_QWEN_OP_ENV_FILE="$GOVERNED_ENV"
+[ "$RC" -ne 0 ] && [ "$CALLS_BEFORE_MISSING_AUTH" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'missing protected Qwen store blocks before provider contact' || bad 'missing protected Qwen store blocks before provider contact'
+mv "$TMP/held-qwen-key" "$AI_QWEN_KEY_STORE"
 echo wrong-model > "$TMP/mode"
 WRONG_DOCTOR="$(run doctor --live 2>&1)"; WRONG_DOCTOR_RC=$?
 if [ "$WRONG_DOCTOR_RC" -eq 0 ]; then bad 'live doctor rejects a returned model mismatch'; else ok 'live doctor rejects a returned model mismatch'; fi
@@ -784,7 +830,7 @@ check "moved-checkout discovery also finds bounded session files" "grep -q 'shor
 
 BODY="$(bash -c '. "$1"; extract_answer "$2"' _ "$TMP/extract.sh" "$TMP/good.jsonl")"
 check 'the text above the verdict is still emitted' "printf '%s' \"\$BODY\" | grep -q 'finding one'"
-check 'provider turns use a one-credential 1Password file' "grep -q 'qwen_env=.*mktemp' '$SCRIPT' && grep -q 'BAILIAN_CODING_PLAN_API_KEY=%s' '$SCRIPT' && ! grep -q 'op run --env-file \"\$MCP_ENV\"' '$SCRIPT'"
+check 'provider turns read only the protected key store' "grep -q 'key_store_ok || die' '$SCRIPT' && grep -q 'key_store=\"\$9\"' '$SCRIPT' && ! grep -q 'op run --env-file \"\$MCP_ENV\"' '$SCRIPT'"
 check 'Qwen child uses an explicit empty-environment allowlist' "grep -q 'clean_env=(\"\$env_bin\" -i' '$SCRIPT' && grep -q 'QWEN_HOME=' '$SCRIPT' && grep -q 'exec \"\${clean_env\[@\]}\"' '$SCRIPT'"
 
 export DEVOPS_MCP_TOKEN=must-not-reach-preloaded SUPABASE_ACCESS_TOKEN=must-not-reach-preloaded RANDOM_API_KEY=must-not-reach-preloaded
@@ -803,7 +849,7 @@ else
 fi
 unset DEVOPS_MCP_TOKEN SUPABASE_ACCESS_TOKEN RANDOM_API_KEY DATABASE_URL AWS_PROFILE SSH_AUTH_SOCK lowercase_secret
 
-printf 'BAILIAN_CODING_PLAN_API_KEY=op://test/qwen/key\n' > "$TMP/managed.env"
+printf 'BAILIAN_CODING_PLAN_API_KEY=op://vibe_coding/qwen-test/credential\n' > "$TMP/managed.env"
 unset BAILIAN_CODING_PLAN_API_KEY
 AI_QWEN_OP_ENV_FILE="$TMP/managed.env"; export AI_QWEN_OP_ENV_FILE
 AI_QWEN_OP_BIN="$STUB/op"; export AI_QWEN_OP_BIN
@@ -817,19 +863,19 @@ echo review > "$TMP/mode"
 CREDENTIAL_OUT="$(run new credential-boundary --prompt review 2>&1)"; CREDENTIAL_RC=$?
 unset BASH_ENV ENV
 [ "$CREDENTIAL_RC" -eq 0 ] || printf '  diagnostic: credential boundary: %s\n' "$CREDENTIAL_OUT"
-check 'managed provider call gives op a one-variable reference file' "test \"\$(wc -l < '$TMP/op-env-file' | tr -d ' ')\" = 1 && grep -q '^BAILIAN_CODING_PLAN_API_KEY=op://' '$TMP/op-env-file'"
+check 'managed provider call did not contact 1Password' "test \"\$(wc -l < '$TMP/op-calls' | tr -d ' ')\" = '$OP_CALLS_AFTER_STORE'"
 check 'the real provider key reaches Qwen only under the one name Qwen strips from its children' "test \"\$(grep -c 'fake-qwen-only' '$TMP/qwen-env')\" = 1 && grep -q '^BAILIAN_CODING_PLAN_API_KEY=fake-qwen-only$' '$TMP/qwen-env' && ! grep -Eq 'DEVOPS|OP_SERVICE|SUPABASE|RANDOM' '$TMP/qwen-credential-names'"
 check 'the Qwen startup relaunch still receives the provider key' "test \"\$(cat '$TMP/qwen-relaunch-key')\" = fake-qwen-only"
 check 'Qwen secret handoff is removed after every provider turn' "test -z \"\$(find '$AI_QWEN_HOME/tmp' -maxdepth 1 -name '.qwen-secret.*' -print -quit)\""
 check 'agent-controlled Qwen children cannot inherit the real provider key' "! grep -q '^BAILIAN_CODING_PLAN_API_KEY=' '$TMP/qwen-tool-child-env' && ! grep -q 'fake-qwen-only' '$TMP/qwen-tool-child-env'"
-check 'real Qwen provider key uses one private self-deleting handoff and is removed before Qwen exec' "grep -q 'chmod 600 \"\$RUN_TURN_SECRET_FILE\"' '$SCRIPT' && grep -q 'unset BAILIAN_CODING_PLAN_API_KEY keep_qwen_key' '$SCRIPT' && grep -q 'AI_QWEN_SECRET_FILE=' '$SCRIPT'"
-check 'hostile shell startup hooks cannot observe managed credentials' "test ! -e '$TMP/hostile-bash-env-fired' && grep -q '\"\$QWEN_ENV_BIN\" -u BASH_ENV -u ENV \"\$op_bin\"' '$SCRIPT'"
+check 'real Qwen provider key uses one private self-deleting handoff and is removed before Qwen exec' "grep -q 'chmod 600 \"\$RUN_TURN_SECRET_FILE\"' '$SCRIPT' && grep -q 'unset BAILIAN_CODING_PLAN_API_KEY' '$SCRIPT' && grep -q 'AI_QWEN_SECRET_FILE=' '$SCRIPT'"
+check 'hostile shell startup hooks cannot observe managed credentials' "test ! -e '$TMP/hostile-bash-env-fired' && grep -q '\"\$QWEN_ENV_BIN\" -u BASH_ENV -u ENV \"\$QWEN_BASH_BIN\"' '$SCRIPT'"
 check 'credentialed Qwen boundary uses only prevalidated absolute executables' "grep -q 'trusted absolute Bash/env executables are required' '$SCRIPT' && grep -q 'clean_env=(\"\$env_bin\" -i' '$SCRIPT' && grep -q '\"\$bash_bin\" --noprofile --norc' '$SCRIPT'"
-echo slow > "$TMP/mode"; rm -f "$TMP/op-env-source"
-(cd "$REPO" && exec env HOME="$HOME" PATH="$PATH" AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" AI_QWEN_OP_ENV_FILE="$AI_QWEN_OP_ENV_FILE" AI_QWEN_OP_BIN="$AI_QWEN_OP_BIN" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" new interrupted-credential --prompt review >/dev/null 2>&1) & QWEN_INTERRUPT_PID=$!
-for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/op-env-source" ] && break; sleep .05; done
-QWEN_TEMP_ENV="$(cat "$TMP/op-env-source" 2>/dev/null || true)"; kill -TERM "$QWEN_INTERRUPT_PID" 2>/dev/null || true; wait "$QWEN_INTERRUPT_PID" 2>/dev/null || true
-check 'interrupted managed turn removes its temporary credential-reference file' "test -n '$QWEN_TEMP_ENV' && test ! -e '$QWEN_TEMP_ENV'"
+echo slow > "$TMP/mode"; rm -f "$TMP/slow-pid"
+(cd "$REPO" && exec env HOME="$HOME" PATH="$PATH" AI_DEVOPS_CONFIG_DIR="$AI_DEVOPS_CONFIG_DIR" AI_QWEN_KEY_STORE="$AI_QWEN_KEY_STORE" AI_QWEN_STATE_DIR="$AI_QWEN_STATE_DIR" AI_QWEN_CALLER=codex AI_QWEN_BIN="$AI_QWEN_BIN" AI_QWEN_HOME="$AI_QWEN_HOME" AI_QWEN_TEST_DIR="$AI_QWEN_TEST_DIR" TMPDIR_FOR_TEST="$TMPDIR_FOR_TEST" "$SCRIPT" new interrupted-credential --prompt review >/dev/null 2>&1) & QWEN_INTERRUPT_PID=$!
+for _ in $(seq 1 "$QWEN_STARTUP_TICKS"); do [ -s "$TMP/slow-pid" ] && break; sleep .05; done
+kill -TERM "$QWEN_INTERRUPT_PID" 2>/dev/null || true; wait "$QWEN_INTERRUPT_PID" 2>/dev/null || true
+check 'interrupted managed turn removes its temporary credential handoff' "test -z \"\$(find '$AI_QWEN_HOME/tmp' -maxdepth 1 -name '.qwen-secret.*' -print -quit)\""
 echo review > "$TMP/mode"
 export AI_QWEN_BIN="$STUB/qwen"
 export BAILIAN_CODING_PLAN_API_KEY=fake-offline-qwen-key

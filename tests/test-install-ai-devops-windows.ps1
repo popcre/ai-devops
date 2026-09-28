@@ -338,6 +338,32 @@ try {
     Assert-True (Test-Path (Join-Path $fixture ".git\hooks\post-merge")) "managed post-merge hook was not installed into the fixture"
     Assert-True ($output -match "Test mode: not running live reviewer qualification") "requalify step did not honour test mode"
 
+    # Exercise the Qwen install stage with a fixture wrapper. The stub leaves
+    # a marker only when store-key --if-missing is actually invoked by Git Bash.
+    $fixture = New-Fixture "qwen-key-store"
+    $fixtureQwen = Join-Path $fixture "bin\ai-qwen"
+    $qwenFixtureScript = @'
+#!/usr/bin/env bash
+[ "$1" = store-key ] && [ "$2" = --if-missing ] || exit 17
+printf ready > "$(dirname "$0")/qwen-store-called"
+'@
+    [IO.File]::WriteAllText($fixtureQwen, $qwenFixtureScript + "`n")
+    git -C $fixture add bin/ai-qwen
+    git -C $fixture commit -m "add Qwen key-store fixture" | Out-Null
+    git -C $fixture push | Out-Null
+    $fakeBin = Join-Path $TempRoot "qwen-key-store\fake-bin"
+    New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
+    [IO.File]::WriteAllText((Join-Path $fakeBin "qwen.cmd"), "@echo off`r`necho fixture-qwen`r`n")
+    $oldPath = $env:PATH
+    try {
+        $env:PATH = "$fakeBin;$oldPath"
+        $output = Invoke-Installer $fixture (Join-Path $TempRoot "qwen-key-store\claude") (Join-Path $TempRoot "qwen-key-store\codex")
+    } finally {
+        $env:PATH = $oldPath
+    }
+    Assert-True (Test-Path (Join-Path $fixture "bin\qwen-store-called")) "Qwen install stage did not invoke store-key --if-missing"
+    Assert-True ($output -match "Qwen protected per-user key store is ready") "Qwen install stage did not report protected key-store readiness"
+
     Write-Host "PASS: install-ai-devops-windows"
 } finally {
     Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue

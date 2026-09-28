@@ -76,7 +76,9 @@ cd /worksp/ai-devops
    agent call, and installs the protected Muse review profile into its isolated
    configuration root; non-interactive updates reuse the existing protected
    bootstrap file automatically and never change normal Claude/Codex
-   authentication.
+   authentication. The user install also prepares Qwen's protected per-user
+   key store. Qwen reviews read that store without calling 1Password;
+   `ai-qwen store-key` explicitly refreshes it after key rotation.
 7. Clones, validates, and manually seeds the private portable-memory hub. On a
    new Claude home with no project memory yet, this truthfully reports a
    fresh-machine seed and uploads nothing; matching project memory is applied
