@@ -230,7 +230,7 @@ if (
   printf '424242\n' > "$legacy_lock/pid"
   SYSTEMROOT=Windows lock_acquire "$legacy_lock" test && exit 1
   [ -d "$legacy_lock" ] && [ "$(cat "$legacy_lock/pid")" = 424242 ]
-); then ok 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; else bad 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; fi
+); then ok 'Windows never reclaims a FRESH Muse lock whose pid is invisible across Git Bash runtimes'; else bad 'Windows never reclaims a FRESH Muse lock whose pid is invisible across Git Bash runtimes'; fi
 if [ -z "${SYSTEMROOT:-}" ]; then
   if (
     source <(sed -n '/^key_store_path_safe() {/,/^}/p; /^key_store_ok() {/,/^}/p' "$SCRIPT")

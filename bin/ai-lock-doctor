@@ -29,8 +29,16 @@
 # (flock records no hold time). The primary proof of a stuck lock is the
 # caller's own failed full `flock -w` wait plus a currently-held probe; the
 # age floor is the secondary bound that spares freshly started processes.
-# Killing an our-tool holder mid-`op read` is recoverable by design: the
-# reads are idempotent and the wrappers retry once.
+# Known transient (second exact-head review of #1002, finding 2): with
+# `flock --close` the op child does NOT hold the lock descriptor, so
+# terminating the flock parent releases the lock while an orphaned op may
+# still be finishing; the caller's single retry can overlap it for seconds.
+# That is bounded (one retry), non-cascading, and safer than staying jammed.
+#
+# A holder reparented to init with no repo path in its own or any ancestor's
+# command line cannot be PROVEN ours, so it is classified foreign, reported,
+# and never killed — even when it is the inherited-descriptor shape of #940.
+# Recovery of that exotic shape stays a human decision with this evidence.
 #
 # "The lock is free" is proven by the kernel (a non-blocking acquisition
 # succeeds), never by the fd scan's mere emptiness: the scan cannot read
@@ -94,13 +102,15 @@ norm(){
 }
 LOCK_DEV_N="$(norm "$lock_dev")"; LOCK_INO_N="$(norm "$lock_ino")"
 
-# Informational only: the /proc/locks pid is not trusted (#940).
+# Informational only: the /proc/locks pid is not trusted (#940). The lock id
+# there is hex (major:minor:inode) while stat prints decimal, so convert.
 locks_pid=''
 if [ -r /proc/locks ]; then
   while IFS=' ' read -r _ _ _ _ lpid lid _ _; do
     [ -n "$lid" ] || continue
     ldev="${lid%%:*}"; resto="${lid#*:}"; lino="${resto##*:}"
-    [ "$(norm "$ldev")" = "$LOCK_DEV_N" ] && [ "$(norm "$lino")" = "$LOCK_INO_N" ] || continue
+    case "$ldev$lino" in ''|*[!0-9a-fA-F]*) continue ;; esac
+    [ "$((16#$lino))" = "$((10#$lock_ino))" ] || continue
     locks_pid="$lpid"
   done < /proc/locks
 fi
@@ -115,7 +125,7 @@ fi
 # proc_cmdline PID -> argv with NULs as spaces (empty for kernel threads).
 proc_cmdline(){ tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | cut -c1-160; }
 
-# proc_stat_field PID FIELD_INDEX (1-based, on the real stat numbering).
+# proc_stat_field FIELD_INDEX PID (field numbering is the kernel's /proc stat).
 proc_stat_field(){
   local rest
   rest="$(sed 's/^.*) //' "/proc/$2/stat" 2>/dev/null)" || return 1

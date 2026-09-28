@@ -287,7 +287,7 @@ fi
 _aidev_flock() {
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
   flock -n "$CFG_DIR/op-refresh.lock" true 2>/dev/null && return 1
-  command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock" 2>/dev/null
+  command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }
 _aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
@@ -327,7 +327,7 @@ URL="\$1"; REF="\$2"; shift 2
 _aidev_flock() {
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
   flock -n "$CFG_DIR/op-refresh.lock" true 2>/dev/null && return 1
-  command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock" 2>/dev/null
+  command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }
 case "\$REF" in
