@@ -33,6 +33,13 @@ function Get-PathAcl([string]$LiteralPath) {
 }
 
 function Assert-PathAcl([string]$LiteralPath, [bool]$Private, [bool]$Directory) {
+  # File.Exists is false for named pipes, devices and directories and does not
+  # open them, so a FIFO fixture cannot hang this verifier before it is rejected.
+  if ($Directory) {
+    if (-not [IO.Directory]::Exists($LiteralPath)) { throw 'invalid path type' }
+  } elseif (-not [IO.File]::Exists($LiteralPath)) {
+    throw 'invalid path type'
+  }
   $item = Get-Item -LiteralPath $LiteralPath -Force
   if ([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
       $item.PSIsContainer -ne $Directory) { throw 'invalid path type' }
