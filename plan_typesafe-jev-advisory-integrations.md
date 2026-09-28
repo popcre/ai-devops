@@ -4,6 +4,8 @@
 
 **Decision record and measured background:** [`plan_typesafe-jev-decision-layer.md`](plan_typesafe-jev-decision-layer.md)
 
+**Separate token-savings lane:** [`plan_typesafe-jev-spend-reduction.md`](plan_typesafe-jev-spend-reduction.md). Its baseline must identify an actual paid model call or context load displaced; this advisory plan's human issue sorting does not by itself prove token savings. Both plans share one bounded Jev client and issue #643.
+
 **Session handoff:** [`HANDOFF.d/2026-09-20T1412Z-916-codex-jev-integration-plan.md`](HANDOFF.d/2026-09-20T1412Z-916-codex-jev-integration-plan.md)
 
 ## STATUS — read this first
