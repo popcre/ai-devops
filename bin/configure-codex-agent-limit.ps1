@@ -38,4 +38,4 @@ if (Test-Path -LiteralPath $ConfigPath) {
   Copy-Item -LiteralPath $ConfigPath -Destination "$ConfigPath.aidevops-$stamp.bak"
 }
 [System.IO.File]::WriteAllText($ConfigPath, $updated, [System.Text.UTF8Encoding]::new($false))
-Write-Host "Removed the managed Codex subagent limit."
+Write-Host "Removed the managed Codex subagent limit. An already-running chat host keeps its current slot limit."

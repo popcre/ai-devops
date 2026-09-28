@@ -106,7 +106,7 @@ tools run via git-bash on Windows).
 | **`~/.claude.json`** | Claude Code's local MCP server list. **This is the only file Claude Code reads MCP servers from** — an `mcpServers` block in `~/.claude/settings.json` is silently ignored (fixed 2026-08-20; before that both setup scripts wrote to the wrong file, so machines had zero working servers while looking configured). | ✅ `bin/setup-machine.ps1` (Windows), `bin/setup-secrets.sh` (Ubuntu) | No — only `op://` references and launcher paths |
 | **`~/.claude/settings.json`** | Claude Code prefs: permissions, hooks, theme, push-notif / auto-update. **Not** MCP servers. | ✅ `bin/ai-claude-permissions` merges the permission allow-list | No |
 | **Claude Desktop config** | Claude Desktop settings + local MCP servers | ✅ `bin/setup-machine.ps1` manages the full MCP set; `bin/configure-claude-desktop-chrome-devtools.ps1` safely installs or repairs only Chrome DevTools MCP | Existing settings and hand-added extensions are preserved; a backup is written before changes |
-| **`~/.codex/config.toml`** | Codex prefs + machine-specific runtime paths + MCP server list | ✅ new configs seed from `config/codex-portable.toml`; `setup-machine.ps1` reconciles the 20-thread subagent limit and the complete repo-owned MCP set while preserving unrelated machine settings and tool approval guards | Machine-specific paths/plugins remain local; managed MCP blocks are token-free |
+| **`~/.codex/config.toml`** | Codex prefs + machine-specific runtime paths + MCP server list | ✅ new configs seed from `config/codex-portable.toml`; `setup-machine.ps1` removes previously managed subagent limits and reconciles the complete repo-owned MCP set while preserving unrelated machine settings and tool approval guards | Machine-specific paths/plugins remain local; managed MCP blocks are token-free |
 | **ZCode home** (`~/.zcode` — Windows only) | ZCode (GLM-5.3 desktop agent) managed state: `skills/` (real managed dir from `skills/zcode`+`skills/shared`, migrating the old junction away non-recursively), seeded `AGENTS.md`, `cli/config.json` → `mcp.servers` (STRICT schema, absolute paths, token-free via the shared launcher) + `hooks` (completion-check, `hooks.enabled: true`), launcher shim `~/.local/bin/zcode` | ✅ `bin/install-ai-devops-windows.ps1`, `bin/setup-machine.ps1`, `bin/configure-zcode-mcps.ps1`, `bin/ai-install-completion-check-hook --client zcode`; health via `ai-zcode doctor` | No token in config — `1password` routes through `mcp-launch.cmd`; `~/.zcode/v2/credentials.json` is checked by existence only and never read |
 | **MiMoCode home** (`~/.config/mimocode` — Windows only) | MiMo (Xiaomi MiMo Desktop / MiMoCode) managed state: `skills/` (real managed dir from `skills/mimo`+`skills/shared`; never `~/.agents/skills`), seeded `AGENTS.md` + `instructions` pointer, `mimocode.jsonc` → `mcp` (ARRAY `command`, `timeout` ms, token-free via the shared launcher). No hooks surface. Data at `~/.local/share/mimocode/` (`mimocode.db`, `memory/`) | ✅ `bin/install-ai-devops-windows.ps1`, `bin/setup-machine.ps1`, `bin/configure-mimocode-mcps.ps1`, `bin/ai-adopt-globals`; health via `ai-mimo doctor` | No token in config — `1password` routes through `mcp-launch.cmd`; account login is interactive and never read |
 | **MCP secret launcher** (`~/.config/ai-devops/mcp-launch.cmd` + `mcp-remote-launch.cmd` → `bin/mcp-secret-launch.ps1`) | Injects `op://` secrets into MCP servers via **one single-flight refresh + 15-min DPAPI cache** (`mcp-secrets.dpapi.json`), not a per-launch `op run`. Caps the shared service account to ≤1 refresh/15 min/machine | ✅ `bin/setup-machine.ps1` writes the `.cmd`s; `bin/mcp-secret-launch.ps1` is repo-owned | No secret on disk except the user-only `op-service-account` token file; cache is DPAPI-encrypted. See [mcp-1password-rate-limit-hardening.md](mcp-1password-rate-limit-hardening.md) |
@@ -299,7 +299,9 @@ before each change.
 
 Machine setup removes previously managed `agents.max_threads` and
 `agents.max_concurrent_threads_per_session` values. When unset, Codex chooses
-its own default concurrency.
+its own default concurrency. An already-running chat host keeps the slot limit
+it loaded; changing this file does not change that host's limit. A host restart
+only picks up a separately changed host setting.
 
 ### 6. Gaps
 - **Memory** — handled by `bin/ai-memory-sync` as a private, lossless Git
@@ -362,7 +364,8 @@ its own default concurrency.
   never Albert's personal Owner/Editor or Terraform-admin credentials.
 - **Portable Codex prefs** — seeded for new machines from
   `config/codex-portable.toml`; established Windows configs receive only the
-  explicitly managed status-line, MCP, and 20-thread subagent settings through
+  explicitly managed status-line and MCP settings, plus removal of previously
+  managed subagent limits, through
   backup-first reconcilers. Phase 3 is complete; do not copy the whole config.
 
 ## Where secrets live (1Password `vibe_coding` — titles only)
