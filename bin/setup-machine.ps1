@@ -488,20 +488,21 @@ $McpServerCatalog["vercel"] = [ordered]@{
 # Non-secret servers still run under the session guard (same lifetime contract
 # as the secret launcher). command=node + guard.mjs, never bare package bins.
 $guardJsPath = Join-Path $CfgDir 'mcp-session-guard.mjs'
+$nodeExe = (Get-Command node -ErrorAction Stop).Source
 $McpServerCatalog["playwright"] = @{
-  command = "node"
+  command = $nodeExe
   args = @($guardJsPath, $McpCommands.playwright)
 }
 $McpServerCatalog["chrome-devtools"] = @{
-  command = "node"
+  command = $nodeExe
   args = @($guardJsPath, $McpCommands.chrome)
 }
 $McpServerCatalog["ag-grid"] = @{
-  command = "node"
+  command = $nodeExe
   args = @($guardJsPath, $McpCommands.aggrid)
 }
 $McpServerCatalog["railway"] = @{
-  command = "node"
+  command = $nodeExe
   args = @($guardJsPath, $McpCommands.remote, "https://mcp.railway.com")
 }
 
@@ -536,7 +537,7 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   # absolute exe also sidesteps PATH resolution picking a broken shim.
   # Session guard keeps the helper from outliving the session.
   $McpServerCatalog["codex-cli"] = @{
-    command = "node"
+    command = $nodeExe
     args    = @($guardJsPath, $codexExe, "mcp-server")
     env     = $codexEnv
   }
@@ -545,7 +546,7 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   # No standalone package (e.g. npm-global install). Use what's on PATH, but say
   # so plainly - we have not proven this one's sandbox can write.
   $McpServerCatalog["codex-cli"] = @{
-    command = "node"
+    command = $nodeExe
     args    = @($guardJsPath, $cmd.Source, "mcp-server")
     env     = $codexEnv
   }

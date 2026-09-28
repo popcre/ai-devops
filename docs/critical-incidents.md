@@ -542,11 +542,12 @@ client death (including OOM SIGKILL) left the npx→npm→node tree orphaned.
 ag-grid, railway, context7) had no wrapper at all. Global-scope servers
 multiply per session, so leaks compound.
 
-**Fix:** `bin/mcp-session-guard.mjs` owns the helper's stdin, places the child
-in a process group (POSIX) or a killable tree (Windows), and shuts down on
-stdin EOF, parent death, or signal — then always reaps the tree. Wired through
-`mcp-launch.sh` / `mcp-remote-launch.sh` (setup-secrets.sh), the Windows
-secret launcher, and the server catalogs. No MCP server was disabled.
+**Fix:** `bin/mcp-session-guard.mjs` owns the helper's stdin, keeps the child
+in this process group (so a harness group kill takes it too) and reaps
+descendants (taskkill /T on Windows), and shuts down on stdin EOF, parent
+death, or signal. Wired through `mcp-launch.sh` / `mcp-remote-launch.sh`
+(setup-secrets.sh), the Windows secret launcher, and the server catalogs. No
+MCP server was disabled.
 
 **Prevention:** `tests/test-mcp-session-guard.sh` proves stdin-EOF and session
 SIGKILL reap helpers and grandchildren; `tests/proof-mcp-session-reap.sh`

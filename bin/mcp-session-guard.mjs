@@ -12,16 +12,18 @@
 // server). For the child it starts, it:
 //   1. Owns the child's stdin and forwards it — so when the client's stdin
 //      closes, THIS process sees EOF even if npm would have swallowed it.
-//   2. Places the child in its own process group (POSIX) so one signal can
-//      reap npx -> npm -> node, not just the top PID.
+//   2. Keeps the child in THIS process group (no detached) so a harness group
+//      kill takes the helper with us, and reaps npx -> npm -> node by walking
+//      descendants (plus taskkill /T on Windows).
 //   3. Detects parent death (PPID change / parent PID gone) and shuts down.
-//   4. Forwards SIGINT/SIGTERM/SIGHUP to the whole group.
+//   4. Forwards SIGINT/SIGTERM/SIGHUP to the whole tree.
 //   5. Always kills the child tree on any exit path.
 //
 // Usage: mcp-session-guard.mjs [--] <command> [args...]
 // Exit:  child's exit code, or 143/130 when shut down by signal/EOF/parent.
 
 import { spawn, spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import process from 'node:process'
 
 const args = process.argv.slice(2)
@@ -76,16 +78,33 @@ function killTree(signal) {
   }
 }
 
-function killDescendants(pid, signal) {
-  let kids = ''
+function childPids(pid) {
+  const out = []
+  // Linux /proc walk — no external binary required.
   try {
-    kids = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).stdout || ''
+    const raw = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8')
+    for (const tok of raw.split(/\s+/)) {
+      const n = Number.parseInt(tok, 10)
+      if (Number.isFinite(n) && n > 0) out.push(n)
+    }
+    if (out.length) return out
   } catch {
-    return
+    /* not Linux, or already gone */
   }
-  for (const line of kids.split('\n')) {
-    const kid = Number.parseInt(line.trim(), 10)
-    if (!Number.isFinite(kid) || kid <= 0) continue
+  try {
+    const res = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' })
+    for (const line of (res.stdout || '').split('\n')) {
+      const n = Number.parseInt(line.trim(), 10)
+      if (Number.isFinite(n) && n > 0) out.push(n)
+    }
+  } catch {
+    /* pgrep missing */
+  }
+  return out
+}
+
+function killDescendants(pid, signal) {
+  for (const kid of childPids(pid)) {
     killDescendants(kid, signal)
     try {
       process.kill(kid, signal)
@@ -180,10 +199,12 @@ if (child.stdin) {
   })
   const onStdinGone = (reason) => {
     // A short-lived child may exit before stdin is used (e.g. `</dev/null`).
-    // Never override its real exit code with a shutdown code.
-    if (child && child.exitCode == null && child.signalCode == null) {
-      shutdown(reason, 143)
-    }
+    // Give it a tick to report its real exit code; never override it.
+    setTimeout(() => {
+      if (child && child.exitCode == null && child.signalCode == null) {
+        shutdown(reason, 143)
+      }
+    }, 50)
   }
   process.stdin.on('error', () => onStdinGone('stdin-error'))
   process.stdin.on('end', () => {
