@@ -11,7 +11,7 @@ Registered handoff: [`HANDOFF.d/2026-09-24T1605Z-edge-dev-zcode-model-tier-deleg
 | 1 | Verify the three lower-tier dispatch paths (read-only) | ✅ done 2026-09-25 | Codex: `codex exec -m <MODEL>` supported (0.153.2 help quoted); two live probes 2026-09-25 — `gpt-6-luna` (new generation, owner-confirmed target) rejected by the ChatGPT plan, `gpt-5.6-luna` accepted headlessly and is the working slug today ([generation probe comment on #782](https://github.com/popcre/ai-devops/issues/782#issuecomment-5835941637); first probe [5834620657](https://github.com/popcre/ai-devops/issues/782#issuecomment-5834620657)). ZCode: no headless model selector; manual path + gap [#828](https://github.com/popcre/ai-devops/issues/828). MiMo: CLI absent, `mimo run` flags unqualified (D10); manual path + gap [#829](https://github.com/popcre/ai-devops/issues/829). [Step 1 comment on #782](https://github.com/popcre/ai-devops/issues/782#issuecomment-5827260474) |
 | 2 | Write `templates/system/model-tier-delegation.md` | ✅ done 2026-09-25 | File on `main` (PR #844); `grep -c '^## '` returns 7 and all seven plan-named sections present by name; dispatch table now carries Codex `codex exec -m gpt-5.6-luna` (slug live-verified 2026-09-25), ZCode manual path + [#828](https://github.com/popcre/ai-devops/issues/828), MiMo manual path + [#829](https://github.com/popcre/ai-devops/issues/829). [Step 2 comment on #782](https://github.com/popcre/ai-devops/issues/782#issuecomment-5833570138) |
 | 3 | Add the identical routing block to the three client globals | ✅ done 2026-09-25 | `### Model-tier delegation` subsection (8 lines incl. trailing blank) appended as the last subsection of `## Owner and execution` in all three globals; proofs run verbatim in the worktree: `grep -l "model-tier-delegation" templates/system/AGENTS-global-*.md` lists exactly the three files; pairwise `diff` of the extracted blocks (codex/zcode, codex/mimo, zcode/mimo) all empty; `grep -c '^## ' templates/system/model-tier-delegation.md` still returns 7. [PR #859](https://github.com/popcre/ai-devops/pull/859). [Step 3 comment on #782](https://github.com/popcre/ai-devops/issues/782#issuecomment-5836229049) |
-| 4 | Point `CHATGPT-codex-cost-efficient.md` and `implementation-plan-standard.md` at the sheet | ⬜ open | — |
+| 4 | Point `CHATGPT-codex-cost-efficient.md` and `implementation-plan-standard.md` at the sheet | ✅ done 2026-09-28 | Both proofs re-run verbatim in the worktree: `grep -n "model-tier-delegation" templates/system/CHATGPT-codex-cost-efficient.md templates/system/implementation-plan-standard.md` hits both files (template line 54, standard line 19); `grep -n "GPT-5.4" templates/system/CHATGPT-codex-cost-efficient.md` and `grep -n "GPT-5.5"` on the same file each return nothing — the intro and `## Model routing` now name GPT-5.6-Sol (frontier) and GPT-6 Luna with today's slug `gpt-5.6-luna` (lower), plus the pointer line to the sheet; the plan standard's zero-questions bar (mindset section) carries the one implementer-agnostic pointer sentence. [PR PLACEHOLDER_PR]. [Step 4 comment on #782](PLACEHOLDER_COMMENT) |
 | 5 | Re-adopt globals on edge-dev and grep-verify installed copies | ⬜ open | — |
 | 6 | Land the PR, add the router row, update issue #782 and this STATUS | ⬜ open | — |
 
@@ -201,10 +201,10 @@ Investigated 2026-09-24, 11:30 AM–12:00 PM EDT, in ZCode chat:
   document the manual path (open the client's app, select the lower-tier model,
   hand it the plan file path) and file a gap issue. Never invent an unsupported
   flag.
-- **OPEN (Step 4 decides): whether `CHATGPT-codex-cost-efficient.md` keeps its
-  own Model routing section.** Criteria: keep it, refreshed to current model
-  names and pointing at the sheet — fold it away only if it directly
-  contradicts the sheet.
+- **RESOLVED (Step 4, 2026-09-28): `CHATGPT-codex-cost-efficient.md` keeps its
+  own Model routing section.** It does not contradict the sheet; it is
+  refreshed to current naming (GPT-5.6-Sol / GPT-6 Luna) and points at the
+  sheet.
 
 ---
 

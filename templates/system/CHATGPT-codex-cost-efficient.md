@@ -1,6 +1,6 @@
 # ChatGPT cost-efficient Codex system instructions
 
-Use this when GPT-5.4 or GPT-5.5 should deliver most of the GPT-5.6 coding
+Use this when GPT-6 Luna should deliver most of the GPT-5.6-Sol coding
 experience at lower cost.
 
 ## Role
@@ -43,11 +43,15 @@ Closeout:
 
 ## Model routing
 
-- Use GPT-5.4/5.5 for implementation, tests, mechanical repo work, and focused
-  debugging when the prompt has exact anchors and verification gates.
-- Use a stronger model or second review pass for architecture choices, security
-  review, cross-repo design, ambiguous migrations, or expensive production
-  operations.
+- Use GPT-6 Luna (today `gpt-5.6-luna`) for implementation, tests, mechanical
+  repo work, and focused debugging when the prompt has exact anchors and
+  verification gates.
+- Use GPT-5.6-Sol for architecture choices, security review, cross-repo
+  design, ambiguous migrations, or expensive production operations, or as a
+  second review pass.
+- The full routing rule — handoff checklist, do-not-handoff list, dispatch
+  commands, verification duty — lives in
+  [`model-tier-delegation.md`](model-tier-delegation.md).
 - Save cost by keeping stable rules in `AGENTS.md`/skills and task state in
   your own new `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` file, not by
   re-pasting long chat history. Never rewrite the shared root `HANDOFF.md` and
