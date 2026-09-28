@@ -569,7 +569,17 @@ The wait was released ($why) but the original $h session and its folder ($cwd) a
     jq --arg at "$(now_iso)" --arg log "$log" --arg m "$mode" '.state="woken" | .mode=$m | .woken_at=$at | .log=$log' "$f" > "$tmp" && mv "$tmp" "$f"
     parked_comment "$f" "$wid" "$mode" 0 "$log" 0
   else
-    local rc=$?; FAILED=1
+    local rc=$?
+    # The desktop may still own this Codex thread. Its resume command rejects
+    # a second writer before running the prompt; keep the wait for a later tick
+    # without spending a wake attempt or reporting a failed continuation.
+    if [ "$h" = codex ] && [ "$mode" = resumed ] &&
+       grep -Fq 'already has an active writer (code -32600)' "$log"; then
+      jq --arg at "$(now_iso)" '.state="waiting" | .attempts-=1 | .active_writer_at=$at | del(.last_attempt_at)' "$f" > "$tmp" && mv "$tmp" "$f" || { FAILED=1; return; }
+      note "Codex session $s is still active; wait $wid remains queued"
+      return
+    fi
+    FAILED=1
     if [ "$(jq .attempts "$f")" -ge "$(cfg .max_wake_attempts)" ]; then
       jq --arg log "$log" --argjson rc "$rc" --arg m "$mode" '.state="failed" | .mode=$m | .log=$log | .exit=$rc' "$f" > "$tmp" && mv "$tmp" "$f"
       parked_comment "$f" "$wid" "$mode" "$rc" "$log" 1
