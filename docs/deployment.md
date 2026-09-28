@@ -279,7 +279,10 @@ record of the allocator-assigned AI reviewer's `APPROVE`, bound to the exact
 inputs. Required fields: `schema_version` 1, `verdict` `"APPROVE"`,
 `reviewer_engine`, `implementer_engine` (must differ from the reviewer),
 `assignment` (the allocator's assignment id), `action` (the exact gate action,
-`deploy` for installs), `repository`, and `head` (the exact 40-character commit).
+`deploy` for installs), `repository`, `head` (the exact 40-character commit),
+and `report` (absolute path of the reviewer's report). The file must be mode
+0600 and owned by the caller, and the report must match a completed, non-stale
+`APPROVE` run that the reviewer lifecycle recorded for that head and engine.
 A protected class's forbidden actions still have no approval path.
 
 ## Update

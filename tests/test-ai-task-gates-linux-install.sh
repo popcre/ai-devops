@@ -7,6 +7,8 @@ TMP="$(mktemp -d /tmp/ai-task-gates-linux.XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
 export AI_TASK_GATES_INSTALL_TEST_MODE=1 AI_TASK_GATES_TEST_ROOT="$TMP" AI_TASK_GATES_DIR="$TMP/state"
 export AI_TASK_GATES_FILE="$ROOT/config/task-gates.json"
+export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
 mkdir -p "$TMP/state" "$TMP/bin" "$TMP/etc" "$TMP/installed/bin" "$TMP/installed/tools/lib" "$TMP/installed/config" "$TMP/installed/.ai-devops"
 git init -q --bare --initial-branch=main "$TMP/origin.git"
 git init -q --initial-branch=main "$TMP/installed"
@@ -44,7 +46,7 @@ stage_report(){
 manifest "$old"
 gate(){ (cd "$2" && "$2/bin/ai-task-gates" install-verify --phase "$1" --target-head "$3" --installed-checkout "$TMP/installed" --installed-launcher "$TMP/bin/ai-task-gates" "${@:4}"); }
 expect_ok(){ local name="$1"; shift; if "$@" > "$TMP/last-output" 2>&1; then printf 'PASS: %s\n' "$name"; else printf 'FAIL: %s\n' "$name"; tail -n 4 "$TMP/last-output"; exit 1; fi; }
-appr(){ local f; f="$(mktemp "$TMP/approval.XXXXXX")"; jq -n --arg h "$1" --arg e "${2:-grok}" '{schema_version:1,verdict:"APPROVE",reviewer_engine:$e,implementer_engine:"claude",assignment:"alloc-test-1",action:"deploy",repository:"popcre/ai-devops",head:$h}' > "$f"; printf '%s\n' "$f"; }
+appr(){ mint_reviewer_approval "$TMP" deploy "$1" popcre/ai-devops "${2:+.implementer_engine=\"$2\" | .reviewer_engine=\"$2\"}"; }
 expect_stop(){ local name="$1"; shift; if "$@" >/dev/null 2>&1; then printf 'FAIL: %s\n' "$name"; exit 1; else printf 'PASS: %s\n' "$name"; fi; }
 
 (cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null

@@ -124,10 +124,10 @@ also refused rather than guessed safe.
 
 ### The review-mode variables are a guardrail, not a boundary
 
-`bin/ai-review` exports `AI_REVIEW_GATE_MODE` and `AI_REVIEW_OWNER_REQUEST` so
+`bin/ai-review` exports `AI_REVIEW_GATE_MODE` and `AI_REVIEW_REVIEWER_APPROVAL` so
 the reviewer lifecycle, which the provider wrappers call for every mode, can see
-the review mode and Albert's request. They keep an honest caller from being
+the review mode and the assigned AI reviewer's approval record. They keep an honest caller from being
 refused; they are not a security boundary. Anyone who can set an environment
 variable in the session can already run the provider wrapper directly. Export
-neither by hand: a request left set in a shell would re-authorize every later
-review in it, each one recorded as if newly asked for.
+neither by hand: an approval left set in a shell would re-authorize every later
+review in it, each one recorded as if newly approved.

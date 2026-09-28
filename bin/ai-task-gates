@@ -335,12 +335,17 @@ state_record_override(){
 
 # Owner ruling 2026-09-28 (popcre/ai-devops#996): no human approves anything.
 # Where a gate once demanded an owner request, it now demands evidence of an
-# allocator-assigned AI reviewer's APPROVE bound to the exact inputs: the
-# action, the repository, and the exact head. The reviewer engine must differ
-# from the implementing engine. Prints a one-line audit summary on success.
+# assigned AI reviewer's APPROVE bound to the exact inputs: the action, the
+# repository, and the exact head. The evidence is a private (0600, caller-owned)
+# JSON record that names the reviewer's report; the report must be the one a
+# completed, non-stale APPROVE run of the reviewer lifecycle recorded for that
+# exact head and reviewer engine, so the record cannot be minted without a real
+# review. The reviewer engine must differ from the implementing engine. Prints
+# a one-line audit summary on success.
 reviewer_approval_summary(){
-  local file="$1" action="$2" head="$3" repo="${4:-}" hash
-  [ -f "$file" ] && [ -r "$file" ] || return 1
+  local file="$1" action="$2" head="$3" repo="${4:-}" hash report report_hash engine lifecycle_root state matched=0
+  [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] || return 1
+  [ "$(stat -c %a "$file" 2>/dev/null)" = 600 ] && [ "$(stat -c %u "$file" 2>/dev/null)" = "$(id -u)" ] || return 1
   jq -e --arg a "$action" --arg h "$head" --arg r "$repo" '
     type=="object" and .schema_version==1 and .verdict=="APPROVE"
     and (.reviewer_engine|type=="string" and length>0)
@@ -350,7 +355,20 @@ reviewer_approval_summary(){
     and .action==$a
     and (.head|type=="string" and test("^[0-9a-f]{40}$")) and .head==$h
     and (.repository|type=="string" and length>0)
-    and ($r=="" or .repository==$r)' "$file" >/dev/null 2>&1 || return 1
+    and ($r=="" or .repository==$r)
+    and (.report|type=="string" and startswith("/"))' "$file" >/dev/null 2>&1 || return 1
+  report="$(jq -r .report "$file")"; engine="$(jq -r .reviewer_engine "$file")"
+  [ -f "$report" ] && [ ! -L "$report" ] || return 1
+  report_hash="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
+  grep -Fqx "| reviewed commit | \`$head\` |" "$report" || return 1
+  lifecycle_root="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}"
+  for state in "$lifecycle_root"/runs/*/*/*/*.json; do
+    [ -f "$state" ] || continue
+    if jq -e --arg h "$head" --arg p "$report" --arg s "$report_hash" --arg e "$engine" \
+      '.status=="completed" and .verdict=="APPROVE" and .stale==false and .head==$h and .report_path==$p and .report_sha256==$s and .provider==$e' \
+      "$state" >/dev/null 2>&1; then matched=1; break; fi
+  done
+  [ "$matched" -eq 1 ] || return 1
   hash="$(sha256sum "$file" | cut -d' ' -f1)" || return 1
   jq -r --arg x "$hash" '"APPROVE by \(.reviewer_engine) (implementer \(.implementer_engine), assignment \(.assignment)) for \(.action) at \(.head) sha256:\($x)"' "$file"
 }
@@ -1270,7 +1288,7 @@ cmd_install_verify(){
     [ ! -e "$issued" ] && [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Unexpected installation authority for an ordinary update.'
     if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
       [ "$declared_installation" = installation ] && [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. Ordinary Linux installation needs a declared installation task and an assigned AI reviewer APPROVE (--reviewer-approval PATH).'
-      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
+      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target" popcre/ai-devops || reviewer_approval_summary "$reviewer_approval" deploy "$target" u2giants/ai-devops)" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
     else
       jq -e --arg old "$old" --arg target "$target" --arg path "$installed" \
         '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.reviewer_approval|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary Linux transaction changed before resume.'

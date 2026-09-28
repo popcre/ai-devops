@@ -11,6 +11,7 @@ GATES="$ROOT/bin/ai-task-gates"
 CLASSIFY="$ROOT/tools/ci/classify-changes.sh"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_TASK_GATES_DIR="$TMP/state"
@@ -27,14 +28,10 @@ out(){ local dir="$1"; shift; ( cd "$dir" && "$GATES" "$@" ) 2>&1; }
 # reviewer APPROVE record bound to the exact action, repository, and head
 # (#996: no human approves; an independent AI reviewer does).
 appr(){
-  local dir="$1" action="$2" head="${3:-}" extra="${4:-.}" repo file
+  local dir="$1" action="$2" head="${3:-}" extra="${4:-.}" repo
   [ -n "$head" ] || head="$(git -C "$dir" rev-parse HEAD)"
   repo="$( cd "$dir" && "$GATES" explain --json 2>/dev/null | jq -r '.repository // ""' )"
-  file="$(mktemp "$TMP/approval.XXXXXX")"
-  jq -n --arg a "$action" --arg h "$head" --arg r "$repo" \
-    '{schema_version:1,verdict:"APPROVE",reviewer_engine:"grok",implementer_engine:"claude",assignment:"alloc-test-1",action:$a,repository:$r,head:$h}' \
-    | jq "$extra" > "$file"
-  printf '%s\n' "$file"
+  mint_reviewer_approval "$TMP" "$action" "$head" "$repo" "$extra"
 }
 
 # newrepo <path> [origin-identity] — a repository with one commit on main.
@@ -759,6 +756,12 @@ check 'an approval without an allocator assignment is refused' \
   "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' 'del(.assignment)')\""
 check 'an approval for another repository is refused' \
   "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.repository=\"someone/else\"')\""
+check 'a world-readable approval record is refused' \
+  "f=\"\$(appr '$TMP/gate' review)\"; chmod 644 \"\$f\"; rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$f\""
+check 'an approval whose report has no lifecycle APPROVE run is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.report=\"/etc/hostname\"')\""
+check 'an approval naming a different reviewer engine than the recorded run is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.reviewer_engine=\"qwen\"')\""
 check 'the reviewer approval is recorded in the intent state' \
   "out '$TMP/gate' status | jq -e '[.overrides[].kind]|index(\"reviewer-approval\")!=null'"
 ( cd "$TMP/gate" && "$GATES" start --class production ) >/dev/null
