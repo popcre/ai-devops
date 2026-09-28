@@ -615,7 +615,8 @@ if [ "$fail" -eq 0 ]; then
     info "Verifying the GLM session harness end-to-end"
     glm_probe="$(mktemp -d)"
     ( cd "$glm_probe" && git init -q && printf '%s\n' 'Public GLM capability probe.' > README.md &&
-      git add README.md && git -c user.email=probe@local -c user.name=probe commit -q -m probe ) >/dev/null 2>&1
+      printf '%s\n' '.ai/' > .gitignore && git add README.md .gitignore &&
+      git -c user.email=probe@local -c user.name=probe commit -q -m probe ) >/dev/null 2>&1
     glm_result=""
     if glm_result="$(cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" new secrets-probe \
            --json --prompt "Review this minimal capability-probe repository. End with a ## Verdict heading followed by exactly APPROVE or REJECT." 2>/dev/null)" &&
