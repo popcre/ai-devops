@@ -538,6 +538,8 @@ AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION=bw.snapshot "$GH" api repos/o/r >/
 check 'BlockerWatch fixed operation is recorded' "jq -se '.[-1].operation == \"bw.snapshot\" and .[-1].caller == \"ai-blocker-watch\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION='bw.snapshot\"injected' "$GH" api repos/o/r >/dev/null 2>&1
 check 'untrusted BlockerWatch operation cannot enter telemetry' "jq -se '.[-1].operation == \"api.unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
+AI_GH_CALLER=ai-merge-group-evidence "$GH" api repos/o/r >/dev/null 2>&1
+check 'merge proof source is retained in telemetry and report' "jq -se '.[-1].caller == \"ai-merge-group-evidence\"' '$TMP/telemetry-state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/telemetry-state/measurements' | jq -e 'any(.sources[]; .caller == \"ai-merge-group-evidence\")'"
 mkdir "$TMP/telemetry-state/measurements/write.lock"
 FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
 check 'telemetry failure is visible and preserves failed command status' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/terr' && cmp '$TMP/tout' '$TMP/expected-out'"
@@ -548,7 +550,7 @@ touch "$TMP/telemetry-state/measurements/2000-01-01.jsonl"
 "$GH" api graphql > /dev/null 2>/dev/null
 check 'telemetry retention removes only old owned date files' "[ ! -e '$TMP/telemetry-state/measurements/2000-01-01.jsonl' ] && jq -se '.[-1].bucket == \"graphql\" and .[-1].cli_executions == 1 and .[-1].principal == \"unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
-check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 6 and .opaque_cli_executions == 6 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 7 and .opaque_cli_executions == 7 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
 mkdir "$TMP/report-compat"
 head -n 1 "$TMP/telemetry-state/measurements/$(date -u +%F).jsonl" > "$TMP/report-compat/$(date -u +%F).jsonl"
 for sample in "$TMP/state/measurements/"*.jsonl; do jq -c 'select(.operation == "api.identity")' "$sample" >> "$TMP/report-compat/$(date -u +%F).jsonl"; done
@@ -572,7 +574,7 @@ for shape in '[]' '["FIXTURE_CANARY"]' 'null' 'true' '1' '"FIXTURE_CANARY"' \
   "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
   check 'request report rejects nonobject or wrong-type label without partial output' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"
 done
-for mutation in '.schema=true' '.schema="1"' 'del(.http_requests)' 'del(.graphql_points)' '.utc=[]' '.latency_ms=true'; do
+for mutation in '.schema=true' '.schema="1"' 'del(.http_requests)' 'del(.graphql_points)' '.utc=[]' '.latency_ms=true' '.operation="api.identity"' '.request_class="identity_probe"' '.measurement="direct_api_invocation_estimate"'; do
   jq -c "$mutation" "$TMP/report-valid" > "$TMP/report-shapes/2001-01-01.jsonl"
   "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
   check 'request report rejects invalid required field shapes' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"

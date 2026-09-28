@@ -46,7 +46,8 @@ def summarize(directory):
                         or request_class not in ("unknown", "identity_probe", "graphql_transformed_unobservable")
                         or (request_class == "graphql_transformed_unobservable" and operation != "api.graphql")
                         or "http_requests" not in row
-                        or (direct and operation != "api.identity")
+                        or (direct and (operation != "api.identity" or request_class != "identity_probe"))
+                        or (not direct and (operation == "api.identity" or request_class == "identity_probe"))
                         or row["http_requests"] is not None
                         or "graphql_points" not in row or row["graphql_points"] is not None):
                     raise ValueError("unsupported measurement schema")
@@ -98,7 +99,7 @@ OPERATIONS.update("bw." + value for value in ("snapshot", "dependents", "wake_mi
 OPERATIONS.update("pr." + value for value in ("view", "checks", "list", "merge", "create", "comment", "edit", "diff"))
 OPERATIONS.update("issue." + value for value in ("view", "list", "create", "comment", "edit", "close", "reopen"))
 OPERATIONS.update("run." + value for value in ("view", "list", "cancel"))
-CALLERS = {"unknown", "interactive", "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch", "ai-verify-run", "ai-memory-sync", "ai-test-local"}
+CALLERS = {"unknown", "interactive", "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch", "ai-verify-run", "ai-memory-sync", "ai-test-local", "ai-merge-group-evidence"}
 
 if __name__ == "__main__":
     try:
