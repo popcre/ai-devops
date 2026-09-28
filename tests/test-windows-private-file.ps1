@@ -35,6 +35,7 @@ try {
   Assert-AiDevOpsPrivateAcl $backup
   function icacls.exe { Write-Error 'simulated native launch failure' }
   $ErrorActionPreference = 'Continue'
+  $global:LASTEXITCODE = 0
   $launchFailed = $false
   try { Invoke-AiDevOpsIcacls -Path $path -Arguments @('/inheritance:r') } catch { $launchFailed = $true }
   $ErrorActionPreference = 'Stop'
