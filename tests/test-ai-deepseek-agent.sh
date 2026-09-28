@@ -91,6 +91,8 @@ printf 'redirected-key\n' > "$TMP/alternate-config/secrets/deepseek-api-key"; ch
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEVOPS_CONFIG_DIR="$TMP/alternate-config" AI_DEEPSEEK_KEY_STORE="$TMP/alternate-config/secrets/deepseek-api-key" bash "$SCRIPT" send redirected --review >/dev/null 2>&1
 check "inherited path overrides cannot redirect a formal review to another key" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
 mv "$TMP/held-deepseek-key" "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+HOME="$TMP/home" USERPROFILE="$TMP/redirect-home" PATH="$TMP/bin:$PATH" bash "$SCRIPT" doctor > "$TMP/fixture-home-doctor.out" 2>&1
+check "offline fixture HOME wins over inherited Windows USERPROFILE" "grep -q '^PASS  curl available' '$TMP/fixture-home-doctor.out'"
 # Production-mode profile lookup must ignore caller-supplied HOME and
 # USERPROFILE; this is an offline doctor comparison, with no provider request.
 mkdir -p "$TMP/redirect-home/.config/ai-devops/secrets"

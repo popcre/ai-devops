@@ -50,7 +50,8 @@ declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "
 # profile, not caller-provided HOME/USERPROFILE. Offline fixtures may supply
 # their own isolated home only with the existing test-only marker.
 if [ -n "${AI_DEEPSEEK_TEST_DIR:-}" ]; then
-  PROFILE_HOME="${USERPROFILE:-$HOME}"
+  # Git Bash CI inherits the host USERPROFILE while each fixture sets HOME.
+  PROFILE_HOME="${HOME:-${USERPROFILE:-}}"
 elif [ -n "${SYSTEMROOT:-}" ]; then
   PROFILE_PS="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
   [ -n "$PROFILE_PS" ] || { echo 'Error: PowerShell is required to resolve the Windows user profile.' >&2; exit 1; }
