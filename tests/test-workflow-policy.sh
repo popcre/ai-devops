@@ -35,6 +35,8 @@ check 'rename sources cannot disappear from classification' "grep -q 'git diff -
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
 check 'scheduled failures create or update an issue' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'gh issue create'"
+check 'managed bin commands use the shared GitHub admission path' \
+  "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$ROOT' >/dev/null"
 # Windows verification runs in two lanes at once (issue #209): the long offline
 # matrix on GitHub's hosted image, where concurrency is unmetered, and the
 # reviewer safety suites on the qualified self-hosted pool, where a timing
@@ -389,6 +391,106 @@ rm -f "$aggregate_script"
 if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
   mutation_dir="$(mktemp -d)"
   trap 'rm -rf "$mutation_dir"' EXIT
+  mkdir -p "$mutation_dir/bin"
+  printf '#!/usr/bin/env bash\n"$ROOT/bin/ai-gh" api repos/acme/example\n' > "$mutation_dir/bin/ai-fixture"
+  check 'a delegated fake transport remains allowed' \
+    "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null"
+  cat > "$mutation_dir/bin/ai-private-config" <<'BOOTSTRAP'
+#!/usr/bin/env bash
+if ! gh auth status >/dev/null 2>&1; then
+mkdir -p "$(dirname "$ROOT")"; gh repo clone "$REPOSITORY" "$ROOT" >/dev/null
+BOOTSTRAP
+  check 'approved first-clone authentication and Git clone remain allowed' \
+    "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null"
+  printf 'gh auth status\n' > "$mutation_dir/bin/ai-bypass"
+  check 'new direct auth status probes are rejected' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  cp "$ROOT/bin/ai-pr-wait" "$mutation_dir/bin/ai-pr-wait"
+  printf '\ngh api repos/acme/example\n' >> "$mutation_dir/bin/ai-pr-wait"
+  check 'retired waiter fallback cannot reappear beside guidance text' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-pr-wait"
+  printf '#!/usr/bin/env bash\ngh api repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a new direct gh command is rejected' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env bash\nCLI=gh\n"$CLI" api repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a CLI alias cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env bash\ngh \\\n api repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a line continuation cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env node\nconst cli = "gh"; require("child_process").execFileSync(cli, ["api", "rate_limit"]);\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a Node CLI alias cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(["gh", "api", "rate_limit"])\n' > "$mutation_dir/bin/ai-bypass.py"
+  check 'a Python argument array cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.py"
+  printf '@echo off\r\ngh api repos/acme/example\r\n' > "$mutation_dir/bin/ai-bypass.cmd"
+  check 'a Windows CMD launcher cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.cmd"
+  printf '@echo off\r\ngh ^\r\n cache list\r\n' > "$mutation_dir/bin/ai-bypass.cmd"
+  check 'a CMD continuation and cache command cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.cmd"
+  printf '& "gh.exe" `\n label list\n' > "$mutation_dir/bin/ai-bypass.ps1"
+  check 'a quoted PowerShell continuation and label command cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.ps1"
+  printf '#!/usr/bin/env bash\n/usr/local/bin/gh api repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'an absolute GitHub CLI path cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(["/usr/local/bin/gh", "api", "rate_limit"])\n' > "$mutation_dir/bin/ai-bypass.py"
+  check 'an absolute Python CLI array cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.py"
+  printf '#!/usr/bin/env python3\nimport subprocess\nsubprocess.run([\n    "gh",\n    "status",\n])\n' > "$mutation_dir/bin/ai-bypass.py"
+  check 'a multiline Python status call cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.py"
+  printf '#!/usr/bin/env node\nrequire("child_process").execFileSync("/usr/local/bin/gh", ["api", "rate_limit"]);\n' > "$mutation_dir/bin/ai-bypass"
+  check 'an absolute Node CLI argument cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env node\nrequire("child_process").execFileSync(\n  "gh", ["api", "rate_limit"]\n);\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a multiline Node call cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf 'Start-Process -FilePath "gh.exe" -ArgumentList "api", "rate_limit"\n' > "$mutation_dir/bin/ai-bypass.ps1"
+  check 'PowerShell Start-Process cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.ps1"
+  printf 'Start-Process -FilePath "C:\\Program Files\\GitHub CLI\\gh.exe" -ArgumentList "api", "rate_limit"\n' > "$mutation_dir/bin/ai-bypass.ps1"
+  check 'a spaced PowerShell CLI path cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.ps1"
+  printf '#!/usr/bin/env bash\ngh futureverb list\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a future GitHub CLI verb cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf 'gh api repos/acme/example\n' > "$mutation_dir/bin/promote-windows-runner-to-service.ps1"
+  check 'retired runner exception cannot admit direct gh again' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/promote-windows-runner-to-service.ps1"
+  printf '& gh.exe api repos/acme/example\n' > "$mutation_dir/bin/ai-powershell.ps1"
+  check 'Windows executable spelling cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-powershell.ps1"
+  printf '#!/usr/bin/env node\nrequire("child_process").execFileSync("gh", ["api", "rate_limit"])\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a new SDK/Node CLI bypass is rejected' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env bash\ncurl https://api.github.com/repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a new direct HTTP bypass is rejected' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
   assert_rejected() {
     name="$1"
     if WORKFLOW_POLICY_MUTATION_CHILD=1 WORKFLOW_UNDER_TEST="$mutation_dir/$name.yml" bash "$0" >/dev/null 2>&1; then

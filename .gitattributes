@@ -25,6 +25,7 @@ mcp/**        text eol=lf
 
 # P1 test receipts and review snapshots must see identical Python bytes.
 tools/github-requests/*.py text eol=lf
+tools/github-requests/pr-status-context text eol=lf
 
 # Windows-native scripts keep CRLF. These rules come last on purpose: a later
 # match wins, so `.ps1` and `.cmd` files inside `bin/` are not caught by the

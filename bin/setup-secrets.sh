@@ -35,6 +35,8 @@
 #      lines and old per-app op-read blocks left in ~/.bashrc (with a backup),
 #      so the only copy of the token on disk is the locked-down file.
 #   8. Verifies every reference resolves (prints PASS/FAIL, never a value).
+#   9. (step 3b) Restores the 916-alien SSH key and installs the private SSH
+#      host aliases via bin/ai-ssh-setup (same as setup-machine.ps1 5b/5c).
 #
 # Usage:
 #   setup-secrets.sh                 # set up / refresh
@@ -47,7 +49,16 @@
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve symlinks (e.g. /usr/local/bin/setup-secrets.sh) so REPO_ROOT is the
+# real checkout. Loop instead of readlink -f for BSD/macOS portability.
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+  _dir="$(cd "$(dirname "$_self")" && pwd)"
+  _self="$(readlink "$_self")"
+  case "$_self" in /*) ;; *) _self="$_dir/$_self" ;; esac
+done
+REPO_ROOT="$(cd "$(dirname "$_self")/.." && pwd -P)"
+unset _self _dir
 CFG_DIR="${AI_DEVOPS_CONFIG:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
@@ -173,6 +184,18 @@ else
 fi
 
 # --------------------------------------------------------------------------
+# 3b. SSH: 916-alien key (-> hetz) and private host aliases (vps, vps2, ...)
+# --------------------------------------------------------------------------
+# Linux twin of setup-machine.ps1 steps 5b/5c (#978). Not fatal: a machine
+# without the private config or 1Password access still gets its secrets wiring.
+info "SSH key and host aliases"
+if [ "$DRY_RUN" -eq 1 ]; then
+  "$REPO_ROOT/bin/ai-ssh-setup" --dry-run || warn "SSH setup incomplete (see above)."
+else
+  "$REPO_ROOT/bin/ai-ssh-setup" || warn "SSH setup incomplete (see above). Re-run: $REPO_ROOT/bin/ai-ssh-setup"
+fi
+
+# --------------------------------------------------------------------------
 # 4. Managed shell snippet + include lines
 # --------------------------------------------------------------------------
 info "Shell snippet -> $SHELLRC"
@@ -248,6 +271,7 @@ else
 # Resolve secrets while holding the refresh lock, then release it BEFORE the
 # long-running MCP server starts. Holding this lock around the server leaves
 # every later MCP waiting until Codex times out.
+# Do not pass the lock descriptor to op; its children may outlive the read.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
   export OP_SERVICE_ACCOUNT_TOKEN
@@ -256,7 +280,7 @@ if [ -n "\${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "\${TRIGGER_ACCESS_TOKEN:-}" ]; 
   exec "\$@"
 fi
 _aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
-_aidev_exports="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
+_aidev_exports="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
 import os, shlex, sys
 for name in sys.argv[1:]:
     value = os.environ.get(name, "")
@@ -279,6 +303,7 @@ EOF
 # \$1 = server URL, \$2 = op:// ref to the bearer token, \$3+ = extra mcp-remote flags.
 # mcp-remote does NOT expand \\\${VAR} in --header, so the token must be a real value
 # before it runs: resolve it in memory here and pass it straight through.
+# Keep the refresh lock through op's exit, not through its children.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
   export OP_SERVICE_ACCOUNT_TOKEN
@@ -289,7 +314,7 @@ case "\$REF" in
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
   *) TOK= ;;
 esac
-[ -n "\$TOK" ] || TOK="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
+[ -n "\$TOK" ] || TOK="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
   echo "ai-devops: serialized fallback FAILED for \$REF — not starting \$URL" >&2
   exit 1
 }
@@ -612,10 +637,14 @@ if [ "$fail" -eq 0 ]; then
   if [ -x "$REPO_ROOT/bin/ai-glm" ] && "$REPO_ROOT/bin/ai-glm" server status >/dev/null 2>&1; then
     info "Verifying the GLM session harness end-to-end"
     glm_probe="$(mktemp -d)"
-    ( cd "$glm_probe" && git init -q && git -c user.email=probe@local -c user.name=probe commit -q --allow-empty -m probe ) >/dev/null 2>&1
+    # ai-glm writes its report under .ai/ inside the reviewed repository; the
+    # probe must ignore it like real repositories do, or the post-review source
+    # digest changes and the review fails source-digest-mismatch (#957).
+    ( cd "$glm_probe" && git init -q && printf '%s\n' '.ai/' >> .git/info/exclude && printf '%s\n' 'Public GLM capability probe.' > README.md &&
+      git add README.md && git -c user.email=probe@local -c user.name=probe commit -q -m probe ) >/dev/null 2>&1
     glm_result=""
     if glm_result="$(cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" new secrets-probe \
-           --json --prompt "Review this empty capability-probe repository. End with a ## Verdict heading followed by exactly APPROVE or REJECT." 2>/dev/null)" &&
+           --json --prompt "Review this minimal capability-probe repository. End with a ## Verdict heading followed by exactly APPROVE or REJECT." 2>/dev/null)" &&
        glm_report="$(printf '%s' "$glm_result" | jq -er '
          select(.schema_version == 1 and .ok == true) |
          select(.session.type == "review" and .session.model == "zai-coding-plan/glm-5.3") |

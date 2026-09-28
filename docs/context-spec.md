@@ -65,11 +65,49 @@ installer to run. It must not be modelled as protected `deployment`, because a
 forbidden action on a protected class has no authorization path and would make
 the installer permanently unusable.
 
+A toolkit update can also carry reviewer-safety changes made since the host's
+last installed commit. For the supported `popcre/ai-devops` and redirected
+`u2giants/ai-devops` GitHub origins only, `deploy` is allowed for that
+protected class when its repository declaration carries
+`reviewed-toolkit-installation` and the check records an explicit owner request
+naming the host and install action. The release still requires local tests,
+exact-head independent review, and installed-routing proof. A different
+repository or a foreign Git host cannot use this route even if it adds the same
+declaration. The source repository must have the canonical GitHub origin.
+If the same release contains a stronger deployment or infrastructure path,
+the narrow reviewer-safety route refuses that mixed release.
+The deployment check runs in a disposable candidate worktree, started at the
+installed checkout's old HEAD and then advanced to the exact reviewed target.
+It verifies that the distinct installed checkout and its managed launcher still
+point to that old HEAD in the same Git repository before any live checkout
+mutation. The installed checkout must be the durable primary checkout, the
+launcher must be at its supported canonical path, and the exact target must
+already be in fetched `origin/main` history. A caller cannot replace the recorded comparison base; an empty or
+dirty reviewer-safety release cannot enter this route.
+An unchanged checkout uses the installation-class owner-request path only
+with its canonical managed launcher and a source receipt matching the current
+commit and gate bytes. Ubuntu uses `/etc/ai-devops/install-manifest.tsv`; Windows
+uses matching commit and SHA-256 markers in both managed launchers, with their
+full command and home routing checked. An explicit
+`--first-install` instead requires that the canonical launcher is absent.
+Missing or stale receipts cannot turn a late declaration after a pull into an
+authorized maintenance install.
+
 Inside a private-evidence repository, named tooling paths may use
 `private-tooling` so local-tests are required. Review stays refused for both
 private classes: a formal review snapshots the whole private repository. Any
 licensed path in the change set forces `private-evidence` even if a higher-ranked
 class was declared.
+
+The one exception is the sealed attachment-only route, `code-only-review`,
+requested solely by `bin/ai-review --code-only` (DeepSeek with an exact paths
+file; the exporter admits only the selected code and the source never becomes a
+provider working directory). It is a separate action, not a permission loop
+around `review`: the formal review action stays forbidden, and the sealed action
+refuses to start on a private class unless that repository's own
+`.ai-devops/task-gates.json` declares the `synthetic-fixtures-only` gate for
+that class. Opening the route is therefore each private repository's own
+reviewed decision, made once in its own policy file rather than per review.
 
 `bin/ai-task-gates` records the declared class at the start of work and
 rechecks the complete change set before any expensive or risky action. The

@@ -13,6 +13,8 @@ PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-timing.sh"
 ai_test_measure_spawn_baseline
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
+ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 mkdir -p "$TMP/bin" "$TMP/state" "$TMP/copies"
 
@@ -29,7 +31,7 @@ cat > "$TMP/bin/packet" <<'EOF'
 #!/usr/bin/env bash
 set -e
 case "$1" in
- resolve) if [ -n "${MOCK_RESOLVE_JSON:-}" ]; then printf '%s\n' "$MOCK_RESOLVE_JSON"; else exec "$REAL_REVIEW_PACKET" "$@"; fi ;;
+ resolve) [ -z "${MOCK_RESOLVE_SLEEP:-}" ] || sleep "$MOCK_RESOLVE_SLEEP"; if [ -n "${MOCK_RESOLVE_JSON:-}" ]; then printf '%s\n' "$MOCK_RESOLVE_JSON"; else exec "$REAL_REVIEW_PACKET" "$@"; fi ;;
  build) [ -z "${MOCK_PACKET_BUILD_SLEEP:-}" ] || sleep "$MOCK_PACKET_BUILD_SLEEP"; p="$2/.ai-review-$3"; mkdir -p "$p"; if [ "${4:-}" = --identity ]; then cp "$5" "$p/identity.json"; fi; printf manifest > "$p/MANIFEST.md"; sha256sum "$p/MANIFEST.md" > "$p/MANIFEST.sha256"; [ "${MOCK_MUTATE_RUNTIME_AFTER_GATE:-0}" = 0 ] || printf '\n# changed after startup gate\n' >> "$AI_GEMINI_BIN"; printf %s "$p" ;;
  verify)
    # The slow-inventory fixture isolates its own 2s bound. Packet verification
@@ -56,6 +58,18 @@ set -e
 case "${1:-}" in --version) if [ "${MOCK_VERSION_HANG:-0}" = 1 ]; then for _ in $(seq 1 600); do sleep 1; done; fi; echo 1.1.14; exit;; --help) echo --sandbox; exit;; models) echo 'gemini-3.8-flash-high'; exit;; esac
 printf '%s\n' "$*" >> "$MOCK_AGY_CALLS"
 args=" $* "
+if [[ "$args" == *"--input-format stream-json"* ]]; then
+  stream_input="$(cat)"
+  printf '%s' "$stream_input" | jq -r '.message.content[0].text' | wc -c > "$MOCK_STREAM_BYTES"
+  [ "${MOCK_MODE:-normal}" != stream-mutate-protected ] || printf changed >> "$MOCK_PROTECTED/file.txt"
+  printf '%s\n' '{"event":"init","conversation_id":"conv-good"}'
+  if [ "${MOCK_MODE:-normal}" = stream-wrong-conversation ]; then
+    printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","conversation_id":"conv-wrong","response":"## Verdict\nAPPROVE"}}'
+  else
+    printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","conversation_id":"conv-good","response":"## Verdict\nAPPROVE"}}'
+  fi
+  exit
+fi
 if [[ "$args" == *" /model "* ]]; then
   [ "${MOCK_MODE:-normal}" = mutate-model ] && printf model-changed > dirty.txt
   cid='conv-good'; [[ "$args" == *"--conversation conv-good"* ]] || cid='wrong-model-conversation'
@@ -99,7 +113,7 @@ APPROVE'; fi
 printf '{"status":"SUCCESS","conversation_id":"%s","response":%s}\n' "$cid" "$(printf %s "$response" | jq -Rs .)"
 EOF
 chmod +x "$TMP/bin/"*
-export MOCK_COPIES="$TMP/copies" MOCK_AGY_CALLS="$TMP/agy-calls" AI_GEMINI_BIN="$TMP/bin/agy" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox" AI_REVIEW_PACKET_BIN="$TMP/bin/packet" AI_GEMINI_STATE_DIR="$TMP/state" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_GEMINI_CALLER=test
+export MOCK_COPIES="$TMP/copies" MOCK_AGY_CALLS="$TMP/agy-calls" MOCK_STREAM_BYTES="$TMP/stream-bytes" AI_GEMINI_BIN="$TMP/bin/agy" AI_REVIEW_SANDBOX_BIN="$TMP/bin/sandbox" AI_REVIEW_PACKET_BIN="$TMP/bin/packet" AI_GEMINI_STATE_DIR="$TMP/state" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_GEMINI_CALLER=test
 : > "$MOCK_AGY_CALLS"
 
 make_repo(){ local d="$1" ignored="${2:-yes}"; mkdir -p "$d"; git -C "$d" init -q; git -C "$d" config user.email test@example.com; git -C "$d" config user.name test; printf base > "$d/file.txt"; if [ "$ignored" = yes ]; then printf '.ai/\n.ignored\n' > "$d/.gitignore"; else printf '.ignored\n' > "$d/.gitignore"; fi; git -C "$d" add file.txt .gitignore; git -C "$d" commit -qm base; }
@@ -109,7 +123,7 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.8-flash-high\"' '$FIXTURES/model-mismatch.json'"
-check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.3'"
+check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.4'"
 mkdir -p "$TMP/fallback-home/.local/bin"
 cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
 FALLBACK_PATH="/mingw64/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
@@ -206,6 +220,15 @@ check 'pool contract emits the model verdict body on stdout for the pool gate' "
 check 'pool contract keeps the PASS line off stdout and on stderr' "! printf '%s\n' \"\$POOL_OUT\" | grep -q '^PASS session=' && grep -q '^PASS session=poolbody' '$TMP/pool.err'"
 check 'ai-review-pool sets the gemini body-on-stdout contract' "grep -q 'AI_GEMINI_BODY_STDOUT=1' '$ROOT/bin/ai-review-pool'"
 R4="$TMP/repo4"; make_repo "$R4"; check 'normal review writes a durable report' "new_run '$R4' good normal && find '$R4/.ai/reviews' -type f -size +0c | grep -q ."
+RLARGE="$TMP/repo-large"; make_repo "$RLARGE"
+python3 -c 'import sys; open(sys.argv[1], "w").write("A" * 150000)' "$TMP/large-prompt.txt"
+check 'large prompt reaches Gemini intact without a single oversized argument' "(cd '$RLARGE' && '$SCRIPT' new large-prompt --prompt-file '$TMP/large-prompt.txt') && test \"\$(cat '$MOCK_STREAM_BYTES')\" -ge 150000"
+check 'large streamed review retains the exact conversation and completes' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for large-prompt)\""
+check 'streamed result with a different conversation is refused' "! (cd '$RLARGE' && MOCK_MODE=stream-wrong-conversation '$SCRIPT' new large-wrong --prompt-file '$TMP/large-prompt.txt') && test \"\$(jq -r .status \"\$(meta_for large-wrong)\")\" = RECOVERY_REQUIRED"
+export MOCK_PROTECTED="$RLARGE"
+check 'streamed source mutation refuses the review' "! (cd '$RLARGE' && MOCK_MODE=stream-mutate-protected '$SCRIPT' new large-drift --prompt-file '$TMP/large-prompt.txt')"
+STREAM_FAILURE="$(jq -r .failure_artifact "$(meta_for large-drift)")"
+check 'source-drift failure preserves raw stream evidence' "test -s '${STREAM_FAILURE%.json}.stream.ndjson'"
 check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for good)\""
 GOOD_META="$(meta_for good)"; GOOD_COPY="$(jq -r .review_dir "$GOOD_META")"
 GOOD_BEFORE="$( { sha256sum "$GOOD_META"; (cd "$R4" && find .ai/reviews -type f -print0 | sort -z | xargs -0 sha256sum); (cd "$GOOD_COPY" && find . -type f -print0 | sort -z | xargs -0 sha256sum); } | sha256sum | cut -d' ' -f1 )"
@@ -293,7 +316,7 @@ SLOW_SNAP="$TMP/repo-slow-snap"; make_repo "$SLOW_SNAP"
 SLOW_SNAP_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_SNAP")"
 set +e; SLOW_SNAP_START=$SECONDS; SLOW_SNAP_OUT="$(cd "$SLOW_SNAP" && MOCK_RESOLVE_JSON="$SLOW_SNAP_IDENTITY" MOCK_ENSURE_COPY_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-snap --prompt review 2>&1)"; SLOW_SNAP_RC=$?; SLOW_SNAP_ELAPSED=$((SECONDS-SLOW_SNAP_START)); set -e
 check 'a stalled snapshot step fails in time instead of hanging' "test '$SLOW_SNAP_RC' -ne 0 && test '$SLOW_SNAP_ELAPSED' -lt $(budget 2 30)"
-check 'the snapshot timeout names the step and the bound' "printf '%s' '$SLOW_SNAP_OUT' | grep -q 'snapshot build failed or timed out after 2s'"
+check 'the snapshot timeout names the step and the bound' "printf '%s' '$SLOW_SNAP_OUT' | grep -q 'snapshot build timed out after 2s'"
 check 'a timed-out prepare starts no session and holds no lock' "test -z \"\$(meta_for slow-snap)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-snap*' -print -quit 2>/dev/null)\""
 SLOW_PKT="$TMP/repo-slow-pkt"; make_repo "$SLOW_PKT"
 # Resolve the fixture's real source identity before the 2s build assertion.
@@ -301,10 +324,10 @@ SLOW_PKT="$TMP/repo-slow-pkt"; make_repo "$SLOW_PKT"
 # bound before the deliberate stall starts; other cases exercise live resolve.
 SLOW_PKT_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_PKT")"
 set +e; SLOW_PKT_OUT="$(cd "$SLOW_PKT" && MOCK_RESOLVE_JSON="$SLOW_PKT_IDENTITY" MOCK_PACKET_BUILD_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" new slow-pkt --prompt review 2>&1)"; SLOW_PKT_RC=$?; set -e
-if [ "$SLOW_PKT_RC" -eq 0 ] || ! grep -q 'packet build failed or timed out after 2s' <<<"$SLOW_PKT_OUT" || [ -n "$(meta_for slow-pkt)" ]; then
+if [ "$SLOW_PKT_RC" -eq 0 ] || ! grep -q 'packet build timed out after 2s' <<<"$SLOW_PKT_OUT" || [ -n "$(meta_for slow-pkt)" ]; then
   printf 'slow-pkt diagnostic: rc=%s meta=%s output=%s\n' "$SLOW_PKT_RC" "$(meta_for slow-pkt)" "$SLOW_PKT_OUT" >&2
 fi
-check 'a stalled packet build fails in time and names the step' "test '$SLOW_PKT_RC' -ne 0 && printf '%s' '$SLOW_PKT_OUT' | grep -q 'packet build failed or timed out after 2s' && test -z \"\$(meta_for slow-pkt)\""
+check 'a stalled packet build fails in time and names the step' "test '$SLOW_PKT_RC' -ne 0 && printf '%s' '$SLOW_PKT_OUT' | grep -q 'packet build timed out after 2s' && test -z \"\$(meta_for slow-pkt)\""
 SLOW_INV="$TMP/repo-slow-inv"; make_repo "$SLOW_INV"; printf slow > "$SLOW_INV/inventory-slow-trigger"
 SLOW_INV_IDENTITY="$("$REAL_REVIEW_PACKET" resolve "$SLOW_INV")"
 mkdir -p "$TMP/slow-bin"
@@ -328,6 +351,12 @@ fi
 check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test -s '$TMP/slow-bin/python3.start' && test '$SLOW_INV_STAGE_ELAPSED' -lt $(budget 2 30)"
 check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory failed or timed out after 2s'"
 check 'a timed-out inventory starts no session and holds no lock' "test -z \"\$(meta_for slow-inv)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-inv*' -print -quit 2>/dev/null)\""
+# #637 gaps 1 and 3: ask() resolve is bounded, and a genuine refusal never says "timed out".
+SLOW_ASK="$TMP/repo-slow-ask"; make_repo "$SLOW_ASK"; new_run "$SLOW_ASK" slow-ask normal >/dev/null
+set +e; SLOW_ASK_START=$SECONDS; SLOW_ASK_OUT="$(cd "$SLOW_ASK" && MOCK_RESOLVE_JSON='{}' MOCK_RESOLVE_SLEEP=60 AI_GEMINI_PREPARE_TIMEOUT=2s "$SCRIPT" ask slow-ask --assert-head "$(git -C "$SLOW_ASK" rev-parse HEAD)" --prompt later 2>&1)"; SLOW_ASK_RC=$?; SLOW_ASK_ELAPSED=$((SECONDS-SLOW_ASK_START)); set -e
+check 'a stalled ask() identity resolve fails in time and names the bound' "test '$SLOW_ASK_RC' -ne 0 && test '$SLOW_ASK_ELAPSED' -lt $(budget 2 30) && printf '%s' '$SLOW_ASK_OUT' | grep -q 'identity resolution timed out after 2s'"
+set +e; REFUSE_OUT="$(cd "$SLOW_ASK" && "$SCRIPT" new refused --assert-head 0000000000000000000000000000000000000000 --prompt review 2>&1)"; set -e
+check 'a genuine identity refusal is not worded as a timeout' "printf '%s' '$REFUSE_OUT' | grep -q 'source identity refused' && ! printf '%s' '$REFUSE_OUT' | grep -qiE 'timed out|deadline|time limit'"
 R7="$TMP/repo7"; make_repo "$R7"; new_run "$R7" stale normal >/dev/null; printf next >> "$R7/file.txt"; git -C "$R7" add file.txt; git -C "$R7" commit -qm next
 check 'follow-up refuses a changed repository head' "! (cd '$R7' && '$SCRIPT' ask stale --prompt later)"
 check 'stale-head refusal becomes recovery-required' "test \"\$(jq -r .status \"\$(meta_for stale)\")\" = RECOVERY_REQUIRED"

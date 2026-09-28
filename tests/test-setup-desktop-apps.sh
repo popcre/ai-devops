@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # bin/setup-desktop-apps.sh: Claude Desktop membership, Codex TOML merge, defer while running.
 set -u
+PY3="$(command -v python3 || command -v python)"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tests/lib-test-harness.sh"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/cfg/state" "$T/Claude" "$T/codex"
 export AI_DEVOPS_CONFIG="$T/cfg" CLAUDE_DESKTOP_CONFIG="$T/Claude/claude_desktop_config.json" CODEX_CONFIG="$T/codex/config.toml"
-export PATH="/usr/bin:/bin"
+# Model the minimal Linux desktop PATH, but keep the same interpreter and git
+# this suite resolved: the Windows lanes run under Git Bash, where /usr/bin
+# carries neither python nor git, and the script under test must not see a
+# different python than the assertions do.
+export PATH="/usr/bin:/bin:$(dirname "$PY3"):$(dirname "$(command -v git)")"
 
 echo '{"preferences":{"keep":true},"mcpServers":{"railway":{"command":"x"},"recall-ai":{"command":"x"},"mine":{"command":"y"}}}' > "$CLAUDE_DESKTOP_CONFIG"
 cat > "$CODEX_CONFIG" <<'EOF'
@@ -44,13 +49,13 @@ sleep 0.2; pkill -f -- "--claude-only --wait-for-desktop-exit" 2>/dev/null
 grep -q '"railway"' "$CLAUDE_DESKTOP_CONFIG" && ok "running Claude Desktop: config untouched" || bad "wrote while Claude Desktop ran"
 
 CLAUDE_DESKTOP_STATE=stopped "$ROOT/bin/setup-desktop-apps.sh" >/dev/null || bad "script failed"
-python3 - "$CLAUDE_DESKTOP_CONFIG" <<'PY' && ok "Claude Desktop membership applied, prefs and unmanaged kept" || bad "Claude Desktop config wrong"
+"$PY3" - "$CLAUDE_DESKTOP_CONFIG" <<'PY' && ok "Claude Desktop membership applied, prefs and unmanaged kept" || bad "Claude Desktop config wrong"
 import json, sys
 c = json.load(open(sys.argv[1]))
 assert sorted(c["mcpServers"]) == ["1password", "mine", "playwright"], c["mcpServers"]  # scoped + retired gone
 assert c["preferences"] == {"keep": True}
 PY
-python3 - "$CODEX_CONFIG" <<'PY' && ok "Codex merge: replaced, env dropped, scoped/retired removed, app entries kept" || bad "Codex config wrong"
+"$PY3" - "$CODEX_CONFIG" <<'PY' && ok "Codex merge: replaced, env dropped, scoped/retired removed, app entries kept" || bad "Codex config wrong"
 import tomllib, sys
 d = tomllib.load(open(sys.argv[1], "rb"))
 m = d["mcp_servers"]
@@ -65,7 +70,7 @@ before="$(cat "$CODEX_CONFIG")"
 "$ROOT/bin/setup-desktop-apps.sh" --codex-only >/dev/null
 [ "$before" = "$(cat "$CODEX_CONFIG")" ] && ok "Codex rerun is idempotent" || bad "Codex rerun changed the file"
 
-python3 "$ROOT/bin/mcp_policy.py" policy | python3 -c '
+"$PY3" "$ROOT/bin/mcp_policy.py" policy | "$PY3" -c '
 import json, sys
 p = json.load(sys.stdin)
 assert "recall-ai" in p["retired"] and "recall-ai" not in p["scoped"] + p["desktop"]
@@ -76,11 +81,20 @@ assert {"ag-grid", "devops-mcp", "synology-monitor"} <= set(p["scoped"])
 clones="$T/clones"; mkdir -p "$clones/theoracle"
 git -C "$clones/theoracle" init -q && git -C "$clones/theoracle" remote add origin https://github.com/u2giants/theoracle.git
 mv "$clones/theoracle" "$clones/oracle"
-echo '{"mcpServers":{},"projects":{"'"$clones/oracle"'":{"mcpServers":{"recall-ai":{"command":"x"},"mine":{"command":"y"}}}}}' > "$T/claude.json"
-AI_REPO_CLONE_ROOTS="$clones" python3 "$ROOT/bin/mcp_policy.py" deliver --catalog "$T/cfg/state/mcp-catalog.json" --claude-json "$T/claude.json" >/dev/null
-python3 - "$T/claude.json" "$clones/oracle" <<'PY' && ok "oracle clone gets trigger; retired pruned; foreign kept" || bad "project delivery wrong"
-import json, sys, tomllib
-e = json.load(open(sys.argv[1]))["projects"][sys.argv[2]]["mcpServers"]
+# The project key must be the path form the native python sees: Git Bash
+# embeds MSYS paths verbatim in file content, while the policy resolves
+# Windows paths, and the two never match.
+oracle_key="$clones/oracle"
+command -v cygpath >/dev/null 2>&1 && oracle_key="$(cygpath -m "$oracle_key")"
+echo '{"mcpServers":{},"projects":{"'"$oracle_key"'":{"mcpServers":{"recall-ai":{"command":"x"},"mine":{"command":"y"}}}}}' > "$T/claude.json"
+AI_REPO_CLONE_ROOTS="$clones" "$PY3" "$ROOT/bin/mcp_policy.py" deliver --catalog "$T/cfg/state/mcp-catalog.json" --claude-json "$T/claude.json" >/dev/null
+"$PY3" - "$T/claude.json" "$oracle_key" <<'PY' && ok "oracle clone gets trigger; retired pruned; foreign kept" || bad "project delivery wrong"
+import json, os, sys, tomllib
+# Temp paths on the Windows runners can appear long, short, slashed or
+# backslashed depending on who produced them; normalize both sides.
+want = os.path.normcase(os.path.normpath(sys.argv[2]))
+e = next(v["mcpServers"] for k, v in json.load(open(sys.argv[1]))["projects"].items()
+         if os.path.normcase(os.path.normpath(k)) == want)
 assert sorted(e) == ["mine", "trigger"], e
 t = tomllib.load(open(sys.argv[2] + "/.codex/config.toml", "rb"))
 assert list(t["mcp_servers"]) == ["trigger"], t

@@ -36,12 +36,23 @@ param(
     # copied to <client>\globals-backup\ first.
     [switch]$AdoptGlobals,
     [switch]$SourceGateOnly,
+    [switch]$LauncherGateOnly,
+    [string]$ExpectedHead = '',
     # Deprecated: retiring skills is now automatic and needs no flag.
     # Accepted so older docs and scripts keep working.
     [switch]$MigrateObsolete
 )
 
 $ErrorActionPreference = "Stop"
+if ($ExpectedHead -and $ExpectedHead -notmatch '^[0-9a-f]{40}$') {
+    throw 'ExpectedHead must be a full lowercase Git commit SHA.'
+}
+if ($ExpectedHead -and $SkillsDryRun) {
+    throw 'ExpectedHead requires a real source check; it cannot be combined with SkillsDryRun.'
+}
+if ($LauncherGateOnly -and ($SourceGateOnly -or $SkillsDryRun)) {
+    throw 'LauncherGateOnly cannot be combined with source-only or dry-run modes.'
+}
 
 function Write-Step {
     param([string]$Message)
@@ -101,7 +112,286 @@ function Invoke-NativeProbe {
     }
 }
 
-function Assert-ReadyRepository([string]$Path) {
+function Get-TaskGateRulesAtRevision([string]$Path, [string]$Revision, [string]$RulesPath) {
+    $raw = Invoke-GitCommand @('-C', $Path, 'show', "${Revision}:$RulesPath")
+    if ($script:LastGitExitCode -ne 0) { throw "Could not read $RulesPath at $Revision." }
+    try { return (($raw -join "`n") | ConvertFrom-Json) } catch { throw "Invalid $RulesPath at $Revision." }
+}
+
+function Get-ReviewerSafetyGlobs([string]$Path, [string]$Revision) {
+    $localRules = Get-TaskGateRulesAtRevision -Path $Path -Revision $Revision -RulesPath '.ai-devops/task-gates.json'
+    $centralRules = Get-TaskGateRulesAtRevision -Path $Path -Revision $Revision -RulesPath 'config/task-gates.json'
+    $globs = @($localRules.paths | Where-Object { $_.class -eq 'reviewer-safety' } | ForEach-Object { $_.glob })
+    foreach ($rule in @($centralRules.rules)) {
+        if (-not $rule.match -or -not ([System.Management.Automation.WildcardPattern]::new($rule.match, 'IgnoreCase').IsMatch('popcre/ai-devops'))) { continue }
+        $globs += @($rule.paths | Where-Object { $_.class -eq 'reviewer-safety' } | ForEach-Object { $_.glob })
+    }
+    if ($globs.Count -eq 0 -or @($globs | Where-Object { -not $_ -or $_ -isnot [string] }).Count -ne 0) {
+        throw "Missing reviewer safety rules at $Revision."
+    }
+    return $globs
+}
+
+function Get-InstalledSourceReceipt([string]$Path) {
+    $launcher = Join-Path $env:USERPROFILE '.local\bin\ai-task-gates'
+    if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and
+        (Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) -notmatch '^github[.]com/') {
+        $launcher = if ($env:AI_DEVOPS_TEST_LAUNCHER) { $env:AI_DEVOPS_TEST_LAUNCHER } else { Join-Path $Path '.ai-devops-test-launchers\ai-task-gates' }
+    }
+    $cmdLauncher = "$launcher.cmd"
+    if (-not (Test-Path -LiteralPath $launcher) -and -not (Test-Path -LiteralPath $cmdLauncher)) {
+        $launcherDir = Split-Path -Parent $launcher
+        foreach ($row in @(Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\config\machine-tools.tsv'))) {
+            if (-not $row -or $row.StartsWith('#')) { continue }
+            $name = ($row -split "`t")[0]
+            if ((Test-Path -LiteralPath (Join-Path $launcherDir $name)) -or
+                (Test-Path -LiteralPath (Join-Path $launcherDir "$name.cmd"))) {
+                return 'partial'
+            }
+        }
+        if (Test-Path -LiteralPath $launcherDir -PathType Container) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $launcherDir -File)) {
+                $header = @(Get-Content -LiteralPath $file.FullName -TotalCount 2 -ErrorAction SilentlyContinue)
+                if ($header | Where-Object { $_ -clike '*Managed by ai-devops install-machine-tools.ps1.*' }) {
+                    return 'partial'
+                }
+            }
+        }
+        if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE -eq '1' -and
+            $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and (Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) -notmatch '^github[.]com/') {
+            return ''
+        }
+        return 'missing'
+    }
+    if (-not (Test-Path -LiteralPath $launcher) -or -not (Test-Path -LiteralPath $cmdLauncher)) { return 'partial' }
+    $bash = @(Get-Content -LiteralPath $launcher)
+    $cmd = @(Get-Content -LiteralPath $cmdLauncher)
+    $offset = 4
+    if ($bash.Count -eq 4 -and $cmd.Count -eq 4) { $offset = 2 }
+    elseif ($bash.Count -ne 6 -or $cmd.Count -ne 6) { throw 'Managed ai-task-gates source receipt is malformed.' }
+    if ($offset -eq 4) {
+        $sha = [regex]::Match($bash[2], '^# source-sha=([0-9a-f]{40})$').Groups[1].Value
+        $hash = [regex]::Match($bash[3], '^# source-hash=([0-9a-f]{64})$').Groups[1].Value
+        if (-not $sha -or -not $hash -or $cmd[2] -cne "rem source-sha=$sha" -or $cmd[3] -cne "rem source-hash=$hash") {
+            throw 'Managed ai-task-gates source receipt is inconsistent.'
+        }
+    }
+    $source = Join-Path $Path 'bin\ai-task-gates'
+    $sourceBash = '/' + (($source -replace '\\','/' -replace '^([A-Za-z]):','$1'))
+    $homeBash = '/' + (($env:USERPROFILE -replace '\\','/' -replace '^([A-Za-z]):','$1'))
+    $bashRoute = 'exec "' + $sourceBash + '" "$@"'
+    $gitBash = @((Join-Path $env:ProgramFiles 'Git\bin\bash.exe'), (Join-Path $env:LOCALAPPDATA 'Programs\Git\bin\bash.exe'))
+    $validCmdRoutes = @($gitBash | ForEach-Object { '"' + $_ + '" "' + $sourceBash + '" %*' })
+    if ($bash[0] -cne '#!/usr/bin/env bash' -or $bash[1] -cne '# Managed by ai-devops install-machine-tools.ps1.' -or
+        $cmd[0] -cne '@echo off' -or $cmd[1] -cne 'rem Managed by ai-devops install-machine-tools.ps1.' -or
+        $bash[$offset] -cne ('export HOME="' + $homeBash + '"') -or $cmd[$offset] -cne ('set "HOME=' + $env:USERPROFILE + '"') -or
+        $bash[$offset + 1] -cne $bashRoute -or $cmd[$offset + 1] -cnotin $validCmdRoutes) {
+        throw 'Managed ai-task-gates launcher routes differ from the supported installation.'
+    }
+    if ($offset -eq 2) { return 'legacy' }
+    $archive = Join-Path ([IO.Path]::GetTempPath()) ('ai-devops-receipt-' + [guid]::NewGuid() + '.zip')
+    $extract = "$archive.extracted"
+    try {
+        Invoke-GitCommand @('-C', $Path, 'archive', '--format=zip', "--output=$archive", $sha, 'bin/ai-task-gates') | Out-Null
+        if ($script:LastGitExitCode -ne 0) { throw 'Could not verify the installed source receipt commit.' }
+        Expand-Archive -LiteralPath $archive -DestinationPath $extract
+        $actualHash = (Get-FileHash -LiteralPath (Join-Path $extract 'bin\ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -cne $hash) { throw 'Managed ai-task-gates source receipt hash does not match its commit.' }
+    } finally {
+        Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    return $sha
+}
+
+function Get-ManagedLauncherInventory([string]$Launcher) {
+    $directory = Split-Path -Parent $Launcher
+    $names = @{}
+    $catalog = Join-Path $PSScriptRoot '..\config\machine-tools.tsv'
+    foreach ($row in @(Get-Content -LiteralPath $catalog)) {
+        if (-not $row -or $row.StartsWith('#')) { continue }
+        $name = ($row -split "`t")[0]
+        foreach ($item in @($name, "$name.cmd")) {
+            $path = Join-Path $directory $item
+            if (Test-Path -LiteralPath $path) { $names[$item] = $path }
+        }
+    }
+    if (Test-Path -LiteralPath $directory -PathType Container) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $directory -File)) {
+            $header = @(Get-Content -LiteralPath $file.FullName -TotalCount 2 -ErrorAction SilentlyContinue)
+            if ($header | Where-Object { $_ -clike '*Managed by ai-devops install-machine-tools.ps1.*' }) {
+                $names[$file.Name] = $file.FullName
+            }
+        }
+    }
+    $result = @()
+    foreach ($name in @($names.Keys | Sort-Object -CaseSensitive)) {
+        $path = $names[$name]
+        $file = Get-Item -LiteralPath $path
+        if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Managed launcher inventory contains an unsafe path.'
+        }
+        $result += @{name=$name;sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()}
+    }
+    return $result
+}
+
+function Test-ProtectedUpdate([string]$Path, [string]$CurrentHead, [string]$TargetHead) {
+    if ($CurrentHead -eq $TargetHead) { return $false }
+    $changed = @(Invoke-GitCommand @('-C', $Path, 'diff', '--no-renames', '--name-only', $CurrentHead, $TargetHead))
+    if ($script:LastGitExitCode -ne 0) { throw 'Could not classify incoming ai-devops source changes.' }
+    # Use both declarations: an update may remove or narrow its own safety rule.
+    $globs = @(Get-ReviewerSafetyGlobs -Path $Path -Revision $CurrentHead) + @(Get-ReviewerSafetyGlobs -Path $Path -Revision $TargetHead)
+    foreach ($file in $changed) {
+        foreach ($glob in $globs) {
+            if ([System.Management.Automation.WildcardPattern]::new($glob, 'IgnoreCase').IsMatch($file)) {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
+function Get-TargetPolicyDigest([string]$Path, [string]$TargetHead) {
+    $blobs = @()
+    foreach ($file in @('config/task-gates.json', '.ai-devops/task-gates.json')) {
+        $blob = Invoke-GitCommand @('-C', $Path, 'rev-parse', ($TargetHead + ':' + $file))
+        if ($script:LastGitExitCode -ne 0 -or $blob.Trim() -notmatch '^[0-9a-f]{40}$') { throw "Cannot verify target policy $file." }
+        $blobs += $blob.Trim()
+    }
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($blobs -join [char]10) + [char]10)
+    return ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+}
+
+function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string]$InstalledHead, [bool]$LegacyMigration, [bool]$FirstInstall, [bool]$RecoverLaunchers) {
+    $fixture = $env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and
+        (Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) -notmatch '^github[.]com/'
+    $authDir = Join-Path $env:USERPROFILE '.local\state\ai-devops\task-gates\install-authorizations'
+    if ($fixture -and $env:AI_DEVOPS_TEST_LAUNCHER) { $authDir = Join-Path (Split-Path -Parent $env:AI_DEVOPS_TEST_LAUNCHER) 'install-authorizations' }
+    $authPath = Join-Path $authDir "$TargetHead.json"
+    $consumingPath = "$authPath.consuming"
+    if ((Test-Path -LiteralPath $authPath) -and (Test-Path -LiteralPath $consumingPath)) { throw 'Ambiguous toolkit install authorization state.' }
+    if (-not (Test-Path -LiteralPath $authPath -PathType Leaf)) {
+        if (-not (Test-Path -LiteralPath $consumingPath -PathType Leaf)) { throw 'Reviewed toolkit install authorization is missing.' }
+        # A setup retry re-enters this source gate before the full installer.
+        # Revalidate the exact pending grant below; do not reserve a second one.
+        $authPath = $consumingPath
+    }
+    try { $auth = Get-Content -Raw -LiteralPath $authPath | ConvertFrom-Json } catch { throw 'Reviewed toolkit install authorization is malformed.' }
+    $expectedCheckout = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $recordedCheckout = [IO.Path]::GetFullPath([string]$auth.installed_checkout).TrimEnd('\')
+    $expectedLauncher = Join-Path $env:USERPROFILE '.local\bin\ai-task-gates'
+    if ($fixture -and $env:AI_DEVOPS_TEST_LAUNCHER) { $expectedLauncher = $env:AI_DEVOPS_TEST_LAUNCHER }
+    if ($auth.schema_version -ne 1 -or $auth.target_head -cne $TargetHead -or
+        $auth.installed_head -cne $InstalledHead -or $recordedCheckout -ine $expectedCheckout -or
+        [IO.Path]::GetFullPath([string]$auth.installed_launcher) -ine [IO.Path]::GetFullPath($expectedLauncher) -or
+        -not $auth.owner_request -or $auth.policy_digest -cne (Get-TargetPolicyDigest -Path $Path -TargetHead $TargetHead) -or
+        [bool]$auth.legacy_migration -ne $LegacyMigration -or [bool]$auth.first_install -ne $FirstInstall -or
+        [bool]$auth.recover_launchers -ne $RecoverLaunchers) {
+        throw 'Reviewed toolkit install authorization does not match installed source, target, or policy.'
+    }
+    if ($LegacyMigration) {
+        $bashHash = (Get-FileHash -LiteralPath $expectedLauncher -Algorithm SHA256).Hash.ToLowerInvariant()
+        $cmdHash = (Get-FileHash -LiteralPath "$expectedLauncher.cmd" -Algorithm SHA256).Hash.ToLowerInvariant()
+        $sourceHash = (Get-FileHash -LiteralPath (Join-Path $Path 'bin\ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($auth.installed_launcher_sha256 -cne $bashHash -or $auth.installed_cmd_sha256 -cne $cmdHash -or
+            $auth.installed_source_sha256 -cne $sourceHash) {
+            throw 'Legacy migration launcher or installed source changed after approval.'
+        }
+    }
+    if ($FirstInstall) {
+        if ((Test-Path -LiteralPath $expectedLauncher) -or (Test-Path -LiteralPath "$expectedLauncher.cmd") -or
+            $auth.installed_source_sha256 -cne (Get-FileHash -LiteralPath (Join-Path $Path 'bin\ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            throw 'First-install source or launcher state changed after approval.'
+        }
+    }
+    if ($RecoverLaunchers) {
+        $bashExists = Test-Path -LiteralPath $expectedLauncher -PathType Leaf
+        $cmdExists = Test-Path -LiteralPath "$expectedLauncher.cmd" -PathType Leaf
+        $bashHash = if ($bashExists) { (Get-FileHash -LiteralPath $expectedLauncher -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+        $cmdHash = if ($cmdExists) { (Get-FileHash -LiteralPath "$expectedLauncher.cmd" -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+        $sourceHash = (Get-FileHash -LiteralPath (Join-Path $Path 'bin\ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actualInventory = @(Get-ManagedLauncherInventory -Launcher $expectedLauncher)
+        $approvedInventory = @($auth.managed_inventory)
+        $inventoryMatches = $actualInventory.Count -eq $approvedInventory.Count
+        if ($inventoryMatches) {
+            foreach ($item in $actualInventory) {
+                $matches = @($approvedInventory | Where-Object { $_.name -ceq $item.name -and $_.sha256 -ceq $item.sha256 })
+                if ($matches.Count -ne 1) { $inventoryMatches=$false; break }
+            }
+        }
+        if (($bashExists -and $cmdExists) -or (-not $inventoryMatches) -or $actualInventory.Count -eq 0 -or
+            $auth.installed_launcher_sha256 -cne $bashHash -or
+            $auth.installed_cmd_sha256 -cne $cmdHash -or $auth.installed_source_sha256 -cne $sourceHash) {
+            throw 'Managed launcher inventory changed after reviewed recovery approval.'
+        }
+    }
+    $report = [IO.Path]::GetFullPath([string]$auth.review_report)
+    if (-not (Test-Path -LiteralPath $report -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant() -cne $auth.review_report_sha256) {
+        throw 'Reviewed toolkit install report is missing or changed.'
+    }
+    $lines = @(Get-Content -LiteralPath $report)
+    if (($lines | Select-Object -Last 2) -join [char]10 -cne ('## Verdict' + [char]10 + 'APPROVE') -or
+        -not ($lines | Where-Object { $_ -ceq ('| reviewed commit | ' + [char]96 + $TargetHead + [char]96 + ' |') }) -or
+        -not ($lines | Where-Object { $_ -ceq ('| source digest | ' + [char]96 + $auth.source_digest + [char]96 + ' |') })) {
+        throw 'Reviewed toolkit install report does not approve the exact target and source.'
+    }
+    if ($LegacyMigration -and -not ($lines | Where-Object { $_ -clike '*legacy-managed-launcher-refresh*' })) {
+        throw 'Review report did not approve the legacy migration operation.'
+    }
+    if ($FirstInstall -and -not ($lines | Where-Object { $_ -clike '*first-managed-install*' })) {
+        throw 'Review report did not approve the first managed installation operation.'
+    }
+    if ($RecoverLaunchers -and -not ($lines | Where-Object { $_ -clike '*partial-managed-launcher-recovery*' })) {
+        throw 'Review report did not approve partial managed launcher recovery.'
+    }
+    $reviewRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $report))
+    $expectedReportDir = Join-Path $reviewRoot '.ai\reviews'
+    if (([IO.Path]::GetFullPath((Split-Path -Parent $report)).TrimEnd('\')) -ine ([IO.Path]::GetFullPath($expectedReportDir).TrimEnd('\'))) {
+        throw 'Reviewed toolkit install report is outside its checkout.'
+    }
+    $reviewHead = Invoke-GitCommand @('-C', $reviewRoot, 'rev-parse', 'HEAD')
+    if ($script:LastGitExitCode -ne 0 -or $reviewHead.Trim() -cne $TargetHead) { throw 'Reviewed checkout moved from exact target.' }
+    $reviewStatus = Invoke-GitCommand @('-C', $reviewRoot, 'status', '--porcelain=v1', '--untracked-files=all')
+    if ($script:LastGitExitCode -ne 0 -or $reviewStatus) { throw 'Reviewed checkout is dirty.' }
+    $installedCommon = Invoke-GitCommand @('-C', $Path, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+    $reviewCommon = Invoke-GitCommand @('-C', $reviewRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+    if ($script:LastGitExitCode -ne 0 -or
+        [IO.Path]::GetFullPath($installedCommon.Trim()) -ine [IO.Path]::GetFullPath($reviewCommon.Trim())) {
+        throw 'Reviewed checkout does not share installed Git ownership.'
+    }
+    $bash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+    if (-not (Test-Path -LiteralPath $bash)) { throw 'Git Bash is required to verify reviewed source.' }
+    $identity = Invoke-NativeProbe -Command $bash -Arguments @((Join-Path $PSScriptRoot 'ai-review-lifecycle'), 'identity', $reviewRoot)
+    if ($identity.ExitCode -ne 0) { throw 'Could not independently verify review source identity.' }
+    try { $source = ($identity.Output -join "`n") | ConvertFrom-Json } catch { throw 'Review source identity is malformed.' }
+    if ($source.head -cne $TargetHead -or $source.source_digest -cne $auth.source_digest) {
+        throw 'Reviewed source digest or commit differs from authorization.'
+    }
+    $lifecycleRoot = Join-Path $env:USERPROFILE '.local\state\ai-devops\review-lifecycle'
+    if ($fixture) { $lifecycleRoot = Join-Path (Split-Path -Parent $env:AI_DEVOPS_TEST_LAUNCHER) 'review-lifecycle' }
+    $runs = Join-Path $lifecycleRoot ('runs\' + $source.repository_key)
+    $matched = $false
+    if (Test-Path -LiteralPath $runs -PathType Container) {
+        foreach ($item in @(Get-ChildItem -LiteralPath $runs -Filter '*.json' -File -Recurse)) {
+            try { $state = Get-Content -Raw -LiteralPath $item.FullName | ConvertFrom-Json } catch { continue }
+            if ($state.status -ceq 'completed' -and $state.verdict -ceq 'APPROVE' -and $state.stale -eq $false -and
+                $state.head -ceq $TargetHead -and $state.source_digest -ceq $auth.source_digest -and
+                $state.report_sha256 -ceq $auth.review_report_sha256 -and $state.report_path) {
+                # Lifecycle is written by Git Bash, so its report path may be
+                # /c/... while this installer receives C:\... from PowerShell.
+                $converted = Invoke-NativeProbe -Command $bash -Arguments @('-c', 'cygpath -aw -- "$1"', 'ai-devops', [string]$state.report_path)
+                if ($converted.ExitCode -eq 0 -and $converted.Output.Count -eq 1 -and
+                    [IO.Path]::GetFullPath([string]$converted.Output[0]) -ieq $report) { $matched = $true; break }
+            }
+        }
+    }
+    if (-not $matched) { throw 'Review report has no matching completed lifecycle record.' }
+    return $authPath
+}
+
+function Assert-ReadyRepository([string]$Path, [string]$ExpectedHead = '') {
     $dirty = Invoke-GitCommand @('-C', $Path, 'status', '--porcelain')
     if ($script:LastGitExitCode -ne 0) { throw 'Could not inspect the ai-devops checkout.' }
     if ($dirty) { throw 'The ai-devops checkout is dirty; refusing to install from mixed source.' }
@@ -131,6 +421,40 @@ function Assert-ReadyRepository([string]$Path) {
     if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve ai-devops HEAD.' }
     $remoteHead = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'origin/main')
     if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve ai-devops origin/main.' }
+    if ($ExpectedHead -and $remoteHead.Trim() -ne $ExpectedHead) {
+        throw "Fetched origin/main $($remoteHead.Trim()) differs from the gate-approved install target $ExpectedHead."
+    }
+    if ($LauncherGateOnly -and $head.Trim() -ne $remoteHead.Trim()) {
+        throw 'Launcher receipt cannot be stamped before the checkout reaches exact origin/main.'
+    }
+    $receiptHead = Get-InstalledSourceReceipt -Path $Path
+    $installedBaseline = $head.Trim()
+    if ($receiptHead -and $receiptHead -notin @('legacy','missing','partial')) {
+        Invoke-GitCommand @('-C', $Path, 'merge-base', '--is-ancestor', $receiptHead, $remoteHead.Trim()) | Out-Null
+        if ($script:LastGitExitCode -ne 0) { throw 'Installed source receipt is not an ancestor of the fetched release.' }
+        $installedBaseline = $receiptHead
+    }
+    $protectedUpdate = Test-ProtectedUpdate -Path $Path -CurrentHead $installedBaseline -TargetHead $remoteHead.Trim()
+    $authorityDir = Join-Path $env:USERPROFILE '.local\state\ai-devops\task-gates\install-authorizations'
+    if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_LAUNCHER) {
+        $authorityDir = Join-Path (Split-Path -Parent $env:AI_DEVOPS_TEST_LAUNCHER) 'install-authorizations'
+    }
+    $issuedAuthorization = Join-Path $authorityDir ($remoteHead.Trim() + '.json')
+    $pendingAuthorization = "$issuedAuthorization.consuming"
+    $hasAuthorization = (Test-Path -LiteralPath $issuedAuthorization -PathType Leaf) -or
+        (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf)
+    if ($protectedUpdate -or $receiptHead -eq 'legacy' -or $receiptHead -eq 'missing' -or $receiptHead -eq 'partial' -or $hasAuthorization) {
+        if (-not $ExpectedHead -and -not (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf)) {
+            throw 'Reviewer safety or legacy update needs a pinned target and one-use task gate authorization.'
+        }
+        $sameCommitLegacy = $receiptHead -eq 'legacy' -and $installedBaseline -eq $remoteHead.Trim()
+        $firstInstall = $receiptHead -eq 'missing'
+        $recoverLaunchers = $receiptHead -eq 'partial'
+        $authorizationPath = Assert-InstallAuthorization -Path $Path -TargetHead $remoteHead.Trim() -InstalledHead $installedBaseline -LegacyMigration $sameCommitLegacy -FirstInstall $firstInstall -RecoverLaunchers $recoverLaunchers
+        $consumingPath = if ($authorizationPath.EndsWith('.consuming')) { $authorizationPath } else { "$authorizationPath.consuming" }
+        if ($authorizationPath -ne $consumingPath) { Move-Item -LiteralPath $authorizationPath -Destination $consumingPath }
+        $script:ConsumingInstallAuthorization = $consumingPath
+    }
     if ($head.Trim() -ne $remoteHead.Trim()) {
         $counts = Invoke-GitCommand @('-C', $Path, 'rev-list', '--left-right', '--count', 'HEAD...origin/main')
         if ($script:LastGitExitCode -ne 0) { throw 'Could not compare ai-devops source state.' }
@@ -144,7 +468,9 @@ function Assert-ReadyRepository([string]$Path) {
         $emptyHooks = Join-Path ([System.IO.Path]::GetTempPath()) ("ai-devops-no-hooks-" + [System.IO.Path]::GetRandomFileName())
         New-Item -ItemType Directory -Path $emptyHooks -Force | Out-Null
         try {
-            Invoke-GitCommand @('-C', $Path, '-c', "core.hooksPath=$emptyHooks", 'merge', '--ff-only', 'origin/main') | Out-Host
+            # Merge the commit we just proved. A concurrent fetch must not
+            # change the target between the comparison and this fast-forward.
+            Invoke-GitCommand @('-C', $Path, '-c', "core.hooksPath=$emptyHooks", 'merge', '--ff-only', $remoteHead.Trim()) | Out-Host
             if ($script:LastGitExitCode -ne 0) { throw 'Fast-forwarding ai-devops failed.' }
         } finally {
             Remove-Item -LiteralPath $emptyHooks -Force -Recurse -ErrorAction SilentlyContinue
@@ -633,8 +959,36 @@ function Install-GlobalFile {
     }
 }
 
+# A machine-wide mutex spans authority reservation, checkout advance, skill
+# install, and final launcher receipt. Nested calls from install-machine-tools
+# run on this PowerShell thread and re-enter the same mutex; other processes
+# cannot reuse a pending one-use authority during the transaction.
+$installMutex = [Threading.Mutex]::new($false, 'Global\AiDevOpsToolkitInstall')
+$installMutexHeld = $false
+try {
+    try { $installMutexHeld = $installMutex.WaitOne(0) }
+    catch [Threading.AbandonedMutexException] { $installMutexHeld = $true }
+    if (-not $installMutexHeld) { throw 'Another toolkit installation holds the machine-wide install lock.' }
+    if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_LOCK_READY -and
+        $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and
+        (Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) -notmatch '^github[.]com/') {
+        $readyPath = [IO.Path]::GetFullPath($env:AI_DEVOPS_TEST_LOCK_READY)
+        if (-not $readyPath.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Install lock fixture marker must be under the temporary directory.'
+        }
+        [IO.File]::WriteAllText($readyPath, [string]$PID)
+        Start-Sleep -Milliseconds 4000
+    }
+
 if ([string]::IsNullOrWhiteSpace($RepoPath)) {
     $RepoPath = Join-Path $InstallRoot "ai-devops"
+}
+
+if ($LauncherGateOnly) {
+    Ensure-Git
+    Assert-ReadyRepository -Path $RepoPath -ExpectedHead $ExpectedHead
+    Write-Note 'Launcher receipt source gate passed.'
+    return
 }
 
 if ($SkillsDryRun) {
@@ -649,7 +1003,7 @@ if ($SkillsDryRun) {
 
     if (Test-Path -LiteralPath (Join-Path $RepoPath ".git")) {
         Write-Note "Repo exists; proving canonical clean main and fast-forwarding only."
-        Assert-ReadyRepository $RepoPath
+        Assert-ReadyRepository -Path $RepoPath -ExpectedHead $ExpectedHead
     } elseif (Test-Path -LiteralPath $RepoPath) {
         throw "$RepoPath exists but is not a git repo. Move it aside or pass -RepoPath to a different folder."
     } else {
@@ -658,7 +1012,7 @@ if ($SkillsDryRun) {
             -Message "Noncanonical RepoUrl: $RepoUrl"
         Invoke-GitCommand @('clone', '--branch', 'main', '--single-branch', $RepoUrl, $RepoPath) | Out-Host
         if ($script:LastGitExitCode -ne 0) { throw 'Cloning ai-devops failed.' }
-        Assert-ReadyRepository $RepoPath
+        Assert-ReadyRepository -Path $RepoPath -ExpectedHead $ExpectedHead
     }
 }
 
@@ -776,12 +1130,50 @@ if ($SkillsDryRun) {
     exit 0
 }
 
+# DeepSeek formal reviews must never ask 1Password for a key. Prepare the
+# protected store before the installer's live qualification pass.
+$deepseekBash = Get-GitBash
+if ($deepseekBash) {
+    $deepseekWrapper = (Join-Path $RepoPath 'bin\ai-deepseek-agent') -replace '\\', '/'
+    $deepseekKeyProbe = Invoke-NativeProbe -Command $deepseekBash.Source -Arguments @('--noprofile', '--norc', $deepseekWrapper, 'store-key', '--if-missing')
+    if ($deepseekKeyProbe.ExitCode -eq 0) {
+        Write-Note 'DeepSeek protected per-user key store is ready.'
+    } else {
+        Write-Note 'DeepSeek key store setup failed; review qualification remains unavailable until ai-deepseek-agent store-key succeeds.'
+    }
+} else {
+    Write-Note 'Git Bash is needed to prepare the DeepSeek key store.'
+}
+
 # Repo-level managed hook plus the update's one reviewer-requalification gate.
 # Rerunning this script is the documented Windows update path, so every real
 # run repairs or refreshes the hook and then requalifies any reviewer whose
 # qualification the pulled code invalidated. The fast-forward above ran with
 # hooks disabled, so this is the only requalify for this run.
 $installBash = Get-GitBash
+
+# A review turn may only read Muse's protected key store. Prepare it before
+# requalification, outside any review, even if Muse Code is not yet installed.
+$museWrapper = Join-Path $RepoPath 'bin\ai-muse'
+if (Test-Path -LiteralPath $museWrapper) {
+    if ($installBash) {
+        $oldMuseCaller = $env:AI_MUSE_CALLER
+        try {
+            $env:AI_MUSE_CALLER = 'installer'
+            $museProbe = Invoke-NativeProbe -Command $installBash.Source -Arguments @('--noprofile', '--norc', ($museWrapper -replace '\\', '/'), 'store-key', '--if-missing')
+        } finally {
+            $env:AI_MUSE_CALLER = $oldMuseCaller
+        }
+        if ($museProbe.ExitCode -eq 0) {
+            Write-Note 'Muse protected per-user key store is ready.'
+        } else {
+            Write-Note 'Muse key store setup failed; review qualification remains unavailable until ai-muse store-key succeeds.'
+        }
+    } else {
+        Write-Note 'Git Bash is needed to prepare the Muse key store.'
+    }
+}
+
 Install-PostMergeHook -Root $RepoPath -Bash $installBash
 if ($installBash) {
     $requalify = (Join-Path $RepoPath 'bin\ai-review-preflight') -replace '\\', '/'
@@ -866,8 +1258,15 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
 
 Write-Step "Checking optional logins"
 if (Get-Command gh -ErrorAction SilentlyContinue) {
-    $ghProbe = Invoke-NativeProbe -Command 'gh' -Arguments @('auth', 'status')
-    if ($ghProbe.ExitCode -ne 0) {
+    $ghGate = (Join-Path $PSScriptRoot 'ai-gh') -replace '\\', '/'
+    if ($installBash -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'ai-gh'))) {
+        $ghProbe = Invoke-NativeProbe -Command $installBash.Source -Arguments @('--noprofile', '--norc', '-c', 'AI_GH_NO_WAIT=1 AI_GH_CALLER=ai-devops-installer "$1" auth status', 'bash', $ghGate)
+    } else {
+        $ghProbe = [pscustomobject]@{ ExitCode = 75 }
+    }
+    if ($ghProbe.ExitCode -eq 75) {
+        Write-Note "GitHub login check deferred because Git Bash or the shared GitHub gate is unavailable."
+    } elseif ($ghProbe.ExitCode -ne 0) {
         Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login"
     }
 } else {
@@ -907,6 +1306,18 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
     } else {
         Write-Note "Qwen Code CLI found: $qwenVersion"
     }
+    $qwenBash = Get-GitBash
+    if ($qwenBash) {
+        $qwenWrapper = (Join-Path $RepoPath 'bin\ai-qwen') -replace '\\', '/'
+        $keyProbe = Invoke-NativeProbe -Command $qwenBash.Source -Arguments @('--noprofile', '--norc', $qwenWrapper, 'store-key', '--if-missing')
+        if ($keyProbe.ExitCode -eq 0) {
+            Write-Note 'Qwen protected per-user key store is ready.'
+        } else {
+            Write-Note 'Qwen key store setup failed; review qualification remains unavailable until ai-qwen store-key succeeds.'
+        }
+    } else {
+        Write-Note 'Git Bash is needed to prepare the Qwen key store.'
+    }
     Write-Note "Verify model access and completion with: ai-qwen doctor --live"
 } else {
     Write-Note "Qwen Code CLI not found. Install/login separately if you want the qwen-code skill to run local Qwen jobs."
@@ -927,9 +1338,24 @@ if ($zcodeAppPresent) {
     Write-Note "ZCode desktop app not found. Install when needed: winget install ZhipuAI.ZCode"
 }
 
+if (-not $SkillsDryRun -and -not ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and
+    $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and
+    (Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) -notmatch '^github[.]com/')) {
+    Write-Step 'Refreshing managed command launchers'
+    # Every completed source update must refresh the durable receipt. Otherwise
+    # a later protected release sees an older baseline than this checkout.
+    # Keep one-use authority through this final step so failure can be retried.
+    & (Join-Path $RepoPath 'bin\install-machine-tools.ps1') -RepoPath $RepoPath
+    if ($LASTEXITCODE -ne 0) { throw 'Managed command launcher installation failed.' }
+    $script:ConsumingInstallAuthorization = $null
+}
 Write-Step "Done"
 Write-Host "AI DevOps repo: $RepoPath"
 Write-Host "Codex skills:  $(Join-Path $CodexHome 'skills')"
 Write-Host "Claude skills: $(Join-Path $ClaudeHome 'skills')"
 Write-Host ""
 Write-Host "Future updates on this computer: rerun this same script."
+} finally {
+    if ($installMutexHeld) { $installMutex.ReleaseMutex() }
+    $installMutex.Dispose()
+}

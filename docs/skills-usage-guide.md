@@ -1,5 +1,11 @@
 # Skills usage guide
 
+## TypeSafe on demand
+
+The shared `typesafe-ai` skill installs through the existing Windows skill installer for Claude Code, Codex, ZCode, and MiMo. Its one-line description is the only routine discovery context outside Claude Code; the full instructions load on invocation. Claude Code's `disable-model-invocation: true` and Codex's `allow_implicit_invocation: false` make it explicit-only in those clients. Say `use the TypeSafe skill` in any client; direct shortcuts are `/typesafe-ai` in Claude Code and MiMo, `$typesafe-ai` in Codex and ZCode. Do not add it to global instructions.
+
+ChatGPT desktop supports standalone local skills; select `@TypeSafe` in the prompt. The signed-out web browser has no bearing on desktop access. Verify this skill appears in the desktop picker after Windows installation. ChatGPT may still choose installed skills automatically.
+
 How the skills in `skills/claude/` and `skills/shared/` map to the things Albert
 used to type manually, and how to install them. Built from an analysis of ~1,790 prompts
 across 179 archived sessions (six machines) in `claude_chats/`.

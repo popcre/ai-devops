@@ -100,6 +100,41 @@ if (Test-Path -LiteralPath $stateAi) {
   Log "stale-gemini-folders removed=$n"
 }
 
-$free = [math]::Round((Get-PSDrive C).Free/1GB,1)
-$freeD = [math]::Round((Get-PSDrive D).Free/1GB,1)
+# 6) ZCode exec session logs (runaway stdout can fill C: - issue #884)
+#    Any *-stdout.log under .zcode/cli/exec older than 3 days, or larger than 50 MB.
+$zExec = 'C:\Users\ahazan\.zcode\cli\exec'
+if (Test-Path -LiteralPath $zExec) {
+  $n = 0
+  $bytes = 0L
+  $cutoff = (Get-Date).AddDays(-3)
+  Get-ChildItem -LiteralPath $zExec -Recurse -Force -File -Filter '*-stdout.log' -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.LastWriteTime -lt $cutoff -or $_.Length -gt 50MB) {
+      try {
+        $bytes += $_.Length
+        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop
+        $n++
+      } catch {
+        # Still open - try truncate so the disk frees even if delete fails
+        try {
+          $fs = [System.IO.File]::Open($_.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+          $fs.SetLength(0); $fs.Close()
+          $n++
+        } catch {}
+      }
+    }
+  }
+  Log "zcode-exec-logs removed/truncated=$n bytes=$bytes"
+}
+
+# Prefer Win32_LogicalDisk: Get-PSDrive can report stale free space on Windows
+$free = 0; $freeD = 0
+try {
+  $c = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
+  if ($c) { $free = [math]::Round($c.FreeSpace/1GB,1) }
+  $d = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='D:'"
+  if ($d) { $freeD = [math]::Round($d.FreeSpace/1GB,1) }
+} catch {
+  $free = [math]::Round((Get-PSDrive C).Free/1GB,1)
+  $freeD = [math]::Round((Get-PSDrive D).Free/1GB,1)
+}
 Log "housekeeping done C_free=${free}GB D_free=${freeD}GB"

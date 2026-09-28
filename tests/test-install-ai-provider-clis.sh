@@ -12,7 +12,7 @@ unset GROK_HOME  # the model lock honors GROK_HOME; never let a test reach a rea
 [[ -x "$script" ]] || { echo "FAIL: installer is not executable"; exit 1; }
 
 # --- help and argument validation -----------------------------------------
-bash "$script" --help | grep -q 'Providers: grok kimi qwen stepfun'
+bash "$script" --help | grep -q 'Providers: grok kimi qwen gemini stepfun'
 
 if bash "$script" --dry-run bogus >"$tmp/bogus" 2>&1; then
   echo "FAIL: unknown provider was accepted"; exit 1
@@ -35,14 +35,14 @@ clean="$tmp/clean-home"; mkdir -p "$clean"
 minimal_path="$(dirname "$(command -v curl)"):$(dirname "$(command -v bash)"):$(dirname "$(command -v jq)"):/usr/bin:/bin"
 clean_run() { env HOME="$clean" PATH="$minimal_path" bash "$script" "$@"; }
 
-for p in grok kimi qwen; do
+for p in grok kimi qwen gemini; do
   if env PATH="$minimal_path" command -v "$p" >/dev/null 2>&1; then
     echo "FAIL: test PATH is not clean, it still resolves $p"; exit 1
   fi
 done
 
 clean_run --dry-run >"$tmp/all" 2>&1
-for p in grok kimi qwen; do grep -q "would install $p" "$tmp/all" || {
+for p in grok kimi qwen gemini; do grep -q "would install $p" "$tmp/all" || {
   echo "FAIL: dry run skipped $p"; exit 1; }
 done
 

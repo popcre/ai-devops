@@ -705,6 +705,39 @@ wait "$job"
         events.publish_report(self.root, "grok", rid, report)
         self.assertEqual(len(events.verify_sandbox(self.root, checkout)), 1)
 
+    def test_code_only_sandbox_keeps_sealed_marker_and_owns_reports_in_host_sidecar(self):
+        rid, checkout, report = self.evidence_fixture()
+        marker = checkout / ".ai-review-sandbox"
+        sealed = {"schema_version": 1, "mode": "code-only", "source_id": "a" * 64,
+                  "export_head": self.sha}
+        marker.write_text(json.dumps(sealed, sort_keys=True) + "\n")
+        marker_bytes = marker.read_bytes()
+        owner_file = checkout.with_name(checkout.name + ".owners.json")
+        owner_file.write_text(json.dumps({"schema_version": 1, "mode": "code-only",
+                                          "marker_sha256": events.digest(marker_bytes),
+                                          "source_id": sealed["source_id"],
+                                          "export_head": sealed["export_head"],
+                                          "review_source": str(self.toolkit), "owners": []}) + "\n")
+        with patch.object(events, "git_value", return_value=self.sha):
+            events.bind_sandbox(self.root, "grok", rid, checkout)
+        self.assertEqual(marker.read_bytes(), marker_bytes)
+        self.assertEqual(json.loads(owner_file.read_text())["owners"], ["grok:" + rid])
+        with self.assertRaisesRegex(events.Blocked, "cleanup and replay refused"):
+            events.verify_sandbox(self.root, checkout)
+        events.publish_report(self.root, "grok", rid, report)
+        self.assertEqual(len(events.verify_sandbox(self.root, checkout)), 1)
+        owner_file.unlink()
+        with self.assertRaisesRegex(events.Blocked, "sidecar is missing"):
+            events.verify_sandbox(self.root, checkout)
+        owner_file.write_text(json.dumps({"schema_version": 1, "mode": "code-only",
+                                          "marker_sha256": "0" * 64,
+                                          "source_id": sealed["source_id"],
+                                          "export_head": sealed["export_head"],
+                                          "review_source": str(self.toolkit),
+                                          "owners": ["grok:" + rid]}) + "\n")
+        with self.assertRaisesRegex(events.Blocked, "binding differs"):
+            events.verify_sandbox(self.root, checkout)
+
     def test_standalone_and_legacy_sandbox_ownership_are_distinct(self):
         checkout = self.root / "sandbox"
         checkout.mkdir()

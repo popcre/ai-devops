@@ -40,7 +40,7 @@ Usage: install-ai-provider-clis.sh [options] [provider ...]
 Installs the third-party AI provider CLIs used by this repo's wrappers.
 With no provider named, installs all of them.
 
-Providers: grok kimi qwen stepfun (stepfun: Linux only)
+Providers: grok kimi qwen gemini stepfun (stepfun: Linux only)
 
 Options:
   --force        Reinstall even if the command already works.
@@ -53,6 +53,7 @@ deliberately does not automate:
   grok            # then follow the sign-in prompt
   kimi login
   qwen            # then configure Alibaba Coding Plan authentication
+  agy             # Gemini: choose Google OAuth and sign in
   ai-stepfun store-key   # StepFun key from 1Password into the protected store
 USAGE
 }
@@ -62,6 +63,7 @@ PROVIDERS=(
   "grok|grok|https://x.ai/cli/install.sh|.grok/bin/grok"
   "kimi|kimi|https://code.kimi.com/kimi-code/install.sh|.kimi-code/bin/kimi"
   "qwen|qwen|https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh|.local/bin/qwen"
+  "gemini|agy|https://antigravity.google/cli/install.sh|.local/bin/agy"
 )
 # StepCode (StepFun Step 5) ships no Windows build yet; offer it on Linux only.
 if [ "$(uname -s)" = Linux ]; then
@@ -408,6 +410,7 @@ if ((installed_any)) && ((DRY_RUN == 0)); then
   echo "NEXT sign in once per provider (interactive, deliberately not automated):"
   echo "  grok            # follow the sign-in prompt"
   echo "  kimi login"
+  echo "  agy             # Gemini: choose Google OAuth, then run: ai-review-preflight qualify gemini"
   [ "$(uname -s)" != Linux ] || echo "  ai-stepfun store-key   # StepFun key from 1Password into the protected store"
   echo "  qwen            # configure Alibaba Coding Plan authentication"
   echo "Then prove the full path:  ai-qwen doctor --live"

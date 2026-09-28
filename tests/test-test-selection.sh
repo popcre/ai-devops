@@ -4,7 +4,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tests/lib-selection.sh"
 
-fails=0; n=0; total=19
+fails=0; n=0; total=21
 check() { # check <label> <expected> <actual>
   n=$((n + 1))
   if [ "$2" = "$3" ]; then
@@ -63,6 +63,12 @@ check 'an explicit non-conventional name uses its declared map' \
   'test-repository-policy.sh' "$(aff 'bin/ai-repo-policy')"
 check 'a suite editing itself stays on that suite' \
   'test-ai-facts.sh' "$(aff 'tests/test-ai-facts.sh')"
+check 'a PowerShell script selects the repository-wide ASCII guard' \
+  'test-windows-scripts.sh' \
+  "$(printf '%s\n' 'scripts/ai-housekeeping/cleanup-ai-debris.ps1' | selection_affected_suites "$ROOT" test-ai-facts.sh test-windows-scripts.sh)"
+check 'a PowerShell module does not claim the script-only ASCII guard' \
+  '' \
+  "$(printf '%s\n' 'scripts/sample.psm1' | selection_affected_suites "$ROOT" test-ai-facts.sh test-windows-scripts.sh)"
 check 'workflow runner changes fail closed to every suite' \
   'test-ai-adopt-globals.sh test-ai-facts.sh test-ai-gh.sh test-ai-install-skills.sh test-ai-repo-policy.sh test-bin-cmd-launchers.sh test-markdown-links.sh test-repository-policy.sh test-workflow-policy.sh' \
   "$(aff '.github/workflows/verify.yml')"

@@ -20,6 +20,7 @@ PASS=0; FAIL=0
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+export AI_GH_STATE_DIR="$WORK/gh-state" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off
 SUITES="$WORK/suites"; LOGS="$WORK/logs"
 mkdir -p "$SUITES" "$LOGS"
 
@@ -144,6 +145,7 @@ check 'the refusal names the busy runner on this host' 'printf "%s" "$out" | gre
 probe_out="$(guard_run --check-collision)"; probe_rc=$?
 check 'the collision probe blocks this host when its runner is busy' \
   '[ "$probe_rc" -eq 3 ] && printf "%s" "$probe_out" | grep -q edge-fixture-win'
+check 'paginated runner collision reads enter the shared gate' '[ -f "$AI_GH_STATE_DIR/last_call_ms" ]'
 
 guard_run --force >/dev/null 2>&1; frc=$?
 check '--force overrides the refusal' '[ "$frc" -ne 3 ]'

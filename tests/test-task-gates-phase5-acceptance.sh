@@ -87,14 +87,15 @@ db_json="$(explain "$TMP/db" supabase/migrations/001.sql)"
 check 'shared-db structure retains branch, review, and target proof' "jq -e '.observed_class==\"shared-db\" and ([\"repository-branch-and-pr\",\"exact-head-independent-review\",\"target-database-proof-before-write\"]- .required_gates|length==0)' <<<\"\$db_json\""
 check 'shared-db fixture may enter its governed database path' "rc '$TMP/db' 0 check --before database"
 
-# 7. Licensed evidence stays private and cannot launch an external action.
+# 7. A raw-evidence consumer explicitly forbids review transmission. Private
+# code review is allowed centrally; this stricter artifact policy remains binding.
 new_repo "$TMP/private" u2giants/licensor-source-data
-write_policy "$TMP/private" '{"schema_version":1,"paths":[{"glob":"outputs/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["private-repository-only","no-third-party-transmission","provenance-preserved"],"forbidden_actions":["deploy","infrastructure","production"]}}}'
+write_policy "$TMP/private" '{"schema_version":1,"paths":[{"glob":"outputs/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["private-repository-only","no-third-party-transmission","provenance-preserved"],"forbidden_actions":["review","deploy","infrastructure","production"]}}}'
 start "$TMP/private" private-evidence
 mkdir -p "$TMP/private/outputs"; printf 'synthetic fixture only\n' > "$TMP/private/outputs/fixture.csv"
 private_json="$(explain "$TMP/private" outputs/fixture.csv)"
 check 'licensed evidence retains privacy and provenance gates' "jq -e '.observed_class==\"private-evidence\" and ([\"private-repository-only\",\"no-third-party-transmission\",\"provenance-preserved\"]- .required_gates|length==0)' <<<\"\$private_json\""
-check 'licensed evidence refuses paid review before launch' "rc '$TMP/private' 3 check --before review"
+check 'explicit licensed-evidence policy refuses paid review before launch' "rc '$TMP/private' 3 check --before review"
 
 # 8. Infrastructure stays read-only and refuses apply entry points.
 new_repo "$TMP/infra" popcre/infrastructure

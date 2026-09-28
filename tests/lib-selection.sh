@@ -250,8 +250,15 @@ selection_affected_suites() {
         add_workflow
         continue
         ;;
-      *.ps1|*.psm1|*.psd1)
-        # PowerShell has its own runner; Bash suites are not the cover.
+      *.ps1)
+        # Windows PowerShell has its own runner, but this Bash suite checks
+        # every tracked .ps1 for the ASCII-only source contract. A narrowed
+        # PR must catch that failure before its full merge-group run.
+        add_suite "test-windows-scripts.sh"
+        continue
+        ;;
+      *.psm1|*.psd1)
+        # PowerShell modules/data have their own runner.
         continue
         ;;
       tests/test-*.sh)

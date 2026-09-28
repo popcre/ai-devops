@@ -200,8 +200,12 @@ cmd_doctor(){
   bin="$(step_bin)" || { printf 'FAIL StepCode CLI (step) is not installed\n'; exit 1; }
   ver="$("$bin" --version 2>/dev/null | tr -d '\r' | tail -n1)"
   version_ge "$ver" "$STEP_MIN_VERSION" || { printf 'FAIL step %s is older than the %s floor\n' "$ver" "$STEP_MIN_VERSION"; exit 1; }
+  # One PASS line per check: the shared-db allocator counts them as proof.
+  printf 'PASS  StepCode CLI %s (floor %s): %s\n' "$ver" "$STEP_MIN_VERSION" "$bin"
   key_store_ok || { printf 'FAIL protected StepFun key store missing (run: ai-stepfun store-key)\n'; exit 1; }
+  printf 'PASS  protected key store (owner-only): %s\n' "$KEY_STORE"
   bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed (sudo apt-get install bubblewrap)\n'; exit 1; }
+  printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
   if [ "$live" = 1 ]; then
     local tmp; mkdir -p "$STATE_DIR"; tmp="$(mktemp -d "$STATE_DIR/doctor.XXXXXX")"; load_key
     if ! run_step "$tmp" "$tmp/out" 'Reply with exactly the text STEPFUN-OK and nothing else.' || ! grep -q 'STEPFUN-OK' "$tmp/out"; then
@@ -209,6 +213,7 @@ cmd_doctor(){
       printf 'FAIL live StepFun call did not answer\n'; sed -n 1,5p "$tmp/out" "$tmp/out.stderr" 2>/dev/null; rm -rf "$tmp"; exit 1
     fi
     rm -rf "$tmp"
+    printf 'PASS  live StepFun call answered (model %s)\n' "$MODEL"
   fi
   printf 'OK step=%s model=%s live=%s\n' "$ver" "$MODEL" "$([ "$live" = 1 ] && echo verified || echo not-run)"
 }

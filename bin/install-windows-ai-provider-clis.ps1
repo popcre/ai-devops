@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-Installs the official Windows Grok Build, Kimi Code, and Qwen Code command-line tools.
+Installs the official Windows Grok Build, Kimi Code, Qwen Code, and Google
+Antigravity (Gemini) command-line tools.
 
 Authentication deliberately remains interactive. The installers only put the
 programs on this computer; each provider opens its own login on first use.
@@ -15,9 +16,9 @@ read, copied or backed up.
 [CmdletBinding()]
 param(
   [switch]$TestOnly,
-  [ValidateSet('grok', 'kimi', 'qwen')]
+  [ValidateSet('grok', 'kimi', 'qwen', 'gemini')]
   [Alias('Provider')]
-  [string[]]$SelectedProvider = @('grok', 'kimi', 'qwen'),
+  [string[]]$SelectedProvider = @('grok', 'kimi', 'qwen', 'gemini'),
   [ValidatePattern('^v\d+\.\d+\.\d+$')]
   [string]$QwenVersion
 )
@@ -367,13 +368,21 @@ $providerCatalog = @(
     InstallUri = 'https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1'
     InstallerSha256 = '901f2974d849a7366dcdbfe0fb23a6e85a97a563570e1e7aa5415a5f634da1c8'
     ExpectedPath = (Join-Path $env:LOCALAPPDATA 'qwen-code\bin\qwen.cmd')
+  },
+  [pscustomobject]@{
+    Name = 'Google Antigravity CLI (Gemini)'
+    Id = 'gemini'
+    Command = 'agy'
+    InstallUri = 'https://antigravity.google/cli/install.ps1'
+    InstallerSha256 = '51c2cb4fada22ce0228da71b9506370383d6544bfebcec85fe7616a52b805344'
+    ExpectedPath = (Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe')
   }
 )
 
 foreach ($providerDefinition in $providerCatalog) {
   if ($providerDefinition.Id -notin $SelectedProvider) { continue }
   $provider = $providerDefinition
-  $required = Get-RequiredProviderVersion -Provider $provider.Command
+  $required = Get-RequiredProviderVersion -Provider $provider.Id
   # An unpinned entry means "presence is enough", which is right for Kimi and
   # Qwen. For Grok it would reinstate the presence-skip this policy exists to
   # remove, so an empty pin is a policy error, not a permission.

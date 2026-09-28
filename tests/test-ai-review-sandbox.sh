@@ -20,6 +20,17 @@ PASS=0; FAIL=0
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Synthetic test repositories have no registered GitHub identity. Keep their
+# historic public-snapshot assertions while the production classifier correctly
+# refuses an unclassified source.
+mkdir -p "$TMP/mockbin"
+cat > "$TMP/mockbin/ai-task-gates" <<'EOF'
+#!/usr/bin/env bash
+printf '{"identity_resolved":true,"effective_class":"code","observed_class":"code"}\n'
+EOF
+chmod +x "$TMP/mockbin/ai-task-gates"
+export PATH="$TMP/mockbin:$PATH"
+
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 

@@ -33,6 +33,13 @@
       "qualified_on": null,
       "exact_install_command": null,
       "notes": "StepCode CLI for StepFun Step 5 reviews, Ubuntu/Linux only (not yet available on Windows). Not pinned here; bin/ai-stepfun enforces its own minimum version floor (0.1.1)."
+    },
+    "gemini": {
+      "command": "agy",
+      "supported_version": null,
+      "qualified_on": null,
+      "exact_install_command": null,
+      "notes": "Google Antigravity CLI used by bin/ai-gemini. Not pinned here; ai-review-preflight binds Gemini's live qualification to the exact agy version and hash, so any agy change re-quarantines Gemini until it is re-qualified."
     }
   }
 }
