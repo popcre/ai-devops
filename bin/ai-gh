@@ -367,8 +367,11 @@ elif [ "${1:-}" = pr ] || [ "${1:-}" = issue ]; then
   BUCKETS=(core graphql); BUCKET_MODE=fixed
 fi
 select_buckets
-if [ "${1:-}" = api ] && [ "${parse_ok:-0}" = 1 ] && [ "$endpoint" = graphql ]; then
-  GH_MEASURE_OPERATION=api.graphql
+if [ "${1:-}" = api ] && [ "$endpoint" = graphql ]; then
+  # jq is an installed toolkit dependency. A GraphQL call cannot safely
+  # claim success if its HTTP-200 application errors cannot be classified.
+  command -v jq >/dev/null 2>&1 || { say "jq is required to classify GraphQL responses"; exit 3; }
+  [ "${parse_ok:-0}" != 1 ] || GH_MEASURE_OPERATION=api.graphql
 fi
 quota_path(){ if [ "$1" = core ]; then printf '%s/quota' "$STATE"; else printf '%s/quota.%s' "$STATE" "$1"; fi; }
 bucket_pause_path(){ printf '%s/quota-pause.%s' "$STATE" "$1"; }
@@ -684,7 +687,9 @@ if [ -n "$GRAPH_PID" ]; then
       none) ;;
       secondary) printf 'GraphQL response: secondary rate limit\n' >> "$err"; rc=1 ;;
       primary) printf 'GraphQL response: API rate limit exceeded\n' >> "$err"; rc=1 ;;
-      error) printf 'GraphQL response: errors with partial or absent data\n' >> "$err"; rc=1 ;;
+      error)
+        say "GraphQL response contains application errors; output may contain partial data."
+        printf 'GraphQL response: errors with partial or absent data\n' >> "$err"; rc=1 ;;
       unknown|*) say "GraphQL response shape unknown; quota result unclassified."; rc=1 ;;
     esac
   fi

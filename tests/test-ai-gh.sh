@@ -222,6 +222,12 @@ fresh_quota
 FAKE_MODE=quota FAKE_REMAINING=0 FAKE_GRAPHQL_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api -X POST /graphql -F query=secretquery >/dev/null 2>&1; rc=$?
 check 'direct GraphQL selects its own bucket even with leading options' "[ $rc -eq 0 ] && grep -q '^0 4000 5000 ' '$TMP/state/quota.graphql'"
 check 'leading GraphQL options retain the GraphQL measurement label' "jq -se '.[-1].operation == \"api.graphql\" and .[-1].bucket == \"graphql\"' '$TMP/state/measurements/'*.jsonl"
+fresh_quota
+command(){ if [ "${1:-}" = -v ] && [ "${2:-}" = jq ]; then return 1; fi; builtin command "$@"; }
+export -f command
+FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/no-jq-out" 2> "$TMP/no-jq-err"; rc=$?
+export -n -f command; unset -f command
+check 'missing jq refuses GraphQL before an API call' "[ $rc -eq 3 ] && [ ! -s '$TMP/no-jq-out' ] && grep -q 'jq is required' '$TMP/no-jq-err' && ! grep -q 'api graphql' '$FAKE_LOG'"
 FAKE_MODE=quota FAKE_REMAINING=0 FAKE_GRAPHQL_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1; rc=$?
 check 'exhausted REST does not stop an independent healthy GraphQL read' "[ $rc -eq 75 ] && [ \$(cat '$TMP/state/quota-pause.core') -gt \$(date +%s) ]"
 fresh_quota
@@ -311,8 +317,8 @@ fresh_quota
 FAKE_MODE=graphql-200-secondary AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/partial-secondary" 2>/dev/null; rc=$?
 check 'GraphQL HTTP-200 secondary error preserves partial output and uses shared backoff' "[ $rc -eq 75 ] && jq -e '.data.viewer.login == \"partial\"' '$TMP/partial-secondary' && [ \$(cat '$TMP/state/backoff_until') -gt \$(date +%s) ]"
 fresh_quota
-FAKE_MODE=graphql-200-partial AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/partial-other" 2>/dev/null; rc=$?
-check 'GraphQL partial non-limit result returns failure and preserves output' "[ $rc -eq 1 ] && jq -e '.errors[0].message == \"field unavailable\" and .data.viewer.login == \"partial\"' '$TMP/partial-other'"
+FAKE_MODE=graphql-200-partial AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/partial-other" 2> "$TMP/partial-other-err"; rc=$?
+check 'GraphQL partial non-limit result returns failure, output, and a safe diagnostic' "[ $rc -eq 1 ] && jq -e '.errors[0].message == \"field unavailable\" and .data.viewer.login == \"partial\"' '$TMP/partial-other' && grep -q 'GraphQL response contains application errors' '$TMP/partial-other-err' && ! grep -q 'field unavailable' '$TMP/partial-other-err'"
 check 'GraphQL application error adds no diagnostic quota request' "! grep -q 'api --include rate_limit' '$FAKE_LOG'"
 fresh_quota
 FAKE_MODE=graphql-cli-error AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/graphql-cli-error-out" 2> "$TMP/graphql-cli-error-err"; rc=$?
