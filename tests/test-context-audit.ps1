@@ -483,11 +483,14 @@ owner: claude/fixture-$n
     $clientGlobals = [ordered]@{
         "Claude" = Get-Content -LiteralPath (Join-Path $repo "templates\system\CLAUDE-global.md") -Raw
         "Codex" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-codex.md") -Raw
+        "ZCode" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-zcode.md") -Raw
+        "MiMo" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-mimo.md") -Raw
     }
     foreach ($client in $clientGlobals.Keys) {
         foreach ($required in @(
             "Start immediately",
             "Never ask a human to approve",
+            "allocator-assigned AI reviewer's explicit APPROVE",
             "recover first and finish",
             "Preserve the capability",
             "reported problem is gone",

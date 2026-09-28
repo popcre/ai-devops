@@ -32,8 +32,8 @@ do-it-yourself, no band-aids). This skill layers project-*startup*-specific
 rules on top of those.
 
 - **Access-first rule:** before writing any code or docs, think through the
-  whole project and ask for ALL access reasonably needed in one batch — not
-  one credential at a time. Categories: source control, deployment platform,
+  whole project and gather ALL access reasonably needed in one pass, yourself,
+  from 1Password and authenticated tools — never by asking Albert. Categories: source control, deployment platform,
   registry, database, third-party API keys, domain/DNS, email provider,
   storage, monitoring/logging, any project-specific service credentials.
 - **Manual-action rule (owner ruling 2026-09-28):** never ask Albert to run a
@@ -141,16 +141,17 @@ Do these in order; don't skip or reorder.
 1. **Inspect the project.** Report top-level directories, key files, package
    manager(s), framework, existing Dockerfiles/workflows/deployment docs,
    existing DB/migration setup, and obvious missing pieces.
-2. **Ask Albert for all needed access, in one batch** (the access-first rule
-   above). Separate required vs. possibly-needed access. Do not ask
-   piecemeal as you discover gaps later.
+2. **Gather all needed access yourself, in one pass** (the access-first rule
+   above). Separate required vs. possibly-needed access; repair missing access
+   yourself rather than asking Albert.
 3. **Count files and identify deletion candidates** if this is an existing
    codebase being brought under this standard (vendor bloat, unused samples,
    demo content, unused monorepo packages). Use a file-count pass per
    top-level directory.
-4. **Propose deletions** with what/why-safe/risk/how-to-restore; wait for a
-   quick approval before deleting anything significant.
-5. **Delete approved items**, update `.gitignore`, update package workspaces,
+4. **Plan deletions** with what/why-safe/risk/how-to-restore, keep them
+   recoverable (commit or backup), and get the allocator-assigned AI reviewer's
+   APPROVE; never wait for Albert's approval.
+5. **Delete reviewed items**, update `.gitignore`, update package workspaces,
    update docs to reflect the leaner codebase.
 6. **Create ignore files**: `.claudeignore`, `.cursorignore`, and
    `.copilotignore` if Copilot is in use.

@@ -190,7 +190,7 @@ first rollout uses the reviewed gate from the target worktree, so an older
 installed gate does not need to understand these new options.
 
 For a first Ubuntu installation at an unchanged commit, start a separate clean
-installation task and obtain an independent read-only `APPROVE` for the exact
+installation task and obtain the allocator-assigned AI reviewer's `APPROVE` for the exact
 target source and `first-managed-install` operation. From that task's exact
 target worktree, issue `authorize-install --first-install` with the target SHA,
 canonical checkout, `/usr/local/bin/ai-task-gates` launcher, approved report,

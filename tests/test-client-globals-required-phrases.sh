@@ -35,6 +35,7 @@ required_phrases=(
   "resume that agent immediately"
   "quote Albert's exact words"
   "no human approval is ever requested"
+  "allocator-assigned AI reviewer's explicit APPROVE"
   "one unproven live-behavior outcome"
   "Never save several unproven steps"
   "Quote every time in EST"

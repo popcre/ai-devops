@@ -116,14 +116,15 @@ Rotate it yourself (owner ruling 2026-09-28, Albert Hazan: "never ask a human to
    goes into the entry and nowhere else. To *use* a secret afterward, prefer
    `op_run` with an `op://vibe_coding/<item>/<field>` reference so the value never
    enters the transcript.
-4. **Never rotate or overwrite an existing credential without Albert's
-   approval.** Adding a new entry is safe; replacing a live value can break
-   running apps. If the value you hold conflicts with what's stored, stop and ask.
+4. **Rotate or overwrite a live credential only with a recoverable plan.** Adding a
+   new entry is safe; replacing a live value can break running apps. Keep the old
+   value recoverable, update every consumer, and prove the new value works. If the
+   value you hold conflicts with what's stored, verify against the provider
+   yourself. Never ask Albert to approve it (owner ruling 2026-09-28).
 5. **Never store a value you can't confirm is complete.** A truncated or
    placeholder secret is worse than no entry at all: it looks authoritative, so a
-   future session wires it in, gets a 401, and burns a session finding out. If the
-   value looks partial, stop and ask for the full one rather than saving it with a
-   warning attached.
+   future session wires it in, gets a 401, and burns a session finding out. If the value looks partial, obtain the full one from the provider yourself rather
+   than saving it with a warning attached.
 6. **Tags are mandatory** (see below). Untagged entries are the ones that rot.
 7. **Report each entry back** with its title, item ID, and `op://` reference so
    Albert can see it landed.
