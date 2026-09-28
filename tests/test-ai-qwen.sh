@@ -181,14 +181,17 @@ if [ -z "${SYSTEMROOT:-}" ]; then
   sleep 0.3
   check 'Qwen key refresh waits for the shared 1Password lock' "test '$(wc -l < "$TMP/op-calls")' = '$OP_CALLS_BEFORE' && kill -0 '$STORE_PID' 2>/dev/null"
   wait "$LOCK_PID"; wait "$STORE_PID"
-  AI_QWEN_TEST_SPAWN_DAEMON=1 "$SCRIPT" store-key >/dev/null
-  OP_CHILD_PID="$(cat "$TMP/op-child-pid")"
-  if flock -n "$AI_DEVOPS_CONFIG_DIR/op-refresh.lock" true; then
-    ok 'Qwen key refresh does not pass the shared lock to 1Password children'
+  if AI_QWEN_TEST_SPAWN_DAEMON=1 "$SCRIPT" store-key >/dev/null && [ -s "$TMP/op-child-pid" ]; then
+    OP_CHILD_PID="$(cat "$TMP/op-child-pid")"
+    if flock -n "$AI_DEVOPS_CONFIG_DIR/op-refresh.lock" true; then
+      ok 'Qwen key refresh does not pass the shared lock to 1Password children'
+    else
+      bad 'Qwen key refresh does not pass the shared lock to 1Password children'
+    fi
+    kill "$OP_CHILD_PID" 2>/dev/null || true
   else
-    bad 'Qwen key refresh does not pass the shared lock to 1Password children'
+    bad 'Qwen key refresh did not launch the 1Password child fixture'
   fi
-  kill "$OP_CHILD_PID" 2>/dev/null || true
 fi
 OP_CALLS_AFTER_STORE="$(wc -l < "$TMP/op-calls" | tr -d ' ')"
 if (

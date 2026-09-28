@@ -248,6 +248,7 @@ else
 # Resolve secrets while holding the refresh lock, then release it BEFORE the
 # long-running MCP server starts. Holding this lock around the server leaves
 # every later MCP waiting until Codex times out.
+# Do not pass the lock descriptor to op; its children may outlive the read.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
   export OP_SERVICE_ACCOUNT_TOKEN
@@ -279,6 +280,7 @@ EOF
 # \$1 = server URL, \$2 = op:// ref to the bearer token, \$3+ = extra mcp-remote flags.
 # mcp-remote does NOT expand \\\${VAR} in --header, so the token must be a real value
 # before it runs: resolve it in memory here and pass it straight through.
+# Keep the refresh lock through op's exit, not through its children.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
   export OP_SERVICE_ACCOUNT_TOKEN
