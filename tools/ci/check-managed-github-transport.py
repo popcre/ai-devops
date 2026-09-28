@@ -15,8 +15,8 @@ ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) == 2 else pathlib.Path(__file__
 LEGACY = {
     "ai-pr-wait": "1c93624f54b4f06e9d79b21b1473ac4f4c56a19a7c26f7ef0749fbc8c94ac9e8",
 }
-DIRECT = re.compile(r"(?<![\w-])gh\s+(?:api|run|repo|pr|issue|workflow|release|search)\b")
-SDK = re.compile(r"(?:execFileSync|spawnSync|execFile|spawn)\s*\(\s*['\"]gh['\"]")
+DIRECT = re.compile(r"(?<![\w-])gh(?:\.exe)?\s+(?:api|run|repo|pr|issue|workflow|release|search)\b", re.IGNORECASE)
+SDK = re.compile(r"(?:execFileSync|spawnSync|execFile|spawn)\s*\(\s*['\"]gh(?:\.exe)?['\"]", re.IGNORECASE)
 HTTP = re.compile(r"(?:api\.github\.com|github\.getOctokit|@octokit)")
 
 

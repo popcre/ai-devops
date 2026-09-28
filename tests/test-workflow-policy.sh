@@ -410,6 +410,10 @@ BOOTSTRAP
   check 'retired runner exception cannot admit direct gh again' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
   rm -f "$mutation_dir/bin/promote-windows-runner-to-service.ps1"
+  printf '& gh.exe api repos/acme/example\n' > "$mutation_dir/bin/ai-powershell.ps1"
+  check 'Windows executable spelling cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-powershell.ps1"
   printf '#!/usr/bin/env node\nrequire("child_process").execFileSync("gh", ["api", "rate_limit"])\n' > "$mutation_dir/bin/ai-bypass"
   check 'a new SDK/Node CLI bypass is rejected' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
