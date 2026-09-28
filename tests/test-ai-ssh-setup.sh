@@ -35,8 +35,8 @@ esac
 OP
 chmod +x "$TMP/bin/op"
 
-printf 'Host vps\n    HostName 100.66.37.58\nMatch host vps !exec "ping -c 1 -W 1 1.2.3.4 || ping.exe -n 1 -w 800 1.2.3.4"\n' > "$TMP/template"
-printf 'Match host vps !exec "ping -n 1 -w 800 1.2.3.4"\n' > "$TMP/windows-template"
+printf 'Host vps\n    HostName 192.0.2.10\nMatch host vps !exec "ping -c 1 -W 1 192.0.2.10 || ping.exe -n 1 -w 800 192.0.2.10"\n' > "$TMP/template"
+printf 'Match host vps !exec "ping -n 1 -w 800 192.0.2.10"\n' > "$TMP/windows-template"
 
 run(){ # home, extra env...
   local home="$1"; shift

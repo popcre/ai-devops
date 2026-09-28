@@ -30,7 +30,8 @@ SSH_DIR="$HOME/.ssh"
 KEY="$SSH_DIR/916-alien"
 PRIV_REF="${AI_SSH_SETUP_PRIVATE_REF:-op://vibe_coding/916-alien SSH key/private key}"
 PUB_REF="${AI_SSH_SETUP_PUBLIC_REF:-op://vibe_coding/916-alien SSH key/public key}"
-INCLUDE_LINE="Include ai-devops.conf"
+CONF_NAME="ai-devops.conf"
+INCLUDE_LINE="Include $CONF_NAME"
 STAMP="$(date +%Y%m%d%H%M%S)"
 status=0
 
@@ -111,7 +112,7 @@ install_config() {
     warn "SSH template still uses Windows-only ping probes (they hang on Linux) - not installed. Update the private config."
     return 1
   fi
-  local conf="$SSH_DIR/ai-devops.conf" main="$SSH_DIR/config"
+  local conf="$SSH_DIR/$CONF_NAME" main="$SSH_DIR/config"
   if [ -f "$conf" ] && cmp -s "$tmpl" "$conf"; then
     ok "ai-devops.conf already current"
   elif [ "$DRY_RUN" -eq 1 ]; then
