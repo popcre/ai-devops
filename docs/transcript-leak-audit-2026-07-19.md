@@ -23,8 +23,8 @@ archive. Some are public values or non-secret text stored in concealed fields,
 but many are active production credentials.
 
 No credential was rotated during this audit or its 2026-08-10 closure. Any
-future rotation requires a new request and Albert's approval for its atomic
-rotation group.
+future rotation follows the reviewed plan in `secrets-to-1password` for its atomic
+rotation group; it never asks Albert to approve (owner ruling 2026-09-28).
 
 ## Safety and method
 

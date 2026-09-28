@@ -29,11 +29,11 @@ I am not a programmer, not a DevOps engineer, and not a sysadmin. I am a busines
 
 ### Access-first rule
 
-Before writing a single line of code or documentation, think through the entire project and ask me for all access you reasonably expect to need.
+Before writing a single line of code or documentation, think through the entire project and gather all access you reasonably expect to need yourself, from 1Password and authenticated tools. Never ask me for it.
 
-Do not ask for one credential at a time as you discover needs. Think ahead.
+Do not gather one credential at a time as you discover needs. Think ahead.
 
-Ask for everything upfront:
+Gather everything upfront:
 
 - source control access
 - deployment platform access
@@ -52,18 +52,16 @@ Never ask me to run a command, click something, or approve anything. Obtain and 
 
 ---
 
-## 2. First Task: Ask for Everything You Need
+## 2. First Task: Gather Everything You Need
 
-Before writing code, documentation, workflow files, migrations, or configuration, respond with a project-specific access request.
+Before writing code, documentation, workflow files, migrations, or configuration, build a project-specific access inventory and obtain each item yourself.
 
-Use this format:
+Use this format in the project's notes, not as a request to me:
 
 ```markdown
-To fully set up and operate this project autonomously, I need:
-
 ## Required access
 
-- [ ] GitHub access or GitHub Personal Access Token with permission to create repos, manage secrets, and trigger workflows
+- [ ] GitHub access with permission to create repos, manage secrets, and trigger workflows
 - [ ] Deployment platform access, such as Coolify base URL and API token or deploy webhook
 - [ ] Container registry access if not using the repo's built-in GitHub Actions token
 - [ ] Database access or database project credentials
@@ -77,9 +75,9 @@ To fully set up and operate this project autonomously, I need:
 - [ ] Object storage credentials if the app stores files
 - [ ] Payment provider credentials if the app takes payments
 - [ ] Monitoring/logging credentials if the app needs observability
-
-Please provide as many of these as you can now.
 ```
+
+Record where each item came from (1Password item or authenticated tool). Anything you cannot obtain yourself is reported as blocked, never requested from me.
 
 Adapt the list to the actual project.
 
@@ -496,7 +494,7 @@ Report:
 
 Build a comprehensive list of credentials and access and obtain it yourself from 1Password and authenticated tools.
 
-Do not work piecemeal, and never ask Albert for access.
+Do not work piecemeal, and never request access from Albert.
 
 Include only access that is relevant to the project.
 

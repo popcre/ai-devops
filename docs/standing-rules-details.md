@@ -91,8 +91,8 @@ and post-apply result; missing evidence stops for an engineer.
 Owner ruling (2026-09-28, Albert Hazan, verbatim: "never ask a human to approve.
 as i have said at least 1000 times, i am a solo vibe coder with no technical
 knowledge. ai has to do everything for me without asking me to do manual things.
-institute that."; also "none of the reviewers should be read-only"): the
-2026-09-16 independent read-only reviewer rule is withdrawn. Assigned AI reviewers gate every technical production action through an
+institute that."): the 2026-09-16 rule that sent every production approval to an
+independent reviewer in place of Albert is replaced. Assigned AI reviewers gate every technical production action through an
 explicit exact-input APPROVE; anything else stops. No human approval is ever
 requested, and AI performs every manual step itself (access, tooling, sign-in,
 keys). Only genuine business-meaning questions go to Albert; platform-level

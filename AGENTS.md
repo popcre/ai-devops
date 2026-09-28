@@ -25,7 +25,9 @@ pipeline. The recovery procedure lives in
 - Production and shared cloud infrastructure are read-only by default. Run `terraform apply`,
   `terraform destroy`, or mutating production `gcloud` commands only with the
   assigned AI reviewer's explicit APPROVE of the exact action and
-  resource; never ask Albert to approve (owner ruling 2026-09-28).
+  resource; never ask Albert to approve (owner ruling 2026-09-28). Where
+  `ai-task-gates` still demands owner authorization, report it `Blocked —`
+  (popcre/ai-devops#996).
   The sole exception is the separately activated `shared-db` automatic migration
   workflow after exact structural admission, guarded merge, and merged-main
   preview proof; it authorizes no manual production command or other infrastructure
@@ -38,7 +40,7 @@ pipeline. The recovery procedure lives in
   uninstall, symlink, or machine-setup behavior.
 - **Independent review is required for the reviewer safety path:** changes to
   reviewer wrappers, evidence tools, safety tests, or installed routing rules
-  need one exact-head final AI review before merge. Ordinary plans,
+  need one read-only exact-head final review before merge. Ordinary plans,
   analysis notes, and documentation-router wording do not.
 - Declare what the task is before starting it: `ai-task-gates start --class
   <class>`. The reviewer lifecycle, `bin/ai-pr-wait`, and `bin/ai-review`

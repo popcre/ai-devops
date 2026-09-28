@@ -2,9 +2,9 @@
 #
 # The full client-autonomy-guardrail check (tests/test-context-audit.ps1) is
 # PowerShell, so it only runs in the Windows CI lanes — a 75-90 minute round
-# trip that is not a required check on main. A prose edit to either global
+# trip that is not a required check on main. A prose edit to any global
 # (templates/system/CLAUDE-global.md, templates/system/AGENTS-global-codex.md,
-# templates/system/AGENTS-global-zcode.md)
+# templates/system/AGENTS-global-zcode.md, templates/system/AGENTS-global-mimo.md)
 # that drops or line-wraps one of these load-bearing phrases sat on main for
 # about a day undetected because of that gap (#209, 2026-09-03: a rewrap
 # broke the check twice in a row, costing two full qualification runs).
@@ -71,5 +71,14 @@ grep -qF "APPROVE of the" "$SECRETS_SKILL" \
   || fail "secrets-to-1password returned to requiring Albert's approval"
 grep -qF "An **assigned AI reviewer** is" "$DETAILS" \
   || fail "standing-rules-details lost the assigned AI reviewer definition"
+
+for never_ask in \
+  "$REPO_ROOT/skills/claude/new-app-setup/NEW-PROJECT-STANDARD.md" \
+  "$REPO_ROOT/skills/claude/new-app-setup/SKILL.md" \
+  "$REPO_ROOT/skills/shared/designflow-human-qa/SKILL.md" \
+  "$REPO_ROOT/docs/deployment.md"; do
+  ! grep -qiE "ask (me|Albert) for (all )?(needed )?access|Please provide as many|Albert explicitly approves|wait for a quick approval" "$never_ask" \
+    || fail "$(basename "$never_ask") returned to asking Albert for access or approval"
+done
 
 echo "PASS: Claude, Codex, ZCode, and MiMo globals carry the required autonomy phrases, unwrapped"

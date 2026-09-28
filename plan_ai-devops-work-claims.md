@@ -390,7 +390,7 @@ Existing suites required: `tests/test-all.sh`; repository-policy/workflow/merge-
 - V1 must not install or alter Git hooks, `core.hooksPath`, or global Git configuration, because linked worktrees share that state.
 - The advisory guard is not a required status check and must not eject a merge-queue batch.
 - The claim system coordinates work intent; it does not authorize destructive Git, production/cloud/ruleset, database, or shared-db actions.
-- Ruleset mutation is outside v1. Future promotion needs measured evidence and Albert naming the exact action/resource in the current chat.
+- Ruleset mutation is outside v1. Future promotion needs measured evidence and an assigned AI reviewer's APPROVE of the exact action/resource.
 - Exact-head independent review is mandatory because this changes shared concurrency and routing safety.
 - STATUS rows marked done cite rerunnable evidence/commit/CI artifacts, never unsourced counts or issue numbers alone.
 
