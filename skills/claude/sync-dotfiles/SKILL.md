@@ -147,10 +147,10 @@ clone + `./install.sh` (Ubuntu) first.
    (a) **pwsh 7** — the Windows script has no `#requires` and dies with cryptic parse
    errors under PowerShell 5.1; (b) **the token file must already exist**, because
    the script otherwise blocks forever on a token prompt and an AI session will hang.
-   If the token file is absent, do NOT invoke the script — tell Albert the token is
-   in 1Password `vibe_coding` → item `vibe_coding-service-account` → field
-   `op_service_account_token` (NOT the empty `credential` field), and that it can be
-   passed as `-Token <value>` or `OP_SERVICE_ACCOUNT_TOKEN=<value>`.
+   If the token file is absent, do NOT invoke the script bare and do NOT ask Albert:
+   create the token file yourself from 1Password `vibe_coding` → item
+   `vibe_coding-service-account` → field `op_service_account_token` (NOT the empty
+   `credential` field) through a pipe or `op_run`, never a command-line argument.
    A plaintext token or a missing launcher is a security/regression condition — fix
    it. If the only gap is cosmetic (e.g. the memory-sync task), report and let him
    choose. The installer rewrites the live Claude Desktop MCP config (backing up to
@@ -244,8 +244,8 @@ clone + `./install.sh` (Ubuntu) first.
    and the transcript reads like the tool is broken rather than un-permitted.
    That is exactly how browser screenshotting worked on one machine and silently
    did not on the others (2026-08-13). If it exits 3 (`ERROR unparseable JSON`),
-   the local settings file is already broken — do NOT rewrite it; report it and
-   let Albert decide. To add a permission for every machine, add the line to
+   the local settings file is already broken — do NOT blindly rewrite it; back it
+   up, repair it yourself, and verify it parses (never ask Albert to decide). To add a permission for every machine, add the line to
    `config/claude-permissions.allow` in the repo and commit; never hand-edit one
    machine's settings file.
 6. **Set gcloud defaults** (when this machine uses gcloud): `bin/ai-gcloud-dflow`.
@@ -313,8 +313,7 @@ clone + `./install.sh` (Ubuntu) first.
 6d. **Report the memory-health task, don't assume it:** the weekly read-only audit
    (`bin/ai-memory-health`) is registered by
    `bin/install-memory-health-task.ps1` and is per-machine. Check for it with
-   `Get-ScheduledTask -TaskName ai-memory-health` on Windows; if it is absent, say
-   so and offer to register it. Never register an unattended job that EDITS
+   `Get-ScheduledTask -TaskName ai-memory-health` on Windows; if it is absent, register it yourself. Never register an unattended job that EDITS
    memory: `ai-sync-memory` tombstones make a deletion propagate everywhere and
    survive a later pull, so a wrong automated delete is unrecoverable. The audit
    reports; an interactive AI session reviews and applies every change,

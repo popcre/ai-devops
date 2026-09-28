@@ -82,8 +82,11 @@ for never_ask in \
   "$REPO_ROOT/skills/shared/secrets-to-1password/SKILL.md" \
   "$REPO_ROOT"/plan_muse-opencode-harness.md "$REPO_ROOT"/plan_kimi-windows-execution-reliability.md \
   "$REPO_ROOT"/plan_kimi-review-failure-recovery.md "$REPO_ROOT"/templates/repo-docs/AGENTS.addon.md \
+  "$REPO_ROOT"/plan_ai-devops-work-claims.md "$REPO_ROOT"/plan_grok_integration-review-access.md \
+  "$REPO_ROOT"/docs/transcript-leak-audit-2026-07-19.md "$REPO_ROOT"/skills/claude/sync-dotfiles/SKILL.md \
+  "$REPO_ROOT"/templates/repo-docs/docs-ai-branching.md \
   "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL" "$AGENTS_MD"; do
-  ! grep -qiP "(?<!never )(ask (me|Albert)( once)? for|ask Albert(\.| to run)|asking Albert to run)|stop and ask Albert|ask for one\.|Please provide as many|Albert (explicitly )?approves|Albert's (explicit )?approval for|needs Albert's approval|once he says yes|Albert authorization|without Albert naming|wait for a quick approval|when he must run" "$never_ask" \
+  ! grep -qiP "(?<!never )(ask (me|Albert)( once)? for|ask Albert(\.| to run)|asking Albert to run)|stop and ask Albert|ask for one\.|Please provide as many|Albert's current-chat (authorization|response)|decided by Albert|Albert must explicitly|tell Albert the token|let Albert decide|offer to register|explicit human approval|do not need Albert unless|Albert (explicitly )?approves|Albert's (explicit )?approval for|needs Albert's approval|once he says yes|Albert authorization|without Albert naming|wait for a quick approval|when he must run" "$never_ask" \
     || fail "$(basename "$never_ask") returned to asking Albert for access or approval"
 done
 

@@ -89,8 +89,9 @@ Gemini field and therefore needs owner/deployment identification before rotation
 The current `1Password Service Account Token - hetzner_vps` value appears exactly
 in the archive and is demonstrably active because it authenticated the protected
 vault-wide comparison. A standing owner directive says not to rotate or suggest
-rotation of this service-account token. This creates an unresolved incident-risk
-exception that must be explicitly decided by Albert; do not silently change it.
+rotation of this service-account token. The standing directive stays in force: do not rotate this token and do not ask
+Albert to approve a rotation (owner ruling 2026-09-28). Only Albert withdrawing
+the directive changes this.
 
 ### Cloudflare tunnel credentials
 
@@ -184,9 +185,9 @@ Each wave requires explicit approval before any value changes:
    DesignFlow PLM, and application logins.
 6. **SSH/password cleanup:** identify the eleven private keys and reset the
    unknown `popdam` password without authentication probing.
-7. **Bootstrap-token exception:** Albert must explicitly resolve the standing
-   no-rotation directive versus the confirmed exposure of the active 1Password
-   service-account token.
+7. **Bootstrap-token exception:** the standing no-rotation directive for the
+   active 1Password service-account token stays in force; it is recorded, not
+   put to Albert as an approval request.
 
 ## GitHub residue
 

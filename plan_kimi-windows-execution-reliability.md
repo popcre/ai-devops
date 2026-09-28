@@ -291,7 +291,7 @@ for handing Kimi a packet that violates its measured read limit.
 3. **Heartbeat interval:** default between 30 and 60 seconds. It must report phase, elapsed time, and last output growth without printing prompt or model text.
 4. **Startup deadline:** choose a measured bound, initially 60 seconds, for “provider/session actually started.” Keep the existing configurable full wall deadline for legitimate long reviews.
 
-These are engineering judgments. They do not need Albert unless live evidence shows that secure main-task routing cannot meet the ultimate goal.
+These are engineering judgments. They never need Albert; if live evidence shows that secure main-task routing cannot meet the ultimate goal, report it `Blocked —` for an assigned AI reviewer.
 
 ## 9. Ordered implementation plan
 
