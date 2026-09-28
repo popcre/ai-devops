@@ -484,13 +484,13 @@ read_key_from_op(){
       "$doctor" --recover --older-than 120 "$candidate" || true
     }
     muse_locked_read() {
-      flock --close -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key'
+      flock --close -E 87 -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key'
     }
-    # A failure while the lock is provably free is op's own error: no sweep,
-    # no retry. A failure while another process still holds the lock is a
-    # stuck holder: doctor, then one retry (#1002).
+    # Exit 87 means the wait timed out on contention; any other failure is
+    # op's own error: no sweep, no retry. On real contention the doctor runs
+    # once, then one retry (#1002).
     MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" muse_locked_read)" || {
-      flock -n "$candidate" true 2>/dev/null && die 'Muse key refresh failed or the shared 1Password lock is busy; no key was stored.'
+      [ "$?" -eq 87 ] || die 'Muse key refresh failed or the shared 1Password lock is busy; no key was stored.'
       muse_doctor
       MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" muse_locked_read)"
     } || die 'Muse key refresh failed or the shared 1Password lock is busy; no key was stored.'

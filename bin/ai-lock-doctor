@@ -54,7 +54,8 @@
 set -uo pipefail
 
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
-REPO_ROOT="${AI_LOCK_DOCTOR_REPO_ROOT:-$(cd "$(dirname "$SELF_PATH")/.." && pwd)}"
+DEFAULT_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
+REPO_ROOT="${AI_LOCK_DOCTOR_REPO_ROOT:-$DEFAULT_ROOT}"
 
 recover=false
 older_than=120
@@ -73,6 +74,14 @@ while [ "$#" -gt 0 ]; do
 done
 case "$older_than" in ''|*[!0-9]*|0) printf 'ai-lock-doctor: --older-than must be a positive whole number of seconds\n' >&2; exit 2 ;; esac
 [ -n "$lockfile" ] || { printf 'usage: ai-lock-doctor [--recover] [--older-than N] <lockfile>\n' >&2; exit 2; }
+
+# The repo-root override is a test seam for DIAGNOSIS only. Under --recover a
+# widened root would mark every holder our-tool and kill-eligible, so the
+# override must still point at a checkout that owns this exact doctor.
+if [ "${AI_LOCK_DOCTOR_REPO_ROOT:-}" != "" ] && [ "$REPO_ROOT" != "$DEFAULT_ROOT" ]; then
+  [ "$(readlink -f "$REPO_ROOT/bin/ai-lock-doctor" 2>/dev/null || true)" = "$SELF_PATH" ] \
+    || { printf 'ai-lock-doctor: AI_LOCK_DOCTOR_REPO_ROOT does not own this doctor; refusing\n' >&2; exit 2; }
+fi
 
 info(){ printf 'ai-lock-doctor: %s\n' "$*" >&2; }
 
@@ -108,16 +117,21 @@ LOCK_DEV_N="$(norm "$lock_dev")"; LOCK_INO_N="$(norm "$lock_ino")"
 # the kernel's list of advisory locks actually held. The pid column is still
 # never trusted (#940), but the ENTRY's existence proves a real flock sits on
 # the inode — an open descriptor alone (an editor, a stale fd) is not a lock,
-# and recovery must not signal anyone for it. The lock id there is hex
-# (major:minor:inode) while stat prints decimal, so convert.
+# and recovery must not signal anyone for it. The line prints major:minor in
+# HEX and the inode in DECIMAL (fs/locks.c "%02x:%02x:%lu"; the #940 evidence
+# line itself shows the decimal inode 102105116). Blocked-waiter lines carry
+# "->" in the second column and are skipped: their fields are shifted.
 locks_seen=false
 locks_pid=''
 if [ -r /proc/locks ]; then
-  while IFS=' ' read -r _ _ _ _ lpid lid _ _; do
+  while IFS=' ' read -r _ marker _ _ lpid lid _ _; do
+    [ "$marker" != "->" ] || continue
     [ -n "$lid" ] || continue
     ldev="${lid%%:*}"; resto="${lid#*:}"; lino="${resto##*:}"
-    case "$ldev$lino" in ''|*[!0-9a-fA-F]*) continue ;; esac
-    [ "$((16#$lino))" = "$((10#$lock_ino))" ] || continue
+    case "$ldev" in ''|*[!0-9a-fA-F]*) continue ;; esac
+    case "$lino" in ''|*[!0-9]*) continue ;; esac
+    [ "$((16#$ldev))" = "$((10#$lock_dev))" ] || continue
+    [ "$((10#$lino))" = "$((10#$lock_ino))" ] || continue
     locks_seen=true; locks_pid="$lpid"
   done < /proc/locks
 fi
@@ -175,16 +189,27 @@ path_is_repo(){
     *) return 1 ;;
   esac
 }
+LOCKFILE_CANON="$(readlink -f "$lockfile" 2>/dev/null || echo "$lockfile")"
 proc_is_our_tool(){
-  local pid="$1" hop pid_now cmd tok
+  local pid="$1" hop pid_now cmd tok first
   pid_now="$pid"
   for hop in 1 2 3 4 5 6 7 8 9 10 11 12; do
     [ -n "$pid_now" ] || return 1
     [ -d "/proc/$pid_now" ] || return 1
     cmd="$(proc_cmdline "$pid_now")"
     [ -n "$cmd" ] || return 1
+    first="${cmd%% *}"
     while IFS= read -r tok; do
       [ -n "$tok" ] || continue
+      # An flock ON THIS EXACT LOCK FILE is by construction one of this
+      # toolkit's serialized reads: the generated setup-secrets launchers
+      # live outside the repository, so the repo-path rule alone cannot see
+      # them, but their own flock command line names the lock itself. Only
+      # the flock process itself counts; a foreign reader that merely opens
+      # the lock file does not.
+      if [ "$first" = flock ] || [ "$first" = flock.exe ]; then
+        [ "$tok" = "$LOCKFILE_CANON" ] && return 0
+      fi
       case "$tok" in
         /*) path_is_repo "$tok" && return 0 ;;
         */*)
@@ -231,6 +256,23 @@ find_holders(){
   done < <(find /proc/[0-9]*/fd -maxdepth 1 -name '[0-9]*' -printf '%p\n' 2>/dev/null | LC_ALL=C sort -u)
 }
 
+# Evidence line: name every holder, but echo a foreign process's own command
+# line only by its argv[0] — this repository's standing rule keeps secret
+# values out of output, and a third party's argv is not ours to publish.
+# Our-tool holders (proven repo descendants or flock-on-this-lock) show a
+# bounded 100-character argv because their wrappers already keep secrets out
+# of arguments.
+holder_evidence(){
+  local pid="$1" klass="$2" age="$3" cmd first
+  cmd="$(proc_cmdline "$pid")"
+  first="${cmd%% *}"
+  if [ "$klass" != our-tool ]; then
+    printf 'holder pid=%s class=%s age=%ss cmd=%s' "$pid" "$klass" "$age" "$first"
+  else
+    printf 'holder pid=%s class=%s age=%ss cmd=%s' "$pid" "$klass" "$age" "$(printf '%s' "$cmd" | cut -c1-100)"
+  fi
+}
+
 scan_once(){
   local pid age klass line
   HOLDERS_OUR=''; HOLDERS_FOREIGN=''; HOLDERS_YOUNG=''; HOLDERS_UNKNOWN_AGE=''
@@ -241,8 +283,7 @@ scan_once(){
     if [ -n "${PROTECTED_PIDS[$pid]:-}" ]; then klass=self
     elif proc_is_our_tool "$pid"; then klass=our-tool
     else klass=foreign; fi
-    line="holder pid=$pid class=$klass age=${age}s cmd=$(proc_cmdline "$pid")"
-    info "$line"
+    info "$(holder_evidence "$pid" "$klass" "$age")"
     case "$klass" in
       our-tool)
         if [ "$age" = '?' ]; then

@@ -57,6 +57,12 @@ jobs:
           ruleset_id="$(jq -r .ruleset_id config/merge-queue-expected.json)"
           repo="$(jq -r .repository config/merge-queue-expected.json)"
           if ! bin/ai-gh api "repos/$repo/rulesets/$ruleset_id" > /tmp/ruleset.json 2>/tmp/read.err; then
+            if grep -q 'HTTP 404' /tmp/read.err; then
+              # The ruleset itself is gone or renumbered: that is drift.
+              echo "outcome=drift" >> "$GITHUB_OUTPUT"
+              echo "the live ruleset $ruleset_id no longer exists" >&2
+              exit 1
+            fi
             echo "outcome=refused" >> "$GITHUB_OUTPUT"
             echo "::warning::live ruleset read was refused; offline checks stay in force"
             sed -n '1,4p' /tmp/read.err || true
@@ -71,12 +77,15 @@ jobs:
 
   alert:
     needs: [drift, live-ruleset]
+    # A failed job of EITHER kind is alertable: an outcome-less failure
+    # (checkout, jq, runner) must reach the standing issue too.
     if: >-
       always() && !cancelled() && github.event_name != 'pull_request' &&
-      (needs.drift.result != 'success' || needs.live-ruleset.outputs.outcome == 'drift' || needs.live-ruleset.outputs.outcome == 'refused')
+      (needs.drift.result != 'success' || needs.live-ruleset.result != 'success' || needs.live-ruleset.outputs.outcome == 'refused')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
     permissions:
+      contents: read
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}

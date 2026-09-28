@@ -285,8 +285,13 @@ fi
 # clears this toolkit's own holders once, then one retry (#1002); a foreign
 # holder is never touched and the failure stands.
 _aidev_flock() {
-  flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
-  flock -n "$CFG_DIR/op-refresh.lock" true 2>/dev/null && return 1
+  # Exit 87 means the wait timed out on contention; any other failure is the
+  # op command's own error: no sweep, no retry. On real contention
+  # ai-lock-doctor clears this toolkit's own holders once, then one retry
+  # (#1002); a foreign holder is never touched and the failure stands.
+  flock --close -E 87 -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
+  _aidev_rc=\$?
+  [ "\$_aidev_rc" -eq 87 ] || return "\$_aidev_rc"
   command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }
@@ -325,8 +330,13 @@ URL="\$1"; REF="\$2"; shift 2
 # lock gets one doctor pass and one retry (#1002), never holding the lock
 # around mcp-remote.
 _aidev_flock() {
-  flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
-  flock -n "$CFG_DIR/op-refresh.lock" true 2>/dev/null && return 1
+  # Exit 87 means the wait timed out on contention; any other failure is the
+  # op command's own error: no sweep, no retry. On real contention
+  # ai-lock-doctor clears this toolkit's own holders once, then one retry
+  # (#1002); a foreign holder is never touched and the failure stands.
+  flock --close -E 87 -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
+  _aidev_rc=\$?
+  [ "\$_aidev_rc" -eq 87 ] || return "\$_aidev_rc"
   command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }

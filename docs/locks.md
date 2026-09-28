@@ -26,18 +26,29 @@ machine. `flock --close` (added by #939) keeps the descriptor out of `op`'s
 children; the kernel releases the lock when the last holder's descriptor
 closes, so a "stuck" flock is always a live holder, never a dead one.
 
+Every wired site acquires with `-E 87`: exit 87 means the wait timed out on
+contention, and ONLY that outcome triggers the doctor and one retry — a
+failure of the op command itself (auth, vault, network) is never swept and
+never retried.
+
 | Where | Acquire / wait | Release | Staleness handling |
 |---|---|---|---|
-| `bin/setup-secrets.sh:286-295` (generated MCP launcher `_aidev_flock`) | `flock --close -w 90` (`:288`), probe (`:289`), retry (`:291`) | kernel | contention probe, then `ai-lock-doctor --recover --older-than 90` (`:290`), then one retry; op's own errors are not swept |
-| `bin/setup-secrets.sh:327-338` (generated remote launcher `_aidev_flock`) | `flock --close -w 90` (`:328`), probe (`:329`), retry (`:331`) | kernel | same shape; call site `:338` |
-| `bin/ai-qwen:442` (`cmd_store_key`; path resolved at `ai-qwen:372-390`; probe helper `lock_still_held` at `:419`) | `flock --close -w 120`, probe, retry (`:445`) | kernel | probe, `lock_doctor` (`--recover --older-than 120`), one retry (#1002) |
-| `bin/ai-muse:484` (`muse_locked_read` in `read_key_from_op`; path at `ai-muse:474`; `need flock` at `:472`) | `flock --close -w "$budget"` (default 120) | kernel | probe (`:490`), `muse_doctor` (`--recover --older-than "$budget"`), one retry; a free lock fails fast with the original message |
-| `bin/ai-deepseek-agent:385` (`ds_locked_reexec`; `flock` check at `:376`) | `flock --close -w 120` | kernel | probe (`:394`) keeps the original exit status, `ds_lock_doctor` (`:382`), one retry |
+| `bin/setup-secrets.sh:287-299` (generated MCP launcher `_aidev_flock`) | `flock --close -E 87 -w 90` (`:292`), retry (`:296`) | kernel | conflict code 87, then `ai-lock-doctor --recover --older-than 90` (`:295`), then one retry; op's own errors keep their status |
+| `bin/setup-secrets.sh:332-348` (generated remote launcher `_aidev_flock`) | `flock --close -E 87 -w 90` (`:337`), retry (`:341`) | kernel | same shape; call site `:348` |
+| `bin/ai-qwen:439` (`cmd_store_key`; path resolved at `ai-qwen:372-390`; `lock_doctor` at `:411`) | `flock --close -E 87 -w 120`, retry (`:442`) | kernel | conflict code 87, doctor (`--recover --older-than 120`), one retry (#1002) |
+| `bin/ai-muse:487` (`muse_locked_read` in `read_key_from_op`; path at `ai-muse:474`; `need flock` at `:472`) | `flock --close -E 87 -w "$budget"` (default 120) | kernel | conflict code 87, `muse_doctor` with the CONSTANT floor `--older-than 120` (never the caller-settable budget), one retry |
+| `bin/ai-deepseek-agent:385` (`ds_locked_reexec`; `flock` check at `:376`) | `flock --close -E 87 -w 120` | kernel | conflict code 87 keeps the original status otherwise, `ds_lock_doctor` (`:377`), one retry |
 
-Grep hits covered: `setup-secrets.sh:287,288,289,290,291,294,327,328,329,
-330,331,338`; `ai-qwen:374,390,419,424,441,442,445`; `ai-muse:472,474,484,
-490`; `ai-deepseek-agent:376,382,385,394,319` (the comment naming the Git
-Bash limitation of the same boundary).
+Grep hits covered: `setup-secrets.sh:287,292,295,296,299,332,337,340,341,348`;
+`ai-qwen:374,390,421,438,439,442`; `ai-muse:472,474,487`;
+`ai-deepseek-agent:376,382,385,319` (the comment naming the Git Bash
+limitation of the same boundary).
+
+The generated launchers live outside the repository, so the doctor's
+repo-path rule cannot see them; their own `flock` process is recognized
+instead by naming THIS exact lock file in its command line, and only an
+`flock` process counts (a foreign reader that merely opens the lock file
+does not).
 
 ## B. The shared Windows credential lock (`credential.lock.d`, mkdir)
 
@@ -47,11 +58,11 @@ has no `flock`.
 
 | Where | Acquire / wait | Release | Staleness handling |
 |---|---|---|---|
-| `bin/ai-muse:497` (`muse_credential_acquire`, publish `muse_credential_publish` at `:398`) | poll until `budget` (120 s default) | `release_credential_lock` (`ai-muse:161`) removes only its own token | owner record: liveness x3 with winpid (`ps -W`); legacy pid-only: never reclaimed on Windows; no pid at all: reclaimed after 60 s |
-| `bin/ai-qwen:544+` `lock_acquire` (call at `ai-qwen:428` inside `cmd_store_key`, path via `qwen_shared_credential_lock_path` `:372-390`) | poll until 120 s deadline | `lock_release` removes only its own token | owner record: liveness x3 with winpid; legacy pid-only (Muse's old format): reclaimed on Windows only under the pid+age rule — pid not observable AND lock older than 15 minutes (`ai-qwen:559-572`); no pid: reclaimed after 7200 s |
+| `bin/ai-muse:500` (`muse_credential_acquire`, publish `muse_credential_publish` at `:398`) | poll until `budget` (120 s default) | `release_credential_lock` (`ai-muse:161`) removes only its own token | owner record: liveness x3 with winpid (`ps -W`); legacy pid-only: never reclaimed on Windows; no pid at all: reclaimed after 60 s |
+| `bin/ai-qwen:541+` `lock_acquire` (call at `ai-qwen:428` inside `cmd_store_key`, path via `qwen_shared_credential_lock_path` `:372-390`) | poll until 120 s deadline | `lock_release` removes only its own token | owner record: liveness x3 with winpid; legacy pid-only (Muse's old format): reclaimed on Windows only under the pid+age rule — pid not observable AND lock older than 15 minutes (`ai-qwen:558-571`); no pid: reclaimed after 7200 s |
 | `bin/ai-deepseek-agent:322` (inline `acquire_lock`/`publish_lock`) | poll until 120 s deadline | inline `release_lock`, token-checked | owner record only: liveness x3 with winpid; refuses every legacy lock without a winpid ("Wait or fail closed") |
 
-Grep hits covered: `ai-muse:497`; `ai-qwen:372,388` (Windows path branch of
+Grep hits covered: `ai-muse:500`; `ai-qwen:372,388` (Windows path branch of
 `qwen_shared_credential_lock_path`); `ai-deepseek-agent:322`.
 
 ## C. Portable per-session mutexes (`*.lock.d`, mkdir + owner pid)
@@ -61,12 +72,12 @@ because `flock` does not exist in Git Bash.
 
 | Tool | Path builders (grep hits) | Acquire / release | Staleness handling |
 |---|---|---|---|
-| `bin/ai-qwen` | `lock_path`/`repolock_path`/`reviewlock_path` (`509,510,515`; comment `518`) | `lock_acquire` (`544`) / `lock_release` | liveness x3 (winpid fallback); tombstoned reclaim keyed by owner token; dead-lock tombs older than 1440 min swept |
+| `bin/ai-qwen` | `lock_path`/`repolock_path`/`reviewlock_path` (`506,507,512`; comment `515`) | `lock_acquire` (`544`) / `lock_release` | liveness x3 (winpid fallback); tombstoned reclaim keyed by owner token; dead-lock tombs older than 1440 min swept |
 | `bin/ai-kimi` | `lock_path`/`repolock_path`/`reviewlock_path` (`529,530,535`; comment `538`) | `lock_acquire` / `lock_release` (rm -rf) | pid dead → `rm -rf` and re-mkdir immediately |
 | `bin/ai-grok-review` | `lock_path`/`repolock_path`/session+work lock builders (`505,507,513,523`; comment `549`) | `lock_acquire` (`551`) / per-scope release | pid alive → busy; dead owner: repo locks retained for manual reconciliation (unconfirmed remote completion), pre-provider work locks reclaimed (`591`); scans over lock sets at `1963,2014` |
 | `bin/ai-glm` | session locks `$rid--$caller--$name.lock.d` (`350`, comment `352`, acquire `2114`, pid read `2284`); meta update lock `.update.lock.d` (`563`); collision guards (`2055,2056,2072,2073`); orphan sweep guards (`2189,2247,2255`) | lock dir with pid file; released by the owning session | pid-file record; collision and orphan logic treats an existing lock as authoritative (fail closed) |
 | `bin/ai-muse` | session lock `lock_session` (`219`) | token + pid publish; `unlock_session` | pid dead or unparsable owner older than 1 min → quarantine and retry (3 attempts) |
-| `bin/ai-lock-doctor` | the doctor itself (`75,250,305` probe and guard lines; header `2,8,10,19,29,30,145`) | reads the lock's inode and `/proc/*/fd`; kernel-proven freedom probes at `250` and `305` | our-tool holders at least `--older-than` old are TERM/KILLed under `--recover`; foreign, young, and unknown-age holders are never signalled |
+| `bin/ai-lock-doctor` | the doctor itself (`94,118` flock guards; kernel-proven freedom probes `204,207,208,210`; lock-existence gate `308,323`; header `2,8,10,19,31,32,35,36,176,262,370`) | reads the lock's inode and `/proc/*/fd`; kernel-proven freedom probes at `250` and `305` | our-tool holders at least `--older-than` old are TERM/KILLed under `--recover`; foreign, young, and unknown-age holders are never signalled |
 
 ## D. One-shot mkdir locks (tick, run, and build serialization)
 

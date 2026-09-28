@@ -415,9 +415,6 @@ cmd_store_key() {
     [ -n "$doctor" ] || { note 'ai-lock-doctor is unavailable; cannot self-heal the credential lock.'; return 0; }
     "$doctor" --recover --older-than "$1" "$2" || true
   }
-  lock_still_held() { # lock_still_held LOCK -> 0 only while another process provably holds the lock
-    ! flock -n "$1" true 2>/dev/null
-  }
   if ! (
     [ -z "$token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$token"
     if [ -n "${SYSTEMROOT:-}" ]; then
@@ -434,13 +431,13 @@ cmd_store_key() {
     else
       # setup-secrets.sh uses this same lock for Linux 1Password reads.
       # Keep it through op's exit, but never pass its descriptor to op's
-      # children. A failure while the lock is provably free is op's own
-      # error: no sweep and no retry. A failure while another process still
-      # holds the lock is a stuck holder: ai-lock-doctor clears only this
-      # toolkit's holders, then the read is retried once (#1002).
+      # children. Exit 87 means the wait timed out on contention (#1002);
+      # any other failure is op's own error: no sweep, no retry. On real
+      # contention ai-lock-doctor clears only this toolkit's holders, then
+      # the read is retried exactly once.
       command -v flock >/dev/null 2>&1 || exit 1
-      flock --close -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp" && exit 0
-      lock_still_held "$credential_lock" || exit 1
+      flock --close -E 87 -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp" && exit 0
+      [ "$?" -eq 87 ] || exit 1
       lock_doctor 120 "$credential_lock"
       flock --close -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp"
     fi

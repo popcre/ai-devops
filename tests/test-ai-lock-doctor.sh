@@ -28,15 +28,16 @@ if "$DOCTOR" >/dev/null 2>&1; then result fail 'no lock file argument refuses wi
 if "$DOCTOR" --no-such-flag "$TMP/x" >/dev/null 2>&1; then result fail 'unknown option is refused'; else result pass 'unknown option is refused'; fi
 if "$DOCTOR" --older-than ten "$TMP/x" >/dev/null 2>&1; then result fail 'non-numeric --older-than is refused'; else result pass 'non-numeric --older-than is refused'; fi
 
-# The wired wrappers must prove contention before any sweep, and must call
-# the doctor only through the bounded --recover route (#1002 review, finding 4).
+# The wired wrappers must prove contention (flock's conflict exit code) before
+# any sweep, and must call the doctor only through the bounded --recover route
+# (#1002 reviews, findings 4 and 5 of rounds 3 and 4).
 for wrapper in ai-qwen ai-muse ai-deepseek-agent; do
   body="$ROOT/bin/$wrapper"
-  if grep -q 'flock -n .*true 2>/dev/null' "$body" && grep -q 'ai-lock-doctor' "$body" \
+  if grep -q -- '-E 87' "$body" && grep -q 'ai-lock-doctor' "$body" \
      && grep -q -- '--recover --older-than' "$body" && bash -n "$body"; then
-    result pass "$wrapper probes contention and sweeps only through ai-lock-doctor"
+    result pass "$wrapper proves contention and sweeps only through ai-lock-doctor"
   else
-    result fail "$wrapper probes contention and sweeps only through ai-lock-doctor"
+    result fail "$wrapper proves contention and sweeps only through ai-lock-doctor"
   fi
 done
 
@@ -126,14 +127,25 @@ else
   result fail 'a detached fd holder is found by inode and classified foreign'
 fi
 
-# Case 2: a foreign holder is reported and NOT killed.
-if ! "$DOCTOR" --recover --older-than 1 "$lock" >"$TMP/out5" 2>&1 && grep -q 'foreign holders remain' "$TMP/out5" \
-   && kill -0 "$daemon_pid" 2>/dev/null; then
+# Case 2: a foreign holder of a REAL flock is reported and NOT killed. The
+# renamed argv[0] keeps the doctor's our-tool rule (an flock on this exact
+# lock) from matching, so the holder is foreign by proof, not by accident.
+foreign_pid=''
+setsid bash -c 'exec -a ailockdoctor-foreign flock "$1" sleep 120' _ "$lock" >/dev/null 2>&1 &
+foreign_spawn=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  foreign_pid="$(ps -eo pid=,ppid=,args= | awk '$2 == 1 && /ailockdoctor-foreign/ { print $1; exit }')"
+  [ -n "$foreign_pid" ] && break
+  sleep 0.2
+done
+if [ -n "$foreign_pid" ] && ! "$DOCTOR" --recover --older-than 1 "$lock" >"$TMP/out5" 2>&1 && grep -q 'foreign holders remain' "$TMP/out5" \
+   && kill -0 "$foreign_pid" 2>/dev/null; then
   result pass 'a foreign holder survives --recover and fails loudly'
 else
   result fail 'a foreign holder survives --recover and fails loudly'
 fi
-kill "$daemon_pid" 2>/dev/null || true; wait "$daemon_spawn" 2>/dev/null || true
+kill "$foreign_pid" 2>/dev/null || true; wait "$foreign_spawn" 2>/dev/null || true
+for _ in 1 2 3 4 5; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; done
 
 # Case 5: a lock held for less than the timeout is left alone.
 flock "$lock" sleep 120 &
