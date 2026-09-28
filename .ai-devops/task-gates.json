@@ -16,6 +16,8 @@
     { "glob": "bin/install-ai-devops-windows.ps1", "class": "reviewer-safety" },
     { "glob": "bin/install-machine-tools.ps1", "class": "reviewer-safety" },
     { "glob": "bin/setup-machine.ps1", "class": "reviewer-safety" },
+    { "glob": "bin/setup_dev_computer_internal.ps1", "class": "reviewer-safety" },
+    { "glob": "bin/run_me_setup_dev_comp.bat", "class": "reviewer-safety" },
     { "glob": "tests/test-windows-source-gate.ps1", "class": "reviewer-safety" },
     { "glob": "tests/test-windows-ai-kimi-shim.ps1", "class": "reviewer-safety" },
     { "glob": "tools/lib/task-gates.sh", "class": "reviewer-safety" },

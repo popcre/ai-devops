@@ -444,12 +444,11 @@ if ($ubuntuReady) {
 # --------------------------------------------------------------------
 Banner "AI DEVOPS SETUP"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$aiDevOpsSetup = Join-Path $repoRoot "setup-machine.ps1"
+$aiDevOpsSetup = Join-Path $PSScriptRoot "setup-machine.ps1"
 $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $aiDevOpsSetup)) {
-    Fail "Missing AI DevOps setup script: $aiDevOpsSetup"
-    Add-Result "AI DevOps setup" "SKIPPED - helper missing" "-"
+    throw "Missing guarded AI DevOps setup script: $aiDevOpsSetup"
 } elseif (-not $pwsh) {
     Warn "PowerShell 7 is not available in this window yet."
     Warn "Re-run this setup after opening a new terminal; it will then run AI DevOps setup."

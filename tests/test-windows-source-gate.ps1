@@ -559,6 +559,16 @@ try {
     'legacy direct setup must authorize source before transcript and package writes'
   Assert ($legacySetup.Contains('AI DevOps guarded machine setup failed; legacy setup cannot report completion.')) `
     'legacy setup must stop when delegated guarded setup fails'
+  $legacyDelegatedSetup=Join-Path (Join-Path $root 'bin') 'setup-machine.ps1'
+  Assert (Test-Path -LiteralPath $legacyDelegatedSetup -PathType Leaf) 'guarded machine setup is absent from legacy helper directory'
+  Assert ($legacySetup.Contains('$aiDevOpsSetup = Join-Path $PSScriptRoot "setup-machine.ps1"') -and
+    $legacySetup.Contains('throw "Missing guarded AI DevOps setup script: $aiDevOpsSetup"')) `
+    'legacy setup must locate and require the guarded installer beside the helper'
+  $localClasses=Get-Content -Raw (Join-Path $root '.ai-devops\task-gates.json') | ConvertFrom-Json
+  foreach ($protectedPath in @('bin/setup_dev_computer_internal.ps1','bin/run_me_setup_dev_comp.bat')) {
+    Assert (@($localClasses.paths | Where-Object { $_.glob -ceq $protectedPath -and $_.class -ceq 'reviewer-safety' }).Count -eq 1) `
+      "legacy setup path lacks reviewer-safety classification: $protectedPath"
+  }
   Write-Host 'PASS: Windows source gate rejects hostile source, moved targets, unpinned protected updates, stale receipts, and pre-advanced checkout'
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
