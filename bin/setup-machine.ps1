@@ -1255,6 +1255,17 @@ if ($LASTEXITCODE -ne 0 -or $museRepo.Count -ne 1 -or [string]::IsNullOrWhiteSpa
 if ($LASTEXITCODE -ne 0) { throw "Muse live preflight exited $LASTEXITCODE" }
 Ok "Muse protected reviewer is ready"
 
+# The Windows installer precedes service-account token setup. Seed DeepSeek's
+# protected store now, outside a review turn, using the wrapper's shared lock.
+Step "DeepSeek protected reviewer"
+$deepseekWrapper = Join-Path $RepoPath "bin\ai-deepseek-agent"
+if (-not (Test-Path -LiteralPath $deepseekWrapper)) { throw "Missing DeepSeek wrapper: $deepseekWrapper" }
+& $gitBash $deepseekWrapper store-key --if-missing
+if ($LASTEXITCODE -ne 0) { throw "ai-deepseek-agent store-key exited $LASTEXITCODE" }
+& $gitBash $deepseekWrapper doctor --live
+if ($LASTEXITCODE -ne 0) { throw "DeepSeek live doctor exited $LASTEXITCODE" }
+Ok "DeepSeek protected reviewer is ready"
+
 # Retired: bin\ai-glm-agent.ps1 (GLM inside a Claude Code child process). Remove any
 # leftover PATH shim so a stale command cannot linger.
 foreach ($stale in @((Join-Path $env:USERPROFILE ".local\bin\ai-glm-agent.cmd"),

@@ -342,14 +342,21 @@ try {
     # a marker only when store-key --if-missing is actually invoked by Git Bash.
     $fixture = New-Fixture "qwen-key-store"
     $fixtureQwen = Join-Path $fixture "bin\ai-qwen"
+    $fixtureDeepSeek = Join-Path $fixture "bin\ai-deepseek-agent"
     $qwenFixtureScript = @'
 #!/usr/bin/env bash
 [ "$1" = store-key ] && [ "$2" = --if-missing ] || exit 17
 printf ready > "$(dirname "$0")/qwen-store-called"
 '@
     [IO.File]::WriteAllText($fixtureQwen, $qwenFixtureScript + "`n")
-    git -C $fixture add bin/ai-qwen
-    git -C $fixture commit -m "add Qwen key-store fixture" | Out-Null
+    $deepseekFixtureScript = @'
+#!/usr/bin/env bash
+[ "$1" = store-key ] && [ "$2" = --if-missing ] || exit 18
+printf ready > "$(dirname "$0")/deepseek-store-called"
+'@
+    [IO.File]::WriteAllText($fixtureDeepSeek, $deepseekFixtureScript + "`n")
+    git -C $fixture add bin/ai-qwen bin/ai-deepseek-agent
+    git -C $fixture commit -m "add reviewer key-store fixtures" | Out-Null
     git -C $fixture push | Out-Null
     $fakeBin = Join-Path $TempRoot "qwen-key-store\fake-bin"
     New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
@@ -363,6 +370,8 @@ printf ready > "$(dirname "$0")/qwen-store-called"
     }
     Assert-True (Test-Path (Join-Path $fixture "bin\qwen-store-called")) "Qwen install stage did not invoke store-key --if-missing"
     Assert-True ($output -match "Qwen protected per-user key store is ready") "Qwen install stage did not report protected key-store readiness"
+    Assert-True (Test-Path (Join-Path $fixture "bin\deepseek-store-called")) "DeepSeek install stage did not invoke store-key --if-missing"
+    Assert-True ($output -match "DeepSeek protected per-user key store is ready") "DeepSeek install stage did not report protected key-store readiness"
 
     # Muse reviews cannot fetch from 1Password. The Windows install must
     # populate the protected store explicitly, even before Muse Code exists.
