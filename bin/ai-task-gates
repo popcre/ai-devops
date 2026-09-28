@@ -957,6 +957,7 @@ cmd_install_verify(){
   case "$phase" in preflight|resume|finalize) ;; *) die 'install-verify needs preflight, resume, or finalize.' ;; esac
   [ "$(uname -s)" = Linux ] || blocked 'ai-task-gates: STOP. This install verification route is Linux-only.'
   [[ "$target" =~ ^[0-9a-f]{40}$ ]] || die 'install-verify requires a full target SHA.'
+  POLICY_FILE="$ROOT/config/task-gates.json"
   require_jq; load_policy; resolve_repo
   intent_state="$(state_path)"
   if [ -f "$intent_state" ]; then declared_installation="$(jq -r '.declared_class // empty' "$intent_state")"; fi
@@ -1115,6 +1116,7 @@ cmd_authorize_install(){
       *) die "unknown option for authorize-install: $1" ;;
     esac
   done
+  POLICY_FILE="$ROOT/config/task-gates.json"
   require_jq; load_policy; resolve_repo
   [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] || blocked 'ai-task-gates: STOP. Install authority is limited to ai-devops.'
   [ "$(state_field declared_class)" = installation ] || blocked 'ai-task-gates: STOP. Install authority requires a separate declared installation task.'
