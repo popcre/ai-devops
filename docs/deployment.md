@@ -283,7 +283,8 @@ cd /worksp/ai-devops-candidate
 ```
 
 The updater verifies the candidate and installed checkout relationship, fetches
-and pins `origin/main`, runs the target gate, then advances only the named
+and pins `origin/main`, records an installation task in the exact target
+candidate, runs its gate, then advances only the named
 installed checkout. Later updates can run from the installed checkout itself.
 `install.sh` checks the same pending authorization before its first machine
 change, including when called directly. Same-source maintenance uses
@@ -299,6 +300,14 @@ provider and skill changes are not an atomic transaction, so a failed update
 still needs explicit capability verification before being called rolled back.
 Reviewer requalification is a required installer stage before authorization
 is finalized, including on a direct retry.
+
+If the installed Linux manifest names an older source SHA than the live clean
+checkout, the independent exact-head report must explicitly name
+`stale-linux-manifest-recovery` and bind the stale manifest SHA and file hash
+plus the live installed SHA and gate hash. The separate installation task then
+uses `authorize-install --stale-manifest-recovery` for one pinned target update.
+Without that exact reviewed evidence, the updater stops before changing the
+installed checkout.
 
 Reviewer hosts do not need `update.sh` for requalification: the managed
 `post-merge` hook runs `ai-review-preflight requalify` on every pull whose

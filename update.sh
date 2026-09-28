@@ -114,11 +114,20 @@ cleanup() {
 trap cleanup EXIT
 git -c core.hooksPath="$hooks_dir" worktree add --detach "$candidate" "$target_head" >/dev/null || exit 1
 candidate_added=1
+# Task declarations are scoped to one worktree. The disposable exact-target
+# candidate must declare its own installation task before its gate preflight;
+# an earlier declaration in the caller's worktree cannot stand in for it.
+declaration_reason="${owner_request:-Pinned installation candidate for $target_head}"
+(cd "$candidate" && "$candidate/bin/ai-task-gates" start --class installation \
+  --base "$previous_head" --reason "$declaration_reason") || {
+  warn 'candidate installation task declaration failed before checkout advance'
+  exit 1
+}
 gate_args=(install-verify --phase preflight --target-head "$target_head"
   --installed-checkout "$REPO_ROOT" --installed-launcher /usr/local/bin/ai-task-gates)
 [ -z "$expected_head" ] || gate_args+=(--caller-pinned)
 [ -z "$owner_request" ] || gate_args+=(--owner-request "$owner_request")
-"$candidate/bin/ai-task-gates" "${gate_args[@]}" || {
+(cd "$candidate" && "$candidate/bin/ai-task-gates" "${gate_args[@]}") || {
   warn 'installation preflight refused; installed checkout was not advanced'
   exit 1
 }

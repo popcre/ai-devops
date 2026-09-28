@@ -10,6 +10,13 @@ mkdir -p "$HOME" "$TMP/src/bin"
 cat > "$TMP/src/bin/ai-task-gates" <<'GATE'
 #!/usr/bin/env bash
 set -eu
+if [ "${1:-}" = start ]; then
+  [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || exit 45
+  printf 'start\n' >> "$TEST_LOG"
+  [ "${TEST_GATE_DENY_PHASE:-}" != start ] || exit 46
+  [ "${2:-}" = --class ] && [ "${3:-}" = installation ] || exit 47
+  exit 0
+fi
 phase=''
 owner=''
 caller_pinned=0
@@ -22,6 +29,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 printf '%s\n' "$phase" >> "$TEST_LOG"
+[ "$phase" != preflight ] || [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || exit 48
 [ "${TEST_GATE_DENY_PHASE:-}" != "$phase" ] || exit 41
 if [ "$phase" = resume ] && [ "${TEST_REQUIRE_OWNER:-0}" = 1 ]; then
   [ -n "$owner" ] || exit 42
@@ -95,6 +103,10 @@ if [ "${TEST_INSTALL_FAIL:-0}" = 1 ]; then
   exit 7
 fi
 "$(dirname "$0")/bin/ai-review-preflight" requalify
+"$(dirname "$0")/bin/ai-task-gates" install-verify --phase stages-complete \
+  --target-head "$(git -C "$(dirname "$0")" rev-parse HEAD)" \
+  --installed-checkout "$(dirname "$0")" \
+  --installed-launcher /usr/local/bin/ai-task-gates
 if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" != 1 ]; then
   "$(dirname "$0")/bin/ai-task-gates" install-verify --phase finalize \
     --target-head "$(git -C "$(dirname "$0")" rev-parse HEAD)" \
@@ -120,7 +132,7 @@ check_head "$before"
 if TEST_GATE_DENY_PHASE=preflight "$TMP/installed/update.sh" --expected-head "$target" \
   >/dev/null 2>&1; then fail 'denied candidate preflight was accepted'; fi
 check_head "$before"
-[ "$(cat "$TEST_LOG")" = preflight ] || fail 'preflight did not precede checkout advance'
+[ "$(paste -sd, "$TEST_LOG")" = 'start,preflight' ] || fail 'task start/preflight did not precede checkout advance'
 [ "$(git -C "$TMP/installed" rev-parse refs/remotes/origin/main)" = "$target" ] ||
   fail 'fetch did not pin origin/main to candidate target'
 
@@ -129,7 +141,7 @@ if TEST_REQUIRE_PIN=1 "$TMP/installed/update.sh" >/dev/null 2>&1; then
   fail 'protected range accepted update without caller pin'
 fi
 check_head "$before"
-[ "$(cat "$TEST_LOG")" = preflight ] || fail 'unpinned update passed preflight'
+[ "$(paste -sd, "$TEST_LOG")" = 'start,preflight' ] || fail 'unpinned update passed preflight'
 : > "$TEST_LOG"
 if TEST_REQUIRE_OWNER_PREFLIGHT=1 "$TMP/installed/update.sh" --expected-head "$target" \
   >/dev/null 2>&1; then fail 'ordinary preflight accepted missing owner request'; fi
@@ -164,6 +176,7 @@ if TEST_REQUALIFY_FAIL=1 "$TMP/requal/update.sh" --expected-head "$target" \
 [ "$(git -C "$TMP/requal" rev-parse HEAD)" = "$target" ] ||
   fail 'unproven requalification incorrectly rolled back target'
 if grep -q '^finalize$' "$TEST_LOG"; then fail 'failed requalification finalized'; fi
+if grep -q '^stages-complete$' "$TEST_LOG"; then fail 'failed requalification marked stages complete'; fi
 if TEST_REQUALIFY_FAIL=1 "$TMP/requal/install.sh" >/dev/null 2>&1; then
   fail 'direct retry accepted failed requalification'
 fi
@@ -175,7 +188,7 @@ if grep -q '^finalize$' "$TEST_LOG"; then fail 'failed direct retry finalized'; 
 : > "$TEST_LOG"
 "$TMP/installed/update.sh" --expected-head "$target" --owner-request 'fixture approval' >/dev/null
 check_head "$target"
-[ "$(paste -sd, "$TEST_LOG")" = 'preflight,install,resume,requalify,finalize' ] ||
+[ "$(paste -sd, "$TEST_LOG")" = 'start,preflight,install,resume,requalify,stages-complete,finalize' ] ||
   fail 'update did not run gate/install/requalification in order'
 
 # First protected rollout executes the target updater from a separate worktree
@@ -197,7 +210,7 @@ TEST_REQUIRE_OWNER_PREFLIGHT=1 "$TMP/first-candidate/update.sh" \
   --owner-request 'fixture first rollout' >/dev/null
 [ "$(git -C "$TMP/first" rev-parse HEAD)" = "$target" ] ||
   fail 'candidate updater did not advance named installed checkout'
-[ "$(paste -sd, "$TEST_LOG")" = 'preflight,install,resume,requalify,finalize' ] ||
+[ "$(paste -sd, "$TEST_LOG")" = 'start,preflight,install,resume,requalify,stages-complete,finalize' ] ||
   fail 'candidate updater skipped an installation stage'
 
 # Exercise the installer's actual routing backup/restore functions in an

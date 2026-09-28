@@ -772,12 +772,21 @@ if ! print_summary; then
   if restore_install_state; then record_restored_state || true; fi
   exit 1
 fi
+"$REPO_ROOT/bin/ai-task-gates" install-verify --phase stages-complete \
+  --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
+  --installed-launcher /usr/local/bin/ai-task-gates || {
+    if restore_install_state; then record_restored_state || true; fi
+    warn 'installation stage receipt refused; authorization remains pending for repair'
+    exit 1
+  }
 if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" != 1 ]; then
   "$REPO_ROOT/bin/ai-task-gates" install-verify --phase finalize \
     --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
   --installed-launcher /usr/local/bin/ai-task-gates || {
-    if restore_install_state; then record_restored_state || true; fi
-    warn 'installation finalization refused; authorization remains pending for safe retry'
+    # Required stages and their protected receipt succeeded. Keep their
+    # coherent target state for a direct retry of finalize; restoring only a
+    # subset now would invalidate the stage receipt and strand the transaction.
+    warn 'installation finalization refused; target remains pending for direct retry'
     exit 1
   }
 fi
