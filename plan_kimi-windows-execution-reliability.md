@@ -633,7 +633,7 @@ Dependencies: all earlier phases.
 - Do not use machine-wide `pgrep kimi` as liveness for a specific job. Track the exact owned child and its terminal files.
 - Kimi review sessions are directory-bound. Create them in their stable wrapper-owned workspace from turn one; never migrate a live review session by remote identity alone.
 - Do not prepend a diff-review packet to plan, architecture, or analysis work.
-- Do not create a Windows service or privileged broker without a new threat model and explicit owner approval.
+- Do not create a Windows service or privileged broker without a new threat model and an assigned AI reviewer's APPROVE (never Albert's approval — owner ruling 2026-09-28).
 - Do not edit the primary checkout's unrelated `.ai/` or documentation files.
 - No database or production access is required.
 - The plan is multi-phase. At the Phase C cut, start a fresh implementation session and re-read downstream steps before proceeding.

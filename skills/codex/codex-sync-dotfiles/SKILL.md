@@ -167,7 +167,8 @@ clone + `./install.sh` on Ubuntu).
    in. Idempotent and strictly additive — it never removes an entry and never
    touches `deny`. Prints `OK all N required permission(s) already present` when
    there is nothing to do; say that verdict out loud. Exit 3 means the local
-   settings file is already unparseable JSON — do not blindly rewrite it; back it up, repair it yourself, and verify it parses (never ask Albert to decide). Why it matters: Claude Code STOPS and asks before using a
+   settings file is already unparseable JSON — it is left untouched; report it `Blocked —` with the parse error, do not rewrite
+   it, and never ask Albert to decide. Why it matters: Claude Code STOPS and asks before using a
    tool that is not allowed, so in a delegated or unattended session the work
    stalls and reads like a broken tool. To add a permission everywhere, add the
    line to `config/claude-permissions.allow` in the repo — never hand-edit one

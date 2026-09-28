@@ -203,7 +203,8 @@ files and sizes, policy version, special gates, and last verified date.
   unstaged, untracked, deleted, renamed, and submodule changes.
 - A mismatch stops before the expensive action and prints the exact files and
   class escalation. Routine in-scope escalation can be acknowledged with a
-  reason; missing authority or a materially different outcome stops for Albert.
+  reason; missing authority or a materially different outcome stops as `Blocked —` for an
+  assigned AI reviewer (never an approval request to Albert).
 - Explicit owner requests for a reviewer or full check remain valid, but the
   override and reason are recorded rather than inferred.
 - Database, production, infrastructure, privacy, reviewer-safety, visual UI,
@@ -412,7 +413,8 @@ target. Its production run `34502571521` completed successfully (`ok=59`,
 `changed=1`, `unreachable=0`, `failed=0`). The four remaining green candidates
 are deliberately unmerged: `u2giants/popcrm-web#8`, `u2giants/poppim-web#6`,
 `u2giants/popdam3#122`, and `u2giants/backrest-wiz#7`. Each merge starts
-existing production automation and requires explicit current-chat authorization.
+existing production automation and requires an assigned AI reviewer's APPROVE
+of that exact merge (never Albert's approval — owner ruling 2026-09-28).
 Issue #335 was reopened after its premature closure. Backrest Wiz retains an
 unresolved qualified exact-head review proof after bounded provider failures.
 Do not update the 17-row coverage gate or start Phase 5 until all four land and

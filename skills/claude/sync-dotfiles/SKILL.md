@@ -243,8 +243,8 @@ clone + `./install.sh` (Ubuntu) first.
    and the transcript reads like the tool is broken rather than un-permitted.
    That is exactly how browser screenshotting worked on one machine and silently
    did not on the others (2026-08-13). If it exits 3 (`ERROR unparseable JSON`),
-   the local settings file is already broken — do NOT blindly rewrite it; back it
-   up, repair it yourself, and verify it parses (never ask Albert to decide). To add a permission for every machine, add the line to
+   the local settings file is already broken — do NOT rewrite it; report it
+   `Blocked —` with the parse error (never ask Albert to decide). To add a permission for every machine, add the line to
    `config/claude-permissions.allow` in the repo and commit; never hand-edit one
    machine's settings file.
 6. **Set gcloud defaults** (when this machine uses gcloud): `bin/ai-gcloud-dflow`.
@@ -309,7 +309,7 @@ clone + `./install.sh` (Ubuntu) first.
    fire in headless `-p` runs at all, so verification is structural
    (`--check`), not a firing proof. Skip with a spoken note on a machine
    without ZCode.
-6d. **Report the memory-health task, don't assume it:** the weekly read-only audit
+6d. **Check and register the memory-health task yourself:** the weekly read-only audit
    (`bin/ai-memory-health`) is registered by
    `bin/install-memory-health-task.ps1` and is per-machine. Check for it with
    `Get-ScheduledTask -TaskName ai-memory-health` on Windows; if it is absent, register it yourself. Never register an unattended job that EDITS

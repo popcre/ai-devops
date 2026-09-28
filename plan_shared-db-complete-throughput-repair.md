@@ -404,7 +404,7 @@ Inventory every place that caps concurrent sub-agents, author lanes, runner jobs
 
 #### Step 8 — execute the organization transfer and native merge queue plan
 
-Do not duplicate the existing plan. Execute `u2giants/shared-db/plan_shared_db_popcre_transfer_merge_queue.md` from its STATUS Step 0 after Albert names the exact transfer/settings action. Preserve repository identity, redirects, integrations, required checks, consumer sync, and direct guarded merging until the native queue is proven.
+Do not duplicate the existing plan. Execute `u2giants/shared-db/plan_shared_db_popcre_transfer_merge_queue.md` from its STATUS Step 0 after an assigned AI reviewer APPROVEs the exact transfer/settings action. Preserve repository identity, redirects, integrations, required checks, consumer sync, and direct guarded merging until the native queue is proven.
 
 Configure one PR per merge group initially, zero batching wait, and all required workflows on `merge_group`. Feed queue completion/ejection events into Step 4 and preserve exact PR-head review plus synthetic-group integration proof.
 
@@ -492,7 +492,7 @@ commit.
 - Work in fresh current-upstream worktrees; preserve concurrent changes.
 - Shared-db uses branch/PR/governed merge. ai-devops uses branch/PR/native queue.
 - Verify `Albert Hazan <u2giants@users.noreply.github.com>` before every commit.
-- Production/shared cloud is read-only unless Albert names the exact action/resource in the current chat.
+- Production/shared cloud is read-only unless an assigned AI reviewer APPROVEs the exact action/resource (never Albert's approval — owner ruling 2026-09-28).
 - No migration version reuse, applied-file edit, broad include, claim deletion, or unproved target.
 - Preview, merge, and production remain one at a time.
 - Reviewer failure is not a code finding; runner cancellation is not a test result.
@@ -561,7 +561,7 @@ Rollback is a reviewed revert of the affected phase plus supported rules reinsta
 
 ### Open questions
 
-No engineering design choice blocks Step 0. Step 8 requires Albert's explicit repository-transfer/settings authority. Issue #2716 requires one explicit policy-activation ruling unless its implementation session can cite a current-chat ruling that authorizes the exact global/workflow change; after activation, individual machine version lists do not return to Albert. These are execution gates, not gaps in this plan.
+No engineering design choice blocks Step 0. Step 8 requires an assigned AI reviewer's APPROVE of the exact repository-transfer/settings action. Issue #2716 requires one explicit policy-activation ruling unless its implementation session can cite a current-chat ruling that authorizes the exact global/workflow change; after activation, individual machine version lists do not return to Albert. These are execution gates, not gaps in this plan.
 
 ## Coverage of the throughput review
 

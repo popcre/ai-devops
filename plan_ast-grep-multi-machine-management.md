@@ -14,7 +14,7 @@ Companion handoff: [HANDOFF.d/2026-08-30T1403Z-edge-dev-codex-ast-grep-managemen
 | 4. Add concise shared Claude/Codex usage guidance | ⬜ open | — | Required templates and parity checks are named in Phase 2. |
 | 5. Add the same pinned package to the Ubuntu Ansible role | ⬜ open | — | Required `u2giants/ansible` files and tests are named in Phase 3. |
 | 6. Land source changes and roll out the three Windows computers | ⬜ open | — | Required GitHub and per-machine evidence is named in Phase 4. |
-| 7. Apply and verify the Ubuntu production-host change | ⬜ open; owner authorization required before apply | — | Required Ansible check/apply/live evidence is named in Phase 5. |
+| 7. Apply and verify the Ubuntu production-host change | ⬜ open; assigned AI reviewer APPROVE required before apply | — | Required Ansible check/apply/live evidence is named in Phase 5. |
 
 Fresh-session start: begin at Step 1. Nothing has been implemented or installed by this planning session.
 
@@ -197,7 +197,7 @@ That would add ceremony to simple work and produce false confidence in unsupport
 - The implementer may add a focused Ansible test file or extend the nearest existing dependency-light source test. It must prove the exact package/version, isolated prefix, full-command-only link, preservation of OS `sg`, documentation coverage, and absence of mutable `latest`.
 - The exact wording location inside the two global templates may follow their current organization, but the Claude and Codex meaning must remain aligned and brief.
 
-No other owner decision is required for source implementation. Production rollout has a separate explicit authorization gate in Sections 9, 12, and 13.
+No other owner decision is required for source implementation. Production rollout has a separate assigned-AI-reviewer APPROVE gate in Sections 9, 12, and 13.
 
 ## 9. Executable implementation plan
 
@@ -303,18 +303,18 @@ Parallelism: the three Windows rollouts may proceed concurrently only after the 
 
 ### Phase 5 — production Ubuntu authorization, apply, and final proof
 
-#### Step 7. Apply the Ansible change to `hetz` only after explicit authorization
+#### Step 7. Apply the Ansible change to `hetz` only after an assigned AI reviewer's APPROVE
 
-1. Present Albert one plain request naming the exact action and consequence: land the identified Ansible source commit and install isolated `@ast-grep/cli` version `0.45.2` on `hetz` through the serialized Phase 1 `dev_tools` apply.
-2. Do not dispatch/allow the apply without explicit current-chat authorization. Planning, commits, and checks are not authorization.
+1. Give an assigned AI reviewer one brief naming the exact action and consequence (never a request to Albert — owner ruling 2026-09-28): land the identified Ansible source commit and install isolated `@ast-grep/cli` version `0.45.2` on `hetz` through the serialized Phase 1 `dev_tools` apply.
+2. Do not dispatch/allow the apply without that reviewer's explicit APPROVE of the exact action. Planning, commits, and checks are not authorization.
 3. Immediately before dispatch re-derive the exact source commit, workflow inputs/tags and auto-apply state, limited check-mode diff, live absence/version, and concurrency state.
-4. Only after authorization, land/push the Ansible change using its freshly confirmed repository policy, then dispatch or observe the governed serialized GitHub Actions apply; never install manually over SSH.
+4. Only after that APPROVE, land/push the Ansible change using its freshly confirmed repository policy, then dispatch or observe the governed serialized GitHub Actions apply; never install manually over SSH.
 5. Wait for completion; preserve failures and repair source rather than suppressing verification.
 6. Verify directly: exact version, usability by the unprivileged Claude/Codex account, harmless read-only search, zero-drift rerun, and no unrelated service/app effects.
 7. From a new SSH-driven Claude/Codex context, verify the remote command and installed shared instruction.
 8. Record run/live evidence in issue #187 and STATUS, close the issue only after all four machines pass, and retire the handoff in the finishing commit.
 
-Dependencies: Step 6 and explicit owner authorization.
+Dependencies: Step 6 and the assigned AI reviewer's APPROVE.
 **Verification gate:** governed apply, live exact-version/unprivileged proof, zero drift, all evidence, issue closure, and handoff retirement are complete.
 
 ## 10. Tests required
@@ -351,7 +351,7 @@ No UI, browser, database, container, or application E2E test is required.
 - Use supported package management; never replace OS binaries.
 - Keep the public repo secret-free; no transcripts, PATH dumps, tokens, or credentials in evidence.
 - `hetz` host packages belong to Ansible; no manual SSH mutation.
-- Production is read-only until exact current-chat authorization; do not bypass serialized apply.
+- Production is read-only until an assigned AI reviewer APPROVEs the exact action; do not bypass serialized apply.
 - Stage only owned files in active repositories; re-read live `AGENTS.md` before shipping.
 - `ai-devops` uses PR/merge queue and `bin/ai-pr-wait`; do not direct-push main. Reconcile any Ansible policy conflict before mutation.
 - Keep `edge-dev` runner work clear of `windows-offline` and `windows-reviewer-safety`; do not duplicate verification of the identical queued commit.
