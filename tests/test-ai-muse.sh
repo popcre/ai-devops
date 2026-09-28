@@ -399,8 +399,15 @@ check 'unknown launched provider work cannot be deleted reconciled or retried' "
 mkdir -p "$TMP/state/credential.lock.d"; touch -d '5 minutes ago' "$TMP/state/credential.lock.d"
 NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)"
 check 'tracked historic reports do not block a new exact destination' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
-eval "$ENV AI_MUSE_KEY_STORE='$TMP/stale-lock-key' '$SCRIPT' store-key" >/dev/null
-check 'old credential lock without an owner is reconciled' "test ! -e '$TMP/state/credential.lock.d'"
+if [ -n "${SYSTEMROOT:-}" ]; then
+  LEGACY_LOCK_RC=0
+  LEGACY_LOCK_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$TMP/stale-lock-key' AI_MUSE_CREDENTIAL_WAIT_SECONDS=2 '$SCRIPT' store-key" 2>&1)" || LEGACY_LOCK_RC=$?
+  check 'Windows preserves an ownerless legacy lock rather than guessing its owner' "test '$LEGACY_LOCK_RC' -ne 0 && test -d '$TMP/state/credential.lock.d' && printf '%s' \"\$LEGACY_LOCK_OUT\" | grep -q 'credential lock still held by another Muse turn after 2s'"
+  rm -rf "$TMP/state/credential.lock.d"
+else
+  eval "$ENV AI_MUSE_KEY_STORE='$TMP/stale-lock-key' '$SCRIPT' store-key" >/dev/null
+  check 'old credential lock without an owner is reconciled' "test ! -e '$TMP/state/credential.lock.d'"
+fi
 check 'new returns first response' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
 check 'OpenCode ignores an invalid native reasoning knob without passing a flag' "cd '$REPO' && eval \"$ENV AI_MUSE_REASONING_EFFORT=not-a-native-tier MUSE_STUB_ARGS_FILE='$TMP/opencode-reasoning-args' '$SCRIPT' new ignored-reasoning --prompt test\" >/dev/null && test -s '$TMP/opencode-reasoning-args' && ! grep -qx -- --reasoning-effort '$TMP/opencode-reasoning-args'"
 check 'provider child never inherits the writable report descriptor' "test ! -e '$TMP/provider-fd-leak'"
