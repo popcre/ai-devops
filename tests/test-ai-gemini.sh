@@ -61,6 +61,7 @@ args=" $* "
 if [[ "$args" == *"--input-format stream-json"* ]]; then
   stream_input="$(cat)"
   printf '%s' "$stream_input" | jq -r '.message.content[0].text' | wc -c > "$MOCK_STREAM_BYTES"
+  [ "${MOCK_MODE:-normal}" != stream-mutate-protected ] || printf changed >> "$MOCK_PROTECTED/file.txt"
   printf '%s\n' '{"event":"init","conversation_id":"conv-good"}'
   if [ "${MOCK_MODE:-normal}" = stream-wrong-conversation ]; then
     printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","conversation_id":"conv-wrong","response":"## Verdict\nAPPROVE"}}'
@@ -224,6 +225,10 @@ python3 -c 'import sys; open(sys.argv[1], "w").write("A" * 150000)' "$TMP/large-
 check 'large prompt reaches Gemini intact without a single oversized argument' "(cd '$RLARGE' && '$SCRIPT' new large-prompt --prompt-file '$TMP/large-prompt.txt') && test \"\$(cat '$MOCK_STREAM_BYTES')\" -ge 150000"
 check 'large streamed review retains the exact conversation and completes' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for large-prompt)\""
 check 'streamed result with a different conversation is refused' "! (cd '$RLARGE' && MOCK_MODE=stream-wrong-conversation '$SCRIPT' new large-wrong --prompt-file '$TMP/large-prompt.txt') && test \"\$(jq -r .status \"\$(meta_for large-wrong)\")\" = RECOVERY_REQUIRED"
+export MOCK_PROTECTED="$RLARGE"
+check 'streamed source mutation refuses the review' "! (cd '$RLARGE' && MOCK_MODE=stream-mutate-protected '$SCRIPT' new large-drift --prompt-file '$TMP/large-prompt.txt')"
+STREAM_FAILURE="$(jq -r .failure_artifact "$(meta_for large-drift)")"
+check 'source-drift failure preserves raw stream evidence' "test -s '${STREAM_FAILURE%.json}.stream.ndjson'"
 check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for good)\""
 GOOD_META="$(meta_for good)"; GOOD_COPY="$(jq -r .review_dir "$GOOD_META")"
 GOOD_BEFORE="$( { sha256sum "$GOOD_META"; (cd "$R4" && find .ai/reviews -type f -print0 | sort -z | xargs -0 sha256sum); (cd "$GOOD_COPY" && find . -type f -print0 | sort -z | xargs -0 sha256sum); } | sha256sum | cut -d' ' -f1 )"

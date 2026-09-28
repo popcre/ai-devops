@@ -321,7 +321,8 @@ call(){
       gemini_credit_stop "$o"
       die 'Gemini stream result or conversation was invalid; evidence preserved'
     fi
-    rm -f -- "$ACTIVE_STREAM_INPUT" "$ACTIVE_STREAM_OUTPUT"; ACTIVE_STREAM_INPUT=''; ACTIVE_STREAM_OUTPUT=''
+    # Keep raw events until all verdict, model, and source checks finish. The
+    # exit trap removes them after success or after failure evidence is copied.
   fi
   [ "$rc" -eq 0 ] || { preserve_failure "$ACTIVE_META" "$o" provider-request; gemini_credit_stop "$o"; die 'Gemini request failed or timed out; evidence preserved'; }
   ad="$(bounded_inventory "$d")" || { preserve_failure "$ACTIVE_META" "$o" provider-copy-inventory; die "review copy inventory after the provider request failed or timed out after $PREPARE_TIMEOUT; evidence preserved"; }
