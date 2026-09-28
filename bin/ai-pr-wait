@@ -79,31 +79,32 @@ if [ "$INTERVAL" -lt 300 ] && [ "${AI_DEVOPS_TEST_MODE:-0}" != 1 ]; then
   INTERVAL=300
 fi
 THROTTLE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)/ai-gh"
-if [ -x "$THROTTLE" ]; then
-  export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
-  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
-    if [ -z "${AI_GH_STATE_DIR:-}" ]; then
-      AI_GH_STATE_DIR="$(mktemp -d)"; TMP_STATE_DIR="$AI_GH_STATE_DIR"
-      trap 'rm -rf "$TMP_STATE_DIR"' EXIT
-    fi
-    export AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}" AI_GH_QUOTA_PROBE_SECONDS="${AI_GH_QUOTA_PROBE_SECONDS:-off}"
+[ -x "$THROTTLE" ] || {
+  printf 'ai-pr-wait: ai-gh throttle is missing; no GitHub call was made\n' >&2
+  exit 3
+}
+export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
+if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
+  if [ -z "${AI_GH_STATE_DIR:-}" ]; then
+    AI_GH_STATE_DIR="$(mktemp -d)"; TMP_STATE_DIR="$AI_GH_STATE_DIR"
+    trap 'rm -rf "$TMP_STATE_DIR"' EXIT
   fi
-  GH_RUNNER="$THROTTLE"
-  # Allowance = the longest the throttle can spend before gh starts (lock wait +
-  # spacing). Without it the supervisor could kill a healthy call and leave the
-  # shared lock behind.
-  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=1}"
-  export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
-  # lock wait + call spacing + the spacing the budget probe adds before the call
-  # + the time-limited budget probe made while holding the lock
-  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_PROBE_TIMEOUT_SECONDS:=0}"
-  THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + 2 * ${AI_GH_MIN_SPACING_SECONDS:-3} + ${AI_GH_PROBE_TIMEOUT_SECONDS:-15} ))
-else
-  printf 'ai-pr-wait: WARNING the ai-gh throttle is not installed next to this script; calling gh directly (no machine-wide rate-limit protection)\n' >&2
-  THROTTLE_ALLOWANCE_SECONDS=0
+  export AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}" AI_GH_QUOTA_PROBE_SECONDS="${AI_GH_QUOTA_PROBE_SECONDS:-off}"
 fi
+GH_RUNNER="$THROTTLE"
+# Allowance = the longest the throttle can spend before gh starts (lock wait +
+# spacing). Without it the supervisor could kill a healthy call and leave the
+# shared lock behind.
+[ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=1}"
+export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
+# lock wait + call spacing + the spacing the budget probe adds before the call
+# + the time-limited budget probe made while holding the lock
+[ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_PROBE_TIMEOUT_SECONDS:=0}"
+THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + 2 * ${AI_GH_MIN_SPACING_SECONDS:-3} + ${AI_GH_PROBE_TIMEOUT_SECONDS:-15} ))
 SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
 [ -x "$SUPERVISOR" ] || { printf 'ai-pr-wait: ai-process-supervisor is not installed\n' >&2; exit 3; }
+PAGER_SCRIPT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")/.." && pwd)/tools/github-requests/pr-status-complete.sh"
+[ -f "$PAGER_SCRIPT" ] || { printf 'ai-pr-wait: complete status reader is not installed\n' >&2; exit 3; }
 BASH_RUNNER="$(command -v bash 2>/dev/null || true)"
 [ -n "$BASH_RUNNER" ] || { printf 'ai-pr-wait: bash is not installed\n' >&2; exit 3; }
 PYTHON_RUNNER=''
@@ -120,6 +121,7 @@ case "$(uname -s 2>/dev/null || true)" in
     GH_RUNNER="$(cygpath -w "$GH_RUNNER")"
     PYTHON_RUNNER="$(cygpath -w "$PYTHON_RUNNER")"
     SUPERVISOR="$(cygpath -w "$SUPERVISOR")"
+    PAGER_SCRIPT="$(cygpath -w "$PAGER_SCRIPT")"
     ;;
 esac
 
@@ -127,7 +129,8 @@ DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
 WAIT_STARTED_SECONDS=$SECONDS
 
 bounded_gh() {
-  local now remaining limit
+  local now remaining limit complete_status=0
+  if [ "${1:-}" = --complete-status ]; then complete_status=1; shift; fi
   now="$(date +%s)"
   remaining=$(( DEADLINE - now ))
   # 125 means the overall deadline expired before any GitHub process started;
@@ -137,12 +140,35 @@ bounded_gh() {
   # spacing before gh even starts; add that allowance so a healthy call is never
   # killed as hung (a kill would leave the shared lock behind).
   limit=$(( API_TIMEOUT_SECONDS + THROTTLE_ALLOWANCE_SECONDS ))
+  [ "$complete_status" -eq 0 ] || limit="$remaining"
   [ "$limit" -le "$remaining" ] || limit="$remaining"
   if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
     printf '%s\n' "$GH_RUNNER" > "$AI_PR_WAIT_TEST_TRACE.resolved"
   fi
-  AI_GH_CALLER=ai-pr-wait "$PYTHON_RUNNER" "$SUPERVISOR" --timeout-seconds "$limit" -- \
-    "$BASH_RUNNER" -c 'runner="$1"; shift; command -v cygpath >/dev/null 2>&1 && runner="$(cygpath -u "$runner")"; if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then printf "%s\n" "$runner" > "$AI_PR_WAIT_TEST_TRACE.child"; fi; exec "$runner" "$@"' bash "$GH_RUNNER" "$@"
+  local -a command
+  if [ "$complete_status" -eq 1 ]; then
+    command=("$PYTHON_RUNNER" "$SUPERVISOR" --timeout-seconds "$limit" -- \
+      "$BASH_RUNNER" -c 'runner="$1"; shift; command -v cygpath >/dev/null 2>&1 && runner="$(cygpath -u "$runner")"; exec "$runner" "$@"' bash \
+      "$PAGER_SCRIPT" "$GH_RUNNER" "$PYTHON_RUNNER" "$SUPERVISOR" "$BASH_RUNNER" \
+      "$OWNER" "$NAME" "$PR" "$DEADLINE" "$API_TIMEOUT_SECONDS" "$THROTTLE_ALLOWANCE_SECONDS" "$SNAP_SOURCE_ARG")
+  else
+    command=("$PYTHON_RUNNER" "$SUPERVISOR" --timeout-seconds "$limit" -- \
+      "$BASH_RUNNER" -c 'runner="$1"; shift; command -v cygpath >/dev/null 2>&1 && runner="$(cygpath -u "$runner")"; if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then printf "%s\n" "$runner" > "$AI_PR_WAIT_TEST_TRACE.child"; fi; exec "$runner" "$@"' bash "$GH_RUNNER" "$@")
+  fi
+  if [ -n "${SNAP_CONTEXT:-}" ] && [ "$complete_status" -eq 1 ]; then
+    local force=()
+    local expected_head="${LAST_HEAD:-any}"
+    local cache_target="${LAST_HEAD:-discover}"
+    # A waiter that has seen queue membership must validate a possible
+    # ejection freshly; its own history cannot be delegated to another waiter.
+    [ "$WAS_QUEUED" -eq 0 ] || force=(--force-refresh)
+    AI_GH_CALLER=ai-pr-wait "$PYTHON_RUNNER" "$SNAP_HELPER_ARG" \
+      --state-dir "$SNAP_STATE_ARG" --key "v1 $SNAP_CONTEXT $REPO $PR $cache_target" \
+      --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" --cap-supervisor-timeout --defer-source-mark \
+      --age-file "$SNAP_AGE_ARG" --source-file "$SNAP_SOURCE_ARG" "${force[@]+"${force[@]}"}" -- "${command[@]}"
+  else
+    AI_GH_CALLER=ai-pr-wait "${command[@]}"
+  fi
 }
 
 if [ -z "$REPO" ]; then
@@ -188,10 +214,42 @@ if [ -n "$GATE_LIB" ]; then
 fi
 OWNER="${REPO%%/*}"
 NAME="${REPO##*/}"
+SNAP_HELPER="$REAL_DIR/../tools/github-requests/pr_status_singleflight.py"
+SNAP_CONTEXT_HELPER=''
+SNAP_DEFAULT_DIR="$HOME/.local/state/ai-devops-pr-status"
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*) SNAP_DEFAULT_DIR="$HOME/.ai-devops/pr-status" ;;
+esac
+SNAP_STATE_DIR="${AI_PR_WAIT_SNAPSHOT_DIR:-$SNAP_DEFAULT_DIR}"
+SNAP_CONTEXT=''
+LAST_HEAD=''
+# The credential-bound read-only context helper is added after P2 lands. Until
+# then, sharing is disabled. Test fixtures can supply an opaque context key.
+if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_CONTEXT_KEY:-}" ]; then
+  SNAP_CONTEXT="$AI_PR_WAIT_TEST_CONTEXT_KEY"
+elif [ -x "$REAL_DIR/../tools/github-requests/pr-status-context" ]; then
+  SNAP_CONTEXT_HELPER="$REAL_DIR/../tools/github-requests/pr-status-context"
+  SNAP_CONTEXT="$("$SNAP_CONTEXT_HELPER" 2>/dev/null || true)"
+fi
+SNAP_AGE_FILE="$(mktemp "${TMPDIR:-/tmp}/ai-pr-wait-age.XXXXXX")" || exit 3
+SNAP_SOURCE_FILE="$(mktemp "${TMPDIR:-/tmp}/ai-pr-wait-source.XXXXXX")" || exit 3
+SNAP_HELPER_ARG="$SNAP_HELPER"
+SNAP_STATE_ARG="$SNAP_STATE_DIR"
+SNAP_AGE_ARG="$SNAP_AGE_FILE"
+SNAP_SOURCE_ARG="$SNAP_SOURCE_FILE"
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*)
+    SNAP_HELPER_ARG="$(cygpath -w "$SNAP_HELPER")"
+    SNAP_STATE_ARG="$(cygpath -w "$SNAP_STATE_DIR")"
+    SNAP_AGE_ARG="$(cygpath -w "$SNAP_AGE_FILE")"
+    SNAP_SOURCE_ARG="$(cygpath -w "$SNAP_SOURCE_FILE")"
+    ;;
+esac
 
 say() { printf '%s\n' "$*"; }
 
 WAS_QUEUED=0
+QUEUED_HEAD=''
 LAST=''
 API_STDERR=/dev/null
 if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; then
@@ -201,8 +259,14 @@ else
     printf 'ai-pr-wait: could not create diagnostic file\n' >&2
     exit 3
   }
-  trap 'rm -f "$API_STDERR"' EXIT
 fi
+cleanup_wait_files() {
+  rm -f "$SNAP_AGE_FILE"
+  rm -f "$SNAP_SOURCE_FILE"
+  [ "$API_STDERR" = /dev/null ] || { [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; } || rm -f "$API_STDERR"
+  [ -z "${TMP_STATE_DIR:-}" ] || rm -rf "$TMP_STATE_DIR"
+}
+trap cleanup_wait_files EXIT
 
 elapsed_seconds() {
   printf '%s' "$(( SECONDS - WAIT_STARTED_SECONDS ))"
@@ -227,11 +291,14 @@ deadline_reached() {
 }
 
 wait_for_next_poll() {
-  local now remaining delay
+  local now remaining delay age
   now="$(date +%s)"
   remaining=$(( DEADLINE - now ))
   [ "$remaining" -gt 0 ] || return 1
   delay="$INTERVAL"
+  age="$(cat "$SNAP_AGE_FILE" 2>/dev/null || printf 0)"
+  case "$age" in ''|*[!0-9]*) age=0 ;; esac
+  [ "$age" -lt "$delay" ] && delay=$(( delay - age ))
   [ "$delay" -le "$remaining" ] || delay="$remaining"
   sleep "$delay"
 }
@@ -240,10 +307,16 @@ while :; do
   # One GraphQL call carries everything that decides the outcome, including the
   # merge-queue membership that `gh pr view` does not report.
   GH_RC=0
-  Q="$(bounded_gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state isInMergeQueue mergeCommit{oid} commits(last:1){nodes{commit{statusCheckRollup{state contexts(last:100){nodes{... on CheckRun{name conclusion}}}}}}}}}}" 2>"$API_STDERR")"
+  Q="$(bounded_gh --complete-status 2>"$API_STDERR")"
   GH_RC=$?
+  # A fresh throttle state has no verified identity before its first call.
+  # Recheck only the local token/cache after a successful response so later
+  # polls can share; an unknown identity stays unshared without another API hit.
+  if [ "$GH_RC" -eq 0 ] && [ -z "$SNAP_CONTEXT" ] && [ -n "$SNAP_CONTEXT_HELPER" ]; then
+    SNAP_CONTEXT="$("$SNAP_CONTEXT_HELPER" 2>/dev/null || true)"
+  fi
 
-  if [ -z "$Q" ] || ! printf '%s' "$Q" | jq -e '.data.repository.pullRequest' >/dev/null 2>&1; then
+  if [ -z "$Q" ] || ! printf '%s' "$Q" | jq -e '.data.repository.pullRequest and (.errors | not) and ((.data.repository.pullRequest.state != "OPEN") or (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup == null) or ((.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage == false) and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount == (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes | length))))' >/dev/null 2>&1; then
     READ_CAUSE="$(read_failure_cause)"
     if [ "$GH_RC" -eq 125 ] && [ -n "$LAST" ]; then
       say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($LAST)"
@@ -262,10 +335,11 @@ while :; do
   fi
 
   STATE="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.state')"
+  LAST_HEAD="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.headRefOid // empty')"
   QUEUED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.isInMergeQueue')"
   MERGE_SHA="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.mergeCommit.oid // "none"')"
   ROLLUP="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // "NONE"')"
-  FAILED="$(printf '%s' "$Q" | jq -r '[.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED") | .name] | join(", ")')"
+  FAILED="$(printf '%s' "$Q" | jq -r '[.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") | (.name // .context)] | join(", ")')"
 
   if [ "$STATE" = "MERGED" ]; then
     say "PR #$PR MERGED  merge commit $MERGE_SHA"
@@ -280,11 +354,19 @@ while :; do
   # open. GitHub ejected it. Nothing further will happen without a person.
   if [ "$QUEUED" = "true" ]; then
     WAS_QUEUED=1
+    QUEUED_HEAD="$LAST_HEAD"
   elif [ "$WAS_QUEUED" -eq 1 ]; then
+    # A push can remove a PR from the queue while replacing its head. That is
+    # not evidence that GitHub ejected the same queued commit.
+    if [ "$LAST_HEAD" != "$QUEUED_HEAD" ]; then
+      WAS_QUEUED=0
+      QUEUED_HEAD=''
+    else
     say "PR #$PR was EJECTED from the merge queue and is still OPEN - waiting longer changes nothing."
     say "  Look at the merge_group run, not the pull request run:"
     say "    gh run list --repo $REPO --event merge_group --limit 5"
     exit 1
+    fi
   fi
 
   if [ -n "$FAILED" ]; then

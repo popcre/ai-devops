@@ -21,7 +21,15 @@ gh_measure_init(){
     ai-reviewer-membership-drift|interactive)
       GH_MEASURE_CALLER="$AI_GH_CALLER" ;;
   esac
+  if [ "$GH_MEASURE_CALLER" = ai-blocker-watch ]; then
+    case "${AI_GH_OPERATION:-}" in
+      bw.snapshot|bw.dependents|bw.wake_miss|bw.alarm_issue|bw.link_issue)
+        GH_MEASURE_OPERATION="$AI_GH_OPERATION" ;;
+    esac
+  fi
   GH_MEASURE_EXECUTED=0
+  GH_MEASURE_PRINCIPAL=unknown
+  GH_MEASURE_REQUEST_CLASS=unknown
 }
 
 gh_measure_clock(){
@@ -49,9 +57,45 @@ gh_measure_finish(){
   [ "$status" = 0 ] && result=success
   [ "$status" = 75 ] && result=deferred
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1
-  record=$(printf '{"schema":1,"utc":"%s","operation":"%s","caller":"%s","api_host":"unknown","principal":"unknown","machine":"local","repository":"redacted","request_class":"unknown","bucket":"%s","cli_executions":%s,"http_requests":null,"graphql_points":null,"measurement":"opaque_cli_estimate","cache_hit":false,"latency_ms":%s,"result":"%s","exit_status":%s,"reset":null}' \
-    "$utc" "$GH_MEASURE_OPERATION" "$GH_MEASURE_CALLER" "$bucket" "$GH_MEASURE_EXECUTED" "$elapsed" "$result" "$status")
+  record=$(printf '{"schema":1,"utc":"%s","operation":"%s","caller":"%s","api_host":"unknown","principal":"%s","machine":"local","repository":"redacted","request_class":"%s","bucket":"%s","cli_executions":%s,"http_requests":null,"graphql_points":null,"measurement":"opaque_cli_estimate","cache_hit":false,"latency_ms":%s,"result":"%s","exit_status":%s,"reset":null}' \
+    "$utc" "$GH_MEASURE_OPERATION" "$GH_MEASURE_CALLER" "$GH_MEASURE_PRINCIPAL" "$GH_MEASURE_REQUEST_CLASS" "$bucket" "$GH_MEASURE_EXECUTED" "$elapsed" "$result" "$status")
   gh_measure_append "$STATE/measurements" "$record"
+}
+
+# A verified-principal lookup is an extra, bounded CLI/API operation. Count it
+# separately from the user's requested command. The CLI may redirect or retry,
+# so even a successful lookup has unknown exact HTTP request count.
+gh_measure_identity_lookup(){
+  local status="$1" principal="${2:-}" result=failed utc record
+  [[ "$status" =~ ^[0-9]{1,3}$ ]] || status=1
+  if [ "$status" = 0 ]; then result=success; fi
+  if [ "$status" = 0 ]; then gh_measure_set_principal "$principal"; fi
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":1,"utc":"%s","operation":"api.identity","caller":"%s","api_host":"unknown","principal":"%s","machine":"local","repository":"redacted","request_class":"identity_probe","bucket":"core","cli_executions":1,"http_requests":null,"graphql_points":null,"measurement":"direct_api_invocation_estimate","cache_hit":false,"latency_ms":null,"result":"%s","exit_status":%s,"reset":null}' \
+    "$utc" "$GH_MEASURE_CALLER" "$GH_MEASURE_PRINCIPAL" "$result" "$status")
+  gh_measure_append "$STATE/measurements" "$record"
+}
+
+gh_measure_set_principal(){
+  GH_MEASURE_PRINCIPAL=unknown
+  [[ "${1:-}" =~ ^[0-9]{1,20}$ ]] || return 0
+  # Numeric GitHub IDs are enumerable, so plain hashing is reversible. Mix a
+  # private, machine-local random salt before hashing. Labels intentionally
+  # cannot be correlated across hosts; P6 must use governed local metadata.
+  local salt_file="$STATE/principal-salt" temp salt digest
+  if [ -L "$salt_file" ] || { [ -e "$salt_file" ] && [ ! -f "$salt_file" ]; }; then return 0; fi
+  if [ ! -s "$salt_file" ]; then
+    temp=$(umask 077; mktemp "$STATE/principal-salt.XXXXXX") || return 0
+    if ! head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$temp"; then
+      rm -f -- "$temp"; return 0
+    fi
+    if [ ! -e "$salt_file" ]; then mv -f -- "$temp" "$salt_file"; else rm -f -- "$temp"; fi
+  fi
+  if [ -L "$salt_file" ] || [ ! -f "$salt_file" ]; then return 0; fi
+  salt=$(cat "$salt_file" 2>/dev/null) || return 0
+  [[ "$salt" =~ ^[0-9a-f]{64}$ ]] || return 0
+  digest=$(printf '%s:%s' "$salt" "$1" | sha256sum | awk '{print $1}')
+  GH_MEASURE_PRINCIPAL="local-sha256:$digest"
 }
 
 # Both command records and server snapshots share the same filesystem boundary.
@@ -128,7 +172,7 @@ gh_measure_quota(){
   temp=$(umask 077; mktemp "$STATE/quota-observation.XXXXXX") || return 1
   # Retain bounded history as well as the latest observation, so normal probes
   # can establish reset-window bounds without a new sampling loop.
-  record=$(printf '{"schema":1,"utc":"%s","principal":"unknown","measurement":"server_bucket_snapshot","buckets":{%s}}' "$utc" "$record")
+  record=$(printf '{"schema":1,"utc":"%s","principal":"%s","measurement":"server_bucket_snapshot","buckets":{%s}}' "$utc" "${GH_MEASURE_PRINCIPAL:-unknown}" "$record")
   printf '%s\n' "$record" > "$temp" || { rm -f -- "$temp"; return 1; }
   mv -f -- "$temp" "$dest" || { rm -f -- "$temp"; return 1; }
   gh_measure_append "$STATE/quota-measurements" "$record"
