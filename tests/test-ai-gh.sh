@@ -545,8 +545,10 @@ AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION=bw.snapshot "$GH" api repos/o/r >/
 check 'BlockerWatch fixed operation is recorded' "jq -se '.[-1].operation == \"bw.snapshot\" and .[-1].caller == \"ai-blocker-watch\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION='bw.snapshot\"injected' "$GH" api repos/o/r >/dev/null 2>&1
 check 'untrusted BlockerWatch operation cannot enter telemetry' "jq -se '.[-1].operation == \"api.unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
-AI_GH_CALLER=ai-merge-group-evidence "$GH" api repos/o/r >/dev/null 2>&1
-check 'merge proof source is retained in telemetry and report' "jq -se '.[-1].caller == \"ai-merge-group-evidence\"' '$TMP/telemetry-state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/telemetry-state/measurements' | jq -e 'any(.sources[]; .caller == \"ai-merge-group-evidence\")'"
+for caller in ai-merge-group-evidence ai-transcript-destination-check ai-workspace-status ai-reviewer-membership-drift; do
+  AI_GH_CALLER="$caller" "$GH" api repos/o/r >/dev/null 2>&1
+  check "$caller source is retained in telemetry and report" "jq -se '.[-1].caller == \"$caller\"' '$TMP/telemetry-state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/telemetry-state/measurements' | jq -e 'any(.sources[]; .caller == \"$caller\")'"
+done
 mkdir "$TMP/telemetry-state/measurements/write.lock"
 FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
 check 'telemetry failure is visible and preserves failed command status' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/terr' && cmp '$TMP/tout' '$TMP/expected-out'"
@@ -557,7 +559,61 @@ touch "$TMP/telemetry-state/measurements/2000-01-01.jsonl"
 "$GH" api graphql > /dev/null 2>/dev/null
 check 'telemetry retention removes only old owned date files' "[ ! -e '$TMP/telemetry-state/measurements/2000-01-01.jsonl' ] && jq -se '.[-1].bucket == \"graphql\" and .[-1].cli_executions == 1 and .[-1].principal == \"unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
-check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 7 and .opaque_cli_executions == 7 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 10 and .opaque_cli_executions == 10 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+source "$ROOT/tools/github-requests/telemetry.sh"
+workflow_id="$(gh_measure_workflow_id)"
+access_context="v1:$(printf '%064d' 0)"
+printf '%s' '{"data":{"rateLimit":{"cost":3,"remaining":4990,"resetAt":"2026-09-28T05:00:00Z"},"repository":{"private":"FIXTURE_CANARY"}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait "$workflow_id" upstream_refresh "$access_context"
+printf '%s' '{"data":{"rateLimit":{"cost":2,"remaining":4988,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait "$workflow_id" upstream_refresh "$access_context"
+printf '%s' '{"data":{"rateLimit":{"cost":9}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait "$workflow_id" cache_hit
+cache_rc=$?
+gh_measure_workflow_outcome ai-pr-wait pr_wait "$workflow_id" checks_failed 1234
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
+check 'GraphQL page costs link once to workflow and local reset headroom' \
+  "[ $rc -eq 0 ] && [ $cache_rc -eq 2 ] && jq -e '.records == 10 and .identity_probe_invocations >= 0 and .observed_graphql_cost_records == 2 and .linked_graphql_points == 5 and .completed_workflow_receipts == 1 and .observed_graphql_windows_local_only == [{\"context_ordinal\":1,\"reset_at\":\"2026-09-28T05:00:00Z\",\"records\":2,\"min_remaining\":4988,\"max_remaining\":4990,\"observed_points\":5}]' '$TMP/report' && ! grep -q '$access_context' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/telemetry-state/measurements'"
+printf '%s' '{"data":{"rateLimit":{"cost":4,"remaining":"bad","resetAt":"FIXTURE_CANARY"}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
+check 'legacy or malformed optional quota fields retain cost without false window' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_cost_records == 3 and .observed_graphql_points == 9 and .observed_graphql_window_records == 2' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/telemetry-state/measurements'"
+mkdir "$TMP/legacy-cost"
+printf '%s\n' '{"schema":2,"utc":"2026-09-28T05:00:00Z","measurement":"observed_graphql_cost","caller":"ai-pr-wait","operation":"graphql.pr_status","workflow":"pr_wait","workflow_id":null,"graphql_points":7,"http_requests":null}' > "$TMP/legacy-cost/2026-09-28.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/legacy-cost" > "$TMP/report"; rc=$?
+check 'older cost rows without quota window fields remain readable' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_points == 7 and .observed_graphql_window_records == 0' '$TMP/report'"
+printf '%s' '{"data":{"rateLimit":{"cost":1,"remaining":4900,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  AI_GH_STATE_DIR="$TMP/unattributed-state" gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh 'ghp_FIXTURE_CANARY'
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/unattributed-state/measurements" > "$TMP/report"; rc=$?
+check 'unverified access stays unattributed and no token enters telemetry or report' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_window_records == 0 and .unattributed_graphql_window_records == 1 and .observed_graphql_windows_local_only == []' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/unattributed-state/measurements' && ! grep -q FIXTURE_CANARY '$TMP/report'"
+bw_id="$(gh_measure_workflow_id)"
+printf '%s' '{"data":{"rateLimit":{"cost":4,"remaining":4800,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_graphql_cost ai-blocker-watch graphql.open_issue_snapshot blocker_watch_tick "$bw_id" direct "$access_context"
+AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_workflow_outcome ai-blocker-watch blocker_watch_tick "$bw_id" completed 1000
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/bw-cost-state/measurements" > "$TMP/report"; rc=$?
+check 'BlockerWatch tick receipt links a direct snapshot cost' \
+  "[ $rc -eq 0 ] && jq -e '.linked_graphql_points == 4 and .completed_workflow_receipts == 1 and .workflow_outcomes[0].workflow == \"blocker_watch_tick\"' '$TMP/report'"
+printf '%s' '{"data":{"rateLimit":{"cost":2,"remaining":4798,"resetAt":"2026-09-28T05:00:00Z"}},"errors":[{"message":"fixture failure"}]}' |
+  AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_graphql_cost ai-blocker-watch graphql.open_issue_snapshot blocker_watch_alarm '' direct "$access_context"
+printf '%s' '{"data":{"rateLimit":{"cost":1,"remaining":4797,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_graphql_cost ai-blocker-watch graphql.open_issue_snapshot blocker_watch_links '' direct "$access_context"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/bw-cost-state/measurements" > "$TMP/report"; rc=$?
+check 'standalone BlockerWatch reads remain separate from tick outcomes, including charged error responses' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_points == 7 and .linked_graphql_points == 4 and (.observed_graphql_cost_sources | any(.workflow == \"blocker_watch_alarm\" and .points == 2)) and (.observed_graphql_cost_sources | any(.workflow == \"blocker_watch_links\" and .points == 1))' '$TMP/report'"
+mkdir "$TMP/cost-only" "$TMP/outcome-only"
+printf '%s\n' '{"schema":2,"utc":"2020-01-01T00:00:00Z","measurement":"observed_graphql_cost","caller":"ai-pr-wait","operation":"graphql.pr_status","workflow":"pr_wait","workflow_id":null,"graphql_points":7,"http_requests":null}' > "$TMP/cost-only/2020-01-01.jsonl"
+printf '%s\n' '{"schema":3,"utc":"2021-01-01T00:00:00Z","measurement":"workflow_outcome","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","outcome":"checks_failed","elapsed_ms":1}' > "$TMP/outcome-only/2021-01-01.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/cost-only" > "$TMP/cost-report"; cost_rc=$?
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/outcome-only" > "$TMP/outcome-report"; outcome_rc=$?
+check 'cost-only and outcome-only reports retain their measurement time bounds' \
+  "[ $cost_rc -eq 0 ] && [ $outcome_rc -eq 0 ] && jq -e '.first_utc == \"2020-01-01T00:00:00Z\" and .last_utc == .first_utc' '$TMP/cost-report' && jq -e '.first_utc == \"2021-01-01T00:00:00Z\" and .last_utc == .first_utc' '$TMP/outcome-report'"
+jq -c '.access_context="FIXTURE_CANARY"' "$TMP/legacy-cost/2026-09-28.jsonl" > "$TMP/legacy-cost/2026-09-27.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/legacy-cost" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+check 'report rejects a non-opaque context without exposing it' \
+  "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && ! grep -q FIXTURE_CANARY '$TMP/report-error'"
 mkdir "$TMP/report-compat"
 head -n 1 "$TMP/telemetry-state/measurements/$(date -u +%F).jsonl" > "$TMP/report-compat/$(date -u +%F).jsonl"
 for sample in "$TMP/state/measurements/"*.jsonl; do jq -c 'select(.operation == "api.identity")' "$sample" >> "$TMP/report-compat/$(date -u +%F).jsonl"; done
@@ -572,6 +628,12 @@ check 'request report rejects untrusted labels without reflecting them' "[ $rc -
 # to prove the report cannot publish a partial aggregate on later corruption.
 mkdir "$TMP/report-shapes"
 head -n 1 "$TMP/telemetry-state/measurements/$(date -u +%F).jsonl" > "$TMP/report-valid"
+mkdir "$TMP/report-callers"
+for caller in ai-merge-group-evidence ai-transcript-destination-check ai-workspace-status ai-reviewer-membership-drift ai-devops-doctor ai-devops-installer; do
+  jq -c --arg caller "$caller" '.caller=$caller' "$TMP/report-valid" > "$TMP/report-callers/2001-01-01.jsonl"
+  "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/report-callers" > "$TMP/report-caller-out" 2> "$TMP/report-caller-err"; rc=$?
+  check "the $caller report label remains accepted and scrubbed" "[ $rc -eq 0 ] && jq -e --arg caller '$caller' '.sources[0].caller == \$caller' '$TMP/report-caller-out' && [ ! -s '$TMP/report-caller-err' ]"
+done
 "$PYTHON_RUNNER" -c 'print("request report: invalid or unavailable measurement input; no report produced")' > "$TMP/report-expected-error"
 for shape in '[]' '["FIXTURE_CANARY"]' 'null' 'true' '1' '"FIXTURE_CANARY"' \
   '{"operation":[]}' '{"operation":{}}' '{"operation":true}' \
@@ -616,6 +678,14 @@ else
 fi
 mkdir "$AI_GH_STATE_DIR/quota-observation.json"
 source "$ROOT/tools/github-requests/telemetry.sh"
+for caller in ai-merge-group-evidence ai-transcript-destination-check ai-workspace-status ai-reviewer-membership-drift ai-devops-doctor ai-devops-installer; do
+  AI_GH_CALLER="$caller" gh_measure_init api graphql
+  check "the $caller transport keeps its fixed telemetry label" "[ '$GH_MEASURE_CALLER' = '$caller' ]"
+done
+AI_GH_CALLER=ai-devops-doctor gh_measure_init auth status
+check 'networked authentication probe has a fixed operation label' "[ '$GH_MEASURE_OPERATION' = auth.status ]"
+AI_GH_CALLER=$'ai-workspace-status\nprivate' gh_measure_init api graphql
+check 'an injected caller label remains unknown and cannot enter telemetry' "[ '$GH_MEASURE_CALLER' = unknown ]"
 STATE="$AI_GH_STATE_DIR"
 gh_measure_quota 1 2 3 4 5 6 7 8 9 >/dev/null 2>&1; rc=$?
 check 'quota observation rejects non-regular destination too' "[ $rc -eq 1 ] && [ -d '$AI_GH_STATE_DIR/quota-observation.json' ] && [ \$(find '$AI_GH_STATE_DIR' -maxdepth 1 -name 'quota-observation.*' -type f | wc -l) -eq 0 ]"

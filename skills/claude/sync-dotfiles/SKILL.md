@@ -90,13 +90,19 @@ clone + `./install.sh` (Ubuntu) first.
 
 ## Procedure
 
-1. **Pull the hub.** In the repo: `git pull --ff-only`. If it fails (local
-   changes / diverged history), STOP and report — do not force, do not `git
-   reset`. Tell the user to resolve or ask to inspect.
+1. **Update the hub.** On Windows, run `powershell -ExecutionPolicy Bypass
+   -File <repo>\bin\install-ai-devops-windows.ps1 -RepoPath <repo>
+   -SourceGateOnly`; it checks the installed source receipt before advancing
+   the checkout and stops protected updates for task gate preflight. On Ubuntu,
+   run `git pull --ff-only`. If the update fails (local changes / diverged
+   history), STOP and report — do not force, do not `git reset`.
 1b. **Reconcile local AI commands before installing skills.** Run
    `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
    Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\install-machine-tools.ps1 -RepoPath <repo>`
-   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. If
+   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. The
+   Windows launcher installer validates the source gate before stamping a
+   receipt; a protected update first needs the reviewed pinned route in
+   `docs/deployment.md`. If
    only `ai-glm` is missing, use the existing GLM installer in step 2b because
    it owns that command and service. Stop if the final doctor is nonzero. Say
    "Local AI commands already current" or name what was installed. On Windows,
@@ -132,7 +138,9 @@ clone + `./install.sh` (Ubuntu) first.
      substring `ops_` and produced a false "plaintext token found" on 2026-07-26.
      A real service-account token is ~866 characters.
    - Windows: `~/.ssh/ai-devops.conf` exists and `~/.ssh/config` `Include`s it.
-     Ubuntu: `~/.config/ai-devops/shellrc` exists and `.bashrc` sources it.
+     Ubuntu: `~/.config/ai-devops/shellrc` exists and `.bashrc` sources it, and
+     `<repo>/bin/ai-ssh-setup` reports the 916-alien key and `ai-devops.conf`
+     Include as current (it is idempotent; run it directly to repair only SSH).
    **If anything is missing or a real token is found**, run the per-OS installer —
    `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\setup-machine.ps1 -RepoPath <repo>`
    or `<repo>/bin/setup-secrets.sh`. Two hard preconditions:

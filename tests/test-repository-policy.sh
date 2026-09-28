@@ -5,6 +5,14 @@ POLICY="$ROOT/bin/ai-repo-policy"; STATUS="$ROOT/bin/ai-workspace-status"
 PASS=0; FAIL=0; ok(){ printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }; bad(){ printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+cat > "$TMP/fake-gh" <<'GH'
+#!/usr/bin/env bash
+[ "$*" = 'pr view --json url --jq .url' ] || exit 2
+printf '%s\n' 'https://example.invalid/pr/1'
+GH
+chmod +x "$TMP/fake-gh"
+export AI_GH_REAL_GH="$TMP/fake-gh" AI_GH_STATE_DIR="$TMP/gh-state"
+export AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off
 
 git init -q --bare --initial-branch=main "$TMP/repo.git"
 git clone -q "$TMP/repo.git" "$TMP/work"
@@ -22,6 +30,8 @@ git clone -q "$TMP/repo.git" "$TMP/other"; git -C "$TMP/other" config user.name 
 echo remote >> "$TMP/other/a"; git -C "$TMP/other" commit -qam remote; git -C "$TMP/other" push -q
 output="$(cd "$TMP/work" && AI_REPO_POLICY_BIN="$POLICY" "$STATUS" 2>&1)"
 check 'workspace status fetches before remote counts' "grep -Fq 'Behind    : 1 commit(s)' <<<\"\$output\""
+check 'workspace PR status entered the shared admission path' \
+  '[ -f "$AI_GH_STATE_DIR/last_call_ms" ] && grep -Fq "https://example.invalid/pr/1" <<<"$output"'
 check 'main-only status gives correct direct-main advice' "grep -Fq \"works directly on 'main'\" <<<\"\$output\""
 check 'main-only status never recommends a feature branch' "! grep -Fqi 'create a feature branch' <<<\"\$output\""
 

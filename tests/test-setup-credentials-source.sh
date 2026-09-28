@@ -127,10 +127,34 @@ if [ -n "$GLM_REPO_SETUP" ] &&
      trap '\''rm -rf "$glm_probe"'\'' EXIT
      test "$(git -C "$glm_probe" ls-files)" = README.md
      "$SANDBOX" assert-public "$glm_probe" >/dev/null
+     before="$("$SANDBOX" digest "$glm_probe")"
+     mkdir -p "$glm_probe/.ai/reviews" && printf report > "$glm_probe/.ai/reviews/glm-probe.md"
+     test "$("$SANDBOX" digest "$glm_probe")" = "$before"
    '; then
   ok "GLM installer creates a classifiable public probe repository"
 else
   bad "GLM installer creates a classifiable public probe repository"
 fi
+
+# A symlinked invocation (e.g. /usr/local/bin/setup-secrets.sh) must resolve
+# REPO_ROOT to the real checkout, not the symlink's directory.
+link_tmp="$(mktemp -d)"
+mkdir -p "$link_tmp/repo/bin" "$link_tmp/usr/bin" "$link_tmp/rel"
+{
+  sed -n '/^_self="\${BASH_SOURCE\[0\]}"$/,/^unset _self _dir$/p' "$SOURCE"
+  printf 'printf %%s "$REPO_ROOT"\n'
+} > "$link_tmp/repo/bin/probe.sh"
+ln -s "$link_tmp/repo/bin/probe.sh" "$link_tmp/usr/bin/probe.sh"
+ln -s "../usr/bin/probe.sh" "$link_tmp/rel/chained.sh"
+want="$(cd "$link_tmp/repo" && pwd -P)"
+direct="$(bash "$link_tmp/usr/bin/probe.sh")"
+chained="$(bash "$link_tmp/rel/chained.sh")"
+if grep -q '^REPO_ROOT=' "$link_tmp/repo/bin/probe.sh" &&
+   [ "$direct" = "$want" ] && [ "$chained" = "$want" ]; then
+  ok "setup-secrets resolves REPO_ROOT through symlinks"
+else
+  bad "setup-secrets resolves REPO_ROOT through symlinks (got '$direct' / '$chained', want '$want')"
+fi
+rm -rf "$link_tmp"
 
 [ "$failures" -eq 0 ]

@@ -117,8 +117,9 @@ machine-atlas fact. Do not let repeated prompt text remain only in chat history.
 On any Windows computer, paste this into PowerShell:
 
 ```powershell
-if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/popcre/ai-devops.git $p} else {git -C $p pull --ff-only}; powershell -ExecutionPolicy Bypass -File "$p\bin\install-ai-devops-windows.ps1"
+if(!(Get-Command git -EA SilentlyContinue)){winget install --id Git.Git -e --source winget; $env:Path=[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")}; $p="$HOME\repos\ai-devops"; if(!(Test-Path "$p\.git")){git clone https://github.com/popcre/ai-devops.git $p}; powershell -ExecutionPolicy Bypass -File "$p\bin\install-ai-devops-windows.ps1"
 ```
 
-That one command clones or pulls this repo, installs Claude and Codex skills,
+That one command clones the repo when needed; the installer checks and updates
+an existing checkout before installing Claude and Codex skills,
 and seeds global instruction files without overwriting local edits.
