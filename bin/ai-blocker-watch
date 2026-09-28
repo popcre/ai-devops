@@ -1141,7 +1141,19 @@ cmd_tick(){
 
 TASK_NAME='ai-devops\blocker-watch'
 CRON_MARKER='# ai-devops blocker-watch (managed by ai-blocker-watch schedule; unschedule removes)'
-cron_job_line(){ printf '*/%s * * * * %s tick >> %s 2>&1' "$(cfg .schedule_every_minutes)" "'$TOOL_ROOT/bin/ai-blocker-watch'" "'$HOME_DIR/tick.log'"; }
+# Every machine used to tick on the same wall-clock minute, so their GitHub
+# reads landed in one burst and tripped GitHub's per-user rate limit. Each
+# machine now ticks at its own stable minute offset derived from its hostname.
+tick_offset(){ # tick_offset <every>: 0..every-1, stable per machine
+  local every="$1" sum
+  [ "$every" -gt 1 ] 2>/dev/null || { printf 0; return; }
+  sum="$(printf '%s' "$(hostname 2>/dev/null || printf unknown)" | cksum | cut -d' ' -f1)"
+  printf '%s' "$(( sum % every ))"
+}
+cron_job_line(){
+  local every off; every="$(cfg .schedule_every_minutes)"; off="$(tick_offset "$every")"
+  printf '%s-59/%s * * * * %s tick >> %s 2>&1' "$off" "$every" "'$TOOL_ROOT/bin/ai-blocker-watch'" "'$HOME_DIR/tick.log'"
+}
 cmd_schedule(){
   local every self
   every="$(cfg .schedule_every_minutes)"
@@ -1150,7 +1162,7 @@ cmd_schedule(){
     bash_exe="$(cygpath -w "$(command -v bash)")"; self="$(cygpath -m "$TOOL_ROOT/bin/ai-blocker-watch")"
     # conhost --headless keeps a console window from flashing every run.
     # /F re-points an existing task, so rerunning the installer stays safe.
-    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /TN "$TASK_NAME" \
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /ST "$(printf '00:%02d' "$(tick_offset "$every")")" /TN "$TASK_NAME" \
       /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' tick >> ~/.ai-devops/blocker-watch/tick.log 2>&1\"" >/dev/null
     note "scheduled every $every minutes as $TASK_NAME"
     return
