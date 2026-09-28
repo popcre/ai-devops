@@ -23,6 +23,20 @@ else:
     import fcntl
 
 
+def windows_acl(mode, path):
+    helper = Path(__file__).with_name("secure-windows-path.ps1")
+    if not helper.is_file():
+        return False
+    try:
+        return subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-File", str(helper), "-Mode", mode, "-Path", str(path)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=15,
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def lock(file):
     if os.name == "nt":
         file.seek(0)
@@ -102,6 +116,8 @@ def atomic_write(path, data):
             file.write(data)
             file.flush()
             os.fsync(file.fileno())
+        if os.name == "nt" and not windows_acl("VerifyCache", Path(name)):
+            raise OSError("snapshot file ACL is not private")
         os.replace(name, path)
     finally:
         if os.path.exists(name):
@@ -147,18 +163,32 @@ def main():
     command = args.command[1:]
     directory = Path(args.state_dir)
     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
-        return 3
-    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
-    # Windows exposes the inherited profile ACL, not POSIX owner/group bits.
-    if directory.is_symlink() or (os.name != "nt" and directory.stat().st_mode & 0o077):
-        return 3
+        return run(command, None, args.age_file, args.source_file, args.expected_head)
+    if os.name == "nt":
+        if not windows_acl("EnsureCache", directory):
+            return run(command, None, args.age_file, args.source_file, args.expected_head)
+    else:
+        try:
+            directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+            if directory.is_symlink() or directory.stat().st_mode & 0o077:
+                return run(command, None, args.age_file, args.source_file, args.expected_head)
+        except OSError:
+            return run(command, None, args.age_file, args.source_file, args.expected_head)
     prune(directory)
     digest = hashlib.sha256(args.key.encode()).hexdigest()
     cache = directory / f"{digest}.json"
     lock_path = directory / f"{digest}.lock"
     if cache.is_symlink() or lock_path.is_symlink():
-        return 3
-    with open(lock_path, "a+b") as owner:
+        return run(command, None, args.age_file, args.source_file, args.expected_head)
+    if os.name == "nt" and cache.exists() and not windows_acl("VerifyCache", cache):
+        return run(command, None, args.age_file, args.source_file, args.expected_head)
+    try:
+        owner_file = open(lock_path, "a+b")
+    except OSError:
+        return run(command, None, args.age_file, args.source_file, args.expected_head)
+    with owner_file as owner:
+        if os.name == "nt" and not windows_acl("VerifyCache", lock_path):
+            return run(command, None, args.age_file, args.source_file, args.expected_head)
         deadline = time.monotonic() + args.wait_seconds
         while True:
             try:
@@ -202,7 +232,11 @@ def run(command, cache, age_file, source_file, expected_head=None):
         print("ai-pr-wait: incomplete or invalid pull-request status; refusing cached success", file=sys.stderr)
         return 4
     if cache is not None and len(result.stdout) <= 1048576 and cacheable(result.stdout, expected_head):
-        atomic_write(cache, result.stdout)
+        try:
+            atomic_write(cache, result.stdout)
+        except OSError:
+            # A cache write must not erase an otherwise valid fresh outcome.
+            pass
     return 0
 
 

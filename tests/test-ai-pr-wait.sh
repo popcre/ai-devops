@@ -43,6 +43,9 @@ for OPTION in --repo --timeout-minutes --interval --api-timeout-seconds; do
     "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'requires a value'"
 done
 
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*) export TMPDIR="$HOME" ;;
+esac
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin"
@@ -295,8 +298,19 @@ check "a genuine same-head merge-queue ejection is terminal" \
 # An explicit --repo skips the preliminary repo lookup. A cold ai-gh state
 # therefore has no principal when the waiter starts; a successful first call
 # can warm it, and later waiters must use that verified local identity.
-mkdir -m 700 -p "$TMP/cold-throttle/identities"
-chmod 700 "$TMP/cold-throttle" "$TMP/cold-throttle/identities"
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*)
+    acl_helper="$(cygpath -w "$ROOT/tools/github-requests/secure-windows-path.ps1")"
+    powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$acl_helper" \
+      -Mode EnsureCache -Path "$(cygpath -w "$TMP/cold-throttle")" >/dev/null || exit 1
+    powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$acl_helper" \
+      -Mode EnsureCache -Path "$(cygpath -w "$TMP/cold-throttle/identities")" >/dev/null || exit 1
+    ;;
+  *)
+    mkdir -m 700 -p "$TMP/cold-throttle/identities"
+    chmod 700 "$TMP/cold-throttle" "$TMP/cold-throttle/identities"
+    ;;
+esac
 printf '%064d\n' 0 > "$TMP/cold-throttle/principal-salt"
 chmod 600 "$TMP/cold-throttle/principal-salt"
 cold_credential_hash="$(printf 'ghp_cold_fixture\n' | sha256sum | cut -d' ' -f1)"

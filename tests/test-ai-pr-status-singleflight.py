@@ -15,11 +15,28 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "tools/github-requests/pr_status_singleflight.py"
 CONTEXT = ROOT / "tools/github-requests/pr-status-context"
+WINDOWS_ACL = ROOT / "tools/github-requests/secure-windows-path.ps1"
+
+
+def secure_windows_directory(path):
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(WINDOWS_ACL), "-Mode", "EnsureCache", "-Path", str(path)],
+        capture_output=True, check=False,
+    )
+    if result.returncode:
+        raise AssertionError(result.stderr.decode(errors="replace"))
+
+
+def bash_path(path):
+    if os.name != "nt":
+        return str(path)
+    return subprocess.check_output(["cygpath", "-u", str(path)], text=True).strip()
 
 
 class SingleFlight(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=Path.home() if os.name == "nt" else None)
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
         self.count = self.base / "calls"
@@ -67,7 +84,10 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
             sorted([(self.base / (suffix + ".source")).read_text() for suffix in ("a", "b")]),
             ["cache", "upstream"],
         )
-        self.assertEqual((self.base / "state").stat().st_mode & 0o077, 0)
+        if os.name == "nt":
+            secure_windows_directory(self.base / "state")
+        else:
+            self.assertEqual((self.base / "state").stat().st_mode & 0o077, 0)
 
     def test_different_access_keys_never_share(self):
         for key in ("scope-a", "scope-b"):
@@ -75,6 +95,18 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
             process.communicate(timeout=5)
             self.assertEqual(process.returncode, 0)
         self.assertEqual(self.calls(), 2)
+
+    @unittest.skipUnless(os.name == "nt", "Windows ACL case")
+    def test_parent_with_other_user_replace_rights_runs_uncached(self):
+        subprocess.run(["icacls.exe", str(self.base), "/grant", "*S-1-1-0:(M)"],
+                       check=True, capture_output=True)
+        for index in range(2):
+            process = self.call(key="replaceable-parent", suffix=f"parent-{index}")
+            _, err = process.communicate(timeout=8)
+            self.assertEqual(process.returncode, 0, err)
+            self.assertEqual((self.base / f"parent-{index}.source").read_text(), "upstream")
+        self.assertEqual(self.calls(), 2)
+        self.assertFalse((self.base / "state").exists())
 
 
     def test_head_change_is_not_served_from_old_key(self):
@@ -133,13 +165,17 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
 
 class AccessContext(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=Path.home() if os.name == "nt" else None)
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
         self.state = self.base / "state"
-        (self.state / "identities").mkdir(parents=True, mode=0o700)
-        self.state.chmod(0o700)
-        (self.state / "identities").chmod(0o700)
+        if os.name == "nt":
+            secure_windows_directory(self.state)
+            secure_windows_directory(self.state / "identities")
+        else:
+            (self.state / "identities").mkdir(parents=True, mode=0o700)
+            self.state.chmod(0o700)
+            (self.state / "identities").chmod(0o700)
         (self.state / "principal-salt").write_text("a" * 64)
         (self.state / "principal-salt").chmod(0o600)
         self.fake = self.base / "gh"
@@ -151,7 +187,8 @@ class AccessContext(unittest.TestCase):
         key = hashlib.sha256(f"3 github.com {digest}".encode()).hexdigest()
         (self.state / "identities" / key).write_text(f"{principal} 1000\n")
         (self.state / "identities" / key).chmod(0o600)
-        env = dict(os.environ, AI_GH_STATE_DIR=str(self.state), AI_GH_REAL_GH=str(self.fake), TOKEN=token)
+        env = dict(os.environ, AI_GH_STATE_DIR=bash_path(self.state),
+                   AI_GH_REAL_GH=bash_path(self.fake), TOKEN=token)
         return subprocess.run(["bash", str(CONTEXT)], capture_output=True, env=env, check=False)
 
     def test_same_principal_different_tokens_have_different_access_keys(self):
@@ -168,10 +205,45 @@ class AccessContext(unittest.TestCase):
         self.assertEqual(result.stdout, b"")
 
     def test_permissive_state_directory_disables_sharing(self):
-        self.state.chmod(0o755)
+        if os.name == "nt":
+            subprocess.run(["icacls.exe", str(self.state), "/grant", "*S-1-1-0:(M)"],
+                           check=True, capture_output=True)
+        else:
+            self.state.chmod(0o755)
         result = self.context("ghp_visible")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, b"")
+
+    @unittest.skipUnless(os.name == "nt", "Windows ACL case")
+    def test_read_only_group_on_verified_identity_does_not_grant_snapshot_access(self):
+        subprocess.run(["icacls.exe", str(self.state), "/grant", "*S-1-1-0:(R)"],
+                       check=True, capture_output=True)
+        result = self.context("ghp_readonly")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipUnless(os.name == "nt", "Windows ACL case")
+    def test_other_user_read_cannot_reach_snapshot(self):
+        secure_windows_directory(self.base / "snapshot")
+        subprocess.run(["icacls.exe", str(self.base / "snapshot"), "/grant", "*S-1-1-0:(R)"],
+                       check=True, capture_output=True)
+        response = {"data": {"repository": {"pullRequest": {
+            "state": "OPEN", "headRefOid": "h1", "isInMergeQueue": False,
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {
+                "state": "PENDING", "contexts": {"totalCount": 0,
+                "pageInfo": {"hasPreviousPage": False}, "nodes": []}}}}]}}}}}
+        source = self.base / "status.py"
+        source.write_text(f"print({json.dumps(json.dumps(response))})\n")
+        for index in range(2):
+            process = subprocess.run(
+                [sys.executable, str(HELPER), "--state-dir", str(self.base / "snapshot"),
+                 "--key", "scope", "--expected-head", "h1", "--ttl", "10",
+                 "--wait-seconds", "4", "--age-file", str(self.base / f"age-{index}"),
+                 "--source-file", str(self.base / f"source-{index}"),
+                 "--", sys.executable, str(source)], capture_output=True, check=False,
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertEqual((self.base / f"source-{index}").read_text(), "upstream")
+        self.assertFalse(list((self.base / "snapshot").glob("*.json")))
 
 
 if __name__ == "__main__":
