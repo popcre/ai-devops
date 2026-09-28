@@ -83,14 +83,19 @@ function Invoke-Installer {
     }
     $oldMode = $env:AI_DEVOPS_INSTALL_TEST_MODE
     $oldRemote = $env:AI_DEVOPS_TEST_EXPECTED_REMOTE
+    $oldSkipMachineTools = $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE
     try {
         $env:AI_DEVOPS_INSTALL_TEST_MODE = '1'
         $env:AI_DEVOPS_TEST_EXPECTED_REMOTE = (git -C $Fixture remote get-url origin)
         if ($LASTEXITCODE -ne 0) { throw 'Could not read fixture remote.' }
+        # This disposable skills fixture has no managed launcher catalog.
+        # The installer accepts this exception only for a local test origin.
+        $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE = '1'
         return (& $Installer @parameters *>&1 | Out-String)
     } finally {
         $env:AI_DEVOPS_INSTALL_TEST_MODE = $oldMode
         $env:AI_DEVOPS_TEST_EXPECTED_REMOTE = $oldRemote
+        $env:AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE = $oldSkipMachineTools
     }
 }
 
