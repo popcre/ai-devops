@@ -71,10 +71,15 @@ function Assert-ReadyRepository([string]$Path) {
     if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) {
       throw 'The ai-devops checkout is ahead of or diverged from origin/main; refusing machine changes.'
     }
-    Invoke-GitCommand @('-C', $Path, 'merge', '--ff-only', 'origin/main') | Out-Host
-    if ($script:LastGitExitCode -ne 0) { throw 'The ai-devops fast-forward update failed.' }
+    # The source installer checks the managed receipt and incoming protected
+    # paths before advancing this checkout. A direct merge here would hide the
+    # installed baseline from that check.
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'install-ai-devops-windows.ps1') -RepoPath $Path -SourceGateOnly -ExpectedHead $remoteHead.Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'The ai-devops guarded source update failed.' }
     $head = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
     if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve updated ai-devops HEAD.' }
+    $remoteHead = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'origin/main')
+    if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve updated ai-devops origin/main.' }
     if ($head.Trim() -ne $remoteHead.Trim()) { throw 'The updated checkout is not exactly equal to origin/main.' }
   }
   return $head.Trim()

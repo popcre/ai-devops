@@ -121,21 +121,60 @@ forces that mode and `--skip-secrets` records an intentional skip.
 Idempotent — safe to re-run.
 
 For an update containing reviewer-safety paths, leave the installed checkout
-unchanged while preparing two linked worktrees: a disposable candidate at its
-current HEAD, and the exact reviewed target containing the new gate. From the
-candidate, run the reviewed gate's `start --class reviewer-safety`, then advance
-only the candidate to the target commit. Run the reviewed gate's `check --before
-deploy --target-head <full SHA> --installed-checkout <canonical checkout>
---installed-launcher <managed ai-task-gates launcher> --owner-request '<host,
-action, and Albert authorization>'`. On Windows, pass the managed extensionless
-launcher; on Ubuntu, pass its symlink. The check binds the candidate to the
-exact target and confirms that the installed checkout, launcher, and recorded
-old HEAD still agree in the same Git repository. Fetch `origin/main` immediately
-before the check; the target must be in that fetched release history. The
+unchanged while preparing two linked worktrees: a disposable installation
+candidate at its current HEAD and a separate reviewer candidate at the exact
+merged target. From the installation candidate, run the target worktree's
+reviewed gate with `start --class installation`, then advance only that
+candidate to the target commit. Declare the separate reviewer candidate as
+`reviewer-safety` and obtain its read-only exact-head independent `APPROVE`
+review.
+Run `ai-task-gates authorize-install --target-head <full SHA>
+--installed-checkout <canonical checkout> --installed-launcher <managed
+ai-task-gates launcher> --review-report <exact-head APPROVE report>
+--owner-request '<host, action, and Albert authorization>'`. On Windows, pass
+the managed extensionless launcher; on Ubuntu, pass its symlink. This separate
+installation task leaves `check --before deploy` forbidden for a reviewer-safety
+change. The authorization binds the candidate, review, installed checkout,
+launcher, and recorded old HEAD in the same Git repository, and is consumed
+once by the Windows installer. Fetch `origin/main` immediately before issuing
+authorization; the target must be the exact fetched release. The
 installed checkout must be the durable primary checkout and the launcher must
 have its supported canonical path. Only after it passes may the
 canonical checkout fast-forward and the supported installer run. Verify the
-installed command hashes and routing afterward.
+installed command hashes and routing afterward. On Windows, pass
+`-RepoPath <canonical checkout> -ExpectedHead <full target SHA>` to the
+reviewed target worktree's `bin/install-ai-devops-windows.ps1`. The old
+installed bootstrap and installer do not have this gate and cannot perform the
+first protected migration. The full target installer refreshes the managed
+command launchers and source receipts before consuming authorization.
+The Windows installer compares the managed launcher receipt with the fetched
+release, so it also detects a checkout that was advanced before the installer
+started. It refuses a reviewer-safety change without both `-ExpectedHead` and
+the matching one-use authorization, including when invoked through bootstrap
+or setup. The source-only gate retains a pending authorization until the full
+installer finishes and refreshes the managed command launchers; a failed full
+installation can retry against the same pinned target. Legacy launchers
+without a receipt need the same one-time path. If both managed gate launchers
+are absent, use `authorize-install --first-install` with a separate exact-head
+review whose approved report names `first-managed-install`. This applies even
+to a newly cloned checkout: a clone reflog does not establish installation
+history. If another managed launcher remains, or just one gate launcher remains,
+use `authorize-install
+--recover-launchers` with a review naming
+`partial-managed-launcher-recovery`. The authority records hashes for every
+present managed launcher, exact absence of the missing gate launcher files,
+and the installed gate source hash. The installer checks them again before
+writing either file.
+The full installer refreshes launchers after ordinary updates as well, so the
+next release starts from the current installed-source receipt. A source-only
+update must be followed by a full install before beginning another release.
+If a legacy four-line launcher already points at an unchanged current-main
+checkout, use the explicit `authorize-install --legacy-migration` route. The
+independent exact-head review must examine the full target source and the
+`legacy-managed-launcher-refresh` operation; its approved report must name that
+operation. The one-use authority records hashes of both launcher files and
+the installed gate source, which the installer checks again before refreshing
+the launcher receipt. This route refuses launchers that already have a receipt.
 
 The route accepts only the supported `popcre/ai-devops` and redirected
 `u2giants/ai-devops` GitHub origins. It compares the full release range,
@@ -143,9 +182,10 @@ including deleted paths, and refuses a divergent or dirty candidate. The
 first rollout uses the reviewed gate from the target worktree, so an older
 installed gate does not need to understand these new options.
 
-For a first installation at an unchanged commit, run `start --class
+For a first Ubuntu installation at an unchanged commit, run `start --class
 installation` before `check --before deploy --first-install` with the canonical
-checkout and launcher paths. The canonical launcher must be absent. For a
+checkout and launcher paths. The canonical launcher must be absent. Windows
+first installation uses the reviewed one-use authority described above. For a
 same-source maintenance reinstall, omit `--first-install`: the check requires
 the installed source receipt to match the current commit and gate bytes. The
 Ubuntu `/etc/ai-devops/install-manifest.tsv` supplies that receipt; the Windows managed Bash and

@@ -33,6 +33,20 @@ $sourceSha = (& git -C $RepoPath rev-parse HEAD 2>$null).Trim()
 if ($LASTEXITCODE -ne 0 -or $sourceSha -notmatch '^[0-9a-f]{40}$') {
   throw "Cannot identify the exact source commit for $RepoPath"
 }
+# This is the common receipt-stamping boundary. A direct launcher refresh must
+# prove the same installed baseline, protected diff, and one-use review as the
+# full installer before it can turn current source into a trusted receipt.
+$sourceGate = Join-Path $RepoPath 'bin\install-ai-devops-windows.ps1'
+$priorPreference = $ErrorActionPreference
+try {
+  # Native Git progress from the child is stderr even on success. Its exit
+  # status, not PowerShell's stderr promotion, decides the preflight result.
+  $ErrorActionPreference = 'Continue'
+  & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $sourceGate `
+    -RepoPath $RepoPath -LauncherGateOnly -ExpectedHead $sourceSha 2>&1 | Out-Host
+  $gateExit = $LASTEXITCODE
+} finally { $ErrorActionPreference = $priorPreference }
+if ($gateExit -ne 0) { throw 'Managed command launcher source gate refused this checkout.' }
 
 $target = Join-Path $UserProfilePath ".local\bin"
 $gitBash = @(
@@ -76,3 +90,7 @@ if (-not ($entries | Where-Object { $_.TrimEnd('\') -ieq $target.TrimEnd('\') })
   Write-Host "OK added $target to User PATH"
 }
 $env:Path = $target + ';' + $env:Path
+$pendingAuthorization = Join-Path $UserProfilePath ('.local\state\ai-devops\task-gates\install-authorizations\' + $sourceSha + '.json.consuming')
+if (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf) {
+  Remove-Item -LiteralPath $pendingAuthorization -Force
+}
