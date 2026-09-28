@@ -268,7 +268,7 @@ check "install.sh runs the shared hook installer" "grep -q 'ai-install-post-merg
 check "the Windows installer runs the shared hook installer" "grep -q 'ai-install-post-merge-hook' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "the Windows installer disables hooks on its own fast-forward" "grep -q 'core.hooksPath' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "update.sh disables hooks on its own pull" "grep -q 'core.hooksPath' '$ROOT/update.sh'"
-check "update.sh requalifies after installing" "grep -q 'bin/ai-review-preflight\" requalify' '$ROOT/update.sh'"
+check "Linux installer requires requalification before finalization" "grep -q 'run_stage required \"Reviewer requalification\".*ai-review-preflight' '$ROOT/install.sh' && grep -q 'install-verify --phase finalize' '$ROOT/update.sh'"
 check "the Windows installer requalifies after installing the hook" "grep -q 'requalify' '$ROOT/bin/install-ai-devops-windows.ps1'"
 check "uninstall removes the hook through the shared script" "grep -q 'bin/ai-install-post-merge-hook' '$ROOT/uninstall.sh' && grep -q -- '--remove.*--repo' '$ROOT/uninstall.sh'"
 check "the hook tree is pinned to LF" "grep -q '^hooks/.*text eol=lf' '$ROOT/.gitattributes'"
