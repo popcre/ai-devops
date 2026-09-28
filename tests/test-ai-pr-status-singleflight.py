@@ -60,11 +60,12 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
 """
         )
 
-    def call(self, key="scope-a", head="h1", mode="open", delay="0", suffix="a", force=False):
+    def call(self, key="scope-a", head="h1", mode="open", delay="0", suffix="a",
+             force=False, wait_seconds="4"):
         env = dict(os.environ, COUNT=str(self.count), HEAD=head, MODE=mode, DELAY=delay)
         argv = [sys.executable, str(HELPER), "--state-dir", str(self.base / "state"),
                 "--key", key, "--expected-head", head, "--ttl", "10",
-                "--wait-seconds", "4", "--age-file", str(self.base / (suffix + ".age")),
+                "--wait-seconds", wait_seconds, "--age-file", str(self.base / (suffix + ".age")),
                 "--source-file", str(self.base / (suffix + ".source")),
                 "--", sys.executable, str(self.fake)]
         if force:
@@ -160,6 +161,54 @@ sys.exit(124)
             process.communicate(timeout=5)
             self.assertEqual(process.returncode, 0)
         self.assertEqual(self.calls(), 2)
+
+    def test_colliding_lock_shard_does_not_share_snapshots_or_grow_locks(self):
+        keys = {}
+        collision = None
+        for number in range(1000):
+            key = f"separate-access-{number}"
+            shard = hashlib.sha256(key.encode()).hexdigest()[:2]
+            if shard in keys:
+                collision = (keys[shard], key)
+                break
+            keys[shard] = key
+        self.assertIsNotNone(collision)
+        first = self.call(key=collision[0], head="h1", delay="0.7", suffix="collision-first")
+        started = time.monotonic()
+        while self.calls() == 0 and time.monotonic() - started < 4:
+            time.sleep(0.01)
+        self.assertEqual(self.calls(), 1)
+        second = self.call(key=collision[1], head="h2", suffix="collision-second")
+        for process, head in ((first, "h1"), (second, "h2")):
+            out, err = process.communicate(timeout=8)
+            self.assertEqual(process.returncode, 0, err)
+            self.assertEqual(json.loads(out)["data"]["repository"]["pullRequest"]["headRefOid"], head)
+        self.assertEqual(self.calls(), 2)
+        shard = hashlib.sha256(collision[0].encode()).hexdigest()[:2]
+        self.assertEqual([path.name for path in (self.base / "state").glob(".flight-*.lock")],
+                         [f".flight-{shard}.lock"])
+        for index, (key, head) in enumerate(zip(collision, ("h1", "h2"))):
+            process = self.call(key=key, head=head, suffix=f"collision-cached-{index}")
+            out, err = process.communicate(timeout=8)
+            self.assertEqual(process.returncode, 0, err)
+            self.assertEqual(json.loads(out)["data"]["repository"]["pullRequest"]["headRefOid"], head)
+            self.assertEqual((self.base / f"collision-cached-{index}.source").read_text(), "cache")
+        self.assertEqual(self.calls(), 2)
+
+        owner = self.call(key=collision[0], head="h1", delay="5", suffix="collision-owner",
+                          force=True, wait_seconds="8")
+        started = time.monotonic()
+        while self.calls() == 2 and time.monotonic() - started < 4:
+            time.sleep(0.01)
+        self.assertEqual(self.calls(), 3)
+        contender = self.call(key=collision[1], head="h2", suffix="collision-deadline",
+                              force=True, wait_seconds="2")
+        _, contender_err = contender.communicate(timeout=7)
+        self.assertEqual(contender.returncode, 75, contender_err)
+        self.assertFalse((self.base / "collision-deadline.source").exists())
+        _, owner_err = owner.communicate(timeout=9)
+        self.assertEqual(owner.returncode, 0, owner_err)
+        self.assertEqual(self.calls(), 3)
 
     @unittest.skipUnless(os.name == "nt", "Windows ACL case")
     def test_parent_with_other_user_replace_rights_runs_uncached(self):

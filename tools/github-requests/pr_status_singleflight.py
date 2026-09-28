@@ -186,7 +186,10 @@ def main():
     prune(directory)
     digest = hashlib.sha256(args.key.encode()).hexdigest()
     cache = directory / f"{digest}.json"
-    lock_path = directory / f"{digest}.lock"
+    # A fixed namespace avoids an immortal lock file for every historical
+    # identity/PR/head. Colliding keys serialize, but snapshots retain their
+    # exact digest and never cross the identity boundary.
+    lock_path = directory / f".flight-{digest[:2]}.lock"
     if cache.is_symlink() or lock_path.is_symlink():
         return upstream(None)
     if os.name == "nt" and cache.exists() and not windows_acl("VerifyCache", cache):
