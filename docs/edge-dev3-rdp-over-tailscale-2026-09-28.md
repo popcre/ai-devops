@@ -60,10 +60,13 @@ connected.
 - Deleting a Credential Manager entry. None was visible under that name.
 - Relying on `mstsc /prompt` to ask for a password. With KRDP it did not ask.
 
-## Known leftover (not fixed)
+## Known leftover (resolved 2026-09-28)
 
-A duplicate user unit `~/.config/systemd/user/krdp.service` restarts every few
-seconds (over 2,000 restarts). It fails with `Unable to listen ... 4837` because
-the packaged KRDP service already owns the port. It is harmless to RDP but
-noisy. Retire it only in a separate change that keeps the packaged service
-running.
+The duplicate user unit `~/.config/systemd/user/krdp.service` (restarting every
+few seconds with `Unable to listen ... 4837`) was retired at 10:12 AM EDT:
+`systemctl --user disable --now krdp.service`, the unit file moved to
+`~/krdp.service.bak-2026-09-28` (outside the unit path), then
+`systemctl --user daemon-reload`. Afterwards `krdp.service` no longer exists,
+`journalctl --user -u krdp.service` shows no new entries, and the packaged
+`app-org.kde.krdpserver.service` (PID 6043) stays active and listening on
+`*:4837`. To restore, move the backup back and re-enable it (not recommended).
