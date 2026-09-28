@@ -614,10 +614,11 @@ if [ "$fail" -eq 0 ]; then
   if [ -x "$REPO_ROOT/bin/ai-glm" ] && "$REPO_ROOT/bin/ai-glm" server status >/dev/null 2>&1; then
     info "Verifying the GLM session harness end-to-end"
     glm_probe="$(mktemp -d)"
-    ( cd "$glm_probe" && git init -q && git -c user.email=probe@local -c user.name=probe commit -q --allow-empty -m probe ) >/dev/null 2>&1
+    ( cd "$glm_probe" && git init -q && printf '%s\n' 'Public GLM capability probe.' > README.md &&
+      git add README.md && git -c user.email=probe@local -c user.name=probe commit -q -m probe ) >/dev/null 2>&1
     glm_result=""
     if glm_result="$(cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" new secrets-probe \
-           --json --prompt "Review this empty capability-probe repository. End with a ## Verdict heading followed by exactly APPROVE or REJECT." 2>/dev/null)" &&
+           --json --prompt "Review this minimal capability-probe repository. End with a ## Verdict heading followed by exactly APPROVE or REJECT." 2>/dev/null)" &&
        glm_report="$(printf '%s' "$glm_result" | jq -er '
          select(.schema_version == 1 and .ok == true) |
          select(.session.type == "review" and .session.model == "zai-coding-plan/glm-5.3") |
