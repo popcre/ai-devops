@@ -6,7 +6,7 @@ Planning date: 2026-09-27 EDT. Parent: [ai-devops #903](https://github.com/popcr
 
 | Step | Outcome | State | Acceptance evidence |
 |---|---|---|---|
-| 0 | Reconcile current owners and establish a measured baseline | Open | Dated report under `tests/verification/repo-throughput/` with reproducible Git/GitHub queries |
+| 0 | Reconcile current owners and establish a measured baseline | Complete, 2026-09-27 EDT | [Ten-PR baseline and ownership map](tests/verification/repo-throughput/2026-09-27-agent-evidence-jj-baseline.md); #910. Steps 2–3 need a specific post-owner defect before a new fix issue. |
 | 1 | Finish shared-db task-evidence isolation under its existing owner | Open; existing work partially landed | Existing [shared-db workflow refactor](https://github.com/popcre/shared-db/blob/main/plan_shared_db_workflow_refactor.md) Step 1 gate and live PR traces |
 | 2 | Remove avoidable evidence-only commit/review loops left after Step 1 | Open | Positive and refusal fixtures; two independent real PRs land without an evidence-only refresh |
 | 3 | Close only proven unrelated-main review invalidation gaps | Open | Exact content/policy identity tests and current-main integration proof; actual implementation changes still invalidate |
