@@ -31,6 +31,15 @@ manifest(){
   hash="$(git -C "$TMP/installed" show "$sha:bin/ai-task-gates" | sha256sum | cut -d' ' -f1)"
   printf 'meta\tsource_sha\t%s\t-\nsymlink\t%s\t%s\t%s\n' "$sha" "$TMP/bin/ai-task-gates" "$TMP/installed/bin/ai-task-gates" "$hash" > "$TMP/etc/install-manifest.tsv"
 }
+stage_report(){
+  local target="$1" name report="$TMP/state/install-stage-reports/$1.tsv"
+  mkdir -p "$(dirname "$report")"
+  for name in 'Base dependencies' 'Node toolchain (node/npm/npx)' 'System directories' 'Configuration seed' 'Configuration migration and validation' 'Unix entrypoints' 'Reviewer auto-requalification hook' 'Claude and Codex skills' 'Protected machine configuration' 'Git commit identity' 'Claude tool permissions' 'Claude closeout hook' 'Private memory seed' 'Managed artifact manifest' 'ai-devops doctor' 'Reviewer requalification'; do
+    printf 'PASS\trequired\t%s\n' "$name"
+  done > "$report"
+  chmod 600 "$report"
+  printf '%s\n' "$report"
+}
 manifest "$old"
 gate(){ (cd "$2" && "$2/bin/ai-task-gates" install-verify --phase "$1" --target-head "$3" --installed-checkout "$TMP/installed" --installed-launcher "$TMP/bin/ai-task-gates" "${@:4}"); }
 expect_ok(){ local name="$1"; shift; if "$@" > "$TMP/last-output" 2>&1; then printf 'PASS: %s\n' "$name"; else printf 'FAIL: %s\n' "$name"; tail -n 4 "$TMP/last-output"; exit 1; fi; }
@@ -49,10 +58,14 @@ git -C "$TMP/installed" merge -q --ff-only "$ordinary"
 expect_ok 'ordinary updated checkout resumes' gate resume "$TMP/installed" "$ordinary"
 expect_stop 'finalize refuses before installed manifest is refreshed' gate finalize "$TMP/installed" "$ordinary"
 manifest "$ordinary"
+expect_stop 'finalize requires exact required-stage receipt' gate finalize "$TMP/installed" "$ordinary"
+stage_path="$(stage_report "$ordinary")"
+expect_ok 'ordinary required stages bind to transaction' gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
 expect_ok 'ordinary update finalizes with completed receipt' gate finalize "$TMP/installed" "$ordinary"
 expect_stop 'same-source reinstall needs task and owner request' gate resume "$TMP/installed" "$ordinary"
 (cd "$TMP/installed" && bin/ai-task-gates start --class installation) >/dev/null
 expect_ok 'trusted same-source reinstall retains capability' gate resume "$TMP/installed" "$ordinary" --owner-request 'Owner requested maintenance reinstall'
+expect_ok 'same-source required stages bind to transaction' gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
 expect_ok 'trusted same-source reinstall finalizes' gate finalize "$TMP/installed" "$ordinary"
 
 (cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
@@ -101,6 +114,21 @@ mv "$auth.consuming" "$TMP/pending-backup"
 expect_stop 'stamped manifest cannot hide lost protected authority' gate resume "$TMP/installed" "$protected" --owner-request 'Owner requested maintenance reinstall'
 expect_stop 'finalize refuses missing protected transaction' gate finalize "$TMP/installed" "$protected"
 mv "$TMP/pending-backup" "$auth.consuming"
+stage_path="$(stage_report "$protected")"
+expect_ok 'protected required stages bind to reviewed authority' gate stages-complete "$TMP/installed" "$protected" --stage-report "$stage_path"
+marker="$TMP/state/install-stages/$protected.json"
+cp "$marker" "$TMP/marker-original"
+jq '.required_stages_pass=false' "$TMP/marker-original" > "$marker"
+chmod 600 "$marker"
+expect_stop 'tampered stage receipt cannot finalize' gate finalize "$TMP/installed" "$protected"
+cp "$TMP/marker-original" "$marker"
+printf 'FAIL(1)\trequired\tReviewer requalification\n' >> "$stage_path"
+expect_stop 'altered stage result refuses finalize' gate finalize "$TMP/installed" "$protected"
+printf 'FAIL(1)\trequired\tReviewer requalification\n' > "$stage_path"
+expect_stop 'failed required stage cannot be sealed' gate stages-complete "$TMP/installed" "$protected" --stage-report "$stage_path"
+stage_path="$(stage_report "$protected")"
+expect_ok 'failed finalize can rebind repaired stage results' gate stages-complete "$TMP/installed" "$protected" --stage-report "$stage_path"
+expect_ok 'completed stages permit protected resume after target manifest' gate resume "$TMP/installed" "$protected"
 expect_ok 'protected install finalizes only with live reviewed authority' gate finalize "$TMP/installed" "$protected"
 expect_stop 'one-use protected authority cannot replay' gate finalize "$TMP/installed" "$protected"
 
@@ -122,6 +150,8 @@ rm -f "$TMP/bin/ai-task-gates"
 expect_ok 'first managed install resumes with launcher absent' gate resume "$TMP/installed" "$protected"
 ln -s "$TMP/installed/bin/ai-task-gates" "$TMP/bin/ai-task-gates"
 manifest "$protected"
+stage_path="$(stage_report "$protected")"
+expect_ok 'first-install required stages bind to authority' gate stages-complete "$TMP/installed" "$protected" --stage-report "$stage_path"
 expect_ok 'first managed install finalizes after receipt publication' gate finalize "$TMP/installed" "$protected"
 
 # A pre-receipt symlink needs a separate same-commit migration review.
@@ -137,6 +167,8 @@ jq -nc --arg target "$protected" --arg path "$TMP/installed" --arg launcher "$TM
 expect_ok 'legacy symlink migration reserves reviewed authority' gate preflight "$TMP/candidate" "$protected" --caller-pinned
 expect_ok 'legacy symlink migration resumes on same commit' gate resume "$TMP/installed" "$protected"
 manifest "$protected"
+stage_path="$(stage_report "$protected")"
+expect_ok 'legacy required stages bind to authority' gate stages-complete "$TMP/installed" "$protected" --stage-report "$stage_path"
 expect_ok 'legacy symlink migration finalizes with new receipt' gate finalize "$TMP/installed" "$protected"
 
 # A historical manifest can lag the live checkout after an earlier unguarded
@@ -182,4 +214,6 @@ manifest "$protected"
 expect_ok 'reviewed stale recovery reserves exact host state' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
 expect_ok 'reviewed stale recovery resumes despite prior source drift' gate resume "$TMP/installed" "$drifted"
 manifest "$drifted"
+stage_path="$(stage_report "$drifted")"
+expect_ok 'stale recovery required stages bind to authority' gate stages-complete "$TMP/installed" "$drifted" --stage-report "$stage_path"
 expect_ok 'reviewed stale recovery finalizes new aligned receipt' gate finalize "$TMP/installed" "$drifted"

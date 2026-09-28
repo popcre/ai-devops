@@ -68,9 +68,9 @@ usage: ai-task-gates <command> [options]
         --installed-launcher PATH --review-report PATH --owner-request TEXT
         [--legacy-migration|--first-install|--recover-launchers|--stale-manifest-recovery]
         Issue one-use authority for an exact reviewed toolkit release.
-  install-verify --phase preflight|resume|finalize --target-head SHA
+  install-verify --phase preflight|resume|stages-complete|finalize --target-head SHA
         --installed-checkout PATH --installed-launcher /usr/local/bin/ai-task-gates
-        [--caller-pinned] [--owner-request TEXT]
+        [--caller-pinned] [--owner-request TEXT] [--stage-report PATH]
         Guard the Linux checkout update and installation transaction.
   explain [--json] [--base REF] [--paths-from FILE|-]
         Show the resolved identity, change set, class, and gates.
@@ -882,7 +882,7 @@ linux_review_authority(){
      (.owner_request|type=="string" and length>0) and .recover_launchers==false' "$auth" >/dev/null 2>&1 || return 1
   policy_digest="$(install_policy_digest "$target")" || return 1
   [ "$(jq -r .policy_digest "$auth")" = "$policy_digest" ] || return 1
-  if [ "$phase" != finalize ]; then
+  if [ "$phase" = preflight ] || [ "$phase" = resume ]; then
     local recorded_manifest recorded_link first_install
     recorded_manifest="$(jq -r '.linux_manifest_sha256 // ""' "$auth")"
     recorded_link="$(jq -r '.linux_link_target // ""' "$auth")"
@@ -964,9 +964,41 @@ linux_review_authority(){
   [ "$matched" -eq 1 ]
 }
 
+linux_stage_report_valid(){
+  local report="$1" expected="$2" mode owner
+  [ "$report" = "$expected" ] && [ -f "$report" ] && [ ! -L "$report" ] || return 1
+  mode="$(stat -c %a "$report" 2>/dev/null)"; owner="$(stat -c %u "$report" 2>/dev/null)"
+  [ "$mode" = 600 ] && [ "$owner" = "$(id -u)" ] || return 1
+  awk -F '\t' '
+    NF!=3 { bad=1 }
+    $2!="required" && $2!="optional" && $2!="selected" { bad=1 }
+    $2=="required" && $1!="PASS" { bad=1 }
+    $2=="required" { seen[$3]++ }
+    END {
+      split("Base dependencies|Node toolchain (node/npm/npx)|System directories|Configuration seed|Configuration migration and validation|Unix entrypoints|Reviewer auto-requalification hook|Claude and Codex skills|Protected machine configuration|Git commit identity|Claude tool permissions|Claude closeout hook|Private memory seed|Managed artifact manifest|ai-devops doctor|Reviewer requalification", required, "|")
+      for (i in required) if (seen[required[i]]!=1) bad=1
+      if (bad) exit 1
+    }
+  ' "$report"
+}
+
+linux_stage_marker_valid(){
+  local marker="$1" transaction="$2" report="$3" manifest="$4" source="$5" target="$6" checkout="$7" txn_hash report_hash manifest_hash source_hash
+  [ -f "$marker" ] && [ ! -L "$marker" ] && [ -f "$transaction" ] || return 1
+  [ "$(stat -c %a "$marker" 2>/dev/null)" = 600 ] && [ "$(stat -c %u "$marker" 2>/dev/null)" = "$(id -u)" ] || return 1
+  linux_stage_report_valid "$report" "$STATE_DIR/install-stage-reports/$target.tsv" || return 1
+  txn_hash="$(sha256sum "$transaction" | cut -d' ' -f1)"
+  report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
+  manifest_hash="$(sha256sum "$manifest" | cut -d' ' -f1)"
+  source_hash="$(sha256sum "$source" | cut -d' ' -f1)"
+  jq -e --arg h "$target" --arg p "$checkout" --arg t "$txn_hash" --arg r "$report_hash" --arg m "$manifest_hash" --arg s "$source_hash" \
+    '.schema_version==1 and .target_head==$h and .installed_checkout==$p and .transaction_sha256==$t and .stage_report_sha256==$r and .manifest_sha256==$m and .source_sha256==$s and .required_stages_pass==true' \
+    "$marker" >/dev/null 2>&1
+}
+
 cmd_install_verify(){
-  local phase='' target='' installed='' launcher='' caller_pinned=0 owner_request='' installed_head candidate_root common origin_url
-  local manifest='/etc/ai-devops/install-manifest.tsv' receipt='' classes='' protected=0 auth_dir issued pending ordinary completion completed_head='' auth old cls protected_flag fixture=0 fixture_root='' intent_state='' declared_installation='' class_base='' stale_recovery=0
+  local phase='' target='' installed='' launcher='' caller_pinned=0 owner_request='' stage_report='' installed_head candidate_root common origin_url
+  local manifest='/etc/ai-devops/install-manifest.tsv' receipt='' classes='' protected=0 auth_dir issued pending ordinary completion completed_head='' auth old cls protected_flag fixture=0 fixture_root='' intent_state='' declared_installation='' class_base='' stale_recovery=0 stage_marker='' staged_ok=0 transaction=''
   while [ $# -gt 0 ]; do
     case "$1" in
       --phase) need_value "$@"; phase="$2"; shift 2 ;;
@@ -975,10 +1007,11 @@ cmd_install_verify(){
       --installed-launcher) need_value "$@"; launcher="$2"; shift 2 ;;
       --caller-pinned) caller_pinned=1; shift ;;
       --owner-request) need_value "$@"; owner_request="$2"; shift 2 ;;
+      --stage-report) need_value "$@"; stage_report="$2"; shift 2 ;;
       *) die "unknown option for install-verify: $1" ;;
     esac
   done
-  case "$phase" in preflight|resume|finalize) ;; *) die 'install-verify needs preflight, resume, or finalize.' ;; esac
+  case "$phase" in preflight|resume|stages-complete|finalize) ;; *) die 'install-verify needs preflight, resume, stages-complete, or finalize.' ;; esac
   [ "$(uname -s)" = Linux ] || blocked 'ai-task-gates: STOP. This install verification route is Linux-only.'
   [[ "$target" =~ ^[0-9a-f]{40}$ ]] || die 'install-verify requires a full target SHA.'
   POLICY_FILE="$ROOT/config/task-gates.json"
@@ -1018,6 +1051,7 @@ cmd_install_verify(){
   installed_head="$(git -C "$installed" rev-parse HEAD)"
   receipt="$(linux_manifest_receipt "$installed" "$launcher" "$manifest")" || receipt=''
   auth_dir="$STATE_DIR/install-authorizations"; issued="$auth_dir/$target.json"; pending="$issued.consuming"; ordinary="$issued.ordinary"
+  stage_marker="$STATE_DIR/install-stages/$target.json"
   completion="$STATE_DIR/install-completions/last.json"
   if [ -e "$completion" ]; then
     completed_head="$(jq -r '.target_head // empty' "$completion" 2>/dev/null)"
@@ -1034,21 +1068,23 @@ cmd_install_verify(){
     fi
   fi
   [ ! -e "$issued" ] || [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Ambiguous install authority state.'
-  if [ "$phase" = finalize ]; then
+  if [ "$phase" = stages-complete ] || [ "$phase" = finalize ]; then
     [ "$installed_head" = "$target" ] && [ "$receipt" = "$target" ] || blocked 'ai-task-gates: STOP. Installed Linux receipt does not match completed target.'
     [ ! -e "$issued" ] || blocked 'ai-task-gates: STOP. Unconsumed install authority remains.'
     [ -e "$pending" ] || [ -e "$ordinary" ] || blocked 'ai-task-gates: STOP. Installation transaction record is missing.'
     [ ! -e "$pending" ] || [ ! -e "$ordinary" ] || blocked 'ai-task-gates: STOP. Ambiguous installation transaction records.'
     if [ -e "$pending" ]; then
+      transaction="$pending"
       old="$(jq -r .installed_head "$pending")"
-      [ -z "$completed_head" ] || [ "$old" = "$completed_head" ] || blocked 'ai-task-gates: STOP. Protected install baseline differs from last completed release.'
+      [ -z "$completed_head" ] || [ "$old" = "$completed_head" ] || { [ "$phase" = finalize ] && [ "$completed_head" = "$target" ]; } || blocked 'ai-task-gates: STOP. Protected install baseline differs from last completed release.'
       linux_review_authority "$pending" "$old" "$target" "$installed" "$launcher" "$candidate_root" finalize "$manifest" || blocked 'ai-task-gates: STOP. Pending install review proof changed.'
     else
+      transaction="$ordinary"
       jq -e --arg old "$(jq -r .installed_head "$ordinary")" --arg target "$target" --arg path "$installed" \
         '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.owner_request|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary install transaction does not match.'
       old="$(jq -r .installed_head "$ordinary")"
       if [ -n "$completed_head" ]; then
-        [ "$old" = "$completed_head" ] || blocked 'ai-task-gates: STOP. Ordinary install baseline differs from last completed release.'
+        [ "$old" = "$completed_head" ] || { [ "$phase" = finalize ] && [ "$completed_head" = "$target" ]; } || blocked 'ai-task-gates: STOP. Ordinary install baseline differs from last completed release.'
       else
         [ "$old" != "$target" ] || blocked 'ai-task-gates: STOP. An uncompleted first install cannot be finalized as ordinary.'
       fi
@@ -1058,6 +1094,23 @@ cmd_install_verify(){
         [ "$protected_flag" != true ] || blocked 'ai-task-gates: STOP. Protected release cannot finalize as ordinary.'
       done <<< "$classes"
     fi
+    if [ "$phase" = stages-complete ]; then
+      [ -z "$stage_report" ] || [ "$stage_report" = "$STATE_DIR/install-stage-reports/$target.tsv" ] || blocked 'ai-task-gates: STOP. Linux stage report path differs from the managed path.'
+      [ -n "$stage_report" ] && linux_stage_report_valid "$stage_report" "$STATE_DIR/install-stage-reports/$target.tsv" || blocked 'ai-task-gates: STOP. Required Linux stage results are absent or failed.'
+      local stage_tmp transaction_hash report_hash manifest_hash source_hash
+      transaction_hash="$(sha256sum "$transaction" | cut -d' ' -f1)"
+      report_hash="$(sha256sum "$stage_report" | cut -d' ' -f1)"
+      manifest_hash="$(sha256sum "$manifest" | cut -d' ' -f1)"
+      source_hash="$(sha256sum "$candidate_root/bin/ai-task-gates" | cut -d' ' -f1)"
+      mkdir -p "$(dirname "$stage_marker")" || blocked 'ai-task-gates: STOP. Cannot protect Linux stage receipt.'
+      chmod 0700 "$(dirname "$stage_marker")" || blocked 'ai-task-gates: STOP. Linux stage receipt directory is not private.'
+      stage_tmp="$stage_marker.tmp.$$"
+      jq -nc --arg target "$target" --arg path "$installed" --arg transaction "$transaction_hash" --arg report "$report_hash" --arg manifest "$manifest_hash" --arg source "$source_hash" \
+        '{schema_version:1,target_head:$target,installed_checkout:$path,transaction_sha256:$transaction,stage_report_sha256:$report,manifest_sha256:$manifest,source_sha256:$source,required_stages_pass:true}' > "$stage_tmp" &&
+        chmod 0600 "$stage_tmp" && mv -f -- "$stage_tmp" "$stage_marker" || blocked 'ai-task-gates: STOP. Cannot publish Linux stage receipt.'
+      printf 'ai-task-gates: Linux required stages recorded at %s.\n' "$target"; return 0
+    fi
+    linux_stage_marker_valid "$stage_marker" "$transaction" "$STATE_DIR/install-stage-reports/$target.tsv" "$manifest" "$candidate_root/bin/ai-task-gates" "$target" "$installed" || blocked 'ai-task-gates: STOP. Required Linux stages are not bound to this installation transaction.'
     local completion_tmp source_hash
     source_hash="$(sha256sum "$candidate_root/bin/ai-task-gates" | cut -d' ' -f1)" || blocked 'ai-task-gates: STOP. Completed source hash unavailable.'
     mkdir -p "$(dirname "$completion")" || blocked 'ai-task-gates: STOP. Cannot protect completed install state.'
@@ -1067,6 +1120,7 @@ cmd_install_verify(){
       chmod 0600 "$completion_tmp" && mv -f -- "$completion_tmp" "$completion" || blocked 'ai-task-gates: STOP. Cannot publish completed install receipt.'
     if [ -e "$pending" ]; then rm -f -- "$pending" || blocked 'ai-task-gates: STOP. Cannot consume completed install authority.'; fi
     if [ -e "$ordinary" ]; then rm -f -- "$ordinary" || blocked 'ai-task-gates: STOP. Cannot close ordinary install transaction.'; fi
+    rm -f -- "$stage_marker" || blocked 'ai-task-gates: STOP. Cannot close Linux stage receipt.'
     printf 'ai-task-gates: Linux install verified at %s.\n' "$target"; return 0
   fi
   if [ "$phase" = preflight ]; then
@@ -1085,6 +1139,13 @@ cmd_install_verify(){
     old="$(jq -r .installed_head "$pending")"
   elif [ "$phase" = resume ] && [ -f "$ordinary" ]; then
     old="$(jq -r .installed_head "$ordinary")"
+  fi
+  if [ -e "$stage_marker" ]; then
+    [ -e "$pending" ] || [ -e "$ordinary" ] || blocked 'ai-task-gates: STOP. Orphaned Linux stage receipt.'
+    transaction="$pending"; [ -e "$pending" ] || transaction="$ordinary"
+    linux_stage_marker_valid "$stage_marker" "$transaction" "$STATE_DIR/install-stage-reports/$target.tsv" "$manifest" "$candidate_root/bin/ai-task-gates" "$target" "$installed" || blocked 'ai-task-gates: STOP. Linux stage receipt changed before retry.'
+    [ "$receipt" = "$target" ] || blocked 'ai-task-gates: STOP. Staged Linux manifest differs from target.'
+    staged_ok=1
   fi
   if [ "$phase" = resume ] && [ "$old" = "$target" ] && [ -z "$completed_head" ] && [ ! -e "$pending" ]; then
     blocked 'ai-task-gates: STOP. Same-source Linux maintenance lacks a completed install receipt; use reviewed migration.'
@@ -1114,7 +1175,9 @@ cmd_install_verify(){
   if [ "$protected" -eq 1 ]; then
     [ "$phase" != preflight ] || [ "$caller_pinned" -eq 1 ] || blocked 'ai-task-gates: STOP. Protected Linux update requires caller-pinned target.'
     [ -f "$auth" ] || blocked 'ai-task-gates: STOP. Reviewed Linux install authority is missing.'
-    linux_review_authority "$auth" "$old" "$target" "$installed" "$launcher" "$candidate_root" "$phase" "$manifest" || blocked 'ai-task-gates: STOP. Reviewed Linux install authority is stale or changed.'
+    local review_phase="$phase"
+    [ "$staged_ok" -eq 0 ] || review_phase=staged-resume
+    linux_review_authority "$auth" "$old" "$target" "$installed" "$launcher" "$candidate_root" "$review_phase" "$manifest" || blocked 'ai-task-gates: STOP. Reviewed Linux install authority is stale or changed.'
     if [ "$phase" = preflight ] && [ "$auth" = "$issued" ]; then mv -- "$issued" "$pending" || blocked 'ai-task-gates: STOP. Could not reserve one-use install authority.'; fi
   else
     [ ! -e "$issued" ] && [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Unexpected installation authority for an ordinary update.'
