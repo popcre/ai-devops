@@ -20,17 +20,22 @@ fi
 phase=''
 owner=''
 caller_pinned=0
+stage_report=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --phase) phase="$2"; shift 2 ;;
     --owner-request) owner="$2"; shift 2 ;;
     --caller-pinned) caller_pinned=1; shift ;;
+    --stage-report) stage_report="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
 printf '%s\n' "$phase" >> "$TEST_LOG"
 [ "$phase" != preflight ] || [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || exit 48
 [ "${TEST_GATE_DENY_PHASE:-}" != "$phase" ] || exit 41
+if [ "$phase" = stages-complete ]; then
+  [ -f "$stage_report" ] && [ "$(stat -c %a "$stage_report")" = 600 ] || exit 49
+fi
 if [ "$phase" = resume ] && [ "${TEST_REQUIRE_OWNER:-0}" = 1 ]; then
   [ -n "$owner" ] || exit 42
 fi
@@ -103,10 +108,14 @@ if [ "${TEST_INSTALL_FAIL:-0}" = 1 ]; then
   exit 7
 fi
 "$(dirname "$0")/bin/ai-review-preflight" requalify
+mkdir -p "$HOME/.local/state/ai-devops/task-gates/install-stage-reports"
+report="$HOME/.local/state/ai-devops/task-gates/install-stage-reports/$(git -C "$(dirname "$0")" rev-parse HEAD).tsv"
+printf 'PASS\trequired\tfixture manifest\nPASS\trequired\tfixture doctor\nPASS\trequired\tfixture reviewer\n' > "$report"
+chmod 600 "$report"
 "$(dirname "$0")/bin/ai-task-gates" install-verify --phase stages-complete \
   --target-head "$(git -C "$(dirname "$0")" rev-parse HEAD)" \
   --installed-checkout "$(dirname "$0")" \
-  --installed-launcher /usr/local/bin/ai-task-gates
+  --installed-launcher /usr/local/bin/ai-task-gates --stage-report "$report"
 if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" != 1 ]; then
   "$(dirname "$0")/bin/ai-task-gates" install-verify --phase finalize \
     --target-head "$(git -C "$(dirname "$0")" rev-parse HEAD)" \
@@ -296,4 +305,20 @@ record_restored_state || fail 'safe rollback proof was refused'
   fail 'safe rollback proof omitted target'
 grep -B1 -F 'run_stage required "Claude and Codex skills"' "$ROOT/install.sh" |
   grep -Fq 'SOURCE_ROLLBACK_SAFE=0' || fail 'skill copy did not end source rollback eligibility'
+
+# The real report writer preserves exact tab-separated stage outcomes in a
+# protected, mode-600 file and refuses an attacker-supplied report symlink.
+eval "$(sed -n '/^publish_stage_report() {/,/^}/p' "$ROOT/install.sh")"
+target_head="$target"
+stage_results=('PASS\trequired\tManaged artifact manifest' 'PASS\trequired\tai-devops doctor'
+  'PASS\trequired\tReviewer requalification' 'SKIP\toptional\tFixture optional')
+publish_stage_report || fail 'exact stage result report was not published'
+[ "$(stat -c %a "$STAGE_REPORT")" = 600 ] || fail 'stage report permissions are not private'
+[ "$(wc -l < "$STAGE_REPORT")" = 4 ] || fail 'stage report omitted an outcome'
+grep -Fxq $'PASS\trequired\tReviewer requalification' "$STAGE_REPORT" ||
+  fail 'stage report changed required outcome'
+rm "$STAGE_REPORT"
+ln -s "$TMP/foreign-report" "$STAGE_REPORT"
+if publish_stage_report; then fail 'symlinked stage report was overwritten'; fi
+[ -L "$STAGE_REPORT" ] || fail 'foreign stage report symlink changed'
 echo 'PASS: Linux installer authorization, checkout pin, lock, and update order'

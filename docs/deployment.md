@@ -299,7 +299,9 @@ automatic rollback and leaves the authorization pending for repair. Per-user
 provider and skill changes are not an atomic transaction, so a failed update
 still needs explicit capability verification before being called rolled back.
 Reviewer requalification is a required installer stage before authorization
-is finalized, including on a direct retry.
+is finalized, including on a direct retry. The installer records each stage's
+result in a protected local report; the gate checks and binds that report
+before the one-use authorization can be consumed.
 
 If the installed Linux manifest names an older source SHA than the live clean
 checkout, the independent exact-head report must explicitly name

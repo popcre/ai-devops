@@ -63,6 +63,22 @@ print_summary() {
   return 0
 }
 
+publish_stage_report() {
+  local report_dir="$HOME/.local/state/ai-devops/task-gates/install-stage-reports" tmp
+  [ ! -L "$report_dir" ] || return 1
+  mkdir -p -m 700 "$report_dir" && chmod 700 "$report_dir" || return 1
+  STAGE_REPORT="$report_dir/$target_head.tsv"
+  [ ! -L "$STAGE_REPORT" ] || return 1
+  [ ! -e "$STAGE_REPORT" ] || [ -f "$STAGE_REPORT" ] || return 1
+  tmp="$(mktemp "$report_dir/.stage.$target_head.XXXXXXXX")" || return 1
+  chmod 600 "$tmp" || { rm -f -- "$tmp"; return 1; }
+  if ! printf '%b\n' "${stage_results[@]}" > "$tmp" || ! mv -f -- "$tmp" "$STAGE_REPORT"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  [ "$(stat -c %a "$STAGE_REPORT")" = 600 ]
+}
+
 require_commands() {
   local missing=() command_name
   for command_name in "$@"; do
@@ -772,9 +788,16 @@ if ! print_summary; then
   if restore_install_state; then record_restored_state || true; fi
   exit 1
 fi
+# Publish the exact stage results in protected local state. The gate binds
+# this report to the transaction before finalize can consume it.
+publish_stage_report || {
+  if restore_install_state; then record_restored_state || true; fi
+  warn 'stage result report could not be published; authorization remains pending'
+  exit 1
+}
 "$REPO_ROOT/bin/ai-task-gates" install-verify --phase stages-complete \
   --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
-  --installed-launcher /usr/local/bin/ai-task-gates || {
+  --installed-launcher /usr/local/bin/ai-task-gates --stage-report "$STAGE_REPORT" || {
     if restore_install_state; then record_restored_state || true; fi
     warn 'installation stage receipt refused; authorization remains pending for repair'
     exit 1
