@@ -234,21 +234,21 @@ sys.exit(124)
         self.assertEqual(self.calls(), 2)
 
     @unittest.skipIf(os.name == "nt", "Unix hardlink case")
-    def test_unix_hardlinked_forged_terminal_cache_runs_uncached(self):
+    def test_unix_hardlinked_forged_queued_cache_runs_uncached(self):
         first = self.call(key="forged", suffix="forged-seed")
         _, err = first.communicate(timeout=5)
         self.assertEqual(first.returncode, 0, err)
         state = self.base / "state"
         cache = next(state.glob("*.json"))
         forged = json.loads(cache.read_text())
-        forged["data"]["repository"]["pullRequest"]["state"] = "MERGED"
+        forged["data"]["repository"]["pullRequest"]["isInMergeQueue"] = True
         cache.write_text(json.dumps(forged))
         cache.chmod(0o600)
         os.link(cache, self.base / "foreign-cache-link")
         second = self.call(key="forged", suffix="forged-untrusted")
         out, err = second.communicate(timeout=5)
         self.assertEqual(second.returncode, 0, err)
-        self.assertEqual(json.loads(out)["data"]["repository"]["pullRequest"]["state"], "OPEN")
+        self.assertFalse(json.loads(out)["data"]["repository"]["pullRequest"]["isInMergeQueue"])
         self.assertEqual((self.base / "forged-untrusted.source").read_text(), "upstream")
         self.assertEqual(self.calls(), 2)
 

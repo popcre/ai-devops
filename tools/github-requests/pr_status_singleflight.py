@@ -80,7 +80,7 @@ def unix_prepare_parent(path):
 def read_private_cache(path):
     """Read one verified Unix inode, without following a swapped pathname."""
     try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(descriptor, "rb") as file:
             if not unix_private(path, "file", owner=file.fileno()):
                 return None
@@ -233,6 +233,8 @@ def main():
             return upstream(None)
     else:
         try:
+            if not hasattr(os, "O_NOFOLLOW"):
+                return upstream(None)
             if not unix_prepare_parent(directory.parent):
                 return upstream(None)
             directory.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -257,7 +259,7 @@ def main():
         if os.name == "nt":
             owner_file = open(lock_path, "a+b")
         else:
-            flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+            flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
             descriptor = os.open(lock_path, flags, 0o600)
             if not unix_private(lock_path, "file", owner=descriptor):
                 os.close(descriptor)
