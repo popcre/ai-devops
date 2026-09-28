@@ -58,7 +58,7 @@ reviewer lifecycle, `ai-pr-wait`, and `ai-review` call it themselves before any
 lock, state file, or paid call exists, so a refusal costs nothing.
 
 If the work legitimately grew, declare it again with the stronger class. A
-protected class cannot be argued past: `--acknowledge` and `--owner-request`
+protected class cannot be argued past: `--acknowledge` and `--reviewer-approval`
 apply only to unprotected classes.
 
 Read-only review of selected code, tests, and contracts in a private repository
@@ -79,8 +79,8 @@ The default private snapshot and packet routes also refuse private source.
 All registered reviewers may review an aggregate that has been checked for
 private content and written to a public repository worktree. Declare the public
 artifact's actual task class there and use the ordinary review route from that
-worktree. A discretionary prose review needs `--owner-request` with an actual
-request from Albert. The private checkout's `private-evidence` gate remains in force; it
+worktree. A discretionary prose review needs `--reviewer-approval` with an
+assigned AI reviewer's exact-input APPROVE. The private checkout's `private-evidence` gate remains in force; it
 does not grant reviewers access to raw transcripts or other private records.
 `--tests` is unavailable on this route because
 arbitrary commands could expose raw evidence. The `private-evidence` class

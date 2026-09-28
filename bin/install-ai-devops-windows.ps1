@@ -285,7 +285,7 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
     if ($auth.schema_version -ne 1 -or $auth.target_head -cne $TargetHead -or
         $auth.installed_head -cne $InstalledHead -or $recordedCheckout -ine $expectedCheckout -or
         [IO.Path]::GetFullPath([string]$auth.installed_launcher) -ine [IO.Path]::GetFullPath($expectedLauncher) -or
-        -not $auth.owner_request -or $auth.policy_digest -cne (Get-TargetPolicyDigest -Path $Path -TargetHead $TargetHead) -or
+        -not $auth.reviewer_approval -or $auth.policy_digest -cne (Get-TargetPolicyDigest -Path $Path -TargetHead $TargetHead) -or
         [bool]$auth.legacy_migration -ne $LegacyMigration -or [bool]$auth.first_install -ne $FirstInstall -or
         [bool]$auth.recover_launchers -ne $RecoverLaunchers) {
         throw 'Reviewed toolkit install authorization does not match installed source, target, or policy.'

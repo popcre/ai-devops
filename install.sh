@@ -113,17 +113,17 @@ fi
 
 REQUIRE_SECRETS=auto
 AUTHORIZATION_TEST_ONLY=0
-owner_request=""
+reviewer_approval=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --require-secrets) REQUIRE_SECRETS=yes; shift ;;
     --skip-secrets) REQUIRE_SECRETS=no; shift ;;
-    --owner-request)
-      [ "$#" -ge 2 ] && [ -n "$2" ] || { warn '--owner-request needs a reason'; exit 2; }
-      owner_request="$2"; shift 2 ;;
+    --reviewer-approval)
+      [ "$#" -ge 2 ] && [ -f "$2" ] || { warn '--reviewer-approval needs an assigned AI reviewer APPROVE evidence file'; exit 2; }
+      reviewer_approval="$(realpath -- "$2")"; shift 2 ;;
     --test-authorization-only) AUTHORIZATION_TEST_ONLY=1; shift ;;
     -h|--help)
-      echo "usage: ./install.sh [--require-secrets|--skip-secrets] [--owner-request TEXT]"
+      echo "usage: ./install.sh [--require-secrets|--skip-secrets] [--reviewer-approval PATH]"
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
@@ -180,7 +180,7 @@ if [ -f "$issued_auth" ]; then
 fi
 resume_args=(install-verify --phase resume --target-head "$target_head"
   --installed-checkout "$REPO_ROOT" --installed-launcher "$install_launcher")
-[ -z "$owner_request" ] || resume_args+=(--owner-request "$owner_request")
+[ -z "$reviewer_approval" ] || resume_args+=(--reviewer-approval "$reviewer_approval")
 resume_output="$(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" "${resume_args[@]}")" || {
   warn 'installation authorization refused before any machine changes'; exit 1;
 }

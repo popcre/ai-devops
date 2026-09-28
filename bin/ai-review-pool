@@ -42,7 +42,7 @@ CALLER="${AI_POOL_CALLER:-zcode}"
 
 die(){ printf 'ai-review-pool: error: %s\n' "$*" >&2; exit 3; }
 
-# Briefs carry owner-request text and reports carry model-quoted source; both
+# Briefs carry reviewer-approval references and reports carry model-quoted source; both
 # stay private on a shared machine (the session runners do the same).
 umask 077
 
@@ -187,9 +187,9 @@ case "$mode" in
   security-review) DECISION='Judge only security risks: authorization, data leakage, injection, secrets, file boundaries, and permissions.';;
   final-check) DECISION='Give the final go/no-go judgment for shipping this exact source state.';;
 esac
-if [ -n "${AI_REVIEW_OWNER_REQUEST:-}" ]; then DECISION="$DECISION
+if [ -n "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] && [ -f "$AI_REVIEW_REVIEWER_APPROVAL" ]; then DECISION="$DECISION
 
-Owner request governing this review: $AI_REVIEW_OWNER_REQUEST"; fi
+Assigned AI reviewer approval governing this review: $(jq -r '"APPROVE by \(.reviewer_engine) for \(.action) at \(.head)"' "$AI_REVIEW_REVIEWER_APPROVAL" 2>/dev/null)"; fi
 
 TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"; TMP_ERR="$(mktemp "$REPORT_DIR/.pool-stderr.XXXXXX")"
 CHANGED_FILES=""

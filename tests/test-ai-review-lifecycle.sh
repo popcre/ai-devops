@@ -201,9 +201,10 @@ check "no provider preflight ran for the refused review" "[ ! -s '$GATE_LOG' ]"
 check "no lifecycle state was created for the refused review" \
   "[ -z \"\$(find '$AI_REVIEW_LIFECYCLE_DIR/runs' -type f -name 'gate-blocked.json' -print -quit 2>/dev/null)\" ]"
 
-GATE_STATE="$(gated_begin gate-owner --owner-request 'Albert asked for a review of the wording')"
-check "an owner-requested review still runs the full gates" "[ -f \"\$GATE_STATE\" ]"
-check "the owner-requested review ran its provider preflight" "grep -q '^check grok ' '$GATE_LOG'"
+appr_file(){ local dir="$1" action="$2" gate="$3" f repo; repo="$( cd "$dir" && "$gate" explain --json 2>/dev/null | jq -r '.repository // ""' )"; f="$(mktemp "$TMP/approval.XXXXXX")"; jq -n --arg a "$action" --arg h "$(git -C "$dir" rev-parse HEAD)" --arg r "$repo" '{schema_version:1,verdict:"APPROVE",reviewer_engine:"grok",implementer_engine:"claude",assignment:"alloc-test-1",action:$a,repository:$r,head:$h}' > "$f"; printf '%s\n' "$f"; }
+GATE_STATE="$(gated_begin gate-owner --reviewer-approval "$(appr_file "$GR" review "$REPO_ROOT/bin/ai-task-gates")")"
+check "a reviewer-approved review still runs the full gates" "[ -f \"\$GATE_STATE\" ]"
+check "the reviewer-approved review ran its provider preflight" "grep -q '^check grok ' '$GATE_LOG'"
 
 printf 'select 1;\n' > "$GR/migration.sql"
 GATE_OUT2="$(gated_begin gate-escalated 2>&1)"; GATE_RC2=$?
@@ -212,8 +213,8 @@ check "the refusal names the file that escalated the class" \
   "printf '%s' \"\$GATE_OUT2\" | grep -q migration.sql"
 rm -f "$GR/migration.sql"
 
-# The wrappers call `begin` for every mode and cannot see the mode or Albert's
-# request, so `bin/ai-review` hands both on. These cases run the real front door
+# The wrappers call `begin` for every mode and cannot see the mode or the reviewer
+# approval, so `bin/ai-review` hands both on. These cases run the real front door
 # with a stub wrapper, which is the path the shipped code actually takes.
 FRONT="$REPO_ROOT/bin/ai-review"
 STUB="$TMP/stub-wrapper"
@@ -231,8 +232,8 @@ FRONT_PLAN="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=stand
 check "a plan review still runs, because it is what decides the class" \
   "[ '$PLAN_RC' -eq 0 ] && [ -f \"\$FRONT_PLAN\" ]"
 
-FRONT_OWNER="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --owner-request 'Albert asked for the wording review' 2>&1 )"; OWNER_RC=$?
-check "an owner request reaches the gate the lifecycle runs" \
+FRONT_OWNER="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --reviewer-approval "$(appr_file "$GR" review "$REPO_ROOT/bin/ai-task-gates")" 2>&1 )"; OWNER_RC=$?
+check "a reviewer approval reaches the gate the lifecycle runs" \
   "[ '$OWNER_RC' -eq 0 ] && [ -f \"\$FRONT_OWNER\" ]"
 
 # The private review front door must hand a provider only the explicitly

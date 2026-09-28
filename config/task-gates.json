@@ -183,7 +183,7 @@
       "installation": {
         "required": [
           "local-tests",
-          "owner-authorization"
+          "assigned-ai-reviewer-approval"
         ],
         "forbidden_actions": [
           "deploy",
@@ -232,7 +232,7 @@
       "deployment": {
         "required": [
           "local-tests",
-          "owner-authorization"
+          "assigned-ai-reviewer-approval"
         ],
         "forbidden_actions": [
           "database",
@@ -243,7 +243,7 @@
       "infrastructure": {
         "required": [
           "local-tests",
-          "owner-authorization",
+          "assigned-ai-reviewer-approval",
           "read-only-by-default"
         ],
         "forbidden_actions": [
@@ -253,7 +253,7 @@
       },
       "production": {
         "required": [
-          "exact-resource-and-action-authorization"
+          "exact-resource-and-action-ai-reviewer-approval"
         ],
         "forbidden_actions": []
       },
@@ -606,7 +606,7 @@
       "gates": {
         "infrastructure": {
           "required": [
-            "exact-resource-and-action-authorization"
+            "exact-resource-and-action-ai-reviewer-approval"
           ],
           "forbidden_actions": [
             "production"
@@ -633,7 +633,7 @@
       "gates": {
         "infrastructure": {
           "required": [
-            "exact-resource-and-action-authorization"
+            "exact-resource-and-action-ai-reviewer-approval"
           ],
           "forbidden_actions": [
             "production"

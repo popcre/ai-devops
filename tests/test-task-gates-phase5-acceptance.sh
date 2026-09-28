@@ -112,14 +112,16 @@ write_policy "$TMP/oracle" '{"schema_version":1,"paths":[{"glob":".github/workfl
 start "$TMP/oracle" production
 oracle_json="$(explain "$TMP/oracle" .github/workflows/release.yml)"
 check 'Oracle production intent dominates the observed deployment path' "jq -e '.declared_class==\"production\" and .observed_class==\"deployment\" and .effective_class==\"production\"' <<<\"\$oracle_json\""
-check 'Oracle production retains exact resource-and-action authorization' "jq -e '.required_gates|index(\"exact-resource-and-action-authorization\")!=null' <<<\"\$oracle_json\""
+check 'Oracle production retains exact resource-and-action authorization' "jq -e '.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null' <<<\"\$oracle_json\""
 check 'Oracle production also retains deployment release review and owner authorization' "jq -e '([\"managed-platform-release-review\",\"exact-owner-action-authorization\",\"local-tests\"]- .required_gates|length==0)' <<<\"\$oracle_json\""
 check 'Oracle fixture may enter production only at declared production strength' "rc '$TMP/oracle' 0 check --before production"
 
-# Non-protected owner overrides are recorded, never silent.
-check 'explicit owner-request override is accepted for prose review' "rc '$TMP/docs' 0 check --before review --owner-request 'controlled Phase 5 acceptance'"
+# Non-protected reviewer-approved overrides are recorded, never silent (#996).
+appr_file(){ local dir="$1" action="$2" gate="$3" f repo; repo="$( cd "$dir" && "$gate" explain --json 2>/dev/null | jq -r '.repository // ""' )"; f="$(mktemp "$TMP/approval.XXXXXX")"; jq -n --arg a "$action" --arg h "$(git -C "$dir" rev-parse HEAD)" --arg r "$repo" '{schema_version:1,verdict:"APPROVE",reviewer_engine:"grok",implementer_engine:"claude",assignment:"alloc-test-1",action:$a,repository:$r,head:$h}' > "$f"; printf '%s\n' "$f"; }
+docs_approval="$(appr_file "$TMP/docs" review "$GATE")"
+check 'assigned AI reviewer approval is accepted for prose review' "rc '$TMP/docs' 0 check --before review --reviewer-approval '$docs_approval'"
 docs_status="$(cd "$TMP/docs" && "$GATE" status)"
-check 'explicit owner-request override is audited' "jq -e '[.overrides[].kind]|index(\"owner-request\")!=null' <<<\"\$docs_status\""
+check 'reviewer-approval override is audited' "jq -e '[.overrides[].kind]|index(\"reviewer-approval\")!=null' <<<\"\$docs_status\""
 
 END_MS="$(date +%s%3N)"
 ELAPSED_MS=$((END_MS - START_MS))

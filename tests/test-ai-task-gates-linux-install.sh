@@ -44,6 +44,7 @@ stage_report(){
 manifest "$old"
 gate(){ (cd "$2" && "$2/bin/ai-task-gates" install-verify --phase "$1" --target-head "$3" --installed-checkout "$TMP/installed" --installed-launcher "$TMP/bin/ai-task-gates" "${@:4}"); }
 expect_ok(){ local name="$1"; shift; if "$@" > "$TMP/last-output" 2>&1; then printf 'PASS: %s\n' "$name"; else printf 'FAIL: %s\n' "$name"; tail -n 4 "$TMP/last-output"; exit 1; fi; }
+appr(){ local f; f="$(mktemp "$TMP/approval.XXXXXX")"; jq -n --arg h "$1" --arg e "${2:-grok}" '{schema_version:1,verdict:"APPROVE",reviewer_engine:$e,implementer_engine:"claude",assignment:"alloc-test-1",action:"deploy",repository:"popcre/ai-devops",head:$h}' > "$f"; printf '%s\n' "$f"; }
 expect_stop(){ local name="$1"; shift; if "$@" >/dev/null 2>&1; then printf 'FAIL: %s\n' "$name"; exit 1; else printf 'PASS: %s\n' "$name"; fi; }
 
 (cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
@@ -53,8 +54,10 @@ git -C "$TMP/candidate" commit -qm ordinary
 ordinary="$(git -C "$TMP/candidate" rev-parse HEAD)"
 git -C "$TMP/candidate" push -q origin HEAD:main
 git -C "$TMP/installed" fetch -q origin
-expect_stop 'ordinary update requires explicit owner request' gate preflight "$TMP/candidate" "$ordinary"
-expect_ok 'ordinary update preflight records transaction' gate preflight "$TMP/candidate" "$ordinary" --owner-request 'Owner requested ordinary Linux update'
+expect_stop 'ordinary update requires an assigned AI reviewer approval' gate preflight "$TMP/candidate" "$ordinary"
+expect_stop 'ordinary update refuses a same-engine approval' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary" claude)"
+expect_stop 'ordinary update refuses an approval for another head' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$old")"
+expect_ok 'ordinary update preflight records transaction' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
 git -C "$TMP/installed" merge -q --ff-only "$ordinary"
 expect_ok 'ordinary updated checkout resumes' gate resume "$TMP/installed" "$ordinary"
 expect_stop 'finalize refuses before installed manifest is refreshed' gate finalize "$TMP/installed" "$ordinary"
@@ -63,13 +66,13 @@ expect_stop 'finalize requires exact required-stage receipt' gate finalize "$TMP
 stage_path="$(stage_report "$ordinary")"
 expect_ok 'ordinary required stages bind to transaction' gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
 expect_ok 'ordinary update finalizes with completed receipt' gate finalize "$TMP/installed" "$ordinary"
-expect_stop 'same-source reinstall needs task and owner request' gate resume "$TMP/installed" "$ordinary"
+expect_stop 'same-source reinstall needs task and reviewer approval' gate resume "$TMP/installed" "$ordinary"
 (cd "$TMP/installed" && bin/ai-task-gates start --class installation) >/dev/null
-expect_ok 'trusted same-source reinstall retains capability' gate resume "$TMP/installed" "$ordinary" --owner-request 'Owner requested maintenance reinstall'
+expect_ok 'trusted same-source reinstall retains capability' gate resume "$TMP/installed" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
 expect_ok 'same-source required stages bind to transaction' gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
 expect_ok 'trusted same-source reinstall finalizes' gate finalize "$TMP/installed" "$ordinary"
 for crash_point in completion authority marker; do
-  expect_ok "ordinary maintenance begins before $crash_point interruption" gate resume "$TMP/installed" "$ordinary" --owner-request 'Owner requested maintenance reinstall'
+  expect_ok "ordinary maintenance begins before $crash_point interruption" gate resume "$TMP/installed" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
   expect_ok "ordinary stages bind before $crash_point interruption" gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
   export AI_TASK_GATES_TEST_FINALIZE_CRASH_AFTER="$crash_point"
   expect_stop "ordinary finalize is interrupted after $crash_point" gate finalize "$TMP/installed" "$ordinary"
@@ -110,7 +113,7 @@ mkdir -p "$(dirname "$auth")"
 jq -nc --arg target "$protected" --arg old "$ordinary" --arg path "$TMP/installed" --arg launcher "$TMP/bin/ai-task-gates" \
   --arg policy "$policy_digest" --arg digest "$digest" --arg report "$report" --arg report_hash "$report_hash" \
   --arg manifest_hash "$(sha256sum "$TMP/etc/install-manifest.tsv" | cut -d' ' -f1)" --arg link "$TMP/installed/bin/ai-task-gates" \
-  '{schema_version:1,target_head:$target,installed_head:$old,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed Linux install",legacy_migration:false,first_install:false,recover_launchers:false,linux_manifest_sha256:$manifest_hash,linux_link_target:$link}' > "$auth"
+  '{schema_version:1,target_head:$target,installed_head:$old,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:"Owner requested reviewed Linux install",legacy_migration:false,first_install:false,recover_launchers:false,linux_manifest_sha256:$manifest_hash,linux_link_target:$link}' > "$auth"
 cp "$auth" "$TMP/auth-original"
 jq '.first_install=true' "$TMP/auth-original" > "$auth"
 expect_stop 'first-install approval cannot replace upgrade approval' gate preflight "$TMP/candidate" "$protected" --caller-pinned
@@ -127,7 +130,7 @@ git -C "$TMP/installed" merge -q --ff-only "$protected"
 expect_ok 'protected install resumes with reviewed pending authority' gate resume "$TMP/installed" "$protected"
 manifest "$protected"
 mv "$auth.consuming" "$TMP/pending-backup"
-expect_stop 'stamped manifest cannot hide lost protected authority' gate resume "$TMP/installed" "$protected" --owner-request 'Owner requested maintenance reinstall'
+expect_stop 'stamped manifest cannot hide lost protected authority' gate resume "$TMP/installed" "$protected" --reviewer-approval "$(appr "$protected")"
 expect_stop 'finalize refuses missing protected transaction' gate finalize "$TMP/installed" "$protected"
 mv "$TMP/pending-backup" "$auth.consuming"
 stage_path="$(stage_report "$protected")"
@@ -187,7 +190,7 @@ jq -nc --arg h "$protected" --arg d "$digest" --arg p "$report" --arg s "$report
   '{status:"completed",verdict:"APPROVE",stale:false,head:$h,source_digest:$d,report_path:$p,report_sha256:$s}' > "$AI_REVIEW_LIFECYCLE_DIR/runs/$key/codex/codex/approved.json"
 jq -nc --arg target "$protected" --arg path "$TMP/installed" --arg launcher "$TMP/bin/ai-task-gates" \
   --arg policy "$policy_digest" --arg digest "$digest" --arg report "$report" --arg report_hash "$report_hash" \
-  '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed first install",legacy_migration:false,first_install:true,recover_launchers:false,linux_manifest_sha256:"",linux_link_target:""}' > "$auth"
+  '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:"Owner requested reviewed first install",legacy_migration:false,first_install:true,recover_launchers:false,linux_manifest_sha256:"",linux_link_target:""}' > "$auth"
 (cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
 mkdir -p "$TMP/home"
 expect_ok 'documented first install reserves and resumes reviewed authority' env HOME="$TMP/home" \
@@ -212,7 +215,7 @@ jq -nc --arg h "$protected" --arg d "$digest" --arg p "$report" --arg s "$report
 source_hash="$(sha256sum "$TMP/installed/bin/ai-task-gates" | cut -d' ' -f1)"
 jq -nc --arg target "$protected" --arg path "$TMP/installed" --arg launcher "$TMP/bin/ai-task-gates" \
   --arg policy "$policy_digest" --arg digest "$digest" --arg report "$report" --arg report_hash "$report_hash" --arg link "$TMP/installed/bin/ai-task-gates" --arg source_hash "$source_hash" \
-  '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed legacy migration",legacy_migration:true,first_install:false,recover_launchers:false,linux_manifest_sha256:"",linux_link_target:$link,installed_source_sha256:$source_hash}' > "$auth"
+  '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:"Owner requested reviewed legacy migration",legacy_migration:true,first_install:false,recover_launchers:false,linux_manifest_sha256:"",linux_link_target:$link,installed_source_sha256:$source_hash}' > "$auth"
 expect_ok 'documented same-commit migration reserves and resumes reviewed authority' env HOME="$TMP/home" \
   "$TMP/installed/install.sh" --test-authorization-only
 [ ! -e "$auth" ] && [ -f "$auth.consuming" ] || { echo 'FAIL: direct legacy migration did not reserve one-use authority'; exit 1; }
@@ -251,7 +254,7 @@ drift_auth="$TMP/state/install-authorizations/$drifted.json"
 jq -nc --arg target "$drifted" --arg recorded "$protected" --arg path "$TMP/installed" --arg launcher "$TMP/bin/ai-task-gates" \
   --arg policy "$drift_policy" --arg digest "$drift_digest" --arg report "$drift_report" --arg report_hash "$drift_report_hash" \
   --arg manifest_hash "$manifest_hash" --arg link "$TMP/installed/bin/ai-task-gates" --arg live_hash "$live_hash" \
-  '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed manifest recovery",legacy_migration:false,first_install:false,recover_launchers:false,stale_manifest_recovery:true,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$recorded,linux_link_target:$link,installed_source_sha256:$live_hash}' > "$drift_auth"
+  '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:"Owner requested reviewed manifest recovery",legacy_migration:false,first_install:false,recover_launchers:false,stale_manifest_recovery:true,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$recorded,linux_link_target:$link,installed_source_sha256:$live_hash}' > "$drift_auth"
 cp "$drift_auth" "$TMP/drift-auth-original"
 jq '.stale_manifest_recovery=false' "$TMP/drift-auth-original" > "$drift_auth"
 expect_stop 'stale recovery cannot be presented as ordinary upgrade' gate preflight "$TMP/candidate" "$drifted" --caller-pinned

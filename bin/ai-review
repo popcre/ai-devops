@@ -2,7 +2,7 @@
 # ai-review — the only supported approval-gate front door.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --owner-request "<why Albert asked for it>" [review options]' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer APPROVE evidence> [review options]' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       ai-review doctor'; }
 # bin/* is symlinked onto PATH, so resolve the real script location before
 # looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
 REAL_DIR="$ROOT"
@@ -48,14 +48,14 @@ case "${1:-}" in
 esac
 shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
-owner_request=""; code_only=0; paths_file=""; review_base=""; review_head=""; tests_command=""; wrapper_args=()
+reviewer_approval=""; code_only=0; paths_file=""; review_base=""; review_head=""; tests_command=""; wrapper_args=()
 [ -n "$pool_provider" ] && wrapper_args+=("$pool_provider")
 wrapper_args+=("$mode")
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --owner-request)
-      [ "$#" -ge 2 ] && [ -n "$2" ] || { usage >&2; exit 2; }
-      owner_request="$2"; shift 2 ;;
+    --reviewer-approval)
+      [ "$#" -ge 2 ] && [ -f "$2" ] || { usage >&2; exit 2; }
+      reviewer_approval="$(realpath -- "$2")"; shift 2 ;;
     --code-only)
       [ "$code_only" -eq 0 ] || { usage >&2; exit 2; }
       code_only=1; shift ;;
@@ -125,11 +125,11 @@ done
 # shellcheck source=../tools/lib/task-gates.sh
 . "$GATE_LIB"
 # The provider wrappers call `ai-review-lifecycle begin`, which runs the gate
-# again. It cannot see the mode or the owner request from there, so hand both
+# again. It cannot see the mode or the reviewer approval from there, so hand both
 # on. This is the only supported front door, so this is the only place they
 # can come from.
 export AI_REVIEW_GATE_MODE="$mode"
-export AI_REVIEW_OWNER_REQUEST="$owner_request"
+export AI_REVIEW_REVIEWER_APPROVAL="$reviewer_approval"
 # A plan review runs before the work exists and is how a session decides what
 # the work is. Gating it on the class of a change set that has not been
 # written yet would refuse the very step that sets the class.
@@ -153,7 +153,7 @@ if [ "$mode" = plan-review ]; then sweep_orphans; exec "$wrapper" "${wrapper_arg
 gate_action=review
 [ "$code_only" -eq 0 ] || gate_action=code-only-review
 gate_args=()
-[ -z "$owner_request" ] || gate_args=(--owner-request "$owner_request")
+[ -z "$reviewer_approval" ] || gate_args=(--reviewer-approval "$reviewer_approval")
 tg_preflight_gate "$gate_action" "${gate_args[@]+"${gate_args[@]}"}" || { printf 'ai-review: no reviewer was started.\n' >&2; exit 3; }
 sweep_orphans
 if [ "$code_only" -eq 1 ]; then
