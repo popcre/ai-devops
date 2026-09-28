@@ -38,7 +38,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   reviewer_event_guard gemini "$_AI_EVENT_SELF" "$@"
   unset _AI_EVENT_SELF
 fi
-VERSION=0.2.3
+VERSION=0.2.4
 QUALIFICATION_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
 CALLER="${AI_GEMINI_CALLER:-codex}"
@@ -61,7 +61,7 @@ declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "
 gemini_credit_stop(){ local o="$1" ev="$1.credit"; [ ! -f "$o" ] || jq -r 'select(type=="object" and .status!="SUCCESS")|(.error//""|tostring)' "$o" > "$ev" 2>/dev/null || true; reviewer_credit_scan gemini "$o.stderr" "$ev" || true; rm -f "$ev"; reviewer_credit_exit; }
 SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$HERE/ai-review-sandbox}"
 PACKET="${AI_REVIEW_PACKET_BIN:-$HERE/ai-review-packet}"
-ACTIVE_META=''; ACTIVE_LOCKS=''; ACTIVE_TERMINAL=0; ACTIVE_CHILD=''
+ACTIVE_META=''; ACTIVE_LOCKS=''; ACTIVE_TERMINAL=0; ACTIVE_CHILD=''; ACTIVE_STREAM_INPUT=''; ACTIVE_STREAM_OUTPUT=''
 die(){ printf 'ai-gemini: error: %s\n' "$*" >&2; exit 1; }
 runtime_qualified(){
   local a="$1" expected_wrapper expected_agy expected_agy_sha expected_model actual_wrapper actual_agy actual_agy_sha
@@ -117,7 +117,7 @@ request(){ if [ "${1:-}" = --prompt ]; then printf %s "${2:-}"; elif [ "${1:-}" 
 write(){ local f="$1" j="$2" t; mkdir -p "$(dirname "$f")"; t="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"; printf '%s\n' "$j" > "$t"; mv -f "$t" "$f"; }
 update_state(){ local f="$1" status="$2" detail="${3:-}" j; j="$(jq -c --arg s "$status" --arg d "$detail" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status=$s | .status_detail=$d | .updated_at=$t' "$f")" || die 'invalid session metadata'; write "$f" "$j"; }
 secure_private(){ local p="$1" mode="$2" win sid; chmod "$mode" "$p" 2>/dev/null || return 1; case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1 && command -v powershell.exe >/dev/null 2>&1 || return 1; win="$(cygpath -w "$p")"; sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n')"; case "$sid" in S-1-*) ;; *) return 1;; esac; if [ -d "$p" ]; then icacls "$win" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null 2>&1 || return 1; else icacls "$win" /inheritance:r /grant:r "*${sid}:(F)" >/dev/null 2>&1 || return 1; fi; powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$ExpectedSid) try { if ([IO.Directory]::Exists($Path)) { $Acl = New-Object Security.AccessControl.DirectorySecurity($Path, [Security.AccessControl.AccessControlSections]::Access) } else { $Acl = New-Object Security.AccessControl.FileSecurity($Path, [Security.AccessControl.AccessControlSections]::Access) }; if (-not $Acl.AreAccessRulesProtected) { exit 1 }; $Full = [Security.AccessControl.FileSystemRights]::FullControl; $CurrentHasFull = $false; foreach ($Rule in @($Acl.Access | Where-Object AccessControlType -eq ([Security.AccessControl.AccessControlType]::Allow))) { $RuleSid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($ExpectedSid, "S-1-5-18", "S-1-5-32-544")) { exit 1 }; if ($RuleSid -eq $ExpectedSid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $CurrentHasFull = $true } }; if (-not $CurrentHasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" >/dev/null 2>&1;; esac; }
-preserve_failure(){ local m="$1" out="$2" stage="$3" dir base artifact j f; [ -n "$m" ] && [ -f "$m" ] || return 0; dir="$STATE_DIR/failures"; mkdir -p "$dir" || return 0; secure_private "$dir" 700 || return 0; base="$(basename "$m" .json)-$(date -u +%Y%m%dT%H%M%SZ)-$$-$stage"; artifact="$dir/$base.json"; if [ -f "$out" ]; then cp -- "$out" "$artifact" || return 0; else printf '{"status":"NO_PROVIDER_OUTPUT"}\n' > "$artifact" || return 0; fi; [ -f "$out.stderr" ] && cp -- "$out.stderr" "$dir/$base.stderr" || true; [ -f "$out.model" ] && cp -- "$out.model" "$dir/$base.model.json" || true; [ -f "$out.model.stderr" ] && cp -- "$out.model.stderr" "$dir/$base.model.stderr" || true; for f in "$dir/$base"*; do secure_private "$f" 600 || { rm -f "$dir/$base"*; return 0; }; done; j="$(jq -c --arg a "$artifact" --arg s "$stage" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.failure_artifact=$a | .failure_stage=$s | .updated_at=$t' "$m" 2>/dev/null)" || { rm -f "$dir/$base"*; return 0; }; write "$m" "$j" || { rm -f "$dir/$base"*; return 0; }; }
+preserve_failure(){ local m="$1" out="$2" stage="$3" dir base artifact j f; [ -n "$m" ] && [ -f "$m" ] || return 0; dir="$STATE_DIR/failures"; mkdir -p "$dir" || return 0; secure_private "$dir" 700 || return 0; base="$(basename "$m" .json)-$(date -u +%Y%m%dT%H%M%SZ)-$$-$stage"; artifact="$dir/$base.json"; if [ -f "$out" ]; then cp -- "$out" "$artifact" || return 0; else printf '{"status":"NO_PROVIDER_OUTPUT"}\n' > "$artifact" || return 0; fi; [ -f "$out.stderr" ] && cp -- "$out.stderr" "$dir/$base.stderr" || true; [ -f "$out.stream" ] && cp -- "$out.stream" "$dir/$base.stream.ndjson" || true; [ -f "$out.model" ] && cp -- "$out.model" "$dir/$base.model.json" || true; [ -f "$out.model.stderr" ] && cp -- "$out.model.stderr" "$dir/$base.model.stderr" || true; for f in "$dir/$base"*; do secure_private "$f" 600 || { rm -f "$dir/$base"*; return 0; }; done; j="$(jq -c --arg a "$artifact" --arg s "$stage" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.failure_artifact=$a | .failure_stage=$s | .updated_at=$t' "$m" 2>/dev/null)" || { rm -f "$dir/$base"*; return 0; }; write "$m" "$j" || { rm -f "$dir/$base"*; return 0; }; }
 
 # Preserve the complete tracked and review-copy identity streams while hashing
 # in one process. The former shell loops launched sha256sum once per file.
@@ -271,7 +271,7 @@ bounded_source_inventory(){ timeout "$PREPARE_TIMEOUT" bash -euo pipefail -c 'so
 sentinel_state(){ local s out=''; IFS=';' read -r -a paths <<< "${AI_GEMINI_OUTSIDE_SENTINELS:-}"; for s in "${paths[@]}"; do [ -n "$s" ] || continue; [ -e "$s" ] || die "outside sentinel missing: $s"; out+="$(sha256sum -- "$s")"$'\n'; done; printf %s "$out" | sha256sum | cut -d' ' -f1; }
 acquire(){ local p="$1" token="$2" owner quarantine moved_owner; mkdir -p "$(dirname "$p")"; if ! mkdir "$p" 2>/dev/null; then owner="$(cat "$p/owner" 2>/dev/null || true)"; case "$owner" in ''|*[!0-9]*) die "review already active or recovery required: $token" ;; esac; kill -0 "$owner" 2>/dev/null && die "review already active or recovery required: $token"; quarantine="$p.stale.$$.$RANDOM"; mv "$p" "$quarantine" 2>/dev/null || die "review lock changed during stale-owner reconciliation: $token"; moved_owner="$(cat "$quarantine/owner" 2>/dev/null || true)"; if [ "$moved_owner" != "$owner" ] || kill -0 "$moved_owner" 2>/dev/null; then [ -e "$p" ] || mv "$quarantine" "$p" 2>/dev/null || true; die "stale review lock ownership changed during reconciliation: $token"; fi; rm -rf -- "$quarantine"; mkdir "$p" 2>/dev/null || die "review lock was claimed during stale-owner reconciliation: $token"; printf 'ai-gemini: warning: reclaimed stale lock for dead local owner %s (%s).\n' "$owner" "$token" >&2; fi; printf '%s\n' "$$" > "$p/owner"; ACTIVE_LOCKS="${ACTIVE_LOCKS:+$ACTIVE_LOCKS;}$p"; }
 release_locks(){ local p; IFS=';' read -r -a locks <<< "$ACTIVE_LOCKS"; for p in "${locks[@]}"; do [ -n "$p" ] && rm -f "$p/owner" && rmdir "$p" 2>/dev/null || true; done; ACTIVE_LOCKS=''; }
-on_exit(){ local rc=$?; if [ -n "$ACTIVE_META" ] && [ "$ACTIVE_TERMINAL" -eq 0 ] && [ -f "$ACTIVE_META" ]; then update_state "$ACTIVE_META" RECOVERY_REQUIRED 'interrupted or failed before all acceptance gates' || true; fi; release_locks; exit "$rc"; }
+on_exit(){ local rc=$?; if [ -n "$ACTIVE_META" ] && [ "$ACTIVE_TERMINAL" -eq 0 ] && [ -f "$ACTIVE_META" ]; then update_state "$ACTIVE_META" RECOVERY_REQUIRED 'interrupted or failed before all acceptance gates' || true; fi; [ -z "$ACTIVE_STREAM_INPUT" ] || rm -f -- "$ACTIVE_STREAM_INPUT"; [ -z "$ACTIVE_STREAM_OUTPUT" ] || rm -f -- "$ACTIVE_STREAM_OUTPUT"; release_locks; exit "$rc"; }
 on_signal(){ local code="$1"; trap - HUP INT TERM; if [ -n "$ACTIVE_CHILD" ]; then kill -TERM "$ACTIVE_CHILD" 2>/dev/null || true; wait "$ACTIVE_CHILD" 2>/dev/null || true; ACTIVE_CHILD=''; fi; exit "$code"; }
 trap on_exit EXIT
 trap 'on_signal 129' HUP
@@ -279,7 +279,58 @@ trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 verify_turn(){ local f="$1" expected="${2:-}"; if [ -n "$GOVERNED_HEAD" ]; then jq -e --arg c "$expected" --arg h "$GOVERNED_HEAD" '.status=="SUCCESS" and (.conversation_id|type=="string" and length>0) and ($c=="" or .conversation_id==$c) and (.response|type=="string" and test("(^|\n)[ \t]*VERDICT:[ \t]*(APPROVE|REJECT|REVISE)[ \t]+" + $h + "[ \t]*[\r\n \t]*$"))' "$f" >/dev/null || { preserve_failure "$ACTIVE_META" "$f" turn; gemini_credit_stop "$f"; die 'no usable Gemini governed verdict or exact conversation mismatch'; }; else jq -e --arg c "$expected" '.status=="SUCCESS" and (.conversation_id|type=="string" and length>0) and ($c=="" or .conversation_id==$c) and (.response|type=="string" and test("^## Verdict[ \\t]*\\r?\\n[ \\t]*(APPROVE|REJECT|BLOCKED)[ \\t]*(\\r?\\n|$)"))' "$f" >/dev/null || { preserve_failure "$ACTIVE_META" "$f" turn; gemini_credit_stop "$f"; die 'no usable Gemini verdict or exact conversation mismatch'; }; fi; }
 verify_model(){ local d="$1" protected="$2" c="$3" o="$4" a actual returned bd ad bp ap bs as rc; bd="$(bounded_inventory "$d")" || die "review copy inventory failed or timed out after $PREPARE_TIMEOUT before model verification"; bp="$(bounded_source_inventory "$protected")" || die "source inventory failed or timed out after $PREPARE_TIMEOUT before model verification"; bs="$(sentinel_state)"; (cd "$d" && a="$(agy)" && exec env MSYS_NO_PATHCONV=1 timeout 90 "$a" --conversation "$c" --sandbox --mode plan --output-format json --print-timeout 1m --print /model) > "$o" 2>"$o.stderr" & ACTIVE_CHILD=$!; rc=0; wait "$ACTIVE_CHILD" || rc=$?; ACTIVE_CHILD=''; [ "$rc" -eq 0 ] || { preserve_failure "$ACTIVE_META" "$o" model-request; gemini_credit_stop "$o"; die 'model verification request failed or timed out'; }; ad="$(bounded_inventory "$d")" || { preserve_failure "$ACTIVE_META" "$o" model-copy-inventory; die "review copy inventory during model verification failed or timed out after $PREPARE_TIMEOUT; evidence preserved"; }; ap="$(bounded_source_inventory "$protected")" || { preserve_failure "$ACTIVE_META" "$o" model-source-inventory; die "source inventory during model verification failed or timed out after $PREPARE_TIMEOUT; evidence preserved"; }; as="$(sentinel_state)"; [ "$bd" = "$ad" ] || { preserve_failure "$ACTIVE_META" "$o" model-copy-drift; die 'Gemini changed the disposable review copy during model verification'; }; [ "$bp" = "$ap" ] || { preserve_failure "$ACTIVE_META" "$o" model-source-drift; die 'Gemini changed the protected source checkout during model verification'; }; [ "$bs" = "$as" ] || { preserve_failure "$ACTIVE_META" "$o" model-sentinel-drift; die 'Gemini changed an outside sentinel during model verification'; }; returned="$(jq -r '.conversation_id // empty' "$o" 2>/dev/null || true)"; [ -z "$returned" ] || [ "$returned" = "$c" ] || { preserve_failure "$ACTIVE_META" "$o" model-conversation; die 'model verification returned the wrong conversation'; }; if ! jq -e --arg m "$MODEL" '.status=="SUCCESS" and .command.name=="model" and .command.data.id==$m and .command.data.is_default==false' "$o" >/dev/null; then actual="$(jq -r '.command.data.id // .response // "unavailable"' "$o" 2>/dev/null | head -c 200)"; preserve_failure "$ACTIVE_META" "$o" model-identity; die "model verification returned '$actual'; expected $MODEL"; fi; }
-call(){ local d="$1" protected="$2" c="$3" p="$4" o="$5" a bd ad bp ap bs as rc; reviewer_event_evidence require-report gemini "$d" || die 'could not reserve durable evidence'; bd="$(bounded_inventory "$d")" || die "review copy inventory failed or timed out after $PREPARE_TIMEOUT before the provider request"; write "$ACTIVE_META" "$(jq -c --arg tree "$bd" '.review_tree_sha256=$tree' "$ACTIVE_META")" || die 'could not retain pre-provider review inventory'; bp="$(bounded_source_inventory "$protected")" || die "source inventory failed or timed out after $PREPARE_TIMEOUT before the provider request"; bs="$(sentinel_state)"; (cd "$d" && a="$(agy)" && if [ -n "$c" ]; then exec timeout "$TIMEOUT" "$a" --conversation "$c" --sandbox --mode plan --model "$MODEL" --output-format json --print-timeout "$TIMEOUT" --print "$p"; else exec timeout "$TIMEOUT" "$a" --new-project --sandbox --mode plan --model "$MODEL" --output-format json --print-timeout "$TIMEOUT" --print "$p"; fi) > "$o" 2>"$o.stderr" & ACTIVE_CHILD=$!; rc=0; wait "$ACTIVE_CHILD" || rc=$?; ACTIVE_CHILD=''; [ "$rc" -eq 0 ] || { preserve_failure "$ACTIVE_META" "$o" provider-request; gemini_credit_stop "$o"; die 'Gemini request failed or timed out; evidence preserved'; }; ad="$(bounded_inventory "$d")" || { preserve_failure "$ACTIVE_META" "$o" provider-copy-inventory; die "review copy inventory after the provider request failed or timed out after $PREPARE_TIMEOUT; evidence preserved"; }; ap="$(bounded_source_inventory "$protected")" || { preserve_failure "$ACTIVE_META" "$o" provider-source-inventory; die "source inventory after the provider request failed or timed out after $PREPARE_TIMEOUT; evidence preserved"; }; as="$(sentinel_state)"; [ "$bd" = "$ad" ] || { preserve_failure "$ACTIVE_META" "$o" provider-copy-drift; die "Gemini changed the disposable review copy; response rejected and copy preserved at $d"; }; [ "$bp" = "$ap" ] || { preserve_failure "$ACTIVE_META" "$o" provider-source-drift; die 'Gemini changed the protected source checkout; response rejected'; }; [ "$bs" = "$as" ] || { preserve_failure "$ACTIVE_META" "$o" provider-sentinel-drift; die 'Gemini changed an outside sentinel; response rejected'; }; }
+call(){
+  local d="$1" protected="$2" c="$3" p="$4" o="$5" a bd ad bp ap bs as rc bytes streamed=0 output="$5"
+  reviewer_event_evidence require-report gemini "$d" || die 'could not reserve durable evidence'
+  bd="$(bounded_inventory "$d")" || die "review copy inventory failed or timed out after $PREPARE_TIMEOUT before the provider request"
+  write "$ACTIVE_META" "$(jq -c --arg tree "$bd" '.review_tree_sha256=$tree' "$ACTIVE_META")" || die 'could not retain pre-provider review inventory'
+  bp="$(bounded_source_inventory "$protected")" || die "source inventory failed or timed out after $PREPARE_TIMEOUT before the provider request"
+  bs="$(sentinel_state)"
+  bytes="$(printf %s "$p" | wc -c)"
+  if [ "$bytes" -gt 16384 ]; then
+    # The complete governed brief can exceed Linux's single-argument limit and
+    # Windows' command-line limit. Keep every byte, but send it on standard input.
+    streamed=1
+    ACTIVE_STREAM_INPUT="$(mktemp)" || die 'cannot reserve private Gemini stream input'
+    printf %s "$p" | jq -cRs '{event:"user",message:{role:"user",content:[{type:"text",text:.}]}}' > "$ACTIVE_STREAM_INPUT" || die 'cannot encode Gemini stream input'
+    output="$o.stream"; ACTIVE_STREAM_OUTPUT="$output"
+  fi
+  (
+    cd "$d" && a="$(agy)"
+    if [ -n "$c" ]; then set -- --conversation "$c"; else set -- --new-project; fi
+    if [ "$streamed" -eq 1 ]; then
+      exec timeout "$TIMEOUT" "$a" "$@" --sandbox --mode plan --model "$MODEL" --input-format stream-json --output-format stream-json --print-timeout "$TIMEOUT" --print '' < "$ACTIVE_STREAM_INPUT"
+    else
+      exec timeout "$TIMEOUT" "$a" "$@" --sandbox --mode plan --model "$MODEL" --output-format json --print-timeout "$TIMEOUT" --print "$p"
+    fi
+  ) > "$output" 2>"$o.stderr" & ACTIVE_CHILD=$!
+  rc=0; wait "$ACTIVE_CHILD" || rc=$?; ACTIVE_CHILD=''
+  if [ "$streamed" -eq 1 ]; then
+    if ! jq -se '
+      . as $events |
+      [$events[] | select(.event=="init")] as $starts |
+      [$events[] | select(.event=="result")] as $ends |
+      if ($starts|length)==1 and ($ends|length)==1
+         and ($starts[0].conversation_id|type)=="string"
+         and $ends[0].result.conversation_id==$starts[0].conversation_id
+      then $ends[0].result
+      else error("Gemini stream has no single matching conversation result")
+      end
+    ' "$output" > "$o"; then
+      preserve_failure "$ACTIVE_META" "$o" provider-stream
+      gemini_credit_stop "$o"
+      die 'Gemini stream result or conversation was invalid; evidence preserved'
+    fi
+    rm -f -- "$ACTIVE_STREAM_INPUT" "$ACTIVE_STREAM_OUTPUT"; ACTIVE_STREAM_INPUT=''; ACTIVE_STREAM_OUTPUT=''
+  fi
+  [ "$rc" -eq 0 ] || { preserve_failure "$ACTIVE_META" "$o" provider-request; gemini_credit_stop "$o"; die 'Gemini request failed or timed out; evidence preserved'; }
+  ad="$(bounded_inventory "$d")" || { preserve_failure "$ACTIVE_META" "$o" provider-copy-inventory; die "review copy inventory after the provider request failed or timed out after $PREPARE_TIMEOUT; evidence preserved"; }
+  ap="$(bounded_source_inventory "$protected")" || { preserve_failure "$ACTIVE_META" "$o" provider-source-inventory; die "source inventory after the provider request failed or timed out after $PREPARE_TIMEOUT; evidence preserved"; }
+  as="$(sentinel_state)"
+  [ "$bd" = "$ad" ] || { preserve_failure "$ACTIVE_META" "$o" provider-copy-drift; die "Gemini changed the disposable review copy; response rejected and copy preserved at $d"; }
+  [ "$bp" = "$ap" ] || { preserve_failure "$ACTIVE_META" "$o" provider-source-drift; die 'Gemini changed the protected source checkout; response rejected'; }
+  [ "$bs" = "$as" ] || { preserve_failure "$ACTIVE_META" "$o" provider-sentinel-drift; die 'Gemini changed an outside sentinel; response rejected'; }
+}
 brief(){ if [ -n "$GOVERNED_HEAD" ]; then cat <<EOF
 Review this code without editing files, running commands, using the network, opening URLs, or invoking MCP tools. Read $2/MANIFEST.md first. This is a disposable review copy.
 OUTPUT FORMAT — follow exactly. Write your findings first, with file paths. No line anywhere in your reply may begin with APPROVE, REJECT, REVISE, PASS, FAIL, LGTM, or OK, and do not write a "## Verdict" heading. The very last line of your reply must be exactly one of:
