@@ -68,6 +68,10 @@ usage: ai-task-gates <command> [options]
         --installed-launcher PATH --review-report PATH --owner-request TEXT
         [--legacy-migration|--first-install|--recover-launchers]
         Issue one-use authority for an exact reviewed toolkit release.
+  install-verify --phase preflight|resume|finalize --target-head SHA
+        --installed-checkout PATH --installed-launcher /usr/local/bin/ai-task-gates
+        [--caller-pinned]
+        Guard the Linux checkout update and installation transaction.
   explain [--json] [--base REF] [--paths-from FILE|-]
         Show the resolved identity, change set, class, and gates.
   status | end
@@ -823,6 +827,266 @@ install_policy_digest(){
   printf '%s\n%s\n' "$central" "$local_rule" | sha256sum | cut -d' ' -f1
 }
 
+# A Linux install must classify the release against BOTH committed policy
+# versions. A target may delete or weaken the rule that protected its source.
+install_release_classes(){
+  local old="$1" target="$2" paths revision dir policy saved_policy="$POLICY_FILE" saved_consumer="$CONSUMER_FILE"
+  [ "$old" != "$target" ] || return 0
+  paths="$(git -C "$TOPLEVEL" diff --no-renames --name-only -z "$old" "$target" | python3 -c '
+import sys
+items = [x.decode("utf-8", "surrogateescape") for x in sys.stdin.buffer.read().split(b"\0") if x]
+if any("\n" in x or "\r" in x for x in items): sys.exit(2)
+sys.stdout.buffer.write(("\n".join(items) + "\n").encode("utf-8", "surrogateescape"))
+')" || fail_closed 'Linux release paths cannot be represented safely.'
+  [ -n "$paths" ] || return 0
+  for revision in "$old" "$target"; do
+    dir="$(mktemp -d)" || fail_closed 'Cannot inspect committed installation policy.'
+    git -C "$TOPLEVEL" show "$revision:config/task-gates.json" > "$dir/central.json" 2>/dev/null &&
+      git -C "$TOPLEVEL" show "$revision:.ai-devops/task-gates.json" > "$dir/local.json" 2>/dev/null || {
+        rm -rf -- "$dir"; fail_closed 'Committed installation policy is missing.';
+      }
+    POLICY_FILE="$dir/central.json"; CONSUMER_FILE="$dir/local.json"
+    load_policy
+    classify_paths "$IDENTITY" "$paths"
+    local contributor cls
+    for contributor in "${CONTRIBUTORS[@]}"; do
+      cls="${contributor%%$'\t'*}"
+      printf '%s\t%s\n' "$cls" "${TG_PROT[$cls]:-false}"
+    done
+    rm -rf -- "$dir"
+  done
+  POLICY_FILE="$saved_policy"; CONSUMER_FILE="$saved_consumer"
+  load_policy
+}
+
+linux_manifest_receipt(){
+  local installed_root="$1" launcher="$2" manifest="$3" sha row_hash row_source old_hash
+  [ -f "$manifest" ] && [ -L "$launcher" ] || return 1
+  [ "$(readlink -f "$launcher")" = "$(readlink -f "$installed_root/bin/ai-task-gates")" ] || return 1
+  sha="$(awk -F '\t' '$1=="meta" && $2=="source_sha" {print $3}' "$manifest")"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  git -C "$installed_root" cat-file -e "$sha^{commit}" 2>/dev/null || return 1
+  row_hash="$(awk -F '\t' -v p="$launcher" '$1=="symlink" && $2==p {print $4}' "$manifest")"
+  row_source="$(awk -F '\t' -v p="$launcher" '$1=="symlink" && $2==p {print $3}' "$manifest")"
+  old_hash="$(git -C "$installed_root" show "$sha:bin/ai-task-gates" 2>/dev/null | sha256sum | cut -d' ' -f1)"
+  [ "$row_source" = "$installed_root/bin/ai-task-gates" ] && [ "$row_hash" = "$old_hash" ] || return 1
+  printf '%s\n' "$sha"
+}
+
+linux_review_authority(){
+  local auth="$1" old="$2" target="$3" checkout="$4" launcher="$5" candidate="$6" phase="$7" manifest="$8"
+  local report review_root report_hash source_digest policy_digest common key lifecycle_root state matched=0
+  jq -e --arg old "$old" --arg target "$target" --arg checkout "$checkout" --arg launcher "$launcher" \
+    '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$checkout and .installed_launcher==$launcher and
+     (.owner_request|type=="string" and length>0) and .recover_launchers==false' "$auth" >/dev/null 2>&1 || return 1
+  policy_digest="$(install_policy_digest "$target")" || return 1
+  [ "$(jq -r .policy_digest "$auth")" = "$policy_digest" ] || return 1
+  if [ "$phase" != finalize ]; then
+    local recorded_manifest recorded_link first_install
+    recorded_manifest="$(jq -r '.linux_manifest_sha256 // ""' "$auth")"
+    recorded_link="$(jq -r '.linux_link_target // ""' "$auth")"
+    first_install="$(jq -r .first_install "$auth")"
+    if [ "$(jq -r .legacy_migration "$auth")" = true ]; then
+      [ "$old" = "$target" ] && [ -z "$recorded_manifest" ] && [ "$first_install" = false ] &&
+        [ "$(sha256sum "$checkout/bin/ai-task-gates" | cut -d' ' -f1)" = "$(jq -r .installed_source_sha256 "$auth")" ] || return 1
+    fi
+    if [ "$first_install" = true ]; then
+      [ ! -e "$launcher" ] && [ ! -L "$launcher" ] && [ -z "$recorded_link" ] && [ -z "$recorded_manifest" ] || return 1
+    else
+      [ "$first_install" = false ] && [ -L "$launcher" ] && [ -n "$recorded_link" ] || return 1
+    fi
+    if [ -L "$launcher" ]; then
+      [ "$(readlink "$launcher")" = "$recorded_link" ] || return 1
+    else
+      [ -z "$recorded_link" ] && [ ! -e "$launcher" ] || return 1
+    fi
+    if [ -n "$recorded_manifest" ]; then
+      [ -f "$manifest" ] &&
+        [ "$(sha256sum "$manifest" | cut -d' ' -f1)" = "$recorded_manifest" ] || return 1
+    else
+      [ ! -e "$manifest" ] || return 1
+    fi
+  fi
+  report="$(jq -r .review_report "$auth")"; [ -f "$report" ] || return 1
+  report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
+  [ "$(jq -r .review_report_sha256 "$auth")" = "$report_hash" ] || return 1
+  [ "$(tail -n 2 "$report" | tr -d '\r')" = $'## Verdict\nAPPROVE' ] || return 1
+  grep -Fqx "| reviewed commit | \`$target\` |" "$report" || return 1
+  source_digest="$(jq -r .source_digest "$auth")"
+  grep -Fqx "| source digest | \`$source_digest\` |" "$report" || return 1
+  if [ "$(jq -r .first_install "$auth")" = true ]; then
+    grep -Fq 'first-managed-install' "$report" || return 1
+  fi
+  if [ "$(jq -r .legacy_migration "$auth")" = true ]; then
+    grep -Fq 'legacy-managed-launcher-refresh' "$report" || return 1
+  fi
+  [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$candidate")" = "$source_digest" ] || return 1
+  review_root="$(git -C "$(dirname "$report")" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  review_root="$(cd "$review_root" && pwd -P)" || return 1
+  case "$(readlink -f "$report")" in "$review_root"/.ai/reviews/*) ;; *) return 1 ;; esac
+  [ "$review_root" != "$candidate" ] && [ "$(git -C "$review_root" rev-parse HEAD)" = "$target" ] || return 1
+  [ -z "$(git -C "$review_root" status --porcelain=v1 --untracked-files=all)" ] || return 1
+  common="$(cd "$(git -C "$checkout" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" || return 1
+  [ "$common" = "$(cd "$(git -C "$review_root" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" ] || return 1
+  [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$review_root")" = "$source_digest" ] || return 1
+  key="$("$SCRIPT_DIR/ai-review-lifecycle" identity "$review_root" | jq -r .repository_key)" || return 1
+  lifecycle_root="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}"
+  for state in "$lifecycle_root/runs/$key/"*/*/*.json; do
+    [ -f "$state" ] || continue
+    if jq -e --arg h "$target" --arg d "$source_digest" --arg p "$report" --arg s "$report_hash" \
+      '.status=="completed" and .verdict=="APPROVE" and .stale==false and .head==$h and .source_digest==$d and .report_path==$p and .report_sha256==$s' "$state" >/dev/null 2>&1; then matched=1; break; fi
+  done
+  [ "$matched" -eq 1 ]
+}
+
+cmd_install_verify(){
+  local phase='' target='' installed='' launcher='' caller_pinned=0 owner_request='' installed_head candidate_root common origin_url
+  local manifest='/etc/ai-devops/install-manifest.tsv' receipt='' classes='' protected=0 auth_dir issued pending ordinary completion completed_head='' auth old cls protected_flag fixture=0 fixture_root='' intent_state='' declared_installation=''
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --phase) need_value "$@"; phase="$2"; shift 2 ;;
+      --target-head) need_value "$@"; target="$2"; shift 2 ;;
+      --installed-checkout) need_value "$@"; installed="$2"; shift 2 ;;
+      --installed-launcher) need_value "$@"; launcher="$2"; shift 2 ;;
+      --caller-pinned) caller_pinned=1; shift ;;
+      --owner-request) need_value "$@"; owner_request="$2"; shift 2 ;;
+      *) die "unknown option for install-verify: $1" ;;
+    esac
+  done
+  case "$phase" in preflight|resume|finalize) ;; *) die 'install-verify needs preflight, resume, or finalize.' ;; esac
+  [ "$(uname -s)" = Linux ] || blocked 'ai-task-gates: STOP. This install verification route is Linux-only.'
+  [[ "$target" =~ ^[0-9a-f]{40}$ ]] || die 'install-verify requires a full target SHA.'
+  require_jq; load_policy; resolve_repo
+  intent_state="$(state_path)"
+  if [ -f "$intent_state" ]; then declared_installation="$(jq -r '.declared_class // empty' "$intent_state")"; fi
+  candidate_root="$(cd "$TOPLEVEL" && pwd -P)"
+  installed="$(cd "$installed" 2>/dev/null && pwd -P)" || blocked 'ai-task-gates: STOP. Installed checkout is unavailable.'
+  origin_url="$(git -C "$installed" config --get remote.origin.url 2>/dev/null || true)"
+  if [ "${AI_TASK_GATES_INSTALL_TEST_MODE:-}" = 1 ] && [[ "$origin_url" = file://* ]]; then
+    fixture_root="$(cd "${AI_TASK_GATES_TEST_ROOT:-/nonexistent}" 2>/dev/null && pwd -P)" || blocked 'ai-task-gates: STOP. Linux install fixture root is unavailable.'
+    case "$fixture_root" in /tmp/*) ;; *) blocked 'ai-task-gates: STOP. Linux install fixture must be under /tmp.' ;; esac
+    case "$candidate_root" in "$fixture_root"/*) ;; *) blocked 'ai-task-gates: STOP. Linux candidate is outside fixture root.' ;; esac
+    case "$installed" in "$fixture_root"/*) ;; *) blocked 'ai-task-gates: STOP. Linux installed checkout is outside fixture root.' ;; esac
+    [ "$STATE_DIR" = "$fixture_root/state" ] || blocked 'ai-task-gates: STOP. Linux fixture state is outside fixture root.'
+    [ "$launcher" = "$fixture_root/bin/ai-task-gates" ] || blocked 'ai-task-gates: STOP. Linux fixture launcher is outside fixture root.'
+    manifest="$fixture_root/etc/install-manifest.tsv"
+    IDENTITY=popcre/ai-devops; IDENTITY_RESOLVED=true; fixture=1
+  else
+    [ "$launcher" = /usr/local/bin/ai-task-gates ] || blocked 'ai-task-gates: STOP. Linux install launcher is not canonical.'
+    [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] || blocked 'ai-task-gates: STOP. Linux install requires ai-devops identity.'
+  fi
+  [ "$(git -C "$installed" rev-parse --path-format=absolute --git-dir)" = "$(git -C "$installed" rev-parse --path-format=absolute --git-common-dir)" ] || blocked 'ai-task-gates: STOP. Installed checkout must be primary.'
+  common="$(cd "$(git -C "$installed" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" || blocked 'ai-task-gates: STOP. Installed Git ownership unavailable.'
+  [ "$common" = "$(cd "$(git -C "$candidate_root" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" ] || blocked 'ai-task-gates: STOP. Candidate and installed checkout have different Git ownership.'
+  [ "$(git -C "$candidate_root" rev-parse HEAD)" = "$target" ] || blocked 'ai-task-gates: STOP. Candidate source differs from pinned target.'
+  if [ "$phase" = preflight ]; then
+    [ "$(git -C "$candidate_root" rev-parse refs/remotes/origin/main 2>/dev/null)" = "$target" ] || blocked 'ai-task-gates: STOP. Target is not exact fetched origin/main.'
+  else
+    git -C "$candidate_root" merge-base --is-ancestor "$target" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Installed target is not in fetched origin/main history.'
+  fi
+  if [ "$fixture" -eq 0 ]; then case "$origin_url" in
+    https://github.com/popcre/ai-devops|https://github.com/popcre/ai-devops.git|git@github.com:popcre/ai-devops|git@github.com:popcre/ai-devops.git|ssh://git@github.com/popcre/ai-devops|ssh://git@github.com/popcre/ai-devops.git|https://github.com/u2giants/ai-devops|https://github.com/u2giants/ai-devops.git|git@github.com:u2giants/ai-devops|git@github.com:u2giants/ai-devops.git|ssh://git@github.com/u2giants/ai-devops|ssh://git@github.com/u2giants/ai-devops.git) ;;
+    *) blocked 'ai-task-gates: STOP. Unsupported installed origin.' ;;
+  esac; fi
+  [ -z "$(git -C "$installed" status --porcelain=v1 --untracked-files=all)" ] && [ -z "$(git -C "$candidate_root" status --porcelain=v1 --untracked-files=all)" ] || blocked 'ai-task-gates: STOP. Installation source checkout is dirty.'
+  installed_head="$(git -C "$installed" rev-parse HEAD)"
+  receipt="$(linux_manifest_receipt "$installed" "$launcher" "$manifest")" || receipt=''
+  auth_dir="$STATE_DIR/install-authorizations"; issued="$auth_dir/$target.json"; pending="$issued.consuming"; ordinary="$issued.ordinary"
+  completion="$STATE_DIR/install-completions/last.json"
+  if [ -e "$completion" ]; then
+    completed_head="$(jq -r '.target_head // empty' "$completion" 2>/dev/null)"
+    [[ "$completed_head" =~ ^[0-9a-f]{40}$ ]] || blocked 'ai-task-gates: STOP. Completed Linux install receipt is malformed.'
+    jq -e --arg path "$installed" --arg launcher "$launcher" --arg h "$completed_head" \
+      '.schema_version==1 and .installed_checkout==$path and .installed_launcher==$launcher and .target_head==$h and (.source_sha256|test("^[0-9a-f]{64}$"))' \
+      "$completion" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Completed Linux install receipt does not match this installation.'
+    local committed_hash
+    committed_hash="$(git -C "$installed" show "$completed_head:bin/ai-task-gates" 2>/dev/null | sha256sum | cut -d' ' -f1)"
+    [ "$committed_hash" = "$(jq -r .source_sha256 "$completion")" ] || blocked 'ai-task-gates: STOP. Completed Linux install receipt source hash changed.'
+    git -C "$installed" merge-base --is-ancestor "$completed_head" "$target" 2>/dev/null || blocked 'ai-task-gates: STOP. Completed Linux release is not ancestor of target.'
+  fi
+  [ ! -e "$issued" ] || [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Ambiguous install authority state.'
+  if [ "$phase" = finalize ]; then
+    [ "$installed_head" = "$target" ] && [ "$receipt" = "$target" ] || blocked 'ai-task-gates: STOP. Installed Linux receipt does not match completed target.'
+    [ ! -e "$issued" ] || blocked 'ai-task-gates: STOP. Unconsumed install authority remains.'
+    [ -e "$pending" ] || [ -e "$ordinary" ] || blocked 'ai-task-gates: STOP. Installation transaction record is missing.'
+    [ ! -e "$pending" ] || [ ! -e "$ordinary" ] || blocked 'ai-task-gates: STOP. Ambiguous installation transaction records.'
+    if [ -e "$pending" ]; then
+      old="$(jq -r .installed_head "$pending")"
+      linux_review_authority "$pending" "$old" "$target" "$installed" "$launcher" "$candidate_root" finalize "$manifest" || blocked 'ai-task-gates: STOP. Pending install review proof changed.'
+    else
+      jq -e --arg old "$(jq -r .installed_head "$ordinary")" --arg target "$target" --arg path "$installed" \
+        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary install transaction does not match.'
+      old="$(jq -r .installed_head "$ordinary")"
+      classes="$(install_release_classes "$old" "$target" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Ordinary transaction range cannot be classified.'
+      while IFS=$'\t' read -r cls protected_flag; do
+        [ -n "$cls" ] || continue
+        [ "$protected_flag" != true ] || blocked 'ai-task-gates: STOP. Protected release cannot finalize as ordinary.'
+      done <<< "$classes"
+    fi
+    local completion_tmp source_hash
+    source_hash="$(sha256sum "$candidate_root/bin/ai-task-gates" | cut -d' ' -f1)" || blocked 'ai-task-gates: STOP. Completed source hash unavailable.'
+    mkdir -p "$(dirname "$completion")" || blocked 'ai-task-gates: STOP. Cannot protect completed install state.'
+    completion_tmp="$completion.tmp.$$"
+    jq -nc --arg old "$old" --arg target "$target" --arg path "$installed" --arg launcher "$launcher" --arg hash "$source_hash" --argjson protected "$([ -e "$pending" ] && printf true || printf false)" \
+      '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path,installed_launcher:$launcher,source_sha256:$hash,protected:$protected}' > "$completion_tmp" &&
+      chmod 0600 "$completion_tmp" && mv -f -- "$completion_tmp" "$completion" || blocked 'ai-task-gates: STOP. Cannot publish completed install receipt.'
+    if [ -e "$pending" ]; then rm -f -- "$pending" || blocked 'ai-task-gates: STOP. Cannot consume completed install authority.'; fi
+    if [ -e "$ordinary" ]; then rm -f -- "$ordinary" || blocked 'ai-task-gates: STOP. Cannot close ordinary install transaction.'; fi
+    printf 'ai-task-gates: Linux install verified at %s.\n' "$target"; return 0
+  fi
+  if [ "$phase" = preflight ]; then
+    [ "$installed_head" != "$target" ] || [ -e "$issued" ] || [ -e "$pending" ] || [ "$receipt" = "$target" ] || blocked 'ai-task-gates: STOP. Unreceipted same-source install needs reviewed migration.'
+  else
+    [ "$installed_head" = "$target" ] || blocked 'ai-task-gates: STOP. Installed checkout is not at pinned target.'
+  fi
+  old="${completed_head:-${receipt:-$installed_head}}"
+  if [ "$phase" = resume ] && [ -f "$pending" ]; then
+    old="$(jq -r .installed_head "$pending")"
+  elif [ "$phase" = resume ] && [ -f "$ordinary" ]; then
+    old="$(jq -r .installed_head "$ordinary")"
+  fi
+  if [ "$phase" = resume ] && [ "$old" = "$target" ] && [ -z "$completed_head" ] && [ ! -e "$pending" ]; then
+    blocked 'ai-task-gates: STOP. Same-source Linux maintenance lacks a completed install receipt; use reviewed migration.'
+  fi
+  if [ -n "$completed_head" ] && [ "$old" != "$completed_head" ]; then
+    blocked 'ai-task-gates: STOP. Installation baseline differs from last completed release.'
+  fi
+  git -C "$installed" merge-base --is-ancestor "$old" "$target" 2>/dev/null || blocked 'ai-task-gates: STOP. Installed receipt is not an ancestor of target.'
+  classes="$(install_release_classes "$old" "$target" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Could not classify Linux release.'
+  local protected_flag
+  while IFS=$'\t' read -r cls protected_flag; do
+    [ -n "$cls" ] || continue
+    if [ "$protected_flag" = true ]; then
+      [ "$cls" = reviewer-safety ] || blocked "ai-task-gates: STOP. '$cls' needs its own stronger installation gate."
+      protected=1
+    fi
+  done <<< "$classes"
+  if [ -z "$receipt" ]; then protected=1; fi
+  if [ "$phase" = preflight ]; then
+    [ "$declared_installation" = installation ] || blocked 'ai-task-gates: STOP. Linux update needs a declared installation task.'
+  fi
+  if [ "$old" = "$target" ] && [ "$protected" -eq 0 ] && [ "$phase" = resume ]; then
+    [ "$declared_installation" = installation ] && [ -n "$owner_request" ] || blocked 'ai-task-gates: STOP. Same-source maintenance needs an installation task and owner request.'
+  fi
+  if [ "$protected" -eq 1 ]; then
+    [ "$phase" != preflight ] || [ "$caller_pinned" -eq 1 ] || blocked 'ai-task-gates: STOP. Protected Linux update requires caller-pinned target.'
+    auth="$pending"
+    if [ "$phase" = preflight ] && [ -f "$issued" ]; then auth="$issued"; fi
+    [ -f "$auth" ] || blocked 'ai-task-gates: STOP. Reviewed Linux install authority is missing.'
+    linux_review_authority "$auth" "$old" "$target" "$installed" "$launcher" "$candidate_root" "$phase" "$manifest" || blocked 'ai-task-gates: STOP. Reviewed Linux install authority is stale or changed.'
+    if [ "$phase" = preflight ] && [ "$auth" = "$issued" ]; then mv -- "$issued" "$pending" || blocked 'ai-task-gates: STOP. Could not reserve one-use install authority.'; fi
+  else
+    [ ! -e "$issued" ] && [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Unexpected installation authority for an ordinary update.'
+    if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
+      mkdir -p "$auth_dir" && chmod 0700 "$STATE_DIR" "$auth_dir" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install state.'
+      jq -nc --arg old "$old" --arg target "$target" --arg path "$installed" \
+        '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path}' > "$ordinary.tmp" &&
+        chmod 0600 "$ordinary.tmp" && mv -f -- "$ordinary.tmp" "$ordinary" || blocked 'ai-task-gates: STOP. Cannot record ordinary install transaction.'
+    fi
+  fi
+  printf 'ai-task-gates: Linux %s verified for %s from %s.\n' "$phase" "$target" "$old"
+}
+
 cmd_authorize_install(){
   local target_head="" installed_checkout="" installed_launcher="" review_report="" owner_request="" legacy_migration=0 first_install=0 recover_launchers=0
   while [ $# -gt 0 ]; do
@@ -911,8 +1175,12 @@ cmd_authorize_install(){
     [ -n "$inventory_lines" ] || blocked 'ai-task-gates: STOP. Launcher recovery found no managed installation; use first-install review.'
   elif [ -L "$installed_launcher" ]; then
     [ -f "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Installed launcher missing.'
-    [ "$legacy_migration" -ne 1 ] || blocked 'ai-task-gates: STOP. Legacy migration is Windows-only.'
     [ "$(readlink -f "$installed_launcher")" = "$(readlink -f "$expected_source")" ] || blocked 'ai-task-gates: STOP. Installed launcher routes elsewhere.'
+    if [ "$legacy_migration" -eq 1 ]; then
+      [ ! -e /etc/ai-devops/install-manifest.tsv ] || blocked 'ai-task-gates: STOP. Linux legacy migration requires an absent install manifest.'
+    elif [ "$installed_launcher" = /usr/local/bin/ai-task-gates ]; then
+      toolkit_source_receipt "$installed_root" "$installed_launcher" "$installed_head" /etc/ai-devops/install-manifest.tsv || blocked 'ai-task-gates: STOP. Linux update requires the installed source receipt; use reviewed same-source migration first.'
+    fi
   else
     [ -f "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Installed launcher missing.'
     windows_launcher_route "$expected_source" "$installed_launcher" || blocked 'ai-task-gates: STOP. Installed Windows launcher routing differs.'
@@ -959,19 +1227,30 @@ cmd_authorize_install(){
   done
   [ "$lifecycle_ok" -eq 1 ] || blocked 'ai-task-gates: STOP. Review report has no completed, matching lifecycle record.'
   local receipt_checkout="$installed_root" receipt_launcher="$installed_launcher" receipt_report="$report_real"
-  local launcher_hash="" cmd_hash="" source_hash=""
+  local launcher_hash="" cmd_hash="" source_hash="" manifest_hash="" linux_link_target=""
   local inventory_json='[]'
   if [ "$legacy_migration" -eq 1 ] || [ "$first_install" -eq 1 ] || [ "$recover_launchers" -eq 1 ]; then
     source_hash="$(sha256sum "$expected_source" | cut -d' ' -f1)"
   fi
   if [ "$legacy_migration" -eq 1 ]; then
-    launcher_hash="$(sha256sum "$installed_launcher" | cut -d' ' -f1)"
-    cmd_hash="$(sha256sum "$installed_launcher.cmd" | cut -d' ' -f1)"
+    if [ -L "$installed_launcher" ]; then
+      launcher_hash="$(sha256sum "$installed_launcher" | cut -d' ' -f1)"
+    else
+      launcher_hash="$(sha256sum "$installed_launcher" | cut -d' ' -f1)"
+      cmd_hash="$(sha256sum "$installed_launcher.cmd" | cut -d' ' -f1)"
+    fi
   fi
   if [ "$recover_launchers" -eq 1 ]; then
     [ ! -f "$installed_launcher" ] || launcher_hash="$(sha256sum "$installed_launcher" | cut -d' ' -f1)"
     [ ! -f "$installed_launcher.cmd" ] || cmd_hash="$(sha256sum "$installed_launcher.cmd" | cut -d' ' -f1)"
     inventory_json="$(printf '%s\n' "$inventory_lines" | jq -Rsc 'split("\n")[:-1]|map(split("\t")|{name:.[0],sha256:.[1]})')" || blocked 'ai-task-gates: STOP. Managed launcher inventory cannot be sealed.'
+  fi
+  if [ "$installed_launcher" = /usr/local/bin/ai-task-gates ] && [ -L "$installed_launcher" ]; then
+    linux_link_target="$(readlink "$installed_launcher")" || blocked 'ai-task-gates: STOP. Installed Linux launcher target unavailable.'
+    if [ -f /etc/ai-devops/install-manifest.tsv ]; then
+      manifest_hash="$(sha256sum /etc/ai-devops/install-manifest.tsv | cut -d' ' -f1)" || blocked 'ai-task-gates: STOP. Installed Linux manifest hash unavailable.'
+      toolkit_source_receipt "$installed_root" "$installed_launcher" "$installed_head" /etc/ai-devops/install-manifest.tsv || blocked 'ai-task-gates: STOP. Installed Linux manifest does not attest the pre-update source.'
+    fi
   fi
   if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then
     receipt_checkout="$(cygpath -aw "$installed_root")" || blocked 'ai-task-gates: STOP. Installed Windows path unavailable.'
@@ -984,9 +1263,9 @@ cmd_authorize_install(){
   jq -nc --arg target "$target_head" --arg base "$start_head" --arg checkout "$receipt_checkout" \
     --arg launcher "$receipt_launcher" --arg policy "$policy_digest" --arg source "$reviewed_digest" \
     --arg report "$receipt_report" --arg report_hash "$report_hash" --arg request "$owner_request" \
-    --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" \
+    --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,owner_request:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,issued_at:$at}' > "$auth_path.tmp" \
+    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,owner_request:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_path.tmp" \
     && chmod 0600 "$auth_path.tmp" && mv -f "$auth_path.tmp" "$auth_path" || blocked 'ai-task-gates: STOP. Could not write install authority.'
   printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$start_head"
 }
@@ -997,6 +1276,7 @@ main(){
     start) cmd_start "$@" ;;
     check) cmd_check "$@" ;;
     authorize-install) cmd_authorize_install "$@" ;;
+    install-verify) cmd_install_verify "$@" ;;
     explain) cmd_explain "$@" ;;
     status) cmd_status "$@" ;;
     end) cmd_end "$@" ;;
