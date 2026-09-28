@@ -77,6 +77,10 @@ HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_T
 check "review with no protected store refuses before 1Password or provider contact" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" DEEPSEEK_API_KEY=untrusted-ambient bash "$SCRIPT" store-key >/dev/null
 KEY_STORE="$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+mv "$TMP/home/.config/ai-devops/op-service-account" "$TMP/token-backup"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" OP_SERVICE_ACCOUNT_TOKEN=placeholder-token bash "$SCRIPT" store-key >/dev/null
+check "explicit refresh accepts an environment service token without a token file" "grep -qx fixture-from-op '$KEY_STORE'"
+mv "$TMP/token-backup" "$TMP/home/.config/ai-devops/op-service-account"
 STORE_PERMISSIONS_OK=0
 # Git Bash stat modes do not prove Windows ACL ownership; use the same native
 # ACL assertion that guards a real review, while POSIX checks exact modes.
