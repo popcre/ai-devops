@@ -33,6 +33,9 @@
 # Provider turns read that store and never contact 1Password.
 
 set -uo pipefail
+# A caller's environment is untrusted review input. Only the managed
+# descriptor supplied by explicit store-key may introduce the provider key.
+unset DEEPSEEK_API_KEY
 
 # Preserve every invocation outcome before reusable session metadata changes.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
@@ -209,6 +212,7 @@ done
 exec "${clean[@]}" /usr/bin/bash --noprofile --norc "$script" "$@"
 '
 if [ -n "${AI_DEEPSEEK_SECRET_FD:-}" ]; then
+  [ "$SUBCMD" = store-key ] || { echo 'Error: managed DeepSeek credential handoff is only valid for store-key.' >&2; exit 1; }
   case "$AI_DEEPSEEK_SECRET_FD" in ''|*[!0-9]*) echo 'Error: invalid managed DeepSeek credential descriptor.' >&2; exit 1;; esac
   IFS= read -r DEEPSEEK_API_KEY <&"$AI_DEEPSEEK_SECRET_FD" || { echo 'Error: managed DeepSeek credential handoff was empty.' >&2; exit 1; }
   eval "exec ${AI_DEEPSEEK_SECRET_FD}<&-"
@@ -300,11 +304,24 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ "$SUBCMD" = store-key ]; then
       lock_dir="${AI_MUSE_STATE_DIR:-$HOME/.local/state/ai-devops/muse}/credential.lock.d"
       mkdir -p "$(dirname "$lock_dir")" || exit 1
       deadline=$(( $(date +%s) + 120 ))
+      lock_token="$$-$RANDOM-$(date +%s)"
       until mkdir "$lock_dir" 2>/dev/null; do
+        owner="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+        case "$owner" in
+          ''|*[!0-9]*)
+            if [ -n "$(find "$lock_dir" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ]; then
+              if mv "$lock_dir" "$lock_dir.stale.$lock_token" 2>/dev/null; then rm -rf "$lock_dir.stale.$lock_token"; continue; fi
+            fi
+            ;;
+          *)
+            if ! kill -0 "$owner" 2>/dev/null; then
+              if mv "$lock_dir" "$lock_dir.stale.$lock_token" 2>/dev/null; then rm -rf "$lock_dir.stale.$lock_token"; continue; fi
+            fi
+            ;;
+        esac
         [ "$(date +%s)" -lt "$deadline" ] || { echo 'Error: 1Password credential lock is busy.' >&2; exit 1; }
         sleep 1
       done
-      lock_token="$$-$RANDOM-$(date +%s)"
       printf '%s\n' "$lock_token" > "$lock_dir/token"
       printf '%s\n' "$$" > "$lock_dir/pid"
       trap '[ "$(cat "$lock_dir/token" 2>/dev/null || true)" != "$lock_token" ] || { rm -f "$lock_dir/token" "$lock_dir/pid"; rmdir "$lock_dir" 2>/dev/null || true; }' EXIT

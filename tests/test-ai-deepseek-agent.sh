@@ -28,7 +28,13 @@ printf 'DEEPSEEK_API_KEY=op://example\nUNRELATED_SECRET=op://must-not-resolve\n'
 cat > "$TMP/bin/op" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$DEEPSEEK_TEST_ARGS"
-while [ "$#" -gt 0 ]; do case "$1" in --env-file) cp "$2" "$DEEPSEEK_TEST_ENV_FILE"; break;; *) shift;; esac; done
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --env-file) cp "$2" "$DEEPSEEK_TEST_ENV_FILE"; shift 2;;
+    --) shift; DEEPSEEK_API_KEY=fixture-from-op exec "$@";;
+    *) shift;;
+  esac
+done
 STUB
 cat > "$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
@@ -57,12 +63,18 @@ export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_CURL_ENV="$TMP/curl-env" DEE
 echo 'ai-deepseek-agent tests'
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test --review >/dev/null 2>&1
 check "review with no protected store refuses before 1Password or provider contact" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
-HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=fixture-key bash "$SCRIPT" store-key >/dev/null
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" DEEPSEEK_API_KEY=untrusted-ambient bash "$SCRIPT" store-key >/dev/null
 check "explicit refresh creates owner-only key store" "test -s '$TMP/home/.config/ai-devops/secrets/deepseek-api-key' && test \"\$(stat -c %a '$TMP/home/.config/ai-devops/secrets/deepseek-api-key')\" = 600 && test \"\$(stat -c %a '$TMP/home/.config/ai-devops/secrets')\" = 700"
+check "explicit refresh ignores inherited key" "grep -qx fixture-from-op '$TMP/home/.config/ai-devops/secrets/deepseek-api-key'"
+rm -f "$TMP/args" "$TMP/op-env"
 chmod 644 "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
-HOME="$TMP/home" PATH="$TMP/bin:$PATH" bash "$SCRIPT" send insecure --review >/dev/null 2>&1
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=untrusted-ambient bash "$SCRIPT" send insecure --review >/dev/null 2>&1
 check "insecure store refuses review without 1Password or provider contact" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
 chmod 600 "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+mv "$TMP/home/.config/ai-devops/secrets/deepseek-api-key" "$TMP/held-deepseek-key"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=untrusted-ambient bash "$SCRIPT" send missing --review >/dev/null 2>&1
+check "inherited key cannot bypass a missing protected store" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
+mv "$TMP/held-deepseek-key" "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test --review >/dev/null 2>&1
 check "review reads protected store without 1Password" "test ! -e '$TMP/args'"
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" bash "$SCRIPT" store-key --if-missing >/dev/null 2>&1
@@ -78,8 +90,9 @@ check "provider endpoint override is rejected before credential resolution" "! H
 check "explicit refresh resolves only the DeepSeek reference behind an empty-environment boundary" "test \"\$(wc -l < '$TMP/op-env')\" -eq 1 && grep -q '^DEEPSEEK_API_KEY=op://' '$TMP/op-env' && grep -q '/usr/bin/env -i' '$SCRIPT'"
 check "managed re-exec keeps the DeepSeek key out of process arguments" "grep -q 'AI_DEEPSEEK_SECRET_FD=9' '$SCRIPT' && ! grep -q '\"DEEPSEEK_API_KEY=\$keep_key\"' '$SCRIPT'"
 check "managed re-exec keeps the repository-tool budgets" "test \"\$(grep -c 'for name in .*DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS' '$SCRIPT')\" -eq 1"
-FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && /usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9 DEEPSEEK_STUB_REPLY=DEEPSEEK_REVIEWER_HEALTHY DEEPSEEK_CURL_ARGS="$DEEPSEEK_CURL_ARGS" DEEPSEEK_CURL_ENV="$DEEPSEEK_CURL_ENV" DEEPSEEK_STUB_PID_FILE="$DEEPSEEK_STUB_PID_FILE" DEEPSEEK_STUB_TERM_MARKER="$DEEPSEEK_STUB_TERM_MARKER" "$SCRIPT" doctor --live 9<&9)"
-check "managed descriptor handoff delivers the key without exporting it to curl" "printf '%s\n' '$FD_HANDOFF_OUT' | grep -q 'live provider response' && ! grep -q '^DEEPSEEK_API_KEY=' '$DEEPSEEK_CURL_ENV'"
+FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && /usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9 "$SCRIPT" store-key 9<&9)"
+check "managed descriptor handoff writes only the protected store" "printf '%s\n' '$FD_HANDOFF_OUT' | grep -q 'protected key store refreshed' && grep -qx fd-managed-key '$TMP/home/.config/ai-devops/secrets/deepseek-api-key' && test ! -s '$DEEPSEEK_CURL_ARGS'"
+check "formal review refuses a credential descriptor bypass" "! (exec 9<<<'bypass'; cd '$TMP/repo' && HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_SECRET_FD=9 '$SCRIPT' send bypass --review 9<&9) >/dev/null 2>&1 && test ! -s '$DEEPSEEK_CURL_ARGS'"
 BOUNDARY_BODY="$(sed -n "/^DEEPSEEK_CREDENTIAL_BOUNDARY='/,/^'$/p" "$SCRIPT" | sed '1d;$d')"
 cat > "$TMP/boundary-probe" <<'PROBE'
 #!/usr/bin/env bash
