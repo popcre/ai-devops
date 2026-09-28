@@ -14,7 +14,8 @@ roles, adapting CLI flags, and how the scripts use the commands.
   reviews through a tool-limited, digest-bound adapter.
 - **GLM-5.3** — out of reviewer rotation (owner instruction; registry `absent`).
   Usable only as an explicitly requested second opinion through `ai-glm`; never
-  assigned a formal review. The rotation pool is Muse, Grok, Qwen, and Gemini.
+  assigned a formal review. The rotation pool is Muse, Grok, Qwen, Gemini, DeepSeek, and StepFun
+  (Ubuntu/Linux only).
 - **Grok Build 4.6** — optional independent review through `ai-grok-review`
   (read-only) and isolated edits through `ai-grok-implement`. Advisory
   look-into-this work uses `ai-grok-implement investigate`; that is not a formal

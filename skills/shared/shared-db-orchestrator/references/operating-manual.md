@@ -212,16 +212,17 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
 The GitHub-backed cursor rotates the six active reviewers -- Muse Spark 1.3
 Contributor, Qwen 3.8 Max, Gemini 3.8 Flash, DeepSeek V4.1 Flash
 (re-entered 2026-09-23 with read-only repository tools), StepFun Step 5
-(Ubuntu/Linux only), and Grok 4.6 as fallback -- then repeats across
+(Ubuntu/Linux only), and Grok 4.6 -- then repeats across
 machines and restarts. GLM 5.3, Kimi K3, the old text-only `deepseek-chat`, and Codex are out of rotation
 (owner instruction; `RETIRED_REVIEWERS` in the allocator and `absent` in
 `config/reviewer-registry.json`): never route a review to them and never wait
-for one of them.
+for one of them. Drawing other reviewers before Grok (shared-db issue #3592)
+is not live until shared-db PR #3593 lands.
 Gemini is eligible only where `ai-review-preflight usable gemini` exits zero;
-StepFun is eligible only on Ubuntu/Linux where `ai-review-preflight usable stepfun`
-exits zero; other platforms report `unsupported-platform`. The platform
-override is restricted to offline tests by `AI_STEPFUN_TEST_MODE=1`.
-otherwise the selector skips it. `usable` is the only command that reconciles
+otherwise the selector skips it. StepFun is eligible only on Ubuntu/Linux where
+`ai-review-preflight usable stepfun` exits zero; other platforms report
+`unsupported-platform`. The platform override is honored only in offline tests
+(`AI_STEPFUN_TEST_MODE=1`). `usable` is the only command that reconciles
 install health, quarantine, live qualification, and reviewer-registry
 membership. A provider can be `installed-healthy` and still unusable because
 the registry does not carry it. That was Gemini's state until 2026-09-06: it was

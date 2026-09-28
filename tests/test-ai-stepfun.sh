@@ -70,7 +70,13 @@ export AI_STEPFUN_BWRAP="$TMP/bin/bwrap"
 echo '== ai-stepfun'
 out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 "$SCRIPT" doctor 2>&1)"; rc=$?
 check "refuses to run on Windows" "[ $rc = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform"
-check "platform override alone cannot simulate Windows" "AI_STEPFUN_TEST_MODE=0 AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor | grep -q '^PASS  StepCode CLI'"
+# Outside test mode the override must be ignored in both directions, so the
+# assertion follows the real host rather than assuming Linux.
+if [ "$(uname -s)" = Linux ]; then
+  check "platform override alone cannot simulate Windows" "AI_STEPFUN_TEST_MODE=0 AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor | grep -q '^PASS  StepCode CLI'"
+else
+  check "platform override alone cannot simulate Linux" "AI_STEPFUN_TEST_MODE=0 AI_STEPFUN_PLATFORM=Linux '$SCRIPT' doctor >/dev/null 2>&1; [ \$? = 2 ]"
+fi
 cat > "$TMP/bin/other-step" <<'STUB'
 #!/usr/bin/env bash
 echo 'step 0.28.2 (Smallstep CLI)'

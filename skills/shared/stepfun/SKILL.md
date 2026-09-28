@@ -50,9 +50,9 @@ ai-stepfun implement --repo . --prompt-file task.md
 ## Membership
 
 `stepfun` is in the shared-db rotation on Ubuntu/Linux. The allocator checks
-local preflight before a draw, so Windows excludes it as unsupported. Preferred
-reviewers, including StepFun, are drawn before Grok; Grok remains available when
-that pool cannot take the exact review.
+local preflight before a draw, so Windows excludes it as unsupported. Drawing
+other reviewers, including StepFun, before Grok is owner policy (shared-db issue
+#3592) that takes effect only when shared-db PR #3593 lands.
 
 ## Failures
 

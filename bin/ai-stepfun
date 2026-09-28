@@ -148,7 +148,7 @@ run_step(){
   local -a tool_args=(--no-tools)
   [ -z "$tools" ] || tool_args=(--tools "$tools")
   bin="$(step_bin)" || {
-    [ -z "${AI_STEPFUN_STEP_BIN:-}" ] || die 'AI_STEPFUN_STEP_BIN is not an executable StepCode CLI; correct or unset that override.'
+    [ -z "${AI_STEPFUN_STEP_BIN:-}" ] || die 'AI_STEPFUN_STEP_BIN does not point to an executable that identifies as the StepCode CLI; correct or unset that override.'
     die 'StepCode CLI (step) is not installed. Install: curl -fsSL https://static-openapi.stepfun.com/stepcode/install.sh | bash'
   }
   bwrap="$(bwrap_bin)" || die 'bubblewrap (bwrap) is required to sandbox StepFun. Install: sudo apt-get install bubblewrap'
@@ -210,7 +210,7 @@ cmd_doctor(){
   [ "${1:-}" != --live ] || live=1
   require_platform
   bin="$(step_bin)" || {
-    if [ -n "${AI_STEPFUN_STEP_BIN:-}" ]; then printf 'FAIL AI_STEPFUN_STEP_BIN is not an executable StepCode CLI; correct or unset that override\n'
+    if [ -n "${AI_STEPFUN_STEP_BIN:-}" ]; then printf 'FAIL AI_STEPFUN_STEP_BIN does not point to an executable that identifies as the StepCode CLI; correct or unset that override\n'
     else printf 'FAIL StepCode CLI (step) is not installed\n'; fi
     exit 1
   }
