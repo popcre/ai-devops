@@ -11,9 +11,10 @@ import sys
 
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) == 2 else pathlib.Path(__file__).resolve().parents[2])
-DIRECT = re.compile(r"(?<![\w-])gh(?:\.exe)?\s+(?:api|run|repo|pr|issue|workflow|release|search)\b", re.IGNORECASE)
+API_VERBS = r"(?:api|run|repo|pr|issue|workflow|release|search|cache|label|gist|project|codespace|secret|variable|ruleset)"
+DIRECT = re.compile(rf"(?<![\w$./-])(?:['\"])?gh(?:\.exe)?(?:['\"])?\s+{API_VERBS}\b", re.IGNORECASE)
 SDK = re.compile(r"(?:execFileSync|spawnSync|execFile|spawn)\s*\(\s*['\"]gh(?:\.exe)?['\"]", re.IGNORECASE)
-ARG_ARRAY = re.compile(r"[\[(,]\s*['\"]gh(?:\.exe)?['\"]\s*,\s*['\"](?:api|run|repo|pr|issue|workflow|release|search)\b", re.IGNORECASE)
+ARG_ARRAY = re.compile(rf"[\[(,]\s*['\"]gh(?:\.exe)?['\"]\s*,\s*['\"]{API_VERBS}\b", re.IGNORECASE)
 HTTP = re.compile(r"(?:api\.github\.com|github\.getOctokit|@octokit)")
 CLI_ALIAS = re.compile(r"\b[A-Za-z_]\w*\s*=\s*['\"]?gh(?:\.exe)?['\"]?(?=\s|;|$)", re.IGNORECASE)
 
@@ -24,15 +25,15 @@ def inspect(path: pathlib.Path) -> list[str]:
         return []  # The shared admission command must invoke the real CLI.
     raw = path.read_bytes()
     problems = []
-    # Preserve the first physical line for diagnostics while joining shell
-    # continuations, which otherwise split `gh` from its API subcommand.
+    # Preserve the first physical line for diagnostics while joining shell,
+    # PowerShell, and CMD continuations, which split CLI from subcommand.
     logical_lines = []
     pending = ""
     start = 1
     for number, physical in enumerate(raw.decode("utf-8", errors="replace").splitlines(), 1):
         if not pending:
             start = number
-        if physical.rstrip().endswith("\\"):
+        if physical.rstrip().endswith(("\\", "`", "^")):
             pending += physical.rstrip()[:-1] + " "
             continue
         logical_lines.append((start, pending + physical))

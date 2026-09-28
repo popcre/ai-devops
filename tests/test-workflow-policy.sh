@@ -431,6 +431,14 @@ BOOTSTRAP
   check 'a Windows CMD launcher cannot bypass admission' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
   rm -f "$mutation_dir/bin/ai-bypass.cmd"
+  printf '@echo off\r\ngh ^\r\n cache list\r\n' > "$mutation_dir/bin/ai-bypass.cmd"
+  check 'a CMD continuation and cache command cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.cmd"
+  printf '& "gh.exe" `\n label list\n' > "$mutation_dir/bin/ai-bypass.ps1"
+  check 'a quoted PowerShell continuation and label command cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.ps1"
   printf 'gh api repos/acme/example\n' > "$mutation_dir/bin/promote-windows-runner-to-service.ps1"
   check 'retired runner exception cannot admit direct gh again' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
