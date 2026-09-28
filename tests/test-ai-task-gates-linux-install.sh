@@ -16,6 +16,7 @@ git -C "$TMP/installed" remote add origin "file://$TMP/origin.git"
 cp "$ROOT/bin/ai-task-gates" "$TMP/installed/bin/ai-task-gates"
 cp "$ROOT/bin/ai-review-sandbox" "$TMP/installed/bin/ai-review-sandbox"
 cp "$ROOT/bin/ai-review-lifecycle" "$TMP/installed/bin/ai-review-lifecycle"
+cp "$ROOT/install.sh" "$TMP/installed/install.sh"
 cp "$ROOT/tools/lib/task-gates.sh" "$TMP/installed/tools/lib/task-gates.sh"
 cp "$ROOT/config/task-gates.json" "$TMP/installed/config/task-gates.json"
 cp "$ROOT/.ai-devops/task-gates.json" "$TMP/installed/.ai-devops/task-gates.json"
@@ -188,7 +189,10 @@ jq -nc --arg target "$protected" --arg path "$TMP/installed" --arg launcher "$TM
   --arg policy "$policy_digest" --arg digest "$digest" --arg report "$report" --arg report_hash "$report_hash" \
   '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed first install",legacy_migration:false,first_install:true,recover_launchers:false,linux_manifest_sha256:"",linux_link_target:""}' > "$auth"
 (cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
-expect_ok 'first managed install reserves reviewed authority' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+mkdir -p "$TMP/home"
+expect_ok 'documented first install reserves and resumes reviewed authority' env HOME="$TMP/home" \
+  "$TMP/installed/install.sh" --test-authorization-only
+[ ! -e "$auth" ] && [ -f "$auth.consuming" ] || { echo 'FAIL: direct first install did not reserve one-use authority'; exit 1; }
 ln -s /tmp/foreign-gate "$TMP/bin/ai-task-gates"
 expect_stop 'foreign launcher cannot enter first-install retry' gate resume "$TMP/installed" "$protected"
 rm -f "$TMP/bin/ai-task-gates"
@@ -209,8 +213,9 @@ source_hash="$(sha256sum "$TMP/installed/bin/ai-task-gates" | cut -d' ' -f1)"
 jq -nc --arg target "$protected" --arg path "$TMP/installed" --arg launcher "$TMP/bin/ai-task-gates" \
   --arg policy "$policy_digest" --arg digest "$digest" --arg report "$report" --arg report_hash "$report_hash" --arg link "$TMP/installed/bin/ai-task-gates" --arg source_hash "$source_hash" \
   '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed legacy migration",legacy_migration:true,first_install:false,recover_launchers:false,linux_manifest_sha256:"",linux_link_target:$link,installed_source_sha256:$source_hash}' > "$auth"
-expect_ok 'legacy symlink migration reserves reviewed authority' gate preflight "$TMP/candidate" "$protected" --caller-pinned
-expect_ok 'legacy symlink migration resumes on same commit' gate resume "$TMP/installed" "$protected"
+expect_ok 'documented same-commit migration reserves and resumes reviewed authority' env HOME="$TMP/home" \
+  "$TMP/installed/install.sh" --test-authorization-only
+[ ! -e "$auth" ] && [ -f "$auth.consuming" ] || { echo 'FAIL: direct legacy migration did not reserve one-use authority'; exit 1; }
 manifest "$protected"
 stage_path="$(stage_report "$protected")"
 expect_ok 'legacy required stages bind to authority' gate stages-complete "$TMP/installed" "$protected" --stage-report "$stage_path"

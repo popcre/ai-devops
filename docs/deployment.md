@@ -151,7 +151,11 @@ The Windows installer compares the managed launcher receipt with the fetched
 release, so it also detects a checkout that was advanced before the installer
 started. It refuses a reviewer-safety change without both `-ExpectedHead` and
 the matching one-use authorization, including when invoked through bootstrap
-or setup. The source-only gate retains a pending authorization until the full
+or setup. Windows bootstrap may provision only the fixed `Git.Git`
+prerequisite when Git is absent; it then checks the canonical source and
+authorization before runner setup, WinGet configuration, provider installs,
+remote access, or machine setup, including with `-SkipMachineSetup`.
+The source-only gate retains a pending authorization until the full
 installer finishes and refreshes the managed command launchers; a failed full
 installation can retry against the same pinned target. Legacy launchers
 without a receipt need the same one-time path. If both managed gate launchers

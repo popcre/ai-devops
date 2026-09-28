@@ -134,6 +134,12 @@ if [ "$AUTHORIZATION_TEST_ONLY" -eq 1 ]; then
   case "$fixture_root" in /tmp/*) ;; *) warn 'authorization test needs a disposable /tmp checkout'; exit 2 ;; esac
   case "$fixture_origin" in file:///tmp/*|/tmp/*) ;; *) warn 'authorization test needs a local /tmp origin'; exit 2 ;; esac
 fi
+install_launcher="$BIN_TARGET/ai-task-gates"
+if [ "$AUTHORIZATION_TEST_ONLY" -eq 1 ] && [ "${AI_TASK_GATES_INSTALL_TEST_MODE:-0}" = 1 ]; then
+  test_root="$(realpath -e "${AI_TASK_GATES_TEST_ROOT:-/nonexistent}")" || exit 2
+  case "$fixture_root" in "$test_root"/*) ;; *) warn 'authorization fixture root differs from checkout'; exit 2 ;; esac
+  install_launcher="$test_root/bin/ai-task-gates"
+fi
 
 # A direct installer and an updater share one checkout lock. An updater passes
 # its open descriptor to its direct child; neither an environment flag nor a
@@ -160,8 +166,18 @@ fi
 # Resume verifies the installed baseline and pending authorization before the
 # first dependency, protected config, symlink, or per-user installation stage.
 target_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || exit 1
+issued_auth="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}/install-authorizations/$target_head.json"
+if [ -f "$issued_auth" ]; then
+  # Direct first installs and exact-commit migrations begin with issued
+  # authority. Reserve it from the already checked-out target before resume.
+  (cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" install-verify --phase preflight \
+    --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
+    --installed-launcher "$install_launcher" --caller-pinned) || {
+      warn 'direct installation preflight refused before any machine changes'; exit 1;
+    }
+fi
 resume_args=(install-verify --phase resume --target-head "$target_head"
-  --installed-checkout "$REPO_ROOT" --installed-launcher /usr/local/bin/ai-task-gates)
+  --installed-checkout "$REPO_ROOT" --installed-launcher "$install_launcher")
 [ -z "$owner_request" ] || resume_args+=(--owner-request "$owner_request")
 resume_output="$(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" "${resume_args[@]}")" || {
   warn 'installation authorization refused before any machine changes'; exit 1;

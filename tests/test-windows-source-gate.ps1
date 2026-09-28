@@ -473,7 +473,16 @@ try {
   Assert ($bootstrap -match 'function Invoke-GitCommand') 'bootstrap native Git stderr guard missing'
   Assert ($bootstrap -match "Invoke-GitCommand @\('-C', \`$Path, 'fetch', 'origin', 'main'\)\s+\| Out-Host\s+if \(\`$script:LastGitExitCode -ne 0\)") 'bootstrap fetch does not check the real Git exit code'
   Assert (-not $bootstrap.Contains("'merge', '--ff-only', 'origin/main'")) 'bootstrap must not pre-advance source before the installer checks its receipt'
-  Assert ($bootstrap.Contains("-RepoPath `$Path -SourceGateOnly")) 'bootstrap must delegate guarded source update to installer'
+  Assert ($bootstrap.Contains('-RepoPath $RepoPath -SourceGateOnly -ExpectedHead $sourceSha')) `
+    'bootstrap must delegate every non-test source update to the pinned installer gate'
+  $sourceGateAt=$bootstrap.IndexOf('-RepoPath $RepoPath -SourceGateOnly -ExpectedHead $sourceSha')
+  $runnerAt=$bootstrap.IndexOf('if ($GitHubRunnerHost) {')
+  $wingetConfigAt=$bootstrap.IndexOf('winget configure -f $configuration')
+  Assert ($sourceGateAt -gt $bootstrap.IndexOf('Clone failed.') -and $sourceGateAt -lt $runnerAt -and $sourceGateAt -lt $wingetConfigAt) `
+    'bootstrap source gate must precede runner and WinGet configuration mutations on clone and existing checkout'
+  Assert (($bootstrap.Split('-SourceGateOnly').Count - 1) -eq 1) 'bootstrap must always use one source gate, even at equal HEAD'
+  Assert ($bootstrap.IndexOf('if (-not $SkipMachineSetup -and -not $TestOnly)') -gt $sourceGateAt) `
+    'SkipMachineSetup may not bypass bootstrap source authorization'
   Write-Host 'PASS: Windows source gate rejects hostile source, moved targets, unpinned protected updates, stale receipts, and pre-advanced checkout'
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
