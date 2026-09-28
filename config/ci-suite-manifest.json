@@ -100,7 +100,8 @@
     "test-ci-runner-router.sh": 1,
     "test-reviewer-credit.sh": 1,
     "test-ai-review-snapshot-bounded-history.sh": 8,
-    "test-setup-desktop-apps.sh": 1
+    "test-setup-desktop-apps.sh": 1,
+    "test-ci-suite-loader.sh": 5
   },
   "bash": [
     "test-ai-adopt-globals.sh",
@@ -166,6 +167,7 @@
     "test-ai-zcode.sh",
     "test-bin-cmd-launchers.sh",
     "test-ci-runner-router.sh",
+    "test-ci-suite-loader.sh",
     "test-classify-database-preview.sh",
     "test-client-globals-required-phrases.sh",
     "test-codex-trigger-eval.sh",
@@ -550,5 +552,6 @@
         "test-bin-cmd-launchers.sh"
       ]
     }
-  }
+  },
+  "windows_offline_section_count": 6
 }

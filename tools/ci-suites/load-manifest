@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# load-manifest — assemble the reader-shaped CI suite manifest (issue #1001).
+#
+# WHY THIS EXISTS. Every tool fix used to edit one shared
+# config/ci-suite-manifest.json, so independent fixes collided textually and
+# merged one at a time (tests/verification/repo-throughput/manifest-collision-2026-09.md).
+# Per-suite data now lives in one small file per suite; this loader assembles
+# the exact legacy shape every reader already consumes.
+#
+# INPUT
+#   Global manifest (default <repo>/config/ci-suite-manifest.json, or
+#   $AI_CI_SUITE_MANIFEST): the slim, rarely-edited keys —
+#     windows_offline_section_count   how many Windows offline sections exist
+#     windows_offline_powershell_shard which section owns the PowerShell suites
+#     suspended_bash / suspended_powershell / _comment_suspended
+#     affected_suite_rules
+#   Suites directory (default <global dir>/ci-suites, or $AI_CI_SUITE_DIR):
+#   one <suite-file-name>.json per suite holding that suite's own data:
+#     kind             "bash" or "powershell"
+#     linux_seconds    optional non-negative integer (bash only); absent means
+#                      the suite has no Linux timing measurement yet
+#     windows          membership tags: "offline" (the Windows-sensitive
+#                      offline lane) and "reviewer-safety" (the Codex/Grok
+#                      reviewer fallback lane; implies "offline")
+#     windows_section  1-based hosted section owner; required for every
+#                      "offline" suite that is not reviewer-safety, forbidden
+#                      otherwise
+#
+# OUTPUT
+#   The legacy reader shape on stdout (schema_version 2 is the reader
+#   contract; the global file's own schema_version tracks its slim layout).
+#   Every list is in canonical LC_ALL=C order, so two branches that touch
+#   different suite files assemble to identical bytes.
+#
+# FAILURE
+#   Any inconsistency fails closed with exit status 2 and a message naming
+#   the offending file. A suite that is "offline" but in no section, a
+#   section with no suites, an out-of-range section number, a duplicate
+#   membership tag, an unknown kind, or a malformed JSON file are all
+#   configuration errors, never quiet coverage loss.
+
+set -uo pipefail
+
+die() {
+  printf 'load-manifest: %s\n' "$*" >&2
+  exit 2
+}
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GLOBAL="${AI_CI_SUITE_MANIFEST:-$SELF_DIR/../../config/ci-suite-manifest.json}"
+SUITE_DIR="${AI_CI_SUITE_DIR:-$(cd "$(dirname "$GLOBAL")" && pwd)/ci-suites}"
+
+command -v jq >/dev/null 2>&1 || die 'jq is required but not on PATH'
+[ -f "$GLOBAL" ] || die "global manifest is missing: $GLOBAL"
+jq -e 'type == "object"' "$GLOBAL" >/dev/null 2>&1 || die "global manifest is not a JSON object: $GLOBAL"
+[ -d "$SUITE_DIR" ] || die "suite directory is missing: $SUITE_DIR"
+
+# Only *.json suite files may live in the directory; anything else (a stray
+# editor temp file, a README someone thought was welcome) is a configuration
+# error rather than silently skipped data.
+shopt -s nullglob
+suite_files=("$SUITE_DIR"/*.json)
+shopt -u nullglob
+[ "${#suite_files[@]}" -gt 0 ] || die "no per-suite JSON files in $SUITE_DIR"
+for stray in "$SUITE_DIR"/*; do
+  case "$stray" in
+    *.json) ;;
+    *) die "non-JSON file in the suite directory: $stray" ;;
+  esac
+done
+
+# Parse-check each file individually: jq's aggregate parse errors do not
+# reliably name the offending file, but a per-file check always can.
+for f in "${suite_files[@]}"; do
+  jq -e 'type == "object"' "$f" >/dev/null 2>&1 ||
+    die "suite file is not valid JSON: $f"
+done
+
+# input_filename carries the real file path into each entry, so validation
+# errors can name the exact suite file.
+entries="$(jq -c '{file: input_filename, body: .}' "${suite_files[@]}")" ||
+  die "a suite file failed to read: see the jq error above"
+
+# --slurpfile turns the newline-delimited entries and the global file into
+# arrays the assembly program can validate as a whole.
+entries_file="$(mktemp)"
+global_file="$(mktemp)"
+trap 'rm -f "$entries_file" "$global_file"' EXIT
+printf '%s\n' "$entries" > "$entries_file"
+cp "$GLOBAL" "$global_file"
+
+jq -e -n -f "$SELF_DIR/load-manifest.jq" --slurpfile e "$entries_file" --slurpfile g "$global_file" ||
+  die 'manifest assembly failed (see the jq error above)'
