@@ -397,11 +397,15 @@ if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
     "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null"
   cat > "$mutation_dir/bin/ai-private-config" <<'BOOTSTRAP'
 #!/usr/bin/env bash
-gh auth status
+if ! gh auth status >/dev/null 2>&1; then
 mkdir -p "$(dirname "$ROOT")"; gh repo clone "$REPOSITORY" "$ROOT" >/dev/null
 BOOTSTRAP
-  check 'approved bootstrap clone and local auth checks remain allowed' \
+  check 'approved first-clone authentication and Git clone remain allowed' \
     "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null"
+  printf 'gh auth status\n' > "$mutation_dir/bin/ai-bypass"
+  check 'new direct auth status probes are rejected' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
   cp "$ROOT/bin/ai-pr-wait" "$mutation_dir/bin/ai-pr-wait"
   printf '\ngh api repos/acme/example\n' >> "$mutation_dir/bin/ai-pr-wait"
   check 'retired waiter fallback cannot reappear beside guidance text' \

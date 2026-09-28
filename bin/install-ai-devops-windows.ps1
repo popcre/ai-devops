@@ -889,8 +889,15 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
 
 Write-Step "Checking optional logins"
 if (Get-Command gh -ErrorAction SilentlyContinue) {
-    $ghProbe = Invoke-NativeProbe -Command 'gh' -Arguments @('auth', 'status')
-    if ($ghProbe.ExitCode -ne 0) {
+    $ghGate = (Join-Path $PSScriptRoot 'ai-gh') -replace '\\', '/'
+    if ($installBash -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'ai-gh'))) {
+        $ghProbe = Invoke-NativeProbe -Command $installBash.Source -Arguments @('--noprofile', '--norc', '-c', 'AI_GH_NO_WAIT=1 AI_GH_CALLER=ai-devops-installer "$1" auth status', 'bash', $ghGate)
+    } else {
+        $ghProbe = [pscustomobject]@{ ExitCode = 75 }
+    }
+    if ($ghProbe.ExitCode -eq 75) {
+        Write-Note "GitHub login check deferred because Git Bash or the shared GitHub gate is unavailable."
+    } elseif ($ghProbe.ExitCode -ne 0) {
         Write-Note "GitHub CLI is installed but not logged in. Run: gh auth login"
     }
 } else {

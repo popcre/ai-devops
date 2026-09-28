@@ -14,7 +14,7 @@ import sys
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) == 2 else pathlib.Path(__file__).resolve().parents[2])
 API_VERBS = r"(?:api|run|repo|pr|issue|workflow|release|search|cache|label|gist|project|codespace|secret|variable|ruleset|status)"
-DIRECT = re.compile(rf"(?<![\w$.-])(?:['\"])?gh(?:\.exe)?(?:['\"])?\s+{API_VERBS}\b", re.IGNORECASE)
+DIRECT = re.compile(rf"(?<![\w$.-])(?:['\"])?gh(?:\.exe)?(?:['\"])?\s+(?:{API_VERBS}\b|auth\s+status\b)", re.IGNORECASE)
 SDK = re.compile(r"(?:execFileSync|spawnSync|execFile|spawn)\s*\(\s*['\"](?:[^'\"]*[/\\])?gh(?:\.exe)?['\"]", re.IGNORECASE)
 ARG_ARRAY = re.compile(rf"[\[(,]\s*['\"](?:[^'\"]*[/\\])?gh(?:\.exe)?['\"]\s*,\s*['\"]{API_VERBS}\b", re.IGNORECASE)
 POWERSHELL_START = re.compile(r"\bStart-Process\s+(?:-FilePath\s+)?['\"]?(?:[^'\"]+[/\\])?gh(?:\.exe)?['\"]?(?=\s|$)", re.IGNORECASE)
@@ -50,6 +50,8 @@ def inspect(path: pathlib.Path) -> list[str]:
             continue
         if path.name == "ai-private-config" and stripped == 'mkdir -p "$(dirname "$ROOT")"; gh repo clone "$REPOSITORY" "$ROOT" >/dev/null':
             continue  # Bootstrap Git clone; separate Git transport, not an API read.
+        if path.name == "ai-private-config" and stripped == 'if ! gh auth status >/dev/null 2>&1; then':
+            continue  # First-clone authentication probe before protected config exists.
         if path.name == "ai-blocker-watch" and stripped.startswith('prompt="ai-blocker-watch:') and stripped.endswith('"') and '$(gh' not in line:
             continue  # User-facing recovery text, not an executed command.
         if path.name == "ai-pr-wait" and stripped in {
