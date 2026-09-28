@@ -614,7 +614,10 @@ if [ "$fail" -eq 0 ]; then
   if [ -x "$REPO_ROOT/bin/ai-glm" ] && "$REPO_ROOT/bin/ai-glm" server status >/dev/null 2>&1; then
     info "Verifying the GLM session harness end-to-end"
     glm_probe="$(mktemp -d)"
-    ( cd "$glm_probe" && git init -q && printf '%s\n' 'Public GLM capability probe.' > README.md &&
+    # ai-glm writes its report under .ai/ inside the reviewed repository; the
+    # probe must ignore it like real repositories do, or the post-review source
+    # digest changes and the review fails source-digest-mismatch (#957).
+    ( cd "$glm_probe" && git init -q && printf '%s\n' '.ai/' >> .git/info/exclude && printf '%s\n' 'Public GLM capability probe.' > README.md &&
       git add README.md && git -c user.email=probe@local -c user.name=probe commit -q -m probe ) >/dev/null 2>&1
     glm_result=""
     if glm_result="$(cd "$glm_probe" && AI_GLM_CALLER=setup "$REPO_ROOT/bin/ai-glm" new secrets-probe \
