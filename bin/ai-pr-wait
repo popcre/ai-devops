@@ -152,7 +152,7 @@ bounded_gh() {
     AI_GH_CALLER=ai-pr-wait "$PYTHON_RUNNER" "$SNAP_HELPER_ARG" \
       --state-dir "$SNAP_STATE_ARG" --key "v1 $SNAP_CONTEXT $REPO $PR $cache_target" \
       --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" \
-      --age-file "$SNAP_AGE_ARG" "${force[@]+"${force[@]}"}" -- "${command[@]}"
+      --age-file "$SNAP_AGE_ARG" --source-file "$SNAP_SOURCE_ARG" "${force[@]+"${force[@]}"}" -- "${command[@]}"
   else
     AI_GH_CALLER=ai-pr-wait "${command[@]}"
   fi
@@ -213,14 +213,17 @@ elif [ -x "$REAL_DIR/../tools/github-requests/pr-status-context" ]; then
   SNAP_CONTEXT="$("$REAL_DIR/../tools/github-requests/pr-status-context" 2>/dev/null || true)"
 fi
 SNAP_AGE_FILE="$(mktemp "${TMPDIR:-/tmp}/ai-pr-wait-age.XXXXXX")" || exit 3
+SNAP_SOURCE_FILE="$(mktemp "${TMPDIR:-/tmp}/ai-pr-wait-source.XXXXXX")" || exit 3
 SNAP_HELPER_ARG="$SNAP_HELPER"
 SNAP_STATE_ARG="$SNAP_STATE_DIR"
 SNAP_AGE_ARG="$SNAP_AGE_FILE"
+SNAP_SOURCE_ARG="$SNAP_SOURCE_FILE"
 case "$(uname -s 2>/dev/null || true)" in
   MINGW*|MSYS*|CYGWIN*)
     SNAP_HELPER_ARG="$(cygpath -w "$SNAP_HELPER")"
     SNAP_STATE_ARG="$(cygpath -w "$SNAP_STATE_DIR")"
     SNAP_AGE_ARG="$(cygpath -w "$SNAP_AGE_FILE")"
+    SNAP_SOURCE_ARG="$(cygpath -w "$SNAP_SOURCE_FILE")"
     ;;
 esac
 
@@ -240,6 +243,7 @@ else
 fi
 cleanup_wait_files() {
   rm -f "$SNAP_AGE_FILE"
+  rm -f "$SNAP_SOURCE_FILE"
   [ "$API_STDERR" = /dev/null ] || { [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_TRACE:-}" ]; } || rm -f "$API_STDERR"
   [ -z "${TMP_STATE_DIR:-}" ] || rm -rf "$TMP_STATE_DIR"
 }

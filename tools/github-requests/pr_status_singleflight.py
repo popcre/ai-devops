@@ -137,6 +137,7 @@ def main():
     parser.add_argument("--ttl", type=int, required=True)
     parser.add_argument("--wait-seconds", type=int, required=True)
     parser.add_argument("--age-file", required=True)
+    parser.add_argument("--source-file", required=True)
     parser.add_argument("--expected-head", required=True)
     parser.add_argument("--force-refresh", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -179,14 +180,18 @@ def main():
                         raw = cache.read_bytes()
                     if cacheable(raw, args.expected_head):
                         Path(args.age_file).write_text(str(age))
+                        Path(args.source_file).write_text("cache")
                         sys.stdout.buffer.write(raw)
                         return 0
-            return run(command, cache, args.age_file, args.expected_head)
+            return run(command, cache, args.age_file, args.source_file, args.expected_head)
         finally:
             unlock(owner)
 
 
-def run(command, cache, age_file, expected_head=None):
+def run(command, cache, age_file, source_file, expected_head=None):
+    # Mark the actual transport before it starts. A completed cache read never
+    # reports upstream spend, even when its age rounds down to zero seconds.
+    Path(source_file).write_text("upstream")
     result = subprocess.run(command, capture_output=True, check=False)
     sys.stderr.buffer.write(result.stderr)
     sys.stdout.buffer.write(result.stdout)

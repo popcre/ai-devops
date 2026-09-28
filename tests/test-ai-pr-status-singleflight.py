@@ -48,6 +48,7 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
         argv = [sys.executable, str(HELPER), "--state-dir", str(self.base / "state"),
                 "--key", key, "--expected-head", head, "--ttl", "10",
                 "--wait-seconds", "4", "--age-file", str(self.base / (suffix + ".age")),
+                "--source-file", str(self.base / (suffix + ".source")),
                 "--", sys.executable, str(self.fake)]
         return subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
@@ -62,6 +63,10 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
             self.assertEqual(process.returncode, 0, err)
             self.assertEqual(json.loads(out)["data"]["repository"]["pullRequest"]["state"], "OPEN")
         self.assertEqual(self.calls(), 1)
+        self.assertEqual(
+            sorted([(self.base / (suffix + ".source")).read_text() for suffix in ("a", "b")]),
+            ["cache", "upstream"],
+        )
         self.assertEqual((self.base / "state").stat().st_mode & 0o077, 0)
 
     def test_different_access_keys_never_share(self):
