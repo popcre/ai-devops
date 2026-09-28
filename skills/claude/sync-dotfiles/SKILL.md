@@ -132,7 +132,9 @@ clone + `./install.sh` (Ubuntu) first.
      substring `ops_` and produced a false "plaintext token found" on 2026-07-26.
      A real service-account token is ~866 characters.
    - Windows: `~/.ssh/ai-devops.conf` exists and `~/.ssh/config` `Include`s it.
-     Ubuntu: `~/.config/ai-devops/shellrc` exists and `.bashrc` sources it.
+     Ubuntu: `~/.config/ai-devops/shellrc` exists and `.bashrc` sources it, and
+     `<repo>/bin/ai-ssh-setup` reports the 916-alien key and `ai-devops.conf`
+     Include as current (it is idempotent; run it directly to repair only SSH).
    **If anything is missing or a real token is found**, run the per-OS installer —
    `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\setup-machine.ps1 -RepoPath <repo>`
    or `<repo>/bin/setup-secrets.sh`. Two hard preconditions:
