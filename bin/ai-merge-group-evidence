@@ -75,6 +75,7 @@ GH="$ROOT/bin/ai-gh"
 [ -x "$GH" ] || die 'the shared GitHub transport is not available'
 gh_call() { AI_GH_CALLER=ai-merge-group-evidence "$GH" "$@"; }
 command -v git >/dev/null 2>&1 || die 'git is not available'
+command -v jq >/dev/null 2>&1 || die 'jq is not available'
 
 # refs/heads/gh-readonly-queue/main/pr-357-<base sha>. Anything else is not a
 # merge-queue ref, and guessing a pull-request number from it would be worse
@@ -104,7 +105,8 @@ REPO_OWNER="${REPO%%/*}"
 REPO_NAME="${REPO#*/}"
 [ -n "$REPO_OWNER" ] && [ -n "$REPO_NAME" ] && [ "$REPO_OWNER" != "$REPO_NAME" ] || die "invalid GitHub repository $REPO"
 read_queue_state() {
-  gh_call api graphql -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid baseRefOid mergeQueueEntry{headCommit{oid}}}}}' -F owner="$REPO_OWNER" -F name="$REPO_NAME" -F number="$PR_NUMBER" --jq '[.data.repository.pullRequest.headRefOid,.data.repository.pullRequest.mergeQueueEntry.headCommit.oid,.data.repository.pullRequest.baseRefOid]|join("|")' 2>/dev/null
+  gh_call api graphql -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid baseRefOid mergeQueueEntry{headCommit{oid}}}}}' -F owner="$REPO_OWNER" -F name="$REPO_NAME" -F number="$PR_NUMBER" 2>/dev/null |
+    jq -er 'if (.errors // [] | length) > 0 then error("GraphQL errors") else [.data.repository.pullRequest.headRefOid,.data.repository.pullRequest.mergeQueueEntry.headCommit.oid,.data.repository.pullRequest.baseRefOid]|join("|") end' 2>/dev/null
 }
 QUEUE_STATE="$(read_queue_state)"
 IFS='|' read -r HEAD_SHA QUEUED_GROUP BASE_SHA <<EOF

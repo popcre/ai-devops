@@ -395,6 +395,13 @@ if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
   printf '#!/usr/bin/env bash\n"$ROOT/bin/ai-gh" api repos/acme/example\n' > "$mutation_dir/bin/ai-fixture"
   check 'a delegated fake transport remains allowed' \
     "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null"
+  cat > "$mutation_dir/bin/ai-private-config" <<'BOOTSTRAP'
+#!/usr/bin/env bash
+gh auth status
+mkdir -p "$(dirname "$ROOT")"; gh repo clone "$REPOSITORY" "$ROOT" >/dev/null
+BOOTSTRAP
+  check 'approved bootstrap clone and local auth checks remain allowed' \
+    "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null"
   printf '#!/usr/bin/env bash\ngh api repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
   check 'a new direct gh command is rejected' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"

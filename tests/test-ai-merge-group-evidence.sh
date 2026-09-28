@@ -69,7 +69,13 @@ case "$1 $2" in
   "api graphql")
     state="$STUB_DIR/queue_state"
     if [ -f "$STUB_DIR/queue-read" ] && [ -f "$STUB_DIR/queue-after" ]; then state="$STUB_DIR/queue-after"; fi
-    case "$*" in *baseRefOid*) cat "$state" ;; *) cut -d'|' -f1-2 "$state" ;; esac
+    if [ -f "$STUB_DIR/graph-errors" ]; then
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"headRefOid":"deadbeef"}}},"errors":[{"message":"partial"}]}'
+    else
+      IFS='|' read -r head queue base < "$state"
+      jq -nc --arg head "$head" --arg queue "$queue" --arg base "$base" \
+        '{data:{repository:{pullRequest:{headRefOid:$head,baseRefOid:$base,mergeQueueEntry:{headCommit:{oid:$queue}}}}}}'
+    fi
     : > "$STUB_DIR/queue-read" ;;
   *) exit 1 ;;
 esac
@@ -82,7 +88,7 @@ RUN() { (cd "$TMP/repo" && PATH="$TMP/bin:$PATH" bash "$CMD" "$@" 2>&1); }
 
 REF='refs/heads/gh-readonly-queue/main/pr-357-b418c2c25ffe877fd3c3987b0aad68483f382078'
 set_world() {
-  rm -f "$TMP/queue-read" "$TMP/queue-after"
+  rm -f "$TMP/queue-read" "$TMP/queue-after" "$TMP/graph-errors"
   printf '%s|%s|%s\n' "$1" "$2" "${5:-$BASE_SHA}" > "$TMP/queue_state"
   printf '%s' "$3" > "$TMP/runs"
   printf '%s' "$4" > "$TMP/jobs"
@@ -97,6 +103,10 @@ OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --req
 check "matching, complete, successful evidence is accepted" \
   "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'verified by'"
 check 'merge proof reads entered the shared gate' '[ -f "$AI_GH_STATE_DIR/last_call_ms" ]'
+touch "$TMP/graph-errors"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops)"; RC=$?
+check 'GraphQL partial errors cannot prove queue identity' '[ "$RC" -ne 0 ]'
+rm -f "$TMP/graph-errors" "$TMP/queue-read"
 
 # A configuration or usage mistake must never read as evidence, so it exits 2,
 # distinct from the exit 1 that means 'the evidence is not good enough'.
