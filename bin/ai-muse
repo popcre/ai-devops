@@ -420,9 +420,28 @@ muse_credential_acquire(){
   fi
   muse_credential_publish "$candidate"
 }
+muse_credential_state(){
+  local credential_home="" ps=""
+  if [ -n "${AI_MUSE_TEST_DIR:-}" ]; then
+    printf '%s\n' "$STATE"
+  elif [ -n "${SYSTEMROOT:-}" ]; then
+    ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+    [ -n "$ps" ] || die 'cannot locate PowerShell to identify the credential-lock owner.'
+    credential_home="$("$ps" -NoProfile -NonInteractive -Command '[Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)' | tr -d '\r')"
+    case "$credential_home" in [A-Za-z]:*) credential_home="/$(printf '%s' "$credential_home" | sed 's#\\#/#g; s#:#/#')";; esac
+    [ -n "$credential_home" ] || die 'cannot identify the credential-lock owner.'
+    printf '%s/.local/state/ai-devops/muse\n' "$credential_home"
+  else
+    credential_home="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | cut -d: -f6)"
+    [ -n "$credential_home" ] || die 'cannot identify the credential-lock owner.'
+    printf '%s/.local/state/ai-devops/muse\n' "$credential_home"
+  fi
+}
 read_key_from_op(){
   # Explicit key refreshes from Muse, Qwen and DeepSeek share this lock.
-  need op; local candidate="$STATE/credential.lock.d" budget deadline delay=1 waited=0; mkdir -p "$STATE"
+  need op; local credential_state="" candidate="" budget deadline delay=1 waited=0
+  credential_state="$(muse_credential_state)" || die 'cannot identify the credential-lock owner.'
+  candidate="$credential_state/credential.lock.d"; mkdir -p "$credential_state"
   budget="${AI_MUSE_CREDENTIAL_WAIT_SECONDS:-120}"; case "$budget" in ''|*[!0-9]*) die 'AI_MUSE_CREDENTIAL_WAIT_SECONDS must be a whole number of seconds.';; esac
   deadline=$(( $(date +%s) + budget ))
   until muse_credential_acquire "$candidate"; do

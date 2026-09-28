@@ -531,6 +531,9 @@ cat > "$TMP/windows-cred-bin/ps" <<'EOF'
 EOF
 chmod +x "$TMP/windows-cred-bin/ps"
 MUSE_LOCK_FUNCTIONS="$(sed -n '/^muse_credential_owner_alive(){/,/^read_key_from_op(){/{ /^read_key_from_op(){/d; p; }' "$SCRIPT")"
+EXPECTED_CRED_STATE="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | cut -d: -f6)/.local/state/ai-devops/muse"
+ACTUAL_CRED_STATE="$( HOME="$TMP/hostile-home" USERPROFILE="$TMP/hostile-profile" AI_MUSE_STATE_DIR="$TMP/hostile-state" AI_MUSE_TEST_DIR='' SYSTEMROOT='' STATE="$TMP/hostile-state" bash -c 'source /dev/stdin; muse_credential_state' <<< "$MUSE_LOCK_FUNCTIONS" )"
+check 'production credential lock ignores inherited home and state redirects' "test '$ACTUAL_CRED_STATE' = '$EXPECTED_CRED_STATE'"
 printf '%s\n' '999999 43210 live-token' > "$TMP/windows-cred-lock/owner"
 if ( export SYSTEMROOT='C:\Windows' PS_STUB_LIVE=1 PATH="$TMP/windows-cred-bin:$PATH"; source /dev/stdin; CRED_LOCK=''; CRED_TOKEN=''; muse_credential_acquire "$TMP/windows-cred-lock" ) <<< "$MUSE_LOCK_FUNCTIONS" >/dev/null 2>&1; then
   bad 'Windows credential lock keeps a live sibling runtime owner'
