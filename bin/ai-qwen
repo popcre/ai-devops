@@ -408,6 +408,13 @@ cmd_store_key() {
   token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
   [ -n "$token" ] || [ ! -s "$TOKEN_FILE" ] || token="$(<"$TOKEN_FILE")"
   credential_lock="$(qwen_shared_credential_lock_path)" || { rm -f "$tmp"; die 'could not resolve the shared 1Password credential lock.'; }
+  lock_doctor() { # lock_doctor WAIT LOCK -> run ai-lock-doctor when it is available
+    local doctor
+    doctor="$SCRIPT_DIR/ai-lock-doctor"
+    [ -x "$doctor" ] || doctor="$(command -v ai-lock-doctor 2>/dev/null || true)"
+    [ -n "$doctor" ] || { note 'ai-lock-doctor is unavailable; cannot self-heal the credential lock.'; return 0; }
+    "$doctor" --recover --older-than "$1" "$2" || true
+  }
   if ! (
     [ -z "$token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$token"
     if [ -n "${SYSTEMROOT:-}" ]; then
@@ -423,8 +430,12 @@ cmd_store_key() {
       "$op_bin" read "$ref" </dev/null > "$tmp"
     else
       # setup-secrets.sh uses this same lock for Linux 1Password reads.
-      # Keep it through op's exit, but never pass its descriptor to op's children.
+      # Keep it through op's exit, but never pass its descriptor to op's
+      # children. A timeout means a live holder: ai-lock-doctor clears only
+      # this toolkit's own holders, then the read is retried once (#1002).
       command -v flock >/dev/null 2>&1 || exit 1
+      flock --close -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp" && exit 0
+      lock_doctor 120 "$credential_lock"
       flock --close -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp"
     fi
   ) || [ ! -s "$tmp" ]; then
@@ -539,11 +550,19 @@ lock_acquire() {
     born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
     owner="$(cat "$dir/pid" 2>/dev/null || true)"
     if [ -n "$owner" ]; then
-      # Muse publishes only its MSYS pid. A different Git Bash runtime cannot
-      # resolve that pid, so it is never safe to reclaim Muse's lock on Windows.
-      # Bound the caller's wait instead of risking two concurrent op reads.
-      [ -z "${SYSTEMROOT:-}" ] || return 1
-      lock_owner_alive "$owner" "" && return 1
+      # Muse's legacy lock publishes only an MSYS pid, which another Git Bash
+      # runtime cannot resolve. Pid liveness alone can therefore never prove
+      # the holder is gone on Windows, so a pid+age rule bounds the jam
+      # instead (#1002): reclaim only when the pid is not observable AND the
+      # lock is older than any legitimate credential read (a live legacy
+      # holder releases within seconds; 15 minutes is far past the 120s wait
+      # budget every wrapper uses). A live pid still never loses its lock.
+      if [ -z "${SYSTEMROOT:-}" ]; then
+        lock_owner_alive "$owner" "" && return 1
+      else
+        lock_owner_alive "$owner" "" && return 1
+        now="$(date +%s)"; [ $((now - born)) -ge 900 ] || return 1
+      fi
     else
       now="$(date +%s)"; [ $((now - born)) -ge 7200 ] || return 1
     fi

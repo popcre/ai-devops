@@ -14,9 +14,16 @@ if grep -Fq 'exec flock -w 90 "$CFG_DIR/op-refresh.lock" op run' "$source_file";
   fail "MCP launcher still holds the refresh lock around the long-running server"
 fi
 
-grep -Fq '_aidev_exports="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op run' "$source_file" ||
+# The serialized op call goes through one shared helper: the lock covers only
+# the op command, closes before op's children, and self-heals once through
+# ai-lock-doctor before a single retry (#1002).
+grep -Fq 'flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"' "$source_file" ||
+  fail "MCP launcher lock helper does not serialize exactly one op command"
+grep -Fq 'ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"' "$source_file" ||
+  fail "MCP launcher lock helper has no bounded self-healing retry"
+grep -Fq '_aidev_exports="\$(_aidev_flock op run' "$source_file" ||
   fail "MCP launcher does not limit the lock to secret resolution"
-grep -Fq 'TOK="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op read' "$source_file" ||
+grep -Fq 'TOK="\$(_aidev_flock op read' "$source_file" ||
   fail "remote MCP launcher passes the refresh lock to 1Password"
 grep -Fq 'unset _aidev_names _aidev_exports' "$source_file" ||
   fail "MCP launcher leaves temporary secret-resolution variables behind"

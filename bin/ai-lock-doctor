@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+# ai-lock-doctor — diagnose and conservatively clear a stuck Linux flock lock.
+#
+# Usage:
+#   ai-lock-doctor [--older-than N] <lockfile>            diagnose only
+#   ai-lock-doctor --recover [--older-than N] <lockfile>  clear our-tool holders
+#
+# A stuck `flock` is always a LIVE holder (an inherited descriptor, issue
+# #940): the kernel releases the lock when the last holder's descriptor
+# closes, so there is no such thing as a dead-holder flock. This tool:
+#
+#   1. reads the lock file's device:inode;
+#   2. scans /proc/<pid>/fd for EVERY process holding that inode — the pid
+#      column of /proc/locks can be absent or run in another pid namespace,
+#      so the fd scan, not the pid, is authoritative (#940 evidence);
+#   3. classifies each holder:
+#        our-tool  the holder's own command line, or any ancestor's, resolves
+#                  under this repository (a bin/ wrapper, a test, or an
+#                  op/flock child of one);
+#        foreign   anything else — reported, never signalled;
+#   4. without --recover: prints one evidence line per holder; exit 0 when
+#      the lock is free, exit 3 when any holder exists;
+#   5. with --recover: TERM, then KILL after a bounded wait, ONLY our-tool
+#      holders at least --older-than seconds old (default 120, the shared
+#      credential wait). Younger our-tool holders and every foreign holder
+#      are left alone and reported.
+#
+# Exit codes: 0 lock free or recovered; 2 usage or unsupported platform;
+# 3 holders remain (foreign, or our-tool but too young to reclaim).
+# Safety rules (issue #1002 plan, locked decision): never delete the lock
+# file, never signal a foreign holder, never signal this process or its own
+# ancestors. Part of docs/locks.md.
+set -uo pipefail
+
+SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+REPO_ROOT="${AI_LOCK_DOCTOR_REPO_ROOT:-$(cd "$(dirname "$SELF_PATH")/.." && pwd)}"
+
+recover=false
+older_than=120
+lockfile=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --recover) recover=true; shift ;;
+    --older-than)
+      [ $# -ge 2 ] || { printf 'ai-lock-doctor: --older-than needs a number of seconds\n' >&2; exit 2; }
+      older_than="$2"; shift 2 ;;
+    -h|--help) sed -n '2,30p' "$SELF_PATH"; exit 0 ;;
+    --*) printf 'ai-lock-doctor: unknown option: %s\n' "$1" >&2; exit 2 ;;
+    *) [ -z "$lockfile" ] || { printf 'ai-lock-doctor: exactly one lock file is expected\n' >&2; exit 2; }
+       lockfile="$1"; shift ;;
+  esac
+done
+case "$older_than" in ''|*[!0-9]*|0) printf 'ai-lock-doctor: --older-than must be a positive whole number of seconds\n' >&2; exit 2 ;; esac
+[ -n "$lockfile" ] || { printf 'usage: ai-lock-doctor [--recover] [--older-than N] <lockfile>\n' >&2; exit 2; }
+
+info(){ printf 'ai-lock-doctor: %s\n' "$*" >&2; }
+
+# Linux only: the whole tool reads /proc. On any other host, say so and let
+# the caller keep its original failure path.
+if [ ! -d /proc/self/fd ] || [ ! -e /proc/locks ] || [ ! -r /proc/locks ]; then
+  info "this host has no readable /proc; cannot diagnose $lockfile"
+  exit 2
+fi
+command -v flock >/dev/null 2>&1 || { info 'flock is unavailable on this host'; exit 2; }
+
+if [ ! -e "$lockfile" ]; then
+  info "lock file $lockfile does not exist; nothing to do"
+  exit 0
+fi
+if [ -L "$lockfile" ]; then
+  info "lock file $lockfile is a symlink; refusing to diagnose a linked path"
+  exit 2
+fi
+lock_id="$(stat -Lc '%d:%i' "$lockfile" 2>/dev/null)" || { info "cannot stat $lockfile"; exit 2; }
+lock_dev="${lock_id%%:*}"; lock_ino="${lock_id##*:}"
+
+# Normalise device numbers so stat's "8:3" matches /proc/locks' "fd:08:00003".
+norm(){
+  local n
+  case "$1" in ''|*[!0-9]*) printf '%s' "$1"; return ;; esac
+  n=$((10#$1))
+  printf '%d' "$n"
+}
+LOCK_DEV_N="$(norm "$lock_dev")"; LOCK_INO_N="$(norm "$lock_ino")"
+
+# Informational only: the /proc/locks pid is not trusted (#940).
+locks_pid=''
+if [ -r /proc/locks ]; then
+  while IFS=' ' read -r _ _ _ _ lpid lid _ _; do
+    [ -n "$lid" ] || continue
+    ldev="${lid%%:*}"; resto="${lid#*:}"; lino="${resto##*:}"
+    [ "$(norm "$ldev")" = "$LOCK_DEV_N" ] && [ "$(norm "$lino")" = "$LOCK_INO_N" ] || continue
+    locks_pid="$lpid"
+  done < /proc/locks
+fi
+if [ -n "$locks_pid" ]; then
+  info "/proc/locks reports pid $locks_pid for inode $lock_id (advisory; the fd scan decides)"
+else
+  info "/proc/locks has no entry for inode $lock_id; scanning every process's descriptors"
+fi
+
+# --- process facts -----------------------------------------------------------
+
+# proc_cmdline PID -> argv with NULs as spaces (empty for kernel threads).
+proc_cmdline(){ tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | cut -c1-160; }
+
+# proc_stat_field PID FIELD_INDEX (1-based, on the real stat numbering).
+proc_stat_field(){
+  local rest
+  rest="$(sed 's/^.*) //' "/proc/$2/stat" 2>/dev/null)" || return 1
+  [ -n "$rest" ] || return 1
+  awk -v f="$(( $1 - 2 ))" '{ print $f }' <<<"$rest"
+}
+proc_ppid(){ proc_stat_field 4 "$1"; }
+proc_start_ticks(){ proc_stat_field 22 "$1"; }
+
+Hertz="$(getconf CLK_TCK 2>/dev/null || echo 100)"
+BootEpoch="$(sed -n 's/^btime //p' /proc/stat 2>/dev/null | tr -d ' \r')"
+[ -n "$BootEpoch" ] || BootEpoch=0
+
+# proc_age_seconds PID -> whole seconds since process start.
+proc_age_seconds(){
+  local start now
+  start="$(proc_start_ticks "$1")" || return 1
+  case "$start" in ''|*[!0-9]*) return 1 ;; esac
+  now="$(date +%s)"
+  printf '%d' "$(( now - BootEpoch - start / Hertz ))"
+}
+
+# proc_is_our_tool PID -> 0 when the pid's own or an ancestor's command line
+# resolves under REPO_ROOT. Ancestors are walked (bounded) so an op/flock
+# child of one of our wrappers counts as ours; a reparented orphan with no
+# resolvable ancestor does not.
+path_is_repo(){
+  local resolved
+  case "$1" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  resolved="$(readlink -f "$1" 2>/dev/null)" || return 1
+  [ -n "$resolved" ] || return 1
+  case "$resolved" in
+    "$REPO_ROOT"|"$REPO_ROOT"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+proc_is_our_tool(){
+  local pid="$1" hop pid_now cmd tok
+  pid_now="$pid"
+  for hop in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    [ -n "$pid_now" ] || return 1
+    [ -d "/proc/$pid_now" ] || return 1
+    cmd="$(proc_cmdline "$pid_now")"
+    [ -n "$cmd" ] || return 1
+    while IFS= read -r tok; do
+      [ -n "$tok" ] || continue
+      case "$tok" in
+        /*) path_is_repo "$tok" && return 0 ;;
+        */*)
+          # A relative path only resolves against THAT process's cwd (a
+          # suite run as "bash tests/test-x.sh" from the repo root).
+          case "$tok" in ../*|./*) continue ;; esac
+          path_is_repo "/proc/$pid_now/cwd/$tok" && return 0
+          ;;
+      esac
+    done < <(tr ' ' '\n' <<<"$cmd")
+    [ "$pid_now" = 1 ] && return 1
+    pid_now="$(proc_ppid "$pid_now")"
+  done
+  return 1
+}
+
+# Never signal this process or its own ancestors.
+self_and_ancestors(){
+  local pid="$$" hop
+  for hop in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    printf '%s\n' "$pid"
+    [ "$pid" = 1 ] && return 0
+    pid="$(proc_ppid "$pid")" || return 0
+    [ -n "$pid" ] || return 0
+  done
+}
+declare -A PROTECTED_PIDS=()
+while IFS= read -r _p; do PROTECTED_PIDS["$_p"]=1; done < <(self_and_ancestors)
+
+# --- holder scan -------------------------------------------------------------
+
+# find_holders -> "pid" lines for every process holding an fd on the lock inode.
+find_holders(){
+  local fd target target_id tdev tino pid
+  while IFS= read -r fd; do
+    target="$(readlink "$fd" 2>/dev/null)" || continue
+    case "$target" in
+      'pipe:'*|'socket:'*|'anon_inode:'*) continue ;;
+    esac
+    target_id="$(stat -Lc '%d:%i' "$fd" 2>/dev/null)" || continue
+    tdev="${target_id%%:*}"; tino="${target_id##*:}"
+    [ "$(norm "$tdev")" = "$LOCK_DEV_N" ] && [ "$(norm "$tino")" = "$LOCK_INO_N" ] || continue
+    pid="${fd#/proc/}"; printf '%s\n' "${pid%%/*}"
+  done < <(find /proc/[0-9]*/fd -maxdepth 1 -name '[0-9]*' -printf '%p\n' 2>/dev/null | LC_ALL=C sort -u)
+}
+
+scan_once(){
+  local pid age klass line
+  HOLDERS_OUR=''; HOLDERS_FOREIGN=''; HOLDERS_YOUNG=''
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    age="$(proc_age_seconds "$pid" 2>/dev/null || echo '?')"
+    if [ -n "${PROTECTED_PIDS[$pid]:-}" ]; then klass=self
+    elif proc_is_our_tool "$pid"; then klass=our-tool
+    else klass=foreign; fi
+    line="holder pid=$pid class=$klass age=${age}s cmd=$(proc_cmdline "$pid")"
+    info "$line"
+    case "$klass" in
+      our-tool)
+        if [ "$age" = '?' ] || [ "$age" -ge "$older_than" ]; then
+          HOLDERS_OUR+="$pid"$'\n'
+        else
+          HOLDERS_YOUNG+="$pid"$'\n'
+        fi ;;
+      foreign) HOLDERS_FOREIGN+="$pid"$'\n' ;;
+      self) info "pid $pid is this doctor or its ancestor; never signalled" ;;
+    esac
+  done < <(find_holders | LC_ALL=C sort -un)
+}
+
+scan_once
+if [ -z "${HOLDERS_OUR}${HOLDERS_FOREIGN}${HOLDERS_YOUNG}" ]; then
+  info "no live holder holds inode $lock_id; the lock is free"
+  exit 0
+fi
+
+if [ "$recover" = false ]; then
+  info "diagnose only: rerun with --recover to clear our-tool holders at least ${older_than}s old"
+  exit 3
+fi
+
+# --- recovery: TERM then KILL, our-tool holders of age only -------------------
+
+kill_holder(){
+  local pid="$1" waited
+  kill -TERM "$pid" 2>/dev/null || { info "TERM failed for pid $pid (already gone?)"; return 0; }
+  for waited in 1 2 3 4 5 6 7 8; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 1
+  done
+  info "pid $pid survived TERM for 8s; sending KILL"
+  kill -KILL "$pid" 2>/dev/null || true
+  for waited in 1 2 3; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 1
+  done
+  info "pid $pid still present after KILL; it may be a zombie or unkillable"
+  return 1
+}
+
+if [ -n "$HOLDERS_FOREIGN" ]; then
+  info "foreign holders remain; they are NEVER signalled — report and fail loudly"
+fi
+if [ -n "$HOLDERS_YOUNG" ]; then
+  info "our-tool holders younger than ${older_than}s are left alone"
+fi
+recovered_all=0
+while IFS= read -r pid; do
+  [ -n "$pid" ] || continue
+  info "recovering our-tool holder pid=$pid (TERM, then KILL)"
+  kill_holder "$pid" || recovered_all=1
+done <<<"$HOLDERS_OUR"
+
+# Re-scan: the lock is only free when every fd on the inode is gone.
+scan_once
+if [ -n "$HOLDERS_FOREIGN" ] || [ -n "$HOLDERS_YOUNG" ] || [ -n "$HOLDERS_OUR" ]; then
+  info "holders remain after recovery: foreign and young holders are never signalled"
+  exit 3
+fi
+[ "$recovered_all" -eq 0 ] || { info "at least one our-tool holder could not be terminated"; exit 3; }
+info "recovered: no process holds inode $lock_id any more; the lock is free"
+exit 0

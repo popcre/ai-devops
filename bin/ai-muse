@@ -473,8 +473,17 @@ read_key_from_op(){
     credential_home="${credential_state%/.local/state/ai-devops/muse}"
     candidate="$credential_home/.config/ai-devops/op-refresh.lock"
     mkdir -p "$(dirname "$candidate")" || die 'could not create the shared 1Password lock directory.'
-    MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" flock --close -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')" \
-      || die 'Muse key refresh failed or the shared 1Password lock is busy; no key was stored.'
+    muse_doctor() { # clear this toolkit's own stuck holders via ai-lock-doctor (#1002)
+      local doctor
+      doctor="$(dirname "$(readlink -f "$SELF")")/ai-lock-doctor"
+      [ -x "$doctor" ] || doctor="$(command -v ai-lock-doctor 2>/dev/null || true)"
+      [ -n "$doctor" ] || return 0
+      "$doctor" --recover --older-than "$budget" "$candidate" || true
+    }
+    MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" flock --close -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')" || {
+      muse_doctor
+      MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" flock --close -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"
+    } || die 'Muse key refresh failed or the shared 1Password lock is busy; no key was stored.'
     [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
     return
   fi
