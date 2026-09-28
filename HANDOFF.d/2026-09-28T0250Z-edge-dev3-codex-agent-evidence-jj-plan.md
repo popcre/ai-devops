@@ -22,7 +22,7 @@ Read current ai-devops/shared-db rules, existing plans and local Git history; re
 
 ## 3. Current state and exact next action
 
-At plan creation, ai-devops `origin/main` was `3d509f47a3467c220e8db523016d28b8431aee65`; shared-db's locally fetched `origin/main` was `7fab5c716eb111a10c865b99e09b5ad94ff092b2`. Refresh both, because these are moving refs. The ai-devops working branch is `codex/agent-evidence-jj-plan` in its isolated worktree. Before implementing Step 0, verify this planning PR was merged and read plan STATUS §9. Step 0's result is a dated, reproducible baseline and an ownership map; it makes no database writes.
+At plan creation, ai-devops `origin/main` was `3d509f47a3467c220e8db523016d28b8431aee65`; shared-db's locally fetched `origin/main` was `7fab5c716eb111a10c865b99e09b5ad94ff092b2`. Those are historical refs. The plan landed via [PR #907](https://github.com/popcre/ai-devops/pull/907) and its README discovery link via [PR #908](https://github.com/popcre/ai-devops/pull/908). Other sessions subsequently completed the baseline [#910](https://github.com/popcre/ai-devops/issues/910) and disposable Jujutsu pilot [#911](https://github.com/popcre/ai-devops/issues/911). The pilot reported **no-go for rollout** because `jj status` automatically recorded a harmless untracked file and added workspaces lacked `.git` for existing tools. The next independent child is [#912](https://github.com/popcre/ai-devops/issues/912), the measured adoption decision and GitHub continuity check. Refresh both repositories and read the plan STATUS before action; do not repeat #910 or #911.
 
 ## 4. Evidence and non-obvious findings
 
@@ -34,7 +34,7 @@ Do not repeat the merged ai-devops #639 repair. Do not fork shared-db's Step 1 o
 
 ## 6. Remaining steps and proof
 
-First: finish and merge this documentation-only plan through the current ai-devops branch/PR route; verify the merged SHA on GitHub. Then the next session performs plan Step 0 under #903 and updates the plan STATUS with the report link. Existing shared-db Step 1 stays with its own non-orchestrator issue; the parent records its live outcome rather than duplicating a PR. Subsequent children address only demonstrated gaps, then run a disposable Jujutsu comparison and publish a go/no-go. Each plan §9 step names files and a verification gate. No child may inherit a prior issue's work type or database-object claim.
+The planning PRs, baseline and disposable pilot are complete. The next session takes only #912: reconcile the two published reports, document the no-go and GitHub continuity result, update parent #903 and the plan STATUS, then stop. The baseline found insufficient evidence to open separate Step 2 or 3 fixes. Shared-db Step 1 remains with its existing non-orchestrator owner; do not duplicate its PR or make it a prerequisite for #912. The exact acceptance and rollback gates are in plan §9 Step 5. No child may inherit a prior issue's work type or database-object claim.
 
 ## 7. Constraints and access
 
@@ -42,7 +42,7 @@ Use fresh current-upstream worktrees; canonical checkouts are landing-only. Run 
 
 ## 8. Delivery and verification state
 
-Planning files and router entry were drafted in the isolated ai-devops worktree. At the time this handoff was written they were not yet committed, pushed, reviewed, merged or installed; the closing session must update this section before shipping. Issue #903 exists. Implementation and pilot are unstarted. There is no deployable app artifact in this documentation-only change. Successful plan delivery means the PR is merged and these files are present on `origin/main`; successful implementation requires the plan's per-child checks and GitHub code continuity.
+Planning files and router entry were committed and pushed as `e5621f96`, merged by PR #907 at `55083c43`; the README route was committed as `e1d6ccd9` and merged by PR #908 at `662e5d29`. Both PRs were verified merged, and the plan and handoff were verified on `origin/main`. The document-reachability check passed after the README link. Parent #903 exists with native children #910 (closed), #911 (closed) and #912 (open). Later sessions published the baseline via PR #921 and the no-go pilot via PR #924; see the plan STATUS for their artifacts. This session performed no implementation code, database mutation, production deployment or fleet installation. The next session verifies #912's outcome rather than inferring completion from the two closed children.
 
 ## 9. Risks, rollback and final self-audit
 
