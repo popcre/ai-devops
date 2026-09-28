@@ -66,7 +66,7 @@ usage: ai-task-gates <command> [options]
         Recompute the change set and decide whether ACTION may start.
   authorize-install --target-head SHA --installed-checkout PATH
         --installed-launcher PATH --review-report PATH --owner-request TEXT
-        [--legacy-migration|--first-install|--recover-launchers]
+        [--legacy-migration|--first-install|--recover-launchers|--stale-manifest-recovery]
         Issue one-use authority for an exact reviewed toolkit release.
   install-verify --phase preflight|resume|finalize --target-head SHA
         --installed-checkout PATH --installed-launcher /usr/local/bin/ai-task-gates
@@ -891,6 +891,16 @@ linux_review_authority(){
       [ "$old" = "$target" ] && [ -z "$recorded_manifest" ] && [ "$first_install" = false ] &&
         [ "$(sha256sum "$checkout/bin/ai-task-gates" | cut -d' ' -f1)" = "$(jq -r .installed_source_sha256 "$auth")" ] || return 1
     fi
+    if [ "$(jq -r '.stale_manifest_recovery // false' "$auth")" = true ]; then
+      local recorded_sha actual_sha old_source_hash
+      recorded_sha="$(jq -r '.linux_manifest_recorded_sha // empty' "$auth")"
+      [[ "$recorded_sha" =~ ^[0-9a-f]{40}$ ]] && [ "$recorded_sha" != "$old" ] || return 1
+      git -C "$checkout" merge-base --is-ancestor "$recorded_sha" "$old" 2>/dev/null || return 1
+      actual_sha="$(linux_manifest_receipt "$checkout" "$launcher" "$manifest")" || return 1
+      [ "$actual_sha" = "$recorded_sha" ] && [ -n "$recorded_manifest" ] || return 1
+      old_source_hash="$(git -C "$checkout" show "$old:bin/ai-task-gates" 2>/dev/null | sha256sum | cut -d' ' -f1)"
+      [ "$old_source_hash" = "$(jq -r .installed_source_sha256 "$auth")" ] || return 1
+    fi
     if [ "$first_install" = true ]; then
       [ ! -e "$launcher" ] && [ ! -L "$launcher" ] && [ -z "$recorded_link" ] && [ -z "$recorded_manifest" ] || return 1
     else
@@ -904,6 +914,9 @@ linux_review_authority(){
     if [ -n "$recorded_manifest" ]; then
       [ -f "$manifest" ] &&
         [ "$(sha256sum "$manifest" | cut -d' ' -f1)" = "$recorded_manifest" ] || return 1
+      if [ "$(jq -r '.stale_manifest_recovery // false' "$auth")" != true ]; then
+        [ "$(linux_manifest_receipt "$checkout" "$launcher" "$manifest")" = "$old" ] || return 1
+      fi
     else
       [ ! -e "$manifest" ] || return 1
     fi
@@ -920,6 +933,17 @@ linux_review_authority(){
   fi
   if [ "$(jq -r .legacy_migration "$auth")" = true ]; then
     grep -Fq 'legacy-managed-launcher-refresh' "$report" || return 1
+  fi
+  if [ "$(jq -r '.stale_manifest_recovery // false' "$auth")" = true ]; then
+    grep -Fq 'stale-linux-manifest-recovery' "$report" || return 1
+    local stale_sha stale_manifest_hash stale_source_hash
+    stale_sha="$(jq -r .linux_manifest_recorded_sha "$auth")"
+    stale_manifest_hash="$(jq -r .linux_manifest_sha256 "$auth")"
+    stale_source_hash="$(jq -r .installed_source_sha256 "$auth")"
+    grep -Fqx "| stale manifest SHA | \`$stale_sha\` |" "$report" || return 1
+    grep -Fqx "| stale manifest hash | \`$stale_manifest_hash\` |" "$report" || return 1
+    grep -Fqx "| live installed SHA | \`$old\` |" "$report" || return 1
+    grep -Fqx "| live gate hash | \`$stale_source_hash\` |" "$report" || return 1
   fi
   [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$candidate")" = "$source_digest" ] || return 1
   review_root="$(git -C "$(dirname "$report")" rev-parse --show-toplevel 2>/dev/null)" || return 1
@@ -942,7 +966,7 @@ linux_review_authority(){
 
 cmd_install_verify(){
   local phase='' target='' installed='' launcher='' caller_pinned=0 owner_request='' installed_head candidate_root common origin_url
-  local manifest='/etc/ai-devops/install-manifest.tsv' receipt='' classes='' protected=0 auth_dir issued pending ordinary completion completed_head='' auth old cls protected_flag fixture=0 fixture_root='' intent_state='' declared_installation=''
+  local manifest='/etc/ai-devops/install-manifest.tsv' receipt='' classes='' protected=0 auth_dir issued pending ordinary completion completed_head='' auth old cls protected_flag fixture=0 fixture_root='' intent_state='' declared_installation='' class_base='' stale_recovery=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --phase) need_value "$@"; phase="$2"; shift 2 ;;
@@ -1051,6 +1075,12 @@ cmd_install_verify(){
     [ "$installed_head" = "$target" ] || blocked 'ai-task-gates: STOP. Installed checkout is not at pinned target.'
   fi
   old="${completed_head:-${receipt:-$installed_head}}"
+  auth="$pending"
+  if [ "$phase" = preflight ] && [ -f "$issued" ]; then auth="$issued"; fi
+  if [ -f "$auth" ] && [ "$(jq -r '.stale_manifest_recovery // false' "$auth" 2>/dev/null)" = true ]; then
+    stale_recovery=1
+    old="$(jq -r .installed_head "$auth")"
+  fi
   if [ "$phase" = resume ] && [ -f "$pending" ]; then
     old="$(jq -r .installed_head "$pending")"
   elif [ "$phase" = resume ] && [ -f "$ordinary" ]; then
@@ -1063,7 +1093,9 @@ cmd_install_verify(){
     blocked 'ai-task-gates: STOP. Installation baseline differs from last completed release.'
   fi
   git -C "$installed" merge-base --is-ancestor "$old" "$target" 2>/dev/null || blocked 'ai-task-gates: STOP. Installed receipt is not an ancestor of target.'
-  classes="$(install_release_classes "$old" "$target" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Could not classify Linux release.'
+  class_base="$old"
+  if [ "$stale_recovery" -eq 1 ]; then class_base="$receipt"; fi
+  classes="$(install_release_classes "$class_base" "$target" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Could not classify Linux release.'
   local protected_flag
   while IFS=$'\t' read -r cls protected_flag; do
     [ -n "$cls" ] || continue
@@ -1072,14 +1104,15 @@ cmd_install_verify(){
       protected=1
     fi
   done <<< "$classes"
-  if [ -z "$receipt" ]; then protected=1; fi
+  if [ -z "$receipt" ] || [ "$stale_recovery" -eq 1 ]; then protected=1; fi
+  if [ -n "$receipt" ] && [ "$receipt" != "$installed_head" ] && [ -z "$completed_head" ] && [ "$stale_recovery" -ne 1 ] && [ ! -e "$pending" ] && [ ! -e "$ordinary" ]; then
+    blocked 'ai-task-gates: STOP. Installed Linux manifest is stale; use reviewed stale-manifest recovery.'
+  fi
   if [ "$phase" = preflight ]; then
     [ "$declared_installation" = installation ] || blocked 'ai-task-gates: STOP. Linux update needs a declared installation task.'
   fi
   if [ "$protected" -eq 1 ]; then
     [ "$phase" != preflight ] || [ "$caller_pinned" -eq 1 ] || blocked 'ai-task-gates: STOP. Protected Linux update requires caller-pinned target.'
-    auth="$pending"
-    if [ "$phase" = preflight ] && [ -f "$issued" ]; then auth="$issued"; fi
     [ -f "$auth" ] || blocked 'ai-task-gates: STOP. Reviewed Linux install authority is missing.'
     linux_review_authority "$auth" "$old" "$target" "$installed" "$launcher" "$candidate_root" "$phase" "$manifest" || blocked 'ai-task-gates: STOP. Reviewed Linux install authority is stale or changed.'
     if [ "$phase" = preflight ] && [ "$auth" = "$issued" ]; then mv -- "$issued" "$pending" || blocked 'ai-task-gates: STOP. Could not reserve one-use install authority.'; fi
@@ -1102,7 +1135,7 @@ cmd_install_verify(){
 }
 
 cmd_authorize_install(){
-  local target_head="" installed_checkout="" installed_launcher="" review_report="" owner_request="" legacy_migration=0 first_install=0 recover_launchers=0
+  local target_head="" installed_checkout="" installed_launcher="" review_report="" owner_request="" legacy_migration=0 first_install=0 recover_launchers=0 stale_manifest_recovery=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --target-head) need_value "$@"; target_head="$2"; shift 2 ;;
@@ -1113,6 +1146,7 @@ cmd_authorize_install(){
       --legacy-migration) legacy_migration=1; shift ;;
       --first-install) first_install=1; shift ;;
       --recover-launchers) recover_launchers=1; shift ;;
+      --stale-manifest-recovery) stale_manifest_recovery=1; shift ;;
       *) die "unknown option for authorize-install: $1" ;;
     esac
   done
@@ -1127,8 +1161,8 @@ cmd_authorize_install(){
   [[ "$start_head" =~ ^[0-9a-f]{40}$ ]] || blocked 'ai-task-gates: STOP. Installation task lacks recorded pre-update HEAD.'
   [[ "$target_head" =~ ^[0-9a-f]{40}$ ]] && [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] || blocked 'ai-task-gates: STOP. Candidate HEAD differs from requested target.'
   [ -n "$owner_request" ] && [ -n "$review_report" ] && [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Install authority needs owner request, exact review, checkout, and launcher.'
-  [ $((legacy_migration + first_install + recover_launchers)) -le 1 ] || blocked 'ai-task-gates: STOP. Choose one installation migration mode.'
-  if [ "$start_head" = "$target_head" ] && [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ]; then
+  [ $((legacy_migration + first_install + recover_launchers + stale_manifest_recovery)) -le 1 ] || blocked 'ai-task-gates: STOP. Choose one installation migration mode.'
+  if [ "$start_head" = "$target_head" ] && [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then
     blocked 'ai-task-gates: STOP. Empty release needs an installed receipt or explicit reviewed legacy migration.'
   fi
   if [ "$start_head" != "$target_head" ] && [ "$legacy_migration" -eq 1 ]; then
@@ -1138,7 +1172,7 @@ cmd_authorize_install(){
   [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse refs/remotes/origin/main 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate is not exact fetched origin/main.'
   [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout is dirty.'
   prepare "$start_head" ""
-  if [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ]; then
+  if [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then
     [ "$OBSERVED_CLASS" = reviewer-safety ] || blocked "ai-task-gates: STOP. Release class is '$OBSERVED_CLASS'; use its own gate."
   fi
   printf '%s\n' "$(merged_gate "$IDENTITY" reviewer-safety)" | grep -qx $'required\treviewed-toolkit-installation' || blocked 'ai-task-gates: STOP. Repository lacks reviewed toolkit install opt-in.'
@@ -1191,7 +1225,24 @@ cmd_authorize_install(){
   elif [ -L "$installed_launcher" ]; then
     [ -f "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Installed launcher missing.'
     [ "$(readlink -f "$installed_launcher")" = "$(readlink -f "$expected_source")" ] || blocked 'ai-task-gates: STOP. Installed launcher routes elsewhere.'
-    if [ "$legacy_migration" -eq 1 ]; then
+    if [ "$stale_manifest_recovery" -eq 1 ]; then
+      [ "$installed_launcher" = /usr/local/bin/ai-task-gates ] || blocked 'ai-task-gates: STOP. Stale manifest recovery is Linux-only.'
+      local manifest_recorded_sha
+      manifest_recorded_sha="$(linux_manifest_receipt "$installed_root" "$installed_launcher" /etc/ai-devops/install-manifest.tsv)" || blocked 'ai-task-gates: STOP. Stale manifest cannot be verified against its committed source.'
+      [ "$manifest_recorded_sha" != "$installed_head" ] || blocked 'ai-task-gates: STOP. Manifest is current; stale recovery is inapplicable.'
+      git -C "$installed_root" merge-base --is-ancestor "$manifest_recorded_sha" "$installed_head" 2>/dev/null || blocked 'ai-task-gates: STOP. Manifest source is not ancestor of installed HEAD.'
+      local stale_classes stale_class stale_protected
+      stale_classes="$(install_release_classes "$manifest_recorded_sha" "$target_head" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Cannot classify stale-manifest release range.'
+      while IFS=$'\t' read -r stale_class stale_protected; do
+        [ -n "$stale_class" ] || continue
+        if [ "$stale_protected" = true ] && [ "$stale_class" != reviewer-safety ]; then
+          blocked "ai-task-gates: STOP. Stale manifest crosses stronger '$stale_class' changes."
+        fi
+      done <<< "$stale_classes"
+      local stale_manifest_hash stale_live_hash
+      stale_manifest_hash="$(sha256sum /etc/ai-devops/install-manifest.tsv | cut -d' ' -f1)"
+      stale_live_hash="$(sha256sum "$expected_source" | cut -d' ' -f1)"
+    elif [ "$legacy_migration" -eq 1 ]; then
       [ ! -e /etc/ai-devops/install-manifest.tsv ] || blocked 'ai-task-gates: STOP. Linux legacy migration requires an absent install manifest.'
     elif [ "$installed_launcher" = /usr/local/bin/ai-task-gates ]; then
       toolkit_source_receipt "$installed_root" "$installed_launcher" "$installed_head" /etc/ai-devops/install-manifest.tsv || blocked 'ai-task-gates: STOP. Linux update requires the installed source receipt; use reviewed same-source migration first.'
@@ -1224,6 +1275,13 @@ cmd_authorize_install(){
   if [ "$recover_launchers" -eq 1 ]; then
     grep -Fq 'partial-managed-launcher-recovery' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve partial managed launcher recovery.'
   fi
+  if [ "$stale_manifest_recovery" -eq 1 ]; then
+    grep -Fq 'stale-linux-manifest-recovery' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve stale Linux manifest recovery.'
+    grep -Fqx "| stale manifest SHA | \`$manifest_recorded_sha\` |" "$report_real" &&
+      grep -Fqx "| stale manifest hash | \`$stale_manifest_hash\` |" "$report_real" &&
+      grep -Fqx "| live installed SHA | \`$installed_head\` |" "$report_real" &&
+      grep -Fqx "| live gate hash | \`$stale_live_hash\` |" "$report_real" || blocked 'ai-task-gates: STOP. Review did not bind exact stale manifest and live source evidence.'
+  fi
   reviewed_digest="$(awk -F'|' '$2 ~ /source digest/ {gsub(/[^0-9a-f]/,"",$3); print $3}' "$report_real")"
   actual_digest="$("$SCRIPT_DIR/ai-review-sandbox" digest "$candidate_root")" || blocked 'ai-task-gates: STOP. Candidate source digest unavailable.'
   [ -n "$reviewed_digest" ] && [ "$reviewed_digest" = "$actual_digest" ] || blocked 'ai-task-gates: STOP. Review source digest differs from candidate.'
@@ -1244,7 +1302,7 @@ cmd_authorize_install(){
   local receipt_checkout="$installed_root" receipt_launcher="$installed_launcher" receipt_report="$report_real"
   local launcher_hash="" cmd_hash="" source_hash="" manifest_hash="" linux_link_target=""
   local inventory_json='[]'
-  if [ "$legacy_migration" -eq 1 ] || [ "$first_install" -eq 1 ] || [ "$recover_launchers" -eq 1 ]; then
+  if [ "$legacy_migration" -eq 1 ] || [ "$first_install" -eq 1 ] || [ "$recover_launchers" -eq 1 ] || [ "$stale_manifest_recovery" -eq 1 ]; then
     source_hash="$(sha256sum "$expected_source" | cut -d' ' -f1)"
   fi
   if [ "$legacy_migration" -eq 1 ]; then
@@ -1264,7 +1322,9 @@ cmd_authorize_install(){
     linux_link_target="$(readlink "$installed_launcher")" || blocked 'ai-task-gates: STOP. Installed Linux launcher target unavailable.'
     if [ -f /etc/ai-devops/install-manifest.tsv ]; then
       manifest_hash="$(sha256sum /etc/ai-devops/install-manifest.tsv | cut -d' ' -f1)" || blocked 'ai-task-gates: STOP. Installed Linux manifest hash unavailable.'
-      toolkit_source_receipt "$installed_root" "$installed_launcher" "$installed_head" /etc/ai-devops/install-manifest.tsv || blocked 'ai-task-gates: STOP. Installed Linux manifest does not attest the pre-update source.'
+      if [ "$stale_manifest_recovery" -ne 1 ]; then
+        toolkit_source_receipt "$installed_root" "$installed_launcher" "$installed_head" /etc/ai-devops/install-manifest.tsv || blocked 'ai-task-gates: STOP. Installed Linux manifest does not attest the pre-update source.'
+      fi
     fi
   fi
   if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then
@@ -1278,9 +1338,9 @@ cmd_authorize_install(){
   jq -nc --arg target "$target_head" --arg base "$start_head" --arg checkout "$receipt_checkout" \
     --arg launcher "$receipt_launcher" --arg policy "$policy_digest" --arg source "$reviewed_digest" \
     --arg report "$receipt_report" --arg report_hash "$report_hash" --arg request "$owner_request" \
-    --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" \
+    --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson stale "$stale_manifest_recovery" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" --arg manifest_recorded_sha "${manifest_recorded_sha:-}" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,owner_request:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_path.tmp" \
+    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,owner_request:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_path.tmp" \
     && chmod 0600 "$auth_path.tmp" && mv -f "$auth_path.tmp" "$auth_path" || blocked 'ai-task-gates: STOP. Could not write install authority.'
   printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$start_head"
 }

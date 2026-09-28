@@ -138,3 +138,48 @@ expect_ok 'legacy symlink migration reserves reviewed authority' gate preflight 
 expect_ok 'legacy symlink migration resumes on same commit' gate resume "$TMP/installed" "$protected"
 manifest "$protected"
 expect_ok 'legacy symlink migration finalizes with new receipt' gate finalize "$TMP/installed" "$protected"
+
+# A historical manifest can lag the live checkout after an earlier unguarded
+# update. It must be reviewed as a distinct recovery operation covering the
+# full manifest-to-target range and the live source bytes.
+rm -f "$TMP/state/install-completions/last.json"
+printf '# changed gate bytes\n' >> "$TMP/candidate/bin/ai-task-gates"
+git -C "$TMP/candidate" add bin/ai-task-gates
+git -C "$TMP/candidate" commit -qm drifted-gate-source
+drifted="$(git -C "$TMP/candidate" rev-parse HEAD)"
+git -C "$TMP/candidate" push -q origin HEAD:main
+git -C "$TMP/installed" fetch -q origin
+git -C "$TMP/installed" merge -q --ff-only "$drifted"
+expect_stop 'stale manifest without reviewed recovery stops' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
+git -C "$TMP/installed" worktree add -q --detach "$TMP/drift-reviewed" "$drifted"
+mkdir -p "$TMP/drift-reviewed/.ai/reviews"
+drift_digest="$("$TMP/candidate/bin/ai-review-sandbox" digest "$TMP/candidate")"
+drift_report="$TMP/drift-reviewed/.ai/reviews/approved.md"
+manifest_hash="$(sha256sum "$TMP/etc/install-manifest.tsv" | cut -d' ' -f1)"
+live_hash="$(sha256sum "$TMP/installed/bin/ai-task-gates" | cut -d' ' -f1)"
+printf '# Review\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n| stale manifest SHA | `%s` |\n| stale manifest hash | `%s` |\n| live installed SHA | `%s` |\n| live gate hash | `%s` |\n\nApproved stale-linux-manifest-recovery.\n\n## Verdict\nAPPROVE\n' \
+  "$drifted" "$drift_digest" "$protected" "$manifest_hash" "$drifted" "$live_hash" > "$drift_report"
+drift_report_hash="$(sha256sum "$drift_report" | cut -d' ' -f1)"
+drift_key="$("$TMP/drift-reviewed/bin/ai-review-lifecycle" identity "$TMP/drift-reviewed" | jq -r .repository_key)"
+mkdir -p "$AI_REVIEW_LIFECYCLE_DIR/runs/$drift_key/codex/codex"
+jq -nc --arg h "$drifted" --arg d "$drift_digest" --arg p "$drift_report" --arg s "$drift_report_hash" \
+  '{status:"completed",verdict:"APPROVE",stale:false,head:$h,source_digest:$d,report_path:$p,report_sha256:$s}' > "$AI_REVIEW_LIFECYCLE_DIR/runs/$drift_key/codex/codex/approved.json"
+drift_policy="$(printf '%s\n%s\n' "$(git -C "$TMP/candidate" rev-parse "$drifted:config/task-gates.json")" "$(git -C "$TMP/candidate" rev-parse "$drifted:.ai-devops/task-gates.json")" | sha256sum | cut -d' ' -f1)"
+drift_auth="$TMP/state/install-authorizations/$drifted.json"
+jq -nc --arg target "$drifted" --arg recorded "$protected" --arg path "$TMP/installed" --arg launcher "$TMP/bin/ai-task-gates" \
+  --arg policy "$drift_policy" --arg digest "$drift_digest" --arg report "$drift_report" --arg report_hash "$drift_report_hash" \
+  --arg manifest_hash "$manifest_hash" --arg link "$TMP/installed/bin/ai-task-gates" --arg live_hash "$live_hash" \
+  '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed manifest recovery",legacy_migration:false,first_install:false,recover_launchers:false,stale_manifest_recovery:true,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$recorded,linux_link_target:$link,installed_source_sha256:$live_hash}' > "$drift_auth"
+cp "$drift_auth" "$TMP/drift-auth-original"
+jq '.stale_manifest_recovery=false' "$TMP/drift-auth-original" > "$drift_auth"
+expect_stop 'stale recovery cannot be presented as ordinary upgrade' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
+jq '.installed_source_sha256="0000000000000000000000000000000000000000000000000000000000000000"' "$TMP/drift-auth-original" > "$drift_auth"
+expect_stop 'stale recovery refuses mismatched live source hash' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
+cp "$TMP/drift-auth-original" "$drift_auth"
+printf '# tampered manifest\n' >> "$TMP/etc/install-manifest.tsv"
+expect_stop 'stale recovery refuses modified manifest bytes' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
+manifest "$protected"
+expect_ok 'reviewed stale recovery reserves exact host state' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
+expect_ok 'reviewed stale recovery resumes despite prior source drift' gate resume "$TMP/installed" "$drifted"
+manifest "$drifted"
+expect_ok 'reviewed stale recovery finalizes new aligned receipt' gate finalize "$TMP/installed" "$drifted"
