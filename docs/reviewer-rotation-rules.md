@@ -95,7 +95,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
     when local `ai-review-preflight` reports it usable; Windows reports
     `unsupported-platform`, so no Windows assignment is made. The platform
     override is available only when `AI_STEPFUN_TEST_MODE=1` for offline tests.
-    The 2026-09-27 membership change mirrors shared-db PR #3556's allocator row
+    The 2026-09-27 membership change mirrors shared-db PR #3657's allocator row (it superseded #3556)
     `stepfun-step-5-preview`; that pull request must land before this mirror.
 
 12. **Prefer other reviewers before Grok.** Owner instruction, 2026-09-27: StepFun
@@ -104,5 +104,5 @@ allocator but stayed registered here, and a session spent an hour trying it.
     the exact review. A reviewer that failed, lacks local support, conflicts
     with the orchestrator, or already holds another slot for this head remains
     excluded by the existing safety checks. Preference never bypasses them.
-    The ordering is implemented and tested in shared-db PR #3593; this repository
+    The ordering is implemented and tested in shared-db PR #3593 (issue #3592), still open; until it lands the live allocator does not apply it. This repository
     mirrors the policy and does not allocate governed shared-db reviewers.
