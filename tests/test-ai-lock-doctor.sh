@@ -16,6 +16,31 @@ result(){
 cleanup(){ kill "$@" 2>/dev/null || true; }
 trap 'rm -rf "$TMP"' EXIT
 
+# On failure, show WHY: the doctor's verdict plus the /proc facts the case
+# was built on (bounded). Offline lane only; nothing here is a secret — the
+# fixtures are all this suite's own processes.
+dump_case(){
+  local label="$1" out="$2"; shift 2
+  printf '  ---- %s diagnostics ----\n' "$label" >&2
+  [ -f "$out" ] && sed -n '1,25p' "$out" >&2
+  local p
+  for p in "$@"; do
+    [ -n "$p" ] || continue
+    kill -0 "$p" 2>/dev/null || { printf '  pid %s: gone\n' "$p" >&2; continue; }
+    printf '  pid %s: cmdline=<%s> ppid/state/start=<%s> fds=<%s>\n' "$p" \
+      "$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | cut -c1-80)" \
+      "$(awk '{print $4, $3, $22}' "/proc/$p/stat" 2>/dev/null)" \
+      "$(ls "/proc/$p/fd" 2>/dev/null | tr '\n' ' ')" >&2
+  done
+  printf '  /proc/locks (first 20):\n' >&2
+  sed -n '1,20p' /proc/locks >&2
+  printf '  lock inode: %s  btime=%s hertz=%s now=%s\n' \
+    "$(stat -Lc '%d:%i' "$lock" 2>/dev/null)" \
+    "$(sed -n 's/^btime //p' /proc/stat 2>/dev/null)" \
+    "$(getconf CLK_TCK 2>/dev/null)" "$(date +%s)" >&2
+  printf '  ---- end diagnostics ----\n' >&2
+}
+
 # --- always: usage, executability, and platform refusal ---------------------
 
 # The tool must be committed executable: install.sh links only executable
@@ -129,6 +154,7 @@ if [ -n "$daemon_pid" ] && ! "$DOCTOR" "$lock" >"$TMP/out4" 2>&1 && grep -q "hol
   result pass 'a detached fd holder is found by inode and classified foreign'
 else
   result fail 'a detached fd holder is found by inode and classified foreign'
+  dump_case 'case4 detached fd holder' "$TMP/out4" "$daemon_pid"
 fi
 kill "$daemon_pid" 2>/dev/null || true; wait "$daemon_spawn" 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$daemon_pid" 2>/dev/null || break; sleep 0.2; done
@@ -156,6 +182,7 @@ if [ -n "$foreign_pid" ] && ! "$DOCTOR" --recover --older-than 1 "$lock" >"$TMP/
   result pass 'a foreign holder survives --recover and fails loudly'
 else
   result fail 'a foreign holder survives --recover and fails loudly'
+  dump_case 'case2 foreign holder' "$TMP/out5" "$foreign_pid"
 fi
 kill "$foreign_pid" 2>/dev/null || true; wait "$foreign_spawn" 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; done
@@ -186,6 +213,7 @@ if "$DOCTOR" --recover --older-than 2 "$lock" >"$TMP/out7" 2>&1 && grep -q 'reco
   result pass 'a live our-tool holder of age is TERM/KILLed and the lock is freed'
 else
   result fail 'a live our-tool holder of age is TERM/KILLed and the lock is freed'
+  dump_case 'case1 our-tool holder of age' "$TMP/out7" "$stuck_holder"
 fi
 elapsed=$(( $(date +%s) - start ))
 [ "$elapsed" -lt 120 ] && result pass "recovery completed in ${elapsed}s (under the 2-minute gate)" \
@@ -217,6 +245,7 @@ if grep -q "holder pid=$blocked_waiter class=waiter" "$TMP/out8" \
 else
   kill "$blocked_waiter" 2>/dev/null || true; wait "$blocked_waiter" 2>/dev/null || true
   result fail 'a kernel-proven blocked waiter is never signalled and finishes cleanly'
+  dump_case 'case6 blocked waiter' "$TMP/out8" "$stuck_waiter_case_holder" "$blocked_waiter"
 fi
 kill "$stuck_waiter_case_holder" 2>/dev/null || true; wait "$stuck_waiter_case_holder" 2>/dev/null || true
 for _ in 1 2 3 4 5; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; done
