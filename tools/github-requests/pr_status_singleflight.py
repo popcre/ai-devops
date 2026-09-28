@@ -37,6 +37,61 @@ def windows_acl(mode, path):
         return False
 
 
+def unix_private(path, kind, *, owner=None):
+    """Accept only our own private inode; never follow a substituted symlink."""
+    try:
+        info = os.lstat(path) if owner is None else os.fstat(owner)
+        wanted = stat.S_ISDIR if kind == "directory" else stat.S_ISREG
+        return (wanted(info.st_mode) and info.st_uid == os.geteuid()
+                and not info.st_mode & 0o077 and (kind == "directory" or info.st_nlink == 1))
+    except OSError:
+        return False
+
+
+def unix_prepare_parent(path):
+    """Build missing private parents only below an unreplaceable ancestor."""
+    path = path.absolute()
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        if part == "..":
+            return False
+        try:
+            info = os.lstat(current)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid not in {0, os.geteuid()}:
+                return False
+            # A sticky root-owned public parent (for example /tmp) protects
+            # the user's private child from replacement by another user.
+            public_sticky = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+            if info.st_mode & 0o022 and not public_sticky:
+                return False
+            current = current / part
+            if not current.exists():
+                current.mkdir(mode=0o700)
+        except OSError:
+            return False
+    try:
+        info = os.lstat(current)
+        return (stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+                and not info.st_mode & 0o022)
+    except OSError:
+        return False
+
+
+def read_private_cache(path):
+    """Read one verified Unix inode, without following a swapped pathname."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(descriptor, "rb") as file:
+            if not unix_private(path, "file", owner=file.fileno()):
+                return None
+            info = os.fstat(file.fileno())
+            if info.st_size > 1048576:
+                return None
+            return info, file.read(1048577)
+    except OSError:
+        return None
+
+
 def lock(file):
     if os.name == "nt":
         file.seek(0)
@@ -178,8 +233,10 @@ def main():
             return upstream(None)
     else:
         try:
+            if not unix_prepare_parent(directory.parent):
+                return upstream(None)
             directory.mkdir(parents=True, mode=0o700, exist_ok=True)
-            if directory.is_symlink() or directory.stat().st_mode & 0o077:
+            if not unix_private(directory, "directory"):
                 return upstream(None)
         except OSError:
             return upstream(None)
@@ -194,8 +251,18 @@ def main():
         return upstream(None)
     if os.name == "nt" and cache.exists() and not windows_acl("VerifyCache", cache):
         return upstream(None)
+    if os.name != "nt" and cache.exists() and not unix_private(cache, "file"):
+        return upstream(None)
     try:
-        owner_file = open(lock_path, "a+b")
+        if os.name == "nt":
+            owner_file = open(lock_path, "a+b")
+        else:
+            flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(lock_path, flags, 0o600)
+            if not unix_private(lock_path, "file", owner=descriptor):
+                os.close(descriptor)
+                return upstream(None)
+            owner_file = os.fdopen(descriptor, "r+b")
     except OSError:
         return upstream(None)
     with owner_file as owner:
@@ -212,11 +279,18 @@ def main():
                 time.sleep(0.05)
         try:
             if cache.is_file() and not cache.is_symlink():
-                stat_result = cache.stat()
+                if os.name == "nt":
+                    if not windows_acl("VerifyCache", cache):
+                        return upstream(None)
+                    stat_result, raw = cache.stat(), cache.read_bytes()
+                else:
+                    result = read_private_cache(cache)
+                    if result is None:
+                        return upstream(None)
+                    stat_result, raw = result
                 wall_age = time.time() - stat_result.st_mtime
                 if stat_result.st_size <= 1048576 and (stat_result.st_mtime_ns >= joined_ns or
                         (not args.force_refresh and 0 <= wall_age < args.ttl)):
-                    raw = cache.read_bytes()
                     # The first condition shares only a response completed
                     # after this subscriber joined the in-flight refresh.
                     # Older terminal/failed/queue results are never replayed.

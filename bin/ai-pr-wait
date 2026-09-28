@@ -216,7 +216,11 @@ OWNER="${REPO%%/*}"
 NAME="${REPO##*/}"
 SNAP_HELPER="$REAL_DIR/../tools/github-requests/pr_status_singleflight.py"
 SNAP_CONTEXT_HELPER=''
-SNAP_STATE_DIR="${AI_PR_WAIT_SNAPSHOT_DIR:-$HOME/.ai-devops/pr-status}"
+SNAP_DEFAULT_DIR="$HOME/.local/state/ai-devops-pr-status"
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*) SNAP_DEFAULT_DIR="$HOME/.ai-devops/pr-status" ;;
+esac
+SNAP_STATE_DIR="${AI_PR_WAIT_SNAPSHOT_DIR:-$SNAP_DEFAULT_DIR}"
 SNAP_CONTEXT=''
 LAST_HEAD=''
 # The credential-bound read-only context helper is added after P2 lands. Until

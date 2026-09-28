@@ -3,6 +3,7 @@
 
 import json
 import hashlib
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -209,6 +211,59 @@ sys.exit(124)
         _, owner_err = owner.communicate(timeout=9)
         self.assertEqual(owner.returncode, 0, owner_err)
         self.assertEqual(self.calls(), 3)
+
+    @unittest.skipIf(os.name == "nt", "Unix inode ownership case")
+    def test_unix_foreign_owner_and_replaceable_parent_disable_sharing(self):
+        first = self.call(key="ownership", suffix="ownership-seed")
+        _, err = first.communicate(timeout=5)
+        self.assertEqual(first.returncode, 0, err)
+        state = self.base / "state"
+        spec = importlib.util.spec_from_file_location("singleflight", HELPER)
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        with mock.patch.object(helper.os, "geteuid", return_value=os.geteuid() + 1):
+            self.assertFalse(helper.unix_private(state, "directory"))
+            self.assertFalse(helper.unix_private(next(state.glob("*.json")), "file"))
+            self.assertFalse(helper.unix_private(next(state.glob(".flight-*.lock")), "file"))
+        self.base.chmod(0o770)
+        second = self.call(key="ownership", suffix="ownership-untrusted")
+        out, err = second.communicate(timeout=5)
+        self.assertEqual(second.returncode, 0, err)
+        self.assertEqual(json.loads(out)["data"]["repository"]["pullRequest"]["state"], "OPEN")
+        self.assertEqual((self.base / "ownership-untrusted.source").read_text(), "upstream")
+        self.assertEqual(self.calls(), 2)
+
+    @unittest.skipIf(os.name == "nt", "Unix hardlink case")
+    def test_unix_hardlinked_forged_terminal_cache_runs_uncached(self):
+        first = self.call(key="forged", suffix="forged-seed")
+        _, err = first.communicate(timeout=5)
+        self.assertEqual(first.returncode, 0, err)
+        state = self.base / "state"
+        cache = next(state.glob("*.json"))
+        forged = json.loads(cache.read_text())
+        forged["data"]["repository"]["pullRequest"]["state"] = "MERGED"
+        cache.write_text(json.dumps(forged))
+        cache.chmod(0o600)
+        os.link(cache, self.base / "foreign-cache-link")
+        second = self.call(key="forged", suffix="forged-untrusted")
+        out, err = second.communicate(timeout=5)
+        self.assertEqual(second.returncode, 0, err)
+        self.assertEqual(json.loads(out)["data"]["repository"]["pullRequest"]["state"], "OPEN")
+        self.assertEqual((self.base / "forged-untrusted.source").read_text(), "upstream")
+        self.assertEqual(self.calls(), 2)
+
+    @unittest.skipIf(os.name == "nt", "Unix hardlink case")
+    def test_unix_hardlinked_lock_runs_uncached(self):
+        first = self.call(key="lock-link", suffix="lock-seed")
+        _, err = first.communicate(timeout=5)
+        self.assertEqual(first.returncode, 0, err)
+        lock_path = next((self.base / "state").glob(".flight-*.lock"))
+        os.link(lock_path, self.base / "foreign-lock-link")
+        second = self.call(key="lock-link", suffix="lock-untrusted")
+        _, err = second.communicate(timeout=5)
+        self.assertEqual(second.returncode, 0, err)
+        self.assertEqual((self.base / "lock-untrusted.source").read_text(), "upstream")
+        self.assertEqual(self.calls(), 2)
 
     @unittest.skipUnless(os.name == "nt", "Windows ACL case")
     def test_parent_with_other_user_replace_rights_runs_uncached(self):
