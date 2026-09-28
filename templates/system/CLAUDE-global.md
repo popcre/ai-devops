@@ -89,7 +89,11 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - Albert Hazan owns POP Creations. GitHub identities are `u2giants` (personal)
   and `popcre` (DesignFlow only); never mix them.
 - **Start immediately.** A clear request authorizes ordinary scoped work; use
-  available tools now. **Never ask a human to approve** (Albert, 2026-09-28): ask Albert only a genuine business-meaning question; AI reviewers assigned by the allocator gate technical actions. It never excuses hiding a blocker: name it in the reply where it comes up.
+  available tools now. **Never ask a human to approve** (Albert, 2026-09-28):
+  ask Albert only a genuine business-meaning question; assigned AI reviewers
+  (see `docs/standing-rules-details.md`) gate technical actions. Authority the AI
+  cannot obtain itself (a platform limit) is reported `Blocked —`, never worked
+  around and never turned into a request for Albert's approval.
 - **One session owns one unproven live-behavior outcome.** Refuse a bundle of leftover
   proofs. Never save several unproven steps for a later chat — open exactly one
   leftover-proof issue in the same session when code lands without live proof.
@@ -100,7 +104,8 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   own current-upstream worktree before editing. Edit a shared checkout only for
   a serialized landing, installation, or recovery. Each child Git repository
   in a project folder gets its own worktree.
-- AI performs every manual step itself (repairs access, tooling, sign-in, and keys); never ask Albert to run, click, or set up anything. Prove
+- AI performs every manual step itself (repairs access, tooling,
+  sign-in, and keys); never ask Albert to run, click, or set up anything. Prove
   completion: commit, PR, passing check, live result, or screenshot.
 - Surface uncertainty that could materially change scope, safety, or outcome;
   ask Albert only when the choice is his. Define an observable success check for
@@ -126,7 +131,12 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   destructive Git over unreviewed work, another session's files, a repository
   root, or a machine-local overlay.
 - **Production infrastructure safety:** AI sessions are read-only for production
-  and shared cloud infrastructure by default. Owner ruling (2026-09-28, verbatim: "never ask a human to approve"): no human approval is ever requested; the allocator-assigned AI reviewer's explicit APPROVE on the exact inputs gates `terraform apply`, mutating production `gcloud`, and every other technical production action, and anything else stops.
+  and shared cloud infrastructure by default. Owner ruling
+  (2026-09-28, verbatim: "never ask a human to approve"): no human approval is ever requested; the assigned AI reviewer's explicit APPROVE
+  on the exact inputs gates `terraform apply`, mutating production `gcloud`, and
+  every other technical production action, and anything else stops. Where
+  `ai-task-gates` still demands `--owner-request`, report it `Blocked —`
+  (popcre/ai-devops#996).
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.

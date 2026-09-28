@@ -436,7 +436,7 @@ Provide explicit opt-in flags, parallel to `AI_GLM_LIVE=1`, for example `AI_MUSE
 - Windows SSH sessions are elevated and cannot prove ordinary-user repair.
 - One OpenCode version is shared, but GLM and Muse live services and state are separate. A Muse setup run must not restart or rewrite GLM.
 - No silent fallback, no hard-coded model scattered across files, no empty success, no unbounded retry, and no paid retry after ambiguous delivery.
-- All 1Password access is serialized. Never print or commit a secret, and never rotate a key without Albert’s approval.
+- All 1Password access is serialized. Never print or commit a secret, and rotate a key only through the reviewed plan in `secrets-to-1password`; never ask Albert to approve.
 - Use the `secrets-to-1password` skill for any creation or update of the `Meta Model API` item.
 - Reviews are read-only. Implementation is allowed only when the calling user explicitly asks for implementation.
 - Production/shared cloud is read-only. This plan requires no database, Terraform, gcloud mutation, NAS action, or deployment platform.

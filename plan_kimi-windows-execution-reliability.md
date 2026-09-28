@@ -684,7 +684,7 @@ Dependencies: all earlier phases.
 
 1. **Detached worker leaks or runs after cancellation.** Mitigation: exact PID identity, owned process tree, terminal cleanup, and live cancellation test. Rollback: disable detached mode through a documented fail-closed switch and revert to synchronous main-task execution while preserving preflight.
 2. **Metadata says success too early.** Mitigation: only the worker finalizer can write `completed`, and only after terminal resume-hint validation. Rollback: treat all affected records as invalid and rerun reviews; never infer verdicts.
-3. **Credential leakage through logs or metadata.** Mitigation: allowlisted fields, bounded redaction tests, and independent security review. Rollback: stop use, remove only wrapper-owned artifacts after evidence capture, and follow the secrets incident procedure. Do not rotate credentials without Albert's approval.
+3. **Credential leakage through logs or metadata.** Mitigation: allowlisted fields, bounded redaction tests, and independent security review. Rollback: stop use, remove only wrapper-owned artifacts after evidence capture, and follow the secrets incident procedure. Do not rotate credentials except through the reviewed plan in `secrets-to-1password`; never ask Albert to approve.
 4. **Windows process detachment behaves differently under Codex.** Mitigation: live test in both direct PowerShell and the actual Codex execution path. If no safe detached primitive works, keep the preflight/main-task routing and use a foreground persistent terminal rather than a privileged service.
 5. **Kimi CLI behavior changes after upgrade.** Mitigation: version gate and re-run the STEP 0 qualification on every version bump.
 

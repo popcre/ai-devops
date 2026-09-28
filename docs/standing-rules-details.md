@@ -92,12 +92,19 @@ Owner ruling (2026-09-28, Albert Hazan, verbatim: "never ask a human to approve.
 as i have said at least 1000 times, i am a solo vibe coder with no technical
 knowledge. ai has to do everything for me without asking me to do manual things.
 institute that."; also "none of the reviewers should be read-only"): the
-2026-09-16 independent read-only reviewer rule is withdrawn. AI reviewers
-assigned by the allocator gate every technical production action through an
+2026-09-16 independent read-only reviewer rule is withdrawn. Assigned AI reviewers gate every technical production action through an
 explicit exact-input APPROVE; anything else stops. No human approval is ever
 requested, and AI performs every manual step itself (access, tooling, sign-in,
 keys). Only genuine business-meaning questions go to Albert; platform-level
 safety limits outside the repository still apply.
+
+An **assigned AI reviewer** is: for `popcre/shared-db` work, the reviewer the
+shared-db allocator draws; everywhere else, a rotation reviewer run through
+`ai-review` whose engine differs from the implementing session's. The
+implementing session never approves its own change. Authority an AI cannot
+obtain itself (a platform limit, or a tool gate such as `ai-task-gates`
+`--owner-request` until popcre/ai-devops#996 lands) is reported `Blocked —`;
+it is never bypassed and never becomes a request for Albert's approval.
 
 Owner ruling (2026-09-28, Albert Hazan, verbatim: "i don't
 need an independent production reviewer. remove that requirement"; popcre/shared-db

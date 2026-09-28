@@ -490,7 +490,7 @@ owner: claude/fixture-$n
         foreach ($required in @(
             "Start immediately",
             "Never ask a human to approve",
-            "allocator-assigned AI reviewer's explicit APPROVE",
+            "assigned AI reviewer's explicit APPROVE",
             "recover first and finish",
             "Preserve the capability",
             "reported problem is gone",
@@ -515,7 +515,7 @@ owner: claude/fixture-$n
             }
         }
     }
-    Write-Host "PASS: Claude and Codex start authorized work, recover from routine errors, repair broken capabilities, and ignore unrelated handoffs"
+    Write-Host "PASS: Claude, Codex, ZCode, and MiMo start authorized work, recover from routine errors, repair broken capabilities, and ignore unrelated handoffs"
 
     # -------------------------------------------------- Codex trigger-eval runner
     $printed = & python $codexRunner --skill sample --eval-set $budgetFile --print-command

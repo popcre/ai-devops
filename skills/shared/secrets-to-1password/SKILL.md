@@ -75,7 +75,9 @@ op read "op://vibe_coding/<item>/<field>" | ssh host 'umask 077; cat > /path/fil
 - ANY command-line argument: after a remote command string, in `--flag=value`,
   or as a `VAR=value cmd` prefix. On a parse error, a wrong argument position, or
   a non-zero exit, the shell echoes the whole command — permanently.
-- Asking Albert to paste, save, or set up a secret. Find it in 1Password or obtain it through the provider's authenticated tools yourself (owner ruling 2026-09-28: AI performs all manual steps).
+- Asking Albert to paste, save, or set up a secret. Find it in 1Password or
+  obtain it through the provider's authenticated tools yourself (owner ruling
+  2026-09-28: AI performs all manual steps).
 - `--reveal` into a terminal, or `echo`/`cat`/`grep` "just to check it looks
   right".
 - Running any of this under `set -x`, a verbose/debug HTTP mode, or through a
@@ -100,7 +102,12 @@ value. Search by pattern and report PATHS ONLY; never print a matched line:
 grep -rl "ops_eyJ" "$HOME" --exclude-dir=.cache      # paths, not contents
 ```
 
-Rotate it yourself (owner ruling 2026-09-28, Albert Hazan: "never ask a human to approve"): report the compromise, rotate through the provider's authenticated tools, update 1Password and every consumer, and prove the new value works. Never ask Albert to approve it.
+Rotate it yourself (owner ruling 2026-09-28, Albert Hazan: "never ask a human
+to approve"): report the compromise, get an assigned AI reviewer's APPROVE of the
+rotation plan, rotate through the provider's authenticated tools, update
+1Password and every consumer, and prove the new value works. Keep the old value
+valid until the new one is proven wherever the provider allows. Never ask Albert
+to approve it.
 
 ## Hard rules
 
@@ -120,7 +127,8 @@ Rotate it yourself (owner ruling 2026-09-28, Albert Hazan: "never ask a human to
    new entry is safe; replacing a live value can break running apps. Keep the old
    value recoverable, update every consumer, and prove the new value works. If the
    value you hold conflicts with what's stored, verify against the provider
-   yourself. Never ask Albert to approve it (owner ruling 2026-09-28).
+   yourself. Rotation follows the reviewed plan above; never ask Albert to approve
+   it (owner ruling 2026-09-28).
 5. **Never store a value you can't confirm is complete.** A truncated or
    placeholder secret is worse than no entry at all: it looks authoritative, so a
    future session wires it in, gets a 401, and burns a session finding out. If the value looks partial, obtain the full one from the provider yourself rather

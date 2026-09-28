@@ -35,7 +35,7 @@ required_phrases=(
   "resume that agent immediately"
   "quote Albert's exact words"
   "no human approval is ever requested"
-  "allocator-assigned AI reviewer's explicit APPROVE"
+  "assigned AI reviewer's explicit APPROVE"
   "one unproven live-behavior outcome"
   "Never save several unproven steps"
   "Quote every time in EST"
@@ -54,5 +54,22 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
   ! grep -qF 'u2giants/shared-db' "$client_file" \
     || fail "$(basename "$client_file") still routes live prose to u2giants/shared-db"
 done
+
+# Owner ruling 2026-09-28 ("never ask a human to approve"): the repository
+# guide, the secrets skill, and the details doc must keep the AI-reviewer gate
+# and must not return to asking Albert to approve.
+AGENTS_MD="$REPO_ROOT/AGENTS.md"
+SECRETS_SKILL="$REPO_ROOT/skills/shared/secrets-to-1password/SKILL.md"
+DETAILS="$REPO_ROOT/docs/standing-rules-details.md"
+grep -qF "assigned AI reviewer's explicit APPROVE" "$AGENTS_MD" \
+  || fail "AGENTS.md lost the assigned AI reviewer production gate"
+! grep -qF "without Albert naming" "$AGENTS_MD" \
+  || fail "AGENTS.md returned to requiring Albert to name production actions"
+grep -qF "APPROVE of the" "$SECRETS_SKILL" \
+  || fail "secrets-to-1password lost the reviewed rotation plan"
+! grep -qF "without Albert's approval" "$SECRETS_SKILL" \
+  || fail "secrets-to-1password returned to requiring Albert's approval"
+grep -qF "An **assigned AI reviewer** is" "$DETAILS" \
+  || fail "standing-rules-details lost the assigned AI reviewer definition"
 
 echo "PASS: Claude, Codex, ZCode, and MiMo globals carry the required autonomy phrases, unwrapped"

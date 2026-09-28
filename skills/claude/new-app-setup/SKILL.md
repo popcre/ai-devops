@@ -149,7 +149,7 @@ Do these in order; don't skip or reorder.
    demo content, unused monorepo packages). Use a file-count pass per
    top-level directory.
 4. **Plan deletions** with what/why-safe/risk/how-to-restore, keep them
-   recoverable (commit or backup), and get the allocator-assigned AI reviewer's
+   recoverable (commit or backup), and get the assigned AI reviewer's
    APPROVE; never wait for Albert's approval.
 5. **Delete reviewed items**, update `.gitignore`, update package workspaces,
    update docs to reflect the leaner codebase.

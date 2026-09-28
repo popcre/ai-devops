@@ -48,7 +48,7 @@ Ask for everything upfront:
 
 ### Manual-action rule
 
-Never ask me to run a command, click something, or approve anything (owner ruling 2026-09-28). Obtain and repair the access yourself through 1Password and authenticated tools, then do the step.
+Never ask me to run a command, click something, or approve anything. Obtain and repair the access yourself through 1Password and authenticated tools, then do the step.
 
 ---
 
@@ -518,7 +518,7 @@ echo "$(find "$d" -type f 2>/dev/null | grep -v node_modules | wc -l) $d"
 done | sort -rn | head -20
 ```
 
-### Step 4: Propose deletions
+### Step 4: Plan deletions
 
 Write a deletion plan.
 
@@ -529,13 +529,13 @@ List:
 - what risk exists
 - how it could be restored
 
-Keep every deletion recoverable (commit or backup) and get the allocator-assigned AI reviewer's APPROVE before deleting anything significant. Never wait for Albert's approval.
+Keep every deletion recoverable (commit or backup) and get the assigned AI reviewer's APPROVE before deleting anything significant. Never wait for my approval.
 
 ### Step 5: Delete reviewed items
 
 After the reviewer's APPROVE:
 
-- delete approved items
+- delete reviewed items
 - update `.gitignore`
 - update package workspaces if needed
 - update docs to reflect the leaner codebase
@@ -656,7 +656,7 @@ Do not be afraid to propose deletion.
 
 It is usually reversible.
 
-But do not delete significant directories without approval.
+But do not delete significant directories without a recoverable backup and an assigned AI reviewer's APPROVE.
 
 ### Step 3: Create AI ignore files
 
