@@ -100,11 +100,17 @@ if [ -z "$REAL" ]; then
 fi
 [ -n "$REAL" ] || { say "the real gh is not installed"; exit 3; }
 
-mkdir -p "$STATE" || { say "cannot create $STATE"; exit 3; }
+(umask 077; mkdir -p "$STATE") || { say "cannot create $STATE"; exit 3; }
+chmod 700 "$STATE" 2>/dev/null || { say "cannot protect GitHub state"; exit 3; }
+for state_file in "$STATE/quota-context" "$STATE/quota-context-key"; do
+  if [ -L "$state_file" ] || { [ -e "$state_file" ] && [ ! -f "$state_file" ]; }; then
+    say "invalid GitHub quota context state"; exit 3
+  fi
+done
 now(){ date +%s; }
 readnum(){ local x; x="$(cat "$1" 2>/dev/null)"; isnum "$x" && echo "$x" || echo 0; }
 # Atomic state write (temp file then rename), so a reader never sees a half-written value.
-put(){ local t="$1.tmp.$$.$RANDOM"; if printf '%s\n' "$2" > "$t" && mv -f "$t" "$1" 2>/dev/null; then return 0; fi; rm -f "$t"; printf '%s\n' "$2" > "$1"; }
+put(){ local t="$1.tmp.$$.$RANDOM"; if (umask 077; printf '%s\n' "$2" > "$t") && mv -f "$t" "$1" 2>/dev/null; then return 0; fi; rm -f "$t"; (umask 077; printf '%s\n' "$2" > "$1"); }
 # Back-off only ever moves later: never shorten a back-off another process recorded.
 extend_backoff(){ [ "$1" -gt "$(readnum "$STATE/backoff_until")" ] && put "$STATE/backoff_until" "$1"; return 0; }
 
@@ -210,7 +216,10 @@ done
 # together across a second boundary.
 now_ms(){ local t; t="$(date +%s%3N)"; isnum "$t" && echo "$t" || echo $(( $(now) * 1000 )); }
 sleep_ms(){ [ "$1" -gt 0 ] && sleep "$(( $1 / 1000 )).$(printf '%03d' $(( $1 % 1000 )))"; return 0; }
-gap_ms=$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 - $(now_ms) ))
+# Launch latency varies across Git Bash/WSL processes. Leave a small margin so
+# observed gh process starts, not just wrapper bookkeeping, respect spacing.
+JITTER_MS=0; [ "$SPACING" -eq 0 ] || JITTER_MS=250
+gap_ms=$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 + JITTER_MS - $(now_ms) ))
 sleep_ms "$gap_ms"
 
 # Resource budgets (including GitHub's growing REST sub-resource inventory)
@@ -310,6 +319,113 @@ elif [ "${1:-}" = pr ] || [ "${1:-}" = issue ]; then
 fi
 select_buckets
 quota_path(){ if [ "$1" = core ]; then printf '%s/quota' "$STATE"; else printf '%s/quota.%s' "$STATE" "$1"; fi; }
+bucket_pause_path(){ printf '%s/quota-pause.%s' "$STATE" "$1"; }
+# Versioned context binds reusable quota rows to the actual credential and API
+# host. A credential hash is local, never logged, and is not a substitute for
+# the authenticated principal: a fresh context gets one bounded /user read.
+# App and installation credentials may have no /user endpoint; those remain
+# unknown and receive only a short credential-local snapshot.
+QUOTA_SCHEMA=3
+API_HOST="${GH_HOST:-github.com}"
+[ "${#PROBE_HOST[@]}" -eq 0 ] || API_HOST="${PROBE_HOST[1]}"
+if [ "${1:-}" != api ]; then
+  repo_arg=''; prev=''
+  for a in "$@"; do
+    if [ "$prev" = -R ] || [ "$prev" = --repo ]; then repo_arg="$a"; break; fi
+    case "$a" in --repo=*|-R=*) repo_arg="${a#*=}"; break;; esac
+    prev="$a"
+  done
+  if [ -n "$repo_arg" ]; then
+    case "$repo_arg" in
+      *://*) API_HOST=unknown ;;
+      */*/*) API_HOST="${repo_arg%%/*}" ;;
+      */*) ;;
+      *) API_HOST=unknown ;;
+    esac
+  fi
+fi
+API_HOST="${API_HOST,,}"
+[[ "${endpoint:-}" != *://* ]] || API_HOST='unknown'
+if [ "${1:-}" != api ] && [ "$API_HOST" != unknown ] && [ "$API_HOST" != "${GH_HOST:-github.com}" ]; then
+  PROBE_HOST=(--hostname "$API_HOST")
+fi
+QUOTA_ACTIVE="$QUOTA_PROBE"
+if [ "$API_HOST" = unknown ]; then
+  QUOTA_ACTIVE=off
+  say "GitHub target host unknown; quota admission unknown. Retaining spacing and refusal back-off."
+fi
+CONTEXT='unknown'
+IDENTITY_VERIFIED=0
+IDENTITY_REQUESTED=0
+if [ "$QUOTA_ACTIVE" != off ] && [[ "$API_HOST" =~ ^[a-z0-9][a-z0-9.-]*$ ]] && command -v sha256sum >/dev/null 2>&1; then
+  credential_hash="$(timeout "$PROBE_TIMEOUT" "$REAL" auth token --hostname "$API_HOST" 2>/dev/null | sha256sum | awk '{print $1}')"
+  # An empty/error token is not an identity. Do not print the token or digest.
+  if [ "$credential_hash" != "$(printf '' | sha256sum | awk '{print $1}')" ]; then
+    credential_class=other
+    if timeout "$PROBE_TIMEOUT" "$REAL" auth token --hostname "$API_HOST" 2>/dev/null | grep -E '^(ghp_|github_pat_)' >/dev/null; then credential_class=pat; fi
+    context_hint="$QUOTA_SCHEMA $API_HOST $credential_hash"
+    CONTEXT="$context_hint unknown"
+    identity_key="$(printf '%s' "$context_hint" | sha256sum | awk '{print $1}')"
+    (umask 077; mkdir -p "$STATE/identities") && chmod 700 "$STATE/identities" 2>/dev/null || { say "cannot protect GitHub identity cache"; exit 3; }
+    identity_file="$STATE/identities/$identity_key"
+    if [ -L "$identity_file" ] || { [ -e "$identity_file" ] && [ ! -f "$identity_file" ]; }; then
+      say "invalid GitHub identity cache"; exit 3
+    fi
+    cached_principal=''; checked_at=''
+    if [ -f "$identity_file" ]; then read -r cached_principal checked_at < "$identity_file" || true; fi
+    if isnum "${cached_principal:-}"; then
+      CONTEXT="$context_hint $cached_principal"
+      IDENTITY_VERIFIED=1
+    elif ! isnum "${checked_at:-}" || [ $(( $(now) - checked_at )) -ge 300 ]; then
+      # A failed /user lookup is normal for app/repository credentials. Cache
+      # that negative lookup briefly to avoid a new request on every call.
+      # This is an actual API request and must be paced like other probes.
+      sleep_ms "$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 + JITTER_MS - $(now_ms) ))"
+      put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
+      principal="$(timeout "$PROBE_TIMEOUT" "$REAL" api user "${PROBE_HOST[@]}" --jq .id 2>/dev/null | tr -d '\r\n')"
+      IDENTITY_REQUESTED=1
+      lookup_status=$?
+      if [ "$MEASURE_READY" = 1 ]; then
+        gh_measure_identity_lookup "$lookup_status" "$principal" || say "request measurement unavailable: identity lookup not saved"
+      fi
+      if isnum "$principal"; then CONTEXT="$context_hint $principal"; IDENTITY_VERIFIED=1; else principal=unknown; fi
+      put "$identity_file" "$principal $(now)" || { say "cannot save GitHub identity cache"; exit 3; }
+    fi
+    if [ "$IDENTITY_VERIFIED" = 1 ] && [ "$credential_class" = pat ]; then
+      CONTEXT="$QUOTA_SCHEMA $API_HOST pat ${CONTEXT##* }"
+    fi
+  fi
+fi
+[ "$MEASURE_READY" != 1 ] || { [ "$IDENTITY_VERIFIED" != 1 ] || gh_measure_set_principal "${CONTEXT##* }"; }
+# Store quota rows for each context separately. A switch restores its old rows
+# but marks them stale: another credential may have consumed the same budget.
+# P6 owns cross-host/account demand coordination; this cache is local only.
+if [ "$QUOTA_ACTIVE" != off ] && [ "$(cat "$STATE/quota-context" 2>/dev/null)" != "$CONTEXT" ]; then
+  mkdir -p "$STATE/quota-contexts"
+  previous_key="$(cat "$STATE/quota-context-key" 2>/dev/null)"
+  if [[ "$previous_key" =~ ^[0-9a-f]{64}$ ]]; then
+    mkdir -p "$STATE/quota-contexts/$previous_key"
+    for file in "$STATE"/quota "$STATE"/quota.* "$STATE"/quota-pause.* "$STATE"/quota-resources; do
+      [ -f "$file" ] && mv -f "$file" "$STATE/quota-contexts/$previous_key/"
+    done
+  else
+    rm -f "$STATE"/quota "$STATE"/quota.* "$STATE"/quota-pause.* "$STATE/quota-resources"
+  fi
+  context_key="$(printf '%s' "$CONTEXT" | sha256sum | awk '{print $1}')"
+  if [ "$CONTEXT" != unknown ] && [ -d "$STATE/quota-contexts/$context_key" ]; then
+    for file in "$STATE/quota-contexts/$context_key"/*; do
+      [ -f "$file" ] && mv -f "$file" "$STATE/"
+    done
+    for file in "$STATE"/quota "$STATE"/quota.*; do
+      [ -f "$file" ] || continue
+      read -r _ remaining limit reset < "$file"
+      put "$file" "0 $remaining $limit $reset"
+    done
+  fi
+  put "$STATE/quota-context-key" "$context_key" && put "$STATE/quota-context" "$CONTEXT" || { say "cannot save GitHub quota context"; exit 3; }
+fi
+CURRENT_CONTEXT_KEY=''
+[ "$QUOTA_ACTIVE" = off ] || CURRENT_CONTEXT_KEY="$(cat "$STATE/quota-context-key" 2>/dev/null)"
 # Optional failure evidence is a real request too. Run in a subshell so a busy
 # lock or active back-off skips this diagnostic without losing the original
 # failure record. Reserve its start under the same lock as every other call.
@@ -318,7 +434,7 @@ failure_quota_snapshot(){
   trap 'release; exit 130' INT TERM
   AI_GH_NO_WAIT=1 acquire
   [ "$(now)" -ge "$(readnum "$STATE/backoff_until")" ] || return 75
-  sleep_ms "$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 - $(now_ms) ))"
+  sleep_ms "$(( $(readnum "$STATE/last_call_ms") + SPACING * 1000 + JITTER_MS - $(now_ms) ))"
   put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
   release
   timeout "$PROBE_TIMEOUT" "$REAL" api --include rate_limit "${PROBE_HOST[@]}" --jq "$QUOTA_FILTER"
@@ -328,6 +444,12 @@ read_quota(){
   local path; path="$(quota_path "$1")"
   [ ! -f "$path" ] || read -r qts qrem qlim qreset < "$path"
 }
+if [ "$IDENTITY_REQUESTED" = 1 ] && [ "$IDENTITY_VERIFIED" = 1 ] && [ "$credential_class" = pat ]; then
+  read_quota core
+  if isnum "$qts" && [ "$qts" -gt 0 ] && isnum "$qrem" && isnum "$qlim" && isnum "$qreset"; then
+    put "$(quota_path core)" "$qts $(( qrem > 0 ? qrem - 1 : 0 )) $qlim $qreset"
+  fi
+fi
 probe_quota(){
   local q bucket remaining limit reset stamp keys
   stamp="$(now)"
@@ -347,24 +469,25 @@ probe_quota(){
   done <<< "$q"
   put "$STATE/quota-resources" "$(printf '%s\n' "$keys" | LC_ALL=C sort -u)"
 }
-if [ "$QUOTA_PROBE" != off ]; then
+if [ "$QUOTA_ACTIVE" != off ]; then
+  for bucket in "${BUCKETS[@]}"; do
+    until_ts="$(readnum "$(bucket_pause_path "$bucket")")"
+    if [ "$(now)" -lt "$until_ts" ]; then
+      say "GitHub $bucket budget paused until its own reset; not calling GitHub."
+      exit 75
+    fi
+  done
   refresh=0
+  [ "$CONTEXT" != unknown ] || refresh=1
+  quota_age="$QUOTA_PROBE"
+  if [ "$IDENTITY_VERIFIED" != 1 ] && [ "$quota_age" -gt 60 ]; then quota_age=60; fi
   for bucket in "${BUCKETS[@]}"; do
     read_quota "$bucket"
-    if ! isnum "${qts:-}" || ! isnum "${qreset:-}" || [ $(( $(now) - qts )) -ge "$QUOTA_PROBE" ] || { [ "$qreset" -gt 0 ] && [ "$qreset" -le "$(now)" ]; }; then refresh=1; fi
+    if ! isnum "${qts:-}" || ! isnum "${qreset:-}" || [ $(( $(now) - qts )) -ge "$quota_age" ] || { [ "$qreset" -gt 0 ] && [ "$qreset" -le "$(now)" ]; }; then refresh=1; fi
   done
-  # Host-specific snapshots must never be reused for the default host.
-  [ "${#PROBE_HOST[@]}" -eq 0 ] || refresh=1
   if [ "$refresh" = 1 ]; then
     probe_quota
     select_buckets
-    # Invalidate before ANY early exit too: a low-budget explicit-host probe
-    # may pause the machine, but cannot leave a reusable default-host snapshot.
-    if [ "${#PROBE_HOST[@]}" -gt 0 ]; then
-      while read -r bucket; do
-        read_quota "$bucket"; put "$(quota_path "$bucket")" "0 $qrem $qlim $qreset"
-      done < <(resource_keys)
-    fi
     # The probe is a request too: keep normal spacing before the real call.
     [ "$SPACING" -gt 0 ] && sleep "$SPACING"
   fi
@@ -373,9 +496,9 @@ if [ "$QUOTA_PROBE" != off ]; then
     if isnum "${qrem:-}" && isnum "${qlim:-}" && [ "${qlim:-0}" -gt 0 ]; then
     pct=$(( qrem * 100 / qlim ))
     if [ "$pct" -lt "$PAUSE_PCT" ] && [ "$(now)" -lt "${qreset:-0}" ]; then
-      extend_backoff "$qreset"
+      put "$(bucket_pause_path "$bucket")" "$qreset"
       printf '%s budget-pause remaining=%s/%s reset=%s resource=%s\n' "$(date -u +%FT%TZ)" "$qrem" "$qlim" "$qreset" "$bucket" >> "$STATE/refusals.log"
-      say "GitHub $bucket budget low (${qrem}/${qlim}); machine-wide pause until the window resets in $(( qreset - $(now) ))s."
+      say "GitHub $bucket budget low (${qrem}/${qlim}); pause until its window resets in $(( qreset - $(now) ))s."
       exit 75
     fi
     if [ "$pct" -lt "$SLOW_PCT" ]; then
@@ -394,23 +517,68 @@ if [ "$QUOTA_PROBE" != off ]; then
       say "GitHub $bucket quota unknown; retaining spacing and refusal back-off (no healthy-budget claim)."
     fi
   done
+  # No credential means no reusable observation, even on success. Unknown
+  # principals with a stable credential have only a short, local snapshot.
+  if [ "$CONTEXT" = unknown ]; then
+    while read -r bucket; do
+      read_quota "$bucket"; put "$(quota_path "$bucket")" "0 $qrem $qlim $qreset"
+    done < <(resource_keys)
+  fi
 fi
 
 err="$(mktemp)"
 put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
-# The lock serializes call STARTS (spacing, budget, back-off bookkeeping) and is
+# The lock serializes call reservations (spacing, budget, back-off bookkeeping) and is
 # released before gh runs. GitHub limits count requests, not concurrency, so a
 # long clone or a hung request must never hold every other session hostage, and
 # a supervisor hard-kill during the call can no longer leave the lock behind.
 release
-ERRFILE="$err"; trap 'status=$?; rm -f "$ERRFILE"; measure_exit "$status"' EXIT; trap 'rm -f "$ERRFILE"; exit 130' INT TERM
+ERRFILE="$err"; GRAPH_DIR=''; GRAPH_FIFO=''; GRAPH_META=''; GRAPH_PID=''
+cleanup_call(){ local status=$?; release; [ -z "$GRAPH_PID" ] || kill "$GRAPH_PID" 2>/dev/null; rm -f "$ERRFILE"; [ -z "$GRAPH_FIFO" ] || rm -f "$GRAPH_FIFO"; [ -z "$GRAPH_META" ] || rm -f "$GRAPH_META"; [ -z "$GRAPH_DIR" ] || rmdir "$GRAPH_DIR" 2>/dev/null; measure_exit "$status"; }
+trap cleanup_call EXIT
+trap 'release; exit 130' INT TERM
 # stderr is passed through live (messages stay visible; gh may hide its spinner
 # because stderr is a pipe) and copied for the failure record.
 exec 4>&1
 GH_MEASURE_EXECUTED=1
-rc="$({ { "$REAL" "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | tee "$err" >&2; } 5>&1)"
+GRAPH_TRANSFORMED=0
+if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ]; then
+  for a in "$@"; do
+    case "$a" in --jq|-q|-q?*|--jq=*|--template|-t|-t?*|--template=*|--silent|--include|-i) GRAPH_TRANSFORMED=1 ;; esac
+  done
+fi
+if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED" = 0 ] && command -v jq >/dev/null 2>&1; then
+  GRAPH_DIR="$(umask 077; mktemp -d "$STATE/graphql-class.XXXXXX")" || { say "cannot prepare private GraphQL classifier"; exit 3; }
+  GRAPH_META="$GRAPH_DIR/result"; GRAPH_FIFO="$GRAPH_DIR/stream"
+  ( umask 077; : > "$GRAPH_META" && mkfifo "$GRAPH_FIFO" ) && [ -p "$GRAPH_FIFO" ] || { say "cannot prepare private GraphQL classifier"; exit 3; }
+  jq -sr '
+    (if length == 1 and (.[0] | type) == "array" then .[0] else . end) as $pages |
+    if ($pages | length) == 0 or ($pages | any(type != "object")) then "unknown"
+    elif ($pages | any(.errors != null and (.errors | type) != "array")) then "unknown"
+    elif ($pages | all(.errors == null or (.errors | length) == 0)) then "none"
+    elif ([$pages[].errors[]? | .message? | strings] | any(test("secondary rate limit|abuse detection|too many requests"; "i"))) then "secondary"
+    elif ([$pages[].errors[]? | .message? | strings] | any(test("rate limit"; "i"))) then "primary"
+    else "error" end
+  ' < "$GRAPH_FIFO" > "$GRAPH_META" 2>/dev/null & GRAPH_PID=$!
+  rc="$({ { "$REAL" "$@" 2>&1 1> >(tee "$GRAPH_FIFO" >&4); printf '%s' "$?" >&5; } | tee "$err" >&2; } 5>&1)"
+else
+  rc="$({ { "$REAL" "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | tee "$err" >&2; } 5>&1)"
+fi
 exec 4>&-
 isnum "${rc:-}" || rc=1
+if [ -n "$GRAPH_PID" ]; then
+  ( sleep "$PROBE_TIMEOUT"; kill "$GRAPH_PID" 2>/dev/null ) & watchdog=$!
+  wait "$GRAPH_PID" 2>/dev/null || true
+  GRAPH_PID=''
+  kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null || true
+  case "$(cat "$GRAPH_META" 2>/dev/null)" in
+    none) ;;
+    secondary) printf 'GraphQL response: secondary rate limit\n' >> "$err"; rc=1 ;;
+    primary) printf 'GraphQL response: API rate limit exceeded\n' >> "$err"; rc=1 ;;
+    error) printf 'GraphQL response: errors with partial or absent data\n' >> "$err"; rc=1 ;;
+    unknown|*) say "GraphQL response shape unknown; quota result unclassified."; rc=1 ;;
+  esac
+fi
 put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
 if [ "$rc" -ne 0 ]; then
   # Exact failure record: HTTP status, rate-limit headers, and message body,
@@ -422,7 +590,7 @@ if [ "$rc" -ne 0 ]; then
   secondary=0
   grep -Eiq 'secondary rate limit|abuse detection|HTTP 429|too many requests|retry-after' "$err" && secondary=1
   snapshot=''
-  if [ "$QUOTA_PROBE" != off ] && [ "$secondary" = 0 ]; then
+  if [ "$QUOTA_ACTIVE" != off ] && [ "$secondary" = 0 ]; then
     snapshot="$(failure_quota_snapshot 2>/dev/null | tr -d '\r')"
     hdr="$(printf '%s\n' "$snapshot" | grep -Ei '^(HTTP/|retry-after|x-ratelimit-|x-github-request-id)')"
   fi
@@ -437,8 +605,13 @@ if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit
   ra="$(grep -Eio 'retry-after"?:? *[0-9]+' "$err" | grep -Eo '[0-9]+' | head -1)"
   wait="$BACKOFF"; isnum "${ra:-}" && [ "$ra" -gt "$wait" ] && wait="$ra"
   kind=secondary
-  if grep -Eiq 'API rate limit( already)? exceeded|rate limit( already)? exceeded for' "$err"; then
+  # The command ran after releasing the lock. Another caller may have switched
+  # active quota context while it was in flight; record this refusal in the
+  # originating context, under the lock, never in that caller's root cache.
+  AI_GH_NO_WAIT=0 acquire
+  if [ "$secondary" = 0 ] && grep -Eiq 'API rate limit( already)? exceeded|rate limit( already)? exceeded for' "$err"; then
     kind=primary
+    matched=0
     # rate_limit's response headers describe THAT request, not the failed
     # GraphQL/search operation. Only matching exhausted resource rows are proof.
     # A newly advertised resource in the failure response also belongs to an
@@ -454,15 +627,27 @@ if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit
       row="$(printf '%s\n' "$snapshot" | awk -v b="$bucket" '$1==b && NF==4 {print $2, $3, $4; exit}')"
       read -r remaining limit reset <<< "$row"
       if isnum "${remaining:-}" && isnum "${limit:-}" && isnum "${reset:-}" && [ "$remaining" -eq 0 ] && [ "$limit" -gt 0 ]; then
+        matched=1
         [ $(( reset - $(now) )) -le "$wait" ] || wait=$(( reset - $(now) ))
+        if [ "$CURRENT_CONTEXT_KEY" = "$(cat "$STATE/quota-context-key" 2>/dev/null)" ]; then
+          put "$(bucket_pause_path "$bucket")" "$reset"
+        elif [[ "$CURRENT_CONTEXT_KEY" =~ ^[0-9a-f]{64}$ ]]; then
+          mkdir -p "$STATE/quota-contexts/$CURRENT_CONTEXT_KEY"
+          put "$STATE/quota-contexts/$CURRENT_CONTEXT_KEY/quota-pause.$bucket" "$reset"
+        else
+          matched=0
+        fi
         printf '%s exhausted-resource=%s reset=%s\n' "$(date -u +%FT%TZ)" "$bucket" "$reset" >> "$STATE/refusals.log"
       fi
     done
   fi
   new=$(( $(now) + wait ))
-  extend_backoff "$new"
+  # A proven primary exhaustion belongs to its resource. Secondary refusals
+  # and primary refusals with no trustworthy bucket stay machine-wide.
+  if [ "$kind" != primary ] || [ "$matched" != 1 ]; then extend_backoff "$new"; fi
+  release
   { printf '%s kind=%s rc=%s retry_after=%s backoff=%ss args=%s\n' "$(date -u +%FT%TZ)" "$kind" "$rc" "${ra:-none}" "$wait" "$(safe_args "$@")"; sed 's/^/    /' "$err"; } | redact >> "$STATE/refusals.log"
-  say "GitHub refused with a $kind rate limit. Machine-wide back-off for ${wait}s recorded. Do not retry sooner."
+  say "GitHub refused with a $kind rate limit. Back-off for ${wait}s recorded. Do not retry sooner."
   rm -f "$err"; exit 75
 fi
 rm -f "$err"
