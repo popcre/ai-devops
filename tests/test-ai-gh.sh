@@ -176,7 +176,7 @@ case "$(uname -s)" in
     trap 'rm -rf "$TMP" "$context_root"' EXIT
     context_state="$context_root/state"
     CONTEXT_ACL_ROOT="$(cygpath -w "$context_root")" powershell.exe \
-      -NoProfile -NonInteractive -Command '$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; & icacls.exe $env:CONTEXT_ACL_ROOT /inheritance:r /grant:r ("*" + $sid + ":(OI)(CI)(F)") | Out-Null; exit $LASTEXITCODE' \
+      -NoProfile -NonInteractive -Command '$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; & icacls.exe "$env:CONTEXT_ACL_ROOT" /inheritance:r /grant:r ("*" + $sid + ":(OI)(CI)(F)") | Out-Null; exit $LASTEXITCODE' \
       >/dev/null 2>&1; context_acl_rc=$?
     powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
       -File "$(cygpath -w "$ROOT/tools/github-requests/secure-windows-path.ps1")" \
