@@ -175,6 +175,23 @@ if [ -z "${SYSTEMROOT:-}" ]; then
   wait "$LOCK_PID"; wait "$STORE_PID"
 fi
 OP_CALLS_AFTER_STORE="$(wc -l < "$TMP/op-calls" | tr -d ' ')"
+if (
+  source <(sed -n '/^lock_acquire() {/,/^}/p' "$SCRIPT")
+  lock_owner_record(){ cat "$1/owner" 2>/dev/null || true; }
+  lock_owner_alive(){ return 1; } # Simulate an MSYS pid invisible to this runtime.
+  legacy_lock="$TMP/muse-credential.lock.d"; mkdir "$legacy_lock"
+  printf '424242\n' > "$legacy_lock/pid"
+  SYSTEMROOT=Windows lock_acquire "$legacy_lock" test && exit 1
+  [ -d "$legacy_lock" ] && [ "$(cat "$legacy_lock/pid")" = 424242 ]
+); then ok 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; else bad 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; fi
+if [ -z "${SYSTEMROOT:-}" ]; then
+  if (
+    source <(sed -n '/^key_store_path_safe() {/,/^}/p; /^key_store_ok() {/,/^}/p' "$SCRIPT")
+    KEY_STORE="$AI_QWEN_KEY_STORE"
+    stat(){ [ "$1" = -f ] || return 1; case "$2" in %Lp) command stat -c %a "$3";; %u) command stat -c %u "$3";; esac; }
+    key_store_ok
+  ); then ok 'BSD stat fallback validates an owner-only Qwen key store'; else bad 'BSD stat fallback validates an owner-only Qwen key store'; fi
+fi
 
 # MSYS may report a WinGet .exe as an extensionless /op path. The wrapper must
 # still return the actual trusted package executable and reject a lone /op.
