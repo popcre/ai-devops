@@ -423,6 +423,14 @@ BOOTSTRAP
   check 'a Node CLI alias cannot bypass admission' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
   rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(["gh", "api", "rate_limit"])\n' > "$mutation_dir/bin/ai-bypass.py"
+  check 'a Python argument array cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.py"
+  printf '@echo off\r\ngh api repos/acme/example\r\n' > "$mutation_dir/bin/ai-bypass.cmd"
+  check 'a Windows CMD launcher cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.cmd"
   printf 'gh api repos/acme/example\n' > "$mutation_dir/bin/promote-windows-runner-to-service.ps1"
   check 'retired runner exception cannot admit direct gh again' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
