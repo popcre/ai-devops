@@ -189,7 +189,9 @@ OPERATIONS.update("bw." + value for value in ("snapshot", "dependents", "wake_mi
 OPERATIONS.update("pr." + value for value in ("view", "checks", "list", "merge", "create", "comment", "edit", "diff"))
 OPERATIONS.update("issue." + value for value in ("view", "list", "create", "comment", "edit", "close", "reopen"))
 OPERATIONS.update("run." + value for value in ("view", "list", "cancel"))
-CALLERS = {"unknown", "interactive", "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch", "ai-verify-run", "ai-memory-sync", "ai-test-local", "ai-merge-group-evidence"}
+CALLERS = {"unknown", "interactive", "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch", "ai-verify-run",
+           "ai-memory-sync", "ai-test-local", "ai-merge-group-evidence",
+           "ai-transcript-destination-check", "ai-workspace-status", "ai-reviewer-membership-drift"}
 COST_KEYS = {"schema", "utc", "measurement", "caller", "operation", "workflow", "graphql_points", "http_requests"}
 COST_KEYS_WITH_ID = COST_KEYS | {"workflow_id"}
 COST_SHAPES = {frozenset(keys | extra) for keys in (COST_KEYS, COST_KEYS_WITH_ID)

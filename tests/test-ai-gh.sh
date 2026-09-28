@@ -545,8 +545,10 @@ AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION=bw.snapshot "$GH" api repos/o/r >/
 check 'BlockerWatch fixed operation is recorded' "jq -se '.[-1].operation == \"bw.snapshot\" and .[-1].caller == \"ai-blocker-watch\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION='bw.snapshot\"injected' "$GH" api repos/o/r >/dev/null 2>&1
 check 'untrusted BlockerWatch operation cannot enter telemetry' "jq -se '.[-1].operation == \"api.unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
-AI_GH_CALLER=ai-merge-group-evidence "$GH" api repos/o/r >/dev/null 2>&1
-check 'merge proof source is retained in telemetry and report' "jq -se '.[-1].caller == \"ai-merge-group-evidence\"' '$TMP/telemetry-state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/telemetry-state/measurements' | jq -e 'any(.sources[]; .caller == \"ai-merge-group-evidence\")'"
+for caller in ai-merge-group-evidence ai-transcript-destination-check ai-workspace-status ai-reviewer-membership-drift; do
+  AI_GH_CALLER="$caller" "$GH" api repos/o/r >/dev/null 2>&1
+  check "$caller source is retained in telemetry and report" "jq -se '.[-1].caller == \"$caller\"' '$TMP/telemetry-state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/telemetry-state/measurements' | jq -e 'any(.sources[]; .caller == \"$caller\")'"
+done
 mkdir "$TMP/telemetry-state/measurements/write.lock"
 FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
 check 'telemetry failure is visible and preserves failed command status' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/terr' && cmp '$TMP/tout' '$TMP/expected-out'"
@@ -557,7 +559,7 @@ touch "$TMP/telemetry-state/measurements/2000-01-01.jsonl"
 "$GH" api graphql > /dev/null 2>/dev/null
 check 'telemetry retention removes only old owned date files' "[ ! -e '$TMP/telemetry-state/measurements/2000-01-01.jsonl' ] && jq -se '.[-1].bucket == \"graphql\" and .[-1].cli_executions == 1 and .[-1].principal == \"unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
-check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 7 and .opaque_cli_executions == 7 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 10 and .opaque_cli_executions == 10 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
 source "$ROOT/tools/github-requests/telemetry.sh"
 workflow_id="$(gh_measure_workflow_id)"
 access_context="v1:$(printf '%064d' 0)"
@@ -571,7 +573,7 @@ cache_rc=$?
 gh_measure_workflow_outcome ai-pr-wait pr_wait "$workflow_id" checks_failed 1234
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
 check 'GraphQL page costs link once to workflow and local reset headroom' \
-  "[ $rc -eq 0 ] && [ $cache_rc -eq 2 ] && jq -e '.records == 7 and .identity_probe_invocations >= 0 and .observed_graphql_cost_records == 2 and .linked_graphql_points == 5 and .completed_workflow_receipts == 1 and .observed_graphql_windows_local_only == [{\"context_ordinal\":1,\"reset_at\":\"2026-09-28T05:00:00Z\",\"records\":2,\"min_remaining\":4988,\"max_remaining\":4990,\"observed_points\":5}]' '$TMP/report' && ! grep -q '$access_context' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/telemetry-state/measurements'"
+  "[ $rc -eq 0 ] && [ $cache_rc -eq 2 ] && jq -e '.records == 10 and .identity_probe_invocations >= 0 and .observed_graphql_cost_records == 2 and .linked_graphql_points == 5 and .completed_workflow_receipts == 1 and .observed_graphql_windows_local_only == [{\"context_ordinal\":1,\"reset_at\":\"2026-09-28T05:00:00Z\",\"records\":2,\"min_remaining\":4988,\"max_remaining\":4990,\"observed_points\":5}]' '$TMP/report' && ! grep -q '$access_context' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/telemetry-state/measurements'"
 printf '%s' '{"data":{"rateLimit":{"cost":4,"remaining":"bad","resetAt":"FIXTURE_CANARY"}}}' |
   gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
