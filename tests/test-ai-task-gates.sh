@@ -136,6 +136,8 @@ check 'the ai-devops pilot protects Windows source gate and bootstrap' \
   "[ \"\$(class_of 'bin/install-ai-devops-windows.ps1')\" = reviewer-safety ] && [ \"\$(class_of 'bin/bootstrap-windows-dev.ps1')\" = reviewer-safety ]"
 check 'the ai-devops pilot protects its Windows source gate test' \
   "[ \"\$(class_of 'tests/test-windows-source-gate.ps1')\" = reviewer-safety ]"
+check 'the ai-devops pilot protects Linux installation routing and its tests' \
+  "[ \"\$(class_of 'install.sh')\" = reviewer-safety ] && [ \"\$(class_of 'update.sh')\" = reviewer-safety ] && [ \"\$(class_of 'tests/test-linux-install-authorization.sh')\" = reviewer-safety ]"
 mkdir -p "$TMP/class/bin"
 printf '#!/bin/sh\n' > "$TMP/class/bin/ai-task-gates"
 git -C "$TMP/class" add .ai-devops/task-gates.json bin/ai-task-gates
@@ -585,13 +587,13 @@ printf 'FROM scratch\n' > "$TMP/mixed-explain/services/api/Dockerfile"
 check 'explain includes reviewer proofs inside a stronger mixed class' \
   "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and (.required_gates|index(\"exact-head-independent-review\")!=null and index(\"installed-routing-proof\")!=null)'"
 
-printf '#!/usr/bin/env bash\n' > "$TMP/class/install.sh"
+printf '#!/usr/bin/env bash\n' > "$TMP/class/bin/install-fixture"
 ( cd "$TMP/class" && "$GATES" start --class installation ) >/dev/null
 check 'installation refuses deployment without an owner request' \
   "rc 3 '$TMP/class' check --before deploy"
 check 'an explicit owner request preserves the supported installation path' \
   "rc 0 '$TMP/class' check --before deploy --owner-request 'Albert requested installation'"
-rm -f "$TMP/class/install.sh"
+rm -f "$TMP/class/bin/install-fixture"
 jq '.paths += [{"glob":"bin/ai-review","class":"prose"}]' \
   "$TMP/class/.ai-devops/task-gates.json" > "$TMP/class/.ai-devops/task-gates.tmp"
 mv "$TMP/class/.ai-devops/task-gates.tmp" "$TMP/class/.ai-devops/task-gates.json"

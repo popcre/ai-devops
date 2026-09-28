@@ -1003,6 +1003,9 @@ cmd_install_verify(){
     committed_hash="$(git -C "$installed" show "$completed_head:bin/ai-task-gates" 2>/dev/null | sha256sum | cut -d' ' -f1)"
     [ "$committed_hash" = "$(jq -r .source_sha256 "$completion")" ] || blocked 'ai-task-gates: STOP. Completed Linux install receipt source hash changed.'
     git -C "$installed" merge-base --is-ancestor "$completed_head" "$target" 2>/dev/null || blocked 'ai-task-gates: STOP. Completed Linux release is not ancestor of target.'
+    if [ -n "$receipt" ] && [ "$receipt" != "$completed_head" ]; then
+      [ "$receipt" = "$target" ] && { [ -e "$pending" ] || [ -e "$ordinary" ]; } || blocked 'ai-task-gates: STOP. Installed manifest diverges from the last completed release.'
+    fi
   fi
   [ ! -e "$issued" ] || [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Ambiguous install authority state.'
   if [ "$phase" = finalize ]; then
@@ -1012,11 +1015,17 @@ cmd_install_verify(){
     [ ! -e "$pending" ] || [ ! -e "$ordinary" ] || blocked 'ai-task-gates: STOP. Ambiguous installation transaction records.'
     if [ -e "$pending" ]; then
       old="$(jq -r .installed_head "$pending")"
+      [ -z "$completed_head" ] || [ "$old" = "$completed_head" ] || blocked 'ai-task-gates: STOP. Protected install baseline differs from last completed release.'
       linux_review_authority "$pending" "$old" "$target" "$installed" "$launcher" "$candidate_root" finalize "$manifest" || blocked 'ai-task-gates: STOP. Pending install review proof changed.'
     else
       jq -e --arg old "$(jq -r .installed_head "$ordinary")" --arg target "$target" --arg path "$installed" \
         '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary install transaction does not match.'
       old="$(jq -r .installed_head "$ordinary")"
+      if [ -n "$completed_head" ]; then
+        [ "$old" = "$completed_head" ] || blocked 'ai-task-gates: STOP. Ordinary install baseline differs from last completed release.'
+      else
+        [ "$old" != "$target" ] || blocked 'ai-task-gates: STOP. An uncompleted first install cannot be finalized as ordinary.'
+      fi
       classes="$(install_release_classes "$old" "$target" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Ordinary transaction range cannot be classified.'
       while IFS=$'\t' read -r cls protected_flag; do
         [ -n "$cls" ] || continue
