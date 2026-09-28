@@ -333,21 +333,14 @@ state_record_override(){
      "$file" > "$file.tmp" && mv -f "$file.tmp" "$file"
 }
 
-# Owner ruling 2026-09-28 (popcre/ai-devops#996): no human approves anything.
-# Where a gate once demanded an owner request, it now demands an assigned AI
-# reviewer's APPROVE: --reviewer-approval names the reviewer's report, and the
-# gate accepts it only when the reviewer lifecycle recorded that exact report as
-# a completed, non-stale APPROVE run for this repository, this exact head, and
-# this exact source digest, by a provider different from the session that
-# called the review (the lifecycle's recorded caller). Nothing here is read from
-# caller-written fields. Action binding is by review mode: an action that
-# changes a machine or a live system needs a final-check or security-review;
-# the other forbidden actions (review, pr-wait, code-only-review) also accept a
-# plan-review, which is ungated, so a documentation change can obtain the
-# approval without first passing the gate it lifts.
+# An approval is a reviewer report the lifecycle recorded as a completed,
+# non-stale APPROVE of this repository key, head, and source digest, whose
+# recorded implementer_engine differs from its provider (#996). Live actions
+# need review_mode final-check or security-review; review, pr-wait, and
+# code-only-review also accept plan-review, which is itself ungated.
 # Usage: reviewer_approval_summary REPORT ACTION HEAD WORKTREE
 reviewer_approval_summary(){
-  local report="$1" action="$2" head="$3" worktree="$4" identity key digest report_hash lifecycle_root state row provider mode name
+  local report="$1" action="$2" head="$3" worktree="$4" identity key digest report_hash lifecycle_root state row mode
   [ -f "$report" ] && [ ! -L "$report" ] || return 1
   report="$(realpath -- "$report")" || return 1
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
@@ -361,21 +354,17 @@ reviewer_approval_summary(){
     if jq -e --arg h "$head" --arg p "$report" --arg s "$report_hash" --arg d "$digest" --arg k "$key" '
       .status=="completed" and .verdict=="APPROVE" and .stale==false and .head==$h
       and .repository_key==$k and .source_digest==$d and .report_path==$p and .report_sha256==$s
-      and (.provider|type=="string" and length>0) and (.caller|type=="string" and length>0)
-      and ((.provider|ascii_downcase) != (.caller|ascii_downcase))' "$state" >/dev/null 2>&1; then row="$state"; break; fi
+      and (.provider|type=="string" and length>0) and (.implementer_engine|type=="string" and length>0)
+      and ((.provider|ascii_downcase) != (.implementer_engine|ascii_downcase))' "$state" >/dev/null 2>&1; then row="$state"; break; fi
   done
   [ -n "$row" ] || return 1
-  provider="$(jq -r .provider "$row")"; name="$(basename "$report")"
-  mode=""
-  for m in plan-review diff-review security-review visual-review final-check; do
-    case "$name" in "$provider-$m-"*) mode="$m" ;; esac
-  done
+  mode="$(jq -r '.review_mode // ""' "$row")"
   case "$action" in
-    review|pr-wait|code-only-review) [ -n "$mode" ] || return 1 ;;
+    review|pr-wait|code-only-review) case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) return 1 ;; esac ;;
     *) [ "$mode" = final-check ] || [ "$mode" = security-review ] || return 1 ;;
   esac
   jq -r --arg a "$action" --arg m "$mode" --arg x "$report_hash" \
-    '"APPROVE by \(.provider) (caller \(.caller), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
+    '"APPROVE by \(.provider) (implementer \(.implementer_engine), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
 }
 
 # --------------------------------------------------------------------------

@@ -240,8 +240,11 @@ begin(){
   BEGIN_LOCK="$lock"; BEGIN_TOKEN="$token"; trap cleanup_begin_failure EXIT INT TERM
   printf '%s\n' "$token" > "$lock/token"; printf '%s\n' "$state" > "$lock/state"
   now="$(date -u +%FT%TZ)"
-  row="$(jq -nc --argjson identity "$identity" --arg provider "$provider" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg base "$base" --arg lock "$lock" --arg token "$token" --arg now "$now" \
-    '{schema_version:1,status:"preflight",provider:$provider,run_id:$run,session_id:(if $session=="" then null else $session end),caller:$caller,base:(if $base=="" then null else $base end),repository_root:$identity.repository_root,normalized_upstream:$identity.normalized_upstream,repository_key:$identity.repository_key,head:$identity.head,source_digest:$identity.source_digest,working_tree_sha256:$identity.working_tree_sha256,lock_path:$lock,lock_token:$token,started_at:$now,updated_at:$now}')"
+  local review_mode="${AI_REVIEW_GATE_MODE:-}" implementer="${AI_REVIEW_IMPLEMENTER:-}"
+  case "$review_mode" in ''|plan-review|diff-review|security-review|visual-review|final-check) ;; *) review_mode="" ;; esac
+  [ -z "$implementer" ] || valid_id "$implementer" || die "AI_REVIEW_IMPLEMENTER is invalid."
+  row="$(jq -nc --argjson identity "$identity" --arg provider "$provider" --arg run "$run" --arg session "$session" --arg caller "$caller" --arg base "$base" --arg lock "$lock" --arg token "$token" --arg now "$now" --arg rmode "$review_mode" --arg impl "$implementer" \
+    '{schema_version:1,status:"preflight",provider:$provider,run_id:$run,session_id:(if $session=="" then null else $session end),caller:$caller,review_mode:(if $rmode=="" then null else $rmode end),implementer_engine:(if $impl=="" then null else $impl end),base:(if $base=="" then null else $base end),repository_root:$identity.repository_root,normalized_upstream:$identity.normalized_upstream,repository_key:$identity.repository_key,head:$identity.head,source_digest:$identity.source_digest,working_tree_sha256:$identity.working_tree_sha256,lock_path:$lock,lock_token:$token,started_at:$now,updated_at:$now}')"
   atomic_json "$state" "$row"
   if [ "$mode" != none ]; then
     local -a preflight_args=(check "$provider" "$repo")

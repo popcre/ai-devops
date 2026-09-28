@@ -744,8 +744,12 @@ check 'a paid review is refused for a documentation change' "rc 3 '$TMP/gate' ch
 check 'a long PR wait is refused for a documentation change' "rc 3 '$TMP/gate' check --before pr-wait"
 check 'an assigned AI reviewer approval lifts a non-protected forbidden action' \
   "rc 0 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review)\""
-check 'an approval whose reviewer is the calling engine is refused' \
-  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.caller=\"grok\"')\""
+check 'an approval whose reviewer is the implementing engine is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.implementer_engine=\"grok\"')\""
+check 'a review with no recorded implementing engine is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.implementer_engine=null')\""
+check 'a review with no recorded mode is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.review_mode=null')\""
 check 'an approval bound to another head is refused' \
   "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review 0000000000000000000000000000000000000000)\""
 check 'a REJECT verdict is refused' \

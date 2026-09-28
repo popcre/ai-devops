@@ -207,6 +207,9 @@ appr_file(){ mint_reviewer_approval "$TMP" "$1" plan-review; }
 GATE_STATE="$(gated_begin gate-owner --reviewer-approval "$(appr_file "$GR" review "$REPO_ROOT/bin/ai-task-gates")")"
 check "a reviewer-approved review still runs the full gates" "[ -f \"\$GATE_STATE\" ]"
 check "the reviewer-approved review ran its provider preflight" "grep -q '^check grok ' '$GATE_LOG'"
+REC_STATE="$( cd "$GR" && AI_REVIEW_GATE_MODE=plan-review AI_REVIEW_IMPLEMENTER=claude AI_TASK_GATES_MODE=standard AI_TEST_PREFLIGHT_LOG="$GATE_LOG" "$SCRIPT" begin --provider grok --repo "$GR" --run-id gate-recorded --caller codex )"
+check "begin records the review mode and implementing engine for gate independence" \
+  "jq -e '.review_mode==\"plan-review\" and .implementer_engine==\"claude\" and .caller==\"codex\"' \"\$REC_STATE\""
 
 printf 'select 1;\n' > "$GR/migration.sql"
 GATE_OUT2="$(gated_begin gate-escalated 2>&1)"; GATE_RC2=$?

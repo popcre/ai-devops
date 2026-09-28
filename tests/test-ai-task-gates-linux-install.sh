@@ -47,7 +47,7 @@ stage_report(){
 manifest "$old"
 gate(){ (cd "$2" && "$2/bin/ai-task-gates" install-verify --phase "$1" --target-head "$3" --installed-checkout "$TMP/installed" --installed-launcher "$TMP/bin/ai-task-gates" "${@:4}"); }
 expect_ok(){ local name="$1"; shift; if "$@" > "$TMP/last-output" 2>&1; then printf 'PASS: %s\n' "$name"; else printf 'FAIL: %s\n' "$name"; tail -n 4 "$TMP/last-output"; exit 1; fi; }
-appr(){ mint_reviewer_approval "$TMP" "${3:-$TMP/candidate}" final-check "$1" "${2:+.caller=\"$2\"}"; }
+appr(){ mint_reviewer_approval "$TMP" "${3:-$TMP/candidate}" final-check "$1" "${2:+.implementer_engine=\"$2\"}"; }
 expect_stop(){ local name="$1"; shift; if "$@" >/dev/null 2>&1; then printf 'FAIL: %s\n' "$name"; exit 1; else printf 'PASS: %s\n' "$name"; fi; }
 
 (cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null

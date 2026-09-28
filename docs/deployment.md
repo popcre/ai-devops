@@ -278,7 +278,9 @@ once took an owner request now takes `--reviewer-approval <report>`: the report
 of an AI reviewer run through `ai-review`. The gate accepts it only when the
 reviewer lifecycle recorded that exact report (path and SHA-256) as a completed,
 non-stale `APPROVE` for this repository, the exact head, and the exact source
-digest, by a provider different from the session that called the review. An
+digest, by a provider different from the implementing engine that
+`ai-review` recorded (`--implementer ENGINE`, else `AI_IMPLEMENTER_ENGINE`,
+else detected for Claude Code and Codex; a row without one cannot lift a gate). An
 install, deploy, or other live action needs a `final-check` or
 `security-review` report; `review`, `pr-wait`, and `code-only-review` also
 accept an ungated `plan-review`. A protected class's forbidden actions still
