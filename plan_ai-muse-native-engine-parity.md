@@ -384,10 +384,9 @@ the catalog when one is readable, else against the help's fixed list.
 - **0A. Land/coordinate the credential-lock dependency.** Check
   `git -C C:\repos\ai-devops-wt-muse-lock-0917 status` (read-only!) and the PR
   list (`ai-gh pr list`). If landed, note the merge SHA here and rebase
-  expectations. If still open/uncommitted after a reasonable wait, ask Albert
-  whether to proceed on a coordinating basis. Do not edit that worktree.
-  *Gate:* the branch is merged to `main` (or Albert explicitly clears Phase A
-  to proceed without it).
+  expectations. If still open/uncommitted after a reasonable wait, report it `Blocked —` and
+  proceed on a coordinating basis only with an assigned AI reviewer's APPROVE. Do not edit that worktree.
+  *Gate:* the branch is merged to `main` (or an assigned AI reviewer APPROVEs Phase A proceeding without it).
 - **0B. Start each phase fresh.** Own worktree
   (`git -C C:\repos\ai-devops fetch origin --prune && git -C C:\repos\ai-devops
   worktree add C:\repos\ai-devops-worktrees/<slug> -b claude/<slug> origin/main`),

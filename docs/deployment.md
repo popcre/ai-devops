@@ -127,12 +127,11 @@ candidate at its current HEAD and a separate reviewer candidate at the exact
 merged target. From the installation candidate, run the target worktree's
 reviewed gate with `start --class installation`, then advance only that
 candidate to the target commit. Declare the separate reviewer candidate as
-`reviewer-safety` and obtain its read-only exact-head independent `APPROVE`
-review.
+`reviewer-safety` and obtain its read-only exact-head independent `APPROVE` review.
 Run `ai-task-gates authorize-install --target-head <full SHA>
 --installed-checkout <canonical checkout> --installed-launcher <managed
 ai-task-gates launcher> --review-report <exact-head APPROVE report>
---owner-request '<host, action, and Albert authorization>'`. On Windows, pass
+--owner-request '<host, action, and quote of Albert requesting this task>'`. On Windows, pass
 the managed extensionless launcher; on Ubuntu, pass its symlink. This separate
 installation task leaves `check --before deploy` forbidden for a reviewer-safety
 change. The authorization binds the candidate, review, installed checkout,
@@ -190,7 +189,7 @@ first rollout uses the reviewed gate from the target worktree, so an older
 installed gate does not need to understand these new options.
 
 For a first Ubuntu installation at an unchanged commit, start a separate clean
-installation task and obtain an independent read-only `APPROVE` for the exact
+installation task and obtain an assigned AI reviewer's read-only `APPROVE` for the exact
 target source and `first-managed-install` operation. From that task's exact
 target worktree, issue `authorize-install --first-install` with the target SHA,
 canonical checkout, `/usr/local/bin/ai-task-gates` launcher, approved report,
@@ -276,21 +275,21 @@ an install by the other reports "up to date" rather than inventing local edits.
 
 ```bash
 cd /worksp/ai-devops
-./update.sh --owner-request '<specific approved action>'
+./update.sh --owner-request '<quote of Albert requesting this task>'
 ```
 
 `update.sh` never overwrites `/etc/ai-devops/*.env`. It returns nonzero if the
 installer has any required failure and reports the exact source SHA attempted.
 
 On Linux, `update.sh --expected-head <full-merged-SHA> --owner-request
-'<specific approved action>'` pins a protected update before the installed
+'<quote of Albert requesting this task>'` pins a protected update before the installed
 checkout moves. The **first** protected rollout must invoke the merged target
 script from a clean, exact-SHA worktree sharing the installed checkout's Git
 common directory:
 
 ```bash
 cd /worksp/ai-devops-candidate
-./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA> --owner-request '<specific approved action>'
+./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA> --owner-request '<quote of Albert requesting this task>'
 ```
 
 The updater verifies the candidate and installed checkout relationship, fetches
@@ -299,7 +298,7 @@ candidate, runs its gate, then advances only the named
 installed checkout. Later updates can run from the installed checkout itself.
 `install.sh` checks the same pending authorization before its first machine
 change, including when called directly. Same-source maintenance uses
-`./install.sh --owner-request '<specific approved action>'`; a protected source
+`./install.sh --owner-request '<quote of Albert requesting this task>'`; a protected source
 change cannot use that route. One checkout lock covers the update and install.
 The installer saves protected config, the manifest, managed launcher targets,
 the user crontab, and the protected configuration checkout's commit before it
