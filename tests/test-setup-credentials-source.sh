@@ -127,6 +127,9 @@ if [ -n "$GLM_REPO_SETUP" ] &&
      trap '\''rm -rf "$glm_probe"'\'' EXIT
      test "$(git -C "$glm_probe" ls-files)" = README.md
      "$SANDBOX" assert-public "$glm_probe" >/dev/null
+     before="$("$SANDBOX" digest "$glm_probe")"
+     mkdir -p "$glm_probe/.ai/reviews" && printf report > "$glm_probe/.ai/reviews/glm-probe.md"
+     test "$("$SANDBOX" digest "$glm_probe")" = "$before"
    '; then
   ok "GLM installer creates a classifiable public probe repository"
 else
