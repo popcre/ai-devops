@@ -110,6 +110,7 @@ cp "$ROOT/config/opencode-muse/agent/muse-review.md" "$HOME_FIX/.config/ai-devop
 mkdir -p "$REPO/.ai/reviews"; printf 'historic\n' > "$REPO/.ai/reviews/historic.md"; git -C "$REPO" add -f .ai/reviews/historic.md; git -C "$REPO" commit -qm 'tracked historic review'
 cat > "$TMP/bin/op" <<'EOF'
 #!/usr/bin/env bash
+[ -z "${OP_STUB_CALLS_FILE:-}" ] || printf 'read\n' >> "$OP_STUB_CALLS_FILE"
 if [ -n "${OP_STUB_DELAY:-}" ]; then
   mkdir "$OP_STUB_ACTIVE" 2>/dev/null || printf 'overlap
 ' >> "$OP_STUB_OVERLAP"
@@ -174,7 +175,12 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$TMP/bin/op" "$BIN/opencode.exe"
-ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
+ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_DIR='$TMP' AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
+export AI_MUSE_TEST_DIR="$TMP" AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe
+mkdir -p "$HOME_FIX/.config/ai-devops/secrets"
+chmod 700 "$HOME_FIX/.config/ai-devops" "$HOME_FIX/.config/ai-devops/secrets"
+printf 'fake-key\n' > "$HOME_FIX/.config/ai-devops/secrets/muse-api-key"
+chmod 600 "$HOME_FIX/.config/ai-devops/secrets/muse-api-key"
 muse_recovery_cases(){
   local calls="$TMP/recovery-calls" m raw rep before tmp report_inode
   local real_jq
@@ -391,6 +397,7 @@ check 'unknown launched provider work cannot be deleted reconciled or retried' "
 mkdir -p "$TMP/state/credential.lock.d"; touch -d '5 minutes ago' "$TMP/state/credential.lock.d"
 NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)"
 check 'tracked historic reports do not block a new exact destination' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
+eval "$ENV AI_MUSE_KEY_STORE='$TMP/stale-lock-key' '$SCRIPT' store-key" >/dev/null
 check 'old credential lock without an owner is reconciled' "test ! -e '$TMP/state/credential.lock.d'"
 check 'new returns first response' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
 check 'OpenCode ignores an invalid native reasoning knob without passing a flag' "cd '$REPO' && eval \"$ENV AI_MUSE_REASONING_EFFORT=not-a-native-tier MUSE_STUB_ARGS_FILE='$TMP/opencode-reasoning-args' '$SCRIPT' new ignored-reasoning --prompt test\" >/dev/null && test -s '$TMP/opencode-reasoning-args' && ! grep -qx -- --reasoning-effort '$TMP/opencode-reasoning-args'"
@@ -505,19 +512,19 @@ check 'compatibility review accepts an explicit verdict' "cd '$REPO' && eval \"$
 
 CONC="$TMP/concurrent-cred"; mkdir -p "$CONC"; CONC_PIDS=()
 for n in 1 2 3; do
-  (cd "$REPO" && eval "$ENV OP_STUB_DELAY=4 OP_STUB_ACTIVE='$CONC/active' OP_STUB_OVERLAP='$CONC/overlap' '$SCRIPT' new cred-race-$n --prompt race$n") > "$CONC/$n.log" 2>&1 & CONC_PIDS+=("$!")
+  (cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$CONC/key-$n' OP_STUB_DELAY=4 OP_STUB_ACTIVE='$CONC/active' OP_STUB_OVERLAP='$CONC/overlap' '$SCRIPT' store-key") > "$CONC/$n.log" 2>&1 & CONC_PIDS+=("$!")
 done
 CONC_RC=0; for pid in "${CONC_PIDS[@]}"; do wait "$pid" || CONC_RC=1; done
-check 'three simultaneous turns with a slow 1Password read all succeed' "test '$CONC_RC' -eq 0 && grep -q '^Muse session: cred-race-1$' '$CONC/1.log' && grep -q '^Muse session: cred-race-2$' '$CONC/2.log' && grep -q '^Muse session: cred-race-3$' '$CONC/3.log' && grep -q 'waiting for another turn' '$CONC'/*.log && ! grep -q 'busy' '$CONC'/*.log"
-check 'simultaneous 1Password reads stay serialized' "test ! -e '$CONC/overlap' && test ! -e '$TMP/state/credential.lock.d'"
+check 'three simultaneous explicit key refreshes succeed' "test '$CONC_RC' -eq 0 && grep -qx fake-key '$CONC/key-1' && grep -qx fake-key '$CONC/key-2' && grep -qx fake-key '$CONC/key-3' && grep -q 'waiting for another turn' '$CONC'/*.log && ! grep -q 'busy' '$CONC'/*.log"
+check 'explicit 1Password refreshes stay serialized' "test ! -e '$CONC/overlap' && test ! -e '$TMP/state/credential.lock.d'"
 mkdir -p "$TMP/state/credential.lock.d"; printf '%s
 ' "$$" > "$TMP/state/credential.lock.d/pid"
-CRED_TIMEOUT_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_CREDENTIAL_WAIT_SECONDS=2 '$SCRIPT' new cred-timeout --prompt t" 2>&1 || true)"
+CRED_TIMEOUT_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$CONC/timeout-key' AI_MUSE_CREDENTIAL_WAIT_SECONDS=2 '$SCRIPT' store-key" 2>&1 || true)"
 check 'a held credential lock fails closed with a clear message after the wait budget' "printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q 'credential lock still held by another Muse turn after 2s' && ! printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q fake-key"
 rm -rf "$TMP/state/credential.lock.d"
 
-# Protected key store: the installer's copy is used before 1Password, and
-# 1Password is only the refresh path when Meta rejects the stored key (#720).
+# Protected key store: review turns fail closed; only explicit store-key uses
+# 1Password when the store is missing or Meta rejects its key.
 KS="$TMP/keystore/muse-api-key"
 STORE_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' store-key" 2>&1)"
 check 'store-key writes the key without printing it' "grep -qx fake-key '$KS' && ! printf '%s' \"\$STORE_OUT\" | grep -q fake-key"
@@ -532,20 +539,24 @@ check 'installer stores the Muse key idempotently when 1Password is present' "gr
 DOCTOR_KS_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' '$SCRIPT' doctor" 2>&1 || true)"
 if printf '%s\n' "$DOCTOR_KS_OUT" | grep -q 'PASS  protected Muse key store is present'; then ok 'doctor reports the protected key store'; else bad 'doctor reports the protected key store'; printf '%s\n' "$DOCTOR_KS_OUT" | sed 's/^/    doctor: /' | head -40; fi
 mkdir -p "$TMP/curl401"; printf '#!/usr/bin/env bash\nprintf 401\n' > "$TMP/curl401/curl"; chmod +x "$TMP/curl401/curl"
-REJ_OUT="$(cd "$REPO" && eval "$ENV PATH='$TMP/curl401:$TMP/bin:$PATH' AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live" 2>&1)"
-check 'a rejected stored key is refreshed from 1Password and rewritten' "grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && grep -qx fake-key '$KS' && printf '%s' \"\$REJ_OUT\" | grep -q 'stored key was rejected'"
-check 'a missing key store falls back to 1Password without writing a store' "rm -f '$KS' && cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && test ! -e '$KS'"
-# The protections that make the store "protected" fail closed to 1Password.
+: > "$TMP/op-review-calls"
+REJ_OUT="$(cd "$REPO" && eval "$ENV PATH='$TMP/curl401:$TMP/bin:$PATH' AI_MUSE_KEY_STORE='$KS' OP_STUB_CALLS_FILE='$TMP/op-review-calls' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live" 2>&1 || true)"
+check 'a rejected key stops review without reading 1Password' "grep -qx stored-key '$KS' && test ! -s '$TMP/op-review-calls' && printf '%s' \"\$REJ_OUT\" | grep -q 'stored Muse key was rejected'"
+check 'explicit store-key refreshes a rejected key' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' OP_STUB_CALLS_FILE='$TMP/op-review-calls' '$SCRIPT' store-key\" >/dev/null && grep -qx fake-key '$KS' && test \"\$(wc -l < '$TMP/op-review-calls')\" -eq 1"
+rm -f "$KS"; : > "$TMP/op-review-calls"
+MISSING_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' OP_STUB_CALLS_FILE='$TMP/op-review-calls' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live" 2>&1 || true)"
+check 'a missing key store stops review without reading 1Password' "test ! -e '$KS' && test ! -s '$TMP/op-review-calls' && printf '%s' \"\$MISSING_OUT\" | grep -q 'protected Muse key store is unavailable'"
+# The protections that make the store "protected" also fail closed during review.
 mkdir -p "$TMP/keystore-real"; printf 'linked-key\n' > "$TMP/keystore-real/muse-api-key"; chmod 600 "$TMP/keystore-real/muse-api-key"
 if MSYS=winsymlinks:nativestrict ln -s "$TMP/keystore-real" "$TMP/keystore-link" 2>/dev/null && [ -L "$TMP/keystore-link" ]; then
-  check 'a key store behind a linked directory is refused' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$TMP/keystore-link/muse-api-key' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env'"
+  check 'a key store behind a linked directory is refused' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$TMP/keystore-link/muse-api-key' OP_STUB_CALLS_FILE='$TMP/op-review-calls' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null 2>&1 && test ! -s '$TMP/op-review-calls'"
   check 'store-key refuses to write through a linked directory' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$TMP/keystore-link/muse-api-key' '$SCRIPT' store-key\" >/dev/null 2>&1 && grep -qx linked-key '$TMP/keystore-real/muse-api-key'"
 else
   skip 'linked key store checks need symlink support'
 fi
 if ! command -v cygpath >/dev/null 2>&1; then
   printf 'loose-key\n' > "$KS"; chmod 644 "$KS"
-  check 'a key store that is not owner-only is refused' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env'"
+  check 'a key store that is not owner-only is refused' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$KS' OP_STUB_CALLS_FILE='$TMP/op-review-calls' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null 2>&1 && test ! -s '$TMP/op-review-calls'"
 fi
 check 'the key probe sends the key from a header file, never argv' "grep -q 'curl .*-H @\"\$hdr\"' '$SCRIPT' && ! grep -q 'Bearer \$MODEL_API_KEY' '$SCRIPT'"
 check 'only a test run may redirect the key probe' "grep -q '^KEY_PROBE_URL=\"https://api.meta.ai/v1/models\"\$' '$SCRIPT' && grep -q 'AI_MUSE_TEST_DIR:-}\" \] || KEY_PROBE_URL=' '$SCRIPT'"

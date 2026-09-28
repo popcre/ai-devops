@@ -372,10 +372,9 @@ read_key_from_op(){
   done
   MODEL_API_KEY="$(op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"; release_credential_lock; [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
 }
-# The installer stores the Muse key once in a per-user protected file so a
-# turn does not need 1Password. 1Password is only the fallback: when the
-# store is missing (read, not written - storing is the installer's job) or
-# when Meta rejects the stored key (read and rewrite the store).
+# The installer stores the Muse key once in a per-user protected file.
+# Review turns only read that store. Explicit store-key is the sole 1Password
+# refresh path, so a missing or rejected key cannot invoke it during review.
 key_store_ok(){
   [ -f "$KEY_STORE" ] && [ -s "$KEY_STORE" ] && ! linked_below_home "$KEY_STORE" || return 1
   # Windows permissions can drift, so the ACL is re-enforced on every use.
@@ -403,13 +402,11 @@ probe_key_rejected(){
   case "$code" in 401|403) return 0;; *) return 1;; esac
 }
 load_key(){
-  if key_store_ok; then
-    IFS= read -r MODEL_API_KEY < "$KEY_STORE" || MODEL_API_KEY=""
-    if [ -n "$MODEL_API_KEY" ] && ! probe_key_rejected "$MODEL_API_KEY"; then return 0; fi
-    printf 'Muse: stored key was rejected; refreshing it from 1Password.\n' >&2
-    read_key_from_op; write_key_store "$MODEL_API_KEY"; return 0
-  fi
-  read_key_from_op
+  key_store_ok || die 'protected Muse key store is unavailable; run ai-muse store-key outside a review.'
+  IFS= read -r MODEL_API_KEY < "$KEY_STORE" || MODEL_API_KEY=""
+  [ -n "$MODEL_API_KEY" ] || die 'protected Muse key store is empty; run ai-muse store-key outside a review.'
+  probe_key_rejected "$MODEL_API_KEY" && die 'stored Muse key was rejected; run ai-muse store-key outside a review.'
+  return 0
 }
 # store-key --if-missing is the installer's idempotent form: a valid store is
 # left untouched and 1Password is not read at all.
