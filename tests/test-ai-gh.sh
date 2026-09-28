@@ -147,12 +147,31 @@ rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
 check 'mixed CLI cost is unknown and its resource snapshots are invalidated' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q '^0 3000 5000 ' '$TMP/state/quota' && grep -q '^0 3000 5000 ' '$TMP/state/quota.graphql'"
 check 'telemetry observes named server buckets with a private principal label' "jq -e '.buckets.core.remaining == 3000 and .buckets.graphql.remaining == 3000 and .buckets.search.remaining == 30 and (.principal | startswith(\"local-sha256:\"))' '$TMP/state/quota-observation.json'"
+check 'verified quota snapshot binds to an opaque local access context' "jq -e '.access_context | strings | test(\"^v1:[0-9a-f]{64}$\")' '$TMP/state/quota-observation.json'"
 # Git Bash on NTFS reports its inherited Windows ACL through synthetic modes;
 # POSIX hosts can additionally prove the file itself is mode 600.
 salt_check="[ \$(stat -c %a '$TMP/state/principal-salt') = 600 ]"
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) salt_check="[ -s '$TMP/state/principal-salt' ]";; esac
 check 'principal label uses a private local salt' "$salt_check && ! grep -R -q 55610577 '$TMP/state/measurements' '$TMP/state/quota-measurements'"
 check 'quota observations retain bounded history without another request' "jq -se 'length >= 1 and .[-1].buckets.graphql.remaining == 3000' '$TMP/state/quota-measurements/'*.jsonl"
+
+# One verified principal can hold distinct PATs. Quota snapshots must keep
+# their access contexts apart while the local context lookup makes no API call.
+context_log="$TMP/context-join-calls"; identity_log="$TMP/context-join-identity.log"
+for token in ghp_fixtureA ghp_fixtureB; do
+  AI_GH_STATE_DIR="$TMP/context-join-state" FAKE_MODE=quota FAKE_REMAINING=4000 \
+    FAKE_TOKEN="$token" FAKE_LOG="$context_log" FAKE_IDENTITY_LOG="$identity_log" \
+    AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api repos/o/r >/dev/null 2>&1
+done
+check 'same-principal credentials retain two distinct quota access contexts' "jq -se 'length == 2 and (map(.access_context) | all(. != null)) and (map(.access_context) | unique | length == 2) and (map(.principal) | unique | length == 1)' '$TMP/context-join-state/quota-measurements/'*.jsonl"
+check 'local context lookup adds no GitHub API request' "[ \$(grep -c '^start' '$context_log') -eq 4 ] && [ \$(wc -l < '$identity_log') -eq 2 ]"
+check 'quota history contains no token or numeric principal' "! grep -Eq 'ghp_fixtureA|ghp_fixtureB|55610577' '$TMP/context-join-state/quota-measurements/'*.jsonl"
+
+AI_GH_STATE_DIR="$TMP/context-missing-state" FAKE_MODE=quota FAKE_REMAINING=4000 \
+  FAKE_TOKEN=ghp_fixtureC FAKE_IDENTITY_STATUS=1 FAKE_LOG="$TMP/context-missing-calls" \
+  AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api repos/o/r >/dev/null 2>&1; context_rc=$?
+check 'unverified identity leaves quota access context unattributed' "[ $context_rc -eq 0 ] && jq -e '.access_context == null and .principal == \"unknown\"' '$TMP/context-missing-state/quota-observation.json'"
+check 'unverified quota history contains no credential or principal' "! grep -Eq 'ghp_fixtureC|55610577' '$TMP/context-missing-state/quota-measurements/'*.jsonl"
 rm -f "$TMP/state/quota"; : > "$FAKE_LOG"
 FAKE_MODE=quota FAKE_REMAINING=900 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_NO_WAIT=1 "$GH" pr view 3 >/dev/null 2>&1; rc=$?
 check 'budget below 20% pauses its resource without making the call' "[ $rc -eq 75 ] && ! grep -q 'pr view 3' '$FAKE_LOG' && [ \$(cat '$TMP/state/quota-pause.core') -gt \$(date +%s) ] && grep -q 'budget-pause remaining=900/5000' '$TMP/state/refusals.log'"
@@ -693,6 +712,8 @@ check 'quota observation rejects non-regular destination too' "[ $rc -eq 1 ] && 
 STATE="$TMP/named-row-state"; mkdir -p "$STATE"
 gh_measure_quota_rows $'future_resource\t9\t10\t30\nsearch\t7\t30\t40\ncore\t80\t100\t50\ngraphql\t61\t200\t60'
 check 'named quota telemetry ignores row order and extra resource names' "jq -e '.buckets.core.remaining == 80 and .buckets.graphql.remaining == 61 and .buckets.search.remaining == 7 and (.buckets|keys|length) == 3' '$STATE/quota-observation.json'"
+gh_measure_quota_rows $'graphql\t61\t200\t60' 'ghp_FIXTURE_CANARY'
+check 'malformed access context cannot enter a quota snapshot' "jq -e '.access_context == null' '$STATE/quota-observation.json' && ! grep -R -q 'FIXTURE_CANARY' '$STATE/quota-measurements'"
 gh_measure_quota_rows $'core\tbad\t100\t50\nsearch\t7\t30\t40\textra'
 check 'missing malformed and overlong quota rows remain unknown' "jq -e '.buckets.core == null and .buckets.graphql == null and .buckets.search == null' '$STATE/quota-observation.json'"
 
