@@ -187,8 +187,11 @@ fi
 kill "$foreign_pid" 2>/dev/null || true; wait "$foreign_spawn" 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; done
 
-# Case 5: a lock held for less than the timeout is left alone.
-flock "$lock" sleep 120 &
+# Case 5: a lock held for less than the timeout is left alone. --close keeps
+# the sleep child from inheriting the lock fd: the case's cleanup kills only
+# the wrapper, and an orphaned fd child would hold the lock for its full
+# 120s, silently poisoning every later case (live evidence, seventh pass).
+flock --close "$lock" sleep 120 &
 young_holder=$!
 for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$lock" true 2>/dev/null || break; sleep 0.2; done
 if ! "$DOCTOR" --recover --older-than 3600 "$lock" >"$TMP/out6" 2>&1 && grep -q 'younger than' "$TMP/out6" \
@@ -202,10 +205,12 @@ for _ in 1 2 3 4 5; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; do
 
 # Case 1: a live our-tool holder at least as old as the wait is recovered,
 # and the lock is really free afterwards (the #940 reproduction, time-scaled).
+# WITHOUT --close, on purpose: the wrapper's sleep child inherits the lock fd
+# and the doctor must clear both.
 flock "$lock" sleep 120 &
 stuck_holder=$!
 for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$lock" true 2>/dev/null || break; sleep 0.2; done
-sleep 2 # holder age crosses --older-than 2
+sleep 3 # holder AND its inherited-fd child cross --older-than 2 with margin
 start="$(date +%s)"
 if "$DOCTOR" --recover --older-than 2 "$lock" >"$TMP/out7" 2>&1 && grep -q 'recovered' "$TMP/out7" \
    && flock -n "$lock" true 2>/dev/null \
@@ -215,6 +220,13 @@ else
   result fail 'a live our-tool holder of age is TERM/KILLed and the lock is freed'
   dump_case 'case1 our-tool holder of age' "$TMP/out7" "$stuck_holder"
 fi
+# The inherited-fd child must not outlive this case whatever the verdict:
+# kill the wrapper and any child it still parents.
+stuck_child="$(ps -o pid= --ppid "$stuck_holder" 2>/dev/null | tr -d ' ' | head -1)"
+kill "$stuck_holder" 2>/dev/null || true
+[ -n "$stuck_child" ] && kill "$stuck_child" 2>/dev/null || true
+wait "$stuck_holder" 2>/dev/null || true
+for _ in 1 2 3 4 5; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; done
 elapsed=$(( $(date +%s) - start ))
 [ "$elapsed" -lt 120 ] && result pass "recovery completed in ${elapsed}s (under the 2-minute gate)" \
                       || result fail "recovery took ${elapsed}s (the 2-minute gate is exceeded)"
@@ -231,7 +243,7 @@ stuck_waiter_case_holder=$!
 for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$lock" true 2>/dev/null || break; sleep 0.2; done
 flock -w 60 "$lock" true &
 blocked_waiter=$!
-sleep 2 # holder and waiter both cross --older-than 2 while queued
+sleep 3 # holder and waiter both cross --older-than 2 with margin
 "$DOCTOR" --recover --older-than 2 "$lock" >"$TMP/out8" 2>&1 || true
 if grep -q "holder pid=$blocked_waiter class=waiter" "$TMP/out8" \
    && ! grep -q "recovering our-tool holder pid=$blocked_waiter" "$TMP/out8"; then

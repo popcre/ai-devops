@@ -14,7 +14,11 @@ the doctor and one retry — a failure of the `op` command itself (auth, vault,
 network) keeps its own status and is never swept. Under `--recover` the
 doctor signals only `our-tool` holders at least `--older-than` seconds old
 (TERM then KILL), and only when `/proc/locks` proves an advisory lock
-actually sits on the inode. Foreign holders, young holders, holders whose
+actually sits on the inode. `our-tool` ancestry stops at a session-id
+change: a reparented process's foster-parent chain is not a true parent
+chain, and on a CI runner that chain can climb through the job supervisor
+into processes carrying this repository's paths, which would make every
+orphan look like ours. Foreign holders, young holders, holders whose
 age cannot be proven, and every process `/proc/locks` names as BLOCKED
 waiting on the lock (an `flock -w` waiter opens the lock file, so the fd
 scan alone cannot tell it from the holder) are reported with full evidence
@@ -82,7 +86,7 @@ because `flock` does not exist in Git Bash.
 | `bin/ai-grok-review` | `lock_path`/`repolock_path`/session+work lock builders (`505,507,513,523`; comment `549`) | `lock_acquire` (`551`) / per-scope release | pid alive → busy; dead owner: repo locks retained for manual reconciliation (unconfirmed remote completion), pre-provider work locks reclaimed (`591`); scans over lock sets at `1963,2014` |
 | `bin/ai-glm` | session locks `$rid--$caller--$name.lock.d` (`350`, comment `352`, acquire `2114`, pid read `2284`); meta update lock `.update.lock.d` (`563`); collision guards (`2055,2056,2072,2073`); orphan sweep guards (`2189,2247,2255`) | lock dir with pid file; released by the owning session | pid-file record; collision and orphan logic treats an existing lock as authoritative (fail closed) |
 | `bin/ai-muse` | session lock `lock_session` (`219`) | token + pid publish; `unlock_session` | pid dead or unparsable owner older than 1 min → quarantine and retry (3 attempts) |
-| `bin/ai-lock-doctor` | the doctor itself: header `8` (live-holder rule), `20-24` (waiter class), `35-38` (age floor), `39-44` (known transient), `45-48` (reparented-holder rule), `99` (flock guard), `144-187` (/proc/locks match and blocked-waiter collection), `256` (flock-on-this-lock classification), `318` (bounded evidence), `330` (kernel-proven waiter classification), `355-357,427-428` (kernel-proven freedom probes), `373-376` (lock-existence gate), `404-405` (waiters never signalled), `432` (recovered confirmation) | reads the lock's inode, `/proc/locks`, and `/proc/*/fd` | our-tool holders at least `--older-than` old are TERM/KILLed under `--recover`; foreign, young, unknown-age holders and kernel-proven blocked waiters are never signalled |
+| `bin/ai-lock-doctor` | the doctor itself: header `8` (live-holder rule), `17-21` (same-session our-tool rule), `22-26` (waiter class), `37-40` (age floor), `41-46` (known transient), `47-50` (reparented-holder rule), `101` (flock guard), `146-189` (/proc/locks match and blocked-waiter collection), `247-292` (classification incl. the session-boundary stop at `281-286`), `265` (flock-on-this-lock rule), `336` (bounded evidence), `348` (kernel-proven waiter classification), `374-375,445-446` (kernel-proven freedom probes), `391-394` (lock-existence gate), `423` (waiters never signalled), `450` (recovered confirmation) | reads the lock's inode, `/proc/locks`, and `/proc/*/fd` | our-tool holders at least `--older-than` old are TERM/KILLed under `--recover`; foreign, young, unknown-age holders and kernel-proven blocked waiters are never signalled |
 
 ## D. One-shot mkdir locks (tick, run, and build serialization)
 

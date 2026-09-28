@@ -14,9 +14,11 @@
 #      column of /proc/locks can be absent or run in another pid namespace,
 #      so the fd scan, not the pid, is authoritative (#940 evidence);
 #   3. classifies each holder:
-#        our-tool  the holder's own command line, or any ancestor's, resolves
-#                  under this repository (a bin/ wrapper, a test, or an
-#                  op/flock child of one);
+#        our-tool  the holder's own command line, or any same-session
+#                  ancestor's, resolves under this repository (a bin/
+#                  wrapper, a test, or an op/flock child of one); the walk
+#                  stops at a session change, because a reparented
+#                  process's foster chain is not a true parent chain;
 #        waiter    /proc/locks names the pid as BLOCKED ("->") on this exact
 #                  lock: it queued for the lock and does not hold it — an
 #                  flock -w waiter opens the lock file, so the fd scan alone
@@ -221,7 +223,13 @@ proc_age_seconds(){
 # proc_is_our_tool PID -> 0 when the pid's own or an ancestor's command line
 # resolves under REPO_ROOT. Ancestors are walked (bounded) so an op/flock
 # child of one of our wrappers counts as ours; a reparented orphan with no
-# resolvable ancestor does not.
+# resolvable ancestor does not. The walk STOPS at a session-id change: a
+# reparented process's foster-parent chain is not a true parent chain (the
+# #940 shape), and on a CI runner that chain can climb through the job
+# supervisor into processes carrying this repository's paths — every
+# orphan would then look like ours (seventh-pass live evidence). This
+# toolkit's wrappers never put their lock children in a new session, so a
+# genuine our-tool ancestry stays inside one session.
 path_is_repo(){
   local resolved
   case "$1" in
@@ -237,7 +245,8 @@ path_is_repo(){
 }
 LOCKFILE_CANON="$(readlink -f "$lockfile" 2>/dev/null || echo "$lockfile")"
 proc_is_our_tool(){
-  local pid="$1" hop pid_now cmd tok first
+  local pid="$1" hop pid_now cmd tok first origin_sid parent parent_sid
+  origin_sid="$(proc_stat_field 6 "$pid" 2>/dev/null || true)"
   pid_now="$pid"
   for hop in 1 2 3 4 5 6 7 8 9 10 11 12; do
     [ -n "$pid_now" ] || return 1
@@ -267,7 +276,16 @@ proc_is_our_tool(){
       esac
     done < <(tr ' ' '\n' <<<"$cmd")
     [ "$pid_now" = 1 ] && return 1
-    pid_now="$(proc_ppid "$pid_now")"
+    parent="$(proc_ppid "$pid_now")"
+    [ -n "$parent" ] || return 1
+    # Stop at a proven session change: the chain crossed a reparenting
+    # boundary (see the comment above this function). Unknown session data
+    # keeps walking — the other gates still bound any kill.
+    if [ -n "$origin_sid" ]; then
+      parent_sid="$(proc_stat_field 6 "$parent" 2>/dev/null || true)"
+      [ -n "$parent_sid" ] && [ "$parent_sid" != "$origin_sid" ] && return 1
+    fi
+    pid_now="$parent"
   done
   return 1
 }
