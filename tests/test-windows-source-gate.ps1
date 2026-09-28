@@ -430,6 +430,18 @@ try {
     Assert ((Get-FileHash -LiteralPath "$($stamp.Launcher).cmd" -Algorithm SHA256).Hash -eq $oldCmdHash) `
       'injected failure changed gate command receipt'
     Assert (Test-Path -LiteralPath $stampPending -PathType Leaf) 'injected failure consumed pending authority'
+    $stampTransaction=Join-Path (Split-Path -Parent $stamp.Launcher) ('launcher-transactions\' + $stampTarget + '.json')
+    $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_GATE='1'
+    $crashed=Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-File',
+      (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1'),'-RepoPath',$stamp.Repo,
+      '-CatalogPath',(Join-Path $stamp.Repo 'config\machine-tools.tsv'),'-UserProfilePath',$env:USERPROFILE) `
+      -PassThru -Wait -WindowStyle Hidden
+    $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_GATE=$null
+    Assert ($crashed.ExitCode -ne 0) 'hard-crash launcher fixture exited successfully'
+    Assert (Test-Path -LiteralPath $stampTransaction -PathType Leaf) 'hard crash did not leave recovery transaction'
+    Assert (Test-Path -LiteralPath $stampPending -PathType Leaf) 'hard crash consumed pending authority'
+    Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -ne $oldLauncherHash) `
+      'hard crash did not publish the atomic gate launcher before termination'
     & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
       -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null
     Assert ([Environment]::GetEnvironmentVariable('PATH', 'User') -ceq $userPathBefore) `
@@ -437,9 +449,9 @@ try {
     Assert ((Get-Content -LiteralPath $stamp.Launcher)[2] -ceq "# source-sha=$stampTarget") `
       'locked direct launcher refresh did not stamp the approved source'
     Assert (-not (Test-Path -LiteralPath $stampPending)) 'successful locked launcher refresh did not consume authority'
-    Assert (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $stamp.Launcher) ('launcher-transactions\' + $stampTarget + '.json')))) `
+    Assert (-not (Test-Path -LiteralPath $stampTransaction)) `
       'successful retry left a pending launcher transaction'
-  } finally { $env:AI_DEVOPS_TEST_FAIL_AFTER_GATE=$null; $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote; $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher }
+  } finally { $env:AI_DEVOPS_TEST_FAIL_AFTER_GATE=$null; $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_GATE=$null; $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote; $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher }
 
   $removed=New-Fixture removed
   $removedBefore=(git -C $removed.Repo rev-parse HEAD).Trim()

@@ -108,6 +108,19 @@ $transactionRoot = if ($fixture) { Join-Path $target 'launcher-transactions' } e
   Join-Path $UserProfilePath '.local\state\ai-devops\task-gates\launcher-transactions'
 }
 $transactionPath = Join-Path $transactionRoot "$sourceSha.json"
+function Publish-StagedFile([string]$Stage, [string]$Destination) {
+  $existing=Get-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+  if ($existing) {
+    if ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      throw "Refusing non-regular managed launcher: $Destination"
+    }
+    $swapBackup=Join-Path (Split-Path -Parent $Stage) ('.swapped-' + [guid]::NewGuid().ToString('N'))
+    [IO.File]::Replace($Stage,$Destination,$swapBackup,$true)
+    [IO.File]::Delete($swapBackup)
+  } else {
+    [IO.File]::Move($Stage,$Destination)
+  }
+}
 foreach ($directory in @($target,$transactionRoot)) {
   $existingDirectory=Get-Item -LiteralPath $directory -Force -ErrorAction SilentlyContinue
   if ($existingDirectory -and ($existingDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
@@ -130,7 +143,9 @@ function Restore-Transaction($record) {
       $record.repo_path -ine [IO.Path]::GetFullPath($RepoPath) -or
       $record.target_dir -ine [IO.Path]::GetFullPath($target) -or
       $record.catalog_sha256 -cne $catalogHash -or @($record.files).Count -ne ($items.Count * 2) -or
-      ($record.had_pending -ne $true -and $record.had_pending -ne $false)) {
+      ($record.had_pending -ne $true -and $record.had_pending -ne $false) -or
+      [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$record.stage_dir)) -ine [IO.Path]::GetFullPath($target) -or
+      [IO.Path]::GetFileName([string]$record.stage_dir) -cnotmatch '^\.ai-devops-staging-[0-9a-f]{32}$') {
     throw 'Launcher recovery record does not match this exact source and catalog.'
   }
   $expectedNames = @($items | ForEach-Object { $_.Name; "$($_.Name).cmd" })
@@ -155,18 +170,27 @@ function Restore-Transaction($record) {
   }
   if ($record.had_pending -and -not (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf)) {
     if (-not $allNew) { throw 'Pending authority disappeared before launcher transaction completed.' }
+    if (Test-Path -LiteralPath $record.stage_dir) { Remove-Item -LiteralPath $record.stage_dir -Recurse -Force }
     Remove-Item -LiteralPath $transactionPath -Force
     return
+  }
+  $stageItem=Get-Item -LiteralPath $record.stage_dir -Force -ErrorAction SilentlyContinue
+  if (-not $stageItem -or -not $stageItem.PSIsContainer -or
+      ($stageItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw 'Launcher recovery staging directory is missing or linked.'
   }
   for ($index=0; $index -lt $expectedNames.Count; $index++) {
     $row=$record.files[$index]; $path=Join-Path $target $row.name
     if ($row.old_exists) {
-      [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String([string]$row.old_bytes))
+      $restoreStage=Join-Path $record.stage_dir ('.restore-' + [guid]::NewGuid().ToString('N'))
+      [IO.File]::WriteAllBytes($restoreStage, [Convert]::FromBase64String([string]$row.old_bytes))
+      Publish-StagedFile $restoreStage $path
       if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $row.old_sha256) {
         throw 'Launcher recovery copy did not verify.'
       }
-    } elseif (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    } elseif (Test-Path -LiteralPath $path) { [IO.File]::Delete($path) }
   }
+  if (Test-Path -LiteralPath $record.stage_dir) { Remove-Item -LiteralPath $record.stage_dir -Recurse -Force }
   Remove-Item -LiteralPath $transactionPath -Force
 }
 
@@ -193,11 +217,13 @@ foreach ($directory in @($target,$transactionRoot)) {
   }
 }
 $rows = [Collections.Generic.List[object]]::new()
+$stageDir=Join-Path $target ('.ai-devops-staging-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $stageDir | Out-Null
 foreach ($item in $items) {
   foreach ($part in @(@($item.Name,$item.BashText,$false),@("$($item.Name).cmd",$item.CmdText,$true))) {
     $name=[string]$part[0]; $path=Join-Path $target $name
     $before=Get-FileState $path
-    $staged=Join-Path $transactionRoot ('.staged-' + [guid]::NewGuid().ToString('N'))
+    $staged=Join-Path $stageDir ('.staged-' + [guid]::NewGuid().ToString('N'))
     if ($part[2]) { [string]$part[1] | Set-Content -Encoding ASCII -LiteralPath $staged }
     else { [string]$part[1] | Set-Content -NoNewline -Encoding ASCII -LiteralPath $staged }
     $after=(Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -207,7 +233,7 @@ foreach ($item in $items) {
 }
 $record=[pscustomobject]@{ schema_version=1; source_sha=$sourceSha;
   repo_path=[IO.Path]::GetFullPath($RepoPath); target_dir=[IO.Path]::GetFullPath($target);
-  catalog_sha256=$catalogHash; had_pending=(Test-Path -LiteralPath $pendingAuthorization -PathType Leaf);
+  catalog_sha256=$catalogHash; stage_dir=$stageDir; had_pending=(Test-Path -LiteralPath $pendingAuthorization -PathType Leaf);
   files=@($rows | ForEach-Object { [pscustomobject]@{name=$_.name;old_exists=$_.old_exists;
     old_bytes=$_.old_bytes;old_sha256=$_.old_sha256;new_sha256=$_.new_sha256} }) }
 $transactionTemp="$transactionPath.tmp.$PID"
@@ -216,12 +242,15 @@ Move-Item -LiteralPath $transactionTemp -Destination $transactionPath
 $userPathBefore=[Environment]::GetEnvironmentVariable('PATH', 'User')
 try {
   foreach ($row in $rows) {
-    Copy-Item -LiteralPath $row.staged_path -Destination (Join-Path $target $row.name) -Force
+    Publish-StagedFile $row.staged_path (Join-Path $target $row.name)
     if ((Get-FileHash -LiteralPath (Join-Path $target $row.name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $row.new_sha256) {
       throw "Managed launcher $($row.name) differs from staged bytes."
     }
     if ($fixture -and $env:AI_DEVOPS_TEST_FAIL_AFTER_GATE -eq '1' -and $row.name -ceq 'ai-task-gates.cmd') {
       throw 'Injected failure after gate launcher stamping.'
+    }
+    if ($fixture -and $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_GATE -eq '1' -and $row.name -ceq 'ai-task-gates.cmd') {
+      [Diagnostics.Process]::GetCurrentProcess().Kill()
     }
     Write-Host "OK installed $($row.name)"
   }
@@ -247,8 +276,11 @@ if (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf) {
   } catch { throw "Launcher install failed ($failure); exact rollback needs repair: $($_.Exception.Message)" }
   throw "Launcher install failed and exact prior launchers were restored: $failure"
 } finally {
-  foreach ($row in $rows) { Remove-Item -LiteralPath $row.staged_path -Force -ErrorAction SilentlyContinue }
+  if (-not (Test-Path -LiteralPath $transactionPath)) {
+    Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }
+Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $transactionPath -Force
 } finally {
   if ($installMutexHeld) { $installMutex.ReleaseMutex() }
