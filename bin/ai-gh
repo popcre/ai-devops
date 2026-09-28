@@ -14,10 +14,11 @@
 # What it enforces, across every process that uses the same state directory:
 #   - Serialization: GitHub call starts are spaced through a lock directory (released before gh runs).
 #   - Spacing: at least AI_GH_MIN_SPACING_SECONDS (default 3) between calls.
-#   - Back-off: a rate-limit refusal (a 403/429 whose message says rate limit,
-#     "secondary rate limit", "abuse detection", Retry-After; an ordinary 403
-#     permission error is NOT one) puts the whole
-#     machine in back-off for max(Retry-After, AI_GH_BACKOFF_SECONDS=600).
+#   - Back-off: a secondary rate-limit refusal (a 403/429 whose message says
+#     "secondary rate limit", "abuse detection", or Retry-After; an ordinary
+#     permission error is NOT one) puts the whole machine in back-off for
+#     max(Retry-After, AI_GH_BACKOFF_SECONDS=600). Primary quota pauses apply
+#     only to their exhausted resource.
 #     A refused call is never retried by this tool: no hot loop.
 #   - Watch commands (`gh run watch`, `--watch`) are refused. Wait with
 #     `ai-gh-wait` (minimum 5-minute interval) or `ai-pr-wait` instead.
@@ -35,8 +36,8 @@
 #   AI_GH_PROBE_TIMEOUT_SECONDS  time limit on each budget/header probe (default 15)
 #   AI_GH_NO_WAIT_LOCK_SECONDS with AI_GH_NO_WAIT=1, max lock wait before exit 75 (default 10)
 #   AI_GH_QUOTA_PROBE_SECONDS  hourly-budget probe cache age (default 300; "off" disables)
-#   AI_GH_QUOTA_PAUSE_PCT      below this % remaining (default 20) the machine is put
-#                              in back-off until the window resets and this call exits 75
+#   AI_GH_QUOTA_PAUSE_PCT      below this % remaining (default 20) that resource
+#                              pauses until its window resets and this call exits 75
 #                              (the caller decides whether to wait out an hour, not this tool)
 #   AI_GH_QUOTA_SLOW_PCT / AI_GH_QUOTA_SLOW_SPACING  below 40% remaining, space calls 30s
 #   Logs: $AI_GH_STATE_DIR/failures.log (every failed call: status, headers,
@@ -366,6 +367,9 @@ elif [ "${1:-}" = pr ] || [ "${1:-}" = issue ]; then
   BUCKETS=(core graphql); BUCKET_MODE=fixed
 fi
 select_buckets
+if [ "${1:-}" = api ] && [ "${parse_ok:-0}" = 1 ] && [ "$endpoint" = graphql ]; then
+  GH_MEASURE_OPERATION=api.graphql
+fi
 quota_path(){ if [ "$1" = core ]; then printf '%s/quota' "$STATE"; else printf '%s/quota.%s' "$STATE" "$1"; fi; }
 bucket_pause_path(){ printf '%s/quota-pause.%s' "$STATE" "$1"; }
 # Versioned context binds reusable quota rows to the actual credential and API
@@ -613,17 +617,44 @@ if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED"
   GRAPH_DIR="$(umask 077; mktemp -d "$STATE/graphql-class.XXXXXX")" || { say "cannot prepare private GraphQL classifier"; exit 3; }
   GRAPH_META="$GRAPH_DIR/result"; GRAPH_FIFO="$GRAPH_DIR/stream"
   ( umask 077; : > "$GRAPH_META" && mkfifo "$GRAPH_FIFO" ) && [ -p "$GRAPH_FIFO" ] || { say "cannot prepare private GraphQL classifier"; exit 3; }
-  classifier_timeout="$PROBE_TIMEOUT"; [ "$classifier_timeout" -gt 0 ] || classifier_timeout=5
   # Git Bash FIFOs are readable by its POSIX tools, but native Windows jq
   # reports "Bad file descriptor" when given a FIFO as stdin. Bridge it to
-  # an anonymous pipe without writing the response body to disk.
-  cat "$GRAPH_FIFO" | timeout "$classifier_timeout" jq -sr '
-    (if length == 1 and (.[0] | type) == "array" then .[0] else . end) as $pages |
-    if ($pages | length) == 0 or ($pages | any(type != "object")) then "unknown"
-    elif ($pages | any(.errors != null and (.errors | type) != "array")) then "unknown"
-    elif ($pages | all(.errors == null or (.errors | length) == 0)) then "none"
-    elif ([$pages[].errors[]? | .message? | strings] | any(test("secondary rate limit|abuse detection|too many requests"; "i"))) then "secondary"
-    elif ([$pages[].errors[]? | .message? | strings] | any(test("rate limit"; "i"))) then "primary"
+  # an anonymous pipe. Stream only path/value events into constant-size
+  # classification state, so large or slow valid responses retain gh's own
+  # lifetime and the response body never lands in a file.
+  cat "$GRAPH_FIFO" | jq -nr --stream '
+    def result_path($p): if ($p | length) > 0 and ($p[0] | type) == "number" then $p[1:] else $p end;
+    reduce inputs as $event (
+      {seen: false, malformed: false, errors: false, primary: false, secondary: false};
+      ($event[0]) as $p |
+      ($event | length) as $n |
+      (if $n == 2 then $event[1] else null end) as $v |
+      (result_path($p)) as $q |
+      .seen = (.seen or
+        (($p | length) > 0 and ($p[0] | type) == "string") or
+        (($p | length) > 0 and ($p[0] | type) == "number" and
+          ((($p | length) > 1 and ($p[1] | type) == "string") or
+           (($p | length) == 1 and $n == 2 and ($v | type) == "object"))) or
+        (($p | length) == 0 and $n == 2 and ($v | type) == "object")) |
+      .malformed = (.malformed or
+        (($p | length) == 0 and $n == 2 and ($v | type) != "object") or
+        (($p | length) > 0 and ($p[0] | type) == "number" and
+          ((($p | length) == 1 and $n == 2 and ($v | type) != "object") or
+           (($p | length) > 1 and ($p[1] | type) != "string"))) or
+        (($q | length) > 0 and $q[0] == "errors" and
+          ((($q | length) == 1 and $n == 2 and $v != null and ($v | type) != "array") or
+           (($q | length) > 1 and ($q[1] | type) != "number")))) |
+      .errors = (.errors or (($q | length) > 1 and $q[0] == "errors" and ($q[1] | type) == "number")) |
+      if $n == 2 and ($q | length) == 3 and $q[0] == "errors" and
+        ($q[1] | type) == "number" and $q[2] == "message" and ($v | type) == "string" then
+        .secondary = (.secondary or ($v | test("secondary rate limit|abuse detection|too many requests"; "i"))) |
+        .primary = (.primary or ($v | test("rate limit"; "i")))
+      else . end
+    ) |
+    if .malformed or (.seen | not) then "unknown"
+    elif .errors | not then "none"
+    elif .secondary then "secondary"
+    elif .primary then "primary"
     else "error" end
   ' > "$GRAPH_META" 2>/dev/null & GRAPH_PID=$!
   # Keep the response tee in the foreground. Git Bash does not reliably wait

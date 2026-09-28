@@ -42,7 +42,7 @@ case "${FAKE_MODE:-ok}" in
     elif [ "$1 $2" = 'api --include' ]; then printf 'HTTP/2 200\nX-Ratelimit-Reset: %s\n\ncore\t4999\t5000\t%s\n' $(( $(date +%s) + 9000 )) $(( $(date +%s) + 9000 ));
     else echo 'gh: API rate limit already exceeded for user ID 55610577. (HTTP 403)' >&2; exit 1; fi ;;
   probe-timeout) if [ "$1 $2" = 'api rate_limit' ]; then sleep 2; else echo "out:$*"; fi ;;
-  graphql-200-primary|graphql-200-secondary|graphql-200-partial|graphql-cli-error|graphql-crash|graphql-unknown|graphql-malformed-errors|graphql-jq-scalar|graphql-jq-empty|graphql-pages|graphql-pages-error)
+  graphql-200-primary|graphql-200-secondary|graphql-200-partial|graphql-cli-error|graphql-crash|graphql-large|graphql-unknown|graphql-malformed-errors|graphql-jq-scalar|graphql-jq-empty|graphql-pages|graphql-pages-error)
     if [ "$1 $2" = 'api rate_limit' ]; then
       printf 'core\t4000\t5000\t%s\ngraphql\t4000\t5000\t%s\n' $(( $(date +%s) + 1800 )) $(( $(date +%s) + 2400 ))
     elif [ "$1 $2" = 'api --include' ]; then
@@ -55,6 +55,8 @@ case "${FAKE_MODE:-ok}" in
       printf 'temporary upstream reset\n' >&2; exit 1
     elif [ "$FAKE_MODE" = graphql-crash ]; then
       printf '{"data":{"viewer":{"login":"FIXTURE_PRIVATE_BODY"}}}\n'; sleep 3
+    elif [ "$FAKE_MODE" = graphql-large ]; then
+      printf '{"data":{"text":"'; head -c 100000 /dev/zero | tr '\0' a; printf '"}}\n'
     elif [ "$FAKE_MODE" = graphql-unknown ]; then
       printf 'not-json\n'
     elif [ "$FAKE_MODE" = graphql-malformed-errors ]; then
@@ -219,6 +221,7 @@ check 'single REST call uses core and reserves one request' "[ $rc -eq 0 ] && gr
 fresh_quota
 FAKE_MODE=quota FAKE_REMAINING=0 FAKE_GRAPHQL_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api -X POST /graphql -F query=secretquery >/dev/null 2>&1; rc=$?
 check 'direct GraphQL selects its own bucket even with leading options' "[ $rc -eq 0 ] && grep -q '^0 4000 5000 ' '$TMP/state/quota.graphql'"
+check 'leading GraphQL options retain the GraphQL measurement label' "jq -se '.[-1].operation == \"api.graphql\" and .[-1].bucket == \"graphql\"' '$TMP/state/measurements/'*.jsonl"
 FAKE_MODE=quota FAKE_REMAINING=0 FAKE_GRAPHQL_REMAINING=4000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1; rc=$?
 check 'exhausted REST does not stop an independent healthy GraphQL read' "[ $rc -eq 75 ] && [ \$(cat '$TMP/state/quota-pause.core') -gt \$(date +%s) ]"
 fresh_quota
@@ -336,6 +339,12 @@ check 'valid paginated GraphQL objects retain success status and all output' "[ 
 fresh_quota
 FAKE_MODE=graphql-pages-error AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql --paginate > "$TMP/graphql-pages-error" 2>/dev/null; rc=$?
 check 'later GraphQL page error is classified without losing earlier output' "[ $rc -eq 75 ] && [ \$(wc -l < '$TMP/graphql-pages-error') -eq 2 ] && [ \$(cat '$TMP/state/quota-pause.graphql') -gt \$(date +%s) ]"
+fresh_quota
+FAKE_MODE=graphql-crash AI_GH_PROBE_TIMEOUT_SECONDS=1 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/graphql-slow" 2>/dev/null; rc=$?
+check 'a valid slow GraphQL response outlives the quota-probe timeout' "[ $rc -eq 0 ] && jq -e '.data.viewer.login == \"FIXTURE_PRIVATE_BODY\"' '$TMP/graphql-slow'"
+fresh_quota
+FAKE_MODE=graphql-large AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/graphql-large" 2>/dev/null; rc=$?
+check 'a large GraphQL response retains its complete output' "[ $rc -eq 0 ] && jq -e '(.data.text | length) == 100000' '$TMP/graphql-large'"
 fresh_quota
 FAKE_MODE=graphql-crash AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/crash-output" 2>/dev/null & crash_pid=$!
 for _ in $(seq 1 30); do grep -q FIXTURE_PRIVATE_BODY "$TMP/crash-output" 2>/dev/null && break; sleep 0.1; done
