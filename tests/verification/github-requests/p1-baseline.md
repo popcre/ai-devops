@@ -11,13 +11,66 @@ preserved in the P1 integration; this does not establish P2 acceptance.
 
 ## Acceptance status
 
-**Incomplete.** This is instrumentation and an inventory, not an accepted live
-baseline or evidence of request savings. No phase after P1 is claimed here.
-P1 has not merged or been installed, and its live acceptance remains open.
+**Incomplete.** P1 instrumentation merged in PR #663 and is installed on
+edge-dev and edge-dev3. The original text below records its pre-merge state.
+The live samples are not an accepted fleet baseline or evidence of request
+savings. No phase after P1 is claimed by this report.
 Acceptance still requires two busy reset windows and twenty comparable completed
 operations including PR waiting, BlockerWatch, dispatch and privacy checks. The
 offline-replay fallback is available only after two business days of insufficient
 volume; a quiet sample today cannot satisfy it.
+
+### Installed live supplement, 2026-09-27
+
+Read-only collection over pinned Tailscale SSH confirmed that edge-dev's
+installed `bin/ai-gh` SHA-256 is
+`f501f95acc9e8a54fb151f41ed9c9568f64525c56e8cdb63d42df4e682974d2a`;
+its installed `report.py` SHA-256 is
+`375b66b4661a3d3b84a89d480bc51616f920d328e8409cc831e1417598818f95`.
+The offline report read private local measurements without copying raw records
+to this public repository or contacting GitHub. Its source digest is
+`eb88425c804e7a0818239a9af0b27951ca10db4212e20bc468eb41e123720091`.
+It found 8,175 wrapper records and 8,079 opaque CLI executions from
+7:45 PM EDT September 23 through 11:09 PM EDT September 27. Caller labels
+include 6,888 BlockerWatch records, 1,024 PR-waiter records, and 263 unknown
+caller records. There were 259 failed and 94 deferred records. These are
+wrapper observations, not HTTP request counts or completed workflows.
+
+Two observed active GraphQL reset windows on edge-dev provide comparable
+pre-reduction samples:
+
+| Window (EDT) | Quota snapshots | Wrapper records | BlockerWatch | PR waiter | Unknown caller | Failures / deferrals | Observed GraphQL remaining |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| September 24, 3:45:06–4:44:59 PM | 229 | 294 | 190 | 96 | 8 | 7 / 3 | 4,999 to 4,933 |
+| September 24, 8:03:31–9:03:25 PM | 165 | 226 | 218 | 8 | 0 | 10 / 3 | 4,999 to 4,942 |
+
+Both windows have a constant reported reset and no increase in observed
+GraphQL remaining inside the window. The observed bucket changes are 66 and
+57 points, respectively; they cannot be attributed to these wrapper commands
+because the authenticated principal is not bound to records, some managed
+callers bypass the wrapper, and other clients may share the account. CLI
+execution volume is not GraphQL point volume. The report's `http_requests`
+and `graphql_points` fields remain null by design.
+
+edge-dev3 separately has 1,929 wrapper records through 11:07 PM EDT September
+27, including 1,140 BlockerWatch and 228 PR-waiter GraphQL labels. Its input
+digest is `38a6c899254a132ddd496e12425e6a635135609389232da98ffeea3e007b7859`.
+The 916 checkout was still at pre-P1 `b05d15d3` on September 27, with no P1
+measurement directory. Its full current-main installation is blocked by the
+local reviewer-safety deployment gate, which requires Albert to name the exact
+resource and action. Hetz was also verified at pre-P1 `cdd18b9b` with no P1
+measurement directory. Installation and representative samples on both hosts
+remain open. External-client coverage remains unverified. Recent edge-dev telemetry
+may also be incomplete because the live watcher reported a storage write failure;
+the host owner is diagnosing that condition.
+
+No existing record binds calls to 20 completed PR wait, BlockerWatch, dispatch,
+and privacy-check workflows. Dispatch and privacy checks are outside the P1
+wrapper as inventoried below. Accordingly these active windows satisfy only
+the window-volume part of P1. A controlled offline trace replay after the
+two-business-day threshold may support a clearly provisional baseline, but
+cannot make these missing workflow outcomes or account-wide HTTP/point counts
+measured facts. The P1 issue stays open for that proof and host coverage.
 
 ## Measurement method and denominators
 
