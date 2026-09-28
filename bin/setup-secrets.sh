@@ -47,7 +47,16 @@
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve symlinks (e.g. /usr/local/bin/setup-secrets.sh) so REPO_ROOT is the
+# real checkout. Loop instead of readlink -f for BSD/macOS portability.
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+  _dir="$(cd "$(dirname "$_self")" && pwd)"
+  _self="$(readlink "$_self")"
+  case "$_self" in /*) ;; *) _self="$_dir/$_self" ;; esac
+done
+REPO_ROOT="$(cd "$(dirname "$_self")/.." && pwd -P)"
+unset _self _dir
 CFG_DIR="${AI_DEVOPS_CONFIG:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
