@@ -91,6 +91,23 @@ export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFI
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID ZCODE_SESSION_ID
 BW(){ "$SCRIPT" "$@"; }
 
+# A failed GraphQL command can still carry a charged rateLimit observation.
+# Exercise the real ai-gh transport here; the regular suite uses a direct stub.
+cat > "$TMP/charged-error-gh" <<'EOF'
+#!/usr/bin/env bash
+case " $* " in
+  *' graphql '*) printf '%s\n' '{"data":{"rateLimit":{"cost":3,"remaining":4997,"resetAt":"2026-09-28T05:00:00Z"}},"errors":[{"message":"fixture failure"}]}' ; exit 1 ;;
+esac
+exit 2
+EOF
+chmod +x "$TMP/charged-error-gh"
+env -u AI_BLOCKER_WATCH_GH AI_BLOCKER_WATCH_HOME="$TMP/charged-error-home" \
+  AI_GH_REAL_GH="$TMP/charged-error-gh" AI_GH_STATE_DIR="$TMP/charged-error-state" \
+  AI_GH_QUOTA_PROBE_SECONDS=off AI_GH_MIN_SPACING_SECONDS=0 \
+  "$SCRIPT" alarm --dry-run > "$TMP/charged-error-out" 2> "$TMP/charged-error-err"; charged_rc=$?
+check 'failed alarm GraphQL read still records the charged upstream response' \
+  "[ $charged_rc -eq 1 ] && jq -se 'any(.[]; .measurement == \"observed_graphql_cost\" and .workflow == \"blocker_watch_alarm\" and .graphql_points == 3)' '$TMP/charged-error-state/measurements/'*.jsonl && grep -q 'could not list open issues' '$TMP/charged-error-err'"
+
 check 'shipped config is valid and names all four programs' "jq -e '.harness|has(\"claude\") and has(\"codex\") and has(\"zcode\") and has(\"mimo\")' '$ROOT/config/blocker-watch.json'"
 check 'shipped config names exactly one propagating machine' "jq -e '(.propagate_on_host | type == \"string\" and length > 0)' '$ROOT/config/blocker-watch.json'"
 check 'wait refuses a malformed reference' "! BW wait 'not-a-ref' --harness claude --session s1"

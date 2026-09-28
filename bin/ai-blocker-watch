@@ -130,7 +130,7 @@ if [ "$GH" = "$TOOL_ROOT/bin/ai-gh" ] && [ -f "$TOOL_ROOT/tools/github-requests/
 fi
 record_graphql_cost(){
   [ "$GH_COST_READY" = 1 ] || return 0
-  printf '%s' "$2" | gh_measure_graphql_cost ai-blocker-watch "$1" blocker_watch_tick "${BW_TICK_RECEIPT_ID:-}" direct "${BW_TICK_CONTEXT:-}" ||
+  printf '%s' "$2" | gh_measure_graphql_cost ai-blocker-watch "$1" "${BW_WORKFLOW:-blocker_watch_manual}" "${BW_TICK_RECEIPT_ID:-}" direct "${BW_TICK_CONTEXT:-}" ||
     note 'request measurement unavailable: GraphQL cost not saved'
 }
 # Label only the transport subprocess. Resumed AI sessions are independent
@@ -139,6 +139,9 @@ gh_call(){ AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; }
 # Only call sites below set this fixed telemetry label; a parent shell must not
 # be able to misclassify unrelated BlockerWatch requests.
 unset AI_GH_OPERATION
+BW_WORKFLOW=''
+BW_TICK_RECEIPT_ID=''
+BW_TICK_CONTEXT=''
 WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
 LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
 LOGS="$HOME_DIR/logs"
@@ -631,18 +634,20 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
 SNAP_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number databaseId title assignees(first:10){totalCount} body blockedBy(first:50){nodes{number state title repository{nameWithOwner} assignees(first:10){totalCount}}}}}}rateLimit{cost remaining resetAt}}'
 declare -A SNAP=() SNAPN=() SNAPERR=()
 open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|i], count in SNAPN[repo]; rc 1 on failure
-  local repo="$1" pfx="$2" pages=0 cursor="" out i
+  local repo="$1" pfx="$2" pages=0 cursor="" out i read_rc
   if [ -n "${SNAPERR[$repo]+set}" ]; then note "$pfx: ${SNAPERR[$repo]} (not retried this tick)"; return 1; fi
   [ -z "${SNAPN[$repo]+set}" ] || return 0
   while :; do
     pages=$((pages+1))
     if [ "$pages" -gt 10 ]; then SNAPERR[$repo]="$repo has more open issues than one scan reads (1000)"; break; fi
+    read_rc=0
     if [ -n "$cursor" ]; then
-      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || read_rc=$?
     else
-      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || read_rc=$?
     fi
     record_graphql_cost graphql.open_issue_snapshot "$out"
+    if [ "$read_rc" -ne 0 ]; then SNAPERR[$repo]="could not list open issues in $repo"; break; fi
     printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository != null)' >/dev/null || { SNAPERR[$repo]="unreadable answer from $repo"; break; }
     SNAP["$repo|$pages"]="$out"
     if [ "$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.hasNextPage')" = true ]; then
@@ -724,7 +729,7 @@ ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,nam
 # that subshell and the cache/budget would never take effect (#809).
 ALARM_TICK=""
 issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node budget, 2 failed
-  local repo="$1" n="$2" out key="$1#$2" spent budget cachef
+  local repo="$1" n="$2" out key="$1#$2" spent budget cachef read_rc=0
   # '@' cannot appear in a GitHub owner or repo name, so owner/repo cannot collide.
   cachef="$ALARM_TICK/cache/${key//\//@}"
   if [ -f "$cachef" ]; then cat "$cachef"; return 0; fi
@@ -732,8 +737,9 @@ issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node
   spent="$(cat "$ALARM_TICK/agql" 2>/dev/null || printf 0)"
   [ "$spent" -lt "$budget" ] || return 1
   printf '%s' "$((spent+1))" > "$ALARM_TICK/agql"
-  out="$(AI_GH_OPERATION=bw.alarm_issue gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || return 2
+  out="$(AI_GH_OPERATION=bw.alarm_issue gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || read_rc=$?
   record_graphql_cost graphql.issue_detail "$out"
+  [ "$read_rc" -eq 0 ] || return 2
   printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository.issue != null)' >/dev/null || return 2
   printf '%s' "$out" > "$cachef"
   printf '%s' "$out"
@@ -1067,6 +1073,7 @@ lock_take(){
 }
 
 cmd_alarm(){
+  BW_WORKFLOW=blocker_watch_alarm
   [ "${1:-}" != --dry-run ] || DRY=1
   alarm_on || die "the unowned-blocker alarm is disabled in the config"
   lock_take || return 0
@@ -1075,6 +1082,7 @@ cmd_alarm(){
 }
 
 cmd_links(){
+  BW_WORKFLOW=blocker_watch_links
   [ "${1:-}" != --dry-run ] || DRY=1
   links_on || die "blocked-by link maintenance is disabled in the config"
   lock_take || return 0
@@ -1083,6 +1091,7 @@ cmd_links(){
 }
 
 cmd_tick(){
+  BW_WORKFLOW=blocker_watch_tick
   [ "${1:-}" != --dry-run ] || DRY=1
   lock_take || return 0
   local tick_started_ms='' tick_elapsed_ms=''

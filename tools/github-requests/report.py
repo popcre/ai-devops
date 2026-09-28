@@ -44,6 +44,7 @@ def summarize(directory):
                 stamp = row.get("utc", "")
                 if not isinstance(stamp, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", stamp):
                     raise ValueError("invalid time")
+                stamps.append(stamp)
                 if row.get("schema") == 2:
                     if (set(row) not in COST_SHAPES
                             or row.get("measurement") != "observed_graphql_cost"
@@ -120,7 +121,6 @@ def summarize(directory):
                         or type(status) is not int or not 0 <= status <= 255
                         or type(calls) is not int or calls not in (0, 1)):
                     raise ValueError("invalid measurement number")
-                stamps.append(stamp)
                 if duration is not None:
                     latency.append(duration)
                 records += 1
@@ -202,6 +202,9 @@ COST_LABELS = {
     ("ai-pr-wait", "graphql.pr_status", "pr_wait"),
     ("ai-blocker-watch", "graphql.open_issue_snapshot", "blocker_watch_tick"),
     ("ai-blocker-watch", "graphql.issue_detail", "blocker_watch_tick"),
+    ("ai-blocker-watch", "graphql.open_issue_snapshot", "blocker_watch_alarm"),
+    ("ai-blocker-watch", "graphql.issue_detail", "blocker_watch_alarm"),
+    ("ai-blocker-watch", "graphql.open_issue_snapshot", "blocker_watch_links"),
 }
 RECEIPT_LABELS = {
     ("ai-pr-wait", "pr_wait", outcome)

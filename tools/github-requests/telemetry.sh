@@ -131,7 +131,10 @@ gh_measure_graphql_cost(){
   case "$caller:$operation:$workflow" in
     ai-pr-wait:graphql.pr_status:pr_wait) [ "$origin" = upstream_refresh ] || return 2 ;;
     ai-blocker-watch:graphql.open_issue_snapshot:blocker_watch_tick|\
-    ai-blocker-watch:graphql.issue_detail:blocker_watch_tick) [ "$origin" = direct ] || return 2 ;;
+    ai-blocker-watch:graphql.issue_detail:blocker_watch_tick|\
+    ai-blocker-watch:graphql.open_issue_snapshot:blocker_watch_alarm|\
+    ai-blocker-watch:graphql.issue_detail:blocker_watch_alarm|\
+    ai-blocker-watch:graphql.open_issue_snapshot:blocker_watch_links) [ "$origin" = direct ] || return 2 ;;
     *) return 2 ;;
   esac
   [ -z "$id" ] || [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 2

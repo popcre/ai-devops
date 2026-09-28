@@ -596,6 +596,20 @@ AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_workflow_outcome ai-blocker-watc
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/bw-cost-state/measurements" > "$TMP/report"; rc=$?
 check 'BlockerWatch tick receipt links a direct snapshot cost' \
   "[ $rc -eq 0 ] && jq -e '.linked_graphql_points == 4 and .completed_workflow_receipts == 1 and .workflow_outcomes[0].workflow == \"blocker_watch_tick\"' '$TMP/report'"
+printf '%s' '{"data":{"rateLimit":{"cost":2,"remaining":4798,"resetAt":"2026-09-28T05:00:00Z"}},"errors":[{"message":"fixture failure"}]}' |
+  AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_graphql_cost ai-blocker-watch graphql.open_issue_snapshot blocker_watch_alarm '' direct "$access_context"
+printf '%s' '{"data":{"rateLimit":{"cost":1,"remaining":4797,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_graphql_cost ai-blocker-watch graphql.open_issue_snapshot blocker_watch_links '' direct "$access_context"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/bw-cost-state/measurements" > "$TMP/report"; rc=$?
+check 'standalone BlockerWatch reads remain separate from tick outcomes, including charged error responses' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_points == 7 and .linked_graphql_points == 4 and (.observed_graphql_cost_sources | any(.workflow == \"blocker_watch_alarm\" and .points == 2)) and (.observed_graphql_cost_sources | any(.workflow == \"blocker_watch_links\" and .points == 1))' '$TMP/report'"
+mkdir "$TMP/cost-only" "$TMP/outcome-only"
+printf '%s\n' '{"schema":2,"utc":"2020-01-01T00:00:00Z","measurement":"observed_graphql_cost","caller":"ai-pr-wait","operation":"graphql.pr_status","workflow":"pr_wait","workflow_id":null,"graphql_points":7,"http_requests":null}' > "$TMP/cost-only/2020-01-01.jsonl"
+printf '%s\n' '{"schema":3,"utc":"2021-01-01T00:00:00Z","measurement":"workflow_outcome","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","outcome":"checks_failed","elapsed_ms":1}' > "$TMP/outcome-only/2021-01-01.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/cost-only" > "$TMP/cost-report"; cost_rc=$?
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/outcome-only" > "$TMP/outcome-report"; outcome_rc=$?
+check 'cost-only and outcome-only reports retain their measurement time bounds' \
+  "[ $cost_rc -eq 0 ] && [ $outcome_rc -eq 0 ] && jq -e '.first_utc == \"2020-01-01T00:00:00Z\" and .last_utc == .first_utc' '$TMP/cost-report' && jq -e '.first_utc == \"2021-01-01T00:00:00Z\" and .last_utc == .first_utc' '$TMP/outcome-report'"
 jq -c '.access_context="FIXTURE_CANARY"' "$TMP/legacy-cost/2026-09-28.jsonl" > "$TMP/legacy-cost/2026-09-27.jsonl"
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/legacy-cost" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
 check 'report rejects a non-opaque context without exposing it' \
