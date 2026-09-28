@@ -166,7 +166,7 @@ planned in advance.
 
 ## Historical recommended rotation waves — not active
 
-Each wave requires explicit approval before any value changes:
+Each wave requires an assigned AI reviewer's APPROVE before any value changes:
 
 1. **MCP access:** five `devops-mcp` client tokens, then the independent
    `nas-mcp` bearer. Update 1Password first, Coolify second, clients from `op://`

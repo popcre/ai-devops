@@ -150,7 +150,9 @@ clone + `./install.sh` (Ubuntu) first.
    If the token file is absent, do NOT invoke the script bare and do NOT ask Albert:
    create the token file yourself from 1Password `vibe_coding` → item
    `vibe_coding-service-account` → field `op_service_account_token` (NOT the empty
-   `credential` field) through a pipe or `op_run`, never a command-line argument.
+   `credential` field) through a pipe or `op_run`, never a command-line argument. If no authenticated
+   1Password route exists on this machine to read it, report it `Blocked —`; never
+   ask Albert.
    A plaintext token or a missing launcher is a security/regression condition — fix
    it. If the only gap is cosmetic (e.g. the memory-sync task), fix it yourself. The installer rewrites the live Claude Desktop MCP config (backing up to
    `*.aidevops.bak` first), so say so before running it.
@@ -315,8 +317,9 @@ clone + `./install.sh` (Ubuntu) first.
    `Get-ScheduledTask -TaskName ai-memory-health` on Windows; if it is absent, register it yourself. Never register an unattended job that EDITS
    memory: `ai-sync-memory` tombstones make a deletion propagate everywhere and
    survive a later pull, so a wrong automated delete is unrecoverable. The audit
-   reports; an interactive AI session reviews and applies every change,
-   never an unattended job and never a request for Albert's approval.
+   reports; every memory edit needs an assigned AI reviewer's APPROVE of the exact
+   edits before it is applied — never an unattended job, never self-approved, and
+   never a request for Albert's approval.
 7. **Capture and publish local memory transactionally:**
    `bin/ai-memory-sync sync-if-stale`. This command alone owns the private clone,
    privacy proof, union, health gate, commit, push, retry state, and success

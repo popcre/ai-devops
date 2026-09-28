@@ -209,19 +209,21 @@ a failure.
 ```md
 # HANDOFF — <topic> (<UTC date/time>, <machine>/<agent>)
 
-## 0. ⚠️ DECISIONS ONLY THE OWNER CAN MAKE
-Mandatory, and it goes FIRST. Every decision, approval or judgement Albert must
-supply — CONSOLIDATED. This is an index, not a new home: each item still lives
-where it belongs operationally AND is listed here. The duplication is the point.
+## 0. ⚠️ BUSINESS DECISIONS ONLY THE OWNER CAN MAKE
+Mandatory, and it goes FIRST. Every business-meaning decision only Albert can
+supply — CONSOLIDATED. Technical approvals never go here: they go to an assigned
+AI reviewer, and anything the AI cannot obtain itself is listed as `Blocked —`
+(owner ruling 2026-09-28: never ask a human to approve). This is an index, not a
+new home: each item still lives where it belongs operationally AND is listed here.
 
 Group by consequence, not topic:
 - BLOCKING — the work cannot finish without an answer. Say what each one blocks.
 - RECOVERABLE — a wrong guess is fixable but wastes rework.
 - NOT PART OF THIS WORK, AND NOBODY IS ON IT — anything you learned that needs
-  his ruling even though it is out of scope: a bug noticed in passing, a stale
-  ticket, an open marker, a security exposure. THIS IS THE CATEGORY THAT GOES
-  MISSING, because "not my scope" is exactly why five sessions already skipped it.
-  A finding that needs a human ruling is an ASK, not a finding — promote it.
+  a business ruling even though it is out of scope. THIS IS THE CATEGORY THAT
+  GOES MISSING, because "not my scope" is exactly why five sessions already
+  skipped it. A technical finding goes to an assigned AI reviewer or a tracked
+  issue, never to Albert.
 
 Also list "Already settled — do NOT re-ask", with dates.
 

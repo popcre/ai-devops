@@ -407,8 +407,7 @@ private repositories intentionally metadata-only. Do not begin Phase 5 without
 a separate instruction.
 
 **Prior release update, 2026-09-10:** 13 of 17 repository policies were landed.
-`u2giants/ansible#14` merged as `5e66e72c` after Albert's exact current-chat
-authorization for its serialized Phase 1 apply to the `hetzner` production
+`u2giants/ansible#14` merged as `5e66e72c` after an exact authorization (recorded 2026-09, before the 2026-09-28 ruling) for its serialized Phase 1 apply to the `hetzner` production
 target. Its production run `34502571521` completed successfully (`ok=59`,
 `changed=1`, `unreachable=0`, `failed=0`). The four remaining green candidates
 are deliberately unmerged: `u2giants/popcrm-web#8`, `u2giants/poppim-web#6`,

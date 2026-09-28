@@ -190,8 +190,10 @@ know**. If they'd have to ask you one question to proceed, that answer belongs i
 the handoff. Default to TOO MUCH — too long costs minutes, too short costs a whole
 session; those are not symmetric, so err long.
 
-0. **⚠️ DECISIONS ONLY THE OWNER CAN MAKE** — see § Section 0 below. **Mandatory,
-   goes FIRST, and is a consolidation of every owner decision in the document.**
+0. **⚠️ BUSINESS DECISIONS ONLY THE OWNER CAN MAKE** — see § Section 0 below.
+   **Mandatory, goes FIRST, and is a consolidation of every business-meaning owner
+   decision in the document.** Technical approvals never go here (owner ruling
+   2026-09-28: never ask a human to approve) — they go to an assigned AI reviewer.
 1. **What this application is** — plain English: what it does, who uses it, why.
    Repos, stack, where it runs (URLs, hosts).
 2. **What we set out to do this session, and why** — goal in business terms + the
@@ -213,7 +215,12 @@ session; those are not symmetric, so err long.
 9. **Open questions and risks** — what's uncertain, what could break, decisions
    made and why, each dated so a later session can't unknowingly contradict them.
 
-## Section 0 — DECISIONS ONLY THE OWNER CAN MAKE (mandatory, goes FIRST)
+## Section 0 — BUSINESS DECISIONS ONLY THE OWNER CAN MAKE (mandatory, goes FIRST)
+
+**Scope (owner ruling 2026-09-28, verbatim: "never ask a human to approve").**
+Only business-meaning questions belong here. Any technical approval, access,
+sign-in, key, or manual step is done by the AI, gated by an assigned AI reviewer,
+or listed as `Blocked —`; it is never an ask for Albert.
 
 **Why this exists.** A handoff is written for the *worker*, so owner decisions
 land wherever they matter operationally: a blocker in §3, a gate in §6, a question
@@ -234,7 +241,7 @@ this section prevents.**
 
 ### What goes in it
 
-**Every decision, approval, or judgement the owner must supply — consolidated.**
+**Every business-meaning decision or judgement the owner must supply — consolidated.**
 Section 0 is an **index, not a new home**: each item still lives where it belongs
 operationally, AND is listed here. **The duplication is the point.** Include:
 

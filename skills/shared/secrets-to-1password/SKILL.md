@@ -103,8 +103,8 @@ grep -rl "ops_eyJ" "$HOME" --exclude-dir=.cache      # paths, not contents
 ```
 
 Rotate it yourself (owner ruling 2026-09-28, Albert Hazan: "never ask a human
-to approve"): report the compromise, get an assigned AI reviewer's APPROVE of the
-rotation plan, rotate through the provider's authenticated tools, update
+to approve"): report the compromise, get an assigned AI reviewer's APPROVE of the rotation plan naming the exact
+credential, provider, and every consumer, rotate through the provider's authenticated tools, update
 1Password and every consumer, and prove the new value works. For an exposed value, revoke
 it as soon as the replacement is in place; never extend its life beyond the
 swap. Never ask Albert

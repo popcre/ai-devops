@@ -124,7 +124,7 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
   or protected files — never chat, command arguments, output, logs, or commits.
   Serialize 1Password access; load `secrets-to-1password`. Report leaks at
-  once and treat them as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan.
+  once and treat them as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers).
 - **Destructive actions:** make each recoverable first — inspect the exact
   target; keep a commit, backup, or reviewed preview. No broad staging or
   destructive Git over unreviewed work, another session's files, a repository
