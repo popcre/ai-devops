@@ -100,7 +100,7 @@ if (Test-Path -LiteralPath $stateAi) {
   Log "stale-gemini-folders removed=$n"
 }
 
-# 6) ZCode exec session logs (runaway stdout can fill C: — issue #884)
+# 6) ZCode exec session logs (runaway stdout can fill C: - issue #884)
 #    Any *-stdout.log under .zcode/cli/exec older than 3 days, or larger than 50 MB.
 $zExec = 'C:\Users\ahazan\.zcode\cli\exec'
 if (Test-Path -LiteralPath $zExec) {
@@ -114,7 +114,7 @@ if (Test-Path -LiteralPath $zExec) {
         Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop
         $n++
       } catch {
-        # Still open — try truncate so the disk frees even if delete fails
+        # Still open - try truncate so the disk frees even if delete fails
         try {
           $fs = [System.IO.File]::Open($_.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
           $fs.SetLength(0); $fs.Close()
