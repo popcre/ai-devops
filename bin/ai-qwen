@@ -363,9 +363,36 @@ key_store_ok() {
       && [ "$dir_owner" = "$(id -u)" ] && [ "$file_owner" = "$(id -u)" ]
   fi
 }
+qwen_shared_credential_lock_path() {
+  local profile_home ps
+  if [ -n "${AI_QWEN_TEST_DIR:-}" ]; then
+    profile_home="${USERPROFILE:-$HOME}"
+    case "$profile_home" in [A-Za-z]:*) profile_home="/$(printf '%s' "$profile_home" | sed 's#\\#/#g; s#:#/#')";; esac
+    if [ -n "${SYSTEMROOT:-}" ]; then
+      printf '%s/credential.lock.d\n' "${AI_MUSE_STATE_DIR:-$profile_home/.local/state/ai-devops/muse}"
+    else
+      printf '%s/op-refresh.lock\n' "$CFG_DIR"
+    fi
+    return
+  fi
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+    [ -n "$ps" ] || return 1
+    profile_home="$("$ps" -NoProfile -NonInteractive -Command '[Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)' | tr -d '\r')"
+  else
+    profile_home="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | cut -d: -f6)"
+  fi
+  [ -n "$profile_home" ] || return 1
+  case "$profile_home" in [A-Za-z]:*) profile_home="/$(printf '%s' "$profile_home" | sed 's#\\#/#g; s#:#/#')";; esac
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    printf '%s/.local/state/ai-devops/muse/credential.lock.d\n' "$profile_home"
+  else
+    printf '%s/.config/ai-devops/op-refresh.lock\n' "$profile_home"
+  fi
+}
 cmd_store_key() {
   [ "${1:-}" != 1 ] || { if key_store_ok; then note "Qwen protected key store is ready."; return 0; fi; }
-  local ref count op_bin dir tmp token
+  local ref count op_bin dir tmp token credential_lock
   [ -f "$MCP_ENV" ] || die 'managed Qwen credential reference is missing.'
   count="$(grep -c '^BAILIAN_CODING_PLAN_API_KEY=' "$MCP_ENV" 2>/dev/null || true)"
   [ "$count" = 1 ] || die 'managed Qwen credential reference must occur exactly once.'
@@ -380,14 +407,13 @@ cmd_store_key() {
   chmod 600 "$tmp" && protect_windows_path "$tmp" file || { rm -f "$tmp"; die 'could not protect Qwen key store.'; }
   token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
   [ -n "$token" ] || [ ! -s "$TOKEN_FILE" ] || token="$(<"$TOKEN_FILE")"
+  credential_lock="$(qwen_shared_credential_lock_path)" || { rm -f "$tmp"; die 'could not resolve the shared 1Password credential lock.'; }
   if ! (
     [ -z "$token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$token"
     if [ -n "${SYSTEMROOT:-}" ]; then
       # Git Bash lacks flock. Share Muse's portable credential lock, which
       # recognizes the same owner record and serializes its own op reads.
-      local profile_home="${USERPROFILE:-$HOME}" credential_lock deadline
-      case "$profile_home" in [A-Za-z]:*) profile_home="/$(printf '%s' "$profile_home" | sed 's#\\#/#g; s#:#/#')";; esac
-      credential_lock="${AI_MUSE_STATE_DIR:-$profile_home/.local/state/ai-devops/muse}/credential.lock.d"
+      local deadline
       deadline=$(( $(date +%s) + 120 ))
       until lock_acquire "$credential_lock" 'Qwen key-store refresh'; do
         [ "$(date +%s)" -lt "$deadline" ] || exit 1
@@ -399,7 +425,7 @@ cmd_store_key() {
       # setup-secrets.sh uses this same lock for Linux 1Password reads.
       # Keep it through op's exit, but never pass its descriptor to op's children.
       command -v flock >/dev/null 2>&1 || exit 1
-      flock --close -w 120 "$CFG_DIR/op-refresh.lock" "$op_bin" read "$ref" </dev/null > "$tmp"
+      flock --close -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp"
     fi
   ) || [ ! -s "$tmp" ]; then
     rm -f "$tmp"; die 'could not refresh Qwen key from 1Password.'
@@ -486,12 +512,12 @@ lock_publish() {
   # Build the whole lock, owner record included, in a private staging
   # directory and publish it with one rename: no reader ever sees a lock
   # without its owner, and a paused creator cannot overwrite a later owner.
-  local dir="$1" stage winpid token published
+  local dir="$1" stage winpid token published holder_pid="$BASHPID"
   stage="$(mktemp -d "$dir.stage.XXXXXX" 2>/dev/null)" || return 1
-  winpid="$(cat "/proc/$$/winpid" 2>/dev/null || echo '')"
-  token="$$.${winpid:-0}.$(date +%s%N).$RANDOM"
-  printf '%s\n' "$$" > "$stage/pid"; printf '%s\n' "$2" > "$stage/label"
-  printf '%s %s %s\n' "$$" "${winpid:--}" "$token" > "$stage/owner"
+  winpid="$(cat "/proc/$holder_pid/winpid" 2>/dev/null || echo '')"
+  token="$holder_pid.${winpid:-0}.$(date +%s%N).$RANDOM"
+  printf '%s\n' "$holder_pid" > "$stage/pid"; printf '%s\n' "$2" > "$stage/label"
+  printf '%s %s %s\n' "$holder_pid" "${winpid:--}" "$token" > "$stage/owner"
   if ! mv -T "$stage" "$dir" 2>/dev/null; then rm -rf "$stage"; return 1; fi
   read -r _ _ published <<<"$(lock_owner_record "$dir")"
   [ "$published" = "$token" ] || return 1
@@ -552,7 +578,7 @@ lock_release() {
   record="$(lock_owner_record "$dir")"; read -r pid _ token <<<"$record"
   if [ -n "$mine" ]; then
     { [ -z "$record" ] || [ "$token" = "$mine" ]; } && rm -rf "$dir" 2>/dev/null
-  elif [ -n "$record" ] && [ "$pid" = "$$" ]; then
+  elif [ -n "$record" ] && [ "$pid" = "$BASHPID" ]; then
     # Taken in a subshell of this process, which could not hand back its token.
     rm -rf "$dir" 2>/dev/null
   fi

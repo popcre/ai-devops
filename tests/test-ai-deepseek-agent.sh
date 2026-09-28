@@ -61,6 +61,18 @@ ln -s "$(command -v python3)" "$TMP/bin/python"
 export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_CURL_ENV="$TMP/curl-env" DEEPSEEK_STUB_PID_FILE="$TMP/curl-pid" DEEPSEEK_STUB_TERM_MARKER="$TMP/curl-terminated"
 : > "$DEEPSEEK_CURL_ARGS"
 echo 'ai-deepseek-agent tests'
+if (
+  source <(sed -n '/^      publish_lock() {/,/^      }/p' "$SCRIPT")
+  lock_record(){ cat "$lock_dir/owner" 2>/dev/null || true; }
+  lock_dir="$TMP/deepseek-owner-fixture.lock.d"
+  holder_pid="$BASHPID"
+  publish_lock || exit 1
+  read -r owner winpid token < "$lock_dir/owner"
+  [ "$owner" = "$holder_pid" ] || exit 1
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    [ "$winpid" = "$(cat "/proc/$holder_pid/winpid")" ] || exit 1
+  fi
+); then ok 'DeepSeek credential lock records its actual shell and Windows process'; else bad 'DeepSeek credential lock records its actual shell and Windows process'; fi
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test --review >/dev/null 2>&1
 check "review with no protected store refuses before 1Password or provider contact" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" DEEPSEEK_API_KEY=untrusted-ambient bash "$SCRIPT" store-key >/dev/null

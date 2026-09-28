@@ -325,15 +325,15 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ "$SUBCMD" = store-key ]; then
         [ -n "$winpid" ] && ps -W 2>/dev/null | awk -v w="$winpid" '$4 == w { f = 1 } END { exit !f }'
       }
       publish_lock() {
-        local stage winpid
+        local stage winpid holder_pid="$BASHPID"
         stage="$(mktemp -d "$lock_dir.stage.XXXXXX")" || return 1
-        winpid="$(cat "/proc/$BASHPID/winpid" 2>/dev/null || true)"
-        lock_token="$BASHPID.${winpid:-0}.$(date +%s%N).$RANDOM"
-        printf '%s %s %s\n' "$BASHPID" "${winpid:--}" "$lock_token" > "$stage/owner"
-        printf '%s\n' "$BASHPID" > "$stage/pid"
+        winpid="$(cat "/proc/$holder_pid/winpid" 2>/dev/null || true)"
+        lock_token="$holder_pid.${winpid:-0}.$(date +%s%N).$RANDOM"
+        printf '%s %s %s\n' "$holder_pid" "${winpid:--}" "$lock_token" > "$stage/owner"
+        printf '%s\n' "$holder_pid" > "$stage/pid"
         printf '%s\n' "$lock_token" > "$stage/token"
         if ! mv -T "$stage" "$lock_dir" 2>/dev/null; then rm -rf "$stage"; return 1; fi
-        [ "$(lock_record)" = "$BASHPID ${winpid:--} $lock_token" ]
+        [ "$(lock_record)" = "$holder_pid ${winpid:--} $lock_token" ]
       }
       acquire_lock() {
         local record owner winowner token tomb attempt
