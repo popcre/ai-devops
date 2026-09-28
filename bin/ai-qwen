@@ -33,7 +33,8 @@
 #     num_turns, result, usage, permission_denials, and timing.
 #   Headless budgets exist and are always set: max session turns, wall time,
 #     tool calls, and subagent depth. Exit 55 means a budget ended the run.
-#   Reviews use `--safe-mode --sandbox --approval-mode yolo` inside a private
+#   Reviews use `--safe-mode --approval-mode yolo` plus Qwen's native bwrap tool
+#     sandbox on Linux (legacy container `--sandbox` elsewhere) inside a private
 #     remote-less snapshot, with a post-run caller-checkout check. Implementation uses
 #     `--safe-mode --sandbox --approval-mode yolo` only inside the wrapper-owned
 #     disposable worktree. The installed Qwen bundle is additionally hardened
@@ -108,6 +109,7 @@ if [ "$allow_key" = 1 ]; then
   clean_env+=("AI_QWEN_SECRET_FILE=$secret_file" "NODE_OPTIONS=--require=$preload" "OPENAI_BASE_URL=$base_url" "OPENAI_MODEL=$model")
 fi
 [ -z "${AI_QWEN_TEST_DIR:-}" ] || clean_env+=("AI_QWEN_TEST_DIR=$AI_QWEN_TEST_DIR")
+[ -z "${QWEN_CODE_SYSTEM_SETTINGS_PATH:-}" ] || clean_env+=("QWEN_CODE_SYSTEM_SETTINGS_PATH=$QWEN_CODE_SYSTEM_SETTINGS_PATH")
 exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c '\''exec "$@"'\'' qwen-clean "$@"
 '
 
@@ -196,6 +198,25 @@ secure_qwen_home() {
 # The wrapper owns that selection: it reinstalls its own governed entry on every
 # run, preserves unrelated settings and third-party providers, and fails closed
 # rather than letting a paid call start against unproven auth.
+# Review tool sandbox (issue #974 follow-up): prefer Qwen's native Linux bwrap
+# execution sandbox. AI_QWEN_REVIEW_SANDBOX=container forces the legacy
+# container sandbox; the test fixture sets it to exec to model a bwrap host.
+review_exec_sandbox_available() {
+  case "${AI_QWEN_REVIEW_SANDBOX:-auto}" in
+    container) return 1 ;;
+    exec) return 0 ;;
+  esac
+  [ "$(uname -s 2>/dev/null)" = Linux ] || return 1
+  command -v bwrap >/dev/null 2>&1 || return 1
+  bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1
+}
+write_review_exec_sandbox_settings() {
+  local f="$QWEN_HOME_DIR/review-execution-sandbox.json"
+  printf '%s\n' '{"tools":{"executionSandbox":{"backend":"bwrap","filesystem":"workspace-write","network":"closed"}}}' > "$f" || return 1
+  chmod 600 "$f" 2>/dev/null || true
+  printf '%s' "$f"
+}
+
 ensure_qwen_auth_settings() {
   local settings="$QWEN_HOME_DIR/settings.json" tmp current
   current='{}'
@@ -961,6 +982,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   else
     max_turns="$IMPLEMENT_MAX_TURNS"; max_tool_calls="$IMPLEMENT_MAX_TOOL_CALLS"; max_wall_time="$IMPLEMENT_MAX_WALL_TIME"
   fi
+  local review_settings=''
   local args=(--model "$QWEN_MODEL" --auth-type openai --output-format stream-json --safe-mode
     --max-session-turns "$max_turns" --max-wall-time "$max_wall_time"
     --max-tool-calls "$max_tool_calls" --max-subagent-depth 1)
@@ -973,7 +995,16 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     # Issue #974: reviews may run code/tests and edit, but only in the private
     # remote-less snapshot, under Qwen's sandbox, like implementation.
     assert_disposable_review_dir "$repo" || die 'refusing a writable Qwen review outside a private remote-less snapshot.'
-    args+=(--sandbox --approval-mode yolo)
+    if review_exec_sandbox_available; then
+      # Linux: Qwen's native bwrap tool sandbox confines every tool to the
+      # snapshot (host read-only, network closed). The legacy container
+      # --sandbox needs a usable Docker/Podman daemon; without one Qwen retries
+      # silently until the startup timeout, so no review can ever finish.
+      review_settings="$(write_review_exec_sandbox_settings)" || die 'could not write the Qwen review tool-sandbox settings.'
+      args+=(--approval-mode yolo)
+    else
+      args+=(--sandbox --approval-mode yolo)
+    fi
   elif [ "$mode" = probe ]; then
     # doctor --live answers one fixed prompt in the caller's directory: it is a
     # qualification probe, not a review, so it gets no tools at all.
@@ -997,7 +1028,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   chmod 600 "$RUN_TURN_SECRET_FILE" 2>/dev/null || die 'could not protect private Qwen secret handoff.'
   protect_windows_path "$RUN_TURN_SECRET_FILE" file || die 'could not enforce private Qwen secret-handoff ACL.'
   set +e
-  ( cd "$repo" && exec "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 1 "$QWEN_CODING_PLAN_BASE_URL" "$QWEN_MODEL" "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" "$preload" "$RUN_TURN_SECRET_FILE" "$KEY_STORE" "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
+  ( cd "$repo" && export QWEN_CODE_SYSTEM_SETTINGS_PATH="$review_settings" && exec "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 1 "$QWEN_CODING_PLAN_BASE_URL" "$QWEN_MODEL" "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" "$preload" "$RUN_TURN_SECRET_FILE" "$KEY_STORE" "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
   RUN_TURN_PID=$!
   # A cold start that never writes one stream byte hangs past Qwen's own
   # --max-wall-time (seen: 15 minutes silent), so the wrapper enforces its own

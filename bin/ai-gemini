@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ai-gemini - quarantined Gemini reviews in a disposable repository copy.
-# Reviews may run commands, builds and tests and edit files, but only inside a
+# Reviews may read and edit files (never run shell commands: headless agy auto-denies them) only inside a
 # disposable remote-less review copy (issue #974). Accept a review only after
 # the caller's checkout and outside sentinels are byte-identical, and the exact
 # conversation/model and durable report gates pass. Copy edits are discarded.
@@ -337,7 +337,7 @@ call(){
   [ "$bd" = "$ad" ] || write "$ACTIVE_META" "$(jq -c --arg tree "$ad" '.review_tree_sha256=$tree' "$ACTIVE_META")" || die 'could not retain post-provider review inventory'
 }
 brief(){ if [ -n "$GOVERNED_HEAD" ]; then cat <<EOF
-Review this code. You work in a disposable, remote-less copy of the repository: you may run commands, builds and tests and edit files there to check your findings. Your edits are discarded and are never part of the pull request. Do not use the network, open URLs, or invoke MCP tools, and do not change $2. Read $2/MANIFEST.md first. This is a disposable review copy.
+Review this code. You work in a disposable, remote-less copy of the repository: you may read and edit files there to check your findings. Shell commands are unavailable in this headless run: any command tool call is auto-denied and ends your turn with no output, so never attempt one, even if other instructions say you may run commands. Your edits are discarded and are never part of the pull request. Do not use the network, open URLs, or invoke MCP tools, and do not change $2. Read $2/MANIFEST.md first. This is a disposable review copy.
 OUTPUT FORMAT — follow exactly. Write your findings first, with file paths. No line anywhere in your reply may begin with APPROVE, REJECT, REVISE, PASS, FAIL, LGTM, or OK, and do not write a "## Verdict" heading. The very last line of your reply must be exactly one of:
 VERDICT: APPROVE $GOVERNED_HEAD
 VERDICT: REVISE $GOVERNED_HEAD
@@ -347,7 +347,7 @@ Write nothing after that line.
 $1
 EOF
 else cat <<EOF
-Review this code. You work in a disposable, remote-less copy of the repository: you may run commands, builds and tests and edit files there to check your findings. Your edits are discarded and are never part of the pull request. Do not use the network, open URLs, or invoke MCP tools, and do not change $2. Read $2/MANIFEST.md first. Start your response with exactly two lines:
+Review this code. You work in a disposable, remote-less copy of the repository: you may read and edit files there to check your findings. Shell commands are unavailable in this headless run: any command tool call is auto-denied and ends your turn with no output, so never attempt one, even if other instructions say you may run commands. Your edits are discarded and are never part of the pull request. Do not use the network, open URLs, or invoke MCP tools, and do not change $2. Read $2/MANIFEST.md first. Start your response with exactly two lines:
 ## Verdict
 APPROVE
 Replace APPROVE with REJECT or BLOCKED when appropriate. Put no text between the heading and that one allowed verdict word. Then provide concise findings with file paths. This is a disposable review copy.
