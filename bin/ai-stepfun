@@ -59,7 +59,9 @@ require_platform(){
 # own install path and accept any binary only if it identifies as StepCode.
 step_bin(){
   local b c
-  for c in "${AI_STEPFUN_STEP_BIN:-}" "$HOME/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
+  local candidates=("$HOME/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)")
+  [ -z "${AI_STEPFUN_STEP_BIN:-}" ] || candidates=("$AI_STEPFUN_STEP_BIN")
+  for c in "${candidates[@]}"; do
     [ -n "$c" ] && [ -x "$c" ] || continue
     "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || continue
     b="$c"; break
