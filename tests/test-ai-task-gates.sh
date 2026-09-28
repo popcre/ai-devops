@@ -103,9 +103,299 @@ check 'the ai-devops pilot protects its own declaration' \
   "[ \"\$(class_of '.ai-devops/task-gates.json')\" = reviewer-safety ]"
 check 'the ai-devops pilot classifies Windows installation separately' \
   "[ \"\$(class_of 'bin/install-machine-tools.ps1')\" = installation ]"
-git -C "$TMP/class" add .ai-devops/task-gates.json
+mkdir -p "$TMP/class/bin"
+printf '#!/bin/sh\n' > "$TMP/class/bin/ai-task-gates"
+git -C "$TMP/class" add .ai-devops/task-gates.json bin/ai-task-gates
 git -C "$TMP/class" commit -qm 'add pilot declaration'
+( cd "$TMP/class" && "$GATES" start --class reviewer-safety ) >/dev/null
+git -C "$TMP/class" worktree add -q --detach "$TMP/class-candidate" HEAD
+mkdir -p "$TMP/fake-os" "$TMP/class-home/.local/bin"
+cat > "$TMP/fake-os/uname" <<'EOF'
+#!/bin/sh
+printf 'MINGW64_NT\n'
+EOF
+chmod +x "$TMP/fake-os/uname"
+class_saved_home="$HOME"; class_saved_path="$PATH"
+class_saved_profile="${USERPROFILE:-}"; class_saved_programfiles="${PROGRAMFILES:-}"
+export HOME="$TMP/class-home" PATH="$TMP/fake-os:$PATH" USERPROFILE="$TMP/class-home" PROGRAMFILES='C:\Program Files'
+( cd "$TMP/class-candidate" && "$GATES" start --class reviewer-safety ) >/dev/null
+class_launcher="$HOME/.local/bin/ai-task-gates"
+ln -s "$TMP/class/bin/ai-task-gates" "$class_launcher"
+printf '#!/bin/sh\n' > "$TMP/class-candidate/bin/ai-review"
+git -C "$TMP/class-candidate" add bin/ai-review
+git -C "$TMP/class-candidate" commit -qm 'reviewed candidate'
+class_target="$(git -C "$TMP/class-candidate" rev-parse HEAD)"
+class_proof="--target-head $class_target --installed-checkout $TMP/class --installed-launcher $class_launcher"
+check 'an unlanded candidate cannot claim the toolkit installation route' \
+  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --owner-request 'Albert requested install on 916'"
+git -C "$TMP/class" update-ref refs/remotes/origin/main "$class_target"
+check 'reviewer-safety installation needs an explicit owner request' \
+  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof"
+check 'reviewer-safety installation keeps independent review and routing proof' \
+  "out '$TMP/class-candidate' explain --json | jq -e '.required_gates | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
+check 'reviewed toolkit release has a narrow authorized installation route' \
+  "rc 0 '$TMP/class-candidate' check --before deploy $class_proof --owner-request 'Albert requested install on 916'"
+printf 'uncommitted\n' > "$TMP/class-candidate/stray.txt"
+check 'the exact candidate target refuses uncommitted files' \
+  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --owner-request 'Albert requested install on 916'"
+rm -f "$TMP/class-candidate/stray.txt"
+rm -f "$class_launcher"
+ln -s "$TMP/class-candidate/bin/ai-task-gates" "$class_launcher"
+check 'the installed launcher cannot point into the candidate checkout' \
+  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --owner-request 'Albert requested install on 916'"
+rm -f "$class_launcher"
+ln -s "$TMP/class/bin/ai-task-gates" "$class_launcher"
+newrepo "$TMP/unrelated-installed"
+check 'a foreign installed checkout cannot be claimed as the same repository' \
+  "rc 3 '$TMP/class-candidate' check --before deploy --target-head '$class_target' --installed-checkout '$TMP/unrelated-installed' --installed-launcher '$class_launcher' --owner-request 'Albert requested install on 916'"
+git -C "$TMP/class" worktree add -q --detach "$TMP/class-fake-installed" HEAD
+rm "$class_launcher"
+ln -s "$TMP/class-fake-installed/bin/ai-task-gates" "$class_launcher"
+check 'a linked sibling cannot impersonate the durable installed checkout' \
+  "rc 3 '$TMP/class-candidate' check --before deploy --target-head '$class_target' --installed-checkout '$TMP/class-fake-installed' --installed-launcher '$class_launcher' --owner-request 'Albert requested install on 916'"
+rm "$class_launcher"
+ln -s "$TMP/class/bin/ai-task-gates" "$class_launcher"
+if ! command -v cygpath >/dev/null 2>&1; then
+  mkdir -p "$TMP/fake-cygpath"
+  cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
+#!/bin/sh
+case "$1" in -u|-wa) printf '%s\n' "$2" ;; *) exit 2 ;; esac
+EOF
+  chmod +x "$TMP/fake-cygpath/cygpath"
+  export PATH="$TMP/fake-cygpath:$PATH"
+fi
+windows_source="$(cygpath -u "$TMP/class/bin/ai-task-gates")"
+rm "$class_launcher"
+cat > "$class_launcher" <<EOF
+#!/usr/bin/env bash
+# Managed by ai-devops install-machine-tools.ps1.
+export HOME="$HOME"
+exec "$windows_source" "\$@"
+EOF
+cat > "$class_launcher.cmd" <<EOF
+@echo off
+rem Managed by ai-devops install-machine-tools.ps1.
+set "HOME=$USERPROFILE"
+"$PROGRAMFILES\Git\bin\bash.exe" "$windows_source" %*
+EOF
+check 'managed Windows launcher resolves to the installed checkout' \
+  "rc 0 '$TMP/class-candidate' check --before deploy --target-head '$class_target' --installed-checkout '$TMP/class' --installed-launcher '$class_launcher' --owner-request 'Albert requested install on 916'"
+sed -i 's/\\Git\\bin\\bash.exe/\\Other\\bash.exe/' "$class_launcher.cmd"
+check 'an update rejects a tampered Windows command route' \
+  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --owner-request 'Albert requested install on 916'"
+sed -i 's/\\Other\\bash.exe/\\Git\\bin\\bash.exe/' "$class_launcher.cmd"
+sed -i 's/^set "HOME=.*/set "HOME=elsewhere"/' "$class_launcher.cmd"
+check 'an update rejects a tampered Windows home route' \
+  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --owner-request 'Albert requested install on 916'"
+sed -i "s|^set \"HOME=.*|set \"HOME=$USERPROFILE\"|" "$class_launcher.cmd"
+mkdir -p "$TMP/class-candidate/services/api" "$TMP/class-candidate/infra"
+printf 'FROM scratch\n' > "$TMP/class-candidate/services/api/Dockerfile"
+check 'mixed deployment and reviewer release cannot use the narrow route' \
+  "rc 3 '$TMP/class-candidate' check --before deploy --owner-request 'Albert requested install on 916'"
+rm -f "$TMP/class-candidate/services/api/Dockerfile"
+rmdir "$TMP/class-candidate/services/api" "$TMP/class-candidate/services"
+printf 'resource \"x\" \"y\" {}\n' > "$TMP/class-candidate/infra/main.tf"
+check 'mixed infrastructure and reviewer release cannot use the narrow route' \
+  "rc 3 '$TMP/class-candidate' check --before deploy --owner-request 'Albert requested install on 916'"
+rm -f "$TMP/class-candidate/infra/main.tf"
+rmdir "$TMP/class-candidate/infra"
+git -C "$TMP/class-candidate" rm -q bin/ai-review
+git -C "$TMP/class-candidate" commit -qm 'finish mixed tests'
+export HOME="$class_saved_home" PATH="$class_saved_path"
+if [ -n "$class_saved_profile" ]; then export USERPROFILE="$class_saved_profile"; else unset USERPROFILE; fi
+if [ -n "$class_saved_programfiles" ]; then export PROGRAMFILES="$class_saved_programfiles"; else unset PROGRAMFILES; fi
+
+newrepo "$TMP/foreign-reviewer" u2giants/other-toolkit
+mkdir -p "$TMP/foreign-reviewer/.ai-devops" "$TMP/foreign-reviewer/bin"
+cp "$ROOT/.ai-devops/task-gates.json" "$TMP/foreign-reviewer/.ai-devops/task-gates.json"
+printf '#!/bin/sh\n' > "$TMP/foreign-reviewer/bin/ai-review"
+( cd "$TMP/foreign-reviewer" && "$GATES" start --class reviewer-safety ) >/dev/null
+check 'another repository cannot use the toolkit installation route' \
+  "rc 3 '$TMP/foreign-reviewer' check --before deploy --owner-request 'Albert requested install on 916'"
+
+for foreign_url in https://gitlab.com/popcre/ai-devops.git git@gitlab.com:popcre/ai-devops.git; do
+  git -C "$TMP/foreign-reviewer" remote set-url origin "$foreign_url"
+  check 'foreign host with the same owner and name cannot use the toolkit route' \
+    "rc 3 '$TMP/foreign-reviewer' check --before deploy --owner-request 'Albert requested install on 916'"
+done
+
+newrepo "$TMP/deleted-reviewer"
+mkdir -p "$TMP/deleted-reviewer/.ai-devops" "$TMP/deleted-reviewer/bin"
+cp "$ROOT/.ai-devops/task-gates.json" "$TMP/deleted-reviewer/.ai-devops/task-gates.json"
+printf '#!/bin/sh\n' > "$TMP/deleted-reviewer/bin/ai-task-gates"
+printf '#!/bin/sh\n' > "$TMP/deleted-reviewer/bin/ai-review"
+git -C "$TMP/deleted-reviewer" add .ai-devops/task-gates.json bin/ai-review bin/ai-task-gates
+git -C "$TMP/deleted-reviewer" commit -qm 'installed reviewer source'
+( cd "$TMP/deleted-reviewer" && "$GATES" start --class reviewer-safety ) >/dev/null
+installed_head="$(git -C "$TMP/deleted-reviewer" rev-parse HEAD)"
+git -C "$TMP/deleted-reviewer" worktree add -q --detach "$TMP/deleted-candidate" "$installed_head"
+export HOME="$TMP/class-home" PATH="$TMP/fake-os:$class_saved_path"
+rm -f "$class_launcher"
+ln -s "$TMP/deleted-reviewer/bin/ai-task-gates" "$class_launcher"
+( cd "$TMP/deleted-candidate" && "$GATES" start --class reviewer-safety ) >/dev/null
+git -C "$TMP/deleted-candidate" rm -q bin/ai-review
+git -C "$TMP/deleted-candidate" commit -qm 'retire reviewer source'
+deleted_target="$(git -C "$TMP/deleted-candidate" rev-parse HEAD)"
+git -C "$TMP/deleted-reviewer" update-ref refs/remotes/origin/main "$deleted_target"
+deleted_proof="--target-head $deleted_target --installed-checkout $TMP/deleted-reviewer --installed-launcher $class_launcher"
+check 'deployment sees a reviewer path deleted after the recorded host HEAD' \
+  "out '$TMP/deleted-candidate' explain --json --base '$installed_head' | jq -e '.changes[] | select(.path==\"bin/ai-review\" and .class==\"reviewer-safety\")'"
+check 'a deleted reviewer path still uses the protected installation route' \
+  "rc 0 '$TMP/deleted-candidate' check --before deploy $deleted_proof --owner-request 'Albert requested install on 916'"
+printf 'local edit\n' >> "$TMP/deleted-reviewer/bin/ai-task-gates"
+check 'preflight refuses local edits in the installed checkout' \
+  "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --owner-request 'Albert requested install on 916'"
+git -C "$TMP/deleted-reviewer" checkout -q -- bin/ai-task-gates
+check 'a caller cannot replace the recorded host HEAD with a newer base' \
+  "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --base HEAD --owner-request 'Albert requested install on 916'"
+check 'preflight rejects a wrong target commit' \
+  "rc 3 '$TMP/deleted-candidate' check --before deploy --target-head '$installed_head' --installed-checkout '$TMP/deleted-reviewer' --installed-launcher '$class_launcher' --owner-request 'Albert requested install on 916'"
+git -C "$TMP/deleted-reviewer" merge --ff-only -q "$deleted_target"
+check 'preflight rejects an installed checkout that already moved' \
+  "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --owner-request 'Albert requested install on 916'"
+export HOME="$class_saved_home" PATH="$class_saved_path"
+
+newrepo "$TMP/empty-release"
+mkdir -p "$TMP/empty-release/.ai-devops" "$TMP/empty-release/bin"
+cp "$ROOT/.ai-devops/task-gates.json" "$TMP/empty-release/.ai-devops/task-gates.json"
+printf '#!/bin/sh\n' > "$TMP/empty-release/bin/ai-task-gates"
+git -C "$TMP/empty-release" add .ai-devops/task-gates.json bin/ai-task-gates
+git -C "$TMP/empty-release" commit -qm 'current source only'
+git -C "$TMP/empty-release" update-ref refs/remotes/origin/main HEAD
+( cd "$TMP/empty-release" && "$GATES" start --class reviewer-safety ) >/dev/null
+check 'an empty reviewer release cannot be installed after a late start' \
+  "rc 3 '$TMP/empty-release' check --before deploy --owner-request 'Albert requested install on 916'"
+( cd "$TMP/empty-release" && "$GATES" start --class installation ) >/dev/null
+check 'late declaration cannot hide an unreceipted installed source' \
+  "rc 3 '$TMP/empty-release' check --before deploy --owner-request 'Albert requested a first install'"
+mkdir -p "$TMP/empty-home/.local/bin" "$TMP/fake-os"
+cat > "$TMP/fake-os/uname" <<'EOF'
+#!/bin/sh
+printf 'MINGW64_NT\n'
+EOF
+chmod +x "$TMP/fake-os/uname"
+saved_home="$HOME"; saved_path="$PATH"; saved_programfiles="${PROGRAMFILES:-}"; saved_profile="${USERPROFILE:-}"
+export HOME="$TMP/empty-home" PATH="$TMP/fake-os:$TMP/fake-cygpath:$PATH" USERPROFILE="$TMP/empty-home"
+export PROGRAMFILES='C:\Program Files'
+empty_launcher="$HOME/.local/bin/ai-task-gates"
+empty_proof="--installed-checkout $TMP/empty-release --installed-launcher $empty_launcher --owner-request 'Albert requested a first install'"
+check 'first install requires an explicit first-install claim' \
+  "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
+check 'first-time toolkit installation retains the owner-authorized route' \
+  "rc 0 '$TMP/empty-release' check --before deploy --first-install $empty_proof"
+empty_sha="$(git -C "$TMP/empty-release" rev-parse HEAD)"
+empty_hash="$(sha256sum "$TMP/empty-release/bin/ai-task-gates" | cut -d' ' -f1)"
+cat > "$empty_launcher" <<EOF
+#!/usr/bin/env bash
+# Managed by ai-devops install-machine-tools.ps1.
+# source-sha=$empty_sha
+# source-hash=$empty_hash
+export HOME="$HOME"
+exec "$TMP/empty-release/bin/ai-task-gates" "\$@"
+EOF
+cat > "$empty_launcher.cmd" <<EOF
+@echo off
+rem Managed by ai-devops install-machine-tools.ps1.
+rem source-sha=$empty_sha
+rem source-hash=$empty_hash
+set "HOME=$HOME"
+"$PROGRAMFILES\Git\bin\bash.exe" "$TMP/empty-release/bin/ai-task-gates" %*
+EOF
+check 'first install refuses a pre-existing managed launcher' \
+  "rc 3 '$TMP/empty-release' check --before deploy --first-install $empty_proof"
+check 'matching installed source receipt permits same-source maintenance' \
+  "rc 0 '$TMP/empty-release' check --before deploy $empty_proof"
+sed -i 's|^export HOME=.*|export HOME="elsewhere"|' "$empty_launcher"
+check 'tampered Windows Bash home refuses maintenance' \
+  "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
+sed -i "s|^export HOME=.*|export HOME=\"$HOME\"|" "$empty_launcher"
+sed -i 's/\\Git\\bin\\bash.exe/\\Other\\bash.exe/' "$empty_launcher.cmd"
+check 'tampered Windows command routing refuses maintenance' \
+  "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
+sed -i 's/\\Other\\bash.exe/\\Git\\bin\\bash.exe/' "$empty_launcher.cmd"
+printf 'call bad.cmd\n' >> "$empty_launcher.cmd"
+check 'extra Windows command refuses maintenance even with valid markers and route' \
+  "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
+sed -i '$d' "$empty_launcher.cmd"
+sed -i 's/^rem source-hash=.*/rem source-hash=bad/' "$empty_launcher.cmd"
+check 'tampered receipt refuses maintenance' \
+  "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
+sed -i "s/^rem source-hash=.*/rem source-hash=$empty_hash/" "$empty_launcher.cmd"
+rm "$empty_launcher.cmd"
+check 'missing receipt refuses maintenance' \
+  "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
+cat > "$empty_launcher.cmd" <<EOF
+@echo off
+rem Managed by ai-devops install-machine-tools.ps1.
+rem source-sha=$empty_sha
+rem source-hash=$empty_hash
+set "HOME=$HOME"
+"$PROGRAMFILES\Git\bin\bash.exe" "$TMP/empty-release/bin/ai-task-gates" %*
+EOF
+rm "$empty_launcher" "$empty_launcher.cmd"
+ln -s "$TMP/empty-release/bin/ai-task-gates" "$empty_launcher"
+mkdir -p "$TMP/empty-etc"
+export AI_DEVOPS_ETC="$TMP/empty-etc"
+printf 'meta\tsource_sha\t%s\t-\nsymlink\t%s\t%s\t%s\n' \
+  "$empty_sha" "$empty_launcher" "$TMP/empty-release/bin/ai-task-gates" "$empty_hash" > "$AI_DEVOPS_ETC/install-manifest.tsv"
+linux_receipt_fixture(){
+  ( eval "$(sed -n '/^toolkit_source_receipt(){/,/^}/p' "$GATES")"; toolkit_source_receipt "$TMP/empty-release" "$empty_launcher" "$empty_sha" "$AI_DEVOPS_ETC/install-manifest.tsv" )
+}
+check 'matching Linux install manifest proves the source receipt' 'linux_receipt_fixture'
+check 'a caller-provided manifest path cannot authorize deployment' \
+  "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
+sed -i 's/^symlink.*$/symlink\tbad\tbad\tbad/' "$AI_DEVOPS_ETC/install-manifest.tsv"
+check 'tampered Linux install manifest refuses source receipt' '! linux_receipt_fixture'
+rm "$AI_DEVOPS_ETC/install-manifest.tsv"
+check 'missing Linux install manifest refuses source receipt' '! linux_receipt_fixture'
+printf 'meta\tsource_sha\t%s\t-\nsymlink\t%s\t%s\t%s\n' \
+  "$empty_sha" "$empty_launcher" "$TMP/empty-release/bin/ai-task-gates" "$empty_hash" > "$AI_DEVOPS_ETC/install-manifest.tsv"
+printf 'new release\n' >> "$TMP/empty-release/README.md"
+git -C "$TMP/empty-release" add README.md
+git -C "$TMP/empty-release" commit -qm 'early pulled update'
+git -C "$TMP/empty-release" update-ref refs/remotes/origin/main HEAD
+( cd "$TMP/empty-release" && "$GATES" start --class installation ) >/dev/null
+check 'late declaration after early pull cannot claim an older source receipt' \
+  "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
+unset AI_DEVOPS_ETC
+if [ -n "$saved_programfiles" ]; then export PROGRAMFILES="$saved_programfiles"; else unset PROGRAMFILES; fi
+if [ -n "$saved_profile" ]; then export USERPROFILE="$saved_profile"; else unset USERPROFILE; fi
+export HOME="$saved_home" PATH="$saved_path"
+
+newrepo "$TMP/redirected-toolkit" u2giants/ai-devops
+mkdir -p "$TMP/redirected-toolkit/.ai-devops" "$TMP/redirected-toolkit/bin"
+cp "$ROOT/.ai-devops/task-gates.json" "$TMP/redirected-toolkit/.ai-devops/task-gates.json"
+printf '#!/bin/sh\n' > "$TMP/redirected-toolkit/bin/ai-task-gates"
+git -C "$TMP/redirected-toolkit" add .ai-devops/task-gates.json bin/ai-task-gates
+git -C "$TMP/redirected-toolkit" commit -qm 'redirected origin base'
+( cd "$TMP/redirected-toolkit" && "$GATES" start --class reviewer-safety ) >/dev/null
+git -C "$TMP/redirected-toolkit" worktree add -q --detach "$TMP/redirected-candidate" HEAD
+export HOME="$TMP/class-home" PATH="$TMP/fake-os:$class_saved_path"
+rm -f "$class_launcher"
+ln -s "$TMP/redirected-toolkit/bin/ai-task-gates" "$class_launcher"
+( cd "$TMP/redirected-candidate" && "$GATES" start --class reviewer-safety ) >/dev/null
+printf '#!/bin/sh\n' > "$TMP/redirected-candidate/bin/ai-review"
+git -C "$TMP/redirected-candidate" add bin/ai-review
+git -C "$TMP/redirected-candidate" commit -qm 'redirected candidate'
+redirected_target="$(git -C "$TMP/redirected-candidate" rev-parse HEAD)"
+git -C "$TMP/redirected-toolkit" update-ref refs/remotes/origin/main "$redirected_target"
+check 'the documented u2giants GitHub origin retains toolkit install route' \
+  "rc 0 '$TMP/redirected-candidate' check --before deploy --target-head '$redirected_target' --installed-checkout '$TMP/redirected-toolkit' --installed-launcher '$class_launcher' --owner-request 'Albert requested install on 916'"
+export HOME="$class_saved_home" PATH="$class_saved_path"
+
+newrepo "$TMP/mixed-explain"
+mkdir -p "$TMP/mixed-explain/.ai-devops" "$TMP/mixed-explain/bin" "$TMP/mixed-explain/services/api"
+cp "$ROOT/.ai-devops/task-gates.json" "$TMP/mixed-explain/.ai-devops/task-gates.json"
+git -C "$TMP/mixed-explain" add .ai-devops/task-gates.json
+git -C "$TMP/mixed-explain" commit -qm 'toolkit declaration'
+( cd "$TMP/mixed-explain" && "$GATES" start --class deployment ) >/dev/null
+printf '#!/bin/sh\n' > "$TMP/mixed-explain/bin/ai-review"
+printf 'FROM scratch\n' > "$TMP/mixed-explain/services/api/Dockerfile"
+check 'explain includes reviewer proofs inside a stronger mixed class' \
+  "out '$TMP/mixed-explain' explain --json | jq -e '.effective_class==\"deployment\" and (.required_gates|index(\"exact-head-independent-review\")!=null and index(\"installed-routing-proof\")!=null)'"
+
 printf '#!/usr/bin/env bash\n' > "$TMP/class/install.sh"
+( cd "$TMP/class" && "$GATES" start --class installation ) >/dev/null
 check 'installation refuses deployment without an owner request' \
   "rc 3 '$TMP/class' check --before deploy"
 check 'an explicit owner request preserves the supported installation path' \

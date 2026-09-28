@@ -61,6 +61,8 @@ usage: ai-task-gates <command> [options]
   start --class CLASS [--reason TEXT] [--base REF]
         Record the intended task class for this repository and worktree.
   check --before ACTION [--acknowledge TEXT] [--owner-request TEXT]
+        [--target-head SHA] [--installed-checkout PATH] [--installed-launcher PATH]
+        [--first-install]
         Recompute the change set and decide whether ACTION may start.
   explain [--json] [--base REF] [--paths-from FILE|-]
         Show the resolved identity, change set, class, and gates.
@@ -342,8 +344,9 @@ cmd_start(){
   state_write "$(jq -nc \
     --arg v 1 --arg identity "$IDENTITY" --arg worktree "$TOPLEVEL" \
     --arg class "$class" --arg reason "$reason" --arg base "$BASE_REF" \
+    --arg start_head "$(git -C "$TOPLEVEL" rev-parse HEAD)" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema_version:($v|tonumber),identity:$identity,worktree:$worktree,declared_class:$class,reason:$reason,base:$base,started_at:$at,overrides:[]}')"
+    '{schema_version:($v|tonumber),identity:$identity,worktree:$worktree,declared_class:$class,reason:$reason,base:$base,start_head:$start_head,started_at:$at,overrides:[]}')"
   printf 'task class "%s" recorded for %s (%s)\n' "$class" "$IDENTITY" "$TOPLEVEL"
   [ -n "$BASE_REF" ] && printf 'base: %s\n' "${BASE_REF:0:12}"
   return 0
@@ -389,7 +392,7 @@ cmd_explain(){
     esac
   done
   prepare "$base" "$paths_from"
-  local declared effective required_gate effective_gate required forbidden line
+  local declared effective required_gate effective_gate required forbidden line reviewer_release=0
   declared="$(state_field declared_class)"
   effective="$OBSERVED_CLASS"
   if [ -n "$declared" ]; then
@@ -411,6 +414,11 @@ cmd_explain(){
   required_gate="$({
     [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"
     [ -z "$declared" ] || [ "$declared" = "$OBSERVED_CLASS" ] || merged_gate "$IDENTITY" "$declared"
+    for line in "${CONTRIBUTORS[@]}"; do
+      if [ "${line%%$'\t'*}" = reviewer-safety ]; then reviewer_release=1; break; fi
+    done
+    [ "$declared" = reviewer-safety ] && reviewer_release=1
+    [ "$reviewer_release" -eq 0 ] || merged_gate "$IDENTITY" reviewer-safety
   } 2>/dev/null | LC_ALL=C sort -u)"
   effective_gate="$(merged_gate "$IDENTITY" "$effective" 2>/dev/null || true)"
   required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
@@ -448,21 +456,145 @@ cmd_explain(){
   fi
 }
 
+windows_launcher_route(){
+  local expected_source="$1" installed_launcher="$2" cmd_launcher="$2.cmd"
+  local launcher_target expected_target source_path cmd_route expected_programfiles expected_localappdata program_files local_app_data offset
+  local bash_home cmd_home expected_home
+  local -a bash_lines=() cmd_lines=()
+  [ -f "$installed_launcher" ] && [ -f "$cmd_launcher" ] || return 1
+  mapfile -t bash_lines < <(tr -d '\r' < "$installed_launcher")
+  mapfile -t cmd_lines < <(tr -d '\r' < "$cmd_launcher")
+  [ "${#bash_lines[@]}" -eq "${#cmd_lines[@]}" ] || return 1
+  case "${#bash_lines[@]}" in 4|6) ;; *) return 1 ;; esac
+  [ "${bash_lines[0]}" = '#!/usr/bin/env bash' ] || return 1
+  [ "${bash_lines[1]}" = '# Managed by ai-devops install-machine-tools.ps1.' ] || return 1
+  [ "${cmd_lines[0]}" = '@echo off' ] || return 1
+  [ "${cmd_lines[1]}" = 'rem Managed by ai-devops install-machine-tools.ps1.' ] || return 1
+  WINDOWS_RECEIPT_SHA="" WINDOWS_RECEIPT_HASH=""
+  offset=2
+  if [ "${#bash_lines[@]}" -eq 6 ]; then
+    WINDOWS_RECEIPT_SHA="${bash_lines[2]#\# source-sha=}"
+    WINDOWS_RECEIPT_HASH="${bash_lines[3]#\# source-hash=}"
+    [ "${bash_lines[2]}" = "# source-sha=$WINDOWS_RECEIPT_SHA" ] && [[ "$WINDOWS_RECEIPT_SHA" =~ ^[0-9a-f]{40}$ ]] || return 1
+    [ "${bash_lines[3]}" = "# source-hash=$WINDOWS_RECEIPT_HASH" ] && [[ "$WINDOWS_RECEIPT_HASH" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [ "${cmd_lines[2]}" = "rem source-sha=$WINDOWS_RECEIPT_SHA" ] || return 1
+    [ "${cmd_lines[3]}" = "rem source-hash=$WINDOWS_RECEIPT_HASH" ] || return 1
+    offset=4
+  fi
+  [[ "${bash_lines[$offset]}" =~ ^export\ HOME=\"[^\"]+\"$ ]] || return 1
+  [[ "${cmd_lines[$offset]}" =~ ^set\ \"HOME=[^\"]+\"$ ]] || return 1
+  bash_home="${bash_lines[$offset]#export HOME=\"}"; bash_home="${bash_home%\"}"
+  cmd_home="${cmd_lines[$offset]#set \"HOME=}"; cmd_home="${cmd_home%\"}"
+  [ -n "${USERPROFILE:-}" ] || return 1
+  expected_home="$(cygpath -wa "$USERPROFILE" 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+  [ -n "$expected_home" ] || return 1
+  [ "$(cygpath -wa "$bash_home" 2>/dev/null | tr '[:upper:]' '[:lower:]')" = "$expected_home" ] || return 1
+  [ "$(cygpath -wa "$cmd_home" 2>/dev/null | tr '[:upper:]' '[:lower:]')" = "$expected_home" ] || return 1
+  source_path="$(sed -n 's/^exec "\(.*\)" "\$@"$/\1/p' <<< "${bash_lines[$((offset+1))]}")"
+  [ -n "$source_path" ] && command -v cygpath >/dev/null 2>&1 || return 1
+  launcher_target="$(cygpath -wa "$source_path" 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+  expected_target="$(cygpath -wa "$expected_source" 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+  [ -n "$launcher_target" ] && [ "$launcher_target" = "$expected_target" ] || return 1
+  cmd_route="${cmd_lines[$((offset+1))]}"
+  program_files="${PROGRAMFILES:-${ProgramFiles:-}}"
+  local_app_data="${LOCALAPPDATA:-${LocalAppData:-}}"
+  expected_programfiles="\"${program_files}\Git\bin\bash.exe\" \"$source_path\" %*"
+  expected_localappdata="\"${local_app_data}\Programs\Git\bin\bash.exe\" \"$source_path\" %*"
+  if [ -n "$program_files" ] && [ "$cmd_route" = "$expected_programfiles" ]; then :
+  elif [ -n "$local_app_data" ] && [ "$cmd_route" = "$expected_localappdata" ]; then :
+  else return 1
+  fi
+}
+
+toolkit_source_receipt(){
+  local installed_root="$1" installed_launcher="$2" installed_head="$3" manifest="$4" expected_source="$1/bin/ai-task-gates"
+  local source_hash marker_sha marker_hash cmd_launcher manifest manifest_sha row_hash row_source
+  [ -f "$expected_source" ] && [ -f "$installed_launcher" ] || return 1
+  source_hash="$(sha256sum "$expected_source" 2>/dev/null | cut -d' ' -f1)"
+  [[ "$source_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+  if [ -L "$installed_launcher" ]; then
+    [ "$(readlink -f "$installed_launcher")" = "$(readlink -f "$expected_source")" ] || return 1
+    [ -f "$manifest" ] || return 1
+    manifest_sha="$(awk -F '\t' '$1=="meta" && $2=="source_sha" {print $3}' "$manifest")"
+    [ "$manifest_sha" = "$installed_head" ] || return 1
+    row_hash="$(awk -F '\t' -v p="$installed_launcher" '$1=="symlink" && $2==p {print $4}' "$manifest")"
+    row_source="$(awk -F '\t' -v p="$installed_launcher" '$1=="symlink" && $2==p {print $3}' "$manifest")"
+    [ "$row_source" = "$expected_source" ] && [ "$row_hash" = "$source_hash" ] || return 1
+  else
+    windows_launcher_route "$expected_source" "$installed_launcher" || return 1
+    [ "$WINDOWS_RECEIPT_SHA" = "$installed_head" ] && [ "$WINDOWS_RECEIPT_HASH" = "$source_hash" ] || return 1
+  fi
+}
+
 cmd_check(){
-  local action="" acknowledge="" owner_request="" base=""
+  local action="" acknowledge="" owner_request="" base="" start_head="" source_changed_count=0
+  local target_head="" installed_checkout="" installed_launcher="" first_install=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --before) need_value "$@"; action="$2"; shift 2 ;;
       --acknowledge) need_value "$@"; acknowledge="$2"; shift 2 ;;
       --owner-request) need_value "$@"; owner_request="$2"; shift 2 ;;
       --base) need_value "$@"; base="$2"; shift 2 ;;
+      --target-head) need_value "$@"; target_head="$2"; shift 2 ;;
+      --installed-checkout) need_value "$@"; installed_checkout="$2"; shift 2 ;;
+      --installed-launcher) need_value "$@"; installed_launcher="$2"; shift 2 ;;
+      --first-install) first_install=1; shift ;;
       *) die "unknown option for check: $1" ;;
     esac
   done
   [ -n "$action" ] || die 'check requires --before ACTION.'
   require_jq; load_policy
   valid_action "$action" || die "unknown action: $action"
+  if [ "$action" = deploy ]; then
+    resolve_repo
+    if [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]]; then
+      start_head="$(state_field start_head)"
+      [ -n "$start_head" ] || blocked 'ai-task-gates: STOP. Toolkit installation requires a task declaration recorded before updating the host checkout.'
+      git -C "$TOPLEVEL" merge-base --is-ancestor "$start_head" HEAD 2>/dev/null || blocked 'ai-task-gates: STOP. The pre-update HEAD is not an ancestor of the release to install.'
+      if [ -n "$base" ]; then
+        [ "$(git -C "$TOPLEVEL" rev-parse --verify --quiet "$base^{commit}" 2>/dev/null)" = "$start_head" ] || blocked 'ai-task-gates: STOP. The requested base differs from the recorded pre-update HEAD.'
+      fi
+      base="$start_head"
+    fi
+  fi
   prepare "$base" ""
+  source_changed_count="$CHANGED_COUNT"
+  if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] && [ "$source_changed_count" -eq 0 ]; then
+    [ -n "$owner_request" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an explicit owner request.'
+    [ "$(state_field declared_class)" = installation ] || blocked 'ai-task-gates: STOP. Same-source toolkit installation requires a declared installation task.'
+    [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs the installed checkout and launcher paths.'
+    local same_root same_head expected_launcher
+    same_root="$(cd "$installed_checkout" 2>/dev/null && pwd -P)" || blocked 'ai-task-gates: STOP. Installed checkout path is unavailable.'
+    [ "$same_root" = "$(cd "$TOPLEVEL" && pwd -P)" ] || blocked 'ai-task-gates: STOP. Same-source installation must run from the installed checkout.'
+    [ "$(git -C "$same_root" rev-parse --path-format=absolute --git-dir 2>/dev/null)" = "$(git -C "$same_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Same-source installation requires a durable primary checkout.'
+    same_head="$(git -C "$same_root" rev-parse HEAD 2>/dev/null)" || blocked 'ai-task-gates: STOP. Installed checkout HEAD is unavailable.'
+    [ -z "$target_head" ] || [ "$target_head" = "$same_head" ] || blocked 'ai-task-gates: STOP. Same-source target differs from the installed commit.'
+    [ "$same_head" = "$start_head" ] && [ "$same_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] || blocked 'ai-task-gates: STOP. Same-source install does not match the recorded source HEAD.'
+    git -C "$same_root" merge-base --is-ancestor "$same_head" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Same-source target is not in the fetched origin/main release history.'
+    [ -z "$(git -C "$same_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Installed checkout has local changes.'
+    [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout has local changes.'
+    [ -f "$same_root/bin/ai-task-gates" ] || blocked 'ai-task-gates: STOP. Installed gate source is missing.'
+    if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then
+      expected_launcher="$HOME/.local/bin/ai-task-gates"
+    else
+      expected_launcher="/usr/local/bin/ai-task-gates"
+    fi
+    [ "$installed_launcher" = "$expected_launcher" ] || blocked 'ai-task-gates: STOP. Same-source install must name the canonical launcher.'
+    local origin_url
+    origin_url="$(git -C "$same_root" config --get remote.origin.url 2>/dev/null || true)"
+    case "$origin_url" in
+      https://github.com/popcre/ai-devops|https://github.com/popcre/ai-devops.git|git@github.com:popcre/ai-devops|git@github.com:popcre/ai-devops.git|ssh://git@github.com/popcre/ai-devops|ssh://git@github.com/popcre/ai-devops.git|https://github.com/u2giants/ai-devops|https://github.com/u2giants/ai-devops.git|git@github.com:u2giants/ai-devops|git@github.com:u2giants/ai-devops.git|ssh://git@github.com/u2giants/ai-devops|ssh://git@github.com/u2giants/ai-devops.git) ;;
+      *) blocked 'ai-task-gates: STOP. Same-source installation requires a supported ai-devops GitHub origin.' ;;
+    esac
+    if [ "$first_install" -eq 1 ]; then
+      [ ! -e "$installed_launcher" ] && [ ! -L "$installed_launcher" ] && [ ! -e "$installed_launcher.cmd" ] || blocked 'ai-task-gates: STOP. A managed launcher already exists; this is not a first install.'
+    else
+      toolkit_source_receipt "$same_root" "$installed_launcher" "$same_head" /etc/ai-devops/install-manifest.tsv || blocked 'ai-task-gates: STOP. Installed source receipt is missing or differs from the current checkout; start the gate before the next update.'
+    fi
+  fi
+  if [ "$action" = deploy ] && [ "$first_install" -eq 1 ] && [ "$source_changed_count" -gt 0 ]; then
+    blocked 'ai-task-gates: STOP. First-install claim cannot replace a nonempty update proof.'
+  fi
 
   # Fail closed where it matters: an unresolvable repository identity must not
   # be allowed to reach a database, deployment, infrastructure, or production
@@ -483,7 +615,7 @@ cmd_check(){
   # 2026-09-25). Classify the COMPLETE inventory instead — the same set the
   # private-source front door classifies — so the proof binding is checked
   # against what the repository is, not against what nothing changed into.
-  if [ "$OBSERVED_CLASS" = none ] && [ -n "$(jqr --arg a "$action" '.action_gates[$a] // empty' "$POLICY_FILE")" ]; then
+  if [ "$OBSERVED_CLASS" = none ] && [ "$action" != deploy ] && [ -n "$(jqr --arg a "$action" '.action_gates[$a] // empty' "$POLICY_FILE")" ]; then
     # The inventory feeds a line-based classifier, and Git's display quoting
     # rewrites non-ASCII and special-character names into spellings no path
     # rule matches, which would drop them to the fallback class and silently
@@ -563,10 +695,15 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   fi
 
   # 2. Forbidden action for the observed class.
-  local required_gate effective_gate forbidden required
+  local required_gate effective_gate forbidden required reviewer_release=0 reviewer_gate line
+  for line in "${CONTRIBUTORS[@]}"; do
+    [ "${line%%$'\t'*}" = reviewer-safety ] && reviewer_release=1
+  done
+  [ "$declared" = reviewer-safety ] && reviewer_release=1
   required_gate="$({
     [ "$OBSERVED_CLASS" = none ] || merged_gate "$IDENTITY" "$OBSERVED_CLASS"
     [ "$declared" = "$OBSERVED_CLASS" ] || merged_gate "$IDENTITY" "$declared"
+    [ "$reviewer_release" -eq 0 ] || merged_gate "$IDENTITY" reviewer-safety
   } | LC_ALL=C sort -u)"
   effective_gate="$(merged_gate "$IDENTITY" "$effective")"
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p')"
@@ -597,6 +734,56 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   if [ -n "$needs_gate" ] && ! printf '%s\n' "$effective_required" | grep -qx -- "$needs_gate"; then
     blocked "$(printf 'ai-task-gates: STOP. "%s" needs the "%s" gate for the class "%s" in %s.\nThis repository has not declared that gate in its own .ai-devops/task-gates.json for that class, so the sealed route is not opened here. Add the declaration through that repository\x27s own reviewed path.' \
       "$action" "$needs_gate" "$effective" "$IDENTITY")"
+  fi
+
+  # A toolkit release can contain reviewer-safety code. The repository's
+  # reviewed opt-in above is necessary, but installing that release still
+  # needs Albert's explicit host/action request. This request authorizes the
+  # install; it does not waive tests, independent review, or routing proof.
+  if [ "$action" = deploy ] && [ "$reviewer_release" -eq 1 ]; then
+    [ "$source_changed_count" -gt 0 ] || blocked 'ai-task-gates: STOP. No release changes were found since the recorded pre-update HEAD; reviewer-safety installation cannot proceed.'
+    [ "$effective" = reviewer-safety ] || blocked "ai-task-gates: STOP. This release also contains the stronger class '$effective'; the reviewer-safety toolkit installation route cannot authorize a mixed protected release."
+    [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] || blocked "ai-task-gates: STOP. Reviewer-safety installation is limited to ai-devops; got $IDENTITY."
+    local origin_url
+    origin_url="$(git -C "$TOPLEVEL" config --get remote.origin.url 2>/dev/null || true)"
+    case "$origin_url" in
+      https://github.com/popcre/ai-devops|https://github.com/popcre/ai-devops.git|git@github.com:popcre/ai-devops|git@github.com:popcre/ai-devops.git|ssh://git@github.com/popcre/ai-devops|ssh://git@github.com/popcre/ai-devops.git|https://github.com/u2giants/ai-devops|https://github.com/u2giants/ai-devops.git|git@github.com:u2giants/ai-devops|git@github.com:u2giants/ai-devops.git|ssh://git@github.com/u2giants/ai-devops|ssh://git@github.com/u2giants/ai-devops.git) ;;
+      *) blocked 'ai-task-gates: STOP. Reviewer-safety installation requires a supported ai-devops GitHub origin.' ;;
+    esac
+    [[ "$target_head" =~ ^[0-9a-f]{40}$ ]] && [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] || blocked 'ai-task-gates: STOP. The candidate HEAD does not match the exact intended install target.'
+    git -C "$TOPLEVEL" merge-base --is-ancestor "$target_head" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Candidate target is not in the fetched origin/main release history.'
+    [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout has uncommitted changes outside the exact target HEAD.'
+    [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Reviewer-safety installation needs the current installed checkout and launcher paths.'
+    local installed_root candidate_root installed_common candidate_common launcher_target expected_target source_path installed_head
+    installed_root="$(cd "$installed_checkout" 2>/dev/null && pwd -P)" || blocked 'ai-task-gates: STOP. Installed checkout path is unavailable.'
+    candidate_root="$(cd "$TOPLEVEL" && pwd -P)" || blocked 'ai-task-gates: STOP. Candidate checkout path is unavailable.'
+    [ "$installed_root" != "$candidate_root" ] || blocked 'ai-task-gates: STOP. Candidate and installed checkouts must be distinct.'
+    [ "$(git -C "$installed_root" rev-parse --path-format=absolute --git-dir 2>/dev/null)" = "$(git -C "$installed_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Installed checkout must be the durable primary checkout.'
+    local canonical_launcher
+    if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then
+      canonical_launcher="$HOME/.local/bin/ai-task-gates"
+    else
+      canonical_launcher="/usr/local/bin/ai-task-gates"
+    fi
+    [ "$installed_launcher" = "$canonical_launcher" ] || blocked 'ai-task-gates: STOP. Installed launcher must be the canonical managed launcher.'
+    installed_common="$(cd "$(git -C "$installed_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)" || blocked 'ai-task-gates: STOP. Installed checkout Git ownership is unavailable.'
+    candidate_common="$(cd "$(git -C "$candidate_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)" || blocked 'ai-task-gates: STOP. Candidate checkout Git ownership is unavailable.'
+    [ "$installed_common" = "$candidate_common" ] || blocked 'ai-task-gates: STOP. Candidate and installed checkouts do not share one Git repository.'
+    installed_head="$(git -C "$installed_root" rev-parse HEAD 2>/dev/null)" || blocked 'ai-task-gates: STOP. Installed checkout HEAD is unavailable.'
+    [ "$installed_head" = "$start_head" ] || blocked 'ai-task-gates: STOP. Installed checkout moved from the recorded pre-update HEAD.'
+    [ -z "$(git -C "$installed_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Installed checkout has local changes that would survive the update.'
+    expected_target="$installed_root/bin/ai-task-gates"
+    [ -f "$expected_target" ] && [ -f "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Installed gate source or launcher is missing.'
+    if [ -L "$installed_launcher" ]; then
+      [ "$(readlink -f "$installed_launcher")" = "$(readlink -f "$expected_target")" ] || blocked 'ai-task-gates: STOP. Installed launcher does not resolve to the installed checkout.'
+    else
+      windows_launcher_route "$expected_target" "$installed_launcher" || blocked 'ai-task-gates: STOP. Installed Windows launchers do not match the managed routing template.'
+    fi
+    reviewer_gate="$(merged_gate "$IDENTITY" reviewer-safety)"
+    printf '%s\n' "$reviewer_gate" | grep -qx $'required\treviewed-toolkit-installation' || blocked 'ai-task-gates: STOP. Reviewer-safety installation lacks the reviewed toolkit opt-in.'
+    [ -n "$owner_request" ] || blocked "ai-task-gates: STOP. Installing a reviewer-safety release requires --owner-request naming Albert's exact host and install action."
+    state_record_override owner-request "$action" "$owner_request" "$effective"
+    printf 'ai-task-gates: reviewer-safety installation authorized by owner request: %s\n' "$owner_request"
   fi
 
   printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"
