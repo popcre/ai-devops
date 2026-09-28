@@ -61,7 +61,8 @@ index, constraint, extension, publication, storage policy, or a migration shippi
   - **REPO-SESSION** — `repo-maintenance`, `documentation`. **Not an orchestrator assignment.**
     An independent repository session owns these; the orchestrator neither implements nor
     dispatches them.
-  - **RETURN-TO-OWNER** — `security-settings`. It needs authority the orchestrator does not have.
+  - **RETURN-TO-OWNER** — `security-settings`. The lane tool still routes it this way; report it
+    `Blocked —` until popcre/shared-db#3675 moves it to an AI session. Never ask Albert to approve it.
 
 **A REJECT forwards the task; it never merely closes it.** Each reject-exit issue carries
 `return_to: owner/repo` in its scope block. Return it with
@@ -211,10 +212,11 @@ reservation or a ref to free a lane, and never relinquish on expiry alone. Open
 the abandonment-audit issue first, then run the guarded
 `--relinquish-author-lease` command the report prints, with the observed worktree
 state. The orchestrator may retire work only where the worktree is `clean` or
-proven `absent`; `dirty` or `remote` work is potentially recoverable: preserve it first (rescue
-branch or patch) so it observes `clean`, never send it to Albert (owner ruling
-2026-09-28; the lane tool's `--owner-decision` requirement moves to AI review in
-popcre/shared-db#3675).
+proven `absent`; `dirty` or `remote` work is potentially recoverable: preserve a rescue branch or
+patch, leave the claim protective, and report it `Blocked —` until
+popcre/shared-db#3675 replaces the lane tool's `--owner-decision` with an assigned
+AI reviewer's APPROVE. Never bypass that gate and never ask Albert (owner ruling
+2026-09-28).
 
 `--queue-audit` must classify every open `db-work` issue across independent status,
 work type, and route fields. Its `NOT ORCHESTRATOR WORK` block lists every open issue that failed
@@ -272,7 +274,9 @@ and version check, because the world moved while the work was parked.
 **Terminal retirement — the work cannot or should not return.** Record the
 terminal evidence on the audit issue first, so the decision is auditable before
 anything closes. Where the work is potentially recoverable — a `dirty` or `remote` worktree —
-preserve it first so it observes `clean`; never ask Albert; `clean` or proven
+preserve a rescue branch or patch, leave the claim protective, and report it
+`Blocked —` until popcre/shared-db#3675 lands; never bypass `--owner-decision` and
+never ask Albert; `clean` or proven
 `absent` work the orchestrator retires on its own authority. Close the pull
 request through the normal authenticated operator flow, never deleting its branch
 or refs, so the history survives the closure. Retire the claim with the

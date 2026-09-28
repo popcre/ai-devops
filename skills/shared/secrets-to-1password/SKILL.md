@@ -108,7 +108,10 @@ rotation plan, rotate through the provider's authenticated tools, update
 1Password and every consumer, and prove the new value works. For an exposed value, revoke
 it as soon as the replacement is in place; never extend its life beyond the
 swap. Never ask Albert
-to approve it.
+to approve it. **Exception:** `1Password Service Account Token - hetzner_vps` is
+under a standing owner no-rotation directive (accepted residual risk, 2026-08-10;
+`docs/transcript-leak-audit-2026-07-19.md`); do not rotate it, and a reviewer
+must refuse any plan that does, until Albert withdraws that directive.
 
 ## Hard rules
 
