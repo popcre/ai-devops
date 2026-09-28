@@ -42,7 +42,7 @@ case "${FAKE_MODE:-ok}" in
     elif [ "$1 $2" = 'api --include' ]; then printf 'HTTP/2 200\nX-Ratelimit-Reset: %s\n\ncore\t4999\t5000\t%s\n' $(( $(date +%s) + 9000 )) $(( $(date +%s) + 9000 ));
     else echo 'gh: API rate limit already exceeded for user ID 55610577. (HTTP 403)' >&2; exit 1; fi ;;
   probe-timeout) if [ "$1 $2" = 'api rate_limit' ]; then sleep 2; else echo "out:$*"; fi ;;
-  graphql-200-primary|graphql-200-secondary|graphql-200-partial|graphql-cli-error|graphql-crash|graphql-large|graphql-unknown|graphql-malformed-errors|graphql-jq-scalar|graphql-jq-empty|graphql-pages|graphql-pages-error)
+  graphql-200-primary|graphql-200-secondary|graphql-200-partial|graphql-cli-error|graphql-crash|graphql-large|graphql-unknown|graphql-malformed-errors|graphql-jq-scalar|graphql-jq-empty|graphql-jq-error|graphql-pages|graphql-pages-error)
     if [ "$1 $2" = 'api rate_limit' ]; then
       printf 'core\t4000\t5000\t%s\ngraphql\t4000\t5000\t%s\n' $(( $(date +%s) + 1800 )) $(( $(date +%s) + 2400 ))
     elif [ "$1 $2" = 'api --include' ]; then
@@ -65,6 +65,10 @@ case "${FAKE_MODE:-ok}" in
       printf 'scalar\n'
     elif [ "$FAKE_MODE" = graphql-jq-empty ]; then
       :
+    elif [ "$FAKE_MODE" = graphql-jq-error ]; then
+      printf '{"data":{"viewer":{"login":"partial"}},"errors":[{"message":"field unavailable"}]}\n'
+      printf 'gh: field unavailable\n' >&2
+      exit 1
     elif [ "$FAKE_MODE" = graphql-pages ]; then
       printf '{"data":{"page":1}}\n{"data":{"page":2}}\n'
     elif [ "$FAKE_MODE" = graphql-pages-error ]; then
@@ -331,7 +335,9 @@ FAKE_MODE=graphql-malformed-errors AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graph
 check 'malformed GraphQL errors field fails closed without losing output' "[ $rc -eq 1 ] && jq -e '.errors.message == \"bad-shape\"' '$TMP/malformed-graphql' && grep -q 'result unclassified' '$TMP/malformed-graphql-err'"
 fresh_quota
 FAKE_MODE=graphql-jq-scalar AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql --jq .data.viewer.login > "$TMP/graphql-scalar" 2> "$TMP/graphql-scalar-err"; rc=$?
-check 'transformed GraphQL preserves output and warns that application errors are unobservable' "[ $rc -eq 0 ] && [ \$(cat '$TMP/graphql-scalar') = scalar ] && grep -q 'transformed GraphQL output hides HTTP-200 application errors' '$TMP/graphql-scalar-err'"
+check 'transformed GraphQL preserves successful CLI output and warns about independent classification' "[ $rc -eq 0 ] && [ \$(cat '$TMP/graphql-scalar') = scalar ] && grep -q 'transformed GraphQL body cannot be independently classified' '$TMP/graphql-scalar-err'"
+FAKE_MODE=graphql-jq-error AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql --jq .data.viewer.login > "$TMP/graphql-jq-error-out" 2> "$TMP/graphql-jq-error-err"; rc=$?
+check 'transformed GraphQL preserves native CLI application-error failure' "[ $rc -eq 1 ] && jq -e '.errors[0].message == \"field unavailable\"' '$TMP/graphql-jq-error-out' && grep -q 'gh: field unavailable' '$TMP/graphql-jq-error-err'"
 check 'transformed GraphQL scalar is explicitly unobservable in request report' "jq -se '[.[] | select(.operation == \"api.graphql\")][-1].request_class == \"graphql_transformed_unobservable\"' '$TMP/state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/state/measurements' | jq -e '.graphql_transformed_unobservable >= 1'"
 check 'managed safety GraphQL callers never request transformed output' "awk '{ line=\$0; while (sub(/\\\\\$/, \"\", line) && (getline more) > 0) line=line more; if (line ~ /graphql/ && line ~ /--(jq|template|silent|include)(=|[[:space:]]|\$)/) exit 1 }' '$ROOT/bin/ai-merge-group-evidence' '$ROOT/bin/ai-pr-wait' '$ROOT/bin/ai-blocker-watch'"
 fresh_quota
