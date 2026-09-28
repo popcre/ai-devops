@@ -76,7 +76,23 @@ if (
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test --review >/dev/null 2>&1
 check "review with no protected store refuses before 1Password or provider contact" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" DEEPSEEK_API_KEY=untrusted-ambient bash "$SCRIPT" store-key >/dev/null
-check "explicit refresh creates owner-only key store" "test -s '$TMP/home/.config/ai-devops/secrets/deepseek-api-key' && test \"\$(stat -c %a '$TMP/home/.config/ai-devops/secrets/deepseek-api-key')\" = 600 && test \"\$(stat -c %a '$TMP/home/.config/ai-devops/secrets')\" = 700"
+KEY_STORE="$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+STORE_PERMISSIONS_OK=0
+# Git Bash stat modes do not prove Windows ACL ownership; use the same native
+# ACL assertion that guards a real review, while POSIX checks exact modes.
+if [ -n "${SYSTEMROOT:-}" ]; then
+  PRIVATE_HELPER="$(cygpath -w "$ROOT/bin/windows-private-file.ps1")"
+  PRIVATE_FILE="$(cygpath -w "$KEY_STORE")"
+  PRIVATE_DIR="$(cygpath -w "$(dirname "$KEY_STORE")")"
+  PS="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+  if [ -n "$PS" ] && AI_DEVOPS_PRIVATE_HELPER="$PRIVATE_HELPER" AI_DEVOPS_PRIVATE_TARGET="$PRIVATE_FILE" AI_DEVOPS_PRIVATE_PARENT="$PRIVATE_DIR" \
+    "$PS" -NoProfile -NonInteractive -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null 2>&1; then
+    STORE_PERMISSIONS_OK=1
+  fi
+elif [ "$(stat -c %a "$KEY_STORE")" = 600 ] && [ "$(stat -c %a "$(dirname "$KEY_STORE")")" = 700 ]; then
+  STORE_PERMISSIONS_OK=1
+fi
+check "explicit refresh creates owner-only key store" "test -s '$KEY_STORE' && test '$STORE_PERMISSIONS_OK' = 1"
 check "explicit refresh ignores inherited key" "grep -qx fixture-from-op '$TMP/home/.config/ai-devops/secrets/deepseek-api-key'"
 rm -f "$TMP/args" "$TMP/op-env"
 chmod 644 "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
@@ -119,7 +135,13 @@ check "provider endpoint override is rejected before credential resolution" "! H
 check "explicit refresh resolves only the DeepSeek reference behind an empty-environment boundary" "test \"\$(wc -l < '$TMP/op-env')\" -eq 1 && grep -q '^DEEPSEEK_API_KEY=op://' '$TMP/op-env' && grep -q '/usr/bin/env -i' '$SCRIPT'"
 check "managed re-exec keeps the DeepSeek key out of process arguments" "grep -q 'AI_DEEPSEEK_SECRET_FD=9' '$SCRIPT' && ! grep -q '\"DEEPSEEK_API_KEY=\$keep_key\"' '$SCRIPT'"
 check "managed re-exec keeps the repository-tool budgets" "test \"\$(grep -c 'for name in .*DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS' '$SCRIPT')\" -eq 1"
-FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && /usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9 "$SCRIPT" store-key 9<&9)"
+FD_ENV=(/usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9)
+# Native PowerShell and icacls still need the Windows runtime basics. The
+# managed production handoff preserves these too, while excluding the key.
+for FD_NAME in SYSTEMROOT WINDIR COMSPEC PATHEXT TEMP USERPROFILE; do
+  [ -z "${!FD_NAME:-}" ] || FD_ENV+=("$FD_NAME=${!FD_NAME}")
+done
+FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && "${FD_ENV[@]}" "$SCRIPT" store-key 9<&9)"
 check "managed descriptor handoff writes only the protected store" "printf '%s\n' '$FD_HANDOFF_OUT' | grep -q 'protected key store refreshed' && grep -qx fd-managed-key '$TMP/home/.config/ai-devops/secrets/deepseek-api-key' && test ! -s '$DEEPSEEK_CURL_ARGS'"
 check "formal review refuses a credential descriptor bypass" "! (exec 9<<<'bypass'; cd '$TMP/repo' && HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_SECRET_FD=9 '$SCRIPT' send bypass --review 9<&9) >/dev/null 2>&1 && test ! -s '$DEEPSEEK_CURL_ARGS'"
 BOUNDARY_BODY="$(sed -n "/^DEEPSEEK_CREDENTIAL_BOUNDARY='/,/^'$/p" "$SCRIPT" | sed '1d;$d')"
