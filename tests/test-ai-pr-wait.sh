@@ -292,6 +292,69 @@ OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/ejected-count" PATH="$TMP/bin:$PATH" bash "$
 check "a genuine same-head merge-queue ejection is terminal" \
   "test '$RC' -eq 1 && test \"\$(cat '$TMP/ejected-count')\" -eq 2 && printf '%s' \"$OUT\" | grep -q EJECTED"
 
+# An explicit --repo skips the preliminary repo lookup. A cold ai-gh state
+# therefore has no principal when the waiter starts; a successful first call
+# can warm it, and later waiters must use that verified local identity.
+mkdir -m 700 -p "$TMP/cold-throttle/identities"
+chmod 700 "$TMP/cold-throttle" "$TMP/cold-throttle/identities"
+printf '%064d\n' 0 > "$TMP/cold-throttle/principal-salt"
+chmod 600 "$TMP/cold-throttle/principal-salt"
+cold_credential_hash="$(printf 'ghp_cold_fixture\n' | sha256sum | cut -d' ' -f1)"
+cold_identity_key="$(printf '3 github.com %s' "$cold_credential_hash" | sha256sum | cut -d' ' -f1)"
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-} ${2:-}" = 'auth token' ]; then
+  printf 'x\n' >> "${AI_PR_WAIT_TEST_AUTH_LOG:?}"
+  printf 'ghp_cold_fixture\n'
+  exit 0
+fi
+if [ "${1:-} ${2:-}" = 'api graphql' ]; then
+  printf 'x\n' >> "${AI_PR_WAIT_TEST_MARKER:?}"
+  if [ "${AI_PR_WAIT_TEST_COLD_MODE:-}" = warm ]; then
+    printf '123 %s\n' "$(/bin/date +%s)" > "$AI_GH_STATE_DIR/identities/${AI_PR_WAIT_TEST_IDENTITY_KEY:?}"
+    chmod 600 "$AI_GH_STATE_DIR/identities/$AI_PR_WAIT_TEST_IDENTITY_KEY"
+    printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","headRefOid":"shared-head","isInMergeQueue":false,"mergeCommit":{"oid":"warm"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false},"nodes":[]}}}}]}}}}}'
+  else
+    /bin/sleep 0.3
+    printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"shared-head","isInMergeQueue":false,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false},"nodes":[]}}}}]}}}}}'
+  fi
+  exit 0
+fi
+exit 8
+EOF
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/cold-auth" "$TMP/cold-calls"
+OUT="$(AI_GH_STATE_DIR="$TMP/cold-throttle" AI_PR_WAIT_TEST_AUTH_LOG="$TMP/cold-auth" \
+  AI_PR_WAIT_TEST_MARKER="$TMP/cold-calls" AI_PR_WAIT_TEST_IDENTITY_KEY="$cold_identity_key" \
+  AI_PR_WAIT_TEST_COLD_MODE=warm PATH="$TMP/bin:$PATH" \
+  bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check 'cold explicit-repo waiter rechecks verified identity after its first successful read' \
+  "test '$RC' -eq 0 && test \"\$(wc -l < '$TMP/cold-auth')\" -eq 2 && test \"\$(wc -l < '$TMP/cold-calls')\" -eq 1 && printf '%s' \"$OUT\" | grep -q MERGED"
+
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+state="${AI_PR_WAIT_TEST_CLOCK:?}"
+count="$(cat "$state" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
+if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
+EOF
+chmod +x "$TMP/bin/date"
+rm -f "$TMP/cold-shared-calls" "$TMP/cold-clock-a" "$TMP/cold-clock-b"
+AI_GH_STATE_DIR="$TMP/cold-throttle" AI_PR_WAIT_SNAPSHOT_DIR="$TMP/cold-snapshots" \
+  AI_PR_WAIT_TEST_AUTH_LOG="$TMP/cold-auth" AI_PR_WAIT_TEST_MARKER="$TMP/cold-shared-calls" \
+  AI_PR_WAIT_TEST_IDENTITY_KEY="$cold_identity_key" AI_PR_WAIT_TEST_COLD_MODE=share \
+  AI_PR_WAIT_TEST_CLOCK="$TMP/cold-clock-a" PATH="$TMP/bin:$PATH" \
+  bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 > "$TMP/cold-shared-a.out" 2>&1 & cold_a=$!
+AI_GH_STATE_DIR="$TMP/cold-throttle" AI_PR_WAIT_SNAPSHOT_DIR="$TMP/cold-snapshots" \
+  AI_PR_WAIT_TEST_AUTH_LOG="$TMP/cold-auth" AI_PR_WAIT_TEST_MARKER="$TMP/cold-shared-calls" \
+  AI_PR_WAIT_TEST_IDENTITY_KEY="$cold_identity_key" AI_PR_WAIT_TEST_COLD_MODE=share \
+  AI_PR_WAIT_TEST_CLOCK="$TMP/cold-clock-b" PATH="$TMP/bin:$PATH" \
+  bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 > "$TMP/cold-shared-b.out" 2>&1 & cold_b=$!
+wait "$cold_a"; cold_a_rc=$?
+wait "$cold_b"; cold_b_rc=$?
+check 'two explicit-repo waiters share one refresh after the cold identity is verified' \
+  "test '$cold_a_rc' -eq 2 && test '$cold_b_rc' -eq 2 && test \"\$(wc -l < '$TMP/cold-shared-calls')\" -eq 1 && grep -q 'still in progress' '$TMP/cold-shared-a.out' && grep -q 'still in progress' '$TMP/cold-shared-b.out'"
+
 check "the cross-process cache preserves privacy, completeness, cancellation and recovery" \
   "python3 '$ROOT/tests/test-ai-pr-status-singleflight.py' -q"
 

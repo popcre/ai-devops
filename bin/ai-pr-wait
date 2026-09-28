@@ -202,6 +202,7 @@ fi
 OWNER="${REPO%%/*}"
 NAME="${REPO##*/}"
 SNAP_HELPER="$REAL_DIR/../tools/github-requests/pr_status_singleflight.py"
+SNAP_CONTEXT_HELPER=''
 SNAP_STATE_DIR="${AI_PR_WAIT_SNAPSHOT_DIR:-$HOME/.ai-devops/pr-status}"
 SNAP_CONTEXT=''
 LAST_HEAD=''
@@ -210,7 +211,8 @@ LAST_HEAD=''
 if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_CONTEXT_KEY:-}" ]; then
   SNAP_CONTEXT="$AI_PR_WAIT_TEST_CONTEXT_KEY"
 elif [ -x "$REAL_DIR/../tools/github-requests/pr-status-context" ]; then
-  SNAP_CONTEXT="$("$REAL_DIR/../tools/github-requests/pr-status-context" 2>/dev/null || true)"
+  SNAP_CONTEXT_HELPER="$REAL_DIR/../tools/github-requests/pr-status-context"
+  SNAP_CONTEXT="$("$SNAP_CONTEXT_HELPER" 2>/dev/null || true)"
 fi
 SNAP_AGE_FILE="$(mktemp "${TMPDIR:-/tmp}/ai-pr-wait-age.XXXXXX")" || exit 3
 SNAP_SOURCE_FILE="$(mktemp "${TMPDIR:-/tmp}/ai-pr-wait-source.XXXXXX")" || exit 3
@@ -290,6 +292,12 @@ while :; do
   GH_RC=0
   Q="$(bounded_gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state headRefOid isInMergeQueue mergeCommit{oid} commits(last:1){nodes{commit{statusCheckRollup{state contexts(last:100){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name conclusion} ... on StatusContext{context state}}}}}}}}}}" 2>"$API_STDERR")"
   GH_RC=$?
+  # A fresh throttle state has no verified identity before its first call.
+  # Recheck only the local token/cache after a successful response so later
+  # polls can share; an unknown identity stays unshared without another API hit.
+  if [ "$GH_RC" -eq 0 ] && [ -z "$SNAP_CONTEXT" ] && [ -n "$SNAP_CONTEXT_HELPER" ]; then
+    SNAP_CONTEXT="$("$SNAP_CONTEXT_HELPER" 2>/dev/null || true)"
+  fi
 
   # GitHub returns only the last 100 check contexts in the first response.
   # Pull earlier pages before making any success/failure decision. A changing
