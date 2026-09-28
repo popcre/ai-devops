@@ -71,6 +71,12 @@ cat > "$TMP/bin/requires-muse-caller" <<'EOF'
 [ "${AI_MUSE_CALLER:-}" = preflight ] || { echo missing-caller >&2; exit 1; }
 echo health ok
 EOF
+cat > "$TMP/bin/slow-muse-live" <<'EOF'
+#!/usr/bin/env bash
+[ "${AI_MUSE_CALLER:-}" = preflight ] || { echo missing-caller >&2; exit 1; }
+[ "${2:-}" = --live ] && sleep 2
+echo health ok
+EOF
 cat > "$TMP/bin/gemini" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -288,6 +294,9 @@ NOAUTH_OUT="$(env -u DEEPSEEK_API_KEY HOME="$TMP/noauth-home" AI_DEVOPS_CONFIG_D
 "$SCRIPT" clear deepseek >/dev/null 2>&1 || true
 export AI_REVIEW_MUSE_WRAPPER="$TMP/bin/requires-muse-caller"
 check "Muse preflight supplies its mandatory caller identity" "$SCRIPT check muse '$REPO' | grep -q 'health=ok'"
+check "Muse live preflight outlasts the short check budget" "AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-live' $SCRIPT check muse '$REPO' --live | grep -q 'health=ok'"
+check "Muse live preflight still times out past its own budget" "AI_REVIEW_MUSE_QUALIFY_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-live' $SCRIPT check muse '$REPO' --live 2>&1 | grep -q 'provider-timeout'"
+"$SCRIPT" clear muse >/dev/null 2>&1 || true
 
 export AI_REVIEW_KIMI_WRAPPER="$TMP/bin/noauth"
 export MOCK_PREFLIGHT_EVIDENCE_LOG="$TMP/evidence-operations"
