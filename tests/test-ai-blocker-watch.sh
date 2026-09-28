@@ -381,6 +381,36 @@ rm -f "$FAKE/active_writer"
 check 'queued Codex wait resumes after the writer releases' \
   "BW2 tick && jq -e '.state==\"woken\" and .attempts==1' '$W2/$busy_id.json'"
 rm -f "$W2/$busy_id.json"
+
+# A Codex multi-agent v2 child has a real transcript and folder, but the CLI
+# refuses to resume it through its parent. The parked brief must start a new
+# independent session in the main checkout instead.
+child_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session child-1 --park 'Codex child work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+printf '%s\n' '{"type":"session_meta","payload":{"id":"child-1","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-1"}}}}}' > "$TMP/transcripts/child-1.jsonl"
+jq --arg m "$TMP/mainco" '.main_checkout=$m' "$W2/$child_id.json" > "$W2/$child_id.new" && mv "$W2/$child_id.new" "$W2/$child_id.json"
+: > "$FAKE/resumed"; : > "$FAKE/comments"
+BW2 tick >/dev/null 2>&1
+check 'Codex child starts a fresh session with its parked context' \
+  "grep -q '^$TMP/mainco|fresh-codex' '$FAKE/resumed' && grep -q 'issues/31' '$FAKE/resumed' && grep -q 'cannot be resumed independently' '$FAKE/resumed' && jq -e '.mode==\"fresh\" and .state==\"woken\" and .attempts==1' '$W2/$child_id.json'"
+check 'Codex child is never falsely resumed or invoked twice' \
+  "! grep -q '|codex child-1' '$FAKE/resumed' && [ \"\$(wc -l < '$FAKE/resumed')\" = 1 ] && [ \"\$(grep -c 'issue comment 31' '$FAKE/comments')\" = 1 ]"
+rm -f "$W2/$child_id.json"
+
+top_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session top-1 --park 'top-level Codex work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+printf '%s\n' '{"type":"session_meta","payload":{"id":"top-1","source":{"cli":{}}}}' > "$TMP/transcripts/top-1.jsonl"
+: > "$FAKE/resumed"
+BW2 tick >/dev/null 2>&1
+check 'top-level Codex still resumes its exact session' \
+  "grep -q '|codex top-1' '$FAKE/resumed' && jq -e '.mode==\"resumed\" and .state==\"woken\"' '$W2/$top_id.json'"
+rm -f "$W2/$top_id.json"
+
+unsafe_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session child-no-fresh --park 'unrunnable child work' --brief-file "$TMP/brief.md" 2>/dev/null)"
+printf '%s\n' '{"type":"session_meta","payload":{"id":"child-no-fresh","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-1"}}}}}' > "$TMP/transcripts/child-no-fresh.jsonl"
+: > "$FAKE/resumed"; : > "$FAKE/comments"
+check 'Codex child without a safe fresh route fails visibly' \
+  "! BW2 tick && jq -e '.state==\"orphaned\" and .attempts==0' '$W2/$unsafe_id.json' && grep -q 'cannot be resumed independently' '$FAKE/comments' && [ ! -s '$FAKE/resumed' ]"
+rm -f "$W2/$unsafe_id.json"
+
 rid="$(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session live-1 --park 'resumable work' --brief-file "$TMP/brief.md" 2>/dev/null)"
 touch "$TMP/transcripts/live-1.jsonl"
 : > "$FAKE/resumed"; : > "$FAKE/comments"; : > "$FAKE/edited"

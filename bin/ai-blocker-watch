@@ -487,13 +487,26 @@ wake(){ # wake <wait file>
   [ -z "$zb" ] || ! command -v cygpath >/dev/null 2>&1 || zb="$(cygpath -m "$zb")"
   # Resume the exact session when its folder AND its transcript still exist;
   # otherwise start a fresh session from the parked issue in the main checkout.
-  local tglob g have_transcript=1 mode=resumed
+  local tglob g have_transcript=1 mode=resumed codex_child=0 transcript first_line
   tglob="$(jq -r --arg h "$h" '.transcript_glob[$h] // ""' "$CONFIG")"
   if [ -n "$tglob" ]; then
     g="${tglob//\{home\}/$home_m}"; g="${g//\{session\}/$s}"
     compgen -G "$g" >/dev/null 2>&1 || have_transcript=0
+    # Codex cannot resume a multi-agent v2 child through the CLI. Its session
+    # metadata identifies that case; the parked issue is the durable context
+    # for a fresh independent session instead. Never inspect transcript body.
+    if [ "$h" = codex ] && [ "$have_transcript" = 1 ]; then
+      while IFS= read -r transcript; do
+        IFS= read -r first_line < "$transcript" || :
+        if printf '%s\n' "$first_line" | jq -e --arg s "$s" \
+          '.type == "session_meta" and .payload.id == $s and
+           (.payload.source.subagent.thread_spawn.parent_thread_id // "") != ""' >/dev/null 2>&1; then
+          codex_child=1; break
+        fi
+      done < <(compgen -G "$g")
+    fi
   fi
-  if [ -d "$cwd" ] && [ "$have_transcript" = 1 ]; then mode=resumed
+  if [ -d "$cwd" ] && [ "$have_transcript" = 1 ] && [ "$codex_child" = 0 ]; then mode=resumed
   elif [ -n "$main_checkout" ] && [ -d "$main_checkout" ] && [ -n "$parked_url" ] &&
        jq -e --arg h "$h" '.harness_fresh[$h]' "$CONFIG" >/dev/null 2>&1; then mode=fresh
   else mode=orphaned; fi
@@ -504,11 +517,13 @@ wake(){ # wake <wait file>
     local tgt; tgt="${parked_issue:-$(jq -r '.for // ""' "$f")}"
     if [ -n "$tgt" ]; then
       local tr tn; read -r tr tn <<<"$(parse_ref "$tgt")"
+      local orphan_reason="the original $h session or its folder ($cwd) is gone"
+      [ "$codex_child" = 0 ] || orphan_reason="the original Codex subagent cannot be resumed independently"
       gh_call issue comment "$tn" -R "$tr" --body "<!-- ai-blocker-watch:orphaned:$wid -->
-The wait was released ($why) but the original $h session and its folder ($cwd) are both gone, and no usable main checkout was recorded, so BlockerWatch cannot restart the work. A person must pick it up from this issue. (ai-blocker-watch)" >/dev/null ||
+The wait was released ($why) but $orphan_reason, and no usable fresh continuation was available, so BlockerWatch cannot restart the work. A person must pick it up from this issue. (ai-blocker-watch)" >/dev/null ||
         note "could not comment on $tgt"
     fi
-    note "wait $wid is orphaned: the $h session and $cwd are gone; restart it from ${tgt:-its brief}"
+    note "wait $wid is orphaned: no safe continuation is available; restart it from ${tgt:-its brief}"
     FAILED=1; return
   fi
   if [ "$mode" = resumed ]; then
@@ -518,7 +533,9 @@ The wait was released ($why) but the original $h session and its folder ($cwd) a
     prompt="$prompt Recheck the wait's final state, then continue the work you were waiting to do. When you finish, or are blocked again, comment the result on ${parked_issue:-your work issue}. If something else now blocks you, register a new wait with ai-blocker-watch."
   else
     local pr pn; read -r pr pn <<<"$(parse_ref "$parked_issue")"
-    prompt="ai-blocker-watch: you are a NEW session picking up parked work, because the session that registered it is gone. The wait was released: $why The full brief is in $parked_url. Read that issue and all of its comments first (gh issue view $pn -R $pr --comments). Follow the repository's AGENTS.md. Create your own worktree from current upstream before you edit anything. Then continue the next steps the brief names. When you finish, or are blocked again, comment the result on that issue. If you are blocked again, register a new wait with: ai-blocker-watch wait <blocker> --for $parked_issue --brief-file <file>."
+    local fresh_reason="the session that registered it is gone"
+    [ "$codex_child" = 0 ] || fresh_reason="the original Codex subagent cannot be resumed independently"
+    prompt="ai-blocker-watch: you are a NEW session picking up parked work, because $fresh_reason. The wait was released: $why The full brief is in $parked_url. Read that issue and all of its comments first (gh issue view $pn -R $pr --comments). Follow the repository's AGENTS.md. Create your own worktree from current upstream before you edit anything. Then continue the next steps the brief names. When you finish, or are blocked again, comment the result on that issue. If you are blocked again, register a new wait with: ai-blocker-watch wait <blocker> --for $parked_issue --brief-file <file>."
     cwd="$main_checkout"
   fi
   local cfgkey=harness; [ "$mode" = resumed ] || cfgkey=harness_fresh
