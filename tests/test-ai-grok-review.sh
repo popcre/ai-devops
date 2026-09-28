@@ -586,8 +586,15 @@ run new t1 --prompt "review this" >/dev/null 2>&1
 ARGV="$(cat "$TMP/argv.txt")"
 check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
 check "new pins the model"                "grep -q -- '--model grok-4.6' '$TMP/argv.txt'"
-check "new denies Edit"                   "grep -q -- '--deny Edit' '$TMP/argv.txt'"
-check "new denies Bash"                   "grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "new allows Edit in the snapshot"   "grep -q -- '--allow Edit' '$TMP/argv.txt' && ! grep -q -- '--deny Edit' '$TMP/argv.txt'"
+check "new allows Bash in the snapshot"   "grep -q -- '--allow Bash' '$TMP/argv.txt' && ! grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "prompt says not read-only and edits are discarded" "grep -q 'You are NOT read-only' '$TMP/prompt-copy' && grep -q 'discarded' '$TMP/prompt-copy'"
+T1_DIR="$(run show t1 | jq -r '.review_dir')"
+check "writable review dir is a snapshot, not the caller checkout" "[ -d '$T1_DIR' ] && [ \"\$(cd '$T1_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
+check "writable review snapshot has no git remote" "[ -z \"\$(git -C '$T1_DIR' remote)\" ]"
+check "reviewer child env is cleared of operator secrets" "test \"\$(grep -cF 'env -i \"\${base_env[@]}\"' '$SCRIPT')\" -eq 2"
+check "caller checkout is verified unchanged after every turn" "grep -q 'changed during the Grok turn' '$SCRIPT'"
+check "legacy live-checkout sessions are refused" "grep -q 'bound to the live checkout' '$SCRIPT'"
 check "new disables web search"           "grep -q -- '--disable-web-search' '$TMP/argv.txt'"
 check "new passes --no-memory"            "grep -q -- '--no-memory' '$TMP/argv.txt'"
 check "review disables ambient MCP, hook, and compatibility session imports" "grep -qx 'false|false|false|false' '$TMP/isolation.txt'"
@@ -606,7 +613,7 @@ check "isolation inspection rejects an enabled compatibility hook" "test '$BAD_H
 INSPECT_HANG="$(AI_GROK_TEST_INSPECT_MODE=inspecthang AI_GROK_ISOLATION_TIMEOUT=2 run new inspect-hang --prompt x 2>&1)"; INSPECT_HANG_RC=$?
 check "hung isolation inspection is bounded and its process tree is terminated" "test '$INSPECT_HANG_RC' -ne 0 && grep -q 'process tree was terminated' <<<\"$INSPECT_HANG\" && test -s '$TMP/inspect-hang-pid' && ! kill -0 \"\$(cat '$TMP/inspect-hang-pid')\" 2>/dev/null"
 check "never uses permission-mode auto"   "! grep -q -- '--permission-mode auto' '$TMP/argv.txt'"
-check "never allows Bash"                 "! grep -q -- '--allow Bash' '$TMP/argv.txt'"
+check "Bash allowance is explicit, not auto" "grep -q -- '--permission-mode default' '$TMP/argv.txt'"
 check "never uses --always-approve"       "! grep -q -- '--always-approve' '$TMP/argv.txt'"
 check "uses --prompt-file (no ARG_MAX)"   "grep -q -- '--prompt-file' '$TMP/argv.txt'"
 
@@ -614,7 +621,7 @@ check "uses --prompt-file (no ARG_MAX)"   "grep -q -- '--prompt-file' '$TMP/argv
 run ask t1 --prompt "follow up" >/dev/null 2>&1
 check "ask passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
 check "ask resumes the session"           "grep -q -- '--resume 019fd4e9' '$TMP/argv.txt'"
-check "ask keeps the frozen permissions"  "grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "ask keeps the frozen permissions"  "grep -q -- '--allow Bash' '$TMP/argv.txt' && grep -q -- '--disable-web-search' '$TMP/argv.txt'"
 
 # Long session names must review, resume, and leave only bounded file names.
 LONG_NAME="long-$(printf 'n%.0s' $(seq 1 150))"

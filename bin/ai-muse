@@ -387,7 +387,7 @@ prepare(){
   rm -f "$identity"
   HEAD_SHA="$(git -C "$REVIEW_DIR" rev-parse HEAD)"; PACKET_HASH="$(cat "$PACKET_DIR/MANIFEST.sha256")"
   # Muse reads the sealed evidence but keeps its own verdict contract.
-  printf '\n\nRead %s/MANIFEST.md first for the exact change and test evidence; ignore its answer-format section and use the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning.\n' "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
+  printf '\n\nRead %s/MANIFEST.md first for the exact change and test evidence; ignore its answer-format section and use the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning. You work in a disposable, remote-less copy of the repository: you may run commands, builds and tests and edit files there to check your findings, but never edit the %s evidence directory. Your edits are discarded after this turn and are not part of the change under review.\n' "${PACKET_DIR#"$REVIEW_DIR"/}" "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
 }
 muse_credential_owner_alive(){
   local pid="$1" winpid="$2"
@@ -755,7 +755,7 @@ acquire_provider_slot(){ # optional machine-wide cap on simultaneous Muse turns;
 release_provider_slot(){ [ -z "${PROVIDER_SLOT:-}" ] || { [ "$(cat "$PROVIDER_SLOT/pid" 2>/dev/null)" != "$$" ] || rm -rf "$PROVIDER_SLOT"; PROVIDER_SLOT=""; }; }
 run_turn(){
   local dir="$1" prompt="$2" out="$3" sid="${4:-}" meta="${5:-}" rc args event_sid_count salvaged_ids waited=0 heartbeat="${AI_MUSE_HEARTBEAT_INTERVAL:-10}" provider_key prompt_text prompt_arg=() timeout_bin="${AI_MUSE_TIMEOUT_BIN:-/usr/bin/timeout}" env_bin=/usr/bin/env safe_name
-  local bash_bin=/usr/bin/bash key_file attempt=0 delay retries="${AI_MUSE_CAPACITY_RETRIES:-6}" backoff="${AI_MUSE_CAPACITY_BACKOFF:-20}"
+  local work_dir="" evidence_dir="$1" bash_bin=/usr/bin/bash key_file attempt=0 delay retries="${AI_MUSE_CAPACITY_RETRIES:-6}" backoff="${AI_MUSE_CAPACITY_BACKOFF:-20}"
   case "$retries" in ''|*[!0-9]*) die 'AI_MUSE_CAPACITY_RETRIES must be a whole number.';; esac
   case "$backoff" in ''|*[!0-9]*) die 'AI_MUSE_CAPACITY_BACKOFF must be a whole number.';; esac
   local -a clean_env
@@ -764,6 +764,14 @@ run_turn(){
   [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
   TURN_SID=""; FINISH=""; TEXT=""; TOKENS=null; TURN_ERROR=""
   runtime_env; [ -x "$timeout_bin" ] || die "local_dependency_unavailable: trusted timeout executable is unavailable: $timeout_bin"; case "$timeout_bin" in /*) ;; *) die 'trusted timeout executable path must be absolute.';; esac
+  if [ -n "$meta" ]; then
+    # #974: the reviewer may edit and run code, so it works in a throwaway copy
+    # of the sealed snapshot; the snapshot itself stays byte-identical for the
+    # post-turn packet verification. Stable per review so sessions can resume.
+    work_dir="$STATE/work/$(basename "$dir")"; rm -rf -- "$work_dir"; mkdir -p "$STATE/work" && cp -a "$dir/." "$work_dir/" || die 'could not create the disposable Muse work copy.'
+    [ -z "$(git -C "$work_dir" remote)" ] || { rm -rf -- "$work_dir"; die 'Muse work copy has a git remote; refusing to launch.'; }
+    dir="$work_dir"
+  fi
   prompt_text="$(cat "$prompt")"; [ "${MUSE_KEY_PRELOADED:-0}" = 1 ] || load_key; provider_key="$MODEL_API_KEY"; unset MODEL_API_KEY MUSE_KEY_PRELOADED
   if [ "$ENGINE" = muse-code ]; then
     # The caller chooses the conversation identity, so a new turn is provable too.
@@ -773,8 +781,10 @@ run_turn(){
       # Implementation: writes and a sandboxed shell inside a disposable worktree; no approval prompts, no web.
       args=(exec --json --model "$MODEL" --session-id "$sid" --workspace "$workspace" --disable-approval --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve)
     else
-      # Read-only review: no writes, no shell, no web, no personal context, no prompts.
-      args=(exec --json --model "$MODEL" --session-id "$sid" --workspace "$workspace" --disable-write --disable-shell --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve)
+      # Review (#974): writes and a sandboxed shell inside the disposable, remote-less
+      # snapshot from ai-review-sandbox ensure-copy (rebuilt every turn, never the
+      # caller's checkout); no approval prompts, no web, no personal context.
+      args=(exec --json --model "$MODEL" --session-id "$sid" --workspace "$workspace" --disable-approval --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve)
     fi
     # The prompt travels in a private file, never as an argument the CLI could parse as options.
     chmod 600 "$prompt" 2>/dev/null && protect_windows_path "$prompt" file || die 'could not make the Muse Code prompt file private.'
@@ -798,7 +808,7 @@ run_turn(){
     while IFS='=' read -r safe_name _; do case "$safe_name" in AI_MUSE_TEST_*|MUSE_STUB_*) clean_env+=("$safe_name=${!safe_name}");; esac; done < <(env)
   fi
   if [ -n "$meta" ]; then
-    reviewer_event_evidence require-report muse "$dir" || die 'could not reserve durable review evidence.'
+    reviewer_event_evidence require-report muse "$evidence_dir" || die 'could not reserve durable review evidence.'
     local launch_tmp; launch_tmp="$(tmp_file)"
     jq --arg now "$(date -u +%FT%TZ)" '.status="provider_launching"|.updated_at=$now' "$meta" > "$launch_tmp" && mv -f "$launch_tmp" "$meta"
   fi
@@ -826,7 +836,7 @@ run_turn(){
     printf 'Muse provider capacity rejection (model_not_found, nothing answered); retry %s/%s in %ss\n' "$attempt" "$retries" "$delay" >&2
     sleep "$delay"
   done
-  provider_key=""; release_provider_slot
+  provider_key=""; release_provider_slot; [ -z "$work_dir" ] || rm -rf -- "$work_dir"
   if [ -n "$meta" ] && ! retain_turn "$meta" "$out" "$prompt" "$rc" "$sid"; then
     printf 'Muse completion evidence could not be published; private runtime evidence retained at %s\n' "$RUN_TMP" >&2
     RETAIN_FAILED=1; TURN_ERROR='Muse completion preservation failed; do not replay the provider turn.'; return 1
@@ -1206,7 +1216,7 @@ cmd_doctor(){
     require_runtime; need jq
     fixture="$RUN_TMP/doctor-fixture"; mkdir -p "$fixture"
     prompt="$(tmp_file)"; out="$(tmp_file)"
-    printf '%s' 'Perform an independent read-only health review of this empty fixture. Finish with exactly one final line: VERDICT: APPROVE' > "$prompt"
+    printf '%s' 'Perform an independent health review of this empty fixture. Finish with exactly one final line: VERDICT: APPROVE' > "$prompt"
     prior_timeout="$TIMEOUT"; TIMEOUT="${AI_MUSE_DOCTOR_TIMEOUT:-90}"
     case "$TIMEOUT" in ''|0|*[!0-9]*) die 'AI_MUSE_DOCTOR_TIMEOUT must be a positive whole number of seconds.';; esac
     if ! run_turn "$fixture" "$prompt" "$out"; then TIMEOUT="$prior_timeout"; muse_credit_stop "$out"; die "$TURN_ERROR"; fi

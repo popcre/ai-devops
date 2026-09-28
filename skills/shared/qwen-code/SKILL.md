@@ -22,18 +22,26 @@ worktrees. It deliberately rejects arbitrary flag forwarding.
 
 Run the command from Git Bash on Windows.
 
-## Reviews are read-only
+## Reviews run in a disposable copy (not read-only)
 
-`new` and review-mode `ask` combine:
+Owner ruling (issue #974): no reviewer is read-only. `new` and review-mode
+`ask` combine:
 
-- Qwen safe mode, which disables local hooks, extensions, skills, and MCP servers.
-- Plan approval mode.
-- Built-in shell, write, and edit tools excluded.
-- A before/after content hash of the complete tracked diff and every untracked
-  file, so edits inside already-dirty paths also fail loudly.
+- A private, remote-less `ai-review-sandbox` snapshot as Qwen's only directory;
+  the wrapper refuses a writable review in the caller's checkout or in any
+  directory with a Git remote.
+- Qwen safe mode (no local hooks, extensions, skills, or MCP servers) plus
+  Qwen's `--sandbox`, with shell, write, and edit tools available so Qwen can
+  run builds and tests and try edits.
+- Reviewer edits are discarded after the turn (snapshot checkpoint and
+  restore), are never part of the pull request, and the sealed evidence
+  packet must still verify.
+- A before/after content hash of the caller's checkout: any change there
+  rejects the turn.
 
-Do not weaken any layer. If a Qwen release changes a flag, stop and re-qualify
-the wrapper against `qwen --help` and a hostile write canary.
+`doctor --live` is a tool-less qualification probe, not a review. Do not weaken
+any layer. If a Qwen release changes a flag, stop and re-qualify the wrapper
+against `qwen --help` and a hostile write canary.
 
 ## Continue the exact named session
 

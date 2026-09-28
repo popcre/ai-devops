@@ -228,5 +228,7 @@ with tempfile.TemporaryDirectory() as tmp:
     rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "1"]).returncode
     check("a plain answer is still final", rc == 0)
 
+names = {x["function"]["name"] for x in t.TOOLS}
+check("write_file and run_command are offered", {"write_file", "run_command"} <= names)
 print(f"{'FAILED ' + str(len(FAILED)) if FAILED else 'all passed'}")
 sys.exit(1 if FAILED else 0)
