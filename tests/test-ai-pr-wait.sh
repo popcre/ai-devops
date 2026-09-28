@@ -48,6 +48,7 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+[ -z "${AI_PR_WAIT_TEST_MARKER:-}" ] || : > "$AI_PR_WAIT_TEST_MARKER"
 exit 1
 EOF
 cat > "$TMP/bin/date" <<'EOF'
@@ -60,6 +61,11 @@ EOF
 chmod +x "$TMP/bin/gh" "$TMP/bin/date"
 check "fixture resolves its exact gh stub" \
   "test \"$(PATH="$TMP/bin:$PATH" command -v gh)\" = '$TMP/bin/gh'"
+mkdir -p "$TMP/no-throttle"
+cp "$CMD" "$TMP/no-throttle/ai-pr-wait"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/no-throttle-called" PATH="$TMP/bin:$PATH" bash "$TMP/no-throttle/ai-pr-wait" 1 --repo popcre/ai-devops 2>&1)"; RC=$?
+check "a missing throttle refuses the wait before any direct gh call" \
+  "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'ai-gh throttle is missing; no GitHub call was made' && test ! -e '$TMP/no-throttle-called'"
 OUT="$(AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
 check "repeated API failure still exits at the deadline" \
   "test '$RC' -eq 2 && printf '%s' \"$OUT\" | grep -q 'could not be read before the 1m deadline'"

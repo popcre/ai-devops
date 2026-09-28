@@ -79,29 +79,28 @@ if [ "$INTERVAL" -lt 300 ] && [ "${AI_DEVOPS_TEST_MODE:-0}" != 1 ]; then
   INTERVAL=300
 fi
 THROTTLE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)/ai-gh"
-if [ -x "$THROTTLE" ]; then
-  export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
-  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
-    if [ -z "${AI_GH_STATE_DIR:-}" ]; then
-      AI_GH_STATE_DIR="$(mktemp -d)"; TMP_STATE_DIR="$AI_GH_STATE_DIR"
-      trap 'rm -rf "$TMP_STATE_DIR"' EXIT
-    fi
-    export AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}" AI_GH_QUOTA_PROBE_SECONDS="${AI_GH_QUOTA_PROBE_SECONDS:-off}"
+[ -x "$THROTTLE" ] || {
+  printf 'ai-pr-wait: ai-gh throttle is missing; no GitHub call was made\n' >&2
+  exit 3
+}
+export AI_GH_REAL_GH="${AI_GH_REAL_GH:-$GH_RUNNER}" AI_GH_NO_WAIT=1
+if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then
+  if [ -z "${AI_GH_STATE_DIR:-}" ]; then
+    AI_GH_STATE_DIR="$(mktemp -d)"; TMP_STATE_DIR="$AI_GH_STATE_DIR"
+    trap 'rm -rf "$TMP_STATE_DIR"' EXIT
   fi
-  GH_RUNNER="$THROTTLE"
-  # Allowance = the longest the throttle can spend before gh starts (lock wait +
-  # spacing). Without it the supervisor could kill a healthy call and leave the
-  # shared lock behind.
-  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=1}"
-  export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
-  # lock wait + call spacing + the spacing the budget probe adds before the call
-  # + the time-limited budget probe made while holding the lock
-  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_PROBE_TIMEOUT_SECONDS:=0}"
-  THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + 2 * ${AI_GH_MIN_SPACING_SECONDS:-3} + ${AI_GH_PROBE_TIMEOUT_SECONDS:-15} ))
-else
-  printf 'ai-pr-wait: WARNING the ai-gh throttle is not installed next to this script; calling gh directly (no machine-wide rate-limit protection)\n' >&2
-  THROTTLE_ALLOWANCE_SECONDS=0
+  export AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS="${AI_GH_MIN_SPACING_SECONDS:-0}" AI_GH_QUOTA_PROBE_SECONDS="${AI_GH_QUOTA_PROBE_SECONDS:-off}"
 fi
+GH_RUNNER="$THROTTLE"
+# Allowance = the longest the throttle can spend before gh starts (lock wait +
+# spacing). Without it the supervisor could kill a healthy call and leave the
+# shared lock behind.
+[ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_NO_WAIT_LOCK_SECONDS:=1}"
+export AI_GH_NO_WAIT_LOCK_SECONDS="${AI_GH_NO_WAIT_LOCK_SECONDS:-10}"
+# lock wait + call spacing + the spacing the budget probe adds before the call
+# + the time-limited budget probe made while holding the lock
+[ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && : "${AI_GH_PROBE_TIMEOUT_SECONDS:=0}"
+THROTTLE_ALLOWANCE_SECONDS=$(( AI_GH_NO_WAIT_LOCK_SECONDS + 2 * ${AI_GH_MIN_SPACING_SECONDS:-3} + ${AI_GH_PROBE_TIMEOUT_SECONDS:-15} ))
 SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-process-supervisor"
 [ -x "$SUPERVISOR" ] || { printf 'ai-pr-wait: ai-process-supervisor is not installed\n' >&2; exit 3; }
 BASH_RUNNER="$(command -v bash 2>/dev/null || true)"
