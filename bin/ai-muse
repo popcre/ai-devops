@@ -343,7 +343,7 @@ prepare(){
   # after local recovery so an identical report remains byte-identical.
   if command -v cygpath >/dev/null 2>&1; then REVIEW_DIR="$(cygpath -am "$REVIEW_DIR")"; fi
   git -C "$REVIEW_DIR" clean -fdq -- .ai/reviews 2>/dev/null || true
-  PACKET_DIR="$("$PACKET" build "$REVIEW_DIR" "$t" --identity "$identity" --decision "$(cat "$prompt")" --class medium)"
+  PACKET_DIR="$("$PACKET" build "$REVIEW_DIR" "$t" --identity "$identity" --decision-file "$prompt" --class medium)"
   "$PACKET" verify "$PACKET_DIR" --identity "$identity" >/dev/null
   rm -f "$identity"
   HEAD_SHA="$(git -C "$REVIEW_DIR" rev-parse HEAD)"; PACKET_HASH="$(cat "$PACKET_DIR/MANIFEST.sha256")"

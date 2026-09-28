@@ -82,6 +82,7 @@
 # request an immutable receipt directly inside the source's ignored .ai/reviews.
 #   --tests CMD       run CMD in the review dir; record command, exit code, tail
 #   --decision TEXT   the one-sentence decision being asked for
+#   --decision-file FILE  read the decision from FILE (exclusive with --decision)
 #   --scope TEXT      what the reviewer IS being asked to judge   (repeatable)
 #   --exclude TEXT    what the reviewer is NOT being asked to judge (repeatable)
 #   --pointer P:NOTE  a file worth reading, BY PATH, with a one-line why
@@ -399,7 +400,7 @@ publish_receipt() { # publish_receipt PACKET HASH
 # ---------------------------------------------------------------------------
 # build
 # ---------------------------------------------------------------------------
-OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_CLASS="small"; OPT_IDENTITY=""
+OPT_BASE=""; OPT_TESTS=""; OPT_DECISION=""; OPT_DECISION_FILE=""; OPT_CLASS="small"; OPT_IDENTITY=""
 SCOPE=(); EXCLUDE=(); POINTERS=()
 
 # Inline a file list, or spill it to its own file when it is long enough to bury
@@ -424,7 +425,10 @@ cmd_build() {
       --base)     OPT_BASE="${2:?--base needs a ref}"; shift 2 ;;
       --identity) OPT_IDENTITY="${2:?--identity needs a file}"; shift 2 ;;
       --tests)    OPT_TESTS="${2:?--tests needs a command}"; shift 2 ;;
-      --decision) OPT_DECISION="${2:?--decision needs text}"; shift 2 ;;
+      --decision) [ -z "$OPT_DECISION_FILE" ] || die '--decision and --decision-file are mutually exclusive.'
+                  OPT_DECISION="${2:?--decision needs text}"; shift 2 ;;
+      --decision-file) [ -z "$OPT_DECISION" ] || die '--decision and --decision-file are mutually exclusive.'
+                       OPT_DECISION_FILE="${2:?--decision-file needs a file}"; shift 2 ;;
       --class)    OPT_CLASS="${2:?--class needs a value}"; shift 2 ;;
       --scope)    SCOPE+=("${2:?--scope needs text}"); shift 2 ;;
       --exclude)  EXCLUDE+=("${2:?--exclude needs text}"); shift 2 ;;
@@ -432,6 +436,13 @@ cmd_build() {
       *) die "unknown option: $1" ;;
     esac
   done
+
+  if [ -n "$OPT_DECISION_FILE" ]; then
+    [ -f "$OPT_DECISION_FILE" ] && [ ! -L "$OPT_DECISION_FILE" ] && [ -r "$OPT_DECISION_FILE" ] \
+      || die '--decision-file must be a readable regular file, not a symlink.'
+    OPT_DECISION="$(cat "$OPT_DECISION_FILE")" || die 'could not read --decision-file.'
+    [ -n "$OPT_DECISION" ] || die '--decision-file is empty.'
+  fi
 
   git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || die "$root is not a Git repository."
   if [ -f "$root/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' "$root/.ai-review-sandbox" >/dev/null 2>&1; then
