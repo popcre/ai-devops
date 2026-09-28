@@ -181,6 +181,7 @@ mkdir -p "$HOME_FIX/.config/ai-devops/secrets"
 chmod 700 "$HOME_FIX/.config/ai-devops" "$HOME_FIX/.config/ai-devops/secrets"
 printf 'fake-key\n' > "$HOME_FIX/.config/ai-devops/secrets/muse-api-key"
 chmod 600 "$HOME_FIX/.config/ai-devops/secrets/muse-api-key"
+check 'read-only Muse commands ignore an inherited outer review event' "cd '$REPO' && eval \"$ENV AI_REVIEW_EVENT_RUN_ID=outer-review '$SCRIPT' --help\" >/dev/null && eval \"$ENV AI_REVIEW_EVENT_RUN_ID=outer-review '$SCRIPT' list\" >/dev/null && eval \"$ENV AI_REVIEW_EVENT_RUN_ID=outer-review '$SCRIPT' doctor\" >/dev/null"
 muse_recovery_cases(){
   local calls="$TMP/recovery-calls" m raw rep before tmp report_inode
   local real_jq

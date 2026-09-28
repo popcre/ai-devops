@@ -2,6 +2,14 @@
 # ai-muse - persistent, named Muse Spark review conversations.
 set -euo pipefail
 
+# Read-only commands do not create a Muse review event. An outer review may
+# have its own event identity, which must not be reconciled as Muse evidence.
+MUSE_EVENT_READ_ONLY=0
+case "${1:-}" in
+  doctor) [ "${2:-}" = --live ] || MUSE_EVENT_READ_ONLY=1;;
+  ''|-h|--help|help|--version|list|show|status|logs|result|path|transcript) MUSE_EVENT_READ_ONLY=1;;
+esac
+
 # Preserve every invocation outcome before reusable session metadata changes.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -134,7 +142,9 @@ cleanup(){
   rm -f -- "$RUN_TMP"/muse-key.*
   release_provider_slot
   release_credential_lock
-  reviewer_event_cleanup_allowed muse || evidence_durable=0
+  if [ "$MUSE_EVENT_READ_ONLY" != 1 ]; then
+    reviewer_event_cleanup_allowed muse || evidence_durable=0
+  fi
   if [ -n "$ACTIVE_META" ] && [ -f "$ACTIVE_META" ]; then
     active_status="$(jq -r '.status//""' "$ACTIVE_META" 2>/dev/null || true)"
     case "$active_status" in
