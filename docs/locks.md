@@ -8,15 +8,18 @@ column, so a new lock site added without a row here makes this file wrong,
 not optional.
 
 Recovery policy for the Linux `flock` sites lives in `bin/ai-lock-doctor`
-(issue #1002 step 2). On a locked-read failure each call site first proves
-contention with a non-blocking probe (`flock -n lock true`): a failure while
-the lock is free is the op command's own error — no sweep and no retry; a
-failure while another process still holds the lock is a stuck holder — the
-doctor runs once (`--recover`, only holders at least as old as the wait
-budget, TERM then KILL, only `our-tool` holders) and the read is retried
-once. A foreign holder is reported with full evidence and never touched.
-"Free" is proven by the kernel (a non-blocking acquisition succeeds), never
-by the fd scan's mere emptiness.
+(issue #1002 step 2). Every call site acquires with `flock --close -E 87`:
+exit 87 is the kernel's lock-conflict code and ONLY that outcome triggers
+the doctor and one retry — a failure of the `op` command itself (auth, vault,
+network) keeps its own status and is never swept. Under `--recover` the
+doctor signals only `our-tool` holders at least `--older-than` seconds old
+(TERM then KILL), and only when `/proc/locks` proves an advisory lock
+actually sits on the inode. Foreign holders, young holders, holders whose
+age cannot be proven, and every process `/proc/locks` names as BLOCKED
+waiting on the lock (an `flock -w` waiter opens the lock file, so the fd
+scan alone cannot tell it from the holder) are reported with full evidence
+and never touched. "Free" is proven by the kernel (a non-blocking
+acquisition succeeds), never by the fd scan's mere emptiness.
 
 ## A. The Linux 1Password refresh lock (`flock`)
 
@@ -29,7 +32,9 @@ closes, so a "stuck" flock is always a live holder, never a dead one.
 Every wired site acquires with `-E 87`: exit 87 means the wait timed out on
 contention, and ONLY that outcome triggers the doctor and one retry — a
 failure of the op command itself (auth, vault, network) is never swept and
-never retried.
+never retried. A child that happens to exit 87 on its own is contained the
+same way: the doctor signals nothing without `/proc/locks` proving an
+advisory lock on the exact inode, so the whole cost is one harmless retry.
 
 | Where | Acquire / wait | Release | Staleness handling |
 |---|---|---|---|
@@ -77,7 +82,7 @@ because `flock` does not exist in Git Bash.
 | `bin/ai-grok-review` | `lock_path`/`repolock_path`/session+work lock builders (`505,507,513,523`; comment `549`) | `lock_acquire` (`551`) / per-scope release | pid alive → busy; dead owner: repo locks retained for manual reconciliation (unconfirmed remote completion), pre-provider work locks reclaimed (`591`); scans over lock sets at `1963,2014` |
 | `bin/ai-glm` | session locks `$rid--$caller--$name.lock.d` (`350`, comment `352`, acquire `2114`, pid read `2284`); meta update lock `.update.lock.d` (`563`); collision guards (`2055,2056,2072,2073`); orphan sweep guards (`2189,2247,2255`) | lock dir with pid file; released by the owning session | pid-file record; collision and orphan logic treats an existing lock as authoritative (fail closed) |
 | `bin/ai-muse` | session lock `lock_session` (`219`) | token + pid publish; `unlock_session` | pid dead or unparsable owner older than 1 min → quarantine and retry (3 attempts) |
-| `bin/ai-lock-doctor` | the doctor itself, all 19 of its own hits: `2,8,10,19,31,32,35,36` (header: live-holder rule, age floor, transient, reparented-holder rule), `94` (flock guard), `126` (/proc/locks match), `185` (flock-on-this-lock classification), `213,216,217,219` (kernel-proven freedom probes), `271` (bounded evidence), `317,332` (lock-existence gates), `385` (recovered confirmation) | reads the lock's inode and `/proc/*/fd`; kernel-proven freedom probes at `250` and `305` | our-tool holders at least `--older-than` old are TERM/KILLed under `--recover`; foreign, young, and unknown-age holders are never signalled |
+| `bin/ai-lock-doctor` | the doctor itself: header `8` (live-holder rule), `20-24` (waiter class), `35-38` (age floor), `39-44` (known transient), `45-48` (reparented-holder rule), `99` (flock guard), `144-187` (/proc/locks match and blocked-waiter collection), `256` (flock-on-this-lock classification), `318` (bounded evidence), `330` (kernel-proven waiter classification), `355-357,427-428` (kernel-proven freedom probes), `373-376` (lock-existence gate), `404-405` (waiters never signalled), `432` (recovered confirmation) | reads the lock's inode, `/proc/locks`, and `/proc/*/fd` | our-tool holders at least `--older-than` old are TERM/KILLed under `--recover`; foreign, young, unknown-age holders and kernel-proven blocked waiters are never signalled |
 
 ## D. One-shot mkdir locks (tick, run, and build serialization)
 
@@ -97,8 +102,9 @@ because `flock` does not exist in Git Bash.
 ## What step 2 changed
 
 - `bin/ai-lock-doctor` exists (executable, with a `.cmd` launcher); every
-  Section A site now gates its self-healing on a non-blocking contention
-  probe, then runs the doctor once and retries once.
+  Section A site now proves real contention with `flock --close -E 87`
+  (the kernel's lock-conflict exit code) before any sweep, then runs the
+  doctor once and retries the read once.
 - `bin/ai-qwen`'s Windows `lock_acquire` also reclaims a legacy pid-only
   `credential.lock.d` under the pid+age rule (pid not observable AND lock
   older than 15 minutes), instead of waiting forever. Muse and DeepSeek keep

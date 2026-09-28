@@ -112,30 +112,43 @@ else
 fi
 
 # Case 4: an inherited descriptor in a reparented child is found by inode,
-# with no /proc/locks entry naming it (the #940 shape).
+# with no /proc/locks entry naming it (the #940 shape). The daemon records
+# its own pid before exec: a ps-based ppid==1 lookup assumed orphans land on
+# init, but runners with a subreaper reparent elsewhere, so the pid (and the
+# case) was never found there.
 daemon_pid=''
-setsid bash -c 'exec -a ailockdoctor-fdholder sleep 120' 9<"$lock" >/dev/null 2>&1 &
+daemon_pidfile="$TMP/daemon.pid"; rm -f "$daemon_pidfile"
+setsid bash -c 'printf "%s\n" "$$" >"$1"; exec -a ailockdoctor-fdholder sleep 120' _ "$daemon_pidfile" 9<"$lock" >/dev/null 2>&1 &
 daemon_spawn=$!
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  daemon_pid="$(ps -eo pid=,ppid=,args= | awk '$2 == 1 && /ailockdoctor-fdholder/ { print $1; exit }')"
-  [ -n "$daemon_pid" ] && break
+  [ -s "$daemon_pidfile" ] && break
   sleep 0.2
 done
+daemon_pid="$(cat "$daemon_pidfile" 2>/dev/null || true)"
 if [ -n "$daemon_pid" ] && ! "$DOCTOR" "$lock" >"$TMP/out4" 2>&1 && grep -q "holder pid=$daemon_pid class=foreign" "$TMP/out4"; then
   result pass 'a detached fd holder is found by inode and classified foreign'
 else
   result fail 'a detached fd holder is found by inode and classified foreign'
 fi
+kill "$daemon_pid" 2>/dev/null || true; wait "$daemon_spawn" 2>/dev/null || true
+for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$daemon_pid" 2>/dev/null || break; sleep 0.2; done
 
 # Case 2: a foreign holder of a REAL flock is reported and NOT killed. The
 # renamed argv[0] keeps the doctor's our-tool rule (an flock on this exact
 # lock) from matching, so the holder is foreign by proof, not by accident.
+# --close keeps the sleep child from inheriting the lock fd, so killing the
+# recorded wrapper pid at cleanup really frees the lock for the next case.
 foreign_pid=''
-setsid bash -c 'exec -a ailockdoctor-foreign flock "$1" sleep 120' _ "$lock" >/dev/null 2>&1 &
+foreign_pidfile="$TMP/foreign.pid"; rm -f "$foreign_pidfile"
+setsid bash -c 'printf "%s\n" "$$" >"$1"; exec -a ailockdoctor-foreign flock --close "$2" sleep 120' _ "$foreign_pidfile" "$lock" >/dev/null 2>&1 &
 foreign_spawn=$!
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  foreign_pid="$(ps -eo pid=,ppid=,args= | awk '$2 == 1 && /ailockdoctor-foreign/ { print $1; exit }')"
-  [ -n "$foreign_pid" ] && break
+  [ -s "$foreign_pidfile" ] && break
+  sleep 0.2
+done
+foreign_pid="$(cat "$foreign_pidfile" 2>/dev/null || true)"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  flock -n "$lock" true 2>/dev/null || break   # held: the foreign flock is really up
   sleep 0.2
 done
 if [ -n "$foreign_pid" ] && ! "$DOCTOR" --recover --older-than 1 "$lock" >"$TMP/out5" 2>&1 && grep -q 'foreign holders remain' "$TMP/out5" \
@@ -145,7 +158,7 @@ else
   result fail 'a foreign holder survives --recover and fails loudly'
 fi
 kill "$foreign_pid" 2>/dev/null || true; wait "$foreign_spawn" 2>/dev/null || true
-for _ in 1 2 3 4 5; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; done
+for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; done
 
 # Case 5: a lock held for less than the timeout is left alone.
 flock "$lock" sleep 120 &
@@ -177,6 +190,37 @@ fi
 elapsed=$(( $(date +%s) - start ))
 [ "$elapsed" -lt 120 ] && result pass "recovery completed in ${elapsed}s (under the 2-minute gate)" \
                       || result fail "recovery took ${elapsed}s (the 2-minute gate is exceeded)"
+
+# Case 6: a kernel-proven BLOCKED WAITER is never signalled, even of age and
+# provably our-tool: an flock -w waiter opens the lock file, so only the
+# /proc/locks "->" line separates it from the stuck holder. Recovery of the
+# real holder lets the waiter take the lock and finish cleanly (exit 0, not
+# a signal death) — sixth exact-head review, finding 2. The doctor's own
+# exit code is not asserted: the waiter legitimately holds the lock for a
+# moment while taking over, and seeing that is correct, not a failure.
+flock --close "$lock" sleep 120 &
+stuck_waiter_case_holder=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$lock" true 2>/dev/null || break; sleep 0.2; done
+flock -w 60 "$lock" true &
+blocked_waiter=$!
+sleep 2 # holder and waiter both cross --older-than 2 while queued
+"$DOCTOR" --recover --older-than 2 "$lock" >"$TMP/out8" 2>&1 || true
+if grep -q "holder pid=$blocked_waiter class=waiter" "$TMP/out8" \
+   && ! grep -q "recovering our-tool holder pid=$blocked_waiter" "$TMP/out8"; then
+  wait "$blocked_waiter"; waiter_rc=$?
+  if [ "$waiter_rc" -eq 0 ] && ! kill -0 "$stuck_waiter_case_holder" 2>/dev/null \
+     && flock -n "$lock" true 2>/dev/null; then
+    result pass 'a kernel-proven blocked waiter is never signalled and finishes cleanly'
+  else
+    result fail 'a kernel-proven blocked waiter is never signalled and finishes cleanly'
+  fi
+else
+  kill "$blocked_waiter" 2>/dev/null || true; wait "$blocked_waiter" 2>/dev/null || true
+  result fail 'a kernel-proven blocked waiter is never signalled and finishes cleanly'
+fi
+kill "$stuck_waiter_case_holder" 2>/dev/null || true; wait "$stuck_waiter_case_holder" 2>/dev/null || true
+for _ in 1 2 3 4 5; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; done
+
 cleanup "$stuck_holder" "$young_holder" "$daemon_pid" 2>/dev/null || true
 
 printf 'ai-lock-doctor: %s pass, %s fail\n' "$PASS" "$FAIL"

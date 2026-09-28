@@ -17,6 +17,10 @@
 #        our-tool  the holder's own command line, or any ancestor's, resolves
 #                  under this repository (a bin/ wrapper, a test, or an
 #                  op/flock child of one);
+#        waiter    /proc/locks names the pid as BLOCKED ("->") on this exact
+#                  lock: it queued for the lock and does not hold it — an
+#                  flock -w waiter opens the lock file, so the fd scan alone
+#                  cannot tell it from the holder. Reported, never signalled;
 #        foreign   anything else — reported, never signalled;
 #   4. without --recover: prints one evidence line per holder; exit 0 when
 #      the lock is free, exit 3 when any holder exists;
@@ -25,7 +29,8 @@
 #      credential wait), and only when /proc/locks proves an advisory lock
 #      actually sits on the inode (an open descriptor alone is not a lock).
 #      Younger our-tool holders, holders whose start time cannot be proven,
-#      and every foreign holder are left alone and reported.
+#      every kernel-proven waiter, and every foreign holder are left alone
+#      and reported.
 #
 # Age semantics: --older-than is a PROCESS-age floor, not the lock-hold time
 # (flock records no hold time). The primary proof of a stuck lock is the
@@ -126,27 +131,58 @@ LOCK_INO_N="$(norm "$lock_ino")"
 # the kernel's list of advisory locks actually held. The pid column is still
 # never trusted (#940), but the ENTRY's existence proves a real flock sits on
 # the inode — an open descriptor alone (an editor, a stale fd) is not a lock,
-# and recovery must not signal anyone for it. The line prints major:minor in
-# HEX and the inode in DECIMAL (fs/locks.c "%02x:%02x:%lu"; the #940 evidence
-# line itself shows the decimal inode 102105116). Blocked-waiter lines carry
-# "->" in the second column and are skipped: their fields are shifted.
+# and recovery must not signal anyone for it. The lock id prints major:minor
+# in HEX and the inode in DECIMAL (fs/locks.c "%02x:%02x:%lu"; the #940
+# evidence line itself shows the decimal inode 102105116). Lines carrying a
+# "->" token are BLOCKED WAITERS, not holders: their fields are shifted, so
+# every line is tokenized and the pid is taken as the token right before the
+# matching major:minor:inode token, independent of column layout. A pid the
+# kernel names as blocked is waiting for the lock, not holding it, and is
+# NEVER signalled — an flock -w waiter opens the lock file, so the fd scan
+# alone cannot tell a queued sibling wrapper from the stuck holder (sixth
+# exact-head review, finding 2).
 locks_seen=false
 locks_pid=''
+declare -A LOCK_BLOCKED_PIDS=()
 if [ -r /proc/locks ]; then
-  while IFS=' ' read -r _ marker _ _ lpid lid _ _; do
-    [ "$marker" != "->" ] || continue
-    [ -n "$lid" ] || continue
-    lmaj="${lid%%:*}"; resto="${lid#*:}"; lmin="${resto%%:*}"; lino="${resto##*:}"
-    case "$lmaj$lmin" in ''|*[!0-9a-fA-F]*) continue ;; esac
-    case "$lino" in ''|*[!0-9]*) continue ;; esac
-    [ "$((16#$lmaj))" -eq "$lock_major" ] || continue
-    [ "$((16#$lmin))" -eq "$lock_minor" ] || continue
-    [ "$((10#$lino))" -eq "$((10#$lock_ino))" ] || continue
-    locks_seen=true; locks_pid="$lpid"
+  while IFS= read -r locks_line; do
+    locks_lid=''; locks_lpid=''; locks_prev=''; locks_blocked=false
+    # shellcheck disable=SC2086 # word-split the lock line into tokens
+    for locks_tok in $locks_line; do
+      [ "$locks_tok" = '->' ] && locks_blocked=true
+      case "$locks_tok" in
+        *:*:*)
+          locks_maj="${locks_tok%%:*}"; locks_rest="${locks_tok#*:}"
+          locks_min="${locks_rest%%:*}"; locks_ino="${locks_rest##*:}"
+          case "$locks_maj$locks_min" in ''|*[!0-9a-fA-F]*) : ;; # not hex: not a lock id
+            *)
+              case "$locks_ino" in
+                *[!0-9]*|'') : ;;
+                *)
+                  if [ "$((16#$locks_maj))" -eq "$lock_major" ] \
+                     && [ "$((16#$locks_min))" -eq "$lock_minor" ] \
+                     && [ "$((10#$locks_ino))" -eq "$((10#$lock_ino))" ]; then
+                    locks_lid="$locks_tok"; locks_lpid="$locks_prev"
+                  fi ;;
+              esac ;;
+          esac ;;
+      esac
+      locks_prev="$locks_tok"
+    done
+    [ -n "$locks_lid" ] || continue
+    case "$locks_lpid" in ''|*[!0-9]*) locks_lpid='' ;; esac
+    if [ "$locks_blocked" = true ]; then
+      [ -n "$locks_lpid" ] && LOCK_BLOCKED_PIDS["$locks_lpid"]=1
+    else
+      locks_seen=true; locks_pid="$locks_lpid"
+    fi
   done < /proc/locks
 fi
 if [ "$locks_seen" = true ]; then
   info "/proc/locks reports an advisory lock on inode $lock_id (reported pid $locks_pid is advisory; the fd scan decides)"
+  if [ "${#LOCK_BLOCKED_PIDS[@]}" -gt 0 ]; then
+    info "/proc/locks names ${#LOCK_BLOCKED_PIDS[@]} blocked waiter(s) on inode $lock_id; waiters are never signalled"
+  fi
 else
   info "/proc/locks reports no advisory lock on inode $lock_id; scanning descriptors anyway (diagnosis is informational)"
 fi
@@ -285,16 +321,18 @@ holder_evidence(){
 
 scan_once(){
   local pid age klass line
-  HOLDERS_OUR=''; HOLDERS_FOREIGN=''; HOLDERS_YOUNG=''; HOLDERS_UNKNOWN_AGE=''
+  HOLDERS_OUR=''; HOLDERS_FOREIGN=''; HOLDERS_YOUNG=''; HOLDERS_UNKNOWN_AGE=''; HOLDERS_WAITERS=''
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
     age="$(proc_age_seconds "$pid" 2>/dev/null || true)"
     [ -n "$age" ] || age='?'
     if [ -n "${PROTECTED_PIDS[$pid]:-}" ]; then klass=self
+    elif [ -n "${LOCK_BLOCKED_PIDS[$pid]:-}" ]; then klass=waiter
     elif proc_is_our_tool "$pid"; then klass=our-tool
     else klass=foreign; fi
     info "$(holder_evidence "$pid" "$klass" "$age")"
     case "$klass" in
+      waiter) HOLDERS_WAITERS+="$pid"$'\n' ;;
       our-tool)
         if [ "$age" = '?' ]; then
           # An unprovable age never authorizes a kill.
@@ -314,7 +352,7 @@ scan_once(){
 # authority on freedom: prove a "no holder" verdict with a non-blocking
 # acquisition instead of trusting the scan's completeness (#1002 review).
 scan_once
-if [ -z "${HOLDERS_OUR}${HOLDERS_FOREIGN}${HOLDERS_YOUNG}${HOLDERS_UNKNOWN_AGE}" ]; then
+if [ -z "${HOLDERS_OUR}${HOLDERS_FOREIGN}${HOLDERS_YOUNG}${HOLDERS_UNKNOWN_AGE}${HOLDERS_WAITERS}" ]; then
   if flock -n "$lockfile" true 2>/dev/null; then
     info "no live holder holds inode $lock_id; the kernel confirms the lock is free"
     exit 0
@@ -363,6 +401,9 @@ kill_holder(){
 if [ -n "$HOLDERS_FOREIGN" ]; then
   info "foreign holders remain; they are NEVER signalled — report and fail loudly"
 fi
+if [ -n "$HOLDERS_WAITERS" ]; then
+  info "kernel-proven waiters (blocked in flock on this lock) are left alone; signalling a queued sibling would kill legitimate work"
+fi
 if [ -n "$HOLDERS_YOUNG" ]; then
   info "our-tool holders younger than ${older_than}s are left alone"
 fi
@@ -379,8 +420,8 @@ done <<<"$HOLDERS_OUR"
 # Re-scan: the lock is only free when every fd on the inode is gone, and the
 # kernel, not the scan, proves it.
 scan_once
-if [ -n "$HOLDERS_FOREIGN" ] || [ -n "$HOLDERS_YOUNG" ] || [ -n "$HOLDERS_OUR" ] || [ -n "$HOLDERS_UNKNOWN_AGE" ]; then
-  info "holders remain after recovery: foreign, unknown-age, and young holders are never signalled"
+if [ -n "$HOLDERS_FOREIGN" ] || [ -n "$HOLDERS_YOUNG" ] || [ -n "$HOLDERS_OUR" ] || [ -n "$HOLDERS_UNKNOWN_AGE" ] || [ -n "$HOLDERS_WAITERS" ]; then
+  info "holders remain after recovery: foreign, unknown-age, and young holders and kernel-proven waiters are never signalled"
   exit 3
 fi
 if ! flock -n "$lockfile" true 2>/dev/null; then
