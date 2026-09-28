@@ -12,10 +12,12 @@ cat > "$TMP/src/bin/ai-task-gates" <<'GATE'
 set -eu
 phase=''
 owner=''
+caller_pinned=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --phase) phase="$2"; shift 2 ;;
     --owner-request) owner="$2"; shift 2 ;;
+    --caller-pinned) caller_pinned=1; shift ;;
     *) shift ;;
   esac
 done
@@ -23,6 +25,9 @@ printf '%s\n' "$phase" >> "$TEST_LOG"
 [ "${TEST_GATE_DENY_PHASE:-}" != "$phase" ] || exit 41
 if [ "$phase" = resume ] && [ "${TEST_REQUIRE_OWNER:-0}" = 1 ]; then
   [ -n "$owner" ] || exit 42
+fi
+if [ "$phase" = preflight ] && [ "${TEST_REQUIRE_PIN:-0}" = 1 ]; then
+  [ "$caller_pinned" = 1 ] || exit 43
 fi
 GATE
 chmod +x "$TMP/src/bin/ai-task-gates"
@@ -39,6 +44,8 @@ git clone -q -b main "$TMP/remote.git" "$TMP/installed"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 check_head() { [ "$(git -C "$TMP/installed" rev-parse HEAD)" = "$1" ] || fail 'installed HEAD changed'; }
+grep -Fq 'run_stage required "Reviewer requalification"' "$ROOT/install.sh" ||
+  fail 'installer must require reviewer requalification before finalize'
 before="$(git -C "$TMP/installed" rev-parse HEAD)"
 
 # A direct installer must refuse before any stage on an authorization failure.
@@ -84,10 +91,18 @@ if [ "${TEST_INSTALL_FAIL:-0}" = 1 ]; then
   printf '%s\n' "$(git -C "$(dirname "$0")" rev-parse HEAD)" > "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE"
   exit 7
 fi
+"$(dirname "$0")/bin/ai-review-preflight" requalify
+if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" != 1 ]; then
+  "$(dirname "$0")/bin/ai-task-gates" install-verify --phase finalize \
+    --target-head "$(git -C "$(dirname "$0")" rev-parse HEAD)" \
+    --installed-checkout "$(dirname "$0")" \
+    --installed-launcher /usr/local/bin/ai-task-gates
+fi
 INSTALL
 cat > "$TMP/src/bin/ai-review-preflight" <<'PREFLIGHT'
 #!/usr/bin/env bash
 printf 'requalify\n' >> "$TEST_LOG"
+[ "${TEST_REQUALIFY_FAIL:-0}" != 1 ]
 PREFLIGHT
 chmod +x "$TMP/src/install.sh" "$TMP/src/bin/ai-review-preflight"
 git -C "$TMP/src" add install.sh bin/ai-review-preflight
@@ -103,6 +118,15 @@ if TEST_GATE_DENY_PHASE=preflight "$TMP/installed/update.sh" --expected-head "$t
   >/dev/null 2>&1; then fail 'denied candidate preflight was accepted'; fi
 check_head "$before"
 [ "$(cat "$TEST_LOG")" = preflight ] || fail 'preflight did not precede checkout advance'
+[ "$(git -C "$TMP/installed" rev-parse refs/remotes/origin/main)" = "$target" ] ||
+  fail 'fetch did not pin origin/main to candidate target'
+
+: > "$TEST_LOG"
+if TEST_REQUIRE_PIN=1 "$TMP/installed/update.sh" >/dev/null 2>&1; then
+  fail 'protected range accepted update without caller pin'
+fi
+check_head "$before"
+[ "$(cat "$TEST_LOG")" = preflight ] || fail 'unpinned update passed preflight'
 
 # If the installer proves that it restored protected state, the updater returns
 # to the prior clean source. The pending grant remains available for retry.
@@ -110,7 +134,36 @@ check_head "$before"
 if TEST_INSTALL_FAIL=1 "$TMP/installed/update.sh" --expected-head "$target" \
   >/dev/null 2>&1; then fail 'failed target install was accepted'; fi
 check_head "$before"
+[ "$(git -C "$TMP/installed" symbolic-ref --short HEAD)" = main ] ||
+  fail 'branch rollback detached the installed checkout'
 [ -z "$(git -C "$TMP/installed" status --porcelain)" ] || fail 'rollback left checkout dirty'
+
+git clone -q -b main "$TMP/remote.git" "$TMP/detached"
+git -C "$TMP/detached" checkout -q --detach "$before"
+if TEST_INSTALL_FAIL=1 "$TMP/detached/update.sh" --expected-head "$target" \
+  >/dev/null 2>&1; then fail 'failed detached install was accepted'; fi
+[ "$(git -C "$TMP/detached" rev-parse HEAD)" = "$before" ] ||
+  fail 'detached rollback did not restore prior SHA'
+[ -z "$(git -C "$TMP/detached" symbolic-ref --short -q HEAD)" ] ||
+  fail 'detached rollback changed branch state'
+
+# A failed reviewer requalification leaves the protected target pending. A
+# direct retry may finalize only after that same required stage succeeds.
+git clone -q -b main "$TMP/remote.git" "$TMP/requal"
+git -C "$TMP/requal" checkout -q --detach "$before"
+: > "$TEST_LOG"
+if TEST_REQUALIFY_FAIL=1 "$TMP/requal/update.sh" --expected-head "$target" \
+  >/dev/null 2>&1; then fail 'failed requalification was accepted'; fi
+[ "$(git -C "$TMP/requal" rev-parse HEAD)" = "$target" ] ||
+  fail 'unproven requalification incorrectly rolled back target'
+if grep -q '^finalize$' "$TEST_LOG"; then fail 'failed requalification finalized'; fi
+if TEST_REQUALIFY_FAIL=1 "$TMP/requal/install.sh" >/dev/null 2>&1; then
+  fail 'direct retry accepted failed requalification'
+fi
+if grep -q '^finalize$' "$TEST_LOG"; then fail 'failed direct retry finalized'; fi
+"$TMP/requal/install.sh" >/dev/null
+[ "$(grep -c '^finalize$' "$TEST_LOG")" = 1 ] ||
+  fail 'successful direct retry did not finalize exactly once'
 
 : > "$TEST_LOG"
 "$TMP/installed/update.sh" --expected-head "$target" >/dev/null

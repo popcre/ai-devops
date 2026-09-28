@@ -41,19 +41,27 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 previous_head="$(git rev-parse HEAD)" || exit 1
 branch="$(git symbolic-ref --short -q HEAD || true)"
-remote=origin; remote_ref=refs/heads/main
 if [ -n "$branch" ]; then
-  remote="$(git config "branch.$branch.remote" || printf origin)"
-  remote_ref="$(git config "branch.$branch.merge" || printf refs/heads/main)"
+  [ "$branch" = main ] || { warn 'only main or a detached installed checkout may update'; exit 1; }
+  configured_remote="$(git config branch.main.remote || true)"
+  configured_ref="$(git config branch.main.merge || true)"
+  [ -z "$configured_remote" ] || [ "$configured_remote" = origin ] || {
+    warn 'main tracks an unsupported remote'; exit 1;
+  }
+  [ -z "$configured_ref" ] || [ "$configured_ref" = refs/heads/main ] || {
+    warn 'main tracks an unsupported branch'; exit 1;
+  }
 fi
-case "$remote" in ''|.|*' '*|*'/'*|*'..'*) warn 'unsafe upstream remote'; exit 1 ;; esac
-case "$remote_ref" in refs/heads/*) ;; *) warn 'unsafe upstream ref'; exit 1 ;; esac
 
 # Fetching objects does not alter the installed checkout. The target code runs
 # from an isolated candidate; only its successful preflight permits advancement.
-info "Fetching $remote ${remote_ref#refs/heads/}"
-git fetch --no-tags "$remote" "$remote_ref" || exit 1
-target_head="$(git rev-parse FETCH_HEAD)" || exit 1
+info 'Fetching origin main'
+git fetch --atomic --no-tags origin \
+  refs/heads/main:refs/remotes/origin/main || exit 1
+target_head="$(git rev-parse refs/remotes/origin/main)" || exit 1
+[ "$target_head" = "$(git rev-parse FETCH_HEAD)" ] || {
+  warn 'fetched commit and origin/main differ'; exit 1;
+}
 [ -z "$expected_head" ] || [ "$target_head" = "$expected_head" ] || {
   warn 'fetched target differs from the explicitly approved commit'; exit 1;
 }
@@ -98,8 +106,17 @@ proof_file="$(mktemp "$install_lock_dir/rollback.XXXXXXXX")" || exit 1
 rollback_checkout() {
   [ -z "$(git status --porcelain)" ] || { warn 'checkout has new local edits; automatic source rollback refused'; return 1; }
   [ "$(git rev-parse HEAD)" = "$target_head" ] || { warn 'checkout moved during install; automatic source rollback refused'; return 1; }
-  git -c core.hooksPath="$hooks_dir" checkout --detach "$previous_head" >/dev/null || return 1
-  [ "$(git rev-parse HEAD)" = "$previous_head" ] && [ -z "$(git status --porcelain)" ]
+  [ "$(git symbolic-ref --short -q HEAD || true)" = "$branch" ] || {
+    warn 'checkout branch changed during install; automatic source rollback refused'; return 1;
+  }
+  if [ -n "$branch" ]; then
+    git -c core.hooksPath="$hooks_dir" reset --hard "$previous_head" >/dev/null || return 1
+  else
+    git -c core.hooksPath="$hooks_dir" checkout --detach "$previous_head" >/dev/null || return 1
+  fi
+  [ "$(git rev-parse HEAD)" = "$previous_head" ] &&
+    [ "$(git symbolic-ref --short -q HEAD || true)" = "$branch" ] &&
+    [ -z "$(git status --porcelain)" ]
 }
 if ! AI_DEVOPS_INSTALL_LOCK_FD=9 AI_DEVOPS_INSTALL_LOCK_PARENT="$$" \
   AI_DEVOPS_INSTALL_DEFER_FINALIZE=1 AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE="$proof_file" \
@@ -113,13 +130,8 @@ if ! AI_DEVOPS_INSTALL_LOCK_FD=9 AI_DEVOPS_INSTALL_LOCK_PARENT="$$" \
   exit 1
 fi
 
-# The checkout pull runs with hooks disabled. Requalification happens once,
-# after installation, and remains required before authorization is consumed.
-info 'Re-qualifying reviewers whose qualification the update invalidated'
-if ! "$REPO_ROOT/bin/ai-review-preflight" requalify; then
-  warn "automatic reviewer requalification failed for source SHA $source_sha; it is recorded as a reviewer issue"
-  exit 1
-fi
+# install.sh ran reviewer requalification as a required stage before reporting
+# success. Only now may the updater consume its pending authorization.
 "$REPO_ROOT/bin/ai-task-gates" install-verify --phase finalize \
   --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
   --installed-launcher /usr/local/bin/ai-task-gates || {

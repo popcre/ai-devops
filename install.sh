@@ -704,6 +704,10 @@ run_doctor() {
   fi
 }
 run_stage required "ai-devops doctor" run_doctor
+# A reviewer whose wrapper changed must be qualified before the pending
+# installation authority is consumed. This also runs on a direct retry after
+# an interrupted or failed update.
+run_stage required "Reviewer requalification" "$REPO_ROOT/bin/ai-review-preflight" requalify
 
 echo
 if ! print_summary; then
