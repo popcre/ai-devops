@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Reject new unmanaged GitHub API/CLI traffic in installed bin commands.
 
-P3/#931 owns this guard. Two exact-byte legacy exceptions have dedicated
-owners (#932 runner maintenance; P4/S2 ai-pr-wait fallback). A change to either
-source invalidates its exception so its owner must remove the bypass first.
+P3/#931 owns this guard. The one exact-byte legacy exception belongs to the
+P4/S2 ai-pr-wait fallback. A change to that source invalidates its exception.
 """
 
 import hashlib
@@ -15,7 +14,6 @@ import sys
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) == 2 else pathlib.Path(__file__).resolve().parents[2])
 LEGACY = {
     "ai-pr-wait": "1c93624f54b4f06e9d79b21b1473ac4f4c56a19a7c26f7ef0749fbc8c94ac9e8",
-    "promote-windows-runner-to-service.ps1": "6ece04875c0b31c90cf25788ed22a860324fb3f1ec5d8697370692e49c012cb8",
 }
 DIRECT = re.compile(r"(?<![\w-])gh\s+(?:api|run|repo|pr|issue|workflow|release|search)\b")
 SDK = re.compile(r"(?:execFileSync|spawnSync|execFile|spawn)\s*\(\s*['\"]gh['\"]")
