@@ -7,7 +7,8 @@ description: Hand real implementation work to DeepSeek (V4.1 Flash or V4 Pro) th
 
 `ai-deepseek` runs DeepSeek inside the pinned OpenCode agent harness with
 write, edit, and shell tools. It is the only supported way to let DeepSeek
-change code. Formal rotation reviews stay on the read-only `ai-deepseek-agent`
+change code. Formal rotation reviews stay on `ai-deepseek-agent` (which runs code and edits
+only in a per-turn disposable copy)
 (skill `deepseek-second-opinion`); never use this harness for a review verdict.
 
 ## Run it
