@@ -1059,9 +1059,9 @@ cmd_doctor(){
   fi
   if key_store_ok; then
     printf 'PASS  protected Muse key store is present\n'
-    command -v op >/dev/null 2>&1 && printf 'PASS  1Password command is available (refresh fallback)\n' || printf 'WARN  1Password command is unavailable; the stored key is used and cannot be refreshed if Meta rejects it\n'
+    command -v op >/dev/null 2>&1 && printf 'PASS  1Password command is available for explicit store-key maintenance\n' || printf 'WARN  1Password command is unavailable; explicit store-key maintenance cannot refresh a rejected key\n'
   else
-    printf 'WARN  protected Muse key store is missing; every turn reads 1Password. Run: AI_MUSE_CALLER=%s ai-muse store-key\n' "$CALLER"
+    printf 'WARN  protected Muse key store is missing; review turns stop. Run outside a review: AI_MUSE_CALLER=%s ai-muse store-key\n' "$CALLER"
     check '1Password command is available' command -v op
   fi
   [ "$failures" -eq 0 ] || exit 1
