@@ -958,6 +958,27 @@ function Install-GlobalFile {
     }
 }
 
+# A machine-wide mutex spans authority reservation, checkout advance, skill
+# install, and final launcher receipt. Nested calls from install-machine-tools
+# run on this PowerShell thread and re-enter the same mutex; other processes
+# cannot reuse a pending one-use authority during the transaction.
+$installMutex = [Threading.Mutex]::new($false, 'Global\AiDevOpsToolkitInstall')
+$installMutexHeld = $false
+try {
+    try { $installMutexHeld = $installMutex.WaitOne(0) }
+    catch [Threading.AbandonedMutexException] { $installMutexHeld = $true }
+    if (-not $installMutexHeld) { throw 'Another toolkit installation holds the machine-wide install lock.' }
+    if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_LOCK_READY -and
+        $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and
+        (Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) -notmatch '^github[.]com/') {
+        $readyPath = [IO.Path]::GetFullPath($env:AI_DEVOPS_TEST_LOCK_READY)
+        if (-not $readyPath.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Install lock fixture marker must be under the temporary directory.'
+        }
+        [IO.File]::WriteAllText($readyPath, [string]$PID)
+        Start-Sleep -Milliseconds 4000
+    }
+
 if ([string]::IsNullOrWhiteSpace($RepoPath)) {
     $RepoPath = Join-Path $InstallRoot "ai-devops"
 }
@@ -1288,3 +1309,7 @@ Write-Host "Codex skills:  $(Join-Path $CodexHome 'skills')"
 Write-Host "Claude skills: $(Join-Path $ClaudeHome 'skills')"
 Write-Host ""
 Write-Host "Future updates on this computer: rerun this same script."
+} finally {
+    if ($installMutexHeld) { $installMutex.ReleaseMutex() }
+    $installMutex.Dispose()
+}

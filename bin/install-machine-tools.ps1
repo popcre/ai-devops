@@ -4,6 +4,14 @@ param(
   [string]$UserProfilePath = $env:USERPROFILE
 )
 $ErrorActionPreference = "Stop"
+# This is also a direct entry point. Hold the same machine-wide lock as the
+# full installer until the launcher receipt and pending authority are closed.
+$installMutex = [Threading.Mutex]::new($false, 'Global\AiDevOpsToolkitInstall')
+$installMutexHeld = $false
+try {
+  try { $installMutexHeld = $installMutex.WaitOne(0) }
+  catch [Threading.AbandonedMutexException] { $installMutexHeld = $true }
+  if (-not $installMutexHeld) { throw 'Another toolkit installation holds the machine-wide install lock.' }
 if (-not $CatalogPath) { $CatalogPath = Join-Path $RepoPath "config\machine-tools.tsv" }
 
 # Launchers contain absolute source paths and outlive the process that creates
@@ -37,18 +45,18 @@ if ($LASTEXITCODE -ne 0 -or $sourceSha -notmatch '^[0-9a-f]{40}$') {
 # prove the same installed baseline, protected diff, and one-use review as the
 # full installer before it can turn current source into a trusted receipt.
 $sourceGate = Join-Path $RepoPath 'bin\install-ai-devops-windows.ps1'
-$priorPreference = $ErrorActionPreference
+# Run the gate on this thread so it can re-enter the lock held by either this
+# direct installer or its parent full installer. A separate process could not
+# distinguish that safe nested call from a competing installer.
 try {
-  # Native Git progress from the child is stderr even on success. Its exit
-  # status, not PowerShell's stderr promotion, decides the preflight result.
-  $ErrorActionPreference = 'Continue'
-  & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $sourceGate `
-    -RepoPath $RepoPath -LauncherGateOnly -ExpectedHead $sourceSha 2>&1 | Out-Host
-  $gateExit = $LASTEXITCODE
-} finally { $ErrorActionPreference = $priorPreference }
-if ($gateExit -ne 0) { throw 'Managed command launcher source gate refused this checkout.' }
+  & $sourceGate -RepoPath $RepoPath -LauncherGateOnly -ExpectedHead $sourceSha
+} catch {
+  throw "Managed command launcher source gate refused this checkout: $($_.Exception.Message)"
+}
 
-$target = Join-Path $UserProfilePath ".local\bin"
+$fixture = $env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and
+  $env:AI_DEVOPS_TEST_LAUNCHER -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -notmatch 'github[.]com'
+$target = if ($fixture) { Split-Path -Parent $env:AI_DEVOPS_TEST_LAUNCHER } else { Join-Path $UserProfilePath ".local\bin" }
 $gitBash = @(
   (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
   (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe")
@@ -83,14 +91,22 @@ set "HOME=$UserProfilePath"
 "@ | Set-Content -Encoding ASCII -LiteralPath (Join-Path $target "$name.cmd")
   Write-Host "OK installed $name"
 }
-$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-$entries = @($userPath -split ';' | Where-Object { $_ })
-if (-not ($entries | Where-Object { $_.TrimEnd('\') -ieq $target.TrimEnd('\') })) {
-  [Environment]::SetEnvironmentVariable('PATH', ((@($target) + $entries) -join ';'), 'User')
-  Write-Host "OK added $target to User PATH"
+if (-not $fixture) {
+  $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+  $entries = @($userPath -split ';' | Where-Object { $_ })
+  if (-not ($entries | Where-Object { $_.TrimEnd('\') -ieq $target.TrimEnd('\') })) {
+    [Environment]::SetEnvironmentVariable('PATH', ((@($target) + $entries) -join ';'), 'User')
+    Write-Host "OK added $target to User PATH"
+  }
+  $env:Path = $target + ';' + $env:Path
 }
-$env:Path = $target + ';' + $env:Path
-$pendingAuthorization = Join-Path $UserProfilePath ('.local\state\ai-devops\task-gates\install-authorizations\' + $sourceSha + '.json.consuming')
+$pendingAuthorization = if ($fixture) { Join-Path $target ('install-authorizations\' + $sourceSha + '.json.consuming') } else {
+  Join-Path $UserProfilePath ('.local\state\ai-devops\task-gates\install-authorizations\' + $sourceSha + '.json.consuming')
+}
 if (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf) {
   Remove-Item -LiteralPath $pendingAuthorization -Force
+}
+} finally {
+  if ($installMutexHeld) { $installMutex.ReleaseMutex() }
+  $installMutex.Dispose()
 }

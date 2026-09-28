@@ -183,6 +183,36 @@ try {
   Assert ((git -C $protected.Repo rev-parse HEAD).Trim() -eq $protectedHead) 'pinned reviewer safety update failed'
   $pending=Join-Path (Split-Path -Parent $protected.Launcher) ('install-authorizations\' + $protectedHead + '.json.consuming')
   Assert (Test-Path -LiteralPath $pending) 'source-only gate lost retryable authorization before full install'
+  # Two independent installer processes cannot both enter the same pending
+  # authority transaction. The first holds the real machine-wide mutex in a
+  # local-origin fixture; the second must refuse before touching the receipt.
+  $oldMode=$env:AI_DEVOPS_INSTALL_TEST_MODE; $oldRemote=$env:AI_DEVOPS_TEST_EXPECTED_REMOTE
+  $oldLauncher=$env:AI_DEVOPS_TEST_LAUNCHER; $oldReady=$env:AI_DEVOPS_TEST_LOCK_READY
+  $ready=Join-Path $temp 'first-installer-lock-ready'
+  $firstOut=Join-Path $temp 'first-installer.out'; $firstErr=Join-Path $temp 'first-installer.err'
+  $first=$null
+  try {
+    $env:AI_DEVOPS_INSTALL_TEST_MODE='1'; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$protected.Remote
+    $env:AI_DEVOPS_TEST_LAUNCHER=$protected.Launcher; $env:AI_DEVOPS_TEST_LOCK_READY=$ready
+    $first=Start-Process pwsh -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr `
+      -ArgumentList @('-NoProfile','-NonInteractive','-File',$installer,
+        '-RepoPath',$protected.Repo,'-LauncherGateOnly','-ExpectedHead',$protectedHead)
+    for ($attempt=0; $attempt -lt 80 -and -not (Test-Path -LiteralPath $ready); $attempt++) { Start-Sleep -Milliseconds 100 }
+    Assert (Test-Path -LiteralPath $ready) 'first installer did not acquire the lock'
+    Remove-Item Env:AI_DEVOPS_TEST_LOCK_READY
+    $secondOutput=(& pwsh -NoProfile -NonInteractive -File $installer `
+      -RepoPath $protected.Repo -LauncherGateOnly -ExpectedHead $protectedHead 2>&1 | Out-String)
+    $secondCode=$LASTEXITCODE
+    Assert ($secondCode -ne 0 -and $secondOutput.Contains('Another toolkit installation holds the machine-wide install lock')) `
+      'second installer reused a pending authority during the first installer run'
+    $first.WaitForExit()
+    Assert ($first.ExitCode -eq 0) ('first installer failed: ' + (Get-Content -Raw -LiteralPath $firstErr))
+    Assert (Test-Path -LiteralPath $pending) 'successful source gate lost retryable pending authorization'
+  } finally {
+    if ($first -and -not $first.HasExited) { $first.Kill(); $first.WaitForExit() }
+    $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote
+    $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher; $env:AI_DEVOPS_TEST_LOCK_READY=$oldReady
+  }
   Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'pending full installation'
   Remove-Item -LiteralPath $pending
   Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'authorization is missing'
@@ -346,10 +376,15 @@ try {
   Copy-Item -LiteralPath $installer -Destination (Join-Path $stamp.Repo 'bin\install-ai-devops-windows.ps1')
   Copy-Item -LiteralPath (Join-Path $root 'bin\install-machine-tools.ps1') -Destination (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1')
   Copy-Item -LiteralPath (Join-Path $root 'bin\repo-identity.ps1') -Destination (Join-Path $stamp.Repo 'bin\repo-identity.ps1')
+  Copy-Item -LiteralPath (Join-Path $root 'bin\ai-review-lifecycle') -Destination (Join-Path $stamp.Repo 'bin\ai-review-lifecycle')
+  Copy-Item -LiteralPath (Join-Path $root 'bin\ai-review-sandbox') -Destination (Join-Path $stamp.Repo 'bin\ai-review-sandbox')
+  New-Item -ItemType Directory -Force -Path (Join-Path $stamp.Repo 'tools\lib') | Out-Null
+  Copy-Item -LiteralPath (Join-Path $root 'tools\lib\task-gates.sh') -Destination (Join-Path $stamp.Repo 'tools\lib\task-gates.sh')
   "ai-task-gates`tbin/ai-task-gates`tbash+cmd" | Set-Content (Join-Path $stamp.Repo 'config\machine-tools.tsv') -Encoding ASCII
-  git -C $stamp.Repo add bin config/machine-tools.tsv
+  git -C $stamp.Repo add bin config/machine-tools.tsv tools/lib/task-gates.sh
   git -C $stamp.Repo commit -m guarded-stamp-base | Out-Null
   git -C $stamp.Repo push origin main | Out-Null
+  $stampBase=(git -C $stamp.Repo rev-parse HEAD).Trim()
   Write-Receipt $stamp
   $oldLauncherHash=(Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash
   'early pulled reviewer gate' | Set-Content (Join-Path $stamp.Repo 'bin\ai-task-gates')
@@ -364,6 +399,19 @@ try {
     Assert $stampFailed 'direct machine-tools stamped an early-pulled protected checkout'
     Assert ($stampFailure -like '*source gate refused*') "direct stamp failed for another reason: $stampFailure"
     Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) 'direct stamp changed launcher before authorization'
+    $stampTarget=(git -C $stamp.Repo rev-parse HEAD).Trim()
+    Write-TestAuthorization $stamp $stampTarget $stampBase | Out-Null
+    $stampStatus=(@(git -C $stamp.Repo status --porcelain=v1 --untracked-files=all) -join '; ')
+    Assert (-not $stampStatus) "direct-stamp fixture dirty before approved refresh: $stampStatus"
+    $userPathBefore=[Environment]::GetEnvironmentVariable('PATH', 'User')
+    & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
+      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null
+    Assert ([Environment]::GetEnvironmentVariable('PATH', 'User') -ceq $userPathBefore) `
+      'disposable launcher fixture changed the real User PATH'
+    Assert ((Get-Content -LiteralPath $stamp.Launcher)[2] -ceq "# source-sha=$stampTarget") `
+      'locked direct launcher refresh did not stamp the approved source'
+    $stampPending=Join-Path (Split-Path -Parent $stamp.Launcher) ('install-authorizations\' + $stampTarget + '.json.consuming')
+    Assert (-not (Test-Path -LiteralPath $stampPending)) 'successful locked launcher refresh did not consume authority'
   } finally { $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote; $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher }
 
   $removed=New-Fixture removed
