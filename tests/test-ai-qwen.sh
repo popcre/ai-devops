@@ -154,11 +154,15 @@ if [ -n "${SYSTEMROOT:-}" ]; then
   PRIVATE_HELPER="$(cygpath -w "$REPO_ROOT/bin/windows-private-file.ps1")"
   PRIVATE_KEY="$(cygpath -w "$AI_QWEN_KEY_STORE")"
   PRIVATE_DIR="$(cygpath -w "$(dirname "$AI_QWEN_KEY_STORE")")"
-  if AI_DEVOPS_PRIVATE_HELPER="$PRIVATE_HELPER" AI_DEVOPS_PRIVATE_TARGET="$PRIVATE_KEY" AI_DEVOPS_PRIVATE_PARENT="$PRIVATE_DIR" \
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
-      '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null 2>&1; then
+  PRIVATE_PS="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+  if [ -n "$PRIVATE_PS" ] && [ -s "$AI_QWEN_KEY_STORE" ] && \
+    AI_DEVOPS_PRIVATE_HELPER="$PRIVATE_HELPER" AI_DEVOPS_PRIVATE_TARGET="$PRIVATE_KEY" AI_DEVOPS_PRIVATE_PARENT="$PRIVATE_DIR" \
+      "$PRIVATE_PS" -NoProfile -ExecutionPolicy Bypass -Command \
+        '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' \
+        >"$TMP/private-acl.stdout" 2>"$TMP/private-acl.stderr"; then
     ok 'install-time Qwen key store is owner-only'
   else
+    [ ! -s "$TMP/private-acl.stderr" ] || sed -n '1,8p' "$TMP/private-acl.stderr" >&2
     bad 'install-time Qwen key store is owner-only'
   fi
 else
