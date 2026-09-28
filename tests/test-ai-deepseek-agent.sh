@@ -4,6 +4,7 @@ set -u
 # or an ambient model override: the suite must control the model everywhere.
 unset DEEPSEEK_API_KEY AI_DEEPSEEK_REEXEC AI_DEEPSEEK_SECRET_FD DEEPSEEK_MODEL
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-deepseek-agent"
+[ -n "$(command -v python 2>/dev/null || true)" ] || python() { python3 "$@"; }
 PASS=0; FAIL=0; SKIP=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
@@ -27,7 +28,13 @@ printf 'DEEPSEEK_API_KEY=op://example\nUNRELATED_SECRET=op://must-not-resolve\n'
 cat > "$TMP/bin/op" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$DEEPSEEK_TEST_ARGS"
-while [ "$#" -gt 0 ]; do case "$1" in --env-file) cp "$2" "$DEEPSEEK_TEST_ENV_FILE"; break;; *) shift;; esac; done
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --env-file) cp "$2" "$DEEPSEEK_TEST_ENV_FILE"; shift 2;;
+    --) shift; DEEPSEEK_API_KEY=fixture-from-op exec "$@";;
+    *) shift;;
+  esac
+done
 STUB
 cat > "$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
@@ -50,21 +57,93 @@ elif [ "${DEEPSEEK_STUB_INVALID:-0}" = 1 ]; then printf '{"choices":[{"message":
 else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
 chmod +x "$TMP/bin/op" "$TMP/bin/curl"
+ln -s "$(command -v python3)" "$TMP/bin/python"
 export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_CURL_ENV="$TMP/curl-env" DEEPSEEK_STUB_PID_FILE="$TMP/curl-pid" DEEPSEEK_STUB_TERM_MARKER="$TMP/curl-terminated"
 : > "$DEEPSEEK_CURL_ARGS"
 echo 'ai-deepseek-agent tests'
-HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test >/dev/null 2>&1
-check "1Password re-exec was attempted" "grep -qx run '$TMP/args'"
+if (
+  source <(sed -n '/^      publish_lock() {/,/^      }/p' "$SCRIPT")
+  lock_record(){ cat "$lock_dir/owner" 2>/dev/null || true; }
+  lock_dir="$TMP/deepseek-owner-fixture.lock.d"
+  holder_pid="$BASHPID"
+  publish_lock || exit 1
+  read -r owner winpid token < "$lock_dir/owner"
+  [ "$owner" = "$holder_pid" ] || exit 1
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    [ "$winpid" = "$(cat "/proc/$holder_pid/winpid")" ] || exit 1
+  fi
+); then ok 'DeepSeek credential lock records its actual shell and Windows process'; else bad 'DeepSeek credential lock records its actual shell and Windows process'; fi
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test --review >/dev/null 2>&1
+check "review with no protected store refuses before 1Password or provider contact" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" DEEPSEEK_API_KEY=untrusted-ambient bash "$SCRIPT" store-key >/dev/null
+KEY_STORE="$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+STORE_PERMISSIONS_OK=0
+# Git Bash stat modes do not prove Windows ACL ownership; use the same native
+# ACL assertion that guards a real review, while POSIX checks exact modes.
+if [ -n "${SYSTEMROOT:-}" ]; then
+  PRIVATE_HELPER="$(cygpath -w "$ROOT/bin/windows-private-file.ps1")"
+  PRIVATE_FILE="$(cygpath -w "$KEY_STORE")"
+  PRIVATE_DIR="$(cygpath -w "$(dirname "$KEY_STORE")")"
+  PS="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+  if [ -n "$PS" ] && AI_DEVOPS_PRIVATE_HELPER="$PRIVATE_HELPER" AI_DEVOPS_PRIVATE_TARGET="$PRIVATE_FILE" AI_DEVOPS_PRIVATE_PARENT="$PRIVATE_DIR" \
+    "$PS" -NoProfile -NonInteractive -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null 2>&1; then
+    STORE_PERMISSIONS_OK=1
+  fi
+elif [ "$(stat -c %a "$KEY_STORE")" = 600 ] && [ "$(stat -c %a "$(dirname "$KEY_STORE")")" = 700 ]; then
+  STORE_PERMISSIONS_OK=1
+fi
+check "explicit refresh creates owner-only key store" "test -s '$KEY_STORE' && test '$STORE_PERMISSIONS_OK' = 1"
+check "explicit refresh ignores inherited key" "grep -qx fixture-from-op '$TMP/home/.config/ai-devops/secrets/deepseek-api-key'"
+rm -f "$TMP/args" "$TMP/op-env"
+chmod 644 "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=untrusted-ambient bash "$SCRIPT" send insecure --review >/dev/null 2>&1
+check "insecure store refuses review without 1Password or provider contact" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
+chmod 600 "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+mv "$TMP/home/.config/ai-devops/secrets/deepseek-api-key" "$TMP/held-deepseek-key"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=untrusted-ambient bash "$SCRIPT" send missing --review >/dev/null 2>&1
+check "inherited key cannot bypass a missing protected store" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
+mkdir -p "$TMP/alternate-config/secrets"; chmod 700 "$TMP/alternate-config/secrets"
+printf 'redirected-key\n' > "$TMP/alternate-config/secrets/deepseek-api-key"; chmod 600 "$TMP/alternate-config/secrets/deepseek-api-key"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEVOPS_CONFIG_DIR="$TMP/alternate-config" AI_DEEPSEEK_KEY_STORE="$TMP/alternate-config/secrets/deepseek-api-key" bash "$SCRIPT" send redirected --review >/dev/null 2>&1
+check "inherited path overrides cannot redirect a formal review to another key" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
+mv "$TMP/held-deepseek-key" "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+HOME="$TMP/home" USERPROFILE="$TMP/redirect-home" PATH="$TMP/bin:$PATH" bash "$SCRIPT" doctor > "$TMP/fixture-home-doctor.out" 2>&1
+check "offline fixture HOME wins over inherited Windows USERPROFILE" "grep -q '^PASS  curl available' '$TMP/fixture-home-doctor.out'"
+# Production-mode profile lookup must ignore caller-supplied HOME and
+# USERPROFILE; this is an offline doctor comparison, with no provider request.
+mkdir -p "$TMP/redirect-home/.config/ai-devops/secrets"
+chmod 700 "$TMP/redirect-home/.config/ai-devops/secrets"
+printf 'redirected-key\n' > "$TMP/redirect-home/.config/ai-devops/secrets/deepseek-api-key"
+chmod 600 "$TMP/redirect-home/.config/ai-devops/secrets/deepseek-api-key"
+HOST_DOCTOR_OUT="$(env -u AI_DEEPSEEK_TEST_DIR "$SCRIPT" doctor 2>&1)"; HOST_DOCTOR_RC=$?
+REDIRECT_DOCTOR_OUT="$(env -u AI_DEEPSEEK_TEST_DIR HOME="$TMP/redirect-home" USERPROFILE="$TMP/redirect-home" AI_DEVOPS_CONFIG_DIR="$TMP/alternate-config" AI_DEEPSEEK_KEY_STORE="$TMP/redirect-home/.config/ai-devops/secrets/deepseek-api-key" "$SCRIPT" doctor 2>&1)"; REDIRECT_DOCTOR_RC=$?
+printf '%s' "$HOST_DOCTOR_OUT" > "$TMP/host-doctor.out"
+printf '%s' "$REDIRECT_DOCTOR_OUT" > "$TMP/redirect-doctor.out"
+check "production doctor ignores inherited home and key-store redirects" "test '$HOST_DOCTOR_RC' -eq '$REDIRECT_DOCTOR_RC' && cmp -s '$TMP/host-doctor.out' '$TMP/redirect-doctor.out'"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test --review >/dev/null 2>&1
+check "review reads protected store without 1Password" "test ! -e '$TMP/args'"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" bash "$SCRIPT" store-key --if-missing >/dev/null 2>&1
+check "idempotent refresh does not call 1Password" "test ! -e '$TMP/args'"
+check "invalid refresh option refuses before 1Password" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_TEST_ARGS='$TMP/args' bash '$SCRIPT' store-key --unknown >/dev/null 2>&1 && test ! -e '$TMP/args'"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" store-key >/dev/null 2>&1
+check "explicit refresh attempts 1Password" "grep -qx run '$TMP/args'"
 mkdir -p "$TMP/untrusted-test-root"
 OP_ARGS_TRUST_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
-check "credential resolution rejects an executable outside its trusted installation or test root" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_TEST_DIR='$TMP/untrusted-test-root' DEEPSEEK_TEST_ARGS='$TMP/args' bash '$SCRIPT' send trust-check 2>/dev/null && test '$OP_ARGS_TRUST_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+check "explicit refresh rejects an executable outside its trusted installation or test root" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_TEST_DIR='$TMP/untrusted-test-root' DEEPSEEK_TEST_ARGS='$TMP/args' bash '$SCRIPT' store-key 2>/dev/null && test '$OP_ARGS_TRUST_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
 OP_ARGS_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
 check "provider endpoint override is rejected before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_TEST_ARGS='$TMP/args' DEEPSEEK_BASE_URL='https://attacker.invalid' bash '$SCRIPT' send endpoint-check && test '$OP_ARGS_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
-check "managed re-exec resolves only the DeepSeek reference behind an empty-environment boundary" "test \"\$(wc -l < '$TMP/op-env')\" -eq 1 && grep -q '^DEEPSEEK_API_KEY=op://' '$TMP/op-env' && grep -q '/usr/bin/env -i' '$SCRIPT'"
+check "explicit refresh resolves only the DeepSeek reference behind an empty-environment boundary" "test \"\$(wc -l < '$TMP/op-env')\" -eq 1 && grep -q '^DEEPSEEK_API_KEY=op://' '$TMP/op-env' && grep -q '/usr/bin/env -i' '$SCRIPT'"
 check "managed re-exec keeps the DeepSeek key out of process arguments" "grep -q 'AI_DEEPSEEK_SECRET_FD=9' '$SCRIPT' && ! grep -q '\"DEEPSEEK_API_KEY=\$keep_key\"' '$SCRIPT'"
 check "managed re-exec keeps the repository-tool budgets" "test \"\$(grep -c 'for name in .*DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS' '$SCRIPT')\" -eq 1"
-FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && /usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9 DEEPSEEK_STUB_REPLY=DEEPSEEK_REVIEWER_HEALTHY DEEPSEEK_CURL_ARGS="$DEEPSEEK_CURL_ARGS" DEEPSEEK_CURL_ENV="$DEEPSEEK_CURL_ENV" DEEPSEEK_STUB_PID_FILE="$DEEPSEEK_STUB_PID_FILE" DEEPSEEK_STUB_TERM_MARKER="$DEEPSEEK_STUB_TERM_MARKER" "$SCRIPT" doctor --live 9<&9)"
-check "managed descriptor handoff delivers the key without exporting it to curl" "printf '%s\n' '$FD_HANDOFF_OUT' | grep -q 'live provider response' && ! grep -q '^DEEPSEEK_API_KEY=' '$DEEPSEEK_CURL_ENV'"
+FD_ENV=(/usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9)
+# Native PowerShell and icacls still need the Windows runtime basics. The
+# managed production handoff preserves these too, while excluding the key.
+for FD_NAME in SYSTEMROOT WINDIR COMSPEC PATHEXT TEMP USERPROFILE; do
+  [ -z "${!FD_NAME:-}" ] || FD_ENV+=("$FD_NAME=${!FD_NAME}")
+done
+FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && "${FD_ENV[@]}" "$SCRIPT" store-key 9<&9)"
+check "managed descriptor handoff writes only the protected store" "printf '%s\n' '$FD_HANDOFF_OUT' | grep -q 'protected key store refreshed' && grep -qx fd-managed-key '$TMP/home/.config/ai-devops/secrets/deepseek-api-key' && test ! -s '$DEEPSEEK_CURL_ARGS'"
+check "formal review refuses a credential descriptor bypass" "! (exec 9<<<'bypass'; cd '$TMP/repo' && HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_SECRET_FD=9 '$SCRIPT' send bypass --review 9<&9) >/dev/null 2>&1 && test ! -s '$DEEPSEEK_CURL_ARGS'"
 BOUNDARY_BODY="$(sed -n "/^DEEPSEEK_CREDENTIAL_BOUNDARY='/,/^'$/p" "$SCRIPT" | sed '1d;$d')"
 cat > "$TMP/boundary-probe" <<'PROBE'
 #!/usr/bin/env bash
