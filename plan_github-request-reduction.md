@@ -8,19 +8,22 @@ Date: 2026-09-20. P1 is claimed under [#660](https://github.com/popcre/ai-devops
 by Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114` on ALBT16. This is a new defect programme;
 do not reopen the completed #401 throughput programme or claim its proofs cover this work.
 
-P1 update 2026-09-24 2:58 PM EDT (Claude chat, edge-dev): PR #663 merged
+P1 update 2026-09-27 11:09 PM EDT (Codex, read-only fleet survey): PR #663 merged
 10:31 PM EDT 2026-09-23 and installed on edge-dev. Live data: 2,205 records over
 15 hourly windows, zero privacy violations, 1,577 quota snapshots
-([evidence](https://github.com/popcre/ai-devops/issues/660#issuecomment-5817155903)).
+([initial evidence](https://github.com/popcre/ai-devops/issues/660#issuecomment-5817155903)).
 BlockerWatch is about 95% of measured traffic, so P5 has the largest payoff.
 Exact-head review of merged P1 rejected only a load-sensitive test; that test was
 rebuilt as a handshake and approved in #776 (#775). Dispatch and privacy-proof
-callers are not wrapped by design (P3). Acceptance still needs the other active
-hosts (ALBT16, 916, hetz) installed and sampled; #660 stays open for its owner.
+callers are not wrapped by design (P3). A later read-only sample found 8,175
+wrapper records and two active reset windows on edge-dev, but no count of 20
+completed workflows or exact HTTP/GraphQL consumption. The 916 and hetz
+installations are still pre-P1 with no measurement history. The full 916 update
+is stopped by its protected reviewer-safety deployment gate; #660 stays open.
 
 | Step | State | Owner / dependency | Evidence required to accept |
 |---|---|---|---|
-| P1. Attribute consumption and freeze a comparable baseline | Merged and live on edge-dev 2026-09-23; multi-host acceptance NOT complete | #660, Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114` on ALBT16 | [Inventory and measurement boundaries](tests/verification/github-requests/p1-baseline.md); two busy reset windows and 20 completed operations still required |
+| P1. Attribute consumption and freeze a comparable baseline | Merged and live on edge-dev/edge-dev3; two active edge-dev reset windows documented, but multi-host acceptance NOT complete | #660, original owner Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114` on ALBT16; live handover to Claude chat `24095101-0001-40ff-aa02-f34947cb0d16` on edge-dev | [Inventory and measurement boundaries](tests/verification/github-requests/p1-baseline.md); 20 completed comparable operations, installed 916/hetz samples, principal binding, and request/point attribution still required |
 | P2. Protect the actual quota and preserve command behavior | Open, 2026-09-20 | P1; one claimed implementation owner | Mixed-bucket fixtures and installed quota-mismatch proof |
 | P3. Route all managed request sources through the shared policy | Open, 2026-09-20 | P2 | Caller inventory reconciled, regression guard and installed representative paths |
 | P4. Coalesce duplicate status reads and waiters | Open, 2026-09-25 — execution steps in [`plan_cut-unneeded-github-traffic.md`](plan_cut-unneeded-github-traffic.md) S2 | P1–P3 | Same-target multi-session trace with one upstream refresh and unchanged outcomes |
