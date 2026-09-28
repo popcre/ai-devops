@@ -1,0 +1,68 @@
+name: Merge-queue settings drift
+
+# Catches a mismatch between the toolkit and GitHub's live merge-queue
+# settings before it ejects pull requests for hours (#913, #1002 step 4):
+# the committed snapshot vs the live ruleset, the required checks vs the
+# merge_group workflows, and the pull-request test selection vs the queue's
+# selection. Daily, on demand, and on pull requests that can change either
+# side. Not a required check: a red run is an alarm on one standing issue.
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/**
+      - tests/lib-selection.sh
+      - config/merge-queue-expected.json
+      - bin/ai-merge-queue-drift
+      - tests/test-ai-merge-queue-drift.sh
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Tools match the live merge-queue settings
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Offline drift checks and suite
+        run: |
+          bash tests/test-ai-merge-queue-drift.sh
+          bin/ai-merge-queue-drift --offline
+      - name: Compare with the live ruleset
+        # Pull requests stay offline: no token spend, and the queue lane
+        # proves the live comparison daily and on demand.
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ruleset_id="$(jq -r .ruleset_id config/merge-queue-expected.json)"
+          repo="$(jq -r .repository config/merge-queue-expected.json)"
+          bin/ai-gh api "repos/$repo/rulesets/$ruleset_id" > /tmp/ruleset.json
+          bin/ai-merge-queue-drift --ruleset /tmp/ruleset.json
+
+  alert:
+    needs: drift
+    if: always() && github.event_name != 'pull_request' && needs.drift.result != 'success'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the merge-queue drift standing issue
+        shell: bash
+        run: |
+          title='Merge-queue settings drift detected'
+          body="The merge-queue drift check failed at $RUN_URL. Run bin/ai-merge-queue-drift for the exact finding, then reconcile it by a pull request to config/merge-queue-expected.json or by reverting the live ruleset. Close this issue only after a later drift run passes."
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug
+          fi
