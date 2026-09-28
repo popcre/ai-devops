@@ -354,8 +354,13 @@ key_store_ok() {
     AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$KEY_STORE")" AI_DEVOPS_PRIVATE_PARENT="$(cygpath -w "$dir")" \
       "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null 2>&1
   else
-    [ "$(stat -c %a "$dir" 2>/dev/null)" = 700 ] && [ "$(stat -c %a "$KEY_STORE" 2>/dev/null)" = 600 ] \
-      && [ "$(stat -c %u "$dir" 2>/dev/null)" = "$(id -u)" ] && [ "$(stat -c %u "$KEY_STORE" 2>/dev/null)" = "$(id -u)" ]
+    local dir_mode file_mode dir_owner file_owner
+    dir_mode="$(stat -c %a "$dir" 2>/dev/null || stat -f %Lp "$dir" 2>/dev/null)" || return 1
+    file_mode="$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" || return 1
+    dir_owner="$(stat -c %u "$dir" 2>/dev/null || stat -f %u "$dir" 2>/dev/null)" || return 1
+    file_owner="$(stat -c %u "$KEY_STORE" 2>/dev/null || stat -f %u "$KEY_STORE" 2>/dev/null)" || return 1
+    [ "$dir_mode" = 700 ] && [ "$file_mode" = 600 ] \
+      && [ "$dir_owner" = "$(id -u)" ] && [ "$file_owner" = "$(id -u)" ]
   fi
 }
 cmd_store_key() {
@@ -507,6 +512,10 @@ lock_acquire() {
     born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
     owner="$(cat "$dir/pid" 2>/dev/null || true)"
     if [ -n "$owner" ]; then
+      # Muse publishes only its MSYS pid. A different Git Bash runtime cannot
+      # resolve that pid, so it is never safe to reclaim Muse's lock on Windows.
+      # Bound the caller's wait instead of risking two concurrent op reads.
+      [ -z "${SYSTEMROOT:-}" ] || return 1
       lock_owner_alive "$owner" "" && return 1
     else
       now="$(date +%s)"; [ $((now - born)) -ge 7200 ] || return 1
