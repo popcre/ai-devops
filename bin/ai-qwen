@@ -2160,7 +2160,7 @@ cmd_delete() {
   [ "$(jq -r '.mode // ""' "$meta")" != implement ] || rid="$(rid_from_meta "$meta")"
   sess_lock="$(lock_path "$rid" "$1")"
   lock_acquire "$sess_lock" "delete:$1" || die "session '$1' has an active turn and cannot be deleted."
-  trap '[ "$(cat "$sess_lock/pid" 2>/dev/null)" != "$$" ] || lock_release "$sess_lock"' EXIT
+  trap '[ "$(cat "$sess_lock/pid" 2>/dev/null)" != "$BASHPID" ] || lock_release "$sess_lock"' EXIT
   if [ "$(jq -r '.version // 1' "$meta")" = 2 ] && [ "$(jq -r .mode "$meta")" = implement ]; then
     dir="$(impl_dir "$rid" "$1")"; manifest="$dir/owner.json"
     same_path "$meta" "$dir/metadata.json" && [ -f "$manifest" ] || die "refusing to delete untrusted implementation state."
