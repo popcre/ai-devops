@@ -398,7 +398,7 @@ cmd_store_key() {
     else
       # setup-secrets.sh uses this same lock for Linux 1Password reads.
       command -v flock >/dev/null 2>&1 || exit 1
-      flock -w 120 "$CFG_DIR/op-refresh.lock" "$op_bin" read "$ref" </dev/null > "$tmp"
+      flock --close -w 120 "$CFG_DIR/op-refresh.lock" "$op_bin" read "$ref" </dev/null > "$tmp"
     fi
   ) || [ ! -s "$tmp" ]; then
     rm -f "$tmp"; die 'could not refresh Qwen key from 1Password.'

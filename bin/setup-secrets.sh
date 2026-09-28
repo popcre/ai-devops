@@ -256,7 +256,7 @@ if [ -n "\${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "\${TRIGGER_ACCESS_TOKEN:-}" ]; 
   exec "\$@"
 fi
 _aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
-_aidev_exports="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
+_aidev_exports="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
 import os, shlex, sys
 for name in sys.argv[1:]:
     value = os.environ.get(name, "")
@@ -289,7 +289,7 @@ case "\$REF" in
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
   *) TOK= ;;
 esac
-[ -n "\$TOK" ] || TOK="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
+[ -n "\$TOK" ] || TOK="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
   echo "ai-devops: serialized fallback FAILED for \$REF — not starting \$URL" >&2
   exit 1
 }

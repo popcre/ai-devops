@@ -139,6 +139,10 @@ cat > "$STUB/op" <<'STUBEOF'
 [ "${1:-}" = read ] || exit 2
 case "${2:-}" in op://vibe_coding/*) ;; *) exit 2;; esac
 printf 'read\n' >> "$TMPDIR_FOR_TEST/op-calls"
+if [ -n "${AI_QWEN_TEST_SPAWN_DAEMON:-}" ]; then
+  sleep 5 </dev/null >/dev/null 2>&1 &
+  printf '%s\n' "$!" > "$TMPDIR_FOR_TEST/op-child-pid"
+fi
 printf 'fake-qwen-only\n'
 STUBEOF
 chmod +x "$STUB/qwen"
@@ -177,6 +181,14 @@ if [ -z "${SYSTEMROOT:-}" ]; then
   sleep 0.3
   check 'Qwen key refresh waits for the shared 1Password lock' "test '$(wc -l < "$TMP/op-calls")' = '$OP_CALLS_BEFORE' && kill -0 '$STORE_PID' 2>/dev/null"
   wait "$LOCK_PID"; wait "$STORE_PID"
+  AI_QWEN_TEST_SPAWN_DAEMON=1 "$SCRIPT" store-key >/dev/null
+  OP_CHILD_PID="$(cat "$TMP/op-child-pid")"
+  if flock -n "$AI_DEVOPS_CONFIG_DIR/op-refresh.lock" true; then
+    ok 'Qwen key refresh does not pass the shared lock to 1Password children'
+  else
+    bad 'Qwen key refresh does not pass the shared lock to 1Password children'
+  fi
+  kill "$OP_CHILD_PID" 2>/dev/null || true
 fi
 OP_CALLS_AFTER_STORE="$(wc -l < "$TMP/op-calls" | tr -d ' ')"
 if (
