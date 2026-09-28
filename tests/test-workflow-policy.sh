@@ -35,6 +35,8 @@ check 'rename sources cannot disappear from classification' "grep -q 'git diff -
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
 check 'scheduled failures create or update an issue' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'gh issue create'"
+check 'managed bin commands use the shared GitHub admission path' \
+  "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$ROOT' >/dev/null"
 # Windows verification runs in two lanes at once (issue #209): the long offline
 # matrix on GitHub's hosted image, where concurrency is unmetered, and the
 # reviewer safety suites on the qualified self-hosted pool, where a timing
@@ -389,6 +391,22 @@ rm -f "$aggregate_script"
 if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
   mutation_dir="$(mktemp -d)"
   trap 'rm -rf "$mutation_dir"' EXIT
+  mkdir -p "$mutation_dir/bin"
+  printf '#!/usr/bin/env bash\n"$ROOT/bin/ai-gh" api repos/acme/example\n' > "$mutation_dir/bin/ai-fixture"
+  check 'a delegated fake transport remains allowed' \
+    "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null"
+  printf '#!/usr/bin/env bash\ngh api repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a new direct gh command is rejected' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env node\nrequire("child_process").execFileSync("gh", ["api", "rate_limit"])\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a new SDK/Node CLI bypass is rejected' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env bash\ncurl https://api.github.com/repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a new direct HTTP bypass is rejected' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
   assert_rejected() {
     name="$1"
     if WORKFLOW_POLICY_MUTATION_CHILD=1 WORKFLOW_UNDER_TEST="$mutation_dir/$name.yml" bash "$0" >/dev/null 2>&1; then

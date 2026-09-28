@@ -1,0 +1,23 @@
+# P3 managed GitHub source disposition
+
+Owner: [#931](https://github.com/popcre/ai-devops/issues/931), under [#658](https://github.com/popcre/ai-devops/issues/658). Source inventory begins with the P1 baseline and was refreshed against current `bin/` and `.github/workflows/` sources. This is source coverage, not installed or account-wide quota acceptance.
+
+| Source | Disposition | Proof / remaining owner |
+|---|---|---|
+| `ai-test-local` runner collision | Shared `ai-gh` for every paginated runner read; retains normal-mode fail-open and explicit-probe unknown | Fake busy, idle, pagination and failed transport in `test-ai-test-local.sh`; installed probe still required by #931 |
+| `ai-verify-run` start/status/cancel | Shared `ai-gh` for fresh exact-SHA reads and explicit mutations; no response cache | Duplicate, tag mismatch, failed creation and cancellation fixtures in `test-ai-verify-run.sh`; installed bounded status required by #931 |
+| `ai-merge-group-evidence` | Shared `ai-gh` for live queue identity and exact-head run/job reads; no response cache | Queue movement, missing jobs, failures and fallback fixtures in `test-ai-merge-group-evidence.sh`; CI merge-queue proof remains required |
+| `ai-memory-sync` and `ai-transcript-destination-check` | Shared `ai-gh` for fresh private-repository visibility on each invocation; fail closed | Fake visibility flip and read failure in their focused tests; installed bounded privacy reads required by #931 |
+| `ai-workspace-status` | Shared `ai-gh` for best-effort PR URL; local git fetch remains Git transport | Local status suite plus bounded installed status required by #931 |
+| `ai-reviewer-membership-drift` | Shared `ai-gh` for fresh allocator source read; fixture-file mode stays offline | Fake CLI and drift fixtures in `test-ai-reviewer-membership-drift.sh`; independent exact-head review required before merge |
+| `ai-pr-wait` | Already uses `ai-gh` on the normal path; legacy direct fallback is an exact-byte temporary exception | P4/S2 owner must remove fallback; the source guard expires its exception on any edit |
+| `promote-windows-runner-to-service.ps1` | Direct elevated `gh` remains an exact-byte temporary exception | [#933](https://github.com/popcre/ai-devops/issues/933) owns paced transport, token safety, Windows fake transport and bounded live proof before P3 closure |
+| `ai-private-config` bootstrap clone | `gh auth` is local sign-in; `gh repo clone` is a Git clone during first protected-config install, outside REST/GraphQL traffic reduction | Protected-config owner; this literal clone is allowlisted by the guard; any other new `gh` call is rejected |
+| `ai-devops` doctor and Windows installers | `gh auth status` only checks local sign-in | Local credential probe, no counted REST/GraphQL request |
+| `.github/workflows/runner-pool-watchdog.yml` | Hourly paginated REST with separate `RUNNER_POOL_READ_TOKEN` fine-grained credential; not proven independent of the user's quota | CI watchdog owner; P6 must establish token principal before aggregate attribution; its safety alarm and full pagination remain |
+| `.github/workflows/windows-queue-watchdog.yml` | `github-script` SDK uses job `GITHUB_TOKEN`, separate job identity and bounded seven-minute watcher | CI queue owner; preserve start-delay detection and no added poll frequency |
+| `.github/workflows/verify.yml` | `github-script` and scheduled incident `gh issue` use per-job `GITHUB_TOKEN`; job credential is not the installed user transport | CI workflow owner; preserve required checks and scheduled failure incident reporting |
+
+`tools/ci/check-managed-github-transport.py`, owned by #931, scans installed `bin/` commands in the existing workflow-policy suite. It rejects a new direct CLI, Node CLI or GitHub HTTP/SDK source; tests prove a legitimate delegated fake transport passes and injected bypasses fail. Its two legacy source exceptions are pinned to exact file digests and retire when the P4/S2 and #933 owners edit those paths. The bootstrap Git clone and user-facing recovery text have narrow literal exceptions. This guard is necessary because the existing policy tests did not cover newly added managed callers; it stays as the regression gate after both legacy exceptions retire.
+
+No response cache is used for collision, exact-SHA, merge-queue or private visibility decisions. The fake transports run offline with isolated state. Success/failure status and CLI output continue to come from the underlying command. Installed and CI proof must be linked on #931 before this disposition is accepted as complete.

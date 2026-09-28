@@ -21,6 +21,7 @@ check() {
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+export AI_GH_STATE_DIR="$TMP/gh-state" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off
 mkdir -p "$TMP/bin" "$TMP/repo"
 git -C "$TMP/repo" init -q
 git -C "$TMP/repo" config user.name Test
@@ -95,6 +96,7 @@ set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(prin
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline)"; RC=$?
 check "matching, complete, successful evidence is accepted" \
   "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'verified by'"
+check 'merge proof reads entered the shared gate' '[ -f "$AI_GH_STATE_DIR/last_call_ms" ]'
 
 # A configuration or usage mistake must never read as evidence, so it exits 2,
 # distinct from the exit 1 that means 'the evidence is not good enough'.

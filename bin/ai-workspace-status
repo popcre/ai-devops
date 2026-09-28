@@ -90,15 +90,15 @@ fi
 # Open PR (best-effort via gh)
 echo
 c_head "Open PR"
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  PR_URL="$(gh pr view --json url --jq .url 2>/dev/null || true)"
+if [ -x "$ROOT/bin/ai-gh" ]; then
+  PR_URL="$(AI_GH_CALLER=ai-workspace-status "$ROOT/bin/ai-gh" pr view --json url --jq .url 2>/dev/null || true)"
   if [ -n "$PR_URL" ]; then
     echo "  $PR_URL"
   else
     echo "  (no open PR detected for this branch)"
   fi
 else
-  echo "  (gh not available or not authenticated — skipped)"
+  echo "  (shared GitHub transport unavailable — skipped)"
 fi
 
 # Warnings
