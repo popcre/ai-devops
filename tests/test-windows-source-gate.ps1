@@ -380,13 +380,16 @@ try {
   Copy-Item -LiteralPath (Join-Path $root 'bin\ai-review-sandbox') -Destination (Join-Path $stamp.Repo 'bin\ai-review-sandbox')
   New-Item -ItemType Directory -Force -Path (Join-Path $stamp.Repo 'tools\lib') | Out-Null
   Copy-Item -LiteralPath (Join-Path $root 'tools\lib\task-gates.sh') -Destination (Join-Path $stamp.Repo 'tools\lib\task-gates.sh')
-  "ai-task-gates`tbin/ai-task-gates`tbash+cmd" | Set-Content (Join-Path $stamp.Repo 'config\machine-tools.tsv') -Encoding ASCII
+  'fixture helper' | Set-Content (Join-Path $stamp.Repo 'bin\ai-helper') -Encoding ASCII
+  @("ai-task-gates`tbin/ai-task-gates`tbash+cmd", "ai-helper`tbin/ai-helper`tbash+cmd") |
+    Set-Content (Join-Path $stamp.Repo 'config\machine-tools.tsv') -Encoding ASCII
   git -C $stamp.Repo add bin config/machine-tools.tsv tools/lib/task-gates.sh
   git -C $stamp.Repo commit -m guarded-stamp-base | Out-Null
   git -C $stamp.Repo push origin main | Out-Null
   $stampBase=(git -C $stamp.Repo rev-parse HEAD).Trim()
   Write-Receipt $stamp
   $oldLauncherHash=(Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash
+  $oldCmdHash=(Get-FileHash -LiteralPath "$($stamp.Launcher).cmd" -Algorithm SHA256).Hash
   'early pulled reviewer gate' | Set-Content (Join-Path $stamp.Repo 'bin\ai-task-gates')
   git -C $stamp.Repo add bin/ai-task-gates
   git -C $stamp.Repo commit -m early-pull | Out-Null
@@ -400,19 +403,43 @@ try {
     Assert ($stampFailure -like '*source gate refused*') "direct stamp failed for another reason: $stampFailure"
     Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) 'direct stamp changed launcher before authorization'
     $stampTarget=(git -C $stamp.Repo rev-parse HEAD).Trim()
-    Write-TestAuthorization $stamp $stampTarget $stampBase | Out-Null
+    $stampIssued=Write-TestAuthorization $stamp $stampTarget $stampBase
     $stampStatus=(@(git -C $stamp.Repo status --porcelain=v1 --untracked-files=all) -join '; ')
     Assert (-not $stampStatus) "direct-stamp fixture dirty before approved refresh: $stampStatus"
     $userPathBefore=[Environment]::GetEnvironmentVariable('PATH', 'User')
+    $partialCatalog=Join-Path (Split-Path -Parent $stamp.Launcher) 'partial-catalog.tsv'
+    "ai-task-gates`tbin/ai-task-gates`tbash+cmd" | Set-Content -LiteralPath $partialCatalog -Encoding ASCII
+    $catalogFailed=$false
+    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
+      -CatalogPath $partialCatalog -UserProfilePath $env:USERPROFILE *>$null } catch { $catalogFailed=$true }
+    Assert $catalogFailed 'direct stamper accepted a partial catalog'
+    Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) `
+      'partial catalog changed the gate launcher'
+    $stampPending=Join-Path (Split-Path -Parent $stamp.Launcher) ('install-authorizations\' + $stampTarget + '.json.consuming')
+    Assert (Test-Path -LiteralPath $stampIssued -PathType Leaf) 'partial catalog consumed authority'
+    $env:AI_DEVOPS_TEST_FAIL_AFTER_GATE='1'
+    $injectedFailed=$false
+    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
+      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
+      catch { $injectedFailed=$true; $injectedMessage=$_.Exception.Message }
+    $env:AI_DEVOPS_TEST_FAIL_AFTER_GATE=$null
+    Assert $injectedFailed 'injected failure after gate launcher did not stop stamping'
+    Assert ($injectedMessage -like '*exact prior launchers were restored*') "injected failure did not roll back: $injectedMessage"
+    Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) `
+      'injected failure changed gate launcher receipt'
+    Assert ((Get-FileHash -LiteralPath "$($stamp.Launcher).cmd" -Algorithm SHA256).Hash -eq $oldCmdHash) `
+      'injected failure changed gate command receipt'
+    Assert (Test-Path -LiteralPath $stampPending -PathType Leaf) 'injected failure consumed pending authority'
     & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
       -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null
     Assert ([Environment]::GetEnvironmentVariable('PATH', 'User') -ceq $userPathBefore) `
       'disposable launcher fixture changed the real User PATH'
     Assert ((Get-Content -LiteralPath $stamp.Launcher)[2] -ceq "# source-sha=$stampTarget") `
       'locked direct launcher refresh did not stamp the approved source'
-    $stampPending=Join-Path (Split-Path -Parent $stamp.Launcher) ('install-authorizations\' + $stampTarget + '.json.consuming')
     Assert (-not (Test-Path -LiteralPath $stampPending)) 'successful locked launcher refresh did not consume authority'
-  } finally { $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote; $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher }
+    Assert (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $stamp.Launcher) ('launcher-transactions\' + $stampTarget + '.json')))) `
+      'successful retry left a pending launcher transaction'
+  } finally { $env:AI_DEVOPS_TEST_FAIL_AFTER_GATE=$null; $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote; $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher }
 
   $removed=New-Fixture removed
   $removedBefore=(git -C $removed.Repo rev-parse HEAD).Trim()
