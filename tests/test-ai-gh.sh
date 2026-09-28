@@ -42,7 +42,7 @@ case "${FAKE_MODE:-ok}" in
     elif [ "$1 $2" = 'api --include' ]; then printf 'HTTP/2 200\nX-Ratelimit-Reset: %s\n\ncore\t4999\t5000\t%s\n' $(( $(date +%s) + 9000 )) $(( $(date +%s) + 9000 ));
     else echo 'gh: API rate limit already exceeded for user ID 55610577. (HTTP 403)' >&2; exit 1; fi ;;
   probe-timeout) if [ "$1 $2" = 'api rate_limit' ]; then sleep 2; else echo "out:$*"; fi ;;
-  graphql-200-primary|graphql-200-secondary|graphql-200-partial|graphql-crash|graphql-unknown|graphql-malformed-errors|graphql-jq-scalar|graphql-jq-empty|graphql-pages|graphql-pages-error)
+  graphql-200-primary|graphql-200-secondary|graphql-200-partial|graphql-cli-error|graphql-crash|graphql-unknown|graphql-malformed-errors|graphql-jq-scalar|graphql-jq-empty|graphql-pages|graphql-pages-error)
     if [ "$1 $2" = 'api rate_limit' ]; then
       printf 'core\t4000\t5000\t%s\ngraphql\t4000\t5000\t%s\n' $(( $(date +%s) + 1800 )) $(( $(date +%s) + 2400 ))
     elif [ "$1 $2" = 'api --include' ]; then
@@ -51,6 +51,8 @@ case "${FAKE_MODE:-ok}" in
       printf '{"data":{"viewer":{"login":"partial"}},"errors":[{"message":"API rate limit exceeded"}]}\n'
     elif [ "$FAKE_MODE" = graphql-200-secondary ]; then
       printf '{"data":{"viewer":{"login":"partial"}},"errors":[{"message":"secondary rate limit"}]}\n'
+    elif [ "$FAKE_MODE" = graphql-cli-error ]; then
+      printf 'temporary upstream reset\n' >&2; exit 1
     elif [ "$FAKE_MODE" = graphql-crash ]; then
       printf '{"data":{"viewer":{"login":"FIXTURE_PRIVATE_BODY"}}}\n'; sleep 3
     elif [ "$FAKE_MODE" = graphql-unknown ]; then
@@ -128,7 +130,9 @@ rm -f "$TMP/state/backoff_until"
 : > "$FAKE_LOG"
 for i in 1 2; do FAKE_MODE=spaced-failure AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1 & done
 wait
-check 'concurrent ordinary failures serialize and space every probe and request' "[ \$(grep -c 'api --include rate_limit' '$FAKE_LOG') -eq 2 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 1900) exit 1}'"
+# Four reservations (two commands and two failure probes) must not collapse
+# into a burst, while process launch after the lock can reorder under load.
+check 'concurrent ordinary failures serialize and space every probe and request' "[ \$(grep -c 'api --include rate_limit' '$FAKE_LOG') -eq 2 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{if(n!=4 || (t[4]-t[1])/1000000 < 5000) exit 1; for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 1000) exit 1}'"
 : > "$FAKE_LOG"
 FAKE_MODE=primary AI_GH_QUOTA_PROBE_SECONDS=0 AI_GH_MIN_SPACING_SECONDS=2 "$GH" api repos/o/r/issues >/dev/null 2>&1; rc=$?
 check 'primary refusal snapshot also respects minimum start spacing' "[ $rc -eq 75 ] && [ \$(grep -c 'api --include rate_limit' '$FAKE_LOG') -eq 1 ] && awk '/^start/{print \$2}' '$FAKE_LOG' | sort -n | awk '{t[++n]=\$1} END{for(i=2;i<=n;i++) if((t[i]-t[i-1])/1000000 < 1900) exit 1}'"
@@ -137,7 +141,11 @@ rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
 check 'mixed CLI cost is unknown and its resource snapshots are invalidated' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q '^0 3000 5000 ' '$TMP/state/quota' && grep -q '^0 3000 5000 ' '$TMP/state/quota.graphql'"
 check 'telemetry observes named server buckets with a private principal label' "jq -e '.buckets.core.remaining == 3000 and .buckets.graphql.remaining == 3000 and .buckets.search.remaining == 30 and (.principal | startswith(\"local-sha256:\"))' '$TMP/state/quota-observation.json'"
-check 'principal label uses a private local salt' "[ \$(stat -c %a '$TMP/state/principal-salt') = 600 ] && ! grep -R -q 55610577 '$TMP/state/measurements' '$TMP/state/quota-measurements'"
+# Git Bash on NTFS reports its inherited Windows ACL through synthetic modes;
+# POSIX hosts can additionally prove the file itself is mode 600.
+salt_check="[ \$(stat -c %a '$TMP/state/principal-salt') = 600 ]"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) salt_check="[ -s '$TMP/state/principal-salt' ]";; esac
+check 'principal label uses a private local salt' "$salt_check && ! grep -R -q 55610577 '$TMP/state/measurements' '$TMP/state/quota-measurements'"
 check 'quota observations retain bounded history without another request' "jq -se 'length >= 1 and .[-1].buckets.graphql.remaining == 3000' '$TMP/state/quota-measurements/'*.jsonl"
 rm -f "$TMP/state/quota"; : > "$FAKE_LOG"
 FAKE_MODE=quota FAKE_REMAINING=900 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_NO_WAIT=1 "$GH" pr view 3 >/dev/null 2>&1; rc=$?
@@ -156,6 +164,45 @@ rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
 
 # Resource classification and accounting: no real credential or API is used.
 fresh_quota(){ rm -f "$TMP/state/quota" "$TMP/state"/quota.* "$TMP/state"/quota-pause.* "$TMP/state/quota-resources" "$TMP/state/backoff_until"; rm -rf "$TMP/state/quota-contexts"; : > "$FAKE_LOG"; }
+mkdir -p "$TMP/linked-outside" "$TMP/link-identity-state" "$TMP/link-context-state" "$TMP/fifo-salt-state"
+if ln -s "$TMP/linked-outside" "$TMP/linked-state" 2>/dev/null; then
+  AI_GH_STATE_DIR="$TMP/linked-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r > "$TMP/linked-state-out" 2> "$TMP/linked-state-err"; rc=$?
+  check 'linked state root is rejected before an API call' "[ $rc -eq 3 ] && [ ! -s '$TMP/linked-state-out' ] && grep -q 'invalid GitHub state directory' '$TMP/linked-state-err'"
+else ok 'linked state root fixture is unavailable on this host'; fi
+if ln -s "$TMP/linked-outside" "$TMP/link-identity-state/identities" 2>/dev/null; then
+  AI_GH_STATE_DIR="$TMP/link-identity-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r > "$TMP/link-identity-out" 2> "$TMP/link-identity-err"; rc=$?
+  check 'linked identity directory is rejected before an API call' "[ $rc -eq 3 ] && [ ! -s '$TMP/link-identity-out' ] && grep -q 'cannot protect GitHub identity cache' '$TMP/link-identity-err' && [ ! -e '$TMP/linked-outside/owner' ]"
+else ok 'linked identity directory fixture is unavailable on this host'; fi
+if ln -s "$TMP/linked-outside" "$TMP/link-context-state/quota-contexts" 2>/dev/null; then
+  AI_GH_STATE_DIR="$TMP/link-context-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r > "$TMP/link-context-out" 2> "$TMP/link-context-err"; rc=$?
+  check 'linked quota directory is rejected before an API call' "[ $rc -eq 3 ] && [ ! -s '$TMP/link-context-out' ] && grep -q 'cannot protect GitHub quota contexts' '$TMP/link-context-err'"
+else ok 'linked quota directory fixture is unavailable on this host'; fi
+mkfifo "$TMP/fifo-salt-state/principal-salt"
+AI_GH_STATE_DIR="$TMP/fifo-salt-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 timeout 15 "$GH" api repos/o/r > "$TMP/fifo-salt-out" 2> "$TMP/fifo-salt-err"; rc=$?
+check 'non-regular principal salt is ignored without blocking the command' "[ $rc -eq 0 ] && jq -e '.principal == \"unknown\"' '$TMP/fifo-salt-state/quota-observation.json' && [ -p '$TMP/fifo-salt-state/principal-salt' ]"
+printf 'protected\n' > "$TMP/linked-outside/canary"
+mkdir -p "$TMP/link-put-state" "$TMP/link-log-state" "$TMP/link-refusal-state" "$TMP/link-restore-state"
+if ln -s "$TMP/linked-outside/canary" "$TMP/link-put-state/last_call" 2>/dev/null; then
+  AI_GH_STATE_DIR="$TMP/link-put-state" AI_GH_QUOTA_PROBE_SECONDS=off "$GH" pr view 1 > "$TMP/link-put-out" 2> "$TMP/link-put-err"; rc=$?
+  check 'atomic state writer refuses a linked destination' "[ $rc -eq 3 ] && [ \$(cat '$TMP/linked-outside/canary') = protected ] && grep -q 'invalid GitHub state file' '$TMP/link-put-err'"
+else ok 'linked state file fixture is unavailable on this host'; fi
+if ln -s "$TMP/linked-outside/canary" "$TMP/link-log-state/failures.log" 2>/dev/null; then
+  AI_GH_STATE_DIR="$TMP/link-log-state" FAKE_MODE=notfound AI_GH_QUOTA_PROBE_SECONDS=off "$GH" pr view 1 > "$TMP/link-log-out" 2> "$TMP/link-log-err"; rc=$?
+  check 'failure evidence never appends through a link' "[ $rc -eq 1 ] && [ \$(cat '$TMP/linked-outside/canary') = protected ] && grep -q 'invalid GitHub state log' '$TMP/link-log-err'"
+else ok 'linked failure log fixture is unavailable on this host'; fi
+if ln -s "$TMP/linked-outside/canary" "$TMP/link-refusal-state/refusals.log" 2>/dev/null; then
+  AI_GH_STATE_DIR="$TMP/link-refusal-state" FAKE_MODE=secondary AI_GH_QUOTA_PROBE_SECONDS=off "$GH" pr view 1 > "$TMP/link-refusal-out" 2> "$TMP/link-refusal-err"; rc=$?
+  check 'rate refusal never appends through a link' "[ $rc -eq 75 ] && [ \$(cat '$TMP/linked-outside/canary') = protected ] && grep -q 'invalid GitHub state log' '$TMP/link-refusal-err'"
+else ok 'linked refusal log fixture is unavailable on this host'; fi
+FAKE_TOKEN=token-restore-A AI_GH_STATE_DIR="$TMP/link-restore-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1
+restore_key="$(cat "$TMP/link-restore-state/quota-context-key")"
+FAKE_TOKEN=token-restore-B AI_GH_STATE_DIR="$TMP/link-restore-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1
+if [ -f "$TMP/link-restore-state/quota-contexts/$restore_key/quota" ] && ln -s "$TMP/linked-outside/canary" "$TMP/link-restore-state/quota-contexts/$restore_key/quota.link" 2>/dev/null; then
+  mv "$TMP/link-restore-state/quota-contexts/$restore_key/quota" "$TMP/link-restore-state/quota-contexts/$restore_key/quota.original"
+  mv "$TMP/link-restore-state/quota-contexts/$restore_key/quota.link" "$TMP/link-restore-state/quota-contexts/$restore_key/quota"
+  FAKE_TOKEN=token-restore-A AI_GH_STATE_DIR="$TMP/link-restore-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r > "$TMP/link-restore-out" 2> "$TMP/link-restore-err"; rc=$?
+  check 'context restoration rejects a linked quota file' "[ $rc -eq 3 ] && [ \$(cat '$TMP/linked-outside/canary') = protected ] && grep -q 'invalid GitHub quota state' '$TMP/link-restore-err'"
+else ok 'linked restore fixture is unavailable on this host'; fi
 fresh_quota
 FAKE_MODE=quota FAKE_REMAINING=4000 FAKE_GRAPHQL_REMAINING=0 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=privatequery >/dev/null 2>"$TMP/resource-err"; rc=$?
 check 'healthy REST cannot conceal exhausted GraphQL before a direct query' "[ $rc -eq 75 ] && ! grep -q 'api graphql' '$FAKE_LOG' && grep -q 'resource=graphql' '$TMP/state/refusals.log'"
@@ -259,6 +306,9 @@ check 'GraphQL HTTP-200 secondary error preserves partial output and uses shared
 fresh_quota
 FAKE_MODE=graphql-200-partial AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/partial-other" 2>/dev/null; rc=$?
 check 'GraphQL partial non-limit result returns failure and preserves output' "[ $rc -eq 1 ] && jq -e '.errors[0].message == \"field unavailable\" and .data.viewer.login == \"partial\"' '$TMP/partial-other'"
+fresh_quota
+FAKE_MODE=graphql-cli-error AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/graphql-cli-error-out" 2> "$TMP/graphql-cli-error-err"; rc=$?
+check 'failed GraphQL command keeps its original error without a shape warning' "[ $rc -eq 1 ] && [ ! -s '$TMP/graphql-cli-error-out' ] && grep -q 'temporary upstream reset' '$TMP/graphql-cli-error-err' && ! grep -q 'result unclassified' '$TMP/graphql-cli-error-err'"
 fresh_quota
 FAKE_MODE=graphql-unknown AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/unknown-graphql" 2> "$TMP/unknown-graphql-err"; rc=$?
 check 'unclassifiable GraphQL result is visible and nonzero' "[ $rc -eq 1 ] && grep -q not-json '$TMP/unknown-graphql' && grep -q 'result unclassified' '$TMP/unknown-graphql-err'"
@@ -475,6 +525,11 @@ touch "$TMP/telemetry-state/measurements/2000-01-01.jsonl"
 check 'telemetry retention removes only old owned date files' "[ ! -e '$TMP/telemetry-state/measurements/2000-01-01.jsonl' ] && jq -se '.[-1].bucket == \"graphql\" and .[-1].cli_executions == 1 and .[-1].principal == \"unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
 check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 6 and .opaque_cli_executions == 6 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+mkdir "$TMP/report-compat"
+head -n 1 "$TMP/telemetry-state/measurements/$(date -u +%F).jsonl" > "$TMP/report-compat/$(date -u +%F).jsonl"
+for sample in "$TMP/state/measurements/"*.jsonl; do jq -c 'select(.operation == "api.identity")' "$sample" >> "$TMP/report-compat/$(date -u +%F).jsonl"; done
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/report-compat" > "$TMP/report"; rc=$?
+check 'report accepts legacy samples alongside identity invocation estimates' "[ $rc -eq 0 ] && jq -e '.records >= 2 and .identity_probe_invocations >= 1 and .http_requests == null' '$TMP/report'"
 printf '{"operation":"FIXTURE_CANARY"}\n' > "$TMP/telemetry-state/measurements/2001-01-01.jsonl"
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
 check 'request report rejects untrusted labels without reflecting them' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && ! grep -q FIXTURE_CANARY '$TMP/report-error'"

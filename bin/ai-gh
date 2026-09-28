@@ -100,8 +100,9 @@ if [ -z "$REAL" ]; then
 fi
 [ -n "$REAL" ] || { say "the real gh is not installed"; exit 3; }
 
+[ ! -L "$STATE" ] || { say "invalid GitHub state directory"; exit 3; }
 (umask 077; mkdir -p "$STATE") || { say "cannot create $STATE"; exit 3; }
-chmod 700 "$STATE" 2>/dev/null || { say "cannot protect GitHub state"; exit 3; }
+[ ! -L "$STATE" ] && chmod 700 "$STATE" 2>/dev/null || { say "cannot protect GitHub state"; exit 3; }
 for state_file in "$STATE/quota-context" "$STATE/quota-context-key"; do
   if [ -L "$state_file" ] || { [ -e "$state_file" ] && [ ! -f "$state_file" ]; }; then
     say "invalid GitHub quota context state"; exit 3
@@ -109,8 +110,46 @@ for state_file in "$STATE/quota-context" "$STATE/quota-context-key"; do
 done
 now(){ date +%s; }
 readnum(){ local x; x="$(cat "$1" 2>/dev/null)"; isnum "$x" && echo "$x" || echo 0; }
+safe_state_file(){
+  local file="$1" parent="${1%/*}"
+  [ ! -L "$STATE" ] && [ -d "$STATE" ] || return 1
+  case "$parent" in
+    "$STATE") ;;
+    "$STATE/identities") [ ! -L "$parent" ] && [ -d "$parent" ] || return 1 ;;
+    "$STATE/quota-contexts/"*)
+      [ ! -L "$STATE/quota-contexts" ] && [ -d "$STATE/quota-contexts" ] &&
+        [ ! -L "$parent" ] && [ -d "$parent" ] || return 1 ;;
+    *) return 1 ;;
+  esac
+  [ ! -L "$file" ] && { [ ! -e "$file" ] || [ -f "$file" ]; }
+}
 # Atomic state write (temp file then rename), so a reader never sees a half-written value.
-put(){ local t="$1.tmp.$$.$RANDOM"; if (umask 077; printf '%s\n' "$2" > "$t") && mv -f "$t" "$1" 2>/dev/null; then return 0; fi; rm -f "$t"; (umask 077; printf '%s\n' "$2" > "$1"); }
+# Never fall back to redirection through an existing destination: it can be a link.
+put(){
+  local target="$1" temp attempt
+  safe_state_file "$target" || { say "invalid GitHub state file"; exit 3; }
+  temp="$(umask 077; mktemp "$target.tmp.XXXXXX")" || { say "cannot create private GitHub state file"; exit 3; }
+  printf '%s\n' "$2" > "$temp" || { rm -f -- "$temp"; say "cannot save GitHub state"; exit 3; }
+  for attempt in 1 2 3; do
+    safe_state_file "$target" || break
+    if mv -f -- "$temp" "$target" 2>/dev/null; then return 0; fi
+    sleep 0.1
+  done
+  rm -f -- "$temp"; say "cannot save GitHub state"; exit 3
+}
+append_state(){
+  local target="$1"
+  safe_state_file "$target" || { say "invalid GitHub state log"; return 1; }
+  (umask 077; cat >> "$target")
+}
+private_dir(){
+  local dir="$1"
+  [ ! -L "$dir" ] || return 1
+  if [ -e "$dir" ]; then [ -d "$dir" ] || return 1
+  else (umask 077; mkdir "$dir") || return 1
+  fi
+  [ ! -L "$dir" ] && [ -d "$dir" ] && chmod 700 "$dir" 2>/dev/null
+}
 # Back-off only ever moves later: never shorten a back-off another process recorded.
 extend_backoff(){ [ "$1" -gt "$(readnum "$STATE/backoff_until")" ] && put "$STATE/backoff_until" "$1"; return 0; }
 
@@ -267,6 +306,15 @@ BUCKET_MODE=all
 COST=unknown
 PROBE_HOST=()
 resource_key(){ [[ "$1" =~ ^[a-z][a-z0-9_]*$ ]]; }
+quota_state_name(){
+  local name="${1##*/}"
+  case "$name" in
+    quota|quota-resources) return 0 ;;
+    quota.*) resource_key "${name#quota.}" ;;
+    quota-pause.*) resource_key "${name#quota-pause.}" ;;
+    *) return 1 ;;
+  esac
+}
 resource_keys(){
   { printf '%s\n' core graphql search code_search; cat "$STATE/quota-resources" 2>/dev/null; } | while read -r key; do resource_key "$key" && printf '%s\n' "$key"; done | LC_ALL=C sort -u
 }
@@ -366,7 +414,7 @@ if [ "$QUOTA_ACTIVE" != off ] && [[ "$API_HOST" =~ ^[a-z0-9][a-z0-9.-]*$ ]] && c
     context_hint="$QUOTA_SCHEMA $API_HOST $credential_hash"
     CONTEXT="$context_hint unknown"
     identity_key="$(printf '%s' "$context_hint" | sha256sum | awk '{print $1}')"
-    (umask 077; mkdir -p "$STATE/identities") && chmod 700 "$STATE/identities" 2>/dev/null || { say "cannot protect GitHub identity cache"; exit 3; }
+    private_dir "$STATE/identities" || { say "cannot protect GitHub identity cache"; exit 3; }
     identity_file="$STATE/identities/$identity_key"
     if [ -L "$identity_file" ] || { [ -e "$identity_file" ] && [ ! -f "$identity_file" ]; }; then
       say "invalid GitHub identity cache"; exit 3
@@ -401,20 +449,27 @@ fi
 # but marks them stale: another credential may have consumed the same budget.
 # P6 owns cross-host/account demand coordination; this cache is local only.
 if [ "$QUOTA_ACTIVE" != off ] && [ "$(cat "$STATE/quota-context" 2>/dev/null)" != "$CONTEXT" ]; then
-  mkdir -p "$STATE/quota-contexts"
+  private_dir "$STATE/quota-contexts" || { say "cannot protect GitHub quota contexts"; exit 3; }
   previous_key="$(cat "$STATE/quota-context-key" 2>/dev/null)"
   if [[ "$previous_key" =~ ^[0-9a-f]{64}$ ]]; then
-    mkdir -p "$STATE/quota-contexts/$previous_key"
+    private_dir "$STATE/quota-contexts/$previous_key" || { say "cannot protect GitHub quota context"; exit 3; }
     for file in "$STATE"/quota "$STATE"/quota.* "$STATE"/quota-pause.* "$STATE"/quota-resources; do
-      [ -f "$file" ] && mv -f "$file" "$STATE/quota-contexts/$previous_key/"
+      [ -e "$file" ] || [ -L "$file" ] || continue
+      quota_state_name "$file" && safe_state_file "$file" &&
+        safe_state_file "$STATE/quota-contexts/$previous_key/${file##*/}" || { say "invalid GitHub quota state"; exit 3; }
+      mv -f -- "$file" "$STATE/quota-contexts/$previous_key/" || { say "cannot save GitHub quota state"; exit 3; }
     done
   else
     rm -f "$STATE"/quota "$STATE"/quota.* "$STATE"/quota-pause.* "$STATE/quota-resources"
   fi
   context_key="$(printf '%s' "$CONTEXT" | sha256sum | awk '{print $1}')"
-  if [ "$CONTEXT" != unknown ] && [ -d "$STATE/quota-contexts/$context_key" ]; then
+  if [ "$CONTEXT" != unknown ] && { [ -e "$STATE/quota-contexts/$context_key" ] || [ -L "$STATE/quota-contexts/$context_key" ]; }; then
+    private_dir "$STATE/quota-contexts/$context_key" || { say "cannot protect GitHub quota context"; exit 3; }
     for file in "$STATE/quota-contexts/$context_key"/*; do
-      [ -f "$file" ] && mv -f "$file" "$STATE/"
+      [ -e "$file" ] || [ -L "$file" ] || continue
+      quota_state_name "$file" || continue
+      safe_state_file "$file" && safe_state_file "$STATE/${file##*/}" || { say "invalid GitHub quota state"; exit 3; }
+      mv -f -- "$file" "$STATE/" || { say "cannot restore GitHub quota state"; exit 3; }
     done
     for file in "$STATE"/quota "$STATE"/quota.*; do
       [ -f "$file" ] || continue
@@ -497,7 +552,7 @@ if [ "$QUOTA_ACTIVE" != off ]; then
     pct=$(( qrem * 100 / qlim ))
     if [ "$pct" -lt "$PAUSE_PCT" ] && [ "$(now)" -lt "${qreset:-0}" ]; then
       put "$(bucket_pause_path "$bucket")" "$qreset"
-      printf '%s budget-pause remaining=%s/%s reset=%s resource=%s\n' "$(date -u +%FT%TZ)" "$qrem" "$qlim" "$qreset" "$bucket" >> "$STATE/refusals.log"
+      printf '%s budget-pause remaining=%s/%s reset=%s resource=%s\n' "$(date -u +%FT%TZ)" "$qrem" "$qlim" "$qreset" "$bucket" | append_state "$STATE/refusals.log" || true
       say "GitHub $bucket budget low (${qrem}/${qlim}); pause until its window resets in $(( qreset - $(now) ))s."
       exit 75
     fi
@@ -551,7 +606,8 @@ if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED"
   GRAPH_DIR="$(umask 077; mktemp -d "$STATE/graphql-class.XXXXXX")" || { say "cannot prepare private GraphQL classifier"; exit 3; }
   GRAPH_META="$GRAPH_DIR/result"; GRAPH_FIFO="$GRAPH_DIR/stream"
   ( umask 077; : > "$GRAPH_META" && mkfifo "$GRAPH_FIFO" ) && [ -p "$GRAPH_FIFO" ] || { say "cannot prepare private GraphQL classifier"; exit 3; }
-  jq -sr '
+  classifier_timeout="$PROBE_TIMEOUT"; [ "$classifier_timeout" -gt 0 ] || classifier_timeout=5
+  timeout "$classifier_timeout" jq -sr '
     (if length == 1 and (.[0] | type) == "array" then .[0] else . end) as $pages |
     if ($pages | length) == 0 or ($pages | any(type != "object")) then "unknown"
     elif ($pages | any(.errors != null and (.errors | type) != "array")) then "unknown"
@@ -560,24 +616,34 @@ if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED"
     elif ([$pages[].errors[]? | .message? | strings] | any(test("rate limit"; "i"))) then "primary"
     else "error" end
   ' < "$GRAPH_FIFO" > "$GRAPH_META" 2>/dev/null & GRAPH_PID=$!
-  rc="$({ { "$REAL" "$@" 2>&1 1> >(tee "$GRAPH_FIFO" >&4); printf '%s' "$?" >&5; } | tee "$err" >&2; } 5>&1)"
+  # Keep the response tee in the foreground. Git Bash does not reliably wait
+  # for a stdout process substitution before the classifier reads its FIFO;
+  # a later page can otherwise be missed while gh has already exited.
+  rc="$({
+    exec 3> >(tee "$err" >&2); stderr_pid=$!
+    "$REAL" "$@" 2>&3 | tee "$GRAPH_FIFO" >&4
+    graph_status=("${PIPESTATUS[@]}")
+    exec 3>&-
+    wait "$stderr_pid" 2>/dev/null || true
+    if [ "${graph_status[1]}" -ne 0 ]; then printf '1'; else printf '%s' "${graph_status[0]}"; fi
+  } 5>&1)"
 else
   rc="$({ { "$REAL" "$@" 2>&1 1>&4; printf '%s' "$?" >&5; } | tee "$err" >&2; } 5>&1)"
 fi
 exec 4>&-
 isnum "${rc:-}" || rc=1
 if [ -n "$GRAPH_PID" ]; then
-  ( sleep "$PROBE_TIMEOUT"; kill "$GRAPH_PID" 2>/dev/null ) & watchdog=$!
   wait "$GRAPH_PID" 2>/dev/null || true
   GRAPH_PID=''
-  kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null || true
-  case "$(cat "$GRAPH_META" 2>/dev/null)" in
-    none) ;;
-    secondary) printf 'GraphQL response: secondary rate limit\n' >> "$err"; rc=1 ;;
-    primary) printf 'GraphQL response: API rate limit exceeded\n' >> "$err"; rc=1 ;;
-    error) printf 'GraphQL response: errors with partial or absent data\n' >> "$err"; rc=1 ;;
-    unknown|*) say "GraphQL response shape unknown; quota result unclassified."; rc=1 ;;
-  esac
+  if [ "$rc" -eq 0 ]; then
+    case "$(cat "$GRAPH_META" 2>/dev/null)" in
+      none) ;;
+      secondary) printf 'GraphQL response: secondary rate limit\n' >> "$err"; rc=1 ;;
+      primary) printf 'GraphQL response: API rate limit exceeded\n' >> "$err"; rc=1 ;;
+      error) printf 'GraphQL response: errors with partial or absent data\n' >> "$err"; rc=1 ;;
+      unknown|*) say "GraphQL response shape unknown; quota result unclassified."; rc=1 ;;
+    esac
+  fi
 fi
 put "$STATE/last_call" "$(now)"; put "$STATE/last_call_ms" "$(now_ms)"
 if [ "$rc" -ne 0 ]; then
@@ -599,7 +665,7 @@ if [ "$rc" -ne 0 ]; then
     printf -- '--- status: %s\n' "$(grep -Eo 'HTTP [0-9]{3}' "$err" | head -1)"
     printf -- '--- message body (stderr):\n'; cat "$err"
     printf -- '--- headers (retry-after, x-ratelimit-*, request id) from a rate_limit request made right after the failure, not the failed call:\n%s\n' "${hdr:-unavailable}"
-  } | redact >> "$STATE/failures.log"
+  } | redact | append_state "$STATE/failures.log" || true
 fi
 if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit exceeded|API rate limit|HTTP 429|too many requests|retry-after' "$err"; then
   ra="$(grep -Eio 'retry-after"?:? *[0-9]+' "$err" | grep -Eo '[0-9]+' | head -1)"
@@ -632,12 +698,15 @@ if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit
         if [ "$CURRENT_CONTEXT_KEY" = "$(cat "$STATE/quota-context-key" 2>/dev/null)" ]; then
           put "$(bucket_pause_path "$bucket")" "$reset"
         elif [[ "$CURRENT_CONTEXT_KEY" =~ ^[0-9a-f]{64}$ ]]; then
-          mkdir -p "$STATE/quota-contexts/$CURRENT_CONTEXT_KEY"
-          put "$STATE/quota-contexts/$CURRENT_CONTEXT_KEY/quota-pause.$bucket" "$reset"
+          if private_dir "$STATE/quota-contexts" && private_dir "$STATE/quota-contexts/$CURRENT_CONTEXT_KEY"; then
+            put "$STATE/quota-contexts/$CURRENT_CONTEXT_KEY/quota-pause.$bucket" "$reset"
+          else
+            matched=0; say "cannot protect GitHub quota context; using shared back-off"
+          fi
         else
           matched=0
         fi
-        printf '%s exhausted-resource=%s reset=%s\n' "$(date -u +%FT%TZ)" "$bucket" "$reset" >> "$STATE/refusals.log"
+        printf '%s exhausted-resource=%s reset=%s\n' "$(date -u +%FT%TZ)" "$bucket" "$reset" | append_state "$STATE/refusals.log" || true
       fi
     done
   fi
@@ -646,7 +715,7 @@ if [ "$rc" -ne 0 ] && grep -Eiq 'secondary rate limit|abuse detection|rate limit
   # and primary refusals with no trustworthy bucket stay machine-wide.
   if [ "$kind" != primary ] || [ "$matched" != 1 ]; then extend_backoff "$new"; fi
   release
-  { printf '%s kind=%s rc=%s retry_after=%s backoff=%ss args=%s\n' "$(date -u +%FT%TZ)" "$kind" "$rc" "${ra:-none}" "$wait" "$(safe_args "$@")"; sed 's/^/    /' "$err"; } | redact >> "$STATE/refusals.log"
+  { printf '%s kind=%s rc=%s retry_after=%s backoff=%ss args=%s\n' "$(date -u +%FT%TZ)" "$kind" "$rc" "${ra:-none}" "$wait" "$(safe_args "$@")"; sed 's/^/    /' "$err"; } | redact | append_state "$STATE/refusals.log" || true
   say "GitHub refused with a $kind rate limit. Back-off for ${wait}s recorded. Do not retry sooner."
   rm -f "$err"; exit 75
 fi

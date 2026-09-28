@@ -80,7 +80,7 @@ gh_measure_set_principal(){
   # private, machine-local random salt before hashing. Labels intentionally
   # cannot be correlated across hosts; P6 must use governed local metadata.
   local salt_file="$STATE/principal-salt" temp salt digest
-  [ ! -L "$salt_file" ] || return 0
+  if [ -L "$salt_file" ] || { [ -e "$salt_file" ] && [ ! -f "$salt_file" ]; }; then return 0; fi
   if [ ! -s "$salt_file" ]; then
     temp=$(umask 077; mktemp "$STATE/principal-salt.XXXXXX") || return 0
     if ! head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$temp"; then
@@ -88,6 +88,7 @@ gh_measure_set_principal(){
     fi
     if [ ! -e "$salt_file" ]; then mv -f -- "$temp" "$salt_file"; else rm -f -- "$temp"; fi
   fi
+  if [ -L "$salt_file" ] || [ ! -f "$salt_file" ]; then return 0; fi
   salt=$(cat "$salt_file" 2>/dev/null) || return 0
   [[ "$salt" =~ ^[0-9a-f]{64}$ ]] || return 0
   digest=$(printf '%s:%s' "$salt" "$1" | sha256sum | awk '{print $1}')
