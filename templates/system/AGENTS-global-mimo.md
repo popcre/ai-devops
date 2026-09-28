@@ -126,6 +126,9 @@ the task needs the detail.
 - Work through authenticated tools before asking Albert to run anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
+- Surface uncertainty that could materially change scope, safety, or outcome;
+  ask Albert only when the choice is his. Define an observable success check for
+  each task and verify it before reporting completion.
 
 ### Model-tier delegation
 

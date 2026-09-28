@@ -37,6 +37,7 @@ check 'delete takes the same session lock' "grep -q 'cmd_delete.*lock_session' '
 check 'compatibility review still requires a verdict' "grep -q 'REQUIRE_VERDICT=1' '$SCRIPT'"
 check 'review uses a disposable copy' "grep -q 'ensure-copy' '$SCRIPT'"
 check 'review builds an evidence packet' "grep -q 'ai-review-packet' '$SCRIPT'"
+check 'review passes prompt path to packet without argv expansion' "grep -Fq -- '--decision-file \"\$prompt\"' '$SCRIPT' && ! grep -Fq -- '--decision \"\$(cat \"\$prompt\")\"' '$SCRIPT'"
 check 'old generated reports are removed from each snapshot' "grep -q 'clean -fdq -- .ai/reviews' '$SCRIPT'"
 check 'local runtime failure is distinct' "grep -q 'local_dependency_unavailable.*LOCAL OpenCode' '$SCRIPT'"
 check 'config pins exact protected provider and model' "jq -e '.model==\"meta-model-api/muse-spark-1.3-contributor\" and .small_model==.model and .share==\"disabled\" and .autoupdate==false and .provider[\"meta-model-api\"].options.baseURL==\"https://api.meta.ai/v1\" and .provider[\"meta-model-api\"].options.apiKey==\"{env:MODEL_API_KEY}\"' '$ROOT/config/opencode-muse/opencode.json'"

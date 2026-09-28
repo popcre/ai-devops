@@ -66,6 +66,24 @@ check "build_prints_the_packet_directory"     "[ -d '$PKT' ]"
 check "packet_lives_inside_the_review_dir"    "[ \"\$(cd \"\$(dirname '$PKT')\" && pwd -P)\" = \"\$(cd '$R' && pwd -P)\" ] && [ \"\$(basename '$PKT')\" = '.ai-review-testtag' ]"
 check "manifest_exists"                       "[ -s '$M' ]"
 
+# A governed review brief can exceed the kernel's per-argument limit. Keep the
+# entire request in the sealed manifest without routing it through argv.
+LONG_DECISION="$TMP/long-decision.txt"
+{ printf 'START-LONG-BRIEF\n'; head -c 220000 /dev/zero | tr '\0' X; printf '\nEND-LONG-BRIEF\n'; } > "$LONG_DECISION"
+LONG_PKT="$("$SCRIPT" build "$R" long-decision --decision-file "$LONG_DECISION")"
+check "large_decision_file_is_preserved_exactly" "python3 - '$LONG_DECISION' '$LONG_PKT/MANIFEST.md' <<'PY'
+import pathlib, sys
+decision = pathlib.Path(sys.argv[1]).read_text().rstrip('\\n')
+manifest = pathlib.Path(sys.argv[2]).read_text()
+actual = manifest.split('## 6. The decision requested\\n\\n', 1)[1].split('\\n\\n## 7. Scope', 1)[0]
+assert actual == decision
+PY"
+check "large_decision_packet_verifies" "'$SCRIPT' verify '$LONG_PKT'"
+check "decision_file_and_text_are_exclusive" "! '$SCRIPT' build '$R' invalid-decision --decision text --decision-file '$LONG_DECISION' >/dev/null 2>&1 && ! '$SCRIPT' build '$R' invalid-decision --decision-file '$LONG_DECISION' --decision text >/dev/null 2>&1"
+check "decision_file_symlink_is_refused" "ln -s '$LONG_DECISION' '$TMP/decision-link' && ! '$SCRIPT' build '$R' invalid-decision --decision-file '$TMP/decision-link' >/dev/null 2>&1"
+check "missing_decision_file_is_refused" "! '$SCRIPT' build '$R' invalid-decision --decision-file '$TMP/missing-decision' >/dev/null 2>&1"
+check "empty_decision_file_is_refused" ": > '$TMP/empty-decision' && ! '$SCRIPT' build '$R' invalid-decision --decision-file '$TMP/empty-decision' >/dev/null 2>&1"
+
 # Loaded Grok readiness waits observe this test-only marker while the packet is
 # still being prepared. Production builds must ignore it completely.
 PROGRESS_FILE="$TMP/packet-progress"
