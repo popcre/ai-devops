@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ai-stepfun - StepFun Step 5 through the StepCode CLI (`step`): read-only
-# reviews and second opinions, plus isolated write-and-execute implementation.
+# ai-stepfun - StepFun Step 5 through the StepCode CLI (`step`): reviews and
+# second opinions in a disposable writable copy, plus isolated implementation.
 #
 # Ubuntu/Linux only (owner instruction 2026-09-25): StepCode is not yet
 # supported on Windows, so this wrapper refuses to run anywhere else and
@@ -8,13 +8,16 @@
 #
 # Sandbox: every StepCode turn runs under bubblewrap with only /usr, /etc,
 # StepCode itself and its own directory mounted; an empty home, /tmp, and /run;
-# and a cleared environment (no SSH, git, gh, or 1Password secrets or sockets) (read-only for review/ask, writable for
-# implement). Extensions, skills, prompt templates, project-local .stepcode
+# and a cleared environment (no SSH, git, gh, or 1Password secrets or sockets) (the working directory is writable in every
+# mode). Extensions, skills, prompt templates, project-local .stepcode
 # files, and session storage are disabled.
 #
-# Review safety: `review` and `ask` allow only read,grep,find,ls under strict
-# approval, in a disposable ai-review-sandbox copy whose digest is compared
-# before and after. `review` also builds and re-verifies the shared sealed
+# Review safety (owner instruction 2026-09-28, #974: "none of the reviewers
+# should be read-only"): `review` and `ask` get the implement tool set
+# (read,bash,edit,write,grep,find,ls) but only inside a disposable, remote-less
+# ai-review-sandbox copy that is discarded afterwards; edits there are allowed
+# and never reach the PR. The caller's checkout is digested before and after
+# and the answer is rejected if it changed. `review` also builds and re-verifies the shared sealed
 # evidence packet (MANIFEST.md) and binds its VERDICT line to the exact head.
 # The API key is read from a protected per-user store (never 1Password during a
 # review, rotation rule 6); `store-key` refreshes it from 1Password.
@@ -45,7 +48,7 @@ TIMEOUT="${AI_STEPFUN_TIMEOUT:-1800}"
 REPORT_FLOOR="${AI_STEPFUN_REPORT_FLOOR:-400}"
 SANDBOX_BIN="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
 PACKET_BIN="${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}"
-READ_ONLY_TOOLS="read,grep,find,ls"
+WRITE_TOOLS="read,bash,edit,write,grep,find,ls"
 
 die(){ printf 'ai-stepfun: error: %s\n' "$*" >&2; exit 1; }
 note(){ printf 'ai-stepfun: %s\n' "$*" >&2; }
@@ -108,12 +111,12 @@ load_key(){
 
 # StepFun's lower account tiers allow about 10 requests a minute (HTTP 429
 # rate_limited). STEP_AUTOPILOT=1 lets StepCode retry and resume inside a run;
-# read-only turns are also re-run whole, after a pause, when a 429 still ends
+# review/ask turns are also re-run whole, after a pause, when a 429 still ends
 # the run. Implementation runs are never re-run blindly: the clone is kept.
 RATE_RETRIES="${AI_STEPFUN_RATE_RETRIES:-2}"
 RATE_PAUSE="${AI_STEPFUN_RATE_PAUSE:-65}"
 rate_limited(){ grep -q '^429: {.*rate_limited' "$1" 2>/dev/null; }
-run_step_retry(){ # same arguments as run_step; read-only turns only
+run_step_retry(){ # same arguments as run_step; disposable-copy turns only
   local n=0 rc
   while :; do
     rc=0; run_step "$@" || rc=$?
@@ -124,12 +127,12 @@ run_step_retry(){ # same arguments as run_step; read-only turns only
 }
 
 # run_step DIR OUT PROMPT [TOOLS] [write]: one non-interactive, sessionless
-# StepCode turn. StepCode's strict approval mode is read-only (it blocks bash,
-# edit, and write); only implement passes "write", which selects auto approval.
+# StepCode turn. StepCode's strict approval mode blocks bash, edit, and write;
+# every caller passes "write" (auto approval) on a disposable directory.
 #
 # Every turn runs inside bubblewrap. Visible: /usr, /etc and the /bin, /lib
 # links (read-only), StepCode's own binary, a private agent directory, and DIR
-# (writable for implement, read-only for review/ask). Empty: home, /tmp, /run
+# (writable; always a disposable copy or clone). Empty: home, /tmp, /run
 # (so no SSH keys or agent socket, git or gh credentials, 1Password token file,
 # user D-Bus, or Docker socket). Nothing else on the machine is mounted. The
 # environment is cleared to an allowlist, so tokens held in environment
@@ -235,8 +238,9 @@ cmd_doctor(){
 }
 
 REVIEW_COPY=""; REVIEW_REPO=""; REVIEW_TAG=""; REVIEW_PACKET=""
-REVIEW_IDENTITY=""
+REVIEW_IDENTITY=""; REVIEW_WORK=""
 cleanup_copy(){
+  [ -z "$REVIEW_WORK" ] || rm -rf "$REVIEW_WORK"
   [ -z "$REVIEW_IDENTITY" ] || rm -f "$REVIEW_IDENTITY"
   [ -z "$REVIEW_PACKET" ] || "$PACKET_BIN" remove "$REVIEW_COPY" "$REVIEW_TAG" >/dev/null 2>&1 || true
   [ -z "$REVIEW_COPY" ] || "$SANDBOX_BIN" remove-copy "$REVIEW_REPO" "$REVIEW_TAG" >/dev/null 2>&1 || true
@@ -248,7 +252,7 @@ cleanup_copy(){
 # (MANIFEST.md, identity, patch) is built inside it, and the packet is
 # re-verified after the model answers.
 cmd_review(){
-  local repo="." prompt="" base="" assert="" head identity copy packet rel before after out report body
+  local repo="." prompt="" base="" assert="" head identity copy work packet rel before after out report body
   while [ "$#" -gt 0 ]; do case "$1" in
     --repo) repo="${2:?--repo needs a value}"; shift 2 ;;
     --base) base="${2:?--base needs a value}"; shift 2 ;;
@@ -273,9 +277,14 @@ cmd_review(){
   REVIEW_PACKET="$packet"
   "$PACKET_BIN" verify "$packet" --identity "$identity" >/dev/null || die 'the sealed review packet did not verify.'
   rel="${packet#"$copy"/}"
-  before="$("$SANDBOX_BIN" digest "$copy")"
+  # The model gets its own writable duplicate of the sealed copy, so its edits
+  # never disturb the snapshot the packet digest is re-verified against.
+  work="$(mktemp -d "$STATE_DIR/review-work.XXXXXX")"; REVIEW_WORK="$work"; chmod 700 "$work"
+  cp -a "$copy/." "$work/" || die 'could not build the writable review copy.'
+  [ -z "$(git -C "$work" remote 2>/dev/null)" ] || die 'the writable review copy has a remote; refusing to run.'
+  before="$("$SANDBOX_BIN" digest "$repo")"
   out="$STATE_DIR/reports/$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}-$$.md"
-  local full="You are an independent, read-only code reviewer. You can only read files (tools: read, grep, find, ls); never try to change anything.
+  local full="You are an independent code reviewer working in a disposable, remote-less copy of the repository. You may read files, run commands, builds and tests, and edit files here; every edit is discarded afterwards and is not part of the PR. Never commit, push, or touch any remote, and never edit $rel.
 Read $rel/MANIFEST.md first: it states the exact base, the head $head, and the patch under review. You may open any other file to confirm a finding.
 
 $prompt
@@ -284,11 +293,11 @@ Return ALL findings, each citing files and line numbers. End your answer with ex
 VERDICT: APPROVE $head
 or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line."
   reviewer_event_evidence require-report stepfun || die 'could not reserve durable review evidence.'
-  if ! run_step_retry "$copy" "$out" "$full" "$READ_ONLY_TOOLS"; then
+  if ! run_step_retry "$work" "$out" "$full" "$WRITE_TOOLS" write; then
     credit_stop "$out"; die "StepFun request failed or timed out; output kept at $out"
   fi
-  after="$("$SANDBOX_BIN" digest "$copy")"
-  [ "$before" = "$after" ] || die "the review copy changed during the review; response rejected (copy: $copy)"
+  after="$("$SANDBOX_BIN" digest "$repo")"
+  [ "$before" = "$after" ] || die "the caller's checkout changed during the review; response rejected ($repo)"
   "$PACKET_BIN" verify "$packet" --identity "$identity" >/dev/null || die 'the sealed review packet changed during the review; response rejected.'
   report="$(tr -d '\r' < "$out")"
   if ! printf '%s\n' "$report" | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}' | tail -n1 | grep -Eq "^[[:space:]]*VERDICT:[[:space:]]*(APPROVE|REVISE|REJECT)[[:space:]]+$head[[:space:]]*$"; then
@@ -297,12 +306,12 @@ or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line
   body="$(printf '%s\n' "$report" | grep -Ev '^[[:space:]]*VERDICT:' | tr -d '[:space:]')"
   [ "${#body}" -ge "$REPORT_FLOOR" ] || die "verdict came with under $REPORT_FLOOR characters of analysis; treated as malformed (empty-report); output kept at $out"
   reviewer_event_publish_report stepfun "$out" || die "review evidence could not be made durable; output kept at $out"
-  rm -f "$identity"
+  rm -f "$identity"; rm -rf "$work"; REVIEW_WORK=""
   cat "$out"
   note "report saved: $out (model $MODEL, head $head)"
 }
 
-# ask [--repo DIR] PROMPT: second-opinion turn with the same read-only tools.
+# ask [--repo DIR] PROMPT: second-opinion turn with the same disposable-copy tools.
 cmd_ask(){
   local repo="." out tmp copy before after
   [ "${1:-}" != --repo ] || { repo="${2:?--repo needs a value}"; shift 2; }
@@ -314,13 +323,13 @@ cmd_ask(){
   trap cleanup_copy EXIT
   copy="$("$SANDBOX_BIN" ensure-copy "$repo" "$REVIEW_TAG")" || die 'could not build the disposable copy.'
   REVIEW_COPY="$copy"
-  before="$("$SANDBOX_BIN" digest "$copy")"
+  before="$("$SANDBOX_BIN" digest "$repo")"
   mkdir -p "$STATE_DIR"; tmp="$(mktemp -d "$STATE_DIR/ask.XXXXXX")"; out="$tmp/out"
-  if ! run_step_retry "$copy" "$out" "Read-only consultation; never change files. $*" "$READ_ONLY_TOOLS" || ! [ -s "$out" ]; then
+  if ! run_step_retry "$copy" "$out" "Consultation in a disposable, remote-less copy of the repository: you may run code and tests and edit files here; edits are discarded and are not part of any PR. Never commit, push, or touch any remote. $*" "$WRITE_TOOLS" write || ! [ -s "$out" ]; then
     credit_stop "$out"; die 'StepFun request failed.'
   fi
-  after="$("$SANDBOX_BIN" digest "$copy")"
-  [ "$before" = "$after" ] || die 'the disposable copy changed during a read-only consultation; answer rejected.'
+  after="$("$SANDBOX_BIN" digest "$repo")"
+  [ "$before" = "$after" ] || die "the caller's checkout changed during the consultation; answer rejected."
   if grep -q '^4[0-9][0-9]: {' "$out"; then credit_stop "$out"; die "StepFun returned an error: $(head -c 300 "$out")"; fi
   cat "$out"; rm -rf "$tmp"
 }
@@ -380,8 +389,8 @@ When done, summarise what you changed and which commands you ran and their resul
 usage(){
   cat <<'EOF'
 ai-stepfun review [--repo DIR] [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE
-                                                                 formal read-only review ending in VERDICT: <APPROVE|REVISE|REJECT> <head>
-ai-stepfun ask [--repo DIR] PROMPT                               read-only second opinion
+                                                                 formal review (disposable writable copy) ending in VERDICT: <APPROVE|REVISE|REJECT> <head>
+ai-stepfun ask [--repo DIR] PROMPT                               second opinion (disposable writable copy)
 ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
                                                                  write and run code in a new remote-less clone (never commits)
 ai-stepfun doctor [--live]                                        install, version floor, key store (and one live call)

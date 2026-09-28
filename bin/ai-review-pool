@@ -9,10 +9,11 @@
 #     (base + assert-head) before and after the paid run;
 #   - ai-review-lifecycle begin runs the provider preflight (health and
 #     quarantine) and owns terminal accounting;
-#   - the session runners (ai-grok-review and siblings) are read-only
-#     (Read/Grep only, no shell, no web) and read the checkout by absolute
-#     path, so no sandbox copy is taken; packet verify after the run is the
-#     source-drift guard;
+#   - the session runners (ai-grok-review and siblings) are NOT read-only
+#     (owner instruction, issue #974): each may run shell commands, builds,
+#     tests and edits, but only inside its own disposable, remote-less copy;
+#     the caller's checkout is never written, and packet verify after the run
+#     is the source-drift guard;
 #   - a verdict is valid only when the report carries a literal
 #     "## Verdict" heading with exactly one allowed word AND names the
 #     reviewed head SHA, and the report clears a minimum analysis floor.
@@ -220,7 +221,7 @@ if [ -n "$TESTS_COMMAND" ]; then
   fi
 fi
 cat > "$TMP_BRIEF" <<BRIEF
-You are performing a READ-ONLY $mode. Do not edit, create, commit, push, merge, or delete files. Use only your read-only tools (no shell, no web search).
+You are performing a $mode. You MAY run shell commands, builds and tests, and edit files, but only inside your disposable review copy: your edits are discarded and are never part of the change under review. Never commit, push, merge, or touch any remote, the pull-request branch, or any checkout outside your copy. No web search.
 
 Your session harness announces an evidence packet (a sealed snapshot of the repository with a MANIFEST.md and the patch). THAT PACKET is the review subject, and you may read only files inside it - never the live working checkout, whose ignored files are outside this review's boundary. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report.$(if [ -n "$CHANGED_FILES" ]; then printf '\n\nThe change under review is exactly these files (read the packet manifest and its patch first, then these files, then only what you need inside the packet to confirm a finding):\n%s' "$CHANGED_FILES"; fi)$([ -n "$TESTS_COMMAND" ] && printf '\n\ntests command on record: %s (executed before dispatch; result: %s)' "$TESTS_COMMAND" "$TESTS_RESULT")
 

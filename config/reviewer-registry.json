@@ -40,7 +40,7 @@
     },
     "stepfun": {
       "registry_state": "registered",
-      "reason": "Rotation reviewer on Ubuntu/Linux only (StepFun Step 5 via StepCode), added by owner instruction on 2026-09-25 and mirrored from popcre/shared-db PR #3657 (superseding #3556) allocator row stepfun-step-5-preview. It was previously outside the allocator. ai-review-preflight excludes it on Windows as unsupported-platform. Formal reviews use read-only tools and a sealed exact-head evidence packet in a disposable copy."
+      "reason": "Rotation reviewer on Ubuntu/Linux only (StepFun Step 5 via StepCode), added by owner instruction on 2026-09-25 and mirrored from popcre/shared-db PR #3657 (superseding #3556) allocator row stepfun-step-5-preview. It was previously outside the allocator. ai-review-preflight excludes it on Windows as unsupported-platform. Formal reviews run over a sealed exact-head evidence packet; reviews may run code and tests and edit files only inside a disposable, remote-less review copy (issue #974)."
     }
   }
 }

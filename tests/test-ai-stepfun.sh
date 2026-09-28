@@ -21,7 +21,7 @@ HEAD_SHA="$(git -C "$TMP/repo" rev-parse HEAD)"
 export STUB_ARGS="$TMP/args"
 cat > "$TMP/bin/step" <<STUB
 #!/usr/bin/env bash
-STUB_ARGS='$TMP/args'; STUB_MODE="\$(cat '$TMP/mode' 2>/dev/null)"
+STUB_ARGS='$TMP/args'; CALLER='$TMP/repo'; STUB_MODE="\$(cat '$TMP/mode' 2>/dev/null)"
 STUB
 cat >> "$TMP/bin/step" <<'STUB'
 [ "${1:-}" = --version ] && { echo 0.1.1; exit 0; }
@@ -34,12 +34,13 @@ case "$STUB_MODE" in
   noverdict) echo 'Looks fine.' ;;
   short) printf 'ok\nVERDICT: APPROVE %s\n' "$head" ;;
   credit) echo '402: {"message":"You exceeded your current quota, please check your plan and billing details","type":"quota_exceeded"}' ;;
-  write) touch MUTATED; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
+  write) touch MUTATED; git remote -v > "$STUB_ARGS.remote" 2>&1; echo "rc=$?" >> "$STUB_ARGS.remote"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   rate) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
         if [ "$n" -lt 1 ]; then echo '429: {"message":"request limited RPM reached","type":"rate_limited"}'; else printf 'Analysis of the change with plenty of detail.\nVERDICT: REVISE %s\n' "$head"; fi ;;
   impl) printf 'print(1)\n' > new.py; echo 'Created new.py and ran it.' ;;
   implcommit) printf 'x\n' > c.txt; git add c.txt; git -c user.name=m -c user.email=m@m commit -qm sneaky; echo done ;;
   askwrite) touch ASKED; echo 'answer' ;;
+  touchcaller) touch "$CALLER/CALLER_TOUCHED"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   quote) echo 'StepFun replies "You exceeded your current quota, please check your plan and billing details" when unpaid.' ;;
   askok) echo 'The loop is bounded by RATE_RETRIES.' ;;
 esac
@@ -104,9 +105,10 @@ check "every turn runs inside the sandbox with an empty home and /tmp" "grep -qx
 check "the sandbox never mounts the whole filesystem, only system trees" "! grep -x -A1 -- --ro-bind '$STUB_ARGS.bwrap' | grep -qx / && grep -x -A1 -- --ro-bind '$STUB_ARGS.bwrap' | grep -qx /usr"
 check "the sandbox also hides /run (agent, D-Bus, and Docker sockets)" "grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx /run"
 check "the user's StepCode settings tree is not remounted" "! grep -qx '$HOME/.stepcode' '$STUB_ARGS.bwrap'"
-check "the review copy is mounted read-only" "grep -x -A1 -- --ro-bind '$STUB_ARGS.bwrap' | grep -q 'stepfun-'"
+check "the review copy (not the caller's checkout) is the writable mount" "grep -x -A1 -- --bind '$STUB_ARGS.bwrap' | grep -q 'review-work[.]' && ! grep -x -A1 -- --bind '$STUB_ARGS.bwrap' | grep -qx '$TMP/repo'"
+check "review prompt no longer claims read-only and says edits are discarded" "! grep -qi 'read-only' '$STUB_ARGS' && grep -q 'discarded' '$STUB_ARGS'"
 check "review hands the model the sealed MANIFEST.md" "grep -q 'MANIFEST.md first' '$STUB_ARGS'"
-check "review runs with only read-only tools and strict approval" "grep -qx 'read,grep,find,ls' '$STUB_ARGS' && grep -qx strict '$STUB_ARGS' && grep -qx deny '$STUB_ARGS' && grep -qx -- --no-extensions '$STUB_ARGS' && grep -qx -- --no-approve '$STUB_ARGS'"
+check "review runs with write and shell tools under auto approval" "grep -qx 'read,bash,edit,write,grep,find,ls' '$STUB_ARGS' && grep -qx auto '$STUB_ARGS' && grep -qx allow '$STUB_ARGS' && grep -qx -- --no-extensions '$STUB_ARGS' && grep -qx -- --no-approve '$STUB_ARGS'"
 OP_SERVICE_ACCOUNT_TOKEN=planted-op GH_TOKEN=planted-gh SSH_AUTH_SOCK=/planted.sock mode ok
 OP_SERVICE_ACCOUNT_TOKEN=planted-op GH_TOKEN=planted-gh SSH_AUTH_SOCK=/planted.sock "$SCRIPT" doctor --live >/dev/null 2>&1
 check "host timeout is resolved from /usr/bin, never a user path" "grep -q 'timeout_bin=\"\$(PATH=/usr/bin:/bin command -v timeout)\"' '$SCRIPT' && ! grep -qE '^[[:space:]]*exec timeout ' '$SCRIPT'"
@@ -118,7 +120,10 @@ check "a governed run writes the source receipt the shared-db runner validates" 
 check "a governed run ends in exactly one terminal VERDICT line for the head" "[ \"\$(grep -c '^VERDICT:' '$TMP/gov.out')\" = 1 ] && tail -n1 '$TMP/gov.out' | grep -qx 'VERDICT: APPROVE $HEAD_SHA'"
 check "review rejects an answer with no verdict" "mode noverdict; ! '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1"
 check "review rejects a verdict with no analysis behind it" "mode short; ! AI_STEPFUN_REPORT_FLOOR=400 '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1"
-check "review rejects any change to the review copy" "mode write; ! '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1 && [ ! -e '$TMP/repo/MUTATED' ]"
+check "review accepts edits in its disposable copy, which has no remote, and leaves the checkout alone" "mode write; '$SCRIPT' review --repo '$TMP/repo' --prompt x 2>/dev/null | grep -q 'VERDICT: APPROVE' && [ ! -e '$TMP/repo/MUTATED' ] && [ -z \"\$(git -C '$TMP/repo' status --porcelain)\" ]"
+check "review rejects an answer when the caller's checkout changed" "mode touchcaller; ! '$SCRIPT' review --repo '$TMP/repo' --prompt x >/dev/null 2>&1 && [ ! -e '$TMP/repo/MUTATED' ]"
+rm -f "$TMP/repo/CALLER_TOUCHED"
+check "the review copy is a git copy with no remote" "grep -qx 'rc=0' '$STUB_ARGS.remote' && [ \"\$(grep -vc '^rc=' '$STUB_ARGS.remote')\" = 0 ]"
 check "review retries a rate limit and then succeeds" "rm -f '$STUB_ARGS.n'; mode rate; '$SCRIPT' review --repo '$TMP/repo' --prompt x 2>/dev/null | grep -q 'VERDICT: REVISE'"
 out="$(mode credit; "$SCRIPT" review --repo "$TMP/repo" --prompt x 2>&1)"; rc=$?
 check "out of credit exits 92 with the contract line" "[ $rc = 92 ] && printf '%s' \"\$out\" | grep -q 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota' && printf '%s' \"\$out\" | grep -q 'OUT OF CREDIT: .*platform.stepfun.ai'"
@@ -135,7 +140,9 @@ check "implement uses a fixed-length branch name" "printf '%s\n' \"\$out\" | gre
 
 check "implement refuses a run in which the model committed" "mode implcommit; ! '$SCRIPT' implement --repo '$TMP/repo' --prompt x >/dev/null 2>&1 && [ \"\$(git -C '$TMP/repo' rev-parse HEAD)\" = '$HEAD_SHA' ]"
 check "ask answers from a disposable copy" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES"
-check "ask rejects any change to its copy and never touches the checkout" "mode askwrite; ! '$SCRIPT' ask --repo '$TMP/repo' x >/dev/null 2>&1 && [ ! -e '$TMP/repo/ASKED' ]"
+check "ask may edit its disposable copy and never touches the checkout" "mode askwrite; '$SCRIPT' ask --repo '$TMP/repo' x 2>/dev/null | grep -q answer && [ ! -e '$TMP/repo/ASKED' ] && grep -qx 'read,bash,edit,write,grep,find,ls' '$STUB_ARGS'"
+check "ask rejects an answer when the caller's checkout changed" "mode touchcaller; ! '$SCRIPT' ask --repo '$TMP/repo' x >/dev/null 2>&1"
+rm -f "$TMP/repo/CALLER_TOUCHED"
 mode quote; "$SCRIPT" review --repo "$TMP/repo" --prompt x >/dev/null 2>&1; rc=$?
 check "a review that only quotes a billing message is not treated as out of credit" "[ $rc != 0 ] && [ $rc != 92 ]"
 check "live doctor stops with exit 92 when StepFun is out of credit" "mode credit; '$SCRIPT' doctor --live >/dev/null 2>&1; [ \$? = 92 ]"

@@ -123,11 +123,16 @@ A genuine back-and-forth: DeepSeek sees the whole thread on every reply, the
 same as resuming a Codex session. Use it for plans, code, environment/config
 questions, debugging theories, or a second-opinion debate -- not just diffs.
 
---review gives DeepSeek read-only repository tools (list_dir, read_file, grep)
-confined to the exact-head review snapshot; --repo-tools gives the same tools
-over the current repository for an ordinary conversation. Paths cannot escape
+--review gives DeepSeek repository tools (list_dir, read_file, grep, write_file,
+run_command) over a disposable remote-less copy of the exact-head review
+snapshot; --repo-tools gives the same tools over a disposable remote-less clone
+of the current repository for an ordinary conversation. The copy is made per
+turn and deleted after it, so edits never reach the caller's checkout, the PR,
+or the evidence snapshot. run_command runs under bubblewrap: only the copy is
+writable, no network, cleared environment, no credentials. Paths cannot escape
 the root, links are not followed, .git/.ai/secret files are refused, and the
-loop is bounded (DEEPSEEK_TOOLS_MAX_CALLS, _MAX_ROUNDS, _MAX_WALL).
+loop is bounded (DEEPSEEK_TOOLS_MAX_CALLS, _MAX_ROUNDS, _MAX_WALL,
+DEEPSEEK_TOOLS_RUN_SECONDS).
 --review requires a final ## Verdict heading and APPROVE, REJECT, or BLOCKED.
 Add --governed-verdict SHA (or --governed-verdict=SHA) with --review to emit one
 final VERDICT: APPROVE|REVISE|REJECT SHA line for a governed recorder. The exact
@@ -473,7 +478,7 @@ PY
 }
 
 LOCK_DIR=""; LOCK_TOKEN=""; LOCK_OWNER_PID=""
-REPO_TOOLS=0; REPO_TOOLS_LOG=""; REPO_TOOLS_USED=0; ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""; ID=""; GOVERNED_HEAD=""; PENDING_DIR=""
+REPO_TOOLS=0; REPO_TOOLS_LOG=""; REPO_TOOLS_USED=0; ACTIVE_API_PID=""; ACTIVE_API_TMP=""; ACTIVE_TURN_WORKSPACE=""; ACTIVE_API_RESPONSE=""; REVIEW_HEAD=""; REVIEW_SOURCE_WORKSPACE=""; API_RESPONSE_FILE=""; ID=""; GOVERNED_HEAD=""; PENDING_DIR=""
 REVIEW_SOURCE_TAG=""; REVIEW_SOURCE_PACKET=""; REVIEW_SOURCE_IDENTITY=""; REVIEW_SOURCE_HASH=""; REVIEW_SOURCE_SAVED=""
 SOURCE_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 release_lock() {
@@ -502,6 +507,7 @@ on_lock_signal() { # SIGNAL_EXIT_CODE
   publish_failure_evidence interrupted || exit "$code"
   [ -z "$ACTIVE_API_TMP" ] || rm -f $ACTIVE_API_TMP
   ACTIVE_API_TMP=""
+  drop_turn_workspace
   [ "$BASHPID" != "$LOCK_OWNER_PID" ] || release_lock
   exit "$code"
 }
@@ -549,7 +555,38 @@ PY
 }
 
 pending_hash() { sha256sum "$1" | awk '{print $1}'; }
-repo_tools_root() { # the directory the read-only tools may read, or nothing
+make_turn_workspace() { # source dir -> print a fresh disposable remote-less copy
+  local src="$1" dir r
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/deepseek-turn.XXXXXX")" || return 1
+  if [ "${REVIEW:-0}" = 1 ]; then
+    # The review snapshot already holds the exact source; copy it verbatim.
+    cp -a "$src/." "$dir/" || { rm -rf "$dir"; return 1; }
+  else
+    git clone --quiet --no-hardlinks "$src" "$dir/repo" >/dev/null 2>&1 || { rm -rf "$dir"; return 1; }
+    # Carry the caller's uncommitted tracked edits, read-only from the caller.
+    git -C "$src" diff --binary HEAD 2>/dev/null | git -C "$dir/repo" apply --whitespace=nowarn 2>/dev/null || true
+    # ...and its untracked, non-ignored files, minus anything secret-looking.
+    git -C "$src" ls-files -z --others --exclude-standard 2>/dev/null \
+      | "$PYTHON" -c 'import os,sys; sys.path.insert(0, sys.argv[1]); from deepseek_repo_tools import is_secret, is_denied
+names=[n for n in sys.stdin.buffer.read().split(b"\0") if n]
+sys.stdout.buffer.write(b"".join(n+b"\0" for n in names if not any(is_secret(p) or is_denied(p) for p in os.fsdecode(n).split("/"))))' "$SOURCE_TOOLS/../tools" \
+      | tar -C "$src" --null --no-recursion -T - -cf - 2>/dev/null | tar -C "$dir/repo" -xf - 2>/dev/null || true
+    dir="$dir/repo"
+  fi
+  if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+    for r in $(git -C "$dir" remote); do git -C "$dir" remote remove "$r" || { rm -rf "$dir"; return 1; }; done
+    [ -z "$(git -C "$dir" remote)" ] || { rm -rf "$dir"; return 1; }
+  fi
+  printf '%s' "$dir"
+}
+drop_turn_workspace() {
+  local dir="${ACTIVE_TURN_WORKSPACE:-}"
+  ACTIVE_TURN_WORKSPACE=""
+  [ -n "$dir" ] || return 0
+  case "$dir" in */deepseek-turn.*/repo) dir="${dir%/repo}" ;; esac
+  case "$dir" in */deepseek-turn.*) chmod -R u+w "$dir" 2>/dev/null; rm -rf "$dir" ;; esac
+}
+repo_tools_root() { # the source the per-turn disposable copy is made from, or nothing
   if [ "${REVIEW:-0}" = 1 ] && [ -n "$REVIEW_SOURCE_WORKSPACE" ]; then printf '%s' "$REVIEW_SOURCE_WORKSPACE"
   elif [ "$REPO_TOOLS" = 1 ]; then printf '%s' "$REPO_ROOT"; fi
 }
@@ -727,11 +764,15 @@ PY
   local tools_root="" tools_round=0 tools_deadline=0 step_rc max_time="$CALL_TIMEOUT"
   tools_root="$(repo_tools_root)"
   if [ -n "$tools_root" ]; then
-    # Read-only repository access: list_dir/read_file/grep confined to
-    # tools_root. The helper never sees the key; this wrapper still owns every
-    # request, so the lock, signal, and transport rules below are unchanged.
+    # Repository tools (list_dir/read_file/grep/write_file/run_command) run in a
+    # DISPOSABLE remote-less copy made for this turn: never the caller's
+    # checkout, never the retained review snapshot whose digest binds the
+    # evidence. The copy is deleted when the turn ends, so edits are discarded.
+    # The helper never sees the key; this wrapper still owns every request.
+    tools_root="$(make_turn_workspace "$tools_root")" || { echo 'Error: could not create the disposable DeepSeek workspace.' >&2; return 1; }
+    ACTIVE_TURN_WORKSPACE="$tools_root"
     REPO_TOOLS_LOG="$resp_file.tools.jsonl"; REPO_TOOLS_USED=1
-    "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" init "$msgs_file" "$MODEL" "$req_file" || return 1
+    "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" init "$msgs_file" "$MODEL" "$req_file" || { drop_turn_workspace; return 1; }
     tools_deadline=$(( SECONDS + ${DEEPSEEK_TOOLS_MAX_WALL:-900} ))
   fi
   while :; do
@@ -759,6 +800,7 @@ PY
     cp "$resp_file" "$resp_file.round-$tools_round" || { rc=1; break; }
     tools_round=$(( tools_round + 1 ))
   done
+  drop_turn_workspace
   http_code="$(cat "$status_file" 2>/dev/null || true)"
   pending_observed "$resp_file" "$rc" "$http_code" || return 1
   if [ "$rc" -ne 0 ]; then
@@ -1123,8 +1165,8 @@ if stream.read(1): raise ValueError("unexpected attachment bytes")
 ' "$@"
 }
 
-# DeepSeek reaches this wrapper over an API. A review gives it read-only
-# list_dir/read_file/grep tools over the exact review snapshot and nothing else.
+# DeepSeek reaches this wrapper over an API. A review gives it repository tools
+# over a disposable remote-less copy of the exact review snapshot and nothing else.
 # Unless the boundary is stated it answers as though it had inspected code it
 # never opened, and reports files it was never shown as "absent". On
 # 2026-08-24 a --review run against issue #62 declared the CI workflow and both
@@ -1134,11 +1176,14 @@ if stream.read(1): raise ValueError("unexpected attachment bytes")
 # rather than a guess. A reply resends the whole conversation, so the boundary is
 # worded around the conversation rather than one message.
 REVIEW_INSTRUCTION='Evidence boundary - read this before answering. You have
-read-only access to a snapshot of the reviewed repository at the commit under
-review, through the list_dir, read_file, and grep tools, and nothing else: no
-commit history, no network, and no way to run commands or tests. Your evidence
-is this conversation (this message, any earlier turns, any files quoted in
-them) plus what those tools return.
+a disposable, remote-less copy of the reviewed repository at the commit under
+review. list_dir, read_file, and grep read it; write_file edits files in it and
+run_command runs code, builds, and tests in it (no network, no credentials).
+You may run the tests and edit files to check a theory, but your edits are
+discarded after this turn and are NOT part of the pull request: judge the
+commit under review, not your edits. Your evidence is this conversation (this
+message, any earlier turns, any files quoted in them) plus what those tools
+return.
 
 Therefore: do not state that any file, test, workflow, directory, commit, or
 setting exists, is missing, or has particular contents unless it is quoted in
