@@ -67,6 +67,7 @@ QWEN_MODEL="${AI_QWEN_MODEL:-qwen3.8-max}"
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="${AI_QWEN_OP_ENV_FILE:-$CFG_DIR/mcp.env}"
+KEY_STORE="${AI_QWEN_KEY_STORE:-$CFG_DIR/secrets/qwen-token-plan-key}"
 # Alibaba Model Studio Token Plan (subscription, sk-sp- key). Owner ruling
 # 2026-09-25: it replaces both the dead Coding Plan and pay-per-token Model
 # Studio. A legacy ~/.config/ai-devops/qwen-endpoint file is ignored.
@@ -77,8 +78,8 @@ QWEN_HOME_DIR="${AI_QWEN_HOME:-${QWEN_HOME:-$HOME/.qwen}}"
 if [ -n "${AI_QWEN_TEST_DIR:-}" ]; then
   QWEN_BASH_BIN="${AI_QWEN_BASH_BIN:-/usr/bin/bash}"; QWEN_ENV_BIN="${AI_QWEN_ENV_BIN:-/usr/bin/env}"
 else
-  [ -z "${AI_QWEN_BASH_BIN:-}" ] && [ -z "${AI_QWEN_ENV_BIN:-}" ] && [ -z "${AI_QWEN_BIN:-}" ] && [ -z "${AI_QWEN_OP_BIN:-}" ] \
-    || { printf 'ai-qwen: error: executable overrides are test-only; use the repository-owned installers to repair production tools.\n' >&2; exit 1; }
+  [ -z "${AI_QWEN_BASH_BIN:-}" ] && [ -z "${AI_QWEN_ENV_BIN:-}" ] && [ -z "${AI_QWEN_BIN:-}" ] && [ -z "${AI_QWEN_OP_BIN:-}" ] && [ -z "${AI_QWEN_KEY_STORE:-}" ] \
+    || { printf 'ai-qwen: error: executable and key-store overrides are test-only; use the repository-owned installers to repair production tools.\n' >&2; exit 1; }
   QWEN_BASH_BIN=/usr/bin/bash; QWEN_ENV_BIN=/usr/bin/env
 fi
 REVIEW_MAX_TURNS="${AI_QWEN_MAX_TURNS:-120}"
@@ -89,17 +90,18 @@ IMPLEMENT_MAX_TOOL_CALLS="${AI_QWEN_MAX_TOOL_CALLS:-80}"
 IMPLEMENT_MAX_WALL_TIME="${AI_QWEN_MAX_WALL_TIME:-15m}"
 
 QWEN_CREDENTIAL_BOUNDARY='
-keep_qwen_key="${BAILIAN_CODING_PLAN_API_KEY:-}"
-allow_key="$1"; base_url="$2"; model="$3"; qwen_home="$4"; bash_bin="$5"; env_bin="$6"; preload="$7"; secret_file="$8"; shift 8
+allow_key="$1"; base_url="$2"; model="$3"; qwen_home="$4"; bash_bin="$5"; env_bin="$6"; preload="$7"; secret_file="$8"; key_store="$9"; shift 9
+unset BAILIAN_CODING_PLAN_API_KEY
 clean_env=("$env_bin" -i "PATH=${PATH:-}" "HOME=$qwen_home" "USERPROFILE=$qwen_home" "QWEN_HOME=$qwen_home"
   "APPDATA=$qwen_home/appdata" "LOCALAPPDATA=$qwen_home/localappdata" "TEMP=$qwen_home/tmp" "TMP=$qwen_home/tmp" "TMPDIR=$qwen_home/tmp")
 for safe_name in SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM; do
   [ -z "${!safe_name:-}" ] || clean_env+=("$safe_name=${!safe_name}")
 done
 if [ "$allow_key" = 1 ]; then
+  IFS= read -r keep_qwen_key < "$key_store" || [ -n "${keep_qwen_key:-}" ] || exit 86
   [ -n "$keep_qwen_key" ] && [ -f "$preload" ] && [ -f "$secret_file" ] || exit 86
   printf "%s\n" "$keep_qwen_key" > "$secret_file" || exit 87
-  unset BAILIAN_CODING_PLAN_API_KEY keep_qwen_key
+  unset keep_qwen_key
   clean_env+=("AI_QWEN_SECRET_FILE=$secret_file" "NODE_OPTIONS=--require=$preload" "OPENAI_BASE_URL=$base_url" "OPENAI_MODEL=$model")
 fi
 [ -z "${AI_QWEN_TEST_DIR:-}" ] || clean_env+=("AI_QWEN_TEST_DIR=$AI_QWEN_TEST_DIR")
@@ -121,7 +123,7 @@ protect_windows_path(){
 }
 qwen_local() { # qwen_local BINARY ARGS... -- local-only command under the same environment boundary
   local qwen="$1"; shift
-  "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 0 '' '' "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" /nonexistent /nonexistent "$qwen" "$@"
+  "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 0 '' '' "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" /nonexistent /nonexistent /nonexistent "$qwen" "$@"
 }
 
 assert_qwen_child_env_hardened() {
@@ -333,6 +335,78 @@ resolve_trusted_op() {
   else [ "$physical" = /usr/bin/op ] || return 1; fi
   [ -f "$physical" ] && [ -x "$physical" ] && printf '%s' "$physical"
 }
+key_store_path_safe() {
+  local path="$KEY_STORE" parent
+  case "$path" in /*) ;; *) return 1;; esac
+  while [ "$path" != / ]; do
+    [ ! -L "$path" ] || return 1
+    parent="$(dirname "$path")"; [ "$parent" != "$path" ] || return 1
+    path="$parent"
+  done
+}
+key_store_ok() {
+  local dir; dir="$(dirname "$KEY_STORE")"
+  key_store_path_safe && [ -f "$KEY_STORE" ] && [ -s "$KEY_STORE" ] && [ -d "$dir" ] || return 1
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    local ps helper
+    ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"; [ -n "$ps" ] || return 1
+    helper="$SCRIPT_DIR/windows-private-file.ps1"; [ -f "$helper" ] || return 1
+    AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$KEY_STORE")" AI_DEVOPS_PRIVATE_PARENT="$(cygpath -w "$dir")" \
+      "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null 2>&1
+  else
+    local dir_mode file_mode dir_owner file_owner
+    dir_mode="$(stat -c %a "$dir" 2>/dev/null || stat -f %Lp "$dir" 2>/dev/null)" || return 1
+    file_mode="$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" || return 1
+    dir_owner="$(stat -c %u "$dir" 2>/dev/null || stat -f %u "$dir" 2>/dev/null)" || return 1
+    file_owner="$(stat -c %u "$KEY_STORE" 2>/dev/null || stat -f %u "$KEY_STORE" 2>/dev/null)" || return 1
+    [ "$dir_mode" = 700 ] && [ "$file_mode" = 600 ] \
+      && [ "$dir_owner" = "$(id -u)" ] && [ "$file_owner" = "$(id -u)" ]
+  fi
+}
+cmd_store_key() {
+  [ "${1:-}" != 1 ] || { if key_store_ok; then note "Qwen protected key store is ready."; return 0; fi; }
+  local ref count op_bin dir tmp token
+  [ -f "$MCP_ENV" ] || die 'managed Qwen credential reference is missing.'
+  count="$(grep -c '^BAILIAN_CODING_PLAN_API_KEY=' "$MCP_ENV" 2>/dev/null || true)"
+  [ "$count" = 1 ] || die 'managed Qwen credential reference must occur exactly once.'
+  ref="$(sed -n 's/^BAILIAN_CODING_PLAN_API_KEY=//p' "$MCP_ENV")"
+  case "$ref" in op://vibe_coding/*) ;; *) die 'managed Qwen credential must be a vibe_coding 1Password reference.';; esac
+  op_bin="$(resolve_trusted_op 2>/dev/null || true)"
+  [ -n "$op_bin" ] && [ -x "$op_bin" ] || die 'trusted 1Password CLI is unavailable for explicit Qwen key refresh.'
+  key_store_path_safe || die 'Qwen key store path is linked; refusing to write through it.'
+  dir="$(dirname "$KEY_STORE")"; mkdir -p "$dir" && chmod 700 "$dir" && protect_windows_path "$dir" directory \
+    || die 'could not protect Qwen key store directory.'
+  tmp="$(mktemp "$dir/.qwen-key.XXXXXX")" || die 'could not reserve Qwen key store.'
+  chmod 600 "$tmp" && protect_windows_path "$tmp" file || { rm -f "$tmp"; die 'could not protect Qwen key store.'; }
+  token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+  [ -n "$token" ] || [ ! -s "$TOKEN_FILE" ] || token="$(<"$TOKEN_FILE")"
+  if ! (
+    [ -z "$token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$token"
+    if [ -n "${SYSTEMROOT:-}" ]; then
+      # Git Bash lacks flock. Share Muse's portable credential lock, which
+      # recognizes the same owner record and serializes its own op reads.
+      local profile_home="${USERPROFILE:-$HOME}" credential_lock deadline
+      case "$profile_home" in [A-Za-z]:*) profile_home="/$(printf '%s' "$profile_home" | sed 's#\\#/#g; s#:#/#')";; esac
+      credential_lock="${AI_MUSE_STATE_DIR:-$profile_home/.local/state/ai-devops/muse}/credential.lock.d"
+      deadline=$(( $(date +%s) + 120 ))
+      until lock_acquire "$credential_lock" 'Qwen key-store refresh'; do
+        [ "$(date +%s)" -lt "$deadline" ] || exit 1
+        sleep 1
+      done
+      trap 'lock_release "$credential_lock"' EXIT
+      "$op_bin" read "$ref" </dev/null > "$tmp"
+    else
+      # setup-secrets.sh uses this same lock for Linux 1Password reads.
+      command -v flock >/dev/null 2>&1 || exit 1
+      flock -w 120 "$CFG_DIR/op-refresh.lock" "$op_bin" read "$ref" </dev/null > "$tmp"
+    fi
+  ) || [ ! -s "$tmp" ]; then
+    rm -f "$tmp"; die 'could not refresh Qwen key from 1Password.'
+  fi
+  mv -f "$tmp" "$KEY_STORE" || { rm -f "$tmp"; die 'could not install Qwen key store.'; }
+  key_store_ok || die 'Qwen key store permissions are not owner-only after refresh.'
+  note 'Qwen protected per-user key store refreshed.'
+}
 PACKET_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ai-review-packet"
 [ -x "$PACKET_BIN" ] || PACKET_BIN="$(command -v ai-review-packet 2>/dev/null || true)"
 REVIEW_BASE=""; REVIEW_HEAD=""; PACKET_HASH=""; WORKING_TREE_HASH=""; PACKET_REL=""; REVIEW_PACKET_DIR=""
@@ -438,6 +512,10 @@ lock_acquire() {
     born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
     owner="$(cat "$dir/pid" 2>/dev/null || true)"
     if [ -n "$owner" ]; then
+      # Muse publishes only its MSYS pid. A different Git Bash runtime cannot
+      # resolve that pid, so it is never safe to reclaim Muse's lock on Windows.
+      # Bound the caller's wait instead of risking two concurrent op reads.
+      [ -z "${SYSTEMROOT:-}" ] || return 1
       lock_owner_alive "$owner" "" && return 1
     else
       now="$(date +%s)"; [ $((now - born)) -ge 7200 ] || return 1
@@ -795,7 +873,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   # can never leave a credential-bearing provider running unsupervised.
   local QWEN_STARTUP_LIMIT="${AI_QWEN_STARTUP_TIMEOUT_SECONDS:-300}"
   [[ "$QWEN_STARTUP_LIMIT" =~ ^[1-9][0-9]*$ ]] || die 'AI_QWEN_STARTUP_TIMEOUT_SECONDS must be a positive whole number of seconds.'
-  local qwen qwen_env="" credential_ref="" op_bin="" credential_count=0 preload max_turns max_tool_calls max_wall_time; qwen="$(resolve_qwen)"
+  local qwen preload max_turns max_tool_calls max_wall_time; qwen="$(resolve_qwen)"
   if [ "$mode" = review ]; then
     max_turns="$REVIEW_MAX_TURNS"; max_tool_calls="$REVIEW_MAX_TOOL_CALLS"; max_wall_time="$REVIEW_MAX_WALL_TIME"
   else
@@ -805,10 +883,9 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     --max-session-turns "$max_turns" --max-wall-time "$max_wall_time"
     --max-tool-calls "$max_tool_calls" --max-subagent-depth 1)
   [ -z "$sid" ] || args+=(--resume "$sid")
-  # The provider key lives in the Qwen process environment so it survives the
-  # runtime's startup relaunch, so EVERY mode depends on the installer-patched
-  # common child sanitizer stripping it from agent-controlled children. Review
-  # mode's excluded tools are a second layer, not the only one.
+  # Every mode depends on the installer-patched child sanitizer. The protected
+  # per-user store is read by a short-lived boundary, never by 1Password during
+  # a reviewer turn; Qwen receives the key through its self-deleting preloader.
   assert_qwen_child_env_hardened || die "Qwen child-process credential hardening was not proven. Re-run the repository-owned provider CLI installer before running Qwen."
   if [ "$mode" = review ]; then
     args+=(--approval-mode plan --exclude-tools shell,write,edit)
@@ -826,27 +903,12 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   ensure_qwen_auth_settings || die 'could not install the governed Qwen auth selection in the private Qwen home; no provider call was made.'
   preload="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools" 2>/dev/null && pwd)/qwen-provider-env-preload.cjs"
   [ -f "$preload" ] || die 'repository-owned Qwen secret-environment preloader is missing.'
+  key_store_ok || die 'protected Qwen key store is missing or not owner-only. Run ai-qwen store-key outside a review.'
   RUN_TURN_SECRET_FILE="$(mktemp "$QWEN_HOME_DIR/tmp/.qwen-secret.XXXXXX")" || die 'could not reserve private Qwen secret handoff.'
   chmod 600 "$RUN_TURN_SECRET_FILE" 2>/dev/null || die 'could not protect private Qwen secret handoff.'
   protect_windows_path "$RUN_TURN_SECRET_FILE" file || die 'could not enforce private Qwen secret-handoff ACL.'
   set +e
-  [ -f "$MCP_ENV" ] && credential_count="$(grep -c '^BAILIAN_CODING_PLAN_API_KEY=' "$MCP_ENV" 2>/dev/null || true)"
-  if [ "$credential_count" = 1 ] && grep -q '^BAILIAN_CODING_PLAN_API_KEY=op://' "$MCP_ENV"; then
-    op_bin="$(resolve_trusted_op 2>/dev/null || true)"
-    [ -n "$op_bin" ] && [ -x "$op_bin" ] || die "1Password CLI is required to resolve the managed Qwen Coding Plan credential."
-    local op_service_token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
-    [ -n "$op_service_token" ] || [ ! -s "$TOKEN_FILE" ] || op_service_token="$(<"$TOKEN_FILE")"
-    credential_ref="$(sed -n 's/^BAILIAN_CODING_PLAN_API_KEY=//p' "$MCP_ENV" | tail -1)"
-    case "$credential_ref" in op://*) ;; *) die "managed Qwen credential is not a 1Password reference." ;; esac
-    qwen_env="$(mktemp)"; RUN_TURN_ENV_FILE="$qwen_env"; printf 'BAILIAN_CODING_PLAN_API_KEY=%s\n' "$credential_ref" > "$qwen_env"; chmod 600 "$qwen_env" 2>/dev/null || true
-    # op run inherits its own environment. Remove shell startup hooks before
-    # launching either op or its Bash child, then the boundary removes every
-    # credential-shaped variable except Qwen's key before exec.
-    case "$op_bin" in /*) ;; *) die 'resolved 1Password executable path must be absolute.' ;; esac
-    ( [ -z "$op_service_token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$op_service_token"; cd "$repo" && exec "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$op_bin" run --env-file "$qwen_env" -- "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 1 "$QWEN_CODING_PLAN_BASE_URL" "$QWEN_MODEL" "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" "$preload" "$RUN_TURN_SECRET_FILE" "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
-  else
-    die "governed Qwen authentication is unavailable. $MCP_ENV must contain exactly one BAILIAN_CODING_PLAN_API_KEY=op:// reference; no provider call was made."
-  fi
+  ( cd "$repo" && exec "$QWEN_ENV_BIN" -u BASH_ENV -u ENV "$QWEN_BASH_BIN" --noprofile --norc -c "$QWEN_CREDENTIAL_BOUNDARY" qwen-credential-boundary 1 "$QWEN_CODING_PLAN_BASE_URL" "$QWEN_MODEL" "$QWEN_HOME_DIR" "$QWEN_BASH_BIN" "$QWEN_ENV_BIN" "$preload" "$RUN_TURN_SECRET_FILE" "$KEY_STORE" "$qwen" "${args[@]}" < "$pf" ) > "$out" 2>"$out.err" &
   RUN_TURN_PID=$!
   # A cold start that never writes one stream byte hangs past Qwen's own
   # --max-wall-time (seen: 15 minutes silent), so the wrapper enforces its own
@@ -1213,6 +1275,7 @@ ai-qwen $VERSION — Qwen Code delegation in persistent, named sessions.
   ai-qwen finalize <name>  finalize a proven retained review locally; no provider call
   ai-qwen list | show <name> | transcript <name> | delete <name>
   ai-qwen doctor [--identity | --live]
+  ai-qwen store-key [--if-missing]  install or explicitly refresh the protected key
 
 'new' creates a STRUCTURALLY read-only review. 'ask' continues the saved mode:
 read-only for reviews, but an implementation continuation (write run) for an
@@ -1287,13 +1350,13 @@ cmd_doctor() {
   echo "caller        : $CALLER"
   echo "state dir     : $STATE_DIR"
   echo "model pin     : $QWEN_MODEL"
-  if [ -f "$MCP_ENV" ] && grep -q '^BAILIAN_CODING_PLAN_API_KEY=op://' "$MCP_ENV"; then
-    echo "credential    : managed 1Password reference"
-    echo "endpoint      : $QWEN_CODING_PLAN_BASE_URL"
-    echo "billing plan  : $QWEN_PLAN_LABEL"
+  if key_store_ok; then
+    echo 'credential    : protected per-user key store'
   else
-    echo "credential    : provider-managed or unavailable"
+    echo 'credential    : MISSING or not owner-only (run ai-qwen store-key outside a review)'; rc=1
   fi
+  echo "endpoint      : $QWEN_CODING_PLAN_BASE_URL"
+  echo "billing plan  : $QWEN_PLAN_LABEL"
   if secure_qwen_home 2>/dev/null && ensure_qwen_auth_settings 2>/dev/null; then
     echo "auth selection: governed (openai auth type pinned to $QWEN_MODEL at the managed endpoint)"
   else
@@ -2132,7 +2195,7 @@ cmd_reset_context() {
 
 # ---------------------------------------------------------------------------
 CMD="${1:-}"; shift || true
-ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_DOCTOR_MODE=""; OPT_GOVERNED_VERDICT=""
+ARG=""; OPT_PROMPT=""; OPT_PROMPT_FILE=""; OPT_JSON=0; OPT_DOCTOR_MODE=""; OPT_GOVERNED_VERDICT=""; OPT_IF_MISSING=0
 OPT_BASE=""; OPT_ASSERT_HEAD=""; SOURCE_IDENTITY=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -2148,6 +2211,7 @@ while [ $# -gt 0 ]; do
       OPT_GOVERNED_VERDICT="$(printf '%s' "$OPT_GOVERNED_VERDICT" | tr '[:upper:]' '[:lower:]')"
       shift 2 ;;
     --json)        OPT_JSON=1; shift ;;
+    --if-missing) [ "$CMD" = store-key ] || die '--if-missing applies only to store-key'; OPT_IF_MISSING=1; shift ;;
     --live|--identity)
       [ -z "$OPT_DOCTOR_MODE" ] || die 'doctor accepts only one mode.'
       OPT_DOCTOR_MODE="$1"; shift ;;
@@ -2170,6 +2234,7 @@ case "$CMD" in
   delete)     [ -n "$ARG" ] || die "usage: ai-qwen delete <name>";      cmd_delete "$ARG" ;;
   reset-context) [ -n "$ARG" ] || die "usage: ai-qwen reset-context <name> …"; cmd_reset_context "$ARG" ;;
   doctor)     cmd_doctor "$OPT_DOCTOR_MODE" ;;
+  store-key)  [ -z "$ARG" ] || die 'store-key accepts only --if-missing'; cmd_store_key "$OPT_IF_MISSING" ;;
   -h|--help|help|"") usage; [ -z "$CMD" ] && exit 2 || exit 0 ;;
   *)          printf 'unknown command: %s\n\n' "$CMD" >&2; usage >&2; exit 2 ;;
 esac
