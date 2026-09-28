@@ -105,6 +105,9 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   in a project folder gets its own worktree.
 - Use authenticated tools before asking Albert to run anything. Prove
   completion: commit, PR, passing check, live result, or screenshot.
+- Surface uncertainty that could materially change scope, safety, or outcome;
+  ask Albert only when the choice is his. Define an observable success check for
+  each task and verify it before reporting completion.
 
 ## Safety rules that apply everywhere
 
