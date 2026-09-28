@@ -907,7 +907,7 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
     } else {
         Write-Note "Qwen Code CLI found: $qwenVersion"
     }
-    $qwenBash = Get-Command bash -ErrorAction SilentlyContinue
+    $qwenBash = Get-GitBash
     if ($qwenBash) {
         $qwenWrapper = (Join-Path $RepoPath 'bin\ai-qwen') -replace '\\', '/'
         $keyProbe = Invoke-NativeProbe -Command $qwenBash.Source -Arguments @('--noprofile', '--norc', $qwenWrapper, 'store-key', '--if-missing')

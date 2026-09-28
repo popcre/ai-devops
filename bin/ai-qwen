@@ -78,8 +78,8 @@ QWEN_HOME_DIR="${AI_QWEN_HOME:-${QWEN_HOME:-$HOME/.qwen}}"
 if [ -n "${AI_QWEN_TEST_DIR:-}" ]; then
   QWEN_BASH_BIN="${AI_QWEN_BASH_BIN:-/usr/bin/bash}"; QWEN_ENV_BIN="${AI_QWEN_ENV_BIN:-/usr/bin/env}"
 else
-  [ -z "${AI_QWEN_BASH_BIN:-}" ] && [ -z "${AI_QWEN_ENV_BIN:-}" ] && [ -z "${AI_QWEN_BIN:-}" ] && [ -z "${AI_QWEN_OP_BIN:-}" ] \
-    || { printf 'ai-qwen: error: executable overrides are test-only; use the repository-owned installers to repair production tools.\n' >&2; exit 1; }
+  [ -z "${AI_QWEN_BASH_BIN:-}" ] && [ -z "${AI_QWEN_ENV_BIN:-}" ] && [ -z "${AI_QWEN_BIN:-}" ] && [ -z "${AI_QWEN_OP_BIN:-}" ] && [ -z "${AI_QWEN_KEY_STORE:-}" ] \
+    || { printf 'ai-qwen: error: executable and key-store overrides are test-only; use the repository-owned installers to repair production tools.\n' >&2; exit 1; }
   QWEN_BASH_BIN=/usr/bin/bash; QWEN_ENV_BIN=/usr/bin/env
 fi
 REVIEW_MAX_TURNS="${AI_QWEN_MAX_TURNS:-120}"
@@ -375,7 +375,27 @@ cmd_store_key() {
   chmod 600 "$tmp" && protect_windows_path "$tmp" file || { rm -f "$tmp"; die 'could not protect Qwen key store.'; }
   token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
   [ -n "$token" ] || [ ! -s "$TOKEN_FILE" ] || token="$(<"$TOKEN_FILE")"
-  if ! ( [ -z "$token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$token"; "$op_bin" read "$ref" </dev/null > "$tmp" ) || [ ! -s "$tmp" ]; then
+  if ! (
+    [ -z "$token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$token"
+    if [ -n "${SYSTEMROOT:-}" ]; then
+      # Git Bash lacks flock. Share Muse's portable credential lock, which
+      # recognizes the same owner record and serializes its own op reads.
+      local profile_home="${USERPROFILE:-$HOME}" credential_lock deadline
+      case "$profile_home" in [A-Za-z]:*) profile_home="/$(printf '%s' "$profile_home" | sed 's#\\#/#g; s#:#/#')";; esac
+      credential_lock="${AI_MUSE_STATE_DIR:-$profile_home/.local/state/ai-devops/muse}/credential.lock.d"
+      deadline=$(( $(date +%s) + 120 ))
+      until lock_acquire "$credential_lock" 'Qwen key-store refresh'; do
+        [ "$(date +%s)" -lt "$deadline" ] || exit 1
+        sleep 1
+      done
+      trap 'lock_release "$credential_lock"' EXIT
+      "$op_bin" read "$ref" </dev/null > "$tmp"
+    else
+      # setup-secrets.sh uses this same lock for Linux 1Password reads.
+      command -v flock >/dev/null 2>&1 || exit 1
+      flock -w 120 "$CFG_DIR/op-refresh.lock" "$op_bin" read "$ref" </dev/null > "$tmp"
+    fi
+  ) || [ ! -s "$tmp" ]; then
     rm -f "$tmp"; die 'could not refresh Qwen key from 1Password.'
   fi
   mv -f "$tmp" "$KEY_STORE" || { rm -f "$tmp"; die 'could not install Qwen key store.'; }

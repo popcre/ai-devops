@@ -150,6 +150,17 @@ export AI_QWEN_KEY_STORE="$TMP/config/secrets/qwen-token-plan-key"
 unset BAILIAN_CODING_PLAN_API_KEY
 "$SCRIPT" store-key >/dev/null
 check 'install-time Qwen key store is owner-only' "test -s '$AI_QWEN_KEY_STORE' && test \"\$(stat -c %a '$AI_QWEN_KEY_STORE')\" = 600 && test \"\$(stat -c %a '$(dirname "$AI_QWEN_KEY_STORE")')\" = 700"
+if [ -z "${SYSTEMROOT:-}" ]; then
+  LOCK_READY="$TMP/op-lock-ready"
+  flock "$AI_DEVOPS_CONFIG_DIR/op-refresh.lock" bash -c 'touch "$1"; sleep 2' _ "$LOCK_READY" & LOCK_PID=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -e "$LOCK_READY" ] && break; sleep 0.1; done
+  OP_CALLS_BEFORE="$(wc -l < "$TMP/op-calls")"
+  "$SCRIPT" store-key >/dev/null 2>&1 & STORE_PID=$!
+  sleep 0.3
+  check 'Qwen key refresh waits for the shared 1Password lock' "test '$(wc -l < "$TMP/op-calls")' = '$OP_CALLS_BEFORE' && kill -0 '$STORE_PID' 2>/dev/null"
+  wait "$LOCK_PID"; wait "$STORE_PID"
+fi
+OP_CALLS_AFTER_STORE="$(wc -l < "$TMP/op-calls" | tr -d ' ')"
 
 # MSYS may report a WinGet .exe as an extensionless /op path. The wrapper must
 # still return the actual trusted package executable and reject a lone /op.
@@ -388,6 +399,7 @@ check 'syntax is valid' "bash -n '$SCRIPT'"
 check 'private Windows ACL is revalidated even when a marker already exists' "! grep -Fq 'if [ ! -f \"\$QWEN_HOME_DIR/.ai-devops-private-home-v1\" ]' '$SCRIPT'"
 check 'help exits zero' 'run --help'
 check 'production Qwen executable overrides are refused' "! env -u AI_QWEN_TEST_DIR AI_QWEN_BIN='$STUB/qwen' bash '$SCRIPT' --help"
+check 'production Qwen key-store path override is refused' "! env -u AI_QWEN_TEST_DIR AI_QWEN_KEY_STORE='$TMP/alternate-key' bash '$SCRIPT' --help"
 check 'Windows official Qwen path comparison normalizes drive-letter paths' "grep -Fq 'physical=\"\$(cygpath -u \"\$physical\"' '$SCRIPT'"
 INSTALL_OUT="$(env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen 2>&1)"; INSTALL_RC=$?
 [ "$INSTALL_RC" -eq 0 ] && grep -q '"BAILIAN_CODING_PLAN_API_KEY"' "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js" && ok 'provider installer applies Qwen child-process credential hardening' || { printf '  diagnostic: installer: %s\n' "$INSTALL_OUT"; bad 'provider installer applies Qwen child-process credential hardening'; }
@@ -816,7 +828,7 @@ echo review > "$TMP/mode"
 CREDENTIAL_OUT="$(run new credential-boundary --prompt review 2>&1)"; CREDENTIAL_RC=$?
 unset BASH_ENV ENV
 [ "$CREDENTIAL_RC" -eq 0 ] || printf '  diagnostic: credential boundary: %s\n' "$CREDENTIAL_OUT"
-check 'managed provider call did not contact 1Password' "test \"\$(wc -l < '$TMP/op-calls' | tr -d ' ')\" = 1"
+check 'managed provider call did not contact 1Password' "test \"\$(wc -l < '$TMP/op-calls' | tr -d ' ')\" = '$OP_CALLS_AFTER_STORE'"
 check 'the real provider key reaches Qwen only under the one name Qwen strips from its children' "test \"\$(grep -c 'fake-qwen-only' '$TMP/qwen-env')\" = 1 && grep -q '^BAILIAN_CODING_PLAN_API_KEY=fake-qwen-only$' '$TMP/qwen-env' && ! grep -Eq 'DEVOPS|OP_SERVICE|SUPABASE|RANDOM' '$TMP/qwen-credential-names'"
 check 'the Qwen startup relaunch still receives the provider key' "test \"\$(cat '$TMP/qwen-relaunch-key')\" = fake-qwen-only"
 check 'Qwen secret handoff is removed after every provider turn' "test -z \"\$(find '$AI_QWEN_HOME/tmp' -maxdepth 1 -name '.qwen-secret.*' -print -quit)\""
