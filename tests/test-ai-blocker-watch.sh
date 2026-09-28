@@ -67,7 +67,12 @@ EOF
 cat > "$TMP/harness" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "${AI_GH_CALLER:-unset}" >> "$FAKE/resumed-callers"
-printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"; [ -f "$FAKE/harness_fail" ] && exit 7; exit 0
+printf '%s|%s\n' "$PWD" "$*" >> "$FAKE/resumed"
+if [ -f "$FAKE/active_writer" ] && [ "${1:-}" = codex ]; then
+  printf 'Error: the thread already has an active writer (code -32600)\n' >&2
+  exit 1
+fi
+[ -f "$FAKE/harness_fail" ] && exit 7; exit 0
 EOF
 chmod +x "$TMP/gh" "$TMP/harness"
 # The fixture config drops propagate_on_host so the suite is machine-independent:
@@ -365,6 +370,17 @@ check 'wait records the main checkout of the current repository' \
 # Mode 1: the folder and the transcript are both still there.
 rm -f "$W2/$pid.json" "$W2/$fid.json"
 echo closed > "$FAKE/state5"
+busy_id="$(cd "$TMP/work" && BW2 wait o/r#5 --harness codex --session busy-1 --park 'active Codex task' --brief-file "$TMP/brief.md" 2>/dev/null)"
+touch "$TMP/transcripts/busy-1.jsonl" "$FAKE/active_writer"
+: > "$FAKE/comments"
+check 'active Codex writer leaves the wait queued without spending an attempt' \
+  "BW2 tick && jq -e '.state==\"waiting\" and .attempts==0 and .active_writer_at!=null' '$W2/$busy_id.json' && ! grep -q 'issue comment 31' '$FAKE/comments'"
+check 'repeated active writer responses remain queued' \
+  "BW2 tick && jq -e '.state==\"waiting\" and .attempts==0' '$W2/$busy_id.json'"
+rm -f "$FAKE/active_writer"
+check 'queued Codex wait resumes after the writer releases' \
+  "BW2 tick && jq -e '.state==\"woken\" and .attempts==1' '$W2/$busy_id.json'"
+rm -f "$W2/$busy_id.json"
 rid="$(cd "$TMP/work" && BW2 wait o/r#5 --harness claude --session live-1 --park 'resumable work' --brief-file "$TMP/brief.md" 2>/dev/null)"
 touch "$TMP/transcripts/live-1.jsonl"
 : > "$FAKE/resumed"; : > "$FAKE/comments"; : > "$FAKE/edited"
