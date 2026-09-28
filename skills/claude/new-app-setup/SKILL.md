@@ -167,10 +167,10 @@ Do these in order; don't skip or reorder.
    workflow").
 10. **Report back**: file count before/after, what was deleted, what was
     documented, what workflow was created/changed, what deployment path is
-    now active, what credentials are still needed, and what the first
-    development task should be.
+    now active, which credentials are still blocked (and why the AI could not
+    obtain them), and what the first development task should be.
 
-Full verbatim detail, including the exact access-request markdown template,
+Full verbatim detail, including the exact access-inventory markdown template,
 the Immediate Action List's shell snippets, and the "Lessons from Past
 Projects" section, is in
 [NEW-PROJECT-STANDARD.md](NEW-PROJECT-STANDARD.md).

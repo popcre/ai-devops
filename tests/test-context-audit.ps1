@@ -491,6 +491,8 @@ owner: claude/fixture-$n
             "Start immediately",
             "Never ask a human to approve",
             "assigned AI reviewer's explicit APPROVE",
+            "no human approval is ever requested",
+            "rotates them itself under an assigned AI reviewer's APPROVE",
             "recover first and finish",
             "Preserve the capability",
             "reported problem is gone",

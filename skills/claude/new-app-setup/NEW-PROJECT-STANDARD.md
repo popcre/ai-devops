@@ -594,7 +594,7 @@ Report:
 - what was documented
 - what workflow was created or changed
 - what deployment path is now active
-- what credentials are still needed
+- which credentials are still blocked, and why you could not obtain them yourself
 - what the first development task should be
 
 ---

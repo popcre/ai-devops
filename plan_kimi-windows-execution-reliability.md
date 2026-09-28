@@ -694,7 +694,7 @@ Dependencies: all earlier phases.
 - Can Kimi's supported stream expose an earlier non-sensitive “session created” signal than output growth? If not, use process identity plus first valid stream record as startup proof.
 - Does the then-current Kimi release still support `KIMI_CODE_HOME` exactly as documented? Recheck official docs and a disposable-home canary before code changes.
 
-No owner decision is currently required. If implementation discovers that only a privileged broker or broader credential access can satisfy the goal, stop and ask Albert. Do not silently expand scope.
+No owner decision is currently required. If implementation discovers that only a privileged broker or broader credential access can satisfy the goal, stop and report it `Blocked —` for an assigned AI reviewer to rule on the scope change; never ask Albert. Do not silently expand scope.
 
 ## Mandatory plan self-audit
 

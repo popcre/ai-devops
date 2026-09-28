@@ -194,7 +194,7 @@ Step 1 implementation began from `origin/main` commit `f25c725765f779012c3fc6448
 - **Common-core file layout:** prefer `bin/lib/ai-opencode-harness.sh` plus small profile files if Bash sourcing remains testable on Git Bash and Ubuntu. A different layout is acceptable only if it still yields one safety implementation and thin provider entry points.
 - **Usage and cache reporting:** expose only fields actually returned by Meta through OpenCode. Label unavailable values as unavailable, never zero.
 - **Rate-limit handling:** retries are allowed only when Meta’s response proves the request was not accepted or supplies a safe retry instruction. Never replay an ambiguously delivered paid turn.
-- **Meta item creation:** if `Meta Model API` does not exist in `vibe_coding`, create it using the `secrets-to-1password` skill with rich notes. If Albert has not yet generated the API key, stop at the access gate in §12 rather than inventing one.
+- **Meta item creation:** if `Meta Model API` does not exist in `vibe_coding`, create it using the `secrets-to-1password` skill with rich notes. If the API key does not exist yet, obtain it through the provider's authenticated tools per §12 rather than inventing one.
 
 ## 9. The plan — numbered, ordered, executable steps
 
@@ -461,7 +461,7 @@ Provide explicit opt-in flags, parallel to `AI_GLM_LIVE=1`, for example `AI_MUSE
 - Environment name expected by Meta: `MODEL_API_KEY`, subject to Step 1 official verification.
 - Never place the value in this plan, Git, OpenCode JSON, service files, task arguments, logs, or reports.
 
-If the item or key does not exist, the implementing session must ask Albert once for access to Meta Model API and permission to store the resulting key, then use the `secrets-to-1password` skill. A correct access result is an authenticated, redacted model-list response containing `muse-spark-1.2-contributor`. Do not ask Albert to run shell commands if browser access can be granted to the session instead.
+If the item or key does not exist, the implementing session obtains Meta Model API access and the key itself through authenticated tools (owner ruling 2026-09-28: never ask Albert), then uses the `secrets-to-1password` skill; if a platform limit prevents that, report it `Blocked —`. A correct access result is an authenticated, redacted model-list response containing `muse-spark-1.2-contributor`. Never ask Albert to run shell commands.
 
 ### Local service identities
 
@@ -537,7 +537,7 @@ If the item or key does not exist, the implementing session must ask Albert once
 
 ### Three required questions
 
-1. **Could a brand-new AI session execute this perfectly without asking Albert anything that is already knowable?** Yes. §§2, 5, 9, 10, and 12 define the repository, current components, exact phased work, tests, platforms, commands, and credential location. The only possible access gap is explicitly handled in §12 with one precise request and a measurable success result.
+1. **Could a brand-new AI session execute this perfectly without asking Albert anything that is already knowable?** Yes. §§2, 5, 9, 10, and 12 define the repository, current components, exact phased work, tests, platforms, commands, and credential location. The only possible access gap is explicitly handled in §12: the session obtains it itself, with a measurable success result.
 2. **Does the plan carry all current background, nuance, reasoning, and rejected options?** Yes. §§3, 6, 7, and 8 preserve why OpenCode was selected over WSL Muse Code, why one server and copied wrappers were rejected, how GLM’s measured controls constrain the design, and which privacy tier is allowed.
 3. **Is the goal clear enough to guide a correct judgment if a step is wrong?** Yes. §1 defines the business result and the unacceptable failure states; §13 provides stop conditions and rollback. An implementer can change a mistaken mechanical step while preserving isolation, exact-model proof, cross-platform access, truthful failure, and GLM reliability.
 

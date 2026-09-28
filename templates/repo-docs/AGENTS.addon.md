@@ -9,7 +9,7 @@
 This repo is onboarded to the AI DevOps staged workflow. When you act as the
 **planning**, **implementation**, or **testing** agent (GPT-5.6 / Codex, medium reasoning):
 
-- Work only from an **approved plan**. If there is no approved plan, ask for one.
+- Work only from an **approved plan**. If there is no approved plan, write one and get an assigned AI reviewer's APPROVE.
 - Make the **smallest safe change**. Do not refactor unrelated code.
 - Always **add or update tests** for behavior you change.
 - Never commit secrets. Never weaken auth or permission checks.

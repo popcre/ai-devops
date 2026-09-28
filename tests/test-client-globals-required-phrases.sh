@@ -65,7 +65,7 @@ grep -qF "assigned AI reviewer's explicit APPROVE" "$AGENTS_MD" \
   || fail "AGENTS.md lost the assigned AI reviewer production gate"
 ! grep -qF "without Albert naming" "$AGENTS_MD" \
   || fail "AGENTS.md returned to requiring Albert to name production actions"
-grep -qF "APPROVE of the" "$SECRETS_SKILL" \
+grep -qF "assigned AI reviewer's APPROVE of the" "$SECRETS_SKILL" \
   || fail "secrets-to-1password lost the reviewed rotation plan"
 ! grep -qF "without Albert's approval" "$SECRETS_SKILL" \
   || fail "secrets-to-1password returned to requiring Albert's approval"
@@ -80,9 +80,16 @@ for never_ask in \
   "$REPO_ROOT/skills/shared/designflow-human-qa/references/safety-and-evidence.md" \
   "$REPO_ROOT/skills/codex/codex-shared-db-change/SKILL.md" \
   "$REPO_ROOT/skills/shared/secrets-to-1password/SKILL.md" \
+  "$REPO_ROOT"/plan_muse-opencode-harness.md "$REPO_ROOT"/plan_kimi-windows-execution-reliability.md \
+  "$REPO_ROOT"/plan_kimi-review-failure-recovery.md "$REPO_ROOT"/templates/repo-docs/AGENTS.addon.md \
   "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL" "$AGENTS_MD"; do
-  ! grep -qiE "ask (me|Albert) for (all )?(needed )?access|Please provide as many|Albert (explicitly )?approves|Albert's (explicit )?approval for|needs Albert's approval|once he says yes|Albert authorization|without Albert naming|wait for a quick approval|when he must run" "$never_ask" \
+  ! grep -qiP "(?<!never )(ask (me|Albert)( once)? for|ask Albert(\.| to run)|asking Albert to run)|stop and ask Albert|ask for one\.|Please provide as many|Albert (explicitly )?approves|Albert's (explicit )?approval for|needs Albert's approval|once he says yes|Albert authorization|without Albert naming|wait for a quick approval|when he must run" "$never_ask" \
     || fail "$(basename "$never_ask") returned to asking Albert for access or approval"
+done
+
+for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL"; do
+  grep -qF "rotates them itself under an assigned AI reviewer's APPROVE" "$client_file" \
+    || fail "$(basename "$client_file") lost the reviewer gate on secret rotation"
 done
 
 echo "PASS: Claude, Codex, ZCode, and MiMo globals carry the required autonomy phrases, unwrapped"
