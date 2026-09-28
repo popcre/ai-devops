@@ -2,6 +2,10 @@
 # ai-muse - persistent, named Muse Spark review conversations.
 set -euo pipefail
 
+# Caller-supplied credentials or preload markers are never trusted. Only this
+# process may set the marker after validating its protected local key store.
+unset MODEL_API_KEY MUSE_KEY_PRELOADED
+
 # Read-only commands do not create a Muse review event. An outer review may
 # have its own event identity, which must not be reconciled as Muse evidence.
 MUSE_EVENT_READ_ONLY=0
@@ -417,6 +421,7 @@ load_key(){
   export -n MODEL_API_KEY
   [ -n "$MODEL_API_KEY" ] || die 'protected Muse key store is empty; run ai-muse store-key outside a review.'
   probe_key_rejected "$MODEL_API_KEY" && die 'stored Muse key was rejected; run ai-muse store-key outside a review.'
+  MUSE_KEY_PRELOADED=1
   return 0
 }
 # store-key --if-missing is the installer's idempotent form: a valid store is
@@ -639,7 +644,7 @@ run_turn(){
   [ "$ENGINE" != muse-code ] || muse_code_reasoning_effort
   TURN_SID=""; FINISH=""; TEXT=""; TOKENS=null; TURN_ERROR=""
   runtime_env; [ -x "$timeout_bin" ] || die "local_dependency_unavailable: trusted timeout executable is unavailable: $timeout_bin"; case "$timeout_bin" in /*) ;; *) die 'trusted timeout executable path must be absolute.';; esac
-  prompt_text="$(cat "$prompt")"; [ -n "${MODEL_API_KEY:-}" ] || load_key; provider_key="$MODEL_API_KEY"; unset MODEL_API_KEY
+  prompt_text="$(cat "$prompt")"; [ "${MUSE_KEY_PRELOADED:-0}" = 1 ] || load_key; provider_key="$MODEL_API_KEY"; unset MODEL_API_KEY MUSE_KEY_PRELOADED
   if [ "$ENGINE" = muse-code ]; then
     # The caller chooses the conversation identity, so a new turn is provable too.
     [ -n "$sid" ] || sid="$(new_session_uuid)" || die 'could not choose a Muse Code session identity.'

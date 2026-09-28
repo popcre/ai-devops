@@ -272,6 +272,7 @@ else
 fi
 check 'offline doctor does not contact the provider' "cd '$REPO' && eval \"$ENV MUSE_STUB_TOUCH='$TMP/doctor-called' '$SCRIPT' doctor\" && test ! -e '$TMP/doctor-called'"
 check 'live doctor contacts Muse and proves its exact verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_TOUCH='$TMP/doctor-called' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" | grep -q 'live provider response' && test -e '$TMP/doctor-called'"
+check 'an inherited key and preload marker cannot override the protected Muse store' "cd '$REPO' && eval \"$ENV MODEL_API_KEY=hostile MUSE_KEY_PRELOADED=1 MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env'"
 check 'live doctor accepts provider progress before the exact final verdict' "cd '$REPO' && eval \"$ENV MUSE_STUB_PREAMBLE=checking MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" | grep -q 'live provider response'"
 export DEVOPS_MCP_TOKEN=must-not-reach-muse OP_SERVICE_ACCOUNT_TOKEN=must-not-reach-muse SUPABASE_ACCESS_TOKEN=must-not-reach-muse
 check 'Muse provider receives only its own key and the minimal runtime environment' "cd '$REPO' && eval \"$ENV MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live\" >/dev/null && grep -qx 'MODEL_API_KEY=fake-key' '$TMP/provider-env' && ! grep -Eq 'DEVOPS_MCP_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|SUPABASE_ACCESS_TOKEN' '$TMP/provider-env'"
@@ -550,6 +551,7 @@ rm -f "$KS"; : > "$TMP/op-review-calls"
 MISSING_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' OP_STUB_CALLS_FILE='$TMP/op-review-calls' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live" 2>&1 || true)"
 check 'a missing key store stops review and gives explicit maintenance guidance' "test ! -e '$KS' && test ! -s '$TMP/op-review-calls' && printf '%s' \"\$MISSING_OUT\" | grep -q 'review turns stop' && printf '%s' \"\$MISSING_OUT\" | grep -q 'FAIL  protected Muse key store is present'"
 check 'a missing key store fails offline doctor and never reads 1Password' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$KS' OP_STUB_CALLS_FILE='$TMP/op-review-calls' '$SCRIPT' doctor\" >/dev/null 2>&1 && test ! -s '$TMP/op-review-calls'"
+check 'a missing store cannot be bypassed with an inherited key or marker' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$KS' MODEL_API_KEY=hostile MUSE_KEY_PRELOADED=1 OP_STUB_CALLS_FILE='$TMP/op-review-calls' '$SCRIPT' doctor --live\" >/dev/null 2>&1 && test ! -s '$TMP/op-review-calls'"
 # The protections that make the store "protected" also fail closed during review.
 mkdir -p "$TMP/keystore-real"; printf 'linked-key\n' > "$TMP/keystore-real/muse-api-key"; chmod 600 "$TMP/keystore-real/muse-api-key"
 if MSYS=winsymlinks:nativestrict ln -s "$TMP/keystore-real" "$TMP/keystore-link" 2>/dev/null && [ -L "$TMP/keystore-link" ]; then
