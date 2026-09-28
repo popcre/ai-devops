@@ -364,6 +364,30 @@ printf ready > "$(dirname "$0")/qwen-store-called"
     Assert-True (Test-Path (Join-Path $fixture "bin\qwen-store-called")) "Qwen install stage did not invoke store-key --if-missing"
     Assert-True ($output -match "Qwen protected per-user key store is ready") "Qwen install stage did not report protected key-store readiness"
 
+    # Muse reviews cannot fetch from 1Password. The Windows install must
+    # populate the protected store explicitly, even before Muse Code exists.
+    $fixture = New-Fixture "muse-key-store"
+    $fixtureMuse = Join-Path $fixture "bin\ai-muse"
+    $museFixtureScript = @'
+#!/usr/bin/env bash
+[ "$1" = store-key ] && [ "$2" = --if-missing ] && [ "$AI_MUSE_CALLER" = installer ] || exit 17
+printf ready > "$(dirname "$0")/muse-store-called"
+'@
+    [IO.File]::WriteAllText($fixtureMuse, $museFixtureScript + "`n")
+    git -C $fixture add bin/ai-muse
+    git -C $fixture commit -m "add Muse key-store fixture" | Out-Null
+    git -C $fixture push | Out-Null
+    $oldMuseCaller = $env:AI_MUSE_CALLER
+    try {
+        $env:AI_MUSE_CALLER = 'prior-caller'
+        $output = Invoke-Installer $fixture (Join-Path $TempRoot "muse-key-store\claude") (Join-Path $TempRoot "muse-key-store\codex")
+        Assert-True ($env:AI_MUSE_CALLER -eq 'prior-caller') "Muse install stage did not restore the caller identity"
+    } finally {
+        $env:AI_MUSE_CALLER = $oldMuseCaller
+    }
+    Assert-True (Test-Path (Join-Path $fixture "bin\muse-store-called")) "Muse install stage did not invoke store-key --if-missing"
+    Assert-True ($output -match "Muse protected per-user key store is ready") "Muse install stage did not report protected key-store readiness"
+
     Write-Host "PASS: install-ai-devops-windows"
 } finally {
     Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
