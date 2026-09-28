@@ -76,8 +76,12 @@ for never_ask in \
   "$REPO_ROOT/skills/claude/new-app-setup/NEW-PROJECT-STANDARD.md" \
   "$REPO_ROOT/skills/claude/new-app-setup/SKILL.md" \
   "$REPO_ROOT/skills/shared/designflow-human-qa/SKILL.md" \
-  "$REPO_ROOT/docs/deployment.md"; do
-  ! grep -qiE "ask (me|Albert) for (all )?(needed )?access|Please provide as many|Albert explicitly approves|wait for a quick approval" "$never_ask" \
+  "$REPO_ROOT/docs/deployment.md" \
+  "$REPO_ROOT/skills/shared/designflow-human-qa/references/safety-and-evidence.md" \
+  "$REPO_ROOT/skills/codex/codex-shared-db-change/SKILL.md" \
+  "$REPO_ROOT/skills/shared/secrets-to-1password/SKILL.md" \
+  "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL" "$AGENTS_MD"; do
+  ! grep -qiE "ask (me|Albert) for (all )?(needed )?access|Please provide as many|Albert (explicitly )?approves|Albert's (explicit )?approval for|needs Albert's approval|once he says yes|Albert authorization|without Albert naming|wait for a quick approval|when he must run" "$never_ask" \
     || fail "$(basename "$never_ask") returned to asking Albert for access or approval"
 done
 

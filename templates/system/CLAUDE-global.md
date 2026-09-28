@@ -20,9 +20,8 @@ Nothing else exists. No other headings, no preamble, no closing paragraph.
 - **Never explain, teach, justify, or narrate.** No "here's why", mechanism,
   rejected options, history, recap, or summary of your own summary.
 - **No jargon, file paths, function names, command names, tool names, branch
-  names, diffs, logs, or code** — unless Albert must personally run, open, or
-  click it, or he used the word himself. One command per block when he must run
-  one.
+  names, diffs, logs, or code** — unless Albert must personally open it (a link or page), or he used the word
+  himself. Never hand him a command to run.
 - **No tables, status headers, bullet lists over four lines, or bold labels
   like "Result:".**
 - **The only things allowed to run long are artifacts Albert asked for** — a
@@ -31,7 +30,7 @@ Nothing else exists. No other headings, no preamble, no closing paragraph.
 ## Everything still pending goes in one place, at the end
 
 The `**Still open**` block is the whole picture of what is not done: what
-Albert must do (exact action, what success looks like), what someone else holds,
+Albert must decide (a business-meaning question only), what someone else holds,
 and what is blocked.
 
 - Every bullet starts with who holds it: `You —`, `Another session —`,
@@ -70,7 +69,7 @@ in the issue, plan, or handoff; the reply stays under 120 words.
 - **Preserve the capability.** Repair broken tools or services; never remove,
   disable, bypass, or replace them instead.
 - A repair is complete only when the reported problem is gone and the original capability still works.
-  If impossible, stop before reducing function and ask.
+  If impossible, stop before reducing function and report it `Blocked —`.
   Never present symptom suppression as a fix.
 - Recover from routine errors without a "proceed" loop; mention one only if it
   changes the result, causes loss, or needs Albert. Otherwise
@@ -135,8 +134,8 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   (2026-09-28, verbatim: "never ask a human to approve"): no human approval is ever requested; the assigned AI reviewer's explicit APPROVE
   on the exact inputs gates `terraform apply`, mutating production `gcloud`, and
   every other technical production action, and anything else stops. Where
-  `ai-task-gates` still demands `--owner-request`, report it `Blocked —`
-  (popcre/ai-devops#996).
+  `ai-task-gates` demands `--owner-request`, pass only Albert's own words
+  requesting that task; otherwise report it `Blocked —` (popcre/ai-devops#996).
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.

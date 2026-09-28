@@ -26,8 +26,8 @@ pipeline. The recovery procedure lives in
   `terraform destroy`, or mutating production `gcloud` commands only with the
   assigned AI reviewer's explicit APPROVE of the exact action and
   resource; never ask Albert to approve (owner ruling 2026-09-28). Where
-  `ai-task-gates` still demands owner authorization, report it `Blocked —`
-  (popcre/ai-devops#996).
+  `ai-task-gates` demands `--owner-request`, pass only Albert's own words
+  requesting that task; otherwise report it `Blocked —` (popcre/ai-devops#996).
   The sole exception is the separately activated `shared-db` automatic migration
   workflow after exact structural admission, guarded merge, and merged-main
   preview proof; it authorizes no manual production command or other infrastructure

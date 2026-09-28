@@ -105,8 +105,9 @@ grep -rl "ops_eyJ" "$HOME" --exclude-dir=.cache      # paths, not contents
 Rotate it yourself (owner ruling 2026-09-28, Albert Hazan: "never ask a human
 to approve"): report the compromise, get an assigned AI reviewer's APPROVE of the
 rotation plan, rotate through the provider's authenticated tools, update
-1Password and every consumer, and prove the new value works. Keep the old value
-valid until the new one is proven wherever the provider allows. Never ask Albert
+1Password and every consumer, and prove the new value works. For an exposed value, revoke
+it as soon as the replacement is in place; never extend its life beyond the
+swap. Never ask Albert
 to approve it.
 
 ## Hard rules
@@ -124,8 +125,8 @@ to approve it.
    `op_run` with an `op://vibe_coding/<item>/<field>` reference so the value never
    enters the transcript.
 4. **Rotate or overwrite a live credential only with a recoverable plan.** Adding a
-   new entry is safe; replacing a live value can break running apps. Keep the old
-   value recoverable, update every consumer, and prove the new value works. If the
+   new entry is safe; replacing a live value can break running apps. For a planned (not exposed) rotation keep the old value
+   recoverable until the new one is proven; update every consumer, and prove the new value works. If the
    value you hold conflicts with what's stored, verify against the provider
    yourself. Rotation follows the reviewed plan above; never ask Albert to approve
    it (owner ruling 2026-09-28).

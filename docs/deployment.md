@@ -131,7 +131,7 @@ candidate to the target commit. Declare the separate reviewer candidate as
 Run `ai-task-gates authorize-install --target-head <full SHA>
 --installed-checkout <canonical checkout> --installed-launcher <managed
 ai-task-gates launcher> --review-report <exact-head APPROVE report>
---owner-request '<host, action, and Albert authorization>'`. On Windows, pass
+--owner-request '<host, action, and Albert's own words requesting this task>'`. On Windows, pass
 the managed extensionless launcher; on Ubuntu, pass its symlink. This separate
 installation task leaves `check --before deploy` forbidden for a reviewer-safety
 change. The authorization binds the candidate, review, installed checkout,
