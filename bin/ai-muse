@@ -376,16 +376,18 @@ muse_credential_owner_alive(){
   if kill -0 "$pid" 2>/dev/null || [ -d "/proc/$pid" ]; then return 0; fi
   [ -n "$winpid" ] && ps -W 2>/dev/null | awk -v w="$winpid" '$4 == w { found=1 } END { exit !found }'
 }
+muse_credential_winpid_for(){ cat "/proc/$1/winpid" 2>/dev/null || true; }
 muse_credential_publish(){
-  local candidate="$1" stage winpid token
+  local candidate="$1" stage holder_pid winpid token
   stage="$(mktemp -d "$candidate.stage.XXXXXX")" || return 1
-  winpid="$(cat "/proc/$BASHPID/winpid" 2>/dev/null || true)"
-  token="$BASHPID.${winpid:-0}.$(date +%s%N).$RANDOM"
-  printf '%s %s %s\n' "$BASHPID" "${winpid:--}" "$token" > "$stage/owner"
-  printf '%s\n' "$BASHPID" > "$stage/pid"
+  holder_pid="$BASHPID"
+  winpid="$(muse_credential_winpid_for "$holder_pid")"
+  token="$holder_pid.${winpid:-0}.$(date +%s%N).$RANDOM"
+  printf '%s %s %s\n' "$holder_pid" "${winpid:--}" "$token" > "$stage/owner"
+  printf '%s\n' "$holder_pid" > "$stage/pid"
   printf '%s\n' "$token" > "$stage/token"
   if ! mv -T "$stage" "$candidate" 2>/dev/null; then rm -rf "$stage"; return 1; fi
-  [ "$(cat "$candidate/owner" 2>/dev/null || true)" = "$BASHPID ${winpid:--} $token" ] || return 1
+  [ "$(cat "$candidate/owner" 2>/dev/null || true)" = "$holder_pid ${winpid:--} $token" ] || return 1
   CRED_LOCK="$candidate"; CRED_TOKEN="$token"
 }
 muse_credential_acquire(){
