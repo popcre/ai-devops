@@ -96,6 +96,61 @@ gh_measure_set_principal(){
   GH_MEASURE_PRINCIPAL="local-sha256:$digest"
 }
 
+# A random ID binds costs to a completed wait or tick without recording a PR,
+# repository, URL, token, or response body.
+gh_measure_workflow_id(){
+  local id
+  id="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')" || return 1
+  [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 1
+  printf '%s' "$id"
+}
+
+gh_measure_workflow_outcome(){
+  local caller="${1:-}" workflow="${2:-}" id="${3:-}" outcome="${4:-}" elapsed="${5:-}" utc record
+  case "$caller:$workflow:$outcome" in
+    ai-pr-wait:pr_wait:merged|ai-pr-wait:pr_wait:closed|\
+    ai-pr-wait:pr_wait:checks_failed|ai-pr-wait:pr_wait:ejected|\
+    ai-pr-wait:pr_wait:deadline|ai-blocker-watch:blocker_watch_tick:completed) ;;
+    *) return 2 ;;
+  esac
+  [[ "$id" =~ ^[0-9a-f]{32}$ && "$elapsed" =~ ^[0-9]{1,9}$ ]] || return 2
+  [ "$elapsed" -le 604800000 ] || return 2
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":3,"utc":"%s","measurement":"workflow_outcome","caller":"%s","workflow":"%s","workflow_id":"%s","outcome":"%s","elapsed_ms":%s}' \
+    "$utc" "$caller" "$workflow" "$id" "$outcome" "$elapsed")
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+}
+
+# Observe quota fields carried by an upstream GraphQL response. Optional
+# remaining/resetAt stay null unless both fields validate; old cost-only
+# responses remain useful without inventing a reset window.
+gh_measure_graphql_cost(){
+  local caller="${1:-}" operation="${2:-}" workflow="${3:-}" id="${4:-}" origin="${5:-}" context="${6:-}" observation utc record id_json=null context_json=null
+  case "$caller:$operation:$workflow" in
+    ai-pr-wait:graphql.pr_status:pr_wait) [ "$origin" = upstream_refresh ] || return 2 ;;
+    ai-blocker-watch:graphql.open_issue_snapshot:blocker_watch_tick|\
+    ai-blocker-watch:graphql.issue_detail:blocker_watch_tick) [ "$origin" = direct ] || return 2 ;;
+    *) return 2 ;;
+  esac
+  [ -z "$id" ] || [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 2
+  observation="$(jq -ce '
+    .data.rateLimit as $r |
+    select(($r.cost | type) == "number" and $r.cost >= 0 and $r.cost <= 1000000000 and $r.cost == ($r.cost | floor)) |
+    if (($r.remaining | type) == "number" and $r.remaining >= 0 and $r.remaining <= 1000000000 and $r.remaining == ($r.remaining | floor)
+        and ($r.resetAt | type) == "string" and ($r.resetAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")))
+    then {graphql_points:$r.cost,graphql_remaining:$r.remaining,graphql_reset_at:$r.resetAt}
+    else {graphql_points:$r.cost,graphql_remaining:null,graphql_reset_at:null} end
+  ' 2>/dev/null)" || return 0
+  observation="${observation#\{}"
+  observation="${observation%\}}"
+  [ -z "$id" ] || id_json="\"$id\""
+  [[ "$context" =~ ^v1:[0-9a-f]{64}$ ]] && context_json="\"$context\""
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  record=$(printf '{"schema":2,"utc":"%s","measurement":"observed_graphql_cost","caller":"%s","operation":"%s","workflow":"%s","workflow_id":%s,"access_context":%s,"http_requests":null,%s}' \
+    "$utc" "$caller" "$operation" "$workflow" "$id_json" "$context_json" "$observation")
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+}
+
 # Both command records and server snapshots share the same filesystem boundary.
 gh_measure_append(){
   local dir="$1" record="$2" file count

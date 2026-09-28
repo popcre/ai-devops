@@ -79,6 +79,12 @@ if [ "$INTERVAL" -lt 300 ] && [ "${AI_DEVOPS_TEST_MODE:-0}" != 1 ]; then
   INTERVAL=300
 fi
 THROTTLE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)/ai-gh"
+GH_COST_READY=0
+GH_COST_HELPER="$(dirname "$THROTTLE")/../tools/github-requests/telemetry.sh"
+if [ -f "$GH_COST_HELPER" ]; then
+  source "$GH_COST_HELPER"
+  GH_COST_READY=1
+fi
 [ -x "$THROTTLE" ] || {
   printf 'ai-pr-wait: ai-gh throttle is missing; no GitHub call was made\n' >&2
   exit 3
@@ -162,12 +168,12 @@ bounded_gh() {
     # A waiter that has seen queue membership must validate a possible
     # ejection freshly; its own history cannot be delegated to another waiter.
     [ "$WAS_QUEUED" -eq 0 ] || force=(--force-refresh)
-    AI_GH_CALLER=ai-pr-wait "$PYTHON_RUNNER" "$SNAP_HELPER_ARG" \
+    AI_GH_CALLER=ai-pr-wait AI_GH_COST_CONTEXT="${SNAP_CONTEXT:-}" "$PYTHON_RUNNER" "$SNAP_HELPER_ARG" \
       --state-dir "$SNAP_STATE_ARG" --key "v1 $SNAP_CONTEXT $REPO $PR $cache_target" \
       --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" --cap-supervisor-timeout --defer-source-mark \
       --age-file "$SNAP_AGE_ARG" --source-file "$SNAP_SOURCE_ARG" "${force[@]+"${force[@]}"}" -- "${command[@]}"
   else
-    AI_GH_CALLER=ai-pr-wait "${command[@]}"
+    AI_GH_CALLER=ai-pr-wait AI_GH_COST_CONTEXT="${SNAP_CONTEXT:-}" "${command[@]}"
   fi
 }
 
@@ -268,6 +274,29 @@ cleanup_wait_files() {
 }
 trap cleanup_wait_files EXIT
 
+PR_WAIT_RECEIPT_ID=''
+PR_WAIT_OUTCOME=''
+PR_WAIT_STARTED_MS=''
+if [ "$GH_COST_READY" = 1 ]; then
+  PR_WAIT_RECEIPT_ID="$(gh_measure_workflow_id)" ||
+    printf 'ai-pr-wait: request measurement unavailable: workflow ID not created\n' >&2
+  gh_measure_clock; PR_WAIT_STARTED_MS="$GH_MEASURE_CLOCK"
+fi
+export PR_WAIT_RECEIPT_ID
+pr_wait_cleanup(){
+  local rc=$? elapsed_ms
+  if [ -n "$PR_WAIT_RECEIPT_ID" ] && [ -n "$PR_WAIT_OUTCOME" ]; then
+    gh_measure_clock
+    elapsed_ms=$(( GH_MEASURE_CLOCK - PR_WAIT_STARTED_MS ))
+    [ "$elapsed_ms" -ge 0 ] || elapsed_ms=0
+    gh_measure_workflow_outcome ai-pr-wait pr_wait "$PR_WAIT_RECEIPT_ID" "$PR_WAIT_OUTCOME" "$elapsed_ms" ||
+      printf 'ai-pr-wait: request measurement unavailable: workflow outcome not saved\n' >&2
+  fi
+  cleanup_wait_files
+  return "$rc"
+}
+trap 'pr_wait_cleanup' EXIT
+
 elapsed_seconds() {
   printf '%s' "$(( SECONDS - WAIT_STARTED_SECONDS ))"
 }
@@ -319,15 +348,18 @@ while :; do
   if [ -z "$Q" ] || ! printf '%s' "$Q" | jq -e '.data.repository.pullRequest and (.errors | not) and ((.data.repository.pullRequest.state != "OPEN") or (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup == null) or ((.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage == false) and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount == (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes | length))))' >/dev/null 2>&1; then
     READ_CAUSE="$(read_failure_cause)"
     if [ "$GH_RC" -eq 125 ] && [ -n "$LAST" ]; then
+      PR_WAIT_OUTCOME=deadline
       say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($LAST)"
       exit 2
     fi
     say "ai-pr-wait: could not read PR #$PR after $(elapsed_seconds)s (transient: $READ_CAUSE); retrying"
     if deadline_reached; then
+      PR_WAIT_OUTCOME=deadline
       say "PR #$PR could not be read before the ${TIMEOUT_MINUTES}m deadline - giving up rather than waiting silently"
       exit 2
     fi
     wait_for_next_poll || {
+      PR_WAIT_OUTCOME=deadline
       say "PR #$PR could not be read before the ${TIMEOUT_MINUTES}m deadline - giving up rather than waiting silently"
       exit 2
     }
@@ -342,10 +374,12 @@ while :; do
   FAILED="$(printf '%s' "$Q" | jq -r '[.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") | (.name // .context)] | join(", ")')"
 
   if [ "$STATE" = "MERGED" ]; then
+    PR_WAIT_OUTCOME=merged
     say "PR #$PR MERGED  merge commit $MERGE_SHA"
     exit 0
   fi
   if [ "$STATE" = "CLOSED" ]; then
+    PR_WAIT_OUTCOME=closed
     say "PR #$PR CLOSED without merging - it will not merge on its own"
     exit 1
   fi
@@ -362,6 +396,7 @@ while :; do
       WAS_QUEUED=0
       QUEUED_HEAD=''
     else
+    PR_WAIT_OUTCOME=ejected
     say "PR #$PR was EJECTED from the merge queue and is still OPEN - waiting longer changes nothing."
     say "  Look at the merge_group run, not the pull request run:"
     say "    gh run list --repo $REPO --event merge_group --limit 5"
@@ -370,6 +405,7 @@ while :; do
   fi
 
   if [ -n "$FAILED" ]; then
+    PR_WAIT_OUTCOME=checks_failed
     say "PR #$PR has failing checks and will not merge: $FAILED"
     say "  A check reported CANCELLED is usually a job timeout, not a test result -"
     say "  compare its duration against timeout-minutes before diagnosing anything."
@@ -383,10 +419,12 @@ while :; do
   fi
 
   if deadline_reached; then
+    PR_WAIT_OUTCOME=deadline
     say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
     exit 2
   fi
   wait_for_next_poll || {
+    PR_WAIT_OUTCOME=deadline
     say "PR #$PR still in progress after ${TIMEOUT_MINUTES}m - giving up rather than waiting silently ($NOW)"
     exit 2
   }

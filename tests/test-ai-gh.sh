@@ -558,6 +558,46 @@ touch "$TMP/telemetry-state/measurements/2000-01-01.jsonl"
 check 'telemetry retention removes only old owned date files' "[ ! -e '$TMP/telemetry-state/measurements/2000-01-01.jsonl' ] && jq -se '.[-1].bucket == \"graphql\" and .[-1].cli_executions == 1 and .[-1].principal == \"unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
 check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 7 and .opaque_cli_executions == 7 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+source "$ROOT/tools/github-requests/telemetry.sh"
+workflow_id="$(gh_measure_workflow_id)"
+access_context="v1:$(printf '%064d' 0)"
+printf '%s' '{"data":{"rateLimit":{"cost":3,"remaining":4990,"resetAt":"2026-09-28T05:00:00Z"},"repository":{"private":"FIXTURE_CANARY"}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait "$workflow_id" upstream_refresh "$access_context"
+printf '%s' '{"data":{"rateLimit":{"cost":2,"remaining":4988,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait "$workflow_id" upstream_refresh "$access_context"
+printf '%s' '{"data":{"rateLimit":{"cost":9}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait "$workflow_id" cache_hit
+cache_rc=$?
+gh_measure_workflow_outcome ai-pr-wait pr_wait "$workflow_id" checks_failed 1234
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
+check 'GraphQL page costs link once to workflow and local reset headroom' \
+  "[ $rc -eq 0 ] && [ $cache_rc -eq 2 ] && jq -e '.records == 7 and .identity_probe_invocations >= 0 and .observed_graphql_cost_records == 2 and .linked_graphql_points == 5 and .completed_workflow_receipts == 1 and .observed_graphql_windows_local_only == [{\"context_ordinal\":1,\"reset_at\":\"2026-09-28T05:00:00Z\",\"records\":2,\"min_remaining\":4988,\"max_remaining\":4990,\"observed_points\":5}]' '$TMP/report' && ! grep -q '$access_context' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/telemetry-state/measurements'"
+printf '%s' '{"data":{"rateLimit":{"cost":4,"remaining":"bad","resetAt":"FIXTURE_CANARY"}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
+check 'legacy or malformed optional quota fields retain cost without false window' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_cost_records == 3 and .observed_graphql_points == 9 and .observed_graphql_window_records == 2' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/telemetry-state/measurements'"
+mkdir "$TMP/legacy-cost"
+printf '%s\n' '{"schema":2,"utc":"2026-09-28T05:00:00Z","measurement":"observed_graphql_cost","caller":"ai-pr-wait","operation":"graphql.pr_status","workflow":"pr_wait","workflow_id":null,"graphql_points":7,"http_requests":null}' > "$TMP/legacy-cost/2026-09-28.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/legacy-cost" > "$TMP/report"; rc=$?
+check 'older cost rows without quota window fields remain readable' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_points == 7 and .observed_graphql_window_records == 0' '$TMP/report'"
+printf '%s' '{"data":{"rateLimit":{"cost":1,"remaining":4900,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  AI_GH_STATE_DIR="$TMP/unattributed-state" gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh 'ghp_FIXTURE_CANARY'
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/unattributed-state/measurements" > "$TMP/report"; rc=$?
+check 'unverified access stays unattributed and no token enters telemetry or report' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_window_records == 0 and .unattributed_graphql_window_records == 1 and .observed_graphql_windows_local_only == []' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/unattributed-state/measurements' && ! grep -q FIXTURE_CANARY '$TMP/report'"
+bw_id="$(gh_measure_workflow_id)"
+printf '%s' '{"data":{"rateLimit":{"cost":4,"remaining":4800,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_graphql_cost ai-blocker-watch graphql.open_issue_snapshot blocker_watch_tick "$bw_id" direct "$access_context"
+AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_workflow_outcome ai-blocker-watch blocker_watch_tick "$bw_id" completed 1000
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/bw-cost-state/measurements" > "$TMP/report"; rc=$?
+check 'BlockerWatch tick receipt links a direct snapshot cost' \
+  "[ $rc -eq 0 ] && jq -e '.linked_graphql_points == 4 and .completed_workflow_receipts == 1 and .workflow_outcomes[0].workflow == \"blocker_watch_tick\"' '$TMP/report'"
+jq -c '.access_context="FIXTURE_CANARY"' "$TMP/legacy-cost/2026-09-28.jsonl" > "$TMP/legacy-cost/2026-09-27.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/legacy-cost" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+check 'report rejects a non-opaque context without exposing it' \
+  "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && ! grep -q FIXTURE_CANARY '$TMP/report-error'"
 mkdir "$TMP/report-compat"
 head -n 1 "$TMP/telemetry-state/measurements/$(date -u +%F).jsonl" > "$TMP/report-compat/$(date -u +%F).jsonl"
 for sample in "$TMP/state/measurements/"*.jsonl; do jq -c 'select(.operation == "api.identity")' "$sample" >> "$TMP/report-compat/$(date -u +%F).jsonl"; done
