@@ -183,6 +183,7 @@ try {
   Assert ((git -C $protected.Repo rev-parse HEAD).Trim() -eq $protectedHead) 'pinned reviewer safety update failed'
   $pending=Join-Path (Split-Path -Parent $protected.Launcher) ('install-authorizations\' + $protectedHead + '.json.consuming')
   Assert (Test-Path -LiteralPath $pending) 'source-only gate lost retryable authorization before full install'
+  $pendingHash=(Get-FileHash -LiteralPath $pending -Algorithm SHA256).Hash
   # Two independent installer processes cannot both enter the same pending
   # authority transaction. The first holds the real machine-wide mutex in a
   # local-origin fixture; the second must refuse before touching the receipt.
@@ -213,7 +214,18 @@ try {
     $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote
     $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher; $env:AI_DEVOPS_TEST_LOCK_READY=$oldReady
   }
-  Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'pending full installation'
+  Invoke-Gate $protected -ExpectedHead $protectedHead
+  Assert (Test-Path -LiteralPath $pending) 'same-target source retry consumed pending authorization'
+  Assert ((Get-FileHash -LiteralPath $pending -Algorithm SHA256).Hash -eq $pendingHash) 'same-target source retry changed pending authorization'
+  Invoke-Gate $protected -ExpectedHead ('0' * 40) -ExpectFailure -FailureContains 'differs from the gate-approved install target'
+  $savedAuth=Get-Content -Raw -LiteralPath $pending
+  try {
+    $tampered=$savedAuth | ConvertFrom-Json
+    $tampered.installed_head='0' * 40
+    $tampered | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $pending -Encoding ASCII
+    Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'does not match installed source'
+  } finally { [IO.File]::WriteAllText($pending, $savedAuth) }
+  Invoke-Gate $protected -ExpectedHead $protectedHead
   Remove-Item -LiteralPath $pending
   Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'authorization is missing'
 
@@ -433,6 +445,8 @@ try {
     Assert ((Get-FileHash -LiteralPath "$($stamp.Launcher).cmd" -Algorithm SHA256).Hash -eq $oldCmdHash) `
       'injected failure changed gate command receipt'
     Assert (Test-Path -LiteralPath $stampPending -PathType Leaf) 'injected failure consumed pending authority'
+    Invoke-Gate $stamp -ExpectedHead $stampTarget
+    Assert (Test-Path -LiteralPath $stampPending -PathType Leaf) 'source retry after launcher failure consumed pending authority'
     $stampTransaction=Join-Path (Split-Path -Parent $stamp.Launcher) ('launcher-transactions\' + $stampTarget + '.json')
     $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_GATE='1'
     $crashed=Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-File',

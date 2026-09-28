@@ -273,7 +273,8 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
     if ((Test-Path -LiteralPath $authPath) -and (Test-Path -LiteralPath $consumingPath)) { throw 'Ambiguous toolkit install authorization state.' }
     if (-not (Test-Path -LiteralPath $authPath -PathType Leaf)) {
         if (-not (Test-Path -LiteralPath $consumingPath -PathType Leaf)) { throw 'Reviewed toolkit install authorization is missing.' }
-        if ($SourceGateOnly -and -not $LauncherGateOnly) { throw 'Toolkit install source update is pending full installation.' }
+        # A setup retry re-enters this source gate before the full installer.
+        # Revalidate the exact pending grant below; do not reserve a second one.
         $authPath = $consumingPath
     }
     try { $auth = Get-Content -Raw -LiteralPath $authPath | ConvertFrom-Json } catch { throw 'Reviewed toolkit install authorization is malformed.' }
