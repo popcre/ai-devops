@@ -776,7 +776,7 @@ Natural context cut: update STATUS, use `fresh-session`, and re-read Phases 4-7.
   `docs/deployment.md`; do not commit real `.env` or machine-local secrets.
 - This public repository cannot contain raw provider transcripts, credentials,
   internal hostnames, private endpoints, or licensed/private source.
-- No production/shared-cloud mutation without Albert naming the exact resource
+- No production/shared-cloud mutation without an assigned AI reviewer's APPROVE of the exact resource
   and action in the implementing chat. This plan contains none.
 - `ai-review-sandbox` is not a security sandbox merely because of its name.
 - Container root and a mounted container socket are not safe defaults. Rootless

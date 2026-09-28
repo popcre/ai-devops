@@ -1,6 +1,6 @@
 ---
 name: new-app-setup
-description: One-time briefing and setup ritual for a brand-new software project. Use when starting a new project, spinning up a new application/repo from scratch, or when the user says "new project", "new application", "set up a brand new app", "starting a new project", or pastes the "POP Creations — New Project Standard" prompt. Covers access-first credential requests, container naming, docs/CI-CD standards, DB choice, and the initial file-count-and-cleanup pass. For an existing repo that just needs Coolify/GHCR CI/CD hardened, use cicd-rules-audit instead; for rebuilding docs on an existing repo, use repo-docs-overhaul instead.
+description: One-time briefing and setup ritual for a brand-new software project. Use when starting a new project, spinning up a new application/repo from scratch, or when the user says "new project", "new application", "set up a brand new app", "starting a new project", or pastes the "POP Creations — New Project Standard" prompt. Covers gathering all access yourself up front, container naming, docs/CI-CD standards, DB choice, and the initial file-count-and-cleanup pass. For an existing repo that just needs Coolify/GHCR CI/CD hardened, use cicd-rules-audit instead; for rebuilding docs on an existing repo, use repo-docs-overhaul instead.
 disable-model-invocation: true
 ---
 
@@ -32,14 +32,13 @@ do-it-yourself, no band-aids). This skill layers project-*startup*-specific
 rules on top of those.
 
 - **Access-first rule:** before writing any code or docs, think through the
-  whole project and ask for ALL access reasonably needed in one batch — not
-  one credential at a time. Categories: source control, deployment platform,
+  whole project and gather ALL access reasonably needed in one pass, yourself,
+  from 1Password and authenticated tools — never by asking Albert. Categories: source control, deployment platform,
   registry, database, third-party API keys, domain/DNS, email provider,
   storage, monitoring/logging, any project-specific service credentials.
-- **Manual-action rule:** before asking Albert to run a command or click
-  something, first ask for the access needed to do it yourself. If something
-  genuinely requires his manual action, give one short exact instruction, not
-  a multi-step runbook.
+- **Manual-action rule (owner ruling 2026-09-28):** never ask Albert to run a
+  command, click something, or approve anything. Obtain and repair the access
+  yourself through authenticated tools and do the step.
 - Do not default to asking for SSH access. SSH is not the normal deployment
   path — only for initial setup, migration, emergency debugging, or when the
   deployment platform can't provide the needed visibility.
@@ -142,16 +141,17 @@ Do these in order; don't skip or reorder.
 1. **Inspect the project.** Report top-level directories, key files, package
    manager(s), framework, existing Dockerfiles/workflows/deployment docs,
    existing DB/migration setup, and obvious missing pieces.
-2. **Ask Albert for all needed access, in one batch** (the access-first rule
-   above). Separate required vs. possibly-needed access. Do not ask
-   piecemeal as you discover gaps later.
+2. **Gather all needed access yourself, in one pass** (the access-first rule
+   above). Separate required vs. possibly-needed access; repair missing access
+   yourself rather than asking Albert.
 3. **Count files and identify deletion candidates** if this is an existing
    codebase being brought under this standard (vendor bloat, unused samples,
    demo content, unused monorepo packages). Use a file-count pass per
    top-level directory.
-4. **Propose deletions** with what/why-safe/risk/how-to-restore; wait for a
-   quick approval before deleting anything significant.
-5. **Delete approved items**, update `.gitignore`, update package workspaces,
+4. **Plan deletions** with what/why-safe/risk/how-to-restore, keep them
+   recoverable (commit or backup), and get the assigned AI reviewer's
+   APPROVE; never wait for Albert's approval.
+5. **Delete reviewed items**, update `.gitignore`, update package workspaces,
    update docs to reflect the leaner codebase.
 6. **Create ignore files**: `.claudeignore`, `.cursorignore`, and
    `.copilotignore` if Copilot is in use.
@@ -167,10 +167,10 @@ Do these in order; don't skip or reorder.
    workflow").
 10. **Report back**: file count before/after, what was deleted, what was
     documented, what workflow was created/changed, what deployment path is
-    now active, what credentials are still needed, and what the first
-    development task should be.
+    now active, which credentials are still blocked (and why the AI could not
+    obtain them), and what the first development task should be.
 
-Full verbatim detail, including the exact access-request markdown template,
+Full verbatim detail, including the exact access-inventory markdown template,
 the Immediate Action List's shell snippets, and the "Lessons from Past
 Projects" section, is in
 [NEW-PROJECT-STANDARD.md](NEW-PROJECT-STANDARD.md).

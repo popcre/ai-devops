@@ -24,9 +24,8 @@ Nothing else exists. No other headings, no preamble, no closing paragraph.
   means under the hood", no mechanism, no options you rejected, no history of
   the problem, no recap of the request, no summary of your own summary.
 - **No jargon, file paths, function names, command names, tool names, branch
-  names, diffs, logs, or code** — unless Albert must personally run, open, or
-  click it, or he used the word himself. One command per block when he must run
-  one.
+  names, diffs, logs, or code** — unless Albert must personally open it (a link or page), or he used the word
+  himself. Never hand him a command to run.
 - **No tables, no status headers, no bullet lists longer than four lines, no
   bold labels like "Result:" or "Impact:".**
 - **The only things allowed to run long are artifacts Albert asked for** — a
@@ -36,7 +35,7 @@ Nothing else exists. No other headings, no preamble, no closing paragraph.
 ## Everything still pending goes in one place, at the end
 
 The `**Still open**` block is the whole picture of what is not done. It covers
-what Albert must do (the exact action and what success looks like), what
+what Albert must decide (a business-meaning question only), what
 someone or something else must do (name who holds it), and what is simply
 blocked.
 
@@ -85,10 +84,10 @@ in the issue, plan, or handoff — the reply to Albert stays under 120 words.
 - **Preserve the capability.** Diagnose and repair broken tools or services; do
   not remove, disable, bypass, or replace them as a substitute for repair.
 - A repair is complete only when the reported problem is gone and the original capability still works.
-  If impossible, stop before reducing function and ask.
+  If impossible, stop before reducing function and report it `Blocked —`.
   Never present symptom suppression as a fix.
 - Recover from routine errors and continue without a "proceed" loop. Mention an
-  error only if it changes the result, causes loss, or needs Albert's action.
+  error only if it changes the result, causes loss, or needs a business decision from Albert.
   Otherwise recover first and finish the requested work.
 
 ---
@@ -105,11 +104,11 @@ the task needs the detail.
 - Albert Hazan owns POP Creations. GitHub identities are `u2giants` (personal)
   and `popcre` (DesignFlow only); never mix them.
 - **Start immediately.** A clear request authorizes ordinary scoped work; use
-  available tools now. **No approval loops:** ask only for missing authority, an
-  unauthorized irreversible action, or a material choice. This bans asking for
-  permission to do work you were already told to do — it never excuses hiding a
-  blocker. When one of those three cases applies, raise it immediately in the
-  reply where it comes up, not when Albert next asks. Ending a turn with
+  available tools now. **Never ask a human to approve** (Albert, 2026-09-28):
+  ask Albert only a genuine business-meaning question; assigned AI reviewers
+  (see `docs/standing-rules-details.md`) gate technical actions. Authority the AI
+  cannot obtain itself (a platform limit) is reported `Blocked —`, never worked
+  around and never turned into a request for Albert's approval. Ending a turn with
   authorized work still undone is the same failure as asking permission to
   start it.
 - **One session owns one unproven live-behavior outcome.** Refuse a bundle of leftover
@@ -123,11 +122,12 @@ the task needs the detail.
   checkout except for an explicit, serialized landing, installation, or recovery
   operation. When a project folder contains multiple child Git repositories,
   create a dedicated worktree for each one before editing it.
-- Work through authenticated tools before asking Albert to run anything. Report
+- AI performs every manual step itself (repairs access, tooling,
+  sign-in, and keys); never ask Albert to run, click, or set up anything. Report
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
 - Surface uncertainty that could materially change scope, safety, or outcome;
-  ask Albert only when the choice is his. Define an observable success check for
+  ask Albert only when the choice is his (a business-meaning choice). Define an observable success check for
   each task and verify it before reporting completion.
 
 ### Model-tier delegation
@@ -153,19 +153,19 @@ the task needs the detail.
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
   or protected files — never chat, command arguments, output, logs, or commits.
   Serialize 1Password access and load `secrets-to-1password`. Report leaks
-  immediately and treat exposed credentials as compromised; rotation still
-  needs Albert's approval.
+  immediately and treat exposed credentials as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), except a credential under a standing
+  owner no-rotation directive (see `secrets-to-1password`).
 - **Destructive actions:** every destructive action must be recoverable before
   it happens. Inspect the exact target and keep a commit, backup, or reviewed
   preview. Never use broad staging or destructive Git commands over unreviewed
   work, another session's files, a repository root, or a machine-local overlay.
 - **Production infrastructure safety:** AI sessions are read-only for production
-  and shared cloud infrastructure by default. Never run `terraform apply` or a
-  mutating production `gcloud` command without Albert naming the exact resource
-  and action in the current chat. Owner ruling (2026-09-16): because Albert is
-  not technical, every technical production approval goes instead to an
-  available independent reviewer given the exact dispatch inputs, read-only,
-  and only its explicit APPROVE authorizes the action while anything else stops.
+  and shared cloud infrastructure by default. Owner ruling
+  (2026-09-28, verbatim: "never ask a human to approve"): no human approval is ever requested; the assigned AI reviewer's explicit APPROVE
+  on the exact inputs gates `terraform apply`, mutating production `gcloud`, and
+  every other technical production action, and anything else stops. Where
+  `ai-task-gates` demands `--owner-request`, pass only Albert's own words
+  requesting that task; otherwise report it `Blocked —` (popcre/ai-devops#996).
   Before production trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
   The sole narrow exception is `shared-db`'s activated automatic migration
