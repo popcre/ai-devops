@@ -342,7 +342,7 @@ state_record_override(){
 reviewer_approval_summary(){
   local report="$1" action="$2" head="$3" worktree="$4" identity key digest report_hash lifecycle_root state row mode
   [ -f "$report" ] && [ ! -L "$report" ] || return 1
-  report="$(realpath -- "$report")" || return 1
+  report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")" || return 1
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
   identity="$("$SCRIPT_DIR/ai-review-lifecycle" identity "$worktree" 2>/dev/null)" || return 1
   key="$(jq -r '.repository_key // ""' <<<"$identity")"; digest="$(jq -r '.source_digest // ""' <<<"$identity")"
@@ -832,7 +832,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
     fi
     approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
-      || blocked "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action.' "$action")"
+      || blocked "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
     state_record_override reviewer-approval "$action" "$approval_summary" "$effective"
     printf 'ai-task-gates: "%s" allowed by assigned AI reviewer: %s\n' "$action" "$approval_summary"
     return 0

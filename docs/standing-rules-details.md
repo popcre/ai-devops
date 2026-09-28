@@ -104,7 +104,8 @@ shared-db allocator draws; everywhere else, a rotation reviewer run through
 implementing session never approves its own change. Authority an AI cannot
 obtain itself (a platform limit) is reported `Blocked —`; `ai-task-gates`
 approval gates take `--reviewer-approval <report>`, the assigned reviewer's
-exact-head APPROVE report (popcre/ai-devops#996). Such a limit is
+exact-head APPROVE report (popcre/ai-devops#996), from a review run with
+`ai-review --implementer <engine>` (auto-detected for Claude Code and Codex). Such a limit is
 never bypassed and never becomes a request for Albert's approval.
 
 Owner ruling (2026-09-28, Albert Hazan, verbatim: "i don't

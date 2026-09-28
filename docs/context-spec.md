@@ -60,7 +60,7 @@ contract; `tools/ci/validate-task-gates.py` enforces it. A repository may ship
 its own `.ai-devops/task-gates.json`, which can only strengthen a class.
 
 Toolkit installation is a distinct non-protected class: it keeps deployment
-refused until an assigned AI reviewer's exact-input APPROVE is recorded, then permits the supported
+refused until an assigned AI reviewer's exact-head APPROVE is recorded, then permits the supported
 installer to run. It must not be modelled as protected `deployment`, because a
 forbidden action on a protected class has no authorization path and would make
 the installer permanently unusable.

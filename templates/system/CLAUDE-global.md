@@ -136,7 +136,9 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   on the exact inputs gates `terraform apply`, mutating production `gcloud`, and
   every other technical production action, and anything else stops. Where
   `ai-task-gates` asks for approval, pass `--reviewer-approval <report>`: the
-  assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996).
+  assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
+  that review with `ai-review --implementer <your engine>` unless you are Claude
+  Code or Codex.
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.

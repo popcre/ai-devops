@@ -165,7 +165,9 @@ the task needs the detail.
   on the exact inputs gates `terraform apply`, mutating production `gcloud`, and
   every other technical production action, and anything else stops. Where
   `ai-task-gates` asks for approval, pass `--reviewer-approval <report>`: the
-  assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996).
+  assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
+  that review with `ai-review --implementer <your engine>` unless you are Claude
+  Code or Codex.
   Before production trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
   The sole narrow exception is `shared-db`'s activated automatic migration
