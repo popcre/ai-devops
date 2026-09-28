@@ -127,10 +127,17 @@ gate_args=(install-verify --phase preflight --target-head "$target_head"
   --installed-checkout "$REPO_ROOT" --installed-launcher /usr/local/bin/ai-task-gates)
 [ -z "$expected_head" ] || gate_args+=(--caller-pinned)
 [ -z "$owner_request" ] || gate_args+=(--owner-request "$owner_request")
-(cd "$candidate" && "$candidate/bin/ai-task-gates" "${gate_args[@]}") || {
+preflight_output="$(cd "$candidate" && "$candidate/bin/ai-task-gates" "${gate_args[@]}")" || {
   warn 'installation preflight refused; installed checkout was not advanced'
   exit 1
 }
+printf '%s\n' "$preflight_output"
+if [ "$preflight_output" = "AI_DEVOPS_INSTALL_RECOVERED=$target_head" ]; then
+  git worktree remove --force "$candidate" >/dev/null || exit 1
+  candidate_added=0
+  info "Prior installation of $target_head was already complete; finalization cleanup recovered"
+  exit 0
+fi
 git worktree remove --force "$candidate" >/dev/null || exit 1
 candidate_added=0
 

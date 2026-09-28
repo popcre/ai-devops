@@ -67,6 +67,21 @@ expect_stop 'same-source reinstall needs task and owner request' gate resume "$T
 expect_ok 'trusted same-source reinstall retains capability' gate resume "$TMP/installed" "$ordinary" --owner-request 'Owner requested maintenance reinstall'
 expect_ok 'same-source required stages bind to transaction' gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
 expect_ok 'trusted same-source reinstall finalizes' gate finalize "$TMP/installed" "$ordinary"
+for crash_point in completion authority marker; do
+  expect_ok "ordinary maintenance begins before $crash_point interruption" gate resume "$TMP/installed" "$ordinary" --owner-request 'Owner requested maintenance reinstall'
+  expect_ok "ordinary stages bind before $crash_point interruption" gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
+  export AI_TASK_GATES_TEST_FINALIZE_CRASH_AFTER="$crash_point"
+  expect_stop "ordinary finalize is interrupted after $crash_point" gate finalize "$TMP/installed" "$ordinary"
+  unset AI_TASK_GATES_TEST_FINALIZE_CRASH_AFTER
+  expect_ok "interrupted ordinary finalize resumes after $crash_point" gate finalize "$TMP/installed" "$ordinary"
+  [ ! -e "$TMP/state/install-authorizations/$ordinary.json.ordinary" ] &&
+    [ ! -e "$TMP/state/install-stages/$ordinary.json" ] || { echo 'FAIL: recovered ordinary cleanup left a transaction'; exit 1; }
+done
+# A previously installed machine may have a completion receipt from the older
+# schema. It must still be able to receive a new, separately authorized target.
+jq 'del(.transaction_sha256,.stage_marker_sha256,.manifest_sha256,.stage_report_sha256)' \
+  "$TMP/state/install-completions/last.json" > "$TMP/old-completion.json"
+cp "$TMP/old-completion.json" "$TMP/state/install-completions/last.json"
 
 (cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
 printf '#!/bin/sh\n' > "$TMP/candidate/bin/ai-grok-review"
@@ -129,8 +144,38 @@ expect_stop 'failed required stage cannot be sealed' gate stages-complete "$TMP/
 stage_path="$(stage_report "$protected")"
 expect_ok 'failed finalize can rebind repaired stage results' gate stages-complete "$TMP/installed" "$protected" --stage-report "$stage_path"
 expect_ok 'completed stages permit protected resume after target manifest' gate resume "$TMP/installed" "$protected"
+cp -a "$TMP/state" "$TMP/state-before-protected-finalize"
 expect_ok 'protected install finalizes only with live reviewed authority' gate finalize "$TMP/installed" "$protected"
-expect_stop 'one-use protected authority cannot replay' gate finalize "$TMP/installed" "$protected"
+expect_ok 'completed protected finalize is idempotent without reminting authority' gate finalize "$TMP/installed" "$protected"
+cp -a "$TMP/state" "$TMP/state-after-protected-finalize"
+for crash_point in completion authority marker; do
+  rm -rf -- "$TMP/state"
+  cp -a "$TMP/state-before-protected-finalize" "$TMP/state"
+  export AI_TASK_GATES_TEST_FINALIZE_CRASH_AFTER="$crash_point"
+  expect_stop "protected finalize is interrupted after $crash_point" gate finalize "$TMP/installed" "$protected"
+  unset AI_TASK_GATES_TEST_FINALIZE_CRASH_AFTER
+  [ "$(jq -r .target_head "$TMP/state/install-completions/last.json")" = "$protected" ] || { echo 'FAIL: interrupted completion target changed'; exit 1; }
+  if [ "$crash_point" = completion ]; then
+    printf '# altered\n' >> "$TMP/state/install-stages/$protected.json"
+    expect_stop 'tampered surviving stage marker cannot recover' gate finalize "$TMP/installed" "$protected"
+    cp "$TMP/state-before-protected-finalize/install-stages/$protected.json" "$TMP/state/install-stages/$protected.json"
+    printf '# altered\n' >> "$auth.consuming"
+    expect_stop 'tampered surviving protected authority cannot recover' gate finalize "$TMP/installed" "$protected"
+    cp "$TMP/state-before-protected-finalize/install-authorizations/$protected.json.consuming" "$auth.consuming"
+  fi
+  if [ "$crash_point" = authority ]; then
+    expect_ok 'updater preflight recovers completed protected install without reminting authority' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+  elif [ "$crash_point" = completion ]; then
+    expect_ok 'direct installer resume recovers completed protected install' gate resume "$TMP/installed" "$protected"
+  else
+    expect_ok "interrupted protected finalize resumes after $crash_point" gate finalize "$TMP/installed" "$protected"
+  fi
+  expect_ok 'completed protected finalize remains idempotent after cleanup' gate finalize "$TMP/installed" "$protected"
+  [ ! -e "$auth.consuming" ] && [ ! -e "$TMP/state/install-stages/$protected.json" ] || { echo 'FAIL: recovered protected cleanup left a transaction'; exit 1; }
+  expect_stop 'completed protected authority cannot reopen preflight' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+done
+rm -rf -- "$TMP/state"
+cp -a "$TMP/state-after-protected-finalize" "$TMP/state"
 
 # A genuinely absent managed installation has its own reviewed first-install
 # operation. A foreign launcher cannot be swapped into that pending grant.

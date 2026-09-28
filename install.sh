@@ -163,9 +163,14 @@ target_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || exit 1
 resume_args=(install-verify --phase resume --target-head "$target_head"
   --installed-checkout "$REPO_ROOT" --installed-launcher /usr/local/bin/ai-task-gates)
 [ -z "$owner_request" ] || resume_args+=(--owner-request "$owner_request")
-(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" "${resume_args[@]}") || {
+resume_output="$(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" "${resume_args[@]}")" || {
   warn 'installation authorization refused before any machine changes'; exit 1;
 }
+printf '%s\n' "$resume_output"
+if [ "$resume_output" = "AI_DEVOPS_INSTALL_RECOVERED=$target_head" ]; then
+  info "Prior installation of $target_head was already complete; finalization cleanup recovered"
+  exit 0
+fi
 [ "$AUTHORIZATION_TEST_ONLY" -eq 0 ] || exit 0
 
 # Pick a sudo prefix only if we are not already root.

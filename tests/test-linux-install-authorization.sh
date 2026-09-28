@@ -21,18 +21,24 @@ phase=''
 owner=''
 caller_pinned=0
 stage_report=''
+target=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --phase) phase="$2"; shift 2 ;;
     --owner-request) owner="$2"; shift 2 ;;
     --caller-pinned) caller_pinned=1; shift ;;
     --stage-report) stage_report="$2"; shift 2 ;;
+    --target-head) target="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
 printf '%s\n' "$phase" >> "$TEST_LOG"
 [ "$phase" != preflight ] || [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || exit 48
 [ "${TEST_GATE_DENY_PHASE:-}" != "$phase" ] || exit 41
+if [ "${TEST_GATE_RECOVER_PHASE:-}" = "$phase" ]; then
+  printf 'AI_DEVOPS_INSTALL_RECOVERED=%s\n' "$target"
+  exit 0
+fi
 if [ "${TEST_ASSERT_GATE_CWD:-0}" = 1 ]; then
   [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || exit 50
 fi
@@ -81,6 +87,10 @@ if TEST_REQUIRE_OWNER=1 "$TMP/installed/install.sh" --test-authorization-only >/
 fi
 TEST_REQUIRE_OWNER=1 TEST_ASSERT_GATE_CWD=1 "$TMP/installed/install.sh" --owner-request 'fixture approval' \
   --test-authorization-only >/dev/null
+: > "$TEST_LOG"
+TEST_GATE_RECOVER_PHASE=resume "$TMP/installed/install.sh" --test-authorization-only > "$TMP/recovered-direct-output"
+grep -Fq 'Prior installation of' "$TMP/recovered-direct-output" || fail 'direct installer ignored recovered completion'
+[ "$(cat "$TEST_LOG")" = resume ] || fail 'recovered direct install ran stages after resume'
 
 # A second direct installer cannot pass the checkout lock even if its gate
 # would have accepted it. The first holder retains the fd for this test.
@@ -136,6 +146,12 @@ git -C "$TMP/src" add install.sh bin/ai-review-preflight
 git -C "$TMP/src" commit -qm target
 git -C "$TMP/src" push -q origin main
 target="$(git -C "$TMP/src" rev-parse HEAD)"
+
+: > "$TEST_LOG"
+TEST_GATE_RECOVER_PHASE=preflight "$TMP/installed/update.sh" --expected-head "$target" > "$TMP/recovered-update-output"
+check_head "$before"
+[ "$(paste -sd, "$TEST_LOG")" = 'start,preflight' ] || fail 'recovered update advanced checkout or reran installation'
+grep -Fq 'Prior installation of' "$TMP/recovered-update-output" || fail 'updater ignored recovered completion'
 
 if "$TMP/installed/update.sh" --expected-head 0000000000000000000000000000000000000000 \
   >/dev/null 2>&1; then fail 'mismatched target pin was accepted'; fi
