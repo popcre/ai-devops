@@ -94,12 +94,15 @@ def summarize(directory):
     }
 
 
-OPERATIONS = {"unknown", "api.graphql", "api.quota", "api.identity", "api.unknown", "repo.view", "workflow.run"}
+OPERATIONS = {"unknown", "api.graphql", "api.quota", "api.identity", "api.unknown", "auth.status", "repo.view", "workflow.run"}
 OPERATIONS.update("bw." + value for value in ("snapshot", "dependents", "wake_miss", "alarm_issue", "link_issue"))
 OPERATIONS.update("pr." + value for value in ("view", "checks", "list", "merge", "create", "comment", "edit", "diff"))
 OPERATIONS.update("issue." + value for value in ("view", "list", "create", "comment", "edit", "close", "reopen"))
 OPERATIONS.update("run." + value for value in ("view", "list", "cancel"))
-CALLERS = {"unknown", "interactive", "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch", "ai-verify-run", "ai-memory-sync", "ai-test-local", "ai-merge-group-evidence"}
+CALLERS = {"unknown", "interactive", "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch",
+           "ai-verify-run", "ai-memory-sync", "ai-test-local", "ai-merge-group-evidence",
+           "ai-transcript-destination-check", "ai-workspace-status", "ai-reviewer-membership-drift",
+           "ai-devops-doctor", "ai-devops-installer"}
 
 if __name__ == "__main__":
     try:

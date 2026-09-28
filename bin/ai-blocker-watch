@@ -109,7 +109,7 @@
 # Environment:
 #   AI_BLOCKER_WATCH_HOME    state (default ~/.ai-devops/blocker-watch)
 #   AI_BLOCKER_WATCH_CONFIG  settings (default <repo>/config/blocker-watch.json)
-#   AI_BLOCKER_WATCH_GH      GitHub command (default ai-gh from this checkout)
+#   AI_BLOCKER_WATCH_TEST_GH  fake GitHub command for explicit test mode only
 set -euo pipefail
 die(){ printf 'ai-blocker-watch: error: %s\n' "$*" >&2; exit 2; }
 note(){ printf 'ai-blocker-watch: %s\n' "$*" >&2; }
@@ -122,7 +122,16 @@ done
 TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
 HOME_DIR="${AI_BLOCKER_WATCH_HOME:-${HOME:?HOME is unavailable}/.ai-devops/blocker-watch}"
 CONFIG="${AI_BLOCKER_WATCH_CONFIG:-$TOOL_ROOT/config/blocker-watch.json}"
-GH="${AI_BLOCKER_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
+GH="$TOOL_ROOT/bin/ai-gh"
+# A production override could silently send every scheduled read/write around
+# the shared quota gate. Only the offline suite may inject a fake transport.
+[ -z "${AI_BLOCKER_WATCH_GH:-}" ] || die 'AI_BLOCKER_WATCH_GH is retired; the scheduled transport must use ai-gh'
+if [ -n "${AI_BLOCKER_WATCH_TEST_GH:-}" ]; then
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || die 'AI_BLOCKER_WATCH_TEST_GH requires AI_DEVOPS_TEST_MODE=1'
+  [ -x "$AI_BLOCKER_WATCH_TEST_GH" ] || die 'test GitHub transport is not executable'
+  GH="$AI_BLOCKER_WATCH_TEST_GH"
+fi
+[ -x "$GH" ] || die 'shared GitHub transport is not executable'
 # Label only the transport subprocess. Resumed AI sessions are independent
 # callers and must not inherit BlockerWatch's attribution.
 gh_call(){ AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; }
