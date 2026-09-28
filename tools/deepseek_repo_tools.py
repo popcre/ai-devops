@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Read-only repository tool loop for ai-deepseek-agent.
+"""Repository tool loop for ai-deepseek-agent.
 
 DeepSeek's chat API cannot open files on its own. This helper runs an
-OpenAI-compatible tool-calling loop that exposes three read-only tools
-(list_dir, read_file, grep) confined to one root directory.
+OpenAI-compatible tool-calling loop that exposes list_dir, read_file, grep,
+write_file, and run_command, confined to one root directory. The wrapper
+always passes a DISPOSABLE, remote-less copy as that root (never the caller's
+checkout and never the review evidence snapshot) and deletes it after the
+turn, so edits and command side effects are discarded. run_command runs under
+bubblewrap: the whole filesystem read-only except the disposable copy, a
+private /tmp and HOME, a cleared environment (no provider key, no Git or
+cloud credentials), and no network. Without bwrap it refuses to run.
 
 The wrapper owns every HTTP request (curl, key on curl's stdin); this helper
 never sees the key. It only builds the first request (init) and, after each
@@ -62,6 +68,15 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string"}, "start_line": {"type": "integer"}, "end_line": {"type": "integer"}},
             "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "write_file",
+        "description": "Create or overwrite a text file in your disposable copy of the repository. The parent directory must exist. Edits are discarded after this turn and are not part of the pull request.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}},
+    {"type": "function", "function": {
+        "name": "run_command",
+        "description": "Run a bash command (build, tests, scripts) with the repository copy as the working directory. Only the copy is writable, there is no network and no credentials, and changes are discarded after this turn. Returns exit code and combined output.",
+        "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
     {"type": "function", "function": {
         "name": "grep",
         "description": "Search repository text files for a Python regular expression. Optional path limits the search to a file or directory. Returns path:line:text matches.",
@@ -294,7 +309,75 @@ def tool_grep(root, args):
     return "\n".join(out)
 
 
-HANDLERS = {"list_dir": tool_list_dir, "read_file": tool_read_file, "grep": tool_grep}
+MAX_WRITE_BYTES = 1024 * 1024
+RUN_SECONDS = float(os.environ.get("DEEPSEEK_TOOLS_RUN_SECONDS", "300"))
+
+
+def tool_write_file(root, args):
+    rel = args.get("path")
+    content = args.get("content")
+    if not isinstance(rel, str) or not rel.strip() or not isinstance(content, str):
+        raise Refused("path and content must be strings")
+    if len(content.encode("utf-8")) > MAX_WRITE_BYTES:
+        raise Refused(f"content is larger than {MAX_WRITE_BYTES} bytes")
+    rel = rel.replace("\\", "/").rstrip("/")
+    parent_rel, _, name = rel.rpartition("/")
+    if not name or name in (".", "..") or is_denied(name) or is_secret(name) or ":" in name or norm(name) == "":
+        raise Refused("that file name is not writable")
+    parent, parent_shown = resolve(root, parent_rel or ".")
+    if not stat.S_ISDIR(os.lstat(parent).st_mode):
+        raise Refused("parent is not a directory")
+    target = os.path.join(parent, name)
+    try:
+        st = os.lstat(target)
+        if is_link(st) or not stat.S_ISREG(st.st_mode):
+            raise Refused("only regular files can be written")
+    except FileNotFoundError:
+        pass
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o644)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    shown = name if parent_shown == "." else parent_shown + "/" + name
+    return f"wrote {shown} ({len(content)} chars) in the disposable copy"
+
+
+def bwrap_bin():
+    b = os.environ.get("AI_DEEPSEEK_BWRAP") or "/usr/bin/bwrap"
+    return b if os.path.isfile(b) and os.access(b, os.X_OK) else None
+
+
+def tool_run_command(root, args):
+    cmd = args.get("command")
+    if not isinstance(cmd, str) or not cmd.strip():
+        raise Refused("command must be a non-empty string")
+    bw = bwrap_bin()
+    if bw is None:
+        raise Refused("run_command is unavailable: bubblewrap (bwrap) is not installed, and commands never run unsandboxed")
+    real = os.path.realpath(root)
+    home = "/tmp/deepseek-home"
+    argv = [bw, "--die-with-parent", "--unshare-all", "--new-session",
+            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+            "--tmpfs", "/tmp", "--dir", home, "--bind", real, real, "--chdir", real,
+            "--clearenv", "--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "--setenv", "HOME", home, "--setenv", "TMPDIR", "/tmp", "--setenv", "LANG", "C.UTF-8",
+            "--setenv", "GIT_CONFIG_NOSYSTEM", "1", "--setenv", "GIT_TERMINAL_PROMPT", "0",
+            "/bin/bash", "-c", cmd]
+    # The real HOME may be under a read-only bind; hide it so no dotfile
+    # credentials are readable from inside the sandbox.
+    real_home = os.path.expanduser("~")
+    if real_home and real_home != "/":
+        argv[argv.index("--bind"):argv.index("--bind")] = ["--tmpfs", real_home]
+    try:
+        done = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              env={"PATH": "/usr/bin:/bin"}, timeout=RUN_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        out = (exc.stdout or b"").decode("utf-8", errors="replace")
+        return f"exit: timeout after {RUN_SECONDS:g}s\n{out}"
+    return f"exit: {done.returncode}\n" + done.stdout.decode("utf-8", errors="replace")
+
+
+HANDLERS = {"list_dir": tool_list_dir, "read_file": tool_read_file, "grep": tool_grep,
+            "write_file": tool_write_file, "run_command": tool_run_command}
 
 
 def run_tool(root, name, raw_args):
@@ -332,7 +415,9 @@ def run_tool(root, name, raw_args):
     return out
 
 
-NOTICE = ("You have read-only access to the repository through the list_dir, read_file, and grep tools. "
+NOTICE = ("You have a disposable, remote-less copy of the repository. list_dir, read_file, and grep read it; "
+          "write_file edits files in it and run_command runs code, builds, and tests in it (no network, no "
+          "credentials). Your edits are discarded after this turn and are not part of the pull request. "
           "Paths are relative to the repository root. Open the files you need to verify claims before "
           "concluding and cite path:line for evidence. Your tool budget is {n} calls.")
 

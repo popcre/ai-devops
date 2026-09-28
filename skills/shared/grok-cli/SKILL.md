@@ -1,6 +1,6 @@
 ---
 name: grok-cli
-description: Use xAI Grok Build through ai-grok-review for repository analysis, read-only review, debate, continuation, or explicit isolated implementation. Use for "ask Grok", "run this by Grok", "Grok CLI", a Grok second opinion, delegated Grok coding, or Grok look-into-this / investigate.
+description: Use xAI Grok Build through ai-grok-review for repository analysis, review (runs code and tests in a disposable snapshot), debate, continuation, or explicit isolated implementation. Use for "ask Grok", "run this by Grok", "Grok CLI", a Grok second opinion, delegated Grok coding, or Grok look-into-this / investigate.
 ---
 
 # Grok CLI
@@ -55,7 +55,7 @@ supervisor waits for every descendant, not only the launcher. If Grok leaves a
 long-lived descendant after producing output, the turn therefore fails closed
 and retains the paid-work block instead of accepting an unowned process.
 
-The wrapper owns the model pin, the read-only permission set, the turn bound, the
+The wrapper owns the model pin, the fixed permission set (reviews may run code and edit files only in a disposable remote-less snapshot; edits are discarded and the caller checkout is verified unchanged), the turn bound, the
 completion rule, the session bookkeeping, and the cost reporting. Every one of those
 exists because getting it wrong cost real money: on 2026-08-05 a hand-composed Grok
 delegation burned **~1.9M tokens and ~$1.28** across five sessions, two of which returned
@@ -154,8 +154,8 @@ is an order of magnitude low.
 
 The wrapper tells you which case you are in and what to do. The one thing to internalise:
 
-> **A denied tool does not cancel a run.** With Bash denied, Grok can finish using its
-> read and search tools. If a review reaches the turn ceiling without a verdict, do not
+> **A denied tool does not cancel a run.** Grok reports it and continues with its
+> other tools. If a review reaches the turn ceiling without a verdict, do not
 > broaden permissions and do not automatically raise `--max-turns`. Diagnose a vague
 > brief, an oversized change, or reviewer wandering; then start a fresh session with a
 > smaller exact scope. Cancellation is different: an empty resumed run after a
@@ -187,8 +187,9 @@ trusting any statement here, **including this one**.
 
 ## Implementation runs — use `ai-grok-implement`. Never hand-compose one.
 
-`ai-grok-review` is read-only by design. When the user **explicitly asks Grok to edit
-code**, use the companion wrapper:
+`ai-grok-review` may run code, tests and edit files, but only in a disposable snapshot
+whose edits are discarded; it never produces a patch. When the user **explicitly asks
+Grok to write code for the PR**, use the companion wrapper:
 
 ```bash
 ai-grok-implement run <name> --repo <path> --prompt-file "$brief" [--ref <ref>] [--max-turns 20]
@@ -200,7 +201,7 @@ ai-grok-implement list | doctor
 `investigate` is advisory look-into-this mode. It runs in an isolated remote-less
 copy with Bash allowed. The brief and doctor output say `INVESTIGATION —
 ADVISORY, NOT FORMAL APPROVAL`. Do not treat it as exact-head approval. Do not
-add Bash or web search to `ai-grok-review`. Do not use this command to build the
+add web search to `ai-grok-review`. Do not use this command to build the
 #249 broker.
 
 On the qualified pin (1.0.13), live Windows headless Bash currently returns
@@ -274,7 +275,8 @@ What this means for you:
 - Paths in the reviewer's report are relative to the snapshot and are identical
   in the real worktree. Quote them unchanged.
 - The reviewer never sees an absolute path from your machine as the source of
-  truth; do not ask it to edit files there, and never commit from the snapshot.
+  truth. It may edit and run code inside the snapshot, but those edits are discarded
+  and are not part of the PR; never commit from the snapshot.
 - The snapshot path is recorded at session creation, refreshes on every turn,
-  and is deleted with the session. Pre-existing sessions keep their old path and
-  warn once so a live conversation is never silently moved.
+  and is deleted with the session. A legacy session bound to the live checkout is
+  refused; delete and recreate it.

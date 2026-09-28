@@ -1,12 +1,12 @@
 ---
 name: gemini-code-delegation
-description: Use Gemini 3.8 Flash through the ai-gemini wrapper for an independent read-only repository review. Trigger when the user says ask Gemini, use Gemini, Gemini review, run this by Gemini, or Gemini 3.8 Flash.
+description: Use Gemini 3.8 Flash through the ai-gemini wrapper for an independent repository review that may run commands, builds and tests and edit files only in a disposable remote-less copy (edits are discarded). Trigger when the user says ask Gemini, use Gemini, Gemini review, run this by Gemini, or Gemini 3.8 Flash.
 ---
 
 # Gemini code review
 
 Gemini 3.8 Flash is a governed reviewer again as of 2026-09-06, and may also be
-used for an ad-hoc advisory read-only review. It was held out after two live
+used for an ad-hoc advisory review. It was held out after two live
 attempts produced no parseable verdict and a bare `PASS` with an empty report;
 it returned only after a recorded live safety qualification and a live review
 that produced a well-formed verdict above a substantive report. It is drawable

@@ -175,10 +175,13 @@ write_qualification
 
 echo '== byte identity and exact identity gates'
 R1="$TMP/repo1"; make_repo "$R1"; printf first-change > "$R1/dirty.txt"
-check 'already-dirty file content mutation is rejected' "! new_run '$R1' dirty mutate-dirty"
-check 'failed mutation remains recovery-required' "test \"\$(jq -r .status \"\$(meta_for dirty)\")\" = RECOVERY_REQUIRED"
+check 'reviewer may edit an already-dirty file inside its disposable copy' "new_run '$R1' dirty mutate-dirty | grep -q '^PASS'"
+check 'copy edit never reaches the caller checkout' "test \"\$(cat '$R1/dirty.txt')\" != changed-again"
+check 'disposable review copy has no git remote' "test -z \"\$(git -C \"\$(jq -r .review_dir \"\$(meta_for dirty)\")\" remote)\""
+check 'copy-edit review completes and records the post-turn copy inventory' "test \"\$(jq -r .status \"\$(meta_for dirty)\")\" = COMPLETE"
 R2="$TMP/repo2"; make_repo "$R2"; printf prior > "$R2/.ignored"
-check 'ignored-file mutation is rejected' "! new_run '$R2' ignored mutate-ignored"
+check 'reviewer may edit an ignored file inside its disposable copy' "new_run '$R2' ignored mutate-ignored | grep -q '^PASS' && test \"\$(cat '$R2/.ignored')\" = prior"
+check 'review prompt no longer says read-only and grants disposable-copy execution' "! grep -q 'without editing files, running commands' '$SCRIPT' && grep -q 'may run commands, builds and tests and edit files' '$SCRIPT' && grep -q -- '--mode accept-edits --model' '$SCRIPT'"
 R3="$TMP/repo3"; make_repo "$R3"; SENT="$TMP/outside-sentinel"; printf safe > "$SENT"; export MOCK_SENTINEL="$SENT"
 check 'outside sentinel mutation is rejected' "! AI_GEMINI_OUTSIDE_SENTINELS='$SENT' new_run '$R3' outside mutate-outside"
 R3B="$TMP/repo3b"; make_repo "$R3B"; export MOCK_PROTECTED="$R3B"

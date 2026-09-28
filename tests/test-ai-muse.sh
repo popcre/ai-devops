@@ -36,6 +36,8 @@ check 'one held-open report staging file is reserved before provider contact and
 check 'delete takes the same session lock' "grep -q 'cmd_delete.*lock_session' '$SCRIPT'"
 check 'compatibility review still requires a verdict' "grep -q 'REQUIRE_VERDICT=1' '$SCRIPT'"
 check 'review uses a disposable copy' "grep -q 'ensure-copy' '$SCRIPT'"
+check 'review prompt says the copy is writable and disposable, not read-only' "grep -q 'you may run commands, builds and tests and edit files there' '$SCRIPT' && grep -q 'Your edits are discarded after this turn and are not part of the change under review' '$SCRIPT'"
+check 'Muse Code review launch no longer disables writes or shell' "! grep -q -- '--disable-write --disable-shell' '$SCRIPT'"
 check 'review builds an evidence packet' "grep -q 'ai-review-packet' '$SCRIPT'"
 check 'review passes prompt path to packet without argv expansion' "grep -Fq -- '--decision-file \"\$prompt\"' '$SCRIPT' && ! grep -Fq -- '--decision \"\$(cat \"\$prompt\")\"' '$SCRIPT'"
 check 'old generated reports are removed from each snapshot' "grep -q 'clean -fdq -- .ai/reviews' '$SCRIPT'"
@@ -154,6 +156,9 @@ case "${1:-}" in
       mv "$MUSE_STUB_SWAP_REVIEWS" "$MUSE_STUB_SWAP_REVIEWS.safe"
       ln -s "$MUSE_STUB_OUTSIDE" "$MUSE_STUB_SWAP_REVIEWS" || { mv "$MUSE_STUB_SWAP_REVIEWS.safe" "$MUSE_STUB_SWAP_REVIEWS"; exit 71; }
       printf done > "$MUSE_STUB_SWAP_DONE"
+    fi
+    if [ -n "${MUSE_STUB_EDIT_COPY:-}" ]; then # #974: reviewer edits + runs a command in its disposable copy
+      prev=''; for a in "$@"; do [ "$prev" = --dir ] && { printf '%s\n' "$a" > "$MUSE_STUB_EDIT_COPY"; printf reviewer-edit >> "$a/a.txt"; printf x > "$a/reviewer-scratch.txt"; git -C "$a" status --porcelain > "$MUSE_STUB_EDIT_COPY.status"; git -C "$a" remote > "$MUSE_STUB_EDIT_COPY.remotes"; }; prev="$a"; done
     fi
     sid=ses_new; prior=''
     while [ $# -gt 0 ]; do [ "$1" = --session ] && { sid="$2"; prior=1; shift 2; continue; }; shift; done
@@ -342,6 +347,7 @@ rm -f -- "$MUSE_STAGING" "$MUSE_STAGING.held"
 rm -rf -- "$REPO/.ai/decoy"
 check 'doctor rejects unknown options' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' doctor --unknown\""
 check 'zero heartbeat interval is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV AI_MUSE_HEARTBEAT_INTERVAL=0 MUSE_STUB_TOUCH='$TMP/heartbeat-called' '$SCRIPT' new invalid-heartbeat --prompt test\" && test ! -e '$TMP/heartbeat-called'"
+check 'review may edit and run in its disposable remote-less copy; caller checkout unchanged (#974)' "cd '$REPO' && before=\$(git status --porcelain=v1 --untracked-files=all; sha256sum a.txt) && eval \"$ENV MUSE_STUB_EDIT_COPY='$TMP/edit-copy-dir' '$SCRIPT' new writable-copy --prompt test\" >/dev/null && d=\$(cat '$TMP/edit-copy-dir') && test \"\$d\" != '$REPO' && grep -q reviewer-scratch.txt '$TMP/edit-copy-dir.status' && test ! -s '$TMP/edit-copy-dir.remotes' && test ! -e \"\$d\" && test ! -e '$REPO/reviewer-scratch.txt' && test \"\$before\" = \"\$(git status --porcelain=v1 --untracked-files=all; sha256sum a.txt)\""
 check 'wrong source head is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/identity-called' '$SCRIPT' new wrong-source-head --assert-head 0000000000000000000000000000000000000000 --prompt test\" && test ! -e '$TMP/identity-called'"
 check 'missing source base is rejected before provider contact' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_TOUCH='$TMP/identity-called' '$SCRIPT' new wrong-source-base --base missing-source-target --prompt test\" && test ! -e '$TMP/identity-called'"
 git -C "$REPO" update-ref refs/heads/review-target HEAD^
