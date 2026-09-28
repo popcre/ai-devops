@@ -182,10 +182,14 @@ including deleted paths, and refuses a divergent or dirty candidate. The
 first rollout uses the reviewed gate from the target worktree, so an older
 installed gate does not need to understand these new options.
 
-For a first Ubuntu installation at an unchanged commit, run `start --class
-installation` before `check --before deploy --first-install` with the canonical
-checkout and launcher paths. The canonical launcher must be absent. Windows
-first installation uses the reviewed one-use authority described above. For a
+For a first Ubuntu installation at an unchanged commit, start a separate clean
+installation task and obtain an independent read-only `APPROVE` for the exact
+target source and `first-managed-install` operation. From that task's exact
+target worktree, issue `authorize-install --first-install` with the target SHA,
+canonical checkout, `/usr/local/bin/ai-task-gates` launcher, approved report,
+and owner request; then invoke the target `install.sh`. The canonical launcher
+and manifest must be absent before authorization. Both Ubuntu and Windows
+first installation require the reviewed one-use authority. For a
 same-source maintenance reinstall, omit `--first-install`: the check requires
 the installed source receipt to match the current commit and gate bytes. The
 Ubuntu `/etc/ai-devops/install-manifest.tsv` supplies that receipt; the Windows managed Bash and
