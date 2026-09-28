@@ -20,7 +20,7 @@ if [ -z "${SYSTEMROOT:-}" ] && [ -x /usr/bin/getent ]; then
   actual="$(HOME="$TMP/hostile-home" USERPROFILE="$TMP/hostile-profile" AI_MUSE_STATE_DIR="$TMP/hostile-state" AI_MUSE_TEST_DIR='' SYSTEMROOT='' STATE="$TMP/hostile-state" bash -c 'source /dev/stdin; muse_credential_state' <<< "$FUNCS")"
   if [ "$actual" = "$expected" ]; then result pass 'production lock stays in the OS account profile'; else result fail 'production lock stays in the OS account profile'; fi
   mkdir -p "$TMP/account-home/.config/ai-devops"
-  printf 'synthetic-token\n' > "$TMP/account-home/.config/ai-devops/op-service-account"
+  printf 'synthetic-token' > "$TMP/account-home/.config/ai-devops/op-service-account"
   chmod 600 "$TMP/account-home/.config/ai-devops/op-service-account"
   expected_flock="$TMP/account-home/.config/ai-devops/op-refresh.lock"
   if ( source /dev/stdin; source <(sed -n '/^read_key_from_op(){/,/^}/p' "$SCRIPT"); muse_os_profile_home(){ printf '%s\n' "$TMP/account-home"; }; linked_below_home(){ return 1; }; need(){ :; }; flock(){ printf '%s\n' "$4" > "$TMP/observed-flock"; [ "$OP_SERVICE_ACCOUNT_TOKEN" = synthetic-token ] || return 1; printf 'fake-key\n'; }; KEY_HOME="$TMP/account-home" AI_MUSE_TEST_DIR='' SYSTEMROOT='' STATE="$TMP/hostile-state" AI_MUSE_CREDENTIAL_WAIT_SECONDS=2; read_key_from_op && [ "$MODEL_API_KEY" = fake-key ] && [ "$(cat "$TMP/observed-flock")" = "$expected_flock" ] ) <<< "$FUNCS" >/dev/null 2>&1; then

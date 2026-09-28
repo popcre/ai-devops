@@ -461,7 +461,8 @@ read_key_from_op(){
     else
       [ "$(stat -c %a "$token_file" 2>/dev/null)" = 600 ] || die '1Password token file is not owner-only.'
     fi
-    IFS= read -r op_token < "$token_file" || op_token=""
+    IFS= read -r op_token < "$token_file" || true
+    op_token="${op_token%$'\r'}"
     [ -n "$op_token" ] || die 'protected 1Password service-account token is empty.'
   else
     op_token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
