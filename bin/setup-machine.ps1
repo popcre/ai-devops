@@ -152,7 +152,7 @@ $codexAgentLimitSetup = Join-Path $RepoPath "bin\configure-codex-agent-limit.ps1
 if (-not (Test-Path -LiteralPath $codexAgentLimitSetup)) {
   throw "Missing Codex agent-limit reconciler: $codexAgentLimitSetup"
 }
-& $codexAgentLimitSetup -ConfigPath $codexConfigPath -MaxConcurrentThreads 20
+& $codexAgentLimitSetup -ConfigPath $codexConfigPath
 # %USERPROFILE%, never $HOME: on a machine with a roaming profile $HOME can point at a
 # network drive (Z:) that nothing reads back, which has silently misplaced installs here
 # before.
