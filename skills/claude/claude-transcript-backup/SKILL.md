@@ -1,51 +1,41 @@
 ---
 name: claude-transcript-backup
-description: Find all local Claude Code session transcripts on this machine and back them up to the PRIVATE repo u2giants/ai-devops-transcripts under claude_chats/<machine>. Use when the user says "find all the Local Claude Code session transcripts everywhere on this entire machine" or "put all of these into claude_chats".
+description: Find all local Claude Code and Codex session transcripts on this machine and back them up to Albert's private Dropbox folder `Dropbox\ai\chat_transcripts\<machine>`. Use when the user says "upload/back up the transcripts", "find all the Local Claude Code session transcripts everywhere on this entire machine", or "put all of these into claude_chats".
 ---
 
 # claude-transcript-backup
 
-> **STOP — transcripts belong only in the private transcript repository.**
-> Before any copy, run `ai-transcript-destination-check <checkout>`. A missing
-> validator or nonzero result stops the backup.
-
-Albert ran this identically on 916, t16, 4837, hetz, seafile, compshop.
-
-**The destination is the PRIVATE repo `u2giants/ai-devops-transcripts`, never
-`ai-devops` itself, which is PUBLIC.** The old `claude_chats/sync.sh` lived in
-ai-devops and was removed on 2026-08-04 along with the 664 MB local archive
-(every file was verified present in the private repo first). Clone the private
-repo, copy into its `claude_chats/<machine>/`, commit and push there. Follow the
-manual procedure below on any platform.
+> **Owner rule (Albert, 2026-09-27): "use Dropbox going forward. put everything
+> in the \ai\chat_transcripts folder right now and make that a rule going
+> forward."**
+>
+> The destination is `<Dropbox root>\ai\chat_transcripts\<machine>\`, stored
+> **uncompressed**. The private Git repository `u2giants/ai-devops-transcripts`
+> is a frozen historical archive (last upload 2026-09-27); never add new
+> transcripts to it, and never to the PUBLIC `ai-devops` repository.
 
 ## Where transcripts live
 
-- **Linux:** `~/.claude/projects/` (check BOTH `/root` and `/home/ai` — compshop
-  needed a merge of the two).
-- **Windows:** `C:\Users\<user>\.claude\projects\` plus Claude Desktop
-  local-agent-mode sessions at `%APPDATA%\Claude\local-agent-mode-sessions\`
-  (each sandbox has a nested `.claude/projects/` and an `audit.jsonl`), and
-  Desktop cowork sessions if present.
-- Scan the system drive only — do NOT scan network/SMB drives (standing
-  instruction: "don't scan network drives. only C:\").
+- **Linux:** `~/.claude/projects/` (check BOTH `/root` and `/home/ai`),
+  `~/.codex/sessions/`, `~/.codex/archived_sessions/`.
+- **Windows:** `C:\Users\<user>\.claude\projects\`, `.codex\sessions\`,
+  `.codex\archived_sessions\`, `.codex\session_index.jsonl` (these may be
+  symlinks — follow them), plus `%APPDATA%\Claude\local-agent-mode-sessions\`
+  when it holds transcripts.
+- Scan the system drive only — never network/SMB drives.
 
 ## Procedure
 
-1. Locate all `.jsonl` transcripts in the paths above; report the count, total
-   size, and date range before copying.
-2. Clone/pull private `u2giants/ai-devops-transcripts` (or initialize the
-   `transcripts/` submodule), then run
-   `ai-transcript-destination-check <private-checkout>`. Only after it passes,
-   copy into that checkout's `claude_chats/<machine>/`
-   mirroring the source layout (machine name = short hostname, e.g. `916` for
-   `916-alien`; Windows layout keeps the `D--repos-x` encoded folders and a
-   `local-agent-mode-sessions/` subfolder).
-3. Refuse the public `ai-devops` checkout and every lookalike remote even if its
-   directory is named `transcripts`. Respect the private repo's `.gitignore`;
-   never force-add excluded paths.
-4. Update `claude_chats/README.md` with a machine section in the existing
-   format (transcript counts per project folder).
-5. Commit and push to main. Warn (don't block) on files over GitHub's 50 MB
-   soft limit; suggest Git LFS if they become common.
-6. Remind: this repo must stay **private** — transcripts may contain live
-   secrets.
+1. Find the Dropbox root: `%LOCALAPPDATA%\Dropbox\info.json` (`personal.path`)
+   on Windows, `~/.dropbox/info.json` on Linux. No Dropbox client on the
+   machine → stop and tell Albert; do not substitute another destination.
+2. Report the source transcript count and total size.
+3. Mirror each source into `chat_transcripts/<machine>/` (machine = short
+   hostname, e.g. `edge-dev`, `916`), with this layout:
+   `claude/projects/`, `codex/sessions/`, `codex/archived_sessions/`,
+   `codex/session_index.jsonl`. Copy additively (Windows: `robocopy /E`;
+   Linux: `rsync -a`) — never mirror-delete, so sessions pruned locally stay
+   in Dropbox.
+4. Verify the `.jsonl` count in Dropbox is at least the source count.
+5. Never share the `chat_transcripts` folder or create a Dropbox link to it —
+   transcripts may contain live secrets.
