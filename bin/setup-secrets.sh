@@ -35,6 +35,8 @@
 #      lines and old per-app op-read blocks left in ~/.bashrc (with a backup),
 #      so the only copy of the token on disk is the locked-down file.
 #   8. Verifies every reference resolves (prints PASS/FAIL, never a value).
+#   9. (step 3b) Restores the 916-alien SSH key and installs the private SSH
+#      host aliases via bin/ai-ssh-setup (same as setup-machine.ps1 5b/5c).
 #
 # Usage:
 #   setup-secrets.sh                 # set up / refresh
@@ -179,6 +181,18 @@ if [ -f "$MCP_ENV" ] && cmp -s "$EXAMPLE" "$MCP_ENV"; then
 else
   run "cp '$EXAMPLE' '$MCP_ENV'"
   ok "Installed/updated mcp.env from repo (references only, no secrets)"
+fi
+
+# --------------------------------------------------------------------------
+# 3b. SSH: 916-alien key (-> hetz) and private host aliases (vps, vps2, ...)
+# --------------------------------------------------------------------------
+# Linux twin of setup-machine.ps1 steps 5b/5c (#978). Not fatal: a machine
+# without the private config or 1Password access still gets its secrets wiring.
+info "SSH key and host aliases"
+if [ "$DRY_RUN" -eq 1 ]; then
+  "$REPO_ROOT/bin/ai-ssh-setup" --dry-run || warn "SSH setup incomplete (see above)."
+else
+  "$REPO_ROOT/bin/ai-ssh-setup" || warn "SSH setup incomplete (see above). Re-run: $REPO_ROOT/bin/ai-ssh-setup"
 fi
 
 # --------------------------------------------------------------------------
