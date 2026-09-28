@@ -163,7 +163,7 @@ target_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || exit 1
 resume_args=(install-verify --phase resume --target-head "$target_head"
   --installed-checkout "$REPO_ROOT" --installed-launcher /usr/local/bin/ai-task-gates)
 [ -z "$owner_request" ] || resume_args+=(--owner-request "$owner_request")
-"$REPO_ROOT/bin/ai-task-gates" "${resume_args[@]}" || {
+(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" "${resume_args[@]}") || {
   warn 'installation authorization refused before any machine changes'; exit 1;
 }
 [ "$AUTHORIZATION_TEST_ONLY" -eq 0 ] || exit 0
@@ -795,17 +795,17 @@ publish_stage_report || {
   warn 'stage result report could not be published; authorization remains pending'
   exit 1
 }
-"$REPO_ROOT/bin/ai-task-gates" install-verify --phase stages-complete \
+(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" install-verify --phase stages-complete \
   --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
-  --installed-launcher /usr/local/bin/ai-task-gates --stage-report "$STAGE_REPORT" || {
+  --installed-launcher /usr/local/bin/ai-task-gates --stage-report "$STAGE_REPORT") || {
     if restore_install_state; then record_restored_state || true; fi
     warn 'installation stage receipt refused; authorization remains pending for repair'
     exit 1
   }
 if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" != 1 ]; then
-  "$REPO_ROOT/bin/ai-task-gates" install-verify --phase finalize \
+  (cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" install-verify --phase finalize \
     --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
-  --installed-launcher /usr/local/bin/ai-task-gates || {
+  --installed-launcher /usr/local/bin/ai-task-gates) || {
     # Required stages and their protected receipt succeeded. Keep their
     # coherent target state for a direct retry of finalize; restoring only a
     # subset now would invalidate the stage receipt and strand the transaction.

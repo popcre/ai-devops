@@ -33,6 +33,9 @@ done
 printf '%s\n' "$phase" >> "$TEST_LOG"
 [ "$phase" != preflight ] || [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || exit 48
 [ "${TEST_GATE_DENY_PHASE:-}" != "$phase" ] || exit 41
+if [ "${TEST_ASSERT_GATE_CWD:-0}" = 1 ]; then
+  [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || exit 50
+fi
 if [ "$phase" = stages-complete ]; then
   [ -f "$stage_report" ] && [ "$(stat -c %a "$stage_report")" = 600 ] || exit 49
 fi
@@ -76,7 +79,7 @@ check_head "$before"
 if TEST_REQUIRE_OWNER=1 "$TMP/installed/install.sh" --test-authorization-only >/dev/null 2>&1; then
   fail 'same-source install accepted missing owner request'
 fi
-TEST_REQUIRE_OWNER=1 "$TMP/installed/install.sh" --owner-request 'fixture approval' \
+TEST_REQUIRE_OWNER=1 TEST_ASSERT_GATE_CWD=1 "$TMP/installed/install.sh" --owner-request 'fixture approval' \
   --test-authorization-only >/dev/null
 
 # A second direct installer cannot pass the checkout lock even if its gate
