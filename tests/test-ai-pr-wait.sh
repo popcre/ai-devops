@@ -9,6 +9,11 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CMD="$ROOT/bin/ai-pr-wait"
+PYTHON_RUNNER=''
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then PYTHON_RUNNER="$(command -v "$candidate")"; break; fi
+done
+[ -n "$PYTHON_RUNNER" ] || { printf 'Python 3.10 or newer is required\n' >&2; exit 2; }
 # The wait behaviour below is what these cases are about, so the task gate is
 # switched off for them and exercised on its own at the end of this file.
 export AI_DEVOPS_TEST_MODE=1
@@ -308,14 +313,17 @@ cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf 'x\n' >> "${AI_PR_WAIT_TEST_MARKER:?}"
 [ -z "${AI_PR_WAIT_TEST_PAGED_DELAY:-}" ] || /bin/sleep "$AI_PR_WAIT_TEST_PAGED_DELAY"
+[[ "$*" == *'rateLimit{cost remaining resetAt}'* ]] || { printf 'missing same-response quota fields\n' >&2; exit 9; }
 if [[ "$*" == *'before:"older"'* ]]; then
   head=h1; [ "${AI_PR_WAIT_TEST_BAD_PAGE:-0}" != 1 ] || head=h2
-  printf '{"data":{"repository":{"pullRequest":{"headRefOid":"%s","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[{"name":"older failure","conclusion":"FAILURE"}]}}}}]}}}}}\n' "$head"
+  printf '{"data":{"repository":{"pullRequest":{"headRefOid":"%s","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[{"name":"older failure","conclusion":"FAILURE"}]}}}}]}}}}}\n' "$head" |
+    jq -c '.data.rateLimit={cost:5,remaining:4992,resetAt:"2026-09-28T05:00:00Z"}'
 elif [[ "$*" == *before:* ]]; then
   printf '%s\n' 'unexpected GraphQL cursor encoding' >&2
   exit 9
 else
-  printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1","isInMergeQueue":false,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":true,"startCursor":"older"},"nodes":[]}}}}]}}}}}'
+  printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1","isInMergeQueue":false,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":true,"startCursor":"older"},"nodes":[]}}}}]}}}}}' |
+    jq -c '.data.rateLimit={cost:3,remaining:4997,resetAt:"2026-09-28T05:00:00Z"}'
 fi
 EOF
 chmod +x "$TMP/bin/gh" "$TMP/bin/date"
@@ -325,12 +333,13 @@ check "a failure on a previous check page remains terminal after complete pagina
   "test '$RC' -eq 1 && test \"\$(wc -l < '$TMP/paged-calls')\" -eq 2 && printf '%s' \"$OUT\" | grep -q 'older failure' && ! printf '%s' \"$OUT\" | grep -q 'unexpected GraphQL cursor encoding'"
 
 rm -f "$TMP/paged-shared-calls" "$TMP/paged-shared-a.clock" "$TMP/paged-shared-b.clock"
-AI_PR_WAIT_TEST_CONTEXT_KEY='host credential principal scopes-a' \
+paged_context="v1:$(printf '%064d' 0)"
+AI_PR_WAIT_TEST_CONTEXT_KEY="$paged_context" \
   AI_PR_WAIT_SNAPSHOT_DIR="$TMP/paged-shared-snapshots" AI_GH_STATE_DIR="$TMP/paged-shared-throttle" \
   AI_PR_WAIT_TEST_PAGED_DELAY=0.3 AI_PR_WAIT_TEST_MARKER="$TMP/paged-shared-calls" \
   AI_PR_WAIT_TEST_CLOCK="$TMP/paged-shared-a.clock" PATH="$TMP/bin:$PATH" \
   bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 >"$TMP/paged-shared-a.out" 2>&1 & paged_a=$!
-AI_PR_WAIT_TEST_CONTEXT_KEY='host credential principal scopes-a' \
+AI_PR_WAIT_TEST_CONTEXT_KEY="$paged_context" \
   AI_PR_WAIT_SNAPSHOT_DIR="$TMP/paged-shared-snapshots" AI_GH_STATE_DIR="$TMP/paged-shared-throttle" \
   AI_PR_WAIT_TEST_PAGED_DELAY=0.3 AI_PR_WAIT_TEST_MARKER="$TMP/paged-shared-calls" \
   AI_PR_WAIT_TEST_CLOCK="$TMP/paged-shared-b.clock" PATH="$TMP/bin:$PATH" \
@@ -339,6 +348,8 @@ wait "$paged_a"; paged_a_rc=$?
 wait "$paged_b"; paged_b_rc=$?
 check "two waiters share one complete multi-page failure read" \
   "test '$paged_a_rc' -eq 1 && test '$paged_b_rc' -eq 1 && test \"\$(wc -l < '$TMP/paged-shared-calls')\" -eq 2 && grep -q 'older failure' '$TMP/paged-shared-a.out' && grep -q 'older failure' '$TMP/paged-shared-b.out'"
+check "two-page upstream refresh records each page cost once and no follower cost" \
+  "'$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/paged-shared-throttle/measurements' | jq -e '.observed_graphql_cost_records == 2 and .observed_graphql_points == 8 and .linked_graphql_points == 8 and .completed_workflow_receipts == 2 and .observed_graphql_windows_local_only[0].min_remaining == 4992' && ! grep -q '$paged_context' <('$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/paged-shared-throttle/measurements')"
 
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
@@ -468,6 +479,21 @@ wait "$cold_a"; cold_a_rc=$?
 wait "$cold_b"; cold_b_rc=$?
 check 'two explicit-repo waiters share one refresh after the cold identity is verified' \
   "test '$cold_a_rc' -eq 2 && test '$cold_b_rc' -eq 2 && test \"\$(wc -l < '$TMP/cold-shared-calls')\" -eq 1 && grep -q 'still in progress' '$TMP/cold-shared-a.out' && grep -q 'still in progress' '$TMP/cold-shared-b.out'"
+
+cat > "$TMP/error-page-gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' '{"data":{"rateLimit":{"cost":6,"remaining":4994,"resetAt":"2026-09-28T05:00:00Z"}},"errors":[{"message":"fixture error"}]}'
+exit 7
+EOF
+chmod +x "$TMP/error-page-gh"
+error_deadline=$(( $(/usr/bin/date +%s) + 30 ))
+AI_GH_STATE_DIR="$TMP/error-page-state" PR_WAIT_RECEIPT_ID="$(printf '%032d' 0)" \
+  AI_GH_COST_CONTEXT="v1:$(printf '%064d' 0)" PATH=/usr/bin:/bin \
+  bash "$ROOT/tools/github-requests/pr-status-complete.sh" "$TMP/error-page-gh" "$PYTHON_RUNNER" \
+  "$ROOT/bin/ai-process-supervisor" "$(command -v bash)" o r 1 "$error_deadline" 10 0 "$TMP/error-page-source" \
+  > "$TMP/error-page-out" 2> "$TMP/error-page-err"; error_page_rc=$?
+check 'a nonzero upstream page with usable rateLimit still records its cost' \
+  "test '$error_page_rc' -eq 7 && test \"\$(cat '$TMP/error-page-source')\" = upstream && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/error-page-state/measurements' | jq -e '.observed_graphql_cost_records == 1 and .observed_graphql_points == 6'"
 
 check "the cross-process cache preserves privacy, completeness, cancellation and recovery" \
   "python3 '$ROOT/tests/test-ai-pr-status-singleflight.py' -q"
