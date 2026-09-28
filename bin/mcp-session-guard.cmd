@@ -1,5 +1,5 @@
 @echo off
-rem Windows launcher so a path call such as bin$mcp-session-guard runs the script
+rem Windows launcher so a path call such as bin\mcp-session-guard runs the script
 rem instead of opening the "Select an app" dialog. Checked by tests/test-bin-cmd-launchers.sh.
 setlocal
 set "AI_BASH=%ProgramFiles%\Git\bin\bash.exe"

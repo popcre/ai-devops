@@ -21,7 +21,7 @@
 // Usage: mcp-session-guard.mjs [--] <command> [args...]
 // Exit:  child's exit code, or 143/130 when shut down by signal/EOF/parent.
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import process from 'node:process'
 
 const args = process.argv.slice(2)
@@ -32,11 +32,19 @@ if (args.length === 0) {
 }
 
 const isWin = process.platform === 'win32'
-const command = args[0]
-const commandArgs = args.slice(1)
+let command = args[0]
+let commandArgs = args.slice(1)
 const parentPidAtStart = process.ppid
 let shuttingDown = false
 let child = null
+let orphanTimer = null
+
+// Windows .cmd/.bat shims cannot be spawn()ed directly (ENOENT). The repo's own
+// catalog documents this: batch files need a shell. Wrap them in cmd /c.
+if (isWin && /\.(cmd|bat)$/i.test(command)) {
+  commandArgs = ['/c', command, ...commandArgs]
+  command = process.env.ComSpec || 'cmd.exe'
+}
 
 if (process.env.MCP_SESSION_GUARD_DEBUG) {
   process.stderr.write(
@@ -54,19 +62,36 @@ function killTree(signal) {
         windowsHide: true,
       }).on('error', () => {})
     } else {
-      // Negative PID = the child's whole process group (see detached below).
+      // Same process group as us (no detached): a harness group kill takes the
+      // helper with us. Walk descendants so npx -> npm -> node all die.
+      killDescendants(pid, signal)
       try {
-        process.kill(-pid, signal)
+        process.kill(pid, signal)
       } catch {
-        try {
-          process.kill(pid, signal)
-        } catch {
-          /* already gone */
-        }
+        /* already gone */
       }
     }
   } catch {
     /* already gone */
+  }
+}
+
+function killDescendants(pid, signal) {
+  let kids = ''
+  try {
+    kids = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).stdout || ''
+  } catch {
+    return
+  }
+  for (const line of kids.split('\n')) {
+    const kid = Number.parseInt(line.trim(), 10)
+    if (!Number.isFinite(kid) || kid <= 0) continue
+    killDescendants(kid, signal)
+    try {
+      process.kill(kid, signal)
+    } catch {
+      /* already gone */
+    }
   }
 }
 
@@ -105,13 +130,12 @@ function parentGone() {
   }
 }
 
-// POSIX: new process group so one kill reaps the whole npx/npm/node chain.
-// Windows: taskkill /T walks the tree instead.
+// Stay in our process group (no detached): a harness group SIGKILL must take
+// the helper with us. Windows uses taskkill /T to walk the tree.
 const spawnOpts = {
   stdio: ['pipe', 'inherit', 'inherit'],
   windowsHide: true,
 }
-if (!isWin) spawnOpts.detached = true
 
 try {
   child = spawn(command, commandArgs, spawnOpts)
@@ -183,7 +207,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 // Parent-death poll (no prctl binding in Node). Catches OOM SIGKILL of the
 // client when no signal was delivered to us and stdin may linger in a zombie
 // pipe holder. Cheap: two syscalls every 2s per helper.
-const orphanTimer = setInterval(() => {
+orphanTimer = setInterval(() => {
   if (parentGone() && child && child.exitCode == null && child.signalCode == null) {
     shutdown('parent-gone', 143)
   }

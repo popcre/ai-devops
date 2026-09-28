@@ -67,13 +67,9 @@ child.on('exit', (code) => process.exit(code ?? 0))
 EOF
 
 alive() {
-  # kill -0 works for POSIX; on Windows Git Bash also accept tasklist.
-  if kill -0 "$1" 2>/dev/null; then return 0; fi
-  if command -v tasklist >/dev/null 2>&1; then
-    tasklist //FI "PID eq $1" 2>/dev/null | grep -q "$1" && return 0
-  fi
-  ps -p "$1" >/dev/null 2>&1 && return 0
-  return 1
+  # Node's process.kill(pid, 0) is reliable for native Windows PIDs; Git Bash
+  # kill -0 is not (it can miss live node.exe processes).
+  "$NODE" -e "try{process.kill(Number(process.argv[1]),0);process.exit(0)}catch{process.exit(1)}" "$1" 2>/dev/null
 }
 
 wait_ready() {
@@ -126,7 +122,31 @@ set -e
 [ "$RC" -eq 7 ] || fail "guard did not forward child exit code (got $RC)"
 ok "child_exit_code_forwarded"
 
-# --- 4. usage ----------------------------------------------------------
+# --- 4. Windows .cmd shims must start (H1: spawn cannot run batch files) ---
+if [ "$OSTYPE" = "msys" ] || [ "$OSTYPE" = "cygwin" ] || [ -n "${WINDIR:-}" ]; then
+  TMP_WIN="$(cygpath -w "$TMP" 2>/dev/null || echo "$TMP")"
+  NODE_WIN="$(cygpath -w "$(command -v "$NODE")" 2>/dev/null || echo "$NODE")"
+  cat > "$TMP/hold.cmd" <<EOF
+@echo off
+"$NODE_WIN" "$TMP_WIN\\hold.js" "$TMP_WIN\\pidcmd"
+EOF
+  rm -f "$TMP/pidcmd" "$TMP/pidcmd.kid"
+  HOLD_CMD_WIN="$(cygpath -w "$TMP/hold.cmd")"
+  "$NODE" "$GUARD" "$HOLD_CMD_WIN" >"$TMP/outcmd" 2>"$TMP/errcmd" &
+  GUARD_CMD=$!
+  wait_ready "$TMP/pidcmd" || fail "helper did not start via .cmd shim: $(cat "$TMP/errcmd" 2>/dev/null)"
+  HELPER_PID="$(cat "$TMP/pidcmd")"
+  alive "$HELPER_PID" || fail "cmd shim helper not alive"
+  kill "$GUARD_CMD" 2>/dev/null || true
+  wait "$GUARD_CMD" 2>/dev/null || true
+  sleep 0.5
+  alive "$HELPER_PID" && fail "cmd shim helper leaked after guard exit (pid $HELPER_PID)"
+  ok "windows_cmd_shim_starts_and_reaps"
+else
+  ok "windows_cmd_shim_starts_and_reaps (skipped, not Windows)"
+fi
+
+# --- 5. usage ----------------------------------------------------------
 set +e
 "$NODE" "$GUARD" </dev/null >"$TMP/out4" 2>"$TMP/err4"
 RC=$?
