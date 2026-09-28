@@ -330,9 +330,10 @@ fresh_quota
 FAKE_MODE=graphql-malformed-errors AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql -f query=fixture > "$TMP/malformed-graphql" 2> "$TMP/malformed-graphql-err"; rc=$?
 check 'malformed GraphQL errors field fails closed without losing output' "[ $rc -eq 1 ] && jq -e '.errors.message == \"bad-shape\"' '$TMP/malformed-graphql' && grep -q 'result unclassified' '$TMP/malformed-graphql-err'"
 fresh_quota
-FAKE_MODE=graphql-jq-scalar AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql --jq .data.viewer.login > "$TMP/graphql-scalar" 2>/dev/null; rc=$?
-check 'valid GraphQL jq scalar keeps original output and success status' "[ $rc -eq 0 ] && [ \$(cat '$TMP/graphql-scalar') = scalar ]"
+FAKE_MODE=graphql-jq-scalar AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql --jq .data.viewer.login > "$TMP/graphql-scalar" 2> "$TMP/graphql-scalar-err"; rc=$?
+check 'transformed GraphQL preserves output and warns that application errors are unobservable' "[ $rc -eq 0 ] && [ \$(cat '$TMP/graphql-scalar') = scalar ] && grep -q 'transformed GraphQL output hides HTTP-200 application errors' '$TMP/graphql-scalar-err'"
 check 'transformed GraphQL scalar is explicitly unobservable in request report' "jq -se '[.[] | select(.operation == \"api.graphql\")][-1].request_class == \"graphql_transformed_unobservable\"' '$TMP/state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/state/measurements' | jq -e '.graphql_transformed_unobservable >= 1'"
+check 'managed safety GraphQL callers never request transformed output' "awk '{ line=\$0; while (sub(/\\\\\$/, \"\", line) && (getline more) > 0) line=line more; if (line ~ /graphql/ && line ~ /--(jq|template|silent|include)(=|[[:space:]]|\$)/) exit 1 }' '$ROOT/bin/ai-merge-group-evidence' '$ROOT/bin/ai-pr-wait' '$ROOT/bin/ai-blocker-watch'"
 fresh_quota
 FAKE_MODE=graphql-jq-scalar AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api --hostname github.example graphql --jq .data.viewer.login > "$TMP/graphql-scalar-host" 2>/dev/null; rc=$?
 check 'GraphQL transform after leading host flag is measured without rejecting report' "[ $rc -eq 0 ] && [ \$(cat '$TMP/graphql-scalar-host') = scalar ] && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/state/measurements' | jq -e '.graphql_transformed_unobservable >= 2'"
@@ -578,6 +579,12 @@ for mutation in '.schema=true' '.schema="1"' 'del(.http_requests)' 'del(.graphql
   jq -c "$mutation" "$TMP/report-valid" > "$TMP/report-shapes/2001-01-01.jsonl"
   "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
   check 'request report rejects invalid required field shapes' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"
+done
+jq -sc '[.[] | select(.operation == "api.identity")][0]' "$TMP/state/measurements/"*.jsonl > "$TMP/report-identity-valid"
+for mutation in '.cli_executions=0' '.latency_ms=0'; do
+  jq -c "$mutation" "$TMP/report-identity-valid" > "$TMP/report-shapes/2001-01-01.jsonl"
+  "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+  check 'request report rejects impossible identity probe counts' "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && cmp '$TMP/report-error' '$TMP/report-expected-error'"
 done
 "$PYTHON_RUNNER" -c 'print("[" * 2000 + "\"FIXTURE_CANARY\"" + "]" * 2000)' > "$TMP/report-shapes/2001-01-01.jsonl"
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/report-shapes" > "$TMP/report" 2> "$TMP/report-error"; rc=$?

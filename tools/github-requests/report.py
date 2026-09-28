@@ -57,7 +57,7 @@ def summarize(directory):
                 duration = row.get("latency_ms")
                 status = row.get("exit_status")
                 calls = row.get("cli_executions")
-                if ((direct and duration is not None and duration != 0)
+                if ((direct and (duration is not None or calls != 1))
                         or (not direct and (type(duration) is not int or not 0 <= duration <= 604800000))
                         or type(status) is not int or not 0 <= status <= 255
                         or type(calls) is not int or calls not in (0, 1)):
