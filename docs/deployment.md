@@ -120,6 +120,39 @@ forces that mode and `--skip-secrets` records an intentional skip.
 
 Idempotent — safe to re-run.
 
+For an update containing reviewer-safety paths, leave the installed checkout
+unchanged while preparing two linked worktrees: a disposable candidate at its
+current HEAD, and the exact reviewed target containing the new gate. From the
+candidate, run the reviewed gate's `start --class reviewer-safety`, then advance
+only the candidate to the target commit. Run the reviewed gate's `check --before
+deploy --target-head <full SHA> --installed-checkout <canonical checkout>
+--installed-launcher <managed ai-task-gates launcher> --owner-request '<host,
+action, and Albert authorization>'`. On Windows, pass the managed extensionless
+launcher; on Ubuntu, pass its symlink. The check binds the candidate to the
+exact target and confirms that the installed checkout, launcher, and recorded
+old HEAD still agree in the same Git repository. Fetch `origin/main` immediately
+before the check; the target must be in that fetched release history. The
+installed checkout must be the durable primary checkout and the launcher must
+have its supported canonical path. Only after it passes may the
+canonical checkout fast-forward and the supported installer run. Verify the
+installed command hashes and routing afterward.
+
+The route accepts only the supported `popcre/ai-devops` and redirected
+`u2giants/ai-devops` GitHub origins. It compares the full release range,
+including deleted paths, and refuses a divergent or dirty candidate. The
+first rollout uses the reviewed gate from the target worktree, so an older
+installed gate does not need to understand these new options.
+
+For a first installation at an unchanged commit, run `start --class
+installation` before `check --before deploy --first-install` with the canonical
+checkout and launcher paths. The canonical launcher must be absent. For a
+same-source maintenance reinstall, omit `--first-install`: the check requires
+the installed source receipt to match the current commit and gate bytes. The
+Ubuntu `/etc/ai-devops/install-manifest.tsv` supplies that receipt; the Windows managed Bash and
+`.cmd` launchers carry matching source commit and SHA-256 markers and must
+match the installed command and user profile routes. The Windows
+machine-tools installer writes those markers when it installs launchers.
+
 The installer does not enable recurring memory synchronization. Automatic
 memory writers remain disabled; a manual private-hub union is the qualified
 production policy.

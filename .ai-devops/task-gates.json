@@ -21,7 +21,7 @@
   ],
   "gates": {
     "reviewer-safety": {
-      "required": ["installed-routing-proof"],
+      "required": ["installed-routing-proof", "reviewed-toolkit-installation"],
       "forbidden_actions": []
     },
     "installation": {

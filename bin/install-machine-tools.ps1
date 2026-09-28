@@ -29,6 +29,10 @@ $gitCommonDir = Resolve-GitMetadataPath $gitCommonDirRaw.Trim()
 if ($gitDir -ne $gitCommonDir) {
   throw "Refusing to install durable machine launchers from linked worktree '$RepoPath'. Run the canonical checkout's installer instead."
 }
+$sourceSha = (& git -C $RepoPath rev-parse HEAD 2>$null).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceSha -notmatch '^[0-9a-f]{40}$') {
+  throw "Cannot identify the exact source commit for $RepoPath"
+}
 
 $target = Join-Path $UserProfilePath ".local\bin"
 $gitBash = @(
@@ -45,16 +49,21 @@ foreach ($line in Get-Content -LiteralPath $CatalogPath) {
   if ($form -ne 'bash+cmd') { continue }
   $sourcePath = Join-Path $RepoPath ($source -replace '/', '\')
   if (-not (Test-Path -LiteralPath $sourcePath)) { throw "Missing wrapper source: $sourcePath" }
+  $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
   $sourceBash = "/" + (($sourcePath -replace '\\','/' -replace '^([A-Za-z]):','$1'))
   @"
 #!/usr/bin/env bash
 # Managed by ai-devops install-machine-tools.ps1.
+# source-sha=$sourceSha
+# source-hash=$sourceHash
 export HOME="$homeBash"
 exec "$sourceBash" "`$@"
 "@ | Set-Content -NoNewline -Encoding ASCII -LiteralPath (Join-Path $target $name)
   @"
 @echo off
 rem Managed by ai-devops install-machine-tools.ps1.
+rem source-sha=$sourceSha
+rem source-hash=$sourceHash
 set "HOME=$UserProfilePath"
 "$gitBash" "$sourceBash" %*
 "@ | Set-Content -Encoding ASCII -LiteralPath (Join-Path $target "$name.cmd")

@@ -29,6 +29,11 @@
     "production"
   ],
   "action_gates": {
+    "deploy": {
+      "require_gate": {
+        "reviewer-safety": "reviewed-toolkit-installation"
+      }
+    },
     "code-only-review": {
       "require_gate": {
         "private-evidence": "synthetic-fixtures-only",
@@ -198,7 +203,6 @@
           "exact-head-independent-review"
         ],
         "forbidden_actions": [
-          "deploy",
           "database",
           "infrastructure",
           "production"
