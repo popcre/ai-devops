@@ -1269,7 +1269,10 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
     die 'Grok isolation inspection found an enabled MCP, hook, plugin, or compatibility import; refusing paid reviewer work.'
   fi
   rm -f "$inspect" "$inspect.err"
-  assert_disposable_review_dir
+  # The live doctor probe runs in an empty throwaway directory with no review.
+  if [ -z "${GROK_LIVE_PROBE_DIR:-}" ] || [ "$repo" != "$GROK_LIVE_PROBE_DIR" ] || [ -n "$REVIEW_DIR" ]; then
+    assert_disposable_review_dir
+  fi
   RUN_TURN_CALLER_DIGEST="$(caller_digest "$REVIEW_SOURCE_ROOT")"
   local args=(--cwd "$ACTIVE_ISOLATED_CWD" --model "$GROK_MODEL" --prompt-file "$pf"
               --max-turns "$turns" "${GROK_PERMS[@]}" --output-format json)
@@ -1705,7 +1708,12 @@ cmd_doctor() {
     echo -n "live probe    : "
     local tmp; tmp="$(mktemp)"
     printf 'Reply with exactly: OK\n' > "$tmp.prompt"
-    run_turn "$(pwd)" "$tmp" "$tmp.prompt" 2 || true
+    # The probe edits nothing, but run_turn only ever runs in a disposable
+    # directory (issue #974), so give it an empty throwaway one.
+    local probe_dir; probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/grok-doctor.XXXXXX")"
+    REVIEW_SOURCE_ROOT="$repo"; GROK_LIVE_PROBE_DIR="$probe_dir"
+    run_turn "$probe_dir" "$tmp" "$tmp.prompt" 2 || true
+    GROK_LIVE_PROBE_DIR=""; rm -rf "$probe_dir" 2>/dev/null || true
     if [ "$RUN_TURN_RC" != 124 ] && jq -e 'has("stopReason")' "$tmp" >/dev/null 2>&1; then
       if reviewer_event_publish_report grok "$tmp" && reviewer_event_cleanup_allowed grok; then
         echo "OK ($(jq -r '.stopReason' "$tmp"), cost \$$(normalized_usage "$tmp" | jq -r '.total_cost_usd // "unknown"'))"
