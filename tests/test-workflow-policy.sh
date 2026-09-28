@@ -439,6 +439,14 @@ BOOTSTRAP
   check 'a quoted PowerShell continuation and label command cannot bypass admission' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
   rm -f "$mutation_dir/bin/ai-bypass.ps1"
+  printf '#!/usr/bin/env bash\n/usr/local/bin/gh api repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'an absolute GitHub CLI path cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf 'Start-Process -FilePath "gh.exe" -ArgumentList "api", "rate_limit"\n' > "$mutation_dir/bin/ai-bypass.ps1"
+  check 'PowerShell Start-Process cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass.ps1"
   printf 'gh api repos/acme/example\n' > "$mutation_dir/bin/promote-windows-runner-to-service.ps1"
   check 'retired runner exception cannot admit direct gh again' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Reject new unmanaged GitHub API/CLI traffic in installed bin commands.
+"""Reject recognizable unmanaged GitHub API/CLI traffic in installed bin commands.
 
 P3/#931 owns this guard. User-facing command examples have narrow literal
 exceptions; the P4/S2 ai-pr-wait direct fallback has been removed.
+This is a static syntax guard for known CLI forms, not a proof about computed
+executables or future gh subcommands; those require source review.
 """
 
 import pathlib
@@ -12,9 +14,10 @@ import sys
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) == 2 else pathlib.Path(__file__).resolve().parents[2])
 API_VERBS = r"(?:api|run|repo|pr|issue|workflow|release|search|cache|label|gist|project|codespace|secret|variable|ruleset)"
-DIRECT = re.compile(rf"(?<![\w$./-])(?:['\"])?gh(?:\.exe)?(?:['\"])?\s+{API_VERBS}\b", re.IGNORECASE)
+DIRECT = re.compile(rf"(?<![\w$.-])(?:['\"])?gh(?:\.exe)?(?:['\"])?\s+{API_VERBS}\b", re.IGNORECASE)
 SDK = re.compile(r"(?:execFileSync|spawnSync|execFile|spawn)\s*\(\s*['\"]gh(?:\.exe)?['\"]", re.IGNORECASE)
 ARG_ARRAY = re.compile(rf"[\[(,]\s*['\"]gh(?:\.exe)?['\"]\s*,\s*['\"]{API_VERBS}\b", re.IGNORECASE)
+POWERSHELL_START = re.compile(r"\bStart-Process\s+(?:-FilePath\s+)?['\"]?(?:[^\s'\"]+[/\\])?gh(?:\.exe)?['\"]?(?=\s|$)", re.IGNORECASE)
 HTTP = re.compile(r"(?:api\.github\.com|github\.getOctokit|@octokit)")
 CLI_ALIAS = re.compile(r"\b[A-Za-z_]\w*\s*=\s*['\"]?gh(?:\.exe)?['\"]?(?=\s|;|$)", re.IGNORECASE)
 
@@ -53,7 +56,7 @@ def inspect(path: pathlib.Path) -> list[str]:
             'say "    gh run list --repo $REPO --event merge_group --limit 5"',
         }:
             continue  # Exact user-facing guidance; S2 removed its direct fallback.
-        if DIRECT.search(line) or SDK.search(line) or ARG_ARRAY.search(line) or HTTP.search(line) or CLI_ALIAS.search(line):
+        if DIRECT.search(line) or SDK.search(line) or ARG_ARRAY.search(line) or POWERSHELL_START.search(line) or HTTP.search(line) or CLI_ALIAS.search(line):
             problems.append(f"{relative}:{number}: unmanaged GitHub transport")
     if path.name == "ai-pr-wait" and b"calling gh directly" in raw:
         problems.append(f"{relative}: unpaced fallback after shared transport failure")
