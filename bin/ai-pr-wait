@@ -15,11 +15,12 @@
 # moving.
 #
 # Usage:
-#   ai-pr-wait <pr-number> [--repo OWNER/NAME] [--timeout-minutes N] [--interval SECONDS] [--api-timeout-seconds N] [--owner-request TEXT]
+#   ai-pr-wait <pr-number> [--repo OWNER/NAME] [--timeout-minutes N] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval REPORT]
 #
 # A documentation-only change does not wait for checks. This command refuses to
-# start a long wait for one, and says so, unless Albert asked for the wait in
-# the current chat and you pass --owner-request with his reason.
+# start a long wait for one, and says so, unless an assigned AI
+# reviewer APPROVE of the exact head exists (a plan-review suffices) and you pass
+# --reviewer-approval with that report.
 #
 # Exit status:
 #   0  merged
@@ -33,11 +34,11 @@ REPO=''
 TIMEOUT_MINUTES=180
 INTERVAL=300
 API_TIMEOUT_SECONDS=30
-OWNER_REQUEST=''
+REVIEWER_APPROVAL=''
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo|--timeout-minutes|--interval|--api-timeout-seconds|--owner-request)
+    --repo|--timeout-minutes|--interval|--api-timeout-seconds|--reviewer-approval)
       option="$1"
       [ $# -ge 2 ] && [ -n "$2" ] || { printf 'ai-pr-wait: %s requires a value\n' "$option" >&2; exit 3; }
       case "$option" in
@@ -45,7 +46,7 @@ while [ $# -gt 0 ]; do
         --timeout-minutes) TIMEOUT_MINUTES="$2" ;;
         --interval) INTERVAL="$2" ;;
         --api-timeout-seconds) API_TIMEOUT_SECONDS="$2" ;;
-        --owner-request) OWNER_REQUEST="$2" ;;
+        --reviewer-approval) [ -f "$2" ] || { printf 'ai-pr-wait: --reviewer-approval needs an existing review report\n' >&2; exit 3; }; REVIEWER_APPROVAL="$(realpath -- "$2")" ;;
       esac
       shift 2
       ;;
@@ -202,7 +203,7 @@ if [ -n "$GATE_LIB" ]; then
   # shellcheck source=../tools/lib/task-gates.sh
   . "$GATE_LIB"
   gate_args=()
-  [ -z "$OWNER_REQUEST" ] || gate_args=(--owner-request "$OWNER_REQUEST")
+  [ -z "$REVIEWER_APPROVAL" ] || gate_args=(--reviewer-approval "$REVIEWER_APPROVAL")
   if ! tg_preflight_gate pr-wait "${gate_args[@]+"${gate_args[@]}"}"; then
     # The gate has already said why. Only add the admin-merge shortcut when the
     # change set really is prose; after a class escalation it is wrong advice,

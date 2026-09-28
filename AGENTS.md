@@ -26,8 +26,10 @@ pipeline. The recovery procedure lives in
   `terraform destroy`, or mutating production `gcloud` commands only with the
   assigned AI reviewer's explicit APPROVE of the exact action and
   resource; never ask Albert to approve (owner ruling 2026-09-28). Where
-  `ai-task-gates` demands `--owner-request`, pass only Albert's own words
-  requesting that task; otherwise report it `Blocked —` (popcre/ai-devops#996).
+  `ai-task-gates` asks for approval, pass `--reviewer-approval <report>`: the
+  assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
+  that review with `ai-review --implementer <your engine>` unless you are Claude
+  Code or Codex.
   The sole exception is the separately activated `shared-db` automatic migration
   workflow after exact structural admission, guarded merge, and merged-main
   preview proof; it authorizes no manual production command or other infrastructure
@@ -45,7 +47,7 @@ pipeline. The recovery procedure lives in
 - Declare what the task is before starting it: `ai-task-gates start --class
   <class>`. The reviewer lifecycle, `bin/ai-pr-wait`, and `bin/ai-review`
   recheck the real change set first and refuse an action the work does not
-  call for. A protected class cannot be acknowledged or owner-requested away;
+  call for. A protected class cannot be acknowledged or reviewer-approved away;
   the honest way past one is to redeclare the task at the stronger class and
   then do what that class actually requires.
 - Wait on CI through **bounded, event-aware** tools.

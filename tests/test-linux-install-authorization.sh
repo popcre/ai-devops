@@ -3,6 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
+printf '{"schema_version":1,"verdict":"APPROVE"}\n' > "$TMP/approval.json"
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" TEST_LOG="$TMP/gate.log"
 mkdir -p "$HOME" "$TMP/src/bin"
@@ -25,7 +26,7 @@ target=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --phase) phase="$2"; shift 2 ;;
-    --owner-request) owner="$2"; shift 2 ;;
+    --reviewer-approval) owner="$2"; shift 2 ;;
     --caller-pinned) caller_pinned=1; shift ;;
     --stage-report) stage_report="$2"; shift 2 ;;
     --target-head) target="$2"; shift 2 ;;
@@ -84,15 +85,15 @@ fi
 check_head "$before"
 [ "$(cat "$TEST_LOG")" = resume ] || fail 'direct installer did not check resume'
 
-# Same-source maintenance forwards its explicit owner request; the gate decides.
+# Same-source maintenance forwards its assigned AI reviewer approval; the gate decides.
 if TEST_REQUIRE_OWNER=1 "$TMP/installed/install.sh" --test-authorization-only >/dev/null 2>&1; then
-  fail 'same-source install accepted missing owner request'
+  fail 'same-source install accepted missing reviewer approval'
 fi
-TEST_REQUIRE_OWNER=1 TEST_ASSERT_GATE_CWD=1 "$TMP/installed/install.sh" --owner-request 'fixture approval' \
+TEST_REQUIRE_OWNER=1 TEST_ASSERT_GATE_CWD=1 "$TMP/installed/install.sh" --reviewer-approval "$TMP/approval.json" \
   --test-authorization-only >/dev/null
 (
   umask 022
-  TEST_CAPTURE_UMASK_FILE="$TMP/installer-umask" "$TMP/installed/install.sh" --owner-request 'fixture approval' \
+  TEST_CAPTURE_UMASK_FILE="$TMP/installer-umask" "$TMP/installed/install.sh" --reviewer-approval "$TMP/approval.json" \
     --test-authorization-only >/dev/null
 )
 [ "$(cat "$TMP/installer-umask")" = 0022 ] || fail 'installer leaked private lock umask into later stages'
@@ -184,7 +185,7 @@ check_head "$before"
 [ "$(paste -sd, "$TEST_LOG")" = 'start,preflight' ] || fail 'unpinned update passed preflight'
 : > "$TEST_LOG"
 if TEST_REQUIRE_OWNER_PREFLIGHT=1 "$TMP/installed/update.sh" --expected-head "$target" \
-  >/dev/null 2>&1; then fail 'ordinary preflight accepted missing owner request'; fi
+  >/dev/null 2>&1; then fail 'ordinary preflight accepted missing reviewer approval'; fi
 check_head "$before"
 
 # If the installer proves that it restored protected state, the updater returns
@@ -229,7 +230,7 @@ if grep -q '^finalize$' "$TEST_LOG"; then fail 'failed direct retry finalized'; 
 (
   umask 022
   TEST_CAPTURE_UMASK_FILE="$TMP/updater-umask" "$TMP/installed/update.sh" --expected-head "$target" \
-    --owner-request 'fixture approval' >/dev/null
+    --reviewer-approval "$TMP/approval.json" >/dev/null
 )
 [ "$(cat "$TMP/updater-umask")" = 0022 ] || fail 'updater leaked private lock umask into installation stages'
 check_head "$target"
@@ -252,7 +253,7 @@ if "$TMP/first-candidate/update.sh" --installed-checkout "$TMP/installed" \
 : > "$TEST_LOG"
 TEST_REQUIRE_OWNER_PREFLIGHT=1 "$TMP/first-candidate/update.sh" \
   --installed-checkout "$TMP/first" --expected-head "$target" \
-  --owner-request 'fixture first rollout' >/dev/null
+  --reviewer-approval "$TMP/approval.json" >/dev/null
 [ "$(git -C "$TMP/first" rev-parse HEAD)" = "$target" ] ||
   fail 'candidate updater did not advance named installed checkout'
 [ "$(paste -sd, "$TEST_LOG")" = 'start,preflight,install,resume,requalify,stages-complete,finalize' ] ||
