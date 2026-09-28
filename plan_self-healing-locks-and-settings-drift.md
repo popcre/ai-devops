@@ -8,9 +8,9 @@ Owner issue: https://github.com/popcre/ai-devops/issues/1002.
 | Step | State | Evidence |
 |---|---|---|
 | 1 Lock inventory | ✅ done (2026-09-28) | `docs/locks.md` covers all 62 hits of `grep -rnE 'flock|lock\.d|\.lock' bin`; AGENTS.md router row added |
-| 2 Stale-holder recovery for flock locks | ⬜ open | — |
-| 3 Settings snapshot + drift check | ⬜ open | — |
-| 4 Scheduled drift check + alert | ⬜ open | — |
+| 2 Stale-holder recovery for flock locks | ✅ done (2026-09-28, Linux CI proof pending merge) | `bin/ai-lock-doctor` + wiring at all 5 flock sites; Windows `lock_acquire` pid+age reclaim; `tests/test-ai-lock-doctor.sh` portable cases green locally; /proc cases prove on the Linux CI lane |
+| 3 Settings snapshot + drift check | ✅ done (2026-09-28) | `config/merge-queue-expected.json` + `bin/ai-merge-queue-drift`; passes against the live ruleset (read via ai-gh) and `tests/test-ai-merge-queue-drift.sh` proves renamed-job, paths-filter, .ps1-divergence, and clean-pass cases |
+| 4 Scheduled drift check + alert | ✅ done (2026-09-28, dispatch proof in Step 5) | `.github/workflows/merge-queue-drift.yml`: daily cron + PR-path trigger + standing-issue alert job |
 | 5 Live proof | ⬜ open | — |
 
 A fresh session starts at Step 1.
