@@ -782,6 +782,29 @@ if ($SkillsDryRun) {
 # qualification the pulled code invalidated. The fast-forward above ran with
 # hooks disabled, so this is the only requalify for this run.
 $installBash = Get-GitBash
+
+# A review turn may only read Muse's protected key store. Prepare it before
+# requalification, outside any review, even if Muse Code is not yet installed.
+$museWrapper = Join-Path $RepoPath 'bin\ai-muse'
+if (Test-Path -LiteralPath $museWrapper) {
+    if ($installBash) {
+        $oldMuseCaller = $env:AI_MUSE_CALLER
+        try {
+            $env:AI_MUSE_CALLER = 'installer'
+            $museProbe = Invoke-NativeProbe -Command $installBash.Source -Arguments @('--noprofile', '--norc', ($museWrapper -replace '\\', '/'), 'store-key', '--if-missing')
+        } finally {
+            $env:AI_MUSE_CALLER = $oldMuseCaller
+        }
+        if ($museProbe.ExitCode -eq 0) {
+            Write-Note 'Muse protected per-user key store is ready.'
+        } else {
+            Write-Note 'Muse key store setup failed; review qualification remains unavailable until ai-muse store-key succeeds.'
+        }
+    } else {
+        Write-Note 'Git Bash is needed to prepare the Muse key store.'
+    }
+}
+
 Install-PostMergeHook -Root $RepoPath -Bash $installBash
 if ($installBash) {
     $requalify = (Join-Path $RepoPath 'bin\ai-review-preflight') -replace '\\', '/'

@@ -2,6 +2,7 @@ Set-StrictMode -Version Latest
 
 function Invoke-AiDevOpsIcacls {
   param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string[]]$Arguments)
+  $ErrorActionPreference = 'Stop'
   if ($env:AI_DEVOPS_TEST_ICACLS_FAIL -eq '1') { throw 'Simulated icacls failure.' }
   & icacls.exe $Path @Arguments | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "icacls failed for $Path with exit code $LASTEXITCODE." }
