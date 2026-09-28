@@ -524,6 +524,26 @@ mkdir -p "$TMP/state/credential.lock.d"; printf '%s
 CRED_TIMEOUT_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$CONC/timeout-key' AI_MUSE_CREDENTIAL_WAIT_SECONDS=2 '$SCRIPT' store-key" 2>&1 || true)"
 check 'a held credential lock fails closed with a clear message after the wait budget' "printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q 'credential lock still held by another Muse turn after 2s' && ! printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q fake-key"
 rm -rf "$TMP/state/credential.lock.d"
+mkdir -p "$TMP/windows-cred-bin" "$TMP/windows-cred-lock"
+cat > "$TMP/windows-cred-bin/ps" <<'EOF'
+#!/usr/bin/env bash
+[ "${PS_STUB_LIVE:-0}" = 1 ] && printf 'a b c 43210\n'
+EOF
+chmod +x "$TMP/windows-cred-bin/ps"
+MUSE_LOCK_FUNCTIONS="$(sed -n '/^muse_credential_owner_alive(){/,/^read_key_from_op(){/{ /^read_key_from_op(){/d; p; }' "$SCRIPT")"
+printf '%s\n' '999999 43210 live-token' > "$TMP/windows-cred-lock/owner"
+if ( export SYSTEMROOT='C:\Windows' PS_STUB_LIVE=1 PATH="$TMP/windows-cred-bin:$PATH"; source /dev/stdin; CRED_LOCK=''; CRED_TOKEN=''; muse_credential_acquire "$TMP/windows-cred-lock" ) <<< "$MUSE_LOCK_FUNCTIONS" >/dev/null 2>&1; then
+  bad 'Windows credential lock keeps a live sibling runtime owner'
+elif [ "$(cat "$TMP/windows-cred-lock/owner")" = '999999 43210 live-token' ]; then
+  ok 'Windows credential lock keeps a live sibling runtime owner'
+else
+  bad 'Windows credential lock keeps a live sibling runtime owner'
+fi
+if ( export SYSTEMROOT='C:\Windows' PS_STUB_LIVE=0 PATH="$TMP/windows-cred-bin:$PATH"; source /dev/stdin; CRED_LOCK=''; CRED_TOKEN=''; muse_credential_acquire "$TMP/windows-cred-lock" && [ -n "$CRED_TOKEN" ] && [ -d "$TMP/windows-cred-lock.dead.live-token" ] ) <<< "$MUSE_LOCK_FUNCTIONS" >/dev/null 2>&1; then
+  ok 'Windows credential lock reclaims only a dead witnessed owner'
+else
+  bad 'Windows credential lock reclaims only a dead witnessed owner'
+fi
 
 # Protected key store: review turns fail closed; only explicit store-key uses
 # 1Password when the store is missing or Meta rejects its key.

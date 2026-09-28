@@ -140,7 +140,14 @@ meta_path(){ state_leaf "$STATE/sessions/$1" "$CALLER--$2" .json; }
 tag(){ short_name "muse-$CALLER-$1" 64; }
 LOCK=""; LOCK_TOKEN=""; CRED_LOCK=""; CRED_TOKEN=""; TURN_PID=""; ACTIVE_META=""; PUBLISH_TMP=""; PUBLISH_FD=""; PUBLISH_ID=""; PUBLISH_FD_ID=""; PUBLISH_DIR_PHYSICAL=""; PUBLISH_ROOT=""; PUBLISH_BASENAME=""
 release_lock(){ [ -z "$LOCK" ] && return 0; [ "$(cat "$LOCK/token" 2>/dev/null || true)" != "$LOCK_TOKEN" ] || rm -rf "$LOCK"; LOCK=""; LOCK_TOKEN=""; }
-release_credential_lock(){ [ -z "$CRED_LOCK" ] && return 0; [ "$(cat "$CRED_LOCK/token" 2>/dev/null || true)" != "$CRED_TOKEN" ] || rm -rf "$CRED_LOCK"; CRED_LOCK=""; CRED_TOKEN=""; }
+release_credential_lock(){
+  [ -z "$CRED_LOCK" ] && return 0
+  local owner="" pid="" winpid="" token=""
+  owner="$(cat "$CRED_LOCK/owner" 2>/dev/null || true)"
+  read -r pid winpid token <<< "$owner"
+  [ -z "$CRED_TOKEN" ] || [ "$token" != "$CRED_TOKEN" ] || rm -rf "$CRED_LOCK"
+  CRED_LOCK=""; CRED_TOKEN=""
+}
 cleanup(){
   local accepted_path="" accepted_id="" active_status="" active_tmp="" evidence_durable=1
   rm -f -- "$RUN_TMP"/muse-key.*
@@ -364,24 +371,63 @@ prepare(){
   # Muse reads the sealed evidence but keeps its own verdict contract.
   printf '\n\nRead %s/MANIFEST.md first for the exact change and test evidence; ignore its answer-format section and use the answer format this request asks for. Return ALL findings in one pass, grouped by severity, with file and line evidence; check for sibling issues of the same class before returning.\n' "${PACKET_DIR#"$REVIEW_DIR"/}" >> "$prompt"
 }
+muse_credential_owner_alive(){
+  local pid="$1" winpid="$2"
+  if kill -0 "$pid" 2>/dev/null || [ -d "/proc/$pid" ]; then return 0; fi
+  [ -n "$winpid" ] && ps -W 2>/dev/null | awk -v w="$winpid" '$4 == w { found=1 } END { exit !found }'
+}
+muse_credential_publish(){
+  local candidate="$1" stage winpid token
+  stage="$(mktemp -d "$candidate.stage.XXXXXX")" || return 1
+  winpid="$(cat "/proc/$BASHPID/winpid" 2>/dev/null || true)"
+  token="$BASHPID.${winpid:-0}.$(date +%s%N).$RANDOM"
+  printf '%s %s %s\n' "$BASHPID" "${winpid:--}" "$token" > "$stage/owner"
+  printf '%s\n' "$BASHPID" > "$stage/pid"
+  printf '%s\n' "$token" > "$stage/token"
+  if ! mv -T "$stage" "$candidate" 2>/dev/null; then rm -rf "$stage"; return 1; fi
+  [ "$(cat "$candidate/owner" 2>/dev/null || true)" = "$BASHPID ${winpid:--} $token" ] || return 1
+  CRED_LOCK="$candidate"; CRED_TOKEN="$token"
+}
+muse_credential_acquire(){
+  local candidate="$1" record owner winpid token born now tomb attempt
+  [ -e "$candidate" ] || { muse_credential_publish "$candidate" && return 0; }
+  record="$(cat "$candidate/owner" 2>/dev/null || true)"
+  read -r owner winpid token <<< "$record"
+  if [ -z "$owner" ] || [ -z "$token" ]; then
+    owner="$(cat "$candidate/pid" 2>/dev/null || true)"
+    # A legacy MSYS pid cannot identify a live owner in another Git Bash
+    # runtime. Waiting is safer than reclaiming its active 1Password lock.
+    [ -z "${SYSTEMROOT:-}" ] || return 1
+    if [ -n "$owner" ]; then muse_credential_owner_alive "$owner" "" && return 1
+    else
+      born="$(date -r "$candidate" +%s 2>/dev/null)" || return 1
+      now="$(date +%s)"; [ $((now - born)) -ge 60 ] || return 1
+    fi
+    token="legacy.${owner:-none}.$(date -r "$candidate" +%s 2>/dev/null)"
+  else
+    [ "$winpid" != - ] || winpid=""
+    [ -z "${SYSTEMROOT:-}" ] || [ -n "$winpid" ] || return 1
+    for attempt in 1 2 3; do
+      muse_credential_owner_alive "$owner" "$winpid" && return 1
+      [ "$attempt" = 3 ] || sleep 1
+    done
+  fi
+  tomb="$candidate.dead.$token"
+  mv -T "$candidate" "$tomb" 2>/dev/null || return 1
+  if [ "$(cat "$tomb/owner" 2>/dev/null || true)" != "$record" ]; then
+    mv -T "$tomb" "$candidate" 2>/dev/null || true
+    return 1
+  fi
+  muse_credential_publish "$candidate"
+}
 read_key_from_op(){
-  # Serialize every 1Password read behind one machine-wide lock. Concurrent
-  # turns wait their turn (bounded, with backoff) instead of refusing.
-  need op; local candidate="$STATE/credential.lock.d" owner token budget deadline delay=1 waited=0; token="$$-$RANDOM-$(date +%s)"; mkdir -p "$STATE"
+  # Explicit key refreshes from Muse, Qwen and DeepSeek share this lock.
+  need op; local candidate="$STATE/credential.lock.d" budget deadline delay=1 waited=0; mkdir -p "$STATE"
   budget="${AI_MUSE_CREDENTIAL_WAIT_SECONDS:-120}"; case "$budget" in ''|*[!0-9]*) die 'AI_MUSE_CREDENTIAL_WAIT_SECONDS must be a whole number of seconds.';; esac
   deadline=$(( $(date +%s) + budget ))
-  while :; do
-    if mkdir "$candidate" 2>/dev/null; then printf '%s
-' "$token" > "$candidate/token"; printf '%s
-' "$$" > "$candidate/pid"; CRED_LOCK="$candidate"; CRED_TOKEN="$token"; break; fi
-    owner="$(cat "$candidate/pid" 2>/dev/null || true)"
-    case "$owner" in
-      ''|*[!0-9]*) if [ -n "$(find "$candidate" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ]; then ! mv "$candidate" "$candidate.stale.$token" 2>/dev/null || { rm -rf "$candidate.stale.$token"; continue; }; fi;;
-      *) if ! kill -0 "$owner" 2>/dev/null; then ! mv "$candidate" "$candidate.stale.$token" 2>/dev/null || { rm -rf "$candidate.stale.$token"; continue; }; fi;;
-    esac
+  until muse_credential_acquire "$candidate"; do
     [ "$(date +%s)" -lt "$deadline" ] || die "1Password credential lock still held by another Muse turn after ${budget}s; no key was read. Retry the Muse turn."
-    [ "$waited" -eq 1 ] || { printf 'Muse: waiting for another turn to finish reading 1Password...
-' >&2; waited=1; }
+    [ "$waited" -eq 1 ] || { printf 'Muse: waiting for another turn to finish reading 1Password...\n' >&2; waited=1; }
     sleep "$delay"; [ "$delay" -ge 4 ] || delay=$((delay * 2))
   done
   MODEL_API_KEY="$(op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"; release_credential_lock; [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
