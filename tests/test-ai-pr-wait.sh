@@ -141,7 +141,7 @@ cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
 printf '%s\n' "$(( count + 1 ))" > "$AI_PR_WAIT_TEST_MARKER"
-printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","isInMergeQueue":false,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"nodes":[]}}}}]}}}}}'
+printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"abc123","isInMergeQueue":false,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[]}}}}]}}}}}'
 EOF
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
@@ -208,6 +208,86 @@ OUT="$( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-d
 check "work that outgrew its declared class still refuses the wait" \
   "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q migration.sql"
 rm -f "$GR/migration.sql"
+
+# Two independent waiters start together on one PR. The shared first status
+# response is OPEN, and each retains its own deadline result.
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf 'x\n' >> "${AI_PR_WAIT_TEST_MARKER:?}"
+/bin/sleep 0.3
+printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"shared-head","isInMergeQueue":false,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[]}}}}]}}}}}'
+EOF
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+state="${AI_PR_WAIT_TEST_CLOCK:?}"
+count="$(cat "$state" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
+if [ "$count" -le 2 ]; then printf '1000\n'; else printf '1060\n'; fi
+EOF
+chmod +x "$TMP/bin/gh" "$TMP/bin/date"
+rm -f "$TMP/shared-calls" "$TMP/shared-clock-a" "$TMP/shared-clock-b"
+AI_TASK_GATES_MODE=none AI_PR_WAIT_TEST_CONTEXT_KEY='host credential principal scopes-a' \
+  AI_PR_WAIT_SNAPSHOT_DIR="$TMP/pr-status" AI_GH_STATE_DIR="$TMP/shared-throttle" \
+  AI_PR_WAIT_TEST_MARKER="$TMP/shared-calls" AI_PR_WAIT_TEST_CLOCK="$TMP/shared-clock-a" \
+  PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 >"$TMP/shared-a.out" 2>&1 & shared_a=$!
+AI_TASK_GATES_MODE=none AI_PR_WAIT_TEST_CONTEXT_KEY='host credential principal scopes-a' \
+  AI_PR_WAIT_SNAPSHOT_DIR="$TMP/pr-status" AI_GH_STATE_DIR="$TMP/shared-throttle" \
+  AI_PR_WAIT_TEST_MARKER="$TMP/shared-calls" AI_PR_WAIT_TEST_CLOCK="$TMP/shared-clock-b" \
+  PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 >"$TMP/shared-b.out" 2>&1 & shared_b=$!
+wait "$shared_a"; shared_a_rc=$?
+wait "$shared_b"; shared_b_rc=$?
+check "two simultaneous first waiters share one complete upstream read and keep independent deadlines" \
+  "test '$shared_a_rc' -eq 2 && test '$shared_b_rc' -eq 2 && test \"\$(wc -l < '$TMP/shared-calls')\" -eq 1 && grep -q 'still in progress' '$TMP/shared-a.out' && grep -q 'still in progress' '$TMP/shared-b.out'"
+
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+printf '1000\n'
+EOF
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf 'x\n' >> "${AI_PR_WAIT_TEST_MARKER:?}"
+if [[ "$*" == *before:* ]]; then
+  printf '%s\n' '{"data":{"repository":{"pullRequest":{"headRefOid":"h1","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[{"name":"older failure","conclusion":"FAILURE"}]}}}}]}}}}}'
+else
+  printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1","isInMergeQueue":false,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":true,"startCursor":"older"},"nodes":[]}}}}]}}}}}'
+fi
+EOF
+chmod +x "$TMP/bin/gh" "$TMP/bin/date"
+rm -f "$TMP/paged-calls"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/paged-calls" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a failure on a previous check page remains terminal after complete pagination" \
+  "test '$RC' -eq 1 && test \"\$(wc -l < '$TMP/paged-calls')\" -eq 2 && printf '%s' \"$OUT\" | grep -q 'older failure'"
+
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
+if [ "$count" -eq 3 ]; then state=MERGED; queue=false; head=h2
+elif [ "$count" -eq 2 ]; then state=OPEN; queue=false; head=h2
+else state=OPEN; queue=true; head=h1; fi
+printf '{"data":{"repository":{"pullRequest":{"state":"%s","headRefOid":"%s","isInMergeQueue":%s,"mergeCommit":{"oid":"done"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false},"nodes":[]}}}}]}}}}}\n' "$state" "$head" "$queue"
+EOF
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/head-move-count"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/head-move-count" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a changed head after queue membership is not falsely called an ejection" \
+  "test '$RC' -eq 0 && test \"\$(cat '$TMP/head-move-count')\" -eq 3 && ! printf '%s' \"$OUT\" | grep -q EJECTED"
+
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
+if [ "$count" -eq 1 ]; then queue=true; else queue=false; fi
+printf '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1","isInMergeQueue":%s,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false},"nodes":[]}}}}]}}}}}\n' "$queue"
+EOF
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/ejected-count"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/ejected-count" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a genuine same-head merge-queue ejection is terminal" \
+  "test '$RC' -eq 1 && test \"\$(cat '$TMP/ejected-count')\" -eq 2 && printf '%s' \"$OUT\" | grep -q EJECTED"
+
+check "the cross-process cache preserves privacy, completeness, cancellation and recovery" \
+  "python3 '$ROOT/tests/test-ai-pr-status-singleflight.py' -q"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

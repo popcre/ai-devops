@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Local, read-only access-context key for sharing PR status snapshots. No API
+# request is made. Unknown identities fail closed and each token stays separate
+# even when two PATs share a GitHub quota bucket and verified principal.
+set -uo pipefail
+
+STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
+HOST="${GH_HOST:-github.com}"
+HOST="${HOST,,}"
+[[ "$HOST" =~ ^[a-z0-9][a-z0-9.-]*$ ]] || exit 1
+REAL="${AI_GH_REAL_GH:-$(command -v gh 2>/dev/null || true)}"
+[ -n "$REAL" ] && command -v sha256sum >/dev/null 2>&1 || exit 1
+private_path(){
+  local path="$1" kind="$2" mode owner
+  [ ! -L "$path" ] || return 1
+  if [ "$kind" = directory ]; then [ -d "$path" ] || return 1
+  else [ -f "$path" ] || return 1; fi
+  mode="$(stat -c %a "$path" 2>/dev/null)" || return 1
+  owner="$(stat -c %u "$path" 2>/dev/null)" || return 1
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] && [[ "$owner" =~ ^[0-9]+$ ]] || return 1
+  [ "$owner" -eq "$(id -u)" ] && [ $(( 8#$mode & 077 )) -eq 0 ]
+}
+private_path "$STATE" directory && private_path "$STATE/identities" directory || exit 1
+
+# A token is sent only through a pipe into the digest process. Neither the
+# token nor its unsalted digest is printed or persisted by this helper.
+credential_hash="$(timeout 15 "$REAL" auth token --hostname "$HOST" 2>/dev/null | sha256sum | awk '{print $1}')" || exit 1
+empty_hash="$(printf '' | sha256sum | awk '{print $1}')"
+[[ "$credential_hash" =~ ^[0-9a-f]{64}$ ]] && [ "$credential_hash" != "$empty_hash" ] || exit 1
+identity_key="$(printf '3 %s %s' "$HOST" "$credential_hash" | sha256sum | awk '{print $1}')"
+identity_file="$STATE/identities/$identity_key"
+private_path "$identity_file" file || exit 1
+read -r principal checked_at extra < "$identity_file" || exit 1
+[[ "$principal" =~ ^[0-9]{1,20}$ ]] && [[ "$checked_at" =~ ^[0-9]{1,12}$ ]] && [ -z "${extra:-}" ] || exit 1
+salt_file="$STATE/principal-salt"
+private_path "$salt_file" file || exit 1
+salt="$(cat "$salt_file")" || exit 1
+[[ "$salt" =~ ^[0-9a-f]{64}$ ]] || exit 1
+printf 'v1:%s\n' "$(printf '%s %s %s %s' "$salt" "$HOST" "$credential_hash" "$principal" | sha256sum | awk '{print $1}')"
