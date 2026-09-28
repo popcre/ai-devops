@@ -325,6 +325,9 @@ FAKE_MODE=graphql-jq-scalar AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql --jq
 check 'valid GraphQL jq scalar keeps original output and success status' "[ $rc -eq 0 ] && [ \$(cat '$TMP/graphql-scalar') = scalar ]"
 check 'transformed GraphQL scalar is explicitly unobservable in request report' "jq -se '[.[] | select(.operation == \"api.graphql\")][-1].request_class == \"graphql_transformed_unobservable\"' '$TMP/state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/state/measurements' | jq -e '.graphql_transformed_unobservable >= 1'"
 fresh_quota
+FAKE_MODE=graphql-jq-scalar AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api --hostname github.example graphql --jq .data.viewer.login > "$TMP/graphql-scalar-host" 2>/dev/null; rc=$?
+check 'GraphQL transform after leading host flag is measured without rejecting report' "[ $rc -eq 0 ] && [ \$(cat '$TMP/graphql-scalar-host') = scalar ] && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/state/measurements' | jq -e '.graphql_transformed_unobservable >= 2'"
+fresh_quota
 FAKE_MODE=graphql-jq-empty AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api graphql --jq .data.missing > "$TMP/graphql-empty" 2>/dev/null; rc=$?
 check 'valid GraphQL jq empty result keeps original success status' "[ $rc -eq 0 ] && [ ! -s '$TMP/graphql-empty' ]"
 fresh_quota

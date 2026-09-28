@@ -606,6 +606,7 @@ if [ "$GRAPH_TRANSFORMED" = 1 ]; then
   # gh has already transformed or suppressed the body before this wrapper can
   # inspect it. Keep the original CLI result and record that HTTP-200 GraphQL
   # application errors could not be classified from this output shape.
+  GH_MEASURE_OPERATION=api.graphql
   GH_MEASURE_REQUEST_CLASS=graphql_transformed_unobservable
 fi
 if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED" = 0 ] && command -v jq >/dev/null 2>&1; then
