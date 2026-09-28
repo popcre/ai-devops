@@ -149,7 +149,21 @@ export AI_QWEN_OP_ENV_FILE="$TMP/managed.env" AI_QWEN_OP_BIN="$STUB/op"
 export AI_QWEN_KEY_STORE="$TMP/config/secrets/qwen-token-plan-key"
 unset BAILIAN_CODING_PLAN_API_KEY
 "$SCRIPT" store-key >/dev/null
-check 'install-time Qwen key store is owner-only' "test -s '$AI_QWEN_KEY_STORE' && test \"\$(stat -c %a '$AI_QWEN_KEY_STORE')\" = 600 && test \"\$(stat -c %a '$(dirname "$AI_QWEN_KEY_STORE")')\" = 700"
+if [ -n "${SYSTEMROOT:-}" ]; then
+  # Git Bash mode bits do not describe the Windows ACL used by the wrapper.
+  PRIVATE_HELPER="$(cygpath -w "$REPO_ROOT/bin/windows-private-file.ps1")"
+  PRIVATE_KEY="$(cygpath -w "$AI_QWEN_KEY_STORE")"
+  PRIVATE_DIR="$(cygpath -w "$(dirname "$AI_QWEN_KEY_STORE")")"
+  if AI_DEVOPS_PRIVATE_HELPER="$PRIVATE_HELPER" AI_DEVOPS_PRIVATE_TARGET="$PRIVATE_KEY" AI_DEVOPS_PRIVATE_PARENT="$PRIVATE_DIR" \
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
+      '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null 2>&1; then
+    ok 'install-time Qwen key store is owner-only'
+  else
+    bad 'install-time Qwen key store is owner-only'
+  fi
+else
+  check 'install-time Qwen key store is owner-only' "test -s '$AI_QWEN_KEY_STORE' && test \"\$(stat -c %a '$AI_QWEN_KEY_STORE')\" = 600 && test \"\$(stat -c %a '$(dirname "$AI_QWEN_KEY_STORE")')\" = 700"
+fi
 if [ -z "${SYSTEMROOT:-}" ]; then
   LOCK_READY="$TMP/op-lock-ready"
   flock "$AI_DEVOPS_CONFIG_DIR/op-refresh.lock" bash -c 'touch "$1"; sleep 2' _ "$LOCK_READY" & LOCK_PID=$!
@@ -195,9 +209,9 @@ printf '{"saved":true}\n' > "$TMP/transcript.jsonl"
 echo review > "$TMP/mode"
 run(){ (cd "$REPO" && bash "$SCRIPT" "$@"); }
 chmod 644 "$AI_QWEN_KEY_STORE"
-BEFORE_INSECURE="$(wc -l < "$TMP/argv.txt" 2>/dev/null || printf 0)"
+BEFORE_INSECURE="$(if [ -e "$TMP/argv.txt" ]; then wc -l < "$TMP/argv.txt"; else printf 0; fi)"
 run new insecure-key-store --prompt review >/dev/null 2>&1; INSECURE_RC=$?
-check 'review refuses an insecure key store before provider contact' "test '$INSECURE_RC' -ne 0 && test '$BEFORE_INSECURE' = \"\$(wc -l < '$TMP/argv.txt' 2>/dev/null || printf 0)\""
+check 'review refuses an insecure key store before provider contact' "test '$INSECURE_RC' -ne 0 && test '$BEFORE_INSECURE' = \"\$(if [ -e '$TMP/argv.txt' ]; then wc -l < '$TMP/argv.txt'; else printf 0; fi)\""
 chmod 600 "$AI_QWEN_KEY_STORE"
 ORIGINAL_KEY_HASH="$(sha256sum "$AI_QWEN_KEY_STORE" | cut -d' ' -f1)"
 printf 'BAILIAN_CODING_PLAN_API_KEY=op://wrong-vault/key\n' > "$TMP/managed.env"
