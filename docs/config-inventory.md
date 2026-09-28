@@ -287,21 +287,19 @@ machine-local; only the required-permissions list is synced.
 
 ### 5. `~/.codex/config.toml`
 Portable Codex CLI settings pin `model = "gpt-5.6-sol"`,
-`model_reasoning_effort = "medium"`, and 20 concurrently open subagent threads
-per session. Established machine files also contain
+`model_reasoning_effort = "medium"`. Established machine files also contain
 `[windows] sandbox = "elevated"`, `[desktop]` UI prefs, enabled plugins
 (chrome, documents, spreadsheets, pdf, browser, visualize, …), a local
 `node_repl` MCP server, and marketplaces. **Most of the file is machine-specific
 runtime paths** (hashed cache dirs, per-install exe paths). Only ~5 lines are
 portable (`model`, `model_reasoning_effort`, `[windows] sandbox`, a couple
 `[desktop]` prefs). **Do not sync wholesale.** The setup workflow reconciles
-only the subagent limit and other explicitly managed sections, with a backup
+only explicitly managed sections, with a backup
 before each change.
 
-The portable file uses Codex's documented `agents.max_threads` compatibility
-alias because the installed 0.144.x desktop generation rejects the newer
-`agents.max_concurrent_threads_per_session` spelling; current releases accept
-both.
+Machine setup removes previously managed `agents.max_threads` and
+`agents.max_concurrent_threads_per_session` values. When unset, Codex chooses
+its own default concurrency.
 
 ### 6. Gaps
 - **Memory** — handled by `bin/ai-memory-sync` as a private, lossless Git
