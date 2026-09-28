@@ -271,6 +271,22 @@ cd /worksp/ai-devops
 `update.sh` never overwrites `/etc/ai-devops/*.env`. It returns nonzero if the
 installer has any required failure and reports the exact source SHA attempted.
 
+On Linux, `update.sh --expected-head <full-merged-SHA>` pins a protected update
+before the installed checkout moves. It fetches the target, runs the target
+gate from an isolated candidate, then fast-forwards the installed checkout.
+`install.sh` checks the same pending authorization before its first machine
+change, including when called directly. Same-source maintenance uses
+`./install.sh --owner-request '<specific approved action>'`; a protected source
+change cannot use that route. One checkout lock covers the update and install.
+The installer saves protected config, the manifest, managed launcher targets,
+the user crontab, and the protected configuration checkout's commit before it
+starts. On a required-stage failure it restores those items where their exact
+prior state can be proved; the updater returns to the prior clean checkout only
+after that restoration is confirmed. A foreign concurrent change stops
+automatic rollback and leaves the authorization pending for repair. Per-user
+provider and skill changes are not an atomic transaction, so a failed update
+still needs explicit capability verification before being called rolled back.
+
 Reviewer hosts do not need `update.sh` for requalification: the managed
 `post-merge` hook runs `ai-review-preflight requalify` on every pull whose
 result is on `origin/main` (development-branch merges are skipped). The two

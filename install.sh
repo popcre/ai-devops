@@ -96,16 +96,55 @@ if [ "${1:-}" = "--test-stage-runner" ]; then
 fi
 
 REQUIRE_SECRETS=auto
-for arg in "$@"; do
-  case "$arg" in
-    --require-secrets) REQUIRE_SECRETS=yes ;;
-    --skip-secrets) REQUIRE_SECRETS=no ;;
+AUTHORIZATION_TEST_ONLY=0
+owner_request=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --require-secrets) REQUIRE_SECRETS=yes; shift ;;
+    --skip-secrets) REQUIRE_SECRETS=no; shift ;;
+    --owner-request)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || { warn '--owner-request needs a reason'; exit 2; }
+      owner_request="$2"; shift 2 ;;
+    --test-authorization-only) AUTHORIZATION_TEST_ONLY=1; shift ;;
     -h|--help)
-      echo "usage: ./install.sh [--require-secrets|--skip-secrets]"
+      echo "usage: ./install.sh [--require-secrets|--skip-secrets] [--owner-request TEXT]"
       exit 0 ;;
-    *) echo "Unknown option: $arg" >&2; exit 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+# A direct installer and an updater share one checkout lock. An updater passes
+# its open descriptor to its direct child; neither an environment flag nor a
+# stale lock-file name alone is accepted as ownership.
+install_lock_dir="$HOME/.local/state/ai-devops/task-gates"
+install_lock_name="install-$(printf '%s' "$REPO_ROOT" | sha256sum | cut -c1-16).lock"
+umask 077
+mkdir -p "$install_lock_dir" || exit 1
+install_lock_file="$install_lock_dir/$install_lock_name"
+if [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" = 9 ]; then
+  [ "${AI_DEVOPS_INSTALL_LOCK_PARENT:-}" = "$PPID" ] &&
+    [ "$(readlink /proc/$$/fd/9 2>/dev/null)" = "$install_lock_file" ] &&
+    flock -n 9 || { warn 'installer did not inherit the updater checkout lock'; exit 1; }
+else
+  exec 9>"$install_lock_file" || exit 1
+  flock -n 9 || { warn 'another installation is active for this checkout'; exit 1; }
+fi
+if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" = 1 ] &&
+   [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" != 9 ]; then
+  warn 'only the lock-owning updater may defer finalization'
+  exit 1
+fi
+
+# Resume verifies the installed baseline and pending authorization before the
+# first dependency, protected config, symlink, or per-user installation stage.
+target_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || exit 1
+resume_args=(install-verify --phase resume --target-head "$target_head"
+  --installed-checkout "$REPO_ROOT" --installed-launcher /usr/local/bin/ai-task-gates)
+[ -z "$owner_request" ] || resume_args+=(--owner-request "$owner_request")
+"$REPO_ROOT/bin/ai-task-gates" "${resume_args[@]}" || {
+  warn 'installation authorization refused before any machine changes'; exit 1;
+}
+[ "$AUTHORIZATION_TEST_ONLY" -eq 0 ] || exit 0
 
 # Pick a sudo prefix only if we are not already root.
 SUDO=""
@@ -116,6 +155,193 @@ if [ "$(id -u)" -ne 0 ]; then
     warn "Not root and sudo not found; system-path steps may fail."
   fi
 fi
+
+# Preserve versioned protected files before the first installer stage. The
+# backup remains owner-protected for recovery; no value enters output.
+backup_protected_config() {
+  local f
+  BACKUP_DIR=""
+  $SUDO install -d -m 700 /var/backups/ai-devops || return 1
+  BACKUP_DIR="$($SUDO mktemp -d /var/backups/ai-devops/install.XXXXXXXX)" || return 1
+  for f in models.env server.env config-state.json install-manifest.tsv; do
+    [ ! -L "$ETC_DIR/$f" ] || { warn "refusing symlinked protected config: $f"; return 1; }
+    if [ -e "$ETC_DIR/$f" ]; then
+      [ -f "$ETC_DIR/$f" ] || return 1
+      $SUDO cp -p "$ETC_DIR/$f" "$BACKUP_DIR/$f" || return 1
+      [ "$($SUDO sha256sum "$ETC_DIR/$f" | cut -d' ' -f1)" = \
+        "$($SUDO sha256sum "$BACKUP_DIR/$f" | cut -d' ' -f1)" ] || return 1
+    else
+      $SUDO touch "$BACKUP_DIR/absent.$f" || return 1
+    fi
+  done
+  $SUDO chmod 700 "$BACKUP_DIR"
+}
+restore_protected_config() {
+  local f failed=0
+  [ -n "${BACKUP_DIR:-}" ] && $SUDO test -d "$BACKUP_DIR" || return 1
+  for f in models.env server.env config-state.json install-manifest.tsv; do
+    [ ! -L "$ETC_DIR/$f" ] || { failed=1; continue; }
+    if $SUDO test -f "$BACKUP_DIR/$f"; then
+      $SUDO cp -p "$BACKUP_DIR/$f" "$ETC_DIR/$f" || failed=1
+    elif $SUDO test -f "$BACKUP_DIR/absent.$f"; then
+      $SUDO rm -f -- "$ETC_DIR/$f" || failed=1
+    else
+      failed=1
+    fi
+  done
+  [ "$failed" -eq 0 ]
+}
+backup_install_routing() {
+  local dest src name target tmp
+  local -A seen=()
+  tmp="$(mktemp)" || return 1
+  chmod 600 "$tmp" || return 1
+  for src in "$REPO_ROOT"/bin/*; do
+    [ -f "$src" ] && [ -x "$src" ] || continue
+    name="$(basename "$src")"; dest="$BIN_TARGET/$name"; seen["$dest"]=1
+    case "$dest" in *$'\t'*|*$'\n'*) return 1 ;; esac
+    if [ -L "$dest" ]; then
+      target="$(readlink "$dest")" || return 1
+      case "$target" in *$'\t'*|*$'\n'*) return 1 ;; esac
+      printf '%s\tsymlink\t%s\n' "$dest" "$target" >> "$tmp"
+    elif [ -e "$dest" ]; then
+      printf '%s\tregular\t-\n' "$dest" >> "$tmp"
+    else
+      printf '%s\tabsent\t-\n' "$dest" >> "$tmp"
+    fi
+  done
+  # The installer also removes stale links into its bin tree. Capture those.
+  for dest in "$BIN_TARGET"/*; do
+    [ -L "$dest" ] && [ -z "${seen[$dest]:-}" ] || continue
+    target="$(readlink "$dest")" || return 1
+    case "$target" in
+      "$REPO_ROOT"/bin/*)
+        case "$dest$target" in *$'\t'*|*$'\n'*) return 1 ;; esac
+        printf '%s\tsymlink\t%s\n' "$dest" "$target" >> "$tmp" ;;
+    esac
+  done
+  $SUDO install -m 600 "$tmp" "$BACKUP_DIR/symlinks.tsv" || return 1
+  rm -f -- "$tmp"
+}
+restore_install_routing() {
+  local dest kind prior current failed=0 tmp
+  $SUDO test -f "$BACKUP_DIR/symlinks.tsv" || return 1
+  tmp="$(mktemp)" || return 1
+  chmod 600 "$tmp" || return 1
+  $SUDO cat "$BACKUP_DIR/symlinks.tsv" > "$tmp" || { rm -f -- "$tmp"; return 1; }
+  while IFS=$'\t' read -r dest kind prior; do
+    case "$dest" in "$BIN_TARGET"/*) ;; *) failed=1; continue ;; esac
+    if [ -L "$dest" ]; then
+      current="$(readlink "$dest")" || { failed=1; continue; }
+      case "$current" in "$REPO_ROOT"/bin/*) ;; "$prior") ;; *) failed=1; continue ;; esac
+    elif [ -e "$dest" ]; then
+      [ "$kind" = regular ] || failed=1
+      continue
+    fi
+    case "$kind" in
+      symlink) $SUDO ln -sfn -- "$prior" "$dest" || failed=1 ;;
+      absent) [ ! -L "$dest" ] || $SUDO rm -f -- "$dest" || failed=1 ;;
+      regular) { [ -e "$dest" ] && [ ! -L "$dest" ]; } || failed=1 ;;
+      *) failed=1 ;;
+    esac
+  done < "$tmp"
+  rm -f -- "$tmp"
+  [ "$failed" -eq 0 ]
+}
+backup_install_crontab() {
+  local tmp err
+  tmp="$(mktemp)" || return 1
+  err="$(mktemp)" || return 1
+  if crontab -l > "$tmp" 2>"$err"; then
+    $SUDO install -m 600 "$tmp" "$BACKUP_DIR/crontab" || return 1
+  elif grep -qi '^no crontab for ' "$err"; then
+    $SUDO touch "$BACKUP_DIR/crontab.absent" || return 1
+  else
+    rm -f -- "$tmp" "$err"
+    return 1
+  fi
+  rm -f -- "$tmp" "$err"
+}
+restore_install_crontab() {
+  local tmp
+  strip_managed_cron() {
+    awk -v bw="$REPO_ROOT/bin/ai-blocker-watch" \
+        -v reap="$REPO_ROOT/bin/ai-reap-shared-db-worktrees" '
+      index($0,"# ai-devops blocker-watch (managed by ai-blocker-watch schedule") == 0 &&
+      index($0,"# ai-devops worktree-reap (managed by ai-reap-shared-db-worktrees schedule") == 0 &&
+      index($0,"\047" bw "\047 tick") == 0 &&
+      index($0,"\047" reap "\047 run") == 0 { print }
+    '
+  }
+  if $SUDO test -f "$BACKUP_DIR/crontab"; then
+    tmp="$(mktemp)" || return 1
+    chmod 600 "$tmp" || return 1
+    $SUDO cat "$BACKUP_DIR/crontab" > "$tmp" || { rm -f -- "$tmp"; return 1; }
+    cmp -s <(strip_managed_cron < "$tmp") \
+      <(crontab -l 2>/dev/null | strip_managed_cron) || { rm -f -- "$tmp"; return 1; }
+    crontab "$tmp"
+    local rc=$?
+    rm -f -- "$tmp"
+    return "$rc"
+  elif $SUDO test -f "$BACKUP_DIR/crontab.absent"; then
+    # Remove only the two installer-owned entries; retain anything another
+    # actor added during this attempt.
+    [ -z "$(crontab -l 2>/dev/null | strip_managed_cron)" ] || return 1
+    "$REPO_ROOT/bin/ai-blocker-watch" unschedule &&
+      "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" unschedule
+  else
+    return 1
+  fi
+}
+backup_private_checkout() {
+  PRIVATE_ROOT="$HOME/.local/share/ai-devops-private-config"
+  if [ -d "$PRIVATE_ROOT/.git" ]; then
+    [ -z "$(git -C "$PRIVATE_ROOT" status --porcelain)" ] || return 1
+    "$REPO_ROOT/bin/ai-private-config" doctor >/dev/null || return 1
+    git -C "$PRIVATE_ROOT" rev-parse HEAD | $SUDO tee "$BACKUP_DIR/private-head" >/dev/null
+  else
+    $SUDO touch "$BACKUP_DIR/private.absent"
+  fi
+}
+restore_private_checkout() {
+  local prior current
+  if $SUDO test -f "$BACKUP_DIR/private.absent"; then
+    # A first-time clone is retained for inspection; no prior commit existed.
+    return 0
+  fi
+  $SUDO test -f "$BACKUP_DIR/private-head" || return 1
+  prior="$($SUDO cat "$BACKUP_DIR/private-head")"
+  [ -d "$PRIVATE_ROOT/.git" ] && [ -z "$(git -C "$PRIVATE_ROOT" status --porcelain)" ] || return 1
+  "$REPO_ROOT/bin/ai-private-config" doctor >/dev/null || return 1
+  current="$(git -C "$PRIVATE_ROOT" rev-parse HEAD)" || return 1
+  [ "$current" = "$prior" ] && return 0
+  git -C "$PRIVATE_ROOT" merge-base --is-ancestor "$prior" "$current" || return 1
+  git -C "$PRIVATE_ROOT" -c core.hooksPath=/dev/null reset --hard "$prior" >/dev/null
+}
+backup_protected_config || {
+  warn 'protected config backup failed; installation did not start'
+  exit 1
+}
+backup_install_routing && backup_install_crontab && backup_private_checkout || {
+  warn 'installed routing or protected source backup failed; installation did not start'
+  exit 1
+}
+restore_install_state() {
+  local failed=0
+  restore_protected_config || failed=1
+  restore_install_routing || failed=1
+  restore_install_crontab || failed=1
+  restore_private_checkout || failed=1
+  [ "$failed" -eq 0 ] || warn "installation rollback needs repair from $BACKUP_DIR"
+  [ "$failed" -eq 0 ]
+}
+record_restored_state() {
+  [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" = 9 ] || return 0
+  [ -n "${AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE:-}" ] || return 0
+  [ -f "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE" ] &&
+    [ ! -L "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE" ] || return 1
+  printf '%s\n' "$target_head" > "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE"
+}
 
 install_dependencies() {
   local apt_packages=(git curl jq ripgrep unzip python3 python3-pip gh tar)
@@ -480,8 +706,17 @@ run_doctor() {
 run_stage required "ai-devops doctor" run_doctor
 
 echo
-if print_summary; then
-  info "install.sh complete. source=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
-  exit 0
+if ! print_summary; then
+  if restore_install_state; then record_restored_state || true; fi
+  exit 1
 fi
-exit 1
+if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" != 1 ]; then
+  "$REPO_ROOT/bin/ai-task-gates" install-verify --phase finalize \
+    --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
+  --installed-launcher /usr/local/bin/ai-task-gates || {
+    if restore_install_state; then record_restored_state || true; fi
+    warn 'installation finalization refused; authorization remains pending for safe retry'
+    exit 1
+  }
+fi
+info "install.sh complete. source=$target_head"
