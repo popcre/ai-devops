@@ -20,7 +20,7 @@ Albert asked for a TypeSafe-skill-informed implementation plan to save tokens wi
 
 ## 3. Current state
 
-At the planning base `11f9658ee66a`, there is no implementation of this token-saving lane. Existing `bin/ai-jev-probe` and `bin/ai-jev-completion-shadow` are committed, and the older [advisory plan](../plan_typesafe-jev-advisory-integrations.md) has open implementation rows. The new plan's STATUS rows are all open. This planning PR changes prose only; no Jev data call, secret read, runtime installation, or transcript upload occurred. This handoff and plan must be updated with their landing commit and PR outcome before reporting the planning deliverable complete.
+Planning PR [#900](https://github.com/popcre/ai-devops/pull/900) merged as `b64a206b41eb5bca96ea8968ffa6835615cab1a9` on `origin/main`; it changed prose only. The [plan](../plan_typesafe-jev-spend-reduction.md) and router link are present there. No token-saving lane is implemented or installed. Existing `bin/ai-jev-probe` and `bin/ai-jev-completion-shadow` remain committed, the older [advisory plan](../plan_typesafe-jev-advisory-integrations.md) still has open implementation rows, and this plan's STATUS rows remain open. No Jev data call, secret read, runtime installation, or transcript upload occurred in the planning session.
 
 ## 4. What did not work / rejected paths
 
@@ -32,9 +32,8 @@ The existing Jev advisory plan measures cost of added Jev calls but does not fir
 
 ## 6. Exact next steps
 
-1. Merge this prose-only plan PR after link/reachability checks; verify the merged commit on `origin/main`. You'll know it worked when the plan, router link, and this handoff are reachable on main.
-2. In a new current-upstream worktree, claim the first open STATUS row and execute plan §9.1 only. You'll know it worked when a reproducible baseline identifies one eligible paid call/context load or records no-go.
-3. Follow the plan's later rows one outcome per session, updating STATUS and issue #643 as each row is proved. You'll know it worked when each row cites its actual artifact and no unproven live outcome is bundled.
+1. In a new current-upstream worktree, claim the first open STATUS row and execute plan §9.1 only. You'll know it worked when a reproducible baseline identifies one eligible paid call/context load or records no-go.
+2. Follow the plan's later rows one outcome per session, updating STATUS and issue #643 as each row is proved. You'll know it worked when each row cites its actual artifact and no unproven live outcome is bundled.
 
 ## 7. Constraints and gotchas
 
