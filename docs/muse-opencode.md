@@ -99,8 +99,10 @@ locks, private reports, credential handoff, retained turns, and `reconcile`.
 - Completion requires OpenCode's structured `step_finish` reason `stop`, a session
   ID, and non-empty response text. Exit status or text alone is not success.
 - Reports are written under `.ai/reviews/`; local metadata contains no prompt or key.
-- The key is read at launch from `vibe_coding / Meta ai Muse Spark API Key / api key`
-  and is never stored in Git or session metadata.
+- Each turn reads the protected local Muse key store. Installation or an explicit
+  `ai-muse store-key` maintenance command refreshes that store from
+  `vibe_coding / Meta ai Muse Spark API Key / api key`; review turns never read
+  1Password. The key is never stored in Git or session metadata.
 
 Contributor data-use terms were accepted by the owner on 2026-08-18. Do not
 substitute the standard tier. A measured follow-up call reused the exact session and

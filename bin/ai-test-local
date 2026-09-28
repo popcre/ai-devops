@@ -12,6 +12,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GH="$ROOT/bin/ai-gh"
 
 JOBS=""
 MODE="all"
@@ -146,7 +147,7 @@ refuse_if_local_runner_busy() {
     [ "$CHECK_COLLISION" -eq 0 ] || echo 'ai-test-local: clear -- no GitHub runner installation is shared with this host.'
     return 0
   fi
-  if ! command -v gh >/dev/null 2>&1; then
+  if [ ! -x "$GH" ]; then
     if [ "$CHECK_COLLISION" -eq 1 ]; then
       echo 'ai-test-local: unknown -- runner status is unavailable; no safe scheduling decision was made.' >&2
       exit 4
@@ -155,7 +156,7 @@ refuse_if_local_runner_busy() {
   fi
 
   local busy_remote
-  busy_remote="$(gh api "repos/$AI_TEST_RUNNER_REPO/actions/runners" --paginate \
+  busy_remote="$(AI_GH_CALLER=ai-test-local "$GH" api "repos/$AI_TEST_RUNNER_REPO/actions/runners" --paginate \
                    --jq '.runners[] | select(.busy) | .name' 2>/dev/null | normalise_names)" || {
     if [ "$CHECK_COLLISION" -eq 1 ]; then
       echo 'ai-test-local: unknown -- runner status is unavailable; no safe scheduling decision was made.' >&2

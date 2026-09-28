@@ -99,9 +99,10 @@ exact caller instead of recording it as `unknown`.
 diff, a plan document, a config file, a log excerpt, whatever DeepSeek needs
 to see, instead of inlining a huge blob on the command line.
 
-DeepSeek's API key is a managed 1Password reference (`config/mcp.env.example`);
-`ai-deepseek-agent` resolves it itself, so nothing needs to be exported by
-hand on any machine.
+DeepSeek's API key is a managed 1Password reference (`config/mcp.env.example`).
+The installer prepares an owner-only key store. Review turns read only that
+store and never call 1Password. If the store is missing or a key is rejected,
+run `ai-deepseek-agent store-key` outside a review, then requalify DeepSeek.
 
 Never paste a secret value into the brief. Point DeepSeek at facts, not
 credentials -- there is no sandboxing on the DeepSeek side the way `codex exec

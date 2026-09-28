@@ -4,6 +4,7 @@
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+cd "$tmp"
 
 # 1. The real probe must close stdin, or it hangs waiting for a prompt.
 grep -q '</dev/null 2>&1)' "$repo/bin/ai-devops"
@@ -67,5 +68,18 @@ FAILED=0
 set +e; check_codex_sandbox >"$tmp/out" 2>&1; set -e
 grep -q 'can write' "$tmp/out"
 [ "$FAILED" = "0" ]
+
+cat > "$fake/gh" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s|%s\n' "${AI_GH_CALLER:-unset}" "$*" >> "$FAKE_GH_LOG"
+[ "$*" = 'auth status' ]
+FAKE
+chmod +x "$fake/gh"
+FAKE_GH_LOG="$tmp/gh-calls" AI_GH_REAL_GH="$fake/gh" \
+  AI_GH_STATE_DIR="$tmp/gh-state" AI_GH_QUOTA_PROBE_SECONDS=off \
+  AI_GH_MIN_SPACING_SECONDS=0 PATH="$fake:$PATH" \
+  timeout 30 "$repo/bin/ai-devops" doctor > "$tmp/doctor-out" 2>&1 || true
+grep -qx 'ai-devops-doctor|auth status' "$tmp/gh-calls"
+grep -q 'gh authenticated' "$tmp/doctor-out"
 
 echo 'PASS: codex sandbox probe closes stdin and classifies auth/sandbox/timeout/ok'

@@ -14,8 +14,10 @@ if grep -Fq 'exec flock -w 90 "$CFG_DIR/op-refresh.lock" op run' "$source_file";
   fail "MCP launcher still holds the refresh lock around the long-running server"
 fi
 
-grep -Fq '_aidev_exports="\$(flock -w 90 "$CFG_DIR/op-refresh.lock" op run' "$source_file" ||
+grep -Fq '_aidev_exports="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op run' "$source_file" ||
   fail "MCP launcher does not limit the lock to secret resolution"
+grep -Fq 'TOK="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op read' "$source_file" ||
+  fail "remote MCP launcher passes the refresh lock to 1Password"
 grep -Fq 'unset _aidev_names _aidev_exports' "$source_file" ||
   fail "MCP launcher leaves temporary secret-resolution variables behind"
 grep -Fq 'exec "\$@"' "$source_file" ||

@@ -24,7 +24,7 @@ It is safe to run twice. A runner that is already a running service with
 automatic start is left alone.
 
 Registration and removal tokens are requested from GitHub through the
-already-authenticated gh CLI while the script runs. The removal token goes to
+already-authenticated shared admission while the script runs. The removal token goes to
 config.cmd on standard input. The registration token cannot: config.cmd reads it
 with a masked console read that fails when standard input is redirected, so
 --unattended --token is the only route the runner offers. That token is minted
@@ -68,8 +68,9 @@ if (Test-Path -LiteralPath $runnerFile -PathType Leaf) {
 # Filter in PowerShell rather than in a --jq expression. Embedded quotes in a
 # jq filter do not survive PowerShell native argument passing; they reach gh as
 # backslash-escaped quotes and jq rejects them.
-$runnerList = gh api "repos/$Repository/actions/runners" | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0) { throw 'gh could not read the runner list; sign gh in inside this elevated session first.' }
+$admission = Join-Path $PSScriptRoot 'runner-github-admission.ps1'
+if (-not (Test-Path -LiteralPath $admission -PathType Leaf)) { throw 'Shared GitHub admission is unavailable.' }
+$runnerList = & $admission -Operation list -Repository $Repository | ConvertFrom-Json
 $registered = @($runnerList.runners | Where-Object { $_.name -eq $RunnerName })[0]
 if ($registered) {
   $remoteLabels = ($registered.labels | Where-Object type -eq 'custom' | ForEach-Object name) -join ','
@@ -99,8 +100,8 @@ if (-not $healthy) {
   try {
     if (Test-Path -LiteralPath $runnerFile -PathType Leaf) {
       Write-Output 'Unconfiguring the existing runner.'
-      $removeToken = gh api --method POST "repos/$Repository/actions/runners/remove-token" --jq .token
-      if ($LASTEXITCODE -ne 0 -or -not $removeToken) { throw 'Could not obtain a runner removal token.' }
+      $removeToken = & $admission -Operation remove-token -Repository $Repository
+      if (-not $removeToken) { throw 'Could not obtain a runner removal token.' }
       $removeToken | & .\config.cmd remove
       $removeToken = $null
       if (Test-Path -LiteralPath $runnerFile -PathType Leaf) { throw 'The runner is still configured after config.cmd remove.' }
@@ -108,8 +109,7 @@ if (-not $healthy) {
       # The local credentials are gone, so config.cmd remove cannot authenticate.
       # Drop the stale registration from GitHub instead.
       Write-Output "Deleting the stale GitHub registration for $RunnerName."
-      gh api --method DELETE "repos/$Repository/actions/runners/$($registered.id)" | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw 'Could not delete the stale runner registration.' }
+      & $admission -Operation delete -Repository $Repository -RunnerId ([long]$registered.id) | Out-Null
     }
 
     # A service left behind by an interrupted reconfigure would fail the
@@ -122,8 +122,8 @@ if (-not $healthy) {
     Remove-Item -LiteralPath (Join-Path $RunnerPath '.service') -Force -ErrorAction SilentlyContinue
 
     Write-Output 'Configuring the runner in service mode.'
-    $registrationToken = gh api --method POST "repos/$Repository/actions/runners/registration-token" --jq .token
-    if ($LASTEXITCODE -ne 0 -or -not $registrationToken) { throw 'Could not obtain a runner registration token.' }
+    $registrationToken = & $admission -Operation registration-token -Repository $Repository
+    if (-not $registrationToken) { throw 'Could not obtain a runner registration token.' }
     # config.cmd reads the token with a masked console read, which fails outright
     # when standard input is redirected ("Cannot read keys when either application
     # does not have a console or when console input has been redirected"). So a

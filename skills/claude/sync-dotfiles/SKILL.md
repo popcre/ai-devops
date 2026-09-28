@@ -90,13 +90,19 @@ clone + `./install.sh` (Ubuntu) first.
 
 ## Procedure
 
-1. **Pull the hub.** In the repo: `git pull --ff-only`. If it fails (local
-   changes / diverged history), STOP and report — do not force, do not `git
-   reset`. Tell the user to resolve or ask to inspect.
+1. **Update the hub.** On Windows, run `powershell -ExecutionPolicy Bypass
+   -File <repo>\bin\install-ai-devops-windows.ps1 -RepoPath <repo>
+   -SourceGateOnly`; it checks the installed source receipt before advancing
+   the checkout and stops protected updates for task gate preflight. On Ubuntu,
+   run `git pull --ff-only`. If the update fails (local changes / diverged
+   history), STOP and report — do not force, do not `git reset`.
 1b. **Reconcile local AI commands before installing skills.** Run
    `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
    Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\install-machine-tools.ps1 -RepoPath <repo>`
-   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. If
+   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. The
+   Windows launcher installer validates the source gate before stamping a
+   receipt; a protected update first needs the reviewed pinned route in
+   `docs/deployment.md`. If
    only `ai-glm` is missing, use the existing GLM installer in step 2b because
    it owns that command and service. Stop if the final doctor is nonzero. Say
    "Local AI commands already current" or name what was installed. On Windows,

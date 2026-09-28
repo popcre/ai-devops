@@ -325,6 +325,15 @@ recovery session. Removal never deletes
 `C:\ProgramData\ai-devops\windows-runner-security.json` and never changes the
 runner service.
 
+For a partial installation, obtain the separate live-host security approval
+before running `-RecoverPartial -Install` from an exact reviewed checkout.
+Recovery identifies a partial task by its fixed action and principal (it never
+reached the sealed DACL), seals and disables that task before unregister so a
+read/execute operator cannot start it during recovery, backs up task, payload
+and runtime records under an administrator-owned directory, and leaves existing
+requests, results, audit, and replay records in place. Verify the installation
+and refresh the security evidence before full GitHub qualification.
+
 Restart the service after any machine-wide package or PATH change:
 
 ```powershell

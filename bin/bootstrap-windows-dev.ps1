@@ -71,13 +71,8 @@ function Assert-ReadyRepository([string]$Path) {
     if ($parts.Count -ne 2 -or [int]$parts[0] -ne 0) {
       throw 'The ai-devops checkout is ahead of or diverged from origin/main; refusing machine changes.'
     }
-    Invoke-GitCommand @('-C', $Path, 'merge', '--ff-only', 'origin/main') | Out-Host
-    if ($script:LastGitExitCode -ne 0) { throw 'The ai-devops fast-forward update failed.' }
-    $head = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
-    if ($script:LastGitExitCode -ne 0) { throw 'Could not resolve updated ai-devops HEAD.' }
-    if ($head.Trim() -ne $remoteHead.Trim()) { throw 'The updated checkout is not exactly equal to origin/main.' }
   }
-  return $head.Trim()
+  return $remoteHead.Trim()
 }
 
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -102,6 +97,9 @@ try {
   Add-Result 'Prerequisite' 'OK' (winget --version)
 
   if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    # Git is the sole bootstrap prerequisite that cannot be source-verified
+    # before it exists. Provision this fixed official package, then run the
+    # guarded toolkit source check before every other machine mutation.
     if ($TestOnly) { throw 'Git is missing; TestOnly never installs software.' }
     winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity
     if ($LASTEXITCODE -ne 0) { throw "Git installation failed with exit code $LASTEXITCODE." }
@@ -110,7 +108,6 @@ try {
 
   if (Test-Path (Join-Path $RepoPath '.git')) {
     $sourceSha = Assert-ReadyRepository $RepoPath
-    Add-Result 'Repository' 'OK' "Canonical clean main equals origin/main at $sourceSha."
   } elseif ($TestOnly) {
     throw "Repository is absent at $RepoPath; TestOnly never clones."
   } else {
@@ -120,8 +117,22 @@ try {
     Invoke-GitCommand @('clone', '--branch', 'main', '--single-branch', $RepoUrl, $RepoPath) | Out-Host
     if ($script:LastGitExitCode -ne 0) { throw 'Clone failed. Verify network access to the public ai-devops repository.' }
     $sourceSha = Assert-ReadyRepository $RepoPath
-    Add-Result 'Repository' 'OK' "Cloned canonical main at $sourceSha."
   }
+
+  if (-not $TestOnly) {
+    # Always check the installed receipt and full protected release range,
+    # including an already advanced checkout and a newly cloned checkout.
+    # SkipMachineSetup must not skip this authorization boundary.
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoPath 'bin\install-ai-devops-windows.ps1') `
+      -RepoPath $RepoPath -SourceGateOnly -ExpectedHead $sourceSha
+    if ($LASTEXITCODE -ne 0) { throw 'The ai-devops guarded source update failed.' }
+    $actualHead = Invoke-GitCommand @('-C', $RepoPath, 'rev-parse', 'HEAD')
+    if ($script:LastGitExitCode -ne 0 -or $actualHead.Trim() -ne $sourceSha) {
+      throw 'The guarded source update did not leave the checkout at the exact approved target.'
+    }
+    Add-Result 'Source authorization' 'OK' "Pinned installed source at $sourceSha."
+  }
+  Add-Result 'Repository' 'OK' "Canonical clean main equals origin/main at $sourceSha."
 
   if ($GitHubRunnerHost) {
     $smartAppControl = Join-Path $RepoPath 'bin\reconcile-smart-app-control.ps1'

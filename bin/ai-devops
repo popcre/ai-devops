@@ -283,8 +283,12 @@ cmd_doctor() {
   c_head "GitHub CLI"
   if have gh; then
     c_ok "gh installed ($(command -v gh))"
-    if gh auth status >/dev/null 2>&1; then
+    auth_rc=0
+    AI_GH_NO_WAIT=1 AI_GH_CALLER=ai-devops-doctor "$AI_TOOL_ROOT/bin/ai-gh" auth status >/dev/null 2>&1 || auth_rc=$?
+    if [ "$auth_rc" -eq 0 ]; then
       c_ok "gh authenticated"
+    elif [ "$auth_rc" -eq 75 ]; then
+      c_warn "gh authentication check deferred by shared GitHub admission"
     else
       c_warn "gh not authenticated — run: gh auth login"
     fi

@@ -36,7 +36,7 @@
     },
     "qwen": {
       "registry_state": "registered",
-      "reason": "Live-qualified 2026-09-07: live probe OK and a real bounded review returned a valid verdict on qwen3.8-max. Runs on the Model Studio pay-per-token lane; the Coding Plan subscription key is dead."
+      "reason": "Rotation reviewer on qwen3.8-max using the Alibaba Model Studio Token Plan subscription. Live readiness is determined by current reviewer preflight."
     },
     "stepfun": {
       "registry_state": "registered",

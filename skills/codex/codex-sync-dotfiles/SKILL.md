@@ -44,12 +44,19 @@ checkout exists, onboard first (`bin/install-ai-devops-windows.ps1` on Windows,
 clone + `./install.sh` on Ubuntu).
 
 ## Procedure
-1. `git pull --ff-only` in the repo. On failure (local changes/diverged), STOP
-   and report — never force or reset.
+1. On Windows, run `powershell -ExecutionPolicy Bypass -File
+   <repo>\bin\install-ai-devops-windows.ps1 -RepoPath <repo> -SourceGateOnly`
+   before the remaining steps. It checks the installed source receipt before
+   advancing the checkout and stops protected updates for task gate preflight.
+   On Ubuntu, run `git pull --ff-only` in the repo. On failure (local
+   changes/diverged), STOP and report — never force or reset.
 1b. **Reconcile local AI commands before installing skills.** Run
    `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
    Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\install-machine-tools.ps1 -RepoPath <repo>`
-   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. If
+   or Ubuntu `<repo>/bin/install-machine-tools.sh`, then re-run the doctor. The
+   Windows launcher installer validates the source gate before stamping a
+   receipt; a protected update first needs the reviewed pinned route in
+   `docs/deployment.md`. If
    only `ai-glm` is missing, use the existing GLM installer in step 2b because
    it owns that command and service. Stop if the final doctor is nonzero. Say
    "Local AI commands already current" or name the launchers installed. On
