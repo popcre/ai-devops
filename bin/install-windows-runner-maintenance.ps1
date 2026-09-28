@@ -207,12 +207,23 @@ function Set-MaintenanceTaskAcl {
   return $sddl
 }
 
+function Resolve-TaskIdentitySid {
+  # Task Scheduler may report the principal as a local account name or as a
+  # SID string depending on how it was registered and which token queries it.
+  param([Parameter(Mandatory)][string]$Identity)
+  if ($Identity -match '^S-1-5-21-') { return $Identity }
+  return ([Security.Principal.NTAccount]$Identity).Translate([Security.Principal.SecurityIdentifier]).Value
+}
+
 function Get-InstalledTaskSnapshot {
   $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction Stop
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
-  $sddl = $service.GetFolder($script:TaskFolderCom).GetTask($script:TaskName).GetSecurityDescriptor(0)
+  $sddl = [string]$service.GetFolder($script:TaskFolderCom).GetTask($script:TaskName).GetSecurityDescriptor(0)
+  # A filtered remote token returns an empty descriptor rather than an error.
+  # Callers that must reason about permissions need an elevated read.
+  if ([string]::IsNullOrWhiteSpace($sddl)) { throw 'TASK_SDDL_UNREADABLE: elevated token is required to read the task security descriptor.' }
   return [ordered]@{
     execute = [string]$task.Actions[0].Execute
     arguments = [string]$task.Actions[0].Arguments
@@ -222,7 +233,7 @@ function Get-InstalledTaskSnapshot {
     run_level = [string]$task.Principal.RunLevel
     trigger_count = @($task.Triggers).Count
     multiple_instances = [string]$task.Settings.MultipleInstances
-    sddl = [string]$sddl
+    sddl = $sddl
     state = [string]$task.State
   }
 }
@@ -325,6 +336,13 @@ function Backup-MaintenanceInstallation {
     # copy site.
     Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
     Copy-Item -LiteralPath $script:PayloadRoot -Destination (Join-Path $Destination 'payload') -Recurse
+  }
+  # Runtime request/result/audit/replay records are part of the durable state
+  # of this boundary. Recovery and removal must never delete them without a
+  # pinned copy first; the live copies stay in place under recovery.
+  if (Test-Path -LiteralPath $script:RuntimeRoot) {
+    Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot
+    Copy-Item -LiteralPath $script:RuntimeRoot -Destination (Join-Path $Destination 'runtime') -Recurse
   }
   @{ schema_version=1; task_path=$script:TaskPath; backed_up_at_utc=[DateTime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination 'recovery.json') -Encoding utf8
 }
@@ -453,36 +471,71 @@ function Remove-MaintenanceInstallation {
 
 function Recover-MaintenanceInstallation {
   # Recovery of a PARTIAL or drifted installation (for example one that
-  # failed mid-run, leaving a registered task or installed trees that fail
-  # Test-MaintenanceInstallation and therefore block both -Install and
-  # -Remove). This runs INSIDE the hardened installer process - pinned
-  # module path, hostile-variable refusal - and uses the same per-delete
-  # re-verification as removal. It refuses the per-user COM overrides
-  # before its first task cmdlet, asserts the payload and runtime roots
-  # (and the runtime parent) against reparse points both before the
-  # elevated backup AND again immediately before every delete, so no copy
-  # or delete can follow an intermediate junction planted in the backup
-  # window, exports an administrator-pinned recovery bundle first, refuses
-  # a running task, removes only owned names, and never touches the
-  # qualification evidence, its tmp sibling, or the parent directory.
+  # failed mid-run after task registration, leaving a registered task and/or
+  # installed trees that fail Test-MaintenanceInstallation and therefore block
+  # both -Install and -Remove). This runs INSIDE the hardened installer
+  # process - pinned module path, hostile-variable refusal - and refuses the
+  # per-user COM overrides before its first task cmdlet.
+  #
+  # Identity: a partial install never reached the sealed task DACL, so recovery
+  # must identify the task by its fixed action, principal, S4U/Highest run
+  # level, empty trigger set, and IgnoreNew policy - not by requiring the
+  # already-sealed descriptor. Payload present must still hash-match its
+  # administrator-owned manifest.
+  #
+  # Race: a GRGX operator can Start-ScheduledTask during backup. Recovery
+  # therefore seals the task DACL first (operator downgraded to read/execute
+  # only), disables the task (a GRGX operator cannot re-enable), re-checks
+  # that it is not running and still matches the expected action, and only
+  # then unregisters. Runtime request/result/audit/replay records stay in
+  # place; the backup bundle also carries a pinned copy. Qualification
+  # evidence, its tmp sibling, and the parent directory are never touched.
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid, [string]$RecoveryPath)
   Assert-NoPerUserComOverride
   $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue
   $payloadPresent = Test-Path -LiteralPath $script:PayloadRoot
   if ($null -eq $task -and -not $payloadPresent) { return 'ABSENT' }
   if ($null -ne $task -and [string]$task.State -eq 'Running') { throw 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before recovery.' }
+  $expectedExecute = 'C:\Windows\System32\cmd.exe'
+  $expectedArgs = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.bat"'
+  $snapshot = $null
+  if ($null -ne $task) {
+    $snapshot = Get-InstalledTaskSnapshot
+    $taskSid = Resolve-TaskIdentitySid -Identity $snapshot.user_id
+    if ($snapshot.action_count -ne 1 -or $snapshot.execute -cne $expectedExecute -or
+        $snapshot.arguments -cne $expectedArgs -or $taskSid -cne $ExpectedOperatorSid -or
+        $snapshot.logon_type -cne 'S4U' -or $snapshot.run_level -cne 'Highest' -or
+        $snapshot.trigger_count -ne 0 -or $snapshot.multiple_instances -cne 'IgnoreNew') {
+      throw 'RECOVERY_IDENTITY_MISMATCH: scheduled task is not the expected maintenance task.'
+    }
+  }
+  if ($payloadPresent) {
+    Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
+    Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
+    $manifest = Get-Content -Raw -LiteralPath (Join-Path $script:PayloadRoot 'manifest.json') | ConvertFrom-Json
+    if ($manifest.schema_version -ne 1 -or $manifest.owner -cne 'popcre/ai-devops#262' -or
+        $manifest.task_path -cne $script:TaskPath -or $manifest.operator_sid -cne $ExpectedOperatorSid) {
+      throw 'RECOVERY_IDENTITY_MISMATCH: payload manifest does not identify this installation.'
+    }
+    $expectedFiles = @('windows-runner-maintenance-worker.ps1', 'launch-worker.bat',
+      'qualify-windows-runner.ps1', 'windows-runner-maintenance-policy.json')
+    $actualFiles = @($manifest.files.PSObject.Properties.Name)
+    if ($actualFiles.Count -ne $expectedFiles.Count -or @($actualFiles | Where-Object { $_ -cnotin $expectedFiles }).Count -ne 0) {
+      throw 'RECOVERY_IDENTITY_MISMATCH: payload file list drift.'
+    }
+    foreach ($file in $manifest.files.PSObject.Properties) {
+      $path = Join-Path $script:PayloadRoot $file.Name
+      if ((Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant() -cne [string]$file.Value) {
+        throw 'RECOVERY_IDENTITY_MISMATCH: payload hash drift.'
+      }
+    }
+  }
   if ([string]::IsNullOrWhiteSpace($RecoveryPath)) { $RecoveryPath = Join-Path (Split-Path -Parent $script:RuntimeRoot) ('windows-runner-maintenance-recovery-partial-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')) }
   if (-not [IO.Path]::IsPathRooted($RecoveryPath)) { throw 'Recovery backup path must be absolute.' }
   $normalizedRecovery = [IO.Path]::GetFullPath($RecoveryPath)
   $adminRoots = @('C:\ProgramData\', 'C:\Program Files\', 'C:\Windows\')
   if (-not @($adminRoots | Where-Object { $normalizedRecovery.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Recovery backup path must be under an administrator-managed root (ProgramData, Program Files or Windows).' }
   Assert-SafeBackupChain -LiteralPath $RecoveryPath
-  # Fail fast: the payload tree is walked recursively BEFORE the backup copies
-  # it, so a child junction cannot be followed into the pinned bundle (the
-  # backup re-walks the source at the copy site itself; this earlier check
-  # only refuses before any elevated work starts). The runtime roots are
-  # likewise asserted early so an already-planted junction never reaches the
-  # backup window at all.
   if ($payloadPresent) {
     Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
     Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
@@ -493,37 +546,35 @@ function Recover-MaintenanceInstallation {
   Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot -AllowMissing
   Assert-NoForeignOwnership -LiteralPath $script:RuntimeRoot
   Backup-MaintenanceInstallation -Destination $RecoveryPath
-  if ($null -ne $task) { Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false }
-  # Re-verify immediately before every elevated recursive delete. The asserts
-  # above are separated from these deletes by the backup and the unregister,
-  # which is long enough for the operator to plant a junction - the same gap
-  # removal documents. The payload root is re-asserted at its delete, and the
-  # runtime root AND its parent are re-asserted immediately before any owned
-  # name is resolved through them: -AllowMissing above is exactly what lets a
-  # partial install (runtime never created) reach this point, so a root that
-  # APPEARED during the window must be refused here, and the per-leaf checks
-  # inside the loop can never see an intermediate reparse.
+  if ($null -ne $task) {
+    # Close the start/unregister race: seal first so the operator drops to
+    # GRGX and cannot redefine or re-enable the task, then disable so a
+    # GRGX Start-ScheduledTask is refused, then re-check, then unregister.
+    Set-MaintenanceTaskAcl -OperatorSid $ExpectedOperatorSid | Out-Null
+    $sealed = Get-InstalledTaskSnapshot
+    $expectedSddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)"
+    if ($sealed.sddl -cne $expectedSddl) { throw 'RECOVERY_SEAL_FAILED: scheduled task permissions were not sealed before recovery.' }
+    Disable-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName | Out-Null
+    $disabled = Get-InstalledTaskSnapshot
+    if ($disabled.state -eq 'Running') { throw 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before recovery.' }
+    if ($disabled.state -ne 'Disabled') { throw 'RECOVERY_SEAL_FAILED: scheduled task is not disabled before recovery.' }
+    if ($disabled.action_count -ne 1 -or $disabled.execute -cne $expectedExecute -or
+        $disabled.arguments -cne $expectedArgs -or $disabled.multiple_instances -cne 'IgnoreNew') {
+      throw 'RECOVERY_IDENTITY_MISMATCH: scheduled task changed before unregister.'
+    }
+    Unregister-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -Confirm:$false
+  }
+  # Re-verify immediately before the elevated recursive payload delete. Runtime
+  # request/result/audit/replay records stay in place; only the protected
+  # payload tree is removed so a clean install can replace it. Qualification
+  # evidence is never opened here.
   if ($payloadPresent) {
     Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
     Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
     Remove-Item -LiteralPath $script:PayloadRoot -Recurse -Force
   }
-  $runtimeParent = Split-Path -Parent $script:RuntimeRoot
-  Assert-NoReparsePoint -LiteralPath $runtimeParent -AllowMissing
-  Assert-NoForeignOwnership -LiteralPath $runtimeParent
-  Assert-NoReparsePoint -LiteralPath $script:RuntimeRoot -AllowMissing
-  Assert-NoForeignOwnership -LiteralPath $script:RuntimeRoot
-  foreach ($name in $script:OwnedRuntimeNames) {
-    $path = Join-Path $script:RuntimeRoot $name
-    if (Test-Path -LiteralPath $path) {
-      Assert-NoReparsePoint -LiteralPath $path
-      Assert-NoForeignOwnership -LiteralPath $path
-      Remove-Item -LiteralPath $path -Recurse -Force
-    }
-  }
   return 'RECOVERED'
 }
-
 function Invoke-InstallerMain {
   $sid = Resolve-OperatorSid -User $OperatorUser
   $sourceRoot = Split-Path -Parent $PSScriptRoot
