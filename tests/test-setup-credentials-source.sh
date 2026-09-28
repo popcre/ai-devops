@@ -125,12 +125,17 @@ if [ -n "$GLM_REPO_SETUP" ] &&
      set -e
      eval "$GLM_REPO_SETUP"
      trap '\''rm -rf "$glm_probe"'\'' EXIT
-     test "$(git -C "$glm_probe" ls-files)" = README.md
+     test "$(git -C "$glm_probe" ls-files)" = "$(printf ".gitignore\nREADME.md")"
+     "$SANDBOX" assert-public "$glm_probe" >/dev/null
+     before="$($SANDBOX digest "$glm_probe")"
+     mkdir -p "$glm_probe/.ai/reviews"
+     printf "%s\n" "Synthetic public review report" > "$glm_probe/.ai/reviews/probe.md"
+     test "$($SANDBOX digest "$glm_probe")" = "$before"
      "$SANDBOX" assert-public "$glm_probe" >/dev/null
    '; then
-  ok "GLM installer creates a classifiable public probe repository"
+  ok "GLM installer creates a stable classifiable public probe repository"
 else
-  bad "GLM installer creates a classifiable public probe repository"
+  bad "GLM installer creates a stable classifiable public probe repository"
 fi
 
 [ "$failures" -eq 0 ]
