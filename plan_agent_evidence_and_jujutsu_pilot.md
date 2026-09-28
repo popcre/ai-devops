@@ -8,10 +8,12 @@ Planning date: 2026-09-27 EDT. Parent: [ai-devops #903](https://github.com/popcr
 |---|---|---|---|
 | 0 | Reconcile current owners and establish a measured baseline | Complete, 2026-09-27 EDT | [Ten-PR baseline and ownership map](tests/verification/repo-throughput/2026-09-27-agent-evidence-jj-baseline.md); #910. Steps 2–3 need a specific post-owner defect before a new fix issue. |
 | 1 | Finish shared-db task-evidence isolation under its existing owner | Open; existing work partially landed | Existing [shared-db workflow refactor](https://github.com/popcre/shared-db/blob/main/plan_shared_db_workflow_refactor.md) Step 1 gate and live PR traces |
-| 2 | Remove avoidable evidence-only commit/review loops left after Step 1 | Open | Positive and refusal fixtures; two independent real PRs land without an evidence-only refresh |
-| 3 | Close only proven unrelated-main review invalidation gaps | Open | Exact content/policy identity tests and current-main integration proof; actual implementation changes still invalidate |
+| 2 | Remove avoidable evidence-only commit/review loops left after Step 1 | Conditional; insufficient evidence for a new fix issue until #3380's accepted outcome | Positive and refusal fixtures; two independent real PRs land without an evidence-only refresh if a residual defect is proven |
+| 3 | Close only proven unrelated-main review invalidation gaps | Conditional; insufficient evidence for a new fix issue | Exact content/policy identity tests and current-main integration proof if a residual defect is proven; actual implementation changes still invalidate |
 | 4 | Run a reversible Jujutsu pilot in disposable clones | Complete, 2026-09-27 EDT; no-go for rollout | [Six paired offline trials, migration refusal, bare Git export and privacy stop](tests/verification/repo-throughput/2026-09-27-jujutsu-pilot.md); #911. No live/default switch. |
-| 5 | Decide adoption from measured results and verify GitHub continuity | Open | Published go/no-go report, rollback drill, and owner-approved rollout only if warranted |
+| 5 | Decide adoption from measured results and verify GitHub continuity | Complete, 2026-09-28 EDT; no-go | [Final comparison, rollback and GitHub continuity](tests/verification/repo-throughput/2026-09-28-agent-evidence-jj-decision.md); #912. No rollout. |
+
+The independent shared-db Step 1 owner retains its open #3380 (**non-orchestrator work**) and PR #3445. Steps 2–3 have insufficient post-owner defect evidence for new issues; the final report does not claim their live gates passed. The parent tracks only accepted mapped children and links these existing owners without taking over their work.
 
 Fresh session: re-read §1, §5, §8, §9 and the live STATUS of each referenced plan, then take **only the first unticked child** on parent #903. Finish that child, tick it with an artifact, comment the next child on the parent, and stop. Do not bundle unproven live outcomes. At each phase boundary use `fresh-session` and re-read downstream steps against current `origin/main`.
 
