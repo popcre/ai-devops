@@ -172,8 +172,10 @@ function Set-ProtectedFilesystemAcl {
     Invoke-ProtectedIcacls -Arguments @($requests,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)M")
     foreach ($child in @(Get-ChildItem -LiteralPath $requests -Force)) {
       Assert-NoReparsePoint -LiteralPath $child.FullName
-      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/setowner',$admins)
-      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:M")
+      # /L acts on the link itself, so a child swapped to a junction after
+      # the check cannot re-own or grant the junction target.
+      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/setowner',$admins)
+      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:M")
     }
     $results = Join-Path $LiteralPath 'results'
     Assert-NoReparsePoint -LiteralPath $results
@@ -181,8 +183,8 @@ function Set-ProtectedFilesystemAcl {
     Invoke-ProtectedIcacls -Arguments @($results,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX")
     foreach ($child in @(Get-ChildItem -LiteralPath $results -Force)) {
       Assert-NoReparsePoint -LiteralPath $child.FullName
-      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/setowner',$admins)
-      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:R")
+      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/setowner',$admins)
+      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:R")
     }
     $audit = Join-Path $LiteralPath 'audit.jsonl'
     if (Test-Path -LiteralPath $audit) { Assert-NoReparsePoint -LiteralPath $audit; Invoke-ProtectedIcacls -Arguments @($audit,'/setowner',$admins); Invoke-ProtectedIcacls -Arguments @($audit,'/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:R") }
@@ -346,12 +348,12 @@ function Copy-VerifiedTree {
   # must never be copied that way from an elevated process.
   param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$TargetRoot)
   Assert-NoReparsePoint -LiteralPath $Source
-  New-Item -ItemType Directory -Path $TargetRoot -Force | Out-Null
+  [IO.Directory]::CreateDirectory($TargetRoot) | Out-Null
   foreach ($child in @(Get-ChildItem -LiteralPath $Source -Force)) {
     Assert-NoReparsePoint -LiteralPath $child.FullName
     $target = Join-Path $TargetRoot $child.Name
     if ($child.PSIsContainer) { Copy-VerifiedTree -Source $child.FullName -TargetRoot $target }
-    else { Copy-Item -LiteralPath $child.FullName -Destination $target }
+    else { Copy-Item -LiteralPath $child.FullName -Destination $target -Force }
   }
 }
 
@@ -364,8 +366,15 @@ function Backup-MaintenanceInstallation {
   # against junctions before anything is created through it.
   $normalizedDestination = [IO.Path]::GetFullPath($Destination)
   foreach ($ownedRoot in @($script:PayloadRoot, $script:RuntimeRoot)) {
+    # Require a boundary at a path separator: a sibling such as
+    # windows-runner-maintenance-recovery-<ts> shares the runtime root
+    # prefix without being inside the tree.
     $ownedFull = [IO.Path]::GetFullPath($ownedRoot)
-    if ($normalizedDestination.StartsWith($ownedFull, [StringComparison]::OrdinalIgnoreCase)) { throw 'Recovery backup path must not be inside the installation trees.' }
+    if (-not $ownedFull.EndsWith('\', [StringComparison]::Ordinal)) { $ownedFull += '\' }
+    if ($normalizedDestination.StartsWith($ownedFull, [StringComparison]::OrdinalIgnoreCase) -or
+        ($normalizedDestination + '\') -eq $ownedFull) {
+      throw 'Recovery backup path must not be inside the installation trees.'
+    }
   }
   if (Test-Path -LiteralPath $Destination) {
     Assert-NoForeignOwnership -LiteralPath $Destination
@@ -532,13 +541,15 @@ function Recover-MaintenanceInstallation {
   # already-sealed descriptor. Payload present must still hash-match its
   # administrator-owned manifest.
   #
-  # Race: a GRGX operator can Start-ScheduledTask during backup. Recovery
-  # therefore seals the task DACL first (operator downgraded to read/execute
-  # only), disables the task (a GRGX operator cannot re-enable), re-checks
-  # that it is not running and still matches the expected action, and only
-  # then unregisters. Runtime request/result/audit/replay records stay in
-  # place; the backup bundle also carries a pinned copy. Qualification
-  # evidence, its tmp sibling, and the parent directory are never touched.
+  # Race: a GRGX operator can Start-ScheduledTask during teardown. Recovery
+  # therefore drops the operator ACE entirely (admins/SYSTEM only) before
+  # disable, stops any instance that landed first, waits for a non-running
+  # state, re-checks full identity, and only then unregisters. The window is
+  # narrowed to Start-ScheduledTask issued before the teardown descriptor;
+  # a surviving worker is still only the hash-verified fixed payload. Runtime
+  # request/result/audit/replay records stay in place; the backup bundle also
+  # carries a pinned copy. Qualification evidence, its tmp sibling, and the
+  # parent directory are never touched.
   param([Parameter(Mandatory)][string]$ExpectedOperatorSid, [string]$RecoveryPath)
   Assert-NoPerUserComOverride
   $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue
@@ -608,6 +619,15 @@ function Recover-MaintenanceInstallation {
     $teardownSddl = 'D:P(A;;FA;;;SY)(A;;FA;;;BA)'
     if ($sealed.sddl -cne $teardownSddl) { throw 'RECOVERY_SEAL_FAILED: scheduled task permissions were not sealed before recovery.' }
     Disable-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName | Out-Null
+    # Start-ScheduledTask is asynchronous: stop any instance that landed
+    # before the teardown descriptor, then wait for a terminal state.
+    try { Stop-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue } catch { }
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+      $disabled = Get-InstalledTaskSnapshot
+      if ($disabled.state -ne 'Running') { break }
+      Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
     $disabled = Get-InstalledTaskSnapshot
     if ($disabled.state -eq 'Running') { throw 'RECOVERY_RUNNING_TASK: wait for the bounded task to stop before recovery.' }
     if ($disabled.state -ne 'Disabled') { throw 'RECOVERY_SEAL_FAILED: scheduled task is not disabled before recovery.' }
