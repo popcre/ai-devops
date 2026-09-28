@@ -14,6 +14,7 @@ ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) == 2 else pathlib.Path(__file__
 DIRECT = re.compile(r"(?<![\w-])gh(?:\.exe)?\s+(?:api|run|repo|pr|issue|workflow|release|search)\b", re.IGNORECASE)
 SDK = re.compile(r"(?:execFileSync|spawnSync|execFile|spawn)\s*\(\s*['\"]gh(?:\.exe)?['\"]", re.IGNORECASE)
 HTTP = re.compile(r"(?:api\.github\.com|github\.getOctokit|@octokit)")
+CLI_ALIAS = re.compile(r"\b[A-Za-z_]\w*\s*=\s*['\"]?gh(?:\.exe)?['\"]?(?=\s|;|$)", re.IGNORECASE)
 
 
 def inspect(path: pathlib.Path) -> list[str]:
@@ -22,7 +23,22 @@ def inspect(path: pathlib.Path) -> list[str]:
         return []  # The shared admission command must invoke the real CLI.
     raw = path.read_bytes()
     problems = []
-    for number, line in enumerate(raw.decode("utf-8", errors="replace").splitlines(), 1):
+    # Preserve the first physical line for diagnostics while joining shell
+    # continuations, which otherwise split `gh` from its API subcommand.
+    logical_lines = []
+    pending = ""
+    start = 1
+    for number, physical in enumerate(raw.decode("utf-8", errors="replace").splitlines(), 1):
+        if not pending:
+            start = number
+        if physical.rstrip().endswith("\\"):
+            pending += physical.rstrip()[:-1] + " "
+            continue
+        logical_lines.append((start, pending + physical))
+        pending = ""
+    if pending:
+        logical_lines.append((start, pending))
+    for number, line in logical_lines:
         stripped = line.lstrip()
         if stripped.startswith(("#", "//", "*")):
             continue
@@ -35,7 +51,7 @@ def inspect(path: pathlib.Path) -> list[str]:
             'say "    gh run list --repo $REPO --event merge_group --limit 5"',
         }:
             continue  # Exact user-facing guidance; S2 removed its direct fallback.
-        if DIRECT.search(line) or SDK.search(line) or HTTP.search(line):
+        if DIRECT.search(line) or SDK.search(line) or HTTP.search(line) or CLI_ALIAS.search(line):
             problems.append(f"{relative}:{number}: unmanaged GitHub transport")
     if path.name == "ai-pr-wait" and b"calling gh directly" in raw:
         problems.append(f"{relative}: unpaced fallback after shared transport failure")

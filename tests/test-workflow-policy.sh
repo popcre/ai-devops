@@ -411,6 +411,18 @@ BOOTSTRAP
   check 'a new direct gh command is rejected' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
   rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env bash\nCLI=gh\n"$CLI" api repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a CLI alias cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env bash\ngh \\\n api repos/acme/example\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a line continuation cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
+  printf '#!/usr/bin/env node\nconst cli = "gh"; require("child_process").execFileSync(cli, ["api", "rate_limit"]);\n' > "$mutation_dir/bin/ai-bypass"
+  check 'a Node CLI alias cannot bypass admission' \
+    "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"
+  rm -f "$mutation_dir/bin/ai-bypass"
   printf 'gh api repos/acme/example\n' > "$mutation_dir/bin/promote-windows-runner-to-service.ps1"
   check 'retired runner exception cannot admit direct gh again' \
     "! python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$mutation_dir' >/dev/null 2>&1"

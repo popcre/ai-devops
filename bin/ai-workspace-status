@@ -95,7 +95,7 @@ if [ -x "$ROOT/bin/ai-gh" ]; then
   if [ -n "$PR_URL" ]; then
     echo "  $PR_URL"
   else
-    echo "  (no open PR detected for this branch)"
+    echo "  (open PR status unavailable or no open PR)"
   fi
 else
   echo "  (shared GitHub transport unavailable — skipped)"
