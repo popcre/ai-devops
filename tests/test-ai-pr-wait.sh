@@ -215,7 +215,8 @@ check "the refusal explains which gate applied" \
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
-appr_file(){ local dir="$1" action="$2" gate="$3" repo; repo="$( cd "$dir" && "$gate" explain --json 2>/dev/null | jq -r '.repository // ""' )"; mint_reviewer_approval "$TMP" "$action" "$(git -C "$dir" rev-parse HEAD)" "$repo"; }
+LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
+appr_file(){ mint_reviewer_approval "$TMP" "$1" plan-review; }
 WAIT_APPROVAL="$(appr_file "$GR" pr-wait "$ROOT/bin/ai-task-gates")"
 OUT="$( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 0 --reviewer-approval "$WAIT_APPROVAL" 2>&1 )"; RC=$?
 check "a reviewer-approved wait passes the gate and reaches the normal checks" \

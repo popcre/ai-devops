@@ -131,7 +131,7 @@ candidate to the target commit. Declare the separate reviewer candidate as
 Run `ai-task-gates authorize-install --target-head <full SHA>
 --installed-checkout <canonical checkout> --installed-launcher <managed
 ai-task-gates launcher> --review-report <exact-head APPROVE report>
---reviewer-approval <assigned AI reviewer APPROVE evidence>`. On Windows, pass
+--reviewer-approval <exact-head APPROVE report>`. On Windows, pass
 the managed extensionless launcher; on Ubuntu, pass its symlink. This separate
 installation task leaves `check --before deploy` forbidden for a reviewer-safety
 change. The authorization binds the candidate, review, installed checkout,
@@ -193,7 +193,7 @@ installation task and obtain an assigned AI reviewer's read-only `APPROVE` for t
 target source and `first-managed-install` operation. From that task's exact
 target worktree, issue `authorize-install --first-install` with the target SHA,
 canonical checkout, `/usr/local/bin/ai-task-gates` launcher, approved report,
-and `--reviewer-approval` evidence; then invoke the target `install.sh`. The canonical launcher
+and the same report as `--reviewer-approval`; then invoke the target `install.sh`. The canonical launcher
 and manifest must be absent before authorization. Both Ubuntu and Windows
 first installation require the reviewed one-use authority. For a
 same-source maintenance reinstall, omit `--first-install`: the check requires
@@ -271,39 +271,38 @@ Both installers implement the same engine, and `tests/test-installer-parity.sh`
 proves it: same file set, byte-identical markers, and a refresh with one after
 an install by the other reports "up to date" rather than inventing local edits.
 
-## Reviewer approval evidence (no human approvals)
+## Reviewer approval (no human approvals)
 
 Owner ruling 2026-09-28 (#996): no human approves anything. Every gate that
-once took an owner request now takes `--reviewer-approval <file>`: a JSON
-record of the allocator-assigned AI reviewer's `APPROVE`, bound to the exact
-inputs. Required fields: `schema_version` 1, `verdict` `"APPROVE"`,
-`reviewer_engine`, `implementer_engine` (must differ from the reviewer),
-`assignment` (the allocator's assignment id), `action` (the exact gate action,
-`deploy` for installs), `repository`, `head` (the exact 40-character commit),
-and `report` (absolute path of the reviewer's report). The file must be mode
-0600 and owned by the caller, and the report must match a completed, non-stale
-`APPROVE` run that the reviewer lifecycle recorded for that head and engine.
-A protected class's forbidden actions still have no approval path.
+once took an owner request now takes `--reviewer-approval <report>`: the report
+of an AI reviewer run through `ai-review`. The gate accepts it only when the
+reviewer lifecycle recorded that exact report (path and SHA-256) as a completed,
+non-stale `APPROVE` for this repository, the exact head, and the exact source
+digest, by a provider different from the session that called the review. An
+install, deploy, or other live action needs a `final-check` or
+`security-review` report; `review`, `pr-wait`, and `code-only-review` also
+accept an ungated `plan-review`. A protected class's forbidden actions still
+have no approval path.
 
 ## Update
 
 ```bash
 cd /worksp/ai-devops
-./update.sh --reviewer-approval <approval.json>
+./update.sh --reviewer-approval <exact-head APPROVE report>
 ```
 
 `update.sh` never overwrites `/etc/ai-devops/*.env`. It returns nonzero if the
 installer has any required failure and reports the exact source SHA attempted.
 
 On Linux, `update.sh --expected-head <full-merged-SHA> --reviewer-approval
-<approval.json>` pins a protected update before the installed
+<exact-head APPROVE report>` pins a protected update before the installed
 checkout moves. The **first** protected rollout must invoke the merged target
 script from a clean, exact-SHA worktree sharing the installed checkout's Git
 common directory:
 
 ```bash
 cd /worksp/ai-devops-candidate
-./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA> --reviewer-approval <approval.json>
+./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA> --reviewer-approval <exact-head APPROVE report>
 ```
 
 The updater verifies the candidate and installed checkout relationship, fetches
@@ -312,7 +311,7 @@ candidate, runs its gate, then advances only the named
 installed checkout. Later updates can run from the installed checkout itself.
 `install.sh` checks the same pending authorization before its first machine
 change, including when called directly. Same-source maintenance uses
-`./install.sh --reviewer-approval <approval.json>`; a protected source
+`./install.sh --reviewer-approval <exact-head APPROVE report>`; a protected source
 change cannot use that route. One checkout lock covers the update and install.
 The installer saves protected config, the manifest, managed launcher targets,
 the user crontab, and the protected configuration checkout's commit before it

@@ -119,7 +119,8 @@ check 'Oracle fixture may enter production only at declared production strength'
 # Non-protected reviewer-approved overrides are recorded, never silent (#996).
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
-appr_file(){ local dir="$1" action="$2" gate="$3" repo; repo="$( cd "$dir" && "$gate" explain --json 2>/dev/null | jq -r '.repository // ""' )"; mint_reviewer_approval "$TMP" "$action" "$(git -C "$dir" rev-parse HEAD)" "$repo"; }
+LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
+appr_file(){ mint_reviewer_approval "$TMP" "$1" plan-review; }
 docs_approval="$(appr_file "$TMP/docs" review "$GATE")"
 check 'assigned AI reviewer approval is accepted for prose review' "rc '$TMP/docs' 0 check --before review --reviewer-approval '$docs_approval'"
 docs_status="$(cd "$TMP/docs" && "$GATE" status)"

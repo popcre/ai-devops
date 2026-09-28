@@ -164,8 +164,8 @@ the task needs the detail.
   (2026-09-28, verbatim: "never ask a human to approve"): no human approval is ever requested; the assigned AI reviewer's explicit APPROVE
   on the exact inputs gates `terraform apply`, mutating production `gcloud`, and
   every other technical production action, and anything else stops. Where
-  `ai-task-gates` asks for approval, pass `--reviewer-approval <file>`: the
-  allocator-assigned AI reviewer's exact-input APPROVE record (popcre/ai-devops#996).
+  `ai-task-gates` asks for approval, pass `--reviewer-approval <report>`: the
+  assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996).
   Before production trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
   The sole narrow exception is `shared-db`'s activated automatic migration

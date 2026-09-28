@@ -9,6 +9,7 @@ export AI_TASK_GATES_INSTALL_TEST_MODE=1 AI_TASK_GATES_TEST_ROOT="$TMP" AI_TASK_
 export AI_TASK_GATES_FILE="$ROOT/config/task-gates.json"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
+LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
 mkdir -p "$TMP/state" "$TMP/bin" "$TMP/etc" "$TMP/installed/bin" "$TMP/installed/tools/lib" "$TMP/installed/config" "$TMP/installed/.ai-devops"
 git init -q --bare --initial-branch=main "$TMP/origin.git"
 git init -q --initial-branch=main "$TMP/installed"
@@ -46,7 +47,7 @@ stage_report(){
 manifest "$old"
 gate(){ (cd "$2" && "$2/bin/ai-task-gates" install-verify --phase "$1" --target-head "$3" --installed-checkout "$TMP/installed" --installed-launcher "$TMP/bin/ai-task-gates" "${@:4}"); }
 expect_ok(){ local name="$1"; shift; if "$@" > "$TMP/last-output" 2>&1; then printf 'PASS: %s\n' "$name"; else printf 'FAIL: %s\n' "$name"; tail -n 4 "$TMP/last-output"; exit 1; fi; }
-appr(){ mint_reviewer_approval "$TMP" deploy "$1" popcre/ai-devops "${2:+.implementer_engine=\"$2\" | .reviewer_engine=\"$2\"}"; }
+appr(){ mint_reviewer_approval "$TMP" "${3:-$TMP/candidate}" final-check "$1" "${2:+.caller=\"$2\"}"; }
 expect_stop(){ local name="$1"; shift; if "$@" >/dev/null 2>&1; then printf 'FAIL: %s\n' "$name"; exit 1; else printf 'PASS: %s\n' "$name"; fi; }
 
 (cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
@@ -57,7 +58,7 @@ ordinary="$(git -C "$TMP/candidate" rev-parse HEAD)"
 git -C "$TMP/candidate" push -q origin HEAD:main
 git -C "$TMP/installed" fetch -q origin
 expect_stop 'ordinary update requires an assigned AI reviewer approval' gate preflight "$TMP/candidate" "$ordinary"
-expect_stop 'ordinary update refuses a same-engine approval' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary" claude)"
+expect_stop 'ordinary update refuses a same-engine approval' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary" grok)"
 expect_stop 'ordinary update refuses an approval for another head' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$old")"
 expect_ok 'ordinary update preflight records transaction' gate preflight "$TMP/candidate" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
 git -C "$TMP/installed" merge -q --ff-only "$ordinary"
@@ -70,11 +71,11 @@ expect_ok 'ordinary required stages bind to transaction' gate stages-complete "$
 expect_ok 'ordinary update finalizes with completed receipt' gate finalize "$TMP/installed" "$ordinary"
 expect_stop 'same-source reinstall needs task and reviewer approval' gate resume "$TMP/installed" "$ordinary"
 (cd "$TMP/installed" && bin/ai-task-gates start --class installation) >/dev/null
-expect_ok 'trusted same-source reinstall retains capability' gate resume "$TMP/installed" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
+expect_ok 'trusted same-source reinstall retains capability' gate resume "$TMP/installed" "$ordinary" --reviewer-approval "$(appr "$ordinary" "" "$TMP/installed")"
 expect_ok 'same-source required stages bind to transaction' gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
 expect_ok 'trusted same-source reinstall finalizes' gate finalize "$TMP/installed" "$ordinary"
 for crash_point in completion authority marker; do
-  expect_ok "ordinary maintenance begins before $crash_point interruption" gate resume "$TMP/installed" "$ordinary" --reviewer-approval "$(appr "$ordinary")"
+  expect_ok "ordinary maintenance begins before $crash_point interruption" gate resume "$TMP/installed" "$ordinary" --reviewer-approval "$(appr "$ordinary" "" "$TMP/installed")"
   expect_ok "ordinary stages bind before $crash_point interruption" gate stages-complete "$TMP/installed" "$ordinary" --stage-report "$stage_path"
   export AI_TASK_GATES_TEST_FINALIZE_CRASH_AFTER="$crash_point"
   expect_stop "ordinary finalize is interrupted after $crash_point" gate finalize "$TMP/installed" "$ordinary"
@@ -132,7 +133,7 @@ git -C "$TMP/installed" merge -q --ff-only "$protected"
 expect_ok 'protected install resumes with reviewed pending authority' gate resume "$TMP/installed" "$protected"
 manifest "$protected"
 mv "$auth.consuming" "$TMP/pending-backup"
-expect_stop 'stamped manifest cannot hide lost protected authority' gate resume "$TMP/installed" "$protected" --reviewer-approval "$(appr "$protected")"
+expect_stop 'stamped manifest cannot hide lost protected authority' gate resume "$TMP/installed" "$protected" --reviewer-approval "$(appr "$protected" "" "$TMP/installed")"
 expect_stop 'finalize refuses missing protected transaction' gate finalize "$TMP/installed" "$protected"
 mv "$TMP/pending-backup" "$auth.consuming"
 stage_path="$(stage_report "$protected")"

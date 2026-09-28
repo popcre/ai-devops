@@ -60,17 +60,17 @@ usage: ai-task-gates <command> [options]
 
   start --class CLASS [--reason TEXT] [--base REF]
         Record the intended task class for this repository and worktree.
-  check --before ACTION [--acknowledge TEXT] [--reviewer-approval PATH]
+  check --before ACTION [--acknowledge TEXT] [--reviewer-approval REPORT]
         [--target-head SHA] [--installed-checkout PATH] [--installed-launcher PATH]
         [--first-install]
         Recompute the change set and decide whether ACTION may start.
   authorize-install --target-head SHA --installed-checkout PATH
-        --installed-launcher PATH --review-report PATH --reviewer-approval PATH
+        --installed-launcher PATH --review-report PATH --reviewer-approval REPORT
         [--legacy-migration|--first-install|--recover-launchers|--stale-manifest-recovery]
         Issue one-use authority for an exact reviewed toolkit release.
   install-verify --phase preflight|resume|stages-complete|finalize --target-head SHA
         --installed-checkout PATH --installed-launcher /usr/local/bin/ai-task-gates
-        [--caller-pinned] [--reviewer-approval PATH] [--stage-report PATH]
+        [--caller-pinned] [--reviewer-approval REPORT] [--stage-report PATH]
         Guard the Linux checkout update and installation transaction.
   explain [--json] [--base REF] [--paths-from FILE|-]
         Show the resolved identity, change set, class, and gates.
@@ -334,43 +334,48 @@ state_record_override(){
 }
 
 # Owner ruling 2026-09-28 (popcre/ai-devops#996): no human approves anything.
-# Where a gate once demanded an owner request, it now demands evidence of an
-# assigned AI reviewer's APPROVE bound to the exact inputs: the action, the
-# repository, and the exact head. The evidence is a private (0600, caller-owned)
-# JSON record that names the reviewer's report; the report must be the one a
-# completed, non-stale APPROVE run of the reviewer lifecycle recorded for that
-# exact head and reviewer engine, so the record cannot be minted without a real
-# review. The reviewer engine must differ from the implementing engine. Prints
-# a one-line audit summary on success.
+# Where a gate once demanded an owner request, it now demands an assigned AI
+# reviewer's APPROVE: --reviewer-approval names the reviewer's report, and the
+# gate accepts it only when the reviewer lifecycle recorded that exact report as
+# a completed, non-stale APPROVE run for this repository, this exact head, and
+# this exact source digest, by a provider different from the session that
+# called the review (the lifecycle's recorded caller). Nothing here is read from
+# caller-written fields. Action binding is by review mode: an action that
+# changes a machine or a live system needs a final-check or security-review;
+# the other forbidden actions (review, pr-wait, code-only-review) also accept a
+# plan-review, which is ungated, so a documentation change can obtain the
+# approval without first passing the gate it lifts.
+# Usage: reviewer_approval_summary REPORT ACTION HEAD WORKTREE
 reviewer_approval_summary(){
-  local file="$1" action="$2" head="$3" repo="${4:-}" hash report report_hash engine lifecycle_root state matched=0
-  [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] || return 1
-  [ "$(stat -c %a "$file" 2>/dev/null)" = 600 ] && [ "$(stat -c %u "$file" 2>/dev/null)" = "$(id -u)" ] || return 1
-  jq -e --arg a "$action" --arg h "$head" --arg r "$repo" '
-    type=="object" and .schema_version==1 and .verdict=="APPROVE"
-    and (.reviewer_engine|type=="string" and length>0)
-    and (.implementer_engine|type=="string" and length>0)
-    and ((.reviewer_engine|ascii_downcase) != (.implementer_engine|ascii_downcase))
-    and (.assignment|type=="string" and length>0)
-    and .action==$a
-    and (.head|type=="string" and test("^[0-9a-f]{40}$")) and .head==$h
-    and (.repository|type=="string" and length>0)
-    and ($r=="" or .repository==$r)
-    and (.report|type=="string" and startswith("/"))' "$file" >/dev/null 2>&1 || return 1
-  report="$(jq -r .report "$file")"; engine="$(jq -r .reviewer_engine "$file")"
+  local report="$1" action="$2" head="$3" worktree="$4" identity key digest report_hash lifecycle_root state row provider mode name
   [ -f "$report" ] && [ ! -L "$report" ] || return 1
+  report="$(realpath -- "$report")" || return 1
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
-  grep -Fqx "| reviewed commit | \`$head\` |" "$report" || return 1
+  identity="$("$SCRIPT_DIR/ai-review-lifecycle" identity "$worktree" 2>/dev/null)" || return 1
+  key="$(jq -r '.repository_key // ""' <<<"$identity")"; digest="$(jq -r '.source_digest // ""' <<<"$identity")"
+  [ -n "$key" ] && [ -n "$digest" ] || return 1
   lifecycle_root="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}"
-  for state in "$lifecycle_root"/runs/*/*/*/*.json; do
+  row=""
+  for state in "$lifecycle_root/runs/$key/"*/*/*.json; do
     [ -f "$state" ] || continue
-    if jq -e --arg h "$head" --arg p "$report" --arg s "$report_hash" --arg e "$engine" \
-      '.status=="completed" and .verdict=="APPROVE" and .stale==false and .head==$h and .report_path==$p and .report_sha256==$s and .provider==$e' \
-      "$state" >/dev/null 2>&1; then matched=1; break; fi
+    if jq -e --arg h "$head" --arg p "$report" --arg s "$report_hash" --arg d "$digest" --arg k "$key" '
+      .status=="completed" and .verdict=="APPROVE" and .stale==false and .head==$h
+      and .repository_key==$k and .source_digest==$d and .report_path==$p and .report_sha256==$s
+      and (.provider|type=="string" and length>0) and (.caller|type=="string" and length>0)
+      and ((.provider|ascii_downcase) != (.caller|ascii_downcase))' "$state" >/dev/null 2>&1; then row="$state"; break; fi
   done
-  [ "$matched" -eq 1 ] || return 1
-  hash="$(sha256sum "$file" | cut -d' ' -f1)" || return 1
-  jq -r --arg x "$hash" '"APPROVE by \(.reviewer_engine) (implementer \(.implementer_engine), assignment \(.assignment)) for \(.action) at \(.head) sha256:\($x)"' "$file"
+  [ -n "$row" ] || return 1
+  provider="$(jq -r .provider "$row")"; name="$(basename "$report")"
+  mode=""
+  for m in plan-review diff-review security-review visual-review final-check; do
+    case "$name" in "$provider-$m-"*) mode="$m" ;; esac
+  done
+  case "$action" in
+    review|pr-wait|code-only-review) [ -n "$mode" ] || return 1 ;;
+    *) [ "$mode" = final-check ] || [ "$mode" = security-review ] || return 1 ;;
+  esac
+  jq -r --arg a "$action" --arg m "$mode" --arg x "$report_hash" \
+    '"APPROVE by \(.provider) (caller \(.caller), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
 }
 
 # --------------------------------------------------------------------------
@@ -676,8 +681,8 @@ cmd_check(){
   prepare "$base" ""
   source_changed_count="$CHANGED_COUNT"
   if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] && [ "$source_changed_count" -eq 0 ]; then
-    [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an assigned AI reviewer APPROVE (--reviewer-approval PATH).'
-    approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$IDENTITY")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to this exact action, repository, and head.'
+    [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
+    approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent lifecycle-recorded APPROVE report to this exact action, repository, head, and source.'
     [ "$(state_field declared_class)" = installation ] || blocked 'ai-task-gates: STOP. Same-source toolkit installation requires a declared installation task.'
     [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs the installed checkout and launcher paths.'
     local same_root same_head expected_launcher
@@ -834,11 +839,11 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         "$action" "$effective" "$IDENTITY")"
     fi
     if [ -z "$reviewer_approval" ]; then
-      blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, obtain an allocator-assigned AI reviewer APPROVE bound to this exact action, repository, and head (reviewer engine different from the implementer) and re-run with --reviewer-approval PATH.' \
+      blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (a plan-review suffices for review, pr-wait, and code-only-review) and re-run with --reviewer-approval <that report>.' \
         "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
     fi
-    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$IDENTITY")" \
-      || blocked "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not an assigned, independent APPROVE bound to this exact action, repository, and head.' "$action")"
+    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
+      || blocked "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action.' "$action")"
     state_record_override reviewer-approval "$action" "$approval_summary" "$effective"
     printf 'ai-task-gates: "%s" allowed by assigned AI reviewer: %s\n' "$action" "$approval_summary"
     return 0
@@ -1287,8 +1292,8 @@ cmd_install_verify(){
   else
     [ ! -e "$issued" ] && [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Unexpected installation authority for an ordinary update.'
     if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
-      [ "$declared_installation" = installation ] && [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. Ordinary Linux installation needs a declared installation task and an assigned AI reviewer APPROVE (--reviewer-approval PATH).'
-      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target" popcre/ai-devops || reviewer_approval_summary "$reviewer_approval" deploy "$target" u2giants/ai-devops)" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
+      [ "$declared_installation" = installation ] && [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. Ordinary Linux installation needs a declared installation task and an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
+      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target" "$candidate_root")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
     else
       jq -e --arg old "$old" --arg target "$target" --arg path "$installed" \
         '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.reviewer_approval|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary Linux transaction changed before resume.'
@@ -1330,7 +1335,7 @@ cmd_authorize_install(){
   [[ "$start_head" =~ ^[0-9a-f]{40}$ ]] || blocked 'ai-task-gates: STOP. Installation task lacks recorded pre-update HEAD.'
   [[ "$target_head" =~ ^[0-9a-f]{40}$ ]] && [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] || blocked 'ai-task-gates: STOP. Candidate HEAD differs from requested target.'
   [ -n "$reviewer_approval" ] && [ -n "$review_report" ] && [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Install authority needs an assigned AI reviewer APPROVE, exact review, checkout, and launcher.'
-  approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target_head" "$IDENTITY")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
+  approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target_head" "$TOPLEVEL")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
   [ $((legacy_migration + first_install + recover_launchers + stale_manifest_recovery)) -le 1 ] || blocked 'ai-task-gates: STOP. Choose one installation migration mode.'
   if [ "$start_head" = "$target_head" ] && [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then
     blocked 'ai-task-gates: STOP. Empty release needs an installed receipt or explicit reviewed legacy migration.'

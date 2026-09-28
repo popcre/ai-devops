@@ -15,11 +15,12 @@
 # moving.
 #
 # Usage:
-#   ai-pr-wait <pr-number> [--repo OWNER/NAME] [--timeout-minutes N] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval PATH]
+#   ai-pr-wait <pr-number> [--repo OWNER/NAME] [--timeout-minutes N] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval REPORT]
 #
 # A documentation-only change does not wait for checks. This command refuses to
-# start a long wait for one, and says so, unless an allocator-assigned AI
-# reviewer approved the wait and you pass --reviewer-approval with its evidence.
+# start a long wait for one, and says so, unless an assigned AI
+# reviewer APPROVE of the exact head exists (a plan-review suffices) and you pass
+# --reviewer-approval with that report.
 #
 # Exit status:
 #   0  merged
@@ -45,7 +46,7 @@ while [ $# -gt 0 ]; do
         --timeout-minutes) TIMEOUT_MINUTES="$2" ;;
         --interval) INTERVAL="$2" ;;
         --api-timeout-seconds) API_TIMEOUT_SECONDS="$2" ;;
-        --reviewer-approval) REVIEWER_APPROVAL="$(realpath -- "$2")" ;;
+        --reviewer-approval) [ -f "$2" ] || { printf 'ai-pr-wait: --reviewer-approval needs an existing review report\n' >&2; exit 3; }; REVIEWER_APPROVAL="$(realpath -- "$2")" ;;
       esac
       shift 2
       ;;

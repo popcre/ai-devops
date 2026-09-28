@@ -19,11 +19,11 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || { warn '--installed-checkout needs a path'; exit 2; }
       installed_checkout="$2"; shift 2 ;;
     --reviewer-approval)
-      [ "$#" -ge 2 ] && [ -f "$2" ] || { warn '--reviewer-approval needs an assigned AI reviewer APPROVE evidence file'; exit 2; }
+      [ "$#" -ge 2 ] && [ -f "$2" ] || { warn '--reviewer-approval needs the assigned AI reviewer exact-head APPROVE report'; exit 2; }
       reviewer_approval="$(realpath -- "$2")"; shift 2 ;;
     --require-secrets|--skip-secrets) install_args+=("$1"); shift ;;
     -h|--help)
-      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--reviewer-approval PATH] [--require-secrets|--skip-secrets]'
+      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--reviewer-approval REPORT] [--require-secrets|--skip-secrets]'
       exit 0 ;;
     *) warn "unknown option: $1"; exit 2 ;;
   esac

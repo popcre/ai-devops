@@ -309,7 +309,7 @@ join(){
   jq '{provider,repository_root,head,source_digest,run_id,session_id,caller,status,verdict,failure_class}' "$state"
 }
 
-usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live] [--reviewer-approval PATH]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE]' 'ai-review-lifecycle join <state-file>'; }
+usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live] [--reviewer-approval REPORT]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE]' 'ai-review-lifecycle join <state-file>'; }
 
 case "${1:-}" in
   identity) shift; [ "$#" -eq 1 ] || die "identity requires one repository."; identity_json "$1";;

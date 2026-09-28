@@ -202,7 +202,8 @@ check "no lifecycle state was created for the refused review" \
   "[ -z \"\$(find '$AI_REVIEW_LIFECYCLE_DIR/runs' -type f -name 'gate-blocked.json' -print -quit 2>/dev/null)\" ]"
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
-appr_file(){ local dir="$1" action="$2" gate="$3" repo; repo="$( cd "$dir" && "$gate" explain --json 2>/dev/null | jq -r '.repository // ""' )"; mint_reviewer_approval "$TMP" "$action" "$(git -C "$dir" rev-parse HEAD)" "$repo"; }
+LIB_REVIEWER_APPROVAL_BIN="$REPO_ROOT/bin"
+appr_file(){ mint_reviewer_approval "$TMP" "$1" plan-review; }
 GATE_STATE="$(gated_begin gate-owner --reviewer-approval "$(appr_file "$GR" review "$REPO_ROOT/bin/ai-task-gates")")"
 check "a reviewer-approved review still runs the full gates" "[ -f \"\$GATE_STATE\" ]"
 check "the reviewer-approved review ran its provider preflight" "grep -q '^check grok ' '$GATE_LOG'"

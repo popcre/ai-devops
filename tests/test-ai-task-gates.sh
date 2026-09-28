@@ -12,6 +12,7 @@ CLASSIFY="$ROOT/tools/ci/classify-changes.sh"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
+LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_TASK_GATES_DIR="$TMP/state"
@@ -28,10 +29,9 @@ out(){ local dir="$1"; shift; ( cd "$dir" && "$GATES" "$@" ) 2>&1; }
 # reviewer APPROVE record bound to the exact action, repository, and head
 # (#996: no human approves; an independent AI reviewer does).
 appr(){
-  local dir="$1" action="$2" head="${3:-}" extra="${4:-.}" repo
-  [ -n "$head" ] || head="$(git -C "$dir" rev-parse HEAD)"
-  repo="$( cd "$dir" && "$GATES" explain --json 2>/dev/null | jq -r '.repository // ""' )"
-  mint_reviewer_approval "$TMP" "$action" "$head" "$repo" "$extra"
+  local dir="$1" action="$2" head="${3:-}" extra="${4:-.}" mode=final-check
+  case "$action" in review|pr-wait|code-only-review) mode=plan-review ;; esac
+  mint_reviewer_approval "$TMP" "$dir" "$mode" "$head" "$extra"
 }
 
 # newrepo <path> [origin-identity] — a repository with one commit on main.
@@ -744,24 +744,24 @@ check 'a paid review is refused for a documentation change' "rc 3 '$TMP/gate' ch
 check 'a long PR wait is refused for a documentation change' "rc 3 '$TMP/gate' check --before pr-wait"
 check 'an assigned AI reviewer approval lifts a non-protected forbidden action' \
   "rc 0 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review)\""
-check 'a same-engine approval is refused' \
-  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.reviewer_engine=\"claude\"')\""
+check 'an approval whose reviewer is the calling engine is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.caller=\"grok\"')\""
 check 'an approval bound to another head is refused' \
   "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review 0000000000000000000000000000000000000000)\""
-check 'an approval for another action is refused' \
-  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' deploy)\""
 check 'a REJECT verdict is refused' \
   "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.verdict=\"REJECT\"')\""
-check 'an approval without an allocator assignment is refused' \
-  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' 'del(.assignment)')\""
-check 'an approval for another repository is refused' \
-  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.repository=\"someone/else\"')\""
-check 'a world-readable approval record is refused' \
-  "f=\"\$(appr '$TMP/gate' review)\"; chmod 644 \"\$f\"; rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$f\""
-check 'an approval whose report has no lifecycle APPROVE run is refused' \
-  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.report=\"/etc/hostname\"')\""
-check 'an approval naming a different reviewer engine than the recorded run is refused' \
-  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.reviewer_engine=\"qwen\"')\""
+check 'a stale review is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.stale=true')\""
+check 'a review of another source digest is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.source_digest=\"0\"')\""
+check 'a review recorded for another repository is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.repository_key=\"other\"')\""
+check 'a report with no lifecycle row is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval /etc/hostname"
+check 'an edited report no longer matches its lifecycle row' \
+  "f=\"\$(appr '$TMP/gate' review)\"; printf 'x\\n' >> \"\$f\"; rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$f\""
+check 'a plan-review cannot authorize a live action' \
+  "rc 3 '$TMP/gate' check --before deploy --reviewer-approval \"\$(mint_reviewer_approval '$TMP' '$TMP/gate' plan-review)\""
 check 'the reviewer approval is recorded in the intent state' \
   "out '$TMP/gate' status | jq -e '[.overrides[].kind]|index(\"reviewer-approval\")!=null'"
 ( cd "$TMP/gate" && "$GATES" start --class production ) >/dev/null

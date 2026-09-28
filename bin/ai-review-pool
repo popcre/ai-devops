@@ -189,7 +189,7 @@ case "$mode" in
 esac
 if [ -n "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] && [ -f "$AI_REVIEW_REVIEWER_APPROVAL" ]; then DECISION="$DECISION
 
-Assigned AI reviewer approval governing this review: $(jq -r '"APPROVE by \(.reviewer_engine) for \(.action) at \(.head)"' "$AI_REVIEW_REVIEWER_APPROVAL" 2>/dev/null)"; fi
+Assigned AI reviewer approval governing this review: $(basename "$AI_REVIEW_REVIEWER_APPROVAL")"; fi
 
 TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"; TMP_ERR="$(mktemp "$REPORT_DIR/.pool-stderr.XXXXXX")"
 CHANGED_FILES=""

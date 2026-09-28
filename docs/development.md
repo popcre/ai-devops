@@ -62,7 +62,7 @@ protected class cannot be argued past: `--acknowledge` and `--reviewer-approval`
 apply only to unprotected classes.
 
 Read-only review of selected code, tests, and contracts in a private repository
-does not require owner permission merely because its task class is
+does not require a reviewer approval merely because its task class is
 `private-evidence`. First write a JSON array of exact repository-relative file
 paths to a private temporary file, then use
 `ai-review deepseek diff-review --code-only --paths-file <file> --base <ref>`.
@@ -80,7 +80,7 @@ All registered reviewers may review an aggregate that has been checked for
 private content and written to a public repository worktree. Declare the public
 artifact's actual task class there and use the ordinary review route from that
 worktree. A discretionary prose review needs `--reviewer-approval` with an
-assigned AI reviewer's exact-input APPROVE. The private checkout's `private-evidence` gate remains in force; it
+assigned AI reviewer's exact-head APPROVE report (a plan-review suffices). The private checkout's `private-evidence` gate remains in force; it
 does not grant reviewers access to raw transcripts or other private records.
 `--tests` is unavailable on this route because
 arbitrary commands could expose raw evidence. The `private-evidence` class
