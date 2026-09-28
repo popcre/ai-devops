@@ -119,6 +119,7 @@ norm(){
   n=$((10#$1))
   printf '%d' "$n"
 }
+LOCK_DEV_N="$(norm "$lock_dev")"
 LOCK_INO_N="$(norm "$lock_ino")"
 
 # Informational for the report, AUTHORITATIVE for recovery: /proc/locks is
