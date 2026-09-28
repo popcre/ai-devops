@@ -7,7 +7,7 @@ Owner issue: https://github.com/popcre/ai-devops/issues/1002.
 
 | Step | State | Evidence |
 |---|---|---|
-| 1 Lock inventory | ⬜ open (2026-09-28) | — |
+| 1 Lock inventory | ✅ done (2026-09-28) | `docs/locks.md` covers all 62 hits of `grep -rnE 'flock|lock\.d|\.lock' bin`; AGENTS.md router row added |
 | 2 Stale-holder recovery for flock locks | ⬜ open | — |
 | 3 Settings snapshot + drift check | ⬜ open | — |
 | 4 Scheduled drift check + alert | ⬜ open | — |
