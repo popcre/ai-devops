@@ -16,7 +16,7 @@ import sys
 
 def summarize(directory):
     counts = collections.Counter()
-    failures = deferred = executions = records = unknown_callers = 0
+    failures = deferred = executions = records = unknown_callers = identity_probes = transformed_graphql = 0
     latency = []
     digest = hashlib.sha256()
     stamps = []
@@ -39,9 +39,16 @@ def summarize(directory):
                 if (not isinstance(operation, str) or operation not in OPERATIONS
                         or not isinstance(caller, str) or caller not in CALLERS):
                     raise ValueError("invalid measurement label")
+                direct = row.get("measurement") == "direct_api_invocation_estimate"
+                request_class = row.get("request_class")
                 if (type(row.get("schema")) is not int or row["schema"] != 1
-                        or row.get("measurement") != "opaque_cli_estimate"
-                        or "http_requests" not in row or row["http_requests"] is not None
+                        or row.get("measurement") not in ("opaque_cli_estimate", "direct_api_invocation_estimate")
+                        or request_class not in ("unknown", "identity_probe", "graphql_transformed_unobservable")
+                        or (request_class == "graphql_transformed_unobservable" and operation != "api.graphql")
+                        or "http_requests" not in row
+                        or (direct and (operation != "api.identity" or request_class != "identity_probe"))
+                        or (not direct and (operation == "api.identity" or request_class == "identity_probe"))
+                        or row["http_requests"] is not None
                         or "graphql_points" not in row or row["graphql_points"] is not None):
                     raise ValueError("unsupported measurement schema")
                 stamp = row.get("utc", "")
@@ -50,14 +57,18 @@ def summarize(directory):
                 duration = row.get("latency_ms")
                 status = row.get("exit_status")
                 calls = row.get("cli_executions")
-                if (type(duration) is not int or not 0 <= duration <= 604800000
+                if ((direct and (duration is not None or calls != 1))
+                        or (not direct and (type(duration) is not int or not 0 <= duration <= 604800000))
                         or type(status) is not int or not 0 <= status <= 255
                         or type(calls) is not int or calls not in (0, 1)):
                     raise ValueError("invalid measurement number")
                 stamps.append(stamp)
-                latency.append(duration)
+                if duration is not None:
+                    latency.append(duration)
                 records += 1
-                executions += calls
+                executions += calls if not direct else 0
+                identity_probes += calls if direct else 0
+                transformed_graphql += calls if request_class == "graphql_transformed_unobservable" else 0
                 deferred += status == 75
                 failures += status not in (0, 75)
                 unknown_callers += row["caller"] == "unknown"
@@ -66,7 +77,8 @@ def summarize(directory):
         "schema": 1,
         "acceptance": "incomplete: busy windows, workflow outcomes, identities and quota observations required",
         "records": records, "opaque_cli_executions": executions,
-        "http_requests": None, "graphql_points": None,
+        "http_requests": None, "identity_probe_invocations": identity_probes,
+        "graphql_transformed_unobservable": transformed_graphql, "graphql_points": None,
         "failed": failures, "deferred": deferred,
         "unknown_caller_records": unknown_callers,
         "first_utc": min(stamps) if stamps else None,
@@ -77,15 +89,17 @@ def summarize(directory):
         "raw_artifact_sha256": digest.hexdigest(),
         "coverage_gaps": ["unwrapped managed callers", "external clients and other hosts",
                           "HTTP pagination and GraphQL point costs", "authenticated principal and API host",
-                          "probe requests", "telemetry warnings or interrupted processes may omit records"],
+                          "probe requests", "transformed GraphQL output hides HTTP-200 errors",
+                          "telemetry warnings or interrupted processes may omit records"],
     }
 
 
-OPERATIONS = {"unknown", "api.graphql", "api.quota", "api.unknown", "repo.view", "workflow.run"}
+OPERATIONS = {"unknown", "api.graphql", "api.quota", "api.identity", "api.unknown", "repo.view", "workflow.run"}
+OPERATIONS.update("bw." + value for value in ("snapshot", "dependents", "wake_miss", "alarm_issue", "link_issue"))
 OPERATIONS.update("pr." + value for value in ("view", "checks", "list", "merge", "create", "comment", "edit", "diff"))
 OPERATIONS.update("issue." + value for value in ("view", "list", "create", "comment", "edit", "close", "reopen"))
 OPERATIONS.update("run." + value for value in ("view", "list", "cancel"))
-CALLERS = {"unknown", "interactive", "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch", "ai-verify-run", "ai-memory-sync", "ai-test-local"}
+CALLERS = {"unknown", "interactive", "ai-pr-wait", "ai-gh-wait", "ai-blocker-watch", "ai-verify-run", "ai-memory-sync", "ai-test-local", "ai-merge-group-evidence"}
 
 if __name__ == "__main__":
     try:

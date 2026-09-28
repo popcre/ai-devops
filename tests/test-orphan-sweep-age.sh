@@ -124,6 +124,34 @@ check "cap_keeps_young"                "[ -d '$CAP_YOUNG' ]"
 check "next_sweep_takes_the_overflow"  "[ ! -d "$AI_REVIEW_SANDBOX_DIR/$CAP_REMAIN" ]"
 rm -rf "$CAP_YOUNG"
 
+# A backlog of unreconciled evidence must neither flood a review start nor
+# starve a later recoverable orphan. The cursor advances after refusals.
+DEFAULT_SANDBOX_DIR="$AI_REVIEW_SANDBOX_DIR"
+AI_REVIEW_SANDBOX_DIR="$TMP/bounded-sandboxes"
+i=1
+while [ "$i" -le 20 ]; do
+  plant "blocked-$(printf '%02d' "$i")" '3 hours ago' 'evidence_owner=muse:00000000000000000000000000000000' >/dev/null
+  i=$(( i + 1 ))
+done
+RECOVERABLE="$(plant recoverable-last '3 hours ago')"
+"$SCRIPT" sweep-orphans --max-removals 16 2> "$TMP/bounded-first.err"
+FIRST_REFUSALS="$(grep -c 'cleanup refused' "$TMP/bounded-first.err" || true)"
+check "refused_evidence_checks_are_bounded" "[ '$FIRST_REFUSALS' -le 16 ] && [ '$FIRST_REFUSALS' -ge 1 ]"
+check "recoverable_orphan_waits_for_next_bounded_pass" "[ -d '$RECOVERABLE' ]"
+"$SCRIPT" sweep-orphans --max-removals 16 2> "$TMP/bounded-second.err"
+SECOND_REFUSALS="$(grep -c 'cleanup refused' "$TMP/bounded-second.err" || true)"
+check "sweep_rotates_past_retained_evidence" "[ ! -d '$RECOVERABLE' ] && [ '$SECOND_REFUSALS' -le 16 ]"
+AI_REVIEW_SANDBOX_DIR="$TMP/mixed-name-sandboxes"
+for mixed_name in -first A-middle a-last; do
+  plant "$mixed_name" '3 hours ago' 'evidence_owner=muse:00000000000000000000000000000000' >/dev/null
+done
+for expected_cursor in -first A-middle a-last; do
+  "$SCRIPT" sweep-orphans --max-removals 1 >/dev/null 2>&1
+  observed_cursor="$(cat "$AI_REVIEW_SANDBOX_DIR/.orphan-sweep-cursor")"
+  check "mixed_name_cursor_follows_byte_order_$expected_cursor" "[ '$observed_cursor' = '$expected_cursor' ]"
+done
+AI_REVIEW_SANDBOX_DIR="$DEFAULT_SANDBOX_DIR"
+
 # --- missing sandbox root is a quiet no-op ------------------------------------
 set +e
 AI_REVIEW_SANDBOX_DIR="$TMP/does-not-exist" "$SCRIPT" sweep-orphans >/dev/null 2>&1

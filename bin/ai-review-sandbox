@@ -826,14 +826,17 @@ cmd_remove() {
 # repositories; only directories carrying a managed marker past the orphan age
 # are considered, and each delete goes through remove_sandbox so containment,
 # AI_KEEP_SANDBOX, and the evidence rules all keep applying. At most
-# ORPHAN_SWEEP_MAX_REMOVALS entries are removed per run, so a review start
-# never blocks behind a mass cleanup — the rest wait for the next parent run
+# ORPHAN_SWEEP_MAX_REMOVALS old managed entries are examined per run, including
+# refused removals. A private cursor rotates past retained evidence so one
+# unreconciled snapshot cannot starve later recoverable snapshots.
 # and the daily housekeeping task. Best-effort by design: an entry
 # remove_sandbox refuses (unreconciled evidence) is reported on stderr and left
 # for reconciliation, and the sweep continues with the rest.
 cmd_sweep_orphans() { # sweep-orphans [--max-age-seconds N] [--max-removals N]
   local max_age="$ORPHAN_MAX_AGE_SECONDS" max_removals="$ORPHAN_SWEEP_MAX_REMOVALS"
-  local entry marker mtime age now removed=0
+  local entry marker mtime age now examined=0 cursor_file cursor='' name pass cursor_tmp
+  local LC_ALL=C
+  local -a entries=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --max-age-seconds)
@@ -848,21 +851,38 @@ cmd_sweep_orphans() { # sweep-orphans [--max-age-seconds N] [--max-removals N]
   case "$max_age" in ''|*[!0-9]*) die "orphan age must be a whole number of seconds." ;; esac
   case "$max_removals" in ''|*[!0-9]*) die "removal cap must be a whole number." ;; esac
   [ -d "$SANDBOX_DIR" ] || return 0
+  cursor_file="$SANDBOX_DIR/.orphan-sweep-cursor"
+  if [ -f "$cursor_file" ] && [ ! -L "$cursor_file" ]; then
+    IFS= read -r cursor < "$cursor_file" || true
+    [[ "$cursor" =~ ^[A-Za-z0-9._-]{1,255}$ ]] || cursor=''
+  fi
+  mapfile -d '' -t entries < <(find "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | LC_ALL=C sort -z)
   now="$(date +%s)"
-  while IFS= read -r -d '' entry; do
-    [ "$removed" -lt "$max_removals" ] || {
-      warn "$(( max_removals )) orphan removal cap reached; remaining orphans wait for the next parent run"
-      return 0
-    }
-    marker="$entry/$MARKER"
-    [ -f "$marker" ] || continue
-    mtime="$(stat -c %Y "$marker" 2>/dev/null)" || continue
-    age=$(( now - mtime ))
-    [ "$age" -gt "$max_age" ] || continue
-    # Subshell: remove_sandbox dies on unreconciled evidence by design, and
-    # that one refusal must not end the sweep of the remaining orphans.
-    if ( remove_sandbox "$entry" ); then removed=$(( removed + 1 )); fi
-  done < <(find "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+  for pass in 1 2; do
+    [ "$pass" = 1 ] || [ -n "$cursor" ] || break
+    for entry in "${entries[@]}"; do
+      name="${entry##*/}"
+      if [ "$pass" = 1 ]; then
+        [[ "$name" > "$cursor" ]] || continue
+      else
+        [[ "$name" > "$cursor" ]] && continue
+      fi
+      marker="$entry/$MARKER"
+      [ -f "$marker" ] || continue
+      mtime="$(stat -c %Y "$marker" 2>/dev/null)" || continue
+      age=$(( now - mtime ))
+      [ "$age" -gt "$max_age" ] || continue
+      [ "$examined" -lt "$max_removals" ] || {
+        warn "$max_removals orphan examination cap reached; remaining orphans wait for the next parent run"
+        return 0
+      }
+      examined=$(( examined + 1 ))
+      # Refused evidence is retained, while this bounded sweep moves forward.
+      ( remove_sandbox "$entry" ) || true
+      cursor_tmp="$(mktemp "$SANDBOX_DIR/.orphan-sweep-cursor.XXXXXX")" || return 1
+      printf '%s\n' "$name" > "$cursor_tmp" && mv -- "$cursor_tmp" "$cursor_file" || return 1
+    done
+  done
   return 0
 }
 
