@@ -85,8 +85,11 @@ for never_ask in \
   "$REPO_ROOT"/plan_ai-devops-work-claims.md "$REPO_ROOT"/plan_grok_integration-review-access.md \
   "$REPO_ROOT"/docs/transcript-leak-audit-2026-07-19.md "$REPO_ROOT"/skills/claude/sync-dotfiles/SKILL.md \
   "$REPO_ROOT"/templates/repo-docs/docs-ai-branching.md \
+  "$REPO_ROOT"/skills/codex/codex-sync-dotfiles/SKILL.md "$REPO_ROOT"/skills/shared/shared-db-orchestrator/SKILL.md \
+  "$REPO_ROOT"/plan_ast-grep-multi-machine-management.md "$REPO_ROOT"/plan_shared-db-finish-first-delivery.md \
+  "$REPO_ROOT"/plan_shared-db-complete-throughput-repair.md "$REPO_ROOT"/plan_ai-muse-native-engine-parity.md \
   "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL" "$AGENTS_MD"; do
-  ! grep -qiP "(?<!never )(ask (me|Albert)( once)? for|ask Albert(\.| to run)|asking Albert to run)|stop and ask Albert|ask for one\.|Please provide as many|Albert's current-chat (authorization|response)|decided by Albert|Albert must explicitly|tell Albert the token|let Albert decide|offer to register|explicit human approval|do not need Albert unless|Albert (explicitly )?approves|Albert's (explicit )?approval for|needs Albert's approval|once he says yes|Albert authorization|without Albert naming|wait for a quick approval|when he must run" "$never_ask" \
+  ! grep -qiP "(?<!never )(ask (me|Albert)( once)? for|ask Albert(\.| to run)|asking Albert to run)|stop and ask Albert|ask for one\.|Please provide as many|Albert's current-chat (authorization|response)|decided by Albert|is Albert's decision|Albert's explicit decision|Albert (must )?explicitly authoriz|Albert decides it|ask Albert (once|whether)|asks Albert once|Albert explicitly clears|Albert must explicitly|tell Albert the token|let Albert decide|offer to register|explicit human approval|do not need Albert unless|Albert (explicitly )?approves|Albert's (explicit )?approval for|needs Albert's approval|once he says yes|Albert authorization|without Albert naming|wait for a quick approval|when he must run" "$never_ask" \
     || fail "$(basename "$never_ask") returned to asking Albert for access or approval"
 done
 

@@ -213,8 +213,10 @@ reservation or a ref to free a lane, and never relinquish on expiry alone. Open
 the abandonment-audit issue first, then run the guarded
 `--relinquish-author-lease` command the report prints, with the observed worktree
 state. The orchestrator may retire work only where the worktree is `clean` or
-proven `absent`; `dirty` or `remote` work is potentially recoverable and is
-Albert's decision.
+proven `absent`; `dirty` or `remote` work is potentially recoverable: preserve it first (rescue
+branch or patch) so it observes `clean`, never send it to Albert (owner ruling
+2026-09-28; the lane tool's `--owner-decision` requirement moves to AI review in
+popcre/shared-db#3675).
 
 `--queue-audit` must classify every open `db-work` issue across independent status,
 work type, and route fields. Its `NOT ORCHESTRATOR WORK` block lists every open issue that failed
@@ -271,8 +273,8 @@ and version check, because the world moved while the work was parked.
 
 **Terminal retirement — the work cannot or should not return.** Record the
 terminal evidence on the audit issue first, so the decision is auditable before
-anything closes. Obtain Albert's explicit decision only where the work is
-potentially recoverable — a `dirty` or `remote` worktree; `clean` or proven
+anything closes. Where the work is potentially recoverable — a `dirty` or `remote` worktree —
+preserve it first so it observes `clean`; never ask Albert; `clean` or proven
 `absent` work the orchestrator retires on its own authority. Close the pull
 request through the normal authenticated operator flow, never deleting its branch
 or refs, so the history survives the closure. Retire the claim with the

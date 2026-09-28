@@ -127,7 +127,7 @@ the task needs the detail.
   completion with appropriate proof: commit, PR, passing check, live result, or
   screenshot.
 - Surface uncertainty that could materially change scope, safety, or outcome;
-  ask Albert only when the choice is his. Define an observable success check for
+  ask Albert only when the choice is his (a business-meaning choice). Define an observable success check for
   each task and verify it before reporting completion.
 
 ### Model-tier delegation

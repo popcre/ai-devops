@@ -324,7 +324,7 @@ Add `--outcome-status <issue>` and `--complete-outcome <issue> --evidence <ref>`
 2. records a live evidence artifact with id and sha256 digest, plus an `application_commit_sha` on that repository's default branch;
 3. writes the `db-outcome-evidence` block in the one format `--complete-outcome` accepts, then runs `--complete-outcome`.
 
-Add a `--emit-live-proof-brief <issue>` manager command that prints the exact assertion, the required evidence fields, and the block template, so the agent cannot produce a block that refuses with `evidence reference must resolve to exactly one db-outcome-evidence block` (the #2792 refusal). If the assertion requires a production write (the #2792 check ran a real cleanup), the agent stops and the orchestrator asks Albert once for that exact action (§11). That is an authority gate, not a wait on another session. Add an ordering rule: an outcome at `production_applied` for more than 30 minutes without a live-proof dispatch is a scheduling defect and appears in the Step 4 alarm.
+Add a `--emit-live-proof-brief <issue>` manager command that prints the exact assertion, the required evidence fields, and the block template, so the agent cannot produce a block that refuses with `evidence reference must resolve to exactly one db-outcome-evidence block` (the #2792 refusal). If the assertion requires a production write (the #2792 check ran a real cleanup), the agent stops and the orchestrator obtains an assigned AI reviewer's APPROVE of that exact action (§11; never Albert's approval, owner ruling 2026-09-28). That is an authority gate, not a wait on another session. Add an ordering rule: an outcome at `production_applied` for more than 30 minutes without a live-proof dispatch is a scheduling defect and appears in the Step 4 alarm.
 
 **Verification gate:** attempts to close at PR merge, preview-only proof, missing return address, or missing live assertion refuse; a full fixture produces one readable outcome history; a fixture reaching `production_applied` emits exactly one live-proof dispatch with no cross-session message; the emitted brief's block template passes `--complete-outcome` validation; a malformed or multiple-block evidence reference refuses with a message naming the missing field.
 
@@ -496,7 +496,7 @@ commit.
 - No migration version reuse, applied-file edit, broad include, claim deletion, or unproved target.
 - Preview, merge, and production remain one at a time.
 - Reviewer failure is not a code finding; runner cancellation is not a test result.
-- Self-service live proof does not grant production-write authority: if a live assertion needs a production write, the orchestrator asks Albert once for that exact action, then proceeds without further asks.
+- Self-service live proof does not grant production-write authority: if a live assertion needs a production write, the orchestrator obtains an assigned AI reviewer's APPROVE of that exact action (never Albert's approval — owner ruling 2026-09-28).
 - Stall-case identifiers in §3 and Steps 2–7 (PRs #2944/#2948/#2955/#2958/#2964, runs, SHAs, and line numbers) were true on 2026-09-15. Re-resolve them before relying on any of them.
 - A merge queue supplements rather than replaces exact-head approval and production freeze.
 - No-database-preview means no database rehearsal, not no verification. It never applies to migrations or any change that can affect database structure, behavior, permissions, or data; ambiguity requires preview.

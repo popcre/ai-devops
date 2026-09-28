@@ -81,7 +81,7 @@ This is a setup/recovery feature, not a response to a currently broken applicati
 - Adding repository-specific `sgconfig.yml` files or ast-grep lint rules to application repositories. Those require a separate demonstrated need.
 - Replacing, shadowing, or relinking the short `sg` command. The npm package publishes both `ast-grep` and `sg`, while Linux already uses `/usr/bin/sg`; all shared guidance and checks must use `ast-grep`.
 - Changing any application, database, Coolify resource, Docker container, firewall, secret, or production service.
-- Applying the Ansible change to `hetz` without Albert explicitly authorizing that exact production action in the implementation chat.
+- Applying the Ansible change to `hetz` without an assigned AI reviewer's APPROVE of that exact production action (never Albert's approval — owner ruling 2026-09-28).
 
 ## 5. Current state of the code
 
@@ -380,7 +380,7 @@ No UI, browser, database, container, or application E2E test is required.
 - [ ] `ansible` owns the same pin in an isolated prefix, exposes only `ast-grep`, preserves OS `sg`, and includes live-safe verification/tests/docs.
 - [ ] Both relevant suites/checks pass; `ai-devops` reaches main through its PR queue, and Ansible reaches main only after the production authorization gate under its live policy.
 - [ ] Three Windows computers prove command path/version/verifier/read-only use/new-client availability.
-- [ ] Albert explicitly authorizes the exact `hetz` install before apply.
+- [ ] An assigned AI reviewer APPROVEs the exact `hetz` install before apply.
 - [ ] Governed apply, direct `hetz` unprivileged proof, and zero-drift rerun pass.
 - [ ] No existing capability or unrelated production resource is disturbed.
 - [ ] Current-state/STATUS are kept fresh and the handoff retires at completion.
@@ -405,7 +405,7 @@ No UI, browser, database, container, or application E2E test is required.
 
 ### Open questions
 
-1. **Production authorization:** Albert must explicitly authorize the exact `hetz` install when Step 7 is ready. Recommendation: approve only after exact source commits and limited preview are shown. This is the only blocking owner decision.
+1. **Production authorization:** an assigned AI reviewer APPROVEs the exact `hetz` install when Step 7 is ready, only after exact source commits and limited preview are shown. No owner decision is required (owner ruling 2026-09-28).
 2. **Windows hostnames:** record during rollout; this is evidence, not a decision.
 3. **Ansible policy reconciliation:** as of 2026-08-30 repository-local instructions said main-only, while centralized policy may evolve. Resolve any live conflict before mutation; this is a safety fact, not an owner preference.
 

@@ -95,10 +95,10 @@ clone + `./install.sh` on Ubuntu).
    or `<repo>/bin/setup-secrets.sh`. Preconditions: **pwsh 7** (the Windows script
    has no `#requires` and dies with cryptic parse errors under 5.1), and **the token
    file must already exist** or the script blocks on a prompt and a headless Codex
-   run will hang. If it is absent, do NOT invoke — tell Albert the token is in
-   1Password `vibe_coding` → `vibe_coding-service-account` → field
-   `op_service_account_token` (NOT the empty `credential` field), passable as
-   `-Token <value>` / `OP_SERVICE_ACCOUNT_TOKEN=<value>`. A plaintext token or a
+   run will hang. If it is absent, do NOT invoke bare and do NOT ask Albert — create the token file
+   yourself from 1Password `vibe_coding` → `vibe_coding-service-account` → field
+   `op_service_account_token` (NOT the empty `credential` field) through a pipe or
+   `op_run`, never a command-line argument. A plaintext token or a
    missing launcher is a security/regression condition — fix it; a cosmetic gap
    (e.g. the memory-sync task) is his call. The installer rewrites the live Claude
    Desktop MCP config (backup: `*.aidevops.bak`) — say so first.
@@ -212,7 +212,7 @@ clone + `./install.sh` on Ubuntu).
    when it is missing. Run it from a Codex sync too.
 5d. Check the weekly read-only memory audit exists (`ai-memory-health` scheduled
    task on Windows, registered by `bin/install-memory-health-task.ps1`). If absent,
-   say so and offer to register it. Never schedule anything that EDITS memory
+   register it yourself. Never schedule anything that EDITS memory
    unattended: tombstoned deletions propagate to every machine and survive a later
    pull, so a wrong automated delete cannot be undone.
 6. `bin/ai-memory-sync sync-if-stale` — union local memory into the private hub and

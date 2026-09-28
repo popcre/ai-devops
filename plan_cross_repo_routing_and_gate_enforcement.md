@@ -572,8 +572,8 @@ command proof; protected external actions use fixtures or read-only dry runs.
 No owner decision blocks Phase 0. The schema file location, state directory, and
 shipping integration point are engineering questions to settle with evidence in
 Phase 1. If any repo's current routing files conflict about authority or if a
-local gate appears to require weakening, stop that repository and ask Albert one
-specific question; continue safe work on the other inventory rows.
+local gate appears to require weakening, stop that repository and report it `Blocked —` for an assigned AI reviewer
+(never an approval request to Albert); continue safe work on the other inventory rows.
 
 ## Plan self-audit — 2026-09-08
 
