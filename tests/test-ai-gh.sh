@@ -573,7 +573,7 @@ check 'request report rejects untrusted labels without reflecting them' "[ $rc -
 mkdir "$TMP/report-shapes"
 head -n 1 "$TMP/telemetry-state/measurements/$(date -u +%F).jsonl" > "$TMP/report-valid"
 mkdir "$TMP/report-callers"
-for caller in ai-merge-group-evidence ai-transcript-destination-check ai-workspace-status ai-reviewer-membership-drift; do
+for caller in ai-merge-group-evidence ai-transcript-destination-check ai-workspace-status ai-reviewer-membership-drift ai-devops-doctor ai-devops-installer; do
   jq -c --arg caller "$caller" '.caller=$caller' "$TMP/report-valid" > "$TMP/report-callers/2001-01-01.jsonl"
   "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/report-callers" > "$TMP/report-caller-out" 2> "$TMP/report-caller-err"; rc=$?
   check "the $caller report label remains accepted and scrubbed" "[ $rc -eq 0 ] && jq -e --arg caller '$caller' '.sources[0].caller == \$caller' '$TMP/report-caller-out' && [ ! -s '$TMP/report-caller-err' ]"
@@ -622,10 +622,12 @@ else
 fi
 mkdir "$AI_GH_STATE_DIR/quota-observation.json"
 source "$ROOT/tools/github-requests/telemetry.sh"
-for caller in ai-merge-group-evidence ai-transcript-destination-check ai-workspace-status ai-reviewer-membership-drift; do
+for caller in ai-merge-group-evidence ai-transcript-destination-check ai-workspace-status ai-reviewer-membership-drift ai-devops-doctor ai-devops-installer; do
   AI_GH_CALLER="$caller" gh_measure_init api graphql
   check "the $caller transport keeps its fixed telemetry label" "[ '$GH_MEASURE_CALLER' = '$caller' ]"
 done
+AI_GH_CALLER=ai-devops-doctor gh_measure_init auth status
+check 'networked authentication probe has a fixed operation label' "[ '$GH_MEASURE_OPERATION' = auth.status ]"
 AI_GH_CALLER=$'ai-workspace-status\nprivate' gh_measure_init api graphql
 check 'an injected caller label remains unknown and cannot enter telemetry' "[ '$GH_MEASURE_CALLER' = unknown ]"
 STATE="$AI_GH_STATE_DIR"
