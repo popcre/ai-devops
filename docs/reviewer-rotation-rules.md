@@ -74,7 +74,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
     `tests/test-reviewer-credit.sh`. Rate limits and a bare
     `RESOURCE_EXHAUSTED` are not credit failures.
 
-11. **StepFun is Ubuntu-only and outside the allocator.** Owner instruction,
+11. **StepFun is Ubuntu-only and in the rotation on Linux machines.** Owner instruction,
     2026-09-25: add StepFun Step 5 as a reviewer on Ubuntu only (StepCode is
     not yet available on Windows) and let it write, implement, and execute
     code. `bin/ai-stepfun` refuses to run off Linux and preflight reports
@@ -92,6 +92,8 @@ allocator but stayed registered here, and a session spent an hour trying it.
     exposure: the network is shared (the StepFun API needs it), so an
     implement run can reach loopback services and the internet without any
     of the caller's credentials.
-    `ai-stepfun` refuses to run without bubblewrap. The shared-db allocator has no platform field,
-    so StepFun is listed in `config/reviewer-membership-scope.json` and is
-    never assigned by the allocator.
+    `ai-stepfun` refuses to run without bubblewrap.
+    Owner instruction, 2026-09-25: "put stepfun into the reviewer rotation".
+    It is the shared-db allocator row `stepfun-step-5-preview`. The allocator
+    has no platform field; on Windows `ai-review-preflight usable` reports
+    stepfun `unsupported-platform`, so a Windows machine never draws it.

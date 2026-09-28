@@ -40,7 +40,7 @@
     },
     "stepfun": {
       "registry_state": "registered",
-      "reason": "StepFun Step 5 (step/step-5-preview through the StepCode CLI, bin/ai-stepfun). Added by owner instruction on 2026-09-25 as a reviewer on Ubuntu/Linux only: StepCode is not yet available on Windows, so ai-review-preflight reports it unsupported-platform there. Reviews outside the shared-db allocator rotation (listed in the membership scope file); read-only tools read/grep/find/ls in a disposable review copy."
+      "reason": "StepFun Step 5 (step/step-5-preview through the StepCode CLI, bin/ai-stepfun). Added by owner instruction on 2026-09-25 as a reviewer on Ubuntu/Linux only: StepCode is not yet available on Windows, so ai-review-preflight reports it unsupported-platform there. In the shared-db allocator rotation since 2026-09-25 (owner instruction \"put stepfun into the reviewer rotation\"; shared-db row stepfun-step-5-preview, popcre/shared-db#3554); a Windows machine never draws it because its preflight is unusable there; read-only tools read/grep/find/ls in a disposable review copy."
     }
   }
 }
