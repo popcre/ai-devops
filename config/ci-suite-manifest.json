@@ -72,6 +72,7 @@
     "test-linux-install-authorization.sh": 10,
     "test-markdown-links.sh": 1,
     "test-mcp-launch-lock.sh": 1,
+    "test-mcp-session-guard.sh": 8,
     "test-muse-opencode-contract.sh": 1,
     "test-orphan-sweep-age.sh": 29,
     "test-pop-business-rules-skill.sh": 1,
@@ -179,6 +180,7 @@
     "test-linux-offline-shards.sh",
     "test-markdown-links.sh",
     "test-mcp-launch-lock.sh",
+    "test-mcp-session-guard.sh",
     "test-muse-opencode-contract.sh",
     "test-orphan-sweep-age.sh",
     "test-pop-business-rules-skill.sh",
@@ -236,6 +238,7 @@
     "test-installer-parity.sh",
     "test-line-endings.sh",
     "test-mcp-launch-lock.sh",
+    "test-mcp-session-guard.sh",
     "test-reviewer-credit.sh",
     "test-windows-scripts.sh",
     "test-worktree-reap-tool.sh"
@@ -272,6 +275,7 @@
     "test-installer-parity.sh",
     "test-line-endings.sh",
     "test-mcp-launch-lock.sh",
+    "test-mcp-session-guard.sh",
     "test-reviewer-credit.sh",
     "test-windows-scripts.sh",
     "test-worktree-reap-tool.sh"
@@ -320,7 +324,8 @@
       "test-ai-memory-sync.sh",
       "test-ai-muse.sh",
       "test-ai-zcode.sh",
-      "test-mcp-launch-lock.sh"
+      "test-mcp-launch-lock.sh",
+      "test-mcp-session-guard.sh"
     ],
     [
       "test-ai-gemini-usage.sh",
@@ -419,6 +424,12 @@
       "bin/ai-memory-index-hook.cmd": ["test-ai-memory-index-hook.sh"],
       "bin/ai-process-supervisor": ["test-mcp-launch-lock.sh", "test-ai-review-sandbox.sh"],
       "bin/ai-process-supervisor.cmd": ["test-mcp-launch-lock.sh", "test-ai-review-sandbox.sh"],
+      "bin/mcp-session-guard": ["test-mcp-session-guard.sh", "test-mcp-launch-lock.sh", "test-bin-cmd-launchers.sh"],
+      "bin/mcp-session-guard.cmd": ["test-mcp-session-guard.sh", "test-mcp-launch-lock.sh", "test-bin-cmd-launchers.sh"],
+      "bin/mcp-session-guard.mjs": ["test-mcp-session-guard.sh"],
+      "bin/mcp-secret-launch.ps1": ["test-mcp-session-guard.sh", "test-mcp-launch-lock.sh"],
+      "tests/test-mcp-session-guard.sh": ["test-mcp-session-guard.sh"],
+      "tests/proof-mcp-session-reap.sh": ["test-mcp-session-guard.sh"],
       "bin/ai-workspace-status": ["test-repository-coverage.sh"],
       "bin/ai-workspace-status.cmd": ["test-repository-coverage.sh"],
       "bin/ai-git-identity": ["test-ai-repo-identity.sh"],

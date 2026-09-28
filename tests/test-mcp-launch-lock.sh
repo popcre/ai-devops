@@ -20,7 +20,9 @@ grep -Fq 'TOK="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op read' "$sour
   fail "remote MCP launcher passes the refresh lock to 1Password"
 grep -Fq 'unset _aidev_names _aidev_exports' "$source_file" ||
   fail "MCP launcher leaves temporary secret-resolution variables behind"
-grep -Fq 'exec "\$@"' "$source_file" ||
-  fail "MCP launcher does not start the server after releasing the lock"
+grep -Fq 'exec node "$GUARD_JS"' "$source_file" ||
+  fail "MCP launcher does not start the server under the session guard after releasing the lock"
+grep -Fq 'mcp-session-guard.mjs' "$source_file" ||
+  fail "MCP launcher generation never installs the session guard"
 
 echo "PASS: Codex skill header and Linux MCP lock lifetime"

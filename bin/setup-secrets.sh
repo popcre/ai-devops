@@ -65,6 +65,10 @@ MCP_ENV="$CFG_DIR/mcp.env"
 SHELLRC="$CFG_DIR/shellrc"
 LAUNCH_SH="$CFG_DIR/mcp-launch.sh"
 REMOTE_SH="$CFG_DIR/mcp-remote-launch.sh"
+# Session guard: one Node supervisor so every MCP helper dies with its session
+# (stdin EOF, parent death, process-group kill). See bin/mcp-session-guard.mjs.
+GUARD_SRC="$REPO_ROOT/bin/mcp-session-guard.mjs"
+GUARD_JS="$CFG_DIR/mcp-session-guard.mjs"
 EXAMPLE="$REPO_ROOT/config/mcp.env.example"
 VAULT="vibe_coding"
 # Claude Code reads local MCP servers from ~/.claude.json ONLY. An "mcpServers"
@@ -263,8 +267,12 @@ ensure_include "$HOME/.profile"
 info "MCP launchers -> $LAUNCH_SH, $REMOTE_SH"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "[dry-run] would write $LAUNCH_SH and $REMOTE_SH"
+  echo "[dry-run] would write $LAUNCH_SH, $REMOTE_SH and copy $GUARD_JS"
 else
+  [ -f "$GUARD_SRC" ] || { warn "Missing $GUARD_SRC; cannot install the session guard"; exit 1; }
+  cp "$GUARD_SRC" "$GUARD_JS"
+  chmod 755 "$GUARD_JS"
+  ok "Installed MCP session guard -> $GUARD_JS"
   cat > "$LAUNCH_SH" <<EOF
 #!/usr/bin/env sh
 # [ai-devops] managed by setup-secrets.sh — do not edit by hand.
@@ -277,7 +285,7 @@ if [ -s "$TOKEN_FILE" ]; then
   export OP_SERVICE_ACCOUNT_TOKEN
 fi
 if [ -n "\${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "\${TRIGGER_ACCESS_TOKEN:-}" ]; then
-  exec "\$@"
+  exec node "$GUARD_JS" "\$@"
 fi
 _aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
 _aidev_exports="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
@@ -292,7 +300,9 @@ for name in sys.argv[1:]:
   exit 1
 }
 unset _aidev_names _aidev_exports
-exec "\$@"
+# Start the server under the session guard, never bare: npm/npx does not
+# forward stdin EOF, so a client death (or OOM kill) left helpers orphaned.
+exec node "$GUARD_JS" "\$@"
 EOF
   chmod 755 "$LAUNCH_SH"
   ok "Wrote $LAUNCH_SH"
@@ -322,7 +332,7 @@ esac
   echo "ai-devops: \$REF resolved EMPTY — not starting \$URL" >&2
   exit 1
 }
-exec npx -y mcp-remote@0.1.38 "\$URL" --header "Authorization: Bearer \$TOK" "\$@"
+exec node "$GUARD_JS" npx -y mcp-remote@0.1.38 "\$URL" --header "Authorization: Bearer \$TOK" "\$@"
 EOF
   chmod 755 "$REMOTE_SH"
   ok "Wrote $REMOTE_SH"
@@ -364,6 +374,8 @@ else
 import json, os, sys
 
 path, launch, remote, supa_ref, codex = sys.argv[1:6]
+# Session guard installed beside the launchers (see the bash section above).
+guard_js = os.path.join(os.path.dirname(launch), "mcp-session-guard.mjs")
 
 cfg = {}
 if os.path.exists(path):
@@ -402,9 +414,11 @@ servers = {
     # flow, so it must NOT go through the remote launcher (that would force a
     # header). vercel is NOT global: it is Oracle-only (setup-machine.ps1
     # $McpProjectScope) and native HTTP, never behind mcp-remote; see below.
-    "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp@0.0.79"]},
-    "ag-grid":    {"command": "npx", "args": ["-y", "ag-mcp"]},
-    "railway":    {"command": "npx", "args": ["-y", "mcp-remote@0.1.38",
+    # Every server still runs under the session guard so helpers cannot outlive
+    # the client (same contract as mcp-launch.sh).
+    "playwright": {"command": "node", "args": [guard_js, "npx", "-y", "@playwright/mcp@0.0.79"]},
+    "ag-grid":    {"command": "node", "args": [guard_js, "npx", "-y", "ag-mcp"]},
+    "railway":    {"command": "node", "args": [guard_js, "npx", "-y", "mcp-remote@0.1.38",
                                               "https://mcp.railway.com"]},
 }
 
@@ -412,8 +426,8 @@ servers = {
 # token. Absolute path, not "codex", so it cannot resolve to a different binary.
 if codex:
     servers["codex-cli"] = {
-        "command": codex,
-        "args": ["mcp-server"],
+        "command": "node",
+        "args": [guard_js, codex, "mcp-server"],
         "env": {"MCP_TOOL_TIMEOUT": "3600000"},
     }
 

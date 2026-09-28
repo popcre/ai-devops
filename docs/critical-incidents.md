@@ -523,3 +523,32 @@ root having been emptied. The fixture skill's `description: test` and the
 
 **Related:** [PR #874](https://github.com/popcre/ai-devops/pull/874) (this
 write-up and fix).
+
+
+## 2026-09-28 — edge-dev3 OOM: leaked MCP helpers ate 18.5 GB
+
+**Impact:** kernel OOM killer killed `claude-desktop` at 6:18 PM EDT on
+edge-dev3 (Ubuntu, 64 GB). The dump showed ~2,098 node processes (~18.5 GB
+RSS) after about ten hours of sessions.
+
+**Symptom:** node process count only grows across Claude/Codex sessions and
+reviewer runs; it does not return to baseline when sessions end.
+
+**Root cause:** every MCP helper (`npx`/`npm exec` → node) was started with no
+session lifetime. npm does not forward stdin EOF to the real server, so a
+client death (including OOM SIGKILL) left the npx→npm→node tree orphaned.
+`scripts/mcp-supabase-launch.mjs` (shared-db) only signalled its direct child;
+`mcp-launch.sh` was `exec "$@"` with no reap; bare-`npx` servers (playwright,
+ag-grid, railway, context7) had no wrapper at all. Global-scope servers
+multiply per session, so leaks compound.
+
+**Fix:** `bin/mcp-session-guard.mjs` owns the helper's stdin, places the child
+in a process group (POSIX) or a killable tree (Windows), and shuts down on
+stdin EOF, parent death, or signal — then always reaps the tree. Wired through
+`mcp-launch.sh` / `mcp-remote-launch.sh` (setup-secrets.sh), the Windows
+secret launcher, and the server catalogs. No MCP server was disabled.
+
+**Prevention:** `tests/test-mcp-session-guard.sh` proves stdin-EOF and session
+SIGKILL reap helpers and grandchildren; `tests/proof-mcp-session-reap.sh`
+starts/ends three sessions and requires the node count to return to baseline.
+Never launch an MCP helper outside the guard.

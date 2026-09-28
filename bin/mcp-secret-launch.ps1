@@ -72,6 +72,17 @@ if ($Mode -eq 'Capture') { Write-EncryptedCache; exit 0 }
 Ensure-Cache
 Import-Cache
 
+# Session guard: every MCP helper is started under bin/mcp-session-guard.mjs so
+# it dies with the session (stdin EOF, parent death, process-group / job kill).
+# Without this, npx/node helpers outlived Claude sessions and piled up until the
+# kernel OOM-killed claude-desktop (edge-dev3, 2026-09-28).
+$guardJs = Join-Path $cfgDir 'mcp-session-guard.mjs'
+if (-not (Test-Path -LiteralPath $guardJs)) {
+  $guardJs = Join-Path (Split-Path -Parent $PSScriptRoot) 'bin\mcp-session-guard.mjs'
+}
+if (-not (Test-Path -LiteralPath $guardJs)) { throw "MCP session guard is missing: $guardJs" }
+$nodeCmd = Get-Command node -ErrorAction Stop
+
 # The 1Password MCP authenticates with OP_SERVICE_ACCOUNT_TOKEN itself, but that
 # variable is NOT in mcp.env and therefore never lands in the DPAPI cache. Ensure-Cache
 # only sets it on the *refresh* path (stale cache), so whether the 1Password MCP got a
@@ -100,11 +111,11 @@ if ($Mode -eq 'Remote') {
   $token = [Environment]::GetEnvironmentVariable($name, 'Process')
   $remoteCommand = Join-Path $cfgDir 'mcp-runtime\node_modules\.bin\mcp-remote.cmd'
   if (-not (Test-Path -LiteralPath $remoteCommand)) { throw "Pinned MCP remote command is missing: $remoteCommand" }
-  & $remoteCommand $Url --header "Authorization: Bearer $token" @CommandArgs
+  & $nodeCmd.Source $guardJs $remoteCommand $Url --header "Authorization: Bearer $token" @CommandArgs
 } else {
   if (-not $CommandArgs -or $CommandArgs.Count -eq 0) { throw 'No MCP command was supplied.' }
   $command = $CommandArgs[0]
   $args = if ($CommandArgs.Count -gt 1) { $CommandArgs[1..($CommandArgs.Count - 1)] } else { @() }
-  & $command @args
+  & $nodeCmd.Source $guardJs $command @args
 }
 exit $LASTEXITCODE

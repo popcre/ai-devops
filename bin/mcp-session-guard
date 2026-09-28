@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# mcp-session-guard — PATH entry for bin/mcp-session-guard.mjs.
+# Kept as a bash wrapper so Windows .cmd launchers and Linux PATH both find one
+# name. The real logic is the Node supervisor (same file base name + .mjs).
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REAL_DIR="$SCRIPT_DIR"
+if command -v readlink >/dev/null 2>&1; then
+  _src="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$_src" ] || REAL_DIR="$(cd "$(dirname "$_src")" && pwd)"
+fi
+NODE_BIN="${MCP_SESSION_GUARD_NODE:-node}"
+exec "$NODE_BIN" "$REAL_DIR/mcp-session-guard.mjs" "$@"
