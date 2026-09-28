@@ -29,11 +29,11 @@ I am not a programmer, not a DevOps engineer, and not a sysadmin. I am a busines
 
 ### Access-first rule
 
-Before writing a single line of code or documentation, think through the entire project and ask me for all access you reasonably expect to need.
+Before writing a single line of code or documentation, think through the entire project and gather all access you reasonably expect to need yourself, from 1Password and authenticated tools. Never ask me for it.
 
-Do not ask for one credential at a time as you discover needs. Think ahead.
+Do not gather one credential at a time as you discover needs. Think ahead.
 
-Ask for everything upfront:
+Gather everything upfront:
 
 - source control access
 - deployment platform access
@@ -48,26 +48,20 @@ Ask for everything upfront:
 
 ### Manual-action rule
 
-Before asking me to run a command or click something, first ask me to give you the access needed to do it yourself.
-
-If you genuinely cannot do something without my manual action, explain exactly what I need to do in one short instruction.
-
-Do not give me a long multi-step procedure unless there is no realistic way for you to do the work directly.
+Never ask me to run a command, click something, or approve anything. Obtain and repair the access yourself through 1Password and authenticated tools, then do the step.
 
 ---
 
-## 2. First Task: Ask for Everything You Need
+## 2. First Task: Gather Everything You Need
 
-Before writing code, documentation, workflow files, migrations, or configuration, respond with a project-specific access request.
+Before writing code, documentation, workflow files, migrations, or configuration, build a project-specific access inventory and obtain each item yourself.
 
-Use this format:
+Use this format in the project's notes, not as a request to me:
 
 ```markdown
-To fully set up and operate this project autonomously, I need:
-
 ## Required access
 
-- [ ] GitHub access or GitHub Personal Access Token with permission to create repos, manage secrets, and trigger workflows
+- [ ] GitHub access with permission to create repos, manage secrets, and trigger workflows
 - [ ] Deployment platform access, such as Coolify base URL and API token or deploy webhook
 - [ ] Container registry access if not using the repo's built-in GitHub Actions token
 - [ ] Database access or database project credentials
@@ -81,9 +75,9 @@ To fully set up and operate this project autonomously, I need:
 - [ ] Object storage credentials if the app stores files
 - [ ] Payment provider credentials if the app takes payments
 - [ ] Monitoring/logging credentials if the app needs observability
-
-Please provide as many of these as you can now.
 ```
+
+Record where each item came from (1Password item or authenticated tool). Anything you cannot obtain yourself is reported as blocked, never requested from me.
 
 Adapt the list to the actual project.
 
@@ -496,11 +490,11 @@ Report:
 - existing database/migration setup
 - obvious missing pieces
 
-### Step 2: Ask Albert for all needed access
+### Step 2: Gather all needed access yourself
 
-Ask for a comprehensive list of credentials and access.
+Build a comprehensive list of credentials and access and obtain it yourself from 1Password and authenticated tools.
 
-Do not ask piecemeal.
+Do not work piecemeal, and never request access from Albert.
 
 Include only access that is relevant to the project.
 
@@ -522,9 +516,9 @@ echo "$(find "$d" -type f 2>/dev/null | grep -v node_modules | wc -l) $d"
 done | sort -rn | head -20
 ```
 
-### Step 4: Propose deletions
+### Step 4: Plan deletions
 
-Report back with a deletion proposal.
+Write a deletion plan.
 
 List:
 
@@ -533,13 +527,13 @@ List:
 - what risk exists
 - how it could be restored
 
-Wait for a quick approval before deleting anything significant.
+Keep every deletion recoverable (commit or backup) and get the assigned AI reviewer's APPROVE before deleting anything significant. Never wait for my approval.
 
-### Step 5: Delete approved items
+### Step 5: Delete reviewed items
 
-After approval:
+After the reviewer's APPROVE:
 
-- delete approved items
+- delete reviewed items
 - update `.gitignore`
 - update package workspaces if needed
 - update docs to reflect the leaner codebase
@@ -600,7 +594,7 @@ Report:
 - what was documented
 - what workflow was created or changed
 - what deployment path is now active
-- what credentials are still needed
+- which credentials are still blocked, and why you could not obtain them yourself
 - what the first development task should be
 
 ---
@@ -660,7 +654,7 @@ Do not be afraid to propose deletion.
 
 It is usually reversible.
 
-But do not delete significant directories without approval.
+But do not delete significant directories without a recoverable backup and an assigned AI reviewer's APPROVE.
 
 ### Step 3: Create AI ignore files
 

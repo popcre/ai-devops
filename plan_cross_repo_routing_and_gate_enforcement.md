@@ -184,7 +184,7 @@ files and sizes, policy version, special gates, and last verified date.
 | Classify only the committed PR diff | Misses scope drift before commit and misses untracked/staged/unstaged work |
 | Trust file extensions alone | Operational Markdown, migration ledgers, policies, and generated artifacts can require stronger gates |
 | Automatically downgrade a gate to save time | Central defaults cannot override a stronger repository rule or explicit owner request |
-| Require Albert to approve every reclassification | Recreates approval loops for ordinary scoped work; only material scope/authority decisions need him |
+| Require Albert to approve every reclassification | Recreates approval loops for ordinary scoped work; only material business-scope decisions need him |
 | Stop after `ai-devops` implementation | Leaves other repositories dependent on copied prose and does not satisfy repository-wide coverage |
 | Use elapsed-time alarms as the primary control | Reports waste after it occurs instead of preventing it |
 
@@ -203,7 +203,8 @@ files and sizes, policy version, special gates, and last verified date.
   unstaged, untracked, deleted, renamed, and submodule changes.
 - A mismatch stops before the expensive action and prints the exact files and
   class escalation. Routine in-scope escalation can be acknowledged with a
-  reason; missing authority or a materially different outcome stops for Albert.
+  reason; missing authority or a materially different outcome stops as `Blocked —` for an
+  assigned AI reviewer (never an approval request to Albert).
 - Explicit owner requests for a reviewer or full check remain valid, but the
   override and reason are recorded rather than inferred.
 - Database, production, infrastructure, privacy, reviewer-safety, visual UI,
@@ -406,13 +407,13 @@ private repositories intentionally metadata-only. Do not begin Phase 5 without
 a separate instruction.
 
 **Prior release update, 2026-09-10:** 13 of 17 repository policies were landed.
-`u2giants/ansible#14` merged as `5e66e72c` after Albert's exact current-chat
-authorization for its serialized Phase 1 apply to the `hetzner` production
+`u2giants/ansible#14` merged as `5e66e72c` after an exact authorization (recorded 2026-09, before the 2026-09-28 ruling) for its serialized Phase 1 apply to the `hetzner` production
 target. Its production run `34502571521` completed successfully (`ok=59`,
 `changed=1`, `unreachable=0`, `failed=0`). The four remaining green candidates
 are deliberately unmerged: `u2giants/popcrm-web#8`, `u2giants/poppim-web#6`,
 `u2giants/popdam3#122`, and `u2giants/backrest-wiz#7`. Each merge starts
-existing production automation and requires explicit current-chat authorization.
+existing production automation and requires an assigned AI reviewer's APPROVE
+of that exact merge (never Albert's approval — owner ruling 2026-09-28).
 Issue #335 was reopened after its premature closure. Backrest Wiz retains an
 unresolved qualified exact-head review proof after bounded provider failures.
 Do not update the 17-row coverage gate or start Phase 5 until all four land and
@@ -438,7 +439,8 @@ archives or licensed source rows to perform the routing audit.
 #### Step 4.3 — infrastructure repositories
 
 Roll out to `popcre/infrastructure` and `u2giants/ansible`. Production mutation
-classes must remain denied without exact current-chat resource/action authority.
+classes must remain denied without an assigned AI reviewer's APPROVE of the exact
+resource/action (never Albert's approval — owner ruling 2026-09-28).
 
 **Gate for Steps 4.1-4.3:** every coverage-manifest row records policy version,
 landed commit/PR, routing before/after, trigger-eval result, local verification,
@@ -572,8 +574,8 @@ command proof; protected external actions use fixtures or read-only dry runs.
 No owner decision blocks Phase 0. The schema file location, state directory, and
 shipping integration point are engineering questions to settle with evidence in
 Phase 1. If any repo's current routing files conflict about authority or if a
-local gate appears to require weakening, stop that repository and ask Albert one
-specific question; continue safe work on the other inventory rows.
+local gate appears to require weakening, stop that repository and report it `Blocked —` for an assigned AI reviewer
+(never an approval request to Albert); continue safe work on the other inventory rows.
 
 ## Plan self-audit — 2026-09-08
 

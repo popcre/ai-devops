@@ -509,8 +509,9 @@ the full run fits, or at least every suite that mentions `blocker-watch`
 
 ### 12. Access and environment
 
-- `gh` is authenticated on edge-dev. The script calls `bin/ai-gh` (a throttling
-  wrapper) unless `AI_BLOCKER_WATCH_GH` overrides it, and tests override it.
+- Historical note: `gh` was authenticated on edge-dev and tests once used
+  `AI_BLOCKER_WATCH_GH` to replace `bin/ai-gh`. P3/#931 retires that production
+  override; only explicit test mode accepts `AI_BLOCKER_WATCH_TEST_GH`.
 - Shells: run Bash suites in Git Bash, and PowerShell suites in `pwsh`.
 - `jq` is required and is on PATH.
 - No test logins, URLs, or 1Password items are needed.

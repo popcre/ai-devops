@@ -518,7 +518,9 @@ check_provider() { # PROVIDER REPO LIVE BASE
   wrapper="$(provider_wrapper "$provider")"; [ -x "$wrapper" ] || die "provider wrapper is not executable: $wrapper"
   set +e
   if [ "$provider" = muse ]; then
-    if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+    # A real Muse live turn outlasts the 10s check budget; ai-muse doctor --live
+    # enforces its own 90s turn limit, so give the whole call room (#842).
+    if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     else out="$(AI_MUSE_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
   elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
     if [ "$provider" = gemini ]; then out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?

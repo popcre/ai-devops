@@ -63,6 +63,22 @@ print_summary() {
   return 0
 }
 
+publish_stage_report() {
+  local report_dir="$HOME/.local/state/ai-devops/task-gates/install-stage-reports" tmp
+  [ ! -L "$report_dir" ] || return 1
+  mkdir -p -m 700 "$report_dir" && chmod 700 "$report_dir" || return 1
+  STAGE_REPORT="$report_dir/$target_head.tsv"
+  [ ! -L "$STAGE_REPORT" ] || return 1
+  [ ! -e "$STAGE_REPORT" ] || [ -f "$STAGE_REPORT" ] || return 1
+  tmp="$(mktemp "$report_dir/.stage.$target_head.XXXXXXXX")" || return 1
+  chmod 600 "$tmp" || { rm -f -- "$tmp"; return 1; }
+  if ! printf '%b\n' "${stage_results[@]}" > "$tmp" || ! mv -f -- "$tmp" "$STAGE_REPORT"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  [ "$(stat -c %a "$STAGE_REPORT")" = 600 ]
+}
+
 require_commands() {
   local missing=() command_name
   for command_name in "$@"; do
@@ -96,16 +112,84 @@ if [ "${1:-}" = "--test-stage-runner" ]; then
 fi
 
 REQUIRE_SECRETS=auto
-for arg in "$@"; do
-  case "$arg" in
-    --require-secrets) REQUIRE_SECRETS=yes ;;
-    --skip-secrets) REQUIRE_SECRETS=no ;;
+AUTHORIZATION_TEST_ONLY=0
+owner_request=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --require-secrets) REQUIRE_SECRETS=yes; shift ;;
+    --skip-secrets) REQUIRE_SECRETS=no; shift ;;
+    --owner-request)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || { warn '--owner-request needs a reason'; exit 2; }
+      owner_request="$2"; shift 2 ;;
+    --test-authorization-only) AUTHORIZATION_TEST_ONLY=1; shift ;;
     -h|--help)
-      echo "usage: ./install.sh [--require-secrets|--skip-secrets]"
+      echo "usage: ./install.sh [--require-secrets|--skip-secrets] [--owner-request TEXT]"
       exit 0 ;;
-    *) echo "Unknown option: $arg" >&2; exit 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+if [ "$AUTHORIZATION_TEST_ONLY" -eq 1 ]; then
+  fixture_root="$(realpath -e "$REPO_ROOT")" || exit 2
+  fixture_origin="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null)" || exit 2
+  case "$fixture_root" in /tmp/*) ;; *) warn 'authorization test needs a disposable /tmp checkout'; exit 2 ;; esac
+  case "$fixture_origin" in file:///tmp/*|/tmp/*) ;; *) warn 'authorization test needs a local /tmp origin'; exit 2 ;; esac
+fi
+install_launcher="$BIN_TARGET/ai-task-gates"
+if [ "$AUTHORIZATION_TEST_ONLY" -eq 1 ] && [ "${AI_TASK_GATES_INSTALL_TEST_MODE:-0}" = 1 ]; then
+  test_root="$(realpath -e "${AI_TASK_GATES_TEST_ROOT:-/nonexistent}")" || exit 2
+  case "$fixture_root" in "$test_root"/*) ;; *) warn 'authorization fixture root differs from checkout'; exit 2 ;; esac
+  install_launcher="$test_root/bin/ai-task-gates"
+fi
+
+# A direct installer and an updater share one checkout lock. An updater passes
+# its open descriptor to its direct child; neither an environment flag nor a
+# stale lock-file name alone is accepted as ownership.
+install_lock_dir="$HOME/.local/state/ai-devops/task-gates"
+install_lock_name="install-$(printf '%s' "$REPO_ROOT" | sha256sum | cut -c1-16).lock"
+install_original_umask="$(umask)"
+umask 077
+mkdir -p "$install_lock_dir" || exit 1
+install_lock_file="$install_lock_dir/$install_lock_name"
+if [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" = 9 ]; then
+  [ "${AI_DEVOPS_INSTALL_LOCK_PARENT:-}" = "$PPID" ] &&
+    [ "$(readlink /proc/$$/fd/9 2>/dev/null)" = "$install_lock_file" ] &&
+    flock -n 9 || { warn 'installer did not inherit the updater checkout lock'; exit 1; }
+else
+  exec 9>"$install_lock_file" || exit 1
+  flock -n 9 || { warn 'another installation is active for this checkout'; exit 1; }
+fi
+umask "$install_original_umask"
+if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" = 1 ] &&
+   [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" != 9 ]; then
+  warn 'only the lock-owning updater may defer finalization'
+  exit 1
+fi
+
+# Resume verifies the installed baseline and pending authorization before the
+# first dependency, protected config, symlink, or per-user installation stage.
+target_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || exit 1
+issued_auth="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}/install-authorizations/$target_head.json"
+if [ -f "$issued_auth" ]; then
+  # Direct first installs and exact-commit migrations begin with issued
+  # authority. Reserve it from the already checked-out target before resume.
+  (cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" install-verify --phase preflight \
+    --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
+    --installed-launcher "$install_launcher" --caller-pinned) || {
+      warn 'direct installation preflight refused before any machine changes'; exit 1;
+    }
+fi
+resume_args=(install-verify --phase resume --target-head "$target_head"
+  --installed-checkout "$REPO_ROOT" --installed-launcher "$install_launcher")
+[ -z "$owner_request" ] || resume_args+=(--owner-request "$owner_request")
+resume_output="$(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" "${resume_args[@]}")" || {
+  warn 'installation authorization refused before any machine changes'; exit 1;
+}
+printf '%s\n' "$resume_output"
+if [ "$resume_output" = "AI_DEVOPS_INSTALL_RECOVERED=$target_head" ]; then
+  info "Prior installation of $target_head was already complete; finalization cleanup recovered"
+  exit 0
+fi
+[ "$AUTHORIZATION_TEST_ONLY" -eq 0 ] || exit 0
 
 # Pick a sudo prefix only if we are not already root.
 SUDO=""
@@ -116,6 +200,267 @@ if [ "$(id -u)" -ne 0 ]; then
     warn "Not root and sudo not found; system-path steps may fail."
   fi
 fi
+
+# Preserve versioned protected files before the first installer stage. The
+# backup remains owner-protected for recovery; no value enters output.
+backup_protected_config() {
+  local f
+  BACKUP_DIR=""
+  $SUDO install -d -m 700 /var/backups/ai-devops || return 1
+  BACKUP_DIR="$($SUDO mktemp -d /var/backups/ai-devops/install.XXXXXXXX)" || return 1
+  for f in models.env server.env config-state.json install-manifest.tsv; do
+    [ ! -L "$ETC_DIR/$f" ] || { warn "refusing symlinked protected config: $f"; return 1; }
+    if [ -e "$ETC_DIR/$f" ]; then
+      [ -f "$ETC_DIR/$f" ] || return 1
+      $SUDO cp -p "$ETC_DIR/$f" "$BACKUP_DIR/$f" || return 1
+      [ "$($SUDO sha256sum "$ETC_DIR/$f" | cut -d' ' -f1)" = \
+        "$($SUDO sha256sum "$BACKUP_DIR/$f" | cut -d' ' -f1)" ] || return 1
+    else
+      $SUDO touch "$BACKUP_DIR/absent.$f" || return 1
+    fi
+  done
+  $SUDO chmod 700 "$BACKUP_DIR"
+}
+restore_protected_config() {
+  local f failed=0
+  [ -n "${BACKUP_DIR:-}" ] && $SUDO test -d "$BACKUP_DIR" || return 1
+  for f in models.env server.env config-state.json install-manifest.tsv; do
+    [ ! -L "$ETC_DIR/$f" ] || { failed=1; continue; }
+    if $SUDO test -f "$BACKUP_DIR/$f"; then
+      $SUDO cp -p "$BACKUP_DIR/$f" "$ETC_DIR/$f" || failed=1
+    elif $SUDO test -f "$BACKUP_DIR/absent.$f"; then
+      $SUDO rm -f -- "$ETC_DIR/$f" || failed=1
+    else
+      failed=1
+    fi
+  done
+  [ "$failed" -eq 0 ]
+}
+backup_install_routing() {
+  local dest src name target tmp
+  local -A seen=()
+  tmp="$(mktemp)" || return 1
+  chmod 600 "$tmp" || return 1
+  for src in "$REPO_ROOT"/bin/*; do
+    [ -f "$src" ] && [ -x "$src" ] || continue
+    name="$(basename "$src")"; dest="$BIN_TARGET/$name"; seen["$dest"]=1
+    case "$dest" in *$'\t'*|*$'\n'*) return 1 ;; esac
+    if [ -L "$dest" ]; then
+      target="$(readlink "$dest")" || return 1
+      case "$target" in *$'\t'*|*$'\n'*) return 1 ;; esac
+      printf '%s\tsymlink\t%s\n' "$dest" "$target" >> "$tmp"
+    elif [ -e "$dest" ]; then
+      printf '%s\tregular\t-\n' "$dest" >> "$tmp"
+    else
+      printf '%s\tabsent\t-\n' "$dest" >> "$tmp"
+    fi
+  done
+  # The installer also removes stale links into its bin tree. Capture those.
+  for dest in "$BIN_TARGET"/*; do
+    [ -L "$dest" ] && [ -z "${seen[$dest]:-}" ] || continue
+    target="$(readlink "$dest")" || return 1
+    case "$target" in
+      "$REPO_ROOT"/bin/*)
+        case "$dest$target" in *$'\t'*|*$'\n'*) return 1 ;; esac
+        printf '%s\tsymlink\t%s\n' "$dest" "$target" >> "$tmp" ;;
+    esac
+  done
+  $SUDO install -m 600 "$tmp" "$BACKUP_DIR/symlinks.tsv" || return 1
+  rm -f -- "$tmp"
+}
+restore_install_routing() {
+  local dest kind prior current failed=0 tmp
+  $SUDO test -f "$BACKUP_DIR/symlinks.tsv" || return 1
+  tmp="$(mktemp)" || return 1
+  chmod 600 "$tmp" || return 1
+  $SUDO cat "$BACKUP_DIR/symlinks.tsv" > "$tmp" || { rm -f -- "$tmp"; return 1; }
+  while IFS=$'\t' read -r dest kind prior; do
+    case "$dest" in "$BIN_TARGET"/*) ;; *) failed=1; continue ;; esac
+    if [ -L "$dest" ]; then
+      current="$(readlink "$dest")" || { failed=1; continue; }
+      case "$current" in "$REPO_ROOT"/bin/*) ;; "$prior") ;; *) failed=1; continue ;; esac
+    elif [ -e "$dest" ]; then
+      [ "$kind" = regular ] || failed=1
+      continue
+    fi
+    case "$kind" in
+      symlink) $SUDO ln -sfn -- "$prior" "$dest" || failed=1 ;;
+      absent) [ ! -L "$dest" ] || $SUDO rm -f -- "$dest" || failed=1 ;;
+      regular) { [ -e "$dest" ] && [ ! -L "$dest" ]; } || failed=1 ;;
+      *) failed=1 ;;
+    esac
+  done < "$tmp"
+  rm -f -- "$tmp"
+  [ "$failed" -eq 0 ]
+}
+backup_install_crontab() {
+  local tmp err
+  tmp="$(mktemp)" || return 1
+  err="$(mktemp)" || return 1
+  if crontab -l > "$tmp" 2>"$err"; then
+    $SUDO install -m 600 "$tmp" "$BACKUP_DIR/crontab" || return 1
+  elif grep -qi '^no crontab for ' "$err"; then
+    $SUDO touch "$BACKUP_DIR/crontab.absent" || return 1
+  else
+    rm -f -- "$tmp" "$err"
+    return 1
+  fi
+  rm -f -- "$tmp" "$err"
+}
+restore_install_crontab() {
+  local tmp
+  strip_managed_cron() {
+    awk -v bw="$REPO_ROOT/bin/ai-blocker-watch" \
+        -v reap="$REPO_ROOT/bin/ai-reap-shared-db-worktrees" '
+      index($0,"# ai-devops blocker-watch (managed by ai-blocker-watch schedule") == 0 &&
+      index($0,"# ai-devops worktree-reap (managed by ai-reap-shared-db-worktrees schedule") == 0 &&
+      index($0,"\047" bw "\047 tick") == 0 &&
+      index($0,"\047" reap "\047 run") == 0 { print }
+    '
+  }
+  if $SUDO test -f "$BACKUP_DIR/crontab"; then
+    tmp="$(mktemp)" || return 1
+    chmod 600 "$tmp" || return 1
+    $SUDO cat "$BACKUP_DIR/crontab" > "$tmp" || { rm -f -- "$tmp"; return 1; }
+    cmp -s <(strip_managed_cron < "$tmp") \
+      <(crontab -l 2>/dev/null | strip_managed_cron) || { rm -f -- "$tmp"; return 1; }
+    crontab "$tmp"
+    local rc=$?
+    rm -f -- "$tmp"
+    return "$rc"
+  elif $SUDO test -f "$BACKUP_DIR/crontab.absent"; then
+    # Remove only the two installer-owned entries; retain anything another
+    # actor added during this attempt.
+    [ -z "$(crontab -l 2>/dev/null | strip_managed_cron)" ] || return 1
+    "$REPO_ROOT/bin/ai-blocker-watch" unschedule &&
+      "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" unschedule
+  else
+    return 1
+  fi
+}
+backup_private_checkout() {
+  PRIVATE_ROOT="$HOME/.local/share/ai-devops-private-config"
+  if [ -d "$PRIVATE_ROOT/.git" ]; then
+    [ -z "$(git -C "$PRIVATE_ROOT" status --porcelain)" ] || return 1
+    "$REPO_ROOT/bin/ai-private-config" doctor >/dev/null || return 1
+    git -C "$PRIVATE_ROOT" rev-parse HEAD | $SUDO tee "$BACKUP_DIR/private-head" >/dev/null
+  else
+    $SUDO touch "$BACKUP_DIR/private.absent"
+  fi
+}
+restore_private_checkout() {
+  local prior current
+  if $SUDO test -f "$BACKUP_DIR/private.absent"; then
+    # A first-time clone is retained for inspection; no prior commit existed.
+    return 0
+  fi
+  $SUDO test -f "$BACKUP_DIR/private-head" || return 1
+  prior="$($SUDO cat "$BACKUP_DIR/private-head")"
+  [ -d "$PRIVATE_ROOT/.git" ] && [ -z "$(git -C "$PRIVATE_ROOT" status --porcelain)" ] || return 1
+  "$REPO_ROOT/bin/ai-private-config" doctor >/dev/null || return 1
+  current="$(git -C "$PRIVATE_ROOT" rev-parse HEAD)" || return 1
+  [ "$current" = "$prior" ] && return 0
+  git -C "$PRIVATE_ROOT" merge-base --is-ancestor "$prior" "$current" || return 1
+  git -C "$PRIVATE_ROOT" -c core.hooksPath=/dev/null reset --hard "$prior" >/dev/null
+}
+backup_reviewer_hook() {
+  local common
+  common="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)" || return 1
+  HOOK_TARGET="$common/hooks/post-merge"
+  [ ! -L "$HOOK_TARGET" ] || { warn 'refusing symlinked reviewer hook'; return 1; }
+  if [ -f "$HOOK_TARGET" ]; then
+    $SUDO cp -p "$HOOK_TARGET" "$BACKUP_DIR/post-merge" || return 1
+    if grep -q '^# ai-devops-managed: reviewer auto-requalification' "$HOOK_TARGET"; then
+      $SUDO touch "$BACKUP_DIR/post-merge.managed"
+    else
+      $SUDO touch "$BACKUP_DIR/post-merge.foreign"
+    fi
+  elif [ -e "$HOOK_TARGET" ]; then
+    warn 'reviewer hook path is not a regular file'; return 1
+  else
+    $SUDO touch "$BACKUP_DIR/post-merge.absent"
+  fi
+}
+restore_reviewer_hook() {
+  local prior_mode current_mode
+  [ ! -L "$HOOK_TARGET" ] || return 1
+  if $SUDO test -f "$BACKUP_DIR/post-merge.absent"; then
+    [ ! -e "$HOOK_TARGET" ] && return 0
+    [ -f "$HOOK_TARGET" ] && cmp -s "$REPO_ROOT/hooks/post-merge" "$HOOK_TARGET" || return 1
+    $SUDO rm -f -- "$HOOK_TARGET"
+  elif $SUDO test -f "$BACKUP_DIR/post-merge.foreign"; then
+    [ -f "$HOOK_TARGET" ] || return 1
+    $SUDO cmp -s "$BACKUP_DIR/post-merge" "$HOOK_TARGET" || return 1
+    prior_mode="$($SUDO stat -c %a "$BACKUP_DIR/post-merge")"
+    current_mode="$(stat -c %a "$HOOK_TARGET")"
+    [ "$prior_mode" = "$current_mode" ]
+  elif $SUDO test -f "$BACKUP_DIR/post-merge.managed"; then
+    [ -f "$HOOK_TARGET" ] || return 1
+    if $SUDO cmp -s "$BACKUP_DIR/post-merge" "$HOOK_TARGET"; then
+      prior_mode="$($SUDO stat -c %a "$BACKUP_DIR/post-merge")"
+      current_mode="$($SUDO stat -c %a "$HOOK_TARGET")"
+      [ "$prior_mode" = "$current_mode" ] && return 0
+    fi
+    cmp -s "$REPO_ROOT/hooks/post-merge" "$HOOK_TARGET" || return 1
+    $SUDO cp -p "$BACKUP_DIR/post-merge" "$HOOK_TARGET"
+  else
+    return 1
+  fi
+}
+backup_protected_config || {
+  warn 'protected config backup failed; installation did not start'
+  exit 1
+}
+backup_install_routing && backup_install_crontab && backup_private_checkout &&
+  backup_reviewer_hook || {
+  warn 'installed routing or protected source backup failed; installation did not start'
+  exit 1
+}
+restore_install_state() {
+  local failed=0
+  restore_protected_config || failed=1
+  restore_install_routing || failed=1
+  restore_install_crontab || failed=1
+  restore_private_checkout || failed=1
+  restore_reviewer_hook || failed=1
+  [ "$failed" -eq 0 ] || warn "installation rollback needs repair from $BACKUP_DIR"
+  [ "$failed" -eq 0 ]
+}
+record_restored_state() {
+  [ "${SOURCE_ROLLBACK_SAFE:-0}" = 1 ] || return 0
+  [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" = 9 ] || return 0
+  [ -n "${AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE:-}" ] || return 0
+  [ -f "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE" ] &&
+    [ ! -L "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE" ] || return 1
+  printf '%s\n' "$target_head" > "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE"
+}
+invalidate_stage_marker() {
+  local marker="$HOME/.local/state/ai-devops/task-gates/install-stages/$target_head.json"
+  [ ! -L "$marker" ] || { warn 'refusing symlinked installation stage marker'; return 1; }
+  [ -e "$marker" ] || return 0
+  [ -f "$marker" ] && [ "$(stat -c %u "$marker")" = "$(id -u)" ] &&
+    [ "$(stat -c %a "$marker")" = 600 ] || {
+      warn 'refusing malformed installation stage marker'; return 1;
+    }
+  jq -e --arg target "$target_head" --arg checkout "$REPO_ROOT" \
+    '.schema_version==1 and .target_head==$target and .installed_checkout==$checkout' \
+    "$marker" >/dev/null 2>&1 || {
+      warn 'installation stage marker belongs to another transaction'; return 1;
+    }
+  rm -f -- "$marker"
+}
+restore_failed_install() {
+  # A prior completed attempt can leave a stage marker while a direct retry
+  # re-runs stages. Remove only this transaction's verified marker before
+  # restoring its older manifest; otherwise resume would reject the mismatch.
+  invalidate_stage_marker || {
+    warn 'installation stage marker needs manual repair; target remains pending'
+    return 1
+  }
+  if restore_install_state; then record_restored_state || true; return 0; fi
+  return 1
+}
+SOURCE_ROLLBACK_SAFE=1
 
 install_dependencies() {
   local apt_packages=(git curl jq ripgrep unzip python3 python3-pip gh tar)
@@ -243,6 +588,10 @@ run_stage required "Reviewer auto-requalification hook" "$REPO_ROOT/bin/ai-insta
 if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
   warn "Running as root via sudo; skills would land under /root. Re-run as your normal user for per-user skill install."
 fi
+# Skills are copied into two user homes and have their own backup semantics.
+# The checkout cannot safely rewind after this point without proving every
+# copied byte and permission. Leave the target pending for explicit repair.
+SOURCE_ROLLBACK_SAFE=0
 run_stage required "Claude and Codex skills" "$REPO_ROOT/bin/ai-install-skills"
 
 # Machine topology and provider identifiers are restored from the protected
@@ -438,6 +787,23 @@ else
   run_stage optional "Qwen key store" qwen_key_store
 fi
 
+# DeepSeek provider turns read only this protected store. A missing store
+# leaves formal reviews unavailable until this explicit install-time refresh.
+if [ "$(id -u)" -eq 0 ]; then
+  stage_results+=("SKIP\toptional\tDeepSeek key store (root install)")
+elif ! command -v op >/dev/null 2>&1; then
+  stage_results+=("SKIP\toptional\tDeepSeek key store (1Password CLI not on PATH)")
+elif [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] && [ ! -s "$HOME/.config/ai-devops/op-service-account" ]; then
+  stage_results+=("SKIP\toptional\tDeepSeek key store (no 1Password service-account token yet)")
+else
+  deepseek_key_store() {
+    local token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+    [ -n "$token" ] || token="$(cat "$HOME/.config/ai-devops/op-service-account")"
+    OP_SERVICE_ACCOUNT_TOKEN="$token" "$REPO_ROOT/bin/ai-deepseek-agent" store-key --if-missing </dev/null
+  }
+  run_stage optional "DeepSeek key store" deepseek_key_store
+fi
+
 # Muse Code on Linux: when the pinned binary is absent, run Meta's official
 # installer (Albert approved automatic install, 2026-09-25), then verify the
 # pinned version and SHA-256. ai-muse runs only that hashed file.
@@ -478,10 +844,39 @@ run_doctor() {
   fi
 }
 run_stage required "ai-devops doctor" run_doctor
+# A reviewer whose wrapper changed must be qualified before the pending
+# installation authority is consumed. This also runs on a direct retry after
+# an interrupted or failed update.
+run_stage required "Reviewer requalification" "$REPO_ROOT/bin/ai-review-preflight" requalify
 
 echo
-if print_summary; then
-  info "install.sh complete. source=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
-  exit 0
+if ! print_summary; then
+  restore_failed_install || true
+  exit 1
 fi
-exit 1
+# Publish the exact stage results in protected local state. The gate binds
+# this report to the transaction before finalize can consume it.
+publish_stage_report || {
+  restore_failed_install || true
+  warn 'stage result report could not be published; authorization remains pending'
+  exit 1
+}
+(cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" install-verify --phase stages-complete \
+  --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
+  --installed-launcher /usr/local/bin/ai-task-gates --stage-report "$STAGE_REPORT") || {
+    restore_failed_install || true
+    warn 'installation stage receipt refused; authorization remains pending for repair'
+    exit 1
+  }
+if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" != 1 ]; then
+  (cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" install-verify --phase finalize \
+    --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
+  --installed-launcher /usr/local/bin/ai-task-gates) || {
+    # Required stages and their protected receipt succeeded. Keep their
+    # coherent target state for a direct retry of finalize; restoring only a
+    # subset now would invalidate the stage receipt and strand the transaction.
+    warn 'installation finalization refused; target remains pending for direct retry'
+    exit 1
+  }
+fi
+info "install.sh complete. source=$target_head"

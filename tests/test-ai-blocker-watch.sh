@@ -87,9 +87,37 @@ chmod +x "$TMP/gh" "$TMP/harness"
 # propagation would be skipped and every propagation check below would fail.
 jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2 | .transcript_glob={claude:"",codex:"",zcode:"",mimo:""}' \
   "$ROOT/config/blocker-watch.json" > "$TMP/config.json"
-export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_BLOCKER_WATCH_GH="$TMP/gh"
+export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_DEVOPS_TEST_MODE=1 AI_BLOCKER_WATCH_TEST_GH="$TMP/gh"
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID ZCODE_SESSION_ID
 BW(){ "$SCRIPT" "$@"; }
+
+# A failed GraphQL command can still carry a charged rateLimit observation.
+# Exercise the real ai-gh transport here; the regular suite uses a direct stub.
+cat > "$TMP/charged-error-gh" <<'EOF'
+#!/usr/bin/env bash
+case " $* " in
+  *' graphql '*) printf '%s\n' '{"data":{"rateLimit":{"cost":3,"remaining":4997,"resetAt":"2026-09-28T05:00:00Z"}},"errors":[{"message":"fixture failure"}]}' ; exit 1 ;;
+esac
+exit 2
+EOF
+chmod +x "$TMP/charged-error-gh"
+env -u AI_BLOCKER_WATCH_TEST_GH AI_BLOCKER_WATCH_HOME="$TMP/charged-error-home" \
+  AI_GH_REAL_GH="$TMP/charged-error-gh" AI_GH_STATE_DIR="$TMP/charged-error-state" \
+  AI_GH_QUOTA_PROBE_SECONDS=off AI_GH_MIN_SPACING_SECONDS=0 \
+  "$SCRIPT" alarm --dry-run > "$TMP/charged-error-out" 2> "$TMP/charged-error-err"; charged_rc=$?
+check 'failed alarm GraphQL read still records the charged upstream response' \
+  "[ $charged_rc -eq 1 ] && jq -se 'any(.[]; .measurement == \"observed_graphql_cost\" and .workflow == \"blocker_watch_alarm\" and .graphql_points == 3)' '$TMP/charged-error-state/measurements/'*.jsonl && grep -q 'could not list open issues' '$TMP/charged-error-err'"
+check 'legacy GitHub command override fails visibly before any work' \
+  "! AI_BLOCKER_WATCH_GH='$TMP/gh' BW list"
+check 'fake transport cannot be selected by a normal scheduler' \
+  "! AI_DEVOPS_TEST_MODE=0 AI_BLOCKER_WATCH_TEST_GH='$TMP/gh' BW list"
+mkdir -p "$TMP/default-fake"
+default_out="$(FAKE="$TMP/default-fake" AI_BLOCKER_WATCH_TEST_GH= AI_DEVOPS_TEST_MODE=0 \
+  AI_GH_REAL_GH="$TMP/gh" AI_GH_STATE_DIR="$TMP/default-gate" \
+  AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off \
+  "$SCRIPT" find no-such-work 2>&1)"; default_rc=$?
+check 'normal default source uses shared admission with a fake real CLI' \
+  '[ "$default_rc" -eq 0 ] && [ -f "$TMP/default-gate/last_call_ms" ] && [ -s "$TMP/default-fake/calls" ]'
 
 check 'shipped config is valid and names all four programs' "jq -e '.harness|has(\"claude\") and has(\"codex\") and has(\"zcode\") and has(\"mimo\")' '$ROOT/config/blocker-watch.json'"
 check 'shipped config names exactly one propagating machine' "jq -e '(.propagate_on_host | type == \"string\" and length > 0)' '$ROOT/config/blocker-watch.json'"
@@ -697,5 +725,14 @@ check 'dependent label identifies only blocking REST reads' \
 AI_GH_OPERATION=bw.snapshot BW find no-such-wait >/dev/null 2>&1 || true
 check 'an inherited label does not classify unrelated calls' \
   "[ \"\$(tail -2 '$FAKE/operation-kinds' | cut -f1 | sort -u)\" = unset ]"
+
+# Machines must not all tick on the same minute (burst tripped GitHub's limit).
+sed -n '/^tick_offset()/,/^}/p' "$SCRIPT" > "$FAKE/tick_offset.sh"
+check 'tick offset is stable and inside the interval' \
+  ". '$FAKE/tick_offset.sh'; a=\$(tick_offset 10); [ \"\$a\" = \"\$(tick_offset 10)\" ] && [ \"\$a\" -ge 0 ] && [ \"\$a\" -lt 10 ] && [ \"\$(tick_offset 1)\" = 0 ]"
+
+sed -n '/^gh_owner()/,/^}/p' "$SCRIPT" > "$FAKE/gh_owner.sh"
+check 'app owner is read from every call shape the tick uses' \
+  ". '$FAKE/gh_owner.sh'; [ \"\$(gh_owner issue comment 5 -R Popcre/x)\" = Popcre ] && [ \"\$(gh_owner api repos/u2giants/y/issues/1)\" = u2giants ] && [ \"\$(gh_owner api graphql -f query=q -f owner=popcre -f name=z)\" = popcre ] && [ \"\$(gh_owner api -X GET search/issues -f 'q=repo:u2giants/a repo:u2giants/b is:issue')\" = u2giants ] && ! gh_owner api rate_limit"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

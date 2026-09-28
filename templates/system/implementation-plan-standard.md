@@ -14,6 +14,9 @@ access to the planning chat.
 If the implementer would have to ask the planner a single question, that
 question's answer belongs in the plan. Default to TOO MUCH: a long plan costs
 minutes of reading; a thin plan costs a whole session and a wrong build.
+The bar exists so ANY session — including a lower-tier implementer chosen
+later — can execute the plan: plans never name their implementer, and routing
+lives in [`model-tier-delegation.md`](model-tier-delegation.md).
 
 Above all: **state the ultimate goal first, in plain business English.** When a
 step turns out to be wrong — and on real work some step always is — the goal is

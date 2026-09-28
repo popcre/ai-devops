@@ -151,23 +151,29 @@ is_managed() {
 }
 
 remove_sandbox() {
-  local d="$1"
+  local d="$1" physical
   [ -e "$d" ] || return 0
   is_managed "$d" || die "refusing to delete $d: it is not a managed review snapshot."
+  # Evidence tools reject junction/reparse components (reviewer_maintenance
+  # physical()). The managed sandbox root is a junction to D: on this machine,
+  # so every delete must go through the canonical spelling or verify-sandbox
+  # always refuses and the copy is retained forever.
+  physical="$(canon_quiet "$d")" || die "refusing to delete $d: it cannot be canonicalized."
+  is_managed "$physical" || die "refusing to delete $physical: it is not a managed review snapshot."
   if [ "${AI_KEEP_SANDBOX:-0}" = 1 ]; then
-    warn "AI_KEEP_SANDBOX=1: retaining $d"
+    warn "AI_KEEP_SANDBOX=1: retaining $physical"
     return 0
   fi
   local python event_tool
   python="$(command -v python3 || command -v python)" || die 'sandbox evidence verification requires Python'
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
-  "$python" "$event_tool" verify-sandbox "$d" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
-  rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
+  "$python" "$event_tool" verify-sandbox "$physical" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
+  rm -rf "$physical" 2>/dev/null || { sleep 1; rm -rf "$physical"; } || warn "could not fully remove $physical"
   # A code-only stage carries host-only sidecars beside the snapshot; leaving
   # them behind after any deletion path leaks the original source pointer
   # (exact-head review, 2026-09-25).
-  rm -f -- "$d.source.json" "$d.owners.json" 2>/dev/null || warn "could not remove sidecars for $d"
-  warn "deleted review snapshot $d"
+  rm -f -- "$physical.source.json" "$physical.owners.json" 2>/dev/null || warn "could not remove sidecars for $physical"
+  warn "deleted review snapshot $physical"
 }
 
 remove_partial() { # remove_partial BUILD FINAL — only a uniquely named child beside FINAL
@@ -826,14 +832,17 @@ cmd_remove() {
 # repositories; only directories carrying a managed marker past the orphan age
 # are considered, and each delete goes through remove_sandbox so containment,
 # AI_KEEP_SANDBOX, and the evidence rules all keep applying. At most
-# ORPHAN_SWEEP_MAX_REMOVALS entries are removed per run, so a review start
-# never blocks behind a mass cleanup — the rest wait for the next parent run
+# ORPHAN_SWEEP_MAX_REMOVALS old managed entries are examined per run, including
+# refused removals. A private cursor rotates past retained evidence so one
+# unreconciled snapshot cannot starve later recoverable snapshots.
 # and the daily housekeeping task. Best-effort by design: an entry
 # remove_sandbox refuses (unreconciled evidence) is reported on stderr and left
 # for reconciliation, and the sweep continues with the rest.
 cmd_sweep_orphans() { # sweep-orphans [--max-age-seconds N] [--max-removals N]
   local max_age="$ORPHAN_MAX_AGE_SECONDS" max_removals="$ORPHAN_SWEEP_MAX_REMOVALS"
-  local entry marker mtime age now removed=0
+  local entry marker mtime age now examined=0 cursor_file cursor='' name pass cursor_tmp
+  local LC_ALL=C
+  local -a entries=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --max-age-seconds)
@@ -848,21 +857,41 @@ cmd_sweep_orphans() { # sweep-orphans [--max-age-seconds N] [--max-removals N]
   case "$max_age" in ''|*[!0-9]*) die "orphan age must be a whole number of seconds." ;; esac
   case "$max_removals" in ''|*[!0-9]*) die "removal cap must be a whole number." ;; esac
   [ -d "$SANDBOX_DIR" ] || return 0
+  cursor_file="$SANDBOX_DIR/.orphan-sweep-cursor"
+  if [ -f "$cursor_file" ] && [ ! -L "$cursor_file" ]; then
+    IFS= read -r cursor < "$cursor_file" || true
+    [[ "$cursor" =~ ^[A-Za-z0-9._-]{1,255}$ ]] || cursor=''
+  fi
+  # find -L follows the managed root when it is a junction/symlink (production
+  # root is a Windows junction to D:). Without -L, find sees no children and
+  # the sweep is a no-op on this machine.
+  mapfile -d '' -t entries < <(find -L "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | LC_ALL=C sort -z)
   now="$(date +%s)"
-  while IFS= read -r -d '' entry; do
-    [ "$removed" -lt "$max_removals" ] || {
-      warn "$(( max_removals )) orphan removal cap reached; remaining orphans wait for the next parent run"
-      return 0
-    }
-    marker="$entry/$MARKER"
-    [ -f "$marker" ] || continue
-    mtime="$(stat -c %Y "$marker" 2>/dev/null)" || continue
-    age=$(( now - mtime ))
-    [ "$age" -gt "$max_age" ] || continue
-    # Subshell: remove_sandbox dies on unreconciled evidence by design, and
-    # that one refusal must not end the sweep of the remaining orphans.
-    if ( remove_sandbox "$entry" ); then removed=$(( removed + 1 )); fi
-  done < <(find "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+  for pass in 1 2; do
+    [ "$pass" = 1 ] || [ -n "$cursor" ] || break
+    for entry in "${entries[@]}"; do
+      name="${entry##*/}"
+      if [ "$pass" = 1 ]; then
+        [[ "$name" > "$cursor" ]] || continue
+      else
+        [[ "$name" > "$cursor" ]] && continue
+      fi
+      marker="$entry/$MARKER"
+      [ -f "$marker" ] || continue
+      mtime="$(stat -c %Y "$marker" 2>/dev/null)" || continue
+      age=$(( now - mtime ))
+      [ "$age" -gt "$max_age" ] || continue
+      [ "$examined" -lt "$max_removals" ] || {
+        warn "$max_removals orphan examination cap reached; remaining orphans wait for the next parent run"
+        return 0
+      }
+      examined=$(( examined + 1 ))
+      # Refused evidence is retained, while this bounded sweep moves forward.
+      ( remove_sandbox "$entry" ) || true
+      cursor_tmp="$(mktemp "$SANDBOX_DIR/.orphan-sweep-cursor.XXXXXX")" || return 1
+      printf '%s\n' "$name" > "$cursor_tmp" && mv -- "$cursor_tmp" "$cursor_file" || return 1
+    done
+  done
   return 0
 }
 

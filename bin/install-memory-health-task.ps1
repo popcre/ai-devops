@@ -6,7 +6,7 @@
 #
 # Deliberate design note: unattended memory *editing* is not offered. ai-sync-memory's
 # tombstones make a deletion propagate to every machine and survive a later pull, so a
-# wrong automated delete is not recoverable. A human approves every change.
+# wrong automated delete is not recoverable. Every change needs an assigned AI reviewer's APPROVE of the exact edits (a different engine; never self-approved, never Albert's approval).
 #
 # Requires PowerShell 7 (pwsh). Idempotent - re-running replaces the task.
 

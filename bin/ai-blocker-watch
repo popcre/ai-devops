@@ -109,7 +109,7 @@
 # Environment:
 #   AI_BLOCKER_WATCH_HOME    state (default ~/.ai-devops/blocker-watch)
 #   AI_BLOCKER_WATCH_CONFIG  settings (default <repo>/config/blocker-watch.json)
-#   AI_BLOCKER_WATCH_GH      GitHub command (default ai-gh from this checkout)
+#   AI_BLOCKER_WATCH_TEST_GH  fake GitHub command for explicit test mode only
 set -euo pipefail
 die(){ printf 'ai-blocker-watch: error: %s\n' "$*" >&2; exit 2; }
 note(){ printf 'ai-blocker-watch: %s\n' "$*" >&2; }
@@ -122,13 +122,65 @@ done
 TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
 HOME_DIR="${AI_BLOCKER_WATCH_HOME:-${HOME:?HOME is unavailable}/.ai-devops/blocker-watch}"
 CONFIG="${AI_BLOCKER_WATCH_CONFIG:-$TOOL_ROOT/config/blocker-watch.json}"
-GH="${AI_BLOCKER_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
+GH="$TOOL_ROOT/bin/ai-gh"
+# A production override could silently send every scheduled read/write around
+# the shared quota gate. Only the offline suite may inject a fake transport.
+[ -z "${AI_BLOCKER_WATCH_GH:-}" ] || die 'AI_BLOCKER_WATCH_GH is retired; the scheduled transport must use ai-gh'
+if [ -n "${AI_BLOCKER_WATCH_TEST_GH:-}" ]; then
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || die 'AI_BLOCKER_WATCH_TEST_GH requires AI_DEVOPS_TEST_MODE=1'
+  [ -x "$AI_BLOCKER_WATCH_TEST_GH" ] || die 'test GitHub transport is not executable'
+  GH="$AI_BLOCKER_WATCH_TEST_GH"
+fi
+[ -x "$GH" ] || die 'shared GitHub transport is not executable'
+GH_COST_READY=0
+if [ "$GH" = "$TOOL_ROOT/bin/ai-gh" ] && [ -f "$TOOL_ROOT/tools/github-requests/telemetry.sh" ]; then
+  source "$TOOL_ROOT/tools/github-requests/telemetry.sh"
+  GH_COST_READY=1
+fi
+record_graphql_cost(){
+  [ "$GH_COST_READY" = 1 ] || return 0
+  printf '%s' "$2" | gh_measure_graphql_cost ai-blocker-watch "$1" "${BW_WORKFLOW:-blocker_watch_manual}" "${BW_TICK_RECEIPT_ID:-}" direct "${BW_TICK_CONTEXT:-}" ||
+    note 'request measurement unavailable: GraphQL cost not saved'
+}
 # Label only the transport subprocess. Resumed AI sessions are independent
 # callers and must not inherit BlockerWatch's attribution.
-gh_call(){ AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; }
+gh_call(){
+  # Scheduled ticks run as the "pop-ai-watchers" GitHub App, which has its own
+  # hourly allowance, so they never spend the personal allowance interactive
+  # sessions need (2026-09-28 exhaustion). Commands a session runs itself (wait,
+  # park, find) keep the personal login. No app key on this machine, or no
+  # owner in the call, falls back to the personal login: nothing stops.
+  local owner tok
+  if [ "$BW_APP" = 1 ] && owner="$(gh_owner "$@")" && tok="$("$APP_TOKEN" token "$owner" 2>/dev/null)"; then
+    GH_TOKEN="$tok" AI_GH_CALLER=ai-blocker-watch "$GH" "$@"
+  else
+    AI_GH_CALLER=ai-blocker-watch "$GH" "$@"
+  fi
+}
+# The repository owner a gh call targets (-R/--repo, repos/<owner>/, repo:<owner>/,
+# or a GraphQL owner= field). Prints nothing and fails when the call names none.
+gh_owner(){
+  local a prev='' o=''
+  for a in "$@"; do
+    case "$prev" in -R|--repo) o="${a%%/*}" ;; esac
+    case "$a" in
+      repos/*/*) o="${a#repos/}"; o="${o%%/*}" ;;
+      owner=*) o="${a#owner=}" ;;
+      *repo:*/*) o="${a#*repo:}"; o="${o%%/*}" ;;
+    esac
+    [ -z "$o" ] || break
+    prev="$a"
+  done
+  [[ "$o" =~ ^[A-Za-z0-9-]+$ ]] && printf '%s\n' "$o"
+}
+BW_APP=0
+APP_TOKEN="$TOOL_ROOT/bin/ai-gh-app-auth"
 # Only call sites below set this fixed telemetry label; a parent shell must not
 # be able to misclassify unrelated BlockerWatch requests.
 unset AI_GH_OPERATION
+BW_WORKFLOW=''
+BW_TICK_RECEIPT_ID=''
+BW_TICK_CONTEXT=''
 WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
 LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
 LOGS="$HOME_DIR/logs"
@@ -377,15 +429,16 @@ propagate(){
   # shared qualifier tail ("is:issue is:closed closed:>=<timestamp>", 48 chars
   # with the trailing repo term) pushes them over; nineteen repos cost three
   # queries instead of nineteen.
-  local -a queries=() ; local cur=""
+  local -a queries=() ; local cur="" cur_owner=""
   while read -r repo; do
     [ -n "$repo" ] || continue
     local term="repo:$repo "
-    if [ -n "$cur" ] && [ $(( ${#cur} + ${#term} + 48 )) -gt 256 ]; then
+    # A batch holds one owner only: each owner is its own app installation.
+    if [ -n "$cur" ] && { [ $(( ${#cur} + ${#term} + 48 )) -gt 256 ] || [ "${repo%%/*}" != "$cur_owner" ]; }; then
       queries+=("${cur}is:issue is:closed closed:>=$since"); cur=""
     fi
-    cur+="$term"
-  done < <(cfg '.repos[]')
+    cur+="$term"; cur_owner="${repo%%/*}"
+  done < <(cfg '.repos[]' | LC_ALL=C sort)
   [ -z "$cur" ] || queries+=("${cur}is:issue is:closed closed:>=$since")
   local ok=1 q closed
   for q in "${queries[@]}"; do
@@ -618,20 +671,23 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
 # re-sending the request; a link created this tick is added to the copy so
 # the alarm still sees it without a second read (or, if that edit fails, the
 # copy is dropped and the alarm re-reads the repo).
-SNAP_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number databaseId title assignees(first:10){totalCount} body blockedBy(first:50){nodes{number state title repository{nameWithOwner} assignees(first:10){totalCount}}}}}}}'
+SNAP_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number databaseId title assignees(first:10){totalCount} body blockedBy(first:50){nodes{number state title repository{nameWithOwner} assignees(first:10){totalCount}}}}}}rateLimit{cost remaining resetAt}}'
 declare -A SNAP=() SNAPN=() SNAPERR=()
 open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|i], count in SNAPN[repo]; rc 1 on failure
-  local repo="$1" pfx="$2" pages=0 cursor="" out i
+  local repo="$1" pfx="$2" pages=0 cursor="" out i read_rc
   if [ -n "${SNAPERR[$repo]+set}" ]; then note "$pfx: ${SNAPERR[$repo]} (not retried this tick)"; return 1; fi
   [ -z "${SNAPN[$repo]+set}" ] || return 0
   while :; do
     pages=$((pages+1))
     if [ "$pages" -gt 10 ]; then SNAPERR[$repo]="$repo has more open issues than one scan reads (1000)"; break; fi
+    read_rc=0
     if [ -n "$cursor" ]; then
-      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || read_rc=$?
     else
-      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || read_rc=$?
     fi
+    record_graphql_cost graphql.open_issue_snapshot "$out"
+    if [ "$read_rc" -ne 0 ]; then SNAPERR[$repo]="could not list open issues in $repo"; break; fi
     printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository != null)' >/dev/null || { SNAPERR[$repo]="unreadable answer from $repo"; break; }
     SNAP["$repo|$pages"]="$out"
     if [ "$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.hasNextPage')" = true ]; then
@@ -707,13 +763,13 @@ snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a 
 # Stalls are findings, not failures: only a failed read or post fails the tick.
 cfgd(){ local v; v="$(cfg "$1")"; if [ "$v" != null ] && [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "$2"; fi; }
 alarm_on(){ [ "$(cfgd .alarm_enabled true)" = true ]; }
-ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){updatedAt createdAt body comments(last:30){nodes{body createdAt}} timelineItems(first:50,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{... on PullRequest{number state}}}}} blocking(first:50){nodes{number state repository{nameWithOwner}}}}}}'
+ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){updatedAt createdAt body comments(last:30){nodes{body createdAt}} timelineItems(first:50,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{... on PullRequest{number state}}}}} blocking(first:50){nodes{number state repository{nameWithOwner}}}}}rateLimit{cost remaining resetAt}}'
 # Per-tick read cache and node budget live in files under ALARM_TICK: issue_json
 # is always called as j="$(issue_json ...)", so shell variables would die with
 # that subshell and the cache/budget would never take effect (#809).
 ALARM_TICK=""
 issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node budget, 2 failed
-  local repo="$1" n="$2" out key="$1#$2" spent budget cachef
+  local repo="$1" n="$2" out key="$1#$2" spent budget cachef read_rc=0
   # '@' cannot appear in a GitHub owner or repo name, so owner/repo cannot collide.
   cachef="$ALARM_TICK/cache/${key//\//@}"
   if [ -f "$cachef" ]; then cat "$cachef"; return 0; fi
@@ -721,7 +777,9 @@ issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node
   spent="$(cat "$ALARM_TICK/agql" 2>/dev/null || printf 0)"
   [ "$spent" -lt "$budget" ] || return 1
   printf '%s' "$((spent+1))" > "$ALARM_TICK/agql"
-  out="$(AI_GH_OPERATION=bw.alarm_issue gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || return 2
+  out="$(AI_GH_OPERATION=bw.alarm_issue gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || read_rc=$?
+  record_graphql_cost graphql.issue_detail "$out"
+  [ "$read_rc" -eq 0 ] || return 2
   printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository.issue != null)' >/dev/null || return 2
   printf '%s' "$out" > "$cachef"
   printf '%s' "$out"
@@ -1055,6 +1113,7 @@ lock_take(){
 }
 
 cmd_alarm(){
+  BW_WORKFLOW=blocker_watch_alarm
   [ "${1:-}" != --dry-run ] || DRY=1
   alarm_on || die "the unowned-blocker alarm is disabled in the config"
   lock_take || return 0
@@ -1063,6 +1122,7 @@ cmd_alarm(){
 }
 
 cmd_links(){
+  BW_WORKFLOW=blocker_watch_links
   [ "${1:-}" != --dry-run ] || DRY=1
   links_on || die "blocked-by link maintenance is disabled in the config"
   lock_take || return 0
@@ -1071,8 +1131,22 @@ cmd_links(){
 }
 
 cmd_tick(){
+  BW_WORKFLOW=blocker_watch_tick
+  # The offline suite never mints real tokens.
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || BW_APP=1
   [ "${1:-}" != --dry-run ] || DRY=1
   lock_take || return 0
+  local tick_started_ms='' tick_elapsed_ms=''
+  BW_TICK_RECEIPT_ID=''
+  BW_TICK_CONTEXT=''
+  if [ "$GH_COST_READY" = 1 ] && [ "$DRY" != 1 ]; then
+    BW_TICK_RECEIPT_ID="$(gh_measure_workflow_id)" || note 'request measurement unavailable: tick ID not created'
+    gh_measure_clock; tick_started_ms="$GH_MEASURE_CLOCK"
+    # One read-only local lookup per tick; unknown identity stays unattributed.
+    if [ -x "$TOOL_ROOT/tools/github-requests/pr-status-context" ]; then
+      BW_TICK_CONTEXT="$("$TOOL_ROOT/tools/github-requests/pr-status-context" 2>/dev/null || true)"
+    fi
+  fi
   # Scans that are due run first, so their open-issue snapshot also answers
   # propagate and wake this tick instead of per-item REST reads.
   local early=""
@@ -1088,12 +1162,31 @@ cmd_tick(){
     wake "$f"
   done
   [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
+  if [ -n "$BW_TICK_RECEIPT_ID" ]; then
+    gh_measure_clock
+    tick_elapsed_ms=$(( GH_MEASURE_CLOCK - tick_started_ms ))
+    [ "$tick_elapsed_ms" -ge 0 ] || tick_elapsed_ms=0
+    gh_measure_workflow_outcome ai-blocker-watch blocker_watch_tick "$BW_TICK_RECEIPT_ID" completed "$tick_elapsed_ms" ||
+      note 'request measurement unavailable: tick outcome not saved'
+  fi
 }
 
 
 TASK_NAME='ai-devops\blocker-watch'
 CRON_MARKER='# ai-devops blocker-watch (managed by ai-blocker-watch schedule; unschedule removes)'
-cron_job_line(){ printf '*/%s * * * * %s tick >> %s 2>&1' "$(cfg .schedule_every_minutes)" "'$TOOL_ROOT/bin/ai-blocker-watch'" "'$HOME_DIR/tick.log'"; }
+# Every machine used to tick on the same wall-clock minute, so their GitHub
+# reads landed in one burst and tripped GitHub's per-user rate limit. Each
+# machine now ticks at its own stable minute offset derived from its hostname.
+tick_offset(){ # tick_offset <every>: 0..every-1, stable per machine
+  local every="$1" sum
+  [ "$every" -gt 1 ] 2>/dev/null || { printf 0; return; }
+  sum="$(printf '%s' "$(hostname 2>/dev/null || printf unknown)" | cksum | cut -d' ' -f1)"
+  printf '%s' "$(( sum % every ))"
+}
+cron_job_line(){
+  local every off; every="$(cfg .schedule_every_minutes)"; off="$(tick_offset "$every")"
+  printf '%s-59/%s * * * * %s tick >> %s 2>&1' "$off" "$every" "'$TOOL_ROOT/bin/ai-blocker-watch'" "'$HOME_DIR/tick.log'"
+}
 cmd_schedule(){
   local every self
   every="$(cfg .schedule_every_minutes)"
@@ -1102,7 +1195,7 @@ cmd_schedule(){
     bash_exe="$(cygpath -w "$(command -v bash)")"; self="$(cygpath -m "$TOOL_ROOT/bin/ai-blocker-watch")"
     # conhost --headless keeps a console window from flashing every run.
     # /F re-points an existing task, so rerunning the installer stays safe.
-    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /TN "$TASK_NAME" \
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /ST "$(printf '00:%02d' "$(tick_offset "$every")")" /TN "$TASK_NAME" \
       /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' tick >> ~/.ai-devops/blocker-watch/tick.log 2>&1\"" >/dev/null
     note "scheduled every $every minutes as $TASK_NAME"
     return

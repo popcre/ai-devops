@@ -302,6 +302,17 @@ check "private code-only route refuses a raw-evidence selection before provider"
 # Exercise the real attachment-only DeepSeek wrapper without a network call.
 # The mock transport captures the complete JSON body that would be transmitted.
 mkdir -p "$TMP/private-mock-bin" "$TMP/private-mock-home"
+mkdir -p "$TMP/private-mock-home/.config/ai-devops/secrets"
+chmod 700 "$TMP/private-mock-home/.config/ai-devops/secrets"
+printf 'synthetic-test-key\n' > "$TMP/private-mock-home/.config/ai-devops/secrets/deepseek-api-key"
+chmod 600 "$TMP/private-mock-home/.config/ai-devops/secrets/deepseek-api-key"
+# Windows ACL validation is a separate installer concern. This fixture tests
+# the private code-only export without invoking a host ACL tool or 1Password.
+cat > "$TMP/private-mock-bin/pwsh.exe" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/private-mock-bin/pwsh.exe"
 cat > "$TMP/private-mock-bin/curl" <<'EOF'
 #!/usr/bin/env bash
 out=""; body=""
@@ -326,7 +337,7 @@ EOF
 chmod +x "$TMP/private-mock-bin/curl"
 DEEPSEEK_STUB_REQUEST="$TMP/private-request.json"; export DEEPSEEK_STUB_REQUEST
 DEEPSEEK_STUB_CWD="$TMP/private-review-cwd"; export DEEPSEEK_STUB_CWD
-NETWORK_OUT="$(cd "$PRIVATE" && HOME="$TMP/private-mock-home" PATH="$TMP/private-mock-bin:$PATH" DEEPSEEK_API_KEY=synthetic-test-key AI_REVIEW_EVENT_DIR="$TMP/private-review-events" AI_REVIEW_SANDBOX_DIR="$TMP/private-sandboxes" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; NETWORK_RC=$?
+NETWORK_OUT="$(cd "$PRIVATE" && HOME="$TMP/private-mock-home" PATH="$TMP/private-mock-bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_REVIEW_EVENT_DIR="$TMP/private-review-events" AI_REVIEW_SANDBOX_DIR="$TMP/private-sandboxes" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --base HEAD~1 --assert-head "$PRIVATE_HEAD" 2>&1)"; NETWORK_RC=$?
 [ "$NETWORK_RC" -eq 0 ] || printf 'private DeepSeek fixture: %s\n' "$(printf '%s' "$NETWORK_OUT" | grep -Ei 'error:|refused|failed|invalid|verdict|packet' | tail -8)" >&2
 check "real private DeepSeek route completes with no network" "[ '$NETWORK_RC' -eq 0 ] && [ -s '$DEEPSEEK_STUB_REQUEST' ] && [ -s '$DEEPSEEK_STUB_CWD' ]"
 check "outbound DeepSeek payload includes approved code only" "jq -e '.messages | map(.content) | join(\"\\n\") | contains(\"print(\\\"changed\\\")\") and (contains(\"raw-row-sentinel\")|not) and (contains(\"history-raw-sentinel\")|not) and (contains(\"untracked-prompt-sentinel\")|not)' '$DEEPSEEK_STUB_REQUEST' >/dev/null && ! grep -Fq '$PRIVATE' '$DEEPSEEK_STUB_REQUEST'"

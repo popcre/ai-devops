@@ -76,9 +76,10 @@ cd /worksp/ai-devops
    agent call, and installs the protected Muse review profile into its isolated
    configuration root; non-interactive updates reuse the existing protected
    bootstrap file automatically and never change normal Claude/Codex
-   authentication. The user install also prepares Qwen's protected per-user
-   key store. Qwen reviews read that store without calling 1Password;
-   `ai-qwen store-key` explicitly refreshes it after key rotation.
+   authentication. The user install also prepares Qwen's and DeepSeek's
+   protected per-user key stores. Their reviews read those stores without
+   calling 1Password; `ai-qwen store-key` and `ai-deepseek-agent store-key`
+   explicitly refresh them after key rotation.
 7. Clones, validates, and manually seeds the private portable-memory hub. On a
    new Claude home with no project memory yet, this truthfully reports a
    fresh-machine seed and uploads nothing; matching project memory is applied
@@ -119,6 +120,88 @@ when an interactive/token-backed install selects them; `--require-secrets`
 forces that mode and `--skip-secrets` records an intentional skip.
 
 Idempotent — safe to re-run.
+
+For an update containing reviewer-safety paths, leave the installed checkout
+unchanged while preparing two linked worktrees: a disposable installation
+candidate at its current HEAD and a separate reviewer candidate at the exact
+merged target. From the installation candidate, run the target worktree's
+reviewed gate with `start --class installation`, then advance only that
+candidate to the target commit. Declare the separate reviewer candidate as
+`reviewer-safety` and obtain its read-only exact-head independent `APPROVE` review.
+Run `ai-task-gates authorize-install --target-head <full SHA>
+--installed-checkout <canonical checkout> --installed-launcher <managed
+ai-task-gates launcher> --review-report <exact-head APPROVE report>
+--owner-request '<host, action, and quote of Albert requesting this task>'`. On Windows, pass
+the managed extensionless launcher; on Ubuntu, pass its symlink. This separate
+installation task leaves `check --before deploy` forbidden for a reviewer-safety
+change. The authorization binds the candidate, review, installed checkout,
+launcher, and recorded old HEAD in the same Git repository, and is consumed
+once by the Windows installer. Fetch `origin/main` immediately before issuing
+authorization; the target must be the exact fetched release. The
+installed checkout must be the durable primary checkout and the launcher must
+have its supported canonical path. Only after it passes may the
+canonical checkout fast-forward and the supported installer run. Verify the
+installed command hashes and routing afterward. On Windows, pass
+`-RepoPath <canonical checkout> -ExpectedHead <full target SHA>` to the
+reviewed target worktree's `bin/install-ai-devops-windows.ps1`. The old
+installed bootstrap and installer do not have this gate and cannot perform the
+first protected migration. The full target installer refreshes the managed
+command launchers and source receipts before consuming authorization.
+The Windows installer compares the managed launcher receipt with the fetched
+release, so it also detects a checkout that was advanced before the installer
+started. It refuses a reviewer-safety change without both `-ExpectedHead` and
+the matching one-use authorization, including when invoked through bootstrap
+or setup. Windows bootstrap may provision only the fixed `Git.Git`
+prerequisite when Git is absent; it then checks the canonical source and
+authorization before runner setup, WinGet configuration, provider installs,
+remote access, or machine setup, including with `-SkipMachineSetup`.
+Direct `setup-machine.ps1` and the legacy developer-computer launcher use
+the same pinned source gate before their package and configuration work.
+The source-only gate retains a pending authorization until the full
+installer finishes and refreshes the managed command launchers; a failed full
+installation can retry against the same pinned target. Legacy launchers
+without a receipt need the same one-time path. If both managed gate launchers
+are absent, use `authorize-install --first-install` with a separate exact-head
+review whose approved report names `first-managed-install`. This applies even
+to a newly cloned checkout: a clone reflog does not establish installation
+history. If another managed launcher remains, or just one gate launcher remains,
+use `authorize-install
+--recover-launchers` with a review naming
+`partial-managed-launcher-recovery`. The authority records hashes for every
+present managed launcher, exact absence of the missing gate launcher files,
+and the installed gate source hash. The installer checks them again before
+writing either file.
+The full installer refreshes launchers after ordinary updates as well, so the
+next release starts from the current installed-source receipt. A source-only
+update must be followed by a full install before beginning another release.
+If a legacy four-line launcher already points at an unchanged current-main
+checkout, use the explicit `authorize-install --legacy-migration` route. The
+independent exact-head review must examine the full target source and the
+`legacy-managed-launcher-refresh` operation; its approved report must name that
+operation. The one-use authority records hashes of both launcher files and
+the installed gate source, which the installer checks again before refreshing
+the launcher receipt. This route refuses launchers that already have a receipt.
+
+The route accepts only the supported `popcre/ai-devops` and redirected
+`u2giants/ai-devops` GitHub origins. It compares the full release range,
+including deleted paths, and refuses a divergent or dirty candidate. The
+first rollout uses the reviewed gate from the target worktree, so an older
+installed gate does not need to understand these new options.
+
+For a first Ubuntu installation at an unchanged commit, start a separate clean
+installation task and obtain an assigned AI reviewer's read-only `APPROVE` for the exact
+target source and `first-managed-install` operation. From that task's exact
+target worktree, issue `authorize-install --first-install` with the target SHA,
+canonical checkout, `/usr/local/bin/ai-task-gates` launcher, approved report,
+and owner request; then invoke the target `install.sh`. The canonical launcher
+and manifest must be absent before authorization. Both Ubuntu and Windows
+first installation require the reviewed one-use authority. For a
+same-source maintenance reinstall, omit `--first-install`: the check requires
+the installed source receipt to match the current commit and gate bytes. The
+Ubuntu `/etc/ai-devops/install-manifest.tsv` supplies that receipt; the Windows managed Bash and
+`.cmd` launchers carry matching source commit and SHA-256 markers and must
+match the installed command and user profile routes. The Windows
+machine-tools installer writes those markers when it installs launchers.
 
 The installer does not enable recurring memory synchronization. Automatic
 memory writers remain disabled; a manual private-hub union is the qualified
@@ -192,18 +275,58 @@ an install by the other reports "up to date" rather than inventing local edits.
 
 ```bash
 cd /worksp/ai-devops
-./update.sh          # git pull --ff-only, re-run install.sh, report installed SHA
+./update.sh --owner-request '<quote of Albert requesting this task>'
 ```
 
 `update.sh` never overwrites `/etc/ai-devops/*.env`. It returns nonzero if the
 installer has any required failure and reports the exact source SHA attempted.
 
+On Linux, `update.sh --expected-head <full-merged-SHA> --owner-request
+'<quote of Albert requesting this task>'` pins a protected update before the installed
+checkout moves. The **first** protected rollout must invoke the merged target
+script from a clean, exact-SHA worktree sharing the installed checkout's Git
+common directory:
+
+```bash
+cd /worksp/ai-devops-candidate
+./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA> --owner-request '<quote of Albert requesting this task>'
+```
+
+The updater verifies the candidate and installed checkout relationship, fetches
+and pins `origin/main`, records an installation task in the exact target
+candidate, runs its gate, then advances only the named
+installed checkout. Later updates can run from the installed checkout itself.
+`install.sh` checks the same pending authorization before its first machine
+change, including when called directly. Same-source maintenance uses
+`./install.sh --owner-request '<quote of Albert requesting this task>'`; a protected source
+change cannot use that route. One checkout lock covers the update and install.
+The installer saves protected config, the manifest, managed launcher targets,
+the user crontab, and the protected configuration checkout's commit before it
+starts. On a required-stage failure it restores those items where their exact
+prior state can be proved; the updater returns to the prior clean checkout only
+after that restoration is confirmed. A foreign concurrent change stops
+automatic rollback and leaves the authorization pending for repair. Per-user
+provider and skill changes are not an atomic transaction, so a failed update
+still needs explicit capability verification before being called rolled back.
+Reviewer requalification is a required installer stage before authorization
+is finalized, including on a direct retry. The installer records each stage's
+result in a protected local report; the gate checks and binds that report
+before the one-use authorization can be consumed.
+
+If the installed Linux manifest names an older source SHA than the live clean
+checkout, the independent exact-head report must explicitly name
+`stale-linux-manifest-recovery` and bind the stale manifest SHA and file hash
+plus the live installed SHA and gate hash. The separate installation task then
+uses `authorize-install --stale-manifest-recovery` for one pinned target update.
+Without that exact reviewed evidence, the updater stops before changing the
+installed checkout.
+
 Reviewer hosts do not need `update.sh` for requalification: the managed
 `post-merge` hook runs `ai-review-preflight requalify` on every pull whose
 result is on `origin/main` (development-branch merges are skipped). The two
 documented update paths — `update.sh` and rerunning the Windows installer —
-each fast-forward with hooks disabled and instead run one explicit
-`ai-review-preflight requalify` after installing, so a failed canary can
+each fast-forward with hooks disabled and run one explicit
+`ai-review-preflight requalify` during installation, so a failed canary can
 never masquerade as a pull or install failure mid-update. A failed automatic
 requalification is recorded with `ai-reviewer-issue record`; it fails
 `update.sh` and is printed (without aborting later skill stages) by the
