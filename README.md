@@ -136,6 +136,9 @@ come from `ai-private-config`, never this repository.
 For reducing delivery delays, repeated tests and reviews, read the
 [workflow efficiency implementation plan](plan_workflow-efficiency.md) STATUS
 first. It distinguishes completed repairs from the next measured improvements.
+For evidence-only commit churn, unrelated-`main` review invalidation, and the
+reversible Jujutsu trial, read the [agent evidence and Jujutsu plan](plan_agent_evidence_and_jujutsu_pilot.md)
+STATUS first.
 For the proposed Jev decision pilot that must prove actual paid model savings,
 read the [measured Jev spend-reduction plan](plan_typesafe-jev-spend-reduction.md)
 STATUS first.
