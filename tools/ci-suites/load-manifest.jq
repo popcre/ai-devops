@@ -53,7 +53,7 @@ def fail($file; $msg): error("load-manifest: \($file): \($msg)");
          elif ($sec | type) != "number" or $sec != ($sec | floor) or $sec < 1 or $sec > $ncount then
            fail($file; "windows_section must be an integer in 1..\($ncount), got \($sec | tojson)")
          else . end)
-      elif (($b.windows // []) | index("offline")) and (($b.windows // []) | index("reviewer-safety") | not) then
+      elif $ncount > 0 and (($b.windows // []) | index("offline")) and (($b.windows // []) | index("reviewer-safety") | not) then
         fail($file; "an offline suite in no hosted section would run nowhere: add windows_section or reviewer-safety")
       else . end)
     | {file: $file, suite: $suite, kind: $b.kind,

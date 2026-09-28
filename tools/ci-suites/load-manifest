@@ -23,8 +23,8 @@
 #                      offline lane) and "reviewer-safety" (the Codex/Grok
 #                      reviewer fallback lane; implies "offline")
 #     windows_section  1-based hosted section owner; required for every
-#                      "offline" suite that is not reviewer-safety, forbidden
-#                      otherwise
+#                      "offline" suite that is not reviewer-safety whenever
+#                      sections are declared (count > 0), forbidden otherwise
 #
 # OUTPUT
 #   The legacy reader shape on stdout (schema_version 2 is the reader
@@ -69,17 +69,18 @@ for stray in "$SUITE_DIR"/*; do
   esac
 done
 
-# Parse-check each file individually: jq's aggregate parse errors do not
-# reliably name the offending file, but a per-file check always can.
-for f in "${suite_files[@]}"; do
-  jq -e 'type == "object"' "$f" >/dev/null 2>&1 ||
-    die "suite file is not valid JSON: $f"
-done
-
 # input_filename carries the real file path into each entry, so validation
-# errors can name the exact suite file.
-entries="$(jq -c '{file: input_filename, body: .}' "${suite_files[@]}")" ||
+# errors can name the exact suite file. jq's aggregate parse errors do not
+# reliably name the offending file, so a parse failure triggers a per-file
+# check that names it exactly (the slow path runs only when something is
+# already broken).
+entries="$(jq -c '{file: input_filename, body: .}' "${suite_files[@]}")" || {
+  for f in "${suite_files[@]}"; do
+    jq -e 'type == "object"' "$f" >/dev/null 2>&1 ||
+      die "suite file is not valid JSON: $f"
+  done
   die "a suite file failed to read: see the jq error above"
+}
 
 # --slurpfile turns the newline-delimited entries and the global file into
 # arrays the assembly program can validate as a whole.

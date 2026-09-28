@@ -5,7 +5,14 @@ workflow="${WORKFLOW_UNDER_TEST:-$ROOT/.github/workflows/verify.yml}"
 blacksmith_workflow="$ROOT/.github/workflows/windows-offline-blacksmith.yml"
 fast_workflow="$ROOT/.github/workflows/fast-classifier.yml"
 classifier="$ROOT/tools/ci/classify-changes.sh"
-manifest="$ROOT/config/ci-suite-manifest.json"
+global_manifest="$ROOT/config/ci-suite-manifest.json"
+manifest="$(mktemp)"
+trap 'rm -f "$manifest"' EXIT
+# The reader-shaped manifest is assembled by the per-suite loader (#1001);
+# every inventory, membership and section check below pins the loader output.
+bash "$ROOT/tools/ci-suites/load-manifest" >"$manifest" || {
+  printf 'FAIL: the suite manifest did not assemble through the loader\n' >&2
+  exit 1; }
 . "$ROOT/tools/lib/task-gates.sh"
 failures=0
 

@@ -383,7 +383,9 @@
       "bin/ai-install-*",
       "bin/install-*",
       "bin/setup-*",
-      "bin/bootstrap-*"
+      "bin/bootstrap-*",
+      "config/ci-suites/**",
+      "tools/ci-suites/*"
     ],
     "path_suites": {
       "bin/ai-gh": [
