@@ -104,14 +104,22 @@ fi
 lock_id="$(stat -Lc '%d:%i' "$lockfile" 2>/dev/null)" || { info "cannot stat $lockfile"; exit 2; }
 lock_dev="${lock_id%%:*}"; lock_ino="${lock_id##*:}"
 
-# Normalise device numbers so stat's "8:3" matches /proc/locks' "fd:08:00003".
+# Decode stat's combined st_dev into major and minor with the exact inverse
+# of glibc's makedev (minor&0xff | major<<8 | (minor&~0xff)<<12), because
+# /proc/locks prints major:minor separately, in hex.
+lock_dev_dec=$((10#$lock_dev))
+lock_major=$(( (lock_dev_dec >> 8) & 0xfff ))
+lock_minor=$(( (lock_dev_dec & 0xff) | ((lock_dev_dec >> 12) & 0xfff00) ))
+
+# Normalise numbers that stat prints in decimal (used stat-to-stat in
+# find_holders, where both sides share one format).
 norm(){
   local n
   case "$1" in ''|*[!0-9]*) printf '%s' "$1"; return ;; esac
   n=$((10#$1))
   printf '%d' "$n"
 }
-LOCK_DEV_N="$(norm "$lock_dev")"; LOCK_INO_N="$(norm "$lock_ino")"
+LOCK_INO_N="$(norm "$lock_ino")"
 
 # Informational for the report, AUTHORITATIVE for recovery: /proc/locks is
 # the kernel's list of advisory locks actually held. The pid column is still
@@ -127,11 +135,12 @@ if [ -r /proc/locks ]; then
   while IFS=' ' read -r _ marker _ _ lpid lid _ _; do
     [ "$marker" != "->" ] || continue
     [ -n "$lid" ] || continue
-    ldev="${lid%%:*}"; resto="${lid#*:}"; lino="${resto##*:}"
-    case "$ldev" in ''|*[!0-9a-fA-F]*) continue ;; esac
+    lmaj="${lid%%:*}"; resto="${lid#*:}"; lmin="${resto%%:*}"; lino="${resto##*:}"
+    case "$lmaj$lmin" in ''|*[!0-9a-fA-F]*) continue ;; esac
     case "$lino" in ''|*[!0-9]*) continue ;; esac
-    [ "$((16#$ldev))" = "$((10#$lock_dev))" ] || continue
-    [ "$((10#$lino))" = "$((10#$lock_ino))" ] || continue
+    [ "$((16#$lmaj))" -eq "$lock_major" ] || continue
+    [ "$((16#$lmin))" -eq "$lock_minor" ] || continue
+    [ "$((10#$lino))" -eq "$((10#$lock_ino))" ] || continue
     locks_seen=true; locks_pid="$lpid"
   done < /proc/locks
 fi
@@ -329,7 +338,13 @@ fi
 
 kill_holder(){
   local pid="$1" waited
-  kill -TERM "$pid" 2>/dev/null || { info "TERM failed for pid $pid (already gone?)"; return 0; }
+  if ! kill -TERM "$pid" 2>/dev/null; then
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 0   # already gone between the scan and the signal
+    fi
+    info "TERM was refused for pid $pid (another user's process holding our lock inode); treating as unrecovered"
+    return 1
+  fi
   for waited in 1 2 3 4 5 6 7 8; do
     kill -0 "$pid" 2>/dev/null || return 0
     sleep 1
