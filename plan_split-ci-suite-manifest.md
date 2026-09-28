@@ -7,7 +7,7 @@ Owner issue: https://github.com/popcre/ai-devops/issues/1001.
 
 | Step | State | Evidence |
 |---|---|---|
-| 0 Prove the collision | ⬜ open (2026-09-28) | — |
+| 0 Prove the collision | ✅ done (2026-09-28) | [manifest-collision-2026-09.md](tests/verification/repo-throughput/manifest-collision-2026-09.md): #721 and #849 both hand-resolved textual manifest conflicts during main refreshes; gate met |
 | 1 Loader | ⬜ open | — |
 | 2 Migrate data | ⬜ open | — |
 | 3 Switch readers | ⬜ open | — |
