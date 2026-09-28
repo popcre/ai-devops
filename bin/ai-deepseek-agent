@@ -46,10 +46,12 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 fi
 
 declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/reviewer_event_guard.sh"
-CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
+PROFILE_HOME="${USERPROFILE:-$HOME}"
+case "$PROFILE_HOME" in [A-Za-z]:*) PROFILE_HOME="/$(printf '%s' "$PROFILE_HOME" | sed 's#\\#/#g; s#:#/#')";; esac
+CFG_DIR="$PROFILE_HOME/.config/ai-devops"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
-KEY_STORE="${AI_DEEPSEEK_KEY_STORE:-$CFG_DIR/secrets/deepseek-api-key}"
+KEY_STORE="$CFG_DIR/secrets/deepseek-api-key"
 # Both slugs below were verified live against https://api.deepseek.com on
 # 2026-09-17 (GET /models, then one doctor --live probe per slug, both PASS):
 # deepseek-flash is DeepSeek V4.1 Flash; deepseek-v4-pro is the other supported
@@ -206,7 +208,7 @@ unset DEEPSEEK_API_KEY
 exec 9<<<"$keep_key"
 keep_key=""
 clean=(/usr/bin/env -i "PATH=${PATH:-}" "HOME=${HOME:-}" "AI_DEEPSEEK_SECRET_FD=9" "AI_DEEPSEEK_REEXEC=1")
-for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL AI_DEVOPS_CONFIG_DIR AI_DEEPSEEK_KEY_STORE DEEPSEEK_MODEL AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
+for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL DEEPSEEK_MODEL AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
   [ -z "${!name:-}" ] || clean+=("$name=${!name}")
 done
 exec "${clean[@]}" /usr/bin/bash --noprofile --norc "$script" "$@"
@@ -301,30 +303,56 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ "$SUBCMD" = store-key ]; then
     # Git Bash lacks flock. Share the portable lock used by the other
     # reviewer key refreshes so 1Password reads remain serialized.
     (
-      lock_dir="${AI_MUSE_STATE_DIR:-$HOME/.local/state/ai-devops/muse}/credential.lock.d"
+      lock_dir="$PROFILE_HOME/.local/state/ai-devops/muse/credential.lock.d"
       mkdir -p "$(dirname "$lock_dir")" || exit 1
       deadline=$(( $(date +%s) + 120 ))
-      lock_token="$$-$RANDOM-$(date +%s)"
-      until mkdir "$lock_dir" 2>/dev/null; do
-        owner="$(cat "$lock_dir/pid" 2>/dev/null || true)"
-        case "$owner" in
-          ''|*[!0-9]*)
-            if [ -n "$(find "$lock_dir" -maxdepth 0 -mmin +1 -print -quit 2>/dev/null)" ]; then
-              if mv "$lock_dir" "$lock_dir.stale.$lock_token" 2>/dev/null; then rm -rf "$lock_dir.stale.$lock_token"; continue; fi
-            fi
-            ;;
-          *)
-            if ! kill -0 "$owner" 2>/dev/null; then
-              if mv "$lock_dir" "$lock_dir.stale.$lock_token" 2>/dev/null; then rm -rf "$lock_dir.stale.$lock_token"; continue; fi
-            fi
-            ;;
-        esac
+      lock_record() { cat "$lock_dir/owner" 2>/dev/null || true; }
+      lock_owner_alive() {
+        local pid="$1" winpid="$2"
+        if kill -0 "$pid" 2>/dev/null || [ -d "/proc/$pid" ]; then return 0; fi
+        [ -n "$winpid" ] && ps -W 2>/dev/null | awk -v w="$winpid" '$4 == w { f = 1 } END { exit !f }'
+      }
+      publish_lock() {
+        local stage winpid
+        stage="$(mktemp -d "$lock_dir.stage.XXXXXX")" || return 1
+        winpid="$(cat "/proc/$BASHPID/winpid" 2>/dev/null || true)"
+        lock_token="$BASHPID.${winpid:-0}.$(date +%s%N).$RANDOM"
+        printf '%s %s %s\n' "$BASHPID" "${winpid:--}" "$lock_token" > "$stage/owner"
+        printf '%s\n' "$BASHPID" > "$stage/pid"
+        printf '%s\n' "$lock_token" > "$stage/token"
+        if ! mv -T "$stage" "$lock_dir" 2>/dev/null; then rm -rf "$stage"; return 1; fi
+        [ "$(lock_record)" = "$BASHPID ${winpid:--} $lock_token" ]
+      }
+      acquire_lock() {
+        local record owner winowner token tomb attempt
+        [ -e "$lock_dir" ] || { publish_lock && return 0; }
+        record="$(lock_record)"
+        read -r owner winowner token <<< "$record"
+        # Muse's legacy pid-only lock is not safely reclaimable from another
+        # Git Bash runtime. Wait or fail closed; never move it aside.
+        [ -n "$owner" ] && [ -n "$token" ] && [ "$winowner" != - ] && [ -n "$winowner" ] || return 1
+        for attempt in 1 2 3; do
+          lock_owner_alive "$owner" "$winowner" && return 1
+          [ "$attempt" = 3 ] || sleep 1
+        done
+        tomb="$lock_dir.dead.$token"
+        mv -T "$lock_dir" "$tomb" 2>/dev/null || return 1
+        if [ "$(cat "$tomb/owner" 2>/dev/null || true)" != "$record" ]; then
+          mv -T "$tomb" "$lock_dir" 2>/dev/null || true
+          return 1
+        fi
+        publish_lock
+      }
+      release_lock() {
+        local current="$(lock_record)" pid winpid token
+        read -r pid winpid token <<< "$current"
+        [ -n "${lock_token:-}" ] && [ "$token" = "$lock_token" ] && rm -rf "$lock_dir" 2>/dev/null || true
+      }
+      until acquire_lock; do
         [ "$(date +%s)" -lt "$deadline" ] || { echo 'Error: 1Password credential lock is busy.' >&2; exit 1; }
         sleep 1
       done
-      printf '%s\n' "$lock_token" > "$lock_dir/token"
-      printf '%s\n' "$$" > "$lock_dir/pid"
-      trap '[ "$(cat "$lock_dir/token" 2>/dev/null || true)" != "$lock_token" ] || { rm -f "$lock_dir/token" "$lock_dir/pid"; rmdir "$lock_dir" 2>/dev/null || true; }' EXIT
+      trap 'release_lock' EXIT
       export OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_TOKEN"
       /usr/bin/env -u BASH_ENV -u ENV "$OP_BIN" run --env-file "$DEEPSEEK_REF_FILE" -- "$BASH_EXE" --noprofile --norc -c "$DEEPSEEK_CREDENTIAL_BOUNDARY" deepseek-credential-boundary "$0" "$SUBCMD" "$@"
     )
