@@ -1,16 +1,16 @@
 # IMPLEMENTATION PLAN — measured Jev token savings (2026-09-27)
 
-**Parent issue:** [#643](https://github.com/popcre/ai-devops/issues/643). **Handoff:** [this session's handoff](HANDOFF.d/2026-09-28T0216Z-edge-dev3-codex-jev-spend-reduction.md). **Owner:** the session implementing the first open row, one row per session.
+**Parent issue:** [#643](https://github.com/popcre/ai-devops/issues/643). **Handoff:** retired after the no-go baseline. **Owner:** the session implementing the first open row, one row per session.
 
 ## STATUS — read first
 
 | Step | State | Date | Acceptance artifact |
 |---|---|---|---|
-| 1. Establish a billable baseline and choose one replaceable decision | open | 2026-09-27 | `tests/verification/jev/spend-baseline-<UTC>.md` |
-| 2. Reuse the bounded Jev client and freeze one question set | open | 2026-09-27 | Client tests, pinned config, question fixture |
-| 3. Run the selected decision in shadow mode | open | 2026-09-27 | Labeled holdout and cost/quality report |
-| 4. Trial the substitution on eligible public work | open | 2026-09-27 | Paired before/after token and quality report |
-| 5. Keep or retire, then install and verify if kept | open | 2026-09-27 | Merged commit, checks, installed proof or no-go record |
+| 1. Establish a billable baseline and choose one replaceable decision | no-go complete | 2026-09-27 | [`spend-baseline-20260928T0243Z.md`](tests/verification/jev/spend-baseline-20260928T0243Z.md): no qualifying target |
+| 2. Reuse the bounded Jev client and freeze one question set | N/A — no qualifying target | 2026-09-27 | Step 1 no-go; no question set or new client |
+| 3. Run the selected decision in shadow mode | N/A — no qualifying target | 2026-09-27 | Step 1 no-go; no eligible selected decision |
+| 4. Trial the substitution on eligible public work | N/A — no qualifying target | 2026-09-27 | Step 1 no-go; no defensible paired trial |
+| 5. Keep or retire, then install and verify if kept | N/A — no qualifying target | 2026-09-27 | No integration or installation under this spend-reduction lane |
 
 **Fresh-session start:** read `AGENTS.md`, this STATUS table, §1, §5–§9, and the existing [Jev advisory plan](plan_typesafe-jev-advisory-integrations.md) STATUS. Claim only the first open row. Recheck live state; a dated plan is not proof of installed state. At each phase boundary use `fresh-session`, reread downstream steps, and update STATUS/current state in the same PR.
 
