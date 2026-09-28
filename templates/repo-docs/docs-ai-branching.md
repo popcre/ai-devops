@@ -36,3 +36,7 @@ ai-codex-review diff-review  # optional second opinion on the diff
 - Force-push (`git push --force`).
 - Delete branches.
 - Rewrite published history.
+
+An *assigned AI reviewer* is a rotation reviewer run through `ai-review` (or the
+shared-db allocator) whose engine differs from the implementing session's; the
+implementing session never approves its own change.

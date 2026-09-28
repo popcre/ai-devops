@@ -10,8 +10,8 @@ not open tasks.
 Closure does not mean every listed credential was rotated, revoked, or proved
 dead. It means the residual risk was explicitly accepted and the open-ended
 cleanup project was ended. No credential was read, changed, or rotated during
-closure. Future work must begin with a new, specifically authorized request for
-a named credential group.
+closure. Future work must begin with a reviewed plan (assigned AI reviewer APPROVE) for a
+named credential group, never an approval request to Albert.
 
 ## Executive verdict
 

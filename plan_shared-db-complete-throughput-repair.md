@@ -224,7 +224,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 7. Reviewer/runner SLOs govern start/reroute, not cancellation of healthy active work.
 8. (Moved out 2026-09-16, owner ruling.) Native merge queue activation and the `popcre` transfer are not #401 acceptance criteria; they belong only to shared-db #2530.
 9. An approved-migration train is an immutable exact list with dependency closure, risk compatibility, target proof, and per-migration live assertions. If #2716 is authorized and lands, a fully machine-qualified train promotes automatically and serially; any missing or ambiguous proof stops for an engineer, not a non-technical version-number choice from Albert.
-10. Owner authorization is consumed once for its stated scope. A session must not ask again for the same fix/deploy action, and must not ask Albert to judge migration identifiers that the governed evidence already decides.
+10. Reviewer authorization is consumed once for its stated scope. A session never asks Albert to approve a fix/deploy action, and must not ask Albert to judge migration identifiers that the governed evidence already decides.
 11. Routing is enforced twice: the sending session must classify from the actual proposed change, and the orchestrator must independently admit only database structure/schema work. A handover, `db-work` label, repository location, or sender assertion is never sufficient.
 12. Database-preview eligibility follows proved impact, not perceived risk. Documentation/plans/handoffs, reviewer and queue tooling, CI/workflow maintenance, read-only audits/reporting, tests, and application-only work may use the no-database-preview lane only when deterministic inspection proves they cannot alter database structure, behavior, permissions, or data. Uncertainty fails closed to the ordinary governed route.
 13. The no-database-preview lane skips only the database rehearsal and structural orchestrator. It retains every applicable code, test, review, security, deployment, and live-behavior gate, records a machine-readable exemption reason, and targets no more than ten minutes from PR-ready to merge-ready when runner capacity is available.
@@ -249,10 +249,10 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 - The runner fallback may use GitHub-hosted, qualified self-hosted, or Blacksmith capacity based on the live workflow's capabilities. It must be additive and fail closed.
 - The urgent start target begins at ten minutes. After five live outcomes, Step 10 may tighten or relax it based on measured evidence without exceeding thirty minutes.
 
-### Owner-only decisions
+### Reviewer-gated decisions (never Albert's approval — owner ruling 2026-09-28)
 
-- Transfer `u2giants/shared-db` to `popcre/shared-db` and mutate its live GitHub ruleset: follow #2530; planning is not authorization.
-- Activating #2716 changes the standing production policy across global instructions, shared-db rules, and workflow behavior. Its implementing session must present that exact policy change to Albert once before activation unless a current-chat ruling already authorizes it; after activation Albert is not asked to name machine migration versions.
+- Transfer `u2giants/shared-db` to `popcre/shared-db` and mutate its live GitHub ruleset: follow #2530 with an assigned AI reviewer's APPROVE; planning is not authorization.
+- Activating #2716 changes the standing production policy across global instructions, shared-db rules, and workflow behavior. Its implementing session gets an assigned AI reviewer's APPROVE of that exact policy change before activation; Albert is never asked to approve it or to name machine migration versions.
 
 ## 9. Numbered implementation plan
 
@@ -561,7 +561,7 @@ Rollback is a reviewed revert of the affected phase plus supported rules reinsta
 
 ### Open questions
 
-No engineering design choice blocks Step 0. Step 8 requires an assigned AI reviewer's APPROVE of the exact repository-transfer/settings action. Issue #2716 requires one explicit policy-activation ruling unless its implementation session can cite a current-chat ruling that authorizes the exact global/workflow change; after activation, individual machine version lists do not return to Albert. These are execution gates, not gaps in this plan.
+No engineering design choice blocks Step 0. Step 8 requires an assigned AI reviewer's APPROVE of the exact repository-transfer/settings action. Issue #2716 requires an assigned AI reviewer's APPROVE of the exact global/workflow policy activation; after activation, individual machine version lists do not return to Albert. These are execution gates, not gaps in this plan.
 
 ## Coverage of the throughput review
 

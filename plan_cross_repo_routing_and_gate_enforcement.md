@@ -440,7 +440,8 @@ archives or licensed source rows to perform the routing audit.
 #### Step 4.3 — infrastructure repositories
 
 Roll out to `popcre/infrastructure` and `u2giants/ansible`. Production mutation
-classes must remain denied without exact current-chat resource/action authority.
+classes must remain denied without an assigned AI reviewer's APPROVE of the exact
+resource/action (never Albert's approval — owner ruling 2026-09-28).
 
 **Gate for Steps 4.1-4.3:** every coverage-manifest row records policy version,
 landed commit/PR, routing before/after, trigger-eval result, local verification,

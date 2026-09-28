@@ -25,3 +25,7 @@ Useful commands (from the toolkit):
 
 - `ai-workspace-status` — check branch/dirty/PR safety before you start.
 - `ai-codex-review diff-review` — second-opinion review of the current diff.
+
+An *assigned AI reviewer* is a rotation reviewer run through `ai-review` (or the
+shared-db allocator) whose engine differs from the implementing session's; the
+implementing session never approves its own change.
