@@ -545,7 +545,8 @@ check 'a rejected key stops review without reading 1Password' "grep -qx stored-k
 check 'explicit store-key refreshes a rejected key' "cd '$REPO' && eval \"$ENV AI_MUSE_KEY_STORE='$KS' OP_STUB_CALLS_FILE='$TMP/op-review-calls' '$SCRIPT' store-key\" >/dev/null && grep -qx fake-key '$KS' && test \"\$(wc -l < '$TMP/op-review-calls')\" -eq 1"
 rm -f "$KS"; : > "$TMP/op-review-calls"
 MISSING_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$KS' OP_STUB_CALLS_FILE='$TMP/op-review-calls' MUSE_STUB_TEXT='VERDICT: APPROVE' '$SCRIPT' doctor --live" 2>&1 || true)"
-check 'a missing key store stops review and gives explicit maintenance guidance' "test ! -e '$KS' && test ! -s '$TMP/op-review-calls' && printf '%s' \"\$MISSING_OUT\" | grep -q 'review turns stop' && printf '%s' \"\$MISSING_OUT\" | grep -q 'protected Muse key store is unavailable'"
+check 'a missing key store stops review and gives explicit maintenance guidance' "test ! -e '$KS' && test ! -s '$TMP/op-review-calls' && printf '%s' \"\$MISSING_OUT\" | grep -q 'review turns stop' && printf '%s' \"\$MISSING_OUT\" | grep -q 'FAIL  protected Muse key store is present'"
+check 'a missing key store fails offline doctor and never reads 1Password' "cd '$REPO' && ! eval \"$ENV AI_MUSE_KEY_STORE='$KS' OP_STUB_CALLS_FILE='$TMP/op-review-calls' '$SCRIPT' doctor\" >/dev/null 2>&1 && test ! -s '$TMP/op-review-calls'"
 # The protections that make the store "protected" also fail closed during review.
 mkdir -p "$TMP/keystore-real"; printf 'linked-key\n' > "$TMP/keystore-real/muse-api-key"; chmod 600 "$TMP/keystore-real/muse-api-key"
 if MSYS=winsymlinks:nativestrict ln -s "$TMP/keystore-real" "$TMP/keystore-link" 2>/dev/null && [ -L "$TMP/keystore-link" ]; then
