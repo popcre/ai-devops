@@ -150,9 +150,10 @@ clone + `./install.sh` (Ubuntu) first.
    If the token file is absent, do NOT invoke the script bare and do NOT ask Albert:
    create the token file yourself from 1Password `vibe_coding` → item
    `vibe_coding-service-account` → field `op_service_account_token` (NOT the empty
-   `credential` field) through a pipe or `op_run`, never a command-line argument. If no authenticated
-   1Password route exists on this machine to read it, report it `Blocked —`; never
-   ask Albert.
+   `credential` field) through a pipe or `op_run`, never a command-line argument. This token is what
+   authenticates 1Password, so when the file is absent the usual route is gone: try
+   the 1Password MCP or an already-signed-in `op` session only; if neither can read
+   it, report it `Blocked —` (never ask Albert).
    A plaintext token or a missing launcher is a security/regression condition — fix
    it. If the only gap is cosmetic (e.g. the memory-sync task), fix it yourself. The installer rewrites the live Claude Desktop MCP config (backing up to
    `*.aidevops.bak` first), so say so before running it.

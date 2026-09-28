@@ -228,12 +228,14 @@ Group by consequence, not topic:
 Also list "Already settled — do NOT re-ask", with dates.
 
 Rules: plain business English, one or two sentences each, no jargon. A
-RECOMMENDATION for every item, so most can be answered with one word. Tell the
-next session to put the WHOLE list to him in ONE message, before starting work —
+RECOMMENDATION for every item, so most can be answered with one word. Tell the next session to put the WHOLE business-question list to him in ONE
+message (never a technical approval), before starting work —
 not one at a time as each is tripped over.
 
 THE SWEEP: before finishing, re-read the whole handoff and extract every sentence
-needing the owner. Tells: ⛔, "approve", "owner", "decide", "waiting on", "needs a
+needing the owner, then classify it: business meaning goes in §0; a technical
+approval, access, key, or manual step goes to an assigned AI reviewer, a tracked
+issue, or `Blocked —`, never to Albert. Tells: ⛔, "approve", "owner", "decide", "waiting on", "needs a
 ruling", "unanswered", "nobody has", his name. Anything found in §1–§9 or part (b)
 MUST also appear here. If there are genuinely none, write "None" explicitly — an
 empty §0 is information, a missing one is indistinguishable from a skipped sweep.
@@ -299,7 +301,8 @@ answer is an evidence-backed "yes" and every identified gap has been closed:
    way to verify it worked?
 5. Did I explain every term, identifier, path, and URL a newcomer wouldn't know?
 6. Did I run the section-0 sweep — walking §1–§9 and part (b) line by line — so
-   that every decision needing Albert appears in §0, including the ones outside
+   that every business decision needing Albert appears in §0 (and no technical
+   approval does), including the ones outside
    this workstream?
 
 Then ask and answer these **four** final synthesis questions exactly:
@@ -314,8 +317,9 @@ Then ask and answer these **four** final synthesis questions exactly:
    current state, failed attempts, decisions, constraints, risks, exact next
    actions, and verification evidence—present for the implementing agent to
    execute flawlessly?**
-4. **If Albert read ONLY section 0, would he see every decision I need from him,
-   including the ones outside this workstream?** Answer it the hard way — walk
+4. **If Albert read ONLY section 0, would he see every business decision I need
+   from him, including the ones outside this workstream, and no technical
+   approval?** Answer it the hard way — walk
    §1–§9 and part (b) line by line, list every sentence needing his judgement,
    and confirm each appears in §0. **Do not answer from memory or from intent.**
    The failure this catches is a decision correctly written down somewhere else

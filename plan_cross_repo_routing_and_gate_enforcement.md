@@ -184,7 +184,7 @@ files and sizes, policy version, special gates, and last verified date.
 | Classify only the committed PR diff | Misses scope drift before commit and misses untracked/staged/unstaged work |
 | Trust file extensions alone | Operational Markdown, migration ledgers, policies, and generated artifacts can require stronger gates |
 | Automatically downgrade a gate to save time | Central defaults cannot override a stronger repository rule or explicit owner request |
-| Require Albert to approve every reclassification | Recreates approval loops for ordinary scoped work; only material scope/authority decisions need him |
+| Require Albert to approve every reclassification | Recreates approval loops for ordinary scoped work; only material business-scope decisions need him |
 | Stop after `ai-devops` implementation | Leaves other repositories dependent on copied prose and does not satisfy repository-wide coverage |
 | Use elapsed-time alarms as the primary control | Reports waste after it occurs instead of preventing it |
 

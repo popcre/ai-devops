@@ -247,12 +247,13 @@ operationally, AND is listed here. **The duplication is the point.** Include:
 
 - Hard gates that block the work outright.
 - Choices where a wrong guess is recoverable but rework is wasteful.
-- **Anything you learned that needs the owner's judgement, even if it is OUTSIDE
-  this workstream** — a bug you noticed in passing, a stale ticket, an open marker,
-  a security exposure. **This is the category that goes missing.** "Not my scope"
+- **Anything you learned that needs a business-meaning judgement from the owner,
+  even if it is OUTSIDE this workstream** (a technical item such as a bug, stale
+  ticket, open marker, or security exposure instead gets a tracked issue, an
+  assigned AI reviewer, or a `Blocked —` line — never an ask to Albert). **This is the category that goes missing.** "Not my scope"
   is exactly why it has been ignored by five sessions already.
-- Anything a sub-agent surfaced. A finding that needs a human ruling is an **ask**,
-  not a finding — promote it.
+- Anything a sub-agent surfaced that needs a business ruling. That is an **ask**,
+  not a finding — promote it. A technical ruling goes to an assigned AI reviewer.
 
 ### How to write it
 
@@ -266,13 +267,16 @@ operationally, AND is listed here. **The duplication is the point.** Include:
   beats "important".
 - **Add an "Already settled — do NOT re-ask" list**, with dates. Re-asking a
   decided question burns the owner's patience and reopens closed arguments.
-- **Instruct the next session to put the WHOLE list to the owner in ONE message,
-  before starting work** — not one at a time as each is tripped over.
+- **Instruct the next session to put the WHOLE business-question list to the owner
+  in ONE message, before starting work** — not one at a time as each is tripped
+  over. Never include a technical approval in it.
 
 ### The sweep that makes it complete
 
-Before you finish, **re-read your own handoff end to end and extract every
-sentence that needs the owner**. Search for the tells: `⛔`, "approve", "owner",
+Before you finish, **re-read your own handoff end to end and extract every sentence that needs the
+owner**, then classify it: a business-meaning question goes in §0; a technical
+approval, access, key, or manual step goes to an assigned AI reviewer, a tracked
+issue, or `Blocked —`, never to Albert. Search for the tells: `⛔`, "approve", "owner",
 "decide", "waiting on", "needs a ruling", "unanswered", "nobody has", the owner's
 name. Anything you find anywhere in §1–§9 or part (b) **must also appear in §0**.
 
@@ -331,8 +335,9 @@ that support each answer:
 3. Is every single relevant detail needed for flawless execution included:
    background, goals, intended outcome, current state, failures, decisions,
    constraints, risks, exact next actions, and verification evidence?
-4. **If the owner read ONLY section 0, would he see every decision I need from
-   him — including the ones outside this workstream?** Answer it the hard way:
+4. **If the owner read ONLY section 0, would he see every business decision I need
+   from him — including the ones outside this workstream — and no technical
+   approval at all?** Answer it the hard way:
    walk §1–§9 and part (b) line by line, list every sentence that needs his
    judgement, and check each one appears in §0. **Do not answer this from memory
    or from intent** — the failure this question exists to catch is a decision you
@@ -380,7 +385,7 @@ now**. If that is true, the answer is Yes — say it.
   §0 as well.
 - **Recording something that needs the owner's ruling as a "finding" because it is
   out of scope.** Out-of-scope findings are precisely the ones that have already
-  been ignored by several sessions. A finding that needs a human ruling is an ask.
+  been ignored by several sessions. A finding that needs a business ruling is an ask; a technical one goes to an assigned AI reviewer.
 - **Making the owner ask "will the next session actually raise all of these?"**
   If he has to ask, §0 was missing or the sweep was skipped. That question is the
   alarm, not the process.

@@ -153,7 +153,8 @@ the task needs the detail.
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
   or protected files — never chat, command arguments, output, logs, or commits.
   Serialize 1Password access and load `secrets-to-1password`. Report leaks
-  immediately and treat exposed credentials as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers).
+  immediately and treat exposed credentials as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), except a credential under a standing
+  owner no-rotation directive (see `secrets-to-1password`).
 - **Destructive actions:** every destructive action must be recoverable before
   it happens. Inspect the exact target and keep a commit, backup, or reviewed
   preview. Never use broad staging or destructive Git commands over unreviewed
