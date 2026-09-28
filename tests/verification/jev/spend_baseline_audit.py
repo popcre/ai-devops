@@ -17,7 +17,8 @@ def read(f):
     except OSError: stats[client]['unreadable_files']+=1
 for client in ('claude','codex'):
     for f in glob.iglob(pat.format(client=client),recursive=True):
-        if '/subagents/' in f or '/agents/' in f:
+        fp=f.replace('\\','/')
+        if '/subagents/' in fp or '/agents/' in fp:
             stats[client]['excluded_subagent_files']+=1;continue
         rows=read(f)
         try: first=next(rows)
