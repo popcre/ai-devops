@@ -39,6 +39,23 @@ if ! command -v op >/dev/null 2>&1 && [ -n "${LOCALAPPDATA:-}" ] && command -v c
 fi
 PROFILE_HOME="${USERPROFILE:-$HOME}"
 case "$PROFILE_HOME" in [A-Za-z]:*) PROFILE_HOME="/$(printf '%s' "$PROFILE_HOME" | sed 's#\\#/#g; s#:#/#')";; esac
+muse_os_profile_home(){
+  local ps home=""
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+    [ -n "$ps" ] || return 1
+    home="$("$ps" -NoProfile -NonInteractive -Command '[Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)' | tr -d '\r')"
+    case "$home" in [A-Za-z]:*) home="/$(printf '%s' "$home" | sed 's#\\#/#g; s#:#/#')";; esac
+  else
+    home="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | cut -d: -f6)"
+  fi
+  [ -n "$home" ] || return 1
+  printf '%s\n' "$home"
+}
+KEY_HOME="$PROFILE_HOME"
+if [ -z "${AI_MUSE_TEST_DIR:-}" ]; then
+  KEY_HOME="$(muse_os_profile_home)" || { printf 'ai-muse: error: cannot identify the credential owner.\n' >&2; exit 1; }
+fi
 CFG="${AI_MUSE_CONFIG_DIR:-$PROFILE_HOME/.config/ai-devops-muse}"
 OC_CFG="$CFG/opencode-xdg/opencode"
 # Runtime engine: Meta's Muse Code CLI (default) or the pinned OpenCode harness.
@@ -65,7 +82,8 @@ case "$ENGINE" in
 esac
 CALLER="${AI_MUSE_CALLER:-}"
 STATE="${AI_MUSE_STATE_DIR:-$PROFILE_HOME/.local/state/ai-devops/muse}"
-KEY_STORE="${AI_MUSE_KEY_STORE:-$PROFILE_HOME/.config/ai-devops/secrets/muse-api-key}"
+KEY_STORE="$KEY_HOME/.config/ai-devops/secrets/muse-api-key"
+[ -z "${AI_MUSE_TEST_DIR:-}" ] || KEY_STORE="${AI_MUSE_KEY_STORE:-$KEY_STORE}"
 # The probe carries the live key, so only a test run may redirect it.
 KEY_PROBE_URL="https://api.meta.ai/v1/models"
 [ -z "${AI_MUSE_TEST_DIR:-}" ] || KEY_PROBE_URL="${AI_MUSE_KEY_PROBE_URL:-$KEY_PROBE_URL}"
@@ -423,33 +441,38 @@ muse_credential_acquire(){
   muse_credential_publish "$candidate"
 }
 muse_credential_state(){
-  local credential_home="" ps=""
+  local credential_home=""
   if [ -n "${AI_MUSE_TEST_DIR:-}" ]; then
     printf '%s\n' "$STATE"
-  elif [ -n "${SYSTEMROOT:-}" ]; then
-    ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
-    [ -n "$ps" ] || die 'cannot locate PowerShell to identify the credential-lock owner.'
-    credential_home="$("$ps" -NoProfile -NonInteractive -Command '[Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)' | tr -d '\r')"
-    case "$credential_home" in [A-Za-z]:*) credential_home="/$(printf '%s' "$credential_home" | sed 's#\\#/#g; s#:#/#')";; esac
-    [ -n "$credential_home" ] || die 'cannot identify the credential-lock owner.'
-    printf '%s/.local/state/ai-devops/muse\n' "$credential_home"
   else
-    credential_home="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | cut -d: -f6)"
-    [ -n "$credential_home" ] || die 'cannot identify the credential-lock owner.'
+    credential_home="$(muse_os_profile_home)" || die 'cannot identify the credential-lock owner.'
     printf '%s/.local/state/ai-devops/muse\n' "$credential_home"
   fi
 }
 read_key_from_op(){
   # Explicit key refreshes from Muse, Qwen and DeepSeek share this lock.
-  need op; local credential_state="" credential_home="" candidate="" budget deadline delay=1 waited=0
+  need op; local credential_state="" credential_home="" candidate="" token_file="" op_token="" budget deadline delay=1 waited=0
   credential_state="$(muse_credential_state)" || die 'cannot identify the credential-lock owner.'
+  if [ -z "${AI_MUSE_TEST_DIR:-}" ]; then
+    token_file="$KEY_HOME/.config/ai-devops/op-service-account"
+    [ -s "$token_file" ] && ! linked_below_home "$token_file" || die 'protected 1Password service-account token is unavailable.'
+    if [ -n "${SYSTEMROOT:-}" ]; then
+      protect_windows_path "$token_file" file || die 'could not verify the 1Password token ACL.'
+    else
+      [ "$(stat -c %a "$token_file" 2>/dev/null)" = 600 ] || die '1Password token file is not owner-only.'
+    fi
+    IFS= read -r op_token < "$token_file" || op_token=""
+    [ -n "$op_token" ] || die 'protected 1Password service-account token is empty.'
+  else
+    op_token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+  fi
   budget="${AI_MUSE_CREDENTIAL_WAIT_SECONDS:-120}"; case "$budget" in ''|*[!0-9]*) die 'AI_MUSE_CREDENTIAL_WAIT_SECONDS must be a whole number of seconds.';; esac
   if [ -z "${SYSTEMROOT:-}" ] && [ -z "${AI_MUSE_TEST_DIR:-}" ]; then
     need flock
     credential_home="${credential_state%/.local/state/ai-devops/muse}"
     candidate="$credential_home/.config/ai-devops/op-refresh.lock"
     mkdir -p "$(dirname "$candidate")" || die 'could not create the shared 1Password lock directory.'
-    MODEL_API_KEY="$(flock --close -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')" \
+    MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" flock --close -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')" \
       || die 'Muse key refresh failed or the shared 1Password lock is busy; no key was stored.'
     [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
     return
@@ -461,7 +484,7 @@ read_key_from_op(){
     [ "$waited" -eq 1 ] || { printf 'Muse: waiting for another turn to finish reading 1Password...\n' >&2; waited=1; }
     sleep "$delay"; [ "$delay" -ge 4 ] || delay=$((delay * 2))
   done
-  MODEL_API_KEY="$(op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"; release_credential_lock; [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
+  MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')"; release_credential_lock; [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
 }
 # The installer stores the Muse key once in a per-user protected file.
 # Review turns only read that store. Explicit store-key is the sole 1Password

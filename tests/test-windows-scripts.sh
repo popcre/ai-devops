@@ -87,6 +87,23 @@ for f in bin/setup-machine.ps1 bin/setup-opencode-glm.ps1; do
   if grep -q 'PSCommandPath' "$f"; then ok "$(basename "$f") defaults to its own checkout"
   else bad "$(basename "$f") does not derive RepoPath from its own location"; fi
 done
+# The installer runs before setup-machine stores the service-account token.
+# A first setup must retry Muse's protected store and prove live readiness only
+# after that token and the Muse runtime setup are available.
+setup_file=bin/setup-machine.ps1
+token_line=$(grep -nF '$env:OP_SERVICE_ACCOUNT_TOKEN = $Token.Trim()' "$setup_file" | tail -1 | cut -d: -f1)
+muse_setup_line=$(grep -nF '& $gitBash $museSetup' "$setup_file" | tail -1 | cut -d: -f1)
+muse_store_line=$(grep -nF '& $gitBash $museWrapper store-key --if-missing' "$setup_file" | tail -1 | cut -d: -f1)
+muse_live_line=$(grep -nF '& $gitBash $preflight check muse ($museRepo[0]) --live' "$setup_file" | tail -1 | cut -d: -f1)
+if [ -n "$token_line" ] && [ -n "$muse_setup_line" ] && [ -n "$muse_store_line" ] && [ -n "$muse_live_line" ] &&
+   [ "$token_line" -lt "$muse_setup_line" ] && [ "$muse_setup_line" -lt "$muse_store_line" ] && [ "$muse_store_line" -lt "$muse_live_line" ] &&
+   grep -Fq 'cygpath -u -- "$1"' "$setup_file" &&
+   grep -Fq 'if ($storeExit -ne 0) { throw "ai-muse store-key exited $storeExit" }' "$setup_file" &&
+   grep -Fq 'if ($LASTEXITCODE -ne 0) { throw "Muse live preflight exited $LASTEXITCODE" }' "$setup_file"; then
+  ok "fresh Windows setup stores and live-checks Muse after token and runtime setup"
+else
+  bad "fresh Windows setup can leave Muse unprepared or hide its setup failure"
+fi
 # Setup derives its checkout from the executing script. A fixed drive default
 # creates a second copy when the real checkout lives elsewhere.
 drive_defaults="$(grep -nE '\$RepoPath\s*=.*"[A-Za-z]:' bin/*.ps1 || true)"

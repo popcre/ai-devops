@@ -1215,12 +1215,6 @@ if (Test-Path -LiteralPath $glmSetup) {
     & $glmSetup -RepoPath $RepoPath
     if ($LASTEXITCODE -ne 0) { throw "setup-opencode-glm.ps1 exited $LASTEXITCODE" }
     Ok "GLM runs locally: ai-glm is on PATH and the OpenCode server is healthy"
-    $museSetup = Join-Path $RepoPath "bin\setup-opencode-muse.sh"
-    if (Test-Path -LiteralPath $museSetup) {
-      & $gitBash $museSetup
-      if ($LASTEXITCODE -ne 0) { throw "setup-opencode-muse.sh exited $LASTEXITCODE" }
-      Ok "Muse persistent protected conversations are installed: `$env:AI_MUSE_CALLER='codex'; ai-muse doctor"
-    }
   } catch {
     # Loud, not silent: say what broke and what still works.
     Warn "Local GLM setup did not complete: $($_.Exception.Message)"
@@ -1230,6 +1224,36 @@ if (Test-Path -LiteralPath $glmSetup) {
 } else {
   Warn "Missing $glmSetup - pull the latest ai-devops and re-run."
 }
+
+# The Windows installer runs before the one-time service-account token exists.
+# Complete Muse's credential setup here, after the token and runtime are ready.
+# Keep Muse independent of GLM so a GLM setup failure cannot skip this stage.
+Step "Muse protected reviewer"
+$museSetup = Join-Path $RepoPath "bin\setup-opencode-muse.sh"
+$museWrapper = Join-Path $RepoPath "bin\ai-muse"
+$preflight = Join-Path $RepoPath "bin\ai-review-preflight"
+foreach ($required in @($museSetup, $museWrapper, $preflight)) {
+  if (-not (Test-Path -LiteralPath $required)) { throw "Missing Muse setup component: $required" }
+}
+& $gitBash $museSetup
+if ($LASTEXITCODE -ne 0) { throw "setup-opencode-muse.sh exited $LASTEXITCODE" }
+$oldMuseCaller = $env:AI_MUSE_CALLER
+try {
+  $env:AI_MUSE_CALLER = 'installer'
+  & $gitBash $museWrapper store-key --if-missing
+  $storeExit = $LASTEXITCODE
+} finally {
+  $env:AI_MUSE_CALLER = $oldMuseCaller
+}
+if ($storeExit -ne 0) { throw "ai-muse store-key exited $storeExit" }
+# Muse has no requalify record; a live preflight is its supported health proof.
+$museRepo = @(& $gitBash -c 'cygpath -u -- "$1"' -- $RepoPath 2>$null)
+if ($LASTEXITCODE -ne 0 -or $museRepo.Count -ne 1 -or [string]::IsNullOrWhiteSpace($museRepo[0])) {
+  throw "Could not translate Muse repository path for Git Bash."
+}
+& $gitBash $preflight check muse ($museRepo[0]) --live
+if ($LASTEXITCODE -ne 0) { throw "Muse live preflight exited $LASTEXITCODE" }
+Ok "Muse protected reviewer is ready"
 
 # Retired: bin\ai-glm-agent.ps1 (GLM inside a Claude Code child process). Remove any
 # leftover PATH shim so a stale command cannot linger.
