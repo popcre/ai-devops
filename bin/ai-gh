@@ -614,7 +614,10 @@ if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED"
   GRAPH_META="$GRAPH_DIR/result"; GRAPH_FIFO="$GRAPH_DIR/stream"
   ( umask 077; : > "$GRAPH_META" && mkfifo "$GRAPH_FIFO" ) && [ -p "$GRAPH_FIFO" ] || { say "cannot prepare private GraphQL classifier"; exit 3; }
   classifier_timeout="$PROBE_TIMEOUT"; [ "$classifier_timeout" -gt 0 ] || classifier_timeout=5
-  timeout "$classifier_timeout" jq -sr '
+  # Git Bash FIFOs are readable by its POSIX tools, but native Windows jq
+  # reports "Bad file descriptor" when given a FIFO as stdin. Bridge it to
+  # an anonymous pipe without writing the response body to disk.
+  cat "$GRAPH_FIFO" | timeout "$classifier_timeout" jq -sr '
     (if length == 1 and (.[0] | type) == "array" then .[0] else . end) as $pages |
     if ($pages | length) == 0 or ($pages | any(type != "object")) then "unknown"
     elif ($pages | any(.errors != null and (.errors | type) != "array")) then "unknown"
@@ -622,7 +625,7 @@ if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED"
     elif ([$pages[].errors[]? | .message? | strings] | any(test("secondary rate limit|abuse detection|too many requests"; "i"))) then "secondary"
     elif ([$pages[].errors[]? | .message? | strings] | any(test("rate limit"; "i"))) then "primary"
     else "error" end
-  ' < "$GRAPH_FIFO" > "$GRAPH_META" 2>/dev/null & GRAPH_PID=$!
+  ' > "$GRAPH_META" 2>/dev/null & GRAPH_PID=$!
   # Keep the response tee in the foreground. Git Bash does not reliably wait
   # for a stdout process substitution before the classifier reads its FIFO;
   # a later page can otherwise be missed while gh has already exited.
@@ -640,10 +643,13 @@ fi
 exec 4>&-
 isnum "${rc:-}" || rc=1
 if [ -n "$GRAPH_PID" ]; then
-  wait "$GRAPH_PID" 2>/dev/null || true
+  wait "$GRAPH_PID" 2>/dev/null; classifier_rc=$?
   GRAPH_PID=''
   if [ "$rc" -eq 0 ]; then
-    case "$(cat "$GRAPH_META" 2>/dev/null)" in
+    # Native Windows jq writes CRLF even for its one-word classifier result.
+    graph_result=''
+    [ "$classifier_rc" -ne 0 ] || graph_result="$(tr -d '\r' < "$GRAPH_META" 2>/dev/null)"
+    case "$graph_result" in
       none) ;;
       secondary) printf 'GraphQL response: secondary rate limit\n' >> "$err"; rc=1 ;;
       primary) printf 'GraphQL response: API rate limit exceeded\n' >> "$err"; rc=1 ;;

@@ -165,15 +165,15 @@ rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
 # Resource classification and accounting: no real credential or API is used.
 fresh_quota(){ rm -f "$TMP/state/quota" "$TMP/state"/quota.* "$TMP/state"/quota-pause.* "$TMP/state/quota-resources" "$TMP/state/backoff_until"; rm -rf "$TMP/state/quota-contexts"; : > "$FAKE_LOG"; }
 mkdir -p "$TMP/linked-outside" "$TMP/link-identity-state" "$TMP/link-context-state" "$TMP/fifo-salt-state"
-if ln -s "$TMP/linked-outside" "$TMP/linked-state" 2>/dev/null; then
+if ln -s "$TMP/linked-outside" "$TMP/linked-state" 2>/dev/null && [ -L "$TMP/linked-state" ]; then
   AI_GH_STATE_DIR="$TMP/linked-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r > "$TMP/linked-state-out" 2> "$TMP/linked-state-err"; rc=$?
   check 'linked state root is rejected before an API call' "[ $rc -eq 3 ] && [ ! -s '$TMP/linked-state-out' ] && grep -q 'invalid GitHub state directory' '$TMP/linked-state-err'"
 else ok 'linked state root fixture is unavailable on this host'; fi
-if ln -s "$TMP/linked-outside" "$TMP/link-identity-state/identities" 2>/dev/null; then
+if ln -s "$TMP/linked-outside" "$TMP/link-identity-state/identities" 2>/dev/null && [ -L "$TMP/link-identity-state/identities" ]; then
   AI_GH_STATE_DIR="$TMP/link-identity-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r > "$TMP/link-identity-out" 2> "$TMP/link-identity-err"; rc=$?
   check 'linked identity directory is rejected before an API call' "[ $rc -eq 3 ] && [ ! -s '$TMP/link-identity-out' ] && grep -q 'cannot protect GitHub identity cache' '$TMP/link-identity-err' && [ ! -e '$TMP/linked-outside/owner' ]"
 else ok 'linked identity directory fixture is unavailable on this host'; fi
-if ln -s "$TMP/linked-outside" "$TMP/link-context-state/quota-contexts" 2>/dev/null; then
+if ln -s "$TMP/linked-outside" "$TMP/link-context-state/quota-contexts" 2>/dev/null && [ -L "$TMP/link-context-state/quota-contexts" ]; then
   AI_GH_STATE_DIR="$TMP/link-context-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r > "$TMP/link-context-out" 2> "$TMP/link-context-err"; rc=$?
   check 'linked quota directory is rejected before an API call' "[ $rc -eq 3 ] && [ ! -s '$TMP/link-context-out' ] && grep -q 'cannot protect GitHub quota contexts' '$TMP/link-context-err'"
 else ok 'linked quota directory fixture is unavailable on this host'; fi
@@ -182,22 +182,22 @@ AI_GH_STATE_DIR="$TMP/fifo-salt-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS
 check 'non-regular principal salt is ignored without blocking the command' "[ $rc -eq 0 ] && jq -e '.principal == \"unknown\"' '$TMP/fifo-salt-state/quota-observation.json' && [ -p '$TMP/fifo-salt-state/principal-salt' ]"
 printf 'protected\n' > "$TMP/linked-outside/canary"
 mkdir -p "$TMP/link-put-state" "$TMP/link-log-state" "$TMP/link-refusal-state" "$TMP/link-restore-state"
-if ln -s "$TMP/linked-outside/canary" "$TMP/link-put-state/last_call" 2>/dev/null; then
+if ln -s "$TMP/linked-outside/canary" "$TMP/link-put-state/last_call" 2>/dev/null && [ -L "$TMP/link-put-state/last_call" ]; then
   AI_GH_STATE_DIR="$TMP/link-put-state" AI_GH_QUOTA_PROBE_SECONDS=off "$GH" pr view 1 > "$TMP/link-put-out" 2> "$TMP/link-put-err"; rc=$?
   check 'atomic state writer refuses a linked destination' "[ $rc -eq 3 ] && [ \$(cat '$TMP/linked-outside/canary') = protected ] && grep -q 'invalid GitHub state file' '$TMP/link-put-err'"
 else ok 'linked state file fixture is unavailable on this host'; fi
-if ln -s "$TMP/linked-outside/canary" "$TMP/link-log-state/failures.log" 2>/dev/null; then
+if ln -s "$TMP/linked-outside/canary" "$TMP/link-log-state/failures.log" 2>/dev/null && [ -L "$TMP/link-log-state/failures.log" ]; then
   AI_GH_STATE_DIR="$TMP/link-log-state" FAKE_MODE=notfound AI_GH_QUOTA_PROBE_SECONDS=off "$GH" pr view 1 > "$TMP/link-log-out" 2> "$TMP/link-log-err"; rc=$?
   check 'failure evidence never appends through a link' "[ $rc -eq 1 ] && [ \$(cat '$TMP/linked-outside/canary') = protected ] && grep -q 'invalid GitHub state log' '$TMP/link-log-err'"
 else ok 'linked failure log fixture is unavailable on this host'; fi
-if ln -s "$TMP/linked-outside/canary" "$TMP/link-refusal-state/refusals.log" 2>/dev/null; then
+if ln -s "$TMP/linked-outside/canary" "$TMP/link-refusal-state/refusals.log" 2>/dev/null && [ -L "$TMP/link-refusal-state/refusals.log" ]; then
   AI_GH_STATE_DIR="$TMP/link-refusal-state" FAKE_MODE=secondary AI_GH_QUOTA_PROBE_SECONDS=off "$GH" pr view 1 > "$TMP/link-refusal-out" 2> "$TMP/link-refusal-err"; rc=$?
   check 'rate refusal never appends through a link' "[ $rc -eq 75 ] && [ \$(cat '$TMP/linked-outside/canary') = protected ] && grep -q 'invalid GitHub state log' '$TMP/link-refusal-err'"
 else ok 'linked refusal log fixture is unavailable on this host'; fi
 FAKE_TOKEN=token-restore-A AI_GH_STATE_DIR="$TMP/link-restore-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1
 restore_key="$(cat "$TMP/link-restore-state/quota-context-key")"
 FAKE_TOKEN=token-restore-B AI_GH_STATE_DIR="$TMP/link-restore-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r >/dev/null 2>&1
-if [ -f "$TMP/link-restore-state/quota-contexts/$restore_key/quota" ] && ln -s "$TMP/linked-outside/canary" "$TMP/link-restore-state/quota-contexts/$restore_key/quota.link" 2>/dev/null; then
+if [ -f "$TMP/link-restore-state/quota-contexts/$restore_key/quota" ] && ln -s "$TMP/linked-outside/canary" "$TMP/link-restore-state/quota-contexts/$restore_key/quota.link" 2>/dev/null && [ -L "$TMP/link-restore-state/quota-contexts/$restore_key/quota.link" ]; then
   mv "$TMP/link-restore-state/quota-contexts/$restore_key/quota" "$TMP/link-restore-state/quota-contexts/$restore_key/quota.original"
   mv "$TMP/link-restore-state/quota-contexts/$restore_key/quota.link" "$TMP/link-restore-state/quota-contexts/$restore_key/quota"
   FAKE_TOKEN=token-restore-A AI_GH_STATE_DIR="$TMP/link-restore-state" FAKE_MODE=quota AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" api repos/o/r > "$TMP/link-restore-out" 2> "$TMP/link-restore-err"; rc=$?
