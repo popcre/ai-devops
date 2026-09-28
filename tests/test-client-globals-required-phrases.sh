@@ -105,4 +105,9 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
     || fail "$(basename "$client_file") lost the reviewer gate on secret rotation"
 done
 
+for sync_skill in "$REPO_ROOT/skills/claude/sync-dotfiles/SKILL.md" "$REPO_ROOT/skills/codex/codex-sync-dotfiles/SKILL.md"; do
+  grep -qF "chmod 600" "$sync_skill" && grep -qF "Set-AiDevOpsPrivateFileAtomic" "$sync_skill" \
+    || fail "$(basename "$(dirname "$sync_skill")") lost the private-file rule for the token file"
+done
+
 echo "PASS: Claude, Codex, ZCode, and MiMo globals carry the required autonomy phrases, unwrapped"

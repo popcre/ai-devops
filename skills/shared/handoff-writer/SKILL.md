@@ -300,8 +300,8 @@ This is what "comprehensive" means. It is a fixed bar, not a feeling. "It could
 always be more detailed" is NOT a checklist item — do not treat it as one.
 
 - [ ] All 10 sections (0–9) present (or "N/A" + reason).
-- [ ] **Section 0 exists and the sweep was actually run.** Every owner decision
-      anywhere in §1–§9 or part (b) also appears in §0 — including ones outside
+- [ ] **Section 0 exists and the sweep was actually run.** Every business decision for the owner anywhere in §1–§9 or part (b) also
+      appears in §0 (and no technical approval does) — including ones outside
       this workstream — each with a recommendation, or §0 says "None" explicitly.
 - [ ] A street-newcomer could continue **without asking a single question**.
 - [ ] They could continue **as effectively as you can right now** — every

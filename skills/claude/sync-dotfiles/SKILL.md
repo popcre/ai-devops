@@ -150,7 +150,10 @@ clone + `./install.sh` (Ubuntu) first.
    If the token file is absent, do NOT invoke the script bare and do NOT ask Albert:
    create the token file yourself from 1Password `vibe_coding` → item
    `vibe_coding-service-account` → field `op_service_account_token` (NOT the empty
-   `credential` field) through a pipe or `op_run`, never a command-line argument. This token is what
+   `credential` field) through a pipe or `op_run`, never a command-line argument, and only
+   as a private file: directory `~/.config/ai-devops` mode `700`, write under
+   `umask 077` then `chmod 600` (Windows: `Set-AiDevOpsPrivateFileAtomic` from
+   `bin/windows-private-file.ps1`); then rerun the setup script so it reuses it. This token is what
    authenticates 1Password, so when the file is absent the usual route is gone: try
    the 1Password MCP or an already-signed-in `op` session only; if neither can read
    it, report it `Blocked —` (never ask Albert).
