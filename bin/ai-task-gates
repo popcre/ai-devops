@@ -70,7 +70,7 @@ usage: ai-task-gates <command> [options]
         Issue one-use authority for an exact reviewed toolkit release.
   install-verify --phase preflight|resume|finalize --target-head SHA
         --installed-checkout PATH --installed-launcher /usr/local/bin/ai-task-gates
-        [--caller-pinned]
+        [--caller-pinned] [--owner-request TEXT]
         Guard the Linux checkout update and installation transaction.
   explain [--json] [--base REF] [--paths-from FILE|-]
         Show the resolved identity, change set, class, and gates.
@@ -116,6 +116,7 @@ validate_action_gates(){
 declare -A TG_RANK=() TG_PROT=()
 load_class_table(){
   local class rank protected
+  TG_RANK=(); TG_PROT=()
   while IFS=$'	' read -r class rank protected; do
     [ -n "$class" ] || continue
     TG_RANK["$class"]="$rank"; TG_PROT["$class"]="$protected"
@@ -1019,7 +1020,7 @@ cmd_install_verify(){
       linux_review_authority "$pending" "$old" "$target" "$installed" "$launcher" "$candidate_root" finalize "$manifest" || blocked 'ai-task-gates: STOP. Pending install review proof changed.'
     else
       jq -e --arg old "$(jq -r .installed_head "$ordinary")" --arg target "$target" --arg path "$installed" \
-        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary install transaction does not match.'
+        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.owner_request|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary install transaction does not match.'
       old="$(jq -r .installed_head "$ordinary")"
       if [ -n "$completed_head" ]; then
         [ "$old" = "$completed_head" ] || blocked 'ai-task-gates: STOP. Ordinary install baseline differs from last completed release.'
@@ -1074,9 +1075,6 @@ cmd_install_verify(){
   if [ "$phase" = preflight ]; then
     [ "$declared_installation" = installation ] || blocked 'ai-task-gates: STOP. Linux update needs a declared installation task.'
   fi
-  if [ "$old" = "$target" ] && [ "$protected" -eq 0 ] && [ "$phase" = resume ]; then
-    [ "$declared_installation" = installation ] && [ -n "$owner_request" ] || blocked 'ai-task-gates: STOP. Same-source maintenance needs an installation task and owner request.'
-  fi
   if [ "$protected" -eq 1 ]; then
     [ "$phase" != preflight ] || [ "$caller_pinned" -eq 1 ] || blocked 'ai-task-gates: STOP. Protected Linux update requires caller-pinned target.'
     auth="$pending"
@@ -1087,9 +1085,15 @@ cmd_install_verify(){
   else
     [ ! -e "$issued" ] && [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Unexpected installation authority for an ordinary update.'
     if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
+      [ "$declared_installation" = installation ] && [ -n "$owner_request" ] || blocked 'ai-task-gates: STOP. Ordinary Linux installation needs a declared installation task and owner request.'
+    else
+      jq -e --arg old "$old" --arg target "$target" --arg path "$installed" \
+        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.owner_request|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary Linux transaction changed before resume.'
+    fi
+    if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
       mkdir -p "$auth_dir" && chmod 0700 "$STATE_DIR" "$auth_dir" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install state.'
-      jq -nc --arg old "$old" --arg target "$target" --arg path "$installed" \
-        '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path}' > "$ordinary.tmp" &&
+      jq -nc --arg old "$old" --arg target "$target" --arg path "$installed" --arg request "$owner_request" \
+        '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path,owner_request:$request}' > "$ordinary.tmp" &&
         chmod 0600 "$ordinary.tmp" && mv -f -- "$ordinary.tmp" "$ordinary" || blocked 'ai-task-gates: STOP. Cannot record ordinary install transaction.'
     fi
   fi

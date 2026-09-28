@@ -43,7 +43,8 @@ git -C "$TMP/candidate" commit -qm ordinary
 ordinary="$(git -C "$TMP/candidate" rev-parse HEAD)"
 git -C "$TMP/candidate" push -q origin HEAD:main
 git -C "$TMP/installed" fetch -q origin
-expect_ok 'ordinary update preflight records transaction' gate preflight "$TMP/candidate" "$ordinary"
+expect_stop 'ordinary update requires explicit owner request' gate preflight "$TMP/candidate" "$ordinary"
+expect_ok 'ordinary update preflight records transaction' gate preflight "$TMP/candidate" "$ordinary" --owner-request 'Owner requested ordinary Linux update'
 git -C "$TMP/installed" merge -q --ff-only "$ordinary"
 expect_ok 'ordinary updated checkout resumes' gate resume "$TMP/installed" "$ordinary"
 expect_stop 'finalize refuses before installed manifest is refreshed' gate finalize "$TMP/installed" "$ordinary"
@@ -81,6 +82,16 @@ jq -nc --arg target "$protected" --arg old "$ordinary" --arg path "$TMP/installe
   --arg policy "$policy_digest" --arg digest "$digest" --arg report "$report" --arg report_hash "$report_hash" \
   --arg manifest_hash "$(sha256sum "$TMP/etc/install-manifest.tsv" | cut -d' ' -f1)" --arg link "$TMP/installed/bin/ai-task-gates" \
   '{schema_version:1,target_head:$target,installed_head:$old,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed Linux install",legacy_migration:false,first_install:false,recover_launchers:false,linux_manifest_sha256:$manifest_hash,linux_link_target:$link}' > "$auth"
+cp "$auth" "$TMP/auth-original"
+jq '.first_install=true' "$TMP/auth-original" > "$auth"
+expect_stop 'first-install approval cannot replace upgrade approval' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+cp "$TMP/auth-original" "$auth"
+printf '# tampered\n' >> "$TMP/etc/install-manifest.tsv"
+expect_stop 'manifest changed after authorization' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+manifest "$ordinary"
+printf '# tampered review\n' >> "$report"
+expect_stop 'review changed after authorization' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+sed -i '$d' "$report"
 expect_ok 'reviewed protected update reserves exact authority' gate preflight "$TMP/candidate" "$protected" --caller-pinned
 expect_ok 'failed advance may retry same reserved target' gate preflight "$TMP/candidate" "$protected" --caller-pinned
 git -C "$TMP/installed" merge -q --ff-only "$protected"
@@ -92,3 +103,38 @@ expect_stop 'finalize refuses missing protected transaction' gate finalize "$TMP
 mv "$TMP/pending-backup" "$auth.consuming"
 expect_ok 'protected install finalizes only with live reviewed authority' gate finalize "$TMP/installed" "$protected"
 expect_stop 'one-use protected authority cannot replay' gate finalize "$TMP/installed" "$protected"
+
+# A genuinely absent managed installation has its own reviewed first-install
+# operation. A foreign launcher cannot be swapped into that pending grant.
+rm -f "$TMP/bin/ai-task-gates" "$TMP/etc/install-manifest.tsv" "$TMP/state/install-completions/last.json"
+printf '# Review\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\nApproved first-managed-install.\n\n## Verdict\nAPPROVE\n' "$protected" "$digest" > "$report"
+report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
+jq -nc --arg h "$protected" --arg d "$digest" --arg p "$report" --arg s "$report_hash" \
+  '{status:"completed",verdict:"APPROVE",stale:false,head:$h,source_digest:$d,report_path:$p,report_sha256:$s}' > "$AI_REVIEW_LIFECYCLE_DIR/runs/$key/codex/codex/approved.json"
+jq -nc --arg target "$protected" --arg path "$TMP/installed" --arg launcher "$TMP/bin/ai-task-gates" \
+  --arg policy "$policy_digest" --arg digest "$digest" --arg report "$report" --arg report_hash "$report_hash" \
+  '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed first install",legacy_migration:false,first_install:true,recover_launchers:false,linux_manifest_sha256:"",linux_link_target:""}' > "$auth"
+(cd "$TMP/candidate" && bin/ai-task-gates start --class installation) >/dev/null
+expect_ok 'first managed install reserves reviewed authority' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+ln -s /tmp/foreign-gate "$TMP/bin/ai-task-gates"
+expect_stop 'foreign launcher cannot enter first-install retry' gate resume "$TMP/installed" "$protected"
+rm -f "$TMP/bin/ai-task-gates"
+expect_ok 'first managed install resumes with launcher absent' gate resume "$TMP/installed" "$protected"
+ln -s "$TMP/installed/bin/ai-task-gates" "$TMP/bin/ai-task-gates"
+manifest "$protected"
+expect_ok 'first managed install finalizes after receipt publication' gate finalize "$TMP/installed" "$protected"
+
+# A pre-receipt symlink needs a separate same-commit migration review.
+rm -f "$TMP/etc/install-manifest.tsv" "$TMP/state/install-completions/last.json"
+printf '# Review\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\nApproved legacy-managed-launcher-refresh.\n\n## Verdict\nAPPROVE\n' "$protected" "$digest" > "$report"
+report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
+jq -nc --arg h "$protected" --arg d "$digest" --arg p "$report" --arg s "$report_hash" \
+  '{status:"completed",verdict:"APPROVE",stale:false,head:$h,source_digest:$d,report_path:$p,report_sha256:$s}' > "$AI_REVIEW_LIFECYCLE_DIR/runs/$key/codex/codex/approved.json"
+source_hash="$(sha256sum "$TMP/installed/bin/ai-task-gates" | cut -d' ' -f1)"
+jq -nc --arg target "$protected" --arg path "$TMP/installed" --arg launcher "$TMP/bin/ai-task-gates" \
+  --arg policy "$policy_digest" --arg digest "$digest" --arg report "$report" --arg report_hash "$report_hash" --arg link "$TMP/installed/bin/ai-task-gates" --arg source_hash "$source_hash" \
+  '{schema_version:1,target_head:$target,installed_head:$target,installed_checkout:$path,installed_launcher:$launcher,policy_digest:$policy,source_digest:$digest,review_report:$report,review_report_sha256:$report_hash,owner_request:"Owner requested reviewed legacy migration",legacy_migration:true,first_install:false,recover_launchers:false,linux_manifest_sha256:"",linux_link_target:$link,installed_source_sha256:$source_hash}' > "$auth"
+expect_ok 'legacy symlink migration reserves reviewed authority' gate preflight "$TMP/candidate" "$protected" --caller-pinned
+expect_ok 'legacy symlink migration resumes on same commit' gate resume "$TMP/installed" "$protected"
+manifest "$protected"
+expect_ok 'legacy symlink migration finalizes with new receipt' gate finalize "$TMP/installed" "$protected"
