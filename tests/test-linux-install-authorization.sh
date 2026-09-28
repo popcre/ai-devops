@@ -33,6 +33,9 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 printf '%s\n' "$phase" >> "$TEST_LOG"
+if [ -n "${TEST_CAPTURE_UMASK_FILE:-}" ]; then
+  umask > "$TEST_CAPTURE_UMASK_FILE"
+fi
 [ "$phase" != preflight ] || [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || exit 48
 [ "${TEST_GATE_DENY_PHASE:-}" != "$phase" ] || exit 41
 if [ "${TEST_GATE_RECOVER_PHASE:-}" = "$phase" ]; then
@@ -87,6 +90,15 @@ if TEST_REQUIRE_OWNER=1 "$TMP/installed/install.sh" --test-authorization-only >/
 fi
 TEST_REQUIRE_OWNER=1 TEST_ASSERT_GATE_CWD=1 "$TMP/installed/install.sh" --owner-request 'fixture approval' \
   --test-authorization-only >/dev/null
+(
+  umask 022
+  TEST_CAPTURE_UMASK_FILE="$TMP/installer-umask" "$TMP/installed/install.sh" --owner-request 'fixture approval' \
+    --test-authorization-only >/dev/null
+)
+[ "$(cat "$TMP/installer-umask")" = 0022 ] || fail 'installer leaked private lock umask into later stages'
+[ "$(stat -c %a "$HOME/.local/state/ai-devops/task-gates")" = 700 ] || fail 'installation lock directory is not private'
+lock_file=("$HOME"/.local/state/ai-devops/task-gates/install-*.lock)
+[ "${#lock_file[@]}" -eq 1 ] && [ "$(stat -c %a "${lock_file[0]}")" = 600 ] || fail 'installation lock file is not private'
 : > "$TEST_LOG"
 TEST_GATE_RECOVER_PHASE=resume "$TMP/installed/install.sh" --test-authorization-only > "$TMP/recovered-direct-output"
 grep -Fq 'Prior installation of' "$TMP/recovered-direct-output" || fail 'direct installer ignored recovered completion'
@@ -214,7 +226,12 @@ if grep -q '^finalize$' "$TEST_LOG"; then fail 'failed direct retry finalized'; 
   fail 'successful direct retry did not finalize exactly once'
 
 : > "$TEST_LOG"
-"$TMP/installed/update.sh" --expected-head "$target" --owner-request 'fixture approval' >/dev/null
+(
+  umask 022
+  TEST_CAPTURE_UMASK_FILE="$TMP/updater-umask" "$TMP/installed/update.sh" --expected-head "$target" \
+    --owner-request 'fixture approval' >/dev/null
+)
+[ "$(cat "$TMP/updater-umask")" = 0022 ] || fail 'updater leaked private lock umask into installation stages'
 check_head "$target"
 [ "$(paste -sd, "$TEST_LOG")" = 'start,preflight,install,resume,requalify,stages-complete,finalize' ] ||
   fail 'update did not run gate/install/requalification in order'
