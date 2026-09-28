@@ -411,6 +411,32 @@ record_restored_state() {
     [ ! -L "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE" ] || return 1
   printf '%s\n' "$target_head" > "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE"
 }
+invalidate_stage_marker() {
+  local marker="$HOME/.local/state/ai-devops/task-gates/install-stages/$target_head.json"
+  [ ! -L "$marker" ] || { warn 'refusing symlinked installation stage marker'; return 1; }
+  [ -e "$marker" ] || return 0
+  [ -f "$marker" ] && [ "$(stat -c %u "$marker")" = "$(id -u)" ] &&
+    [ "$(stat -c %a "$marker")" = 600 ] || {
+      warn 'refusing malformed installation stage marker'; return 1;
+    }
+  jq -e --arg target "$target_head" --arg checkout "$REPO_ROOT" \
+    '.schema_version==1 and .target_head==$target and .installed_checkout==$checkout' \
+    "$marker" >/dev/null 2>&1 || {
+      warn 'installation stage marker belongs to another transaction'; return 1;
+    }
+  rm -f -- "$marker"
+}
+restore_failed_install() {
+  # A prior completed attempt can leave a stage marker while a direct retry
+  # re-runs stages. Remove only this transaction's verified marker before
+  # restoring its older manifest; otherwise resume would reject the mismatch.
+  invalidate_stage_marker || {
+    warn 'installation stage marker needs manual repair; target remains pending'
+    return 1
+  }
+  if restore_install_state; then record_restored_state || true; return 0; fi
+  return 1
+}
 SOURCE_ROLLBACK_SAFE=1
 
 install_dependencies() {
@@ -785,20 +811,20 @@ run_stage required "Reviewer requalification" "$REPO_ROOT/bin/ai-review-prefligh
 
 echo
 if ! print_summary; then
-  if restore_install_state; then record_restored_state || true; fi
+  restore_failed_install || true
   exit 1
 fi
 # Publish the exact stage results in protected local state. The gate binds
 # this report to the transaction before finalize can consume it.
 publish_stage_report || {
-  if restore_install_state; then record_restored_state || true; fi
+  restore_failed_install || true
   warn 'stage result report could not be published; authorization remains pending'
   exit 1
 }
 (cd "$REPO_ROOT" && "$REPO_ROOT/bin/ai-task-gates" install-verify --phase stages-complete \
   --target-head "$target_head" --installed-checkout "$REPO_ROOT" \
   --installed-launcher /usr/local/bin/ai-task-gates --stage-report "$STAGE_REPORT") || {
-    if restore_install_state; then record_restored_state || true; fi
+    restore_failed_install || true
     warn 'installation stage receipt refused; authorization remains pending for repair'
     exit 1
   }

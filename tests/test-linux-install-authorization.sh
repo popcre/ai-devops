@@ -324,4 +324,41 @@ rm "$STAGE_REPORT"
 ln -s "$TMP/foreign-report" "$STAGE_REPORT"
 if publish_stage_report; then fail 'symlinked stage report was overwritten'; fi
 [ -L "$STAGE_REPORT" ] || fail 'foreign stage report symlink changed'
+
+# A direct retry may start with a valid marker from a prior completed stage
+# attempt. A later required-stage failure must remove only that target's
+# marker before restoring the old manifest, so pending authority can resume.
+eval "$(sed -n '/^invalidate_stage_marker() {/,/^}/p' "$ROOT/install.sh")"
+eval "$(sed -n '/^restore_failed_install() {/,/^}/p' "$ROOT/install.sh")"
+REPO_ROOT="$TMP/installed"
+marker_dir="$HOME/.local/state/ai-devops/task-gates/install-stages"
+mkdir -p "$marker_dir"
+marker="$marker_dir/$target.json"
+manifest="$TMP/retry-manifest"
+printf 'target manifest\n' > "$manifest"
+printf 'old manifest\n' > "$TMP/old-manifest"
+restore_install_state() { cp "$TMP/old-manifest" "$manifest"; }
+SOURCE_ROLLBACK_SAFE=0
+printf '%s\n' "$(jq -nc --arg t "$target" --arg p "$REPO_ROOT" \
+  '{schema_version:1,target_head:$t,installed_checkout:$p}')" > "$marker"
+chmod 600 "$marker"
+restore_failed_install || fail 'verified prior stage marker blocked rollback'
+[ ! -e "$marker" ] || fail 'stale stage marker survived failed retry'
+cmp -s "$TMP/old-manifest" "$manifest" || fail 'failed retry did not restore old manifest'
+auth_dir="$HOME/.local/state/ai-devops/task-gates/install-authorizations"
+mkdir -p "$auth_dir"
+touch "$auth_dir/$target.json.consuming"
+[ ! -e "$marker" ] && cmp -s "$TMP/old-manifest" "$manifest" ||
+  fail 'pending retry cannot resume from restored state'
+printf '%s\n' "$(jq -nc --arg t "$target" --arg p "$TMP/foreign" \
+  '{schema_version:1,target_head:$t,installed_checkout:$p}')" > "$marker"
+chmod 600 "$marker"
+printf 'target manifest\n' > "$manifest"
+if restore_failed_install; then fail 'foreign stage marker was removed'; fi
+[ -f "$marker" ] && [ "$(cat "$manifest")" = 'target manifest' ] ||
+  fail 'foreign marker or target manifest changed'
+rm "$marker"
+ln -s "$TMP/foreign-marker" "$marker"
+if restore_failed_install; then fail 'symlinked stage marker was removed'; fi
+[ -L "$marker" ] || fail 'symlinked stage marker changed'
 echo 'PASS: Linux installer authorization, checkout pin, lock, and update order'
