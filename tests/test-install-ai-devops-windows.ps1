@@ -377,6 +377,8 @@ printf ready > "$(dirname "$0")/muse-store-called"
     git -C $fixture add bin/ai-muse
     git -C $fixture commit -m "add Muse key-store fixture" | Out-Null
     git -C $fixture push | Out-Null
+    Invoke-Installer $fixture (Join-Path $TempRoot "muse-key-store\dry-claude") (Join-Path $TempRoot "muse-key-store\dry-codex") -SkillsDryRun | Out-Null
+    Assert-True (-not (Test-Path (Join-Path $fixture "bin\muse-store-called"))) "skills dry-run prepared the Muse key store"
     $oldMuseCaller = $env:AI_MUSE_CALLER
     try {
         $env:AI_MUSE_CALLER = 'prior-caller'
@@ -387,6 +389,11 @@ printf ready > "$(dirname "$0")/muse-store-called"
     }
     Assert-True (Test-Path (Join-Path $fixture "bin\muse-store-called")) "Muse install stage did not invoke store-key --if-missing"
     Assert-True ($output -match "Muse protected per-user key store is ready") "Muse install stage did not report protected key-store readiness"
+    $keyReadyAt = $output.IndexOf("Muse protected per-user key store is ready")
+    $requalifyAt = $output.IndexOf("Re-qualifying reviewers whose qualification the update invalidated")
+    $qualificationAt = $output.IndexOf("Test mode: not running live reviewer qualification")
+    Assert-True ($keyReadyAt -ge 0 -and $requalifyAt -gt $keyReadyAt -and $qualificationAt -gt $requalifyAt) `
+        "Muse key store was not prepared before the reviewer requalification path"
 
     Write-Host "PASS: install-ai-devops-windows"
 } finally {

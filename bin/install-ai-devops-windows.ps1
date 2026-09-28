@@ -782,6 +782,29 @@ if ($SkillsDryRun) {
 # qualification the pulled code invalidated. The fast-forward above ran with
 # hooks disabled, so this is the only requalify for this run.
 $installBash = Get-GitBash
+
+# A review turn may only read Muse's protected key store. Prepare it before
+# requalification, outside any review, even if Muse Code is not yet installed.
+$museWrapper = Join-Path $RepoPath 'bin\ai-muse'
+if (Test-Path -LiteralPath $museWrapper) {
+    if ($installBash) {
+        $oldMuseCaller = $env:AI_MUSE_CALLER
+        try {
+            $env:AI_MUSE_CALLER = 'installer'
+            $museProbe = Invoke-NativeProbe -Command $installBash.Source -Arguments @('--noprofile', '--norc', ($museWrapper -replace '\\', '/'), 'store-key', '--if-missing')
+        } finally {
+            $env:AI_MUSE_CALLER = $oldMuseCaller
+        }
+        if ($museProbe.ExitCode -eq 0) {
+            Write-Note 'Muse protected per-user key store is ready.'
+        } else {
+            Write-Note 'Muse key store setup failed; review qualification remains unavailable until ai-muse store-key succeeds.'
+        }
+    } else {
+        Write-Note 'Git Bash is needed to prepare the Muse key store.'
+    }
+}
+
 Install-PostMergeHook -Root $RepoPath -Bash $installBash
 if ($installBash) {
     $requalify = (Join-Path $RepoPath 'bin\ai-review-preflight') -replace '\\', '/'
@@ -922,30 +945,6 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
     Write-Note "Verify model access and completion with: ai-qwen doctor --live"
 } else {
     Write-Note "Qwen Code CLI not found. Install/login separately if you want the qwen-code skill to run local Qwen jobs."
-}
-
-# A review turn may only read Muse's protected key store. Prepare it during
-# installation, outside any review, even when the optional Muse Code CLI has
-# not yet been installed on this machine.
-$museWrapper = Join-Path $RepoPath 'bin\ai-muse'
-if (Test-Path -LiteralPath $museWrapper) {
-    $museBash = Get-GitBash
-    if ($museBash) {
-        $oldMuseCaller = $env:AI_MUSE_CALLER
-        try {
-            $env:AI_MUSE_CALLER = 'installer'
-            $museProbe = Invoke-NativeProbe -Command $museBash.Source -Arguments @('--noprofile', '--norc', ($museWrapper -replace '\\', '/'), 'store-key', '--if-missing')
-        } finally {
-            $env:AI_MUSE_CALLER = $oldMuseCaller
-        }
-        if ($museProbe.ExitCode -eq 0) {
-            Write-Note 'Muse protected per-user key store is ready.'
-        } else {
-            Write-Note 'Muse key store setup failed; review qualification remains unavailable until ai-muse store-key succeeds.'
-        }
-    } else {
-        Write-Note 'Git Bash is needed to prepare the Muse key store.'
-    }
 }
 
 # ZCode is a Windows-only client; $env:ProgramFiles is empty on non-Windows
