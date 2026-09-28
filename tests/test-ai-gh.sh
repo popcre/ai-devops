@@ -170,13 +170,18 @@ case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     # Match the S2 Windows context tests: the state must be below the user's
     # profile and have a private ACL before its first credential is read.
+    # Prepare a private parent first. A user profile may itself grant Modify
+    # to other SIDs, so EnsureCache must not be called directly below it.
     context_root="$(mktemp -d "$HOME/ai-gh-context.XXXXXXXX")"
     trap 'rm -rf "$TMP" "$context_root"' EXIT
     context_state="$context_root/state"
+    CONTEXT_ACL_ROOT="$(cygpath -w "$context_root")" powershell.exe \
+      -NoProfile -NonInteractive -Command '$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; & icacls.exe $env:CONTEXT_ACL_ROOT /inheritance:r /grant:r ("*" + $sid + ":(OI)(CI)(F)") | Out-Null; exit $LASTEXITCODE' \
+      >/dev/null 2>&1; context_acl_rc=$?
     powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
       -File "$(cygpath -w "$ROOT/tools/github-requests/secure-windows-path.ps1")" \
       -Mode EnsureCache -Path "$(cygpath -w "$context_state")" >/dev/null 2>&1; context_setup_rc=$?
-    check 'Windows quota context fixture has a protected state directory' "[ $context_setup_rc -eq 0 ] && [ -d '$context_state' ]"
+    check 'Windows quota context fixture has a protected state directory' "[ $context_acl_rc -eq 0 ] && [ $context_setup_rc -eq 0 ] && [ -d '$context_state' ]"
     ;;
 esac
 for token in ghp_fixtureA ghp_fixtureB; do
