@@ -131,7 +131,7 @@ Get-ChildItem -LiteralPath $reposSrc -Directory -Force | ForEach-Object {
     return
   }
   if ($keepOnC -contains $name) {
-    # worktrees container is bulk — still move it below via explicit entry
+    # worktrees container is bulk - still move it below via explicit entry
     if ($name -ne 'worktrees') { return }
   }
 
