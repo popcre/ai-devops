@@ -146,6 +146,7 @@ fi
 # stale lock-file name alone is accepted as ownership.
 install_lock_dir="$HOME/.local/state/ai-devops/task-gates"
 install_lock_name="install-$(printf '%s' "$REPO_ROOT" | sha256sum | cut -c1-16).lock"
+install_original_umask="$(umask)"
 umask 077
 mkdir -p "$install_lock_dir" || exit 1
 install_lock_file="$install_lock_dir/$install_lock_name"
@@ -157,6 +158,7 @@ else
   exec 9>"$install_lock_file" || exit 1
   flock -n 9 || { warn 'another installation is active for this checkout'; exit 1; }
 fi
+umask "$install_original_umask"
 if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" = 1 ] &&
    [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" != 9 ]; then
   warn 'only the lock-owning updater may defer finalization'
