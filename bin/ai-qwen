@@ -408,12 +408,15 @@ cmd_store_key() {
   token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
   [ -n "$token" ] || [ ! -s "$TOKEN_FILE" ] || token="$(<"$TOKEN_FILE")"
   credential_lock="$(qwen_shared_credential_lock_path)" || { rm -f "$tmp"; die 'could not resolve the shared 1Password credential lock.'; }
-  lock_doctor() { # lock_doctor WAIT LOCK -> run ai-lock-doctor when it is available
+  lock_doctor() { # lock_doctor WAIT LOCK -> sweep our-tool holders when available (#1002)
     local doctor
     doctor="$SCRIPT_DIR/ai-lock-doctor"
     [ -x "$doctor" ] || doctor="$(command -v ai-lock-doctor 2>/dev/null || true)"
     [ -n "$doctor" ] || { note 'ai-lock-doctor is unavailable; cannot self-heal the credential lock.'; return 0; }
     "$doctor" --recover --older-than "$1" "$2" || true
+  }
+  lock_still_held() { # lock_still_held LOCK -> 0 only while another process provably holds the lock
+    ! flock -n "$1" true 2>/dev/null
   }
   if ! (
     [ -z "$token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$token"
@@ -431,10 +434,13 @@ cmd_store_key() {
     else
       # setup-secrets.sh uses this same lock for Linux 1Password reads.
       # Keep it through op's exit, but never pass its descriptor to op's
-      # children. A timeout means a live holder: ai-lock-doctor clears only
-      # this toolkit's own holders, then the read is retried once (#1002).
+      # children. A failure while the lock is provably free is op's own
+      # error: no sweep and no retry. A failure while another process still
+      # holds the lock is a stuck holder: ai-lock-doctor clears only this
+      # toolkit's holders, then the read is retried once (#1002).
       command -v flock >/dev/null 2>&1 || exit 1
       flock --close -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp" && exit 0
+      lock_still_held "$credential_lock" || exit 1
       lock_doctor 120 "$credential_lock"
       flock --close -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp"
     fi

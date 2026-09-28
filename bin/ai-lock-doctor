@@ -22,8 +22,19 @@
 #      the lock is free, exit 3 when any holder exists;
 #   5. with --recover: TERM, then KILL after a bounded wait, ONLY our-tool
 #      holders at least --older-than seconds old (default 120, the shared
-#      credential wait). Younger our-tool holders and every foreign holder
-#      are left alone and reported.
+#      credential wait). Younger our-tool holders, holders whose start time
+#      cannot be proven, and every foreign holder are left alone and reported.
+#
+# Age semantics: --older-than is a PROCESS-age floor, not the lock-hold time
+# (flock records no hold time). The primary proof of a stuck lock is the
+# caller's own failed full `flock -w` wait plus a currently-held probe; the
+# age floor is the secondary bound that spares freshly started processes.
+# Killing an our-tool holder mid-`op read` is recoverable by design: the
+# reads are idempotent and the wrappers retry once.
+#
+# "The lock is free" is proven by the kernel (a non-blocking acquisition
+# succeeds), never by the fd scan's mere emptiness: the scan cannot read
+# other users' /proc trees.
 #
 # Exit codes: 0 lock free or recovered; 2 usage or unsupported platform;
 # 3 holders remain (foreign, or our-tool but too young to reclaim).
@@ -118,9 +129,12 @@ Hertz="$(getconf CLK_TCK 2>/dev/null || echo 100)"
 BootEpoch="$(sed -n 's/^btime //p' /proc/stat 2>/dev/null | tr -d ' \r')"
 [ -n "$BootEpoch" ] || BootEpoch=0
 
-# proc_age_seconds PID -> whole seconds since process start.
+# proc_age_seconds PID -> whole seconds since process start, or empty when the
+# start time cannot be proven (no btime, unreadable stat). An unknown age is
+# NEVER kill-eligible: the age floor only protects, it never authorizes.
 proc_age_seconds(){
   local start now
+  [ "$BootEpoch" -gt 0 ] || return 1
   start="$(proc_start_ticks "$1")" || return 1
   case "$start" in ''|*[!0-9]*) return 1 ;; esac
   now="$(date +%s)"
@@ -202,10 +216,11 @@ find_holders(){
 
 scan_once(){
   local pid age klass line
-  HOLDERS_OUR=''; HOLDERS_FOREIGN=''; HOLDERS_YOUNG=''
+  HOLDERS_OUR=''; HOLDERS_FOREIGN=''; HOLDERS_YOUNG=''; HOLDERS_UNKNOWN_AGE=''
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
-    age="$(proc_age_seconds "$pid" 2>/dev/null || echo '?')"
+    age="$(proc_age_seconds "$pid" 2>/dev/null || true)"
+    [ -n "$age" ] || age='?'
     if [ -n "${PROTECTED_PIDS[$pid]:-}" ]; then klass=self
     elif proc_is_our_tool "$pid"; then klass=our-tool
     else klass=foreign; fi
@@ -213,7 +228,10 @@ scan_once(){
     info "$line"
     case "$klass" in
       our-tool)
-        if [ "$age" = '?' ] || [ "$age" -ge "$older_than" ]; then
+        if [ "$age" = '?' ]; then
+          # An unprovable age never authorizes a kill.
+          HOLDERS_UNKNOWN_AGE+="$pid"$'\n'
+        elif [ "$age" -ge "$older_than" ]; then
           HOLDERS_OUR+="$pid"$'\n'
         else
           HOLDERS_YOUNG+="$pid"$'\n'
@@ -224,10 +242,17 @@ scan_once(){
   done < <(find_holders | LC_ALL=C sort -un)
 }
 
+# The fd scan can only see processes this user may read. The kernel is the
+# authority on freedom: prove a "no holder" verdict with a non-blocking
+# acquisition instead of trusting the scan's completeness (#1002 review).
 scan_once
-if [ -z "${HOLDERS_OUR}${HOLDERS_FOREIGN}${HOLDERS_YOUNG}" ]; then
-  info "no live holder holds inode $lock_id; the lock is free"
-  exit 0
+if [ -z "${HOLDERS_OUR}${HOLDERS_FOREIGN}${HOLDERS_YOUNG}${HOLDERS_UNKNOWN_AGE}" ]; then
+  if flock -n "$lockfile" true 2>/dev/null; then
+    info "no live holder holds inode $lock_id; the kernel confirms the lock is free"
+    exit 0
+  fi
+  info "the fd scan found no readable holder, but the kernel says the lock is held: another user's process or a restricted /proc holds inode $lock_id"
+  exit 3
 fi
 
 if [ "$recover" = false ]; then
@@ -260,6 +285,9 @@ fi
 if [ -n "$HOLDERS_YOUNG" ]; then
   info "our-tool holders younger than ${older_than}s are left alone"
 fi
+if [ -n "$HOLDERS_UNKNOWN_AGE" ]; then
+  info "our-tool holders whose start time cannot be proven are left alone"
+fi
 recovered_all=0
 while IFS= read -r pid; do
   [ -n "$pid" ] || continue
@@ -267,12 +295,17 @@ while IFS= read -r pid; do
   kill_holder "$pid" || recovered_all=1
 done <<<"$HOLDERS_OUR"
 
-# Re-scan: the lock is only free when every fd on the inode is gone.
+# Re-scan: the lock is only free when every fd on the inode is gone, and the
+# kernel, not the scan, proves it.
 scan_once
-if [ -n "$HOLDERS_FOREIGN" ] || [ -n "$HOLDERS_YOUNG" ] || [ -n "$HOLDERS_OUR" ]; then
-  info "holders remain after recovery: foreign and young holders are never signalled"
+if [ -n "$HOLDERS_FOREIGN" ] || [ -n "$HOLDERS_YOUNG" ] || [ -n "$HOLDERS_OUR" ] || [ -n "$HOLDERS_UNKNOWN_AGE" ]; then
+  info "holders remain after recovery: foreign, unknown-age, and young holders are never signalled"
+  exit 3
+fi
+if ! flock -n "$lockfile" true 2>/dev/null; then
+  info "the fd scan sees no holder, but the kernel still holds the lock; refusing to claim recovery"
   exit 3
 fi
 [ "$recovered_all" -eq 0 ] || { info "at least one our-tool holder could not be terminated"; exit 3; }
-info "recovered: no process holds inode $lock_id any more; the lock is free"
+info "recovered: the kernel confirms no process holds inode $lock_id; the lock is free"
 exit 0

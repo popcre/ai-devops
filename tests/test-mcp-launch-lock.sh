@@ -15,10 +15,13 @@ if grep -Fq 'exec flock -w 90 "$CFG_DIR/op-refresh.lock" op run' "$source_file";
 fi
 
 # The serialized op call goes through one shared helper: the lock covers only
-# the op command, closes before op's children, and self-heals once through
+# the op command, closes before op's children, proves real contention with a
+# non-blocking probe before any sweep, and self-heals once through
 # ai-lock-doctor before a single retry (#1002).
 grep -Fq 'flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"' "$source_file" ||
   fail "MCP launcher lock helper does not serialize exactly one op command"
+grep -Fq 'flock -n "$CFG_DIR/op-refresh.lock" true 2>/dev/null && return 1' "$source_file" ||
+  fail "MCP launcher sweeps the lock without proving contention first"
 grep -Fq 'ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"' "$source_file" ||
   fail "MCP launcher lock helper has no bounded self-healing retry"
 grep -Fq '_aidev_exports="\$(_aidev_flock op run' "$source_file" ||

@@ -16,12 +16,29 @@ result(){
 cleanup(){ kill "$@" 2>/dev/null || true; }
 trap 'rm -rf "$TMP"' EXIT
 
-# --- always: usage and platform refusal -------------------------------------
+# --- always: usage, executability, and platform refusal ---------------------
 
+# The tool must be committed executable: install.sh links only executable
+# bin/* entries, and the wired call sites test [ -x ] before falling back to
+# PATH (first exact-head review of #1002, finding 1).
+[ -x "$DOCTOR" ] && result pass 'ai-lock-doctor is committed executable' || result fail 'ai-lock-doctor is committed executable'
+[ -f "$ROOT/bin/ai-lock-doctor.cmd" ] && result pass 'ai-lock-doctor carries a Windows .cmd launcher' || result fail 'ai-lock-doctor carries a Windows .cmd launcher'
 bash -n "$DOCTOR" && result pass 'ai-lock-doctor passes bash -n' || result fail 'ai-lock-doctor passes bash -n'
 if "$DOCTOR" >/dev/null 2>&1; then result fail 'no lock file argument refuses with usage'; else result pass 'no lock file argument refuses with usage'; fi
 if "$DOCTOR" --no-such-flag "$TMP/x" >/dev/null 2>&1; then result fail 'unknown option is refused'; else result pass 'unknown option is refused'; fi
 if "$DOCTOR" --older-than ten "$TMP/x" >/dev/null 2>&1; then result fail 'non-numeric --older-than is refused'; else result pass 'non-numeric --older-than is refused'; fi
+
+# The wired wrappers must prove contention before any sweep, and must call
+# the doctor only through the bounded --recover route (#1002 review, finding 4).
+for wrapper in ai-qwen ai-muse ai-deepseek-agent; do
+  body="$ROOT/bin/$wrapper"
+  if grep -q 'flock -n .*true 2>/dev/null' "$body" && grep -q 'ai-lock-doctor' "$body" \
+     && grep -q -- '--recover --older-than' "$body" && bash -n "$body"; then
+    result pass "$wrapper probes contention and sweeps only through ai-lock-doctor"
+  else
+    result fail "$wrapper probes contention and sweeps only through ai-lock-doctor"
+  fi
+done
 
 # --- portable: Qwen lock_acquire pid+age rule for Muse's legacy lock --------
 

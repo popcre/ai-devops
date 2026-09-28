@@ -13,6 +13,8 @@ result(){
   else FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$2" >&2; fi
 }
 
+[ -x "$DRIFT" ] && result pass 'ai-merge-queue-drift is committed executable' || result fail 'ai-merge-queue-drift is committed executable'
+[ -f "$ROOT/bin/ai-merge-queue-drift.cmd" ] && result pass 'ai-merge-queue-drift carries a Windows .cmd launcher' || result fail 'ai-merge-queue-drift carries a Windows .cmd launcher'
 bash -n "$DRIFT" && result pass 'ai-merge-queue-drift passes bash -n' || result fail 'ai-merge-queue-drift passes bash -n'
 if "$DRIFT" --bogus >/dev/null 2>&1; then result fail 'unknown argument is refused'; else result pass 'unknown argument is refused'; fi
 

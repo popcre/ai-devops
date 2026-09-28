@@ -279,11 +279,14 @@ fi
 if [ -n "\${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "\${TRIGGER_ACCESS_TOKEN:-}" ]; then
   exec "\$@"
 fi
-# Serialize one op command under the refresh lock. On a wait timeout, let
-# ai-lock-doctor clear this toolkit's own stuck holders once, then retry
-# (#1002); a foreign holder is never touched and the failure stands.
+# Serialize one op command under the refresh lock. A failure while the lock
+# is provably free is op's own error: no sweep, no retry. A failure while
+# another process still holds the lock is a stuck holder: ai-lock-doctor
+# clears this toolkit's own holders once, then one retry (#1002); a foreign
+# holder is never touched and the failure stands.
 _aidev_flock() {
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
+  flock -n "$CFG_DIR/op-refresh.lock" true 2>/dev/null && return 1
   command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock" 2>/dev/null
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }
@@ -317,10 +320,13 @@ if [ -s "$TOKEN_FILE" ]; then
   export OP_SERVICE_ACCOUNT_TOKEN
 fi
 URL="\$1"; REF="\$2"; shift 2
-# Serialize the fallback op read like the MCP launcher: one doctor pass and
-# retry on a wait timeout (#1002), never holding the lock around mcp-remote.
+# Serialize the fallback op read like the MCP launcher: a failure while the
+# lock is provably free is op's own error (no sweep, no retry); a still-held
+# lock gets one doctor pass and one retry (#1002), never holding the lock
+# around mcp-remote.
 _aidev_flock() {
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
+  flock -n "$CFG_DIR/op-refresh.lock" true 2>/dev/null && return 1
   command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock" 2>/dev/null
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }
