@@ -14,14 +14,15 @@ Linked handoff (this session):
 
 | Step | State | Owner / dependency | Evidence required to accept |
 |---|---|---|---|
-| S1. Land BlockerWatch snapshot reuse (P5 REST savings) | 🟡 PR #867 merged and installed on edge-dev; 134 replay/tick checks and two normal scheduled ticks passed on 2026-09-27. The live request log lacks endpoint categories, so the exact REST savings are still unproved in [#868](https://github.com/popcre/ai-devops/issues/868). See [edge-dev evidence](tests/verification/github-requests/s1-edge-dev-2026-09-27.md). | #868 live-proof owner; do not bundle | One scheduled tick with category-level evidence for snapshot, dependents, wake, alarm, and links; then mark done |
-| S2. Share one PR status read across waiters (P4) | ⬜ open | after S1 helper edits settle | multi-waiter fixture: one upstream refresh, unchanged terminal outcomes |
-| S3. Route leftover direct callers through `ai-gh` (P3) | ⬜ open | after S2 | caller inventory disposition + focused bypass regression test |
-| S4. Before/after traffic sample + de-stale parent STATUS | ⬜ open | after S1–S3 installed | dated report under `tests/verification/github-requests/` |
+| S1. Land BlockerWatch snapshot reuse (P5 REST savings) | Code through #923 merged; 134 replay/tick checks and two prior edge-dev ticks passed. Category-level live savings remain unproved in #868 because installed telemetry predates #929. | #868 live-proof owner; installer #950 | One normal scheduled tick after install with snapshot, dependents, wake, alarm, and link category evidence |
+| S2. Share one PR status read across waiters (P4) | Accepted: PR #948 merged as f55c1a6 after exact-head review and Linux/Windows tests; edge-dev3 installed pair shared one OPEN refresh with independent deadlines at 11:45–11:46 AM EDT; #925 closed. | Codex issue #658 orchestrator | Live refresh and deadline proof passed; terminal and identity cases passed checked-in fixtures |
+| S3. Route leftover direct callers through ai-gh (P3) | PR #973 merged as 9cf87d4 after exact-head approval, focused tests, and green CI; S2 and shared-db consumer #3649 merged. Installed #931/#933 proof remains. | #931 and #933 scoped proof owners; installation | Caller inventory disposition, fail-closed static guard, focused bypass tests, and PR/CI passed; installed paths remain |
+| S4. Before/after traffic sample and de-stale parent STATUS | Open; parent STATUS updated provisionally on 2026-09-28, measured after-sample unavailable before installation. | Codex issue #658 orchestrator; S1-S3 installed | Dated comparable report under tests/verification/github-requests/ |
 
-**Start here:** a fresh session reads this entire file, then §5 "half-done WIP"
-before touching code. Claim exactly one step. One unproven live outcome per
-session. Update this STATUS when a step lands.
+**Start here:** read this STATUS and the
+[active programme handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md)
+before touching code. S2 is landed; finish the first actionable unproved outcome.
+Keep one live proof per owner and update this STATUS when a step lands.
 
 ---
 
@@ -107,11 +108,14 @@ Anchors were checked 2026-09-25 on `origin/main` at `f1758c21` and on merged
 | Batched closed-issue search in `propagate` | already in `bin/ai-blocker-watch:360–375` | ~3 search queries per tick for 18 repos, not one per repo |
 | Safe request telemetry (P1) | #663 (`f0dc027b`) | caller labels + scrubbed measurements; live on edge-dev |
 
-**Important:** parent `plan_github-request-reduction.md` P5 STATUS still listed
-#809 as remaining on 2026-09-24. That row is stale. S4 must fix the parent
-STATUS; do not reimplement #809.
+**Historical warning (2026-09-24):** the parent P5 STATUS once listed #809 as
+remaining after it had landed. The parent STATUS was refreshed provisionally on
+2026-09-28; do not reimplement #809. S4 still owes the measured after-sample.
 
-### Still true of the tick path (the remaining waste)
+### Original tick-path inventory (historical, before S1 landings)
+
+The rows below describe the 2026-09-25 starting state. Recheck current code and
+the STATUS table before treating one as an open defect.
 
 | Source | File:line (approx) | Behavior today | Why it is unneeded |
 |---|---|---|---|
@@ -536,4 +540,5 @@ targets and gates; adversarial tables with test names on every row; locked vs
 open decisions; named test suites; secrets by vault name only; DoD includes
 commit/PR/CI; reciprocal links with `HANDOFF.d/`.
 
-No claim that S1–S4 are already implemented. This document is the build brief.
+S2 code landed in #948. S1 live savings, S3, and S4 remain open as stated in
+the STATUS table; the original build brief below remains the decision record.

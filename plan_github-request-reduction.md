@@ -21,26 +21,55 @@ completed workflows or exact HTTP/GraphQL consumption. The 916 and hetz
 installations are still pre-P1 with no measurement history. The full 916 update
 is stopped by its protected reviewer-safety deployment gate; #660 stays open.
 
+Update 2026-09-28 2:41 PM EDT (Codex issue #658 orchestration): P2 #929,
+P4/S2 #948, installer #950, P3/S3 #973, and P1 #970 have merged. P2 #914
+and P4 #925 passed installed proof and closed. Guarded installation and measured
+acceptance remain open. A forward-only P1 attribution repair is in PR #1000;
+its first Windows CI run failed two fixture assertions; the then-current scoped
+repair received exact-head independent APPROVE, but subsequent commits invalidated
+that verdict. Historical GraphQL cost and quota snapshots cannot be
+joined to one credential context.
+The current phase states are below and in the
+[active handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md).
+
+Stop-state update 2026-09-28 3:40 PM EDT: Albert explicitly stopped this
+session and requested handover. Parent #658 was reopened because nine acceptance
+items remained unchecked. PR #1000 is open at `7190d7a`; Linux focused tests
+passed 204/0 and a protected Windows fixture pattern passed on 916, but the
+latest exact-head review is BLOCKED because its packet omitted test evidence.
+No merge or installation may use that verdict. A valid 4837 exact-head REJECT
+found a report crash and Windows recovery defect; scoped #1008 contains an
+interrupted, uncommitted repair in its own worktree. No fresh install approval
+exists for that changed target. The replacement standing rules put technical
+sign-in/access recovery on AI and prohibit asking Albert to perform it.
+
 | Step | State | Owner / dependency | Evidence required to accept |
 |---|---|---|---|
-| P1. Attribute consumption and freeze a comparable baseline | Merged and live on edge-dev/edge-dev3; two active edge-dev reset windows documented, but multi-host acceptance NOT complete | #660, original owner Codex chat `01a0c02a-1fd1-7471-a874-4deb1038d114` on ALBT16; live handover to Claude chat `24095101-0001-40ff-aa02-f34947cb0d16` on edge-dev | [Inventory and measurement boundaries](tests/verification/github-requests/p1-baseline.md); 20 completed comparable operations, installed 916/hetz samples, principal binding, and request/point attribution still required |
-| P2. Protect the actual quota and preserve command behavior | Open, 2026-09-20 | P1; one claimed implementation owner | Mixed-bucket fixtures and installed quota-mismatch proof |
-| P3. Route all managed request sources through the shared policy | Open, 2026-09-20 | P2 | Caller inventory reconciled, regression guard and installed representative paths |
-| P4. Coalesce duplicate status reads and waiters | Open, 2026-09-25 — execution steps in [`plan_cut-unneeded-github-traffic.md`](plan_cut-unneeded-github-traffic.md) S2 | P1–P3 | Same-target multi-session trace with one upstream refresh and unchanged outcomes |
-| P5. Remove repeated BlockerWatch scans and writes | In progress, 2026-09-25: PR #806 (shared open-issue read), PR #812 (depends_on PR skip), and PR #853 (#809 alarm cache) on main. Wake and parked-work propagation already read the snapshot. This landing adds digest lookup and link() ids from the same snapshot. Before sample (edge-dev call log, 2026-09-25 8:00–9:00 AM EDT): 89 BlockerWatch calls (50 REST, 37 GraphQL). After sample pending one comparable hour after install. Remaining: after sample, then mark done | P1–P3; serialize with P4 helper edits | Scan/write counts plus wake, alarm and dependency-link equivalence |
-| P6. Govern aggregate account demand across hosts | Open, 2026-09-20 | P2–P5 | Selected design record and simultaneous-host quota/recovery proof |
-| P7. Install and prove coverage across active clients and hosts | Open, 2026-09-20 | P2–P6 | Host/client/version matrix with one bounded installation proof per session |
-| P8. Accept measured savings with no workflow regression | Open, 2026-09-20 | P1–P7 | Comparable before/after report satisfying section 13 |
+| P1. Attribute consumption and freeze a comparable baseline | Partial: PR #970 merged as e108418; edge-dev3 has 16 observed GraphQL cost rows but only 2 completed non-deadline receipts, and old quota snapshots lack access-context join; PR #1000 open at 7190d7a with exact-head review BLOCKED for missing test packet evidence | #660, successor owner of #658; guarded installation and live proof | Baseline exists; 20 comparable operations, host samples, principal binding, and actual request/point attribution still required |
+| P2. Protect the actual quota and preserve command behavior | Accepted: PR #929 (b2fb997) merged after review/CI; installed edge-dev3 hash matched and normal GraphQL read passed at 11:37 AM EDT; #914 closed with signed proof | Codex issue #658 orchestrator | Separate-bucket, identity, malformed-state and cost fixtures plus installed read passed; broader P8 savings remain separate |
+| P3. Route all managed request sources through the shared policy | PR #973 merged as 9cf87d4 after exact-head approval, focused tests, and green CI; shared-db consumer #3649 merged; installed #931/#933 proof open | #931 and #933 scoped proof owners; installation | Caller inventory, regression guard, and PR/CI passed; installed representative paths remain |
+| P4. Coalesce duplicate status reads and waiters | Accepted: PR #948 (f55c1a6) merged after review/CI; two installed edge-dev3 waiters shared one OPEN refresh and kept independent deadline outcomes at 11:45–11:46 AM EDT; #925 closed with signed proof | Codex issue #658 orchestrator | Live same-target trace passed; terminal merge/ejection and identity isolation passed checked-in fixtures |
+| P5. Remove repeated BlockerWatch scans and writes | Snapshot code through #923 merged; edge-dev telemetry lacks #929 category labels, so #868 live proof remains open | #868, Codex issue #658 orchestrator; installer #950 | One natural due tick after install with category counts and wake/alarm/link equivalence |
+| P6. Govern aggregate account demand across hosts | Provisional decision on #658: retain local admission; no coordinator without same-principal contention evidence | Codex issue #658 orchestrator; P1/P7 samples | Simultaneous-host quota/recovery proof or evidence-backed final design record |
+| P7. Install and prove coverage across active clients and hosts | Open: #950 merged; #1008 interrupted safety repair follows valid 4837 REJECT; edge-dev3 guarded retry stopped before backup on sudo auth; edge-dev legacy launchers/dirty canonical preserved; edge-dev/916 personal auth and t16 route unresolved | Successor owner of #658; guarded host-local exact-head reviews and AI access recovery | Host/client/source-hash matrix and functional installed paths; Hetz production gate is separate |
+| P8. Accept measured savings with no workflow regression | Open: no valid 20-outcome/two-busy-window comparison yet | Codex issue #658 orchestrator; P1-P7 | Comparable before/after report satisfying section 13 or independently reviewed lower-bound amendment |
 
-**Start:** claim P1 on #658, reconcile current upstream and read this entire plan,
-then its [discovery handoff](HANDOFF.d/2026-09-20T1801Z-916-codex-github-request-reduction.md).
-Each row is a separate outcome/session. The parent is a tracking record, not a
-bundle to dispatch to one worker. A phase owner opens a scoped child issue before
-implementation and updates this table. At each natural cut, use `fresh-session`
-and re-read downstream phases for drift. A landed-but-unproven row must name
-exactly one owned proof issue opened by its landing session, not this umbrella.
+**Start:** reconcile current upstream, read this STATUS and the
+[active handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md),
+then finish the first actionable unproved outcome under #658. The original
+[discovery handoff](HANDOFF.d/2026-09-20T1801Z-916-codex-github-request-reduction.md)
+remains historical context.
+Each row is a separate outcome with one accountable owner under the current
+orchestrator. The parent is a tracking record; distinct proof outcomes stay on
+scoped child issues. A phase owner updates this table and re-reads downstream
+phases for drift. A landed-but-unproven row must name exactly one owned proof
+issue rather than treating this umbrella as live proof.
 
 ## 1. The ultimate goal — what we are actually trying to achieve
+
+The source inventory and phase instructions below record the original design.
+Use the dated STATUS table above for what has landed, what is installed, and
+which proof remains open; do not redo a merged phase from historical prose.
 
 Albert's work should finish promptly without GitHub limits repeatedly interrupting
 it. Remove unnecessary requests where they originate, share already-fetched

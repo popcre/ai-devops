@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# ai-gh-app-auth — short-lived GitHub App installation token for background work.
+#
+# WHY THIS EXISTS. Every AI helper and every scheduled BlockerWatch tick used
+# Albert's personal login, so they shared ONE hourly GitHub allowance (5,000
+# REST requests, 5,000 GraphQL points). On 2026-09-28 it ran out and all GitHub
+# work stopped for about an hour. The GitHub App "pop-ai-watchers" (app id
+# 5112061, installed on popcre and u2giants) has its own allowance per
+# installation, so scheduled background reads no longer spend the allowance
+# that interactive sessions need.
+#
+# Usage:
+#   ai-gh-app-auth token <owner>   print an installation token for <owner> on stdout
+#                                   (for a pipe or GH_TOKEN only; never log it)
+#   ai-gh-app-auth install         copy the app private key from 1Password
+#                                   (vibe_coding / "GitHub App - pop-ai-watchers")
+#                                   into this machine's protected key file
+#   ai-gh-app-auth status          say whether this machine is set up (no secrets)
+#
+# Exit status: 0 ok; 3 this machine has no app key (callers fall back to the
+# personal login, so nothing stops); 1 any other failure.
+#
+# Environment:
+#   AI_GH_APP_DIR   key and token cache (default ~/.ai-devops/github-app)
+#   AI_GH_APP_ID    app id (default 5112061)
+set -euo pipefail
+umask 077
+
+DIR="${AI_GH_APP_DIR:-${HOME:?}/.ai-devops/github-app}"
+APP_ID="${AI_GH_APP_ID:-5112061}"
+KEY="$DIR/pop-ai-watchers.pem"
+API="https://api.github.com"
+OP_ITEM="GitHub App - pop-ai-watchers"
+
+say(){ printf 'ai-gh-app-auth: %s\n' "$*" >&2; }
+b64url(){ openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+jwt(){
+  local now head body
+  now="$(date +%s)"
+  head="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)"
+  body="$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)"
+  printf '%s.%s.%s' "$head" "$body" "$(printf '%s.%s' "$head" "$body" | openssl dgst -sha256 -sign "$KEY" | b64url)"
+}
+
+# App-authenticated calls (JWT) are not counted against any user allowance.
+app_get(){ curl -fsS --max-time 20 -H "Authorization: Bearer $1" -H 'Accept: application/vnd.github+json' "$API/$2"; }
+
+cmd_token(){
+  local owner="${1:-}" cache now exp tok J inst
+  [[ "$owner" =~ ^[A-Za-z0-9-]+$ ]] || { say "usage: token <owner>"; exit 1; }
+  [ -f "$KEY" ] || exit 3
+  owner="${owner,,}"
+  cache="$DIR/token-$owner"
+  now="$(date +%s)"
+  # Reuse a cached token with at least 10 minutes left (tokens last one hour).
+  if [ -f "$cache" ] && read -r exp tok < "$cache" && [ -n "${tok:-}" ] && [ "$exp" -gt $((now + 600)) ]; then
+    printf '%s\n' "$tok"; return 0
+  fi
+  J="$(jwt)" || { say "cannot sign with the app key"; exit 1; }
+  inst="$(app_get "$J" "users/$owner/installation" | jq -r '.id // empty')" ||
+    { say "app is not installed for $owner"; exit 1; }
+  [ -n "$inst" ] || { say "app is not installed for $owner"; exit 1; }
+  tok="$(curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $J" -H 'Accept: application/vnd.github+json' \
+    "$API/app/installations/$inst/access_tokens" | jq -r '.token // empty')" || { say "token request failed for $owner"; exit 1; }
+  [ -n "$tok" ] || { say "token request returned nothing for $owner"; exit 1; }
+  printf '%s %s\n' "$((now + 3300))" "$tok" > "$cache.tmp" && mv -f "$cache.tmp" "$cache"
+  printf '%s\n' "$tok"
+}
+
+cmd_install(){
+  command -v op >/dev/null || { say "1Password CLI (op) is required"; exit 1; }
+  mkdir -p "$DIR"; chmod 700 "$DIR"
+  # The key moves op -> protected file directly; it is never printed.
+  timeout 60 op read "op://vibe_coding/$OP_ITEM/private_key" < /dev/null > "$KEY.tmp" ||
+    { rm -f "$KEY.tmp"; say "could not read the key from 1Password"; exit 1; }
+  grep -q 'PRIVATE KEY' "$KEY.tmp" || { rm -f "$KEY.tmp"; say "1Password value is not a private key"; exit 1; }
+  chmod 600 "$KEY.tmp"; mv -f "$KEY.tmp" "$KEY"
+  say "key installed; checking both installations"
+  cmd_status
+}
+
+cmd_status(){
+  [ -f "$KEY" ] || { say "not set up on this machine (run: ai-gh-app-auth install)"; exit 3; }
+  local o rc=0
+  for o in popcre u2giants; do
+    if cmd_token "$o" >/dev/null; then say "$o: ok"; else say "$o: FAILED"; rc=1; fi
+  done
+  return "$rc"
+}
+
+case "${1:-}" in
+  token) shift; cmd_token "$@" ;;
+  install) cmd_install ;;
+  status) cmd_status ;;
+  *) say "usage: ai-gh-app-auth token <owner> | install | status"; exit 1 ;;
+esac

@@ -8,7 +8,9 @@ description: Start or continue a persistent protected Muse Spark 1.3 Contributor
 Use `ai-muse` only. Do not call OpenCode, the Meta API, or 1Password directly.
 
 Muse uses named persistent conversations in a disposable, self-contained copy of the
-target repository. Reviews have no write or shell tools. No other model is used if Muse fails.
+target repository (no git remote, never your checkout). Reviews may run commands, builds and
+tests and edit files in that copy; the edits are discarded and are not part of the PR.
+No other model is used if Muse fails.
 
 To have Muse write code, use `ai-muse implement <name> [--base REF] --prompt-file <brief>`.
 Muse edits a disposable worktree with a sandboxed shell; its work is committed on

@@ -144,7 +144,37 @@ record_graphql_cost(){
 }
 # Label only the transport subprocess. Resumed AI sessions are independent
 # callers and must not inherit BlockerWatch's attribution.
-gh_call(){ AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; }
+gh_call(){
+  # Scheduled ticks run as the "pop-ai-watchers" GitHub App, which has its own
+  # hourly allowance, so they never spend the personal allowance interactive
+  # sessions need (2026-09-28 exhaustion). Commands a session runs itself (wait,
+  # park, find) keep the personal login. No app key on this machine, or no
+  # owner in the call, falls back to the personal login: nothing stops.
+  local owner tok
+  if [ "$BW_APP" = 1 ] && owner="$(gh_owner "$@")" && tok="$("$APP_TOKEN" token "$owner" 2>/dev/null)"; then
+    GH_TOKEN="$tok" AI_GH_CALLER=ai-blocker-watch "$GH" "$@"
+  else
+    AI_GH_CALLER=ai-blocker-watch "$GH" "$@"
+  fi
+}
+# The repository owner a gh call targets (-R/--repo, repos/<owner>/, repo:<owner>/,
+# or a GraphQL owner= field). Prints nothing and fails when the call names none.
+gh_owner(){
+  local a prev='' o=''
+  for a in "$@"; do
+    case "$prev" in -R|--repo) o="${a%%/*}" ;; esac
+    case "$a" in
+      repos/*/*) o="${a#repos/}"; o="${o%%/*}" ;;
+      owner=*) o="${a#owner=}" ;;
+      *repo:*/*) o="${a#*repo:}"; o="${o%%/*}" ;;
+    esac
+    [ -z "$o" ] || break
+    prev="$a"
+  done
+  [[ "$o" =~ ^[A-Za-z0-9-]+$ ]] && printf '%s\n' "$o"
+}
+BW_APP=0
+APP_TOKEN="$TOOL_ROOT/bin/ai-gh-app-auth"
 # Only call sites below set this fixed telemetry label; a parent shell must not
 # be able to misclassify unrelated BlockerWatch requests.
 unset AI_GH_OPERATION
@@ -399,15 +429,16 @@ propagate(){
   # shared qualifier tail ("is:issue is:closed closed:>=<timestamp>", 48 chars
   # with the trailing repo term) pushes them over; nineteen repos cost three
   # queries instead of nineteen.
-  local -a queries=() ; local cur=""
+  local -a queries=() ; local cur="" cur_owner=""
   while read -r repo; do
     [ -n "$repo" ] || continue
     local term="repo:$repo "
-    if [ -n "$cur" ] && [ $(( ${#cur} + ${#term} + 48 )) -gt 256 ]; then
+    # A batch holds one owner only: each owner is its own app installation.
+    if [ -n "$cur" ] && { [ $(( ${#cur} + ${#term} + 48 )) -gt 256 ] || [ "${repo%%/*}" != "$cur_owner" ]; }; then
       queries+=("${cur}is:issue is:closed closed:>=$since"); cur=""
     fi
-    cur+="$term"
-  done < <(cfg '.repos[]')
+    cur+="$term"; cur_owner="${repo%%/*}"
+  done < <(cfg '.repos[]' | LC_ALL=C sort)
   [ -z "$cur" ] || queries+=("${cur}is:issue is:closed closed:>=$since")
   local ok=1 q closed
   for q in "${queries[@]}"; do
@@ -1101,6 +1132,8 @@ cmd_links(){
 
 cmd_tick(){
   BW_WORKFLOW=blocker_watch_tick
+  # The offline suite never mints real tokens.
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || BW_APP=1
   [ "${1:-}" != --dry-run ] || DRY=1
   lock_take || return 0
   local tick_started_ms='' tick_elapsed_ms=''
