@@ -46,7 +46,19 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 fi
 
 declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/reviewer_event_guard.sh"
-PROFILE_HOME="${USERPROFILE:-$HOME}"
+# Live reviews anchor the credential store to the operating system's account
+# profile, not caller-provided HOME/USERPROFILE. Offline fixtures may supply
+# their own isolated home only with the existing test-only marker.
+if [ -n "${AI_DEEPSEEK_TEST_DIR:-}" ]; then
+  PROFILE_HOME="${USERPROFILE:-$HOME}"
+elif [ -n "${SYSTEMROOT:-}" ]; then
+  PROFILE_PS="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"
+  [ -n "$PROFILE_PS" ] || { echo 'Error: PowerShell is required to resolve the Windows user profile.' >&2; exit 1; }
+  PROFILE_HOME="$("$PROFILE_PS" -NoProfile -NonInteractive -Command '[Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)' | tr -d '\r')"
+else
+  PROFILE_HOME="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | cut -d: -f6)"
+fi
+[ -n "$PROFILE_HOME" ] || { echo 'Error: could not resolve the operating-system user profile.' >&2; exit 1; }
 case "$PROFILE_HOME" in [A-Za-z]:*) PROFILE_HOME="/$(printf '%s' "$PROFILE_HOME" | sed 's#\\#/#g; s#:#/#')";; esac
 CFG_DIR="$PROFILE_HOME/.config/ai-devops"
 TOKEN_FILE="$CFG_DIR/op-service-account"
@@ -208,7 +220,7 @@ unset DEEPSEEK_API_KEY
 exec 9<<<"$keep_key"
 keep_key=""
 clean=(/usr/bin/env -i "PATH=${PATH:-}" "HOME=${HOME:-}" "AI_DEEPSEEK_SECRET_FD=9" "AI_DEEPSEEK_REEXEC=1")
-for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL DEEPSEEK_MODEL AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
+for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL DEEPSEEK_MODEL AI_DEEPSEEK_TEST_DIR AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
   [ -z "${!name:-}" ] || clean+=("$name=${!name}")
 done
 exec "${clean[@]}" /usr/bin/bash --noprofile --norc "$script" "$@"

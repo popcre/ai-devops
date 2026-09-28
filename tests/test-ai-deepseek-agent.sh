@@ -79,6 +79,17 @@ printf 'redirected-key\n' > "$TMP/alternate-config/secrets/deepseek-api-key"; ch
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEVOPS_CONFIG_DIR="$TMP/alternate-config" AI_DEEPSEEK_KEY_STORE="$TMP/alternate-config/secrets/deepseek-api-key" bash "$SCRIPT" send redirected --review >/dev/null 2>&1
 check "inherited path overrides cannot redirect a formal review to another key" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
 mv "$TMP/held-deepseek-key" "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+# Production-mode profile lookup must ignore caller-supplied HOME and
+# USERPROFILE; this is an offline doctor comparison, with no provider request.
+mkdir -p "$TMP/redirect-home/.config/ai-devops/secrets"
+chmod 700 "$TMP/redirect-home/.config/ai-devops/secrets"
+printf 'redirected-key\n' > "$TMP/redirect-home/.config/ai-devops/secrets/deepseek-api-key"
+chmod 600 "$TMP/redirect-home/.config/ai-devops/secrets/deepseek-api-key"
+HOST_DOCTOR_OUT="$(env -u AI_DEEPSEEK_TEST_DIR "$SCRIPT" doctor 2>&1)"; HOST_DOCTOR_RC=$?
+REDIRECT_DOCTOR_OUT="$(env -u AI_DEEPSEEK_TEST_DIR HOME="$TMP/redirect-home" USERPROFILE="$TMP/redirect-home" AI_DEVOPS_CONFIG_DIR="$TMP/alternate-config" AI_DEEPSEEK_KEY_STORE="$TMP/redirect-home/.config/ai-devops/secrets/deepseek-api-key" "$SCRIPT" doctor 2>&1)"; REDIRECT_DOCTOR_RC=$?
+printf '%s' "$HOST_DOCTOR_OUT" > "$TMP/host-doctor.out"
+printf '%s' "$REDIRECT_DOCTOR_OUT" > "$TMP/redirect-doctor.out"
+check "production doctor ignores inherited home and key-store redirects" "test '$HOST_DOCTOR_RC' -eq '$REDIRECT_DOCTOR_RC' && cmp -s '$TMP/host-doctor.out' '$TMP/redirect-doctor.out'"
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test --review >/dev/null 2>&1
 check "review reads protected store without 1Password" "test ! -e '$TMP/args'"
 HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" bash "$SCRIPT" store-key --if-missing >/dev/null 2>&1
