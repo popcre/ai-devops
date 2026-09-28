@@ -147,7 +147,14 @@ rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
 check 'mixed CLI cost is unknown and its resource snapshots are invalidated' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q '^0 3000 5000 ' '$TMP/state/quota' && grep -q '^0 3000 5000 ' '$TMP/state/quota.graphql'"
 check 'telemetry observes named server buckets with a private principal label' "jq -e '.buckets.core.remaining == 3000 and .buckets.graphql.remaining == 3000 and .buckets.search.remaining == 30 and (.principal | startswith(\"local-sha256:\"))' '$TMP/state/quota-observation.json'"
-check 'verified quota snapshot binds to an opaque local access context' "jq -e '.access_context | strings | test(\"^v1:[0-9a-f]{64}$\")' '$TMP/state/quota-observation.json'"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # The runner's short-TEMP ACL varies by host. The protected positive
+    # fixture below proves attribution; this one may safely be unattributed.
+    check 'Windows quota context is validated or unattributed' "jq -e '.access_context | if . == null then true else test(\"^v1:[0-9a-f]{64}$\") end' '$TMP/state/quota-observation.json'"
+    ;;
+  *) check 'verified quota snapshot binds to an opaque local access context' "jq -e '.access_context | strings | test(\"^v1:[0-9a-f]{64}$\")' '$TMP/state/quota-observation.json'" ;;
+esac
 # Git Bash on NTFS reports its inherited Windows ACL through synthetic modes;
 # POSIX hosts can additionally prove the file itself is mode 600.
 salt_check="[ \$(stat -c %a '$TMP/state/principal-salt') = 600 ]"
@@ -158,14 +165,28 @@ check 'quota observations retain bounded history without another request' "jq -s
 # One verified principal can hold distinct PATs. Quota snapshots must keep
 # their access contexts apart while the local context lookup makes no API call.
 context_log="$TMP/context-join-calls"; identity_log="$TMP/context-join-identity.log"
+context_state="$TMP/context-join-state"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Match the S2 Windows context tests: the state must be below the user's
+    # profile and have a private ACL before its first credential is read.
+    context_root="$(mktemp -d "$HOME/ai-gh-context.XXXXXXXX")"
+    trap 'rm -rf "$TMP" "$context_root"' EXIT
+    context_state="$context_root/state"
+    powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+      -File "$(cygpath -w "$ROOT/tools/github-requests/secure-windows-path.ps1")" \
+      -Mode EnsureCache -Path "$(cygpath -w "$context_state")" >/dev/null 2>&1; context_setup_rc=$?
+    check 'Windows quota context fixture has a protected state directory' "[ $context_setup_rc -eq 0 ] && [ -d '$context_state' ]"
+    ;;
+esac
 for token in ghp_fixtureA ghp_fixtureB; do
-  AI_GH_STATE_DIR="$TMP/context-join-state" FAKE_MODE=quota FAKE_REMAINING=4000 \
+  AI_GH_STATE_DIR="$context_state" FAKE_MODE=quota FAKE_REMAINING=4000 \
     FAKE_TOKEN="$token" FAKE_LOG="$context_log" FAKE_IDENTITY_LOG="$identity_log" \
     AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api repos/o/r >/dev/null 2>&1
 done
-check 'same-principal credentials retain two distinct quota access contexts' "jq -se 'length == 2 and (map(.access_context) | all(. != null)) and (map(.access_context) | unique | length == 2) and (map(.principal) | unique | length == 1)' '$TMP/context-join-state/quota-measurements/'*.jsonl"
+check 'same-principal credentials retain two distinct quota access contexts' "jq -se 'length == 2 and (map(.access_context) | all(. != null)) and (map(.access_context) | unique | length == 2) and (map(.principal) | unique | length == 1)' '$context_state/quota-measurements/'*.jsonl"
 check 'local context lookup adds no GitHub API request' "[ \$(grep -c '^start' '$context_log') -eq 4 ] && [ \$(wc -l < '$identity_log') -eq 2 ]"
-check 'quota history contains no token or numeric principal' "! grep -Eq 'ghp_fixtureA|ghp_fixtureB|55610577' '$TMP/context-join-state/quota-measurements/'*.jsonl"
+check 'quota history contains no token or numeric principal' "! grep -Eq 'ghp_fixtureA|ghp_fixtureB|55610577' '$context_state/quota-measurements/'*.jsonl"
 
 AI_GH_STATE_DIR="$TMP/context-missing-state" FAKE_MODE=quota FAKE_REMAINING=4000 \
   FAKE_TOKEN=ghp_fixtureC FAKE_IDENTITY_STATUS=1 FAKE_LOG="$TMP/context-missing-calls" \
