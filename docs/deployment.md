@@ -265,15 +265,26 @@ an install by the other reports "up to date" rather than inventing local edits.
 
 ```bash
 cd /worksp/ai-devops
-./update.sh          # git pull --ff-only, re-run install.sh, report installed SHA
+./update.sh --owner-request '<specific approved action>'
 ```
 
 `update.sh` never overwrites `/etc/ai-devops/*.env`. It returns nonzero if the
 installer has any required failure and reports the exact source SHA attempted.
 
-On Linux, `update.sh --expected-head <full-merged-SHA>` pins a protected update
-before the installed checkout moves. It fetches the target, runs the target
-gate from an isolated candidate, then fast-forwards the installed checkout.
+On Linux, `update.sh --expected-head <full-merged-SHA> --owner-request
+'<specific approved action>'` pins a protected update before the installed
+checkout moves. The **first** protected rollout must invoke the merged target
+script from a clean, exact-SHA worktree sharing the installed checkout's Git
+common directory:
+
+```bash
+cd /worksp/ai-devops-candidate
+./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA> --owner-request '<specific approved action>'
+```
+
+The updater verifies the candidate and installed checkout relationship, fetches
+and pins `origin/main`, runs the target gate, then advances only the named
+installed checkout. Later updates can run from the installed checkout itself.
 `install.sh` checks the same pending authorization before its first machine
 change, including when called directly. Same-source maintenance uses
 `./install.sh --owner-request '<specific approved action>'`; a protected source
@@ -286,13 +297,15 @@ after that restoration is confirmed. A foreign concurrent change stops
 automatic rollback and leaves the authorization pending for repair. Per-user
 provider and skill changes are not an atomic transaction, so a failed update
 still needs explicit capability verification before being called rolled back.
+Reviewer requalification is a required installer stage before authorization
+is finalized, including on a direct retry.
 
 Reviewer hosts do not need `update.sh` for requalification: the managed
 `post-merge` hook runs `ai-review-preflight requalify` on every pull whose
 result is on `origin/main` (development-branch merges are skipped). The two
 documented update paths — `update.sh` and rerunning the Windows installer —
-each fast-forward with hooks disabled and instead run one explicit
-`ai-review-preflight requalify` after installing, so a failed canary can
+each fast-forward with hooks disabled and run one explicit
+`ai-review-preflight requalify` during installation, so a failed canary can
 never masquerade as a pull or install failure mid-update. A failed automatic
 requalification is recorded with `ai-reviewer-issue record`; it fails
 `update.sh` and is printed (without aborting later skill stages) by the

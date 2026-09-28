@@ -112,6 +112,12 @@ while [ "$#" -gt 0 ]; do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+if [ "$AUTHORIZATION_TEST_ONLY" -eq 1 ]; then
+  fixture_root="$(realpath -e "$REPO_ROOT")" || exit 2
+  fixture_origin="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null)" || exit 2
+  case "$fixture_root" in /tmp/*) ;; *) warn 'authorization test needs a disposable /tmp checkout'; exit 2 ;; esac
+  case "$fixture_origin" in file:///tmp/*|/tmp/*) ;; *) warn 'authorization test needs a local /tmp origin'; exit 2 ;; esac
+fi
 
 # A direct installer and an updater share one checkout lock. An updater passes
 # its open descriptor to its direct child; neither an environment flag nor a
@@ -318,11 +324,56 @@ restore_private_checkout() {
   git -C "$PRIVATE_ROOT" merge-base --is-ancestor "$prior" "$current" || return 1
   git -C "$PRIVATE_ROOT" -c core.hooksPath=/dev/null reset --hard "$prior" >/dev/null
 }
+backup_reviewer_hook() {
+  local common
+  common="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)" || return 1
+  HOOK_TARGET="$common/hooks/post-merge"
+  [ ! -L "$HOOK_TARGET" ] || { warn 'refusing symlinked reviewer hook'; return 1; }
+  if [ -f "$HOOK_TARGET" ]; then
+    $SUDO cp -p "$HOOK_TARGET" "$BACKUP_DIR/post-merge" || return 1
+    if grep -q '^# ai-devops-managed: reviewer auto-requalification' "$HOOK_TARGET"; then
+      $SUDO touch "$BACKUP_DIR/post-merge.managed"
+    else
+      $SUDO touch "$BACKUP_DIR/post-merge.foreign"
+    fi
+  elif [ -e "$HOOK_TARGET" ]; then
+    warn 'reviewer hook path is not a regular file'; return 1
+  else
+    $SUDO touch "$BACKUP_DIR/post-merge.absent"
+  fi
+}
+restore_reviewer_hook() {
+  local prior_mode current_mode
+  [ ! -L "$HOOK_TARGET" ] || return 1
+  if $SUDO test -f "$BACKUP_DIR/post-merge.absent"; then
+    [ ! -e "$HOOK_TARGET" ] && return 0
+    [ -f "$HOOK_TARGET" ] && cmp -s "$REPO_ROOT/hooks/post-merge" "$HOOK_TARGET" || return 1
+    $SUDO rm -f -- "$HOOK_TARGET"
+  elif $SUDO test -f "$BACKUP_DIR/post-merge.foreign"; then
+    [ -f "$HOOK_TARGET" ] || return 1
+    $SUDO cmp -s "$BACKUP_DIR/post-merge" "$HOOK_TARGET" || return 1
+    prior_mode="$($SUDO stat -c %a "$BACKUP_DIR/post-merge")"
+    current_mode="$(stat -c %a "$HOOK_TARGET")"
+    [ "$prior_mode" = "$current_mode" ]
+  elif $SUDO test -f "$BACKUP_DIR/post-merge.managed"; then
+    [ -f "$HOOK_TARGET" ] || return 1
+    if $SUDO cmp -s "$BACKUP_DIR/post-merge" "$HOOK_TARGET"; then
+      prior_mode="$($SUDO stat -c %a "$BACKUP_DIR/post-merge")"
+      current_mode="$($SUDO stat -c %a "$HOOK_TARGET")"
+      [ "$prior_mode" = "$current_mode" ] && return 0
+    fi
+    cmp -s "$REPO_ROOT/hooks/post-merge" "$HOOK_TARGET" || return 1
+    $SUDO cp -p "$BACKUP_DIR/post-merge" "$HOOK_TARGET"
+  else
+    return 1
+  fi
+}
 backup_protected_config || {
   warn 'protected config backup failed; installation did not start'
   exit 1
 }
-backup_install_routing && backup_install_crontab && backup_private_checkout || {
+backup_install_routing && backup_install_crontab && backup_private_checkout &&
+  backup_reviewer_hook || {
   warn 'installed routing or protected source backup failed; installation did not start'
   exit 1
 }
@@ -332,16 +383,19 @@ restore_install_state() {
   restore_install_routing || failed=1
   restore_install_crontab || failed=1
   restore_private_checkout || failed=1
+  restore_reviewer_hook || failed=1
   [ "$failed" -eq 0 ] || warn "installation rollback needs repair from $BACKUP_DIR"
   [ "$failed" -eq 0 ]
 }
 record_restored_state() {
+  [ "${SOURCE_ROLLBACK_SAFE:-0}" = 1 ] || return 0
   [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" = 9 ] || return 0
   [ -n "${AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE:-}" ] || return 0
   [ -f "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE" ] &&
     [ ! -L "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE" ] || return 1
   printf '%s\n' "$target_head" > "$AI_DEVOPS_INSTALL_ROLLBACK_PROOF_FILE"
 }
+SOURCE_ROLLBACK_SAFE=1
 
 install_dependencies() {
   local apt_packages=(git curl jq ripgrep unzip python3 python3-pip gh tar)
@@ -469,6 +523,10 @@ run_stage required "Reviewer auto-requalification hook" "$REPO_ROOT/bin/ai-insta
 if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
   warn "Running as root via sudo; skills would land under /root. Re-run as your normal user for per-user skill install."
 fi
+# Skills are copied into two user homes and have their own backup semantics.
+# The checkout cannot safely rewind after this point without proving every
+# copied byte and permission. Leave the target pending for explicit repair.
+SOURCE_ROLLBACK_SAFE=0
 run_stage required "Claude and Codex skills" "$REPO_ROOT/bin/ai-install-skills"
 
 # Machine topology and provider identifiers are restored from the protected

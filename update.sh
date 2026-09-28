@@ -2,20 +2,28 @@
 # update.sh — pin, authorize, fast-forward, install, and re-qualify the toolkit.
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 info() { printf '\033[1m==>\033[0m %s\n' "$1"; }
 warn() { printf '\033[33m[WARN]\033[0m %s\n' "$1"; }
 
 expected_head=""
+installed_checkout=""
+owner_request=""
 install_args=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --expected-head)
       [ "$#" -ge 2 ] || { warn '--expected-head needs a full commit SHA'; exit 2; }
       expected_head="$2"; shift 2 ;;
+    --installed-checkout)
+      [ "$#" -ge 2 ] || { warn '--installed-checkout needs a path'; exit 2; }
+      installed_checkout="$2"; shift 2 ;;
+    --owner-request)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || { warn '--owner-request needs a reason'; exit 2; }
+      owner_request="$2"; shift 2 ;;
     --require-secrets|--skip-secrets) install_args+=("$1"); shift ;;
     -h|--help)
-      echo 'usage: ./update.sh [--expected-head FULL_SHA] [--require-secrets|--skip-secrets]'
+      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--owner-request TEXT] [--require-secrets|--skip-secrets]'
       exit 0 ;;
     *) warn "unknown option: $1"; exit 2 ;;
   esac
@@ -24,6 +32,27 @@ if [ -n "$expected_head" ] && ! [[ "$expected_head" =~ ^[0-9a-f]{40}$ ]]; then
   warn '--expected-head must be a full lowercase commit SHA'; exit 2
 fi
 
+REPO_ROOT="$SOURCE_ROOT"
+if [ -n "$installed_checkout" ]; then
+  [ -n "$expected_head" ] || { warn 'a candidate updater requires --expected-head'; exit 2; }
+  REPO_ROOT="$(cd "$installed_checkout" 2>/dev/null && pwd -P)" || {
+    warn 'installed checkout does not exist'; exit 1;
+  }
+  [ "$SOURCE_ROOT" != "$REPO_ROOT" ] || { warn 'candidate and installed checkout must differ'; exit 1; }
+  source_top="$(git -C "$SOURCE_ROOT" rev-parse --show-toplevel 2>/dev/null)" || exit 1
+  installed_top="$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null)" || exit 1
+  [ "$source_top" = "$SOURCE_ROOT" ] && [ "$installed_top" = "$REPO_ROOT" ] || {
+    warn 'candidate or installed path is not a Git worktree root'; exit 1;
+  }
+  source_common="$(git -C "$SOURCE_ROOT" rev-parse --path-format=absolute --git-common-dir)" || exit 1
+  installed_common="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)" || exit 1
+  [ "$(realpath "$source_common")" = "$(realpath "$installed_common")" ] || {
+    warn 'candidate does not share the installed checkout Git common directory'; exit 1;
+  }
+  [ -z "$(git -C "$SOURCE_ROOT" status --porcelain)" ] || {
+    warn 'candidate checkout has local changes'; exit 1;
+  }
+fi
 cd "$REPO_ROOT" || exit 1
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { warn 'not a Git checkout'; exit 1; }
 # One lock spans fetch, candidate preflight, checkout advance, installation,
@@ -62,6 +91,9 @@ target_head="$(git rev-parse refs/remotes/origin/main)" || exit 1
 [ "$target_head" = "$(git rev-parse FETCH_HEAD)" ] || {
   warn 'fetched commit and origin/main differ'; exit 1;
 }
+[ -z "$installed_checkout" ] || [ "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" = "$target_head" ] || {
+  warn 'candidate checkout is not the exact fetched target'; exit 1;
+}
 [ -z "$expected_head" ] || [ "$target_head" = "$expected_head" ] || {
   warn 'fetched target differs from the explicitly approved commit'; exit 1;
 }
@@ -85,6 +117,7 @@ candidate_added=1
 gate_args=(install-verify --phase preflight --target-head "$target_head"
   --installed-checkout "$REPO_ROOT" --installed-launcher /usr/local/bin/ai-task-gates)
 [ -z "$expected_head" ] || gate_args+=(--caller-pinned)
+[ -z "$owner_request" ] || gate_args+=(--owner-request "$owner_request")
 "$candidate/bin/ai-task-gates" "${gate_args[@]}" || {
   warn 'installation preflight refused; installed checkout was not advanced'
   exit 1
