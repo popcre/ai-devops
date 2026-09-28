@@ -524,34 +524,7 @@ mkdir -p "$TMP/state/credential.lock.d"; printf '%s
 CRED_TIMEOUT_OUT="$(cd "$REPO" && eval "$ENV AI_MUSE_KEY_STORE='$CONC/timeout-key' AI_MUSE_CREDENTIAL_WAIT_SECONDS=2 '$SCRIPT' store-key" 2>&1 || true)"
 check 'a held credential lock fails closed with a clear message after the wait budget' "printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q 'credential lock still held by another Muse turn after 2s' && ! printf '%s' \"\$CRED_TIMEOUT_OUT\" | grep -q fake-key"
 rm -rf "$TMP/state/credential.lock.d"
-mkdir -p "$TMP/windows-cred-bin" "$TMP/windows-cred-lock"
-cat > "$TMP/windows-cred-bin/ps" <<'EOF'
-#!/usr/bin/env bash
-[ "${PS_STUB_LIVE:-0}" = 1 ] && printf 'a b c 43210\n'
-EOF
-chmod +x "$TMP/windows-cred-bin/ps"
-MUSE_LOCK_FUNCTIONS="$(sed -n '/^muse_credential_owner_alive(){/,/^read_key_from_op(){/{ /^read_key_from_op(){/d; p; }' "$SCRIPT")"
-EXPECTED_CRED_STATE="$(/usr/bin/getent passwd "$(/usr/bin/id -u)" | cut -d: -f6)/.local/state/ai-devops/muse"
-ACTUAL_CRED_STATE="$( HOME="$TMP/hostile-home" USERPROFILE="$TMP/hostile-profile" AI_MUSE_STATE_DIR="$TMP/hostile-state" AI_MUSE_TEST_DIR='' SYSTEMROOT='' STATE="$TMP/hostile-state" bash -c 'source /dev/stdin; muse_credential_state' <<< "$MUSE_LOCK_FUNCTIONS" )"
-check 'production credential lock ignores inherited home and state redirects' "test '$ACTUAL_CRED_STATE' = '$EXPECTED_CRED_STATE'"
-if ( source /dev/stdin; muse_credential_winpid_for(){ [ "$1" = "$EXPECTED_HOLDER" ] || return 1; printf 43210; }; EXPECTED_HOLDER="$BASHPID"; CRED_LOCK=''; CRED_TOKEN=''; muse_credential_publish "$TMP/windows-published-lock" && read -r owner winpid token < "$TMP/windows-published-lock/owner" && [ "$owner" = "$EXPECTED_HOLDER" ] && [ "$winpid" = 43210 ] && [ "$token" = "$CRED_TOKEN" ] ) <<< "$MUSE_LOCK_FUNCTIONS" >/dev/null 2>&1; then
-  ok 'credential lock records the holding shell Windows process id'
-else
-  bad 'credential lock records the holding shell Windows process id'
-fi
-printf '%s\n' '999999 43210 live-token' > "$TMP/windows-cred-lock/owner"
-if ( export SYSTEMROOT='C:\Windows' PS_STUB_LIVE=1 PATH="$TMP/windows-cred-bin:$PATH"; source /dev/stdin; CRED_LOCK=''; CRED_TOKEN=''; muse_credential_acquire "$TMP/windows-cred-lock" ) <<< "$MUSE_LOCK_FUNCTIONS" >/dev/null 2>&1; then
-  bad 'Windows credential lock keeps a live sibling runtime owner'
-elif [ "$(cat "$TMP/windows-cred-lock/owner")" = '999999 43210 live-token' ]; then
-  ok 'Windows credential lock keeps a live sibling runtime owner'
-else
-  bad 'Windows credential lock keeps a live sibling runtime owner'
-fi
-if ( export SYSTEMROOT='C:\Windows' PS_STUB_LIVE=0 PATH="$TMP/windows-cred-bin:$PATH"; source /dev/stdin; CRED_LOCK=''; CRED_TOKEN=''; muse_credential_acquire "$TMP/windows-cred-lock" && [ -n "$CRED_TOKEN" ] && [ -d "$TMP/windows-cred-lock.dead.live-token" ] ) <<< "$MUSE_LOCK_FUNCTIONS" >/dev/null 2>&1; then
-  ok 'Windows credential lock reclaims only a dead witnessed owner'
-else
-  bad 'Windows credential lock reclaims only a dead witnessed owner'
-fi
+check 'cross-runtime credential lock regression suite' "bash '$ROOT/tests/test-ai-muse-credential-lock.sh' >/dev/null"
 
 # Protected key store: review turns fail closed; only explicit store-key uses
 # 1Password when the store is missing or Meta rejects its key.
