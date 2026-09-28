@@ -8,7 +8,7 @@
 
 ## 1. What this application is
 
-This is a machine connectivity issue, not an ai-devops application change. `edge-dev3` is this Linux KDE Plasma machine. KDE KRDP serves its existing graphical desktop to Windows Remote Desktop Connection (`mstsc`) on TCP port 4837. Tailscale MagicDNS names the machine `edge-dev3.coho-banded.ts.net` and maps it to `100.66.9.69`; the LAN address is `10.0.5.154`. The public `popcre/ai-devops` repository only holds this continuation handoff; no runtime source in the repository was changed.
+This is a machine connectivity issue, not an ai-devops application change. `edge-dev3` is this Linux KDE Plasma machine. KDE KRDP serves its existing graphical desktop to Windows Remote Desktop Connection (`mstsc`) on TCP port 4837. Tailscale MagicDNS names the machine `[private tailnet domain in protected machine atlas]` and maps it to `[private address in protected machine atlas]`; the LAN address is `[private address in protected machine atlas]`. The public `popcre/ai-devops` repository only holds this continuation handoff; no runtime source in the repository was changed.
 
 ## 2. What we set out to do this session, and why
 
@@ -16,9 +16,9 @@ Albert wants machines on the Tailscale network to reach this machine by `edge-de
 
 ## 3. Current state — what is true right now
 
-- Tailscale reports this host as `edge-dev3`, IP `100.66.9.69`, MagicDNS enabled tailnet-wide. Direct lookup against Tailscale DNS `100.100.100.100` resolves `edge-dev3` to `100.66.9.69`. The fully qualified name resolves the same way. A screenshot provided by Albert showed the correct target `edge-dev3:4837` in the Windows Computer box.
-- KDE's packaged `app-org.kde.krdpserver.service` is active with PID 1629 as observed September 28, 2026, 7:38 AM EDT. Its listener is `*:4837`, and local TCP probes to both `10.0.5.154:4837` and `100.66.9.69:4837` succeeded. These local probes do not prove a remote tailnet client can connect.
-- A LAN RDP connection from `10.0.5.55` to `10.0.5.154:4837` was established at 7:38 AM EDT. Albert confirms LAN access works. Its mere presence does not establish whether concurrent connections are supported or relevant.
+- Tailscale reports this host as `edge-dev3`, IP `[private address in protected machine atlas]`, MagicDNS enabled tailnet-wide. Direct lookup against Tailscale DNS `[private address in protected machine atlas]` resolves `edge-dev3` to `[private address in protected machine atlas]`. The fully qualified name resolves the same way. A screenshot provided by Albert showed the correct target `edge-dev3:4837` in the Windows Computer box.
+- KDE's packaged `app-org.kde.krdpserver.service` is active with PID 1629 as observed September 28, 2026, 7:38 AM EDT. Its listener is `*:4837`, and local TCP probes to both `[private address in protected machine atlas]:4837` and `[private address in protected machine atlas]:4837` succeeded. These local probes do not prove a remote tailnet client can connect.
+- A LAN RDP connection from `[private address in protected machine atlas]` to `[private address in protected machine atlas]:4837` was established at 7:38 AM EDT. Albert confirms LAN access works. Its mere presence does not establish whether concurrent connections are supported or relevant.
 - At 12:26:35 AM EDT on September 28, a Windows client connected and KRDP attempted PAM authentication for `ahazan`. The Linux log says `pam_unix(login:auth): authentication failure` and `pam_authenticate failure: Authentication failure` at 12:26:38 AM EDT, then closed the session. At 12:26:49 AM EDT another Windows connection authenticated `ahazan` successfully, initialized video, and started the desktop portal. The temporal sequence aligns with Albert's reported failing hostname attempt followed by working LAN connection, but the KRDP log does not include the peer IP for each attempt; do not claim the source mapping as certain without a client-side test.
 - No secret value appeared in chat. No source code, Tailscale setting, firewall rule, or server configuration was changed. No GitHub issue was opened because Albert invoked wrap-up, whose scope freeze forbids starting a new issue.
 
@@ -47,7 +47,7 @@ The separate duplicate service problem is real: `krdp.service` from `/home/ahaza
 ## 7. Constraints and gotchas in force
 
 - Albert is a business owner; keep user-facing instructions short. Never ask him to paste a password. No credentials appeared in this session, so there is nothing to store in 1Password.
-- Preserve the already working LAN RDP access. Do not restart or disable services to chase an unproven cause. A local probe of `100.66.9.69` runs through the local kernel route and does not verify a remote Tailscale path.
+- Preserve the already working LAN RDP access. Do not restart or disable services to chase an unproven cause. A local probe of `[private address in protected machine atlas]` runs through the local kernel route and does not verify a remote Tailscale path.
 - Use `ai-task-gates start` and a valid `check --before infrastructure` gate before any actual machine setting change. The earlier refusal arose from the shared ai-devops checkout's concurrent protected changes; worktree isolation does not itself authorize bypassing a protected gate.
 - This repository is public. Keep passwords, private logs, and raw user data out of commits. The only repository write from this wrap-up is this handoff.
 
