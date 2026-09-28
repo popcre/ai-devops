@@ -8,8 +8,8 @@ Owner issue: https://github.com/popcre/ai-devops/issues/1001.
 | Step | State | Evidence |
 |---|---|---|
 | 0 Prove the collision | ✅ done (2026-09-28) | [manifest-collision-2026-09.md](tests/verification/repo-throughput/manifest-collision-2026-09.md): #721 and #849 both hand-resolved textual manifest conflicts during main refreshes; gate met |
-| 1 Loader | ⬜ open | — |
-| 2 Migrate data | ⬜ open | — |
+| 1 Loader | ✅ done (2026-09-28) | `tools/ci-suites/load-manifest` + `tests/test-ci-suite-loader.sh` (17 passed); loader output `jq -S` == monolith `jq -S` byte for byte |
+| 2 Migrate data | ✅ done (2026-09-28) | `config/ci-suites/*.json` (132 files) generated 1:1; Step 1 equality re-verified after migration and after suite registration |
 | 3 Switch readers | ⬜ open | — |
 | 4 Remove the monolith | ⬜ open | — |
 | 5 Live proof | ⬜ open | — |
