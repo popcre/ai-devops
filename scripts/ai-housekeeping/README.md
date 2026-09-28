@@ -7,7 +7,7 @@ Tracked by issues [#714](https://github.com/popcre/ai-devops/issues/714) (these 
 | Script | Purpose |
 |--------|---------|
 | `cleanup-ai-debris.ps1` | Daily backup sweep. Windows task `AI-Debris-Housekeeping` at 03:30. Deletes old review sandboxes, clean worktree groups, archived sessions, temp debris. Never touches dirty work or items on its preserve list. |
-| `move-bulk-to-d.ps1` | Move growth folders to `D:\ai-data` and leave directory junctions on C: so every tool keeps working. Run only when Codex/opencode and other coding tools are **closed**. |
+| `move-bulk-to-d.ps1` | Move growth folders to `D:\ai-data` and leave directory junctions on C: so every tool keeps working. Safe while tools run (locked folders skip and retry); live SQLite stores are never moved. Preview with `-DryRun`. |
 
 Policy (owner, 2026-09-23): the run that creates a temporary copy deletes it before returning. This daily sweep is **backup only**. Do not retire it until self-cleanup has been live-proven for 14 days.
 

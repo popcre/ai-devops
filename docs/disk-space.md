@@ -90,13 +90,14 @@ needs a patch comparison. Unclear → keep it.
 
 Policy: **SSD (usually C:) holds speed** — live repos, tool binaries, packages,
 auth. **HDD (often D:) holds bulk/growth** — review sandboxes, worktrees, session
-logs, archives, thread history.
+logs, archives, thread history, download caches (npm/pnpm/playwright).
 
 On EDGE-DEV (2026-09-23) growth paths already junction to `D:\ai-data\...`.
 On another machine:
 
 ```powershell
-# Close Codex, opencode, Claude, and other coding tools first.
+# Add -DryRun to preview every move. Locked folders skip and retry; close
+# coding tools only for a final pass.
 pwsh -NoProfile -ExecutionPolicy Bypass -File C:\repos\ai-devops\scripts\ai-housekeeping\move-bulk-to-d.ps1
 ```
 

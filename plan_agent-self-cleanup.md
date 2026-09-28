@@ -72,7 +72,7 @@ Also from the same thread (locked design input):
 6. One **live proof** with a real review, then a leftover-proof issue if live proof is deferred.
 
 ### NOT in this plan (explicit)
-- Moving more folders to D: (already done for the growth paths; see §5).
+- Moving more folders to D: (already done for the growth paths; see §5. The script's own header documents its current map.)
 - Cleaning the six dirty leftover work folders (separate session; prompt already written: `prompt-for-six-worktrees.md`).
 - Changing reviewer model choice, prompts, or review quality.
 - Shared-database schema/structure work (route via `u2giants/shared-db` if ever needed).
@@ -95,7 +95,7 @@ Also from the same thread (locked design input):
 | `C:\Users\ahazan\.codex\archived_sessions`, `sessions` | Chat logs (growth) | **Junction → `D:\ai-data\codex\...`** |
 | `C:\Users\ahazan\.local\state\ai-devops\grok` | Grok reviewer state (growth) | **Junction → `D:\ai-data\local\state\ai-devops\grok`** |
 | `C:\Users\ahazan\.local\share\ai-devops` | Some helper installs | Still on C: (was locked by `opencode` process). Finish move when tools closed. |
-| `C:\Users\ahazan\.codex\thread_history_1.sqlite`, `logs_2.sqlite` | Codex history DBs (growth) | Still on C: (locked while Codex runs). Move when Codex closed — script ready: `move-bulk-to-d.ps1` |
+| `C:\Users\ahazan\.codex\thread_history_1.sqlite`, `logs_2.sqlite` | Codex history DBs (growth) | **Stay on C:** — mklink /J cannot junction a file; `move-bulk-to-d.ps1` rejects file entries (2026-09-28) |
 
 Drives: **C: = 512 GB NVMe SSD (fast)**. **D: = 1 TB HDD (slow, roomy)**. After cleanup C: ~267 GB free.
 
