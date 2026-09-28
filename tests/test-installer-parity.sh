@@ -56,13 +56,18 @@ remote_url="$(git -C "$fixture" remote get-url origin)"
 
 echo "1/2 fresh install: Bash and PowerShell agree file for file"
 mkdir -p "$TMP_ROOT/bash/codex" "$TMP_ROOT/ps/codex" "$TMP_ROOT/ps/mimo" "$TMP_ROOT/bash/mimo"
+mkdir -p "$TMP_ROOT/profile"
 # The fixture repo holds skills and templates only, not bin/ai-git-identity, so
 # the installer's machine-tools gate must be skipped here — exactly as
 # tests/test-ai-install-skills.sh does. Without it the installer correctly exits
 # 1 with "SYNC INCOMPLETE" and this whole suite dies at its first step.
 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 \
 CLAUDE_HOME="$TMP_ROOT/bash/claude" CODEX_HOME="$TMP_ROOT/bash/codex" \
-  bash "$fixture/bin/ai-install-skills" >/dev/null 2>&1
+  bash "$fixture/bin/ai-install-skills" >"$TMP_ROOT/bash-install.log" 2>&1 || {
+    cat "$TMP_ROOT/bash-install.log" >&2
+    fail 'Bash fixture install failed'
+  }
+USERPROFILE="$TMP_ROOT/profile" \
 AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
 pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
@@ -70,7 +75,10 @@ pwsh -NoProfile -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -CodexHome "$(cygpath -w "$TMP_ROOT/ps/codex" 2>/dev/null || echo "$TMP_ROOT/ps/codex")" \
   -ZCodeHome "$(cygpath -w "$TMP_ROOT/ps/zcode" 2>/dev/null || echo "$TMP_ROOT/ps/zcode")" \
   -MimoHome "$(cygpath -w "$TMP_ROOT/ps/mimo" 2>/dev/null || echo "$TMP_ROOT/ps/mimo")" \
-  -SkipGitInstall >/dev/null 2>&1
+  -SkipGitInstall >"$TMP_ROOT/powershell-install.log" 2>&1 || {
+    cat "$TMP_ROOT/powershell-install.log" >&2
+    fail 'PowerShell fixture install failed'
+  }
 
 listing() { (cd "$1" && find skills -type f | LC_ALL=C sort); }
 for client in claude codex; do
@@ -101,6 +109,7 @@ mkdir -p "$gh_config_dir"
 gh_config_native="$(cygpath -w "$gh_config_dir" 2>/dev/null || echo "$gh_config_dir")"
 set +e
 out="$(GH_CONFIG_DIR="$gh_config_native" GH_TOKEN= GITHUB_TOKEN= \
+  USERPROFILE="$TMP_ROOT/profile" \
   AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 AI_DEVOPS_TEST_EXPECTED_REMOTE="$remote_url" \
   "$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/bin/install-ai-devops-windows.ps1" \
   -RepoPath "$(cygpath -w "$fixture" 2>/dev/null || echo "$fixture")" \
