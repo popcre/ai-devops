@@ -11,8 +11,7 @@ Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep t
 
 **Reporting to Albert.** Every status, queue, audit, marker and dispatch record
 in this skill is written into GitHub issues, plans and handoffs — never into the
-chat reply. Replies to Albert obey the global 150-word limit, and anything he
-must decide or approve, and every issue, agent, check or merge this session is
+chat reply. Replies to Albert obey the global 150-word limit, and any business-meaning question only he can answer, and every issue, agent, check or merge this session is
 waiting on, appears only in the closing `**Still open**` block. Never paste a queue listing, marker block, audit result or per-agent
 status roll-up into chat.
 
@@ -32,8 +31,7 @@ another repository. Immediately start the appropriate separate task or session;
 do not perform non-structural work in the orchestrator context. Keep every
 independent structural stream moving, disclose the blocker and owner-facing
 consequence immediately, and follow the repair task until the capability is
-restored. Record any required owner authorization at once in plain business
-language with one exact request; never park it silently.
+restored. Never request owner authorization for a technical step (owner ruling 2026-09-28): get an assigned AI reviewer's APPROVE instead, or report it `Blocked —`; never park it silently.
 
 Treat reviewer, allocator, tooling, and rate-limit failures as urgent operational
 blockers. Preserve the capability, use bounded API calls, read the provider's
@@ -63,7 +61,8 @@ index, constraint, extension, publication, storage policy, or a migration shippi
   - **REPO-SESSION** — `repo-maintenance`, `documentation`. **Not an orchestrator assignment.**
     An independent repository session owns these; the orchestrator neither implements nor
     dispatches them.
-  - **RETURN-TO-OWNER** — `security-settings`. It needs authority the orchestrator does not have.
+  - **RETURN-TO-OWNER** — `security-settings`. The lane tool still routes it this way; report it
+    `Blocked —` until popcre/shared-db#3675 moves it to an AI session. Never ask Albert to approve it.
 
 **A REJECT forwards the task; it never merely closes it.** Each reject-exit issue carries
 `return_to: owner/repo` in its scope block. Return it with
@@ -213,8 +212,11 @@ reservation or a ref to free a lane, and never relinquish on expiry alone. Open
 the abandonment-audit issue first, then run the guarded
 `--relinquish-author-lease` command the report prints, with the observed worktree
 state. The orchestrator may retire work only where the worktree is `clean` or
-proven `absent`; `dirty` or `remote` work is potentially recoverable and is
-Albert's decision.
+proven `absent`; `dirty` or `remote` work is potentially recoverable: preserve a rescue branch or
+patch, leave the claim protective, and report it `Blocked —` until
+popcre/shared-db#3675 replaces the lane tool's `--owner-decision` with an assigned
+AI reviewer's APPROVE. Never bypass that gate and never ask Albert (owner ruling
+2026-09-28).
 
 `--queue-audit` must classify every open `db-work` issue across independent status,
 work type, and route fields. Its `NOT ORCHESTRATOR WORK` block lists every open issue that failed
@@ -271,8 +273,10 @@ and version check, because the world moved while the work was parked.
 
 **Terminal retirement — the work cannot or should not return.** Record the
 terminal evidence on the audit issue first, so the decision is auditable before
-anything closes. Obtain Albert's explicit decision only where the work is
-potentially recoverable — a `dirty` or `remote` worktree; `clean` or proven
+anything closes. Where the work is potentially recoverable — a `dirty` or `remote` worktree —
+preserve a rescue branch or patch, leave the claim protective, and report it
+`Blocked —` until popcre/shared-db#3675 lands; never bypass `--owner-decision` and
+never ask Albert; `clean` or proven
 `absent` work the orchestrator retires on its own authority. Close the pull
 request through the normal authenticated operator flow, never deleting its branch
 or refs, so the history survives the closure. Retire the claim with the
@@ -303,7 +307,7 @@ and the investigation would block itself.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Phase 2 is active. Protected claims never disappear when an author lease is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops for an owner decision without mutation. Reviewer reservations record one review per exact head and session for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek; they never serialize independent reviews by the same provider and never create a wait because a provider is already reviewing. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
+Phase 2 is active. Protected claims never disappear when an author lease is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops without mutation and goes to an assigned AI reviewer, never to Albert. Reviewer reservations record one review per exact head and session for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek; they never serialize independent reviews by the same provider and never create a wait because a provider is already reviewing. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
 
 ## Before preview and merge
 

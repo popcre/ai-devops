@@ -209,29 +209,33 @@ a failure.
 ```md
 # HANDOFF — <topic> (<UTC date/time>, <machine>/<agent>)
 
-## 0. ⚠️ DECISIONS ONLY THE OWNER CAN MAKE
-Mandatory, and it goes FIRST. Every decision, approval or judgement Albert must
-supply — CONSOLIDATED. This is an index, not a new home: each item still lives
-where it belongs operationally AND is listed here. The duplication is the point.
+## 0. ⚠️ BUSINESS DECISIONS ONLY THE OWNER CAN MAKE
+Mandatory, and it goes FIRST. Every business-meaning decision only Albert can
+supply — CONSOLIDATED. Technical approvals never go here: they go to an assigned
+AI reviewer, and anything the AI cannot obtain itself is listed as `Blocked —`
+(owner ruling 2026-09-28: never ask a human to approve). This is an index, not a
+new home: each item still lives where it belongs operationally AND is listed here.
 
 Group by consequence, not topic:
 - BLOCKING — the work cannot finish without an answer. Say what each one blocks.
 - RECOVERABLE — a wrong guess is fixable but wastes rework.
 - NOT PART OF THIS WORK, AND NOBODY IS ON IT — anything you learned that needs
-  his ruling even though it is out of scope: a bug noticed in passing, a stale
-  ticket, an open marker, a security exposure. THIS IS THE CATEGORY THAT GOES
-  MISSING, because "not my scope" is exactly why five sessions already skipped it.
-  A finding that needs a human ruling is an ASK, not a finding — promote it.
+  a business ruling even though it is out of scope. THIS IS THE CATEGORY THAT
+  GOES MISSING, because "not my scope" is exactly why five sessions already
+  skipped it. A technical finding goes to an assigned AI reviewer or a tracked
+  issue, never to Albert.
 
 Also list "Already settled — do NOT re-ask", with dates.
 
 Rules: plain business English, one or two sentences each, no jargon. A
-RECOMMENDATION for every item, so most can be answered with one word. Tell the
-next session to put the WHOLE list to him in ONE message, before starting work —
+RECOMMENDATION for every item, so most can be answered with one word. Tell the next session to put the WHOLE business-question list to him in ONE
+message (never a technical approval), before starting work —
 not one at a time as each is tripped over.
 
 THE SWEEP: before finishing, re-read the whole handoff and extract every sentence
-needing the owner. Tells: ⛔, "approve", "owner", "decide", "waiting on", "needs a
+needing the owner, then classify it: business meaning goes in §0; a technical
+approval, access, key, or manual step goes to an assigned AI reviewer, a tracked
+issue, or `Blocked —`, never to Albert. Tells: ⛔, "approve", "owner", "decide", "waiting on", "needs a
 ruling", "unanswered", "nobody has", his name. Anything found in §1–§9 or part (b)
 MUST also appear here. If there are genuinely none, write "None" explicitly — an
 empty §0 is information, a missing one is indistinguishable from a skipped sweep.
@@ -297,7 +301,8 @@ answer is an evidence-backed "yes" and every identified gap has been closed:
    way to verify it worked?
 5. Did I explain every term, identifier, path, and URL a newcomer wouldn't know?
 6. Did I run the section-0 sweep — walking §1–§9 and part (b) line by line — so
-   that every decision needing Albert appears in §0, including the ones outside
+   that every business decision needing Albert appears in §0 (and no technical
+   approval does), including the ones outside
    this workstream?
 
 Then ask and answer these **four** final synthesis questions exactly:
@@ -312,8 +317,9 @@ Then ask and answer these **four** final synthesis questions exactly:
    current state, failed attempts, decisions, constraints, risks, exact next
    actions, and verification evidence—present for the implementing agent to
    execute flawlessly?**
-4. **If Albert read ONLY section 0, would he see every decision I need from him,
-   including the ones outside this workstream?** Answer it the hard way — walk
+4. **If Albert read ONLY section 0, would he see every business decision I need
+   from him, including the ones outside this workstream, and no technical
+   approval?** Answer it the hard way — walk
    §1–§9 and part (b) line by line, list every sentence needing his judgement,
    and confirm each appears in §0. **Do not answer from memory or from intent.**
    The failure this catches is a decision correctly written down somewhere else
@@ -337,8 +343,8 @@ This is what "comprehensive" means. It is a fixed bar, not a feeling. "It could
 always be more detailed" is NOT an item on this list — do not treat it as one.
 
 - [ ] All 10 sections (0–9) present (or "N/A" + reason).
-- [ ] Section 0 exists AND the sweep was actually run: every owner decision
-      anywhere in §1–§9 or part (b) also appears in §0 — including the ones
+- [ ] Section 0 exists AND the sweep was actually run: every business decision for the owner anywhere in §1–§9 or part (b) also
+      appears in §0 (and no technical approval does) — including the ones
       outside this workstream — each with a recommendation; or §0 says "None".
 - [ ] A street-newcomer could continue WITHOUT asking a single question.
 - [ ] They could continue as effectively as you can right now — every non-obvious

@@ -483,11 +483,16 @@ owner: claude/fixture-$n
     $clientGlobals = [ordered]@{
         "Claude" = Get-Content -LiteralPath (Join-Path $repo "templates\system\CLAUDE-global.md") -Raw
         "Codex" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-codex.md") -Raw
+        "ZCode" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-zcode.md") -Raw
+        "MiMo" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-mimo.md") -Raw
     }
     foreach ($client in $clientGlobals.Keys) {
         foreach ($required in @(
             "Start immediately",
-            "No approval loops",
+            "Never ask a human to approve",
+            "assigned AI reviewer's explicit APPROVE",
+            "no human approval is ever requested",
+            "rotates them itself under an assigned AI reviewer's APPROVE",
             "recover first and finish",
             "Preserve the capability",
             "reported problem is gone",
@@ -512,7 +517,7 @@ owner: claude/fixture-$n
             }
         }
     }
-    Write-Host "PASS: Claude and Codex start authorized work, recover from routine errors, repair broken capabilities, and ignore unrelated handoffs"
+    Write-Host "PASS: Claude, Codex, ZCode, and MiMo start authorized work, recover from routine errors, repair broken capabilities, and ignore unrelated handoffs"
 
     # -------------------------------------------------- Codex trigger-eval runner
     $printed = & python $codexRunner --skill sample --eval-set $budgetFile --print-command

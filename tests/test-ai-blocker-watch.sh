@@ -726,4 +726,9 @@ AI_GH_OPERATION=bw.snapshot BW find no-such-wait >/dev/null 2>&1 || true
 check 'an inherited label does not classify unrelated calls' \
   "[ \"\$(tail -2 '$FAKE/operation-kinds' | cut -f1 | sort -u)\" = unset ]"
 
+# Machines must not all tick on the same minute (burst tripped GitHub's limit).
+sed -n '/^tick_offset()/,/^}/p' "$SCRIPT" > "$FAKE/tick_offset.sh"
+check 'tick offset is stable and inside the interval' \
+  ". '$FAKE/tick_offset.sh'; a=\$(tick_offset 10); [ \"\$a\" = \"\$(tick_offset 10)\" ] && [ \"\$a\" -ge 0 ] && [ \"\$a\" -lt 10 ] && [ \"\$(tick_offset 1)\" = 0 ]"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

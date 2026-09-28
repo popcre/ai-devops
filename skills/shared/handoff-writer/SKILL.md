@@ -190,8 +190,10 @@ know**. If they'd have to ask you one question to proceed, that answer belongs i
 the handoff. Default to TOO MUCH — too long costs minutes, too short costs a whole
 session; those are not symmetric, so err long.
 
-0. **⚠️ DECISIONS ONLY THE OWNER CAN MAKE** — see § Section 0 below. **Mandatory,
-   goes FIRST, and is a consolidation of every owner decision in the document.**
+0. **⚠️ BUSINESS DECISIONS ONLY THE OWNER CAN MAKE** — see § Section 0 below.
+   **Mandatory, goes FIRST, and is a consolidation of every business-meaning owner
+   decision in the document.** Technical approvals never go here (owner ruling
+   2026-09-28: never ask a human to approve) — they go to an assigned AI reviewer.
 1. **What this application is** — plain English: what it does, who uses it, why.
    Repos, stack, where it runs (URLs, hosts).
 2. **What we set out to do this session, and why** — goal in business terms + the
@@ -213,7 +215,12 @@ session; those are not symmetric, so err long.
 9. **Open questions and risks** — what's uncertain, what could break, decisions
    made and why, each dated so a later session can't unknowingly contradict them.
 
-## Section 0 — DECISIONS ONLY THE OWNER CAN MAKE (mandatory, goes FIRST)
+## Section 0 — BUSINESS DECISIONS ONLY THE OWNER CAN MAKE (mandatory, goes FIRST)
+
+**Scope (owner ruling 2026-09-28, verbatim: "never ask a human to approve").**
+Only business-meaning questions belong here. Any technical approval, access,
+sign-in, key, or manual step is done by the AI, gated by an assigned AI reviewer,
+or listed as `Blocked —`; it is never an ask for Albert.
 
 **Why this exists.** A handoff is written for the *worker*, so owner decisions
 land wherever they matter operationally: a blocker in §3, a gate in §6, a question
@@ -234,18 +241,19 @@ this section prevents.**
 
 ### What goes in it
 
-**Every decision, approval, or judgement the owner must supply — consolidated.**
+**Every business-meaning decision or judgement the owner must supply — consolidated.**
 Section 0 is an **index, not a new home**: each item still lives where it belongs
 operationally, AND is listed here. **The duplication is the point.** Include:
 
 - Hard gates that block the work outright.
 - Choices where a wrong guess is recoverable but rework is wasteful.
-- **Anything you learned that needs the owner's judgement, even if it is OUTSIDE
-  this workstream** — a bug you noticed in passing, a stale ticket, an open marker,
-  a security exposure. **This is the category that goes missing.** "Not my scope"
+- **Anything you learned that needs a business-meaning judgement from the owner,
+  even if it is OUTSIDE this workstream** (a technical item such as a bug, stale
+  ticket, open marker, or security exposure instead gets a tracked issue, an
+  assigned AI reviewer, or a `Blocked —` line — never an ask to Albert). **This is the category that goes missing.** "Not my scope"
   is exactly why it has been ignored by five sessions already.
-- Anything a sub-agent surfaced. A finding that needs a human ruling is an **ask**,
-  not a finding — promote it.
+- Anything a sub-agent surfaced that needs a business ruling. That is an **ask**,
+  not a finding — promote it. A technical ruling goes to an assigned AI reviewer.
 
 ### How to write it
 
@@ -259,13 +267,16 @@ operationally, AND is listed here. **The duplication is the point.** Include:
   beats "important".
 - **Add an "Already settled — do NOT re-ask" list**, with dates. Re-asking a
   decided question burns the owner's patience and reopens closed arguments.
-- **Instruct the next session to put the WHOLE list to the owner in ONE message,
-  before starting work** — not one at a time as each is tripped over.
+- **Instruct the next session to put the WHOLE business-question list to the owner
+  in ONE message, before starting work** — not one at a time as each is tripped
+  over. Never include a technical approval in it.
 
 ### The sweep that makes it complete
 
-Before you finish, **re-read your own handoff end to end and extract every
-sentence that needs the owner**. Search for the tells: `⛔`, "approve", "owner",
+Before you finish, **re-read your own handoff end to end and extract every sentence that needs the
+owner**, then classify it: a business-meaning question goes in §0; a technical
+approval, access, key, or manual step goes to an assigned AI reviewer, a tracked
+issue, or `Blocked —`, never to Albert. Search for the tells: `⛔`, "approve", "owner",
 "decide", "waiting on", "needs a ruling", "unanswered", "nobody has", the owner's
 name. Anything you find anywhere in §1–§9 or part (b) **must also appear in §0**.
 
@@ -289,8 +300,8 @@ This is what "comprehensive" means. It is a fixed bar, not a feeling. "It could
 always be more detailed" is NOT a checklist item — do not treat it as one.
 
 - [ ] All 10 sections (0–9) present (or "N/A" + reason).
-- [ ] **Section 0 exists and the sweep was actually run.** Every owner decision
-      anywhere in §1–§9 or part (b) also appears in §0 — including ones outside
+- [ ] **Section 0 exists and the sweep was actually run.** Every business decision for the owner anywhere in §1–§9 or part (b) also
+      appears in §0 (and no technical approval does) — including ones outside
       this workstream — each with a recommendation, or §0 says "None" explicitly.
 - [ ] A street-newcomer could continue **without asking a single question**.
 - [ ] They could continue **as effectively as you can right now** — every
@@ -324,8 +335,9 @@ that support each answer:
 3. Is every single relevant detail needed for flawless execution included:
    background, goals, intended outcome, current state, failures, decisions,
    constraints, risks, exact next actions, and verification evidence?
-4. **If the owner read ONLY section 0, would he see every decision I need from
-   him — including the ones outside this workstream?** Answer it the hard way:
+4. **If the owner read ONLY section 0, would he see every business decision I need
+   from him — including the ones outside this workstream — and no technical
+   approval at all?** Answer it the hard way:
    walk §1–§9 and part (b) line by line, list every sentence that needs his
    judgement, and check each one appears in §0. **Do not answer this from memory
    or from intent** — the failure this question exists to catch is a decision you
@@ -373,7 +385,7 @@ now**. If that is true, the answer is Yes — say it.
   §0 as well.
 - **Recording something that needs the owner's ruling as a "finding" because it is
   out of scope.** Out-of-scope findings are precisely the ones that have already
-  been ignored by several sessions. A finding that needs a human ruling is an ask.
+  been ignored by several sessions. A finding that needs a business ruling is an ask; a technical one goes to an assigned AI reviewer.
 - **Making the owner ask "will the next session actually raise all of these?"**
   If he has to ask, §0 was missing or the sweep was skipped. That question is the
   alarm, not the process.
