@@ -50,7 +50,6 @@ if (-not $amAdmin) {
 $ErrorActionPreference = "Continue"
 $ProgressPreference    = "SilentlyContinue"   # speeds up downloads
 $logFile = Join-Path $env:USERPROFILE "dev-setup-log.txt"
-try { Start-Transcript -Path $logFile -Append | Out-Null } catch {}
 
 # Collect a status row for the final summary: @{Tool; Status; Version}
 $Results = New-Object System.Collections.ArrayList
@@ -141,6 +140,28 @@ function Find-AllInstances($cmdName, $wingetId, $appxLike) {
 
     return $found
 }
+
+# This legacy launcher can be invoked directly from its BAT file. Verify the
+# pinned toolkit source before any package upgrade, setup, or transcript write.
+# Fixed Git.Git is the sole prerequisite if Git does not yet exist.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'Git and WinGet are unavailable for source verification.' }
+    winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Git prerequisite installation failed.' }
+    Update-SessionPath
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git prerequisite is not available after installation.' }
+}
+$sourceRepo = Split-Path -Parent $PSScriptRoot
+if (-not (Test-Path -LiteralPath (Join-Path $sourceRepo '.git'))) { throw 'Legacy setup requires its canonical ai-devops checkout.' }
+& git -C $sourceRepo fetch -q origin main 2>$null
+if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch ai-devops origin/main before legacy setup.' }
+$sourceTarget = (& git -C $sourceRepo rev-parse origin/main 2>$null).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceTarget -notmatch '^[0-9a-f]{40}$') { throw 'Cannot pin ai-devops source for legacy setup.' }
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $sourceRepo 'bin\install-ai-devops-windows.ps1') `
+    -RepoPath $sourceRepo -SourceGateOnly -ExpectedHead $sourceTarget
+if ($LASTEXITCODE -ne 0) { throw 'Guarded ai-devops source update refused legacy setup.' }
+if ((& git -C $sourceRepo rev-parse HEAD 2>$null).Trim() -ne $sourceTarget) { throw 'Legacy setup source differs from pinned target.' }
+try { Start-Transcript -Path $logFile -Append | Out-Null } catch {}
 
 Banner "DEV COMPUTER SETUP STARTING"
 Write-Host "A full log is being saved to: $logFile" -ForegroundColor DarkGray
@@ -439,8 +460,7 @@ if (-not (Test-Path $aiDevOpsSetup)) {
     if ($LASTEXITCODE -eq 0) {
         Add-Result "AI DevOps setup" "OK" "skills, secrets, MCPs, SSH"
     } else {
-        Warn "AI DevOps setup did not complete. Review its output, correct the reported issue, then re-run this launcher."
-        Add-Result "AI DevOps setup" "CHECK OUTPUT" "-"
+        throw 'AI DevOps guarded machine setup failed; legacy setup cannot report completion.'
     }
 }
 

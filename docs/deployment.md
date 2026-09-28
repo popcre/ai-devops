@@ -155,6 +155,8 @@ or setup. Windows bootstrap may provision only the fixed `Git.Git`
 prerequisite when Git is absent; it then checks the canonical source and
 authorization before runner setup, WinGet configuration, provider installs,
 remote access, or machine setup, including with `-SkipMachineSetup`.
+Direct `setup-machine.ps1` and the legacy developer-computer launcher use
+the same pinned source gate before their package and configuration work.
 The source-only gate retains a pending authorization until the full
 installer finishes and refreshes the managed command launchers; a failed full
 installation can retry against the same pinned target. Legacy launchers

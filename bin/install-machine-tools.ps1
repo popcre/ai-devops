@@ -108,6 +108,18 @@ $transactionRoot = if ($fixture) { Join-Path $target 'launcher-transactions' } e
   Join-Path $UserProfilePath '.local\state\ai-devops\task-gates\launcher-transactions'
 }
 $transactionPath = Join-Path $transactionRoot "$sourceSha.json"
+$fixturePathStore=Join-Path $target '.user-path-fixture'
+function Get-UserPathValue {
+  if ($fixture) {
+    if (Test-Path -LiteralPath $fixturePathStore -PathType Leaf) { return [IO.File]::ReadAllText($fixturePathStore) }
+    return ''
+  }
+  return [string][Environment]::GetEnvironmentVariable('PATH','User')
+}
+function Set-UserPathValue($Value) {
+  if ($fixture) { [IO.File]::WriteAllText($fixturePathStore,[string]$Value) }
+  else { [Environment]::SetEnvironmentVariable('PATH',$Value,'User') }
+}
 function Publish-StagedFile([string]$Stage, [string]$Destination) {
   $existing=Get-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
   if ($existing) {
@@ -145,10 +157,15 @@ function Restore-Transaction($record) {
       $record.catalog_sha256 -cne $catalogHash -or @($record.files).Count -ne ($items.Count * 2) -or
       ($record.had_pending -ne $true -and $record.had_pending -ne $false) -or
       [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$record.stage_dir)) -ine [IO.Path]::GetFullPath($target) -or
-      [IO.Path]::GetFileName([string]$record.stage_dir) -cnotmatch '^\.ai-devops-staging-[0-9a-f]{32}$') {
+      [IO.Path]::GetFileName([string]$record.stage_dir) -cnotmatch '^\.ai-devops-staging-[0-9a-f]{32}$' -or
+      $record.old_user_path -isnot [string] -or $record.new_user_path -isnot [string]) {
     throw 'Launcher recovery record does not match this exact source and catalog.'
   }
   $expectedNames = @($items | ForEach-Object { $_.Name; "$($_.Name).cmd" })
+  $currentUserPath=Get-UserPathValue
+  if ($currentUserPath -cne $record.old_user_path -and $currentUserPath -cne $record.new_user_path) {
+    throw 'User PATH changed outside the pending installation transaction.'
+  }
   $allNew = $true
   for ($index=0; $index -lt $expectedNames.Count; $index++) {
     $row=$record.files[$index]
@@ -170,10 +187,12 @@ function Restore-Transaction($record) {
   }
   if ($record.had_pending -and -not (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf)) {
     if (-not $allNew) { throw 'Pending authority disappeared before launcher transaction completed.' }
+    if ($currentUserPath -cne $record.new_user_path) { throw 'Completed launcher PATH differs from the recorded value.' }
     if (Test-Path -LiteralPath $record.stage_dir) { Remove-Item -LiteralPath $record.stage_dir -Recurse -Force }
     Remove-Item -LiteralPath $transactionPath -Force
     return
   }
+  if ($currentUserPath -cne $record.old_user_path) { Set-UserPathValue $record.old_user_path }
   $stageItem=Get-Item -LiteralPath $record.stage_dir -Force -ErrorAction SilentlyContinue
   if (-not $stageItem -or -not $stageItem.PSIsContainer -or
       ($stageItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
@@ -202,6 +221,9 @@ if (Test-Path -LiteralPath $transactionPath) {
   }
   $prior = Get-Content -Raw -LiteralPath $transactionPath | ConvertFrom-Json
   Restore-Transaction $prior
+  if ($fixture -and $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY -eq '1') {
+    throw 'Injected stop after exact PATH and launcher recovery.'
+  }
 }
 
 # This is the common receipt-stamping boundary. Run it on the same PowerShell
@@ -231,15 +253,20 @@ foreach ($item in $items) {
       old_sha256=$before.Hash; new_sha256=$after; staged_path=$staged })
   }
 }
+$userPathBefore=[string](Get-UserPathValue)
+$pathEntries=@($userPathBefore -split ';' | Where-Object { $_ })
+$userPathAfter=if ($pathEntries | Where-Object { $_.TrimEnd('\') -ieq $target.TrimEnd('\') }) {
+  $userPathBefore
+} else { (@($target) + $pathEntries) -join ';' }
 $record=[pscustomobject]@{ schema_version=1; source_sha=$sourceSha;
   repo_path=[IO.Path]::GetFullPath($RepoPath); target_dir=[IO.Path]::GetFullPath($target);
   catalog_sha256=$catalogHash; stage_dir=$stageDir; had_pending=(Test-Path -LiteralPath $pendingAuthorization -PathType Leaf);
+  old_user_path=$userPathBefore; new_user_path=$userPathAfter;
   files=@($rows | ForEach-Object { [pscustomobject]@{name=$_.name;old_exists=$_.old_exists;
     old_bytes=$_.old_bytes;old_sha256=$_.old_sha256;new_sha256=$_.new_sha256} }) }
 $transactionTemp="$transactionPath.tmp.$PID"
 $record | ConvertTo-Json -Depth 5 -Compress | Set-Content -Encoding UTF8 -LiteralPath $transactionTemp
 Move-Item -LiteralPath $transactionTemp -Destination $transactionPath
-$userPathBefore=[Environment]::GetEnvironmentVariable('PATH', 'User')
 try {
   foreach ($row in $rows) {
     Publish-StagedFile $row.staged_path (Join-Path $target $row.name)
@@ -254,13 +281,15 @@ try {
     }
     Write-Host "OK installed $($row.name)"
   }
+if ((Get-UserPathValue) -cne $userPathBefore) { throw 'User PATH changed while launchers were being installed.' }
+if ($userPathAfter -cne $userPathBefore) {
+  Set-UserPathValue $userPathAfter
+  Write-Host "OK added $target to User PATH"
+}
+if ($fixture -and $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_PATH -eq '1') {
+  [Diagnostics.Process]::GetCurrentProcess().Kill()
+}
 if (-not $fixture) {
-  $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-  $entries = @($userPath -split ';' | Where-Object { $_ })
-  if (-not ($entries | Where-Object { $_.TrimEnd('\') -ieq $target.TrimEnd('\') })) {
-    [Environment]::SetEnvironmentVariable('PATH', ((@($target) + $entries) -join ';'), 'User')
-    Write-Host "OK added $target to User PATH"
-  }
   $env:Path = $target + ';' + $env:Path
 }
 if (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf) {
@@ -269,9 +298,6 @@ if (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf) {
 } catch {
   $failure=$_.Exception.Message
   try {
-    if (-not $fixture -and [Environment]::GetEnvironmentVariable('PATH', 'User') -cne $userPathBefore) {
-      [Environment]::SetEnvironmentVariable('PATH', $userPathBefore, 'User')
-    }
     Restore-Transaction $record
   } catch { throw "Launcher install failed ($failure); exact rollback needs repair: $($_.Exception.Message)" }
   throw "Launcher install failed and exact prior launchers were restored: $failure"

@@ -407,6 +407,9 @@ try {
     $stampStatus=(@(git -C $stamp.Repo status --porcelain=v1 --untracked-files=all) -join '; ')
     Assert (-not $stampStatus) "direct-stamp fixture dirty before approved refresh: $stampStatus"
     $userPathBefore=[Environment]::GetEnvironmentVariable('PATH', 'User')
+    $fixturePathStore=Join-Path (Split-Path -Parent $stamp.Launcher) '.user-path-fixture'
+    $fixturePathBefore='C:\Existing;D:\Custom'
+    [IO.File]::WriteAllText($fixturePathStore,$fixturePathBefore)
     $partialCatalog=Join-Path (Split-Path -Parent $stamp.Launcher) 'partial-catalog.tsv'
     "ai-task-gates`tbin/ai-task-gates`tbash+cmd" | Set-Content -LiteralPath $partialCatalog -Encoding ASCII
     $catalogFailed=$false
@@ -442,6 +445,44 @@ try {
     Assert (Test-Path -LiteralPath $stampPending -PathType Leaf) 'hard crash consumed pending authority'
     Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -ne $oldLauncherHash) `
       'hard crash did not publish the atomic gate launcher before termination'
+    $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY='1'
+    $recoveryStopped=$false
+    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
+      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
+      catch { $recoveryStopped=$true }
+    $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY=$null
+    Assert $recoveryStopped 'fixture did not stop after interrupted launcher recovery'
+    Assert ([IO.File]::ReadAllText($fixturePathStore) -ceq $fixturePathBefore) 'launcher recovery changed prior PATH'
+    Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) `
+      'hard-crash launcher recovery did not restore old gate bytes'
+    $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_PATH='1'
+    $pathCrashed=Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-File',
+      (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1'),'-RepoPath',$stamp.Repo,
+      '-CatalogPath',(Join-Path $stamp.Repo 'config\machine-tools.tsv'),'-UserProfilePath',$env:USERPROFILE) `
+      -PassThru -Wait -WindowStyle Hidden
+    $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_PATH=$null
+    Assert ($pathCrashed.ExitCode -ne 0) 'hard-crash PATH fixture exited successfully'
+    Assert (Test-Path -LiteralPath $stampTransaction -PathType Leaf) 'PATH crash lost recovery transaction'
+    Assert (Test-Path -LiteralPath $stampPending -PathType Leaf) 'PATH crash consumed authority'
+    $fixturePathAfter=[IO.File]::ReadAllText($fixturePathStore)
+    Assert ($fixturePathAfter -cne $fixturePathBefore) 'PATH crash did not publish expected test PATH'
+    [IO.File]::WriteAllText($fixturePathStore,'C:\ConcurrentUserEdit')
+    $concurrentFailed=$false
+    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
+      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
+      catch { $concurrentFailed=($_.Exception.Message -like '*PATH changed outside*') }
+    Assert $concurrentFailed 'recovery overwrote an unrelated User PATH edit'
+    [IO.File]::WriteAllText($fixturePathStore,$fixturePathAfter)
+    $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY='1'
+    $pathRecoveryStopped=$false
+    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
+      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
+      catch { $pathRecoveryStopped=$true }
+    $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY=$null
+    Assert $pathRecoveryStopped 'PATH recovery fixture did not stop after rollback'
+    Assert ([IO.File]::ReadAllText($fixturePathStore) -ceq $fixturePathBefore) 'PATH crash recovery did not restore exact prior value'
+    Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) `
+      'PATH crash recovery did not restore old gate launcher'
     & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
       -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null
     Assert ([Environment]::GetEnvironmentVariable('PATH', 'User') -ceq $userPathBefore) `
@@ -451,7 +492,14 @@ try {
     Assert (-not (Test-Path -LiteralPath $stampPending)) 'successful locked launcher refresh did not consume authority'
     Assert (-not (Test-Path -LiteralPath $stampTransaction)) `
       'successful retry left a pending launcher transaction'
-  } finally { $env:AI_DEVOPS_TEST_FAIL_AFTER_GATE=$null; $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_GATE=$null; $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote; $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher }
+    Assert ([IO.File]::ReadAllText($fixturePathStore) -ceq $fixturePathAfter) `
+      'same-target retry did not publish intended test User PATH'
+    Remove-Item -LiteralPath $fixturePathStore -Force
+    & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
+      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null
+    Assert ([IO.File]::ReadAllText($fixturePathStore).StartsWith((Split-Path -Parent $stamp.Launcher))) `
+      'empty or absent User PATH could not be installed from trusted same-source receipt'
+  } finally { $env:AI_DEVOPS_TEST_FAIL_AFTER_GATE=$null; $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY=$null; $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_GATE=$null; $env:AI_DEVOPS_TEST_HARD_CRASH_AFTER_PATH=$null; $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote; $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher }
 
   $removed=New-Fixture removed
   $removedBefore=(git -C $removed.Repo rev-parse HEAD).Trim()
@@ -483,6 +531,20 @@ try {
   Assert (($bootstrap.Split('-SourceGateOnly').Count - 1) -eq 1) 'bootstrap must always use one source gate, even at equal HEAD'
   Assert ($bootstrap.IndexOf('if (-not $SkipMachineSetup -and -not $TestOnly)') -gt $sourceGateAt) `
     'SkipMachineSetup may not bypass bootstrap source authorization'
+  $setup = Get-Content -Raw (Join-Path $root 'bin\setup-machine.ps1')
+  $setupGateAt=$setup.IndexOf('-RepoPath $RepoPath -SourceGateOnly -ExpectedHead $sourceTarget')
+  Assert ($setupGateAt -gt 0 -and $setupGateAt -lt $setup.IndexOf('Copy-Item -LiteralPath $codexPortableTemplate') -and
+    $setupGateAt -lt $setup.IndexOf('Ensure-Winget "GitHub.cli"')) `
+    'direct setup must authorize source before copying configuration or installing non-Git packages'
+  Assert ($setup.Contains('Guarded ai-devops installation failed; machine setup cannot continue.')) `
+    'direct setup must stop when its full guarded installer fails'
+  $legacySetup = Get-Content -Raw (Join-Path $root 'bin\setup_dev_computer_internal.ps1')
+  $legacyGateAt=$legacySetup.IndexOf('-RepoPath $sourceRepo -SourceGateOnly -ExpectedHead $sourceTarget')
+  Assert ($legacyGateAt -gt 0 -and $legacyGateAt -lt $legacySetup.IndexOf('Start-Transcript -Path $logFile') -and
+    $legacyGateAt -lt $legacySetup.IndexOf('Ensure-Winget "OpenJS.NodeJS.LTS"')) `
+    'legacy direct setup must authorize source before transcript and package writes'
+  Assert ($legacySetup.Contains('AI DevOps guarded machine setup failed; legacy setup cannot report completion.')) `
+    'legacy setup must stop when delegated guarded setup fails'
   Write-Host 'PASS: Windows source gate rejects hostile source, moved targets, unpinned protected updates, stale receipts, and pre-advanced checkout'
 } finally {
   Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
