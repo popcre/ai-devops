@@ -731,4 +731,8 @@ sed -n '/^tick_offset()/,/^}/p' "$SCRIPT" > "$FAKE/tick_offset.sh"
 check 'tick offset is stable and inside the interval' \
   ". '$FAKE/tick_offset.sh'; a=\$(tick_offset 10); [ \"\$a\" = \"\$(tick_offset 10)\" ] && [ \"\$a\" -ge 0 ] && [ \"\$a\" -lt 10 ] && [ \"\$(tick_offset 1)\" = 0 ]"
 
+sed -n '/^gh_owner()/,/^}/p' "$SCRIPT" > "$FAKE/gh_owner.sh"
+check 'app owner is read from every call shape the tick uses' \
+  ". '$FAKE/gh_owner.sh'; [ \"\$(gh_owner issue comment 5 -R Popcre/x)\" = Popcre ] && [ \"\$(gh_owner api repos/u2giants/y/issues/1)\" = u2giants ] && [ \"\$(gh_owner api graphql -f query=q -f owner=popcre -f name=z)\" = popcre ] && [ \"\$(gh_owner api -X GET search/issues -f 'q=repo:u2giants/a repo:u2giants/b is:issue')\" = u2giants ] && ! gh_owner api rate_limit"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
