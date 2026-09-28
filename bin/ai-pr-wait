@@ -151,7 +151,7 @@ bounded_gh() {
     [ "$WAS_QUEUED" -eq 0 ] || force=(--force-refresh)
     AI_GH_CALLER=ai-pr-wait "$PYTHON_RUNNER" "$SNAP_HELPER_ARG" \
       --state-dir "$SNAP_STATE_ARG" --key "v1 $SNAP_CONTEXT $REPO $PR $cache_target" \
-      --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" \
+      --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" --cap-supervisor-timeout \
       --age-file "$SNAP_AGE_ARG" --source-file "$SNAP_SOURCE_ARG" "${force[@]+"${force[@]}"}" -- "${command[@]}"
   else
     AI_GH_CALLER=ai-pr-wait "${command[@]}"
@@ -311,7 +311,7 @@ while :; do
       [ "$pages" -le 20 ] || { GH_RC=4; break; }
       cursor="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.startCursor // empty')"
       [ -n "$cursor" ] || { GH_RC=4; break; }
-      quoted_cursor="$(jq -Rn --arg value "$cursor" '$value|@json')"
+      quoted_cursor="$(jq -nr --arg value "$cursor" '$value|@json')"
       PAGE="$(bounded_gh api graphql -f query="{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){headRefOid commits(last:1){nodes{commit{statusCheckRollup{contexts(last:100,before:$quoted_cursor){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name conclusion} ... on StatusContext{context state}}}}}}}}}}" 2>>"$API_STDERR")"
       page_rc=$?
       first_total="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount // empty')"

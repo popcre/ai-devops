@@ -156,40 +156,46 @@ def main():
     parser.add_argument("--source-file", required=True)
     parser.add_argument("--expected-head", required=True)
     parser.add_argument("--force-refresh", action="store_true")
+    parser.add_argument("--cap-supervisor-timeout", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if not args.command or args.command[0] != "--" or args.ttl < 1 or args.wait_seconds < 1 or not args.expected_head:
         return 3
     command = args.command[1:]
+    deadline = time.monotonic() + args.wait_seconds
+
+    def upstream(cache_path):
+        return run(command, cache_path, args.age_file, args.source_file, args.expected_head,
+                   deadline, args.cap_supervisor_timeout)
+
     directory = Path(args.state_dir)
     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
-        return run(command, None, args.age_file, args.source_file, args.expected_head)
+        return upstream(None)
     if os.name == "nt":
         if not windows_acl("EnsureCache", directory):
-            return run(command, None, args.age_file, args.source_file, args.expected_head)
+            return upstream(None)
     else:
         try:
             directory.mkdir(parents=True, mode=0o700, exist_ok=True)
             if directory.is_symlink() or directory.stat().st_mode & 0o077:
-                return run(command, None, args.age_file, args.source_file, args.expected_head)
+                return upstream(None)
         except OSError:
-            return run(command, None, args.age_file, args.source_file, args.expected_head)
+            return upstream(None)
     prune(directory)
     digest = hashlib.sha256(args.key.encode()).hexdigest()
     cache = directory / f"{digest}.json"
     lock_path = directory / f"{digest}.lock"
     if cache.is_symlink() or lock_path.is_symlink():
-        return run(command, None, args.age_file, args.source_file, args.expected_head)
+        return upstream(None)
     if os.name == "nt" and cache.exists() and not windows_acl("VerifyCache", cache):
-        return run(command, None, args.age_file, args.source_file, args.expected_head)
+        return upstream(None)
     try:
         owner_file = open(lock_path, "a+b")
     except OSError:
-        return run(command, None, args.age_file, args.source_file, args.expected_head)
+        return upstream(None)
     with owner_file as owner:
         if os.name == "nt" and not windows_acl("VerifyCache", lock_path):
-            return run(command, None, args.age_file, args.source_file, args.expected_head)
-        deadline = time.monotonic() + args.wait_seconds
+            return upstream(None)
         while True:
             try:
                 lock(owner)
@@ -213,12 +219,26 @@ def main():
                         Path(args.source_file).write_text("cache")
                         sys.stdout.buffer.write(raw)
                         return 0
-            return run(command, cache, args.age_file, args.source_file, args.expected_head)
+            return upstream(cache)
         finally:
             unlock(owner)
 
 
-def run(command, cache, age_file, source_file, expected_head=None):
+def run(command, cache, age_file, source_file, expected_head=None,
+        deadline=None, cap_supervisor_timeout=False):
+    if cap_supervisor_timeout:
+        try:
+            index = command.index("--timeout-seconds")
+            original_limit = int(command[index + 1])
+        except (ValueError, IndexError):
+            print("ai-pr-wait: shared refresh has no bounded supervisor", file=sys.stderr)
+            return 3
+        remaining = int(deadline - time.monotonic())
+        if remaining < 1:
+            print("ai-pr-wait: shared refresh used the request deadline", file=sys.stderr)
+            return 75
+        command = list(command)
+        command[index + 1] = str(min(original_limit, remaining))
     # Mark the actual transport before it starts. A completed cache read never
     # reports upstream spend, even when its age rounds down to zero seconds.
     Path(source_file).write_text("upstream")

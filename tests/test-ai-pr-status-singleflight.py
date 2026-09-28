@@ -89,6 +89,39 @@ print(json.dumps({'errors': [{'message': 'partial'}]} if mode == 'partial' else
         else:
             self.assertEqual((self.base / "state").stat().st_mode & 0o077, 0)
 
+    def test_lock_wait_and_upstream_share_one_deadline(self):
+        leader = self.call(key="deadline", delay="1.2", suffix="leader")
+        start = time.monotonic()
+        while self.calls() == 0 and time.monotonic() - start < 3:
+            time.sleep(0.01)
+        self.assertEqual(self.calls(), 1)
+        supervisor = self.base / "slow_supervisor.py"
+        supervisor.write_text(
+            """import json, os, sys, time
+limit = int(sys.argv[sys.argv.index('--timeout-seconds') + 1])
+with open(os.environ['LIMIT_FILE'], 'w') as output: output.write(str(limit))
+time.sleep(limit)
+sys.exit(124)
+"""
+        )
+        limit_file = self.base / "observed-limit"
+        env = dict(os.environ, LIMIT_FILE=str(limit_file))
+        argv = [sys.executable, str(HELPER), "--state-dir", str(self.base / "state"),
+                "--key", "deadline", "--expected-head", "h1", "--ttl", "10",
+                "--wait-seconds", "5", "--cap-supervisor-timeout", "--force-refresh",
+                "--age-file", str(self.base / "follower.age"),
+                "--source-file", str(self.base / "follower.source"), "--",
+                sys.executable, str(supervisor), "--timeout-seconds", "5"]
+        started = time.monotonic()
+        follower = subprocess.run(argv, capture_output=True, env=env, timeout=7)
+        elapsed = time.monotonic() - started
+        _, leader_err = leader.communicate(timeout=5)
+        self.assertEqual(leader.returncode, 0, leader_err)
+        self.assertEqual(follower.returncode, 124, follower.stderr)
+        self.assertLess(elapsed, 5.8)
+        self.assertTrue(limit_file.exists())
+        self.assertLess(int(limit_file.read_text()), 5)
+
     def test_different_access_keys_never_share(self):
         for key in ("scope-a", "scope-b"):
             process = self.call(key=key, suffix=key)

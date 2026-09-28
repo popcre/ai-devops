@@ -250,22 +250,33 @@ check "two simultaneous first waiters share one complete upstream read and keep 
 
 cat > "$TMP/bin/date" <<'EOF'
 #!/usr/bin/env bash
-printf '1000\n'
+state="${AI_PR_WAIT_TEST_CLOCK:?}"
+count="$(cat "$state" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$state"
+if [ "$count" -lt 20 ]; then printf '1000\n'; else printf '1060\n'; fi
 EOF
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf 'x\n' >> "${AI_PR_WAIT_TEST_MARKER:?}"
-if [[ "$*" == *before:* ]]; then
+if [[ "$*" == *'before:"older"'* ]]; then
   printf '%s\n' '{"data":{"repository":{"pullRequest":{"headRefOid":"h1","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[{"name":"older failure","conclusion":"FAILURE"}]}}}}]}}}}}'
+elif [[ "$*" == *before:* ]]; then
+  printf '%s\n' 'unexpected GraphQL cursor encoding' >&2
+  exit 9
 else
   printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1","isInMergeQueue":false,"mergeCommit":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":true,"startCursor":"older"},"nodes":[]}}}}]}}}}}'
 fi
 EOF
 chmod +x "$TMP/bin/gh" "$TMP/bin/date"
-rm -f "$TMP/paged-calls"
-OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/paged-calls" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+rm -f "$TMP/paged-calls" "$TMP/paged-clock"
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/paged-calls" AI_PR_WAIT_TEST_CLOCK="$TMP/paged-clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
 check "a failure on a previous check page remains terminal after complete pagination" \
-  "test '$RC' -eq 1 && test \"\$(wc -l < '$TMP/paged-calls')\" -eq 2 && printf '%s' \"$OUT\" | grep -q 'older failure'"
+  "test '$RC' -eq 1 && test \"\$(wc -l < '$TMP/paged-calls')\" -eq 2 && printf '%s' \"$OUT\" | grep -q 'older failure' && ! printf '%s' \"$OUT\" | grep -q 'unexpected GraphQL cursor encoding'"
+
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+printf '1000\n'
+EOF
 
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
