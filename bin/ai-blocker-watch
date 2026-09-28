@@ -126,6 +126,9 @@ GH="${AI_BLOCKER_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
 # Label only the transport subprocess. Resumed AI sessions are independent
 # callers and must not inherit BlockerWatch's attribution.
 gh_call(){ AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; }
+# Only call sites below set this fixed telemetry label; a parent shell must not
+# be able to misclassify unrelated BlockerWatch requests.
+unset AI_GH_OPERATION
 WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
 LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
 LOGS="$HOME_DIR/logs"
@@ -151,7 +154,7 @@ link(){ # link <blocked> <blocker> [blocker id, when already read]
   if [ -z "$id" ] && [ -n "${SNAPIDX[$kr#$kn]+set}" ]; then
     id="${SNAPIDX[$kr#$kn]%%$'\t'*}"
   fi
-  [ -n "$id" ] || id="$(gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
+  [ -n "$id" ] || id="$(AI_GH_OPERATION=bw.link_issue gh_api "repos/$kr/issues/$kn" --jq .id)" || die "cannot read $2"
   note "linking $1 as blocked by $2 on GitHub"
   # SNAPDEP is keyed by blocker: SNAPDEP[blocker] lists the issues it blocks.
   if [ -n "${SNAPREPO[$br]+set}" ]; then
@@ -159,10 +162,10 @@ link(){ # link <blocked> <blocker> [blocker id, when already read]
       note "$1 is already blocked by $2"; return 0 ;;
     esac
   fi
-  if gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
+  if AI_GH_OPERATION=bw.link_issue gh_api "repos/$br/issues/$bn/dependencies/blocked_by" --jq '.[].id' | grep -qx "$id"; then
     note "$1 is already blocked by $2"; return 0
   fi
-  gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null ||
+  AI_GH_OPERATION=bw.link_issue gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null ||
     die "GitHub refused the link $1 blocked by $2"
   note "recorded: $1 is blocked by $2"
 }
@@ -397,7 +400,7 @@ propagate(){
       # The tick's open-issue snapshot already says which OPEN issues wait on
       # this one; REST only when it has none (a miss is not "no dependents").
       snapshot_all_indexed && deps="$(snapshot_dependents_of "$repo" "$n")"
-      if [ -z "$deps" ] && ! deps="$(gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
+      if [ -z "$deps" ] && ! deps="$(AI_GH_OPERATION=bw.dependents gh_api "repos/$repo/issues/$n/dependencies/blocking" --jq '.[] | select(.state=="open") | "\(.repository_url | sub("^.*/repos/"; ""))#\(.number)"')"; then
         note "could not read what $repo#$n was blocking"; ok=0; continue
       fi
       for dep in $deps; do
@@ -459,7 +462,7 @@ wake(){ # wake <wait file>
     # Still OPEN in this tick's snapshot → no REST read. A miss (closed, a pull
     # request, a repo outside the scan) always falls through to REST.
     if meta="$(snapshot_open_hit "$ref")"; then :
-    elif ! meta="$(gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
+    elif ! meta="$(AI_GH_OPERATION=bw.wake_miss gh_api "repos/$r/issues/$n" --jq '[.state, ((.pull_request != null) | tostring), .title] | @tsv')"; then
       note "could not read $ref"; FAILED=1; return; fi
     IFS=$'\t' read -r state ispr title <<<"$meta"
     if [ "$state" = closed ]; then
@@ -625,9 +628,9 @@ open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|
     pages=$((pages+1))
     if [ "$pages" -gt 10 ]; then SNAPERR[$repo]="$repo has more open issues than one scan reads (1000)"; break; fi
     if [ -n "$cursor" ]; then
-      out="$(gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
     else
-      out="$(gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
     fi
     printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository != null)' >/dev/null || { SNAPERR[$repo]="unreadable answer from $repo"; break; }
     SNAP["$repo|$pages"]="$out"
@@ -718,7 +721,7 @@ issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node
   spent="$(cat "$ALARM_TICK/agql" 2>/dev/null || printf 0)"
   [ "$spent" -lt "$budget" ] || return 1
   printf '%s' "$((spent+1))" > "$ALARM_TICK/agql"
-  out="$(gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || return 2
+  out="$(AI_GH_OPERATION=bw.alarm_issue gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || return 2
   printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository.issue != null)' >/dev/null || return 2
   printf '%s' "$out" > "$cachef"
   printf '%s' "$out"
@@ -1015,14 +1018,14 @@ maintain_links(){ # maintain_links <dry 0|1>
     bref="${edge%% *}"; dep="${edge##* }"; br="${bref%#*}"; bn="${bref#*#}"
     id="${idmap[$br#$dep]:-}"
     if [ -z "$id" ]; then
-      id="$(gh_api "repos/$br/issues/$dep" --jq 'if .pull_request then "pr" else .id end' 2>/dev/null)" || id=""
+      id="$(AI_GH_OPERATION=bw.link_issue gh_api "repos/$br/issues/$dep" --jq 'if .pull_request then "pr" else .id end' 2>/dev/null)" || id=""
       if [ -z "$id" ]; then note "links: cannot read $br#$dep (named in $bref's depends_on); skipped"; unresolvable=$((unresolvable+1)); continue; fi
       # GitHub only links issues to issues; a pull request target is refused
       # every scan and kept the links clock from ever advancing.
       if [ "$id" = pr ]; then note "links: $br#$dep (named in $bref's depends_on) is a pull request, which GitHub cannot link; skipped"; unresolvable=$((unresolvable+1)); continue; fi
     fi
     if [ "$dry" = 1 ]; then note "links: would record $bref is blocked by $br#$dep (from its db-work-scope depends_on)"; continue; fi
-    if gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
+    if AI_GH_OPERATION=bw.link_issue gh_api -X POST "repos/$br/issues/$bn/dependencies/blocked_by" -F "issue_id=$id" >/dev/null; then
       created=$((created+1)); snapshot_index_set "$bref" "$br#$dep"; snapshot_addlink "$br" "$bn" "$dep" || snapshot_drop "$br"; note "links: recorded $bref is blocked by $br#$dep (from its db-work-scope depends_on)"
     else
       note "links: GitHub refused the link $bref blocked by $br#$dep"; lfail=1

@@ -17,6 +17,13 @@ cat > "$TMP/gh" <<'EOF'
 #!/usr/bin/env bash
 F="$FAKE"; printf '%s\n' "$*" >> "$F/calls"
 printf '%s\n' "${AI_GH_CALLER:-unset}" >> "$F/callers"
+printf '%s\n' "${AI_GH_OPERATION:-unset}" >> "$F/operations"
+kind=other
+case "$*" in
+  *graphql*states:OPEN*) kind=snapshot ;;
+  *dependencies/blocking*) kind=dependents ;;
+esac
+printf '%s\t%s\n' "${AI_GH_OPERATION:-unset}" "$kind" >> "$F/operation-kinds"
 [ -f "$F/fail" ] && exit 1
 jqarg=""; args=("$@"); for i in "${!args[@]}"; do [ "${args[$i]}" = --jq ] && jqarg="${args[$((i+1))]}"; done
 out(){ if [ -n "$jqarg" ]; then jq -r "$jqarg" <<<"$1"; else printf '%s\n' "$1"; fi; }
@@ -677,5 +684,18 @@ date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ > "$TMP/home-snap6/last-alarm"
 AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" BW links >/dev/null 2>&1 || true
 check 'an edge already in the snapshot is not re-fetched or re-posted' \
   "[ ! -f '$FAKE/links' ] && ! grep -q 'dependencies/blocked_by' '$FAKE/calls' && ! grep -q 'issue_id=' '$FAKE/calls'"
+
+# Fixed telemetry labels must reach the CLI subprocess across gh_api/gh_call,
+# and each may identify only its intended request category.
+for op in bw.snapshot bw.dependents bw.wake_miss bw.alarm_issue bw.link_issue; do
+  check "fixed telemetry label $op reaches the CLI" "grep -qx '$op' '$FAKE/operations'"
+done
+check 'snapshot label identifies only open-issue GraphQL walks' \
+  "awk -F '\t' '\$2 == \"snapshot\" && \$1 != \"bw.snapshot\" { bad=1 } \$2 != \"snapshot\" && \$1 == \"bw.snapshot\" { bad=1 } END { exit bad }' '$FAKE/operation-kinds'"
+check 'dependent label identifies only blocking REST reads' \
+  "awk -F '\t' '\$2 == \"dependents\" && \$1 != \"bw.dependents\" { bad=1 } \$2 != \"dependents\" && \$1 == \"bw.dependents\" { bad=1 } END { exit bad }' '$FAKE/operation-kinds'"
+AI_GH_OPERATION=bw.snapshot BW find no-such-wait >/dev/null 2>&1 || true
+check 'an inherited label does not classify unrelated calls' \
+  "[ \"\$(tail -2 '$FAKE/operation-kinds' | cut -f1 | sort -u)\" = unset ]"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
