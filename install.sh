@@ -438,6 +438,23 @@ else
   run_stage optional "Qwen key store" qwen_key_store
 fi
 
+# DeepSeek provider turns read only this protected store. A missing store
+# leaves formal reviews unavailable until this explicit install-time refresh.
+if [ "$(id -u)" -eq 0 ]; then
+  stage_results+=("SKIP\toptional\tDeepSeek key store (root install)")
+elif ! command -v op >/dev/null 2>&1; then
+  stage_results+=("SKIP\toptional\tDeepSeek key store (1Password CLI not on PATH)")
+elif [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] && [ ! -s "$HOME/.config/ai-devops/op-service-account" ]; then
+  stage_results+=("SKIP\toptional\tDeepSeek key store (no 1Password service-account token yet)")
+else
+  deepseek_key_store() {
+    local token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+    [ -n "$token" ] || token="$(cat "$HOME/.config/ai-devops/op-service-account")"
+    OP_SERVICE_ACCOUNT_TOKEN="$token" "$REPO_ROOT/bin/ai-deepseek-agent" store-key --if-missing </dev/null
+  }
+  run_stage optional "DeepSeek key store" deepseek_key_store
+fi
+
 # Muse Code on Linux: when the pinned binary is absent, run Meta's official
 # installer (Albert approved automatic install, 2026-09-25), then verify the
 # pinned version and SHA-256. ai-muse runs only that hashed file.

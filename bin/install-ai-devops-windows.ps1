@@ -776,6 +776,21 @@ if ($SkillsDryRun) {
     exit 0
 }
 
+# DeepSeek formal reviews must never ask 1Password for a key. Prepare the
+# protected store before the installer's live qualification pass.
+$deepseekBash = Get-GitBash
+if ($deepseekBash) {
+    $deepseekWrapper = (Join-Path $RepoPath 'bin\ai-deepseek-agent') -replace '\\', '/'
+    $deepseekKeyProbe = Invoke-NativeProbe -Command $deepseekBash.Source -Arguments @('--noprofile', '--norc', $deepseekWrapper, 'store-key', '--if-missing')
+    if ($deepseekKeyProbe.ExitCode -eq 0) {
+        Write-Note 'DeepSeek protected per-user key store is ready.'
+    } else {
+        Write-Note 'DeepSeek key store setup failed; review qualification remains unavailable until ai-deepseek-agent store-key succeeds.'
+    }
+} else {
+    Write-Note 'Git Bash is needed to prepare the DeepSeek key store.'
+}
+
 # Repo-level managed hook plus the update's one reviewer-requalification gate.
 # Rerunning this script is the documented Windows update path, so every real
 # run repairs or refreshes the hook and then requalifies any reviewer whose

@@ -29,9 +29,8 @@
 # stored under .ai/deepseek-sessions/ in the current repo (or cwd if not in a
 # repo) and are local scratch, not meant to be committed.
 #
-# Secrets: DEEPSEEK_API_KEY self-resolves from 1Password (same pattern as
-# opencode-glm-launch), so this works whether or not the calling shell already
-# exported it.
+# Secrets: store-key explicitly refreshes an owner-only key from 1Password.
+# Provider turns read that store and never contact 1Password.
 
 set -uo pipefail
 
@@ -47,6 +46,7 @@ declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "
 CFG_DIR="${AI_DEVOPS_CONFIG_DIR:-$HOME/.config/ai-devops}"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
+KEY_STORE="${AI_DEEPSEEK_KEY_STORE:-$CFG_DIR/secrets/deepseek-api-key}"
 # Both slugs below were verified live against https://api.deepseek.com on
 # 2026-09-17 (GET /models, then one doctor --live probe per slug, both PASS):
 # deepseek-flash is DeepSeek V4.1 Flash; deepseek-v4-pro is the other supported
@@ -98,6 +98,9 @@ Usage:
   ai-deepseek-agent doctor [--live]
       Validate the governed runtime; --live makes one bounded provider probe.
 
+  ai-deepseek-agent store-key [--if-missing]
+      Explicitly refresh the owner-only key store from 1Password.
+
 A genuine back-and-forth: DeepSeek sees the whole thread on every reply, the
 same as resuming a Codex session. Use it for plans, code, environment/config
 questions, debugging theories, or a second-opinion debate -- not just diffs.
@@ -125,10 +128,14 @@ SUBCMD="${1:-}"
 [ -n "$SUBCMD" ] && shift || true
 
 case "$SUBCMD" in
-  send|reply|show|list|doctor|finalize) ;;
+  send|reply|show|list|doctor|finalize|store-key) ;;
   ""|-h|--help|help) usage; exit 0 ;;
   *) echo "Unknown subcommand: $SUBCMD" >&2; echo >&2; usage >&2; exit 2 ;;
 esac
+if [ "$SUBCMD" = store-key ]; then
+  case "${1:-}" in ''|--if-missing) ;; *) echo 'Usage: ai-deepseek-agent store-key [--if-missing]' >&2; exit 2;; esac
+  [ "$#" -le 1 ] || { echo 'Usage: ai-deepseek-agent store-key [--if-missing]' >&2; exit 2; }
+fi
 
 # Validate the model against the two live provider ids before credential
 # resolution or any provider call -- but only for the subcommands that can
@@ -196,7 +203,7 @@ unset DEEPSEEK_API_KEY
 exec 9<<<"$keep_key"
 keep_key=""
 clean=(/usr/bin/env -i "PATH=${PATH:-}" "HOME=${HOME:-}" "AI_DEEPSEEK_SECRET_FD=9" "AI_DEEPSEEK_REEXEC=1")
-for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL AI_DEVOPS_CONFIG_DIR DEEPSEEK_MODEL AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
+for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL AI_DEVOPS_CONFIG_DIR AI_DEEPSEEK_KEY_STORE DEEPSEEK_MODEL AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
   [ -z "${!name:-}" ] || clean+=("$name=${!name}")
 done
 exec "${clean[@]}" /usr/bin/bash --noprofile --norc "$script" "$@"
@@ -207,9 +214,41 @@ if [ -n "${AI_DEEPSEEK_SECRET_FD:-}" ]; then
   eval "exec ${AI_DEEPSEEK_SECRET_FD}<&-"
   unset AI_DEEPSEEK_SECRET_FD
 fi
-if [ -z "${DEEPSEEK_API_KEY:-}" ] && { [ "$SUBCMD" = "send" ] || [ "$SUBCMD" = "reply" ] || { [ "$SUBCMD" = doctor ] && [ "${1:-}" = --live ]; }; }; then
+key_store_path_safe() {
+  local path="$KEY_STORE" parent
+  case "$path" in /*) ;; *) return 1;; esac
+  while [ "$path" != / ]; do
+    [ ! -L "$path" ] || return 1
+    parent="$(dirname "$path")"; [ "$parent" != "$path" ] || return 1
+    path="$parent"
+  done
+}
+key_store_ok() {
+  local dir="$(dirname "$KEY_STORE")" helper ps
+  key_store_path_safe && [ -f "$KEY_STORE" ] && [ -s "$KEY_STORE" ] && [ -d "$dir" ] || return 1
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"; [ -n "$ps" ] || return 1
+    helper="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/windows-private-file.ps1"
+    AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$KEY_STORE")" AI_DEVOPS_PRIVATE_PARENT="$(cygpath -w "$dir")" \
+      "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null 2>&1
+  else
+    [ "$(stat -c %a "$dir" 2>/dev/null || stat -f %Lp "$dir" 2>/dev/null)" = 700 ] &&
+    [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ] &&
+    [ "$(stat -c %u "$dir" 2>/dev/null || stat -f %u "$dir" 2>/dev/null)" = "$(id -u)" ] &&
+    [ "$(stat -c %u "$KEY_STORE" 2>/dev/null || stat -f %u "$KEY_STORE" 2>/dev/null)" = "$(id -u)" ]
+  fi
+}
+if [ "$SUBCMD" = store-key ] && [ "${1:-}" = --if-missing ] && key_store_ok; then
+  echo 'DeepSeek protected key store already present.'; exit 0
+fi
+if [ "$SUBCMD" != store-key ] && { [ "$SUBCMD" = send ] || [ "$SUBCMD" = reply ] || { [ "$SUBCMD" = doctor ] && [ "${1:-}" = --live ]; }; } && [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+  key_store_ok || { echo 'Error: DeepSeek protected key store is missing or insecure. Run ai-deepseek-agent store-key outside a review.' >&2; exit 1; }
+  IFS= read -r DEEPSEEK_API_KEY < "$KEY_STORE" || DEEPSEEK_API_KEY=""
+  [ -n "$DEEPSEEK_API_KEY" ] || { echo 'Error: DeepSeek protected key store is empty.' >&2; exit 1; }
+fi
+if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ "$SUBCMD" = store-key ]; then
   if [ -n "${AI_DEEPSEEK_REEXEC:-}" ]; then
-    echo "Error: DEEPSEEK_API_KEY resolved EMPTY from $MCP_ENV after 'op run'." >&2
+    echo "Error: DEEPSEEK_API_KEY resolved EMPTY from $MCP_ENV during explicit key refresh." >&2
     echo "       Check the DEEPSEEK_API_KEY reference in config/mcp.env.example." >&2
     exit 1
   fi
@@ -254,7 +293,28 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && { [ "$SUBCMD" = "send" ] || [ "$SUBCMD" = "
     BASH_EXE=/usr/bin/bash
   fi
   set +e
-  ( export OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_TOKEN"; exec /usr/bin/env -u BASH_ENV -u ENV "$OP_BIN" run --env-file "$DEEPSEEK_REF_FILE" -- "$BASH_EXE" --noprofile --norc -c "$DEEPSEEK_CREDENTIAL_BOUNDARY" deepseek-credential-boundary "$0" "$SUBCMD" "$@" )
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    # Git Bash lacks flock. Share the portable lock used by the other
+    # reviewer key refreshes so 1Password reads remain serialized.
+    (
+      lock_dir="${AI_MUSE_STATE_DIR:-$HOME/.local/state/ai-devops/muse}/credential.lock.d"
+      mkdir -p "$(dirname "$lock_dir")" || exit 1
+      deadline=$(( $(date +%s) + 120 ))
+      until mkdir "$lock_dir" 2>/dev/null; do
+        [ "$(date +%s)" -lt "$deadline" ] || { echo 'Error: 1Password credential lock is busy.' >&2; exit 1; }
+        sleep 1
+      done
+      lock_token="$$-$RANDOM-$(date +%s)"
+      printf '%s\n' "$lock_token" > "$lock_dir/token"
+      printf '%s\n' "$$" > "$lock_dir/pid"
+      trap '[ "$(cat "$lock_dir/token" 2>/dev/null || true)" != "$lock_token" ] || { rm -f "$lock_dir/token" "$lock_dir/pid"; rmdir "$lock_dir" 2>/dev/null || true; }' EXIT
+      export OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_TOKEN"
+      /usr/bin/env -u BASH_ENV -u ENV "$OP_BIN" run --env-file "$DEEPSEEK_REF_FILE" -- "$BASH_EXE" --noprofile --norc -c "$DEEPSEEK_CREDENTIAL_BOUNDARY" deepseek-credential-boundary "$0" "$SUBCMD" "$@"
+    )
+  else
+    command -v flock >/dev/null 2>&1 || { echo 'Error: flock is required for serialized DeepSeek key refresh.' >&2; rm -f "$DEEPSEEK_REF_FILE"; exit 1; }
+    ( export OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_TOKEN"; exec flock --close -w 120 "$CFG_DIR/op-refresh.lock" /usr/bin/env -u BASH_ENV -u ENV "$OP_BIN" run --env-file "$DEEPSEEK_REF_FILE" -- "$BASH_EXE" --noprofile --norc -c "$DEEPSEEK_CREDENTIAL_BOUNDARY" deepseek-credential-boundary "$0" "$SUBCMD" "$@" )
+  fi
   REEXEC_RC=$?; set -e; rm -f "$DEEPSEEK_REF_FILE"; exit "$REEXEC_RC"
 fi
 
@@ -263,6 +323,28 @@ fi
 # child can start. Only shell-built header bytes use this non-exported value.
 DEEPSEEK_PROVIDER_KEY="${DEEPSEEK_API_KEY:-}"
 unset DEEPSEEK_API_KEY
+
+if [ "$SUBCMD" = store-key ]; then
+  [ -n "$DEEPSEEK_PROVIDER_KEY" ] || { echo 'Error: DeepSeek key resolved empty.' >&2; exit 1; }
+  key_store_path_safe || { echo 'Error: DeepSeek key store path is linked.' >&2; exit 1; }
+  key_dir="$(dirname "$KEY_STORE")"; mkdir -p "$key_dir" && chmod 700 "$key_dir" || exit 1
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"; [ -n "$ps" ] || exit 1
+    helper="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/windows-private-file.ps1"
+    AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$key_dir")" \
+      "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET -Directory' >/dev/null || exit 1
+  fi
+  key_tmp="$(mktemp "$key_dir/.deepseek-key.XXXXXX")" || exit 1
+  chmod 600 "$key_tmp" || { rm -f "$key_tmp"; exit 1; }
+  if [ -n "${SYSTEMROOT:-}" ]; then
+    AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$key_tmp")" \
+      "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null || { rm -f "$key_tmp"; exit 1; }
+  fi
+  printf '%s\n' "$DEEPSEEK_PROVIDER_KEY" > "$key_tmp" || { rm -f "$key_tmp"; exit 1; }
+  mv -f "$key_tmp" "$KEY_STORE" || { rm -f "$key_tmp"; exit 1; }
+  key_store_ok || { echo 'Error: DeepSeek key store is not owner-only after refresh.' >&2; exit 1; }
+  echo 'DeepSeek protected key store refreshed.'; exit 0
+fi
 
 command -v curl >/dev/null 2>&1 || { echo "Error: curl is required." >&2; exit 1; }
 
@@ -1098,10 +1180,8 @@ case "$SUBCMD" in
     case "${1:-}" in '') ;; --live) LIVE=1;; *) echo "Error: unknown doctor option: $1" >&2; exit 2;; esac
     [ "$#" -le 1 ] || { echo 'Usage: ai-deepseek-agent doctor [--live]' >&2; exit 2; }
     CREDENTIAL_READY=0
-    if [ -n "$DEEPSEEK_PROVIDER_KEY" ]; then CREDENTIAL_READY=1
-    elif command -v op >/dev/null 2>&1 && [ -s "$TOKEN_FILE" ] && [ -f "$MCP_ENV" ] \
-      && [ "$(grep -c '^DEEPSEEK_API_KEY=op://' "$MCP_ENV" 2>/dev/null || true)" = 1 ]; then CREDENTIAL_READY=1; fi
-    [ "$CREDENTIAL_READY" -eq 1 ] || { echo 'Error: DeepSeek credential plumbing is unavailable (no key and no governed 1Password reference).' >&2; exit 1; }
+    if [ -n "$DEEPSEEK_PROVIDER_KEY" ] || key_store_ok; then CREDENTIAL_READY=1; fi
+    [ "$CREDENTIAL_READY" -eq 1 ] || { echo 'Error: DeepSeek protected key store is unavailable. Run ai-deepseek-agent store-key outside a review.' >&2; exit 1; }
     printf 'PASS  curl available\nPASS  Python available (%s)\nPASS  bounded provider timeout (%ss)\n' "$PYTHON" "$CALL_TIMEOUT"
     if [ "$LIVE" -eq 1 ]; then
       MSGS="$(mktemp)"; REPLY_FILE="$(mktemp)"

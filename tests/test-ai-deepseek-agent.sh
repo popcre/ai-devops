@@ -4,6 +4,7 @@ set -u
 # or an ambient model override: the suite must control the model everywhere.
 unset DEEPSEEK_API_KEY AI_DEEPSEEK_REEXEC AI_DEEPSEEK_SECRET_FD DEEPSEEK_MODEL
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; SCRIPT="$ROOT/bin/ai-deepseek-agent"
+[ -n "$(command -v python 2>/dev/null || true)" ] || python() { python3 "$@"; }
 PASS=0; FAIL=0; SKIP=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
 
@@ -50,17 +51,31 @@ elif [ "${DEEPSEEK_STUB_INVALID:-0}" = 1 ]; then printf '{"choices":[{"message":
 else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
 chmod +x "$TMP/bin/op" "$TMP/bin/curl"
+ln -s "$(command -v python3)" "$TMP/bin/python"
 export DEEPSEEK_CURL_ARGS="$TMP/curl-args" DEEPSEEK_CURL_ENV="$TMP/curl-env" DEEPSEEK_STUB_PID_FILE="$TMP/curl-pid" DEEPSEEK_STUB_TERM_MARKER="$TMP/curl-terminated"
 : > "$DEEPSEEK_CURL_ARGS"
 echo 'ai-deepseek-agent tests'
-HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test >/dev/null 2>&1
-check "1Password re-exec was attempted" "grep -qx run '$TMP/args'"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test --review >/dev/null 2>&1
+check "review with no protected store refuses before 1Password or provider contact" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=fixture-key bash "$SCRIPT" store-key >/dev/null
+check "explicit refresh creates owner-only key store" "test -s '$TMP/home/.config/ai-devops/secrets/deepseek-api-key' && test \"\$(stat -c %a '$TMP/home/.config/ai-devops/secrets/deepseek-api-key')\" = 600 && test \"\$(stat -c %a '$TMP/home/.config/ai-devops/secrets')\" = 700"
+chmod 644 "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" bash "$SCRIPT" send insecure --review >/dev/null 2>&1
+check "insecure store refuses review without 1Password or provider contact" "test ! -e '$TMP/args' && test ! -s '$DEEPSEEK_CURL_ARGS'"
+chmod 600 "$TMP/home/.config/ai-devops/secrets/deepseek-api-key"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" send test --review >/dev/null 2>&1
+check "review reads protected store without 1Password" "test ! -e '$TMP/args'"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" bash "$SCRIPT" store-key --if-missing >/dev/null 2>&1
+check "idempotent refresh does not call 1Password" "test ! -e '$TMP/args'"
+check "invalid refresh option refuses before 1Password" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_TEST_ARGS='$TMP/args' bash '$SCRIPT' store-key --unknown >/dev/null 2>&1 && test ! -e '$TMP/args'"
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_TEST_ARGS="$TMP/args" DEEPSEEK_TEST_ENV_FILE="$TMP/op-env" bash "$SCRIPT" store-key >/dev/null 2>&1
+check "explicit refresh attempts 1Password" "grep -qx run '$TMP/args'"
 mkdir -p "$TMP/untrusted-test-root"
 OP_ARGS_TRUST_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
-check "credential resolution rejects an executable outside its trusted installation or test root" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_TEST_DIR='$TMP/untrusted-test-root' DEEPSEEK_TEST_ARGS='$TMP/args' bash '$SCRIPT' send trust-check 2>/dev/null && test '$OP_ARGS_TRUST_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
+check "explicit refresh rejects an executable outside its trusted installation or test root" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' AI_DEEPSEEK_TEST_DIR='$TMP/untrusted-test-root' DEEPSEEK_TEST_ARGS='$TMP/args' bash '$SCRIPT' store-key 2>/dev/null && test '$OP_ARGS_TRUST_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
 OP_ARGS_BEFORE="$(sha256sum "$TMP/args" | cut -d' ' -f1)"
 check "provider endpoint override is rejected before credential resolution" "! HOME='$TMP/home' PATH='$TMP/bin:$PATH' DEEPSEEK_TEST_ARGS='$TMP/args' DEEPSEEK_BASE_URL='https://attacker.invalid' bash '$SCRIPT' send endpoint-check && test '$OP_ARGS_BEFORE' = \"\$(sha256sum '$TMP/args' | cut -d' ' -f1)\""
-check "managed re-exec resolves only the DeepSeek reference behind an empty-environment boundary" "test \"\$(wc -l < '$TMP/op-env')\" -eq 1 && grep -q '^DEEPSEEK_API_KEY=op://' '$TMP/op-env' && grep -q '/usr/bin/env -i' '$SCRIPT'"
+check "explicit refresh resolves only the DeepSeek reference behind an empty-environment boundary" "test \"\$(wc -l < '$TMP/op-env')\" -eq 1 && grep -q '^DEEPSEEK_API_KEY=op://' '$TMP/op-env' && grep -q '/usr/bin/env -i' '$SCRIPT'"
 check "managed re-exec keeps the DeepSeek key out of process arguments" "grep -q 'AI_DEEPSEEK_SECRET_FD=9' '$SCRIPT' && ! grep -q '\"DEEPSEEK_API_KEY=\$keep_key\"' '$SCRIPT'"
 check "managed re-exec keeps the repository-tool budgets" "test \"\$(grep -c 'for name in .*DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS' '$SCRIPT')\" -eq 1"
 FD_HANDOFF_OUT="$(exec 9<<<'fd-managed-key'; cd "$TMP/repo" && /usr/bin/env -i HOME="$TMP/home" PATH="$TMP/bin:$PATH" AI_DEEPSEEK_TEST_DIR="$TMP" AI_DEEPSEEK_SECRET_FD=9 DEEPSEEK_STUB_REPLY=DEEPSEEK_REVIEWER_HEALTHY DEEPSEEK_CURL_ARGS="$DEEPSEEK_CURL_ARGS" DEEPSEEK_CURL_ENV="$DEEPSEEK_CURL_ENV" DEEPSEEK_STUB_PID_FILE="$DEEPSEEK_STUB_PID_FILE" DEEPSEEK_STUB_TERM_MARKER="$DEEPSEEK_STUB_TERM_MARKER" "$SCRIPT" doctor --live 9<&9)"
