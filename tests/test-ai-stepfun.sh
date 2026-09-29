@@ -217,6 +217,7 @@ if [ "$(uname -s)" = Linux ]; then
   export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_OPENCODE_ROOT="$TMP/bin"
   rm -f "$TMP/args.bwrap"
   check "Linux OpenCode turn runs under bubblewrap with an empty home and no host root" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES && grep -qx -- '--unshare-all' '$TMP/args.bwrap' && grep -qx -- '--tmpfs' '$TMP/args.bwrap' && grep -qx \"\$HOME\" '$TMP/args.bwrap' && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx / && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx /etc"
+  check "Linux OpenCode doctor fails without bubblewrap" "! AI_STEPFUN_BWRAP=/nonexistent '$SCRIPT' doctor >/dev/null 2>&1 && '$SCRIPT' doctor | grep -q '^PASS  bubblewrap sandbox'"
   unset AI_STEPFUN_OPENCODE_ROOT
 fi
 unset AI_STEPFUN_ENGINE AI_STEPFUN_OPENCODE AI_STEPFUN_ICACLS

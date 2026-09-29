@@ -271,7 +271,7 @@ for _ in 1 2 3 4 5; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; do
 id_lock="$(mktemp)"
 { sed -n '/^norm()/,/^}/p' "$DOCTOR"; sed -n '/^proc_stat_field()/,/^}/p' "$DOCTOR"; sed -n '/^proc_start_ticks()/p' "$DOCTOR"
   sed -n '/^proc_ppid()/p' "$DOCTOR"
-  sed -n '/^same_holder()/,/^}/p' "$DOCTOR"; sed -n '/^lock_held_now()/p' "$DOCTOR"; sed -n '/^related_to_lock_pid()/,/^}/p' "$DOCTOR"
+  sed -n '/^same_holder()/,/^}/p' "$DOCTOR"; sed -n '/^fd_holds_lock()/,/^}/p' "$DOCTOR"
   sed -n '/^gone()/,/^}/p' "$DOCTOR"; } > "$TMP/identity.sh"
 ( exec 7<"$id_lock"; flock 7; exec sleep 30 ) & id_holder=$!
 sleep 0.3
@@ -288,13 +288,11 @@ if (
   LOCK_INO_N=0                           # the process no longer holds this lock
   ! same_holder "$id_holder" || exit 1
   LOCK_INO_N="$(norm "${id##*:}")"
-  ( exec 8<"$id_lock"; sleep 5 ) & opener=$!   # open but NOT locking
+  ( exec 8<"$id_lock"; exec sleep 5 ) & opener=$!   # open but NOT locking
   sleep 0.2
   HOLDER_START[$opener]="$(proc_start_ticks "$opener")"
-  locks_pid="$id_holder"
   ! same_holder "$opener" || { kill "$opener"; exit 1; }
   kill "$id_holder"; wait "$id_holder" 2>/dev/null; sleep 0.2
-  locks_pid=''
   ! same_holder "$opener" || { kill "$opener"; exit 1; }   # lock released: open fd alone never qualifies
   kill "$opener" 2>/dev/null
 ); then

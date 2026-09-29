@@ -425,6 +425,11 @@ cmd_doctor(){
         [ -f "$OC_PROFILE_SRC/$f" ] || { printf 'FAIL profile %s missing\n' "$f"; exit 1; }
       done
       printf 'PASS  OpenCode profile (review + implement agents)\n'
+      if [ "$IS_WINDOWS" != 1 ]; then
+        # Linux OpenCode turns only run under bubblewrap (#1086).
+        bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed on Linux (sudo apt-get install bubblewrap)\n'; exit 1; }
+        printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
+      fi
       ;;
   esac
   key_store_ok || { printf 'FAIL protected StepFun key store missing (run: ai-stepfun store-key)\n'; exit 1; }
