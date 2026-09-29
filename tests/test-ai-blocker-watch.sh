@@ -64,6 +64,7 @@ case "$*" in
   *dependencies/blocking*) out "$(cat "$F/blocking.json" 2>/dev/null || echo '[]')" ;;
   *"-X POST"*blocked_by*) printf 'linked\n' >> "$F/links"; echo '{}' ;;
   *dependencies/blocked_by*) out '[]' ;;
+  *labels=ready-for-fixer*) out "$(cat "$F/fixer.json" 2>/dev/null || echo '[]')" ;;
   *issues/31/comments*) out "$(cat "$F/comments31.json" 2>/dev/null || echo '[]')" ;;
   *repos/o/r/pulls/5*) out "$(cat "$F/pull5.json" 2>/dev/null || echo '{"merged":true}')" ;;
   *repos/o/r/issues/5*) pr=null; [ -f "$F/is_pr" ] && pr='{"url":"x"}'; out "{\"id\":55,\"state\":\"$(cat "$F/state5" 2>/dev/null || echo open)\",\"title\":\"gate bug\",\"pull_request\":$pr}" ;;
@@ -734,5 +735,39 @@ check 'tick offset is stable and inside the interval' \
 sed -n '/^gh_owner()/,/^}/p' "$SCRIPT" > "$FAKE/gh_owner.sh"
 check 'app owner is read from every call shape the tick uses' \
   ". '$FAKE/gh_owner.sh'; [ \"\$(gh_owner issue comment 5 -R Popcre/x)\" = Popcre ] && [ \"\$(gh_owner api repos/u2giants/y/issues/1)\" = u2giants ] && [ \"\$(gh_owner api graphql -f query=q -f owner=popcre -f name=z)\" = popcre ] && [ \"\$(gh_owner api -X GET search/issues -f 'q=repo:u2giants/a repo:u2giants/b is:issue')\" = u2giants ] && ! gh_owner api rate_limit"
+
+# --- fixer pickup (#1011) ---------------------------------------------------
+fx_host="$(hostname 2>/dev/null | tr '[:upper:]' '[:lower:]' | cut -d. -f1)"
+mkdir -p "$TMP/fixer-cwd"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s|%s\n" "$PWD" "$*" >> "$FAKE/fixer-started"' > "$TMP/fixer-harness"
+chmod +x "$TMP/fixer-harness"
+jq --arg h "$TMP/fixer-harness" --arg host "$fx_host" --arg cwd "$TMP/fixer-cwd" \
+  '.repos=[] | .alarm_enabled=false | .links_enabled=false | .fixer_enabled=true | .fixer_on_host=$host | .fixer_repos=["o/r"] | .fixer_cwd=$cwd | .fixer_max_concurrent=1 | .harness_fresh.claude=[$h,"{prompt}"]' \
+  "$TMP/config.json" > "$TMP/config-fixer.json"
+BOTI='{"number":71,"title":"Stuck PR #9","user":{"login":"pop-ai-watchers[bot]"},"labels":[{"name":"ready-for-fixer"}]}'
+FORGED='{"number":70,"title":"Stuck PR #8","user":{"login":"someone"},"labels":[{"name":"ready-for-fixer"}]}'
+DONE='{"number":69,"title":"Stuck PR #7","user":{"login":"pop-ai-watchers[bot]"},"labels":[{"name":"ready-for-fixer"},{"name":"fixer-attempted"}]}'
+BOTJ='{"number":72,"title":"Stuck PR #10","user":{"login":"pop-ai-watchers[bot]"},"labels":[{"name":"ready-for-fixer"}]}'
+printf '[%s,%s,%s,%s]\n' "$DONE" "$FORGED" "$BOTI" "$BOTJ" > "$FAKE/fixer.json"
+: > "$FAKE/edited"; rm -f "$FAKE/fixer-started"
+AI_BLOCKER_WATCH_HOME="$TMP/home-fixer" AI_BLOCKER_WATCH_CONFIG="$TMP/config-fixer.json" BW tick >/dev/null 2>&1; fx_rc=$?
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$FAKE/fixer-started" ] && break; sleep 0.2; done
+check 'fixer claims only the oldest unattempted bot-authored issue, once' \
+  "[ $fx_rc -eq 0 ] && [ \"\$(grep -c 'add-label fixer-attempted' '$FAKE/edited')\" = 1 ] && grep -q '^issue edit 71 -R o/r --add-label fixer-attempted' '$FAKE/edited'"
+check 'fixer starts one fresh session in the configured folder with the issue named' \
+  "[ \"\$(wc -l < '$FAKE/fixer-started')\" = 1 ] && grep -q '^$TMP/fixer-cwd|.*o/r#71.*untrusted data' '$FAKE/fixer-started'"
+check 'fixer never claims a forged or already-attempted issue' \
+  "! grep -Eq 'issue edit (69|70) ' '$FAKE/edited'"
+sleep 30 & live=$!
+mkdir -p "$TMP/home-fixer/fixers"; echo "$live" > "$TMP/home-fixer/fixers/o-r-71.pid"
+: > "$FAKE/edited"
+AI_BLOCKER_WATCH_HOME="$TMP/home-fixer" AI_BLOCKER_WATCH_CONFIG="$TMP/config-fixer.json" BW tick >/dev/null 2>&1
+check 'concurrency cap: no new fixer while one is running' "! grep -q 'fixer-attempted' '$FAKE/edited'"
+kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+jq '.fixer_on_host="some-other-machine"' "$TMP/config-fixer.json" > "$TMP/config-fixer-off.json"
+AI_BLOCKER_WATCH_HOME="$TMP/home-fixer2" AI_BLOCKER_WATCH_CONFIG="$TMP/config-fixer-off.json" BW tick >/dev/null 2>&1
+check 'fixer runs only on fixer_on_host' "! grep -q 'fixer-attempted' '$FAKE/edited'"
+check 'shipped config names one fixer machine and a cap' \
+  "jq -e '(.fixer_on_host|type==\"string\" and length>0) and (.fixer_max_concurrent>=1) and (.harness_fresh[.fixer_harness]|length>0)' '$ROOT/config/blocker-watch.json'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
