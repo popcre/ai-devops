@@ -74,9 +74,10 @@ jobs:
             # GitHub answers 404 both for a deleted ruleset and for a token not
             # allowed to see it. Only a readable ruleset list that lacks the id
             # proves deletion; anything else is a refused read (#1086).
+            # The list is paged fully; a readable EMPTY list also proves it.
             if grep -q 'HTTP 404' /tmp/read.err &&
-               bin/ai-gh api "repos/$repo/rulesets" --jq '.[].id' > /tmp/ids.txt 2>/dev/null &&
-               [ -s /tmp/ids.txt ] && ! grep -qx "$ruleset_id" /tmp/ids.txt; then
+               bin/ai-gh api --paginate "repos/$repo/rulesets?per_page=100" --jq '.[].id' > /tmp/ids.txt 2>/dev/null &&
+               ! grep -qx "$ruleset_id" /tmp/ids.txt; then
               echo "outcome=drift" >> "$GITHUB_OUTPUT"
               echo "the live ruleset $ruleset_id no longer exists" >&2
               exit 1

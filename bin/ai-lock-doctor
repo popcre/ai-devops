@@ -396,13 +396,36 @@ fi
 # (same kernel start time) AND it still has the lock inode open. A released
 # lock or a reused PID therefore never receives a signal (#1086).
 same_holder(){
-  local pid="$1" want="${HOLDER_START[$1]:-}" now fd tid
+  local pid="$1" want="${HOLDER_START[$1]:-}" now fd tid open=1
   [ -n "$want" ] || return 1
   now="$(proc_start_ticks "$pid" 2>/dev/null)" || return 1
   [ "$now" = "$want" ] || return 1
   for fd in /proc/"$pid"/fd/[0-9]*; do
     tid="$(stat -Lc '%d:%i' "$fd" 2>/dev/null)" || continue
-    [ "$(norm "${tid%%:*}")" = "$LOCK_DEV_N" ] && [ "$(norm "${tid##*:}")" = "$LOCK_INO_N" ] && return 0
+    if [ "$(norm "${tid%%:*}")" = "$LOCK_DEV_N" ] && [ "$(norm "${tid##*:}")" = "$LOCK_INO_N" ]; then open=0; break; fi
+  done
+  [ "$open" = 0 ] || return 1
+  # An open descriptor is not a lock: the kernel must still report the lock
+  # held right now (a non-blocking acquisition fails) ...
+  lock_held_now || return 1
+  # ... and when /proc/locks names a holder visible in this pid namespace,
+  # this pid must be that holder or share its descriptor by inheritance
+  # (its ancestor or descendant).
+  related_to_lock_pid "$pid"
+}
+lock_held_now(){ ! flock -n "${lockfile:?}" true 2>/dev/null; }
+related_to_lock_pid(){
+  local pid="$1" lp="${locks_pid:-}" p n
+  case "$lp" in ''|*[!0-9]*) return 0 ;; esac
+  [ -e "/proc/$lp" ] || return 0          # namespaced or gone: fd evidence decides
+  [ "$pid" = "$lp" ] && return 0
+  p="$pid"; for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+    p="$(proc_ppid "$p" 2>/dev/null)" || break
+    [ "$p" = "$lp" ] && return 0; [ "$p" -gt 1 ] 2>/dev/null || break
+  done
+  p="$lp"; for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+    p="$(proc_ppid "$p" 2>/dev/null)" || break
+    [ "$p" = "$pid" ] && return 0; [ "$p" -gt 1 ] 2>/dev/null || break
   done
   return 1
 }

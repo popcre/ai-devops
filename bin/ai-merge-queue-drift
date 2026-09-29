@@ -179,9 +179,16 @@ while IFS= read -r producer; do
   fi
   # Mentioning merge_group is not enough: an if: that excludes it (for example
   # github.event_name != 'merge_group') skips every queue run (#1086).
-  if [ -n "$job_if" ] && grep -Eq "!=[[:space:]]*['\"]merge_group['\"]|['\"]merge_group['\"][[:space:]]*!=|!contains\([^)]*merge_group" <<<"$job_if"; then
-    drift "required check '$context': job '$job_name' has an if: that excludes merge_group; it skips queue runs"
-    continue
+  # Fail closed: the if: must contain an explicit positive merge_group match
+  # (== 'merge_group', or contains(..., 'merge_group') not negated) and no
+  # negation touching merge_group anywhere.
+  if [ -n "$job_if" ]; then
+    flat="$(tr '\n' ' ' <<<"$job_if")"
+    if grep -Eq "!=[[:space:]]*['\"]merge_group['\"]|['\"]merge_group['\"][[:space:]]*!=|![[:space:]]*\(|![[:space:]]*contains\(|![[:space:]]*startsWith\(|![[:space:]]*endsWith\(" <<<"$flat" ||
+       ! grep -Eq "==[[:space:]]*['\"]merge_group['\"]|['\"]merge_group['\"][[:space:]]*==|(^|[^!])contains\([^)]*['\"]merge_group['\"]" <<<"$flat"; then
+      drift "required check '$context': job '$job_name' has an if: that excludes merge_group or does not explicitly select it; it can skip queue runs"
+      continue
+    fi
   fi
   ok "required check '$context' is produced by '$wf_name' job '$job_name' on merge_group without a paths filter or queue-skip"
 done < <(jq -c '.required_check_producers[]' "$SNAPSHOT")

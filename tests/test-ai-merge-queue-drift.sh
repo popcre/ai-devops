@@ -127,6 +127,23 @@ out="$("$DRIFT" --root "$f_excl" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$
   && result pass 'an if: that excludes merge_group is reported as drift' \
   || result fail 'an if: that excludes merge_group is reported as drift'
 
+# Case 1d: merge_group appears only as an unrelated string; nothing selects it.
+f_str="$(make_fixture onlystring)"
+python3 - "$ROOT/.github/workflows/verify.yml" "$f_str/.github/workflows/verify.yml" <<'PY2'
+import sys
+t = open(sys.argv[1]).read()
+old = """    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'pull_request' || github.event_name == 'merge_group')"""
+assert old in t, 'verify.yml verification-closure if: changed; update this fixture'
+t = t.replace(old, """    if: github.event_name == 'pull_request' || format('{0}', 'merge_group') == 'x'""", 1)
+open(sys.argv[2], 'w').write(t)
+PY2
+out="$("$DRIFT" --root "$f_str" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
+[ $rc -eq 1 ] && grep -q 'does not explicitly select it' <<<"$out" \
+  && result pass 'an if: that only mentions merge_group as a string is reported as drift' \
+  || result fail 'an if: that only mentions merge_group as a string is reported as drift'
+
 # Case 1c: the required job reports under a different display name.
 f_disp="$(make_fixture display)"
 awk '{ print } /^  verification-closure:$/ { print "    name: Verification closure" }' \
