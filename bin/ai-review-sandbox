@@ -209,7 +209,10 @@ source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible 
   tree="$(git -C "$root" rev-parse HEAD^{tree} 2>/dev/null)" \
     || { rm -f "$list" "$diff"; return 1; }
   test_progress || { rm -f "$list" "$diff"; return 1; }
-  git -C "$root" diff --binary HEAD > "$diff" 2>/dev/null \
+  # --full-index: a shallow snapshot has a smaller object database, so git
+  # abbreviates the index line to a different width than the full source and
+  # a text hash of `git diff` never matches (snapshot-digest-mismatch).
+  git -C "$root" diff --binary --full-index HEAD > "$diff" 2>/dev/null \
     || { rm -f "$list" "$diff"; return 1; }
   test_progress || { rm -f "$list" "$diff"; return 1; }
   git -C "$root" ls-files --others --exclude-standard -z > "$list" \
