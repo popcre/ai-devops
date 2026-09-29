@@ -169,7 +169,7 @@ check 'Gemini, GLM and Muse Code run in different sections within the same 40-mi
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 check 'manual Blacksmith lane runs the same complete section mapping' \
-  'grep -qF "section: $sections_expected" "$blacksmith_workflow" && grep -qF "matrix.section }} of $shard_count" "$blacksmith_workflow" && grep -qF "matrix.section }}/$shard_count" "$blacksmith_workflow" && grep -qF -- "-Shard" "$blacksmith_workflow" && grep -qF "all six Blacksmith sections succeeded" "$blacksmith_workflow"'
+  'grep -qF "section: $sections_expected" "$blacksmith_workflow" && grep -qF "matrix.section }} of $shard_count" "$blacksmith_workflow" && grep -qF "matrix.section }}/$shard_count" "$blacksmith_workflow" && grep -qF -- "-Shard" "$blacksmith_workflow" && grep -qF "all eight Blacksmith sections succeeded" "$blacksmith_workflow"'
 check 'Blacksmith stays manual, bounded, independently hosted and fail-closed' \
   'grep -q "^  workflow_dispatch:" "$blacksmith_workflow" && ! grep -Eq "^  (pull_request|schedule|merge_group|workflow_run):" "$blacksmith_workflow" && grep -qF "runs-on: blacksmith-4vcpu-windows-2025" "$blacksmith_workflow" && grep -qF "timeout-minutes: 20" "$blacksmith_workflow" && grep -qF "fail-fast: false" "$blacksmith_workflow" && grep -qF "failing closed" "$blacksmith_workflow"'
 # Sections run at the same time on independent hosted machines, and one failing
@@ -245,8 +245,8 @@ windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | t
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' "$workflow" &&
 [ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
 printf '%s' "$complete_block" | grep -Fq '.\tests\test-all.ps1 -Shard' &&
-sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -Fq "github.event_name == 'pull_request'" &&
-sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -Fq "github.event_name != 'pull_request'" || {
+sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -F "github.event_name == 'pull_request'" >/dev/null &&
+sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -F "github.event_name != 'pull_request'" >/dev/null || {
   printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2
   exit 1
 }
