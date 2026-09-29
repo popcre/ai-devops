@@ -2,8 +2,9 @@
 
 Every lock used by `bin/`, written for issue
 [#1002](https://github.com/popcre/ai-devops/issues/1002) step 1. The table is
-the complete answer to `grep -rnE 'flock|lock\.d|\.lock' bin` (87 hits after
-step 2, verified 2026-09-28); every hit line is cited in the Grep hits
+the complete answer to `grep -rnE 'flock|lock\.d|\.lock' bin` (94 hits after
+step 2 and 94 after the 2026-09-28 merge of main, re-verified
+2026-09-29); every hit line is cited in the Grep hits
 column, so a new lock site added without a row here makes this file wrong,
 not optional.
 
@@ -44,14 +45,15 @@ advisory lock on the exact inode, so the whole cost is one harmless retry.
 |---|---|---|---|
 | `bin/setup-secrets.sh:287-299` (generated MCP launcher `_aidev_flock`) | `flock --close -E 87 -w 90` (`:292`), retry (`:296`) | kernel | conflict code 87, then `ai-lock-doctor --recover --older-than 90` (`:295`), then one retry; op's own errors keep their status |
 | `bin/setup-secrets.sh:332-348` (generated remote launcher `_aidev_flock`) | `flock --close -E 87 -w 90` (`:337`), retry (`:341`) | kernel | same shape; call site `:348` |
-| `bin/ai-qwen:439` (`cmd_store_key`; path resolved at `ai-qwen:372-390`; `lock_doctor` at `:411`) | `flock --close -E 87 -w 120`, retry (`:442`) | kernel | conflict code 87, doctor (`--recover --older-than 120`), one retry (#1002) |
+| `bin/ai-qwen:494` (`cmd_store_key`; path resolved at `ai-qwen:421`; `lock_doctor` at `:466`) | `flock --close -E 87 -w 120` (`:494`), retry (`:497`) | kernel | conflict code 87, doctor (`--recover --older-than 120`), one retry (#1002) |
 | `bin/ai-muse:487` (`muse_locked_read` in `read_key_from_op`; path at `ai-muse:474`; `need flock` at `:472`) | `flock --close -E 87 -w "$budget"` (default 120) | kernel | conflict code 87, `muse_doctor` with the CONSTANT floor `--older-than 120` (never the caller-settable budget), one retry |
-| `bin/ai-deepseek-agent:385` (`ds_locked_reexec`; `flock` check at `:376`) | `flock --close -E 87 -w 120` | kernel | conflict code 87 keeps the original status otherwise, `ds_lock_doctor` (`:377`), one retry |
+| `bin/ai-deepseek-agent:390` (`ds_locked_reexec`; `flock` check at `:381`) | `flock --close -E 87 -w 120` (`:390`) | kernel | conflict code 87 keeps the original status otherwise, `ds_lock_doctor` (`:382`), one retry |
 
 Grep hits covered: `setup-secrets.sh:287,292,295,296,299,332,337,340,341,348`;
-`ai-qwen:374,390,421,438,439,442`; `ai-muse:472,474,487`;
-`ai-deepseek-agent:376,382,385,319` (the comment naming the Git Bash
-limitation of the same boundary).
+`ai-qwen:427,429,443,445,476,493,494,497` plus the Section C hits below;
+`ai-muse:472,474,487`;
+`ai-deepseek-agent:324,327,381,387,390` (the comment at `:324` naming the
+Git Bash limitation of the same boundary).
 
 The generated launchers live outside the repository, so the doctor's
 repo-path rule cannot see them; their own `flock` process is recognized
@@ -68,11 +70,11 @@ has no `flock`.
 | Where | Acquire / wait | Release | Staleness handling |
 |---|---|---|---|
 | `bin/ai-muse:500` (`muse_credential_acquire`, publish `muse_credential_publish` at `:398`) | poll until `budget` (120 s default) | `release_credential_lock` (`ai-muse:161`) removes only its own token | owner record: liveness x3 with winpid (`ps -W`); legacy pid-only: never reclaimed on Windows; no pid at all: reclaimed after 60 s |
-| `bin/ai-qwen:541+` `lock_acquire` (call at `ai-qwen:428` inside `cmd_store_key`, path via `qwen_shared_credential_lock_path` `:372-390`) | poll until 120 s deadline | `lock_release` removes only its own token | owner record: liveness x3 with winpid; legacy pid-only (Muse's old format): reclaimed on Windows only under the pid+age rule — pid not observable AND lock older than 15 minutes (`ai-qwen:558-571`); no pid: reclaimed after 7200 s |
-| `bin/ai-deepseek-agent:322` (inline `acquire_lock`/`publish_lock`) | poll until 120 s deadline | inline `release_lock`, token-checked | owner record only: liveness x3 with winpid; refuses every legacy lock without a winpid ("Wait or fail closed") |
+| `bin/ai-qwen:596` `lock_acquire` (call at `ai-qwen:480` inside `cmd_store_key`, path via `qwen_shared_credential_lock_path` `:421`) | poll until 120 s deadline | `lock_release` removes only its own token | owner record: liveness x3 with winpid; legacy pid-only (Muse's old format): reclaimed on Windows only under the pid+age rule — pid not observable AND lock older than 15 minutes (`ai-qwen:613-626`); no pid: reclaimed after 7200 s |
+| `bin/ai-deepseek-agent:327` (inline `acquire_lock`/`publish_lock`) | poll until 120 s deadline | inline `release_lock`, token-checked | owner record only: liveness x3 with winpid; refuses every legacy lock without a winpid ("Wait or fail closed") |
 
-Grep hits covered: `ai-muse:500`; `ai-qwen:372,388` (Windows path branch of
-`qwen_shared_credential_lock_path`); `ai-deepseek-agent:322`.
+Grep hits covered: `ai-muse:500`; `ai-qwen:427,443` (Windows path branch of
+`qwen_shared_credential_lock_path`); `ai-deepseek-agent:327`.
 
 ## C. Portable per-session mutexes (`*.lock.d`, mkdir + owner pid)
 
@@ -81,7 +83,7 @@ because `flock` does not exist in Git Bash.
 
 | Tool | Path builders (grep hits) | Acquire / release | Staleness handling |
 |---|---|---|---|
-| `bin/ai-qwen` | `lock_path`/`repolock_path`/`reviewlock_path` (`506,507,512`; comment `515`) | `lock_acquire` (`544`) / `lock_release` | liveness x3 (winpid fallback); tombstoned reclaim keyed by owner token; dead-lock tombs older than 1440 min swept |
+| `bin/ai-qwen` | `lock_path`/`repolock_path`/`reviewlock_path` (`561,562,567`; comment `570`) | `lock_acquire` (`596`) / `lock_release` | liveness x3 (winpid fallback); tombstoned reclaim keyed by owner token; dead-lock tombs older than 1440 min swept |
 | `bin/ai-kimi` | `lock_path`/`repolock_path`/`reviewlock_path` (`529,530,535`; comment `538`) | `lock_acquire` / `lock_release` (rm -rf) | pid dead → `rm -rf` and re-mkdir immediately |
 | `bin/ai-grok-review` | `lock_path`/`repolock_path`/session+work lock builders (`505,507,513,523`; comment `549`) | `lock_acquire` (`551`) / per-scope release | pid alive → busy; dead owner: repo locks retained for manual reconciliation (unconfirmed remote completion), pre-provider work locks reclaimed (`591`); scans over lock sets at `1963,2014` |
 | `bin/ai-glm` | session locks `$rid--$caller--$name.lock.d` (`350`, comment `352`, acquire `2114`, pid read `2284`); meta update lock `.update.lock.d` (`563`); collision guards (`2055,2056,2072,2073`); orphan sweep guards (`2189,2247,2255`) | lock dir with pid file; released by the owning session | pid-file record; collision and orphan logic treats an existing lock as authoritative (fail closed) |
@@ -101,7 +103,7 @@ because `flock` does not exist in Git Bash.
 | `bin/ai-review-lifecycle` | assignment lock (`235` create, `201` read for release) | `mkdir` + token/state files; release is token-checked `rm` + `rmdir` | none: duplicate active assignment dies; token mismatch refuses release |
 | `bin/ai-review-sandbox` | snapshot build lock (`572`) | `mkdir` / `rmdir` in cleanup | none: concurrent build of one tag dies |
 | `bin/ai-glm` sandbox build claim | stage lock (comment `2084`, `2085,2086`) | `mkdir`, never waits | none: a claimed stage refuses |
-| `bin/ai-deepseek-agent` | transcript store lock (`545`) | `mkdir` + owner token, waits `LOCK_WAIT` s / token-checked release | none: "session is busy" after the wait |
+| `bin/ai-deepseek-agent` | transcript store lock (`551`) | `mkdir` + owner token, waits `LOCK_WAIT` s / token-checked release | none: "session is busy" after the wait |
 
 ## What step 2 changed
 
