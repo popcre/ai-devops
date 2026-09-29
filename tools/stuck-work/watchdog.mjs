@@ -351,6 +351,12 @@ export async function run({ token, rerunToken, dryRun = false, now = Date.now(),
           act(`refresh stuck-fixer ${repo}#${num} for new head ${sha.slice(0, 8)}`);
           if (!dryRun) await gh.req('PATCH', `repos/${repo}/issues/${num}`, { body });
         }
+        // An issue first opened as a re-run marker store has no dispatch label;
+        // once the failure is real it must reach the fixer.
+        if (issue && !(issue.labels || []).some((l) => (l.name || l) === 'ready-for-fixer')) {
+          act(`label ${repo}#${num} ready-for-fixer`);
+          if (!dryRun) await gh.req('POST', `repos/${repo}/issues/${num}/labels`, { labels: ['ready-for-fixer'] });
+        }
         if (newOwner) {
           act(`comment Owner: stuck-fixer on ${repo}#${s.number}`);
           if (!dryRun) await gh.req('POST', `repos/${repo}/issues/${s.number}/comments`, { body: `Owner: stuck-fixer #${num} since ${edt(new Date(now).toISOString())}\n\n${SIGNATURE}` });
