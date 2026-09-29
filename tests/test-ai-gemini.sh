@@ -456,5 +456,7 @@ else
   printf '  note drive-letter spelling check needs cygpath (Windows only)
 '
 fi
+check 'brief forbids shell commands the headless runtime auto-denies' "test \"\$(grep -c 'never call run_command' '$SCRIPT')\" -eq 2 && ! grep -q 'you may run commands' '$SCRIPT'"
+check 'denied tool turn fails with a named denial' "grep -q 'headless runtime denied a tool' '$SCRIPT'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
