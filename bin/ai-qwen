@@ -121,7 +121,7 @@ need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installe
 # container) so a written opinion still works. AI_QWEN_CONTAINER_SANDBOX=0|1
 # overrides detection for tests and deliberate pinning.
 qwen_container_sandbox_available() {
-  case "${AI_QWEN_CONTAINER_SANDBOX:-}" in
+  case "$(printf '%s' "${AI_QWEN_CONTAINER_SANDBOX:-}" | tr '[:upper:]' '[:lower:]')" in
     0|false|no)  return 1 ;;
     1|true|yes)  return 0 ;;
   esac
@@ -1016,8 +1016,9 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
     # sandbox cannot start (no Docker/podman), fall back to REVIEWER-ONLY:
     # plan mode with shell/write/edit removed. Still a disposable copy.
     assert_disposable_review_dir "$repo" || die 'refusing a Qwen review outside a private remote-less snapshot.'
-    if qwen_container_sandbox_available; then
-      REVIEW_CONTAINMENT=sandbox
+    # Prefer the containment already chosen for the prompt; detect only if unset.
+    REVIEW_CONTAINMENT="${REVIEW_CONTAINMENT:-$(review_containment_mode)}"
+    if [ "$REVIEW_CONTAINMENT" = sandbox ]; then
       args+=(--sandbox --approval-mode yolo)
     else
       REVIEW_CONTAINMENT=reviewer-only
@@ -1943,7 +1944,7 @@ start_session() { # start_session NAME MODE
 
   note "Qwen $mode '$name' starting (model $QWEN_MODEL)…"
   if [ "$mode" = review ]; then
-    if [ "$(review_containment_mode)" = "reviewer-only" ]; then
+    if [ "${REVIEW_CONTAINMENT:-}" = "reviewer-only" ]; then
       note "  containment : REVIEWER-ONLY (no Docker/podman). Qwen can read and advise; it cannot run builds/tests or edit. Install Docker or Podman for full sandbox reviews."
     else
       note "  containment : sandbox + full tools in a disposable remote-less copy"
@@ -2028,6 +2029,9 @@ cmd_ask() {
   fi
   status="$(jq -r '.status // "active"' "$meta")"
   [ "$status" = active ] || die "review session '$name' requires recovery ($status) because its provider conversation may have advanced beyond accepted evidence. Inspect the recorded recovery_stream, then delete and start a new named Qwen review."
+  # Same containment as the turn will use, so the prompt never claims tools
+  # the run is about to strip (or the reverse).
+  REVIEW_CONTAINMENT="$(review_containment_mode)"
 
   expected_head="$(jq -r '.head // empty' "$meta")"; expected_tree="$(jq -r '.working_tree_sha256 // empty' "$meta")"; expected_packet="$(jq -r '.packet_sha256 // empty' "$meta")"
   [ -n "$expected_head" ] && [ -n "$expected_tree" ] && [ -n "$expected_packet" ] \
