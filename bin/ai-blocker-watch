@@ -74,6 +74,13 @@
 #   ai-blocker-watch link <blocked owner/repo#M> <blocker owner/repo#N>
 #   ai-blocker-watch list
 #   ai-blocker-watch cancel <wait-id>
+#   ai-blocker-watch reap [--dry-run]
+#       Archive dead task/session state past its TTL (orphan_ttl_hours):
+#       terminal records (woken/failed/unrunnable/orphaned) and interrupted
+#       wakes idle longer than the TTL are moved to ~/.ai-devops/blocker-watch/
+#       reaped/ with one audit line in reap.log. Live `waiting` records and
+#       reviewer leases are never touched; unique uncommitted work is
+#       preserved (the worktree is left alone). --dry-run lists decisions.
 #   ai-blocker-watch tick [--dry-run]
 #   ai-blocker-watch alarm [--dry-run]      scan for unowned blockers now
 #   ai-blocker-watch links [--dry-run]      maintain blocked-by links from
@@ -383,6 +390,137 @@ cmd_find(){
 }
 
 cmd_cancel(){ [ $# -eq 1 ] || die "usage: cancel <wait-id>"; rm -f -- "$WAITS/$1.json" || true; note "cancelled $1"; }
+
+# --- orphan task/session reap (B1, #1116) ------------------------------------
+# WHY THIS EXISTS. Sessions park work here and some of them never come back.
+# Terminal records (woken/failed/unrunnable/orphaned) and interrupted wakes
+# sat in the state directory for days — the measured pain was a 14-hour
+# orphaned background task holding the machine. This reap is the TTL layer:
+# it archives dead task/session state past a TTL so the machine stops carrying
+# it, without ever touching live work.
+#
+# WHAT GETS REAPED (and only this):
+#   1. Terminal wait records (woken, failed, unrunnable, orphaned) whose
+#      last-activity timestamp is older than orphan_ttl_hours.
+#   2. Interrupted `waking` records whose last_attempt_at is older than
+#      orphan_ttl_hours (the wake process is long past wake_timeout_minutes).
+#   3. Dead fixer pid files (the process is gone; the file is residue).
+#
+# WHAT IS NEVER REAPED:
+#   - `waiting` records. Wake/resume must stay intact: a fresh continuation
+#     is still possible when the blocker closes.
+#   - `waking` records younger than the TTL (the wake may still be running).
+#   - Reviewer leases or any reviewer-slot state. Lease liveness is a
+#     separate completed design (plan_reviewer_lease_liveness.md) that
+#     forbids freeing a reviewer slot on age alone. This function does not
+#     read, write, or release lease state of any kind.
+#   - Unique uncommitted work. The wait record is archived, never a dirty
+#     worktree: a record whose cwd has uncommitted changes is logged as
+#     `preserved` and its worktree is left alone (cleanup-worktree rules).
+#
+# Recoverable and auditable: every reaped JSON is moved to
+# $HOME_DIR/reaped/<id>.json and one line is appended to $HOME_DIR/reap.log
+# with the id, old state, reason, and timestamp. Dry-run lists decisions
+# and reaps nothing.
+REAP_DIR="$HOME_DIR/reaped"; REAP_LOG="$HOME_DIR/reap.log"
+
+iso_epoch(){ date -u -d "$1" +%s 2>/dev/null || echo 0; }
+
+reap_age_hours(){ # reap_age_hours <iso timestamp> -> whole hours since then (0 if unreadable)
+  local ep now_e
+  ep="$(iso_epoch "$1")"; now_e="$(date -u +%s)"
+  [ "$ep" -gt 0 ] 2>/dev/null || { printf 0; return; }
+  printf '%s' "$(( (now_e - ep) / 3600 ))"
+}
+
+reap_last_activity(){ # reap_last_activity <wait json> -> best timestamp for age
+  jq -r '[.woken_at, .checked_at, .last_attempt_at, .active_writer_at, .registered_at] | map(select(. != null and . != "")) | first // ""' "$1" 2>/dev/null
+}
+
+reap_is_candidate(){ # reap_is_candidate <state> <last activity iso> <ttl hours> -> 0 if reappable
+  local state="$1" at="$2" ttl="$3" age
+  case "$state" in
+    waiting) return 1 ;;  # live: wake/resume intact
+    waking)
+      # A wake older than the TTL is interrupted: wake_timeout_minutes is
+      # 45, so anything this old is not still running.
+      ;;
+    woken|failed|unrunnable|orphaned) ;;
+    *) return 1 ;;
+  esac
+  [ -n "$at" ] || return 1
+  age="$(reap_age_hours "$at")"
+  [ "$age" -ge "$ttl" ] 2>/dev/null
+}
+
+worktree_has_unique_work(){ # worktree_has_unique_work <cwd> -> 0 when dirty (preserve)
+  local cwd="$1"
+  [ -n "$cwd" ] && [ -d "$cwd" ] || return 1
+  # Uncommitted tracked changes or untracked files mean unique work.
+  [ -n "$(git -C "$cwd" status --porcelain 2>/dev/null)" ]
+}
+
+reap_one(){ # reap_one <json path> <dry 0|1> -> 0 reaped, 1 kept
+  local f="$1" dry="$2" id state at age ttl reason dest
+  id="$(basename "$f" .json)"
+  state="$(jq -r '.state // ""' "$f" 2>/dev/null)"
+  at="$(reap_last_activity "$f")"
+  ttl="$(cfgd .orphan_ttl_hours 24)"
+  reap_is_candidate "$state" "$at" "$ttl" || return 1
+  age="$(reap_age_hours "$at")"
+  reason="terminal state '$state' idle ${age}h (ttl ${ttl}h)"
+  [ "$state" != waking ] || reason="interrupted wake idle ${age}h (ttl ${ttl}h)"
+  local cwd preserved=""
+  cwd="$(jq -r '.cwd // ""' "$f" 2>/dev/null)"
+  if worktree_has_unique_work "$cwd"; then preserved=" preserved unique work at $cwd"; fi
+  if [ "$dry" = 1 ]; then
+    note "would reap $id ($reason)$preserved"
+    return 0
+  fi
+  mkdir -p "$REAP_DIR"
+  dest="$REAP_DIR/$id.json"
+  mv "$f" "$dest" || return 1
+  printf '%s reaped %s state=%s age=%sh reason=%s%s\n' \
+    "$(now_iso)" "$id" "$state" "$age" "$reason" "$preserved" >> "$REAP_LOG"
+  note "reaped $id ($reason)$preserved"
+  return 0
+}
+
+reap_fixer_pids(){ # reap_fixer_pids <dry 0|1>: remove pid files whose process is gone
+  local dry="$1" dir="$HOME_DIR/fixers" pf pid n=0
+  [ -d "$dir" ] || return 0
+  for pf in "$dir"/*.pid; do
+    [ -e "$pf" ] || continue
+    pid="$(cat "$pf" 2>/dev/null || true)"
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+      if [ "$dry" = 1 ]; then note "would reap dead fixer pid file $(basename "$pf")"; else
+        rm -f "$pf"
+        printf '%s reaped fixer-pid file=%s pid=%s reason=process-gone\n' "$(now_iso)" "$(basename "$pf")" "${pid:-empty}" >> "$REAP_LOG"
+        note "reaped dead fixer pid file $(basename "$pf")"
+      fi
+      n=$((n + 1))
+    fi
+  done
+  return 0
+}
+
+cmd_reap(){
+  local dry=0
+  [ "${1:-}" != --dry-run ] || dry=1
+  local ttl max f count=0
+  ttl="$(cfgd .orphan_ttl_hours 24)"
+  max="$(cfgd .reap_max_per_run 64)"
+  [ "$ttl" -ge 1 ] 2>/dev/null || die "orphan_ttl_hours must be a positive integer"
+  [ "$max" -ge 1 ] 2>/dev/null || die "reap_max_per_run must be a positive integer"
+  note "reap start (ttl ${ttl}h, max $max, dry=$dry)"
+  for f in "$WAITS"/*.json; do
+    [ -e "$f" ] || continue
+    [ "$count" -lt "$max" ] || { note "reap cap $max reached; later records wait for the next run"; break; }
+    if reap_one "$f" "$dry"; then count=$((count + 1)); fi
+  done
+  reap_fixer_pids "$dry"
+  note "reap end: $count wait record(s) $([ "$dry" = 1 ] && echo 'would be reaped' || echo reaped)"
+}
 
 cmd_has_wait(){
   # The closeout hook's cheap local question: does THIS session hold a wait the
@@ -1253,6 +1391,17 @@ cmd_tick(){
   done
   stuck_watchdog_scan
   fixer_scan
+  # Housekeeping: archive dead task/session state past its TTL. Local-only,
+  # cheap, bounded; never touches waiting records or reviewer leases.
+  reap_fixer_pids 0
+  local reap_n=0 reap_ttl reap_max reap_f
+  reap_ttl="$(cfgd .orphan_ttl_hours 24)"; reap_max="$(cfgd .reap_max_per_run 64)"
+  for reap_f in "$WAITS"/*.json; do
+    [ -e "$reap_f" ] || continue
+    [ "$reap_n" -lt "$reap_max" ] || break
+    if reap_one "$reap_f" 0; then reap_n=$((reap_n + 1)); fi
+  done
+  [ "$reap_n" -eq 0 ] || note "tick reaped $reap_n aged task/session record(s)"
   [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
   if [ -n "$BW_TICK_RECEIPT_ID" ]; then
     gh_measure_clock
@@ -1322,6 +1471,7 @@ case "${1:-}" in
   find) shift; cmd_find "$@" ;;
   has-wait) shift; cmd_has_wait "$@" ;;
   cancel) shift; cmd_cancel "$@" ;;
+  reap) shift; cmd_reap "$@" ;;
   tick) shift; cmd_tick "$@" ;;
   alarm) shift; cmd_alarm "$@" ;;
   links) shift; cmd_links "$@" ;;

@@ -25,6 +25,8 @@
   "first_scan_lookback_minutes": 60,
   "max_wake_attempts": 3,
   "wake_timeout_minutes": 45,
+  "orphan_ttl_hours": 24,
+  "reap_max_per_run": 64,
   "schedule_every_minutes": 10,
   "alarm_enabled": true,
   "alarm_interval_minutes": 60,
