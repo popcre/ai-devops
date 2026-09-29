@@ -1,28 +1,29 @@
 ---
 name: stepfun
-description: Use StepFun Step 5 (step-5-preview) through ai-stepfun. Formal reviews with a VERDICT line and second opinions (both may run code and edit files in a disposable remote-less copy), and implementation runs that write and execute code in an isolated remote-less clone. Windows runs through OpenCode; Ubuntu runs through StepCode. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion.
+description: Use StepFun Step 5 (step-5-preview) through ai-stepfun. Formal reviews with a VERDICT line and second opinions (both may run code and edit files in a disposable remote-less copy), and implementation runs that write and execute code in an isolated remote-less clone. Ubuntu/Linux only (StepCode or OpenCode, always under bubblewrap); Windows is refused. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion.
 ---
 
 # stepfun
 
 StepFun Step 5 runs through `ai-stepfun`. On Ubuntu/Linux where StepCode is
-installed it uses the StepCode CLI (`step`) under bubblewrap. On Windows (and
-any host without StepCode) it uses the pinned OpenCode harness — the same
-binary GLM, Muse, and DeepSeek use. Owner instruction 2026-09-25: let it write,
+installed it uses the StepCode CLI (`step`); otherwise the pinned OpenCode
+harness (the same binary GLM, Muse, and DeepSeek use). Both run under
+bubblewrap. Owner instruction 2026-09-25: let it write,
 implement, and execute code. Owner instruction 2026-09-28 (#974): reviewers are
 not read-only.
 
 ## Platform
 
-Windows and Ubuntu/Linux. On Windows, run `bin\setup-opencode-stepfun.ps1` once
-to install OpenCode and the `ai-stepfun` command. On Ubuntu, install StepCode
-and bubblewrap, or the OpenCode path works there too.
+Ubuntu/Linux only (owner instruction 2026-09-25). `ai-stepfun` refuses Windows,
+because its shell-enabled turns need the bubblewrap sandbox (#1086). Install
+bubblewrap and StepCode (or the OpenCode harness).
 
 ## Sandbox
 
 Every turn runs against a disposable, remote-less copy or clone. StepCode turns
 additionally run under bubblewrap: the model sees only its own folder, with an
-empty home, /tmp and /run and a cleared environment. OpenCode turns run against
+empty home, /tmp and /run and a cleared environment; OpenCode turns get the
+same sandbox. OpenCode turns run against
 the same disposable copy with a per-run profile and the key exported only into
 the child environment.
 

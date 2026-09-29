@@ -2,9 +2,9 @@
 # ai-stepfun - StepFun Step 5: reviews and second opinions in a disposable
 # writable copy, plus isolated implementation.
 #
-# Engine: StepCode CLI (`step`) on Ubuntu/Linux where it is installed, otherwise
-# the pinned OpenCode harness (same binary GLM/Muse/DeepSeek use). Windows runs
-# through OpenCode. Owner instruction 2026-09-25: StepFun may write, implement,
+# Engine: StepCode CLI (`step`) where it is installed, otherwise the pinned
+# OpenCode harness (same binary GLM/Muse/DeepSeek use). Ubuntu/Linux only: both
+# engines run every turn under bubblewrap, and Windows is refused (#1086). Owner instruction 2026-09-25: StepFun may write, implement,
 # and execute code. Owner instruction 2026-09-28 (#974): reviewers are not
 # read-only.
 #
@@ -12,8 +12,8 @@
 # StepCode turns additionally run under bubblewrap with only /usr, /etc,
 # StepCode itself and its own directory mounted; an empty home, /tmp, and /run;
 # and a cleared environment (no SSH, git, gh, or 1Password secrets or sockets).
-# OpenCode turns run against the same disposable copy with a per-run profile
-# and the key exported only into the child environment.
+# OpenCode turns run under the same bubblewrap sandbox, against the same
+# disposable copy, with a per-run profile and the key exported only into it.
 #
 # Review safety (owner instruction 2026-09-28, #974: "none of the reviewers
 # should be read-only"): `review` and `ask` get the implement tool set
@@ -89,6 +89,11 @@ detect_engine(){
   else ENGINE=""; fi
 }
 require_engine(){
+  # Ubuntu/Linux only (owner instruction 2026-09-25; docs/reviewer-rotation-rules.md
+  # rule 11): every turn must run under bubblewrap, which Windows lacks (#1086).
+  if [ "$IS_WINDOWS" = 1 ]; then
+    printf 'ai-stepfun: unsupported-platform: StepFun runs only on Ubuntu/Linux, where every turn is sandboxed by bubblewrap.\n' >&2; exit 2
+  fi
   detect_engine
   case "$ENGINE" in
     stepcode|opencode) return 0 ;;
@@ -122,44 +127,9 @@ key_store_ok(){
   # stat -c %a is meaningless on NTFS (returns a synthesised mode). On Windows
   # accept a present, non-empty, non-link file; the path is under the user
   # profile and store-key writes it with chmod 600 where the filesystem honors it.
-  if [ "$IS_WINDOWS" = 1 ]; then windows_acl_owner_only "$KEY_STORE"; return; fi
+  # StepFun is Ubuntu/Linux-only (owner instruction 2026-09-25): no Windows key store is trusted.
+  [ "$IS_WINDOWS" != 1 ] || return 1
   [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
-}
-
-# NTFS ignores chmod, so on Windows the real control is the file's ACL: it must
-# have inheritance removed and grant access to the current user only (plus
-# SYSTEM and Administrators, which can read any file anyway) (#1086).
-icacls_bin(){ printf '%s' "${AI_STEPFUN_ICACLS:-icacls}"; }
-windows_acl_owner_only(){
-  local acl user line principal
-  acl="$("$(icacls_bin)" "$(native_path "$1")" 2>/dev/null | tr -d '\r')" || return 1
-  [ -n "$acl" ] || return 1
-  user="$(windows_account)"
-  [ -n "$user" ] || return 1
-  while IFS= read -r line; do
-    case "$line" in *'Successfully processed'*|'') continue ;; esac
-    # icacls prints "<path> <principal>:(rights)" on the first line and
-    # "  <principal>:(rights)" on the rest.
-    line="${line#"$(native_path "$1")"}"; line="${line#"${line%%[![:space:]]*}"}"
-    principal="${line%%:(*}"
-    case "$line" in *'(I)'*) return 1 ;; esac
-    # Compare the FULL DOMAIN\\account, case-insensitively: a same-named user
-    # of another domain is not the owner.
-    case "${principal,,}" in
-      "${user,,}"|'nt authority\system'|'builtin\administrators') ;;
-      *) return 1 ;;
-    esac
-  done <<< "$acl"
-  return 0
-}
-# windows_account -> DOMAIN\\user of the current account.
-windows_account(){
-  if [ -n "${USERDOMAIN:-}" ] && [ -n "${USERNAME:-}" ]; then printf '%s\\%s' "$USERDOMAIN" "$USERNAME"
-  else whoami 2>/dev/null | tr -d '\r'; fi
-}
-windows_acl_restrict(){
-  local user; user="$(windows_account)"; [ -n "$user" ] || return 1
-  "$(icacls_bin)" "$(native_path "$1")" /inheritance:r /grant:r "$user:F" >/dev/null 2>&1
 }
 
 cmd_store_key(){
@@ -175,15 +145,11 @@ cmd_store_key(){
   # The key moves op -> file directly; it never enters argv or this output.
   if ! op read "$OP_REF" </dev/null > "$tmp" || [ ! -s "$tmp" ]; then rm -f "$tmp"; die 'could not read the StepFun key from 1Password.'; fi
   mv -f "$tmp" "$KEY_STORE"
-  if [ "$IS_WINDOWS" = 1 ]; then
-    windows_acl_restrict "$KEY_STORE" && windows_acl_owner_only "$KEY_STORE" ||
-      { rm -f "$KEY_STORE"; die "could not restrict the key store ACL to the current user: $KEY_STORE"; }
-  fi
   printf 'StepFun key stored in the protected per-user store: %s\n' "$KEY_STORE"
 }
 
 load_key(){
-  key_store_ok || die "protected StepFun key store is missing or not owner-only (600 on Linux, current-user-only ACL on Windows): $KEY_STORE. Run: ai-stepfun store-key"
+  key_store_ok || die "protected StepFun key store is missing or not owner-only (600): $KEY_STORE. Run: ai-stepfun store-key"
   IFS= read -r STEP_KEY < "$KEY_STORE" || true
   [ -n "${STEP_KEY:-}" ] || die 'StepFun key store is empty. Run: ai-stepfun store-key'
 }
@@ -252,18 +218,6 @@ run_opencode_turn(){
   load_key
   log="$out.jsonl"
   set +e
-  if [ "$IS_WINDOWS" = 1 ]; then
-  ( unset OP_SERVICE_ACCOUNT_TOKEN
-    export STEPFUN_API_KEY="$STEP_KEY"
-    export XDG_CONFIG_HOME="$(native_path "$STATE_DIR/xdg/config")" \
-           XDG_DATA_HOME="$(native_path "$STATE_DIR/xdg/data")" \
-           XDG_STATE_HOME="$(native_path "$STATE_DIR/xdg/state")"
-    printf '%s' "$prompt" | timeout "$TIMEOUT" "$oc" run --agent "$agent" --auto \
-      --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$(native_path "$dir")" \
-      > "$log" 2>"$out.stderr"
-  )
-  rc=$?
-  else
   # Linux: the shell-enabled agent runs under bubblewrap exactly like StepCode:
   # read-only system trees, an empty home, /tmp and /run, a cleared
   # environment, and only the OpenCode install, its per-run state and the
@@ -295,7 +249,6 @@ run_opencode_turn(){
       > "$log" 2>"$out.stderr"
   )
   rc=$?
-  fi
   set -e
   STEP_KEY=""
   # OpenCode emits JSONL events; surface the assistant text as the turn output.

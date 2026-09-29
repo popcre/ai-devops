@@ -27,6 +27,12 @@ $ErrorActionPreference = 'Stop'
 function Step($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "[ OK ] $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "[WARN] $m" -ForegroundColor Yellow }
+
+# StepFun is Ubuntu/Linux-only (owner instruction 2026-09-25, docs/reviewer-rotation-rules.md
+# rule 11): ai-stepfun refuses Windows because its shell-enabled turns need the
+# bubblewrap sandbox (#1086). Nothing is installed here.
+Warn "StepFun runs only on Ubuntu/Linux (bubblewrap sandbox); ai-stepfun refuses Windows. Nothing was installed."
+exit 1
 function Die($m)  { Write-Host "[FAIL] $m" -ForegroundColor Red; exit 1 }
 
 $HomeDir = $env:USERPROFILE
@@ -143,23 +149,7 @@ Ok "ai-stepfun is now callable from PowerShell"
 # 3. Key store
 # ---------------------------------------------------------------------------
 if (Test-Path -LiteralPath $KeyStore) {
-  # NTFS ignores chmod: the key store is protected only if its ACL has no
-  # inherited entries and grants nobody but the current user (plus SYSTEM and
-  # Administrators). Restrict it, then verify before calling it protected (#1086).
-  $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-  & icacls.exe $KeyStore /inheritance:r /grant:r "$($me):F" | Out-Null
-  $acl = Get-Acl -LiteralPath $KeyStore
-  # Compare the FULL DOMAIN\account: a same-named user of another domain is not the owner.
-  $allowed = @($me, 'NT AUTHORITY\SYSTEM', 'BUILTIN\Administrators')
-  $others = @($acl.Access | Where-Object {
-      $_.IsInherited -or ($allowed -notcontains $_.IdentityReference.Value)
-    })
-  if ($acl.AreAccessRulesProtected -and $others.Count -eq 0) {
-    Ok "Protected key store present (current-user-only ACL): $KeyStore"
-  } else {
-    Warn "Key store ACL is not current-user-only; ai-stepfun will refuse it: $KeyStore"
-    Warn "  ai-stepfun store-key"
-  }
+  Ok "Protected key store present: $KeyStore"
 } else {
   Warn "Protected key store is missing. Run this once to fill it from 1Password:"
   Warn "  ai-stepfun store-key"

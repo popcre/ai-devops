@@ -144,6 +144,22 @@ out="$("$DRIFT" --root "$f_str" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
   && result pass 'an if: that only mentions merge_group as a string is reported as drift' \
   || result fail 'an if: that only mentions merge_group as a string is reported as drift'
 
+# Case 1e: merge_group is selected but an extra && term makes it unproducible.
+f_false="$(make_fixture andfalse)"
+python3 - "$ROOT/.github/workflows/verify.yml" "$f_false/.github/workflows/verify.yml" <<'PY2'
+import sys
+t = open(sys.argv[1]).read()
+old = """    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'pull_request' || github.event_name == 'merge_group')"""
+assert old in t, 'verify.yml verification-closure if: changed; update this fixture'
+open(sys.argv[2], 'w').write(t.replace(old, "    if: github.event_name == 'merge_group' && false", 1))
+PY2
+out="$("$DRIFT" --root "$f_false" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
+[ $rc -eq 1 ] && grep -q 'does not explicitly select it' <<<"$out" \
+  && result pass 'an if: with an extra && term is reported as drift' \
+  || result fail 'an if: with an extra && term is reported as drift'
+
 # Case 1c: the required job reports under a different display name.
 f_disp="$(make_fixture display)"
 awk '{ print } /^  verification-closure:$/ { print "    name: Verification closure" }' \

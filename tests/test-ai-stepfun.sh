@@ -189,38 +189,28 @@ fi
 
 # ---- OpenCode engine (works on any host with the stub) ----
 echo '== ai-stepfun OpenCode engine'
-# On Windows filesystems chmod 600 is synthesised; force the Windows key-store
-# path so the mode check is skipped (NTFS ACLs are the real control there).
+# StepFun is Ubuntu/Linux-only: Windows is refused even with OpenCode present.
 export AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/bin/opencode"
-export AI_STEPFUN_PLATFORM=MINGW64_NT-10.0
-# icacls stand-in: prints the ACL named by $TMP/acl (owner-only by default).
-cat > "$TMP/bin/icacls" <<'STUB'
-#!/usr/bin/env bash
-case "$*" in *'/inheritance:r'*) exit 0 ;; esac
-acl="$(cat "$STEPFUN_TEST_ACL" 2>/dev/null || printf '%s' 'HOST\tester:(F)')"
-printf '%s\r\n' "$1 $acl" '   NT AUTHORITY\SYSTEM:(F)' '' 'Successfully processed 1 files; Failed processing 0 files'
-STUB
-chmod +x "$TMP/bin/icacls"
-export AI_STEPFUN_ICACLS="$TMP/bin/icacls" USERNAME=tester USERDOMAIN=HOST STEPFUN_TEST_ACL="$TMP/acl"
+check "Windows is refused even with OpenCode installed (Ubuntu/Linux only)" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform"
+# The OpenCode cases need a Linux filesystem (owner-only key store) and bubblewrap.
+if [ "$(uname -s)" != Linux ]; then
+  SKIP=$((SKIP + 1)); echo 'SKIP  OpenCode engine cases (not a Linux filesystem)'
+else
+export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_OPENCODE_ROOT="$TMP/bin"
 mode ok
-check "Windows key store with an inherited or shared ACL is refused" "printf '%s' 'BUILTIN\\Users:(I)(RX)' > '$TMP/acl'; ! '$SCRIPT' doctor >/dev/null 2>&1; rm -f '$TMP/acl'"
-check "Windows key store owned by a same-named user of another domain is refused" "printf '%s' 'OTHER\\tester:(F)' > '$TMP/acl'; ! '$SCRIPT' doctor >/dev/null 2>&1; rm -f '$TMP/acl'"
 check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT' doctor | grep -q '^OK engine=opencode'"
-check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 4 ]"
+check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 5 ]"
 check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
 check "OpenCode review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
 check "OpenCode review uses the review agent" "grep -qx 'stepfun-review' '$TMP/args.oc'"
 check "OpenCode implement uses the implement agent and a remote-less clone" "mode impl; out=\$('$SCRIPT' implement --repo '$TMP/repo' --prompt 'add new.py' 2>&1); wt=\$(printf '%s\n' \"\$out\" | sed -n 's/^CLONE //p'); [ -n \"\$wt\" ] && [ -f \"\$wt/new.py\" ] && [ -z \"\$(git -C \"\$wt\" remote)\" ] && grep -qx 'stepfun-implement' '$TMP/args.oc'"
 check "OpenCode ask answers from a disposable copy" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES"
 check "OpenCode rejects a turn directory that has a remote" "mode ok; git -C '$TMP/repo' remote add origin https://example.com/x.git 2>/dev/null; ! '$SCRIPT' ask --repo '$TMP/repo' x >/dev/null 2>&1; git -C '$TMP/repo' remote remove origin"
-if [ "$(uname -s)" = Linux ]; then
-  export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_OPENCODE_ROOT="$TMP/bin"
   rm -f "$TMP/args.bwrap"
   check "Linux OpenCode turn runs under bubblewrap with an empty home and no host root" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES && grep -qx -- '--unshare-all' '$TMP/args.bwrap' && grep -qx -- '--tmpfs' '$TMP/args.bwrap' && grep -qx \"\$HOME\" '$TMP/args.bwrap' && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx / && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx /etc"
   check "Linux OpenCode doctor fails without bubblewrap" "! AI_STEPFUN_BWRAP=/nonexistent '$SCRIPT' doctor >/dev/null 2>&1 && '$SCRIPT' doctor | grep -q '^PASS  bubblewrap sandbox'"
-  unset AI_STEPFUN_OPENCODE_ROOT
 fi
-unset AI_STEPFUN_ENGINE AI_STEPFUN_OPENCODE AI_STEPFUN_ICACLS
+unset AI_STEPFUN_ENGINE AI_STEPFUN_OPENCODE AI_STEPFUN_OPENCODE_ROOT
 
 printf '\n%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

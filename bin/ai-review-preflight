@@ -245,14 +245,10 @@ static_status() {
   case "$1" in
     gemini) gemini_live_qualified && return 1; printf '{"provider":"gemini","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
     qwen) qwen_live_qualified && return 1; printf '{"provider":"qwen","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
-    # StepFun runs through StepCode (Ubuntu) or OpenCode (Windows/fallback).
-    # Unsupported only when neither engine is available on this host.
+    # StepFun is Ubuntu/Linux-only: every turn needs the bubblewrap sandbox
+    # (owner instruction 2026-09-25; #1086). Any other platform is unsupported.
     stepfun)
       if [ "${AI_STEPFUN_PLATFORM:-$(uname -s)}" = Linux ]; then return 1; fi
-      # Non-Linux: supported when the OpenCode harness is present.
-      _oc_ver="$(tr -d ' \r\n' < "${AI_REVIEW_ROOT:-$SCRIPT_DIR/..}/config/opencode/version" 2>/dev/null || true)"
-      _oc_bin="${AI_STEPFUN_OPENCODE:-$HOME/.local/lib/ai-devops/opencode/${_oc_ver}/node_modules/opencode-ai/bin/opencode.exe}"
-      if [ -x "$_oc_bin" ] || command -v opencode >/dev/null 2>&1; then return 1; fi
       printf '{"provider":"stepfun","status":"unsupported-platform","failure_class":"unsupported-platform"}\n'; return 0 ;;
     *) return 1 ;;
   esac
@@ -312,7 +308,7 @@ explain_failure() {
     service-unavailable) printf 'Retry the service check once after a short delay, then wait. Do not misclassify an outage as a code verdict.\n' ;;
     substantive-finding) printf 'Stop and fix the finding. Never rotate providers to shop for a friendlier verdict.\n' ;;
     empty-report) printf 'The provider returned a decision with no analysis behind it. Treat it as malformed, not as an approval. Re-run the review and require a report; never relax the report floor to let the verdict through.\n' ;;
-    unsupported-platform) printf 'This provider has no engine on this operating system (StepFun needs StepCode on Ubuntu or OpenCode on Windows). Run bin/setup-opencode-stepfun.ps1, or use another registered reviewer; never emulate or force it.\n' ;;
+    unsupported-platform) printf 'This provider has no engine on this operating system (StepFun runs only on Ubuntu/Linux under bubblewrap). Use another registered reviewer; never emulate or force it.\n' ;;
     not-registered) printf 'The provider is not carried in the reviewer registry, so it cannot receive a review no matter how healthy its local install is. Re-entry is a reviewed registry change backed by a live well-formed verdict, never an edit made to unblock an allocation.\n' ;;
     live-qualification-required) printf 'The reviewer live qualification no longer matches its wrapper, runtime, or preloader bytes. A pull of new toolkit code re-qualifies it automatically via the repository post-merge hook; to restore it now run: ai-review-preflight requalify\n' ;;
     authentication-failed|provider-timeout|provider-unhealthy) printf 'Quarantine this provider and correct the named health failure before assigning a review.\n' ;;
