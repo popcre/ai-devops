@@ -255,8 +255,5 @@
       ]
     }
   },
-  "windows_offline_section_count": 6,
-  "linux_offline_suite_seconds": {
-    "test-mcp-session-guard.sh": 8
-  }
+  "windows_offline_section_count": 6
 }
