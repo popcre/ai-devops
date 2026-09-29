@@ -105,7 +105,7 @@ jobs:
             # refusal is never booked as a settings drift. Say so once; a
             # repeat refusal stays silent while that notice is the latest
             # comment OR still the issue body (a fresh issue has no comments).
-            title='Merge-queue drift lane degraded: live ruleset read refused'
+            title='Merge-queue drift lane degraded - live ruleset read refused'
             body="The live ruleset comparison could not read repos/$GITHUB_REPOSITORY at $RUN_URL (token refused the ruleset read). The offline checks stay in force. Grant the lane a ruleset read or move the live comparison to a machine with admin access; until then scheduled runs are degraded, and this message will not repeat while it is the latest comment."
           else
             title='Merge-queue settings drift detected'
