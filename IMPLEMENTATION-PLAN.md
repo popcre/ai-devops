@@ -166,6 +166,19 @@ Reviewer wrappers other than `ai-glm`'s doctor path; shared-db; installers; CI w
 | First instrument = spawn-count, not wall-clock | 2026-09-29 | Deterministic; matches existing `tests/test-ai-glm.sh` guard |
 | Independent exact-head review required for the doctor PR | standing | `bin/ai-glm` is a reviewer wrapper; AGENTS.md reviewer-safety path |
 
+### Decision ledger: why findings 3 and 9 are not done
+
+**Finding 3 (pin-only qualification) — rejected, both precedents:**
+
+1. **Owner ruling 2026-09-23** (`config/provider-cli-versions.json` grok notes): exact pin blocked every review on auto-update; the chosen design is a floor (`version_match: "minimum"`), not a hard pin. A hash-pin lane would reintroduce the same failure.
+2. **Hash-pin + re-qualify already exists** for Gemini (`bin/ai-review-preflight` live qualification). "Hash pin everything" is therefore already designed narrowly — a full pin-only lane would duplicate this without new safety.
+
+**Finding 9 (`ai-ci-status` tool) — rejected, correct grounds:**
+
+1. **`AGENTS.md` reuse rule**: every new shared artifact needs an owner, a reason the shared home cannot serve the need, and a retirement path. Finding 9 names no owner and does not explain why `ai-pr-wait`, `ai-review-packet`, or `tools/ci/verify-closure.sh` cannot serve the visibility need.
+2. **`plan_workflow-efficiency.md` P9**: queue reuse only after measured savings; baseline queue median is seven minutes. The existing homes (`ai-pr-wait`, `ai-review-packet`, `tools/ci/verify-closure.sh`) are already named there. Building a new tool before measurement inverts the rule.
+3. **Do not cite P8** ("Do not add a new general-purpose status index") as a ban on `bin/` tools — that sentence is about document proliferation, not executable tools. The rejection rests on the reuse rule and P9, not P8.
+
 ### Open (implementer judgment)
 
 | Question | Criteria |
