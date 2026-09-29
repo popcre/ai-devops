@@ -1,6 +1,7 @@
 # IMPLEMENTATION PLAN — delete shared-db coordination layer (C by deletion) (2026-09-29)
 
 **Session handoff:** [HANDOFF.d/2026-09-29T1635Z-edge-dev-mimo-c-by-deletion.md](HANDOFF.d/2026-09-29T1635Z-edge-dev-mimo-c-by-deletion.md)  
+**Full background (why these deletions):** [`docs/shared-db-delivery-failure-background-2026-09-29.md`](docs/shared-db-delivery-failure-background-2026-09-29.md)  
 **External reviews:** Grok consensus C-by-deletion · Opus plan-review REJECT (thin brief) · StepFun REVISE (applied) · BlockerWatch: Grok DELETE / StepFun SHRINK → **SHRINK**.
 
 ## STATUS — read first
