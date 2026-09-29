@@ -43,19 +43,19 @@ Put this WHOLE list to Albert in ONE message before starting work.
 - Skill `C:\Users\ahazan\.config\mimocode\skills\jev-transcript-classify\SKILL.md` rewritten with archive layout, batching, polarity, privacy, and what not to do. Locales already present.
 - GLM critique completed (session `jev-plan-critique-20260929`, model glm-5.3). Verdict **REVISE**. Report: `C:/repos/ai-devops/.ai/reviews/glm-jev-plan-critique-20260929-b33a60737869a5b249f9e0c80ad81ab56a39d68e1c56f29c44b70dcb4701730b.md`.
 - Root cause of `snapshot-digest-mismatch`: `source_inventory` hashed `git diff HEAD` text; shallow snapshots abbreviate the index line to a different width than the full ODB. Fix: `--full-index` in `bin/ai-review-sandbox`.
-- **PR #1060** https://github.com/popcre/ai-devops/pull/1060 — commit `a8cc7964` on `mimo/sandbox-digest-full-index` (worktree `C:\repos\ai-devops-wt-sandbox-full-index`). Files: `bin/ai-review-sandbox`, `tests/test-ai-review-sandbox.sh` (new case `shallow_and_full_odb_agree_on_source_digest`).
+- **PR #1060** https://github.com/popcre/ai-devops/pull/1060 — fix commit `a8cc7964` on `mimo/sandbox-digest-full-index` (worktree `C:\repos\ai-devops-wt-sandbox-full-index`). Files: `bin/ai-review-sandbox`, `tests/test-ai-review-sandbox.sh` (new case `shallow_and_full_odb_agree_on_source_digest`). Branch later reconciled onto `origin/main` after #1078 landed; review the PR tip, not `a8cc7964` alone.
 - `bash tests/test-ai-review-sandbox.sh` in that worktree: **109 passed, 0 failed**.
 - Reviewer incidents recorded on edge-dev (see §8).
 
 **In progress / not done**
-- `tests/test-ai-review-packet.sh` was still running (120 `ok` lines, no final summary) at wrap-up; log `/tmp/packet-tests.log` (Git Bash temp on edge-dev). Not a failure — incomplete run.
-- **Independent exact-head review of #1060 not started** (required before merge).
-- **Gemini review of the process plan + GLM cut NOT started.** Gemini is eligible (`ai-review-preflight usable gemini` true; doctor PASS `gemini-3.8-flash-high`; usage 47% weekly / 96% 5h at 13:30 UTC). Must run from a **clean worktree** (packet builder rejects dirty trees). Clean worktree already exists: `C:\repos\ai-devops-wt-sandbox-full-index` after the commit (or a fresh one from `origin/main` for a plan-only review).
+- `tests/test-ai-review-packet.sh` completed once: **144 passed, 1 failed**. Failure `decision_file_symlink_is_refused` is pre-existing on this Windows host (`ln -s` in Git Bash copies the file instead of making a symlink). Unrelated to the digest fix. The new `shallow_and_full_odb_agree_on_source_digest` case passes.
+- **Independent exact-head review of #1060: Gemini REJECT (2026-09-29 ~15:22 UTC).** Substantive finding: branch was behind `origin/main` after #1078 and the PR diff would have deleted that plan/handoff. Digest fix itself called "structurally clean". Also: no test evidence in that packet; handoff named stale SHA `a8cc7964`. Remediation: merged `origin/main` into the branch so the PR diff is only `bin/ai-review-sandbox`, `tests/test-ai-review-sandbox.sh`, and this handoff. Re-review needed with `--tests`. Note: that Gemini report put `## Verdict` before the head SHA, so `ai-review-pool` refused it as unbound even though the SHA is in the metadata — quote the SHA before the Verdict heading in any retry.
+- **Gemini review of the process plan + GLM cut NOT started.** Clean worktree required.
 - PR #1060 not merged. Branch kept.
 - Plan re-cut (GLM's shape) not written.
 
 **Committed / pushed**
-- `a8cc7964` pushed to `origin/mimo/sandbox-digest-full-index`. Not on `main`.
+- `a8cc7964` (fix) and later docs commits on `origin/mimo/sandbox-digest-full-index`. Not on `main`. Branch reconciled with `origin/main` (merge) after #1078.
 
 ## 4. Everything we tried that did NOT work
 
@@ -206,7 +206,7 @@ Corpus: 1,306 sessions (2026-09-08→09-29; codex 877 / claude 400 / grok 29) af
 ## 8. Access and environment
 
 - Host: `edge-dev` (Windows). Repo: `C:\repos\ai-devops` (origin `https://github.com/popcre/ai-devops.git`).
-- Task worktree: `C:\repos\ai-devops-wt-sandbox-full-index` branch `mimo/sandbox-digest-full-index` @ `a8cc7964`.
+- Task worktree: `C:\repos\ai-devops-wt-sandbox-full-index` branch `mimo/sandbox-digest-full-index` (review the PR tip).
 - Reviewer incidents: `C:\repos\ai-devops-reviewer-install\.ai\reviewer-issues\20260929T125838Z-edge-dev-muse-1961321` and `…\20260929T130211Z-edge-dev-grok-1989270`.
 - GLM report: `C:/repos/ai-devops/.ai/reviews/glm-jev-plan-critique-20260929-….md`. GLM session name `jev-plan-critique-20260929` (caller `mimo`).
 - Secrets: 1Password vault `vibe_coding`, item `typesafe.ai API`, field `credential` (TypeSafe). `op-service-account` under `~/.config/ai-devops/`. Never print values.
