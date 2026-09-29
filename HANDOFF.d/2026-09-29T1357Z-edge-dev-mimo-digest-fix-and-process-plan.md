@@ -91,7 +91,88 @@ Corpus: 1,306 sessions (2026-09-08→09-29; codex 877 / claude 400 / grok 29) af
 
 **GLM verdict:** REVISE — do not add a new parallel programme. Keep 2, 3, 9; fold 1/4/5/6/7 into #658, #650, #131, live-proof-session-sizing, BlockerWatch. First proving PR = doctor sweep removal + wall-time regress check. Second = pin-only lane.
 
-**Disregarded (do not re-mine as signal):** 2026-09-15 fixture burst; Grok id-stub sessions; product/app work (Supabase/ColdLion/Disney); shared-db mega-sessions except toolkit-failure excerpts. Full TEMP report may be gone: `C:\Users\ahazan\AppData\Local\Temp\jev_process_improvements.md`.
+**Disregarded (do not re-mine as signal):**
+- **2026-09-15 fixture burst (~122 sessions):** canned one-liners ("CI is still running…", "The Kimi reviewer wrapper crashed…") duplicated across Claude and Codex within minutes, tiny sizes, empty titles. Evaluation fixtures. Counted once as a note only.
+- **Grok remainder (29):** almost all session-id stubs, empty excerpts.
+- **p>0.8 tail:** Supabase, ColdLion, Disney/HTS, website work — outside toolkit process.
+- **shared-db orchestrator mega-sessions (up to 54MB):** app/DB delivery; mined only for reviewer/rate-limit/CI-tooling failures.
+- **Session size alone:** tool-result bloat inflates bytes; use wall-clock span from timestamps when judging waste.
+
+**Corpus mechanics (how the numbers were made):**
+- Root: `C:\Users\ahazan\Dropbox\ai\chat_transcripts\{edge-dev,edge-dev3}\…` (machines only those two in this window).
+- Units: Claude UUID `*.jsonl` (not subagents/tool-results), Codex `rollout-*.jsonl`, Grok `summary.json`. ~2,079 files → 1,346 unique digests (`sha1(cwd|excerpt[:240])`).
+- Jev Noul "this session does NOT primarily concern failures/slowness in AI DevOps…"; discard only at `p>0.90` → 40 discarded, 1,306 remainder. Theme hits on title+excerpt of remainder: CI 99, reviewer 83, wait 60, blocker 44, fail 43, merge 43, runner 25, queue 16, install 15, wrapper 12, rate-limit 5. Keyword counts undercount (excerpt only).
+- Deep-read 22 substantial sessions (not 22 of 1,306 linearly). Size>1MB: 735 files.
+
+**Deep-read index (session digest → theme; paths are under the Dropbox transcript root):**
+
+| Digest | Theme |
+|---|---|
+| 552e8c11532c | All four reviewers fail preflight (#686, ~2 days) |
+| a401cb275650 | ai-glm OpenCode crash loop (6 days; CloseWait hang) |
+| 304c7949d9f1 | doctor >60s preflight (per-record process spawns ~0.1s on Windows) |
+| 5c73f1d4a1ff | Gemini bare PASS / registry drift (#285) |
+| a7991fe608ca | Muse model_not_found (#683) |
+| 2f4ce1b84511 | Dead reviewer lease (#283) |
+| cd232fff9152 | Qwen reviewer logs; 8 mistake rounds found one at a time; 14h orphan task |
+| d504cdb07574 | Muse live preflight timeout default 10s |
+| b30403745856 | Flaky wall-clock tests (#89) |
+| 19727c2f4a1a | Test infra redesign after 24h loops |
+| 432e1fad1fbd | Runner-safety over-blocking |
+| 97d14683d623 | Windows runner / ENVY / ~30 queued runs |
+| 509116c2b044 | Merge queue funnel + preview DB |
+| eaa68b8be9ef | Blacksmith cost shock |
+| eaec492c8948 | GitHub rate-limit separation (Apps) |
+| c996d7ec5a9b | API-hit reduction plan implementation |
+| aff0b3a070f1 | Half of MCP servers failing |
+| a9cf7a2a0391 | Duplicate qwen installs / PATH shadowing |
+| a324e4d4a683 | Qwen vault / 1Password connection |
+| 8cae63550af6 | Superseded-head failure code |
+| cfcf33b6fcd5 | Blocked sessions / stuck CI queue ("alternative to github?") |
+| ad61d3296df1 | StepFun reviewer + repeat loop |
+| 88350b3b04e5 | Handoff wording caused idle waiting (condition-free "do not") |
+| c31b6ce5eb3a | BlockerWatch cold-start pickup (lost context) |
+
+**Per-item detail (fuller than the table):**
+
+1. **Reviewer registry + empty verdicts.** Membership in at least two places (ai-devops mirror vs shared-db allocator) rots: retired providers still listed, out-of-credit still assigned, ~1 hour spent reaching a removed reviewer. One provider "available" but no verdict + bare PASS (false green). ~116 sessions / 48 substantial. Qwen log session found 8 mistakes one at a time. Change (original): one registry + CI fail on mirror disagreement; empty/no-verdict = FAILURE never PASS; lease TTL/reclaim. GLM: membership-drift check already exists (`bin/ai-reviewer-membership-drift`); empty-report fail-closed already at `bin/ai-review-pool` (reject empty report; lifecycle tests `tests/test-ai-review-lifecycle.sh` cover approval-with-empty-report → BLOCKED). Residuals only: lease TTL; empty-report should mark provider unavailable in capacity record (`bin/ai-review-preflight` already has `malformed-response` vocabulary to extend).
+
+2. **Bounded preflight (do first).** `ai-glm doctor` ran prune/reconcile inline (per-record spawns); at ~150 records blew 60s governed preflight → every GLM review failed "doctor did not answer within 60s". Separate preflight 10s default too short for legitimate starts. Fixes took 5–6 days + several compactions. Preflight already wraps probes in `timeout` and caps capacity at 5s — the incident is doctor sweeping in the check path. Surgical fix is S: move sweeps to scheduled maintenance; regress-check doctor wall-time (generous upper bound only).
+
+3. **Pin-only qualification.** Provider auto-updated past pin → whole pool down; Grok UNQUALIFIED; two days repair; owner asked why a version bump needs "a whole check, windows run, etc." Pin-only lane: hash binary + doctor + one live smoke; auto-quarantine on mismatch, auto-restore when pin updates in the same change. Still a reviewer-safety path (independent exact-head review required).
+
+4. **Wall-clock tests / suite budgets.** Timing asserts flaked under load; one session re-ran a ~6-hour suite ~25 times in 24h; sibling did the same; owner: checks "go on for 48 hours and then fail." Ban exact timing asserts + sleep-sync; deterministic fixtures; per-suite timeout + auto-cancel; no-progress detector (N identical failures ⇒ stop and file). Scope ban carefully so #2's doctor wall-time upper-bound check remains legal. `docs/development.md` already warns wall-clock budget failures mislead.
+
+5. **GitHub quota.** All helpers shared one 5,000/hr allowance; holds ("hold off until…"); sessions still ask whether the reduction plan landed (~29 sessions). `bin/ai-gh` already has quota thresholds, spacing, back-off. #658/#660 measure BlockerWatch ≈95% of traffic; P5 = move BlockerWatch to the existing pop-ai-watchers App (`bin/ai-gh-app-auth` exists). Then lint direct `gh`, publish remaining quota in `ai-gh` output. Defer multi-App split until post-P5 measurement.
+
+6. **Session sizing.** Multi-day runs, 3–5 compactions, 14h orphan background tasks, loops with no change (owner: "what did I do that made you repeat the same thing over and over?"); owner intervened at 80/142 minutes to kill stalled tasks; BlockerWatch wakeups start a cold session (105 continuation/handoff hits; 21 explicit loop/24h language). "One unproven outcome per session" is already locked + phrase-guarded (`plan_live-proof-session-sizing`, `tests/test-client-globals-required-phrases.sh`). Residues only: task TTL+reap with summary; wake = resume parked session or machine-readable state file (see `plan_blockerwatch-reliability-repair.md`).
+
+7. **Collisions / work-claims.** Owner: "we've had a LOT of collisions in ai-devops." Parallel sessions on same wrappers; one commit broke another; superseded-head reviews; a handoff forbade work while a runner was idle → session waited though a slot was free (condition-free prohibition). 64 collision/worktree-keyword sessions. #131 `plan_ai-devops-work-claims.md` already specifies advisory PR guard + frozen schema; hard CI rejection only after 30-day measurement. Handoff template: technical prohibitions need a machine-checkable condition or expiry; **owner-ruling blocks stay condition-free**.
+
+8. **Install drift.** Duplicate CLIs shadow PATH (qwen 0.21.15 vs 0.23.0); stale 1Password names break MCP ("half the MCP servers are now failing"); SSH host-key failures; `op` missing so wrapper preflight fails. 57 sessions. Prefer extending `ai-machine-tools-doctor` (reuse rule) with versions-vs-pins, duplicate PATH, `op://` resolution, MCP health, known_hosts — **cached/scheduled**, cheap staleness check at session start only (else repeats bug #2).
+
+9. **CI/queue visibility.** ~30 queued runs; adding a runner felt like "30 wasted minutes before the slow backup lane"; unclear merge ownership; "checks never pass"; Blacksmith judged extremely expensive mid-investigation; "alternative to github?" asked in frustration. No existing queue-depth/cost tool in `bin/`. Keep `ai-ci-status` (queue depth, lane wait, tip-PR owner, cost/day) + published lane-capacity policy. Auto-cancel superseded queue entries needs a precise supersession definition (review-packet race plan keeps HEAD/digest/merge-base strict).
+
+**GLM's missing adds (keep these):**
+- **One-page loss ledger** (incident class → date → hours lost → owning plan), seeded from the three transcript weeks — ranking by expected hours saved, not anecdote vividness. `plan_workflow-efficiency.md` forbids making a measurement *platform* a prerequisite; a one-page table is enough.
+- **Plan-backlog consolidation session** — ~40 `plan_*.md` at root; this proposal would be #41 and overlaps five. Mark superseded/complete as decision records; fold live remainders into parents (AGENTS.md reuse rule; #168 under #159).
+
+**GLM risks called out (do not reintroduce):**
+- Hard gates for a non-programmer owner (items 6/7 as written) repeat the "condition-free rule blocked free work" failure.
+- Item 2 vs 4 contradiction (wall-clock ban vs doctor regress check).
+- Item 9 auto-cancel can destroy exact-head evidence if "superseded" is vague.
+- Item 8 "at session start" full fleet doctor re-creates the preflight sweep bug.
+- Parallel-programme proliferation = self-inflicted registry rot.
+
+**GLM evidence caveats:** packet for that critique was mismatched (unrelated handoff in patch.diff; plan not in packet). Magnitudes (~25 suite reruns, ~30 queue, "LOT of collisions", 14h orphans) are single-source uncounted — use for ranking only. Empty-report incident may predate merged empty-report handling — verify before item-1 work. Effort labels ignore independent-review cost on reviewer-safety paths.
+
+**Gaps / uncertainty in the mining itself:**
+- Some Codex rollouts yield 0 extractable user prompts (wrapper-only; e.g. 13MB runner-safety session) — represented via excerpts/cross-refs only.
+- Title+excerpt keyword counts undercount; claim rankings, not exact totals.
+- Remainder is selection-biased toward failure/slowness (Jev kept 1306/1346); frequencies are within-corpus, not fleet rates.
+- Clusters overlap; 74 sessions match ≥3 patterns.
+- No transcript dates before 2026-09-08 in this set.
+- TEMP copies (`jev_process_improvements.md`, `jev_remainder.jsonl`) may be gone — this §5a is the durable public-safe copy.
 
 ### 5b. Tooling findings
 
@@ -105,7 +186,7 @@ Corpus: 1,306 sessions (2026-09-08→09-29; codex 877 / claude 400 / grok 29) af
 
 1. **Finish packet tests** on the #1060 worktree if still running: `tail /tmp/packet-tests.log` or re-run `bash tests/test-ai-review-packet.sh` from `C:\repos\ai-devops-wt-sandbox-full-index`. **Success:** `N passed, 0 failed` (or an explained failure).
 2. **Independent exact-head review of PR #1060** (reviewer-safety). Use a governed reviewer (Gemini is usable) from a **clean** worktree at `a8cc7964`. **Success:** a durable APPROVE report naming that SHA, stored under `.ai/reviews/`.
-3. **Gemini review of the process plan + GLM cut** (authorized, not done). Brief content: `%TEMP%\jev_process_improvements.md` + GLM's REVISE recommendation (fold into #658/#650/#131; keep preflight/pin/CI-visibility). Prompt-file; clean worktree; `AI_GEMINI_CALLER=mimo ai-gemini new …`. **Success:** Gemini verdict on "is GLM's cut right?" with a durable report.
+3. **Gemini review of the process plan + GLM cut** (authorized, not done). Brief content is **this handoff §5a** (nine items + GLM cut) + the question "is GLM's re-cut right (keep 2/3/9; fold the rest)?" Prompt-file; clean worktree; `AI_GEMINI_CALLER=mimo ai-gemini new …`. **Success:** Gemini verdict on that question with a durable report.
 4. **Merge #1060** through the queue after review + green checks (`bin/ai-pr-wait 1060`). **Success:** commit on `origin/main`; then prove one live packet build (Muse or Grok) and resolve the two reviewer-issue records with that evidence.
 5. **Ask Albert §0 item 1** (plan re-cut). If he accepts GLM's cut, fold deltas into the named existing plans — do not create a 40th plan file.
 6. Delete this handoff only after #1060 is merged and the two incidents are resolved (successor rule).
