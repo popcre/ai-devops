@@ -8,6 +8,8 @@ Related: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401)
 
 ## STATUS — read first
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** the leftover-proof **issue** rule below is deleted as process. A proof gap is a checklist item on the **same** GitHub issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Session-sizing honesty (one unproven outcome per session) is kept; only the issue minting is gone. Mentions of leftover-proof issues in this file are historical.
+
 The original refuse-bundle work is complete. The source-rule follow-up merged through PR #520; acceptance now waits only on installed-global proof and issue closure. Remaining leftover proofs stay with live [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator); do not start a second chat on them.
 
 | # | Step | State | Date | Evidence |
@@ -99,9 +101,9 @@ Plain-English diagnosis (not in git; do not commit transcripts): `C:\Users\ahaza
 - Handover skill: one issue and one session per leftover proof; proofs still never go to the orchestrator.
 - #401 legend: a Live proof owner cell names at most one unproven step and one issue. Remaining unproven 3027 rows say no further steps may be added. Posted proofs on Steps 1 and 2A stay with 3027.
 
-**On PR #520, not yet accepted**
+**On PR #520, not yet accepted** (leftover-proof **issue** wording here is historical — superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md); use a checklist on the same issue instead)
 
-- Both globals say that code landing without live proof creates exactly one leftover-proof issue for that step in the same session and never saves several unproven steps for a later chat.
+- Both globals say that code landing without live proof creates exactly one leftover-proof issue for that step in the same session and never saves several unproven steps for a later chat. *(Leftover-proof **issue** rule superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md); the “never save several unproven steps” honesty is kept.)*
 - Both implementation-plan sources require a `code landed, not accepted` row to name that one owner issue when the code lands.
 - The handover skill, required-phrase test, parity map, and Windows parity fixture carry the same rule.
 
@@ -149,11 +151,11 @@ Evidence:
 - 2026-09-16: proofs, reports, and tooling never go to the shared-db orchestrator (#500).
 - 2026-09-16: this plan does not implement shared-db product fixes.
 - 2026-09-16: both Claude and Codex globals get the same sentence; the required phrase must not wrap across lines (#209).
-- 2026-09-16: when code lands without live proof, its session files exactly one leftover-proof owner issue for that step; several unproven steps are never saved for a later chat.
+- 2026-09-16: when code lands without live proof, its session files exactly one leftover-proof owner issue for that step; several unproven steps are never saved for a later chat. *(Leftover-proof **issue** filing superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md) — same-issue checklist instead.)*
 
 **OPEN — implementer’s judgment**
 
-- Exact GitHub issue titles if Step 4 opens new leftover-proof issues (one step each, labelled non-orchestrator in the body).
+- Exact GitHub issue titles if Step 4 opens new leftover-proof issues (one step each, labelled non-orchestrator in the body). *(Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md): do not open leftover-proof issues.)*
 - Whether to install globals on every in-scope machine in this same session or only on `edge-dev` and leave fleet sync to the supported route. Prefer: install on the machine that implements, then run the supported sync; do not invent a second installer.
 
 ---
@@ -264,7 +266,7 @@ Then:
 
 **Depends on:** the completed Steps 1–5.
 **Files:** both global templates and `skills/shared/shared-db-handover/SKILL.md`.
-**Do:** add one matching global rule: when code lands without live proof, open exactly one leftover-proof issue for that step in the same session; never save several unproven steps for a later chat. Keep proofs out of the shared-db orchestrator.
+**Do:** add one matching global rule: when code lands without live proof, open exactly one leftover-proof issue for that step in the same session; never save several unproven steps for a later chat. Keep proofs out of the shared-db orchestrator. *(Historical — leftover-proof **issue** minting superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md); proof gaps are same-issue checklists.)*
 **You’ll know it worked when:** `git grep -n "Never save several unproven steps" templates/system/CLAUDE-global.md templates/system/AGENTS-global-codex.md` finds one unwrapped line in each file.
 
 ### Step 7 — Make the plan writer assign the owner immediately

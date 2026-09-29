@@ -1,5 +1,7 @@
 # Implementation plan — AI agents clean up after themselves
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** steps below that require a leftover-proof issue instead leave a proof-gap checklist item on the **same** issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Mentions of leftover-proof issues in this file are historical.
+
 | Step | Status | Evidence |
 |------|--------|----------|
 | 1. Shrink what a review copies | ✅ done — merged `af80fcf0f11b66f99fa794ad159b4b6f110eae2d` (PR #797, Muse APPROVE at exact head; bounded shallow snapshots, not files-only: the packet/lifecycle tools run git inside the snapshot, so a no-`.git` shape cannot work — `tests/test-ai-review-snapshot-bounded-history.sh`, `tests/test-ai-review-sandbox.sh` 108/108, packet 138/138) | real-worktree dry run: 15 MB / 13 commits / 17 s vs old full clone 461 MB / 1,206 commits / 63 s; a real Muse review of PR #797 ran entirely inside a bounded snapshot |
@@ -69,7 +71,7 @@ Also from the same thread (locked design input):
 3. Make the **parent wrapper sweep orphans** left by killed children.
 4. Keep the **daily Windows scheduled task** as backup only (`AI-Debris-Housekeeping`, already installed on this machine).
 5. Apply the same create/cleanup discipline to **Codex worktree groups** under `C:\Users\ahazan\.codex\worktrees` (now junctioned to `D:\ai-data\codex\worktrees`).
-6. One **live proof** with a real review, then a leftover-proof issue if live proof is deferred.
+6. One **live proof** with a real review; if live proof is deferred, leave a `- [ ] live proof` checklist item on the same issue (leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 
 ### NOT in this plan (explicit)
 - Moving more folders to D: (already done for the growth paths; see §5).
@@ -284,7 +286,7 @@ Each sandbox already writes:
 
 **Step 5.2 — Leftover-proof rule**
 
-- If code merges without live proof in the same session, open **exactly one** leftover-proof issue in `popcre/ai-devops` before that session ends, assign an owner (`owner:` line), and link the PR. Never batch proofs for a later chat.
+- If code merges without live proof in the same session, leave a `- [ ] live proof` checklist item on the **same** GitHub issue before that session ends, assign an owner (`owner:` line), and link the PR. Never batch proofs for a later chat. Do **not** open a leftover-proof issue (superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 
 **Context cut points:** end of Phase 1, end of Phase 2, end of Phase 5. Re-read §8–§9 before starting the next phase (drift check). Use `fresh-session` at each cut if the context is full.
 
@@ -332,7 +334,7 @@ Do not say "add tests" in a PR without these names or a written reason why one d
 - [ ] Phase 1–3 code merged to the repo's mainline via PR (or `develop` if that repo uses it).
 - [ ] Named tests in §10 pass in CI.
 - [ ] One live review (Phase 5) left **zero** sandboxes from that run; evidence linked in the PR.
-- [ ] If live proof deferred: exactly one leftover-proof issue open, assigned, with `owner:` line.
+- [ ] If live proof deferred: a `- [ ] live proof` checklist item on the same issue, assigned, with `owner:` line (leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 - [ ] Daily task still installed and logged success once after the change.
 - [ ] Plan STATUS table updated (done rows cite a commit SHA or test path — never a bare count).
 - [ ] `HANDOFF.d/` file created in `ai-devops` linking to this plan; this plan links back. Root `HANDOFF.md` untouched.

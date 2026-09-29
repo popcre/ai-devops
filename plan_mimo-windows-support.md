@@ -4,6 +4,8 @@ Paired handoff: [`HANDOFF.d/2026-09-23T1856Z-edge-dev-mimo-client-integration.md
 
 ## STATUS
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** steps below that require a leftover-proof issue instead leave a proof-gap checklist item on the **same** issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue.
+
 | Step | State | Date | Evidence |
 |---|---|---|---|
 | 1. Freeze the MiMo Windows baseline (qualification facts) | ✅ done | 2026-09-23 | `tests/verification/mimo-windows-2026-09-23/README.md` — Desktop path, CLI-absent fact, MCP array-command schema, no-hooks fact, session/memory layout. Full `mimo run` flag qualification remains OPEN (D10) until the CLI is installed. |
@@ -17,7 +19,7 @@ Paired handoff: [`HANDOFF.d/2026-09-23T1856Z-edge-dev-mimo-client-integration.md
 | 9. Reviewer wrapper `bin/ai-mimo-review` | ⛔ out of scope | 2026-09-23 | MiMo is the fourth INTERACTIVE client, not a formal reviewer or pipeline stage (ZCode pattern). |
 | 10. Doctor and machine verification surface | ✅ done | 2026-09-23 | `bin/ai-devops` doctor MiMo section (warn-only on Desktop absence); `ai-mimo doctor` (14/14 fixture tests). `tests/test-ai-devops-doctor-install-state.sh` PASS. |
 | 11. Documentation (README, task router, model setup, config inventory) | ✅ done | 2026-09-23 | `docs/model-setup.md` MiMo section; `docs/config-inventory.md` MiMoCode-home row; `AGENTS.md` task-router row; `README.md` mention. `tests/test-markdown-links.sh` PASS (377 files). |
-| 12. Land: tests green, merge, install, verify | ⬜ open | — | Offline suites green (ai-mimo 14/14, configure-mimocode 23/23, adopt-globals, install-windows, installer-parity, client-globals, machine-tools, doctor-install-state, markdown-links, context-audit, blocker-watch). Merge through the queue; leftover-proof issue if live install is not proven in the landing session. |
+| 12. Land: tests green, merge, install, verify | ⬜ open | — | Offline suites green (ai-mimo 14/14, configure-mimocode 23/23, adopt-globals, install-windows, installer-parity, client-globals, machine-tools, doctor-install-state, markdown-links, context-audit, blocker-watch). Merge through the queue; if live install is not proven in the landing session, leave a `- [ ] live proof` checklist item on the same issue (leftover-proof **issues** superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)). |
 
 **Fresh-session starting point:** begin at the first ⬜ row. Re-read §§5–8 before changing any code, and re-read the phase heading before starting each phase.
 
@@ -220,7 +222,7 @@ file:line evidence and non-obvious discoveries:
 **Step 12. Land.**
 - Tests green (`tests/test-ai-mimo.sh`, `tests/test-configure-mimocode-mcps.ps1`, install/adopt fixture suites, `test-ai-devops-doctor*` if present).
 - Worktree branch → PR → merge queue → confirm `origin/main`.
-- Install on edge-dev from the merged commit (or open exactly one leftover-proof issue if live install cannot run in the landing session — **one unproven outcome per session**).
+- Install on edge-dev from the merged commit (or leave a `- [ ] live proof` checklist item on the same issue if live install cannot run in the landing session — **one unproven outcome per session**; leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 - BlockerWatch: add `mimo` harness entries in the same PR; first live wake is a separate live-proof if not done here.
 
 ## 10. Tests required
@@ -249,7 +251,7 @@ Register every new test in `config/ci-suite-manifest.json`.
 - Never write skills into `~/.agents/skills` for MiMo-managed installs.
 - Never start the Desktop GUI as a headless fallback.
 - Never pass `--yolo` / `--dangerously-skip-permissions` from caller input into `mimo run`.
-- One unproven outcome per session: if live `mimo run` is not proven in the landing session, open exactly one leftover-proof issue.
+- One unproven outcome per session: if live `mimo run` is not proven in the landing session, leave a `- [ ] live proof` checklist item on the same issue (leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 
 ## 12. Access and environment
 
@@ -268,8 +270,8 @@ Register every new test in `config/ci-suite-manifest.json`.
 - [ ] Offline tests green; ci-suite-manifest updated.
 - [ ] PR merged to `origin/main`; merge commit reported.
 - [ ] Docs updated; `ai-doc-reachability` PASS.
-- [ ] Either live install verified on edge-dev, **or** exactly one leftover-proof issue opened in the landing session.
-- [ ] BlockerWatch `mimo` keys present; live wake either proven or included in that one leftover-proof issue.
+- [ ] Either live install verified on edge-dev, **or** a `- [ ] live proof` checklist item left on the same issue in the landing session (leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
+- [ ] BlockerWatch `mimo` keys present; live wake either proven or included in that same-issue proof-gap checklist.
 
 **Risks:**
 
