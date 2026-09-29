@@ -8,14 +8,17 @@ name: Stuck-work watchdog
 # conductor on its open orchestrator-marker issue; never re-runs or merges.
 # Albert gets one daily "Stuck work - <date>" issue for items stuck > 90 min.
 #
-# Runs on a GitHub-hosted runner so none of Albert's three machines has to be
-# awake. Identity and allowance: the pop-ai-watchers GitHub App (its own
+# Scheduled from ai-blocker-watch (see `on:` below). Identity and allowance: the pop-ai-watchers GitHub App (its own
 # hourly allowance, bot login distinct from every session); the job token is
 # used only to re-run ai-devops jobs. One run costs about 20 API calls.
 # Rollback: disable this workflow.
 on:
-  schedule:
-    - cron: '7,22,37,52 * * * *'
+  # No `schedule:` on purpose: GitHub dropped most scheduled runs in this
+  # repository (hourly crons fired every 4-7 hours on 2026-09-28/29), and the
+  # first four 15-minute slots after this workflow merged never ran. The
+  # 15-minute cadence runs from ai-blocker-watch tick on fixer_on_host
+  # (config/blocker-watch.json, stuck_watchdog_*); this workflow stays for
+  # manual dry runs and manual live runs.
   workflow_dispatch:
     inputs:
       dry_run:
@@ -43,7 +46,7 @@ jobs:
         env:
           POP_AI_WATCHERS_KEY: ${{ secrets.POP_AI_WATCHERS_KEY }}
           RERUN_TOKEN: ${{ github.token }}
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'yes' || 'no' }}
+          DRY_RUN: ${{ inputs.dry_run && 'yes' || 'no' }}
         shell: bash
         run: |
           set -euo pipefail

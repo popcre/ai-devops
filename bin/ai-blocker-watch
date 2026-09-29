@@ -1100,6 +1100,35 @@ maybe_links(){
   if scan_due "$LAST_LINKS" "$(cfgd .links_interval_minutes 60)" "${1:-}"; then maintain_links 0; fi
 }
 
+# --- stuck-work watchdog trigger (popcre/ai-devops#1011) ---------------------
+# GitHub drops most scheduled runs in this repository (an hourly cron fired
+# every 4-7 hours on 2026-09-28/29), so the watchdog's 15-minute cadence is
+# driven from here: on fixer_on_host, every stuck_watchdog_interval_minutes, a
+# tick runs tools/stuck-work/watchdog.mjs as the pop-ai-watchers App (its own
+# allowance). Re-runs use this machine's gh login and happen at most once per
+# head SHA. About 15 API calls per run.
+stuck_watchdog_scan(){
+  [ "$(cfgd .stuck_watchdog_enabled false)" = true ] || return 0
+  local want me; want="$(cfgd .fixer_on_host '')"
+  me="$(hostname 2>/dev/null | tr '[:upper:]' '[:lower:]' | cut -d. -f1)"
+  [ -n "$want" ] && [ "$me" = "${want,,}" ] || return 0
+  local last="$HOME_DIR/last-stuck-watchdog"
+  [ "$DRY" = 1 ] || scan_due "$last" "$(cfgd .stuck_watchdog_interval_minutes 15)" || return 0
+  local script="$TOOL_ROOT/tools/stuck-work/watchdog.mjs" auth="$TOOL_ROOT/bin/ai-gh-app-auth" tok rerun="" log
+  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then script="${AI_BLOCKER_WATCH_TEST_STUCK_SCRIPT:-$script}"; auth="${AI_BLOCKER_WATCH_TEST_APP_AUTH:-$auth}"; fi
+  [ -f "$script" ] && command -v node >/dev/null 2>&1 || { note "stuck watchdog: node or $script missing"; FAILED=1; return 0; }
+  tok="$("$auth" token popcre 2>/dev/null)" || { note "stuck watchdog: no app token on this machine"; FAILED=1; return 0; }
+  [ "$DRY" = 1 ] || rerun="$("$GH" auth token 2>/dev/null || true)"
+  log="$LOGS/stuck-watchdog-$(date -u +%Y%m%dT%H%M%S).log"
+  local -a args=(--json "$HOME_DIR/stuck-report.json"); [ "$DRY" = 1 ] && args+=(--dry-run)
+  if GH_TOKEN="$tok" RERUN_TOKEN="$rerun" timeout 300 node "$script" "${args[@]}" >"$log" 2>&1; then
+    [ "$DRY" = 1 ] || now_iso > "$last"
+    note "stuck watchdog: $(grep -m1 '^Stuck-work watchdog' "$log" || echo ran) (log $log)"
+  else
+    note "stuck watchdog failed; log $log"; FAILED=1
+  fi
+}
+
 # --- fixer: stuck-PR fixer pickup (popcre/ai-devops#1011) --------------------
 # The stuck-work watchdog workflow opens one `stuck-fixer` issue per stuck
 # ai-devops pull request and labels it `ready-for-fixer`. On the ONE machine
@@ -1219,6 +1248,7 @@ cmd_tick(){
     [ "$(jq -r .state "$f")" = waiting ] || continue
     wake "$f"
   done
+  stuck_watchdog_scan
   fixer_scan
   [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
   if [ -n "$BW_TICK_RECEIPT_ID" ]; then
