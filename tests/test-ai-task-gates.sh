@@ -11,6 +11,8 @@ GATES="$ROOT/bin/ai-task-gates"
 CLASSIFY="$ROOT/tools/ci/classify-changes.sh"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
+LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export AI_TASK_GATES_DIR="$TMP/state"
@@ -22,6 +24,15 @@ command -v jq >/dev/null 2>&1 || { printf 'jq is required for this suite\n' >&2;
 # rc <expected> <dir> <args...> — run ai-task-gates in <dir> and compare status.
 rc(){ local want="$1" dir="$2" got; shift 2; ( cd "$dir" && "$GATES" "$@" ) >/dev/null 2>&1; got=$?; [ "$got" -eq "$want" ]; }
 out(){ local dir="$1"; shift; ( cd "$dir" && "$GATES" "$@" ) 2>&1; }
+
+# appr <dir> <action> [head] [overrides-jq] — mint an allocator-assigned AI
+# reviewer APPROVE record bound to the exact action, repository, and head
+# (#996: no human approves; an independent AI reviewer does).
+appr(){
+  local dir="$1" action="$2" head="${3:-}" extra="${4:-.}" mode=final-check
+  case "$action" in review|pr-wait|code-only-review) mode=plan-review ;; esac
+  mint_reviewer_approval "$TMP" "$dir" "$mode" "$head" "$extra"
+}
 
 # newrepo <path> [origin-identity] — a repository with one commit on main.
 newrepo(){
@@ -175,56 +186,56 @@ class_report="$(make_approved_report "$TMP/class-candidate" "$class_target")"
 check 'separate reviewer task can pass the real review preflight' \
   "rc 0 '$TMP/class-candidate-reviewed' check --before review"
 check 'stale target cannot issue install authority' \
-  "rc 3 '$TMP/class-candidate' authorize-install --target-head \"\$(git -C '$TMP/class' rev-parse HEAD)\" --installed-checkout '$TMP/class' --installed-launcher '$class_launcher' --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install --target-head \"\$(git -C '$TMP/class' rev-parse HEAD)\" --installed-checkout '$TMP/class' --installed-launcher '$class_launcher' --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 check 'an unlanded candidate cannot claim the toolkit installation route' \
-  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 git -C "$TMP/class" update-ref refs/remotes/origin/main "$class_target"
-check 'reviewer-safety installation needs an explicit owner request' \
+check 'reviewer-safety installation needs an assigned AI reviewer approval' \
   "rc 3 '$TMP/class-candidate' check --before deploy $class_proof"
 check 'reviewer-safety installation keeps independent review and routing proof' \
   "out '$TMP/class-candidate' explain --json | jq -e '.required_gates | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
-check 'reviewer-safety deploy remains forbidden even with owner request' \
-  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --owner-request 'Albert requested install on 916'"
+check 'reviewer-safety deploy remains forbidden even with reviewer approval' \
+  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 class_state="$(state_file_for "$TMP/class-candidate")"
 jq '.declared_class="reviewer-safety"' "$class_state" > "$class_state.tmp" && mv "$class_state.tmp" "$class_state"
 check 'a protected task cannot issue installation authority' \
-  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 jq '.declared_class="installation"' "$class_state" > "$class_state.tmp" && mv "$class_state.tmp" "$class_state"
 check 'a separate installation task can issue exact reviewed authority' \
-  "rc 0 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 0 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 check 'the issued authority binds old and target commits' \
-  "jq -e --arg old \"\$(git -C '$TMP/class' rev-parse HEAD)\" --arg target '$class_target' '.installed_head==\$old and .target_head==\$target and .owner_request!=\"\"' '$AI_TASK_GATES_DIR/install-authorizations/$class_target.json'"
+  "jq -e --arg old \"\$(git -C '$TMP/class' rev-parse HEAD)\" --arg target '$class_target' '.installed_head==\$old and .target_head==\$target and .reviewer_approval!=\"\"' '$AI_TASK_GATES_DIR/install-authorizations/$class_target.json'"
 check 'authorization cannot be issued twice for one target' \
-  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 rm -f "$AI_TASK_GATES_DIR/install-authorizations/$class_target.json"
 cp "$class_report" "$TMP/class-report.backup"
 printf '\nchanged report\n' >> "$class_report"
 check 'tampered exact-head review cannot issue install authority' \
-  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 mv "$TMP/class-report.backup" "$class_report"
 class_lifecycle="$(find "$AI_REVIEW_LIFECYCLE_DIR" -name test.json -type f | head -1)"
 mv "$class_lifecycle" "$class_lifecycle.held"
 check 'a report without completed lifecycle evidence cannot issue install authority' \
-  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 mv "$class_lifecycle.held" "$class_lifecycle"
 printf 'uncommitted\n' > "$TMP/class-candidate/stray.txt"
 check 'the exact candidate target refuses uncommitted files' \
-  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 rm -f "$TMP/class-candidate/stray.txt"
 rm -f "$class_launcher"
 ln -s "$TMP/class-candidate/bin/ai-task-gates" "$class_launcher"
 check 'the installed launcher cannot point into the candidate checkout' \
-  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 rm -f "$class_launcher"
 ln -s "$TMP/class/bin/ai-task-gates" "$class_launcher"
 newrepo "$TMP/unrelated-installed"
 check 'a foreign installed checkout cannot be claimed as the same repository' \
-  "rc 3 '$TMP/class-candidate' authorize-install --target-head '$class_target' --installed-checkout '$TMP/unrelated-installed' --installed-launcher '$class_launcher' --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install --target-head '$class_target' --installed-checkout '$TMP/unrelated-installed' --installed-launcher '$class_launcher' --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 git -C "$TMP/class" worktree add -q --detach "$TMP/class-fake-installed" HEAD
 rm "$class_launcher"
 ln -s "$TMP/class-fake-installed/bin/ai-task-gates" "$class_launcher"
 check 'a linked sibling cannot impersonate the durable installed checkout' \
-  "rc 3 '$TMP/class-candidate' authorize-install --target-head '$class_target' --installed-checkout '$TMP/class-fake-installed' --installed-launcher '$class_launcher' --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install --target-head '$class_target' --installed-checkout '$TMP/class-fake-installed' --installed-launcher '$class_launcher' --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 rm "$class_launcher"
 ln -s "$TMP/class/bin/ai-task-gates" "$class_launcher"
 if ! command -v cygpath >/dev/null 2>&1; then
@@ -251,15 +262,15 @@ set "HOME=$USERPROFILE"
 "$PROGRAMFILES\Git\bin\bash.exe" "$windows_source" %*
 EOF
 check 'managed Windows launcher resolves to the installed checkout' \
-  "rc 0 '$TMP/class-candidate' authorize-install --target-head '$class_target' --installed-checkout '$TMP/class' --installed-launcher '$class_launcher' --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 0 '$TMP/class-candidate' authorize-install --target-head '$class_target' --installed-checkout '$TMP/class' --installed-launcher '$class_launcher' --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 rm -f "$AI_TASK_GATES_DIR/install-authorizations/$class_target.json"
 sed -i 's/\\Git\\bin\\bash.exe/\\Other\\bash.exe/' "$class_launcher.cmd"
 check 'an update rejects a tampered Windows command route' \
-  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 sed -i 's/\\Other\\bash.exe/\\Git\\bin\\bash.exe/' "$class_launcher.cmd"
 sed -i 's/^set "HOME=.*/set "HOME=elsewhere"/' "$class_launcher.cmd"
 check 'an update rejects a tampered Windows home route' \
-  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 sed -i "s|^set \"HOME=.*|set \"HOME=$USERPROFILE\"|" "$class_launcher.cmd"
 newrepo "$TMP/legacy-primary"
 mkdir -p "$TMP/legacy-primary/.ai-devops" "$TMP/legacy-primary/bin"
@@ -287,7 +298,7 @@ rem Managed by ai-devops install-machine-tools.ps1.
 set "HOME=$USERPROFILE"
 "$PROGRAMFILES\Git\bin\bash.exe" "$legacy_source" %*
 EOF
-legacy_proof="--target-head $legacy_target --installed-checkout $TMP/legacy-primary --installed-launcher $class_launcher --review-report $legacy_report --owner-request Albert-approved-edge-dev-install"
+legacy_proof="--target-head $legacy_target --installed-checkout $TMP/legacy-primary --installed-launcher $class_launcher --review-report $legacy_report --reviewer-approval $(appr "$TMP/legacy-primary" deploy "$legacy_target")"
 check 'same-commit legacy migration requires explicit reviewed mode' \
   "rc 3 '$TMP/legacy-install' authorize-install $legacy_proof"
 check 'same-commit legacy migration binds managed launcher and source bytes' \
@@ -311,7 +322,7 @@ git -C "$TMP/first-primary" update-ref refs/remotes/origin/main "$first_target"
 git -C "$TMP/first-primary" worktree add -q --detach "$TMP/first-install" "$first_target"
 ( cd "$TMP/first-install" && "$GATES" start --class installation ) >/dev/null
 first_report="$(make_approved_report "$TMP/first-install" "$first_target" first-managed-install)"
-first_proof="--target-head $first_target --installed-checkout $TMP/first-primary --installed-launcher $class_launcher --review-report $first_report --owner-request Albert-approved-edge-dev-first-install"
+first_proof="--target-head $first_target --installed-checkout $TMP/first-primary --installed-launcher $class_launcher --review-report $first_report --reviewer-approval $(appr "$TMP/first-primary" deploy "$first_target")"
 check 'first managed installation needs explicit reviewed mode' \
   "rc 3 '$TMP/first-install' authorize-install $first_proof"
 printf '# Managed by ai-devops install-machine-tools.ps1.\n' > "$(dirname "$class_launcher")/retired-tool"
@@ -326,7 +337,7 @@ rm -f "$AI_TASK_GATES_DIR/install-authorizations/$first_target.json"
 retired_launcher="$(dirname "$class_launcher")/retired-tool"
 printf '# Managed by ai-devops install-machine-tools.ps1.\n' > "$retired_launcher"
 recovery_report="$(make_approved_report "$TMP/first-install" "$first_target" partial-managed-launcher-recovery)"
-recovery_proof="--target-head $first_target --installed-checkout $TMP/first-primary --installed-launcher $class_launcher --review-report $recovery_report --owner-request Albert-approved-edge-dev-recovery"
+recovery_proof="--target-head $first_target --installed-checkout $TMP/first-primary --installed-launcher $class_launcher --review-report $recovery_report --reviewer-approval $(appr "$TMP/first-primary" deploy "$first_target")"
 check 'missing gate pair with sibling launcher needs reviewed recovery mode' \
   "rc 3 '$TMP/first-install' authorize-install $recovery_proof --first-install"
 check 'reviewed recovery binds the full managed launcher inventory' \
@@ -381,12 +392,12 @@ ln -s "$TMP/class/bin/ai-task-gates" "$class_launcher"
 mkdir -p "$TMP/class-candidate/services/api" "$TMP/class-candidate/infra"
 printf 'FROM scratch\n' > "$TMP/class-candidate/services/api/Dockerfile"
 check 'mixed deployment and reviewer release cannot use the narrow route' \
-  "rc 3 '$TMP/class-candidate' check --before deploy --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' check --before deploy --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 rm -f "$TMP/class-candidate/services/api/Dockerfile"
 rmdir "$TMP/class-candidate/services/api" "$TMP/class-candidate/services"
 printf 'resource \"x\" \"y\" {}\n' > "$TMP/class-candidate/infra/main.tf"
 check 'mixed infrastructure and reviewer release cannot use the narrow route' \
-  "rc 3 '$TMP/class-candidate' check --before deploy --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/class-candidate' check --before deploy --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 rm -f "$TMP/class-candidate/infra/main.tf"
 rmdir "$TMP/class-candidate/infra"
 git -C "$TMP/class-candidate" rm -q bin/ai-review
@@ -401,12 +412,12 @@ cp "$ROOT/.ai-devops/task-gates.json" "$TMP/foreign-reviewer/.ai-devops/task-gat
 printf '#!/bin/sh\n' > "$TMP/foreign-reviewer/bin/ai-review"
 ( cd "$TMP/foreign-reviewer" && "$GATES" start --class reviewer-safety ) >/dev/null
 check 'another repository cannot use the toolkit installation route' \
-  "rc 3 '$TMP/foreign-reviewer' check --before deploy --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/foreign-reviewer' check --before deploy --reviewer-approval \"\$(appr '$TMP/foreign-reviewer' deploy)\""
 
 for foreign_url in https://gitlab.com/popcre/ai-devops.git git@gitlab.com:popcre/ai-devops.git; do
   git -C "$TMP/foreign-reviewer" remote set-url origin "$foreign_url"
   check 'foreign host with the same owner and name cannot use the toolkit route' \
-    "rc 3 '$TMP/foreign-reviewer' check --before deploy --owner-request 'Albert requested install on 916'"
+    "rc 3 '$TMP/foreign-reviewer' check --before deploy --reviewer-approval \"\$(appr '$TMP/foreign-reviewer' deploy)\""
 done
 
 newrepo "$TMP/deleted-reviewer"
@@ -432,19 +443,19 @@ deleted_proof="--target-head $deleted_target --installed-checkout $TMP/deleted-r
 check 'deployment sees a reviewer path deleted after the recorded host HEAD' \
   "out '$TMP/deleted-candidate' explain --json --base '$installed_head' | jq -e '.changes[] | select(.path==\"bin/ai-review\" and .class==\"reviewer-safety\")'"
 check 'a deleted reviewer path still uses the protected installation route' \
-  "rc 0 '$TMP/deleted-candidate' authorize-install $deleted_proof --review-report '$deleted_report' --owner-request 'Albert requested install on 916'"
+  "rc 0 '$TMP/deleted-candidate' authorize-install $deleted_proof --review-report '$deleted_report' --reviewer-approval \"\$(appr '$TMP/deleted-candidate' deploy)\""
 rm -f "$AI_TASK_GATES_DIR/install-authorizations/$deleted_target.json"
 printf 'local edit\n' >> "$TMP/deleted-reviewer/bin/ai-task-gates"
 check 'preflight refuses local edits in the installed checkout' \
-  "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --reviewer-approval \"\$(appr '$TMP/deleted-candidate' deploy)\""
 git -C "$TMP/deleted-reviewer" checkout -q -- bin/ai-task-gates
 check 'a caller cannot replace the recorded host HEAD with a newer base' \
-  "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --base HEAD --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --base HEAD --reviewer-approval \"\$(appr '$TMP/deleted-candidate' deploy)\""
 check 'preflight rejects a wrong target commit' \
-  "rc 3 '$TMP/deleted-candidate' check --before deploy --target-head '$installed_head' --installed-checkout '$TMP/deleted-reviewer' --installed-launcher '$class_launcher' --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/deleted-candidate' check --before deploy --target-head '$installed_head' --installed-checkout '$TMP/deleted-reviewer' --installed-launcher '$class_launcher' --reviewer-approval \"\$(appr '$TMP/deleted-candidate' deploy)\""
 git -C "$TMP/deleted-reviewer" merge --ff-only -q "$deleted_target"
 check 'preflight rejects an installed checkout that already moved' \
-  "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --reviewer-approval \"\$(appr '$TMP/deleted-candidate' deploy)\""
 export HOME="$class_saved_home" PATH="$class_saved_path"
 
 newrepo "$TMP/empty-release"
@@ -456,10 +467,10 @@ git -C "$TMP/empty-release" commit -qm 'current source only'
 git -C "$TMP/empty-release" update-ref refs/remotes/origin/main HEAD
 ( cd "$TMP/empty-release" && "$GATES" start --class reviewer-safety ) >/dev/null
 check 'an empty reviewer release cannot be installed after a late start' \
-  "rc 3 '$TMP/empty-release' check --before deploy --owner-request 'Albert requested install on 916'"
+  "rc 3 '$TMP/empty-release' check --before deploy --reviewer-approval \"\$(appr '$TMP/empty-release' deploy)\""
 ( cd "$TMP/empty-release" && "$GATES" start --class installation ) >/dev/null
 check 'late declaration cannot hide an unreceipted installed source' \
-  "rc 3 '$TMP/empty-release' check --before deploy --owner-request 'Albert requested a first install'"
+  "rc 3 '$TMP/empty-release' check --before deploy --reviewer-approval \"\$(appr '$TMP/empty-release' deploy)\""
 mkdir -p "$TMP/empty-home/.local/bin" "$TMP/fake-os"
 cat > "$TMP/fake-os/uname" <<'EOF'
 #!/bin/sh
@@ -470,10 +481,10 @@ saved_home="$HOME"; saved_path="$PATH"; saved_programfiles="${PROGRAMFILES:-}"; 
 export HOME="$TMP/empty-home" PATH="$TMP/fake-os:$TMP/fake-cygpath:$PATH" USERPROFILE="$TMP/empty-home"
 export PROGRAMFILES='C:\Program Files'
 empty_launcher="$HOME/.local/bin/ai-task-gates"
-empty_proof="--installed-checkout $TMP/empty-release --installed-launcher $empty_launcher --owner-request 'Albert requested a first install'"
+empty_proof="--installed-checkout $TMP/empty-release --installed-launcher $empty_launcher --reviewer-approval $(appr "$TMP/empty-release" deploy)"
 check 'first install requires an explicit first-install claim' \
   "rc 3 '$TMP/empty-release' check --before deploy $empty_proof"
-check 'first-time toolkit installation retains the owner-authorized route' \
+check 'first-time toolkit installation retains the reviewer-approved route' \
   "rc 0 '$TMP/empty-release' check --before deploy --first-install $empty_proof"
 empty_sha="$(git -C "$TMP/empty-release" rev-parse HEAD)"
 empty_hash="$(sha256sum "$TMP/empty-release/bin/ai-task-gates" | cut -d' ' -f1)"
@@ -573,7 +584,7 @@ redirected_target="$(git -C "$TMP/redirected-candidate" rev-parse HEAD)"
 git -C "$TMP/redirected-toolkit" update-ref refs/remotes/origin/main "$redirected_target"
 redirected_report="$(make_approved_report "$TMP/redirected-candidate" "$redirected_target")"
 check 'the documented u2giants GitHub origin retains toolkit install route' \
-  "rc 0 '$TMP/redirected-candidate' authorize-install --target-head '$redirected_target' --installed-checkout '$TMP/redirected-toolkit' --installed-launcher '$class_launcher' --review-report '$redirected_report' --owner-request 'Albert requested install on 916'"
+  "rc 0 '$TMP/redirected-candidate' authorize-install --target-head '$redirected_target' --installed-checkout '$TMP/redirected-toolkit' --installed-launcher '$class_launcher' --review-report '$redirected_report' --reviewer-approval \"\$(appr '$TMP/redirected-candidate' deploy)\""
 export HOME="$class_saved_home" PATH="$class_saved_path"
 
 newrepo "$TMP/mixed-explain"
@@ -589,10 +600,10 @@ check 'explain includes reviewer proofs inside a stronger mixed class' \
 
 printf '#!/usr/bin/env bash\n' > "$TMP/class/bin/install-fixture"
 ( cd "$TMP/class" && "$GATES" start --class installation ) >/dev/null
-check 'installation refuses deployment without an owner request' \
+check 'installation refuses deployment without a reviewer approval' \
   "rc 3 '$TMP/class' check --before deploy"
-check 'an explicit owner request preserves the supported installation path' \
-  "rc 0 '$TMP/class' check --before deploy --owner-request 'Albert requested installation'"
+check 'an assigned AI reviewer approval preserves the supported installation path' \
+  "rc 0 '$TMP/class' check --before deploy --reviewer-approval \"\$(appr '$TMP/class' deploy)\""
 rm -f "$TMP/class/bin/install-fixture"
 jq '.paths += [{"glob":"bin/ai-review","class":"prose"}]' \
   "$TMP/class/.ai-devops/task-gates.json" > "$TMP/class/.ai-devops/task-gates.tmp"
@@ -675,7 +686,7 @@ check 'no changes at all allows the action' "rc 0 '$TMP/clean' check --before sh
 check 'no changes and no declaration fail closed before production' "rc 4 '$TMP/clean' check --before production"
 ( cd "$TMP/clean" && "$GATES" start --class production ) >/dev/null
 check 'a declared production task retains its production gate with no file change' \
-  "out '$TMP/clean' explain --json | jq -e '.observed_class==\"none\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-authorization\")!=null)'"
+  "out '$TMP/clean' explain --json | jq -e '.observed_class==\"none\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
 check 'a declared production task may enter its guarded production path' \
   "rc 0 '$TMP/clean' check --before production"
 
@@ -731,21 +742,43 @@ newrepo "$TMP/gate"
 printf 'x\n' > "$TMP/gate/note.md"
 check 'a paid review is refused for a documentation change' "rc 3 '$TMP/gate' check --before review"
 check 'a long PR wait is refused for a documentation change' "rc 3 '$TMP/gate' check --before pr-wait"
-check 'an owner request lifts a non-protected forbidden action' \
-  "rc 0 '$TMP/gate' check --before review --owner-request 'Albert asked for a review'"
-check 'the owner request is recorded in the intent state' \
-  "out '$TMP/gate' status | jq -e '[.overrides[].kind]|index(\"owner-request\")!=null'"
+check 'an assigned AI reviewer approval lifts a non-protected forbidden action' \
+  "rc 0 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review)\""
+check 'an approval whose reviewer is the implementing engine is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.implementer_engine=\"grok\"')\""
+check 'a review with no recorded implementing engine is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.implementer_engine=null')\""
+check 'a review with no recorded mode is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.review_mode=null')\""
+check 'an approval bound to another head is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review 0000000000000000000000000000000000000000)\""
+check 'a REJECT verdict is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.verdict=\"REJECT\"')\""
+check 'a stale review is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.stale=true')\""
+check 'a review of another source digest is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.source_digest=\"0\"')\""
+check 'a review recorded for another repository is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review '' '.repository_key=\"other\"')\""
+check 'a report with no lifecycle row is refused' \
+  "rc 3 '$TMP/gate' check --before review --reviewer-approval /etc/hostname"
+check 'an edited report no longer matches its lifecycle row' \
+  "f=\"\$(appr '$TMP/gate' review)\"; printf 'x\\n' >> \"\$f\"; rc 3 '$TMP/gate' check --before review --reviewer-approval \"\$f\""
+check 'a plan-review cannot authorize a live action' \
+  "rc 3 '$TMP/gate' check --before deploy --reviewer-approval \"\$(mint_reviewer_approval '$TMP' '$TMP/gate' plan-review)\""
+check 'the reviewer approval is recorded in the intent state' \
+  "out '$TMP/gate' status | jq -e '[.overrides[].kind]|index(\"reviewer-approval\")!=null'"
 ( cd "$TMP/gate" && "$GATES" start --class production ) >/dev/null
 printf 'x\n' > "$TMP/gate/note.md"
 check 'a stronger declared class supplies the effective gates' \
-  "out '$TMP/gate' explain --json | jq -e '.observed_class==\"prose\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-authorization\")!=null)'"
+  "out '$TMP/gate' explain --json | jq -e '.observed_class==\"prose\" and .effective_class==\"production\" and (.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null)'"
 check 'a stronger declared class does not drop observed-class required proof' \
-  "out '$TMP/gate' explain --json | jq -e '.required_gates|index(\"exact-resource-and-action-authorization\")!=null'"
+  "out '$TMP/gate' explain --json | jq -e '.required_gates|index(\"exact-resource-and-action-ai-reviewer-approval\")!=null'"
 rm -f "$TMP/gate/note.md"
 ( cd "$TMP/gate" && "$GATES" start --class prose ) >/dev/null
 mkdir -p "$TMP/gate/bin"; printf '#!/bin/sh\n' > "$TMP/gate/bin/ai-review-lifecycle"
-check 'a protected class cannot be owner-requested past a forbidden action' \
-  "rc 3 '$TMP/gate' check --before production --owner-request 'please'"
+check 'a protected class cannot be reviewer-approved past a forbidden action' \
+  "rc 3 '$TMP/gate' check --before production --reviewer-approval \"\$(appr '$TMP/gate' production)\""
 rm -rf "$TMP/gate/bin"
 printf 'select 1;\n' > "$TMP/gate/x.sql"
 check 'shared-db work is refused a deployment' "rc 3 '$TMP/gate' check --before deploy"
@@ -785,9 +818,9 @@ check 'a higher-ranked declaration cannot outrank licensed rows' \
 check 'and the refusal still names the protected class' \
   "out '$TMP/lsd' check --before review | grep -Fq 'private-evidence'"
 check 'the protected stop does not claim an owner resource unlock' \
-  "! out '$TMP/lsd' check --before review --owner-request 'please' | grep -Fq 'exact resource and action'"
-check 'the protected stop says there is no owner-request path' \
-  "out '$TMP/lsd' check --before review --owner-request 'please' | grep -Fq 'no owner-request'"
+  "! out '$TMP/lsd' check --before review --reviewer-approval \"\$(appr '$TMP/lsd' review)\" | grep -Fq 'exact resource and action'"
+check 'the protected stop says there is no reviewer-approval path' \
+  "out '$TMP/lsd' check --before review --reviewer-approval \"\$(appr '$TMP/lsd' review)\" | grep -Fq 'no reviewer-approval'"
 rm -f "$TMP/lsd/warner-bros/assets.csv"
 
 printf 'private code review keeps evidence and mutation boundaries\n'
@@ -798,19 +831,19 @@ cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
 {"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]},"private-tooling":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]}}}
 EOF
 ( cd "$TMP/private" && "$GATES" start --class private-tooling ) >/dev/null
-check 'the sealed route needs no owner request or acknowledgement' \
+check 'the sealed route needs no reviewer approval or acknowledgement' \
   "rc 0 '$TMP/private' check --before code-only-review"
 check 'the formal review stays forbidden on the same change set' \
   "rc 3 '$TMP/private' check --before review"
-check 'and that refusal still has no owner-request path' \
-  "out '$TMP/private' check --before review --owner-request 'please' | grep -Fq 'no owner-request'"
+check 'and that refusal still has no reviewer-approval path' \
+  "out '$TMP/private' check --before review --reviewer-approval \"\$(appr '$TMP/private' review)\" | grep -Fq 'no reviewer-approval'"
 check 'the sealed route retains central and consumer evidence requirements' \
   "out '$TMP/private' explain --json | jq -e '.effective_class==\"private-evidence\" and ([\"privacy-classification\",\"no-raw-content-read\",\"licensed-row-containment\",\"synthetic-fixtures-only\"] - .required_gates | length==0)'"
 check 'private-evidence remains protected at its existing rank' \
   "jq -e '.change_classes[\"private-evidence\"] | .protected==true and .rank==90' '$AI_TASK_GATES_FILE'"
 for action in deploy database infrastructure production; do
   check "private code review cannot authorize $action even with owner override" \
-    "rc 3 '$TMP/private' check --before '$action' --owner-request 'review requested' --acknowledge 'in scope'"
+    "rc 3 '$TMP/private' check --before '$action' --reviewer-approval \"\$(appr '$TMP/private' '$action')\" --acknowledge 'in scope'"
 done
 # A declaration on the weaker tooling class must not open the route for a
 # sticky private-evidence change set: the opt-in is proven by the effective
@@ -836,7 +869,7 @@ cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
 {"schema_version":1,"gates":{"private-evidence":{"forbidden_actions":["review"]}}}
 EOF
 check 'an explicit consumer review prohibition remains binding' \
-  "rc 3 '$TMP/private' check --before review --owner-request 'review requested'"
+  "rc 3 '$TMP/private' check --before review --reviewer-approval \"\$(appr '$TMP/private' review)\""
 check 'the sealed route closes once the fixtures declaration is gone' \
   "rc 3 '$TMP/private' check --before code-only-review"
 check 'and the stop names the missing fixtures boundary' \
@@ -978,7 +1011,7 @@ check 'an action-gate naming an undeclared class fails closed' \
 
 # A flag given without its value must fail fast, never spin: on 2026-09-17 an
 # orphaned `start --class` burned 11 CPU-hours and starved the local GLM server.
-for args in 'start --class' 'start --class prose --reason' 'start --base' 'check --before' 'check --acknowledge' 'check --owner-request' 'check --base'; do
+for args in 'start --class' 'start --class prose --reason' 'start --base' 'check --before' 'check --acknowledge' 'check --reviewer-approval' 'check --base'; do
   check "missing value for '$args' fails fast instead of looping" \
     "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
 done

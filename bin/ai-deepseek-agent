@@ -379,7 +379,27 @@ if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ "$SUBCMD" = store-key ]; then
     )
   else
     command -v flock >/dev/null 2>&1 || { echo 'Error: flock is required for serialized DeepSeek key refresh.' >&2; rm -f "$DEEPSEEK_REF_FILE"; exit 1; }
-    ( export OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_TOKEN"; exec flock --close -w 120 "$CFG_DIR/op-refresh.lock" /usr/bin/env -u BASH_ENV -u ENV "$OP_BIN" run --env-file "$DEEPSEEK_REF_FILE" -- "$BASH_EXE" --noprofile --norc -c "$DEEPSEEK_CREDENTIAL_BOUNDARY" deepseek-credential-boundary "$0" "$SUBCMD" "$@" )
+    ds_lock_doctor() { # sweep this toolkit's own stuck holders via ai-lock-doctor (#1002)
+      local doctor
+      doctor="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/ai-lock-doctor"
+      [ -x "$doctor" ] || doctor="$(command -v ai-lock-doctor 2>/dev/null || true)"
+      [ -n "$doctor" ] || return 0
+      "$doctor" --recover --older-than 120 "$CFG_DIR/op-refresh.lock" || true
+    }
+    ds_locked_reexec() {
+      flock --close -E 87 -w 120 "$CFG_DIR/op-refresh.lock" /usr/bin/env -u BASH_ENV -u ENV "$OP_BIN" run --env-file "$DEEPSEEK_REF_FILE" -- "$BASH_EXE" --noprofile --norc -c "$DEEPSEEK_CREDENTIAL_BOUNDARY" deepseek-credential-boundary "$0" "$SUBCMD" "$@"
+    }
+    (
+      export OP_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_TOKEN"
+      ds_locked_reexec "$@" && exit $?
+      reexec_rc=$?
+      # Exit 87 means the wait timed out on contention; any other failure is
+      # the command's own error: no sweep, no retry, original status kept.
+      # On real contention the doctor runs once, then exactly one retry (#1002).
+      [ "$reexec_rc" -eq 87 ] || exit "$reexec_rc"
+      ds_lock_doctor
+      ds_locked_reexec "$@"
+    )
   fi
   REEXEC_RC=$?; set -e; rm -f "$DEEPSEEK_REF_FILE"; exit "$REEXEC_RC"
 fi

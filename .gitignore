@@ -22,6 +22,11 @@ id_ed25519
 !bin/ai-private-config
 !bin/ai-private-config.cmd
 !tests/test-ai-private-config.sh
+# Per-suite CI metadata for public "private"-named suites: kind, measured
+# seconds and section membership only (#1001). No private values exist in them.
+!config/ci-suites/test-ai-private-config.sh.json
+!config/ci-suites/test-build-private-memory-hub.ps1.json
+!config/ci-suites/test-windows-private-file.ps1.json
 
 # Memory notes (memory/**/*.md) document things *about* credentials — incident
 # records, access paths, rotation to-dos — so their filenames routinely contain

@@ -513,11 +513,21 @@ if [ "$IDENTITY_REQUESTED" = 1 ] && [ "$IDENTITY_VERIFIED" = 1 ] && [ "$credenti
   fi
 fi
 probe_quota(){
-  local q bucket remaining limit reset stamp keys
+  local q bucket remaining limit reset stamp keys context_helper access_context=''
   stamp="$(now)"
+  # The local helper reuses the already verified identity cache. It reads the
+  # active token only through a pipe and makes no GitHub API request. A failed
+  # verification leaves this overview unattributed instead of guessing from a
+  # PAT-grouped quota context or a principal shared by several credentials.
+  if [ "$MEASURE_READY" = 1 ] && [ "$IDENTITY_VERIFIED" = 1 ]; then
+    context_helper="$(dirname "$self")/../tools/github-requests/pr-status-context"
+    if [ -x "$context_helper" ]; then
+      access_context="$(AI_GH_STATE_DIR="$STATE" AI_GH_REAL_GH="$REAL" GH_HOST="$API_HOST" "$context_helper" 2>/dev/null || true)"
+    fi
+  fi
   q="$(timeout "$PROBE_TIMEOUT" "$REAL" api rate_limit "${PROBE_HOST[@]}" --jq "$QUOTA_FILTER" 2>/dev/null | tr -d '\r')"
   if [ "$MEASURE_READY" = 1 ]; then
-    gh_measure_quota_rows "$q" || say "request measurement unavailable: quota snapshot not saved"
+    gh_measure_quota_rows "$q" "$access_context" || say "request measurement unavailable: quota snapshot not saved"
   fi
   # Missing/malformed resources are explicitly unknown, not healthy or zero.
   keys="$(resource_keys)"

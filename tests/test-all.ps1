@@ -142,6 +142,10 @@ if ($runPowerShell) {
           $path -match '^HANDOFF\.d/' -or $path -match '^docs/' -or $path -match '^tests/verification/') {
         continue
       }
+      # A Bash suite's own per-suite manifest file (#1001) can only affect the
+      # Bash lane; a PowerShell suite's file and the shared global manifest
+      # still force the full PowerShell run.
+      if ($path -match '^config/ci-suites/[^/]+\.sh\.json$') { continue }
       if ($path -match '\.(ps1|psm1|psd1)$' -or
           $path -match '^bin/.*\.ps1$' -or
           $path -match '^tests/.*\.ps1$' -or

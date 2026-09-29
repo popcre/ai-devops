@@ -201,9 +201,20 @@ check "no provider preflight ran for the refused review" "[ ! -s '$GATE_LOG' ]"
 check "no lifecycle state was created for the refused review" \
   "[ -z \"\$(find '$AI_REVIEW_LIFECYCLE_DIR/runs' -type f -name 'gate-blocked.json' -print -quit 2>/dev/null)\" ]"
 
-GATE_STATE="$(gated_begin gate-owner --owner-request 'Albert asked for a review of the wording')"
-check "an owner-requested review still runs the full gates" "[ -f \"\$GATE_STATE\" ]"
-check "the owner-requested review ran its provider preflight" "grep -q '^check grok ' '$GATE_LOG'"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
+LIB_REVIEWER_APPROVAL_BIN="$REPO_ROOT/bin"
+appr_file(){ mint_reviewer_approval "$TMP" "$1" plan-review; }
+GATE_STATE="$(gated_begin gate-owner --reviewer-approval "$(appr_file "$GR" review "$REPO_ROOT/bin/ai-task-gates")")"
+check "a reviewer-approved review still runs the full gates" "[ -f \"\$GATE_STATE\" ]"
+check "the reviewer-approved review ran its provider preflight" "grep -q '^check grok ' '$GATE_LOG'"
+REC_STATE="$( cd "$GR" && AI_REVIEW_GATE_MODE=plan-review AI_REVIEW_IMPLEMENTER=claude AI_TASK_GATES_MODE=standard AI_TEST_PREFLIGHT_LOG="$GATE_LOG" "$SCRIPT" begin --provider grok --repo "$GR" --run-id gate-recorded --caller codex )"
+check "begin records the review mode and implementing engine for gate independence" \
+  "jq -e '.review_mode==\"plan-review\" and .implementer_engine==\"claude\" and .caller==\"codex\"' \"\$REC_STATE\""
+REC_REPORT="$TMP/grok-plan-review-gate-recorded.md"
+{ printf '# grok plan review\n\n'; for n in 1 2 3 4 5 6; do printf 'The documentation change is accurate, scoped, and consistent with the surrounding contract; finding %s is none.\n' "$n"; done; printf '\n## Verdict\nAPPROVE\n'; } > "$REC_REPORT"
+"$SCRIPT" finish --state "$REC_STATE" --verdict APPROVE --report "$REC_REPORT" --elapsed 5 >/dev/null 2>&1
+check "a finished lifecycle APPROVE lifts the forbidden review for its exact head end to end" \
+  "( cd '$GR' && AI_REVIEW_LIFECYCLE_DIR='$AI_REVIEW_LIFECYCLE_DIR' '$REPO_ROOT/bin/ai-task-gates' check --before review --reviewer-approval '$REC_REPORT' )"
 
 printf 'select 1;\n' > "$GR/migration.sql"
 GATE_OUT2="$(gated_begin gate-escalated 2>&1)"; GATE_RC2=$?
@@ -212,8 +223,8 @@ check "the refusal names the file that escalated the class" \
   "printf '%s' \"\$GATE_OUT2\" | grep -q migration.sql"
 rm -f "$GR/migration.sql"
 
-# The wrappers call `begin` for every mode and cannot see the mode or Albert's
-# request, so `bin/ai-review` hands both on. These cases run the real front door
+# The wrappers call `begin` for every mode and cannot see the mode or the reviewer
+# approval, so `bin/ai-review` hands both on. These cases run the real front door
 # with a stub wrapper, which is the path the shipped code actually takes.
 FRONT="$REPO_ROOT/bin/ai-review"
 STUB="$TMP/stub-wrapper"
@@ -231,8 +242,8 @@ FRONT_PLAN="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=stand
 check "a plan review still runs, because it is what decides the class" \
   "[ '$PLAN_RC' -eq 0 ] && [ -f \"\$FRONT_PLAN\" ]"
 
-FRONT_OWNER="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --owner-request 'Albert asked for the wording review' 2>&1 )"; OWNER_RC=$?
-check "an owner request reaches the gate the lifecycle runs" \
+FRONT_OWNER="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --reviewer-approval "$(appr_file "$GR" review "$REPO_ROOT/bin/ai-task-gates")" 2>&1 )"; OWNER_RC=$?
+check "a reviewer approval reaches the gate the lifecycle runs" \
   "[ '$OWNER_RC' -eq 0 ] && [ -f \"\$FRONT_OWNER\" ]"
 
 # The private review front door must hand a provider only the explicitly

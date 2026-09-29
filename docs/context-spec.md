@@ -60,7 +60,7 @@ contract; `tools/ci/validate-task-gates.py` enforces it. A repository may ship
 its own `.ai-devops/task-gates.json`, which can only strengthen a class.
 
 Toolkit installation is a distinct non-protected class: it keeps deployment
-refused until an explicit owner request is recorded, then permits the supported
+refused until an assigned AI reviewer's exact-head APPROVE is recorded, then permits the supported
 installer to run. It must not be modelled as protected `deployment`, because a
 forbidden action on a protected class has no authorization path and would make
 the installer permanently unusable.
@@ -69,8 +69,8 @@ A toolkit update can also carry reviewer-safety changes made since the host's
 last installed commit. For the supported `popcre/ai-devops` and redirected
 `u2giants/ai-devops` GitHub origins only, `deploy` is allowed for that
 protected class when its repository declaration carries
-`reviewed-toolkit-installation` and the check records an explicit owner request
-naming the host and install action. The release still requires local tests,
+`reviewed-toolkit-installation` and the check records an assigned AI reviewer's
+APPROVE bound to the install action, repository, and exact head. The release still requires local tests,
 exact-head independent review, and installed-routing proof. A different
 repository or a foreign Git host cannot use this route even if it adds the same
 declaration. The source repository must have the canonical GitHub origin.
@@ -84,7 +84,7 @@ mutation. The installed checkout must be the durable primary checkout, the
 launcher must be at its supported canonical path, and the exact target must
 already be in fetched `origin/main` history. A caller cannot replace the recorded comparison base; an empty or
 dirty reviewer-safety release cannot enter this route.
-An unchanged checkout uses the installation-class owner-request path only
+An unchanged checkout uses the installation-class reviewer-approval path only
 with its canonical managed launcher and a source receipt matching the current
 commit and gate bytes. Ubuntu uses `/etc/ai-devops/install-manifest.tsv`; Windows
 uses matching commit and SHA-256 markers in both managed launchers, with their
@@ -118,16 +118,16 @@ effective class, so an explicitly declared production task can enter the
 production gate without dropping the deployment proofs attached to its changed
 files. A
 protected class — reviewer safety, shared database, deployment, infrastructure,
-production, private evidence — can never be acknowledged or owner-requested
+production, private evidence — can never be acknowledged or reviewer-approved
 away. A protected external action with neither changes nor a declared class is
 also refused rather than guessed safe.
 
 ### The review-mode variables are a guardrail, not a boundary
 
-`bin/ai-review` exports `AI_REVIEW_GATE_MODE` and `AI_REVIEW_OWNER_REQUEST` so
+`bin/ai-review` exports `AI_REVIEW_GATE_MODE` and `AI_REVIEW_REVIEWER_APPROVAL` so
 the reviewer lifecycle, which the provider wrappers call for every mode, can see
-the review mode and Albert's request. They keep an honest caller from being
+the review mode and the assigned AI reviewer's approval report. They keep an honest caller from being
 refused; they are not a security boundary. Anyone who can set an environment
 variable in the session can already run the provider wrapper directly. Export
-neither by hand: a request left set in a shell would re-authorize every later
-review in it, each one recorded as if newly asked for.
+neither by hand: an approval left set in a shell would re-authorize every later
+review in it, each one recorded as if newly approved.

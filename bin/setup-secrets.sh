@@ -290,8 +290,24 @@ fi
 if [ -n "\${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "\${TRIGGER_ACCESS_TOKEN:-}" ]; then
   exec "$NODE_BIN" "$GUARD_JS" "\$@"
 fi
+# Serialize one op command under the refresh lock. A failure while the lock
+# is provably free is op's own error: no sweep, no retry. A failure while
+# another process still holds the lock is a stuck holder: ai-lock-doctor
+# clears this toolkit's own holders once, then one retry (#1002); a foreign
+# holder is never touched and the failure stands.
+_aidev_flock() {
+  # Exit 87 means the wait timed out on contention; any other failure is the
+  # op command's own error: no sweep, no retry. On real contention
+  # ai-lock-doctor clears this toolkit's own holders once, then one retry
+  # (#1002); a foreign holder is never touched and the failure stands.
+  flock --close -E 87 -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
+  _aidev_rc=\$?
+  [ "\$_aidev_rc" -eq 87 ] || return "\$_aidev_rc"
+  command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"
+  flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
+}
 _aidev_names="\$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=op:\/\/.*/\1/p' "$MCP_ENV" | tr '\n' ' ')"
-_aidev_exports="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
+_aidev_exports="\$(_aidev_flock op run --no-masking --env-file="$MCP_ENV" -- python3 -c '
 import os, shlex, sys
 for name in sys.argv[1:]:
     value = os.environ.get(name, "")
@@ -322,12 +338,27 @@ if [ -s "$TOKEN_FILE" ]; then
   export OP_SERVICE_ACCOUNT_TOKEN
 fi
 URL="\$1"; REF="\$2"; shift 2
+# Serialize the fallback op read like the MCP launcher: a failure while the
+# lock is provably free is op's own error (no sweep, no retry); a still-held
+# lock gets one doctor pass and one retry (#1002), never holding the lock
+# around mcp-remote.
+_aidev_flock() {
+  # Exit 87 means the wait timed out on contention; any other failure is the
+  # op command's own error: no sweep, no retry. On real contention
+  # ai-lock-doctor clears this toolkit's own holders once, then one retry
+  # (#1002); a foreign holder is never touched and the failure stands.
+  flock --close -E 87 -w 90 "$CFG_DIR/op-refresh.lock" "\$@" && return 0
+  _aidev_rc=\$?
+  [ "\$_aidev_rc" -eq 87 ] || return "\$_aidev_rc"
+  command -v ai-lock-doctor >/dev/null 2>&1 && ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"
+  flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
+}
 case "\$REF" in
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token) TOK="\${DEVOPS_MCP_TOKEN:-}" ;;
   op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
   *) TOK= ;;
 esac
-[ -n "\$TOK" ] || TOK="\$(flock --close -w 90 "$CFG_DIR/op-refresh.lock" op read "\$REF")" || {
+[ -n "\$TOK" ] || TOK="\$(_aidev_flock op read "\$REF")" || {
   echo "ai-devops: serialized fallback FAILED for \$REF — not starting \$URL" >&2
   exit 1
 }

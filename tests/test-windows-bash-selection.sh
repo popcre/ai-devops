@@ -23,7 +23,12 @@ check 'help lists the guarded reviewer exclusion and list mode' \
 
 printf '#!/usr/bin/env bash\nexit 0\n' >"$SUITES/test-linux-only.sh"
 printf '#!/usr/bin/env bash\nexit 17\n' >"$SUITES/test-windows-defect.sh"
-printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh","test-windows-defect.sh"],"windows_reviewer_safety_bash":["test-windows-defect.sh"]}' >"$MANIFEST"
+# Per-suite manifest files (#1001): the global file declares the section-less
+# slim shape; membership lives in each suite's own file.
+CONFIGS="$TMP/ci-suites"; mkdir -p "$CONFIGS"
+printf '%s\n' '{"windows_offline_section_count":0}' >"$MANIFEST"
+printf '%s\n' '{"kind":"bash","windows":["offline"]}' >"$CONFIGS/test-linux-only.sh.json"
+printf '%s\n' '{"kind":"bash","windows":["offline","reviewer-safety"]}' >"$CONFIGS/test-windows-defect.sh.json"
 chmod +x "$SUITES"/*.sh
 
 listed="$(run --windows-offline --list 2>"$TMP/list.err")"; list_rc=$?
@@ -47,21 +52,25 @@ check 'the hosted split passes only because fallback owns the injected reviewer 
 run >/dev/null 2>&1; complete_rc=$?
 check 'the unchanged no-argument complete run still sees the defect' '[ "$complete_rc" -ne 0 ]'
 
-printf '%s\n' '{"windows_offline_bash":["test-missing.sh"]}' >"$MANIFEST"
+rm -f "$CONFIGS/test-linux-only.sh.json" "$CONFIGS/test-windows-defect.sh.json"
+printf '%s\n' '{"kind":"bash","windows":["offline"]}' >"$CONFIGS/test-missing.sh.json"
 run --windows-offline --list >/dev/null 2>&1; stale_rc=$?
 check 'a stale Windows mapping fails instead of dropping coverage' '[ "$stale_rc" -eq 2 ]'
+rm -f "$CONFIGS/test-missing.sh.json"
 
-printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh","test-linux-only.sh"]}' >"$MANIFEST"
-run --windows-offline --list >/dev/null 2>&1; duplicate_rc=$?
-check 'a duplicate Windows assignment fails instead of repeating work' '[ "$duplicate_rc" -eq 2 ]'
+# A duplicate Windows assignment is unrepresentable in the per-suite layout
+# (exactly one file per suite, one windows membership list per file), so the
+# old duplicate-array case is covered by the loader's duplicate-tag refusal
+# in tests/test-ci-suite-loader.sh instead.
 
-printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh"],"windows_reviewer_safety_bash":["test-windows-defect.sh"]}' >"$MANIFEST"
+printf '%s\n' '{"kind":"bash","windows":["offline"]}' >"$CONFIGS/test-linux-only.sh.json"
 run --exclude-reviewer-safety --list >/dev/null 2>&1; unsafe_rc=$?
 check 'reviewer exclusion without Windows lane context fails closed' '[ "$unsafe_rc" -eq 2 ]'
 
-printf '%s\n' '{"windows_offline_bash":["test-linux-only.sh"]}' >"$MANIFEST"
+rm -f "$CONFIGS/test-linux-only.sh.json"
 run --windows-offline --exclude-reviewer-safety --list >/dev/null 2>&1; missing_reviewer_rc=$?
 check 'missing reviewer assignment fails instead of creating a coverage gap' '[ "$missing_reviewer_rc" -eq 2 ]'
+printf '%s\n' '{"kind":"bash","windows":["offline"]}' >"$CONFIGS/test-linux-only.sh.json"
 
 if command -v pwsh >/dev/null 2>&1; then
   powershell_guard_output="$(pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -ExcludeReviewerSafety 2>&1)"
@@ -80,11 +89,22 @@ fi
 printf '#!/usr/bin/env bash\nexit 0\n' >"$SUITES/test-sec-a.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$SUITES/test-sec-c.sh"
 chmod +x "$SUITES"/*.sh
+# lane_manifest <count> <owner> [suite:section ...]: declares <count> hosted
+# sections; every listed pair owns its section, and any hosted-eligible suite
+# left unlisted deliberately stays section-less to build a broken fixture.
 lane_manifest() {
-  printf '%s\n' "{\"windows_offline_bash\":[\"test-sec-a.sh\",\"test-sec-c.sh\",\"test-windows-defect.sh\"],\"windows_reviewer_safety_bash\":[\"test-windows-defect.sh\"],\"windows_offline_powershell_shard\":1,\"windows_offline_shards\":$1}" >"$MANIFEST"
+  local count="$1" owner="$2" pair suite section
+  shift 2
+  printf '{"windows_offline_section_count":%s,"windows_offline_powershell_shard":%s}\n' "$count" "$owner" >"$MANIFEST"
+  printf '%s\n' '{"kind":"bash","windows":["offline","reviewer-safety"]}' >"$CONFIGS/test-windows-defect.sh.json"
+  rm -f "$CONFIGS/test-linux-only.sh.json" "$CONFIGS/test-sec-a.sh.json" "$CONFIGS/test-sec-c.sh.json"
+  for pair in "$@"; do
+    suite="${pair%%:*}"; section="${pair##*:}"
+    printf '{"kind":"bash","windows":["offline"],"windows_section":%s}\n' "$section" >"$CONFIGS/$suite.json"
+  done
 }
 
-lane_manifest '[["test-sec-a.sh"],["test-sec-c.sh"]]'
+lane_manifest 2 1 test-sec-a.sh:1 test-sec-c.sh:2
 first="$(run --windows-offline --exclude-reviewer-safety --shard 1/2 --list 2>/dev/null | grep '^test-')"
 second="$(run --windows-offline --exclude-reviewer-safety --shard 2/2 --list 2>/dev/null | grep '^test-')"
 check 'the declared sections partition the ordinary lane with nothing lost or repeated' \
@@ -107,15 +127,16 @@ check 'the complete scheduled backstop still sees a defect no section could hide
   '[ "$sec_complete_rc" -ne 0 ]'
 printf '#!/usr/bin/env bash\nexit 0\n' >"$SUITES/test-sec-c.sh"; chmod +x "$SUITES/test-sec-c.sh"
 
-lane_manifest '[["test-sec-a.sh"]]'
+lane_manifest 1 1 test-sec-a.sh:1
+printf '%s\n' '{"kind":"bash","windows":["offline"]}' >"$CONFIGS/test-sec-c.sh.json"
 run --windows-offline --exclude-reviewer-safety --shard 1/1 --list >/dev/null 2>&1; sec_gap_rc=$?
 check 'sections that do not cover the lane fail instead of dropping a suite' '[ "$sec_gap_rc" -eq 2 ]'
 
-lane_manifest '[["test-sec-a.sh","test-sec-c.sh"],["test-sec-c.sh"]]'
+lane_manifest 2 1 test-sec-a.sh:1 test-sec-c.sh:3
 run --windows-offline --exclude-reviewer-safety --shard 1/2 --list >/dev/null 2>&1; sec_dup_rc=$?
-check 'a suite declared in two sections fails instead of running twice' '[ "$sec_dup_rc" -eq 2 ]'
+check 'a suite assigned beyond the declared sections fails instead of running anywhere' '[ "$sec_dup_rc" -eq 2 ]'
 
-lane_manifest '[["test-sec-a.sh"],["test-sec-c.sh"]]'
+lane_manifest 2 1 test-sec-a.sh:1 test-sec-c.sh:2
 run --windows-offline --exclude-reviewer-safety --shard 1/3 --list >/dev/null 2>&1; sec_count_rc=$?
 run --windows-offline --exclude-reviewer-safety --shard 0/2 --list >/dev/null 2>&1; sec_zero_rc=$?
 run --windows-offline --shard 1/2 --list >/dev/null 2>&1; sec_context_rc=$?
@@ -130,14 +151,16 @@ run --windows-offline --exclude-reviewer-safety --shard 1/ --list >/dev/null 2>&
 check 'a section argument with anything but one <i>/<n> pair is refused' \
   '[ "$sec_slash_rc" -eq 2 ] && [ "$sec_head_rc" -eq 2 ] && [ "$sec_tail_rc" -eq 2 ]'
 
-printf '%s\n' '{"windows_offline_bash":["test-sec-a.sh","test-sec-c.sh","test-windows-defect.sh"],"windows_reviewer_safety_bash":["test-windows-defect.sh"]}' >"$MANIFEST"
+printf '%s\n' '{"windows_offline_section_count":0}' >"$MANIFEST"
+printf '%s\n' '{"kind":"bash","windows":["offline"]}' >"$CONFIGS/test-sec-a.sh.json"
+printf '%s\n' '{"kind":"bash","windows":["offline"]}' >"$CONFIGS/test-sec-c.sh.json"
 run --windows-offline --exclude-reviewer-safety --shard 1/2 --list >/dev/null 2>&1; sec_absent_rc=$?
 check 'a manifest with no declared sections refuses to run one' '[ "$sec_absent_rc" -eq 2 ]'
 
 # The PowerShell suites are not divisible by this mapping, so exactly one
 # section owns them and every other section skips them by declaration.
 if command -v pwsh >/dev/null 2>&1; then
-  lane_manifest '[["test-sec-a.sh"],["test-sec-c.sh"]]'
+  lane_manifest 2 1 test-sec-a.sh:1 test-sec-c.sh:2
   owner_out="$(AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$MANIFEST" pwsh -NoProfile -File "$ROOT/tests/test-all.ps1" -WindowsPullRequest -ExcludeReviewerSafety -Shard 2/2 2>&1)"
   check 'a section that does not own the PowerShell suites says so and skips them' \
     'printf "%s" "$owner_out" | grep -Fq "POWERSHELL SUITES run in section 1 of 2"'
@@ -150,7 +173,7 @@ else
 fi
 
 # Complete sections discover all names independently of the PR manifest.
-lane_manifest '[["test-sec-a.sh"],["test-sec-c.sh"]]'
+lane_manifest 2 1 test-sec-a.sh:1 test-sec-c.sh:2
 printf '#!/usr/bin/env bash\nexit 0\n' > "$SUITES/test-000-future.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$SUITES/test-z-nonwindows.sh"
 complete_all="$(run --list | grep '^test-' | LC_ALL=C sort)"
@@ -191,6 +214,10 @@ if command -v pwsh >/dev/null 2>&1; then
   # Its PowerShell discovery must never invoke this repository's real suites.
   ps_fixture="$TMP/ps-fixture/tests"; mkdir -p "$ps_fixture"
   cp "$ROOT/tests/test-all.ps1" "$ROOT/tests/test-all.sh" "$ROOT/tests/lib-selection.sh" "$ps_fixture/"
+  # The miniature repository carries its own copy of the per-suite loader
+  # (#1001): test-all.sh reaches it relative to its own root.
+  mkdir -p "$TMP/ps-fixture/tools/ci-suites"
+  cp "$ROOT/tools/ci-suites/load-manifest" "$ROOT/tools/ci-suites/load-manifest.jq" "$TMP/ps-fixture/tools/ci-suites/"
   # Assert on the actual exception message, not PowerShell's host-dependent
   # colored/wrapped error display. Keep exit status and suite execution intact.
   cat > "$ps_fixture/invoke-selection.ps1" <<'PS'
@@ -240,11 +267,11 @@ BASH
   ps_run -Shard 1/999 > "$TMP/ps-oversized-selection.log" 2>&1; ps_oversized_rc=$?
   check 'oversized complete selection refuses before either language executes a suite' \
     '[ "$ps_oversized_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ] && grep -q "complete section count exceeds discovered suites" "$TMP/ps-oversized-selection.log"' "$TMP/ps-oversized-selection.log"
-  jq '.windows_offline_shards=[["test-sec-a.sh"]]' "$MANIFEST" > "$TMP/incomplete-pr-selection.json"
+  jq '.windows_offline_section_count=1' "$MANIFEST" > "$TMP/incomplete-pr-selection.json"
   : > "$AI_TEST_EXEC_TRACE"
   AI_TEST_SUITE_DIR="$SUITES" AI_CI_SUITE_MANIFEST="$TMP/incomplete-pr-selection.json" pwsh -NoProfile -File "$ps_fixture/invoke-selection.ps1" -WindowsPullRequest -ExcludeReviewerSafety -Shard 1/1 > "$TMP/ps-incomplete-pr.log" 2>&1; ps_incomplete_pr_rc=$?
   check 'incomplete PR selection refuses before either language executes a suite' \
-    '[ "$ps_incomplete_pr_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ] && grep -q "do not cover the Windows lane exactly" "$TMP/ps-incomplete-pr.log"' "$TMP/ps-incomplete-pr.log"
+    '[ "$ps_incomplete_pr_rc" -ne 0 ] && [ ! -s "$AI_TEST_EXEC_TRACE" ] && grep -q "Bash section selection is invalid" "$TMP/ps-incomplete-pr.log"' "$TMP/ps-incomplete-pr.log"
   unset AI_TEST_EXEC_TRACE
 fi
 

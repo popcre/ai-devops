@@ -11,6 +11,8 @@ bin/ai-provider-version*
 bin/ai-review*
 bin/windows-private-file.ps1
 config/ci-suite-manifest.json
+config/ci-suites/**
+tools/ci-suites/*
 config/provider-cli-versions.json
 config/reviewer-capacity.json
 config/reviewer-registry.json

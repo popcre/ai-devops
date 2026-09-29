@@ -102,10 +102,11 @@ An **assigned AI reviewer** is: for `popcre/shared-db` work, the reviewer the
 shared-db allocator draws; everywhere else, a rotation reviewer run through
 `ai-review` whose engine differs from the implementing session's. The
 implementing session never approves its own change. Authority an AI cannot
-obtain itself (a platform limit, or an `ai-task-gates` `--owner-request` gate for a task
-Albert never requested; until popcre/ai-devops#996 lands, `--owner-request`
-carries only Albert's own words requesting that task) is reported `Blocked —`;
-it is never bypassed and never becomes a request for Albert's approval.
+obtain itself (a platform limit) is reported `Blocked —`; `ai-task-gates`
+approval gates take `--reviewer-approval <report>`, the assigned reviewer's
+exact-head APPROVE report (popcre/ai-devops#996), from a review run with
+`ai-review --implementer <engine>` (auto-detected for Claude Code and Codex). Such a limit is
+never bypassed and never becomes a request for Albert's approval.
 
 Owner ruling (2026-09-28, Albert Hazan, verbatim: "i don't
 need an independent production reviewer. remove that requirement"; popcre/shared-db
