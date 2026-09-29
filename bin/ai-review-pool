@@ -333,16 +333,21 @@ if [ "${AI_KEEP_SANDBOX:-0}" != 1 ]; then
     muse)
       # Everything from here on is post-accounting and best-effort: the review
       # is durable, so no step in this branch may abort (set -e), hang, or
-      # otherwise cost the caller its exit 0 and report path. Bound the
-      # provider-facing delete with a hard timeout, and when no timeout tool
-      # can bound it, skip the release entirely — the sweep still takes the
-      # copy (Qwen review of PR #1017, finding 1).
-      RELEASE_TIMEOUT_BIN="$(command -v timeout || true)"
+      # otherwise cost the caller its exit 0 and report path. The delete is a
+      # provider-facing call, so it gets a hard bound — SIGTERM at 60 s plus
+      # kill-after, the same shape bin/ai-deepseek-agent uses — resolved from
+      # /usr/bin:/bin only, because an ambient PATH can front Windows
+      # timeout.exe (a delay utility that runs no command). No `--` separator:
+      # the MSYS timeout rejects it, and $RUNNER is always an absolute path.
+      # When no such timeout tool exists, skip the release entirely — the
+      # sweep still takes the copy (Qwen round 1 finding 1; Grok round 2
+      # findings P1/P2).
+      RELEASE_TIMEOUT_BIN="$(PATH=/usr/bin:/bin command -v timeout || true)"
       if [ -z "$RELEASE_TIMEOUT_BIN" ]; then
         printf 'ai-review-pool: no timeout tool to bound the session release; session %s copy retained until sweep.\n' "$TAG" >&2 || true
       else
         TMP_DELETE="$(mktemp "$REPORT_DIR/.pool-release.XXXXXX" 2>/dev/null)" || TMP_DELETE=""
-        if ( cd "$REVIEW_DIR" && exec env AI_MUSE_CALLER="$CALLER" "$RELEASE_TIMEOUT_BIN" 60 "$RUNNER" delete "$TAG" ) >/dev/null 2>>"${TMP_DELETE:-/dev/null}"; then
+        if ( cd "$REVIEW_DIR" && exec env AI_MUSE_CALLER="$CALLER" "$RELEASE_TIMEOUT_BIN" -k 5 60 "$RUNNER" delete "$TAG" ) >/dev/null 2>>"${TMP_DELETE:-/dev/null}"; then
           :
         else
           { [ -n "$TMP_DELETE" ] && [ -s "$TMP_DELETE" ] && sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$TMP_DELETE" | sed 's/^/  runner: /'; } >&2 || true
