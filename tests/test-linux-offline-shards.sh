@@ -17,7 +17,20 @@ listed() { run "$@" --list 2>/dev/null | grep '^test-'; }
 for name in heavy-a heavy-b heavy-c small-a small-b small-c small-d unmeasured; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$SUITES/test-$name.sh"
 done
-printf '%s\n' '{"linux_offline_suite_seconds":{"test-heavy-a.sh":300,"test-heavy-b.sh":250,"test-heavy-c.sh":200,"test-small-a.sh":40,"test-small-b.sh":30,"test-small-c.sh":20,"test-small-d.sh":10,"test-retired.sh":99}}' >"$MANIFEST"
+# Per-suite manifest files (#1001): the Linux timing lives in each suite's own
+# file; the global manifest declares only the section-less slim shape here.
+CONFIGS="$TMP/ci-suites"; mkdir -p "$CONFIGS"
+printf '%s\n' '{"windows_offline_section_count":0}' >"$MANIFEST"
+sj() { printf '{"kind":"bash"%s}\n' "${2:-}" >"$CONFIGS/$1.json"; }
+sj test-heavy-a.sh ',"linux_seconds":300'
+sj test-heavy-b.sh ',"linux_seconds":250'
+sj test-heavy-c.sh ',"linux_seconds":200'
+sj test-small-a.sh ',"linux_seconds":40'
+sj test-small-b.sh ',"linux_seconds":30'
+sj test-small-c.sh ',"linux_seconds":20'
+sj test-small-d.sh ',"linux_seconds":10'
+sj test-unmeasured.sh ''
+sj test-retired.sh ',"linux_seconds":99'
 
 all="$(listed | LC_ALL=C sort)"
 union="$(for i in 1 2 3; do listed --balanced --shard "$i/3"; done | LC_ALL=C sort)"
@@ -43,11 +56,28 @@ check '--balanced cannot rewrite the declared Windows sections' '[ "$win_rc" -eq
 run --balanced --shard 9/9 --list >/dev/null 2>&1; over_rc=$?
 check 'more sections than suites is a configuration error' '[ "$over_rc" -eq 2 ]'
 cp "$MANIFEST" "$TMP/good.json"
-for broken in '{}' '{"linux_offline_suite_seconds":{}}' '{"linux_offline_suite_seconds":{"test-heavy-a.sh":"300"}}' '{"linux_offline_suite_seconds":{"test-heavy-a.sh":-1}}' '{'; do
-  printf '%s\n' "$broken" >"$MANIFEST"
-  run --balanced --shard 1/3 --list >/dev/null 2>&1; broken_rc=$?
-  check "an invalid measured-seconds map fails closed: $broken" '[ "$broken_rc" -eq 2 ]'
+sj test-heavy-a.sh ',"linux_seconds":"300"'   # a string measurement
+run --balanced --shard 1/3 --list >/dev/null 2>&1; string_rc=$?
+check 'a non-numeric measured-seconds value fails closed' '[ "$string_rc" -eq 2 ]'
+sj test-heavy-a.sh ',"linux_seconds":-1'      # a negative measurement
+run --balanced --shard 1/3 --list >/dev/null 2>&1; negative_rc=$?
+check 'a negative measured-seconds value fails closed' '[ "$negative_rc" -eq 2 ]'
+for f in "$CONFIGS"/*.json; do                  # nothing measured at all
+  printf '{"kind":"bash"}\n' >"$f"
 done
+run --balanced --shard 1/3 --list >/dev/null 2>&1; empty_rc=$?
+check 'an empty measured-seconds map fails closed' '[ "$empty_rc" -eq 2 ]'
+sj test-heavy-a.sh ',"linux_seconds":300'
+sj test-heavy-b.sh ',"linux_seconds":250'
+sj test-heavy-c.sh ',"linux_seconds":200'
+sj test-small-a.sh ',"linux_seconds":40'
+sj test-small-b.sh ',"linux_seconds":30'
+sj test-small-c.sh ',"linux_seconds":20'
+sj test-small-d.sh ',"linux_seconds":10'
+sj test-retired.sh ',"linux_seconds":99'
+printf '%s\n' '{' >"$MANIFEST"                # a malformed global manifest
+run --balanced --shard 1/3 --list >/dev/null 2>&1; malformed_rc=$?
+check 'a malformed global manifest fails closed' '[ "$malformed_rc" -eq 2 ]'
 rm -f "$MANIFEST"
 run --balanced --shard 1/3 --list >/dev/null 2>&1; missing_rc=$?
 check 'a missing manifest fails closed' '[ "$missing_rc" -eq 2 ]'

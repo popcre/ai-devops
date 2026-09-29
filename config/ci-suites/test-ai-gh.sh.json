@@ -1,0 +1,8 @@
+{
+  "kind": "bash",
+  "linux_seconds": 35,
+  "windows": [
+    "offline"
+  ],
+  "windows_section": 1
+}

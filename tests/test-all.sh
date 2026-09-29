@@ -26,6 +26,22 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tests/lib-selection.sh"
 SUITE_DIR="${AI_TEST_SUITE_DIR:-$ROOT/tests}"
 MANIFEST="${AI_CI_SUITE_MANIFEST:-$ROOT/config/ci-suite-manifest.json}"
+# Per-suite data (inventories, seconds, Windows membership, section
+# assignment) lives in one file per suite and is assembled by the loader
+# (#1001); only the slim global keys are read from $MANIFEST directly.
+LOADER="$ROOT/tools/ci-suites/load-manifest"
+MANIFEST_JSON_LOADED=0
+MANIFEST_JSON=""
+manifest_json() {
+  if [ "$MANIFEST_JSON_LOADED" -eq 0 ]; then
+    [ -x "$LOADER" ] || {
+      printf 'test-all.sh: suite manifest loader is missing: %s\n' "$LOADER" >&2; exit 2; }
+    MANIFEST_JSON="$(AI_CI_SUITE_MANIFEST="$MANIFEST" bash "$LOADER")" || {
+      printf 'test-all.sh: the suite manifest failed to assemble\n' >&2; exit 2; }
+    MANIFEST_JSON_LOADED=1
+  fi
+  printf '%s' "$MANIFEST_JSON"
+}
 SHARED_RUNTIME_LOCK="${AI_TEST_SHARED_RUNTIME_LOCK:-}"
 SHARED_RUNTIME_LOCK_HELD=0
 
@@ -184,15 +200,15 @@ if [ -n "$only" ]; then
   fi
 elif [ "$windows_offline" = true ]; then
   [ -f "$MANIFEST" ] || { printf 'test-all.sh: Windows suite manifest is missing: %s\n' "$MANIFEST" >&2; exit 2; }
-  jq -e '.windows_offline_bash | type == "array" and length > 0 and all(.[]; type == "string")' "$MANIFEST" >/dev/null 2>&1 || {
+  manifest_json | jq -e '.windows_offline_bash | type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1 || {
     printf 'test-all.sh: Windows suite manifest has no valid windows_offline_bash group\n' >&2; exit 2; }
-  mapfile -t tests < <(jq -r '.windows_offline_bash[]' "$MANIFEST" | tr -d '\r')
+  mapfile -t tests < <(manifest_json | jq -r '.windows_offline_bash[]' | tr -d '\r')
   [ "$(printf '%s\n' "${tests[@]}" | LC_ALL=C sort -u | wc -l)" -eq "${#tests[@]}" ] || {
     printf 'test-all.sh: windows_offline_bash contains a duplicate suite\n' >&2; exit 2; }
   if [ "$exclude_reviewer_safety" = true ]; then
-    jq -e '.windows_reviewer_safety_bash | type == "array" and length > 0 and all(.[]; type == "string")' "$MANIFEST" >/dev/null 2>&1 || {
+    manifest_json | jq -e '.windows_reviewer_safety_bash | type == "array" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1 || {
       printf 'test-all.sh: Windows suite manifest has no valid windows_reviewer_safety_bash group\n' >&2; exit 2; }
-    mapfile -t reviewer_tests < <(jq -r '.windows_reviewer_safety_bash[]' "$MANIFEST" | tr -d '\r')
+    mapfile -t reviewer_tests < <(manifest_json | jq -r '.windows_reviewer_safety_bash[]' | tr -d '\r')
     mapfile -t tests < <(comm -23 \
       <(printf '%s\n' "${tests[@]}" | LC_ALL=C sort) \
       <(printf '%s\n' "${reviewer_tests[@]}" | LC_ALL=C sort))
@@ -211,17 +227,17 @@ elif [ "$windows_offline" = true ]; then
     # reviewer can read which section proves what. The union check below is the
     # real guarantee: the declared sections must reconstitute this lane exactly,
     # or the run is a configuration error rather than quiet coverage loss.
-    jq -e '.windows_offline_shards | type == "array" and length > 0 and all(.[]; type == "array" and length > 0 and all(.[]; type == "string"))' "$MANIFEST" >/dev/null 2>&1 || {
+    manifest_json | jq -e '.windows_offline_shards | type == "array" and length > 0 and all(.[]; type == "array" and length > 0 and all(.[]; type == "string"))' >/dev/null 2>&1 || {
       printf 'test-all.sh: Windows suite manifest has no valid windows_offline_shards group\n' >&2; exit 2; }
-    declared_total="$(jq '.windows_offline_shards | length' "$MANIFEST")"
+    declared_total="$(manifest_json | jq '.windows_offline_shards | length')"
     [ "$declared_total" -eq "$shard_total" ] || {
       printf 'test-all.sh: --shard count %s does not match the %s declared sections\n' "$shard_total" "$declared_total" >&2; exit 2; }
-    mapfile -t shard_union < <(jq -r '.windows_offline_shards[][]' "$MANIFEST" | tr -d '\r')
+    mapfile -t shard_union < <(manifest_json | jq -r '.windows_offline_shards[][]' | tr -d '\r')
     [ "$(printf '%s\n' "${shard_union[@]}" | LC_ALL=C sort -u | wc -l)" -eq "${#shard_union[@]}" ] || {
       printf 'test-all.sh: a suite is assigned to more than one section\n' >&2; exit 2; }
     [ "$(printf '%s\n' "${shard_union[@]}" | LC_ALL=C sort)" = "$(printf '%s\n' "${tests[@]}" | LC_ALL=C sort)" ] || {
       printf 'test-all.sh: declared sections do not cover the Windows lane exactly\n' >&2; exit 2; }
-    mapfile -t tests < <(jq -r --argjson i "$((shard_index - 1))" '.windows_offline_shards[$i][]' "$MANIFEST" | tr -d '\r')
+    mapfile -t tests < <(manifest_json | jq -r --argjson i "$((shard_index - 1))" '.windows_offline_shards[$i][]' | tr -d '\r')
     reason="$reason section $shard_index of $shard_total"
   fi
   if [ "$affected_filter" = true ]; then
@@ -250,13 +266,13 @@ else
       # no measurement is still placed, at a default weight, so a new suite
       # can never fall out of the lane.
       [ -f "$MANIFEST" ] || { printf 'test-all.sh: suite manifest is missing: %s\n' "$MANIFEST" >&2; exit 2; }
-      jq -e '.linux_offline_suite_seconds | type == "object" and length > 0 and all(.[]; type == "number" and . >= 0 and floor == .)' "$MANIFEST" >/dev/null 2>&1 || {
+      manifest_json | jq -e '.linux_offline_suite_seconds | type == "object" and length > 0 and all(.[]; type == "number" and . >= 0 and floor == .)' >/dev/null 2>&1 || {
         printf 'test-all.sh: suite manifest has no valid linux_offline_suite_seconds map\n' >&2; exit 2; }
       default_seconds=30
       declare -A suite_seconds=()
       while read -r w name; do
         [ -n "$name" ] && suite_seconds["$name"]="$w"
-      done < <(jq -r '.linux_offline_suite_seconds | to_entries[] | "\(.value) \(.key)"' "$MANIFEST" | tr -d '\r')
+      done < <(manifest_json | jq -r '.linux_offline_suite_seconds | to_entries[] | "\(.value) \(.key)"' | tr -d '\r')
       mapfile -t weighted < <(
         for name in "${all_tests[@]}"; do
           printf '%s %s\n' "${suite_seconds[$name]:-$default_seconds}" "$name"

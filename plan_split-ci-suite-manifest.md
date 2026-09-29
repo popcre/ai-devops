@@ -7,11 +7,11 @@ Owner issue: https://github.com/popcre/ai-devops/issues/1001.
 
 | Step | State | Evidence |
 |---|---|---|
-| 0 Prove the collision | ⬜ open (2026-09-28) | — |
-| 1 Loader | ⬜ open | — |
-| 2 Migrate data | ⬜ open | — |
-| 3 Switch readers | ⬜ open | — |
-| 4 Remove the monolith | ⬜ open | — |
+| 0 Prove the collision | ✅ done (2026-09-28) | [manifest-collision-2026-09.md](tests/verification/repo-throughput/manifest-collision-2026-09.md): #721 and #849 both hand-resolved textual manifest conflicts during main refreshes; gate met |
+| 1 Loader | ✅ done (2026-09-28) | `tools/ci-suites/load-manifest` + `tests/test-ci-suite-loader.sh` (17 passed); loader output `jq -S` == monolith `jq -S` byte for byte |
+| 2 Migrate data | ✅ done (2026-09-28) | `config/ci-suites/*.json` (132 files) generated 1:1; Step 1 equality re-verified after migration and after suite registration |
+| 3 Switch readers | ✅ done (2026-09-28) | commit 89887ae7: test-all.sh/test-workflow-policy.sh/test-all.ps1 + trigger globs; sections 1-6 membership diff vs pre-split main is empty; selection suites green (27/48/17) |
+| 4 Remove the monolith | ✅ done (2026-09-28) | commit 123a85af: global file slim (schema_version 3); test-workflow-policy rejects reintroduced per-suite arrays and proves it on a mutated copy; all suites green |
 | 5 Live proof | ⬜ open | — |
 
 A fresh session starts at Step 0.
