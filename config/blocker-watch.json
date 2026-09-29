@@ -134,7 +134,7 @@
     "popcre/ai-devops"
   ],
   "fixer_max_concurrent": 1,
-  "fixer_harness": "claude",
+  "fixer_harness": "codex",
   "fixer_cwd": "{home}/repos/ai-devops",
   "fixer_timeout_minutes": 60,
   "fixer_trusted_author": "pop-ai-watchers[bot]",
