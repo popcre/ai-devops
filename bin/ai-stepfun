@@ -53,7 +53,14 @@ WRITE_TOOLS="read,bash,edit,write,grep,find,ls"
 die(){ printf 'ai-stepfun: error: %s\n' "$*" >&2; exit 1; }
 note(){ printf 'ai-stepfun: %s\n' "$*" >&2; }
 
-platform_ok(){ [ "${AI_STEPFUN_PLATFORM:-$(uname -s)}" = Linux ]; }
+platform_ok(){
+  local platform
+  platform="$(uname -s)"
+  # The platform override is only for offline tests; an inherited value cannot
+  # make a Windows installation eligible for an allocator draw.
+  [ "${AI_STEPFUN_TEST_MODE:-}" != 1 ] || platform="${AI_STEPFUN_PLATFORM:-$platform}"
+  [ "$platform" = Linux ]
+}
 require_platform(){
   platform_ok || { printf 'ai-stepfun: unsupported-platform: StepFun Step 5 reviews run on Ubuntu/Linux only; StepCode is not yet available on Windows. Use another reviewer.\n' >&2; exit 2; }
 }
@@ -62,7 +69,9 @@ require_platform(){
 # own install path and accept any binary only if it identifies as StepCode.
 step_bin(){
   local b c
-  for c in "${AI_STEPFUN_STEP_BIN:-}" "$HOME/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
+  local candidates=("$HOME/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)")
+  [ -z "${AI_STEPFUN_STEP_BIN:-}" ] || candidates=("$AI_STEPFUN_STEP_BIN")
+  for c in "${candidates[@]}"; do
     [ -n "$c" ] && [ -x "$c" ] || continue
     "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || continue
     b="$c"; break
@@ -141,7 +150,10 @@ run_step(){
   [ "${5:-}" != write ] || { approval=auto; fallback=allow; dir_bind=--bind; }
   local -a tool_args=(--no-tools)
   [ -z "$tools" ] || tool_args=(--tools "$tools")
-  bin="$(step_bin)" || die 'StepCode CLI (step) is not installed. Install: curl -fsSL https://static-openapi.stepfun.com/stepcode/install.sh | bash'
+  bin="$(step_bin)" || {
+    [ -z "${AI_STEPFUN_STEP_BIN:-}" ] || die 'AI_STEPFUN_STEP_BIN does not point to an executable that identifies as the StepCode CLI; correct or unset that override.'
+    die 'StepCode CLI (step) is not installed. Install: curl -fsSL https://static-openapi.stepfun.com/stepcode/install.sh | bash'
+  }
   bwrap="$(bwrap_bin)" || die 'bubblewrap (bwrap) is required to sandbox StepFun. Install: sudo apt-get install bubblewrap'
   mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR" 2>/dev/null || true
   agent="$(mktemp -d "$STATE_DIR/agent.XXXXXX")"; chmod 700 "$agent"
@@ -200,7 +212,11 @@ cmd_doctor(){
   local live=0 bin ver
   [ "${1:-}" != --live ] || live=1
   require_platform
-  bin="$(step_bin)" || { printf 'FAIL StepCode CLI (step) is not installed\n'; exit 1; }
+  bin="$(step_bin)" || {
+    if [ -n "${AI_STEPFUN_STEP_BIN:-}" ]; then printf 'FAIL AI_STEPFUN_STEP_BIN does not point to an executable that identifies as the StepCode CLI; correct or unset that override\n'
+    else printf 'FAIL StepCode CLI (step) is not installed\n'; fi
+    exit 1
+  }
   ver="$("$bin" --version 2>/dev/null | tr -d '\r' | tail -n1)"
   version_ge "$ver" "$STEP_MIN_VERSION" || { printf 'FAIL step %s is older than the %s floor\n' "$ver" "$STEP_MIN_VERSION"; exit 1; }
   # One PASS line per check: the shared-db allocator counts them as proof.

@@ -10,7 +10,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
    `bin/ai-reviewer-membership-drift` compares the two and fails on any
    difference; the `Reviewer membership drift` workflow runs it every six hours
    and on registry changes. Providers that review outside the allocator
-   (Claude approval gate, Codex overflow) are listed in
+   (Claude and Codex one-shot approval gates) are listed in
    `config/reviewer-membership-scope.json`.
 2. **Unreachable reviewer: check membership, then move on.** Run
    `bin/ai-reviewer-membership-drift` or read the registry first. If the
@@ -73,7 +73,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
     `tests/test-reviewer-credit.sh`. Rate limits and a bare
     `RESOURCE_EXHAUSTED` are not credit failures.
 
-11. **StepFun is Ubuntu-only and outside the allocator.** Owner instruction,
+11. **StepFun is Ubuntu-only and in the allocator.** Owner instruction,
     2026-09-25: add StepFun Step 5 as a reviewer on Ubuntu only (StepCode is
     not yet available on Windows) and let it write, implement, and execute
     code. `bin/ai-stepfun` refuses to run off Linux and preflight reports
@@ -91,6 +91,18 @@ allocator but stayed registered here, and a session spent an hour trying it.
     exposure: the network is shared (the StepFun API needs it), so an
     implement run can reach loopback services and the internet without any
     of the caller's credentials.
-    `ai-stepfun` refuses to run without bubblewrap. The shared-db allocator has no platform field,
-    so StepFun is listed in `config/reviewer-membership-scope.json` and is
-    never assigned by the allocator.
+    `ai-stepfun` refuses to run without bubblewrap. The allocator draws it only
+    when local `ai-review-preflight` reports it usable; Windows reports
+    `unsupported-platform`, so no Windows assignment is made. The platform
+    override is available only when `AI_STEPFUN_TEST_MODE=1` for offline tests.
+    The 2026-09-27 membership change mirrors shared-db PR #3657's allocator row (it superseded #3556)
+    `stepfun-step-5-preview`; that pull request must land before this mirror.
+
+12. **Prefer other reviewers before Grok.** Owner instruction, 2026-09-27: StepFun
+    joins the rotation. The allocator rotates among all active reviewers other
+    than Grok first; Grok remains eligible when that preferred pool cannot take
+    the exact review. A reviewer that failed, lacks local support, conflicts
+    with the orchestrator, or already holds another slot for this head remains
+    excluded by the existing safety checks. Preference never bypasses them.
+    The ordering is implemented and tested in shared-db PR #3593 (issue #3592), still open; until it lands the live allocator does not apply it. This repository
+    mirrors the policy and does not allocate governed shared-db reviewers.

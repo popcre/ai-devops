@@ -283,10 +283,15 @@ check "Codex status is available with its doctor contract" "$SCRIPT status codex
 check "Codex preflight uses its doctor contract" "$SCRIPT check codex '$REPO' | grep -q 'health=ok'"
 check "DeepSeek status is available with its doctor contract" "$SCRIPT status deepseek | jq -e '.status==\"installed-healthy\"'"
 check "DeepSeek preflight uses its doctor contract" "$SCRIPT check deepseek '$REPO' | grep -q 'health=ok'"
-check "StepFun is usable on Linux with its doctor contract" "AI_STEPFUN_PLATFORM=Linux $SCRIPT status stepfun | jq -e '.status==\"installed-healthy\" and .usable==true'"
-check "StepFun preflight passes on Linux" "AI_STEPFUN_PLATFORM=Linux $SCRIPT check stepfun '$REPO' | grep -q 'health=ok'"
-check "StepFun is unsupported-platform and unusable on Windows" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
-check "StepFun preflight refuses on Windows without contacting the provider" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
+check "StepFun is usable on Linux with its doctor contract" "AI_STEPFUN_TEST_MODE=1 AI_STEPFUN_PLATFORM=Linux $SCRIPT status stepfun | jq -e '.status==\"installed-healthy\" and .usable==true'"
+check "StepFun preflight passes on Linux" "AI_STEPFUN_TEST_MODE=1 AI_STEPFUN_PLATFORM=Linux $SCRIPT check stepfun '$REPO' | grep -q 'health=ok'"
+check "StepFun is unsupported-platform and unusable on Windows" "AI_STEPFUN_TEST_MODE=1 AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
+check "StepFun preflight refuses on Windows without contacting the provider" "AI_STEPFUN_TEST_MODE=1 AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
+if [ "$(uname -s)" = Linux ]; then
+  check "StepFun platform override is ignored outside tests" "AI_STEPFUN_TEST_MODE=0 AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT status stepfun | jq -e '.status==\"installed-healthy\" and .usable==true'"
+else
+  check "StepFun platform override is ignored outside tests" "AI_STEPFUN_TEST_MODE=0 AI_STEPFUN_PLATFORM=Linux $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
+fi
 check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux only'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
 # AI_DEEPSEEK_TEST_DIR makes the wrapper honor this isolated HOME; production

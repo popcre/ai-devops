@@ -8,7 +8,7 @@
     },
     "codex": {
       "registry_state": "registered",
-      "reason": "Approval-gate wrapper only (ai-codex-review one-shot modes, like the Claude gate); NOT a rotation or overflow reviewer. popcre/shared-db RETIRED_REVIEWERS carries codex-gpt-5.6-sol since 2026-09-06 (shared-db issue #2485), so the allocator never assigns it; owner confirmed on 2026-09-22 that the rotation pool is Muse, Grok, Qwen, Gemini."
+      "reason": "Approval-gate wrapper only (ai-codex-review one-shot modes, like the Claude gate); NOT a rotation or overflow reviewer. popcre/shared-db RETIRED_REVIEWERS carries codex-gpt-5.6-sol since 2026-09-06 (shared-db issue #2485), so the allocator never assigns it."
     },
     "deepseek": {
       "registry_state": "registered",
@@ -40,7 +40,7 @@
     },
     "stepfun": {
       "registry_state": "registered",
-      "reason": "StepFun Step 5 (step/step-5-preview through the StepCode CLI, bin/ai-stepfun). Added by owner instruction on 2026-09-25 as a reviewer on Ubuntu/Linux only: StepCode is not yet available on Windows, so ai-review-preflight reports it unsupported-platform there. Reviews outside the shared-db allocator rotation (listed in the membership scope file); reviews may run code and tests and edit files only inside a disposable, remote-less review copy (issue #974)."
+      "reason": "Rotation reviewer on Ubuntu/Linux only (StepFun Step 5 via StepCode), added by owner instruction on 2026-09-25 and mirrored from popcre/shared-db PR #3657 (superseding #3556) allocator row stepfun-step-5-preview. It was previously outside the allocator. ai-review-preflight excludes it on Windows as unsupported-platform. Formal reviews run over a sealed exact-head evidence packet; reviews may run code and tests and edit files only inside a disposable, remote-less review copy (issue #974)."
     }
   }
 }

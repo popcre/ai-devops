@@ -52,10 +52,10 @@ ai-stepfun implement --repo . --prompt-file task.md
 
 ## Membership
 
-`stepfun` is registered in `config/reviewer-registry.json` and listed as
-outside the shared-db allocator: the allocator has no platform awareness, so it
-never assigns StepFun. Use it when a session on Ubuntu wants a reviewer, or when
-Albert asks for StepFun.
+`stepfun` is in the shared-db rotation on Ubuntu/Linux. The allocator checks
+local preflight before a draw, so Windows excludes it as unsupported. Drawing
+other reviewers, including StepFun, before Grok is owner policy (shared-db issue
+#3592) that takes effect only when shared-db PR #3593 lands.
 
 ## Failures
 

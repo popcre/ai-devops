@@ -209,15 +209,20 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
   --issue <issue> --pr <pr> --head-sha <exact-head>
 ```
 
-The GitHub-backed cursor rotates the five active reviewers -- Muse Spark 1.3
-Contributor, Grok 4.6, Qwen 3.8 Max, Gemini 3.8 Flash, and DeepSeek V4.1 Flash
-(re-entered 2026-09-23 with read-only repository tools) -- then repeats across
+The GitHub-backed cursor rotates the six active reviewers -- Muse Spark 1.3
+Contributor, Qwen 3.8 Max, Gemini 3.8 Flash, DeepSeek V4.1 Flash
+(re-entered 2026-09-23 with read-only repository tools), StepFun Step 5
+(Ubuntu/Linux only), and Grok 4.6 -- then repeats across
 machines and restarts. GLM 5.3, Kimi K3, the old text-only `deepseek-chat`, and Codex are out of rotation
 (owner instruction; `RETIRED_REVIEWERS` in the allocator and `absent` in
 `config/reviewer-registry.json`): never route a review to them and never wait
-for one of them.
+for one of them. Drawing other reviewers before Grok (shared-db issue #3592)
+is not live until shared-db PR #3593 lands.
 Gemini is eligible only where `ai-review-preflight usable gemini` exits zero;
-otherwise the selector skips it. `usable` is the only command that reconciles
+otherwise the selector skips it. StepFun is eligible only on Ubuntu/Linux where
+`ai-review-preflight usable stepfun` exits zero; other platforms report
+`unsupported-platform`. The platform override is honored only in offline tests
+(`AI_STEPFUN_TEST_MODE=1`). `usable` is the only command that reconciles
 install health, quarantine, live qualification, and reviewer-registry
 membership. A provider can be `installed-healthy` and still unusable because
 the registry does not carry it. That was Gemini's state until 2026-09-06: it was
@@ -228,7 +233,7 @@ carrying the head SHA above a substantive report. Registry re-entry is always a
 reviewed shared-db change backed by that evidence; it is never an edit made to
 unblock an allocation. Retrying the same
 issue/PR/head returns the same assignment. Use only the returned wrapper:
-`ai-muse`, `ai-grok-review`, `ai-qwen`, `ai-gemini`, or
+`ai-muse`, `ai-grok-review`, `ai-qwen`, `ai-gemini`, `ai-stepfun`, or
 `ai-deepseek-agent send --review --governed-verdict <sha> --model deepseek-flash`. Never override its model or
 reasoning pin, and never call `agy` directly.
 
