@@ -37,6 +37,9 @@ empty_hash="$(printf '' | sha256sum | awk '{print $1}')"
 identity_key="$(printf '3 %s %s' "$HOST" "$credential_hash" | sha256sum | awk '{print $1}')"
 identity_file="$STATE/identities/$identity_key"
 salt_file="$STATE/principal-salt"
+# A FIFO or other non-regular salt must be ignored without blocking on read.
+[ -f "$identity_file" ] && [ -f "$salt_file" ] || exit 1
+[ ! -L "$identity_file" ] && [ ! -L "$salt_file" ] || exit 1
 if [ "$windows" -eq 1 ]; then
   acl_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/secure-windows-path.ps1"
   [ -f "$acl_helper" ] && command -v powershell.exe >/dev/null 2>&1 &&

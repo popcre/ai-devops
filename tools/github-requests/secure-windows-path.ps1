@@ -22,11 +22,28 @@ $write = [Security.AccessControl.FileSystemRights]::Write -bor
   [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
   [Security.AccessControl.FileSystemRights]::TakeOwnership
 
+function Get-PathAcl([string]$LiteralPath) {
+  # Get-Acl lives in Microsoft.PowerShell.Security and can fail to import when
+  # Windows PowerShell type data is already registered. The .NET accessors
+  # always work and return the same descriptor.
+  if ([IO.Directory]::Exists($LiteralPath)) {
+    return [IO.Directory]::GetAccessControl($LiteralPath)
+  }
+  return [IO.File]::GetAccessControl($LiteralPath)
+}
+
 function Assert-PathAcl([string]$LiteralPath, [bool]$Private, [bool]$Directory) {
+  # File.Exists is false for named pipes, devices and directories and does not
+  # open them, so a FIFO fixture cannot hang this verifier before it is rejected.
+  if ($Directory) {
+    if (-not [IO.Directory]::Exists($LiteralPath)) { throw 'invalid path type' }
+  } elseif (-not [IO.File]::Exists($LiteralPath)) {
+    throw 'invalid path type'
+  }
   $item = Get-Item -LiteralPath $LiteralPath -Force
   if ([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
       $item.PSIsContainer -ne $Directory) { throw 'invalid path type' }
-  $acl = Get-Acl -LiteralPath $LiteralPath
+  $acl = Get-PathAcl $LiteralPath
   $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
   if (($Private -and $Directory -and $owner -ne $current.Value) -or
       ($owner -notin $trusted)) {
