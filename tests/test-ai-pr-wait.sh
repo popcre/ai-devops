@@ -193,7 +193,7 @@ check "nothing else in the repository hand-rolls a pull-request wait loop" \
 
 # --------------------------------------------------------------------------
 # Task gate. A documentation-only pull request must not start a long wait at
-# all, and the owner may still ask for one.
+# all, and an assigned AI reviewer APPROVE of the exact head may still lift that.
 # --------------------------------------------------------------------------
 GR="$TMP/gated"; mkdir -p "$GR"; git -C "$GR" init -q --initial-branch=main
 git -C "$GR" config user.name Test; git -C "$GR" config user.email t@example.com
@@ -213,8 +213,13 @@ check "the refusal names the admin squash merge instead" \
 check "the refusal explains which gate applied" \
   "grep -q ai-task-gates '$GATE_OUT'"
 
-OUT="$( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 0 --owner-request 'Albert asked for the wait' 2>&1 )"; RC=$?
-check "an owner-requested wait passes the gate and reaches the normal checks" \
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
+export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
+LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
+appr_file(){ mint_reviewer_approval "$TMP" "$1" plan-review; }
+WAIT_APPROVAL="$(appr_file "$GR" pr-wait "$ROOT/bin/ai-task-gates")"
+OUT="$( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 0 --reviewer-approval "$WAIT_APPROVAL" 2>&1 )"; RC=$?
+check "a reviewer-approved wait passes the gate and reaches the normal checks" \
   "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'positive whole number'"
 
 printf 'select 1;\n' > "$GR/migration.sql"

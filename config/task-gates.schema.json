@@ -38,7 +38,7 @@
       }
     },
     "change_classes": {
-      "description": "What a change can be. Central file only. `rank` orders strength and the strongest matching class always wins; a `protected` class can never be acknowledged or owner-requested away.",
+      "description": "What a change can be. Central file only. `rank` orders strength and the strongest matching class always wins; a `protected` class can never be acknowledged or reviewer-approved away.",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": {
