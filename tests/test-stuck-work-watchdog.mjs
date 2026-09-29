@@ -142,6 +142,7 @@ test('ai-devops quota failure: re-run once per head SHA, then fixer issue', asyn
   await run({ token: 't', rerunToken: 'r', now: NOW, fetchImpl: second.fetchImpl, log: () => {} });
   assert.ok(!second.writes.some((w) => /rerun/.test(w)), 'no second re-run on the same SHA');
   assert.ok(second.writes.includes('POST /repos/popcre/ai-devops/issues/42/comments'), 'Owner comment names the fixer');
+  assert.ok(second.writes.includes('POST /repos/popcre/ai-devops/issues/50/labels'), 'a re-run marker issue still red is handed to the fixer');
 
   const forged = fakeGitHub({ ...base, issues: { 'ai-devops:stuck-fixer': [{ ...issue, user: { login: 'u2giants' } }] } });
   await run({ token: 't', rerunToken: 'r', now: NOW, fetchImpl: forged.fetchImpl, log: () => {} });
