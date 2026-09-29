@@ -1391,12 +1391,18 @@ check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-
 # the completed review, and unwired providers note-and-retain. These checks
 # use a private sandbox root so retention cases leave nothing on the machine.
 SBXROOT="$POOLTMP/sbxroot"; mkdir -p "$SBXROOT"
+# The sandbox tool canonicalizes its root with pwd -P, so compare against the
+# resolved spelling — the raw mktemp path diverges on the Windows lanes
+# (same hazard the suite already documents near the gemini checks).
+SBXROOT="$(cd "$SBXROOT" && pwd -P)"
 rm -f "$POOLTMP/delete-log"
+REL_BASE="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" bash "$POOL" muse final-check ) > "$POOLTMP/out-rel" 2>&1; RC_REL=$?
 REL_DELETE_COUNT="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
 REL_PWD="$(sed -n 's/^pwd=//p' "$POOLTMP/delete-log" 2>/dev/null | tail -1)"
-check "pool_muse_success_releases_the_one_shot_session" "[ '$RC_REL' -eq 0 ] && [ '$REL_DELETE_COUNT' -ge 1 ]"
+check "pool_muse_success_releases_the_one_shot_session" "[ '$RC_REL' -eq 0 ] && [ '$REL_DELETE_COUNT' -eq $(( REL_BASE + 1 )) ]"
 check "pool_muse_release_runs_from_inside_the_snapshot" "case '$REL_PWD' in '$SBXROOT'/pool-muse-*) true;; *) false;; esac"
+check "pool_muse_success_keeps_the_report_path_last" "case \"\$(tail -1 '$POOLTMP/out-rel')\" in *.md) true;; *) false;; esac"
 DEL_BASE="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" AI_KEEP_SANDBOX=1 bash "$POOL" muse final-check ) > "$POOLTMP/out-keep" 2>&1; RC_KEEP=$?
 DEL_AFTER_KEEP="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
@@ -1411,6 +1417,7 @@ check "pool_muse_stale_review_retains_the_session" "[ '$RC_RELDRIFT' -ne 0 ] && 
 rm -f "$POOLTMP/flip"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" POOL_RUNNER_DELETE_MODE=refuse bash "$POOL" muse final-check ) > "$POOLTMP/out-reldeny" 2>&1; RC_DENY=$?
 check "pool_muse_refused_release_never_fails_the_review" "[ '$RC_DENY' -eq 0 ] && grep -q 'session release refused' '$POOLTMP/out-reldeny' && grep -q 'retained until sweep' '$POOLTMP/out-reldeny'"
+check "pool_muse_refused_release_keeps_the_report_path_last" "case \"\$(tail -1 '$POOLTMP/out-reldeny')\" in *.md) true;; *) false;; esac"
 GRK_BASE="$(grep -c '^delete pool-grok-' "$POOLTMP/runner-args" 2>/dev/null || true)"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" bash "$POOL" grok security-review ) > "$POOLTMP/out-grkrel" 2>&1; RC_GRKREL=$?
 GRK_AFTER="$(grep -c '^delete pool-grok-' "$POOLTMP/runner-args" 2>/dev/null || true)"
