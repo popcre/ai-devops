@@ -39,7 +39,7 @@ Put this WHOLE list to Albert in ONE message before starting work.
 
 **Done and verified**
 - Jev classified 1,346 unique session digests (from ~2,079 files). 40 discarded at confidence >90% not-related; 1,306 remainder. Scratch: `%TEMP%\jev_digests.jsonl`, `jev_classified.jsonl`, `jev_remainder.jsonl`.
-- Subagent deep-read 22 transcripts and wrote 9 ranked process improvements: `%TEMP%\jev_process_improvements.md` (also presented in chat).
+- Subagent deep-read 22 transcripts and wrote 9 ranked process improvements. **Full substance is in §5a of this file** (TEMP copy may be gone).
 - Skill `C:\Users\ahazan\.config\mimocode\skills\jev-transcript-classify\SKILL.md` rewritten with archive layout, batching, polarity, privacy, and what not to do. Locales already present.
 - GLM critique completed (session `jev-plan-critique-20260929`, model glm-5.3). Verdict **REVISE**. Report: `C:/repos/ai-devops/.ai/reviews/glm-jev-plan-critique-20260929-b33a60737869a5b249f9e0c80ad81ab56a39d68e1c56f29c44b70dcb4701730b.md`.
 - Root cause of `snapshot-digest-mismatch`: `source_inventory` hashed `git diff HEAD` text; shallow snapshots abbreviate the index line to a different width than the full ODB. Fix: `--full-index` in `bin/ai-review-sandbox`.
@@ -68,6 +68,32 @@ Put this WHOLE list to Albert in ONE message before starting work.
 7. **Sending full transcript JSONL to Jev** — never done (privacy). Digests only. The 2026-09-15 ~19:00–19:45 canned burst is evaluation fixtures (~122 sessions); exclude from evidence.
 
 ## 5. Root causes and key findings
+
+### 5a. Transcript-mined process findings (the substance — do not lose this)
+
+Corpus: 1,306 sessions (2026-09-08→09-29; codex 877 / claude 400 / grok 29) after Jev dropped 40 clearly unrelated. 122 were the 2026-09-15 fixture burst (canned one-liners — ignore). 22 substantial transcripts deep-read; paraphrases only.
+
+**Pattern (executive):** pain is the toolkit's own reviewer/CI machinery failing closed or hanging — not app bugs. All four rotation reviewers dead on one machine; review server hang/crash loop for days; doctor blew its own 60s preflight so every review failed; one bare PASS with empty report. CI is one funnel (flaky wall-clock tests re-ran ~6h suites ~25× in 24h; ~30 queued runs). Shared 5,000/hr GitHub quota. Sessions overshoot (multi-day, 3–5 compactions, 14h orphans, repeat loops). Registry/install drift.
+
+| # | Finding (short) | Evidence (counts / named sessions) | Proposed change | GLM cut (2026-09-29) |
+|---|---|---|---|---|
+| 1 | Reviewer registry in two places rots; empty verdict → false green | ~116 reviewer-keyword sessions; #686 (4 preflights dead, 2 days), #285, #283 | One registry + drift CI; empty verdict = FAILURE; lease TTL | **Shrink to S residuals:** lease TTL/reclaim + empty-report → mark provider unavailable. Registry/empty-report fail-closed largely **already exist** (`bin/ai-reviewer-membership-drift`, `bin/ai-review-pool` empty-report). Verify whether the cited incident predates that merge. |
+| 2 | Preflight/doctor does sweeps and times out — fleet-wide review outage | Deep reads: ai-glm doctor >60s; Muse 10s preflight; OpenCode crash loop | Cheap O(1) preflight only; sweeps to scheduled maintenance; wall-time regress check | **KEEP — do first (S not M).** Strongest item. Smallest first PR: remove prune/reconcile from doctor preflight + generous upper-bound regress check. |
+| 3 | Pin bump after auto-update took two days / full re-qual | #686 Grok UNQUALIFIED after self-update; 7 preflight-friction sessions | Pin-only lane: hash + doctor + one smoke; auto-quarantine on mismatch | **KEEP (S).** Still needs independent exact-head review for reviewer-safety; lane does not replace it. |
+| 4 | Wall-clock asserts flaked; 24h no-progress suite loops | ~42 CI sessions; flaky #89 tests; test-infra redesign | Ban wall-clock asserts; suite timeouts; no-progress detector | **Partial.** Overlaps #650 / `plan_workflow-efficiency` P3/P6/P7. New slice = no-progress detector + per-suite auto-cancel. **Contradiction with #2:** ban must exempt generous upper-bound regress checks (doctor). |
+| 5 | Shared 5,000/hr GitHub quota; holds on rate-limit | ~29 quota sessions; rate-limit separation work; #658 data | Apps-per-workload; lint away direct `gh`; show remaining quota | **Re-scope, drop L multi-App.** Finish #658 P5 (BlockerWatch → existing App) first; then measure. Lint + quota display are cheap. |
+| 6 | Multi-day sessions, orphans, cold BlockerWatch wakeups | 105 handoff/continuation; 21 loop/24h; Qwen 14h task; StepFun repeat loop | One unproven outcome/session (already a rule); task TTL+reap; resume-on-wake | **Mostly already shipped** (`plan_live-proof-session-sizing`). Residues: TTL/reap + wakeup resume (under BlockerWatch plan). Do not re-propose the locked sentence. |
+| 7 | Collisions; superseded-head reviews; handoffs that block free work | 64 worktree/collision; owner "LOT of collisions"; #2026-09-28 blocked-sessions | Hard pre-edit claims + CI reject unclaimed diffs | **Wrong fix as specified.** #131 already chose **advisory-first** then measure. Do not hard-gate yet. Handoff rule: ban condition-free *technical* "do not" only — **owner rulings stay exempt**. |
+| 8 | Install/MCP drift rediscovered by hand (PATH dupes, stale `op://`, SSH) | 57 install/MCP sessions; qwen 0.21 vs 0.23; "half of MCP failing" | `ai-fleet-doctor` at session start | **Reuse `ai-machine-tools-doctor`**, cached/scheduled — not a new full sweep in the check path (that repeats bug #2). |
+| 9 | No single "why is nothing moving" for queue/cost | Deep reads: ENVY/Windows runner, merge queue, Blacksmith cost; 42 CI-queue | `ai-ci-status` + lane policy | **KEEP** (genuinely new, read-only). Auto-cancel of "superseded" queue entries is risky — needs a precise definition or it kills exact-head evidence (review-packet race plan). |
+
+**GLM's missing adds:** (a) one-page loss ledger (incident class → hours lost → owning plan) so ranking is by cost not vividness; (b) explicit plan-backlog consolidation session (~40 `plan_*.md` already; this proposal would be #41).
+
+**GLM verdict:** REVISE — do not add a new parallel programme. Keep 2, 3, 9; fold 1/4/5/6/7 into #658, #650, #131, live-proof-session-sizing, BlockerWatch. First proving PR = doctor sweep removal + wall-time regress check. Second = pin-only lane.
+
+**Disregarded (do not re-mine as signal):** 2026-09-15 fixture burst; Grok id-stub sessions; product/app work (Supabase/ColdLion/Disney); shared-db mega-sessions except toolkit-failure excerpts. Full TEMP report may be gone: `C:\Users\ahazan\AppData\Local\Temp\jev_process_improvements.md`.
+
+### 5b. Tooling findings
 
 - **`snapshot-digest-mismatch` root cause** (`bin/ai-review-sandbox` `source_inventory`): `git diff --binary HEAD` embeds an `index 001754a1..404441ad` line whose abbreviation width depends on ODB size. Shallow review snapshot vs full source → different bytes → different sha256 → packet validation dies. `--full-index` forces 40-hex SHAs. Verified: source digest == snapshot digest after the change (live diag on edge-dev).
 - **Second contributor:** untracked files that change during snapshot build (e.g. another session writing `plan_shared-db-coordination-deletion.md`) also break equality. `create_or_refresh` retries twice; continuous writers still fail. Keep the tree quiet during packet builds.
