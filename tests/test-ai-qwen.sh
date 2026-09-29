@@ -887,6 +887,7 @@ export DEVOPS_MCP_TOKEN=must-not-reach-preloaded SUPABASE_ACCESS_TOKEN=must-not-
 export DATABASE_URL=must-not-reach-preloaded AWS_PROFILE=must-not-reach-preloaded SSH_AUTH_SOCK=must-not-reach-preloaded lowercase_secret=must-not-reach-preloaded
 echo review > "$TMP/mode"; run new preloaded-credential-boundary --prompt review >/dev/null 2>&1
 check 'preloaded-key Qwen process also receives no unrelated credentials' "grep -qx BAILIAN_CODING_PLAN_API_KEY '$TMP/qwen-credential-names' && ! grep -Eq 'DEVOPS|SUPABASE|RANDOM|DATABASE_URL|AWS_PROFILE|SSH_AUTH_SOCK|lowercase_secret' '$TMP/qwen-env'"
+check 'sandboxed Qwen can load the preloader: it is mounted read-only at its own path (#1032)' "grep -Eq '^SANDBOX_MOUNTS=(/[^,]*)/qwen-provider-env-preload.cjs:\1/qwen-provider-env-preload.cjs:ro$' '$TMP/qwen-env' && grep -Eq '^NODE_OPTIONS=--require=.*/qwen-provider-env-preload.cjs$' '$TMP/qwen-env'"
 EXPECTED_QWEN_HOME="$AI_QWEN_HOME"
 EXPECTED_QWEN_HOME_ALT="$AI_QWEN_HOME"
 if [ -n "${SYSTEMROOT:-}" ]; then EXPECTED_QWEN_HOME="$(cygpath -w "$AI_QWEN_HOME")"; EXPECTED_QWEN_HOME_ALT="$(cygpath -m "$AI_QWEN_HOME")"; fi
