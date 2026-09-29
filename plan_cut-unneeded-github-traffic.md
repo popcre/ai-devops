@@ -12,6 +12,8 @@ Linked handoff (this session):
 
 ## STATUS — read first
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** steps below that require a leftover-proof issue instead leave a proof-gap checklist item on the **same** issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Mentions of leftover-proof issues in this file are historical.
+
 | Step | State | Owner / dependency | Evidence required to accept |
 |---|---|---|---|
 | S1. Land BlockerWatch snapshot reuse (P5 REST savings) | Code through #923 merged; 134 replay/tick checks and two prior edge-dev ticks passed. Category-level live savings remain unproved in #868 because installed telemetry predates #929. | #868 live-proof owner; installer #950 | One normal scheduled tick after install with snapshot, dependents, wake, alarm, and link category evidence |
@@ -274,8 +276,10 @@ knob is required (do not change intervals).
    or `tools/github-requests` telemetry) showing: one snapshot build, zero
    dependents REST calls when the inverted index hits, wake REST only on miss.
 9. Open a PR (code ⇒ normal checks + merge queue). In the landing session, if
-   live proof is not finished, open **exactly one** leftover-proof issue and
-   name it in this STATUS. Do not bundle S2.
+   live proof is not finished, leave a `- [ ] live proof` checklist item on the
+   same issue and name it in this STATUS (leftover-proof issues superseded
+   2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
+   Do not bundle S2.
 
 **Verification gate — you'll know it worked when:**
 - `tests/test-ai-blocker-watch.sh` and `tests/test-ai-blocker-watch-replay.sh`
@@ -409,7 +413,10 @@ inventory disposition only; do not pool with the user quota.
 2. Update `plan_github-request-reduction.md` STATUS: mark #809 done (cite
    `5f8cf19b` / #853), mark P5 REST savings done when S1 proof exists, note S2
    and S3 landings, and point remaining P5/P4/P3 rows at this plan's steps.
-3. Close leftover-proof issues opened by S1–S3, or name who owns the last one.
+3. Close any historical leftover-proof issues opened by S1–S3, or name who owns
+   the last one. New proof gaps are checklist items on the same issue
+   (leftover-proof issues superseded 2026-09-29 by
+   [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 4. Do **not** claim the parent P8 acceptance contract (50%/30% targets) from a
    small sample — those remain programme-level (parent §13).
 
@@ -453,7 +460,9 @@ inventory disposition only; do not pool with the user quota.
 - **Long waits (>~10 min)** are registered with `ai-blocker-watch wait`, then
   the turn ends. Polling inside a turn is the exception.
 - **One unproven live outcome per session.** If code lands without live proof,
-  open exactly one leftover-proof issue before the session ends.
+  leave a `- [ ] live proof` checklist item on the same issue before the session
+  ends (leftover-proof issues superseded 2026-09-29 by
+  [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 - **Do not rewrite** root `HANDOFF.md` (static pointer). One new
   `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` per session.
 - **Sign GitHub posts** with `Posted by MiMo chat <id> on <machine>`.
@@ -492,7 +501,7 @@ inventory disposition only; do not pool with the user quota.
 - [ ] S3 landed + inventory disposition complete + bypass regression green
 - [ ] S4 dated after-sample filed + parent STATUS de-staled (#809 marked done
       with `5f8cf19b`)
-- [ ] Every step's leftover-proof issue resolved or explicitly owned
+- [ ] Every step's proof gap resolved on its own issue (same-issue checklist; leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)) or explicitly owned
 - [ ] Commits on `origin/main` cited by SHA; required CI green (or docs-only
       admin merge where applicable)
 - [ ] This plan STATUS updated by whoever did the work

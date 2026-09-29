@@ -5,6 +5,8 @@ Registered handoff: [`HANDOFF.d/2026-09-24T1605Z-edge-dev-zcode-model-tier-deleg
 
 ## STATUS — read this first
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** parent/child issue trees are deleted as process. Track remaining work as a checklist on the existing issue (#782); do not open child issues. Mentions of parent/child trees in this file are historical.
+
 | # | Step | Status | Evidence |
 |---|------|--------|----------|
 | 0 | Plan written, registered in `HANDOFF.d/`, parent issue opened | ✅ done 2026-09-24 | This file merged on `main` (see git log for `plan_model_tier_delegation.md`); [issue #782](https://github.com/popcre/ai-devops/issues/782) first comment links it |

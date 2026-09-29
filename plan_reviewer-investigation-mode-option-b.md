@@ -14,6 +14,8 @@ Correction baseline: `origin/main` `2719315e13fc6e3cb99511dced33915ea46f4d47` (2
 
 ## STATUS — read this first
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** parent/child issue trees are deleted as process. Track remaining work as a checklist on the existing issue (#253); do not open child issues. Mentions of parent/child trees and children #254–#257 / #513 in this file are historical.
+
 | Step | Owner issue | Status | Evidence |
 |---|---:|---|---|
 | 0. Re-resolve source truth, ownership, and current pins | #253 | ⬜ open | Full multi-provider baseline directory was not written; #513 used a Grok-only live doctor. Do not treat Step 0 as done. |
