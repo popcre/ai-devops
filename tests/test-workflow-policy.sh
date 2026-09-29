@@ -56,22 +56,22 @@ check 'every fixed non-preferred Windows job runs on Blacksmith; routed sections
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
-check 'docs are prose-only' "classify pull_request 'docs/example.md' | grep -q '^run_long=false$'"
-check 'root plans are prose-only' "classify pull_request 'plan_example.md' | grep -q '^run_long=false$'"
-check 'skills always run long' "classify pull_request 'skills/shared/example/SKILL.md' | grep -q '^run_long=true$'"
-check 'code runs long' "classify pull_request 'bin/ai-example' | grep -q '^run_long=true$'"
-check 'workflow changes run long' "classify pull_request '.github/workflows/verify.yml' | grep -q '^workflow=true$'"
-check 'PowerShell changes run long' "classify pull_request 'tests/example.ps1' | grep -q '^powershell=true$'"
-check 'test fixtures run long' "classify pull_request 'tests/fixtures/example/data.md' | grep -q '^test_fixtures=true$'"
-check 'unrelated code skips reviewer lane' "classify pull_request 'bin/ai-example' | grep -q '^reviewer=false$'"
+check 'docs are prose-only' "classify pull_request 'docs/example.md' | grep '^run_long=false$' >/dev/null"
+check 'root plans are prose-only' "classify pull_request 'plan_example.md' | grep '^run_long=false$' >/dev/null"
+check 'skills always run long' "classify pull_request 'skills/shared/example/SKILL.md' | grep '^run_long=true$' >/dev/null"
+check 'code runs long' "classify pull_request 'bin/ai-example' | grep '^run_long=true$' >/dev/null"
+check 'workflow changes run long' "classify pull_request '.github/workflows/verify.yml' | grep '^workflow=true$' >/dev/null"
+check 'PowerShell changes run long' "classify pull_request 'tests/example.ps1' | grep '^powershell=true$' >/dev/null"
+check 'test fixtures run long' "classify pull_request 'tests/fixtures/example/data.md' | grep '^test_fixtures=true$' >/dev/null"
+check 'unrelated code skips reviewer lane' "classify pull_request 'bin/ai-example' | grep '^reviewer=false$' >/dev/null"
 check 'every declared reviewer dependency selects reviewer lane' \
   ". '$ROOT/tools/lib/task-gates.sh'; while IFS= read -r pattern; do pattern=\${pattern%\$'\\r'}; case \"\$pattern\" in ''|'#'*) continue ;; esac; sample=\${pattern//\*\*\/nested\/file}; sample=\${sample//\*/file}; tg_legacy_classify pull_request <<<\"\$sample\" | grep -q '^reviewer=true$' || exit 1; done < '$ROOT/config/reviewer-ci-paths.txt'"
 check 'reviewer path policy is safe after a Windows CRLF checkout' \
   "tmp=\$(mktemp -d); mkdir -p \"\$tmp/config\"; sed 's/\$/\\r/' '$ROOT/config/reviewer-ci-paths.txt' >\"\$tmp/config/reviewer-ci-paths.txt\"; saved_root=\$TG_LIB_REPO_ROOT; TG_LIB_REPO_ROOT=\$tmp; result=\$(tg_legacy_classify pull_request <<<'bin/ai-codex-review'); TG_LIB_REPO_ROOT=\$saved_root; rm -rf \"\$tmp\"; grep -Fqx 'reviewer=true' <<<\"\$result\""
 check 'representative shared reviewer paths select reviewer lane' \
   ". '$ROOT/tools/lib/task-gates.sh'; for path in 'tools/reviewer_event_guard.sh' 'tools/reviewer_events.py' 'tools/reviewer_maintenance.py' 'tools/lib/provider-wrapper-common.sh' 'config/provider-cli-versions.json' 'tests/lib-test-timing.sh' '.github/workflows/verify.yml'; do tg_legacy_classify pull_request <<<\"\$path\" | grep -q '^reviewer=true$' || exit 1; done"
-check 'non-PR events always run reviewer lane' "classify schedule 'docs/example.md' | grep -q '^reviewer=true$' && classify workflow_dispatch 'docs/example.md' | grep -q '^reviewer=true$'"
-check 'non-PR events always run long' "classify schedule 'docs/example.md' | grep -q '^run_long=true$' && classify workflow_dispatch 'docs/example.md' | grep -q '^run_long=true$' && classify merge_group 'docs/example.md' | grep -q '^run_long=true$'"
+check 'non-PR events always run reviewer lane' "classify schedule 'docs/example.md' | grep '^reviewer=true$' >/dev/null && classify workflow_dispatch 'docs/example.md' | grep '^reviewer=true$' >/dev/null"
+check 'non-PR events always run long' "classify schedule 'docs/example.md' | grep '^run_long=true$' >/dev/null && classify workflow_dispatch 'docs/example.md' | grep '^run_long=true$' >/dev/null && classify merge_group 'docs/example.md' | grep '^run_long=true$' >/dev/null"
 check 'mixed changes fail closed' "printf 'docs/example.md\nbin/ai-example\n' | bash '$classifier' pull_request | grep -q '^run_long=true$'"
 check 'skills-to-docs rename paths fail closed' "printf 'skills/shared/example/SKILL.md\ndocs/example.md\n' | bash '$classifier' pull_request | grep -q '^run_long=true$'"
 
