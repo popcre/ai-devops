@@ -34,33 +34,21 @@ EOF
 
 # Session client: like Claude, owns the helper's stdin and can close it.
 cat > "$TMP/session.js" <<'EOF'
-// usage: session.js <guard.mjs> <hold.js> <pidfile> <mode>
-//   mode=hold     — start helper, keep stdin open forever (write READY)
-//   mode=eof      — start helper, keep stdin open until READY, then end stdin
-//   mode=kill     — start helper under a child we will not signal (parent death)
+// usage: session.js <guard.mjs> <pidfile> <mode> <command> [args...]
+//   mode=hold — keep stdin open;  mode=eof — end stdin after the helper starts.
 const { spawn } = require('child_process')
 const fs = require('fs')
-const [guard, hold, pidfile, mode] = process.argv.slice(2)
+const [guard, pidfile, mode, command, ...rest] = process.argv.slice(2)
 
-const child = spawn(process.execPath, [guard, process.execPath, hold, pidfile], {
+const child = spawn(process.execPath, [guard, command, ...rest], {
   stdio: ['pipe', 'inherit', 'inherit'],
 })
-child.stdin.write('') // ensure the pipe exists
+child.stdin.write('')
 const ready = setInterval(() => {
   if (fs.existsSync(pidfile) && fs.statSync(pidfile).size > 0) {
     clearInterval(ready)
     process.stdout.write('READY\n')
-    if (mode === 'eof') {
-      // Client goes away shortly — leave time for the test to observe the live helper.
-      setTimeout(() => child.stdin.end(), 300)
-    }
-    if (mode === 'kill') {
-      // Parent death: this session process is about to be SIGKILLed by the test.
-      // Keep the stdin write end open (via this process) until we are killed.
-    }
-    if (mode === 'hold') {
-      // stay alive holding stdin
-    }
+    if (mode === 'eof') setTimeout(() => child.stdin.end(), 300)
   }
 }, 50)
 child.on('exit', (code) => process.exit(code ?? 0))
@@ -85,7 +73,7 @@ echo "== mcp-session-guard"
 
 # --- 1. stdin EOF reaps the helper tree ---------------------------------
 rm -f "$TMP/pid1" "$TMP/pid1.kid"
-"$NODE" "$TMP/session.js" "$GUARD" "$TMP/hold.js" "$TMP/pid1" eof \
+"$NODE" "$TMP/session.js" "$GUARD" "$TMP/pid1" eof "$NODE" "$TMP/hold.js" "$TMP/pid1" \
   >"$TMP/out1" 2>"$TMP/err1" &
 SESSION=$!
 wait_ready "$TMP/pid1" || fail "helper did not start (stdin-eof case): $(cat "$TMP/err1" 2>/dev/null)"
@@ -102,7 +90,7 @@ ok "stdin_eof_kills_helper_and_grandchild"
 # Killing the session closes its stdin write end — the same event an OOM
 # SIGKILL produces. The guard must reap npx/node grandchildren too.
 rm -f "$TMP/pid2" "$TMP/pid2.kid"
-"$NODE" "$TMP/session.js" "$GUARD" "$TMP/hold.js" "$TMP/pid2" hold \
+"$NODE" "$TMP/session.js" "$GUARD" "$TMP/pid2" hold "$NODE" "$TMP/hold.js" "$TMP/pid2" \
   >"$TMP/out2" 2>"$TMP/err2" &
 SESSION=$!
 wait_ready "$TMP/pid2" || fail "helper did not start (session-kill case): $(cat "$TMP/err2" 2>/dev/null)"
@@ -123,6 +111,8 @@ set -e
 ok "child_exit_code_forwarded"
 
 # --- 4. Windows .cmd shims must start (H1: spawn cannot run batch files) ---
+# Drive it through session.js so stdin is a live pipe (CI's inherited stdin is
+# already EOF and would reap the helper before the assertion).
 if [ "$OSTYPE" = "msys" ] || [ "$OSTYPE" = "cygwin" ] || [ -n "${WINDIR:-}" ]; then
   TMP_WIN="$(cygpath -w "$TMP" 2>/dev/null || echo "$TMP")"
   NODE_WIN="$(cygpath -w "$(command -v "$NODE")" 2>/dev/null || echo "$NODE")"
@@ -132,15 +122,17 @@ if [ "$OSTYPE" = "msys" ] || [ "$OSTYPE" = "cygwin" ] || [ -n "${WINDIR:-}" ]; t
 EOF
   rm -f "$TMP/pidcmd" "$TMP/pidcmd.kid"
   HOLD_CMD_WIN="$(cygpath -w "$TMP/hold.cmd")"
-  "$NODE" "$GUARD" "$HOLD_CMD_WIN" >"$TMP/outcmd" 2>"$TMP/errcmd" &
+  # session.js expects (guard, hold.js-or-cmd, pidfile, mode). Pass the .cmd as
+  # the "hold" command; the guard wraps it in cmd /c.
+  "$NODE" "$TMP/session.js" "$GUARD" "$TMP/pidcmd" eof "$HOLD_CMD_WIN" \
+    >"$TMP/outcmd" 2>"$TMP/errcmd" &
   GUARD_CMD=$!
   wait_ready "$TMP/pidcmd" || fail "helper did not start via .cmd shim: $(cat "$TMP/errcmd" 2>/dev/null)"
   HELPER_PID="$(cat "$TMP/pidcmd")"
-  alive "$HELPER_PID" || fail "cmd shim helper not alive"
-  kill "$GUARD_CMD" 2>/dev/null || true
+  alive "$HELPER_PID" || fail "cmd shim helper not alive (pid $HELPER_PID; err=$(cat "$TMP/errcmd" 2>/dev/null))"
   wait "$GUARD_CMD" 2>/dev/null || true
-  sleep 0.5
-  alive "$HELPER_PID" && fail "cmd shim helper leaked after guard exit (pid $HELPER_PID)"
+  sleep 1
+  alive "$HELPER_PID" && fail "cmd shim helper leaked after stdin EOF (pid $HELPER_PID; err=$(cat "$TMP/errcmd" 2>/dev/null))"
   ok "windows_cmd_shim_starts_and_reaps"
 else
   ok "windows_cmd_shim_starts_and_reaps (skipped, not Windows)"

@@ -28,8 +28,8 @@ EOF
 cat > "$TMP/session.js" <<'EOF'
 const { spawn } = require('child_process')
 const fs = require('fs')
-const [guard, hold, pidfile, mode] = process.argv.slice(2)
-const child = spawn(process.execPath, [guard, process.execPath, hold, pidfile], {
+const [guard, pidfile, mode, command, ...rest] = process.argv.slice(2)
+const child = spawn(process.execPath, [guard, command, ...rest], {
   stdio: ['pipe', 'inherit', 'inherit'],
 })
 const ready = setInterval(() => {
@@ -37,7 +37,6 @@ const ready = setInterval(() => {
     clearInterval(ready)
     process.stdout.write('READY\n')
     if (mode === 'eof') setTimeout(() => child.stdin.end(), 200)
-    if (mode === 'hold') { /* keep stdin */ }
   }
 }, 50)
 child.on('exit', (code) => process.exit(code ?? 0))
@@ -48,7 +47,7 @@ BASE=$(node_count)
 
 pids=()
 for i in 1 2 3; do
-  "$NODE" "$TMP/session.js" "$ROOT/bin/mcp-session-guard.mjs" "$TMP/hold.js" "$TMP/pid$i" hold \
+  "$NODE" "$TMP/session.js" "$ROOT/bin/mcp-session-guard.mjs" "$TMP/pid$i" hold "$NODE" "$TMP/hold.js" "$TMP/pid$i" \
     >"$TMP/out$i" 2>"$TMP/err$i" &
   pids+=($!)
 done
