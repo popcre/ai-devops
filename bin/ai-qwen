@@ -106,6 +106,10 @@ if [ "$allow_key" = 1 ]; then
   printf "%s\n" "$keep_qwen_key" > "$secret_file" || exit 87
   unset keep_qwen_key
   clean_env+=("AI_QWEN_SECRET_FILE=$secret_file" "NODE_OPTIONS=--require=$preload" "OPENAI_BASE_URL=$base_url" "OPENAI_MODEL=$model")
+  # Issue #1032: --sandbox forwards NODE_OPTIONS into the container, so the
+  # preloader must exist there at the same path (read-only). Inside the
+  # container AI_QWEN_SECRET_FILE is already gone, so it is a no-op.
+  clean_env+=("SANDBOX_MOUNTS=$preload:$preload:ro")
 fi
 [ -z "${AI_QWEN_TEST_DIR:-}" ] || clean_env+=("AI_QWEN_TEST_DIR=$AI_QWEN_TEST_DIR")
 exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c '\''exec "$@"'\'' qwen-clean "$@"
