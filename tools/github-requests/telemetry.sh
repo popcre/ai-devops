@@ -209,12 +209,13 @@ gh_measure_quota_rows(){
       search) search=("$remaining" "$limit" "$reset") ;;
     esac
   done <<< "${1:-}"
-  gh_measure_quota "${core[@]}" "${graphql[@]}" "${search[@]}"
+  gh_measure_quota "${core[@]}" "${graphql[@]}" "${search[@]}" "${2:-}"
 }
 
 # No extra request and no change to the upstream resource admission semantics.
 gh_measure_quota(){
-  local bucket record=''; local remaining limit reset
+  local bucket record='' context="${10:-}" context_json=null; local remaining limit reset
+  [[ "$context" =~ ^v1:[0-9a-f]{64}$ ]] && context_json="\"$context\""
   for bucket in core graphql search; do
     remaining="${1:-unknown}"; limit="${2:-unknown}"; reset="${3:-unknown}"
     if [[ "$remaining" =~ ^[0-9]{1,10}$ && "$limit" =~ ^[0-9]{1,10}$ && "$reset" =~ ^[0-9]{1,10}$ ]]; then
@@ -231,7 +232,7 @@ gh_measure_quota(){
   temp=$(umask 077; mktemp "$STATE/quota-observation.XXXXXX") || return 1
   # Retain bounded history as well as the latest observation, so normal probes
   # can establish reset-window bounds without a new sampling loop.
-  record=$(printf '{"schema":1,"utc":"%s","principal":"%s","measurement":"server_bucket_snapshot","buckets":{%s}}' "$utc" "${GH_MEASURE_PRINCIPAL:-unknown}" "$record")
+  record=$(printf '{"schema":1,"utc":"%s","principal":"%s","measurement":"server_bucket_snapshot","access_context":%s,"buckets":{%s}}' "$utc" "${GH_MEASURE_PRINCIPAL:-unknown}" "$context_json" "$record")
   printf '%s\n' "$record" > "$temp" || { rm -f -- "$temp"; return 1; }
   mv -f -- "$temp" "$dest" || { rm -f -- "$temp"; return 1; }
   gh_measure_append "$STATE/quota-measurements" "$record"

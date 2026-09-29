@@ -291,7 +291,7 @@ for handing Kimi a packet that violates its measured read limit.
 3. **Heartbeat interval:** default between 30 and 60 seconds. It must report phase, elapsed time, and last output growth without printing prompt or model text.
 4. **Startup deadline:** choose a measured bound, initially 60 seconds, for “provider/session actually started.” Keep the existing configurable full wall deadline for legitimate long reviews.
 
-These are engineering judgments. They do not need Albert unless live evidence shows that secure main-task routing cannot meet the ultimate goal.
+These are engineering judgments. They never need Albert; if live evidence shows that secure main-task routing cannot meet the ultimate goal, report it `Blocked —` for an assigned AI reviewer.
 
 ## 9. Ordered implementation plan
 
@@ -633,7 +633,7 @@ Dependencies: all earlier phases.
 - Do not use machine-wide `pgrep kimi` as liveness for a specific job. Track the exact owned child and its terminal files.
 - Kimi review sessions are directory-bound. Create them in their stable wrapper-owned workspace from turn one; never migrate a live review session by remote identity alone.
 - Do not prepend a diff-review packet to plan, architecture, or analysis work.
-- Do not create a Windows service or privileged broker without a new threat model and explicit owner approval.
+- Do not create a Windows service or privileged broker without a new threat model and an assigned AI reviewer's APPROVE (never Albert's approval — owner ruling 2026-09-28).
 - Do not edit the primary checkout's unrelated `.ai/` or documentation files.
 - No database or production access is required.
 - The plan is multi-phase. At the Phase C cut, start a fresh implementation session and re-read downstream steps before proceeding.
@@ -684,7 +684,7 @@ Dependencies: all earlier phases.
 
 1. **Detached worker leaks or runs after cancellation.** Mitigation: exact PID identity, owned process tree, terminal cleanup, and live cancellation test. Rollback: disable detached mode through a documented fail-closed switch and revert to synchronous main-task execution while preserving preflight.
 2. **Metadata says success too early.** Mitigation: only the worker finalizer can write `completed`, and only after terminal resume-hint validation. Rollback: treat all affected records as invalid and rerun reviews; never infer verdicts.
-3. **Credential leakage through logs or metadata.** Mitigation: allowlisted fields, bounded redaction tests, and independent security review. Rollback: stop use, remove only wrapper-owned artifacts after evidence capture, and follow the secrets incident procedure. Do not rotate credentials without Albert's approval.
+3. **Credential leakage through logs or metadata.** Mitigation: allowlisted fields, bounded redaction tests, and independent security review. Rollback: stop use, remove only wrapper-owned artifacts after evidence capture, and follow the secrets incident procedure. Do not rotate credentials except through the reviewed plan in `secrets-to-1password`; never ask Albert to approve.
 4. **Windows process detachment behaves differently under Codex.** Mitigation: live test in both direct PowerShell and the actual Codex execution path. If no safe detached primitive works, keep the preflight/main-task routing and use a foreground persistent terminal rather than a privileged service.
 5. **Kimi CLI behavior changes after upgrade.** Mitigation: version gate and re-run the STEP 0 qualification on every version bump.
 
@@ -694,7 +694,7 @@ Dependencies: all earlier phases.
 - Can Kimi's supported stream expose an earlier non-sensitive “session created” signal than output growth? If not, use process identity plus first valid stream record as startup proof.
 - Does the then-current Kimi release still support `KIMI_CODE_HOME` exactly as documented? Recheck official docs and a disposable-home canary before code changes.
 
-No owner decision is currently required. If implementation discovers that only a privileged broker or broader credential access can satisfy the goal, stop and ask Albert. Do not silently expand scope.
+No owner decision is currently required. If implementation discovers that only a privileged broker or broader credential access can satisfy the goal, stop and report it `Blocked —` for an assigned AI reviewer to rule on the scope change; never ask Albert. Do not silently expand scope.
 
 ## Mandatory plan self-audit
 

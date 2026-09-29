@@ -1,6 +1,6 @@
 ---
 name: stepfun
-description: Use StepFun Step 5 (step-5-preview) through ai-stepfun on Ubuntu/Linux only. Formal read-only reviews with a VERDICT line, read-only second opinions, and implementation runs that write and execute code in an isolated remote-less clone. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion. Not available on Windows.
+description: Use StepFun Step 5 (step-5-preview) through ai-stepfun on Ubuntu/Linux only. Formal reviews with a VERDICT line and second opinions (both may run code and edit files in a disposable remote-less copy), and implementation runs that write and execute code in an isolated remote-less clone. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion. Not available on Windows.
 ---
 
 # stepfun
@@ -27,11 +27,12 @@ agent, git or gh logins, 1Password token, or Docker socket). If
 ## Commands
 
 ```bash
-# Formal review: read-only tools, disposable copy, ends in
+# Formal review: read, shell, edit and write tools in a disposable
+# remote-less copy (edits discarded, never part of the PR), ends in
 # "VERDICT: APPROVE|REVISE|REJECT <head sha>"
 ai-stepfun review --repo . --base origin/main --prompt-file brief.md
 
-# Second opinion, read-only
+# Second opinion, same disposable writable copy
 ai-stepfun ask --repo . "Is this retry loop bounded?"
 
 # Implementation: StepFun may read, edit, write, and run commands, in a NEW
@@ -40,8 +41,10 @@ ai-stepfun ask --repo . "Is this retry loop bounded?"
 ai-stepfun implement --repo . --prompt-file task.md
 ```
 
-- Reviews and `ask` stay read-only by design: an independent review must not
-  change what it reviews. The power to write and execute is `implement`.
+- Reviews and `ask` are not read-only (owner instruction, #974): StepFun may
+  run builds and tests and edit files, but only in a disposable, remote-less
+  copy that is thrown away. The caller's checkout is checked unchanged and the
+  answer is rejected if it moved. Keeping changes is `implement`'s job.
 - After `implement`, inspect the diff in the printed `CLONE` folder, run the tests
   yourself, and only then carry the change into your own branch. StepFun's
   output is work to verify, not a finished change.

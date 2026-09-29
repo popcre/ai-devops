@@ -52,7 +52,7 @@ if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"private-provider-e
 elif [ -n "${DEEPSEEK_STUB_CREDIT:-}" ]; then cp "$DEEPSEEK_STUB_CREDIT" "$out"; printf 402
 elif [ -n "${DEEPSEEK_STUB_TOOLCALL:-}" ] && { [ "${DEEPSEEK_STUB_TOOLCALL_ALWAYS:-0}" = 1 ] || [ ! -e "$DEEPSEEK_STUB_TOOLCALL_MARK" ]; }; then
   : > "$DEEPSEEK_STUB_TOOLCALL_MARK"
-  python -c 'import json,os,sys; json.dump({"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":os.environ["DEEPSEEK_STUB_TOOLCALL"]}}]}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200
+  python -c 'import json,os,sys; json.dump({"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":os.environ.get("DEEPSEEK_STUB_TOOLNAME","read_file"),"arguments":os.environ["DEEPSEEK_STUB_TOOLCALL"]}}]}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200
 elif [ "${DEEPSEEK_STUB_INVALID:-0}" = 1 ]; then printf '{"choices":[{"message":{"content":null}}]}' > "$out"; printf 200
 else python -c 'import json,os,sys; json.dump({"choices":[{"message":{"content":os.environ.get("DEEPSEEK_STUB_REPLY","answer")}}],"usage":json.loads(os.environ.get("DEEPSEEK_STUB_USAGE","null"))},open(sys.argv[1],"w"))' "$out"; printf 200; fi
 STUB
@@ -363,7 +363,7 @@ BOUND_ID="$(printf '%s
 ' "$BOUND_OUT"|sed -n 's/^SESSION_ID: //p')"
 BOUND_MSG="$TMP/bound-msg.txt"
 jq -r '[.[]|select(.role=="user")]|last|.content' "$TMP/repo/.ai/deepseek-sessions/$BOUND_ID.json" > "$BOUND_MSG" 2>/dev/null || : > "$BOUND_MSG"
-check "a review states the read-only repository boundary"   "grep -q 'read-only access to a snapshot of the reviewed repository' '$BOUND_MSG'"
+check "a review states the disposable-copy repository boundary"   "grep -q 'a disposable, remote-less copy of the reviewed repository' '$BOUND_MSG'"
 check "a review forbids asserting presence or absence of unquoted evidence"   "grep -q 'Absence from this conversation is NOT evidence of absence' '$BOUND_MSG' && grep -q 'return BLOCKED instead of inferring it' '$BOUND_MSG'"
 check "a review still demands the terminal verdict heading"   "grep -q 'literal ## Verdict heading' '$BOUND_MSG'"
 check "repeated --file attaches every evidence file, not just the last"   "grep -q 'alpha-evidence' '$BOUND_MSG' && grep -q 'beta-evidence' '$BOUND_MSG'"
@@ -433,7 +433,7 @@ check "a review refuses a caller system prompt before any provider contact" "tes
 check "the refused review never reached the provider" "test '$CALLS_BEFORE_SYS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 BOUND_SYS="$TMP/boundary-system.txt"
 jq -r '.[0]|select(.role=="system")|.content' "$TMP/repo/.ai/deepseek-sessions/$BOUND_ID.json" > "$BOUND_SYS" 2>/dev/null || : > "$BOUND_SYS"
-check "the review boundary is carried by the system message, not only the user turn" "grep -q 'read-only access to a snapshot of the reviewed repository' '$BOUND_SYS'"
+check "the review boundary is carried by the system message, not only the user turn" "grep -q 'a disposable, remote-less copy of the reviewed repository' '$BOUND_SYS'"
 PLAIN_OUT="$(DEEPSEEK_STUB_REPLY='chat' run send plain-chat --system "You are terse.")"
 PLAIN_ID="$(printf '%s\n' "$PLAIN_OUT"|sed -n 's/^SESSION_ID: //p')"
 check "a non-review conversation still honours its caller system prompt" "jq -e '.[0].role==\"system\" and .[0].content==\"You are terse.\"' '$TMP/repo/.ai/deepseek-sessions/$PLAIN_ID.json'"
@@ -480,7 +480,7 @@ check "governed mode requires explicit formal review" "test '$gov_bad_rc' -ne 0 
 DEEPSEEK_STUB_REPLY=$'Findings complete.\nVERDICT: APPROVE '"$GOV_HEAD" run send governed --review --governed-verdict="$GOV_HEAD" >"$TMP/gov.out" 2>"$TMP/gov.err"; gov_rc=$?
 GOV_ID="$(sed -n 's/^SESSION_ID: //p' "$TMP/gov.err")"
 check "governed send emits exact terminal contract without a stdout session header" "test '$gov_rc' -eq 0 && test -n '$GOV_ID' && tail -1 '$TMP/gov.out' | grep -qx 'VERDICT: APPROVE $GOV_HEAD' && ! grep -q '^SESSION_ID:' '$TMP/gov.out'"
-check "governed transcript retains its fixed head and evidence boundary" "jq -e '.[0].content | contains(\"read-only access to a snapshot of the reviewed repository\") and contains(\"VERDICT: APPROVE $GOV_HEAD\")' '$TMP/repo/.ai/deepseek-sessions/$GOV_ID.json'"
+check "governed transcript retains its fixed head and evidence boundary" "jq -e '.[0].content | contains(\"a disposable, remote-less copy of the reviewed repository\") and contains(\"VERDICT: APPROVE $GOV_HEAD\")' '$TMP/repo/.ai/deepseek-sessions/$GOV_ID.json'"
 DEEPSEEK_STUB_REPLY=$'Further findings.\nVERDICT: REVISE '"$GOV_HEAD" run reply "$GOV_ID" --review --governed-verdict "$GOV_HEAD" continuation >"$TMP/gov-reply.out" 2>"$TMP/gov-reply.err"; gov_rc=$?
 check "governed continuation preserves exact mode and supports REVISE" "test '$gov_rc' -eq 0 && tail -1 '$TMP/gov-reply.out' | grep -qx 'VERDICT: REVISE $GOV_HEAD'"
 gov_calls="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
@@ -559,7 +559,7 @@ check "source movement marks only the completed turn non-authorizing" "jq -e '.s
 check "a later formal turn can review the current source after movement" "DEEPSEEK_STUB_REPLY=\$'fresh review\\n## Verdict\\nAPPROVE' run reply '$SOURCE_ID' continue-current-source --review >'$TMP/continue-current-source.log' 2>&1 && jq -e '.status==\"complete\"' '$SOURCE_META'"
 [ "$FAIL" -eq 0 ] || cat "$SOURCE_MOVE_LOG" "$TMP/continue-current-source.log" 2>/dev/null || true
 
-# --- Read-only repository tools (list_dir / read_file / grep) ---
+# --- Repository tools over a disposable copy ---
 TOOLS_PY="$ROOT/tools/deepseek_repo_tools.py"
 FX="$TMP/tools-fixture"; mkdir -p "$FX/sub" "$FX/.git"
 printf 'alpha line\nbeta needle line\n' > "$FX/sub/a.txt"
@@ -576,12 +576,21 @@ check "repo tools refuse .git internals" "tool read_file '{\"path\":\".git/confi
 check "repo tools refuse secret-looking files" "tool read_file '{\"path\":\".env\"}' | grep -q '^Error: secret' && tool read_file '{\"path\":\"deploy.pem\"}' | grep -q '^Error: secret'"
 check "repo tools grep skips secret files and finds ordinary matches" "out=\$(tool grep '{\"pattern\":\"needle\"}') && printf '%s' \"\$out\" | grep -qx 'sub/a.txt:2:beta needle line' && ! printf '%s' \"\$out\" | grep -q 'SECRET\|outside'"
 check "repo tools refuse binary and oversized files" "tool read_file '{\"path\":\"bin.dat\"}' | grep -q '^Error: binary' && tool read_file '{\"path\":\"big.txt\"}' | grep -q '^Error: file is larger'"
-check "repo tools reject unknown tools and malformed arguments" "tool write_file '{}' | grep -q '^Error: unknown tool' && tool read_file 'not-json' | grep -q '^Error: tool arguments'"
+check "repo tools reject unknown tools and malformed arguments" "tool delete_repo '{}' | grep -q '^Error: unknown tool' && tool read_file 'not-json' | grep -q '^Error: tool arguments'"
 if ln -s "$TMP/outside.txt" "$FX/link.txt" 2>/dev/null && [ -L "$FX/link.txt" ]; then
   check "repo tools do not follow symbolic links" "tool read_file '{\"path\":\"link.txt\"}' | grep -q '^Error: symbolic links' && ! tool grep '{\"pattern\":\"outside\"}' | grep -q outside"
 else
   skip "repo tools do not follow symbolic links (this filesystem cannot create a real symlink)"
 fi
+check "write_file edits a file inside the tool root" "tool write_file '{\"path\":\"sub/new.txt\",\"content\":\"made\"}' | grep -q '^wrote sub/new.txt' && grep -qx made '$FX/sub/new.txt'"
+check "write_file refuses escapes, .git, secrets, and links" "tool write_file '{\"path\":\"../x.txt\",\"content\":\"a\"}' | grep -q '^Error:' && tool write_file '{\"path\":\".git/hooks\",\"content\":\"a\"}' | grep -q '^Error:' && tool write_file '{\"path\":\".env\",\"content\":\"a\"}' | grep -q '^Error:' && test ! -e '$TMP/x.txt'"
+if command -v bwrap >/dev/null 2>&1 && bwrap --ro-bind / / true 2>/dev/null; then
+  check "run_command runs inside the root with a cleared environment and no network" "out=\$(SECRET_PROBE=leak tool run_command '{\"command\":\"pwd; echo probe=\$SECRET_PROBE; echo built > built.txt; getent hosts example.com || echo nonet\"}') && printf '%s' \"\$out\" | grep -qx 'exit: 0' && printf '%s' \"\$out\" | grep -qx 'probe=' && printf '%s' \"\$out\" | grep -qx nonet && grep -qx built '$FX/built.txt'"
+  check "run_command cannot write outside the root" "tool run_command '{\"command\":\"echo x > $TMP/escaped.txt\"}' >/dev/null; test ! -e '$TMP/escaped.txt'"
+else
+  skip "run_command sandbox cases (bubblewrap unavailable)"
+fi
+check "run_command never runs unsandboxed" "AI_DEEPSEEK_BWRAP=/nonexistent tool run_command '{\"command\":\"touch ran\"}' | grep -q '^Error: run_command is unavailable' && test ! -e '$FX/ran'"
 check "repo-tools helper never handles the provider key" "! grep -qiE 'bearer|api_key|sys\.stdin|PROVIDER_KEY' '$TOOLS_PY'"
 printf 'tool-proof line 1\nquote me: deepseek-can-read\n' > "$TMP/repo/proof.txt"
 TOOL_REQ="$TMP/tool-request.json"; export DEEPSEEK_STUB_TOOLCALL_MARK="$TMP/toolcall-mark"
@@ -593,6 +602,21 @@ rm -f "$DEEPSEEK_STUB_TOOLCALL_MARK"
 CALLS_BEFORE="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 DEEPSEEK_TOOLS_MAX_ROUNDS=2 DEEPSEEK_STUB_TOOLCALL_ALWAYS=1 DEEPSEEK_STUB_REQUEST="$TOOL_REQ" DEEPSEEK_STUB_TOOLCALL='{"path":"proof.txt"}' run send 'loop forever' --repo-tools > "$TMP/tools-budget.out" 2>&1 || true  # no answer after the budget is a clean failure
 check "tool loop is bounded and the last request withholds tools" "test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq \$(( CALLS_BEFORE + 3 )) && jq -e '(has(\"tools\")|not) and (.messages[-1].content|contains(\"budget exhausted\"))' '$TOOL_REQ'"
+rm -f "$DEEPSEEK_STUB_TOOLCALL_MARK"
+git -C "$TMP/repo" remote add origin https://example.invalid/repo.git 2>/dev/null || true
+CALLER_STATUS="$(git -C "$TMP/repo" status --porcelain; cat "$TMP/repo/proof.txt")"
+DEEPSEEK_STUB_REQUEST="$TOOL_REQ" DEEPSEEK_STUB_TOOLNAME=write_file DEEPSEEK_STUB_TOOLCALL='{"path":"proof.txt","content":"overwritten by deepseek"}' DEEPSEEK_STUB_REPLY='edited' run send 'edit proof' --repo-tools > "$TMP/tools-write.out" 2>&1
+check "--repo-tools edits land in a disposable copy, not the caller's checkout" "jq -e '.messages|map(select(.role==\"tool\"))|.[0].content|startswith(\"wrote proof.txt\")' '$TOOL_REQ' && test \"\$(git -C '$TMP/repo' status --porcelain; cat '$TMP/repo/proof.txt')\" = \"\$CALLER_STATUS\""
+check "the disposable copy is deleted after the turn" "test -z \"\$(find \"\${TMPDIR:-/tmp}\" -maxdepth 1 -name 'deepseek-turn.*' -newer '$TMP/tools-write.out' 2>/dev/null)\" && ! ls -d \"\${TMPDIR:-/tmp}\"/deepseek-turn.* 2>/dev/null | xargs -r -I{} grep -rl 'overwritten by deepseek' {} 2>/dev/null | grep -q ."
+if command -v bwrap >/dev/null 2>&1 && bwrap --ro-bind / / true 2>/dev/null; then
+  rm -f "$DEEPSEEK_STUB_TOOLCALL_MARK"
+  DEEPSEEK_STUB_REQUEST="$TOOL_REQ" DEEPSEEK_STUB_TOOLNAME=run_command DEEPSEEK_STUB_TOOLCALL='{"command":"echo remotes=$(git remote | wc -l); cat proof.txt; touch made-by-run"}' DEEPSEEK_STUB_REPLY='ran' run send 'run in copy' --repo-tools > "$TMP/tools-run.out" 2>&1
+  check "--repo-tools run_command sees the caller's files in a copy with no Git remote" "jq -e '.messages|map(select(.role==\"tool\"))|.[0].content|(contains(\"remotes=0\") and contains(\"deepseek-can-read\"))' '$TOOL_REQ' && test ! -e '$TMP/repo/made-by-run' && test -n \"\$(git -C '$TMP/repo' remote)\""
+fi
+git -C "$TMP/repo" remote remove origin 2>/dev/null || true
+rm -f "$DEEPSEEK_STUB_TOOLCALL_MARK"
+RW_OUT="$(DEEPSEEK_STUB_REQUEST="$TOOL_REQ" DEEPSEEK_STUB_TOOLNAME=write_file DEEPSEEK_STUB_TOOLCALL='{"path":"proof.txt","content":"review edit"}' DEEPSEEK_STUB_REPLY=$'edited in copy\n## Verdict\nAPPROVE' run send 'review with edit' --review 2>&1)"; RW_ID="$(printf '%s\n' "$RW_OUT" | sed -n 's/^SESSION_ID: //p')"
+check "a review may edit its disposable copy and still completes with an exact-head verdict" "test -n '$RW_ID' && jq -e '.messages|map(select(.role==\"tool\"))|.[0].content|startswith(\"wrote proof.txt\")' '$TOOL_REQ' && jq -e '.status==\"complete\" and .verdict==\"APPROVE\"' '$TMP/repo/.ai/deepseek-sessions/$RW_ID.meta.json' && ! grep -q 'review edit' '$TMP/repo/proof.txt'"
 DEEPSEEK_STUB_REQUEST="$TOOL_REQ" run send 'no tools' > /dev/null 2>&1
 check "an ordinary send offers no repository tools" "jq -e 'has(\"tools\")|not' '$TOOL_REQ'"
 TOOLS_SID="$(sed -n 's/^SESSION_ID: //p' "$TMP/tools-send.out" | head -1)"

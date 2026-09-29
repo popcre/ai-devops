@@ -95,12 +95,16 @@ clone + `./install.sh` on Ubuntu).
    or `<repo>/bin/setup-secrets.sh`. Preconditions: **pwsh 7** (the Windows script
    has no `#requires` and dies with cryptic parse errors under 5.1), and **the token
    file must already exist** or the script blocks on a prompt and a headless Codex
-   run will hang. If it is absent, do NOT invoke — tell Albert the token is in
-   1Password `vibe_coding` → `vibe_coding-service-account` → field
-   `op_service_account_token` (NOT the empty `credential` field), passable as
-   `-Token <value>` / `OP_SERVICE_ACCOUNT_TOKEN=<value>`. A plaintext token or a
-   missing launcher is a security/regression condition — fix it; a cosmetic gap
-   (e.g. the memory-sync task) is his call. The installer rewrites the live Claude
+   run will hang. If it is absent, do NOT invoke bare and do NOT ask Albert — create the token file
+   yourself from 1Password `vibe_coding` → `vibe_coding-service-account` → field
+   `op_service_account_token` (NOT the empty `credential` field) through a pipe or `op_run`, never a command-line argument, and only
+   as a private file: directory `~/.config/ai-devops` mode `700`, write under
+   `umask 077` then `chmod 600` (Windows: `Set-AiDevOpsPrivateFileAtomic` from
+   `bin/windows-private-file.ps1`); then rerun the setup script so it reuses it. This token is what
+   authenticates 1Password, so when the file is absent the usual route is gone: try
+   the 1Password MCP or an already-signed-in `op` session only; if neither can read
+   it, report it `Blocked —` (never ask Albert). A plaintext token or a
+   missing launcher is a security/regression condition — fix it; fix a cosmetic gap (e.g. the memory-sync task) yourself too. The installer rewrites the live Claude
    Desktop MCP config (backup: `*.aidevops.bak`) — say so first.
    **If all present, state "Phase 2 wiring already current"** so the report
    distinguishes *checked and fine* from *not checked*. After any MCP config
@@ -168,8 +172,8 @@ clone + `./install.sh` on Ubuntu).
    in. Idempotent and strictly additive — it never removes an entry and never
    touches `deny`. Prints `OK all N required permission(s) already present` when
    there is nothing to do; say that verdict out loud. Exit 3 means the local
-   settings file is already unparseable JSON — it is left untouched; report it,
-   do not rewrite it. Why it matters: Claude Code STOPS and asks before using a
+   settings file is already unparseable JSON — it is left untouched; report it `Blocked —` with the parse error, do not rewrite
+   it, and never ask Albert to decide. Why it matters: Claude Code STOPS and asks before using a
    tool that is not allowed, so in a delegated or unattended session the work
    stalls and reads like a broken tool. To add a permission everywhere, add the
    line to `config/claude-permissions.allow` in the repo — never hand-edit one
@@ -212,7 +216,8 @@ clone + `./install.sh` on Ubuntu).
    when it is missing. Run it from a Codex sync too.
 5d. Check the weekly read-only memory audit exists (`ai-memory-health` scheduled
    task on Windows, registered by `bin/install-memory-health-task.ps1`). If absent,
-   say so and offer to register it. Never schedule anything that EDITS memory
+   register it yourself. Every memory edit needs an assigned AI reviewer's APPROVE of the exact edits
+   (never self-approved, never Albert's approval). Never schedule anything that EDITS memory
    unattended: tombstoned deletions propagate to every machine and survive a later
    pull, so a wrong automated delete cannot be undone.
 6. `bin/ai-memory-sync sync-if-stale` — union local memory into the private hub and

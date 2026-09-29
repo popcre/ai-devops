@@ -153,7 +153,7 @@ Earlier designs and reviews still matter. A committed claims file was rejected b
 
 - **Ref namespace:** prefer `refs/ai-devops-claims/<key>` if live qualification proves REST create/read/list plus Git force-with-lease update/delete and ruleset compatibility. Otherwise use `refs/heads/ai-work-claims/<key>` and accept transient branch visibility. Do not use tags. Record the proof before coding.
 - **Liveness interval:** warn after 8 hours and classify stale after 24 hours unless measurement proves a longer heartbeat-less session. Liveness never transfers ownership. Heartbeat adapters are optional convenience; absence of a Codex lifecycle hook is safe because ownership remains protective.
-- **Post-v1 promotion:** after 30 days, consider units, takeover, hooks, or making the guard required only from measured need. Required-check promotion needs zero claim-guard-caused ejections, a stable queue pass rate target recorded by the throughput plan, and Albert's current-chat authorization naming ruleset `21564317` and the check.
+- **Post-v1 promotion:** after 30 days, consider units, takeover, hooks, or making the guard required only from measured need. Required-check promotion needs zero claim-guard-caused ejections, a stable queue pass rate target recorded by the throughput plan, and an assigned AI reviewer's APPROVE naming ruleset `21564317` and the check (never Albert's approval — owner ruling 2026-09-28).
 
 No owner decision is needed to implement and ship advisory v1 after the throughput prerequisite passes. Any manual stale-ref mutation, future takeover mechanism, or required-check promotion is outside v1 and needs a separately authorized procedure.
 
@@ -238,7 +238,7 @@ Dependencies: 9.4.
 
 Add `heartbeat`, `verify-owned`, and `release`. Heartbeat advances the task ref only through force-with-lease from the exact recorded object and updates audit without exposing the token. `verify-owned` checks current owner hash/object and warns after 8h/stale after 24h without surrendering ownership. It reports issue closure but does not block the owner; follow-up work records a bounded purpose in metadata.
 
-Release uses force-with-lease deletion from the exact recorded object and confirms absence; failure leaves the ref protective. There is no takeover command. For stale/closed-owner recovery, `doctor` prints canonical repo, task, exact ref, current object SHA, owner hash, last GitHub timestamp, issue state, any open PR whose body contains both `Task-Issue: #N` and the current `Work-Claim` ref key, and a copyable request: `Authorize manual reconciliation of <ref> at <object> for task #N by <delete|replace>, reason: <text>.` Only Albert's current-chat response naming the same ref/object/action authorizes a one-off operator procedure. The operator re-reads the ref, refuses a changed object or such an open PR, performs Git force-with-lease from that exact object, reads back the result, and posts the authorization/result audit URL. This is manual recovery, not standing permission or a v1 command.
+Release uses force-with-lease deletion from the exact recorded object and confirms absence; failure leaves the ref protective. There is no takeover command. For stale/closed-owner recovery, `doctor` prints canonical repo, task, exact ref, current object SHA, owner hash, last GitHub timestamp, issue state, any open PR whose body contains both `Task-Issue: #N` and the current `Work-Claim` ref key, and a reviewer brief: `Authorize manual reconciliation of <ref> at <object> for task #N by <delete|replace>, reason: <text>.` Only an assigned AI reviewer's APPROVE naming the same ref/object/action authorizes a one-off operator procedure (never Albert's approval — owner ruling 2026-09-28). The operator re-reads the ref, refuses a changed object or such an open PR, performs Git force-with-lease from that exact object, reads back the result, and posts the authorization/result audit URL. This is manual recovery, not standing permission or a v1 command.
 
 Remote claim operations fail closed on network ambiguity. A secondary-rate-limit response is bounded and explicitly says not to poll; no retry loop is built into the command. Ordinary `git commit` and `git push` remain Git operations in v1 and are not intercepted; advisory CI records missed ownership without claiming mandatory local enforcement.
 
@@ -390,7 +390,7 @@ Existing suites required: `tests/test-all.sh`; repository-policy/workflow/merge-
 - V1 must not install or alter Git hooks, `core.hooksPath`, or global Git configuration, because linked worktrees share that state.
 - The advisory guard is not a required status check and must not eject a merge-queue batch.
 - The claim system coordinates work intent; it does not authorize destructive Git, production/cloud/ruleset, database, or shared-db actions.
-- Ruleset mutation is outside v1. Future promotion needs measured evidence and Albert naming the exact action/resource in the current chat.
+- Ruleset mutation is outside v1. Future promotion needs measured evidence and an assigned AI reviewer's APPROVE of the exact action/resource.
 - Exact-head independent review is mandatory because this changes shared concurrency and routing safety.
 - STATUS rows marked done cite rerunnable evidence/commit/CI artifacts, never unsourced counts or issue numbers alone.
 

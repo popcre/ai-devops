@@ -7,11 +7,11 @@ Owner issue: https://github.com/popcre/ai-devops/issues/1002.
 
 | Step | State | Evidence |
 |---|---|---|
-| 1 Lock inventory | ⬜ open (2026-09-28) | — |
-| 2 Stale-holder recovery for flock locks | ⬜ open | — |
-| 3 Settings snapshot + drift check | ⬜ open | — |
-| 4 Scheduled drift check + alert | ⬜ open | — |
-| 5 Live proof | ⬜ open | — |
+| 1 Lock inventory | ✅ done (2026-09-28) | `docs/locks.md` covers every hit of `grep -rnE 'flock|lock\.d|\.lock' bin` (62 pre-change; 94 after step 2 and the 2026-09-28/29 merges of main, all re-cited); `docs/task-router.md` router row added |
+| 2 Stale-holder recovery for flock locks | ✅ done — Linux-lane proof recorded (2026-09-28) | `bin/ai-lock-doctor` + `-E 87` wiring at all 5 flock sites; Windows `lock_acquire` pid+age reclaim; `tests/test-ai-lock-doctor.sh` portable cases green; the /proc cases proved on the merge-queue Linux lane: verify run 36514500830 on merge commit 0c581822 green (exactly-once review passes 6-12 fixed the undefined scan variable, the runner's subreaper reparenting, the over-broad ancestor walk, and the waiter-kill class; evidence in tests/verification/self-healing/2026-09-28.md); SCOPE DISCLOSURE per section 1: the exotic #940 shape itself — an inherited descriptor in a process reparented out of our session — is diagnosed and reported as foreign (human decision), NOT auto-cleared; that is the locked safety decision, flagged here on the owner issue as section 1 requires |
+| 3 Settings snapshot + drift check | ✅ done (2026-09-28) | `config/merge-queue-expected.json` + `bin/ai-merge-queue-drift`; passes against the live ruleset (read via ai-gh) and `tests/test-ai-merge-queue-drift.sh` proves renamed-job, paths-filter, .ps1-divergence, and clean-pass cases |
+| 4 Scheduled drift check + alert | ✅ done — clean dispatch recorded (2026-09-28) | `.github/workflows/merge-queue-drift.yml`: daily cron + PR-path trigger + standing-issue alert job; offline checks green, degraded-refusal notice has its own standing issue; clean dispatch run 36515379051 on merged main: offline checks success, no alert posted (the Step 4 gate); and the live ruleset lane is DORMANT by default (repository variable + ruleset read grant, owner decision) — tracked with the dispatch proof and the deferred review findings in leftover-proof issue #1026; offline enforcement is not blocked by any of that |
+| 5 Live proof | ✅ done — record landed (2026-09-28) | tests/verification/self-healing/2026-09-28.md cites the merge-queue run 36514500830, the PR-lane drift run 36510834506, and the dispatch run 36515379051; the live ruleset lane's enable decision and the deferred review findings stay owned by #1026 |
 
 A fresh session starts at Step 1.
 
@@ -182,6 +182,11 @@ Done means all of the following:
 Risks and open questions:
 - **Killing the wrong process.** Mitigated by the our-tool classification; Rollback is
   to remove `--recover` from the call sites.
+- **The #940 shape is diagnosed, not healed** (owner-issue disclosure per section 1):
+  a reparented inherited-descriptor holder is reported as foreign and never signalled —
+  recovery of that exact shape stays a human decision with the doctor's evidence.
+- **The live ruleset lane ships dormant** until an owner grants the ruleset read and
+  sets the enable variable; offline enforcement runs daily regardless (#1026).
 - **Unknown lock sites.** Step 1 may find more locks than expected. Split them if there
   are more than 8.
 

@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "_comment": [
+    "The committed expectation of the live branch-protection ruleset and the",
+    "merge-queue checks for popcre/ai-devops (issue #1002). Any change to the",
+    "live ruleset on GitHub is drift and must be reconciled by a PR that",
+    "updates this file (or by reverting the ruleset), never by editing GitHub",
+    "directly. bin/ai-merge-queue-drift compares this snapshot with the live",
+    "ruleset, proves every required check is produced by a job in a workflow",
+    "that subscribes to merge_group without a paths filter or an if: skip,",
+    "and proves the pull-request test selection still covers every suite the",
+    "merge queue executes for each file class (the #913 ejection class)."
+  ],
+  "repository": "popcre/ai-devops",
+  "ruleset_id": 21564317,
+  "ruleset": {
+    "enforcement": "active",
+    "ref_name_include": ["~DEFAULT_BRANCH"],
+    "rule_types": [
+      "deletion",
+      "merge_queue",
+      "non_fast_forward",
+      "pull_request",
+      "required_status_checks"
+    ],
+    "pull_request": {
+      "allowed_merge_methods": ["squash"],
+      "required_approving_review_count": 0
+    },
+    "merge_queue": {
+      "check_response_timeout_minutes": 120,
+      "grouping_strategy": "ALLGREEN",
+      "max_entries_to_build": 5,
+      "max_entries_to_merge": 5,
+      "merge_method": "SQUASH",
+      "min_entries_to_merge": 1,
+      "min_entries_to_merge_wait_minutes": 0
+    },
+    "required_status_checks": ["verification-closure"]
+  },
+  "required_check_producers": [
+    {
+      "context": "verification-closure",
+      "workflow": "verify.yml",
+      "job": "verification-closure"
+    }
+  ],
+  "selection_parity": [
+    {
+      "file_class": ".sh",
+      "representative_paths": ["bin/example.sh", "tests/test-example.sh"],
+      "required_suites": []
+    },
+    {
+      "file_class": ".ps1",
+      "representative_paths": ["scripts/example.ps1", "tests/example.ps1"],
+      "required_suites": ["test-windows-scripts.sh"]
+    },
+    {
+      "file_class": ".md",
+      "representative_paths": ["docs/example.md", "README.md"],
+      "required_suites": []
+    },
+    {
+      "file_class": ".json",
+      "representative_paths": ["config/example.json"],
+      "required_suites": []
+    },
+    {
+      "file_class": ".yml",
+      "representative_paths": [".github/workflows/example.yml"],
+      "required_suites": ["test-workflow-policy.sh"]
+    }
+  ]
+}

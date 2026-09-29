@@ -230,7 +230,7 @@ if (
   printf '424242\n' > "$legacy_lock/pid"
   SYSTEMROOT=Windows lock_acquire "$legacy_lock" test && exit 1
   [ -d "$legacy_lock" ] && [ "$(cat "$legacy_lock/pid")" = 424242 ]
-); then ok 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; else bad 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; fi
+); then ok 'Windows never reclaims a FRESH Muse lock whose pid is invisible across Git Bash runtimes'; else bad 'Windows never reclaims a FRESH Muse lock whose pid is invisible across Git Bash runtimes'; fi
 if [ -z "${SYSTEMROOT:-}" ]; then
   if (
     source <(sed -n '/^key_store_path_safe() {/,/^}/p; /^key_store_ok() {/,/^}/p' "$SCRIPT")
@@ -505,10 +505,11 @@ else
 fi
 check 'review pins the stable Qwen 3.8 Max model' "grep -q -- '--model qwen3.8-max' '$TMP/argv.txt'"
 check 'review uses safe mode' "grep -q -- '--safe-mode' '$TMP/argv.txt'"
-check 'review uses plan mode' "grep -q -- '--approval-mode plan' '$TMP/argv.txt'"
-check 'review excludes mutation tools' "grep -q -- '--exclude-tools shell,write,edit' '$TMP/argv.txt'"
+check 'review runs under Qwen sandbox with full tools (#974)' "grep -q -- '--sandbox --approval-mode yolo' '$TMP/argv.txt' && ! grep -q -- '--exclude-tools' '$TMP/argv.txt' && ! grep -q -- '--approval-mode plan' '$TMP/argv.txt'"
 check 'review has measured governed-review budgets' "grep -q -- '--max-session-turns 120' '$TMP/argv.txt' && grep -q -- '--max-tool-calls 120' '$TMP/argv.txt' && grep -q -- '--max-wall-time 60m' '$TMP/argv.txt'"
-check 'review never uses yolo or continue' "! grep -qE -- '--approval-mode yolo|--continue' '$TMP/argv.txt'"
+check 'review never uses continue' "! grep -q -- '--continue' '$TMP/argv.txt'"
+check 'review prompt says it may run code and edit a disposable copy' "grep -q 'disposable, remote-less copy' '$TMP/prompt-copy' && grep -q 'edits are discarded' '$TMP/prompt-copy' && ! grep -qi 'read-only' '$TMP/prompt-copy'"
+check 'review directory is a remote-less snapshot, not the caller checkout' "d=\$(run show review-1 | jq -r .review_dir) && test -f \"\$d/AI-REVIEW-SANDBOX.md\" && test -z \"\$(git -C \"\$d\" remote)\" && test \"\$(cd \"\$d\" && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\""
 check 'review record stores exact session' "run show review-1 | jq -e '.qwen_session_id==\"qwen-session-1\" and .caller==\"codex\"'"
 check 'review record binds exact evidence identity' "run show review-1 | jq -e '(.base|length)==40 and (.head|length)==40 and (.packet_sha256|length)==64 and (.working_tree_sha256|length)==64 and .evidence_generation==1'"
 check 'governed auth settings are regular and pin both provider and active model identity' "test -f '$AI_QWEN_HOME/settings.json' && test ! -L '$AI_QWEN_HOME/settings.json' && jq -e '.model.baseUrl as \$url | .security.auth.selectedType==\"openai\" and .model.name==\"qwen3.8-max\" and (\$url|length)>0 and (.modelProviders.openai|any(.id==\"qwen3.8-max\" and .baseUrl==\$url and .envKey==\"BAILIAN_CODING_PLAN_API_KEY\"))' '$AI_QWEN_HOME/settings.json'"
@@ -717,13 +718,19 @@ run new late-signal-ask --prompt review >/dev/null 2>&1 || bad 'late-signal foll
 qwen_late_signal_case late-signal-ask ask
 
 echo mutate-review > "$TMP/mode"
-if run new hostile --prompt 'write a file' >/dev/null 2>&1; then bad 'review mutation fails loudly'; else ok 'review mutation fails loudly'; fi
+BEFORE_CLEAN="$(sha256sum "$REPO/a.txt" | awk '{print $1}')"
+HOSTILE_OUT="$(run new hostile --prompt "write a file" 2>&1)"; HR=$?
+[ "$HR" = 0 ] || printf '  diagnostic: hostile: %s\n' "$(printf %s "$HOSTILE_OUT" | tail -3)"
+if [ "$HR" = 0 ]; then ok 'review may edit its disposable copy (#974)'; else bad 'review may edit its disposable copy (#974)'; fi
+HOSTILE_DIR="$(run show hostile 2>/dev/null | jq -r '.review_dir // empty')"
+if [ -z "$HOSTILE_DIR" ] || [ ! -d "$HOSTILE_DIR" ] || ! grep -q '^bad$' "$HOSTILE_DIR/a.txt"; then ok 'reviewer edits in the disposable copy are discarded'; else bad 'reviewer edits in the disposable copy are discarded'; fi
+[ "$BEFORE_CLEAN" = "$(sha256sum "$REPO/a.txt" | awk '{print $1}')" ] && [ -z "$(git -C "$REPO" status --porcelain)" ] && ok 'disposable-copy edit leaves caller checkout unchanged' || bad 'disposable-copy edit leaves caller checkout unchanged'
 git -C "$REPO" checkout -q -- a.txt
 
 printf 'owner work\n' >> "$REPO/a.txt"
 BEFORE_DIRTY="$(sha256sum "$REPO/a.txt" | awk '{print $1}')"
 echo mutate-review > "$TMP/mode"
-if run new hostile-dirty --prompt 'write a file' >/dev/null 2>&1; then bad 'mutation inside an already-dirty file fails'; else ok 'mutation inside an already-dirty file fails'; fi
+if run new hostile-dirty --prompt 'write a file' >/dev/null 2>&1; then ok 'edit of an already-dirty file in the copy is allowed'; else bad 'edit of an already-dirty file in the copy is allowed'; fi
 AFTER_DIRTY="$(sha256sum "$REPO/a.txt" | awk '{print $1}')"
 if [ "$BEFORE_DIRTY" = "$AFTER_DIRTY" ]; then ok 'private-copy mutation leaves owner work untouched'; else bad 'private-copy mutation leaves owner work untouched'; fi
 git -C "$REPO" checkout -q -- a.txt

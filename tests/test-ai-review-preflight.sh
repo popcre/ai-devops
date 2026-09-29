@@ -289,7 +289,9 @@ check "StepFun is unsupported-platform and unusable on Windows" "AI_STEPFUN_PLAT
 check "StepFun preflight refuses on Windows without contacting the provider" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
 check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux only'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
-NOAUTH_OUT="$(env -u DEEPSEEK_API_KEY HOME="$TMP/noauth-home" AI_DEVOPS_CONFIG_DIR="$TMP/noauth-config" AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" check deepseek "$REPO" 2>&1)"; NOAUTH_RC=$?
+# AI_DEEPSEEK_TEST_DIR makes the wrapper honor this isolated HOME; production
+# mode intentionally anchors the key store to the OS user profile instead.
+NOAUTH_OUT="$(env -u DEEPSEEK_API_KEY HOME="$TMP/noauth-home" AI_DEEPSEEK_TEST_DIR="$TMP/noauth-home" AI_DEVOPS_CONFIG_DIR="$TMP/noauth-config" AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" check deepseek "$REPO" 2>&1)"; NOAUTH_RC=$?
 [ "$NOAUTH_RC" -ne 0 ] && ! printf '%s' "$NOAUTH_OUT" | grep -q 'health=ok' && ok "DeepSeek without key or governed reference cannot pass offline preflight" || bad "DeepSeek without key or governed reference cannot pass offline preflight"
 "$SCRIPT" clear deepseek >/dev/null 2>&1 || true
 export AI_REVIEW_MUSE_WRAPPER="$TMP/bin/requires-muse-caller"

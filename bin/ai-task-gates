@@ -60,17 +60,17 @@ usage: ai-task-gates <command> [options]
 
   start --class CLASS [--reason TEXT] [--base REF]
         Record the intended task class for this repository and worktree.
-  check --before ACTION [--acknowledge TEXT] [--owner-request TEXT]
+  check --before ACTION [--acknowledge TEXT] [--reviewer-approval REPORT]
         [--target-head SHA] [--installed-checkout PATH] [--installed-launcher PATH]
         [--first-install]
         Recompute the change set and decide whether ACTION may start.
   authorize-install --target-head SHA --installed-checkout PATH
-        --installed-launcher PATH --review-report PATH --owner-request TEXT
+        --installed-launcher PATH --review-report PATH --reviewer-approval REPORT
         [--legacy-migration|--first-install|--recover-launchers|--stale-manifest-recovery]
         Issue one-use authority for an exact reviewed toolkit release.
   install-verify --phase preflight|resume|stages-complete|finalize --target-head SHA
         --installed-checkout PATH --installed-launcher /usr/local/bin/ai-task-gates
-        [--caller-pinned] [--owner-request TEXT] [--stage-report PATH]
+        [--caller-pinned] [--reviewer-approval REPORT] [--stage-report PATH]
         Guard the Linux checkout update and installation transaction.
   explain [--json] [--base REF] [--paths-from FILE|-]
         Show the resolved identity, change set, class, and gates.
@@ -331,6 +331,40 @@ state_record_override(){
      --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '.overrides = ((.overrides // []) + [{kind:$k,action:$a,reason:$r,observed_class:$o,at:$t}])' \
      "$file" > "$file.tmp" && mv -f "$file.tmp" "$file"
+}
+
+# An approval is a reviewer report the lifecycle recorded as a completed,
+# non-stale APPROVE of this repository key, head, and source digest, whose
+# recorded implementer_engine differs from its provider (#996). Live actions
+# need review_mode final-check or security-review; review, pr-wait, and
+# code-only-review also accept plan-review, which is itself ungated.
+# Usage: reviewer_approval_summary REPORT ACTION HEAD WORKTREE
+reviewer_approval_summary(){
+  local report="$1" action="$2" head="$3" worktree="$4" identity key digest report_hash lifecycle_root state row mode
+  [ -f "$report" ] && [ ! -L "$report" ] || return 1
+  report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")" || return 1
+  report_hash="$(sha256sum "$report" | cut -d' ' -f1)" || return 1
+  identity="$("$SCRIPT_DIR/ai-review-lifecycle" identity "$worktree" 2>/dev/null)" || return 1
+  key="$(jq -r '.repository_key // ""' <<<"$identity")"; digest="$(jq -r '.source_digest // ""' <<<"$identity")"
+  [ -n "$key" ] && [ -n "$digest" ] || return 1
+  lifecycle_root="${AI_REVIEW_LIFECYCLE_DIR:-$HOME/.local/state/ai-devops/review-lifecycle}"
+  row=""
+  for state in "$lifecycle_root/runs/$key/"*/*/*.json; do
+    [ -f "$state" ] || continue
+    if jq -e --arg h "$head" --arg p "$report" --arg s "$report_hash" --arg d "$digest" --arg k "$key" '
+      .status=="completed" and .verdict=="APPROVE" and .stale==false and .head==$h
+      and .repository_key==$k and .source_digest==$d and .report_path==$p and .report_sha256==$s
+      and (.provider|type=="string" and length>0) and (.implementer_engine|type=="string" and length>0)
+      and ((.provider|ascii_downcase) != (.implementer_engine|ascii_downcase))' "$state" >/dev/null 2>&1; then row="$state"; break; fi
+  done
+  [ -n "$row" ] || return 1
+  mode="$(jq -r '.review_mode // ""' "$row")"
+  case "$action" in
+    review|pr-wait|code-only-review) case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) return 1 ;; esac ;;
+    *) [ "$mode" = final-check ] || [ "$mode" = security-review ] || return 1 ;;
+  esac
+  jq -r --arg a "$action" --arg m "$mode" --arg x "$report_hash" \
+    '"APPROVE by \(.provider) (implementer \(.implementer_engine), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
 }
 
 # --------------------------------------------------------------------------
@@ -603,13 +637,13 @@ toolkit_source_receipt(){
 }
 
 cmd_check(){
-  local action="" acknowledge="" owner_request="" base="" start_head="" source_changed_count=0
+  local action="" acknowledge="" reviewer_approval="" approval_summary="" base="" start_head="" source_changed_count=0
   local target_head="" installed_checkout="" installed_launcher="" first_install=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --before) need_value "$@"; action="$2"; shift 2 ;;
       --acknowledge) need_value "$@"; acknowledge="$2"; shift 2 ;;
-      --owner-request) need_value "$@"; owner_request="$2"; shift 2 ;;
+      --reviewer-approval) need_value "$@"; reviewer_approval="$2"; shift 2 ;;
       --base) need_value "$@"; base="$2"; shift 2 ;;
       --target-head) need_value "$@"; target_head="$2"; shift 2 ;;
       --installed-checkout) need_value "$@"; installed_checkout="$2"; shift 2 ;;
@@ -636,7 +670,8 @@ cmd_check(){
   prepare "$base" ""
   source_changed_count="$CHANGED_COUNT"
   if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] && [ "$source_changed_count" -eq 0 ]; then
-    [ -n "$owner_request" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an explicit owner request.'
+    [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
+    approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent lifecycle-recorded APPROVE report to this exact action, repository, head, and source.'
     [ "$(state_field declared_class)" = installation ] || blocked 'ai-task-gates: STOP. Same-source toolkit installation requires a declared installation task.'
     [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. A same-source toolkit installation needs the installed checkout and launcher paths.'
     local same_root same_head expected_launcher
@@ -759,7 +794,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       detail="$detail  ${line#*	}"$'\n'
     done
     if [ "$protected" = true ]; then
-      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged or owner-requested away. Re-declare the task with `ai-task-gates start --class %s` and do what that class requires, or take these files out of the change set.' \
+      blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged or reviewer-approved away. Re-declare the task with `ai-task-gates start --class %s` and do what that class requires, or take these files out of the change set.' \
         "$action" "$declared" "$OBSERVED_CLASS" "$detail" "$OBSERVED_CLASS")"
     fi
     if [ -z "$acknowledge" ]; then
@@ -789,20 +824,22 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
   if printf '%s\n' "$forbidden" | grep -qx -- "$action"; then
     if [ "$protected" = true ]; then
-      blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no owner-request and no acknowledge path.\nNarrow the change set out of protected paths, or change this policy through its own reviewed path.' \
+      blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no reviewer-approval and no acknowledge path.\nNarrow the change set out of protected paths, or change this policy through its own reviewed path.' \
         "$action" "$effective" "$IDENTITY")"
     fi
-    if [ -z "$owner_request" ]; then
-      blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nIf Albert explicitly asked for it, re-run with --owner-request "<reason>".' \
+    if [ -z "$reviewer_approval" ]; then
+      blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (a plan-review suffices for review, pr-wait, and code-only-review) and re-run with --reviewer-approval <that report>.' \
         "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
     fi
-    state_record_override owner-request "$action" "$owner_request" "$effective"
-    printf 'ai-task-gates: "%s" allowed by explicit owner request: %s\n' "$action" "$owner_request"
+    approval_summary="$(reviewer_approval_summary "$reviewer_approval" "$action" "$(git -C "$TOPLEVEL" rev-parse HEAD)" "$TOPLEVEL")" \
+      || blocked "$(printf 'ai-task-gates: STOP. The reviewer approval for "%s" is not a lifecycle-recorded independent APPROVE report for this exact head, source, and action (the review must record an implementing engine: ai-review --implementer ENGINE).' "$action")"
+    state_record_override reviewer-approval "$action" "$approval_summary" "$effective"
+    printf 'ai-task-gates: "%s" allowed by assigned AI reviewer: %s\n' "$action" "$approval_summary"
     return 0
   fi
 
   # 3. Per-action proof binding. The sealed code-only review route is an
-  # action a private class may start without an owner request, but only while
+  # action a private class may start without a reviewer approval, but only while
   # the repository's own declaration carries the fixtures boundary the route
   # promises. The binding is proven by the EFFECTIVE class's own merged
   # proofs, never by a stronger declared class's: a private-tooling
@@ -879,7 +916,7 @@ linux_review_authority(){
   local report review_root report_hash source_digest policy_digest common key lifecycle_root state matched=0
   jq -e --arg old "$old" --arg target "$target" --arg checkout "$checkout" --arg launcher "$launcher" \
     '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$checkout and .installed_launcher==$launcher and
-     (.owner_request|type=="string" and length>0) and .recover_launchers==false' "$auth" >/dev/null 2>&1 || return 1
+     (.reviewer_approval|type=="string" and length>0) and .recover_launchers==false' "$auth" >/dev/null 2>&1 || return 1
   policy_digest="$(install_policy_digest "$target")" || return 1
   [ "$(jq -r .policy_digest "$auth")" = "$policy_digest" ] || return 1
   if [ "$phase" = preflight ] || [ "$phase" = resume ]; then
@@ -997,7 +1034,7 @@ linux_stage_marker_valid(){
 }
 
 cmd_install_verify(){
-  local phase='' target='' installed='' launcher='' caller_pinned=0 owner_request='' stage_report='' installed_head candidate_root common origin_url
+  local phase='' target='' installed='' launcher='' caller_pinned=0 reviewer_approval='' approval_summary='' stage_report='' installed_head candidate_root common origin_url
   local manifest='/etc/ai-devops/install-manifest.tsv' receipt='' classes='' protected=0 auth_dir issued pending ordinary completion completed_head='' auth old cls protected_flag fixture=0 fixture_root='' intent_state='' declared_installation='' class_base='' stale_recovery=0 stage_marker='' staged_ok=0 transaction=''
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1006,7 +1043,7 @@ cmd_install_verify(){
       --installed-checkout) need_value "$@"; installed="$2"; shift 2 ;;
       --installed-launcher) need_value "$@"; launcher="$2"; shift 2 ;;
       --caller-pinned) caller_pinned=1; shift ;;
-      --owner-request) need_value "$@"; owner_request="$2"; shift 2 ;;
+      --reviewer-approval) need_value "$@"; reviewer_approval="$2"; shift 2 ;;
       --stage-report) need_value "$@"; stage_report="$2"; shift 2 ;;
       *) die "unknown option for install-verify: $1" ;;
     esac
@@ -1136,7 +1173,7 @@ cmd_install_verify(){
     else
       transaction="$ordinary"
       jq -e --arg old "$(jq -r .installed_head "$ordinary")" --arg target "$target" --arg path "$installed" \
-        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.owner_request|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary install transaction does not match.'
+        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.reviewer_approval|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary install transaction does not match.'
       old="$(jq -r .installed_head "$ordinary")"
       if [ -n "$completed_head" ]; then
         [ "$old" = "$completed_head" ] || { [ "$phase" = finalize ] && [ "$completed_head" = "$target" ]; } || blocked 'ai-task-gates: STOP. Ordinary install baseline differs from last completed release.'
@@ -1244,10 +1281,11 @@ cmd_install_verify(){
   else
     [ ! -e "$issued" ] && [ ! -e "$pending" ] || blocked 'ai-task-gates: STOP. Unexpected installation authority for an ordinary update.'
     if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
-      [ "$declared_installation" = installation ] && [ -n "$owner_request" ] || blocked 'ai-task-gates: STOP. Ordinary Linux installation needs a declared installation task and owner request.'
+      [ "$declared_installation" = installation ] && [ -n "$reviewer_approval" ] || blocked 'ai-task-gates: STOP. Ordinary Linux installation needs a declared installation task and an assigned AI reviewer APPROVE (--reviewer-approval <report>).'
+      approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target" "$candidate_root")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
     else
       jq -e --arg old "$old" --arg target "$target" --arg path "$installed" \
-        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.owner_request|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary Linux transaction changed before resume.'
+        '.schema_version==1 and .installed_head==$old and .target_head==$target and .installed_checkout==$path and (.reviewer_approval|type=="string" and length>0)' "$ordinary" >/dev/null 2>&1 || blocked 'ai-task-gates: STOP. Ordinary Linux transaction changed before resume.'
     fi
     if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
       mkdir -p "$auth_dir" && chmod 0700 "$STATE_DIR" "$auth_dir" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install state.'
@@ -1255,23 +1293,24 @@ cmd_install_verify(){
       local ordinary_stage
       ordinary_stage="$(mktemp "$auth_dir/.ordinary.XXXXXXXX")" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install transaction.'
       chmod 0600 "$ordinary_stage" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install transaction.'
-      jq -nc --arg old "$old" --arg target "$target" --arg path "$installed" --arg request "$owner_request" --arg id "$(cat /proc/sys/kernel/random/uuid)" \
-        '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path,owner_request:$request,transaction_id:$id}' > "$ordinary_stage" &&
+      jq -nc --arg old "$old" --arg target "$target" --arg path "$installed" --arg request "$approval_summary" --arg id "$(cat /proc/sys/kernel/random/uuid)" \
+        '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path,reviewer_approval:$request,transaction_id:$id}' > "$ordinary_stage" &&
         ln -- "$ordinary_stage" "$ordinary" && rm -- "$ordinary_stage" || blocked 'ai-task-gates: STOP. Cannot record ordinary install transaction.'
+
     fi
   fi
   printf 'ai-task-gates: Linux %s verified for %s from %s.\n' "$phase" "$target" "$old"
 }
 
 cmd_authorize_install(){
-  local target_head="" installed_checkout="" installed_launcher="" review_report="" owner_request="" legacy_migration=0 first_install=0 recover_launchers=0 stale_manifest_recovery=0
+  local target_head="" installed_checkout="" installed_launcher="" review_report="" reviewer_approval="" approval_summary="" legacy_migration=0 first_install=0 recover_launchers=0 stale_manifest_recovery=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --target-head) need_value "$@"; target_head="$2"; shift 2 ;;
       --installed-checkout) need_value "$@"; installed_checkout="$2"; shift 2 ;;
       --installed-launcher) need_value "$@"; installed_launcher="$2"; shift 2 ;;
       --review-report) need_value "$@"; review_report="$2"; shift 2 ;;
-      --owner-request) need_value "$@"; owner_request="$2"; shift 2 ;;
+      --reviewer-approval) need_value "$@"; reviewer_approval="$2"; shift 2 ;;
       --legacy-migration) legacy_migration=1; shift ;;
       --first-install) first_install=1; shift ;;
       --recover-launchers) recover_launchers=1; shift ;;
@@ -1289,7 +1328,8 @@ cmd_authorize_install(){
   start_head="$(state_field start_head)"
   [[ "$start_head" =~ ^[0-9a-f]{40}$ ]] || blocked 'ai-task-gates: STOP. Installation task lacks recorded pre-update HEAD.'
   [[ "$target_head" =~ ^[0-9a-f]{40}$ ]] && [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] || blocked 'ai-task-gates: STOP. Candidate HEAD differs from requested target.'
-  [ -n "$owner_request" ] && [ -n "$review_report" ] && [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Install authority needs owner request, exact review, checkout, and launcher.'
+  [ -n "$reviewer_approval" ] && [ -n "$review_report" ] && [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Install authority needs an assigned AI reviewer APPROVE, exact review, checkout, and launcher.'
+  approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target_head" "$TOPLEVEL")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
   [ $((legacy_migration + first_install + recover_launchers + stale_manifest_recovery)) -le 1 ] || blocked 'ai-task-gates: STOP. Choose one installation migration mode.'
   if [ "$start_head" = "$target_head" ] && [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then
     blocked 'ai-task-gates: STOP. Empty release needs an installed receipt or explicit reviewed legacy migration.'
@@ -1469,11 +1509,12 @@ cmd_authorize_install(){
   chmod 0600 "$auth_stage" || blocked 'ai-task-gates: STOP. Could not protect install authority.'
   jq -nc --arg target "$target_head" --arg base "$start_head" --arg checkout "$receipt_checkout" \
     --arg launcher "$receipt_launcher" --arg policy "$policy_digest" --arg source "$reviewed_digest" \
-    --arg report "$receipt_report" --arg report_hash "$report_hash" --arg request "$owner_request" \
+    --arg report "$receipt_report" --arg report_hash "$report_hash" --arg request "$approval_summary" \
     --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson stale "$stale_manifest_recovery" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" --arg manifest_recorded_sha "${manifest_recorded_sha:-}" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,owner_request:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
+    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
     && ln -- "$auth_stage" "$auth_path" && rm -- "$auth_stage" || blocked 'ai-task-gates: STOP. Could not write install authority.'
+
   printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$start_head"
 }
 
