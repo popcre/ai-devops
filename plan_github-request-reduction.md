@@ -23,6 +23,8 @@ is stopped by its protected reviewer-safety deployment gate; #660 stays open.
 
 Update 2026-09-28 2:41 PM EDT (Codex issue #658 orchestration): P2 #929,
 P4/S2 #948, installer #950, P3/S3 #973, and P1 #970 have merged. P2 #914
+
+2026-09-29 transcript finding 5: GitHub quota — finish P5 (BlockerWatch → existing App) before any multi-App split; lint direct `gh`; show remaining quota in `ai-gh` output.
 and P4 #925 passed installed proof and closed. Guarded installation and measured
 acceptance remain open. A forward-only P1 attribution repair is in PR #1000;
 its first Windows CI run failed two fixture assertions; the then-current scoped
