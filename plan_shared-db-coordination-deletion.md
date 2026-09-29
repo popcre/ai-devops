@@ -191,8 +191,9 @@ Evidence (private scratch `.ai/tmp/` — **never commit raw transcripts**):
 
 **OPEN (criteria in parentheses):**
 - Exact `claim-admission` string if `ai-task-gates` rejects it (shortest name that still matches; update every mirror in the same PR).
-- Fold `shared-db-orchestrator` skill into `shared-db-change` vs keep as optional reference (prefer fold if `test-skill-trigger-policy.sh` can pass without losing protected-skill history).
+- **Do not fold or delete `shared-db-orchestrator` SKILL.md** until you prove every machine-checked safety sentence it carries is preserved elsewhere (claim locks, lease flags, clock-expiry, pinned auto-migration commits). Prefer: keep the skill file, demote the *role* (no required marker/orchestrator chat), leave safety bullets intact. `tests/test-shared-db-routing-rules.sh` guards routing/role text — re-read it before editing and keep its actual invariants green.
 - Whether to keep a **read-only** daily stuck-PR list for Albert (status only, never a work ticket). Default: omit if in doubt.
+- Watchdog comment **idempotence**: one comment per stuck PR **per head SHA** (or edit a single sticky comment on that PR). Do not post a new comment every tick. Fetch `assignees` in the GraphQL/REST payload before any @-mention.
 
 ## 9. The plan — numbered steps
 
@@ -255,19 +256,19 @@ rg -n "leftover-proof issue|one unproven live-behavior outcome|Never save severa
 ### Phase B — PR-B (Steps 3, 5)
 
 #### Step 3. Self-service claim is the default structural path
-**Files:**
-- `skills/shared/shared-db-orchestrator/SKILL.md` + `references/operating-manual.md`
+**Files (including the four globals — do not skip these):**
+- **`templates/system/CLAUDE-global.md`, `AGENTS-global-codex.md`, `AGENTS-global-zcode.md`, `AGENTS-global-mimo.md`** — today they still make the **orchestrator a required role**. In the same PR-B, change that to **optional reference / claim-first default**. Without this, Step 9 re-adopts "required" onto every machine. Keep every **production-safety** sentence (claims, stage leases, clock-expiry, pinned auto-migration commits, never-terraform-without-approval). Only the **required orchestrator role / marker** language goes.
+- `skills/shared/shared-db-orchestrator/SKILL.md` + `references/operating-manual.md` — **keep the file** and its safety bullets; demote the *role* (no "you are the orchestrator / open a marker"). Do **not** fold/delete until safety sentences are proven portable (§8 OPEN).
 - `skills/shared/shared-db-handover/SKILL.md`
 - `docs/task-router.md`, `AGENTS.md` (shared-db rows)
 - `docs/standing-rules-details.md` (leftover-proof / one-outcome wording — same checklist rule as Step 2)
-- `templates/system/implementation-plan-standard.md:160-164` and `skills/shared/implementation-plan-writer/SKILL.md` (~:222) — STATUS-row leftover-proof language becomes "one live-proof owner issue only when proof cannot be produced in-session"
-- `tests/test-shared-db-routing-rules.sh:8-24`
+- `templates/system/implementation-plan-standard.md:160-164` and `skills/shared/implementation-plan-writer/SKILL.md` (~:222)
+- `tests/test-shared-db-routing-rules.sh` — **read first**; it guards routing/role invariants, not the whole skill body. Keep its real invariants green; adjust only the required-role assertion.
 - `config/skill-trigger-policy.json:20-21` + `tests/test-skill-trigger-policy.sh` if skill set changes
 
 **Behavior when done:**
 - New structural work starts when a session successfully **claims exact objects** on the **existing** issue (model: `shared-db/docs/agents/orchestrator.md` `self-service-additive`).
-- No marker, no orchestrator chat required.
-- Orchestrator skill is **optional reference** (or folded into `shared-db-change` per §8 OPEN).
+- No marker, no orchestrator chat required. Installed globals say the same as the skills.
 - Handover = notes on the same issue, not a new ticket.
 
 **Suggested skill header change (orchestrator SKILL.md):** keep safety bullets (claims, versions, stage leases, review, live proof); replace "you are the orchestrator / open a marker" with "not required; claim-first is the default; this document is reference only".
@@ -295,8 +296,8 @@ rg -n "exactly one leftover-proof|open your OWN orchestrator-marker" skills/
 
 #### Step 4. Re-point stuck-work watchdog
 **Behavior contract (locked):**
-1. Input: stuck **PRs** (from `listPulls`).
-2. Output: **one comment per stuck PR** on that PR. If the PR has an assignee, @-mention them in the comment text. If unassigned, comment without inventing an owner.
+1. Input: stuck **PRs** (from `listPulls` / GraphQL — **select `assignees`**; without that field the @-mention is unimplementable).
+2. Output: **one comment per stuck PR per head SHA** (idempotence key = PR number + head SHA). Prefer editing one sticky comment on that PR over spamming every 15-minute tick. If the PR has an assignee **from the fetched assignees list**, @-mention them; if unassigned, comment without inventing an owner.
 3. **Preserve:** `!rerun` / no fixer issue for shared-db. `REPOS` map: shared-db must **not** take the ai-devops `fixer`/`else` branch.
 4. **Remove:** `orchestrator-marker` upsert/ping; "nobody (no open orchestrator marker)"; any "the conductor decides" wording.
 5. Keep quota/runner **one re-run per head on the same PR** if that already exists (capacity, not process).
@@ -316,11 +317,13 @@ rg -n "exactly one leftover-proof|open your OWN orchestrator-marker" skills/
 
 #### Step 4B. SHRINK BlockerWatch
 **DELETE:**
-- Standing rule / `AGENTS.md` / `docs/standing-rules-details.md`: "**register a wait and end the turn**" for >~10 minute waits → replace with: use bounded `ai-pr-wait` while you remain in the turn; otherwise leave the **existing issue/PR** as the card and return later (GitHub notifications are the reminder).
-- Closeout `has-wait` completeness gate.
+- Standing rule / `AGENTS.md` / **all four globals** / `docs/standing-rules-details.md`: "**register a wait and end the turn**" and **`ai-blocker-watch wait`** as a **required** delivery step → replace with: use bounded `ai-pr-wait` while you remain in the turn; otherwise leave the **existing issue/PR** as the card and return later (GitHub notifications are the reminder).
+- Closeout **`has-wait`** completeness gate **and** the completion-check hook / dispatcher path that enforces it (`bin/ai-completion-check-hook` or equivalent — find every caller of `has-wait` / `ai-blocker-watch wait` before deleting; dropping `has-wait` from the dispatcher without replacing the guard either **blocks every waiting turn-end** or **silently kills** the waiting guard). Target behavior: turn-end may close with an unchecked checklist on the issue; it must **not** fail closed solely because no BlockerWatch wait exists, and must **not** silently pretend a wait was registered.
 - `--park` (creates a new issue if you have none).
 - Session `wake`/resume as a **delivery** dependency.
 - Do **not** start `plan_blockerwatch-reliability-repair.md` step 5 (enforced registration).
+
+**Also edit the four globals here if PR-B did not already** (they still say `ai-blocker-watch wait` is required). Same checklist wording as Step 2/3.
 
 **KEEP:**
 - Tick/scheduler that runs the janitor (`bin/ai-blocker-watch` stuck_watchdog path).
