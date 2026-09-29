@@ -11,10 +11,10 @@
 | **A1. P3: stop long suites after a known failure + no-progress detector** | ⬜ open | **top hours: 10–20/wk** |
 | **A2. P7: timeout ≠ broken reviewer (bounded first probe + retry/cooldown)** | ⬜ open | **5–12/wk** |
 | **B1. Session/task TTL + reap (14h orphans) under BlockerWatch** | ⬜ open | **3–8/wk** |
-| C1. Correct handoff §5a lines (lease TTL; 10s window) | ⬜ open | |
-| C2. Decision ledger: items 3/9 not done (correct citations) | ⬜ open | |
-| C3. Index the 18 unlisted root `plan_*.md` | ⬜ open | |
-| C4. Fold-routing lines for findings 5/6/7/8 | ⬜ open | |
+| C1. Correct handoff §5a lines (lease TTL; 10s window) | ✅ done 2026-09-29 | PR #1123 `b0779156`; handoff grep clean (no `lease TTL`/`60s`; `10s`/`CHECK_TIMEOUT` at 76/81/113/140) |
+| C2. Decision ledger: items 3/9 not done (correct citations) | ✅ done 2026-09-29 | PR #1124 `ff28e561`; IMPLEMENTATION-PLAN.md §8 "Decision ledger: why findings 3 and 9 are not done" |
+| C3. Index the 18 unlisted root `plan_*.md` | ✅ done 2026-09-29 | PR #1123 `b0779156`; 73/73 plans indexed (re-measured 19 missing incl. `plan_reviewer-pipeline-core.md`) |
+| C4. Fold-routing lines for findings 5/6/7/8 | ✅ done 2026-09-29 | PR #1123 `b0779156`; markers in plan_workflow-efficiency, plan_github-request-reduction, plan_blockerwatch-reliability-repair, plan_ai-devops-work-claims, bin/ai-machine-tools-doctor |
 | D1. Doctor orphan spawn guard + reconcile residual (small) | ⬜ open | after A1; keep |
 | 7. Independent exact-head review per code PR | ⬜ open | |
 | 8. Merge via queue + live proof per PR | ⬜ open | |
