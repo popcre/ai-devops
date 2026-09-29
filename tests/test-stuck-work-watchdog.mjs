@@ -71,7 +71,8 @@ test('rerun/owner markers are trusted only from the watchdog bot', () => {
 });
 
 test('log excerpt passes the secret scrubber', () => {
-  const s = scrub('token ghp_abcdefghijklmnopqrstuvwxyz0123456789 and Authorization: Bearer xyz.abc');
+  const fake = ['gh', 'p_', 'x'.repeat(36)].join(''); // built at runtime: no credential-shaped literal in the public tree
+  const s = scrub(`token ${fake} and Authorization: Bearer xyz.abc`);
   assert.doesNotMatch(s, /ghp_|xyz\.abc/);
 });
 
