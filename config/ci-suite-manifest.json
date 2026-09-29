@@ -63,6 +63,14 @@
         "test-ai-memory-sync.sh",
         "test-ai-memory-sync-fanout.sh"
       ],
+      "bin/ai-muse": [
+        "test-ai-muse.sh",
+        "test-ai-lock-doctor.sh"
+      ],
+      "bin/ai-muse.cmd": [
+        "test-ai-muse.sh",
+        "test-ai-lock-doctor.sh"
+      ],
       "bin/ai-memory-sync.cmd": [
         "test-ai-memory-sync.sh",
         "test-ai-memory-sync-fanout.sh"
@@ -100,6 +108,22 @@
       ],
       "bin/ai-gemini-usage.cmd": [
         "test-ai-gemini-usage.sh"
+      ],
+      "bin/ai-deepseek-agent": [
+        "test-ai-deepseek-agent.sh",
+        "test-ai-lock-doctor.sh"
+      ],
+      "bin/ai-deepseek-agent.cmd": [
+        "test-ai-deepseek-agent.sh",
+        "test-ai-lock-doctor.sh"
+      ],
+      "bin/ai-qwen": [
+        "test-ai-qwen.sh",
+        "test-ai-lock-doctor.sh"
+      ],
+      "bin/ai-qwen.cmd": [
+        "test-ai-qwen.sh",
+        "test-ai-lock-doctor.sh"
       ],
       "bin/ai-qwen-cli": [
         "test-ai-qwen-cli.sh"

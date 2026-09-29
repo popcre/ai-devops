@@ -473,8 +473,27 @@ read_key_from_op(){
     credential_home="${credential_state%/.local/state/ai-devops/muse}"
     candidate="$credential_home/.config/ai-devops/op-refresh.lock"
     mkdir -p "$(dirname "$candidate")" || die 'could not create the shared 1Password lock directory.'
-    MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" flock --close -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key')" \
-      || die 'Muse key refresh failed or the shared 1Password lock is busy; no key was stored.'
+    muse_doctor() { # sweep this toolkit's own stuck holders via ai-lock-doctor (#1002)
+      # The kill floor is a CONSTANT, never the caller-settable wait budget:
+      # a small AI_MUSE_CREDENTIAL_WAIT_SECONDS must not lower the minimum
+      # age at which a holder may be signalled (third exact-head review).
+      local doctor
+      doctor="$(dirname "$(readlink -f "$SELF")")/ai-lock-doctor"
+      [ -x "$doctor" ] || doctor="$(command -v ai-lock-doctor 2>/dev/null || true)"
+      [ -n "$doctor" ] || return 0
+      "$doctor" --recover --older-than 120 "$candidate" || true
+    }
+    muse_locked_read() {
+      flock --close -E 87 -w "$budget" "$candidate" op read 'op://vibe_coding/Meta ai Muse Spark API Key/api key'
+    }
+    # Exit 87 means the wait timed out on contention; any other failure is
+    # op's own error: no sweep, no retry. On real contention the doctor runs
+    # once, then one retry (#1002).
+    MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" muse_locked_read)" || {
+      [ "$?" -eq 87 ] || die 'Muse key refresh failed or the shared 1Password lock is busy; no key was stored.'
+      muse_doctor
+      MODEL_API_KEY="$(OP_SERVICE_ACCOUNT_TOKEN="$op_token" muse_locked_read)"
+    } || die 'Muse key refresh failed or the shared 1Password lock is busy; no key was stored.'
     [ -n "$MODEL_API_KEY" ] || die 'Muse key resolved empty.'
     return
   fi

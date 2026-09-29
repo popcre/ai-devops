@@ -23,7 +23,10 @@ if [ -z "${SYSTEMROOT:-}" ] && [ -x /usr/bin/getent ]; then
   printf 'synthetic-token' > "$TMP/account-home/.config/ai-devops/op-service-account"
   chmod 600 "$TMP/account-home/.config/ai-devops/op-service-account"
   expected_flock="$TMP/account-home/.config/ai-devops/op-refresh.lock"
-  if ( source /dev/stdin; source <(sed -n '/^read_key_from_op(){/,/^}/p' "$SCRIPT"); muse_os_profile_home(){ printf '%s\n' "$TMP/account-home"; }; linked_below_home(){ return 1; }; need(){ :; }; flock(){ printf '%s\n' "$4" > "$TMP/observed-flock"; [ "$OP_SERVICE_ACCOUNT_TOKEN" = synthetic-token ] || return 1; printf 'fake-key\n'; }; KEY_HOME="$TMP/account-home" AI_MUSE_TEST_DIR='' SYSTEMROOT='' STATE="$TMP/hostile-state" AI_MUSE_CREDENTIAL_WAIT_SECONDS=2; read_key_from_op && [ "$MODEL_API_KEY" = fake-key ] && [ "$(cat "$TMP/observed-flock")" = "$expected_flock" ] ) <<< "$FUNCS" >/dev/null 2>&1; then
+  # The refresh serializes through the shared account flock: the lock path
+  # must appear among the mock's captured arguments wherever the wrapper's
+  # option order puts it (#1002 added flock's -E 87 conflict code).
+  if ( source /dev/stdin; source <(sed -n '/^read_key_from_op(){/,/^}/p' "$SCRIPT"); muse_os_profile_home(){ printf '%s\n' "$TMP/account-home"; }; linked_below_home(){ return 1; }; need(){ :; }; flock(){ printf '%s\n' "$@" > "$TMP/observed-flock"; [ "$OP_SERVICE_ACCOUNT_TOKEN" = synthetic-token ] || return 1; printf 'fake-key\n'; }; KEY_HOME="$TMP/account-home" AI_MUSE_TEST_DIR='' SYSTEMROOT='' STATE="$TMP/hostile-state" AI_MUSE_CREDENTIAL_WAIT_SECONDS=2; read_key_from_op && [ "$MODEL_API_KEY" = fake-key ] && grep -qxF -- "$expected_flock" "$TMP/observed-flock" ) <<< "$FUNCS" >/dev/null 2>&1; then
     result pass 'Linux Muse refresh uses the shared account flock'
   else result fail 'Linux Muse refresh uses the shared account flock'; fi
   rm -f "$TMP/account-home/.config/ai-devops/op-service-account" "$TMP/op-without-token"

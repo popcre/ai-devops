@@ -1,0 +1,131 @@
+name: Merge-queue settings drift
+
+# Catches a mismatch between the toolkit and GitHub's live merge-queue
+# settings before it ejects pull requests for hours (#913, #1002 step 4):
+# the committed snapshot vs the live ruleset, the required checks vs the
+# merge_group workflows, and the pull-request test selection vs the queue's
+# selection. Daily, on demand, and on pull requests that can change either
+# side. Not a required check: a red run is an alarm on one standing issue.
+#
+# The live ruleset read may be refused for the workflow token (repo ruleset
+# reads can require administration). A refused read is DEGRADED, not drift:
+# the offline checks stay in force, the standing issue is told once, and
+# repeat refusals do not comment again (no daily false alarm).
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/**
+      - tests/lib-selection.sh
+      - config/merge-queue-expected.json
+      - bin/ai-merge-queue-drift
+      - tests/test-ai-merge-queue-drift.sh
+
+permissions:
+  contents: read
+
+# A cron run and a manual dispatch must not race the same standing issue.
+concurrency:
+  group: merge-queue-drift-alert
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Offline drift checks hold
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Offline drift checks and suite
+        run: |
+          bash tests/test-ai-merge-queue-drift.sh
+          bin/ai-merge-queue-drift --offline
+
+  live-ruleset:
+    name: Snapshot matches the live ruleset
+    # Dormant by default: the job token cannot read rulesets under
+    # contents:read, so until an owner grants the read AND sets the
+    # repository variable MERGE_QUEUE_DRIFT_LIVE=enabled (#1026), a live
+    # run can only end in the degraded notice. Offline checks run daily
+    # regardless.
+    if: github.event_name != 'pull_request' && vars.MERGE_QUEUE_DRIFT_LIVE == 'enabled'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      outcome: ${{ steps.live.outputs.outcome }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Compare with the live ruleset
+        # The job-level gate keeps pull requests offline and keeps this lane
+        # dormant until the owner decision in #1026 lands.
+        id: live
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ruleset_id="$(jq -r .ruleset_id config/merge-queue-expected.json)"
+          repo="$(jq -r .repository config/merge-queue-expected.json)"
+          if ! bin/ai-gh api "repos/$repo/rulesets/$ruleset_id" > /tmp/ruleset.json 2>/tmp/read.err; then
+            if grep -q 'HTTP 404' /tmp/read.err; then
+              # The ruleset itself is gone or renumbered: that is drift.
+              echo "outcome=drift" >> "$GITHUB_OUTPUT"
+              echo "the live ruleset $ruleset_id no longer exists" >&2
+              exit 1
+            fi
+            echo "outcome=refused" >> "$GITHUB_OUTPUT"
+            echo "::warning::live ruleset read was refused; offline checks stay in force"
+            sed -n '1,4p' /tmp/read.err || true
+            exit 0
+          fi
+          if bin/ai-merge-queue-drift --ruleset /tmp/ruleset.json; then
+            echo "outcome=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "outcome=drift" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+  alert:
+    needs: [drift, live-ruleset]
+    # A failed job of EITHER kind is alertable: an outcome-less failure
+    # (checkout, jq, runner) must reach the standing issue too.
+    if: >-
+      always() && !cancelled() && github.event_name != 'pull_request' &&
+      (needs.drift.result != 'success' || needs.live-ruleset.result == 'failure' || needs.live-ruleset.outputs.outcome == 'refused')
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the merge-queue drift standing issue
+        shell: bash
+        run: |
+          outcome="${{ needs.live-ruleset.outputs.outcome }}"
+          if [ "$outcome" = refused ] && [ "${{ needs.drift.result }}" = success ]; then
+            # Degraded, NOT drift: it gets its own standing issue so a read
+            # refusal is never booked as a settings drift. Say so once; a
+            # repeat refusal stays silent while that notice is the latest
+            # comment OR still the issue body (a fresh issue has no comments).
+            title='Merge-queue drift lane degraded - live ruleset read refused'
+            body="The live ruleset comparison could not read repos/$GITHUB_REPOSITORY at $RUN_URL (token refused the ruleset read). The offline checks stay in force. Grant the lane a ruleset read or move the live comparison to a machine with admin access; until then scheduled runs are degraded, and this message will not repeat while it is the latest comment."
+          else
+            title='Merge-queue drift check failed'
+            body="The merge-queue drift check failed at $RUN_URL. Run bin/ai-merge-queue-drift for the exact finding, then reconcile it by a pull request to config/merge-queue-expected.json or by reverting the live ruleset. Close this issue only after a later drift run passes."
+          fi
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
+          if [ "$outcome" = refused ] && [ -n "$existing" ]; then
+            last="$(gh issue view "$existing" --repo "$GITHUB_REPOSITORY" --json body,comments --jq '.body, (.comments[-1].body // "")' 2>/dev/null)"
+            if [ "$(printf '%s' "$last" | grep -c 'will not repeat while it is the latest comment')" -ge 1 ]; then
+              echo "refusal already reported; staying silent"
+              exit 0
+            fi
+          fi
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug
+          fi
