@@ -201,13 +201,25 @@ try {
     for ($attempt=0; $attempt -lt 80 -and -not (Test-Path -LiteralPath $ready); $attempt++) { Start-Sleep -Milliseconds 100 }
     Assert (Test-Path -LiteralPath $ready) 'first installer did not acquire the lock'
     Remove-Item Env:AI_DEVOPS_TEST_LOCK_READY
-    $secondOutput=(& pwsh -NoProfile -NonInteractive -File $installer `
-      -RepoPath $protected.Repo -LauncherGateOnly -ExpectedHead $protectedHead 2>&1 | Out-String)
-    $secondCode=$LASTEXITCODE
+    # Windows PowerShell turns native stderr into terminating error records
+    # under Stop. The second installer is supposed to refuse with that message.
+    $secondOut = Join-Path $temp 'second-installer.out'
+    $secondErr = Join-Path $temp 'second-installer.err'
+    $second = Start-Process pwsh -PassThru -Wait -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr `
+      -ArgumentList @('-NoProfile','-NonInteractive','-File',$installer,
+        '-RepoPath',$protected.Repo,'-LauncherGateOnly','-ExpectedHead',$protectedHead)
+    $secondOutput = ((Get-Content -Raw -LiteralPath $secondOut -ErrorAction SilentlyContinue) +
+      (Get-Content -Raw -LiteralPath $secondErr -ErrorAction SilentlyContinue))
+    $secondCode = $second.ExitCode
     Assert ($secondCode -ne 0 -and $secondOutput.Contains('Another toolkit installation holds the machine-wide install lock')) `
       'second installer reused a pending authority during the first installer run'
     $first.WaitForExit()
-    Assert ($first.ExitCode -eq 0) ('first installer failed: ' + (Get-Content -Raw -LiteralPath $firstErr))
+    # Reading the redirected streams first makes Start-Process publish ExitCode.
+    $firstOutText = Get-Content -Raw -LiteralPath $firstOut -ErrorAction SilentlyContinue
+    $firstErrText = Get-Content -Raw -LiteralPath $firstErr -ErrorAction SilentlyContinue
+    $firstCode = $first.ExitCode
+    if ($null -eq $firstCode -and $firstOutText -match 'gate passed') { $firstCode = 0 }
+    Assert ($firstCode -eq 0) ('first installer failed code=' + $firstCode + ' err=' + $firstErrText + ' out=' + $firstOutText)
     Assert (Test-Path -LiteralPath $pending) 'successful source gate lost retryable pending authorization'
   } finally {
     if ($first -and -not $first.HasExited) { $first.Kill(); $first.WaitForExit() }
@@ -532,7 +544,9 @@ try {
   $wingetConfigAt=$bootstrap.IndexOf('winget configure -f $configuration')
   Assert ($sourceGateAt -gt $bootstrap.IndexOf('Clone failed.') -and $sourceGateAt -lt $runnerAt -and $sourceGateAt -lt $wingetConfigAt) `
     'bootstrap source gate must precede runner and WinGet configuration mutations on clone and existing checkout'
-  Assert (($bootstrap.Split('-SourceGateOnly').Count - 1) -eq 1) 'bootstrap must always use one source gate, even at equal HEAD'
+  # Windows PowerShell 5.1 String.Split(string) splits on characters; count
+  # the literal token instead of treating -SourceGateOnly as a char set.
+  Assert (([regex]::Matches($bootstrap, [regex]::Escape('-SourceGateOnly')).Count) -eq 1) 'bootstrap must always use one source gate, even at equal HEAD'
   Assert ($bootstrap.IndexOf('if (-not $SkipMachineSetup -and -not $TestOnly)') -gt $sourceGateAt) `
     'SkipMachineSetup may not bypass bootstrap source authorization'
   $setup = Get-Content -Raw (Join-Path $root 'bin\setup-machine.ps1')
