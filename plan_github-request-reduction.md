@@ -43,9 +43,18 @@ interrupted, uncommitted repair in its own worktree. No fresh install approval
 exists for that changed target. The replacement standing rules put technical
 sign-in/access recovery on AI and prohibit asking Albert to perform it.
 
+Update 2026-09-28 10:55 PM EDT (MiMo on edge-dev): PR #1000 merged through
+the queue as `2b0fe5ab2553d31378e6caa81ac3fb74d111e762` and confirmed on
+`origin/main`. Exact head `953997e7` repaired Windows quota-context fixtures
+(`Get-Acl` import failure → .NET ACL APIs) and non-regular `principal-salt`
+reads (FIFO must not block). Codex exact-head final-check APPROVE with
+`tests/test-ai-gh.sh` 205/0 in the packet. Signed proof:
+https://github.com/popcre/ai-devops/issues/658#issuecomment-5887556377.
+Installed P1 reporting (#660) and the rest of the handoff remain open.
+
 | Step | State | Owner / dependency | Evidence required to accept |
 |---|---|---|---|
-| P1. Attribute consumption and freeze a comparable baseline | Partial: PR #970 merged as e108418; edge-dev3 has 16 observed GraphQL cost rows but only 2 completed non-deadline receipts, and old quota snapshots lack access-context join; PR #1000 open at 7190d7a with exact-head review BLOCKED for missing test packet evidence | #660, successor owner of #658; guarded installation and live proof | Baseline exists; 20 comparable operations, host samples, principal binding, and actual request/point attribution still required |
+| P1. Attribute consumption and freeze a comparable baseline | Partial: PR #970 merged as e108418 and PR #1000 merged as 2b0fe5ab (access-context join + Windows ACL/salt fixtures, Codex APPROVE at 953997e7); edge-dev3 still has only 2 completed non-deadline receipts; installed reporting proof remains open | #660, successor owner of #658; guarded installation and live proof | Baseline exists; 20 comparable operations, host samples, principal binding, and actual request/point attribution still required |
 | P2. Protect the actual quota and preserve command behavior | Accepted: PR #929 (b2fb997) merged after review/CI; installed edge-dev3 hash matched and normal GraphQL read passed at 11:37 AM EDT; #914 closed with signed proof | Codex issue #658 orchestrator | Separate-bucket, identity, malformed-state and cost fixtures plus installed read passed; broader P8 savings remain separate |
 | P3. Route all managed request sources through the shared policy | PR #973 merged as 9cf87d4 after exact-head approval, focused tests, and green CI; shared-db consumer #3649 merged; installed #931/#933 proof open | #931 and #933 scoped proof owners; installation | Caller inventory, regression guard, and PR/CI passed; installed representative paths remain |
 | P4. Coalesce duplicate status reads and waiters | Accepted: PR #948 (f55c1a6) merged after review/CI; two installed edge-dev3 waiters shared one OPEN refresh and kept independent deadline outcomes at 11:45–11:46 AM EDT; #925 closed with signed proof | Codex issue #658 orchestrator | Live same-target trace passed; terminal merge/ejection and identity isolation passed checked-in fixtures |
