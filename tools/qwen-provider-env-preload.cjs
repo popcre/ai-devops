@@ -22,3 +22,17 @@ if (secretFile) {
   if (!secret) throw new Error('empty Qwen secret file');
   process.env.BAILIAN_CODING_PLAN_API_KEY = secret;
 }
+
+// Issue #1032: once the key is in the environment this preloader has no work
+// left, so drop its own --require from NODE_OPTIONS. Otherwise Qwen's --sandbox
+// forwards NODE_OPTIONS into the container, where this host path does not
+// exist, and every sandboxed review dies with MODULE_NOT_FOUND before any
+// model call. The host re-exec chain keeps working because the key itself is
+// an ordinary inherited variable.
+if (process.env.NODE_OPTIONS) {
+  const self = __filename;
+  const kept = process.env.NODE_OPTIONS.split(/\s+/).filter((opt) => opt
+    && opt !== `--require=${self}` && opt !== `-r=${self}`);
+  if (kept.length) process.env.NODE_OPTIONS = kept.join(' ');
+  else delete process.env.NODE_OPTIONS;
+}
