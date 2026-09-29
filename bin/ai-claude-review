@@ -17,7 +17,7 @@ SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
 PACKET="${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}"
 LIFECYCLE="${AI_REVIEW_LIFECYCLE_BIN:-$SCRIPT_DIR/ai-review-lifecycle}"
 CALLER="${AI_CLAUDE_REVIEW_CALLER:-codex}"
-CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort high --output-format json --permission-mode plan --tools Read,Grep,Glob --strict-mcp-config --mcp-config {"mcpServers":{}} --no-session-persistence --no-chrome --disable-slash-commands'
+CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort low --output-format json --permission-mode plan --tools Read,Grep,Glob --strict-mcp-config --mcp-config {"mcpServers":{}} --no-session-persistence --no-chrome --disable-slash-commands'
 [ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
 
 die(){ printf 'ai-claude-review: error: %s\n' "$*" >&2; exit 1; }
@@ -33,6 +33,7 @@ EOF
 
 validate_command(){
   case " $CLAUDE_REVIEW_CMD " in *' --model claude-opus-5 '*) ;; *) die 'CLAUDE_REVIEW_CMD must pin --model claude-opus-5.';; esac
+  case " $CLAUDE_REVIEW_CMD " in *' --effort low '*) ;; *) die 'CLAUDE_REVIEW_CMD must pin --effort low.';; esac
   case " $CLAUDE_REVIEW_CMD " in *' --permission-mode plan '*) ;; *) die 'CLAUDE_REVIEW_CMD must pin --permission-mode plan.';; esac
   case " $CLAUDE_REVIEW_CMD " in *' --tools Read,Grep,Glob '*) ;; *) die 'CLAUDE_REVIEW_CMD must allow only Read,Grep,Glob.';; esac
   case " $CLAUDE_REVIEW_CMD " in *' --output-format json '*);; *) die 'CLAUDE_REVIEW_CMD must use JSON output.';; esac
@@ -46,7 +47,7 @@ doctor(){
   local live="${1:-}" probe
   validate_command; "$SANDBOX" --version >/dev/null; "$PACKET" --version >/dev/null; "$LIFECYCLE" --version >/dev/null
   if [ "$live" = --live ]; then
-    probe="$(printf '%s\n' 'Return exactly: OPUS5_ACCESS_OK' | "${CLAUDE_ARGS[0]}" -p --model claude-opus-5 --effort high --output-format json --tools "" --no-session-persistence --no-chrome)" \
+    probe="$(printf '%s\n' 'Return exactly: OPUS5_ACCESS_OK' | "${CLAUDE_ARGS[0]}" -p --model claude-opus-5 --effort low --output-format json --tools "" --no-session-persistence --no-chrome)" \
       || die 'live Claude Opus 5 capability probe failed.'
     jq -e 'def haiku_id: startswith("claude-haiku-") or test("^claude-[0-9]+(-[0-9]+)?-haiku-"); def valid_models: (.modelUsage|type=="object") and (.modelUsage["claude-opus-5"]|type=="object") and ((.modelUsage["claude-opus-5"]|has("canonicalModel")|not) or (.modelUsage["claude-opus-5"].canonicalModel=="claude-opus-5")) and ([.modelUsage|to_entries[]|select(.key!="claude-opus-5")|((.value|type=="object") and (.key|haiku_id) and (.value.provider?=="firstParty") and ((.value.canonicalModel?|type)=="string") and (.value.canonicalModel|haiku_id))]|all); .is_error==false and .result=="OPUS5_ACCESS_OK" and valid_models' <<<"$probe" >/dev/null \
       || die 'live Claude response did not prove canonical claude-opus-5 access.'

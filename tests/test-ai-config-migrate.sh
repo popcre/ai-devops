@@ -7,15 +7,18 @@ cp "$ROOT/config/models.env.example" "$CFG/models.env"
 cp "$ROOT/config/server.env.example" "$CFG/server.env"
 sed -i '/^CODEX_TEST_CMD=/d' "$CFG/models.env"
 sed -i "s#^CODEX_CMD=.*#CODEX_CMD='codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium'#" "$CFG/models.env"
+sed -i "s#^CLAUDE_REVIEW_CMD=.*#CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort high --output-format json --permission-mode plan --tools Read,Grep,Glob --strict-mcp-config --mcp-config {\\\"mcpServers\\\":{}} --no-session-persistence --no-chrome --disable-slash-commands'#" "$CFG/models.env"
 sed -i 's#^OWNER_NAME=.*#OWNER_NAME="Custom Owner"#' "$CFG/server.env"
 FIXED_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 bash "$ROOT/bin/ai-config-migrate" --repo-root "$ROOT" --config-dir "$CFG" --dry-run >/dev/null
 ! grep -q '^CODEX_TEST_CMD=' "$CFG/models.env" || { echo 'FAIL: dry run changed config'; exit 1; }
 ! grep -q 'CODEX_CMD=.*gpt-5.6-sol' "$CFG/models.env" || { echo 'FAIL: dry run replaced config'; exit 1; }
+! grep -q 'CLAUDE_REVIEW_CMD=.*--effort low' "$CFG/models.env" || { echo 'FAIL: dry run replaced Claude effort'; exit 1; }
 bash "$ROOT/bin/ai-config-migrate" --repo-root "$ROOT" --config-dir "$CFG" --source-sha "$FIXED_SHA" >/dev/null
 grep -q '^CODEX_TEST_CMD=' "$CFG/models.env" || { echo 'FAIL: missing default not added'; exit 1; }
 grep -q "^CODEX_CMD='codex exec -m gpt-5.6-sol" "$CFG/models.env" || { echo 'FAIL: known old default not upgraded'; exit 1; }
+grep -q "^CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort low " "$CFG/models.env" || { echo 'FAIL: old --effort high default not upgraded'; exit 1; }
 grep -q '^OWNER_NAME="Custom Owner"' "$CFG/server.env" || { echo 'FAIL: user value overwritten'; exit 1; }
 jq -e --arg sha "$FIXED_SHA" '.schema == 2 and .source_sha == $sha' "$CFG/config-state.json" >/dev/null || { echo 'FAIL: exact source state missing'; exit 1; }
 find "$CFG/backups" -type f -name models.env | grep -q . || { echo 'FAIL: backup missing'; exit 1; }
