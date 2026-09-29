@@ -5,6 +5,8 @@
 
 ## STATUS — read this first
 
+2026-09-29 transcript finding 7: collisions — advisory-first already chosen; hard gate only after 30-day measure. Handoff condition-free "do not" ban does **not** apply to owner rulings.
+
 | Step | Status | Evidence |
 |---|---|---|
 | 0. Reconcile Grok, GLM, and two execution-session reviews | ✅ done 2026-08-27 | [`plan_must_address.md`](plan_must_address.md); [`docs/work-claims-plan-review-2026-08-27.md`](docs/work-claims-plan-review-2026-08-27.md); Grok 4.6 closing verdict `APPROVE` |

@@ -25,6 +25,22 @@ record merely to reduce the file count.
 | [`plan_reviewer-assisted-problem-solving.md`](../plan_reviewer-assisted-problem-solving.md) | [#198](https://github.com/popcre/ai-devops/issues/198) | Step 0; no implementation has started |
 | [`plan_reviewer-cache-efficiency.md`](../plan_reviewer-cache-efficiency.md) | [#333](https://github.com/popcre/ai-devops/issues/333) | Step 2.1; only provider-returned cache reporting remains |
 | [`plan_reviewer-investigation-mode-option-b.md`](../plan_reviewer-investigation-mode-option-b.md) | [#253](https://github.com/popcre/ai-devops/issues/253) | Step 0 still open. Grok #513 landed `7f0f8f6c` 2026-09-16 — do not redo. Remaining children #254–#257. No CLI upgrades; #249 stays separate |
+| [`plan_agent_evidence_and_jujutsu_pilot.md`](../plan_agent_evidence_and_jujutsu_pilot.md) | [#903](https://github.com/popcre/ai-devops/issues/903) | Reconcile existing owners first; GitHub stays authoritative; pilot remains reversible |
+| [`plan_ai-muse-native-engine-parity.md`](../plan_ai-muse-native-engine-parity.md) | [#542](https://github.com/popcre/ai-devops/issues/542) | Phase A coordination done; remaining phases open |
+| [`plan_cut-unneeded-github-traffic.md`](../plan_cut-unneeded-github-traffic.md) | (see plan STATUS) | Measure and reduce remaining unneeded traffic; preserve workflow and separate quota buckets |
+| [`plan_github-request-reduction.md`](../plan_github-request-reduction.md) | [#658](https://github.com/popcre/ai-devops/issues/658) | P5 (BlockerWatch → existing App) before any multi-App split |
+| [`plan_mimo-windows-support.md`](../plan_mimo-windows-support.md) | (see plan STATUS) | Follow the Claude/Codex/ZCode per-client pattern; skills write root is `~/.config/mimocode/skills/` |
+| [`plan_model_tier_delegation.md`](../plan_model_tier_delegation.md) | [#782](https://github.com/popcre/ai-devops/issues/782) | Steps 5–6 open: re-adopt globals on edge-dev, land PR, add router row |
+| [`plan_review-packet-race-and-evidence-speed.md`](../plan_review-packet-race-and-evidence-speed.md) | (see plan STATUS) | Only the target-ref tip check gains ancestry tolerance; HEAD/digest/merge-base stay strict |
+| [`plan_reviewer-pipeline-core.md`](../plan_reviewer-pipeline-core.md) | (see plan STATUS) | Phases A–C then D–E; new 2026-09-29, index retro-fix |
+| [`plan_reviewer-reliability-and-efficiency.md`](../plan_reviewer-reliability-and-efficiency.md) | (see plan STATUS) | Reuse existing provider work; no completion without installed evidence |
+| [`plan_shared-db-coordination-deletion.md`](../plan_shared-db-coordination-deletion.md) | (see plan STATUS) | Keep claims/leases/review/live proof; delete leftover-proof mill; never path-filter required checks |
+| [`plan_tool-and-skill-scoping.md`](../plan_tool-and-skill-scoping.md) | [#707](https://github.com/popcre/ai-devops/issues/707) | Measure before/after; never remove a constrained server; protected skills stay global |
+| [`plan_typesafe-jev-decision-layer.md`](../plan_typesafe-jev-decision-layer.md) | [#643](https://github.com/popcre/ai-devops/issues/643) | Public-data pilots first; Jev never opens a gate or replaces review |
+| [`plan_typesafe-jev-advisory-integrations.md`](../plan_typesafe-jev-advisory-integrations.md) | [#643](https://github.com/popcre/ai-devops/issues/643) | Advisory integrations after decision-layer gates |
+| [`plan_typesafe-jev-spend-reduction.md`](../plan_typesafe-jev-spend-reduction.md) | (see plan STATUS) | Measured token substitution; key via `op run` only |
+| [`plan_workflow-efficiency.md`](../plan_workflow-efficiency.md) | [#650](https://github.com/popcre/ai-devops/issues/650) | One measured outcome per session; reuse existing repairs |
+| [`plan_zcode-windows-support.md`](../plan_zcode-windows-support.md) | [#558](https://github.com/popcre/ai-devops/issues/558) | Follow the Claude/Codex per-client pattern; NO ZCode reviewer ever |
 
 ## Completed decision records
 
@@ -49,8 +65,11 @@ approach.
 | `plan_reviewer-diagnostics-quota-preflight.md` | Closed issue #312 and merged evidence |
 | `plan_reviewer-log-repair-checkpoints.md` | Closed issue #308; issue #322 is a separate Qwen limitation |
 | `plan_reviewer-system-repair.md` | Closed issue #34 and complete STATUS |
-| `plan_live-proof-session-sizing.md` | Closed issue #511 and PR #515; one unproven live-proof outcome per session |
+| `plan_live-proof-session-sizing.md` | Closed issue #511 and PR #515; one unproven live-proof outcome per session. **Resolve live state:** plan STATUS step 8 is 🟡 partial — installed-global proof and issue #511 closure remain (owner-gated). Do not treat as fully closed until that proof lands. |
 | `plan_shared-db-complete-throughput-repair.md` | Closed issue #401; every in-scope row is live-proven, and repository transfer/merge-queue work remains separately owned by popcre/shared-db#2530 |
+| `plan_agent-self-cleanup.md` | All five steps done (live re-proof 2026-09-28 on PR #1029); residual extension tracked in #1018 |
+| `plan_self-healing-locks-and-settings-drift.md` | Steps 4–5 done (2026-09-28); drift check dispatch and live proof recorded |
+| `plan_split-ci-suite-manifest.md` | Steps 0–4 done (PR #1007, `9cf1bed3`); step 5 live proof moved to #1023 (one leftover proof per session) |
 
 ## Superseded or reference-only records
 
