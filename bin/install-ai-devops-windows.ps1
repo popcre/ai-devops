@@ -337,13 +337,13 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
         -not ($lines | Where-Object { $_ -ceq ('| source digest | ' + [char]96 + $auth.source_digest + [char]96 + ' |') })) {
         throw 'Reviewed toolkit install report does not approve the exact target and source.'
     }
-    if ($LegacyMigration -and -not ($lines | Where-Object { $_ -clike '*legacy-managed-launcher-refresh*' })) {
+    if ($LegacyMigration -and -not ($lines | Where-Object { $_ -ceq 'Approved legacy-managed-launcher-refresh.' })) {
         throw 'Review report did not approve the legacy migration operation.'
     }
-    if ($FirstInstall -and -not ($lines | Where-Object { $_ -clike '*first-managed-install*' })) {
+    if ($FirstInstall -and -not ($lines | Where-Object { $_ -ceq 'Approved first-managed-install.' })) {
         throw 'Review report did not approve the first managed installation operation.'
     }
-    if ($RecoverLaunchers -and -not ($lines | Where-Object { $_ -clike '*partial-managed-launcher-recovery*' })) {
+    if ($RecoverLaunchers -and -not ($lines | Where-Object { $_ -ceq 'Approved partial-managed-launcher-recovery.' })) {
         throw 'Review report did not approve partial managed launcher recovery.'
     }
     $reviewRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $report))
@@ -426,6 +426,20 @@ function Assert-ReadyRepository([string]$Path, [string]$ExpectedHead = '') {
     }
     if ($LauncherGateOnly -and $head.Trim() -ne $remoteHead.Trim()) {
         throw 'Launcher receipt cannot be stamped before the checkout reaches exact origin/main.'
+    }
+    # Restore a hard-crashed launcher transaction before reading its receipt.
+    # The sub-installer validates the exact source, catalog and prior bytes.
+    if (-not $LauncherGateOnly) {
+        $transactionRoot = if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_LAUNCHER -and
+            $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and (Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) -notmatch '^github[.]com/') {
+            Join-Path (Split-Path -Parent $env:AI_DEVOPS_TEST_LAUNCHER) 'launcher-transactions'
+        } else {
+            Join-Path $env:USERPROFILE '.local\state\ai-devops\task-gates\launcher-transactions'
+        }
+        $transactionPath = Join-Path $transactionRoot ($head.Trim() + '.json')
+        if (Test-Path -LiteralPath $transactionPath) {
+            & (Join-Path $Path 'bin\install-machine-tools.ps1') -RepoPath $Path -RecoverPendingTransactionOnly
+        }
     }
     $receiptHead = Get-InstalledSourceReceipt -Path $Path
     $installedBaseline = $head.Trim()

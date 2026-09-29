@@ -966,13 +966,13 @@ linux_review_authority(){
   source_digest="$(jq -r .source_digest "$auth")"
   grep -Fqx "| source digest | \`$source_digest\` |" "$report" || return 1
   if [ "$(jq -r .first_install "$auth")" = true ]; then
-    grep -Fq 'first-managed-install' "$report" || return 1
+    grep -Fqx 'Approved first-managed-install.' "$report" || return 1
   fi
   if [ "$(jq -r .legacy_migration "$auth")" = true ]; then
-    grep -Fq 'legacy-managed-launcher-refresh' "$report" || return 1
+    grep -Fqx 'Approved legacy-managed-launcher-refresh.' "$report" || return 1
   fi
   if [ "$(jq -r '.stale_manifest_recovery // false' "$auth")" = true ]; then
-    grep -Fq 'stale-linux-manifest-recovery' "$report" || return 1
+    grep -Fqx 'Approved stale-linux-manifest-recovery.' "$report" || return 1
     local stale_sha stale_manifest_hash stale_source_hash
     stale_sha="$(jq -r .linux_manifest_recorded_sha "$auth")"
     stale_manifest_hash="$(jq -r .linux_manifest_sha256 "$auth")"
@@ -1289,9 +1289,14 @@ cmd_install_verify(){
     fi
     if [ "$phase" = preflight ] || [ ! -e "$ordinary" ]; then
       mkdir -p "$auth_dir" && chmod 0700 "$STATE_DIR" "$auth_dir" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install state.'
+      [ ! -e "$ordinary" ] && [ ! -L "$ordinary" ] || blocked 'ai-task-gates: STOP. Ordinary install transaction path already exists.'
+      local ordinary_stage
+      ordinary_stage="$(mktemp "$auth_dir/.ordinary.XXXXXXXX")" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install transaction.'
+      chmod 0600 "$ordinary_stage" || blocked 'ai-task-gates: STOP. Cannot protect ordinary install transaction.'
       jq -nc --arg old "$old" --arg target "$target" --arg path "$installed" --arg request "$approval_summary" --arg id "$(cat /proc/sys/kernel/random/uuid)" \
-        '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path,reviewer_approval:$request,transaction_id:$id}' > "$ordinary.tmp" &&
-        chmod 0600 "$ordinary.tmp" && mv -f -- "$ordinary.tmp" "$ordinary" || blocked 'ai-task-gates: STOP. Cannot record ordinary install transaction.'
+        '{schema_version:1,installed_head:$old,target_head:$target,installed_checkout:$path,reviewer_approval:$request,transaction_id:$id}' > "$ordinary_stage" &&
+        ln -- "$ordinary_stage" "$ordinary" && rm -- "$ordinary_stage" || blocked 'ai-task-gates: STOP. Cannot record ordinary install transaction.'
+
     fi
   fi
   printf 'ai-task-gates: Linux %s verified for %s from %s.\n' "$phase" "$target" "$old"
@@ -1431,16 +1436,16 @@ cmd_authorize_install(){
   [ "$reviewed_commit" = "$target_head" ] || blocked 'ai-task-gates: STOP. Review does not name exact target.'
   [ "$(tail -n 2 "$report_real" | tr -d '\r')" = $'## Verdict\nAPPROVE' ] || blocked 'ai-task-gates: STOP. Exact-head independent review has not approved release.'
   if [ "$legacy_migration" -eq 1 ]; then
-    grep -Fq 'legacy-managed-launcher-refresh' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve the legacy managed launcher migration operation.'
+    grep -Fqx 'Approved legacy-managed-launcher-refresh.' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve the legacy managed launcher migration operation.'
   fi
   if [ "$first_install" -eq 1 ]; then
-    grep -Fq 'first-managed-install' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve the first managed installation operation.'
+    grep -Fqx 'Approved first-managed-install.' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve the first managed installation operation.'
   fi
   if [ "$recover_launchers" -eq 1 ]; then
-    grep -Fq 'partial-managed-launcher-recovery' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve partial managed launcher recovery.'
+    grep -Fqx 'Approved partial-managed-launcher-recovery.' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve partial managed launcher recovery.'
   fi
   if [ "$stale_manifest_recovery" -eq 1 ]; then
-    grep -Fq 'stale-linux-manifest-recovery' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve stale Linux manifest recovery.'
+    grep -Fqx 'Approved stale-linux-manifest-recovery.' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve stale Linux manifest recovery.'
     grep -Fqx "| stale manifest SHA | \`$manifest_recorded_sha\` |" "$report_real" &&
       grep -Fqx "| stale manifest hash | \`$stale_manifest_hash\` |" "$report_real" &&
       grep -Fqx "| live installed SHA | \`$installed_head\` |" "$report_real" &&
@@ -1498,14 +1503,18 @@ cmd_authorize_install(){
   fi
   auth_dir="$STATE_DIR/install-authorizations"; auth_path="$auth_dir/$target_head.json"
   mkdir -p "$auth_dir" && chmod 0700 "$STATE_DIR" "$auth_dir" || blocked 'ai-task-gates: STOP. Cannot protect install state.'
-  [ ! -e "$auth_path" ] || blocked 'ai-task-gates: STOP. Authorization already exists for target.'
+  [ ! -e "$auth_path" ] && [ ! -L "$auth_path" ] || blocked 'ai-task-gates: STOP. Authorization already exists for target.'
+  local auth_stage
+  auth_stage="$(mktemp "$auth_dir/.authority.XXXXXXXX")" || blocked 'ai-task-gates: STOP. Could not protect install authority.'
+  chmod 0600 "$auth_stage" || blocked 'ai-task-gates: STOP. Could not protect install authority.'
   jq -nc --arg target "$target_head" --arg base "$start_head" --arg checkout "$receipt_checkout" \
     --arg launcher "$receipt_launcher" --arg policy "$policy_digest" --arg source "$reviewed_digest" \
     --arg report "$receipt_report" --arg report_hash "$report_hash" --arg request "$approval_summary" \
     --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson stale "$stale_manifest_recovery" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" --arg manifest_recorded_sha "${manifest_recorded_sha:-}" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_path.tmp" \
-    && chmod 0600 "$auth_path.tmp" && mv -f "$auth_path.tmp" "$auth_path" || blocked 'ai-task-gates: STOP. Could not write install authority.'
+    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
+    && ln -- "$auth_stage" "$auth_path" && rm -- "$auth_stage" || blocked 'ai-task-gates: STOP. Could not write install authority.'
+
   printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$start_head"
 }
 

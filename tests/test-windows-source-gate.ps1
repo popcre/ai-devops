@@ -32,7 +32,7 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   $identity=((& $bash (Join-Path $root 'bin\ai-review-lifecycle') identity $reviewRoot) -join "`n") | ConvertFrom-Json
   Assert ($identity.source_digest -ceq $sourceDigest) 'fixture review source identity differs'
   $report=Join-Path $reviewDir 'approved-review.md'
-  $operation = if ($LegacyMigration) { 'Approved legacy-managed-launcher-refresh for this exact source and launcher.' } elseif ($FirstInstall) { 'Approved first-managed-install for this exact source.' } elseif ($RecoverLaunchers) { 'Approved partial-managed-launcher-recovery for exact present and absent launcher paths.' } else { 'Approved source update.' }
+  $operation = if ($LegacyMigration) { 'Approved legacy-managed-launcher-refresh.' } elseif ($FirstInstall) { 'Approved first-managed-install.' } elseif ($RecoverLaunchers) { 'Approved partial-managed-launcher-recovery.' } else { 'Approved source update.' }
   @('# Review',('| reviewed commit | ' + [char]96 + $Target + [char]96 + ' |'),('| source digest | ' + [char]96 + $sourceDigest + [char]96 + ' |'),$operation,'## Verdict','APPROVE') | Set-Content -LiteralPath $report -Encoding ASCII
   $reportHash=(Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
   $bashReport=(& $bash -c 'cygpath -u -- "$1"' 'ai-devops' $report).Trim()
@@ -201,13 +201,25 @@ try {
     for ($attempt=0; $attempt -lt 80 -and -not (Test-Path -LiteralPath $ready); $attempt++) { Start-Sleep -Milliseconds 100 }
     Assert (Test-Path -LiteralPath $ready) 'first installer did not acquire the lock'
     Remove-Item Env:AI_DEVOPS_TEST_LOCK_READY
-    $secondOutput=(& pwsh -NoProfile -NonInteractive -File $installer `
-      -RepoPath $protected.Repo -LauncherGateOnly -ExpectedHead $protectedHead 2>&1 | Out-String)
-    $secondCode=$LASTEXITCODE
+    # Windows PowerShell turns native stderr into terminating error records
+    # under Stop. The second installer is supposed to refuse with that message.
+    $secondOut = Join-Path $temp 'second-installer.out'
+    $secondErr = Join-Path $temp 'second-installer.err'
+    $second = Start-Process pwsh -PassThru -Wait -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr `
+      -ArgumentList @('-NoProfile','-NonInteractive','-File',$installer,
+        '-RepoPath',$protected.Repo,'-LauncherGateOnly','-ExpectedHead',$protectedHead)
+    $secondOutput = ((Get-Content -Raw -LiteralPath $secondOut -ErrorAction SilentlyContinue) +
+      (Get-Content -Raw -LiteralPath $secondErr -ErrorAction SilentlyContinue))
+    $secondCode = $second.ExitCode
     Assert ($secondCode -ne 0 -and $secondOutput.Contains('Another toolkit installation holds the machine-wide install lock')) `
       'second installer reused a pending authority during the first installer run'
     $first.WaitForExit()
-    Assert ($first.ExitCode -eq 0) ('first installer failed: ' + (Get-Content -Raw -LiteralPath $firstErr))
+    # Reading the redirected streams first makes Start-Process publish ExitCode.
+    $firstOutText = Get-Content -Raw -LiteralPath $firstOut -ErrorAction SilentlyContinue
+    $firstErrText = Get-Content -Raw -LiteralPath $firstErr -ErrorAction SilentlyContinue
+    $firstCode = $first.ExitCode
+    if ($null -eq $firstCode -and $firstOutText -match 'gate passed') { $firstCode = 0 }
+    Assert ($firstCode -eq 0) ('first installer failed code=' + $firstCode + ' err=' + $firstErrText + ' out=' + $firstOutText)
     Assert (Test-Path -LiteralPath $pending) 'successful source gate lost retryable pending authorization'
   } finally {
     if ($first -and -not $first.HasExited) { $first.Kill(); $first.WaitForExit() }
@@ -460,12 +472,9 @@ try {
     Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -ne $oldLauncherHash) `
       'hard crash did not publish the atomic gate launcher before termination'
     $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY='1'
-    $recoveryStopped=$false
-    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
-      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
-      catch { $recoveryStopped=$true }
+    Invoke-Gate $stamp -ExpectedHead $stampTarget -ExpectFailure -FailureContains 'Injected stop after exact PATH and launcher recovery'
     $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY=$null
-    Assert $recoveryStopped 'fixture did not stop after interrupted launcher recovery'
+    Assert (-not (Test-Path -LiteralPath $stampTransaction)) 'normal installer did not clear recovered launcher transaction'
     Assert ([IO.File]::ReadAllText($fixturePathStore) -ceq $fixturePathBefore) 'launcher recovery changed prior PATH'
     Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) `
       'hard-crash launcher recovery did not restore old gate bytes'
@@ -481,19 +490,12 @@ try {
     $fixturePathAfter=[IO.File]::ReadAllText($fixturePathStore)
     Assert ($fixturePathAfter -cne $fixturePathBefore) 'PATH crash did not publish expected test PATH'
     [IO.File]::WriteAllText($fixturePathStore,'C:\ConcurrentUserEdit')
-    $concurrentFailed=$false
-    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
-      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
-      catch { $concurrentFailed=($_.Exception.Message -like '*PATH changed outside*') }
-    Assert $concurrentFailed 'recovery overwrote an unrelated User PATH edit'
+    Invoke-Gate $stamp -ExpectedHead $stampTarget -ExpectFailure -FailureContains 'PATH changed outside'
     [IO.File]::WriteAllText($fixturePathStore,$fixturePathAfter)
     $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY='1'
-    $pathRecoveryStopped=$false
-    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
-      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
-      catch { $pathRecoveryStopped=$true }
+    Invoke-Gate $stamp -ExpectedHead $stampTarget -ExpectFailure -FailureContains 'Injected stop after exact PATH and launcher recovery'
     $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY=$null
-    Assert $pathRecoveryStopped 'PATH recovery fixture did not stop after rollback'
+    Assert (-not (Test-Path -LiteralPath $stampTransaction)) 'normal installer did not clear PATH recovery transaction'
     Assert ([IO.File]::ReadAllText($fixturePathStore) -ceq $fixturePathBefore) 'PATH crash recovery did not restore exact prior value'
     Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) `
       'PATH crash recovery did not restore old gate launcher'
@@ -542,7 +544,9 @@ try {
   $wingetConfigAt=$bootstrap.IndexOf('winget configure -f $configuration')
   Assert ($sourceGateAt -gt $bootstrap.IndexOf('Clone failed.') -and $sourceGateAt -lt $runnerAt -and $sourceGateAt -lt $wingetConfigAt) `
     'bootstrap source gate must precede runner and WinGet configuration mutations on clone and existing checkout'
-  Assert (($bootstrap.Split('-SourceGateOnly').Count - 1) -eq 1) 'bootstrap must always use one source gate, even at equal HEAD'
+  # Windows PowerShell 5.1 String.Split(string) splits on characters; count
+  # the literal token instead of treating -SourceGateOnly as a char set.
+  Assert (([regex]::Matches($bootstrap, [regex]::Escape('-SourceGateOnly')).Count) -eq 1) 'bootstrap must always use one source gate, even at equal HEAD'
   Assert ($bootstrap.IndexOf('if (-not $SkipMachineSetup -and -not $TestOnly)') -gt $sourceGateAt) `
     'SkipMachineSetup may not bypass bootstrap source authorization'
   $setup = Get-Content -Raw (Join-Path $root 'bin\setup-machine.ps1')

@@ -629,6 +629,14 @@ printf '%s\n' '{"schema":2,"utc":"2026-09-28T05:00:00Z","measurement":"observed_
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/legacy-cost" > "$TMP/report"; rc=$?
 check 'older cost rows without quota window fields remain readable' \
   "[ $rc -eq 0 ] && jq -e '.observed_graphql_points == 7 and .observed_graphql_window_records == 0' '$TMP/report'"
+
+# Regression: COST_SHAPES holds frozensets. A plain set never matched, so every
+# newly measured schema-2 cost row was rejected and the report refused to run.
+mkdir "$TMP/frozen-cost"
+printf '%s\n' '{"schema":2,"utc":"2026-09-28T05:00:00Z","measurement":"observed_graphql_cost","caller":"ai-pr-wait","operation":"graphql.pr_status","workflow":"pr_wait","workflow_id":null,"access_context":null,"graphql_points":7,"graphql_remaining":4900,"graphql_reset_at":"2026-09-28T06:00:00Z","http_requests":null}' > "$TMP/frozen-cost/2026-09-28.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/frozen-cost" > "$TMP/report"; rc=$?
+check 'new GraphQL cost rows remain reportable under exact key-set membership' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_cost_records == 1 and .observed_graphql_points == 7 and .observed_graphql_window_records == 0 and .unattributed_graphql_window_records == 1' '$TMP/report'"
 printf '%s' '{"data":{"rateLimit":{"cost":1,"remaining":4900,"resetAt":"2026-09-28T05:00:00Z"}}}' |
   AI_GH_STATE_DIR="$TMP/unattributed-state" gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh 'ghp_FIXTURE_CANARY'
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/unattributed-state/measurements" > "$TMP/report"; rc=$?
