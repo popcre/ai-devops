@@ -120,11 +120,12 @@ RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; STARTED="$(date +%s)"
 # short name from the provider, mode, caller and that exact run ID. A rare
 # collision still fails closed in the runner's own session reservation.
 TAG="pool-${provider}-$(printf '%s' "${provider}-${mode}-${CALLER}-${RUN_ID}" | git hash-object --stdin | cut -c1-16)"
-STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""; REVIEW_DIR=""
+STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""; TMP_DELETE=""; REVIEW_DIR=""
 cleanup(){
   reviewer_event_cleanup_allowed "$provider" || return 1
   [ -z "$TMP_BRIEF" ] || rm -f "$TMP_BRIEF"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"; [ -z "$TMP_TESTS" ] || rm -f "$TMP_TESTS"
+  [ -z "$TMP_DELETE" ] || rm -f "$TMP_DELETE"
   [ -z "$REVIEW_DIR" ] || "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
 }
 # Under set -e a refused cleanup would replace the real exit code (for
@@ -317,4 +318,49 @@ if [ -z "$AFTER_IDENTITY" ] || [ "$AFTER_IDENTITY" != "$SOURCE_IDENTITY" ]; then
 fi
 FINAL_STATE="$($LIFECYCLE finish --state "$STATE" --verdict "$VERDICT" --report "$OUT" --elapsed "$ELAPSED")" || { mv "$OUT" "$OUT.accounting-failed" 2>/dev/null || true; die 'lifecycle accounting failed.'; }
 [ "$(jq -r .stale <<<"$FINAL_STATE")" = false ] && [ "$(jq -r .verdict <<<"$FINAL_STATE")" = "$VERDICT" ] || { mv "$OUT" "$OUT.stale" 2>/dev/null || true; die 'source changed during review.'; }
+# One-shot runner session release (issue #711 Phase 5, plan "the creating run
+# deletes before returning"): once the verdict is accounted, the runner's own
+# session-delete path discards the provider session, the runner's working
+# copy, and the state-dir meta together — a raw remove-copy would orphan the
+# first and last of those. It must run from inside the snapshot, because the
+# runner keyed its session on the snapshot's repo identity; the pool EXIT trap
+# removes the snapshot itself right after. Best-effort by design, exactly like
+# the front-door sweep: a refused cleanup (e.g. unreconciled evidence) retains
+# the copy for reconciliation and must never fail a completed review. Only the
+# muse runner is wired; the others keep their copy until the sweep (follow-up
+# issue: verify each runner's session-delete equivalent before wiring it).
+if [ "${AI_KEEP_SANDBOX:-0}" != 1 ]; then
+  case "$provider" in
+    muse)
+      # Everything from here on is post-accounting and best-effort: the review
+      # is durable, so no step in this branch may abort (set -e), hang, or
+      # otherwise cost the caller its exit 0 and report path. The delete is a
+      # provider-facing call, so it gets a hard bound — SIGTERM at 60 s plus
+      # kill-after, the same shape bin/ai-deepseek-agent uses — resolved from
+      # /usr/bin:/bin only, because an ambient PATH can front Windows
+      # timeout.exe (a delay utility that runs no command). No `--` separator:
+      # the MSYS timeout rejects it, and $RUNNER is always an absolute path.
+      # When no such timeout tool exists, skip the release entirely — the
+      # sweep still takes the copy (Qwen round 1 finding 1; Grok round 2
+      # findings P1/P2).
+      RELEASE_TIMEOUT_BIN="$(PATH=/usr/bin:/bin command -v timeout || true)"
+      if [ -z "$RELEASE_TIMEOUT_BIN" ]; then
+        printf 'ai-review-pool: no timeout tool to bound the session release; session %s copy retained until sweep.\n' "$TAG" >&2 || true
+      else
+        TMP_DELETE="$(mktemp "$REPORT_DIR/.pool-release.XXXXXX" 2>/dev/null)" || TMP_DELETE=""
+        if ( cd "$REVIEW_DIR" && exec env AI_MUSE_CALLER="$CALLER" "$RELEASE_TIMEOUT_BIN" -k 5 60 "$RUNNER" delete "$TAG" ) >/dev/null 2>>"${TMP_DELETE:-/dev/null}"; then
+          :
+        else
+          { [ -n "$TMP_DELETE" ] && [ -s "$TMP_DELETE" ] && sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$TMP_DELETE" | sed 's/^/  runner: /'; } >&2 || true
+          printf 'ai-review-pool: muse session release refused; session %s, runner copy muse-%s-%s-*, pool snapshot %s retained until sweep.\n' "$TAG" "$CALLER" "$TAG" "$REVIEW_DIR" >&2 || true
+        fi
+      fi
+      ;;
+    *)
+      printf 'ai-review-pool: runner session cleanup not yet wired for %s; copy retained until sweep.\n' "$provider" >&2 || true
+      ;;
+  esac
+fi
+# The report path stays the final stdout line: merged-output consumers read it
+# back-to-front, so the release note must precede it, never follow it.
 printf '%s\n' "$OUT"
