@@ -742,7 +742,7 @@ mkdir -p "$TMP/fixer-cwd"
 printf '%s\n' '#!/usr/bin/env bash' 'printf "%s|%s\n" "$PWD" "$*" >> "$FAKE/fixer-started"' > "$TMP/fixer-harness"
 chmod +x "$TMP/fixer-harness"
 jq --arg h "$TMP/fixer-harness" --arg host "$fx_host" --arg cwd "$TMP/fixer-cwd" \
-  '.repos=[] | .alarm_enabled=false | .links_enabled=false | .fixer_enabled=true | .fixer_on_host=$host | .fixer_repos=["o/r"] | .fixer_cwd=$cwd | .fixer_max_concurrent=1 | .harness_fresh.claude=[$h,"{prompt}"]' \
+  '.repos=[] | .alarm_enabled=false | .links_enabled=false | .fixer_enabled=true | .fixer_on_host=$host | .fixer_repos=["o/r"] | .fixer_cwd=$cwd | .fixer_max_concurrent=1 | .fixer_harness="claude" | .harness_fresh.claude=[$h,"{prompt}"]' \
   "$TMP/config.json" > "$TMP/config-fixer.json"
 BOTI='{"number":71,"title":"Stuck PR #9","user":{"login":"pop-ai-watchers[bot]"},"labels":[{"name":"ready-for-fixer"}]}'
 FORGED='{"number":70,"title":"Stuck PR #8","user":{"login":"someone"},"labels":[{"name":"ready-for-fixer"}]}'
