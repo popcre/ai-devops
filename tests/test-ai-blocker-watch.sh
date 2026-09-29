@@ -756,6 +756,8 @@ check 'fixer claims only the oldest unattempted bot-authored issue, once' \
   "[ $fx_rc -eq 0 ] && [ \"\$(grep -c 'add-label fixer-attempted' '$FAKE/edited')\" = 1 ] && grep -q '^issue edit 71 -R o/r --add-label fixer-attempted' '$FAKE/edited'"
 check 'fixer starts one fresh session in the configured folder with the issue named' \
   "[ \"\$(wc -l < '$FAKE/fixer-started')\" = 1 ] && grep -q '^$TMP/fixer-cwd|.*o/r#71.*untrusted data' '$FAKE/fixer-started'"
+check 'fixer brief resolves merge conflicts by merging main, never rebasing' \
+  "grep -q 'merge current origin/main into that branch (never rebase or force-push)' '$FAKE/fixer-started'"
 check 'fixer never claims a forged or already-attempted issue' \
   "! grep -Eq 'issue edit (69|70) ' '$FAKE/edited'"
 sleep 30 & live=$!

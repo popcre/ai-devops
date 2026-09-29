@@ -165,10 +165,34 @@ while IFS= read -r producer; do
     drift "required check '$context': job '$job_name' is missing from '$wf_name' (a rename must update the snapshot and the ruleset together)"
     continue
   fi
+  # The check context GitHub reports is the job's display name (`name:`), or
+  # its id when unnamed; a mismatch leaves the required context unproduced.
+  display="$(job_block "$wf" "$job_name" | sed -n 's/^    name:[[:space:]]*//p' | head -1 | sed "s/^[\"']//; s/[\"']\$//")"
+  if [ "${display:-$job_name}" != "$context" ]; then
+    drift "required check '$context': job '$job_name' in '$wf_name' reports as '${display:-$job_name}', not '$context'"
+    continue
+  fi
   job_if="$(job_if_expression "$wf" "$job_name")"
   if [ -n "$job_if" ] && ! grep -q 'merge_group' <<<"$job_if"; then
     drift "required check '$context': job '$job_name' has an if: that never mentions merge_group; it can silently skip queue runs"
     continue
+  fi
+  # Mentioning merge_group is not enough: an if: that excludes it (for example
+  # github.event_name != 'merge_group') skips every queue run (#1086).
+  # Fail closed: an if: is accepted only in a recognised shape - an optional
+  # always()/!cancelled()/success() prefix joined by && to a parenthesised or
+  # bare disjunction of github.event_name == '<event>' terms that includes
+  # merge_group. Anything else (a negation, an extra && term, a string that
+  # merely mentions merge_group) is drift until the allowlist is extended (#1086).
+  if [ -n "$job_if" ]; then
+    flat="$(tr '\n' ' ' <<<"$job_if" | sed -E "s/^[[:space:]]*>-?[[:space:]]*//; s/[[:space:]]+/ /g; s/^ //; s/ \$//")"
+    body="$(sed -E 's/^((always\(\)|!cancelled\(\)|success\(\)) && )*//' <<<"$flat")"
+    body="$(sed -E 's/^\((.*)\)$/\1/' <<<"$body")"
+    term="github\.event_name == '[a-z_]+'"
+    if ! grep -Eqx "$term( \|\| $term)*" <<<"$body" || ! grep -q "== 'merge_group'" <<<"$body"; then
+      drift "required check '$context': job '$job_name' has an if: that excludes merge_group or does not explicitly select it; it can skip queue runs"
+      continue
+    fi
   fi
   ok "required check '$context' is produced by '$wf_name' job '$job_name' on merge_group without a paths filter or queue-skip"
 done < <(jq -c '.required_check_producers[]' "$SNAPSHOT")

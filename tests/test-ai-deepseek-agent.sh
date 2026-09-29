@@ -587,6 +587,9 @@ check "write_file refuses escapes, .git, secrets, and links" "tool write_file '{
 if command -v bwrap >/dev/null 2>&1 && bwrap --ro-bind / / true 2>/dev/null; then
   check "run_command runs inside the root with a cleared environment and no network" "out=\$(SECRET_PROBE=leak tool run_command '{\"command\":\"pwd; echo probe=\$SECRET_PROBE; echo built > built.txt; getent hosts example.com || echo nonet\"}') && printf '%s' \"\$out\" | grep -qx 'exit: 0' && printf '%s' \"\$out\" | grep -qx 'probe=' && printf '%s' \"\$out\" | grep -qx nonet && grep -qx built '$FX/built.txt'"
   check "run_command cannot write outside the root" "tool run_command '{\"command\":\"echo x > $TMP/escaped.txt\"}' >/dev/null; test ! -e '$TMP/escaped.txt'"
+  check "run_command cannot read files outside the root (no host root bind)" "vt=\$(mktemp /var/tmp/ds-outside.XXXXXX) && echo SECRETVAR > \"\$vt\" && out=\$(tool run_command \"{\\\"command\\\":\\\"cat \$vt || echo unreadable\\\"}\"); rm -f \"\$vt\"; printf '%s' \"\$out\" | grep -qx unreadable && ! printf '%s' \"\$out\" | grep -q SECRETVAR"
+  check "run_command sees only allowlisted /etc files (no /etc/environment)" "out=\$(tool run_command '{\"command\":\"test -e /etc/environment && echo visible || echo hidden; test -e /etc/passwd && echo passwd\"}') && printf '%s' \"\$out\" | grep -qx hidden && printf '%s' \"\$out\" | grep -qx passwd"
+  check "run_command stops a command that floods output" "out=\$(DEEPSEEK_TOOLS_RUN_OUTPUT_BYTES=4096 tool run_command '{\"command\":\"yes\"}') && printf '%s' \"\$out\" | head -1 | grep -q '^exit: output limit of 4096 bytes reached'"
 else
   skip "run_command sandbox cases (bubblewrap unavailable)"
 fi

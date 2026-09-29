@@ -62,13 +62,22 @@ jobs:
         # dormant until the owner decision in #1026 lands.
         id: live
         env:
-          GH_TOKEN: ${{ github.token }}
+          # The job token cannot read rulesets (administration: read is not a
+          # workflow permission). The owner-provisioned MERGE_QUEUE_DRIFT_TOKEN
+          # (a token with administration read) is used when present (#1086);
+          # without it the lane stays degraded rather than guessing.
+          GH_TOKEN: ${{ secrets.MERGE_QUEUE_DRIFT_TOKEN || github.token }}
         run: |
           ruleset_id="$(jq -r .ruleset_id config/merge-queue-expected.json)"
           repo="$(jq -r .repository config/merge-queue-expected.json)"
           if ! bin/ai-gh api "repos/$repo/rulesets/$ruleset_id" > /tmp/ruleset.json 2>/tmp/read.err; then
-            if grep -q 'HTTP 404' /tmp/read.err; then
-              # The ruleset itself is gone or renumbered: that is drift.
+            # GitHub answers 404 both for a deleted ruleset and for a token not
+            # allowed to see it. Only a readable ruleset list that lacks the id
+            # proves deletion; anything else is a refused read (#1086).
+            # The list is paged fully; a readable EMPTY list also proves it.
+            if grep -q 'HTTP 404' /tmp/read.err &&
+               bin/ai-gh api --paginate "repos/$repo/rulesets?per_page=100" --jq '.[].id' > /tmp/ids.txt 2>/dev/null &&
+               ! grep -qx "$ruleset_id" /tmp/ids.txt; then
               echo "outcome=drift" >> "$GITHUB_OUTPUT"
               echo "the live ruleset $ruleset_id no longer exists" >&2
               exit 1
@@ -101,9 +110,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      # A failed checkout must not silence the alert it may be the cause of:
+      # the alert then falls back to the runner's own gh (#1086).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        continue-on-error: true
       - name: Open or update the merge-queue drift standing issue
         shell: bash
         run: |
+          if [ -x bin/ai-gh ]; then GHX=bin/ai-gh; else GHX=gh; fi
           outcome="${{ needs.live-ruleset.outputs.outcome }}"
           if [ "$outcome" = refused ] && [ "${{ needs.drift.result }}" = success ]; then
             # Degraded, NOT drift: it gets its own standing issue so a read
@@ -116,16 +130,16 @@ jobs:
             title='Merge-queue drift check failed'
             body="The merge-queue drift check failed at $RUN_URL. Run bin/ai-merge-queue-drift for the exact finding, then reconcile it by a pull request to config/merge-queue-expected.json or by reverting the live ruleset. Close this issue only after a later drift run passes."
           fi
-          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
+          existing="$("$GHX" issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
           if [ "$outcome" = refused ] && [ -n "$existing" ]; then
-            last="$(gh issue view "$existing" --repo "$GITHUB_REPOSITORY" --json body,comments --jq '.body, (.comments[-1].body // "")' 2>/dev/null)"
+            last="$("$GHX" issue view "$existing" --repo "$GITHUB_REPOSITORY" --json body,comments --jq '.body, (.comments[-1].body // "")' 2>/dev/null)"
             if [ "$(printf '%s' "$last" | grep -c 'will not repeat while it is the latest comment')" -ge 1 ]; then
               echo "refusal already reported; staying silent"
               exit 0
             fi
           fi
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+            "$GHX" issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
           else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug
+            "$GHX" issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug
           fi

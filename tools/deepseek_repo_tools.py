@@ -346,6 +346,39 @@ def bwrap_bin():
     return b if os.path.isfile(b) and os.access(b, os.X_OK) else None
 
 
+# Only these system trees are visible inside the sandbox, read-only. The host
+# root is never bound: other checkouts, home directories, /run sockets, /srv,
+# /worksp and machine secrets stay invisible (#1086).
+SANDBOX_SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
+# /etc is NOT bound whole (it can hold secrets, e.g. /etc/environment): only
+# this allowlist of loader, name-service, certificate and locale files (#1086).
+SANDBOX_ETC_ALLOW = ("/etc/passwd", "/etc/group", "/etc/nsswitch.conf", "/etc/resolv.conf", "/etc/hosts", "/etc/host.conf", "/etc/gai.conf", "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/localtime", "/etc/timezone", "/etc/alternatives", "/etc/ssl/certs", "/etc/ca-certificates", "/etc/ca-certificates.conf", "/etc/pki/tls/certs", "/etc/mime.types", "/etc/protocols", "/etc/services", "/etc/os-release", "/etc/lsb-release", "/etc/debian_version", "/etc/inputrc", "/etc/bash.bashrc", "/etc/profile", "/etc/locale.alias", "/etc/gitattributes")
+# Output is read incrementally and the command is stopped once it has produced
+# this many bytes, so a runaway command cannot exhaust memory (#1086).
+RUN_OUTPUT_BYTES = int(os.environ.get("DEEPSEEK_TOOLS_RUN_OUTPUT_BYTES", str(MAX_OUTPUT_CHARS * 4)))
+
+
+def sandbox_argv(bw, real, cmd):
+    home = "/tmp/deepseek-home"
+    argv = [bw, "--die-with-parent", "--unshare-all", "--new-session"]
+    for d in SANDBOX_SYSTEM_DIRS:
+        if os.path.islink(d):
+            argv += ["--symlink", os.readlink(d), d]
+        elif os.path.isdir(d):
+            argv += ["--ro-bind", d, d]
+    argv += ["--dir", "/etc"]
+    for e in SANDBOX_ETC_ALLOW:
+        if os.path.lexists(e):
+            argv += ["--ro-bind", e, e]
+    argv += ["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--dir", home,
+             "--bind", real, real, "--chdir", real,
+             "--clearenv", "--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+             "--setenv", "HOME", home, "--setenv", "TMPDIR", "/tmp", "--setenv", "LANG", "C.UTF-8",
+             "--setenv", "GIT_CONFIG_NOSYSTEM", "1", "--setenv", "GIT_TERMINAL_PROMPT", "0",
+             "/bin/bash", "-c", cmd]
+    return argv
+
+
 def tool_run_command(root, args):
     cmd = args.get("command")
     if not isinstance(cmd, str) or not cmd.strip():
@@ -353,27 +386,48 @@ def tool_run_command(root, args):
     bw = bwrap_bin()
     if bw is None:
         raise Refused("run_command is unavailable: bubblewrap (bwrap) is not installed, and commands never run unsandboxed")
-    real = os.path.realpath(root)
-    home = "/tmp/deepseek-home"
-    argv = [bw, "--die-with-parent", "--unshare-all", "--new-session",
-            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-            "--tmpfs", "/tmp", "--dir", home, "--bind", real, real, "--chdir", real,
-            "--clearenv", "--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            "--setenv", "HOME", home, "--setenv", "TMPDIR", "/tmp", "--setenv", "LANG", "C.UTF-8",
-            "--setenv", "GIT_CONFIG_NOSYSTEM", "1", "--setenv", "GIT_TERMINAL_PROMPT", "0",
-            "/bin/bash", "-c", cmd]
-    # The real HOME may be under a read-only bind; hide it so no dotfile
-    # credentials are readable from inside the sandbox.
-    real_home = os.path.expanduser("~")
-    if real_home and real_home != "/":
-        argv[argv.index("--bind"):argv.index("--bind")] = ["--tmpfs", real_home]
+    argv = sandbox_argv(bw, os.path.realpath(root), cmd)
+    proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            env={"PATH": "/usr/bin:/bin"})
+    import selectors
+    import time
+    chunks, size, reason = [], 0, None
+    deadline = time.monotonic() + RUN_SECONDS
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stdout, selectors.EVENT_READ)
     try:
-        done = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                              env={"PATH": "/usr/bin:/bin"}, timeout=RUN_SECONDS)
-    except subprocess.TimeoutExpired as exc:
-        out = (exc.stdout or b"").decode("utf-8", errors="replace")
-        return f"exit: timeout after {RUN_SECONDS:g}s\n{out}"
-    return f"exit: {done.returncode}\n" + done.stdout.decode("utf-8", errors="replace")
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                reason = f"timeout after {RUN_SECONDS:g}s"
+                break
+            if not sel.select(timeout=min(left, 1.0)):
+                if proc.poll() is not None:
+                    break
+                continue
+            data = os.read(proc.stdout.fileno(), 65536)
+            if not data:
+                break
+            room = RUN_OUTPUT_BYTES - size
+            chunks.append(data[:room])
+            size += min(len(data), room)
+            if len(data) >= room:
+                reason = f"output limit of {RUN_OUTPUT_BYTES} bytes reached; command stopped"
+                break
+    finally:
+        sel.close()
+        if reason is not None and proc.poll() is None:
+            proc.kill()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        proc.stdout.close()
+    out = b"".join(chunks).decode("utf-8", errors="replace")
+    if reason is not None:
+        return f"exit: {reason}\n{out}"
+    return f"exit: {proc.returncode}\n" + out
 
 
 HANDLERS = {"list_dir": tool_list_dir, "read_file": tool_read_file, "grep": tool_grep,

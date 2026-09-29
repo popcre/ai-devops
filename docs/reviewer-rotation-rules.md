@@ -77,9 +77,10 @@ allocator but stayed registered here, and a session spent an hour trying it.
     2026-09-25: add StepFun Step 5 as a reviewer on Ubuntu only (StepCode is
     not yet available on Windows) and let it write, implement, and execute
     code. `bin/ai-stepfun` refuses to run off Linux and preflight reports
-    `unsupported-platform` there. Its formal reviews stay read-only; writing
-    and executing happens only in `ai-stepfun implement`, inside a new
-    remote-less clone; a run that commits or adds a remote is refused.
+    `unsupported-platform` there. Its reviews and `ask` may write and run
+    code only inside a disposable, remote-less review copy that is discarded
+    (owner instruction 2026-09-28, #974); `ai-stepfun implement` writes in a
+    new remote-less clone; a run that commits or adds a remote is refused.
     Every StepFun turn runs under bubblewrap with an empty home, /tmp and
     /run and a cleared environment, so the model never sees SSH keys or the
     agent socket, git or gh credentials, the 1Password token, or the Docker
