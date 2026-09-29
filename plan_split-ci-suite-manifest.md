@@ -12,9 +12,9 @@ Owner issue: https://github.com/popcre/ai-devops/issues/1001.
 | 2 Migrate data | ✅ done (2026-09-28) | `config/ci-suites/*.json` (132 files) generated 1:1; Step 1 equality re-verified after migration and after suite registration |
 | 3 Switch readers | ✅ done (2026-09-28) | commit 89887ae7: test-all.sh/test-workflow-policy.sh/test-all.ps1 + trigger globs; sections 1-6 membership diff vs pre-split main is empty; selection suites green (27/48/17) |
 | 4 Remove the monolith | ✅ done (2026-09-28) | commit 123a85af: global file slim (schema_version 3); test-workflow-policy rejects reintroduced per-suite arrays and proves it on a mutated copy; all suites green |
-| 5 Live proof | ⬜ open | — |
+| 5 Live proof | ⬜ open | moved to #1023 (one leftover proof per session); Steps 0-4 landed via PR #1007, merge commit 9cf1bed3, 2026-09-28 8:48 PM EDT |
 
-A fresh session starts at Step 0.
+A fresh session starts at Step 5 (live proof, #1023); Steps 0-4 are done.
 
 ## 1. Ultimate goal
 
