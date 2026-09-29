@@ -271,7 +271,7 @@ for _ in 1 2 3 4 5; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; do
 id_lock="$(mktemp)"
 { sed -n '/^norm()/,/^}/p' "$DOCTOR"; sed -n '/^proc_stat_field()/,/^}/p' "$DOCTOR"; sed -n '/^proc_start_ticks()/p' "$DOCTOR"
   sed -n '/^proc_ppid()/p' "$DOCTOR"
-  sed -n '/^same_holder()/,/^}/p' "$DOCTOR"; sed -n '/^fd_holds_lock()/,/^}/p' "$DOCTOR"
+  sed -n '/^same_holder()/,/^}/p' "$DOCTOR"; sed -n '/^fd_holds_lock()/,/^}/p' "$DOCTOR"; sed -n '/^pinned_signal()/,/^}/p' "$DOCTOR"
   sed -n '/^gone()/,/^}/p' "$DOCTOR"; } > "$TMP/identity.sh"
 ( exec 7<"$id_lock"; flock 7; exec sleep 30 ) & id_holder=$!
 sleep 0.3
@@ -294,11 +294,22 @@ if (
   ! same_holder "$opener" || { kill "$opener"; exit 1; }
   kill "$id_holder"; wait "$id_holder" 2>/dev/null; sleep 0.2
   ! same_holder "$opener" || { kill "$opener"; exit 1; }   # lock released: open fd alone never qualifies
-  kill "$opener" 2>/dev/null
+  # Signals go through a pinned pidfd after re-proving identity and the lock.
+  ( exec 8<"$id_lock"; exec sleep 20 ) & opener2=$!; sleep 0.2
+  HOLDER_START[$opener2]="$(proc_start_ticks "$opener2")"
+  rc=0; pinned_signal "$opener2" TERM || rc=$?
+  [ "$rc" = 4 ] && kill -0 "$opener2" || { kill "$opener2" "$opener" 2>/dev/null; exit 1; }
+  HOLDER_START[$opener2]=1; rc=0; pinned_signal "$opener2" TERM || rc=$?
+  [ "$rc" = 3 ] && kill -0 "$opener2" || { kill "$opener2" "$opener" 2>/dev/null; exit 1; }
+  ( exec 7<"$id_lock"; flock 7; exec sleep 20 ) & holder2=$!; sleep 0.3
+  HOLDER_START[$holder2]="$(proc_start_ticks "$holder2")"
+  pinned_signal "$holder2" TERM || { kill "$holder2" "$opener2" "$opener" 2>/dev/null; exit 1; }
+  wait "$holder2" 2>/dev/null; ! kill -0 "$holder2" 2>/dev/null || exit 1
+  kill "$opener" "$opener2" 2>/dev/null
 ); then
-  result pass 'a reused PID, a released lock, or an open-but-unlocking process is never signalled'
+  result pass 'a reused PID, a released lock, or an open-but-unlocking process is never signalled (pidfd-pinned)'
 else
-  result fail 'a reused PID, a released lock, or an open-but-unlocking process is never signalled'
+  result fail 'a reused PID, a released lock, or an open-but-unlocking process is never signalled (pidfd-pinned)'
 fi
 kill "$id_holder" 2>/dev/null || true; wait "$id_holder" 2>/dev/null || true; rm -f "$id_lock"
 
