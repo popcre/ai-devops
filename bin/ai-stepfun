@@ -114,8 +114,8 @@ version_ge(){ [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]; 
 key_store_ok(){
   [ -f "$KEY_STORE" ] && [ ! -L "$KEY_STORE" ] && [ -s "$KEY_STORE" ] || return 1
   # stat -c %a is meaningless on NTFS (returns a synthesised mode). On Windows
-  # the real control is the DACL set by store-key / setup; accept a present,
-  # non-empty, non-link file there and rely on icacls at write time.
+  # accept a present, non-empty, non-link file; the path is under the user
+  # profile and store-key writes it with chmod 600 where the filesystem honors it.
   if [ "$IS_WINDOWS" = 1 ]; then return 0; fi
   [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
 }
@@ -148,7 +148,9 @@ load_key(){
 # the run. Implementation runs are never re-run blindly: the clone is kept.
 RATE_RETRIES="${AI_STEPFUN_RATE_RETRIES:-2}"
 RATE_PAUSE="${AI_STEPFUN_RATE_PAUSE:-65}"
-rate_limited(){ grep -q '^429: {.*rate_limited' "$1" 2>/dev/null; }
+# StepCode prints "429: {json}" on stdout; OpenCode surfaces rate limits in
+# stderr or JSONL error events. Match either shape.
+rate_limited(){ grep -qE '(^429: \{.*rate_limited|rate_limited|429|Too Many Requests)' "$1" "$1.stderr" 2>/dev/null; }
 run_step_retry(){ # same arguments as run_step; disposable-copy turns only
   local n=0 rc
   while :; do
