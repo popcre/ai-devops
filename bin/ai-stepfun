@@ -97,7 +97,7 @@ require_engine(){
   detect_engine
   case "$ENGINE" in
     stepcode|opencode) return 0 ;;
-    *) printf 'ai-stepfun: unsupported-platform: no StepCode CLI and no OpenCode install. Run bin/setup-opencode-stepfun.ps1 (Windows) or install StepCode / OpenCode.\n' >&2; exit 2 ;;
+    *) printf 'ai-stepfun: unsupported-platform: no StepCode CLI and no OpenCode install. Install StepCode, or the OpenCode harness with bin/setup-opencode-glm.sh.\n' >&2; exit 2 ;;
   esac
 }
 
@@ -187,13 +187,16 @@ run_step(){
 # ---- OpenCode engine (Windows, or any host without StepCode) ----
 # Same profile-install and key-export pattern as bin/ai-deepseek. The key is
 # exported into the child environment only, never argv or output.
+# install_oc_profile XDG: a FRESH per-run XDG tree. The profile is copied in
+# before the sandbox starts and mounted read-only; data/state/cache are the
+# only writable parts and the whole tree is deleted after the turn, so nothing
+# a model writes survives into the next host-side copy (#1086).
 install_oc_profile(){
-  local xdg="$STATE_DIR/xdg/config/opencode"
-  mkdir -p "$xdg/agent" "$STATE_DIR/xdg/data" "$STATE_DIR/xdg/state"
+  local root="$1" xdg="$1/config/opencode"
+  mkdir -p "$xdg/agent" "$root/data" "$root/state" "$root/cache"
   cp "$OC_PROFILE_SRC/opencode.json" "$xdg/opencode.json"
   cp "$OC_PROFILE_SRC/agent/$OC_AGENT_REVIEW.md" "$xdg/agent/$OC_AGENT_REVIEW.md"
   cp "$OC_PROFILE_SRC/agent/$OC_AGENT_IMPLEMENT.md" "$xdg/agent/$OC_AGENT_IMPLEMENT.md"
-  chmod 700 "$STATE_DIR" 2>/dev/null || true
 }
 
 oc_bin(){
@@ -211,10 +214,12 @@ oc_bin(){
 # Caller sets STEPFUN_OC_AGENT to choose; defaults to the review agent.
 run_opencode_turn(){
   local dir="$1" out="$2" prompt="$3" agent="${STEPFUN_OC_AGENT:-$OC_AGENT_REVIEW}" rc=0 log oc
-  oc="$(oc_bin)" || die "OpenCode $OC_VERSION is not installed. Run bin/setup-opencode-stepfun.ps1 (Windows) or bin/setup-opencode-glm.sh first."
+  oc="$(oc_bin)" || die "OpenCode $OC_VERSION is not installed. Run bin/setup-opencode-glm.sh first."
   [ -d "$dir" ] || die "OpenCode turn directory is gone: $dir"
   [ -z "$(git -C "$dir" remote 2>/dev/null)" ] || die "turn directory has a remote; refusing to run StepFun there: $dir"
-  install_oc_profile
+  mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR" 2>/dev/null || true
+  local xdg; xdg="$(mktemp -d "$STATE_DIR/oc-run.XXXXXX")"; chmod 700 "$xdg"
+  install_oc_profile "$xdg"
   load_key
   log="$out.jsonl"
   set +e
@@ -228,21 +233,21 @@ run_opencode_turn(){
   oc_real="$(readlink -f "$oc")"
   oc_root="${AI_STEPFUN_OPENCODE_ROOT:-$HOME/.local/lib/ai-devops/opencode/$OC_VERSION}"
   case "$oc_real" in "$oc_root"/*) ;; *) oc_root="$(dirname "$oc_real")" ;; esac
-  mkdir -p "$STATE_DIR/xdg/config" "$STATE_DIR/xdg/data" "$STATE_DIR/xdg/state" "$STATE_DIR/xdg/cache"
   local -a sys_binds=(); sandbox_sys_binds
   ( home="$HOME"
     for name in $(compgen -e); do
       case "$STEP_ENV_ALLOW" in *" $name "*) ;; *) unset "$name" 2>/dev/null || true ;; esac
     done
     export HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" STEPFUN_API_KEY="$STEP_KEY" \
-      XDG_CONFIG_HOME="$STATE_DIR/xdg/config" XDG_DATA_HOME="$STATE_DIR/xdg/data" \
-      XDG_STATE_HOME="$STATE_DIR/xdg/state" XDG_CACHE_HOME="$STATE_DIR/xdg/cache"
+      XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
+      XDG_STATE_HOME="$xdg/state" XDG_CACHE_HOME="$xdg/cache"
     printf '%s' "$prompt" | "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
       "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
       --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
       --tmpfs "$home" \
       --ro-bind "$oc_root" "$oc_root" \
-      --bind "$STATE_DIR/xdg" "$STATE_DIR/xdg" \
+      --ro-bind "$xdg/config" "$xdg/config" \
+      --bind "$xdg/data" "$xdg/data" --bind "$xdg/state" "$xdg/state" --bind "$xdg/cache" "$xdg/cache" \
       --bind "$dir" "$dir" --chdir "$dir" -- \
       "$oc" run --agent "$agent" --auto \
       --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$dir" \
@@ -250,6 +255,7 @@ run_opencode_turn(){
   )
   rc=$?
   set -e
+  rm -rf "$xdg"
   STEP_KEY=""
   # OpenCode emits JSONL events; surface the assistant text as the turn output.
   if [ -s "$log" ]; then
@@ -372,7 +378,7 @@ cmd_doctor(){
       ;;
     opencode)
       local oc
-      oc="$(oc_bin)" || { printf 'FAIL OpenCode %s is not installed (run bin/setup-opencode-stepfun.ps1)\n' "$OC_VERSION"; exit 1; }
+      oc="$(oc_bin)" || { printf 'FAIL OpenCode %s is not installed (run bin/setup-opencode-glm.sh)\n' "$OC_VERSION"; exit 1; }
       printf 'PASS  OpenCode %s: %s\n' "$OC_VERSION" "$oc"
       for f in opencode.json "agent/$OC_AGENT_REVIEW.md" "agent/$OC_AGENT_IMPLEMENT.md"; do
         [ -f "$OC_PROFILE_SRC/$f" ] || { printf 'FAIL profile %s missing\n' "$f"; exit 1; }
@@ -560,7 +566,7 @@ ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
                                                                  write and run code in a new remote-less clone (never commits)
 ai-stepfun doctor [--live]                                       install, engine, key store (and one live call)
 ai-stepfun store-key [--if-missing]                              refresh the protected key store from 1Password
-Engine: StepCode CLI on Ubuntu/Linux where installed, otherwise OpenCode (Windows).
+Engine: StepCode CLI where installed, otherwise OpenCode; Ubuntu/Linux only, always under bubblewrap.
 EOF
 }
 

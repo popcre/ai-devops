@@ -208,6 +208,7 @@ check "OpenCode ask answers from a disposable copy" "mode askok; '$SCRIPT' ask -
 check "OpenCode rejects a turn directory that has a remote" "mode ok; git -C '$TMP/repo' remote add origin https://example.com/x.git 2>/dev/null; ! '$SCRIPT' ask --repo '$TMP/repo' x >/dev/null 2>&1; git -C '$TMP/repo' remote remove origin"
   rm -f "$TMP/args.bwrap"
   check "Linux OpenCode turn runs under bubblewrap with an empty home and no host root" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES && grep -qx -- '--unshare-all' '$TMP/args.bwrap' && grep -qx -- '--tmpfs' '$TMP/args.bwrap' && grep -qx \"\$HOME\" '$TMP/args.bwrap' && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx / && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx /etc"
+  check "Linux OpenCode state is a fresh per-run tree: profile read-only, removed after the turn" "grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -q '/oc-run\.[^/]*/config\$' && ! ls -d \"\${AI_STEPFUN_STATE_DIR:-\$HOME/.local/state/ai-devops/stepfun}\"/oc-run.* >/dev/null 2>&1"
   check "Linux OpenCode doctor fails without bubblewrap" "! AI_STEPFUN_BWRAP=/nonexistent '$SCRIPT' doctor >/dev/null 2>&1 && '$SCRIPT' doctor | grep -q '^PASS  bubblewrap sandbox'"
 fi
 unset AI_STEPFUN_ENGINE AI_STEPFUN_OPENCODE AI_STEPFUN_OPENCODE_ROOT

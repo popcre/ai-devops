@@ -48,7 +48,6 @@ tests/test-workflow-policy.sh
 bin/ai-task-gates*
 bin/setup-opencode-glm.*
 bin/setup-opencode-muse.sh
-bin/setup-opencode-stepfun.*
 config/muse-code/**
 config/opencode/**
 config/opencode-muse/**
