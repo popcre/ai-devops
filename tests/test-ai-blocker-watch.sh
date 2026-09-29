@@ -86,7 +86,7 @@ chmod +x "$TMP/gh" "$TMP/harness"
 # The fixture config drops propagate_on_host so the suite is machine-independent:
 # the shipped value names one real machine, and on any other host (CI runners)
 # propagation would be skipped and every propagation check below would fail.
-jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2 | .transcript_glob={claude:"",codex:"",zcode:"",mimo:""}' \
+jq --arg h "$TMP/harness" '.repos=["o/r"] | del(.propagate_on_host) | .stuck_watchdog_enabled=false | .fixer_enabled=false | .harness.claude=[$h,"claude","{session}","{prompt}"] | .harness.codex=[$h,"codex","{session}"] | .max_wake_attempts=2 | .transcript_glob={claude:"",codex:"",zcode:"",mimo:""}' \
   "$ROOT/config/blocker-watch.json" > "$TMP/config.json"
 export FAKE="$TMP/fake" AI_BLOCKER_WATCH_HOME="$TMP/home" AI_BLOCKER_WATCH_CONFIG="$TMP/config.json" AI_DEVOPS_TEST_MODE=1 AI_BLOCKER_WATCH_TEST_GH="$TMP/gh"
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID ZCODE_SESSION_ID
@@ -769,5 +769,26 @@ AI_BLOCKER_WATCH_HOME="$TMP/home-fixer2" AI_BLOCKER_WATCH_CONFIG="$TMP/config-fi
 check 'fixer runs only on fixer_on_host' "! grep -q 'fixer-attempted' '$FAKE/edited'"
 check 'shipped config names one fixer machine and a cap' \
   "jq -e '(.fixer_on_host|type==\"string\" and length>0) and (.fixer_max_concurrent>=1) and (.harness_fresh[.fixer_harness]|length>0)' '$ROOT/config/blocker-watch.json'"
+
+# --- stuck-work watchdog trigger (#1011) -------------------------------------
+printf '%s\n' '#!/usr/bin/env bash' 'echo app-token' > "$TMP/fake-app-auth"
+printf '%s\n' 'const fs=require("fs");fs.appendFileSync(process.env.FAKE+"/watchdog-runs",process.argv.slice(2).join(" ")+"|"+process.env.GH_TOKEN+"\n");console.log("Stuck-work watchdog fake - 0 stuck");' > "$TMP/fake-watchdog.cjs"
+chmod +x "$TMP/fake-app-auth"
+jq '.stuck_watchdog_enabled=true | .stuck_watchdog_interval_minutes=15 | .fixer_enabled=false' "$TMP/config-fixer.json" > "$TMP/config-sw.json"
+rm -f "$FAKE/watchdog-runs"
+swrun(){ AI_BLOCKER_WATCH_HOME="$TMP/home-sw" AI_BLOCKER_WATCH_CONFIG="$1" AI_BLOCKER_WATCH_TEST_APP_AUTH="$TMP/fake-app-auth" AI_BLOCKER_WATCH_TEST_STUCK_SCRIPT="$TMP/fake-watchdog.cjs" BW tick >/dev/null 2>&1; }
+swrun "$TMP/config-sw.json"
+check 'tick runs the stuck watchdog on fixer_on_host with the app token' \
+  "[ \"\$(wc -l < '$FAKE/watchdog-runs')\" = 1 ] && grep -q '^--json .*stuck-report.json|app-token\$' '$FAKE/watchdog-runs'"
+swrun "$TMP/config-sw.json"
+check 'the watchdog runs at most once per interval' "[ \"\$(wc -l < '$FAKE/watchdog-runs')\" = 1 ]"
+jq '.fixer_on_host="some-other-machine"' "$TMP/config-sw.json" > "$TMP/config-sw-off.json"
+rm -f "$TMP/home-sw/last-stuck-watchdog"
+swrun "$TMP/config-sw-off.json"
+check 'the watchdog runs only on fixer_on_host' "[ \"\$(wc -l < '$FAKE/watchdog-runs')\" = 1 ]"
+check 'shipped config enables the 15-minute watchdog trigger' \
+  "jq -e '.stuck_watchdog_enabled == true and .stuck_watchdog_interval_minutes == 15' '$ROOT/config/blocker-watch.json'"
+check 'the watchdog workflow has no GitHub schedule (dropped runs); manual dispatch stays' \
+  "! grep -q '^  schedule:' '$ROOT/.github/workflows/stuck-work-watchdog.yml' && grep -q '^  workflow_dispatch:' '$ROOT/.github/workflows/stuck-work-watchdog.yml'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
