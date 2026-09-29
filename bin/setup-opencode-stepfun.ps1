@@ -146,10 +146,13 @@ if (Test-Path -LiteralPath $KeyStore) {
   # NTFS ignores chmod: the key store is protected only if its ACL has no
   # inherited entries and grants nobody but the current user (plus SYSTEM and
   # Administrators). Restrict it, then verify before calling it protected (#1086).
-  & icacls.exe $KeyStore /inheritance:r /grant:r "$($env:USERNAME):F" | Out-Null
+  $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  & icacls.exe $KeyStore /inheritance:r /grant:r "$($me):F" | Out-Null
   $acl = Get-Acl -LiteralPath $KeyStore
+  # Compare the FULL DOMAIN\account: a same-named user of another domain is not the owner.
+  $allowed = @($me, 'NT AUTHORITY\SYSTEM', 'BUILTIN\Administrators')
   $others = @($acl.Access | Where-Object {
-      $_.IsInherited -or ($_.IdentityReference.Value -notmatch ('\\' + [regex]::Escape($env:USERNAME) + '$|^NT AUTHORITY\\SYSTEM$|^BUILTIN\\Administrators$'))
+      $_.IsInherited -or ($allowed -notcontains $_.IdentityReference.Value)
     })
   if ($acl.AreAccessRulesProtected -and $others.Count -eq 0) {
     Ok "Protected key store present (current-user-only ACL): $KeyStore"

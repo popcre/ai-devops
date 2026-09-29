@@ -100,7 +100,13 @@ require_engine(){
 # own install path and accept any binary only if it identifies as StepCode.
 step_bin(){
   local b c
-  for c in "${AI_STEPFUN_STEP_BIN:-}" "$HOME/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
+  # An explicit override is authoritative: a wrong program there is refused,
+  # never silently replaced by another installed binary (#1086).
+  if [ -n "${AI_STEPFUN_STEP_BIN:-}" ]; then
+    [ -x "$AI_STEPFUN_STEP_BIN" ] && "$AI_STEPFUN_STEP_BIN" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || return 1
+    printf '%s' "$AI_STEPFUN_STEP_BIN"; return 0
+  fi
+  for c in "$HOME/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
     [ -n "$c" ] && [ -x "$c" ] || continue
     "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || continue
     b="$c"; break
@@ -128,7 +134,8 @@ windows_acl_owner_only(){
   local acl user line principal
   acl="$("$(icacls_bin)" "$(native_path "$1")" 2>/dev/null | tr -d '\r')" || return 1
   [ -n "$acl" ] || return 1
-  user="${USERNAME:-$(whoami 2>/dev/null)}"; user="${user##*\\}"
+  user="$(windows_account)"
+  [ -n "$user" ] || return 1
   while IFS= read -r line; do
     case "$line" in *'Successfully processed'*|'') continue ;; esac
     # icacls prints "<path> <principal>:(rights)" on the first line and
@@ -136,15 +143,22 @@ windows_acl_owner_only(){
     line="${line#"$(native_path "$1")"}"; line="${line#"${line%%[![:space:]]*}"}"
     principal="${line%%:(*}"
     case "$line" in *'(I)'*) return 1 ;; esac
-    case "${principal##*\\}" in
-      "$user"|SYSTEM|Administrators) ;;
+    # Compare the FULL DOMAIN\\account, case-insensitively: a same-named user
+    # of another domain is not the owner.
+    case "${principal,,}" in
+      "${user,,}"|'nt authority\system'|'builtin\administrators') ;;
       *) return 1 ;;
     esac
   done <<< "$acl"
   return 0
 }
+# windows_account -> DOMAIN\\user of the current account.
+windows_account(){
+  if [ -n "${USERDOMAIN:-}" ] && [ -n "${USERNAME:-}" ]; then printf '%s\\%s' "$USERDOMAIN" "$USERNAME"
+  else whoami 2>/dev/null | tr -d '\r'; fi
+}
 windows_acl_restrict(){
-  local user="${USERNAME:-$(whoami 2>/dev/null)}"; user="${user##*\\}"
+  local user; user="$(windows_account)"; [ -n "$user" ] || return 1
   "$(icacls_bin)" "$(native_path "$1")" /inheritance:r /grant:r "$user:F" >/dev/null 2>&1
 }
 
@@ -355,15 +369,18 @@ run_stepcode(){
 # sandbox_sys_binds: fills the caller's sys_binds array with the read-only
 # system trees a sandboxed program needs; never `/` itself.
 sandbox_sys_binds(){
-  sys_binds=(--ro-bind /usr /usr --ro-bind /etc /etc)
+  sys_binds=(--ro-bind /usr /usr)
   local top
   for top in /bin /sbin /lib /lib32 /lib64 /libx32; do
     if [ -L "$top" ]; then sys_binds+=(--symlink "$(readlink "$top")" "$top")
     elif [ -d "$top" ]; then sys_binds+=(--ro-bind "$top" "$top"); fi
   done
-  local secret
-  for secret in /etc/ai-devops /etc/ssh /etc/ssl/private /etc/sudoers.d; do
-    [ -d "$secret" ] && sys_binds+=(--tmpfs "$secret")
+  # /etc is never bound whole (it can hold secrets such as /etc/environment):
+  # only loader, name-service, certificate and locale files (#1086).
+  sys_binds+=(--dir /etc)
+  local e
+  for e in /etc/passwd /etc/group /etc/nsswitch.conf /etc/resolv.conf /etc/hosts /etc/host.conf /etc/gai.conf /etc/ld.so.cache /etc/ld.so.conf /etc/ld.so.conf.d /etc/localtime /etc/timezone /etc/alternatives /etc/ssl/certs /etc/ca-certificates /etc/ca-certificates.conf /etc/pki/tls/certs /etc/mime.types /etc/protocols /etc/services /etc/os-release /etc/lsb-release /etc/debian_version /etc/inputrc /etc/bash.bashrc /etc/profile /etc/locale.alias /etc/gitattributes; do
+    { [ -e "$e" ] || [ -L "$e" ]; } && sys_binds+=(--ro-bind "$e" "$e")
   done
   return 0
 }

@@ -349,10 +349,10 @@ def bwrap_bin():
 # Only these system trees are visible inside the sandbox, read-only. The host
 # root is never bound: other checkouts, home directories, /run sockets, /srv,
 # /worksp and machine secrets stay invisible (#1086).
-SANDBOX_SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc")
-# /etc is needed for the loader, locale and passwd lookups; these secret-bearing
-# parts of it are masked.
-SANDBOX_MASKED_ETC = ("/etc/ai-devops", "/etc/ssh", "/etc/ssl/private", "/etc/sudoers.d")
+SANDBOX_SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
+# /etc is NOT bound whole (it can hold secrets, e.g. /etc/environment): only
+# this allowlist of loader, name-service, certificate and locale files (#1086).
+SANDBOX_ETC_ALLOW = ("/etc/passwd", "/etc/group", "/etc/nsswitch.conf", "/etc/resolv.conf", "/etc/hosts", "/etc/host.conf", "/etc/gai.conf", "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/localtime", "/etc/timezone", "/etc/alternatives", "/etc/ssl/certs", "/etc/ca-certificates", "/etc/ca-certificates.conf", "/etc/pki/tls/certs", "/etc/mime.types", "/etc/protocols", "/etc/services", "/etc/os-release", "/etc/lsb-release", "/etc/debian_version", "/etc/inputrc", "/etc/bash.bashrc", "/etc/profile", "/etc/locale.alias", "/etc/gitattributes")
 # Output is read incrementally and the command is stopped once it has produced
 # this many bytes, so a runaway command cannot exhaust memory (#1086).
 RUN_OUTPUT_BYTES = int(os.environ.get("DEEPSEEK_TOOLS_RUN_OUTPUT_BYTES", str(MAX_OUTPUT_CHARS * 4)))
@@ -366,9 +366,10 @@ def sandbox_argv(bw, real, cmd):
             argv += ["--symlink", os.readlink(d), d]
         elif os.path.isdir(d):
             argv += ["--ro-bind", d, d]
-    for d in SANDBOX_MASKED_ETC:
-        if os.path.isdir(d):
-            argv += ["--tmpfs", d]
+    argv += ["--dir", "/etc"]
+    for e in SANDBOX_ETC_ALLOW:
+        if os.path.lexists(e):
+            argv += ["--ro-bind", e, e]
     argv += ["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--dir", home,
              "--bind", real, real, "--chdir", real,
              "--clearenv", "--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",

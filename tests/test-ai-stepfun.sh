@@ -194,15 +194,17 @@ echo '== ai-stepfun OpenCode engine'
 export AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/bin/opencode"
 export AI_STEPFUN_PLATFORM=MINGW64_NT-10.0
 # icacls stand-in: prints the ACL named by $TMP/acl (owner-only by default).
-cat > "$TMP/bin/icacls" <<STUB
+cat > "$TMP/bin/icacls" <<'STUB'
 #!/usr/bin/env bash
-case "\$*" in *'/inheritance:r'*) exit 0 ;; esac
-printf '%s\r\n' "\$1 \$(cat '$TMP/acl' 2>/dev/null || echo 'HOST\\\\tester:(F)')" '   NT AUTHORITY\\SYSTEM:(F)' '' 'Successfully processed 1 files; Failed processing 0 files'
+case "$*" in *'/inheritance:r'*) exit 0 ;; esac
+acl="$(cat "$STEPFUN_TEST_ACL" 2>/dev/null || printf '%s' 'HOST\tester:(F)')"
+printf '%s\r\n' "$1 $acl" '   NT AUTHORITY\SYSTEM:(F)' '' 'Successfully processed 1 files; Failed processing 0 files'
 STUB
 chmod +x "$TMP/bin/icacls"
-export AI_STEPFUN_ICACLS="$TMP/bin/icacls" USERNAME=tester
+export AI_STEPFUN_ICACLS="$TMP/bin/icacls" USERNAME=tester USERDOMAIN=HOST STEPFUN_TEST_ACL="$TMP/acl"
 mode ok
-check "Windows key store with an inherited or shared ACL is refused" "printf 'BUILTIN\\\\Users:(I)(RX)' > '$TMP/acl'; ! '$SCRIPT' doctor >/dev/null 2>&1; rm -f '$TMP/acl'"
+check "Windows key store with an inherited or shared ACL is refused" "printf '%s' 'BUILTIN\\Users:(I)(RX)' > '$TMP/acl'; ! '$SCRIPT' doctor >/dev/null 2>&1; rm -f '$TMP/acl'"
+check "Windows key store owned by a same-named user of another domain is refused" "printf '%s' 'OTHER\\tester:(F)' > '$TMP/acl'; ! '$SCRIPT' doctor >/dev/null 2>&1; rm -f '$TMP/acl'"
 check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT' doctor | grep -q '^OK engine=opencode'"
 check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 4 ]"
 check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
@@ -214,7 +216,7 @@ check "OpenCode rejects a turn directory that has a remote" "mode ok; git -C '$T
 if [ "$(uname -s)" = Linux ]; then
   export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_OPENCODE_ROOT="$TMP/bin"
   rm -f "$TMP/args.bwrap"
-  check "Linux OpenCode turn runs under bubblewrap with an empty home and no host root" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES && grep -qx -- '--unshare-all' '$TMP/args.bwrap' && grep -qx -- '--tmpfs' '$TMP/args.bwrap' && grep -qx \"\$HOME\" '$TMP/args.bwrap' && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx /"
+  check "Linux OpenCode turn runs under bubblewrap with an empty home and no host root" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES && grep -qx -- '--unshare-all' '$TMP/args.bwrap' && grep -qx -- '--tmpfs' '$TMP/args.bwrap' && grep -qx \"\$HOME\" '$TMP/args.bwrap' && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx / && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx /etc"
   unset AI_STEPFUN_OPENCODE_ROOT
 fi
 unset AI_STEPFUN_ENGINE AI_STEPFUN_OPENCODE AI_STEPFUN_ICACLS
