@@ -115,6 +115,25 @@ die()  { printf 'ai-qwen: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ai-qwen: warning: %s\n' "$*" >&2; }
 note() { printf '%s\n' "$*" >&2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+
+# Qwen's --sandbox is container-backed and needs Docker or Podman. When neither
+# is present, reviews fall back to REVIEWER-ONLY (no shell/write/edit, no
+# container) so a written opinion still works. AI_QWEN_CONTAINER_SANDBOX=0|1
+# overrides detection for tests and deliberate pinning.
+qwen_container_sandbox_available() {
+  case "${AI_QWEN_CONTAINER_SANDBOX:-}" in
+    0|false|no)  return 1 ;;
+    1|true|yes)  return 0 ;;
+  esac
+  command -v docker >/dev/null 2>&1 && return 0
+  command -v podman >/dev/null 2>&1 && return 0
+  return 1
+}
+# What a review turn will actually get. Announced in doctor, start notes, and
+# the prompt so sessions never have to guess why a run has no container sandbox.
+review_containment_mode() {
+  if qwen_container_sandbox_available; then printf 'sandbox'; else printf 'reviewer-only'; fi
+}
 protect_windows_path(){
   local path="$1" kind="${2:-file}" ps helper
   [ -n "${SYSTEMROOT:-}" ] || return 0
@@ -992,13 +1011,22 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   # a reviewer turn; Qwen receives the key through its self-deleting preloader.
   assert_qwen_child_env_hardened || die "Qwen child-process credential hardening was not proven. Re-run the repository-owned provider CLI installer before running Qwen."
   if [ "$mode" = review ]; then
-    # Issue #974: reviews may run code/tests and edit, but only in the private
-    # remote-less snapshot, under Qwen's sandbox, like implementation.
-    assert_disposable_review_dir "$repo" || die 'refusing a writable Qwen review outside a private remote-less snapshot.'
-    args+=(--sandbox --approval-mode yolo)
+    # Issue #974: a full review may run code/tests and edit, but only in the
+    # private remote-less snapshot, under Qwen's container sandbox. When that
+    # sandbox cannot start (no Docker/podman), fall back to REVIEWER-ONLY:
+    # plan mode with shell/write/edit removed. Still a disposable copy.
+    assert_disposable_review_dir "$repo" || die 'refusing a Qwen review outside a private remote-less snapshot.'
+    if qwen_container_sandbox_available; then
+      REVIEW_CONTAINMENT=sandbox
+      args+=(--sandbox --approval-mode yolo)
+    else
+      REVIEW_CONTAINMENT=reviewer-only
+      args+=(--approval-mode plan --exclude-tools shell,write,edit)
+    fi
   elif [ "$mode" = probe ]; then
     # doctor --live answers one fixed prompt in the caller's directory: it is a
     # qualification probe, not a review, so it gets no tools at all.
+    REVIEW_CONTAINMENT=reviewer-only
     args+=(--approval-mode plan --exclude-tools shell,write,edit)
   elif [ "$mode" = implement ]; then
     # Preserve the complete implementation toolset, including shell and tests.
@@ -1214,7 +1242,18 @@ report_answer_defect() { # report_answer_defect NAME STREAM_PATH
   return 1
 }
 
-REVIEW_WORKSPACE_NOTE="You are working in a disposable, remote-less copy of the repository. You may run shell commands, builds, and tests and edit files here to verify your findings. Your edits are discarded and are not part of the pull request. Do not modify the sealed evidence packet directory."
+REVIEW_CONTAINMENT=""
+review_workspace_note() {
+  if [ "${REVIEW_CONTAINMENT:-}" = "reviewer-only" ]; then
+    cat <<'EOF'
+REVIEWER-ONLY mode: You are working in a disposable, remote-less copy of the repository. You may read files and reason about the code. You cannot run shell commands, builds, or tests, and you cannot edit files. Give a written opinion with file paths and line numbers. Do not modify the sealed evidence packet directory. If a conclusion would need a build or test run, say so and return BLOCKED rather than guessing.
+EOF
+  else
+    cat <<'EOF'
+You are working in a disposable, remote-less copy of the repository. You may run shell commands, builds, and tests and edit files here to verify your findings. Your edits are discarded and are not part of the pull request. Do not modify the sealed evidence packet directory.
+EOF
+  fi
+}
 STANDARD_PROMPT_FOOTER="
 
 ---
@@ -1258,7 +1297,7 @@ build_prompt_file() {
   [ -s "$body" ] || die "the prompt is empty."
   if [ -n "$PACKET_REL" ]; then
     printf 'Read %s/MANIFEST.md first and verify its sealed evidence before judging the code.\n\n' "$PACKET_REL" > "$dest"
-    printf '%s\n\n' "$REVIEW_WORKSPACE_NOTE" >> "$dest"
+    printf '%s\n\n' "$(review_workspace_note)" >> "$dest"
     cat "$body" >> "$dest"; rm -f "$body"
   else mv -f "$body" "$dest"; fi
   if [ -n "${OPT_GOVERNED_VERDICT:-}" ]; then governed_prompt_footer >> "$dest"
@@ -1390,8 +1429,9 @@ ai-qwen $VERSION — Qwen Code delegation in persistent, named sessions.
   ai-qwen doctor [--identity | --live]
   ai-qwen store-key [--if-missing]  install or explicitly refresh the protected key
 
-'new' creates a review in a disposable remote-less copy (it may run code and
-edit there; edits are discarded). 'ask' continues the saved mode: a review
+'new' creates a review in a disposable remote-less copy. With Docker or Podman
+it may run code and edit there (edits are discarded). Without them it runs
+REVIEWER-ONLY: read and advise, no shell/write/edit. 'ask' continues the saved mode: a review
 for reviews, but an implementation continuation (write run) for an
 implementation session. 'implement' creates or continues an isolated write
 session. Each write turn uses a new disposable worktree reconstructed from the
@@ -1476,7 +1516,7 @@ cmd_doctor() {
   else
     echo "auth selection: FAILED — the governed Qwen auth entry could not be installed"; rc=1
   fi
-  echo "review        : safe mode + sandbox + tools in a disposable remote-less copy"
+  echo "review        : $(if qwen_container_sandbox_available; then echo 'safe mode + sandbox + tools in a disposable remote-less copy'; else echo 'REVIEWER-ONLY (no container sandbox; no shell/write/edit) in a disposable remote-less copy'; fi)"
   if assert_qwen_child_env_hardened 2>/dev/null; then
     echo "child secrets : HARDENED (Coding Plan key stripped from Qwen tool children)"
   else
@@ -1570,8 +1610,9 @@ record_new_review_recovery() { # META REPO NAME REVIEW_DIR OUT REASON
     --arg caller "$CALLER" --arg model "$QWEN_MODEL" --arg review_dir "$review_dir" --arg base "$REVIEW_BASE" --arg head "$REVIEW_HEAD" \
     --arg packet "$PACKET_HASH" --arg tree "$WORKING_TREE_HASH" --arg pending "$pending" --arg reason "$reason" --arg now "$now" \
     --arg stderr_digest "$(sha256_file "$pending.stderr")" --arg digest "$digest" --arg runtime "$REVIEW_RUNTIME_SHA" --arg preloader "$REVIEW_PRELOADER_SHA" --arg governed "${OPT_GOVERNED_VERDICT:-}" --arg event "${AI_REVIEW_EVENT_RUN_ID:-}" \
+    --arg containment "${REVIEW_CONTAINMENT:-reviewer-only}" \
     '{qwen_session_id:$sid,repo:$repo,repo_remote:$remote,name:$name,caller:$caller,mode:"review",status:"recovery-required",model:$model,
-      review_dir:$review_dir,base:$base,head:$head,packet_sha256:$packet,working_tree_sha256:$tree,evidence_generation:1,
+      review_dir:$review_dir,base:$base,head:$head,packet_sha256:$packet,working_tree_sha256:$tree,evidence_generation:1,containment:$containment,
       recovery_stream:$pending,recovery_stderr:($pending+".stderr"),recovery_stderr_sha256:$stderr_digest,recovery_evidence_version:2,recovery_sha256:$digest,recovery_runtime_sha256:$runtime,recovery_preloader_sha256:$preloader,recovery_event_run_id:$event,governed_head:$governed,failure_reason:$reason,created:$now,updated:$now,turns:0}')"
 }
 LIFECYCLE_SID=""
@@ -1862,6 +1903,7 @@ start_session() { # start_session NAME MODE
 
   local workdir="$repo"
   if [ "$mode" != implement ]; then
+    REVIEW_CONTAINMENT="$(review_containment_mode)"
     source_head_before="$(git -C "$repo" rev-parse HEAD)"
     source_tree_before="$(tree_state "$repo")"
     [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_SNAPSHOT_MARKER"
@@ -1900,6 +1942,13 @@ start_session() { # start_session NAME MODE
   [ "$mode" != review ] || snapshot_checkpoint "$workdir"
 
   note "Qwen $mode '$name' starting (model $QWEN_MODEL)…"
+  if [ "$mode" = review ]; then
+    if [ "$(review_containment_mode)" = "reviewer-only" ]; then
+      note "  containment : REVIEWER-ONLY (no Docker/podman). Qwen can read and advise; it cannot run builds/tests or edit. Install Docker or Podman for full sandbox reviews."
+    else
+      note "  containment : sandbox + full tools in a disposable remote-less copy"
+    fi
+  fi
   if [ "$mode" = review ]; then
     LIFECYCLE_META="$meta"
     capture_review_runtime
@@ -2141,7 +2190,7 @@ complete_review_metadata() { # META EXACT_SESSION; publish before removing recov
   [ "$digest" = "$(jq -r .recovery_sha256 "$meta")" ] || return 1
   [ -n "$QWEN_LAST_REPORT" ] && [ -f "$QWEN_LAST_REPORT" ] || return 1
   report_hash="$(sha256_file "$QWEN_LAST_REPORT")" || return 1
-  updated="$(jq --arg sid "$sid" --arg report "$QWEN_LAST_REPORT" --arg report_hash "$report_hash" --arg digest "$digest" --arg u "$(date -u +%FT%TZ)" '.qwen_session_id=$sid | .status="active" | .last_finalized_stream_sha256=$digest | .last_report=$report | .last_report_sha256=$report_hash | del(.failure_reason,.recovery_stream,.recovery_stderr) | .updated=$u | .turns=(.turns+1)' "$meta")" || return 1
+  updated="$(jq --arg sid "$sid" --arg report "$QWEN_LAST_REPORT" --arg report_hash "$report_hash" --arg digest "$digest" --arg containment "${REVIEW_CONTAINMENT:-}" --arg u "$(date -u +%FT%TZ)" '(.qwen_session_id=$sid | .status="active" | .last_finalized_stream_sha256=$digest | .last_report=$report | .last_report_sha256=$report_hash | del(.failure_reason,.recovery_stream,.recovery_stderr) | .updated=$u | .turns=(.turns+1)) | if $containment != "" then .containment=$containment else . end' "$meta")" || return 1
   write_meta "$meta" "$updated" || return 1
   rm -f "$pending" "$pending.stderr"
 }
