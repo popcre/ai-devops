@@ -3,8 +3,7 @@
 Every lock used by `bin/`, written for issue
 [#1002](https://github.com/popcre/ai-devops/issues/1002) step 1. The table is
 the complete answer to `grep -rnE 'flock|lock\.d|\.lock' bin` (94 hits after
-step 2 and 94 after the 2026-09-28 merge of main, re-verified
-2026-09-29); every hit line is cited in the Grep hits
+step 2 and the later merges of main); every hit line is cited in the Grep hits
 column, so a new lock site added without a row here makes this file wrong,
 not optional.
 

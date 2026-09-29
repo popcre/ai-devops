@@ -100,13 +100,16 @@ if ( source /dev/stdin
 else
   result fail 'an aged legacy Muse lock (pid invisible, older than 15 min) is reclaimed on Windows'
 fi
+legacy_live="$TMP/muse-legacy-live.lock.d"; mkdir "$legacy_live"
+printf '424242\n' > "$legacy_live/pid"
+touch -d '20 minutes ago' "$legacy_live"
 if ( source /dev/stdin
      lock_owner_record(){ cat "$1/owner" 2>/dev/null || true; }
      lock_owner_alive(){ return 0; } # a live, observable owner
      warn(){ :; }
      declare -A LOCK_TOKENS=()
      export SYSTEMROOT=Windows
-     ! lock_acquire "$legacy_old" test && [ -f "$legacy_old/pid" ]
+     ! lock_acquire "$legacy_live" test && [ "$(cat "$legacy_live/pid")" = 424242 ] && [ ! -f "$legacy_live/owner" ]
    ) <<< "$FUNCS" >/dev/null 2>&1; then
   result pass 'a live visible legacy owner never loses the lock, whatever the age'
 else

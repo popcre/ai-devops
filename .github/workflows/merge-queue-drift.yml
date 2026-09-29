@@ -26,6 +26,11 @@ on:
 permissions:
   contents: read
 
+# A cron run and a manual dispatch must not race the same standing issue.
+concurrency:
+  group: merge-queue-drift-alert
+  cancel-in-progress: false
+
 jobs:
   drift:
     name: Offline drift checks hold
@@ -94,18 +99,25 @@ jobs:
       - name: Open or update the merge-queue drift standing issue
         shell: bash
         run: |
-          title='Merge-queue settings drift detected'
-          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
           outcome="${{ needs.live-ruleset.outputs.outcome }}"
           if [ "$outcome" = refused ] && [ "${{ needs.drift.result }}" = success ]; then
-            # Degraded, not drift: say so once. A repeat refusal stays silent.
-            body="The live ruleset comparison could not read repos/$GITHUB_REPOSITORY at $RUN_URL (token refused the ruleset read). The offline checks stay in force. Grant the lane a reader or move the live comparison to a machine with admin access; until then this run is degraded, and this message will not repeat while it is the latest comment."
-            if [ -n "$existing" ] && [ "$(gh issue view "$existing" --repo "$GITHUB_REPOSITORY" --json comments --jq '.comments[-1].body' 2>/dev/null | grep -c 'will not repeat while it is the latest comment')" -ge 1 ]; then
+            # Degraded, NOT drift: it gets its own standing issue so a read
+            # refusal is never booked as a settings drift. Say so once; a
+            # repeat refusal stays silent while that notice is the latest
+            # comment OR still the issue body (a fresh issue has no comments).
+            title='Merge-queue drift lane degraded: live ruleset read refused'
+            body="The live ruleset comparison could not read repos/$GITHUB_REPOSITORY at $RUN_URL (token refused the ruleset read). The offline checks stay in force. Grant the lane a ruleset read or move the live comparison to a machine with admin access; until then scheduled runs are degraded, and this message will not repeat while it is the latest comment."
+          else
+            title='Merge-queue settings drift detected'
+            body="The merge-queue drift check failed at $RUN_URL. Run bin/ai-merge-queue-drift for the exact finding, then reconcile it by a pull request to config/merge-queue-expected.json or by reverting the live ruleset. Close this issue only after a later drift run passes."
+          fi
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
+          if [ "$outcome" = refused ] && [ -n "$existing" ]; then
+            last="$(gh issue view "$existing" --repo "$GITHUB_REPOSITORY" --json body,comments --jq '.body, (.comments[-1].body // "")' 2>/dev/null)"
+            if [ "$(printf '%s' "$last" | grep -c 'will not repeat while it is the latest comment')" -ge 1 ]; then
               echo "refusal already reported; staying silent"
               exit 0
             fi
-          else
-            body="The merge-queue drift check failed at $RUN_URL. Run bin/ai-merge-queue-drift for the exact finding, then reconcile it by a pull request to config/merge-queue-expected.json or by reverting the live ruleset. Close this issue only after a later drift run passes."
           fi
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"

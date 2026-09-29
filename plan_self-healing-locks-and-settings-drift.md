@@ -7,10 +7,10 @@ Owner issue: https://github.com/popcre/ai-devops/issues/1002.
 
 | Step | State | Evidence |
 |---|---|---|
-| 1 Lock inventory | ✅ done (2026-09-28) | `docs/locks.md` covers every hit of `grep -rnE 'flock|lock\.d|\.lock' bin` (62 pre-change; 87 after step 2, all re-cited); `docs/task-router.md` router row added |
+| 1 Lock inventory | ✅ done (2026-09-28) | `docs/locks.md` covers every hit of `grep -rnE 'flock|lock\.d|\.lock' bin` (62 pre-change; 94 after step 2 and the 2026-09-28/29 merges of main, all re-cited); `docs/task-router.md` router row added |
 | 2 Stale-holder recovery for flock locks | 🔶 done pending Linux-lane proof (2026-09-28) | `bin/ai-lock-doctor` + `-E 87` wiring at all 5 flock sites; Windows `lock_acquire` pid+age reclaim; `tests/test-ai-lock-doctor.sh` portable cases green; the /proc cases prove on the PR's Linux CI lane (exact-head reviews 3-5 fixed the platform guard, the decimal-inode/hex-device decode, and the racy probe found there) |
 | 3 Settings snapshot + drift check | ✅ done (2026-09-28) | `config/merge-queue-expected.json` + `bin/ai-merge-queue-drift`; passes against the live ruleset (read via ai-gh) and `tests/test-ai-merge-queue-drift.sh` proves renamed-job, paths-filter, .ps1-divergence, and clean-pass cases |
-| 4 Scheduled drift check + alert | ✅ done (2026-09-28, dispatch proof in Step 5) | `.github/workflows/merge-queue-drift.yml`: daily cron + PR-path trigger + standing-issue alert job |
+| 4 Scheduled drift check + alert | 🔶 workflow landed, dispatch proof pending (2026-09-29) | `.github/workflows/merge-queue-drift.yml`: daily cron + PR-path trigger + standing-issue alert job; offline checks green, degraded-refusal notice has its own standing issue; the one-time clean dispatch run is booked in Step 5, and the live ruleset read needs an owner decision (grant the lane a ruleset read) before it can ever be green — offline enforcement is not blocked by that |
 | 5 Live proof | ⬜ open | — |
 
 A fresh session starts at Step 1.
