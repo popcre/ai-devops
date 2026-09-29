@@ -116,8 +116,36 @@ key_store_ok(){
   # stat -c %a is meaningless on NTFS (returns a synthesised mode). On Windows
   # accept a present, non-empty, non-link file; the path is under the user
   # profile and store-key writes it with chmod 600 where the filesystem honors it.
-  if [ "$IS_WINDOWS" = 1 ]; then return 0; fi
+  if [ "$IS_WINDOWS" = 1 ]; then windows_acl_owner_only "$KEY_STORE"; return; fi
   [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
+}
+
+# NTFS ignores chmod, so on Windows the real control is the file's ACL: it must
+# have inheritance removed and grant access to the current user only (plus
+# SYSTEM and Administrators, which can read any file anyway) (#1086).
+icacls_bin(){ printf '%s' "${AI_STEPFUN_ICACLS:-icacls}"; }
+windows_acl_owner_only(){
+  local acl user line principal
+  acl="$("$(icacls_bin)" "$(native_path "$1")" 2>/dev/null | tr -d '\r')" || return 1
+  [ -n "$acl" ] || return 1
+  user="${USERNAME:-$(whoami 2>/dev/null)}"; user="${user##*\\}"
+  while IFS= read -r line; do
+    case "$line" in *'Successfully processed'*|'') continue ;; esac
+    # icacls prints "<path> <principal>:(rights)" on the first line and
+    # "  <principal>:(rights)" on the rest.
+    line="${line#"$(native_path "$1")"}"; line="${line#"${line%%[![:space:]]*}"}"
+    principal="${line%%:(*}"
+    case "$line" in *'(I)'*) return 1 ;; esac
+    case "${principal##*\\}" in
+      "$user"|SYSTEM|Administrators) ;;
+      *) return 1 ;;
+    esac
+  done <<< "$acl"
+  return 0
+}
+windows_acl_restrict(){
+  local user="${USERNAME:-$(whoami 2>/dev/null)}"; user="${user##*\\}"
+  "$(icacls_bin)" "$(native_path "$1")" /inheritance:r /grant:r "$user:F" >/dev/null 2>&1
 }
 
 cmd_store_key(){
@@ -133,11 +161,15 @@ cmd_store_key(){
   # The key moves op -> file directly; it never enters argv or this output.
   if ! op read "$OP_REF" </dev/null > "$tmp" || [ ! -s "$tmp" ]; then rm -f "$tmp"; die 'could not read the StepFun key from 1Password.'; fi
   mv -f "$tmp" "$KEY_STORE"
+  if [ "$IS_WINDOWS" = 1 ]; then
+    windows_acl_restrict "$KEY_STORE" && windows_acl_owner_only "$KEY_STORE" ||
+      { rm -f "$KEY_STORE"; die "could not restrict the key store ACL to the current user: $KEY_STORE"; }
+  fi
   printf 'StepFun key stored in the protected per-user store: %s\n' "$KEY_STORE"
 }
 
 load_key(){
-  key_store_ok || die "protected StepFun key store is missing or not owner-only (600): $KEY_STORE. Run: ai-stepfun store-key"
+  key_store_ok || die "protected StepFun key store is missing or not owner-only (600 on Linux, current-user-only ACL on Windows): $KEY_STORE. Run: ai-stepfun store-key"
   IFS= read -r STEP_KEY < "$KEY_STORE" || true
   [ -n "${STEP_KEY:-}" ] || die 'StepFun key store is empty. Run: ai-stepfun store-key'
 }
@@ -206,6 +238,7 @@ run_opencode_turn(){
   load_key
   log="$out.jsonl"
   set +e
+  if [ "$IS_WINDOWS" = 1 ]; then
   ( unset OP_SERVICE_ACCOUNT_TOKEN
     export STEPFUN_API_KEY="$STEP_KEY"
     export XDG_CONFIG_HOME="$(native_path "$STATE_DIR/xdg/config")" \
@@ -216,6 +249,39 @@ run_opencode_turn(){
       > "$log" 2>"$out.stderr"
   )
   rc=$?
+  else
+  # Linux: the shell-enabled agent runs under bubblewrap exactly like StepCode:
+  # read-only system trees, an empty home, /tmp and /run, a cleared
+  # environment, and only the OpenCode install, its per-run state and the
+  # disposable directory mounted (#1086).
+  local bwrap oc_real oc_root timeout_bin
+  bwrap="$(bwrap_bin)" || die 'bubblewrap (bwrap) is required to sandbox StepFun. Install: sudo apt-get install bubblewrap'
+  timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)" || die 'timeout is missing from /usr/bin.'
+  oc_real="$(readlink -f "$oc")"
+  oc_root="${AI_STEPFUN_OPENCODE_ROOT:-$HOME/.local/lib/ai-devops/opencode/$OC_VERSION}"
+  case "$oc_real" in "$oc_root"/*) ;; *) oc_root="$(dirname "$oc_real")" ;; esac
+  mkdir -p "$STATE_DIR/xdg/config" "$STATE_DIR/xdg/data" "$STATE_DIR/xdg/state" "$STATE_DIR/xdg/cache"
+  local -a sys_binds=(); sandbox_sys_binds
+  ( home="$HOME"
+    for name in $(compgen -e); do
+      case "$STEP_ENV_ALLOW" in *" $name "*) ;; *) unset "$name" 2>/dev/null || true ;; esac
+    done
+    export HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" STEPFUN_API_KEY="$STEP_KEY" \
+      XDG_CONFIG_HOME="$STATE_DIR/xdg/config" XDG_DATA_HOME="$STATE_DIR/xdg/data" \
+      XDG_STATE_HOME="$STATE_DIR/xdg/state" XDG_CACHE_HOME="$STATE_DIR/xdg/cache"
+    printf '%s' "$prompt" | "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
+      "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
+      --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
+      --tmpfs "$home" \
+      --ro-bind "$oc_root" "$oc_root" \
+      --bind "$STATE_DIR/xdg" "$STATE_DIR/xdg" \
+      --bind "$dir" "$dir" --chdir "$dir" -- \
+      "$oc" run --agent "$agent" --auto \
+      --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$dir" \
+      > "$log" 2>"$out.stderr"
+  )
+  rc=$?
+  fi
   set -e
   STEP_KEY=""
   # OpenCode emits JSONL events; surface the assistant text as the turn output.
@@ -259,12 +325,7 @@ run_stepcode(){
   agent="$(mktemp -d "$STATE_DIR/agent.XXXXXX")"; chmod 700 "$agent"
   # Only the system trees programs need, read-only: never `/` itself, so a
   # checkout or data outside the home (/srv, /data, /mnt, ...) stays invisible.
-  local -a sys_binds=(--ro-bind /usr /usr --ro-bind /etc /etc)
-  local top
-  for top in /bin /sbin /lib /lib32 /lib64 /libx32; do
-    if [ -L "$top" ]; then sys_binds+=(--symlink "$(readlink "$top")" "$top")
-    elif [ -d "$top" ]; then sys_binds+=(--ro-bind "$top" "$top"); fi
-  done
+  local -a sys_binds=(); sandbox_sys_binds
   # Resolve host programs before the environment is cleared, so a file planted
   # in a user-writable PATH entry can never run outside the sandbox.
   local timeout_bin; timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)" || die 'timeout is missing from /usr/bin.'
@@ -289,6 +350,22 @@ run_stepcode(){
   ) < /dev/null > "$out" 2>"$out.stderr" || rc=$?
   rm -rf "$agent"
   return "$rc"
+}
+
+# sandbox_sys_binds: fills the caller's sys_binds array with the read-only
+# system trees a sandboxed program needs; never `/` itself.
+sandbox_sys_binds(){
+  sys_binds=(--ro-bind /usr /usr --ro-bind /etc /etc)
+  local top
+  for top in /bin /sbin /lib /lib32 /lib64 /libx32; do
+    if [ -L "$top" ]; then sys_binds+=(--symlink "$(readlink "$top")" "$top")
+    elif [ -d "$top" ]; then sys_binds+=(--ro-bind "$top" "$top"); fi
+  done
+  local secret
+  for secret in /etc/ai-devops /etc/ssh /etc/ssl/private /etc/sudoers.d; do
+    [ -d "$secret" ] && sys_binds+=(--tmpfs "$secret")
+  done
+  return 0
 }
 
 bwrap_bin(){

@@ -334,6 +334,7 @@ holder_evidence(){
   fi
 }
 
+declare -A HOLDER_START=()
 scan_once(){
   local pid age klass line
   HOLDERS_OUR=''; HOLDERS_FOREIGN=''; HOLDERS_YOUNG=''; HOLDERS_UNKNOWN_AGE=''; HOLDERS_WAITERS=''
@@ -341,6 +342,7 @@ scan_once(){
     [ -n "$pid" ] || continue
     age="$(proc_age_seconds "$pid" 2>/dev/null || true)"
     [ -n "$age" ] || age='?'
+    HOLDER_START["$pid"]="$(proc_start_ticks "$pid" 2>/dev/null || true)"
     if [ -n "${PROTECTED_PIDS[$pid]:-}" ]; then klass=self
     elif [ -n "${LOCK_BLOCKED_PIDS[$pid]:-}" ]; then klass=waiter
     elif proc_is_our_tool "$pid"; then klass=our-tool
@@ -390,8 +392,34 @@ if [ "$locks_seen" != true ]; then
   exit 3
 fi
 
+# same_holder PID -> 0 only while PID is still the exact process the scan saw
+# (same kernel start time) AND it still has the lock inode open. A released
+# lock or a reused PID therefore never receives a signal (#1086).
+same_holder(){
+  local pid="$1" want="${HOLDER_START[$1]:-}" now fd tid
+  [ -n "$want" ] || return 1
+  now="$(proc_start_ticks "$pid" 2>/dev/null)" || return 1
+  [ "$now" = "$want" ] || return 1
+  for fd in /proc/"$pid"/fd/[0-9]*; do
+    tid="$(stat -Lc '%d:%i' "$fd" 2>/dev/null)" || continue
+    [ "$(norm "${tid%%:*}")" = "$LOCK_DEV_N" ] && [ "$(norm "${tid##*:}")" = "$LOCK_INO_N" ] && return 0
+  done
+  return 1
+}
+# gone PID -> 0 when the scanned process no longer exists (a different process
+# reusing the PID counts as gone).
+gone(){
+  local now
+  now="$(proc_start_ticks "$1" 2>/dev/null)" || return 0
+  [ "$now" != "${HOLDER_START[$1]:-}" ]
+}
+
 kill_holder(){
   local pid="$1" waited
+  if ! same_holder "$pid"; then
+    gone "$pid" || info "pid $pid no longer holds the lock; not signalled"
+    return 0
+  fi
   if ! kill -TERM "$pid" 2>/dev/null; then
     if ! kill -0 "$pid" 2>/dev/null; then
       return 0   # already gone between the scan and the signal
@@ -400,13 +428,17 @@ kill_holder(){
     return 1
   fi
   for waited in 1 2 3 4 5 6 7 8; do
-    kill -0 "$pid" 2>/dev/null || return 0
+    gone "$pid" && return 0
     sleep 1
   done
+  if ! same_holder "$pid"; then
+    info "pid $pid released the lock after TERM; KILL not sent"
+    return 0
+  fi
   info "pid $pid survived TERM for 8s; sending KILL"
   kill -KILL "$pid" 2>/dev/null || true
   for waited in 1 2 3; do
-    kill -0 "$pid" 2>/dev/null || return 0
+    gone "$pid" && return 0
     sleep 1
   done
   info "pid $pid still present after KILL; it may be a zombie or unkillable"

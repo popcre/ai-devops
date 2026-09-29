@@ -143,7 +143,20 @@ Ok "ai-stepfun is now callable from PowerShell"
 # 3. Key store
 # ---------------------------------------------------------------------------
 if (Test-Path -LiteralPath $KeyStore) {
-  Ok "Protected key store present: $KeyStore"
+  # NTFS ignores chmod: the key store is protected only if its ACL has no
+  # inherited entries and grants nobody but the current user (plus SYSTEM and
+  # Administrators). Restrict it, then verify before calling it protected (#1086).
+  & icacls.exe $KeyStore /inheritance:r /grant:r "$($env:USERNAME):F" | Out-Null
+  $acl = Get-Acl -LiteralPath $KeyStore
+  $others = @($acl.Access | Where-Object {
+      $_.IsInherited -or ($_.IdentityReference.Value -notmatch ('\\' + [regex]::Escape($env:USERNAME) + '$|^NT AUTHORITY\\SYSTEM$|^BUILTIN\\Administrators$'))
+    })
+  if ($acl.AreAccessRulesProtected -and $others.Count -eq 0) {
+    Ok "Protected key store present (current-user-only ACL): $KeyStore"
+  } else {
+    Warn "Key store ACL is not current-user-only; ai-stepfun will refuse it: $KeyStore"
+    Warn "  ai-stepfun store-key"
+  }
 } else {
   Warn "Protected key store is missing. Run this once to fill it from 1Password:"
   Warn "  ai-stepfun store-key"

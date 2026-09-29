@@ -103,6 +103,39 @@ out="$("$DRIFT" --root "$f_renamed" --ruleset "$TMP/ruleset-live.json" 2>&1)"; r
   && result pass 'a renamed required job is reported as drift' \
   || result fail 'a renamed required job is reported as drift'
 
+# Case 1b: the required job's if: mentions merge_group only to exclude it.
+f_excl="$(make_fixture excludes)"
+awk '{ print } /^  verification-closure:$/ { print "    if: github.event_name != '"'"'merge_group'"'"'" }' \
+  "$ROOT/.github/workflows/verify.yml" > "$f_excl/.github/workflows/verify.yml.new"
+python3 - "$f_excl/.github/workflows/verify.yml.new" "$f_excl/.github/workflows/verify.yml" <<'PY2'
+import sys, re
+t = open(sys.argv[1]).read().split('\n')
+out, in_job, seen = [], False, False
+for line in t:
+    if line == '  verification-closure:':
+        in_job = True; out.append(line); continue
+    if in_job and re.match(r'^  [A-Za-z0-9_-]+:$', line):
+        in_job = False
+    if in_job and line.startswith('    if:'):
+        if seen: continue
+        seen = True
+    out.append(line)
+open(sys.argv[2], 'w').write('\n'.join(out))
+PY2
+out="$("$DRIFT" --root "$f_excl" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
+[ $rc -eq 1 ] && grep -q 'excludes merge_group' <<<"$out" \
+  && result pass 'an if: that excludes merge_group is reported as drift' \
+  || result fail 'an if: that excludes merge_group is reported as drift'
+
+# Case 1c: the required job reports under a different display name.
+f_disp="$(make_fixture display)"
+awk '{ print } /^  verification-closure:$/ { print "    name: Verification closure" }' \
+  "$ROOT/.github/workflows/verify.yml" > "$f_disp/.github/workflows/verify.yml"
+out="$("$DRIFT" --root "$f_disp" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
+[ $rc -eq 1 ] && grep -q "reports as 'Verification closure'" <<<"$out" \
+  && result pass 'a required job with a different display name is reported as drift' \
+  || result fail 'a required job with a different display name is reported as drift'
+
 # Case 2: the producing workflow grows a paths filter (the trigger can skip).
 f_paths="$(make_fixture paths)"
 awk '{ print } /^  pull_request:/ { print "    paths:"; print "      - bin/**" }' \

@@ -265,6 +265,32 @@ fi
 kill "$stuck_waiter_case_holder" 2>/dev/null || true; wait "$stuck_waiter_case_holder" 2>/dev/null || true
 for _ in 1 2 3 4 5; do flock -n "$lock" true 2>/dev/null && break; sleep 0.2; done
 
+# Case: PID identity is rechecked before any signal (#1086). A holder whose
+# kernel start time differs from the scan (PID reuse), or that no longer has
+# the lock open, is never signalled.
+id_lock="$(mktemp)"
+{ sed -n '/^norm()/,/^}/p' "$DOCTOR"; sed -n '/^proc_stat_field()/,/^}/p' "$DOCTOR"; sed -n '/^proc_start_ticks()/p' "$DOCTOR"
+  sed -n '/^same_holder()/,/^}/p' "$DOCTOR"; sed -n '/^gone()/,/^}/p' "$DOCTOR"; } > "$TMP/identity.sh"
+( exec 7<"$id_lock"; sleep 30 ) & id_holder=$!
+sleep 0.3
+if (
+  . "$TMP/identity.sh"
+  declare -A HOLDER_START=()
+  id="$(stat -c '%d:%i' "$id_lock")"; LOCK_DEV_N="$(norm "${id%%:*}")"; LOCK_INO_N="$(norm "${id##*:}")"
+  HOLDER_START[$id_holder]="$(proc_start_ticks "$id_holder")"
+  same_holder "$id_holder" || exit 1
+  HOLDER_START[$id_holder]=1            # a different process reusing the pid
+  ! same_holder "$id_holder" && gone "$id_holder" || exit 1
+  HOLDER_START[$id_holder]="$(proc_start_ticks "$id_holder")"
+  LOCK_INO_N=0                           # the process no longer holds this lock
+  ! same_holder "$id_holder" || exit 1
+); then
+  result pass 'a reused PID or a released lock is never signalled'
+else
+  result fail 'a reused PID or a released lock is never signalled'
+fi
+kill "$id_holder" 2>/dev/null || true; wait "$id_holder" 2>/dev/null || true; rm -f "$id_lock"
+
 cleanup "$stuck_holder" "$young_holder" "$daemon_pid" 2>/dev/null || true
 
 printf 'ai-lock-doctor: %s pass, %s fail\n' "$PASS" "$FAIL"

@@ -165,9 +165,22 @@ while IFS= read -r producer; do
     drift "required check '$context': job '$job_name' is missing from '$wf_name' (a rename must update the snapshot and the ruleset together)"
     continue
   fi
+  # The check context GitHub reports is the job's display name (`name:`), or
+  # its id when unnamed; a mismatch leaves the required context unproduced.
+  display="$(job_block "$wf" "$job_name" | sed -n 's/^    name:[[:space:]]*//p' | head -1 | sed "s/^[\"']//; s/[\"']\$//")"
+  if [ "${display:-$job_name}" != "$context" ]; then
+    drift "required check '$context': job '$job_name' in '$wf_name' reports as '${display:-$job_name}', not '$context'"
+    continue
+  fi
   job_if="$(job_if_expression "$wf" "$job_name")"
   if [ -n "$job_if" ] && ! grep -q 'merge_group' <<<"$job_if"; then
     drift "required check '$context': job '$job_name' has an if: that never mentions merge_group; it can silently skip queue runs"
+    continue
+  fi
+  # Mentioning merge_group is not enough: an if: that excludes it (for example
+  # github.event_name != 'merge_group') skips every queue run (#1086).
+  if [ -n "$job_if" ] && grep -Eq "!=[[:space:]]*['\"]merge_group['\"]|['\"]merge_group['\"][[:space:]]*!=|!contains\([^)]*merge_group" <<<"$job_if"; then
+    drift "required check '$context': job '$job_name' has an if: that excludes merge_group; it skips queue runs"
     continue
   fi
   ok "required check '$context' is produced by '$wf_name' job '$job_name' on merge_group without a paths filter or queue-skip"
