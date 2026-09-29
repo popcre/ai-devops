@@ -58,7 +58,7 @@ make_approved_report(){
   mkdir -p "$dir/.ai/reviews"
   digest="$("$ROOT/bin/ai-review-sandbox" digest "$dir")" || return 1
   report="$dir/.ai/reviews/codex-final-check-test.md"
-  printf '# Exact review\n\n| reviewed commit | %s%s%s |\n| source digest | %s%s%s |\n\n## Result\n\nApproved fixture source and routes. %s\n\n## Verdict\nAPPROVE\n' \
+  printf '# Exact review\n\n| reviewed commit | %s%s%s |\n| source digest | %s%s%s |\n\n## Result\n\nApproved fixture source and routes.\nApproved %s.\n\n## Verdict\nAPPROVE\n' \
     "$(printf '\140')" "$target" "$(printf '\140')" "$(printf '\140')" "$digest" "$(printf '\140')" "$operation" > "$report"
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
   key="$("$ROOT/bin/ai-review-lifecycle" identity "$dir" | jq -r .repository_key)" || return 1
@@ -312,12 +312,31 @@ git -C "$TMP/first-primary" worktree add -q --detach "$TMP/first-install" "$firs
 ( cd "$TMP/first-install" && "$GATES" start --class installation ) >/dev/null
 first_report="$(make_approved_report "$TMP/first-install" "$first_target" first-managed-install)"
 first_proof="--target-head $first_target --installed-checkout $TMP/first-primary --installed-launcher $class_launcher --review-report $first_report --owner-request Albert-approved-edge-dev-first-install"
+first_key="$("$ROOT/bin/ai-review-lifecycle" identity "$TMP/first-install" | jq -r .repository_key)"
+first_lifecycle="$AI_REVIEW_LIFECYCLE_DIR/runs/$first_key/codex/codex/test.json"
+cp "$first_report" "$TMP/first-report-backup"
+sed -i 's/^Approved first-managed-install\.$/Not approved first-managed-install./' "$first_report"
+first_hash="$(sha256sum "$first_report" | cut -d' ' -f1)"
+jq --arg hash "$first_hash" '.report_sha256=$hash' "$first_lifecycle" > "$TMP/first-lifecycle-updated"
+mv "$TMP/first-lifecycle-updated" "$first_lifecycle"
+check 'mentioning a sensitive install mode is not approval' \
+  "rc 3 '$TMP/first-install' authorize-install $first_proof --first-install"
+cp "$TMP/first-report-backup" "$first_report"
+first_hash="$(sha256sum "$first_report" | cut -d' ' -f1)"
+jq --arg hash "$first_hash" '.report_sha256=$hash' "$first_lifecycle" > "$TMP/first-lifecycle-updated"
+mv "$TMP/first-lifecycle-updated" "$first_lifecycle"
 check 'first managed installation needs explicit reviewed mode' \
   "rc 3 '$TMP/first-install' authorize-install $first_proof"
 printf '# Managed by ai-devops install-machine-tools.ps1.\n' > "$(dirname "$class_launcher")/retired-tool"
 check 'first managed installation rejects retired managed launchers' \
   "rc 3 '$TMP/first-install' authorize-install $first_proof --first-install"
 rm -f "$(dirname "$class_launcher")/retired-tool"
+auth_target="$AI_TASK_GATES_DIR/install-authorizations/$first_target.json"
+printf 'sentinel\n' > "$TMP/authority-sentinel"
+ln -s "$TMP/authority-sentinel" "$auth_target"
+check 'dangling or linked authority destination cannot be replaced' \
+  "rc 3 '$TMP/first-install' authorize-install $first_proof --first-install && [ \"\$(cat '$TMP/authority-sentinel')\" = sentinel ]"
+rm "$auth_target"
 check 'first managed installation binds clean source with absent launchers' \
   "rc 0 '$TMP/first-install' authorize-install $first_proof --first-install"
 check 'first-install authority records target source hash' \

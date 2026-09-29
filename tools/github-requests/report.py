@@ -46,7 +46,7 @@ def summarize(directory):
                     raise ValueError("invalid time")
                 stamps.append(stamp)
                 if row.get("schema") == 2:
-                    if (set(row) not in COST_SHAPES
+                    if (frozenset(row) not in COST_SHAPES
                             or row.get("measurement") != "observed_graphql_cost"
                             or (row.get("caller"), row.get("operation"), row.get("workflow")) not in COST_LABELS
                             or type(row.get("graphql_points")) is not int

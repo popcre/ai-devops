@@ -32,7 +32,7 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   $identity=((& $bash (Join-Path $root 'bin\ai-review-lifecycle') identity $reviewRoot) -join "`n") | ConvertFrom-Json
   Assert ($identity.source_digest -ceq $sourceDigest) 'fixture review source identity differs'
   $report=Join-Path $reviewDir 'approved-review.md'
-  $operation = if ($LegacyMigration) { 'Approved legacy-managed-launcher-refresh for this exact source and launcher.' } elseif ($FirstInstall) { 'Approved first-managed-install for this exact source.' } elseif ($RecoverLaunchers) { 'Approved partial-managed-launcher-recovery for exact present and absent launcher paths.' } else { 'Approved source update.' }
+  $operation = if ($LegacyMigration) { 'Approved legacy-managed-launcher-refresh.' } elseif ($FirstInstall) { 'Approved first-managed-install.' } elseif ($RecoverLaunchers) { 'Approved partial-managed-launcher-recovery.' } else { 'Approved source update.' }
   @('# Review',('| reviewed commit | ' + [char]96 + $Target + [char]96 + ' |'),('| source digest | ' + [char]96 + $sourceDigest + [char]96 + ' |'),$operation,'## Verdict','APPROVE') | Set-Content -LiteralPath $report -Encoding ASCII
   $reportHash=(Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
   $bashReport=(& $bash -c 'cygpath -u -- "$1"' 'ai-devops' $report).Trim()
@@ -460,12 +460,9 @@ try {
     Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -ne $oldLauncherHash) `
       'hard crash did not publish the atomic gate launcher before termination'
     $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY='1'
-    $recoveryStopped=$false
-    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
-      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
-      catch { $recoveryStopped=$true }
+    Invoke-Gate $stamp -ExpectedHead $stampTarget -ExpectFailure -FailureContains 'Injected stop after exact PATH and launcher recovery'
     $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY=$null
-    Assert $recoveryStopped 'fixture did not stop after interrupted launcher recovery'
+    Assert (-not (Test-Path -LiteralPath $stampTransaction)) 'normal installer did not clear recovered launcher transaction'
     Assert ([IO.File]::ReadAllText($fixturePathStore) -ceq $fixturePathBefore) 'launcher recovery changed prior PATH'
     Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) `
       'hard-crash launcher recovery did not restore old gate bytes'
@@ -481,19 +478,12 @@ try {
     $fixturePathAfter=[IO.File]::ReadAllText($fixturePathStore)
     Assert ($fixturePathAfter -cne $fixturePathBefore) 'PATH crash did not publish expected test PATH'
     [IO.File]::WriteAllText($fixturePathStore,'C:\ConcurrentUserEdit')
-    $concurrentFailed=$false
-    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
-      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
-      catch { $concurrentFailed=($_.Exception.Message -like '*PATH changed outside*') }
-    Assert $concurrentFailed 'recovery overwrote an unrelated User PATH edit'
+    Invoke-Gate $stamp -ExpectedHead $stampTarget -ExpectFailure -FailureContains 'PATH changed outside'
     [IO.File]::WriteAllText($fixturePathStore,$fixturePathAfter)
     $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY='1'
-    $pathRecoveryStopped=$false
-    try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
-      -CatalogPath (Join-Path $stamp.Repo 'config\machine-tools.tsv') -UserProfilePath $env:USERPROFILE *>$null } `
-      catch { $pathRecoveryStopped=$true }
+    Invoke-Gate $stamp -ExpectedHead $stampTarget -ExpectFailure -FailureContains 'Injected stop after exact PATH and launcher recovery'
     $env:AI_DEVOPS_TEST_FAIL_AFTER_RECOVERY=$null
-    Assert $pathRecoveryStopped 'PATH recovery fixture did not stop after rollback'
+    Assert (-not (Test-Path -LiteralPath $stampTransaction)) 'normal installer did not clear PATH recovery transaction'
     Assert ([IO.File]::ReadAllText($fixturePathStore) -ceq $fixturePathBefore) 'PATH crash recovery did not restore exact prior value'
     Assert ((Get-FileHash -LiteralPath $stamp.Launcher -Algorithm SHA256).Hash -eq $oldLauncherHash) `
       'PATH crash recovery did not restore old gate launcher'

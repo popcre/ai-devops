@@ -158,17 +158,21 @@ authorization before runner setup, WinGet configuration, provider installs,
 remote access, or machine setup, including with `-SkipMachineSetup`.
 Direct `setup-machine.ps1` and the legacy developer-computer launcher use
 the same pinned source gate before their package and configuration work.
+After a launcher write is interrupted, the normal installer first restores
+the exact recorded prior launcher and PATH state under its installation lock,
+then checks the pending one-use authority. A changed launcher or PATH stops
+the retry for manual repair.
 The source-only gate retains a pending authorization until the full
 installer finishes and refreshes the managed command launchers; a failed full
 installation can retry against the same pinned target. Legacy launchers
 without a receipt need the same one-time path. If both managed gate launchers
 are absent, use `authorize-install --first-install` with a separate exact-head
-review whose approved report names `first-managed-install`. This applies even
+review whose approved report contains the exact line `Approved first-managed-install.`. This applies even
 to a newly cloned checkout: a clone reflog does not establish installation
 history. If another managed launcher remains, or just one gate launcher remains,
 use `authorize-install
 --recover-launchers` with a review naming
-`partial-managed-launcher-recovery`. The authority records hashes for every
+`Approved partial-managed-launcher-recovery.`. The authority records hashes for every
 present managed launcher, exact absence of the missing gate launcher files,
 and the installed gate source hash. The installer checks them again before
 writing either file.
@@ -178,7 +182,7 @@ update must be followed by a full install before beginning another release.
 If a legacy four-line launcher already points at an unchanged current-main
 checkout, use the explicit `authorize-install --legacy-migration` route. The
 independent exact-head review must examine the full target source and the
-`legacy-managed-launcher-refresh` operation; its approved report must name that
+`legacy-managed-launcher-refresh` operation; its approved report must contain the exact line `Approved legacy-managed-launcher-refresh.` for that
 operation. The one-use authority records hashes of both launcher files and
 the installed gate source, which the installer checks again before refreshing
 the launcher receipt. This route refuses launchers that already have a receipt.
@@ -316,7 +320,7 @@ before the one-use authorization can be consumed.
 
 If the installed Linux manifest names an older source SHA than the live clean
 checkout, the independent exact-head report must explicitly name
-`stale-linux-manifest-recovery` and bind the stale manifest SHA and file hash
+`Approved stale-linux-manifest-recovery.` and bind the stale manifest SHA and file hash
 plus the live installed SHA and gate hash. The separate installation task then
 uses `authorize-install --stale-manifest-recovery` for one pinned target update.
 Without that exact reviewed evidence, the updater stops before changing the
