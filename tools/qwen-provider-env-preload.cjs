@@ -30,9 +30,31 @@ if (secretFile) {
 // model call. The host re-exec chain keeps working because the key itself is
 // an ordinary inherited variable.
 if (process.env.NODE_OPTIONS) {
-  const self = __filename;
-  const kept = process.env.NODE_OPTIONS.split(/\s+/).filter((opt) => opt
-    && opt !== `--require=${self}` && opt !== `-r=${self}`);
+  // Compare real paths: on Windows the wrapper may spell this file as an MSYS
+  // path (/d/...) or with different case/separators than __filename.
+  const path = require('node:path');
+  const canon = (p) => {
+    let v = String(p).replace(/^["']|["']$/g, '');
+    if (process.platform === 'win32') {
+      v = v.replace(/^\/([a-zA-Z])\//, '$1:/');
+    }
+    try { v = fs.realpathSync.native(v); } catch { v = path.resolve(v); }
+    return process.platform === 'win32' ? v.replace(/\//g, '\\').toLowerCase() : v;
+  };
+  const self = canon(__filename);
+  const opts = process.env.NODE_OPTIONS.split(/\s+/).filter(Boolean);
+  const kept = [];
+  for (let i = 0; i < opts.length; i += 1) {
+    const m = /^(?:--require|-r)(?:=(.*))?$/.exec(opts[i]);
+    if (m) {
+      const target = m[1] !== undefined ? m[1] : opts[i + 1];
+      if (target !== undefined && canon(target) === self) {
+        if (m[1] === undefined) i += 1;
+        continue;
+      }
+    }
+    kept.push(opts[i]);
+  }
   if (kept.length) process.env.NODE_OPTIONS = kept.join(' ');
   else delete process.env.NODE_OPTIONS;
 }
