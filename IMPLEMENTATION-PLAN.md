@@ -1,16 +1,23 @@
-# IMPLEMENTATION PLAN — doctor orphan-scan guard + process re-cut landing (2026-09-29)
+# IMPLEMENTATION PLAN — CI fast-fail + reviewer timeout diagnosis + orphan reap (2026-09-29)
+
+> **Revision 2026-09-29 (after owner challenge + StepFun re-rank).** The first draft
+> led with a small doctor spawn guard. That under-shot the transcript losses
+> (6h suite ×25 reruns; 30 queued runs; slow reviewers marked broken). Priority
+> is now hours saved. Doctor orphan guard drops to a small residual (step D1).
 
 | Step | Status | Evidence |
 |---|---|---|
 | 0. Plan written and registered | ✅ done 2026-09-29 | this file + `HANDOFF.d/2026-09-29T2148Z-edge-dev-mimo-doctor-orphan-guard.md` |
-| 1. Spawn-count guard + batching for `glm_orphan_sandbox_report` | ⬜ open | |
-| 2. Bound or residual-name `reconcile_implementation_records` open-record path | ⬜ open | |
-| 3. Correct handoff §5a lines (lease TTL; 10s window) | ⬜ open | |
-| 4. Record item-3 rejection (two precedents) in the decision ledger | ⬜ open | |
-| 5. Index the 18 unlisted root `plan_*.md` files | ⬜ open | |
-| 6. Written fold-routing lines for findings 4/5/6/7/8 | ⬜ open | |
-| 7. Independent exact-head review of the doctor PR | ⬜ open | |
-| 8. Merge via queue; live `ai-glm doctor` proof | ⬜ open | |
+| **A1. P3: stop long suites after a known failure + no-progress detector** | ⬜ open | **top hours: 10–20/wk** |
+| **A2. P7: timeout ≠ broken reviewer (bounded first probe + retry/cooldown)** | ⬜ open | **5–12/wk** |
+| **B1. Session/task TTL + reap (14h orphans) under BlockerWatch** | ⬜ open | **3–8/wk** |
+| C1. Correct handoff §5a lines (lease TTL; 10s window) | ⬜ open | |
+| C2. Decision ledger: items 3/9 not done (correct citations) | ⬜ open | |
+| C3. Index the 18 unlisted root `plan_*.md` | ⬜ open | |
+| C4. Fold-routing lines for findings 5/6/7/8 | ⬜ open | |
+| D1. Doctor orphan spawn guard + reconcile residual (small) | ⬜ open | after A1; keep |
+| 7. Independent exact-head review per code PR | ⬜ open | |
+| 8. Merge via queue + live proof per PR | ⬜ open | |
 
 **Fresh session starts at step 1.** Re-read this STATUS table first. Do not re-derive or re-plan.
 
@@ -24,10 +31,12 @@ Albert Hazan (non-technical owner of POP Creations) loses real money when his mu
 
 When this plan is done:
 
-1. That leftover scan is **proven cheap** by a test that fails if anyone makes it expensive again.
-2. The other slow path in the same health-check is either **bounded or explicitly named as the next owned residual** — never silently open.
-3. A large chat-mining exercise (nine process findings) is **closed out cleanly**: the two items we will never do are documented as rejected with reasons, the finished work is not re-proposed, and nothing important is lost.
-4. There is still **no new planning book**. The owner accepted: one small safety PR, nothing else new.
+1. **A known failure stops the expensive test run** (no more six-hour suites re-run twenty-five times after we already knew the answer).
+2. **A slow reviewer is not treated as a broken reviewer** (timeouts get a bounded retry, not "this provider is dead").
+3. **Orphan background work is reaped** instead of living 14 hours and locking the machine.
+4. Small leftovers (doctor orphan scan, index drift, rejected-item ledger) are cleaned up without a new planning book.
+
+Owner position (2026-09-29): he is unqualified to choose technical work; the parent agent and one independent reviewer pick by **hours saved**, not by smallest diff. He was right that a doctor spawn guard alone would not "speed everything up."
 
 If any step below conflicts with this goal, the goal wins — stop and flag it.
 
