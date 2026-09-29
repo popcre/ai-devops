@@ -38,8 +38,8 @@ $parityLines = @(
     "Serialize every 1Password read.",
     "Synology long reads use the managed long-running skill.",
     "Write a HANDOFF file at session end.",
-    "one unproven live-behavior outcome",
-    "Never save several unproven steps",
+    "Live proof is required before an outcome is closed",
+    "One issue per application need",
     "Quote every time in EST"
 )
 

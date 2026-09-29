@@ -93,9 +93,11 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   (see `docs/standing-rules-details.md`) gate technical actions. Authority the AI
   cannot obtain itself (a platform limit) is reported `Blocked —`, never worked
   around and never turned into a request for Albert's approval.
-- **One session owns one unproven live-behavior outcome.** Refuse a bundle of leftover
-  proofs. Never save several unproven steps for a later chat — open exactly one
-  leftover-proof issue in the same session when code lands without live proof.
+- **Live proof is required before an outcome is closed.** If live proof is not
+  yet done, leave a checklist item on the **same** GitHub issue (e.g. `- [ ] live
+  proof`) and name it in the session's closing note. Do **not** open a
+  leftover-proof issue, an "unproven step" issue, or a second ticket for that
+  gap. One issue per application need; one named owner until the app works live.
 - **Multi-step work runs through one parent issue** whose body says: take the
   first unticked child, do only that one, tick it, comment the next child on the
   parent, and stop.
