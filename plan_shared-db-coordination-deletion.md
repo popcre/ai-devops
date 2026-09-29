@@ -187,13 +187,14 @@ Evidence (private scratch `.ai/tmp/` — **never commit raw transcripts**):
 - 2026-09-29 — **No path filters** on required checks; use `verification-closure`.
 - 2026-09-29 — `orchestrator-claim` → rename `claim-admission`, still required.
 - 2026-09-29 — Shared-db freshness/behind-branch stays until #2530 (out-of-repo hold).
-- 2026-09-29 — **BlockerWatch SHRINK:** delete registration/`has-wait`/`--park`; keep automatic tick + re-pointed janitor. Do not enforce registration.
+- 2026-09-29 — **BlockerWatch SHRINK:** delete registration/`has-wait`/`--park`; keep automatic tick + re-pointed janitor. Do not enforce registration. **`fixer_enabled: false`** (no auto session-spawn). Omit extra daily lists. No cron to “fix” single-heartbeat.
+- 2026-09-29 — **Do not rename** route string `shared-db-orchestrator` (Qwen) — only demote required-ness. Keep non-ticket session-sizing honesty; delete only leftover-proof **issue** minting.
 - 2026-09-29 — Watchdog posts **one comment per stuck PR**; @-mention assignee if set; **never** invent an owner; **never** fixer-issue or marker-ping.
 
 **OPEN (criteria in parentheses):**
 - Exact `claim-admission` string if `ai-task-gates` rejects it (shortest name that still matches; update every mirror in the same PR).
 - **Do not fold or delete `shared-db-orchestrator` SKILL.md** until you prove every machine-checked safety sentence it carries is preserved elsewhere (claim locks, lease flags, clock-expiry, pinned auto-migration commits). Prefer: keep the skill file, demote the *role* (no required marker/orchestrator chat), leave safety bullets intact. `tests/test-shared-db-routing-rules.sh` guards routing/role text — re-read it before editing and keep its actual invariants green.
-- Whether to keep a **read-only** daily stuck-PR list for Albert (status only, never a work ticket). Default: omit if in doubt.
+- Whether to keep a **read-only** daily stuck-PR list for Albert (status only, never a work ticket). **DECIDED (Qwen): omit.**
 - Watchdog comment **idempotence**: one comment per stuck PR **per head SHA** (or edit a single sticky comment on that PR). Do not post a new comment every tick. Fetch `assignees` in the GraphQL/REST payload before any @-mention.
 
 ## 9. The plan — numbered steps
@@ -319,7 +320,7 @@ rg -n "exactly one leftover-proof|open your OWN orchestrator-marker" skills/
 #### Step 4B. SHRINK BlockerWatch
 **DELETE:**
 - Standing rule / `AGENTS.md` / **all four globals** / `docs/standing-rules-details.md`: "**register a wait and end the turn**" and **`ai-blocker-watch wait`** as a **required** delivery step → replace with: use bounded `ai-pr-wait` while you remain in the turn; otherwise leave the **existing issue/PR** as the card and return later (GitHub notifications are the reminder).
-- Closeout **`has-wait`** completeness gate **and** the completion-check hook / dispatcher path that enforces it (`bin/ai-completion-check-hook` or equivalent — find every caller of `has-wait` / `ai-blocker-watch wait` before deleting; dropping `has-wait` from the dispatcher without replacing the guard either **blocks every waiting turn-end** or **silently kills** the waiting guard). Target behavior: turn-end may close with an unchecked checklist on the issue; it must **not** fail closed solely because no BlockerWatch wait exists, and must **not** silently pretend a wait was registered.
+- Closeout **`has-wait`** completeness gate **and** the completion-check hook / dispatcher path that enforces it (`bin/ai-completion-check-hook` or equivalent — find every caller of `has-wait` / `ai-blocker-watch wait` before deleting). **Delete the gate. Do not invent a replacement guard.** Target: turn-end may close with an unchecked checklist on the issue; it must not fail closed solely because no BlockerWatch wait exists.
 - `--park` (creates a new issue if you have none).
 - Session `wake`/resume as a **delivery** dependency.
 - Do **not** start `plan_blockerwatch-reliability-repair.md` step 5 (enforced registration).
@@ -328,9 +329,10 @@ rg -n "exactly one leftover-proof|open your OWN orchestrator-marker" skills/
 
 **KEEP:**
 - Tick/scheduler that runs the janitor (`bin/ai-blocker-watch` stuck_watchdog path).
+- **Set `fixer_enabled: false`** (StepFun): the tick also runs `fixer_scan()` which auto-spawns sessions — delete that fan-out. Keep only janitor **report** (per-PR comment + fetched assignee @-mention + session-less once-per-head re-run + the existing daily notice). **Omit** any extra daily list.
 - Watchdog per Step 4.
 - `bin/ai-pr-wait` (not BlockerWatch).
-- Optional read-only daily stuck-PR list for Albert — **only if** it opens zero work tickets (§8 OPEN).
+- **Residual (record only):** one-host tick heartbeat; fails safe. **Do not add cron** to “fix” it (re-creates coordinator).
 
 **Implementation note:** prefer making wait/wake/park commands print a short "registration is no longer required" and exit 0 **or** removing them from the help surface; do not leave a required closeout hook calling `has-wait`. Update `tests/test-ai-blocker-watch.sh` to match remaining behavior.
 
