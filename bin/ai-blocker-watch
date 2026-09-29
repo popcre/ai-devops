@@ -1153,6 +1153,9 @@ fixer_scan(){
   done
   [ "$running" -lt "$max" ] || { note "fixer: $running of $max fixer session(s) already running"; return 0; }
   local h bot cwd repo list n title
+  # cron's PATH is /usr/bin:/bin; user-installed CLIs (codex on hetz lives in
+  # /usr/local/bin) must still resolve for the fixer.
+  local PATH="$PATH:/usr/local/bin:$HOME/.local/bin"
   h="$(cfgd .fixer_harness claude)"; bot="$(cfgd .fixer_trusted_author 'pop-ai-watchers[bot]')"
   cwd="$(cfgd .fixer_cwd "$TOOL_ROOT")"; cwd="${cwd//\{home\}/$HOME}"
   while IFS= read -r repo; do
