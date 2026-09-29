@@ -9,10 +9,13 @@ trap 'rm -rf "$TMP"' EXIT
 
 node_count() {
   # Count node processes we can see (Windows: tasklist; POSIX: pgrep).
+  # pgrep -c prints 0 and exits 1 on no match — do not append another 0.
   if command -v tasklist >/dev/null 2>&1; then
     tasklist //FI "IMAGENAME eq node.exe" 2>/dev/null | grep -c 'node.exe' || true
   else
-    pgrep -c node 2>/dev/null || echo 0
+    local n
+    n=$(pgrep -c node 2>/dev/null || true)
+    printf '%s\n' "${n:-0}"
   fi
 }
 

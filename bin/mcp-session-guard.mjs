@@ -204,7 +204,7 @@ if (child.stdin) {
       if (child && child.exitCode == null && child.signalCode == null) {
         shutdown(reason, 143)
       }
-    }, 50)
+    }, 250)
   }
   process.stdin.on('error', () => onStdinGone('stdin-error'))
   process.stdin.on('end', () => {

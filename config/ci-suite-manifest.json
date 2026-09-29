@@ -2,13 +2,11 @@
   "schema_version": 3,
   "windows_offline_powershell_shard": 3,
   "suspended_bash": [
-    "test-ai-kimi.sh",
-    "test-mcp-session-guard.sh"
+    "test-ai-kimi.sh"
   ],
   "suspended_powershell": [
     "test-kimi-windows-execution.ps1",
-    "test-windows-ai-kimi-shim.ps1",
-    "test-mcp-session-guard.sh"
+    "test-windows-ai-kimi-shim.ps1"
   ],
   "_comment_suspended": "Suites suspended from every CI lane (declared here, honored by tests/test-all.sh and tests/test-all.ps1). Kimi suspended 2026-09-17: the provider is out of credit and registry-absent since 2026-09-10; the wrapper, suites, and timing entries are retained for re-entry. Remove the entries from the suspended lists to restore the lanes.",
   "affected_suite_rules": {
