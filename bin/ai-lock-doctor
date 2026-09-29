@@ -340,9 +340,15 @@ scan_once(){
   HOLDERS_OUR=''; HOLDERS_FOREIGN=''; HOLDERS_YOUNG=''; HOLDERS_UNKNOWN_AGE=''; HOLDERS_WAITERS=''
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
-    age="$(proc_age_seconds "$pid" 2>/dev/null || true)"
-    [ -n "$age" ] || age='?'
+    # Identity and age come from ONE read of the start time, so the age that
+    # authorizes recovery always belongs to the process later pinned by that
+    # same start time (a PID reused between two reads cannot inherit it).
     HOLDER_START["$pid"]="$(proc_start_ticks "$pid" 2>/dev/null || true)"
+    age='?'
+    case "${HOLDER_START[$pid]}" in
+      ''|*[!0-9]*) ;;
+      *) [ "$BootEpoch" -gt 0 ] && age="$(( $(date +%s) - BootEpoch - ${HOLDER_START[$pid]} / Hertz ))" ;;
+    esac
     if [ -n "${PROTECTED_PIDS[$pid]:-}" ]; then klass=self
     elif [ -n "${LOCK_BLOCKED_PIDS[$pid]:-}" ]; then klass=waiter
     elif proc_is_our_tool "$pid"; then klass=our-tool

@@ -69,12 +69,14 @@ die(){ printf 'ai-stepfun: error: %s\n' "$*" >&2; exit 1; }
 note(){ printf 'ai-stepfun: %s\n' "$*" >&2; }
 
 IS_WINDOWS=0
-case "$(uname -s 2>/dev/null || echo unknown)" in MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1;; esac
+IS_LINUX=0
+case "$(uname -s 2>/dev/null || echo unknown)" in MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1;; Linux) IS_LINUX=1;; esac
 # AI_STEPFUN_PLATFORM overrides uname for tests and forced-engine runs.
 if [ -n "${AI_STEPFUN_PLATFORM:-}" ]; then
   case "${AI_STEPFUN_PLATFORM}" in
-    Linux|linux) IS_WINDOWS=0 ;;
-    MINGW*|MSYS*|CYGWIN*|Windows*|windows*) IS_WINDOWS=1 ;;
+    Linux|linux) IS_WINDOWS=0; IS_LINUX=1 ;;
+    MINGW*|MSYS*|CYGWIN*|Windows*|windows*) IS_WINDOWS=1; IS_LINUX=0 ;;
+    *) IS_WINDOWS=0; IS_LINUX=0 ;;
   esac
 fi
 
@@ -91,7 +93,7 @@ detect_engine(){
 require_engine(){
   # Ubuntu/Linux only (owner instruction 2026-09-25; docs/reviewer-rotation-rules.md
   # rule 11): every turn must run under bubblewrap, which Windows lacks (#1086).
-  if [ "$IS_WINDOWS" = 1 ]; then
+  if [ "$IS_LINUX" != 1 ]; then
     printf 'ai-stepfun: unsupported-platform: StepFun runs only on Ubuntu/Linux, where every turn is sandboxed by bubblewrap.\n' >&2; exit 2
   fi
   detect_engine
@@ -128,7 +130,7 @@ key_store_ok(){
   # accept a present, non-empty, non-link file; the path is under the user
   # profile and store-key writes it with chmod 600 where the filesystem honors it.
   # StepFun is Ubuntu/Linux-only (owner instruction 2026-09-25): no Windows key store is trusted.
-  [ "$IS_WINDOWS" != 1 ] || return 1
+  [ "$IS_LINUX" = 1 ] || return 1
   [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
 }
 

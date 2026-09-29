@@ -191,6 +191,7 @@ fi
 echo '== ai-stepfun OpenCode engine'
 # StepFun is Ubuntu/Linux-only: Windows is refused even with OpenCode present.
 export AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/bin/opencode"
+check "macOS and unknown systems are refused too (Ubuntu/Linux only)" "for plat in Darwin FreeBSD; do out=\$(AI_STEPFUN_PLATFORM=\$plat '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform || exit 1; done"
 check "Windows is refused even with OpenCode installed (Ubuntu/Linux only)" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform"
 # The OpenCode cases need a Linux filesystem (owner-only key store) and bubblewrap.
 if [ "$(uname -s)" != Linux ]; then
