@@ -69,24 +69,45 @@ chmod +x "$TMP/bin/bwrap"
 export AI_STEPFUN_BWRAP="$TMP/bin/bwrap"
 
 echo '== ai-stepfun'
-out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 "$SCRIPT" doctor 2>&1)"; rc=$?
-check "refuses to run on Windows" "[ $rc = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform"
+# Windows without a usable engine is still refused; with OpenCode it is supported.
+out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_ENGINE=none "$SCRIPT" doctor 2>&1)"; rc=$?
+check "refuses to run on Windows without an engine" "[ $rc = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform"
 cat > "$TMP/bin/other-step" <<'STUB'
 #!/usr/bin/env bash
 echo 'step 0.28.2 (Smallstep CLI)'
 STUB
 chmod +x "$TMP/bin/other-step"
-check "a different program named step is not accepted as StepCode" "! AI_STEPFUN_STEP_BIN='$TMP/bin/other-step' HOME='$TMP/nohome' '$SCRIPT' doctor >/dev/null 2>&1"
+check "a different program named step is not accepted as StepCode" "! AI_STEPFUN_STEP_BIN='$TMP/bin/other-step' HOME='$TMP/nohome' AI_STEPFUN_ENGINE=stepcode '$SCRIPT' doctor >/dev/null 2>&1"
 
-# The checks below drive the stubbed Linux path, whose key-store proof
-# (stat mode 600) and bubblewrap sandbox only exist on Linux filesystems;
-# on Windows the wrapper is correctly refused above and nothing here could
-# pass for filesystem reasons rather than code reasons.
+# OpenCode engine stub: records argv and answers per the mode file, emitting
+# the JSONL shape `opencode run --format json` produces. Writes files into the
+# --dir target, as a real agent would.
+cat > "$TMP/bin/opencode" <<STUB
+#!/usr/bin/env bash
+STUB_ARGS='$TMP/args.oc'; STUB_MODE="\$(cat '$TMP/mode' 2>/dev/null)"
+STUB
+cat >> "$TMP/bin/opencode" <<'STUB'
+[ "${1:-}" = --version ] && { echo 1.18.12; exit 0; }
+printf '%s\n' "$@" > "$STUB_ARGS"
+dir="."; while [ $# -gt 0 ]; do [ "$1" = --dir ] && { dir="$2"; shift; }; shift; done
+prompt="$(cat)"; head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
+case "$STUB_MODE" in
+  ok) printf '{"type":"text","part":{"text":"STEPFUN-OK"}}\n' ;;
+  verdict) printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail in f:1.\\n\\nVERDICT: APPROVE %s"}}\n' "$head" ;;
+  impl) printf 'print(1)\n' > "$dir/new.py"; printf '{"type":"text","part":{"text":"Created new.py and ran it."}}\n' ;;
+  askok) printf '{"type":"text","part":{"text":"The loop is bounded by RATE_RETRIES."}}\n' ;;
+  *) printf '{"type":"text","part":{"text":"ok"}}\n' ;;
+esac
+STUB
+chmod +x "$TMP/bin/opencode"
+
+# The checks below drive the stubbed Linux StepCode path, whose key-store proof
+# (stat mode 600) and bubblewrap sandbox only exist on Linux filesystems.
 if [ "$(uname -s)" != Linux ]; then
   SKIP=$((SKIP + 1)); echo 'SKIP  stubbed Linux path (not a Linux filesystem)'
 else
-check "doctor passes with the stub and a protected key store" "'$SCRIPT' doctor | grep -q '^OK step=0.1.1'"
-check "doctor prints one PASS line per check for the shared-db allocator" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 3 ] && mode ok && [ \"\$('$SCRIPT' doctor --live | grep -c '^PASS  ')\" = 4 ]"
+check "doctor passes with the stub and a protected key store" "'$SCRIPT' doctor | grep -q '^OK engine=stepcode'"
+check "doctor prints one PASS line per check for the shared-db allocator" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 4 ] && mode ok && [ \"\$('$SCRIPT' doctor --live | grep -c '^PASS  ')\" = 5 ]"
 check "doctor refuses a key store that is not owner-only" "chmod 644 '$AI_STEPFUN_KEY_STORE'; ! '$SCRIPT' doctor >/dev/null; rc=\$?; chmod 600 '$AI_STEPFUN_KEY_STORE'; [ \$rc = 0 ]"
 check "live doctor makes one call and sees the answer" "mode ok; '$SCRIPT' doctor --live | grep -q 'live=verified'"
 check "the key reaches step through the environment, never argv" "mode ok; '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key' && ! grep -q stub-key '$STUB_ARGS'"
@@ -165,6 +186,23 @@ fi
 check "invocations are recorded in the durable reviewer event ledger" "grep -rqs stepfun '$TMP/events'"
 
 fi
+
+# ---- OpenCode engine (works on any host with the stub) ----
+echo '== ai-stepfun OpenCode engine'
+# On Windows filesystems chmod 600 is synthesised; force the Windows key-store
+# path so the mode check is skipped (NTFS ACLs are the real control there).
+export AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/bin/opencode"
+export AI_STEPFUN_PLATFORM=MINGW64_NT-10.0
+mode ok
+check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT' doctor | grep -q '^OK engine=opencode'"
+check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 4 ]"
+check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
+check "OpenCode review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
+check "OpenCode review uses the review agent" "grep -qx 'stepfun-review' '$TMP/args.oc'"
+check "OpenCode implement uses the implement agent and a remote-less clone" "mode impl; out=\$('$SCRIPT' implement --repo '$TMP/repo' --prompt 'add new.py' 2>&1); wt=\$(printf '%s\n' \"\$out\" | sed -n 's/^CLONE //p'); [ -n \"\$wt\" ] && [ -f \"\$wt/new.py\" ] && [ -z \"\$(git -C \"\$wt\" remote)\" ] && grep -qx 'stepfun-implement' '$TMP/args.oc'"
+check "OpenCode ask answers from a disposable copy" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES"
+check "OpenCode rejects a turn directory that has a remote" "mode ok; git -C '$TMP/repo' remote add origin https://example.com/x.git 2>/dev/null; ! '$SCRIPT' ask --repo '$TMP/repo' x >/dev/null 2>&1; git -C '$TMP/repo' remote remove origin"
+unset AI_STEPFUN_ENGINE AI_STEPFUN_OPENCODE
 
 printf '\n%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

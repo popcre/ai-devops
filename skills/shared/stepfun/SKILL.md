@@ -1,28 +1,30 @@
 ---
 name: stepfun
-description: Use StepFun Step 5 (step-5-preview) through ai-stepfun on Ubuntu/Linux only. Formal reviews with a VERDICT line and second opinions (both may run code and edit files in a disposable remote-less copy), and implementation runs that write and execute code in an isolated remote-less clone. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion. Not available on Windows.
+description: Use StepFun Step 5 (step-5-preview) through ai-stepfun. Formal reviews with a VERDICT line and second opinions (both may run code and edit files in a disposable remote-less copy), and implementation runs that write and execute code in an isolated remote-less clone. Windows runs through OpenCode; Ubuntu runs through StepCode. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion.
 ---
 
 # stepfun
 
-StepFun Step 5 runs through the StepCode CLI (`step`), wrapped by
-`ai-stepfun`. Owner instruction 2026-09-25: add it as a reviewer on Ubuntu only,
-and let it write, implement, and execute code.
+StepFun Step 5 runs through `ai-stepfun`. On Ubuntu/Linux where StepCode is
+installed it uses the StepCode CLI (`step`) under bubblewrap. On Windows (and
+any host without StepCode) it uses the pinned OpenCode harness — the same
+binary GLM, Muse, and DeepSeek use. Owner instruction 2026-09-25: let it write,
+implement, and execute code. Owner instruction 2026-09-28 (#974): reviewers are
+not read-only.
 
 ## Platform
 
-Ubuntu/Linux only. StepCode is not yet available on Windows, so `ai-stepfun`
-exits 2 with `unsupported-platform` there and `ai-review-preflight status
-stepfun` reports `unsupported-platform`. On Windows, pick another reviewer; do
-not try to install or emulate StepCode.
+Windows and Ubuntu/Linux. On Windows, run `bin\setup-opencode-stepfun.ps1` once
+to install OpenCode and the `ai-stepfun` command. On Ubuntu, install StepCode
+and bubblewrap, or the OpenCode path works there too.
 
 ## Sandbox
 
-Every StepFun turn runs under bubblewrap: the model sees only its own folder,
-with an empty home, /tmp and /run and a cleared environment (no SSH keys or
-agent, git or gh logins, 1Password token, or Docker socket). If
-`bwrap` is missing, `ai-stepfun` refuses to run; install it with
-`sudo apt-get install bubblewrap`.
+Every turn runs against a disposable, remote-less copy or clone. StepCode turns
+additionally run under bubblewrap: the model sees only its own folder, with an
+empty home, /tmp and /run and a cleared environment. OpenCode turns run against
+the same disposable copy with a per-run profile and the key exported only into
+the child environment.
 
 ## Commands
 
@@ -54,8 +56,8 @@ ai-stepfun implement --repo . --prompt-file task.md
 
 `stepfun` is registered in `config/reviewer-registry.json` and listed as
 outside the shared-db allocator: the allocator has no platform awareness, so it
-never assigns StepFun. Use it when a session on Ubuntu wants a reviewer, or when
-Albert asks for StepFun.
+never assigns StepFun. Use it when a session wants a reviewer, or when Albert
+asks for StepFun.
 
 ## Failures
 

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "stepfun-api/step-5-preview",
+  "small_model": "stepfun-api/step-5-preview",
+  "share": "disabled",
+  "autoupdate": false,
+  "compaction": {
+    "auto": true,
+    "prune": false,
+    "tail_turns": 8,
+    "reserved": 32768
+  },
+  "provider": {
+    "stepfun-api": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "StepFun",
+      "options": {
+        "baseURL": "https://api.stepfun.ai/v1",
+        "apiKey": "{env:STEPFUN_API_KEY}"
+      },
+      "models": {
+        "step-5-preview": {
+          "name": "StepFun Step 5 Preview",
+          "tool_call": true,
+          "limit": { "context": 131072, "output": 32768 }
+        }
+      }
+    }
+  }
+}
