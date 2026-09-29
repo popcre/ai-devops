@@ -8,10 +8,10 @@ Owner issue: https://github.com/popcre/ai-devops/issues/1002.
 | Step | State | Evidence |
 |---|---|---|
 | 1 Lock inventory | ✅ done (2026-09-28) | `docs/locks.md` covers every hit of `grep -rnE 'flock|lock\.d|\.lock' bin` (62 pre-change; 94 after step 2 and the 2026-09-28/29 merges of main, all re-cited); `docs/task-router.md` router row added |
-| 2 Stale-holder recovery for flock locks | 🔶 done pending Linux-lane proof (2026-09-28) | `bin/ai-lock-doctor` + `-E 87` wiring at all 5 flock sites; Windows `lock_acquire` pid+age reclaim; `tests/test-ai-lock-doctor.sh` portable cases green; the /proc cases prove on the PR's Linux CI lane (exact-head reviews 3-5 fixed the platform guard, the decimal-inode/hex-device decode, and the racy probe found there) |
+| 2 Stale-holder recovery for flock locks | 🔶 done pending Linux-lane proof (2026-09-28) | `bin/ai-lock-doctor` + `-E 87` wiring at all 5 flock sites; Windows `lock_acquire` pid+age reclaim; `tests/test-ai-lock-doctor.sh` portable cases green; the /proc cases prove on the PR's Linux CI lane (exact-head reviews 3-5 fixed the platform guard, the decimal-inode/hex-device decode, and the racy probe found there); SCOPE DISCLOSURE per section 1: the exotic #940 shape itself — an inherited descriptor in a process reparented out of our session — is diagnosed and reported as foreign (human decision), NOT auto-cleared; that is the locked safety decision, flagged here on the owner issue as section 1 requires |
 | 3 Settings snapshot + drift check | ✅ done (2026-09-28) | `config/merge-queue-expected.json` + `bin/ai-merge-queue-drift`; passes against the live ruleset (read via ai-gh) and `tests/test-ai-merge-queue-drift.sh` proves renamed-job, paths-filter, .ps1-divergence, and clean-pass cases |
-| 4 Scheduled drift check + alert | 🔶 workflow landed, dispatch proof pending (2026-09-29) | `.github/workflows/merge-queue-drift.yml`: daily cron + PR-path trigger + standing-issue alert job; offline checks green, degraded-refusal notice has its own standing issue; the one-time clean dispatch run is booked in Step 5, and the live ruleset read needs an owner decision (grant the lane a ruleset read) before it can ever be green — offline enforcement is not blocked by that |
-| 5 Live proof | ⬜ open | — |
+| 4 Scheduled drift check + alert | 🔶 workflow landed, dispatch proof pending (2026-09-29) | `.github/workflows/merge-queue-drift.yml`: daily cron + PR-path trigger + standing-issue alert job; offline checks green, degraded-refusal notice has its own standing issue; the one-time clean dispatch run is booked in Step 5, and the live ruleset lane is DORMANT by default (repository variable + ruleset read grant, owner decision) — tracked with the dispatch proof and the deferred review findings in leftover-proof issue #1026; offline enforcement is not blocked by any of that |
+| 5 Live proof | ⬜ open | owned by leftover-proof issue #1026: the clean dispatch run id, the seeded-mismatch alert (accepted offline-proven), and the verification record citing the Linux-lane run ids |
 
 A fresh session starts at Step 1.
 
@@ -182,6 +182,11 @@ Done means all of the following:
 Risks and open questions:
 - **Killing the wrong process.** Mitigated by the our-tool classification; Rollback is
   to remove `--recover` from the call sites.
+- **The #940 shape is diagnosed, not healed** (owner-issue disclosure per section 1):
+  a reparented inherited-descriptor holder is reported as foreign and never signalled —
+  recovery of that exact shape stays a human decision with the doctor's evidence.
+- **The live ruleset lane ships dormant** until an owner grants the ruleset read and
+  sets the enable variable; offline enforcement runs daily regardless (#1026).
 - **Unknown lock sites.** Step 1 may find more locks than expected. Split them if there
   are more than 8.
 

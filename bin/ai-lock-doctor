@@ -58,11 +58,16 @@
 # Safety rules (issue #1002 plan, locked decision): never delete the lock
 # file, never signal a foreign holder, never signal this process or its own
 # ancestors. Part of docs/locks.md.
+# Known fail-safe limits: argv is read to 160 characters, so a longer holder
+# command line can under-classify an our-tool holder as foreign (recovery is
+# declined, nothing extra is signalled); waiter protection reads the
+# /proc/locks pid column, which can be absent or namespaced — in that exotic
+# case a blocked sibling past the age floor could be signalled (harm bounded
+# to one failed credential read). Both tracked in #1026.
 set -uo pipefail
 
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
-DEFAULT_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
-REPO_ROOT="${AI_LOCK_DOCTOR_REPO_ROOT:-$DEFAULT_ROOT}"
+REPO_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
 
 recover=false
 older_than=120
@@ -81,14 +86,6 @@ while [ "$#" -gt 0 ]; do
 done
 case "$older_than" in ''|*[!0-9]*|0) printf 'ai-lock-doctor: --older-than must be a positive whole number of seconds\n' >&2; exit 2 ;; esac
 [ -n "$lockfile" ] || { printf 'usage: ai-lock-doctor [--recover] [--older-than N] <lockfile>\n' >&2; exit 2; }
-
-# The repo-root override is a test seam for DIAGNOSIS only. Under --recover a
-# widened root would mark every holder our-tool and kill-eligible, so the
-# override must still point at a checkout that owns this exact doctor.
-if [ "${AI_LOCK_DOCTOR_REPO_ROOT:-}" != "" ] && [ "$REPO_ROOT" != "$DEFAULT_ROOT" ]; then
-  [ "$(readlink -f "$REPO_ROOT/bin/ai-lock-doctor" 2>/dev/null || true)" = "$SELF_PATH" ] \
-    || { printf 'ai-lock-doctor: AI_LOCK_DOCTOR_REPO_ROOT does not own this doctor; refusing\n' >&2; exit 2; }
-fi
 
 info(){ printf 'ai-lock-doctor: %s\n' "$*" >&2; }
 
