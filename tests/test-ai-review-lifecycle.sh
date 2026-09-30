@@ -359,5 +359,30 @@ if [ -s "$DEEPSEEK_STUB_CWD" ]; then
   check "retained DeepSeek verdict binds original and synthetic source identity" "[ -n '$NETWORK_META' ] && jq -e --arg original '$PRIVATE_HEAD' --arg export '$NETWORK_SYNTHETIC_HEAD' --slurpfile marker '$NETWORK_SNAPSHOT/.ai-review-sandbox' '.status==\"complete\" and .verdict==\"APPROVE\" and .governed_head==\$export and .source_identity.code_only==\$marker[0] and .source_identity.code_only.original_head==\$original and .source_identity.code_only.export_head==\$export and (.source_identity.code_only.source_digest|length)==64 and (.source_identity.code_only.path_manifest_sha256|length)==64' '$NETWORK_META' >/dev/null"
 fi
 
+# --- packet identity on terminal finish (#1111, additive) ---------------------
+# finish accepts --packet-dir and --packet-sha256, writes them into state, and
+# join() surfaces them. Without the new args, finish still works unchanged.
+PKT_SHA="$(printf 'a%.0s' $(seq 1 64))"
+STATE_PKT="$($SCRIPT begin --provider grok --repo "$R" --run-id packet-run --caller codex)"
+$SCRIPT finish --state "$STATE_PKT" --verdict APPROVE --report "$REPORT" --elapsed 5 \
+  --packet-dir '/tmp/fake-packet' --packet-sha256 "$PKT_SHA" >/dev/null
+check "finish_records_packet_dir_and_sha256" \
+  "jq -e --arg s '$PKT_SHA' '.packet_dir==\"/tmp/fake-packet\" and .packet_sha256==\$s' '$STATE_PKT'"
+check "join_includes_packet_identity" \
+  "'$SCRIPT' join '$STATE_PKT' | jq -e --arg s '$PKT_SHA' '.packet_dir==\"/tmp/fake-packet\" and .packet_sha256==\$s'"
+check "scoreboard_receives_packet_sha256" \
+  "jq -e --arg s '$PKT_SHA' '.packet_sha256==\$s' '$AI_TEST_SCOREBOARD_META'"
+
+STATE_NOPKT="$($SCRIPT begin --provider grok --repo "$R" --run-id no-packet-run --caller codex)"
+$SCRIPT finish --state "$STATE_NOPKT" --verdict APPROVE --report "$REPORT" --elapsed 5 >/dev/null
+check "finish_without_packet_args_still_works" \
+  "[ \"\$(jq -r .status '$STATE_NOPKT')\" = completed ] && jq -e '.packet_dir==null and .packet_sha256==null' '$STATE_NOPKT'"
+check "join_without_packet_args_still_works" \
+  "'$SCRIPT' join '$STATE_NOPKT' | jq -e '.status==\"completed\" and .packet_dir==null'"
+
+STATE_BADSHA="$($SCRIPT begin --provider grok --repo "$R" --run-id bad-sha-run --caller codex)"
+check "invalid_packet_sha256_is_rejected" \
+  "! $SCRIPT finish --state '$STATE_BADSHA' --verdict APPROVE --report '$REPORT' --elapsed 5 --packet-sha256 'not-hex' >/dev/null 2>&1"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

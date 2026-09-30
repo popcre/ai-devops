@@ -533,5 +533,65 @@ check "unknown_subcommand_rejected"           "! '$SCRIPT' nonsense"
 check "unknown_option_rejected"               "! '$SCRIPT' build '$R' t --bogus x"
 check "non_git_directory_rejected"            "mkdir -p '$TMP/plain' && ! '$SCRIPT' build '$TMP/plain' t"
 
+# --- store-before-delete evidence retention (#1111) ---------------------------
+# Deleting a managed packet must leave a full durable copy in the ignored
+# .ai/reviews/packets/ store, and that copy must still pass verify-retained
+# after the original review root is gone. If the store cannot be written and
+# verified, the delete is skipped so the only copy is never lost.
+
+RET_R="$TMP/retain-repo"
+mkdir -p "$RET_R"
+git -C "$RET_R" init -q -b main
+git -C "$RET_R" config user.email t@example.com
+git -C "$RET_R" config user.name Test
+echo base > "$RET_R/a.txt"
+git -C "$RET_R" add -A; git -C "$RET_R" commit -qm init
+git -C "$RET_R" checkout -q -b feature
+echo changed > "$RET_R/a.txt"
+git -C "$RET_R" add -A; git -C "$RET_R" commit -qm feature
+
+# 1. remove_packet stores a full managed packet before delete.
+RET_PKT="$("$SCRIPT" build "$RET_R" retainer --tests 'true')"
+"$SCRIPT" remove "$RET_R" retainer
+RET_DEST="$RET_R/.ai/reviews/packets/.ai-review-retainer"
+check "remove_stores_full_packet_before_delete" \
+  "[ ! -d '$RET_PKT' ] && [ -d '$RET_DEST' ]"
+check "retained_copy_has_manifest"            "[ -s '$RET_DEST/MANIFEST.md' ]"
+check "retained_copy_has_patch"               "[ -s '$RET_DEST/patch.diff' ]"
+check "retained_copy_has_identity"            "[ -f '$RET_DEST/identity.json' ]"
+check "retained_copy_has_seal"                "[ -s '$RET_DEST/MANIFEST.sha256' ]"
+check "retained_copy_has_marker"              "[ -f '$RET_DEST/.ai-review-packet' ]"
+check "retained_copy_marker_rebinds" \
+  "case \"\$(sed -n '3p' '$RET_DEST/.ai-review-packet')\" in retained|retained-live) [ -n \"\$(sed -n '4p' '$RET_DEST/.ai-review-packet')\" ] ;; *) false ;; esac"
+
+# 2. If store/verify fails, delete is skipped and the original remains.
+RET2_PKT="$("$SCRIPT" build "$RET_R" skipdel --tests 'true')"
+echo tamper >> "$RET2_PKT/patch.diff"
+check "corrupt_packet_remove_skips_delete" \
+  "! '$SCRIPT' remove '$RET_R' skipdel 2>/dev/null && [ -d '$RET2_PKT' ]"
+
+# 3. A correctly retained isolated-snapshot packet passes verify-retained after
+#    relocation (the re-bind fix). A live-source retained copy must NOT.
+RET_WT="$TMP/retain-wt"
+git -C "$RET_R" worktree add -q -b retain-branch "$RET_WT" >/dev/null 2>&1
+echo snap-only > "$RET_WT/snap.txt"
+git -C "$RET_WT" add -A; git -C "$RET_WT" commit -qm snap
+RET_SNAP="$("$REPO_ROOT/bin/ai-review-sandbox" ensure-copy "$RET_R" relocate)"
+RET_IPKT="$("$SCRIPT" build "$RET_SNAP" relocate --tests 'true')"
+check "snapshot_packet_verifies_retained_while_root_lives" \
+  "'$SCRIPT' verify-retained '$RET_IPKT'"
+RET_IDEST="$("$SCRIPT" retain "$RET_IPKT")"
+check "retain_prints_durable_path" \
+  "[ -d '$RET_IDEST' ] && [ \"\$(basename '$RET_IDEST')\" = '.ai-review-relocate' ]"
+check "isolated_retained_marker_says_retained" \
+  "[ \"\$(sed -n '3p' '$RET_IDEST/.ai-review-packet')\" = retained ]"
+check "live_source_retained_copy_is_not_retained_evidence" \
+  "! '$SCRIPT' verify-retained '$RET_DEST'"
+"$REPO_ROOT/bin/ai-review-sandbox" remove-copy "$RET_R" relocate
+check "retained_packet_passes_verify_retained_after_relocation" \
+  "'$SCRIPT' verify-retained '$RET_IDEST'"
+check "retained_copy_survives_original_root_deletion" \
+  "[ ! -d '$RET_SNAP' ] && [ -s '$RET_IDEST/MANIFEST.md' ]"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

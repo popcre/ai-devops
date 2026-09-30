@@ -150,6 +150,24 @@ is_managed() {
   [ -f "$d/$MARKER" ]
 }
 
+# Store-before-delete for every managed packet inside a sandbox (issue #1111).
+# The sandbox is about to be destroyed and may hold the only packet copy, so
+# each packet is retained through ai-review-packet retain first. If any retain
+# fails, the caller must skip the sandbox delete.
+retain_sandbox_packets() { # retain_sandbox_packets PHYSICAL
+  local d="$1" pkt packet_bin rc=0
+  packet_bin="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/ai-review-packet"
+  for pkt in "$d"/.ai-review "$d"/.ai-review-*; do
+    [ -d "$pkt" ] || continue
+    [ -f "$pkt/.ai-review-packet" ] || continue
+    if ! "$packet_bin" retain "$pkt" >/dev/null; then
+      warn "could not retain packet $pkt before sandbox deletion"
+      rc=1
+    fi
+  done
+  return $rc
+}
+
 remove_sandbox() {
   local d="$1" physical
   [ -e "$d" ] || return 0
@@ -168,6 +186,12 @@ remove_sandbox() {
   python="$(command -v python3 || command -v python)" || die 'sandbox evidence verification requires Python'
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
   "$python" "$event_tool" verify-sandbox "$physical" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
+  # Never destroy the last copy of a review packet. Retain every managed
+  # packet first; if that fails, skip the delete and warn.
+  if ! retain_sandbox_packets "$physical"; then
+    warn "could not retain packets in $physical; skipping delete so the only copy is not lost."
+    return 1
+  fi
   rm -rf "$physical" 2>/dev/null || { sleep 1; rm -rf "$physical"; } || warn "could not fully remove $physical"
   # A code-only stage carries host-only sidecars beside the snapshot; leaving
   # them behind after any deletion path leaks the original source pointer

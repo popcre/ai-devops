@@ -63,8 +63,9 @@
 #   ai-review-packet resolve <repo> [--base REF] [--assert-head SHA]
 #   ai-review-packet verify <packet-dir>                  # validate seal and live source identity
 #   ai-review-packet verify-retained <packet-dir>         # retained snapshot integrity only; never authorization
+#   ai-review-packet retain  <packet-dir>                 # store a full durable copy; never deletes
 #   ai-review-packet path   <review-dir> [tag]            # print it, create nothing
-#   ai-review-packet remove <review-dir> [tag]            # delete that session's packet
+#   ai-review-packet remove <review-dir> [tag]            # retain, then delete that session's packet
 #
 # <tag> identifies the SESSION, and the packet directory is named after it, so
 # two reviewers working from one checkout cannot overwrite each other.
@@ -183,10 +184,121 @@ is_managed() {
   [ -f "$d/$MARKER" ]
 }
 
+# DURABLE RETAINED-EVIDENCE STORE (issue #1111).
+#
+# Deleting a managed packet must never destroy the only copy of review
+# evidence. remove_packet and ai-review-sandbox's remove_sandbox therefore
+# store a complete is_managed-compliant packet BEFORE any delete, and skip the
+# delete entirely when the store cannot be written and verified.
+#
+# Default store: <real source>/.ai/reviews/packets/<packet-dir-name>/
+# (gitignored — same ignored .ai/reviews/ home the source receipt already
+# uses). The real source is the review root, or the checkout named by the
+# sandbox marker's first line when the review root is a disposable snapshot,
+# so the durable copy survives sandbox deletion. Override with
+# AI_REVIEW_PACKET_STORE for tests or a private store.
+#
+# The retained copy's marker is re-bound (line 3 = `retained`, line 4 = the
+# original seal hash) and the copy is re-sealed, so verify-retained still
+# works after the original review root is gone. Only a packet that was
+# verified as isolated-snapshot evidence at retain time is marked `retained`;
+# a live-source packet is stored as `retained-live` and still fails
+# verify-retained. This is the anti-fake rule: never ship a retained packet
+# that claims isolation we did not observe.
+retained_store_root() { # retained_store_root REVIEW_ROOT
+  local root="$1" source="$root"
+  [ ! -f "$root/.ai-review-sandbox" ] || source="$(head -1 "$root/.ai-review-sandbox")"
+  if [ -n "${AI_REVIEW_PACKET_STORE:-}" ]; then
+    printf '%s' "$AI_REVIEW_PACKET_STORE"
+  else
+    printf '%s' "$source/.ai/reviews/packets"
+  fi
+}
+
+retain_packet() { # retain_packet PACKET_DIR -> prints durable path; 0 on success, 1 on failure (caller must skip delete)
+  local d="$1" root tag source store dest orig_hash new_hash isolated=false
+  is_managed "$d" || { warn "cannot retain $d: it is not a managed review packet."; return 1; }
+  [ -f "$d/$HASHFILE" ] || { warn "cannot retain $d: it has no $HASHFILE seal."; return 1; }
+  orig_hash="$(cat "$d/$HASHFILE")"
+  [ "$orig_hash" = "$(hash_packet "$d")" ] \
+    || { warn "cannot retain $d: its seal does not match the contents; refusing to store unverifiable evidence."; return 1; }
+  [ -f "$d/identity.json" ] || { warn "cannot retain $d: identity.json is missing."; return 1; }
+  [ -s "$d/$MANIFEST" ] && [ -f "$d/$PATCH" ] \
+    || { warn "cannot retain $d: required evidence files are missing."; return 1; }
+
+  root="$(sed -n '1p' "$d/$MARKER")"
+  tag="$(sed -n '2p' "$d/$MARKER")"
+  [ -n "$tag" ] || tag="$(basename "$d")"
+  source="$(jq -r .repository "$d/identity.json")"
+
+  # Isolation is decided HERE, while both paths still exist, so a relocated
+  # live-source packet can never later claim to be isolated evidence.
+  if [ -n "$root" ] && [ -n "$source" ] && [ "$source" != null ]; then
+    if [ -d "$root" ] && [ -d "$source" ]; then
+      [ "$(canon "$root")" != "$(canon "$source")" ] && isolated=true
+    elif [ "$root" != "$source" ]; then
+      isolated=true
+    fi
+  fi
+
+  store="$(retained_store_root "$root")"
+  dest="$store/$(basename "$d")"
+  if [ -e "$dest" ] && [ -f "$dest/$MARKER" ]; then
+    local dest_orig
+    dest_orig="$(sed -n '4p' "$dest/$MARKER" 2>/dev/null || true)"
+    if [ "$dest_orig" = "$orig_hash" ]; then
+      # Idempotent: this exact packet was already retained.
+      printf '%s' "$dest"
+      return 0
+    fi
+  fi
+  mkdir -p "$store" 2>/dev/null || { warn "cannot retain $d: cannot create durable store $store."; return 1; }
+  # Keep the durable store out of the change under review.
+  if [ -n "$source" ] && [ "$source" != null ] && [ -d "$source" ] && git -C "$source" rev-parse --git-dir >/dev/null 2>&1; then
+    local excl store_excl
+    excl="$(git -C "$source" rev-parse --git-path info/exclude)"
+    case "$excl" in /*|[A-Za-z]:[/\\]*) ;; *) excl="$source/$excl" ;; esac
+    mkdir -p "$(dirname "$excl")" 2>/dev/null || true
+    store_excl="/.ai/reviews/"
+    grep -qxF "$store_excl" "$excl" 2>/dev/null || printf '%s\n' "$store_excl" >> "$excl" 2>/dev/null || true
+  fi
+  rm -rf "$dest" 2>/dev/null || { warn "cannot retain $d: cannot clear destination $dest."; return 1; }
+  cp -a "$d" "$dest" 2>/dev/null || cp -R "$d" "$dest" 2>/dev/null \
+    || { rm -rf "$dest" 2>/dev/null; warn "cannot retain $d: copy to $dest failed."; return 1; }
+
+  # Re-bind the retained copy's marker and re-seal it. Line 3 records that this
+  # copy went through store-before-delete; line 4 preserves the original seal
+  # hash so the chain back to the wrapper-recorded packet_sha256 is not lost.
+  if [ "$isolated" = true ]; then
+    printf '%s\n%s\nretained\n%s\n' "$root" "$tag" "$orig_hash" > "$dest/$MARKER" \
+      || { rm -rf "$dest" 2>/dev/null; warn "cannot retain $d: marker re-bind failed."; return 1; }
+  else
+    printf '%s\n%s\nretained-live\n%s\n' "$root" "$tag" "$orig_hash" > "$dest/$MARKER" \
+      || { rm -rf "$dest" 2>/dev/null; warn "cannot retain $d: marker re-bind failed."; return 1; }
+  fi
+  new_hash="$(hash_packet "$dest")" || { rm -rf "$dest" 2>/dev/null; warn "cannot retain $d: re-seal failed."; return 1; }
+  printf '%s\n' "$new_hash" > "$dest/$HASHFILE" \
+    || { rm -rf "$dest" 2>/dev/null; warn "cannot retain $d: could not write the retained seal."; return 1; }
+
+  # Verify the copy before the caller is allowed to delete the original.
+  [ "$(hash_packet "$dest")" = "$new_hash" ] \
+    || { rm -rf "$dest" 2>/dev/null; warn "cannot retain $d: retained copy failed its seal check."; return 1; }
+  [ -s "$dest/$MANIFEST" ] && [ -f "$dest/$PATCH" ] && [ -f "$dest/identity.json" ] && [ -f "$dest/$MARKER" ] \
+    || { rm -rf "$dest" 2>/dev/null; warn "cannot retain $d: retained copy is missing required files."; return 1; }
+  printf '%s' "$dest"
+}
+
 remove_packet() {
-  local d="$1"
+  local d="$1" retained
   [ -e "$d" ] || return 0
   is_managed "$d" || die "refusing to delete $d: it is not a managed review packet."
+  # Store-before-delete. If the durable copy cannot be written and verified,
+  # skip the delete and warn: never lose the only copy.
+  if ! retained="$(retain_packet "$d")"; then
+    warn "could not retain $d to a durable store; skipping delete so the only copy is not lost."
+    return 1
+  fi
+  warn "retained review evidence at $retained before deleting $d"
   rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
 }
 
@@ -891,7 +1003,7 @@ The evidence was modified after it was sealed. Do not review from it; rebuild."
 }
 
 cmd_verify_retained() {
-  local pkt want have parts root
+  local pkt want have parts root retained_flag
   pkt="$(canon "${1:?usage: ai-review-packet verify-retained <packet-dir>}")"
   [ "$#" -eq 1 ] || die "verify-retained accepts only a packet directory."
   is_managed "$pkt" || die "$pkt is not a managed review packet."
@@ -903,7 +1015,19 @@ cmd_verify_retained() {
 The retained evidence was modified after it was sealed. Keep the paid result blocked."
   [ -f "$pkt/identity.json" ] || die "packet-identity-missing"
   root="$(head -1 "$pkt/$MARKER")"
-  validate_retained_identity "$pkt/identity.json" "$root"
+  retained_flag="$(sed -n '3p' "$pkt/$MARKER")"
+  if [ "$retained_flag" = retained ]; then
+    # Relocated retained copy: the original review root may be gone. The seal,
+    # identity schema, and evidence files prove the copy is the one that was
+    # store-before-deleted. Isolation was already verified at retain time (the
+    # marker's `retained` flag is only written then), so a live-source packet
+    # can never claim this path — it is stored as `retained-live` instead.
+    validate_identity_schema "$pkt/identity.json"
+  elif [ "$retained_flag" = retained-live ]; then
+    die "retained-verification-requires-isolated-snapshot"
+  else
+    validate_retained_identity "$pkt/identity.json" "$root"
+  fi
   [ -s "$pkt/$MANIFEST" ] && [ -f "$pkt/$PATCH" ] || die "packet-evidence-missing"
   if [ -f "$pkt/$PATCH_FULL" ]; then
     parts="$(mktemp)"
@@ -920,11 +1044,21 @@ The retained evidence was modified after it was sealed. Keep the paid result blo
 # but a caller that knows its tag must pass it: with no tag this only ever
 # touches the bare `.ai-review` directory, never another session's packet.
 cmd_path()   { printf '%s' "$(packet_path "$(canon "${1:?usage: ai-review-packet path <review-dir> [tag]}")" "${2:+$(packet_dir_name "$2")}")"; }
+cmd_retain() {
+  local d
+  d="$(canon "${1:?usage: ai-review-packet retain <packet-dir>}")"
+  [ "$#" -eq 1 ] || die "retain accepts only a packet directory."
+  is_managed "$d" || die "refusing to retain $d: it is not a managed review packet."
+  retain_packet "$d" || die "could not retain $d"
+}
 cmd_remove() {
   local root tag real_root
   root="$(canon "${1:?usage: ai-review-packet remove <review-dir> [tag]}")"
   tag="${2:-}"
-  remove_packet "$(packet_path "$root" "${tag:+$(packet_dir_name "$tag")}")"
+  # Store-before-delete lives in remove_packet. If it cannot retain, it skips
+  # the delete and returns non-zero — keep the base ref then too, or the
+  # retained evidence would lose the object that pins its recorded base.
+  remove_packet "$(packet_path "$root" "${tag:+$(packet_dir_name "$tag")}")" || exit 1
   # Delete this tag's private base ref — from the REAL source repository, which
   # the snapshot marker names when the review dir is a snapshot — and never
   # another tag's. A missing ref is not an error: remove stays idempotent, and
@@ -943,8 +1077,9 @@ case "${1:-}" in
   resolve)   shift; cmd_resolve "$@" ;;
   verify)    shift; cmd_verify "$@" ;;
   verify-retained) shift; cmd_verify_retained "$@" ;;
+  retain)    shift; cmd_retain "$@" ;;
   path)      shift; cmd_path "$@" ;;
   remove)    shift; cmd_remove "$@" ;;
   --version) printf '%s\n' "$VERSION" ;;
-  *) die "usage: ai-review-packet {build|resolve|verify|verify-retained|path|remove} ..." ;;
+  *) die "usage: ai-review-packet {build|resolve|verify|verify-retained|retain|path|remove} ..." ;;
 esac

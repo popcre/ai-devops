@@ -452,5 +452,20 @@ LONG_COPY="$("$SCRIPT" ensure-copy "$WT" "$LONG_TAG_A")"
 check "long_tag_copy_builds_and_records_full_tag" "test -f '$LONG_COPY/AI-REVIEW-SANDBOX.md' && grep -Fqx 'Snapshot tag: $LONG_TAG_A' '$LONG_COPY/AI-REVIEW-SANDBOX.md'"
 check "long_tag_copy_removes_by_recorded_tag"     "'$SCRIPT' remove-recorded '$LONG_TAG_A' '$LONG_COPY' && test ! -e '$LONG_COPY'"
 
+# --- store-before-delete for packets inside a sandbox (#1111) -----------------
+# remove_sandbox must retain every managed packet before destroying the
+# snapshot, because the sandbox may hold the only copy of review evidence.
+PACKET_BIN="$REPO_ROOT/bin/ai-review-packet"
+RET_STAGE="$("$SCRIPT" ensure-copy "$MAIN" retain-pkt)"
+RET_PKT_DIR="$("$PACKET_BIN" build "$RET_STAGE" retain-pkt --tests 'true')"
+check "sandbox_retain_fixture_builds_packet"  "[ -d '$RET_PKT_DIR' ] && [ -s '$RET_PKT_DIR/MANIFEST.md' ]"
+"$SCRIPT" remove-copy "$MAIN" retain-pkt
+check "remove_copy_retains_packet_before_delete" \
+  "[ ! -d '$RET_STAGE' ] && [ -d '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt' ]"
+check "retained_sandbox_packet_has_full_evidence" \
+  "[ -s '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/MANIFEST.md' ] && [ -s '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/patch.diff' ] && [ -f '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/identity.json' ] && [ -s '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/MANIFEST.sha256' ]"
+check "retained_sandbox_packet_rebinds_marker" \
+  "[ \"\$(sed -n '3p' '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/.ai-review-packet')\" = retained ]"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
