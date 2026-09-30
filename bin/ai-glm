@@ -498,7 +498,11 @@ metadata_lock_acquire() { # lock used only for one atomic record transition
 # whitespace and would drop empty fields on read. Order: repository_id, caller,
 # name, repository_root, status, owner_pid, clone_path, opencode_session_id, type
 implementation_record_fields() {
-  jq -r '[
+  # Refuse a record whose fields contain the packing separator: an in-band
+  # U+001F would shift columns and break path/name validation. Same treatment
+  # as an unreadable record.
+  local out
+  out="$(jq -r '[
     .repository_id // "",
     .caller // "",
     .name // "",
@@ -508,7 +512,9 @@ implementation_record_fields() {
     .clone_path // "",
     .opencode_session_id // "",
     .type // ""
-  ] | join("\u001f")' "$1" 2>/dev/null
+  ] | if any(.[]; type == "string" and contains("\u001f")) then error("field contains packing separator") else join("\u001f") end' "$1" 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 1
+  printf '%s' "$out"
 }
 
 implementation_record_path_valid() { # FILE [FIELDS]
