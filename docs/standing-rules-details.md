@@ -6,42 +6,17 @@ startup context.
 
 ## BlockerWatch (waiting on anything machine-checkable)
 
-**Registration is the default; polling is the exception.** A wait that may
-exceed ~10 minutes — on an issue, a pull request, a CI run, or another
-session's work — is registered with BlockerWatch and only then does the turn
-end. The scheduled watcher wakes the session when the wait releases. Holding a
-poll open inside the turn is for short waits only, while the session keeps
-working; a turn never ends by saying it is still waiting.
+**Registration is no longer required.** Use bounded `ai-pr-wait` while you
+remain in the turn; otherwise leave the existing issue or pull request as the
+card and return later — GitHub notifications are the reminder. A turn may end
+with an unchecked checklist on the issue.
 
-```text
-ai-blocker-watch wait <owner/repo#N> [--until <UTC>] (--for <owner/repo#M> | --park "<title>") --brief-file <file>
-```
-
-- `N` is the blocker — an issue or a pull request. A pull request is watched
-  directly (GitHub cannot link a PR as a blocker; the wake says so if it closed
-  unmerged). A CI run is its pull request, or `--until` as a check-in.
-- `M` is the issue this work belongs to. No issue of your own, or the issue is
-  already closed? Use `--park "<plain-English title>"` and one is opened.
-- The brief is required. Write, in plain English, what this work is, what is
-  already done, and the exact next steps — a brand-new session may have to
-  continue from that text alone.
-- Subagents register too (#723). A dispatched headless agent registers its own
-  session; an in-chat subagent inherits the parent session's ID, and that is
-  the correct wake target, because the parent chat owns the work. A session
-  with no session ID passes `--harness` and `--session` explicitly.
-- Combine a blocker and `--until` for a long job: the wake rechecks and
-  re-registers if it is still running. Never hold such a wait open for days.
-- A registered wait makes ending the turn correct. The closeout hook accepts a
-  turn that ends on waiting language only when the session holds a wait still
-  in flight (`ai-blocker-watch has-wait <session-id>`).
-- Waiting on a PERSON is not a BlockerWatch wait: name who holds it and what
-  you need in the reply's Still-open block instead.
+Waiting on a PERSON is named in the reply's Still-open block: say who holds it
+and what you need.
 
 A blocker issue gets an owner at birth. Assign yourself (or the session that
 will own it) and say so, or hand it to a named queue owner with an `owner:`
 line in the body. Never leave it unowned.
-
-Parked work is findable later with `ai-blocker-watch find <plain words>`.
 
 ## Subagent dispatch
 

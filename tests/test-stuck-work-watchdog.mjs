@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classify, infraDecision, parseReset, readMarkers, scrub, fixerBody, fixerMarker, run, noticeBody,
+  stuckCommentBody, STUCK_COMMENT_MARKER,
 } from '../tools/stuck-work/watchdog.mjs';
 
 const NOW = Date.parse('2026-09-29T09:00:00Z');
@@ -13,6 +14,7 @@ const BOT = 'pop-ai-watchers[bot]';
 function pr(over = {}) {
   return {
     number: 3567, title: 'Native merge queue', isDraft: false, createdAt: ago(600), headRefOid: SHA, mergeQueueEntry: null,
+    assignees: { nodes: [] },
     commits: { nodes: [{ commit: { committedDate: ago(180), statusCheckRollup: { state: 'FAILURE' } } }] },
     reviews: { nodes: [] },
     comments: { nodes: [{ createdAt: ago(170), author: { __typename: 'User', login: 'u2giants' } }] },
@@ -118,7 +120,7 @@ function fakeGitHub({ prsByRepo, required, logs = {}, issues = {}, comments = []
 
 const failing = (id, event = 'pull_request') => ({ __typename: 'CheckRun', name: 'verification-closure', conclusion: 'FAILURE', completedAt: ago(90), databaseId: id, isRequired: true, checkSuite: { workflowRun: { databaseId: 5000 + id, event } } });
 
-test('shared-db is conductor-only: no re-run, no fixer issue, one marker comment', async () => {
+test('shared-db is comment-only: comment on the stuck PR, no marker, no fixer, no re-run', async () => {
   const gh = fakeGitHub({
     prsByRepo: { 'shared-db': [pr({ number: 3620 })] },
     required: { 3620: [failing(1)] },
@@ -127,8 +129,50 @@ test('shared-db is conductor-only: no re-run, no fixer issue, one marker comment
   });
   const r = await run({ token: 't', rerunToken: 'r', now: NOW, fetchImpl: gh.fetchImpl, log: () => {} });
   assert.deepEqual(r.repos['popcre/shared-db'].stuck, [3620]);
-  assert.deepEqual(gh.writes.filter((w) => w.includes('shared-db')), ['POST /repos/popcre/shared-db/issues/3821/comments']);
+  // comment target is the stuck PR number, not a marker issue
+  assert.deepEqual(gh.writes.filter((w) => w.includes('shared-db')), ['POST /repos/popcre/shared-db/issues/3620/comments']);
+  // no orchestrator-marker create/update
+  assert.ok(!gh.writes.some((w) => /orchestrator-marker/.test(w)));
+  // no fixer issue for shared-db (never takes the ai-devops fixer/else branch)
+  assert.ok(!gh.writes.some((w) => w.includes('shared-db') && /stuck-fixer|ready-for-fixer/.test(w)));
+  assert.ok(!gh.writes.some((w) => w.includes('shared-db') && /POST \/repos\/popcre\/shared-db\/issues$/.test(w)));
+  // still !rerun even on a quota failure
   assert.ok(!gh.writes.some((w) => /rerun/.test(w)));
+});
+
+test('shared-db sticky comment is idempotent per head SHA and edited on a new head', async () => {
+  const base = { prsByRepo: { 'shared-db': [pr({ number: 3621 })] }, required: { 3621: [failing(8)] }, logs: { 8: QUOTA_LOG } };
+  // same head already noted: no write at all
+  const same = fakeGitHub({ ...base, comments: [{ id: 501, user: { login: BOT }, body: `${STUCK_COMMENT_MARKER}\nHead: ${SHA}` }] });
+  await run({ token: 't', rerunToken: 'r', now: NOW, fetchImpl: same.fetchImpl, log: () => {} });
+  assert.deepEqual(same.writes.filter((w) => w.includes('shared-db')), [], 'same head SHA: no write at all');
+
+  // a different head is a new idempotence key: edit the sticky comment, do not post a second one
+  const other = 'b'.repeat(40);
+  const moved = fakeGitHub({
+    ...base,
+    prsByRepo: { 'shared-db': [pr({ number: 3621, headRefOid: other })] },
+    comments: [{ id: 501, user: { login: BOT }, body: `${STUCK_COMMENT_MARKER}\nHead: ${SHA}` }],
+  });
+  await run({ token: 't', rerunToken: 'r', now: NOW, fetchImpl: moved.fetchImpl, log: () => {} });
+  assert.deepEqual(moved.writes.filter((w) => w.includes('shared-db')), ['PATCH /repos/popcre/shared-db/issues/comments/501']);
+  assert.ok(!moved.writes.some((w) => w.includes('3621') && w.startsWith('POST')), 'no second comment on the same PR');
+});
+
+test('the stuck-PR comment @-mentions only a fetched assignee and never invents an owner', async () => {
+  const named = stuckCommentBody({ reason: 'red checks', since: ago(100), headRefOid: SHA, assignees: ['u2giants'] }, NOW);
+  assert.match(named, /@u2giants/);
+  const bare = stuckCommentBody({ reason: 'red checks', since: ago(100), headRefOid: SHA, assignees: [] }, NOW);
+  assert.doesNotMatch(bare, /@/);
+  assert.doesNotMatch(bare, /Owner:/);
+
+  const gh = fakeGitHub({
+    prsByRepo: { 'shared-db': [pr({ number: 3622, assignees: { nodes: [{ login: 'u2giants' }] } })] },
+    required: { 3622: [failing(9)] },
+    logs: { 9: QUOTA_LOG },
+  });
+  await run({ token: 't', rerunToken: 'r', now: NOW, fetchImpl: gh.fetchImpl, log: () => {} });
+  assert.ok(gh.writes.includes('POST /repos/popcre/shared-db/issues/3622/comments'));
 });
 
 test('ai-devops quota failure: re-run once per head SHA, then fixer issue', async () => {
