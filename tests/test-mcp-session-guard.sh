@@ -14,22 +14,45 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GUARD="$ROOT/bin/mcp-session-guard.mjs"
 NODE="${MCP_SESSION_GUARD_NODE:-node}"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+CHECKS_PASSED=0
+
+# Kill every helper this script started, then clean TMP. Never override the
+# script's own exit status: a leftover helper or a busy TMP must not turn a
+# green run red (the CI "Killed" flake).
+cleanup() {
+  local rc=$?
+  set +e
+  for f in "$TMP"/pid*; do
+    [ -f "$f" ] || continue
+    local pid
+    pid="$(cat "$f" 2>/dev/null || true)"
+    [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null
+    [ -f "$f.kid" ] || continue
+    pid="$(cat "$f.kid" 2>/dev/null || true)"
+    [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null
+  done
+  rm -rf "$TMP"
+  exit "$rc"
+}
+trap cleanup EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
-ok() { echo "  ok $*"; }
+ok() { echo "  ok $*"; CHECKS_PASSED=$((CHECKS_PASSED + 1)); }
 
 command -v "$NODE" >/dev/null 2>&1 || fail "node is required"
 [ -f "$GUARD" ] || fail "missing $GUARD"
 
 # Stand-in for an MCP server: records its pid tree and sleeps.
+# The grandchild hold is short-lived on purpose: it only needs to outlive the
+# reap assertions (~3 s), not a minute. A 60 s Node timer made each case four
+# live Node processes and was an OOM risk on shared CI runners.
 cat > "$TMP/hold.js" <<'EOF'
 const fs = require('fs')
 fs.writeFileSync(process.argv[2], String(process.pid))
 const { spawn } = require('child_process')
-const kid = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 60000)'], { stdio: 'ignore' })
+const kid = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 15000)'], { stdio: 'ignore' })
 fs.writeFileSync(process.argv[2] + '.kid', String(kid.pid))
-setInterval(() => {}, 1000)
+setTimeout(() => {}, 15000)
 EOF
 
 # Session client: like Claude, owns the helper's stdin and can close it.
@@ -69,6 +92,20 @@ wait_ready() {
   return 1
 }
 
+# Wait for a background session we intentionally SIGKILLed. Bash prints a
+# "Killed" job-status line when it reaps a SIGKILLed job; that is the expected
+# outcome here, not a suite failure. Assert the status so a host/OOM kill
+# cannot masquerade as a silent pass, and so the line is explained.
+wait_sigkill() {
+  local pid="$1" rc
+  set +e
+  wait "$pid" 2>/dev/null
+  rc=$?
+  set -e
+  # 137 = 128 + SIGKILL(9). Any other status means the process died another way.
+  [ "$rc" -eq 137 ] || fail "expected SIGKILL (137) for session $pid, got $rc"
+}
+
 echo "== mcp-session-guard"
 
 # --- 1. stdin EOF reaps the helper tree ---------------------------------
@@ -97,7 +134,8 @@ wait_ready "$TMP/pid2" || fail "helper did not start (session-kill case): $(cat 
 HELPER_PID="$(cat "$TMP/pid2")"
 KID_PID="$(cat "$TMP/pid2.kid" 2>/dev/null || true)"
 kill -9 "$SESSION" 2>/dev/null || true
-sleep 3
+wait_sigkill "$SESSION"
+sleep 2
 alive "$HELPER_PID" && fail "helper still alive after session SIGKILL (pid $HELPER_PID)"
 [ -n "$KID_PID" ] && alive "$KID_PID" && fail "grandchild still alive after session SIGKILL (pid $KID_PID)"
 ok "session_sigkill_reaps_helper_tree"
@@ -146,4 +184,4 @@ set -e
 [ "$RC" -eq 2 ] || fail "empty command should exit 2 (got $RC)"
 ok "empty_command_is_usage_error"
 
-echo "PASS: mcp-session-guard"
+echo "PASS: mcp-session-guard checks=$CHECKS_PASSED"
