@@ -1823,21 +1823,7 @@ cmd_new() {
   [ -n "$sid" ] && [ "$sid" != null ] || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
   capture_terminal_evidence "$out" 2>/dev/null || note 'native terminal evidence unavailable; retaining generic cancellation diagnosis.'
-  RECOVERY_RC="$rc"
-  if ! recover_permission_cancelled "$out" "$sid" "$turns" "$pf"; then
-    rc="$RECOVERY_RC"
-    if [ "$rc" = 124 ]; then
-      record_diagnostic "$repo" "$workid" "$name" terminal provider-deadline --exit-code "$rc" --deadline-kind wrapper-timeout --cancellation-initiator wrapper-deadline --cancellation-confirmation unconfirmed --failure-class timed-out
-    else
-      record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
-    fi
-    grok_credit_release "$rid_lock" "$sess_lock" "$out"
-    preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
-    note "  a resumed turn after permission_cancelled returned no confirmed result (exit $rc); paid work retained for reconciliation."
-    reviewer_credit_exit
-    exit 1
-  fi
-  rc="$RECOVERY_RC"
+  recover_or_preserve "$repo" "$workid" "$name" "$out" "$sid" "$turns" "$pf" "$rid_lock" "$sess_lock" "$rc"; rc="$RECOVERY_RC"
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
@@ -1969,6 +1955,7 @@ $REVIEW_HEAD only."
   fi
 
   capture_terminal_evidence "$out" 2>/dev/null || note 'native terminal evidence unavailable; retaining generic cancellation diagnosis.'
+  recover_or_preserve "$repo" "$workid" "$name" "$out" "$sid" "$turns" "$pf" "$rid_lock" "$sess_lock" "$rc"; rc="$RECOVERY_RC"
   write_meta "$meta" "$(jq \
     --arg updated "$(date -u +%FT%TZ)" \
     --argjson tokens "$(normalized_usage "$out" | jq '.usage.total_tokens')" \
@@ -2042,7 +2029,8 @@ recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE
     grok_credit_scan "$RECOVERY_RC" "$next"
     if [ "$RECOVERY_RC" = 124 ] || [ -n "${REVIEWER_CREDIT_HIT:-}" ] || ! await_result "$next" "review resume $n"; then
       # Keep the confirmed cancelled result and its witness untouched; the
-      # unconfirmed resume output stays beside it as evidence.
+      # unconfirmed resume output stays beside it as the failure evidence.
+      RECOVERY_OUT="$next"
       return 1
     fi
     capture_terminal_evidence "$next" 2>/dev/null || true
@@ -2050,6 +2038,27 @@ recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE
     [ ! -f "$next.terminal.json" ] || mv -f "$next.terminal.json" "$out.terminal.json"
   done
   return 0
+}
+
+# Shared by new and ask: resume a native PermissionCancelled turn, or, when a
+# resumed paid turn is unconfirmed, preserve it exactly like an unconfirmed
+# first turn (diagnostic, credit evidence from the RESUMED output, retained lock).
+recover_or_preserve() { # REPO WORKID NAME OUT SID TURNS PROMPT_FILE RID_LOCK SESS_LOCK RC
+  local repo="$1" workid="$2" name="$3" out="$4" sid="$5" turns="$6" pf="$7" rid_lock="$8" sess_lock="$9" rc="${10}" ev
+  RECOVERY_RC="$rc"; RECOVERY_OUT=""
+  recover_permission_cancelled "$out" "$sid" "$turns" "$pf" && return 0
+  rc="$RECOVERY_RC"; ev="${RECOVERY_OUT:-$out}"
+  if [ "$rc" = 124 ]; then
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-deadline --exit-code "$rc" --deadline-kind wrapper-timeout --cancellation-initiator wrapper-deadline --cancellation-confirmation unconfirmed --failure-class timed-out
+  else
+    record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
+  fi
+  grok_credit_release "$rid_lock" "$sess_lock" "$ev"
+  preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
+  note "  a resumed turn after permission_cancelled returned no confirmed result (exit $rc); paid work retained for reconciliation."
+  [ -s "$ev.err" ] && { note "  stderr:"; sed 's/^/    /' "$ev.err" >&2; }
+  reviewer_credit_exit
+  exit 1
 }
 
 finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
