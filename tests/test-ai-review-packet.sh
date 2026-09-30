@@ -593,5 +593,26 @@ check "retained_packet_passes_verify_retained_after_relocation" \
 check "retained_copy_survives_original_root_deletion" \
   "[ ! -d '$RET_SNAP' ] && [ -s '$RET_IDEST/MANIFEST.md' ]"
 
+# 4. Tampered dest (matching line-4 orig_hash but damaged evidence) is never
+#    accepted as already-retained. retain must not return success while the
+#    store is still broken, and remove must not delete the only good copy.
+RET3_PKT="$("$SCRIPT" build "$RET_R" tamperdest --tests 'true')"
+RET3_DEST="$("$SCRIPT" retain "$RET3_PKT")"
+echo RETAIN-TAMPER >> "$RET3_DEST/patch.diff"
+check "tampered_dest_is_not_accepted_as_already_retained" \
+  "! '$SCRIPT' retain '$RET3_PKT' >/dev/null 2>&1"
+check "remove_with_unverified_dest_skips_delete" \
+  "! '$SCRIPT' remove '$RET_R' tamperdest 2>/dev/null && [ -d '$RET3_PKT' ]"
+
+# 5. retain of a packet already at its durable destination (dest == d) must
+#    not rm/cp onto its own input. Already-in-store only when that copy verifies.
+RET4_PKT="$("$SCRIPT" build "$RET_R" selfstore --tests 'true')"
+RET4_DEST="$("$SCRIPT" retain "$RET4_PKT")"
+check "retain_of_packet_already_at_dest_does_not_destroy_input" \
+  "'$SCRIPT' retain '$RET4_DEST' >/dev/null && [ -d '$RET4_DEST' ] && [ -s '$RET4_DEST/MANIFEST.md' ] && [ -f '$RET4_DEST/identity.json' ] && [ -s '$RET4_DEST/patch.diff' ] && [ -s '$RET4_DEST/MANIFEST.sha256' ]"
+echo RETAIN-TAMPER2 >> "$RET4_DEST/patch.diff"
+check "retain_of_broken_packet_at_dest_fails_without_deleting" \
+  "! '$SCRIPT' retain '$RET4_DEST' >/dev/null 2>&1 && [ -d '$RET4_DEST' ] && [ -s '$RET4_DEST/MANIFEST.md' ]"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

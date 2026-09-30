@@ -215,6 +215,21 @@ retained_store_root() { # retained_store_root REVIEW_ROOT
   fi
 }
 
+# Durable-copy integrity gate. The same checks the non-shortcut retain path
+# applies after the copy: the seal hash matches the contents and every required
+# evidence file is present. Used by the idempotent and dest==d shortcuts so a
+# tampered or partial store is never accepted as already-retained.
+retained_dest_verifies() { # retained_dest_verifies DEST -> 0 when seal matches and required evidence is present
+  local dest="$1"
+  [ -f "$dest/$HASHFILE" ] || return 1
+  [ -f "$dest/identity.json" ] || return 1
+  [ -f "$dest/$MARKER" ] || return 1
+  [ -s "$dest/$MANIFEST" ] || return 1
+  [ -f "$dest/$PATCH" ] || return 1
+  [ "$(cat "$dest/$HASHFILE")" = "$(hash_packet "$dest")" ] || return 1
+  return 0
+}
+
 retain_packet() { # retain_packet PACKET_DIR -> prints durable path; 0 on success, 1 on failure (caller must skip delete)
   local d="$1" root tag source store dest orig_hash new_hash isolated=false
   is_managed "$d" || { warn "cannot retain $d: it is not a managed review packet."; return 1; }
@@ -243,13 +258,33 @@ retain_packet() { # retain_packet PACKET_DIR -> prints durable path; 0 on succes
 
   store="$(retained_store_root "$root")"
   dest="$store/$(basename "$d")"
+
+  # Retaining a packet that already sits at its durable destination must not
+  # rm/cp onto its own input. Already-in-store only when that copy verifies.
+  if [ -d "$dest" ] && [ "$(canon "$dest")" = "$(canon "$d")" ]; then
+    if retained_dest_verifies "$dest"; then
+      printf '%s' "$dest"
+      return 0
+    fi
+    warn "cannot retain $d: it is its own durable destination and fails verification; refusing to delete the only copy."
+    return 1
+  fi
+
   if [ -e "$dest" ] && [ -f "$dest/$MARKER" ]; then
     local dest_orig
     dest_orig="$(sed -n '4p' "$dest/$MARKER" 2>/dev/null || true)"
     if [ "$dest_orig" = "$orig_hash" ]; then
-      # Idempotent: this exact packet was already retained.
-      printf '%s' "$dest"
-      return 0
+      if retained_dest_verifies "$dest"; then
+        # Idempotent: this exact packet was already retained and still verifies.
+        printf '%s' "$dest"
+        return 0
+      fi
+      # A matching line-4 orig_hash is not enough. This dest claims to be the
+      # retained copy of $d but fails the seal/files gate: never treat it as
+      # already-retained (remove_packet would then delete the only good copy)
+      # and never rm a store we cannot vouch for.
+      warn "cannot retain $d: durable copy at $dest claims this packet but fails verification; leaving both copies in place."
+      return 1
     fi
   fi
   mkdir -p "$store" 2>/dev/null || { warn "cannot retain $d: cannot create durable store $store."; return 1; }
