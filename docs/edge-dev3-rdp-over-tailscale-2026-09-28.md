@@ -112,7 +112,7 @@ SAM error for the same password.
 1. Downgraded the four packages to 3.31 and held them:
    `sudo dpkg -i` the 3.31 debs (three came from `/var/cache/apt/archives/`,
    `libfreerdp-server3-3` from
-   `https://launchpad.net/ubuntu/+archive/primary/+files/libfreerdp-server3-3_3.31.0+dfsg-0ubuntu0.26.04.1_amd64.deb`),
+   `launchpad.net package libfreerdp-server3-3_3.31.0+dfsg-0ubuntu0.26.04.1_amd64.deb`),
    then `sudo apt-mark hold libwinpr3-3 libfreerdp3-3 libfreerdp-client3-3 libfreerdp-server3-3`.
    **Before unholding**, test a newer FreeRDP with the port-4838 method above.
 2. After the downgrade, the login succeeded but the window flashed and closed
