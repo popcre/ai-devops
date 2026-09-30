@@ -189,9 +189,9 @@ al8960ofc/Hetz with t16 residual, 10 started.
 - Hetz: `ssh vps2-direct` (user `ai`, `/worksp/ai-devops`). Do **not** use
   `ssh -i ~/.ssh/916-alien ai@178.156.180.212` (times out).
 - edge-dev3: `ssh -i ~/.ssh/916-alien ahazan@edge-dev3`.
-- al8960ofc/4837: Tailscale often down; LAN `192.168.2.131` as `ahazan2` with
-  916-alien; remote default shell is cmd.exe. (Do not put that LAN IP in public
-  proof files.)
+- al8960ofc/4837: Tailscale often down; LAN address redacted for the public
+  boundary (2026-09-30; see the machine atlas) as `ahazan2` with
+  916-alien; remote default shell is cmd.exe.
 - Machine atlas (private): `bin/ai-private-config path machine_atlas`.
 - Secrets: 1Password vault `vibe_coding` only. None appeared this session.
 
