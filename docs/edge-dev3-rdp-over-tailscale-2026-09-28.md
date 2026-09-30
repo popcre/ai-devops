@@ -158,6 +158,19 @@ journalctl --user -u 'app-org.kde.krdpserver*' --since '-10min' --no-pager | gre
   and showed its own "Login to edge-dev3" screen. It was **purged** 2026-09-30.
 - Granting the portal permission in the PermissionStore did not stop the popup. `--plasma` did.
 
+## Popup and restart behavior (verified 2026-09-30, 1:24 PM EDT)
+
+- KRDP asks the portal for the app ID `org.kde.krdp-server`, but the packaged desktop
+  file is `org.kde.krdpserver.desktop`. The log showed `Could not register app ID: App info
+  not found`, and the approval was forgotten at every restart. Fix: a user desktop file
+  `~/.local/share/applications/org.kde.krdp-server.desktop` (NoDisplay, same Exec and
+  `X-KDE-Wayland-Interfaces`). After one Approve, a reboot restored the portal session with
+  no click: the log showed `Started Freedesktop Portal session`.
+- After a reboot, `mstsc` flashes and closes (`PostConnect ... failed`) for about the first
+  2 minutes while Plasma and the portal finish starting. Wait and retry.
+- A "Control input devices" popup can still appear after connecting. RDP works anyway.
+  It is harmless and not yet removed.
+
 ## Still open — ScreenConnect black screen
 
 ScreenConnect (`connectwisecontrol-159806842ff2961f`, a system service) captures
@@ -168,3 +181,15 @@ Wayland sessions on every boot since 2026-09-28. **How it worked is not yet expl
 Do not assume Wayland and X11 are mutually exclusive with KRDP until that is
 investigated. The next step is to compare the ScreenConnect client version and
 logs from before and after the 10:54 AM EDT reboot.
+
+Findings so far (2026-09-30):
+- The console (edgehome.screenconnect.com, Access → edge-dev3) shows **Logged On User: root**,
+  client **26.6.6.9747**, which is the newest client in the fleet. An agent update is not the fix.
+- The agent runs `DISPLAY=:0 XAUTHORITY=/opt/connectwisecontrol-*/.Xauthority`.
+  `who` prints `1000` and not a username, and there is no `/run/utmp`. The agent still
+  probes the user with `runuser` every 5 s, and it did the same on 2026-09-28.
+- The agent log `/var/log/connectwisecontrol-159806842ff2961f` holds only tray/DISPLAY exceptions.
+- Nothing in `/var/log/dpkg.log` since 2026-09-28 touches ScreenConnect, Xwayland, KWin or Java.
+- **ConnectWise support case #03766621** was filed at 1:40 PM EDT, 2026-09-30, asking about Wayland
+  support and user/display selection. Next step: act on their reply.
+- Not tried, because it would risk the working RDP: switching to a Plasma X11 session.
