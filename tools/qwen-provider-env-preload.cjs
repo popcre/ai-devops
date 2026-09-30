@@ -21,6 +21,17 @@ if (secretFile) {
   delete process.env.AI_QWEN_SECRET_FILE;
   if (!secret) throw new Error('empty Qwen secret file');
   process.env.BAILIAN_CODING_PLAN_API_KEY = secret;
+  // Qwen's --sandbox starts a container that forwards only a fixed list of
+  // provider variables (OPENAI_API_KEY, GEMINI_API_KEY, ...), so the Coding
+  // Plan key never reached the sandboxed CLI and every review failed with
+  // "Missing API key". A bare `--env NAME` makes docker copy the value from
+  // its own inherited environment, so the key is never written into the
+  // docker command line (unlike SANDBOX_ENV=NAME=value or OPENAI_API_KEY).
+  const forward = '--env BAILIAN_CODING_PLAN_API_KEY';
+  const flags = process.env.SANDBOX_FLAGS || '';
+  if (!flags.split(/\s+/).join(' ').includes(forward)) {
+    process.env.SANDBOX_FLAGS = flags ? `${flags} ${forward}` : forward;
+  }
 }
 
 // Issue #1032: once the key is in the environment this preloader has no work
