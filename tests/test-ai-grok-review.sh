@@ -588,7 +588,7 @@ check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.t
 check "new pins the model"                "grep -q -- '--model grok-4.6' '$TMP/argv.txt'"
 check "new allows Edit in the snapshot"   "grep -q -- '--allow Edit' '$TMP/argv.txt' && ! grep -q -- '--deny Edit' '$TMP/argv.txt'"
 check "new allows Bash in the snapshot"   "grep -q -- '--allow Bash' '$TMP/argv.txt' && ! grep -q -- '--deny Bash' '$TMP/argv.txt'"
-check "prompt warns that assignment-prefixed shell commands cancel the run" "grep -q 'CANCELS THIS WHOLE REVIEW' '$TMP/prompt-copy' && grep -q 'bash ./that-script.sh' '$TMP/prompt-copy'"
+check "prompt warns that assignment-prefixed shell commands cancel the run" "grep -q 'CANCELS THIS WHOLE REVIEW' '$TMP/prompt-copy' && grep -q 'bash .git/review-scratch/run.sh' '$TMP/prompt-copy' && grep -q 'invalidates the whole review' '$TMP/prompt-copy'"
 check "permission_cancelled is resumed in the same session, bounded, only on the native witness" "grep -q '^  recover_permission_cancelled ' '$SCRIPT' && grep -q 'AI_GROK_PERMISSION_RESUMES:-3' '$SCRIPT' && grep -q '= permission_cancelled ]; do' '$SCRIPT'"
 check "prompt says not read-only and edits are discarded" "grep -q 'You are NOT read-only' '$TMP/prompt-copy' && grep -q 'discarded' '$TMP/prompt-copy'"
 T1_DIR="$(run show t1 | jq -r '.review_dir')"
