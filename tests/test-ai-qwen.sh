@@ -712,6 +712,7 @@ qwen_late_signal_case(){ # NAME COMMAND
   check "$command: signal after a complete answer records a locally finalizable turn" "jq -e '.status==\"recovery-required\" and .failure_reason==\"provider_turn_pending_local_validation\"' '$meta' && grep -q 'ai-qwen finalize $name' '$TMP/late-$name.log'"
   event="$(jq -r .recovery_event_run_id "$meta")"; python="$(command -v python3 || command -v python)"
   check "$command: the interrupted invocation is still not durable before finalize" "! '$python' '$REPO_ROOT/tools/reviewer_events.py' verify-reports qwen '$event' >/dev/null 2>&1"
+  check "$command: interrupted review releases its lock before local recovery" "! grep -Rl '^review:$name\$' '$TMP/state/locks' --include=label"
   check "$command: late-signal answer finalizes locally with a verdict" "run finalize '$name' > '$TMP/late-$name-finalize.log' 2>&1 && jq -e '.status==\"active\"' '$meta' && grep -l 'late signal review' '$REPO/.ai/reviews'/qwen-$name-*.md >/dev/null"
   check "$command: finalize makes the interrupted invocation durable" "'$python' '$REPO_ROOT/tools/reviewer_events.py' verify-reports qwen '$event' >/dev/null"
   check "$command: late-signal recovery spends zero additional provider turns" "test \"\$(( calls + 1 ))\" -eq \"\$(wc -l < '$TMP/argv.txt')\""

@@ -1810,8 +1810,13 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
     fi
     [ "$LIFECYCLE_PRESERVE" = 1 ] || cleanup_wt "$LIFECYCLE_REPO" "$LIFECYCLE_WT" "$LIFECYCLE_OWNER"
   fi
-  reviewer_event_cleanup_allowed qwen || return 1
-  rm -f "$LIFECYCLE_PF" "$LIFECYCLE_OUT" "$LIFECYCLE_OUT.err" 2>/dev/null || true
+  if reviewer_event_cleanup_allowed qwen; then
+    rm -f "$LIFECYCLE_PF" "$LIFECYCLE_OUT" "$LIFECYCLE_OUT.err" 2>/dev/null || true
+  else
+    # Retain uncertain evidence, but never strand this session's lock. A
+    # completed provider answer must remain locally finalizable on Windows.
+    final=1
+  fi
   [ -z "$LIFECYCLE_LOCK" ] || lock_release "$LIFECYCLE_LOCK"
   [ -z "$LIFECYCLE_SESSION_LOCK" ] || lock_release "$LIFECYCLE_SESSION_LOCK"
   return "$final"
