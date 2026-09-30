@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ai-merge-queue-drift suite (issue #1002 step 3). Offline: every ruleset is
-# a fixture, no network, and bin/ai-gh is never invoked.
+# a fixture, no network, and bin/ai-gh appears only as a per-case stub.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -203,6 +203,137 @@ out="$("$DRIFT" --root "$f_ps1" --ruleset "$TMP/ruleset-live.json" 2>&1)"; rc=$?
 [ $rc -eq 1 ] && grep -qF "file class .ps1 ('scripts/example.ps1'): PR selection dropped" <<<"$out" \
   && result pass 'a .ps1 selection divergence is reported as drift' \
   || result fail 'a .ps1 selection divergence is reported as drift'
+
+# --- The live lane itself (#1026 item 4) --------------------------------------
+# The live-ruleset job's run: script is extracted from the workflow so the
+# lane's own branching is executed, not just the bin tool's.
+
+lane_yml="$ROOT/.github/workflows/merge-queue-drift.yml"
+lane_txt="$(tr -d '\r' < "$lane_yml")"
+grep -q 'GH_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN || github.token }}' <<<"$lane_txt" &&
+  ! grep -q 'MERGE_QUEUE_DRIFT_TOKEN' <<<"$lane_txt" &&
+  result pass 'the live lane reads through the existing scoped RUNNER_POOL_READ_TOKEN (no new credential)' ||
+  result fail 'the live lane reads through the existing scoped RUNNER_POOL_READ_TOKEN (no new credential)'
+grep -q "^    if: github.event_name != 'pull_request' && vars.MERGE_QUEUE_DRIFT_LIVE == 'enabled'$" <<<"$lane_txt" &&
+  result pass 'pull requests stay offline and the lane is gated on MERGE_QUEUE_DRIFT_LIVE' ||
+  result fail 'pull requests stay offline and the lane is gated on MERGE_QUEUE_DRIFT_LIVE'
+
+# Extract the live-ruleset job's run: block (content indented 10 or more
+# spaces under `        run: |`, between the `live-ruleset:` job key and the
+# next 2-space job key).
+live_run_script(){
+  awk '
+    { sub(/\r$/, "") }
+    $0 ~ /^  live-ruleset:$/ { in_job=1; next }
+    in_job && /^  [A-Za-z0-9_-]+:$/ { exit }
+    in_job && /^        run: \|$/ { in_run=1; next }
+    in_run && /^ {10}/ { print substr($0, 11); next }
+    in_run && /^$/ { print ""; next }
+    in_run { exit }
+  ' "$lane_yml"
+}
+
+# A stub ai-gh whose answers are steered by environment knobs, so the lane's
+# HTTP-404 logic runs offline: STUB_RULESET_OK/STUB_RULESET_FILE (the single
+# ruleset read), STUB_RUNNERS_OK (the administration probe),
+# STUB_LIST_OK/STUB_LIST_IDS (the ruleset list, already post-jq).
+make_live_fixture(){
+  local name="$1"; local f
+  f="$(make_fixture "$name")"
+  cp "$ROOT/bin/ai-merge-queue-drift" "$f/bin/"
+  chmod +x "$f/bin/ai-merge-queue-drift"
+  live_run_script > "$f/live-run.sh"
+  cat > "$f/bin/ai-gh" <<'STUB'
+#!/usr/bin/env bash
+endpoint=""
+for a in "$@"; do
+  case "$a" in repos/*) endpoint="$a" ;; esac
+done
+case "$endpoint" in
+  */actions/runners*)
+    if [ "${STUB_RUNNERS_OK:-0}" = 1 ]; then
+      printf '{"total_count":0,"runners":[]}\n'
+      exit 0
+    fi
+    printf 'gh: Not Found (HTTP 404)\n' >&2
+    exit 1
+    ;;
+  */rulesets[?]per_page=*)
+    if [ "${STUB_LIST_OK:-0}" = 1 ]; then
+      printf '%s\n' ${STUB_LIST_IDS:-}
+      exit 0
+    fi
+    printf 'gh: Not Found (HTTP 404)\n' >&2
+    exit 1
+    ;;
+  */rulesets/*)
+    if [ "${STUB_RULESET_OK:-0}" = 1 ]; then
+      cat "${STUB_RULESET_FILE:?}"
+      exit 0
+    fi
+    printf 'gh: Not Found (HTTP 404)\n' >&2
+    exit 1
+    ;;
+esac
+printf 'ai-gh stub: unexpected endpoint: %s\n' "$endpoint" >&2
+exit 1
+STUB
+  chmod +x "$f/bin/ai-gh"
+  printf '%s\n' "$f"
+}
+run_live_lane(){ # run_live_fixture NAME -> runs its extracted lane script in place
+  ( cd "$1" && GITHUB_OUTPUT="$1/outcome-$2.txt" bash live-run.sh 2>&1 ); return $?
+}
+
+f_live="$(make_live_fixture live)"
+
+# Case L1 (the #1026 hardening): a mis-scoped token answers 404 on the
+# ruleset read AND fails the administration probe; that must be booked
+# refused (say-once degraded), never "the ruleset no longer exists" drift.
+out="$(run_live_lane "$f_live" l1)"; rc=$?
+[ $rc -eq 0 ] && grep -q 'outcome=refused' "$f_live/outcome-l1.txt" &&
+  ! grep -q '^outcome=drift' "$f_live/outcome-l1.txt" &&
+  ! grep -q 'no longer exists' <<<"$out" &&
+  result pass 'a mis-scoped 404 token is booked refused, not deletion drift' ||
+  result fail 'a mis-scoped 404 token is booked refused, not deletion drift'
+
+# Case L1b (the exact #1026 hole): a token WITHOUT administration gets a
+# readable ruleset list that still lacks the id. The pre-hardening lane
+# booked that as deletion drift and re-commented daily; the administration
+# probe must refuse it instead.
+out="$(STUB_RUNNERS_OK=0 STUB_LIST_OK=1 STUB_LIST_IDS="111 222" run_live_lane "$f_live" l1b)"; rc=$?
+[ $rc -eq 0 ] && grep -q 'outcome=refused' "$f_live/outcome-l1b.txt" &&
+  ! grep -q 'no longer exists' <<<"$out" &&
+  result pass 'a readable list without administration read is refused, not drift' ||
+  result fail 'a readable list without administration read is refused, not drift'
+
+# Case L2: an administration-authorized token with a readable ruleset list
+# that lacks the id: that is genuine deletion drift.
+out="$(STUB_RUNNERS_OK=1 STUB_LIST_OK=1 STUB_LIST_IDS="111 222" run_live_lane "$f_live" l2)"; rc=$?
+[ $rc -eq 1 ] && grep -q '^outcome=drift' "$f_live/outcome-l2.txt" &&
+  grep -q 'no longer exists' <<<"$out" &&
+  result pass 'an authorized 404 with the id missing from the list is deletion drift' ||
+  result fail 'an authorized 404 with the id missing from the list is deletion drift'
+
+# Case L2b: a readable EMPTY list also proves deletion (pre-#1026 behavior).
+out="$(STUB_RUNNERS_OK=1 STUB_LIST_OK=1 STUB_LIST_IDS="" run_live_lane "$f_live" l2b)"; rc=$?
+[ $rc -eq 1 ] && grep -q '^outcome=drift' "$f_live/outcome-l2b.txt" &&
+  grep -q 'no longer exists' <<<"$out" &&
+  result pass 'a readable empty ruleset list still proves deletion' ||
+  result fail 'a readable empty ruleset list still proves deletion'
+
+# Case L3: the read succeeds and the ruleset matches: outcome=ok.
+out="$(STUB_RULESET_OK=1 STUB_RULESET_FILE="$TMP/ruleset-live.json" run_live_lane "$f_live" l3)"; rc=$?
+[ $rc -eq 0 ] && grep -q 'outcome=ok' "$f_live/outcome-l3.txt" &&
+  result pass 'a clean live ruleset read reports ok' ||
+  result fail 'a clean live ruleset read reports ok'
+
+# Case L4: the read succeeds but the live ruleset drifted: outcome=drift.
+out="$(STUB_RULESET_OK=1 STUB_RULESET_FILE="$TMP/ruleset-drifted.json" run_live_lane "$f_live" l4)"; rc=$?
+[ $rc -eq 1 ] && grep -q '^outcome=drift' "$f_live/outcome-l4.txt" &&
+  grep -q 'check_response_timeout_minutes' <<<"$out" &&
+  result pass 'a readable drifted ruleset is reported as drift by the lane' ||
+  result fail 'a readable drifted ruleset is reported as drift by the lane'
 
 # The real repository itself must be clean offline (workflow + selection).
 out="$("$DRIFT" --root "$ROOT" --offline 2>&1)"; rc=$?
