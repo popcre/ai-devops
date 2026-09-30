@@ -16,7 +16,49 @@ CI lies about what went wrong. A Windows job that is killed under load, or that 
 
 Two hard capacity limits amplified everything: one shared Windows machine hosting runners and daily work, and one GitHub identity shared by background watchers and interactive work. The watcher identity has now been split (GitHub App `pop-ai-watchers`), and three machines' watchers were staggered off the same 10-minute mark after five same-day refusals — those two fixes worked and must be kept.
 
-The highest-leverage changes are therefore not "add more checks." They are: (1) finish deleting the coordination layer that mints tickets — already decided and largely landed; (2) make waits die automatically instead of parking; (3) report timeout, kill, and rate-limit as capacity categories, not as test failure or empty quota; (4) keep long Windows work off the merge critical path and buy or route real capacity; (5) stop full re-qualification and preflight sweeps from sitting in the hot path of every review. Everything below is ranked against those five.
+The highest-leverage changes are therefore not "add more checks." The agreed order after the Muse audit is below.
+
+---
+
+## 2b. Agreed plan (Muse audit, 2026-09-30)
+
+This order supersedes the draft ranking. It was adversarially audited in a
+back-and-forth with Muse (`muse-spark-1.3-contributor`, session
+`process-plan-audit-20260930`) and both sides signed AGREE. Lead with the daily
+merge tax; one-time cleanup trails.
+
+1. **Label capacity as capacity.** Two labels only in the action taxonomy:
+   `capacity/infra` vs `result`. Timeout, kill, and rate-limit are capacity.
+   An empty reviewer verdict fails the **review step** and reroutes (map to
+   workflow-efficiency P7) — it never reddens the PR test verdict. Detailed
+   incident categories stay in reports only.
+2. **Parallelize the merge critical path and finish fast-fail.** Finish
+   workflow-efficiency P3/P5/P6 acceptance. Required `verification-closure` and
+   the merge queue survive. Windows stays gating (parallel lanes). No path
+   filters. Never raise ceilings.
+3. **Delete waiters as a class.** Bounded in-session `ai-pr-wait` with an
+   explicit deadline only. No TTL service, no parked-state store, no waiter
+   registry. **`ai-blocker-watch wait` registration is out as any required or
+   standing rule** (never adopted in practice; locked deletion in
+   `plan_shared-db-coordination-deletion.md`). Turn-end blocker state lives on
+   the issue and is re-surfaced by the bounded janitor. Voluntary registration
+   is permitted, unrequired, unmeasured. Re-admit as a rule only on 14-day
+   measured wake evidence.
+4. **Coord-deletion residuals, one-time, inside the existing PR-A…D slice.**
+   Hetz/t16 globals re-adopt, machine-tools duplicate rows, parked-issue tidy.
+   No new programme and no new tracking issue.
+5. **Maintenance out of the hot path, no new machinery.** O(1) preflight,
+   pin-only qualification, unowned reviewer doc table (reviewer → wrapper → pin
+   → reroute), and the two named wrapper fixes (Qwen `NODE_OPTIONS` sandbox;
+   Gemini headless command blocks) with reroute-on-empty.
+
+**Binding constraints on every row.** Each row maps to exactly one existing
+owner (#650 / #658 / #1061 / #511). Unmapped rows are rejected. Janitor bounds:
+6h per-PR cooldown, comments only, never opens issues, no comment after human
+activity in 24h, kill switch on the #1061 lineage. Windows runner slowness is
+infra (#209 / #262), not process — this plan does not fix hardware. Keep list
+unchanged: live proof before close, exact-head independent review, no path
+filters on required checks, #401 and #204 stay closed.
 
 ---
 
