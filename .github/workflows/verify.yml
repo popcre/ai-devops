@@ -672,14 +672,19 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Open or update the scheduled verification incident
         shell: bash
         run: |
-          title='Scheduled full verification is failing'
-          body="The complete scheduled matrix failed at $RUN_URL. Diagnose the named failing job and close this issue only after a later complete scheduled run passes."
-          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug
-          fi
+          needs_summary=""
+          for pair in \
+            "fast-classifier=${{ needs.fast-classifier.result }}" \
+            "linux-offline=${{ needs.linux-offline.result }}" \
+            "windows-offline-complete=${{ needs.windows-offline-complete.result }}" \
+            "windows-reviewer-safety=${{ needs.windows-reviewer-safety.result }}"; do
+            needs_summary="$needs_summary$pair "
+          done
+          bash tools/ci/report-scheduled-failure.sh \
+            --run-url "$RUN_URL" \
+            --repo "$GITHUB_REPOSITORY" \
+            --results "$needs_summary"

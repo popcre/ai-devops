@@ -372,7 +372,7 @@ while :; do
   QUEUED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.isInMergeQueue')"
   MERGE_SHA="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.mergeCommit.oid // "none"')"
   ROLLUP="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // "NONE"')"
-  FAILED="$(printf '%s' "$Q" | jq -r '[.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") | (.name // .context)] | join(", ")')"
+  FAILED="$(printf '%s' "$Q" | jq -r '[.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE"))] | join("\n")')"
 
   if [ "$STATE" = "MERGED" ]; then
     PR_WAIT_OUTCOME=merged
@@ -407,9 +407,47 @@ while :; do
 
   if [ -n "$FAILED" ]; then
     PR_WAIT_OUTCOME=checks_failed
-    say "PR #$PR has failing checks and will not merge: $FAILED"
-    say "  A check reported CANCELLED is usually a job timeout, not a test result -"
-    say "  compare its duration against timeout-minutes before diagnosing anything."
+    say "PR #$PR has failing checks and will not merge:"
+    # Action taxonomy (agreed plan §2b): capacity/infra vs result only.
+    # Empty-verdict is the review-step carve-out and never a PR test result.
+    TAXONOMY="$REAL_DIR/../tools/ci/action-taxonomy.sh"
+    [ -f "$TAXONOMY" ] || TAXONOMY="$(dirname "$0")/../tools/ci/action-taxonomy.sh"
+    any_capacity=0
+    any_result=0
+    any_review=0
+    while IFS=$'\t' read -r cname cconc; do
+      [ -n "$cname" ] || continue
+      if [ -f "$TAXONOMY" ]; then
+        action="$(bash "$TAXONOMY" check "$cconc" "$cname" 2>/dev/null || printf 'result')"
+        detail="$(bash "$TAXONOMY" detail "$cconc" "$cname" 2>/dev/null || printf 'test-failure')"
+      else
+        action=result
+        detail=test-failure
+      fi
+      say "  - $cname ($cconc)  action=$action  detail=$detail"
+      case "$action" in
+        capacity/infra) any_capacity=1 ;;
+        review-step) any_review=1 ;;
+        *) any_result=1 ;;
+      esac
+    done <<<"$FAILED"
+    if [ "$any_capacity" -eq 1 ]; then
+      say "  capacity/infra: timeout/kill/rate-limit. A check reported CANCELLED"
+      say "  is usually a job timeout, not a test result. Park the merge and"
+      say "  retry; do not re-diagnose as broken code. Capacity never invalidates"
+      say "  an exact-head approval."
+    fi
+    if [ "$any_review" -eq 1 ]; then
+      say "  review-step: empty reviewer verdict fails the review and reroutes."
+      say "  It never reddens the PR test verdict."
+    fi
+    if [ "$any_result" -eq 1 ]; then
+      say "  result: a real test outcome. Diagnose the failing suite."
+      if [ "$any_capacity" -eq 1 ]; then
+        say "  Mixed run: a real failure is present alongside capacity. Do not"
+        say "  park the whole pull request as capacity."
+      fi
+    fi
     exit 1
   fi
 
