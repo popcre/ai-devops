@@ -588,7 +588,7 @@ check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.t
 check "new pins the model"                "grep -q -- '--model grok-4.6' '$TMP/argv.txt'"
 check "new allows Edit in the snapshot"   "grep -q -- '--allow Edit' '$TMP/argv.txt' && ! grep -q -- '--deny Edit' '$TMP/argv.txt'"
 check "new allows Bash in the snapshot"   "grep -q -- '--allow Bash' '$TMP/argv.txt' && ! grep -q -- '--deny Bash' '$TMP/argv.txt'"
-check "prompt warns that assignment-prefixed shell commands cancel the run" "grep -q 'CANCELS THIS WHOLE REVIEW' '$TMP/prompt-copy' && grep -q 'bash .git/review-scratch/run.sh' '$TMP/prompt-copy' && grep -q 'invalidates the whole review' '$TMP/prompt-copy'"
+check "prompt warns that assignment-prefixed shell commands cancel the run" "grep -q 'CANCELS your current turn' '$TMP/prompt-copy' && grep -q 'bash .git/review-scratch/run.sh' '$TMP/prompt-copy' && grep -q 'invalidates the whole review' '$TMP/prompt-copy'"
 check "permission_cancelled is resumed in the same session, bounded, only on the native witness" "[ \$(grep -c '^  recover_or_preserve ' '$SCRIPT') -eq 2 ] && grep -q 'AI_GROK_PERMISSION_RESUMES:-3' '$SCRIPT' && grep -q 'native_permission_cancelled .*; do' '$SCRIPT' && ! grep -q 'permission_cancelled) printf' '$SCRIPT'"
 check "prompt says not read-only and edits are discarded" "grep -q 'You are NOT read-only' '$TMP/prompt-copy' && grep -q 'discarded' '$TMP/prompt-copy'"
 T1_DIR="$(run show t1 | jq -r '.review_dir')"
@@ -780,9 +780,10 @@ permission_resume_cases(){
   await_result(){ [ "${FAKE_AWAIT:-0}" = 0 ]; }
   # a) native witness: resumed once in the same session with the remaining budget
   PERMISSION_RESUMES=3; : > "$calls"; rm -f "$out.terminal.json"
-  jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:7}' > "$out"; witness
+  rm -f "$out.prior-usage"; jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:7}' > "$out"; witness
   recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
   check 'native PermissionCancelled resumes the same session once with the remaining turns' "[ $rc -eq 0 ] && [ \$(wc -l < '$calls') -eq 1 ] && grep -q '^13 s1 The Grok CLI refused' '$calls' && jq -e '.stopReason==\"end_turn\"' '$out' >/dev/null"
+  check 'replaced paid turn usage is kept for accounting' "[ -f '$out.prior-usage' ]"
   # b) raw stop token without the native witness never resumes
   : > "$calls"; rm -f "$out.terminal.json"
   jq -n '{stopReason:"permission_cancelled",sessionId:"s1",num_turns:7}' > "$out"
