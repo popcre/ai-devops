@@ -23,9 +23,9 @@ BW(){ "$SCRIPT" "$@"; }
 WAITS="$TMP/home/waits"; REAPED="$TMP/home/reaped"; REAPLOG="$TMP/home/reap.log"
 mkdir -p "$WAITS" "$TMP/home/logs" "$TMP/work-clean" "$TMP/work-dirty"
 # A dirty worktree with unique uncommitted work (preserve rule).
-( cd "$TMP/work-dirty" && git init -q && git commit -q --allow-empty -m init && echo unique > newfile.txt )
+( cd "$TMP/work-dirty" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init && echo unique > newfile.txt )
 # A clean worktree (no uncommitted work).
-( cd "$TMP/work-clean" && git init -q && git commit -q --allow-empty -m init )
+( cd "$TMP/work-clean" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init )
 
 ts_ago(){ date -u -d "$1 ago" +%Y-%m-%dT%H:%M:%SZ; }
 
