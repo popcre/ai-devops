@@ -174,10 +174,12 @@
       ],
       "bin/ai-process-supervisor": [
         "test-mcp-launch-lock.sh",
+        "test-mcp-session-guard.sh",
         "test-ai-review-sandbox.sh"
       ],
       "bin/ai-process-supervisor.cmd": [
         "test-mcp-launch-lock.sh",
+        "test-mcp-session-guard.sh",
         "test-ai-review-sandbox.sh"
       ],
       "bin/ai-workspace-status": [
@@ -222,6 +224,29 @@
       "config/reviewer-ci-paths.txt": [
         "test-reviewer-ci-paths.sh",
         "test-workflow-policy.sh"
+      ],
+      "bin/mcp-session-guard": [
+        "test-mcp-session-guard.sh",
+        "test-mcp-launch-lock.sh",
+        "test-bin-cmd-launchers.sh"
+      ],
+      "bin/mcp-session-guard.cmd": [
+        "test-mcp-session-guard.sh",
+        "test-mcp-launch-lock.sh",
+        "test-bin-cmd-launchers.sh"
+      ],
+      "bin/mcp-session-guard.mjs": [
+        "test-mcp-session-guard.sh"
+      ],
+      "bin/mcp-secret-launch.ps1": [
+        "test-mcp-session-guard.sh",
+        "test-mcp-launch-lock.sh"
+      ],
+      "tests/test-mcp-session-guard.sh": [
+        "test-mcp-session-guard.sh"
+      ],
+      "tests/proof-mcp-session-reap.sh": [
+        "test-mcp-session-guard.sh"
       ]
     },
     "companion_suites": {

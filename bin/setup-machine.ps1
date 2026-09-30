@@ -388,6 +388,13 @@ Ok "Installed mcp.env (op:// references only, no secrets)"
 # 5. Launcher that injects secrets at MCP-server start
 # --------------------------------------------------------------------------
 Step "MCP launcher -> $Launcher"
+# Install the session guard beside the launchers so every MCP helper dies with
+# its session (stdin EOF / parent death / process-tree kill).
+$guardSource = Join-Path $RepoPath 'bin\mcp-session-guard.mjs'
+$guardDest = Join-Path $CfgDir 'mcp-session-guard.mjs'
+if (-not (Test-Path -LiteralPath $guardSource)) { throw "Missing MCP session guard: $guardSource" }
+Copy-Item -LiteralPath $guardSource -Destination $guardDest -Force
+Ok "MCP session guard -> $guardDest"
 $launcherBody = @"
 @echo off
 rem [ai-devops] one single-flight 1Password refresh, then DPAPI cache reuse.
@@ -478,21 +485,25 @@ $McpServerCatalog["vercel"] = [ordered]@{
   type = "http"
   url = "https://mcp.vercel.com"
 }
+# Non-secret servers still run under the session guard (same lifetime contract
+# as the secret launcher). command=node + guard.mjs, never bare package bins.
+$guardJsPath = Join-Path $CfgDir 'mcp-session-guard.mjs'
+$nodeExe = (Get-Command node -ErrorAction Stop).Source
 $McpServerCatalog["playwright"] = @{
-  command = "cmd"
-  args = @("/c", $McpCommands.playwright)
+  command = $nodeExe
+  args = @($guardJsPath, $McpCommands.playwright)
 }
 $McpServerCatalog["chrome-devtools"] = @{
-  command = "cmd"
-  args = @("/c", $McpCommands.chrome)
+  command = $nodeExe
+  args = @($guardJsPath, $McpCommands.chrome)
 }
 $McpServerCatalog["ag-grid"] = @{
-  command = "cmd"
-  args = @("/c", $McpCommands.aggrid)
+  command = $nodeExe
+  args = @($guardJsPath, $McpCommands.aggrid)
 }
 $McpServerCatalog["railway"] = @{
-  command = "cmd"
-  args = @("/c", $McpCommands.remote, "https://mcp.railway.com")
+  command = $nodeExe
+  args = @($guardJsPath, $McpCommands.remote, "https://mcp.railway.com")
 }
 
 # codex-cli (stdio). Deliberately NOT wrapped in the op launcher: Codex carries
@@ -524,9 +535,10 @@ $codexEnv = @{ MCP_TOOL_TIMEOUT = "3600000" }
 if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   # Absolute path: the MSIX sandbox does not inherit the user PATH, and an
   # absolute exe also sidesteps PATH resolution picking a broken shim.
+  # Session guard keeps the helper from outliving the session.
   $McpServerCatalog["codex-cli"] = @{
-    command = $codexExe
-    args    = @("mcp-server")
+    command = $nodeExe
+    args    = @($guardJsPath, $codexExe, "mcp-server")
     env     = $codexEnv
   }
   Ok "codex-cli -> native mcp-server ($codexExe)"
@@ -534,8 +546,8 @@ if ($codexExe -and (Test-Path -LiteralPath $codexExe)) {
   # No standalone package (e.g. npm-global install). Use what's on PATH, but say
   # so plainly - we have not proven this one's sandbox can write.
   $McpServerCatalog["codex-cli"] = @{
-    command = $cmd.Source
-    args    = @("mcp-server")
+    command = $nodeExe
+    args    = @($guardJsPath, $cmd.Source, "mcp-server")
     env     = $codexEnv
   }
   Warn "codex-cli -> $($cmd.Source) (non-standalone; run 'ai-devops doctor' to prove its sandbox can write)"
