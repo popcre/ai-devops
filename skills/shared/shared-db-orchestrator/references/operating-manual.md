@@ -1,5 +1,9 @@
 # Shared DB orchestrator operating manual
 
+> **Reference only. Claim-first is the default; no orchestrator chat or marker
+> is required.** The safety rules in this manual stay binding whenever shared-db
+> structural work runs.
+
 ## Contents
 
 1. Startup recovery
@@ -23,8 +27,7 @@ same command. Do not call GitHub unavailable and do not widen the task to full
 filesystem access. The repair grants read-only access to that one settings
 folder; GitHub credentials remain in Windows Credential Manager.
 
-Confirm the sole open orchestrator marker,
-then rebuild state from current `main`, open `db-work` and `db-claim` issues,
+Rebuild state from current `main`, open `db-work` and `db-claim` issues,
 open pull requests, GitHub coordination refs and local worktrees. Documents and
 local scratch registers are never authority.
 
@@ -149,9 +152,9 @@ into the orchestrator context. Continue independent structural work, disclose
 the blocker and business consequence immediately, and follow the repair task
 until the original capability is restored.
 
-If Albert's authority is required, record it immediately in plain business
-language with one exact request and the consequence of waiting. Never silently
-park an owner decision. Reviewer, tooling, allocator, and rate-limit failures are
+Never request Albert's authority for a technical step (owner ruling
+2026-09-28): get an assigned AI reviewer's APPROVE or report it `Blocked —`.
+Ask Albert only a business-meaning question. Never silently park a decision. Reviewer, tooling, allocator, and rate-limit failures are
 urgent operational blockers: preserve capability, use bounded API calls, read
 and report the provider reset time in Eastern Time, and do not repeatedly invoke
 a path already known to be unsafe. The reviewer-allocator redesign blocker is
@@ -184,7 +187,7 @@ scope block. Never paste a private artifact into a public shared-db issue.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Keep object protection separate from author leases. A dependency wait creates no successful workflow evidence. Immediately before each manual preview run, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and dispatch only the matching instruction. Historical recovery uses `mode=apply` only; its dry-run applies nothing and proves nothing. Repair only a v2-bound stale wrong digest with `--repair-preview-ready <ready-id> --issue <n>`; a corrupt current digest needs an owner decision and no mutation. Reviewer reservations record one review per exact head and session; a provider already reviewing is never busy and never causes a wait (decision 21).
+Keep object protection separate from author leases. A dependency wait creates no successful workflow evidence. Immediately before each manual preview run, re-audit live claims, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector/fresh-ledger check, and dispatch only the matching instruction. Historical recovery uses `mode=apply` only; its dry-run applies nothing and proves nothing. Repair only a v2-bound stale wrong digest with `--repair-preview-ready <ready-id> --issue <n>`; a corrupt current digest stops without mutation and goes to an assigned AI reviewer, never to Albert. Reviewer reservations record one review per exact head and session; a provider already reviewing is never busy and never causes a wait (decision 21).
 
 ## Preview and merge locks
 

@@ -586,8 +586,15 @@ run new t1 --prompt "review this" >/dev/null 2>&1
 ARGV="$(cat "$TMP/argv.txt")"
 check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
 check "new pins the model"                "grep -q -- '--model grok-4.6' '$TMP/argv.txt'"
-check "new denies Edit"                   "grep -q -- '--deny Edit' '$TMP/argv.txt'"
-check "new denies Bash"                   "grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "new allows Edit in the snapshot"   "grep -q -- '--allow Edit' '$TMP/argv.txt' && ! grep -q -- '--deny Edit' '$TMP/argv.txt'"
+check "new allows Bash in the snapshot"   "grep -q -- '--allow Bash' '$TMP/argv.txt' && ! grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "prompt says not read-only and edits are discarded" "grep -q 'You are NOT read-only' '$TMP/prompt-copy' && grep -q 'discarded' '$TMP/prompt-copy'"
+T1_DIR="$(run show t1 | jq -r '.review_dir')"
+check "writable review dir is a snapshot, not the caller checkout" "[ -d '$T1_DIR' ] && [ \"\$(cd '$T1_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
+check "writable review snapshot has no git remote" "[ -z \"\$(git -C '$T1_DIR' remote)\" ]"
+check "reviewer child env is cleared of operator secrets" "test \"\$(grep -cF 'env -i \"\${base_env[@]}\"' '$SCRIPT')\" -eq 2"
+check "caller checkout is verified unchanged after every turn" "grep -q 'changed during the Grok turn' '$SCRIPT'"
+check "legacy live-checkout sessions are refused" "grep -q 'bound to the live checkout' '$SCRIPT'"
 check "new disables web search"           "grep -q -- '--disable-web-search' '$TMP/argv.txt'"
 check "new passes --no-memory"            "grep -q -- '--no-memory' '$TMP/argv.txt'"
 check "review disables ambient MCP, hook, and compatibility session imports" "grep -qx 'false|false|false|false' '$TMP/isolation.txt'"
@@ -606,7 +613,7 @@ check "isolation inspection rejects an enabled compatibility hook" "test '$BAD_H
 INSPECT_HANG="$(AI_GROK_TEST_INSPECT_MODE=inspecthang AI_GROK_ISOLATION_TIMEOUT=2 run new inspect-hang --prompt x 2>&1)"; INSPECT_HANG_RC=$?
 check "hung isolation inspection is bounded and its process tree is terminated" "test '$INSPECT_HANG_RC' -ne 0 && grep -q 'process tree was terminated' <<<\"$INSPECT_HANG\" && test -s '$TMP/inspect-hang-pid' && ! kill -0 \"\$(cat '$TMP/inspect-hang-pid')\" 2>/dev/null"
 check "never uses permission-mode auto"   "! grep -q -- '--permission-mode auto' '$TMP/argv.txt'"
-check "never allows Bash"                 "! grep -q -- '--allow Bash' '$TMP/argv.txt'"
+check "Bash allowance is explicit, not auto" "grep -q -- '--permission-mode default' '$TMP/argv.txt'"
 check "never uses --always-approve"       "! grep -q -- '--always-approve' '$TMP/argv.txt'"
 check "uses --prompt-file (no ARG_MAX)"   "grep -q -- '--prompt-file' '$TMP/argv.txt'"
 
@@ -614,7 +621,7 @@ check "uses --prompt-file (no ARG_MAX)"   "grep -q -- '--prompt-file' '$TMP/argv
 run ask t1 --prompt "follow up" >/dev/null 2>&1
 check "ask passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.txt'"
 check "ask resumes the session"           "grep -q -- '--resume 019fd4e9' '$TMP/argv.txt'"
-check "ask keeps the frozen permissions"  "grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "ask keeps the frozen permissions"  "grep -q -- '--allow Bash' '$TMP/argv.txt' && grep -q -- '--disable-web-search' '$TMP/argv.txt'"
 
 # Long session names must review, resume, and leave only bounded file names.
 LONG_NAME="long-$(printf 'n%.0s' $(seq 1 150))"
@@ -1332,14 +1339,20 @@ cat > "$POOLTMP/lifecycle" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
   begin) printf '{"head":"$FAKE_HEAD","source_digest":"deadbeef","stale":false,"verdict":null}\n' > "\$(dirname "\$0")/state.json"; printf '%s\n' "\$(dirname "\$0")/state.json" ;;
-  finish) verdict=''; shift; while [ \$# -gt 0 ]; do [ "\$1" = --verdict ] && verdict="\$2"; shift; done; printf '{"stale":false,"verdict":"%s"}\n' "\$verdict" ;;
+  finish) verdict=''; shift; while [ \$# -gt 0 ]; do [ "\$1" = --verdict ] && verdict="\$2"; shift; done; printf '%s\n' "\$verdict" >> "\$(dirname "\$0")/finish-verdicts"; printf '{"stale":false,"verdict":"%s"}\n' "\$verdict" ;;
   *) exit 0 ;;
 esac
 EOF
 cat > "$POOLTMP/runner" <<'EOF'
 #!/usr/bin/env bash
 # invoked as: runner new TAG --prompt-file BRIEF --max-turns N
+#             runner delete TAG   (pool one-shot session release, #711 Phase 5)
 printf '%s\n' "$*" >> "$(dirname "$0")/runner-args"
+if [ "$1" = delete ]; then
+  printf 'pwd=%s\n' "$PWD" >> "$(dirname "$0")/delete-log"
+  [ "${POOL_RUNNER_DELETE_MODE:-ok}" = refuse ] && exit 7
+  exit 0
+fi
 git remote get-url origin > "$(dirname "$0")/origin-url" 2>/dev/null || true
 BRIEF="$4"
 HEAD="$(grep -oE 'head commit is [0-9a-f]{7,40}' "$BRIEF" | head -1 | sed 's/.*is //')"
@@ -1348,6 +1361,9 @@ case "${POOL_RUNNER_MODE:-approve}" in
   nounbound) printf 'Some analysis without naming the head under review, deliberately long enough to clear the report floor so that the binding check is the only failure mode exercised by this case, with no other assertion depending on the content of this paragraph.\n\n## Verdict\nAPPROVE\n' ;;
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+  provisional) printf '## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own. Head under review: %s.\n\n## Verdict\nREJECT\n' "$HEAD" ;;
+  provisionalonly) printf 'Head under review: %s.\n\n## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n' "$HEAD" ;;
+  headafterfinal) printf '## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n\n## Verdict\nAPPROVE\nHead: %s\n' "$HEAD" ;;
   drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
   credit) printf 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota\nOUT OF CREDIT: stub - then run: ai-review-preflight clear grok\n' >&2; exit 92 ;;
   chrome) printf 'runner progress chrome naming the head %s with enough padding text that a whole-buffer byte floor would pass if chrome were counted toward the analysis floor, which is exactly what this mode must not reward\n' "$HEAD" >&2; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
@@ -1379,10 +1395,54 @@ check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runn
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
 check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
 check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 32'"
+# Issue #711 Phase 5 (B'): a one-shot pool review releases the runner's session
+# through the runner's own delete path once the verdict is accounted, from
+# inside the snapshot; a refused or skipped release must never fail or narrow
+# the completed review, and unwired providers note-and-retain. These checks
+# use a private sandbox root so retention cases leave nothing on the machine.
+SBXROOT="$POOLTMP/sbxroot"; mkdir -p "$SBXROOT"
+# The sandbox tool canonicalizes its root with pwd -P, so compare against the
+# resolved spelling — the raw mktemp path diverges on the Windows lanes
+# (same hazard the suite already documents near the gemini checks).
+SBXROOT="$(cd "$SBXROOT" && pwd -P)"
+rm -f "$POOLTMP/delete-log"
+REL_BASE="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" bash "$POOL" muse final-check ) > "$POOLTMP/out-rel" 2>&1; RC_REL=$?
+REL_DELETE_COUNT="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+REL_PWD="$(sed -n 's/^pwd=//p' "$POOLTMP/delete-log" 2>/dev/null | tail -1)"
+check "pool_muse_success_releases_the_one_shot_session" "[ '$RC_REL' -eq 0 ] && [ '$REL_DELETE_COUNT' -eq $(( REL_BASE + 1 )) ]"
+check "pool_muse_release_runs_from_inside_the_snapshot" "case '$REL_PWD' in '$SBXROOT'/pool-muse-*) true;; *) false;; esac"
+check "pool_muse_success_keeps_the_report_path_last" "case \"\$(tail -1 '$POOLTMP/out-rel')\" in *.md) true;; *) false;; esac"
+DEL_BASE="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" AI_KEEP_SANDBOX=1 bash "$POOL" muse final-check ) > "$POOLTMP/out-keep" 2>&1; RC_KEEP=$?
+DEL_AFTER_KEEP="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+check "pool_muse_keep_sandbox_short_circuits_the_release" "[ '$RC_KEEP' -eq 0 ] && [ '$DEL_AFTER_KEEP' -eq '$DEL_BASE' ]"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" POOL_RUNNER_MODE=nounbound bash "$POOL" muse final-check ) > "$POOLTMP/out-relfail" 2>&1; RC_RELFAIL=$?
+DEL_AFTER_FAIL="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+check "pool_muse_failed_verdict_retains_the_session" "[ '$RC_RELFAIL' -ne 0 ] && [ '$DEL_AFTER_FAIL' -eq '$DEL_BASE' ]"
+rm -f "$POOLTMP/flip"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" POOL_RUNNER_MODE=drift bash "$POOL" muse final-check ) > "$POOLTMP/out-reldrift" 2>&1; RC_RELDRIFT=$?
+DEL_AFTER_DRIFT="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+check "pool_muse_stale_review_retains_the_session" "[ '$RC_RELDRIFT' -ne 0 ] && [ '$DEL_AFTER_DRIFT' -eq '$DEL_BASE' ]"
+rm -f "$POOLTMP/flip"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" POOL_RUNNER_DELETE_MODE=refuse bash "$POOL" muse final-check ) > "$POOLTMP/out-reldeny" 2>&1; RC_DENY=$?
+check "pool_muse_refused_release_never_fails_the_review" "[ '$RC_DENY' -eq 0 ] && grep -q 'session release refused' '$POOLTMP/out-reldeny' && grep -q 'retained until sweep' '$POOLTMP/out-reldeny'"
+check "pool_muse_refused_release_keeps_the_report_path_last" "case \"\$(tail -1 '$POOLTMP/out-reldeny')\" in *.md) true;; *) false;; esac"
+GRK_BASE="$(grep -c '^delete pool-grok-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" bash "$POOL" grok security-review ) > "$POOLTMP/out-grkrel" 2>&1; RC_GRKREL=$?
+GRK_AFTER="$(grep -c '^delete pool-grok-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+check "pool_grok_success_notes_and_retains" "[ '$RC_GRKREL' -eq 0 ] && [ '$GRK_AFTER' -eq '$GRK_BASE' ] && grep -q 'not yet wired for grok' '$POOLTMP/out-grkrel'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=nounbound bash "$POOL" grok security-review ) > "$POOLTMP/out-nb" 2>&1; RC_NB=$?
 check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
 check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-nv'"
+rm -f "$POOLTMP/finish-verdicts"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisional bash "$POOL" grok security-review ) > "$POOLTMP/out-prov" 2>&1; RC_PROV=$?
+check "pool_adapter_takes_the_final_verdict_not_the_provisional_one" "[ '$RC_PROV' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = REJECT ]"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=headafterfinal bash "$POOL" grok security-review ) > "$POOLTMP/out-haf" 2>&1; RC_HAF=$?
+check "pool_adapter_binds_head_only_before_the_final_verdict" "[ '$RC_HAF' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-haf'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisionalonly bash "$POOL" grok security-review ) > "$POOLTMP/out-po" 2>&1; RC_PO=$?
+check "pool_adapter_floor_counts_only_text_before_the_final_verdict" "[ '$RC_PO' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-po'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" grok security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
 check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?

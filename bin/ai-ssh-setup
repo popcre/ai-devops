@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# ai-ssh-setup — Linux/macOS equivalent of bin/setup-machine.ps1 steps 5b/5c.
+#
+#   1. Restores the "916-alien" SSH key (dev machines -> hetz VPS) from
+#      1Password to ~/.ssh/916-alien and ~/.ssh/916-alien.pub.
+#   2. Installs the private SSH host-alias template (ai-private-config path
+#      ssh_config) as ~/.ssh/ai-devops.conf and puts "Include ai-devops.conf"
+#      FIRST in ~/.ssh/config, keeping everything else in that file.
+#
+# Idempotent. Secret values travel only through pipes and mode-600 files; they
+# are never printed, logged, or passed as command arguments. When op is missing
+# or cannot read the item, the key step is skipped and an existing key is left
+# untouched. A key that ssh-keygen cannot parse is never installed.
+#
+# Usage: ai-ssh-setup [--dry-run]
+# Test hooks: AI_SSH_SETUP_TEMPLATE overrides the template path;
+#             AI_SSH_SETUP_PRIVATE_REF / AI_SSH_SETUP_PUBLIC_REF override refs.
+set -u
+
+DRY_RUN=0
+case "${1:-}" in
+  --dry-run) DRY_RUN=1 ;;
+  "") ;;
+  -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+  *) printf 'usage: ai-ssh-setup [--dry-run]\n' >&2; exit 2 ;;
+esac
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SSH_DIR="$HOME/.ssh"
+KEY="$SSH_DIR/916-alien"
+PRIV_REF="${AI_SSH_SETUP_PRIVATE_REF:-op://vibe_coding/916-alien SSH key/private key}"
+PUB_REF="${AI_SSH_SETUP_PUBLIC_REF:-op://vibe_coding/916-alien SSH key/public key}"
+CONF_NAME="ai-devops.conf"
+INCLUDE_LINE="Include $CONF_NAME"
+STAMP="$(date +%Y%m%d%H%M%S)"
+status=0
+
+ok()   { printf '  ok %s\n' "$1"; }
+warn() { printf '[WARN] %s\n' "$1" >&2; }
+
+umask 077
+if [ "$DRY_RUN" -eq 0 ]; then
+  mkdir -p "$SSH_DIR" && chmod 700 "$SSH_DIR"
+fi
+
+# ---------------------------------------------------------------- 1. key
+restore_key() {
+  if ! command -v op >/dev/null 2>&1; then
+    warn "op (1Password CLI) not found - skipping 916-alien key restore."
+    return 0
+  fi
+  if ! command -v ssh-keygen >/dev/null 2>&1; then
+    warn "ssh-keygen not found - skipping 916-alien key restore."
+    return 0
+  fi
+  local work; work="$(mktemp -d "${TMPDIR:-/tmp}/ai-ssh-setup.XXXXXX")" || return 1
+  # shellcheck disable=SC2064
+  trap "rm -rf '$work'" RETURN
+  if ! op read "$PRIV_REF" </dev/null >"$work/key" 2>/dev/null || [ ! -s "$work/key" ]; then
+    warn "Could not read the 916-alien private key from 1Password - skipping (existing key left as is)."
+    return 0
+  fi
+  # Private keys need LF newlines and a trailing newline.
+  tr -d '\r' <"$work/key" >"$work/key.lf" && mv "$work/key.lf" "$work/key"
+  [ -n "$(tail -c 1 "$work/key")" ] && printf '\n' >>"$work/key"
+  chmod 600 "$work/key"
+  if ! ssh-keygen -y -f "$work/key" </dev/null >"$work/derived.pub" 2>/dev/null; then
+    warn "1Password returned data that ssh-keygen cannot parse as a private key - not installed."
+    return 1
+  fi
+  local derived; derived="$(awk '{print $1" "$2}' "$work/derived.pub")"
+  if op read "$PUB_REF" </dev/null >"$work/stored.pub" 2>/dev/null && [ -s "$work/stored.pub" ]; then
+    if [ "$(tr -d '\r' <"$work/stored.pub" | awk '{print $1" "$2}')" != "$derived" ]; then
+      warn "1Password public key does not match its private key - not installed."
+      return 1
+    fi
+    tr -d '\r' <"$work/stored.pub" | tr '\n' ' ' | sed 's/[[:space:]]*$//' >"$work/pub"
+    printf '\n' >>"$work/pub"
+  else
+    cp "$work/derived.pub" "$work/pub"
+  fi
+
+  if [ -f "$KEY" ] && cmp -s "$work/key" "$KEY" && [ -f "$KEY.pub" ] && cmp -s "$work/pub" "$KEY.pub"; then
+    [ "$DRY_RUN" -eq 0 ] && chmod 600 "$KEY"
+    ok "916-alien key already current"
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '[dry-run] would install %s (+ .pub)\n' "$KEY"; return 0
+  fi
+  if [ -f "$KEY" ] && ! cmp -s "$work/key" "$KEY"; then
+    cp -p "$KEY" "$KEY.bak.$STAMP" && ok "Previous key kept at $KEY.bak.$STAMP"
+  fi
+  cp "$work/key" "$SSH_DIR/.916-alien.new" && chmod 600 "$SSH_DIR/.916-alien.new" &&
+    mv -f "$SSH_DIR/.916-alien.new" "$KEY" || { warn "Could not write $KEY"; return 1; }
+  cp "$work/pub" "$SSH_DIR/.916-alien.pub.new" && chmod 644 "$SSH_DIR/.916-alien.pub.new" &&
+    mv -f "$SSH_DIR/.916-alien.pub.new" "$KEY.pub" || { warn "Could not write $KEY.pub"; return 1; }
+  ok "Restored $KEY (+ .pub), verified with ssh-keygen"
+}
+
+# ---------------------------------------------------------------- 2. config
+install_config() {
+  local tmpl="${AI_SSH_SETUP_TEMPLATE:-}"
+  if [ -z "$tmpl" ]; then
+    tmpl="$("$ROOT/bin/ai-private-config" path ssh_config 2>/dev/null | tail -n 1)" || tmpl=""
+  fi
+  if [ -z "$tmpl" ] || [ ! -f "$tmpl" ]; then
+    warn "Private SSH template unavailable (ai-private-config path ssh_config) - skipping SSH aliases."
+    return 1
+  fi
+  if grep -q 'ping -n 1 -w' "$tmpl" && ! grep -q 'ping -c 1' "$tmpl"; then
+    warn "SSH template still uses Windows-only ping probes (they hang on Linux) - not installed. Update the private config."
+    return 1
+  fi
+  local conf="$SSH_DIR/$CONF_NAME" main="$SSH_DIR/config"
+  if [ -f "$conf" ] && cmp -s "$tmpl" "$conf"; then
+    ok "ai-devops.conf already current"
+  elif [ "$DRY_RUN" -eq 1 ]; then
+    printf '[dry-run] would install %s\n' "$conf"
+  else
+    cp "$tmpl" "$conf.new" && chmod 600 "$conf.new" && mv -f "$conf.new" "$conf" || { warn "Could not write $conf"; return 1; }
+    ok "Installed $conf"
+  fi
+
+  local want
+  if [ -f "$main" ]; then
+    # Drop any existing managed Include (and its old marker comment), then put
+    # one Include first. OpenSSH uses the first value it sees for a setting.
+    want="$(awk -v inc="$INCLUDE_LINE" '
+      BEGIN { print inc; print "" }
+      /^[[:space:]]*#[[:space:]]*ai-devops managed host aliases/ { next }
+      /^[[:space:]]*[Ii]nclude[[:space:]]+ai-devops\.conf[[:space:]]*$/ { next }
+      { lines[++n] = $0 }
+      END { s = 1; while (s <= n && lines[s] ~ /^[[:space:]]*$/) s++; for (i = s; i <= n; i++) print lines[i] }
+    ' <(tr -d '\r' <"$main"))"
+  else
+    want="$INCLUDE_LINE"
+  fi
+  if [ -f "$main" ] && [ "$(cat "$main")" = "$want" ]; then
+    ok "~/.ssh/config already Includes ai-devops.conf first"
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '[dry-run] would place "%s" first in %s\n' "$INCLUDE_LINE" "$main"; return 0
+  fi
+  [ -f "$main" ] && cp -p "$main" "$main.bak.$STAMP"
+  printf '%s\n' "$want" >"$main.new" && chmod 600 "$main.new" && mv -f "$main.new" "$main" ||
+    { warn "Could not write $main"; return 1; }
+  ok "Placed '$INCLUDE_LINE' first in ~/.ssh/config"
+}
+
+restore_key || status=1
+install_config || status=1
+exit "$status"

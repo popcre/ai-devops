@@ -11,6 +11,8 @@ bin/ai-provider-version*
 bin/ai-review*
 bin/windows-private-file.ps1
 config/ci-suite-manifest.json
+config/ci-suites/**
+tools/ci-suites/*
 config/provider-cli-versions.json
 config/reviewer-capacity.json
 config/reviewer-registry.json
@@ -49,6 +51,7 @@ bin/setup-opencode-muse.sh
 config/muse-code/**
 config/opencode/**
 config/opencode-muse/**
+config/opencode-stepfun/**
 config/systemd/opencode-*
 tests/fixtures/**
 tests/test-reviewer-ci-paths.sh

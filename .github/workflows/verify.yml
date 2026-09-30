@@ -87,7 +87,7 @@ jobs:
   # main's safety does not change. Unknown paths still select every suite.
   linux-offline-shard:
     needs: [fast-classifier, manual-preflight]
-    if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
+    if: ${{ !cancelled() && needs.fast-classifier.outputs.validation_result != 'failure' && (needs.fast-classifier.outputs.selection_result != 'success' || needs.fast-classifier.outputs.run_long != 'false') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     strategy:
       # One failing section must never hide the other sections' results.
       fail-fast: false
@@ -133,7 +133,7 @@ jobs:
   # the sections' condition, so it is skipped only when they legitimately were.
   linux-offline:
     needs: [fast-classifier, manual-preflight, linux-offline-shard]
-    if: ${{ !cancelled() && (needs.fast-classifier.result != 'success' || needs.fast-classifier.outputs.run_long == 'true') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
+    if: ${{ !cancelled() && needs.fast-classifier.outputs.validation_result != 'failure' && (needs.fast-classifier.outputs.selection_result != 'success' || needs.fast-classifier.outputs.run_long != 'false') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     env:
@@ -189,7 +189,7 @@ jobs:
           fi
           bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety
 
-  # Ordinary pull requests divide the Windows-sensitive lane into six declared
+  # Ordinary pull requests divide the Windows-sensitive lane into eight declared
   # sections that run at the same time on independent GitHub-hosted
   # machines (#210). Hosted concurrency is unmetered on a public repository, so
   # this is real parallelism on separate hardware, not several processes competing
@@ -239,8 +239,9 @@ jobs:
     # runs every section.
     if: >-
       !cancelled() && github.event_name == 'pull_request' &&
-      (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true')
+      needs.fast-classifier.outputs.validation_result != 'failure' &&
+      (needs.fast-classifier.outputs.selection_result != 'success' ||
+       needs.fast-classifier.outputs.run_long != 'false')
     name: windows-offline-section (${{ matrix.section }}, ${{ matrix.lane }})
     strategy:
       # One failing section must never hide the result of the other five:
@@ -250,8 +251,11 @@ jobs:
       # The router's plan; the literal fallback is the all-Blacksmith plan used
       # when the router produced nothing.
       matrix:
-        include: ${{ fromJSON(needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
+        include: ${{ fromJSON(needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":7,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":8,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
     runs-on: ${{ matrix.runs_on }}
+    # Eight sections since 2026-09-29 (#185): section 1 reached this 40-minute
+    # ceiling on EDGE-RUNN-ENVY (37-55 minutes), so test-ai-deepseek-agent.sh
+    # and test-ai-gh.sh moved to their own sections 7 and 8.
     # Six sections after PR #666's serial Gemini, GLM and Muse Code section
     # reached the 40-minute ceiling. Those three long suites now have distinct
     # sections; GLM shares only three short suites. Kimi stays declared and
@@ -279,10 +283,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $short | Out-Null
           "TEMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
           "TMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Windows-sensitive section ${{ matrix.section }} of 6
+      - name: Windows-sensitive section ${{ matrix.section }} of 8
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/6' -ChangedSince $env:SELECTION_BASE
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/8' -ChangedSince $env:SELECTION_BASE
       - name: Remove the short TEMP tree on a reused machine
         if: ${{ always() && matrix.lane == 'qualified-self-hosted' }}
         shell: pwsh
@@ -301,8 +305,9 @@ jobs:
     if: >-
       !cancelled() && github.event_name != 'merge_group' &&
       github.event_name != 'pull_request' &&
-      (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.run_long == 'true') &&
+      needs.fast-classifier.outputs.validation_result != 'failure' &&
+      (needs.fast-classifier.outputs.selection_result != 'success' ||
+       needs.fast-classifier.outputs.run_long != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
     # GitHub-hosted, on purpose. Self-hosted capacity was added to this
@@ -355,20 +360,22 @@ jobs:
       - name: Aggregate the Windows offline lane
         env:
           EVENT: ${{ github.event_name }}
-          CLASSIFIER_RESULT: ${{ needs.fast-classifier.result }}
+          SELECTION_RESULT: ${{ needs.fast-classifier.outputs.selection_result }}
           RUN_LONG: ${{ needs.fast-classifier.outputs.run_long }}
           RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
           SECTION_RESULT: ${{ needs.windows-offline-section.result }}
           COMPLETE_RESULT: ${{ needs.windows-offline-complete.result }}
         run: |
           set -uo pipefail
-          printf 'event=%s classifier=%s run_long=%s sections=%s complete=%s\n' \
-            "$EVENT" "$CLASSIFIER_RESULT" "$RUN_LONG" "$SECTION_RESULT" "$COMPLETE_RESULT"
+          printf 'event=%s selection=%s run_long=%s sections=%s complete=%s\n' \
+            "$EVENT" "$SELECTION_RESULT" "$RUN_LONG" "$SECTION_RESULT" "$COMPLETE_RESULT"
 
-          # A legitimate whole-lane skip: the classifier succeeded and proved the
-          # change is prose-only, or a manual run declined the expensive jobs.
+          # A legitimate whole-lane skip needs an explicit prose-only verdict
+          # from a successful selection, or a manual run that declined the
+          # expensive jobs. A missing or invalid classification is never a
+          # green skip: the lane keeps its fail-closed result.
           prose_only=false
-          if [ "$CLASSIFIER_RESULT" = 'success' ] && [ "$RUN_LONG" != 'true' ]; then
+          if [ "$SELECTION_RESULT" = 'success' ] && [ "$RUN_LONG" = 'false' ]; then
             prose_only=true
           fi
           if [ "$EVENT" = 'workflow_dispatch' ] && [ "$RUN_EXPENSIVE" != 'true' ]; then
@@ -377,7 +384,7 @@ jobs:
 
           if [ "$EVENT" = 'pull_request' ]; then
             lane_result="$SECTION_RESULT"
-            lane_name='the six Windows sections'
+            lane_name='the eight Windows sections'
           else
             lane_result="$COMPLETE_RESULT"
             lane_name='the complete Windows matrix'
@@ -402,8 +409,9 @@ jobs:
       !cancelled() && github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
-      (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.reviewer == 'true') &&
+      needs.fast-classifier.outputs.validation_result != 'failure' &&
+      (needs.fast-classifier.outputs.selection_result != 'success' ||
+       needs.fast-classifier.outputs.reviewer != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -443,8 +451,9 @@ jobs:
       !cancelled() && github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
-      (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.reviewer == 'true') &&
+      needs.fast-classifier.outputs.validation_result != 'failure' &&
+      (needs.fast-classifier.outputs.selection_result != 'success' ||
+       needs.fast-classifier.outputs.reviewer != 'false') &&
       needs.reviewer-runner-availability.outputs.preferred_available == 'true' &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
@@ -515,8 +524,9 @@ jobs:
       !cancelled() && github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
-      (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.reviewer == 'true') &&
+      needs.fast-classifier.outputs.validation_result != 'failure' &&
+      (needs.fast-classifier.outputs.selection_result != 'success' ||
+       needs.fast-classifier.outputs.reviewer != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -544,8 +554,9 @@ jobs:
     needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
     if: >-
       always() && !cancelled() && github.event_name != 'merge_group' &&
-      (needs.fast-classifier.result != 'success' ||
-       needs.fast-classifier.outputs.reviewer == 'true') &&
+      needs.fast-classifier.outputs.validation_result != 'failure' &&
+      (needs.fast-classifier.outputs.selection_result != 'success' ||
+       needs.fast-classifier.outputs.reviewer != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
@@ -584,7 +595,7 @@ jobs:
       - name: Aggregate reviewer safety proof
         env:
           EVENT: ${{ github.event_name }}
-          CLASSIFIER_RESULT: ${{ needs.fast-classifier.result }}
+          SELECTION_RESULT: ${{ needs.fast-classifier.outputs.selection_result }}
           RUN_REVIEWER: ${{ needs.fast-classifier.outputs.reviewer }}
           RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
           PREFERRED_RESULT: ${{ needs.reviewer-safety-start-deadline.outputs.preferred_result }}
@@ -592,8 +603,8 @@ jobs:
           FALLBACK_RESULT: ${{ needs.windows-reviewer-fallback.result }}
         run: |
           set -uo pipefail
-          printf 'event=%s classifier=%s reviewer=%s preferred=%s watchdog=%s fallback=%s\n' \
-            "$EVENT" "$CLASSIFIER_RESULT" "$RUN_REVIEWER" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT"
+          printf 'event=%s selection=%s reviewer=%s preferred=%s watchdog=%s fallback=%s\n' \
+            "$EVENT" "$SELECTION_RESULT" "$RUN_REVIEWER" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT"
 
           if [ "$PREFERRED_RESULT" = 'success' ]; then
             printf 'windows-reviewer-safety: qualified self-hosted proof succeeded.\n'
@@ -604,8 +615,11 @@ jobs:
             exit 0
           fi
 
+          # A legitimate skip needs an explicit "reviewer is not selected"
+          # verdict from a successful selection, or a manual run that declined
+          # the expensive jobs. Unknown selection is never a green skip.
           legitimate_skip=false
-          if [ "$CLASSIFIER_RESULT" = 'success' ] && [ "$RUN_REVIEWER" != 'true' ]; then
+          if [ "$SELECTION_RESULT" = 'success' ] && [ "$RUN_REVIEWER" = 'false' ]; then
             legitimate_skip=true
           fi
           if [ "$EVENT" = 'workflow_dispatch' ] && [ "$RUN_EXPENSIVE" != 'true' ]; then
@@ -638,8 +652,9 @@ jobs:
         run: |
           bash tools/ci/verify-closure.sh \
             "${{ github.event_name }}" \
-            "${{ needs.fast-classifier.result }}" \
+            "${{ needs.fast-classifier.outputs.selection_result }}" \
             "${{ needs.fast-classifier.outputs.run_long }}" \
+            "${{ needs.fast-classifier.outputs.validation_result }}" \
             "${{ needs.merge-group-evidence.result }}" \
             "${{ needs.linux-offline.result }}" \
             "${{ needs.windows-offline.result }}" \
@@ -657,14 +672,19 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Open or update the scheduled verification incident
         shell: bash
         run: |
-          title='Scheduled full verification is failing'
-          body="The complete scheduled matrix failed at $RUN_URL. Diagnose the named failing job and close this issue only after a later complete scheduled run passes."
-          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug
-          fi
+          needs_summary=""
+          for pair in \
+            "fast-classifier=${{ needs.fast-classifier.result }}" \
+            "linux-offline=${{ needs.linux-offline.result }}" \
+            "windows-offline-complete=${{ needs.windows-offline-complete.result }}" \
+            "windows-reviewer-safety=${{ needs.windows-reviewer-safety.result }}"; do
+            needs_summary="$needs_summary$pair "
+          done
+          bash tools/ci/report-scheduled-failure.sh \
+            --run-url "$RUN_URL" \
+            --repo "$GITHUB_REPOSITORY" \
+            --results "$needs_summary"

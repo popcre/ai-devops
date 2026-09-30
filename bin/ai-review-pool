@@ -9,10 +9,11 @@
 #     (base + assert-head) before and after the paid run;
 #   - ai-review-lifecycle begin runs the provider preflight (health and
 #     quarantine) and owns terminal accounting;
-#   - the session runners (ai-grok-review and siblings) are read-only
-#     (Read/Grep only, no shell, no web) and read the checkout by absolute
-#     path, so no sandbox copy is taken; packet verify after the run is the
-#     source-drift guard;
+#   - the session runners (ai-grok-review and siblings) are NOT read-only
+#     (owner instruction, issue #974): each may run shell commands, builds,
+#     tests and edits, but only inside its own disposable, remote-less copy;
+#     the caller's checkout is never written, and packet verify after the run
+#     is the source-drift guard;
 #   - a verdict is valid only when the report carries a literal
 #     "## Verdict" heading with exactly one allowed word AND names the
 #     reviewed head SHA, and the report clears a minimum analysis floor.
@@ -42,7 +43,7 @@ CALLER="${AI_POOL_CALLER:-zcode}"
 
 die(){ printf 'ai-review-pool: error: %s\n' "$*" >&2; exit 3; }
 
-# Briefs carry owner-request text and reports carry model-quoted source; both
+# Briefs carry reviewer-approval references and reports carry model-quoted source; both
 # stay private on a shared machine (the session runners do the same).
 umask 077
 
@@ -119,11 +120,12 @@ RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"; STARTED="$(date +%s)"
 # short name from the provider, mode, caller and that exact run ID. A rare
 # collision still fails closed in the runner's own session reservation.
 TAG="pool-${provider}-$(printf '%s' "${provider}-${mode}-${CALLER}-${RUN_ID}" | git hash-object --stdin | cut -c1-16)"
-STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""; REVIEW_DIR=""
+STATE=""; TMP_BRIEF=""; TMP_TEXT=""; TMP_ERR=""; TMP_TESTS=""; TMP_DELETE=""; REVIEW_DIR=""
 cleanup(){
   reviewer_event_cleanup_allowed "$provider" || return 1
   [ -z "$TMP_BRIEF" ] || rm -f "$TMP_BRIEF"; [ -z "$TMP_TEXT" ] || rm -f "$TMP_TEXT"
   [ -z "$TMP_ERR" ] || rm -f "$TMP_ERR"; [ -z "$TMP_TESTS" ] || rm -f "$TMP_TESTS"
+  [ -z "$TMP_DELETE" ] || rm -f "$TMP_DELETE"
   [ -z "$REVIEW_DIR" ] || "$SANDBOX" remove-copy "$REPO_ROOT" "$TAG" >/dev/null 2>&1 || true
 }
 # Under set -e a refused cleanup would replace the real exit code (for
@@ -187,9 +189,9 @@ case "$mode" in
   security-review) DECISION='Judge only security risks: authorization, data leakage, injection, secrets, file boundaries, and permissions.';;
   final-check) DECISION='Give the final go/no-go judgment for shipping this exact source state.';;
 esac
-if [ -n "${AI_REVIEW_OWNER_REQUEST:-}" ]; then DECISION="$DECISION
+if [ -n "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] && [ -f "$AI_REVIEW_REVIEWER_APPROVAL" ]; then DECISION="$DECISION
 
-Owner request governing this review: $AI_REVIEW_OWNER_REQUEST"; fi
+Assigned AI reviewer approval governing this review: $(basename "$AI_REVIEW_REVIEWER_APPROVAL")"; fi
 
 TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"; TMP_ERR="$(mktemp "$REPORT_DIR/.pool-stderr.XXXXXX")"
 CHANGED_FILES=""
@@ -220,7 +222,7 @@ if [ -n "$TESTS_COMMAND" ]; then
   fi
 fi
 cat > "$TMP_BRIEF" <<BRIEF
-You are performing a READ-ONLY $mode. Do not edit, create, commit, push, merge, or delete files. Use only your read-only tools (no shell, no web search).
+You are performing a $mode. You MAY run shell commands, builds and tests, and edit files, but only inside your disposable review copy: your edits are discarded and are never part of the change under review. Never commit, push, merge, or touch any remote, the pull-request branch, or any checkout outside your copy. No web search.
 
 Your session harness announces an evidence packet (a sealed snapshot of the repository with a MANIFEST.md and the patch). THAT PACKET is the review subject, and you may read only files inside it - never the live working checkout, whose ignored files are outside this review's boundary. The reviewed head commit is $REVIEW_HEAD and the source digest is $REVIEW_DIGEST; you MUST quote the full reviewed head SHA in your report.$(if [ -n "$CHANGED_FILES" ]; then printf '\n\nThe change under review is exactly these files (read the packet manifest and its patch first, then these files, then only what you need inside the packet to confirm a finding):\n%s' "$CHANGED_FILES"; fi)$([ -n "$TESTS_COMMAND" ] && printf '\n\ntests command on record: %s (executed before dispatch; result: %s)' "$TESTS_COMMAND" "$TESTS_RESULT")
 
@@ -286,16 +288,20 @@ if [ -z "$SNAPSHOT_DIGEST_AFTER" ] || [ "$SNAPSHOT_DIGEST_AFTER" != "$SNAPSHOT_D
 fi
 [ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
 
-VERDICT="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
+# The prompt asks for an early provisional verdict and the final verdict LAST
+# under a literal heading, so only the last `## Verdict` heading counts; an
+# earlier (provisional) one must never be read as the final answer.
+VERDICT_LINE="$(awk '/^## Verdict[[:space:]]*$/{n=NR} END{print n+0}' "$TMP_TEXT")"
+VERDICT="$(awk -v n="$VERDICT_LINE" 'n>0 && NR==n+1{gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
 case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
 # Binding and the analysis floor are judged on the MODEL BODY - stdout only,
 # captured separately from the runner's stderr chrome, and only the text
-# before the verdict heading counts.
-if ! awk -v h="$REVIEW_HEAD" '/^## Verdict[[:space:]]*$/{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
+# before the final verdict heading counts.
+if ! awk -v h="$REVIEW_HEAD" -v n="$VERDICT_LINE" 'NR>=n{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure verdict-not-bound-to-head --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die "$provider verdict did not name the reviewed head; refusing unbound verdict."
 fi
-BODY_BYTES="$(awk '/^## Verdict[[:space:]]*$/{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
+BODY_BYTES="$(awk -v n="$VERDICT_LINE" 'NR>=n{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
 [ "$BODY_BYTES" -ge 400 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure report-floor --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider analysis body is below the minimum analysis floor (runner chrome excluded)."; }
 
 OUT="$REPORT_DIR/${provider}-${mode}-${RUN_ID}.md"; [ ! -e "$OUT" ] || die "unique report collision: $OUT"
@@ -316,4 +322,49 @@ if [ -z "$AFTER_IDENTITY" ] || [ "$AFTER_IDENTITY" != "$SOURCE_IDENTITY" ]; then
 fi
 FINAL_STATE="$($LIFECYCLE finish --state "$STATE" --verdict "$VERDICT" --report "$OUT" --elapsed "$ELAPSED")" || { mv "$OUT" "$OUT.accounting-failed" 2>/dev/null || true; die 'lifecycle accounting failed.'; }
 [ "$(jq -r .stale <<<"$FINAL_STATE")" = false ] && [ "$(jq -r .verdict <<<"$FINAL_STATE")" = "$VERDICT" ] || { mv "$OUT" "$OUT.stale" 2>/dev/null || true; die 'source changed during review.'; }
+# One-shot runner session release (issue #711 Phase 5, plan "the creating run
+# deletes before returning"): once the verdict is accounted, the runner's own
+# session-delete path discards the provider session, the runner's working
+# copy, and the state-dir meta together — a raw remove-copy would orphan the
+# first and last of those. It must run from inside the snapshot, because the
+# runner keyed its session on the snapshot's repo identity; the pool EXIT trap
+# removes the snapshot itself right after. Best-effort by design, exactly like
+# the front-door sweep: a refused cleanup (e.g. unreconciled evidence) retains
+# the copy for reconciliation and must never fail a completed review. Only the
+# muse runner is wired; the others keep their copy until the sweep (follow-up
+# issue: verify each runner's session-delete equivalent before wiring it).
+if [ "${AI_KEEP_SANDBOX:-0}" != 1 ]; then
+  case "$provider" in
+    muse)
+      # Everything from here on is post-accounting and best-effort: the review
+      # is durable, so no step in this branch may abort (set -e), hang, or
+      # otherwise cost the caller its exit 0 and report path. The delete is a
+      # provider-facing call, so it gets a hard bound — SIGTERM at 60 s plus
+      # kill-after, the same shape bin/ai-deepseek-agent uses — resolved from
+      # /usr/bin:/bin only, because an ambient PATH can front Windows
+      # timeout.exe (a delay utility that runs no command). No `--` separator:
+      # the MSYS timeout rejects it, and $RUNNER is always an absolute path.
+      # When no such timeout tool exists, skip the release entirely — the
+      # sweep still takes the copy (Qwen round 1 finding 1; Grok round 2
+      # findings P1/P2).
+      RELEASE_TIMEOUT_BIN="$(PATH=/usr/bin:/bin command -v timeout || true)"
+      if [ -z "$RELEASE_TIMEOUT_BIN" ]; then
+        printf 'ai-review-pool: no timeout tool to bound the session release; session %s copy retained until sweep.\n' "$TAG" >&2 || true
+      else
+        TMP_DELETE="$(mktemp "$REPORT_DIR/.pool-release.XXXXXX" 2>/dev/null)" || TMP_DELETE=""
+        if ( cd "$REVIEW_DIR" && exec env AI_MUSE_CALLER="$CALLER" "$RELEASE_TIMEOUT_BIN" -k 5 60 "$RUNNER" delete "$TAG" ) >/dev/null 2>>"${TMP_DELETE:-/dev/null}"; then
+          :
+        else
+          { [ -n "$TMP_DELETE" ] && [ -s "$TMP_DELETE" ] && sed -E 's/((API[_-]?KEY|TOKEN|SECRET|PASSWORD)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig; s/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' "$TMP_DELETE" | sed 's/^/  runner: /'; } >&2 || true
+          printf 'ai-review-pool: muse session release refused; session %s, runner copy muse-%s-%s-*, pool snapshot %s retained until sweep.\n' "$TAG" "$CALLER" "$TAG" "$REVIEW_DIR" >&2 || true
+        fi
+      fi
+      ;;
+    *)
+      printf 'ai-review-pool: runner session cleanup not yet wired for %s; copy retained until sweep.\n' "$provider" >&2 || true
+      ;;
+  esac
+fi
+# The report path stays the final stdout line: merged-output consumers read it
+# back-to-front, so the release note must precede it, never follow it.
 printf '%s\n' "$OUT"

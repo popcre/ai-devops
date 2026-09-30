@@ -150,24 +150,54 @@ is_managed() {
   [ -f "$d/$MARKER" ]
 }
 
+# Store-before-delete for every managed packet inside a sandbox (issue #1111).
+# The sandbox is about to be destroyed and may hold the only packet copy, so
+# each packet is retained through ai-review-packet retain first. If any retain
+# fails, the caller must skip the sandbox delete.
+retain_sandbox_packets() { # retain_sandbox_packets PHYSICAL
+  local d="$1" pkt packet_bin rc=0
+  packet_bin="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/ai-review-packet"
+  for pkt in "$d"/.ai-review "$d"/.ai-review-*; do
+    [ -d "$pkt" ] || continue
+    [ -f "$pkt/.ai-review-packet" ] || continue
+    if ! "$packet_bin" retain "$pkt" >/dev/null; then
+      warn "could not retain packet $pkt before sandbox deletion"
+      rc=1
+    fi
+  done
+  return $rc
+}
+
 remove_sandbox() {
-  local d="$1"
+  local d="$1" physical
   [ -e "$d" ] || return 0
   is_managed "$d" || die "refusing to delete $d: it is not a managed review snapshot."
+  # Evidence tools reject junction/reparse components (reviewer_maintenance
+  # physical()). The managed sandbox root is a junction to D: on this machine,
+  # so every delete must go through the canonical spelling or verify-sandbox
+  # always refuses and the copy is retained forever.
+  physical="$(canon_quiet "$d")" || die "refusing to delete $d: it cannot be canonicalized."
+  is_managed "$physical" || die "refusing to delete $physical: it is not a managed review snapshot."
   if [ "${AI_KEEP_SANDBOX:-0}" = 1 ]; then
-    warn "AI_KEEP_SANDBOX=1: retaining $d"
+    warn "AI_KEEP_SANDBOX=1: retaining $physical"
     return 0
   fi
   local python event_tool
   python="$(command -v python3 || command -v python)" || die 'sandbox evidence verification requires Python'
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" && pwd -P)/reviewer_events.py"
-  "$python" "$event_tool" verify-sandbox "$d" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
-  rm -rf "$d" 2>/dev/null || { sleep 1; rm -rf "$d"; } || warn "could not fully remove $d"
+  "$python" "$event_tool" verify-sandbox "$physical" >/dev/null || die 'sandbox evidence is not reconciled; retained for local recovery'
+  # Never destroy the last copy of a review packet. Retain every managed
+  # packet first; if that fails, skip the delete and warn.
+  if ! retain_sandbox_packets "$physical"; then
+    warn "could not retain packets in $physical; skipping delete so the only copy is not lost."
+    return 1
+  fi
+  rm -rf "$physical" 2>/dev/null || { sleep 1; rm -rf "$physical"; } || warn "could not fully remove $physical"
   # A code-only stage carries host-only sidecars beside the snapshot; leaving
   # them behind after any deletion path leaks the original source pointer
   # (exact-head review, 2026-09-25).
-  rm -f -- "$d.source.json" "$d.owners.json" 2>/dev/null || warn "could not remove sidecars for $d"
-  warn "deleted review snapshot $d"
+  rm -f -- "$physical.source.json" "$physical.owners.json" 2>/dev/null || warn "could not remove sidecars for $physical"
+  warn "deleted review snapshot $physical"
 }
 
 remove_partial() { # remove_partial BUILD FINAL — only a uniquely named child beside FINAL
@@ -203,7 +233,10 @@ source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible 
   tree="$(git -C "$root" rev-parse HEAD^{tree} 2>/dev/null)" \
     || { rm -f "$list" "$diff"; return 1; }
   test_progress || { rm -f "$list" "$diff"; return 1; }
-  git -C "$root" diff --binary HEAD > "$diff" 2>/dev/null \
+  # --full-index: a shallow snapshot has a smaller object database, so git
+  # abbreviates the index line to a different width than the full source and
+  # a text hash of `git diff` never matches (snapshot-digest-mismatch).
+  git -C "$root" diff --binary --full-index HEAD > "$diff" 2>/dev/null \
     || { rm -f "$list" "$diff"; return 1; }
   test_progress || { rm -f "$list" "$diff"; return 1; }
   git -C "$root" ls-files --others --exclude-standard -z > "$list" \
@@ -856,7 +889,10 @@ cmd_sweep_orphans() { # sweep-orphans [--max-age-seconds N] [--max-removals N]
     IFS= read -r cursor < "$cursor_file" || true
     [[ "$cursor" =~ ^[A-Za-z0-9._-]{1,255}$ ]] || cursor=''
   fi
-  mapfile -d '' -t entries < <(find "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | LC_ALL=C sort -z)
+  # find -L follows the managed root when it is a junction/symlink (production
+  # root is a Windows junction to D:). Without -L, find sees no children and
+  # the sweep is a no-op on this machine.
+  mapfile -d '' -t entries < <(find -L "$SANDBOX_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | LC_ALL=C sort -z)
   now="$(date +%s)"
   for pass in 1 2; do
     [ "$pass" = 1 ] || [ -n "$cursor" ] || break

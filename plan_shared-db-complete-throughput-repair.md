@@ -224,7 +224,7 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 7. Reviewer/runner SLOs govern start/reroute, not cancellation of healthy active work.
 8. (Moved out 2026-09-16, owner ruling.) Native merge queue activation and the `popcre` transfer are not #401 acceptance criteria; they belong only to shared-db #2530.
 9. An approved-migration train is an immutable exact list with dependency closure, risk compatibility, target proof, and per-migration live assertions. If #2716 is authorized and lands, a fully machine-qualified train promotes automatically and serially; any missing or ambiguous proof stops for an engineer, not a non-technical version-number choice from Albert.
-10. Owner authorization is consumed once for its stated scope. A session must not ask again for the same fix/deploy action, and must not ask Albert to judge migration identifiers that the governed evidence already decides.
+10. Reviewer authorization is consumed once for its stated scope. A session never asks Albert to approve a fix/deploy action, and must not ask Albert to judge migration identifiers that the governed evidence already decides.
 11. Routing is enforced twice: the sending session must classify from the actual proposed change, and the orchestrator must independently admit only database structure/schema work. A handover, `db-work` label, repository location, or sender assertion is never sufficient.
 12. Database-preview eligibility follows proved impact, not perceived risk. Documentation/plans/handoffs, reviewer and queue tooling, CI/workflow maintenance, read-only audits/reporting, tests, and application-only work may use the no-database-preview lane only when deterministic inspection proves they cannot alter database structure, behavior, permissions, or data. Uncertainty fails closed to the ordinary governed route.
 13. The no-database-preview lane skips only the database rehearsal and structural orchestrator. It retains every applicable code, test, review, security, deployment, and live-behavior gate, records a machine-readable exemption reason, and targets no more than ten minutes from PR-ready to merge-ready when runner capacity is available.
@@ -233,9 +233,9 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 
 14. **The outcome owner produces the live proof.** When `live_verified` needs evidence from a consuming application, the orchestrator dispatches its own agent to produce and record that evidence against the application repository's default branch. It never waits for, or asks Albert to prompt, another session. Any production write needed for that proof still requires the exact authority named in §11.
 15. **Wait only on a named exclusive stage.** Merge-ready work may wait only for the specific preview, merge, or production lease it needs, or for an exact object/dependency conflict. "Wait until another item's production finishes" is forbidden unless the two items share an object or dependency.
-16. **No-progress alarm.** If no owned outcome makes a stage transition for two hours, the orchestrator must tell Albert immediately: what is stuck, the exact blocker, and the one action that unblocks it. Unchanged "still open" summaries are not reports.
+16. **No-progress alarm.** If no owned outcome makes a stage transition for two hours, the orchestrator must report it immediately: what is stuck, the exact blocker, and the one action the AI is taking to unblock it (never an action for Albert). Unchanged "still open" summaries are not reports.
 17. **Edge-history refusals are defects, not decisions.** When a delivery tool refuses a legitimate history (a pre-merge preview apply, a recovery run, a drop-then-recreate rebuild, a renumber), the repair goes into the tool with a regression fixture. The orchestrator does not route each occurrence through a manual detour more than once.
-18. **Answer from the record before asking Albert.** Before any question goes under "What I need from you", the orchestrator and its agents search the repository docs, the issue and its comments, and the current chat. They ask Albert only for a decision recorded nowhere, and the question names where they looked. They never ask him to relay, copy, or re-paste anything already in the chat, the repo, or another session. (Albert, 2026-09-15.)
+18. **Answer from the record before asking Albert.** Before any question goes under "What I need from you", the orchestrator and its agents search the repository docs, the issue and its comments, and the current chat. They ask Albert only a business-meaning decision recorded nowhere (never a technical approval — owner ruling 2026-09-28), and the question names where they looked. They never ask him to relay, copy, or re-paste anything already in the chat, the repo, or another session. (Albert, 2026-09-15.)
 19. **GitHub calls go through the machine-wide throttle; never trip a GitHub rate limit again (#401).** On 2026-09-15 the orchestrator and several sub-agents, all sharing one token, ran 60-second watcher loops (`gh run watch`, sleep loops). From 19:25 to 19:37 UTC GitHub refused with `gh: API rate limit exceeded for user ID 55610577` — the PRIMARY 5000-requests-per-hour user limit (evidence request ID `F95F:1E2E31:F1BFCA:3218145:6AA99BB1` at 19:25Z). A later `gh api rate_limit` reading of 5000/5000 only meant a new window had started (reset 20:30Z); it was first misread as the secondary burst limit. A transient "token in keyring is invalid" also appeared, so the undiagnosed failure mode itself is a defect. It was the second such incident. Enforced fix: every AI session calls GitHub through `bin/ai-gh` — cross-process lock and minimum spacing; an hourly budget read from the free `rate_limit` endpoint (the x-ratelimit-* values), cached and decremented locally, that slows calls below 40% remaining and pauses the whole machine until reset below 20%; detection of primary ("API rate limit exceeded", back-off until reset) and secondary (HTTP 403/429, "secondary rate limit", Retry-After, back-off max(Retry-After, 600 s)) refusals with no automatic retry; the exact refusal text in `refusals.log`; every failed call's HTTP status and message body, plus the rate-limit headers and request ID from a rate_limit request made right after it, credentials redacted, in `failures.log`; and refusal of `gh run watch` and `--watch`. Waiting uses `bin/ai-gh-wait` (minimum 300-second interval) or `bin/ai-pr-wait` (now routed through the throttle with the same 300-second floor). Rule for every waiter and sub-agent brief: GitHub calls at most every 5 minutes per waiter, use the throttle helper, never `gh run watch`. This is the concrete mechanism behind Step 10's "no unchanged-state polling" target. (Albert, 2026-09-15.)
 
 ### Locked decisions — 2026-09-16 (Albert's ruling in chat)
@@ -249,10 +249,10 @@ Baseline captured 2026-09-11; every implementation session must re-resolve it.
 - The runner fallback may use GitHub-hosted, qualified self-hosted, or Blacksmith capacity based on the live workflow's capabilities. It must be additive and fail closed.
 - The urgent start target begins at ten minutes. After five live outcomes, Step 10 may tighten or relax it based on measured evidence without exceeding thirty minutes.
 
-### Owner-only decisions
+### Reviewer-gated decisions (never Albert's approval — owner ruling 2026-09-28)
 
-- Transfer `u2giants/shared-db` to `popcre/shared-db` and mutate its live GitHub ruleset: follow #2530; planning is not authorization.
-- Activating #2716 changes the standing production policy across global instructions, shared-db rules, and workflow behavior. Its implementing session must present that exact policy change to Albert once before activation unless a current-chat ruling already authorizes it; after activation Albert is not asked to name machine migration versions.
+- Transfer `u2giants/shared-db` to `popcre/shared-db` and mutate its live GitHub ruleset: follow #2530 with an assigned AI reviewer's APPROVE; planning is not authorization.
+- Activating #2716 changes the standing production policy across global instructions, shared-db rules, and workflow behavior. Its implementing session gets an assigned AI reviewer's APPROVE of that exact policy change before activation; Albert is never asked to approve it or to name machine migration versions.
 
 ## 9. Numbered implementation plan
 
@@ -324,7 +324,7 @@ Add `--outcome-status <issue>` and `--complete-outcome <issue> --evidence <ref>`
 2. records a live evidence artifact with id and sha256 digest, plus an `application_commit_sha` on that repository's default branch;
 3. writes the `db-outcome-evidence` block in the one format `--complete-outcome` accepts, then runs `--complete-outcome`.
 
-Add a `--emit-live-proof-brief <issue>` manager command that prints the exact assertion, the required evidence fields, and the block template, so the agent cannot produce a block that refuses with `evidence reference must resolve to exactly one db-outcome-evidence block` (the #2792 refusal). If the assertion requires a production write (the #2792 check ran a real cleanup), the agent stops and the orchestrator asks Albert once for that exact action (§11). That is an authority gate, not a wait on another session. Add an ordering rule: an outcome at `production_applied` for more than 30 minutes without a live-proof dispatch is a scheduling defect and appears in the Step 4 alarm.
+Add a `--emit-live-proof-brief <issue>` manager command that prints the exact assertion, the required evidence fields, and the block template, so the agent cannot produce a block that refuses with `evidence reference must resolve to exactly one db-outcome-evidence block` (the #2792 refusal). If the assertion requires a production write (the #2792 check ran a real cleanup), the agent stops and the orchestrator obtains an assigned AI reviewer's APPROVE of that exact action (§11; never Albert's approval, owner ruling 2026-09-28). That is an authority gate, not a wait on another session. Add an ordering rule: an outcome at `production_applied` for more than 30 minutes without a live-proof dispatch is a scheduling defect and appears in the Step 4 alarm.
 
 **Verification gate:** attempts to close at PR merge, preview-only proof, missing return address, or missing live assertion refuse; a full fixture produces one readable outcome history; a fixture reaching `production_applied` emits exactly one live-proof dispatch with no cross-session message; the emitted brief's block template passes `--complete-outcome` validation; a malformed or multiple-block evidence reference refuses with a message naming the missing field.
 
@@ -404,7 +404,7 @@ Inventory every place that caps concurrent sub-agents, author lanes, runner jobs
 
 #### Step 8 — execute the organization transfer and native merge queue plan
 
-Do not duplicate the existing plan. Execute `u2giants/shared-db/plan_shared_db_popcre_transfer_merge_queue.md` from its STATUS Step 0 after Albert names the exact transfer/settings action. Preserve repository identity, redirects, integrations, required checks, consumer sync, and direct guarded merging until the native queue is proven.
+Do not duplicate the existing plan. Execute `u2giants/shared-db/plan_shared_db_popcre_transfer_merge_queue.md` from its STATUS Step 0 after an assigned AI reviewer APPROVEs the exact transfer/settings action. Preserve repository identity, redirects, integrations, required checks, consumer sync, and direct guarded merging until the native queue is proven.
 
 Configure one PR per merge group initially, zero batching wait, and all required workflows on `merge_group`. Feed queue completion/ejection events into Step 4 and preserve exact PR-head review plus synthetic-group integration proof.
 
@@ -492,11 +492,11 @@ commit.
 - Work in fresh current-upstream worktrees; preserve concurrent changes.
 - Shared-db uses branch/PR/governed merge. ai-devops uses branch/PR/native queue.
 - Verify `Albert Hazan <u2giants@users.noreply.github.com>` before every commit.
-- Production/shared cloud is read-only unless Albert names the exact action/resource in the current chat.
+- Production/shared cloud is read-only unless an assigned AI reviewer APPROVEs the exact action/resource (never Albert's approval — owner ruling 2026-09-28).
 - No migration version reuse, applied-file edit, broad include, claim deletion, or unproved target.
 - Preview, merge, and production remain one at a time.
 - Reviewer failure is not a code finding; runner cancellation is not a test result.
-- Self-service live proof does not grant production-write authority: if a live assertion needs a production write, the orchestrator asks Albert once for that exact action, then proceeds without further asks.
+- Self-service live proof does not grant production-write authority: if a live assertion needs a production write, the orchestrator obtains an assigned AI reviewer's APPROVE of that exact action (never Albert's approval — owner ruling 2026-09-28).
 - Stall-case identifiers in §3 and Steps 2–7 (PRs #2944/#2948/#2955/#2958/#2964, runs, SHAs, and line numbers) were true on 2026-09-15. Re-resolve them before relying on any of them.
 - A merge queue supplements rather than replaces exact-head approval and production freeze.
 - No-database-preview means no database rehearsal, not no verification. It never applies to migrations or any change that can affect database structure, behavior, permissions, or data; ambiguity requires preview.
@@ -561,7 +561,7 @@ Rollback is a reviewed revert of the affected phase plus supported rules reinsta
 
 ### Open questions
 
-No engineering design choice blocks Step 0. Step 8 requires Albert's explicit repository-transfer/settings authority. Issue #2716 requires one explicit policy-activation ruling unless its implementation session can cite a current-chat ruling that authorizes the exact global/workflow change; after activation, individual machine version lists do not return to Albert. These are execution gates, not gaps in this plan.
+No engineering design choice blocks Step 0. Step 8 requires an assigned AI reviewer's APPROVE of the exact repository-transfer/settings action. Issue #2716 requires an assigned AI reviewer's APPROVE of the exact global/workflow policy activation; after activation, individual machine version lists do not return to Albert. These are execution gates, not gaps in this plan.
 
 ## Coverage of the throughput review
 
@@ -591,7 +591,7 @@ No engineering design choice blocks Step 0. Step 8 requires Albert's explicit re
 
 ## Mandatory implementation-plan self-audit
 
-1. **Could a brand-new AI session execute this plan without asking Albert anything? Yes for every reversible planning and implementation step.** §§2, 5, 9, 10, and 12 identify repositories, current components, concrete files/functions, dependencies, commands/evidence, environments, and verification gates. §8 and §13 isolate the only later owner actions: repository transfer/settings and exact production lists.
+1. **Could a brand-new AI session execute this plan without asking Albert anything? Yes for every reversible planning and implementation step.** §§2, 5, 9, 10, and 12 identify repositories, current components, concrete files/functions, dependencies, commands/evidence, environments, and verification gates. §8 and §13 isolate the only later assigned-AI-reviewer approvals (never owner approvals, owner ruling 2026-09-28): repository transfer/settings and exact production lists.
 2. **Does the plan carry the complete background, nuance, and rejected reasoning? Yes.** §§3, 5–8 preserve the seven-transcript findings, distinguish completed controls from gaps, explain #2705/#2709's narrow reviewer coverage and #2715/#2716's independent ownership, enforce two-sided non-structural refusal, define the fail-closed no-database-preview boundary, reject both preview-everything and risk-label exemptions, reject the superseded 1+1 premise, and preserve every safety boundary.
 3. **Is the ultimate goal clear enough for correct judgment when a step is wrong? Yes.** §1 makes live application delivery the outcome, safety preservation the invariant, and explicitly says the goal wins.
 

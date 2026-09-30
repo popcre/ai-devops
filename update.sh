@@ -8,7 +8,7 @@ warn() { printf '\033[33m[WARN]\033[0m %s\n' "$1"; }
 
 expected_head=""
 installed_checkout=""
-owner_request=""
+reviewer_approval=""
 install_args=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -18,12 +18,12 @@ while [ "$#" -gt 0 ]; do
     --installed-checkout)
       [ "$#" -ge 2 ] || { warn '--installed-checkout needs a path'; exit 2; }
       installed_checkout="$2"; shift 2 ;;
-    --owner-request)
-      [ "$#" -ge 2 ] && [ -n "$2" ] || { warn '--owner-request needs a reason'; exit 2; }
-      owner_request="$2"; shift 2 ;;
+    --reviewer-approval)
+      [ "$#" -ge 2 ] && [ -f "$2" ] || { warn '--reviewer-approval needs the assigned AI reviewer exact-head APPROVE report'; exit 2; }
+      reviewer_approval="$(realpath -- "$2")"; shift 2 ;;
     --require-secrets|--skip-secrets) install_args+=("$1"); shift ;;
     -h|--help)
-      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--owner-request TEXT] [--require-secrets|--skip-secrets]'
+      echo 'usage: ./update.sh [--installed-checkout PATH --expected-head FULL_SHA] [--reviewer-approval REPORT] [--require-secrets|--skip-secrets]'
       exit 0 ;;
     *) warn "unknown option: $1"; exit 2 ;;
   esac
@@ -59,11 +59,13 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { warn 'not a Git checkou
 # requalification, and finalization. The child installer checks this exact fd.
 install_lock_dir="$HOME/.local/state/ai-devops/task-gates"
 install_lock_name="install-$(printf '%s' "$REPO_ROOT" | sha256sum | cut -c1-16).lock"
+install_original_umask="$(umask)"
 umask 077
 mkdir -p "$install_lock_dir" || exit 1
 install_lock_file="$install_lock_dir/$install_lock_name"
 exec 9>"$install_lock_file" || exit 1
 flock -n 9 || { warn 'another installation is active for this checkout'; exit 1; }
+umask "$install_original_umask"
 if [ -n "$(git status --porcelain)" ]; then
   warn 'checkout has local changes; preserve and reconcile them before updating'
   exit 1
@@ -117,7 +119,7 @@ candidate_added=1
 # Task declarations are scoped to one worktree. The disposable exact-target
 # candidate must declare its own installation task before its gate preflight;
 # an earlier declaration in the caller's worktree cannot stand in for it.
-declaration_reason="${owner_request:-Pinned installation candidate for $target_head}"
+declaration_reason="Pinned installation candidate for $target_head"
 (cd "$candidate" && "$candidate/bin/ai-task-gates" start --class installation \
   --base "$previous_head" --reason "$declaration_reason") || {
   warn 'candidate installation task declaration failed before checkout advance'
@@ -126,7 +128,7 @@ declaration_reason="${owner_request:-Pinned installation candidate for $target_h
 gate_args=(install-verify --phase preflight --target-head "$target_head"
   --installed-checkout "$REPO_ROOT" --installed-launcher /usr/local/bin/ai-task-gates)
 [ -z "$expected_head" ] || gate_args+=(--caller-pinned)
-[ -z "$owner_request" ] || gate_args+=(--owner-request "$owner_request")
+[ -z "$reviewer_approval" ] || gate_args+=(--reviewer-approval "$reviewer_approval")
 preflight_output="$(cd "$candidate" && "$candidate/bin/ai-task-gates" "${gate_args[@]}")" || {
   warn 'installation preflight refused; installed checkout was not advanced'
   exit 1

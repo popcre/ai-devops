@@ -140,8 +140,8 @@ the correct route. A predecessor's repository is context, not routing proof.
    promote to production that way.** Production almost always carries pending
    migrations from other workstreams that other teams have deliberately kept off it,
    so a plain `db push` either refuses or sweeps up work that was never approved.
-   Production promotion normally requires **Albert's explicit approval for that exact
-   change**, the `AGENTS.md` §5 merge checklist, and the §5.1 bounded temp-checkout
+   Production promotion normally requires **the assigned AI reviewer's exact-head APPROVE
+   for that exact change** (never Albert's approval — owner ruling 2026-09-28), the `AGENTS.md` §5 merge checklist, and the §5.1 bounded temp-checkout
    recipe. The sole exception is the separately activated automatic workflow recorded
    by issue #2716: only after exact structural admission, guarded merge, merged-main
    preview, and every immutable evidence gate may that workflow dispatch its existing

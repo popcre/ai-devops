@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+# ai-merge-queue-drift — catch a mismatch between this toolkit's expectations
+# and GitHub's live merge-queue settings before it ejects pull requests for
+# hours (issue #913, issue #1002 step 3).
+#
+# Usage:
+#   ai-merge-queue-drift                     full check (live ruleset read)
+#   ai-merge-queue-drift --ruleset FILE      use a fixture ruleset JSON (offline)
+#   ai-merge-queue-drift --offline           ruleset comparison skipped
+#   ai-merge-queue-drift --root DIR          check another checkout/fixture tree
+#
+# Three checks:
+#   (a) the live ruleset (default: repos/<repo>/rulesets/<id> via bin/ai-gh)
+#       projected onto enforcement, ref conditions, rule types, pull-request
+#       parameters, merge-queue parameters, and required status checks, then
+#       diffed against config/merge-queue-expected.json;
+#   (b) every required check is produced by a declared job in a workflow that
+#       subscribes to merge_group, with no trigger-level paths: filter and no
+#       job-level if: that fails to mention merge_group (a skip in the queue);
+#   (c) for every declared file class, the pull-request test selection
+#       (tests/lib-selection.sh) over representative paths still selects every
+#       suite the merge queue executes for that class: the #913 ejection class.
+#
+# Exit codes: 0 no drift; 1 drift found (one plain line per finding); 2 usage
+# or internal error. Read-only: this tool never edits GitHub, files, or state.
+set -uo pipefail
+
+SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+DEFAULT_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
+ROOT="$DEFAULT_ROOT"
+ruleset_arg=''
+offline=false
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --ruleset) [ $# -ge 2 ] || { printf 'ai-merge-queue-drift: --ruleset needs a file\n' >&2; exit 2; }
+      ruleset_arg="$2"; shift 2 ;;
+    --offline) offline=true; shift ;;
+    --root) [ $# -ge 2 ] || { printf 'ai-merge-queue-drift: --root needs a directory\n' >&2; exit 2; }
+      ROOT="$2"; shift 2 ;;
+    -h|--help) sed -n '2,26p' "$SELF_PATH"; exit 0 ;;
+    *) printf 'ai-merge-queue-drift: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+
+SNAPSHOT="$ROOT/config/merge-queue-expected.json"
+[ -f "$SNAPSHOT" ] || { printf 'ai-merge-queue-drift: snapshot missing: %s\n' "$SNAPSHOT" >&2; exit 2; }
+command -v jq >/dev/null 2>&1 || { printf 'ai-merge-queue-drift: jq is required\n' >&2; exit 2; }
+jq -e '.schema_version == 1 and (.repository|type=="string") and (.ruleset_id|type=="number") and (.ruleset|type=="object")' "$SNAPSHOT" >/dev/null \
+  || { printf 'ai-merge-queue-drift: snapshot is not a valid schema-1 expectation\n' >&2; exit 2; }
+
+DRIFT=0
+drift(){ printf 'ai-merge-queue-drift: DRIFT: %s\n' "$1" >&2; DRIFT=1; }
+ok(){ printf 'ai-merge-queue-drift: ok: %s\n' "$1" >&2; }
+
+# --- (a) ruleset snapshot vs live or fixture ---------------------------------
+
+# Project a full ruleset JSON onto the fields this repository depends on.
+project_ruleset(){
+  jq -S '{
+    enforcement: .enforcement,
+    ref_name_include: (.conditions.ref_name.include // []),
+    rule_types: ([.rules[].type] | sort),
+    pull_request: ([.rules[] | select(.type == "pull_request") | .parameters
+      | {allowed_merge_methods: (.allowed_merge_methods // []), required_approving_review_count: (.required_approving_review_count // 0)}] | first // null),
+    merge_queue: ([.rules[] | select(.type == "merge_queue") | .parameters] | first // null),
+    required_status_checks: ([.rules[] | select(.type == "required_status_checks")
+      | .parameters.required_status_checks[]?.context] | sort)
+  }'
+}
+
+check_ruleset(){
+  local live_json="$1" label="$2" live want
+  live_json="$(project_ruleset <<<"$live_json")" || { printf 'ai-merge-queue-drift: could not parse the %s ruleset\n' "$label" >&2; exit 2; }
+  want="$(jq -S '.ruleset' "$SNAPSHOT")"
+  if [ "$live_json" = "$want" ]; then
+    ok "$label ruleset matches the snapshot (enforcement, rules, merge queue, required checks)"
+  else
+    drift "$label ruleset differs from the snapshot:
+--- snapshot
++++ $label
+$(diff <(printf '%s\n' "$want") <(printf '%s\n' "$live_json") | sed 's/^/    /')"
+  fi
+}
+
+if [ "$offline" = true ]; then
+  ok "offline mode: the ruleset comparison was skipped"
+elif [ -n "$ruleset_arg" ]; then
+  [ -f "$ruleset_arg" ] || { printf 'ai-merge-queue-drift: fixture ruleset not found: %s\n' "$ruleset_arg" >&2; exit 2; }
+  check_ruleset "$(cat "$ruleset_arg")" "fixture"
+else
+  REPO="$(jq -r '.repository' "$SNAPSHOT")"
+  RULESET_ID="$(jq -r '.ruleset_id' "$SNAPSHOT")"
+  AI_GH="$ROOT/bin/ai-gh"
+  [ -x "$AI_GH" ] || AI_GH="$(command -v ai-gh 2>/dev/null || true)"
+  [ -n "$AI_GH" ] || { printf 'ai-merge-queue-drift: bin/ai-gh is unavailable for the live read\n' >&2; exit 2; }
+  LIVE="$("$AI_GH" api "repos/$REPO/rulesets/$RULESET_ID" 2>&1)" \
+    || { printf 'ai-merge-queue-drift: live ruleset read failed: %s\n' "$LIVE" >&2; exit 2; }
+  check_ruleset "$LIVE" "live"
+fi
+
+# --- (b) required checks are produced for merge groups ------------------------
+
+WORKFLOWS_DIR="$ROOT/.github/workflows"
+[ -d "$WORKFLOWS_DIR" ] || { printf 'ai-merge-queue-drift: no workflows directory: %s\n' "$WORKFLOWS_DIR" >&2; exit 2; }
+
+# wf_subscribes_merge_group FILE -> 0 when the on: block has merge_group:
+wf_subscribes_merge_group(){
+  awk '
+    /^on:/ { in_on=1; next }
+    in_on && /^[^ ]/ { in_on=0 }
+    in_on && /^  merge_group:/ { found=1 }
+    END { exit !found }
+  ' "$1"
+}
+# wf_has_paths_filter FILE -> 0 when any paths:/paths-ignore: sits in on:
+wf_has_paths_filter(){
+  awk '
+    /^on:/ { in_on=1; next }
+    in_on && /^[^ ]/ { in_on=0 }
+    in_on && /^ +paths(-ignore)?:/ { found=1 }
+    END { exit !found }
+  ' "$1"
+}
+# job_block FILE JOB -> the job body between "  <job>:" and the next 2-space key
+job_block(){
+  awk -v job="$2" '
+    { sub(/\r$/, "") }
+    $0 ~ "^  " job ":$" { in_job=1; next }
+    in_job && /^  [A-Za-z0-9_-]+:$/ { exit }
+    in_job { print }
+  ' "$1"
+}
+
+# job_if_expression FILE JOB -> the full if: expression (folded blocks included)
+job_if_expression(){
+  awk -v job="$2" '
+    { sub(/\r$/, "") }
+    $0 ~ "^  " job ":$" { in_job=1; next }
+    in_job && /^  [A-Za-z0-9_-]+:$/ { exit }
+    in_job && /^    if:/ { in_if=1 }
+    in_if && /^    [A-Za-z0-9_-]+:/ && !/^    if:/ { exit }
+    in_if { print }
+  ' "$1" | sed 's/^    if:[[:space:]]*//'
+}
+
+while IFS= read -r producer; do
+  context="$(jq -r '.context' <<<"$producer" | tr -d '\r')"
+  wf_name="$(jq -r '.workflow' <<<"$producer" | tr -d '\r')"
+  job_name="$(jq -r '.job' <<<"$producer" | tr -d '\r')"
+  wf="$WORKFLOWS_DIR/$wf_name"
+  if [ ! -f "$wf" ]; then
+    drift "required check '$context' names workflow '$wf_name', which does not exist (renamed job or workflow: update config/merge-queue-expected.json by PR)"
+    continue
+  fi
+  if ! wf_subscribes_merge_group "$wf"; then
+    drift "required check '$context': workflow '$wf_name' does not subscribe to merge_group; the queue would time it out (#204)"
+    continue
+  fi
+  if wf_has_paths_filter "$wf"; then
+    drift "required check '$context': workflow '$wf_name' carries a paths filter; the merge queue can skip its trigger"
+    continue
+  fi
+  if ! job_block "$wf" "$job_name" | grep -q '^    '; then
+    drift "required check '$context': job '$job_name' is missing from '$wf_name' (a rename must update the snapshot and the ruleset together)"
+    continue
+  fi
+  # The check context GitHub reports is the job's display name (`name:`), or
+  # its id when unnamed; a mismatch leaves the required context unproduced.
+  display="$(job_block "$wf" "$job_name" | sed -n 's/^    name:[[:space:]]*//p' | head -1 | sed "s/^[\"']//; s/[\"']\$//")"
+  if [ "${display:-$job_name}" != "$context" ]; then
+    drift "required check '$context': job '$job_name' in '$wf_name' reports as '${display:-$job_name}', not '$context'"
+    continue
+  fi
+  job_if="$(job_if_expression "$wf" "$job_name")"
+  if [ -n "$job_if" ] && ! grep -q 'merge_group' <<<"$job_if"; then
+    drift "required check '$context': job '$job_name' has an if: that never mentions merge_group; it can silently skip queue runs"
+    continue
+  fi
+  # Mentioning merge_group is not enough: an if: that excludes it (for example
+  # github.event_name != 'merge_group') skips every queue run (#1086).
+  # Fail closed: an if: is accepted only in a recognised shape - an optional
+  # always()/!cancelled()/success() prefix joined by && to a parenthesised or
+  # bare disjunction of github.event_name == '<event>' terms that includes
+  # merge_group. Anything else (a negation, an extra && term, a string that
+  # merely mentions merge_group) is drift until the allowlist is extended (#1086).
+  if [ -n "$job_if" ]; then
+    flat="$(tr '\n' ' ' <<<"$job_if" | sed -E "s/^[[:space:]]*>-?[[:space:]]*//; s/[[:space:]]+/ /g; s/^ //; s/ \$//")"
+    body="$(sed -E 's/^((always\(\)|!cancelled\(\)|success\(\)) && )*//' <<<"$flat")"
+    body="$(sed -E 's/^\((.*)\)$/\1/' <<<"$body")"
+    term="github\.event_name == '[a-z_]+'"
+    if ! grep -Eqx "$term( \|\| $term)*" <<<"$body" || ! grep -q "== 'merge_group'" <<<"$body"; then
+      drift "required check '$context': job '$job_name' has an if: that excludes merge_group or does not explicitly select it; it can skip queue runs"
+      continue
+    fi
+  fi
+  ok "required check '$context' is produced by '$wf_name' job '$job_name' on merge_group without a paths filter or queue-skip"
+done < <(jq -c '.required_check_producers[]' "$SNAPSHOT")
+
+# Every snapshot ruleset required check must also have a declared producer.
+producers="$(jq -r '.required_check_producers[].context' "$SNAPSHOT" | tr -d '\r' | LC_ALL=C sort)"
+required="$(jq -r '.ruleset.required_status_checks[]' "$SNAPSHOT" | tr -d '\r' | LC_ALL=C sort)"
+[ "$producers" = "$required" ] \
+  || drift "required checks without a declared producer: $(comm -23 <(printf '%s\n' "$required") <(printf '%s\n' "$producers") | tr '\n' ' ')"
+
+# --- (c) pull-request selection parity per file class ------------------------
+
+SELECTOR="$ROOT/tests/lib-selection.sh"
+[ -f "$SELECTOR" ] || { printf 'ai-merge-queue-drift: selector missing: %s\n' "$SELECTOR" >&2; exit 2; }
+# shellcheck source=/dev/null
+. "$SELECTOR"
+
+# The merge-group inventory: every discovered suite minus the suspended set.
+SUSPENDED="$(jq -r '.suspended_bash // [] | .[]' "$ROOT/config/ci-suite-manifest.json" 2>/dev/null | tr -d '\r' || true)"
+mapfile -t complete_suites < <(
+  find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.sh' ! -name 'test-all.sh' -printf '%f\n' 2>/dev/null | LC_ALL=C sort |
+  while IFS= read -r s; do printf '%s\n' "$SUSPENDED" | grep -Fxq "$s" || printf '%s\n' "$s"; done
+)
+[ "${#complete_suites[@]}" -gt 0 ] || { printf 'ai-merge-queue-drift: no suites discovered under %s/tests\n' "$ROOT" >&2; exit 2; }
+
+while IFS= read -r entry; do
+  file_class="$(jq -r '.file_class' <<<"$entry" | tr -d '\r')"
+  needed="$(jq -r '.required_suites // [] | if length == 0 then "" else .[] end' <<<"$entry" | tr -d '\r')"
+  # Every declared suite must still exist in the merge-group inventory: a
+  # renamed or deleted suite is drift even before selection runs.
+  for need in $needed; do
+    if ! printf '%s\n' "${complete_suites[@]}" | grep -Fxq "$need"; then
+      drift "file class $file_class requires suite '$need', which no longer exists in the merge-group inventory"
+    fi
+  done
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    pr_selection="$(printf '%s\n' "$path" | selection_affected_suites "$ROOT" "${complete_suites[@]}")"
+    # PR mode must stay inside what the queue executes (subset), and must
+    # still cover every class-required suite (the #913 ejection class).
+    outside="$(comm -23 <(printf '%s\n' "$pr_selection" | LC_ALL=C sort) <(printf '%s\n' "${complete_suites[@]}"))"
+    if [ -n "$outside" ]; then
+      drift "file class $file_class ('$path'): the PR selection names suites the merge queue does not run: $(printf '%s ' $outside)"
+    fi
+    missing=''
+    for need in $needed; do
+      printf '%s\n' "$pr_selection" | grep -Fxq "$need" || missing="$missing $need"
+    done
+    if [ -n "$missing" ]; then
+      drift "file class $file_class ('$path'): PR selection dropped suites the merge queue runs:$missing (an ejection the PR lane cannot see)"
+    else
+      ok "file class $file_class ('$path'): PR selection covers the queue's suites for the class"
+    fi
+  done < <(jq -r '.representative_paths[]' <<<"$entry" | tr -d '\r')
+done < <(jq -c '.selection_parity[]' "$SNAPSHOT")
+
+[ "$DRIFT" -eq 0 ] && printf 'ai-merge-queue-drift: no drift between the tools and the merge-queue settings.\n' >&2
+exit "$DRIFT"

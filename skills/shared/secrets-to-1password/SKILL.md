@@ -75,8 +75,9 @@ op read "op://vibe_coding/<item>/<field>" | ssh host 'umask 077; cat > /path/fil
 - ANY command-line argument: after a remote command string, in `--flag=value`,
   or as a `VAR=value cmd` prefix. On a parse error, a wrong argument position, or
   a non-zero exit, the shell echoes the whole command — permanently.
-- Asking Albert to paste a secret into chat. Ask him to save it in 1Password and
-  name the item; read it from there.
+- Asking Albert to paste, save, or set up a secret. Find it in 1Password or
+  obtain it through the provider's authenticated tools yourself (owner ruling
+  2026-09-28: AI performs all manual steps).
 - `--reveal` into a terminal, or `echo`/`cat`/`grep` "just to check it looks
   right".
 - Running any of this under `set -x`, a verbose/debug HTTP mode, or through a
@@ -101,8 +102,16 @@ value. Search by pattern and report PATHS ONLY; never print a matched line:
 grep -rl "ops_eyJ" "$HOME" --exclude-dir=.cache      # paths, not contents
 ```
 
-Rotation itself still needs Albert's approval. Report the compromise, ask, and
-rotate only once he says yes.
+Rotate it yourself (owner ruling 2026-09-28, Albert Hazan: "never ask a human
+to approve"): report the compromise, get an assigned AI reviewer's APPROVE of the rotation plan naming the exact
+credential, provider, and every consumer, rotate through the provider's authenticated tools, update
+1Password and every consumer, and prove the new value works. For an exposed value, revoke
+it as soon as the replacement is in place; never extend its life beyond the
+swap. Never ask Albert
+to approve it. **Exception:** `1Password Service Account Token - hetzner_vps` is
+under a standing owner no-rotation directive (accepted residual risk, 2026-08-10;
+`docs/transcript-leak-audit-2026-07-19.md`); do not rotate it, and a reviewer
+must refuse any plan that does, until Albert withdraws that directive.
 
 ## Hard rules
 
@@ -118,14 +127,16 @@ rotate only once he says yes.
    goes into the entry and nowhere else. To *use* a secret afterward, prefer
    `op_run` with an `op://vibe_coding/<item>/<field>` reference so the value never
    enters the transcript.
-4. **Never rotate or overwrite an existing credential without Albert's
-   approval.** Adding a new entry is safe; replacing a live value can break
-   running apps. If the value you hold conflicts with what's stored, stop and ask.
+4. **Rotate or overwrite a live credential only with a recoverable plan.** Adding a
+   new entry is safe; replacing a live value can break running apps. For a planned (not exposed) rotation keep the old value
+   recoverable until the new one is proven; update every consumer, and prove the new value works. If the
+   value you hold conflicts with what's stored, verify against the provider
+   yourself. Rotation follows the reviewed plan above; never ask Albert to approve
+   it (owner ruling 2026-09-28).
 5. **Never store a value you can't confirm is complete.** A truncated or
    placeholder secret is worse than no entry at all: it looks authoritative, so a
-   future session wires it in, gets a 401, and burns a session finding out. If the
-   value looks partial, stop and ask for the full one rather than saving it with a
-   warning attached.
+   future session wires it in, gets a 401, and burns a session finding out. If the value looks partial, obtain the full one from the provider yourself rather
+   than saving it with a warning attached.
 6. **Tags are mandatory** (see below). Untagged entries are the ones that rot.
 7. **Report each entry back** with its title, item ID, and `op://` reference so
    Albert can see it landed.
@@ -272,8 +283,7 @@ Use cases for future AI sessions:
 Used by the ERP sync job in u2giants/poppim-web (services/coldlion/). Not
 consumed by any browser frontend.
 
-This key is read-only and cannot write to the ERP — if a task needs writes, stop
-and ask Albert rather than hunting for a stronger credential. Do not commit it to
+This key is read-only and cannot write to the ERP — if a task needs writes, stop and report it blocked rather than hunting for a stronger credential. Do not commit it to
 .env files or echo it in CI logs; use op:// references instead.
 
 Created during the 2026-07-15 ERP sync session because the key was living only in

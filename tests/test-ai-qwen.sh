@@ -230,7 +230,7 @@ if (
   printf '424242\n' > "$legacy_lock/pid"
   SYSTEMROOT=Windows lock_acquire "$legacy_lock" test && exit 1
   [ -d "$legacy_lock" ] && [ "$(cat "$legacy_lock/pid")" = 424242 ]
-); then ok 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; else bad 'Windows never reclaims a Muse lock whose pid is invisible across Git Bash runtimes'; fi
+); then ok 'Windows never reclaims a FRESH Muse lock whose pid is invisible across Git Bash runtimes'; else bad 'Windows never reclaims a FRESH Muse lock whose pid is invisible across Git Bash runtimes'; fi
 if [ -z "${SYSTEMROOT:-}" ]; then
   if (
     source <(sed -n '/^key_store_path_safe() {/,/^}/p; /^key_store_ok() {/,/^}/p' "$SCRIPT")
@@ -496,8 +496,21 @@ QWEN_STARTUP_TICKS=$(( ((SECONDS-INITIAL_STARTED)*2 + $(budget 2 5)) * 20 ))
 [ "$INITIAL_RC" -eq 0 ] || printf '  diagnostic: initial review: %s\n' "$INITIAL_OUT"
 check 'initial review completes successfully' "test '$INITIAL_RC' -eq 0"
 printf 'preload-test-secret\n' > "$TMP/preload-secret"; chmod 600 "$TMP/preload-secret"
-PRELOAD_PROOF="$(AI_QWEN_SECRET_FILE="$TMP/preload-secret" PRELOAD_TEST_FILE="$TMP/preload-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'const {spawnSync}=require("node:child_process"),fs=require("node:fs"); const reexec=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8"}); const sanitized={...process.env}; delete sanitized.BAILIAN_CODING_PLAN_API_KEY; const toolChild=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8",env:sanitized}); process.stdout.write(JSON.stringify({direct:process.env.BAILIAN_CODING_PLAN_API_KEY,handoffVar:Object.hasOwn(process.env,"AI_QWEN_SECRET_FILE"),handoffFile:fs.existsSync(process.env.PRELOAD_TEST_FILE),reexec:reexec.stdout,toolChild:toolChild.stdout}));')"
+PRELOAD_PROOF="$(env -u SANDBOX_FLAGS AI_QWEN_SECRET_FILE="$TMP/preload-secret" PRELOAD_TEST_FILE="$TMP/preload-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'const {spawnSync}=require("node:child_process"),fs=require("node:fs"); const reexec=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8"}); const sanitized={...process.env}; delete sanitized.BAILIAN_CODING_PLAN_API_KEY; const toolChild=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8",env:sanitized}); process.stdout.write(JSON.stringify({direct:process.env.BAILIAN_CODING_PLAN_API_KEY,handoffVar:Object.hasOwn(process.env,"AI_QWEN_SECRET_FILE"),handoffFile:fs.existsSync(process.env.PRELOAD_TEST_FILE),reexec:reexec.stdout,toolChild:toolChild.stdout,nodeOptions:process.env.NODE_OPTIONS||"absent",sandboxFlags:process.env.SANDBOX_FLAGS||"absent"}));')"
 check 'Qwen preloader survives the runtime re-exec, deletes its handoff, and stays strippable for tool children' "printf '%s' '$PRELOAD_PROOF' | jq -e '.direct==\"preload-test-secret\" and .handoffVar==false and .handoffFile==false and .reexec==\"preload-test-secret\" and .toolChild==\"absent\"'"
+# Issue #1032: --sandbox forwards NODE_OPTIONS into the container, where the host
+# preloader path does not exist; the preloader must remove itself once consumed.
+check 'Qwen preloader removes itself from NODE_OPTIONS so a sandboxed child never requires a host-only path' "printf '%s' '$PRELOAD_PROOF' | jq -e '.nodeOptions==\"absent\"'"
+# --sandbox forwards only a fixed provider-variable list; the key must reach the
+# container by name (docker copies the value from its env), never as NAME=value argv.
+check 'Qwen preloader forwards the key into the sandbox by name only' "printf '%s' '$PRELOAD_PROOF' | jq -e '.sandboxFlags==\"--env BAILIAN_CODING_PLAN_API_KEY\"'"
+sandbox_flags_after() {
+  printf 'k\n' > "$TMP/preload-flags-secret"; chmod 600 "$TMP/preload-flags-secret"
+  env SANDBOX_FLAGS="$1" AI_QWEN_SECRET_FILE="$TMP/preload-flags-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'process.stdout.write(process.env.SANDBOX_FLAGS||"")'
+}
+check 'Qwen sandbox forward replaces a stale NAME=value flag' "test \"\$(sandbox_flags_after '--env BAILIAN_CODING_PLAN_API_KEY=oldvalue --rm')\" = '--rm --env BAILIAN_CODING_PLAN_API_KEY'"
+check 'Qwen sandbox forward is not satisfied by a similarly named variable' "test \"\$(sandbox_flags_after '--env BAILIAN_CODING_PLAN_API_KEY_EXTRA')\" = '--env BAILIAN_CODING_PLAN_API_KEY_EXTRA --env BAILIAN_CODING_PLAN_API_KEY'"
+check 'Qwen sandbox forward does not duplicate an --env= form' "test \"\$(sandbox_flags_after '--env=BAILIAN_CODING_PLAN_API_KEY')\" = '--env BAILIAN_CODING_PLAN_API_KEY'"
 if [ -n "${SYSTEMROOT:-}" ]; then
   check 'Qwen runtime home has a private Windows ACL before provider contact' "test -f '$AI_QWEN_HOME/.ai-devops-private-home-v1' && ! icacls.exe \"\$(cygpath -w '$AI_QWEN_HOME')\" | grep -Ei 'BUILTIN\\\\Users|Authenticated Users|Everyone'"
 else
@@ -505,10 +518,11 @@ else
 fi
 check 'review pins the stable Qwen 3.8 Max model' "grep -q -- '--model qwen3.8-max' '$TMP/argv.txt'"
 check 'review uses safe mode' "grep -q -- '--safe-mode' '$TMP/argv.txt'"
-check 'review uses plan mode' "grep -q -- '--approval-mode plan' '$TMP/argv.txt'"
-check 'review excludes mutation tools' "grep -q -- '--exclude-tools shell,write,edit' '$TMP/argv.txt'"
+check 'review runs under Qwen sandbox with full tools (#974)' "grep -q -- '--sandbox --approval-mode yolo' '$TMP/argv.txt' && ! grep -q -- '--exclude-tools' '$TMP/argv.txt' && ! grep -q -- '--approval-mode plan' '$TMP/argv.txt'"
 check 'review has measured governed-review budgets' "grep -q -- '--max-session-turns 120' '$TMP/argv.txt' && grep -q -- '--max-tool-calls 120' '$TMP/argv.txt' && grep -q -- '--max-wall-time 60m' '$TMP/argv.txt'"
-check 'review never uses yolo or continue' "! grep -qE -- '--approval-mode yolo|--continue' '$TMP/argv.txt'"
+check 'review never uses continue' "! grep -q -- '--continue' '$TMP/argv.txt'"
+check 'review prompt says it may run code and edit a disposable copy' "grep -q 'disposable, remote-less copy' '$TMP/prompt-copy' && grep -q 'edits are discarded' '$TMP/prompt-copy' && ! grep -qi 'read-only' '$TMP/prompt-copy'"
+check 'review directory is a remote-less snapshot, not the caller checkout' "d=\$(run show review-1 | jq -r .review_dir) && test -f \"\$d/AI-REVIEW-SANDBOX.md\" && test -z \"\$(git -C \"\$d\" remote)\" && test \"\$(cd \"\$d\" && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\""
 check 'review record stores exact session' "run show review-1 | jq -e '.qwen_session_id==\"qwen-session-1\" and .caller==\"codex\"'"
 check 'review record binds exact evidence identity' "run show review-1 | jq -e '(.base|length)==40 and (.head|length)==40 and (.packet_sha256|length)==64 and (.working_tree_sha256|length)==64 and .evidence_generation==1'"
 check 'governed auth settings are regular and pin both provider and active model identity' "test -f '$AI_QWEN_HOME/settings.json' && test ! -L '$AI_QWEN_HOME/settings.json' && jq -e '.model.baseUrl as \$url | .security.auth.selectedType==\"openai\" and .model.name==\"qwen3.8-max\" and (\$url|length)>0 and (.modelProviders.openai|any(.id==\"qwen3.8-max\" and .baseUrl==\$url and .envKey==\"BAILIAN_CODING_PLAN_API_KEY\"))' '$AI_QWEN_HOME/settings.json'"
@@ -708,6 +722,7 @@ qwen_late_signal_case(){ # NAME COMMAND
   check "$command: signal after a complete answer records a locally finalizable turn" "jq -e '.status==\"recovery-required\" and .failure_reason==\"provider_turn_pending_local_validation\"' '$meta' && grep -q 'ai-qwen finalize $name' '$TMP/late-$name.log'"
   event="$(jq -r .recovery_event_run_id "$meta")"; python="$(command -v python3 || command -v python)"
   check "$command: the interrupted invocation is still not durable before finalize" "! '$python' '$REPO_ROOT/tools/reviewer_events.py' verify-reports qwen '$event' >/dev/null 2>&1"
+  check "$command: interrupted review releases its lock before local recovery" "! grep -Rl '^review:$name\$' '$TMP/state/locks' --include=label"
   check "$command: late-signal answer finalizes locally with a verdict" "run finalize '$name' > '$TMP/late-$name-finalize.log' 2>&1 && jq -e '.status==\"active\"' '$meta' && grep -l 'late signal review' '$REPO/.ai/reviews'/qwen-$name-*.md >/dev/null"
   check "$command: finalize makes the interrupted invocation durable" "'$python' '$REPO_ROOT/tools/reviewer_events.py' verify-reports qwen '$event' >/dev/null"
   check "$command: late-signal recovery spends zero additional provider turns" "test \"\$(( calls + 1 ))\" -eq \"\$(wc -l < '$TMP/argv.txt')\""
@@ -717,13 +732,19 @@ run new late-signal-ask --prompt review >/dev/null 2>&1 || bad 'late-signal foll
 qwen_late_signal_case late-signal-ask ask
 
 echo mutate-review > "$TMP/mode"
-if run new hostile --prompt 'write a file' >/dev/null 2>&1; then bad 'review mutation fails loudly'; else ok 'review mutation fails loudly'; fi
+BEFORE_CLEAN="$(sha256sum "$REPO/a.txt" | awk '{print $1}')"
+HOSTILE_OUT="$(run new hostile --prompt "write a file" 2>&1)"; HR=$?
+[ "$HR" = 0 ] || printf '  diagnostic: hostile: %s\n' "$(printf %s "$HOSTILE_OUT" | tail -3)"
+if [ "$HR" = 0 ]; then ok 'review may edit its disposable copy (#974)'; else bad 'review may edit its disposable copy (#974)'; fi
+HOSTILE_DIR="$(run show hostile 2>/dev/null | jq -r '.review_dir // empty')"
+if [ -z "$HOSTILE_DIR" ] || [ ! -d "$HOSTILE_DIR" ] || ! grep -q '^bad$' "$HOSTILE_DIR/a.txt"; then ok 'reviewer edits in the disposable copy are discarded'; else bad 'reviewer edits in the disposable copy are discarded'; fi
+[ "$BEFORE_CLEAN" = "$(sha256sum "$REPO/a.txt" | awk '{print $1}')" ] && [ -z "$(git -C "$REPO" status --porcelain)" ] && ok 'disposable-copy edit leaves caller checkout unchanged' || bad 'disposable-copy edit leaves caller checkout unchanged'
 git -C "$REPO" checkout -q -- a.txt
 
 printf 'owner work\n' >> "$REPO/a.txt"
 BEFORE_DIRTY="$(sha256sum "$REPO/a.txt" | awk '{print $1}')"
 echo mutate-review > "$TMP/mode"
-if run new hostile-dirty --prompt 'write a file' >/dev/null 2>&1; then bad 'mutation inside an already-dirty file fails'; else ok 'mutation inside an already-dirty file fails'; fi
+if run new hostile-dirty --prompt 'write a file' >/dev/null 2>&1; then ok 'edit of an already-dirty file in the copy is allowed'; else bad 'edit of an already-dirty file in the copy is allowed'; fi
 AFTER_DIRTY="$(sha256sum "$REPO/a.txt" | awk '{print $1}')"
 if [ "$BEFORE_DIRTY" = "$AFTER_DIRTY" ]; then ok 'private-copy mutation leaves owner work untouched'; else bad 'private-copy mutation leaves owner work untouched'; fi
 git -C "$REPO" checkout -q -- a.txt

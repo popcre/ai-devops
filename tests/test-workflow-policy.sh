@@ -5,7 +5,14 @@ workflow="${WORKFLOW_UNDER_TEST:-$ROOT/.github/workflows/verify.yml}"
 blacksmith_workflow="$ROOT/.github/workflows/windows-offline-blacksmith.yml"
 fast_workflow="$ROOT/.github/workflows/fast-classifier.yml"
 classifier="$ROOT/tools/ci/classify-changes.sh"
-manifest="$ROOT/config/ci-suite-manifest.json"
+global_manifest="$ROOT/config/ci-suite-manifest.json"
+manifest="$(mktemp)"
+trap 'rm -f "$manifest"' EXIT
+# The reader-shaped manifest is assembled by the per-suite loader (#1001);
+# every inventory, membership and section check below pins the loader output.
+bash "$ROOT/tools/ci-suites/load-manifest" >"$manifest" || {
+  printf 'FAIL: the suite manifest did not assemble through the loader\n' >&2
+  exit 1; }
 . "$ROOT/tools/lib/task-gates.sh"
 failures=0
 
@@ -29,12 +36,86 @@ check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ]
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: blacksmith-4vcpu-ubuntu-2404' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
-check 'long and reviewer jobs use their separate classifier outputs' "[ \"\$(grep -c \"needs.fast-classifier.outputs.run_long == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -c \"needs.fast-classifier.outputs.reviewer == 'true'\" '$workflow')\" -eq 4 ] && [ \"\$(grep -cE 'needs: \\[fast-classifier, manual-preflight(, runner-router)?\\]' '$workflow')\" -eq 4 ]"
-check 'classifier failure runs every existing check fail closed' "[ \"\$(grep -c \"needs.fast-classifier.result != 'success'\" '$workflow')\" -eq 8 ]"
+# P3 splits selection from fast validation. The assertions below check each
+# expensive job's dependencies and required outcomes directly. They do not
+# count how many times a fragment appears: a new expensive lane must carry the
+# same gates, and a removed gate must fail here whatever the layout looks like.
+job_block() {
+  sed -n "/^  $1:/,/^  $2:/p" "$workflow"
+}
+# Capture the block first: `sed | grep -q` under `set -o pipefail` reports a
+# false negative on Linux, where grep -q closes the pipe after the first match
+# and sed's broken-pipe exit status is then what the pipeline returns.
+job_has() {
+  local block
+  block="$(job_block "$1" "$2")"
+  printf '%s' "$block" | grep -Fq "$3"
+}
+# Every long-suite job selects on the run-long output, not on the whole
+# classifier result, and every reviewer-lane job selects on the reviewer
+# output. Both keep the conservative "unknown selection runs everything" arm.
+long_jobs_select_run_long_ok() {
+  job_has linux-offline-shard linux-offline "outputs.run_long != 'false'" || return 1
+  job_has linux-offline merge-group-evidence "outputs.run_long != 'false'" || return 1
+  job_has windows-offline-section windows-offline-complete "outputs.run_long != 'false'" || return 1
+  job_has windows-offline-complete windows-offline "outputs.run_long != 'false'" || return 1
+  job_has linux-offline-shard linux-offline "outputs.selection_result != 'success'" || return 1
+  job_has windows-offline-section windows-offline-complete "outputs.selection_result != 'success'" || return 1
+  job_has windows-offline-complete windows-offline "outputs.selection_result != 'success'" || return 1
+}
+reviewer_jobs_select_reviewer_ok() {
+  job_has reviewer-runner-availability windows-reviewer-preferred "outputs.reviewer != 'false'" || return 1
+  job_has windows-reviewer-preferred reviewer-safety-start-deadline "outputs.reviewer != 'false'" || return 1
+  job_has reviewer-safety-start-deadline windows-reviewer-fallback "outputs.reviewer != 'false'" || return 1
+  job_has windows-reviewer-fallback windows-reviewer-safety "outputs.reviewer != 'false'" || return 1
+  job_has reviewer-runner-availability windows-reviewer-preferred "outputs.selection_result != 'success'" || return 1
+  job_has windows-reviewer-preferred reviewer-safety-start-deadline "outputs.selection_result != 'success'" || return 1
+}
+# A known terminal fast-validation failure starts no long job. This is the
+# per-suite auto-cancel: each expensive suite is stopped before it starts, one
+# suite at a time, without any whole-queue status tool.
+expensive_jobs_carry_validation_stop_ok() {
+  job_has linux-offline-shard linux-offline "outputs.validation_result != 'failure'" || return 1
+  job_has linux-offline merge-group-evidence "outputs.validation_result != 'failure'" || return 1
+  job_has windows-offline-section windows-offline-complete "outputs.validation_result != 'failure'" || return 1
+  job_has windows-offline-complete windows-offline "outputs.validation_result != 'failure'" || return 1
+  job_has windows-reviewer-fallback windows-reviewer-safety "outputs.validation_result != 'failure'" || return 1
+  job_has reviewer-runner-availability windows-reviewer-preferred "outputs.validation_result != 'failure'" || return 1
+}
+check 'long and reviewer jobs use their separate selection outputs' long_jobs_select_run_long_ok
+check 'reviewer lane selects on the reviewer output, not the whole classifier' reviewer_jobs_select_reviewer_ok
+check 'a known terminal validation failure stops every expensive suite before it starts' expensive_jobs_carry_validation_stop_ok
+# Missing or invalid classification never becomes a green skip: the aggregates
+# accept a skip only on an explicit prose-only verdict from a successful
+# selection. The old "anything that is not true" arm let an empty output skip
+# every expensive suite and still pass.
+never_green_skip_ok() {
+  grep -Fq "\"\$RUN_LONG\" = 'false'" "$workflow" || return 1
+  grep -Fq "\"\$RUN_REVIEWER\" = 'false'" "$workflow" || return 1
+  ! grep -Fq "\"\$RUN_LONG\" != 'true'" "$workflow" || return 1
+  ! grep -Fq "\"\$RUN_REVIEWER\" != 'true'" "$workflow" || return 1
+}
+check 'missing or invalid classification is never a green skip' never_green_skip_ok
+# No-progress detector / per-suite auto-cancel: a suite that is cancelled or
+# that never reported is no progress, never a pass. Per-suite cancel is the
+# only cancellation scope; there is no whole-queue status tool.
+no_progress_never_pass_ok() {
+  grep -Fq 'bash tools/ci/verify-closure.sh' "$workflow" || return 1
+  local closure_block
+  closure_block="$(sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' "$workflow")"
+  printf '%s' "$closure_block" | grep -Fq 'outputs.validation_result' || return 1
+  # The closure evaluator is the no-progress detector: it is the component that
+  # names a cancelled or missing lane and refuses to close.
+  grep -Fq 'cancelled' "$ROOT/tools/ci/verify-closure.sh" || return 1
+  grep -Fq 'no progress' "$ROOT/tests/test-verify-closure.sh" || return 1
+}
+check 'no_progress_detector: a cancelled or missing suite is no progress and never a pass' no_progress_never_pass_ok
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
-check 'scheduled failures create or update an issue' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'gh issue create'"
+check 'scheduled failures create or update an issue with action labels' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'tools/ci/report-scheduled-failure.sh' && test -f '$ROOT/tools/ci/report-scheduled-failure.sh' && grep -q 'action-taxonomy' '$ROOT/tools/ci/report-scheduled-failure.sh'"
+check 'capacity labels land on scheduled incidents (timeout/kill/rate-limit = capacity/infra)' \
+  "grep -q 'capacity/infra' '$ROOT/tools/ci/action-taxonomy.sh' && grep -q 'action_taxonomy_check' '$ROOT/tools/ci/report-scheduled-failure.sh' && bash '$ROOT/tools/ci/action-taxonomy.sh' check TIMED_OUT | grep -qx 'capacity/infra' && bash '$ROOT/tools/ci/action-taxonomy.sh' check CANCELLED | grep -qx 'capacity/infra' && bash '$ROOT/tools/ci/action-taxonomy.sh' review empty-report | grep -qx 'review-step'"
 check 'managed bin commands use the shared GitHub admission path' \
   "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$ROOT' >/dev/null"
 # Windows verification runs in two lanes at once (issue #209): the long offline
@@ -107,6 +188,19 @@ check 'the required closure checks out its evaluator before running it' \
 # Counts are derived from discovery (checked exactly below), never hard-coded:
 # a literal count went stale on every new suite and failed 11 of 23 runs.
 check 'manifest declares unique, non-empty Bash suites' "[ \"\$(jq '.bash | length' '$manifest')\" -gt 0 ] && [ \"\$(jq '.bash | length' '$manifest')\" -eq \"\$(jq '.bash | unique | length' '$manifest')\" ]"
+# The split (#1001): per-suite data lives only in config/ci-suites/*.json and
+# is assembled by the loader. Reintroducing a per-suite array or map in the
+# global file would recreate the shared-file collision the split removed.
+slim_violations() {
+  jq -r 'keys | map(select(. == "bash" or . == "powershell" or . == "linux_offline_suite_seconds" or . == "windows_sensitive_bash" or . == "windows_reviewer_safety_bash" or . == "windows_offline_bash" or . == "windows_offline_shards")) | length' "$1" | tr -d '\r'
+}
+check 'the global manifest carries no per-suite data' '[ "$(slim_violations "$global_manifest")" -eq 0 ]'
+slim_probe="$(mktemp)"
+jq '. + {bash: ["test-reintroduced.sh"]}' "$global_manifest" >"$slim_probe"
+check 'a reintroduced per-suite array in the global manifest is rejected' '[ "$(slim_violations "$slim_probe")" -ne 0 ]'
+rm -f "$slim_probe"
+check 'per-suite manifest files exist beside the global manifest' \
+  '[ -d "$ROOT/config/ci-suites" ] && [ "$(find "$ROOT/config/ci-suites" -maxdepth 1 -name "*.json" | wc -l | tr -d " ")" -gt 0 ]'
 check 'manifest declares unique, non-empty PowerShell suites' "[ \"\$(jq '.powershell | length' '$manifest')\" -gt 0 ] && [ \"\$(jq '.powershell | length' '$manifest')\" -eq \"\$(jq '.powershell | unique | length' '$manifest')\" ]"
 check 'manifest exactly matches Bash discovery' '[ "$actual_bash" = "$manifest_bash" ]'
 check 'manifest exactly matches PowerShell discovery' '[ "$actual_pwsh" = "$manifest_pwsh" ]'
@@ -149,7 +243,7 @@ check 'Gemini, GLM and Muse Code run in different sections within the same 40-mi
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 check 'manual Blacksmith lane runs the same complete section mapping' \
-  'grep -qF "section: $sections_expected" "$blacksmith_workflow" && grep -qF "matrix.section }} of $shard_count" "$blacksmith_workflow" && grep -qF "matrix.section }}/$shard_count" "$blacksmith_workflow" && grep -qF -- "-Shard" "$blacksmith_workflow" && grep -qF "all six Blacksmith sections succeeded" "$blacksmith_workflow"'
+  'grep -qF "section: $sections_expected" "$blacksmith_workflow" && grep -qF "matrix.section }} of $shard_count" "$blacksmith_workflow" && grep -qF "matrix.section }}/$shard_count" "$blacksmith_workflow" && grep -qF -- "-Shard" "$blacksmith_workflow" && grep -qF "all eight Blacksmith sections succeeded" "$blacksmith_workflow"'
 check 'Blacksmith stays manual, bounded, independently hosted and fail-closed' \
   'grep -q "^  workflow_dispatch:" "$blacksmith_workflow" && ! grep -Eq "^  (pull_request|schedule|merge_group|workflow_run):" "$blacksmith_workflow" && grep -qF "runs-on: blacksmith-4vcpu-windows-2025" "$blacksmith_workflow" && grep -qF "timeout-minutes: 20" "$blacksmith_workflow" && grep -qF "fail-fast: false" "$blacksmith_workflow" && grep -qF "failing closed" "$blacksmith_workflow"'
 # Sections run at the same time on independent hosted machines, and one failing
@@ -211,22 +305,27 @@ grep -Fq '|| github.sha' "$workflow" || {
   printf 'FAIL: manual verification must remain scoped to its immutable source SHA\n' >&2
   exit 1
 }
-# No physical Windows or fallback job may run on merge_group; a queue rebuild restarts them,
-# and the long suite holds a qualified pool host for the better part of an hour.
-windows_skips="$(grep -c "github.event_name != 'merge_group' &&" "$workflow" | tr -d '
-')"
-[ "$windows_skips" -eq 5 ] || {
-  printf 'FAIL: physical Windows routing and fallback jobs must be skipped on merge_group
-' >&2
-  exit 1
+# No physical Windows or fallback job may run on merge_group; a queue rebuild
+# restarts them, and the long suite holds a qualified pool host for the better
+# part of an hour. Asserted per job, not as a fragment count: a new Windows job
+# must carry the same event isolation.
+windows_merge_group_isolated_ok() {
+  job_has windows-offline-section windows-offline-complete "github.event_name == 'pull_request'" || return 1
+  job_has windows-offline-complete windows-offline "github.event_name != 'merge_group'" || return 1
+  job_has windows-offline windows-reviewer-safety "github.event_name != 'merge_group'" || return 1
+  job_has reviewer-runner-availability windows-reviewer-preferred "github.event_name != 'merge_group'" || return 1
+  job_has windows-reviewer-preferred reviewer-safety-start-deadline "github.event_name != 'merge_group'" || return 1
+  job_has reviewer-safety-start-deadline windows-reviewer-fallback "github.event_name != 'merge_group'" || return 1
+  job_has windows-reviewer-fallback windows-reviewer-safety "github.event_name != 'merge_group'" || return 1
 }
+check 'physical Windows routing and fallback jobs are skipped on merge_group' windows_merge_group_isolated_ok
 # Pull requests use the hosted Windows-sensitive assignment. Schedule and
 # workflow_dispatch keep the complete sharded runner as the backstop.
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' "$workflow" &&
 [ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
 printf '%s' "$complete_block" | grep -Fq '.\tests\test-all.ps1 -Shard' &&
-sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -Fq "github.event_name == 'pull_request'" &&
-sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -Fq "github.event_name != 'pull_request'" || {
+sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -F "github.event_name == 'pull_request'" >/dev/null &&
+sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -F "github.event_name != 'pull_request'" >/dev/null || {
   printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2
   exit 1
 }
@@ -249,18 +348,20 @@ sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | gre
 # to blacksmith"); the self-hosted pool and GitHub-hosted queue both stalled.
 # Albert then clarified he wanted Blacksmith added, not ENVY removed (#736):
 # the reviewer lane prefers idle ENVY and falls back to Blacksmith otherwise.
-[ "$(grep -F 'ai-devops-windows-qualified]' "$workflow" | grep -c 'runs-on' | tr -d '
-')" -eq 1 ] || {
-  printf 'FAIL: only the preferred reviewer job may use the qualified self-hosted pool
-' >&2
-  exit 1
+# Permitted runners: the qualified self-hosted pool is allowed only on the
+# preferred reviewer job, and the two fixed non-preferred Windows jobs must
+# stay on Blacksmith. Asserted per job so a new job cannot quietly claim a
+# runner it was never granted.
+qualified_pool_ok() {
+  job_has windows-reviewer-preferred reviewer-safety-start-deadline 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' || return 1
+  [ "$(grep -F 'ai-devops-windows-qualified]' "$workflow" | grep -c 'runs-on' | tr -d '\r')" -eq 1 ]
 }
-blacksmith_pool="$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*$' "$workflow" | tr -d '\r')"
-[ "$blacksmith_pool" -eq 2 ] || {
-  printf 'FAIL: the two fixed non-preferred Windows verify jobs must run on Blacksmith (sections are routed, Blacksmith fallback)
-' >&2
-  exit 1
+check 'only the preferred reviewer job may use the qualified self-hosted pool' qualified_pool_ok
+blacksmith_fixed_windows_ok() {
+  job_has windows-offline-complete windows-offline 'runs-on: blacksmith-4vcpu-windows-2025' || return 1
+  job_has windows-reviewer-fallback windows-reviewer-safety 'runs-on: blacksmith-4vcpu-windows-2025' || return 1
 }
+check 'the two fixed non-preferred Windows verify jobs run on Blacksmith' blacksmith_fixed_windows_ok
 if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ubuntu-24\.04|ubuntu-latest|^[[:space:]]*runs-on:[[:space:]]*windows-2025'; then
   printf 'FAIL: verify jobs must not use GitHub-hosted runners
 ' >&2
@@ -310,11 +411,23 @@ check 'measured Linux suite seconds name only discovered suites' \
   '[ -n "$linux_weight_names" ] && [ -z "$(LC_ALL=C comm -23 <(printf "%s\n" "$linux_weight_names") <(printf "%s\n" "$manifest_bash"))" ]'
 check 'the four balanced sections partition every runnable Bash suite exactly once' \
   '[ "$(for i in 1 2 3 4; do bash "$ROOT/tests/test-all.sh" --balanced --shard "$i/4" --list | grep "^test-"; done | LC_ALL=C sort)" = "$expected_bash" ]'
-cancel_aware_jobs="$(grep -c '!cancelled()' "$workflow" | tr -d '\r')"
-[ "$cancel_aware_jobs" -eq 11 ] || {
-  printf 'FAIL: every dependent verification job must stop when its run is cancelled\n' >&2
-  exit 1
+# Every dependent verification job must stop when its run is cancelled. The
+# assertion is per job: a new dependent job must carry the same cancellation
+# awareness, and a removed arm must fail here whatever the layout looks like.
+cancel_aware_ok() {
+  job_has linux-offline-shard linux-offline '!cancelled()' || return 1
+  job_has linux-offline merge-group-evidence '!cancelled()' || return 1
+  job_has windows-offline-section windows-offline-complete '!cancelled()' || return 1
+  job_has windows-offline-complete windows-offline '!cancelled()' || return 1
+  job_has windows-offline windows-reviewer-safety '!cancelled()' || return 1
+  job_has reviewer-runner-availability windows-reviewer-preferred '!cancelled()' || return 1
+  job_has windows-reviewer-preferred reviewer-safety-start-deadline '!cancelled()' || return 1
+  job_has reviewer-safety-start-deadline windows-reviewer-fallback '!cancelled()' || return 1
+  job_has windows-reviewer-fallback windows-reviewer-safety '!cancelled()' || return 1
+  job_has windows-reviewer-safety report-scheduled-failure '!cancelled()' || return 1
+  job_has verification-closure report-scheduled-failure '!cancelled()' || return 1
 }
+check 'every dependent verification job stops when its run is cancelled' cancel_aware_ok
 if sed -n '/^  linux-offline:/,/^  report-scheduled-failure:/p' "$workflow" | grep -Fq 'if: always()'; then
   printf 'FAIL: always() would keep superseded pull-request work running after cancellation\n' >&2
   exit 1
@@ -376,7 +489,7 @@ check_reviewer_result() {
     exit 1
   }
 }
-common_reviewer_env='EVENT=pull_request CLASSIFIER_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=true WATCHDOG_RESULT=success'
+common_reviewer_env='EVENT=pull_request SELECTION_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=true WATCHDOG_RESULT=success'
 # Regression: a timed-out or cancelled preferred host is not a global stop when
 # the independent hosted runner completed every identical reviewer assertion.
 check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=success
@@ -384,8 +497,11 @@ check_reviewer_result 0 $common_reviewer_env PREFERRED_RESULT=failure FALLBACK_R
 check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=failure
 check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cancelled FALLBACK_RESULT=skipped
 check_reviewer_result 1 $common_reviewer_env PREFERRED_RESULT=cleanup_failure FALLBACK_RESULT=skipped
-check_reviewer_result 0 EVENT=pull_request CLASSIFIER_RESULT=success RUN_REVIEWER=false RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
-check_reviewer_result 0 EVENT=workflow_dispatch CLASSIFIER_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=false WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+check_reviewer_result 0 EVENT=pull_request SELECTION_RESULT=success RUN_REVIEWER=false RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+check_reviewer_result 0 EVENT=workflow_dispatch SELECTION_RESULT=success RUN_REVIEWER=true RUN_EXPENSIVE=false WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+# Missing or invalid selection never becomes a green skip of the reviewer lane.
+check_reviewer_result 1 EVENT=pull_request SELECTION_RESULT=missing RUN_REVIEWER= RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
+check_reviewer_result 1 EVENT=pull_request SELECTION_RESULT=failure RUN_REVIEWER= RUN_EXPENSIVE=true WATCHDOG_RESULT=skipped PREFERRED_RESULT= FALLBACK_RESULT=skipped
 rm -f "$aggregate_script"
 
 if [ "${WORKFLOW_POLICY_MUTATION_CHILD:-0}" != 1 ]; then
@@ -528,6 +644,15 @@ BOOTSTRAP
   assert_rejected fork-fallback-blocked
   sed '/Dir::Etc::sourceparts=-/d' "$workflow" >"$mutation_dir/third-party-apt-feed.yml"
   assert_rejected third-party-apt-feed
+  # P3 load-bearing gates: removing the known-terminal-failure stop, or
+  # reintroducing the green-skip arm, must fail policy just like the older
+  # mutations. A deliberately invalid candidate is the same shape as these.
+  sed "s/validation_result != 'failure'/validation_result != 'never'/" "$workflow" >"$mutation_dir/validation-stop-removed.yml"
+  assert_rejected validation-stop-removed
+  sed "s/RUN_LONG\" = 'false'/RUN_LONG\" != 'true'/" "$workflow" >"$mutation_dir/green-skip-reintroduced.yml"
+  assert_rejected green-skip-reintroduced
+  sed "s/RUN_REVIEWER\" = 'false'/RUN_REVIEWER\" != 'true'/" "$workflow" >"$mutation_dir/reviewer-green-skip.yml"
+  assert_rejected reviewer-green-skip
 fi
 
 [ "$failures" -eq 0 ] || { printf 'FAIL: %s workflow policy assertions failed\n' "$failures" >&2; exit 1; }

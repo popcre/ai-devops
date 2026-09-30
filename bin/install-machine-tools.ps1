@@ -1,7 +1,8 @@
 param(
   [string]$RepoPath = (Split-Path -Parent $PSScriptRoot),
   [string]$CatalogPath,
-  [string]$UserProfilePath = $env:USERPROFILE
+  [string]$UserProfilePath = $env:USERPROFILE,
+  [switch]$RecoverPendingTransactionOnly
 )
 $ErrorActionPreference = "Stop"
 # This is also a direct entry point. Hold the same machine-wide lock as the
@@ -225,6 +226,8 @@ if (Test-Path -LiteralPath $transactionPath) {
     throw 'Injected stop after exact PATH and launcher recovery.'
   }
 }
+
+if ($RecoverPendingTransactionOnly) { return }
 
 # This is the common receipt-stamping boundary. Run it on the same PowerShell
 # thread so a child of the full installer can re-enter the held mutex.

@@ -9,6 +9,8 @@ Session record: [`HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-
 
 ## STATUS (read this first — do not re-derive or re-plan)
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** (1) steps that require a leftover-proof issue instead leave a proof-gap checklist item on the **same** issue (e.g. `- [ ] live proof`) — do **not** open a leftover-proof issue; (2) parent/child issue trees are deleted as process — track remaining work as a checklist on the existing issue, not as child issues. Mentions of leftover-proof issues and parent/child trees in this file are historical.
+
 | Step | State | Date | Evidence |
 |---|---|---|---|
 | 0. Plan written, issues opened, gateway handoff folded in | ✅ done | 2026-09-23 | this file; issues #703–#707 |
@@ -30,6 +32,7 @@ Session record: [`HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-
 steps in #707's body: take the first unticked phase, do only that phase, tick it,
 comment the next child issue on #707, and stop. Before each phase, re-read every
 later phase and fix anything the previous phase made untrue.
+*(Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md): parent/child issue trees are deleted as process. Track remaining phases as a checklist on the existing issue; do not open child issues. Historical text retained above.)*
 
 ---
 
@@ -184,8 +187,8 @@ Locked (do not relitigate):
 - One catalog of definitions; membership is data beside it. No second copy.
 - Protected skills stay global and auto-invocable.
 - Measure before and after every change with the same method.
-- One phase = one session = one issue; each phase ends with live proof or one
-  leftover-proof issue for that phase.
+- One phase = one session = one issue; each phase ends with live proof or a
+  `- [ ] live proof` checklist item on that same issue (leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 
 Open (implementer's judgment, with criteria):
 - Owner repository of each scraper and DesignFlow skill: read the skill's own

@@ -46,6 +46,7 @@ if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   fi
   [ "${2:-}" = --live ] || { [ "${MOCK_QWEN_NORMAL_DOCTOR_FAIL:-0}" = 0 ] || exit 124; }
   [ "${2:-}" != --live ] || { [ -z "${MOCK_QWEN_CONTACT_FILE:-}" ] || printf 'one\n' >> "$MOCK_QWEN_CONTACT_FILE"; }
+  [ "${2:-}" != --live ] || { [ "${MOCK_QWEN_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; }
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
   if [ "${MOCK_QWEN_FAIL:-0}" = 1 ]; then
@@ -136,13 +137,21 @@ check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check ge
 check "tampered Gemini qualification record fails closed" "mkdir -p '$AI_REVIEW_QUARANTINE_DIR'; printf '{\"version\":2,\"provider\":\"gemini\",\"wrapper_sha256\":\"bad\",\"agy_sha256\":\"bad\",\"agy_version\":\"1.1.19\",\"model\":\"gemini-3.8-flash-high\",\"qualified_epoch\":1}\n' > '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'; $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
 check "successful Gemini live qualification durably releases quarantine" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 check "Gemini qualification remains valid when network-dependent normal doctor is unavailable" "MOCK_GEMINI_NORMAL_DOCTOR_FAIL=1 $SCRIPT qualify gemini && MOCK_GEMINI_NORMAL_DOCTOR_FAIL=1 $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
-check "failed Gemini requalification revokes the prior qualification" "! MOCK_GEMINI_FAIL=1 $SCRIPT qualify gemini && test ! -e '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json' && $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
+# Old "failed requalification revokes the prior qualification" (delete-before-
+# canary) was a product bug: it was the 24-48h quarantine loop (issue #1112).
+# A failed canary keeps the previous version valid — no quarantine, no lockout.
+check "failed Gemini requalification keeps the prior qualification (no quarantine)" "! MOCK_GEMINI_FAIL=1 $SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 check "Gemini can be qualified again after a failed requalification" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 cp "$TMP/bin/gemini" "$TMP/bin/gemini-race"; chmod +x "$TMP/bin/gemini-race"
 check "wrapper replacement during Gemini canary cannot authorize untested bytes" "rm -f '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'; ! MOCK_GEMINI_MUTATE_WRAPPER=1 AI_REVIEW_GEMINI_WRAPPER='$TMP/bin/gemini-race' $SCRIPT qualify gemini && test ! -e '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'"
 check "Gemini remains quarantined after a during-canary wrapper replacement" "AI_REVIEW_GEMINI_WRAPPER='$TMP/bin/gemini-race' $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
 check "Gemini requalification still works after rejecting a race" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
-check "same-version Gemini runtime replacement during canary is rejected" "! MOCK_GEMINI_MUTATE_RUNTIME=1 $SCRIPT qualify gemini && test ! -e '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'"
+# Re-scoped: the old assertion expected the whole record to be deleted
+# (revoke-on-fail, the 24-48h product bug). The invariant to keep is that the
+# untested runtime bytes are never authorized: no version may carry the
+# replaced runtime hash, while the prior version is kept.
+BAD_AGY_SHA="$(printf '%064d\n' 0 | tr 0 b)"
+check "same-version Gemini runtime replacement during canary is rejected" "! MOCK_GEMINI_MUTATE_RUNTIME=1 $SCRIPT qualify gemini && ! jq -e --arg s '$BAD_AGY_SHA' 'any(.versions[]; .agy_sha256==\$s)' '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json' && $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
 printf '%064d\n' 0 | tr 0 a > "$MOCK_AGY_SHA_FILE"
 check "Gemini can be requalified after rejecting runtime replacement" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 check "Gemini runtime version drift invalidates qualification" "MOCK_AGY_VERSION=1.1.20 $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
@@ -164,7 +173,10 @@ check "extra Qwen identity output fails closed" "MOCK_QWEN_IDENTITY_EXTRA=1 $SCR
 check "failed Qwen identity command fails closed" "MOCK_QWEN_IDENTITY_FAIL=1 $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
 unset MOCK_QWEN_MODE_LOG
 MOCK_QWEN_CONTACT_FILE="$TMP/qwen-contact"; export MOCK_QWEN_CONTACT_FILE; : > "$MOCK_QWEN_CONTACT_FILE"
-check "failed Qwen requalification revokes the prior qualification" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && test ! -e '$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json' && $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
+# Old "failed requalification revokes the prior qualification" (delete-before-
+# canary) was a product bug: it was the 24-48h quarantine loop (issue #1112).
+# A failed canary keeps the previous version valid — no quarantine, no lockout.
+check "failed Qwen requalification keeps the prior qualification (no quarantine)" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 check "failed Qwen qualification is attempted exactly once" "test \"\$(wc -l < '$MOCK_QWEN_CONTACT_FILE')\" -eq 1"
 unset MOCK_QWEN_CONTACT_FILE
 check "Qwen can be qualified after an evidence-directed failure" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
@@ -178,6 +190,26 @@ printf '\n# version changed\n' >> "$TMP/bin/good"
 check "Qwen wrapper changes invalidate prior live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 sed -i '$d' "$TMP/bin/good"
 check "Qwen can be requalified after a wrapper change" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+
+echo '== requalification keeps last good (#1112)'
+# The old qualify path deleted the live-qualification record BEFORE the live
+# canary ("revoke-on-fail"). That was a product bug — the 24-48h quarantine
+# loop (issue #1112). The record is now a versioned store keyed by
+# wrapper/runtime/preloader hashes (Gemini also model): every canary-proven key
+# is kept, a failed canary never deletes the last good approval, and untested
+# bytes are never authorized.
+check "Qwen starts from a live-qualified last good version" "$SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+check "failed canary keeps previous version (no quarantine)" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+cp "$TMP/bin/good" "$TMP/bin/good-mutated"
+printf '\n# mutated wrapper for issue 1112\n' >> "$TMP/bin/good-mutated"
+MUTATED_SHA="$(sha256sum "$TMP/bin/good-mutated" | awk '{print $1}')"
+check "mutate wrapper hash keeps tool usable on last good version" "! MOCK_QWEN_FAIL=1 AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-mutated' $SCRIPT qualify qwen && AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good' $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+check "successful canary publishes new version" "AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-mutated' $SCRIPT qualify qwen && jq -e --arg sha '$MUTATED_SHA' 'any(.versions[]; .wrapper_sha256==\$sha)' '$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json' && AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-mutated' $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+check "drift selects matching version instead of quarantine" "AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good' $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+cp "$TMP/bin/good" "$TMP/bin/good-race"; chmod +x "$TMP/bin/good-race"
+check "untested bytes are never authorized" "! MOCK_QWEN_MUTATE_WRAPPER=1 AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-race' $SCRIPT qualify qwen && AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-race' $SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"' && AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good' $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+RACE_SHA="$(sha256sum "$TMP/bin/good-race" | awk '{print $1}')"
+check "no version authorizes the raced untested bytes" "jq -e --arg sha '$RACE_SHA' 'all(.versions[]; .wrapper_sha256!=\$sha)' '$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json'"
 
 echo '== automatic requalification (#804)'
 MOCK_QWEN_MODE_LOG="$TMP/qwen-requalify-mode-log"; export MOCK_QWEN_MODE_LOG
@@ -285,11 +317,14 @@ check "DeepSeek status is available with its doctor contract" "$SCRIPT status de
 check "DeepSeek preflight uses its doctor contract" "$SCRIPT check deepseek '$REPO' | grep -q 'health=ok'"
 check "StepFun is usable on Linux with its doctor contract" "AI_STEPFUN_PLATFORM=Linux $SCRIPT status stepfun | jq -e '.status==\"installed-healthy\" and .usable==true'"
 check "StepFun preflight passes on Linux" "AI_STEPFUN_PLATFORM=Linux $SCRIPT check stepfun '$REPO' | grep -q 'health=ok'"
-check "StepFun is unsupported-platform and unusable on Windows" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
-check "StepFun preflight refuses on Windows without contacting the provider" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
-check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux only'"
+check "StepFun is unsupported-platform on Windows without OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH='/usr/bin:/bin' $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
+check "StepFun preflight refuses on Windows without an engine" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH='/usr/bin:/bin' $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
+check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'only on Ubuntu/Linux'"
+check "StepFun is unsupported-platform on Windows even with OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE=/bin/true $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\"'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
-NOAUTH_OUT="$(env -u DEEPSEEK_API_KEY HOME="$TMP/noauth-home" AI_DEVOPS_CONFIG_DIR="$TMP/noauth-config" AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" check deepseek "$REPO" 2>&1)"; NOAUTH_RC=$?
+# AI_DEEPSEEK_TEST_DIR makes the wrapper honor this isolated HOME; production
+# mode intentionally anchors the key store to the OS user profile instead.
+NOAUTH_OUT="$(env -u DEEPSEEK_API_KEY HOME="$TMP/noauth-home" AI_DEEPSEEK_TEST_DIR="$TMP/noauth-home" AI_DEVOPS_CONFIG_DIR="$TMP/noauth-config" AI_REVIEW_DEEPSEEK_WRAPPER="$ROOT/bin/ai-deepseek-agent" "$SCRIPT" check deepseek "$REPO" 2>&1)"; NOAUTH_RC=$?
 [ "$NOAUTH_RC" -ne 0 ] && ! printf '%s' "$NOAUTH_OUT" | grep -q 'health=ok' && ok "DeepSeek without key or governed reference cannot pass offline preflight" || bad "DeepSeek without key or governed reference cannot pass offline preflight"
 "$SCRIPT" clear deepseek >/dev/null 2>&1 || true
 export AI_REVIEW_MUSE_WRAPPER="$TMP/bin/requires-muse-caller"
@@ -384,6 +419,45 @@ check "global quarantine update preserves scoped refusal" "$SCRIPT quarantine ki
 printf '#!/usr/bin/env bash\necho "credential    : managed 1Password reference"\nsleep 5\n' > "$TMP/bin/slow-cred"; chmod +x "$TMP/bin/slow-cred"
 SLOW_OUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/slow-cred" $SCRIPT check deepseek "$REPO" 2>&1)"
 printf '%s' "$SLOW_OUT" | grep -q 'deepseek failed: provider-timeout' && ok "timed-out doctor is classified as a timeout, not an auth failure" || bad "timed-out doctor is classified as a timeout, not an auth failure"
+
+echo '== P7 timeout diagnosis: bounded probe, timeout-is-not-identity, timeout-never-approves'
+
+# probe_first_call_bounded: a hanging first probe terminates and leaves no child.
+printf '#!/usr/bin/env bash\nsleep 30\n' > "$TMP/bin/hang-first"; chmod +x "$TMP/bin/hang-first"
+HANG_START=$(date +%s)
+HANG_OUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-first" $SCRIPT check deepseek "$REPO" 2>&1)"; HANG_RC=$?
+HANG_ELAPSED=$(( $(date +%s) - HANG_START ))
+check "probe_first_call_bounded" "[ '$HANG_RC' -ne 0 ] && [ '$HANG_ELAPSED' -lt 15 ] && printf '%s' '$HANG_OUT' | grep -q 'provider-timeout'"
+"$SCRIPT" clear deepseek >/dev/null 2>&1 || true
+
+# probe_timeout_not_identity_failure: timeout exit status is classified as
+# provider-timeout, not authentication-failed or provider-unhealthy.
+printf '#!/usr/bin/env bash\nsleep 5\n' > "$TMP/bin/hang-clean"; chmod +x "$TMP/bin/hang-clean"
+TOUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-clean" $SCRIPT check deepseek "$REPO" 2>&1)"
+printf '%s' "$TOUT" | grep -q 'deepseek failed: provider-timeout' && ! printf '%s' "$TOUT" | grep -qE 'authentication-failed|provider-unhealthy|identity' && ok "probe_timeout_not_identity_failure" || bad "probe_timeout_not_identity_failure"
+"$SCRIPT" clear deepseek >/dev/null 2>&1 || true
+
+# probe_timeout_never_approves: a transient timeout never yields health=ok.
+printf '#!/usr/bin/env bash\nsleep 5\n' > "$TMP/bin/hang-approve"; chmod +x "$TMP/bin/hang-approve"
+AOUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-approve" $SCRIPT check deepseek "$REPO" 2>&1)"; ARC=$?
+[ "$ARC" -ne 0 ] && ! printf '%s' "$AOUT" | grep -q 'health=ok' && ok "probe_timeout_never_approves" || bad "probe_timeout_never_approves"
+"$SCRIPT" clear deepseek >/dev/null 2>&1 || true
+
+# Empty probe output is probe-no-output, not provider-unhealthy.
+printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/bin/empty-out"; chmod +x "$TMP/bin/empty-out"
+EOUT="$(AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/empty-out" $SCRIPT check deepseek "$REPO" 2>&1)"
+printf '%s' "$EOUT" | grep -q 'probe-no-output' && ! printf '%s' "$EOUT" | grep -q 'provider-unhealthy' && ok "empty probe output is probe-no-output" || bad "empty probe output is probe-no-output"
+"$SCRIPT" clear deepseek >/dev/null 2>&1 || true
+
+# Transient timeout uses a short cooldown; auth failure uses the full cooldown.
+printf '#!/usr/bin/env bash\nsleep 5\n' > "$TMP/bin/hang-cool"; chmod +x "$TMP/bin/hang-cool"
+AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_TIMEOUT_COOLDOWN_SECONDS=7 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-cool" $SCRIPT check deepseek "$REPO" >/dev/null 2>&1 || true
+COOL_STATUS="$($SCRIPT status deepseek)"
+printf '%s' "$COOL_STATUS" | jq -e '.failure_class=="provider-timeout"' >/dev/null && ok "timeout quarantine records provider-timeout" || bad "timeout quarantine records provider-timeout"
+"$SCRIPT" clear deepseek >/dev/null 2>&1 || true
+
+# Drift is reported as drift, not as a timeout.
+check "drift is reported as drift" "$SCRIPT explain provider-timeout | grep -q 'transient liveness' && $SCRIPT explain authentication-failed | grep -q 'Quarantine'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -114,6 +114,31 @@ printf 'nested\n' > "$MAIN/Microsoft/Windows/PowerShell/other.txt"
 check "other_files_beside_the_cache_still_count" "[ '$PS_BEFORE' != \"\$('$SCRIPT' digest '$MAIN')\" ]"
 "$SCRIPT" remove-copy "$MAIN" pscache
 rm -rf "$MAIN/Microsoft"
+
+# A shallow snapshot has a smaller object database than the full source, so git
+# abbreviates the `index` line in `git diff` to a different width. Hashing that
+# text made source and snapshot digests disagree (snapshot-digest-mismatch).
+FULL_ODB="$TMP/full-odb"
+mkdir -p "$FULL_ODB"
+git -C "$FULL_ODB" init -q
+git -C "$FULL_ODB" config user.email t@example.com
+git -C "$FULL_ODB" config user.name Test
+echo base > "$FULL_ODB/a.txt"
+git -C "$FULL_ODB" add -A
+git -C "$FULL_ODB" commit -qm init
+i=0
+while [ "$i" -lt 30 ]; do
+  echo "filler-$i" > "$FULL_ODB/filler-$i.txt"
+  git -C "$FULL_ODB" add -A
+  git -C "$FULL_ODB" commit -qm "filler $i"
+  i=$((i + 1))
+done
+echo changed >> "$FULL_ODB/a.txt"
+SHALLOW_ODB="$TMP/shallow-odb"
+git clone -q --depth 1 "file://$FULL_ODB" "$SHALLOW_ODB"
+echo changed >> "$SHALLOW_ODB/a.txt"
+check "shallow_and_full_odb_agree_on_source_digest" \
+  "[ \"\$('$SCRIPT' digest '$FULL_ODB')\" = \"\$('$SCRIPT' digest '$SHALLOW_ODB')\" ]"
 check "head_matches_the_worktree" \
   "[ \"\$(git -C '$WT' rev-parse HEAD)\" = \"\$(git -C '$STAGE' rev-parse HEAD)\" ]"
 
@@ -426,6 +451,21 @@ check "short_tag_directory_name_unchanged"    "basename \"\$('$SCRIPT' path '$WT
 LONG_COPY="$("$SCRIPT" ensure-copy "$WT" "$LONG_TAG_A")"
 check "long_tag_copy_builds_and_records_full_tag" "test -f '$LONG_COPY/AI-REVIEW-SANDBOX.md' && grep -Fqx 'Snapshot tag: $LONG_TAG_A' '$LONG_COPY/AI-REVIEW-SANDBOX.md'"
 check "long_tag_copy_removes_by_recorded_tag"     "'$SCRIPT' remove-recorded '$LONG_TAG_A' '$LONG_COPY' && test ! -e '$LONG_COPY'"
+
+# --- store-before-delete for packets inside a sandbox (#1111) -----------------
+# remove_sandbox must retain every managed packet before destroying the
+# snapshot, because the sandbox may hold the only copy of review evidence.
+PACKET_BIN="$REPO_ROOT/bin/ai-review-packet"
+RET_STAGE="$("$SCRIPT" ensure-copy "$MAIN" retain-pkt)"
+RET_PKT_DIR="$("$PACKET_BIN" build "$RET_STAGE" retain-pkt --tests 'true')"
+check "sandbox_retain_fixture_builds_packet"  "[ -d '$RET_PKT_DIR' ] && [ -s '$RET_PKT_DIR/MANIFEST.md' ]"
+"$SCRIPT" remove-copy "$MAIN" retain-pkt
+check "remove_copy_retains_packet_before_delete" \
+  "[ ! -d '$RET_STAGE' ] && [ -d '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt' ]"
+check "retained_sandbox_packet_has_full_evidence" \
+  "[ -s '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/MANIFEST.md' ] && [ -s '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/patch.diff' ] && [ -f '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/identity.json' ] && [ -s '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/MANIFEST.sha256' ]"
+check "retained_sandbox_packet_rebinds_marker" \
+  "[ \"\$(sed -n '3p' '$MAIN/.ai/reviews/packets/.ai-review-retain-pkt/.ai-review-packet')\" = retained ]"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

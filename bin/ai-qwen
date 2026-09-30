@@ -2,21 +2,24 @@
 # ai-qwen — Qwen Code delegation in persistent, named sessions.
 #
 # This is the ONLY supported way for Claude or Codex to drive Qwen headlessly.
-# Never call `qwen -p` directly: this script owns the model pin, the read-only
-# enforcement, the completion rule, the session bookkeeping, and the worktree
+# Never call `qwen -p` directly: this script owns the model pin, the review
+# disposable-copy isolation, the completion rule, the session bookkeeping, and the worktree
 # isolation for write runs.
 #
-#   ai-qwen new <name>       [--prompt T | --prompt-file F | stdin]   read-only review
+#   ai-qwen new <name>       [--prompt T | --prompt-file F | stdin]   review in a disposable copy
 #   ai-qwen ask <name>       [--prompt T | --prompt-file F | stdin]   continue its saved mode
 #   ai-qwen implement <name> [--prompt T | --prompt-file F | stdin]   create/continue write run
 #   ai-qwen reset-context <name> [--prompt T | --prompt-file F]       visible recovery
 #   ai-qwen list | show <name> | transcript <name> | delete <name>
 #   ai-qwen doctor [--identity | --live]
 #
-# Review sessions are structurally read-only: safe mode disables local hooks,
-# extensions, skills, and MCP servers; plan mode plus excluded shell/write/edit
-# tools removes every built-in mutation route. Implementation runs require
-# Qwen's sandbox and a wrapper-owned disposable Git worktree.
+# Reviews are NOT read-only (owner ruling, issue #974): the reviewer may run
+# shell commands, builds and tests and edit files, but only inside a private,
+# remote-less ai-review-sandbox snapshot under Qwen's sandbox. Safe mode still
+# disables local hooks, extensions, skills, and MCP servers. Snapshot edits are
+# discarded; the caller's checkout must be unchanged or the turn is rejected.
+# Implementation runs require Qwen's sandbox and a wrapper-owned disposable Git
+# worktree.
 #
 # ---------------------------------------------------------------------------
 # STEP 0 VERIFICATION — qualified 2026-08-14 against Qwen Code 0.21.11.
@@ -30,8 +33,8 @@
 #     num_turns, result, usage, permission_denials, and timing.
 #   Headless budgets exist and are always set: max session turns, wall time,
 #     tool calls, and subagent depth. Exit 55 means a budget ended the run.
-#   Reviews use `--safe-mode --approval-mode plan --exclude-tools
-#     shell,write,edit` and a post-run tree-state check. Implementation uses
+#   Reviews use `--safe-mode --sandbox --approval-mode yolo` inside a private
+#     remote-less snapshot, with a post-run caller-checkout check. Implementation uses
 #     `--safe-mode --sandbox --approval-mode yolo` only inside the wrapper-owned
 #     disposable worktree. The installed Qwen bundle is additionally hardened
 #     so its common child-process sanitizer removes the Coding Plan credential
@@ -300,6 +303,58 @@ review_boundary() { # review_boundary ROOT TAG -> directory to hand the reviewer
   [ -n "$SANDBOX_BIN" ] || die "ai-review-sandbox is missing; install the toolkit's bin/ on PATH."
   AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" "$SANDBOX_BIN" ensure-copy "$1" "$2" || die "could not prepare a private review snapshot for $1"
 }
+# A writable review directory must be a managed snapshot: never the caller's
+# checkout, and carrying no Git remote.
+assert_disposable_review_dir() { # assert_disposable_review_dir DIR
+  local dir="$1" source="${REVIEW_SOURCE_REPO:-}"
+  [ -d "$dir" ] && [ -d "$source" ] || return 1
+  [ "$(cd "$dir" && pwd -P)" != "$(cd "$source" && pwd -P)" ] || return 1
+  [ -f "$dir/AI-REVIEW-SANDBOX.md" ] || return 1
+  [ -z "$(git -C "$dir" remote 2>/dev/null)" ] || return 1
+}
+# Issue #974: a review may run code and edit its private snapshot. The snapshot
+# has its own .git inside the boundary; checkpoint it before the turn and put it
+# back afterwards so reviewer edits are discarded and the sealed packet still
+# verifies. Git config is restored first so no reviewer-written config (hooks,
+# fsmonitor, filters, remotes) is honoured by the wrapper's own git calls.
+SNAP_DIR=""; SNAP_GITDIR=""; SNAP_HEAD=""; SNAP_SYMREF=""; SNAP_TREE=""; SNAP_INDEX=""; SNAP_CONFIG=""
+snapshot_checkpoint() { # snapshot_checkpoint REVIEW_DIR
+  local wd="$1" idx
+  SNAP_DIR="$wd"; SNAP_GITDIR="$wd/.git"
+  [ -d "$SNAP_GITDIR" ] && [ ! -L "$SNAP_GITDIR" ] || die 'review snapshot has no private .git directory; refusing a writable review.'
+  SNAP_HEAD="$(git -C "$wd" rev-parse HEAD)" || die 'could not checkpoint the review snapshot.'
+  SNAP_SYMREF="$(git -C "$wd" symbolic-ref -q HEAD 2>/dev/null || true)"
+  SNAP_CONFIG="$(mktemp)" && cp -p "$SNAP_GITDIR/config" "$SNAP_CONFIG" || die 'could not checkpoint the review snapshot config.'
+  SNAP_INDEX="$(mktemp)"
+  if [ -f "$SNAP_GITDIR/index" ]; then cp -p "$SNAP_GITDIR/index" "$SNAP_INDEX"; else rm -f "$SNAP_INDEX"; SNAP_INDEX=""; fi
+  idx="$(mktemp)"; rm -f "$idx"
+  [ -z "$SNAP_INDEX" ] || cp "$SNAP_INDEX" "$idx"
+  GIT_INDEX_FILE="$idx" git -C "$wd" add -A . >/dev/null 2>&1 && SNAP_TREE="$(GIT_INDEX_FILE="$idx" git -C "$wd" write-tree)" \
+    || { rm -f "$idx"; die 'could not checkpoint the review snapshot contents.'; }
+  rm -f "$idx"
+}
+snapshot_restore() { # snapshot_restore EXPECTED_TREE_STATE
+  local wd="$SNAP_DIR" idx
+  [ -n "$wd" ] && [ -n "$SNAP_TREE" ] || die 'no review snapshot checkpoint to restore.'
+  [ -d "$SNAP_GITDIR" ] && [ ! -L "$SNAP_GITDIR" ] || die 'the review snapshot .git was replaced during the turn; the response was rejected.'
+  cp "$SNAP_CONFIG" "$SNAP_GITDIR/config" || die 'could not restore the review snapshot config.'
+  if [ -n "$SNAP_SYMREF" ]; then
+    git -C "$wd" symbolic-ref HEAD "$SNAP_SYMREF" && git -C "$wd" update-ref "$SNAP_SYMREF" "$SNAP_HEAD"
+  else
+    git -C "$wd" update-ref --no-deref HEAD "$SNAP_HEAD"
+  fi || die 'could not restore the review snapshot HEAD.'
+  idx="$(mktemp)"; rm -f "$idx"
+  GIT_INDEX_FILE="$idx" git -C "$wd" read-tree "$SNAP_TREE" \
+    && GIT_INDEX_FILE="$idx" git -C "$wd" checkout-index -a -f \
+    && GIT_INDEX_FILE="$idx" git -C "$wd" ls-files -z --others --exclude-standard \
+      | (cd "$wd" && xargs -0 -r rm -f --) \
+    || { rm -f "$idx"; die 'could not discard reviewer edits in the review snapshot.'; }
+  rm -f "$idx"
+  if [ -n "$SNAP_INDEX" ]; then cp "$SNAP_INDEX" "$SNAP_GITDIR/index"; else rm -f "$SNAP_GITDIR/index"; fi
+  rm -f "$SNAP_CONFIG" "$SNAP_INDEX"
+  assert_disposable_review_dir "$wd" || die 'review snapshot is no longer a private remote-less copy; the response was rejected.'
+  [ "$(tree_state "$wd")" = "$1" ] || die 'reviewer edits could not be fully discarded from the review snapshot; the response was rejected.'
+}
 release_boundary() { # release_boundary ROOT TAG
   [ -n "$SANDBOX_BIN" ] || return 0
   "$SANDBOX_BIN" remove-copy "$1" "$2"
@@ -408,6 +463,13 @@ cmd_store_key() {
   token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
   [ -n "$token" ] || [ ! -s "$TOKEN_FILE" ] || token="$(<"$TOKEN_FILE")"
   credential_lock="$(qwen_shared_credential_lock_path)" || { rm -f "$tmp"; die 'could not resolve the shared 1Password credential lock.'; }
+  lock_doctor() { # lock_doctor WAIT LOCK -> sweep our-tool holders when available (#1002)
+    local doctor
+    doctor="$SCRIPT_DIR/ai-lock-doctor"
+    [ -x "$doctor" ] || doctor="$(command -v ai-lock-doctor 2>/dev/null || true)"
+    [ -n "$doctor" ] || { note 'ai-lock-doctor is unavailable; cannot self-heal the credential lock.'; return 0; }
+    "$doctor" --recover --older-than "$1" "$2" || true
+  }
   if ! (
     [ -z "$token" ] || export OP_SERVICE_ACCOUNT_TOKEN="$token"
     if [ -n "${SYSTEMROOT:-}" ]; then
@@ -423,8 +485,15 @@ cmd_store_key() {
       "$op_bin" read "$ref" </dev/null > "$tmp"
     else
       # setup-secrets.sh uses this same lock for Linux 1Password reads.
-      # Keep it through op's exit, but never pass its descriptor to op's children.
+      # Keep it through op's exit, but never pass its descriptor to op's
+      # children. Exit 87 means the wait timed out on contention (#1002);
+      # any other failure is op's own error: no sweep, no retry. On real
+      # contention ai-lock-doctor clears only this toolkit's holders, then
+      # the read is retried exactly once.
       command -v flock >/dev/null 2>&1 || exit 1
+      flock --close -E 87 -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp" && exit 0
+      [ "$?" -eq 87 ] || exit 1
+      lock_doctor 120 "$credential_lock"
       flock --close -w 120 "$credential_lock" "$op_bin" read "$ref" </dev/null > "$tmp"
     fi
   ) || [ ! -s "$tmp" ]; then
@@ -539,11 +608,19 @@ lock_acquire() {
     born="$(date -r "$dir" +%s 2>/dev/null)" || return 1
     owner="$(cat "$dir/pid" 2>/dev/null || true)"
     if [ -n "$owner" ]; then
-      # Muse publishes only its MSYS pid. A different Git Bash runtime cannot
-      # resolve that pid, so it is never safe to reclaim Muse's lock on Windows.
-      # Bound the caller's wait instead of risking two concurrent op reads.
-      [ -z "${SYSTEMROOT:-}" ] || return 1
-      lock_owner_alive "$owner" "" && return 1
+      # Muse's legacy lock publishes only an MSYS pid, which another Git Bash
+      # runtime cannot resolve. Pid liveness alone can therefore never prove
+      # the holder is gone on Windows, so a pid+age rule bounds the jam
+      # instead (#1002): reclaim only when the pid is not observable AND the
+      # lock is older than any legitimate credential read (a live legacy
+      # holder releases within seconds; 15 minutes is far past the 120s wait
+      # budget every wrapper uses). A live pid still never loses its lock.
+      if [ -z "${SYSTEMROOT:-}" ]; then
+        lock_owner_alive "$owner" "" && return 1
+      else
+        lock_owner_alive "$owner" "" && return 1
+        now="$(date +%s)"; [ $((now - born)) -ge 900 ] || return 1
+      fi
     else
       now="$(date +%s)"; [ $((now - born)) -ge 7200 ] || return 1
     fi
@@ -901,7 +978,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   local QWEN_STARTUP_LIMIT="${AI_QWEN_STARTUP_TIMEOUT_SECONDS:-300}"
   [[ "$QWEN_STARTUP_LIMIT" =~ ^[1-9][0-9]*$ ]] || die 'AI_QWEN_STARTUP_TIMEOUT_SECONDS must be a positive whole number of seconds.'
   local qwen preload max_turns max_tool_calls max_wall_time; qwen="$(resolve_qwen)"
-  if [ "$mode" = review ]; then
+  if [ "$mode" = review ] || [ "$mode" = probe ]; then
     max_turns="$REVIEW_MAX_TURNS"; max_tool_calls="$REVIEW_MAX_TOOL_CALLS"; max_wall_time="$REVIEW_MAX_WALL_TIME"
   else
     max_turns="$IMPLEMENT_MAX_TURNS"; max_tool_calls="$IMPLEMENT_MAX_TOOL_CALLS"; max_wall_time="$IMPLEMENT_MAX_WALL_TIME"
@@ -915,6 +992,13 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MODE [SESSION_ID]
   # a reviewer turn; Qwen receives the key through its self-deleting preloader.
   assert_qwen_child_env_hardened || die "Qwen child-process credential hardening was not proven. Re-run the repository-owned provider CLI installer before running Qwen."
   if [ "$mode" = review ]; then
+    # Issue #974: reviews may run code/tests and edit, but only in the private
+    # remote-less snapshot, under Qwen's sandbox, like implementation.
+    assert_disposable_review_dir "$repo" || die 'refusing a writable Qwen review outside a private remote-less snapshot.'
+    args+=(--sandbox --approval-mode yolo)
+  elif [ "$mode" = probe ]; then
+    # doctor --live answers one fixed prompt in the caller's directory: it is a
+    # qualification probe, not a review, so it gets no tools at all.
     args+=(--approval-mode plan --exclude-tools shell,write,edit)
   elif [ "$mode" = implement ]; then
     # Preserve the complete implementation toolset, including shell and tests.
@@ -1130,6 +1214,7 @@ report_answer_defect() { # report_answer_defect NAME STREAM_PATH
   return 1
 }
 
+REVIEW_WORKSPACE_NOTE="You are working in a disposable, remote-less copy of the repository. You may run shell commands, builds, and tests and edit files here to verify your findings. Your edits are discarded and are not part of the pull request. Do not modify the sealed evidence packet directory."
 STANDARD_PROMPT_FOOTER="
 
 ---
@@ -1173,6 +1258,7 @@ build_prompt_file() {
   [ -s "$body" ] || die "the prompt is empty."
   if [ -n "$PACKET_REL" ]; then
     printf 'Read %s/MANIFEST.md first and verify its sealed evidence before judging the code.\n\n' "$PACKET_REL" > "$dest"
+    printf '%s\n\n' "$REVIEW_WORKSPACE_NOTE" >> "$dest"
     cat "$body" >> "$dest"; rm -f "$body"
   else mv -f "$body" "$dest"; fi
   if [ -n "${OPT_GOVERNED_VERDICT:-}" ]; then governed_prompt_footer >> "$dest"
@@ -1304,8 +1390,9 @@ ai-qwen $VERSION — Qwen Code delegation in persistent, named sessions.
   ai-qwen doctor [--identity | --live]
   ai-qwen store-key [--if-missing]  install or explicitly refresh the protected key
 
-'new' creates a STRUCTURALLY read-only review. 'ask' continues the saved mode:
-read-only for reviews, but an implementation continuation (write run) for an
+'new' creates a review in a disposable remote-less copy (it may run code and
+edit there; edits are discarded). 'ask' continues the saved mode: a review
+for reviews, but an implementation continuation (write run) for an
 implementation session. 'implement' creates or continues an isolated write
 session. Each write turn uses a new disposable worktree reconstructed from the
 immutable base and cumulative patch. Ignored build and dependency state does
@@ -1389,7 +1476,7 @@ cmd_doctor() {
   else
     echo "auth selection: FAILED — the governed Qwen auth entry could not be installed"; rc=1
   fi
-  echo "read-only     : safe mode + plan mode + shell/write/edit excluded"
+  echo "review        : safe mode + sandbox + tools in a disposable remote-less copy"
   if assert_qwen_child_env_hardened 2>/dev/null; then
     echo "child secrets : HARDENED (Coding Plan key stripped from Qwen tool children)"
   else
@@ -1412,7 +1499,7 @@ cmd_doctor() {
     QUALIFICATION_RUNTIME_SHA="$runtime_sha"; QUALIFICATION_PRELOADER_SHA="$preloader_sha"
     QUALIFICATION_WRAPPER_SHA="$(sha256_file "${BASH_SOURCE[0]}")"
     echo -n "live probe    : "
-    run_turn "$(pwd)" "$tmp" "$tmp.p" review >/dev/null || true
+    run_turn "$(pwd)" "$tmp" "$tmp.p" probe >/dev/null || true
     provider_rc="${RUN_TURN_RC:-1}"
     post_runtime_sha="$(qwen_runtime_sha256 2>/dev/null || true)"
     post_preloader_sha="$(qwen_preloader_sha256 2>/dev/null || true)"
@@ -1723,8 +1810,13 @@ lifecycle_finalize() { # lifecycle_finalize ORIGINAL_EXIT_STATUS
     fi
     [ "$LIFECYCLE_PRESERVE" = 1 ] || cleanup_wt "$LIFECYCLE_REPO" "$LIFECYCLE_WT" "$LIFECYCLE_OWNER"
   fi
-  reviewer_event_cleanup_allowed qwen || return 1
-  rm -f "$LIFECYCLE_PF" "$LIFECYCLE_OUT" "$LIFECYCLE_OUT.err" 2>/dev/null || true
+  if reviewer_event_cleanup_allowed qwen; then
+    rm -f "$LIFECYCLE_PF" "$LIFECYCLE_OUT" "$LIFECYCLE_OUT.err" 2>/dev/null || true
+  else
+    # Retain uncertain evidence, but never strand this session's lock. A
+    # completed provider answer must remain locally finalizable on Windows.
+    final=1
+  fi
   [ -z "$LIFECYCLE_LOCK" ] || lock_release "$LIFECYCLE_LOCK"
   [ -z "$LIFECYCLE_SESSION_LOCK" ] || lock_release "$LIFECYCLE_SESSION_LOCK"
   return "$final"
@@ -1779,6 +1871,7 @@ start_session() { # start_session NAME MODE
     source_tree_before="$(tree_state "$repo")"
     [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_SNAPSHOT_MARKER"
     [ -z "${AI_QWEN_TEST_PRE_SNAPSHOT_DELAY:-}" ] || sleep "$AI_QWEN_TEST_PRE_SNAPSHOT_DELAY"
+    REVIEW_SOURCE_REPO="$repo"
     resolve_review_identity "$repo"
     workdir="$(review_boundary "$repo" "$(short_name "qwen-$name" 64)")"
     LIFECYCLE_REVIEW_DIR="$workdir"
@@ -1809,6 +1902,7 @@ start_session() { # start_session NAME MODE
   out="$(mktemp)"; LIFECYCLE_OUT="$out"
   build_prompt_file "$pf"
   before="$(tree_state "$workdir")"
+  [ "$mode" != review ] || snapshot_checkpoint "$workdir"
 
   note "Qwen $mode '$name' starting (model $QWEN_MODEL)…"
   if [ "$mode" = review ]; then
@@ -1843,12 +1937,9 @@ start_session() { # start_session NAME MODE
   LIFECYCLE_STATE=completed
   LIFECYCLE_SID="$sid"
 
-  after="$(tree_state "$workdir")"
-  if [ "$mode" = review ] && [ "$before" != "$after" ]; then
-    die "a READ-ONLY Qwen review changed the working tree. The agent profile's tool
-  restriction is not holding — do not trust further reviews until this is understood.
-  Inspect: git -C $repo status"
-  fi
+  # Issue #974: edits inside the disposable snapshot are allowed and discarded;
+  # only the caller's checkout (checked above) must be unchanged.
+  [ "$mode" != review ] || snapshot_restore "$before"
 
   # #1220: keep the lifecycle bookkeeping, THEN fail. Aborting on the spot would
   # skip lifecycle_finalize and lose the run's own record of what happened.
@@ -1927,6 +2018,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     warn "session '$name' predates recorded private snapshots and remains bound to its original review directory. Delete and recreate it when convenient; until then, do not move or update an ordinary checkout during a turn."
   fi
   source_head_before="$current_head"; source_tree_before="$current_tree"
+  REVIEW_SOURCE_REPO="$repo"
   resolve_review_identity "$repo"
   workdir="$(refresh_review_boundary "$repo" "$(short_name "qwen-$name" 64)" "$workdir")"
   [ -z "${AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER:-}" ] || printf reached > "$AI_QWEN_TEST_PRE_FOLLOWUP_PACKET_MARKER"
@@ -1939,6 +2031,7 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
     || die "review session '$name' no longer reproduces its exact sealed evidence; no provider call was made. Start a new named Qwen review."
   build_prompt_file "$pf"
   before="$(tree_state "$workdir")"
+  snapshot_checkpoint "$workdir"
   PLAIN_REVIEW_META="$meta"; PLAIN_REVIEW_OUT="$out"
   capture_review_runtime
   reviewer_event_evidence require-report qwen "$workdir" || die 'could not reserve durable Qwen evidence; no provider call was made.'
@@ -1962,10 +2055,8 @@ The committed, dirty, or untracked source state changed. Start a new named Qwen 
   if [ "$source_head_before" != "$(git -C "$repo" rev-parse HEAD)" ] || [ "$source_tree_before" != "$(tree_state "$repo")" ]; then
     die "the source repository changed during the Qwen turn; the stale response was rejected. Start a new named Qwen review."
   fi
-  after="$(tree_state "$workdir")"
-  if [ "$mode" = review ] && [ "$before" != "$after" ]; then
-    die "a READ-ONLY Qwen review changed the working tree. Inspect: git -C $repo status"
-  fi
+  # Issue #974: snapshot edits are allowed; discard them before verification.
+  snapshot_restore "$before"
   FINISH_RC=0
   finish_turn "$repo" "$name" "$out" || FINISH_RC=$?
   if [ "$FINISH_RC" = 0 ]; then
@@ -2248,7 +2339,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 need jq
-[ -z "$OPT_GOVERNED_VERDICT" ] || { [ "$CMD" = new ] || [ "$CMD" = ask ] || [ "$CMD" = finalize ]; } || die '--governed-verdict applies only to read-only new, ask, or finalize turns.'
+[ -z "$OPT_GOVERNED_VERDICT" ] || { [ "$CMD" = new ] || [ "$CMD" = ask ] || [ "$CMD" = finalize ]; } || die '--governed-verdict applies only to review new, ask, or finalize turns.'
 
 case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-qwen new <name> …";       start_session "$ARG" review ;;

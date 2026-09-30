@@ -4,6 +4,8 @@
 
 ## STATUS — read first
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** parent/child issue trees are deleted as process. Track remaining work as a checklist on the existing issue (#643); do not open child issues. Mentions of parent/child trees in this file are historical.
+
 | Step | State | Date | Acceptance artifact |
 |---|---|---|---|
 | 1. Establish a billable baseline and choose one replaceable decision | no-go complete | 2026-09-27 | [`spend-baseline-20260928T0243Z.md`](tests/verification/jev/spend-baseline-20260928T0243Z.md): no qualifying target |

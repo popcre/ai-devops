@@ -393,7 +393,7 @@ This plan must not rely on agreement about only the “central direction.” Use
 3. Maintain a consensus ledger in this plan recording each objection, evidence, resolution, changed section, and both reviewers’ final position.
 4. Relay full opposing reasoning through `templates/delegation/debate-turn.md`; do not summarize away the strongest objection.
 5. Allow the initial review plus at most three rebuttal turns per reviewer. Re-read the current plan every turn.
-6. Stop only when both reviewers state no material objection to every section, or record the exact unresolved decision and ask Albert one plain-English question.
+6. Stop only when both reviewers state no material objection to every section, or record the exact unresolved decision and route it to a third assigned AI reviewer (never Albert — owner ruling 2026-09-28).
 7. After implementation, repeat exact-head code review with independent reviewers. Plan agreement does not approve code.
 
 A fourth model is not routine. Use GLM only if Grok and Kimi remain materially split at the debate bound or if both share the same unverified assumption. More opinions without resolving existing objections create breadth, not consensus.
@@ -579,7 +579,7 @@ The implementing session must read the then-current repository test commands. At
 - [ ] The health audit and delivery preflight are read-only and cover every named failure class.
 - [ ] One outcome card cannot close before live verification.
 - [ ] Full existing and new test suites pass.
-- [ ] Grok and Kimi explicitly agree section by section on the final plan; every material objection is resolved or Albert decides it.
+- [ ] Grok and Kimi explicitly agree section by section on the final plan; every material objection is resolved or a third assigned AI reviewer decides it.
 - [ ] Both repositories are committed correctly, pushed, reviewed, merged, and verified at their remote SHAs.
 - [ ] Canonical and installed instruction hashes match.
 - [ ] Activation makes no database change and preserves every durable reservation.
@@ -602,7 +602,7 @@ Rollback is a reviewed revert of the operating-model commits plus canonical rein
 
 ### Open questions
 
-No implementation names remain open after the 2026-08-18 exact-plan review; §8 locks them. If Grok and Kimi remain split after the bounded debate, ask Albert one plain-English question with a recommendation. Do not seek a fourth opinion merely to avoid resolving existing evidence.
+No implementation names remain open after the 2026-08-18 exact-plan review; §8 locks them. If Grok and Kimi remain split after the bounded debate, a third assigned AI reviewer decides (never Albert — owner ruling 2026-09-28). Do not seek a fourth opinion merely to avoid resolving existing evidence.
 
 The §9.6 consensus gate itself depends on the imperfect Kimi wrapper. Run Kimi from a stable self-contained workspace, use a plan-specific prompt, and treat directory-binding, concurrent-tree, timeout, or missing-terminal-record failures as transport failures rather than reviewer objections. The independent fix remains `plan_kimi-windows-execution-reliability.md`; do not block database delivery on its completion.
 

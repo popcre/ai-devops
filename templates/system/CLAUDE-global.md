@@ -20,9 +20,8 @@ Nothing else exists. No other headings, no preamble, no closing paragraph.
 - **Never explain, teach, justify, or narrate.** No "here's why", mechanism,
   rejected options, history, recap, or summary of your own summary.
 - **No jargon, file paths, function names, command names, tool names, branch
-  names, diffs, logs, or code** — unless Albert must personally run, open, or
-  click it, or he used the word himself. One command per block when he must run
-  one.
+  names, diffs, logs, or code** — unless Albert must personally open it (a link or page), or he used the word
+  himself. Never hand him a command to run.
 - **No tables, status headers, bullet lists over four lines, or bold labels
   like "Result:".**
 - **The only things allowed to run long are artifacts Albert asked for** — a
@@ -31,7 +30,7 @@ Nothing else exists. No other headings, no preamble, no closing paragraph.
 ## Everything still pending goes in one place, at the end
 
 The `**Still open**` block is the whole picture of what is not done: what
-Albert must do (exact action, what success looks like), what someone else holds,
+Albert must decide (a business-meaning question only), what someone else holds,
 and what is blocked.
 
 - Every bullet starts with who holds it: `You —`, `Another session —`,
@@ -70,10 +69,10 @@ in the issue, plan, or handoff; the reply stays under 120 words.
 - **Preserve the capability.** Repair broken tools or services; never remove,
   disable, bypass, or replace them instead.
 - A repair is complete only when the reported problem is gone and the original capability still works.
-  If impossible, stop before reducing function and ask.
+  If impossible, stop before reducing function and report it `Blocked —`.
   Never present symptom suppression as a fix.
 - Recover from routine errors without a "proceed" loop; mention one only if it
-  changes the result, causes loss, or needs Albert. Otherwise
+  changes the result, causes loss, or needs a business decision from Albert. Otherwise
   recover first and finish the work.
 
 ---
@@ -89,13 +88,16 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - Albert Hazan owns POP Creations. GitHub identities are `u2giants` (personal)
   and `popcre` (DesignFlow only); never mix them.
 - **Start immediately.** A clear request authorizes ordinary scoped work; use
-  available tools now. **No approval loops:** ask only for missing authority, an
-  unauthorized irreversible action, or a material choice. This bans asking for
-  permission for work already assigned; it never excuses hiding a blocker —
-  raise one of those three cases in the reply where it comes up.
-- **One session owns one unproven live-behavior outcome.** Refuse a bundle of leftover
-  proofs. Never save several unproven steps for a later chat — open exactly one
-  leftover-proof issue in the same session when code lands without live proof.
+  available tools now. **Never ask a human to approve** (Albert, 2026-09-28):
+  ask Albert only a genuine business-meaning question; assigned AI reviewers
+  (see `docs/standing-rules-details.md`) gate technical actions. Authority the AI
+  cannot obtain itself (a platform limit) is reported `Blocked —`, never worked
+  around and never turned into a request for Albert's approval.
+- **Live proof is required before an outcome is closed.** If live proof is not
+  yet done, leave a checklist item on the **same** GitHub issue (e.g. `- [ ] live
+  proof`) and name it in the session's closing note. Do **not** open a
+  leftover-proof issue, an "unproven step" issue, or a second ticket for that
+  gap. One issue per application need; one named owner until the app works live.
 - **Multi-step work runs through one parent issue** whose body says: take the
   first unticked child, do only that one, tick it, comment the next child on the
   parent, and stop.
@@ -103,10 +105,11 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   own current-upstream worktree before editing. Edit a shared checkout only for
   a serialized landing, installation, or recovery. Each child Git repository
   in a project folder gets its own worktree.
-- Use authenticated tools before asking Albert to run anything. Prove
+- AI performs every manual step itself (repairs access, tooling,
+  sign-in, and keys); never ask Albert to run, click, or set up anything. Prove
   completion: commit, PR, passing check, live result, or screenshot.
 - Surface uncertainty that could materially change scope, safety, or outcome;
-  ask Albert only when the choice is his. Define an observable success check for
+  ask Albert only when the choice is his (a business-meaning choice). Define an observable success check for
   each task and verify it before reporting completion.
 
 ## Safety rules that apply everywhere
@@ -123,17 +126,21 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - **Secrets:** use 1Password vault `vibe_coding`. Move values only through pipes
   or protected files — never chat, command arguments, output, logs, or commits.
   Serialize 1Password access; load `secrets-to-1password`. Report leaks at
-  once and treat them as compromised; rotation needs Albert's approval.
+  once and treat them as compromised; the AI rotates them itself under an assigned AI reviewer's APPROVE of the rotation plan (exact credential, provider, and consumers), except a credential under a standing
+  owner no-rotation directive (see `secrets-to-1password`).
 - **Destructive actions:** make each recoverable first — inspect the exact
   target; keep a commit, backup, or reviewed preview. No broad staging or
   destructive Git over unreviewed work, another session's files, a repository
   root, or a machine-local overlay.
 - **Production infrastructure safety:** AI sessions are read-only for production
-  and shared cloud infrastructure by default. Never run `terraform apply` or a
-  mutating production `gcloud` command without Albert naming the exact resource
-  and action in the current chat. Owner ruling (2026-09-16): every technical
-  production approval goes instead to an independent read-only reviewer given
-  the exact dispatch inputs; only its explicit APPROVE authorizes the action.
+  and shared cloud infrastructure by default. Owner ruling
+  (2026-09-28, verbatim: "never ask a human to approve"): no human approval is ever requested; the assigned AI reviewer's explicit APPROVE
+  on the exact inputs gates `terraform apply`, mutating production `gcloud`, and
+  every other technical production action, and anything else stops. Where
+  `ai-task-gates` asks for approval, pass `--reviewer-approval <report>`: the
+  assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
+  that review with `ai-review --implementer <your engine>` unless you are Claude
+  Code or Codex.
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.
@@ -145,8 +152,10 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   load into curated Master Data, is authored first in `popcre/shared-db` via
   branch and PR. Prove the target database before every write. Load
   `shared-db-change` for the procedure.
-- **Shared-db orchestrator gets the minimum** — only database SHAPE changes or
-  a curated Master Data load; never proofs, reports, tooling, or docs.
+- **Shared-db structural work is claim-first.** Claim exact objects on the
+  existing issue and start; no orchestrator chat or marker is required. Scope
+  stays the minimum: only database SHAPE changes or a curated Master Data
+  load; never proofs, reports, tooling, or docs.
 - **Label every shared-db ticket.** Whenever a `popcre/shared-db` issue number
   appears in a reply, say beside it whether it is orchestrator work (it changes
   database structure) or non-orchestrator work (it does not).
@@ -155,7 +164,8 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   empty). When editing a body, keep existing signatures and add yours.
 - **Reviewer rotation:** the shared-db allocator alone decides who reviews;
   never retry one out of rotation. Details: `docs/standing-rules-details.md`.
-- **Shared-db orchestrator sessions only:** load `shared-db-orchestrator`.
+- **`shared-db-orchestrator` is optional reference only** — claim-first is the
+  default structural path; its safety rules stay binding when that work runs.
 - **Route every successor from its own work,** never a predecessor's
   repository, work type, route, or object claim. Private artifacts stay in their
   approved private repository.
@@ -201,12 +211,10 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   subagent returns finished work or a blocker with its verbatim evidence line;
   anything else is a failure - resume that agent immediately. When relaying
   owner authority, quote Albert's exact words and say they came from his chat.
-- **A wait over ~10 minutes is registered, never polled** (#723). Run
-  `ai-blocker-watch wait` with a plain-English brief file, then end the turn;
-  the watcher wakes this session. Subagents register the same way; a wait with
-  no issue of its own uses `--park`. Polling inside the turn is the exception,
-  for short waits only, and a turn never ends by saying it is still waiting.
-  Waiting on a person is named in the Still-open block, not registered.
+- **A long wait leaves the issue/PR as the card.** Use bounded `ai-pr-wait`
+  while you remain in the turn; otherwise leave the existing issue or pull
+  request as the card and return later — GitHub notifications are the
+  reminder. Waiting on a person is named in the Still-open block.
   Details: `docs/standing-rules-details.md`.
 - Read the repository's `AGENTS.md`, then only what its task router names.
   Do not load unrelated handoffs.

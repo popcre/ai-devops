@@ -35,45 +35,26 @@
 #      longer be forgotten, because sessions were never trusted to record them.
 #
 # Usage:
-#   ai-blocker-watch wait <owner/repo#N> [--until <UTC time>]
-#       (--for <owner/repo#M> | --park "<plain-English title>")
-#       --brief-file PATH [--note TEXT]
-#       Park this work and register this session as waiting. A wait is
-#       released by whichever comes first: blocker N closing, or --until
-#       passing. One of the two is required; both together is the pattern for
-#       a long-running job with a safety check-in.
-#       --brief-file is REQUIRED and is the whole point: in plain English,
-#       what this work is, what is already done, and the exact next steps. A
-#       brand-new session may have to continue the work from that text alone.
-#       The brief is published as a "parked" GitHub issue, so the work is
-#       searchable weeks later and survives the session, the branch and the
-#       worktree being deleted. --for posts it on an existing issue (and
-#       records the native "M is blocked by N" link); --park opens a new issue
-#       in the repository of the current checkout. Harness and session come
-#       from the environment (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID,
-#       ZCODE_SESSION_ID) or --harness/--session/--cwd.
-#
-#       REGISTRATION IS THE DEFAULT (#723): any wait that may exceed ~10
-#       minutes — on an issue, a pull request, a CI run (its pull request, or
-#       --until as a check-in), or another session's work — is registered
-#       here, then the turn ends; the scheduled watcher wakes this session.
-#       Polling inside the turn is the exception, for short waits only.
-#       Subagents register the same way: a dispatched headless agent passes
-#       its own --harness/--session, and an in-chat subagent inherits the
-#       parent session's ID from the environment — which is the correct wake
-#       target, because the parent chat owns the work. A session with no
-#       issue of its own, or whose issue is already closed, uses --park.
+#   ai-blocker-watch wait ...
+#       Registration is no longer required (coord-del Step 4B). Prints a short
+#       note and exits 0. Use bounded `ai-pr-wait` while you remain in the
+#       turn; otherwise leave the existing issue or pull request as the card
+#       and return later — GitHub notifications are the reminder.
 #   ai-blocker-watch find <words...> [--all]
 #       Plain-language search of parked and resumed work across the configured
 #       owners. --all includes closed issues.
 #   ai-blocker-watch has-wait <session-id>
-#       Exit 0 when that session holds a registered wait still in flight
-#       (state waiting or waking), exit 1 when it does not. The closeout hook
-#       asks this before letting a turn end on waiting language; a session
-#       may ask it directly ("am I registered?").
+#       Registration is no longer required. Prints a short note and exits 0.
 #   ai-blocker-watch link <blocked owner/repo#M> <blocker owner/repo#N>
 #   ai-blocker-watch list
 #   ai-blocker-watch cancel <wait-id>
+#   ai-blocker-watch reap [--dry-run]
+#       Archive dead task/session state past its TTL (orphan_ttl_hours):
+#       terminal records (woken/failed/unrunnable/orphaned) and interrupted
+#       wakes idle longer than the TTL are moved to ~/.ai-devops/blocker-watch/
+#       reaped/ with one audit line in reap.log. Live `waiting` records and
+#       reviewer leases are never touched; unique uncommitted work is
+#       preserved (the worktree is left alone). --dry-run lists decisions.
 #   ai-blocker-watch tick [--dry-run]
 #   ai-blocker-watch alarm [--dry-run]      scan for unowned blockers now
 #   ai-blocker-watch links [--dry-run]      maintain blocked-by links from
@@ -132,12 +113,55 @@ if [ -n "${AI_BLOCKER_WATCH_TEST_GH:-}" ]; then
   GH="$AI_BLOCKER_WATCH_TEST_GH"
 fi
 [ -x "$GH" ] || die 'shared GitHub transport is not executable'
+GH_COST_READY=0
+if [ "$GH" = "$TOOL_ROOT/bin/ai-gh" ] && [ -f "$TOOL_ROOT/tools/github-requests/telemetry.sh" ]; then
+  source "$TOOL_ROOT/tools/github-requests/telemetry.sh"
+  GH_COST_READY=1
+fi
+record_graphql_cost(){
+  [ "$GH_COST_READY" = 1 ] || return 0
+  printf '%s' "$2" | gh_measure_graphql_cost ai-blocker-watch "$1" "${BW_WORKFLOW:-blocker_watch_manual}" "${BW_TICK_RECEIPT_ID:-}" direct "${BW_TICK_CONTEXT:-}" ||
+    note 'request measurement unavailable: GraphQL cost not saved'
+}
 # Label only the transport subprocess. Resumed AI sessions are independent
 # callers and must not inherit BlockerWatch's attribution.
-gh_call(){ AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; }
+gh_call(){
+  # Scheduled ticks run as the "pop-ai-watchers" GitHub App, which has its own
+  # hourly allowance, so they never spend the personal allowance interactive
+  # sessions need (2026-09-28 exhaustion). Commands a session runs itself (wait,
+  # park, find) keep the personal login. No app key on this machine, or no
+  # owner in the call, falls back to the personal login: nothing stops.
+  local owner tok
+  if [ "$BW_APP" = 1 ] && owner="$(gh_owner "$@")" && tok="$("$APP_TOKEN" token "$owner" 2>/dev/null)"; then
+    GH_TOKEN="$tok" AI_GH_CALLER=ai-blocker-watch "$GH" "$@"
+  else
+    AI_GH_CALLER=ai-blocker-watch "$GH" "$@"
+  fi
+}
+# The repository owner a gh call targets (-R/--repo, repos/<owner>/, repo:<owner>/,
+# or a GraphQL owner= field). Prints nothing and fails when the call names none.
+gh_owner(){
+  local a prev='' o=''
+  for a in "$@"; do
+    case "$prev" in -R|--repo) o="${a%%/*}" ;; esac
+    case "$a" in
+      repos/*/*) o="${a#repos/}"; o="${o%%/*}" ;;
+      owner=*) o="${a#owner=}" ;;
+      *repo:*/*) o="${a#*repo:}"; o="${o%%/*}" ;;
+    esac
+    [ -z "$o" ] || break
+    prev="$a"
+  done
+  [[ "$o" =~ ^[A-Za-z0-9-]+$ ]] && printf '%s\n' "$o"
+}
+BW_APP=0
+APP_TOKEN="$TOOL_ROOT/bin/ai-gh-app-auth"
 # Only call sites below set this fixed telemetry label; a parent shell must not
 # be able to misclassify unrelated BlockerWatch requests.
 unset AI_GH_OPERATION
+BW_WORKFLOW=''
+BW_TICK_RECEIPT_ID=''
+BW_TICK_CONTEXT=''
 WAITS="$HOME_DIR/waits"; NOTIFIED="$HOME_DIR/notified.tsv"; SCAN="$HOME_DIR/last-scan"
 LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
 LOGS="$HOME_DIR/logs"
@@ -188,122 +212,8 @@ ensure_labels(){ # ensure_labels <owner/repo> — labels are cheap and idempoten
 }
 
 cmd_wait(){
-  local ref="" for="" text="" harness="" session="" cwd="$PWD" brief="" park="" until_at=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --for) [ $# -ge 2 ] || die "--for needs a value"; for="$2"; shift 2 ;;
-      --note) [ $# -ge 2 ] || die "--note needs a value"; text="$2"; shift 2 ;;
-      --brief-file) [ $# -ge 2 ] || die "--brief-file needs a value"; brief="$2"; shift 2 ;;
-      --park) [ $# -ge 2 ] || die "--park needs a value"; park="$2"; shift 2 ;;
-      --until) [ $# -ge 2 ] || die "--until needs a value"; until_at="$2"; shift 2 ;;
-      --harness) [ $# -ge 2 ] || die "--harness needs a value"; harness="$2"; shift 2 ;;
-      --session) [ $# -ge 2 ] || die "--session needs a value"; session="$2"; shift 2 ;;
-      --cwd) [ $# -ge 2 ] || die "--cwd needs a value"; cwd="$2"; shift 2 ;;
-      -*) die "unknown option: $1" ;;
-      *) [ -z "$ref" ] || die "one blocker per wait"; ref="$1"; shift ;;
-    esac
-  done
-  [ -n "$ref" ] || [ -n "$until_at" ] || die "usage: ai-blocker-watch wait <owner/repo#N> [--until <UTC time>] (--for owner/repo#M | --park \"title\") --brief-file PATH"
-  [ -z "$ref" ] || parse_ref "$ref" >/dev/null
-  if [ -n "$until_at" ]; then
-    until_at="$(date -u -d "$until_at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" ||
-      die "--until needs a time this machine understands, for example 2026-09-25T09:00:00Z"
-  fi
-  # A wait with no durable brief is exactly the failure this tool exists to fix:
-  # weeks later nobody, human or fresh session, can tell what the work was.
-  [ -n "$brief" ] && [ -s "$brief" ] ||
-    die "a wait needs --brief-file: what this work is, what is done, the exact next steps"
-  [ -n "$for" ] || [ -n "$park" ] ||
-    die "name the parked issue: --for owner/repo#M, or --park \"plain-English title\""
-  if [ -z "$harness" ]; then
-    if [ -n "${ZCODE_SESSION_ID:-}" ]; then harness=zcode; session="${session:-$ZCODE_SESSION_ID}"
-    elif [ -n "${CODEX_THREAD_ID:-}" ]; then harness=codex; session="${session:-$CODEX_THREAD_ID}"
-    elif [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then harness=claude; session="${session:-$CLAUDE_CODE_SESSION_ID}"
-    else die "cannot tell which program this session runs in; pass --harness and --session"; fi
-  fi
-  [ -n "$session" ] || die "no session ID; pass --session"
-  jq -e --arg h "$harness" '.harness[$h]' "$CONFIG" >/dev/null || die "unknown harness: $harness"
-  if command -v cygpath >/dev/null 2>&1; then cwd="$(cygpath -m "$cwd")"; fi
-  # The MAIN checkout, not this worktree: a fresh session starts there and makes
-  # its own worktree, exactly as the standing rules require. A deleted worktree
-  # therefore no longer strands the work.
-  local main=""
-  main="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-  main="$(printf '%s' "$main" | tr -d '\r')"; main="${main%/}"; main="${main%/.git}"
-  if [ -n "$main" ] && command -v cygpath >/dev/null 2>&1; then main="$(cygpath -m "$main")"; fi
-  local repo=""
-  if [ -n "$for" ]; then
-    parse_ref "$for" >/dev/null; repo="${for%%#*}"
-  else
-    repo="$( (cd "$cwd" && gh_call repo view --json nameWithOwner --jq .nameWithOwner) | tr -d '\r' )" ||
-      die "cannot tell which repository $cwd belongs to; use --for owner/repo#M instead"
-    [ -n "$repo" ] || die "cannot tell which repository $cwd belongs to; use --for owner/repo#M instead"
-  fi
-  local waiting_on="" bid="" bispr=""
-  if [ -n "$ref" ]; then
-    local br bn btitle bmeta
-    read -r br bn <<<"$(parse_ref "$ref")"
-    # ONE read gives the title, the id the link needs, and whether the blocker
-    # is a pull request. Every ai-gh call is throttled and, on a loaded Windows
-    # machine, can take a minute or more; each avoided call is real time.
-    note "reading blocker $ref"
-    bmeta="$(gh_api "repos/$br/issues/$bn" --jq '[(.id|tostring), ((.pull_request != null) | tostring), .title] | @tsv')" ||
-      die "cannot read $ref"
-    IFS=$'\t' read -r bid bispr btitle <<<"$bmeta"
-    [ -n "$bid" ] || die "cannot read $ref"
-    waiting_on="$ref — $btitle"
-    # GitHub's "blocked by" link accepts only issues and refuses a pull request.
-    # A PR blocker is still watched: every tick reads its state and wakes this
-    # session when it merges or closes (and says so if it closed unmerged).
-    [ "$bispr" != true ] || note "$ref is a pull request; GitHub cannot link a pull request as a blocker, so this wait watches the pull request directly"
-  fi
-  if [ -n "$until_at" ]; then
-    if [ -n "$waiting_on" ]; then waiting_on="$waiting_on
-The time $until_at — whichever comes first."
-    else waiting_on="The time $until_at."; fi
-  fi
-  local tmp="$HOME_DIR/parked-$$.md"
-  { printf '<!-- ai-blocker-watch:parked -->\n## What this is about\n'
-    awk 'NF==0 && seen { exit } { print; seen=1 }' "$brief"
-    printf '\n## Waiting on\n%s\n\n## Resume brief\n' "$waiting_on"
-    cat "$brief"
-    printf '\n\n## Record\nMachine %s, %s session %s, main checkout %s, registered %s.\n' \
-      "$(hostname 2>/dev/null || echo unknown)" "$harness" "$session" "${main:-<not a git checkout>}" "$(now_iso)"
-    printf 'owner: ai-blocker-watch — it continues this work by itself once the wait is released.\n'
-  } > "$tmp"
-  local parked_issue="" parked_url=""
-  if [ -n "$park" ]; then
-    note "opening the parked issue in $repo"
-    # Labels exist after the first wait in a repository; create them only when
-    # GitHub refuses the label, instead of spending two calls every time.
-    parked_url="$(gh_call issue create -R "$repo" -t "$park" --body-file "$tmp" --label "$(cfg .parked_label)" | tr -d '\r' | tail -n1)" ||
-      { ensure_labels "$repo"
-        parked_url="$(gh_call issue create -R "$repo" -t "$park" --body-file "$tmp" --label "$(cfg .parked_label)" | tr -d '\r' | tail -n1)"; } ||
-      { rm -f "$tmp"; die "could not open the parked issue in $repo"; }
-    [ -n "$parked_url" ] || { rm -f "$tmp"; die "GitHub returned no issue URL for the parked issue"; }
-    parked_issue="$repo#${parked_url##*/}"
-  else
-    local fr fn; read -r fr fn <<<"$(parse_ref "$for")"
-    note "posting the resume brief on $for"
-    gh_call issue comment "$fn" -R "$fr" --body-file "$tmp" >/dev/null ||
-      { rm -f "$tmp"; die "could not post the resume brief on $for"; }
-    gh_call issue edit "$fn" -R "$fr" --add-label "$(cfg .parked_label)" >/dev/null ||
-      { ensure_labels "$repo"; gh_call issue edit "$fn" -R "$fr" --add-label "$(cfg .parked_label)" >/dev/null; } ||
-      { rm -f "$tmp"; die "could not mark $for parked"; }
-    parked_issue="$for"; parked_url="https://github.com/$fr/issues/$fn"
-  fi
-  rm -f "$tmp"
-  [ -z "$ref" ] || [ "$bispr" = true ] || link "$parked_issue" "$ref" "$bid"
-  local id; id="$(date -u +%Y%m%dT%H%M%S)-$harness-${session:0:8}-$(printf '%s' "${ref:-until}" | tr '/#' '__')"
-  jq -n --arg id "$id" --arg ref "$ref" --arg for "$for" --arg note "$text" --arg h "$harness" \
-    --arg s "$session" --arg cwd "$cwd" --arg at "$(now_iso)" --arg pi "$parked_issue" \
-    --arg pu "$parked_url" --arg main "$main" --arg until "$until_at" \
-    '{id:$id, blocker:$ref, for:$for, note:$note, harness:$h, session:$s, cwd:$cwd,
-      parked_issue:$pi, parked_url:$pu, main_checkout:$main, until:$until,
-      registered_at:$at, state:"waiting", attempts:0}' > "$WAITS/$id.json"
-  printf '%s\n' "$id"
-  note "parked as $parked_url"
-  note "this session will be continued when the wait is released. End the turn; do not hold the wait open."
+  note "registration is no longer required; use bounded ai-pr-wait in-turn, or leave the issue/PR as the card and return later"
+  return 0
 }
 
 cmd_list(){
@@ -341,23 +251,140 @@ cmd_find(){
 
 cmd_cancel(){ [ $# -eq 1 ] || die "usage: cancel <wait-id>"; rm -f -- "$WAITS/$1.json" || true; note "cancelled $1"; }
 
-cmd_has_wait(){
-  # The closeout hook's cheap local question: does THIS session hold a wait the
-  # watcher still owes a wake for? A finished (woken/failed/orphaned/unrunnable)
-  # wait owes nothing, so it does not count — a turn may not end on waiting
-  # language because a wait USED to exist.
-  [ $# -eq 1 ] || die "usage: has-wait <session-id>"
-  local f
-  for f in "$WAITS"/*.json; do
-    [ -e "$f" ] || continue
-    case "$(jq -r '.state // ""' "$f" 2>/dev/null)" in waiting|waking) ;; *) continue ;; esac
-    if [ "$(jq -r '.session // ""' "$f" 2>/dev/null)" = "$1" ]; then
-      note "session $1 holds wait $(basename "$f" .json) ($(jq -r .state "$f"))"
-      exit 0
+# --- orphan task/session reap (B1, #1116) ------------------------------------
+# WHY THIS EXISTS. Sessions park work here and some of them never come back.
+# Terminal records (woken/failed/unrunnable/orphaned) and interrupted wakes
+# sat in the state directory for days — the measured pain was a 14-hour
+# orphaned background task holding the machine. This reap is the TTL layer:
+# it archives dead task/session state past a TTL so the machine stops carrying
+# it, without ever touching live work.
+#
+# WHAT GETS REAPED (and only this):
+#   1. Terminal wait records (woken, failed, unrunnable, orphaned) whose
+#      last-activity timestamp is older than orphan_ttl_hours.
+#   2. Interrupted `waking` records whose last_attempt_at is older than
+#      orphan_ttl_hours (the wake process is long past wake_timeout_minutes).
+#   3. Dead fixer pid files (the process is gone; the file is residue).
+#
+# WHAT IS NEVER REAPED:
+#   - `waiting` records. Wake/resume must stay intact: a fresh continuation
+#     is still possible when the blocker closes.
+#   - `waking` records younger than the TTL (the wake may still be running).
+#   - Reviewer leases or any reviewer-slot state. Lease liveness is a
+#     separate completed design (plan_reviewer_lease_liveness.md) that
+#     forbids freeing a reviewer slot on age alone. This function does not
+#     read, write, or release lease state of any kind.
+#   - Unique uncommitted work. The wait record is archived, never a dirty
+#     worktree: a record whose cwd has uncommitted changes is logged as
+#     `preserved` and its worktree is left alone (cleanup-worktree rules).
+#
+# Recoverable and auditable: every reaped JSON is moved to
+# $HOME_DIR/reaped/<id>.json and one line is appended to $HOME_DIR/reap.log
+# with the id, old state, reason, and timestamp. Dry-run lists decisions
+# and reaps nothing.
+REAP_DIR="$HOME_DIR/reaped"; REAP_LOG="$HOME_DIR/reap.log"
+
+iso_epoch(){ date -u -d "$1" +%s 2>/dev/null || echo 0; }
+
+reap_age_hours(){ # reap_age_hours <iso timestamp> -> whole hours since then (0 if unreadable)
+  local ep now_e
+  ep="$(iso_epoch "$1")"; now_e="$(date -u +%s)"
+  [ "$ep" -gt 0 ] 2>/dev/null || { printf 0; return; }
+  printf '%s' "$(( (now_e - ep) / 3600 ))"
+}
+
+reap_last_activity(){ # reap_last_activity <wait json> -> best timestamp for age
+  jq -r '[.woken_at, .checked_at, .last_attempt_at, .active_writer_at, .registered_at] | map(select(. != null and . != "")) | first // ""' "$1" 2>/dev/null
+}
+
+reap_is_candidate(){ # reap_is_candidate <state> <last activity iso> <ttl hours> -> 0 if reappable
+  local state="$1" at="$2" ttl="$3" age
+  case "$state" in
+    waiting) return 1 ;;  # live: wake/resume intact
+    waking)
+      # A wake older than the TTL is interrupted: wake_timeout_minutes is
+      # 45, so anything this old is not still running.
+      ;;
+    woken|failed|unrunnable|orphaned) ;;
+    *) return 1 ;;
+  esac
+  [ -n "$at" ] || return 1
+  age="$(reap_age_hours "$at")"
+  [ "$age" -ge "$ttl" ] 2>/dev/null
+}
+
+worktree_has_unique_work(){ # worktree_has_unique_work <cwd> -> 0 when dirty (preserve)
+  local cwd="$1"
+  [ -n "$cwd" ] && [ -d "$cwd" ] || return 1
+  # Uncommitted tracked changes or untracked files mean unique work.
+  [ -n "$(git -C "$cwd" status --porcelain 2>/dev/null)" ]
+}
+
+reap_one(){ # reap_one <json path> <dry 0|1> -> 0 reaped, 1 kept
+  local f="$1" dry="$2" id state at age ttl reason dest
+  id="$(basename "$f" .json)"
+  state="$(jq -r '.state // ""' "$f" 2>/dev/null)"
+  at="$(reap_last_activity "$f")"
+  ttl="$(cfgd .orphan_ttl_hours 24)"
+  reap_is_candidate "$state" "$at" "$ttl" || return 1
+  age="$(reap_age_hours "$at")"
+  reason="terminal state '$state' idle ${age}h (ttl ${ttl}h)"
+  [ "$state" != waking ] || reason="interrupted wake idle ${age}h (ttl ${ttl}h)"
+  local cwd preserved=""
+  cwd="$(jq -r '.cwd // ""' "$f" 2>/dev/null)"
+  if worktree_has_unique_work "$cwd"; then preserved=" preserved unique work at $cwd"; fi
+  if [ "$dry" = 1 ]; then
+    note "would reap $id ($reason)$preserved"
+    return 0
+  fi
+  mkdir -p "$REAP_DIR"
+  dest="$REAP_DIR/$id.json"
+  mv "$f" "$dest" || return 1
+  printf '%s reaped %s state=%s age=%sh reason=%s%s\n' \
+    "$(now_iso)" "$id" "$state" "$age" "$reason" "$preserved" >> "$REAP_LOG"
+  note "reaped $id ($reason)$preserved"
+  return 0
+}
+
+reap_fixer_pids(){ # reap_fixer_pids <dry 0|1>: remove pid files whose process is gone
+  local dry="$1" dir="$HOME_DIR/fixers" pf pid n=0
+  [ -d "$dir" ] || return 0
+  for pf in "$dir"/*.pid; do
+    [ -e "$pf" ] || continue
+    pid="$(cat "$pf" 2>/dev/null || true)"
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+      if [ "$dry" = 1 ]; then note "would reap dead fixer pid file $(basename "$pf")"; else
+        rm -f "$pf"
+        printf '%s reaped fixer-pid file=%s pid=%s reason=process-gone\n' "$(now_iso)" "$(basename "$pf")" "${pid:-empty}" >> "$REAP_LOG"
+        note "reaped dead fixer pid file $(basename "$pf")"
+      fi
+      n=$((n + 1))
     fi
   done
-  note "session $1 holds no wait in flight"
-  exit 1
+  return 0
+}
+
+cmd_reap(){
+  local dry=0
+  [ "${1:-}" != --dry-run ] || dry=1
+  local ttl max f count=0
+  ttl="$(cfgd .orphan_ttl_hours 24)"
+  max="$(cfgd .reap_max_per_run 64)"
+  [ "$ttl" -ge 1 ] 2>/dev/null || die "orphan_ttl_hours must be a positive integer"
+  [ "$max" -ge 1 ] 2>/dev/null || die "reap_max_per_run must be a positive integer"
+  note "reap start (ttl ${ttl}h, max $max, dry=$dry)"
+  for f in "$WAITS"/*.json; do
+    [ -e "$f" ] || continue
+    [ "$count" -lt "$max" ] || { note "reap cap $max reached; later records wait for the next run"; break; }
+    if reap_one "$f" "$dry"; then count=$((count + 1)); fi
+  done
+  reap_fixer_pids "$dry"
+  note "reap end: $count wait record(s) $([ "$dry" = 1 ] && echo 'would be reaped' || echo reaped)"
+}
+
+cmd_has_wait(){
+  note "registration is no longer required"
+  exit 0
 }
 
 # --- tick -------------------------------------------------------------------
@@ -386,15 +413,16 @@ propagate(){
   # shared qualifier tail ("is:issue is:closed closed:>=<timestamp>", 48 chars
   # with the trailing repo term) pushes them over; nineteen repos cost three
   # queries instead of nineteen.
-  local -a queries=() ; local cur=""
+  local -a queries=() ; local cur="" cur_owner=""
   while read -r repo; do
     [ -n "$repo" ] || continue
     local term="repo:$repo "
-    if [ -n "$cur" ] && [ $(( ${#cur} + ${#term} + 48 )) -gt 256 ]; then
+    # A batch holds one owner only: each owner is its own app installation.
+    if [ -n "$cur" ] && { [ $(( ${#cur} + ${#term} + 48 )) -gt 256 ] || [ "${repo%%/*}" != "$cur_owner" ]; }; then
       queries+=("${cur}is:issue is:closed closed:>=$since"); cur=""
     fi
-    cur+="$term"
-  done < <(cfg '.repos[]')
+    cur+="$term"; cur_owner="${repo%%/*}"
+  done < <(cfg '.repos[]' | LC_ALL=C sort)
   [ -z "$cur" ] || queries+=("${cur}is:issue is:closed closed:>=$since")
   local ok=1 q closed
   for q in "${queries[@]}"; do
@@ -627,20 +655,23 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
 # re-sending the request; a link created this tick is added to the copy so
 # the alarm still sees it without a second read (or, if that edit fails, the
 # copy is dropped and the alarm re-reads the repo).
-SNAP_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number databaseId title assignees(first:10){totalCount} body blockedBy(first:50){nodes{number state title repository{nameWithOwner} assignees(first:10){totalCount}}}}}}}'
+SNAP_Q='query($owner:String!,$name:String!,$after:String){repository(owner:$owner,name:$name){issues(first:100,states:OPEN,after:$after){pageInfo{hasNextPage endCursor}nodes{number databaseId title assignees(first:10){totalCount} body blockedBy(first:50){nodes{number state title repository{nameWithOwner} assignees(first:10){totalCount}}}}}}rateLimit{cost remaining resetAt}}'
 declare -A SNAP=() SNAPN=() SNAPERR=()
 open_snapshot(){ # open_snapshot <owner/repo> <note prefix>: pages in SNAP[repo|i], count in SNAPN[repo]; rc 1 on failure
-  local repo="$1" pfx="$2" pages=0 cursor="" out i
+  local repo="$1" pfx="$2" pages=0 cursor="" out i read_rc
   if [ -n "${SNAPERR[$repo]+set}" ]; then note "$pfx: ${SNAPERR[$repo]} (not retried this tick)"; return 1; fi
   [ -z "${SNAPN[$repo]+set}" ] || return 0
   while :; do
     pages=$((pages+1))
     if [ "$pages" -gt 10 ]; then SNAPERR[$repo]="$repo has more open issues than one scan reads (1000)"; break; fi
+    read_rc=0
     if [ -n "$cursor" ]; then
-      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -f after="$cursor")" || read_rc=$?
     else
-      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || { SNAPERR[$repo]="could not list open issues in $repo"; break; }
+      out="$(AI_GH_OPERATION=bw.snapshot gh_api graphql -f query="$SNAP_Q" -f owner="${repo%/*}" -f name="${repo#*/}")" || read_rc=$?
     fi
+    record_graphql_cost graphql.open_issue_snapshot "$out"
+    if [ "$read_rc" -ne 0 ]; then SNAPERR[$repo]="could not list open issues in $repo"; break; fi
     printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository != null)' >/dev/null || { SNAPERR[$repo]="unreadable answer from $repo"; break; }
     SNAP["$repo|$pages"]="$out"
     if [ "$(printf '%s' "$out" | jq -r '.data.repository.issues.pageInfo.hasNextPage')" = true ]; then
@@ -716,13 +747,13 @@ snapshot_addlink(){ # snapshot_addlink <owner/repo> <issue> <blocker>: record a 
 # Stalls are findings, not failures: only a failed read or post fails the tick.
 cfgd(){ local v; v="$(cfg "$1")"; if [ "$v" != null ] && [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "$2"; fi; }
 alarm_on(){ [ "$(cfgd .alarm_enabled true)" = true ]; }
-ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){updatedAt createdAt body comments(last:30){nodes{body createdAt}} timelineItems(first:50,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{... on PullRequest{number state}}}}} blocking(first:50){nodes{number state repository{nameWithOwner}}}}}}'
+ISSUE_Q='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){updatedAt createdAt body comments(last:30){nodes{body createdAt}} timelineItems(first:50,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{... on PullRequest{number state}}}}} blocking(first:50){nodes{number state repository{nameWithOwner}}}}}rateLimit{cost remaining resetAt}}'
 # Per-tick read cache and node budget live in files under ALARM_TICK: issue_json
 # is always called as j="$(issue_json ...)", so shell variables would die with
 # that subshell and the cache/budget would never take effect (#809).
 ALARM_TICK=""
 issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node budget, 2 failed
-  local repo="$1" n="$2" out key="$1#$2" spent budget cachef
+  local repo="$1" n="$2" out key="$1#$2" spent budget cachef read_rc=0
   # '@' cannot appear in a GitHub owner or repo name, so owner/repo cannot collide.
   cachef="$ALARM_TICK/cache/${key//\//@}"
   if [ -f "$cachef" ]; then cat "$cachef"; return 0; fi
@@ -730,7 +761,9 @@ issue_json(){ # issue_json <owner/repo> <n>: cached ISSUE_Q answer; 0 ok, 1 node
   spent="$(cat "$ALARM_TICK/agql" 2>/dev/null || printf 0)"
   [ "$spent" -lt "$budget" ] || return 1
   printf '%s' "$((spent+1))" > "$ALARM_TICK/agql"
-  out="$(AI_GH_OPERATION=bw.alarm_issue gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || return 2
+  out="$(AI_GH_OPERATION=bw.alarm_issue gh_api graphql -f query="$ISSUE_Q" -f owner="${repo%/*}" -f name="${repo#*/}" -F "n=$n")" || read_rc=$?
+  record_graphql_cost graphql.issue_detail "$out"
+  [ "$read_rc" -eq 0 ] || return 2
   printf '%s' "$out" | jq -e '(has("errors")|not) and (.data.repository.issue != null)' >/dev/null || return 2
   printf '%s' "$out" > "$cachef"
   printf '%s' "$out"
@@ -1051,6 +1084,35 @@ maybe_links(){
   if scan_due "$LAST_LINKS" "$(cfgd .links_interval_minutes 60)" "${1:-}"; then maintain_links 0; fi
 }
 
+# --- stuck-work watchdog trigger (popcre/ai-devops#1011) ---------------------
+# GitHub drops most scheduled runs in this repository (an hourly cron fired
+# every 4-7 hours on 2026-09-28/29), so the watchdog's 15-minute cadence is
+# driven from here: on fixer_on_host, every stuck_watchdog_interval_minutes, a
+# tick runs tools/stuck-work/watchdog.mjs as the pop-ai-watchers App (its own
+# allowance). Re-runs use this machine's gh login and happen at most once per
+# head SHA. About 15 API calls per run.
+stuck_watchdog_scan(){
+  [ "$(cfgd .stuck_watchdog_enabled false)" = true ] || return 0
+  local want me; want="$(cfgd .fixer_on_host '')"
+  me="$(hostname 2>/dev/null | tr '[:upper:]' '[:lower:]' | cut -d. -f1)"
+  [ -n "$want" ] && [ "$me" = "${want,,}" ] || return 0
+  local last="$HOME_DIR/last-stuck-watchdog"
+  [ "$DRY" = 1 ] || scan_due "$last" "$(cfgd .stuck_watchdog_interval_minutes 15)" || return 0
+  local script="$TOOL_ROOT/tools/stuck-work/watchdog.mjs" auth="$TOOL_ROOT/bin/ai-gh-app-auth" tok rerun="" log
+  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ]; then script="${AI_BLOCKER_WATCH_TEST_STUCK_SCRIPT:-$script}"; auth="${AI_BLOCKER_WATCH_TEST_APP_AUTH:-$auth}"; fi
+  [ -f "$script" ] && command -v node >/dev/null 2>&1 || { note "stuck watchdog: node or $script missing"; FAILED=1; return 0; }
+  tok="$("$auth" token popcre 2>/dev/null)" || { note "stuck watchdog: no app token on this machine"; FAILED=1; return 0; }
+  [ "$DRY" = 1 ] || rerun="$("$GH" auth token 2>/dev/null || true)"
+  log="$LOGS/stuck-watchdog-$(date -u +%Y%m%dT%H%M%S).log"
+  local -a args=(--json "$HOME_DIR/stuck-report.json"); [ "$DRY" = 1 ] && args+=(--dry-run)
+  if GH_TOKEN="$tok" RERUN_TOKEN="$rerun" timeout 300 node "$script" "${args[@]}" >"$log" 2>&1; then
+    [ "$DRY" = 1 ] || now_iso > "$last"
+    note "stuck watchdog: $(grep -m1 '^Stuck-work watchdog' "$log" || echo ran) (log $log)"
+  else
+    note "stuck watchdog failed; log $log"; FAILED=1
+  fi
+}
+
 lock_take(){
   local lock="$HOME_DIR/tick.lock"
   if ! mkdir "$lock" 2>/dev/null; then
@@ -1064,6 +1126,7 @@ lock_take(){
 }
 
 cmd_alarm(){
+  BW_WORKFLOW=blocker_watch_alarm
   [ "${1:-}" != --dry-run ] || DRY=1
   alarm_on || die "the unowned-blocker alarm is disabled in the config"
   lock_take || return 0
@@ -1072,6 +1135,7 @@ cmd_alarm(){
 }
 
 cmd_links(){
+  BW_WORKFLOW=blocker_watch_links
   [ "${1:-}" != --dry-run ] || DRY=1
   links_on || die "blocked-by link maintenance is disabled in the config"
   lock_take || return 0
@@ -1080,8 +1144,22 @@ cmd_links(){
 }
 
 cmd_tick(){
+  BW_WORKFLOW=blocker_watch_tick
+  # The offline suite never mints real tokens.
+  [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] || BW_APP=1
   [ "${1:-}" != --dry-run ] || DRY=1
   lock_take || return 0
+  local tick_started_ms='' tick_elapsed_ms=''
+  BW_TICK_RECEIPT_ID=''
+  BW_TICK_CONTEXT=''
+  if [ "$GH_COST_READY" = 1 ] && [ "$DRY" != 1 ]; then
+    BW_TICK_RECEIPT_ID="$(gh_measure_workflow_id)" || note 'request measurement unavailable: tick ID not created'
+    gh_measure_clock; tick_started_ms="$GH_MEASURE_CLOCK"
+    # One read-only local lookup per tick; unknown identity stays unattributed.
+    if [ -x "$TOOL_ROOT/tools/github-requests/pr-status-context" ]; then
+      BW_TICK_CONTEXT="$("$TOOL_ROOT/tools/github-requests/pr-status-context" 2>/dev/null || true)"
+    fi
+  fi
   # Scans that are due run first, so their open-issue snapshot also answers
   # propagate and wake this tick instead of per-item REST reads.
   local early=""
@@ -1096,13 +1174,44 @@ cmd_tick(){
     [ "$(jq -r .state "$f")" = waiting ] || continue
     wake "$f"
   done
+  stuck_watchdog_scan
+  # Housekeeping: archive dead task/session state past its TTL. Local-only,
+  # cheap, bounded; never touches waiting records or reviewer leases.
+  reap_fixer_pids 0
+  local reap_n=0 reap_ttl reap_max reap_f
+  reap_ttl="$(cfgd .orphan_ttl_hours 24)"; reap_max="$(cfgd .reap_max_per_run 64)"
+  for reap_f in "$WAITS"/*.json; do
+    [ -e "$reap_f" ] || continue
+    [ "$reap_n" -lt "$reap_max" ] || break
+    if reap_one "$reap_f" 0; then reap_n=$((reap_n + 1)); fi
+  done
+  [ "$reap_n" -eq 0 ] || note "tick reaped $reap_n aged task/session record(s)"
   [ "$FAILED" = 0 ] || { note "tick finished with failures"; exit 1; }
+  if [ -n "$BW_TICK_RECEIPT_ID" ]; then
+    gh_measure_clock
+    tick_elapsed_ms=$(( GH_MEASURE_CLOCK - tick_started_ms ))
+    [ "$tick_elapsed_ms" -ge 0 ] || tick_elapsed_ms=0
+    gh_measure_workflow_outcome ai-blocker-watch blocker_watch_tick "$BW_TICK_RECEIPT_ID" completed "$tick_elapsed_ms" ||
+      note 'request measurement unavailable: tick outcome not saved'
+  fi
 }
 
 
 TASK_NAME='ai-devops\blocker-watch'
 CRON_MARKER='# ai-devops blocker-watch (managed by ai-blocker-watch schedule; unschedule removes)'
-cron_job_line(){ printf '*/%s * * * * %s tick >> %s 2>&1' "$(cfg .schedule_every_minutes)" "'$TOOL_ROOT/bin/ai-blocker-watch'" "'$HOME_DIR/tick.log'"; }
+# Every machine used to tick on the same wall-clock minute, so their GitHub
+# reads landed in one burst and tripped GitHub's per-user rate limit. Each
+# machine now ticks at its own stable minute offset derived from its hostname.
+tick_offset(){ # tick_offset <every>: 0..every-1, stable per machine
+  local every="$1" sum
+  [ "$every" -gt 1 ] 2>/dev/null || { printf 0; return; }
+  sum="$(printf '%s' "$(hostname 2>/dev/null || printf unknown)" | cksum | cut -d' ' -f1)"
+  printf '%s' "$(( sum % every ))"
+}
+cron_job_line(){
+  local every off; every="$(cfg .schedule_every_minutes)"; off="$(tick_offset "$every")"
+  printf '%s-59/%s * * * * %s tick >> %s 2>&1' "$off" "$every" "'$TOOL_ROOT/bin/ai-blocker-watch'" "'$HOME_DIR/tick.log'"
+}
 cmd_schedule(){
   local every self
   every="$(cfg .schedule_every_minutes)"
@@ -1111,7 +1220,7 @@ cmd_schedule(){
     bash_exe="$(cygpath -w "$(command -v bash)")"; self="$(cygpath -m "$TOOL_ROOT/bin/ai-blocker-watch")"
     # conhost --headless keeps a console window from flashing every run.
     # /F re-points an existing task, so rerunning the installer stays safe.
-    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /TN "$TASK_NAME" \
+    MSYS2_ARG_CONV_EXCL='*' schtasks.exe /Create /F /SC MINUTE /MO "$every" /ST "$(printf '00:%02d' "$(tick_offset "$every")")" /TN "$TASK_NAME" \
       /TR "conhost.exe --headless \"$bash_exe\" -lc \"'$self' tick >> ~/.ai-devops/blocker-watch/tick.log 2>&1\"" >/dev/null
     note "scheduled every $every minutes as $TASK_NAME"
     return
@@ -1146,6 +1255,7 @@ case "${1:-}" in
   find) shift; cmd_find "$@" ;;
   has-wait) shift; cmd_has_wait "$@" ;;
   cancel) shift; cmd_cancel "$@" ;;
+  reap) shift; cmd_reap "$@" ;;
   tick) shift; cmd_tick "$@" ;;
   alarm) shift; cmd_alarm "$@" ;;
   links) shift; cmd_links "$@" ;;

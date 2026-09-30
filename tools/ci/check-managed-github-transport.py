@@ -31,6 +31,9 @@ LOCAL_OR_TEXT = {
         '[ $# -gt 0 ] || { say "gh arguments are required after --"; exit 3; }',
         'fails=$((fails+1)); say "gh failed (rc=$rc, attempt $fails)"',
     },
+    # App JWT sign-in and token minting: counted against no user allowance,
+    # and ai-gh cannot sign as an app. The minted token then goes through ai-gh.
+    "ai-gh-app-auth": {'API="https://api.github.com"'},
     "ai-pr-wait": {'command -v gh >/dev/null 2>&1 || { printf \'ai-pr-wait: gh is not installed\\n\' >&2; exit 3; }'},
     "ai-private-config": {
         "[ -r /dev/tty ] || die 'GitHub CLI is not authenticated; run: gh auth login'",

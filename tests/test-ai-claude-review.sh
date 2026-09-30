@@ -40,7 +40,7 @@ case "${AI_CLAUDE_STUB_MODE:-success}" in
 esac
 EOF
 chmod +x "$STUB"; mkdir -p "$TMP/args"
-MODELS="$TMP/models.env"; printf "CLAUDE_REVIEW_CMD='%s -p --model claude-opus-5 --effort high --output-format json --permission-mode plan --tools Read,Grep,Glob --strict-mcp-config --mcp-config {\\\"mcpServers\\\":{}} --no-session-persistence --no-chrome --disable-slash-commands'\n" "$STUB" > "$MODELS"
+MODELS="$TMP/models.env"; printf "CLAUDE_REVIEW_CMD='%s -p --model claude-opus-5 --effort low --output-format json --permission-mode plan --tools Read,Grep,Glob --strict-mcp-config --mcp-config {\\\"mcpServers\\\":{}} --no-session-persistence --no-chrome --disable-slash-commands'\n" "$STUB" > "$MODELS"
 export AI_DEVOPS_MODELS_ENV="$MODELS" AI_CLAUDE_TEST_ARGS="$TMP/args" AI_CLAUDE_STUB_SOURCE="$R"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle" AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 
@@ -66,6 +66,7 @@ check 'report identifies canonical Opus 5' "grep -q 'model.*claude-opus-5' '$OUT
 check 'report contains exact verdict' "grep -A1 '^## Verdict' '$OUT' | tail -1 | grep -qx APPROVE"
 check 'provider saw complete untracked snapshot' "grep -q 'review saw complete snapshot' '$OUT'"
 check 'provider receives only read grep glob tools' "grep -Rzq -- 'Read,Grep,Glob' '$TMP/args' && ! grep -Rzq -- 'Bash,\|Write,\|Edit,' '$TMP/args'"
+check 'provider receives the low effort pin' "find '$TMP/args' -name 'args-*' -exec cat {} + | tr '\\0' '\\n' | awk '\$0==\"--effort\"{getline; if(\$0==\"low\") ok=1; else bad=1} END{exit !(ok&&!bad)}'"
 check 'source remains unchanged' "[ '$BEFORE' = \"\$('$ROOT/bin/ai-review-sandbox' digest '$R')\" ]"
 check 'lifecycle records Claude completion' "find '$TMP/lifecycle/runs' -name '*.json' -exec jq -e 'select(.provider==\"claude\" and .status==\"completed\" and .verdict==\"APPROVE\")' {} \; | grep APPROVE >/dev/null"
 check 'scoreboard records Claude current result' "jq -e 'select(.provider==\"claude\" and .evidence_state==\"current\" and .verdict==\"APPROVE\")' '$TMP/scoreboard/reviews.jsonl'"
@@ -84,5 +85,7 @@ check 'concurrent reviews both complete' "[ '$C1' -eq 0 ] && [ '$C2' -eq 0 ]"
 check 'concurrent reports do not collide' "[ \"\$(cat '$TMP/one')\" != \"\$(cat '$TMP/two')\" ]"
 BAD="$TMP/bad.env"; printf "CLAUDE_REVIEW_CMD='%s -p --model claude-opus-5 --output-format json --tools Bash'\n" "$STUB" > "$BAD"
 check 'unsafe command is refused' "cd '$R' && ! AI_DEVOPS_MODELS_ENV='$BAD' '$SCRIPT' doctor >/dev/null 2>&1"
+BAD_EFFORT="$TMP/bad-effort.env"; printf "CLAUDE_REVIEW_CMD='%s -p --model claude-opus-5 --effort high --output-format json --permission-mode plan --tools Read,Grep,Glob --strict-mcp-config --mcp-config {\\\"mcpServers\\\":{}} --no-session-persistence --no-chrome --disable-slash-commands'\n" "$STUB" > "$BAD_EFFORT"
+check 'high effort is refused' "cd '$R' && ! AI_DEVOPS_MODELS_ENV='$BAD_EFFORT' '$SCRIPT' doctor >/dev/null 2>&1"
 check 'unknown mode is rejected' "cd '$R' && ! '$SCRIPT' nonsense >/dev/null 2>&1"
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

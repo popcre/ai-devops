@@ -110,6 +110,7 @@ PASS'; elif [ "${MOCK_MODE:-normal}" = governed ]; then response='Findings: none
 VERDICT: APPROVE 1111111111111111111111111111111111111111'; elif [ "${MOCK_MODE:-normal}" = governed-heading ]; then response='## Verdict
 APPROVE'; else response='## Verdict
 APPROVE'; fi
+if [ "${MOCK_MODE:-normal}" = denied ]; then printf '{"status":"SUCCESS","conversation_id":"%s","response":"","denied_actions":[{"action":"command","display_name":"RunCommand"}]}\n' "$cid"; exit 0; fi
 printf '{"status":"SUCCESS","conversation_id":"%s","response":%s}\n' "$cid" "$(printf %s "$response" | jq -Rs .)"
 EOF
 chmod +x "$TMP/bin/"*
@@ -175,10 +176,13 @@ write_qualification
 
 echo '== byte identity and exact identity gates'
 R1="$TMP/repo1"; make_repo "$R1"; printf first-change > "$R1/dirty.txt"
-check 'already-dirty file content mutation is rejected' "! new_run '$R1' dirty mutate-dirty"
-check 'failed mutation remains recovery-required' "test \"\$(jq -r .status \"\$(meta_for dirty)\")\" = RECOVERY_REQUIRED"
+check 'reviewer may edit an already-dirty file inside its disposable copy' "new_run '$R1' dirty mutate-dirty | grep -q '^PASS'"
+check 'copy edit never reaches the caller checkout' "test \"\$(cat '$R1/dirty.txt')\" != changed-again"
+check 'disposable review copy has no git remote' "test -z \"\$(git -C \"\$(jq -r .review_dir \"\$(meta_for dirty)\")\" remote)\""
+check 'copy-edit review completes and records the post-turn copy inventory' "test \"\$(jq -r .status \"\$(meta_for dirty)\")\" = COMPLETE"
 R2="$TMP/repo2"; make_repo "$R2"; printf prior > "$R2/.ignored"
-check 'ignored-file mutation is rejected' "! new_run '$R2' ignored mutate-ignored"
+check 'reviewer may edit an ignored file inside its disposable copy' "new_run '$R2' ignored mutate-ignored | grep -q '^PASS' && test \"\$(cat '$R2/.ignored')\" = prior"
+check 'review prompt no longer says read-only and grants disposable-copy file edits' "! grep -q 'without editing files, running commands' '$SCRIPT' && grep -q 'you may read and edit files there' '$SCRIPT' && grep -q -- '--mode accept-edits --model' '$SCRIPT'"
 R3="$TMP/repo3"; make_repo "$R3"; SENT="$TMP/outside-sentinel"; printf safe > "$SENT"; export MOCK_SENTINEL="$SENT"
 check 'outside sentinel mutation is rejected' "! AI_GEMINI_OUTSIDE_SENTINELS='$SENT' new_run '$R3' outside mutate-outside"
 R3B="$TMP/repo3b"; make_repo "$R3B"; export MOCK_PROTECTED="$R3B"
@@ -345,11 +349,11 @@ chmod +x "$TMP/slow-bin/python3"
 set +e; SLOW_INV_OUT="$(cd "$SLOW_INV" && PATH="$TMP/slow-bin:$PATH" MOCK_PACKET_VERIFY_FAST=1 MOCK_RESOLVE_JSON="$SLOW_INV_IDENTITY" AI_GEMINI_PREPARE_TIMEOUT=2s MOCK_MODE=normal "$SCRIPT" new slow-inv --prompt review 2>&1)"; SLOW_INV_RC=$?; set -e
 SLOW_INV_STAGE_START="$(cat "$TMP/slow-bin/python3.start" 2>/dev/null || printf 0)"
 SLOW_INV_STAGE_ELAPSED=$(( $(date +%s) - SLOW_INV_STAGE_START ))
-if [ "$SLOW_INV_RC" -eq 0 ] || ! grep -q 'inventory failed or timed out after 2s' <<<"$SLOW_INV_OUT" || [ -n "$(meta_for slow-inv)" ]; then
+if [ "$SLOW_INV_RC" -eq 0 ] || ! grep -q 'inventory timed out after 2s' <<<"$SLOW_INV_OUT" || [ -n "$(meta_for slow-inv)" ]; then
   printf 'slow-inv diagnostic: rc=%s meta=%s output=%s\n' "$SLOW_INV_RC" "$(meta_for slow-inv)" "$SLOW_INV_OUT" >&2
 fi
 check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test -s '$TMP/slow-bin/python3.start' && test '$SLOW_INV_STAGE_ELAPSED' -lt $(budget 2 30)"
-check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory failed or timed out after 2s'"
+check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory timed out after 2s'"
 check 'a timed-out inventory starts no session and holds no lock' "test -z \"\$(meta_for slow-inv)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-inv*' -print -quit 2>/dev/null)\""
 # #637 gaps 1 and 3: ask() resolve is bounded, and a genuine refusal never says "timed out".
 SLOW_ASK="$TMP/repo-slow-ask"; make_repo "$SLOW_ASK"; new_run "$SLOW_ASK" slow-ask normal >/dev/null
@@ -453,5 +457,8 @@ else
   printf '  note drive-letter spelling check needs cygpath (Windows only)
 '
 fi
+check 'brief forbids shell commands the headless runtime auto-denies' "test \"\$(grep -c 'never call run_command' '$SCRIPT')\" -eq 2 && ! grep -q 'you may run commands' '$SCRIPT'"
+check 'governed denied-tool turn fails naming the denied tool' "! (gov_run govdenied denied 2>&1 | tee '$TMP/govdenied.err' >/dev/null; exit \${PIPESTATUS[0]}) && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/govdenied.err'"
+check 'plain denied-tool turn fails naming the denied tool' "! (new_run '$RG' plaindenied denied 2>&1 | tee '$TMP/plaindenied.err' >/dev/null; exit \${PIPESTATUS[0]}) && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/plaindenied.err'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

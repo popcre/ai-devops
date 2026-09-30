@@ -20,6 +20,19 @@ operations including PR waiting, BlockerWatch, dispatch and privacy checks. The
 offline-replay fallback is available only after two business days of insufficient
 volume; a quiet sample today cannot satisfy it.
 
+### Integration candidate, 2026-09-28
+
+The candidate measures `rateLimit.cost`, `remaining`, and `resetAt` from each
+actual upstream GraphQL page used by the PR waiter or BlockerWatch. This adds
+no GitHub call. Opaque workflow IDs bind a page's cost to a terminal wait or
+completed tick; a shared waiter follower records no duplicate cost. The report
+accepts older cost rows and groups reset headroom only by a validated, opaque
+local access-context key. Reports print a context ordinal, never the key;
+unknown context stays unattributed. It cannot add reset-window totals across
+hosts because local keys are deliberately host-specific. Dispatch and privacy
+outcome receipts, two comparable busy windows, and installed proof remain open.
+The 2026-09-24 baseline cannot be retroactively turned into per-call costs.
+
 ### Installed live supplement, 2026-09-27
 
 Read-only collection over pinned Tailscale SSH confirmed that edge-dev's

@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
-# ai-stepfun - StepFun Step 5 through the StepCode CLI (`step`): read-only
-# reviews and second opinions, plus isolated write-and-execute implementation.
+# ai-stepfun - StepFun Step 5: reviews and second opinions in a disposable
+# writable copy, plus isolated implementation.
 #
-# Ubuntu/Linux only (owner instruction 2026-09-25): StepCode is not yet
-# supported on Windows, so this wrapper refuses to run anywhere else and
-# ai-review-preflight reports it as unsupported-platform there.
+# Engine: StepCode CLI (`step`) where it is installed, otherwise the pinned
+# OpenCode harness (same binary GLM/Muse/DeepSeek use). Ubuntu/Linux only: both
+# engines run every turn under bubblewrap, and Windows is refused (#1086). Owner instruction 2026-09-25: StepFun may write, implement,
+# and execute code. Owner instruction 2026-09-28 (#974): reviewers are not
+# read-only.
 #
-# Sandbox: every StepCode turn runs under bubblewrap with only /usr, /etc,
+# Sandbox: every turn runs against a disposable, remote-less copy or clone.
+# StepCode turns additionally run under bubblewrap with only /usr, /etc,
 # StepCode itself and its own directory mounted; an empty home, /tmp, and /run;
-# and a cleared environment (no SSH, git, gh, or 1Password secrets or sockets) (read-only for review/ask, writable for
-# implement). Extensions, skills, prompt templates, project-local .stepcode
-# files, and session storage are disabled.
+# and a cleared environment (no SSH, git, gh, or 1Password secrets or sockets).
+# OpenCode turns run under the same bubblewrap sandbox, against the same
+# disposable copy, with a per-run profile and the key exported only into it.
 #
-# Review safety: `review` and `ask` allow only read,grep,find,ls under strict
-# approval, in a disposable ai-review-sandbox copy whose digest is compared
-# before and after. `review` also builds and re-verifies the shared sealed
+# Review safety (owner instruction 2026-09-28, #974: "none of the reviewers
+# should be read-only"): `review` and `ask` get the implement tool set
+# (read,bash,edit,write,grep,find,ls) but only inside a disposable, remote-less
+# ai-review-sandbox copy that is discarded afterwards; edits there are allowed
+# and never reach the PR. The caller's checkout is digested before and after
+# and the answer is rejected if it changed. `review` also builds and re-verifies the shared sealed
 # evidence packet (MANIFEST.md) and binds its VERDICT line to the exact head.
 # The API key is read from a protected per-user store (never 1Password during a
 # review, rotation rule 6); `store-key` refreshes it from 1Password.
@@ -29,12 +35,13 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   unset _AI_EVENT_SELF
 fi
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REAL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../tools/reviewer_event_guard.sh
 declare -F reviewer_credit_scan >/dev/null || source "$REAL_DIR/../tools/reviewer_event_guard.sh"
 
+# StepCode model id; the OpenCode profile pins stepfun-api/step-5-preview.
 MODEL="${AI_STEPFUN_MODEL:-step/step-5-preview}"
 BASE_URL="${AI_STEPFUN_BASE_URL:-https://api.stepfun.ai/v1}"
 STEP_MIN_VERSION="0.1.1"
@@ -45,21 +52,68 @@ TIMEOUT="${AI_STEPFUN_TIMEOUT:-1800}"
 REPORT_FLOOR="${AI_STEPFUN_REPORT_FLOOR:-400}"
 SANDBOX_BIN="${AI_REVIEW_SANDBOX_BIN:-$SCRIPT_DIR/ai-review-sandbox}"
 PACKET_BIN="${AI_REVIEW_PACKET_BIN:-$SCRIPT_DIR/ai-review-packet}"
-READ_ONLY_TOOLS="read,grep,find,ls"
+WRITE_TOOLS="read,bash,edit,write,grep,find,ls"
+
+# OpenCode engine (Windows, or any host without StepCode). Same pinned binary
+# and profile pattern as bin/ai-deepseek.
+OC_ROOT="$(cd "$REAL_DIR/.." && pwd)"
+OC_VERSION="$(tr -d ' \r\n' < "$OC_ROOT/config/opencode/version" 2>/dev/null || true)"
+OC_BIN="${AI_STEPFUN_OPENCODE:-$HOME/.local/lib/ai-devops/opencode/$OC_VERSION/node_modules/opencode-ai/bin/opencode.exe}"
+OC_PROFILE_SRC="$OC_ROOT/config/opencode-stepfun"
+OC_AGENT_REVIEW=stepfun-review
+OC_AGENT_IMPLEMENT=stepfun-implement
+OC_PROVIDER=stepfun-api
+OC_MODEL_ID=step-5-preview
 
 die(){ printf 'ai-stepfun: error: %s\n' "$*" >&2; exit 1; }
 note(){ printf 'ai-stepfun: %s\n' "$*" >&2; }
 
-platform_ok(){ [ "${AI_STEPFUN_PLATFORM:-$(uname -s)}" = Linux ]; }
-require_platform(){
-  platform_ok || { printf 'ai-stepfun: unsupported-platform: StepFun Step 5 reviews run on Ubuntu/Linux only; StepCode is not yet available on Windows. Use another reviewer.\n' >&2; exit 2; }
+IS_WINDOWS=0
+IS_LINUX=0
+case "$(uname -s 2>/dev/null || echo unknown)" in MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1;; Linux) IS_LINUX=1;; esac
+# AI_STEPFUN_PLATFORM overrides uname for tests and forced-engine runs.
+if [ -n "${AI_STEPFUN_PLATFORM:-}" ]; then
+  case "${AI_STEPFUN_PLATFORM}" in
+    Linux|linux) IS_WINDOWS=0; IS_LINUX=1 ;;
+    MINGW*|MSYS*|CYGWIN*|Windows*|windows*) IS_WINDOWS=1; IS_LINUX=0 ;;
+    *) IS_WINDOWS=0; IS_LINUX=0 ;;
+  esac
+fi
+
+native_path(){ if [ "$IS_WINDOWS" = 1 ]; then cygpath -w "$1" 2>/dev/null || printf '%s' "$1"; else printf '%s' "$1"; fi; }
+
+# Engine: stepcode when the StepCode CLI is present (Ubuntu), else opencode.
+ENGINE="${AI_STEPFUN_ENGINE:-}"
+detect_engine(){
+  [ -n "$ENGINE" ] && return 0
+  if step_bin >/dev/null 2>&1; then ENGINE=stepcode
+  elif [ -x "$OC_BIN" ] || command -v opencode >/dev/null 2>&1; then ENGINE=opencode
+  else ENGINE=""; fi
+}
+require_engine(){
+  # Ubuntu/Linux only (owner instruction 2026-09-25; docs/reviewer-rotation-rules.md
+  # rule 11): every turn must run under bubblewrap, which Windows lacks (#1086).
+  if [ "$IS_LINUX" != 1 ]; then
+    printf 'ai-stepfun: unsupported-platform: StepFun runs only on Ubuntu/Linux, where every turn is sandboxed by bubblewrap.\n' >&2; exit 2
+  fi
+  detect_engine
+  case "$ENGINE" in
+    stepcode|opencode) return 0 ;;
+    *) printf 'ai-stepfun: unsupported-platform: no StepCode CLI and no OpenCode install. Install StepCode, or the OpenCode harness with bin/setup-opencode-glm.sh.\n' >&2; exit 2 ;;
+  esac
 }
 
 # `step` is a generic name (Smallstep's CLI uses it too), so prefer StepCode's
 # own install path and accept any binary only if it identifies as StepCode.
 step_bin(){
   local b c
-  for c in "${AI_STEPFUN_STEP_BIN:-}" "$HOME/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
+  # An explicit override is authoritative: a wrong program there is refused,
+  # never silently replaced by another installed binary (#1086).
+  if [ -n "${AI_STEPFUN_STEP_BIN:-}" ]; then
+    [ -x "$AI_STEPFUN_STEP_BIN" ] && "$AI_STEPFUN_STEP_BIN" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || return 1
+    printf '%s' "$AI_STEPFUN_STEP_BIN"; return 0
+  fi
+  for c in "$HOME/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
     [ -n "$c" ] && [ -x "$c" ] || continue
     "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || continue
     b="$c"; break
@@ -72,6 +126,11 @@ version_ge(){ [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]; 
 
 key_store_ok(){
   [ -f "$KEY_STORE" ] && [ ! -L "$KEY_STORE" ] && [ -s "$KEY_STORE" ] || return 1
+  # stat -c %a is meaningless on NTFS (returns a synthesised mode). On Windows
+  # accept a present, non-empty, non-link file; the path is under the user
+  # profile and store-key writes it with chmod 600 where the filesystem honors it.
+  # StepFun is Ubuntu/Linux-only (owner instruction 2026-09-25): no Windows key store is trusted.
+  [ "$IS_LINUX" = 1 ] || return 1
   [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
 }
 
@@ -99,12 +158,14 @@ load_key(){
 
 # StepFun's lower account tiers allow about 10 requests a minute (HTTP 429
 # rate_limited). STEP_AUTOPILOT=1 lets StepCode retry and resume inside a run;
-# read-only turns are also re-run whole, after a pause, when a 429 still ends
+# review/ask turns are also re-run whole, after a pause, when a 429 still ends
 # the run. Implementation runs are never re-run blindly: the clone is kept.
 RATE_RETRIES="${AI_STEPFUN_RATE_RETRIES:-2}"
 RATE_PAUSE="${AI_STEPFUN_RATE_PAUSE:-65}"
-rate_limited(){ grep -q '^429: {.*rate_limited' "$1" 2>/dev/null; }
-run_step_retry(){ # same arguments as run_step; read-only turns only
+# StepCode prints "429: {json}" on stdout; OpenCode surfaces rate limits in
+# stderr or JSONL error events. Match either shape.
+rate_limited(){ grep -qE '(^429: \{.*rate_limited|rate_limited|429|Too Many Requests)' "$1" "$1.stderr" 2>/dev/null; }
+run_step_retry(){ # same arguments as run_step; disposable-copy turns only
   local n=0 rc
   while :; do
     rc=0; run_step "$@" || rc=$?
@@ -114,13 +175,108 @@ run_step_retry(){ # same arguments as run_step; read-only turns only
   done
 }
 
-# run_step DIR OUT PROMPT [TOOLS] [write]: one non-interactive, sessionless
-# StepCode turn. StepCode's strict approval mode is read-only (it blocks bash,
-# edit, and write); only implement passes "write", which selects auto approval.
+# run_step DIR OUT PROMPT [TOOLS] [write]: one non-interactive turn on the
+# selected engine. Dispatches to StepCode (Ubuntu) or OpenCode (Windows/fallback).
+run_step(){
+  detect_engine
+  case "$ENGINE" in
+    stepcode) run_stepcode "$@" ;;
+    opencode) run_opencode_turn "$@" ;;
+    *) die 'no engine available (StepCode or OpenCode)' ;;
+  esac
+}
+
+# ---- OpenCode engine (Windows, or any host without StepCode) ----
+# Same profile-install and key-export pattern as bin/ai-deepseek. The key is
+# exported into the child environment only, never argv or output.
+# install_oc_profile XDG: a FRESH per-run XDG tree. The profile is copied in
+# before the sandbox starts and mounted read-only; data/state/cache are the
+# only writable parts and the whole tree is deleted after the turn, so nothing
+# a model writes survives into the next host-side copy (#1086).
+install_oc_profile(){
+  local root="$1" xdg="$1/config/opencode"
+  mkdir -p "$xdg/agent" "$root/data" "$root/state" "$root/cache"
+  cp "$OC_PROFILE_SRC/opencode.json" "$xdg/opencode.json"
+  cp "$OC_PROFILE_SRC/agent/$OC_AGENT_REVIEW.md" "$xdg/agent/$OC_AGENT_REVIEW.md"
+  cp "$OC_PROFILE_SRC/agent/$OC_AGENT_IMPLEMENT.md" "$xdg/agent/$OC_AGENT_IMPLEMENT.md"
+}
+
+oc_bin(){
+  if [ -x "$OC_BIN" ]; then printf '%s' "$OC_BIN"; return 0; fi
+  local p; p="$(command -v opencode 2>/dev/null || true)"
+  [ -n "$p" ] && [ -x "$p" ] || return 1
+  printf '%s' "$p"
+}
+
+# run_opencode_turn DIR OUT PROMPT [TOOLS] [write]: one OpenCode CLI turn.
+# The agent file carries the working tool map (write/edit/bash allowed, webfetch
+# denied); the disposable directory is the real boundary, exactly as on StepCode.
+# review/ask use the review agent (still writable inside the disposable copy,
+# per #974); implement uses the implement agent. Both are write-capable.
+# Caller sets STEPFUN_OC_AGENT to choose; defaults to the review agent.
+run_opencode_turn(){
+  local dir="$1" out="$2" prompt="$3" agent="${STEPFUN_OC_AGENT:-$OC_AGENT_REVIEW}" rc=0 log oc
+  oc="$(oc_bin)" || die "OpenCode $OC_VERSION is not installed. Run bin/setup-opencode-glm.sh first."
+  [ -d "$dir" ] || die "OpenCode turn directory is gone: $dir"
+  [ -z "$(git -C "$dir" remote 2>/dev/null)" ] || die "turn directory has a remote; refusing to run StepFun there: $dir"
+  mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR" 2>/dev/null || true
+  local xdg; xdg="$(mktemp -d "$STATE_DIR/oc-run.XXXXXX")"; chmod 700 "$xdg"
+  install_oc_profile "$xdg"
+  load_key
+  log="$out.jsonl"
+  set +e
+  # Linux: the shell-enabled agent runs under bubblewrap exactly like StepCode:
+  # read-only system trees, an empty home, /tmp and /run, a cleared
+  # environment, and only the OpenCode install, its per-run state and the
+  # disposable directory mounted (#1086).
+  local bwrap oc_real oc_root timeout_bin
+  bwrap="$(bwrap_bin)" || die 'bubblewrap (bwrap) is required to sandbox StepFun. Install: sudo apt-get install bubblewrap'
+  timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)" || die 'timeout is missing from /usr/bin.'
+  oc_real="$(readlink -f "$oc")"
+  oc_root="${AI_STEPFUN_OPENCODE_ROOT:-$HOME/.local/lib/ai-devops/opencode/$OC_VERSION}"
+  case "$oc_real" in "$oc_root"/*) ;; *) oc_root="$(dirname "$oc_real")" ;; esac
+  local -a sys_binds=(); sandbox_sys_binds
+  ( home="$HOME"
+    for name in $(compgen -e); do
+      case "$STEP_ENV_ALLOW" in *" $name "*) ;; *) unset "$name" 2>/dev/null || true ;; esac
+    done
+    export HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" STEPFUN_API_KEY="$STEP_KEY" \
+      XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
+      XDG_STATE_HOME="$xdg/state" XDG_CACHE_HOME="$xdg/cache"
+    printf '%s' "$prompt" | "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
+      "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
+      --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
+      --tmpfs "$home" \
+      --ro-bind "$oc_root" "$oc_root" \
+      --ro-bind "$xdg/config" "$xdg/config" \
+      --bind "$xdg/data" "$xdg/data" --bind "$xdg/state" "$xdg/state" --bind "$xdg/cache" "$xdg/cache" \
+      --bind "$dir" "$dir" --chdir "$dir" -- \
+      "$oc" run --agent "$agent" --auto \
+      --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$dir" \
+      > "$log" 2>"$out.stderr"
+  )
+  rc=$?
+  set -e
+  rm -rf "$xdg"
+  STEP_KEY=""
+  # OpenCode emits JSONL events; surface the assistant text as the turn output.
+  if [ -s "$log" ]; then
+    jq -r 'select(.type=="text") | .part.text' "$log" 2>/dev/null > "$out" || true
+  fi
+  [ -s "$out" ] || [ "$rc" -eq 0 ] || { [ -f "$out" ] || : > "$out"; }
+  # Preserve any raw provider error lines for credit_scan.
+  if [ ! -s "$out" ] && [ -s "$log" ]; then cat "$log" > "$out"; fi
+  return "$rc"
+}
+
+# ---- StepCode engine (Ubuntu/Linux) ----
+# run_stepcode DIR OUT PROMPT [TOOLS] [write]: one non-interactive, sessionless
+# StepCode turn. StepCode's strict approval mode blocks bash, edit, and write;
+# every caller passes "write" (auto approval) on a disposable directory.
 #
 # Every turn runs inside bubblewrap. Visible: /usr, /etc and the /bin, /lib
 # links (read-only), StepCode's own binary, a private agent directory, and DIR
-# (writable for implement, read-only for review/ask). Empty: home, /tmp, /run
+# (writable; always a disposable copy or clone). Empty: home, /tmp, /run
 # (so no SSH keys or agent socket, git or gh credentials, 1Password token file,
 # user D-Bus, or Docker socket). Nothing else on the machine is mounted. The
 # environment is cleared to an allowlist, so tokens held in environment
@@ -133,7 +289,7 @@ run_step_retry(){ # same arguments as run_step; read-only turns only
 # implement run can reach loopback services and the internet, but it holds no
 # credential of the caller's with which to act on them.
 STEP_ENV_ALLOW=" LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR "
-run_step(){
+run_stepcode(){
   local dir="$1" out="$2" prompt="$3" tools="${4:-}" bin rc=0 approval=strict fallback=deny dir_bind=--ro-bind bwrap agent
   [ "${5:-}" != write ] || { approval=auto; fallback=allow; dir_bind=--bind; }
   local -a tool_args=(--no-tools)
@@ -144,12 +300,7 @@ run_step(){
   agent="$(mktemp -d "$STATE_DIR/agent.XXXXXX")"; chmod 700 "$agent"
   # Only the system trees programs need, read-only: never `/` itself, so a
   # checkout or data outside the home (/srv, /data, /mnt, ...) stays invisible.
-  local -a sys_binds=(--ro-bind /usr /usr --ro-bind /etc /etc)
-  local top
-  for top in /bin /sbin /lib /lib32 /lib64 /libx32; do
-    if [ -L "$top" ]; then sys_binds+=(--symlink "$(readlink "$top")" "$top")
-    elif [ -d "$top" ]; then sys_binds+=(--ro-bind "$top" "$top"); fi
-  done
+  local -a sys_binds=(); sandbox_sys_binds
   # Resolve host programs before the environment is cleared, so a file planted
   # in a user-writable PATH entry can never run outside the sandbox.
   local timeout_bin; timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)" || die 'timeout is missing from /usr/bin.'
@@ -176,6 +327,25 @@ run_step(){
   return "$rc"
 }
 
+# sandbox_sys_binds: fills the caller's sys_binds array with the read-only
+# system trees a sandboxed program needs; never `/` itself.
+sandbox_sys_binds(){
+  sys_binds=(--ro-bind /usr /usr)
+  local top
+  for top in /bin /sbin /lib /lib32 /lib64 /libx32; do
+    if [ -L "$top" ]; then sys_binds+=(--symlink "$(readlink "$top")" "$top")
+    elif [ -d "$top" ]; then sys_binds+=(--ro-bind "$top" "$top"); fi
+  done
+  # /etc is never bound whole (it can hold secrets such as /etc/environment):
+  # only loader, name-service, certificate and locale files (#1086).
+  sys_binds+=(--dir /etc)
+  local e
+  for e in /etc/passwd /etc/group /etc/nsswitch.conf /etc/resolv.conf /etc/hosts /etc/host.conf /etc/gai.conf /etc/ld.so.cache /etc/ld.so.conf /etc/ld.so.conf.d /etc/localtime /etc/timezone /etc/alternatives /etc/ssl/certs /etc/ca-certificates /etc/ca-certificates.conf /etc/pki/tls/certs /etc/mime.types /etc/protocols /etc/services /etc/os-release /etc/lsb-release /etc/debian_version /etc/inputrc /etc/bash.bashrc /etc/profile /etc/locale.alias /etc/gitattributes; do
+    { [ -e "$e" ] || [ -L "$e" ]; } && sys_binds+=(--ro-bind "$e" "$e")
+  done
+  return 0
+}
+
 bwrap_bin(){
   local b="${AI_STEPFUN_BWRAP:-$(PATH=/usr/bin:/bin command -v bwrap 2>/dev/null || true)}"
   [ -n "$b" ] && [ -x "$b" ] || return 1
@@ -194,18 +364,37 @@ credit_stop(){
 }
 
 cmd_doctor(){
-  local live=0 bin ver
+  local live=0
   [ "${1:-}" != --live ] || live=1
-  require_platform
-  bin="$(step_bin)" || { printf 'FAIL StepCode CLI (step) is not installed\n'; exit 1; }
-  ver="$("$bin" --version 2>/dev/null | tr -d '\r' | tail -n1)"
-  version_ge "$ver" "$STEP_MIN_VERSION" || { printf 'FAIL step %s is older than the %s floor\n' "$ver" "$STEP_MIN_VERSION"; exit 1; }
-  # One PASS line per check: the shared-db allocator counts them as proof.
-  printf 'PASS  StepCode CLI %s (floor %s): %s\n' "$ver" "$STEP_MIN_VERSION" "$bin"
+  require_engine
+  printf 'PASS  engine: %s\n' "$ENGINE"
+  case "$ENGINE" in
+    stepcode)
+      local bin ver
+      bin="$(step_bin)" || { printf 'FAIL StepCode CLI (step) is not installed\n'; exit 1; }
+      ver="$("$bin" --version 2>/dev/null | tr -d '\r' | tail -n1)"
+      version_ge "$ver" "$STEP_MIN_VERSION" || { printf 'FAIL step %s is older than the %s floor\n' "$ver" "$STEP_MIN_VERSION"; exit 1; }
+      printf 'PASS  StepCode CLI %s (floor %s): %s\n' "$ver" "$STEP_MIN_VERSION" "$bin"
+      bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed (sudo apt-get install bubblewrap)\n'; exit 1; }
+      printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
+      ;;
+    opencode)
+      local oc
+      oc="$(oc_bin)" || { printf 'FAIL OpenCode %s is not installed (run bin/setup-opencode-glm.sh)\n' "$OC_VERSION"; exit 1; }
+      printf 'PASS  OpenCode %s: %s\n' "$OC_VERSION" "$oc"
+      for f in opencode.json "agent/$OC_AGENT_REVIEW.md" "agent/$OC_AGENT_IMPLEMENT.md"; do
+        [ -f "$OC_PROFILE_SRC/$f" ] || { printf 'FAIL profile %s missing\n' "$f"; exit 1; }
+      done
+      printf 'PASS  OpenCode profile (review + implement agents)\n'
+      if [ "$IS_WINDOWS" != 1 ]; then
+        # Linux OpenCode turns only run under bubblewrap (#1086).
+        bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed on Linux (sudo apt-get install bubblewrap)\n'; exit 1; }
+        printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
+      fi
+      ;;
+  esac
   key_store_ok || { printf 'FAIL protected StepFun key store missing (run: ai-stepfun store-key)\n'; exit 1; }
   printf 'PASS  protected key store (owner-only): %s\n' "$KEY_STORE"
-  bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed (sudo apt-get install bubblewrap)\n'; exit 1; }
-  printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
   if [ "$live" = 1 ]; then
     local tmp; mkdir -p "$STATE_DIR"; tmp="$(mktemp -d "$STATE_DIR/doctor.XXXXXX")"; load_key
     if ! run_step "$tmp" "$tmp/out" 'Reply with exactly the text STEPFUN-OK and nothing else.' || ! grep -q 'STEPFUN-OK' "$tmp/out"; then
@@ -215,12 +404,13 @@ cmd_doctor(){
     rm -rf "$tmp"
     printf 'PASS  live StepFun call answered (model %s)\n' "$MODEL"
   fi
-  printf 'OK step=%s model=%s live=%s\n' "$ver" "$MODEL" "$([ "$live" = 1 ] && echo verified || echo not-run)"
+  printf 'OK engine=%s model=%s live=%s\n' "$ENGINE" "$MODEL" "$([ "$live" = 1 ] && echo verified || echo not-run)"
 }
 
 REVIEW_COPY=""; REVIEW_REPO=""; REVIEW_TAG=""; REVIEW_PACKET=""
-REVIEW_IDENTITY=""
+REVIEW_IDENTITY=""; REVIEW_WORK=""
 cleanup_copy(){
+  [ -z "$REVIEW_WORK" ] || rm -rf "$REVIEW_WORK"
   [ -z "$REVIEW_IDENTITY" ] || rm -f "$REVIEW_IDENTITY"
   [ -z "$REVIEW_PACKET" ] || "$PACKET_BIN" remove "$REVIEW_COPY" "$REVIEW_TAG" >/dev/null 2>&1 || true
   [ -z "$REVIEW_COPY" ] || "$SANDBOX_BIN" remove-copy "$REVIEW_REPO" "$REVIEW_TAG" >/dev/null 2>&1 || true
@@ -232,7 +422,7 @@ cleanup_copy(){
 # (MANIFEST.md, identity, patch) is built inside it, and the packet is
 # re-verified after the model answers.
 cmd_review(){
-  local repo="." prompt="" base="" assert="" head identity copy packet rel before after out report body
+  local repo="." prompt="" base="" assert="" head identity copy work packet rel before after out report body
   while [ "$#" -gt 0 ]; do case "$1" in
     --repo) repo="${2:?--repo needs a value}"; shift 2 ;;
     --base) base="${2:?--base needs a value}"; shift 2 ;;
@@ -242,7 +432,7 @@ cmd_review(){
     *) die "review: unknown argument $1" ;;
   esac; done
   [ -n "$prompt" ] || die 'review needs --prompt or --prompt-file.'
-  require_platform
+  require_engine
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   load_key
   mkdir -p "$STATE_DIR/reports"; chmod 700 "$STATE_DIR" "$STATE_DIR/reports" 2>/dev/null || true
@@ -257,9 +447,14 @@ cmd_review(){
   REVIEW_PACKET="$packet"
   "$PACKET_BIN" verify "$packet" --identity "$identity" >/dev/null || die 'the sealed review packet did not verify.'
   rel="${packet#"$copy"/}"
-  before="$("$SANDBOX_BIN" digest "$copy")"
+  # The model gets its own writable duplicate of the sealed copy, so its edits
+  # never disturb the snapshot the packet digest is re-verified against.
+  work="$(mktemp -d "$STATE_DIR/review-work.XXXXXX")"; REVIEW_WORK="$work"; chmod 700 "$work"
+  cp -a "$copy/." "$work/" || die 'could not build the writable review copy.'
+  [ -z "$(git -C "$work" remote 2>/dev/null)" ] || die 'the writable review copy has a remote; refusing to run.'
+  before="$("$SANDBOX_BIN" digest "$repo")"
   out="$STATE_DIR/reports/$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}-$$.md"
-  local full="You are an independent, read-only code reviewer. You can only read files (tools: read, grep, find, ls); never try to change anything.
+  local full="You are an independent code reviewer working in a disposable, remote-less copy of the repository. You may read files, run commands, builds and tests, and edit files here; every edit is discarded afterwards and is not part of the PR. Never commit, push, or touch any remote, and never edit $rel.
 Read $rel/MANIFEST.md first: it states the exact base, the head $head, and the patch under review. You may open any other file to confirm a finding.
 
 $prompt
@@ -268,11 +463,12 @@ Return ALL findings, each citing files and line numbers. End your answer with ex
 VERDICT: APPROVE $head
 or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line."
   reviewer_event_evidence require-report stepfun || die 'could not reserve durable review evidence.'
-  if ! run_step_retry "$copy" "$out" "$full" "$READ_ONLY_TOOLS"; then
+  STEPFUN_OC_AGENT="$OC_AGENT_REVIEW"
+  if ! run_step_retry "$work" "$out" "$full" "$WRITE_TOOLS" write; then
     credit_stop "$out"; die "StepFun request failed or timed out; output kept at $out"
   fi
-  after="$("$SANDBOX_BIN" digest "$copy")"
-  [ "$before" = "$after" ] || die "the review copy changed during the review; response rejected (copy: $copy)"
+  after="$("$SANDBOX_BIN" digest "$repo")"
+  [ "$before" = "$after" ] || die "the caller's checkout changed during the review; response rejected ($repo)"
   "$PACKET_BIN" verify "$packet" --identity "$identity" >/dev/null || die 'the sealed review packet changed during the review; response rejected.'
   report="$(tr -d '\r' < "$out")"
   if ! printf '%s\n' "$report" | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}' | tail -n1 | grep -Eq "^[[:space:]]*VERDICT:[[:space:]]*(APPROVE|REVISE|REJECT)[[:space:]]+$head[[:space:]]*$"; then
@@ -281,30 +477,31 @@ or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line
   body="$(printf '%s\n' "$report" | grep -Ev '^[[:space:]]*VERDICT:' | tr -d '[:space:]')"
   [ "${#body}" -ge "$REPORT_FLOOR" ] || die "verdict came with under $REPORT_FLOOR characters of analysis; treated as malformed (empty-report); output kept at $out"
   reviewer_event_publish_report stepfun "$out" || die "review evidence could not be made durable; output kept at $out"
-  rm -f "$identity"
+  rm -f "$identity"; rm -rf "$work"; REVIEW_WORK=""
   cat "$out"
   note "report saved: $out (model $MODEL, head $head)"
 }
 
-# ask [--repo DIR] PROMPT: second-opinion turn with the same read-only tools.
+# ask [--repo DIR] PROMPT: second-opinion turn with the same disposable-copy tools.
 cmd_ask(){
   local repo="." out tmp copy before after
   [ "${1:-}" != --repo ] || { repo="${2:?--repo needs a value}"; shift 2; }
   [ "$#" -gt 0 ] || die 'ask needs a prompt.'
-  require_platform
+  require_engine
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   load_key
   REVIEW_REPO="$repo"; REVIEW_TAG="stepfun-ask-$$"
   trap cleanup_copy EXIT
   copy="$("$SANDBOX_BIN" ensure-copy "$repo" "$REVIEW_TAG")" || die 'could not build the disposable copy.'
   REVIEW_COPY="$copy"
-  before="$("$SANDBOX_BIN" digest "$copy")"
+  before="$("$SANDBOX_BIN" digest "$repo")"
   mkdir -p "$STATE_DIR"; tmp="$(mktemp -d "$STATE_DIR/ask.XXXXXX")"; out="$tmp/out"
-  if ! run_step_retry "$copy" "$out" "Read-only consultation; never change files. $*" "$READ_ONLY_TOOLS" || ! [ -s "$out" ]; then
+  STEPFUN_OC_AGENT="$OC_AGENT_REVIEW"
+  if ! run_step_retry "$copy" "$out" "Consultation in a disposable, remote-less copy of the repository: you may run code and tests and edit files here; edits are discarded and are not part of any PR. Never commit, push, or touch any remote. $*" "$WRITE_TOOLS" write || ! [ -s "$out" ]; then
     credit_stop "$out"; die 'StepFun request failed.'
   fi
-  after="$("$SANDBOX_BIN" digest "$copy")"
-  [ "$before" = "$after" ] || die 'the disposable copy changed during a read-only consultation; answer rejected.'
+  after="$("$SANDBOX_BIN" digest "$repo")"
+  [ "$before" = "$after" ] || die "the caller's checkout changed during the consultation; answer rejected."
   if grep -q '^4[0-9][0-9]: {' "$out"; then credit_stop "$out"; die "StepFun returned an error: $(head -c 300 "$out")"; fi
   cat "$out"; rm -rf "$tmp"
 }
@@ -326,7 +523,7 @@ cmd_implement(){
     *) die "implement: unknown argument $1" ;;
   esac; done
   [ -n "$prompt" ] || die 'implement needs --prompt or --prompt-file.'
-  require_platform
+  require_engine
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   base="$(git -C "$repo" rev-parse --verify "$ref^{commit}")" || die "ref does not resolve: $ref"
   load_key
@@ -344,6 +541,7 @@ cmd_implement(){
   git -C "$wt" checkout -q -b "$branch" "$base" || die 'could not check out the base in the implementation clone.'
   [ -z "$(git -C "$wt" remote)" ] || die 'implementation clone still has a remote; refusing to run.'
   out="$STATE_DIR/reports/impl-$id.md"
+  STEPFUN_OC_AGENT="$OC_AGENT_IMPLEMENT"
   if ! run_step "$wt" "$out" "You are implementing a change in this git checkout (branch $branch, based on $base). You may read, edit, write files and run commands, but stay inside this directory, do not commit, push, or touch any remote, and never print secrets. Task:
 
 $prompt
@@ -364,13 +562,13 @@ When done, summarise what you changed and which commands you ran and their resul
 usage(){
   cat <<'EOF'
 ai-stepfun review [--repo DIR] [--base REF] [--assert-head SHA] --prompt TEXT|--prompt-file FILE
-                                                                 formal read-only review ending in VERDICT: <APPROVE|REVISE|REJECT> <head>
-ai-stepfun ask [--repo DIR] PROMPT                               read-only second opinion
+                                                                 formal review (disposable writable copy) ending in VERDICT: <APPROVE|REVISE|REJECT> <head>
+ai-stepfun ask [--repo DIR] PROMPT                              second opinion (disposable writable copy)
 ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
                                                                  write and run code in a new remote-less clone (never commits)
-ai-stepfun doctor [--live]                                        install, version floor, key store (and one live call)
-ai-stepfun store-key [--if-missing]                               refresh the protected key store from 1Password
-Ubuntu/Linux only.
+ai-stepfun doctor [--live]                                       install, engine, key store (and one live call)
+ai-stepfun store-key [--if-missing]                              refresh the protected key store from 1Password
+Engine: StepCode CLI where installed, otherwise OpenCode; Ubuntu/Linux only, always under bubblewrap.
 EOF
 }
 
@@ -379,7 +577,7 @@ case "${1:-}" in
   ask) shift; cmd_ask "$@" ;;
   implement) shift; cmd_implement "$@" ;;
   doctor) shift; cmd_doctor "$@" ;;
-  store-key) shift; require_platform; cmd_store_key "$@" ;;
+  store-key) shift; cmd_store_key "$@" ;;
   --version) printf 'ai-stepfun %s\n' "$VERSION" ;;
   -h|--help) usage ;;
   *) usage >&2; exit 2 ;;

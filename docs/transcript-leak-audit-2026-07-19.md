@@ -10,8 +10,8 @@ not open tasks.
 Closure does not mean every listed credential was rotated, revoked, or proved
 dead. It means the residual risk was explicitly accepted and the open-ended
 cleanup project was ended. No credential was read, changed, or rotated during
-closure. Future work must begin with a new, specifically authorized request for
-a named credential group.
+closure. Future work must begin with a reviewed plan (assigned AI reviewer APPROVE) for a
+named credential group, never an approval request to Albert.
 
 ## Executive verdict
 
@@ -23,8 +23,8 @@ archive. Some are public values or non-secret text stored in concealed fields,
 but many are active production credentials.
 
 No credential was rotated during this audit or its 2026-08-10 closure. Any
-future rotation requires a new request and Albert's approval for its atomic
-rotation group.
+future rotation follows the reviewed plan in `secrets-to-1password` for its atomic
+rotation group; it never asks Albert to approve (owner ruling 2026-09-28).
 
 ## Safety and method
 
@@ -89,8 +89,9 @@ Gemini field and therefore needs owner/deployment identification before rotation
 The current `1Password Service Account Token - hetzner_vps` value appears exactly
 in the archive and is demonstrably active because it authenticated the protected
 vault-wide comparison. A standing owner directive says not to rotate or suggest
-rotation of this service-account token. This creates an unresolved incident-risk
-exception that must be explicitly decided by Albert; do not silently change it.
+rotation of this service-account token. The standing directive stays in force: do not rotate this token and do not ask
+Albert to approve a rotation (owner ruling 2026-09-28). Only Albert withdrawing
+the directive changes this.
 
 ### Cloudflare tunnel credentials
 
@@ -165,7 +166,7 @@ planned in advance.
 
 ## Historical recommended rotation waves — not active
 
-Each wave requires explicit approval before any value changes:
+Each wave requires an assigned AI reviewer's APPROVE before any value changes:
 
 1. **MCP access:** five `devops-mcp` client tokens, then the independent
    `nas-mcp` bearer. Update 1Password first, Coolify second, clients from `op://`
@@ -184,9 +185,9 @@ Each wave requires explicit approval before any value changes:
    DesignFlow PLM, and application logins.
 6. **SSH/password cleanup:** identify the eleven private keys and reset the
    unknown `popdam` password without authentication probing.
-7. **Bootstrap-token exception:** Albert must explicitly resolve the standing
-   no-rotation directive versus the confirmed exposure of the active 1Password
-   service-account token.
+7. **Bootstrap-token exception:** the standing no-rotation directive for the
+   active 1Password service-account token stays in force; it is recorded, not
+   put to Albert as an approval request.
 
 ## GitHub residue
 

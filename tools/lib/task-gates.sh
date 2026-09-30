@@ -127,7 +127,7 @@ tg_identity_match() {
 # It runs BEFORE any provider process starts and before any call is spent, so a
 # task whose real change set does not match its declared class costs nothing.
 #
-#   tg_preflight_gate <action> [--owner-request TEXT] [--acknowledge TEXT]
+#   tg_preflight_gate <action> [--reviewer-approval REPORT] [--acknowledge TEXT]
 #
 # Returns 0 to proceed. Returns the engine's own status (3 blocked,
 # 4 cannot classify) after printing its explanation on stderr. A gate that is

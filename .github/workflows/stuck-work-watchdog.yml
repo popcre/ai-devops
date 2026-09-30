@@ -1,0 +1,75 @@
+name: Stuck-work watchdog
+
+# Finds pull requests in popcre/shared-db and popcre/ai-devops that are red
+# (or ejected from the merge queue) with no owner action for 30 minutes
+# (popcre/ai-devops#1011; design: shared-db docs/plans/plan_stuck_work_watchdog.md).
+# ai-devops: re-runs a quota/runner-loss failure once per head SHA, otherwise
+# opens one stuck-fixer issue per PR. shared-db: one sticky comment per stuck
+# PR per head SHA on the PR itself (fetched assignee @-mentioned when set);
+# never re-runs, never opens a fixer issue, never touches a marker issue.
+# Albert gets one daily "Stuck work - <date>" issue for items stuck > 90 min.
+#
+# Scheduled from ai-blocker-watch (see `on:` below). Identity and allowance: the pop-ai-watchers GitHub App (its own
+# hourly allowance, bot login distinct from every session); the job token is
+# used only to re-run ai-devops jobs. One run costs about 20 API calls.
+# Rollback: disable this workflow.
+on:
+  # No `schedule:` on purpose: GitHub dropped most scheduled runs in this
+  # repository (hourly crons fired every 4-7 hours on 2026-09-28/29), and the
+  # first four 15-minute slots after this workflow merged never ran. The
+  # 15-minute cadence runs from ai-blocker-watch tick on fixer_on_host
+  # (config/blocker-watch.json, stuck_watchdog_*); this workflow stays for
+  # manual dry runs and manual live runs.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: List stuck PRs and planned actions without writing anything
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: stuck-work-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Find and route stuck pull requests
+    if: github.repository == 'popcre/ai-devops'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Run the watchdog
+        env:
+          POP_AI_WATCHERS_KEY: ${{ secrets.POP_AI_WATCHERS_KEY }}
+          RERUN_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run && 'yes' || 'no' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$POP_AI_WATCHERS_KEY" ]; then
+            echo "::error::secret POP_AI_WATCHERS_KEY is missing; the watchdog cannot run"
+            exit 1
+          fi
+          export AI_GH_APP_DIR="$RUNNER_TEMP/github-app"
+          mkdir -p "$AI_GH_APP_DIR" && chmod 700 "$AI_GH_APP_DIR"
+          printf '%s\n' "$POP_AI_WATCHERS_KEY" > "$AI_GH_APP_DIR/pop-ai-watchers.pem"
+          chmod 600 "$AI_GH_APP_DIR/pop-ai-watchers.pem"
+          GH_TOKEN="$(bin/ai-gh-app-auth token popcre)"
+          echo "::add-mask::$GH_TOKEN"
+          export GH_TOKEN
+          args=(--json "$RUNNER_TEMP/stuck-report.json")
+          [ "$DRY_RUN" = yes ] && args+=(--dry-run)
+          node tools/stuck-work/watchdog.mjs "${args[@]}"
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stuck-report
+          path: ${{ runner.temp }}/stuck-report.json
+          retention-days: 14
+          if-no-files-found: ignore

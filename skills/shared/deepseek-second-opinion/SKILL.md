@@ -1,6 +1,6 @@
 ---
 name: deepseek-second-opinion
-description: Rotation reviewer since 2026-09-23 (DeepSeek V4.1 Flash, model pin deepseek-flash, read-only repository tools) and a second-opinion debater. Take formal reviews only when the allocator assigns DeepSeek. Debate a plan, diagnosis, design, diff, or configuration with DeepSeek through ai-deepseek-agent. Use for "ask DeepSeek", "run this by DeepSeek", "what does DeepSeek think", "debate DeepSeek", or a DeepSeek second opinion. Report its view and push back when needed.
+description: Rotation reviewer since 2026-09-23 (DeepSeek V4.1 Flash, model pin deepseek-flash, repository tools over a disposable remote-less copy) and a second-opinion debater. Take formal reviews only when the allocator assigns DeepSeek. Debate a plan, diagnosis, design, diff, or configuration with DeepSeek through ai-deepseek-agent. Use for "ask DeepSeek", "run this by DeepSeek", "what does DeepSeek think", "debate DeepSeek", or a DeepSeek second opinion. Report its view and push back when needed.
 ---
 
 # deepseek-second-opinion
@@ -20,7 +20,8 @@ one anchored on the first is worth nothing. The value is in genuine
 independence, then genuine argument.
 
 To have DeepSeek actually write and commit code, use `deepseek-code-delegation`
-(the `ai-deepseek` OpenCode harness). This skill stays read-only.
+(the `ai-deepseek` OpenCode harness). Here DeepSeek may run code and edit files
+only in a per-turn disposable copy; nothing it changes reaches your checkout or the PR.
 
 ## Trigger phrases
 
@@ -70,10 +71,15 @@ literal `## Verdict` section with `APPROVE`, `REJECT`, or `BLOCKED`, and writes 
 metadata sidecar bound to the session and exact Git HEAD. It refuses before
 provider contact when no Git commit can be resolved.
 
-**DeepSeek reads the repository through read-only tools.** Inside a Git
-repository it gets `list_dir`, `read_file`, and `grep`, confined to the
-repository root and bounded by `DEEPSEEK_TOOLS_MAX_CALLS`, `_MAX_ROUNDS`, and
-`_MAX_WALL`. The review metadata records `repository_access` and
+**DeepSeek works in a disposable copy of the repository.** Each tool turn
+gets a fresh remote-less copy (the exact-head review snapshot for `--review`, a
+clone of your checkout plus uncommitted edits for `--repo-tools`), deleted when
+the turn ends. Tools: `list_dir`, `read_file`, `grep`, `write_file`, and
+`run_command` (bubblewrap: only the copy is writable, no network, cleared
+environment, no credentials; refused if bwrap is missing). Your checkout, the
+PR branch, and the evidence snapshot are never touched. Bounded by
+`DEEPSEEK_TOOLS_MAX_CALLS`, `_MAX_ROUNDS`, `_MAX_WALL`, and
+`DEEPSEEK_TOOLS_RUN_SECONDS`. The review metadata records `repository_access` and
 `evidence_scope` (`repository-read-tools` or `attached-materials-only`), so a
 verdict states which evidence it rested on. Tool calls the model leaks as DSML
 markup in its message text are recovered and run; unparseable markup is never

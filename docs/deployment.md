@@ -127,12 +127,11 @@ candidate at its current HEAD and a separate reviewer candidate at the exact
 merged target. From the installation candidate, run the target worktree's
 reviewed gate with `start --class installation`, then advance only that
 candidate to the target commit. Declare the separate reviewer candidate as
-`reviewer-safety` and obtain its read-only exact-head independent `APPROVE`
-review.
+`reviewer-safety` and obtain its read-only exact-head independent `APPROVE` review.
 Run `ai-task-gates authorize-install --target-head <full SHA>
 --installed-checkout <canonical checkout> --installed-launcher <managed
 ai-task-gates launcher> --review-report <exact-head APPROVE report>
---owner-request '<host, action, and Albert authorization>'`. On Windows, pass
+--reviewer-approval <exact-head APPROVE report>`. On Windows, pass
 the managed extensionless launcher; on Ubuntu, pass its symlink. This separate
 installation task leaves `check --before deploy` forbidden for a reviewer-safety
 change. The authorization binds the candidate, review, installed checkout,
@@ -158,17 +157,21 @@ authorization before runner setup, WinGet configuration, provider installs,
 remote access, or machine setup, including with `-SkipMachineSetup`.
 Direct `setup-machine.ps1` and the legacy developer-computer launcher use
 the same pinned source gate before their package and configuration work.
+After a launcher write is interrupted, the normal installer first restores
+the exact recorded prior launcher and PATH state under its installation lock,
+then checks the pending one-use authority. A changed launcher or PATH stops
+the retry for manual repair.
 The source-only gate retains a pending authorization until the full
 installer finishes and refreshes the managed command launchers; a failed full
 installation can retry against the same pinned target. Legacy launchers
 without a receipt need the same one-time path. If both managed gate launchers
 are absent, use `authorize-install --first-install` with a separate exact-head
-review whose approved report names `first-managed-install`. This applies even
+review whose approved report contains the exact line `Approved first-managed-install.`. This applies even
 to a newly cloned checkout: a clone reflog does not establish installation
 history. If another managed launcher remains, or just one gate launcher remains,
 use `authorize-install
 --recover-launchers` with a review naming
-`partial-managed-launcher-recovery`. The authority records hashes for every
+`Approved partial-managed-launcher-recovery.`. The authority records hashes for every
 present managed launcher, exact absence of the missing gate launcher files,
 and the installed gate source hash. The installer checks them again before
 writing either file.
@@ -178,7 +181,7 @@ update must be followed by a full install before beginning another release.
 If a legacy four-line launcher already points at an unchanged current-main
 checkout, use the explicit `authorize-install --legacy-migration` route. The
 independent exact-head review must examine the full target source and the
-`legacy-managed-launcher-refresh` operation; its approved report must name that
+`legacy-managed-launcher-refresh` operation; its approved report must contain the exact line `Approved legacy-managed-launcher-refresh.` for that
 operation. The one-use authority records hashes of both launcher files and
 the installed gate source, which the installer checks again before refreshing
 the launcher receipt. This route refuses launchers that already have a receipt.
@@ -190,11 +193,11 @@ first rollout uses the reviewed gate from the target worktree, so an older
 installed gate does not need to understand these new options.
 
 For a first Ubuntu installation at an unchanged commit, start a separate clean
-installation task and obtain an independent read-only `APPROVE` for the exact
+installation task and obtain an assigned AI reviewer's read-only `APPROVE` for the exact
 target source and `first-managed-install` operation. From that task's exact
 target worktree, issue `authorize-install --first-install` with the target SHA,
 canonical checkout, `/usr/local/bin/ai-task-gates` launcher, approved report,
-and owner request; then invoke the target `install.sh`. The canonical launcher
+and the same report as `--reviewer-approval`; then invoke the target `install.sh`. The canonical launcher
 and manifest must be absent before authorization. Both Ubuntu and Windows
 first installation require the reviewed one-use authority. For a
 same-source maintenance reinstall, omit `--first-install`: the check requires
@@ -272,25 +275,40 @@ Both installers implement the same engine, and `tests/test-installer-parity.sh`
 proves it: same file set, byte-identical markers, and a refresh with one after
 an install by the other reports "up to date" rather than inventing local edits.
 
+## Reviewer approval (no human approvals)
+
+Owner ruling 2026-09-28 (#996): no human approves anything. Every gate that
+once took an owner request now takes `--reviewer-approval <report>`: the report
+of an AI reviewer run through `ai-review`. The gate accepts it only when the
+reviewer lifecycle recorded that exact report (path and SHA-256) as a completed,
+non-stale `APPROVE` for this repository, the exact head, and the exact source
+digest, by a provider different from the implementing engine that
+`ai-review` recorded (`--implementer ENGINE`, else `AI_IMPLEMENTER_ENGINE`,
+else detected for Claude Code and Codex; a row without one cannot lift a gate). An
+install, deploy, or other live action needs a `final-check` or
+`security-review` report; `review`, `pr-wait`, and `code-only-review` also
+accept an ungated `plan-review`. A protected class's forbidden actions still
+have no approval path.
+
 ## Update
 
 ```bash
 cd /worksp/ai-devops
-./update.sh --owner-request '<specific approved action>'
+./update.sh --reviewer-approval <exact-head APPROVE report>
 ```
 
 `update.sh` never overwrites `/etc/ai-devops/*.env`. It returns nonzero if the
 installer has any required failure and reports the exact source SHA attempted.
 
-On Linux, `update.sh --expected-head <full-merged-SHA> --owner-request
-'<specific approved action>'` pins a protected update before the installed
+On Linux, `update.sh --expected-head <full-merged-SHA> --reviewer-approval
+<exact-head APPROVE report>` pins a protected update before the installed
 checkout moves. The **first** protected rollout must invoke the merged target
 script from a clean, exact-SHA worktree sharing the installed checkout's Git
 common directory:
 
 ```bash
 cd /worksp/ai-devops-candidate
-./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA> --owner-request '<specific approved action>'
+./update.sh --installed-checkout /worksp/ai-devops --expected-head <full-merged-SHA> --reviewer-approval <exact-head APPROVE report>
 ```
 
 The updater verifies the candidate and installed checkout relationship, fetches
@@ -299,7 +317,7 @@ candidate, runs its gate, then advances only the named
 installed checkout. Later updates can run from the installed checkout itself.
 `install.sh` checks the same pending authorization before its first machine
 change, including when called directly. Same-source maintenance uses
-`./install.sh --owner-request '<specific approved action>'`; a protected source
+`./install.sh --reviewer-approval <exact-head APPROVE report>`; a protected source
 change cannot use that route. One checkout lock covers the update and install.
 The installer saves protected config, the manifest, managed launcher targets,
 the user crontab, and the protected configuration checkout's commit before it
@@ -316,7 +334,7 @@ before the one-use authorization can be consumed.
 
 If the installed Linux manifest names an older source SHA than the live clean
 checkout, the independent exact-head report must explicitly name
-`stale-linux-manifest-recovery` and bind the stale manifest SHA and file hash
+`Approved stale-linux-manifest-recovery.` and bind the stale manifest SHA and file hash
 plus the live installed SHA and gate hash. The separate installation task then
 uses `authorize-install --stale-manifest-recovery` for one pinned target update.
 Without that exact reviewed evidence, the updater stops before changing the

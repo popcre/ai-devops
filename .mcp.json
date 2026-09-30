@@ -1,8 +1,10 @@
 {
   "mcpServers": {
     "context7": {
-      "command": "npx",
+      "command": "node",
       "args": [
+        "bin/mcp-session-guard.mjs",
+        "npx",
         "-y",
         "@upstash/context7-mcp@latest"
       ]

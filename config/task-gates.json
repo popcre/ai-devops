@@ -12,7 +12,7 @@
     "one. See docs/context-spec.md for the full contract.",
     "",
     "code-only-review is the sealed attachment-only route (bin/ai-review --code-only):",
-    "the only review action a private class may start without an owner request.",
+    "the only review action a private class may start without a reviewer approval.",
     "It refuses to start on a private class unless that repository's own",
     ".ai-devops/task-gates.json declares the synthetic-fixtures-only gate for",
     "that class, so opening the route is each private repository's own reviewed",
@@ -50,7 +50,7 @@
     "installation": {
       "rank": 25,
       "protected": false,
-      "description": "Toolkit installers, machine setup, and local command catalogs requiring an explicit owner request before installation."
+      "description": "Toolkit installers, machine setup, and local command catalogs requiring an assigned AI reviewer's exact-head APPROVE before installation."
     },
     "reviewer-safety": {
       "rank": 30,
@@ -183,7 +183,7 @@
       "installation": {
         "required": [
           "local-tests",
-          "owner-authorization"
+          "assigned-ai-reviewer-approval"
         ],
         "forbidden_actions": [
           "deploy",
@@ -221,7 +221,7 @@
           "local-tests",
           "shared-db-branch-and-pr",
           "target-identity-proof",
-          "orchestrator-claim"
+          "claim-admission"
         ],
         "forbidden_actions": [
           "deploy",
@@ -232,7 +232,7 @@
       "deployment": {
         "required": [
           "local-tests",
-          "owner-authorization"
+          "assigned-ai-reviewer-approval"
         ],
         "forbidden_actions": [
           "database",
@@ -243,7 +243,7 @@
       "infrastructure": {
         "required": [
           "local-tests",
-          "owner-authorization",
+          "assigned-ai-reviewer-approval",
           "read-only-by-default"
         ],
         "forbidden_actions": [
@@ -253,7 +253,7 @@
       },
       "production": {
         "required": [
-          "exact-resource-and-action-authorization"
+          "exact-resource-and-action-ai-reviewer-approval"
         ],
         "forbidden_actions": []
       },
@@ -606,7 +606,7 @@
       "gates": {
         "infrastructure": {
           "required": [
-            "exact-resource-and-action-authorization"
+            "exact-resource-and-action-ai-reviewer-approval"
           ],
           "forbidden_actions": [
             "production"
@@ -633,7 +633,7 @@
       "gates": {
         "infrastructure": {
           "required": [
-            "exact-resource-and-action-authorization"
+            "exact-resource-and-action-ai-reviewer-approval"
           ],
           "forbidden_actions": [
             "production"

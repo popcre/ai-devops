@@ -14,6 +14,9 @@ access to the planning chat.
 If the implementer would have to ask the planner a single question, that
 question's answer belongs in the plan. Default to TOO MUCH: a long plan costs
 minutes of reading; a thin plan costs a whole session and a wrong build.
+The bar exists so ANY session — including a lower-tier implementer chosen
+later — can execute the plan: plans never name their implementer, and routing
+lives in [`model-tier-delegation.md`](model-tier-delegation.md).
 
 Above all: **state the ultimate goal first, in plain business English.** When a
 step turns out to be wrong — and on real work some step always is — the goal is
@@ -154,11 +157,12 @@ a specific missing checklist item — fix exactly that, re-grade, answer "Yes."
   **33** behaviour tests, and it was a pull-request description rather than a run. The
   figure was wrong, relabelled in transit, and unsourced at every hop. No CI check can
   catch that class; only citing the artifact can.
-- **A STATUS row that is "code landed, not accepted" names exactly one live-proof
-  owner issue, opened when that code landed.** Do not point several unproven steps
-  at one issue. Do not open a bundle of leftover proofs later for a later chat.
-  The session that merged the code either proves it live or files that one
-  leftover-proof issue before it ends.
+- **A STATUS row that is "code landed, not accepted" leaves a checklist item on
+  the same GitHub issue when that code landed.** Live proof is required before
+  an outcome is closed. If live proof is not yet done, leave a checklist item on
+  the **same** issue (e.g. `- [ ] live proof`) and name it in the session's
+  closing note. Do **not** open a leftover-proof issue, an "unproven step"
+  issue, or a second ticket for that gap.
 - **Executing part of a plan makes the rest of it lie.** Whoever does the work updates
   the plan in the same session — the `session-docs-update` / `codex-docs-update` skills
   carry a mandatory plan-file gate: de-stale the "current state of the code" section,

@@ -22,16 +22,23 @@ pipeline. The recovery procedure lives in
 - This repository is public. Never open or commit raw transcript `.jsonl`,
   licensed data, secrets, or private artifacts. The private `transcripts/`
   submodule and ignored chat archives stay outside normal AI context.
-- Production and shared cloud infrastructure are read-only by default. Do not
-  run `terraform apply`, `terraform destroy`, or mutating production `gcloud`
-  commands without Albert naming the exact action and resource in this chat.
+- Production and shared cloud infrastructure are read-only by default. Run `terraform apply`,
+  `terraform destroy`, or mutating production `gcloud` commands only with the
+  assigned AI reviewer's explicit APPROVE of the exact action and
+  resource; never ask Albert to approve (owner ruling 2026-09-28). Where
+  `ai-task-gates` asks for approval, pass `--reviewer-approval <report>`: the
+  assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
+  that review with `ai-review --implementer <your engine>` unless you are Claude
+  Code or Codex.
   The sole exception is the separately activated `shared-db` automatic migration
   workflow after exact structural admission, guarded merge, and merged-main
   preview proof; it authorizes no manual production command or other infrastructure
   mutation and fails closed to an engineer on any absent or ambiguous evidence.
 - Shared-database STRUCTURE changes are authored in `popcre/shared-db` through
-  its branch-and-PR workflow. Load the matching shared-db skill before acting;
-  application rows remain owned by the application.
+  its branch-and-PR workflow. Claim-first is the default: claim exact objects on
+  the existing issue and start — no orchestrator chat or marker. Load the
+  matching shared-db skill before acting; application rows remain owned by the
+  application.
 - Installation changes can write outside the repository. Read
   [`docs/deployment.md`](docs/deployment.md) before changing install, update,
   uninstall, symlink, or machine-setup behavior.
@@ -42,7 +49,7 @@ pipeline. The recovery procedure lives in
 - Declare what the task is before starting it: `ai-task-gates start --class
   <class>`. The reviewer lifecycle, `bin/ai-pr-wait`, and `bin/ai-review`
   recheck the real change set first and refuse an action the work does not
-  call for. A protected class cannot be acknowledged or owner-requested away;
+  call for. A protected class cannot be acknowledged or reviewer-approved away;
   the honest way past one is to redeclare the task at the stronger class and
   then do what that class actually requires.
 - Wait on CI through **bounded, event-aware** tools.
@@ -54,9 +61,10 @@ pipeline. The recovery procedure lives in
   migrated; other waits use `bin/ai-gh-wait`. At most one
   GitHub call every 5 minutes per waiter; never `gh run watch`, and never an
   open-ended `until`/`while` loop around `gh` — every wait needs a deadline or
-  iteration cap (#401). Any wait that may exceed ~10 minutes is REGISTERED with
-  `ai-blocker-watch wait` and the turn ends; polling is the exception for short
-  waits (#723, `docs/standing-rules-details.md`).
+  iteration cap (#401). For a wait that may exceed ~10 minutes, use bounded
+  `ai-pr-wait` while you remain in the turn; otherwise leave the existing
+  issue or pull request as the card and return later — GitHub notifications
+  are the reminder.
 - Reuse before adding another plan, workflow, harness, or provider copy. Every
   new shared artifact needs an owner, a reason the
   shared home cannot serve the need, and a retirement or consolidation path.
@@ -81,7 +89,8 @@ pipeline. The recovery procedure lives in
 | ZCode for Windows client support (skills, MCP, hooks, wrapper) | [ZCode Windows support plan](plan_zcode-windows-support.md) STATUS, [issue #558](https://github.com/popcre/ai-devops/issues/558) | Follow the Claude/Codex per-client pattern; never edit vendor bytes under `C:\Program Files\ZCode`; NO ZCode reviewer ever (owner ruling 2026-09-17: GLM never reviews GLM-orchestrated work) |
 | MiMo / MiMoCode for Windows client support (skills, MCP, wrapper) | [MiMo Windows support plan](plan_mimo-windows-support.md) STATUS | Follow the Claude/Codex/ZCode per-client pattern; skills write root is `~/.config/mimocode/skills/` only; MCP `command` is an array and timeout key is `timeout`; NO MiMo reviewer; no completion-check hook (no hook surface) |
 | Shared-db delivery delay or orchestrator throughput | [`plan_shared-db-complete-throughput-repair.md`](plan_shared-db-complete-throughput-repair.md) STATUS (closed #401 decision record) | Preserve the proven request-to-live safeguards; route new defects to new issues rather than reopening the programme |
-| Bundled leftover live proofs, one chat given several unproven steps, or proofs saved for a later chat | [`plan_live-proof-session-sizing.md`](plan_live-proof-session-sizing.md) STATUS | One unproven outcome per session; never save several unproven steps for later; do not steal remaining 3027 proofs |
+| Delete shared-db coordination layer (C by deletion) | [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md) STATUS | Keep claims/leases/review/live proof; delete leftover-proof mill, required orchestrator role, chat conductor; never path-filter required checks; do not reopen #401 |
+| Bundled leftover live proofs, one chat given several unproven steps, or proofs saved for a later chat | [`plan_live-proof-session-sizing.md`](plan_live-proof-session-sizing.md) STATUS | Live proof is required before an outcome is closed; leave a checklist item on the same issue — never a leftover-proof ticket |
 | Combined reviewer reliability and cache/session qualification | [`plan_reviewer-reliability-and-efficiency.md`](plan_reviewer-reliability-and-efficiency.md) STATUS | Reuse existing provider work; no completion without installed evidence |
 | TypeSafe Jev evaluation or advisory integration | [`plan_typesafe-jev-decision-layer.md`](plan_typesafe-jev-decision-layer.md) STATUS, then [`plan_typesafe-jev-advisory-integrations.md`](plan_typesafe-jev-advisory-integrations.md) STATUS and [issue #643](https://github.com/popcre/ai-devops/issues/643); for measured token substitution read [`plan_typesafe-jev-spend-reduction.md`](plan_typesafe-jev-spend-reduction.md) STATUS | Public-data pilots first; Jev never opens a gate, mutates authoritative state, or replaces review; key via `op run` only |
 | Review-packet race (target moved forward), slow review evidence, or adversarial-case planning | [review-packet race and evidence speed plan](plan_review-packet-race-and-evidence-speed.md) STATUS | Only the target-ref tip check gains ancestry tolerance; HEAD/digest/merge-base stay strict; never delete a guarded packet test — re-scope it |

@@ -147,12 +147,57 @@ rm -f "$TMP/state/quota"
 FAKE_MODE=quota FAKE_REMAINING=3000 AI_GH_QUOTA_PROBE_SECONDS=300 "$GH" pr view 2 > "$TMP/qout" 2>/dev/null; rc=$?
 check 'mixed CLI cost is unknown and its resource snapshots are invalidated' "[ $rc -eq 0 ] && grep -q 'out:pr view 2' '$TMP/qout' && grep -q '^0 3000 5000 ' '$TMP/state/quota' && grep -q '^0 3000 5000 ' '$TMP/state/quota.graphql'"
 check 'telemetry observes named server buckets with a private principal label' "jq -e '.buckets.core.remaining == 3000 and .buckets.graphql.remaining == 3000 and .buckets.search.remaining == 30 and (.principal | startswith(\"local-sha256:\"))' '$TMP/state/quota-observation.json'"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # The runner's short-TEMP ACL varies by host. The protected positive
+    # fixture below proves attribution; this one may safely be unattributed.
+    check 'Windows quota context is validated or unattributed' "jq -e '.access_context | if . == null then true else test(\"^v1:[0-9a-f]{64}$\") end' '$TMP/state/quota-observation.json'"
+    ;;
+  *) check 'verified quota snapshot binds to an opaque local access context' "jq -e '.access_context | strings | test(\"^v1:[0-9a-f]{64}$\")' '$TMP/state/quota-observation.json'" ;;
+esac
 # Git Bash on NTFS reports its inherited Windows ACL through synthetic modes;
 # POSIX hosts can additionally prove the file itself is mode 600.
 salt_check="[ \$(stat -c %a '$TMP/state/principal-salt') = 600 ]"
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) salt_check="[ -s '$TMP/state/principal-salt' ]";; esac
 check 'principal label uses a private local salt' "$salt_check && ! grep -R -q 55610577 '$TMP/state/measurements' '$TMP/state/quota-measurements'"
 check 'quota observations retain bounded history without another request' "jq -se 'length >= 1 and .[-1].buckets.graphql.remaining == 3000' '$TMP/state/quota-measurements/'*.jsonl"
+
+# One verified principal can hold distinct PATs. Quota snapshots must keep
+# their access contexts apart while the local context lookup makes no API call.
+context_log="$TMP/context-join-calls"; identity_log="$TMP/context-join-identity.log"
+context_state="$TMP/context-join-state"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Match the S2 Windows context tests: the state must be below the user's
+    # profile and have a private ACL before its first credential is read.
+    # Prepare a private parent first. A user profile may itself grant Modify
+    # to other SIDs, so EnsureCache must not be called directly below it.
+    context_root="$(mktemp -d "$HOME/ai-gh-context.XXXXXXXX")"
+    trap 'rm -rf "$TMP" "$context_root"' EXIT
+    context_state="$context_root/state"
+    CONTEXT_ACL_ROOT="$(cygpath -w "$context_root")" powershell.exe \
+      -NoProfile -NonInteractive -Command '$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; & icacls.exe "$env:CONTEXT_ACL_ROOT" /inheritance:r /grant:r ("*" + $sid + ":(OI)(CI)(F)") | Out-Null; exit $LASTEXITCODE' \
+      >/dev/null 2>&1; context_acl_rc=$?
+    powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+      -File "$(cygpath -w "$ROOT/tools/github-requests/secure-windows-path.ps1")" \
+      -Mode EnsureCache -Path "$(cygpath -w "$context_state")" >/dev/null 2>&1; context_setup_rc=$?
+    check 'Windows quota context fixture has a protected state directory' "[ $context_acl_rc -eq 0 ] && [ $context_setup_rc -eq 0 ] && [ -d '$context_state' ]"
+    ;;
+esac
+for token in ghp_fixtureA ghp_fixtureB; do
+  AI_GH_STATE_DIR="$context_state" FAKE_MODE=quota FAKE_REMAINING=4000 \
+    FAKE_TOKEN="$token" FAKE_LOG="$context_log" FAKE_IDENTITY_LOG="$identity_log" \
+    AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api repos/o/r >/dev/null 2>&1
+done
+check 'same-principal credentials retain two distinct quota access contexts' "jq -se 'length == 2 and (map(.access_context) | all(. != null)) and (map(.access_context) | unique | length == 2) and (map(.principal) | unique | length == 1)' '$context_state/quota-measurements/'*.jsonl"
+check 'local context lookup adds no GitHub API request' "[ \$(grep -c '^start' '$context_log') -eq 4 ] && [ \$(wc -l < '$identity_log') -eq 2 ]"
+check 'quota history contains no token or numeric principal' "! grep -Eq 'ghp_fixtureA|ghp_fixtureB|55610577' '$context_state/quota-measurements/'*.jsonl"
+
+AI_GH_STATE_DIR="$TMP/context-missing-state" FAKE_MODE=quota FAKE_REMAINING=4000 \
+  FAKE_TOKEN=ghp_fixtureC FAKE_IDENTITY_STATUS=1 FAKE_LOG="$TMP/context-missing-calls" \
+  AI_GH_QUOTA_PROBE_SECONDS=0 "$GH" api repos/o/r >/dev/null 2>&1; context_rc=$?
+check 'unverified identity leaves quota access context unattributed' "[ $context_rc -eq 0 ] && jq -e '.access_context == null and .principal == \"unknown\"' '$TMP/context-missing-state/quota-observation.json'"
+check 'unverified quota history contains no credential or principal' "! grep -Eq 'ghp_fixtureC|55610577' '$TMP/context-missing-state/quota-measurements/'*.jsonl"
 rm -f "$TMP/state/quota"; : > "$FAKE_LOG"
 FAKE_MODE=quota FAKE_REMAINING=900 AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_NO_WAIT=1 "$GH" pr view 3 >/dev/null 2>&1; rc=$?
 check 'budget below 20% pauses its resource without making the call' "[ $rc -eq 75 ] && ! grep -q 'pr view 3' '$FAKE_LOG' && [ \$(cat '$TMP/state/quota-pause.core') -gt \$(date +%s) ] && grep -q 'budget-pause remaining=900/5000' '$TMP/state/refusals.log'"
@@ -545,8 +590,10 @@ AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION=bw.snapshot "$GH" api repos/o/r >/
 check 'BlockerWatch fixed operation is recorded' "jq -se '.[-1].operation == \"bw.snapshot\" and .[-1].caller == \"ai-blocker-watch\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION='bw.snapshot\"injected' "$GH" api repos/o/r >/dev/null 2>&1
 check 'untrusted BlockerWatch operation cannot enter telemetry' "jq -se '.[-1].operation == \"api.unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
-AI_GH_CALLER=ai-merge-group-evidence "$GH" api repos/o/r >/dev/null 2>&1
-check 'merge proof source is retained in telemetry and report' "jq -se '.[-1].caller == \"ai-merge-group-evidence\"' '$TMP/telemetry-state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/telemetry-state/measurements' | jq -e 'any(.sources[]; .caller == \"ai-merge-group-evidence\")'"
+for caller in ai-merge-group-evidence ai-transcript-destination-check ai-workspace-status ai-reviewer-membership-drift; do
+  AI_GH_CALLER="$caller" "$GH" api repos/o/r >/dev/null 2>&1
+  check "$caller source is retained in telemetry and report" "jq -se '.[-1].caller == \"$caller\"' '$TMP/telemetry-state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/telemetry-state/measurements' | jq -e 'any(.sources[]; .caller == \"$caller\")'"
+done
 mkdir "$TMP/telemetry-state/measurements/write.lock"
 FAKE_STATUS=8 "$GH" pr checks 1 > "$TMP/tout" 2> "$TMP/terr"; rc=$?
 check 'telemetry failure is visible and preserves failed command status' "[ $rc -eq 8 ] && grep -q 'request measurement unavailable' '$TMP/terr' && cmp '$TMP/tout' '$TMP/expected-out'"
@@ -557,7 +604,69 @@ touch "$TMP/telemetry-state/measurements/2000-01-01.jsonl"
 "$GH" api graphql > /dev/null 2>/dev/null
 check 'telemetry retention removes only old owned date files' "[ ! -e '$TMP/telemetry-state/measurements/2000-01-01.jsonl' ] && jq -se '.[-1].bucket == \"graphql\" and .[-1].cli_executions == 1 and .[-1].principal == \"unknown\"' '$TMP/telemetry-state/measurements/'*.jsonl"
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
-check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 7 and .opaque_cli_executions == 7 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+check 'request_report_coverage_and_denominator' "[ $rc -eq 0 ] && jq -e '.records == 10 and .opaque_cli_executions == 10 and .http_requests == null and .graphql_points == null and (.acceptance | startswith(\"incomplete\")) and (.coverage_gaps | length) > 0' '$TMP/report'"
+source "$ROOT/tools/github-requests/telemetry.sh"
+workflow_id="$(gh_measure_workflow_id)"
+access_context="v1:$(printf '%064d' 0)"
+printf '%s' '{"data":{"rateLimit":{"cost":3,"remaining":4990,"resetAt":"2026-09-28T05:00:00Z"},"repository":{"private":"FIXTURE_CANARY"}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait "$workflow_id" upstream_refresh "$access_context"
+printf '%s' '{"data":{"rateLimit":{"cost":2,"remaining":4988,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait "$workflow_id" upstream_refresh "$access_context"
+printf '%s' '{"data":{"rateLimit":{"cost":9}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait "$workflow_id" cache_hit
+cache_rc=$?
+gh_measure_workflow_outcome ai-pr-wait pr_wait "$workflow_id" checks_failed 1234
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
+check 'GraphQL page costs link once to workflow and local reset headroom' \
+  "[ $rc -eq 0 ] && [ $cache_rc -eq 2 ] && jq -e '.records == 10 and .identity_probe_invocations >= 0 and .observed_graphql_cost_records == 2 and .linked_graphql_points == 5 and .completed_workflow_receipts == 1 and .observed_graphql_windows_local_only == [{\"context_ordinal\":1,\"reset_at\":\"2026-09-28T05:00:00Z\",\"records\":2,\"min_remaining\":4988,\"max_remaining\":4990,\"observed_points\":5}]' '$TMP/report' && ! grep -q '$access_context' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/telemetry-state/measurements'"
+printf '%s' '{"data":{"rateLimit":{"cost":4,"remaining":"bad","resetAt":"FIXTURE_CANARY"}}}' |
+  gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
+check 'legacy or malformed optional quota fields retain cost without false window' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_cost_records == 3 and .observed_graphql_points == 9 and .observed_graphql_window_records == 2' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/telemetry-state/measurements'"
+mkdir "$TMP/legacy-cost"
+printf '%s\n' '{"schema":2,"utc":"2026-09-28T05:00:00Z","measurement":"observed_graphql_cost","caller":"ai-pr-wait","operation":"graphql.pr_status","workflow":"pr_wait","workflow_id":null,"graphql_points":7,"http_requests":null}' > "$TMP/legacy-cost/2026-09-28.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/legacy-cost" > "$TMP/report"; rc=$?
+check 'older cost rows without quota window fields remain readable' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_points == 7 and .observed_graphql_window_records == 0' '$TMP/report'"
+
+# Regression: COST_SHAPES holds frozensets. A plain set never matched, so every
+# newly measured schema-2 cost row was rejected and the report refused to run.
+mkdir "$TMP/frozen-cost"
+printf '%s\n' '{"schema":2,"utc":"2026-09-28T05:00:00Z","measurement":"observed_graphql_cost","caller":"ai-pr-wait","operation":"graphql.pr_status","workflow":"pr_wait","workflow_id":null,"access_context":null,"graphql_points":7,"graphql_remaining":4900,"graphql_reset_at":"2026-09-28T06:00:00Z","http_requests":null}' > "$TMP/frozen-cost/2026-09-28.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/frozen-cost" > "$TMP/report"; rc=$?
+check 'new GraphQL cost rows remain reportable under exact key-set membership' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_cost_records == 1 and .observed_graphql_points == 7 and .observed_graphql_window_records == 0 and .unattributed_graphql_window_records == 1' '$TMP/report'"
+printf '%s' '{"data":{"rateLimit":{"cost":1,"remaining":4900,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  AI_GH_STATE_DIR="$TMP/unattributed-state" gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh 'ghp_FIXTURE_CANARY'
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/unattributed-state/measurements" > "$TMP/report"; rc=$?
+check 'unverified access stays unattributed and no token enters telemetry or report' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_window_records == 0 and .unattributed_graphql_window_records == 1 and .observed_graphql_windows_local_only == []' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/unattributed-state/measurements' && ! grep -q FIXTURE_CANARY '$TMP/report'"
+bw_id="$(gh_measure_workflow_id)"
+printf '%s' '{"data":{"rateLimit":{"cost":4,"remaining":4800,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_graphql_cost ai-blocker-watch graphql.open_issue_snapshot blocker_watch_tick "$bw_id" direct "$access_context"
+AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_workflow_outcome ai-blocker-watch blocker_watch_tick "$bw_id" completed 1000
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/bw-cost-state/measurements" > "$TMP/report"; rc=$?
+check 'BlockerWatch tick receipt links a direct snapshot cost' \
+  "[ $rc -eq 0 ] && jq -e '.linked_graphql_points == 4 and .completed_workflow_receipts == 1 and .workflow_outcomes[0].workflow == \"blocker_watch_tick\"' '$TMP/report'"
+printf '%s' '{"data":{"rateLimit":{"cost":2,"remaining":4798,"resetAt":"2026-09-28T05:00:00Z"}},"errors":[{"message":"fixture failure"}]}' |
+  AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_graphql_cost ai-blocker-watch graphql.open_issue_snapshot blocker_watch_alarm '' direct "$access_context"
+printf '%s' '{"data":{"rateLimit":{"cost":1,"remaining":4797,"resetAt":"2026-09-28T05:00:00Z"}}}' |
+  AI_GH_STATE_DIR="$TMP/bw-cost-state" gh_measure_graphql_cost ai-blocker-watch graphql.open_issue_snapshot blocker_watch_links '' direct "$access_context"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/bw-cost-state/measurements" > "$TMP/report"; rc=$?
+check 'standalone BlockerWatch reads remain separate from tick outcomes, including charged error responses' \
+  "[ $rc -eq 0 ] && jq -e '.observed_graphql_points == 7 and .linked_graphql_points == 4 and (.observed_graphql_cost_sources | any(.workflow == \"blocker_watch_alarm\" and .points == 2)) and (.observed_graphql_cost_sources | any(.workflow == \"blocker_watch_links\" and .points == 1))' '$TMP/report'"
+mkdir "$TMP/cost-only" "$TMP/outcome-only"
+printf '%s\n' '{"schema":2,"utc":"2020-01-01T00:00:00Z","measurement":"observed_graphql_cost","caller":"ai-pr-wait","operation":"graphql.pr_status","workflow":"pr_wait","workflow_id":null,"graphql_points":7,"http_requests":null}' > "$TMP/cost-only/2020-01-01.jsonl"
+printf '%s\n' '{"schema":3,"utc":"2021-01-01T00:00:00Z","measurement":"workflow_outcome","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","outcome":"checks_failed","elapsed_ms":1}' > "$TMP/outcome-only/2021-01-01.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/cost-only" > "$TMP/cost-report"; cost_rc=$?
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/outcome-only" > "$TMP/outcome-report"; outcome_rc=$?
+check 'cost-only and outcome-only reports retain their measurement time bounds' \
+  "[ $cost_rc -eq 0 ] && [ $outcome_rc -eq 0 ] && jq -e '.first_utc == \"2020-01-01T00:00:00Z\" and .last_utc == .first_utc' '$TMP/cost-report' && jq -e '.first_utc == \"2021-01-01T00:00:00Z\" and .last_utc == .first_utc' '$TMP/outcome-report'"
+jq -c '.access_context="FIXTURE_CANARY"' "$TMP/legacy-cost/2026-09-28.jsonl" > "$TMP/legacy-cost/2026-09-27.jsonl"
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/legacy-cost" > "$TMP/report" 2> "$TMP/report-error"; rc=$?
+check 'report rejects a non-opaque context without exposing it' \
+  "[ $rc -eq 1 ] && [ ! -s '$TMP/report' ] && ! grep -q FIXTURE_CANARY '$TMP/report-error'"
 mkdir "$TMP/report-compat"
 head -n 1 "$TMP/telemetry-state/measurements/$(date -u +%F).jsonl" > "$TMP/report-compat/$(date -u +%F).jsonl"
 for sample in "$TMP/state/measurements/"*.jsonl; do jq -c 'select(.operation == "api.identity")' "$sample" >> "$TMP/report-compat/$(date -u +%F).jsonl"; done
@@ -637,6 +746,8 @@ check 'quota observation rejects non-regular destination too' "[ $rc -eq 1 ] && 
 STATE="$TMP/named-row-state"; mkdir -p "$STATE"
 gh_measure_quota_rows $'future_resource\t9\t10\t30\nsearch\t7\t30\t40\ncore\t80\t100\t50\ngraphql\t61\t200\t60'
 check 'named quota telemetry ignores row order and extra resource names' "jq -e '.buckets.core.remaining == 80 and .buckets.graphql.remaining == 61 and .buckets.search.remaining == 7 and (.buckets|keys|length) == 3' '$STATE/quota-observation.json'"
+gh_measure_quota_rows $'graphql\t61\t200\t60' 'ghp_FIXTURE_CANARY'
+check 'malformed access context cannot enter a quota snapshot' "jq -e '.access_context == null' '$STATE/quota-observation.json' && ! grep -R -q 'FIXTURE_CANARY' '$STATE/quota-measurements'"
 gh_measure_quota_rows $'core\tbad\t100\t50\nsearch\t7\t30\t40\textra'
 check 'missing malformed and overlong quota rows remain unknown' "jq -e '.buckets.core == null and .buckets.graphql == null and .buckets.search == null' '$STATE/quota-observation.json'"
 

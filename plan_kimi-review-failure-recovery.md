@@ -717,7 +717,7 @@ artifacts; do not copy old pass counts into the STATUS table.
 2. **Private reports could leak sensitive review content.** Use user-only
    permissions, safe metadata, bounded redacted excerpts, and never commit the
    state directory. On suspected exposure, stop use and follow the secrets
-   incident process; do not rotate credentials without Albert's approval.
+   incident process; rotate credentials only through the reviewed plan in `secrets-to-1password`; never ask Albert to approve.
 3. **Retrieval could select the wrong same-name job.** Validate repository ID,
    caller, job ID, exact head, and artifact hash; ambiguity must refuse.
 4. **Mirroring could create duplicates or overwrite evidence.** One worker owns

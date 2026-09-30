@@ -1,14 +1,16 @@
 # Implementation plan — AI agents clean up after themselves
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** steps below that require a leftover-proof issue instead leave a proof-gap checklist item on the **same** issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Mentions of leftover-proof issues in this file are historical.
+
 | Step | Status | Evidence |
 |------|--------|----------|
 | 1. Shrink what a review copies | ✅ done — merged `af80fcf0f11b66f99fa794ad159b4b6f110eae2d` (PR #797, Muse APPROVE at exact head; bounded shallow snapshots, not files-only: the packet/lifecycle tools run git inside the snapshot, so a no-`.git` shape cannot work — `tests/test-ai-review-snapshot-bounded-history.sh`, `tests/test-ai-review-sandbox.sh` 108/108, packet 138/138) | real-worktree dry run: 15 MB / 13 commits / 17 s vs old full clone 461 MB / 1,206 commits / 63 s; a real Muse review of PR #797 ran entirely inside a bounded snapshot |
 | 2. Delete the copy when the review ends | ✅ done — merged `41f8e75ab4e2ad0a496547fffec427fe110ed956` (PR #823, Muse final APPROVE at exact head 6026815b): `with-copy` run wrapper in `bin/ai-review-sandbox` deletes on success/failure/abort via EXIT/INT/TERM trap; `AI_KEEP_SANDBOX=1` debugging exception; path-guarded delete unchanged; kimi start-failure paths release the snapshot (`tests/test-ai-review-sandbox-self-cleanup.sh` 22/22, `tests/test-ai-review-sandbox-delete-guard.sh` 9/9 + 4 symlink skips where `ln -s` is unavailable, `tests/test-ai-review-sandbox.sh` 108/108). Issue #802 one-line kimi refresh-copy base-hint fix landed here (`tests/test-ai-review-snapshot-bounded-history.sh` 23/23) | creating run deletes before returning; `AI_KEEP_SANDBOX=1` keeps |
 | 3. Parent process sweeps orphans | ✅ done — merged `dbe9637430f668ba0953dd907fea8c5e31fd0072` (PR #855, Muse final-check APPROVE at exact head e9f36a91, CI 20 pass/0 fail): `bin/ai-review-sandbox sweep-orphans` removes managed snapshots whose marker is >2 h old, at most 16 per run, through the same path-guarded evidence-checked delete the creating run uses (unreconciled-evidence orphans are retained and reported); wired once at the `bin/ai-review` front door, skipped under `AI_DEVOPS_TEST_MODE` so offline suites stay hermetic. An intermediate draft wired it into `ai-review-lifecycle begin` instead — that made every direct-wrapper suite sweep the real machine root and broke the local codex suite (18/32); reverted after clean-main and final-revision runs both proved codex 50/50. Step 3.2 (PID marker) deliberately deferred: the sandbox tool is short-lived so its PID dies at once and the rule would delete live session snapshots 15 min in; correct ownership needs a create-side change across the session wrappers (`tests/test-orphan-sweep-age.sh` 26/26: age rule, cap + overflow, evidence retention, unmarked/lock skip, `AI_KEEP_SANDBOX`, real `ensure-copy` aging, front-door wiring proof) | local (Git Bash): sandbox 108/108, self-cleanup 22/22, delete-guard 9/9, bounded-history 23/23, lifecycle 51/51, claude-review 38/38, codex-review 50/50. Machine at merge time: 575 managed snapshots >2 h old (92 without evidence owners) — the pile this drains, ≤16 per review start |
-| 4. Daily sweep as backup only | ⬜ open (task already installed on this machine) | `AI-Debris-Housekeeping` scheduled task, 03:30 daily |
-| 5. Prove it live with one real review | ⬜ open | |
+| 4. Daily sweep as backup only | ✅ done — verified 2026-09-28, no code change (Phase 3 changed no paths or marker names, so only this verification gate remained; `cleanup-ai-debris.ps1` re-read against reality: same sandbox root via junction, 24 h floor, six preserved dirty worktree folders intact) | manual `schtasks /Run /TN AI-Debris-Housekeeping` completed 12:15:45 PM EST `housekeeping done C_free=275.1GB D_free=822.8GB`; the same day's automatic 03:30 run removed 6 sandboxes >24 h (`D:\ai-data\logs\housekeeping.log`) |
+| 5. Prove it live with one real review | ✅ done — live re-proof 2026-09-28 10:29–10:33 PM EST on PR #1029 (head `a36ecc51`): muse final-check through the merged front door returned APPROVE at the exact head, and the run deleted its own artifacts — dispatch stderr `deleted review snapshot …/muse-zcode-pool-muse-53fde2303183a4db-…` is the new release firing; sandbox-root diff before→after shows that entry gone with nothing else from the run (one unrelated grok entry from another session appeared and is theirs); free space C 273.0→272.9 GB, D 822.7→822.7 GB | zero sandboxes from the run remain — the locked 2026-09-23 ruling now holds in letter for pool-dispatched muse reviews. 14-day AI-Debris-Housekeeping keep-or-retire observation runs 2026-09-28 → ~2026-10-12 (owner question, plan §13; recommendation: keep it). Grok/qwen/gemini runner extension tracked in #1018 |
 
-**Where a fresh session starts:** Phase 4 (daily-sweep verification; plan §9 Phase 4 — no code change is expected there: Phase 3 changed no paths or marker names, so only the verification gate remains), then Phase 5 (one live review with zero leftovers). Re-read this STATUS table before each phase.
+**Where a fresh session starts:** all five phases are done (row 5 closed by the PR #1029 live re-proof). What remains lives in its own issues: #1018 (extend the release to grok/qwen/gemini) and the 14-day AI-Debris-Housekeeping observation ending ~2026-10-12, after which the owner answers the keep-or-retire question (§13; recommendation: keep it).
 
 Related handoff: [HANDOFF.d/2026-09-25T1720Z-edge-dev-zcode-agent-self-cleanup-phase4.md](HANDOFF.d/2026-09-25T1720Z-edge-dev-zcode-agent-self-cleanup-phase4.md) (issue [#711](https://github.com/popcre/ai-devops/issues/711)). Do not rewrite root `HANDOFF.md`.
 
@@ -69,7 +71,7 @@ Also from the same thread (locked design input):
 3. Make the **parent wrapper sweep orphans** left by killed children.
 4. Keep the **daily Windows scheduled task** as backup only (`AI-Debris-Housekeeping`, already installed on this machine).
 5. Apply the same create/cleanup discipline to **Codex worktree groups** under `C:\Users\ahazan\.codex\worktrees` (now junctioned to `D:\ai-data\codex\worktrees`).
-6. One **live proof** with a real review, then a leftover-proof issue if live proof is deferred.
+6. One **live proof** with a real review; if live proof is deferred, leave a `- [ ] live proof` checklist item on the same issue (leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 
 ### NOT in this plan (explicit)
 - Moving more folders to D: (already done for the growth paths; see §5).
@@ -284,7 +286,7 @@ Each sandbox already writes:
 
 **Step 5.2 — Leftover-proof rule**
 
-- If code merges without live proof in the same session, open **exactly one** leftover-proof issue in `popcre/ai-devops` before that session ends, assign an owner (`owner:` line), and link the PR. Never batch proofs for a later chat.
+- If code merges without live proof in the same session, leave a `- [ ] live proof` checklist item on the **same** GitHub issue before that session ends, assign an owner (`owner:` line), and link the PR. Never batch proofs for a later chat. Do **not** open a leftover-proof issue (superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 
 **Context cut points:** end of Phase 1, end of Phase 2, end of Phase 5. Re-read §8–§9 before starting the next phase (drift check). Use `fresh-session` at each cut if the context is full.
 
@@ -332,7 +334,7 @@ Do not say "add tests" in a PR without these names or a written reason why one d
 - [ ] Phase 1–3 code merged to the repo's mainline via PR (or `develop` if that repo uses it).
 - [ ] Named tests in §10 pass in CI.
 - [ ] One live review (Phase 5) left **zero** sandboxes from that run; evidence linked in the PR.
-- [ ] If live proof deferred: exactly one leftover-proof issue open, assigned, with `owner:` line.
+- [ ] If live proof deferred: a `- [ ] live proof` checklist item on the same issue, assigned, with `owner:` line (leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 - [ ] Daily task still installed and logged success once after the change.
 - [ ] Plan STATUS table updated (done rows cite a commit SHA or test path — never a bare count).
 - [ ] `HANDOFF.d/` file created in `ai-devops` linking to this plan; this plan links back. Root `HANDOFF.md` untouched.

@@ -21,6 +21,8 @@ This replaces the earlier plan and consolidates every still-relevant obligation 
 
 ## STATUS — read this first
 
+> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** parent/child issue trees are deleted as process. Track remaining work as a checklist on the existing issue (#159); do not open child issues. Mentions of parent/child trees in this file are historical.
+
 **2026-09-15 completion:** every registered delivery row is complete. #398
 accounted its frozen 198 entries plus bounded successor intervals; #337 closed
 after every nested child; #166 verified the effective ruleset read-only and PR

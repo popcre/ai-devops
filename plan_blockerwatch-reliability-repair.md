@@ -10,6 +10,8 @@ Written 2026-09-20 on `916-alien` by Codex from `origin/main`
 
 ## STATUS
 
+2026-09-29 transcript finding 6: session orphans — TTL/reap + wake-resume live here, **not** in `plan_live-proof-session-sizing.md` (frozen).
+
 | # | Deliverable | Status | Evidence required |
 |---|---|---|---|
 | 0 | Reconcile live incidents and inventory every wait | ⬜ open | Redacted baseline under `tests/verification/blocker-watch/` |

@@ -72,6 +72,12 @@ while IFS= read -r file; do
   if [ "$file" = models.env ] && grep -Fxq "CODEX_CMD='codex exec --skip-git-repo-check --sandbox read-only -c model_reasoning_effort=medium'" "$path"; then
     replacements+=(CODEX_CMD)
   fi
+  # Claude review default: the known shipped --effort high line must become the
+  # current --effort low pin on migrate. Custom CLAUDE_REVIEW_CMD values that
+  # do not match that default prefix are left alone.
+  if [ "$file" = models.env ] && grep -qE "^CLAUDE_REVIEW_CMD='claude -p --model claude-opus-5 --effort high " "$path"; then
+    replacements+=(CLAUDE_REVIEW_CMD)
+  fi
 
   if [ "${#additions[@]}" -gt 0 ] || [ "${#replacements[@]}" -gt 0 ]; then
     changed=1

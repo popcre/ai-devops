@@ -272,6 +272,8 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-model-call <stage> <prompt> <out>` | Generic model invocation helper |
 | `ai-run-task start "<task>"` | Create an immutable seven-stage run; use `run`, `resume`, and `status` to operate it |
 | `ai-task-gates start|check|explain|status|end` | Declare what a task is and refuse an action the change set does not call for |
+| `ai-lock-doctor [--recover] <lockfile>` | Diagnose a stuck Linux `flock`; with `--recover`, clear only this toolkit's own holders (see [docs/locks.md](docs/locks.md)) |
+| `ai-merge-queue-drift` | Compare the live merge-queue ruleset and required checks with `config/merge-queue-expected.json` |
 | `ai-glm new|ask|implement <name> ...` | Persistent, named GLM-5.3 sessions (see docs/glm-opencode.md) |
 | `ai-doc-reachability --repo . --base <ref>` | Block new or moved Markdown that no living root can reach |
 
