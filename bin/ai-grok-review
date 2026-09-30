@@ -1350,7 +1350,6 @@ terminal_reason() { # provider stop token -> stable diagnostic, without inferenc
   case "$1" in
     end_turn|EndTurn|stop|completed) printf '%s' "$1" ;;
     cancelled) printf 'provider_cancelled' ;;
-    permission_cancelled) printf 'permission_cancelled' ;;
     max_turns|max_turns_reached|max-turns*) printf 'turn_limit_cancelled' ;;
     *) printf 'unknown_terminal_reason' ;;
   esac
@@ -1824,7 +1823,21 @@ cmd_new() {
   [ -n "$sid" ] && [ "$sid" != null ] || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
   capture_terminal_evidence "$out" 2>/dev/null || note 'native terminal evidence unavailable; retaining generic cancellation diagnosis.'
-  recover_permission_cancelled "$out" "$sid" "$turns" "$pf"
+  RECOVERY_RC="$rc"
+  if ! recover_permission_cancelled "$out" "$sid" "$turns" "$pf"; then
+    rc="$RECOVERY_RC"
+    if [ "$rc" = 124 ]; then
+      record_diagnostic "$repo" "$workid" "$name" terminal provider-deadline --exit-code "$rc" --deadline-kind wrapper-timeout --cancellation-initiator wrapper-deadline --cancellation-confirmation unconfirmed --failure-class timed-out
+    else
+      record_diagnostic "$repo" "$workid" "$name" terminal provider-unconfirmed --exit-code "$rc" --cancellation-initiator unknown --cancellation-confirmation unconfirmed --failure-class unconfirmed-result
+    fi
+    grok_credit_release "$rid_lock" "$sess_lock" "$out"
+    preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"
+    note "  a resumed turn after permission_cancelled returned no confirmed result (exit $rc); paid work retained for reconciliation."
+    reviewer_credit_exit
+    exit 1
+  fi
+  rc="$RECOVERY_RC"
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
@@ -1999,10 +2012,21 @@ $REVIEW_HEAD only."
 # corrective message, at most AI_GROK_PERMISSION_RESUMES times and within the
 # remaining turn budget. Every other stop keeps its existing handling.
 PERMISSION_RESUMES="${AI_GROK_PERMISSION_RESUMES:-3}"
-recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE -> may replace OUT
+native_permission_cancelled() { # OUT -> 0 only on the hash-bound native PermissionCancelled witness
+  local out="$1"
+  [ "$(jq -r '.stopReason // ""' "$out")" = cancelled ] && [ -f "$out.terminal.json" ] && [ ! -L "$out.terminal.json" ] &&
+    [ "$(jq -r '.result_sha256 // ""' "$out.terminal.json")" = "$(sha256sum "$out" | awk '{print $1}')" ] &&
+    jq -e '.schema_version==1 and .native_terminal_matches==1 and .category=="PermissionCancelled" and .terminal_reason=="permission_cancelled"' "$out.terminal.json" >/dev/null 2>&1
+}
+# Returns 0 when OUT holds a confirmed terminal result (resumed or not) and
+# sets RECOVERY_RC to the exit code of the turn that produced it. Returns 1
+# when a resumed paid turn is unconfirmed (timeout, no terminal JSON, or a
+# credit refusal); the caller must then preserve it like an unconfirmed first turn.
+recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE
   local out="$1" sid="$2" turns="$3" pf="$4" n=0 used spent=0 left next rpf
   case "$PERMISSION_RESUMES" in ''|*[!0-9]*) PERMISSION_RESUMES=0 ;; esac
-  while [ "$n" -lt "$PERMISSION_RESUMES" ] && [ "$(terminal_reason_for_result "$out")" = permission_cancelled ]; do
+  [ "$PERMISSION_RESUMES" -le 5 ] || PERMISSION_RESUMES=5
+  while [ "$n" -lt "$PERMISSION_RESUMES" ] && native_permission_cancelled "$out"; do
     used="$(jq -r '.num_turns // 0' "$out")"; case "$used" in ''|*[!0-9]*) used="$turns" ;; esac
     spent=$(( spent + used )); left=$(( turns - spent ))
     [ "$left" -ge 1 ] || return 0
@@ -2011,11 +2035,12 @@ recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE -> may replace 
     report_usage "$out" || true
     rpf="$pf.resume$n"; next="$out.resume$n"
     printf '%s\n' "The Grok CLI refused your last shell command and cancelled it; nothing ran. It refuses shell variable assignments (FOO=1 cmd, export FOO=1), the env wrapper, git -c, and \$(...) or backtick substitution. Do not retry that form. Rewrite it without those forms (for environment variables, write a script under .git/review-scratch/ in your copy and run bash .git/review-scratch/run.sh; never leave new or changed files in the working tree), then continue the same review from where you stopped and finish with the required '## Verdict' section." > "$rpf"
-    run_turn "$REVIEW_DIR" "$next" "$rpf" "$left" "$sid"
+    run_turn "$REVIEW_DIR" "$next" "$rpf" "$left" "$sid"; RECOVERY_RC="$RUN_TURN_RC"
     rm -f "$rpf"
-    if [ "$RUN_TURN_RC" = 124 ] || ! await_result "$next" "review resume $n"; then
-      note "  resume $n returned no terminal result; keeping the cancelled result."
-      return 0
+    grok_credit_scan "$RECOVERY_RC" "$next"
+    if [ "$RECOVERY_RC" = 124 ] || [ -n "${REVIEWER_CREDIT_HIT:-}" ] || ! await_result "$next" "review resume $n"; then
+      mv -f "$next" "$out" 2>/dev/null || true; rm -f "$out.terminal.json"
+      return 1
     fi
     capture_terminal_evidence "$next" 2>/dev/null || true
     rm -f "$out.terminal.json"; mv -f "$next" "$out"
