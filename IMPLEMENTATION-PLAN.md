@@ -15,9 +15,9 @@
 | C2. Decision ledger: items 3/9 not done (correct citations) | ✅ done 2026-09-29 | PR #1124 `ff28e561`; IMPLEMENTATION-PLAN.md §8 "Decision ledger: why findings 3 and 9 are not done" |
 | C3. Index the 18 unlisted root `plan_*.md` | ✅ done 2026-09-29 | PR #1123 `b0779156`; 73/73 plans indexed (re-measured 19 missing incl. `plan_reviewer-pipeline-core.md`) |
 | C4. Fold-routing lines for findings 5/6/7/8 | ✅ done 2026-09-29 | PR #1123 `b0779156`; markers in plan_workflow-efficiency, plan_github-request-reduction, plan_blockerwatch-reliability-repair, plan_ai-devops-work-claims, bin/ai-machine-tools-doctor |
-| D1. Doctor orphan spawn guard + reconcile residual (small) | ⬜ open | after A1; keep |
-| 7. Independent exact-head review per code PR | ⬜ open | |
-| 8. Merge via queue + live proof per PR | ⬜ open | |
+| D1. Doctor orphan spawn guard + reconcile residual (small) | ✅ done 2026-09-30 | PR #1149 `852dd7e3`; Qwen APPROVE exact-head `d43df6c1`; `tests/test-ai-glm.sh` 364/0 (spawn bound 7 for N=5 and N=50); live proof 20 orphans in 420 ms |
+| 7. Independent exact-head review per code PR | ✅ done 2026-09-30 | A2 Muse APPROVE; D1 Qwen APPROVE `d43df6c1` (`.ai/reviews/qwen-d1-orphan-final-check.md`) |
+| 8. Merge via queue + live proof per PR | ✅ done 2026-09-30 | A1 `f8f032ed`, A2 `cbe08f5d`, B1 `c12470a5`, D1 `852dd7e3` via merge queue; live proofs named in each STATUS row |
 
 **Fresh session starts at step 1.** Re-read this STATUS table first. Do not re-derive or re-plan.
 
