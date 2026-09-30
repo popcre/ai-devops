@@ -517,6 +517,7 @@ implementation_record_fields() { # FILE [fresh] -> packed fields; caches by file
   fi
   if [ "${2:-}" = fresh ]; then
     unset '_AI_GLM_IMPL_FIELDS[$f]'
+    _AI_GLM_CANONICAL_PATH=()
   fi
   out="$(jq -r '
     (try (
@@ -638,7 +639,7 @@ implementation_fields_fill() { # FILE...
               ] | join("")
             )])
         catch [$i, ""]
-      | @tsv' -R "${args[@]}" 2>/dev/null | tr -d '\r' || true)
+      | "\(.[0])\t\(.[1])"' -R "${args[@]}" 2>/dev/null | tr -d '\r' || true)
   done
   rm -f "$sep"
   return 0
