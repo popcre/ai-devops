@@ -152,8 +152,10 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   load into curated Master Data, is authored first in `popcre/shared-db` via
   branch and PR. Prove the target database before every write. Load
   `shared-db-change` for the procedure.
-- **Shared-db orchestrator gets the minimum** — only database SHAPE changes or
-  a curated Master Data load; never proofs, reports, tooling, or docs.
+- **Shared-db structural work is claim-first.** Claim exact objects on the
+  existing issue and start; no orchestrator chat or marker is required. Scope
+  stays the minimum: only database SHAPE changes or a curated Master Data
+  load; never proofs, reports, tooling, or docs.
 - **Label every shared-db ticket.** Whenever a `popcre/shared-db` issue number
   appears in a reply, say beside it whether it is orchestrator work (it changes
   database structure) or non-orchestrator work (it does not).
@@ -162,7 +164,8 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   empty). When editing a body, keep existing signatures and add yours.
 - **Reviewer rotation:** the shared-db allocator alone decides who reviews;
   never retry one out of rotation. Details: `docs/standing-rules-details.md`.
-- **Shared-db orchestrator sessions only:** load `shared-db-orchestrator`.
+- **`shared-db-orchestrator` is optional reference only** — claim-first is the
+  default structural path; its safety rules stay binding when that work runs.
 - **Route every successor from its own work,** never a predecessor's
   repository, work type, route, or object claim. Private artifacts stay in their
   approved private repository.

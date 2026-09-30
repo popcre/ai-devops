@@ -35,8 +35,10 @@ pipeline. The recovery procedure lives in
   preview proof; it authorizes no manual production command or other infrastructure
   mutation and fails closed to an engineer on any absent or ambiguous evidence.
 - Shared-database STRUCTURE changes are authored in `popcre/shared-db` through
-  its branch-and-PR workflow. Load the matching shared-db skill before acting;
-  application rows remain owned by the application.
+  its branch-and-PR workflow. Claim-first is the default: claim exact objects on
+  the existing issue and start — no orchestrator chat or marker. Load the
+  matching shared-db skill before acting; application rows remain owned by the
+  application.
 - Installation changes can write outside the repository. Read
   [`docs/deployment.md`](docs/deployment.md) before changing install, update,
   uninstall, symlink, or machine-setup behavior.
@@ -87,7 +89,7 @@ pipeline. The recovery procedure lives in
 | MiMo / MiMoCode for Windows client support (skills, MCP, wrapper) | [MiMo Windows support plan](plan_mimo-windows-support.md) STATUS | Follow the Claude/Codex/ZCode per-client pattern; skills write root is `~/.config/mimocode/skills/` only; MCP `command` is an array and timeout key is `timeout`; NO MiMo reviewer; no completion-check hook (no hook surface) |
 | Shared-db delivery delay or orchestrator throughput | [`plan_shared-db-complete-throughput-repair.md`](plan_shared-db-complete-throughput-repair.md) STATUS (closed #401 decision record) | Preserve the proven request-to-live safeguards; route new defects to new issues rather than reopening the programme |
 | Delete shared-db coordination layer (C by deletion) | [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md) STATUS | Keep claims/leases/review/live proof; delete leftover-proof mill, required orchestrator role, chat conductor; never path-filter required checks; do not reopen #401 |
-| Bundled leftover live proofs, one chat given several unproven steps, or proofs saved for a later chat | [`plan_live-proof-session-sizing.md`](plan_live-proof-session-sizing.md) STATUS | One unproven outcome per session; never save several unproven steps for later; do not steal remaining 3027 proofs |
+| Bundled leftover live proofs, one chat given several unproven steps, or proofs saved for a later chat | [`plan_live-proof-session-sizing.md`](plan_live-proof-session-sizing.md) STATUS | Live proof is required before an outcome is closed; leave a checklist item on the same issue — never a leftover-proof ticket |
 | Combined reviewer reliability and cache/session qualification | [`plan_reviewer-reliability-and-efficiency.md`](plan_reviewer-reliability-and-efficiency.md) STATUS | Reuse existing provider work; no completion without installed evidence |
 | TypeSafe Jev evaluation or advisory integration | [`plan_typesafe-jev-decision-layer.md`](plan_typesafe-jev-decision-layer.md) STATUS, then [`plan_typesafe-jev-advisory-integrations.md`](plan_typesafe-jev-advisory-integrations.md) STATUS and [issue #643](https://github.com/popcre/ai-devops/issues/643); for measured token substitution read [`plan_typesafe-jev-spend-reduction.md`](plan_typesafe-jev-spend-reduction.md) STATUS | Public-data pilots first; Jev never opens a gate, mutates authoritative state, or replaces review; key via `op run` only |
 | Review-packet race (target moved forward), slow review evidence, or adversarial-case planning | [review-packet race and evidence speed plan](plan_review-packet-race-and-evidence-speed.md) STATUS | Only the target-ref tip check gains ancestry tolerance; HEAD/digest/merge-base stay strict; never delete a guarded packet test — re-scope it |
