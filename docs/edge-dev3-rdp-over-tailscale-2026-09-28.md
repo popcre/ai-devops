@@ -70,3 +70,126 @@ few seconds with `Unable to listen ... 4837`) was retired at 10:12 AM EDT:
 `journalctl --user -u krdp.service` shows no new entries, and the packaged
 `app-org.kde.krdpserver.service` (PID 6043) stays active and listening on
 `*:4837`. To restore, move the backup back and re-enable it (not recommended).
+
+---
+
+# Second incident — RDP refused every password (2026-09-30)
+
+Status: **RDP resolved** about 1:05 PM EDT, September 30, 2026. Albert confirmed a
+working `mstsc` session. **ScreenConnect black screen is still open** (see the end).
+The office network move at the same time was a coincidence. Tailscale, UFW
+and DNS were fine throughout.
+
+## Symptom
+
+Every `mstsc` attempt gave "The logon attempt failed", both from the office LAN
+and from home over Tailscale. The server log showed this for every user, including a
+brand-new KRDP user:
+
+```
+[com.winpr.sspi.NTLM] ntlm_fetch_ntlm_v2_hash: Could not find user in SAM database
+AcceptSecurityContext status SEC_E_NO_CREDENTIALS
+```
+
+## Actual root cause
+
+An automatic update at 6:06 AM EDT on 2026-09-29 upgraded FreeRDP from
+`3.31.0+dfsg-0ubuntu0.26.04.1` to `3.32.0+dfsg-0ubuntu0.26.04.1`. The packages
+were `libwinpr3-3`, `libfreerdp3-3`, `libfreerdp-server3-3` and
+`libfreerdp-client3-3`. KRDP only loads the new libraries after it restarts,
+so it broke at the first reboot after the update. With 3.32, KRDP's
+server-side login (NLA) never reaches KRDP's own user check (PAM or KRDP
+users). Instead it looks up a nonexistent FreeRDP SAM file
+(`/etc/FreeRDP/FreeRDP/SAM`, seen with `strace`), so every login fails.
+
+**Proof, same machine and same user:** a second `krdpserver --port 4838` run with
+`LD_LIBRARY_PATH` pointed at the extracted 3.31 libraries logged
+`User "ahazan2" authenticated successfully`. The 3.32 server on 4837 gave the
+SAM error for the same password.
+
+## Fix applied (2026-09-30)
+
+1. Downgraded the four packages to 3.31 and held them:
+   `sudo dpkg -i` the 3.31 debs (three came from `/var/cache/apt/archives/`,
+   `libfreerdp-server3-3` from
+   `https://launchpad.net/ubuntu/+archive/primary/+files/libfreerdp-server3-3_3.31.0+dfsg-0ubuntu0.26.04.1_amd64.deb`),
+   then `sudo apt-mark hold libwinpr3-3 libfreerdp3-3 libfreerdp-client3-3 libfreerdp-server3-3`.
+   **Before unholding**, test a newer FreeRDP with the port-4838 method above.
+2. After the downgrade, the login succeeded but the window flashed and closed
+   (`PostConnect ... failed`). The cause was the KDE "Remote Control — Control
+   input devices" approval popup, which had not been clicked yet. Clicking Approve at the screen fixed it. KRDP cannot
+   start the portal session until someone approves it at the screen. Permanent fix:
+   run KRDP with `--plasma` (it uses KWin's protocols directly, allowed by
+   `X-KDE-Wayland-Interfaces` in `/usr/share/applications/org.kde.krdpserver.desktop`,
+   so there is no popup). Drop-in:
+   `~/.config/systemd/user/app-org.kde.krdpserver.service.d/plasma.conf` with
+   `ExecStart=` then `ExecStart=/usr/bin/krdpserver --plasma`.
+   **REVERTED the same day: `--plasma` gave a black screen over RDP (same symptom as
+   ScreenConnect). Do not use it.** The popup must still be approved at the screen
+   once per login. The popup is an open item.
+3. The KRDP settings now have `SystemUserEnabled=false` and a dedicated KRDP user `ahazan2`
+   (password in KWallet folder `KRDP`, set by Albert in System Settings → Remote
+   Desktop). The PAM/system-password path was not retested on 3.31. It worked on
+   2026-09-28 per the incident above.
+4. Auto-login stays on (`User=ahazan` in `/etc/sddm.conf.d/kde_settings.conf`).
+   It is needed so KRDP, a user service, starts without anyone at the keyboard.
+
+## Fast diagnosis next time
+
+```bash
+grep -E ' (upgrade|install) ' /var/log/dpkg.log | grep -iE 'freerdp|winpr|krdp' | tail
+journalctl --user -u 'app-org.kde.krdpserver*' --since '-10min' --no-pager | grep -vE 'deactivate_all|BIO|TRANSPORT'
+```
+
+- `Could not find user in SAM database` → FreeRDP regression; check versions and holds.
+- `PostConnect ... failed` right after `New client connected` → the portal approval
+  is missing. Check that `--plasma` is still in effect (`ps -o args= -C krdpserver`).
+- `Unable to listen ... 4837` → another program owns the port (`ss -ltnp | grep 4837`).
+
+## Wrong turns (do not repeat)
+
+- Blaming the office network or the Windows `al8960ofc\` domain prefix. Both were irrelevant.
+- Writing passwords into KWallet by hand, and trying `edge-dev3\` or `\` username prefixes.
+- Turning auto-login off. KRDP then never starts until someone signs in locally.
+  Also, `sddm` reads **every** file in `/etc/sddm.conf.d/`, so a `.bak` copy there
+  overrides the real file. Keep backups outside that folder.
+- Enabling the OpenSSL legacy provider (MD4) for KRDP. It had no effect and was removed.
+- xrdp (installed 2026-09-24) sometimes took over port 4837 when KRDP was not running
+  and showed its own "Login to edge-dev3" screen. It was **purged** 2026-09-30.
+- Granting the portal permission in the PermissionStore did not stop the popup. `--plasma` did.
+
+## Popup and restart behavior (verified 2026-09-30, 1:24 PM EDT)
+
+- KRDP asks the portal for the app ID `org.kde.krdp-server`, but the packaged desktop
+  file is `org.kde.krdpserver.desktop`. The log showed `Could not register app ID: App info
+  not found`, and the approval was forgotten at every restart. Fix: a user desktop file
+  `~/.local/share/applications/org.kde.krdp-server.desktop` (NoDisplay, same Exec and
+  `X-KDE-Wayland-Interfaces`). After one Approve, a reboot restored the portal session with
+  no click: the log showed `Started Freedesktop Portal session`.
+- After a reboot, `mstsc` flashes and closes (`PostConnect ... failed`) for about the first
+  2 minutes while Plasma and the portal finish starting. Wait and retry.
+- A "Control input devices" popup can still appear after connecting. RDP works anyway.
+  It is harmless and not yet removed.
+
+## Still open — ScreenConnect black screen
+
+ScreenConnect (`connectwisecontrol-159806842ff2961f`, a system service) captures
+`DISPLAY=:0`. On Plasma Wayland that display is Xwayland, which contains only X11 apps,
+so the capture is black and input does not reach the desktop. Albert reports it
+worked on the morning of 2026-09-30 in this same Wayland setup. The journal shows
+Wayland sessions on every boot since 2026-09-28. **How it worked is not yet explained.**
+Do not assume Wayland and X11 are mutually exclusive with KRDP until that is
+investigated. The next step is to compare the ScreenConnect client version and
+logs from before and after the 10:54 AM EDT reboot.
+
+Findings so far (2026-09-30):
+- The console (edgehome.screenconnect.com, Access → edge-dev3) shows **Logged On User: root**,
+  client **26.6.6.9747**, which is the newest client in the fleet. An agent update is not the fix.
+- The agent runs `DISPLAY=:0 XAUTHORITY=/opt/connectwisecontrol-*/.Xauthority`.
+  `who` prints `1000` and not a username, and there is no `/run/utmp`. The agent still
+  probes the user with `runuser` every 5 s, and it did the same on 2026-09-28.
+- The agent log `/var/log/connectwisecontrol-159806842ff2961f` holds only tray/DISPLAY exceptions.
+- Nothing in `/var/log/dpkg.log` since 2026-09-28 touches ScreenConnect, Xwayland, KWin or Java.
+- **ConnectWise support case #03766621** was filed at 1:40 PM EDT, 2026-09-30, asking about Wayland
+  support and user/display selection. Next step: act on their reply.
+- Not tried, because it would risk the working RDP: switching to a Plasma X11 session.
