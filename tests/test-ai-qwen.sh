@@ -496,7 +496,7 @@ QWEN_STARTUP_TICKS=$(( ((SECONDS-INITIAL_STARTED)*2 + $(budget 2 5)) * 20 ))
 [ "$INITIAL_RC" -eq 0 ] || printf '  diagnostic: initial review: %s\n' "$INITIAL_OUT"
 check 'initial review completes successfully' "test '$INITIAL_RC' -eq 0"
 printf 'preload-test-secret\n' > "$TMP/preload-secret"; chmod 600 "$TMP/preload-secret"
-PRELOAD_PROOF="$(AI_QWEN_SECRET_FILE="$TMP/preload-secret" PRELOAD_TEST_FILE="$TMP/preload-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'const {spawnSync}=require("node:child_process"),fs=require("node:fs"); const reexec=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8"}); const sanitized={...process.env}; delete sanitized.BAILIAN_CODING_PLAN_API_KEY; const toolChild=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8",env:sanitized}); process.stdout.write(JSON.stringify({direct:process.env.BAILIAN_CODING_PLAN_API_KEY,handoffVar:Object.hasOwn(process.env,"AI_QWEN_SECRET_FILE"),handoffFile:fs.existsSync(process.env.PRELOAD_TEST_FILE),reexec:reexec.stdout,toolChild:toolChild.stdout,nodeOptions:process.env.NODE_OPTIONS||"absent",sandboxFlags:process.env.SANDBOX_FLAGS||"absent"}));')"
+PRELOAD_PROOF="$(env -u SANDBOX_FLAGS AI_QWEN_SECRET_FILE="$TMP/preload-secret" PRELOAD_TEST_FILE="$TMP/preload-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'const {spawnSync}=require("node:child_process"),fs=require("node:fs"); const reexec=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8"}); const sanitized={...process.env}; delete sanitized.BAILIAN_CODING_PLAN_API_KEY; const toolChild=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8",env:sanitized}); process.stdout.write(JSON.stringify({direct:process.env.BAILIAN_CODING_PLAN_API_KEY,handoffVar:Object.hasOwn(process.env,"AI_QWEN_SECRET_FILE"),handoffFile:fs.existsSync(process.env.PRELOAD_TEST_FILE),reexec:reexec.stdout,toolChild:toolChild.stdout,nodeOptions:process.env.NODE_OPTIONS||"absent",sandboxFlags:process.env.SANDBOX_FLAGS||"absent"}));')"
 check 'Qwen preloader survives the runtime re-exec, deletes its handoff, and stays strippable for tool children' "printf '%s' '$PRELOAD_PROOF' | jq -e '.direct==\"preload-test-secret\" and .handoffVar==false and .handoffFile==false and .reexec==\"preload-test-secret\" and .toolChild==\"absent\"'"
 # Issue #1032: --sandbox forwards NODE_OPTIONS into the container, where the host
 # preloader path does not exist; the preloader must remove itself once consumed.
@@ -504,6 +504,13 @@ check 'Qwen preloader removes itself from NODE_OPTIONS so a sandboxed child neve
 # --sandbox forwards only a fixed provider-variable list; the key must reach the
 # container by name (docker copies the value from its env), never as NAME=value argv.
 check 'Qwen preloader forwards the key into the sandbox by name only' "printf '%s' '$PRELOAD_PROOF' | jq -e '.sandboxFlags==\"--env BAILIAN_CODING_PLAN_API_KEY\"'"
+sandbox_flags_after() {
+  printf 'k\n' > "$TMP/preload-flags-secret"; chmod 600 "$TMP/preload-flags-secret"
+  env SANDBOX_FLAGS="$1" AI_QWEN_SECRET_FILE="$TMP/preload-flags-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'process.stdout.write(process.env.SANDBOX_FLAGS||"")'
+}
+check 'Qwen sandbox forward replaces a stale NAME=value flag' "test \"\$(sandbox_flags_after '--env BAILIAN_CODING_PLAN_API_KEY=oldvalue --rm')\" = '--rm --env BAILIAN_CODING_PLAN_API_KEY'"
+check 'Qwen sandbox forward is not satisfied by a similarly named variable' "test \"\$(sandbox_flags_after '--env BAILIAN_CODING_PLAN_API_KEY_EXTRA')\" = '--env BAILIAN_CODING_PLAN_API_KEY_EXTRA --env BAILIAN_CODING_PLAN_API_KEY'"
+check 'Qwen sandbox forward does not duplicate an --env= form' "test \"\$(sandbox_flags_after '--env=BAILIAN_CODING_PLAN_API_KEY')\" = '--env BAILIAN_CODING_PLAN_API_KEY'"
 if [ -n "${SYSTEMROOT:-}" ]; then
   check 'Qwen runtime home has a private Windows ACL before provider contact' "test -f '$AI_QWEN_HOME/.ai-devops-private-home-v1' && ! icacls.exe \"\$(cygpath -w '$AI_QWEN_HOME')\" | grep -Ei 'BUILTIN\\\\Users|Authenticated Users|Everyone'"
 else
