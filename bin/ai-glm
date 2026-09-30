@@ -332,11 +332,34 @@ prefix_packet_preamble() { # prefix_packet_preamble PROMPT_FILE
   { printf '%s' "${PACKET_PREAMBLE//.ai-review/$PACKET_REL}"; cat "$pf"; } > "$tmp"
   mv "$tmp" "$pf"
 }
+# repo_id spawns git/sha256sum/cut; cache by repository root so N open records
+# sharing one checkout pay it once. Call without command substitution when
+# filling the cache (a $(...) subshell cannot publish the write); callers that
+# only need the value use REPO_ID_OUT after a non-subshell call, or $(repo_id)
+# which still works but will not populate the parent cache.
+declare -A _AI_GLM_REPO_ID=()
+REPO_ID_OUT=""
+
 repo_id() {
-  local root remote
-  root="$(cd "$1" && pwd -P)"
+  local root remote id
+  if [ -n "${_AI_GLM_REPO_ID[$1]+x}" ]; then
+    REPO_ID_OUT="${_AI_GLM_REPO_ID[$1]}"
+    printf '%s' "$REPO_ID_OUT"
+    return 0
+  fi
+  root="$(cd "$1" && pwd -P)" || return 1
+  if [ -n "${_AI_GLM_REPO_ID[$root]+x}" ]; then
+    REPO_ID_OUT="${_AI_GLM_REPO_ID[$root]}"
+    _AI_GLM_REPO_ID[$1]="$REPO_ID_OUT"
+    printf '%s' "$REPO_ID_OUT"
+    return 0
+  fi
   remote="$(git -C "$root" config --get remote.origin.url 2>/dev/null || echo '')"
-  printf '%s' "$(printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12)"
+  id="$(printf '%s\n%s' "$root" "$remote" | sha256sum | cut -c1-12)"
+  _AI_GLM_REPO_ID[$1]="$id"
+  _AI_GLM_REPO_ID[$root]="$id"
+  REPO_ID_OUT="$id"
+  printf '%s' "$id"
 }
 repo_remote() { git -C "$1" config --get remote.origin.url 2>/dev/null || true; }
 safe_repo_remote() { repo_remote "$1" | sed -E 's#(https?://)[^/@]+@#\1[REDACTED]@#; s/[?#].*$//'; }
@@ -661,7 +684,7 @@ implementation_record_path_valid() { # FILE [FIELDS]
 
 implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER] [FIELDS]
   local f="$1" expected_root="${2:-}" expected_caller="${3:-$CALLER}" fields="${4:-}"
-  local root rid name caller clone expected root_norm clone_norm schema_ok
+  local root rid name caller clone expected root_norm clone_norm schema_ok id
     if [ -z "$fields" ]; then
     fields="$(implementation_record_fields "$f")" || return 1
   fi
@@ -669,7 +692,10 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER] [FIELDS]
   [ "$schema_ok" = 1 ] || return 1
   valid_name "$name" || return 1
   if [ -d "$root" ]; then
-    [ "$rid" = "$(repo_id "$root")" ] || return 1
+    repo_id "$root" >/dev/null || return 1
+    id="$REPO_ID_OUT"
+    [ -n "$id" ] || id="$(repo_id "$root")" || return 1
+    [ "$rid" = "$id" ] || return 1
   else
     # The job's repository was removed after the job ended (a deleted worktree).
     # A finished record with nothing left to clean up is still trustworthy history;
@@ -691,7 +717,7 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER] [FIELDS]
     if [ "$clone" != "$expected" ]; then
       canonical_path "$clone" "$STATE_DIR" >/dev/null || return 1
       clone_norm="$CANONICAL_PATH_OUT"
-      canonical_path "$expected" "$STATE_DIR" >/dev/null || true
+      canonical_path "$expected" "$STATE_DIR" >/dev/null || return 1
       [ "$clone_norm" = "$CANONICAL_PATH_OUT" ] || return 1
     fi
   fi
@@ -720,6 +746,7 @@ implementation_update() { # FILE JQ_FILTER [jq args...]
   esac
   implementation_meta_valid "$tmp" "" "$record_caller" || { rm -f "$tmp"; rm -rf "$update_lock"; return 1; }
   if ! write_meta "$f" "$(cat "$tmp")"; then rm -f "$tmp"; rm -rf "$update_lock"; return 1; fi
+  unset '_AI_GLM_IMPL_FIELDS[$tmp]'
   rm -f "$tmp"; rm -rf "$update_lock"
 }
 
