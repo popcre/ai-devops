@@ -1339,7 +1339,7 @@ cat > "$POOLTMP/lifecycle" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
   begin) printf '{"head":"$FAKE_HEAD","source_digest":"deadbeef","stale":false,"verdict":null}\n' > "\$(dirname "\$0")/state.json"; printf '%s\n' "\$(dirname "\$0")/state.json" ;;
-  finish) verdict=''; shift; while [ \$# -gt 0 ]; do [ "\$1" = --verdict ] && verdict="\$2"; shift; done; printf '{"stale":false,"verdict":"%s"}\n' "\$verdict" ;;
+  finish) verdict=''; shift; while [ \$# -gt 0 ]; do [ "\$1" = --verdict ] && verdict="\$2"; shift; done; printf '%s\n' "\$verdict" >> "\$(dirname "\$0")/finish-verdicts"; printf '{"stale":false,"verdict":"%s"}\n' "\$verdict" ;;
   *) exit 0 ;;
 esac
 EOF
@@ -1361,6 +1361,9 @@ case "${POOL_RUNNER_MODE:-approve}" in
   nounbound) printf 'Some analysis without naming the head under review, deliberately long enough to clear the report floor so that the binding check is the only failure mode exercised by this case, with no other assertion depending on the content of this paragraph.\n\n## Verdict\nAPPROVE\n' ;;
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+  provisional) printf '## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own. Head under review: %s.\n\n## Verdict\nREJECT\n' "$HEAD" ;;
+  provisionalonly) printf 'Head under review: %s.\n\n## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n' "$HEAD" ;;
+  headafterfinal) printf '## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n\n## Verdict\nAPPROVE\nHead: %s\n' "$HEAD" ;;
   drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
   credit) printf 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota\nOUT OF CREDIT: stub - then run: ai-review-preflight clear grok\n' >&2; exit 92 ;;
   chrome) printf 'runner progress chrome naming the head %s with enough padding text that a whole-buffer byte floor would pass if chrome were counted toward the analysis floor, which is exactly what this mode must not reward\n' "$HEAD" >&2; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
@@ -1433,6 +1436,13 @@ check "pool_grok_success_notes_and_retains" "[ '$RC_GRKREL' -eq 0 ] && [ '$GRK_A
 check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
 check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-nv'"
+rm -f "$POOLTMP/finish-verdicts"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisional bash "$POOL" grok security-review ) > "$POOLTMP/out-prov" 2>&1; RC_PROV=$?
+check "pool_adapter_takes_the_final_verdict_not_the_provisional_one" "[ '$RC_PROV' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = REJECT ]"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=headafterfinal bash "$POOL" grok security-review ) > "$POOLTMP/out-haf" 2>&1; RC_HAF=$?
+check "pool_adapter_binds_head_only_before_the_final_verdict" "[ '$RC_HAF' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-haf'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisionalonly bash "$POOL" grok security-review ) > "$POOLTMP/out-po" 2>&1; RC_PO=$?
+check "pool_adapter_floor_counts_only_text_before_the_final_verdict" "[ '$RC_PO' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-po'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" grok security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
 check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
