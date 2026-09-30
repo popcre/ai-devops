@@ -117,14 +117,16 @@ SAM error for the same password.
    **Before unholding**, test a newer FreeRDP with the port-4838 method above.
 2. After the downgrade, the login succeeded but the window flashed and closed
    (`PostConnect ... failed`). The cause was the KDE "Remote Control — Control
-   input devices" approval popup, which had not been clicked yet. KRDP cannot
+   input devices" approval popup, which had not been clicked yet. Clicking Approve at the screen fixed it. KRDP cannot
    start the portal session until someone approves it at the screen. Permanent fix:
    run KRDP with `--plasma` (it uses KWin's protocols directly, allowed by
    `X-KDE-Wayland-Interfaces` in `/usr/share/applications/org.kde.krdpserver.desktop`,
    so there is no popup). Drop-in:
    `~/.config/systemd/user/app-org.kde.krdpserver.service.d/plasma.conf` with
    `ExecStart=` then `ExecStart=/usr/bin/krdpserver --plasma`.
-   Pending: after a reboot, confirm no popup and a working session.
+   **REVERTED the same day: `--plasma` gave a black screen over RDP (same symptom as
+   ScreenConnect). Do not use it.** The popup must still be approved at the screen
+   once per login. The popup is an open item.
 3. The KRDP settings now have `SystemUserEnabled=false` and a dedicated KRDP user `ahazan2`
    (password in KWallet folder `KRDP`, set by Albert in System Settings → Remote
    Desktop). The PAM/system-password path was not retested on 3.31. It worked on
