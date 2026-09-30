@@ -8,7 +8,7 @@
 # assigning the same unhealthy provider again.
 set -euo pipefail
 
-VERSION="1.4.0"
+VERSION="1.5.0"
 STATE_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 CHECK_TIMEOUT="${AI_REVIEW_PREFLIGHT_TIMEOUT:-10}"
 COOLDOWN="${AI_REVIEW_QUARANTINE_SECONDS:-1800}"
@@ -155,27 +155,144 @@ capacity_result() { # PROVIDER
     capacity_unknown "$provider" malformed-response unverified config "$version"
   fi
 }
+# The live-qualification record is a versioned store keyed by the exact
+# installed bytes (wrapper/runtime/preloader hashes; Gemini also model). Each
+# version is one live canary that PASSED for those exact bytes. Older
+# single-record files are folded into the same array so a toolkit upgrade does
+# not throw away the last good approval.
+#
+# The file keeps its legacy top-level fields as the "selected" view because
+# bin/ai-gemini reads only those (it is out of scope to change that wrapper).
+# Preflight matches against versions[], then syncs the top-level view to the
+# version it selected, so the wrapper and preflight never disagree.
+normalize_qualification_versions() { # RAW_JSON -> JSON array
+  printf '%s\n' "$1" | jq -c '
+    if ((.versions|type)=="array") then [.versions[]]
+    elif ((.wrapper_sha256|type)=="string") then [ {
+        wrapper_sha256: .wrapper_sha256,
+        runtime_sha256: .runtime_sha256,
+        preloader_sha256: .preloader_sha256,
+        agy_sha256: .agy_sha256,
+        agy_version: .agy_version,
+        model: .model,
+        qualified_epoch: .qualified_epoch
+      } | with_entries(select(.value != null)) ]
+    else [] end' 2>/dev/null || printf '[]\n'
+}
+
+# qualification_versions PROVIDER prints the provider's stored qualification
+# versions as a JSON array. An absent or unreadable record yields [] — never a
+# guessed match.
+qualification_versions() { # PROVIDER -> JSON array
+  local file raw
+  file="$(qualification_file "$1")"
+  [ -f "$file" ] || { printf '[]\n'; return 0; }
+  raw="$(cat "$file" 2>/dev/null)" || { printf '[]\n'; return 0; }
+  [ -n "$raw" ] || { printf '[]\n'; return 0; }
+  normalize_qualification_versions "$raw"
+}
+
+legacy_record_version() { # PROVIDER -> schema number the provider wrapper accepts
+  case "$1" in gemini) printf 2 ;; qwen) printf 3 ;; *) return 1 ;; esac
+}
+
+# write_qualification_store PROVIDER VERSIONS_JSON SELECTED_JSON writes the
+# versioned store with the legacy top-level view set to SELECTED. VERSIONS []
+# removes the record entirely. The candidate goes to a temp file and is moved
+# into place only after it validates, so untested bytes are never published.
+write_qualification_store() { # PROVIDER VERSIONS_JSON SELECTED_JSON
+  local provider="$1" versions="$2" selected="$3" file legacy candidate
+  file="$(qualification_file "$provider")"
+  if [ -z "$versions" ] || [ "$versions" = "[]" ]; then rm -f "$file"; return 0; fi
+  legacy="$(legacy_record_version "$provider")" || return 1
+  candidate="$(jq -nc --arg p "$provider" --argjson legacy "$legacy" --argjson versions "$versions" --argjson selected "$selected" \
+    '{version:$legacy, provider:$p} + $selected + {versions:$versions}')" || return 1
+  printf '%s\n' "$candidate" | jq -e --arg p "$provider" '
+    .provider==$p and (.versions|type=="array") and (.versions|length>0)
+    and (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$"))
+    and (.qualified_epoch|type=="number")' >/dev/null 2>&1 || return 1
+  write_atomic "$file" "$candidate"
+}
+
+# publish_qualification_version PROVIDER PRIOR_VERSIONS_JSON NEW_VERSION_JSON
+# appends (or refreshes) one canary-proven version and publishes it atomically.
+# PRIOR_VERSIONS must be captured BEFORE the canary: a provider wrapper may
+# rewrite the record during its own canary, and the last good approvals have
+# to survive that. A failed canary never calls this (issue #1112 — the old
+# delete-before-canary revoke-on-fail was the 24-48h quarantine loop).
+publish_qualification_version() { # PROVIDER PRIOR_VERSIONS_JSON NEW_VERSION_JSON
+  local provider="$1" prior="$2" new_version="$3" versions
+  [ -n "$prior" ] || prior='[]'
+  versions="$(printf '%s\n' "$prior" | jq -c --argjson new "$new_version" '
+    [ .[] | select(
+        .wrapper_sha256 != $new.wrapper_sha256
+        or ((.runtime_sha256 // "") != ($new.runtime_sha256 // ""))
+        or ((.preloader_sha256 // "") != ($new.preloader_sha256 // ""))
+        or ((.agy_sha256 // "") != ($new.agy_sha256 // ""))
+        or ((.agy_version // "") != ($new.agy_version // ""))
+        or ((.model // "") != ($new.model // ""))
+      ) ] + [$new] | .[-32:]')" || return 1
+  write_qualification_store "$provider" "$versions" "$new_version"
+}
+
+# restore_qualification_versions PROVIDER PRIOR_RAW_JSON undoes any rewrite a
+# provider wrapper made during a canary this preflight rejected, putting the
+# record back exactly as it was before the canary started.
+restore_qualification_versions() { # PROVIDER PRIOR_RAW_JSON
+  local provider="$1" prior_raw="$2" file versions
+  file="$(qualification_file "$provider")"
+  if [ -z "$prior_raw" ]; then rm -f "$file"; return 0; fi
+  versions="$(normalize_qualification_versions "$prior_raw")"
+  if [ "$versions" = "[]" ]; then rm -f "$file"; return 0; fi
+  write_atomic "$file" "$prior_raw"
+}
+
+# activate_qualification_version PROVIDER VERSION_JSON syncs the record's
+# legacy top-level view to the version preflight selected, so the provider
+# wrapper's own check agrees with this selection. Best effort: a failed sync
+# never invalidates a match that already succeeded.
+activate_qualification_version() { # PROVIDER VERSION_JSON
+  local provider="$1" selected="$2" file raw versions current
+  file="$(qualification_file "$provider")"; [ -f "$file" ] || return 0
+  raw="$(cat "$file" 2>/dev/null)"; [ -n "$raw" ] || return 0
+  current="$(printf '%s\n' "$raw" | jq -c '{wrapper_sha256,runtime_sha256,preloader_sha256,agy_sha256,agy_version,model,qualified_epoch}' 2>/dev/null)" || return 0
+  [ "$current" = "$(printf '%s\n' "$selected" | jq -c '{wrapper_sha256,runtime_sha256,preloader_sha256,agy_sha256,agy_version,model,qualified_epoch}')" ] && return 0
+  versions="$(normalize_qualification_versions "$raw")"
+  [ "$versions" = "[]" ] && return 0
+  write_qualification_store "$provider" "$versions" "$selected" || true
+}
+
 gemini_live_qualified() {
-  local file wrapper expected actual expected_agy actual_agy expected_agy_sha actual_agy_sha expected_model actual_model out rc
+  local file wrapper actual actual_agy actual_agy_sha actual_model out rc versions match
   file="$(qualification_file gemini)"; [ -f "$file" ] || return 1
   wrapper="$(provider_wrapper gemini)"; [ -f "$wrapper" ] || return 1
-  jq -e '.version==2 and .provider=="gemini" and (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_version|type=="string" and length>0) and (.model|type=="string" and length>0) and (.qualified_epoch|type=="number")' "$file" >/dev/null 2>&1 || return 1
-  expected="$(jq -r .wrapper_sha256 "$file")"; expected_agy="$(jq -r .agy_version "$file")"; expected_agy_sha="$(jq -r .agy_sha256 "$file")"; expected_model="$(jq -r .model "$file")"
   actual="$(sha256sum "$wrapper" 2>/dev/null | awk '{print $1}')"
   set +e; out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; rc=$?; set -e
   [ "$rc" -eq 0 ] || return 1
   actual_agy="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY agy=\([^ ]*\) agy_sha256=.*/\1/p')"
   actual_agy_sha="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"
   actual_model="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY agy=[^ ]* agy_sha256=[0-9a-f]\{64\} model=\([^ ]*\) .*/\1/p')"
-  [ -n "$expected" ] && [ "$expected" = "$actual" ] && [ "$expected_agy" = "$actual_agy" ] && [ "$expected_agy_sha" = "$actual_agy_sha" ] && [ "$expected_model" = "$actual_model" ]
+  [ -n "$actual" ] && [ -n "$actual_agy" ] && [ -n "$actual_agy_sha" ] && [ -n "$actual_model" ] || return 1
+  versions="$(qualification_versions gemini)"
+  # Usable only when a stored version's key matches every installed byte. A
+  # stored version never authorizes untested bytes; drift selects the version
+  # that matches the drifted bytes, or fails closed.
+  match="$(printf '%s\n' "$versions" | jq -c --arg sha "$actual" --arg agy "$actual_agy" --arg agy_sha "$actual_agy_sha" --arg model "$actual_model" '
+    [ .[] | select(
+        (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+        (.agy_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+        (.agy_version|type=="string" and length>0) and
+        (.model|type=="string" and length>0) and
+        (.qualified_epoch|type=="number") and
+        .wrapper_sha256==$sha and .agy_sha256==$agy_sha and .agy_version==$agy and .model==$model
+      ) ][0] // empty')" || return 1
+  [ -n "$match" ] && [ "$match" != null ] || return 1
+  activate_qualification_version gemini "$match"
 }
 qwen_live_qualified() {
-  local file wrapper expected actual expected_runtime actual_runtime expected_preloader actual_preloader out rc count lines
+  local file wrapper actual actual_runtime actual_preloader out rc count lines versions match
   file="$(qualification_file qwen)"; [ -f "$file" ] || return 1
   wrapper="$(provider_wrapper qwen)"; [ -f "$wrapper" ] || return 1
-  expected="$(jq -r '.wrapper_sha256 // empty' "$file" 2>/dev/null)"
-  expected_runtime="$(jq -r '.runtime_sha256 // empty' "$file" 2>/dev/null)"
-  expected_preloader="$(jq -r '.preloader_sha256 // empty' "$file" 2>/dev/null)"
   actual="$(sha256sum "$wrapper" 2>/dev/null | awk '{print $1}')"
   set +e; out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; rc=$?; set -e
   [ "$rc" -eq 0 ] || return 1
@@ -184,7 +301,18 @@ qwen_live_qualified() {
   [ "$count" -eq 1 ] && [ "$lines" -eq 1 ] || return 1
   actual_runtime="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY runtime_sha256=\([0-9a-f]\{64\}\) preloader_sha256=[0-9a-f]\{64\}$/\1/p')"
   actual_preloader="$(printf '%s\n' "$out" | sed -n 's/^IDENTITY runtime_sha256=[0-9a-f]\{64\} preloader_sha256=\([0-9a-f]\{64\}\)$/\1/p')"
-  [ -n "$expected" ] && [ "$expected" = "$actual" ] && [ -n "$expected_runtime" ] && [ "$expected_runtime" = "$actual_runtime" ] && [ -n "$expected_preloader" ] && [ "$expected_preloader" = "$actual_preloader" ]
+  [ -n "$actual" ] && [ -n "$actual_runtime" ] && [ -n "$actual_preloader" ] || return 1
+  versions="$(qualification_versions qwen)"
+  match="$(printf '%s\n' "$versions" | jq -c --arg sha "$actual" --arg runtime "$actual_runtime" --arg preloader "$actual_preloader" '
+    [ .[] | select(
+        (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+        (.runtime_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+        (.preloader_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+        (.qualified_epoch|type=="number") and
+        .wrapper_sha256==$sha and .runtime_sha256==$runtime and .preloader_sha256==$preloader
+      ) ][0] // empty')" || return 1
+  [ -n "$match" ] && [ "$match" != null ] || return 1
+  activate_qualification_version qwen "$match"
 }
 qwen_runtime_sha() { # WRAPPER [DOCTOR_OUTPUT]
   local wrapper="$1" out="${2:-}" value count
@@ -348,43 +476,57 @@ provider_wrapper() {
 }
 
 qualify_qwen() {
-  local wrapper out rc sha before_sha runtime_sha preloader_sha now file
+  local wrapper out rc sha before_sha runtime_sha preloader_sha now file prior_versions prior_raw
   wrapper="$(provider_wrapper qwen)"; [ -x "$wrapper" ] || die "Qwen wrapper is not executable: $wrapper"
-  file="$(qualification_file qwen)"; rm -f "$file"
+  file="$(qualification_file qwen)"
+  # Never delete the prior qualification before the canary (issue #1112). A
+  # failed canary keeps the previous version valid — revoke-on-fail was the
+  # 24-48h quarantine loop — and never authorizes the untested bytes.
+  prior_raw="$(cat "$file" 2>/dev/null || true)"
+  prior_versions="$(qualification_versions qwen)"
   before_sha="$(sha256sum "$wrapper" | awk '{print $1}')"
   set +e; out="$(timeout "${AI_REVIEW_QWEN_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?; set -e
-  [ "$rc" = 0 ] || { printf 'ai-review-preflight: Qwen live qualification failed; quarantine remains.\n%s\n' "$out" >&2; return 1; }
-  runtime_sha="$(qwen_runtime_sha "$wrapper" "$out")" || { printf 'ai-review-preflight: Qwen live qualification did not identify one exact installed runtime hash; quarantine remains.\n' >&2; return 1; }
-  preloader_sha="$(qwen_preloader_sha "$wrapper" "$out")" || { printf 'ai-review-preflight: Qwen live qualification did not identify one exact credential-preloader hash; quarantine remains.\n' >&2; return 1; }
-  sha="$(sha256sum "$wrapper" | awk '{print $1}')"; [ "$before_sha" = "$sha" ] || { printf 'ai-review-preflight: Qwen wrapper changed during qualification; quarantine remains.\n' >&2; return 1; }
+  [ "$rc" = 0 ] || { restore_qualification_versions qwen "$prior_raw"; printf 'ai-review-preflight: Qwen live qualification failed; the previous qualification version stays valid.\n%s\n' "$out" >&2; return 1; }
+  runtime_sha="$(qwen_runtime_sha "$wrapper" "$out")" || { restore_qualification_versions qwen "$prior_raw"; printf 'ai-review-preflight: Qwen live qualification did not identify one exact installed runtime hash; the previous qualification version stays valid.\n' >&2; return 1; }
+  preloader_sha="$(qwen_preloader_sha "$wrapper" "$out")" || { restore_qualification_versions qwen "$prior_raw"; printf 'ai-review-preflight: Qwen live qualification did not identify one exact credential-preloader hash; the previous qualification version stays valid.\n' >&2; return 1; }
+  sha="$(sha256sum "$wrapper" | awk '{print $1}')"; [ "$before_sha" = "$sha" ] || { restore_qualification_versions qwen "$prior_raw"; printf 'ai-review-preflight: Qwen wrapper changed during qualification; untested bytes are not authorized and the previous qualification version stays valid.\n' >&2; return 1; }
   now="$(now_epoch)"
-  write_atomic "$file" "$(jq -nc --arg provider qwen --arg sha "$sha" --arg runtime "$runtime_sha" --arg preloader "$preloader_sha" --argjson at "$now" '{version:3,provider:$provider,wrapper_sha256:$sha,runtime_sha256:$runtime,preloader_sha256:$preloader,qualified_epoch:$at}')"
-  qwen_live_qualified || { rm -f "$file"; printf 'ai-review-preflight: Qwen qualification record did not validate after writing; quarantine remains.\n' >&2; return 1; }
+  publish_qualification_version qwen "$prior_versions" "$(jq -nc --arg sha "$sha" --arg runtime "$runtime_sha" --arg preloader "$preloader_sha" --argjson at "$now" '{wrapper_sha256:$sha,runtime_sha256:$runtime,preloader_sha256:$preloader,qualified_epoch:$at}')" \
+    || { restore_qualification_versions qwen "$prior_raw"; printf 'ai-review-preflight: Qwen qualification version did not publish; the previous qualification version stays valid.\n' >&2; return 1; }
+  qwen_live_qualified || { restore_qualification_versions qwen "$prior_raw"; printf 'ai-review-preflight: Qwen qualification record did not validate after publishing; the previous qualification version stays valid.\n' >&2; return 1; }
   note "ai-review-preflight: Qwen live qualification recorded for wrapper $sha, runtime $runtime_sha, and credential preloader $preloader_sha."
 }
 
 qualify_gemini() {
-  local wrapper out rc sha before_sha agy_version before_agy agy_sha before_agy_sha model before_model now file doctor_out before_doctor count
+  local wrapper out rc sha before_sha agy_version before_agy agy_sha before_agy_sha model before_model now file doctor_out before_doctor count prior_versions prior_raw
   wrapper="$(provider_wrapper gemini)"; [ -x "$wrapper" ] || die "Gemini wrapper is not executable: $wrapper"
-  file="$(qualification_file gemini)"; rm -f "$file"
+  file="$(qualification_file gemini)"
+  # Never delete the prior qualification before the canary (issue #1112). A
+  # failed canary keeps the previous version valid — revoke-on-fail was the
+  # 24-48h quarantine loop — and never authorizes the untested bytes. The
+  # prior store is captured before the canary because bin/ai-gemini rewrites
+  # the record when its own canary passes; that rewrite must not drop history.
+  prior_raw="$(cat "$file" 2>/dev/null || true)"
+  prior_versions="$(qualification_versions gemini)"
   before_sha="$(sha256sum "$wrapper" | awk '{print $1}')"
   set +e; before_doctor="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; set -e
   before_agy="$(printf '%s\n' "$before_doctor" | sed -n 's/^[A-Z]* agy=\([^ ]*\) agy_sha256=.*/\1/p')"; before_agy_sha="$(printf '%s\n' "$before_doctor" | sed -n 's/^[A-Z]* agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"; before_model="$(printf '%s\n' "$before_doctor" | sed -n 's/^[A-Z]* agy=[^ ]* agy_sha256=[0-9a-f]\{64\} model=\([^ ]*\) .*/\1/p')"
-  [ -n "$before_agy" ] && [ -n "$before_agy_sha" ] && [ -n "$before_model" ] || { printf 'ai-review-preflight: Gemini qualification could not identify the pre-canary runtime and model; quarantine remains.\n' >&2; return 1; }
+  [ -n "$before_agy" ] && [ -n "$before_agy_sha" ] && [ -n "$before_model" ] || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini qualification could not identify the pre-canary runtime and model; the previous qualification version stays valid.\n' >&2; return 1; }
   set +e; out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" qualify-live 2>&1)"; rc=$?; set -e
-  [ "$rc" = 0 ] || { printf 'ai-review-preflight: Gemini live qualification failed; quarantine remains.\n%s\n' "$out" >&2; return 1; }
+  [ "$rc" = 0 ] || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini live qualification failed; the previous qualification version stays valid.\n%s\n' "$out" >&2; return 1; }
   count="$(printf '%s\n' "$out" | grep -Ec '^QUALIFIED session=[^ ]+ model=[^ ]+ exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=.+$' || true)"
-  [ "$count" -eq 1 ] || { printf 'ai-review-preflight: Gemini live qualification did not return one exact QUALIFIED contract; quarantine remains.\n' >&2; return 1; }
+  [ "$count" -eq 1 ] || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini live qualification did not return one exact QUALIFIED contract; the previous qualification version stays valid.\n' >&2; return 1; }
   model="$(printf '%s\n' "$out" | sed -n 's/^QUALIFIED session=[^ ]* model=\([^ ]*\) exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=.*$/\1/p')"
   set +e; doctor_out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)"; set -e
   agy_version="$(printf '%s\n' "$doctor_out" | sed -n 's/^[A-Z]* agy=\([^ ]*\) agy_sha256=.*/\1/p')"; agy_sha="$(printf '%s\n' "$doctor_out" | sed -n 's/^[A-Z]* agy=[^ ]* agy_sha256=\([0-9a-f]\{64\}\) model=.*/\1/p')"
-  [ -n "$agy_version" ] && [ -n "$model" ] || { printf 'ai-review-preflight: Gemini qualification could not bind the runtime version and model; quarantine remains.\n' >&2; return 1; }
-  printf '%s\n' "$doctor_out" | grep -q " model=$model " || { printf 'ai-review-preflight: Gemini qualification model disagrees with the wrapper doctor; quarantine remains.\n' >&2; return 1; }
+  [ -n "$agy_version" ] && [ -n "$model" ] || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini qualification could not bind the runtime version and model; the previous qualification version stays valid.\n' >&2; return 1; }
+  printf '%s\n' "$doctor_out" | grep -q " model=$model " || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini qualification model disagrees with the wrapper doctor; the previous qualification version stays valid.\n' >&2; return 1; }
   sha="$(sha256sum "$wrapper" | awk '{print $1}')"
-  [ "$before_sha" = "$sha" ] && [ "$before_agy" = "$agy_version" ] && [ "$before_agy_sha" = "$agy_sha" ] && [ "$before_model" = "$model" ] || { printf 'ai-review-preflight: Gemini wrapper, runtime, or model changed during qualification; quarantine remains.\n' >&2; return 1; }
+  [ "$before_sha" = "$sha" ] && [ "$before_agy" = "$agy_version" ] && [ "$before_agy_sha" = "$agy_sha" ] && [ "$before_model" = "$model" ] || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini wrapper, runtime, or model changed during qualification; untested bytes are not authorized and the previous qualification version stays valid.\n' >&2; return 1; }
   now="$(now_epoch)"
-  write_atomic "$file" "$(jq -nc --arg provider gemini --arg sha "$sha" --arg agy "$agy_version" --arg agy_sha "$agy_sha" --arg model "$model" --argjson at "$now" '{version:2,provider:$provider,wrapper_sha256:$sha,agy_version:$agy,agy_sha256:$agy_sha,model:$model,qualified_epoch:$at}')"
-  gemini_live_qualified || { rm -f "$file"; printf 'ai-review-preflight: Gemini qualification record did not validate after writing; quarantine remains.\n' >&2; return 1; }
+  publish_qualification_version gemini "$prior_versions" "$(jq -nc --arg sha "$sha" --arg agy "$agy_version" --arg agy_sha "$agy_sha" --arg model "$model" --argjson at "$now" '{wrapper_sha256:$sha,agy_version:$agy,agy_sha256:$agy_sha,model:$model,qualified_epoch:$at}')" \
+    || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini qualification version did not publish; the previous qualification version stays valid.\n' >&2; return 1; }
+  gemini_live_qualified || { restore_qualification_versions gemini "$prior_raw"; printf 'ai-review-preflight: Gemini qualification record did not validate after publishing; the previous qualification version stays valid.\n' >&2; return 1; }
   note "ai-review-preflight: Gemini live qualification recorded for wrapper $sha, agy $agy_version, and model $model."
 }
 
@@ -418,10 +560,12 @@ ai-reviewer-issue record itself failed."
 }
 
 # requalify_expected_file PROVIDER is the marker that says this host HAS
-# held a live qualification for the provider. qualify_* deletes the record
-# before its canary, so a failed requalification leaves no record; without
-# this marker the next automatic run would see "no record" and silently
-# stop retrying (#804 requires the opposite).
+# held a live qualification for the provider. A record that is missing
+# entirely (for example, manually removed) with a marker present is still
+# retried; without this marker the next automatic run would see "no record"
+# and silently stop retrying (#804 requires the opposite). Since #1112 the
+# qualify path no longer deletes the record on a failed canary, so the
+# "revoked" case only appears when something outside requalify removed it.
 requalify_expected_file() { printf '%s/%s-requalify-marker.json' "$STATE_DIR" "$1"; }
 
 # requalify_provider PROVIDER returns 0 when the provider's live qualification
@@ -442,7 +586,7 @@ requalify_provider() { # PROVIDER
       note "ai-review-preflight: $provider has no prior live-qualification record; nothing to re-qualify."
       return 0
     fi
-    note "ai-review-preflight: $provider qualification record was revoked by a failed requalification; retrying."
+    note "ai-review-preflight: $provider qualification record is missing but this host held one before; retrying."
   else
     write_atomic "$marker" "$(jq -nc --arg provider "$provider" --argjson at "$(now_epoch)" '{version:1,provider:$provider,expected_epoch:$at}')"
     case "$provider" in
