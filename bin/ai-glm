@@ -700,6 +700,9 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER] [FIELDS]
 implementation_update() { # FILE JQ_FILTER [jq args...]
   local f="$1" filter="$2" old new tmp record_caller update_lock="$1.update.lock.d"; shift 2
   metadata_lock_acquire "$update_lock" || return 1
+  # Pre-write gate must see the file on disk, not a reconcile snapshot.
+  unset '_AI_GLM_IMPL_FIELDS[$f]'
+  _AI_GLM_CANONICAL_PATH=()
   record_caller="$(jq -r '.caller // empty' "$f" 2>/dev/null)"
   if [ ! -f "$f" ] || [ -z "$record_caller" ] || ! implementation_meta_valid "$f" "" "$record_caller"; then
     rm -rf "$update_lock"; return 1
@@ -2452,10 +2455,12 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
     [ "$state" = failed ] && implementation_cleanup_pending "$mp" || return 0
   fi
   if kill -0 "$pid" 2>/dev/null; then return 0; fi
-  # Dead-owner recovery is destructive (clone tree, terminal write). Re-read the
-  # record from disk so a mid-pass mutation cannot be authorized by the batch
-  # snapshot used for the live-owner fast path.
-  fields="$(implementation_record_fields "$mp" fresh)" || return 0
+  # Dead-owner recovery is destructive (clone tree, terminal write). Drop the
+  # batch snapshot in THIS shell (a $(...) subshell cannot) so the re-read and
+  # every later canonical_path see on-disk truth.
+  unset '_AI_GLM_IMPL_FIELDS[$mp]'
+  _AI_GLM_CANONICAL_PATH=()
+  fields="$(implementation_record_fields "$mp")" || return 0
   IFS=$'\x1f' read -r schema_ok rid caller name root state pid clone sid type <<< "$fields"
   [ "$type" = implementation ] || return 0
   if [ -z "$root" ] || [ -z "$caller" ] || ! implementation_record_path_valid "$mp" "$fields" || ! implementation_meta_valid "$mp" "$root" "$caller" "$fields"; then
