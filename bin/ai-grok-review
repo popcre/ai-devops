@@ -2053,7 +2053,8 @@ recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE
     [ ! -f "$out.terminal.json" ] || mv -f "$out.terminal.json" "$out.resume$n.replaced-terminal.json"
     mv -f "$next" "$out"
     [ ! -f "$next.terminal.json" ] || mv -f "$next.terminal.json" "$out.terminal.json"
-    rm -f "$next.err"
+    # stderr belongs to the result it now sits beside.
+    if [ -f "$next.err" ]; then mv -f "$next.err" "$out.err"; else rm -f "$out.err"; fi
   done
   return 0
 }
