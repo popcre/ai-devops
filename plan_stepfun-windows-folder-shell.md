@@ -1,196 +1,288 @@
 # IMPLEMENTATION PLAN — StepFun Windows folder + test shell (2026-09-30)
 
-## 1. The ultimate goal — what we are trying to achieve
+> **Fresh session starts here.** Owner decision, threat model, exact files, and
+> verification gates are below. No chat context is required. If any step
+> conflicts with §1, the goal wins — stop and flag it.
 
-StepFun Step 5 runs on edge-dev Windows again, as a reviewer/implementer whose
-turn is confined to a disposable review folder, with shell allowed only to run
-the project's tests inside that folder. Linux keeps today's bubblewrap guarantee
-unchanged. Residual Windows risk (absolute host paths may still be reachable
-through shell escapes) is named and owner-accepted — it is not claimed as
-rule-11 equivalent. Issue: popcre/ai-devops#1169.
+## STATUS (live)
+
+| Step | Status | Evidence |
+|---|---|---|
+| 1 Plan written | DONE | this file |
+| 2 Plan review #1 | DONE — REJECT | `.ai/reviews/grok-plan-review-20260930T172515-118426-1832.md` |
+| 3 Plan revised after reject | DONE (this revision) | commit message cites grok findings |
+| 4 Plan re-review → APPROVE | OPEN | required before any code commit |
+| 5 Wrapper `require_engine` / `run_opencode_turn` / `key_store_ok` | OPEN | |
+| 6 Windows env allowlist + HOME/APPDATA redirect | OPEN | |
+| 7 Test-runner allowlist shell gate | OPEN | |
+| 8 Agent profiles + preflight + tests inversion | OPEN | |
+| 9 Docs / rule 11 Windows exception / registry | OPEN | |
+| 10 Offline tests green | OPEN | |
+| 11 Live isolation proof (fail bar in §10) | OPEN | `tests/verification/` |
+| 12 Exact-head CODE review → APPROVE | OPEN | required (reviewer-safety) |
+| 13 PR merge via queue | OPEN | |
+| 14 Install refresh + final live turn | OPEN | |
+| 15 #1169 close with owner quote + residual risk | OPEN | |
+
+## 1. The ultimate goal
+
+StepFun Step 5 runs on edge-dev Windows as reviewer/implementer confined to a
+**disposable review folder**, with **shell allowed only for an allowlisted set
+of test runners** inside that folder. Linux bubblewrap is unchanged. Windows is
+**not** claimed to be rule-11 equivalent. Residual risk (shell-escape or
+non-allowlisted interpreter paths to host credentials) is named and
+owner-accepted.
 
 If any step below conflicts with this goal, the goal wins — stop and flag it.
 
 ## 2. What this application is
 
-`popcre/ai-devops` — Albert's public recovery toolkit. This change touches the
-StepFun reviewer wrapper (`bin/ai-stepfun`), its shared skill, reviewer
-registry/membership config, rotation rules, offline tests, and a live isolation
-proof under `tests/verification/`. Work happens on a branch cut from
-`origin/main` in a dedicated worktree; never edit a shared checkout.
+`popcre/ai-devops` public recovery toolkit. This change is the StepFun reviewer
+path: `bin/ai-stepfun`, OpenCode agent profiles, preflight, skill/docs/registry,
+tests, live proof. Worktree `C:/repos/ai-devops-wt-stepfun-win`, branch
+`stepfun-windows-folder-shell`. Never edit a shared checkout.
 
 ## 3. What triggered this work
 
-- #1169: stale pre-#1086 install ran StepFun on Windows unsandboxed.
-- Owner Albert (MiMo chat, 2026-09-30): this PC cannot run WSL (RAM maxed by
-  ZCode, MiMo Desktop, Claude). After the risk was explained in plain language,
-  he chose **"folder + test shell."** — explore the review folder freely and run
-  tests inside it; accept the residual exposure in writing.
+#1169. Owner Albert (MiMo chat, 2026-09-30) cannot use WSL (RAM maxed by ZCode,
+MiMo Desktop, Claude). After risk was explained he chose verbatim: **folder +
+test shell.** Meaning accepted: explore the review folder; run tests via shell
+inside it; residual host-path risk accepted in writing.
 
 ## 4. Scope — in and out
 
-In: Windows path for `ai-stepfun` via pinned OpenCode; folder confinement;
-test-only shell; cleared env + redirected HOME; docs/skill/registry/tests;
-live proof on edge-dev; #1169 closeout.
+In: Windows OpenCode path for `ai-stepfun`; folder confinement; test-runner
+allowlist shell; Windows-safe env allowlist; key-store Windows rule; preflight
+`static_status`; agent profiles; inverted refusal tests; rule 11 exception;
+live proof with fail bar; install refresh; #1169 closeout.
 
-NOT in: WSL or bubblewrap on Windows; weakening the Linux bubblewrap path;
-StepCode on Windows; allocator membership changes beyond the existing
-out-of-allocator listing; restoring `bin/setup-opencode-stepfun.ps1` verbatim
-from backups (reference only).
+NOT in: WSL; Windows bubblewrap; weakening Linux bubblewrap; StepCode on
+Windows; allocator membership for StepFun (LOCKED out); restoring
+`bin/setup-opencode-stepfun.ps1` verbatim; a new StepFun OpenCode installer
+(reuse GLM/Muse pin `config/opencode/version` +
+`$HOME/.local/lib/ai-devops/opencode/$OC_VERSION/.../opencode.exe`).
 
-## 5. Current state of the code
+## 5. Current state of the code (`origin/main` @ `93ff6e48`)
 
-`origin/main` @ `93ff6e48` (worktree `C:/repos/ai-devops-wt-stepfun-win`,
-branch `stepfun-windows-folder-shell`). `bin/ai-stepfun` refuses non-Linux with
-`unsupported-platform` (#1086). Skill/docs/registry record Ubuntu-only +
-bubblewrap. `config/opencode-stepfun/` remains for the Linux OpenCode fallback.
-Backups of the old Windows setup live outside the repo
-(`/c/repos/reviewer-install-untracked-backup-2026-09-30/`) — reference only.
-
-## 6. Key findings and root cause
-
-- Rule 11 isolation = bubblewrap mount namespace (paths unreachable). Windows
-  has no bubblewrap. Cleared env + HOME redirect is **not** equivalent.
-- Owner cannot use WSL (RAM). So Windows cannot meet rule 11 as written.
-- Owner chose a **narrower** product guarantee: folder + test shell, residual
-  risk accepted 2026-09-30 (quoted in §8). Rule 11 text must gain an explicit
-  Windows exception so docs stop promising what Windows cannot deliver.
-
-## 7. Approaches considered and REJECTED, and why
-
-| Approach | Why rejected |
+| Location | State |
 |---|---|
-| WSL2 + bubblewrap | Owner: PC RAM maxed; WSL not viable (2026-09-30). |
-| Windows Sandbox / VM | Too heavy on this host; same RAM constraint. |
-| Claim env-clear + HOME redirect = rule 11 | False. Absolute paths and named pipes remain. |
-| Packet-only (no tools) | Owner chose folder + test shell instead. |
-| Full shell with no confinement | Too wide; not the owner's choice. |
-| Restore #1049 Windows path verbatim | Unsanbox'd; caused the #1169 drift. |
+| `bin/ai-stepfun:93-104` `require_engine` | exits `unsupported-platform` unless `IS_LINUX=1` |
+| `bin/ai-stepfun:127-135` `key_store_ok` | returns 1 on all Windows (`[ "$IS_LINUX" = 1 ]`) |
+| `bin/ai-stepfun:217-247` `run_opencode_turn` | always requires bubblewrap + `/usr/bin/timeout` |
+| `bin/ai-stepfun:291` `STEP_ENV_ALLOW` | Linux allowlist `LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR` |
+| `bin/ai-stepfun:389-393` `cmd_doctor` | already skips bwrap on Windows (dead until require_engine allows) |
+| `bin/ai-review-preflight:248-258,325` | StepFun `unsupported-platform` unless Linux |
+| `config/opencode-stepfun/agent/stepfun-{review,implement}.md` | `bash: "*": allow` + write/edit (#974) |
+| `config/opencode-stepfun/opencode.json` | no `mcp` key today (keep as regression assert) |
+| `tests/test-ai-stepfun.sh:192-199` | asserts Windows refused; OpenCode block SKIP off-Linux |
+| `tests/test-ai-review-preflight.sh:288-291` | Windows unsupported even with OpenCode |
+| `tests/test-install-ai-provider-clis.sh:62-67` | non-Linux StepCode install fails — **KEEP** (Windows uses OpenCode) |
+| `docs/reviewer-rotation-rules.md` rule 11 | Ubuntu-only + bubblewrap |
+| `docs/architecture.md:151` | "StepFun on Ubuntu/Linux only" |
+| `config/reviewer-membership-scope.json` | outside allocator; "never assigned to a Windows session" |
 
-## 8. Design decisions already made (dated)
+## 6. Key findings
 
-- **LOCKED (owner 2026-09-30, Albert chat): "folder + test shell."** Quote for
-  the decision trail: *folder + test shell.* Meaning as presented and accepted:
-  StepFun may explore the review folder and run tests via shell inside that
-  folder; it is not promised host-credential unreachability.
-- **LOCKED:** Linux bubblewrap path unchanged; Windows never claims bubblewrap.
-- **LOCKED:** One reviewed PR; design review before landing code; live proof
-  from inside a real Windows turn before #1169 close.
-- **OPEN:** Exact shell-guard strictness (denylist of credential paths vs
-  allowlist of test runners) — implementer picks the stronger practical guard
-  and proves it in the live turn.
+- Bubblewrap = mount unreachability. Windows cannot do that without WSL/VM.
+- Env-clear + HOME redirect is not unreachability. Owner accepted residual risk.
+- Sibling Windows isolation (grok `bin/ai-grok-review:1182-1204`, qwen
+  `bin/ai-qwen:98-102`, muse `bin/ai-muse:258-259`) uses an **allowlist**
+  survival set (`SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `APPDATA`, `LOCALAPPDATA`,
+  …), not a denylist strip.
+- OpenCode bash is already `bash: "*": allow` — a path denylist in front of it
+  is theater (`type`, `python -c`, `powershell Get-Content`, UNC).
 
-## 9. The plan — numbered, ordered steps
+## 7. Approaches REJECTED
 
-### Phase A — Plan and design review
-1. Land this plan on the worktree branch. Verify: file exists at repo root and
-   STATUS table below is filled.
-2. Independent exact-head design review (`ai-review` / assigned reviewer).
-   Verify: APPROVE of the plan head before any code commit.
-3. `bin/ai-task-gates check --before review` then before wait/merge later.
+| Approach | Why |
+|---|---|
+| WSL2 + bubblewrap | Owner: no RAM (2026-09-30). |
+| Windows Sandbox / VM | Same host constraint. |
+| Claim env-clear + HOME redirect = rule 11 | False. |
+| Credential-path **denylist** in front of full bash | Bypassable; not "test shell". |
+| Packet-only / no tools | Owner chose folder + test shell. |
+| Restore #1049 path verbatim | Unsandboxed; caused #1169 drift. |
+| Drop write/edit on Windows only | Contradicts #974; `echo >` still writes via bash. |
 
-### Phase B — Wrapper and isolation
-4. `bin/ai-stepfun`: on Windows allow OpenCode engine; refuse StepCode;
-   implement per-run profile dir, cleared environment (strip SSH/gith credential
-   agent, `GH_TOKEN`, `GITHUB_TOKEN`, `OP_SERVICE_ACCOUNT_TOKEN`, `DOCKER_*`,
-   `GIT_*` auth), `HOME`/`USERPROFILE` redirected to a fresh per-run dir, cwd =
-   disposable review copy, remote-less. Linux path unchanged (bubblewrap still
-   required).
-5. Windows shell gate: wrap `bash`/test execution so shell work is rooted at the
-   review folder; deny known credential locations (SSH dir, gh/git credential
-   files, 1Password token file, Docker pipe) with a clear refusal message. This
-   is best-effort and must be labeled as such in code comments and docs.
-6. Tool profile: `read,grep,find,ls,bash` for review/ask inside the folder;
-   `implement` keeps write/edit in the disposable clone. No OpenCode MCP that
-   can reach 1Password or Docker.
+## 8. Design decisions
 
-### Phase C — Docs and registry
-7. `docs/reviewer-rotation-rules.md` rule 11: keep Ubuntu bubblewrap text;
-   add Windows exception citing owner 2026-09-30 "folder + test shell" and the
-   residual risk. Do not say Windows is rule-11 equivalent.
-8. `skills/shared/stepfun/SKILL.md`, `docs/config-inventory.md` StepFun row,
-   `config/reviewer-registry.json`, `config/reviewer-membership-scope.json`,
-   `config/provider-cli-versions.json` as needed — Windows allowed with the
-   named weaker guarantee.
-9. Fix the wrong #1091 citation wherever this work records history: the
-   Windows refusal / mandatory bubblewrap is **#1086**.
+- **LOCKED (owner 2026-09-30):** "folder + test shell." Quote: *folder + test
+  shell.* Residual risk accepted: non-allowlisted escapes may reach host paths.
+- **LOCKED:** Linux bubblewrap unchanged; Windows never claimed rule-11 equal.
+- **LOCKED:** Shell gate is a **test-runner allowlist**, not a credential
+  denylist. Allow only runners needed for the reviewed project's tests (default
+  set: `npm`, `npm.cmd`, `npx`, `node`, `pytest`, `python`, `python3`, `go`,
+  `cargo`, `dotnet`, `pwsh`, `powershell` **only when the invocation is a test
+  script under the review folder**, plus `bash`/`sh` limited to scripts whose
+  path is under the review folder). Anything else is refused with a clear
+  message. Escape via a copied interpreter or absolute host script is residual
+  risk (owner-accepted), not a silent hole.
+- **LOCKED:** review/ask keep write/edit/bash **inside the disposable copy**
+  (#974). Windows does not narrow the tool list below Linux's contract.
+- **LOCKED:** `STEP_ENV_ALLOW` stays an allowlist; extend with the Windows
+  survival set used by grok/qwen/muse. Never switch to a denylist. Parent loads
+  the key from the real profile store **before** child HOME/USERPROFILE/APPDATA
+  redirect.
+- **LOCKED:** StepFun stays **outside the allocator** even when Windows works
+  (`config/reviewer-membership-scope.json`). Explicit `ai-stepfun` only.
+- **LOCKED:** Live proof fail bar (§10): allowlisted test run must work;
+  reads of credential locations **via allowlisted runners only** may succeed
+  (residual, recorded); non-allowlisted access commands must be **refused by
+  the gate** in the recorded attempt list. A gate refusal that does not happen
+  is a plan failure, not "accepted residual".
+- **OPEN:** which concrete runners appear in the default allowlist for a given
+  repo (derive from lockfiles / `package.json` scripts when present).
 
-### Phase D — Tests and proof
-10. Offline: extend `tests/test-ai-stepfun.sh` for Windows selection, env
-    strip, HOME redirect, shell-guard refusal, and "Linux still requires
-    bubblewrap" regression. Register any new suite in `config/ci-suites/`.
-11. Live isolation proof on edge-dev (Git Bash, not WSL): from inside a real
-    `ai-stepfun ask`/`review` turn, attempt reads of credential paths and the
-    Docker pipe; record pass/fail of each attempt plus a normal review still
-    working. Save under `tests/verification/` with run/turn evidence.
-    If an attempt **succeeds**, record it as residual risk (owner-accepted) —
-    do not hide it and do not silently weaken further.
-12. PR with plan + code + proof pointer; `bin/ai-pr-wait`; merge per
-    `config/repository-policy.json`.
+## 9. The plan — numbered steps (each has a verify gate)
 
-### Phase E — Install and closeout
-13. Refresh `C:/repos/ai-devops-reviewer-install` to new main so it cannot
-    drift ahead of policy. Re-run `ai-review-preflight status stepfun` and one
-    live Windows turn as final proof.
-14. Comment the decision trail on #1169 (owner quote + date), evidence links,
-    residual risk sentence, close it. Sign every GitHub post.
+### Phase A — Plan approval
+1. This revision committed. **Verify:** STATUS shows step 3 DONE and cites the
+   grok reject file.
+2. Re-run plan-review at exact head until APPROVE. **Verify:** report names the
+   plan head SHA and `VERDICT: APPROVE`.
+3. `bin/ai-task-gates check --before review` before later phases. **Verify:**
+   gate allows the declared class.
 
-## 10. Tests required
+### Phase B — Wrapper (functions named)
+4. `require_engine` (`bin/ai-stepfun:93-104`): allow Windows + ENGINE=opencode;
+   still refuse StepCode on Windows; Linux still requires bubblewrap.
+   **Verify:** `AI_STEPFUN_PLATFORM=Windows` doctor reaches engine detect, no
+   `unsupported-platform`.
+5. `key_store_ok` (`:127-135`): Windows accepts present, non-empty, non-symlink
+   store; do not require `stat 600`. **Verify:** unit path in offline suite.
+6. `run_opencode_turn` (`:217-247`): add a Windows branch that does **not**
+   call `bwrap` or `/usr/bin/timeout` (use Git Bash `timeout` or a portable
+   bound); launch with allowlisted env; child HOME/USERPROFILE/APPDATA → per-run
+   dir; cwd = disposable copy. Parent may read `KEY_STORE` first.
+   **Verify:** offline stub launch shows no bwrap in argv and redirected profile
+   vars in the child env dump.
+7. Extend `STEP_ENV_ALLOW` (`:291`) with Windows survival set (copy the
+   grok/qwen/muse list: `SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `TMP`, `TEMP`,
+   `APPDATA`, `LOCALAPPDATA`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `PATH`
+   only as needed for `node`/`npm`, etc.). **Verify:** `GH_TOKEN`,
+   `GITHUB_TOKEN`, `OP_SERVICE_ACCOUNT_TOKEN`, `SSH_AUTH_SOCK`, `DOCKER_*` are
+   absent from the child dump.
 
-- `tests/test-ai-stepfun.sh` (extended) must pass on Windows Git Bash and Linux.
-- Existing `tests/test-all.sh --windows-offline` / reviewer-safety membership
-  must stay green; new suites registered in `config/ci-suites/` if added.
-- Live proof record under `tests/verification/` (phase D step 11) is required
-  before close.
+### Phase C — Test-runner allowlist shell gate
+8. Add `bin/ai-stepfun-windows-shell` (or equivalent invoked by the OpenCode
+   agent bash): cwd forced to review folder; argv must be an allowlisted
+   runner or a script path under the review folder; otherwise exit 126 with
+   `stepfun-shell: refused (not an allowlisted test runner)`.
+   **Verify:** offline cases in §10 adversarial table all behave as specified.
+9. Point `config/opencode-stepfun/agent/stepfun-review.md` and
+   `stepfun-implement.md` bash permission at that gate on Windows (keep
+   `bash: "*": allow` semantics for Linux bubblewrap, or route both through
+   the gate with Linux seeing the same allowlist **plus** bwrap). Keep
+   write/edit/patch. Assert `opencode.json` still has no MCP. **Verify:**
+   profile diff is intentional and tests cover both platforms.
 
-## 11. Constraints, standing rules, and gotchas in force
+### Phase D — Preflight, tests, docs
+10. `bin/ai-review-preflight` `static_status` / `explain_failure`
+    (`:248-258`, `:325`): Windows + OpenCode + key store + shell gate ⇒ usable;
+    without them keep a specific failure (not a blanket `unsupported-platform`).
+    **Verify:** `ai-review-preflight status stepfun` on edge-dev is usable after
+    install refresh.
+11. Invert refusal tests (do not merely extend):
+    - `tests/test-ai-stepfun.sh:192-199` — Windows+OpenCode is supported;
+      OpenCode block runs on Windows with stubs (no `stat 600`, no bwrap).
+    - `tests/test-ai-review-preflight.sh:288-291` — same inversion.
+    - **Keep** `tests/test-install-ai-provider-clis.sh:62-67` (StepCode stays
+      Linux-only).
+    **Verify:** `tests/test-ai-stepfun.sh` and preflight test green on Windows
+    Git Bash and Linux.
+12. Docs: rule 11 Windows exception (quote owner + residual risk; do **not**
+    claim equivalence); `skills/shared/stepfun/SKILL.md`;
+    `docs/config-inventory.md` StepFun row; `docs/architecture.md:151`;
+    `bin/ai-stepfun` `usage()`; `config/reviewer-registry.json` reason text;
+    membership scope left out-of-allocator (LOCKED). **Verify:** docs grep shows
+    no "Windows refused" / "Ubuntu-only" absolute claim without the exception.
+13. `AGENTS.md` task-router row for this plan + `HANDOFF.d/` backlink file.
+    **Verify:** both exist and point at this plan.
 
-- Never push to `main`; branch + PR + merge queue.
-- `git var GIT_COMMITTER_IDENT` must show Albert's identity before commit.
-- Reviewer-safety class: independent review before merge (`ai-review`).
-- No secrets in chat, argv, logs, commits. Never print credential contents —
-  only "read succeeded/failed".
-- PowerShell/Git Bash compatibility; run bash tests through Git Bash on
-  Windows (`C:\Program Files\Git\bin\bash.exe` — system `bash` is WSL stub).
-- Do not weaken Linux bubblewrap. Do not claim Windows equals rule 11.
-- Sign GitHub: `Posted by MiMo chat <id> on edge-dev`. Times in EST/EDT.
+### Phase E — Proof, review, ship
+14. Offline suite + any new `config/ci-suites/` registration. **Verify:**
+    `tests/test-all.sh --windows-offline` relevant shards green; collision
+    check `bin/ai-test-local --check-collision` first.
+15. Live isolation proof on edge-dev (Git Bash, not WSL) in one real
+    `ai-stepfun ask`/`review` turn — fail bar in §10. Record under
+    `tests/verification/`. **Verify:** record file lists each attempt with
+    refused/residual/allowed and the turn id.
+16. Exact-head **code** review (`ai-review <pool> diff-review|final-check
+    --assert-head`) — required for reviewer-safety. **Verify:** APPROVE bound
+    to the PR head.
+17. PR, `bin/ai-pr-wait`, merge per `config/repository-policy.json`.
+    **Verify:** merge SHA on `origin/main`.
+18. Refresh `C:/repos/ai-devops-reviewer-install` to new main; rerun preflight
+    + one live Windows turn. **Verify:** install tree matches main digest;
+    preflight usable.
+19. #1169: owner quote, residual-risk sentence, evidence links, close. Sign
+    every post. **Verify:** issue CLOSED.
+
+## 10. Tests required (including adversarial table)
+
+Fail bar for live proof (§8 LOCKED):
+- Allowlisted test run **inside the folder** → must succeed.
+- Gate refusal of a **non-allowlisted** access command (e.g. `type`, `cat`
+  of a host path, `python -c` open host path) → **must be refused** and
+  recorded as such. Missing refusal = plan failure.
+- Allowlisted runner reading a host credential path → residual (record
+  succeeded/failed **without printing contents**).
+
+| # | Hostile case | Expected | Test |
+|---|---|---|---|
+| A1 | `cat /c/Users/*/.ssh/id_rsa` (non-allowlisted) | gate refuse | offline + live attempt |
+| A2 | `type C:\Users\...\.ssh\id_rsa` | gate refuse | offline |
+| A3 | `python -c "open(r'C:\\Users\\...')"` | gate refuse (python only as test runner with script **under** folder) | offline + live |
+| A4 | `powershell Get-Content ...hosts.yml` | gate refuse unless powershell invoked as allowlisted test entry | offline |
+| A5 | UNC / mapped path to token file | gate refuse (not under folder / not allowlisted) | offline |
+| A6 | symlink/junction from folder to `~/.ssh` | read via allowlisted runner = residual; via `cat` = refuse | offline |
+| A7 | `cd /` then relative escape | cwd forced to folder; refuse | offline |
+| A8 | write redirect `echo x > /c/Users/...` via bash | refuse (not allowlisted runner) | offline |
+| A9 | `git push` / `git remote add` / `gh` / `op` | refuse (existing agents + gate) | offline (keep current) |
+| A10 | leftover `OP_SERVICE_ACCOUNT_TOKEN` / `SSH_AUTH_SOCK` / `DOCKER_*` / `GH_TOKEN` in child env | absent (allowlist) | offline env dump |
+| A11 | child HOME/USERPROFILE/APPDATA point at per-run dir | assert redirect | offline |
+| A12 | non-Linux StepCode install | still fails | **keep** existing test |
+| A13 | Linux without bubblewrap | still refuses | keep |
+| A14 | `opencode.json` MCP added | fail regression | offline |
+
+Windows-runnable stubs must not require `stat 600` or bwrap (see
+`tests/test-ai-stepfun.sh` current skips at `:106-108`, `:196-199`).
+
+## 11. Constraints
+
+Branch + PR + merge queue; identity check; reviewer-safety independent review
+before merge; no secrets in chat/argv/logs; Git Bash on Windows
+(`C:\Program Files\Git\bin\bash.exe` — system `bash` is the WSL stub); never
+weaken Linux; never claim Windows = rule 11; `bin/ai-gh` only; sign GitHub
+posts; times EST/EDT.
 
 ## 12. Access and environment
 
-- Host: edge-dev Windows. Git Bash. No WSL distro installed; do not use it.
-- Worktree: `C:/repos/ai-devops-wt-stepfun-win` branch
-  `stepfun-windows-folder-shell`.
-- GitHub via `bin/ai-gh` only.
-- StepFun key store already exists for live turns (`ai-stepfun store-key` path);
-  live proof may use a real StepFun turn. 1Password titles only in docs.
+edge-dev Windows, Git Bash, no WSL. Worktree as above. StepFun key store
+already provisioned for live turns. OpenCode binary via existing GLM/Muse pin
+path — do not invent an installer.
 
-## 13. Definition of done + risks and open questions
+## 13. Definition of done, rollback, residual
 
-Done when: PR merged on `origin/main`; live proof recorded; install refreshed;
-#1169 closed with owner quote and residual-risk sentence; Linux tests still
-pass.
+Done: § STATUS all DONE; merge SHA on main; live proof record; install digest
+matches; #1169 CLOSED with owner quote and residual sentence.
 
-Risks: shell escapes can still reach host absolute paths (accepted); OpenCode
-tool profile may need iteration on Windows path mapping; stale installs on
-other machines if only edge-dev is refreshed.
+Rollback: revert the PR (restore `require_engine` Linux-only, preflight
+`static_status`, refusal tests). No data migration.
 
-Open: none that block start — residual-risk wording is fixed by §8.
+Residual (owner-accepted): allowlisted interpreters can still be pointed at
+host absolute paths; a determined escape is not mount-blocked. Document that
+sentence on #1169 at close.
 
-## STATUS
+## Plan-mechanics self-audit
 
-| Step | Status | Evidence |
-|---|---|---|
-| 1 Plan written | DONE | this file, 2026-09-30 |
-| 2 Design review | OPEN | |
-| 3 Task gates | DONE (start) | class reviewer-safety, base 93ff6e48 |
-| 4 Wrapper Windows isolation | OPEN | |
-| 5 Shell guard | OPEN | |
-| 6 Tool profile | OPEN | |
-| 7 Rule 11 Windows exception | OPEN | |
-| 8 Skill/docs/registry | OPEN | |
-| 9 #1086 citation fix | OPEN | |
-| 10 Offline tests | OPEN | |
-| 11 Live isolation proof | OPEN | |
-| 12 PR merge | OPEN | |
-| 13 Install refresh | OPEN | |
-| 14 #1169 close | OPEN | |
+- Goal first? yes.
+- File:line for current state? yes §5.
+- Rejected approaches? yes §7.
+- LOCKED vs OPEN? yes §8.
+- Verify gate per step? yes §9.
+- Adversarial table with tests? yes §10.
+- Rollback? yes §13.
+- HANDOFF + AGENTS router? step 13.
+- STATUS at top? yes.
+- Exact-head code review before merge? step 16.
