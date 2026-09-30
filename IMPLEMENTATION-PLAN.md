@@ -8,9 +8,9 @@
 | Step | Status | Evidence |
 |---|---|---|
 | 0. Plan written and registered | ✅ done 2026-09-29 | this file + `HANDOFF.d/2026-09-29T2148Z-edge-dev-mimo-doctor-orphan-guard.md` |
-| **A1. P3: stop long suites after a known failure + no-progress detector** | ⬜ open | **top hours: 10–20/wk** |
+| **A1. P3: stop long suites after a known failure + no-progress detector** | ✅ done 2026-09-30 | PR #1134 `f8f032ed`; `tests/test-verify-closure.sh` 35/35 + `tests/test-workflow-policy.sh` 102/102; live pair 36651631566 / 36653293397 |
 | **A2. P7: timeout ≠ broken reviewer (bounded first probe + retry/cooldown)** | ⬜ open | **5–12/wk** |
-| **B1. Session/task TTL + reap (14h orphans) under BlockerWatch** | ⬜ open | **3–8/wk** |
+| **B1. Session/task TTL + reap (14h orphans) under BlockerWatch** | ✅ done 2026-09-30 | PR #1129 `c12470a5`; `tests/test-ai-blocker-watch-reap.sh` 20/20; live proof `tests/verification/blocker-watch/2026-09-30-b1-reap-live-proof.md` (18 reaped / 21 kept) |
 | C1. Correct handoff §5a lines (lease TTL; 10s window) | ✅ done 2026-09-29 | PR #1123 `b0779156`; handoff grep clean (no `lease TTL`/`60s`; `10s`/`CHECK_TIMEOUT` at 76/81/113/140) |
 | C2. Decision ledger: items 3/9 not done (correct citations) | ✅ done 2026-09-29 | PR #1124 `ff28e561`; IMPLEMENTATION-PLAN.md §8 "Decision ledger: why findings 3 and 9 are not done" |
 | C3. Index the 18 unlisted root `plan_*.md` | ✅ done 2026-09-29 | PR #1123 `b0779156`; 73/73 plans indexed (re-measured 19 missing incl. `plan_reviewer-pipeline-core.md`) |
