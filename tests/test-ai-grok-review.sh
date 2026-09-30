@@ -588,6 +588,7 @@ check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.t
 check "new pins the model"                "grep -q -- '--model grok-4.6' '$TMP/argv.txt'"
 check "new allows Edit in the snapshot"   "grep -q -- '--allow Edit' '$TMP/argv.txt' && ! grep -q -- '--deny Edit' '$TMP/argv.txt'"
 check "new allows Bash in the snapshot"   "grep -q -- '--allow Bash' '$TMP/argv.txt' && ! grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "prompt warns that assignment-prefixed shell commands cancel the run" "grep -q 'CANCELS THIS WHOLE REVIEW' '$TMP/prompt-copy' && grep -q 'bash ./that-script.sh' '$TMP/prompt-copy'"
 check "prompt says not read-only and edits are discarded" "grep -q 'You are NOT read-only' '$TMP/prompt-copy' && grep -q 'discarded' '$TMP/prompt-copy'"
 T1_DIR="$(run show t1 | jq -r '.review_dir')"
 check "writable review dir is a snapshot, not the caller checkout" "[ -d '$T1_DIR' ] && [ \"\$(cd '$T1_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
@@ -739,7 +740,7 @@ native_terminal_reason_cases(){
   note(){ printf '%s\n' "$*" >&2; }
   stream="$STATE_DIR/isolated-home/sessions/encoded-cwd/native-session/updates.jsonl"
   mkdir -p "$(dirname "$stream")"
-  for category in max_turns_reached PRIVATE_UNKNOWN_CATEGORY wrong-request wrong-session duplicate absent; do
+  for category in max_turns_reached PermissionCancelled PRIVATE_UNKNOWN_CATEGORY wrong-request wrong-session duplicate absent; do
     jq -n '{stopReason:"cancelled",sessionId:"native-session",requestId:"native-request",num_turns:20}' > "$fixture"
     rm -f "$fixture.terminal.json"
     jq -nc --arg category "$category" '{params:{sessionId:"native-session",update:{sessionUpdate:"turn_completed",prompt_id:"native-request",stop_reason:"cancelled"},_meta:{cancellationCategory:$category}}}' > "$stream"
@@ -756,6 +757,8 @@ native_terminal_reason_cases(){
       check 'native category witness binds result and terminal record hashes' "jq -e '.native_terminal_matches==1 and (.result_sha256|length)==64 and (.source_terminal_sha256|length)==64' '$fixture.terminal.json'"
       printf '\n' >> "$fixture"
       check 'changed paid result cannot reuse an earlier native witness' "test \"\$(terminal_reason_for_result '$fixture')\" = provider_cancelled"
+    elif [ "$category" = PermissionCancelled ]; then
+      check 'native PermissionCancelled is named as a local refused command, not the provider' "printf '%s' \"\$output\" | grep -q 'reason: permission_cancelled' && printf '%s' \"\$output\" | grep -q 'not the provider'"
     else
       check "native $category remains generic cancellation without guessing" "printf '%s' \"\$output\" | grep -q 'reason: provider_cancelled'"
     fi
@@ -1391,7 +1394,7 @@ check "pool_gemini_argv_omits_max_turns" "grep -q '^new pool-gemini-' '$POOLTMP/
 check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runner-args' && ! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
 check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
-check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 32'"
+check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 120'"
 # Issue #711 Phase 5 (B'): a one-shot pool review releases the runner's session
 # through the runner's own delete path once the verdict is accounted, from
 # inside the snapshot; a refused or skipped release must never fail or narrow

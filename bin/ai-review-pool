@@ -49,7 +49,7 @@ umask 077
 
 provider="${1:-}"; mode="${2:-}"
 case "$provider" in
-  grok)  RUNNER="$ROOT/ai-grok-review";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  grok)  RUNNER="$ROOT/ai-grok-review";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-120}" ;; # same review budget as ai-qwen; 32 ran out on a 48-file change
   muse)  RUNNER="$ROOT/ai-muse";         RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
   qwen)  RUNNER="$ROOT/ai-qwen";         RUNNER_MAX_TURNS="" ;; # ai-qwen owns its 120-turn/60m review budget and rejects --max-turns
   gemini) RUNNER="$ROOT/ai-gemini";      RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag

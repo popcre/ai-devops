@@ -1350,6 +1350,7 @@ terminal_reason() { # provider stop token -> stable diagnostic, without inferenc
   case "$1" in
     end_turn|EndTurn|stop|completed) printf '%s' "$1" ;;
     cancelled) printf 'provider_cancelled' ;;
+    permission_cancelled) printf 'permission_cancelled' ;;
     max_turns|max_turns_reached|max-turns*) printf 'turn_limit_cancelled' ;;
     *) printf 'unknown_terminal_reason' ;;
   esac
@@ -1396,6 +1397,7 @@ witness['native_terminal_matches']=len(matches)
 if len(matches)==1:
     witness.update(matches[0])
     if matches[0]['category']=='max_turns_reached': witness['terminal_reason']='turn_limit_cancelled'
+    if matches[0]['category']=='PermissionCancelled': witness['terminal_reason']='permission_cancelled'
 fd=os.open(str(result_path)+'.terminal.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
 with os.fdopen(fd,'w',encoding='utf-8') as handle: json.dump(witness,handle); handle.write('\n')
 PY
@@ -1407,6 +1409,10 @@ terminal_reason_for_result() {
      [ "$(jq -r '.result_sha256 // ""' "$out.terminal.json")" = "$(sha256sum "$out" | awk '{print $1}')" ] &&
      jq -e '.schema_version==1 and .native_terminal_matches==1 and .category=="max_turns_reached" and .terminal_reason=="turn_limit_cancelled"' "$out.terminal.json" >/dev/null 2>&1; then
     printf '%s' turn_limit_cancelled
+  elif [ "$stop" = cancelled ] && [ -f "$out.terminal.json" ] && [ ! -L "$out.terminal.json" ] &&
+     [ "$(jq -r '.result_sha256 // ""' "$out.terminal.json")" = "$(sha256sum "$out" | awk '{print $1}')" ] &&
+     jq -e '.schema_version==1 and .native_terminal_matches==1 and .category=="PermissionCancelled" and .terminal_reason=="permission_cancelled"' "$out.terminal.json" >/dev/null 2>&1; then
+    printf '%s' permission_cancelled
   else
     terminal_reason "$stop"
   fi
@@ -1417,6 +1423,7 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
   sr="$(jq -r '.stopReason // "missing"' "$f")"
   raw_sr="$sr"
   [ "$(terminal_reason_for_result "$f")" != turn_limit_cancelled ] || sr=max_turns_reached
+  local why; why="$(terminal_reason_for_result "$f")"
   sid="$(jq -r '.sessionId // ""' "$f")"
   used="$(jq -r '.num_turns // "?"' "$f")"
   case "$sr" in
@@ -1425,9 +1432,14 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
     cancelled)
       note ""
       note "ai-grok-review: Grok cancelled without a final answer."
-      note "  reason: $(terminal_reason "$sr")"
+      note "  reason: $why"
       note "  stopReason  : $raw_sr"
       note "  session     : ${sid:-unknown} (saved as '$name')"
+      if [ "$why" = permission_cancelled ]; then
+        note "  The Grok CLI refused a shell command it cannot match to an allow rule"
+        note "  (variable assignment, env wrapper, or command substitution) and, being"
+        note "  headless, cancelled the whole run. This is local, not the provider."
+      fi
       note ""
       note "Grok may not resume a cancelled session cleanly. Do not broaden"
       note "permissions or keep retrying an empty resume. Start a fresh named session"
@@ -1536,7 +1548,7 @@ Do not put the verdict anywhere else."
 
 build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/stdin)
   local dest="$1"
-  printf 'Your evidence packet is at %s/%s/MANIFEST.md. Read it first.\nIt contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n\nYou may read any other file under %s to confirm a finding; the packet is your starting point, not a boundary. Do not reconstruct the diff because it is already in %s/%s/patch.diff.\n\nYou are NOT read-only. %s is your own disposable copy of the repository with no git remote. You may run shell commands, builds and tests there (cd into it first) and edit files there to test a hypothesis. Your edits are discarded after this turn and are NOT part of the pull request; report findings, not patches. Do not push, fetch credentials, or touch anything outside that copy.\n\n---\n\n' \
+  printf 'Your evidence packet is at %s/%s/MANIFEST.md. Read it first.\nIt contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n\nYou may read any other file under %s to confirm a finding; the packet is your starting point, not a boundary. Do not reconstruct the diff because it is already in %s/%s/patch.diff.\n\nYou are NOT read-only. %s is your own disposable copy of the repository with no git remote. You may run shell commands, builds and tests there (cd into it first) and edit files there to test a hypothesis. Your edits are discarded after this turn and are NOT part of the pull request; report findings, not patches. Do not push, fetch credentials, or touch anything outside that copy.\n\nShell rule (Grok CLI limit, not a policy choice): a command containing a shell variable assignment (FOO=1 cmd, export FOO=1), the env wrapper, or $(...)/backtick substitution is refused, and a refused command CANCELS THIS WHOLE REVIEW with no verdict. When a build or test needs environment variables, write a small script file inside your copy with your file tool and run it with: bash ./that-script.sh\n\n---\n\n' \
     "$REVIEW_DIR" "$PACKET_REL" "$REVIEW_DIR" "$REVIEW_DIR" "$PACKET_REL" "$REVIEW_DIR" > "$dest"
   dest="$dest.body"
   if [ -n "${OPT_PROMPT_FILE:-}" ]; then
