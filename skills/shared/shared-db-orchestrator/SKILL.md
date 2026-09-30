@@ -89,6 +89,12 @@ A marker and an orchestrator chat are **not required**. Structural work starts
 when a session claims exact objects on the existing issue and begins (model:
 `shared-db/docs/agents/orchestrator.md` `self-service-additive`).
 
+If `gh` reports `GitHub CLI\\config.yml: Access is denied`, that is a **Codex
+task-profile configuration failure**, not "GitHub is unavailable." Run
+`pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`,
+then retry the same read. This grants the Codex sandbox read-only access to that
+settings folder and does not expose or copy a token.
+
 1. Fetch current `main`, audit open routed issues, `db-claim` issues, PRs, worktrees and open handoffs. `db-work` is an intake label, never proof of ownership.
 2. Record every active workstream and exact claimed database objects.
 3. Warn if more than five open handoffs exist.
