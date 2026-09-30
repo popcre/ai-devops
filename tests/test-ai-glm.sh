@@ -957,17 +957,19 @@ check "reconciling 25 open records does not scale spawns per field" \
   "test $(( (RECON_SPAWN_25 + 24) / 25 )) -le '$RECON_SPAWN_1'"
 # A packed field must not contain the UNIT SEP, or columns shift and path
 # validation compares the wrong strings.
-sep_reject() {
+sep_reject() { # US or newline in a packed field must fail closed
   AI_GLM_SOURCE="$AI_GLM" bash -c '
     source "$AI_GLM_SOURCE"
     STATE_DIR="$(mktemp -d)"
     mkdir -p "$STATE_DIR/sessions/rid1"
     f="$STATE_DIR/sessions/rid1/claude--n.json"
     python -c "import json,sys; sys.stdout.write(json.dumps({\"type\":\"implementation\",\"repository_id\":\"rid1\",\"caller\":\"a\"+chr(31)+\"b\",\"name\":\"n\",\"repository_root\":\"/r\",\"status\":\"running\",\"owner_pid\":1,\"base_sha\":\"x\"}))" > "$f"
+    ! implementation_record_fields "$f" >/dev/null || exit 1
+    python -c "import json,sys; sys.stdout.write(json.dumps({\"type\":\"implementation\",\"repository_id\":\"rid1\",\"caller\":\"a\\nb\",\"name\":\"n\",\"repository_root\":\"/r\",\"status\":\"running\",\"owner_pid\":1,\"base_sha\":\"x\"}))" > "$f"
     ! implementation_record_fields "$f" >/dev/null
   '
 }
-check "a record field containing the packing separator is not trusted" "sep_reject"
+check "a record field containing packing control characters is not trusted" "sep_reject"
 # The due scan, by behaviour: recorded-old + mtime-old is due; either freshness gate excludes.
 SC_STATE="$TMP/scan-state"; mkdir -p "$SC_STATE/sessions/rid1"
 scan_rec() { jq -n --arg ts "$1" '{type:"review",name:"n",caller:"claude",created_at:$ts,last_activity_at:$ts}' > "$SC_STATE/sessions/rid1/claude--$2.json"; }
