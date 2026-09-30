@@ -43,8 +43,13 @@ check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::E
 job_block() {
   sed -n "/^  $1:/,/^  $2:/p" "$workflow"
 }
+# Capture the block first: `sed | grep -q` under `set -o pipefail` reports a
+# false negative on Linux, where grep -q closes the pipe after the first match
+# and sed's broken-pipe exit status is then what the pipeline returns.
 job_has() {
-  job_block "$1" "$2" | grep -Fq "$3"
+  local block
+  block="$(job_block "$1" "$2")"
+  printf '%s' "$block" | grep -Fq "$3"
 }
 # Every long-suite job selects on the run-long output, not on the whole
 # classifier result, and every reviewer-lane job selects on the reviewer
@@ -96,7 +101,9 @@ check 'missing or invalid classification is never a green skip' never_green_skip
 # only cancellation scope; there is no whole-queue status tool.
 no_progress_never_pass_ok() {
   grep -Fq 'bash tools/ci/verify-closure.sh' "$workflow" || return 1
-  sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' "$workflow" | grep -Fq 'outputs.validation_result' || return 1
+  local closure_block
+  closure_block="$(sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' "$workflow")"
+  printf '%s' "$closure_block" | grep -Fq 'outputs.validation_result' || return 1
   # The closure evaluator is the no-progress detector: it is the component that
   # names a cancelled or missing lane and refuses to close.
   grep -Fq 'cancelled' "$ROOT/tools/ci/verify-closure.sh" || return 1
