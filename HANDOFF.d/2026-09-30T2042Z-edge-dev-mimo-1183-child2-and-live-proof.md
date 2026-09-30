@@ -175,7 +175,7 @@ Handoff this session inherited:
   (Claude APPROVE medium note). A later child may add one; not required for
   child 2 unless the file changes.
 - `bin/ai-public-boundary-check` precision fix is on main via this PR; if a
-  true `https://1.2.3.4/` endpoint ever needs to fail, the authority-only arm
+  true `https://<numeric-IP>/` endpoint ever needs to fail, the authority-only arm
   still catches it. Do not widen the project-identifier pattern.
 - Windows section (2) and reviewer-fallback were slow on the #1189 run; that
   is capacity, not process (do not "fix" by raising ceilings).
