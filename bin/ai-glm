@@ -2175,21 +2175,39 @@ glm_retention_problem() { # prints why RETENTION_HOURS is unusable; nothing when
 # "reclaimable". `ai-glm prune` (unbounded) remains the reclamation path and applies
 # every gate before removing anything.
 glm_orphan_sandbox_report() { # CUTOFF
-  local cutoff="$1" recorded_refs="" orphan_count=0 orphan_name orphan_tag
+  local cutoff="$1" recorded_refs="" orphan_count=0 orphan_name orphan_tag mt
+  local -a candidates=() chunk=()
+  local -A orphan_mtime=()
   if [ ! -d "$GLM_SANDBOX_DIR" ] || [ -z "$SANDBOX_BIN" ]; then return 0; fi
   if ! recorded_refs="$(sandbox_references 2>/dev/null)"; then
     printf 'WARN  unrecorded sandbox state could not be verified; run: ai-glm prune\n'
     return 0
   fi
-  while IFS= read -r orphan_name; do
+  mapfile -t candidates < <(comm -23 <(ls "$GLM_SANDBOX_DIR" 2>/dev/null | grep -E '^glm-.+-[0-9a-f]{12}$' | sort) \
+                                         <(printf '%s\n' "$recorded_refs" | sort -u))
+  # Batch-stat every candidate in chunks of 100 (same shape as glm_record_index)
+  # so the per-directory cost is O(batches), not O(N spawns).
+  local i j n
+  n=${#candidates[@]}
+  for ((i = 0; i < n; i += 100)); do
+    chunk=()
+    for ((j = i; j < i + 100 && j < n; j++)); do
+      chunk+=("$GLM_SANDBOX_DIR/${candidates[j]}")
+    done
+    [ "${#chunk[@]}" -gt 0 ] || continue
+    while read -r mt orphan_name; do orphan_mtime["${orphan_name##*/}"]="$mt"; done \
+      < <(stat -c '%Y %n' "${chunk[@]}" 2>/dev/null || true)
+  done
+  for orphan_name in "${candidates[@]}"; do
     [ -n "$orphan_name" ] || continue
-    [ "$(stat -c %Y "$GLM_SANDBOX_DIR/$orphan_name" 2>/dev/null || printf '99999999999')" -lt "$cutoff" ] || continue
-    orphan_tag="$(printf '%s' "$orphan_name" | sed -nE 's/^(glm-.+)-[0-9a-f]{12}$/\1/p')"
+    mt="${orphan_mtime[$orphan_name]:-}"
+    [ -n "$mt" ] && [ "$mt" -lt "$cutoff" ] || continue
+    [[ $orphan_name =~ ^(glm-.+)-[0-9a-f]{12}$ ]] || continue
+    orphan_tag="${BASH_REMATCH[1]}"
     [ -n "$orphan_tag" ] || continue
     compgen -G "$STATE_DIR/locks/*--${orphan_tag#glm-}.lock.d" >/dev/null && continue
     orphan_count=$((orphan_count + 1))
-  done < <(comm -23 <(ls "$GLM_SANDBOX_DIR" 2>/dev/null | grep -E '^glm-.+-[0-9a-f]{12}$' | sort) \
-                          <(printf '%s\n' "$recorded_refs" | sort -u))
+  done
   if [ "$orphan_count" -gt 0 ]; then
     printf 'WARN  %s idle unrecorded review sandbox(es) present; some may be retained for evidence; run: ai-glm prune\n' "$orphan_count"
   else

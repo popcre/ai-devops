@@ -866,6 +866,44 @@ orphan_report() { AI_GLM_SOURCE="$AI_GLM" REPO_ROOT="$REPO_ROOT" AI_GLM_STATE_DI
 r_out="$(orphan_report)"
 check "orphan report counts only idle, unlocked, unrecorded sandboxes" \
   "printf '%s' \"\$r_out\" | grep -q 'WARN  1 idle unrecorded' && ! printf '%s' \"\$r_out\" | grep -q 'PASS'"
+# Spawn-count guard: orphan scan cost must be bounded and independent of N (not per directory).
+# Stubs shadow every external tool the report path still spawns; count is total, not wall-clock.
+orphan_spawn_run() { # N -> total spawn count for N unrecorded idle sandboxes
+  local n="$1"
+  local state="$TMP/orphan-spawn-$n-state" sb="$TMP/orphan-spawn-$n-sb" i
+  mkdir -p "$state/sessions" "$state/locks" "$sb"
+  for i in $(seq 1 "$n"); do
+    mkdir -p "$sb/glm-orphan$i-0123456789ab"
+    touch -d '3 days ago' "$sb/glm-orphan$i-0123456789ab"
+  done
+  # Adversarial dirs: no pattern, wrong hash width — must not count or spawn per-name tools.
+  mkdir -p "$sb/not-a-sandbox" "$sb/glm-foo-zz" "$sb/glm-foo-123"
+  # Broken symlink must not crash or spawn unbounded.
+  ln -sf "$sb/does-not-exist" "$sb/glm-broken-0123456789ab" 2>/dev/null || true
+  AI_GLM_SOURCE="$AI_GLM" REPO_ROOT="$REPO_ROOT" AI_GLM_STATE_DIR="$state" AI_REVIEW_SANDBOX_DIR="$sb" \
+  bash -c '
+    source "$AI_GLM_SOURCE"
+    GLM_SANDBOX_DIR="$AI_REVIEW_SANDBOX_DIR"
+    SANDBOX_BIN="$REPO_ROOT/bin/ai-review-sandbox"
+    stat(){ echo stat >> "$STATE_DIR/spawns"; command stat "$@"; }
+    sed(){ echo sed >> "$STATE_DIR/spawns"; command sed "$@"; }
+    jq(){ echo jq >> "$STATE_DIR/spawns"; command jq "$@"; }
+    date(){ echo date >> "$STATE_DIR/spawns"; command date "$@"; }
+    ls(){ echo ls >> "$STATE_DIR/spawns"; command ls "$@"; }
+    grep(){ echo grep >> "$STATE_DIR/spawns"; command grep "$@"; }
+    sort(){ echo sort >> "$STATE_DIR/spawns"; command sort "$@"; }
+    comm(){ echo comm >> "$STATE_DIR/spawns"; command comm "$@"; }
+    cutoff=$(( $(date +%s) - 24*3600 ))
+    glm_orphan_sandbox_report "$cutoff" >/dev/null 2>&1
+    wc -l < "$STATE_DIR/spawns" | tr -d " "
+  '
+}
+ORPHAN_SPAWN_5="$(orphan_spawn_run 5)"
+ORPHAN_SPAWN_50="$(orphan_spawn_run 50)"
+check "scanning 5 orphan sandboxes costs a bounded number of spawns" \
+  "test '$ORPHAN_SPAWN_5' -le 15"
+check "scanning 50 orphan sandboxes costs the same spawn bound as 5" \
+  "test '$ORPHAN_SPAWN_50' -eq '$ORPHAN_SPAWN_5'"
 # The due scan, by behaviour: recorded-old + mtime-old is due; either freshness gate excludes.
 SC_STATE="$TMP/scan-state"; mkdir -p "$SC_STATE/sessions/rid1"
 scan_rec() { jq -n --arg ts "$1" '{type:"review",name:"n",caller:"claude",created_at:$ts,last_activity_at:$ts}' > "$SC_STATE/sessions/rid1/claude--$2.json"; }
