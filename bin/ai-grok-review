@@ -1824,6 +1824,7 @@ cmd_new() {
   [ -n "$sid" ] && [ "$sid" != null ] || { preserve_uncertain_paid_turn "$rid_lock" "$sess_lock"; die "Grok returned no sessionId; cannot continue this workstream."; }
 
   capture_terminal_evidence "$out" 2>/dev/null || note 'native terminal evidence unavailable; retaining generic cancellation diagnosis.'
+  recover_permission_cancelled "$out" "$sid" "$turns" "$pf"
   write_meta "$meta" "$(MSYS2_ARG_CONV_EXCL='*' jq -n \
     --arg sid "$sid" --arg repo "$repo" --arg remote "$(repo_remote "$repo")" --arg name "$name" --arg caller "$CALLER" \
     --arg prefix "$(frozen_prefix)" --arg created "$(date -u +%FT%TZ)" \
@@ -1988,6 +1989,39 @@ $REVIEW_HEAD only."
   }
   rm -f "$pf" "$out" "$out.err" "$out.terminal.json"
   return $st
+}
+
+# Grok CLI (1.0.41) cancels the WHOLE headless turn when it meets a shell form
+# no --allow rule can cover (variable assignment, env wrapper, git -c,
+# command substitution, ...). That set belongs to the CLI, so a prompt warning
+# cannot be complete. Only a native-witnessed PermissionCancelled is resumed,
+# in the same session (context kept, permissions unchanged), with a fixed
+# corrective message, at most AI_GROK_PERMISSION_RESUMES times and within the
+# remaining turn budget. Every other stop keeps its existing handling.
+PERMISSION_RESUMES="${AI_GROK_PERMISSION_RESUMES:-3}"
+recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE -> may replace OUT
+  local out="$1" sid="$2" turns="$3" pf="$4" n=0 used spent=0 left next rpf
+  case "$PERMISSION_RESUMES" in ''|*[!0-9]*) PERMISSION_RESUMES=0 ;; esac
+  while [ "$n" -lt "$PERMISSION_RESUMES" ] && [ "$(terminal_reason_for_result "$out")" = permission_cancelled ]; do
+    used="$(jq -r '.num_turns // 0' "$out")"; case "$used" in ''|*[!0-9]*) used="$turns" ;; esac
+    spent=$(( spent + used )); left=$(( turns - spent ))
+    [ "$left" -ge 1 ] || return 0
+    n=$((n + 1))
+    note "  Grok refused a shell command form and cancelled the turn (permission_cancelled); resuming the same session ($n of $PERMISSION_RESUMES, $left turns left)."
+    report_usage "$out" || true
+    rpf="$pf.resume$n"; next="$out.resume$n"
+    printf '%s\n' "The Grok CLI refused your last shell command and cancelled it; nothing ran. It refuses shell variable assignments (FOO=1 cmd, export FOO=1), the env wrapper, git -c, and \$(...) or backtick substitution. Do not retry that form. Rewrite it without those forms (for environment variables, write a script file inside your disposable copy and run bash ./script.sh), then continue the same review from where you stopped and finish with the required '## Verdict' section." > "$rpf"
+    run_turn "$REVIEW_DIR" "$next" "$rpf" "$left" "$sid"
+    rm -f "$rpf"
+    if [ "$RUN_TURN_RC" = 124 ] || ! await_result "$next" "review resume $n"; then
+      note "  resume $n returned no terminal result; keeping the cancelled result."
+      return 0
+    fi
+    capture_terminal_evidence "$next" 2>/dev/null || true
+    rm -f "$out.terminal.json"; mv -f "$next" "$out"
+    [ ! -f "$next.terminal.json" ] || mv -f "$next.terminal.json" "$out.terminal.json"
+  done
+  return 0
 }
 
 finish_turn() { # finish_turn REPO NAME OUT MAX_TURNS
