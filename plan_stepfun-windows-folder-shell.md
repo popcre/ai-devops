@@ -1,288 +1,342 @@
-# IMPLEMENTATION PLAN — StepFun Windows folder + test shell (2026-09-30)
+# IMPLEMENTATION PLAN — StepFun Windows folder + test shell (2026-09-30 rev C)
 
-> **Fresh session starts here.** Owner decision, threat model, exact files, and
-> verification gates are below. No chat context is required. If any step
-> conflicts with §1, the goal wins — stop and flag it.
+> **Fresh session starts here.** Owner decision, threat model, exact files,
+> locked shell contract, and verification gates are below. No chat context is
+> required. If any step conflicts with §1, the goal wins — stop and flag it.
 
 ## STATUS (live)
 
 | Step | Status | Evidence |
 |---|---|---|
-| 1 Plan written | DONE | this file |
-| 2 Plan review #1 | DONE — REJECT | `.ai/reviews/grok-plan-review-20260930T172515-118426-1832.md` |
-| 3 Plan revised after reject | DONE (this revision) | commit message cites grok findings |
-| 4 Plan re-review → APPROVE | OPEN | required before any code commit |
-| 5 Wrapper `require_engine` / `run_opencode_turn` / `key_store_ok` | OPEN | |
-| 6 Windows env allowlist + HOME/APPDATA redirect | OPEN | |
-| 7 Test-runner allowlist shell gate | OPEN | |
-| 8 Agent profiles + preflight + tests inversion | OPEN | |
-| 9 Docs / rule 11 Windows exception / registry | OPEN | |
-| 10 Offline tests green | OPEN | |
-| 11 Live isolation proof (fail bar in §10) | OPEN | `tests/verification/` |
-| 12 Exact-head CODE review → APPROVE | OPEN | required (reviewer-safety) |
-| 13 PR merge via queue | OPEN | |
-| 14 Install refresh + final live turn | OPEN | |
-| 15 #1169 close with owner quote + residual risk | OPEN | |
+| 1 Plan written | DONE | rev A |
+| 2 Plan review #1 grok | DONE — REJECT | `.ai/reviews/grok-plan-review-20260930T172515-118426-1832.md` |
+| 3 Plan rev B | DONE | commit `30bd439c` |
+| 4 Plan review #2 muse | DONE — REJECT (stale file, content intact) | `.ai/reviews/muse-plan-review-20260930T174430-270732-20790.md.stale` |
+| 5 Plan rev C (this file) | DONE | addresses grok+muse criticals |
+| 6 Plan re-review → APPROVE | OPEN | required before any code commit |
+| 7 Wrapper + env + key-store | OPEN | |
+| 8 Shell gate + file-tool path clamp | OPEN | |
+| 9 Agent profiles + preflight + tests | OPEN | |
+| 10 Docs / rule 11 exception / registry | OPEN | |
+| 11 Offline tests green | OPEN | |
+| 12 Live proof with **canary files only** | OPEN | `tests/verification/` |
+| 13 Exact-head CODE review → APPROVE | OPEN | reviewer-safety |
+| 14 PR merge via queue | OPEN | |
+| 15 Install refresh + final live turn | OPEN | |
+| 16 #1169 close (owner quote + residual) | OPEN | |
 
 ## 1. The ultimate goal
 
-StepFun Step 5 runs on edge-dev Windows as reviewer/implementer confined to a
-**disposable review folder**, with **shell allowed only for an allowlisted set
-of test runners** inside that folder. Linux bubblewrap is unchanged. Windows is
-**not** claimed to be rule-11 equivalent. Residual risk (shell-escape or
-non-allowlisted interpreter paths to host credentials) is named and
-owner-accepted.
+StepFun runs on edge-dev Windows inside a **disposable review folder**. Shell
+is allowed only through a **gated test-runner contract** (defined in §8).
+File tools (`read`/`write`/`edit`/`patch`) refuse paths outside that folder.
+Linux bubblewrap is unchanged. Windows is **not** rule-11 equivalent. Residual
+risk is named and owner-accepted.
 
 If any step below conflicts with this goal, the goal wins — stop and flag it.
 
 ## 2. What this application is
 
-`popcre/ai-devops` public recovery toolkit. This change is the StepFun reviewer
-path: `bin/ai-stepfun`, OpenCode agent profiles, preflight, skill/docs/registry,
-tests, live proof. Worktree `C:/repos/ai-devops-wt-stepfun-win`, branch
+`popcre/ai-devops` recovery toolkit. StepFun reviewer path:
+`bin/ai-stepfun`, OpenCode profiles, preflight, skill/docs/registry, tests,
+live proof. Worktree `C:/repos/ai-devops-wt-stepfun-win`, branch
 `stepfun-windows-folder-shell`. Never edit a shared checkout.
 
 ## 3. What triggered this work
 
-#1169. Owner Albert (MiMo chat, 2026-09-30) cannot use WSL (RAM maxed by ZCode,
-MiMo Desktop, Claude). After risk was explained he chose verbatim: **folder +
-test shell.** Meaning accepted: explore the review folder; run tests via shell
-inside it; residual host-path risk accepted in writing.
+#1169. Owner Albert (MiMo chat, 2026-09-30): no WSL (RAM maxed). After risk
+was explained he chose verbatim: **folder + test shell.** Residual host-path
+risk accepted in writing.
 
 ## 4. Scope — in and out
 
-In: Windows OpenCode path for `ai-stepfun`; folder confinement; test-runner
-allowlist shell; Windows-safe env allowlist; key-store Windows rule; preflight
-`static_status`; agent profiles; inverted refusal tests; rule 11 exception;
-live proof with fail bar; install refresh; #1169 closeout.
+In: Windows OpenCode path; gated shell; file-tool path clamp; Windows env
+allowlist + profile redirect; key-store Windows rule; preflight; inverted
+tests; rule 11 exception; canary-based live proof; install refresh; #1169.
 
-NOT in: WSL; Windows bubblewrap; weakening Linux bubblewrap; StepCode on
-Windows; allocator membership for StepFun (LOCKED out); restoring
-`bin/setup-opencode-stepfun.ps1` verbatim; a new StepFun OpenCode installer
-(reuse GLM/Muse pin `config/opencode/version` +
-`$HOME/.local/lib/ai-devops/opencode/$OC_VERSION/.../opencode.exe`).
+NOT in: WSL; Windows bubblewrap; weakening Linux; StepCode on Windows;
+allocator membership for StepFun (LOCKED out); restoring
+`bin/setup-opencode-stepfun.ps1`; a new OpenCode installer (reuse
+`config/opencode/version` + `~/.local/lib/ai-devops/opencode/$OC_VERSION/`).
 
-## 5. Current state of the code (`origin/main` @ `93ff6e48`)
+## 5. Current state (`origin/main` @ `93ff6e48`)
 
 | Location | State |
 |---|---|
-| `bin/ai-stepfun:93-104` `require_engine` | exits `unsupported-platform` unless `IS_LINUX=1` |
-| `bin/ai-stepfun:127-135` `key_store_ok` | returns 1 on all Windows (`[ "$IS_LINUX" = 1 ]`) |
-| `bin/ai-stepfun:217-247` `run_opencode_turn` | always requires bubblewrap + `/usr/bin/timeout` |
-| `bin/ai-stepfun:291` `STEP_ENV_ALLOW` | Linux allowlist `LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR` |
-| `bin/ai-stepfun:389-393` `cmd_doctor` | already skips bwrap on Windows (dead until require_engine allows) |
-| `bin/ai-review-preflight:248-258,325` | StepFun `unsupported-platform` unless Linux |
-| `config/opencode-stepfun/agent/stepfun-{review,implement}.md` | `bash: "*": allow` + write/edit (#974) |
-| `config/opencode-stepfun/opencode.json` | no `mcp` key today (keep as regression assert) |
-| `tests/test-ai-stepfun.sh:192-199` | asserts Windows refused; OpenCode block SKIP off-Linux |
-| `tests/test-ai-review-preflight.sh:288-291` | Windows unsupported even with OpenCode |
-| `tests/test-install-ai-provider-clis.sh:62-67` | non-Linux StepCode install fails — **KEEP** (Windows uses OpenCode) |
-| `docs/reviewer-rotation-rules.md` rule 11 | Ubuntu-only + bubblewrap |
+| `bin/ai-stepfun:93-104` `require_engine` | Linux-only exit `unsupported-platform` |
+| `bin/ai-stepfun:127-135` `key_store_ok` | returns 1 on all Windows |
+| `bin/ai-stepfun:217-247` `run_opencode_turn` | always bwrap + `/usr/bin/timeout` |
+| `bin/ai-stepfun:291` `STEP_ENV_ALLOW` | `LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR` |
+| `bin/ai-stepfun:389-393` `cmd_doctor` | Windows bwrap skip (dead until engine allows) |
+| `bin/ai-review-preflight:248-258,232-246,325` | `static_status` / `reconciled_status` / `explain_failure` |
+| `config/opencode-stepfun/agent/stepfun-{review,implement}.md` | `bash: "*": allow` + write/edit/patch (#974) |
+| `config/opencode-stepfun/opencode.json` | no `mcp` (keep regression assert) |
+| `tests/test-ai-stepfun.sh:104-110,192-203` | Windows refused; OpenCode SKIP; PASS-count asserts |
+| `tests/test-ai-review-preflight.sh:286-291` | Windows unsupported + `only on Ubuntu/Linux` string |
+| `tests/test-install-ai-provider-clis.sh:62-67` | non-Linux StepCode fails — **KEEP** |
 | `docs/architecture.md:151` | "StepFun on Ubuntu/Linux only" |
-| `config/reviewer-membership-scope.json` | outside allocator; "never assigned to a Windows session" |
+| `config/reviewer-membership-scope.json` | outside allocator (LOCKED) |
+
+Sibling Windows env model to copy (not invent): `bin/ai-qwen` credential
+boundary uses `env -i` + `HOME/USERPROFILE=qwen_home` +
+`APPDATA/LOCALAPPDATA/TEMP/TMP/TMPDIR` under that home +
+`SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL TERM`.
+`bin/ai-muse:258-259` also sets `PSModuleAnalysisCachePath` to private temp.
 
 ## 6. Key findings
 
-- Bubblewrap = mount unreachability. Windows cannot do that without WSL/VM.
-- Env-clear + HOME redirect is not unreachability. Owner accepted residual risk.
-- Sibling Windows isolation (grok `bin/ai-grok-review:1182-1204`, qwen
-  `bin/ai-qwen:98-102`, muse `bin/ai-muse:258-259`) uses an **allowlist**
-  survival set (`SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `APPDATA`, `LOCALAPPDATA`,
-  …), not a denylist strip.
-- OpenCode bash is already `bash: "*": allow` — a path denylist in front of it
-  is theater (`type`, `python -c`, `powershell Get-Content`, UNC).
+- Bubblewrap = mount unreachability. Windows cannot do that (no WSL).
+- OpenCode `bash: "*": allow` is full shell; a path denylist in front is theater.
+- write/edit/patch are a separate path into the host filesystem.
+- Live proof must **never** probe real credential files (existence leak / contents).
 
 ## 7. Approaches REJECTED
 
 | Approach | Why |
 |---|---|
-| WSL2 + bubblewrap | Owner: no RAM (2026-09-30). |
-| Windows Sandbox / VM | Same host constraint. |
-| Claim env-clear + HOME redirect = rule 11 | False. |
-| Credential-path **denylist** in front of full bash | Bypassable; not "test shell". |
+| WSL2 + bubblewrap / VM | No RAM (owner 2026-09-30). |
+| Env-clear + HOME redirect = rule 11 | False. |
+| Credential-path denylist in front of full bash | Bypassable (`type`, `python -c`, UNC, PATH plant). |
 | Packet-only / no tools | Owner chose folder + test shell. |
 | Restore #1049 path verbatim | Unsandboxed; caused #1169 drift. |
-| Drop write/edit on Windows only | Contradicts #974; `echo >` still writes via bash. |
+| Drop write/edit on Windows only | Breaks #974; bash can still write. |
+| Live proof against real `~/.ssh` / `hosts.yml` | Existence/contents leak (muse critical 6). |
 
-## 8. Design decisions
+## 8. Design decisions (LOCKED unless marked OPEN)
 
-- **LOCKED (owner 2026-09-30):** "folder + test shell." Quote: *folder + test
-  shell.* Residual risk accepted: non-allowlisted escapes may reach host paths.
-- **LOCKED:** Linux bubblewrap unchanged; Windows never claimed rule-11 equal.
-- **LOCKED:** Shell gate is a **test-runner allowlist**, not a credential
-  denylist. Allow only runners needed for the reviewed project's tests (default
-  set: `npm`, `npm.cmd`, `npx`, `node`, `pytest`, `python`, `python3`, `go`,
-  `cargo`, `dotnet`, `pwsh`, `powershell` **only when the invocation is a test
-  script under the review folder**, plus `bash`/`sh` limited to scripts whose
-  path is under the review folder). Anything else is refused with a clear
-  message. Escape via a copied interpreter or absolute host script is residual
-  risk (owner-accepted), not a silent hole.
-- **LOCKED:** review/ask keep write/edit/bash **inside the disposable copy**
-  (#974). Windows does not narrow the tool list below Linux's contract.
-- **LOCKED:** `STEP_ENV_ALLOW` stays an allowlist; extend with the Windows
-  survival set used by grok/qwen/muse. Never switch to a denylist. Parent loads
-  the key from the real profile store **before** child HOME/USERPROFILE/APPDATA
-  redirect.
-- **LOCKED:** StepFun stays **outside the allocator** even when Windows works
-  (`config/reviewer-membership-scope.json`). Explicit `ai-stepfun` only.
-- **LOCKED:** Live proof fail bar (§10): allowlisted test run must work;
-  reads of credential locations **via allowlisted runners only** may succeed
-  (residual, recorded); non-allowlisted access commands must be **refused by
-  the gate** in the recorded attempt list. A gate refusal that does not happen
-  is a plan failure, not "accepted residual".
-- **OPEN:** which concrete runners appear in the default allowlist for a given
-  repo (derive from lockfiles / `package.json` scripts when present).
+### 8.1 Owner product decision
+**LOCKED (2026-09-30):** "folder + test shell." Quote: *folder + test shell.*
+Residual risk accepted: determined escapes (in-folder script bodies, eval
+flags, PATH-planted bins) may still reach host paths.
 
-## 9. The plan — numbered steps (each has a verify gate)
+### 8.2 Shell contract — the gate (muse criticals 1–4, 7)
+There is **one** execution path on Windows: OpenCode `bash` is set to
+**deny-by-default** and every command is routed to
+`bin/ai-stepfun-windows-shell` (replacing the raw shell), **or** OpenCode
+`bash` permission is left `"*": deny` and the agent is instructed to use only
+`ai-stepfun-windows-shell`. **LOCKED mechanism:** wrapper script replaces the
+shell for the child; the agent file states that only `bash` tool commands are
+gate-checked and other interpreters are not exposed as separate tools.
+
+Gate rules (whole-string, not argv-prefix):
+1. Command string is parsed into commands (reject `;` `&&` `||` `|` `` ` ``
+   `$()` `>` `>>` `<` `tee` `%…%` unless the entire string is a single
+   allowlisted invocation). Metacharacters ⇒ refuse `stepfun-shell: refused
+   (metacharacters)`.
+2. `argv[0]` must resolve via **fixed** PATH (not the disposable copy) to an
+   allowlisted runner from the default set: `npm`, `npx`, `node`, `pytest`,
+   `python`, `python3`, `go`, `cargo`, `dotnet`, `pwsh`, `powershell`,
+   `bash`, `sh`. **PATH plant defense:** resolve with a frozen PATH that
+   excludes the review folder and user-writable dirs.
+3. Eval/inline flags (`-c`, `-e`, `-p`, `-Command`, `-EncodedCommand`,
+   `exec`, `-m` except allowlisted modules, `--eval`) ⇒ refuse
+   `stepfun-shell: refused (eval flag)`. Script body is only allowed via
+   `bash <folder-script>` / `python <folder-script>` / `npm test` etc.
+4. Any file operand (script path) must canonicalize **inside** the review
+   folder (muse high 8): normalize with `cygpath -w` + realpath; reject
+   `\\?\`, `\\.\`, 8.3 short names, hardlinks/junctions whose target escapes
+   (best-effort: `readlink`/`GetFinalPathNameByHandle` via a tiny helper;
+   failures ⇒ refuse).
+5. cwd is forced to the review folder; `cd` in the command string is refused.
+6. Non-allowlisted argv ⇒ `stepfun-shell: refused (not an allowlisted test
+   runner)` exit 126.
+
+**Residual (documented, not claimed as blocked):** an in-folder script body
+(`npm test` → `package.json` scripts, `build.rs`, lifecycle hooks) can still
+read host paths. That is residual risk (owner-accepted), not a silent hole.
+
+**OPEN:** derive the default runner set from lockfiles when present
+(`package.json` ⇒ npm/node; `pytest.ini`/`pyproject.toml` ⇒ python/pytest;
+etc.). Implementer picks the smallest set that makes a normal test run work.
+
+### 8.3 File-tool path clamp (muse critical 5)
+**LOCKED:** On Windows, `read`/`write`/`edit`/`patch` are confined to the
+disposable review folder. Mechanism: OpenCode agent profiles set
+`permission.read/write/edit` to allow only in-tree paths (if the schema
+supports path globs, use them); additionally the wrapper chdirs into the
+copy and sets the only writable mount analog to that directory. If OpenCode
+cannot path-clamp tools, then the Windows profile **disables** `write`/`edit`/
+`patch` and allows only `read`/`glob`/`grep`/`list` inside the packet/folder
+plus the gated shell — and rule 11 + docs must say Windows reviews are
+folder-read + gated-shell, not full #974 write. That fork is decided at
+implementation by a 10-minute spike against the pinned OpenCode schema;
+result recorded in the plan STATUS. Do not ship write tools without a
+proven path clamp.
+
+### 8.4 Environment allowlist (muse high 9)
+**LOCKED:** copy the **qwen** model, not a denylist. Child env =
+`env -i` plus:
+`PATH` (frozen system PATH only),
+`HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP`, `TMPDIR`
+all under the per-run dir,
+`SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `USER`, `USERNAME`, `LOGNAME`,
+`LANG`, `LC_ALL`, `TERM`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
+`PSModuleAnalysisCachePath` under per-run temp (muse).
+Explicitly **absent** (assert in tests): `SSH_AUTH_SOCK`, `GH_TOKEN`,
+`GITHUB_TOKEN`, `GITHUB_*`, `GIT_*`, `OP_SERVICE_ACCOUNT_TOKEN`, `DOCKER_*`,
+`AWS_*`, `AZURE_*`, `OPENAI_API_KEY`, `ANTHROPIC_*`, `*TOKEN*`, `*SECRET*`,
+`*KEY*`, `NODE_PATH`, `PYTHONPATH`, `PSModulePath` (unless needed).
+Parent loads `KEY_STORE` from the **real** profile **before** redirect
+(grok high 4 / muse 14).
+
+### 8.5 Key store on Windows (muse medium 13)
+Present, non-empty, not a symlink **or junction** (check both `[ -L ]` and
+`cmd //c dir /AL` / `Get-Item` attributes). Do not require `stat 600`.
+Document residual: ACLs on the profile store are owner-only by prior setup;
+this change does not weaken that.
+
+### 8.6 Network residual (muse high 10)
+**LOCKED:** Windows accepts the same network exposure as Linux (shared net).
+Docs list `curl`, `Invoke-WebRequest`, `npm publish`, `ssh/scp` as residual
+exfil class; `git push`/`gh`/`op` stay denied (agents + gate). Do not claim
+network isolation.
+
+### 8.7 Allocator
+**LOCKED:** StepFun stays out of `config/reviewer-membership-scope.json`
+allocation even when Windows works. Update that file's **reason** text only
+(“not assigned by the allocator; explicit use on Linux (bubblewrap) or Windows
+(folder + test shell, weaker)”) so docs-grep does not see a false
+Ubuntu-only absolute.
+
+### 8.8 Live proof (muse critical 6) — canary only
+**LOCKED:** never touch real credential paths. The proof creates **canary
+files** under a temp tree standing in for “host credential” locations and
+attempts the adversarial cases against **those** paths. Record
+refused/allowed/residual per attempt + turn id. No secret contents ever
+printed. Fail bar:
+- Allowlisted test run inside folder → must succeed.
+- Non-allowlisted / metachar / eval-flag attempt → **must refuse** (missing
+  refusal = plan failure).
+- In-folder script reading a canary via absolute path → residual (record
+  outcome of the canary file only).
+
+### 8.9 OpenCode install
+Reuse GLM/Muse pin (`config/opencode/version` +
+`~/.local/lib/ai-devops/opencode/$OC_VERSION/node_modules/opencode-ai/bin/opencode.exe`).
+No new installer.
+
+## 9. The plan — numbered steps (verify gate each)
 
 ### Phase A — Plan approval
-1. This revision committed. **Verify:** STATUS shows step 3 DONE and cites the
-   grok reject file.
-2. Re-run plan-review at exact head until APPROVE. **Verify:** report names the
-   plan head SHA and `VERDICT: APPROVE`.
-3. `bin/ai-task-gates check --before review` before later phases. **Verify:**
-   gate allows the declared class.
+1. Rev C committed. **Verify:** STATUS cites grok+muse reject artifacts.
+2. Plan-review at exact head until `VERDICT: APPROVE` naming that head.
+   **Verify:** report file + head SHA.
+3. `bin/ai-task-gates check --before review` before later phases.
 
-### Phase B — Wrapper (functions named)
-4. `require_engine` (`bin/ai-stepfun:93-104`): allow Windows + ENGINE=opencode;
-   still refuse StepCode on Windows; Linux still requires bubblewrap.
-   **Verify:** `AI_STEPFUN_PLATFORM=Windows` doctor reaches engine detect, no
-   `unsupported-platform`.
-5. `key_store_ok` (`:127-135`): Windows accepts present, non-empty, non-symlink
-   store; do not require `stat 600`. **Verify:** unit path in offline suite.
-6. `run_opencode_turn` (`:217-247`): add a Windows branch that does **not**
-   call `bwrap` or `/usr/bin/timeout` (use Git Bash `timeout` or a portable
-   bound); launch with allowlisted env; child HOME/USERPROFILE/APPDATA → per-run
-   dir; cwd = disposable copy. Parent may read `KEY_STORE` first.
-   **Verify:** offline stub launch shows no bwrap in argv and redirected profile
-   vars in the child env dump.
-7. Extend `STEP_ENV_ALLOW` (`:291`) with Windows survival set (copy the
-   grok/qwen/muse list: `SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `TMP`, `TEMP`,
-   `APPDATA`, `LOCALAPPDATA`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `PATH`
-   only as needed for `node`/`npm`, etc.). **Verify:** `GH_TOKEN`,
-   `GITHUB_TOKEN`, `OP_SERVICE_ACCOUNT_TOKEN`, `SSH_AUTH_SOCK`, `DOCKER_*` are
-   absent from the child dump.
+### Phase B — Wrapper
+4. `require_engine` (`:93-104`): Windows + opencode allowed; StepCode still
+   Linux-only; Linux still requires bwrap. **Verify:** `AI_STEPFUN_PLATFORM=Windows`
+   doctor reaches engine detect.
+5. `key_store_ok` (`:127-135`): Windows rule per §8.5. **Verify:** offline case.
+6. `run_opencode_turn` (`:217-247`) Windows branch: no bwrap, no
+   `/usr/bin/timeout` (use Git Bash `timeout` or a portable deadline); env per
+   §8.4; profile redirect per §8.4; parent key load first; per-run XDG cleanup
+   + `STEP_KEY=""` zeroing like Linux (`:260-261`). Resolve `OC_BIN` **before**
+   HOME redirect. **Verify:** offline env dump + argv has no bwrap.
+7. `STEP_ENV_ALLOW` replaced by the qwen-style builder in §8.4 (allowlist, not
+   strip). **Verify:** A10/A11 offline asserts.
 
-### Phase C — Test-runner allowlist shell gate
-8. Add `bin/ai-stepfun-windows-shell` (or equivalent invoked by the OpenCode
-   agent bash): cwd forced to review folder; argv must be an allowlisted
-   runner or a script path under the review folder; otherwise exit 126 with
-   `stepfun-shell: refused (not an allowlisted test runner)`.
-   **Verify:** offline cases in §10 adversarial table all behave as specified.
-9. Point `config/opencode-stepfun/agent/stepfun-review.md` and
-   `stepfun-implement.md` bash permission at that gate on Windows (keep
-   `bash: "*": allow` semantics for Linux bubblewrap, or route both through
-   the gate with Linux seeing the same allowlist **plus** bwrap). Keep
-   write/edit/patch. Assert `opencode.json` still has no MCP. **Verify:**
-   profile diff is intentional and tests cover both platforms.
+### Phase C — Shell gate + file clamp
+8. Add `bin/ai-stepfun-windows-shell` implementing §8.2 (LF + exec bit).
+   **Verify:** offline adversarial cases A1–A9, A13–A16 all match expected.
+9. Wire agent profiles (`stepfun-review.md`, `stepfun-implement.md`) per
+   §8.2/§8.3. Keep Linux bwrap. Assert `opencode.json` still has no MCP.
+   **Verify:** profile diff intentional; both platforms covered by tests.
+10. File-tool clamp spike (§8.3 fork) with result recorded in STATUS.
+    **Verify:** either proven clamp or write/edit disabled on Windows with
+    docs updated in the same commit.
 
 ### Phase D — Preflight, tests, docs
-10. `bin/ai-review-preflight` `static_status` / `explain_failure`
-    (`:248-258`, `:325`): Windows + OpenCode + key store + shell gate ⇒ usable;
-    without them keep a specific failure (not a blanket `unsupported-platform`).
-    **Verify:** `ai-review-preflight status stepfun` on edge-dev is usable after
-    install refresh.
-11. Invert refusal tests (do not merely extend):
-    - `tests/test-ai-stepfun.sh:192-199` — Windows+OpenCode is supported;
-      OpenCode block runs on Windows with stubs (no `stat 600`, no bwrap).
-    - `tests/test-ai-review-preflight.sh:288-291` — same inversion.
-    - **Keep** `tests/test-install-ai-provider-clis.sh:62-67` (StepCode stays
-      Linux-only).
-    **Verify:** `tests/test-ai-stepfun.sh` and preflight test green on Windows
-    Git Bash and Linux.
-12. Docs: rule 11 Windows exception (quote owner + residual risk; do **not**
-    claim equivalence); `skills/shared/stepfun/SKILL.md`;
-    `docs/config-inventory.md` StepFun row; `docs/architecture.md:151`;
-    `bin/ai-stepfun` `usage()`; `config/reviewer-registry.json` reason text;
-    membership scope left out-of-allocator (LOCKED). **Verify:** docs grep shows
-    no "Windows refused" / "Ubuntu-only" absolute claim without the exception.
-13. `AGENTS.md` task-router row for this plan + `HANDOFF.d/` backlink file.
-    **Verify:** both exist and point at this plan.
+11. Preflight `static_status` / `reconciled_status` / `explain_failure`
+    (`:232-258`, `:325`): Windows+OpenCode+key+gate ⇒ usable; new failure class
+    `shell-gate-missing` when the wrapper is absent. **Verify:**
+    `ai-review-preflight status stepfun` usable after install.
+12. Invert tests (not merely extend) **including** PASS-count and skip guards:
+    `tests/test-ai-stepfun.sh:104-110,192-203`, `tests/test-ai-review-preflight.sh:286-291`.
+    **Keep** `tests/test-install-ai-provider-clis.sh:62-67`. Windows stub
+    strategy: no `stat 600`, no bwrap, no PATHEXT dependence in Linux CI.
+    **Verify:** both suites green on Windows Git Bash and Linux.
+13. Docs: rule 11 Windows exception (quote owner + residual; never
+    “equivalent”); skill; `docs/config-inventory.md`; `docs/architecture.md:151`;
+    `usage()`; `bin/ai-stepfun` header comments (`:6-7,132`); registry reason;
+    `reviewer-membership-scope.json` reason (§8.7). **Verify:** docs-grep has
+    no unqualified “Windows refused” / “Ubuntu-only” absolute.
+14. `AGENTS.md` router row + `HANDOFF.d/` backlink. **Verify:** both exist.
 
 ### Phase E — Proof, review, ship
-14. Offline suite + any new `config/ci-suites/` registration. **Verify:**
-    `tests/test-all.sh --windows-offline` relevant shards green; collision
-    check `bin/ai-test-local --check-collision` first.
-15. Live isolation proof on edge-dev (Git Bash, not WSL) in one real
-    `ai-stepfun ask`/`review` turn — fail bar in §10. Record under
-    `tests/verification/`. **Verify:** record file lists each attempt with
-    refused/residual/allowed and the turn id.
-16. Exact-head **code** review (`ai-review <pool> diff-review|final-check
-    --assert-head`) — required for reviewer-safety. **Verify:** APPROVE bound
-    to the PR head.
-17. PR, `bin/ai-pr-wait`, merge per `config/repository-policy.json`.
+15. Offline suite; `bin/ai-test-local --check-collision` first; register any
+    new `config/ci-suites/` entry. **Verify:** `tests/test-all.sh --windows-offline`
+    relevant shards green.
+16. Live proof (§8.8 canary-only) in one real `ai-stepfun` turn on edge-dev
+    Git Bash. **Verify:** `tests/verification/` record with per-attempt
+    refused/allowed/residual + turn id.
+17. Exact-head **code** review (`ai-review … diff-review|final-check
+    --assert-head`). **Verify:** APPROVE bound to PR head.
+18. PR, `bin/ai-pr-wait`, merge per `config/repository-policy.json`.
     **Verify:** merge SHA on `origin/main`.
-18. Refresh `C:/repos/ai-devops-reviewer-install` to new main; rerun preflight
-    + one live Windows turn. **Verify:** install tree matches main digest;
-    preflight usable.
-19. #1169: owner quote, residual-risk sentence, evidence links, close. Sign
-    every post. **Verify:** issue CLOSED.
+19. Refresh `C:/repos/ai-devops-reviewer-install` to new main; re-run preflight
+    + one live Windows turn. **Verify:** install digest matches main.
+20. #1169 close: owner quote, residual sentence, evidence links. Sign posts.
+    **Verify:** issue CLOSED.
 
-## 10. Tests required (including adversarial table)
-
-Fail bar for live proof (§8 LOCKED):
-- Allowlisted test run **inside the folder** → must succeed.
-- Gate refusal of a **non-allowlisted** access command (e.g. `type`, `cat`
-  of a host path, `python -c` open host path) → **must be refused** and
-  recorded as such. Missing refusal = plan failure.
-- Allowlisted runner reading a host credential path → residual (record
-  succeeded/failed **without printing contents**).
+## 10. Tests required (adversarial table)
 
 | # | Hostile case | Expected | Test |
 |---|---|---|---|
-| A1 | `cat /c/Users/*/.ssh/id_rsa` (non-allowlisted) | gate refuse | offline + live attempt |
-| A2 | `type C:\Users\...\.ssh\id_rsa` | gate refuse | offline |
-| A3 | `python -c "open(r'C:\\Users\\...')"` | gate refuse (python only as test runner with script **under** folder) | offline + live |
-| A4 | `powershell Get-Content ...hosts.yml` | gate refuse unless powershell invoked as allowlisted test entry | offline |
-| A5 | UNC / mapped path to token file | gate refuse (not under folder / not allowlisted) | offline |
-| A6 | symlink/junction from folder to `~/.ssh` | read via allowlisted runner = residual; via `cat` = refuse | offline |
-| A7 | `cd /` then relative escape | cwd forced to folder; refuse | offline |
-| A8 | write redirect `echo x > /c/Users/...` via bash | refuse (not allowlisted runner) | offline |
-| A9 | `git push` / `git remote add` / `gh` / `op` | refuse (existing agents + gate) | offline (keep current) |
-| A10 | leftover `OP_SERVICE_ACCOUNT_TOKEN` / `SSH_AUTH_SOCK` / `DOCKER_*` / `GH_TOKEN` in child env | absent (allowlist) | offline env dump |
-| A11 | child HOME/USERPROFILE/APPDATA point at per-run dir | assert redirect | offline |
-| A12 | non-Linux StepCode install | still fails | **keep** existing test |
+| A1 | `cat`/`type` of canary “SSH” path | gate refuse | offline + live (canary) |
+| A2 | `python -c open(canary)` | refuse (eval flag) | offline + live |
+| A3 | `powershell -Command Get-Content canary` | refuse (eval flag) | offline |
+| A4 | `powershell -File <folder-test.ps1>` | allow if folder script | offline |
+| A5 | UNC / `\\?\` / 8.3 path to canary | refuse (outside folder) | offline |
+| A6 | symlink/junction folder→canary | file tools refuse; shell residual | offline |
+| A7 | `cd / && …` / metachar chains | refuse | offline |
+| A8 | `echo x > host-path` | refuse (metachar / outside) | offline |
+| A9 | `git push` / `git remote` / `gh` / `op` | refuse (keep current) | offline |
+| A10 | `SSH_AUTH_SOCK`/`GH_TOKEN`/`OP_*`/`DOCKER_*`/`AWS_*`… in child env | absent | offline |
+| A11 | HOME/USERPROFILE/APPDATA/LOCALAPPDATA/TEMP/TMP/TMPDIR under per-run dir; HOMEDRIVE+HOMEPATH do not recombine to real profile | assert | offline |
+| A12 | non-Linux StepCode install | still fails | **keep** |
 | A13 | Linux without bubblewrap | still refuses | keep |
-| A14 | `opencode.json` MCP added | fail regression | offline |
+| A14 | `opencode.json` gains MCP | fail regression | offline |
+| A15 | PATH-planted `npm` in review folder | not used (frozen PATH) | offline |
+| A16 | `node -e` / `npx -e` / `cmd /c` / `wsl` / `bash -c` | refuse | offline |
+| A17 | write/edit/patch to path outside folder | refuse (or tool disabled) | offline |
+| A18 | canary test run inside folder | must succeed | offline + live |
 
-Windows-runnable stubs must not require `stat 600` or bwrap (see
-`tests/test-ai-stepfun.sh` current skips at `:106-108`, `:196-199`).
+Live proof uses **only** canary files under a temp tree (§8.8). Never probe
+real `~/.ssh`, `hosts.yml`, 1Password token file, or Docker pipe.
 
 ## 11. Constraints
 
-Branch + PR + merge queue; identity check; reviewer-safety independent review
-before merge; no secrets in chat/argv/logs; Git Bash on Windows
-(`C:\Program Files\Git\bin\bash.exe` — system `bash` is the WSL stub); never
-weaken Linux; never claim Windows = rule 11; `bin/ai-gh` only; sign GitHub
-posts; times EST/EDT.
+Branch + PR + queue; identity check; reviewer-safety independent code review
+before merge; no secrets in chat/argv/logs; Git Bash
+(`C:\Program Files\Git\bin\bash.exe`); never weaken Linux; never claim
+Windows = rule 11; `bin/ai-gh` only; sign GitHub; times EST/EDT; new scripts
+LF + exec bit.
 
 ## 12. Access and environment
 
 edge-dev Windows, Git Bash, no WSL. Worktree as above. StepFun key store
-already provisioned for live turns. OpenCode binary via existing GLM/Muse pin
-path — do not invent an installer.
+already provisioned. OpenCode via existing pin path.
 
-## 13. Definition of done, rollback, residual
+## 13. Done, rollback, residual
 
-Done: § STATUS all DONE; merge SHA on main; live proof record; install digest
-matches; #1169 CLOSED with owner quote and residual sentence.
+Done: STATUS all DONE; merge SHA on main; canary live proof; install digest
+matches; #1169 CLOSED with owner quote + residual sentence.
 
-Rollback: revert the PR (restore `require_engine` Linux-only, preflight
-`static_status`, refusal tests). No data migration.
+Rollback: revert PR (restore Linux-only `require_engine`, preflight, refusal
+tests). No data migration.
 
-Residual (owner-accepted): allowlisted interpreters can still be pointed at
-host absolute paths; a determined escape is not mount-blocked. Document that
-sentence on #1169 at close.
+Residual (owner-accepted): in-folder script bodies and other allowlisted
+runner abuse can still reach host paths; network is shared; Windows is not
+mount-isolated. That sentence goes on #1169 at close.
 
 ## Plan-mechanics self-audit
 
-- Goal first? yes.
-- File:line for current state? yes §5.
-- Rejected approaches? yes §7.
-- LOCKED vs OPEN? yes §8.
-- Verify gate per step? yes §9.
-- Adversarial table with tests? yes §10.
-- Rollback? yes §13.
-- HANDOFF + AGENTS router? step 13.
-- STATUS at top? yes.
-- Exact-head code review before merge? step 16.
+- Goal first? yes. File:line current state? yes §5. Rejected? yes §7.
+- LOCKED/OPEN? yes §8. Verify gate per step? yes §9.
+- Adversarial table + canary-only proof? yes §8.8/§10.
+- Rollback? yes §13. HANDOFF + AGENTS? step 14.
+- STATUS at top? yes. Code review before merge? step 17.
+- Muse criticals 1–6 addressed? §8.2 (gate), §8.2 (allowlist triple),
+  §8.2 residual (script bodies), §8.2 (metachar), §8.3 (file tools),
+  §8.8 (canary).
