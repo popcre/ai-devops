@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — Reviewer pipeline core (rewrite per StepFun)
 
-**Tracking:** see HANDOFF.d/2026-09-29T1427Z-edge-dev-mimo-reviewer-pipeline-core.md  
+**Tracking:** see HANDOFF.d/2026-09-29T2205Z-edge-dev-mimo-reviewer-pipeline-wrapup.md  
 **Date:** 2026-09-29  
 **Authoring basis:** StepFun critique VERDICT REVISE on head `7f6c53fc` (report `.ai/tmp/stepfun_critique_report.md`), Gemini critique (superseded on fleet membership), three wrapper audits, Jev transcript diagnosis.  
 **Full investigation write-up:** [docs/reviewer-failure-full-writeup.md](docs/reviewer-failure-full-writeup.md) (all background, critiques, incidents)
@@ -272,4 +272,4 @@ Full suite: `bin/ai-test-local` after `bin/ai-test-local --check-collision`. Nev
 
 ## Handoff link
 
-See [`HANDOFF.d/2026-09-29T1427Z-edge-dev-mimo-reviewer-pipeline-core.md`](HANDOFF.d/2026-09-29T1427Z-edge-dev-mimo-reviewer-pipeline-core.md).
+See [`HANDOFF.d/2026-09-29T2205Z-edge-dev-mimo-reviewer-pipeline-wrapup.md`](HANDOFF.d/2026-09-29T2205Z-edge-dev-mimo-reviewer-pipeline-wrapup.md).

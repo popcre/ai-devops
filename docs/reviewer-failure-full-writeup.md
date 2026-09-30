@@ -4,7 +4,7 @@
 **Prepared by:** MiMo chat on edge-dev  
 **Purpose:** one complete record of what went wrong, all background, no dropped nuance.  
 **Plan of record:** [`plan_reviewer-pipeline-core.md`](../plan_reviewer-pipeline-core.md)  
-**Evidence folder:** [`reviewer-failure-evidence/`](reviewer-failure-evidence/)
+**Evidence folder:** `docs/reviewer-failure-evidence/` (local-only private investigation notes; intentionally not committed to this public repository)
 
 This document is the investigation dossier. The plan is what to build next. If they disagree, stop and flag it — the goal in the plan §1 wins.
 
