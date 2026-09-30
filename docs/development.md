@@ -200,8 +200,7 @@ uses GitHub-hosted runners (`ubuntu-24.04`, `windows-2025`) and, when idle,
 qualified self-hosted hosts (EDGE-RUNN-ENVY / `ai-devops-windows-qualified`) as
 extra capacity. WarpBuild Azure BYOC (`warp-custom-warpbuild-win2022-canary`) is
 the final option only after GitHub-hosted and edge-runn-envy are full; the
-manual `windows-offline-warpbuild` workflow is the on-demand overflow lane (see
-[`warpbuild-azure-byoc.md`](warpbuild-azure-byoc.md)). Only the manual runner
+manual `windows-offline-warpbuild` workflow is the on-demand overflow lane. Only the manual runner
 qualification workflow still targets self-hosted machines. Required check names
 are unchanged. On pull requests the `runner-router` job gives ordinary Windows
 sections to idle qualified self-hosted hosts first, then GitHub-hosted, then
