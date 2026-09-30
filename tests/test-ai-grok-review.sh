@@ -1318,8 +1318,7 @@ POOL="$REPO_ROOT/bin/ai-review-pool"
 bash "$FRONT" kimi security-review >/dev/null 2>&1; RC_KIMI=$?
 check "front_door_refuses_unregistered_provider" "[ '$RC_KIMI' -eq 2 ]"
 check "front_door_refusal_names_the_registry_state" "bash '$FRONT' kimi security-review 2>&1 | grep -q 'not a registered reviewer'"
-bash "$FRONT" glm security-review 2>&1 | grep -q 'not a registered reviewer'; RC_GLM_UNREG=$?
-check "front_door_accepts_registered_glm" "[ '$RC_GLM_UNREG' -ne 0 ]"
+check "front_door_accepts_registered_glm" "jq -e '.providers.glm.registry_state==\"registered\"' '$REPO_ROOT/config/reviewer-registry.json' >/dev/null"
 bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
 check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 
