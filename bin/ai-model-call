@@ -29,9 +29,13 @@ validate_codex(){
 review_stage(){
   local mode="$1" report rc brief
   # Claude left the reviewer pool (owner instruction 2026-09-30). Pipeline
-  # review stages use a registered pool provider; Codex cannot, because it is
-  # the implementing engine for these stages.
+  # review stages use a registered pool provider. Codex is refused here: it is
+  # the implementing engine for these stages, so it cannot be the independent
+  # reviewer.
   local provider="${AI_PIPELINE_REVIEW_PROVIDER:-grok}"
+  case "$provider" in
+    ''|codex|claude) die "AI_PIPELINE_REVIEW_PROVIDER must be a pool reviewer other than codex or claude." ;;
+  esac
   brief="$(cd "$(dirname "$PROMPT")" && pwd -P)/$(basename "$PROMPT")"
   set +e; report="$(cd "$REPO" && AI_REVIEW_BRIEF_FILE="$brief" "$REVIEW" "$provider" "$mode")"; rc=$?; set -e
   [ "$rc" -eq 0 ] && [ -s "$report" ] || die "governed $provider review failed for $STAGE."
