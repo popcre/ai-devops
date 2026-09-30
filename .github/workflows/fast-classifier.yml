@@ -1,30 +1,41 @@
 name: fast-classifier
 
+# Selection and fast validation are deliberately separate outcomes (P3).
+# Selection answers "which expensive suites can this change break?" and is
+# conservative whenever it is uncertain. Fast validation answers "is this
+# candidate even runnable?" and a known terminal failure there must start no
+# long job at all. The publish job always runs so the caller always receives an
+# explicit selection_result and validation_result; a missing result is never
+# read as success.
 on:
   workflow_call:
     outputs:
       run_long:
-        value: ${{ jobs.classify.outputs.run_long }}
+        value: ${{ jobs.publish.outputs.run_long }}
       prose_only:
-        value: ${{ jobs.classify.outputs.prose_only }}
+        value: ${{ jobs.publish.outputs.prose_only }}
       skills:
-        value: ${{ jobs.classify.outputs.skills }}
+        value: ${{ jobs.publish.outputs.skills }}
       code:
-        value: ${{ jobs.classify.outputs.code }}
+        value: ${{ jobs.publish.outputs.code }}
       workflow:
-        value: ${{ jobs.classify.outputs.workflow }}
+        value: ${{ jobs.publish.outputs.workflow }}
       powershell:
-        value: ${{ jobs.classify.outputs.powershell }}
+        value: ${{ jobs.publish.outputs.powershell }}
       test_fixtures:
-        value: ${{ jobs.classify.outputs.test_fixtures }}
+        value: ${{ jobs.publish.outputs.test_fixtures }}
       reviewer:
-        value: ${{ jobs.classify.outputs.reviewer }}
+        value: ${{ jobs.publish.outputs.reviewer }}
+      selection_result:
+        value: ${{ jobs.publish.outputs.selection_result }}
+      validation_result:
+        value: ${{ jobs.publish.outputs.validation_result }}
 
 permissions:
   contents: read
 
 jobs:
-  classify:
+  select:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 3
     outputs:
@@ -54,6 +65,18 @@ jobs:
           else
             bash tools/ci/classify-changes.sh "${{ github.event_name }}" </dev/null >> "$GITHUB_OUTPUT"
           fi
+
+  # Fast validation, isolated from selection so that a known syntax or policy
+  # failure can be reported as such and stop the expensive suites. These checks
+  # run in seconds and are the whole fast-fail path: when they fail the change
+  # is already known bad and a 45-105 minute suite can only re-report it.
+  validate:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - name: Bash syntax
         shell: bash
         run: |
@@ -65,3 +88,37 @@ jobs:
         run: bash tests/test-workflow-policy.sh
       - name: Suite selection
         run: bash tests/test-test-selection.sh
+
+  # Always runs, even when select or validate failed, so the caller gets an
+  # explicit result for each outcome instead of an empty string that could be
+  # mistaken for a clean skip.
+  publish:
+    if: always()
+    needs: [select, validate]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 2
+    outputs:
+      run_long: ${{ needs.select.outputs.run_long }}
+      prose_only: ${{ needs.select.outputs.prose_only }}
+      skills: ${{ needs.select.outputs.skills }}
+      code: ${{ needs.select.outputs.code }}
+      workflow: ${{ needs.select.outputs.workflow }}
+      powershell: ${{ needs.select.outputs.powershell }}
+      test_fixtures: ${{ needs.select.outputs.test_fixtures }}
+      reviewer: ${{ needs.select.outputs.reviewer }}
+      selection_result: ${{ steps.record.outputs.selection_result }}
+      validation_result: ${{ steps.record.outputs.validation_result }}
+    steps:
+      - name: Publish selection and validation results
+        id: record
+        run: |
+          selection='${{ needs.select.result }}'
+          validation='${{ needs.validate.result }}'
+          case "$selection" in success|failure|cancelled|skipped) ;; *) selection=missing ;; esac
+          case "$validation" in success|failure|cancelled|skipped) ;; *) validation=missing ;; esac
+          {
+            printf 'selection_result=%s\n' "$selection"
+            printf 'validation_result=%s\n' "$validation"
+          } >> "$GITHUB_OUTPUT"
+          printf 'fast-classifier: selection=%s validation=%s run_long=%s\n' \
+            "$selection" "$validation" '${{ needs.select.outputs.run_long }}'
