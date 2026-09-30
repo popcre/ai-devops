@@ -107,7 +107,7 @@ echo '== preflight reports the provider unusable'
 PREFLIGHT="$ROOT/bin/ai-review-preflight"
 check "preflight explains the out-of-credit class" "bash '$PREFLIGHT' explain out-of-credit | grep -q 'Tell Albert in this same reply'"
 check "preflight classifies billing text as out-of-credit" "bash -c 'source <(sed -n \"/^classify_failure()/,/^}/p\" \"$PREFLIGHT\"); [ \"\$(classify_failure \"Insufficient Balance\")\" = out-of-credit ] && [ \"\$(classify_failure \"429 rate limit\")\" = allowance-exhausted ] && [ \"\$(classify_failure \"HTTP 403 monthly spending limit\")\" = out-of-credit ] && [ \"\$(classify_failure \"403 out of credits\")\" = out-of-credit ]'"
-check "preflight holds an out-of-credit doctor failure for the classifier's hour" "grep -q 'class\" != out-of-credit ] || seconds=3600' '$PREFLIGHT'"
+check "preflight holds an out-of-credit doctor failure for the classifier's hour" "grep -qE 'out-of-credit\\)[[:space:]]+seconds=3600' '$PREFLIGHT'"
 AI_REVIEW_QUARANTINE_DIR="$Q" bash "$TMP/stop.sh" deepseek "$FIX/deepseek-402.json" >/dev/null 2>&1
 check "preflight clear removes the out-of-credit quarantine" "AI_REVIEW_QUARANTINE_DIR='$Q' bash '$PREFLIGHT' clear deepseek >/dev/null 2>&1 && [ \"\$(\"$PY\" \"$TOOL\" global deepseek --directory '$Q')\" = null ]"
 
