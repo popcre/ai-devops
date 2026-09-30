@@ -12,9 +12,10 @@ roles, adapting CLI flags, and how the scripts use the commands.
   and fixing. Only implementation and testing receive workspace write access.
 - **Claude Opus 5** — independent plan, diff, security, and final approval
   reviews through a tool-limited, digest-bound adapter.
-- **GLM-5.3** — out of reviewer rotation (owner instruction; registry `absent`).
-  Usable only as an explicitly requested second opinion through `ai-glm`; never
-  assigned a formal review. The rotation pool is Muse, Grok, Qwen, and Gemini.
+- **GLM-5.3** — rotation reviewer (restored 2026-09-30). Never reviews
+  GLM-orchestrated (ZCode) work. Also usable as an explicitly requested second
+  opinion through `ai-glm`. The rotation pool is Muse, Grok, Qwen, Gemini, GLM,
+  and DeepSeek.
 - **Grok Build 4.6** — optional independent review through `ai-grok-review`
   (read-only) and isolated edits through `ai-grok-implement`. Advisory
   look-into-this work uses `ai-grok-implement investigate`; that is not a formal

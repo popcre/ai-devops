@@ -19,8 +19,8 @@
       "reason": "Rotation reviewer (gemini-3.8-flash-high). Re-entered the allocating registry on 2026-09-06 after a recorded live safety qualification and a live review of merged commit 99fbefcb that returned a well-formed VERDICT APPROVE line carrying the head SHA above 3,137 characters of real analysis. The earlier bare PASS with an empty report is now caught for every provider by the lifecycle report floor, not trusted."
     },
     "glm": {
-      "registry_state": "absent",
-      "reason": "Removed from reviewer rotation by owner instruction on 2026-09-22 (\"we took GLM out of rotation and we have 4 reviewers: Muse, Grok, Qwen, Gemini\"); matches popcre/shared-db RETIRED_REVIEWERS, which carries glm-5.3 since 2026-09-18. No review routes to GLM. Re-entry requires owner instruction and a reviewed registry change in both repositories."
+      "registry_state": "registered",
+      "reason": "Rotation reviewer (glm-5.3). Restored by owner instruction on 2026-09-30 (\"add GLM back into the reviewer rotation\") after a 2026-09-18 weekly-usage pause; matches popcre/shared-db removing glm-5.3 from RETIRED_REVIEWERS in its historical slot. The 2026-09-17 independence ruling still binds: GLM never reviews GLM-orchestrated (ZCode) work."
     },
     "grok": {
       "registry_state": "registered",
