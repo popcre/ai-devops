@@ -430,9 +430,7 @@ while :; do
         review-step) any_review=1 ;;
         *) any_result=1 ;;
       esac
-    done <<EOF
-$FAILED
-EOF
+    done <<<"$FAILED"
     if [ "$any_capacity" -eq 1 ]; then
       say "  capacity/infra: timeout/kill/rate-limit. A check reported CANCELLED"
       say "  is usually a job timeout, not a test result. Park the merge and"

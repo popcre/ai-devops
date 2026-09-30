@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # test-action-taxonomy.sh — two action labels only: capacity/infra vs result.
 # Empty reviewer verdict is the review-step carve-out and never `result`.
+# These checks execute the classifier; they do not grep for its strings.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CMD="$ROOT/tools/ci/action-taxonomy.sh"
@@ -12,6 +13,7 @@ check() {
 
 check "the taxonomy helper exists and is executable" "test -x '$CMD'"
 check "it parses as valid bash" "bash -n '$CMD'"
+check "it is committed as mode 100755" "git -C '$ROOT' ls-files -s tools/ci/action-taxonomy.sh | grep -q '^100755 '"
 
 act() { bash "$CMD" check "$@"; }
 det() { bash "$CMD" detail "$@"; }
@@ -21,12 +23,20 @@ check "TIMED_OUT is capacity/infra" \
   "test \"$(act TIMED_OUT windows-offline)\" = 'capacity/infra'"
 check "CANCELLED is capacity/infra (killed/interrupt)" \
   "test \"$(act CANCELLED windows-offline)\" = 'capacity/infra'"
-check "rate-limit text is capacity/infra" \
+check "rate-limit summary is capacity/infra" \
   "test \"$(act FAILURE some-check 'GraphQL rate limit exceeded')\" = 'capacity/infra'"
 check "a real test FAILURE is result" \
   "test \"$(act FAILURE linux-offline 'assertion failed')\" = 'result'"
 check "ERROR without capacity signal is result" \
   "test \"$(act ERROR windows-offline)\" = 'result'"
+
+# Finding 5: a check *name* containing quota/kill/429 must stay result.
+check "quota in the check name is not capacity" \
+  "test \"$(act FAILURE quota-check 'suite failed')\" = 'result'"
+check "kill in the check name is not capacity" \
+  "test \"$(act FAILURE skills-lint 'lint failed')\" = 'result'"
+check "429 in the check name is not capacity" \
+  "test \"$(act FAILURE job-429 'assert failed')\" = 'result'"
 
 check "timeout detail is report-only timeout-capacity" \
   "test \"$(det TIMED_OUT)\" = 'timeout-capacity'"
@@ -48,15 +58,23 @@ check "allowance exhaustion is capacity/infra" \
 check "stale-source is a result" \
   "test \"$(rev stale-source)\" = 'result'"
 
-check "an empty-verdict check signal is never labeled result (no PR test red)" \
-  "test \"$(act FAILURE x 'empty report')\" = 'review-step'"
+# The carve-out must fire from a real check signal (name or summary), not only
+# from the review failure_class API. An empty-verdict check is never `result`.
+check "empty-verdict in the check name is review-step, never result" \
+  "test \"$(act FAILURE empty-report 'provider returned no analysis')\" = 'review-step'"
+check "empty-verdict in the check summary is review-step, never result" \
+  "test \"$(act FAILURE windows-reviewer-safety 'empty report from provider')\" = 'review-step'"
 check "empty-verdict detail is empty-verdict" \
   "test \"$(det FAILURE x 'empty report')\" = 'empty-verdict'"
 
-# Binding constraint from the Muse-agreed plan: empty reviewer verdict must
-# never be classified as a PR test result.
 check "no empty-verdict path returns result" \
-  "test \"$(rev empty-report)\" != 'result' && test \"$(rev empty-verdict)\" != 'result' && test \"$(rev no-verdict)\" != 'result' && test \"$(rev malformed-verdict)\" != 'result'"
+  "test \"$(rev empty-report)\" != 'result' && test \"$(rev empty-verdict)\" != 'result' && test \"$(rev no-verdict)\" != 'result' && test \"$(rev malformed-verdict)\" != 'result' && test \"$(act FAILURE empty-verdict x)\" != 'result'"
+
+# End-to-end: the classification ai-pr-wait and report-scheduled-failure run.
+check "report-scheduled-failure classifies a cancelled need as capacity/infra" \
+  "test \"$(act cancelled windows-offline-complete)\" = 'capacity/infra'"
+check "report-scheduled-failure classifies a failure need as result" \
+  "test \"$(act failure linux-offline)\" = 'result'"
 
 printf 'action-taxonomy: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
