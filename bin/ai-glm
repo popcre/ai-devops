@@ -2463,6 +2463,9 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
   if ! implementation_active "$state"; then
     [ "$state" = failed ] && implementation_cleanup_pending "$mp" || return 0
   fi
+  # A mid-pass rewrite may have installed a live owner (and its own lock pid).
+  # Re-probe liveness on the fresh pid before any destructive step.
+  if kill -0 "$pid" 2>/dev/null; then return 0; fi
   lock="$STATE_DIR/locks/$rid--$caller--$name.lock.d"; lock_pid="$(cat "$lock/pid" 2>/dev/null || echo '')"
   if [ ! -d "$lock" ] || [ "$lock_pid" != "$pid" ]; then
     warn "dead implementation owner has ambiguous lock evidence; left untouched: $mp"; return 1
