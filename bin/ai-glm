@@ -405,13 +405,15 @@ implementation_lock_acquire() { # never reclaim: a stale lock is reconciliation 
 }
 
 write_meta() { # write_meta FILE JSON  (atomic: temp + mv on the same filesystem)
-  local f="$1" tmp
+  local f="$1" tmp rc
   mkdir -p "$(dirname "$f")"
   tmp="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"
   printf '%s\n' "$2" > "$tmp"
   chmod 0600 "$tmp"
   mv -f "$tmp" "$f"
+  rc=$?
   implementation_fields_invalidate "$1"
+  return "$rc"
 }
 
 # A successful HTTP submission can still leave the paid provider turn's outcome
@@ -591,6 +593,9 @@ implementation_record_fields() { # FILE [fresh] -> packed fields; caches by file
       .type // ""
     ] | join("")' "$f" 2>/dev/null)" || out=''
   [ -n "$out" ] || { _AI_GLM_IMPL_FIELDS[$f]=''; return 1; }
+  case "$out" in
+    *$'\n'*) _AI_GLM_IMPL_FIELDS[$f]=''; return 1 ;;
+  esac
   _AI_GLM_IMPL_FIELDS[$f]="$out"
   printf '%s' "$out"
 }
