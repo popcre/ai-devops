@@ -180,8 +180,17 @@ check "it exits on a failing check instead of waiting" \
   "grep -q 'failing checks and will not merge' '$CMD'"
 check "it has its own deadline so it can never wait forever" \
   "grep -q 'giving up rather than waiting silently' '$CMD'"
-check "it warns that a CANCELLED check is usually a job timeout" \
-  "grep -q 'usually a job timeout' '$CMD'"
+# Execute the taxonomy the waiter uses — a grep cannot prove the carve-out.
+TAX="$ROOT/tools/ci/action-taxonomy.sh"
+tax() { bash "$TAX" "$@"; }
+check "the waiter's action taxonomy classifies timeout as capacity/infra" \
+  "test \"$(tax check TIMED_OUT windows-offline)\" = 'capacity/infra'"
+check "the waiter's action taxonomy classifies CANCELLED as capacity/infra" \
+  "test \"$(tax check CANCELLED windows-offline)\" = 'capacity/infra'"
+check "the waiter's action taxonomy never labels empty verdict as result" \
+  "test \"$(tax check FAILURE empty-report 'empty report')\" = 'review-step' && test \"$(tax review empty-report)\" = 'review-step'"
+check "the waiter reports action labels and the empty-verdict carve-out" \
+  "grep -q 'action=\$action' '$CMD' && grep -q 'never reddens the PR test verdict' '$CMD' && grep -q 'action-taxonomy' '$CMD'"
 
 # The guard that actually prevents a repeat: no other file may hand-roll the
 # blind wait loop. Matches a `gh pr view ... state` inside a shell loop.
