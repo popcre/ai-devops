@@ -36,7 +36,7 @@ account-wide request savings. Preserve the existing workflow while proving both.
 | Control command | `bin/ai-devops` | `doctor` (health checks), `version`, `paths` |
 | Workspace safety | `bin/ai-workspace-status` | Read-only git/branch/PR/dirty snapshot + warnings |
 | Manual verification | `bin/ai-verify-run` | Provenance-bearing dispatch, duplicate refusal, status, and separately confirmed cancellation |
-| Approval review | `bin/ai-review`, `bin/ai-review-pool`, `bin/ai-codex-review` | Exact-source, lifecycle-accounted approval from a registered pool reviewer or the Codex gate |
+| Approval review | `bin/ai-review`, `bin/ai-review-pool`, `bin/ai-codex-review` | Exact-source, lifecycle-accounted approval from a registered pool reviewer (default Muse) or the Codex gate |
 | Model invocation | `bin/ai-model-call` | Runs one stage with validated arguments and atomic output; never shell-evaluates config |
 | Task orchestrator | `bin/ai-run-task` | Immutable seven-stage manifest, artifact chain, fail-closed resume and retry |
 | Documentation reachability | `bin/ai-doc-reachability`, `.doc-reachability.json`, reusable workflow | Blocks PR-added, copied, or moved Markdown that no configured root can reach; legacy orphans are not gated |

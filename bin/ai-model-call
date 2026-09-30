@@ -32,7 +32,7 @@ review_stage(){
   # review stages use a registered pool provider. Codex is refused here: it is
   # the implementing engine for these stages, so it cannot be the independent
   # reviewer.
-  local provider="${AI_PIPELINE_REVIEW_PROVIDER:-grok}"
+  local provider="${AI_PIPELINE_REVIEW_PROVIDER:-muse}"
   case "$provider" in
     ''|codex|claude) die "AI_PIPELINE_REVIEW_PROVIDER must be a pool reviewer other than codex or claude." ;;
   esac

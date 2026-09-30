@@ -10,7 +10,7 @@ roles, adapting CLI flags, and how the scripts use the commands.
 
 - **GPT-5.6-Sol / Codex (medium reasoning)** — planning, implementation, testing,
   and fixing. Only implementation and testing receive workspace write access.
-- **Pipeline review stages** — a registered pool reviewer (default Grok; override
+- **Pipeline review stages** — a registered pool reviewer (default Muse; override
   with `AI_PIPELINE_REVIEW_PROVIDER`). Claude left the reviewer pool on
   2026-09-30 and is no longer an approval reviewer.
 - **GLM-5.3** — out of reviewer rotation (owner instruction; registry `absent`).

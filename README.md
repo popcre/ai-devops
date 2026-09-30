@@ -159,7 +159,7 @@ STATUS first.
 
 High-level roles:
 
-- **Registered pool reviewer** (default Grok) — independent plan, diff, security,
+- **Registered pool reviewer** (default Muse) — independent plan, diff, security,
   and final review. Claude is out of the reviewer pool (owner instruction
   2026-09-30).
 - **GPT-5.6 / Codex (medium)** — planning, implementation, testing, fixing.

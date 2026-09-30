@@ -33,8 +33,9 @@ of forcing resume.
 
 - Codex / GPT-5.6 at medium reasoning plans in a read-only sandbox, then owns
   implementation and testing in an explicit workspace-write sandbox.
-- A registered pool reviewer independently reviews the plan, diff, security, and
-  final state. Claude is out of the reviewer pool and is never the reviewer.
+- A registered pool reviewer (default Muse) independently reviews the plan, diff,
+  security, and final state. Claude is out of the reviewer pool and is never the
+  reviewer.
 - `ai-review <registered-provider> ...` is the approval-capable front door.
   Other model wrappers are advisory or quarantined and cannot replace a required
   approval.
