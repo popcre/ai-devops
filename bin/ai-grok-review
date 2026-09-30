@@ -2036,6 +2036,7 @@ recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE
     capture_terminal_evidence "$next" 2>/dev/null || true
     rm -f "$out.terminal.json"; mv -f "$next" "$out"
     [ ! -f "$next.terminal.json" ] || mv -f "$next.terminal.json" "$out.terminal.json"
+    rm -f "$next.err"
   done
   return 0
 }
