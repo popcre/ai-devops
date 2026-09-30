@@ -86,7 +86,7 @@ Plan STATUS on `origin/main` marks steps 0–8 done, 9 proven edge-dev/edge-dev3
 - GitHub: `bin/ai-gh` via Git Bash (`"C:\Program Files\Git\bin\bash.exe"`); plain `bash` on this host is WSL and fails.
 - Hetz: `ssh vps2-direct` (user context on that host is `ai` under `/worksp/ai-devops`).
 - edge-dev3: `ssh -i ~/.ssh/916-alien ahazan@edge-dev3`.
-- al8960ofc/4837: Tailscale often down; LAN `192.168.2.131` as user **`ahazan2`** with 916-alien; remote default shell is cmd.exe.
+- al8960ofc/4837: Tailscale often down; LAN address redacted for the public boundary (2026-09-30; see the machine atlas) as user **`ahazan2`** with 916-alien; remote default shell is cmd.exe.
 - Machine atlas (private): `bin/ai-private-config path machine_atlas`.
 
 ## 9. Open questions and risks
