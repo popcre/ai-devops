@@ -155,4 +155,11 @@ superseded; their failure was main's, not the suites'). One transient flake
 one shard of #1175's first PR run and passed on the failed-jobs rerun;
 #1176's identical run was green throughout.
 
+Postscript: the same jam pattern repeated after the proof — #1178 (a HANDOFF,
+14:31 UTC) again landed a LAN address and failed this evidence PR's first PR
+run (its pull-request merge base pointed at the dirty `main`); #1180
+redacted it (15:0x UTC) and this PR re-ran green. Doc-only lanes keep
+skipping the whole-repo suites that catch this; a durable fix belongs to the
+coordination-deletion lane, not to this proof.
+
 Posted by ZCode chat unknown on edge-dev
