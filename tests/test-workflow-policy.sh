@@ -113,7 +113,9 @@ check 'no_progress_detector: a cancelled or missing suite is no progress and nev
 check 'rename sources cannot disappear from classification' "grep -q 'git diff --no-renames --name-only' '$fast_workflow'"
 check 'workflows have no top-level paths-ignore' "! grep -q 'paths-ignore:' '$workflow' && ! grep -q 'paths-ignore:' '$fast_workflow'"
 check 'scheduled and manual complete runs exist' "grep -q '^  schedule:' '$workflow' && grep -q '^  workflow_dispatch:' '$workflow'"
-check 'scheduled failures create or update an issue' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'gh issue create'"
+check 'scheduled failures create or update an issue with action labels' "grep -q '^  report-scheduled-failure:' '$workflow' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'issues: write' && sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q 'tools/ci/report-scheduled-failure.sh' && test -f '$ROOT/tools/ci/report-scheduled-failure.sh' && grep -q 'action-taxonomy' '$ROOT/tools/ci/report-scheduled-failure.sh'"
+check 'capacity labels land on scheduled incidents (timeout/kill/rate-limit = capacity/infra)' \
+  "grep -q 'capacity/infra' '$ROOT/tools/ci/action-taxonomy.sh' && grep -q 'action_taxonomy_check' '$ROOT/tools/ci/report-scheduled-failure.sh' && bash '$ROOT/tools/ci/action-taxonomy.sh' check TIMED_OUT | grep -qx 'capacity/infra' && bash '$ROOT/tools/ci/action-taxonomy.sh' check CANCELLED | grep -qx 'capacity/infra' && bash '$ROOT/tools/ci/action-taxonomy.sh' review empty-report | grep -qx 'review-step'"
 check 'managed bin commands use the shared GitHub admission path' \
   "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$ROOT' >/dev/null"
 # Windows verification runs in two lanes at once (issue #209): the long offline
