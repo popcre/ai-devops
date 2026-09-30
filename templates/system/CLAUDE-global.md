@@ -211,12 +211,10 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   subagent returns finished work or a blocker with its verbatim evidence line;
   anything else is a failure - resume that agent immediately. When relaying
   owner authority, quote Albert's exact words and say they came from his chat.
-- **A wait over ~10 minutes is registered, never polled** (#723). Run
-  `ai-blocker-watch wait` with a plain-English brief file, then end the turn;
-  the watcher wakes this session. Subagents register the same way; a wait with
-  no issue of its own uses `--park`. Polling inside the turn is the exception,
-  for short waits only, and a turn never ends by saying it is still waiting.
-  Waiting on a person is named in the Still-open block, not registered.
+- **A long wait leaves the issue/PR as the card.** Use bounded `ai-pr-wait`
+  while you remain in the turn; otherwise leave the existing issue or pull
+  request as the card and return later — GitHub notifications are the
+  reminder. Waiting on a person is named in the Still-open block.
   Details: `docs/standing-rules-details.md`.
 - Read the repository's `AGENTS.md`, then only what its task router names.
   Do not load unrelated handoffs.

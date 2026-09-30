@@ -4,8 +4,9 @@ name: Stuck-work watchdog
 # (or ejected from the merge queue) with no owner action for 30 minutes
 # (popcre/ai-devops#1011; design: shared-db docs/plans/plan_stuck_work_watchdog.md).
 # ai-devops: re-runs a quota/runner-loss failure once per head SHA, otherwise
-# opens one stuck-fixer issue per PR. shared-db: only tags the Shared-db.orch
-# conductor on its open orchestrator-marker issue; never re-runs or merges.
+# opens one stuck-fixer issue per PR. shared-db: one sticky comment per stuck
+# PR per head SHA on the PR itself (fetched assignee @-mentioned when set);
+# never re-runs, never opens a fixer issue, never touches a marker issue.
 # Albert gets one daily "Stuck work - <date>" issue for items stuck > 90 min.
 #
 # Scheduled from ai-blocker-watch (see `on:` below). Identity and allowance: the pop-ai-watchers GitHub App (its own

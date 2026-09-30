@@ -15,10 +15,10 @@
 //                       merge_group run); otherwise one `stuck-fixer` issue
 //                       per PR (label `ready-for-fixer`) and one
 //                       `Owner: stuck-fixer #N` comment per head SHA.
-//   popcre/shared-db  - never re-runs, never dispatches Guarded Merge, never
-//                       opens a fixer issue: it only keeps ONE comment on the
-//                       open `orchestrator-marker` issue (the Shared-db.orch
-//                       conductor) current, listing the stuck PRs.
+//   popcre/shared-db  - never re-runs, never opens a fixer issue, never
+//                       touches an orchestrator marker: one sticky comment
+//                       per stuck PR per head SHA on the PR itself, with the
+//                       fetched assignee @-mentioned when one is set.
 //   both              - items stuck more than 90 minutes go on one daily
 //                       ai-devops issue "Stuck work - <date>" assigned to
 //                       u2giants, rewritten in place.
@@ -44,7 +44,7 @@ export const LATCH_IGNORE_SECONDS = 120;
 export const ABANDONED_MINUTES = 3 * 24 * 60; // idle > 3 days: report only
 export const SIGNATURE = 'Posted by stuck-work-watchdog (ai-devops)';
 export const REPOS = [
-  { owner: 'popcre', name: 'shared-db', mode: 'conductor' },
+  { owner: 'popcre', name: 'shared-db', mode: 'comment' },
   { owner: 'popcre', name: 'ai-devops', mode: 'full' },
 ];
 const NOTICE_REPO = 'popcre/ai-devops';
@@ -177,11 +177,15 @@ export function noticeBody(items, now = Date.now(), abandoned = []) {
   return `<!-- stuck-work-notice -->\n${header}\n\n${body}${old}\n\n${SIGNATURE}`;
 }
 
-export function conductorBody(items, now = Date.now()) {
-  const list = items.length
-    ? items.map((i) => `- #${i.number} ${i.reason}, no owner action since ${edt(i.since)}`).join('\n')
-    : '- none right now';
-  return `<!-- stuck-work-conductor -->\nShared-db.orch conductor: these shared-db pull requests are stuck (red or ejected, no owner action for ${IDLE_MINUTES}+ minutes). The watchdog never re-runs or merges here; the conductor decides. Updated in place, last ${edt(new Date(now).toISOString())}.\n\n${list}\n\n${SIGNATURE}`;
+export const STUCK_COMMENT_MARKER = '<!-- stuck-work-watchdog -->';
+
+// One sticky comment per stuck PR per head SHA. The assignee @-mention comes
+// only from the fetched assignees list; an unassigned PR is never given an
+// invented owner.
+export function stuckCommentBody(item, now = Date.now()) {
+  const list = item.assignees || [];
+  const mention = list.length ? `\n\n${list.map((a) => `@${a}`).join(' ')}` : '';
+  return `${STUCK_COMMENT_MARKER}\nThis pull request is stuck: ${item.reason}, no owner action since ${edt(item.since)}.\nHead: ${item.headRefOid}\nThe watchdog never re-runs or merges here; an owner must act.${mention}\n\n${SIGNATURE}`;
 }
 
 // ---------------------------------------------------------------- GitHub I/O
@@ -193,6 +197,7 @@ const PR_QUERY = `query($owner:String!,$name:String!,$cursor:String){
       pageInfo{hasNextPage endCursor}
       nodes{
         number title isDraft createdAt headRefOid mergeQueueEntry{enqueuedAt}
+        assignees(first:5){nodes{login}}
         commits(last:1){nodes{commit{committedDate statusCheckRollup{state}}}}
         reviews(last:1){nodes{submittedAt author{__typename login}}}
         comments(last:20){nodes{createdAt author{__typename login}}}
@@ -276,34 +281,34 @@ export async function run({ token, rerunToken, dryRun = false, now = Date.now(),
     for (const { pr, c } of candidates) {
       const checks = c.reason === 'red checks' ? req.get(pr.number) || [] : [];
       if (c.reason === 'red checks' && checks.length === 0) continue; // only optional checks are red
-      stuck.push({ repo, number: pr.number, title: pr.title, headRefOid: pr.headRefOid, reason: c.reason === 'red checks' ? `required check ${checks.map((k) => `"${dataText(k.name || k.context)}"`).slice(0, 3).join(', ')} failing` : c.reason, since: c.since, idleMinutes: c.idleMinutes, checks, pr });
+      stuck.push({ repo, number: pr.number, title: pr.title, headRefOid: pr.headRefOid, assignees: (pr.assignees?.nodes || []).map((a) => a.login), reason: c.reason === 'red checks' ? `required check ${checks.map((k) => `"${dataText(k.name || k.context)}"`).slice(0, 3).join(', ')} failing` : c.reason, since: c.since, idleMinutes: c.idleMinutes, checks, pr });
     }
-    // Idle more than 3 days: abandoned, report only (no fixer, no conductor ping).
+    // Idle more than 3 days: abandoned, report only (no fixer, no comment).
     const abandoned = stuck.filter((s) => s.idleMinutes >= ABANDONED_MINUTES);
     for (const s of abandoned) { s.abandoned = true; s.holder = 'nobody (idle over 3 days)'; s.next = 'report only'; }
     report.abandoned = [...(report.abandoned || []), ...abandoned.map((s) => `${repo}#${s.number}`)];
     stuck.splice(0, stuck.length, ...stuck.filter((s) => !s.abandoned));
     report.repos[repo] = { open: prs.length, incomplete, stuck: stuck.map((s) => s.number), abandoned: abandoned.map((s) => s.number) };
 
-    if (mode === 'conductor') {
-      for (const s of stuck) { s.holder = 'the Shared-db.orch conductor'; s.next = 'the conductor re-runs or merges it'; }
-      const markers = await openIssues(gh, repo, 'orchestrator-marker');
-      const marker = markers.sort((a, b) => b.number - a.number)[0];
-      if (!marker) {
-        for (const s of stuck) s.holder = 'nobody (no open orchestrator marker)';
-      } else {
-        const comments = await gh.req('GET', `repos/${repo}/issues/${marker.number}/comments?per_page=100`);
-        const mine = comments.find((k) => k.user?.login === botLogin && k.body?.startsWith('<!-- stuck-work-conductor -->'));
-        const body = conductorBody(stuck, now);
-        const listed = (b) => [...String(b || '').matchAll(/^- #(\d+)/gm)].map((m) => m[1]).join(',');
-        if (mine && listed(mine.body) === listed(body)) {
-          // unchanged list: no write, no noise
+    if (mode === 'comment') {
+      // One sticky comment per stuck PR per head SHA. No fixer issue, no
+      // re-run, no orchestrator marker — the comment lands on the PR itself.
+      for (const s of stuck) {
+        const names = (s.assignees || []).map((a) => `@${a}`);
+        s.holder = names.length ? names.join(' ') : 'unassigned';
+        s.next = 'an owner re-runs or merges it';
+        const comments = await gh.req('GET', `repos/${repo}/issues/${s.number}/comments?per_page=100`);
+        const mine = comments.find((k) => k.user?.login === botLogin && String(k.body || '').includes(STUCK_COMMENT_MARKER));
+        const body = stuckCommentBody(s, now);
+        const headOf = (b) => String(b || '').match(/^Head: ([0-9a-f]{40})$/m)?.[1] || '';
+        if (mine && headOf(mine.body) === s.headRefOid) {
+          // same head SHA: idempotence key is PR + head, so no write
         } else if (mine) {
-          act(`update conductor note on ${repo}#${marker.number} (stuck: ${stuck.map((s) => s.number).join(', ') || 'none'})`);
+          act(`update stuck note on ${repo}#${s.number} for head ${s.headRefOid.slice(0, 8)}`);
           if (!dryRun) await gh.req('PATCH', `repos/${repo}/issues/comments/${mine.id}`, { body });
-        } else if (stuck.length) {
-          act(`tag conductor on ${repo}#${marker.number} (stuck: ${stuck.map((s) => s.number).join(', ')})`);
-          if (!dryRun) await gh.req('POST', `repos/${repo}/issues/${marker.number}/comments`, { body });
+        } else {
+          act(`comment stuck note on ${repo}#${s.number}`);
+          if (!dryRun) await gh.req('POST', `repos/${repo}/issues/${s.number}/comments`, { body });
         }
       }
     } else {
