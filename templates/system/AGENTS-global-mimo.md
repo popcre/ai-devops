@@ -185,9 +185,11 @@ the task needs the detail.
   Outside-sourced bulk loads into curated Master Data also use that governed
   route. Prove the target database immediately before every write. Load
   `shared-db-change` for the full procedure.
-- **Shared-db orchestrator gets the minimum** — only work that changes the
-  database's SHAPE, or a curated Master Data load. Proofs, monitoring, reports,
-  tooling, scripts, docs, and repository maintenance never go there.
+- **Shared-db structural work is claim-first.** Claim exact objects on the
+  existing issue and start; no orchestrator chat or marker is required. Scope
+  stays the minimum: only work that changes the database's SHAPE, or a curated
+  Master Data load. Proofs, monitoring, reports, tooling, scripts, docs, and
+  repository maintenance never go there.
 - **Label every shared-db ticket.** Whenever a `popcre/shared-db` issue number
   appears in a reply, say beside it whether it is orchestrator work (it changes
   database structure) or non-orchestrator work (it does not).
@@ -197,8 +199,9 @@ the task needs the detail.
 - **Reviewer rotation:** the shared-db allocator is the one source of truth
   for who reviews. Never retry one out of rotation. Reviewer wrappers never call
   1Password during a review. Details: `ai-devops/docs/reviewer-rotation-rules.md`.
-- **Shared-db orchestrator sessions only:** load `shared-db-orchestrator`. Its
-  detailed rules stay in that skill.
+- **`shared-db-orchestrator` is optional reference only** — claim-first is the
+  default structural path. Its detailed safety rules stay binding whenever
+  shared-db structural work runs.
 - **Route every successor from its own work.** Never inherit a predecessor's
   repository, work type, route, or database-object claim. Keep private artifacts
   in their approved private repository.

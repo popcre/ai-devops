@@ -1,52 +1,41 @@
 ---
 name: shared-db-handover
-description: Hand over, wrap up, close out, or stop any shared-db or shared Supabase session. Use for orchestrator/coordinator transfer, database handoff, "wrap up" after schema work, fresh-session transfer, or dispatched database agents. Non-orchestrators route ONLY database-shape changes to the orchestrator and keep everything else; orchestrators write coordination plus per-agent handoff state.
+description: Hand over, wrap up, close out, or stop any shared-db or shared Supabase session. Handover is notes on the same issue — not a new ticket. Claim-first is the default; no orchestrator chat or marker is required. Use for database handoff after schema work, fresh-session transfer, or dispatched database agents. Keep every safety disclosure (claims, preview writes, private artifacts).
 ---
 
 # shared-db-handover
 
-## FIRST: are you the orchestrator? Answer this before anything else
+## FIRST: settle what you owe (claim-first — no orchestrator role)
 
-`popcre/shared-db` runs **ONE orchestrator session at a time**. It takes
-**only work that changes the SHAPE of the database** (schema, table, column,
-view, function, trigger, policy, grant, index, constraint, or the migration
-that ships one) plus curated Master Data loads. Everything else — live proofs,
-monitoring, reports, tooling, scripts, docs, repository maintenance, app data —
-is **never** sent to the orchestrator, not even as a small item. Do it yourself
-or give it to a separately started repository session. When in doubt, it does
-not go to the orchestrator. When you keep leftover live-proof work, open one issue per unproven step and start one session per issue. Do not bundle several leftover proofs into one ticket or one chat. Never save several unproven steps to hand to a later session. Handing over means something completely
-different depending on which you are, so settle it first.
+`popcre/shared-db` structural work is **claim-first**: a session claims exact
+objects on the existing issue and starts. No orchestrator chat and no marker are
+required. This skill's job is to leave **notes on the same issue** — never a new
+ticket — so the work can continue safely.
 
-**You are the orchestrator only if** this session was opened as the orchestrator —
-it has been maintaining the live register, writing sub-agent briefs, and reading
-their reports. If you were started to *do* a piece of shared-db work, or you have
-just realised you are working in this repo without being the orchestrator, you are
-**not** the orchestrator. When in doubt, you are not.
-
-Then take exactly one path:
-
-- **NOT the orchestrator → path (A) below.** Stop database mutation, classify the
-  work, and open an issue only when a real handover is needed. The `db-work` label
-  is intake, not orchestrator ownership.
-- **The orchestrator → path (B), the rest of this skill.**
+When you keep unfinished live-proof work, leave a checklist item on the **same**
+GitHub issue (e.g. `- [ ] live proof`) and name it in your closing note. Do
+**not** open a leftover-proof issue, an "unproven step" issue, or a second
+ticket for that gap. One issue per application need; one named owner until the
+app works live.
 
 ---
 
-## (A) You are NOT the orchestrator — stop mutating, and hand over only structural work
+## (A) Hand over unfinished work — notes on the same issue
 
 **Stop working now.** Do not continue the task, and do not commit, push, merge,
 apply, promote, or write anything further to any database. Do not create
-background task chips. Do not delete or clean up your worktree or branch — the
-orchestrator may resume them, and an agent that tidies itself away destroys the
-evidence.
+background task chips. Do not delete or clean up your worktree or branch —
+another session may resume them, and an agent that tidies itself away destroys
+the evidence.
 
-**If — and only if — the unfinished work changes the database's shape, open a GitHub issue** on `popcre/shared-db` describing
-what you were doing and what state you left it in. Include a `db-work-scope` block
-with separate `status`, `work_type`, and `route`. Never infer the route from the
-repository, `db-work`, or `needs-albert`.
+**If the unfinished work changes the database's shape, leave a handover block on
+the existing GitHub issue** in `popcre/shared-db` describing what you were doing
+and what state you left it in. **Do not open a new ticket.** If a `db-work-scope`
+block already exists, extend it; never infer the route from the repository,
+`db-work`, or `needs-albert`.
 
 ```bash
-gh issue create --repo popcre/shared-db --label db-work   --title "HANDOVER: <what you were doing>"   --body-file <a file you wrote>
+gh issue comment <existing-issue> --repo popcre/shared-db --body-file <a file you wrote>
 ```
 
 Only structural work uses `route: shared-db-orchestrator`. Source-data decisions,
@@ -61,7 +50,7 @@ the structural migration-author queue.
 > edited at once and that never once shrank. **Do not append to it.** If you find
 > instructions telling you to, they are stale.
 
-**The nine things the issue must say.** This replaces the template that used to live
+**The nine things the note must say.** This replaces the template that used to live
 in the file. Answer every one, including the ones that make you look bad — those are
 the ones that save the next session a day:
 
@@ -151,12 +140,12 @@ opened one. Do not start anything else, and do not "just finish this one thing".
 
 ---
 
-## (B) You ARE the orchestrator — the two-halves handover
+## (B) Ending a structural session — the two-halves handover
 
-The end of a `popcre/shared-db` session. This skill exists because the normal
-handoff is not enough here: a shared-db session is run by a **orchestrator** that
-dispatched sub-agents (see the `shared-db-orchestrator` skill), and the next
-orchestrator has to be able to resume or retire **each agent individually**.
+The end of a `popcre/shared-db` structural session. A session that claimed exact
+objects and dispatched sub-agents (see the `shared-db-orchestrator` reference)
+must leave enough state for the next session to resume or retire **each agent
+individually**.
 
 > **This skill does not replace `handoff-writer`.** Follow that skill's file
 > convention (one write-once file at
@@ -165,12 +154,12 @@ orchestrator has to be able to resume or retire **each agent individually**.
 > including the mandatory "what we tried that did NOT work", and its
 > fresh-developer self-audit gate. This skill adds what shared-db needs on top.
 
-## The handoff has TWO halves — and a REQUIRED queue seed
+## The handoff has TWO halves — and a REQUIRED outstanding-work note
 
-A orchestrator handoff that omits half (b) is **incomplete**, no matter how long
-it is. **A orchestrator handoff that leaves outstanding work with no open
-`db-work` issue is equally incomplete**, and carries exactly the same weight —
-see "Seed the queue" below. *(Corrected 2026-08-09: this named the `REQUEST
+A structural handoff that omits half (b) is **incomplete**, no matter how long
+it is. **A handoff that leaves outstanding work with no note on the existing
+issue is equally incomplete**, and carries exactly the same weight —
+see "Seed the outstanding work" below. *(Corrected 2026-08-09: this named the `REQUEST
 QUEUE` in `COORDINATOR_INTAKE.md`, retired 2026-08-07.)*
 
 **(a) Coordination state**
@@ -201,13 +190,13 @@ One clearly headed block per agent — never merged into a single narrative:
 That last line matters most. Without it the next session redoes abandoned work
 or, worse, undoes a deliberate omission.
 
-## Seed the queue — REQUIRED, and a handover without it is INCOMPLETE
+## Seed the outstanding work — REQUIRED, and a handover without it is INCOMPLETE
 
-**Before you call the handover done, the outgoing orchestrator MUST seed or
-open or update an issue for EVERY outstanding
-item** — everything in `HANDOFF.md`'s opening agenda, its "waiting on Albert"
-list, and its `## BACKLOG` section, plus anything you dispatched that did not
-finish. Nothing outstanding may exist only in `HANDOFF.md` prose.
+**Before you call the handover done, leave a note for EVERY outstanding
+item** on the existing issue — everything in `HANDOFF.md`'s opening agenda, its
+"waiting on Albert" list, and its `## BACKLOG` section, plus anything you
+dispatched that did not finish. **Do not open a new ticket per item.** Nothing
+outstanding may exist only in `HANDOFF.md` prose.
 
 **Why this rule exists — 2026-07-31.** A fresh orchestrator opened a session, read
 the `REQUEST QUEUE`, `INTAKE QUEUE` and `IN PROGRESS` sections of
@@ -236,21 +225,20 @@ How to do it correctly:
   then closed. Never delete an issue. *(Corrected 2026-08-09: this pointed at
   lifecycle rules owned by the retired `COORDINATOR_INTAKE.md`.)*
 
-## Ingesting a handover issue
+## Ingesting a handover note
 
-Other sessions open a GitHub issue titled `HANDOVER: …` with the `db-work` label
-(path A above). ⚠️ They used to append to `COORDINATOR_INTAKE.md`; that file was
+Other sessions leave a handover note on the existing `db-work` issue (path A
+above). ⚠️ They used to append to `COORDINATOR_INTAKE.md`; that file was
 **RETIRED** on 2026-08-07 and is now a pointer. When you ingest one: **verify every
 claim against the live repo rather than trusting it** — `git fetch --all`, `gh pr list`, `git worktree list`,
 and the real current maximum migration version in `supabase/migrations/`.
 Documents in this repo have gone stale within the hour, and multiple agents have
 caught real errors exactly this way.
 
-After you have dispatched the work, **comment on the issue** with the date and
-who you dispatched it to, and close it once the work lands — never delete it. The
-issue history is the audit trail of who touched what. *(Corrected 2026-08-09:
-this said "move the ingested block to the file's TAKEN OVER section", which was
-the retired `COORDINATOR_INTAKE.md` workflow.)*
+After you have taken up the work, **comment on the same issue** with the date and
+what you took up. The issue history is the audit trail of who touched what.
+*(Corrected 2026-08-09: this said "move the ingested block to the file's TAKEN
+OVER section", which was the retired `COORDINATOR_INTAKE.md` workflow.)*
 
 ## The sweep — do this BEFORE you write the handover, not after
 
@@ -425,68 +413,12 @@ gh pr merge <n> --repo popcre/shared-db --squash
    `main`, saw a five-day-old handover, and concluded the session had been lost.
    Nothing was lost; it was parked by the rule. A handover nobody can find is not
    a handover.
-5b. **Close your orchestrator marker** — the open GitHub issue labelled
-   `orchestrator-marker` you opened at step 0 of the orchestrator sweep.
-
-   > ⚠️ **"Last" means AFTER STEP 9, not here at 5b.** This step is numbered 5b for
-   > readability — it sits next to the PR merge it depends on — but **do not perform
-   > it in numbered order.** Steps 6 through 9 (secrets sweep, docs pass, sweep
-   > confirmation, queue check, the fresh-developer gate) all still run, and step 6b
-   > says its output "goes in the handover PR". Closing the marker at 5b would drop
-   > the single-orchestrator lock with five steps of closeout still to go, and would
-   > tell the next orchestrator the board is clear while you are still working.
-   > **Close the marker as the final external action of the session, after step 9
-   > passes.** *(Ordering contradiction found 2026-08-11 by an independent Codex
-   > GPT-5.6 review, shared-db issue #530.)*
-
-   Close it **last**, after the handover PR is merged. Leaving it open makes the next
-   orchestrator stop and ask Albert about a session that ended cleanly; that stop
-   is the correct behaviour for a *dead* orchestrator and pure noise for a clean
-   handover.
-
-   > ⚠️ **CORRECTED 2026-08-26 (shared-db #1605). The old text here said that if a
-   > fresh session continues immediately you should "say so in the issue and leave
-   > it open deliberately". DO NOT DO THAT.** An open marker now carries a
-   > `route_id` — the address other sessions delegate to. Leaving yours open past
-   > your own death points every delegating session at a session that no longer
-   > exists. That was one of the enabling causes of the #1605 failure, in which an
-   > authorized structural request was delegated back to an already-closed
-   > orchestrator. It was not the sole cause — the marker also carried no address,
-   > the requester fell back to stale handoff material, and nothing acknowledged
-   > delivery — but following the old instruction now would directly encode that
-   > same dead-address failure.
-   >
-   > **A handover is: you close your marker, the successor opens its own with its
-   > OWN new `route_id`.** There is no edit-in-place handover and no marker that
-   > outlives its session. The guard catches the common case of a successor copying
-   > its predecessor's `route_id`, though that check is a trap rather than a proof.
-   >
-   > ### ⚠️ The zero-marker gap is BOUNDED, not race-free. Hand over in this order.
-   >
-   > Claiming a marker is **check-then-create, not atomic.** Two sessions can both
-   > see zero markers, both conclude they may claim, and both open one. The gap is
-   > strictly better than indefinitely routing work to a dead session, but do not
-   > read it as safe. Minimise it with a serialized handshake — this is the ordering,
-   > not a suggestion:
-   >
-   > 1. **Name your intended successor before you close anything.**
-   > 2. **Wait for it to confirm** it has its own `route_id` and is ready to claim
-   >    immediately.
-   > 3. **Only then close your marker.**
-   > 4. The successor **opens its marker at once** and runs
-   >    `node scripts/check-orchestrator-marker.mjs --resolve`.
-   > 5. **It dispatches nothing** until that resolution comes back clean and prints
-   >    its own `route_id`. Two markers, or an unsafe verdict, means stop — someone
-   >    else claimed in the gap.
-   >
-   > If you have no successor lined up, close the marker anyway and leave the board
-   > empty. `--resolve` then reports "no active orchestrator" and other sessions
-   > queue their work, which is the correct outcome — far better than a dead marker
-   > that silently absorbs delegations.
-   >
-   > *(The race was identified by independent Codex GPT-5.6 review during #1605.
-   > A genuinely race-free transition needs an atomic claim/transfer the GitHub
-   > issue workflow does not provide; this handshake bounds it, and says so.)*
+5b. **No marker to close.** Markers are not part of the default path. If an
+   older `orchestrator-marker` issue is still open from a previous process,
+   close it as housekeeping — it is not a lock and never was one. Merges are
+   dispatched by guarded-merge / train tooling and stage leases
+   (`EXCLUSIVE_REFS` in `manage-migration-author-lanes.mjs`), not by a chat
+   conductor.
 6. **The secrets sweep — DO IT, do not delegate it to a skill the user has to
    invoke.** This step is part of the handover, not a follow-on ritual. Albert
    should never have to run a second closing skill because this one stopped short.

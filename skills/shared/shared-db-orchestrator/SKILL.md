@@ -1,13 +1,17 @@
 ---
 name: shared-db-orchestrator
-description: Open or run the single popcre/shared-db orchestrator and route structural database work through its governed issues. Use for shared-db sessions, migrations, schema changes, promotion, database handovers, parallel database agents, or curated Master Data loads.
+description: Optional reference for shared-db structural work safety rules (claims, exact-object locks, stage leases, review, live proof). Claim-first is the default — no orchestrator chat or marker is required. Use when a structural session wants the detailed checklist, promotion rules, or exception handling.
 ---
 
 # Shared DB Orchestrator
 
 > Replacement work is planned in [`../../../plan_shared-db-complete-throughput-repair.md`](../../../plan_shared-db-complete-throughput-repair.md). Read its STATUS table before changing this skill or the lane model. The older 1+1 proposal is superseded. Until the replacement is implemented, the safety rules below remain binding; do not partially remove them.
 
-Coordinate only. Dispatch implementation to agents in isolated worktrees. Keep the full map of claims, branches, preview state, merges and owner decisions.
+**Not required. Claim-first is the default. This document is reference only.**
+New structural work starts when a session claims exact objects on the existing
+issue and begins — no orchestrator chat and no marker. The safety rules below
+(claims, versions, stage leases, independent review, live proof) stay binding
+whenever shared-db structural work runs.
 
 **Reporting to Albert.** Every status, queue, audit, marker and dispatch record
 in this skill is written into GitHub issues, plans and handoffs — never into the
@@ -79,51 +83,21 @@ test, stamped REJECT or FORK; clear it, do not carry it.
 
 Read `C:\repos\shared-db\AGENTS.md` before dispatch. It is the authoritative rulebook. Read [references/operating-manual.md](references/operating-manual.md) only when startup recovery, incidents, credentials, promotion, or detailed exception handling is needed.
 
-## Start
+## Start (claim-first — no marker)
 
-1. Check the open `orchestrator-marker` issue in `popcre/shared-db`. Fail closed if GitHub cannot be read. Never open a second active orchestrator. If `gh` reports `GitHub CLI\\config.yml: Access is denied`, report a **Codex task-profile configuration failure**, not “GitHub is unavailable.” Run `pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`, then retry the same read. This grants the Codex sandbox read-only access to that settings folder and does not expose or copy a token.
+A marker and an orchestrator chat are **not required**. Structural work starts
+when a session claims exact objects on the existing issue and begins (model:
+`shared-db/docs/agents/orchestrator.md` `self-service-additive`).
 
-   **Run the check rather than eyeballing the issue list** — `node scripts/check-orchestrator-marker.mjs`. Hand-querying the label has printed empty while a marker existed, and an empty result reads as permission to start.
+If `gh` reports `GitHub CLI\\config.yml: Access is denied`, that is a **Codex
+task-profile configuration failure**, not "GitHub is unavailable." Run
+`pwsh -NoProfile -File C:\\repos\\ai-devops\\bin\\repair-codex-github-cli-access.ps1`,
+then retry the same read. This grants the Codex sandbox read-only access to that
+settings folder and does not expose or copy a token.
 
-1a. **Claim your marker with a routing block, and name your session `shared-db.orch…`** (shared-db `AGENTS.md` §11c, issue #1605, owner instruction 2026-08-26). The marker is how every other session finds you; without a routable address it proves only that *someone* is running, and a session with no address falls back to a handoff or conversation history — which is how an authorized request reached an orchestrator that had already closed.
-
-   Set your session display name to begin with `shared-db.orch`, then open the marker containing:
-
-   ````
-   ```orchestrator-routing
-   status: active
-   identifier: shared-db.orch
-   engine: codex            # or `claude`
-   session_name: shared-db.orch <machine> <short label>
-   route_id: <YOUR OWN routable id — see below>
-   owner: u2giants
-   machine: <MACHINE>
-   started: <ISO-8601, e.g. 2026-08-26T14:39:25Z>
-   handover_issue: <predecessor marker number, or `none`>
-   briefing: <HANDOFF.d/... path, or `none`>
-   ```
-   ````
-
-   `route_id` is **your own** id, never the predecessor's. The guard catches the common copy — a
-   numeric `handover_issue` whose marker is readable and carries the same id — but it is a **trap,
-   not a proof**: it cannot catch an id reused from an older ancestor, a wrong predecessor number,
-   a `handover_issue: none` that is a lie, or a fabricated id of the right shape. Recording your
-   real id is your obligation.
-   - **Codex:** your thread UUID, the `session_id` in your rollout under `~/.codex/sessions/…`. Another session reaches you with `codex-reply` on that `threadId`.
-   - **Claude:** your own `sessionId` (e.g. `local_<uuid>`), which another Claude session messages directly.
-
-   Every field is required and **blank is never a default** — state a value or `none`. Verify before you dispatch anything:
-
-   ```bash
-   node scripts/check-orchestrator-marker.mjs --resolve
-   ```
-
-   It must print **your** `route_id`. If it does not, no other session can even ADDRESS you, and
-   you are not ready to run. Printing it proves only that the marker declares your address — not
-   that anyone can reach you. Nothing here can prove liveness or delivery.
-2. Fetch current `main`, audit open routed issues, `db-claim` issues, PRs, worktrees and open handoffs. `db-work` is an intake label, never proof of orchestrator ownership.
-3. Record every active workstream and exact claimed database objects.
-4. Warn if more than five open handoffs exist.
+1. Fetch current `main`, audit open routed issues, `db-claim` issues, PRs, worktrees and open handoffs. `db-work` is an intake label, never proof of ownership.
+2. Record every active workstream and exact claimed database objects.
+3. Warn if more than five open handoffs exist.
 
 ## Dispatch structural work
 
@@ -307,7 +281,7 @@ and the investigation would block itself.
 
 ## Phase 2 preview and reviewer lifecycle
 
-Phase 2 is active. Protected claims never disappear when an author lease is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, resolve the live marker, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops without mutation and goes to an assigned AI reviewer, never to Albert. Reviewer reservations record one review per exact head and session for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek; they never serialize independent reviews by the same provider and never create a wait because a provider is already reviewing. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
+Phase 2 is active. Protected claims never disappear when an author lease is relinquished, and preview dependencies are waits rather than successful checks. Before manual preview dispatch, re-audit live claims, run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch <issue>`, rerun the read-only selector with a fresh preview-ledger read, and use only the matching stored instruction. Historical recovery is apply-only; a historical dry-run proves nothing. Use `--repair-preview-ready <ready-id> --issue <n>` only for a v2-bound stale wrong digest; a corrupt live digest stops without mutation and goes to an assigned AI reviewer, never to Albert. Reviewer reservations record one review per exact head and session for Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, Gemini 3.8 Flash on a currently qualified host, Codex GPT-5.6 Sol, and DeepSeek; they never serialize independent reviews by the same provider and never create a wait because a provider is already reviewing. Gemini uses `ai-gemini` only; the selector must skip it unless `ai-review-preflight usable gemini` exits zero.
 
 ## Before preview and merge
 
