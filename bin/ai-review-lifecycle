@@ -280,12 +280,19 @@ report_substance(){ # FILE -> substantive character count
 
 terminal(){ # finish|fail args
   local operation="$1"; shift; local state="" verdict="" report="" elapsed="" failure="" current row report_sha="" stale=false scoreboard_rc=0 now
+  local packet_dir="" packet_sha256=""
   while [ "$#" -gt 0 ]; do case "$1" in
     --state) state="${2:-}"; shift 2;; --verdict) verdict="${2:-}"; shift 2;;
     --report) report="${2:-}"; shift 2;; --elapsed) elapsed="${2:-}"; shift 2;;
-    --failure) failure="${2:-}"; shift 2;; *) die "unknown terminal option: $1";; esac; done
+    --failure) failure="${2:-}"; shift 2;;
+    --packet-dir) packet_dir="${2:-}"; shift 2;;
+    --packet-sha256) packet_sha256="${2:-}"; shift 2;;
+    *) die "unknown terminal option: $1";; esac; done
   state="$(state_checked "$state")"; [ "$(jq -r .status "$state")" = running ] || die "lifecycle is not running: $state"
   case "$elapsed" in ''|*[!0-9]*) die "--elapsed must be a non-negative integer.";; esac
+  if [ -n "$packet_sha256" ]; then
+    printf '%s' "$packet_sha256" | grep -Eq '^[0-9a-f]{64}$' || die "--packet-sha256 must be 64 hex characters."
+  fi
   if [ "$operation" = finish ]; then case "$verdict" in APPROVE|REJECT|BLOCKED) ;; *) die "finish requires APPROVE, REJECT, or BLOCKED.";; esac
   else verdict=BLOCKED; [ -n "$failure" ] || failure=provider-failed; fi
   if [ -n "$report" ]; then [ -f "$report" ] && [ ! -L "$report" ] || die "report is not a regular file: $report"; report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")"; report_sha="$(sha256sum "$report"|cut -d' ' -f1)"; fi
@@ -296,8 +303,8 @@ terminal(){ # finish|fail args
   current="$($DIGEST digest "$(jq -r .repository_root "$state")")" || die "could not verify source at terminal transition."
   if [ "$current" != "$(jq -r .source_digest "$state")" ]; then stale=true; verdict=BLOCKED; failure=stale-source; fi
   now="$(date -u +%FT%TZ)"
-  row="$(jq --arg status "$([ "$operation" = finish ] && printf completed || printf failed)" --arg verdict "$verdict" --arg failure "$failure" --arg report "$report" --arg report_sha "$report_sha" --arg now "$now" --argjson elapsed "$elapsed" --argjson stale "$stale" \
-    '.status=$status|.verdict=$verdict|.failure_class=(if $failure=="" then null else $failure end)|.report_path=(if $report=="" then null else $report end)|.report_sha256=(if $report_sha=="" then null else $report_sha end)|.elapsed_seconds=$elapsed|.stale=$stale|.updated_at=$now|.finished_at=$now|.tree_sha256=.source_digest' "$state")"
+  row="$(jq --arg status "$([ "$operation" = finish ] && printf completed || printf failed)" --arg verdict "$verdict" --arg failure "$failure" --arg report "$report" --arg report_sha "$report_sha" --arg now "$now" --argjson elapsed "$elapsed" --argjson stale "$stale" --arg packet_dir "$packet_dir" --arg packet_sha256 "$packet_sha256" \
+    '.status=$status|.verdict=$verdict|.failure_class=(if $failure=="" then null else $failure end)|.report_path=(if $report=="" then null else $report end)|.report_sha256=(if $report_sha=="" then null else $report_sha end)|.elapsed_seconds=$elapsed|.stale=$stale|.updated_at=$now|.finished_at=$now|.tree_sha256=.source_digest|.packet_dir=(if $packet_dir=="" then null else $packet_dir end)|.packet_sha256=(if $packet_sha256=="" then null else $packet_sha256 end)' "$state")"
   atomic_json "$state" "$row"
   set +e; "$SCOREBOARD" append "$(jq -r .provider "$state")" "$state" --elapsed "$elapsed" --verdict "$verdict" --failure "$failure" --stale "$stale" >/dev/null; scoreboard_rc=$?; set -e
   if [ "$scoreboard_rc" -ne 0 ]; then
@@ -309,10 +316,10 @@ terminal(){ # finish|fail args
 
 join(){
   local state; state="$(state_checked "${1:-}")"
-  jq '{provider,repository_root,head,source_digest,run_id,session_id,caller,status,verdict,failure_class}' "$state"
+  jq '{provider,repository_root,head,source_digest,run_id,session_id,caller,status,verdict,failure_class,packet_dir,packet_sha256}' "$state"
 }
 
-usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live] [--reviewer-approval REPORT]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE]' 'ai-review-lifecycle join <state-file>'; }
+usage(){ printf '%s\n' 'ai-review-lifecycle identity <repo>' 'ai-review-lifecycle begin --provider P --repo PATH --run-id ID --caller NAME [--session-id ID] [--base REF] [--preflight standard|live] [--reviewer-approval REPORT]' 'ai-review-lifecycle observe --provider P --repo PATH --run-id ID --caller NAME --phase PHASE --observation TYPE [diagnostic fields]' 'ai-review-lifecycle finish --state FILE --verdict APPROVE|REJECT|BLOCKED --report FILE --elapsed N [--failure CLASS] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle fail --state FILE --elapsed N --failure CLASS [--report FILE] [--packet-dir DIR] [--packet-sha256 HEX]' 'ai-review-lifecycle join <state-file>'; }
 
 case "${1:-}" in
   identity) shift; [ "$#" -eq 1 ] || die "identity requires one repository."; identity_json "$1";;
