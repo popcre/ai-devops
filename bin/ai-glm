@@ -492,18 +492,24 @@ metadata_lock_acquire() { # lock used only for one atomic record transition
   if ! printf '%s' "$$" > "$d/pid"; then rm -rf "$d"; return 1; fi
 }
 
-implementation_record_path_valid() {
-  local f="$1" rid caller name expected
-  rid="$(jq -r '.repository_id // empty' "$f" 2>/dev/null)"
-  caller="$(jq -r '.caller // empty' "$f" 2>/dev/null)"
-  name="$(jq -r '.name // empty' "$f" 2>/dev/null)"
-  expected="$STATE_DIR/sessions/$rid/$caller--$name.json"
-  [ "$(canonical_path "$f" "$STATE_DIR")" = "$(canonical_path "$expected" "$STATE_DIR")" ]
-}
+# One jq read of schema validity plus every field the shared validators and
+# reconcile need. Callers that already hold the packed fields pass it through so
+# one record is not re-read per function. Columns use UNIT SEP (U+001F), not tab:
+# tab is IFS whitespace and would drop empty fields on read.
+# Order: schema_ok, repository_id, caller, name, repository_root, status,
+#        owner_pid, clone_path, opencode_session_id, type
+declare -A _AI_GLM_IMPL_FIELDS=()
 
-implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
-  local f="$1" expected_root="${2:-}" expected_caller="${3:-$CALLER}" root rid name caller clone expected
-  jq -e '
+implementation_record_fields() { # FILE -> packed fields; caches by file
+  local f="$1" out
+  if [ -n "${_AI_GLM_IMPL_FIELDS[$f]+x}" ]; then
+    [ -n "${_AI_GLM_IMPL_FIELDS[$f]}" ] || return 1
+    printf '%s' "${_AI_GLM_IMPL_FIELDS[$f]}"
+    return 0
+  fi
+  out="$(jq -r '
+    (try (
+
     .schema_version == 3 and .type == "implementation" and
     (.name|type)=="string" and (.repository_root|type)=="string" and
     (.repository_id|type)=="string" and (.caller|type)=="string" and
@@ -535,9 +541,120 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
     (.artifact_state == null or (.artifact_state|IN("pending","none","durable","failed"))) and
     (.provider_usage_state == null or (.provider_usage_state|IN("pending","unavailable","final"))) and
     (.provider_tokens == null or (.provider_tokens|type)=="object")
-  ' "$f" >/dev/null 2>&1 || return 1
-  root="$(jq -r .repository_root "$f")"; rid="$(jq -r .repository_id "$f")"
-  name="$(jq -r .name "$f")"; caller="$(jq -r .caller "$f")"
+  
+    ) catch false) as $ok |
+    [
+      (if $ok then "1" else "0" end),
+      .repository_id // "",
+      .caller // "",
+      .name // "",
+      .repository_root // "",
+      .status // "",
+      .owner_pid // "",
+      .clone_path // "",
+      .opencode_session_id // "",
+      .type // ""
+    ] | join("")' "$f" 2>/dev/null)" || out=''
+  [ -n "$out" ] || { _AI_GLM_IMPL_FIELDS[$f]=''; return 1; }
+  _AI_GLM_IMPL_FIELDS[$f]="$out"
+  printf '%s' "$out"
+}
+
+# Batch-fill the field cache in one jq pass per 100 files (glm_record_index shape).
+implementation_fields_fill() { # FILE...
+  local sep args chunk i f out
+  local GLM_REC_END='@@ai-glm-impl-end@@'
+  [ "$#" -gt 0 ] || return 0
+  sep="$(mktemp "${TMPDIR:-/tmp}/ai-glm-impl-end.XXXXXX")" || return 1
+  printf '\n%s\n' "$GLM_REC_END" > "$sep"
+  local files=("$@") n=$#
+  for ((i = 0; i < n; i += 100)); do
+    chunk=("${files[@]:i:100}"); args=()
+    for f in "${chunk[@]}"; do args+=("$f" "$sep"); done
+    while IFS=$'\t' read -r idx out; do
+      case "$idx" in ''|*[!0-9]*) continue ;; esac
+      f="${chunk[idx]}"
+      [ -n "$out" ] || { _AI_GLM_IMPL_FIELDS[$f]=''; continue; }
+      _AI_GLM_IMPL_FIELDS[$f]="$out"
+    done < <(jq -nr --arg end "$GLM_REC_END" --argjson want "${#chunk[@]}" '
+      reduce inputs as $l ({cur: "", recs: []};
+        if ($l | rtrimstr("\r")) == $end then .recs += [.cur] | .cur = "" else .cur += $l + "\n" end)
+      | .recs | if length != $want then empty else to_entries[] end
+      | .key as $i
+      | try (.value | fromjson
+          | if type != "object" then error("not a record") else . end
+          | (try (
+
+    .schema_version == 3 and .type == "implementation" and
+    (.name|type)=="string" and (.repository_root|type)=="string" and
+    (.repository_id|type)=="string" and (.caller|type)=="string" and
+    (.base_sha|type)=="string" and (.owner_pid|type)=="number" and
+    (.status|IN("starting","running","abort-requested","completed","failed","aborted")) and
+    (.clone_path == null or (.clone_path|type)=="string") and
+    (.opencode_session_id == null or (.opencode_session_id|type)=="string") and
+    (.failure_summary == null or (.failure_summary|type)=="string") and
+    (.failure_detail == null or ((.failure_detail|type)=="object" and
+      (.failure_detail.reason_id|type)=="string" and
+      (.failure_detail.reason|type)=="string")) and
+    (.failure_detected_at == null or (.failure_detected_at|type)=="string") and
+    (.changes_present == null or (.changes_present|type)=="boolean") and
+    (.patch_exists == null or (.patch_exists|type)=="boolean") and
+    (.outcome == null or (.outcome|IN(
+      "completed","failed-partial","failed-no-changes",
+      "aborted-partial","aborted-no-changes",
+      "timed-out-partial","timed-out-no-changes",
+      "usage-limit-partial","usage-limit-no-changes",
+      "permission-failed-partial","permission-failed-no-changes",
+      "artifact-export-failed"))) and
+    (.failure_kind == null or (.failure_kind|IN(
+      "provider-or-service","usage-limit","timed-out","permission-failed","transport-failed",
+      "aborted","artifact-export-failed","artifact-metadata-failed",
+      "report-write-failed","patch-export-failed","resource-cleanup-failed",
+      "owner-process-died","interrupted","wrapper-setup-failed"))) and
+    (.incomplete_patch_path == null or (.incomplete_patch_path|type)=="string") and
+    (.incomplete_report_path == null or (.incomplete_report_path|type)=="string") and
+    (.artifact_state == null or (.artifact_state|IN("pending","none","durable","failed"))) and
+    (.provider_usage_state == null or (.provider_usage_state|IN("pending","unavailable","final"))) and
+    (.provider_tokens == null or (.provider_tokens|type)=="object")
+  
+            ) catch false) as $ok
+          | [$i, (
+              [
+                (if $ok then "1" else "0" end),
+                .repository_id // "", .caller // "", .name // "",
+                .repository_root // "", .status // "", (.owner_pid // "" | tostring),
+                .clone_path // "", .opencode_session_id // "", .type // ""
+              ] | join("")
+            )])
+        catch [$i, ""]
+      | @tsv' -R "${args[@]}" 2>/dev/null | tr -d '\r' || true)
+  done
+  rm -f "$sep"
+  return 0
+}
+
+implementation_record_path_valid() { # FILE [FIELDS]
+  local f="$1" fields="${2:-}" rid caller name expected f_norm
+  if [ -z "$fields" ]; then
+    fields="$(implementation_record_fields "$f")" || return 1
+  fi
+  IFS=$'\x1f' read -r _ rid caller name _ _ _ _ _ _ <<< "$fields"
+  expected="$STATE_DIR/sessions/$rid/$caller--$name.json"
+  [ "$f" = "$expected" ] && return 0
+  canonical_path "$f" "$STATE_DIR" >/dev/null || true
+  f_norm="$CANONICAL_PATH_OUT"
+  canonical_path "$expected" "$STATE_DIR" >/dev/null || true
+  [ "$f_norm" = "$CANONICAL_PATH_OUT" ]
+}
+
+implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER] [FIELDS]
+  local f="$1" expected_root="${2:-}" expected_caller="${3:-$CALLER}" fields="${4:-}"
+  local root rid name caller clone expected root_norm clone_norm schema_ok
+    if [ -z "$fields" ]; then
+    fields="$(implementation_record_fields "$f")" || return 1
+  fi
+  IFS=$'\x1f' read -r schema_ok rid caller name root _ _ clone _ _ <<< "$fields"
+  [ "$schema_ok" = 1 ] || return 1
   valid_name "$name" || return 1
   if [ -d "$root" ]; then
     [ "$rid" = "$(repo_id "$root")" ] || return 1
@@ -545,17 +662,26 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER]
     # The job's repository was removed after the job ended (a deleted worktree).
     # A finished record with nothing left to clean up is still trustworthy history;
     # a live or cleanup-pending job without its repository stays ambiguous.
-    jq -e '.status|IN("completed","failed","aborted")' "$f" >/dev/null 2>&1 || return 1
-    jq -e '(.cleanup|type)=="object" and
+    jq -e '(.status|IN("completed","failed","aborted")) and
+      (.cleanup|type)=="object" and
       (.cleanup.clone|IN("removed","absent","none")) and
       (.cleanup.server_session|IN("removed","absent","none"))' "$f" >/dev/null 2>&1 || return 1
   fi
   [ "$caller" = "$expected_caller" ] || return 1
-  [ -z "$expected_root" ] || [ "$(canonical_path "$root" "$root")" = "$(canonical_path "$expected_root" "$expected_root")" ] || return 1
-  clone="$(jq -r '.clone_path // empty' "$f")"
+  if [ -n "$expected_root" ] && [ "$root" != "$expected_root" ]; then
+    canonical_path "$root" "$root" >/dev/null || true
+    root_norm="$CANONICAL_PATH_OUT"
+    canonical_path "$expected_root" "$expected_root" >/dev/null || true
+    [ "$root_norm" = "$CANONICAL_PATH_OUT" ] || return 1
+  fi
   if [ -n "$clone" ]; then
     expected="$STATE_DIR/wt/$rid/$caller--$name"
-    [ "$(canonical_path "$clone" "$STATE_DIR")" = "$(canonical_path "$expected" "$STATE_DIR")" ] || return 1
+    if [ "$clone" != "$expected" ]; then
+      canonical_path "$clone" "$STATE_DIR" >/dev/null || true
+      clone_norm="$CANONICAL_PATH_OUT"
+      canonical_path "$expected" "$STATE_DIR" >/dev/null || true
+      [ "$clone_norm" = "$CANONICAL_PATH_OUT" ] || return 1
+    fi
   fi
 }
 
@@ -665,20 +791,36 @@ sanitize_permission_body() { # redact first, then cap response detail at 2 KiB
   printf '%s%s' "$clean" "$truncated"
 }
 
-canonical_path() { # canonical_path PATH BASE; supports paths that do not exist yet
-  local path="$1" base="$2" out
+# Pure in (path, base). Cache in-process; only a same-shell call fills it
+# (`$(canonical_path ...)` cannot publish writes). Shared validators call this
+# without command substitution and read CANONICAL_PATH_OUT.
+declare -A _AI_GLM_CANONICAL_PATH=()
+CANONICAL_PATH_OUT=""
+
+canonical_path() { # canonical_path PATH BASE -> stdout and CANONICAL_PATH_OUT
+  local path="$1" base="$2" out key="$1"$'\x1f'"$2"
+  CANONICAL_PATH_OUT=""
+  if [ -n "${_AI_GLM_CANONICAL_PATH[$key]+x}" ]; then
+    if [ -z "${_AI_GLM_CANONICAL_PATH[$key]}" ]; then return 1; fi
+    CANONICAL_PATH_OUT="${_AI_GLM_CANONICAL_PATH[$key]}"
+    printf '%s' "$CANONICAL_PATH_OUT"
+    return 0
+  fi
   case "$path" in
     /*|[A-Za-z]:[\\/]*|\\\\*) ;;
     *) path="$base/$path" ;;
   esac
   if [ "$IS_WINDOWS" = 1 ] && command -v cygpath >/dev/null 2>&1; then
-    out="$(cygpath -am "$path" 2>/dev/null)" || return 1
-    printf '%s' "$out" | tr '[:upper:]' '[:lower:]'
+    out="$(cygpath -am "$path" 2>/dev/null)" || { _AI_GLM_CANONICAL_PATH[$key]=''; return 1; }
+    out="$(printf '%s' "$out" | tr '[:upper:]' '[:lower:]')" || { _AI_GLM_CANONICAL_PATH[$key]=''; return 1; }
   elif command -v realpath >/dev/null 2>&1; then
-    realpath -m -- "$path" 2>/dev/null
+    out="$(realpath -m -- "$path" 2>/dev/null)" || { _AI_GLM_CANONICAL_PATH[$key]=''; return 1; }
   else
     return 1
   fi
+  _AI_GLM_CANONICAL_PATH[$key]="$out"
+  CANONICAL_PATH_OUT="$out"
+  printf '%s' "$out"
 }
 
 path_category() { # path_category TARGET SESSION_DIR
@@ -2286,21 +2428,19 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
 }
 
 reconcile_implementation_record() { # conservative dead-owner recovery; never trusts PID alone
-  local mp="$1" root rid name caller state pid clone sid lock lock_pid clone_state=none session_state=none
-  [ "$(jq -r '.type // empty' "$mp" 2>/dev/null)" = implementation ] || return 0
-  root="$(jq -r '.repository_root // empty' "$mp" 2>/dev/null)"
-  caller="$(jq -r '.caller // empty' "$mp" 2>/dev/null)"
-  if [ -z "$root" ] || [ -z "$caller" ] || ! implementation_record_path_valid "$mp" || ! implementation_meta_valid "$mp" "$root" "$caller"; then
+  local mp="$1" root rid name caller state pid clone sid lock lock_pid clone_state=none session_state=none fields type schema_ok
+  # Unreadable is not an implementation record for this path; leave it alone.
+  fields="$(implementation_record_fields "$mp")" || return 0
+  IFS=$'\x1f' read -r schema_ok rid caller name root state pid clone sid type <<< "$fields"
+  [ "$type" = implementation ] || return 0
+  if [ -z "$root" ] || [ -z "$caller" ] || ! implementation_record_path_valid "$mp" "$fields" || ! implementation_meta_valid "$mp" "$root" "$caller" "$fields"; then
     warn "malformed implementation record left untouched: $mp"; return 1
   fi
-  state="$(jq -r .status "$mp")"
   if ! implementation_active "$state"; then
     [ "$state" = failed ] && implementation_cleanup_pending "$mp" || return 0
   fi
-  rid="$(jq -r .repository_id "$mp")"; name="$(jq -r .name "$mp")"; pid="$(jq -r .owner_pid "$mp")"
-  clone="$(jq -r '.clone_path // empty' "$mp")"; sid="$(jq -r '.opencode_session_id // empty' "$mp")"
-  lock="$STATE_DIR/locks/$rid--$caller--$name.lock.d"; lock_pid="$(cat "$lock/pid" 2>/dev/null || echo '')"
   if kill -0 "$pid" 2>/dev/null; then return 0; fi
+  lock="$STATE_DIR/locks/$rid--$caller--$name.lock.d"; lock_pid="$(cat "$lock/pid" 2>/dev/null || echo '')"
   if [ ! -d "$lock" ] || [ "$lock_pid" != "$pid" ]; then
     warn "dead implementation owner has ambiguous lock evidence; left untouched: $mp"; return 1
   fi
@@ -2345,12 +2485,19 @@ reconcile_implementation_records() {
   # (completed, aborted, or failed with no pending cleanup) is one it would validate
   # and then leave alone; that validation costs over ten seconds per record on a
   # loaded Windows host, so the scan skips it and doctor fits its preflight window.
+  local -a candidates=()
   while IFS=$'\t' read -r f type newest state; do
     case "$type:$state" in
       implementation:settled) ;;
-      implementation:*|'?':*) reconcile_implementation_record "$f" || rc=1 ;;
+      implementation:*|'?':*) candidates+=("$f") ;;
     esac
   done < <(glm_index)
+  if [ "${#candidates[@]}" -gt 0 ]; then
+    implementation_fields_fill "${candidates[@]}"
+  fi
+  for f in "${candidates[@]}"; do
+    reconcile_implementation_record "$f" || rc=1
+  done
   return "$rc"
 }
 

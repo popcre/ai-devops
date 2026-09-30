@@ -904,6 +904,55 @@ check "scanning 5 orphan sandboxes costs a bounded number of spawns" \
   "test '$ORPHAN_SPAWN_5' -le 15"
 check "scanning 50 orphan sandboxes costs the same spawn bound as 5" \
   "test '$ORPHAN_SPAWN_50' -eq '$ORPHAN_SPAWN_5'"
+echo "== reconcile open-record spawn residual =="
+# Residual (plan step 2b): one open record used to pay ~10 jq reads plus repeated
+# canonical_path (cygpath+tr each) inside the shared validators. Batching those
+# keeps per-record cost a constant spawn count, not one per field.
+reconcile_spawn_run() { # N -> total spawn count for N open implementation records
+  local n="$1"
+  local state="$TMP/reconcile-spawn-$n-state" root="$TMP/reconcile-spawn-repo" i name
+  mkdir -p "$state/sessions/rid1" "$state/locks" "$root"
+  if [ ! -d "$root/.git" ]; then
+    git -C "$root" init -q
+    git -C "$root" config user.name Test
+    git -C "$root" config user.email test@example.com
+    git -C "$root" commit -q --allow-empty -m x
+  fi
+  for i in $(seq 1 "$n"); do
+    name="job$i"
+    jq -n --arg root "$root" --argjson pid "$$" --arg name "$name" \
+      '{schema_version:3,type:"implementation",name:$name,repository_root:$root,
+        repository_id:"rid1",caller:"claude",base_sha:("a"*40),owner_pid:$pid,
+        status:"running",clone_path:null,opencode_session_id:null}' \
+      > "$state/sessions/rid1/claude--$name.json"
+  done
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$state" bash -c '
+    source "$AI_GLM_SOURCE"
+    CALLER=claude
+    repo_id(){ printf rid1; }
+    stat(){ echo stat >> "$STATE_DIR/spawns"; command stat "$@"; }
+    sed(){ echo sed >> "$STATE_DIR/spawns"; command sed "$@"; }
+    jq(){ echo jq >> "$STATE_DIR/spawns"; command jq "$@"; }
+    date(){ echo date >> "$STATE_DIR/spawns"; command date "$@"; }
+    ls(){ echo ls >> "$STATE_DIR/spawns"; command ls "$@"; }
+    grep(){ echo grep >> "$STATE_DIR/spawns"; command grep "$@"; }
+    sort(){ echo sort >> "$STATE_DIR/spawns"; command sort "$@"; }
+    cat(){ echo cat >> "$STATE_DIR/spawns"; command cat "$@"; }
+    cygpath(){ echo cygpath >> "$STATE_DIR/spawns"; command cygpath "$@"; }
+    tr(){ echo tr >> "$STATE_DIR/spawns"; command tr "$@"; }
+    realpath(){ echo realpath >> "$STATE_DIR/spawns"; command realpath "$@"; }
+    : > "$STATE_DIR/spawns"
+    GLM_INDEX_CACHED="$(glm_record_index)"
+    reconcile_implementation_records
+    wc -l < "$STATE_DIR/spawns" | tr -d " "
+  '
+}
+RECON_SPAWN_1="$(reconcile_spawn_run 1)"
+RECON_SPAWN_25="$(reconcile_spawn_run 25)"
+check "reconciling 1 open record costs a bounded number of spawns" \
+  "test '$RECON_SPAWN_1' -le 25"
+check "reconciling 25 open records costs the same spawn bound as 1" \
+  "test '$RECON_SPAWN_25' -eq '$RECON_SPAWN_1'"
 # The due scan, by behaviour: recorded-old + mtime-old is due; either freshness gate excludes.
 SC_STATE="$TMP/scan-state"; mkdir -p "$SC_STATE/sessions/rid1"
 scan_rec() { jq -n --arg ts "$1" '{type:"review",name:"n",caller:"claude",created_at:$ts,last_activity_at:$ts}' > "$SC_STATE/sessions/rid1/claude--$2.json"; }
