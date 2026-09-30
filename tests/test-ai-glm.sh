@@ -944,7 +944,8 @@ reconcile_spawn_run() { # N -> total spawn count for N open implementation recor
     : > "$STATE_DIR/spawns"
     GLM_INDEX_CACHED="$(glm_record_index)"
     reconcile_implementation_records
-    wc -l < "$STATE_DIR/spawns" | tr -d " "
+    set -- $(command wc -l < "$STATE_DIR/spawns")
+    printf '%s' "$1"
   '
 }
 RECON_SPAWN_1="$(reconcile_spawn_run 1)"
