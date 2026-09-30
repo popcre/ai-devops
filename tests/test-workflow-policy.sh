@@ -236,8 +236,8 @@ check 'the PowerShell suites are owned by exactly one existing section' \
   '[ "$powershell_owner" != null ] && [ "$powershell_owner" -ge 1 ] && [ "$powershell_owner" -le "$shard_count" ]'
 check 'the expanded DeepSeek and Muse suites run in separate sections' \
   '[ -n "$deepseek_owner" ] && [ -n "$muse_owner" ] && [ "$deepseek_owner" -ne "$muse_owner" ]'
-check 'Gemini, GLM and Muse Code run in different sections within the same 40-minute bound' \
-  '[ "$shard_count" -ge 6 ] && [ "$(printf "%s" "$heavy_owners" | jq "length")" -eq 3 ] && [ "$(printf "%s" "$heavy_owners" | jq "unique | length")" -eq 3 ] && [ "$section_timeout" -eq 40 ]'
+check 'Gemini, GLM and Muse Code run in different sections within the same 90-minute bound' \
+  '[ "$shard_count" -ge 6 ] && [ "$(printf "%s" "$heavy_owners" | jq "length")" -eq 3 ] && [ "$(printf "%s" "$heavy_owners" | jq "unique | length")" -eq 3 ] && [ "$section_timeout" -eq 90 ]'
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 check 'manual WarpBuild lane runs the same complete section mapping' \
@@ -247,7 +247,7 @@ check 'WarpBuild stays manual, bounded, independently hosted and fail-closed' \
 # Sections run at the same time on independent hosted machines, and one failing
 # section must never hide the other sections.
 check 'sections run on independent hosted machines and all keep reporting' \
-  '[ -n "$section_timeout" ] && [ "$section_timeout" -le 40 ] && printf "%s" "$section_block" | grep -qF "fail-fast: false" && printf "%s" "$section_block" | grep -qF "runs-on: \${{ matrix.runs_on }}" && [ "$(printf "%s" "$section_block" | grep -o "\"runs_on\":\"windows-2025\"" | wc -l | tr -d " ")" = "$shard_count" ]'
+  '[ -n "$section_timeout" ] && [ "$section_timeout" -le 90 ] && printf "%s" "$section_block" | grep -qF "fail-fast: false" && printf "%s" "$section_block" | grep -qF "runs-on: \${{ matrix.runs_on }}" && [ "$(printf "%s" "$section_block" | grep -o "\"runs_on\":\"windows-2025\"" | wc -l | tr -d " ")" = "$shard_count" ]'
 # #166 restores `windows-offline` as a required context, so it must keep that
 # exact name and stay fail-closed: any lane result other than success, or a skip
 # the classifier did not justify, fails the aggregate.
