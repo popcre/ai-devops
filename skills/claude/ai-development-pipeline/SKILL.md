@@ -33,11 +33,11 @@ of forcing resume.
 
 - Codex / GPT-5.6 at medium reasoning plans in a read-only sandbox, then owns
   implementation and testing in an explicit workspace-write sandbox.
-- Claude Opus 5 independently reviews the plan, diff, security, and final state
-  with only Read, Grep, and Glob in a complete disposable snapshot.
-- `ai-review claude ...` and `ai-review codex ...` are the only approval-capable
-  front doors. Other model wrappers are advisory or quarantined and cannot
-  replace a required approval.
+- A registered pool reviewer independently reviews the plan, diff, security, and
+  final state. Claude is out of the reviewer pool and is never the reviewer.
+- `ai-review <registered-provider> ...` is the approval-capable front door.
+  Other model wrappers are advisory or quarantined and cannot replace a required
+  approval.
 - Any `REJECT`, `BLOCKED`, missing verdict, provider failure, source change, or
   lifecycle-accounting failure stops later stages.
 

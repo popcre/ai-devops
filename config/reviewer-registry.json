@@ -3,8 +3,8 @@
   "description": "Allocatable reviewer membership. Health is not membership: a provider whose local install is healthy is still unusable unless it is carried in the allocating registry (popcre/shared-db scripts/manage-migration-author-lanes.mjs REVIEWERS). This file is the ai-devops mirror of that membership so one command can answer 'can I use this reviewer right now'. It is a guard: never flip a provider to registered to make an allocation succeed.",
   "providers": {
     "claude": {
-      "registry_state": "registered",
-      "reason": "Approval-gate reviewer; never reviews a Claude-orchestrated issue."
+      "registry_state": "absent",
+      "reason": "Removed from the reviewer pool by owner instruction on 2026-09-30 (\"take claude out of the reviewer pool\"). No assigned or formal review routes to Claude, including the former approval-gate path. Claude remains an orchestrator/writer only. Re-entry requires owner instruction and a reviewed registry change."
     },
     "codex": {
       "registry_state": "registered",

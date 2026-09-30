@@ -16,7 +16,7 @@ export AI_DEVOPS_MODELS_ENV="$GOOD" AI_REVIEW_BIN="$REVIEW" AI_MODEL_TEST_REVIEW
 echo '== ai-model-call and ai-review gate'
 check 'read-only plan command succeeds' "cd '$R' && '$SCRIPT' plan '$TMP/prompt' '$TMP/plan.out'"
 check 'writable implementation command succeeds' "cd '$R' && '$SCRIPT' implement '$TMP/prompt' '$TMP/impl.out'"
-check 'review routes through supported Claude gate' "cd '$R' && '$SCRIPT' plan-review '$TMP/prompt' '$TMP/review.out' && grep -qx 'claude plan-review' '$TMP/review.args'"
+check 'review routes through a registered pool provider' "cd '$R' && '$SCRIPT' plan-review '$TMP/prompt' '$TMP/review.out' && grep -qx 'grok plan-review' '$TMP/review.args'"
 check 'review output is copied as immutable artifact' "grep -q '^APPROVE$' '$TMP/review.out'"
 check 'existing output is never replaced' "cd '$R' && ! '$SCRIPT' plan '$TMP/prompt' '$TMP/plan.out'"
 BAD="$TMP/bad.env"; printf "CODEX_PLAN_CMD='%s exec -m gpt-5.6-sol --sandbox read-only -c model_reasoning_effort=high'\n" "$STUB" > "$BAD"
