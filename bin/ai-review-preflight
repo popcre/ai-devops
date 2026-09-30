@@ -12,6 +12,10 @@ VERSION="1.4.0"
 STATE_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 CHECK_TIMEOUT="${AI_REVIEW_PREFLIGHT_TIMEOUT:-10}"
 COOLDOWN="${AI_REVIEW_QUARANTINE_SECONDS:-1800}"
+# A transient liveness timeout is not a demonstrated safety or identity
+# problem. It gets a short cooldown so the next caller can retry quickly,
+# instead of the full quarantine that auth/containment failures earn.
+TIMEOUT_COOLDOWN="${AI_REVIEW_TIMEOUT_COOLDOWN_SECONDS:-60}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Registry membership is a separate gate from install health. A provider whose
 # doctor passes is still unusable if the allocating registry does not carry it.
@@ -271,9 +275,16 @@ write_atomic() { # FILE JSON
 }
 
 quarantine() { # PROVIDER CLASS [SECONDS]
-  local provider="$1" class="$2" seconds="${3:-$COOLDOWN}" now expires f
+  local provider="$1" class="$2" seconds="${3:-}" now expires f
   # Out of credit matches the wrapper classifier's one-hour hold (CREDIT_SECONDS).
-  [ -n "${3:-}" ] || [ "$class" != out-of-credit ] || seconds=3600
+  if [ -z "$seconds" ]; then
+    case "$class" in
+      out-of-credit)    seconds=3600 ;;
+      # Transient timeout earns a short retry window, not a 30-minute hold.
+      provider-timeout) seconds="$TIMEOUT_COOLDOWN" ;;
+      *)                seconds="$COOLDOWN" ;;
+    esac
+  fi
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$seconds" in ''|*[!0-9]*) die "quarantine seconds must be a positive integer." ;; esac
   [ "$seconds" -gt 0 ] || die "quarantine seconds must be greater than zero."
@@ -288,6 +299,9 @@ active_quarantine() { # PROVIDER -> 0 active, 1 absent/expired
 
 classify_failure() { # OUTPUT
   local text; text="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  # An empty or whitespace-only probe result is not evidence of any named
+  # health failure. It is a probe that produced no diagnosis.
+  [ -n "$(printf '%s' "$text" | tr -d '[:space:]')" ] || { printf probe-no-output; return; }
   case "$text" in
     *insufficient*balance*|*insufficient_quota*|*out?of?credit*|*credits*depleted*|*monthly?spending?limit*|*arrearage*) printf out-of-credit ;;
     *403*|*429*|*allowance*|*usage.limit*|*quota*) printf allowance-exhausted ;;
@@ -311,7 +325,9 @@ explain_failure() {
     unsupported-platform) printf 'This provider has no engine on this operating system (StepFun runs only on Ubuntu/Linux under bubblewrap). Use another registered reviewer; never emulate or force it.\n' ;;
     not-registered) printf 'The provider is not carried in the reviewer registry, so it cannot receive a review no matter how healthy its local install is. Re-entry is a reviewed registry change backed by a live well-formed verdict, never an edit made to unblock an allocation.\n' ;;
     live-qualification-required) printf 'The reviewer live qualification no longer matches its wrapper, runtime, or preloader bytes. A pull of new toolkit code re-qualifies it automatically via the repository post-merge hook; to restore it now run: ai-review-preflight requalify\n' ;;
-    authentication-failed|provider-timeout|provider-unhealthy) printf 'Quarantine this provider and correct the named health failure before assigning a review.\n' ;;
+    probe-no-output) printf 'The health probe returned no diagnostic output. This is not proof the provider is broken. Retry after the short cooldown; if it persists, check the wrapper manually. Never treat empty output as healthy.\n' ;;
+    provider-timeout) printf 'The health probe exceeded its time budget. This is a transient liveness problem, not an identity or auth failure. A short cooldown applies; retry after it expires. A timeout never means the provider is healthy and never authorizes a review.\n' ;;
+    authentication-failed|provider-unhealthy) printf 'Quarantine this provider and correct the named health failure before assigning a review.\n' ;;
     *) die "unknown failure class '$1'." ;;
   esac
 }
@@ -532,12 +548,32 @@ check_provider() { # PROVIDER REPO LIVE BASE
   else
     out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
   fi
+  # A transient liveness timeout gets one bounded retry before it is recorded.
+  # The retry is part of the timeout path: a timeout result alone never means
+  # the provider is healthy and never authorizes a review to proceed.
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    note "ai-review-preflight: $provider probe timed out (rc=$rc); retrying once after a short delay."
+    sleep "${AI_REVIEW_TIMEOUT_RETRY_DELAY:-2}"
+    if [ "$provider" = muse ]; then
+      if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+      else out="$(AI_MUSE_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
+    elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
+      if [ "$provider" = gemini ]; then out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+      elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+      else out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
+    else
+      out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
+    fi
+  fi
   set -e
   if [ "$rc" -ne 0 ]; then
     # A doctor killed by the check budget is a timeout, whatever its partial
     # output says: Qwen's doctor prints "credential" before any auth step, and
     # reading that as authentication-failed quarantined a healthy Qwen (#720).
-    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then class=provider-timeout; else class="$(classify_failure "$out")"; fi
+    # Empty output with a non-zero exit is probe-no-output, not provider-unhealthy.
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then class=provider-timeout
+    elif [ -z "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then class=probe-no-output
+    else class="$(classify_failure "$out")"; fi
     quarantine "$provider" "$class"
     printf 'ai-review-preflight: %s failed: %s\n' "$provider" "$class" >&2
     printf '%s\n' "$out" | tail -12 >&2
