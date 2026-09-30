@@ -25,12 +25,24 @@ ai-review-preflight usable gemini
 AI_GEMINI_CALLER=codex ai-gemini doctor
 ```
 
+On Windows PowerShell, set the caller as `$env:AI_GEMINI_CALLER='codex'` (or
+`claude`) before the command. The bash `VAR=val cmd` prefix is not PowerShell
+syntax and leaves the caller unset.
+
 Proceed only when `doctor` reports `PASS` for exact model
 `gemini-3.8-flash-high`. If it reports `QUARANTINED`, stop and choose another
 governed reviewer until one governed requalification succeeds. An empty answer,
 wrong model or conversation, changed protected file, committed or uncommitted
 source drift, interruption, or missing durable report is always a failed review.
 Gemini is review-only.
+
+## Clean worktree only
+
+The `ai-gemini` packet builder rejects a dirty working tree with
+`snapshot-digest-mismatch`. Run every Gemini review from a clean worktree that
+matches upstream — never from a canonical checkout that has uncommitted drift
+or is behind `origin/main`. Confirm `git status` is clean and the branch is
+current before building the packet.
 
 ## Check the allowance before a long review
 
