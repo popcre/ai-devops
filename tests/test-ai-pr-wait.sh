@@ -180,8 +180,8 @@ check "it exits on a failing check instead of waiting" \
   "grep -q 'failing checks and will not merge' '$CMD'"
 check "it has its own deadline so it can never wait forever" \
   "grep -q 'giving up rather than waiting silently' '$CMD'"
-check "it warns that a CANCELLED check is usually a job timeout" \
-  "grep -q 'usually a job timeout' '$CMD'"
+check "it labels capacity failures and never treats empty verdict as a test result" \
+  "grep -q 'capacity/infra' '$CMD' && grep -q 'never reddens the PR test verdict' '$CMD' && grep -q 'action-taxonomy' '$CMD'"
 
 # The guard that actually prevents a repeat: no other file may hand-roll the
 # blind wait loop. Matches a `gh pr view ... state` inside a shell loop.
