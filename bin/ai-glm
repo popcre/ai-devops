@@ -653,9 +653,9 @@ implementation_record_path_valid() { # FILE [FIELDS]
   IFS=$'\x1f' read -r _ rid caller name _ _ _ _ _ _ <<< "$fields"
   expected="$STATE_DIR/sessions/$rid/$caller--$name.json"
   [ "$f" = "$expected" ] && return 0
-  canonical_path "$f" "$STATE_DIR" >/dev/null || true
+  canonical_path "$f" "$STATE_DIR" >/dev/null || return 1
   f_norm="$CANONICAL_PATH_OUT"
-  canonical_path "$expected" "$STATE_DIR" >/dev/null || true
+  canonical_path "$expected" "$STATE_DIR" >/dev/null || return 1
   [ "$f_norm" = "$CANONICAL_PATH_OUT" ]
 }
 
@@ -681,15 +681,15 @@ implementation_meta_valid() { # FILE [EXPECTED_ROOT] [EXPECTED_CALLER] [FIELDS]
   fi
   [ "$caller" = "$expected_caller" ] || return 1
   if [ -n "$expected_root" ] && [ "$root" != "$expected_root" ]; then
-    canonical_path "$root" "$root" >/dev/null || true
+    canonical_path "$root" "$root" >/dev/null || return 1
     root_norm="$CANONICAL_PATH_OUT"
-    canonical_path "$expected_root" "$expected_root" >/dev/null || true
+    canonical_path "$expected_root" "$expected_root" >/dev/null || return 1
     [ "$root_norm" = "$CANONICAL_PATH_OUT" ] || return 1
   fi
   if [ -n "$clone" ]; then
     expected="$STATE_DIR/wt/$rid/$caller--$name"
     if [ "$clone" != "$expected" ]; then
-      canonical_path "$clone" "$STATE_DIR" >/dev/null || true
+      canonical_path "$clone" "$STATE_DIR" >/dev/null || return 1
       clone_norm="$CANONICAL_PATH_OUT"
       canonical_path "$expected" "$STATE_DIR" >/dev/null || true
       [ "$clone_norm" = "$CANONICAL_PATH_OUT" ] || return 1
@@ -2527,11 +2527,14 @@ reconcile_implementation_records() {
   if [ "${#candidates[@]}" -gt 0 ]; then
     implementation_fields_fill "${candidates[@]}"
   fi
-  for f in "${candidates[@]}"; do
-    reconcile_implementation_record "$f" || rc=1
-  done
+  if [ "${#candidates[@]}" -gt 0 ]; then
+    for f in "${candidates[@]}"; do
+      reconcile_implementation_record "$f" || rc=1
+    done
+  fi
   # One pass only: never leave a reconcile snapshot behind for later callers.
   _AI_GLM_IMPL_FIELDS=()
+  _AI_GLM_CANONICAL_PATH=()
   return "$rc"
 }
 

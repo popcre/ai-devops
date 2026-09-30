@@ -953,6 +953,33 @@ check "reconciling 1 open record costs a bounded number of spawns" \
   "test '$RECON_SPAWN_1' -le 25"
 check "reconciling 25 open records costs the same spawn bound as 1" \
   "test '$RECON_SPAWN_25' -eq '$RECON_SPAWN_1'"
+# Dead-owner path (fresh re-read + second liveness probe) is the destructive
+# half of reconcile; the spawn fixture above only covers live owners.
+reconcile_dead_run() {
+  local state="$TMP/reconcile-dead-state" root="$TMP/reconcile-spawn-repo"
+  mkdir -p "$state/sessions/rid1" "$state/locks" "$root"
+  if [ ! -d "$root/.git" ]; then
+    git -C "$root" init -q
+    git -C "$root" config user.name Test
+    git -C "$root" config user.email test@example.com
+    git -C "$root" commit -q --allow-empty -m x
+  fi
+  jq -n --arg root "$root" --argjson pid 999999 --arg name deadjob \
+    '{schema_version:3,type:"implementation",name:$name,repository_root:$root,
+      repository_id:"rid1",caller:"claude",base_sha:("a"*40),owner_pid:$pid,
+      status:"running",clone_path:null,opencode_session_id:null}' \
+    > "$state/sessions/rid1/claude--deadjob.json"
+  AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$state" bash -c '
+    source "$AI_GLM_SOURCE"
+    CALLER=claude
+    repo_id(){ printf rid1; }
+    reconcile_implementation_record "$STATE_DIR/sessions/rid1/claude--deadjob.json" || true
+    jq -r .status "$STATE_DIR/sessions/rid1/claude--deadjob.json"
+  '
+}
+DEAD_OUT="$(reconcile_dead_run 2>&1)"
+check "dead owner without lock evidence is left untouched" \
+  "printf '%s' \"\$DEAD_OUT\" | grep -q 'ambiguous lock evidence' && printf '%s' \"\$DEAD_OUT\" | grep -q 'running'"
 # The due scan, by behaviour: recorded-old + mtime-old is due; either freshness gate excludes.
 SC_STATE="$TMP/scan-state"; mkdir -p "$SC_STATE/sessions/rid1"
 scan_rec() { jq -n --arg ts "$1" '{type:"review",name:"n",caller:"claude",created_at:$ts,last_activity_at:$ts}' > "$SC_STATE/sessions/rid1/claude--$2.json"; }
