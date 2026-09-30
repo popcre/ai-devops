@@ -1,5 +1,7 @@
 # Shared DB orchestrator operating manual
 
+Before routing or closing work, read [shared-db current workflow](https://github.com/popcre/shared-db/blob/main/docs/agents/current-workflow.md); it identifies current scope, evidence and completion ownership.
+
 ## Contents
 
 1. Startup recovery
