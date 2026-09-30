@@ -19,7 +19,7 @@
 | 7. Out-of-repo hold: shared-db freshness until #2530 | ✅ done | 2026-09-29 | Hold recorded in Phase E Step 7 paragraph of this plan (no ai-devops code edit required) |
 | 8. Supersede leftover-proof-minting plan STATUS rows | ✅ done | 2026-09-29 | PR-D docs-only: supersession notes in `plan_live-proof-session-sizing.md`, `plan_mimo-windows-support.md`, `plan_cut-unneeded-github-traffic.md`, `plan_agent-self-cleanup.md`, `plan_tool-and-skill-scoping.md`, `plan_model_tier_delegation.md`, `plan_repo-throughput-restructure.md`, `plan_typesafe-jev-spend-reduction.md`, `plan_reviewer-investigation-mode-option-b.md`, `plan_self-healing-locks-and-settings-drift.md`; `rg -n "leftover-proof issue" plan_*.md` only in superseded/historical sections with a note pointing here |
 | 9. Fleet re-adopt globals | ⬜ open | | Per-machine adopt proof (Step 9) |
-| 10. Measure 14d/30d + stop rule | ⬜ open | | `tests/verification/shared-db-coordination-deletion/<UTC>.md` |
+| 10. Measure 14d/30d + stop rule | 🟡 started | 2026-09-30 | `tests/verification/shared-db-coordination-deletion/2026-09-30T045654Z.md` started (baseline captured; 14d check due 2026-10-14, 30d check due 2026-10-30) |
 
 **Where a fresh session starts:** first `⬜ open` row (currently Step 9). Re-read §8 LOCKED and §11 before any edit.
 
