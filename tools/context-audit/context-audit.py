@@ -127,8 +127,8 @@ PARITY_RULES = {
     "assumptions get named": r"answered with an\s+assumption",
     "label shared-db tickets orchestrator or not": r"non-orchestrator work",
     "never replace system binaries": r"system binaries|operating-system binaries",
-    "one unproven outcome per session": r"one unproven live-behavior outcome",
-    "do not defer live-proof dumps": r"Never save several unproven steps",
+    "live proof required before close": r"Live proof is required before an outcome is closed",
+    "one issue per application need": r"One issue per application need",
     "quote every time in EST": r"Quote every time in EST",
 }
 

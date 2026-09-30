@@ -36,8 +36,8 @@ required_phrases=(
   "quote Albert's exact words"
   "no human approval is ever requested"
   "assigned AI reviewer's explicit APPROVE"
-  "one unproven live-behavior outcome"
-  "Never save several unproven steps"
+  "Live proof is required before an outcome is closed"
+  "One issue per application need"
   "Quote every time in EST"
 )
 

@@ -104,7 +104,7 @@
       "workflow_family": "feature-branch-pr",
       "policy_source": "consumer",
       "routing_files": ["AGENTS.md", "HANDOFF.md", "README.md"],
-      "special_gates": ["shared-db-structure", "orchestrator-claim", "target-identity-proof", "production-promotion"],
+      "special_gates": ["shared-db-structure", "claim-admission", "target-identity-proof", "production-promotion"],
       "aliases": ["u2giants/shared-db"]
     },
     {

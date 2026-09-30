@@ -221,7 +221,7 @@
           "local-tests",
           "shared-db-branch-and-pr",
           "target-identity-proof",
-          "orchestrator-claim"
+          "claim-admission"
         ],
         "forbidden_actions": [
           "deploy",
