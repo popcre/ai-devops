@@ -963,7 +963,7 @@ sep_reject() {
     STATE_DIR="$(mktemp -d)"
     mkdir -p "$STATE_DIR/sessions/rid1"
     f="$STATE_DIR/sessions/rid1/claude--n.json"
-    python3 -c "import json,sys; sys.stdout.write(json.dumps({\"type\":\"implementation\",\"repository_id\":\"rid1\",\"caller\":\"a\"+chr(31)+\"b\",\"name\":\"n\",\"repository_root\":\"/r\",\"status\":\"running\",\"owner_pid\":1,\"base_sha\":\"x\"}))" > "$f"
+    python -c "import json,sys; sys.stdout.write(json.dumps({\"type\":\"implementation\",\"repository_id\":\"rid1\",\"caller\":\"a\"+chr(31)+\"b\",\"name\":\"n\",\"repository_root\":\"/r\",\"status\":\"running\",\"owner_pid\":1,\"base_sha\":\"x\"}))" > "$f"
     ! implementation_record_fields "$f" >/dev/null
   '
 }
