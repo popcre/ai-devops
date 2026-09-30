@@ -1421,8 +1421,8 @@ handle_stop_reason() { # handle_stop_reason FILE NAME MAX_TURNS -> 0 ok, 1 fail
   local f="$1" name="$2" turns="$3" sr raw_sr sid used
   sr="$(jq -r '.stopReason // "missing"' "$f")"
   raw_sr="$sr"
-  [ "$(terminal_reason_for_result "$f")" != turn_limit_cancelled ] || sr=max_turns_reached
   local why; why="$(terminal_reason_for_result "$f")"
+  [ "$why" != turn_limit_cancelled ] || sr=max_turns_reached
   sid="$(jq -r '.sessionId // ""' "$f")"
   used="$(jq -r '.num_turns // "?"' "$f")"
   case "$sr" in
@@ -1547,7 +1547,7 @@ Do not put the verdict anywhere else."
 
 build_prompt_file() { # build_prompt_file DEST  (reads --prompt/--prompt-file/stdin)
   local dest="$1"
-  printf 'Your evidence packet is at %s/%s/MANIFEST.md. Read it first.\nIt contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n\nYou may read any other file under %s to confirm a finding; the packet is your starting point, not a boundary. Do not reconstruct the diff because it is already in %s/%s/patch.diff.\n\nYou are NOT read-only. %s is your own disposable copy of the repository with no git remote. You may run shell commands, builds and tests there (cd into it first) and edit files there to test a hypothesis. Your edits are discarded after this turn and are NOT part of the pull request; report findings, not patches. Do not push, fetch credentials, or touch anything outside that copy.\n\nShell rule (Grok CLI limit, not a policy choice): a command containing a shell variable assignment (FOO=1 cmd, export FOO=1), the env wrapper, or $(...)/backtick substitution is refused, and a refused command CANCELS THIS WHOLE REVIEW with no verdict. When a build or test needs environment variables, write a small script under .git/review-scratch/ inside your copy with your file tool and run it with: bash .git/review-scratch/run.sh (never add files to the working tree). Before your verdict, undo every working-tree change you made (git checkout -- <file>, delete new files): any leftover change invalidates the whole review.\n\n---\n\n' \
+  printf 'Your evidence packet is at %s/%s/MANIFEST.md. Read it first.\nIt contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n\nYou may read any other file under %s to confirm a finding; the packet is your starting point, not a boundary. Do not reconstruct the diff because it is already in %s/%s/patch.diff.\n\nYou are NOT read-only. %s is your own disposable copy of the repository with no git remote. You may run shell commands, builds and tests there (cd into it first) and edit files there to test a hypothesis. Your edits are discarded after this turn and are NOT part of the pull request; report findings, not patches. Do not push, fetch credentials, or touch anything outside that copy.\n\nShell rule (Grok CLI limit, not a policy choice): a command containing a shell variable assignment (FOO=1 cmd, export FOO=1), the env wrapper, or $(...)/backtick substitution is refused, and a refused command CANCELS THIS WHOLE REVIEW with no verdict. When a build or test needs environment variables, write a small script under .git/review-scratch/ inside your copy (with your file-writing tool) and run it with: bash .git/review-scratch/run.sh (never add files to the working tree). Before your verdict, undo every working-tree change you made (git checkout -- <file>, delete new files): any leftover change invalidates the whole review.\n\n---\n\n' \
     "$REVIEW_DIR" "$PACKET_REL" "$REVIEW_DIR" "$REVIEW_DIR" "$PACKET_REL" "$REVIEW_DIR" > "$dest"
   dest="$dest.body"
   if [ -n "${OPT_PROMPT_FILE:-}" ]; then
@@ -2027,6 +2027,8 @@ recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE
   case "$PERMISSION_RESUMES" in ''|*[!0-9]*) PERMISSION_RESUMES=0 ;; esac
   [ "$PERMISSION_RESUMES" -le 5 ] || PERMISSION_RESUMES=5
   while [ "$n" -lt "$PERMISSION_RESUMES" ] && native_permission_cancelled "$out"; do
+    # num_turns is per invocation, not session-cumulative (verified live on
+    # Grok CLI 1.0.41, 2026-09-30: two consecutive resumes each reported 1).
     used="$(jq -r '.num_turns // 0' "$out")"; case "$used" in ''|*[!0-9]*) used="$turns" ;; esac
     spent=$(( spent + used )); left=$(( turns - spent ))
     [ "$left" -ge 1 ] || return 0
@@ -2039,7 +2041,8 @@ recover_permission_cancelled() { # OUT SID MAX_TURNS PROMPT_FILE
     rm -f "$rpf"
     grok_credit_scan "$RECOVERY_RC" "$next"
     if [ "$RECOVERY_RC" = 124 ] || [ -n "${REVIEWER_CREDIT_HIT:-}" ] || ! await_result "$next" "review resume $n"; then
-      mv -f "$next" "$out" 2>/dev/null || true; rm -f "$out.terminal.json"
+      # Keep the confirmed cancelled result and its witness untouched; the
+      # unconfirmed resume output stays beside it as evidence.
       return 1
     fi
     capture_terminal_evidence "$next" 2>/dev/null || true

@@ -769,6 +769,35 @@ native_terminal_reason_cases(){
 echo "== stop_reason handling =="
 terminal_reason_cases
 native_terminal_reason_cases
+
+permission_resume_cases(){
+  local out="$TMP/perm-out.json" pf="$TMP/perm-prompt" calls="$TMP/perm-calls" before
+  source <(sed -n '/^native_permission_cancelled() {/,/^}/p; /^recover_permission_cancelled() {/,/^}/p' "$SCRIPT")
+  note(){ :; }; report_usage(){ :; }; grok_credit_scan(){ :; }; capture_terminal_evidence(){ :; }
+  REVIEW_DIR="$TMP"; : > "$pf"
+  witness(){ jq -n --arg h "$(sha256sum "$out" | awk '{print $1}')" '{schema_version:1,native_terminal_matches:1,category:"PermissionCancelled",terminal_reason:"permission_cancelled",result_sha256:$h}' > "$out.terminal.json"; }
+  run_turn(){ printf '%s %s %s\n' "$4" "$5" "$(head -c 40 "$3")" >> "$calls"; RUN_TURN_RC="${FAKE_RC:-0}"; jq -n '{stopReason:"end_turn",sessionId:"s1",num_turns:3,text:"## Verdict\nAPPROVE"}' > "$2"; }
+  await_result(){ [ "${FAKE_AWAIT:-0}" = 0 ]; }
+  # a) native witness: resumed once in the same session with the remaining budget
+  PERMISSION_RESUMES=3; : > "$calls"; rm -f "$out.terminal.json"
+  jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:7}' > "$out"; witness
+  recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'native PermissionCancelled resumes the same session once with the remaining turns' "[ $rc -eq 0 ] && [ \$(wc -l < '$calls') -eq 1 ] && grep -q '^13 s1 The Grok CLI refused' '$calls' && jq -e '.stopReason==\"end_turn\"' '$out' >/dev/null"
+  # b) raw stop token without the native witness never resumes
+  : > "$calls"; rm -f "$out.terminal.json"
+  jq -n '{stopReason:"permission_cancelled",sessionId:"s1",num_turns:7}' > "$out"
+  recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'raw permission_cancelled token without native witness is not resumed' "[ $rc -eq 0 ] && [ ! -s '$calls' ]"
+  # c) an unconfirmed resume fails closed and keeps the confirmed cancelled result
+  : > "$calls"; jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:7}' > "$out"; witness; before="$(sha256sum "$out")"
+  FAKE_RC=124 recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'unconfirmed resumed turn fails closed and keeps the cancelled result and witness' "[ $rc -eq 1 ] && [ \"\$(sha256sum '$out')\" = '$before' ] && [ -f '$out.terminal.json' ]"
+  # d) exhausted budget does not resume
+  : > "$calls"; jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:20}' > "$out"; witness
+  recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'no resume once the turn budget is spent' "[ $rc -eq 0 ] && [ ! -s '$calls' ]"
+}
+permission_resume_cases
 echo cancelled > "$TMP/mode"
 OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
 # This case is about how a cancelled stopReason is reported, not about the wait
