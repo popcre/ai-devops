@@ -349,11 +349,11 @@ chmod +x "$TMP/slow-bin/python3"
 set +e; SLOW_INV_OUT="$(cd "$SLOW_INV" && PATH="$TMP/slow-bin:$PATH" MOCK_PACKET_VERIFY_FAST=1 MOCK_RESOLVE_JSON="$SLOW_INV_IDENTITY" AI_GEMINI_PREPARE_TIMEOUT=2s MOCK_MODE=normal "$SCRIPT" new slow-inv --prompt review 2>&1)"; SLOW_INV_RC=$?; set -e
 SLOW_INV_STAGE_START="$(cat "$TMP/slow-bin/python3.start" 2>/dev/null || printf 0)"
 SLOW_INV_STAGE_ELAPSED=$(( $(date +%s) - SLOW_INV_STAGE_START ))
-if [ "$SLOW_INV_RC" -eq 0 ] || ! grep -q 'inventory failed or timed out after 2s' <<<"$SLOW_INV_OUT" || [ -n "$(meta_for slow-inv)" ]; then
+if [ "$SLOW_INV_RC" -eq 0 ] || ! grep -q 'inventory timed out after 2s' <<<"$SLOW_INV_OUT" || [ -n "$(meta_for slow-inv)" ]; then
   printf 'slow-inv diagnostic: rc=%s meta=%s output=%s\n' "$SLOW_INV_RC" "$(meta_for slow-inv)" "$SLOW_INV_OUT" >&2
 fi
 check 'a stalled byte inventory fails in time instead of hanging' "test '$SLOW_INV_RC' -ne 0 && test -s '$TMP/slow-bin/python3.start' && test '$SLOW_INV_STAGE_ELAPSED' -lt $(budget 2 30)"
-check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory failed or timed out after 2s'"
+check 'the inventory timeout names the step and the bound' "printf '%s' '$SLOW_INV_OUT' | grep -q 'inventory timed out after 2s'"
 check 'a timed-out inventory starts no session and holds no lock' "test -z \"\$(meta_for slow-inv)\" && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*slow-inv*' -print -quit 2>/dev/null)\""
 # #637 gaps 1 and 3: ask() resolve is bounded, and a genuine refusal never says "timed out".
 SLOW_ASK="$TMP/repo-slow-ask"; make_repo "$SLOW_ASK"; new_run "$SLOW_ASK" slow-ask normal >/dev/null
