@@ -46,8 +46,8 @@ capacity_seen=0
 result_seen=0
 review_seen=0
 detail_notes=""
-# Accept space- or newline-separated name=conclusion pairs.
-for entry in $RESULTS; do
+# Accept space- or newline-separated name=conclusion pairs. Split safely.
+while IFS= read -r entry; do
   case "$entry" in
     *=*) ;;
     *) continue ;;
@@ -65,19 +65,20 @@ for entry in $RESULTS; do
     review-step) review_seen=1 ;;
     *) result_seen=1 ;;
   esac
-done
+done <<EOF
+$(printf '%s\n' "$RESULTS" | tr ' ' '\n')
+EOF
 
-# Two labels only for ordinary red work. Prefer capacity/infra when any
-# failing job is capacity: do not bury a timeout under a `result` label.
-# Review-step carve-outs never force `result`.
-if [ "$capacity_seen" -eq 1 ]; then
-  action=capacity/infra
-  detail=capacity
-elif [ "$result_seen" -eq 1 ]; then
+# Two labels only for ordinary red work. A mixed run (one timeout plus one
+# real test failure) is `result`: a genuine failure must not be parked as
+# capacity. Review-step carve-outs never force `result`.
+if [ "$result_seen" -eq 1 ]; then
   action=result
   detail=test-failure
+elif [ "$capacity_seen" -eq 1 ]; then
+  action=capacity/infra
+  detail=capacity
 elif [ "$review_seen" -eq 1 ]; then
-  # Empty-verdict style failure: review step owns it. Do not label as result.
   action=review-step
   detail=empty-verdict
 else
@@ -86,22 +87,33 @@ else
 fi
 
 label="$action"
+guidance="Diagnose the named failing job and close this issue only after a later complete scheduled run passes."
+if [ "$action" = capacity/infra ]; then
+  guidance="capacity/infra means timeout/kill/rate-limit — park and retry; do not re-diagnose as broken code."
+elif [ "$action" = review-step ]; then
+  guidance="empty reviewer verdict fails the review step and reroutes. It never reddens the PR test verdict."
+else
+  guidance="result is a real test outcome. Diagnose the failing suite."
+fi
+if [ "$capacity_seen" -eq 1 ] && [ "$result_seen" -eq 1 ]; then
+  guidance="$guidance Note: this run mixed capacity and result; the result label wins so a real failure is not parked."
+fi
+
 body="The complete scheduled matrix failed at ${RUN_URL}.
 
 Action label: \`${label}\`
 Report-only category: ${detail}
 
-${detail_notes}Diagnose the named failing job and close this issue only after a later complete scheduled run passes. A \`capacity/infra\` label means timeout/kill/rate-limit — park and retry; do not re-diagnose as broken code. A \`result\` label is a real test outcome."
+${detail_notes}${guidance}"
 
 existing="$(gh issue list --repo "$REPO" --state open --search "in:title $TITLE" --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)"
+# Labels may not exist yet; create before every attach.
+gh label create "$label" --repo "$REPO" --force >/dev/null 2>&1 || true
 if [ -n "$existing" ]; then
   gh issue comment "$existing" --repo "$REPO" --body "$body"
-  # Keep the action label current; never leave a capacity incident labeled result.
-  gh issue edit "$existing" --repo "$REPO" --add-label "$label" >/dev/null
+  gh issue edit "$existing" --repo "$REPO" --add-label "$label" >/dev/null 2>&1 || true
   printf 'report-scheduled-failure: updated issue #%s label=%s\n' "$existing" "$label"
 else
-  # Labels are created by repository setup; fall back to creating on first use.
-  gh label create "$label" --repo "$REPO" --force >/dev/null 2>&1 || true
   number="$(gh issue create --repo "$REPO" --title "$TITLE" --body "$body" --label "$label")"
   printf 'report-scheduled-failure: opened %s label=%s\n' "$number" "$label"
 fi

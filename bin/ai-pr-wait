@@ -441,8 +441,12 @@ while :; do
       say "  review-step: empty reviewer verdict fails the review and reroutes."
       say "  It never reddens the PR test verdict."
     fi
-    if [ "$any_result" -eq 1 ] && [ "$any_capacity" -eq 0 ] && [ "$any_review" -eq 0 ]; then
+    if [ "$any_result" -eq 1 ]; then
       say "  result: a real test outcome. Diagnose the failing suite."
+      if [ "$any_capacity" -eq 1 ]; then
+        say "  Mixed run: a real failure is present alongside capacity. Do not"
+        say "  park the whole pull request as capacity."
+      fi
     fi
     exit 1
   fi
