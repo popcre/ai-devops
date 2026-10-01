@@ -209,9 +209,9 @@ jobs:
           bash tests/test-markdown-links.sh
 
   # Ordinary pull requests divide the Windows-sensitive lane into eight declared
-  # sections that run at the same time on independent GitHub-hosted
-  # machines (#210). Hosted concurrency is unmetered on a public repository, so
-  # this is real parallelism on separate hardware, not several processes competing
+  # sections that run at the same time on independent machines (#210): idle
+  # qualified self-hosted hosts when available, Blacksmith otherwise. This is
+  # real parallelism on separate hardware, not several processes competing
   # for one desktop - the failure mode the issue explicitly forbids. The section
   # boundaries live in config/ci-suite-manifest.json and are sized from the
   # measured per-suite timings of runs 35200063547 and 35189676116;
@@ -270,12 +270,15 @@ jobs:
       # and the rest of the evidence still lands.
       fail-fast: false
       # The router's plan; the literal fallback is the all-Blacksmith plan used
-      # when the router produced nothing. The head-repo test is the primary
-      # fork guard and lives HERE, not in the router: a pull request may edit
-      # tools/ci/runner-router.cjs or config/ci-runner-routing.json, but it may
-      # not edit the merge ref's policy that decides which machines run its code.
-      # A foreign head therefore always gets the Blacksmith literal regardless
-      # of what the router (or a tampered config) reports.
+      # when the router produced nothing. The head-repo test here is
+      # defense-in-depth: GitHub does not route pull_request jobs from forks
+      # to self-hosted runners by default, and fork PRs get read-only tokens
+      # with no secrets. The head-repo check and the all-Blacksmith fallback
+      # add a second layer in the workflow. For trusted enforcement that does
+      # not depend on the PR-editable workflow definition, see the runner-level
+      # guards and GitHub's fork isolation for self-hosted runners.
+      # A foreign head gets the Blacksmith literal regardless of what the
+      # router (or a tampered config) reports.
       matrix:
         include: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":7,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":8,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
     runs-on: ${{ matrix.runs_on }}
