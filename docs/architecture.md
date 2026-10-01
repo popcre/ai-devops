@@ -36,7 +36,7 @@ account-wide request savings. Preserve the existing workflow while proving both.
 | Control command | `bin/ai-devops` | `doctor` (health checks), `version`, `paths` |
 | Workspace safety | `bin/ai-workspace-status` | Read-only git/branch/PR/dirty snapshot + warnings |
 | Manual verification | `bin/ai-verify-run` | Provenance-bearing dispatch, duplicate refusal, status, and separately confirmed cancellation |
-| Approval review | `bin/ai-review`, `bin/ai-claude-review`, `bin/ai-codex-review` | Exact-source, lifecycle-accounted Claude Opus 5 or Codex approval |
+| Approval review | `bin/ai-review`, `bin/ai-review-pool`, `bin/ai-codex-review` | Exact-source, lifecycle-accounted approval from a registered pool reviewer (default Muse) or the Codex gate |
 | Model invocation | `bin/ai-model-call` | Runs one stage with validated arguments and atomic output; never shell-evaluates config |
 | Task orchestrator | `bin/ai-run-task` | Immutable seven-stage manifest, artifact chain, fail-closed resume and retry |
 | Documentation reachability | `bin/ai-doc-reachability`, `.doc-reachability.json`, reusable workflow | Blocks PR-added, copied, or moved Markdown that no configured root can reach; legacy orphans are not gated |
@@ -49,12 +49,12 @@ account-wide request savings. Preserve the existing workflow while proving both.
 Seven stages, mapped to models via `/etc/ai-devops/models.env`:
 
 1. **Plan** — GPT-5.6 / Codex, read-only, medium reasoning — `01-opus48-plan.md`
-2. **Plan review** — Claude Opus 5 — `02-opus-plan-review.md`
+2. **Plan review** — registered pool reviewer — `02-opus-plan-review.md`
 3. **Implement** — GPT-5.6 / Codex, workspace-write, medium — `03-gpt55-implement.md`
-4. **Diff review** — Claude Opus 5 — `04-opus-diff-review.md`
+4. **Diff review** — registered pool reviewer — `04-opus-diff-review.md`
 5. **Test** — GPT-5.6 / Codex, workspace-write, medium — `05-gpt55-test.md`
-6. **Security review** — Claude Opus 5 — `06-opus-security-review.md`
-7. **Final review** — Claude Opus 5 — `07-opus48-final-review.md`
+6. **Security review** — registered pool reviewer — `06-opus-security-review.md`
+7. **Final review** — registered pool reviewer — `07-opus48-final-review.md`
 
 Review stages receive only read/search tools in a complete disposable snapshot.
 Implementation/test stages make the smallest safe change and add tests.
@@ -148,7 +148,7 @@ never overwrites them. See [`configuration.md`](configuration.md).
 Every known reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex,
 DeepSeek, and StepFun—is known to preflight and the scoreboard so historical evidence stays
 readable; only providers `registered` in `config/reviewer-registry.json` (today
-Muse, Grok, Qwen, Gemini, GLM, DeepSeek, plus the Claude and Codex approval-gate wrappers, and StepFun on Ubuntu/Linux only, outside the allocator) receive reviews. Unsupported metadata
+Muse, Grok, Qwen, Gemini, GLM, DeepSeek, the Codex approval-gate wrapper, and StepFun on Ubuntu/Linux only, outside the allocator) receive reviews. Claude is absent from the pool (owner instruction 2026-09-30) and never receives a formal or assigned review. Unsupported metadata
 is represented as missing, never invented. Scoreboard evidence is
 `current`, `stale`, or `unknown`; only a current verdict is usable. Packets seal
 each relative file name, byte length, and digest. `ai-review-sandbox` publishes

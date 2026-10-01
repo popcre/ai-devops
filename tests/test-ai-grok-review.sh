@@ -588,6 +588,8 @@ check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.t
 check "new pins the model"                "grep -q -- '--model grok-4.6' '$TMP/argv.txt'"
 check "new allows Edit in the snapshot"   "grep -q -- '--allow Edit' '$TMP/argv.txt' && ! grep -q -- '--deny Edit' '$TMP/argv.txt'"
 check "new allows Bash in the snapshot"   "grep -q -- '--allow Bash' '$TMP/argv.txt' && ! grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "prompt warns that assignment-prefixed shell commands cancel the run" "grep -q 'CANCELS your current turn' '$TMP/prompt-copy' && grep -q 'bash .git/review-scratch/run.sh' '$TMP/prompt-copy' && grep -q 'invalidates the whole review' '$TMP/prompt-copy'"
+check "permission_cancelled is resumed in the same session, bounded, only on the native witness" "[ \$(grep -c '^  recover_or_preserve ' '$SCRIPT') -eq 2 ] && grep -q 'AI_GROK_PERMISSION_RESUMES:-3' '$SCRIPT' && grep -q 'native_permission_cancelled .*; do' '$SCRIPT' && ! grep -q 'permission_cancelled) printf' '$SCRIPT'"
 check "prompt says not read-only and edits are discarded" "grep -q 'You are NOT read-only' '$TMP/prompt-copy' && grep -q 'discarded' '$TMP/prompt-copy'"
 T1_DIR="$(run show t1 | jq -r '.review_dir')"
 check "writable review dir is a snapshot, not the caller checkout" "[ -d '$T1_DIR' ] && [ \"\$(cd '$T1_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
@@ -739,7 +741,7 @@ native_terminal_reason_cases(){
   note(){ printf '%s\n' "$*" >&2; }
   stream="$STATE_DIR/isolated-home/sessions/encoded-cwd/native-session/updates.jsonl"
   mkdir -p "$(dirname "$stream")"
-  for category in max_turns_reached PRIVATE_UNKNOWN_CATEGORY wrong-request wrong-session duplicate absent; do
+  for category in max_turns_reached PermissionCancelled PRIVATE_UNKNOWN_CATEGORY wrong-request wrong-session duplicate absent; do
     jq -n '{stopReason:"cancelled",sessionId:"native-session",requestId:"native-request",num_turns:20}' > "$fixture"
     rm -f "$fixture.terminal.json"
     jq -nc --arg category "$category" '{params:{sessionId:"native-session",update:{sessionUpdate:"turn_completed",prompt_id:"native-request",stop_reason:"cancelled"},_meta:{cancellationCategory:$category}}}' > "$stream"
@@ -756,6 +758,8 @@ native_terminal_reason_cases(){
       check 'native category witness binds result and terminal record hashes' "jq -e '.native_terminal_matches==1 and (.result_sha256|length)==64 and (.source_terminal_sha256|length)==64' '$fixture.terminal.json'"
       printf '\n' >> "$fixture"
       check 'changed paid result cannot reuse an earlier native witness' "test \"\$(terminal_reason_for_result '$fixture')\" = provider_cancelled"
+    elif [ "$category" = PermissionCancelled ]; then
+      check 'native PermissionCancelled is named as a local refused command, not the provider' "printf '%s' \"\$output\" | grep -q 'reason: permission_cancelled' && printf '%s' \"\$output\" | grep -q 'not the provider'"
     else
       check "native $category remains generic cancellation without guessing" "printf '%s' \"\$output\" | grep -q 'reason: provider_cancelled'"
     fi
@@ -765,6 +769,36 @@ native_terminal_reason_cases(){
 echo "== stop_reason handling =="
 terminal_reason_cases
 native_terminal_reason_cases
+
+permission_resume_cases(){
+  local out="$TMP/perm-out.json" pf="$TMP/perm-prompt" calls="$TMP/perm-calls" before
+  source <(sed -n '/^native_permission_cancelled() {/,/^}/p; /^recover_permission_cancelled() {/,/^}/p' "$SCRIPT")
+  note(){ :; }; report_usage(){ :; }; grok_credit_scan(){ :; }; capture_terminal_evidence(){ :; }
+  REVIEW_DIR="$TMP"; : > "$pf"
+  witness(){ jq -n --arg h "$(sha256sum "$out" | awk '{print $1}')" '{schema_version:1,native_terminal_matches:1,category:"PermissionCancelled",terminal_reason:"permission_cancelled",result_sha256:$h}' > "$out.terminal.json"; }
+  run_turn(){ printf '%s %s %s\n' "$4" "$5" "$(head -c 40 "$3")" >> "$calls"; RUN_TURN_RC="${FAKE_RC:-0}"; jq -n '{stopReason:"end_turn",sessionId:"s1",num_turns:3,text:"## Verdict\nAPPROVE"}' > "$2"; }
+  await_result(){ [ "${FAKE_AWAIT:-0}" = 0 ]; }
+  # a) native witness: resumed once in the same session with the remaining budget
+  PERMISSION_RESUMES=3; : > "$calls"; rm -f "$out.terminal.json"
+  rm -f "$out.prior-usage"; jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:7}' > "$out"; witness
+  recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'native PermissionCancelled resumes the same session once with the remaining turns' "[ $rc -eq 0 ] && [ \$(wc -l < '$calls') -eq 1 ] && grep -q '^13 s1 The Grok CLI refused' '$calls' && jq -e '.stopReason==\"end_turn\"' '$out' >/dev/null"
+  check 'replaced paid turn usage is kept for accounting' "[ -f '$out.prior-usage' ]"
+  # b) raw stop token without the native witness never resumes
+  : > "$calls"; rm -f "$out.terminal.json"
+  jq -n '{stopReason:"permission_cancelled",sessionId:"s1",num_turns:7}' > "$out"
+  recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'raw permission_cancelled token without native witness is not resumed' "[ $rc -eq 0 ] && [ ! -s '$calls' ]"
+  # c) an unconfirmed resume fails closed and keeps the confirmed cancelled result
+  : > "$calls"; jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:7}' > "$out"; witness; before="$(sha256sum "$out")"
+  FAKE_RC=124 recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'unconfirmed resumed turn fails closed and keeps the cancelled result and witness' "[ $rc -eq 1 ] && [ \"\$(sha256sum '$out')\" = '$before' ] && [ -f '$out.terminal.json' ]"
+  # d) exhausted budget does not resume
+  : > "$calls"; jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:20}' > "$out"; witness
+  recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'no resume once the turn budget is spent' "[ $rc -eq 0 ] && [ ! -s '$calls' ]"
+}
+permission_resume_cases
 echo cancelled > "$TMP/mode"
 OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
 # This case is about how a cancelled stopReason is reported, not about the wait
@@ -1396,7 +1430,7 @@ check "pool_gemini_argv_omits_max_turns" "grep -q '^new pool-gemini-' '$POOLTMP/
 check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runner-args' && ! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
 check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
-check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 32'"
+check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 120'"
 # Issue #711 Phase 5 (B'): a one-shot pool review releases the runner's session
 # through the runner's own delete path once the verdict is accounted, from
 # inside the snapshot; a refused or skipped release must never fail or narrow

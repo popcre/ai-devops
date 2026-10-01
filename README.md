@@ -150,16 +150,18 @@ STATUS first.
 | Stage | Model | Role |
 |-------|-------|------|
 | Plan / architecture | **GPT-5.6 / Codex (medium)** | Implementation plans, architecture design |
-| Plan review | **Claude Opus 5** | Independent review of the plan |
+| Plan review | **Registered pool reviewer** | Independent review of the plan |
 | Implementation | **GPT-5.6 / Codex (medium)** | Writes the code, smallest safe change |
-| Diff review | **Claude Opus 5** | Reviews the git diff for regressions |
+| Diff review | **Registered pool reviewer** | Reviews the git diff for regressions |
 | Test | **GPT-5.6 / Codex (medium)** | Runs tests, visual checks, fixes, reruns |
-| Security review | **Claude Opus 5** | Auth, data-leak, SQL, secrets review |
-| Final review | **Claude Opus 5** | Final product/architecture sign-off |
+| Security review | **Registered pool reviewer** | Auth, data-leak, SQL, secrets review |
+| Final review | **Registered pool reviewer** | Final product/architecture sign-off |
 
 High-level roles:
 
-- **Claude Opus 5** — independent plan, diff, security, and final review.
+- **Registered pool reviewer** (default Muse) — independent plan, diff, security,
+  and final review. Claude is out of the reviewer pool (owner instruction
+  2026-09-30).
 - **GPT-5.6 / Codex (medium)** — planning, implementation, testing, fixing.
 
 The exact CLI flags for each model live in `/etc/ai-devops/models.env` and can be
@@ -267,7 +269,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-devops paths` | Print the paths this toolkit uses |
 | `ai-workspace-status` | Show git/branch/PR safety status of the current repo |
 | `ai-verify-run` | Safely start or inspect manual verification without cancelling active proof |
-| `ai-review <claude\|codex> <mode>` | Start a gated review; the only supported front door |
+| `ai-review <provider> <mode>` | Start a gated review; the only supported front door (registry decides the pool) |
 | `ai-codex-review <mode>` | Read-only Codex second-opinion review (call it through `ai-review`; a plan review started directly is refused) |
 | `ai-model-call <stage> <prompt> <out>` | Generic model invocation helper |
 | `ai-run-task start "<task>"` | Create an immutable seven-stage run; use `run`, `resume`, and `status` to operate it |

@@ -382,7 +382,8 @@ check "the Gemini entry still records why the empty report mattered"   "jq -e '.
 check "Kimi is removed from the shipped reviewer registry while credit is exhausted" "jq -e '.providers.kimi.registry_state==\"absent\" and (.providers.kimi.reason|test(\"out of credit\"))' '$REAL_REGISTRY'"
 check "GLM is back in the shipped reviewer registry (owner instruction 2026-09-30)" "jq -e '.providers.glm.registry_state==\"registered\" and (.providers.glm.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 check "DeepSeek V4.1 Flash is registered (shared-db REVIEWERS) and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"registered\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
-check "the shipped registry is Muse, Grok, Qwen, Gemini, GLM, DeepSeek, the Claude and Codex gates, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"claude\",\"codex\",\"deepseek\",\"gemini\",\"glm\",\"grok\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
+check "the shipped registry is Muse, Grok, Qwen, Gemini, GLM, DeepSeek, the Codex gate, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"codex\",\"deepseek\",\"gemini\",\"glm\",\"grok\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
+check "Claude is out of the shipped reviewer pool (owner instruction 2026-09-30)" "jq -e '.providers.claude.registry_state==\"absent\" and (.providers.claude.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 # Health alone must still never mean allocatable. Proved against a fixture that
 # omits a provider, so the guard survives any future registry membership change.
 printf '{"version":1,"providers":{"codex":{"registry_state":"absent","reason":"omitted for this fixture"}}}

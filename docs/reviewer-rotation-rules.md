@@ -10,7 +10,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
    `bin/ai-reviewer-membership-drift` compares the two and fails on any
    difference; the `Reviewer membership drift` workflow runs it every six hours
    and on registry changes. Providers that review outside the allocator
-   (Claude approval gate, Codex overflow) are listed in
+   (Codex approval gate, StepFun on Ubuntu/Linux) are listed in
    `config/reviewer-membership-scope.json`.
 2. **Unreachable reviewer: check membership, then move on.** Run
    `bin/ai-reviewer-membership-drift` or read the registry first. If the
