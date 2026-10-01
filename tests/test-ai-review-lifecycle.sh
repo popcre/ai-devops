@@ -28,10 +28,18 @@ printf '%s\n' "$@" > "$AI_TEST_FRONT_LOG"
 EOF
 chmod +x "$FRONT_STUB"
 export AI_TEST_FRONT_LOG="$TMP/front.log"
+# Shipped registry has Claude absent. A fixture is required to exercise the
+# legacy Claude adapter path; membership refusal is asserted below.
+printf '{"version":1,"providers":{"claude":{"registry_state":"registered","reason":"offline front-door fixture"}}}\n' > "$TMP/claude-registry.json"
 (cd "$R" && AI_CODEX_REVIEW_BIN="$FRONT_STUB" "$FRONT" codex final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789)
 check "approval front door forwards exact test and source options" \
   "printf '%s\n' final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789 | diff -u - '$AI_TEST_FRONT_LOG'"
-(cd "$R" && AI_CLAUDE_REVIEW_BIN="$FRONT_STUB" "$FRONT" claude final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789)
+if (cd "$R" && AI_CLAUDE_REVIEW_BIN="$FRONT_STUB" "$FRONT" claude final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789) >/dev/null 2>&1; then
+  check "shipped registry refuses Claude reviews" "false"
+else
+  check "shipped registry refuses Claude reviews" "true"
+fi
+(cd "$R" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$FRONT_STUB" "$FRONT" claude final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789)
 check "approval front door forwards exact test and source options to Claude" \
   "printf '%s\n' final-check --tests 'bash tests/focused.sh' --base origin/main --assert-head 0123456789012345678901234567890123456789 | diff -u - '$AI_TEST_FRONT_LOG'"
 
@@ -235,14 +243,14 @@ AI_TASK_GATES_MODE=standard AI_TEST_PREFLIGHT_LOG="$GATE_LOG" \
 STUBEOF
 chmod +x "$STUB"
 
-FRONT_OUT="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review 2>&1 )"; FRONT_RC=$?
+FRONT_OUT="$( cd "$GR" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review 2>&1 )"; FRONT_RC=$?
 check "the front door refuses a paid diff review of a documentation change" "[ '$FRONT_RC' -ne 0 ]"
 
-FRONT_PLAN="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude plan-review 2>&1 )"; PLAN_RC=$?
+FRONT_PLAN="$( cd "$GR" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude plan-review 2>&1 )"; PLAN_RC=$?
 check "a plan review still runs, because it is what decides the class" \
   "[ '$PLAN_RC' -eq 0 ] && [ -f \"\$FRONT_PLAN\" ]"
 
-FRONT_OWNER="$( cd "$GR" && AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --reviewer-approval "$(appr_file "$GR" review "$REPO_ROOT/bin/ai-task-gates")" 2>&1 )"; OWNER_RC=$?
+FRONT_OWNER="$( cd "$GR" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --reviewer-approval "$(appr_file "$GR" review "$REPO_ROOT/bin/ai-task-gates")" 2>&1 )"; OWNER_RC=$?
 check "a reviewer approval reaches the gate the lifecycle runs" \
   "[ '$OWNER_RC' -eq 0 ] && [ -f \"\$FRONT_OWNER\" ]"
 
@@ -297,12 +305,12 @@ check "private review refuses a verdict when unselected source changes during pr
 check "a stale private result never prints an APPROVE token" "! printf '%s' \"\$MUTATE_OUT\" | grep -q 'VERDICT: APPROVE'"
 TESTS_OUT="$(cd "$PRIVATE" && AI_DEEPSEEK_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" deepseek diff-review --code-only --paths-file "$TMP/approved-paths.json" --tests 'cat evidence/raw.csv' 2>&1)"; TESTS_RC=$?
 check "private code-only route refuses arbitrary tests commands before provider" "[ '$TESTS_RC' -ne 0 ] && printf '%s' \"\$TESTS_OUT\" | grep -q 'does not accept a tests command'"
-CLI_OUT="$(cd "$PRIVATE" && AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --code-only --paths-file "$TMP/approved-paths.json" 2>&1)"; CLI_RC=$?
+CLI_OUT="$(cd "$PRIVATE" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" claude diff-review --code-only --paths-file "$TMP/approved-paths.json" 2>&1)"; CLI_RC=$?
 check "private code-only route refuses tool-capable CLI reviewers before provider" "[ '$CLI_RC' -ne 0 ] && printf '%s' \"\$CLI_OUT\" | grep -q 'attachment-only DeepSeek'"
 rm -f "$AI_TEST_PRIVATE_ARGS"
 for provider_mode in 'claude diff-review' 'claude plan-review' 'codex diff-review' 'grok diff-review'; do
   set -- $provider_mode
-  RAW_CLI_OUT="$(cd "$PRIVATE" && AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_CODEX_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" "$1" "$2" 2>&1)"; RAW_CLI_RC=$?
+  RAW_CLI_OUT="$(cd "$PRIVATE" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN="$PRIVATE_STUB" AI_CODEX_REVIEW_BIN="$PRIVATE_STUB" AI_TASK_GATES_MODE=standard "$FRONT" "$1" "$2" 2>&1)"; RAW_CLI_RC=$?
   check "ordinary $provider_mode refuses private source before provider" "[ '$RAW_CLI_RC' -ne 0 ] && [ ! -e '$AI_TEST_PRIVATE_ARGS' ] && printf '%s' \"\$RAW_CLI_OUT\" | grep -q 'private source requires'"
 done
 printf '["evidence/raw.csv"]\n' > "$TMP/raw-paths.json"

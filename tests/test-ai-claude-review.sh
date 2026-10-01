@@ -41,7 +41,11 @@ esac
 EOF
 chmod +x "$STUB"; mkdir -p "$TMP/args"
 MODELS="$TMP/models.env"; printf "CLAUDE_REVIEW_CMD='%s -p --model claude-opus-5 --effort low --output-format json --permission-mode plan --tools Read,Grep,Glob --strict-mcp-config --mcp-config {\\\"mcpServers\\\":{}} --no-session-persistence --no-chrome --disable-slash-commands'\n" "$STUB" > "$MODELS"
-export AI_DEVOPS_MODELS_ENV="$MODELS" AI_CLAUDE_TEST_ARGS="$TMP/args" AI_CLAUDE_STUB_SOURCE="$R"
+# Claude is absent from the shipped registry (owner instruction 2026-09-30).
+# These tests exercise the adapter itself, so they carry a fixture that still
+# registers the provider; production membership is asserted in test-ai-review-preflight.sh.
+printf '{"version":1,"providers":{"claude":{"registry_state":"registered","reason":"offline adapter fixture"}}}\n' > "$TMP/reviewer-registry.json"
+export AI_DEVOPS_MODELS_ENV="$MODELS" AI_CLAUDE_TEST_ARGS="$TMP/args" AI_CLAUDE_STUB_SOURCE="$R" AI_REVIEW_REGISTRY_FILE="$TMP/reviewer-registry.json"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle" AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard" AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 
 echo '== ai-claude-review'

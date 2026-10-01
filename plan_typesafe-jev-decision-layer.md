@@ -6,6 +6,8 @@
 
 ## STATUS
 
+**Spend-reduction decision (2026-09-27 EDT):** The [measured baseline](tests/verification/jev/spend-baseline-20260928T0243Z.md) found no qualifying existing paid decision or demonstrably avoidable skill load with 30 independent public ground-truth cases. The separate spend-reduction plan is closed as no-go; it added no Jev runtime or installation. The advisory issue-pair pilot remains a human-time experiment and has no measured frontier-token saving.
+
 | Step | Status | Last updated | Evidence |
 |---|---|---|---|
 | 1. Confirm Jev is real, and what it actually guarantees | ✅ complete | 2026-09-18 | Section 3 below |
