@@ -33,7 +33,7 @@ fallback_timeout="$(sed -n '/^  windows-reviewer-fallback:/,/^  report-scheduled
 section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 check 'complete Windows sections retain the existing timeout bound' '[ "$windows_timeout" = 105 ]'
 check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 30 ]'
-check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ]'
+check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 120 ]'
 check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
 # P3 splits selection from fast validation. The assertions below check each

@@ -561,9 +561,10 @@ jobs:
     runs-on: windows-2025
     # This is an emergency hosted path, not the qualified timing signal. Run
     # 34387666739 reached Grok but was killed by the original 30-minute bound;
-    # prior hosted evidence measured Grok alone at 41m20s. Sixty minutes keeps
-    # the fallback bounded without weakening any assertion.
-    timeout-minutes: 60
+    # prior hosted evidence measured Grok alone at 41m20s. Sixty minutes was
+    # enough on Blacksmith (~2x faster); GitHub-hosted Windows cancelled at that
+    # ceiling on 2026-10-01. 120 minutes keeps the fallback bounded and complete.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
