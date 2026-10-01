@@ -52,13 +52,13 @@ function isForeignHead(context) {
 async function run({ github, poolGithub, context, core, cfg }) {
   let idle = 0;
   if (isForeignHead(context)) {
-    core.info('Pull request head is outside this repository; every Windows section stays on Blacksmith.');
+    core.info('Pull request head is outside this repository; every Windows section stays on the default Windows lane.');
     poolGithub = null;
   }
   try {
     if (poolGithub) idle = Math.max(0, (await countIdleQualified(poolGithub, context, cfg)) - (await queuedQualifiedJobs(github, context, cfg)));
   } catch (error) {
-    core.warning(`Qualified pool unknown (${error.message}); every Windows section stays on Blacksmith.`);
+    core.warning(`Qualified pool unknown (${error.message}); every Windows section stays on the default Windows lane.`);
     idle = 0;
   }
   const plan = decide(cfg, { event: context.eventName, idleQualified: idle });
