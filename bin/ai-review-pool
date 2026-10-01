@@ -78,6 +78,50 @@ for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_
   fi
 done
 unset _hook_var
+# ---------------------------------------------------------------------------
+# Structural forcing function (plan_reviewer-pipeline-core §9 Phase D).
+# A provider whose door is registered in config/review-runner-doors.json MUST
+# be dispatched through the shared review runner (bin/ai-review-engine).
+# pool refuses any substitution that would bypass the runner: a library the
+# doors may skip is a rejected shape. This is the admission gate that ends the
+# copy-paste governance path for migrated doors.
+# ---------------------------------------------------------------------------
+ENGINE="${AI_REVIEW_ENGINE_BIN:-$ROOT/ai-review-engine}"
+DOORS_JSON="${AI_REVIEW_RUNNER_DOORS_JSON:-$ROOT/../config/review-runner-doors.json}"
+_runner_door_registered() {
+  [ -f "$DOORS_JSON" ] && jq -e --arg p "$1" 'has($p)' "$DOORS_JSON" >/dev/null 2>&1
+}
+if _runner_door_registered "$provider"; then
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'must be run inside a Git repository.'
+  REPO_ROOT="$(git rev-parse --show-toplevel)"
+  # AI_POOL_RUNNER_* may only name the engine itself. Anything else is a
+  # bypassed review and is refused before any lifecycle state exists.
+  _pool_sub_var="AI_POOL_RUNNER_$(printf '%s' "$provider" | tr '[:lower:]' '[:upper:]')"
+  if [ -n "${!_pool_sub_var:-}" ]; then
+    _sub_real="$(readlink -f "${!_pool_sub_var}" 2>/dev/null || printf '%s' "${!_pool_sub_var}")"
+    _engine_real="$(readlink -f "$ENGINE" 2>/dev/null || printf '%s' "$ENGINE")"
+    if [ "$_sub_real" != "$_engine_real" ]; then
+      die "refusing a $provider review that bypasses the shared review runner (ai-review-engine). ${_pool_sub_var} may only name the engine; use AI_REVIEW_ENGINE_BIN under AI_POOL_TEST_HOOKS=1 to substitute it."
+    fi
+  fi
+  RUNNER="$ENGINE"
+  # Forward the remaining options (already validated by the usage contract)
+  # to the runner's review contract. The engine owns task gate, identity,
+  # sandbox, packet seal + durable store, lifecycle terminal, report floor,
+  # and cleanup-after-store; the door supplies provider bits only.
+  shift 2
+  _engine_args=(review --provider "$provider" --name "pool-${provider}-${mode}" --repo "$REPO_ROOT" --mode "$mode" --caller "$CALLER")
+  [ -z "${AI_POOL_RUNNER_MAX_TURNS:-}" ] || _engine_args+=(--max-turns "$AI_POOL_RUNNER_MAX_TURNS")
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --base|--assert-head|--tests)
+        [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."
+        _engine_args+=("$1" "$2"); shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  exec "$RUNNER" "${_engine_args[@]}"
+fi
 case "$provider" in
   grok)   [ -z "${AI_POOL_RUNNER_GROK:-}" ] || RUNNER="$AI_POOL_RUNNER_GROK" ;;
   muse)   [ -z "${AI_POOL_RUNNER_MUSE:-}" ] || RUNNER="$AI_POOL_RUNNER_MUSE" ;;

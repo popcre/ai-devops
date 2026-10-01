@@ -1,0 +1,12 @@
+{
+  "_comment": "Providers whose formal reviews MUST go through bin/ai-review-engine. pool/preflight/allocator refuse a review that bypasses the runner for any provider listed here. Door scripts own provider bits only (binary/profile, credentials, model pin, tool set, parse to our report shape). See docs/reviewer-harness-consolidation.md and plan_reviewer-pipeline-core.md §9 Phase D.",
+  "schema_version": 1,
+  "runner_core": "review-lifecycle-core/1",
+  "runner_entry": "bin/ai-review-engine",
+  "grok": {
+    "door": "tools/lib/review-doors/grok.sh",
+    "contract": ["review", "implement"],
+    "migrated_in": "fix/1114-review-runner-doors",
+    "notes": "First proven door. Session CLI bin/ai-grok-review remains for persistent named sessions; formal pool reviews dispatch through the engine."
+  }
+}
