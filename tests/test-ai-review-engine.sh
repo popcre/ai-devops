@@ -125,8 +125,17 @@ check "pool_bypass_refusal_names_the_engine" "grep -q 'ai-review-engine' '$TMP/p
 
 # Unregistered providers keep their existing session-runner path (muse is not
 # in the doors registry), so a plain substitution is still allowed under hooks.
+# Provider preflight is stubbed: this check proves dispatch routing, not the
+# host's Muse health (a missing provider binary must not decide the outcome).
+POOL_PF_STUB="$TMP/pool-preflight-stub"
+cat > "$POOL_PF_STUB" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$POOL_PF_STUB"
 set +e
 ( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_POOL_RUNNER_MUSE="$NOT_ENGINE" \
+    AI_REVIEW_PREFLIGHT_BIN="$POOL_PF_STUB" \
     AI_POOL_CALLER=codex bash "$POOL" muse diff-review ) >"$TMP/pool-muse.out" 2>"$TMP/pool-muse.err"
 POOL_MUSE_RC=$?
 set -e

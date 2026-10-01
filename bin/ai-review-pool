@@ -124,7 +124,10 @@ if _runner_door_registered "$provider"; then
   # and cleanup-after-store; the door supplies provider bits only.
   shift 2
   _engine_args=(review --provider "$provider" --name "pool-${provider}-${mode}" --repo "$REPO_ROOT" --mode "$mode" --caller "$CALLER")
-  [ -z "${AI_POOL_RUNNER_MAX_TURNS:-}" ] || _engine_args+=(--max-turns "$AI_POOL_RUNNER_MAX_TURNS")
+  # Same budget rule as the legacy path: grok's 120-turn default (the env
+  # override is already folded into RUNNER_MAX_TURNS) and nothing for runners
+  # that own their budget and reject the flag.
+  [ -z "$RUNNER_MAX_TURNS" ] || _engine_args+=(--max-turns "$RUNNER_MAX_TURNS")
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --base|--assert-head|--tests)

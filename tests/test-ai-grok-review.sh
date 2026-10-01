@@ -1399,17 +1399,29 @@ case "${POOL_RUNNER_MODE:-approve}" in
   provisionalonly) printf 'Head under review: %s.\n\n## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n' "$HEAD" ;;
   headafterfinal) printf '## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n\n## Verdict\nAPPROVE\nHead: %s\n' "$HEAD" ;;
   drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
-  credit) printf 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota\nOUT OF CREDIT: stub - then run: ai-review-preflight clear grok\n' >&2; exit 92 ;;
+  credit) _cr_p="$(printf '%s' "$2" | cut -d- -f2)"; printf 'AI_REVIEWER_OUT_OF_CREDIT provider=%s code=insufficient_quota\nOUT OF CREDIT: stub - then run: ai-review-preflight clear %s\n' "$_cr_p" "$_cr_p" >&2; exit 92 ;;
   chrome) printf 'runner progress chrome naming the head %s with enough padding text that a whole-buffer byte floor would pass if chrome were counted toward the analysis floor, which is exactly what this mode must not reward\n' "$HEAD" >&2; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
 esac
 EOF
 chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/runner"
-export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_GROK="$POOLTMP/runner" AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
+# Grok is a runner-registered door: pool dispatches it through the shared
+# engine and refuses any other AI_POOL_RUNNER_GROK substitution. A fake
+# ENGINE records the engine argv so the grok budget/naming shape is still
+# asserted; the adapter contract itself runs through unregistered providers
+# (qwen below) on the legacy session-runner path, which is the path the
+# contract code still owns.
+cat > "$POOLTMP/engine" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$POOLTMP/engine-args"
+exit 0
+EOF
+chmod +x "$POOLTMP/engine"
+export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_QWEN="$POOLTMP/runner" AI_REVIEW_ENGINE_BIN="$POOLTMP/engine" AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
 
-( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-approve" 2>&1; RC_APPROVE=$?
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" qwen security-review ) > "$POOLTMP/out-approve" 2>&1; RC_APPROVE=$?
 APPROVE_REPORT="$(tail -1 "$POOLTMP/out-approve" 2>/dev/null)"
 check "pool_adapter_approves_a_bound_verdict" "[ '$RC_APPROVE' -eq 0 ] && [ -f '$APPROVE_REPORT' ] && grep -q APPROVE '$APPROVE_REPORT'"
-check "pool_adapter_writes_the_report" "ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '^grok-security-review-'"
+check "pool_adapter_writes_the_report" "ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '^qwen-security-review-'"
 # The adapter's generated name must fit every registered runner, including
 # Muse's 40-character limit and Gemini's caller-qualified 64-character tag.
 # Keep the provider names distinct while the full run ID stays in the report.
@@ -1428,7 +1440,11 @@ check "pool_gemini_argv_omits_max_turns" "grep -q '^new pool-gemini-' '$POOLTMP/
 check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runner-args' && ! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
 check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
-check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 120'"
+# Grok's 120-turn budget must reach the engine dispatch, not just the legacy
+# argv. The fake engine records the exact engine contract args.
+rm -f "$POOLTMP/engine-args"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-grkeng" 2>&1; RC_GRKENG=$?
+check "pool_grok_argv_keeps_max_turns" "grep -q -- '--provider grok' '$POOLTMP/engine-args' && grep -q -- '--max-turns 120' '$POOLTMP/engine-args'"
 # Issue #711 Phase 5 (B'): a one-shot pool review releases the runner's session
 # through the runner's own delete path once the verdict is accounted, from
 # inside the snapshot; a refused or skipped release must never fail or narrow
@@ -1462,44 +1478,44 @@ rm -f "$POOLTMP/flip"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" POOL_RUNNER_DELETE_MODE=refuse bash "$POOL" muse final-check ) > "$POOLTMP/out-reldeny" 2>&1; RC_DENY=$?
 check "pool_muse_refused_release_never_fails_the_review" "[ '$RC_DENY' -eq 0 ] && grep -q 'session release refused' '$POOLTMP/out-reldeny' && grep -q 'retained until sweep' '$POOLTMP/out-reldeny'"
 check "pool_muse_refused_release_keeps_the_report_path_last" "case \"\$(tail -1 '$POOLTMP/out-reldeny')\" in *.md) true;; *) false;; esac"
-GRK_BASE="$(grep -c '^delete pool-grok-' "$POOLTMP/runner-args" 2>/dev/null || true)"
-( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" bash "$POOL" grok security-review ) > "$POOLTMP/out-grkrel" 2>&1; RC_GRKREL=$?
-GRK_AFTER="$(grep -c '^delete pool-grok-' "$POOLTMP/runner-args" 2>/dev/null || true)"
-check "pool_grok_success_notes_and_retains" "[ '$RC_GRKREL' -eq 0 ] && [ '$GRK_AFTER' -eq '$GRK_BASE' ] && grep -q 'not yet wired for grok' '$POOLTMP/out-grkrel'"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=nounbound bash "$POOL" grok security-review ) > "$POOLTMP/out-nb" 2>&1; RC_NB=$?
+GRK_BASE="$(grep -c '^delete pool-qwen-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" bash "$POOL" qwen security-review ) > "$POOLTMP/out-grkrel" 2>&1; RC_GRKREL=$?
+GRK_AFTER="$(grep -c '^delete pool-qwen-' "$POOLTMP/runner-args" 2>/dev/null || true)"
+check "pool_grok_success_notes_and_retains" "[ '$RC_GRKREL' -eq 0 ] && [ '$GRK_AFTER' -eq '$GRK_BASE' ] && grep -q 'not yet wired for qwen' '$POOLTMP/out-grkrel'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=nounbound bash "$POOL" qwen security-review ) > "$POOLTMP/out-nb" 2>&1; RC_NB=$?
 check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" qwen security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
 check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-nv'"
 rm -f "$POOLTMP/finish-verdicts"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisional bash "$POOL" grok security-review ) > "$POOLTMP/out-prov" 2>&1; RC_PROV=$?
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisional bash "$POOL" qwen security-review ) > "$POOLTMP/out-prov" 2>&1; RC_PROV=$?
 check "pool_adapter_takes_the_final_verdict_not_the_provisional_one" "[ '$RC_PROV' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = REJECT ]"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=headafterfinal bash "$POOL" grok security-review ) > "$POOLTMP/out-haf" 2>&1; RC_HAF=$?
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=headafterfinal bash "$POOL" qwen security-review ) > "$POOLTMP/out-haf" 2>&1; RC_HAF=$?
 check "pool_adapter_binds_head_only_before_the_final_verdict" "[ '$RC_HAF' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-haf'"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisionalonly bash "$POOL" grok security-review ) > "$POOLTMP/out-po" 2>&1; RC_PO=$?
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisionalonly bash "$POOL" qwen security-review ) > "$POOLTMP/out-po" 2>&1; RC_PO=$?
 check "pool_adapter_floor_counts_only_text_before_the_final_verdict" "[ '$RC_PO' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-po'"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" grok security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" qwen security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
 check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
 rm -f "$POOLTMP/flip"
 check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift'"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=credit bash "$POOL" grok security-review ) > "$POOLTMP/out-credit" 2>&1; RC_CREDIT=$?
-check "pool_adapter_passes_out_of_credit_through" "[ '$RC_CREDIT' -eq 92 ] && grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota' '$POOLTMP/out-credit' && grep -q '^OUT OF CREDIT: ' '$POOLTMP/out-credit'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=credit bash "$POOL" qwen security-review ) > "$POOLTMP/out-credit" 2>&1; RC_CREDIT=$?
+check "pool_adapter_passes_out_of_credit_through" "[ '$RC_CREDIT' -eq 92 ] && grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=qwen code=insufficient_quota' '$POOLTMP/out-credit' && grep -q '^OUT OF CREDIT: ' '$POOLTMP/out-credit'"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok visual-review ) > "$POOLTMP/out-visual" 2>&1; RC_VISUAL=$?
 check "pool_adapter_refuses_unsupported_mode" "[ '$RC_VISUAL' -eq 2 ]"
 check "front_door_registry_comment_pins_the_promise" "grep -q 'registry decides the pool' '$FRONT'"
 check "pool_adapter_guards_as_the_dispatched_provider" "grep -q 'reviewer_event_guard \"\$provider\"' '$POOL'"
 check "pool_adapter_exports_the_caller_identity" "grep -q \"printf -v _pool_caller_var 'AI_%s_CALLER'\" '$POOL' && grep -q '\$_pool_caller_var=\$CALLER' '$POOL'"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=chrome bash "$POOL" grok security-review ) > "$POOLTMP/out-chrome" 2>&1; RC_CHROME=$?
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=chrome bash "$POOL" qwen security-review ) > "$POOLTMP/out-chrome" 2>&1; RC_CHROME=$?
 RUNNER_LINES_BEFORE="$(wc -l < "$POOLTMP/runner-args" 2>/dev/null || echo 0)"
-( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'true' ) > "$POOLTMP/out-tests-ok" 2>&1; RC_TESTS_OK=$?
-( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'false' ) > "$POOLTMP/out-tests-bad" 2>&1; RC_TESTS_BAD=$?
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" qwen security-review --tests 'true' ) > "$POOLTMP/out-tests-ok" 2>&1; RC_TESTS_OK=$?
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" qwen security-review --tests 'false' ) > "$POOLTMP/out-tests-bad" 2>&1; RC_TESTS_BAD=$?
 RUNNER_LINES_AFTER="$(wc -l < "$POOLTMP/runner-args" 2>/dev/null || echo 0)"
 check "pool_adapter_executes_the_tests_command_before_dispatch" "[ '$RC_TESTS_OK' -eq 0 ]"
-( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --tests 'touch live-probe.txt' ) > "$POOLTMP/out-mutate" 2>&1; RC_MUTATE=$?
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" qwen security-review --tests 'touch live-probe.txt' ) > "$POOLTMP/out-mutate" 2>&1; RC_MUTATE=$?
 check "pool_adapter_tests_command_cannot_mutate_the_live_tree" "[ '$RC_MUTATE' -eq 0 ] && [ ! -e '$POOLTMP/fakerepo/live-probe.txt' ]"
 check "pool_adapter_refuses_dispatch_when_tests_fail" "[ '$RC_TESTS_BAD' -ne 0 ] && grep -q 'tests command failed' '$POOLTMP/out-tests-bad' && [ '$RUNNER_LINES_AFTER' -eq $(( RUNNER_LINES_BEFORE + 1 )) ]"
 check "pool_adapter_binds_the_verdict_to_the_body_not_chrome" "[ '$RC_CHROME' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-chrome'"
-( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review --base HEAD ) > "$POOLTMP/out-fwd" 2>&1; RC_FWD=$?
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" qwen security-review --base HEAD ) > "$POOLTMP/out-fwd" 2>&1; RC_FWD=$?
 check "pool_adapter_forwards_the_caller_base_to_the_runner" "[ '$RC_FWD' -eq 0 ] && grep -q -- '--base HEAD' '$POOLTMP/runner-args'"
 check "pool_adapter_pins_private_artifact_umask" "grep -q 'umask 077' '$POOL'"
 GUARD_LINE="$(grep -n 'reviewer_event_guard "\$provider"' "$POOL" | head -1 | cut -d: -f1)"
@@ -1509,7 +1525,7 @@ SNAPSHOT_ORIGIN="$(cat "$POOLTMP/origin-url" 2>/dev/null)"
 check "pool_adapter_strips_credentials_from_the_snapshot_origin" "[ -n '$SNAPSHOT_ORIGIN' ] && [ "'$SNAPSHOT_ORIGIN'" = "'https://github.com/org/repo.git'" ]"
 SANDBOX_PIN_LINE="$(grep -n '^SANDBOX=' "$POOL" | head -1 | cut -d: -f1)"
 MODELS_SOURCE_LINE2="$(grep -n '\. "$MODELS_ENV"' "$POOL" | head -1 | cut -d: -f1)"
-check "pool_adapter_gates_the_sandbox_tool_hook" "grep -q 'AI_REVIEW_SANDBOX_BIN' '$POOL' && grep -q 'AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_SANDBOX_BIN' '$POOL'"
+check "pool_adapter_gates_the_sandbox_tool_hook" "grep -q 'AI_REVIEW_SANDBOX_BIN' '$POOL' && grep -q 'AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN' '$POOL'"
 check "pool_adapter_pins_the_sandbox_tool_before_models_env" "[ -n '$SANDBOX_PIN_LINE' ] && [ -n '$MODELS_SOURCE_LINE2' ] && [ '$SANDBOX_PIN_LINE' -lt '$MODELS_SOURCE_LINE2' ]"
 check "front_door_gates_the_pool_wrapper_hook" "grep -q 'AI_POOL_TEST_HOOKS=1 to substitute the pool adapter' '$FRONT'"
 check "pool_adapter_redacts_credential_shaped_diagnostics" "grep -q 'REDACTED' '$POOL'"
