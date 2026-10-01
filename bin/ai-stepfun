@@ -251,10 +251,10 @@ run_opencode_turn(){
     install_oc_profile "$xdg"
     # Prefer the Windows agent profiles when present (per-OS tools map).
     if [ -f "$OC_PROFILE_SRC/agent/stepfun-review-windows.md" ]; then
-      cp "$OC_PROFILE_SRC/agent/stepfun-review-windows.md" "$xdg/agent/$OC_AGENT_REVIEW.md"
+      cp "$OC_PROFILE_SRC/agent/stepfun-review-windows.md" "$xdg/config/opencode/agent/$OC_AGENT_REVIEW.md"
     fi
     if [ -f "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" ]; then
-      cp "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" "$xdg/agent/$OC_AGENT_IMPLEMENT.md"
+      cp "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" "$xdg/config/opencode/agent/$OC_AGENT_IMPLEMENT.md"
     fi
     load_key
     log="$out.jsonl"
