@@ -16,7 +16,7 @@ export AI_DEVOPS_MODELS_ENV="$GOOD" AI_REVIEW_BIN="$REVIEW" AI_MODEL_TEST_REVIEW
 echo '== ai-model-call and ai-review gate'
 check 'read-only plan command succeeds' "cd '$R' && '$SCRIPT' plan '$TMP/prompt' '$TMP/plan.out'"
 check 'writable implementation command succeeds' "cd '$R' && '$SCRIPT' implement '$TMP/prompt' '$TMP/impl.out'"
-check 'review routes through supported Claude gate' "cd '$R' && '$SCRIPT' plan-review '$TMP/prompt' '$TMP/review.out' && grep -qx 'claude plan-review' '$TMP/review.args'"
+check 'review routes through a registered pool provider' "cd '$R' && '$SCRIPT' plan-review '$TMP/prompt' '$TMP/review.out' && grep -qx 'muse plan-review' '$TMP/review.args'"
 check 'review output is copied as immutable artifact' "grep -q '^APPROVE$' '$TMP/review.out'"
 check 'existing output is never replaced' "cd '$R' && ! '$SCRIPT' plan '$TMP/prompt' '$TMP/plan.out'"
 BAD="$TMP/bad.env"; printf "CODEX_PLAN_CMD='%s exec -m gpt-5.6-sol --sandbox read-only -c model_reasoning_effort=high'\n" "$STUB" > "$BAD"
@@ -24,5 +24,7 @@ check 'unsupported Codex reasoning is refused' "cd '$R' && ! AI_DEVOPS_MODELS_EN
 INJECT="$TMP/inject.env"; printf "CODEX_PLAN_CMD='%s exec -m gpt-5.6-sol --sandbox read-only -c model_reasoning_effort=medium; touch BAD'\n" "$STUB" > "$INJECT"
 check 'shell operators in config are refused' "cd '$R' && ! AI_DEVOPS_MODELS_ENV='$INJECT' '$SCRIPT' plan '$TMP/prompt' '$TMP/inject.out' && test ! -e '$R/BAD'"
 check 'advisory provider cannot satisfy gate' "cd '$R' && ! '$GATE' qwen diff-review >/dev/null 2>&1"
+check 'pipeline review refuses the implementing engine' "cd '$R' && ! AI_PIPELINE_REVIEW_PROVIDER=codex '$SCRIPT' plan-review '$TMP/prompt' '$TMP/codex.out'"
+check 'pipeline review refuses Claude' "cd '$R' && ! AI_PIPELINE_REVIEW_PROVIDER=claude '$SCRIPT' plan-review '$TMP/prompt' '$TMP/claude.out'"
 check 'unknown stage is rejected' "cd '$R' && ! '$SCRIPT' nope '$TMP/prompt' '$TMP/nope.out'"
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
