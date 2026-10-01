@@ -10,9 +10,11 @@
 # tool set, parse to our report shape. A door that deletes a packet or sandbox
 # is a rejected shape; see tests/test-ai-review-engine.sh purity checks.
 #
-# Structural forcing function: pool/preflight/allocator refuse a review that
+# Structural forcing function: pool/preflight refuse a review that
 # bypasses the runner. rlc_export_runner_token is the only writer of
-# AI_REVIEW_RUNNER_CORE; doors and pool refuse without it.
+# AI_REVIEW_RUNNER_CORE; doors and pool refuse without it. (No allocator
+# surface lives in this toolkit; the shared-db rotation is a separate
+# repository and enforces membership only.)
 
 # shellcheck shell=bash
 
@@ -88,7 +90,11 @@ rlc_init() {
   [ -f "$RLC_GATES_LIB" ] || rlc_die 'cannot find the task-gate library.'
   # shellcheck source=task-gates.sh
   . "$RLC_GATES_LIB"
-  RLC_DOORS_JSON="${AI_REVIEW_RUNNER_DOORS_JSON:-$RLC_ROOT/config/review-runner-doors.json}"
+  # The shipped registry is authoritative for runner-managed providers.
+  # AI_REVIEW_RUNNER_DOORS_JSON may extend the door set for tests but must
+  # never shrink it, so a foreign registry cannot unregister a migrated door.
+  RLC_SHIPPED_DOORS_JSON="$RLC_ROOT/config/review-runner-doors.json"
+  RLC_DOORS_JSON="${AI_REVIEW_RUNNER_DOORS_JSON:-$RLC_SHIPPED_DOORS_JSON}"
   export RLC_STAMP RLC_RUNNER_NAME RLC_VERSION
 }
 
@@ -151,9 +157,13 @@ rlc_require_runner_token() {
 }
 
 # Door registry. A provider listed here has a runner-native door and MUST be
-# dispatched through ai-review-engine. Anything else is a bypass.
+# dispatched through ai-review-engine. Anything else is a bypass. The shipped
+# registry decides: an env override may extend the set but never shrink it.
 rlc_runner_door_registered() { # PROVIDER -> 0 when registered
   local provider="$1"
+  if [ -f "$RLC_SHIPPED_DOORS_JSON" ] && jq -e --arg p "$provider" 'has($p)' "$RLC_SHIPPED_DOORS_JSON" >/dev/null 2>&1; then
+    return 0
+  fi
   [ -f "$RLC_DOORS_JSON" ] || return 1
   jq -e --arg p "$provider" 'has($p)' "$RLC_DOORS_JSON" >/dev/null 2>&1
 }
@@ -166,6 +176,20 @@ rlc_door_path() { # PROVIDER -> prints door script path
     [ -f "$door" ] || rlc_die "door override is not a file: $door"
     printf '%s' "$door"
     return 0
+  fi
+  # A provider the SHIPPED registry migrated keeps its shipped door: a foreign
+  # AI_REVIEW_RUNNER_DOORS_JSON must not retarget it, only extend the set.
+  if [ -f "$RLC_SHIPPED_DOORS_JSON" ] && jq -e --arg p "$provider" 'has($p)' "$RLC_SHIPPED_DOORS_JSON" >/dev/null 2>&1; then
+    door="$(jq -r --arg p "$provider" '.[$p].door // empty' "$RLC_SHIPPED_DOORS_JSON" 2>/dev/null || true)"
+    if [ -n "$door" ] && [ "$door" != null ]; then
+      case "$door" in
+        /*|[A-Za-z]:*) ;;
+        *) door="$RLC_ROOT/$door" ;;
+      esac
+      [ -f "$door" ] || rlc_die "registered door is missing: $door"
+      printf '%s' "$door"
+      return 0
+    fi
   fi
   if [ -f "$RLC_DOORS_JSON" ]; then
     door="$(jq -r --arg p "$provider" '.[$p].door // empty' "$RLC_DOORS_JSON" 2>/dev/null || true)"

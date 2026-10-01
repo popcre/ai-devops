@@ -68,11 +68,14 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 fi
 # models.env may carry provider endpoints as shell assignments. It is sourced
 # only AFTER the invocation is recorded, and it can never retarget a
-# review-critical binary: AI_POOL_RUNNER_* and AI_REVIEW_SANDBOX_BIN
-# substitutions are TEST HOOKS and require an explicit AI_POOL_TEST_HOOKS=1,
-# which the offline suites set. Everything else review-critical was pinned
-# above, before this file is sourced.
-for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_SANDBOX_BIN; do
+# review-critical binary: AI_POOL_RUNNER_*, AI_REVIEW_ENGINE_BIN and
+# AI_REVIEW_SANDBOX_BIN substitutions are TEST HOOKS and require an explicit
+# AI_POOL_TEST_HOOKS=1, which the offline suites set. Everything else
+# review-critical was pinned above, before this file is sourced. An ungated
+# AI_REVIEW_ENGINE_BIN is refused here, before ENGINE is resolved, so a
+# wrapper cannot point the runner at a look-alike that skips every governance
+# step while still satisfying the door's token check.
+for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN; do
   if [ -n "${!_hook_var:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
     die "$_hook_var is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute a review binary."
   fi
@@ -86,9 +89,19 @@ unset _hook_var
 # doors may skip is a rejected shape. This is the admission gate that ends the
 # copy-paste governance path for migrated doors.
 # ---------------------------------------------------------------------------
+# AI_REVIEW_ENGINE_BIN was gated above: without AI_POOL_TEST_HOOKS=1 the
+# override is refused, and ENGINE is the pinned runner in this tree.
 ENGINE="${AI_REVIEW_ENGINE_BIN:-$ROOT/ai-review-engine}"
-DOORS_JSON="${AI_REVIEW_RUNNER_DOORS_JSON:-$ROOT/../config/review-runner-doors.json}"
+# The SHIPPED registry is authoritative for which providers are
+# runner-managed. AI_REVIEW_RUNNER_DOORS_JSON may extend that set for tests,
+# but it can never shrink it: unregistering a migrated door (grok) must not
+# drop the structural gate and fall through to the legacy session-runner path.
+SHIPPED_DOORS_JSON="$ROOT/../config/review-runner-doors.json"
+DOORS_JSON="${AI_REVIEW_RUNNER_DOORS_JSON:-$SHIPPED_DOORS_JSON}"
 _runner_door_registered() {
+  if [ -f "$SHIPPED_DOORS_JSON" ] && jq -e --arg p "$1" 'has($p)' "$SHIPPED_DOORS_JSON" >/dev/null 2>&1; then
+    return 0
+  fi
   [ -f "$DOORS_JSON" ] && jq -e --arg p "$1" 'has($p)' "$DOORS_JSON" >/dev/null 2>&1
 }
 if _runner_door_registered "$provider"; then

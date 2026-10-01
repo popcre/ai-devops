@@ -644,12 +644,62 @@ emit_status() {
 ' "$row"; return "$rc"
 }
 
+# ---------------------------------------------------------------------------
+# Structural forcing function (plan_reviewer-pipeline-core §9 Phase D).
+# A provider whose door is registered in config/review-runner-doors.json MUST
+# be dispatched through the shared review runner (bin/ai-review-engine).
+# Preflight refuses to authorize a review that would bypass the runner: an
+# ungated AI_REVIEW_ENGINE_BIN override, or a runner-doors provider whose
+# engine or door is missing at runtime, never reaches a PASS row. The shipped
+# registry is authoritative, so a foreign AI_REVIEW_RUNNER_DOORS_JSON cannot
+# unregister a migrated door here either.
+# ---------------------------------------------------------------------------
+SHIPPED_DOORS_JSON="$REGISTRY_REAL_DIR/../config/review-runner-doors.json"
+runner_door_registered() { # PROVIDER -> 0 when the shipped registry lists it
+  [ -f "$SHIPPED_DOORS_JSON" ] && jq -e --arg p "$1" 'has($p)' "$SHIPPED_DOORS_JSON" >/dev/null 2>&1
+}
+
+refuse_runner_bypass() { # PROVIDER -> 0 to authorize; nonzero to refuse
+  local provider="$1" engine door effective
+  runner_door_registered "$provider" || return 0
+  engine="$REGISTRY_REAL_DIR/ai-review-engine"
+  if [ -n "${AI_REVIEW_ENGINE_BIN:-}" ]; then
+    if [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
+      note "ai-review-preflight: AI_REVIEW_ENGINE_BIN is a test hook (AI_POOL_TEST_HOOKS=1); refusing an ungated engine override for $provider."
+      return 1
+    fi
+    engine="$AI_REVIEW_ENGINE_BIN"
+  fi
+  if [ ! -f "$engine" ] && [ ! -x "$engine" ]; then
+    note "ai-review-preflight: $provider is a runner-doors provider but the shared review runner is missing ($engine); refusing to authorize a review that would bypass it."
+    return 1
+  fi
+  effective="${AI_REVIEW_RUNNER_DOORS_JSON:-$SHIPPED_DOORS_JSON}"
+  door="$(jq -r --arg p "$provider" '.[$p].door // empty' "$SHIPPED_DOORS_JSON" 2>/dev/null || true)"
+  if [ -z "$door" ] || [ "$door" = null ]; then
+    door="$(jq -r --arg p "$provider" '.[$p].door // empty' "$effective" 2>/dev/null || true)"
+  fi
+  case "$door" in
+    ''|null) ;;
+    /*|[A-Za-z]:*) ;;
+    *) door="$REGISTRY_REAL_DIR/../$door" ;;
+  esac
+  if [ -z "$door" ] || [ "$door" = null ] || [ ! -f "$door" ]; then
+    note "ai-review-preflight: $provider is a runner-doors provider but its door is missing at runtime; refusing to authorize a review that would bypass the runner."
+    return 1
+  fi
+  return 0
+}
+
 check_provider() { # PROVIDER REPO LIVE BASE
   local provider="$1" repo="$2" live="$3" base="$4" wrapper sandbox packet tag out rc class
   valid_provider "$provider" || die "unknown provider '$provider'."
   [ -d "$repo" ] || die "review directory does not exist: $repo"
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   need jq; need git; need timeout
+  # Structural refusal before any health work: a runner-doors provider whose
+  # review would bypass bin/ai-review-engine is never authorized here.
+  refuse_runner_bypass "$provider" || return 1
   # Always name the exact resolved wrapper so nobody reports a guessed name.
   wrapper="$(provider_wrapper "$provider")"
   printf 'ai-review-preflight: %s wrapper command: %s (%s)

@@ -10,7 +10,7 @@
 # cleanup-after-store) lives in tools/lib/review-lifecycle-core.sh. Doors
 # supply provider bits only and are invoked with the runner token.
 #
-# Structural forcing function: pool/preflight/allocator refuse a review that
+# Structural forcing function: pool/preflight refuse a review that
 # bypasses this runner. Do not call a door directly.
 set -euo pipefail
 

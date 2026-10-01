@@ -5,9 +5,12 @@
 # No network, no xAI/DeepSeek calls, no cost.
 #
 # The tests that matter most and must never be weakened:
-#   - pool_refuses_bypass_for_runner_doors / door_refuses_without_runner_token :
+#   - pool_refuses_bypass_for_runner_doors / door_refuses_without_runner_token /
+#     pool_refuses_ungated_engine_bin_override /
+#     pool_keeps_runner_door_when_registry_unregisters_grok /
+#     preflight_refuses_bypass_for_runner_doors :
 #     the structural forcing function. A library the doors may skip is a
-#     rejected shape; pool/preflight/allocator must REFUSE a bypassed review.
+#     rejected shape; pool/preflight must REFUSE a bypassed review.
 #   - adapter_source_has_no_packet_remove_or_sandbox_delete : door purity.
 #   - review_contract_leaves_packet_and_report : one end-to-end door run
 #     through the runner leaves packet + report.
@@ -129,6 +132,81 @@ POOL_MUSE_RC=$?
 set -e
 # The stub exits 99; the pool must have LAUNCHED it (not refused as bypass).
 check "pool_still_dispatches_unregistered_doors" "grep -q 'must never be used' '$TMP/pool-muse.err' || test '$POOL_MUSE_RC' -eq 99"
+
+# --- structural forcing function: AI_REVIEW_ENGINE_BIN is a gated test hook --
+echo '== structural forcing function (engine bin gate)'
+FAKE_ENGINE="$TMP/fake-engine.sh"
+cat > "$FAKE_ENGINE" <<EOF
+#!/usr/bin/env bash
+printf 'invoked: %s\n' "\$*" >> "$TMP/engine-invoked.log"
+exit 99
+EOF
+chmod +x "$FAKE_ENGINE"
+
+# Without AI_POOL_TEST_HOOKS=1 an injected engine bin is refused and never
+# invoked: it would otherwise export the runner token and skip every
+# governance step while still satisfying the door.
+rm -f "$TMP/engine-invoked.log"
+set +e
+( cd "$PREPO" && AI_REVIEW_ENGINE_BIN="$FAKE_ENGINE" \
+    AI_POOL_CALLER=codex bash "$POOL" grok diff-review ) >"$TMP/pool-eng.out" 2>"$TMP/pool-eng.err"
+POOL_ENG_RC=$?
+set -e
+check "pool_refuses_ungated_engine_bin_override" \
+  "test '$POOL_ENG_RC' -ne 0 && grep -q 'AI_REVIEW_ENGINE_BIN' '$TMP/pool-eng.err' && test ! -f '$TMP/engine-invoked.log'"
+
+# --- structural forcing function: the shipped door set cannot be shrunk ------
+echo '== structural forcing function (doors registry cannot shrink)'
+SHRUNK_DOORS="$TMP/doors-no-grok.json"
+printf '{\n  "schema_version": 1,\n  "_comment": "grok deliberately unregistered"\n}\n' > "$SHRUNK_DOORS"
+rm -f "$TMP/engine-invoked.log"
+set +e
+( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_ENGINE_BIN="$FAKE_ENGINE" \
+    AI_REVIEW_RUNNER_DOORS_JSON="$SHRUNK_DOORS" \
+    AI_POOL_CALLER=codex bash "$POOL" grok diff-review ) >"$TMP/pool-shrunk.out" 2>"$TMP/pool-shrunk.err"
+POOL_SHRUNK_RC=$?
+set -e
+# Unregistering grok via the env JSON must NOT fall through to the legacy
+# session-runner path: the shipped registry still owns the door set, so the
+# review is dispatched through the engine (the gated fake records its argv).
+check "pool_keeps_runner_door_when_registry_unregisters_grok" \
+  "grep -q 'invoked: review --provider grok' '$TMP/engine-invoked.log'"
+check "pool_shrunk_registry_never_reaches_legacy_runner" \
+  "test '$POOL_SHRUNK_RC' -eq 99"
+
+# A missing doors file is the same class: it must not unregister the door.
+rm -f "$TMP/engine-invoked.log"
+set +e
+( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_ENGINE_BIN="$FAKE_ENGINE" \
+    AI_REVIEW_RUNNER_DOORS_JSON="$TMP/doors-missing.json" \
+    AI_POOL_CALLER=codex bash "$POOL" grok diff-review ) >"$TMP/pool-missing.out" 2>"$TMP/pool-missing.err"
+POOL_MISSING_RC=$?
+set -e
+check "pool_keeps_runner_door_when_registry_file_is_missing" \
+  "grep -q 'invoked: review --provider grok' '$TMP/engine-invoked.log' && test '$POOL_MISSING_RC' -eq 99"
+
+# --- structural forcing function: preflight refuses the same bypass ----------
+echo '== structural forcing function (preflight)'
+PREFLIGHT_BIN="$REPO_ROOT/bin/ai-review-preflight"
+rm -f "$TMP/engine-invoked.log"
+set +e
+( cd "$PREPO" && AI_REVIEW_QUARANTINE_DIR="$TMP/pf-state" \
+    AI_REVIEW_ENGINE_BIN="$FAKE_ENGINE" \
+    AI_POOL_CALLER=codex bash "$PREFLIGHT_BIN" check grok "$PREPO" ) >"$TMP/pf-bypass.out" 2>"$TMP/pf-bypass.err"
+PF_BYPASS_RC=$?
+set -e
+check "preflight_refuses_bypass_for_runner_doors" \
+  "test '$PF_BYPASS_RC' -ne 0 && grep -qi 'refus' '$TMP/pf-bypass.err' && test ! -f '$TMP/engine-invoked.log'"
+# A shrunk registry must not switch the refusal off either.
+rm -f "$TMP/engine-invoked.log"
+set +e
+( cd "$PREPO" && AI_REVIEW_QUARANTINE_DIR="$TMP/pf-state" \
+    AI_REVIEW_ENGINE_BIN="$FAKE_ENGINE" AI_REVIEW_RUNNER_DOORS_JSON="$SHRUNK_DOORS" \
+    AI_POOL_CALLER=codex bash "$PREFLIGHT_BIN" check grok "$PREPO" ) >"$TMP/pf-shrunk.out" 2>"$TMP/pf-shrunk.err"
+PF_SHRUNK_RC=$?
+set -e
+check "preflight_refuses_bypass_even_when_registry_unregisters_grok" \
+  "test '$PF_SHRUNK_RC' -ne 0 && grep -qi 'refus' '$TMP/pf-shrunk.err' && test ! -f '$TMP/engine-invoked.log'"
 
 # --- door adapter purity ----------------------------------------------------
 echo '== adapter purity'
