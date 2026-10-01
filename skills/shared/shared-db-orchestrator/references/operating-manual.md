@@ -212,13 +212,14 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
   --issue <issue> --pr <pr> --head-sha <exact-head>
 ```
 
-The GitHub-backed cursor rotates the five active reviewers -- Muse Spark 1.3
-Contributor, Grok 4.6, Qwen 3.8 Max, Gemini 3.8 Flash, and DeepSeek V4.1 Flash
+The GitHub-backed cursor rotates the six active reviewers -- Grok 4.6, GLM 5.3
+(restored 2026-09-30), Muse Spark 1.3 Contributor, Qwen 3.8 Max, Gemini 3.8
+Flash, and DeepSeek V4.1 Flash
 (re-entered 2026-09-23 with read-only repository tools) -- then repeats across
-machines and restarts. GLM 5.3, Kimi K3, the old text-only `deepseek-chat`, and Codex are out of rotation
+machines and restarts. Kimi K3, the old text-only `deepseek-chat`, and Codex are out of rotation
 (owner instruction; `RETIRED_REVIEWERS` in the allocator and `absent` in
 `config/reviewer-registry.json`): never route a review to them and never wait
-for one of them.
+for one of them. GLM never reviews GLM-orchestrated (ZCode) work.
 Gemini is eligible only where `ai-review-preflight usable gemini` exits zero;
 otherwise the selector skips it. `usable` is the only command that reconciles
 install health, quarantine, live qualification, and reviewer-registry
@@ -265,8 +266,8 @@ Never spend an overflow review on work you expect to argue about. Overflow exist
 only for the case where every rotation provider has genuinely refused, not to
 review contentious work.
 
-**The retired `glm-5.2` and `glm-5.3` labels receive no new work** until an explicit owner
-instruction restores it. Qwen 3.8 Max is no longer retired (owner instruction,
+**The retired `glm-5.2` label receives no new work.** `glm-5.3` is active again
+(owner instruction 2026-09-30). Qwen 3.8 Max is no longer retired (owner instruction,
 2026-09-04); it is gated only by its own preflight qualification. Historical
 assignments, failures, and replacement evidence stay readable and must be
 recovered through `scripts/manage-migration-author-lanes.mjs`, never
