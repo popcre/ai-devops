@@ -1,10 +1,12 @@
 'use strict';
 // Gives idle qualified self-hosted Windows hosts (EDGE-RUNN-ENVY and any other
 // host labelled ai-devops-windows-qualified) ordinary verify.yml Windows
-// sections as extra capacity. Every other section stays on Blacksmith, the
-// owner's 2026-09-23 lane for all verify jobs. run() never throws: any lookup
-// error keeps the all-Blacksmith plan, so routing can only add capacity and
-// never sends work back to the GitHub-hosted queue.
+// sections as extra capacity. Every other section stays on the default Windows
+// lane (WarpBuild Azure BYOC since 2026-10-01; the config key name
+// blacksmith_windows is kept for compatibility). The matrix lane identifier
+// 'blacksmith' is likewise kept so check names remain stable. run() never
+// throws: any lookup error keeps the all-default plan, so routing can only add
+// capacity and never sends work back to the GitHub-hosted queue.
 
 function range(n) { return Array.from({ length: n }, (_, i) => i + 1); }
 

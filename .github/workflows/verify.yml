@@ -270,7 +270,7 @@ jobs:
       # The router's plan; the literal fallback is the all-Blacksmith plan used
       # when the router produced nothing.
       matrix:
-        include: ${{ fromJSON(needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":7,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":8,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
+        include: ${{ fromJSON(needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"warp-custom-warpbuild-win2022-canary"}, {"section":2,"lane":"blacksmith","runs_on":"warp-custom-warpbuild-win2022-canary"}, {"section":3,"lane":"blacksmith","runs_on":"warp-custom-warpbuild-win2022-canary"}, {"section":4,"lane":"blacksmith","runs_on":"warp-custom-warpbuild-win2022-canary"}, {"section":5,"lane":"blacksmith","runs_on":"warp-custom-warpbuild-win2022-canary"}, {"section":6,"lane":"blacksmith","runs_on":"warp-custom-warpbuild-win2022-canary"}, {"section":7,"lane":"blacksmith","runs_on":"warp-custom-warpbuild-win2022-canary"}, {"section":8,"lane":"blacksmith","runs_on":"warp-custom-warpbuild-win2022-canary"}]') }}
     runs-on: ${{ matrix.runs_on }}
     # Eight sections since 2026-09-29 (#185): section 1 reached this 40-minute
     # ceiling on EDGE-RUNN-ENVY (37-55 minutes), so test-ai-deepseek-agent.sh
@@ -329,16 +329,11 @@ jobs:
        needs.fast-classifier.outputs.run_long != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    # GitHub-hosted, on purpose. Self-hosted capacity was added to this
-    # repository to have MORE Windows capacity, not to move off GitHub's
-    # runners: hosted concurrency is unmetered on a public repository, so this
-    # long matrix never waits for a machine. It ran on windows-2025 from
-    # 2026-04 until 2026-08-29 without a runner-caused failure. Routing it to
-    # the single-host self-hosted pool on 2026-09-02 serialised the whole
-    # repository behind one desktop and left fourteen verify runs queued at
-    # once. The self-hosted lane keeps windows-reviewer-safety below, where a
-    # timing flake can be reproduced on a known physical machine.
-    runs-on: blacksmith-4vcpu-windows-2025
+    # WarpBuild Azure BYOC (win-2022, popcre-ci-use1) since 2026-10-01: one
+    # ephemeral VM per job, deleted after. Moved off Blacksmith windows-2025
+    # to cut CI cost. The self-hosted lane keeps windows-reviewer-safety below,
+    # where a timing flake can be reproduced on a known physical machine.
+    runs-on: warp-custom-warpbuild-win2022-canary
     # Run 34856869730 reached the existing 105-minute bound in Bash suite
     # 19/74, before PowerShell started. Partition the complete dynamic inventory
     # across independent hosts instead of extending that bound or dropping tests.
@@ -638,7 +633,7 @@ jobs:
        needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
        needs['reviewer-safety-start-deadline'].outputs.fallback_codex == 'true')
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: warp-custom-warpbuild-win2022-canary
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -660,7 +655,7 @@ jobs:
        needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
        needs['reviewer-safety-start-deadline'].outputs.fallback_grok == 'true')
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: warp-custom-warpbuild-win2022-canary
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
