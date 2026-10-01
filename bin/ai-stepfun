@@ -91,16 +91,27 @@ detect_engine(){
   else ENGINE=""; fi
 }
 require_engine(){
-  # Ubuntu/Linux only (owner instruction 2026-09-25; docs/reviewer-rotation-rules.md
-  # rule 11): every turn must run under bubblewrap, which Windows lacks (#1086).
-  if [ "$IS_LINUX" != 1 ]; then
-    printf 'ai-stepfun: unsupported-platform: StepFun runs only on Ubuntu/Linux, where every turn is sandboxed by bubblewrap.\n' >&2; exit 2
+  # Linux: every turn must run under bubblewrap (rule 11, #1086).
+  # Windows (owner 2026-09-30 "folder + test shell"): OpenCode only, gated
+  # shell + disposable folder. Not rule-11 equivalent. StepCode stays Linux-only.
+  if [ "$IS_LINUX" = 1 ]; then
+    detect_engine
+    case "$ENGINE" in
+      stepcode|opencode) return 0 ;;
+      *) printf 'ai-stepfun: unsupported-platform: no StepCode CLI and no OpenCode install. Install StepCode, or the OpenCode harness with bin/setup-opencode-glm.sh.\n' >&2; exit 2 ;;
+    esac
   fi
-  detect_engine
-  case "$ENGINE" in
-    stepcode|opencode) return 0 ;;
-    *) printf 'ai-stepfun: unsupported-platform: no StepCode CLI and no OpenCode install. Install StepCode, or the OpenCode harness with bin/setup-opencode-glm.sh.\n' >&2; exit 2 ;;
-  esac
+  if [ "$IS_WINDOWS" = 1 ]; then
+    ENGINE=opencode
+    [ -x "$OC_BIN" ] || command -v opencode >/dev/null 2>&1 || {
+      printf 'ai-stepfun: unsupported-platform: no OpenCode install. Run bin/setup-opencode-glm.ps1 first.\n' >&2; exit 2
+    }
+    command -v jq >/dev/null 2>&1 || {
+      printf 'ai-stepfun: unsupported-platform: jq is required for the Windows shell gate allowlist.\n' >&2; exit 2
+    }
+    return 0
+  fi
+  printf 'ai-stepfun: unsupported-platform: StepFun runs on Ubuntu/Linux (bubblewrap) or Windows (folder + test shell).\n' >&2; exit 2
 }
 
 # `step` is a generic name (Smallstep's CLI uses it too), so prefer StepCode's
@@ -126,10 +137,10 @@ version_ge(){ [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]; 
 
 key_store_ok(){
   [ -f "$KEY_STORE" ] && [ ! -L "$KEY_STORE" ] && [ -s "$KEY_STORE" ] || return 1
-  # stat -c %a is meaningless on NTFS (returns a synthesised mode). On Windows
-  # accept a present, non-empty, non-link file; the path is under the user
-  # profile and store-key writes it with chmod 600 where the filesystem honors it.
-  # StepFun is Ubuntu/Linux-only (owner instruction 2026-09-25): no Windows key store is trusted.
+  # stat -c %a is meaningless on NTFS (returns a synthesised mode). Windows
+  # accepts a present, non-empty, non-link file (owner 2026-09-30 folder +
+  # test shell); Linux keeps the mode-600 rule.
+  if [ "$IS_WINDOWS" = 1 ]; then return 0; fi
   [ "$IS_LINUX" = 1 ] || return 1
   [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ]
 }
@@ -225,6 +236,71 @@ run_opencode_turn(){
   load_key
   log="$out.jsonl"
   set +e
+  # Windows (owner 2026-09-30 "folder + test shell"): no bubblewrap. Folder
+  # confinement + gated shell. Not rule-11 equivalent. File tools stay off via
+  # the Windows agent profile (tools: map is the only enforcement on pin 1.18.12).
+  if [ "$IS_WINDOWS" = 1 ]; then
+    local gate home_dir win_home timeout_win
+    gate="$REAL_DIR/ai-stepfun-windows-shell"
+    [ -x "$gate" ] || die "Windows shell gate is missing: $gate"
+    # Resolve real profile home before redirect (ai-deepseek HOME_DIR pattern).
+    home_dir="${HOME:-${USERPROFILE:-}}"
+    [ -n "$home_dir" ] || die 'cannot resolve the Windows user profile'
+    win_home="$(mktemp -d "$STATE_DIR/oc-home.XXXXXX")"; chmod 700 "$win_home"
+    mkdir -p "$win_home/appdata" "$win_home/localappdata" "$win_home/tmp"
+    install_oc_profile "$xdg"
+    # Prefer the Windows agent profiles when present (per-OS tools map).
+    if [ -f "$OC_PROFILE_SRC/agent/stepfun-review-windows.md" ]; then
+      cp "$OC_PROFILE_SRC/agent/stepfun-review-windows.md" "$xdg/agent/$OC_AGENT_REVIEW.md"
+    fi
+    if [ -f "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" ]; then
+      cp "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" "$xdg/agent/$OC_AGENT_IMPLEMENT.md"
+    fi
+    load_key
+    log="$out.jsonl"
+    # Closed gate PATH (not host PATH): Git usr/bin + cmd + PowerShell v1.0.
+    local git_root gate_path
+    git_root="$(cd / && printf '%s' /c/Program\ Files/Git 2>/dev/null || true)"
+    [ -d "/c/Program Files/Git/usr/bin" ] || die 'Git for Windows is required (usr/bin)'
+    gate_path="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0"
+    timeout_win="/c/Program Files/Git/usr/bin/timeout"
+    [ -x "$timeout_win" ] || timeout_win="$(command -v timeout || true)"
+    ( for name in $(compgen -e); do
+        case "$name" in
+          PATH|SYSTEMROOT|LANG|LC_ALL|TERM|SSL_CERT_FILE|SSL_CERT_DIR|PSModuleAnalysisCachePath|AI_STEPFUN_*) ;;
+          *) unset "$name" 2>/dev/null || true ;;
+        esac
+      done
+      export HOME="$win_home" USERPROFILE="$win_home" \
+        APPDATA="$win_home/appdata" LOCALAPPDATA="$win_home/localappdata" \
+        TEMP="$win_home/tmp" TMP="$win_home/tmp" TMPDIR="$win_home/tmp" \
+        HOMEDRIVE="${HOMEDRIVE:-C:}" HOMEPATH="$win_home" \
+        PATH="$gate_path" \
+        STEPFUN_API_KEY="$STEP_KEY" \
+        AI_STEPFUN_REVIEW_DIR="$dir" \
+        GATE_PATH="$gate_path" \
+        XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
+        XDG_STATE_HOME="$xdg/state" XDG_CACHE_HOME="$xdg/cache"
+      # Force bash tool through the gate via a PATH shim.
+      mkdir -p "$win_home/shim"
+      printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$gate" > "$win_home/shim/bash"
+      chmod +x "$win_home/shim/bash"
+      export PATH="$win_home/shim:$gate_path"
+      printf '%s' "$prompt" | "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
+        --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$dir" \
+        > "$log" 2>"$out.stderr"
+    )
+    rc=$?
+    set -e
+    rm -rf "$xdg" "$win_home"
+    STEP_KEY=""
+    if [ -s "$log" ]; then
+      jq -r 'select(.type=="text") | .part.text' "$log" 2>/dev/null > "$out" || true
+    fi
+    [ -s "$out" ] || [ "$rc" -eq 0 ] || { [ -f "$out" ] || : > "$out"; }
+    if [ ! -s "$out" ] && [ -s "$log" ]; then cat "$log" > "$out"; fi
+    return "$rc"
+  fi
   # Linux: the shell-enabled agent runs under bubblewrap exactly like StepCode:
   # read-only system trees, an empty home, /tmp and /run, a cleared
   # environment, and only the OpenCode install, its per-run state and the
@@ -524,6 +600,10 @@ cmd_implement(){
   esac; done
   [ -n "$prompt" ] || die 'implement needs --prompt or --prompt-file.'
   require_engine
+  if [ "${IS_WINDOWS:-0}" = 1 ]; then
+    printf 'ai-stepfun: unsupported-platform: implement is not supported on Windows (folder + test shell). Use review/ask.\n' >&2
+    exit 2
+  fi
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   base="$(git -C "$repo" rev-parse --verify "$ref^{commit}")" || die "ref does not resolve: $ref"
   load_key
