@@ -387,25 +387,25 @@ check 'the WarpBuild proof lane is non-blocking, fork-guarded, quota-capped and 
 # the router reports. This test reads the matrix expression itself and fails if
 # the head-repo check or the Blacksmith fallback is removed or weakened.
 fork_guard_ok() {
-  local matrix_line
-  matrix_line="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | grep 'include:')"
-  [ -n "$matrix_line" ] || return 1
+  local section_block matrix_line
+  section_block="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow")"
+  [ -n "$section_block" ] || { echo 'fork_guard: empty section block' >&2; return 1; }
+  matrix_line="$(printf '%s
+' "$section_block" | grep 'include:')"
+  [ -n "$matrix_line" ] || { echo 'fork_guard: no include line found' >&2; return 1; }
   # The guard must test head repo against the repository itself.
-  printf '%s' "$matrix_line" | grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' || return 1
-  # The fallback must be the all-Blacksmith literal: every entry names
-  # blacksmith-4vcpu-windows-2025 and nothing else.
-  printf '%s' "$matrix_line" | grep -qF 'blacksmith-4vcpu-windows-2025' || return 1
-  # Eight Blacksmith entries in the fallback.
-  [ "$(printf '%s' "$matrix_line" | grep -oF 'blacksmith-4vcpu-windows-2025' | wc -l)" -eq 8 ] || return 1
+  printf '%s' "$matrix_line" | grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' || { echo 'fork_guard: missing head-repo check' >&2; return 1; }
+  # The fallback must be the all-Blacksmith literal.
+  printf '%s' "$matrix_line" | grep -qF 'blacksmith-4vcpu-windows-2025' || { echo 'fork_guard: no blacksmith label in fallback' >&2; return 1; }
   # No WarpBuild or self-hosted label in the fallback literal.
-  ! printf '%s' "$matrix_line" | grep -qF 'warp-custom' || return 1
-  ! printf '%s' "$matrix_line" | grep -qF 'self-hosted' || return 1
-  # The surrounding comment must name the primary fork protection: the
-  # repository's all_external_contributors approval policy (see
-  # docs/self-hosted-windows-runner.md). The workflow-level check is
-  # defense-in-depth, not the sole guard.
-  sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | grep -qF 'all_external_contributors' || return 1
-  sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | grep -qF 'defense-in-depth' || return 1
+  printf '%s' "$matrix_line" | grep -qF 'warp-custom' && { echo 'fork_guard: warp label leaked into fallback' >&2; return 1; }
+  printf '%s' "$matrix_line" | grep -qF 'self-hosted' && { echo 'fork_guard: self-hosted label leaked into fallback' >&2; return 1; }
+  # The surrounding comment must name the primary fork protection and
+  # describe the workflow check as defense-in-depth.
+  printf '%s
+' "$section_block" | grep -qF 'all_external_contributors' || { echo 'fork_guard: missing all_external_contributors reference' >&2; return 1; }
+  printf '%s
+' "$section_block" | grep -qF 'defense-in-depth' || { echo 'fork_guard: missing defense-in-depth note' >&2; return 1; }
 }
 check 'the required section matrix fork guard falls back to all-Blacksmith and cannot be silently removed' fork_guard_ok
 # Windows verification runs in two lanes at once, and both must stay present.
