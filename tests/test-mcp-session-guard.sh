@@ -71,7 +71,7 @@ const ready = setInterval(() => {
   if (fs.existsSync(pidfile) && fs.statSync(pidfile).size > 0) {
     clearInterval(ready)
     process.stdout.write('READY\n')
-    if (mode === 'eof') setTimeout(() => child.stdin.end(), 300)
+    if (mode === 'eof') setTimeout(() => child.stdin.end(), 1500)
   }
 }, 50)
 child.on('exit', (code) => process.exit(code ?? 0))
@@ -84,8 +84,10 @@ alive() {
 }
 
 wait_ready() {
+  # 30s budget: GitHub-hosted Windows can spend several seconds just starting
+  # node.exe (Defender / cold PATH). 5s made "helper did not start" a flake.
   local f="$1" i
-  for i in $(seq 1 50); do
+  for i in $(seq 1 300); do
     [ -s "$f" ] && return 0
     sleep 0.1
   done
@@ -117,7 +119,7 @@ wait_ready "$TMP/pid1" || fail "helper did not start (stdin-eof case): $(cat "$T
 HELPER_PID="$(cat "$TMP/pid1")"
 KID_PID="$(cat "$TMP/pid1.kid" 2>/dev/null || true)"
 alive "$HELPER_PID" || fail "helper not alive before stdin close"
-sleep 1
+sleep 2
 alive "$HELPER_PID" && fail "helper still alive after stdin EOF (pid $HELPER_PID)"
 [ -n "$KID_PID" ] && alive "$KID_PID" && fail "grandchild still alive after stdin EOF (pid $KID_PID)"
 wait "$SESSION" 2>/dev/null || true
