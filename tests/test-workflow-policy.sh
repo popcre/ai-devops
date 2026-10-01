@@ -123,10 +123,10 @@ check 'capacity labels land on scheduled incidents (timeout/kill/rate-limit = ca
 check 'managed bin commands use the shared GitHub admission path' \
   "python3 '$ROOT/tools/ci/check-managed-github-transport.py' '$ROOT' >/dev/null"
 # Windows verification runs in two lanes at once (issue #209): the long offline
-# matrix on GitHub's hosted image, where concurrency is unmetered, and the
-# reviewer safety suites on the qualified self-hosted pool, where a timing
-# flake can be reproduced on a known physical machine. Neither lane may route
-# to the daily-use EDGE-DEV computer or a bare candidate host.
+# matrix on Blacksmith, and the reviewer safety suites on the qualified
+# self-hosted pool, where a timing flake can be reproduced on a known physical
+# machine. Neither lane may route to the daily-use EDGE-DEV computer or a bare
+# candidate host.
 # `ai-devops-windows` is the qualification-only label: a host carrying it has
 # been registered, not proven.
 check 'reviewer Windows job prefers the qualified pool (ENVY)' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 1 ]"
@@ -382,15 +382,35 @@ proof_ok() {
   ! grep -qF 'warp-custom-warpbuild-win2022-canary' <(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow") || return 1
 }
 check 'the WarpBuild proof lane is non-blocking, fork-guarded, quota-capped and outside the required aggregate' proof_ok
+# The fork-isolation guard on the required section matrix is security-critical:
+# a foreign head must always get the all-Blacksmith literal regardless of what
+# the router reports. This test reads the matrix expression itself and fails if
+# the head-repo check or the Blacksmith fallback is removed or weakened.
+fork_guard_ok() {
+  local matrix_line
+  matrix_line="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | grep 'include:')"
+  [ -n "$matrix_line" ] || return 1
+  # The guard must test head repo against the repository itself.
+  printf '%s' "$matrix_line" | grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' || return 1
+  # The fallback must be the all-Blacksmith literal: every entry names
+  # blacksmith-4vcpu-windows-2025 and nothing else.
+  printf '%s' "$matrix_line" | grep -qF 'blacksmith-4vcpu-windows-2025' || return 1
+  # Eight Blacksmith entries in the fallback.
+  [ "$(printf '%s' "$matrix_line" | grep -oF 'blacksmith-4vcpu-windows-2025' | wc -l)" -eq 8 ] || return 1
+  # No WarpBuild or self-hosted label in the fallback literal.
+  ! printf '%s' "$matrix_line" | grep -qF 'warp-custom' || return 1
+  ! printf '%s' "$matrix_line" | grep -qF 'self-hosted' || return 1
+}
+check 'the required section matrix fork guard falls back to all-Blacksmith and cannot be silently removed' fork_guard_ok
 # Windows verification runs in two lanes at once, and both must stay present.
 # The self-hosted pool was added to this repository to have MORE Windows
-# capacity than GitHub's runners alone, not to replace them: routing every
+# capacity than Blacksmith alone, not to replace it: routing every
 # Windows job to a one-host pool serialised the whole repository on
-# 2026-09-02. So the long offline matrix keeps the GitHub-hosted lane, where
-# concurrency is unmetered on a public repository and a run never waits for a
-# machine, and the reviewer safety suites - the source of every timing flake
-# worth investigating - keep the qualified self-hosted lane, where a failure
-# can be reproduced on a known physical machine.
+# 2026-09-02. So the long offline matrix stays on Blacksmith (owner 2026-10-01:
+# KEEP Blacksmith in the pool until WarpBuild is fully up) and the reviewer
+# safety suites - the source of every timing flake worth investigating - keep
+# the qualified self-hosted lane, where a failure can be reproduced on a known
+# physical machine.
 #
 # EDGE-DEV and bare candidate hosts stay banned from `runs-on` either way.
 # `ai-devops-windows` is the qualification-only label: a host carrying it has
