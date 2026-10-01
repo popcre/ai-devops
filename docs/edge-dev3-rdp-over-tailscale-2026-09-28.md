@@ -282,3 +282,6 @@ RDP would need `xrdp` instead. xrdp gives a **separate** desktop, not the physic
 desktop, and it once took over port 4837 (see above). So the choice is: keep Wayland
 (RDP shows the real desktop, ScreenConnect stays black; recommended), or switch to X11
 (ScreenConnect works, RDP becomes a separate xrdp desktop). Nothing has been installed.
+
+**Owner decision (2026-10-01, Albert, verbatim):** "keep wayland, leave screenconnect black".
+Closed: do not switch edge-dev3 to X11 or install xrdp for ScreenConnect. Use RDP (KRDP) for remote access.
