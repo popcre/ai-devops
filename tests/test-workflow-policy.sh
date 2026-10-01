@@ -31,7 +31,7 @@ windows_timeout="$(sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p
 reviewer_timeout="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 fallback_timeout="$(sed -n '/^  windows-reviewer-fallback-codex:/,/^  windows-reviewer-fallback-grok:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 fallback_grok_timeout="$(sed -n '/^  windows-reviewer-fallback-grok:/,/^  windows-reviewer-safety:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
-section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
+section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 check 'complete Windows sections retain the existing timeout bound' '[ "$windows_timeout" = 105 ]'
 check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 30 ]'
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ] && [ -n "$fallback_grok_timeout" ] && [ "$fallback_grok_timeout" -ge 50 ] && [ "$fallback_grok_timeout" -le 60 ]'
@@ -58,10 +58,10 @@ job_has() {
 long_jobs_select_run_long_ok() {
   job_has linux-offline-shard linux-offline "outputs.run_long != 'false'" || return 1
   job_has linux-offline merge-group-evidence "outputs.run_long != 'false'" || return 1
-  job_has windows-offline-section windows-offline-complete "outputs.run_long != 'false'" || return 1
+  job_has windows-offline-section windows-offline-warpbuild-proof "outputs.run_long != 'false'" || return 1
   job_has windows-offline-complete windows-offline "outputs.run_long != 'false'" || return 1
   job_has linux-offline-shard linux-offline "outputs.selection_result != 'success'" || return 1
-  job_has windows-offline-section windows-offline-complete "outputs.selection_result != 'success'" || return 1
+  job_has windows-offline-section windows-offline-warpbuild-proof "outputs.selection_result != 'success'" || return 1
   job_has windows-offline-complete windows-offline "outputs.selection_result != 'success'" || return 1
 }
 reviewer_jobs_select_reviewer_ok() {
@@ -79,7 +79,7 @@ reviewer_jobs_select_reviewer_ok() {
 expensive_jobs_carry_validation_stop_ok() {
   job_has linux-offline-shard linux-offline "outputs.validation_result != 'failure'" || return 1
   job_has linux-offline merge-group-evidence "outputs.validation_result != 'failure'" || return 1
-  job_has windows-offline-section windows-offline-complete "outputs.validation_result != 'failure'" || return 1
+  job_has windows-offline-section windows-offline-warpbuild-proof "outputs.validation_result != 'failure'" || return 1
   job_has windows-offline-complete windows-offline "outputs.validation_result != 'failure'" || return 1
   job_has reviewer-safety-start-deadline windows-reviewer-fallback-codex "outputs.validation_result != 'failure'" || return 1
   job_has windows-reviewer-fallback-codex windows-reviewer-fallback-grok "outputs.validation_result != 'failure'" || return 1
@@ -241,7 +241,7 @@ check 'hosted reviewer proofs are independent Codex and Grok jobs' \
 # Inputs are byte-sorted; comm under a UTF-8 locale (Git Bash) collates
 # differently and silently misreports membership, so every comm is C-locale.
 check 'every set comparison uses byte order on every platform'   "! grep -nE '(^|[^_=A-Z])comm -' '$0' | grep -v 'LC_ALL=C comm -'"
-section_block="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow")"
+section_block="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow")"
 aggregate_block="$(sed -n '/^  windows-offline:$/,/^  windows-reviewer-safety:/p' "$workflow")"
 shard_union="$(jq -r '.windows_offline_shards[][]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 shard_count="$(jq '.windows_offline_shards | length' "$manifest" | tr -d '\r')"
@@ -339,7 +339,7 @@ grep -Fq '|| github.sha' "$workflow" || {
 # part of an hour. Asserted per job, not as a fragment count: a new Windows job
 # must carry the same event isolation.
 windows_merge_group_isolated_ok() {
-  job_has windows-offline-section windows-offline-complete "github.event_name == 'pull_request'" || return 1
+  job_has windows-offline-section windows-offline-warpbuild-proof "github.event_name == 'pull_request'" || return 1
   job_has windows-offline-complete windows-offline "github.event_name != 'merge_group'" || return 1
   job_has windows-offline windows-reviewer-safety "github.event_name != 'merge_group'" || return 1
   job_has reviewer-runner-availability windows-reviewer-preferred "github.event_name != 'merge_group'" || return 1
@@ -354,11 +354,34 @@ check 'physical Windows routing and fallback jobs are skipped on merge_group' wi
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' "$workflow" &&
 [ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 3 ] &&
 printf '%s' "$complete_block" | grep -Fq '.\tests\test-all.ps1 -Shard' &&
-sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -F "github.event_name == 'pull_request'" >/dev/null &&
+sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | grep -F "github.event_name == 'pull_request'" >/dev/null &&
 sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -F "github.event_name != 'pull_request'" >/dev/null || {
   printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2
   exit 1
 }
+# The WarpBuild BYOC proof lane (issue #961) runs the same required Windows
+# suite but must never be load-bearing: continue-on-error, absent from
+# verification-closure's needs, guarded against fork heads (those VMs are our
+# Azure subscription), on the WarpBuild label, and capped at the live quota
+# (standardDASv4Family 10 vCPUs = 2 concurrent Standard_D4as_v4 VMs). The
+# required Blacksmith sections must never borrow these properties by accident,
+# so the checks below read the proof job's own block only.
+proof_ok() {
+  local proof
+  proof="$(job_block windows-offline-warpbuild-proof windows-offline-complete)"
+  [ -n "$proof" ] || return 1
+  printf '%s' "$proof" | grep -qF 'continue-on-error: true' || return 1
+  printf '%s' "$proof" | grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' || return 1
+  printf '%s' "$proof" | grep -qF 'runs-on: warp-custom-warpbuild-win2022-canary' || return 1
+  printf '%s' "$proof" | grep -qF 'max-parallel: 2' || return 1
+  printf '%s' "$proof" | grep -qF 'section: [1, 2, 3, 4, 5, 6, 7, 8]' || return 1
+  printf '%s' "$proof" | grep -qF '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' || return 1
+  # Not load-bearing: verification-closure must not depend on it.
+  ! grep -qF 'windows-offline-warpbuild-proof' <(sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' "$workflow") || return 1
+  # And the required section matrix must never route to the WarpBuild label.
+  ! grep -qF 'warp-custom-warpbuild-win2022-canary' <(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow") || return 1
+}
+check 'the WarpBuild proof lane is non-blocking, fork-guarded, quota-capped and outside the required aggregate' proof_ok
 # Windows verification runs in two lanes at once, and both must stay present.
 # The self-hosted pool was added to this repository to have MORE Windows
 # capacity than GitHub's runners alone, not to replace them: routing every
@@ -448,7 +471,7 @@ check 'the four balanced sections partition every runnable Bash suite exactly on
 cancel_aware_ok() {
   job_has linux-offline-shard linux-offline '!cancelled()' || return 1
   job_has linux-offline merge-group-evidence '!cancelled()' || return 1
-  job_has windows-offline-section windows-offline-complete '!cancelled()' || return 1
+  job_has windows-offline-section windows-offline-warpbuild-proof '!cancelled()' || return 1
   job_has windows-offline-complete windows-offline '!cancelled()' || return 1
   job_has windows-offline windows-reviewer-safety '!cancelled()' || return 1
   job_has reviewer-runner-availability windows-reviewer-preferred '!cancelled()' || return 1

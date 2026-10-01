@@ -1,6 +1,7 @@
 # Non-required canary for WarpBuild Azure BYOC Windows runner (issue #961).
-# Manual only. Must NOT become a required check. Required CI migrated to this
-# lane 2026-10-01 (#961); this canary remains as a manual health check.
+# Manual only. Must NOT become a required check. Required CI stays on
+# Blacksmith; WarpBuild runs the required suite as the non-blocking
+# windows-offline-warpbuild-proof lane in verify.yml (2026-10-01, #961).
 name: warpbuild-win2022-canary
 
 on:
