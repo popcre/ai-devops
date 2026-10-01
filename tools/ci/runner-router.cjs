@@ -1,21 +1,28 @@
 'use strict';
-// Gives idle qualified self-hosted Windows hosts (EDGE-RUNN-ENVY and any other
-// host labelled ai-devops-windows-qualified) ordinary verify.yml Windows
-// sections as extra capacity. Every other section stays on the default Windows
-// lane (WarpBuild Azure BYOC since 2026-10-01; the config key name
-// blacksmith_windows is kept for compatibility). The matrix lane identifier
-// 'blacksmith' is likewise kept so check names remain stable. run() never
-// throws: any lookup error keeps the all-default plan, so routing can only add
-// capacity and never sends work back to the GitHub-hosted queue.
+// Routes verify.yml Windows sections across three lanes. 2026-10-01 owner
+// ruling: KEEP Blacksmith live until WarpBuild is fully up; prefer WarpBuild
+// when it works, fall back to Blacksmith so CI is never stuck. WarpBuild Azure
+// BYOC (popcre-ci-use1) takes up to cfg.warpbuild_sections sections (the Azure
+// standardDASv4Family quota is 10 vCPUs = 2 concurrent Standard_D4as_v4 VMs).
+// Idle qualified self-hosted hosts (ai-devops-windows-qualified) are extra
+// capacity after that. Everything else - including every foreign-head section,
+// because BYOC VMs are our own Azure subscription - stays on Blacksmith, the
+// overflow and emergency lane. run() never throws: any lookup error keeps the
+// all-Blacksmith plan, so routing can only add capacity and never sends work
+// back to the GitHub-hosted queue.
 
 function range(n) { return Array.from({ length: n }, (_, i) => i + 1); }
 
-function decide(cfg, { event, idleQualified }) {
+function decide(cfg, { event, idleQualified, foreign }) {
   const reserve = cfg.reserve_qualified_for_reviewer_events.includes(event) ? cfg.reserved_qualified_hosts : 0;
-  let selfHosted = Math.max(0, Math.min(cfg.windows_sections, (idleQualified || 0) - reserve));
+  // A foreign head never runs on our machines: not the BYOC VMs and not the
+  // self-hosted pool. Both stay zero; every section falls through to Blacksmith.
+  let warpbuild = foreign ? 0 : Math.max(0, Math.min(cfg.warpbuild_sections, cfg.windows_sections));
+  let selfHosted = foreign ? 0 : Math.max(0, Math.min(cfg.windows_sections - warpbuild, (idleQualified || 0) - reserve));
   return {
     idle_qualified: idleQualified || 0,
     windows_matrix: range(cfg.windows_sections).map(section => {
+      if (warpbuild > 0) { warpbuild -= 1; return { section, lane: 'warpbuild', runs_on: cfg.warpbuild_windows }; }
       if (selfHosted > 0) { selfHosted -= 1; return { section, lane: 'qualified-self-hosted', runs_on: cfg.qualified_windows }; }
       return { section, lane: 'blacksmith', runs_on: cfg.blacksmith_windows };
     }),
@@ -42,8 +49,9 @@ async function countIdleQualified(poolGithub, context, cfg) {
 }
 
 // Code from another repository (a fork pull request) never runs on our own
-// machines. Missing secrets already hide the pool from forks; this makes the
-// rule explicit instead of incidental.
+// machines: neither the self-hosted pool nor the WarpBuild BYOC VMs in our own
+// Azure subscription. Missing secrets already hide the pool from forks; this
+// makes the rule explicit instead of incidental.
 function isForeignHead(context) {
   const head = context.payload && context.payload.pull_request && context.payload.pull_request.head;
   return !!head && (!head.repo || head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`);
@@ -51,17 +59,18 @@ function isForeignHead(context) {
 
 async function run({ github, poolGithub, context, core, cfg }) {
   let idle = 0;
-  if (isForeignHead(context)) {
-    core.info('Pull request head is outside this repository; every Windows section stays on the default Windows lane.');
+  const foreign = isForeignHead(context);
+  if (foreign) {
+    core.info('Pull request head is outside this repository; every Windows section stays on Blacksmith.');
     poolGithub = null;
   }
   try {
     if (poolGithub) idle = Math.max(0, (await countIdleQualified(poolGithub, context, cfg)) - (await queuedQualifiedJobs(github, context, cfg)));
   } catch (error) {
-    core.warning(`Qualified pool unknown (${error.message}); every Windows section stays on the default Windows lane.`);
+    core.warning(`Qualified pool unknown (${error.message}); every non-WarpBuild section stays on Blacksmith.`);
     idle = 0;
   }
-  const plan = decide(cfg, { event: context.eventName, idleQualified: idle });
+  const plan = decide(cfg, { event: context.eventName, idleQualified: idle, foreign });
   core.info(`idle_qualified=${plan.idle_qualified}`);
   for (const w of plan.windows_matrix) core.info(`windows section ${w.section} -> ${w.lane}`);
   core.setOutput('windows_matrix', JSON.stringify(plan.windows_matrix));

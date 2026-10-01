@@ -130,7 +130,7 @@ check 'managed bin commands use the shared GitHub admission path' \
 # `ai-devops-windows` is the qualification-only label: a host carrying it has
 # been registered, not proven.
 check 'reviewer Windows job prefers the qualified pool (ENVY)' "[ \"\$(grep -cF 'runs-on: [self-hosted, Windows, X64, ai-devops-windows-qualified]' '$workflow')\" -eq 1 ]"
-check 'every fixed non-preferred Windows job runs on the WarpBuild BYOC lane; routed sections fall back to it' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*warp-custom-warpbuild-win2022-canary[[:space:]]*\$' '$workflow')\" -eq 3 ] && grep -qF 'needs.runner-router.outputs.windows_matrix ||' '$workflow'"
+check 'every fixed non-preferred Windows job runs on Blacksmith; routed sections fall back to it' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*blacksmith-4vcpu-windows-2025[[:space:]]*\$' '$workflow')\" -eq 3 ] && grep -qF 'needs.runner-router.outputs.windows_matrix ||' '$workflow'"
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
@@ -257,7 +257,7 @@ heavy_owners="$(jq -r '. as $manifest | ["test-ai-gemini.sh","test-ai-glm.sh","t
 sections_declared="[$(printf '%s\n' "$section_block" | grep -o '"section":[0-9]*' | cut -d: -f2 | tr -d '\r' | paste -sd, - | sed 's/,/, /g')]"
 routing="$ROOT/config/ci-runner-routing.json"
 check 'the routing config matches the manifest and never targets a GitHub-hosted label' \
-  '[ "$(jq -r .windows_sections "$routing")" = "$shard_count" ] && [ "$(jq -r .blacksmith_windows "$routing")" = warp-custom-warpbuild-win2022-canary ] && [ "$(jq -c .qualified_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-qualified\"]" ] && ! grep -Eq "\"(windows-20[0-9][0-9]|ubuntu-[0-9][0-9]\\.[0-9][0-9])\"" "$routing"'
+  '[ "$(jq -r .windows_sections "$routing")" = "$shard_count" ] && [ "$(jq -r .blacksmith_windows "$routing")" = blacksmith-4vcpu-windows-2025 ] && [ "$(jq -r .warpbuild_windows "$routing")" = warp-custom-warpbuild-win2022-canary ] && [ "$(jq -c .qualified_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-qualified\"]" ] && ! grep -Eq "\"(windows-20[0-9][0-9]|ubuntu-[0-9][0-9]\\.[0-9][0-9])\"" "$routing"'
 sections_expected="[$(seq -s ', ' 1 "$shard_count")]"
 check 'declared sections cover the ordinary hosted lane exactly, with no suite twice' \
   '[ "$shard_union" = "$hosted_without_reviewer" ] && [ "$(printf "%s\n" "$shard_union" | LC_ALL=C sort -u)" = "$shard_union" ]'
@@ -278,7 +278,7 @@ check 'Blacksmith stays manual, bounded, independently hosted and fail-closed' \
 # Sections run at the same time on independent hosted machines, and one failing
 # section must never hide the other sections.
 check 'sections run on independent hosted machines and all keep reporting' \
-  '[ -n "$section_timeout" ] && [ "$section_timeout" -le 40 ] && printf "%s" "$section_block" | grep -qF "fail-fast: false" && printf "%s" "$section_block" | grep -qF "runs-on: \${{ matrix.runs_on }}" && [ "$(printf "%s" "$section_block" | grep -o "\"runs_on\":\"warp-custom-warpbuild-win2022-canary\"" | wc -l | tr -d " ")" = "$shard_count" ]'
+  '[ -n "$section_timeout" ] && [ "$section_timeout" -le 40 ] && printf "%s" "$section_block" | grep -qF "fail-fast: false" && printf "%s" "$section_block" | grep -qF "runs-on: \${{ matrix.runs_on }}" && [ "$(printf "%s" "$section_block" | grep -o "\"runs_on\":\"blacksmith-4vcpu-windows-2025\"" | wc -l | tr -d " ")" = "$shard_count" ]'
 # #166 restores `windows-offline` as a required context, so it must keep that
 # exact name and stay fail-closed: any lane result other than success, or a skip
 # the classifier did not justify, fails the aggregate.
@@ -388,11 +388,11 @@ qualified_pool_ok() {
 }
 check 'only the preferred reviewer job may use the qualified self-hosted pool' qualified_pool_ok
 fixed_windows_ok() {
-  job_has windows-offline-complete windows-offline 'runs-on: warp-custom-warpbuild-win2022-canary' || return 1
-  job_has windows-reviewer-fallback-codex windows-reviewer-fallback-grok 'runs-on: warp-custom-warpbuild-win2022-canary' || return 1
-  job_has windows-reviewer-fallback-grok windows-reviewer-safety 'runs-on: warp-custom-warpbuild-win2022-canary' || return 1
+  job_has windows-offline-complete windows-offline 'runs-on: blacksmith-4vcpu-windows-2025' || return 1
+  job_has windows-reviewer-fallback-codex windows-reviewer-fallback-grok 'runs-on: blacksmith-4vcpu-windows-2025' || return 1
+  job_has windows-reviewer-fallback-grok windows-reviewer-safety 'runs-on: blacksmith-4vcpu-windows-2025' || return 1
 }
-check 'the fixed non-preferred Windows verify jobs run on the WarpBuild BYOC lane' fixed_windows_ok
+check 'the fixed non-preferred Windows verify jobs run on Blacksmith' fixed_windows_ok
 if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ubuntu-24\.04|ubuntu-latest|^[[:space:]]*runs-on:[[:space:]]*windows-2025'; then
   printf 'FAIL: verify jobs must not use GitHub-hosted runners
 ' >&2

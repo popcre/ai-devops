@@ -1,9 +1,11 @@
 {
-  "_comment": "Where verify.yml runs its Windows sections (tools/ci/runner-router.cjs). 2026-10-01: required Windows CI moves to WarpBuild Azure BYOC (popcre-ci-use1, win-2022) to cut cost; the blacksmith_windows key name is kept for test compatibility but the value is the WarpBuild label. Idle qualified self-hosted Windows hosts (EDGE-RUNN-ENVY and any other host carrying ai-devops-windows-qualified) remain extra capacity. A section goes to a qualified host only when one is online and idle at routing time; otherwise it runs on WarpBuild. GitHub-hosted runners are never a routing target. Manual Blacksmith fallback lives in windows-offline-blacksmith.yml.",
+  "_comment": "Where verify.yml runs its Windows sections (tools/ci/runner-router.cjs). 2026-10-01 owner ruling: KEEP Blacksmith live until WarpBuild is fully up; prefer WarpBuild when it works, fall back to Blacksmith so CI is never stuck. warpbuild_windows takes up to warpbuild_sections sections (Azure standardDASv4Family quota is 10 vCPUs = 2 concurrent Standard_D4as_v4 VMs on popcre-ci-use1); the remainder, all foreign-head work, and every fixed/emergency job stay on Blacksmith. Idle qualified self-hosted hosts (ai-devops-windows-qualified) remain extra capacity after the WarpBuild allotment. GitHub-hosted runners are never a routing target. Manual full-suite Blacksmith lane lives in windows-offline-blacksmith.yml.",
   "schema_version": 2,
   "max_active_runs_sampled": 15,
   "windows_sections": 8,
-  "blacksmith_windows": "warp-custom-warpbuild-win2022-canary",
+  "blacksmith_windows": "blacksmith-4vcpu-windows-2025",
+  "warpbuild_windows": "warp-custom-warpbuild-win2022-canary",
+  "warpbuild_sections": 2,
   "qualified_windows": ["self-hosted", "Windows", "X64", "ai-devops-windows-qualified"],
   "qualified_label": "ai-devops-windows-qualified",
   "reserve_qualified_for_reviewer_events": ["workflow_dispatch"],
