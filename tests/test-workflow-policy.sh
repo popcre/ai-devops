@@ -352,7 +352,7 @@ check 'physical Windows routing and fallback jobs are skipped on merge_group' wi
 # Pull requests use the hosted Windows-sensitive assignment. Schedule and
 # workflow_dispatch keep the complete sharded runner as the backstop.
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' "$workflow" &&
-[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
+[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 3 ] &&
 printf '%s' "$complete_block" | grep -Fq '.\tests\test-all.ps1 -Shard' &&
 sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -F "github.event_name == 'pull_request'" >/dev/null &&
 sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -F "github.event_name != 'pull_request'" >/dev/null || {
