@@ -11,10 +11,14 @@ function range(n) { return Array.from({ length: n }, (_, i) => i + 1); }
 function decide(cfg, { event, idleQualified }) {
   const reserve = cfg.reserve_qualified_for_reviewer_events.includes(event) ? cfg.reserved_qualified_hosts : 0;
   let selfHosted = Math.max(0, Math.min(cfg.windows_sections, (idleQualified || 0) - reserve));
+  // Section 1 contains the slowest Bash suites and has reached the 40-minute
+  // self-hosted job limit. Assign spare hosts to other sections first.
+  const qualifiedPriority = [4, 5, 2, 3, 6, 1];
+  const qualifiedSections = new Set(qualifiedPriority.filter(section => section <= cfg.windows_sections).slice(0, selfHosted));
   return {
     idle_qualified: idleQualified || 0,
     windows_matrix: range(cfg.windows_sections).map(section => {
-      if (selfHosted > 0) { selfHosted -= 1; return { section, lane: 'qualified-self-hosted', runs_on: cfg.qualified_windows }; }
+      if (qualifiedSections.has(section)) { return { section, lane: 'qualified-self-hosted', runs_on: cfg.qualified_windows }; }
       return { section, lane: 'blacksmith', runs_on: cfg.blacksmith_windows };
     }),
   };

@@ -94,19 +94,36 @@ The model and npm/MCP selections are the exact reviewed values in
 `config/tool-versions.json`. Do not substitute `latest` during recovery. Version
 upgrades are a separate tested change after the machine is healthy.
 
-### 6. Log in to Claude
+### 6. Enable SSH access for other machines
+
+A fresh Ubuntu install does not accept inbound SSH, so no session on another
+machine can log in until this runs. From a terminal on the new machine:
+
+```bash
+sudo ./bin/configure-ubuntu-bootstrap-access.sh
+```
+
+The script installs and starts the OpenSSH server, authorizes the protected
+bootstrap key for your user (fetched through `ai-private-config`; it syncs the
+protected configuration first if needed), and opens the firewall for SSH —
+Tailscale only when the `tailscale0` interface exists, otherwise port 22. It
+prints one status line per check and exits nonzero if any check fails. From
+here the remaining steps can run over SSH from any authorized machine; verify
+with `ssh <user>@<host> true` from another machine.
+
+### 7. Log in to Claude
 
 ```bash
 claude login        # or run `claude` and follow the login prompt
 ```
 
-### 7. Log in to Codex
+### 8. Log in to Codex
 
 ```bash
 codex login         # or run `codex` and follow the login prompt
 ```
 
-### 8. Verify with doctor
+### 9. Verify with doctor
 
 ```bash
 ai-devops doctor

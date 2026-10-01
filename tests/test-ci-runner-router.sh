@@ -36,9 +36,9 @@ check('every section is planned exactly once', () => {
 });
 check('one idle qualified host takes exactly one pull-request section', () => {
   const p = decide(cfg, { event: 'pull_request', idleQualified: 1 });
-  assert.strictEqual(lanes(p.windows_matrix), 'qualified-self-hosted' + allBlacksmith.slice('blacksmith'.length));
-  assert.deepStrictEqual(p.windows_matrix[0].runs_on, cfg.qualified_windows);
-  assert.strictEqual(p.windows_matrix[1].runs_on, cfg.blacksmith_windows);
+  assert.strictEqual(p.windows_matrix[3].lane, 'qualified-self-hosted');
+  assert.deepStrictEqual(p.windows_matrix[3].runs_on, cfg.qualified_windows);
+  assert.strictEqual(p.windows_matrix[0].lane, 'blacksmith');
 });
 check('manual runs keep one qualified host free for the reviewer proof', () => {
   assert.strictEqual(decide(cfg, { event: 'workflow_dispatch', idleQualified: 1 }).windows_matrix.filter(x => x.lane !== 'blacksmith').length, 0);
@@ -72,7 +72,7 @@ const lanesOut = core => lanes(JSON.parse(core.out.windows_matrix));
     ['a failed pool lookup keeps every section on Blacksmith', { github: fakeGithub(), poolGithub: fakePool([], true) }, allBlacksmith],
     ['a failed job lookup keeps every section on Blacksmith', { github: fakeGithub([], true), poolGithub: fakePool([envy(false)]) }, allBlacksmith],
     ['no pool token keeps every section on Blacksmith', { github: fakeGithub(), poolGithub: null }, allBlacksmith],
-    ['an idle qualified host takes section 1', { github: fakeGithub(), poolGithub: fakePool([envy(false)]) }, 'qualified-self-hosted' + allBlacksmith.slice('blacksmith'.length)],
+    ['an idle qualified host takes section 4', { github: fakeGithub(), poolGithub: fakePool([envy(false)]) }, ['blacksmith','blacksmith','blacksmith','qualified-self-hosted','blacksmith','blacksmith'].join(',')],
     ['a job already waiting for the qualified host claims it first',
       { github: fakeGithub([{ status: 'queued', labels: ['self-hosted', cfg.qualified_label] }]), poolGithub: fakePool([envy(false)]) }, allBlacksmith],
     ['busy, offline and unqualified hosts are never used',
