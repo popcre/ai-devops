@@ -212,7 +212,19 @@ if [ -n "$GATE_LIB" ]; then
     OBSERVED=""
     [ -x "$GATE_BIN" ] && OBSERVED="$("$GATE_BIN" explain --json 2>/dev/null | jq -r '.observed_class // empty' 2>/dev/null | tr -d '\r')"
     if [ "$OBSERVED" = prose ]; then
-      printf 'ai-pr-wait: a documentation-only pull request merges immediately with `gh pr merge --squash --admin`; no wait was started.\n' >&2
+      # The immediate squash-admin lane skips the offline suites, so its own
+      # doc content is never checked anywhere else (#1188). Prove the two
+      # whole-repo doc invariants on this tree before offering the shortcut;
+      # a refusal here is the fix point, not a reason to wait.
+      DOC_SAFETY_BIN="$REAL_DIR/ai-doc-safety"
+      DOC_SAFETY_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+      if [ ! -f "$DOC_SAFETY_BIN" ] || [ -z "$DOC_SAFETY_ROOT" ]; then
+        printf 'ai-pr-wait: run `bin/ai-doc-safety` on the exact head worktree before `gh pr merge --squash --admin`; no wait was started.\n' >&2
+      elif DOC_SAFETY_OUT="$(bash "$DOC_SAFETY_BIN" "$DOC_SAFETY_ROOT" 2>&1)"; then
+        printf 'ai-pr-wait: doc-safety passed on this tree; a documentation-only pull request merges immediately with `gh pr merge --squash --admin`; no wait was started.\n' >&2
+      else
+        printf 'ai-pr-wait: doc-safety FAILED on this tree; fix the named file before `gh pr merge --squash --admin`:\n%s\nno wait was started.\n' "$DOC_SAFETY_OUT" >&2
+      fi
     else
       printf 'ai-pr-wait: no wait was started.\n' >&2
     fi

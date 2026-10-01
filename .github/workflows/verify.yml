@@ -189,6 +189,25 @@ jobs:
           fi
           bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety
 
+  # The two whole-repo doc invariants — the public boundary and local Markdown
+  # links — are the only checks whose input a prose-only change controls, yet
+  # the prose bypass (#805) and the immediate squash-admin lane both skip the
+  # offline suites that carry them, and prose paths select no suite even in a
+  # mixed pull request. Three 2026-09-30 landings jammed the merge queue that
+  # way (#1188: #1171, #1174/#1162, #1178/#1180). This job is unconditional on
+  # purpose: no path filter and no classification condition, so it is the
+  # opposite of the #1073 hole — every event, prose-only pull requests
+  # included, proves the change's own doc content in seconds.
+  doc-safety:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Whole-repo public boundary and local Markdown links
+        run: |
+          bash tests/test-public-boundary.sh
+          bash tests/test-markdown-links.sh
+
   # Ordinary pull requests divide the Windows-sensitive lane into eight declared
   # sections that run at the same time on independent GitHub-hosted
   # machines (#210). Hosted concurrency is unmetered on a public repository, so
@@ -729,7 +748,7 @@ jobs:
   # queue it closes over the fresh Linux run and merge-group-evidence, so an
   # evidence refusal cannot be hidden by an unrelated green required job.
   verification-closure:
-    needs: [fast-classifier, merge-group-evidence, linux-offline, windows-offline, windows-reviewer-safety]
+    needs: [fast-classifier, merge-group-evidence, doc-safety, linux-offline, windows-offline, windows-reviewer-safety]
     if: >-
       always() && !cancelled() &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group')
@@ -747,7 +766,8 @@ jobs:
             "${{ needs.merge-group-evidence.result }}" \
             "${{ needs.linux-offline.result }}" \
             "${{ needs.windows-offline.result }}" \
-            "${{ needs.windows-reviewer-safety.result }}"
+            "${{ needs.windows-reviewer-safety.result }}" \
+            "${{ needs.doc-safety.result }}"
 
   report-scheduled-failure:
     needs: [fast-classifier, linux-offline, windows-offline-complete, windows-reviewer-safety]

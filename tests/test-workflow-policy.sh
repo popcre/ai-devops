@@ -188,11 +188,27 @@ check 'the queue evidence gate reports on every event, not only merge groups' \
 check 'one stable required closure covers pull requests and merge groups' \
   "grep -q '^  verification-closure:' '$workflow' && sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | grep -q \"github.event_name == 'pull_request'.*github.event_name == 'merge_group'\""
 check 'the required closure depends on every pull-request and queue proof' \
-  "grep -Fq 'needs: [fast-classifier, merge-group-evidence, linux-offline, windows-offline, windows-reviewer-safety]' '$workflow'"
+  "grep -Fq 'needs: [fast-classifier, merge-group-evidence, doc-safety, linux-offline, windows-offline, windows-reviewer-safety]' '$workflow'"
 check 'the required closure delegates to the regression-tested evaluator' \
   "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | grep -Fq 'bash tools/ci/verify-closure.sh'"
 check 'the required closure checks out its evaluator before running it' \
   "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | awk '/uses: actions\/checkout@/{checkout=NR} /bash tools\/ci\/verify-closure.sh/{run=NR} END {exit !(checkout && run && checkout < run)}'"
+
+# The #1188 doc gate: the two whole-repo doc invariants must run on EVERY
+# event with no classification condition and no path filter — the opposite of
+# the #1073 hole — and closure must receive its result fail-closed. A
+# condition added to this job would let prose-only landings skip the only
+# check whose input they control.
+doc_safety_block="$(awk '/^  doc-safety:/{f=1;next} f&&/^  [a-z]/{exit} f' "$workflow")"
+check 'a doc-safety job exists' "test -n '$doc_safety_block'"
+check 'the doc-safety job is unconditional: no path filter, no classification condition' \
+  "! printf '%s' '$doc_safety_block' | grep -q '^[[:space:]]*if:'"
+check 'the doc-safety job runs the public-boundary and Markdown-link suites' \
+  "printf '%s' '$doc_safety_block' | grep -q 'tests/test-public-boundary.sh' && printf '%s' '$doc_safety_block' | grep -q 'tests/test-markdown-links.sh'"
+check 'the doc-safety job stays on the Blacksmith Linux pool' \
+  "printf '%s' '$doc_safety_block' | grep -q 'runs-on: blacksmith-4vcpu-ubuntu-2404'"
+check 'closure evaluates the doc-safety result fail-closed' \
+  "sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' '$workflow' | grep -q 'needs.doc-safety.result'"
 
 # Counts are derived from discovery (checked exactly below), never hard-coded:
 # a literal count went stale on every new suite and failed 11 of 23 runs.
