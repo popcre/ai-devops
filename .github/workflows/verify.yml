@@ -75,6 +75,21 @@ jobs:
   fast-classifier:
     uses: ./.github/workflows/fast-classifier.yml
 
+  # Abandoned-push cost control (owner 2026-10-01): rapid PR pushes already
+  # cancel the previous run, but expensive jobs may have started and burned
+  # paid minutes. A short quiet window on pull requests means intermediate
+  # pushes cost only this free job; the last push pays for the full matrix once.
+  push-settle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Quiet window for abandoned pushes
+        if: github.event_name == 'pull_request'
+        run: sleep 90
+      - name: Non-PR events run immediately
+        if: github.event_name != 'pull_request'
+        run: echo "no settle window for ${{ github.event_name }}"
+
   # The complete offline Bash suite, split into four sections that run at the
   # same time on separate hosted machines (docs/ci-speed-audit-2026-09-17.md,
   # speedup 2). tests/test-all.sh --balanced packs every discovered suite into
@@ -86,7 +101,7 @@ jobs:
   # merge queue, schedule, and manual runs keep the complete inventory, so
   # main's safety does not change. Unknown paths still select every suite.
   linux-offline-shard:
-    needs: [fast-classifier, manual-preflight]
+    needs: [fast-classifier, manual-preflight, push-settle]
     if: ${{ !cancelled() && needs.fast-classifier.outputs.validation_result != 'failure' && (needs.fast-classifier.outputs.selection_result != 'success' || needs.fast-classifier.outputs.run_long != 'false') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     strategy:
       # One failing section must never hide the other sections' results.
@@ -250,7 +265,7 @@ jobs:
             await router.run({ github, poolGithub, context, core, cfg });
 
   windows-offline-section:
-    needs: [fast-classifier, manual-preflight, runner-router]
+    needs: [fast-classifier, manual-preflight, push-settle, runner-router]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     # Also skipped when the fast classifier proves the change is prose-only.
@@ -313,7 +328,7 @@ jobs:
   # backstop that proves every suite in one place must not depend on the section
   # mapping being correct.
   windows-offline-complete:
-    needs: [fast-classifier, manual-preflight]
+    needs: [fast-classifier, manual-preflight, push-settle]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     # Fail-closed: any classifier result other than a clean prose-only verdict
@@ -457,7 +472,7 @@ jobs:
             }
 
   windows-reviewer-preferred:
-    needs: [fast-classifier, manual-preflight, reviewer-runner-availability]
+    needs: [fast-classifier, manual-preflight, push-settle, reviewer-runner-availability]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     # Also skipped when the fast classifier proves the change does not touch
