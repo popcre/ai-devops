@@ -46,7 +46,8 @@ entrypoints retain their serial behavior. A single
 aggregate job keeps the stable name `windows-offline` and fails closed on any
 lane result other than success. The ordinary pull-request
 hosted matrix omits Codex and Grok only after assigning both unchanged suites
-to `windows-reviewer-fallback` on an independent `windows-2025` host. That job
+to `windows-reviewer-fallback-codex` and `windows-reviewer-fallback-grok` on
+independent `windows-2025` hosts (P6). Together those jobs
 is the required pull-request and scheduled proof. The qualified self-hosted
 lane remains available on an explicit full manual run for host-bound diagnosis,
 but it cannot queue or fail a repository-wide verification run. Its 30-minute
