@@ -221,6 +221,22 @@ check "the refusal names the admin squash merge instead" \
   "grep -qF -- 'gh pr merge --squash --admin' '$GATE_OUT'"
 check "the refusal explains which gate applied" \
   "grep -q ai-task-gates '$GATE_OUT'"
+check "the prose refusal proves doc safety on this tree first" \
+  "grep -qF 'doc-safety passed on this tree' '$GATE_OUT'"
+
+# The #1188 jams: prose content that violates a whole-repo doc invariant must
+# not be offered the immediate admin merge. The waiter runs the same two
+# offline checks the merge queue would run, on the exact tree at hand.
+mkdir -p "$GR/docs"; printf 'HostName 10.20.30.40\n' > "$GR/docs/topology.md"
+git -C "$GR" add docs/topology.md
+BAD_OUT="$TMP/gate-docfail.txt"
+( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops ) >"$BAD_OUT" 2>&1; RC=$?
+check "a doc-unsafe prose tree still does not start a long wait" "test '$RC' -eq 3"
+check "a doc-unsafe prose tree is refused the admin merge until fixed" \
+  "grep -qF 'doc-safety FAILED on this tree' '$BAD_OUT' && grep -q 'BOUNDARY FAIL' '$BAD_OUT'"
+check "the doc-unsafe refusal still names the topology culprit" \
+  "grep -q 'protected private-network topology' '$BAD_OUT'"
+git -C "$GR" rm -q --cached docs/topology.md; rm -f "$GR/docs/topology.md"
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
