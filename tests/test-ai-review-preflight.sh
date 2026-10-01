@@ -46,6 +46,7 @@ if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   fi
   [ "${2:-}" = --live ] || { [ "${MOCK_QWEN_NORMAL_DOCTOR_FAIL:-0}" = 0 ] || exit 124; }
   [ "${2:-}" != --live ] || { [ -z "${MOCK_QWEN_CONTACT_FILE:-}" ] || printf 'one\n' >> "$MOCK_QWEN_CONTACT_FILE"; }
+  [ "${2:-}" != --live ] || { [ "${MOCK_QWEN_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; }
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
   if [ "${MOCK_QWEN_FAIL:-0}" = 1 ]; then
@@ -136,13 +137,21 @@ check "Gemini check cannot report healthy while quarantined" "! $SCRIPT check ge
 check "tampered Gemini qualification record fails closed" "mkdir -p '$AI_REVIEW_QUARANTINE_DIR'; printf '{\"version\":2,\"provider\":\"gemini\",\"wrapper_sha256\":\"bad\",\"agy_sha256\":\"bad\",\"agy_version\":\"1.1.19\",\"model\":\"gemini-3.8-flash-high\",\"qualified_epoch\":1}\n' > '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'; $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
 check "successful Gemini live qualification durably releases quarantine" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 check "Gemini qualification remains valid when network-dependent normal doctor is unavailable" "MOCK_GEMINI_NORMAL_DOCTOR_FAIL=1 $SCRIPT qualify gemini && MOCK_GEMINI_NORMAL_DOCTOR_FAIL=1 $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
-check "failed Gemini requalification revokes the prior qualification" "! MOCK_GEMINI_FAIL=1 $SCRIPT qualify gemini && test ! -e '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json' && $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
+# Old "failed requalification revokes the prior qualification" (delete-before-
+# canary) was a product bug: it was the 24-48h quarantine loop (issue #1112).
+# A failed canary keeps the previous version valid — no quarantine, no lockout.
+check "failed Gemini requalification keeps the prior qualification (no quarantine)" "! MOCK_GEMINI_FAIL=1 $SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 check "Gemini can be qualified again after a failed requalification" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 cp "$TMP/bin/gemini" "$TMP/bin/gemini-race"; chmod +x "$TMP/bin/gemini-race"
 check "wrapper replacement during Gemini canary cannot authorize untested bytes" "rm -f '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'; ! MOCK_GEMINI_MUTATE_WRAPPER=1 AI_REVIEW_GEMINI_WRAPPER='$TMP/bin/gemini-race' $SCRIPT qualify gemini && test ! -e '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'"
 check "Gemini remains quarantined after a during-canary wrapper replacement" "AI_REVIEW_GEMINI_WRAPPER='$TMP/bin/gemini-race' $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
 check "Gemini requalification still works after rejecting a race" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
-check "same-version Gemini runtime replacement during canary is rejected" "! MOCK_GEMINI_MUTATE_RUNTIME=1 $SCRIPT qualify gemini && test ! -e '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json'"
+# Re-scoped: the old assertion expected the whole record to be deleted
+# (revoke-on-fail, the 24-48h product bug). The invariant to keep is that the
+# untested runtime bytes are never authorized: no version may carry the
+# replaced runtime hash, while the prior version is kept.
+BAD_AGY_SHA="$(printf '%064d\n' 0 | tr 0 b)"
+check "same-version Gemini runtime replacement during canary is rejected" "! MOCK_GEMINI_MUTATE_RUNTIME=1 $SCRIPT qualify gemini && ! jq -e --arg s '$BAD_AGY_SHA' 'any(.versions[]; .agy_sha256==\$s)' '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json' && $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
 printf '%064d\n' 0 | tr 0 a > "$MOCK_AGY_SHA_FILE"
 check "Gemini can be requalified after rejecting runtime replacement" "$SCRIPT qualify gemini && $SCRIPT status gemini | jq -e '.status==\"installed-healthy\"'"
 check "Gemini runtime version drift invalidates qualification" "MOCK_AGY_VERSION=1.1.20 $SCRIPT status gemini | jq -e '.status==\"quarantined\"'"
@@ -164,7 +173,10 @@ check "extra Qwen identity output fails closed" "MOCK_QWEN_IDENTITY_EXTRA=1 $SCR
 check "failed Qwen identity command fails closed" "MOCK_QWEN_IDENTITY_FAIL=1 $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
 unset MOCK_QWEN_MODE_LOG
 MOCK_QWEN_CONTACT_FILE="$TMP/qwen-contact"; export MOCK_QWEN_CONTACT_FILE; : > "$MOCK_QWEN_CONTACT_FILE"
-check "failed Qwen requalification revokes the prior qualification" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && test ! -e '$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json' && $SCRIPT status qwen | jq -e '.status==\"quarantined\"'"
+# Old "failed requalification revokes the prior qualification" (delete-before-
+# canary) was a product bug: it was the 24-48h quarantine loop (issue #1112).
+# A failed canary keeps the previous version valid — no quarantine, no lockout.
+check "failed Qwen requalification keeps the prior qualification (no quarantine)" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 check "failed Qwen qualification is attempted exactly once" "test \"\$(wc -l < '$MOCK_QWEN_CONTACT_FILE')\" -eq 1"
 unset MOCK_QWEN_CONTACT_FILE
 check "Qwen can be qualified after an evidence-directed failure" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
@@ -178,6 +190,26 @@ printf '\n# version changed\n' >> "$TMP/bin/good"
 check "Qwen wrapper changes invalidate prior live qualification" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 sed -i '$d' "$TMP/bin/good"
 check "Qwen can be requalified after a wrapper change" "$SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+
+echo '== requalification keeps last good (#1112)'
+# The old qualify path deleted the live-qualification record BEFORE the live
+# canary ("revoke-on-fail"). That was a product bug — the 24-48h quarantine
+# loop (issue #1112). The record is now a versioned store keyed by
+# wrapper/runtime/preloader hashes (Gemini also model): every canary-proven key
+# is kept, a failed canary never deletes the last good approval, and untested
+# bytes are never authorized.
+check "Qwen starts from a live-qualified last good version" "$SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+check "failed canary keeps previous version (no quarantine)" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+cp "$TMP/bin/good" "$TMP/bin/good-mutated"
+printf '\n# mutated wrapper for issue 1112\n' >> "$TMP/bin/good-mutated"
+MUTATED_SHA="$(sha256sum "$TMP/bin/good-mutated" | awk '{print $1}')"
+check "mutate wrapper hash keeps tool usable on last good version" "! MOCK_QWEN_FAIL=1 AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-mutated' $SCRIPT qualify qwen && AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good' $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+check "successful canary publishes new version" "AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-mutated' $SCRIPT qualify qwen && jq -e --arg sha '$MUTATED_SHA' 'any(.versions[]; .wrapper_sha256==\$sha)' '$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json' && AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-mutated' $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+check "drift selects matching version instead of quarantine" "AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good' $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+cp "$TMP/bin/good" "$TMP/bin/good-race"; chmod +x "$TMP/bin/good-race"
+check "untested bytes are never authorized" "! MOCK_QWEN_MUTATE_WRAPPER=1 AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-race' $SCRIPT qualify qwen && AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good-race' $SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"' && AI_REVIEW_QWEN_WRAPPER='$TMP/bin/good' $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+RACE_SHA="$(sha256sum "$TMP/bin/good-race" | awk '{print $1}')"
+check "no version authorizes the raced untested bytes" "jq -e --arg sha '$RACE_SHA' 'all(.versions[]; .wrapper_sha256!=\$sha)' '$AI_REVIEW_QUARANTINE_DIR/qwen-live-qualified.json'"
 
 echo '== automatic requalification (#804)'
 MOCK_QWEN_MODE_LOG="$TMP/qwen-requalify-mode-log"; export MOCK_QWEN_MODE_LOG
@@ -348,9 +380,10 @@ check "shipped reviewer registry is valid JSON" "jq -e '.version==1 and (.provid
 check "Gemini is carried in the shipped reviewer registry after live re-qualification"   "jq -e '.providers.gemini.registry_state==\"registered\"' '$REAL_REGISTRY'"
 check "the Gemini entry still records why the empty report mattered"   "jq -e '.providers.gemini.reason|test(\"empty report\")' '$REAL_REGISTRY'"
 check "Kimi is removed from the shipped reviewer registry while credit is exhausted" "jq -e '.providers.kimi.registry_state==\"absent\" and (.providers.kimi.reason|test(\"out of credit\"))' '$REAL_REGISTRY'"
-check "GLM is out of rotation in the shipped reviewer registry (owner instruction 2026-09-22)" "jq -e '.providers.glm.registry_state==\"absent\" and (.providers.glm.reason|test(\"2026-09-22\"))' '$REAL_REGISTRY'"
+check "GLM is back in the shipped reviewer registry (owner instruction 2026-09-30)" "jq -e '.providers.glm.registry_state==\"registered\" and (.providers.glm.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 check "DeepSeek V4.1 Flash is registered (shared-db REVIEWERS) and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"registered\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
-check "the shipped registry is Muse, Grok, Qwen, Gemini, DeepSeek, the Claude and Codex gates, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"claude\",\"codex\",\"deepseek\",\"gemini\",\"grok\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
+check "the shipped registry is Muse, Grok, Qwen, Gemini, GLM, DeepSeek, the Codex gate, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"codex\",\"deepseek\",\"gemini\",\"glm\",\"grok\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
+check "Claude is out of the shipped reviewer pool (owner instruction 2026-09-30)" "jq -e '.providers.claude.registry_state==\"absent\" and (.providers.claude.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 # Health alone must still never mean allocatable. Proved against a fixture that
 # omits a provider, so the guard survives any future registry membership change.
 printf '{"version":1,"providers":{"codex":{"registry_state":"absent","reason":"omitted for this fixture"}}}

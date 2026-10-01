@@ -10,7 +10,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
    `bin/ai-reviewer-membership-drift` compares the two and fails on any
    difference; the `Reviewer membership drift` workflow runs it every six hours
    and on registry changes. Providers that review outside the allocator
-   (Claude approval gate, Codex overflow) are listed in
+   (Codex approval gate, StepFun on Ubuntu/Linux) are listed in
    `config/reviewer-membership-scope.json`.
 2. **Unreachable reviewer: check membership, then move on.** Run
    `bin/ai-reviewer-membership-drift` or read the registry first. If the
@@ -73,7 +73,16 @@ allocator but stayed registered here, and a session spent an hour trying it.
     `tests/test-reviewer-credit.sh`. Rate limits and a bare
     `RESOURCE_EXHAUSTED` are not credit failures.
 
-11. **StepFun is Ubuntu-only and outside the allocator.** Owner instruction,
+11. **Credit pause is a one-command switch, not a roster edit.** Owner rule,
+    2026-09-30: subscription credit pauses must be as easy as on/off. Use
+    `ai-review-preflight quarantine <provider> out-of-credit` to turn a
+    provider off and `ai-review-preflight clear <provider>` to turn it back
+    on after a refill. The allocator already skips quarantined providers.
+    Never edit `RETIRED_REVIEWERS` or `config/reviewer-registry.json` for a
+    credit pause — that path needs two repos, tests, and a review. Reserve
+    roster edits for permanent retirement or a real membership change.
+
+12. **StepFun is Ubuntu-only and outside the allocator.** Owner instruction,
     2026-09-25: add StepFun Step 5 as a reviewer on Ubuntu only (StepCode is
     not yet available on Windows) and let it write, implement, and execute
     code. `bin/ai-stepfun` refuses to run off Linux and preflight reports

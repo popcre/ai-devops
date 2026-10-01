@@ -148,10 +148,11 @@ read_jobs() {
 equivalent_fallback_proven() { # completed same-run replacement, never a failed assertion
   local jobs job conclusion status
   jobs="$(printf '%s\n' "$1" | sed 's/\r$//')"
-  # The workflow runs the identical Codex and Grok suites in these two lanes.
-  # Every other reported job must already be complete and clean. Explicitly
-  # require the core jobs too; an incomplete API response is not coverage.
-  for job in windows-reviewer-fallback windows-offline linux-offline 'fast-classifier / classify'; do
+  # P6: the hosted Codex and Grok suites are independent jobs. Both must have
+  # succeeded to replace the original reviewer lane. Every other reported job
+  # must already be complete and clean. Explicitly require the core jobs too;
+  # an incomplete API response is not coverage.
+  for job in windows-reviewer-fallback-codex windows-reviewer-fallback-grok windows-offline linux-offline 'fast-classifier / classify'; do
     printf '%s\n' "$jobs" | awk -F'\t' -v want="$job" '$1==want && $2=="success" && $3=="completed" {found=1} END {exit !found}' || return 1
   done
   printf '%s\n' "$jobs" | awk -F'\t' '$1=="windows-reviewer-safety" {found=1} END {exit !found}' || return 1
@@ -207,7 +208,7 @@ if [ "${#REQUIRED_JOBS[@]}" -gt 0 ]; then
     [ -n "$line" ] || reject "run $RUN_ID never ran the required job $job on head commit $HEAD_SHA"
     if [ "$job" = windows-reviewer-safety ] && [ "$line" != success ] && equivalent_fallback_proven "$JOBS"; then
       [ "$(read_queue_state)" = "$QUEUE_STATE" ] || reject 'the queued source or base changed during fallback verification'
-      printf 'ai-merge-group-evidence: exact-head windows-reviewer-fallback success supplies the identical reviewer suites for PR %s\n' "$PR_NUMBER"
+      printf 'ai-merge-group-evidence: exact-head hosted reviewer fallbacks supply the identical reviewer suites for PR %s\n' "$PR_NUMBER"
       continue
     fi
     if [ "$line" = skipped ]; then

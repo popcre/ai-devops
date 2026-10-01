@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# ai-doc-safety — prove the two whole-repo doc invariants on one tree, offline.
+#
+# WHY THIS EXISTS. A prose-only pull request merges through the immediate
+# squash-admin lane and skips the offline suites, and prose paths select no
+# suite even in a mixed pull request (#805). The public-boundary and local
+# Markdown-link checks therefore never see the one input they exist for: doc
+# content. Three 2026-09-30 landings jammed the merge queue that way (#1188:
+# #1171, #1174/#1162, #1178/#1180), each needing a manual unblock pull request.
+# This gate runs both checks on the exact tree a session is about to land, so
+# the immediate lane proves its own doc safety without a full-repo re-check.
+#
+# Usage:
+#   ai-doc-safety [tree]   (default: the caller's repository root)
+#
+# Exit status:
+#   0  both invariants hold on the tree
+#   1  at least one invariant failed (the failing check's output is printed)
+#   2  usage or environment error
+set -uo pipefail
+
+REAL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
+
+case "${1:-}" in
+  -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+  '') tree="$(git rev-parse --show-toplevel 2>/dev/null)" ;;
+  -*) printf 'ai-doc-safety: unknown option %s\n' "$1" >&2; exit 2 ;;
+  *) tree="$1" ;;
+esac
+[ -n "${tree:-}" ] || { printf 'ai-doc-safety: %s is not inside a git worktree\n' "${1:-$(pwd)}" >&2; exit 2; }
+tree="$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null)" || {
+  printf 'ai-doc-safety: %s is not a git repository\n' "$1" >&2; exit 2
+}
+
+PYTHON_RUNNER=''
+for candidate in python3 python; do
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 7) else 1)' >/dev/null 2>&1 || continue
+  PYTHON_RUNNER="$(command -v "$candidate")"
+  break
+done
+[ -n "$PYTHON_RUNNER" ] || { printf 'ai-doc-safety: Python 3.7 or newer is not installed\n' >&2; exit 2; }
+
+failed=0
+
+if ! bash "$REAL_DIR/ai-public-boundary-check" "$tree"; then
+  printf 'ai-doc-safety: public-boundary invariant failed on %s\n' "$tree" >&2
+  failed=1
+fi
+
+if ! "$PYTHON_RUNNER" "$REAL_DIR/../tools/check-markdown-links.py" "$tree"; then
+  printf 'ai-doc-safety: local Markdown-link invariant failed on %s\n' "$tree" >&2
+  failed=1
+fi
+
+[ "$failed" -eq 0 ] && printf 'ai-doc-safety: public boundary and local Markdown links hold on %s\n' "$tree"
+exit "$failed"

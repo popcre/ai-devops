@@ -588,6 +588,8 @@ check "new passes --max-turns"            "grep -q -- '--max-turns' '$TMP/argv.t
 check "new pins the model"                "grep -q -- '--model grok-4.6' '$TMP/argv.txt'"
 check "new allows Edit in the snapshot"   "grep -q -- '--allow Edit' '$TMP/argv.txt' && ! grep -q -- '--deny Edit' '$TMP/argv.txt'"
 check "new allows Bash in the snapshot"   "grep -q -- '--allow Bash' '$TMP/argv.txt' && ! grep -q -- '--deny Bash' '$TMP/argv.txt'"
+check "prompt warns that assignment-prefixed shell commands cancel the run" "grep -q 'CANCELS your current turn' '$TMP/prompt-copy' && grep -q 'bash .git/review-scratch/run.sh' '$TMP/prompt-copy' && grep -q 'invalidates the whole review' '$TMP/prompt-copy'"
+check "permission_cancelled is resumed in the same session, bounded, only on the native witness" "[ \$(grep -c '^  recover_or_preserve ' '$SCRIPT') -eq 2 ] && grep -q 'AI_GROK_PERMISSION_RESUMES:-3' '$SCRIPT' && grep -q 'native_permission_cancelled .*; do' '$SCRIPT' && ! grep -q 'permission_cancelled) printf' '$SCRIPT'"
 check "prompt says not read-only and edits are discarded" "grep -q 'You are NOT read-only' '$TMP/prompt-copy' && grep -q 'discarded' '$TMP/prompt-copy'"
 T1_DIR="$(run show t1 | jq -r '.review_dir')"
 check "writable review dir is a snapshot, not the caller checkout" "[ -d '$T1_DIR' ] && [ \"\$(cd '$T1_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
@@ -739,7 +741,7 @@ native_terminal_reason_cases(){
   note(){ printf '%s\n' "$*" >&2; }
   stream="$STATE_DIR/isolated-home/sessions/encoded-cwd/native-session/updates.jsonl"
   mkdir -p "$(dirname "$stream")"
-  for category in max_turns_reached PRIVATE_UNKNOWN_CATEGORY wrong-request wrong-session duplicate absent; do
+  for category in max_turns_reached PermissionCancelled PRIVATE_UNKNOWN_CATEGORY wrong-request wrong-session duplicate absent; do
     jq -n '{stopReason:"cancelled",sessionId:"native-session",requestId:"native-request",num_turns:20}' > "$fixture"
     rm -f "$fixture.terminal.json"
     jq -nc --arg category "$category" '{params:{sessionId:"native-session",update:{sessionUpdate:"turn_completed",prompt_id:"native-request",stop_reason:"cancelled"},_meta:{cancellationCategory:$category}}}' > "$stream"
@@ -756,6 +758,8 @@ native_terminal_reason_cases(){
       check 'native category witness binds result and terminal record hashes' "jq -e '.native_terminal_matches==1 and (.result_sha256|length)==64 and (.source_terminal_sha256|length)==64' '$fixture.terminal.json'"
       printf '\n' >> "$fixture"
       check 'changed paid result cannot reuse an earlier native witness' "test \"\$(terminal_reason_for_result '$fixture')\" = provider_cancelled"
+    elif [ "$category" = PermissionCancelled ]; then
+      check 'native PermissionCancelled is named as a local refused command, not the provider' "printf '%s' \"\$output\" | grep -q 'reason: permission_cancelled' && printf '%s' \"\$output\" | grep -q 'not the provider'"
     else
       check "native $category remains generic cancellation without guessing" "printf '%s' \"\$output\" | grep -q 'reason: provider_cancelled'"
     fi
@@ -765,6 +769,36 @@ native_terminal_reason_cases(){
 echo "== stop_reason handling =="
 terminal_reason_cases
 native_terminal_reason_cases
+
+permission_resume_cases(){
+  local out="$TMP/perm-out.json" pf="$TMP/perm-prompt" calls="$TMP/perm-calls" before
+  source <(sed -n '/^native_permission_cancelled() {/,/^}/p; /^recover_permission_cancelled() {/,/^}/p' "$SCRIPT")
+  note(){ :; }; report_usage(){ :; }; grok_credit_scan(){ :; }; capture_terminal_evidence(){ :; }
+  REVIEW_DIR="$TMP"; : > "$pf"
+  witness(){ jq -n --arg h "$(sha256sum "$out" | awk '{print $1}')" '{schema_version:1,native_terminal_matches:1,category:"PermissionCancelled",terminal_reason:"permission_cancelled",result_sha256:$h}' > "$out.terminal.json"; }
+  run_turn(){ printf '%s %s %s\n' "$4" "$5" "$(head -c 40 "$3")" >> "$calls"; RUN_TURN_RC="${FAKE_RC:-0}"; jq -n '{stopReason:"end_turn",sessionId:"s1",num_turns:3,text:"## Verdict\nAPPROVE"}' > "$2"; }
+  await_result(){ [ "${FAKE_AWAIT:-0}" = 0 ]; }
+  # a) native witness: resumed once in the same session with the remaining budget
+  PERMISSION_RESUMES=3; : > "$calls"; rm -f "$out.terminal.json"
+  rm -f "$out.prior-usage"; jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:7}' > "$out"; witness
+  recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'native PermissionCancelled resumes the same session once with the remaining turns' "[ $rc -eq 0 ] && [ \$(wc -l < '$calls') -eq 1 ] && grep -q '^13 s1 The Grok CLI refused' '$calls' && jq -e '.stopReason==\"end_turn\"' '$out' >/dev/null"
+  check 'replaced paid turn usage is kept for accounting' "[ -f '$out.prior-usage' ]"
+  # b) raw stop token without the native witness never resumes
+  : > "$calls"; rm -f "$out.terminal.json"
+  jq -n '{stopReason:"permission_cancelled",sessionId:"s1",num_turns:7}' > "$out"
+  recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'raw permission_cancelled token without native witness is not resumed' "[ $rc -eq 0 ] && [ ! -s '$calls' ]"
+  # c) an unconfirmed resume fails closed and keeps the confirmed cancelled result
+  : > "$calls"; jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:7}' > "$out"; witness; before="$(sha256sum "$out")"
+  FAKE_RC=124 recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'unconfirmed resumed turn fails closed and keeps the cancelled result and witness' "[ $rc -eq 1 ] && [ \"\$(sha256sum '$out')\" = '$before' ] && [ -f '$out.terminal.json' ]"
+  # d) exhausted budget does not resume
+  : > "$calls"; jq -n '{stopReason:"cancelled",sessionId:"s1",num_turns:20}' > "$out"; witness
+  recover_permission_cancelled "$out" s1 20 "$pf"; rc=$?
+  check 'no resume once the turn budget is spent' "[ $rc -eq 0 ] && [ ! -s '$calls' ]"
+}
+permission_resume_cases
 echo cancelled > "$TMP/mode"
 OUT="$(run new t4 --prompt x 2>&1)"; RC=$?
 # This case is about how a cancelled stopReason is reported, not about the wait
@@ -1318,8 +1352,10 @@ POOL="$REPO_ROOT/bin/ai-review-pool"
 bash "$FRONT" kimi security-review >/dev/null 2>&1; RC_KIMI=$?
 check "front_door_refuses_unregistered_provider" "[ '$RC_KIMI' -eq 2 ]"
 check "front_door_refusal_names_the_registry_state" "bash '$FRONT' kimi security-review 2>&1 | grep -q 'not a registered reviewer'"
-bash "$FRONT" glm security-review >/dev/null 2>&1; RC_GLM=$?
-check "front_door_refuses_glm_out_of_rotation" "[ '$RC_GLM' -eq 2 ]"
+# Registered GLM must not be refused as unregistered. A short timeout keeps the
+# offline suite from starting a real review when the front door accepts it.
+timeout 3 bash "$FRONT" glm security-review 2>&1 | grep -q 'not a registered reviewer'; RC_GLM_UNREG=$?
+check "front_door_does_not_refuse_registered_glm" "[ '$RC_GLM_UNREG' -ne 0 ]"
 bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
 check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 
@@ -1339,7 +1375,7 @@ cat > "$POOLTMP/lifecycle" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
   begin) printf '{"head":"$FAKE_HEAD","source_digest":"deadbeef","stale":false,"verdict":null}\n' > "\$(dirname "\$0")/state.json"; printf '%s\n' "\$(dirname "\$0")/state.json" ;;
-  finish) verdict=''; shift; while [ \$# -gt 0 ]; do [ "\$1" = --verdict ] && verdict="\$2"; shift; done; printf '{"stale":false,"verdict":"%s"}\n' "\$verdict" ;;
+  finish) verdict=''; shift; while [ \$# -gt 0 ]; do [ "\$1" = --verdict ] && verdict="\$2"; shift; done; printf '%s\n' "\$verdict" >> "\$(dirname "\$0")/finish-verdicts"; printf '{"stale":false,"verdict":"%s"}\n' "\$verdict" ;;
   *) exit 0 ;;
 esac
 EOF
@@ -1361,6 +1397,9 @@ case "${POOL_RUNNER_MODE:-approve}" in
   nounbound) printf 'Some analysis without naming the head under review, deliberately long enough to clear the report floor so that the binding check is the only failure mode exercised by this case, with no other assertion depending on the content of this paragraph.\n\n## Verdict\nAPPROVE\n' ;;
   noverdict) printf 'A long analysis that never ends with a verdict heading, deliberately long enough to clear the report floor so the missing verdict is the only failure mode exercised by this case, with severity groups and file references but no terminal section at all.\n' ;;
   tiny) printf 'Head: %s\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
+  provisional) printf '## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own. Head under review: %s.\n\n## Verdict\nREJECT\n' "$HEAD" ;;
+  provisionalonly) printf 'Head under review: %s.\n\n## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n' "$HEAD" ;;
+  headafterfinal) printf '## Verdict\nAPPROVE\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own.\n\n## Verdict\nAPPROVE\nHead: %s\n' "$HEAD" ;;
   drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
   credit) printf 'AI_REVIEWER_OUT_OF_CREDIT provider=grok code=insufficient_quota\nOUT OF CREDIT: stub - then run: ai-review-preflight clear grok\n' >&2; exit 92 ;;
   chrome) printf 'runner progress chrome naming the head %s with enough padding text that a whole-buffer byte floor would pass if chrome were counted toward the analysis floor, which is exactly what this mode must not reward\n' "$HEAD" >&2; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
@@ -1391,7 +1430,7 @@ check "pool_gemini_argv_omits_max_turns" "grep -q '^new pool-gemini-' '$POOLTMP/
 check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runner-args' && ! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
 check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
-check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 32'"
+check "pool_grok_argv_keeps_max_turns" "grep '^new pool-grok-' '$POOLTMP/runner-args' | head -1 | grep -q -- '--max-turns 120'"
 # Issue #711 Phase 5 (B'): a one-shot pool review releases the runner's session
 # through the runner's own delete path once the verdict is accounted, from
 # inside the snapshot; a refused or skipped release must never fail or narrow
@@ -1433,6 +1472,13 @@ check "pool_grok_success_notes_and_retains" "[ '$RC_GRKREL' -eq 0 ] && [ '$GRK_A
 check "pool_adapter_refuses_verdict_not_bound_to_head" "[ '$RC_NB' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-nb'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=noverdict bash "$POOL" grok security-review ) > "$POOLTMP/out-nv" 2>&1; RC_NV=$?
 check "pool_adapter_refuses_missing_verdict" "[ '$RC_NV' -ne 0 ] && grep -q 'no valid ## Verdict' '$POOLTMP/out-nv'"
+rm -f "$POOLTMP/finish-verdicts"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisional bash "$POOL" grok security-review ) > "$POOLTMP/out-prov" 2>&1; RC_PROV=$?
+check "pool_adapter_takes_the_final_verdict_not_the_provisional_one" "[ '$RC_PROV' -eq 0 ] && [ \"\$(tail -1 '$POOLTMP/finish-verdicts')\" = REJECT ]"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=headafterfinal bash "$POOL" grok security-review ) > "$POOLTMP/out-haf" 2>&1; RC_HAF=$?
+check "pool_adapter_binds_head_only_before_the_final_verdict" "[ '$RC_HAF' -ne 0 ] && grep -q 'did not name the reviewed head' '$POOLTMP/out-haf'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=provisionalonly bash "$POOL" grok security-review ) > "$POOLTMP/out-po" 2>&1; RC_PO=$?
+check "pool_adapter_floor_counts_only_text_before_the_final_verdict" "[ '$RC_PO' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-po'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" grok security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
 check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" grok security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?

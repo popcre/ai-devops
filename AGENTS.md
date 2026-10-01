@@ -116,6 +116,11 @@ pipeline. The recovery procedure lives in
   usable. For runner or CI work, follow [`docs/task-router.md`](docs/task-router.md).
 - Do not verify the same commit twice. The merge queue tests the exact landing
   commit; rerun only a failed or changed result.
+- A documentation-only landing still proves its own content (#1188): the
+  immediate `gh pr merge --squash --admin` lane is used only after
+  `bin/ai-doc-safety` passes on the exact head — `bin/ai-pr-wait` runs it on
+  the prose path — and the unconditional `doc-safety` check carries the same
+  public-boundary and local-link invariants for every CI event.
 - A reviewer repair is complete only when tests pass and every affected local
   reviewer-issue record is resolved or partially resolved with exact evidence.
   Follow `log-reviewer-issue` and preserve the incident package.

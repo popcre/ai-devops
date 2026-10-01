@@ -49,7 +49,7 @@ umask 077
 
 provider="${1:-}"; mode="${2:-}"
 case "$provider" in
-  grok)  RUNNER="$ROOT/ai-grok-review";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  grok)  RUNNER="$ROOT/ai-grok-review";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-120}" ;; # same review budget as ai-qwen; 32 ran out on a 48-file change
   muse)  RUNNER="$ROOT/ai-muse";         RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
   qwen)  RUNNER="$ROOT/ai-qwen";         RUNNER_MAX_TURNS="" ;; # ai-qwen owns its 120-turn/60m review budget and rejects --max-turns
   gemini) RUNNER="$ROOT/ai-gemini";      RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
@@ -288,16 +288,20 @@ if [ -z "$SNAPSHOT_DIGEST_AFTER" ] || [ "$SNAPSHOT_DIGEST_AFTER" != "$SNAPSHOT_D
 fi
 [ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
 
-VERDICT="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
+# The prompt asks for an early provisional verdict and the final verdict LAST
+# under a literal heading, so only the last `## Verdict` heading counts; an
+# earlier (provisional) one must never be read as the final answer.
+VERDICT_LINE="$(awk '/^## Verdict[[:space:]]*$/{n=NR} END{print n+0}' "$TMP_TEXT")"
+VERDICT="$(awk -v n="$VERDICT_LINE" 'n>0 && NR==n+1{gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
 case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
 # Binding and the analysis floor are judged on the MODEL BODY - stdout only,
 # captured separately from the runner's stderr chrome, and only the text
-# before the verdict heading counts.
-if ! awk -v h="$REVIEW_HEAD" '/^## Verdict[[:space:]]*$/{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
+# before the final verdict heading counts.
+if ! awk -v h="$REVIEW_HEAD" -v n="$VERDICT_LINE" 'NR>=n{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure verdict-not-bound-to-head --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die "$provider verdict did not name the reviewed head; refusing unbound verdict."
 fi
-BODY_BYTES="$(awk '/^## Verdict[[:space:]]*$/{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
+BODY_BYTES="$(awk -v n="$VERDICT_LINE" 'NR>=n{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
 [ "$BODY_BYTES" -ge 400 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure report-floor --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider analysis body is below the minimum analysis floor (runner chrome excluded)."; }
 
 OUT="$REPORT_DIR/${provider}-${mode}-${RUN_ID}.md"; [ ! -e "$OUT" ] || die "unique report collision: $OUT"

@@ -9,8 +9,8 @@
 # no progress, never a pass.
 set -uo pipefail
 
-[ "$#" -eq 8 ] || {
-  echo 'verify-closure: event selection run_long validation evidence linux windows reviewer are required.' >&2
+[ "$#" -eq 9 ] || {
+  echo 'verify-closure: event selection run_long validation evidence linux windows reviewer doc are required.' >&2
   exit 2
 }
 
@@ -22,10 +22,11 @@ EVIDENCE_RESULT="$5"
 LINUX_RESULT="$6"
 WINDOWS_RESULT="$7"
 REVIEWER_RESULT="$8"
+DOC_RESULT="$9"
 
-printf 'event=%s selection=%s run_long=%s validation=%s evidence=%s linux=%s windows=%s reviewer=%s\n' \
+printf 'event=%s selection=%s run_long=%s validation=%s evidence=%s linux=%s windows=%s reviewer=%s doc=%s\n' \
   "$EVENT" "$SELECTION_RESULT" "$RUN_LONG" "$VALIDATION_RESULT" \
-  "$EVIDENCE_RESULT" "$LINUX_RESULT" "$WINDOWS_RESULT" "$REVIEWER_RESULT"
+  "$EVIDENCE_RESULT" "$LINUX_RESULT" "$WINDOWS_RESULT" "$REVIEWER_RESULT" "$DOC_RESULT"
 
 # Map a job result onto the truth-table vocabulary. Anything outside the known
 # GitHub conclusions is "missing": it is never treated as progress or as proof.
@@ -69,6 +70,18 @@ fi
 EVIDENCE_STATE="$(classify_result "$EVIDENCE_RESULT")"
 if [ "$EVIDENCE_STATE" != success ]; then
   echo "verify-closure: merge-group evidence did not succeed (state=$EVIDENCE_STATE)." >&2
+  exit 1
+fi
+
+# 3b. Whole-repo doc safety. The public boundary and local Markdown links are
+#     the one lane a prose-only change controls entirely, and the immediate
+#     squash-admin lane skips every suite (#1188). The doc-safety job is
+#     unconditional on both required events, so anything but a real success —
+#     including a skip that can only come from removing that condition — fails
+#     closure here.
+DOC_STATE="$(classify_result "$DOC_RESULT")"
+if [ "$DOC_STATE" != success ]; then
+  echo "verify-closure: whole-repo doc safety (public boundary + local links) did not succeed (state=$DOC_STATE)." >&2
   exit 1
 fi
 
