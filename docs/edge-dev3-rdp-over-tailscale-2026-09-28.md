@@ -304,3 +304,21 @@ Closed: do not switch edge-dev3 to X11 or install xrdp for ScreenConnect. Use RD
   If `false`, unlock the wallet at the screen, then restart the KRDP service.
 - **Open:** surviving a reboot unattended needs the wallet to open without a password
   (an empty `kdewallet` password, set by Albert in KWalletManager). Owner decision pending.
+
+### Owner requirement and fix (2026-10-01, 5:57 PM EDT)
+
+Albert, verbatim: "i can't unlock the wallet every time i want to remote control it" and
+"I WILL NOT BE BY THE CONSOLE! i need true remote". Changes:
+
+- `SystemUserEnabled=true` in `~/.config/krdpserverrc` (backup `krdpserverrc.bak-20261001`).
+  KRDP checks the Linux login through PAM (`login` service) before the KWallet users, so
+  logging in as `ahazan` with the Linux password works with the wallet locked. `ahazan2`
+  still works whenever the wallet happens to be open. Security is TLS only (server NLA off),
+  so PAM receives the password.
+- Screen-share approval: `~/.local/state/krdp-serverstaterc` holds a restore token that the
+  portal PermissionStore (`remote-desktop` table) maps to `org.kde.krdp-server` = yes. The
+  approval asked at 5:49 PM EDT followed a test session at 5:46 PM EDT that started the
+  portal and closed before it finished, which likely consumed the old token. Do not run
+  half-finished test connections against the live service; use port 4838.
+- A local Ubuntu FreeRDP 3.31 client cannot finish a session (no H.264), so live proof
+  needs Albert's Windows client after a reboot.
