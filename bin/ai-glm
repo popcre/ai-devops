@@ -734,6 +734,7 @@ implementation_update() { # FILE JQ_FILTER [jq args...]
   # Pre-write gate must see the file on disk, not a reconcile snapshot.
   unset '_AI_GLM_IMPL_FIELDS[$f]'
   _AI_GLM_CANONICAL_PATH=()
+  _AI_GLM_REPO_ID=()
   record_caller="$(jq -r '.caller // empty' "$f" 2>/dev/null)"
   if [ ! -f "$f" ] || [ -z "$record_caller" ] || ! implementation_meta_valid "$f" "" "$record_caller"; then
     rm -rf "$update_lock"; return 1
@@ -2492,6 +2493,7 @@ reconcile_implementation_record() { # conservative dead-owner recovery; never tr
   # every later canonical_path see on-disk truth.
   unset '_AI_GLM_IMPL_FIELDS[$mp]'
   _AI_GLM_CANONICAL_PATH=()
+  _AI_GLM_REPO_ID=()
   fields="$(implementation_record_fields "$mp")" || return 0
   IFS=$'\x1f' read -r schema_ok rid caller name root state pid clone sid type <<< "$fields"
   [ "$type" = implementation ] || return 0
@@ -2567,6 +2569,7 @@ reconcile_implementation_records() {
   # One pass only: never leave a reconcile snapshot behind for later callers.
   _AI_GLM_IMPL_FIELDS=()
   _AI_GLM_CANONICAL_PATH=()
+  _AI_GLM_REPO_ID=()
   return "$rc"
 }
 
