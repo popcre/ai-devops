@@ -16,8 +16,9 @@
 | C3. Index the 18 unlisted root `plan_*.md` | ✅ done 2026-09-29 | PR #1123 `b0779156`; 73/73 plans indexed (re-measured 19 missing incl. `plan_reviewer-pipeline-core.md`) |
 | C4. Fold-routing lines for findings 5/6/7/8 | ✅ done 2026-09-29 | PR #1123 `b0779156`; markers in plan_workflow-efficiency, plan_github-request-reduction, plan_blockerwatch-reliability-repair, plan_ai-devops-work-claims, bin/ai-machine-tools-doctor |
 | D1. Doctor orphan spawn guard + reconcile residual (small) | ✅ done 2026-09-30 | PR #1149 `852dd7e3`; Qwen APPROVE exact-head `d43df6c1`; `tests/test-ai-glm.sh` 364/0 (spawn bound 7 for N=5 and N=50); live proof 20 orphans in 420 ms |
-| 7. Independent exact-head review per code PR | ✅ done 2026-09-30 | A2 Muse APPROVE; D1 Qwen APPROVE `d43df6c1` (`.ai/reviews/qwen-d1-orphan-final-check.md`) |
-| 8. Merge via queue + live proof per PR | ✅ done 2026-09-30 | A1 `f8f032ed`, A2 `cbe08f5d`, B1 `c12470a5`, D1 `852dd7e3` via merge queue; live proofs named in each STATUS row |
+| **D2. Reconcile open-record batching (2026-09-29 residual, step 2b)** | ✅ done 2026-10-01 | PR #1194 merge `5ad0ef4e`; Codex APPROVE exact-head `73fd0005`; `tests/test-ai-glm.sh` 367/0 (1 vs 25 open records equal spawn bound); live proof 25 open records / 933 ms / 5 spawns (issue #1116 comment) |
+| 7. Independent exact-head review per code PR | ✅ done 2026-09-30 | A2 Muse APPROVE; D1 Qwen APPROVE `d43df6c1` (`.ai/reviews/qwen-d1-orphan-final-check.md`); D2 Codex APPROVE `73fd0005` (`.ai/reviews/codex-final-check-20261001T023239-179255-24713.md`) |
+| 8. Merge via queue + live proof per PR | ✅ done 2026-09-30 | A1 `f8f032ed`, A2 `cbe08f5d`, B1 `c12470a5`, D1 `852dd7e3`, D2 `5ad0ef4e` via merge queue; live proofs named in each STATUS row |
 
 **Fresh session starts at step 1.** Re-read this STATUS table first. Do not re-derive or re-plan.
 
@@ -164,6 +165,7 @@ Reviewer wrappers other than `ai-glm`'s doctor path; shared-db; installers; CI w
 | Item 1 is closed (no new registry work) | 2026-09-29 | Empty-report fail-closed + lease liveness already merged |
 | No lease TTL | 2026-09-05 (design) | Never free a slot on age alone |
 | First instrument = spawn-count, not wall-clock | 2026-09-29 | Deterministic; matches existing `tests/test-ai-glm.sh` guard |
+| 2026-09-29 residual (step 2b) **resolved 2026-10-01** | 2026-10-01 | Reconcile open-record path is batched and cache-backed (PR #1194 `5ad0ef4e`): one jq for schema+fields per record (bulk-filled per 100), `canonical_path`/`repo_id` caches cleared on destructive re-reads, fail-closed path checks. Owner was "whoever next touches bin/ai-glm doctor" — done in D2. Live proof on #1116: 25 open records in 933 ms / 5 spawns. |
 | Independent exact-head review required for the doctor PR | standing | `bin/ai-glm` is a reviewer wrapper; AGENTS.md reviewer-safety path |
 
 ### Decision ledger: why findings 3 and 9 are not done
