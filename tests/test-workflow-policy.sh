@@ -400,9 +400,11 @@ fork_guard_ok() {
   # No WarpBuild or self-hosted label in the fallback literal.
   ! printf '%s' "$matrix_line" | grep -qF 'warp-custom' || return 1
   ! printf '%s' "$matrix_line" | grep -qF 'self-hosted' || return 1
-  # The surrounding comment must acknowledge this is defense-in-depth,
-  # not the sole guard (GitHub's fork isolation for self-hosted runners
-  # is the primary protection).
+  # The surrounding comment must name the primary fork protection: the
+  # repository's all_external_contributors approval policy (see
+  # docs/self-hosted-windows-runner.md). The workflow-level check is
+  # defense-in-depth, not the sole guard.
+  sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | grep -qF 'all_external_contributors' || return 1
   sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | grep -qF 'defense-in-depth' || return 1
 }
 check 'the required section matrix fork guard falls back to all-Blacksmith and cannot be silently removed' fork_guard_ok

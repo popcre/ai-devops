@@ -270,15 +270,14 @@ jobs:
       # and the rest of the evidence still lands.
       fail-fast: false
       # The router's plan; the literal fallback is the all-Blacksmith plan used
-      # when the router produced nothing. The head-repo test here is
-      # defense-in-depth: GitHub does not route pull_request jobs from forks
-      # to self-hosted runners by default, and fork PRs get read-only tokens
-      # with no secrets. The head-repo check and the all-Blacksmith fallback
-      # add a second layer in the workflow. For trusted enforcement that does
-      # not depend on the PR-editable workflow definition, see the runner-level
-      # guards and GitHub's fork isolation for self-hosted runners.
-      # A foreign head gets the Blacksmith literal regardless of what the
-      # router (or a tampered config) reports.
+      # when the router produced nothing. Primary fork protection is the
+      # repository's Actions fork-PR approval policy (all_external_contributors,
+      # see docs/self-hosted-windows-runner.md): every external contributor
+      # needs approval before any workflow runs on self-hosted or BYOC
+      # runners. The head-repo check and all-Blacksmith fallback here are
+      # defense-in-depth inside the PR-editable workflow definition. A foreign
+      # head gets the Blacksmith literal regardless of what the router (or a
+      # tampered config) reports.
       matrix:
         include: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":7,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":8,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
     runs-on: ${{ matrix.runs_on }}
@@ -328,9 +327,11 @@ jobs:
   # every required aggregate: `continue-on-error: true` and absent from
   # verification-closure's needs. An unqueued or quota-stalled WarpBuild pool
   # therefore cannot block a merge - the Blacksmith sections above remain the
-  # required proof. The head-repo guard keeps fork pull requests off our Azure
-  # subscription's VMs. max-parallel 2 matches the live standardDASv4Family
-  # quota (10 vCPUs = 2 concurrent Standard_D4as_v4 VMs).
+  # required proof. Primary fork protection is the repository's
+  # all_external_contributors approval policy (docs/self-hosted-windows-runner.md);
+  # the head-repo if-guard is defense-in-depth against fork PRs reaching our
+  # Azure subscription's VMs. max-parallel 2 matches the live
+  # standardDASv4Family quota (10 vCPUs = 2 concurrent Standard_D4as_v4).
   windows-offline-warpbuild-proof:
     needs: [fast-classifier, manual-preflight]
     if: >-
