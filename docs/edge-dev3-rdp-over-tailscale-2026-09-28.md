@@ -285,3 +285,22 @@ desktop, and it once took over port 4837 (see above). So the choice is: keep Way
 
 **Owner decision (2026-10-01, Albert, verbatim):** "keep wayland, leave screenconnect black".
 Closed: do not switch edge-dev3 to X11 or install xrdp for ScreenConnect. Use RDP (KRDP) for remote access.
+
+## 2026-10-01 evening: flash-and-close after reboot (locked KWallet)
+
+- **Symptom:** after the 5:29 PM EDT reboot, `mstsc` showed "estimating connection quality",
+  flashed, and closed for 10+ minutes (not the 2-minute startup window).
+- **Evidence:** every attempt logged `New client connected` then `PostConnect ... failed`, with
+  no `authenticated successfully` line and no portal activity. KRDP 6.6.4 `onPostConnect`
+  returns false when a configured user's password is empty. KRDP reads the `ahazan2` password
+  from KWallet (folder `KRDP`) once at startup; the wallet was locked (SDDM auto-login cannot
+  unlock it, `pam_kwallet5` is only in `/etc/pam.d/sddm`), so the read waited and the password
+  stayed empty. The wallet was unlocked at the console at 5:40:57 PM EDT.
+- **Proof:** after `systemctl --user restart app-org.kde.krdpserver` (5:45 PM EDT, wallet open),
+  a local FreeRDP 3.31 client logged `User "ahazan2" authenticated successfully` and
+  `Initializing Freedesktop Portal Session`. Earlier fixes (software encoder drop-in, portal
+  desktop file, kdeglobals restrictions) were untouched.
+- **Fast check:** `qdbus6 org.kde.kwalletd6 /modules/kwalletd6 org.kde.KWallet.isOpen kdewallet`.
+  If `false`, unlock the wallet at the screen, then restart the KRDP service.
+- **Open:** surviving a reboot unattended needs the wallet to open without a password
+  (an empty `kdewallet` password, set by Albert in KWalletManager). Owner decision pending.
