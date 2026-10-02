@@ -190,7 +190,7 @@ Concrete mechanisms and a numbered playbook. Several pieces have already landed;
 
 7. **No-progress detection.** If the same test fails the same way N times, stop and report the category. No session may repeat a multi-hour suite for a day. The 24-hour loop (owner-reported) is exactly this failure.
 
-8. **Do independent useful work while waiting (rule already exists — make it structural).** A session that is waiting on CI should be doing another bounded task, or the turn should end with the wait registered. Sitting in the turn polling is forbidden and is also how secondary rate limits get tripped.
+8. **Do independent useful work while waiting (rule already exists — make it structural).** A session that is waiting on CI should be doing another bounded task, or the turn should end with the issue/PR as the card (registration is OUT). Sitting in the turn polling is forbidden and is also how secondary rate limits get tripped.
 
 ### 6.2 Numbered playbook
 

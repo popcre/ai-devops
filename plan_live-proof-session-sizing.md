@@ -251,7 +251,7 @@ When you keep leftover live-proof work, open one issue per unproven step and sta
 Then:
 
 1. Commit only task-owned files. Push. Open a PR to `main` titled like `fix(#511): one unproven live-proof outcome per session`.
-2. This change set includes globals, a test, a skill, and Python — **not** documentation-only. Wait with `bin/ai-pr-wait <pr>`. Merge through the queue. Confirm the squash commit on `origin/main`.
+2. This change set includes globals, a test, a skill, and Python — **not** documentation-only. Wait with `bin/ai-pr-wait <pr> --timeout-minutes N`. Merge through the queue. Confirm the squash commit on `origin/main`.
 3. Install: `bin/ai-adopt-globals` on this machine (installation class; #511 plus Albert’s “write up a plan to implement” and this plan’s Step 5 are the owner request to install the new global sentence). Preserve machine sections. Verify:
 
    ```powershell

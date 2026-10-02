@@ -61,7 +61,8 @@ pipeline. The recovery procedure lives in
   open-ended `until`/`while` loop around `gh` — every wait needs a deadline or
   iteration cap (#401). Use bounded in-session `ai-pr-wait` /
   `ai-gh-wait` with an **explicit** `--timeout-minutes` deadline only; there is
-  no waiter registry, TTL service, or park-state store. If the wait will outlive
+  no required waiter registry, TTL service, or park-state store (voluntary
+  inert registration is permitted, unrequired, unmeasured). If the wait will outlive
   the turn, leave the existing issue or pull request as the card and return
   later — GitHub notifications are the reminder (#1183 child 3, #511).
 - Reuse before adding another plan, workflow, harness, or provider copy. Every
