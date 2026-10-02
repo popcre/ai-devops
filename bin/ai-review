@@ -89,8 +89,28 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$code_only" -eq 1 ] || { [ -z "$paths_file" ] || { usage >&2; exit 2; }; }
 if [ "$review_provider" = deepseek ] && [ "$code_only" -ne 1 ]; then
-  printf 'ai-review: DeepSeek uses the explicit code-only route; supply --code-only and --paths-file.\n' >&2
-  exit 2
+  # Ordinary DeepSeek reviews dispatch through the shared review runner's
+  # OpenCode door, the same pool path as the other rotation reviewers. The
+  # --code-only attachment-only route stays below and is chosen only with
+  # that flag (private source; see docs/development.md).
+  REGISTRY=""
+  for candidate in "$REAL_DIR/../config/reviewer-registry.json" "$ROOT/../config/reviewer-registry.json"; do
+    [ -f "$candidate" ] && REGISTRY="$candidate" && break
+  done
+  [ -z "${AI_REVIEW_REGISTRY_FILE:-}" ] || REGISTRY="$AI_REVIEW_REGISTRY_FILE"
+  registry_state=""
+  [ -z "$REGISTRY" ] || registry_state="$(jq -r --arg p deepseek '.providers[$p].registry_state // "absent"' "$REGISTRY" 2>/dev/null || true)"
+  if [ "$registry_state" != "registered" ]; then
+    printf 'ai-review: error: deepseek is not a registered reviewer (registry state: %s). The registry decides the pool; never flip a state to make a review succeed.\n' "${registry_state:-registry-not-found}" >&2
+    exit 2
+  fi
+  if [ -n "${AI_REVIEW_POOL_BIN:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
+    printf 'ai-review: error: AI_REVIEW_POOL_BIN is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute the pool adapter.\n' >&2
+    exit 2
+  fi
+  pool_provider="deepseek"
+  wrapper="${AI_REVIEW_POOL_BIN:-$ROOT/ai-review-pool}"
+  wrapper_args=("deepseek" "${wrapper_args[@]}")
 fi
 if [ "$code_only" -eq 1 ]; then
   [ "$review_provider" = deepseek ] || { printf 'ai-review: code-only mode requires the attachment-only DeepSeek reviewer.\n' >&2; exit 2; }

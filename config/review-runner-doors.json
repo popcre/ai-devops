@@ -8,5 +8,12 @@
     "contract": ["review", "implement"],
     "migrated_in": "fix/1114-review-runner-doors",
     "notes": "First proven door. Session CLI bin/ai-grok-review remains for persistent named sessions; formal pool reviews dispatch through the engine."
+  },
+  "deepseek": {
+    "door": "tools/lib/review-doors/deepseek.sh",
+    "contract": ["review", "implement"],
+    "migrated_in": "fix/1114-opencode-deepseek-door",
+    "harness": "opencode",
+    "notes": "First OpenCode door on the same runner. Profile config/opencode-deepseek selects the model pin and tool set; formal pool reviews dispatch through the engine. Session CLIs bin/ai-deepseek and bin/ai-deepseek-agent remain for named sessions and debates."
   }
 }

@@ -1352,10 +1352,17 @@ POOL="$REPO_ROOT/bin/ai-review-pool"
 bash "$FRONT" kimi security-review >/dev/null 2>&1; RC_KIMI=$?
 check "front_door_refuses_unregistered_provider" "[ '$RC_KIMI' -eq 2 ]"
 check "front_door_refusal_names_the_registry_state" "bash '$FRONT' kimi security-review 2>&1 | grep -q 'not a registered reviewer'"
-# Registered GLM must not be refused as unregistered. A short timeout keeps the
-# offline suite from starting a real review when the front door accepts it.
-timeout 3 bash "$FRONT" glm security-review 2>&1 | grep -q 'not a registered reviewer'; RC_GLM_UNREG=$?
-check "front_door_does_not_refuse_registered_glm" "[ '$RC_GLM_UNREG' -ne 0 ]"
+# GLM is a rotation reviewer again (owner instruction 2026-09-30). The old
+# "refuses glm out of rotation" check encoded the 2026-09-18 pause. Draw
+# eligibility from the registry instead of a hardcoded expectation.
+GLM_STATE="$(jq -r '.providers.glm.registry_state // "absent"' "$REPO_ROOT/config/reviewer-registry.json" 2>/dev/null || echo absent)"
+if [ "$GLM_STATE" = registered ]; then
+  bash "$FRONT" glm security-review >/dev/null 2>&1; RC_GLM=$?
+  check "front_door_accepts_registered_glm_from_registry" "[ '$RC_GLM' -ne 2 ]"
+else
+  bash "$FRONT" glm security-review >/dev/null 2>&1; RC_GLM=$?
+  check "front_door_refuses_glm_out_of_rotation" "[ '$RC_GLM' -eq 2 ]"
+fi
 bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
 check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 
@@ -1527,7 +1534,7 @@ SNAPSHOT_ORIGIN="$(cat "$POOLTMP/origin-url" 2>/dev/null)"
 check "pool_adapter_strips_credentials_from_the_snapshot_origin" "[ -n '$SNAPSHOT_ORIGIN' ] && [ "'$SNAPSHOT_ORIGIN'" = "'https://github.com/org/repo.git'" ]"
 SANDBOX_PIN_LINE="$(grep -n '^SANDBOX=' "$POOL" | head -1 | cut -d: -f1)"
 MODELS_SOURCE_LINE2="$(grep -n '\. "$MODELS_ENV"' "$POOL" | head -1 | cut -d: -f1)"
-check "pool_adapter_gates_the_sandbox_tool_hook" "grep -q 'AI_REVIEW_SANDBOX_BIN' '$POOL' && grep -q 'AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN' '$POOL'"
+check "pool_adapter_gates_the_sandbox_tool_hook" "grep -q 'AI_REVIEW_SANDBOX_BIN' '$POOL' && grep -q 'AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_POOL_RUNNER_DEEPSEEK AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN' '$POOL'"
 check "pool_adapter_pins_the_sandbox_tool_before_models_env" "[ -n '$SANDBOX_PIN_LINE' ] && [ -n '$MODELS_SOURCE_LINE2' ] && [ '$SANDBOX_PIN_LINE' -lt '$MODELS_SOURCE_LINE2' ]"
 check "front_door_gates_the_pool_wrapper_hook" "grep -q 'AI_POOL_TEST_HOOKS=1 to substitute the pool adapter' '$FRONT'"
 check "pool_adapter_redacts_credential_shaped_diagnostics" "grep -q 'REDACTED' '$POOL'"

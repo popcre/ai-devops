@@ -9,6 +9,7 @@ bin/ai-muse*
 bin/ai-process-supervisor*
 bin/ai-provider-version*
 bin/ai-review*
+bin/ai-deepseek*
 bin/windows-private-file.ps1
 config/ci-suite-manifest.json
 config/ci-suites/**
@@ -53,6 +54,7 @@ bin/setup-opencode-muse.sh
 config/muse-code/**
 config/opencode/**
 config/opencode-muse/**
+config/opencode-deepseek/**
 config/opencode-stepfun/**
 config/systemd/opencode-*
 tests/fixtures/**
