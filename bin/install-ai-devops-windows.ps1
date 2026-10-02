@@ -1333,8 +1333,8 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
         Write-Note 'Git Bash is needed to prepare the Qwen key store.'
     }
     $grokBash = Get-GitBash
-    $grokWrapper = (Join-Path $RepoPath 'bini-grok-review') -replace '\', '/'
-    if ($grokBash -and (Test-Path -LiteralPath (Join-Path $RepoPath 'bini-grok-review'))) {
+    $grokWrapper = (Join-Path $RepoPath 'bin\ai-grok-review') -replace '\\', '/'
+    if ($grokBash -and (Test-Path -LiteralPath (Join-Path $RepoPath 'bin\ai-grok-review'))) {
         # API-key fallback used only when no Grok OAuth session (auth.json) exists.
         $grokKeyProbe = Invoke-NativeProbe -Command $grokBash.Source -Arguments @('--noprofile', '--norc', $grokWrapper, 'store-key', '--if-missing')
         if ($grokKeyProbe.ExitCode -eq 0) { Write-Note 'Grok protected per-user key store is ready.' }
