@@ -1352,8 +1352,17 @@ POOL="$REPO_ROOT/bin/ai-review-pool"
 bash "$FRONT" kimi security-review >/dev/null 2>&1; RC_KIMI=$?
 check "front_door_refuses_unregistered_provider" "[ '$RC_KIMI' -eq 2 ]"
 check "front_door_refusal_names_the_registry_state" "bash '$FRONT' kimi security-review 2>&1 | grep -q 'not a registered reviewer'"
-bash "$FRONT" glm security-review >/dev/null 2>&1; RC_GLM=$?
-check "front_door_refuses_glm_out_of_rotation" "[ '$RC_GLM' -eq 2 ]"
+# GLM is a rotation reviewer again (owner instruction 2026-09-30). The old
+# "refuses glm out of rotation" check encoded the 2026-09-18 pause. Draw
+# eligibility from the registry instead of a hardcoded expectation.
+GLM_STATE="$(jq -r '.providers.glm.registry_state // "absent"' "$REPO_ROOT/config/reviewer-registry.json" 2>/dev/null || echo absent)"
+if [ "$GLM_STATE" = registered ]; then
+  bash "$FRONT" glm security-review >/dev/null 2>&1; RC_GLM=$?
+  check "front_door_accepts_registered_glm_from_registry" "[ '$RC_GLM' -ne 2 ]"
+else
+  bash "$FRONT" glm security-review >/dev/null 2>&1; RC_GLM=$?
+  check "front_door_refuses_glm_out_of_rotation" "[ '$RC_GLM' -eq 2 ]"
+fi
 bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
 check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 
