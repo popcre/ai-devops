@@ -35,10 +35,8 @@ pipeline. The recovery procedure lives in
   preview proof; it authorizes no manual production command or other infrastructure
   mutation and fails closed to an engineer on any absent or ambiguous evidence.
 - Shared-database STRUCTURE changes are authored in `popcre/shared-db` through
-  its branch-and-PR workflow. Claim-first is the default: claim exact objects on
-  the existing issue and start — no orchestrator chat or marker. Load the
-  matching shared-db skill before acting; application rows remain owned by the
-  application.
+  its branch-and-PR workflow. Load the matching shared-db skill before acting;
+  application rows remain owned by the application.
 - Installation changes can write outside the repository. Read
   [`docs/deployment.md`](docs/deployment.md) before changing install, update,
   uninstall, symlink, or machine-setup behavior.
@@ -61,10 +59,9 @@ pipeline. The recovery procedure lives in
   migrated; other waits use `bin/ai-gh-wait`. At most one
   GitHub call every 5 minutes per waiter; never `gh run watch`, and never an
   open-ended `until`/`while` loop around `gh` — every wait needs a deadline or
-  iteration cap (#401). For a wait that may exceed ~10 minutes, use bounded
-  `ai-pr-wait` while you remain in the turn; otherwise leave the existing
-  issue or pull request as the card and return later — GitHub notifications
-  are the reminder.
+  iteration cap (#401). Any wait that may exceed ~10 minutes is REGISTERED with
+  `ai-blocker-watch wait` and the turn ends; polling is the exception for short
+  waits (#723, `docs/standing-rules-details.md`).
 - Reuse before adding another plan, workflow, harness, or provider copy. Every
   new shared artifact needs an owner, a reason the
   shared home cannot serve the need, and a retirement or consolidation path.
@@ -86,11 +83,11 @@ pipeline. The recovery procedure lives in
 | Repeated tests/reviews, interrupted runs, or workflow delivery efficiency | [`plan_workflow-efficiency.md`](plan_workflow-efficiency.md) STATUS, issue #650 | One measured outcome per session; reuse existing repairs and retain source-bound safety |
 | Evidence-only commit churn, unrelated-main review invalidation, or Jujutsu pilot | [`plan_agent_evidence_and_jujutsu_pilot.md`](plan_agent_evidence_and_jujutsu_pilot.md) STATUS, issue #903 | Reconcile existing owners first; GitHub stays authoritative; pilot remains reversible |
 | Windows runner maintenance elevation over SSH | [Windows runner maintenance elevation plan](plan_windows-runner-maintenance-elevation.md) STATUS, [issue #262](https://github.com/popcre/ai-devops/issues/262) | Keep UAC and remote-token filtering; only the qualification refresh is allowlisted; installation/live proof remains a protected gate |
+| WarpBuild Azure BYOC Windows CI (canary or cost cut-over) | [`docs/warpbuild-azure-byoc.md`](docs/warpbuild-azure-byoc.md), [issue #961](https://github.com/popcre/ai-devops/issues/961) | Required CI stays Blacksmith until a reviewed cut-over; public-repo runner groups must allow public jobs |
 | ZCode for Windows client support (skills, MCP, hooks, wrapper) | [ZCode Windows support plan](plan_zcode-windows-support.md) STATUS, [issue #558](https://github.com/popcre/ai-devops/issues/558) | Follow the Claude/Codex per-client pattern; never edit vendor bytes under `C:\Program Files\ZCode`; NO ZCode reviewer ever (owner ruling 2026-09-17: GLM never reviews GLM-orchestrated work) |
 | MiMo / MiMoCode for Windows client support (skills, MCP, wrapper) | [MiMo Windows support plan](plan_mimo-windows-support.md) STATUS | Follow the Claude/Codex/ZCode per-client pattern; skills write root is `~/.config/mimocode/skills/` only; MCP `command` is an array and timeout key is `timeout`; NO MiMo reviewer; no completion-check hook (no hook surface) |
 | Shared-db delivery delay or orchestrator throughput | [`plan_shared-db-complete-throughput-repair.md`](plan_shared-db-complete-throughput-repair.md) STATUS (closed #401 decision record) | Preserve the proven request-to-live safeguards; route new defects to new issues rather than reopening the programme |
-| Delete shared-db coordination layer (C by deletion) | [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md) STATUS | Keep claims/leases/review/live proof; delete leftover-proof mill, required orchestrator role, chat conductor; never path-filter required checks; do not reopen #401 |
-| Bundled leftover live proofs, one chat given several unproven steps, or proofs saved for a later chat | [`plan_live-proof-session-sizing.md`](plan_live-proof-session-sizing.md) STATUS | Live proof is required before an outcome is closed; leave a checklist item on the same issue — never a leftover-proof ticket |
+| Bundled leftover live proofs, one chat given several unproven steps, or proofs saved for a later chat | [`plan_live-proof-session-sizing.md`](plan_live-proof-session-sizing.md) STATUS | One unproven outcome per session; never save several unproven steps for later; do not steal remaining 3027 proofs |
 | Combined reviewer reliability and cache/session qualification | [`plan_reviewer-reliability-and-efficiency.md`](plan_reviewer-reliability-and-efficiency.md) STATUS | Reuse existing provider work; no completion without installed evidence |
 | TypeSafe Jev evaluation or advisory integration | [`plan_typesafe-jev-decision-layer.md`](plan_typesafe-jev-decision-layer.md) STATUS, then [`plan_typesafe-jev-advisory-integrations.md`](plan_typesafe-jev-advisory-integrations.md) STATUS and [issue #643](https://github.com/popcre/ai-devops/issues/643); for measured token substitution read [`plan_typesafe-jev-spend-reduction.md`](plan_typesafe-jev-spend-reduction.md) STATUS | Public-data pilots first; Jev never opens a gate, mutates authoritative state, or replaces review; key via `op run` only |
 | Review-packet race (target moved forward), slow review evidence, or adversarial-case planning | [review-packet race and evidence speed plan](plan_review-packet-race-and-evidence-speed.md) STATUS | Only the target-ref tip check gains ancestry tolerance; HEAD/digest/merge-base stay strict; never delete a guarded packet test — re-scope it |

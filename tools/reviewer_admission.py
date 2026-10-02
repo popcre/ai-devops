@@ -52,6 +52,45 @@ PROVIDER_CREDIT_PATTERNS = {'qwen': tuple(re.compile(p) for p in (
 # DashScope uses insufficient_quota for rate limiting too, so it proves nothing
 # about Qwen's balance; Qwen relies on its own status codes above.
 PROVIDER_EXCLUDED_PATTERNS = {'qwen': ('insufficient_quota',)}
+# #1115 failure streams. Provider-side policy and downtime must not enter the
+# code-defect stream. A bare HTTP 404 (or 403) is code/config unless separate
+# credit, capacity, or provider-down evidence appears in the same text.
+STREAM_OUTAGE = 'provider-outage'
+STREAM_CODE = 'code-defect'
+# Terminal usage-limit refusals reuse the existing observe() reason name.
+USAGE_LIMIT_PATTERNS = tuple(re.compile(p) for p in (
+    r'usage[ _-]?limit',
+    r'exceeded (your |the )?(current |daily |monthly )?usage',
+    r'terminal["\s:=]+usage-limit',
+))
+# Quota/rate/allowance policy. Not "needs money" and not a code defect.
+CAPACITY_PATTERNS = tuple(re.compile(p) for p in (
+    r'rate[ _-]?limit',
+    r'too many requests',
+    r'\bhttp[ /_-]?429\b',
+    r'\bstatus[ :=]+429\b',
+    r'resource_exhausted',
+    r'insufficient_quota',
+    r'quota.{0,24}(exceed|exhaust|reached|deplet)',
+    r'(exceed|exhaust|reach|deplet).{0,24}quota',
+    r'allowance.{0,24}(exceed|exhaust|reached)',
+    r'throttl',
+))
+# Provider transport/downtime only. Deliberately excludes bare 403/404/429.
+PROVIDER_DOWN_PATTERNS = tuple(re.compile(p) for p in (
+    r'connection (refused|reset|aborted|closed|failed)',
+    r'network is unreachable|no route to host',
+    r'service (is )?unavailable',
+    r'temporarily unavailable',
+    r'\bbad gateway\b',
+    r'gateway[ _-]?(time-?out|error)',
+    r'\bhttp[ /_-]?50[234]\b',
+    r'\bstatus[ :=]+50[234]\b',
+    r'econnrefused|econnreset|etimedout|epipe',
+    r'connection timed out',
+    r'upstream (is )?(unavailable|unreachable|down)',
+    r'dns (lookup|resolution) (failed|error)',
+))
 CREDIT_MESSAGES = {
     'grok': 'the xAI (Grok) account has run out of credits or hit its monthly spending limit - add credits at https://console.x.ai',
     'muse': 'the Meta (Muse) API account has run out of credits - add credits at https://dev.meta.ai',
@@ -60,6 +99,16 @@ CREDIT_MESSAGES = {
     'deepseek': 'the DeepSeek account balance is used up - top up at https://platform.deepseek.com/top_up',
     'stepfun': 'the StepFun (Step 5) API account is out of credit - add credits at https://platform.stepfun.ai',
 }
+
+
+def credit_match_text(text, provider=None):
+    """Return the first matching credit pattern name for already-read text."""
+    for pattern in CREDIT_PATTERNS + PROVIDER_CREDIT_PATTERNS.get(provider, ()):
+        if pattern.pattern in PROVIDER_EXCLUDED_PATTERNS.get(provider, ()):
+            continue
+        if pattern.search(text):
+            return pattern.pattern
+    return None
 
 
 def credit_match(paths, provider=None):
@@ -74,12 +123,31 @@ def credit_match(paths, provider=None):
                 text = source.read().decode('utf-8', 'replace').lower()
         except OSError:
             continue
-        for pattern in CREDIT_PATTERNS + PROVIDER_CREDIT_PATTERNS.get(provider, ()):
-            if pattern.pattern in PROVIDER_EXCLUDED_PATTERNS.get(provider, ()):
-                continue
-            if pattern.search(text):
-                return pattern.pattern
+        matched = credit_match_text(text, provider)
+        if matched is not None:
+            return matched
     return None
+
+
+def classify_event(text, provider=None):
+    """Return the failure stream and class for one failure text blob.
+
+    Reuses the existing credit/usage-limit evidence classes and extends them
+    with capacity and provider-down. A bare HTTP 404 or 403 stays code-config:
+    those are usually a wrong path, model name, or permission setting.
+    """
+    lowered = (text or '').lower()
+    if credit_match_text(lowered, provider) is not None:
+        return STREAM_OUTAGE, 'credit'
+    for patterns in (USAGE_LIMIT_PATTERNS, CAPACITY_PATTERNS, PROVIDER_DOWN_PATTERNS):
+        for pattern in patterns:
+            if pattern.search(lowered):
+                if patterns is USAGE_LIMIT_PATTERNS:
+                    return STREAM_OUTAGE, 'usage-limit'
+                if patterns is CAPACITY_PATTERNS:
+                    return STREAM_OUTAGE, 'capacity'
+                return STREAM_OUTAGE, 'outage'
+    return STREAM_CODE, 'code-config'
 
 
 def credit(directory, provider, paths, record, seconds):
@@ -269,20 +337,45 @@ def observe(directory, provider, profile, model, run_id, observed, now, seconds,
         return admission(data, profile, model, now)
 
 
+def classify(paths, extra_text, provider):
+    """Classify failure evidence into (stream, class). Scans file tails only."""
+    chunks = []
+    for path in paths:
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            with path.open('rb') as source:
+                size = source.seek(0, os.SEEK_END)
+                source.seek(max(0, size - CREDIT_SCAN_BYTES))
+                chunks.append(source.read().decode('utf-8', 'replace'))
+        except OSError:
+            continue
+    if extra_text:
+        chunks.append(extra_text)
+    return classify_event('\n'.join(chunks), provider)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear', 'credit'))
+    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear', 'credit', 'classify'))
     parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen','stepfun'))
-    parser.add_argument('--directory', type=pathlib.Path, required=True)
+    parser.add_argument('--directory', type=pathlib.Path)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
     parser.add_argument('--home')
     parser.add_argument('--run-id', default=''); parser.add_argument('--observed', type=int)
     parser.add_argument('--seconds', type=int, default=1800); parser.add_argument('--reason', default='')
     parser.add_argument('--evidence', type=pathlib.Path)
     parser.add_argument('--scan', type=pathlib.Path, action='append', default=[])
+    parser.add_argument('--text', default='')
     parser.add_argument('--record', action='store_true')
     args = parser.parse_args()
     now = int(time.time())
+    if args.action == 'classify':
+        stream, failure_class = classify(args.scan, args.text, args.provider)
+        print(json.dumps({'stream': stream, 'failure_class': failure_class}, sort_keys=True))
+        return
+    if args.directory is None:
+        raise ValueError('--directory is required')
     if args.action == 'credit':
         seconds = args.seconds if args.seconds != 1800 else CREDIT_SECONDS
         if not 1 <= seconds <= 86400:

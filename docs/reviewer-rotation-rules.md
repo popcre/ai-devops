@@ -10,7 +10,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
    `bin/ai-reviewer-membership-drift` compares the two and fails on any
    difference; the `Reviewer membership drift` workflow runs it every six hours
    and on registry changes. Providers that review outside the allocator
-   (Claude approval gate, Codex overflow) are listed in
+   (Codex approval gate, StepFun on Ubuntu/Linux) are listed in
    `config/reviewer-membership-scope.json`.
 2. **Unreachable reviewer: check membership, then move on.** Run
    `bin/ai-reviewer-membership-drift` or read the registry first. If the
@@ -73,13 +73,22 @@ allocator but stayed registered here, and a session spent an hour trying it.
     `tests/test-reviewer-credit.sh`. Rate limits and a bare
     `RESOURCE_EXHAUSTED` are not credit failures.
 
-11. **StepFun is outside the allocator; Linux is bubblewrap-isolated, Windows
+11. **Credit pause is a one-command switch, not a roster edit.** Owner rule,
+    2026-09-30: subscription credit pauses must be as easy as on/off. Use
+    `ai-review-preflight quarantine <provider> out-of-credit` to turn a
+    provider off and `ai-review-preflight clear <provider>` to turn it back
+    on after a refill. The allocator already skips quarantined providers.
+    Never edit `RETIRED_REVIEWERS` or `config/reviewer-registry.json` for a
+    credit pause — that path needs two repos, tests, and a review. Reserve
+    roster edits for permanent retirement or a real membership change.
+
+12. **StepFun is outside the allocator; Linux is bubblewrap-isolated, Windows
     is folder + test shell (weaker).** Owner instruction 2026-09-25: StepFun
     on Ubuntu only with bubblewrap. Owner instruction 2026-09-30 (MiMo chat,
     *folder + test shell*): Windows may run `review`/`ask` via the pinned
     OpenCode engine inside a disposable remote-less folder with a gated test
     command path (`bin/ai-stepfun-windows-shell`). **Windows is not
-    rule-11 equivalent and is not mount-isolated.** On Windows, OpenCode file
+    rule-12 equivalent and is not mount-isolated.** On Windows, OpenCode file
     tools are removed (`tools:` map — the only enforcement on pin 1.18.12);
     `implement` is refused; exploration/tests run through the gate
     (`ls`/`cat`/`head` in-folder + allowlisted test runners). Residual

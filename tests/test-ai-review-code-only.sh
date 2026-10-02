@@ -155,7 +155,8 @@ fi
 # checkout, and the export's sidecars must not outlive any removal path
 # (exact-head review, 2026-09-25).
 FRONT="$ROOT/bin/ai-review"
-if ( cd "$EXPORT" && AI_CLAUDE_REVIEW_BIN=/bin/true "$FRONT" claude diff-review ) > "$TMP/cli-in-export.out" 2>&1; then
+printf '{"version":1,"providers":{"claude":{"registry_state":"registered","reason":"offline export fixture"}}}\n' > "$TMP/claude-registry.json"
+if ( cd "$EXPORT" && AI_REVIEW_REGISTRY_FILE="$TMP/claude-registry.json" AI_CLAUDE_REVIEW_BIN=/bin/true "$FRONT" claude diff-review ) > "$TMP/cli-in-export.out" 2>&1; then
   fail 'a CLI reviewer started inside a retained code-only export'
 fi
 grep -Fq 'private source requires the code-only attachment route' "$TMP/cli-in-export.out" \

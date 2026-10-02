@@ -49,7 +49,7 @@ umask 077
 
 provider="${1:-}"; mode="${2:-}"
 case "$provider" in
-  grok)  RUNNER="$ROOT/ai-grok-review";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-32}" ;;
+  grok)  RUNNER="$ROOT/ai-grok-review";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-120}" ;; # same review budget as ai-qwen; 32 ran out on a 48-file change
   muse)  RUNNER="$ROOT/ai-muse";         RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
   qwen)  RUNNER="$ROOT/ai-qwen";         RUNNER_MAX_TURNS="" ;; # ai-qwen owns its 120-turn/60m review budget and rejects --max-turns
   gemini) RUNNER="$ROOT/ai-gemini";      RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
@@ -68,16 +68,76 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
 fi
 # models.env may carry provider endpoints as shell assignments. It is sourced
 # only AFTER the invocation is recorded, and it can never retarget a
-# review-critical binary: AI_POOL_RUNNER_* and AI_REVIEW_SANDBOX_BIN
-# substitutions are TEST HOOKS and require an explicit AI_POOL_TEST_HOOKS=1,
-# which the offline suites set. Everything else review-critical was pinned
-# above, before this file is sourced.
-for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_SANDBOX_BIN; do
+# review-critical binary: AI_POOL_RUNNER_*, AI_REVIEW_ENGINE_BIN and
+# AI_REVIEW_SANDBOX_BIN substitutions are TEST HOOKS and require an explicit
+# AI_POOL_TEST_HOOKS=1, which the offline suites set. Everything else
+# review-critical was pinned above, before this file is sourced. An ungated
+# AI_REVIEW_ENGINE_BIN is refused here, before ENGINE is resolved, so a
+# wrapper cannot point the runner at a look-alike that skips every governance
+# step while still satisfying the door's token check.
+for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN; do
   if [ -n "${!_hook_var:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
     die "$_hook_var is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute a review binary."
   fi
 done
 unset _hook_var
+# ---------------------------------------------------------------------------
+# Structural forcing function (plan_reviewer-pipeline-core §9 Phase D).
+# A provider whose door is registered in config/review-runner-doors.json MUST
+# be dispatched through the shared review runner (bin/ai-review-engine).
+# pool refuses any substitution that would bypass the runner: a library the
+# doors may skip is a rejected shape. This is the admission gate that ends the
+# copy-paste governance path for migrated doors.
+# ---------------------------------------------------------------------------
+# AI_REVIEW_ENGINE_BIN was gated above: without AI_POOL_TEST_HOOKS=1 the
+# override is refused, and ENGINE is the pinned runner in this tree.
+ENGINE="${AI_REVIEW_ENGINE_BIN:-$ROOT/ai-review-engine}"
+# The SHIPPED registry is authoritative for which providers are
+# runner-managed. AI_REVIEW_RUNNER_DOORS_JSON may extend that set for tests,
+# but it can never shrink it: unregistering a migrated door (grok) must not
+# drop the structural gate and fall through to the legacy session-runner path.
+SHIPPED_DOORS_JSON="$ROOT/../config/review-runner-doors.json"
+DOORS_JSON="${AI_REVIEW_RUNNER_DOORS_JSON:-$SHIPPED_DOORS_JSON}"
+_runner_door_registered() {
+  if [ -f "$SHIPPED_DOORS_JSON" ] && jq -e --arg p "$1" 'has($p)' "$SHIPPED_DOORS_JSON" >/dev/null 2>&1; then
+    return 0
+  fi
+  [ -f "$DOORS_JSON" ] && jq -e --arg p "$1" 'has($p)' "$DOORS_JSON" >/dev/null 2>&1
+}
+if _runner_door_registered "$provider"; then
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'must be run inside a Git repository.'
+  REPO_ROOT="$(git rev-parse --show-toplevel)"
+  # AI_POOL_RUNNER_* may only name the engine itself. Anything else is a
+  # bypassed review and is refused before any lifecycle state exists.
+  _pool_sub_var="AI_POOL_RUNNER_$(printf '%s' "$provider" | tr '[:lower:]' '[:upper:]')"
+  if [ -n "${!_pool_sub_var:-}" ]; then
+    _sub_real="$(readlink -f "${!_pool_sub_var}" 2>/dev/null || printf '%s' "${!_pool_sub_var}")"
+    _engine_real="$(readlink -f "$ENGINE" 2>/dev/null || printf '%s' "$ENGINE")"
+    if [ "$_sub_real" != "$_engine_real" ]; then
+      die "refusing a $provider review that bypasses the shared review runner (ai-review-engine). ${_pool_sub_var} may only name the engine; use AI_REVIEW_ENGINE_BIN under AI_POOL_TEST_HOOKS=1 to substitute it."
+    fi
+  fi
+  RUNNER="$ENGINE"
+  # Forward the remaining options (already validated by the usage contract)
+  # to the runner's review contract. The engine owns task gate, identity,
+  # sandbox, packet seal + durable store, lifecycle terminal, report floor,
+  # and cleanup-after-store; the door supplies provider bits only.
+  shift 2
+  _engine_args=(review --provider "$provider" --name "pool-${provider}-${mode}" --repo "$REPO_ROOT" --mode "$mode" --caller "$CALLER")
+  # Same budget rule as the legacy path: grok's 120-turn default (the env
+  # override is already folded into RUNNER_MAX_TURNS) and nothing for runners
+  # that own their budget and reject the flag.
+  [ -z "$RUNNER_MAX_TURNS" ] || _engine_args+=(--max-turns "$RUNNER_MAX_TURNS")
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --base|--assert-head|--tests)
+        [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 requires a value."
+        _engine_args+=("$1" "$2"); shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  exec "$RUNNER" "${_engine_args[@]}"
+fi
 case "$provider" in
   grok)   [ -z "${AI_POOL_RUNNER_GROK:-}" ] || RUNNER="$AI_POOL_RUNNER_GROK" ;;
   muse)   [ -z "${AI_POOL_RUNNER_MUSE:-}" ] || RUNNER="$AI_POOL_RUNNER_MUSE" ;;
@@ -288,16 +348,20 @@ if [ -z "$SNAPSHOT_DIGEST_AFTER" ] || [ "$SNAPSHOT_DIGEST_AFTER" != "$SNAPSHOT_D
 fi
 [ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
 
-VERDICT="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
+# The prompt asks for an early provisional verdict and the final verdict LAST
+# under a literal heading, so only the last `## Verdict` heading counts; an
+# earlier (provisional) one must never be read as the final answer.
+VERDICT_LINE="$(awk '/^## Verdict[[:space:]]*$/{n=NR} END{print n+0}' "$TMP_TEXT")"
+VERDICT="$(awk -v n="$VERDICT_LINE" 'n>0 && NR==n+1{gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
 case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
 # Binding and the analysis floor are judged on the MODEL BODY - stdout only,
 # captured separately from the runner's stderr chrome, and only the text
-# before the verdict heading counts.
-if ! awk -v h="$REVIEW_HEAD" '/^## Verdict[[:space:]]*$/{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
+# before the final verdict heading counts.
+if ! awk -v h="$REVIEW_HEAD" -v n="$VERDICT_LINE" 'NR>=n{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure verdict-not-bound-to-head --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die "$provider verdict did not name the reviewed head; refusing unbound verdict."
 fi
-BODY_BYTES="$(awk '/^## Verdict[[:space:]]*$/{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
+BODY_BYTES="$(awk -v n="$VERDICT_LINE" 'NR>=n{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
 [ "$BODY_BYTES" -ge 400 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure report-floor --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider analysis body is below the minimum analysis floor (runner chrome excluded)."; }
 
 OUT="$REPORT_DIR/${provider}-${mode}-${RUN_ID}.md"; [ ! -e "$OUT" ] || die "unique report collision: $OUT"

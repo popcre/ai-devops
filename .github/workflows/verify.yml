@@ -189,10 +189,29 @@ jobs:
           fi
           bash bin/ai-merge-group-evidence --ref "${{ github.ref }}" --merge-group-sha "${{ github.sha }}" --repo "${{ github.repository }}" --require windows-offline --require windows-reviewer-safety
 
+  # The two whole-repo doc invariants — the public boundary and local Markdown
+  # links — are the only checks whose input a prose-only change controls, yet
+  # the prose bypass (#805) and the immediate squash-admin lane both skip the
+  # offline suites that carry them, and prose paths select no suite even in a
+  # mixed pull request. Three 2026-09-30 landings jammed the merge queue that
+  # way (#1188: #1171, #1174/#1162, #1178/#1180). This job is unconditional on
+  # purpose: no path filter and no classification condition, so it is the
+  # opposite of the #1073 hole — every event, prose-only pull requests
+  # included, proves the change's own doc content in seconds.
+  doc-safety:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Whole-repo public boundary and local Markdown links
+        run: |
+          bash tests/test-public-boundary.sh
+          bash tests/test-markdown-links.sh
+
   # Ordinary pull requests divide the Windows-sensitive lane into eight declared
-  # sections that run at the same time on independent GitHub-hosted
-  # machines (#210). Hosted concurrency is unmetered on a public repository, so
-  # this is real parallelism on separate hardware, not several processes competing
+  # sections that run at the same time on independent machines (#210): idle
+  # qualified self-hosted hosts when available, Blacksmith otherwise. This is
+  # real parallelism on separate hardware, not several processes competing
   # for one desktop - the failure mode the issue explicitly forbids. The section
   # boundaries live in config/ci-suite-manifest.json and are sized from the
   # measured per-suite timings of runs 35200063547 and 35189676116;
@@ -201,8 +220,10 @@ jobs:
   # error rather than a quiet pass.
   # Extra Windows capacity (owner, 2026-09-23: "why are we saving ENVY? WE
   # NEED TO SPEED THINGS UP!!!"). Idle qualified self-hosted hosts take
-  # ordinary Windows sections; everything else stays on Blacksmith. Any lookup
-  # failure, or this job failing outright, leaves every section on Blacksmith.
+  # ordinary Windows sections; everything else stays on Blacksmith (owner
+  # 2026-10-01: KEEP Blacksmith in the pool until WarpBuild is fully up). Any
+  # lookup failure, or this job failing outright, leaves every section on
+  # Blacksmith.
   runner-router:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -249,9 +270,16 @@ jobs:
       # and the rest of the evidence still lands.
       fail-fast: false
       # The router's plan; the literal fallback is the all-Blacksmith plan used
-      # when the router produced nothing.
+      # when the router produced nothing. Primary fork protection is the
+      # repository's Actions fork-PR approval policy (all_external_contributors,
+      # see docs/self-hosted-windows-runner.md): every external contributor
+      # needs approval before any workflow runs on self-hosted or BYOC
+      # runners. The head-repo check and all-Blacksmith fallback here are
+      # defense-in-depth inside the PR-editable workflow definition. A foreign
+      # head gets the Blacksmith literal regardless of what the router (or a
+      # tampered config) reports.
       matrix:
-        include: ${{ fromJSON(needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":7,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":8,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
+        include: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":7,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":8,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
     runs-on: ${{ matrix.runs_on }}
     # Eight sections since 2026-09-29 (#185): section 1 reached this 40-minute
     # ceiling on EDGE-RUNN-ENVY (37-55 minutes), so test-ai-deepseek-agent.sh
@@ -292,6 +320,52 @@ jobs:
         shell: pwsh
         run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}')
 
+  # WarpBuild Azure BYOC proof lane (issue #961, owner 2026-10-01: KEEP
+  # Blacksmith in the pool until WarpBuild is fully up; USE Blacksmith for runs
+  # that would otherwise get stuck). This job runs the same required Windows
+  # section suite on the WarpBuild BYOC label, but it is deliberately OUTSIDE
+  # every required aggregate: `continue-on-error: true` and absent from
+  # verification-closure's needs. An unqueued or quota-stalled WarpBuild pool
+  # therefore cannot block a merge - the Blacksmith sections above remain the
+  # required proof. Primary fork protection is the repository's
+  # all_external_contributors approval policy (docs/self-hosted-windows-runner.md);
+  # the head-repo if-guard is defense-in-depth against fork PRs reaching our
+  # Azure subscription's VMs. max-parallel 2 matches the live
+  # standardDASv4Family quota (10 vCPUs = 2 concurrent Standard_D4as_v4).
+  windows-offline-warpbuild-proof:
+    needs: [fast-classifier, manual-preflight]
+    if: >-
+      !cancelled() && github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.fast-classifier.outputs.validation_result != 'failure' &&
+      (needs.fast-classifier.outputs.selection_result != 'success' ||
+       needs.fast-classifier.outputs.run_long != 'false')
+    continue-on-error: true
+    name: windows-offline-warpbuild-proof (${{ matrix.section }})
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        section: [1, 2, 3, 4, 5, 6, 7, 8]
+    runs-on: warp-custom-warpbuild-win2022-canary
+    timeout-minutes: 40
+    env:
+      SELECTION_BASE: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Verify offline test dependencies
+        shell: pwsh
+        run: |
+          if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+            throw 'The pinned Windows runner image does not provide jq.'
+          }
+      - name: WarpBuild proof section ${{ matrix.section }} of 8
+        shell: pwsh
+        run: |
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/8' -ChangedSince $env:SELECTION_BASE
+
   # Scheduled, manual and qualification verification stay complete and
   # unsectioned. Sectioning is a wall-clock lever for the pull-request lane; the
   # backstop that proves every suite in one place must not depend on the section
@@ -310,15 +384,10 @@ jobs:
        needs.fast-classifier.outputs.run_long != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    # GitHub-hosted, on purpose. Self-hosted capacity was added to this
-    # repository to have MORE Windows capacity, not to move off GitHub's
-    # runners: hosted concurrency is unmetered on a public repository, so this
-    # long matrix never waits for a machine. It ran on windows-2025 from
-    # 2026-04 until 2026-08-29 without a runner-caused failure. Routing it to
-    # the single-host self-hosted pool on 2026-09-02 serialised the whole
-    # repository behind one desktop and left fourteen verify runs queued at
-    # once. The self-hosted lane keeps windows-reviewer-safety below, where a
-    # timing flake can be reproduced on a known physical machine.
+    # Blacksmith stays the fixed lane until WarpBuild is fully proven (owner,
+    # 2026-10-01: KEEP Blacksmith in the pool; USE it for runs that would
+    # otherwise get stuck). The scheduled/manual complete matrix runs five
+    # 105-minute sections in parallel, beyond the 2-VM WarpBuild quota.
     runs-on: blacksmith-4vcpu-windows-2025
     # Run 34856869730 reached the existing 105-minute bound in Bash suite
     # 19/74, before PowerShell started. Partition the complete dynamic inventory
@@ -478,6 +547,8 @@ jobs:
     timeout-minutes: 60
     outputs:
       proof_result: ${{ steps.proof.outputs.proof_result }}
+      codex_result: ${{ steps.proof.outputs.codex_result }}
+      grok_result: ${{ steps.proof.outputs.grok_result }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -492,30 +563,64 @@ jobs:
         id: proof
         shell: pwsh
         run: |
+          # Preferred stays serial on one host (same-host exclusion). Each suite
+          # writes its own result so the hosted fallback is per unproved suite,
+          # not a second run of work the preferred host already proved.
           $bash = 'C:\Program Files\Git\bin\bash.exe'
-          $command = 'failures=0; for test in tests/test-ai-codex-review.sh tests/test-ai-grok-review.sh; do bash "$test" || failures=$((failures+1)); done; exit "$failures"'
+          $resultFile = Join-Path $env:RUNNER_TEMP 'preferred-suite-results.txt'
+          $scriptFile = Join-Path $env:RUNNER_TEMP 'preferred-reviewer-suites.sh'
+          $resultFilePosix = $resultFile -replace '\\', '/'
+          @"
+          set -uo pipefail
+          c=0
+          g=0
+          bash tests/test-ai-codex-review.sh || c=`$?
+          bash tests/test-ai-grok-review.sh || g=`$?
+          {
+            if [ "`$c" -eq 0 ]; then echo 'codex_result=success'; else echo 'codex_result=failure'; fi
+            if [ "`$g" -eq 0 ]; then echo 'grok_result=success'; else echo 'grok_result=failure'; fi
+          } > '$resultFilePosix'
+          if [ "`$c" -eq 0 ] && [ "`$g" -eq 0 ]; then
+            exit 0
+          fi
+          exit 1
+          "@ | Set-Content -Path $scriptFile -Encoding ascii
           $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
           $startInfo.FileName = $bash
           $startInfo.UseShellExecute = $false
-          $startInfo.ArgumentList.Add('-lc')
-          $startInfo.ArgumentList.Add($command)
+          $startInfo.WorkingDirectory = $env:GITHUB_WORKSPACE
+          $startInfo.ArgumentList.Add($scriptFile -replace '\\', '/')
           $process = [System.Diagnostics.Process]::Start($startInfo)
           if (-not $process.WaitForExit(55 * 60 * 1000)) {
             & .\tools\ci\stop-process-tree.ps1 -TargetProcessId $process.Id -WaitMilliseconds 10000
             if ($LASTEXITCODE -ne 0) {
               "proof_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              "codex_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              "grok_result=cleanup_failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
               Write-Error 'Preferred reviewer timed out, but its process tree could not be proven stopped. Refusing overlapping fallback.'
               exit 0
             }
             "proof_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "codex_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "grok_result=timed_out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             Write-Warning 'Preferred reviewer proof reached its 55-minute bound; hosted fallback is required.'
             exit 0
           }
-          if ($process.ExitCode -eq 0) {
+          $codex = 'failure'
+          $grok = 'failure'
+          if (Test-Path $resultFile) {
+            foreach ($line in Get-Content $resultFile) {
+              if ($line -match '^codex_result=(\w+)$') { $codex = $Matches[1] }
+              if ($line -match '^grok_result=(\w+)$') { $grok = $Matches[1] }
+            }
+          }
+          "codex_result=$codex" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "grok_result=$grok" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          if ($process.ExitCode -eq 0 -and $codex -eq 'success' -and $grok -eq 'success') {
             "proof_result=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
             "proof_result=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Warning "Preferred reviewer proof failed with exit code $($process.ExitCode); hosted fallback is required."
+            Write-Warning "Preferred reviewer proof failed with exit code $($process.ExitCode); hosted fallback is required for unproved suites."
           }
 
   reviewer-safety-start-deadline:
@@ -534,6 +639,10 @@ jobs:
     outputs:
       fallback_required: ${{ steps.watch.outputs.fallback_required }}
       preferred_result: ${{ steps.watch.outputs.preferred_result }}
+      fallback_codex: ${{ steps.watch.outputs.fallback_codex }}
+      fallback_grok: ${{ steps.watch.outputs.fallback_grok }}
+      codex_status: ${{ steps.watch.outputs.codex_status }}
+      grok_status: ${{ steps.watch.outputs.grok_status }}
     steps:
       - name: Bound the self-hosted reviewer lane start
         id: watch
@@ -541,16 +650,34 @@ jobs:
         env:
           AVAILABLE: ${{ needs.reviewer-runner-availability.outputs.preferred_available }}
           PROOF_RESULT: ${{ needs.windows-reviewer-preferred.outputs.proof_result }}
+          CODEX_RESULT: ${{ needs.windows-reviewer-preferred.outputs.codex_result }}
+          GROK_RESULT: ${{ needs.windows-reviewer-preferred.outputs.grok_result }}
         with:
           script: |
             const available = process.env.AVAILABLE === 'true';
             const proofResult = process.env.PROOF_RESULT || (available ? 'unknown' : 'unavailable');
-            const fallback = proofResult === 'success' || proofResult === 'cleanup_failure' ? 'false' : 'true';
+            const status = (value) => value || (available ? 'unknown' : 'unavailable');
+            const codexStatus = status(process.env.CODEX_RESULT);
+            const grokStatus = status(process.env.GROK_RESULT);
+            // Per unproved suite: a suite the preferred host already proved (or
+            // that left an unclean process tree) never overlaps a hosted twin.
+            const needsFallback = (v) => (v === 'success' || v === 'cleanup_failure' ? 'false' : 'true');
+            const fallbackCodex = needsFallback(codexStatus);
+            const fallbackGrok = needsFallback(grokStatus);
+            const fallback = fallbackCodex === 'true' || fallbackGrok === 'true' ? 'true' : 'false';
             core.setOutput('fallback_required', fallback);
             core.setOutput('preferred_result', proofResult);
-            core.info(`Reviewer host available=${available} proof=${proofResult}; fallback_required=${fallback}.`);
+            core.setOutput('fallback_codex', fallbackCodex);
+            core.setOutput('fallback_grok', fallbackGrok);
+            core.setOutput('codex_status', codexStatus);
+            core.setOutput('grok_status', grokStatus);
+            core.info(`Reviewer host available=${available} proof=${proofResult} codex=${codexStatus} grok=${grokStatus}; fallback_codex=${fallbackCodex} fallback_grok=${fallbackGrok}.`);
 
-  windows-reviewer-fallback:
+  # Hosted Codex and Grok proofs run as independent jobs on separate machines
+  # (P6). Each job covers exactly one unproved suite, so wall time is near
+  # max(individual suites) rather than their sum. Timeouts stay bounded at the
+  # existing 60-minute ceiling - this is not a raised limit.
+  windows-reviewer-fallback-codex:
     needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
     if: >-
       always() && !cancelled() && github.event_name != 'merge_group' &&
@@ -560,33 +687,52 @@ jobs:
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
-       needs['reviewer-safety-start-deadline'].outputs.fallback_required == 'true')
+       needs['reviewer-safety-start-deadline'].outputs.fallback_codex == 'true')
+    # Emergency reviewer fallback: Blacksmith, never the unproven WarpBuild
+    # lane (owner, 2026-10-01: USE Blacksmith for runs that would otherwise
+    # get stuck).
     runs-on: blacksmith-4vcpu-windows-2025
-    # This is an emergency hosted path, not the qualified timing signal. Run
-    # 34387666739 reached Grok but was killed by the original 30-minute bound;
-    # prior hosted evidence measured Grok alone at 41m20s. Sixty minutes keeps
-    # the fallback bounded without weakening any assertion.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - name: Run reviewer suites omitted from the hosted matrix
+      - name: Codex reviewer safety suite
         shell: pwsh
         run: |
-          $bash = 'C:\Program Files\Git\bin\bash.exe'
-          $failures = 0
-          foreach ($test in @('tests/test-ai-codex-review.sh', 'tests/test-ai-grok-review.sh')) {
-            & $bash $test
-            if ($LASTEXITCODE -ne 0) { $failures++ }
-          }
-          if ($failures -ne 0) { exit 1 }
+          & 'C:\Program Files\Git\bin\bash.exe' tests/test-ai-codex-review.sh
+
+  windows-reviewer-fallback-grok:
+    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline]
+    if: >-
+      always() && !cancelled() && github.event_name != 'merge_group' &&
+      needs.fast-classifier.outputs.validation_result != 'failure' &&
+      (needs.fast-classifier.outputs.selection_result != 'success' ||
+       needs.fast-classifier.outputs.reviewer != 'false') &&
+      (github.event_name != 'workflow_dispatch' ||
+       needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
+      (needs['reviewer-safety-start-deadline'].result != 'success' ||
+       needs['reviewer-safety-start-deadline'].outputs.fallback_grok == 'true')
+    # Emergency reviewer fallback: Blacksmith, never the unproven WarpBuild
+    # lane (owner, 2026-10-01: USE Blacksmith for runs that would otherwise
+    # get stuck).
+    runs-on: blacksmith-4vcpu-windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Grok reviewer safety suite
+        shell: pwsh
+        run: |
+          & 'C:\Program Files\Git\bin\bash.exe' tests/test-ai-grok-review.sh
 
   # Stable required result for reviewer safety. The qualified self-hosted lane
-  # remains preferred, but it is not a machine-wide stop: an independent hosted
-  # fallback that runs every identical assertion is equally valid proof.
+  # remains preferred, but it is not a machine-wide stop: independent hosted
+  # fallbacks that run every identical assertion are equally valid proof. Each
+  # suite is accepted on its own; one unproved suite fails the aggregate.
   windows-reviewer-safety:
-    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback]
+    needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-codex, windows-reviewer-fallback-grok]
     if: >-
       !cancelled() && github.event_name != 'merge_group'
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -600,20 +746,15 @@ jobs:
           RUN_EXPENSIVE: ${{ needs.manual-preflight.outputs.run_expensive_jobs }}
           PREFERRED_RESULT: ${{ needs.reviewer-safety-start-deadline.outputs.preferred_result }}
           WATCHDOG_RESULT: ${{ needs.reviewer-safety-start-deadline.result }}
-          FALLBACK_RESULT: ${{ needs.windows-reviewer-fallback.result }}
+          CODEX_PREFERRED: ${{ needs.reviewer-safety-start-deadline.outputs.codex_status }}
+          GROK_PREFERRED: ${{ needs.reviewer-safety-start-deadline.outputs.grok_status }}
+          CODEX_FALLBACK: ${{ needs.windows-reviewer-fallback-codex.result }}
+          GROK_FALLBACK: ${{ needs.windows-reviewer-fallback-grok.result }}
         run: |
           set -uo pipefail
-          printf 'event=%s selection=%s reviewer=%s preferred=%s watchdog=%s fallback=%s\n' \
-            "$EVENT" "$SELECTION_RESULT" "$RUN_REVIEWER" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT"
-
-          if [ "$PREFERRED_RESULT" = 'success' ]; then
-            printf 'windows-reviewer-safety: qualified self-hosted proof succeeded.\n'
-            exit 0
-          fi
-          if [ "$FALLBACK_RESULT" = 'success' ]; then
-            printf 'windows-reviewer-safety: independent hosted fallback proof succeeded after preferred result=%s.\n' "$PREFERRED_RESULT"
-            exit 0
-          fi
+          printf 'event=%s selection=%s reviewer=%s preferred=%s watchdog=%s codex_pref=%s grok_pref=%s codex_fb=%s grok_fb=%s\n' \
+            "$EVENT" "$SELECTION_RESULT" "$RUN_REVIEWER" "$PREFERRED_RESULT" "$WATCHDOG_RESULT" \
+            "$CODEX_PREFERRED" "$GROK_PREFERRED" "$CODEX_FALLBACK" "$GROK_FALLBACK"
 
           # A legitimate skip needs an explicit "reviewer is not selected"
           # verdict from a successful selection, or a manual run that declined
@@ -625,13 +766,36 @@ jobs:
           if [ "$EVENT" = 'workflow_dispatch' ] && [ "$RUN_EXPENSIVE" != 'true' ]; then
             legitimate_skip=true
           fi
-          if [ "$FALLBACK_RESULT" = 'skipped' ] && [ "$legitimate_skip" = true ]; then
+          if [ "$legitimate_skip" = true ] && [ "$CODEX_FALLBACK" = 'skipped' ] && [ "$GROK_FALLBACK" = 'skipped' ]; then
             printf 'windows-reviewer-safety: reviewer work was legitimately skipped.\n'
             exit 0
           fi
 
-          printf 'windows-reviewer-safety: no successful reviewer proof; preferred=%s watchdog=%s fallback=%s.\n' \
-            "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$FALLBACK_RESULT" >&2
+          suite_proved() {
+            preferred="$1"
+            fallback="$2"
+            [ "$preferred" = 'success' ] || [ "$fallback" = 'success' ]
+          }
+
+          all_ok=true
+          if ! suite_proved "$CODEX_PREFERRED" "$CODEX_FALLBACK"; then
+            printf 'windows-reviewer-safety: codex suite unproved (preferred=%s fallback=%s).\n' \
+              "$CODEX_PREFERRED" "$CODEX_FALLBACK" >&2
+            all_ok=false
+          fi
+          if ! suite_proved "$GROK_PREFERRED" "$GROK_FALLBACK"; then
+            printf 'windows-reviewer-safety: grok suite unproved (preferred=%s fallback=%s).\n' \
+              "$GROK_PREFERRED" "$GROK_FALLBACK" >&2
+            all_ok=false
+          fi
+
+          if [ "$all_ok" = true ]; then
+            printf 'windows-reviewer-safety: every reviewer suite is proved.\n'
+            exit 0
+          fi
+
+          printf 'windows-reviewer-safety: no complete reviewer proof; preferred=%s watchdog=%s codex_fb=%s grok_fb=%s.\n' \
+            "$PREFERRED_RESULT" "$WATCHDOG_RESULT" "$CODEX_FALLBACK" "$GROK_FALLBACK" >&2
           exit 1
 
   # The ruleset requires this one stable context on both pull_request and
@@ -640,7 +804,7 @@ jobs:
   # queue it closes over the fresh Linux run and merge-group-evidence, so an
   # evidence refusal cannot be hidden by an unrelated green required job.
   verification-closure:
-    needs: [fast-classifier, merge-group-evidence, linux-offline, windows-offline, windows-reviewer-safety]
+    needs: [fast-classifier, merge-group-evidence, doc-safety, linux-offline, windows-offline, windows-reviewer-safety]
     if: >-
       always() && !cancelled() &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group')
@@ -658,7 +822,8 @@ jobs:
             "${{ needs.merge-group-evidence.result }}" \
             "${{ needs.linux-offline.result }}" \
             "${{ needs.windows-offline.result }}" \
-            "${{ needs.windows-reviewer-safety.result }}"
+            "${{ needs.windows-reviewer-safety.result }}" \
+            "${{ needs.doc-safety.result }}"
 
   report-scheduled-failure:
     needs: [fast-classifier, linux-offline, windows-offline-complete, windows-reviewer-safety]
@@ -672,14 +837,19 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Open or update the scheduled verification incident
         shell: bash
         run: |
-          title='Scheduled full verification is failing'
-          body="The complete scheduled matrix failed at $RUN_URL. Diagnose the named failing job and close this issue only after a later complete scheduled run passes."
-          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug
-          fi
+          needs_summary=""
+          for pair in \
+            "fast-classifier=${{ needs.fast-classifier.result }}" \
+            "linux-offline=${{ needs.linux-offline.result }}" \
+            "windows-offline-complete=${{ needs.windows-offline-complete.result }}" \
+            "windows-reviewer-safety=${{ needs.windows-reviewer-safety.result }}"; do
+            needs_summary="$needs_summary$pair "
+          done
+          bash tools/ci/report-scheduled-failure.sh \
+            --run-url "$RUN_URL" \
+            --repo "$GITHUB_REPOSITORY" \
+            --results "$needs_summary"

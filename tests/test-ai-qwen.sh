@@ -23,6 +23,9 @@ export AI_QWEN_CALLER=codex
 export TMPDIR_FOR_TEST="$TMP"
 export AI_QWEN_TEST_DIR="$TMP" AI_QWEN_HOME="$TMP/qwen-home"
 export AI_QWEN_SANITIZER_ROOT="$TMP/qwen-install"
+# Default the suite to the container-sandbox review path (#974). Reviewer-only
+# (no Docker/podman) is covered in its own section with AI_QWEN_CONTAINER_SANDBOX=0.
+export AI_QWEN_CONTAINER_SANDBOX=1
 mkdir -p "$AI_QWEN_SANITIZER_ROOT/bin" "$AI_QWEN_SANITIZER_ROOT/lib/chunks"
 printf 'fixture launcher\n' > "$AI_QWEN_SANITIZER_ROOT/bin/qwen.js"
 cat > "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js" <<'EOF'
@@ -496,11 +499,21 @@ QWEN_STARTUP_TICKS=$(( ((SECONDS-INITIAL_STARTED)*2 + $(budget 2 5)) * 20 ))
 [ "$INITIAL_RC" -eq 0 ] || printf '  diagnostic: initial review: %s\n' "$INITIAL_OUT"
 check 'initial review completes successfully' "test '$INITIAL_RC' -eq 0"
 printf 'preload-test-secret\n' > "$TMP/preload-secret"; chmod 600 "$TMP/preload-secret"
-PRELOAD_PROOF="$(AI_QWEN_SECRET_FILE="$TMP/preload-secret" PRELOAD_TEST_FILE="$TMP/preload-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'const {spawnSync}=require("node:child_process"),fs=require("node:fs"); const reexec=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8"}); const sanitized={...process.env}; delete sanitized.BAILIAN_CODING_PLAN_API_KEY; const toolChild=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8",env:sanitized}); process.stdout.write(JSON.stringify({direct:process.env.BAILIAN_CODING_PLAN_API_KEY,handoffVar:Object.hasOwn(process.env,"AI_QWEN_SECRET_FILE"),handoffFile:fs.existsSync(process.env.PRELOAD_TEST_FILE),reexec:reexec.stdout,toolChild:toolChild.stdout,nodeOptions:process.env.NODE_OPTIONS||"absent"}));')"
+PRELOAD_PROOF="$(env -u SANDBOX_FLAGS AI_QWEN_SECRET_FILE="$TMP/preload-secret" PRELOAD_TEST_FILE="$TMP/preload-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'const {spawnSync}=require("node:child_process"),fs=require("node:fs"); const reexec=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8"}); const sanitized={...process.env}; delete sanitized.BAILIAN_CODING_PLAN_API_KEY; const toolChild=spawnSync(process.execPath,["-e","process.stdout.write(process.env.BAILIAN_CODING_PLAN_API_KEY||\"absent\")"],{encoding:"utf8",env:sanitized}); process.stdout.write(JSON.stringify({direct:process.env.BAILIAN_CODING_PLAN_API_KEY,handoffVar:Object.hasOwn(process.env,"AI_QWEN_SECRET_FILE"),handoffFile:fs.existsSync(process.env.PRELOAD_TEST_FILE),reexec:reexec.stdout,toolChild:toolChild.stdout,nodeOptions:process.env.NODE_OPTIONS||"absent",sandboxFlags:process.env.SANDBOX_FLAGS||"absent"}));')"
 check 'Qwen preloader survives the runtime re-exec, deletes its handoff, and stays strippable for tool children' "printf '%s' '$PRELOAD_PROOF' | jq -e '.direct==\"preload-test-secret\" and .handoffVar==false and .handoffFile==false and .reexec==\"preload-test-secret\" and .toolChild==\"absent\"'"
 # Issue #1032: --sandbox forwards NODE_OPTIONS into the container, where the host
 # preloader path does not exist; the preloader must remove itself once consumed.
 check 'Qwen preloader removes itself from NODE_OPTIONS so a sandboxed child never requires a host-only path' "printf '%s' '$PRELOAD_PROOF' | jq -e '.nodeOptions==\"absent\"'"
+# --sandbox forwards only a fixed provider-variable list; the key must reach the
+# container by name (docker copies the value from its env), never as NAME=value argv.
+check 'Qwen preloader forwards the key into the sandbox by name only' "printf '%s' '$PRELOAD_PROOF' | jq -e '.sandboxFlags==\"--env BAILIAN_CODING_PLAN_API_KEY\"'"
+sandbox_flags_after() {
+  printf 'k\n' > "$TMP/preload-flags-secret"; chmod 600 "$TMP/preload-flags-secret"
+  env SANDBOX_FLAGS="$1" AI_QWEN_SECRET_FILE="$TMP/preload-flags-secret" NODE_OPTIONS="--require=$REPO_ROOT/tools/qwen-provider-env-preload.cjs" node -e 'process.stdout.write(process.env.SANDBOX_FLAGS||"")'
+}
+check 'Qwen sandbox forward replaces a stale NAME=value flag' "test \"\$(sandbox_flags_after '--env BAILIAN_CODING_PLAN_API_KEY=oldvalue --rm')\" = '--rm --env BAILIAN_CODING_PLAN_API_KEY'"
+check 'Qwen sandbox forward is not satisfied by a similarly named variable' "test \"\$(sandbox_flags_after '--env BAILIAN_CODING_PLAN_API_KEY_EXTRA')\" = '--env BAILIAN_CODING_PLAN_API_KEY_EXTRA --env BAILIAN_CODING_PLAN_API_KEY'"
+check 'Qwen sandbox forward does not duplicate an --env= form' "test \"\$(sandbox_flags_after '--env=BAILIAN_CODING_PLAN_API_KEY')\" = '--env BAILIAN_CODING_PLAN_API_KEY'"
 if [ -n "${SYSTEMROOT:-}" ]; then
   check 'Qwen runtime home has a private Windows ACL before provider contact' "test -f '$AI_QWEN_HOME/.ai-devops-private-home-v1' && ! icacls.exe \"\$(cygpath -w '$AI_QWEN_HOME')\" | grep -Ei 'BUILTIN\\\\Users|Authenticated Users|Everyone'"
 else
@@ -509,6 +522,7 @@ fi
 check 'review pins the stable Qwen 3.8 Max model' "grep -q -- '--model qwen3.8-max' '$TMP/argv.txt'"
 check 'review uses safe mode' "grep -q -- '--safe-mode' '$TMP/argv.txt'"
 check 'review runs under Qwen sandbox with full tools (#974)' "grep -q -- '--sandbox --approval-mode yolo' '$TMP/argv.txt' && ! grep -q -- '--exclude-tools' '$TMP/argv.txt' && ! grep -q -- '--approval-mode plan' '$TMP/argv.txt'"
+check 'review record announces sandbox containment' "run show review-1 | jq -e '.containment==\"sandbox\"'"
 check 'review has measured governed-review budgets' "grep -q -- '--max-session-turns 120' '$TMP/argv.txt' && grep -q -- '--max-tool-calls 120' '$TMP/argv.txt' && grep -q -- '--max-wall-time 60m' '$TMP/argv.txt'"
 check 'review never uses continue' "! grep -q -- '--continue' '$TMP/argv.txt'"
 check 'review prompt says it may run code and edit a disposable copy' "grep -q 'disposable, remote-less copy' '$TMP/prompt-copy' && grep -q 'edits are discarded' '$TMP/prompt-copy' && ! grep -qi 'read-only' '$TMP/prompt-copy'"
@@ -520,6 +534,27 @@ check 'review prompt requires the sealed packet first' "grep -q '.ai-review-qwen
 REVIEW_DIR="$(run show review-1 | jq -r .review_dir)"
 check 'ordinary clone review uses a private copy' "[ \"\$(cd '$REVIEW_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
 check 'private review copy owns its git controls' "test -d '$REVIEW_DIR/.git'"
+
+# Reviewer-only path: no Docker/podman, so no container sandbox and no
+# shell/write/edit. Sessions must still get a usable opinion and a clear announce.
+echo review > "$TMP/mode"; : > "$TMP/argv.txt"
+export AI_QWEN_CONTAINER_SANDBOX=0
+RO_OUT="$(run new reviewer-only-1 --prompt 'opinion please' 2>&1)"; RO_RC=$?
+export AI_QWEN_CONTAINER_SANDBOX=1
+[ "$RO_RC" -eq 0 ] || printf '  diagnostic: reviewer-only rc=%s: %s\n' "$RO_RC" "$RO_OUT"
+check 'reviewer-only review completes without Docker/podman' "test '$RO_RC' -eq 0"
+check 'reviewer-only omits container sandbox and strips shell/write/edit' "! grep -q -- '--sandbox' '$TMP/argv.txt' && grep -q -- '--approval-mode plan' '$TMP/argv.txt' && grep -q -- '--exclude-tools shell,write,edit' '$TMP/argv.txt'"
+check 'reviewer-only prompt announces the mode and forbids builds/edits' "grep -q 'REVIEWER-ONLY' '$TMP/prompt-copy' && grep -q 'cannot run shell' '$TMP/prompt-copy' && ! grep -q 'edits are discarded' '$TMP/prompt-copy'"
+check 'reviewer-only start note tells the caller why there is no container' "printf '%s' '$RO_OUT' | grep -q 'REVIEWER-ONLY (no Docker/podman)'"
+check 'reviewer-only record stores containment' "run show reviewer-only-1 | jq -e '.containment==\"reviewer-only\"'"
+check 'doctor announces reviewer-only when no container sandbox' "AI_QWEN_CONTAINER_SANDBOX=0 run doctor 2>/dev/null | grep -q 'REVIEWER-ONLY'"
+check 'doctor announces sandbox when a container sandbox exists' "AI_QWEN_CONTAINER_SANDBOX=1 run doctor 2>/dev/null | grep -q 'safe mode + sandbox + tools'"
+export AI_QWEN_CONTAINER_SANDBOX=0
+RO_ASK_OUT="$(run ask reviewer-only-1 --prompt 'follow up' 2>&1)"; RO_ASK_RC=$?
+export AI_QWEN_CONTAINER_SANDBOX=1
+[ "$RO_ASK_RC" -eq 0 ] || printf '  diagnostic: reviewer-only ask rc=%s: %s\n' "$RO_ASK_RC" "$RO_ASK_OUT"
+check 'reviewer-only follow-up completes without Docker/podman' "test '$RO_ASK_RC' -eq 0"
+check 'reviewer-only follow-up prompt matches stripped tools' "grep -q 'REVIEWER-ONLY' '$TMP/prompt-copy' && grep -q 'cannot run shell' '$TMP/prompt-copy' && ! grep -q 'edits are discarded' '$TMP/prompt-copy'"
 
 FIRST_ASK_OUT="$(run ask review-1 --prompt 'follow up' 2>&1)"; FIRST_ASK_RC=$?
 [ "$FIRST_ASK_RC" -eq 0 ] || printf '  diagnostic: first follow-up: %s\n' "$FIRST_ASK_OUT"

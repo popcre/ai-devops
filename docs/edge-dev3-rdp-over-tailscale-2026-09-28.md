@@ -70,3 +70,255 @@ few seconds with `Unable to listen ... 4837`) was retired at 10:12 AM EDT:
 `journalctl --user -u krdp.service` shows no new entries, and the packaged
 `app-org.kde.krdpserver.service` (PID 6043) stays active and listening on
 `*:4837`. To restore, move the backup back and re-enable it (not recommended).
+
+---
+
+# Second incident — RDP refused every password (2026-09-30)
+
+Status: **RDP resolved** about 1:05 PM EDT, September 30, 2026. Albert confirmed a
+working `mstsc` session. **ScreenConnect black screen is still open** (see the end).
+The office network move at the same time was a coincidence. Tailscale, UFW
+and DNS were fine throughout.
+
+## Symptom
+
+Every `mstsc` attempt gave "The logon attempt failed", both from the office LAN
+and from home over Tailscale. The server log showed this for every user, including a
+brand-new KRDP user:
+
+```
+[com.winpr.sspi.NTLM] ntlm_fetch_ntlm_v2_hash: Could not find user in SAM database
+AcceptSecurityContext status SEC_E_NO_CREDENTIALS
+```
+
+## Actual root cause
+
+An automatic update at 6:06 AM EDT on 2026-09-29 upgraded FreeRDP from
+`3.31.0+dfsg-0ubuntu0.26.04.1` to `3.32.0+dfsg-0ubuntu0.26.04.1`. The packages
+were `libwinpr3-3`, `libfreerdp3-3`, `libfreerdp-server3-3` and
+`libfreerdp-client3-3`. KRDP only loads the new libraries after it restarts,
+so it broke at the first reboot after the update. With 3.32, KRDP's
+server-side login (NLA) never reaches KRDP's own user check (PAM or KRDP
+users). Instead it looks up a nonexistent FreeRDP SAM file
+(`/etc/FreeRDP/FreeRDP/SAM`, seen with `strace`), so every login fails.
+
+**Proof, same machine and same user:** a second `krdpserver --port 4838` run with
+`LD_LIBRARY_PATH` pointed at the extracted 3.31 libraries logged
+`User "ahazan2" authenticated successfully`. The 3.32 server on 4837 gave the
+SAM error for the same password.
+
+## Fix applied (2026-09-30)
+
+1. Downgraded the four packages to 3.31 and held them:
+   `sudo dpkg -i` the 3.31 debs (three came from `/var/cache/apt/archives/`,
+   `libfreerdp-server3-3` from
+   `https://launchpad.net/ubuntu/+archive/primary/+files/libfreerdp-server3-3_3.31.0+dfsg-0ubuntu0.26.04.1_amd64.deb`),
+   then `sudo apt-mark hold libwinpr3-3 libfreerdp3-3 libfreerdp-client3-3 libfreerdp-server3-3`.
+   **Before unholding**, test a newer FreeRDP with the port-4838 method above.
+2. After the downgrade, the login succeeded but the window flashed and closed
+   (`PostConnect ... failed`). The cause was the KDE "Remote Control — Control
+   input devices" approval popup, which had not been clicked yet. Clicking Approve at the screen fixed it. KRDP cannot
+   start the portal session until someone approves it at the screen. Permanent fix:
+   run KRDP with `--plasma` (it uses KWin's protocols directly, allowed by
+   `X-KDE-Wayland-Interfaces` in `/usr/share/applications/org.kde.krdpserver.desktop`,
+   so there is no popup). Drop-in:
+   `~/.config/systemd/user/app-org.kde.krdpserver.service.d/plasma.conf` with
+   `ExecStart=` then `ExecStart=/usr/bin/krdpserver --plasma`.
+   **REVERTED the same day: `--plasma` gave a black screen over RDP (same symptom as
+   ScreenConnect). Do not use it.** The popup must still be approved at the screen
+   once per login. The popup is an open item.
+3. The KRDP settings now have `SystemUserEnabled=false` and a dedicated KRDP user `ahazan2`
+   (password in KWallet folder `KRDP`, set by Albert in System Settings → Remote
+   Desktop). The PAM/system-password path was not retested on 3.31. It worked on
+   2026-09-28 per the incident above.
+4. Auto-login stays on (`User=ahazan` in `/etc/sddm.conf.d/kde_settings.conf`).
+   It is needed so KRDP, a user service, starts without anyone at the keyboard.
+
+## Fast diagnosis next time
+
+```bash
+grep -E ' (upgrade|install) ' /var/log/dpkg.log | grep -iE 'freerdp|winpr|krdp' | tail
+journalctl --user -u 'app-org.kde.krdpserver*' --since '-10min' --no-pager | grep -vE 'deactivate_all|BIO|TRANSPORT'
+```
+
+- `Could not find user in SAM database` → FreeRDP regression; check versions and holds.
+- `PostConnect ... failed` right after `New client connected` → the portal approval
+  is missing. Check that `--plasma` is still in effect (`ps -o args= -C krdpserver`).
+- `Unable to listen ... 4837` → another program owns the port (`ss -ltnp | grep 4837`).
+
+## Wrong turns (do not repeat)
+
+- Blaming the office network or the Windows `al8960ofc\` domain prefix. Both were irrelevant.
+- Writing passwords into KWallet by hand, and trying `edge-dev3\` or `\` username prefixes.
+- Turning auto-login off. KRDP then never starts until someone signs in locally.
+  Also, `sddm` reads **every** file in `/etc/sddm.conf.d/`, so a `.bak` copy there
+  overrides the real file. Keep backups outside that folder.
+- Enabling the OpenSSL legacy provider (MD4) for KRDP. It had no effect and was removed.
+- xrdp (installed 2026-09-24) sometimes took over port 4837 when KRDP was not running
+  and showed its own "Login to edge-dev3" screen. It was **purged** 2026-09-30.
+- Granting the portal permission in the PermissionStore did not stop the popup. `--plasma` did.
+
+## Popup and restart behavior (verified 2026-09-30, 1:24 PM EDT)
+
+- KRDP asks the portal for the app ID `org.kde.krdp-server`, but the packaged desktop
+  file is `org.kde.krdpserver.desktop`. The log showed `Could not register app ID: App info
+  not found`, and the approval was forgotten at every restart. Fix: a user desktop file
+  `~/.local/share/applications/org.kde.krdp-server.desktop` (NoDisplay, same Exec and
+  `X-KDE-Wayland-Interfaces`). After one Approve, a reboot restored the portal session with
+  no click: the log showed `Started Freedesktop Portal session`.
+- After a reboot, `mstsc` flashes and closes (`PostConnect ... failed`) for about the first
+  2 minutes while Plasma and the portal finish starting. Wait and retry.
+- A "Control input devices" popup can still appear after connecting. RDP works anyway.
+  It is harmless and not yet removed.
+
+## Still open — ScreenConnect black screen
+
+ScreenConnect (`connectwisecontrol-159806842ff2961f`, a system service) captures
+`DISPLAY=:0`. On Plasma Wayland that display is Xwayland, which contains only X11 apps,
+so the capture is black and input does not reach the desktop. Albert reports it
+worked on the morning of 2026-09-30 in this same Wayland setup. The journal shows
+Wayland sessions on every boot since 2026-09-28. **How it worked is not yet explained.**
+Do not assume Wayland and X11 are mutually exclusive with KRDP until that is
+investigated. The next step is to compare the ScreenConnect client version and
+logs from before and after the 10:54 AM EDT reboot.
+
+Findings so far (2026-09-30):
+- The console (edgehome.screenconnect.com, Access → edge-dev3) shows **Logged On User: root**,
+  client **26.6.6.9747**, which is the newest client in the fleet. An agent update is not the fix.
+- The agent runs `DISPLAY=:0 XAUTHORITY=/opt/connectwisecontrol-*/.Xauthority`.
+  `who` prints `1000` and not a username, and there is no `/run/utmp`. The agent still
+  probes the user with `runuser` every 5 s, and it did the same on 2026-09-28.
+- The agent log `/var/log/connectwisecontrol-159806842ff2961f` holds only tray/DISPLAY exceptions.
+- Nothing in `/var/log/dpkg.log` since 2026-09-28 touches ScreenConnect, Xwayland, KWin or Java.
+- **ConnectWise support case #03766621** was filed at 1:40 PM EDT, 2026-09-30, asking about Wayland
+  support and user/display selection. Next step: act on their reply.
+- Not tried, because it would risk the working RDP: switching to a Plasma X11 session.
+
+## 2026-10-01 — overnight lockup, frozen RDP, rejected password (resolved)
+
+Three separate faults looked like one "the computer is acting whacky" problem. Record
+them separately. Each one wasted time when it was confused with another.
+
+### 1. Overnight lockup: login screen took no clicks or typing (RDP and physical console)
+
+- **Symptom:** from about 8:34 PM EDT on 2026-09-30, RDP and the physical monitor both
+  showed a login screen that ignored all input. The machine kept working behind it, and
+  Claude Remote Control still worked. Albert's restart at 9:14 AM EDT on 2026-10-01
+  cleared it.
+- **Evidence (previous boot journal, `journalctl -b -1`):** at 20:33:16 `kscreenlocker_greet`
+  rejected a password (`pam_unix(kde:auth): authentication failure`). At 20:34:09 `sddm`
+  logged `Adding new display... Using VT 1`, which is what the lock screen's
+  **Switch User** does. KWin then logged `atomic commit failed: Permission denied`, and
+  `sddm-helper` logged `Failed to take control of "/dev/tty1" ("ahazan")` and then
+  `HELPER_TTY_ERROR`. SDDM started its greeter on VT1, the same VT as the auto-login
+  session, so it took DRM away from the live session's KWin. The greeter died at once,
+  and the live session never got the display or input back. It happened again at 21:19:28.
+- **Fix (2026-10-01):** in `~/.config/kdeglobals`, under `[KDE Action Restrictions]`, set
+  `action/switch_user=false` and `action/start_new_session=false`. Switch User was already
+  unusable on this machine because it always ended in `HELPER_TTY_ERROR`.
+  **Verified:** Albert saw the lock screen without the Switch User button. Undo it with
+  `kwriteconfig6 --file kdeglobals --group "KDE Action Restrictions" --key action/switch_user --delete`.
+- The password rejected at 20:33 was not a typing error. See fault 3.
+
+### 2. RDP showed a different screen, ignored input, and dropped after minutes
+
+- **Symptom (2026-10-01, morning):** RDP connected, but showed a stale image that did not
+  match the physical monitor. Clicks and typing seemed to do nothing, and the session
+  dropped after a few minutes.
+- **Evidence:** `krdpserver` logged `Failed to create surface from DRM object: 2 (resource
+  allocation failed)`, then `Parsed_hwmap_0 ... Failed to map frame: -5`, and floods of
+  `kpipewire_record_logging: Failed receiving filtered frame: Input/output error`. Then
+  `BIO_read ... Connection timed out`. The Intel VAAPI hardware H.264 encoder (iHD) stopped
+  producing frames, so the client kept showing an old image.
+- **Fix:** a systemd user drop-in
+  `~/.config/systemd/user/app-org.kde.krdpserver.service.d/software-encoder.conf` with
+  `[Service]` and `Environment=KPIPEWIRE_FORCE_ENCODER=libx264`. Then
+  `systemctl --user daemon-reload && systemctl --user restart app-org.kde.krdpserver.service`.
+  The restart drops any connected client. **Verified:** Albert reconnected, and the live
+  desktop matched the monitor and responded. It survives reboots.
+
+### 3. Lock screen said "unlocking failed" over RDP (and later at the console)
+
+- **Symptom:** every unlock attempt failed, while Albert believed the password worked
+  at the console.
+- **Real cause:** `/etc/shadow` was modified at **2026-09-30 19:17:36 EDT** by another AI
+  session on **edge-dev** (Tailscale tailnet address). Over SSH, after `sudo` password checks
+  failed (19:16), it reset `ahazan`'s password through a root Docker container. It stored the
+  new value in 1Password `vibe_coding` as "edge-dev3 ahazan sudo password (restored
+  2026-09-30)", at 19:17:34 EDT. The console only *seemed* to work because SDDM auto-logs in
+  `ahazan` at boot, so no password is typed there.
+- **Wrong turn:** RDP keystroke mangling was suspected, and Albert was asked to type tests.
+  Check `ls -l --time-style=full-iso /etc/shadow` and the 1Password vault first next time.
+- **Resolution:** Albert signed in with the 1Password value and then **changed the password
+  back to his old one** (2026-10-01). That 1Password item is now titled
+  `STALE - edge-dev3 ahazan sudo password (...)`. Its value is no longer valid, and AI
+  sessions do not have the current sudo password.
+- **Rule for AI sessions:** never reset a human's login password to get sudo. It silently
+  locks the owner out of the lock screen. Report `Blocked —` instead.
+
+### Related facts verified the same day
+
+- `ahazan2` is **not** a Linux user. It is only KRDP's own RDP login (`~/.config/krdpserverrc`:
+  `Users=ahazan2`, `SystemUserEnabled=false`). After the RDP login you are inside the
+  `ahazan` desktop (display name "al"). The lock screen always wants **`ahazan`'s** password.
+- `~/.config/kscreenlockerrc` has `Timeout=1`, so the screen locks after 1 idle minute.
+  Albert chose to leave it.
+- Unlocking remotely: `loginctl unlock-session <id>` works (`loginctl list-sessions`, use
+  the seat0 session). Check `pgrep -f kscreenlocker_greet`. A bare `pgrep kscreenlocker_greet`
+  silently matches nothing because the name is too long. It relocks after the idle timeout.
+- The `runuser` lines every 5 s in the journal are the ScreenConnect agent probing the
+  user, as recorded above. They are not related to these faults.
+
+## ScreenConnect — ConnectWise reply to case #03766621 (2026-10-01)
+
+ConnectWise said Wayland is not supported and only partly works with ScreenConnect. They
+said to install a desktop environment that supports X11 (they suggested LightDM). Their
+reply assumed GNOME. This machine is **KDE Plasma 6.6 + SDDM**, and SDDM can start X11
+sessions, so LightDM is not needed. The X11 route is the apt package `plasma-session-x11`
+(candidate 6.6.6, with `kwin-x11`). There is no `/usr/share/xsessions` today.
+
+**Trade-off (owner decision pending):** KRDP only works on Plasma **Wayland**. Under X11,
+RDP would need `xrdp` instead. xrdp gives a **separate** desktop, not the physical-console
+desktop, and it once took over port 4837 (see above). So the choice is: keep Wayland
+(RDP shows the real desktop, ScreenConnect stays black; recommended), or switch to X11
+(ScreenConnect works, RDP becomes a separate xrdp desktop). Nothing has been installed.
+
+**Owner decision (2026-10-01, Albert, verbatim):** "keep wayland, leave screenconnect black".
+Closed: do not switch edge-dev3 to X11 or install xrdp for ScreenConnect. Use RDP (KRDP) for remote access.
+
+## 2026-10-01 evening: flash-and-close after reboot (locked KWallet)
+
+- **Symptom:** after the 5:29 PM EDT reboot, `mstsc` showed "estimating connection quality",
+  flashed, and closed for 10+ minutes (not the 2-minute startup window).
+- **Evidence:** every attempt logged `New client connected` then `PostConnect ... failed`, with
+  no `authenticated successfully` line and no portal activity. KRDP 6.6.4 `onPostConnect`
+  returns false when a configured user's password is empty. KRDP reads the `ahazan2` password
+  from KWallet (folder `KRDP`) once at startup; the wallet was locked (SDDM auto-login cannot
+  unlock it, `pam_kwallet5` is only in `/etc/pam.d/sddm`), so the read waited and the password
+  stayed empty. The wallet was unlocked at the console at 5:40:57 PM EDT.
+- **Proof:** after `systemctl --user restart app-org.kde.krdpserver` (5:45 PM EDT, wallet open),
+  a local FreeRDP 3.31 client logged `User "ahazan2" authenticated successfully` and
+  `Initializing Freedesktop Portal Session`. Earlier fixes (software encoder drop-in, portal
+  desktop file, kdeglobals restrictions) were untouched.
+- **Fast check:** `qdbus6 org.kde.kwalletd6 /modules/kwalletd6 org.kde.KWallet.isOpen kdewallet`.
+  If `false`, unlock the wallet at the screen, then restart the KRDP service.
+- **Open:** surviving a reboot unattended needs the wallet to open without a password
+  (an empty `kdewallet` password, set by Albert in KWalletManager). Owner decision pending.
+
+### Owner requirement and fix (2026-10-01, 5:57 PM EDT)
+
+Albert, verbatim: "i can't unlock the wallet every time i want to remote control it" and
+"I WILL NOT BE BY THE CONSOLE! i need true remote". Changes:
+
+- `SystemUserEnabled=true` in `~/.config/krdpserverrc` (backup `krdpserverrc.bak-20261001`).
+  KRDP checks the Linux login through PAM (`login` service) before the KWallet users, so
+  logging in as `ahazan` with the Linux password works with the wallet locked. `ahazan2`
+  still works whenever the wallet happens to be open. Security is TLS only (server NLA off),
+  so PAM receives the password.
+- Screen-share approval: `~/.local/state/krdp-serverstaterc` holds a restore token that the
+  portal PermissionStore (`remote-desktop` table) maps to `org.kde.krdp-server` = yes. The
+  approval asked at 5:49 PM EDT followed a test session at 5:46 PM EDT that started the
+  portal and closed before it finished, which likely consumed the old token. Do not run
+  half-finished test connections against the live service; use port 4838.
+- A local Ubuntu FreeRDP 3.31 client cannot finish a session (no H.264), so live proof
+  needs Albert's Windows client after a reboot.

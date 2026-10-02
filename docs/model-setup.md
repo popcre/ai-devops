@@ -10,11 +10,13 @@ roles, adapting CLI flags, and how the scripts use the commands.
 
 - **GPT-5.6-Sol / Codex (medium reasoning)** — planning, implementation, testing,
   and fixing. Only implementation and testing receive workspace write access.
-- **Claude Opus 5** — independent plan, diff, security, and final approval
-  reviews through a tool-limited, digest-bound adapter.
-- **GLM-5.3** — out of reviewer rotation (owner instruction; registry `absent`).
-  Usable only as an explicitly requested second opinion through `ai-glm`; never
-  assigned a formal review. The rotation pool is Muse, Grok, Qwen, and Gemini.
+- **Pipeline review stages** — a registered pool reviewer (default Muse; override
+  with `AI_PIPELINE_REVIEW_PROVIDER`). Claude left the reviewer pool on
+  2026-09-30 and is no longer an approval reviewer.
+- **GLM-5.3** — rotation reviewer (restored 2026-09-30). Never reviews
+  GLM-orchestrated (ZCode) work. Also usable as an explicitly requested second
+  opinion through `ai-glm`. The rotation pool is Muse, Grok, Qwen, Gemini, GLM,
+  and DeepSeek.
 - **Grok Build 4.6** — optional independent review through `ai-grok-review`
   (read-only) and isolated edits through `ai-grok-implement`. Advisory
   look-into-this work uses `ai-grok-implement investigate`; that is not a formal
@@ -156,8 +158,8 @@ model id or the reasoning flag. The scripts always read the real file at
   executes all seven stages and `resume` verifies every prior artifact first.
 - `ai-model-call <stage> <prompt> <out>` runs one atomic stage without shell
   evaluation.
-- `ai-review claude <mode>` and `ai-review codex <mode>` are the only supported
-  approval front doors. Other provider tools remain advisory or quarantined.
+- `ai-review <registered-provider> <mode>` is the supported approval front door.
+  The registry decides the pool. Claude is `absent` and is refused.
 - `ai-codex-review <mode>` uses `CODEX_CMD` for read-only reviews and refuses
   configuration that does not explicitly retain `--sandbox read-only` plus
   `model_reasoning_effort=low` or `medium`.
