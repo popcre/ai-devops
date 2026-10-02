@@ -1,5 +1,5 @@
 {
-  "_comment": "Where verify.yml runs its Windows sections (tools/ci/runner-router.cjs). Owner decision 2026-10-01: Blacksmith is out of the pool. Preference order: idle qualified self-hosted Windows hosts (edge-runn-envy / ai-devops-windows-qualified) first as extra capacity ('why are we saving ENVY? WE NEED TO SPEED THINGS UP!!!'), then GitHub-hosted Windows runners; WarpBuild Azure BYOC is the final option only after GitHub-hosted and edge-runn-envy are full. A section goes to a qualified host only when one is online and idle at routing time; remaining sections go to GitHub-hosted unless that lane is full, in which case they go to WarpBuild.",
+  "_comment": "Where verify.yml runs its Windows sections (tools/ci/runner-router.cjs). Owner decision 2026-10-01: Blacksmith is out of the pool (turned off). Preference order: idle qualified self-hosted Windows hosts (edge-runn-envy / ai-devops-windows-qualified) first as extra capacity, then GitHub-hosted Windows runners; WarpBuild Azure BYOC is the final option only after GitHub-hosted and edge-runn-envy are full. A section goes to a qualified host only when one is online and idle at routing time; remaining sections go to GitHub-hosted unless that lane is full, in which case they go to WarpBuild.",
   "schema_version": 3,
   "max_active_runs_sampled": 15,
   "windows_sections": 8,

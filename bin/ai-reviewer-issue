@@ -10,7 +10,7 @@
 # code or provider sessions.
 set -euo pipefail
 
-VERSION="1.5.0"
+VERSION="1.6.0"
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SCRIPT_SOURCE" ]; do
   SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
@@ -147,6 +147,30 @@ redact_text(){
     -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig'
 }
 
+# classify_failure prints {"stream":...,"failure_class":...} from the shared
+# admission classifier. Credit, usage-limit, capacity, and provider-down events
+# are provider-outage and are never labeled a code defect (#1115). A bare 404
+# or 403 stays code-config. Falls back to code-config only if classification
+# itself cannot run.
+classify_failure(){ # PROVIDER SUMMARY [SCAN_FILE...]
+  local provider="$1" summary="$2"; shift 2
+  local python tool out file
+  local -a scan=()
+  python="$(command -v python3 || command -v python)" || true
+  tool="$TOOLKIT_ROOT/tools/reviewer_admission.py"
+  for file in "$@"; do
+    [ -n "$file" ] && [ -f "$file" ] && [ ! -L "$file" ] && scan+=(--scan "$file")
+  done
+  if [ -n "${python:-}" ] && [ -f "$tool" ]; then
+    out="$("$python" "$tool" classify "$provider" --text "$summary" "${scan[@]}" 2>/dev/null)" || out=""
+    if [ -n "$out" ] && jq -e '.stream and .failure_class' >/dev/null 2>&1 <<<"$out"; then
+      printf '%s' "$out"
+      return 0
+    fi
+  fi
+  printf '{"stream":"code-defect","failure_class":"code-config"}'
+}
+
 write_artifact_inventory(){ # write_artifact_inventory REPO DESTINATION
   local repo="$1" dest="$2" f count=0
   : > "$dest"
@@ -200,6 +224,7 @@ capture_scoreboard(){ # capture_scoreboard PROVIDER REPO HEAD RUN SESSION CALLER
 record_issue(){
   local provider="" summary="" details="" details_file="" command_text="" repo="$(pwd)" error_file="" run_id="" session_id="" caller="" source_digest="" lifecycle_state="" observed_head="" event_sha256="" root now stamp host id report_dir
   local metadata_source="" metadata_copy="" metadata_status=0 diagnostic_source="" diagnostic_copy="" diagnostic_status=0 status_short="" branch="" head="" remote="" safe_summary="" safe_command=""
+  local classification="" failure_stream="" failure_class="" code_defect=false
   local report_count=0 log_count=0 scoreboard_count=0 diagnostic_count=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -309,6 +334,14 @@ record_issue(){
     chmod 0600 "$report_dir/error.redacted.txt" 2>/dev/null || true
   fi
 
+  # Shared admission classifier (#1115): credit, usage-limit, capacity, and
+  # provider-down are provider-outage and are never filed as code defects.
+  classification="$(classify_failure "$provider" "$safe_summary" "$report_dir/error.redacted.txt" "$report_dir/details.redacted.txt")"
+  failure_stream="$(jq -r '.stream' <<<"$classification")"
+  failure_class="$(jq -r '.failure_class' <<<"$classification")"
+  code_defect=false
+  [ "$failure_stream" = "code-defect" ] && code_defect=true
+
   jq -n \
     --arg id "$id" --arg created "$now" --arg provider "$provider" --arg summary "$safe_summary" \
     --arg toolkit "$TOOLKIT_ROOT" --arg report_dir "$report_dir" --arg repo "$root" \
@@ -319,8 +352,11 @@ record_issue(){
     --arg details_file "$details_file" --arg details "$details" \
     --arg run_id "$run_id" --arg session_id "$session_id" --arg caller "$caller" --arg source_digest "$source_digest" --arg lifecycle_state "$lifecycle_state" --arg event_sha256 "$event_sha256" \
     --arg diagnostic_source "$diagnostic_source" --arg diagnostic_copy "$diagnostic_copy" \
+    --arg failure_stream "$failure_stream" --arg failure_class "$failure_class" \
+    --argjson code_defect "$code_defect" \
     --argjson report_count "$report_count" --argjson log_count "$log_count" --argjson scoreboard_count "$scoreboard_count" --argjson diagnostic_count "$diagnostic_count" \
     '{schema_version:3,id:$id,created_at:$created,provider:$provider,summary:$summary,reported_command:$command,
+      failure_stream:$failure_stream,failure_class:$failure_class,code_defect:$code_defect,
       join:{run_id:(if $run_id=="" then null else $run_id end),session_id:(if $session_id=="" then null else $session_id end),caller:(if $caller=="" then null else $caller end),source_digest:(if $source_digest=="" then null else $source_digest end),lifecycle_state:(if $lifecycle_state=="" then null else $lifecycle_state end),event_sha256:(if $event_sha256=="" then null else $event_sha256 end)},
       toolkit_root:$toolkit,report_directory:$report_dir,
       repository:{root:$repo,remote:$remote,branch:$branch,head:$head,working_tree_changes:$status},
@@ -341,6 +377,10 @@ record_issue(){
   chmod -R go-rwx "$report_dir" 2>/dev/null || true
 
   note "recorded $id"
+  note "class $failure_stream/$failure_class"
+  if [ "$failure_stream" != "code-defect" ]; then
+    note "provider-side event; not a code defect"
+  fi
   note "saved to $report_dir"
 }
 
@@ -354,7 +394,9 @@ list_issues(){
     [ ! -d "$issue_dir/resolutions" ] || resolution="$(find "$issue_dir/resolutions" -maxdepth 1 -type f -name '*.json' -print | sort | tail -n 1)"
     status="open"
     [ -z "$resolution" ] || status="$(jq -r '.status' "$resolution")"
-    jq -r --arg status "$status" '[.id,.created_at,.provider,$status,.summary]|@tsv' "$f"
+    jq -r --arg status "$status" '[.id,.created_at,.provider,$status,
+      ((.failure_stream // "code-defect") + "/" + (.failure_class // "code-config")),
+      .summary]|@tsv' "$f"
   done
   [ "$found" -eq 1 ] || note "no recorded issues"
 }

@@ -69,6 +69,13 @@ check('github_windows_limit overflows the remainder to WarpBuild', () => {
   const p = decide(limited, { event: 'pull_request', idleQualified: 0 });
   assert.strictEqual(lanes(p.windows_matrix), 'github-hosted,github-hosted,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild');
 });
+check('a foreign head never reaches the self-hosted pool or WarpBuild', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: 50, foreign: true });
+  assert.strictEqual(lanes(p.windows_matrix), allGithub);
+  for (const w of p.windows_matrix) {
+    assert.strictEqual(w.runs_on, cfg.github_windows);
+  }
+});
 
 function fakeCore() {
   const out = {};
@@ -105,8 +112,8 @@ const lanesOut = core => lanes(JSON.parse(core.out.windows_matrix));
     await run({ ...deps, context: ctx, core, cfg });
     check(label, () => assert.strictEqual(lanesOut(core), expected));
   }
-  for (const [label, head] of [['a fork pull request never reaches a self-hosted host', { repo: { full_name: 'stranger/ai-devops' } }],
-                               ['a pull request from a deleted fork never reaches a self-hosted host', { repo: null }]]) {
+  for (const [label, head] of [['a fork pull request never reaches a self-hosted host or WarpBuild', { repo: { full_name: 'stranger/ai-devops' } }],
+                               ['a pull request from a deleted fork never reaches a self-hosted host or WarpBuild', { repo: null }]]) {
     const core = fakeCore();
     const forkCtx = { ...ctx, payload: { pull_request: { head } } };
     await run({ github: fakeGithub(), poolGithub: fakePool([envy(false)]), context: forkCtx, core, cfg });

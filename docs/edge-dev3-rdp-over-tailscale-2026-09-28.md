@@ -112,7 +112,7 @@ SAM error for the same password.
 1. Downgraded the four packages to 3.31 and held them:
    `sudo dpkg -i` the 3.31 debs (three came from `/var/cache/apt/archives/`,
    `libfreerdp-server3-3` from
-   `launchpad.net package libfreerdp-server3-3_3.31.0+dfsg-0ubuntu0.26.04.1_amd64.deb`),
+   `https://launchpad.net/ubuntu/+archive/primary/+files/libfreerdp-server3-3_3.31.0+dfsg-0ubuntu0.26.04.1_amd64.deb`),
    then `sudo apt-mark hold libwinpr3-3 libfreerdp3-3 libfreerdp-client3-3 libfreerdp-server3-3`.
    **Before unholding**, test a newer FreeRDP with the port-4838 method above.
 2. After the downgrade, the login succeeded but the window flashed and closed
@@ -242,7 +242,7 @@ them separately. Each one wasted time when it was confused with another.
 - **Symptom:** every unlock attempt failed, while Albert believed the password worked
   at the console.
 - **Real cause:** `/etc/shadow` was modified at **2026-09-30 19:17:36 EDT** by another AI
-  session on **edge-dev** (Tailscale host alias `edge-dev-tailscale`). Over SSH, after `sudo` password checks
+  session on **edge-dev** (Tailscale tailnet address). Over SSH, after `sudo` password checks
   failed (19:16), it reset `ahazan`'s password through a root Docker container. It stored the
   new value in 1Password `vibe_coding` as "edge-dev3 ahazan sudo password (restored
   2026-09-30)", at 19:17:34 EDT. The console only *seemed* to work because SDDM auto-logs in
@@ -285,3 +285,40 @@ desktop, and it once took over port 4837 (see above). So the choice is: keep Way
 
 **Owner decision (2026-10-01, Albert, verbatim):** "keep wayland, leave screenconnect black".
 Closed: do not switch edge-dev3 to X11 or install xrdp for ScreenConnect. Use RDP (KRDP) for remote access.
+
+## 2026-10-01 evening: flash-and-close after reboot (locked KWallet)
+
+- **Symptom:** after the 5:29 PM EDT reboot, `mstsc` showed "estimating connection quality",
+  flashed, and closed for 10+ minutes (not the 2-minute startup window).
+- **Evidence:** every attempt logged `New client connected` then `PostConnect ... failed`, with
+  no `authenticated successfully` line and no portal activity. KRDP 6.6.4 `onPostConnect`
+  returns false when a configured user's password is empty. KRDP reads the `ahazan2` password
+  from KWallet (folder `KRDP`) once at startup; the wallet was locked (SDDM auto-login cannot
+  unlock it, `pam_kwallet5` is only in `/etc/pam.d/sddm`), so the read waited and the password
+  stayed empty. The wallet was unlocked at the console at 5:40:57 PM EDT.
+- **Proof:** after `systemctl --user restart app-org.kde.krdpserver` (5:45 PM EDT, wallet open),
+  a local FreeRDP 3.31 client logged `User "ahazan2" authenticated successfully` and
+  `Initializing Freedesktop Portal Session`. Earlier fixes (software encoder drop-in, portal
+  desktop file, kdeglobals restrictions) were untouched.
+- **Fast check:** `qdbus6 org.kde.kwalletd6 /modules/kwalletd6 org.kde.KWallet.isOpen kdewallet`.
+  If `false`, unlock the wallet at the screen, then restart the KRDP service.
+- **Open:** surviving a reboot unattended needs the wallet to open without a password
+  (an empty `kdewallet` password, set by Albert in KWalletManager). Owner decision pending.
+
+### Owner requirement and fix (2026-10-01, 5:57 PM EDT)
+
+Albert, verbatim: "i can't unlock the wallet every time i want to remote control it" and
+"I WILL NOT BE BY THE CONSOLE! i need true remote". Changes:
+
+- `SystemUserEnabled=true` in `~/.config/krdpserverrc` (backup `krdpserverrc.bak-20261001`).
+  KRDP checks the Linux login through PAM (`login` service) before the KWallet users, so
+  logging in as `ahazan` with the Linux password works with the wallet locked. `ahazan2`
+  still works whenever the wallet happens to be open. Security is TLS only (server NLA off),
+  so PAM receives the password.
+- Screen-share approval: `~/.local/state/krdp-serverstaterc` holds a restore token that the
+  portal PermissionStore (`remote-desktop` table) maps to `org.kde.krdp-server` = yes. The
+  approval asked at 5:49 PM EDT followed a test session at 5:46 PM EDT that started the
+  portal and closed before it finished, which likely consumed the old token. Do not run
+  half-finished test connections against the live service; use port 4838.
+- A local Ubuntu FreeRDP 3.31 client cannot finish a session (no H.264), so live proof
+  needs Albert's Windows client after a reboot.

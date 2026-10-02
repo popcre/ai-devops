@@ -1,5 +1,6 @@
 'use strict';
-// Windows section routing pool (Blacksmith removed). Preference order:
+// Windows section routing pool (Blacksmith removed — it is turned off).
+// Preference order:
 // 1. idle qualified self-hosted hosts (EDGE-RUNN-ENVY and any other host
 //    labelled ai-devops-windows-qualified) as extra capacity
 // 2. GitHub-hosted Windows runners
@@ -9,9 +10,12 @@
 
 function range(n) { return Array.from({ length: n }, (_, i) => i + 1); }
 
-function decide(cfg, { event, idleQualified, githubFull = false }) {
+function decide(cfg, { event, idleQualified, githubFull = false, foreign = false }) {
   const reserve = cfg.reserve_qualified_for_reviewer_events.includes(event) ? cfg.reserved_qualified_hosts : 0;
-  let selfHosted = Math.max(0, Math.min(cfg.windows_sections, (idleQualified || 0) - reserve));
+  // A foreign head never runs on our machines: not the self-hosted pool and
+  // not the WarpBuild BYOC VMs in our own Azure subscription. Both stay zero;
+  // every section falls through to GitHub-hosted.
+  let selfHosted = foreign ? 0 : Math.max(0, Math.min(cfg.windows_sections, (idleQualified || 0) - reserve));
   const limit = cfg.github_windows_limit == null ? cfg.windows_sections : cfg.github_windows_limit;
   let github = githubFull ? 0 : Math.max(0, Math.min(cfg.windows_sections, limit));
   return {
@@ -45,8 +49,10 @@ async function countIdleQualified(poolGithub, context, cfg) {
 }
 
 // Code from another repository (a fork pull request) never runs on our own
-// machines. Missing secrets already hide the pool from forks; this makes the
-// rule explicit instead of incidental.
+// machines: neither the self-hosted pool nor the WarpBuild BYOC VMs in our own
+// Azure subscription. This check is defense in depth - the workflow's own
+// job-level `if` conditions are the primary guard and are not editable by the
+// router this job loads from the pull request's tree.
 function isForeignHead(context) {
   const head = context.payload && context.payload.pull_request && context.payload.pull_request.head;
   return !!head && (!head.repo || head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`);
@@ -54,7 +60,8 @@ function isForeignHead(context) {
 
 async function run({ github, poolGithub, context, core, cfg, githubFull = false }) {
   let idle = 0;
-  if (isForeignHead(context)) {
+  const foreign = isForeignHead(context);
+  if (foreign) {
     core.info('Pull request head is outside this repository; every Windows section stays on GitHub-hosted runners.');
     poolGithub = null;
   }
@@ -64,7 +71,7 @@ async function run({ github, poolGithub, context, core, cfg, githubFull = false 
     core.warning(`Qualified pool unknown (${error.message}); every Windows section stays on GitHub-hosted runners.`);
     idle = 0;
   }
-  const plan = decide(cfg, { event: context.eventName, idleQualified: idle, githubFull });
+  const plan = decide(cfg, { event: context.eventName, idleQualified: idle, githubFull, foreign });
   core.info(`idle_qualified=${plan.idle_qualified}`);
   core.info(`github_full=${plan.github_full}`);
   for (const w of plan.windows_matrix) core.info(`windows section ${w.section} -> ${w.lane}`);
