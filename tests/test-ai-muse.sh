@@ -510,12 +510,12 @@ FAILURE_META="$(find "$TMP/state" -name 'codex--failure-followup.json' -type f)"
 check 'failed follow-up is marked uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' ask failure-followup --prompt retry\"; jq -e '.status==\"provider_outcome_uncertain\" and (.last_failure_report|length>0)' '$FAILURE_META'"
 check 'uncertain session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
 check 'interrupted turn state cannot continue without reconciliation' "tmp='${STALE_META}.tmp'; jq '.status=\"turn_in_progress\"' '$STALE_META' > \"\$tmp\" && mv \"\$tmp\" '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
+check 'exact retained completion can reconcile an interrupted local observer without replay' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" && jq -e '.status==\"active\" and .retained_turn.finalized==true' '$STALE_META'"
 fi  # part 2
 ai_test_part 3
 if ai_test_part_active; then
 WRONG_NEW="$(cd "$REPO" && eval "$ENV '$SCRIPT' new wrong-followup --prompt test" 2>&1)"
 WRONG_META="$(find "$TMP/state" -name 'codex--wrong-followup.json' -type f)"
-check 'exact retained completion can reconcile an interrupted local observer without replay' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" && jq -e '.status==\"active\" and .retained_turn.finalized==true' '$STALE_META'"
 check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask wrong-followup --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' '$WRONG_META'"
 check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new mixed-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask mixed-followup --prompt mixed\""
 check 'conflicting start-event session is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new start-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixedstart '$SCRIPT' ask start-followup --prompt mixed\""

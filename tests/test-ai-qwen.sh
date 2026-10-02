@@ -695,10 +695,18 @@ printf 'changed during follow-up evidence preparation\n' >> "$REPO/a.txt"; FOLLO
 [ "$FOLLOWUP_PREPARE_RC" -ne 0 ] && [ "$CALLS_BEFORE_FOLLOWUP_PREPARE" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'follow-up source drift during packet rebuild blocks before provider contact' || bad 'follow-up source drift during packet rebuild blocks before provider contact'
 git -C "$REPO" checkout -q -- a.txt
 
-cp "$REPO/a.txt" "$TMP/a-before-live-drift"
+run transcript review-1 >/dev/null 2>&1
+check 'transcript copy stays in ignored review directory' "/usr/bin/find '$REPO/.ai/reviews' -name 'qwen-review-1-*.jsonl' | grep -q ."
+check 'local transcript discovery receives no provider credential' "! grep -qx BAILIAN_CODING_PLAN_API_KEY '$TMP/qwen-credential-names'"
+run delete review-1 >/dev/null 2>&1
+check 'delete removes the private review copy' "test ! -d '$REVIEW_DIR'"
 fi  # part 1
 ai_test_part 2
 if ai_test_part_active; then
+# Part 1 calibrates startup polling from its first review; a standalone part 2
+# polls with a generous bound instead (loops still stop as soon as ready).
+[ -n "${QWEN_STARTUP_TICKS:-}" ] || QWEN_STARTUP_TICKS="$(scale_ticks 1200)"
+cp "$REPO/a.txt" "$TMP/a-before-live-drift"
 echo mutate-source-dirty > "$TMP/mode"
 if run new live-dirty --prompt review >/dev/null 2>&1; then bad 'same-turn dirty source drift rejects the response'; else ok 'same-turn dirty source drift rejects the response'; fi
 cp "$TMP/a-before-live-drift" "$REPO/a.txt"
@@ -805,11 +813,6 @@ check 'implementation does not touch live checkout' "test ! -e '$REPO/qwen.txt'"
 check 'implementation removes disposable worktree' "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
 
 echo review > "$TMP/mode"
-run transcript review-1 >/dev/null 2>&1
-check 'transcript copy stays in ignored review directory' "/usr/bin/find '$REPO/.ai/reviews' -name 'qwen-review-1-*.jsonl' | grep -q ."
-check 'local transcript discovery receives no provider credential' "! grep -qx BAILIAN_CODING_PLAN_API_KEY '$TMP/qwen-credential-names'"
-run delete review-1 >/dev/null 2>&1
-check 'delete removes the private review copy' "test ! -d '$REVIEW_DIR'"
 DOCTOR_ONE="$(run doctor)"
 check 'doctor checks installed interface without a model call' "printf '%s\\n' \"\$DOCTOR_ONE\" | grep -Eq '^qwen runtime sha256: [0-9a-f]{64}$'"
 check 'doctor secures a fresh Qwen home before checking its session store' "sed -n '/^cmd_doctor()/,/^}/p' '$SCRIPT' | grep -q 'secure_qwen_home'"
