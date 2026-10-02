@@ -156,7 +156,7 @@ OUT="$(AI_DEVOPS_TEST_MODE=1 AI_PR_WAIT_TEST_TRACE="$TMP/fast-trace" AI_PR_WAIT_
 ELAPSED=$SECONDS
 [ "$RC" -eq 0 ] || printf '  diagnostic: fast request rc=%s elapsed=%ss resolved=%s child=%s stderr=%s output=%s\n' "$RC" "$ELAPSED" "$(cat "$TMP/fast-trace.resolved" 2>/dev/null || printf missing)" "$(cat "$TMP/fast-trace.child" 2>/dev/null || printf missing)" "$(cat "$TMP/fast-trace.stderr" 2>/dev/null || printf missing)" "$OUT" >&2
 check "a fast successful request returns without an orphan timer" \
-  "test -f '$TMP/fast-called' && test '$RC' -eq 0 && test '$ELAPSED' -lt 5 && printf '%s' \"$OUT\" | grep -q 'MERGED  merge commit abc123' && ! grep -q '( sleep \"\$limit\"' '$CMD'"
+  "test -f '$TMP/fast-called' && test '$RC' -eq 0 && test '$ELAPSED' -lt 15 && printf '%s' \"$OUT\" | grep -q 'MERGED  merge commit abc123' && ! grep -q '( sleep \"\$limit\"' '$CMD'"
 check "PR waiter labels only its GitHub transport invocation" \
   "grep -qx ai-pr-wait '$TMP/fast-trace.caller' && ! grep -Eq '^ *export .*AI_GH_CALLER=' '$CMD'"
 

@@ -14,10 +14,11 @@
 #      dependency. When an issue in a configured repo closes, every OPEN issue
 #      it was blocking gets one comment naming the closed blocker. Closing that
 #      parent later repeats the step one level up, so a chain unwinds by itself.
-#   2. Wake. A session that runs `wait` is registered with its harness, session
-#      ID and directory. When its blocker closes, the watcher resumes that exact
-#      session headlessly (claude -p --resume / codex exec resume /
-#      zcode --resume) with a prompt to recheck and continue.
+#   2. Wake (legacy records only; `wait` is inert under #1183 child 3). Older
+#      wait records may still carry harness/session ID and directory. When such
+#      a blocker closes, the watcher may resume that session headlessly
+#      (claude -p --resume / codex exec resume / zcode --resume) with a prompt to
+#      recheck and continue. New work leaves the issue/PR as the card instead.
 #   3. Unowned-blocker alarm. A blocker nobody owns stalls every session behind
 #      it. Each alarm scan finds OPEN issues that block another OPEN issue yet
 #      have no assignee, no `owner:` line, no open linked pull request and no
