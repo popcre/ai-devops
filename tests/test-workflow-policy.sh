@@ -374,7 +374,7 @@ proof_ok() {
   printf '%s' "$proof" | grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' || return 1
   printf '%s' "$proof" | grep -qF 'runs-on: warp-custom-warpbuild-win2022-canary' || return 1
   printf '%s' "$proof" | grep -qF 'max-parallel: 2' || return 1
-  printf '%s' "$proof" | grep -qF 'section: [1, 2, 3, 4, 5, 6, 7, 8]' || return 1
+  printf '%s' "$proof" | grep -qF 'section: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]' || return 1
   printf '%s' "$proof" | grep -qF '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' || return 1
   # Not load-bearing: verification-closure must not depend on it.
   ! grep -qF 'windows-offline-warpbuild-proof' <(sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' "$workflow") || return 1

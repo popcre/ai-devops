@@ -292,8 +292,10 @@ jobs:
       # head gets the GitHub-hosted literal regardless of what the router (or a
       # tampered config) reports. Blacksmith is turned off and is not a target.
       matrix:
-        include: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":2,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":3,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":4,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":5,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":6,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":7,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":8,"lane":"github-hosted","runs_on":"windows-2025"}]') }}
+        include: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":2,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":3,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":4,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":5,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":6,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":7,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":8,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":9,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":10,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":11,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":12,"lane":"github-hosted","runs_on":"windows-2025"}]') }}
     runs-on: ${{ matrix.runs_on }}
+    # Twelve sections since 2026-10-02: the Qwen and Muse suites run as parts
+    # (tests/lib-test-part.sh) so each section fits the 20-minute paid lane.
     # Eight sections since 2026-09-29 (#185). 90 minutes since 2026-10-01:
     # GitHub-hosted Windows is slower than the retired Blacksmith lane
     # (Blacksmith measured ~2x faster per suite), and sections 2 and 3 hit the
@@ -321,10 +323,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $short | Out-Null
           "TEMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
           "TMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Windows-sensitive section ${{ matrix.section }} of 8
+      - name: Windows-sensitive section ${{ matrix.section }} of 12
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/8' -ChangedSince $env:SELECTION_BASE
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/12' -ChangedSince $env:SELECTION_BASE
       - name: Remove the short TEMP tree on a reused machine
         if: ${{ always() && matrix.lane == 'qualified-self-hosted' }}
         shell: pwsh
@@ -361,7 +363,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        section: [1, 2, 3, 4, 5, 6, 7, 8]
+        section: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     runs-on: warp-custom-warpbuild-win2022-canary
     timeout-minutes: 40
     env:
@@ -376,10 +378,10 @@ jobs:
           if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
             throw 'The pinned Windows runner image does not provide jq.'
           }
-      - name: WarpBuild proof section ${{ matrix.section }} of 8
+      - name: WarpBuild proof section ${{ matrix.section }} of 12
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/8' -ChangedSince $env:SELECTION_BASE
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/12' -ChangedSince $env:SELECTION_BASE
 
   # Scheduled, manual and qualification verification stay complete and
   # unsectioned. Sectioning is a wall-clock lever for the pull-request lane; the

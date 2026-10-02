@@ -36,7 +36,7 @@ jobs:
       # the free lane's windows-offline-section in verify.yml.
       fail-fast: false
       matrix:
-        section: [1, 2, 3, 4, 5, 6, 7, 8]
+        section: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     runs-on: warp-custom-warpbuild-win2022-canary
     # The free hosted lane bounds the same work at 40 minutes (verify.yml).
     # This overflow lane keeps a tighter paid ceiling.
@@ -67,10 +67,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path C:\t | Out-Null
           "TEMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
           "TMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Windows-sensitive section ${{ matrix.section }} of 8 (WarpBuild)
+      - name: Windows-sensitive section ${{ matrix.section }} of 12 (WarpBuild)
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/8'
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/12'
 
   windows-offline-warpbuild:
     needs: [windows-offline-warpbuild-section]

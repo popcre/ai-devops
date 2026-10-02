@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$REPO_ROOT/bin/ai-qwen"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-part.sh"
 check 'Qwen delegates only pure adapter primitives to the shared helper' "grep -q 'provider-wrapper-common.sh' '$SCRIPT' && grep -q 'provider_wrapper_valid_name' '$SCRIPT' && grep -q 'provider_wrapper_sha256_file' '$SCRIPT'"
 
 # Timing budgets are measured, not guessed: a constant that is generous on an
@@ -474,6 +475,9 @@ crash_recorded_worker(){ # SUPERVISOR PROVIDER EXPECTED_LOCK_LABEL
   [ "$rc" -ne 0 ] || { bad 'crashed review worker must report a nonzero result'; return 1; }
 }
 
+# Windows CI runs the main flow below as two parts (tests/test-ai-qwen-part2.sh);
+# see tests/lib-test-part.sh.
+if ai_test_part_active; then
 echo 'ai-qwen tests'
 check 'missing crash worker cannot signal the test process group' '( kill(){ printf called > "$TMP/invalid-crash-signal"; }; wait(){ :; }; crash_recorded_worker 0 0 missing >/dev/null 2>&1; rc=$?; [ "$rc" -ne 0 ] && [ ! -e "$TMP/invalid-crash-signal" ] )'
 check 'syntax is valid' "bash -n '$SCRIPT'"
@@ -692,6 +696,9 @@ printf 'changed during follow-up evidence preparation\n' >> "$REPO/a.txt"; FOLLO
 git -C "$REPO" checkout -q -- a.txt
 
 cp "$REPO/a.txt" "$TMP/a-before-live-drift"
+fi  # part 1
+ai_test_part 2
+if ai_test_part_active; then
 echo mutate-source-dirty > "$TMP/mode"
 if run new live-dirty --prompt review >/dev/null 2>&1; then bad 'same-turn dirty source drift rejects the response'; else ok 'same-turn dirty source drift rejects the response'; fi
 cp "$TMP/a-before-live-drift" "$REPO/a.txt"
@@ -1059,5 +1066,6 @@ echo review > "$TMP/mode"
 if (cd "$REPO" && AI_QWEN_STARTUP_TIMEOUT_SECONDS=soon bash "$SCRIPT" new bad-deadline --prompt review) >/dev/null 2>&1; then bad 'a non-numeric startup deadline is refused'; else ok 'a non-numeric startup deadline is refused'; fi
 
 recovery_cases
+fi  # part 2
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))

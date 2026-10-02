@@ -376,11 +376,17 @@ Installer behavior has lightweight, dependency-free tests:
 python3 tests/test-ai-doc-reachability.py
 bash tests/test-ai-install-skills.sh
 bash tests/test-ai-memory-sync.sh
-bash tests/test-ai-qwen.sh
+AI_TEST_PART=all bash tests/test-ai-qwen.sh
 bash tests/test-codex-trigger-eval.sh
 bash tests/test-installer-parity.sh
 bash tests/test-ai-adopt-globals.sh
 ```
+
+The long Qwen and Muse suites (`test-ai-qwen.sh`, `test-ai-muse.sh`,
+`test-ai-muse-code.sh`) run as parts so each Windows CI section stays under
+its time limit: the suite file runs part 1 and `tests/<suite>-partN.sh` runs
+part N. `AI_TEST_PART=all` runs every part in one process; see
+`tests/lib-test-part.sh`.
 
 `tests/test-ai-adopt-globals.sh` covers `bin/ai-adopt-globals`, the wrapper that
 replaces a machine's always-loaded globals **without losing its machine
