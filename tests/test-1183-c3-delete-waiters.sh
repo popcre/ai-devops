@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Bound to this snapshot: run from the worktree root only.
+# Bound to this snapshot: resolve the repo root from this script's location.
 set -euo pipefail
-cd "$(dirname "$0")"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 test -f bin/ai-pr-wait
 test -f bin/ai-gh-wait
 test -f bin/ai-blocker-watch
