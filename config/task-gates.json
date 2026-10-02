@@ -32,13 +32,19 @@
     "deploy",
     "database",
     "infrastructure",
-    "production"
+    "production",
+    "shared-db-promotion"
   ],
   "action_gates": {
     "code-only-review": {
       "require_gate": {
         "private-evidence": "synthetic-fixtures-only",
         "private-tooling": "synthetic-fixtures-only"
+      }
+    },
+    "shared-db-promotion": {
+      "require_gate": {
+        "shared-db": "production-promotion-authorization"
       }
     }
   },
@@ -177,7 +183,8 @@
           "deploy",
           "database",
           "infrastructure",
-          "production"
+          "production",
+          "shared-db-promotion"
         ]
       },
       "code": {
@@ -188,7 +195,8 @@
           "deploy",
           "database",
           "infrastructure",
-          "production"
+          "production",
+          "shared-db-promotion"
         ]
       },
       "installation": {
@@ -200,7 +208,8 @@
           "deploy",
           "database",
           "infrastructure",
-          "production"
+          "production",
+          "shared-db-promotion"
         ]
       },
       "reviewer-safety": {
@@ -212,7 +221,8 @@
           "deploy",
           "database",
           "infrastructure",
-          "production"
+          "production",
+          "shared-db-promotion"
         ]
       },
       "ui-live-workflow": {
@@ -224,7 +234,8 @@
         "forbidden_actions": [
           "database",
           "infrastructure",
-          "production"
+          "production",
+          "shared-db-promotion"
         ]
       },
       "shared-db": {
@@ -248,7 +259,8 @@
         "forbidden_actions": [
           "database",
           "infrastructure",
-          "production"
+          "production",
+          "shared-db-promotion"
         ]
       },
       "infrastructure": {
@@ -259,14 +271,17 @@
         ],
         "forbidden_actions": [
           "database",
-          "production"
+          "production",
+          "shared-db-promotion"
         ]
       },
       "production": {
         "required": [
           "exact-resource-and-action-ai-reviewer-approval"
         ],
-        "forbidden_actions": []
+        "forbidden_actions": [
+          "shared-db-promotion"
+        ]
       },
       "private-evidence": {
         "required": [
@@ -278,7 +293,8 @@
           "deploy",
           "database",
           "infrastructure",
-          "production"
+          "production",
+          "shared-db-promotion"
         ]
       },
       "private-tooling": {
@@ -292,7 +308,8 @@
           "deploy",
           "database",
           "infrastructure",
-          "production"
+          "production",
+          "shared-db-promotion"
         ]
       }
     }

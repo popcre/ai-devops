@@ -121,6 +121,30 @@ check 'canonical shared-db identity retains the structural class and gates' \
 check 'redirected pre-transfer shared-db identity retains identical structural gates' \
   "[ \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_canonical\")\" = \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_redirected\")\" ]"
 
+printf 'shared-db promotion launch (owner ruling 2026-10-02)\n'
+for repo in db-canonical db-redirected; do
+  mkdir -p "$TMP/$repo/migrations"; printf 'select 1;\n' > "$TMP/$repo/migrations/001.sql"
+  git -C "$TMP/$repo" add -A; git -C "$TMP/$repo" commit -qm migration
+done
+check 'canonical shared-db may launch the promotion run for a merged change' \
+  "rc 0 '$TMP/db-canonical' check --before shared-db-promotion"
+check 'redirected shared-db identity may launch the promotion run' \
+  "rc 0 '$TMP/db-redirected' check --before shared-db-promotion"
+check 'the promotion launch never unlocks a manual production action' \
+  "! rc 0 '$TMP/db-canonical' check --before production"
+newrepo "$TMP/db-app" u2giants/licensor-source-data
+mkdir -p "$TMP/db-app/db/migrations"; printf 'select 1;\n' > "$TMP/db-app/db/migrations/001.sql"
+git -C "$TMP/db-app" add -A; git -C "$TMP/db-app" commit -qm migration
+check 'an application repository with SQL cannot launch the promotion run' \
+  "rc 3 '$TMP/db-app' check --before shared-db-promotion"
+newrepo "$TMP/code-promo" popcre/shared-db
+printf 'x\n' > "$TMP/code-promo/tool.sh"; git -C "$TMP/code-promo" add -A; git -C "$TMP/code-promo" commit -qm code
+( cd "$TMP/code-promo" && "$GATES" start --class code >/dev/null 2>&1 )
+check 'a non-shared-db class in the shared-db repository cannot launch it' \
+  "rc 3 '$TMP/code-promo' check --before shared-db-promotion"
+check 'a reviewer approval cannot carry the launch to a non-shared-db class' \
+  "out '$TMP/code-promo' check --before shared-db-promotion --reviewer-approval x | grep -q 'opens only for the shared-db class'"
+
 printf 'consumer declarations\n'
 mkdir -p "$TMP/class/.ai-devops"
 cat > "$TMP/class/.ai-devops/task-gates.json" <<'EOF'

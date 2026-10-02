@@ -19,48 +19,18 @@ this public skill. Prove the live link immediately before every write.
 say "pull the repo again and re-read the .md files to see the proper way to make
 db changes" in at least three separate sessions — this skill is that protocol.
 
-> **Working IN the shared-db repo and you were not started as the orchestrator?
-> STOP.** `AGENTS.md` runs one orchestrator session; every other session opens a
-> GitHub issue and stops —
-> `gh issue create --repo popcre/shared-db --label db-work --title "HANDOVER: …" --body-file <file>`.
-> This skill tells you how to author a correct change once you have been
-> dispatched; it is not permission to start one. **This STOP is about changing
-> STRUCTURE.** It is not about looking — read-only inspection of the schema is
-> always allowed from anywhere (Rule 0 below). And it is not about your own
-> application's data — see Rule 0.5.
->
-> **Need to reach the orchestrator? Resolve it, never remember it** (shared-db
-> `AGENTS.md` §11c, issue #1605):
->
-> ```bash
-> node scripts/check-orchestrator-marker.mjs --resolve
-> ```
->
-> It answers from the **current open marker only** and prints the address that
-> marker DECLARES. Exit 0 = one valid marker, and the printed `route_id` is where
-> to try. Exit 3 = **no active orchestrator** — open your issue and let it queue;
-> do not dispatch and do not appoint yourself. Exit 1 = unsafe, ambiguous or
-> unroutable — an orchestrator may be live and unreachable, so stop. Exit 2 =
-> GitHub unreadable — assume one exists.
->
-> ⚠️ **Exit 0 does not prove anyone is there.** Nothing checks that the session
-> exists, is running, or can receive a message — only that a marker declares that
-> address. **Confirm you got a reply.** Silence is not delivery, and if nobody
-> answers, re-resolve rather than assuming it landed.
->
-> ⚠️ **Never take a routing target from conversation history, a `HANDOFF.d/` file,
-> a closed marker, or a remembered id.** That is exactly how an authorized
-> structural request was once delegated to an orchestrator that had already
-> closed, and nothing reported it. Re-resolve before every delegation; a handover
-> changes the target.
->
-> **Working IN the shared-db repo, or running more than one workstream?** Load the
-> **`shared-db-orchestrator`** skill as well. This skill covers how to author a
-> correct change; that one covers how a session is run — one orchestrator, all work
-> in isolated sub-agent worktrees, never background task chips (four of them once
-> wrote competing `CREATE OR REPLACE` migrations on the same function),
-> up to five isolated authors with atomic GitHub-backed reservations, and the two-part orchestrator
-> handoff. To end or hand over that session, use **`shared-db-handover`**.
+> **Shared-db structural work is claim-first (owner ruling, Albert Hazan,
+> 2026-10-02: "there is no longer an orchestrator").** There is no orchestrator
+> session, no orchestrator chat, no marker, no dispatch, and no HANDOVER-and-stop.
+> Any session that needs a STRUCTURE change claims the exact database objects on
+> the existing `popcre/shared-db` issue and starts, doing the change itself:
+> own worktree and branch in `popcre/shared-db`, migration version from the lane
+> tool where one exists, pull request, the assigned AI reviewer's APPROVE of the
+> exact apply, and proof of the target database immediately before every write.
+> Read-only inspection is always allowed (Rule 0); your own application's rows are
+> not gated (Rule 0.5). `shared-db-orchestrator` is optional reference only for its
+> safety rules (claims, exact-object locks, review, live proof). To end or hand
+> over a session, use **`shared-db-handover`** (notes on the same issue).
 
 > ## ⚠️ Two corrections, 2026-08-07. Read before rule 1.
 >
@@ -77,15 +47,15 @@ db changes" in at least three separate sessions — this skill is that protocol.
 >
 > **2. Requesting the work has changed.** `COORDINATOR_INTAKE.md` was retired on
 > 2026-08-07 and is now a 37-line pointer. If you need database work done and have not
-> started it, **open a GitHub issue**:
-> `gh issue create --repo popcre/shared-db --label db-work --title "…" --body-file <file>`.
+> started it, **claim the exact objects on the existing GitHub issue
+> (open one with `--label db-work` only if none exists) and start the work yourself.
 > A required check fails any PR that writes work back into the old file.
 
 ## Rule 0 — read-only inspection is ALLOWED, from every repo, always
 
 **None of the gates below apply to reading.** This skill governs *changes*. Any AI
 session, in any application repository, may inspect the shared database in full
-without a GitHub issue, an orchestrator dispatch, or a handoff:
+without a GitHub issue, a claim, or a handoff:
 
 - schemas; tables and columns; keys and relationships; indexes and constraints
 - views; functions and RPCs; triggers; row-security (RLS) policies
@@ -112,12 +82,13 @@ Three conditions on a read-only review:
    repo, a GitHub issue, logs, prompts sent to outside services, commit messages
    or pull requests.
 
-Everything below — the issue, the orchestrator, the branch/PR/preview process —
+Everything below — the claim, the branch/PR/preview process —
 starts the moment the answer is "and now change the SHAPE of it".
 
 ## Rule 0.5 — DATA is not gated. Rows belong to the application session.
 
-> **Owner ruling, Albert Hazan, 2026-08-13** — "shared-db orchestrator is for creating,
+> **Owner ruling, Albert Hazan, 2026-08-13** (historical wording; the orchestrator
+> role was retired 2026-10-02 — read it as "shared-db structural work") — "shared-db orchestrator is for creating,
 > changing, or deleting the STRUCTURE or schema or design of the database, not for
 > creating, changing, or deleting the data inside the database. That should be done by
 > the sessions working on the actual application."
@@ -134,12 +105,12 @@ This skill governs the **shape** of the shared database, not its **contents**.
 - operational data: job runs, queue rows, cache entries, audit and log rows
 
 Older wording here listed "a seed or data fix" next to tables and columns, so sessions
-reasonably read any `INSERT` as orchestrator work. It never was.
+reasonably read any `INSERT` as gated structural work. It never was.
 
 **The one carve-out — curated Master Data.** Bulk or ad-hoc loading of **outside-sourced**
 content (spreadsheet, CSV, export, pasted rows, screenshot, chat message, API pull) into
 `core.licensor`, `core.property`, `core.character`, `core.customer`, `core.factory` or
-their `*_ext` tables is still orchestrator work under `AGENTS.md` §6.4 and its 2026-08-03
+their `*_ext` tables is still gated, claim-first structural-lane work under `AGENTS.md` §6.4 and its 2026-08-03
 correction, matched-row abstention included. That gate was bought with an incident. The
 trigger is **provenance and target**, not volume or verb.
 
@@ -153,7 +124,7 @@ unless the target is curated Master Data.
 ## Successor issues must be routed from scratch
 
 Never inherit the route of a predecessor issue. Classify the successor's own
-requested work: structural work routes to `shared-db-orchestrator` and names
+requested work: structural work is claimed claim-first on the issue and names
 exact database objects; ordinary application data or offline analysis routes to
 the owning application session; outside-sourced curated Master Data uses its
 existing governed exception; planning and repository maintenance do not consume

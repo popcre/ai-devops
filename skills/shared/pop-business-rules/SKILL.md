@@ -72,7 +72,7 @@ plans. Those can reveal behavior, evidence, conflict, or an unanswered question.
 - Never copy rule content into this Skill.
 - Never edit a consumer repo's `shared-db/` mirror.
 - Database structure changes route through `codex-shared-db-change` or
-  `shared-db-orchestrator`; this Skill grants no database-change authority.
+  `shared-db-change` (claim-first); this Skill grants no database-change authority.
 - Outside-sourced writes into curated Master Data retain shared-db governance.
 - Licensed row contents stay in approved private repositories and never enter
   public docs, issues, commits, or outside-model prompts.

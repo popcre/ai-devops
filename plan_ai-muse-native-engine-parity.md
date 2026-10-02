@@ -73,7 +73,7 @@ read-only governed reviews. It has **two engines** (PR #529):
 - `muse-code` (opt-in, `AI_MUSE_ENGINE=muse-code`): Meta's native Windows CLI,
   a private hash-verified copy of
   `%LOCALAPPDATA%\Programs\muse\muse-bin-<version>.exe`
-  (`config/muse-code/version` = `1.3.0-R3233.1`, SHA-256 in
+  (`config/muse-code/version` = `1.4.2-R4684.1`, SHA-256 in
   `config/muse-code/sha256`, copied to
   `~/.local/share/ai-devops/muse-code-bin/muse-<sha>.exe`; the auto-updating
   `muse` launcher is never used), model id `muse-spark-1.3-contributor`.
@@ -580,7 +580,7 @@ Existing suites that must stay green on every phase PR (Git Bash, Windows):
 ### 12. Access and environment
 
 - Machine: Windows (`edge-dev`), Git Bash, `jq` and `python3` on PATH.
-- Pinned native binary source: `%LOCALAPPDATA%\Programs\muse\muse-bin-1.3.0-R3233.1.exe`;
+- Pinned native binary source: `%LOCALAPPDATA%\Programs\muse\muse-bin-1.4.2-R4684.1.exe`;
   pin files: `config/muse-code/version`, `config/muse-code/sha256`. Wrapper
   runs a private verified copy under `~/.local/share/ai-devops/muse-code-bin/`.
 - Private stores (muse-code engine): data

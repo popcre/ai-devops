@@ -21,7 +21,7 @@ arguments. Prove the live link again immediately before every write.
 one app repo can silently break another. All durable DB **structure** lives in shared-db.
 
 > **Structure, not data (owner ruling, Albert Hazan, 2026-08-13; `AGENTS.md` §0.0-B).**
-> This skill and the shared-db orchestrator govern the *shape* of the database — schema,
+> This skill governs the *shape* of the database — schema,
 > tables, columns, views, functions/RPCs, triggers, RLS, indexes, migrations, cross-app
 > contracts. The rows an application creates, edits, or deletes in the normal course of its
 > work belong to the session working on that application: **no issue, no dispatch, no
@@ -31,7 +31,7 @@ one app repo can silently break another. All durable DB **structure** lives in s
 > **One carve-out:** bulk or ad-hoc loading of outside-sourced content (spreadsheet, CSV,
 > export, pasted rows, API pull) into curated Master Data — `core.licensor`,
 > `core.property`, `core.character`, `core.customer`, `core.factory` and their `*_ext`
-> tables — is still orchestrator work under `AGENTS.md` §6.4, matched-row abstention
+> tables — is still gated, claim-first structural-lane work under `AGENTS.md` §6.4, matched-row abstention
 > included. The trigger is provenance and target, not volume or verb.
 >
 > **Unchanged:** §4.2 still requires proving the connection target immediately before every
@@ -46,11 +46,13 @@ one app repo can silently break another. All durable DB **structure** lives in s
 >    `<protected-retired-preview-ref>`, which is not a project in this account. Preview is
 >    **`<protected-shared-preview-ref>`** (Supabase branch `shared-db-schema-rehearsal`);
 >    production is `<protected-shared-prod-ref>`. Fixed throughout.
-> 2. **You almost certainly may not do this work yourself.** `shared-db` runs **one
->    orchestrator session** and every other session **stops and opens a GitHub issue**:
->    `gh issue create --repo popcre/shared-db --label db-work --title "…" --body-file <file>`.
->    Read the procedure below as *how a dispatched agent authors the change*, never as
->    permission to start one.
+> 2. **Claim-first — there is no orchestrator (owner ruling, Albert Hazan, 2026-10-02:
+>    "there is no longer an orchestrator").** Claim the exact database objects on the
+>    existing `popcre/shared-db` issue and start the change yourself: own worktree and
+>    branch, migration version from the lane tool where one exists, pull request, the
+>    assigned AI reviewer's APPROVE of the exact apply, and target proof before every
+>    write. No orchestrator chat, marker, dispatch, or HANDOVER-and-stop.
+>    `shared-db-orchestrator` is optional reference for its safety rules only.
 > 3. **Prove which database you are on before every write** — `AGENTS.md` §4.2, an owner
 >    ruling. Immediately before any statement that writes, changes or removes data,
 >    schema or privileges (preview included), read `cat supabase/.temp/project-ref`, and
@@ -65,7 +67,7 @@ one app repo can silently break another. All durable DB **structure** lives in s
 
 **Everything in this skill governs CHANGES. None of it applies to reading.** Any
 session, in any application repository, may inspect the shared database in full
-with no GitHub issue, no orchestrator dispatch and no handoff: schemas; tables and
+with no GitHub issue, no claim and no handoff: schemas; tables and
 columns; keys and relationships; indexes and constraints; views; functions and
 RPCs; triggers; row-security policies; migration history; generated types;
 metadata; and safe sample data when a review needs it. It may compare all of that
@@ -100,7 +102,7 @@ change is applied.
 ## Successor issues must be routed from scratch
 
 Never inherit the route of a predecessor issue. Classify the successor's own
-requested work: structural work routes to `shared-db-orchestrator` and names
+requested work: structural work is claimed claim-first on the issue and names
 exact database objects; ordinary application data or offline analysis routes to
 the owning application session; outside-sourced curated Master Data uses its
 existing governed exception; planning and repository maintenance do not consume
@@ -145,9 +147,11 @@ the correct route. A predecessor's repository is context, not routing proof.
    recipe. The sole exception is the separately activated automatic workflow recorded
    by issue #2716: only after exact structural admission, guarded merge, merged-main
    preview, and every immutable evidence gate may that workflow dispatch its existing
-   serial production lane. A session never reconstructs or dispatches it manually;
-   absent or ambiguous evidence stops for an engineer. It is the orchestrator's call,
-   not this authoring skill's.
+   serial production lane. A session never reconstructs it or applies to production
+   by hand; absent or ambiguous evidence stops for an engineer. Owner ruling
+   (2026-10-02, verbatim: "let AI launch it and remove that rule permanently"): an AI
+   session may launch the merged-preview apply run that starts it, for an approved,
+   merged change, after `ai-task-gates check --before shared-db-promotion` passes.
    If a change was already applied out-of-band, use `supabase migration repair
    --status applied <version>` to record it (metadata only, no SQL re-run). If the
    dry-run reports "Remote migration versions not found in local migrations
