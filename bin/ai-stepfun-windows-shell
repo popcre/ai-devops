@@ -126,6 +126,7 @@ assert_in_folder(){
     NUL|CON|COM1|COM2|COM3|PRN|AUX|nul|con) REFUSE 'reserved device' ;;
   esac
   # Relative path only; join under REVIEW_DIR then canonicalize.
+  # Refuse symlink/reparse escape: -L on any path component, or resolved dir outside.
   local full="$REVIEW_DIR/$raw"
   if command -v cygpath >/dev/null 2>&1; then
     norm="$(cygpath -u "$full" 2>/dev/null || true)"
@@ -135,10 +136,10 @@ assert_in_folder(){
   [ -n "$norm" ] || REFUSE 'path resolve'
   local rev_norm
   rev_norm="$(cd "$REVIEW_DIR" && pwd -P)"
-  local dir base
+  local dir base dir_p
   dir="$(dirname "$norm")"
   base="$(basename "$norm")"
-  local dir_p
+  [ ! -L "$norm" ] || REFUSE 'symlink path'
   dir_p="$(cd "$dir" 2>/dev/null && pwd -P)" || REFUSE 'path escape'
   case "$dir_p" in
     "$rev_norm"|"$rev_norm"/*) ;;
@@ -167,7 +168,8 @@ allow_colon_name(){
 }
 
 run(){
-  # exec the real runner via allowlist file if present
+  # Always dispatch the parsed token list (never raw "$*").
+  local -a argv=("$@")
   local allow="${AI_STEPFUN_RUNNERS_JSON:-${HOME}/.config/ai-devops/secrets/stepfun-windows-runners.json}"
   local real=""
   if [ -f "$allow" ] && command -v jq >/dev/null 2>&1; then
@@ -231,7 +233,6 @@ case "$runner_lc" in
     ;;
   go|cargo|dotnet)
     case "$sub" in test|build) ;; *) REFUSE 'runner subcommand' ;; esac
-    # Any path-looking operand must stay in the folder; flag-shaped args are refused.
     i=2
     while [ "$i" -lt "${#tokens[@]}" ]; do
       a="${tokens[i]}"
@@ -241,7 +242,7 @@ case "$runner_lc" in
       esac
       i=$((i+1))
     done
-    run "$@"
+    run "${tokens[@]:1}"
     ;;
   ls|cat|head)
     [ -n "$sub" ] || REFUSE 'missing path'
@@ -250,7 +251,6 @@ case "$runner_lc" in
     run "$sub"
     ;;
   bash|sh)
-    # file runner only — already Layer0-stripped if -c
     case "${tokens[1]:-}" in
       --noprofile) [ "${tokens[2]:-}" = '--norc' ] || REFUSE 'bash flags'; f="${tokens[3]:-}"; [ "${#tokens[@]}" -eq 4 ] || REFUSE 'extra args' ;;
       *) f="${tokens[1]:-}"; [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args' ;;

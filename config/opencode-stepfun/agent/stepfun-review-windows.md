@@ -11,6 +11,7 @@ tools:
   glob: false
   grep: false
   list: false
+  find: false
   webfetch: false
   task: false
   todowrite: true

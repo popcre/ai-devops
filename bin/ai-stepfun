@@ -2,11 +2,12 @@
 # ai-stepfun - StepFun Step 5: reviews and second opinions in a disposable
 # writable copy, plus isolated implementation.
 #
-# Engine: StepCode CLI (`step`) where it is installed, otherwise the pinned
-# OpenCode harness (same binary GLM/Muse/DeepSeek use). Ubuntu/Linux only: both
-# engines run every turn under bubblewrap, and Windows is refused (#1086). Owner instruction 2026-09-25: StepFun may write, implement,
-# and execute code. Owner instruction 2026-09-28 (#974): reviewers are not
-# read-only.
+# Engine: StepCode CLI (`step`) on Ubuntu/Linux, otherwise the pinned OpenCode
+# harness. Linux runs every turn under bubblewrap (#1086). Windows runs
+# folder + test shell (owner 2026-09-30) via OpenCode only — not rule-12
+# equivalent. Owner instruction 2026-09-25: StepFun may write, implement, and
+# execute code. Owner instruction 2026-09-28 (#974): reviewers are not
+# read-only (Windows implement is refused).
 #
 # Sandbox: every turn runs against a disposable, remote-less copy or clone.
 # StepCode turns additionally run under bubblewrap with only /usr, /etc,
@@ -656,7 +657,7 @@ ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
                                                                  write and run code in a new remote-less clone (never commits)
 ai-stepfun doctor [--live]                                       install, engine, key store (and one live call)
 ai-stepfun store-key [--if-missing]                              refresh the protected key store from 1Password
-Engine: StepCode CLI where installed, otherwise OpenCode; Ubuntu/Linux only, always under bubblewrap.
+Engine: StepCode on Linux (bubblewrap) or OpenCode on Windows (folder + test shell).
 EOF
 }
 
