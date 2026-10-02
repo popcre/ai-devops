@@ -12,24 +12,23 @@ const chunks = path.join(root, 'lib', 'chunks');
 const files = fs.readdirSync(chunks).filter((name) => name.endsWith('.js'));
 const candidates = files.map((name) => path.join(chunks, name)).filter((file) => {
   const text = fs.readFileSync(file, 'utf8');
-  return text.includes('var INTERNAL_SECRET_ENV_VARS') && text.includes('function sanitizeChildEnv');
+  return /var\s+INTERNAL_SECRET_ENV_VARS\b/.test(text) && text.includes('function sanitizeChildEnv');
 });
 if (candidates.length !== 1) throw new Error(`expected one sanitizer bundle, found ${candidates.length}`);
 const source = fs.readFileSync(candidates[0], 'utf8');
-const declarations = source.match(/var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];/g) || [];
+const declarations = source.match(/var\s+INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];/g) || [];
 // Two declarations make the effective array ambiguous (the last one wins).
 if (declarations.length !== 1) throw new Error(`expected one sanitizer declaration, found ${declarations.length}`);
-const declaration = declarations;
 // The same holds for the functions: a decoy first definition must not be the
 // one proven while a later definition is the one that runs.
 for (const name of ['sanitizeChildEnv', 'isInternalSecretEnvVar']) {
-  const count = source.split(`function ${name}(`).length - 1;
+  const count = (source.match(new RegExp(String.raw`function\s+${name}\s*\(`, 'g')) || []).length;
   if (count > 1) throw new Error(`expected at most one ${name} definition, found ${count}`);
 }
 // Pretty-printed (<= 0.23) and minified (0.24+) bundles both end the function
 // with "return sanitized" and close it right before its __name() registration.
 const fn = source.match(/function sanitizeChildEnv\([^)]*\)\s*\{[\s\S]*?return sanitized;?\s*\}(?=\s*__name\(sanitizeChildEnv\b|\s*$)/m);
-if (!declaration || !fn) throw new Error('could not extract the known sanitizer implementation');
+if (!fn) throw new Error('could not extract the known sanitizer implementation');
 let helperProgram = '';
 if (fn[0].includes('isInternalSecretEnvVar')) {
   const nameSet = source.match(/var INTERNAL_SECRET_ENV_VAR_NAMES\s*=\s*new Set\([\s\S]*?\);/);
@@ -39,7 +38,7 @@ if (fn[0].includes('isInternalSecretEnvVar')) {
 }
 const program = `
 const PRIVATE_ACP_CAPABILITY_ENV = "QWEN_PRIVATE_ACP_CAPABILITY";
-${declaration[0]}
+${declarations[0]}
 ${helperProgram}
 ${fn[0]}
 sanitizeChildEnv({

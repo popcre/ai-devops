@@ -111,11 +111,16 @@ try {
   $refused = $false
   try { [void](Set-QwenChildEnvironmentHardening -Root $minRoot) } catch { $refused = $_.Exception.Message -like '*refusing an unverified patch*' }
   Assert $refused 'an ambiguous bundle whose first declaration lists the key must be refused, not skipped'
-  $verifyOut = & (Join-Path $minNode 'node.exe') (Join-Path $root 'toolserify-qwen-child-env-sanitizer.mjs') $minRoot 2>&1
-  Assert ($LASTEXITCODE -ne 0) 'the behavioral verifier must refuse a bundle with two sanitizer declarations'
+  $verifyOut = & (Join-Path $minNode 'node.exe') (Join-Path $root 'tools\verify-qwen-child-env-sanitizer.mjs') $minRoot 2>&1
+  Assert ($LASTEXITCODE -ne 0 -and "$verifyOut" -match 'expected one sanitizer declaration') 'the behavioral verifier must refuse a bundle with two sanitizer declarations'
   [IO.File]::WriteAllText($minFile, $minBundle.Replace('init_esbuild_shims();', 'init_esbuild_shims();function sanitizeChildEnv(env){const sanitized={};return sanitized}__name(sanitizeChildEnv,"sanitizeChildEnv");').Replace('["QWEN_SERVER_TOKEN"', '["BAILIAN_CODING_PLAN_API_KEY","QWEN_SERVER_TOKEN"'), [Text.UTF8Encoding]::new($false))
-  $verifyOut = & (Join-Path $minNode 'node.exe') (Join-Path $root 'toolserify-qwen-child-env-sanitizer.mjs') $minRoot 2>&1
-  Assert ($LASTEXITCODE -ne 0) 'the behavioral verifier must refuse a bundle with a decoy sanitizer function'
+  $verifyOut = & (Join-Path $minNode 'node.exe') (Join-Path $root 'tools\verify-qwen-child-env-sanitizer.mjs') $minRoot 2>&1
+  Assert ($LASTEXITCODE -ne 0 -and "$verifyOut" -match 'expected at most one sanitizeChildEnv') 'the behavioral verifier must refuse a bundle with a decoy sanitizer function'
+  # Whitespace variants are still the same declaration to JavaScript.
+  [IO.File]::WriteAllText($minFile, $minBundle.Replace('init_esbuild_shims();', 'init_esbuild_shims();var  INTERNAL_SECRET_ENV_VARS = ["X"];'), [Text.UTF8Encoding]::new($false))
+  $refused = $false
+  try { [void](Set-QwenChildEnvironmentHardening -Root $minRoot) } catch { $refused = $_.Exception.Message -like '*refusing an unverified patch*' }
+  Assert $refused 'a whitespace-variant second declaration must be refused'
 } finally {
   if (Test-Path -LiteralPath $minRoot) { Remove-Item -LiteralPath $minRoot -Recurse -Force }
 }
