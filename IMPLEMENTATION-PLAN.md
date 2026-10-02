@@ -293,7 +293,7 @@ One dated line each (STATUS bullet or issue comment). **No** new plan files.
 
 ### Step 8 — Merge and live proof
 
-- `bin/ai-gh pr merge` / queue; `bin/ai-pr-wait <pr>`.
+- `bin/ai-gh pr merge` / queue; `bin/ai-pr-wait <pr> --timeout-minutes N`.
 - Confirm squash/merge commit on `origin/main`.
 - Live proof: `ai-glm doctor` on edge-dev with a **seeded** orphan backlog (e.g. 20 fake dirs) finishes inside the 10s window; paste timing into the PR or handoff.
 - Update STATUS rows in **this plan** (mandatory `session-docs-update` / plan-file gate). Mark step 8 done only with the live artifact named.

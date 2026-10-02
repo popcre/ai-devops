@@ -50,8 +50,12 @@ esac
 GH="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)/ai-gh"
 STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
 deadline=$(( $(date +%s) + TIMEOUT * 60 ))
-# Offline tests pin the deadline without sleeping a real minute.
-[ -z "${AI_GH_WAIT_TEST_DEADLINE_EPOCH:-}" ] || deadline="$AI_GH_WAIT_TEST_DEADLINE_EPOCH"
+# Offline tests (AI_DEVOPS_TEST_MODE=1 only) pin the deadline without sleeping
+# a real minute. Production ignores the hook so a stray env cannot defeat the
+# caller's explicit bound.
+if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_GH_WAIT_TEST_DEADLINE_EPOCH:-}" ]; then
+  deadline="$AI_GH_WAIT_TEST_DEADLINE_EPOCH"
+fi
 prev=''; fails=0
 while :; do
   out="$(AI_GH_CALLER=ai-gh-wait AI_GH_NO_WAIT=1 "$GH" "$@")"; rc=$?   # stderr passes through so the real error is visible

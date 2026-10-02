@@ -211,8 +211,9 @@ clone + `./install.sh` on Ubuntu).
 5c3. **Install the Claude closeout hook:** `bin/ai-install-completion-check-hook`
    (Claude is the default client; `--check` reports drift). Idempotent; strictly
    additive to `~/.claude/settings.json`. Without it, a session that ends on
-   waiting language is never forced to hold a BlockerWatch wait, so the
-   BlockerWatch rule is honor-system only (issue #878). `ai-devops doctor` fails
+   waiting language is not required to hold any BlockerWatch wait
+   (registration is OUT; #1183 child 3). Residual honor-system wording about
+   a registration rule is obsolete (issue #878). `ai-devops doctor` fails
    when it is missing. Run it from a Codex sync too.
 5d. Check the weekly read-only memory audit exists (`ai-memory-health` scheduled
    task on Windows, registered by `bin/install-memory-health-task.ps1`). If absent,
