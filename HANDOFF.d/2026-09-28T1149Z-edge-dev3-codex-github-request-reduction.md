@@ -101,7 +101,7 @@ Reduce unnecessary GitHub requests and checks as far as possible without losing 
 ## 7. Constraints and gotchas
 
 - All write work must remain in dedicated current-upstream worktrees; canonical checkout is landing-only. No broad staging, force push, direct protected-main push, or destructive cleanup of another worker's state.
-- `bin/ai-gh` is the transport for GitHub CLI calls. One call per five minutes per waiter. Waits over roughly ten minutes must use `ai-blocker-watch wait` rather than polling.
+- `bin/ai-gh` is the transport for GitHub CLI calls. One call per five minutes per waiter. Registration is OUT (#1183 child 3). Waits use `bin/ai-pr-wait <pr> --timeout-minutes N`; if the wait outlives the turn, leave the issue/PR as the card.
 - Run `ai-task-gates start --class ...` per worktree and check before review, ship, deployment or production. Reviewer safety paths require independent read-only exact-head final review; a new commit invalidates the prior verdict.
 - `git var GIT_COMMITTER_IDENT` must show `Albert Hazan <u2giants@users.noreply.github.com>` before each first commit. Sign every GitHub issue/PR/comment body `Posted by Codex chat <id> on <machine>`.
 - Do not reduce original capability to suppress rate limits. The install gate must preserve rollback/retry, installed launchers, and PATH behavior. Shared-db #3646 is non-orchestrator tooling, never a schema-orchestrator request.

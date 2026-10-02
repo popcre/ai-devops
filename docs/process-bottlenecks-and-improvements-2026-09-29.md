@@ -127,7 +127,7 @@ filters on required checks, #401 and #204 stay closed.
 | **One shared GitHub identity (largely fixed)** | Work stopped on rate-limit holds; background scans starving interactive work | Scheduled watchers used the personal token; BlockerWatch was ~95% of measured managed traffic; three machines ticked on the same minute (secondary limit) | Whole-fleet pauses on the owner's budget | Keep App `pop-ai-watchers` for scheduled ticks (PR #1006) and the per-machine tick stagger (PRs #999, #1003, #1004). Finish #658 remaining rows (installed attribution, BlockerWatch savings proof, host matrix, measured acceptance) — already owned by `plan_github-request-reduction.md` / `plan_cut-unneeded-github-traffic.md` |
 | **Reviewer preflights and qualification** | Reviews fail "doctor did not answer within 60s"; pin bump costs two days; out-of-quota discovered after failure | Sweeps inside the check path; too-short timeouts; no headroom check; multiple membership sources | Multi-day reviewer outages; competing fix PRs | Bounded O(1) preflight, pin-only lane, single registry, headroom gate before long reviews (`ai-gemini-usage` pattern is the model — extend or do not duplicate) |
 | **Handoffs and succession** | Hours of re-orientation; claims left under dead names; briefs wiped; marker rotation (#3570 → #3655-style chains) | Handoff as ceremony; ephemeral scratch state; required orchestrator role | Most wall-clock was coordination, waiting, handover, re-orientation | Coordination deletion (landed: claim-first, no marker, no chat conductor). Keep handoffs for **unfinished work only**. Positive machine-checkable conditions in handoff text, never bare negative instructions |
-| **Waiters and background helpers** | 31 helpers running against stopped targets; orphan 14-hour background tasks; 24-hour repeat of one ~6-hour test | No liveness, no TTL, no no-progress detector; waits do not expire | Days of apparent activity with zero delivery | Self-expiring waiters, background-task TTL + auto-reap with a summary, "N identical failures ⇒ stop" detector, park-with-state instead of cold-start redo |
+| **Waiters and background helpers** | 31 helpers running against stopped targets; orphan 14-hour background tasks; 24-hour repeat of one ~6-hour test | No liveness, no TTL, no no-progress detector; waits do not expire | Days of apparent activity with zero delivery | **NOT ADOPTED as TTL/park-state** (#1183 c3). Bounded in-session deadlines + issue-as-card only |
 
 ---
 
@@ -287,7 +287,7 @@ So nobody "fixes" this by adding process back:
 
 1. **Finish the coordination-deletion residuals** (globals on Hetz, machine-tools duplicates, parked-issue tidy) and never re-add the ticket mill, orchestrator role, markers, or required wait registration.
 2. **Label timeout / kill / rate-limit as capacity** in CI and waiter reporting — and never let a capacity failure invalidate an exact-head approval.
-3. **Make waits die:** self-expiring waiters, background-task TTL, park-with-state instead of cold-start redo.
+3. **Make waits die:** **NOT ADOPTED as TTL/park-state** (#1183 c3). Bounded explicit deadlines + leave the issue/PR as the card.
 4. **Keep long Windows work off the merge critical path** and finish real capacity routing (hosted short job, ENVY, Blacksmith, affected-test selection) — without raising ceilings.
 5. **Take maintenance out of the hot path:** O(1) preflight, pin-only qualification, one reviewer registry, empty-verdict = failure.
 

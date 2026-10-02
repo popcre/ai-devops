@@ -110,7 +110,7 @@ PENDING_MARKERS = (
     # "PR #123 is the card; GitHub notifications are the reminder."
     # Registration is inert (wait/has-wait print a note), so claiming a
     # registration is NOT a pending marker.
-    "issue is the card", "pr is the card", "as the card and return",
+    "is the card", "as the card and return",
     "github notifications are the reminder",
 )
 
