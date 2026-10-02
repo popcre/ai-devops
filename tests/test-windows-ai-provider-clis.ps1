@@ -113,6 +113,9 @@ try {
   Assert $refused 'an ambiguous bundle whose first declaration lists the key must be refused, not skipped'
   $verifyOut = & (Join-Path $minNode 'node.exe') (Join-Path $root 'toolserify-qwen-child-env-sanitizer.mjs') $minRoot 2>&1
   Assert ($LASTEXITCODE -ne 0) 'the behavioral verifier must refuse a bundle with two sanitizer declarations'
+  [IO.File]::WriteAllText($minFile, $minBundle.Replace('init_esbuild_shims();', 'init_esbuild_shims();function sanitizeChildEnv(env){const sanitized={};return sanitized}__name(sanitizeChildEnv,"sanitizeChildEnv");').Replace('["QWEN_SERVER_TOKEN"', '["BAILIAN_CODING_PLAN_API_KEY","QWEN_SERVER_TOKEN"'), [Text.UTF8Encoding]::new($false))
+  $verifyOut = & (Join-Path $minNode 'node.exe') (Join-Path $root 'toolserify-qwen-child-env-sanitizer.mjs') $minRoot 2>&1
+  Assert ($LASTEXITCODE -ne 0) 'the behavioral verifier must refuse a bundle with a decoy sanitizer function'
 } finally {
   if (Test-Path -LiteralPath $minRoot) { Remove-Item -LiteralPath $minRoot -Recurse -Force }
 }

@@ -20,6 +20,12 @@ const declarations = source.match(/var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?
 // Two declarations make the effective array ambiguous (the last one wins).
 if (declarations.length !== 1) throw new Error(`expected one sanitizer declaration, found ${declarations.length}`);
 const declaration = declarations;
+// The same holds for the functions: a decoy first definition must not be the
+// one proven while a later definition is the one that runs.
+for (const name of ['sanitizeChildEnv', 'isInternalSecretEnvVar']) {
+  const count = source.split(`function ${name}(`).length - 1;
+  if (count > 1) throw new Error(`expected at most one ${name} definition, found ${count}`);
+}
 // Pretty-printed (<= 0.23) and minified (0.24+) bundles both end the function
 // with "return sanitized" and close it right before its __name() registration.
 const fn = source.match(/function sanitizeChildEnv\([^)]*\)\s*\{[\s\S]*?return sanitized;?\s*\}(?=\s*__name\(sanitizeChildEnv\b|\s*$)/m);
