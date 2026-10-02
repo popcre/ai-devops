@@ -775,6 +775,10 @@ check_provider() { # PROVIDER REPO LIVE BASE
   fi
   set -e
   if [ "$rc" -ne 0 ]; then
+    if printf '%s' "$out" | grep -q 'unsupported-platform'; then
+      printf 'ai-review-preflight: %s is unsupported on this platform (engine missing or wrong OS).\n' "$provider" >&2
+      return 4
+    fi
     # A doctor killed by the check budget is a timeout, whatever its partial
     # output says: Qwen's doctor prints "credential" before any auth step, and
     # reading that as authentication-failed quarantined a healthy Qwen (#720).
