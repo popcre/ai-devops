@@ -447,6 +447,32 @@ credit_stop(){
   reviewer_credit_exit
 }
 
+# write_windows_runners: install-time-ish provisioning of the hashed runner
+# allowlist used by bin/ai-stepfun-windows-shell. Fail closed if a runner
+# cannot be located or hashed.
+write_windows_runners(){
+  local out="${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
+  command -v jq >/dev/null 2>&1 || return 1
+  command -v sha256sum >/dev/null 2>&1 || return 1
+  local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0"
+  local json="{" first=1 name path hash
+  for name in npm node pytest python python3 go cargo dotnet; do
+    path="$(PATH="$sanitized" command -v "$name" 2>/dev/null || true)"
+    [ -n "$path" ] && [ -x "$path" ] || continue
+    case "$path" in *WindowsApps*) continue ;; esac
+    hash="$(sha256sum "$path" | awk '{print $1}')"
+    [ "$first" = 1 ] || json+=","
+    first=0
+    json+="\"$name\":{\"path\":$(printf '%s' "$path" | jq -Rs .),\"sha256\":\"$hash\"}"
+  done
+  json+="}"
+  printf '%s\n' "$json" | jq -e 'type=="object"' >/dev/null 2>&1 || return 1
+  mkdir -p "$(dirname "$out")"
+  printf '%s\n' "$json" > "$out"
+  chmod 600 "$out" 2>/dev/null || true
+  [ -s "$out" ]
+}
+
 cmd_doctor(){
   local live=0
   [ "${1:-}" != --live ] || live=1
@@ -474,6 +500,9 @@ cmd_doctor(){
         # Linux OpenCode turns only run under bubblewrap (#1086).
         bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed on Linux (sudo apt-get install bubblewrap)\n'; exit 1; }
         printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
+      else
+        write_windows_runners || { printf 'FAIL cannot write Windows runner allowlist (stepfun-windows-runners.json)\n'; exit 1; }
+        printf 'PASS  Windows runner allowlist (hashed): %s\n' "${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
       fi
       ;;
   esac
