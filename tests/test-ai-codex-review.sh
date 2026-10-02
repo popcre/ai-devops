@@ -45,6 +45,10 @@ export AI_DEVOPS_MODELS_ENV="$MODELS"
 export AI_CODEX_REVIEW_TEST_DIR="$TMP"
 export AI_CODEX_TEST_ARGS="$TMP/args"
 export AI_CODEX_STUB_SOURCE="$R"
+# Fixture registry: Codex is out of the shipped pool (owner instruction
+# 2026-09-30). These tests cover the wrapper, not live membership.
+printf '{"version":1,"providers":{"codex":{"registry_state":"registered","reason":"offline adapter fixture"}}}\n' > "$TMP/reviewer-registry.json"
+export AI_REVIEW_REGISTRY_FILE="$TMP/reviewer-registry.json"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
 export AI_REVIEW_SCOREBOARD_DIR="$TMP/scoreboard"
 export AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine"
