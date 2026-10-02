@@ -746,6 +746,12 @@ check 'skills do not require BlockerWatch registration' \
   "! grep -RIn --include='SKILL.md' -E 'ai-blocker-watch wait|REGISTERED with' '$ROOT/skills'"
 check 'global templates show the explicit-deadline wait form' \
   "grep -q 'ai-pr-wait <pr> --timeout-minutes N' '$ROOT/templates/system/AGENTS-global-mimo.md' && grep -q 'ai-pr-wait <pr> --timeout-minutes N' '$ROOT/templates/system/CLAUDE-global.md'"
+check 'install.sh does not require BlockerWatch registration' \
+  "! grep -q 'hold an \`ai-blocker-watch wait\`' '$ROOT/install.sh'"
+check 'traffic plan does not mandate long-wait registration' \
+  "! grep -q 'are registered with \`ai-blocker-watch wait\`' '$ROOT/plan_cut-unneeded-github-traffic.md'"
+check 'session-conduct policy matches the explicit-deadline router text' \
+  "grep -q 'ai-pr-wait <pr> --timeout-minutes N' '$ROOT/tests/test-session-conduct-policy.sh'"
 check 'ai-pr-wait requires an explicit --timeout-minutes deadline' \
   "grep -q 'explicit deadline only' '$ROOT/bin/ai-pr-wait' && ! grep -q '^TIMEOUT_MINUTES=180' '$ROOT/bin/ai-pr-wait'"
 check 'ai-gh-wait requires an explicit --timeout-minutes deadline' \
