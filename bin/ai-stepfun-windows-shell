@@ -183,7 +183,8 @@ run(){
     [ -x "$real" ] || REFUSE 'runner path not executable'
     [ -x "$real" ] || REFUSE 'runner path not executable'
     cd "$REVIEW_DIR"
-    export PATH="${GATE_PATH:-/usr/bin:/bin}"
+    # Keep system dirs so shebangs (env/bash) resolve; no shim re-entry.
+    export PATH="${GATE_PATH:-/usr/bin:/bin}:/usr/bin:/bin"
     exec "$real" "$@"
   fi
   # No allowlist: fail closed unless an offline test explicitly stubs GATE_PATH.
@@ -191,7 +192,7 @@ run(){
     real="$(PATH="${GATE_PATH:-/usr/bin:/bin}" command -v "$runner_lc" 2>/dev/null || true)"
     [ -n "$real" ] || REFUSE 'runner not in allowlist'
     cd "$REVIEW_DIR"
-    export PATH="${GATE_PATH:-/usr/bin:/bin}"
+    export PATH="${GATE_PATH:-/usr/bin:/bin}:/usr/bin:/bin"
     exec "$real" "$@"
   fi
   REFUSE 'runner allowlist missing'

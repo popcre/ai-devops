@@ -13,6 +13,7 @@ printf '#!/bin/sh\nexit 0\n' > "$TMP/stubs/npm"
 chmod +x "$TMP/stubs/cat" "$TMP/stubs/npm"
 GATE=bin/ai-stepfun-windows-shell
 export AI_STEPFUN_TEST_MODE=1
+export AI_STEPFUN_RUNNERS_JSON="$TMP/no-such-runners.json"
 
 {
   echo "# Windows StepFun canary proof"
