@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   select:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
       run_long: ${{ steps.classify.outputs.run_long }}
@@ -71,7 +71,7 @@ jobs:
   # run in seconds and are the whole fast-fail path: when they fail the change
   # is already known bad and a 45-105 minute suite can only re-report it.
   validate:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -95,7 +95,7 @@ jobs:
   publish:
     if: always()
     needs: [select, validate]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     outputs:
       run_long: ${{ needs.select.outputs.run_long }}

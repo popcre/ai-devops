@@ -34,6 +34,9 @@ pipeline. The recovery procedure lives in
   workflow after exact structural admission, guarded merge, and merged-main
   preview proof; it authorizes no manual production command or other infrastructure
   mutation and fails closed to an engineer on any absent or ambiguous evidence.
+  Owner ruling (2026-10-02, verbatim: "let AI launch it and remove that rule
+  permanently"): an AI session may launch its merged-preview run for an
+  approved, merged change after `ai-task-gates check --before shared-db-promotion`.
 - Shared-database STRUCTURE changes are authored in `popcre/shared-db` through
   its branch-and-PR workflow. Load the matching shared-db skill before acting;
   application rows remain owned by the application.
@@ -110,7 +113,7 @@ pipeline. The recovery procedure lives in
 - Never overlap a local full test series with a GitHub job on the same physical
   Windows host or a shared installed runtime. Check that boundary with
   `bin/ai-test-local --check-collision`; a busy remote self-hosted runner does
-  not create a machine-wide stop, and GitHub-hosted and Blacksmith lanes remain
+  not create a machine-wide stop, and GitHub-hosted and WarpBuild lanes remain
   usable. For runner or CI work, follow [`docs/task-router.md`](docs/task-router.md).
 - Do not verify the same commit twice. The merge queue tests the exact landing
   commit; rerun only a failed or changed result.

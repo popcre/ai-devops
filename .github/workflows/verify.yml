@@ -38,7 +38,7 @@ permissions:
 jobs:
   manual-preflight:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read
@@ -75,6 +75,21 @@ jobs:
   fast-classifier:
     uses: ./.github/workflows/fast-classifier.yml
 
+  # Abandoned-push cost control (owner 2026-10-01): rapid PR pushes already
+  # cancel the previous run, but expensive jobs may have started and burned
+  # paid minutes. A short quiet window on pull requests means intermediate
+  # pushes cost only this free job; the last push pays for the full matrix once.
+  push-settle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Quiet window for abandoned pushes
+        if: github.event_name == 'pull_request'
+        run: sleep 90
+      - name: Non-PR events run immediately
+        if: github.event_name != 'pull_request'
+        run: echo "no settle window for ${{ github.event_name }}"
+
   # The complete offline Bash suite, split into four sections that run at the
   # same time on separate hosted machines (docs/ci-speed-audit-2026-09-17.md,
   # speedup 2). tests/test-all.sh --balanced packs every discovered suite into
@@ -86,14 +101,14 @@ jobs:
   # merge queue, schedule, and manual runs keep the complete inventory, so
   # main's safety does not change. Unknown paths still select every suite.
   linux-offline-shard:
-    needs: [fast-classifier, manual-preflight]
+    needs: [fast-classifier, manual-preflight, push-settle]
     if: ${{ !cancelled() && needs.fast-classifier.outputs.validation_result != 'failure' && (needs.fast-classifier.outputs.selection_result != 'success' || needs.fast-classifier.outputs.run_long != 'false') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
     strategy:
       # One failing section must never hide the other sections' results.
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       SELECTION_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
@@ -134,7 +149,7 @@ jobs:
   linux-offline:
     needs: [fast-classifier, manual-preflight, linux-offline-shard]
     if: ${{ !cancelled() && needs.fast-classifier.outputs.validation_result != 'failure' && (needs.fast-classifier.outputs.selection_result != 'success' || needs.fast-classifier.outputs.run_long != 'false') && (github.event_name != 'workflow_dispatch' || needs.manual-preflight.outputs.run_expensive_jobs == 'true') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
       SELECTION_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
@@ -169,7 +184,7 @@ jobs:
     # merge group waits out the 120-minute response timeout, or a pull request
     # can never satisfy a context that never reports. Outside the queue this job
     # says so and passes in seconds, so one stable context covers both.
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       actions: read
@@ -199,7 +214,7 @@ jobs:
   # opposite of the #1073 hole — every event, prose-only pull requests
   # included, proves the change's own doc content in seconds.
   doc-safety:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -220,13 +235,11 @@ jobs:
   # error rather than a quiet pass.
   # Extra Windows capacity (owner, 2026-09-23: "why are we saving ENVY? WE
   # NEED TO SPEED THINGS UP!!!"). Idle qualified self-hosted hosts take
-  # ordinary Windows sections; everything else stays on Blacksmith (owner
-  # 2026-10-01: KEEP Blacksmith in the pool until WarpBuild is fully up). Any
-  # lookup failure, or this job failing outright, leaves every section on
-  # Blacksmith.
+  # ordinary Windows sections; everything else stays on GitHub-hosted runners. Any lookup
+  # failure, or this job failing outright, leaves every section on GitHub-hosted runners.
   runner-router:
     if: ${{ github.event_name == 'pull_request' }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:
       actions: read
@@ -252,7 +265,7 @@ jobs:
             await router.run({ github, poolGithub, context, core, cfg });
 
   windows-offline-section:
-    needs: [fast-classifier, manual-preflight, runner-router]
+    needs: [fast-classifier, manual-preflight, push-settle, runner-router]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     # Also skipped when the fast classifier proves the change is prose-only.
@@ -269,26 +282,23 @@ jobs:
       # the whole point of sectioning is that a useful failure arrives early
       # and the rest of the evidence still lands.
       fail-fast: false
-      # The router's plan; the literal fallback is the all-Blacksmith plan used
+      # The router's plan; the literal fallback is the all-GitHub plan used
       # when the router produced nothing. Primary fork protection is the
       # repository's Actions fork-PR approval policy (all_external_contributors,
       # see docs/self-hosted-windows-runner.md): every external contributor
       # needs approval before any workflow runs on self-hosted or BYOC
-      # runners. The head-repo check and all-Blacksmith fallback here are
+      # runners. The head-repo check and all-GitHub fallback here are
       # defense-in-depth inside the PR-editable workflow definition. A foreign
-      # head gets the Blacksmith literal regardless of what the router (or a
-      # tampered config) reports.
+      # head gets the GitHub-hosted literal regardless of what the router (or a
+      # tampered config) reports. Blacksmith is turned off and is not a target.
       matrix:
-        include: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":7,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":8,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
+        include: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":2,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":3,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":4,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":5,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":6,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":7,"lane":"github-hosted","runs_on":"windows-2025"}, {"section":8,"lane":"github-hosted","runs_on":"windows-2025"}]') }}
     runs-on: ${{ matrix.runs_on }}
-    # Eight sections since 2026-09-29 (#185): section 1 reached this 40-minute
-    # ceiling on EDGE-RUNN-ENVY (37-55 minutes), so test-ai-deepseek-agent.sh
-    # and test-ai-gh.sh moved to their own sections 7 and 8.
-    # Six sections after PR #666's serial Gemini, GLM and Muse Code section
-    # reached the 40-minute ceiling. Those three long suites now have distinct
-    # sections; GLM shares only three short suites. Kimi stays declared and
-    # suspended for re-entry, and every other runnable suite remains assigned.
-    timeout-minutes: 40
+    # Eight sections since 2026-09-29 (#185). 90 minutes since 2026-10-01:
+    # GitHub-hosted Windows is slower than the retired Blacksmith lane
+    # (Blacksmith measured ~2x faster per suite), and sections 2 and 3 hit the
+    # old 40-minute ceiling twice on this pool. Prefer ENVY when idle for speed.
+    timeout-minutes: 90
     env:
       SELECTION_BASE: ${{ github.event.pull_request.base.sha }}
     steps:
@@ -334,7 +344,12 @@ jobs:
   # standardDASv4Family quota (10 vCPUs = 2 concurrent Standard_D4as_v4).
   windows-offline-warpbuild-proof:
     needs: [fast-classifier, manual-preflight]
+    # Disabled (leading false) while the WarpBuild pool is not accepting jobs:
+    # queued proof jobs sat for hours and held the workflow open. The guard
+    # body stays so re-enable is a one-token change when issue #961 proves
+    # warp-custom-warpbuild-win2022-canary actually picks up.
     if: >-
+      false &&
       !cancelled() && github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       needs.fast-classifier.outputs.validation_result != 'failure' &&
@@ -371,7 +386,7 @@ jobs:
   # backstop that proves every suite in one place must not depend on the section
   # mapping being correct.
   windows-offline-complete:
-    needs: [fast-classifier, manual-preflight]
+    needs: [fast-classifier, manual-preflight, push-settle]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     # Fail-closed: any classifier result other than a clean prose-only verdict
@@ -384,11 +399,16 @@ jobs:
        needs.fast-classifier.outputs.run_long != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    # Blacksmith stays the fixed lane until WarpBuild is fully proven (owner,
-    # 2026-10-01: KEEP Blacksmith in the pool; USE it for runs that would
-    # otherwise get stuck). The scheduled/manual complete matrix runs five
-    # 105-minute sections in parallel, beyond the 2-VM WarpBuild quota.
-    runs-on: blacksmith-4vcpu-windows-2025
+    # GitHub-hosted, on purpose. Self-hosted capacity was added to this
+    # repository to have MORE Windows capacity, not to move off GitHub's
+    # runners: hosted concurrency is unmetered on a public repository, so this
+    # long matrix never waits for a machine. It ran on windows-2025 from
+    # 2026-04 until 2026-08-29 without a runner-caused failure. Routing it to
+    # the single-host self-hosted pool on 2026-09-02 serialised the whole
+    # repository behind one desktop and left fourteen verify runs queued at
+    # once. The self-hosted lane keeps windows-reviewer-safety below, where a
+    # timing flake can be reproduced on a known physical machine.
+    runs-on: windows-2025
     # Run 34856869730 reached the existing 105-minute bound in Bash suite
     # 19/74, before PowerShell started. Partition the complete dynamic inventory
     # across independent hosts instead of extending that bound or dropping tests.
@@ -423,7 +443,7 @@ jobs:
     needs: [fast-classifier, manual-preflight, windows-offline-section, windows-offline-complete]
     if: >-
       !cancelled() && github.event_name != 'merge_group'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Aggregate the Windows offline lane
@@ -473,7 +493,7 @@ jobs:
   reviewer-runner-availability:
     needs: [fast-classifier, manual-preflight]
     # Samples ENVY (the qualified pool) for every event that runs the reviewer
-    # lane (#736). Busy or offline -> the fallback goes straight to Blacksmith.
+    # lane (#736). Busy or offline -> the fallback goes straight to GitHub-hosted.
     if: >-
       !cancelled() && github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
@@ -483,7 +503,7 @@ jobs:
        needs.fast-classifier.outputs.reviewer != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
       preferred_available: ${{ steps.runners.outputs.preferred_available }}
@@ -510,7 +530,7 @@ jobs:
             }
 
   windows-reviewer-preferred:
-    needs: [fast-classifier, manual-preflight, reviewer-runner-availability]
+    needs: [fast-classifier, manual-preflight, push-settle, reviewer-runner-availability]
     # Not run on merge_group: linux-offline is the queue gate, and the Windows
     # proof comes from the pull_request run on the exact head commit (#204).
     # Also skipped when the fast classifier proves the change does not touch
@@ -589,7 +609,8 @@ jobs:
           $startInfo.FileName = $bash
           $startInfo.UseShellExecute = $false
           $startInfo.WorkingDirectory = $env:GITHUB_WORKSPACE
-          $startInfo.ArgumentList.Add($scriptFile -replace '\\', '/')
+          $scriptFilePosix = $scriptFile -replace '\\', '/'
+          $startInfo.ArgumentList.Add($scriptFilePosix)
           $process = [System.Diagnostics.Process]::Start($startInfo)
           if (-not $process.WaitForExit(55 * 60 * 1000)) {
             & .\tools\ci\stop-process-tree.ps1 -TargetProcessId $process.Id -WaitMilliseconds 10000
@@ -634,7 +655,7 @@ jobs:
        needs.fast-classifier.outputs.reviewer != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
       fallback_required: ${{ steps.watch.outputs.fallback_required }}
@@ -688,11 +709,13 @@ jobs:
        needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
        needs['reviewer-safety-start-deadline'].outputs.fallback_codex == 'true')
-    # Emergency reviewer fallback: Blacksmith, never the unproven WarpBuild
-    # lane (owner, 2026-10-01: USE Blacksmith for runs that would otherwise
-    # get stuck).
-    runs-on: blacksmith-4vcpu-windows-2025
-    timeout-minutes: 60
+    runs-on: windows-2025
+    # This is an emergency hosted path, not the qualified timing signal. Run
+    # 34387666739 reached Grok but was killed by the original 30-minute bound;
+    # prior hosted evidence measured Grok alone at 41m20s. GitHub-hosted Windows
+    # is slower than the retired Blacksmith lane (~2x), so 120 minutes keeps
+    # this fallback bounded and complete.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -713,11 +736,8 @@ jobs:
        needs.manual-preflight.outputs.run_expensive_jobs == 'true') &&
       (needs['reviewer-safety-start-deadline'].result != 'success' ||
        needs['reviewer-safety-start-deadline'].outputs.fallback_grok == 'true')
-    # Emergency reviewer fallback: Blacksmith, never the unproven WarpBuild
-    # lane (owner, 2026-10-01: USE Blacksmith for runs that would otherwise
-    # get stuck).
-    runs-on: blacksmith-4vcpu-windows-2025
-    timeout-minutes: 60
+    runs-on: windows-2025
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -735,7 +755,7 @@ jobs:
     needs: [fast-classifier, manual-preflight, reviewer-safety-start-deadline, windows-reviewer-fallback-codex, windows-reviewer-fallback-grok]
     if: >-
       !cancelled() && github.event_name != 'merge_group'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Aggregate reviewer safety proof
@@ -808,7 +828,7 @@ jobs:
     if: >-
       always() && !cancelled() &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -828,7 +848,7 @@ jobs:
   report-scheduled-failure:
     needs: [fast-classifier, linux-offline, windows-offline-complete, windows-reviewer-safety]
     if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:
       contents: read
