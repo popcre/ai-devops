@@ -348,6 +348,17 @@ registry_reason() { # PROVIDER
 # when the local install is healthy, unquarantined, and live-qualified.
 health_status() { # PROVIDER
   if static_status "$1"; then return 1; fi
+  if [ "$1" = stepfun ]; then
+    case "${AI_STEPFUN_PLATFORM:-$(uname -s)}" in
+      MINGW*|MSYS*|CYGWIN*|Windows*|windows*)
+        local oc="${AI_STEPFUN_OPENCODE:-}"
+        if [ -z "$oc" ] || [ ! -x "$oc" ]; then
+          printf '{"provider":"stepfun","status":"unsupported-platform","failure_class":"unsupported-platform"}\n'
+          return 1
+        fi
+        ;;
+    esac
+  fi
   if active_quarantine "$1"; then printf '%s\n' "$ACTIVE_QUARANTINE" | jq -c '. + {status:"quarantined"}'; return 1; fi
   printf '{"provider":"%s","status":"installed-healthy"}
 ' "$1"
@@ -377,10 +388,13 @@ static_status() {
   case "$1" in
     gemini) gemini_live_qualified && return 1; printf '{"provider":"gemini","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
     qwen) qwen_live_qualified && return 1; printf '{"provider":"qwen","status":"quarantined","failure_class":"live-qualification-required"}\n'; return 0 ;;
-    # StepFun is Ubuntu/Linux-only: every turn needs the bubblewrap sandbox
-    # (owner instruction 2026-09-25; #1086). Any other platform is unsupported.
+    # StepFun: Linux (bubblewrap) or Windows (folder + test shell, owner
+    # 2026-09-30). Other platforms unsupported.
     stepfun)
-      if [ "${AI_STEPFUN_PLATFORM:-$(uname -s)}" = Linux ]; then return 1; fi
+      case "${AI_STEPFUN_PLATFORM:-$(uname -s)}" in
+        Linux|linux) return 1 ;;
+        MINGW*|MSYS*|CYGWIN*|Windows*|windows*) return 1 ;;
+      esac
       printf '{"provider":"stepfun","status":"unsupported-platform","failure_class":"unsupported-platform"}\n'; return 0 ;;
     *) return 1 ;;
   esac
@@ -450,7 +464,7 @@ explain_failure() {
     service-unavailable) printf 'Retry the service check once after a short delay, then wait. Do not misclassify an outage as a code verdict.\n' ;;
     substantive-finding) printf 'Stop and fix the finding. Never rotate providers to shop for a friendlier verdict.\n' ;;
     empty-report) printf 'The provider returned a decision with no analysis behind it. Treat it as malformed, not as an approval. Re-run the review and require a report; never relax the report floor to let the verdict through.\n' ;;
-    unsupported-platform) printf 'This provider has no engine on this operating system (StepFun runs only on Ubuntu/Linux under bubblewrap). Use another registered reviewer; never emulate or force it.\n' ;;
+    unsupported-platform) printf 'This provider has no engine on this operating system (StepFun: Ubuntu/Linux under bubblewrap, or Windows folder + test shell). Use another registered reviewer; never emulate or force it.\n' ;;
     not-registered) printf 'The provider is not carried in the reviewer registry, so it cannot receive a review no matter how healthy its local install is. Re-entry is a reviewed registry change backed by a live well-formed verdict, never an edit made to unblock an allocation.\n' ;;
     live-qualification-required) printf 'The reviewer live qualification no longer matches its wrapper, runtime, or preloader bytes. A pull of new toolkit code re-qualifies it automatically via the repository post-merge hook; to restore it now run: ai-review-preflight requalify\n' ;;
     probe-no-output) printf 'The health probe returned no diagnostic output. This is not proof the provider is broken. Retry after the short cooldown; if it persists, check the wrapper manually. Never treat empty output as healthy.\n' ;;
@@ -722,6 +736,19 @@ check_provider() { # PROVIDER REPO LIVE BASE
     static_status "$provider" >&2
     case "$provider" in gemini|qwen) return 3 ;; *) return 4 ;; esac
   fi
+  # Windows StepFun without OpenCode is an engine miss (exit 4), not a quarantine.
+  if [ "$provider" = stepfun ]; then
+    case "${AI_STEPFUN_PLATFORM:-$(uname -s)}" in
+      MINGW*|MSYS*|CYGWIN*|Windows*|windows*)
+        if [ -z "${AI_STEPFUN_OPENCODE:-}" ] || [ ! -x "${AI_STEPFUN_OPENCODE:-}" ]; then
+          if ! command -v opencode >/dev/null 2>&1 && [ ! -x "${AI_STEPFUN_OPENCODE:-}" ]; then
+            printf 'ai-review-preflight: stepfun is unsupported on this platform (engine missing or wrong OS).\n' >&2
+            return 4
+          fi
+        fi
+        ;;
+    esac
+  fi
 
   git -C "$repo" rev-parse --verify HEAD^{commit} >/dev/null 2>&1 || die "repository has no readable HEAD commit."
   [ -z "$base" ] || git -C "$repo" rev-parse --verify "$base^{commit}" >/dev/null 2>&1 \
@@ -761,6 +788,10 @@ check_provider() { # PROVIDER REPO LIVE BASE
   fi
   set -e
   if [ "$rc" -ne 0 ]; then
+    if printf '%s' "$out" | grep -q 'unsupported-platform'; then
+      printf 'ai-review-preflight: %s is unsupported on this platform (engine missing or wrong OS).\n' "$provider" >&2
+      return 4
+    fi
     # A doctor killed by the check budget is a timeout, whatever its partial
     # output says: Qwen's doctor prints "credential" before any auth step, and
     # reading that as authentication-failed quarantined a healthy Qwen (#720).

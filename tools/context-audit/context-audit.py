@@ -125,7 +125,7 @@ PARITY_RULES = {
     "never delegate a decision": r"never delegate a schema change|Never delegate a decision",
     "finished reply says it is finished": r"silent about being finished",
     "assumptions get named": r"answered with an\s+assumption",
-    "label shared-db tickets orchestrator or not": r"non-orchestrator work",
+    "shared-db structural work is claim-first": r"[Cc]laim exact objects on the\s+existing issue",
     "never replace system binaries": r"system binaries|operating-system binaries",
     "live proof required before close": r"Live proof is required before an outcome is closed",
     "one issue per application need": r"One issue per application need",
