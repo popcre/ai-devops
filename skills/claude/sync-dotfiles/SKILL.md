@@ -30,13 +30,13 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
 | Global instructions (`CLAUDE.md`, Codex `AGENTS.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
 | Claude tool permissions (`~/.claude/settings.json` allow list) | repo → machine, **checked every run (step 5b)**; merged in when missing, never removed | `bin/ai-claude-permissions` (list: `config/claude-permissions.allow`) |
-| Blocker-watch timer (wakes parked cross-issue waits) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
+| Blocker-watch timer (re-surfaces stuck state; registration is OUT) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
 | Auto-memory | machine ↔ private memory hub (lossless transaction) | `bin/ai-memory-sync` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
 | Codex's own memory feature (separate store from Claude's; OFF by default) | enabled on machine, **checked every run (step 6c)** | `bin/ai-codex-memories` |
 | Memory-index hook (blocks a memory from going unindexed) | installed on machine, **checked every run (step 6c2)** | `bin/ai-install-memory-hook` |
-| Claude closeout hook (forces BlockerWatch registration on waiting language) | installed on machine, **checked every run (step 6c2b)** | `bin/ai-install-completion-check-hook` |
+| Claude closeout hook (keeps a turn from closing while work is still named) | installed on machine, **checked every run (step 6c2b)** | `bin/ai-install-completion-check-hook` |
 | ZCode skills, globals, and completion-check hook | repo → machine (Windows only), **checked every run (step 6c3)** | `bin/install-ai-devops-windows.ps1` (skills/globals), `bin/ai-install-completion-check-hook --client zcode` |
 | Weekly read-only memory-health report | per-machine task, **checked every run (step 6d)** | `bin/install-memory-health-task.ps1` → `bin/ai-memory-health` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
@@ -119,7 +119,7 @@ clone + `./install.sh` (Ubuntu) first.
    arrive with a plain `git pull`; the timer does not, so a machine onboarded
    before the blocker watch existed would park work that nothing resumes. Report
    the verdict out loud. If it dies because neither `schtasks` nor `crontab` is
-   available, say so plainly — waits on that machine must not be parked.
+   available, say so plainly — do not leave background waits on that machine.
 2. **Check the Phase 2 wiring (secrets, MCP, SSH) — never skip this.** Report each
    item as present or missing:
    - `~/.config/ai-devops/op-service-account` (the vault-locked 1Password

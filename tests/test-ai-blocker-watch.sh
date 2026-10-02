@@ -756,5 +756,7 @@ check 'ai-pr-wait requires an explicit --timeout-minutes deadline' \
   "grep -q 'explicit deadline only' '$ROOT/bin/ai-pr-wait' && ! grep -q '^TIMEOUT_MINUTES=180' '$ROOT/bin/ai-pr-wait'"
 check 'ai-gh-wait requires an explicit --timeout-minutes deadline' \
   "grep -q 'explicit deadline only' '$ROOT/bin/ai-gh-wait' && ! grep -q '^INTERVAL=300; TIMEOUT=120' '$ROOT/bin/ai-gh-wait'"
+check 'sync skills do not force BlockerWatch registration' \
+  "! grep -RIn --include='SKILL.md' -E 'forces BlockerWatch registration|wakes parked cross-issue waits|waits on that machine must not be parked' '$ROOT/skills'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

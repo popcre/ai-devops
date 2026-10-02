@@ -29,7 +29,7 @@ instructions, memory, gcloud, **and the secret/MCP/SSH plumbing** (Phase 2 of
 |---|---|---|
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
 | Global instructions (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
-| Blocker-watch timer (wakes parked cross-issue waits) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
+| Blocker-watch timer (re-surfaces stuck state; registration is OUT) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
 | Auto-memory | machine ↔ private memory hub (lossless transaction) | `bin/ai-memory-sync` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
@@ -73,7 +73,7 @@ clone + `./install.sh` on Ubuntu).
    arrive with a plain `git pull`; the timer does not, so a machine onboarded
    before the blocker watch existed would park work that nothing resumes. Report
    the verdict out loud. If it dies because neither `schtasks` nor `crontab` is
-   available, say so plainly — waits on that machine must not be parked.
+   available, say so plainly — do not leave background waits on that machine.
 2. **Check the Phase 2 wiring (secrets, MCP, SSH) — never skip.** Report each item
    present/missing:
    - `~/.config/ai-devops/op-service-account` (vault-locked 1Password SA token file).
