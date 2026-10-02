@@ -266,7 +266,7 @@ run_opencode_turn(){
     [ -d "/c/Program Files/Git/usr/bin" ] || die 'Git for Windows is required (usr/bin)'
     # Closed gate PATH: GNU tools only from Git usr/bin + runner allowlist dir.
     # Do not put Git cmd (git/ssh) or System32 on the gate PATH.
-    gate_path="/c/Program Files/Git/usr/bin"
+    gate_path="/c/Program Files/Git/usr/bin:/c/Program Files/Git/mingw64/bin"
     timeout_win="/c/Program Files/Git/usr/bin/timeout"
     [ -x "$timeout_win" ] || timeout_win="$(command -v timeout || true)"
     ( for name in $(compgen -e); do
@@ -452,11 +452,17 @@ credit_stop(){
 # cannot be located or hashed.
 write_windows_runners(){
   local out="${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
+  # Verify-only unless missing or --write-runners.
+  if [ "${1:-}" != --write-runners ] && [ -s "$out" ]; then
+    command -v jq >/dev/null 2>&1 || return 1
+    jq -e 'type=="object" and length>0' "$out" >/dev/null 2>&1 || return 1
+    return 0
+  fi
   command -v jq >/dev/null 2>&1 || return 1
   command -v sha256sum >/dev/null 2>&1 || return 1
-  local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Python313:/c/Python312:/c/Python311"
+  local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Program Files/nodejs:/c/Program Files/Git/mingw64/bin:/c/Python313:/c/Python312:/c/Python311"
   local json="{" first=1 name path hash
-  for name in ls cat head bash sh npm node pytest python python3 go cargo dotnet; do
+  for name in ls cat head bash sh jq npm node pytest python python3 go cargo dotnet; do
     path="$(PATH="$sanitized" command -v "$name" 2>/dev/null || true)"
     [ -n "$path" ] && [ -x "$path" ] || continue
     case "$path" in *WindowsApps*) continue ;; esac
