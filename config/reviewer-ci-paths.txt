@@ -16,6 +16,7 @@ tools/ci-suites/*
 config/provider-cli-versions.json
 config/reviewer-capacity.json
 config/reviewer-registry.json
+config/review-runner-doors.json
 config/task-gates.json
 bin/ai-repo-policy
 config/repository-policy.json
@@ -32,6 +33,7 @@ tests/test-all.sh
 tests/test-ai-codex-review.sh
 tests/test-ai-grok-review.sh
 tests/test-ai-review-code-only.sh
+tests/test-ai-review-engine.sh
 tests/lib-review-public-fixture.sh
 tests/test-ai-review-lifecycle.sh
 tests/test-ai-review-packet.sh
@@ -58,6 +60,8 @@ tests/test-reviewer-ci-paths.sh
 tools/ci/classify-changes.sh
 tools/ci/stop-process-tree.ps1
 tools/lib/provider-wrapper-common.sh
+tools/lib/review-lifecycle-core.sh
+tools/lib/review-doors/*
 tools/lib/task-gates.sh
 tools/reviewer_admission.py
 tools/reviewer_event_guard.sh

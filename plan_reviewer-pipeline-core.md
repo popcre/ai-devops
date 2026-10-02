@@ -14,7 +14,7 @@
 | 1. Phase A — evidence retention (safe first PR) | ⬜ open | 2026-09-29 | §9 Phase A; start here in a new worktree |
 | 2. Phase B — requalification versioning (Gemini/Qwen) | ⬜ open | 2026-09-29 | §9 Phase B; after A lands |
 | 3. Phase C — failure-class split (outage vs code) | ⬜ open | 2026-09-29 | §9 Phase C; reuse `tools/reviewer_admission.py` |
-| 4. Phase D — runner + adapters (forcing function) | ⬜ open | 2026-09-29 | §9 Phase D; only after A–C |
+| 4. Phase D — runner + adapters (forcing function) | 🟡 in progress | 2026-09-30 | §9 Phase D; shared runner core + Grok door + pool forcing function in `fix/1114-review-runner-doors` (#1114). Remaining doors are follow-up PRs. |
 | 5. Phase E — retire copies + metrics proof | ⬜ open | 2026-09-29 | §9 Phase E; measure before/after |
 
 **GitHub issues (parent + children):**
