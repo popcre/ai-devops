@@ -1121,6 +1121,11 @@ check 'small entry never releases other actions' \
   "rc 3 '$TMP/small-entry' check --before production --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
 check 'the small-entry release is recorded in task state' \
   "jq -e '.overrides|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-entry')\" >/dev/null"
+newrepo "$TMP/small-structural" popcre/some-app
+( cd "$TMP/small-structural" && "$GATES" start --class code >/dev/null 2>&1 )
+mkdir -p "$TMP/small-structural/db/migrations"; printf 'select 1;\n' > "$TMP/small-structural/db/migrations/001.sql"
+check 'a structural change set never qualifies as a small owner entry' \
+  "! rc 0 '$TMP/small-structural' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' && ! jq -e '(.overrides // [])|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-structural')\" >/dev/null 2>&1"
 unset AI_GH_REAL_GH AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS AI_GH_NO_WAIT
 for args in 'check --small-owner-entry' 'check --row-count' 'check --owner-quote'; do
   check "missing value for '$args' fails fast instead of looping" \
