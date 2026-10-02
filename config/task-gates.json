@@ -16,7 +16,13 @@
     "It refuses to start on a private class unless that repository's own",
     ".ai-devops/task-gates.json declares the synthetic-fixtures-only gate for",
     "that class, so opening the route is each private repository's own reviewed",
-    "decision. The formal review action stays forbidden for both private classes."
+    "decision. The formal review action stays forbidden for both private classes.",
+    "",
+    "reviewer_release (#1239) lets one protected class reach the reviewer-approval step for one named",
+    "action, only while the EFFECTIVE class is named there AND that repository declares the named gate",
+    "for that class in its own .ai-devops/task-gates.json. It never starts the action without an",
+    "assigned AI reviewer exact-head final-check or security-review APPROVE, and it can never",
+    "release private-evidence: one licensed path in the change set keeps the action sealed."
   ],
   "actions": [
     "review",
@@ -40,6 +46,11 @@
       "require_gate": {
         "shared-db": "production-promotion-authorization"
       }
+    }
+  },
+  "reviewer_release": {
+    "database": {
+      "private-tooling": "reviewed-private-data-writer"
     }
   },
   "change_classes": {
@@ -573,6 +584,10 @@
         },
         {
           "glob": "**/package-lock.json",
+          "class": "private-tooling"
+        },
+        {
+          "glob": ".ai-devops/task-gates.json",
           "class": "private-tooling"
         },
         {

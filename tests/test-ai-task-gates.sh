@@ -867,10 +867,45 @@ check 'the protected stop says there is no reviewer-approval path' \
   "out '$TMP/lsd' check --before review --reviewer-approval \"\$(appr '$TMP/lsd' review)\" | grep -Fq 'no reviewer-approval'"
 rm -f "$TMP/lsd/warner-bros/assets.csv"
 
+printf 'reviewed private data writer release (#1239)\n'
+newrepo "$TMP/writer" u2giants/licensor-source-data
+mkdir -p "$TMP/writer/reconciliation/x" "$TMP/writer/.ai-devops"
+( cd "$TMP/writer" && "$GATES" start --class private-tooling ) >/dev/null
+printf 'export default 1;\n' > "$TMP/writer/reconciliation/x/writer.mjs"
+check 'an undeclared repository keeps database sealed for a writer' \
+  "out '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database)\" | grep -Fq 'no reviewer-approval'"
+# The declaration lands on the base first, through its own PR. That PR changes
+# only the repository's gate file, which is private-tooling (it carries no
+# licensed rows), so its own sealed code-only review can start.
+rm -f "$TMP/writer/reconciliation/x/writer.mjs"
+printf '%s\n' '{"schema_version":1,"gates":{"private-tooling":{"required":["synthetic-fixtures-only","reviewed-private-data-writer"]}}}' > "$TMP/writer/.ai-devops/task-gates.json"
+check 'the declaration PR itself is private-tooling and reaches code-only review' \
+  "rc 0 '$TMP/writer' check --before code-only-review"
+git -C "$TMP/writer" add -A && git -C "$TMP/writer" commit -qm declare
+( cd "$TMP/writer" && "$GATES" start --class private-tooling --base HEAD ) >/dev/null
+printf 'export default 1;\n' > "$TMP/writer/reconciliation/x/writer.mjs"
+check 'a declared writer reaches the reviewer-approval step for database' \
+  "out '$TMP/writer' check --before database | grep -Fq 'obtain an assigned AI reviewer APPROVE'"
+check 'and is still refused without that approval' \
+  "rc 3 '$TMP/writer' check --before database"
+check 'an approval that is not an exact-head lifecycle APPROVE is refused' \
+  "out '$TMP/writer' check --before database --reviewer-approval '$TMP/writer/.ai-devops/task-gates.json' | grep -Fq 'not a lifecycle-recorded'"
+check 'the release never opens production for the same writer' \
+  "out '$TMP/writer' check --before production --reviewer-approval \"\$(appr '$TMP/writer' production)\" | grep -Fq 'no reviewer-approval'"
+check 'the release never opens a formal review' \
+  "rc 3 '$TMP/writer' check --before review"
+printf 'id,name\n1,secret\n' > "$TMP/writer/reconciliation/x/rows.csv"
+check 'one licensed row keeps database sealed despite the declaration' \
+  "out '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database)\" | grep -Fq 'no reviewer-approval'"
+rm -rf "$TMP/writer"
+
 printf 'private code review keeps evidence and mutation boundaries\n'
 newrepo "$TMP/private" 'u2giants/licensor-source-data'
 mkdir -p "$TMP/private/disney-dcpvault" "$TMP/private/.ai-devops"
 printf '# synthetic loader code only\n' > "$TMP/private/disney-dcpvault/loader.py"
+# A synthetic fixture under the licensed folder keeps this change set in
+# private-evidence; the gate file alone is private-tooling (#1239).
+printf 'id\n0\n' > "$TMP/private/disney-dcpvault/fixture.csv"
 cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
 {"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]},"private-tooling":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]}}}
 EOF
@@ -1047,7 +1082,11 @@ jq '.action_gates = {"teleport": {"require_gate": {"prose": "whatever"}}}' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-action.json"
 jq '.action_gates["code-only-review"].require_gate["made-up-class"] = "whatever"' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-class.json"
+jq '.reviewer_release.database["private-evidence"] = "whatever"' \
+  "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-release.json"
 newrepo "$TMP/schema-repo"
+check 'a reviewer release naming private-evidence fails closed' \
+  "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-release.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
 check 'an action-gate naming an unknown action fails closed' \
   "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-action.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
 check 'an action-gate naming an undeclared class fails closed' \
