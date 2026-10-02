@@ -18,7 +18,7 @@ on:
 jobs:
   drift:
     name: Registry matches shared-db allocator
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read

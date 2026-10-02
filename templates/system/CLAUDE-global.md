@@ -144,9 +144,13 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.
-  This exception authorizes no manual production command, session-made workflow
-  dispatch, other repository, infrastructure action, or bypass. Before
-  production trigger or Terraform-state work, read the details doc.
+  Owner ruling (2026-10-02, verbatim: "let AI launch it and remove that rule
+  permanently"): an AI session may launch that workflow's merged-preview run for
+  an approved, merged change after `ai-task-gates check --before
+  shared-db-promotion` passes. This exception authorizes no manual production command,
+  other repository, infrastructure action, or bypass of the workflow's own
+  checks. Before production trigger or Terraform-state work, read the details
+  doc.
 - **Shared database:** reading schema and safe samples is open; row data
   belongs to the application. Every STRUCTURE change, and every outside bulk
   load into curated Master Data, is authored first in `popcre/shared-db` via

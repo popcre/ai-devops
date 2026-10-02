@@ -177,8 +177,12 @@ the task needs the detail.
   must independently re-prove the one open structural work issue, immutable
   preview evidence, production target, bounded allowlist, fresh dry-run,
   exclusive lock, and post-apply result. Missing evidence stops for an engineer.
-  This exception authorizes no manual production command, session-made workflow
-  dispatch, other repository, infrastructure action, or bypass.
+  Owner ruling (2026-10-02, verbatim: "let AI launch it and remove that rule
+  permanently"): an AI session may launch that workflow's merged-preview run for
+  an approved, merged change after `ai-task-gates check --before
+  shared-db-promotion` passes.
+  This exception authorizes no manual production command, other repository,
+  infrastructure action, or bypass of the workflow's own checks.
 - **Shared database:** reading schema and safe sample data is open. Application
   row data belongs to the application. Every shared-database STRUCTURE change
   is authored first in `popcre/shared-db` through its branch-and-PR workflow.

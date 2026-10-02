@@ -325,8 +325,8 @@ check "StepFun is usable on Linux with its doctor contract" "AI_STEPFUN_PLATFORM
 check "StepFun preflight passes on Linux" "AI_STEPFUN_PLATFORM=Linux $SCRIPT check stepfun '$REPO' | grep -q 'health=ok'"
 check "StepFun is unsupported-platform on Windows without OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH='/usr/bin:/bin' $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
 check "StepFun preflight refuses on Windows without an engine" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH='/usr/bin:/bin' $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
-check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'only on Ubuntu/Linux'"
-check "StepFun is unsupported-platform on Windows even with OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE=/bin/true $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\"'"
+check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux under bubblewrap, or Windows folder + test shell'"
+check "StepFun is not statically unsupported on Windows with OpenCode (folder + test shell)" "! AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE=/bin/true $SCRIPT status stepfun | jq -e '.failure_class==\"unsupported-platform\"'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
 # AI_DEEPSEEK_TEST_DIR makes the wrapper honor this isolated HOME; production
 # mode intentionally anchors the key store to the OS user profile instead.
