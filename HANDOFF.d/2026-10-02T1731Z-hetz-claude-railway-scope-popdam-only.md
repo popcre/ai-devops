@@ -20,7 +20,7 @@ c. Exposed Claude OAuth token: Albert must sign out/in of the desktop app once h
 `bin/setup-machine.ps1` `$McpProjectScope` already maps `popdam3 = @("railway","chrome-devtools")`; scoped servers must never be global. So (a) is drift on 4837, not a policy change.
 
 ## 5. What was tried and failed
-- SSH from hetz to 4837 (100.123.87.44) as u2giants/albert/Albert: publickey denied. Tailscale alias `4837` resolves wrong (0.0.18.229). No route from hetz.
+- SSH from hetz to 4837 as u2giants/albert/Albert: publickey denied. Tailscale alias `4837` resolves wrong (0.0.18.229). No route from hetz.
 
 ## 6. Exact next steps
 1. In a desktop-app session whose location is 4837 itself, in `C:\repos\ai-devops`: find where `railway`/`chrome-devtools` are defined globally (`%USERPROFILE%\.claude.json` top-level `mcpServers`, `%APPDATA%\Claude\claude_desktop_config.json`, `%USERPROFILE%\.claude\settings.json`), remove them from global scope, rerun `bin/setup-machine.ps1` so they are delivered only to popdam3 roots.
