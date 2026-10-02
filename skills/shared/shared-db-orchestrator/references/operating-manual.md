@@ -343,6 +343,17 @@ production job then independently repeats its evidence checks, acquires the
 global production lock, performs the fresh dry-run immediately before the write,
 and records post-apply ledger and catalog proof.
 
+Launching the run (owner ruling, Albert 2026-10-02, verbatim: "let AI launch it
+and remove that rule permanently."): guarded merge does not start the
+merged-main preview by itself. Any AI session may launch it for an approved,
+merged change: in the shared-db checkout run `ai-task-gates check --before
+shared-db-promotion`, then dispatch `shared-supabase-migrations.yml` on `main`
+with target `preview`, mode `apply`, and `merged_preview_source_pr` set to the
+merged PR. The automatic promotion then runs with every check above unchanged.
+A refusal (for example an APPROVE without its `production-risk-assessment`
+block) is fixed at its cause by the allocator-assigned reviewer re-issuing a
+complete verdict, then the run is launched again; never bypassed.
+
 ## Release and recovery
 
 Release is explicit and owner-checked. Before deleting any GitHub ref, verify it

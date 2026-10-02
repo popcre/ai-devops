@@ -63,6 +63,17 @@ independently re-prove the one open structural work issue, immutable preview
 evidence, production target, bounded allowlist, fresh dry-run, exclusive lock,
 and post-apply result; missing evidence stops for an engineer.
 
+Owner ruling (2026-10-02, Albert Hazan, verbatim: "let AI launch it and remove
+that rule permanently."): the earlier bar on a session-made dispatch of that
+lane is removed permanently. An AI session may launch the merged-preview apply
+run of `shared-supabase-migrations.yml` (target preview, mode apply, the merged
+source PR) that starts the automatic promotion, for an approved, merged
+shared-db change, after `ai-task-gates check --before shared-db-promotion`
+passes in the shared-db checkout. The workflow's own re-proof, risk assessment,
+lock, and evidence checks stay binding; a refusal there is fixed at its cause,
+never bypassed. This allows no manual production command and no other
+workflow, repository, or infrastructure action.
+
 Owner ruling (2026-09-28, Albert Hazan, verbatim: "never ask a human to approve.
 as i have said at least 1000 times, i am a solo vibe coder with no technical
 knowledge. ai has to do everything for me without asking me to do manual things.

@@ -34,7 +34,7 @@ concurrency:
 jobs:
   drift:
     name: Offline drift checks hold
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -52,7 +52,7 @@ jobs:
     # it a live run ends in the degraded notice. Offline checks run daily
     # regardless, and pull requests stay offline (no fork exposure).
     if: github.event_name != 'pull_request' && vars.MERGE_QUEUE_DRIFT_LIVE == 'enabled'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       outcome: ${{ steps.live.outputs.outcome }}
@@ -110,7 +110,7 @@ jobs:
     if: >-
       always() && !cancelled() && github.event_name != 'pull_request' &&
       (needs.drift.result != 'success' || needs.live-ruleset.result == 'failure' || needs.live-ruleset.outputs.outcome == 'refused')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:
       contents: read
