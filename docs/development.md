@@ -195,12 +195,12 @@ complete deterministic Bash set on Linux. For ordinary pull requests, Windows
 runs every PowerShell suite plus the Bash suites classified as Windows-sensitive;
 the separate `windows-reviewer-safety` lane owns Codex and Grok. A fallback
 watchdog reruns those omitted suites if the preferred lane does not report
-success. Since 2026-09-23 every CI job (Linux and Windows) runs on Blacksmith
-(`blacksmith-4vcpu-ubuntu-2404`, `blacksmith-4vcpu-windows-2025`), not the
-GitHub-hosted queue or the self-hosted pool; only the manual runner
-qualification workflow still targets self-hosted machines (plus the
-`runner-router` extra-capacity routing described below), and the free
-`push-settle` quiet window runs on `ubuntu-24.04`. A non-required WarpBuild
+success. The verify test jobs (Linux and Windows) run on Blacksmith
+(`blacksmith-4vcpu-ubuntu-2404`, `blacksmith-4vcpu-windows-2025`; owner
+2026-10-02: "use blacksmith to run your tests"). Exceptions: idle qualified
+self-hosted hosts take Windows sections as extra capacity (`runner-router`,
+below) and run the preferred reviewer lane; the free `push-settle` quiet
+window and the watchdog/drift workflows run on GitHub-hosted `ubuntu-24.04`. A non-required WarpBuild
 Azure BYOC Windows canary also exists (`warp-custom-warpbuild-win2022-canary`,
 `warpbuild-win2022-canary.yml`);
 required CI is not migrated there (see [`warpbuild-azure-byoc.md`](warpbuild-azure-byoc.md)). Required check names

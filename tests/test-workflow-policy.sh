@@ -35,7 +35,7 @@ section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-com
 check 'complete Windows sections retain the existing timeout bound' '[ "$windows_timeout" = 105 ]'
 check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 30 ]'
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ] && [ -n "$fallback_grok_timeout" ] && [ "$fallback_grok_timeout" -ge 50 ] && [ "$fallback_grok_timeout" -le 60 ]'
-check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: ubuntu-24.04' '$fast_workflow'"
+check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: blacksmith-4vcpu-ubuntu-2404' '$fast_workflow' && ! grep -q 'runs-on: ubuntu-' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
 # P3 splits selection from fast validation. The assertions below check each
 # expensive job's dependencies and required outcomes directly. They do not
@@ -428,7 +428,9 @@ fixed_windows_ok() {
   job_has windows-reviewer-fallback-grok windows-reviewer-safety 'runs-on: blacksmith-4vcpu-windows-2025' || return 1
 }
 check 'the fixed non-preferred Windows verify jobs run on Blacksmith' fixed_windows_ok
-# The only GitHub-hosted job is the free push-settle quiet window (owner
+# The only GitHub-hosted job in verify.yml or the fast classifier it calls
+# (checked above) is the free push-settle quiet window; it never gates on a
+# test result and sleeps at most 90 seconds (owner
 # 2026-10-01 abandoned-push cost control); every test job runs on Blacksmith
 # (owner 2026-10-02: "use blacksmith to run your tests").
 check 'push-settle is the single free GitHub-hosted job' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*ubuntu-24\.04' '$workflow')\" -eq 1 ] && job_has push-settle linux-offline-shard 'runs-on: ubuntu-24.04'"
