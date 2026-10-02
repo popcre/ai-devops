@@ -1,7 +1,8 @@
 # Non-required canary for WarpBuild Azure BYOC Windows runner (issue #961).
 # Manual only. Must NOT become a required check. Required CI stays on
-# Blacksmith; WarpBuild runs the required suite as the non-blocking
-# windows-offline-warpbuild-proof lane in verify.yml (2026-10-01, #961).
+# Blacksmith (owner 2026-10-02: "use blacksmith to run your tests"). This
+# tooling canary is the only WarpBuild workflow; verify.yml no longer runs a
+# WarpBuild proof lane.
 name: warpbuild-win2022-canary
 
 on:
