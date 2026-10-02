@@ -457,13 +457,15 @@ write_windows_runners(){
   if [ "${1:-}" != --write-runners ] && [ -s "$out" ]; then
     command -v jq >/dev/null 2>&1 || return 1
     jq -e 'type=="object" and length>0' "$out" >/dev/null 2>&1 || return 1
-    # Verify every pinned hash; mismatch fails (repair with write_windows_runners --write-runners).
-    local n p w g bad=0
+    local n p w g bad=0 tsv
+    tsv="$(jq -r 'to_entries[] | [.key, (.value.path // empty), (.value.sha256 // empty)] | @tsv' "$out" 2>/dev/null)" || return 1
+    [ -n "$tsv" ] || return 1
     while IFS=$'\t' read -r n p w; do
-      [ -n "$p" ] && [ -n "$w" ] || { bad=1; break; }
+      [ -n "$n" ] && [ -n "$p" ] && [ -n "$w" ] || { bad=1; break; }
+      [ ! -L "$p" ] || { bad=1; break; }
       g="$(sha256sum "$p" 2>/dev/null | awk '{print $1}')" || { bad=1; break; }
       [ "$g" = "$w" ] || { bad=1; break; }
-    done < <(jq -r 'to_entries[] | [.key, (.value.path // .value), (.value.sha256 // "")] | @tsv' "$out" 2>/dev/null) || bad=1
+    done <<<"$tsv"
     [ "$bad" = 0 ] || return 1
     return 0
   fi

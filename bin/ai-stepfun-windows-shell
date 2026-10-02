@@ -176,11 +176,18 @@ run(){
     want="$(jq -r --arg n "$runner_lc" '.[$n].sha256 // empty' "$allow" 2>/dev/null || true)"
     [ -n "$real" ] || REFUSE 'runner not in allowlist'
     [ -n "$want" ] || REFUSE 'runner hash pin missing'
+    [ -e "$real" ] || REFUSE 'runner path not executable'
+    [ -x "$real" ] || REFUSE 'runner path not executable'
+    # Refuse if any path component is a symlink/reparse (best-effort).
+    _p="$real"
+    while [ "$_p" != "/" ] && [ -n "$_p" ]; do
+      [ ! -L "$_p" ] || REFUSE 'runner path linked'
+      _p="$(dirname "$_p")"
+    done
     command -v sha256sum >/dev/null 2>&1 || REFUSE 'sha256sum unavailable'
     local got
     got="$(sha256sum "$real" | awk '{print $1}')"
     [ "$got" = "$want" ] || REFUSE 'runner hash mismatch'
-    [ -x "$real" ] || REFUSE 'runner path not executable'
     cd "$REVIEW_DIR"
     # Keep system dirs so shebangs (env/bash) resolve; no shim re-entry.
     export PATH="${GATE_PATH:-/usr/bin:/bin}:/usr/bin:/bin"
