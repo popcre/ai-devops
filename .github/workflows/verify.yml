@@ -344,12 +344,10 @@ jobs:
   # standardDASv4Family quota (10 vCPUs = 2 concurrent Standard_D4as_v4).
   windows-offline-warpbuild-proof:
     needs: [fast-classifier, manual-preflight]
-    if: >-
-      !cancelled() && github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      needs.fast-classifier.outputs.validation_result != 'failure' &&
-      (needs.fast-classifier.outputs.selection_result != 'success' ||
-       needs.fast-classifier.outputs.run_long != 'false')
+    # Disabled while the WarpBuild pool is not accepting jobs: queued proof
+    # jobs sat for hours and held the workflow open. Re-enable when
+    # warp-custom-warpbuild-win2022-canary actually picks up (issue #961).
+    if: false
     continue-on-error: true
     name: windows-offline-warpbuild-proof (${{ matrix.section }})
     strategy:
