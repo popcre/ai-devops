@@ -402,8 +402,9 @@ small_owner_entry_summary(){
   [ "${repo,,}" = "${IDENTITY,,}" ] || { _soe_stop "The owner-request issue must belong to $IDENTITY (got $repo)."; return 1; }
   [[ "$rows" =~ ^[1-9][0-9]?$ ]] && [ "$rows" -le 10 ] \
     || { _soe_stop "A small owner entry needs --row-count between 1 and 10 (got \"$rows\"); larger writes need --reviewer-approval."; return 1; }
-  [ "${#quote}" -ge 12 ] && [[ "$quote" != *$'\n'* ]] && [[ "$quote" != *$'\r'* ]] \
-    || { _soe_stop 'A small owner entry needs a one-line --owner-quote of at least 12 characters with the owner request verbatim.'; return 1; }
+  local squeezed="${quote//[[:space:]]/}"
+  [ "${#squeezed}" -ge 12 ] && [[ "$quote" != *$'\n'* ]] && [[ "$quote" != *$'\r'* ]] \
+    || { _soe_stop 'A small owner entry needs a one-line --owner-quote of at least 12 non-space characters with the owner request verbatim.'; return 1; }
   [ -f "$(state_path)" ] || { _soe_stop 'A small owner entry needs a declared task (ai-task-gates start) so the release is recorded.'; return 1; }
   json="$(AI_GH_CALLER=ai-task-gates "$SCRIPT_DIR/ai-gh" issue view "$num" -R "$repo" --json url,author,body,comments 2>/dev/null)" \
     || { _soe_stop "Issue $url could not be read from GitHub."; return 1; }

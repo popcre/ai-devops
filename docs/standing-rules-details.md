@@ -134,7 +134,9 @@ an owner account (`u2giants` or `popcre`). A declared task is required so the
 release is always recorded. The gate refuses a row count outside 1..10, a multi-line
 quote, a quote missing from the issue body or comments, any action other than
 `database`, any change set above `code` (structure, security, infrastructure,
-or a protected class), and combining it with `--reviewer-approval`. The row
+or a protected class), and combining it with `--reviewer-approval`. It checks
+the file change set, not the SQL: row-data-only and no-deletion are, like the
+row count below, part of the caller's declared contract. The row
 count and the transaction guard are the caller's declared contract; the
 release, URL, row count, and quote digest are recorded in the task state.
 

@@ -1071,7 +1071,8 @@ SMALL_Q='add the three Hasbro contacts'
 mkdir -p "$TMP/small-gh"
 jq -n --arg u "$SMALL_URL" '{url:$u, author:{login:"u2giants"}, body:"Owner request (verbatim): \"add the three Hasbro contacts\"", comments:[]}' > "$TMP/small-gh/7.json"
 jq -n '{url:"https://github.com/popcre/some-app/issues/8", author:{login:"someone"}, body:"x", comments:[{author:{login:"stranger"}, body:"add the three Hasbro contacts"}]}' > "$TMP/small-gh/8.json"
-jq -n '{url:"https://github.com/popcre/some-app/issues/1", author:{login:"u2giants"}, body:"add the three Hasbro contacts", comments:[]}' > "$TMP/small-gh/9.json"
+jq -n '{url:"https://github.com/popcre/some-app/issues/10", user:{login:"someone"}, body:"x", comments:[{user:{login:"popcre"}, body:"please add the two Mattel licensor rows"}]}' > "$TMP/small-gh/10.json"
+jq -n '{url:"https://github.com/popcre/some-app/issues/1",author:{login:"u2giants"}, body:"add the three Hasbro contacts", comments:[]}' > "$TMP/small-gh/9.json"
 cat > "$TMP/small-gh/gh" <<EOF
 #!/usr/bin/env bash
 # Fake real gh behind ai-gh: serves issue JSON fixtures by number.
@@ -1121,6 +1122,15 @@ check 'small entry never releases other actions' \
   "rc 3 '$TMP/small-entry' check --before production --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
 check 'the small-entry release is recorded in task state' \
   "jq -e '.overrides|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-entry')\" >/dev/null"
+check 'an owner request quoted only in an owner comment (REST user.login) qualifies' \
+  "rc 0 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/some-app/issues/10' --row-count 2 --owner-quote 'add the two Mattel licensor rows'"
+check 'a whitespace-padded quote under 12 real characters is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote 'add the     '"
+newrepo "$TMP/small-infra" popcre/some-app
+( cd "$TMP/small-infra" && "$GATES" start --class code >/dev/null 2>&1 )
+mkdir -p "$TMP/small-infra/infra"; printf 'x\n' > "$TMP/small-infra/infra/main.tf"
+check 'an infrastructure change set never qualifies as a small owner entry' \
+  "! rc 0 '$TMP/small-infra' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
 newrepo "$TMP/small-structural" popcre/some-app
 ( cd "$TMP/small-structural" && "$GATES" start --class code >/dev/null 2>&1 )
 mkdir -p "$TMP/small-structural/db/migrations"; printf 'select 1;\n' > "$TMP/small-structural/db/migrations/001.sql"
