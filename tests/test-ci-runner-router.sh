@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Regression test for tools/ci/runner-router.cjs, the verify.yml job that gives
-# idle qualified self-hosted Windows hosts ordinary Windows sections and keeps
-# every other section on Blacksmith.
+# idle qualified self-hosted Windows hosts (EDGE-RUNN-ENVY and any other host
+# labelled ai-devops-windows-qualified) ordinary verify.yml Windows sections as
+# extra capacity and keeps every other section on Blacksmith (owner ruling
+# 2026-10-01: KEEP Blacksmith in the pool; USE Blacksmith for runs that would
+# otherwise get stuck). WarpBuild Azure BYOC is NOT routed here - it runs the
+# required suite as a non-blocking proof job outside the required aggregate.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if ! command -v node >/dev/null 2>&1; then
@@ -26,7 +30,7 @@ check('no idle host keeps every section on Blacksmith', () => {
   assert.strictEqual(lanes(decide(cfg, { event: 'pull_request', idleQualified: 0 }).windows_matrix), allBlacksmith);
 });
 check('the config never names a GitHub-hosted label', () => {
-  assert.ok(!/windows-20\d\d"|ubuntu-\d\d\.\d\d/.test(JSON.stringify(cfg).replace(cfg.blacksmith_windows, '')));
+  assert.ok(!/windows-20\d\d"|ubuntu-\d\d\.\d\d/.test(JSON.stringify(cfg).replace(cfg.blacksmith_windows, '').replace(cfg.warpbuild_windows, '')));
 });
 check('every section is planned exactly once', () => {
   for (const i of [0, 2, 99]) {
@@ -46,6 +50,13 @@ check('manual runs keep one qualified host free for the reviewer proof', () => {
 });
 check('more idle hosts than sections never over-assigns', () => {
   assert.strictEqual(decide(cfg, { event: 'pull_request', idleQualified: 50 }).windows_matrix.filter(x => x.lane !== 'blacksmith').length, cfg.windows_sections);
+});
+check('a foreign head never reaches the self-hosted pool or WarpBuild', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: 50, foreign: true });
+  assert.strictEqual(lanes(p.windows_matrix), allBlacksmith);
+  for (const w of p.windows_matrix) {
+    assert.strictEqual(w.runs_on, cfg.blacksmith_windows);
+  }
 });
 
 function fakeCore() {
@@ -83,12 +94,15 @@ const lanesOut = core => lanes(JSON.parse(core.out.windows_matrix));
     await run({ ...deps, context: ctx, core, cfg });
     check(label, () => assert.strictEqual(lanesOut(core), expected));
   }
-  for (const [label, head] of [['a fork pull request never reaches a self-hosted host', { repo: { full_name: 'stranger/ai-devops' } }],
-                               ['a pull request from a deleted fork never reaches a self-hosted host', { repo: null }]]) {
+  for (const [label, head] of [['a fork pull request never reaches a self-hosted host or WarpBuild', { repo: { full_name: 'stranger/ai-devops' } }],
+                               ['a pull request from a deleted fork never reaches a self-hosted host or WarpBuild', { repo: null }]]) {
     const core = fakeCore();
     const forkCtx = { ...ctx, payload: { pull_request: { head } } };
     await run({ github: fakeGithub(), poolGithub: fakePool([envy(false)]), context: forkCtx, core, cfg });
     check(label, () => assert.strictEqual(lanesOut(core), allBlacksmith));
+    check(label + ' (never our machines)', () => {
+      for (const w of JSON.parse(core.out.windows_matrix)) assert.strictEqual(w.runs_on, cfg.blacksmith_windows);
+    });
   }
   if (failures) { console.error(`${failures} runner-router check(s) failed`); process.exit(1); }
   console.log('runner-router: all checks passed');
