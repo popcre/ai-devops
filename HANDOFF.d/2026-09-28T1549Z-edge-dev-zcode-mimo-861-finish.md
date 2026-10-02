@@ -82,7 +82,7 @@ This wrap-up (2026-09-28) finishes the one item still in flight: landing PR #861
    3/4 failed AGAIN. So "just rerun" is now half-disproven: a second rerun without
    reading the logs is not justified.
 4. **Park #865's wake** — never landed the finish (3-day gap, session went idle).
-   This handoff + a fresh registered wait is the replacement.
+   This handoff + leaving the issue/PR as the card is the replacement (registration is OUT; #1183 child 3).
 5. **Log fetch mid-run** — `gh run view --job … --log` and the jobs/logs API return
    nothing while the run is `in_progress`. Wait for run completion first.
 

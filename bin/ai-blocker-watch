@@ -213,7 +213,7 @@ ensure_labels(){ # ensure_labels <owner/repo> — labels are cheap and idempoten
 }
 
 cmd_wait(){
-  note "registration is no longer required; use bounded ai-pr-wait in-turn, or leave the issue/PR as the card and return later"
+  note "registration is no longer required; use bounded ai-pr-wait <pr> --timeout-minutes N in-turn, or leave the issue/PR as the card and return later"
   return 0
 }
 
