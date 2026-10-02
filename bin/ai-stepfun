@@ -456,6 +456,14 @@ write_windows_runners(){
   if [ "${1:-}" != --write-runners ] && [ -s "$out" ]; then
     command -v jq >/dev/null 2>&1 || return 1
     jq -e 'type=="object" and length>0' "$out" >/dev/null 2>&1 || return 1
+    # Verify every pinned hash; mismatch fails (repair with write_windows_runners --write-runners).
+    local n p w g bad=0
+    while IFS=$'\t' read -r n p w; do
+      [ -n "$p" ] && [ -n "$w" ] || { bad=1; break; }
+      g="$(sha256sum "$p" 2>/dev/null | awk '{print $1}')" || { bad=1; break; }
+      [ "$g" = "$w" ] || { bad=1; break; }
+    done < <(jq -r 'to_entries[] | [.key, (.value.path // .value), (.value.sha256 // "")] | @tsv' "$out")
+    [ "$bad" = 0 ] || return 1
     return 0
   fi
   command -v jq >/dev/null 2>&1 || return 1
@@ -481,8 +489,13 @@ write_windows_runners(){
 }
 
 cmd_doctor(){
-  local live=0
-  [ "${1:-}" != --live ] || live=1
+  local live=0 write_runners=""
+  for a in "$@"; do
+    case "$a" in
+      --live) live=1 ;;
+      --write-runners) write_runners=--write-runners ;;
+    esac
+  done
   require_engine
   printf 'PASS  engine: %s\n' "$ENGINE"
   case "$ENGINE" in
@@ -508,7 +521,7 @@ cmd_doctor(){
         bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed on Linux (sudo apt-get install bubblewrap)\n'; exit 1; }
         printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
       else
-        write_windows_runners || { printf 'FAIL cannot write Windows runner allowlist (stepfun-windows-runners.json)\n'; exit 1; }
+        write_windows_runners "$write_runners" || { printf 'FAIL Windows runner allowlist missing or hash-mismatched (repair: ai-stepfun doctor --write-runners)\n'; exit 1; }
         printf 'PASS  Windows runner allowlist (hashed): %s\n' "${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
       fi
       ;;
