@@ -129,7 +129,7 @@ This wrap-up (2026-09-28) finishes the one item still in flight: landing PR #861
 - Never guess model slugs or CLI flags; qualify live, quote verbatim.
 - Canonical checkout `C:/repos/ai-devops` is landing-only; work in worktrees.
 - Docs-only PRs merge immediately `--squash --admin`; code PRs wait on CI via
-  `bin/ai-pr-wait` run from a worktree.
+  `bin/ai-pr-wait --timeout-minutes N` run from a worktree.
 - Sheet dispatch-row updates land in the SAME PR as the fix they reflect.
 - Human-facing times in EDT with the zone named; sign every GitHub post.
 - Do not edit other sessions' `HANDOFF.d/` files (several landed today, e.g. a

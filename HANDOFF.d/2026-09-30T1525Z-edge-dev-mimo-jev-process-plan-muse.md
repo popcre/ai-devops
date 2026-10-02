@@ -52,7 +52,7 @@ Albert asked to:
 **Muse audit (session `process-plan-audit-20260930`, engine muse-code):**
 - Four turns: BLOCKED (missing files) → ACCEPT WITH CHANGES → COUNTER on one
   carve-out → AGREE.
-- Single disagreement resolved: required `ai-blocker-watch wait` registration is
+- Single disagreement resolved: required `ai-blocker-watch wait` registration is OUT (kept as decided) and
   OUT as a standing rule (owner-reported non-adoption; locked deletion under
   #1061). Voluntary use unrequired. Re-admit only on 14-day measured wake evidence.
 - Reorder accepted: daily merge tax leads; coord-deletion residuals trail.

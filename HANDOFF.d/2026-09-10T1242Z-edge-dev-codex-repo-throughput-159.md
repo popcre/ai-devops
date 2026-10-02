@@ -209,7 +209,7 @@ the final cutover.
 6. Obtain a fresh exact-head read-only independent final review with the actual
    focused test command supplied. You will know it worked when the review names
    the exact PR head and ends `APPROVE`, with no unresolved review thread.
-7. Wait through `bin/ai-pr-wait 371`, enqueue PR #371, and verify the merge-group
+7. Wait through `bin/ai-pr-wait 371 --timeout-minutes N`, enqueue PR #371, and verify the merge-group
    gate and stable `windows-offline` context on the actual queued commit. Merge
    through the queue, fetch, and verify the resulting commit on `origin/main`.
    You will know it worked when PR #371 is MERGED, issue #167 is CLOSED, and the
@@ -249,7 +249,7 @@ the final cutover.
   verification.
 - Reviewer wrappers, safety tests, evidence tooling, workflow safety, and
   installed routing changes require exact-head independent read-only review.
-- Use bounded event-aware waiting (`bin/ai-pr-wait`). Surface failures and queue
+- Use bounded event-aware waiting (`bin/ai-pr-wait --timeout-minutes N`). Surface failures and queue
   ejections immediately.
 - The repository is public. Never commit raw transcripts, licensed data,
   secrets, `.env` files, or private artifacts.

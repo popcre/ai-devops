@@ -119,7 +119,7 @@ Albert’s chosen path: **new fresh-context session** using `.ai/tmp/autonomous-
 
 - Never push `main`; branch + PR + merge queue. Docs-only PRs may `gh pr merge --squash --admin` after checks policy — **still no private content**.
 - `git var GIT_COMMITTER_IDENT` = `Albert Hazan <u2giants@users.noreply.github.com>` before first commit. Stage **only** your files.
-- `bin/ai-gh` for GitHub; `bin/ai-pr-wait` for PRs; no open-ended `gh` polls; long waits `ai-blocker-watch`.
+- `bin/ai-gh` for GitHub; `bin/ai-pr-wait --timeout-minutes N` for PRs; no open-ended `gh` polls; long waits `ai-blocker-watch`.
 - Reviewer safety path: wrapper/evidence/safety-test changes need **one read-only exact-head final review** before merge.
 - Do not force Gemini/Qwen `qualify-live` to “unstick” quarantine — that is #1112’s bug.
 - Windows: `C:\Program Files\Git\bin\bash.exe`; do not use WSL bash (no distro).

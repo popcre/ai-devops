@@ -115,7 +115,7 @@ At 2026-09-17 21:02Z, GitHub showed PRs #15, #33, #66, #135, #184, #192, #392, #
 
 - Use one current-upstream worktree per write-capable task; keep the canonical checkout landing-only.
 - Start the task class and recheck before review, shipment, installation, or infrastructure action.
-- Make every GitHub call through `bin/ai-gh`; use `bin/ai-pr-wait` for bounded PR waits.
+- Make every GitHub call through `bin/ai-gh`; use `bin/ai-pr-wait --timeout-minutes N` for bounded PR waits.
 - Never push directly to `main`. Outside DesignFlow, the session that opens a PR owns merging it unless a real blocker remains.
 - Reviewer wrappers, evidence tools, safety tests, and installed routing rules require a read-only exact-head final review.
 - Do not overlap a local full suite with jobs using the same Windows host or installed runtime. Do not rerun the unchanged #560 full suite after the Win32 1455 resource failure.

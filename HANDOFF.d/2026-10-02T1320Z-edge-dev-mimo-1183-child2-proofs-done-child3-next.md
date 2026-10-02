@@ -148,7 +148,7 @@ delete after the run IDs are no longer needed; they are not required for main.
 2. Work in a fresh worktree from current `origin/main` (canonical checkout is
    landing-only). `ai-task-gates start --class …` before edits.
 3. Implement child 3 with branch + PR + merge queue. If the change set touches
-   `bin/ai-pr-wait` or another reviewer-safety path (see
+   `bin/ai-pr-wait --timeout-minutes N` or another reviewer-safety path (see
    `.ai-devops/task-gates.json`), declare `--class reviewer-safety` and get
    exact-head independent review (`ai-review <provider> final-check
    --implementer mimo`).

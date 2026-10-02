@@ -79,7 +79,7 @@ No shared preview or production database changes were applied by this session or
 
 ## 7. Constraints and traps
 
-- All repos require isolated worktrees, protected PR/queue merges, task-specific staging, correct Albert noreply commit identity, and signed GitHub comments. Use `bin/ai-gh` for all GitHub calls and `bin/ai-pr-wait` for bounded event-aware PR waits. Do not have multiple full local Windows test series overlap the same physical runner or installed runtime.
+- All repos require isolated worktrees, protected PR/queue merges, task-specific staging, correct Albert noreply commit identity, and signed GitHub comments. Use `bin/ai-gh` for all GitHub calls and `bin/ai-pr-wait --timeout-minutes N` for bounded event-aware PR waits. Do not have multiple full local Windows test series overlap the same physical runner or installed runtime.
 - Independent exact-head read-only final review is mandatory for reviewer wrappers, safety tests, evidence tools, and installed routing rules before merge. No formal old-installed Muse or DeepSeek review. Do not call 1Password during a formal review. Kimi and GLM remain out of allocator rotation.
 - Shared-db #3526/#3528/#3556/#3593 change tooling only, not database shape. They are **non-orchestrator work**; do not send them to the structural migration queue or claim a structural marker. The #3570 merge hold has ended.
 - #3528 has a unique unpublished local commit; do not reset or clean that worktree. #3593 is stacked on #3556. #3627 is unrelated and must not gate or be merged for this task.

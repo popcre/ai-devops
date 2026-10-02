@@ -68,7 +68,7 @@ No failed runtime repair, token change or installation occurred.
 ## 5. Root causes and key findings
 
 - `bin/ai-gh:238` reads only `.resources.core`; `:268` subtracts one per command.
-- `bin/ai-pr-wait:243` uses GraphQL. Its exhausted bucket can be invisible to core.
+- `bin/ai-pr-wait:243 --timeout-minutes N` uses GraphQL. Its exhausted bucket can be invisible to core.
 - `bin/ai-gh:55` uses per-home local state. Cross-host demand remains outside that lock.
 - Bare calls persist in `bin/ai-test-local:158`, `bin/ai-verify-run:43–84`,
   `bin/ai-workspace-status:94`, `bin/ai-memory-sync:90`.

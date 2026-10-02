@@ -72,7 +72,7 @@ fully up. Albert chose WarpBuild after Blacksmith billing looked high.
   compare to `timeout-minutes`); 4–8 still pending. **PR #1220 is queued to
   merge** (auto-merge/queue). Codex `final-check` **APPROVE** at exact head
   `7a27834e` (`.ai/reviews/codex-final-check-20261002T002128-838032-27249.md`).
-- `bin/ai-pr-wait 1220` reports the proof-lan failure as merge-blocking even
+- `bin/ai-pr-wait 1220 --timeout-minutes N` reports the proof-lan failure as merge-blocking even
   though the lane is `continue-on-error`; if the queue ejects, re-check which
   status checks are required vs the proof lane.
 - Next after merge: prove required Windows green **post-merge** on main, comment

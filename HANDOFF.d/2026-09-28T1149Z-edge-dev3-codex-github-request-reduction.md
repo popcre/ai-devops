@@ -85,7 +85,7 @@ Reduce unnecessary GitHub requests and checks as far as possible without losing 
 
 - BlockerWatch accounted for roughly 95% of measured managed traffic, so shared snapshots and category-level proof dominate potential savings. Source plan: `plan_cut-unneeded-github-traffic.md` S1.
 - GraphQL and REST limits are separate; P2 merged resource-aware admission. Do not flatten them into one quota.
-- Repeat waiter reads can be shared only for the same repository, PR, expected head, host, principal, credential and access context; queue and terminal decisions remain waiter-owned. `bin/ai-pr-wait` and `bin/pr_status_singleflight.py` are the S2 implementation.
+- Repeat waiter reads can be shared only for the same repository, PR, expected head, host, principal, credential and access context; queue and terminal decisions remain waiter-owned. `bin/ai-pr-wait --timeout-minutes N` and `bin/pr_status_singleflight.py` are the S2 implementation.
 - CLI invocation counts are not actual HTTP requests or GraphQL points. P1 records response cost where GitHub supplies it; old opaque events remain explicitly unknown, not zero.
 - The protected machine atlas is authoritative for host connection details. Do not publish its values in this public repository.
 
