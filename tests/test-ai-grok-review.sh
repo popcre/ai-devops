@@ -1530,7 +1530,8 @@ STALE_BEFORE_FORWARD="$(ls "$POOLTMP/fakerepo/.ai/reviews/" 2>/dev/null | grep -
 rm -f "$POOLTMP/flip"
 FORWARD_REPORT="$(tail -1 "$POOLTMP/out-forward" 2>/dev/null)"
 check "pool_adapter_keeps_a_paid_report_across_a_forward_target_move" "[ '$RC_FORWARD' -eq 0 ] && [ -f '$FORWARD_REPORT' ] && grep -q APPROVE '$FORWARD_REPORT'"
-check "pool_adapter_forward_move_leaves_no_stale_report" "[ \"\$(ls '$POOLTMP/fakerepo/.ai/reviews/' 2>/dev/null | grep -c '\\.stale\\$' || true)\" -eq '$STALE_BEFORE_FORWARD' ]"
+STALE_AFTER_FORWARD="$(ls "$POOLTMP/fakerepo/.ai/reviews/" 2>/dev/null | grep -c '\.stale$' || true)"
+check "pool_adapter_forward_move_leaves_no_stale_report" "[ '$STALE_AFTER_FORWARD' -eq '$STALE_BEFORE_FORWARD' ]"
 # A changed digest under a forward-moving target is still refused: only the
 # tip gains tolerance, never the reviewed content.
 ( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_BASE" "$FAKE_HEAD" && POOL_RUNNER_MODE=drift POOL_ID_DIGEST_AFTER=feedface bash "$POOL" qwen security-review ) > "$POOLTMP/out-fwdigest" 2>&1; RC_FWDIGEST=$?
