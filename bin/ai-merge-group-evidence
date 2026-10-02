@@ -152,7 +152,7 @@ equivalent_fallback_proven() { # completed same-run replacement, never a failed 
   # succeeded to replace the original reviewer lane. Every other reported job
   # must already be complete and clean. Explicitly require the core jobs too;
   # an incomplete API response is not coverage.
-  for job in windows-reviewer-fallback-codex windows-reviewer-fallback-grok windows-offline linux-offline 'fast-classifier / classify'; do
+  for job in windows-reviewer-fallback-codex windows-reviewer-fallback-grok windows-offline linux-offline 'fast-classifier / select' 'fast-classifier / validate'; do
     printf '%s\n' "$jobs" | awk -F'\t' -v want="$job" '$1==want && $2=="success" && $3=="completed" {found=1} END {exit !found}' || return 1
   done
   printf '%s\n' "$jobs" | awk -F'\t' '$1=="windows-reviewer-safety" {found=1} END {exit !found}' || return 1
