@@ -10,12 +10,12 @@
 
 | Step | Status | Last updated | Evidence / next gate |
 |---|---|---|---|
-| 0. Confirm fleet membership and out-of-scope list | ⬜ open | 2026-09-29 | §4, §8; owner already corrected this in chat 2026-09-29 |
-| 1. Phase A — evidence retention (safe first PR) | ⬜ open | 2026-09-29 | §9 Phase A; start here in a new worktree |
-| 2. Phase B — requalification versioning (Gemini/Qwen) | ⬜ open | 2026-09-29 | §9 Phase B; after A lands |
-| 3. Phase C — failure-class split (outage vs code) | ⬜ open | 2026-09-29 | §9 Phase C; reuse `tools/reviewer_admission.py` |
-| 4. Phase D — runner + adapters (forcing function) | 🟡 in progress | 2026-09-30 | §9 Phase D; shared runner core + Grok door + pool forcing function in `fix/1114-review-runner-doors` (#1114). Remaining doors are follow-up PRs. |
-| 5. Phase E — retire copies + metrics proof | ⬜ open | 2026-09-29 | §9 Phase E; measure before/after |
+| 0. Confirm fleet membership and out-of-scope list | ✅ done | 2026-09-29 | §4, §8; owner-corrected fleet Muse/Grok/Qwen/StepFun/DeepSeek/Gemini |
+| 1. Phase A — evidence retention (safe first PR) | ✅ done | 2026-10-02 | PR #1135 merged `fd857196`; store-before-delete + re-bind + lifecycle packet args; tests packet/sandbox/lifecycle; leftover proof #1163 |
+| 2. Phase B — requalification versioning (Gemini/Qwen) | ✅ done | 2026-10-02 | PR #1201 merged `544207c8`; versioned last-good records; tests/test-ai-review-preflight.sh; leftover proof #1204 |
+| 3. Phase C — failure-class split (outage vs code) | ✅ done | 2026-10-02 | PR #1218 merged `44a7e446`; tools/reviewer_admission.py + bin/ai-reviewer-issue; bare 403/404 stay code |
+| 4. Phase D — runner + adapters (forcing function) | 🟡 code landed | 2026-10-02 | PR #1209 merged (runner + Grok native door + forcing function). PR #1225 DeepSeek OpenCode door APPROVE at `4d64b36e`/f79b02a2, final CI. Leftover proof #1257. |
+| 5. Phase E — retire copies + metrics proof | ⬜ open | 2026-10-02 | §9 Phase E; measure before/after (needs clean window after D) |
 
 **GitHub issues (parent + children):**
 | Issue | Step |
