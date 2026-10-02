@@ -570,6 +570,10 @@
           "class": "private-tooling"
         },
         {
+          "glob": ".ai-devops/task-gates.json",
+          "class": "private-tooling"
+        },
+        {
           "glob": "**",
           "class": "private-evidence"
         }
