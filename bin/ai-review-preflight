@@ -736,6 +736,19 @@ check_provider() { # PROVIDER REPO LIVE BASE
     static_status "$provider" >&2
     case "$provider" in gemini|qwen) return 3 ;; *) return 4 ;; esac
   fi
+  # Windows StepFun without OpenCode is an engine miss (exit 4), not a quarantine.
+  if [ "$provider" = stepfun ]; then
+    case "${AI_STEPFUN_PLATFORM:-$(uname -s)}" in
+      MINGW*|MSYS*|CYGWIN*|Windows*|windows*)
+        if [ -z "${AI_STEPFUN_OPENCODE:-}" ] || [ ! -x "${AI_STEPFUN_OPENCODE:-}" ]; then
+          if ! command -v opencode >/dev/null 2>&1; then
+            printf 'ai-review-preflight: stepfun is unsupported on this platform (engine missing or wrong OS).\n' >&2
+            return 4
+          fi
+        fi
+        ;;
+    esac
+  fi
 
   git -C "$repo" rev-parse --verify HEAD^{commit} >/dev/null 2>&1 || die "repository has no readable HEAD commit."
   [ -z "$base" ] || git -C "$repo" rev-parse --verify "$base^{commit}" >/dev/null 2>&1 \
