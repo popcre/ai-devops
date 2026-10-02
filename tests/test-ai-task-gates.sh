@@ -850,7 +850,13 @@ mkdir -p "$TMP/writer/reconciliation/x" "$TMP/writer/.ai-devops"
 printf 'export default 1;\n' > "$TMP/writer/reconciliation/x/writer.mjs"
 check 'an undeclared repository keeps database sealed for a writer' \
   "out '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database)\" | grep -Fq 'no reviewer-approval'"
+# The declaration lands on the base first, as it does through its own PR; a
+# policy file inside the change set is itself private evidence there.
+rm -f "$TMP/writer/reconciliation/x/writer.mjs"
 printf '%s\n' '{"schema_version":1,"gates":{"private-tooling":{"required":["reviewed-private-data-writer"]}}}' > "$TMP/writer/.ai-devops/task-gates.json"
+git -C "$TMP/writer" add -A && git -C "$TMP/writer" commit -qm declare
+( cd "$TMP/writer" && "$GATES" start --class private-tooling --base HEAD ) >/dev/null
+printf 'export default 1;\n' > "$TMP/writer/reconciliation/x/writer.mjs"
 check 'a declared writer reaches the reviewer-approval step for database' \
   "out '$TMP/writer' check --before database | grep -Fq 'obtain an assigned AI reviewer APPROVE'"
 check 'and is still refused without that approval' \
