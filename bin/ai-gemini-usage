@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # ai-gemini-usage - report Antigravity subscription allowance and reset times.
+# P5 live-proof leaf touch: comment-only change to exercise suite selection.
 #
 # This is a read-only allowance query. It never copies a repository, never runs
 # a review, and never starts a conversation, so it deliberately lives outside
