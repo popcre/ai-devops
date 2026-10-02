@@ -348,6 +348,17 @@ registry_reason() { # PROVIDER
 # when the local install is healthy, unquarantined, and live-qualified.
 health_status() { # PROVIDER
   if static_status "$1"; then return 1; fi
+  if [ "$1" = stepfun ]; then
+    case "${AI_STEPFUN_PLATFORM:-$(uname -s)}" in
+      MINGW*|MSYS*|CYGWIN*|Windows*|windows*)
+        local oc="${AI_STEPFUN_OPENCODE:-}"
+        if [ -z "$oc" ] || [ ! -x "$oc" ]; then
+          printf '{"provider":"stepfun","status":"unsupported-platform","failure_class":"unsupported-platform"}\n'
+          return 1
+        fi
+        ;;
+    esac
+  fi
   if active_quarantine "$1"; then printf '%s\n' "$ACTIVE_QUARANTINE" | jq -c '. + {status:"quarantined"}'; return 1; fi
   printf '{"provider":"%s","status":"installed-healthy"}
 ' "$1"

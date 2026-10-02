@@ -1,6 +1,8 @@
 @echo off
-rem Launcher for ai-stepfun-windows-shell (tests/test-bin-cmd-launchers.sh).
+rem Windows launcher so a path call runs the script instead of opening the
+rem "Select an app" dialog. Checked by tests/test-bin-cmd-launchers.sh.
 setlocal
-set "SCRIPT=%~dp0ai-stepfun-windows-shell"
-bash "%SCRIPT%" %*
+set "AI_BASH=%ProgramFiles%\Git\bin\bash.exe"
+if not exist "%AI_BASH%" set "AI_BASH=%LOCALAPPDATA%\Programs\Git\bin\bash.exe"
+"%AI_BASH%" -c "exec \"$0\" \"$@\"" "%~dpn0" %*
 exit /b %ERRORLEVEL%
