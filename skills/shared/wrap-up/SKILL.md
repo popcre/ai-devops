@@ -73,19 +73,19 @@ exact repository name are the gate.
 
 Before anything else, answer this out loud in the session: **did this session
 touch the shared Supabase database or `popcre/shared-db`, dispatch sub-agents,
-or hold an `orchestrator-marker` issue?**
+or hold a claim on a shared-db issue?**
 
-Check rather than assume — `gh issue list --repo popcre/shared-db --label
-orchestrator-marker --state open` and the session's own history. If the answer
+Check rather than assume — the session's own history and its claims on
+`popcre/shared-db` issues. If the answer
 to ANY of those is yes, **stop and run the `shared-db-handover` skill now**; it
-owns the whole close-out for this session, including the marker, the `db-work`
+owns the whole close-out for this session, including releasing claims, the `db-work`
 queue, and one handoff block per sub-agent. Come back to the chain below only
 for the parts that skill does not cover.
 
 Bare "wrap up" is enough to trigger this gate. Albert never has to name the
 shared-db skill, the issue commands, the labels, or a path letter — if he did,
 this gate would be broken. A generic handoff from a shared-db session is
-incomplete, and so is an orchestrator session that ends with its marker open.
+incomplete, and so is a session that ends holding an unreleased claim.
 
 ## The chain
 

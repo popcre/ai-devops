@@ -142,6 +142,28 @@ check "ambiguous metadata cannot capture a scoreboard row" "test ! -e '$ambiguou
 check "missing summary is refused" "! $SCRIPT record --provider grok --repo '$TMP/repo'"
 check "unsafe provider name is refused" "! $SCRIPT record --provider '../bad' --summary bad --repo '$TMP/repo'"
 
+# #1115: credit/quota/usage-limit/provider-down never enter the code-defect stream.
+printf '402 Payment Required: insufficient_quota - Your account has insufficient credits.\n' > "$TMP/credit.err"
+credit_issue="$($SCRIPT record --provider grok --summary 'Reviewer run stopped on billing failure.' --repo "$TMP/repo" --error-file "$TMP/credit.err")"
+credit_id="$(printf '%s\n' "$credit_issue" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+credit_report="$AI_REVIEWER_ISSUE_DIR/$credit_id"
+check "credit issue carries the outage stream" "jq -e '.failure_stream==\"provider-outage\" and .failure_class==\"credit\"' '$credit_report/issue.json'"
+check "credit issue is not labeled a code defect" "jq -e '.code_defect==false and .failure_stream!=\"code-defect\"' '$credit_report/issue.json'"
+check "credit issue summary shows the outage class" "printf '%s\n' '$credit_issue' | grep -q 'provider-outage/credit' && printf '%s\n' '$credit_issue' | grep -q 'not a code defect'"
+check "list surfaces the outage class" "$SCRIPT list | grep -q 'provider-outage/credit'"
+
+printf 'API error (status 429 Too Many Requests): Rate limit reached.\n' > "$TMP/capacity.err"
+capacity_id="$(printf '%s\n' "$($SCRIPT record --provider grok --summary 'Reviewer run hit a rate limit.' --repo "$TMP/repo" --error-file "$TMP/capacity.err")" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+check "quota/capacity issue is outage, not code" "jq -e '.failure_stream==\"provider-outage\" and .failure_class==\"capacity\" and .code_defect==false' '$AI_REVIEWER_ISSUE_DIR/$capacity_id/issue.json'"
+
+printf 'HTTP 404 Not Found: model_not_found\n' > "$TMP/notfound.err"
+notfound_id="$(printf '%s\n' "$($SCRIPT record --provider muse --summary 'Model name rejected by provider.' --repo "$TMP/repo" --error-file "$TMP/notfound.err")" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+check "bare 404 stays code-config" "jq -e '.failure_stream==\"code-defect\" and .failure_class==\"code-config\" and .code_defect==true' '$AI_REVIEWER_ISSUE_DIR/$notfound_id/issue.json'"
+
+printf 'connection refused while reaching the provider API\n' > "$TMP/outage.err"
+outage_id="$(printf '%s\n' "$($SCRIPT record --provider grok --summary 'Provider unreachable.' --repo "$TMP/repo" --error-file "$TMP/outage.err")" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+check "provider-down issue is outage, not code" "jq -e '.failure_stream==\"provider-outage\" and .failure_class==\"outage\" and .code_defect==false' '$AI_REVIEWER_ISSUE_DIR/$outage_id/issue.json'"
+
 PYTHON="$(command -v python3 || command -v python)"
 export AI_REVIEWER_BASH="$BASH"
 maintenance_rc=0

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Regression test for tools/ci/runner-router.cjs, the verify.yml job that gives
-# idle qualified self-hosted Windows hosts ordinary Windows sections and keeps
-# every other section on Blacksmith.
+# idle qualified self-hosted Windows hosts ordinary Windows sections, keeps the
+# rest on GitHub-hosted runners, and sends overflow to WarpBuild only after
+# both are full.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if ! command -v node >/dev/null 2>&1; then
@@ -20,13 +21,21 @@ function check(label, fn) {
   try { fn(); console.log(`  ok   ${label}`); }
   catch (e) { failures += 1; console.error(`  FAIL ${label}: ${e.message}`); }
 }
-const allBlacksmith = Array(cfg.windows_sections).fill('blacksmith').join(',');
+const allGithub = Array(cfg.windows_sections).fill('github-hosted').join(',');
+const allWarp = Array(cfg.windows_sections).fill('warpbuild').join(',');
 
-check('no idle host keeps every section on Blacksmith', () => {
-  assert.strictEqual(lanes(decide(cfg, { event: 'pull_request', idleQualified: 0 }).windows_matrix), allBlacksmith);
+check('no idle host and GitHub available keeps every section on GitHub-hosted', () => {
+  assert.strictEqual(lanes(decide(cfg, { event: 'pull_request', idleQualified: 0 }).windows_matrix), allGithub);
 });
-check('the config never names a GitHub-hosted label', () => {
-  assert.ok(!/windows-20\d\d"|ubuntu-\d\d\.\d\d/.test(JSON.stringify(cfg).replace(cfg.blacksmith_windows, '')));
+check('Blacksmith is out of the pool', () => {
+  const cfgNoComment = { ...cfg }; delete cfgNoComment._comment;
+  assert.ok(!/blacksmith/i.test(JSON.stringify(cfgNoComment)));
+  assert.ok(!/blacksmith/i.test(JSON.stringify(decide(cfg, { event: 'pull_request', idleQualified: 0 }))));
+});
+check('the pool names GitHub-hosted, qualified self-hosted, and WarpBuild', () => {
+  assert.strictEqual(cfg.github_windows, 'windows-2025');
+  assert.deepStrictEqual(cfg.qualified_windows, ['self-hosted', 'Windows', 'X64', 'ai-devops-windows-qualified']);
+  assert.strictEqual(cfg.warpbuild_windows, 'warp-custom-warpbuild-win2022-canary');
 });
 check('every section is planned exactly once', () => {
   for (const i of [0, 2, 99]) {
@@ -36,16 +45,36 @@ check('every section is planned exactly once', () => {
 });
 check('one idle qualified host takes exactly one pull-request section', () => {
   const p = decide(cfg, { event: 'pull_request', idleQualified: 1 });
-  assert.strictEqual(lanes(p.windows_matrix), 'qualified-self-hosted' + allBlacksmith.slice('blacksmith'.length));
+  assert.strictEqual(lanes(p.windows_matrix), 'qualified-self-hosted' + allGithub.slice('github-hosted'.length));
   assert.deepStrictEqual(p.windows_matrix[0].runs_on, cfg.qualified_windows);
-  assert.strictEqual(p.windows_matrix[1].runs_on, cfg.blacksmith_windows);
+  assert.strictEqual(p.windows_matrix[1].runs_on, cfg.github_windows);
 });
 check('manual runs keep one qualified host free for the reviewer proof', () => {
-  assert.strictEqual(decide(cfg, { event: 'workflow_dispatch', idleQualified: 1 }).windows_matrix.filter(x => x.lane !== 'blacksmith').length, 0);
-  assert.strictEqual(decide(cfg, { event: 'workflow_dispatch', idleQualified: 2 }).windows_matrix.filter(x => x.lane !== 'blacksmith').length, 1);
+  assert.strictEqual(decide(cfg, { event: 'workflow_dispatch', idleQualified: 1 }).windows_matrix.filter(x => x.lane === 'qualified-self-hosted').length, 0);
+  assert.strictEqual(decide(cfg, { event: 'workflow_dispatch', idleQualified: 2 }).windows_matrix.filter(x => x.lane === 'qualified-self-hosted').length, 1);
 });
 check('more idle hosts than sections never over-assigns', () => {
-  assert.strictEqual(decide(cfg, { event: 'pull_request', idleQualified: 50 }).windows_matrix.filter(x => x.lane !== 'blacksmith').length, cfg.windows_sections);
+  assert.strictEqual(decide(cfg, { event: 'pull_request', idleQualified: 50 }).windows_matrix.filter(x => x.lane === 'qualified-self-hosted').length, cfg.windows_sections);
+});
+check('WarpBuild is the final option only when GitHub is full and ENVY is gone', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: 0, githubFull: true });
+  assert.strictEqual(lanes(p.windows_matrix), allWarp);
+  const mixed = decide(cfg, { event: 'pull_request', idleQualified: 1, githubFull: true });
+  assert.strictEqual(lanes(mixed.windows_matrix), 'qualified-self-hosted,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild');
+  const notFull = decide(cfg, { event: 'pull_request', idleQualified: 0, githubFull: false });
+  assert.ok(notFull.windows_matrix.every(w => w.lane === 'github-hosted'));
+});
+check('github_windows_limit overflows the remainder to WarpBuild', () => {
+  const limited = Object.assign({}, cfg, { github_windows_limit: 2 });
+  const p = decide(limited, { event: 'pull_request', idleQualified: 0 });
+  assert.strictEqual(lanes(p.windows_matrix), 'github-hosted,github-hosted,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild');
+});
+check('a foreign head never reaches the self-hosted pool or WarpBuild', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: 50, foreign: true });
+  assert.strictEqual(lanes(p.windows_matrix), allGithub);
+  for (const w of p.windows_matrix) {
+    assert.strictEqual(w.runs_on, cfg.github_windows);
+  }
 });
 
 function fakeCore() {
@@ -69,26 +98,31 @@ const lanesOut = core => lanes(JSON.parse(core.out.windows_matrix));
 
 (async () => {
   const cases = [
-    ['a failed pool lookup keeps every section on Blacksmith', { github: fakeGithub(), poolGithub: fakePool([], true) }, allBlacksmith],
-    ['a failed job lookup keeps every section on Blacksmith', { github: fakeGithub([], true), poolGithub: fakePool([envy(false)]) }, allBlacksmith],
-    ['no pool token keeps every section on Blacksmith', { github: fakeGithub(), poolGithub: null }, allBlacksmith],
-    ['an idle qualified host takes section 1', { github: fakeGithub(), poolGithub: fakePool([envy(false)]) }, 'qualified-self-hosted' + allBlacksmith.slice('blacksmith'.length)],
+    ['a failed pool lookup keeps every section on GitHub-hosted', { github: fakeGithub(), poolGithub: fakePool([], true) }, allGithub],
+    ['a failed job lookup keeps every section on GitHub-hosted', { github: fakeGithub([], true), poolGithub: fakePool([envy(false)]) }, allGithub],
+    ['no pool token keeps every section on GitHub-hosted', { github: fakeGithub(), poolGithub: null }, allGithub],
+    ['an idle qualified host takes section 1', { github: fakeGithub(), poolGithub: fakePool([envy(false)]) }, 'qualified-self-hosted' + allGithub.slice('github-hosted'.length)],
     ['a job already waiting for the qualified host claims it first',
-      { github: fakeGithub([{ status: 'queued', labels: ['self-hosted', cfg.qualified_label] }]), poolGithub: fakePool([envy(false)]) }, allBlacksmith],
+      { github: fakeGithub([{ status: 'queued', labels: ['self-hosted', cfg.qualified_label] }]), poolGithub: fakePool([envy(false)]) }, allGithub],
     ['busy, offline and unqualified hosts are never used',
-      { github: fakeGithub(), poolGithub: fakePool([envy(true), envy(false, ['self-hosted', 'ai-devops-windows']), { ...envy(false), status: 'offline' }]) }, allBlacksmith],
+      { github: fakeGithub(), poolGithub: fakePool([envy(true), envy(false, ['self-hosted', 'ai-devops-windows']), { ...envy(false), status: 'offline' }]) }, allGithub],
   ];
   for (const [label, deps, expected] of cases) {
     const core = fakeCore();
     await run({ ...deps, context: ctx, core, cfg });
     check(label, () => assert.strictEqual(lanesOut(core), expected));
   }
-  for (const [label, head] of [['a fork pull request never reaches a self-hosted host', { repo: { full_name: 'stranger/ai-devops' } }],
-                               ['a pull request from a deleted fork never reaches a self-hosted host', { repo: null }]]) {
+  for (const [label, head] of [['a fork pull request never reaches a self-hosted host or WarpBuild', { repo: { full_name: 'stranger/ai-devops' } }],
+                               ['a pull request from a deleted fork never reaches a self-hosted host or WarpBuild', { repo: null }]]) {
     const core = fakeCore();
     const forkCtx = { ...ctx, payload: { pull_request: { head } } };
     await run({ github: fakeGithub(), poolGithub: fakePool([envy(false)]), context: forkCtx, core, cfg });
-    check(label, () => assert.strictEqual(lanesOut(core), allBlacksmith));
+    check(label, () => assert.strictEqual(lanesOut(core), allGithub));
+  }
+  {
+    const core = fakeCore();
+    await run({ github: fakeGithub(), poolGithub: fakePool([]), context: ctx, core, cfg, githubFull: true });
+    check('run() passes GitHub-full through to WarpBuild overflow', () => assert.strictEqual(lanesOut(core), allWarp));
   }
   if (failures) { console.error(`${failures} runner-router check(s) failed`); process.exit(1); }
   console.log('runner-router: all checks passed');

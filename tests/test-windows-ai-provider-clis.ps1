@@ -84,6 +84,47 @@ function sanitizeChildEnv(env2 = process.env) {
   if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
 }
 
+# Qwen 0.24.7 ships the sanitizer chunk minified on one line. The hardener must
+# patch that exact shape, the verifier must execute it, and an ambiguous bundle
+# (two declarations) must still be refused rather than guessed at.
+$minRoot = Join-Path ([IO.Path]::GetTempPath()) ("ai-devops-qwen-minified-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+  $minChunks = Join-Path $minRoot 'lib\chunks'
+  $minNode = Join-Path $minRoot 'node'
+  [void](New-Item -ItemType Directory -Path $minChunks, $minNode)
+  $minBundle = 'import{PRIVATE_ACP_CAPABILITY_ENV}from"./chunk-SLD7H2FA.js";init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=["QWEN_SERVER_TOKEN","QWEN_DAEMON_TOKEN","QWEN_CODE_EXTERNAL_TOOL_GUARD_TOKEN",PRIVATE_ACP_CAPABILITY_ENV];var INTERNAL_SECRET_ENV_VAR_NAMES=new Set(INTERNAL_SECRET_ENV_VARS.map(name=>name.toUpperCase()));function isInternalSecretEnvVar(name){return INTERNAL_SECRET_ENV_VAR_NAMES.has(name.toUpperCase())}__name(isInternalSecretEnvVar,"isInternalSecretEnvVar");function sanitizeChildEnv(env=process.env){const sanitized={...env};for(const key of Object.keys(sanitized)){if(isInternalSecretEnvVar(key)){delete sanitized[key]}}return sanitized}__name(sanitizeChildEnv,"sanitizeChildEnv");export{INTERNAL_SECRET_ENV_VARS,isInternalSecretEnvVar,sanitizeChildEnv};'
+  $minFile = Join-Path $minChunks 'chunk-LFKUPU57.js'
+  [IO.File]::WriteAllText($minFile, $minBundle, [Text.UTF8Encoding]::new($false))
+  Copy-Item -LiteralPath (Get-Command node -ErrorAction Stop).Source -Destination (Join-Path $minNode 'node.exe')
+  Assert (-not (Test-QwenChildEnvironmentHardened -Root $minRoot)) 'an unpatched minified 0.24 sanitizer must report that hardening is due'
+  [void](Set-QwenChildEnvironmentHardening -Root $minRoot)
+  Assert (Test-QwenChildEnvironmentHardened -Root $minRoot) 'the minified 0.24 sanitizer must be patched and behaviorally verified'
+  Assert ((Get-Content -Raw -LiteralPath $minFile).Contains('var INTERNAL_SECRET_ENV_VARS=["BAILIAN_CODING_PLAN_API_KEY","QWEN_SERVER_TOKEN"')) 'the minified patch must insert the credential inside the sanitizer array'
+  [IO.File]::WriteAllText($minFile, $minBundle.Replace('init_esbuild_shims();', 'init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=["X"];'), [Text.UTF8Encoding]::new($false))
+  $refused = $false
+  try { [void](Set-QwenChildEnvironmentHardening -Root $minRoot) } catch { $refused = $_.Exception.Message -like '*refusing an unverified patch*' }
+  Assert $refused 'an ambiguous sanitizer bundle with two declarations must be refused, not patched'
+  # Fail-open ordering: the first declaration already lists the key, the
+  # effective (last) one does not. It must neither pass the check nor be skipped.
+  [IO.File]::WriteAllText($minFile, $minBundle.Replace('init_esbuild_shims();', 'init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=["BAILIAN_CODING_PLAN_API_KEY"];'), [Text.UTF8Encoding]::new($false))
+  Assert (-not (Test-QwenChildEnvironmentHardened -Root $minRoot)) 'an ambiguous bundle whose first declaration lists the key must not count as hardened'
+  $refused = $false
+  try { [void](Set-QwenChildEnvironmentHardening -Root $minRoot) } catch { $refused = $_.Exception.Message -like '*refusing an unverified patch*' }
+  Assert $refused 'an ambiguous bundle whose first declaration lists the key must be refused, not skipped'
+  $verifyOut = & (Join-Path $minNode 'node.exe') (Join-Path $root 'tools\verify-qwen-child-env-sanitizer.mjs') $minRoot 2>&1
+  Assert ($LASTEXITCODE -ne 0 -and "$verifyOut" -match 'expected one sanitizer declaration') 'the behavioral verifier must refuse a bundle with two sanitizer declarations'
+  [IO.File]::WriteAllText($minFile, $minBundle.Replace('init_esbuild_shims();', 'init_esbuild_shims();function sanitizeChildEnv(env){const sanitized={};return sanitized}__name(sanitizeChildEnv,"sanitizeChildEnv");').Replace('["QWEN_SERVER_TOKEN"', '["BAILIAN_CODING_PLAN_API_KEY","QWEN_SERVER_TOKEN"'), [Text.UTF8Encoding]::new($false))
+  $verifyOut = & (Join-Path $minNode 'node.exe') (Join-Path $root 'tools\verify-qwen-child-env-sanitizer.mjs') $minRoot 2>&1
+  Assert ($LASTEXITCODE -ne 0 -and "$verifyOut" -match 'expected at most one sanitizeChildEnv') 'the behavioral verifier must refuse a bundle with a decoy sanitizer function'
+  # Whitespace variants are still the same declaration to JavaScript.
+  [IO.File]::WriteAllText($minFile, $minBundle.Replace('init_esbuild_shims();', 'init_esbuild_shims();var  INTERNAL_SECRET_ENV_VARS = ["X"];'), [Text.UTF8Encoding]::new($false))
+  $refused = $false
+  try { [void](Set-QwenChildEnvironmentHardening -Root $minRoot) } catch { $refused = $_.Exception.Message -like '*refusing an unverified patch*' }
+  Assert $refused 'a whitespace-variant second declaration must be refused'
+} finally {
+  if (Test-Path -LiteralPath $minRoot) { Remove-Item -LiteralPath $minRoot -Recurse -Force }
+}
+
 # --- exact version policy (issue #251) -------------------------------------
 # "A provider that runs" is not the contract. Both Grok wrappers are qualified
 # against one exact build, so the Windows installer must detect any other build

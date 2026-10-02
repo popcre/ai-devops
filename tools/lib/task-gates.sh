@@ -15,7 +15,12 @@ TG_LIB_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # from config/task-gates.json: the gate contract may grow classes freely without
 # silently changing a CI output that other jobs branch on.
 # ---------------------------------------------------------------------------
-tg_legacy_classify() {
+tg_legacy_classify() (
+  # Callers often pipe into grep -q, which exits on first match and SIGPIPEs
+  # this function mid-print. pipefail then reports failure even when the
+  # classification was correct. Ignore PIPE so a short-circuit consumer
+  # cannot turn a true result into a false negative (Linux CI flake).
+  trap "" PIPE
   local event="$1" path
   local prose_only=true skills=false code=false workflow=false
   local powershell=false test_fixtures=false reviewer=false count=0 run_long=true
@@ -60,7 +65,7 @@ tg_legacy_classify() {
   printf 'test_fixtures=%s\n' "$test_fixtures"
   printf 'reviewer=%s\n' "$reviewer"
   printf 'run_long=%s\n' "$run_long"
-}
+)
 
 # ---------------------------------------------------------------------------
 # Repository identity. A linked worktree shares its clone's origin, so a

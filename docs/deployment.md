@@ -103,6 +103,9 @@ cd /worksp/ai-devops
    worktrees retire themselves daily on every agent machine. Machines without a
    shared-db checkout schedule the sweep anyway; the run exits 0 with nothing
    to reap until one appears. All safety refusals live in shared-db's reaper.
+   CI **watchdog** timers (queue-slow, runner-pool, drift) belong to the
+   **watchdog duty pool** — see [`watchdog-duty-pool.md`](watchdog-duty-pool.md)
+   for claim/lease rotation and how to add a machine; never paid Blacksmith.
 10. Records exact source, config, owned symlinks, config files, managed
     skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
 11. Runs `ai-devops doctor`.

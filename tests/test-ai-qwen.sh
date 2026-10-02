@@ -23,6 +23,9 @@ export AI_QWEN_CALLER=codex
 export TMPDIR_FOR_TEST="$TMP"
 export AI_QWEN_TEST_DIR="$TMP" AI_QWEN_HOME="$TMP/qwen-home"
 export AI_QWEN_SANITIZER_ROOT="$TMP/qwen-install"
+# Default the suite to the container-sandbox review path (#974). Reviewer-only
+# (no Docker/podman) is covered in its own section with AI_QWEN_CONTAINER_SANDBOX=0.
+export AI_QWEN_CONTAINER_SANDBOX=1
 mkdir -p "$AI_QWEN_SANITIZER_ROOT/bin" "$AI_QWEN_SANITIZER_ROOT/lib/chunks"
 printf 'fixture launcher\n' > "$AI_QWEN_SANITIZER_ROOT/bin/qwen.js"
 cat > "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js" <<'EOF'
@@ -485,6 +488,16 @@ cp "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js" "$TMP/bad-sanitizer.js"
 sed 's/delete sanitized\[key\];/void key;/' "$TMP/bad-sanitizer.js" > "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js"
 check 'behavioral verifier rejects a sanitizer that retains the credential' "! '$AI_QWEN_SANITIZER_ROOT/node/bin/node' '$REPO_ROOT/tools/verify-qwen-child-env-sanitizer.mjs' '$AI_QWEN_SANITIZER_ROOT'"
 mv "$TMP/bad-sanitizer.js" "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js"
+# Qwen 0.24.7 ships the sanitizer minified on one line; the installer must
+# patch it and the verifier must execute it. Two declarations stay refused.
+MIN_ROOT="$TMP/qwen-minified"; mkdir -p "$MIN_ROOT/lib/chunks"; cp -R "$AI_QWEN_SANITIZER_ROOT/node" "$MIN_ROOT/node"
+MIN_BUNDLE='init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=["QWEN_SERVER_TOKEN","QWEN_DAEMON_TOKEN",PRIVATE_ACP_CAPABILITY_ENV];var INTERNAL_SECRET_ENV_VAR_NAMES=new Set(INTERNAL_SECRET_ENV_VARS.map(name=>name.toUpperCase()));function isInternalSecretEnvVar(name){return INTERNAL_SECRET_ENV_VAR_NAMES.has(name.toUpperCase())}__name(isInternalSecretEnvVar,"isInternalSecretEnvVar");function sanitizeChildEnv(env=process.env){const sanitized={...env};for(const key of Object.keys(sanitized)){if(isInternalSecretEnvVar(key)){delete sanitized[key]}}return sanitized}__name(sanitizeChildEnv,"sanitizeChildEnv");export{sanitizeChildEnv};'
+printf '%s\n' "$MIN_BUNDLE" > "$MIN_ROOT/lib/chunks/chunk-min.js"
+env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$MIN_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen >/dev/null 2>&1 \
+  && grep -Fq 'var INTERNAL_SECRET_ENV_VARS=["BAILIAN_CODING_PLAN_API_KEY","QWEN_SERVER_TOKEN"' "$MIN_ROOT/lib/chunks/chunk-min.js" \
+  && ok 'provider installer hardens the minified Qwen 0.24 sanitizer' || bad 'provider installer hardens the minified Qwen 0.24 sanitizer'
+printf '%s\n' "${MIN_BUNDLE/init_esbuild_shims();/init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=[\"X\"];}" > "$MIN_ROOT/lib/chunks/chunk-min.js"
+check 'provider installer refuses an ambiguous Qwen sanitizer bundle' "! env HOME='$TMP/installer-home' PATH='$STUB:$PATH' AI_QWEN_SANITIZER_ROOT='$MIN_ROOT' bash '$REPO_ROOT/bin/install-ai-provider-clis.sh' qwen"
 
 : > "$TMP/argv.txt"
 INITIAL_STARTED=$SECONDS
@@ -519,6 +532,7 @@ fi
 check 'review pins the stable Qwen 3.8 Max model' "grep -q -- '--model qwen3.8-max' '$TMP/argv.txt'"
 check 'review uses safe mode' "grep -q -- '--safe-mode' '$TMP/argv.txt'"
 check 'review runs under Qwen sandbox with full tools (#974)' "grep -q -- '--sandbox --approval-mode yolo' '$TMP/argv.txt' && ! grep -q -- '--exclude-tools' '$TMP/argv.txt' && ! grep -q -- '--approval-mode plan' '$TMP/argv.txt'"
+check 'review record announces sandbox containment' "run show review-1 | jq -e '.containment==\"sandbox\"'"
 check 'review has measured governed-review budgets' "grep -q -- '--max-session-turns 120' '$TMP/argv.txt' && grep -q -- '--max-tool-calls 120' '$TMP/argv.txt' && grep -q -- '--max-wall-time 60m' '$TMP/argv.txt'"
 check 'review never uses continue' "! grep -q -- '--continue' '$TMP/argv.txt'"
 check 'review prompt says it may run code and edit a disposable copy' "grep -q 'disposable, remote-less copy' '$TMP/prompt-copy' && grep -q 'edits are discarded' '$TMP/prompt-copy' && ! grep -qi 'read-only' '$TMP/prompt-copy'"
@@ -530,6 +544,27 @@ check 'review prompt requires the sealed packet first' "grep -q '.ai-review-qwen
 REVIEW_DIR="$(run show review-1 | jq -r .review_dir)"
 check 'ordinary clone review uses a private copy' "[ \"\$(cd '$REVIEW_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
 check 'private review copy owns its git controls' "test -d '$REVIEW_DIR/.git'"
+
+# Reviewer-only path: no Docker/podman, so no container sandbox and no
+# shell/write/edit. Sessions must still get a usable opinion and a clear announce.
+echo review > "$TMP/mode"; : > "$TMP/argv.txt"
+export AI_QWEN_CONTAINER_SANDBOX=0
+RO_OUT="$(run new reviewer-only-1 --prompt 'opinion please' 2>&1)"; RO_RC=$?
+export AI_QWEN_CONTAINER_SANDBOX=1
+[ "$RO_RC" -eq 0 ] || printf '  diagnostic: reviewer-only rc=%s: %s\n' "$RO_RC" "$RO_OUT"
+check 'reviewer-only review completes without Docker/podman' "test '$RO_RC' -eq 0"
+check 'reviewer-only omits container sandbox and strips shell/write/edit' "! grep -q -- '--sandbox' '$TMP/argv.txt' && grep -q -- '--approval-mode plan' '$TMP/argv.txt' && grep -q -- '--exclude-tools shell,write,edit' '$TMP/argv.txt'"
+check 'reviewer-only prompt announces the mode and forbids builds/edits' "grep -q 'REVIEWER-ONLY' '$TMP/prompt-copy' && grep -q 'cannot run shell' '$TMP/prompt-copy' && ! grep -q 'edits are discarded' '$TMP/prompt-copy'"
+check 'reviewer-only start note tells the caller why there is no container' "printf '%s' '$RO_OUT' | grep -q 'REVIEWER-ONLY (no Docker/podman)'"
+check 'reviewer-only record stores containment' "run show reviewer-only-1 | jq -e '.containment==\"reviewer-only\"'"
+check 'doctor announces reviewer-only when no container sandbox' "AI_QWEN_CONTAINER_SANDBOX=0 run doctor 2>/dev/null | grep -q 'REVIEWER-ONLY'"
+check 'doctor announces sandbox when a container sandbox exists' "AI_QWEN_CONTAINER_SANDBOX=1 run doctor 2>/dev/null | grep -q 'safe mode + sandbox + tools'"
+export AI_QWEN_CONTAINER_SANDBOX=0
+RO_ASK_OUT="$(run ask reviewer-only-1 --prompt 'follow up' 2>&1)"; RO_ASK_RC=$?
+export AI_QWEN_CONTAINER_SANDBOX=1
+[ "$RO_ASK_RC" -eq 0 ] || printf '  diagnostic: reviewer-only ask rc=%s: %s\n' "$RO_ASK_RC" "$RO_ASK_OUT"
+check 'reviewer-only follow-up completes without Docker/podman' "test '$RO_ASK_RC' -eq 0"
+check 'reviewer-only follow-up prompt matches stripped tools' "grep -q 'REVIEWER-ONLY' '$TMP/prompt-copy' && grep -q 'cannot run shell' '$TMP/prompt-copy' && ! grep -q 'edits are discarded' '$TMP/prompt-copy'"
 
 FIRST_ASK_OUT="$(run ask review-1 --prompt 'follow up' 2>&1)"; FIRST_ASK_RC=$?
 [ "$FIRST_ASK_RC" -eq 0 ] || printf '  diagnostic: first follow-up: %s\n' "$FIRST_ASK_OUT"
