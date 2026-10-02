@@ -1362,15 +1362,35 @@ check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 check "pool_passes_max_turns_only_to_grok" "grep -q 'qwen)  RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -q 'gemini) RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -q 'muse)  RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -Fq '[ -z \"\$RUNNER_MAX_TURNS\" ] || RUNNER_ARGS+=(--max-turns' '$POOL'"
 POOLTMP="$(mktemp -d)"
 mkdir -p "$POOLTMP/fakerepo"
-( cd "$POOLTMP/fakerepo" && git init -q && printf '.ai/\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm init && git remote add origin 'https://user:p@ss@GitHub.com/org/repo.git' )
+( cd "$POOLTMP/fakerepo" && git init -q && printf '.ai/\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm init && printf 'x\n' > x && git add x && git -c user.email=t@t -c user.name=t commit -qm second && git remote add origin 'https://user:p@ss@GitHub.com/org/repo.git' )
 FAKE_HEAD="$(git -C "$POOLTMP/fakerepo" rev-parse HEAD)"
+FAKE_BASE="$(git -C "$POOLTMP/fakerepo" rev-parse HEAD~1)"
 cat > "$POOLTMP/packet" <<'EOF'
 #!/usr/bin/env bash
+# resolve emits a packet identity. JSON mode (default) exercises the pool's
+# field-wise identity gate; POOL_IDENTITY_MODE=plain keeps the legacy
+# non-JSON strict byte-compare fallback under test. The target tip flips
+# from POOL_ID_TGT_BEFORE to POOL_ID_TGT_AFTER once the runner touches
+# ./flip, modelling a shared target ref that moved while the review ran.
 case "$1" in
-  resolve) if [ -f "$(dirname "$0")/flip" ]; then printf 'identity-after\n'; else printf 'identity-before\n'; fi ;;
+  resolve)
+    if [ "${POOL_IDENTITY_MODE:-json}" = plain ]; then
+      if [ -f "$(dirname "$0")/flip" ]; then printf 'identity-after\n'; else printf 'identity-before\n'; fi
+      exit 0
+    fi
+    repo="${POOL_ID_REPO:-$(pwd)}"
+    head="${POOL_ID_HEAD:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
+    base="${POOL_ID_BASE:-0000000000000000000000000000000000000000}"
+    tgt="${POOL_ID_TGT_BEFORE:-$head}"
+    digest="${POOL_ID_DIGEST:-deadbeef}"
+    if [ -f "$(dirname "$0")/flip" ]; then tgt="${POOL_ID_TGT_AFTER:-$head}"; digest="${POOL_ID_DIGEST_AFTER:-$digest}"; fi
+    printf '{"schema_version":1,"repository":"%s","base":"%s","head":"%s","target":"%s","target_ref":"origin/main","merge_base":"%s","source_digest":"%s","rule":"merge-base of HEAD with origin/main (no --base was given)","requested_base":null}\n' \
+      "$repo" "$base" "$head" "$tgt" "$base" "$digest"
+    ;;
   *) exit 0 ;;
 esac
 EOF
+export_pool_id(){ export POOL_ID_REPO="$PWD" POOL_ID_HEAD="$FAKE_HEAD" POOL_ID_BASE="$FAKE_BASE" POOL_ID_DIGEST="deadbeef" POOL_IDENTITY_MODE="${1:-json}" POOL_ID_TGT_BEFORE="${2:-}" POOL_ID_TGT_AFTER="${3:-}"; }
 cat > "$POOLTMP/lifecycle" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
@@ -1473,7 +1493,7 @@ check "pool_muse_keep_sandbox_short_circuits_the_release" "[ '$RC_KEEP' -eq 0 ] 
 DEL_AFTER_FAIL="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
 check "pool_muse_failed_verdict_retains_the_session" "[ '$RC_RELFAIL' -ne 0 ] && [ '$DEL_AFTER_FAIL' -eq '$DEL_BASE' ]"
 rm -f "$POOLTMP/flip"
-( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" POOL_RUNNER_MODE=drift bash "$POOL" muse final-check ) > "$POOLTMP/out-reldrift" 2>&1; RC_RELDRIFT=$?
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_HEAD" "$FAKE_BASE" && AI_REVIEW_SANDBOX_DIR="$SBXROOT" POOL_RUNNER_MODE=drift bash "$POOL" muse final-check ) > "$POOLTMP/out-reldrift" 2>&1; RC_RELDRIFT=$?
 DEL_AFTER_DRIFT="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
 check "pool_muse_stale_review_retains_the_session" "[ '$RC_RELDRIFT' -ne 0 ] && [ '$DEL_AFTER_DRIFT' -eq '$DEL_BASE' ]"
 rm -f "$POOLTMP/flip"
@@ -1497,9 +1517,29 @@ check "pool_adapter_binds_head_only_before_the_final_verdict" "[ '$RC_HAF' -ne 0
 check "pool_adapter_floor_counts_only_text_before_the_final_verdict" "[ '$RC_PO' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-po'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" qwen security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
 check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
+# A rewritten target tip (moved BACKWARD to a non-descendant) is real drift
+# and must still destroy the paid report.
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_HEAD" "$FAKE_BASE" && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
 rm -f "$POOLTMP/flip"
-check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift'"
+check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift' && ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '\.stale$'"
+STALE_BEFORE_FORWARD="$(ls "$POOLTMP/fakerepo/.ai/reviews/" 2>/dev/null | grep -c '\.stale$' || true)"
+# A target tip that only moved FORWARD (old tip is an ancestor of the new
+# tip) leaves the reviewed base..head diff byte-identical: the completed
+# report must survive (#1254 — origin/main moved while the paid round ran).
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_BASE" "$FAKE_HEAD" && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-forward" 2>&1; RC_FORWARD=$?
+rm -f "$POOLTMP/flip"
+FORWARD_REPORT="$(tail -1 "$POOLTMP/out-forward" 2>/dev/null)"
+check "pool_adapter_keeps_a_paid_report_across_a_forward_target_move" "[ '$RC_FORWARD' -eq 0 ] && [ -f '$FORWARD_REPORT' ] && grep -q APPROVE '$FORWARD_REPORT'"
+check "pool_adapter_forward_move_leaves_no_stale_report" "[ \"\$(ls '$POOLTMP/fakerepo/.ai/reviews/' 2>/dev/null | grep -c '\\.stale\\$' || true)\" -eq '$STALE_BEFORE_FORWARD' ]"
+# A changed digest under a forward-moving target is still refused: only the
+# tip gains tolerance, never the reviewed content.
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_BASE" "$FAKE_HEAD" && POOL_RUNNER_MODE=drift POOL_ID_DIGEST_AFTER=feedface bash "$POOL" qwen security-review ) > "$POOLTMP/out-fwdigest" 2>&1; RC_FWDIGEST=$?
+rm -f "$POOLTMP/flip"
+check "pool_adapter_forward_move_never_tolerates_a_changed_digest" "[ '$RC_FWDIGEST' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-fwdigest'"
+# A non-JSON identity keeps the strict byte-compare fallback.
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id plain && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-plaindrift" 2>&1; RC_PLAINDRIFT=$?
+rm -f "$POOLTMP/flip"
+check "pool_adapter_plain_identity_keeps_the_strict_compare" "[ '$RC_PLAINDRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-plaindrift'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=credit bash "$POOL" qwen security-review ) > "$POOLTMP/out-credit" 2>&1; RC_CREDIT=$?
 check "pool_adapter_passes_out_of_credit_through" "[ '$RC_CREDIT' -eq 92 ] && grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=qwen code=insufficient_quota' '$POOLTMP/out-credit' && grep -q '^OUT OF CREDIT: ' '$POOLTMP/out-credit'"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok visual-review ) > "$POOLTMP/out-visual" 2>&1; RC_VISUAL=$?
