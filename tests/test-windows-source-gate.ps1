@@ -33,7 +33,8 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   Assert ($identity.source_digest -ceq $sourceDigest) 'fixture review source identity differs'
   $report=Join-Path $reviewDir 'approved-review.md'
   $operation = if ($LegacyMigration) { 'Approved legacy-managed-launcher-refresh.' } elseif ($FirstInstall) { 'Approved first-managed-install.' } elseif ($RecoverLaunchers) { 'Approved partial-managed-launcher-recovery.' } else { 'Approved source update.' }
-  @('# Review',('| reviewed commit | ' + [char]96 + $Target + [char]96 + ' |'),('| source digest | ' + [char]96 + $sourceDigest + [char]96 + ' |'),$operation,'## Verdict','APPROVE') | Set-Content -LiteralPath $report -Encoding ASCII
+  $operationRow = if ($operation -match '^Approved ((legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery))\.$') { @('| operation | ' + [char]96 + $Matches[1] + [char]96 + ' |') } else { @() }
+  @(@('# Review',('| reviewed commit | ' + [char]96 + $Target + [char]96 + ' |'),('| source digest | ' + [char]96 + $sourceDigest + [char]96 + ' |')) + $operationRow + @($operation,'## Verdict','APPROVE')) | Set-Content -LiteralPath $report -Encoding ASCII
   $reportHash=(Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
   $bashReport=(& $bash -c 'cygpath -u -- "$1"' 'ai-devops' $report).Trim()
   $stateDir=Join-Path (Split-Path -Parent $Fixture.Launcher) ('review-lifecycle\runs\' + $identity.repository_key + '\codex\codex')

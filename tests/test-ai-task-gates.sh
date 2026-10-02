@@ -71,6 +71,11 @@ make_approved_report(){
   report="$dir/.ai/reviews/codex-final-check-test.md"
   printf '# Exact review\n\n| reviewed commit | %s%s%s |\n| source digest | %s%s%s |\n\n## Result\n\nApproved fixture source and routes.\nApproved %s.\n\n## Verdict\nAPPROVE\n' \
     "$(printf '\140')" "$target" "$(printf '\140')" "$(printf '\140')" "$digest" "$(printf '\140')" "$operation" > "$report"
+  case "$operation" in
+    legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery)
+      # The review wrapper records the requested operation in the report table.
+      sed -i "/^| source digest | /a | operation | $(printf '\140')$operation$(printf '\140') |" "$report" ;;
+  esac
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
   key="$("$ROOT/bin/ai-review-lifecycle" identity "$dir" | jq -r .repository_key)" || return 1
   state_dir="$AI_REVIEW_LIFECYCLE_DIR/runs/$key/codex/codex"
@@ -356,6 +361,21 @@ jq --arg hash "$first_hash" '.report_sha256=$hash' "$first_lifecycle" > "$TMP/fi
 mv "$TMP/first-lifecycle-updated" "$first_lifecycle"
 check 'mentioning a sensitive install mode is not approval' \
   "rc 3 '$TMP/first-install' authorize-install $first_proof --first-install"
+# A report that also approves a sibling operation, or records no operation or a
+# different one, must not authorize the requested operation (issue #658).
+for op_case in sibling missing-row other-row; do
+  cp "$TMP/first-report-backup" "$first_report"
+  case "$op_case" in
+    sibling) sed -i 's/^Approved first-managed-install\.$/&\nApproved legacy-managed-launcher-refresh./' "$first_report" ;;
+    missing-row) sed -i '/^| operation | /d' "$first_report" ;;
+    other-row) sed -i 's/^| operation | .*$/| operation | `partial-managed-launcher-recovery` |/' "$first_report" ;;
+  esac
+  op_hash="$(sha256sum "$first_report" | cut -d' ' -f1)"
+  jq --arg hash "$op_hash" '.report_sha256=$hash' "$first_lifecycle" > "$TMP/first-lifecycle-updated"
+  mv "$TMP/first-lifecycle-updated" "$first_lifecycle"
+  check "install operation binding refuses $op_case report" \
+    "rc 3 '$TMP/first-install' authorize-install $first_proof --first-install"
+done
 cp "$TMP/first-report-backup" "$first_report"
 first_hash="$(sha256sum "$first_report" | cut -d' ' -f1)"
 jq --arg hash "$first_hash" '.report_sha256=$hash' "$first_lifecycle" > "$TMP/first-lifecycle-updated"

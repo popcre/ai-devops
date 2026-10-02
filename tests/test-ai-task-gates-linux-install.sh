@@ -187,7 +187,7 @@ cp -a "$TMP/state-after-protected-finalize" "$TMP/state"
 # A genuinely absent managed installation has its own reviewed first-install
 # operation. A foreign launcher cannot be swapped into that pending grant.
 rm -f "$TMP/bin/ai-task-gates" "$TMP/etc/install-manifest.tsv" "$TMP/state/install-completions/last.json"
-printf '# Review\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\nApproved first-managed-install.\n\n## Verdict\nAPPROVE\n' "$protected" "$digest" > "$report"
+printf '# Review\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n| operation | `first-managed-install` |\n\nApproved first-managed-install.\n\n## Verdict\nAPPROVE\n' "$protected" "$digest" > "$report"
 report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
 jq -nc --arg h "$protected" --arg d "$digest" --arg p "$report" --arg s "$report_hash" \
   '{status:"completed",verdict:"APPROVE",stale:false,head:$h,source_digest:$d,report_path:$p,report_sha256:$s}' > "$AI_REVIEW_LIFECYCLE_DIR/runs/$key/codex/codex/approved.json"
@@ -211,7 +211,7 @@ expect_ok 'first managed install finalizes after receipt publication' gate final
 
 # A pre-receipt symlink needs a separate same-commit migration review.
 rm -f "$TMP/etc/install-manifest.tsv" "$TMP/state/install-completions/last.json"
-printf '# Review\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\nApproved legacy-managed-launcher-refresh.\n\n## Verdict\nAPPROVE\n' "$protected" "$digest" > "$report"
+printf '# Review\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n| operation | `legacy-managed-launcher-refresh` |\n\nApproved legacy-managed-launcher-refresh.\n\n## Verdict\nAPPROVE\n' "$protected" "$digest" > "$report"
 report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
 jq -nc --arg h "$protected" --arg d "$digest" --arg p "$report" --arg s "$report_hash" \
   '{status:"completed",verdict:"APPROVE",stale:false,head:$h,source_digest:$d,report_path:$p,report_sha256:$s}' > "$AI_REVIEW_LIFECYCLE_DIR/runs/$key/codex/codex/approved.json"

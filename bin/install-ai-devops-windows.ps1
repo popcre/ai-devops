@@ -346,6 +346,14 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
     if ($RecoverLaunchers -and -not ($lines | Where-Object { $_ -ceq 'Approved partial-managed-launcher-recovery.' })) {
         throw 'Review report did not approve partial managed launcher recovery.'
     }
+    $requestedOperation = if ($LegacyMigration) { 'legacy-managed-launcher-refresh' } elseif ($FirstInstall) { 'first-managed-install' } elseif ($RecoverLaunchers) { 'partial-managed-launcher-recovery' } else { '' }
+    if ($requestedOperation) {
+        $siblingApprovals = @('legacy-managed-launcher-refresh','first-managed-install','partial-managed-launcher-recovery','stale-linux-manifest-recovery') | Where-Object { $_ -cne $requestedOperation } | Where-Object { $sibling = 'Approved ' + $_ + '.'; $lines | Where-Object { $_ -ceq $sibling } }
+        $operationRows = @($lines | Where-Object { $_.StartsWith('| operation | ') })
+        if ($siblingApprovals -or $operationRows.Count -ne 1 -or $operationRows[0] -cne ('| operation | ' + [char]96 + $requestedOperation + [char]96 + ' |')) {
+            throw 'Review report does not bind exactly the requested installation operation.'
+        }
+    }
     $reviewRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $report))
     $expectedReportDir = Join-Path $reviewRoot '.ai\reviews'
     if (([IO.Path]::GetFullPath((Split-Path -Parent $report)).TrimEnd('\')) -ine ([IO.Path]::GetFullPath($expectedReportDir).TrimEnd('\'))) {
