@@ -148,7 +148,7 @@ never overwrites them. See [`configuration.md`](configuration.md).
 Every known reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex,
 DeepSeek, and StepFun—is known to preflight and the scoreboard so historical evidence stays
 readable; only providers `registered` in `config/reviewer-registry.json` (today
-Muse, Grok, Qwen, Gemini, DeepSeek, the Codex approval-gate wrapper, and StepFun on Ubuntu/Linux only, outside the allocator) receive reviews. Claude is absent from the pool (owner instruction 2026-09-30) and never receives a formal or assigned review. Unsupported metadata
+Muse, Grok, Qwen, Gemini, GLM, DeepSeek, the Codex approval-gate wrapper, and StepFun on Ubuntu/Linux only, outside the allocator) receive reviews. Claude is absent from the pool (owner instruction 2026-09-30) and never receives a formal or assigned review. Unsupported metadata
 is represented as missing, never invented. Scoreboard evidence is
 `current`, `stale`, or `unknown`; only a current verdict is usable. Packets seal
 each relative file name, byte length, and digest. `ai-review-sandbox` publishes

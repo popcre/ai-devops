@@ -2,15 +2,23 @@
 // Gives idle qualified self-hosted Windows hosts (EDGE-RUNN-ENVY and any other
 // host labelled ai-devops-windows-qualified) ordinary verify.yml Windows
 // sections as extra capacity. Every other section stays on Blacksmith, the
-// owner's 2026-09-23 lane for all verify jobs. run() never throws: any lookup
-// error keeps the all-Blacksmith plan, so routing can only add capacity and
-// never sends work back to the GitHub-hosted queue.
+// lane that always has capacity (owner ruling 2026-10-01: KEEP Blacksmith in
+// the pool until WarpBuild is fully up; USE Blacksmith for runs that would
+// otherwise get stuck). WarpBuild Azure BYOC is NOT routed here: it runs the
+// required suite as a non-blocking proof job (windows-offline-warpbuild-proof
+// in verify.yml) outside the required aggregate, so an unqueued WarpBuild pool
+// can never block a merge. run() never throws: any lookup error keeps the
+// all-Blacksmith plan, so routing can only add capacity and never sends work
+// back to the GitHub-hosted queue.
 
 function range(n) { return Array.from({ length: n }, (_, i) => i + 1); }
 
-function decide(cfg, { event, idleQualified }) {
+function decide(cfg, { event, idleQualified, foreign }) {
   const reserve = cfg.reserve_qualified_for_reviewer_events.includes(event) ? cfg.reserved_qualified_hosts : 0;
-  let selfHosted = Math.max(0, Math.min(cfg.windows_sections, (idleQualified || 0) - reserve));
+  // A foreign head never runs on our machines: not the self-hosted pool and
+  // not the WarpBuild BYOC VMs in our own Azure subscription. Both stay zero;
+  // every section falls through to Blacksmith.
+  let selfHosted = foreign ? 0 : Math.max(0, Math.min(cfg.windows_sections, (idleQualified || 0) - reserve));
   return {
     idle_qualified: idleQualified || 0,
     windows_matrix: range(cfg.windows_sections).map(section => {
@@ -40,8 +48,10 @@ async function countIdleQualified(poolGithub, context, cfg) {
 }
 
 // Code from another repository (a fork pull request) never runs on our own
-// machines. Missing secrets already hide the pool from forks; this makes the
-// rule explicit instead of incidental.
+// machines: neither the self-hosted pool nor the WarpBuild BYOC VMs in our own
+// Azure subscription. This check is defense in depth - the workflow's own
+// job-level `if` conditions are the primary guard and are not editable by the
+// router this job loads from the pull request's tree.
 function isForeignHead(context) {
   const head = context.payload && context.payload.pull_request && context.payload.pull_request.head;
   return !!head && (!head.repo || head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`);
@@ -49,7 +59,8 @@ function isForeignHead(context) {
 
 async function run({ github, poolGithub, context, core, cfg }) {
   let idle = 0;
-  if (isForeignHead(context)) {
+  const foreign = isForeignHead(context);
+  if (foreign) {
     core.info('Pull request head is outside this repository; every Windows section stays on Blacksmith.');
     poolGithub = null;
   }
@@ -59,7 +70,7 @@ async function run({ github, poolGithub, context, core, cfg }) {
     core.warning(`Qualified pool unknown (${error.message}); every Windows section stays on Blacksmith.`);
     idle = 0;
   }
-  const plan = decide(cfg, { event: context.eventName, idleQualified: idle });
+  const plan = decide(cfg, { event: context.eventName, idleQualified: idle, foreign });
   core.info(`idle_qualified=${plan.idle_qualified}`);
   for (const w of plan.windows_matrix) core.info(`windows section ${w.section} -> ${w.lane}`);
   core.setOutput('windows_matrix', JSON.stringify(plan.windows_matrix));

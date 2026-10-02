@@ -83,8 +83,10 @@ def inspect(path: pathlib.Path) -> list[str]:
         if path.name == "ai-blocker-watch" and stripped.startswith('prompt="ai-blocker-watch:') and stripped.endswith('"') and '$(gh' not in line:
             continue  # User-facing recovery text, not an executed command.
         if path.name == "ai-pr-wait" and stripped in {
-            "printf 'ai-pr-wait: a documentation-only pull request merges immediately with `gh pr merge --squash --admin`; no wait was started.\\n' >&2",
             'say "    gh run list --repo $REPO --event merge_group --limit 5"',
+            "printf 'ai-pr-wait: run `bin/ai-doc-safety` on the exact head worktree before `gh pr merge --squash --admin`; no wait was started.\\n' >&2",
+            "printf 'ai-pr-wait: doc-safety passed on this tree; a documentation-only pull request merges immediately with `gh pr merge --squash --admin`; no wait was started.\\n' >&2",
+            "printf 'ai-pr-wait: doc-safety FAILED on this tree; fix the named file before `gh pr merge --squash --admin`:\\n%s\\nno wait was started.\\n' \"$DOC_SAFETY_OUT\" >&2",
         }:
             continue  # Exact user-facing guidance; S2 removed its direct fallback.
         if DIRECT.search(line) or SDK.search(line) or ARG_ARRAY.search(line) or POWERSHELL_START.search(line) or HTTP.search(line) or CLI_ALIAS.search(line):

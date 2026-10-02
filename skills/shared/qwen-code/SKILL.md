@@ -22,26 +22,37 @@ worktrees. It deliberately rejects arbitrary flag forwarding.
 
 Run the command from Git Bash on Windows.
 
-## Reviews run in a disposable copy (not read-only)
+## Reviews run in a disposable copy
 
-Owner ruling (issue #974): no reviewer is read-only. `new` and review-mode
-`ask` combine:
+Every `new` and review-mode `ask` runs in a private, remote-less
+`ai-review-sandbox` snapshot. The wrapper refuses a review in the caller's
+checkout or any directory with a Git remote. A before/after content hash of the
+caller's checkout rejects the turn if the source tree changed.
 
-- A private, remote-less `ai-review-sandbox` snapshot as Qwen's only directory;
-  the wrapper refuses a writable review in the caller's checkout or in any
-  directory with a Git remote.
-- Qwen safe mode (no local hooks, extensions, skills, or MCP servers) plus
-  Qwen's `--sandbox`, with shell, write, and edit tools available so Qwen can
-  run builds and tests and try edits.
-- Reviewer edits are discarded after the turn (snapshot checkpoint and
-  restore), are never part of the pull request, and the sealed evidence
-  packet must still verify.
-- A before/after content hash of the caller's checkout: any change there
-  rejects the turn.
+Containment is announced in `ai-qwen doctor`, the start note, the prompt, and
+the session record's `containment` field. Do not block a Qwen opinion for
+missing Docker — check the announced mode instead.
+
+### Full review (Docker or Podman present)
+
+Owner ruling (issue #974): Qwen may run builds/tests and edit inside the
+snapshot. Uses Qwen safe mode plus `--sandbox` with shell, write, and edit.
+Edits are discarded after the turn and never enter the pull request. The sealed
+evidence packet must still verify.
+
+### REVIEWER-ONLY (no Docker/podman)
+
+When neither container runtime is installed, reviews still work. The wrapper
+drops `--sandbox` and excludes shell, write, and edit. Qwen reads the disposable
+copy and gives a written opinion with paths and line numbers. It cannot run
+builds or tests; if a conclusion would need one, it must return BLOCKED rather
+than guess. Start notes say `REVIEWER-ONLY (no Docker/podman)`. Install Docker
+or Podman later to get full sandbox reviews — no wrapper change needed.
 
 `doctor --live` is a tool-less qualification probe, not a review. Do not weaken
-any layer. If a Qwen release changes a flag, stop and re-qualify the wrapper
-against `qwen --help` and a hostile write canary.
+any layer that is active for the announced mode. If a Qwen release changes a
+flag, stop and re-qualify the wrapper against `qwen --help` and a hostile write
+canary.
 
 ## Continue the exact named session
 

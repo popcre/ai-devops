@@ -116,5 +116,74 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(self.observe()['state'], 'backoff')
 
 
+class ClassifyEventTests(unittest.TestCase):
+    """#1115: outage-side events never enter the code-defect stream."""
+
+    def test_credit_and_usage_limit_are_outage_not_code_defect(self):
+        cases = [
+            ('Your team has used all available credits or reached its monthly spending limit', 'credit'),
+            ('402 Payment Required: insufficient_quota - Your account has insufficient credits', 'credit'),
+            ('Insufficient Balance', 'credit'),
+            ('{"terminal":"usage-limit"}', 'usage-limit'),
+            ('You exceeded your current usage limit', 'usage-limit'),
+        ]
+        for text, expected_class in cases:
+            with self.subTest(text=text):
+                stream, failure_class = api.classify_event(text, 'grok')
+                self.assertEqual(stream, api.STREAM_OUTAGE)
+                self.assertEqual(failure_class, expected_class)
+                self.assertNotEqual(stream, api.STREAM_CODE)
+
+    def test_quota_and_capacity_are_outage_not_code_defect(self):
+        cases = [
+            'API error (status 429 Too Many Requests): Rate limit reached for requests per minute.',
+            '{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}',
+            'Throttling.RateQuota: Requests rate limit exceeded, please try again later.',
+            'You exceeded your current quota, please check your plan and billing details',
+            'allowance exhausted for this model',
+        ]
+        for text in cases:
+            with self.subTest(text=text):
+                stream, failure_class = api.classify_event(text, 'grok')
+                self.assertEqual((stream, failure_class), (api.STREAM_OUTAGE, 'capacity'))
+                self.assertNotEqual(stream, api.STREAM_CODE)
+
+    def test_bare_404_and_403_stay_code_config(self):
+        for text in ('HTTP 404 Not Found: model_not_found',
+                     'Error: 404 page not found',
+                     '403 Forbidden',
+                     'Request failed with status code 403'):
+            with self.subTest(text=text):
+                stream, failure_class = api.classify_event(text, 'muse')
+                self.assertEqual((stream, failure_class), (api.STREAM_CODE, 'code-config'))
+
+    def test_provider_down_is_outage(self):
+        for text in ('connection refused', 'Service Unavailable', 'HTTP 503',
+                     'Bad Gateway', 'ECONNRESET', 'upstream is unreachable'):
+            with self.subTest(text=text):
+                stream, failure_class = api.classify_event(text, 'grok')
+                self.assertEqual((stream, failure_class), (api.STREAM_OUTAGE, 'outage'))
+
+    def test_credit_beats_capacity_when_both_appear(self):
+        stream, failure_class = api.classify_event(
+            '403 rate limit: insufficient_quota out of credits', 'grok')
+        self.assertEqual((stream, failure_class), (api.STREAM_OUTAGE, 'credit'))
+
+    def test_classify_cli_scans_files_and_text(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(tmp, ignore_errors=True))
+        evidence = tmp / 'err.txt'
+        evidence.write_text('connection refused while contacting the model endpoint')
+        command = [sys.executable, str(MODULE), 'classify', 'grok',
+                   '--scan', str(evidence), '--text', 'reviewer failed']
+        output = subprocess.check_output(command, text=True)
+        result = json.loads(output)
+        self.assertEqual(result, {'stream': 'provider-outage', 'failure_class': 'outage'})
+
+    def test_qwen_insufficient_quota_is_capacity_not_credit(self):
+        stream, failure_class = api.classify_event('insufficient_quota', 'qwen')
+        self.assertEqual((stream, failure_class), (api.STREAM_OUTAGE, 'capacity'))
+
+
 if __name__ == '__main__':
     unittest.main()
