@@ -541,9 +541,9 @@ rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
 # ai-gh-wait
 AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --timeout-minutes 1 --interval 60 -- run view 1 >/dev/null 2>&1; rc=$?
 check 'wait refuses an interval below 300 seconds' "[ $rc -eq 3 ]"
-AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --interval 60 -- run view 1 >/dev/null 2>&1; rc=$?
+AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --interval 300 -- run view 1 >/dev/null 2>&1; rc=$?
 check 'wait requires an explicit --timeout-minutes deadline' "[ $rc -eq 3 ]"
-AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --timeout-minutes 0 --interval 60 -- run view 1 >/dev/null 2>&1; rc=$?
+AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --timeout-minutes 0 --interval 300 -- run view 1 >/dev/null 2>&1; rc=$?
 check 'wait refuses a zero deadline' "[ $rc -eq 3 ]"
 AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 FAKE_MODE=counter "$WAIT" --until-regex completed --interval 1 --timeout-minutes 1 -- run view 1 > "$TMP/wout" 2>/dev/null; rc=$?
 check 'wait exits 0 when the state matches' "[ $rc -eq 0 ] && grep -q completed '$TMP/wout' && [ \$(cat '$FAKE_COUNT') -eq 2 ]"

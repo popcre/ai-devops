@@ -51,6 +51,8 @@ CASES = [
     # voluntary registration OR issue-as-card is the correct close (#1183 c3)
     ("I registered a BlockerWatch wait on the PR; nothing is needed from you until it wakes me.", "pending", "correct"),
     ("PR #123 is the card; GitHub notifications are the reminder. Returning later.", "pending", "correct"),
+    # an unrelated completed reply mentioning a card must not become pending
+    ("Fixed and merged. Nothing is left to do here. The baseball card collection is fine too.", "control", "correct"),
     # a control that ends holding a wait is a false positive
     ("Merged and verified. Still waiting for the deploy run to finish before reporting.", "control", "false_positive"),
 ]

@@ -111,7 +111,8 @@ PENDING_MARKERS = (
     # "PR #123 is the card; GitHub notifications are the reminder."
     "registered a wait", "registered the wait", "ai-blocker-watch",
     "blocker-watch", "blockerwatch", "blocker watch",
-    "is the card", "as the card", "github notifications",
+    "issue is the card", "pr is the card", "as the card and return",
+    "github notifications are the reminder",
 )
 
 # Held-wait closes: ending a turn while promising to poll or watch is the
