@@ -60,15 +60,17 @@ function Set-QwenChildEnvironmentHardening {
   $declaration = [regex]::Match($content, 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
   if (-not $declaration.Success) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
   if (-not $declaration.Value.Contains('"BAILIAN_CODING_PLAN_API_KEY"')) {
-    $needle = 'var INTERNAL_SECRET_ENV_VARS = ['
-    $replacement = "$needle`n  `"BAILIAN_CODING_PLAN_API_KEY`","
-    $index = $content.IndexOf($needle, [StringComparison]::Ordinal)
-    if ($index -lt 0) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
+    # Insert right after the declaration's opening bracket. Qwen 0.24 ships the
+    # bundle minified ("var INTERNAL_SECRET_ENV_VARS=[...]"), earlier builds
+    # pretty-printed; the regex match covers both and nothing else.
+    if (@([regex]::Matches($content, 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[')).Count -ne 1) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
+    $index = $declaration.Index + $declaration.Value.IndexOf('[') + 1
+    $replacement = '"BAILIAN_CODING_PLAN_API_KEY",'
     $backupDir = Join-Path $HOME '.local\state\ai-devops\qwen\vendor-backups'
     [void](New-Item -ItemType Directory -Force -Path $backupDir)
     $backup = Join-Path $backupDir ("{0}.{1}.bak" -f $candidates[0].Name, ('{0}-{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N').Substring(0,8)))
     Copy-Item -LiteralPath $path -Destination $backup
-    $patched = $content.Substring(0, $index) + $replacement + $content.Substring($index + $needle.Length)
+    $patched = $content.Substring(0, $index) + $replacement + $content.Substring($index)
     $temp = "$path.harden.$PID.tmp"
     try {
       [IO.File]::WriteAllText($temp, $patched, [Text.UTF8Encoding]::new($false))

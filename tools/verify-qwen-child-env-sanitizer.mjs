@@ -17,12 +17,14 @@ const candidates = files.map((name) => path.join(chunks, name)).filter((file) =>
 if (candidates.length !== 1) throw new Error(`expected one sanitizer bundle, found ${candidates.length}`);
 const source = fs.readFileSync(candidates[0], 'utf8');
 const declaration = source.match(/var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];/);
-const fn = source.match(/function sanitizeChildEnv\([^)]*\)\s*\{[\s\S]*?return sanitized;\s*\n\}/);
+// Pretty-printed (<= 0.23) and minified (0.24+) bundles both end the function
+// with "return sanitized" and close it right before its __name() registration.
+const fn = source.match(/function sanitizeChildEnv\([^)]*\)\s*\{[\s\S]*?return sanitized;?\s*\}(?=\s*__name\(sanitizeChildEnv\b|\s*$)/m);
 if (!declaration || !fn) throw new Error('could not extract the known sanitizer implementation');
 let helperProgram = '';
 if (fn[0].includes('isInternalSecretEnvVar')) {
   const nameSet = source.match(/var INTERNAL_SECRET_ENV_VAR_NAMES\s*=\s*new Set\([\s\S]*?\);/);
-  const helper = source.match(/function isInternalSecretEnvVar\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  const helper = source.match(/function isInternalSecretEnvVar\([^)]*\)\s*\{[\s\S]*?\}(?=\s*__name\(isInternalSecretEnvVar\b|\s*$)/m);
   if (!nameSet || !helper) throw new Error('could not extract the known case-insensitive sanitizer helper');
   helperProgram = `${nameSet[0]}\n${helper[0]}`;
 }

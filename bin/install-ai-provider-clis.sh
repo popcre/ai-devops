@@ -159,14 +159,16 @@ harden_qwen_child_env() {
   done < <(grep -l 'var INTERNAL_SECRET_ENV_VARS' "$root"/lib/chunks/*.js 2>/dev/null || true)
   [ "$count" = 1 ] || { echo "ERROR qwen: expected exactly one child-environment sanitizer bundle under $root; found $count" >&2; return 1; }
   local declaration
-  declaration="$(sed -n '/var INTERNAL_SECRET_ENV_VARS[[:space:]]*=[[:space:]]*\[/,/^[[:space:]]*\];/p' "$candidate")"
+  # Qwen 0.24 minifies the bundle onto one line; match the bracketed array
+  # itself so both the minified and the older pretty-printed shapes qualify.
+  declaration="$(perl -0777 -ne 'my @m = /var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];/g; print $m[0] if @m == 1' "$candidate")"
   [[ -n "$declaration" ]] || die 'the known Qwen sanitizer declaration was not found; refusing an unverified patch'
   if ! grep -q '"BAILIAN_CODING_PLAN_API_KEY"' <<<"$declaration"; then
     backup_dir="$HOME/.local/state/ai-devops/qwen/vendor-backups"
     mkdir -p "$backup_dir"
     cp -p "$candidate" "$backup_dir/$(basename "$candidate").$(date -u +%Y%m%dT%H%M%SZ).bak" || return 1
     tmp="$(mktemp "${candidate}.harden.XXXXXX")" || return 1
-    if ! awk '!done && /var INTERNAL_SECRET_ENV_VARS = \[/ { print; print "  \"BAILIAN_CODING_PLAN_API_KEY\","; done=1; next } { print } END { if (!done) exit 42 }' "$candidate" > "$tmp"; then
+    if ! perl -0777 -pe '$n = s/(var INTERNAL_SECRET_ENV_VARS\s*=\s*\[)/$1"BAILIAN_CODING_PLAN_API_KEY",/g; END { exit 42 unless $n == 1 }' "$candidate" > "$tmp"; then
       rm -f "$tmp"; echo "ERROR qwen: could not patch the known child-environment sanitizer" >&2; return 1
     fi
     chmod --reference="$candidate" "$tmp" 2>/dev/null || true
