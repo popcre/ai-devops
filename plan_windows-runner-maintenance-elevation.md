@@ -153,7 +153,7 @@ No owner decision is currently required. A request for another operation, anothe
 
 ### Phase B — review and land (fresh session; re-read Phases B and C first)
 
-5. **Obtain exact-head independent security approval and land.** Commit only the planned files on a current-upstream feature branch. Run `ai-task-gates check --before review`; dispatch one read-only security reviewer with the exact head/base SHAs, full diff, locked threat model, task ACL, filesystem ACL, request race/concurrency model, rollback, and hostile-test evidence. Any response other than explicit `APPROVE` stops and is repaired on the same branch. Then open a PR linked to #262, use `bin/ai-pr-wait`, merge through the queue, and verify the merge commit is on `origin/main`. **You'll know it worked when** the reviewer verdict names the exact head SHA, all required checks pass for the queued landing commit, and `origin/main` contains it.
+5. **Obtain exact-head independent security approval and land.** Commit only the planned files on a current-upstream feature branch. Run `ai-task-gates check --before review`; dispatch one read-only security reviewer with the exact head/base SHAs, full diff, locked threat model, task ACL, filesystem ACL, request race/concurrency model, rollback, and hostile-test evidence. Any response other than explicit `APPROVE` stops and is repaired on the same branch. Then open a PR linked to #262, use `bin/ai-pr-wait <pr> --timeout-minutes N`, merge through the queue, and verify the merge commit is on `origin/main`. **You'll know it worked when** the reviewer verdict names the exact head SHA, all required checks pass for the queued landing commit, and `origin/main` contains it.
 
 ### Phase C — one live host per fresh session
 

@@ -72,7 +72,7 @@ Full local series: `bin/ai-test-local --check-collision` first, then the suite n
 1. Edit the named files only.
 2. Run the step's verification gate command until green.
 3. Update this plan's STATUS row for that step with an **artifact path or command**, not a feeling.
-4. Commit only your hunks; push branch; open PR; wait with `bin/ai-pr-wait`; merge per repo policy.
+4. Commit only your hunks; push branch; open PR; wait with `bin/ai-pr-wait <pr> --timeout-minutes N`; merge per repo policy.
 
 ---
 
