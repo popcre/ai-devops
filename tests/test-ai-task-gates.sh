@@ -1042,7 +1042,8 @@ done
 newrepo "$TMP/small-entry" popcre/some-app
 ( cd "$TMP/small-entry" && "$GATES" start --class code >/dev/null 2>&1 )
 SMALL_URL='https://github.com/popcre/some-app/issues/7'
-printf 'Owner request (verbatim): "add the three Hasbro contacts"\n' > "$TMP/small-issue.md"
+jq -n --arg u "$SMALL_URL" '{url:$u, body:"Owner request (verbatim): \"add the three Hasbro contacts\"", comments:[]}' > "$TMP/small-issue.md"
+jq -n '{url:"https://github.com/popcre/some-app/issues/8", body:"add the three Hasbro contacts", comments:[]}' > "$TMP/small-other.json"
 SMALL_Q='add the three Hasbro contacts'
 check 'database without reviewer or small entry stays blocked' \
   "rc 3 '$TMP/small-entry' check --before database"
@@ -1060,6 +1061,16 @@ check 'a quote absent from the issue is refused' \
   "rc 3 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote 'delete everything' --issue-body-file '$TMP/small-issue.md'"
 check 'a non-issue URL is refused' \
   "rc 3 '$TMP/small-entry' check --before database --small-owner-entry 'https://example.com/x' --row-count 3 --owner-quote '$SMALL_Q' --issue-body-file '$TMP/small-issue.md'"
+check 'an issue from another repository is refused' \
+  "rc 3 '$TMP/small-entry' check --before database --small-owner-entry 'https://github.com/popcre/other/issues/7' --row-count 3 --owner-quote '$SMALL_Q' --issue-body-file '$TMP/small-issue.md'"
+check 'an issue JSON for a different issue is refused' \
+  "rc 3 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' --issue-body-file '$TMP/small-other.json'"
+check 'a plain-text body file is refused' \
+  "printf 'add the three Hasbro contacts\\n' > '$TMP/small-plain.txt' && rc 3 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' --issue-body-file '$TMP/small-plain.txt'"
+check 'small-entry options without --small-owner-entry fail' \
+  "rc 1 '$TMP/small-entry' check --before database --row-count 3"
+check 'small entry and reviewer approval together fail' \
+  "rc 1 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --reviewer-approval /nonexistent"
 check 'small entry never releases other actions' \
   "rc 3 '$TMP/small-entry' check --before production --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' --issue-body-file '$TMP/small-issue.md'"
 check 'the small-entry release is recorded in task state' \

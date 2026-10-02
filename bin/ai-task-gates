@@ -61,7 +61,7 @@ usage: ai-task-gates <command> [options]
   start --class CLASS [--reason TEXT] [--base REF]
         Record the intended task class for this repository and worktree.
   check --before ACTION [--acknowledge TEXT] [--reviewer-approval REPORT]
-        [--small-owner-entry ISSUE_URL --row-count N --owner-quote TEXT --issue-body-file PATH]
+        [--small-owner-entry ISSUE_URL --row-count N --owner-quote TEXT --issue-body-file ISSUE_JSON]
         [--target-head SHA] [--installed-checkout PATH] [--installed-launcher PATH]
         [--first-install]
         Recompute the change set and decide whether ACTION may start.
@@ -372,24 +372,38 @@ reviewer_approval_summary(){
 # can skip the reviewer") releases ONLY the reviewer APPROVE for the database
 # action: an owner-requested row-data write of 1..10 rows, no structure,
 # schema, security change, or deletion, run as one guarded transaction that
-# asserts the exact row count after proving the target database. The linked
-# GitHub issue must quote the owner's request verbatim. Protected classes,
-# escalation, and every other gate still apply; this runs only after them.
-# Usage: small_owner_entry_summary ACTION ISSUE_URL ROWS QUOTE BODY_FILE
+# asserts the exact row count after proving the target database. The issue
+# must belong to this repository and quote the owner's request verbatim; the
+# issue is read from the GitHub issue JSON (url, body, comments) that the
+# caller fetched through the managed transport, and it must name
+# the same URL. Only a prose or code change set qualifies: a structural,
+# security, infrastructure, or protected class never does. The row count and
+# transaction guard are the caller's declared contract, recorded in the task
+# state for audit; escalation and every other gate still run first.
+# Usage: small_owner_entry_summary ACTION ISSUE_URL ROWS QUOTE BODY_JSON CLASS
 small_owner_entry_summary(){
-  local action="$1" url="$2" rows="$3" quote="$4" body_file="$5" repo num body
-  [ "$action" = database ] || { printf 'ai-task-gates: STOP. --small-owner-entry applies only to --before database.\n' >&2; return 1; }
-  [[ "$url" =~ ^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/([0-9]+)$ ]] \
-    || { printf 'ai-task-gates: STOP. --small-owner-entry needs a GitHub issue URL (https://github.com/OWNER/REPO/issues/N).\n' >&2; return 1; }
-    [[ "$rows" =~ ^[0-9]+$ ]] && [ "$rows" -ge 1 ] && [ "$rows" -le 10 ] \
-    || { printf 'ai-task-gates: STOP. A small owner entry needs --row-count between 1 and 10 (got "%s"); larger writes need --reviewer-approval.\n' "$rows" >&2; return 1; }
-  [ -n "$quote" ] || { printf 'ai-task-gates: STOP. A small owner entry needs --owner-quote with the owner request verbatim.\n' >&2; return 1; }
-  [ -n "$body_file" ] && [ -f "$body_file" ] && [ ! -L "$body_file" ] \
-    || { printf 'ai-task-gates: STOP. A small owner entry needs --issue-body-file with the linked issue body and comments as fetched from GitHub.\n' >&2; return 1; }
-  body="$(cat "$body_file")"
-  [ -n "$body" ] && grep -qF -- "$quote" <<<"$body" \
-    || { printf 'ai-task-gates: STOP. Issue %s does not quote the owner request verbatim (--owner-quote not found).\n' "$url" >&2; return 1; }
-  printf 'small owner entry %s, %s row(s), owner quote verified; guarded single transaction with exact row-count assertion and target-database proof required' "$url" "$rows"
+  local action="$1" url="$2" rows="$3" quote="$4" body_file="$5" class="$6" repo json text
+  _soe_stop(){ printf 'ai-task-gates: STOP. %s\n' "$*" >&2; return 1; }
+  [ "$action" = database ] || { _soe_stop '--small-owner-entry applies only to --before database.'; return 1; }
+  case "$class" in none|prose|code) ;; *) _soe_stop "A small owner entry is row data only; the \"$class\" change set needs --reviewer-approval."; return 1 ;; esac
+  [[ "$url" =~ ^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/[1-9][0-9]*$ ]] \
+    || { _soe_stop '--small-owner-entry needs a GitHub issue URL (https://github.com/OWNER/REPO/issues/N).'; return 1; }
+  repo="${BASH_REMATCH[1]}"
+  [ "${repo,,}" = "${IDENTITY,,}" ] || { _soe_stop "The owner-request issue must belong to $IDENTITY (got $repo)."; return 1; }
+  [[ "$rows" =~ ^[1-9][0-9]?$ ]] && [ "$rows" -le 10 ] \
+    || { _soe_stop "A small owner entry needs --row-count between 1 and 10 (got \"$rows\"); larger writes need --reviewer-approval."; return 1; }
+  [ -n "$quote" ] && [[ "$quote" != *$'\n'* ]] && [[ "$quote" != *$'\r'* ]] \
+    || { _soe_stop 'A small owner entry needs a one-line --owner-quote with the owner request verbatim.'; return 1; }
+  [ -n "$body_file" ] && [ ! -L "$body_file" ] && [ -f "$body_file" ] \
+    || { _soe_stop 'A small owner entry needs --issue-body-file: the GitHub issue JSON with url, body, and comments.'; return 1; }
+  json="$(cat -- "$body_file")" && [ ! -L "$body_file" ] || { _soe_stop 'The issue body file could not be read safely.'; return 1; }
+  jq -e --arg u "$url" '.url == $u and (.body|type=="string")' >/dev/null 2>&1 <<<"$json" \
+    || { _soe_stop "The issue body file is not the GitHub issue JSON for $url."; return 1; }
+  text="$(jq -r '.body, ((.comments // [])[]?.body // empty)' <<<"$json" | tr -d '\r')"
+  grep -qF -- "$quote" <<<"$text" \
+    || { _soe_stop "Issue $url does not quote the owner request verbatim (--owner-quote not found)."; return 1; }
+  printf 'small owner entry %s, %s row(s), quote sha256:%s verified in issue; caller must run one guarded transaction asserting exactly %s row(s) after target-database proof' \
+    "$url" "$rows" "$(printf '%s' "$quote" | sha256sum | cut -d' ' -f1)" "$rows"
 }
 
 # --------------------------------------------------------------------------
@@ -683,6 +697,11 @@ cmd_check(){
     esac
   done
   [ -n "$action" ] || die 'check requires --before ACTION.'
+  if [ -z "$small_entry" ]; then
+    [ -z "$small_rows$small_quote$small_body" ] || die '--row-count, --owner-quote, and --issue-body-file need --small-owner-entry.'
+  else
+    [ -z "$reviewer_approval" ] || die '--small-owner-entry and --reviewer-approval are mutually exclusive.'
+  fi
   require_jq; load_policy
   valid_action "$action" || die "unknown action: $action"
   if [ "$action" = deploy ]; then
@@ -857,8 +876,8 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no reviewer-approval and no acknowledge path.\nNarrow the change set out of protected paths, or change this policy through its own reviewed path.' \
         "$action" "$effective" "$IDENTITY")"
     fi
-    if [ -n "$small_entry" ] && [ -z "$reviewer_approval" ]; then
-      approval_summary="$(small_owner_entry_summary "$action" "$small_entry" "$small_rows" "$small_quote" "$small_body")" || exit "$EX_BLOCKED"
+    if [ -n "$small_entry" ]; then
+      approval_summary="$(small_owner_entry_summary "$action" "$small_entry" "$small_rows" "$small_quote" "$small_body" "$effective")" || exit "$EX_BLOCKED"
       state_record_override small-owner-entry "$action" "$approval_summary" "$effective"
       printf 'ai-task-gates: "%s" allowed as a small owner-requested entry (no AI reviewer, owner ruling 2026-10-02): %s\n' "$action" "$approval_summary"
       return 0

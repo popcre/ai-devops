@@ -160,7 +160,7 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   target database, with Albert's request quoted verbatim in the linked issue,
   skips the AI reviewer APPROVE and keeps every other gate:
   `ai-task-gates check --before database --small-owner-entry <issue-url>
-  --row-count N --owner-quote "<quote>" --issue-body-file <saved issue>`. Details doc: "Small owner entries".
+  --row-count N --owner-quote "<quote>" --issue-body-file <issue JSON>`. Details doc: "Small owner entries".
 - **Shared-db structural work is claim-first.** Claim exact objects on the
   existing issue and start; no orchestrator chat or marker is required. Scope
   stays the minimum: only database SHAPE changes or a curated Master Data

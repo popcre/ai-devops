@@ -116,11 +116,15 @@ identity proof, claim rules, and live proof. Run:
     ai-task-gates check --before database \
       --small-owner-entry https://github.com/OWNER/REPO/issues/N \
       --row-count 3 --owner-quote "<Albert's words, verbatim>" \\
-      --issue-body-file <issue body and comments saved from GitHub>
+      --issue-body-file <JSON from `gh issue view N --json url,body,comments`>
 
-The gate refuses a row count outside 1..10, a non-issue URL, a quote missing
-from the issue body or comments, any action other than `database`, and any
-protected class; the release is recorded in the task state.
+The issue must belong to the repository being worked on, and its JSON must
+name the same URL. The gate refuses a row count outside 1..10, a multi-line
+quote, a quote missing from the issue body or comments, any action other than
+`database`, any change set above `code` (structure, security, infrastructure,
+or a protected class), and combining it with `--reviewer-approval`. The row
+count and the transaction guard are the caller's declared contract; the
+release, URL, row count, and quote digest are recorded in the task state.
 
 ## Reviewer rotation details
 
