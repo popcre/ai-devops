@@ -37,8 +37,17 @@
         }
       }
     },
+    "reviewer_release": {
+      "description": "Central only (#1239): action name to {protected class: gate}. A forbidden action for that protected EFFECTIVE class reaches the assigned-AI-reviewer-approval step (never starts without it) only while the class's merged required gates contain the named gate, i.e. the repository declared it. private-evidence can never be named.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": { "type": "string", "minLength": 1 }
+      }
+    },
     "change_classes": {
-      "description": "What a change can be. Central file only. `rank` orders strength and the strongest matching class always wins; a `protected` class can never be acknowledged or reviewer-approved away.",
+      "description": "What a change can be. Central file only. `rank` orders strength and the strongest matching class always wins; a `protected` class can never be acknowledged away, and is reviewer-approved past a forbidden action only through an explicit reviewer_release.",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": {
