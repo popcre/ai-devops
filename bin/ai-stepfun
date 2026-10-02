@@ -261,7 +261,7 @@ run_opencode_turn(){
     cp "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" "$xdg/config/opencode/agent/$OC_AGENT_IMPLEMENT.md"
     load_key
     log="$out.jsonl"
-    # Closed gate PATH (not host PATH): Git usr/bin + cmd + PowerShell v1.0.
+    # Closed gate PATH: GNU tools only from Git usr/bin (not host PATH, not cmd/System32).
     local gate_path
     [ -d "/c/Program Files/Git/usr/bin" ] || die 'Git for Windows is required (usr/bin)'
     # Closed gate PATH: GNU tools only from Git usr/bin + runner allowlist dir.

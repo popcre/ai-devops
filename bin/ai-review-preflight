@@ -741,7 +741,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
     case "${AI_STEPFUN_PLATFORM:-$(uname -s)}" in
       MINGW*|MSYS*|CYGWIN*|Windows*|windows*)
         if [ -z "${AI_STEPFUN_OPENCODE:-}" ] || [ ! -x "${AI_STEPFUN_OPENCODE:-}" ]; then
-          if ! command -v opencode >/dev/null 2>&1; then
+          if ! command -v opencode >/dev/null 2>&1 && [ ! -x "${AI_STEPFUN_OPENCODE:-}" ]; then
             printf 'ai-review-preflight: stepfun is unsupported on this platform (engine missing or wrong OS).\n' >&2
             return 4
           fi
