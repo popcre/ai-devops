@@ -94,6 +94,19 @@ check "provider_received_complete_untracked_snapshot" "grep -q 'review saw compl
 check "provider_command_keeps_readonly_sandbox" "grep -Rzq -- '--sandbox' '$TMP/args' && grep -Rzq -- 'read-only' '$TMP/args'"
 check "provider_command_ignores_secret_bearing_user_config" "grep -Rzq -- '--ignore-user-config' '$TMP/args'"
 check "provider_command_receives_private_directory" "grep -Rzq -- '--cd' '$TMP/args'"
+# The prompt travels on stdin, which no shell converts. An absolute Git Bash
+# path sends a native Windows reviewer outside its own workspace, and it then
+# reports a denied read instead of a judgment. The packet must therefore be
+# named relative to the working directory Codex is already started in.
+# On Windows, `--ignore-user-config` also drops `[windows] sandbox`, and Codex
+# then refuses every shell command outright. The permission level still comes
+# from `--sandbox read-only`, which the check above proves is unchanged.
+if [ -n "${SYSTEMROOT:-}" ]; then
+  check "provider_command_keeps_the_windows_sandbox_implementation" "grep -Rzq -- 'windows.sandbox=' '$TMP/args'"
+fi
+check "prompt_names_the_packet_relative_to_the_review_directory" "grep -hq 'Read [.]ai-review[^ ]*/MANIFEST[.]md' '$TMP/args'/prompt-*"
+check "prompt_sends_no_absolute_snapshot_path" "! grep -hq 'Read /' '$TMP/args'/prompt-*"
+check "prompt_demands_all_findings_and_sibling_issues" "grep -hq 'Return ALL findings in one pass' '$TMP/args'/prompt-* && grep -hq 'sibling issues' '$TMP/args'/prompt-*"
 check "report_without_operation_records_none" "! grep -q '| operation |' '$OUT'"
 check "prompt_without_operation_requests_no_approval_line" "! grep -hq 'installation operation' '$TMP/args'/prompt-*"
 # --operation (issue #658): the exact approval line reaches the Codex request
@@ -108,19 +121,6 @@ check "unknown_operation_never_reaches_codex" "[ '$OP_BAD_RC' -ne 0 ] && grep -q
 rm -f "$TMP/args"/prompt-*
 (cd "$R" && AI_REVIEW_OPERATION=first-managed-install "$SCRIPT" security-review) > "$TMP/op-mode.out" 2>&1; OP_MODE_RC=$?
 check "operation_outside_final_check_never_reaches_codex" "[ '$OP_MODE_RC' -ne 0 ] && grep -q 'review operation needs final-check' '$TMP/op-mode.out' && ! ls '$TMP/args'/prompt-* >/dev/null 2>&1"
-# The prompt travels on stdin, which no shell converts. An absolute Git Bash
-# path sends a native Windows reviewer outside its own workspace, and it then
-# reports a denied read instead of a judgment. The packet must therefore be
-# named relative to the working directory Codex is already started in.
-# On Windows, `--ignore-user-config` also drops `[windows] sandbox`, and Codex
-# then refuses every shell command outright. The permission level still comes
-# from `--sandbox read-only`, which the check above proves is unchanged.
-if [ -n "${SYSTEMROOT:-}" ]; then
-  check "provider_command_keeps_the_windows_sandbox_implementation" "grep -Rzq -- 'windows.sandbox=' '$TMP/args'"
-fi
-check "prompt_names_the_packet_relative_to_the_review_directory" "grep -hq 'Read [.]ai-review[^ ]*/MANIFEST[.]md' '$TMP/args'/prompt-*"
-check "prompt_sends_no_absolute_snapshot_path" "! grep -hq 'Read /' '$TMP/args'/prompt-*"
-check "prompt_demands_all_findings_and_sibling_issues" "grep -hq 'Return ALL findings in one pass' '$TMP/args'/prompt-* && grep -hq 'sibling issues' '$TMP/args'/prompt-*"
 check "source_is_unchanged_by_successful_review" "[ \"$BEFORE\" = \"\$('$REPO_ROOT/bin/ai-review-sandbox' digest '$R')\" ]"
 if [ -n "${SYSTEMROOT:-}" ]; then
   export AI_PRIVATE_HELPER_WIN="$(cygpath -w "$REPO_ROOT/bin/windows-private-file.ps1")"
