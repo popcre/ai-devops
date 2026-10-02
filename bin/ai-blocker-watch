@@ -613,7 +613,7 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
       local tmp="$f.tmp"
       jq --arg at "$(now_iso)" --arg p "${prog:-<empty command>}" \
         '.state="unrunnable" | .error=("harness program not found on this machine: " + $p) | .checked_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
-      note "cannot wake $h session $s: harness program not found on this machine: ${prog:-<empty command>}; wait $wid is now unrunnable (re-register the wait once the program is installed)"
+      note "cannot wake $h session $s: harness program not found on this machine: ${prog:-<empty command>}; wait $wid is now unrunnable (leave the issue as the card once the program is installed)"
     fi
     FAILED=1; return
   fi

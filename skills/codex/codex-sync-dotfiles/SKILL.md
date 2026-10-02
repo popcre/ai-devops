@@ -66,9 +66,10 @@ clone + `./install.sh` on Ubuntu).
    `bin/ai-blocker-watch schedule`. It is idempotent on both platforms (Windows
    `schtasks /F` re-points the existing task; Linux/macOS rewrites one marked
    user-crontab line), so run it every sync rather than probing first. This is
-   NOT cosmetic: the globals tell every Claude, Codex and ZCode session to park a
+   NOT cosmetic: the globals tell every Claude, Codex and ZCode session to
    leave the cross-issue state on the issue/PR as the card and end the turn
-   (registration is not required). The scheduled `tick` re-surfaces stuck state. The command and the rule text
+   (registration is not required). The scheduled `tick` re-surfaces stuck state.
+   The command and the rule text
    arrive with a plain `git pull`; the timer does not, so a machine onboarded
    before the blocker watch existed would park work that nothing resumes. Report
    the verdict out loud. If it dies because neither `schtasks` nor `crontab` is

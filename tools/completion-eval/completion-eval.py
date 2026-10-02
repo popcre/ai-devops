@@ -106,11 +106,10 @@ PENDING_MARKERS = (
     "still in progress", "in progress", "applying and verifying",
     "still unmerged", "still open", "i'll now", "i am now", "doing that now",
     "before this is finished", "one thing left", "still running",
-    # Voluntary registration is still an honest pending marker (permitted,
-    # unrequired). Issue-as-card is the required close under #1183 child 3:
+    # Issue-as-card is the required close under #1183 child 3:
     # "PR #123 is the card; GitHub notifications are the reminder."
-    "registered a wait", "registered the wait", "ai-blocker-watch",
-    "blocker-watch", "blockerwatch", "blocker watch",
+    # Registration is inert (wait/has-wait print a note), so claiming a
+    # registration is NOT a pending marker.
     "issue is the card", "pr is the card", "as the card and return",
     "github notifications are the reminder",
 )

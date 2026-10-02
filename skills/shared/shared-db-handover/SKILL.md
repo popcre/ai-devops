@@ -71,7 +71,7 @@ the ones that save the next session a day:
 in the issue and leave a ten-page briefing in `HANDOFF.d/`. A ten-page briefing pasted
 into an issue is a ten-page briefing nobody reads.
 
-**A dependency you file is yours to register — never to "a future session."** The session
+**A dependency you file is yours to own — never "a future session."** The session
 that files or identifies "this cannot proceed until N closes" either leaves the
 issue/PR as the card and ends its turn (registration is not required; the bounded
 janitor re-surfaces stuck state), or names the owning session/owner in the issue. Deferring to an
