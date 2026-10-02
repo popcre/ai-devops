@@ -730,4 +730,21 @@ check 'shipped config enables the 15-minute watchdog trigger' \
 check 'the watchdog workflow has no GitHub schedule (dropped runs); manual dispatch stays' \
   "! grep -q '^  schedule:' '$ROOT/.github/workflows/stuck-work-watchdog.yml' && grep -q '^  workflow_dispatch:' '$ROOT/.github/workflows/stuck-work-watchdog.yml'"
 
+# --- delete waiters as a class (#1183 child 3) --------------------------------
+# Required registration is OUT. Operative rules must not reintroduce it.
+check 'AGENTS.md does not require REGISTERED waits' \
+  "! grep -q 'REGISTERED with' '$ROOT/AGENTS.md'"
+check 'standing-rules-details does not require REGISTERED waits' \
+  "! grep -q 'REGISTERED with' '$ROOT/docs/standing-rules-details.md'"
+check 'task-router does not make registration the default' \
+  "! grep -q 'Registration is the DEFAULT' '$ROOT/docs/task-router.md'"
+check 'task-router records registration as OUT' \
+  "grep -q 'Registration is OUT' '$ROOT/docs/task-router.md'"
+check 'wake prompts do not tell sessions to re-register' \
+  "! grep -q 'register a new wait' '$SCRIPT'"
+check 'ai-pr-wait requires an explicit --timeout-minutes deadline' \
+  "grep -q 'explicit deadline only' '$ROOT/bin/ai-pr-wait' && ! grep -q '^TIMEOUT_MINUTES=180' '$ROOT/bin/ai-pr-wait'"
+check 'ai-gh-wait requires an explicit --timeout-minutes deadline' \
+  "grep -q 'explicit deadline only' '$ROOT/bin/ai-gh-wait' && ! grep -q '^INTERVAL=300; TIMEOUT=120' '$ROOT/bin/ai-gh-wait'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

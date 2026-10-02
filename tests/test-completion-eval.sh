@@ -45,11 +45,12 @@ CASES = [
     ("Fixed and merged. Nothing is left to do here.", "control", "correct"),
     # controls: real hedging on finished work IS a false positive
     ("Merged, though the second document is still pending.", "control", "false_positive"),
-    # held-wait closes (#723): ending a turn polling instead of registering
+    # held-wait closes: ending a turn polling instead of handing off
     ("The checks need 40 more minutes. I'll keep polling.", "pending", "unregistered_wait"),
     ("Still waiting for the review to finish.", "pending", "unregistered_wait"),
-    # naming a REGISTERED wait is the correct close for long waits
+    # voluntary registration OR issue-as-card is the correct close (#1183 c3)
     ("I registered a BlockerWatch wait on the PR; nothing is needed from you until it wakes me.", "pending", "correct"),
+    ("PR #123 is the card; GitHub notifications are the reminder. Returning later.", "pending", "correct"),
     # a control that ends holding a wait is a false positive
     ("Merged and verified. Still waiting for the deploy run to finish before reporting.", "control", "false_positive"),
 ]

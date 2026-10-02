@@ -8,9 +8,12 @@
 # (2026-09-15 secondary rate-limit incident, popcre/ai-devops#401).
 #
 # Usage:
-#   ai-gh-wait --until-regex REGEX [--interval SECONDS] [--timeout-minutes N] -- <gh args>
+#   ai-gh-wait --until-regex REGEX --timeout-minutes N [--interval SECONDS] -- <gh args>
 # Example:
-#   ai-gh-wait --until-regex '"status":"completed"' -- run view 123 --repo o/r --json status,conclusion
+#   ai-gh-wait --until-regex '"status":"completed"' --timeout-minutes 30 -- run view 123 --repo o/r --json status,conclusion
+#
+# --timeout-minutes is required (explicit deadline only; #1183 child 3). There
+# is no default: a waiter is never started without a deadline the caller named.
 #
 # The interval may not be below 300 seconds. Exit: 0 matched, 1 repeated
 # non-rate-limit failure, 2 deadline reached, 3 usage error.
@@ -18,7 +21,7 @@ set -uo pipefail
 say(){ printf 'ai-gh-wait: %s\n' "$*" >&2; }
 MIN=300
 [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_GH_WAIT_TEST_MIN_INTERVAL:-}" ] && MIN="$AI_GH_WAIT_TEST_MIN_INTERVAL"
-INTERVAL=300; TIMEOUT=120; REGEX=''
+INTERVAL=300; TIMEOUT=''; REGEX=''
 # Exit codes that mean "not finished yet" rather than failure (gh pr checks: 8).
 PENDING="${AI_GH_WAIT_PENDING_CODES:-8}"
 while [ $# -gt 0 ]; do
@@ -36,13 +39,19 @@ while [ $# -gt 0 ]; do
     *) say "unknown option $1"; exit 3 ;;
   esac
 done
-case "$INTERVAL$TIMEOUT" in *[!0-9]*|'') say "--interval and --timeout-minutes must be whole numbers"; exit 3 ;; esac
+case "$INTERVAL" in *[!0-9]*|'') say "--interval must be a whole number"; exit 3 ;; esac
+case "$TIMEOUT" in
+  '') say "--timeout-minutes is required (explicit deadline only; no default)"; exit 3 ;;
+  *[!0-9]*|0*) say "--timeout-minutes must be a positive whole number without leading zeros"; exit 3 ;;
+esac
 [ -n "$REGEX" ] || { say "--until-regex is required"; exit 3; }
 [ $# -gt 0 ] || { say "gh arguments are required after --"; exit 3; }
 [ "$INTERVAL" -ge "$MIN" ] || { say "--interval ${INTERVAL}s is below the 300-second minimum for GitHub waits"; exit 3; }
 GH="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)/ai-gh"
 STATE="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"
 deadline=$(( $(date +%s) + TIMEOUT * 60 ))
+# Offline tests pin the deadline without sleeping a real minute.
+[ -z "${AI_GH_WAIT_TEST_DEADLINE_EPOCH:-}" ] || deadline="$AI_GH_WAIT_TEST_DEADLINE_EPOCH"
 prev=''; fails=0
 while :; do
   out="$(AI_GH_CALLER=ai-gh-wait AI_GH_NO_WAIT=1 "$GH" "$@")"; rc=$?   # stderr passes through so the real error is visible

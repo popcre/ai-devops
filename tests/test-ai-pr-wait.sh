@@ -34,6 +34,15 @@ check "a missing pull request number is refused, not waited on" \
 OUT="$(bash "$CMD" not-a-number 2>&1)"; RC=$?
 check "a non-numeric pull request number is refused" "test '$RC' -eq 3"
 
+# #1183 child 3: explicit deadline only. A waiter is never started without a
+# deadline the caller named — there is no default --timeout-minutes.
+OUT="$(bash "$CMD" 1 --repo popcre/ai-devops 2>&1)"; RC=$?
+check "a missing --timeout-minutes is refused (explicit deadline only)" \
+  "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'explicit deadline only'"
+OUT="$(bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 2>&1)"; RC=$?
+check "--timeout-minutes without a value is refused immediately" \
+  "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'requires a value'"
+
 OUT="$(bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 0 2>&1)"; RC=$?
 check "a zero deadline is refused" "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'positive whole number'"
 OUT="$(bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 00 2>&1)"; RC=$?
@@ -71,7 +80,7 @@ check "fixture resolves its exact gh stub" \
   "test \"$(PATH="$TMP/bin:$PATH" command -v gh)\" = '$TMP/bin/gh'"
 mkdir -p "$TMP/no-throttle"
 cp "$CMD" "$TMP/no-throttle/ai-pr-wait"
-OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/no-throttle-called" PATH="$TMP/bin:$PATH" bash "$TMP/no-throttle/ai-pr-wait" 1 --repo popcre/ai-devops 2>&1)"; RC=$?
+OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/no-throttle-called" PATH="$TMP/bin:$PATH" bash "$TMP/no-throttle/ai-pr-wait" 1 --repo popcre/ai-devops --timeout-minutes 1 2>&1)"; RC=$?
 check "a missing throttle refuses the wait before any direct gh call" \
   "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'ai-gh throttle is missing; no GitHub call was made' && test ! -e '$TMP/no-throttle-called'"
 OUT="$(AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 2>&1)"; RC=$?
@@ -215,7 +224,7 @@ export AI_TASK_GATES_DIR="$TMP/gates"
 # The refusal text carries backticks, so it is kept in a file rather than in a
 # shell variable the check would re-expand.
 GATE_OUT="$TMP/gate-refusal.txt"
-( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops ) >"$GATE_OUT" 2>&1; RC=$?
+( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 ) >"$GATE_OUT" 2>&1; RC=$?
 check "a documentation-only pull request does not start a long wait" "test '$RC' -eq 3"
 check "the refusal names the admin squash merge instead" \
   "grep -qF -- 'gh pr merge --squash --admin' '$GATE_OUT'"
@@ -230,7 +239,7 @@ check "the prose refusal proves doc safety on this tree first" \
 mkdir -p "$GR/docs"; printf 'HostName 10.20.30.40\n' > "$GR/docs/topology.md"
 git -C "$GR" add docs/topology.md
 BAD_OUT="$TMP/gate-docfail.txt"
-( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops ) >"$BAD_OUT" 2>&1; RC=$?
+( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 ) >"$BAD_OUT" 2>&1; RC=$?
 check "a doc-unsafe prose tree still does not start a long wait" "test '$RC' -eq 3"
 check "a doc-unsafe prose tree is refused the admin merge until fixed" \
   "grep -qF 'doc-safety FAILED on this tree' '$BAD_OUT' && grep -q 'BOUNDARY FAIL' '$BAD_OUT'"
@@ -248,7 +257,7 @@ check "a reviewer-approved wait passes the gate and reaches the normal checks" \
   "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'positive whole number'"
 
 printf 'select 1;\n' > "$GR/migration.sql"
-OUT="$( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops 2>&1 )"; RC=$?
+OUT="$( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 2>&1 )"; RC=$?
 check "work that outgrew its declared class still refuses the wait" \
   "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q migration.sql"
 rm -f "$GR/migration.sql"

@@ -570,12 +570,12 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
     prompt="ai-blocker-watch: $why"
     [ -z "$(jq -r '.for // ""' "$f")" ] || prompt="$prompt You were waiting on it for $(jq -r .for "$f")."
     [ -z "$(jq -r '.note // ""' "$f")" ] || prompt="$prompt Your note: $(jq -r .note "$f")."
-    prompt="$prompt Recheck the wait's final state, then continue the work you were waiting to do. When you finish, or are blocked again, comment the result on ${parked_issue:-your work issue}. If something else now blocks you, register a new wait with ai-blocker-watch."
+    prompt="$prompt Recheck the wait's final state, then continue the work you were waiting to do. When you finish, or are blocked again, comment the result on ${parked_issue:-your work issue}. If something else now blocks you, leave that issue or pull request as the card and return later — registration is not required."
   else
     local pr pn; read -r pr pn <<<"$(parse_ref "$parked_issue")"
     local fresh_reason="the session that registered it is gone"
     [ "$codex_child" = 0 ] || fresh_reason="the original Codex subagent cannot be resumed independently"
-    prompt="ai-blocker-watch: you are a NEW session picking up parked work, because $fresh_reason. The wait was released: $why The full brief is in $parked_url. Read that issue and all of its comments first (gh issue view $pn -R $pr --comments). Follow the repository's AGENTS.md. Create your own worktree from current upstream before you edit anything. Then continue the next steps the brief names. When you finish, or are blocked again, comment the result on that issue. If you are blocked again, register a new wait with: ai-blocker-watch wait <blocker> --for $parked_issue --brief-file <file>."
+    prompt="ai-blocker-watch: you are a NEW session picking up parked work, because $fresh_reason. The wait was released: $why The full brief is in $parked_url. Read that issue and all of its comments first (gh issue view $pn -R $pr --comments). Follow the repository's AGENTS.md. Create your own worktree from current upstream before you edit anything. Then continue the next steps the brief names. When you finish, or are blocked again, comment the result on that issue. If you are blocked again, leave that issue or pull request as the card and return later - registration is not required."
     cwd="$main_checkout"
   fi
   local cfgkey=harness; [ "$mode" = resumed ] || cfgkey=harness_fresh

@@ -15,7 +15,10 @@
 # moving.
 #
 # Usage:
-#   ai-pr-wait <pr-number> [--repo OWNER/NAME] [--timeout-minutes N] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval REPORT]
+#   ai-pr-wait <pr-number> --timeout-minutes N [--repo OWNER/NAME] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval REPORT]
+#
+# --timeout-minutes is required (explicit deadline only; #1183 child 3). There
+# is no default: a waiter is never started without a deadline the caller named.
 #
 # A documentation-only change does not wait for checks. This command refuses to
 # start a long wait for one, and says so, unless an assigned AI
@@ -31,7 +34,7 @@ set -uo pipefail
 
 PR=''
 REPO=''
-TIMEOUT_MINUTES=180
+TIMEOUT_MINUTES=''
 INTERVAL=300
 API_TIMEOUT_SECONDS=30
 REVIEWER_APPROVAL=''
@@ -60,7 +63,8 @@ case "$PR" in
   ''|*[!0-9]*) printf 'ai-pr-wait: give a pull request number\n' >&2; exit 3 ;;
 esac
 case "$TIMEOUT_MINUTES" in
-  ''|0*|*[!0-9]*) printf 'ai-pr-wait: --timeout-minutes must be a positive whole number without leading zeros\n' >&2; exit 3 ;;
+  '') printf 'ai-pr-wait: --timeout-minutes is required (explicit deadline only; no default)\n' >&2; exit 3 ;;
+  0*|*[!0-9]*) printf 'ai-pr-wait: --timeout-minutes must be a positive whole number without leading zeros\n' >&2; exit 3 ;;
 esac
 case "$INTERVAL" in
   ''|0*|*[!0-9]*) printf 'ai-pr-wait: --interval must be a positive whole number without leading zeros\n' >&2; exit 3 ;;

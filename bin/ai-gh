@@ -67,7 +67,7 @@ prev=''
 for a in "$@"; do
   if [ "$a" = --watch ] || [ "${a%%=*}" = --watch ] || { [ "$prev" = run ] && [ "$a" = watch ]; }; then
     say "watch commands are forbidden (they poll GitHub every few seconds and trip the secondary rate limit)."
-    say "wait with: ai-gh-wait --until-regex <pattern> -- <gh args>   (minimum 5-minute interval), or ai-pr-wait <pr>"
+    say "wait with: ai-gh-wait --until-regex <pattern> --timeout-minutes N -- <gh args>   (minimum 5-minute interval), or ai-pr-wait <pr> --timeout-minutes N"
     exit 2
   fi
   prev="$a"
