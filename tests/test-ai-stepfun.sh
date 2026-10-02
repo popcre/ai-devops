@@ -189,10 +189,10 @@ fi
 
 # ---- OpenCode engine (works on any host with the stub) ----
 echo '== ai-stepfun OpenCode engine'
-# StepFun is Ubuntu/Linux-only: Windows is refused even with OpenCode present.
+# StepFun: Ubuntu/Linux (bubblewrap) or Windows (folder + test shell, 2026-09-30).
 export AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/bin/opencode"
-check "macOS and unknown systems are refused too (Ubuntu/Linux only)" "for plat in Darwin FreeBSD; do out=\$(AI_STEPFUN_PLATFORM=\$plat '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform || exit 1; done"
-check "Windows is refused even with OpenCode installed (Ubuntu/Linux only)" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform"
+check "macOS and unknown systems are refused" "for plat in Darwin FreeBSD; do out=\$(AI_STEPFUN_PLATFORM=\$plat '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform || exit 1; done"
+check "Windows is allowed with OpenCode (folder + test shell)" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor 2>&1); printf '%s' \"\$out\" | grep -q 'OK engine=opencode'"
 # The OpenCode cases need a Linux filesystem (owner-only key store) and bubblewrap.
 if [ "$(uname -s)" != Linux ]; then
   SKIP=$((SKIP + 1)); echo 'SKIP  OpenCode engine cases (not a Linux filesystem)'

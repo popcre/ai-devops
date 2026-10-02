@@ -38,11 +38,12 @@ function Test-QwenChildEnvironmentHardened {
     $chunkRoot = Join-Path $Root 'lib\chunks'
     $hits = @(Get-ChildItem -LiteralPath $chunkRoot -Filter '*.js' -File -ErrorAction Stop | Where-Object {
       $text = Get-Content -Raw -LiteralPath $_.FullName
-      $text.Contains('var INTERNAL_SECRET_ENV_VARS') -and $text.Contains('function sanitizeChildEnv')
+      $text -match 'var\s+INTERNAL_SECRET_ENV_VARS\b' -and $text.Contains('function sanitizeChildEnv')
     })
     if ($hits.Count -ne 1) { return $false }
-    $declaration = [regex]::Match((Get-Content -Raw -LiteralPath $hits[0].FullName), 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
-    return ($declaration.Success -and $declaration.Value.Contains('"BAILIAN_CODING_PLAN_API_KEY"'))
+    # Exactly one declaration, or the bundle is ambiguous and not hardened.
+    $declarations = [regex]::Matches((Get-Content -Raw -LiteralPath $hits[0].FullName), 'var\s+INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
+    return ($declarations.Count -eq 1 -and $declarations[0].Value.Contains('"BAILIAN_CODING_PLAN_API_KEY"'))
   } catch { return $false }
 }
 
@@ -52,23 +53,27 @@ function Set-QwenChildEnvironmentHardening {
   if (-not (Test-Path -LiteralPath $chunkRoot -PathType Container)) { throw "Qwen bundle directory is missing: $chunkRoot" }
   $candidates = @(Get-ChildItem -LiteralPath $chunkRoot -Filter '*.js' -File | Where-Object {
     $text = Get-Content -Raw -LiteralPath $_.FullName
-    $text.Contains('var INTERNAL_SECRET_ENV_VARS') -and $text.Contains('function sanitizeChildEnv')
+    $text -match 'var\s+INTERNAL_SECRET_ENV_VARS\b' -and $text.Contains('function sanitizeChildEnv')
   })
   if ($candidates.Count -ne 1) { throw "Expected exactly one Qwen child-environment sanitizer bundle under $chunkRoot; found $($candidates.Count)." }
   $path = $candidates[0].FullName
   $content = Get-Content -Raw -LiteralPath $path
-  $declaration = [regex]::Match($content, 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
-  if (-not $declaration.Success) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
+  # Exactly one declaration, checked before anything else: with two, JavaScript
+  # uses the last, so judging (or skipping) on the first could fail open.
+  $declarations = [regex]::Matches($content, 'var\s+INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
+  if ($declarations.Count -ne 1) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
+  $declaration = $declarations[0]
   if (-not $declaration.Value.Contains('"BAILIAN_CODING_PLAN_API_KEY"')) {
-    $needle = 'var INTERNAL_SECRET_ENV_VARS = ['
-    $replacement = "$needle`n  `"BAILIAN_CODING_PLAN_API_KEY`","
-    $index = $content.IndexOf($needle, [StringComparison]::Ordinal)
-    if ($index -lt 0) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
+    # Insert right after the declaration's opening bracket. Qwen 0.24 ships the
+    # bundle minified ("var INTERNAL_SECRET_ENV_VARS=[...]"), earlier builds
+    # pretty-printed; the regex match covers both and nothing else.
+    $index = $declaration.Index + $declaration.Value.IndexOf('[') + 1
+    $replacement = '"BAILIAN_CODING_PLAN_API_KEY",'
     $backupDir = Join-Path $HOME '.local\state\ai-devops\qwen\vendor-backups'
     [void](New-Item -ItemType Directory -Force -Path $backupDir)
     $backup = Join-Path $backupDir ("{0}.{1}.bak" -f $candidates[0].Name, ('{0}-{1}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ'), [guid]::NewGuid().ToString('N').Substring(0,8)))
     Copy-Item -LiteralPath $path -Destination $backup
-    $patched = $content.Substring(0, $index) + $replacement + $content.Substring($index + $needle.Length)
+    $patched = $content.Substring(0, $index) + $replacement + $content.Substring($index)
     $temp = "$path.harden.$PID.tmp"
     try {
       [IO.File]::WriteAllText($temp, $patched, [Text.UTF8Encoding]::new($false))

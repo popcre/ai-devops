@@ -31,7 +31,7 @@ $parityLines = @(
     "never delegate a schema change",
     "silent about being finished",
     "answered with an assumption",
-    "non-orchestrator work",
+    "claim exact objects on the existing issue",
     "Preparation is not delivery",
     "Ending the turn is the error",
     "Production infrastructure safety is absolute.",
