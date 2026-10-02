@@ -115,7 +115,8 @@ identity proof, claim rules, and live proof. Run:
 
     ai-task-gates check --before database \
       --small-owner-entry https://github.com/OWNER/REPO/issues/N \
-      --row-count 3 --owner-quote "<Albert's words, verbatim>"
+      --row-count 3 --owner-quote "<Albert's words, verbatim>" \\
+      --issue-body-file <issue body and comments saved from GitHub>
 
 The gate refuses a row count outside 1..10, a non-issue URL, a quote missing
 from the issue body or comments, any action other than `database`, and any
