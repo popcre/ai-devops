@@ -81,6 +81,13 @@ usage: ai-task-gates <command> [options]
   version
 
 ACTION is one of: review code-only-review pr-wait ship deploy database infrastructure production
+  shared-db-promotion
+
+shared-db-promotion is the one owner-authorized (Albert, 2026-10-02) launch of
+shared-db's merged-preview run that starts its automatic production promotion
+workflow for an approved, merged change. It opens only for the shared-db class
+in a repository whose policy requires production-promotion-authorization; it
+never allows a manual production command or a bypass of the workflow.
 EOF
 }
 
@@ -712,7 +719,7 @@ cmd_check(){
   # helper on central defaults alone.
   if [ "$IDENTITY_RESOLVED" != true ]; then
     case "$action" in
-      deploy|database|infrastructure|production)
+      deploy|database|infrastructure|production|shared-db-promotion)
         fail_closed "repository identity is unresolved; refusing to start '$action'." ;;
     esac
   fi
@@ -750,7 +757,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   if [ -z "$declared" ]; then
     if [ "$OBSERVED_CLASS" = none ]; then
       case "$action" in
-        deploy|database|infrastructure|production|code-only-review)
+        deploy|database|infrastructure|production|shared-db-promotion|code-only-review)
           fail_closed "no changes and no task class were found; refusing to start '$action' without an explicit declaration." ;;
       esac
       # An action bound to per-action proofs can never take the empty-change-set
@@ -803,6 +810,13 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     fi
     state_record_override acknowledge "$action" "$acknowledge" "$OBSERVED_CLASS"
     printf 'ai-task-gates: escalation to "%s" acknowledged: %s\n' "$OBSERVED_CLASS" "$acknowledge"
+  fi
+
+  # 1b. The shared-db promotion launch (owner ruling, Albert 2026-10-02: "let AI
+  # launch it and remove that rule permanently") belongs to the shared-db class
+  # only. No acknowledge or reviewer approval can carry it to another class.
+  if [ "$action" = shared-db-promotion ] && [ "$effective" != shared-db ]; then
+    blocked "$(printf 'ai-task-gates: STOP. "shared-db-promotion" opens only for the shared-db class; the effective class here is "%s" in %s.' "$effective" "$IDENTITY")"
   fi
 
   # 2. Forbidden action for the observed class.

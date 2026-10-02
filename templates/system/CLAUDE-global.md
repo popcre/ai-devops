@@ -144,9 +144,13 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.
-  This exception authorizes no manual production command, session-made workflow
-  dispatch, other repository, infrastructure action, or bypass. Before
-  production trigger or Terraform-state work, read the details doc.
+  Owner ruling (2026-10-02, verbatim: "let AI launch it and remove that rule
+  permanently"): an AI session may launch that workflow's merged-preview run for
+  an approved, merged change after `ai-task-gates check --before
+  shared-db-promotion` passes. This exception authorizes no manual production command,
+  other repository, infrastructure action, or bypass of the workflow's own
+  checks. Before production trigger or Terraform-state work, read the details
+  doc.
 - **Shared database:** reading schema and safe samples is open; row data
   belongs to the application. Every STRUCTURE change, and every outside bulk
   load into curated Master Data, is authored first in `popcre/shared-db` via
@@ -156,9 +160,6 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   existing issue and start; no orchestrator chat or marker is required. Scope
   stays the minimum: only database SHAPE changes or a curated Master Data
   load; never proofs, reports, tooling, or docs.
-- **Label every shared-db ticket.** Whenever a `popcre/shared-db` issue number
-  appears in a reply, say beside it whether it is orchestrator work (it changes
-  database structure) or non-orchestrator work (it does not).
 - **Sign everything posted to GitHub** with `Posted by Claude chat <id> on
   <machine>`, where `<id>` is `$CLAUDE_CODE_SESSION_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.
@@ -194,8 +195,10 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - **Albert does not merge — you do.** Merge every PR you were authorized to
   create, except DesignFlow or one Albert said he will review first.
 - **A documentation-only pull request skips checks without asking:** if every
-  changed file is prose, `gh pr merge --squash --admin` immediately; any code,
-  test, script, workflow, or config file means normal checks.
+  changed file is prose, merge it immediately the normal way (merge queue where
+  one exists, never `--admin`); repositories with a prose fast path report every
+  required check green in seconds. Any code, test, script, workflow, or config
+  file means normal checks.
 - **Wait on CI with the bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
