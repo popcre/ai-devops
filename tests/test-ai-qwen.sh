@@ -488,6 +488,16 @@ cp "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js" "$TMP/bad-sanitizer.js"
 sed 's/delete sanitized\[key\];/void key;/' "$TMP/bad-sanitizer.js" > "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js"
 check 'behavioral verifier rejects a sanitizer that retains the credential' "! '$AI_QWEN_SANITIZER_ROOT/node/bin/node' '$REPO_ROOT/tools/verify-qwen-child-env-sanitizer.mjs' '$AI_QWEN_SANITIZER_ROOT'"
 mv "$TMP/bad-sanitizer.js" "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js"
+# Qwen 0.24.7 ships the sanitizer minified on one line; the installer must
+# patch it and the verifier must execute it. Two declarations stay refused.
+MIN_ROOT="$TMP/qwen-minified"; mkdir -p "$MIN_ROOT/lib/chunks"; cp -R "$AI_QWEN_SANITIZER_ROOT/node" "$MIN_ROOT/node"
+MIN_BUNDLE='init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=["QWEN_SERVER_TOKEN","QWEN_DAEMON_TOKEN",PRIVATE_ACP_CAPABILITY_ENV];var INTERNAL_SECRET_ENV_VAR_NAMES=new Set(INTERNAL_SECRET_ENV_VARS.map(name=>name.toUpperCase()));function isInternalSecretEnvVar(name){return INTERNAL_SECRET_ENV_VAR_NAMES.has(name.toUpperCase())}__name(isInternalSecretEnvVar,"isInternalSecretEnvVar");function sanitizeChildEnv(env=process.env){const sanitized={...env};for(const key of Object.keys(sanitized)){if(isInternalSecretEnvVar(key)){delete sanitized[key]}}return sanitized}__name(sanitizeChildEnv,"sanitizeChildEnv");export{sanitizeChildEnv};'
+printf '%s\n' "$MIN_BUNDLE" > "$MIN_ROOT/lib/chunks/chunk-min.js"
+env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$MIN_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen >/dev/null 2>&1 \
+  && grep -Fq 'var INTERNAL_SECRET_ENV_VARS=["BAILIAN_CODING_PLAN_API_KEY","QWEN_SERVER_TOKEN"' "$MIN_ROOT/lib/chunks/chunk-min.js" \
+  && ok 'provider installer hardens the minified Qwen 0.24 sanitizer' || bad 'provider installer hardens the minified Qwen 0.24 sanitizer'
+printf '%s\n' "${MIN_BUNDLE/init_esbuild_shims();/init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=[\"X\"];}" > "$MIN_ROOT/lib/chunks/chunk-min.js"
+check 'provider installer refuses an ambiguous Qwen sanitizer bundle' "! env HOME='$TMP/installer-home' PATH='$STUB:$PATH' AI_QWEN_SANITIZER_ROOT='$MIN_ROOT' bash '$REPO_ROOT/bin/install-ai-provider-clis.sh' qwen"
 
 : > "$TMP/argv.txt"
 INITIAL_STARTED=$SECONDS
