@@ -388,7 +388,7 @@ small_owner_entry_summary(){
   if [ -n "${AI_TASK_GATES_ISSUE_BODY_FILE:-}" ]; then
     body="$(cat "$AI_TASK_GATES_ISSUE_BODY_FILE" 2>/dev/null)" || body=""
   else
-    body="$(gh issue view "$num" -R "$repo" --json body,comments -q '.body, (.comments[].body)' 2>/dev/null)" || body=""
+    body="$(AI_GH_CALLER=ai-task-gates "$SCRIPT_DIR/ai-gh" issue view "$num" -R "$repo" --json body,comments -q '.body, (.comments[].body)' 2>/dev/null)" || body=""
   fi
   [ -n "$body" ] && grep -qF -- "$quote" <<<"$body" \
     || { printf 'ai-task-gates: STOP. Issue %s does not quote the owner request verbatim (--owner-quote not found).\n' "$url" >&2; return 1; }
