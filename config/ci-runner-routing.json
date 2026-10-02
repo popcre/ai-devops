@@ -4,7 +4,7 @@
   "max_active_runs_sampled": 15,
   "windows_sections": 12,
   "github_windows": "windows-2025",
-  "github_windows_limit": 8,
+  "github_windows_limit": 12,
   "qualified_windows": ["self-hosted", "Windows", "X64", "ai-devops-windows-qualified"],
   "qualified_label": "ai-devops-windows-qualified",
   "warpbuild_windows": "warp-custom-warpbuild-win2022-canary",

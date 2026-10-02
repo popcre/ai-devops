@@ -60,14 +60,14 @@ check('WarpBuild is the final option only when GitHub is full and ENVY is gone',
   const p = decide(cfg, { event: 'pull_request', idleQualified: 0, githubFull: true });
   assert.strictEqual(lanes(p.windows_matrix), allWarp);
   const mixed = decide(cfg, { event: 'pull_request', idleQualified: 1, githubFull: true });
-  assert.strictEqual(lanes(mixed.windows_matrix), 'qualified-self-hosted,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild');
+  assert.strictEqual(lanes(mixed.windows_matrix), ['qualified-self-hosted'].concat(Array(cfg.windows_sections - 1).fill('warpbuild')).join(','));
   const notFull = decide(cfg, { event: 'pull_request', idleQualified: 0, githubFull: false });
   assert.ok(notFull.windows_matrix.every(w => w.lane === 'github-hosted'));
 });
 check('github_windows_limit overflows the remainder to WarpBuild', () => {
   const limited = Object.assign({}, cfg, { github_windows_limit: 2 });
   const p = decide(limited, { event: 'pull_request', idleQualified: 0 });
-  assert.strictEqual(lanes(p.windows_matrix), 'github-hosted,github-hosted,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild');
+  assert.strictEqual(lanes(p.windows_matrix), ['github-hosted', 'github-hosted'].concat(Array(cfg.windows_sections - 2).fill('warpbuild')).join(','));
 });
 check('a foreign head never reaches the self-hosted pool or WarpBuild', () => {
   const p = decide(cfg, { event: 'pull_request', idleQualified: 50, foreign: true });
