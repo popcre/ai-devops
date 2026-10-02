@@ -173,7 +173,7 @@ run(){
   local allow="${AI_STEPFUN_RUNNERS_JSON:-${HOME}/.config/ai-devops/secrets/stepfun-windows-runners.json}"
   local real=""
   if [ -f "$allow" ] && command -v jq >/dev/null 2>&1; then
-    real="$(jq -r --arg n "$runner_lc" '.[$n] // empty' "$allow" 2>/dev/null || true)"
+    real="$(jq -r --arg n "$runner_lc" '.[$n].path // .[$n] // empty' "$allow" 2>/dev/null || true)"
   fi
   if [ -z "$real" ]; then
     # Offline/test fallback: resolve from GATE_PATH only (not host PATH).
@@ -228,7 +228,7 @@ case "$runner_lc" in
     else
       [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args'
       assert_in_folder "$sub"
-      run "$@"
+      run "$sub"
     fi
     ;;
   go|cargo|dotnet)

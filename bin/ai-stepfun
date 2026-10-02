@@ -254,19 +254,15 @@ run_opencode_turn(){
     [ -n "$home_dir" ] || die 'cannot resolve the Windows user profile'
     win_home="$(mktemp -d "$STATE_DIR/oc-home.XXXXXX")"; chmod 700 "$win_home"
     mkdir -p "$win_home/appdata" "$win_home/localappdata" "$win_home/tmp"
-    install_oc_profile "$xdg"
     # Prefer the Windows agent profiles when present (per-OS tools map).
-    if [ -f "$OC_PROFILE_SRC/agent/stepfun-review-windows.md" ]; then
-      cp "$OC_PROFILE_SRC/agent/stepfun-review-windows.md" "$xdg/config/opencode/agent/$OC_AGENT_REVIEW.md"
-    fi
-    if [ -f "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" ]; then
-      cp "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" "$xdg/config/opencode/agent/$OC_AGENT_IMPLEMENT.md"
-    fi
+    [ -f "$OC_PROFILE_SRC/agent/stepfun-review-windows.md" ] || die 'Windows review profile is missing'
+    [ -f "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" ] || die 'Windows implement profile is missing'
+    cp "$OC_PROFILE_SRC/agent/stepfun-review-windows.md" "$xdg/config/opencode/agent/$OC_AGENT_REVIEW.md"
+    cp "$OC_PROFILE_SRC/agent/stepfun-implement-windows.md" "$xdg/config/opencode/agent/$OC_AGENT_IMPLEMENT.md"
     load_key
     log="$out.jsonl"
     # Closed gate PATH (not host PATH): Git usr/bin + cmd + PowerShell v1.0.
-    local git_root gate_path
-    git_root="$(cd / && printf '%s' /c/Program\ Files/Git 2>/dev/null || true)"
+    local gate_path
     [ -d "/c/Program Files/Git/usr/bin" ] || die 'Git for Windows is required (usr/bin)'
     # Closed gate PATH: GNU tools only from Git usr/bin + runner allowlist dir.
     # Do not put Git cmd (git/ssh) or System32 on the gate PATH.
@@ -290,10 +286,13 @@ run_opencode_turn(){
         AI_STEPFUN_RUNNERS_JSON="${AI_STEPFUN_RUNNERS_JSON:-$home_dir/.config/ai-devops/secrets/stepfun-windows-runners.json}" \
         XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
         XDG_STATE_HOME="$xdg/state" XDG_CACHE_HOME="$xdg/cache"
-      # Force bash tool through the gate via a PATH shim.
+      # Force bash tool through the gate via PATH shims with Windows extensions
+      # (PATHEXT resolution: extensionless `bash` is ignored).
       mkdir -p "$win_home/shim"
       printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$gate" > "$win_home/shim/bash"
       chmod +x "$win_home/shim/bash"
+      cp "$win_home/shim/bash" "$win_home/shim/bash.exe"
+      printf '@echo off\r\nbash "%%~dp0bash" %%*\r\n' > "$win_home/shim/bash.cmd"
       export PATH="$win_home/shim:$gate_path"
       printf '%s' "$prompt" | "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
         --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$dir" \
