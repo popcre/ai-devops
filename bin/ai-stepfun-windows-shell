@@ -181,7 +181,6 @@ run(){
     got="$(sha256sum "$real" | awk '{print $1}')"
     [ "$got" = "$want" ] || REFUSE 'runner hash mismatch'
     [ -x "$real" ] || REFUSE 'runner path not executable'
-    [ -x "$real" ] || REFUSE 'runner path not executable'
     cd "$REVIEW_DIR"
     # Keep system dirs so shebangs (env/bash) resolve; no shim re-entry.
     export PATH="${GATE_PATH:-/usr/bin:/bin}:/usr/bin:/bin"
