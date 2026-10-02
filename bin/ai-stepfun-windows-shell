@@ -174,13 +174,13 @@ run(){
     real="$(jq -r --arg n "$runner_lc" '.[$n].path // .[$n] // empty' "$allow" 2>/dev/null || true)"
     local want=""
     want="$(jq -r --arg n "$runner_lc" '.[$n].sha256 // empty' "$allow" 2>/dev/null || true)"
-    if [ -n "$real" ] && [ -n "$want" ] && command -v sha256sum >/dev/null 2>&1; then
-      local got
-      got="$(sha256sum "$real" | awk '{print $1}')"
-      [ "$got" = "$want" ] || REFUSE 'runner hash mismatch'
-    fi
-    # Allowlist present: never fall open to PATH search.
     [ -n "$real" ] || REFUSE 'runner not in allowlist'
+    [ -n "$want" ] || REFUSE 'runner hash pin missing'
+    command -v sha256sum >/dev/null 2>&1 || REFUSE 'sha256sum unavailable'
+    local got
+    got="$(sha256sum "$real" | awk '{print $1}')"
+    [ "$got" = "$want" ] || REFUSE 'runner hash mismatch'
+    [ -x "$real" ] || REFUSE 'runner path not executable'
     [ -x "$real" ] || REFUSE 'runner path not executable'
     cd "$REVIEW_DIR"
     export PATH="${GATE_PATH:-/usr/bin:/bin}"
