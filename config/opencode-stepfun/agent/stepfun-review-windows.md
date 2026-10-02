@@ -4,6 +4,13 @@ mode: primary
 model: stepfun-api/step-5-preview
 tools:
   bash: true
+  read: false
+  edit: false
+  write: false
+  patch: false
+  glob: false
+  grep: false
+  list: false
   webfetch: false
   task: false
   todowrite: true

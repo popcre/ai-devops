@@ -196,10 +196,14 @@ run(){
 case "$runner_lc" in
   npm)
     case "$sub" in
-      test) run test ;;
+      test)
+        [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args'
+        run test
+        ;;
       run)
         name="${tokens[2]:-}"
         [ -n "$name" ] || REFUSE 'npm run needs name'
+        [ "${#tokens[@]}" -eq 3 ] || REFUSE 'extra args'
         is_safe_name "$name" || REFUSE 'npm name'
         case "$name" in *:*) allow_colon_name "$name" || REFUSE 'npm name' ;; esac
         run run "$name"
@@ -220,18 +224,24 @@ case "$runner_lc" in
     if [ "${#tokens[@]}" -eq 1 ]; then
       run
     else
+      [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args'
       assert_in_folder "$sub"
       run "$@"
     fi
     ;;
-  go)
-    case "$sub" in test|build) run "$@" ;; *) REFUSE 'go subcommand' ;; esac
-    ;;
-  cargo)
-    case "$sub" in test|build) run "$@" ;; *) REFUSE 'cargo subcommand' ;; esac
-    ;;
-  dotnet)
-    case "$sub" in test|build) run "$@" ;; *) REFUSE 'dotnet subcommand' ;; esac
+  go|cargo|dotnet)
+    case "$sub" in test|build) ;; *) REFUSE 'runner subcommand' ;; esac
+    # Any path-looking operand must stay in the folder; flag-shaped args are refused.
+    i=2
+    while [ "$i" -lt "${#tokens[@]}" ]; do
+      a="${tokens[i]}"
+      case "$a" in
+        -*) REFUSE 'unknown flag' ;;
+        *) assert_in_folder "$a" ;;
+      esac
+      i=$((i+1))
+    done
+    run "$@"
     ;;
   ls|cat|head)
     [ -n "$sub" ] || REFUSE 'missing path'
@@ -242,8 +252,8 @@ case "$runner_lc" in
   bash|sh)
     # file runner only — already Layer0-stripped if -c
     case "${tokens[1]:-}" in
-      --noprofile) [ "${tokens[2]:-}" = '--norc' ] || REFUSE 'bash flags'; f="${tokens[3]:-}" ;;
-      *) f="${tokens[1]:-}" ;;
+      --noprofile) [ "${tokens[2]:-}" = '--norc' ] || REFUSE 'bash flags'; f="${tokens[3]:-}"; [ "${#tokens[@]}" -eq 4 ] || REFUSE 'extra args' ;;
+      *) f="${tokens[1]:-}"; [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args' ;;
     esac
     [ -n "$f" ] || REFUSE 'missing script'
     assert_in_folder "$f"

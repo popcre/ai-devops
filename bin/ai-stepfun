@@ -91,7 +91,7 @@ detect_engine(){
   else ENGINE=""; fi
 }
 require_engine(){
-  # Linux: every turn must run under bubblewrap (rule 11, #1086).
+  # Linux: every turn must run under bubblewrap (rotation rules item 12, #1086).
   # Windows (owner 2026-09-30 "folder + test shell"): OpenCode only, gated
   # shell + disposable folder. Not rule-11 equivalent. StepCode stays Linux-only.
   if [ "$IS_LINUX" = 1 ]; then
@@ -102,7 +102,12 @@ require_engine(){
     esac
   fi
   if [ "$IS_WINDOWS" = 1 ]; then
-    ENGINE=opencode
+    case "${ENGINE:-}" in
+      stepcode)
+        printf 'ai-stepfun: unsupported-platform: StepCode is Linux-only. Use OpenCode on Windows (folder + test shell).\n' >&2; exit 2 ;;
+      opencode|'') ENGINE=opencode ;;
+      *) printf 'ai-stepfun: unsupported-platform: unknown engine %s on Windows.\n' "$ENGINE" >&2; exit 2 ;;
+    esac
     [ -x "$OC_BIN" ] || command -v opencode >/dev/null 2>&1 || {
       printf 'ai-stepfun: unsupported-platform: no OpenCode install. Run bin/setup-opencode-glm.ps1 first.\n' >&2; exit 2
     }
@@ -262,7 +267,9 @@ run_opencode_turn(){
     local git_root gate_path
     git_root="$(cd / && printf '%s' /c/Program\ Files/Git 2>/dev/null || true)"
     [ -d "/c/Program Files/Git/usr/bin" ] || die 'Git for Windows is required (usr/bin)'
-    gate_path="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0"
+    # Closed gate PATH: GNU tools only from Git usr/bin + runner allowlist dir.
+    # Do not put Git cmd (git/ssh) or System32 on the gate PATH.
+    gate_path="/c/Program Files/Git/usr/bin"
     timeout_win="/c/Program Files/Git/usr/bin/timeout"
     [ -x "$timeout_win" ] || timeout_win="$(command -v timeout || true)"
     ( for name in $(compgen -e); do
@@ -279,6 +286,7 @@ run_opencode_turn(){
         STEPFUN_API_KEY="$STEP_KEY" \
         AI_STEPFUN_REVIEW_DIR="$dir" \
         GATE_PATH="$gate_path" \
+        AI_STEPFUN_RUNNERS_JSON="${AI_STEPFUN_RUNNERS_JSON:-$home_dir/.config/ai-devops/secrets/stepfun-windows-runners.json}" \
         XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
         XDG_STATE_HOME="$xdg/state" XDG_CACHE_HOME="$xdg/cache"
       # Force bash tool through the gate via a PATH shim.
