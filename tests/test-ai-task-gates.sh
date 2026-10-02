@@ -1036,4 +1036,39 @@ for args in 'start --class' 'start --class prose --reason' 'start --base' 'check
     "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
 done
 
+# Owner ruling 2026-10-02 ("yes, small entries can skip the reviewer"): a
+# small owner-requested row-data write (1..10 rows) may pass the database gate
+# without an AI reviewer, but only with the issue quoting the owner verbatim.
+newrepo "$TMP/small-entry" popcre/some-app
+( cd "$TMP/small-entry" && "$GATES" start --class code >/dev/null 2>&1 )
+SMALL_URL='https://github.com/popcre/some-app/issues/7'
+printf 'Owner request (verbatim): "add the three Hasbro contacts"\n' > "$TMP/small-issue.md"
+export AI_TASK_GATES_ISSUE_BODY_FILE="$TMP/small-issue.md"
+SMALL_Q='add the three Hasbro contacts'
+check 'database without reviewer or small entry stays blocked' \
+  "rc 3 '$TMP/small-entry' check --before database"
+check 'a 3-row owner entry passes the database gate without a reviewer' \
+  "out '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' | grep -q 'allowed as a small owner-requested entry'"
+check 'a 10-row owner entry is still small' \
+  "rc 0 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 10 --owner-quote '$SMALL_Q'"
+check 'an 11-row entry needs a reviewer' \
+  "rc 3 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 11 --owner-quote '$SMALL_Q'"
+check 'a zero or non-numeric row count is refused' \
+  "rc 3 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 0 --owner-quote '$SMALL_Q' && rc 3 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 3x --owner-quote '$SMALL_Q'"
+check 'a missing row count is refused' \
+  "rc 3 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --owner-quote '$SMALL_Q'"
+check 'a quote absent from the issue is refused' \
+  "rc 3 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote 'delete everything'"
+check 'a non-issue URL is refused' \
+  "rc 3 '$TMP/small-entry' check --before database --small-owner-entry 'https://example.com/x' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'small entry never releases other actions' \
+  "rc 3 '$TMP/small-entry' check --before production --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'the small-entry release is recorded in task state' \
+  "jq -e '.overrides|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-entry')\" >/dev/null"
+unset AI_TASK_GATES_ISSUE_BODY_FILE
+for args in 'check --small-owner-entry' 'check --row-count' 'check --owner-quote'; do
+  check "missing value for '$args' fails fast instead of looping" \
+    "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
+done
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

@@ -92,6 +92,35 @@ its full checklist lives in `skills/shared/shared-db-orchestrator/` and
 `skills/shared/shared-db-change/`. That exception authorizes no manual
 production command.
 
+## Small owner entries
+
+Owner ruling (2026-10-02, Albert Hazan, from chat, verbatim): Q: "should small
+owner-requested record entries skip the AI reviewer?" A: "yes, small entries
+can skip the reviewer".
+
+"Small" is defined narrowly (an implementing assumption; a broader reading
+needs a new owner ruling). A write qualifies only when ALL hold:
+
+1. Albert asked for it, and the linked GitHub issue quotes his request verbatim.
+2. It writes application row data only: no structure, schema, migration,
+   security-rule, permission, or curated Master Data bulk-load change, and no
+   deletion of any row.
+3. It touches at most 10 rows in the shared database.
+4. It runs as one guarded transaction that first proves the target database
+   and asserts the exact affected row count, rolling back on any mismatch.
+
+Such a write skips only the assigned-AI-reviewer APPROVE. Every other gate
+stays: task declaration, class escalation, protected-class seals, target
+identity proof, claim rules, and live proof. Run:
+
+    ai-task-gates check --before database \
+      --small-owner-entry https://github.com/OWNER/REPO/issues/N \
+      --row-count 3 --owner-quote "<Albert's words, verbatim>"
+
+The gate refuses a row count outside 1..10, a non-issue URL, a quote missing
+from the issue body or comments, any action other than `database`, and any
+protected class; the release is recorded in the task state.
+
 ## Reviewer rotation details
 
 `docs/reviewer-rotation-rules.md`. Reviewer wrappers never call 1Password
