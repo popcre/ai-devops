@@ -1075,6 +1075,11 @@ check 'a trivially short quote is refused' \
 newrepo "$TMP/small-undeclared" popcre/some-app; echo change > "$TMP/small-undeclared/app.txt"
 check 'a small entry without a declared task is refused (no unrecorded release)' \
   "! rc 0 '$TMP/small-undeclared' check --before database --small-owner-entry 'https://github.com/popcre/some-app/issues/7' --row-count 3 --owner-quote '$SMALL_Q' --issue-body-file '$TMP/small-issue.md'"
+check 'a REST-shaped issue (user.login) is accepted' \
+  "jq -n --arg u '$SMALL_URL' '{url:\$u, user:{login:\"u2giants\"}, body:\"add the three Hasbro contacts\", comments:[]}' > '$TMP/small-rest.json' && rc 0 '$TMP/small-entry' check --before database --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' --issue-body-file '$TMP/small-rest.json'"
+newrepo "$TMP/small-corrupt" popcre/some-app
+check 'an unrecordable release is refused' \
+  "( cd '$TMP/small-corrupt' && '$GATES' start --class code >/dev/null 2>&1 ) && f=\"\$(state_file_for '$TMP/small-corrupt')\" && jq '.overrides = \"broken\"' \"\$f\" > \"\$f.x\" && mv \"\$f.x\" \"\$f\" && rc 3 '$TMP/small-corrupt' check --before database --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' --issue-body-file '$TMP/small-issue.md'"
 check 'small-entry options without --small-owner-entry fail' \
   "rc 1 '$TMP/small-entry' check --before database --row-count 3"
 check 'small entry and reviewer approval together fail' \

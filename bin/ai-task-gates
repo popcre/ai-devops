@@ -403,12 +403,11 @@ small_owner_entry_summary(){
     || { _soe_stop 'A small owner entry needs --issue-body-file: the GitHub issue JSON with url, body, and comments.'; return 1; }
   exec {fd}<"$body_file" || { _soe_stop 'The issue body file could not be opened.'; return 1; }
   json="$(cat <&"$fd")"; exec {fd}<&-
-  [ ! -L "$body_file" ] || { _soe_stop 'The issue body file could not be read safely.'; return 1; }
   jq -e --arg u "$url" '.url == $u and (.body|type=="string")' >/dev/null 2>&1 <<<"$json" \
     || { _soe_stop "The issue body file is not the GitHub issue JSON for $url."; return 1; }
   text="$(jq -r --argjson owners "$OWNER_LOGINS" '
-    ([{author:.author, body:.body}] + (.comments // []))[]
-    | select((.author.login // "" | ascii_downcase) as $l | $owners | index($l))
+    ([{author:.author, user:.user, body:.body}] + (.comments // []))[]
+    | select((.author.login // .user.login // "" | ascii_downcase) as $l | $owners | index($l))
     | .body // empty' <<<"$json" | tr -d '\r')"
   grep -qF -- "$quote" <<<"$text" \
     || { _soe_stop "Issue $url does not quote the owner request verbatim in owner-authored text (--owner-quote not found)."; return 1; }
@@ -888,7 +887,9 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     fi
     if [ -n "$small_entry" ]; then
       approval_summary="$(small_owner_entry_summary "$action" "$small_entry" "$small_rows" "$small_quote" "$small_body" "$effective")" || exit "$EX_BLOCKED"
-      state_record_override small-owner-entry "$action" "$approval_summary" "$effective"
+      state_record_override small-owner-entry "$action" "$approval_summary" "$effective" \
+        && jq -e --arg r "$approval_summary" '.overrides | map(select(.kind=="small-owner-entry" and .reason==$r)) | length > 0' "$(state_path)" >/dev/null 2>&1 \
+        || blocked 'ai-task-gates: STOP. The small owner entry could not be recorded in the task state; nothing was released.'
       printf 'ai-task-gates: "%s" allowed as a small owner-requested entry (no AI reviewer, owner ruling 2026-10-02): %s\n' "$action" "$approval_summary"
       return 0
     fi
