@@ -11,9 +11,11 @@ GitHub signature this session: `Posted by MiMo chat ses_ffe5f06a5eb68ffeJ09D0qCZ
 
 ## 0. Decisions only the owner can make
 
-- **Already decided (do not re-ask):** Watchdogs become plain timed tasks on
-  edge-dev; GitHub free runners are backup only; never pay for watchdogs again
-  (Albert, 2026-10-01 chat).
+- **Already decided (do not re-ask):** Watchdogs become plain timed tasks;
+  GitHub free runners are backup only; never pay for watchdogs again (Albert,
+  2026-10-01 chat). **Automatic rotation** across edge-dev, edge-dev3, and hetz
+  because Albert’s PCs have imperfect uptime (Albert, 2026-10-01 follow-up).
+  Duty is single-poster via a short claim/lease on a standing GitHub issue.
 - **Still his:** nothing required to start implementation.
 
 ## 1. What this project is
@@ -39,8 +41,9 @@ primary cadence off Actions entirely.
 
 ## 4. Next concrete step
 
-Start at plan STATUS **P0** (shared local-watch harness), then P1–P5 as in the
-plan. Fresh session: open the plan file, read STATUS, claim one row.
+Start at plan STATUS **P0** (shared local-watch harness), then **P0b** (claim/
+lease), then P1–P5. Fresh session: open the plan file, read STATUS, claim one
+row. Failover proof needs at least two hosts (edge-dev + edge-dev3 or hetz).
 
 ## 5. What must not be lost
 

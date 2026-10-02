@@ -7,11 +7,12 @@ Handoff registration: [HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-t
 | Step | One independently accepted outcome | State | Evidence when done |
 |---|---|---|---|
 | P0 | Shared local-watch harness (`schedule` / `tick` / log / lock) reused, not copied | ⬜ open | |
-| P1 | Runner-pool watch as a local timed task on edge-dev | ⬜ open | |
+| P0b | Multi-host claim/lease helper (`ai-local-watch claim`) + `watch_hosts` config | ⬜ open | |
+| P1 | Runner-pool watch as a local timed task (primary on claim holder) | ⬜ open | |
 | P2 | Windows queue-slow watch as a local timed task (replaces Action-on-every-verify) | ⬜ open | |
 | P3 | Membership-drift + merge-queue-drift as local timed tasks | ⬜ open | |
 | P4 | Free GitHub Actions kept only as backup; paid Blacksmith gone from watchdogs | ⬜ open | |
-| P5 | Installer + docs updated; live proof on edge-dev | ⬜ open | |
+| P5 | Installer + docs updated; live proof on **edge-dev, edge-dev3, and hetz** (failover proven) | ⬜ open | |
 
 **Where a fresh session starts:** P0. Do not open P1 until P0’s verification gate is green. Re-read this STATUS table before each phase; the plan is stale the moment a row turns done.
 
@@ -19,9 +20,9 @@ Handoff registration: [HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-t
 
 ## 1. The ultimate goal — what we are actually trying to achieve
 
-Albert pays for CI runners. Watchdogs are small alarm scripts — they should not sit on paid machines, and they should not even need GitHub Actions when a computer he already owns can run them on a timer.
+Albert pays for CI runners. Watchdogs are small alarm scripts — they should not sit on paid machines, and they should not even need GitHub Actions when computers he already owns can run them on a timer. Those computers do not have perfect uptime, so one pinned host is not enough.
 
-When this is done: every routine watchdog that used to burn a GitHub Actions job (including paid Blacksmith) runs as a plain timed task on **edge-dev** (this machine). GitHub’s **free** hosted runners remain only as a backup alarm if edge-dev is asleep, offline, or the local tick stops reporting. The expensive path is gone.
+When this is done: every routine watchdog that used to burn a GitHub Actions job (including paid Blacksmith) runs as a plain timed task on **edge-dev, edge-dev3, or hetz**, with automatic failover — whichever machine is alive and holds the claim posts the alarm. GitHub’s **free** hosted runners remain only as a backup alarm if every local host is down or the claim has gone stale. The expensive path is gone, and a single offline PC does not silence the alarms.
 
 If a step below conflicts with this goal, the goal wins — stop and flag it.
 
@@ -31,11 +32,11 @@ If a step below conflicts with this goal, the goal wins — stop and flag it.
 
 Watchdogs today are GitHub Actions workflows under `.github/workflows/`. Their job is to notice stuck queues, a dead Windows runner pool, or a registry/allocator mismatch, and leave a loud alarm (issue comment or failing non-required check). They do not merge code.
 
-This machine is **edge-dev** (Windows). It already runs Task Scheduler jobs for `ai-blocker-watch tick`, `ai-reviewer-start-watch tick`, and `ai-reap-shared-db-worktrees` — that pattern is the one to copy.
+This machine is **edge-dev** (Windows). The candidate host set for watchdog duty is **edge-dev** (Windows, Task Scheduler), **edge-dev3** (Ubuntu desktop, user crontab / systemd user timer), and **hetz** (Ubuntu VPS, user crontab — higher uptime). edge-dev already runs Task Scheduler jobs for `ai-blocker-watch tick`, `ai-reviewer-start-watch tick`, and `ai-reap-shared-db-worktrees` — that pattern is the one to copy. Host nicknames and SSH routes live in the protected machine atlas; never put keys in the public repo.
 
 ## 3. What triggered this work
 
-On 2026-10-01 Albert reported about **$1000 of Blacksmith spend in two weeks**. He then turned Blacksmith off; jobs whose labels still named Blacksmith sat queued and agents waited. A follow-up question was why a watchdog needs a paid runner at all. Answer: it does not. He asked for a plan to make those small scripts **plain timed tasks on this machine**, with **GitHub’s free machines as a backup**.
+On 2026-10-01 Albert reported about **$1000 of Blacksmith spend in two weeks**. He then turned Blacksmith off; jobs whose labels still named Blacksmith sat queued and agents waited. A follow-up question was why a watchdog needs a paid runner at all. Answer: it does not. He asked for a plan to make those small scripts **plain timed tasks on this machine**, with **GitHub’s free machines as a backup**. The same day he added: **“my computers don't always have the best uptime”** and asked for **automatic rotation across edge-dev, edge-dev3, or hetz**. Single-host pin is therefore not sufficient; failover is in scope.
 
 Related live work (do not re-derive): [PR #1193](https://github.com/popcre/ai-devops/pull/1193) already switches verify + remaining Action watchdogs from Blacksmith to free GitHub-hosted / ENVY / WarpBuild. This plan **complements** that PR: after #1193, watchdog Actions are free but still burn Actions minutes and still depend on GitHub’s schedule reliability (GitHub has dropped scheduled runs on this repo — see `stuck-work-watchdog.yml` header).
 
@@ -44,9 +45,10 @@ Related live work (do not re-derive): [PR #1193](https://github.com/popcre/ai-de
 **In scope**
 - The four Action-based watchdog workflows listed in §5.
 - A small shared local-watch harness (or reuse of an existing one) so each watchdog gets `schedule` / `tick` / log / lock like `ai-blocker-watch`.
-- Task Scheduler registration on edge-dev via the existing installer path.
-- Free GitHub-hosted Actions kept as **backup only** (lower frequency and/or heartbeat-stale trigger).
-- Tests for the new/changed `bin/` tools and schedule registration.
+- **Multi-host claim/lease failover** across edge-dev, edge-dev3, and hetz (automatic rotation when the current duty host is down).
+- Schedule registration on each candidate host (Task Scheduler on Windows, crontab/systemd on Linux) via the existing installer paths.
+- Free GitHub-hosted Actions kept as **backup only** (when the shared claim is stale).
+- Tests for the new/changed `bin/` tools, claim helper, and schedule registration.
 
 **NOT in this plan**
 - Changing `verify.yml` required CI, merge-queue rules, or runner pool for the main test matrix (owned by PR #1193 / WarpBuild #961).
@@ -67,7 +69,8 @@ Related live work (do not re-derive): [PR #1193](https://github.com/popcre/ai-de
 | `stuck-work-watchdog.yml` | **Already free** (`ubuntu-latest`) and **already scheduled from local** `ai-blocker-watch tick` on `fixer_on_host` — GitHub cron is deliberately unused because GitHub dropped scheduled runs. This is the target architecture. | `.github/workflows/stuck-work-watchdog.yml:15–21, 41` |
 | Local schedule pattern | Each tool has `schedule` / `tick`, Task Scheduler via `schtasks /F`, log under `~/.ai-devops/<tool>/`, host selected by config JSON. Installer wires them. | `bin/ai-blocker-watch`, `bin/ai-reviewer-start-watch`, `bin/ai-reap-shared-db-worktrees`; `install-ai-devops-windows.ps1:1207–1271`; `docs/deployment.md:87–105` |
 | Drift CLIs already exist | `bin/ai-merge-queue-drift`, `bin/ai-reviewer-membership-drift` — **reuse**, do not fork. | `bin/ai-merge-queue-drift`, `bin/ai-reviewer-membership-drift` |
-| Host pinning example | `config/reviewer-start-watch.json` `run_on_host`; `config/blocker-watch.json` `propagate_on_host` / `stuck_watchdog_*`. | those config files |
+| Host pinning example | `config/reviewer-start-watch.json` `run_on_host`; `config/blocker-watch.json` `propagate_on_host` (edge-dev) / `fixer_on_host` (edge-dev3) / `stuck_watchdog_*`. **Pin without failover** — if that host is offline, the duty is silent. | those config files |
+| Candidate hosts | edge-dev (Windows Task Scheduler), edge-dev3 (Ubuntu, `ssh -i ~/.ssh/916-alien ahazan@edge-dev3`), hetz (Ubuntu VPS, `ssh vps2-direct`, user `ai` on `/worksp/ai-devops`). Installs: `install.ps1` / `install.sh`. | `docs/restore-from-zero.md`, handoff fleet-adopt notes |
 
 ## 6. Key findings and root cause
 
@@ -76,6 +79,7 @@ Related live work (do not re-derive): [PR #1193](https://github.com/popcre/ai-de
 3. **Event-driven watch ≠ must stay in Actions.** `windows-queue-watchdog` looks like it must be a `workflow_run` hook, but its real job is: “for each in-progress PR verify, if Windows sections are still queued after ~3 minutes, comment once.” A local 1–2 minute tick can do the same list+comment via `ai-gh`, and can cancel/ignore non-PR runs without creating an Actions run at all.
 4. **Same-machine pattern is already proven.** `ai-reviewer-start-watch` every 2 minutes and `ai-blocker-watch tick` every 10 minutes run unattended on edge-dev with Task Scheduler, a tick lock, and `tick.log` (`docs/task-router.md` reviewer-start-watch row; `tests/verification/github-requests/s1-edge-dev-2026-09-27.md`).
 5. **Local primary + Actions backup matches `stuck-work-watchdog`.** That workflow is only a manual/backup execution surface; the cadence lives on the machine.
+6. **Single-host pin dies with the host.** Albert (2026-10-01): his computers “don’t always have the best uptime.” `propagate_on_host` / `run_on_host` are single points of silence. Failover needs a **shared claim** any host can see (hosts cannot see each other’s disks). GitHub via `ai-gh` is the only shared store every candidate already has; a short lease (renewed each successful duty tick) is enough.
 
 ## 7. Approaches considered and REJECTED, and why
 
@@ -88,18 +92,24 @@ Related live work (do not re-derive): [PR #1193](https://github.com/popcre/ai-de
 | Fold every watch into one `ai-blocker-watch tick` without a shared harness | BlockerWatch is a different ownership/safety surface; bolting five unrelated alarms on it makes failures impossible to attribute. Prefer **one shared local-watch helper** + thin per-tool ticks (P0). |
 | Delete the watchdogs | They close real blind spots (dead Windows pool silently drops coverage; merge-queue drift ejects PRs for hours). Goal is *move*, not *remove*. |
 | Ask Albert to keep a PC on / RDP in to click things | Standing rule: AI runs the manual steps. Task Scheduler + login-as-user (S4U where appropriate) is the supported path already used on this machine. |
+| Keep a single `run_on_host` pin (first draft of this plan) | Silences alarms when that host is offline — the exact failure Albert named. Replaced by claim/lease failover (2026-10-01). |
+| All hosts always run every tick and always post | Triple API reads (conflicts with GitHub request reduction #658) and triple comments. Claim/lease keeps one poster. |
+| Lease on a Synology share or a shared-db table | Synology is not mounted on every host; shared-db structure is a governed cross-repo change for a watchdog detail. Rejected for v1. |
 
 ## 8. Design decisions already made (dated)
 
 | Decision | Status | Reason |
 |---|---|---|
-| Primary runtime = **Task Scheduler on edge-dev** (2026-10-01, Albert: “plain timed tasks on this machine”) | **LOCKED** | Owner request; matches existing machine pattern. |
+| Primary runtime = **local timed tasks** on edge-dev / edge-dev3 / hetz (2026-10-01, Albert: “plain timed tasks on this machine”; then automatic rotation across the three) | **LOCKED** | Owner request; matches existing machine pattern; uptime failover. |
+| **Automatic rotation** = short claim/lease (default TTL 3× the tool’s tick interval, min 15 min), stored as a marker on one standing GitHub issue via `ai-gh`; duty host renews while healthy; any listed host may claim when stale (2026-10-01) | **LOCKED** | Shared store every host already has; no new service; one poster. |
 | Backup runtime = **GitHub free hosted** (`ubuntu-24.04` / `ubuntu-latest`), never Blacksmith (2026-10-01) | **LOCKED** | Owner cost rule; public repo free tier. |
 | Reuse `bin/ai-merge-queue-drift` and `bin/ai-reviewer-membership-drift` rather than reimplement (2026-10-01) | **LOCKED** | Repository reuse rule. |
 | One shared local-watch harness (schedule/tick/lock/log) instead of five copy-pasted Task Scheduler scripts (2026-10-01) | **LOCKED** | Harness consolidation (#167 class); copy #9 trap in reviewer-wrapper audits. |
 | `windows-queue-watchdog` messaging must stop recommending Blacksmith (2026-10-01) | **LOCKED** | Blacksmith is out of the pool (PR #1193 / owner cost direction). |
-| Which exact host name string goes in the new host-pin config (`edge-dev` vs `COMPUTERNAME` value) | **OPEN** | Implementer records the live `COMPUTERNAME` / existing config convention (`reviewer-start-watch.json` `run_on_host`) and matches it. |
-| Backup Actions cadence (daily vs weekly vs heartbeat-stale-only) | **OPEN** | Prefer heartbeat-stale-only + weekly smoke; justify in the PR if different. |
+| Host name strings in `watch_hosts[]` (`edge-dev` vs `COMPUTERNAME`, `edge-dev3` vs hostname) | **OPEN** | Match `blocker-watch.json` `propagate_on_host` / `fixer_on_host` nicknames already in use; document aliases in the config `_comment`. |
+| Claim marker home: dedicated issue number vs `alarm_digest` style standing issue | **OPEN** | Prefer one long-lived issue titled `local-watch-leader` (or reuse an existing ops issue); document the issue number in `config/local-watch.json`. |
+| hetz participation: full duty vs backup-only (production-read-only habits) | **OPEN** | Read-only tick + claim is fine; **no** package installs on hetz outside Ansible / approved install path. If that blocks `install.sh` on hetz, leave the crontab entry as a manual one-liner in the handoff and mark the row partial. |
+| Backup Actions cadence (daily vs weekly vs heartbeat-stale-only) | **OPEN** | Prefer claim-stale-only + weekly smoke; justify in the PR if different. |
 | Whether queue-slow tick rides `ai-blocker-watch tick` or its own 2-minute task | **OPEN** | Criteria: if both can share one lock/log without cross-failures, piggyback is fine; else own task. |
 
 ## 9. The plan — numbered, ordered steps
@@ -110,13 +120,26 @@ Related live work (do not re-derive): [PR #1193](https://github.com/popcre/ai-de
 **Depends on:** nothing.  
 **Gate:** `tests/test-local-watch.sh` green (new); `bash tests/test-ai-blocker-watch.sh` and `tests/test-ai-reviewer-start-watch.sh` still green if those tools switch to the helper.
 
-**A2. Define host-pin config** — `config/local-watch.json` with `run_on_host` (same idea as `config/reviewer-start-watch.json`). Only that host registers the tasks in the installer; other machines skip with a note.  
-**Gate:** unit test asserts a non-host machine’s install test-mode output contains “skipped”.
+**A2. Define multi-host config** — `config/local-watch.json` with:
+- `watch_hosts`: ordered preference `["edge-dev","edge-dev3","hetz"]` (names per §8 OPEN).
+- `claim_issue`: number of the standing `local-watch-leader` issue (or create one in P5).
+- `lease_ttl_minutes`: default `max(15, 3 × tool_tick_minutes)`.
+- per-tool tick minutes (queue-watch 2, pool 60, membership 360, merge-queue 1440).  
+**Depends on:** A1.  
+**Gate:** unit test that config schema validates and that a host **not** in `watch_hosts` does not claim (install may still schedule a *local-only* wake if desired — default **skip**).
+
+**A2b. `bin/ai-local-watch claim|release|status`** (or commands on the A1 helper) — each duty tick:
+1. Read the claim marker on the standing issue (`ai-gh`).
+2. If renewer is me and lease not expired → renew, exit 0 (I hold duty).
+3. If lease expired or missing → claim (hostname + ISO timestamp), exit 0.
+4. If another host holds a fresh lease → exit 3 (*skip: leader=…*).  
+Non-leader ticks must not post public alarms.  
+**Gate:** `tests/test-local-watch-claim.sh` fixtures: fresh other lease → skip; expired → claim; own lease → renew; API error → do not claim, exit alarm code.
 
 ### Phase B — move the cheap periodic watches (P1, P3)
 
 **B1. `bin/ai-runner-pool-watch`** (new thin wrapper; body = the bash in `runner-pool-watchdog.yml:40–75`): commands `tick`, `schedule`, `check`. Uses `ai-gh` (never raw `gh`) and the same Administration:Read token resolution as today (1Password / env — never log the token). Hourly on the 25th minute. Failures append to tick.log **and** open/update one standing issue (same alarm surface as the Action).  
-**Gate:** `tests/test-ai-runner-pool-watch.sh` (offline fixture roster: 0 online → alarm; 1 online → warning; 2+ → ok). Live: `ai-runner-pool-watch tick` on edge-dev returns 0 and the log line names the online count.
+**Gate:** `tests/test-ai-runner-pool-watch.sh` (offline fixture roster: 0 online → alarm; 1 online → warning; 2+ → ok). Live: `ai-runner-pool-watch tick` on the current claim holder returns 0 and the log line names the online count.
 
 **B2. `bin/ai-reviewer-membership-drift schedule|tick`** — wrap the existing Node tool; tick runs the offline suite then the compare. Every 6 hours at minute 17 (keep the old minute to avoid colliding with other tasks).  
 **Gate:** `schtasks /Query /TN \ai-devops\reviewer-membership-drift` shows the task; one manual tick matches the Action’s two steps.
@@ -137,14 +160,20 @@ Related live work (do not re-derive): [PR #1193](https://github.com/popcre/ai-de
 **D1. Convert the other three workflows to backup-only on free runners** (`ubuntu-24.04`, never Blacksmith): keep `workflow_dispatch` + a **weekly** schedule that runs the same `bin/… tick` entry points. If `config/local-watch.json` heartbeat (`~/.ai-devops/<tool>/tick.log` mtime) is stale, the backup may run sooner — optional, OPEN.  
 **Gate:** `grep blacksmith` under `.github/workflows/*watchdog*.yml` and `*drift*.yml` returns nothing; `tests/test-workflow-policy.sh` still green if it asserts runner labels (coordinate with PR #1193 if both land).
 
-**D2. Installer wiring** — in `bin/install-ai-devops-windows.ps1` after the existing schedule blocks (`:1207–1271`), register each new tool’s `schedule` the same way (Git Bash path resolution included; test mode must not touch Task Scheduler). Optionally the Unix installer / `bin/setup-machine.ps1` if this repo still installs crontab there — **only if those files already schedule sibling tools**; do not invent a second pattern.  
-**Gate:** `AI_DEVOPS_INSTALL_TEST_MODE=1` prints “not touching this computer's scheduled tasks” for each; a real install on edge-dev shows four new tasks under `\ai-devops\`.
+**D2. Installer wiring on every `watch_hosts` member** —
+- **edge-dev / Windows:** `bin/install-ai-devops-windows.ps1` after the existing schedule blocks (`:1207–1271`), same Git Bash + test-mode rules. Four new tasks under `\ai-devops\`.
+- **edge-dev3 / hetz / Linux:** extend the existing `install.sh` / crontab or systemd-user pattern **only if sibling tools already schedule there** (blocker-watch / worktree reap). Prefer one marked crontab block `# ai-devops local-watch` invoking `bin/ai-local-watch tick-all`. hetz: if package/install policy blocks `install.sh`, a documented user-crontab one-liner in the handoff is acceptable for P5 partial.  
+**Gate:** test mode never touches tasks; each host that is in scope shows its four timers (or documented partial). Claim is exercised at least once per OS (Windows Task Scheduler + Linux crontab).
 
 **D3. Docs** — `docs/deployment.md` schedule list, `docs/task-router.md` a row for “routine watchdog / drift alarm”, AGENTS.md router row if a task type is missing. Strike Blacksmith wording from watchdog comments.  
 **Gate:** `bin/ai-doc-reachability` (or the repo’s doc test) passes; no stale “route to Blacksmith” string in watchdog sources.
 
-**D4. Live proof on edge-dev (required before any row is marked done)** — one successful manual tick per tool, Task Scheduler LastRunTime/LastTaskResult, tick.log lines, and (for B1) one synthetic alarm in a test-only mode or a dry-run issue comment path. Leave `- [ ] live proof` on the owner issue if a step is code-landed-but-unproved.  
-**Gate:** screenshot or log excerpts attached to the owner issue; `schtasks /Query` for each name.
+**D4. Live proof including failover (required before any row is marked done)** —
+1. One successful manual tick per tool on the duty host (log lines + timer LastRun).
+2. **Failover drill:** stop/sleep the duty host (or freeze its claim), wait past `lease_ttl_minutes`, confirm a second host claims and posts once.
+3. Restore the first host; confirm it does **not** double-post (skip path, leader=… in its log).  
+Leave `- [ ] live proof` on the owner issue if a step is code-landed-but-unproved.  
+**Gate:** log excerpts for claim/renew/skip from at least two hosts; one single public alarm during the drill.
 
 ### Adversarial cases (trust boundary: GitHub API, tokens, comments)
 
@@ -156,6 +185,8 @@ Related live work (do not re-derive): [PR #1193](https://github.com/popcre/ai-de
 | `RUNNER_POOL_READ_TOKEN` | Token present but under-scoped; token in argv or log line | assert token never printed; `ai-gh` / env-only |
 | Task Scheduler | Task already exists from old script; laptop sleeps mid-tick; two ticks overlap | lock file test; `schtasks /F` re-point test |
 | Clock skew | tick uses UTC vs local; “3 minutes” uses wrong unit | fixture freezes time in unit tests |
+| Claim marker / lease | Two hosts claim the same second; host crashes after claim before renew; forged hostname in marker | claim tests: second claim loses or wins deterministically (issue edit is the lock); expired lease can be stolen; marker parsed strictly (host allowlist `watch_hosts`) |
+| Claim API outage | `ai-gh` fails mid-tick | do not treat as leadership; exit alarm; never post from a host that cannot read the lease |
 
 ## 10. Tests required
 
@@ -200,15 +231,21 @@ Run focused suites first, then the repository’s required local/CI suites per `
 ## 13. Definition of done + risks and open questions
 
 **Done when**
-- [ ] P0–P5 STATUS rows each have artifact evidence (path, commit SHA, or `schtasks /Query` output).
+- [ ] P0–P5 STATUS rows each have artifact evidence (path, commit SHA, or `schtasks`/`crontab` listing).
 - [ ] No watchdog/drift workflow on `main` uses Blacksmith labels.
-- [ ] Four local tasks registered on edge-dev; four tools have green unit tests + one live tick each.
-- [ ] Backup Actions are free-only and rare; primary cadence is local.
+- [ ] Four tools have green unit tests + one live tick each; **claim failover proven on at least two hosts** (edge-dev + one of edge-dev3/hetz).
+- [ ] Backup Actions are free-only and rare; primary cadence is local; duty is single-poster via claim.
 - [ ] PR merged through the queue; `origin/main` contains the commit.
 - [ ] `docs/deployment.md` + task-router updated; no “route to Blacksmith” in watchdog sources.
 - [ ] Owner issue checklist item `live proof` ticked or explicitly left with one named owner.
 
-**Rollback:** delete/disable the new Task Scheduler tasks (`schtasks /Change /TN … /DISABLE` or installer remove), re-enable the Action triggers (revert the workflow commit). No data migration.
+**Rollback:** delete/disable the new timed tasks on each host (Task Scheduler / crontab block), re-enable the Action triggers (revert the workflow commit). Clear or delete the claim issue marker. No data migration.
+
+**Risks (updated)**
+- Claim race at the same second → last successful issue edit wins; the loser logs skip. Acceptable (idempotent alarms).
+- hetz install path constrained by production/Ansible habits → document a crontab one-liner rather than force `install.sh`.
+- Clock skew between Windows and Ubuntu → lease checks use UTC ISO in the marker only.
+- Landing this while PR #1193 is open → workflow YAML conflicts; rebase first and re-run workflow policy tests.
 
 **Risks**
 - edge-dev offline → primary alarm silent → backup Actions cover (by design). Document how to see “local heartbeat stale”.
@@ -222,8 +259,8 @@ Run focused suites first, then the repository’s required local/CI suites per `
 
 ## Self-audit (implementation-plan-writer Mode A)
 
-1. **Could a brand-new AI session execute this without asking anything?** Yes — §2 names the app and machine; §5–§6 give file anchors and why Actions cron is untrustworthy; §9 steps name `tools/lib/local-watch.sh`, `bin/ai-runner-pool-watch`, `bin/ai-windows-queue-watch`, installer lines `install-ai-devops-windows.ps1:1207–1271`, and verification gates; §10–§12 give tests and auth locations. Gap found and fixed during draft: queue-watch is event-shaped — §6.3 and step C1/C2 convert it to a tick and then retire the `workflow_run` trigger so implementers do not leave both firing.
-2. **Does it carry background, nuance, and rejected approaches?** Yes — §3 links the $1000/Blacksmith incident and PR #1193; §7 rejects free-Actions-only, self-hosted pool heartbeats, deleting watches, and mega-BlockerWatch; §8 locks owner decisions and labels open ones.
-3. **Is the ultimate goal clear for judgment calls?** Yes — §1 is business English (“should not sit on paid machines”; free backup only) and ends with goal-wins. Backup cadence and host-pin remain open with criteria so a wrong step can be corrected toward the goal.
+1. **Could a brand-new AI session execute this without asking anything?** Yes — §2 names the app, three hosts, and install paths; §5–§6 give file anchors, why Actions cron is untrustworthy, and why single-host pin fails; §9 steps name `tools/lib/local-watch.sh`, `bin/ai-local-watch claim`, `bin/ai-runner-pool-watch`, `bin/ai-windows-queue-watch`, Windows installer lines `install-ai-devops-windows.ps1:1207–1271`, Linux crontab rules, and gates including the failover drill. Gaps fixed in draft: (a) queue-watch is event-shaped — C1/C2 convert it to a tick and retire `workflow_run`; (b) first draft pinned one host — §6.6 / A2 / A2b add claim/lease rotation across edge-dev, edge-dev3, hetz.
+2. **Does it carry background, nuance, and rejected approaches?** Yes — §3 links the $1000/Blacksmith incident, PR #1193, and the uptime/rotation request; §7 rejects free-Actions-only, self-hosted pool heartbeats, deleting watches, mega-BlockerWatch, bare multi-poster, and Synology/shared-db leases; §8 locks owner decisions and labels open ones (name strings, claim issue home, hetz install depth).
+3. **Is the ultimate goal clear for judgment calls?** Yes — §1 is business English (no paid runners; alarms must survive one offline PC; free Actions only if every host is down) and ends with goal-wins. Open items carry criteria so implementers correct toward the goal instead of redesigning.
 
-**Checklist:** 13 sections present; goal first; fresh-session executable; rejected approaches present; steps have files + gates; adversarial table for API/token/comment inputs; locked vs open labeled; out-of-scope explicit; tests named; terms defined; secrets by location; DoD includes commit/CI; handoff linked both ways.
+**Checklist:** 13 sections present; goal first; fresh-session executable; rejected approaches present; steps have files + gates; adversarial table includes claim/lease races; locked vs open labeled; out-of-scope explicit; tests named; terms defined; secrets by location; DoD includes commit/CI and two-host failover proof; handoff linked both ways.
