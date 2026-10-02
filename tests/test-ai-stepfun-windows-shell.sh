@@ -22,6 +22,7 @@ echo canary > "$TMP/host/secret.txt"
 echo ok > "$TMP/folder/readme.md"
 export AI_STEPFUN_REVIEW_DIR="$TMP/folder"
 export GATE_PATH="/usr/bin:/bin"
+export AI_STEPFUN_TEST_MODE=1
 
 refuses(){ "$GATE" "$@"; [ "$?" -eq 126 ]; }
 allows(){ "$GATE" "$@"; }
