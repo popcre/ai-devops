@@ -4,8 +4,8 @@
 # labelled ai-devops-windows-qualified) ordinary verify.yml Windows sections as
 # extra capacity and keeps every other section on Blacksmith (owner ruling
 # 2026-10-01: KEEP Blacksmith in the pool; USE Blacksmith for runs that would
-# otherwise get stuck). WarpBuild Azure BYOC is NOT routed here - it runs the
-# required suite as a non-blocking proof job outside the required aggregate.
+# otherwise get stuck; 2026-10-02: use blacksmith to run your tests). WarpBuild
+# Azure BYOC is NOT routed here; only warpbuild-win2022-canary.yml uses it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if ! command -v node >/dev/null 2>&1; then

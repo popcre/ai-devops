@@ -335,8 +335,9 @@ jobs:
         shell: pwsh
         run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}')
 
-  # Pull-request Windows tests run only on Blacksmith (owner 2026-10-02: "use
-  # blacksmith to run your tests"). The WarpBuild BYOC proof lane that queued
+  # Pull-request Windows tests run on Blacksmith, with idle qualified
+  # self-hosted hosts as extra capacity (owner 2026-10-02: "use blacksmith to
+  # run your tests"). The WarpBuild BYOC proof lane that queued
   # here without a runner was removed; WarpBuild is still proven separately by
   # warpbuild-win2022-canary.yml.
 
