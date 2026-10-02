@@ -74,7 +74,7 @@ Rules for the block:
 
 ## Process rules never override this
 
-Skills, orchestrator procedures, handoff formats, and repository contracts
+Skills, procedures, handoff formats, and repository contracts
 govern how you *do the work* and what you write *into files*. They never govern
 what you say to Albert. A skill demanding detailed status means detailed status
 in the issue, plan, or handoff — the reply to Albert stays under 120 words.
@@ -190,9 +190,6 @@ the task needs the detail.
   stays the minimum: only work that changes the database's SHAPE, or a curated
   Master Data load. Proofs, monitoring, reports, tooling, scripts, docs, and
   repository maintenance never go there.
-- **Label every shared-db ticket.** Whenever a `popcre/shared-db` issue number
-  appears in a reply, say beside it whether it is orchestrator work (it changes
-  database structure) or non-orchestrator work (it does not).
 - **Sign everything posted to GitHub** with `Posted by MiMo chat <id> on
   <machine>`, where `<id>` is `$MIMO_SESSION_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.

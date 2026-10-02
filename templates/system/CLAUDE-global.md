@@ -156,9 +156,6 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   existing issue and start; no orchestrator chat or marker is required. Scope
   stays the minimum: only database SHAPE changes or a curated Master Data
   load; never proofs, reports, tooling, or docs.
-- **Label every shared-db ticket.** Whenever a `popcre/shared-db` issue number
-  appears in a reply, say beside it whether it is orchestrator work (it changes
-  database structure) or non-orchestrator work (it does not).
 - **Sign everything posted to GitHub** with `Posted by Claude chat <id> on
   <machine>`, where `<id>` is `$CLAUDE_CODE_SESSION_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.

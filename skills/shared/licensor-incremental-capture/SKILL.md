@@ -174,10 +174,10 @@ the moved ones.
 
 ## Loading the delta
 
-Ordinary application row writes belong to this session and need no orchestrator issue.
+Ordinary application row writes belong to this session and need no shared-db issue.
 **But outside-sourced content landing in curated Master Data (`core.licensor`,
 `core.property`, `core.character`, `core.customer`, `core.factory` and their `*_ext`
-tables) stays orchestrator work under the shared-db carve-out.** A bulk portal dump can
+tables) stays gated, claim-first structural-lane work under the shared-db carve-out.** A bulk portal dump can
 silently supersede hand-curated owner rulings. Route those through
 `gh issue create --repo popcre/shared-db --label db-work`.
 
