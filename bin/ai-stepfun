@@ -707,8 +707,6 @@ ai-stepfun review [--repo DIR] [--base REF] [--assert-head SHA] --prompt TEXT|--
 ai-stepfun ask [--repo DIR] PROMPT                              second opinion (disposable writable copy)
 ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
                                                                  write and run code in a new remote-less clone (never commits)
-ai-stepfun doctor [--live]                                       install, engine, key store (and one live call)
-ai-stepfun store-key [--if-missing]                              refresh the protected key store from 1Password
 ai-stepfun doctor [--live] [--write-runners]                      health check; Windows may re-pin runner allowlist
 Engine: StepCode on Linux (bubblewrap) or OpenCode on Windows (folder + test shell).
 EOF
