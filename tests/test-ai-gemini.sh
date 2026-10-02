@@ -16,6 +16,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
+# Fixture registry: offline adapter tests never depend on live pool membership.
+printf '{"version":1,"providers":{"gemini":{"registry_state":"registered","reason":"offline adapter fixture"}}}\n' > "$TMP/reviewer-registry.json"
+export AI_REVIEW_REGISTRY_FILE="$TMP/reviewer-registry.json"
 mkdir -p "$TMP/bin" "$TMP/state" "$TMP/copies"
 
 cat > "$TMP/bin/sandbox" <<'EOF'

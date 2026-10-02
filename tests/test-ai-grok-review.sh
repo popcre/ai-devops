@@ -74,6 +74,9 @@ fi
 
 TMP="$(mktemp -d)"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
+# Fixture registry: offline adapter tests never depend on live pool membership.
+printf '{"version":1,"providers":{"grok":{"registry_state":"registered","reason":"offline adapter fixture"}}}\n' > "$TMP/reviewer-registry.json"
+export AI_REVIEW_REGISTRY_FILE="$TMP/reviewer-registry.json"
 # Git Bash can spell the Network Service temp directory as /tmp while native
 # Windows children report its physical /c/Windows/ServiceProfiles/... path.
 # Keep every fixture, progress fingerprint, and saved review path in one

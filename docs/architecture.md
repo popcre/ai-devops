@@ -36,7 +36,7 @@ account-wide request savings. Preserve the existing workflow while proving both.
 | Control command | `bin/ai-devops` | `doctor` (health checks), `version`, `paths` |
 | Workspace safety | `bin/ai-workspace-status` | Read-only git/branch/PR/dirty snapshot + warnings |
 | Manual verification | `bin/ai-verify-run` | Provenance-bearing dispatch, duplicate refusal, status, and separately confirmed cancellation |
-| Approval review | `bin/ai-review`, `bin/ai-review-pool`, `bin/ai-codex-review` | Exact-source, lifecycle-accounted approval from a registered pool reviewer (default Muse) or the Codex gate |
+| Approval review | `bin/ai-review`, `bin/ai-review-pool` | Exact-source, lifecycle-accounted approval from a registered pool reviewer (default Muse) |
 | Model invocation | `bin/ai-model-call` | Runs one stage with validated arguments and atomic output; never shell-evaluates config |
 | Task orchestrator | `bin/ai-run-task` | Immutable seven-stage manifest, artifact chain, fail-closed resume and retry |
 | Documentation reachability | `bin/ai-doc-reachability`, `.doc-reachability.json`, reusable workflow | Blocks PR-added, copied, or moved Markdown that no configured root can reach; legacy orphans are not gated |
@@ -148,7 +148,7 @@ never overwrites them. See [`configuration.md`](configuration.md).
 Every known reviewer name—Grok, Kimi, GLM, Muse, Gemini, Qwen, Codex,
 DeepSeek, and StepFun—is known to preflight and the scoreboard so historical evidence stays
 readable; only providers `registered` in `config/reviewer-registry.json` (today
-Muse, Grok, Qwen, Gemini, GLM, DeepSeek, the Codex approval-gate wrapper, and StepFun on Ubuntu/Linux only, outside the allocator) receive reviews. Claude is absent from the pool (owner instruction 2026-09-30) and never receives a formal or assigned review. Unsupported metadata
+Muse, Grok, Qwen, Gemini, GLM, DeepSeek, and StepFun on Ubuntu/Linux only, outside the allocator) receive reviews. Claude and Codex are absent from the pool (owner instruction 2026-09-30) and never receive a formal or assigned review. Unsupported metadata
 is represented as missing, never invented. Scoreboard evidence is
 `current`, `stale`, or `unknown`; only a current verdict is usable. Packets seal
 each relative file name, byte length, and digest. `ai-review-sandbox` publishes

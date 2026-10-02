@@ -82,7 +82,14 @@ allocator but stayed registered here, and a session spent an hour trying it.
     credit pause — that path needs two repos, tests, and a review. Reserve
     roster edits for permanent retirement or a real membership change.
 
-12. **StepFun is Ubuntu-only and outside the allocator.** Owner instruction,
+12. **Offline adapter suites never read live membership.** Owner rule,
+    2026-09-30: a pool on/off flip must not require test edits. Every
+    `tests/test-ai-*-review` / provider-wrapper suite sets
+    `AI_REVIEW_REGISTRY_FILE` to a fixture. `tests/test-reviewer-registry-fixtures.sh`
+    enforces it. Live membership is asserted only in
+    `tests/test-ai-review-preflight.sh` against the shipped registry.
+
+13. **StepFun is Ubuntu-only and outside the allocator.** Owner instruction,
     2026-09-25: add StepFun Step 5 as a reviewer on Ubuntu only (StepCode is
     not yet available on Windows) and let it write, implement, and execute
     code. `bin/ai-stepfun` refuses to run off Linux and preflight reports

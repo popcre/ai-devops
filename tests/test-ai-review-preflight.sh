@@ -381,18 +381,19 @@ check "Gemini is carried in the shipped reviewer registry after live re-qualific
 check "the Gemini entry still records why the empty report mattered"   "jq -e '.providers.gemini.reason|test(\"empty report\")' '$REAL_REGISTRY'"
 check "Kimi is removed from the shipped reviewer registry while credit is exhausted" "jq -e '.providers.kimi.registry_state==\"absent\" and (.providers.kimi.reason|test(\"out of credit\"))' '$REAL_REGISTRY'"
 check "GLM is back in the shipped reviewer registry (owner instruction 2026-09-30)" "jq -e '.providers.glm.registry_state==\"registered\" and (.providers.glm.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
-check "DeepSeek V4.1 Flash is registered (shared-db REVIEWERS) and Codex is an approval gate only" "jq -e '.providers.deepseek.registry_state==\"registered\" and (.providers.codex.reason|test(\"NOT a rotation\"))' '$REAL_REGISTRY'"
-check "the shipped registry is Muse, Grok, Qwen, Gemini, GLM, DeepSeek, the Codex gate, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"codex\",\"deepseek\",\"gemini\",\"glm\",\"grok\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
+check "DeepSeek V4.1 Flash is registered (shared-db REVIEWERS)" "jq -e '.providers.deepseek.registry_state==\"registered\"' '$REAL_REGISTRY'"
+check "the shipped registry is Muse, Grok, Qwen, Gemini, GLM, DeepSeek, and Linux-only StepFun" "jq -e '[.providers|to_entries[]|select(.value.registry_state==\"registered\")|.key]|sort==[\"deepseek\",\"gemini\",\"glm\",\"grok\",\"muse\",\"qwen\",\"stepfun\"]' '$REAL_REGISTRY'"
 check "Claude is out of the shipped reviewer pool (owner instruction 2026-09-30)" "jq -e '.providers.claude.registry_state==\"absent\" and (.providers.claude.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
+check "Codex is out of the shipped reviewer pool (owner instruction 2026-09-30)" "jq -e '.providers.codex.registry_state==\"absent\" and (.providers.codex.reason|test(\"2026-09-30\"))' '$REAL_REGISTRY'"
 # Health alone must still never mean allocatable. Proved against a fixture that
 # omits a provider, so the guard survives any future registry membership change.
 printf '{"version":1,"providers":{"codex":{"registry_state":"absent","reason":"omitted for this fixture"}}}
 ' > "$TMP/omitted.json"
 check "healthy install alone never reports usable when the registry omits the provider"   "AI_REVIEW_REGISTRY_FILE='$TMP/omitted.json' $SCRIPT status codex | jq -e '.usable==false and .registry_state==\"absent\"'"
 check "status no longer calls a merely healthy install available"   "! $SCRIPT status codex | grep -q '\"status\":\"available\"'"
-check "status reports one reconciled answer per provider"   "$SCRIPT status codex | jq -e '.status==\"installed-healthy\" and .usable==true and .registry_state==\"registered\" and (.registry_reason|length>0)'"
+check "status reports one reconciled answer per provider"   "$SCRIPT status muse | jq -e '.status==\"installed-healthy\" and .usable==true and .registry_state==\"registered\" and (.registry_reason|length>0)'"
 check "usable exits non-zero for a provider the registry omits"   "! AI_REVIEW_REGISTRY_FILE='$TMP/omitted.json' $SCRIPT usable codex"
-check "usable exits zero for a registered healthy provider" "$SCRIPT usable codex"
+check "usable exits zero for a registered healthy provider" "$SCRIPT usable muse"
 check "usable names why an omitted provider cannot be used"   "AI_REVIEW_REGISTRY_FILE='$TMP/omitted.json' $SCRIPT usable codex | jq -e '.registry_reason|test(\"omitted for this fixture\")'"
 check "an unregistered provider cannot be preflighted for a review"   "! AI_REVIEW_REGISTRY_FILE='$TMP/omitted.json' $SCRIPT check codex '$REPO' 2>&1 | grep -q 'health=ok'"
 check "a missing registry never reports a provider as usable"   "AI_REVIEW_REGISTRY_FILE='$TMP/no-such-registry.json' $SCRIPT status codex | jq -e '.usable==false and .registry_state==\"unknown\"'"
