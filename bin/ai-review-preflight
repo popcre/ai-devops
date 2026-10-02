@@ -11,6 +11,12 @@ set -euo pipefail
 VERSION="1.5.0"
 STATE_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 CHECK_TIMEOUT="${AI_REVIEW_PREFLIGHT_TIMEOUT:-10}"
+# A real live doctor turn (Qwen ~50s, Grok/DeepSeek ~10s on Windows Git Bash) and an
+# offline doctor (~10s of process forks on Windows) both outlast the 10s identity
+# budget, which recorded false provider-timeout quarantines (2026-10-02). A timeout
+# still never means healthy.
+LIVE_PROBE_TIMEOUT="${AI_REVIEW_LIVE_PROBE_TIMEOUT:-180}"
+DOCTOR_PROBE_TIMEOUT="${AI_REVIEW_DOCTOR_PROBE_TIMEOUT:-30}"
 COOLDOWN="${AI_REVIEW_QUARANTINE_SECONDS:-1800}"
 # A transient liveness timeout is not a demonstrated safety or identity
 # problem. It gets a short cooldown so the next caller can retry quickly,
@@ -768,9 +774,9 @@ check_provider() { # PROVIDER REPO LIVE BASE
     if [ "$provider" = gemini ]; then out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     # A StepCode live turn takes about 8-9s, too close to the 10s check budget.
     elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
-    else out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
+    else out="$(timeout "${LIVE_PROBE_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
   else
-    out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
+    out="$(timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
   fi
   # A transient liveness timeout gets one bounded retry before it is recorded.
   # The retry is part of the timeout path: a timeout result alone never means
@@ -784,9 +790,9 @@ check_provider() { # PROVIDER REPO LIVE BASE
     elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
       if [ "$provider" = gemini ]; then out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
       elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
-      else out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
+      else out="$(timeout "${LIVE_PROBE_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?; fi
     else
-      out="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
+      out="$(timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?
     fi
   fi
   set -e
