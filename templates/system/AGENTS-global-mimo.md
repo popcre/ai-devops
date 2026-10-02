@@ -232,8 +232,9 @@ the task needs the detail.
   authorized to create, except DesignFlow and a PR Albert explicitly said he
   wants to review first.
 - **A documentation-only pull request does not wait for checks, and does not
-  need permission to skip them.** If every changed file is prose, merge it with
-  `gh pr merge --squash --admin` immediately. If even one changed file is code,
+  need permission to skip them.** If every changed file is prose, merge it
+  immediately the normal way (merge queue where one exists, never `--admin`).
+  If even one changed file is code,
   tests, scripts, workflows, or configuration, the normal checks apply.
 - **Wait on CI with the repository's bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
