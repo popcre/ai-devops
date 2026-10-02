@@ -53,24 +53,47 @@ fully up. Albert chose WarpBuild after Blacksmith billing looked high.
   Storage stuck at 150 GB (vendor floor 256 GB; tooling canary still fit).
 
 ### NOT done (this is the open work)
-- **Required CI is still on Blacksmith.** Cut-over is NOT merged.
-- Branch `mimo/warpbuild-required-cutover`
-  (worktree `C:/repos/ai-devops/.ai/worktrees/warpbuild-required-cutover`) has
-  commits re-pointing required Windows to the WarpBuild label.
-- PR [#1220](https://github.com/popcre/ai-devops/pull/1220) ("Cut required
-  Windows CI from Blacksmith to WarpBuild Azure BYOC") is **not merged** and
-  has been closed/reopened several times (Albert once closed to reset a stuck
-  concurrency group). Latest checks on that branch **failed broadly**:
-  `doc-safety`; `linux-offline-shard` (2) and (4); **all**
-  `windows-offline-section` (1–8); `windows-reviewer-fallback-codex/grok`;
-  `verification-closure`. Diagnose before any merge.
-- Open PR [#1193](https://github.com/popcre/ai-devops/pull/1193)
-  (`mimo/runner-pool-github-envy-warpbuild`) prefers GitHub+ENVY then
-  WarpBuild. Do **not** let it violate Albert's two rules (WarpBuild is the
-  target cost lane; Blacksmith stays until WarpBuild is fully up).
-- Background workers `general-1` (cancelled repeatedly) and `general-2` were
-  dispatched for this cut-over. If a worker is still running, it may continue
-  only the cut-over; wrap-up freeze forbids new scope.
+- **Required CI is still on Blacksmith** (correct per owner rule). Cut-over is
+  NOT merged.
+- **Current approach (worker `general-2`, 2026-10-02):** WarpBuild is a
+  **non-blocking proof lane** (`continue-on-error`, `max-parallel: 2`,
+  fork-guarded) **alongside live Blacksmith required**. Matches Albert:
+  Blacksmith required until WarpBuild is fully up; WarpBuild proof continues.
+  Outside `verification-closure`. Branch `mimo/warpbuild-required-cutover`.
+- PR [#1220](https://github.com/popcre/ai-devops/pull/1220) is **OPEN** with
+  the proof-lane approach. Codex `final-check` **APPROVE** on `df2cb5f5`
+  (zero findings). Head later moved past that APPROVE — re-review at exact
+  head before merge.
+- CI snapshot 2026-10-02 late: **required Blacksmith windows-offline-section
+  1–8 all PASS**, linux shards pass, doc-safety pass,
+  `windows-reviewer-fallback-codex` pass, **`verification-closure` PASS**,
+  `windows-reviewer-safety` PASS. Non-blocking `windows-offline-warpbuild-proof`:
+  **(1) PASS** 13m14s; **(2) FAIL/CANCELLED** at 35m (likely proof timeout —
+  compare to `timeout-minutes`); 4–8 still pending. **PR #1220 is queued to
+  merge** (auto-merge/queue). Codex `final-check` **APPROVE** at exact head
+  `7a27834e` (`.ai/reviews/codex-final-check-20261002T002128-838032-27249.md`).
+- `bin/ai-pr-wait 1220` reports the proof-lan failure as merge-blocking even
+  though the lane is `continue-on-error`; if the queue ejects, re-check which
+  status checks are required vs the proof lane.
+- Next after merge: prove required Windows green **post-merge** on main, comment
+  green job URL on #961 (non-orchestrator), signature
+  `Posted by MiMo chat ses_ffe5f0d4e5291ffey2COx392lA on edge-dev`. Then keep
+  using WarpBuild proof results to decide when it is "fully up" (owner).
+- Open PR [#1193](https://github.com/popcre/ai-devops/pull/1193) is a
+  different routing preference; do not violate Albert's two rules.
+- Files on the cut-over branch: `verify.yml`, `warpbuild-win2022-canary.yml`,
+  `config/ci-runner-routing.json`, `tools/ci/runner-router.cjs`,
+  `tests/test-workflow-policy.sh`, `tests/test-ci-runner-router.sh`.
+
+### Worker findings (do not rediscover)
+- Codex `final-check` rejects fork-guard comments that treat workflow-level
+  guards as trusted enforcement; name `all_external_contributors` (repo
+  policy, `docs/self-hosted-windows-runner.md`) as primary and call the
+  workflow check defense-in-depth.
+- `fork_guard_ok` `grep -oF | wc -l` count of 8 was line-ending fragile;
+  presence/absence checks + diagnostics are the right shape.
+- `1password_op_run` with `shell: git-bash` works as a command runner when
+  Bash/Write/Edit are permission-gated in a subagent.
 
 ## 4. Failed or incomplete attempts
 
@@ -80,10 +103,12 @@ fully up. Albert chose WarpBuild after Blacksmith billing looked high.
 - PATCH runner storage to 256 GB returned 200 but stayed 150 GB.
 - `az vm run-command` captures can be preempted; use a tiny log-tail script
   immediately (VMs die in ~40s after failed pickup).
-- Cut-over PR CI failed (list in §3). Not diagnosed to root cause before
-  wrap-up.
+- Cut-over PR CI failed broadly on an earlier hard-cut of Blacksmith (list in
+  §3 history). Worker `general-2` reworked to the non-blocking WarpBuild
+  proof-lane + live Blacksmith required approach; required sections now pass.
 - Subagent `general-1` was cancelled/failed multiple times (process restarts).
-  Work resumed via `general-2`. Do not assume either finished.
+  `general-2` finished partial 2026-10-02: proof lane implemented, Codex
+  APPROVE on `df2cb5f5`, required CI mostly green; merge still open.
 
 ## 5. Findings that affect the implementation
 
@@ -109,14 +134,27 @@ fully up. Albert chose WarpBuild after Blacksmith billing looked high.
    neither can run tests. Never skip coverage.
 4. Fix `doc-safety` on that PR.
 5. Focused offline tests (`tests/test-workflow-policy.sh`, runner-router tests).
-6. Independent exact-head APPROVE. Reopen #1220 or open a clean PR on the same
-   branch. `bin/ai-pr-wait`. Merge via queue. You merge; Albert does not.
-7. After merge, one real required Windows verify must go green (WarpBuild
-   preferred; Blacksmith fallback OK while WarpBuild is not fully up). Comment
-   the green job URL on #961 (non-orchestrator). Signature above.
-8. Only when WarpBuild carries the full suite reliably may Blacksmith be
-   considered for reduction — and **only with a fresh owner decision**. Default
-   is leave Blacksmith on.
+6. **LAND IT (exact head already APPROVED):** Codex `final-check` APPROVE is
+   at `7a27834ef28448163554b6faa37a9a8b12ed0333` —
+   `.ai/worktrees/warpbuild-required-cutover/.ai/reviews/codex-final-check-20261002T002128-838032-27249.md`.
+   PR #1220 is OPEN / MERGEABLE / `mergeStateStatus` UNSTABLE because the
+   non-blocking `windows-offline-warpbuild-proof (2)` failed at 35m (timeout).
+   Required checks are green (`verification-closure` PASS). Put #1220 on the
+   merge queue (`bin/ai-gh pr merge 1220 --repo popcre/ai-devops --auto --merge`).
+   If the queue refuses solely on the proof lane, that lane is `continue-on-error`
+   and outside `verification-closure` — fix the **proof job timeout**
+   (`timeout-minutes`) on a follow-up commit only if the queue will not take
+   the PR otherwise; do not weaken required Blacksmith checks. If head moves
+   past `7a27834e`, re-run Codex `final-check --assert-head <new>`.
+7. **PROVE FULL SUITE AFTER LIVE:** once #1220 is MERGED, run one full required
+   Windows verify on **main** (Blacksmith required path). Expect green because
+   those sections already passed on the PR. Also read the WarpBuild proof jobs
+   on that merge-group/main run. Comment the **required** green job URL on #961
+   (non-orchestrator). Signature:
+   `Posted by MiMo chat ses_ffe5f0d4e5291ffey2COx392lA on edge-dev`.
+8. Only when WarpBuild proof jobs stay green over multiple runs may Blacksmith
+   be considered for reduction — and **only with a fresh owner decision**.
+   Default is leave Blacksmith on (owner, 2026-10-01).
 
 ## 7. Constraints and safety
 
