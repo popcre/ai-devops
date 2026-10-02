@@ -238,5 +238,22 @@ printf '%s|changed-group|%s\n' "$GOOD_HEAD" "$BASE_SHA" > "$TMP/queue-after"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
 check "fallback proof rechecks exact queue identity" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'changed during fallback verification'"
 
+ADV_JOBS="$(printf 'windows-offline\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nwindows-reviewer-safety\tsuccess\tcompleted\nverification-closure\tsuccess\tcompleted\nwindows-offline-warpbuild-proof (3)\tpending\tqueued\nwindows-offline-warpbuild-proof (4)\tpending\tqueued\n')"
+set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$ADV_JOBS"
+OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+check "queued advisory WarpBuild proof does not stall complete evidence" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'advisory'"
+for mutation in closure-pending closure-missing required-pending required-failed; do
+  jobs="$ADV_JOBS"
+  case "$mutation" in
+    closure-pending) jobs="$(printf '%s' "$jobs" | sed 's/verification-closure\tsuccess\tcompleted/verification-closure\tpending\tqueued/')" ;;
+    closure-missing) jobs="$(printf '%s' "$jobs" | sed '/verification-closure/d')" ;;
+    required-pending) jobs="$(printf '%s' "$jobs" | sed 's/linux-offline\tsuccess\tcompleted/linux-offline\tpending\tin_progress/')" ;;
+    required-failed) jobs="$(printf '%s' "$jobs" | sed 's/windows-offline\tsuccess\tcompleted/windows-offline\tfailure\tcompleted/')" ;;
+  esac
+  set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tqueued\t\n')" "$jobs"
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  check "advisory allowance remains fail-closed for $mutation" "test '$RC' -eq 1"
+done
+
 printf '\n%s passed, %s failed, 0 skipped\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
