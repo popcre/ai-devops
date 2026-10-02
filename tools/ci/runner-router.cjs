@@ -5,10 +5,16 @@
 //    labelled ai-devops-windows-qualified) as extra capacity
 // 2. GitHub-hosted Windows runners
 // 3. WarpBuild Azure BYOC — final option, only after GitHub-hosted and
-//    edge-runn-envy are full
+//    edge-runn-envy are full. Labels are distributed round-robin across the
+//    three active BYOC stacks so no single region absorbs every section.
 // run() never throws: any lookup error keeps the all-GitHub plan.
 
 function range(n) { return Array.from({ length: n }, (_, i) => i + 1); }
+
+function warpbuildLabel(cfg, section) {
+  const labels = Array.isArray(cfg.warpbuild_windows) ? cfg.warpbuild_windows : [cfg.warpbuild_windows];
+  return labels[(section - 1) % labels.length];
+}
 
 function decide(cfg, { event, idleQualified, githubFull = false, foreign = false }) {
   const reserve = cfg.reserve_qualified_for_reviewer_events.includes(event) ? cfg.reserved_qualified_hosts : 0;
@@ -24,7 +30,7 @@ function decide(cfg, { event, idleQualified, githubFull = false, foreign = false
     windows_matrix: range(cfg.windows_sections).map(section => {
       if (selfHosted > 0) { selfHosted -= 1; return { section, lane: 'qualified-self-hosted', runs_on: cfg.qualified_windows }; }
       if (github > 0) { github -= 1; return { section, lane: 'github-hosted', runs_on: cfg.github_windows }; }
-      return { section, lane: 'warpbuild', runs_on: cfg.warpbuild_windows };
+      return { section, lane: 'warpbuild', runs_on: warpbuildLabel(cfg, section) };
     }),
   };
 }

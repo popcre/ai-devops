@@ -35,7 +35,11 @@ check('Blacksmith is out of the pool', () => {
 check('the pool names GitHub-hosted, qualified self-hosted, and WarpBuild', () => {
   assert.strictEqual(cfg.github_windows, 'windows-2025');
   assert.deepStrictEqual(cfg.qualified_windows, ['self-hosted', 'Windows', 'X64', 'ai-devops-windows-qualified']);
-  assert.strictEqual(cfg.warpbuild_windows, 'warp-custom-warpbuild-win2022-canary');
+  assert.deepStrictEqual(cfg.warpbuild_windows, [
+    'warp-custom-warpbuild-win2022-canary',
+    'warp-custom-warpbuild-win2022-use2',
+    'warp-custom-warpbuild-win2022-cus',
+  ]);
 });
 check('every section is planned exactly once', () => {
   for (const i of [0, 2, 99]) {
@@ -63,6 +67,13 @@ check('WarpBuild is the final option only when GitHub is full and ENVY is gone',
   assert.strictEqual(lanes(mixed.windows_matrix), 'qualified-self-hosted,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild,warpbuild');
   const notFull = decide(cfg, { event: 'pull_request', idleQualified: 0, githubFull: false });
   assert.ok(notFull.windows_matrix.every(w => w.lane === 'github-hosted'));
+});
+check('WarpBuild labels are distributed round-robin across the three BYOC stacks', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: 0, githubFull: true });
+  const labels = cfg.warpbuild_windows;
+  for (const w of p.windows_matrix) {
+    assert.strictEqual(w.runs_on, labels[(w.section - 1) % labels.length]);
+  }
 });
 check('github_windows_limit overflows the remainder to WarpBuild', () => {
   const limited = Object.assign({}, cfg, { github_windows_limit: 2 });

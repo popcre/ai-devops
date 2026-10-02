@@ -1,7 +1,8 @@
-# Non-required canary for WarpBuild Azure BYOC Windows runner (issue #961).
+# Non-required canary for WarpBuild Azure BYOC Windows runners (issue #961).
 # Manual only. Must NOT become a required check. Required CI stays on
-# Blacksmith; WarpBuild runs the required suite as the non-blocking
+# GitHub-hosted Windows; WarpBuild runs the required suite as the non-blocking
 # windows-offline-warpbuild-proof lane in verify.yml (2026-10-01, #961).
+# One job per BYOC stack so a single dispatch proves all three regions.
 name: warpbuild-win2022-canary
 
 on:
@@ -12,8 +13,18 @@ permissions:
 
 jobs:
   canary:
-    name: windows-tooling-canary
-    runs-on: warp-custom-warpbuild-win2022-canary
+    name: windows-tooling-canary (${{ matrix.region }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - region: use1
+            warp_label: warp-custom-warpbuild-win2022-canary
+          - region: use2
+            warp_label: warp-custom-warpbuild-win2022-use2
+          - region: cus
+            warp_label: warp-custom-warpbuild-win2022-cus
+    runs-on: ${{ matrix.warp_label }}
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -22,6 +33,8 @@ jobs:
       - name: OS and tooling
         shell: pwsh
         run: |
+          Write-Host "region=${{ matrix.region }}"
+          Write-Host "label=${{ matrix.warp_label }}"
           Write-Host "runner=$env:RUNNER_NAME"
           Write-Host "os=$([System.Environment]::OSVersion.VersionString)"
           Write-Host "arch=$env:RUNNER_ARCH"
@@ -35,5 +48,5 @@ jobs:
       - name: Terminate proof
         shell: pwsh
         run: |
-          Write-Host "canary job completed; runner should terminate after this job"
+          Write-Host "canary job completed (${{ matrix.region }}); runner should terminate after this job"
           exit 0

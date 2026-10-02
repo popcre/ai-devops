@@ -9,7 +9,7 @@ Do not put secrets, API keys, signed vendor URLs, subscription GUIDs, or private
 account identifiers in this public repository. Resolve live values with `az` and
 1Password (`op run`) at use time.
 
-## Live state (2026-10-02)
+## Live state (2026-10-03)
 
 | Piece | State |
 |---|---|
@@ -17,15 +17,16 @@ account identifiers in this public repository. Resolve live values with `az` and
 | Stacks | `popcre-ci-use1` (eastus), `popcre-ci-use2` (eastus2), `popcre-ci-cus` (centralus) — all active |
 | Runner sets | `warp-custom-win2022-canary` / `warp-custom-warpbuild-win2022-canary` (eastus); `warp-custom-win2022-use2` / `warp-custom-warpbuild-win2022-use2` (eastus2); `warp-custom-win2022-cus` / `warp-custom-warpbuild-win2022-cus` (centralus). On-demand, image `windows-server-2022`, arch x64 |
 | Instance types (cheapest first) | `Standard_D4as_v4`, `Standard_D4s_v4`, `Standard_D4ds_v4` on every runner — fallback list, not a sum |
-| Canary workflow | `.github/workflows/warpbuild-win2022-canary.yml` — manual `workflow_dispatch` only, non-required |
+| Canary workflow | `.github/workflows/warpbuild-win2022-canary.yml` — manual `workflow_dispatch` only, non-required. Matrix runs one job per stack (use1 / use2 / cus) so a single dispatch proves all three. |
 | Canary proof | Green 2026-09-30 on eastus: [run 36731941680 job 109943590499](https://github.com/popcre/ai-devops/actions/runs/36731941680/job/109943590499). Windows NT 10.0.20348, X64, git/pwsh/node/bash present; VM and OS disk deleted after the job |
-| Required CI | **Still Blacksmith** (`blacksmith-4vcpu-windows-2025`). Cut-over PR `mimo/warpbuild-required-cutover` / #1220 is **not merged**; latest checks failed broadly (see below). |
-| Owner rule (2026-10-01) | **Blacksmith stays in the pool until WarpBuild is fully up.** Use Blacksmith for runs that would otherwise get stuck. Do not turn Blacksmith off. Do not stop WarpBuild bring-up. |
+| Proof lane | `windows-offline-warpbuild-proof` in verify.yml — **re-enabled** with three-label round-robin distribution across sections 1–8. `continue-on-error: true`, outside `verification-closure`, fork-guarded. |
+| Required CI | **Still GitHub-hosted Windows** (`windows-2025`) via `tools/ci/runner-router.cjs`. Required CI does NOT route to WarpBuild. Owner rule (2026-10-01): keep the preferred pool until WarpBuild is fully proven. |
+| Owner rule (2026-10-01) | **Keep the preferred pool until WarpBuild is fully up.** Use it for runs that would otherwise get stuck. Do not stop WarpBuild bring-up. |
 | Owner rule (2026-10-02) | **No West Europe.** US regions only (eastus / eastus2 / centralus). |
 
 ### Cut-over attempt (not landed)
 
-Branch `mimo/warpbuild-required-cutover` re-points required Windows `runs-on` to the WarpBuild label. PR #1220 was opened/closed/reopened several times. Latest verification on that branch failed: `doc-safety`, `linux-offline-shard` 2/4, all `windows-offline-section` 1–8, `windows-reviewer-fallback-*`, `verification-closure`. Do not merge those changes until the failures are diagnosed and Blacksmith remains a live fallback per the owner rule. Open sibling PR #1193 (`mimo/runner-pool-github-envy-warpbuild`) is a different routing preference and must not silently drop WarpBuild or Blacksmith.
+Branch `mimo/warpbuild-required-cutover` re-points required Windows `runs-on` to the WarpBuild label. PR #1220 was opened/closed/reopened several times. Latest verification on that branch failed: `doc-safety`, `linux-offline-shard` 2/4, all `windows-offline-section` 1–8, `windows-reviewer-fallback-*`, `verification-closure`. Do not merge those changes until the failures are diagnosed and the preferred pool remains a live fallback per the owner rule. Open sibling PR #1193 (`mimo/runner-pool-github-envy-warpbuild`) is a different routing preference and must not silently drop WarpBuild.
 
 ## Runbook
 
@@ -95,23 +96,27 @@ workflows can use), `provider_id` = stack id, and:
 
 ### 3. Run the canary
 
-1. Point the canary workflow (or proof lane) at one of the `warp-custom-*`
-   labels. Required Windows stays on Blacksmith.
+1. The canary workflow runs one job per stack (use1 / use2 / cus) via matrix so
+   a single dispatch proves all three. Required Windows stays on GitHub-hosted.
 2. Dispatch: `bin/ai-gh workflow run warpbuild-win2022-canary.yml` (or the
    Actions UI). It is `workflow_dispatch` only and must stay non-required.
 3. Watch with `bin/ai-gh run view <run> --json status,jobs` (bounded; no
    `gh run watch`).
-4. Pass criteria: job completes on a WarpBuild Windows runner, `git` / `pwsh` /
-   `node` / `bash` present, X64, then the VM and OS disk are deleted.
-5. If the job stays `queued` with empty `runner_name`, check runner-group
+4. Pass criteria: each job completes on its WarpBuild Windows runner, `git` /
+   `pwsh` / `node` / `bash` present, X64, then the VM and OS disk are deleted.
+5. If a job stays `queued` with empty `runner_name`, check runner-group
    public access first (below), then quota, then the stuck-canary section.
 
 ### 4. Updating labels / proof lane
 
 Workflow `runs-on` and `config/ci-runner-routing.json` (`warpbuild_windows`)
-must name the same label. Proof lane stays `continue-on-error`, fork-guarded,
-and outside `verification-closure`. Keep Blacksmith as the required lane until
-a reviewed cut-over.
+must name the same labels. The config holds an array of three labels; the
+router (`tools/ci/runner-router.cjs`) cycles them round-robin by section number
+so no single region absorbs every section. The proof lane
+(`windows-offline-warpbuild-proof`) and the overflow lane
+(`windows-offline-warpbuild.yml`) use matrix `include` entries to pair each
+section with a label. Proof lane stays `continue-on-error`, fork-guarded, and
+outside `verification-closure`. Required CI does not route to WarpBuild.
 
 ## Pitfalls already paid for (do not repeat)
 
@@ -166,9 +171,9 @@ online, check runner-group public access first.
 - Independent review before any new Azure topology, role, or required-CI
   cut-over. The canary and the Default-group public flag were operational CI
   enablement on an already-approved dedicated subscription, not a new grant.
-- Required workflows stay on Blacksmith until a reviewed cut-over proves the
-  full Windows suite on BYOC and invoices meet the cost goal. Preserve
-  `config/ci-suite-manifest.json` fan-out and reviewer safeguards.
+- Required workflows stay on GitHub-hosted Windows until a reviewed cut-over
+  proves the full Windows suite on BYOC and invoices meet the cost goal.
+  Preserve `config/ci-suite-manifest.json` fan-out and reviewer safeguards.
 - No Spot for required-test evidence. Disk floor is 256 GB per vendor docs;
   the live canary runner was created at 150 GB and still passed the tooling
   canary — reconfirm before assuming required suites fit.

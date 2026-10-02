@@ -257,7 +257,7 @@ heavy_owners="$(jq -r '. as $manifest | ["test-ai-gemini.sh","test-ai-glm.sh","t
 sections_declared="[$(printf '%s\n' "$section_block" | grep -o '"section":[0-9]*' | cut -d: -f2 | tr -d '\r' | paste -sd, - | sed 's/,/, /g')]"
 routing="$ROOT/config/ci-runner-routing.json"
 check 'the routing config names GitHub, ENVY, and WarpBuild — never Blacksmith' \
-  '[ "$(jq -r .windows_sections "$routing")" = "$shard_count" ] && [ "$(jq -r .github_windows "$routing")" = windows-2025 ] && [ "$(jq -c .qualified_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-qualified\"]" ] && [ "$(jq -r .warpbuild_windows "$routing")" = warp-custom-warpbuild-win2022-canary ] && ! jq "del(._comment)" "$routing" | grep -qi blacksmith'
+  '[ "$(jq -r .windows_sections "$routing")" = "$shard_count" ] && [ "$(jq -r .github_windows "$routing")" = windows-2025 ] && [ "$(jq -c .qualified_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-qualified\"]" ] && [ "$(jq -c .warpbuild_windows "$routing")" = "[\"warp-custom-warpbuild-win2022-canary\",\"warp-custom-warpbuild-win2022-use2\",\"warp-custom-warpbuild-win2022-cus\"]" ] && ! jq "del(._comment)" "$routing" | grep -qi blacksmith'
 sections_expected="[$(seq -s ', ' 1 "$shard_count")]"
 check 'declared sections cover the ordinary hosted lane exactly, with no suite twice' \
   '[ "$shard_union" = "$hosted_without_reviewer" ] && [ "$(printf "%s\n" "$shard_union" | LC_ALL=C sort -u)" = "$shard_union" ]'
@@ -274,7 +274,7 @@ check 'the workflow runs exactly the sections the manifest declares' \
 check 'manual WarpBuild lane runs the same complete section mapping' \
   'grep -qF "section: $sections_expected" "$warpbuild_workflow" && grep -qF "matrix.section }} of $shard_count" "$warpbuild_workflow" && grep -qF "matrix.section }}/$shard_count" "$warpbuild_workflow" && grep -qF -- "-Shard" "$warpbuild_workflow" && grep -qF "all eight WarpBuild sections succeeded" "$warpbuild_workflow"'
 check 'WarpBuild stays manual, bounded, independently hosted and fail-closed' \
-  'grep -q "^  workflow_dispatch:" "$warpbuild_workflow" && ! grep -Eq "^  (pull_request|schedule|merge_group|workflow_run):" "$warpbuild_workflow" && grep -qF "runs-on: warp-custom-warpbuild-win2022-canary" "$warpbuild_workflow" && grep -qF "timeout-minutes: 20" "$warpbuild_workflow" && grep -qF "fail-fast: false" "$warpbuild_workflow" && grep -qF "failing closed" "$warpbuild_workflow"'
+  'grep -q "^  workflow_dispatch:" "$warpbuild_workflow" && ! grep -Eq "^  (pull_request|schedule|merge_group|workflow_run):" "$warpbuild_workflow" && grep -qF "runs-on: \${{ matrix.warp_label }}" "$warpbuild_workflow" && grep -qF "timeout-minutes: 20" "$warpbuild_workflow" && grep -qF "fail-fast: false" "$warpbuild_workflow" && grep -qF "failing closed" "$warpbuild_workflow"'
 # Sections run at the same time on independent hosted machines, and one failing
 # section must never hide the other sections.
 check 'sections run on independent hosted machines and all keep reporting' \
@@ -372,14 +372,14 @@ proof_ok() {
   [ -n "$proof" ] || return 1
   printf '%s' "$proof" | grep -qF 'continue-on-error: true' || return 1
   printf '%s' "$proof" | grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' || return 1
-  printf '%s' "$proof" | grep -qF 'runs-on: warp-custom-warpbuild-win2022-canary' || return 1
+  printf '%s' "$proof" | grep -qF 'runs-on: ${{ matrix.warp_label }}' || return 1
   printf '%s' "$proof" | grep -qF 'max-parallel: 2' || return 1
   printf '%s' "$proof" | grep -qF 'section: [1, 2, 3, 4, 5, 6, 7, 8]' || return 1
   printf '%s' "$proof" | grep -qF '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' || return 1
   # Not load-bearing: verification-closure must not depend on it.
   ! grep -qF 'windows-offline-warpbuild-proof' <(sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' "$workflow") || return 1
-  # And the required section matrix must never route to the WarpBuild label.
-  ! grep -qF 'warp-custom-warpbuild-win2022-canary' <(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow") || return 1
+  # And the required section matrix must never route to any WarpBuild label.
+  ! grep -qF 'warp-custom' <(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow") || return 1
 }
 check 'the WarpBuild proof lane is non-blocking, fork-guarded, quota-capped and outside the required aggregate' proof_ok
 # The fork-isolation guard on the required section matrix is security-critical:
