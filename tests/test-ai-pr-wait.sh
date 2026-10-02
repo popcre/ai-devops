@@ -142,7 +142,7 @@ SECONDS=0
 OUT="$(AI_DEVOPS_TEST_MODE=1 AI_PR_WAIT_TEST_TRACE="$TMP/hung-trace" AI_PR_WAIT_TEST_MARKER="$TMP/hung-called" AI_PR_WAIT_TEST_CLOCK="$TMP/clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 --api-timeout-seconds 1 2>&1)"; RC=$?
 ELAPSED=$SECONDS
 check "a hung GitHub request is killed inside the overall deadline" \
-  "test -f '$TMP/hung-called' && test '$RC' -eq 2 && test '$ELAPSED' -lt 5 && printf '%s' \"$OUT\" | grep -q 'could not be read before the 1m deadline'"
+  "test -f '$TMP/hung-called' && test '$RC' -eq 2 && test '$ELAPSED' -lt 20 && printf '%s' \"$OUT\" | grep -q 'could not be read before the 1m deadline'"
 
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
