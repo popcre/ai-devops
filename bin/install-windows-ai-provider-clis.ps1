@@ -41,8 +41,9 @@ function Test-QwenChildEnvironmentHardened {
       $text.Contains('var INTERNAL_SECRET_ENV_VARS') -and $text.Contains('function sanitizeChildEnv')
     })
     if ($hits.Count -ne 1) { return $false }
-    $declaration = [regex]::Match((Get-Content -Raw -LiteralPath $hits[0].FullName), 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
-    return ($declaration.Success -and $declaration.Value.Contains('"BAILIAN_CODING_PLAN_API_KEY"'))
+    # Exactly one declaration, or the bundle is ambiguous and not hardened.
+    $declarations = [regex]::Matches((Get-Content -Raw -LiteralPath $hits[0].FullName), 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
+    return ($declarations.Count -eq 1 -and $declarations[0].Value.Contains('"BAILIAN_CODING_PLAN_API_KEY"'))
   } catch { return $false }
 }
 
@@ -57,13 +58,15 @@ function Set-QwenChildEnvironmentHardening {
   if ($candidates.Count -ne 1) { throw "Expected exactly one Qwen child-environment sanitizer bundle under $chunkRoot; found $($candidates.Count)." }
   $path = $candidates[0].FullName
   $content = Get-Content -Raw -LiteralPath $path
-  $declaration = [regex]::Match($content, 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
-  if (-not $declaration.Success) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
+  # Exactly one declaration, checked before anything else: with two, JavaScript
+  # uses the last, so judging (or skipping) on the first could fail open.
+  $declarations = [regex]::Matches($content, 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[[\s\S]*?\];')
+  if ($declarations.Count -ne 1) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
+  $declaration = $declarations[0]
   if (-not $declaration.Value.Contains('"BAILIAN_CODING_PLAN_API_KEY"')) {
     # Insert right after the declaration's opening bracket. Qwen 0.24 ships the
     # bundle minified ("var INTERNAL_SECRET_ENV_VARS=[...]"), earlier builds
     # pretty-printed; the regex match covers both and nothing else.
-    if (@([regex]::Matches($content, 'var INTERNAL_SECRET_ENV_VARS\s*=\s*\[')).Count -ne 1) { throw 'The known Qwen sanitizer declaration was not found; refusing an unverified patch.' }
     $index = $declaration.Index + $declaration.Value.IndexOf('[') + 1
     $replacement = '"BAILIAN_CODING_PLAN_API_KEY",'
     $backupDir = Join-Path $HOME '.local\state\ai-devops\qwen\vendor-backups'

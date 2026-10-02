@@ -158,6 +158,7 @@ harden_qwen_child_env() {
     candidate="$file"; count=$((count+1))
   done < <(grep -l 'var INTERNAL_SECRET_ENV_VARS' "$root"/lib/chunks/*.js 2>/dev/null || true)
   [ "$count" = 1 ] || { echo "ERROR qwen: expected exactly one child-environment sanitizer bundle under $root; found $count" >&2; return 1; }
+  command -v perl >/dev/null 2>&1 || { echo "ERROR qwen: perl is required to verify and patch the child-environment sanitizer" >&2; return 1; }
   local declaration
   # Qwen 0.24 minifies the bundle onto one line; match the bracketed array
   # itself so both the minified and the older pretty-printed shapes qualify.

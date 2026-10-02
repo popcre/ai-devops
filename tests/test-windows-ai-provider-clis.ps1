@@ -104,6 +104,15 @@ try {
   $refused = $false
   try { [void](Set-QwenChildEnvironmentHardening -Root $minRoot) } catch { $refused = $_.Exception.Message -like '*refusing an unverified patch*' }
   Assert $refused 'an ambiguous sanitizer bundle with two declarations must be refused, not patched'
+  # Fail-open ordering: the first declaration already lists the key, the
+  # effective (last) one does not. It must neither pass the check nor be skipped.
+  [IO.File]::WriteAllText($minFile, $minBundle.Replace('init_esbuild_shims();', 'init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=["BAILIAN_CODING_PLAN_API_KEY"];'), [Text.UTF8Encoding]::new($false))
+  Assert (-not (Test-QwenChildEnvironmentHardened -Root $minRoot)) 'an ambiguous bundle whose first declaration lists the key must not count as hardened'
+  $refused = $false
+  try { [void](Set-QwenChildEnvironmentHardening -Root $minRoot) } catch { $refused = $_.Exception.Message -like '*refusing an unverified patch*' }
+  Assert $refused 'an ambiguous bundle whose first declaration lists the key must be refused, not skipped'
+  $verifyOut = & (Join-Path $minNode 'node.exe') (Join-Path $root 'toolserify-qwen-child-env-sanitizer.mjs') $minRoot 2>&1
+  Assert ($LASTEXITCODE -ne 0) 'the behavioral verifier must refuse a bundle with two sanitizer declarations'
 } finally {
   if (Test-Path -LiteralPath $minRoot) { Remove-Item -LiteralPath $minRoot -Recurse -Force }
 }
