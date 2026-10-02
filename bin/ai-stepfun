@@ -271,7 +271,7 @@ run_opencode_turn(){
     [ -x "$timeout_win" ] || timeout_win="$(command -v timeout || true)"
     ( for name in $(compgen -e); do
         case "$name" in
-          PATH|SYSTEMROOT|LANG|LC_ALL|TERM|SSL_CERT_FILE|SSL_CERT_DIR|PSModuleAnalysisCachePath|AI_STEPFUN_TIMEOUT|AI_STEPFUN_MODEL|AI_STEPFUN_BASE_URL) ;;
+          PATH|SYSTEMROOT|LANG|LC_ALL|TERM|SSL_CERT_FILE|SSL_CERT_DIR|PSModuleAnalysisCachePath|AI_STEPFUN_TIMEOUT|AI_STEPFUN_MODEL|AI_STEPFUN_BASE_URL|AI_STEPFUN_RUNNERS_JSON|AI_STEPFUN_REVIEW_DIR) ;;
           *) unset "$name" 2>/dev/null || true ;;
         esac
       done
@@ -454,9 +454,9 @@ write_windows_runners(){
   local out="${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
   command -v jq >/dev/null 2>&1 || return 1
   command -v sha256sum >/dev/null 2>&1 || return 1
-  local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0"
+  local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Python313:/c/Python312:/c/Python311"
   local json="{" first=1 name path hash
-  for name in npm node pytest python python3 go cargo dotnet; do
+  for name in ls cat head bash sh npm node pytest python python3 go cargo dotnet; do
     path="$(PATH="$sanitized" command -v "$name" 2>/dev/null || true)"
     [ -n "$path" ] && [ -x "$path" ] || continue
     case "$path" in *WindowsApps*) continue ;; esac
@@ -466,7 +466,8 @@ write_windows_runners(){
     json+="\"$name\":{\"path\":$(printf '%s' "$path" | jq -Rs .),\"sha256\":\"$hash\"}"
   done
   json+="}"
-  printf '%s\n' "$json" | jq -e 'type=="object"' >/dev/null 2>&1 || return 1
+  [ "$first" = 1 ] && return 1
+  printf '%s\n' "$json" | jq -e 'type=="object" and length>0' >/dev/null 2>&1 || return 1
   mkdir -p "$(dirname "$out")"
   printf '%s\n' "$json" > "$out"
   chmod 600 "$out" 2>/dev/null || true
