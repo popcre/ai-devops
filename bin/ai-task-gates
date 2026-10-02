@@ -376,13 +376,17 @@ reviewer_approval_summary(){
 # must belong to this repository and quote the owner's request verbatim; the
 # issue is read from the GitHub issue JSON (url, body, comments) that the
 # caller fetched through the managed transport, and it must name
-# the same URL. Only a prose or code change set qualifies: a structural,
-# security, infrastructure, or protected class never does. The row count and
+# the same URL. The quote (at least 12 characters, one line) must appear in
+# text authored by an owner account (OWNER_LOGINS). Only an empty, prose, or
+# code change set qualifies: a structural, security, infrastructure, or
+# protected class never does. A declared task (start) is required so the
+# release is always recorded. The row count and
 # transaction guard are the caller's declared contract, recorded in the task
 # state for audit; escalation and every other gate still run first.
 # Usage: small_owner_entry_summary ACTION ISSUE_URL ROWS QUOTE BODY_JSON CLASS
+OWNER_LOGINS='["u2giants","popcre"]'
 small_owner_entry_summary(){
-  local action="$1" url="$2" rows="$3" quote="$4" body_file="$5" class="$6" repo json text
+  local action="$1" url="$2" rows="$3" quote="$4" body_file="$5" class="$6" repo json text fd
   _soe_stop(){ printf 'ai-task-gates: STOP. %s\n' "$*" >&2; return 1; }
   [ "$action" = database ] || { _soe_stop '--small-owner-entry applies only to --before database.'; return 1; }
   case "$class" in none|prose|code) ;; *) _soe_stop "A small owner entry is row data only; the \"$class\" change set needs --reviewer-approval."; return 1 ;; esac
@@ -392,16 +396,22 @@ small_owner_entry_summary(){
   [ "${repo,,}" = "${IDENTITY,,}" ] || { _soe_stop "The owner-request issue must belong to $IDENTITY (got $repo)."; return 1; }
   [[ "$rows" =~ ^[1-9][0-9]?$ ]] && [ "$rows" -le 10 ] \
     || { _soe_stop "A small owner entry needs --row-count between 1 and 10 (got \"$rows\"); larger writes need --reviewer-approval."; return 1; }
-  [ -n "$quote" ] && [[ "$quote" != *$'\n'* ]] && [[ "$quote" != *$'\r'* ]] \
-    || { _soe_stop 'A small owner entry needs a one-line --owner-quote with the owner request verbatim.'; return 1; }
+  [ "${#quote}" -ge 12 ] && [[ "$quote" != *$'\n'* ]] && [[ "$quote" != *$'\r'* ]] \
+    || { _soe_stop 'A small owner entry needs a one-line --owner-quote of at least 12 characters with the owner request verbatim.'; return 1; }
+  [ -f "$(state_path)" ] || { _soe_stop 'A small owner entry needs a declared task (ai-task-gates start) so the release is recorded.'; return 1; }
   [ -n "$body_file" ] && [ ! -L "$body_file" ] && [ -f "$body_file" ] \
     || { _soe_stop 'A small owner entry needs --issue-body-file: the GitHub issue JSON with url, body, and comments.'; return 1; }
-  json="$(cat -- "$body_file")" && [ ! -L "$body_file" ] || { _soe_stop 'The issue body file could not be read safely.'; return 1; }
+  exec {fd}<"$body_file" || { _soe_stop 'The issue body file could not be opened.'; return 1; }
+  json="$(cat <&"$fd")"; exec {fd}<&-
+  [ ! -L "$body_file" ] || { _soe_stop 'The issue body file could not be read safely.'; return 1; }
   jq -e --arg u "$url" '.url == $u and (.body|type=="string")' >/dev/null 2>&1 <<<"$json" \
     || { _soe_stop "The issue body file is not the GitHub issue JSON for $url."; return 1; }
-  text="$(jq -r '.body, ((.comments // [])[]?.body // empty)' <<<"$json" | tr -d '\r')"
+  text="$(jq -r --argjson owners "$OWNER_LOGINS" '
+    ([{author:.author, body:.body}] + (.comments // []))[]
+    | select((.author.login // "" | ascii_downcase) as $l | $owners | index($l))
+    | .body // empty' <<<"$json" | tr -d '\r')"
   grep -qF -- "$quote" <<<"$text" \
-    || { _soe_stop "Issue $url does not quote the owner request verbatim (--owner-quote not found)."; return 1; }
+    || { _soe_stop "Issue $url does not quote the owner request verbatim in owner-authored text (--owner-quote not found)."; return 1; }
   printf 'small owner entry %s, %s row(s), quote sha256:%s verified in issue; caller must run one guarded transaction asserting exactly %s row(s) after target-database proof' \
     "$url" "$rows" "$(printf '%s' "$quote" | sha256sum | cut -d' ' -f1)" "$rows"
 }

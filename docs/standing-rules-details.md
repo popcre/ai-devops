@@ -118,8 +118,11 @@ identity proof, claim rules, and live proof. Run:
       --row-count 3 --owner-quote "<Albert's words, verbatim>" \\
       --issue-body-file <JSON from `gh issue view N --json url,body,comments`>
 
-The issue must belong to the repository being worked on, and its JSON must
-name the same URL. The gate refuses a row count outside 1..10, a multi-line
+The issue must belong to the repository being worked on, its JSON (from
+`gh issue view N --json url,author,body,comments`) must name the same URL, and
+the quote (one line, at least 12 characters) must appear in text authored by
+an owner account (`u2giants` or `popcre`). A declared task is required so the
+release is always recorded. The gate refuses a row count outside 1..10, a multi-line
 quote, a quote missing from the issue body or comments, any action other than
 `database`, any change set above `code` (structure, security, infrastructure,
 or a protected class), and combining it with `--reviewer-approval`. The row
