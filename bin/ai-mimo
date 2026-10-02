@@ -6,7 +6,7 @@
 # This script owns the read-only default agent pin, the wall-clock ceiling, the
 # yolo refusal, and the completion honesty check.
 #
-#   ai-mimo ask "<prompt>" [--agent plan|build] [--cwd DIR] [--json-output]
+#   ai-mimo ask "<prompt>" [--agent plan|build] [--model provider/model] [--dir DIR] [--json-output]
 #   ai-mimo doctor [--live]
 #   ai-mimo version
 #
@@ -16,15 +16,30 @@
 # be added (interactive client only; formal review stays Claude/Codex).
 #
 # ---------------------------------------------------------------------------
-# STEP 0 VERIFICATION -- baseline 2026-09-23 on edge-dev.
-#   Desktop app PRESENT: C:/Program Files/Xiaomi MiMo AI/Xiaomi MiMo AI.exe
-#   Standalone `mimo` CLI ABSENT on PATH. Headless `mimo run` is the documented
-#   entry (MiMoCode commands reference) but the exact flag set is UNQUALIFIED
-#   until the CLI is installed (plan D10). This wrapper therefore:
-#     - fails closed with local_dependency_unavailable when `mimo` is missing
-#     - never launches the Desktop GUI
-#     - never passes --yolo / --dangerously-skip-permissions from caller input
-#     - defaults to --agent plan (read-only) plus a wall-clock ceiling
+# STEP 0 VERIFICATION -- CLI baseline 2026-09-25 on edge-dev (mimo 0.1.15).
+#   Standalone CLI PRESENT on PATH: @mimo-ai/cli 0.1.15, the official Xiaomi
+#   npm package (repo XiaomiMiMo/MiMo-Code), installed with
+#   `npm install -g @mimo-ai/cli`. Desktop app also PRESENT:
+#   C:/Program Files/Xiaomi MiMo AI/Xiaomi MiMo AI.exe
+#   `mimo run` flag set QUALIFIED LIVE 2026-09-25 (D10 closed); verbatim
+#   evidence: tests/verification/mimo-cli-2026-09-25/README.md. Key facts:
+#     - model selector EXISTS: -m/--model, format provider/model
+#       (`mimo models` lists xiaomi/mimo-v2.6-flash and xiaomi/mimo-v2.6-pro)
+#     - directory flag is --dir (NOT --cwd; --cwd was a pre-qualification guess
+#       and is now refused as an unknown option)
+#     - agents `plan` and `build` both exist (`mimo agent list`, both primary)
+#     - --yolo is an alias of --dangerously-skip-permissions (refused here)
+#     - TRAP: a failed run can exit 0 with the error text on stderr and EMPTY
+#       stdout; the empty-answer check below is the honesty gate for that
+#     - --format exists (default|json) but its JSON event shape is unqualified;
+#       --json-output wraps text locally with jq instead of passing --format
+#   Auth: the CLI keeps its own credentials (~/.local/share/mimocode/auth.json)
+#   and the Desktop login does NOT carry over. `mimo providers whoami` said
+#   "Not logged in" on 2026-09-25; the one-time interactive login is
+#   `mimo providers login -p xiaomi` (browser OAuth + pasted code).
+#   Owner rule (2026-09-25): SUBSCRIPTION-ONLY -- no pay-per-token API keys.
+#   If the login demands an API key instead of the Xiaomi subscription
+#   account, abort; the manual Desktop path remains the dispatch route.
 #   MCP config: ~/.config/mimocode/mimocode.jsonc -> mcp.<name> uses an ARRAY
 #   command, key `timeout` (ms), and `type: local|remote`. Do not reuse the
 #   ZCode writer (string command / timeoutMs).
@@ -33,12 +48,13 @@
 #   Skills write root: ~/.config/mimocode/skills/ only (never ~/.agents/skills).
 # ---------------------------------------------------------------------------
 #
-# Re-run and update this block on any version bump or first live `mimo run`
-# qualification; evidence: tests/verification/mimo-windows-2026-09-23/.
+# Re-run and update this block on any version bump; evidence:
+# tests/verification/mimo-cli-2026-09-25/ (CLI) and
+# tests/verification/mimo-windows-2026-09-23/ (Desktop/config baseline).
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 MIMO_HOME="${AI_MIMO_HOME:-$HOME/.config/mimocode}"
 MIMO_DATA="${AI_MIMO_DATA:-$HOME/.local/share/mimocode}"
@@ -64,8 +80,9 @@ resolve_cli() {
     command -v mimo; return 0
   fi
   die "local_dependency_unavailable: standalone MiMoCode CLI 'mimo' not found on PATH.
-This is not a model-provider fault. Install the MiMoCode CLI (or set AI_MIMO_CLI
-to its absolute path), then re-run. The Desktop app at $MIMO_DESKTOP_EXE is a
+This is not a model-provider fault. Install the official package with
+\`npm install -g @mimo-ai/cli\` (repo XiaomiMiMo/MiMo-Code), or set AI_MIMO_CLI
+to its absolute path, then re-run. The Desktop app at $MIMO_DESKTOP_EXE is a
 GUI and is never used as a headless fallback. Presence probe: ai-mimo doctor"
 }
 
@@ -73,7 +90,7 @@ GUI and is never used as a headless fallback. Presence probe: ai-mimo doctor"
 # ask -- one-shot headless prompt via `mimo run`.
 # ---------------------------------------------------------------------------
 cmd_ask() {
-  local prompt="" agent="$DEFAULT_AGENT" json_out=0 cwd="" arg
+  local prompt="" agent="$DEFAULT_AGENT" model="" json_out=0 dir="" arg
   while [ $# -gt 0 ]; do
     arg="$1"; shift
     case "$arg" in
@@ -81,36 +98,47 @@ cmd_ask() {
         [ $# -gt 0 ] || die "--agent requires a value"
         agent="$1"; shift
         ;;
+      --model)
+        [ $# -gt 0 ] || die "--model requires a value"
+        model="$1"; shift
+        ;;
       --json-output) json_out=1 ;;
-      --cwd)
-        [ $# -gt 0 ] || die "--cwd requires a value"
-        cwd="$1"; shift
+      --dir)
+        [ $# -gt 0 ] || die "--dir requires a value"
+        dir="$1"; shift
         ;;
       --yolo|--dangerously-skip-permissions|--never-ask)
         die "$arg is refused: this wrapper never auto-approves from caller input. Use --agent plan (default, read-only) or --agent build."
         ;;
-      -*) die "unknown ask option: $arg (accepted: --agent, --cwd, --json-output)" ;;
+      -*) die "unknown ask option: $arg (accepted: --agent, --model, --dir, --json-output)" ;;
       *)  [ -z "$prompt" ] || die "only one positional prompt is allowed"
           prompt="$arg" ;;
     esac
   done
-  [ -n "$prompt" ] || die "no prompt given. Usage: ai-mimo ask \"<prompt>\" [--agent plan|build] [--cwd DIR] [--json-output]"
+  [ -n "$prompt" ] || die "no prompt given. Usage: ai-mimo ask \"<prompt>\" [--agent plan|build] [--model provider/model] [--dir DIR] [--json-output]"
 
   case "$agent" in
     plan|build) ;;
     *) die "unknown --agent: $agent (accepted: plan, build)" ;;
   esac
 
+  # Qualified flag (mimo run --help, 2026-09-25): -m/--model takes
+  # provider/model. The model list comes from `mimo models`.
+  if [ -n "$model" ] && ! printf '%s' "$model" | grep -Eq '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'; then
+    die "invalid --model: $model (expected provider/model, e.g. xiaomi/mimo-v2.6-flash; list with: mimo models)"
+  fi
+
   local cli rc
   cli="$(resolve_cli)"
   local -a argv=(run --agent "$agent")
-  [ -n "$cwd" ] && argv+=(--cwd "$cwd")
+  [ -n "$model" ] && argv+=(--model "$model")
+  [ -n "$dir" ] && argv+=(--dir "$dir")
   argv+=("$prompt")
 
   out="$(mktemp)"; err="$(mktemp)"
   trap 'rm -f "$out" "$err"' EXIT
   rc=0
-  ( cd "${cwd:-$(pwd)}" && timeout "$ASK_TIMEOUT"s "$cli" "${argv[@]}" ) >"$out" 2>"$err" || rc=$?
+  ( cd "${dir:-$(pwd)}" && timeout "$ASK_TIMEOUT"s "$cli" "${argv[@]}" ) >"$out" 2>"$err" || rc=$?
 
   if [ "$rc" -eq 124 ]; then
     die "ask timed out after ${ASK_TIMEOUT}s (ceiling: AI_MIMO_ASK_TIMEOUT). The provider may still be running; no answer was parsed."
@@ -121,6 +149,9 @@ cmd_ask() {
   fi
 
   # Completion honesty: empty stdout is a failed run, not a silent success.
+  # Qualified trap 2026-09-25: an unauthenticated/failed `mimo run` can exit 0
+  # with the error text on stderr and EMPTY stdout -- this check is what turns
+  # that into a failure instead of a silent empty answer.
   if ! [ -s "$out" ]; then
     head -5 "$err" >&2 || true
     die "mimo produced an empty answer. Treat as incomplete."
