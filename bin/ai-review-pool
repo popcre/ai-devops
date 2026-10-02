@@ -22,7 +22,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
+usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini|deepseek> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -53,6 +53,7 @@ case "$provider" in
   muse)  RUNNER="$ROOT/ai-muse";         RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
   qwen)  RUNNER="$ROOT/ai-qwen";         RUNNER_MAX_TURNS="" ;; # ai-qwen owns its 120-turn/60m review budget and rejects --max-turns
   gemini) RUNNER="$ROOT/ai-gemini";      RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
+  deepseek) RUNNER="$ROOT/ai-review-engine"; RUNNER_MAX_TURNS="" ;; # OpenCode door: no session-runner copy; only the shared runner may dispatch it
   ''|-h|--help|help) usage; [ -n "$provider" ] || exit 0; exit 2 ;;
   *) printf 'ai-review-pool: error: %s is not a pool provider with a session runner.\n' "$provider" >&2; exit 2 ;;
 esac
@@ -75,7 +76,7 @@ fi
 # AI_REVIEW_ENGINE_BIN is refused here, before ENGINE is resolved, so a
 # wrapper cannot point the runner at a look-alike that skips every governance
 # step while still satisfying the door's token check.
-for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN; do
+for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_POOL_RUNNER_DEEPSEEK AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN; do
   if [ -n "${!_hook_var:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
     die "$_hook_var is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute a review binary."
   fi
