@@ -551,7 +551,8 @@ jobs:
           $startInfo.FileName = $bash
           $startInfo.UseShellExecute = $false
           $startInfo.WorkingDirectory = $env:GITHUB_WORKSPACE
-          $startInfo.ArgumentList.Add($scriptFile -replace '\\', '/')
+          $scriptFilePosix = $scriptFile -replace '\\', '/'
+          $startInfo.ArgumentList.Add($scriptFilePosix)
           $process = [System.Diagnostics.Process]::Start($startInfo)
           if (-not $process.WaitForExit(55 * 60 * 1000)) {
             & .\tools\ci\stop-process-tree.ps1 -TargetProcessId $process.Id -WaitMilliseconds 10000
