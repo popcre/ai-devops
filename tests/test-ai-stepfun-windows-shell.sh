@@ -22,6 +22,8 @@ echo canary > "$TMP/host/secret.txt"
 echo ok > "$TMP/folder/readme.md"
 export AI_STEPFUN_REVIEW_DIR="$TMP/folder"
 export GATE_PATH="/usr/bin:/bin"
+export AI_STEPFUN_TEST_MODE=1
+export AI_STEPFUN_RUNNERS_JSON="$TMP/no-such-runners.json"
 
 refuses(){ "$GATE" "$@"; [ "$?" -eq 126 ]; }
 allows(){ "$GATE" "$@"; }
@@ -49,6 +51,37 @@ check 'allows cat in folder (stub)' bash -c "\"$GATE\" cat readme.md; test \$? -
 check 'allows npm test (stub)' bash -c "\"$GATE\" npm test; test \$? -eq 0"
 check 'allows npm run test:unit (stub)' bash -c "\"$GATE\" npm run test:unit; test \$? -eq 0"
 check 'refuses unknown npm flag' bash -c "\"$GATE\" npm --prefix /tmp test; test \$? -eq 126"
+
+# Production allowlist/hash path (no test-mode fallback).
+export AI_STEPFUN_TEST_MODE=0
+mkdir -p "$TMP/stubs2"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/stubs2/cat"
+chmod +x "$TMP/stubs2/cat"
+echo 'missing allowlist refuses' >/dev/null
+if AI_STEPFUN_RUNNERS_JSON="$TMP/missing.json" AI_STEPFUN_REVIEW_DIR="$TMP/folder" GATE_PATH="$TMP/stubs2" bash "$GATE" cat r.md >/dev/null 2>&1; then
+  echo 'FAIL missing allowlist'; fail=$((fail+1))
+else
+  echo 'ok   missing allowlist refuses'; pass=$((pass+1))
+fi
+good_hash="$(sha256sum "$TMP/stubs2/cat" | awk '{print $1}')"
+printf '{"cat":{"path":"%s","sha256":"%s"}}\n' "$TMP/stubs2/cat" "$good_hash" > "$TMP/runners.json"
+if AI_STEPFUN_RUNNERS_JSON="$TMP/runners.json" AI_STEPFUN_REVIEW_DIR="$TMP/folder" GATE_PATH="$TMP/stubs2" bash "$GATE" cat r.md >/dev/null 2>&1; then
+  echo 'ok   valid hash allowlist allows'; pass=$((pass+1))
+else
+  echo 'FAIL valid hash allowlist'; fail=$((fail+1))
+fi
+printf '{"cat":{"path":"%s","sha256":"%s"}}\n' "$TMP/stubs2/cat" "deadbeef" > "$TMP/runners-bad.json"
+if AI_STEPFUN_RUNNERS_JSON="$TMP/runners-bad.json" AI_STEPFUN_REVIEW_DIR="$TMP/folder" GATE_PATH="$TMP/stubs2" bash "$GATE" cat r.md >/dev/null 2>&1; then
+  echo 'FAIL hash mismatch allowed'; fail=$((fail+1))
+else
+  echo 'ok   hash mismatch refuses'; pass=$((pass+1))
+fi
+printf '{"cat":{"path":"%s"}}\n' "$TMP/stubs2/cat" > "$TMP/runners-nohash.json"
+if AI_STEPFUN_RUNNERS_JSON="$TMP/runners-nohash.json" AI_STEPFUN_REVIEW_DIR="$TMP/folder" GATE_PATH="$TMP/stubs2" bash "$GATE" cat r.md >/dev/null 2>&1; then
+  echo 'FAIL missing hash allowed'; fail=$((fail+1))
+else
+  echo 'ok   missing hash pin refuses'; pass=$((pass+1))
+fi
 
 printf 'passed=%s failed=%s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

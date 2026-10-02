@@ -168,31 +168,40 @@ allow_colon_name(){
 }
 
 run(){
-  # Always dispatch the parsed token list (never raw "$*").
-  local -a argv=("$@")
   local allow="${AI_STEPFUN_RUNNERS_JSON:-${HOME}/.config/ai-devops/secrets/stepfun-windows-runners.json}"
   local real=""
-  if [ -f "$allow" ] && command -v jq >/dev/null 2>&1; then
+  if [ -f "$allow" ] && [ ! -L "$allow" ] && PATH="${GATE_PATH:-/usr/bin:/bin}:/usr/bin:/bin" command -v jq >/dev/null 2>&1; then
     real="$(jq -r --arg n "$runner_lc" '.[$n].path // .[$n] // empty' "$allow" 2>/dev/null || true)"
+    local want=""
+    want="$(jq -r --arg n "$runner_lc" '.[$n].sha256 // empty' "$allow" 2>/dev/null || true)"
+    [ -n "$real" ] || REFUSE 'runner not in allowlist'
+    [ -n "$want" ] || REFUSE 'runner hash pin missing'
+    [ -e "$real" ] || REFUSE 'runner path not executable'
+    [ -x "$real" ] || REFUSE 'runner path not executable'
+    # Refuse if any path component is a symlink/reparse (best-effort).
+    _p="$real"
+    while [ "$_p" != "/" ] && [ -n "$_p" ]; do
+      [ ! -L "$_p" ] || REFUSE 'runner path linked'
+      _p="$(dirname "$_p")"
+    done
+    command -v sha256sum >/dev/null 2>&1 || REFUSE 'sha256sum unavailable'
+    local got
+    got="$(sha256sum "$real" | awk '{print $1}')"
+    [ "$got" = "$want" ] || REFUSE 'runner hash mismatch'
+    cd "$REVIEW_DIR"
+    # Keep system dirs so shebangs (env/bash) resolve; no shim re-entry.
+    export PATH="${GATE_PATH:-/usr/bin:/bin}:/usr/bin:/bin"
+    exec "$real" "$@"
   fi
-  if [ -z "$real" ]; then
-    # Offline/test fallback: resolve from GATE_PATH only (not host PATH).
+  # No allowlist: fail closed unless an offline test explicitly stubs GATE_PATH.
+  if [ "${AI_STEPFUN_TEST_MODE:-}" = 1 ]; then
     real="$(PATH="${GATE_PATH:-/usr/bin:/bin}" command -v "$runner_lc" 2>/dev/null || true)"
+    [ -n "$real" ] || REFUSE 'runner not in allowlist'
+    cd "$REVIEW_DIR"
+    export PATH="${GATE_PATH:-/usr/bin:/bin}:/usr/bin:/bin"
+    exec "$real" "$@"
   fi
-  [ -n "$real" ] || REFUSE 'runner not in allowlist'
-  if [ -n "${AI_STEPFUN_RUNNERS_JSON:-}" ] && [ -f "${AI_STEPFUN_RUNNERS_JSON}" ] && command -v jq >/dev/null 2>&1; then
-    local want
-    want="$(jq -r --arg n "$runner_lc" '.[$n].sha256 // empty' "${AI_STEPFUN_RUNNERS_JSON}" 2>/dev/null || true)"
-    if [ -n "$want" ] && command -v sha256sum >/dev/null 2>&1; then
-      local got
-      got="$(sha256sum "$real" | awk '{print $1}')"
-      [ "$got" = "$want" ] || REFUSE 'runner hash mismatch'
-    fi
-  fi
-  cd "$REVIEW_DIR"
-  # Children must not re-enter the shim.
-  export PATH="${GATE_PATH:-/usr/bin:/bin}"
-  exec "$real" "$@"
+  REFUSE 'runner allowlist missing'
 }
 
 case "$runner_lc" in
