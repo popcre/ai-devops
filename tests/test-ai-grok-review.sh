@@ -1362,7 +1362,11 @@ check "front_door_refuses_unknown_operation" "[ '$RC_FRONT_OPBAD' -eq 2 ] && gre
 bash "$FRONT" codex final-check --operation stale-linux-manifest-recovery > /dev/null 2>&1; RC_FRONT_OPSTALE=$?
 check "front_door_refuses_unbindable_stale_manifest_operation" "[ '$RC_FRONT_OPSTALE' -eq 2 ]"
 bash "$FRONT" codex plan-review --operation first-managed-install > "$TMP/front-opplan" 2>&1; RC_FRONT_OPPLAN=$?
-check "front_door_refuses_operation_on_plan_review" "[ '$RC_FRONT_OPPLAN' -eq 2 ] && grep -q 'formal exact-head review mode' '$TMP/front-opplan'"
+check "front_door_refuses_operation_on_plan_review" "[ '$RC_FRONT_OPPLAN' -eq 2 ] && grep -q 'final-check exact-head review mode' '$TMP/front-opplan'"
+for op_mode in diff-review security-review visual-review; do
+  bash "$FRONT" codex "$op_mode" --operation first-managed-install > "$TMP/front-opmode" 2>&1; RC_FRONT_OPMODE=$?
+  check "front_door_refuses_operation_on_$op_mode" "[ '$RC_FRONT_OPMODE' -eq 2 ] && grep -q 'final-check exact-head review mode' '$TMP/front-opmode'"
+done
 bash "$FRONT" codex final-check --operation first-managed-install --operation first-managed-install > /dev/null 2>&1; RC_FRONT_OPDUP=$?
 check "front_door_refuses_repeated_operation" "[ '$RC_FRONT_OPDUP' -eq 2 ]"
 check "front_door_never_forwards_inherited_operation" "grep -q '^export AI_REVIEW_OPERATION=\"\$operation\"' '$FRONT'"
@@ -1464,6 +1468,9 @@ check "pool_operation_report_records_operation" "[ -f '$OP_REPORT' ] && grep -Fq
 OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=stale-linux-manifest-recovery bash "$POOL" qwen final-check ) > "$POOLTMP/out-opbad" 2>&1; RC_OPBAD=$?
 check "pool_unknown_operation_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -q 'unknown review operation' '$POOLTMP/out-opbad' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
+OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=first-managed-install bash "$POOL" qwen security-review ) > "$POOLTMP/out-opmode" 2>&1; RC_OPMODE=$?
+check "pool_operation_outside_final_check_never_dispatches" "[ '$RC_OPMODE' -ne 0 ] && grep -q 'review operation needs final-check' '$POOLTMP/out-opmode' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
 rm -f "$POOLTMP/last-brief"
 ( cd "$POOLTMP/fakerepo" && export_pool && unset AI_REVIEW_OPERATION && bash "$POOL" qwen final-check ) > /dev/null 2>&1
 check "pool_without_operation_requests_no_approval_line" "[ -f '$POOLTMP/last-brief' ] && ! grep -q '^Approved ' '$POOLTMP/last-brief' && ! grep -q 'installation operation' '$POOLTMP/last-brief'"

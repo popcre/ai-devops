@@ -217,6 +217,7 @@ Follow this exact stage brief and treat its named prior artifact as the input co
 $(cat "$AI_REVIEW_BRIEF_FILE")"
 fi
 if [ -n "${AI_REVIEW_OPERATION:-}" ]; then
+  [ "$MODE" = final-check ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "review operation needs final-check, not $MODE."; }
   # shellcheck source=../tools/lib/review-operation.sh
   . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/review-operation.sh" || die 'cannot load the review operation list.'
   OPERATION_REQUEST="$(review_operation_request "$AI_REVIEW_OPERATION")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "unknown review operation: $AI_REVIEW_OPERATION"; }

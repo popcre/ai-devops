@@ -105,6 +105,9 @@ check "operation_report_records_operation" "[ -s '$OP_OUT' ] && grep -Fq '| oper
 rm -f "$TMP/args"/prompt-*
 (cd "$R" && AI_REVIEW_OPERATION=bogus-operation "$SCRIPT" final-check) > "$TMP/op-bad.out" 2>&1; OP_BAD_RC=$?
 check "unknown_operation_never_reaches_codex" "[ '$OP_BAD_RC' -ne 0 ] && grep -q 'unknown review operation' '$TMP/op-bad.out' && ! ls '$TMP/args'/prompt-* >/dev/null 2>&1"
+rm -f "$TMP/args"/prompt-*
+(cd "$R" && AI_REVIEW_OPERATION=first-managed-install "$SCRIPT" security-review) > "$TMP/op-mode.out" 2>&1; OP_MODE_RC=$?
+check "operation_outside_final_check_never_reaches_codex" "[ '$OP_MODE_RC' -ne 0 ] && grep -q 'review operation needs final-check' '$TMP/op-mode.out' && ! ls '$TMP/args'/prompt-* >/dev/null 2>&1"
 # The prompt travels on stdin, which no shell converts. An absolute Git Bash
 # path sends a native Windows reviewer outside its own workspace, and it then
 # reports a denied read instead of a judgment. The packet must therefore be

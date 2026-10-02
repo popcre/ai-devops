@@ -95,7 +95,7 @@ if [ -n "$operation" ]; then
   # shellcheck source=../tools/lib/review-operation.sh
   . "$OP_LIB" || { printf 'ai-review: cannot load the review operation list.\n' >&2; exit 3; }
   review_operation_valid "$operation" || { printf 'ai-review: unknown --operation %s; no reviewer was started.\n' "$operation" >&2; exit 2; }
-  [ "$code_only" -eq 0 ] && [ "$mode" != plan-review ] || { printf 'ai-review: --operation needs a formal exact-head review mode, not code-only or plan-review.\n' >&2; exit 2; }
+  [ "$code_only" -eq 0 ] && [ "$mode" = final-check ] || { printf 'ai-review: --operation needs the final-check exact-head review mode.\n' >&2; exit 2; }
 fi
 # Only an explicit --operation reaches the wrappers; an inherited value never does.
 export AI_REVIEW_OPERATION="$operation"

@@ -254,6 +254,7 @@ if [ -n "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] && [ -f "$AI_REVIEW_REVIEWER_APPROV
 Assigned AI reviewer approval governing this review: $(basename "$AI_REVIEW_REVIEWER_APPROVAL")"; fi
 
 if [ -n "${AI_REVIEW_OPERATION:-}" ]; then
+  [ "$mode" = final-check ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "review operation needs final-check, not $mode."; }
   # shellcheck source=../tools/lib/review-operation.sh
   . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/review-operation.sh" || die 'cannot load the review operation list.'
   OPERATION_REQUEST="$(review_operation_request "$AI_REVIEW_OPERATION")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "unknown review operation: $AI_REVIEW_OPERATION"; }
