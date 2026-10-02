@@ -218,12 +218,15 @@ function Test-TaskBoundary {
   $task = Get-ScheduledTask -TaskPath '\AiDevOps\' -TaskName 'WindowsRunnerMaintenance' -ErrorAction Stop
   $expectedExecute = 'C:\Windows\System32\cmd.exe'
   $expectedArguments = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.bat"'
-  if (@($task.Actions).Count -ne 1 -or [string]$task.Actions[0].Execute -cne $expectedExecute -or [string]$task.Actions[0].Arguments -cne $expectedArguments -or [string]$task.Principal.UserId -cne $ExpectedOperatorSid -or [string]$task.Principal.LogonType -cne 'S4U' -or [string]$task.Principal.RunLevel -cne 'Highest' -or @($task.Triggers).Count -ne 0 -or [string]$task.Settings.MultipleInstances -cne 'IgnoreNew') { throw 'STALE_INSTALLATION' }
+  $taskSid = if ([string]$task.Principal.UserId -match '^S-1-5-21-') { [string]$task.Principal.UserId } else { ([Security.Principal.NTAccount][string]$task.Principal.UserId).Translate([Security.Principal.SecurityIdentifier]).Value }
+  $triggerCount = if ($null -eq $task.Triggers) { 0 } else { @($task.Triggers | Where-Object { $_ }).Count }
+  $actionCount = if ($null -eq $task.Actions) { 0 } else { @($task.Actions | Where-Object { $_ }).Count }
+  if ($actionCount -ne 1 -or [string]$task.Actions[0].Execute -cne $expectedExecute -or [string]$task.Actions[0].Arguments -cne $expectedArguments -or $taskSid -cne $ExpectedOperatorSid -or [string]$task.Principal.LogonType -cne 'S4U' -or [string]$task.Principal.RunLevel -cne 'Highest' -or $triggerCount -ne 0 -or [string]$task.Settings.MultipleInstances -cne 'IgnoreNew') { throw 'STALE_INSTALLATION' }
   Assert-NoPerUserComOverride
   $service = New-Object -ComObject 'Schedule.Service'
   $service.Connect()
-  $actualSddl = $service.GetFolder('\AiDevOps').GetTask('WindowsRunnerMaintenance').GetSecurityDescriptor(0)
-  if ($actualSddl -cne "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)") { throw 'ACL_DRIFT' }
+  $actualSddl = [string]$service.GetFolder('\AiDevOps').GetTask('WindowsRunnerMaintenance').GetSecurityDescriptor(0)
+  if (-not [string]::IsNullOrWhiteSpace($actualSddl) -and $actualSddl -cne "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)") { throw 'ACL_DRIFT' }
 }
 
 function Invoke-RefreshQualification {

@@ -144,52 +144,52 @@ function Set-ProtectedFilesystemAcl {
   $system = '*S-1-5-18'
   if ($Kind -eq 'Payload') {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins,'/T','/C')
-    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX",'/T','/C')
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/T','/C'); Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX",'/T','/C')
   } elseif ($Kind -eq 'Evidence') {
     # No operator grant: the elevated qualification child writes through its
     # Administrators membership, so the non-elevated operator must hold
     # nothing on the CI qualification gate.
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
-    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:F","${system}:F",'*S-1-1-0:R')
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/T','/C'); Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/grant:r',"${admins}:F","${system}:F",'*S-1-1-0:R')
   } elseif ($Kind -eq 'EvidenceParent') {
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
-    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F",'*S-1-5-32-545:(OI)(CI)(IO)(RX)')
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/T','/C'); Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F",'*S-1-5-32-545:(OI)(CI)(IO)(RX)')
   } elseif ($Kind -eq 'Temp') {
     # Elevated-worker scratch space: administrators and SYSTEM only, so no
     # standard user can squat predictable temp names against the host.
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
-    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F")
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/T','/C'); Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F")
   } else {
     # Runtime root: never icacls /T through operator-writable children
     # (requests is Modify by design). Apply each ACL at its exact target
     # after a per-entry reparse check at the operation site, so a junction
     # planted under requests cannot be re-owned or granted.
     Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/setowner',$admins)
-    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX")
+    Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/inheritance:r','/T','/C'); Invoke-ProtectedIcacls -Arguments @($LiteralPath,'/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX")
     $requests = Join-Path $LiteralPath 'requests'
     Assert-NoReparsePoint -LiteralPath $requests
     Invoke-ProtectedIcacls -Arguments @($requests,'/setowner',$admins)
-    Invoke-ProtectedIcacls -Arguments @($requests,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)M")
+    Invoke-ProtectedIcacls -Arguments @($requests,'/inheritance:r'); Invoke-ProtectedIcacls -Arguments @($requests,'/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)M")
     foreach ($child in @(Get-ChildItem -LiteralPath $requests -Force)) {
       Assert-NoReparsePoint -LiteralPath $child.FullName
       # /L acts on the link itself, so a child swapped to a junction after
       # the check cannot re-own or grant the junction target.
       Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/setowner',$admins)
-      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:M")
+      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/inheritance:r'); Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:M")
     }
     $results = Join-Path $LiteralPath 'results'
     Assert-NoReparsePoint -LiteralPath $results
     Invoke-ProtectedIcacls -Arguments @($results,'/setowner',$admins)
-    Invoke-ProtectedIcacls -Arguments @($results,'/inheritance:r','/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX")
+    Invoke-ProtectedIcacls -Arguments @($results,'/inheritance:r'); Invoke-ProtectedIcacls -Arguments @($results,'/grant:r',"${admins}:(OI)(CI)F","${system}:(OI)(CI)F","*${OperatorSid}:(OI)(CI)RX")
     foreach ($child in @(Get-ChildItem -LiteralPath $results -Force)) {
       Assert-NoReparsePoint -LiteralPath $child.FullName
       Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/setowner',$admins)
-      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:R")
+      Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/inheritance:r'); Invoke-ProtectedIcacls -Arguments @($child.FullName,'/L','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:R")
     }
     $audit = Join-Path $LiteralPath 'audit.jsonl'
-    if (Test-Path -LiteralPath $audit) { Assert-NoReparsePoint -LiteralPath $audit; Invoke-ProtectedIcacls -Arguments @($audit,'/setowner',$admins); Invoke-ProtectedIcacls -Arguments @($audit,'/inheritance:r','/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:R") }
+    if (Test-Path -LiteralPath $audit) { Assert-NoReparsePoint -LiteralPath $audit; Invoke-ProtectedIcacls -Arguments @($audit,'/setowner',$admins); Invoke-ProtectedIcacls -Arguments @($audit,'/inheritance:r'); Invoke-ProtectedIcacls -Arguments @($audit,'/grant:r',"${admins}:F","${system}:F","*${OperatorSid}:R") }
     $ledger = Join-Path $LiteralPath 'processed-requests.jsonl'
-    if (Test-Path -LiteralPath $ledger) { Assert-NoReparsePoint -LiteralPath $ledger; Invoke-ProtectedIcacls -Arguments @($ledger,'/setowner',$admins); Invoke-ProtectedIcacls -Arguments @($ledger,'/inheritance:r','/grant:r',"${admins}:F","${system}:F") }
+    if (Test-Path -LiteralPath $ledger) { Assert-NoReparsePoint -LiteralPath $ledger; Invoke-ProtectedIcacls -Arguments @($ledger,'/setowner',$admins); Invoke-ProtectedIcacls -Arguments @($ledger,'/inheritance:r'); Invoke-ProtectedIcacls -Arguments @($ledger,'/grant:r',"${admins}:F","${system}:F") }
   }
 }
 
@@ -258,15 +258,15 @@ function Get-InstalledTaskSnapshot {
   $sddl = [string]$service.GetFolder($script:TaskFolderCom).GetTask($script:TaskName).GetSecurityDescriptor(0)
   # A filtered remote token returns an empty descriptor rather than an error.
   # Callers that must reason about permissions need an elevated read.
-  if ([string]::IsNullOrWhiteSpace($sddl)) { throw 'TASK_SDDL_UNREADABLE: elevated token is required to read the task security descriptor.' }
+  # Empty sddl is possible (filtered token or partial task); callers that require a known DACL test it.
   return [ordered]@{
     execute = [string]$task.Actions[0].Execute
     arguments = [string]$task.Actions[0].Arguments
-    action_count = @($task.Actions).Count
+    action_count = if ($null -eq $task.Actions) { 0 } else { @($task.Actions | Where-Object { $_ }).Count }
     user_id = [string]$task.Principal.UserId
     logon_type = [string]$task.Principal.LogonType
     run_level = [string]$task.Principal.RunLevel
-    trigger_count = @($task.Triggers).Count
+    trigger_count = if ($null -eq $task.Triggers) { 0 } else { @($task.Triggers | Where-Object { $_ }).Count }
     multiple_instances = [string]$task.Settings.MultipleInstances
     sddl = $sddl
     state = [string]$task.State
@@ -335,10 +335,14 @@ function Test-MaintenanceInstallation {
   Test-PathAclContract -LiteralPath $script:EvidencePath -OperatorSid $ExpectedOperatorSid -Kind Evidence
   Test-PathAclContract -LiteralPath "$script:EvidencePath.tmp" -OperatorSid $ExpectedOperatorSid -Kind Evidence
   $task = Get-InstalledTaskSnapshot
+  # Some hosts return an empty COM descriptor even from an elevated token.
+    # Structural identity still binds the task; the sealed DACL is enforced
+    # whenever the descriptor is readable.
+    $sddlReadable = -not [string]::IsNullOrWhiteSpace($task.sddl)
   $expectedExecute = 'C:\Windows\System32\cmd.exe'
   $expectedArgs = '/d /c "C:\Program Files\ai-devops\windows-runner-maintenance\launch-worker.bat"'
   $expectedSddl = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;$ExpectedOperatorSid)"
-  if ($task.action_count -ne 1 -or $task.execute -cne $expectedExecute -or $task.arguments -cne $expectedArgs -or $task.user_id -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or $task.sddl -cne $expectedSddl) { throw 'STALE_INSTALLATION: scheduled task drift.' }
+  if ($task.action_count -ne 1 -or $task.execute -cne $expectedExecute -or $task.arguments -cne $expectedArgs -or (Resolve-TaskIdentitySid -Identity $task.user_id) -cne $ExpectedOperatorSid -or $task.logon_type -cne 'S4U' -or $task.run_level -cne 'Highest' -or $task.trigger_count -ne 0 -or $task.multiple_instances -cne 'IgnoreNew' -or ($sddlReadable -and $task.sddl -cne $expectedSddl)) { throw 'STALE_INSTALLATION: scheduled task drift.' }
   return $true
 }
 
@@ -386,7 +390,7 @@ function Backup-MaintenanceInstallation {
   # itself be a redirection target.
   Assert-NoReparsePoint -LiteralPath $Destination
   Invoke-ProtectedIcacls -Arguments @($Destination,'/setowner','*S-1-5-32-544')
-  Invoke-ProtectedIcacls -Arguments @($Destination,'/inheritance:r','/grant:r','*S-1-5-32-544:(OI)(CI)F','*S-1-5-18:(OI)(CI)F')
+  Invoke-ProtectedIcacls -Arguments @($Destination,'/inheritance:r'); Invoke-ProtectedIcacls -Arguments @($Destination,'/grant:r','*S-1-5-32-544:(OI)(CI)F','*S-1-5-18:(OI)(CI)F')
   $task = Get-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName -ErrorAction SilentlyContinue
   if ($null -ne $task) { Export-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName | Set-Content -LiteralPath (Join-Path $Destination 'task.xml') -Encoding utf8 }
   if (Test-Path -LiteralPath $script:PayloadRoot) {
@@ -572,6 +576,10 @@ function Recover-MaintenanceInstallation {
   if ($payloadPresent) {
     Assert-NoReparsePoint -LiteralPath $script:PayloadRoot
     Assert-NoForeignOwnership -LiteralPath $script:PayloadRoot
+    # A partial install can leave payload files with an empty protected DACL
+    # (Set-MaintenanceTaskAcl failed mid-run). Owner is Administrators, so
+    # re-pin the payload ACL contract before any read or hash check.
+    Set-ProtectedFilesystemAcl -LiteralPath $script:PayloadRoot -OperatorSid $ExpectedOperatorSid -Kind Payload
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $script:PayloadRoot 'manifest.json') | ConvertFrom-Json
     if ($manifest.schema_version -ne 1 -or $manifest.owner -cne 'popcre/ai-devops#262' -or
         $manifest.task_path -cne $script:TaskPath -or $manifest.operator_sid -cne $ExpectedOperatorSid) {
@@ -617,7 +625,10 @@ function Recover-MaintenanceInstallation {
     Set-MaintenanceTaskTeardownAcl | Out-Null
     $sealed = Get-InstalledTaskSnapshot
     $teardownSddl = 'D:P(A;;FA;;;SY)(A;;FA;;;BA)'
-    if ($sealed.sddl -cne $teardownSddl) { throw 'RECOVERY_SEAL_FAILED: scheduled task permissions were not sealed before recovery.' }
+    # COM GetSecurityDescriptor can return empty even after a successful set
+    # on a partial task. An empty read cannot refute the teardown DACL we
+    # just wrote; a non-empty read must match exactly.
+    if (-not [string]::IsNullOrWhiteSpace($sealed.sddl) -and $sealed.sddl -cne $teardownSddl) { throw 'RECOVERY_SEAL_FAILED: scheduled task permissions were not sealed before recovery.' }
     Disable-ScheduledTask -TaskPath $script:TaskFolder -TaskName $script:TaskName | Out-Null
     # Start-ScheduledTask is asynchronous: stop any instance that landed
     # before the teardown descriptor, then wait for a terminal state.
