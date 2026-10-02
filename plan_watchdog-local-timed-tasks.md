@@ -2,6 +2,8 @@
 
 Handoff registration: [HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-timed-tasks.md](HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-timed-tasks.md)
 
+Operator / agent runbook (name, add-a-machine, claim rules): [`docs/watchdog-duty-pool.md`](docs/watchdog-duty-pool.md) — keep that contract in sync when a STATUS row turns done.
+
 ## STATUS — read first
 
 | Step | One independently accepted outcome | State | Evidence when done |
