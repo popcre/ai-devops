@@ -879,6 +879,9 @@ printf 'private code review keeps evidence and mutation boundaries\n'
 newrepo "$TMP/private" 'u2giants/licensor-source-data'
 mkdir -p "$TMP/private/disney-dcpvault" "$TMP/private/.ai-devops"
 printf '# synthetic loader code only\n' > "$TMP/private/disney-dcpvault/loader.py"
+# A synthetic fixture under the licensed folder keeps this change set in
+# private-evidence; the gate file alone is private-tooling (#1239).
+printf 'id\n0\n' > "$TMP/private/disney-dcpvault/fixture.csv"
 cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
 {"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]},"private-tooling":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]}}}
 EOF
