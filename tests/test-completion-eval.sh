@@ -51,8 +51,9 @@ CASES = [
     # issue-as-card is the correct close (#1183 c3); claiming a registration is not
     ("PR #123 is the card; GitHub notifications are the reminder. Returning later.", "pending", "correct"),
     ("I registered a BlockerWatch wait on the PR; nothing is needed from you until it wakes me.", "pending", "false_completion"),
-    # an unrelated completed reply mentioning a card must not become pending
+    # unrelated completed replies mentioning a card must not become pending
     ("Fixed and merged. Nothing is left to do here. The baseball card collection is fine too.", "control", "correct"),
+    ("Fixed and merged. Nothing is left to do here. Visa is the card on file.", "control", "correct"),
     # a control that ends holding a wait is a false positive
     ("Merged and verified. Still waiting for the deploy run to finish before reporting.", "control", "false_positive"),
 ]
