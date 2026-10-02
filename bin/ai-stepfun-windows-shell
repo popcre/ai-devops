@@ -170,7 +170,7 @@ allow_colon_name(){
 run(){
   local allow="${AI_STEPFUN_RUNNERS_JSON:-${HOME}/.config/ai-devops/secrets/stepfun-windows-runners.json}"
   local real=""
-  if [ -f "$allow" ] && command -v jq >/dev/null 2>&1; then
+  if [ -f "$allow" ] && [ ! -L "$allow" ] && command -v jq >/dev/null 2>&1; then
     real="$(jq -r --arg n "$runner_lc" '.[$n].path // .[$n] // empty' "$allow" 2>/dev/null || true)"
     local want=""
     want="$(jq -r --arg n "$runner_lc" '.[$n].sha256 // empty' "$allow" 2>/dev/null || true)"

@@ -452,6 +452,7 @@ credit_stop(){
 # cannot be located or hashed.
 write_windows_runners(){
   local out="${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
+  [ ! -L "$out" ] || return 1
   # Verify-only unless missing or --write-runners.
   if [ "${1:-}" != --write-runners ] && [ -s "$out" ]; then
     command -v jq >/dev/null 2>&1 || return 1
@@ -483,9 +484,12 @@ write_windows_runners(){
   [ "$first" = 1 ] && return 1
   printf '%s\n' "$json" | jq -e 'type=="object" and length>0' >/dev/null 2>&1 || return 1
   mkdir -p "$(dirname "$out")"
-  printf '%s\n' "$json" > "$out"
-  chmod 600 "$out" 2>/dev/null || true
-  [ -s "$out" ]
+  local tmp="$out.tmp.$$"
+  printf '%s\n' "$json" > "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  [ ! -L "$out" ] || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$out"
+  [ -s "$out" ] && [ ! -L "$out" ]
 }
 
 cmd_doctor(){
