@@ -742,6 +742,10 @@ check 'task-router records registration as OUT' \
   "grep -q 'Registration is OUT' '$ROOT/docs/task-router.md'"
 check 'wake prompts do not tell sessions to re-register' \
   "! grep -q 'register a new wait' '$SCRIPT'"
+check 'skills do not require BlockerWatch registration' \
+  "! grep -RIn --include='SKILL.md' -E 'ai-blocker-watch wait|REGISTERED with' '$ROOT/skills'"
+check 'global templates show the explicit-deadline wait form' \
+  "grep -q 'ai-pr-wait <pr> --timeout-minutes N' '$ROOT/templates/system/AGENTS-global-mimo.md' && grep -q 'ai-pr-wait <pr> --timeout-minutes N' '$ROOT/templates/system/CLAUDE-global.md'"
 check 'ai-pr-wait requires an explicit --timeout-minutes deadline' \
   "grep -q 'explicit deadline only' '$ROOT/bin/ai-pr-wait' && ! grep -q '^TIMEOUT_MINUTES=180' '$ROOT/bin/ai-pr-wait'"
 check 'ai-gh-wait requires an explicit --timeout-minutes deadline' \

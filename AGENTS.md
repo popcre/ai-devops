@@ -51,7 +51,7 @@ pipeline. The recovery procedure lives in
   the honest way past one is to redeclare the task at the stronger class and
   then do what that class actually requires.
 - Wait on CI through **bounded, event-aware** tools.
-  Use `bin/ai-pr-wait <pr>` for a pull request, surface a failing check or queue
+  Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request, surface a failing check or queue
   ejection immediately, and do independent useful work while long checks run.
   Make every GitHub call through `bin/ai-gh` (machine-wide lock, spacing, hourly
   budget, and rate-limit back-off) — this is a rule for callers, not something the

@@ -109,7 +109,7 @@ dependency record: the blocker watcher's tick parses it on every open issue and
 records any missing native "blocked by" link itself (ai-devops #596), so links
 can no longer be forgotten. Filing a dependency still owns it, though: the
 session that files or identifies "this cannot proceed until N closes" either
-registers `ai-blocker-watch wait N --for M` and ends its turn (the watcher wakes
+leaves the issue/PR as the card and ends its turn (registration is not required; the bounded janitor re-surfaces stuck state when
 it when N closes), or hands the wait to a NAMED session/owner in the issue —
 never to "a future session." Deferring to an unnamed future owner left the
 #3180 follow-through unregistered for ~15 hours until Albert asked.

@@ -113,8 +113,8 @@ clone + `./install.sh` (Ubuntu) first.
    `schtasks /F` re-points the existing task; Linux/macOS rewrites one marked
    user-crontab line), so run it every sync rather than probing first. This is
    NOT cosmetic: the globals tell every Claude, Codex and ZCode session to park a
-   cross-issue wait with `ai-blocker-watch wait` and end the turn, and only this
-   scheduled `tick` ever wakes that session again. The command and the rule text
+   leave the cross-issue state on the issue/PR as the card and end the turn
+   (registration is not required). The scheduled `tick` re-surfaces stuck state. The command and the rule text
    arrive with a plain `git pull`; the timer does not, so a machine onboarded
    before the blocker watch existed would park work that nothing resumes. Report
    the verdict out loud. If it dies because neither `schtasks` nor `crontab` is
@@ -301,7 +301,7 @@ clone + `./install.sh` (Ubuntu) first.
 6c2b. **Install the Claude closeout hook:** `bin/ai-install-completion-check-hook`
    (Claude is the default client; `--check` reports drift). Idempotent; strictly
    additive to `~/.claude/settings.json`. Without it, a session that ends on
-   waiting language is never forced to hold an `ai-blocker-watch wait`, so the
+   waiting language is never forced to hold a BlockerWatch wait, so the
    BlockerWatch rule is honor-system only (issue #878). `ai-devops doctor` fails
    when it is missing. Report the verdict out loud.
 6c3. **Register the ZCode completion-check hook (Windows, when ZCode is
