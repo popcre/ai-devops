@@ -242,7 +242,7 @@ them separately. Each one wasted time when it was confused with another.
 - **Symptom:** every unlock attempt failed, while Albert believed the password worked
   at the console.
 - **Real cause:** `/etc/shadow` was modified at **2026-09-30 19:17:36 EDT** by another AI
-  session on **edge-dev** (Tailscale `100.75.135.31`). Over SSH, after `sudo` password checks
+  session on **edge-dev** (Tailscale address; see private topology store). Over SSH, after `sudo` password checks
   failed (19:16), it reset `ahazan`'s password through a root Docker container. It stored the
   new value in 1Password `vibe_coding` as "edge-dev3 ahazan sudo password (restored
   2026-09-30)", at 19:17:34 EDT. The console only *seemed* to work because SDDM auto-logs in
