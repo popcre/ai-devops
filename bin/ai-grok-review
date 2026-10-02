@@ -1047,6 +1047,34 @@ await_result() { # await_result FILE LABEL -> 0 done, 1 not-done/timeout
 # ---------------------------------------------------------------------------
 # Turn execution
 # ---------------------------------------------------------------------------
+run_clean_env() { # NAME=VALUE... -- COMMAND...; `env -i` without putting values in argv
+  # Bash builtins set the environment, so a forwarded credential never appears
+  # on a process command line the way `env -i XAI_API_KEY=...` would.
+  (
+    local n
+    for n in $(compgen -e); do unset "$n" 2>/dev/null || true; done
+    while [ "$#" -gt 0 ] && [ "$1" != -- ]; do export "$1"; shift; done
+    [ "$#" -gt 0 ] && shift
+    exec "$@"
+  )
+}
+
+resolve_xai_api_key() { # print the API-key fallback; never logs the value
+  # Supported non-interactive credential (installed docs 02-authentication.md
+  # "API Key"): used only when no OAuth session file exists. The paid child runs
+  # under env -i, so a caller's exported XAI_API_KEY is otherwise dropped
+  # (incident 20261002T170937Z-al8960ofc-grok-289826). Only this one first-party
+  # variable is forwarded; every other caller secret stays stripped.
+  if [ -n "${XAI_API_KEY:-}" ]; then printf '%s' "$XAI_API_KEY"; return 0; fi
+  [ "${AI_GROK_TEST_MODE:-}" = 1 ] && return 1
+  local ref="${AI_GROK_XAI_KEY_REF:-op://vibe_coding/grok xai x.ai/api key}" key
+  [ "$ref" = none ] && return 1
+  command -v op >/dev/null 2>&1 || return 1
+  key="$(op read "$ref" 2>/dev/null)" || return 1
+  [ -n "$key" ] || return 1
+  printf '%s' "$key"
+}
+
 prepare_auth_link() { # SOURCE ISOLATED-HOME; publish without unlinking a live reader
   local source="$1" auth_home="$2" pending rc=0
   mkdir -p "$auth_home"; chmod 700 "$auth_home" 2>/dev/null || true
@@ -1207,9 +1235,13 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   if [ "${AI_GROK_TEST_MODE:-}" = 1 ]; then
     for n in $(compgen -e | grep -E '^(AI_GROK_TEST_|TMPDIR_FOR_TEST$)' || true); do base_env+=("$n=${!n}"); done
   fi
+  if [ ! -s "$isolated_home/auth.json" ]; then
+    local xai_key; xai_key="$(resolve_xai_api_key)" && [ -n "$xai_key" ] && base_env+=("XAI_API_KEY=$xai_key")
+    unset xai_key
+  fi
   local inspect inspect_rc=0 inspect_waited=0 inspect_stopped=0; inspect="$(mktemp)"
   prepare_active_stop_file
-  env -i "${base_env[@]}" "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" -- \
+  run_clean_env "${base_env[@]}" "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" -- "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" -- \
     "${grok_command[@]}" --cwd "$ACTIVE_ISOLATED_CWD" inspect --json > "$inspect" 2>"$inspect.err" &
   ACTIVE_GROK_CHILD=$!
   while kill -0 "$ACTIVE_GROK_CHILD" 2>/dev/null; do
@@ -1290,7 +1322,7 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   [ -z "$ACTIVE_PAID_LOCK" ] || date -u +%FT%TZ > "$ACTIVE_PAID_LOCK/provider-contacted"
   [ -z "$ACTIVE_TURN_RECORD" ] || date -u +%FT%TZ > "$ACTIVE_TURN_RECORD/provider-contacted"
   set +e
-  env -i "${base_env[@]}" "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
+  run_clean_env "${base_env[@]}" "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" -- "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
   local child=$! rc waited=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
   ACTIVE_GROK_CHILD="$child"
   while kill -0 "$child" 2>/dev/null; do
@@ -1706,7 +1738,7 @@ cmd_doctor() {
   # The model catalogue can succeed without chat credentials. Check the same
   # credential source used by the isolated runtime without reading its contents.
   # Presence is not proof of validity; only --live can prove a chat round trip.
-  if [ ! -s "${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json" ] && [ -z "${XAI_API_KEY:-}" ]; then
+  if [ ! -s "${AI_GROK_AUTH_HOME:-$HOME/.grok}/auth.json" ] && ! resolve_xai_api_key >/dev/null; then
     echo "auth          : MISSING — no cached credentials or XAI_API_KEY. Run 'grok login'."
     return 1
   elif "$grok" models >/dev/null 2>&1; then
