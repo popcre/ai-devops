@@ -160,6 +160,7 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s\n' \
   "${XDG_CONFIG_HOME:-}" "${XDG_CACHE_HOME:-}" "${XDG_DATA_HOME:-}" \
   "${APPDATA:-}" "${LOCALAPPDATA:-}" >> "$TMPDIR_FOR_TEST/isolation-homes.txt"
 printf '%s\n' "$([ -f "${GROK_HOME:-}/auth.json" ] && printf visible || printf missing)" >> "$TMPDIR_FOR_TEST/isolation-auth.txt"
+printf '%s|%s\n' "${XAI_API_KEY:-none}" "${OPERATOR_SECRET_FIXTURE:-stripped}" >> "$TMPDIR_FOR_TEST/isolation-key.txt"
 if printf '%s\n' "$@" | grep -qx inspect; then
   case "${AI_GROK_TEST_INSPECT_MODE:-ok}" in
     badshape) printf '%s\n' '{}' ;;
@@ -580,6 +581,7 @@ echo "== max_turns_always_present / permissions_are_fixed =="
 : > "$TMP/argv.txt"
 : > "$TMP/isolation-homes.txt"
 : > "$TMP/isolation-auth.txt"
+: > "$TMP/isolation-key.txt"
 mkdir -p "$AI_GROK_AUTH_HOME"
 printf 'fixture-auth\n' > "$AI_GROK_AUTH_HOME/auth.json"
 run new t1 --prompt "review this" >/dev/null 2>&1
@@ -594,7 +596,7 @@ check "prompt says not read-only and edits are discarded" "grep -q 'You are NOT 
 T1_DIR="$(run show t1 | jq -r '.review_dir')"
 check "writable review dir is a snapshot, not the caller checkout" "[ -d '$T1_DIR' ] && [ \"\$(cd '$T1_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
 check "writable review snapshot has no git remote" "[ -z \"\$(git -C '$T1_DIR' remote)\" ]"
-check "reviewer child env is cleared of operator secrets" "test \"\$(grep -cF 'env -i \"\${base_env[@]}\"' '$SCRIPT')\" -eq 2"
+check "reviewer child env is cleared of operator secrets" "test \"\$(grep -cF 'run_clean_env \"\${base_env[@]}\"' '$SCRIPT')\" -eq 2"
 check "caller checkout is verified unchanged after every turn" "grep -q 'changed during the Grok turn' '$SCRIPT'"
 check "legacy live-checkout sessions are refused" "grep -q 'bound to the live checkout' '$SCRIPT'"
 check "new disables web search"           "grep -q -- '--disable-web-search' '$TMP/argv.txt'"
@@ -602,6 +604,19 @@ check "new passes --no-memory"            "grep -q -- '--no-memory' '$TMP/argv.t
 check "review disables ambient MCP, hook, and compatibility session imports" "grep -qx 'false|false|false|false' '$TMP/isolation.txt'"
 check "inspect and paid children share one empty user home separate from GROK_HOME" "isolation_homes_match"
 check "inspect and paid children both retain credential reachability through GROK_HOME" "test \"\$(grep -cx visible '$TMP/isolation-auth.txt')\" -eq 2"
+check "OAuth session present: no API key is forwarded" "test \"\$(grep -cx 'none|stripped' '$TMP/isolation-key.txt')\" -eq 2"
+
+echo "== api_key_store_forwarded_only_without_oauth_session =="
+: > "$TMP/isolation-key.txt"; : > "$TMP/argv.txt"
+KEY_HOME="$TMP/key-auth"; mkdir -p "$KEY_HOME" "$TMP/key-store"; chmod 700 "$TMP/key-store"
+printf 'xai-fixture-store-key\n' > "$TMP/key-store/grok-xai-api-key"; chmod 600 "$TMP/key-store/grok-xai-api-key"
+AI_GROK_AUTH_HOME="$KEY_HOME" AI_GROK_KEY_STORE="$TMP/key-store/grok-xai-api-key" OPERATOR_SECRET_FIXTURE=leaked XAI_API_KEY= run new tkey --prompt "review this" >/dev/null 2>&1
+check "protected key store reaches both Grok children as XAI_API_KEY" "test \"\$(grep -cx 'xai-fixture-store-key|stripped' '$TMP/isolation-key.txt')\" -eq 2"
+check "forwarded key never appears in Grok argv" "! grep -q 'xai-fixture-store-key' '$TMP/argv.txt'"
+check "review path never calls 1Password" "! sed -n '/^resolve_xai_api_key() {/,/^}/p' '$SCRIPT' | grep -q 'op read'"
+: > "$TMP/isolation-key.txt"
+AI_GROK_AUTH_HOME="$KEY_HOME" AI_GROK_KEY_STORE="$TMP/key-store/missing" XAI_API_KEY= run new tkey2 --prompt "review this" >/dev/null 2>&1
+check "no store and no OAuth session forwards nothing" "! grep -q 'xai-' '$TMP/isolation-key.txt'"
 check "Windows reviewer isolates USERPROFILE for the native Grok child" "grep -q '\"USERPROFILE=\$isolated_native_user_home\"' '$REPO_ROOT/bin/ai-grok-review'"
 check "Windows reviewer isolates every XDG root for the native Grok child" "grep -q '\"XDG_CONFIG_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review' && grep -q '\"XDG_CACHE_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review' && grep -q '\"XDG_DATA_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review'"
 check "review denies MCP meta-tools"       "grep -q -- '--disallowed-tools search_tool,use_tool,Agent' '$TMP/argv.txt' && grep -q -- '--deny MCPTool(\\*)' '$TMP/argv.txt'"
