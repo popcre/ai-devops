@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# ai-review-engine — the one review runner entry (plan_reviewer-pipeline-core §9 Phase D).
+#
+# Two contracts, one office:
+#   ai-review-engine review    --provider P --name N --repo PATH [options]
+#   ai-review-engine implement --provider P --name N --repo PATH [options]
+#
+# This entry is thin on purpose. Every governance step (task gate, identity,
+# sandbox, packet seal + durable store, lifecycle terminal, report floor,
+# cleanup-after-store) lives in tools/lib/review-lifecycle-core.sh. Doors
+# supply provider bits only and are invoked with the runner token.
+#
+# Structural forcing function: pool/preflight refuse a review that
+# bypasses this runner. Do not call a door directly.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if command -v readlink >/dev/null 2>&1; then
+  _real="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  [ -z "$_real" ] || ROOT="$(cd "$(dirname "$_real")/.." && pwd -P)"
+fi
+CORE="$ROOT/tools/lib/review-lifecycle-core.sh"
+[ -f "$CORE" ] || { printf 'ai-review-engine: error: review runner core missing: %s\n' "$CORE" >&2; exit 1; }
+# shellcheck source=../tools/lib/review-lifecycle-core.sh
+. "$CORE"
+
+usage() {
+  cat <<'EOF'
+ai-review-engine — shared review runner (review + implement).
+
+  ai-review-engine review --provider P --name N --repo PATH
+      [--prompt-file F] [--base REF] [--assert-head SHA]
+      [--mode plan-review|diff-review|security-review|final-check]
+      [--caller NAME] [--tests CMD] [--max-turns N]
+
+  ai-review-engine implement --provider P --name N --repo PATH
+      [--prompt-file F] [--ref REF] [--caller NAME] [--max-turns N] [--keep]
+
+  ai-review-engine doctor
+  ai-review-engine --version
+
+The runner owns task gate, identity, sandbox, packet seal + durable store
+(store-before-delete), lifecycle terminal, report floor, and cleanup-after-store.
+The door (tools/lib/review-doors/<provider>.sh) owns only binary/profile
+selection, credentials, model pin, provider tool set, and parse to our report
+shape. Never invoke a door directly; pool/preflight refuse bypassed reviews.
+EOF
+}
+
+die() { printf 'ai-review-engine: error: %s\n' "$*" >&2; exit 2; }
+
+contract=""; provider=""; name=""; repo=""; prompt_file=""; base=""; assert_head=""
+mode="diff-review"; caller="ai-review-engine"; tests_cmd=""; max_turns=""; ref=""; keep=0
+
+[ "$#" -gt 0 ] || { usage >&2; exit 2; }
+case "$1" in
+  review|implement) contract="$1"; shift ;;
+  doctor) shift; rlc_init; printf 'ai-review-engine %s (core %s)\n' "1.0.0" "$RLC_STAMP"; printf 'doors registry: %s\n' "$RLC_DOORS_JSON"; exit 0 ;;
+  --version) printf 'ai-review-engine 1.0.0 (%s)\n' "review-lifecycle-core/1"; exit 0 ;;
+  -h|--help|help) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --provider) provider="${2:-}"; shift 2 ;;
+    --name) name="${2:-}"; shift 2 ;;
+    --repo) repo="${2:-}"; shift 2 ;;
+    --prompt-file) prompt_file="${2:-}"; shift 2 ;;
+    --base) base="${2:-}"; shift 2 ;;
+    --assert-head) assert_head="${2:-}"; shift 2 ;;
+    --mode) mode="${2:-}"; shift 2 ;;
+    --caller) caller="${2:-}"; shift 2 ;;
+    --tests) tests_cmd="${2:-}"; shift 2 ;;
+    --max-turns) max_turns="${2:-}"; shift 2 ;;
+    --ref) ref="${2:-}"; shift 2 ;;
+    --keep) keep=1; shift ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+[ -n "$provider" ] || die '--provider is required.'
+[ -n "$name" ] || die '--name is required.'
+[ -n "$repo" ] || die '--repo is required.'
+[ -d "$repo" ] || die "repository not found: $repo"
+
+case "$mode" in
+  plan-review|diff-review|security-review|visual-review|final-check) ;;
+  *) die "invalid --mode: $mode" ;;
+esac
+
+# The core exports the runner token before any door is invoked, so a door
+# that is called without it refuses (second structural refusal).
+rlc_init
+rlc_export_runner_token
+
+case "$contract" in
+  review)
+    rlc_run_review "$provider" "$name" "$repo" "$base" "$assert_head" "$mode" "$prompt_file" "$caller" "$tests_cmd" "$max_turns"
+    ;;
+  implement)
+    rlc_run_implement "$provider" "$name" "$repo" "$prompt_file" "$ref" "$caller" "$max_turns" "$keep"
+    ;;
+esac
