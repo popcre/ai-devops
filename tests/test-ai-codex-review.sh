@@ -94,6 +94,17 @@ check "provider_received_complete_untracked_snapshot" "grep -q 'review saw compl
 check "provider_command_keeps_readonly_sandbox" "grep -Rzq -- '--sandbox' '$TMP/args' && grep -Rzq -- 'read-only' '$TMP/args'"
 check "provider_command_ignores_secret_bearing_user_config" "grep -Rzq -- '--ignore-user-config' '$TMP/args'"
 check "provider_command_receives_private_directory" "grep -Rzq -- '--cd' '$TMP/args'"
+check "report_without_operation_records_none" "! grep -q '| operation |' '$OUT'"
+check "prompt_without_operation_requests_no_approval_line" "! grep -hq 'installation operation' '$TMP/args'/prompt-*"
+# --operation (issue #658): the exact approval line reaches the Codex request
+# and the report records the operation; an unknown name never reaches Codex.
+rm -f "$TMP/args"/prompt-*
+OP_OUT="$(cd "$R" && AI_REVIEW_OPERATION=first-managed-install "$SCRIPT" final-check)"
+check "operation_prompt_requests_exact_line" "grep -hqx 'Approved first-managed-install.' '$TMP/args'/prompt-*"
+check "operation_report_records_operation" "[ -s '$OP_OUT' ] && grep -Fq '| operation | \`first-managed-install\` |' '$OP_OUT'"
+rm -f "$TMP/args"/prompt-*
+(cd "$R" && AI_REVIEW_OPERATION=bogus-operation "$SCRIPT" final-check) > "$TMP/op-bad.out" 2>&1; OP_BAD_RC=$?
+check "unknown_operation_never_reaches_codex" "[ '$OP_BAD_RC' -ne 0 ] && grep -q 'unknown review operation' '$TMP/op-bad.out' && ! ls '$TMP/args'/prompt-* >/dev/null 2>&1"
 # The prompt travels on stdin, which no shell converts. An absolute Git Bash
 # path sends a native Windows reviewer outside its own workspace, and it then
 # reports a denied read instead of a judgment. The packet must therefore be
