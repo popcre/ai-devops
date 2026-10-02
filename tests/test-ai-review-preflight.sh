@@ -337,8 +337,10 @@ export AI_REVIEW_MUSE_WRAPPER="$TMP/bin/requires-muse-caller"
 check "Muse preflight supplies its mandatory caller identity" "$SCRIPT check muse '$REPO' | grep -q 'health=ok'"
 check "Muse live preflight outlasts the short check budget" "AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-live' $SCRIPT check muse '$REPO' --live | grep -q 'health=ok'"
 check "Muse live preflight still times out past its own budget" "AI_REVIEW_MUSE_QUALIFY_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-live' $SCRIPT check muse '$REPO' --live 2>&1 | grep -q 'provider-timeout'"
+"$SCRIPT" clear muse >/dev/null 2>&1 || true
 check "Muse offline doctor outlasts the short check budget" "AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-doctor' $SCRIPT check muse '$REPO' | grep -q 'health=ok'"
-check "Muse offline doctor still times out past its own budget" "AI_REVIEW_MUSE_DOCTOR_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-doctor' $SCRIPT check muse '$REPO' 2>&1 | grep -q 'provider-timeout'"
+"$SCRIPT" clear muse >/dev/null 2>&1 || true
+check "Muse offline doctor still times out past its own budget" "AI_REVIEW_MUSE_DOCTOR_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-doctor' $SCRIPT check muse '$REPO' 2>&1 | grep -q 'muse probe timed out'"
 "$SCRIPT" clear muse >/dev/null 2>&1 || true
 
 export AI_REVIEW_KIMI_WRAPPER="$TMP/bin/noauth"
