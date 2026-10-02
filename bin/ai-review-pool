@@ -253,6 +253,14 @@ if [ -n "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] && [ -f "$AI_REVIEW_REVIEWER_APPROV
 
 Assigned AI reviewer approval governing this review: $(basename "$AI_REVIEW_REVIEWER_APPROVAL")"; fi
 
+if [ -n "${AI_REVIEW_OPERATION:-}" ]; then
+  # shellcheck source=../tools/lib/review-operation.sh
+  . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/review-operation.sh" || die 'cannot load the review operation list.'
+  OPERATION_REQUEST="$(review_operation_request "$AI_REVIEW_OPERATION")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "unknown review operation: $AI_REVIEW_OPERATION"; }
+  DECISION="$DECISION
+
+$OPERATION_REQUEST"
+fi
 TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"; TMP_ERR="$(mktemp "$REPORT_DIR/.pool-stderr.XXXXXX")"
 CHANGED_FILES=""
 if [ -n "$OPT_BASE" ]; then
@@ -369,6 +377,7 @@ TMP_REPORT="$(mktemp "$REPORT_DIR/.pool-report.XXXXXX")"
 {
   printf '# %s pool review — %s\n\n| field | value |\n|---|---|\n' "$provider" "$mode"
   printf '| provider | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| source digest | `%s` |\n' "$provider" "$REPO_ROOT" "$REVIEW_HEAD" "$REVIEW_DIGEST"
+  [ -z "${AI_REVIEW_OPERATION:-}" ] || printf '| operation | `%s` |\n' "$AI_REVIEW_OPERATION"
   printf '| run | `%s` |\n| caller | `%s` |\n| elapsed seconds | `%s` |\n| tools | read-only session runner |\n\n## Result\n\n' "$RUN_ID" "$CALLER" "$ELAPSED"
   cat "$TMP_TEXT"
 } > "$TMP_REPORT"; [ -s "$TMP_REPORT" ] || die 'report assembly was empty.'; mv "$TMP_REPORT" "$OUT"; TMP_REPORT=""
