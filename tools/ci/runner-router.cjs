@@ -4,10 +4,9 @@
 // sections as extra capacity. Every other section stays on Blacksmith, the
 // lane that always has capacity (owner ruling 2026-10-01: KEEP Blacksmith in
 // the pool until WarpBuild is fully up; USE Blacksmith for runs that would
-// otherwise get stuck). WarpBuild Azure BYOC is NOT routed here: it runs the
-// required suite as a non-blocking proof job (windows-offline-warpbuild-proof
-// in verify.yml) outside the required aggregate, so an unqueued WarpBuild pool
-// can never block a merge. run() never throws: any lookup error keeps the
+// otherwise get stuck; 2026-10-02: "use blacksmith to run your tests").
+// WarpBuild Azure BYOC is NOT routed here; it is proven only by
+// warpbuild-win2022-canary.yml. run() never throws: any lookup error keeps the
 // all-Blacksmith plan, so routing can only add capacity and never sends work
 // back to the GitHub-hosted queue.
 

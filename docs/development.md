@@ -198,8 +198,10 @@ watchdog reruns those omitted suites if the preferred lane does not report
 success. Since 2026-09-23 every CI job (Linux and Windows) runs on Blacksmith
 (`blacksmith-4vcpu-ubuntu-2404`, `blacksmith-4vcpu-windows-2025`), not the
 GitHub-hosted queue or the self-hosted pool; only the manual runner
-qualification workflow still targets self-hosted machines. A non-required
-WarpBuild Azure BYOC Windows canary also exists (`warp-custom-win2022-canary`);
+qualification workflow still targets self-hosted machines, and the free
+`push-settle` quiet window runs on `ubuntu-24.04`. A non-required WarpBuild
+Azure BYOC Windows canary also exists (`warp-custom-warpbuild-win2022-canary`,
+`warpbuild-win2022-canary.yml`);
 required CI is not migrated there (see [`warpbuild-azure-byoc.md`](warpbuild-azure-byoc.md)). Required check names
 are unchanged, so a green Blacksmith run is the required `verification-closure`
 merge check (Albert, 2026-09-23). One addition: on pull requests the
