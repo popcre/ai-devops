@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# ai-stepfun-windows-shell — sole execution path for Windows StepFun turns.
+#
+# Layer 0: accepts OpenCode-style wrapper forms (bash -c 'INNER', -lc, etc.)
+#          and extracts INNER. A bare script path is also accepted.
+# Layer 1: INNER must be a single allowlisted test-runner invocation.
+#
+# Exit 126 with "stepfun-shell: refused" on any other shape. No side effects
+# before a refusal. Residual (owner-accepted 2026-09-30): an allowlisted
+# runner executing an in-folder script is arbitrary user-level code.
+set -euo pipefail
+
+REFUSE(){ printf 'stepfun-shell: refused (%s)\n' "$*" >&2; exit 126; }
+
+# --- Layer 0: strip OpenCode wrapper prefixes ---------------------------------
+if [ "$#" -eq 0 ]; then REFUSE 'empty'; fi
+argv=("$@")
+case "${argv[0]}" in
+  bash|bash.exe|sh|sh.exe|*/bash|*/bash.exe|*/sh|*/sh.exe)
+    if [ "${#argv[@]}" -eq 1 ]; then REFUSE 'shell without command'; fi
+    case "${argv[1]}" in
+      -c|-lc|-ec)
+        [ "${#argv[@]}" -ge 3 ] || REFUSE 'missing -c payload'
+        INNER="${argv[2]}"
+        ;;
+      --noprofile|--norc)
+        # bash --noprofile --norc -c 'INNER'
+        i=1
+        while [ "$i" -lt "${#argv[@]}" ]; do
+          case "${argv[i]}" in
+            --noprofile|--norc) ;;
+            -c|-lc) [ $((i+1)) -lt "${#argv[@]}" ] || REFUSE 'missing -c payload'; INNER="${argv[i+1]}"; break ;;
+            *) REFUSE 'unsupported shell flags' ;;
+          esac
+          i=$((i+1))
+        done
+        [ -n "${INNER:-}" ] || REFUSE 'unsupported shell flags'
+        ;;
+      -*)
+        REFUSE 'unsupported shell flags'
+        ;;
+      *)
+        # bash <file-in-folder>  (file runner)
+        INNER="$*"
+        ;;
+    esac
+    ;;
+  *)
+    INNER="$*"
+    ;;
+esac
+
+# --- Layer 1: closed grammar -------------------------------------------------
+# Allow quotes only around path tokens that contain spaces; otherwise no
+# shell metacharacters at all.
+case "$INNER" in
+  *[[:cntrl:]]*) REFUSE 'control character' ;;
+  *';'*|*'&'*|*'|'*|*'('*|*')'*|*'{'*|*'}'*|*'['*|*']'*|*'<'*|*'>'*|*'`'*|*'$'*|*'~'*|*'*'*|*'?'*|*'!'*|*'%'*|*'^'*|*'@'*) REFUSE 'metacharacter' ;;
+esac
+
+# Tokenize on spaces; keep quoted path tokens together (simple state machine).
+tokens=()
+cur=''
+in_q=0
+i=0
+len=${#INNER}
+while [ "$i" -lt "$len" ]; do
+  ch="${INNER:$i:1}"
+  if [ "$in_q" -eq 1 ]; then
+    if [ "$ch" = "'" ]; then in_q=0; else cur+="$ch"; fi
+  else
+    case "$ch" in
+      "'") in_q=1 ;;
+      ' ')
+        [ -n "$cur" ] && tokens+=("$cur")
+        cur=''
+        ;;
+      *) cur+="$ch" ;;
+    esac
+  fi
+  i=$((i+1))
+done
+[ "$in_q" -eq 0 ] || REFUSE 'unterminated quote'
+[ -n "$cur" ] && tokens+=("$cur")
+[ "${#tokens[@]}" -ge 1 ] || REFUSE 'empty command'
+
+# '=' env-prefix smuggle (but allow npm run name with '='? no — names are [A-Za-z0-9._:-])
+case "${tokens[0]}" in
+  *=*) REFUSE 'env prefix' ;;
+esac
+
+# ':' only later in npm run names — checked below.
+
+runner="${tokens[0]}"
+# Normalize basename
+runner_base="${runner##*/}"
+runner_base="${runner_base%.exe}"
+runner_base="${runner_base%.cmd}"
+runner_base="${runner_base%.bat}"
+# Case-insensitive
+runner_lc="$(printf '%s' "$runner_base" | tr '[:upper:]' '[:lower:]')"
+
+# Absolute interpreter paths are refused (identity comes from allowlist).
+case "$runner" in
+  [A-Za-z]:*|/c/*|/C/*|//*|\\\\*) REFUSE 'absolute interpreter' ;;
+esac
+
+REVIEW_DIR="${AI_STEPFUN_REVIEW_DIR:-${AI_STEPFUN_TURN_DIR:-$PWD}}"
+case "$REVIEW_DIR" in
+  ''|/) REFUSE 'review dir unset' ;;
+esac
+export AI_STEPFUN_REVIEW_DIR="$REVIEW_DIR"
+
+# Path operand helper: must resolve under REVIEW_DIR.
+assert_in_folder(){
+  local raw="$1" norm
+  case "$raw" in
+    *:*) REFUSE 'path with colon' ;;
+    *..*) REFUSE 'parent path' ;;
+    /c/*|/C/*|///*|\\\\*|*\\*) case "$raw" in
+      [A-Za-z]:*|/c/*|/C/*|//*|\\\\*) REFUSE 'host path' ;;
+      *\\*) REFUSE 'backslash path' ;;
+    esac ;;
+  esac
+  case "$raw" in
+    NUL|CON|COM1|COM2|COM3|PRN|AUX|nul|con) REFUSE 'reserved device' ;;
+  esac
+  # Relative path only; join under REVIEW_DIR then canonicalize.
+  # Refuse symlink/reparse escape: -L on any path component, or resolved dir outside.
+  local full="$REVIEW_DIR/$raw"
+  if command -v cygpath >/dev/null 2>&1; then
+    norm="$(cygpath -u "$full" 2>/dev/null || true)"
+  else
+    norm="$full"
+  fi
+  [ -n "$norm" ] || REFUSE 'path resolve'
+  local rev_norm
+  rev_norm="$(cd "$REVIEW_DIR" && pwd -P)"
+  local dir base dir_p
+  dir="$(dirname "$norm")"
+  base="$(basename "$norm")"
+  [ ! -L "$norm" ] || REFUSE 'symlink path'
+  dir_p="$(cd "$dir" 2>/dev/null && pwd -P)" || REFUSE 'path escape'
+  case "$dir_p" in
+    "$rev_norm"|"$rev_norm"/*) ;;
+    *) REFUSE 'path escape' ;;
+  esac
+}
+
+# --- runner table -------------------------------------------------------------
+# args after runner; $1 is often a subcommand.
+sub="${tokens[1]:-}"
+
+is_safe_name(){
+  case "$1" in
+    ''|*[!A-Za-z0-9._:-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# colon only inside npm run name
+allow_colon_name(){
+  case "$1" in
+    *[!A-Za-z0-9._:-]*) return 1 ;;
+    *:*) return 0 ;; # colon ok in name
+    *) return 0 ;;
+  esac
+}
+
+run(){
+  # Always dispatch the parsed token list (never raw "$*").
+  local -a argv=("$@")
+  local allow="${AI_STEPFUN_RUNNERS_JSON:-${HOME}/.config/ai-devops/secrets/stepfun-windows-runners.json}"
+  local real=""
+  if [ -f "$allow" ] && command -v jq >/dev/null 2>&1; then
+    real="$(jq -r --arg n "$runner_lc" '.[$n].path // .[$n] // empty' "$allow" 2>/dev/null || true)"
+  fi
+  if [ -z "$real" ]; then
+    # Offline/test fallback: resolve from GATE_PATH only (not host PATH).
+    real="$(PATH="${GATE_PATH:-/usr/bin:/bin}" command -v "$runner_lc" 2>/dev/null || true)"
+  fi
+  [ -n "$real" ] || REFUSE 'runner not in allowlist'
+  if [ -n "${AI_STEPFUN_RUNNERS_JSON:-}" ] && [ -f "${AI_STEPFUN_RUNNERS_JSON}" ] && command -v jq >/dev/null 2>&1; then
+    local want
+    want="$(jq -r --arg n "$runner_lc" '.[$n].sha256 // empty' "${AI_STEPFUN_RUNNERS_JSON}" 2>/dev/null || true)"
+    if [ -n "$want" ] && command -v sha256sum >/dev/null 2>&1; then
+      local got
+      got="$(sha256sum "$real" | awk '{print $1}')"
+      [ "$got" = "$want" ] || REFUSE 'runner hash mismatch'
+    fi
+  fi
+  cd "$REVIEW_DIR"
+  # Children must not re-enter the shim.
+  export PATH="${GATE_PATH:-/usr/bin:/bin}"
+  exec "$real" "$@"
+}
+
+case "$runner_lc" in
+  npm)
+    case "$sub" in
+      test)
+        [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args'
+        run test
+        ;;
+      run)
+        name="${tokens[2]:-}"
+        [ -n "$name" ] || REFUSE 'npm run needs name'
+        [ "${#tokens[@]}" -eq 3 ] || REFUSE 'extra args'
+        is_safe_name "$name" || REFUSE 'npm name'
+        case "$name" in *:*) allow_colon_name "$name" || REFUSE 'npm name' ;; esac
+        run run "$name"
+        ;;
+      *) REFUSE 'npm subcommand' ;;
+    esac
+    ;;
+  node|python|python3)
+    [ -n "$sub" ] || REFUSE 'missing script'
+    case "$sub" in
+      -*) REFUSE 'eval flag' ;;
+    esac
+    [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args'
+    assert_in_folder "$sub"
+    run "$sub"
+    ;;
+  pytest)
+    if [ "${#tokens[@]}" -eq 1 ]; then
+      run
+    else
+      [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args'
+      assert_in_folder "$sub"
+      run "$sub"
+    fi
+    ;;
+  go|cargo|dotnet)
+    case "$sub" in test|build) ;; *) REFUSE 'runner subcommand' ;; esac
+    i=2
+    while [ "$i" -lt "${#tokens[@]}" ]; do
+      a="${tokens[i]}"
+      case "$a" in
+        -*) REFUSE 'unknown flag' ;;
+        *) assert_in_folder "$a" ;;
+      esac
+      i=$((i+1))
+    done
+    run "${tokens[@]:1}"
+    ;;
+  ls|cat|head)
+    [ -n "$sub" ] || REFUSE 'missing path'
+    [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args'
+    assert_in_folder "$sub"
+    run "$sub"
+    ;;
+  bash|sh)
+    case "${tokens[1]:-}" in
+      --noprofile) [ "${tokens[2]:-}" = '--norc' ] || REFUSE 'bash flags'; f="${tokens[3]:-}"; [ "${#tokens[@]}" -eq 4 ] || REFUSE 'extra args' ;;
+      *) f="${tokens[1]:-}"; [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args' ;;
+    esac
+    [ -n "$f" ] || REFUSE 'missing script'
+    assert_in_folder "$f"
+    run --noprofile --norc "$f"
+    ;;
+  pwsh|powershell)
+    # Only -File form; inject safe flags via run() wrapper — simplified: refuse
+    # until dedicated handler. Keep closed.
+    REFUSE 'powershell runner disabled'
+    ;;
+  wsl|cmd|npx|git|gh|op|curl|certutil)
+    REFUSE 'forbidden runner'
+    ;;
+  *)
+    REFUSE 'not an allowlisted test runner'
+    ;;
+esac
