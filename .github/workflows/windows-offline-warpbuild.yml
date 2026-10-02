@@ -37,7 +37,32 @@ jobs:
       fail-fast: false
       matrix:
         section: [1, 2, 3, 4, 5, 6, 7, 8]
-    runs-on: warp-custom-warpbuild-win2022-canary
+        include:
+          - section: 1
+            region: use1
+            warp_label: warp-custom-warpbuild-win2022-canary
+          - section: 2
+            region: use2
+            warp_label: warp-custom-warpbuild-win2022-use2
+          - section: 3
+            region: cus
+            warp_label: warp-custom-warpbuild-win2022-cus
+          - section: 4
+            region: use1
+            warp_label: warp-custom-warpbuild-win2022-canary
+          - section: 5
+            region: use2
+            warp_label: warp-custom-warpbuild-win2022-use2
+          - section: 6
+            region: cus
+            warp_label: warp-custom-warpbuild-win2022-cus
+          - section: 7
+            region: use1
+            warp_label: warp-custom-warpbuild-win2022-canary
+          - section: 8
+            region: use2
+            warp_label: warp-custom-warpbuild-win2022-use2
+    runs-on: ${{ matrix.warp_label }}
     # The free hosted lane bounds the same work at 40 minutes (verify.yml).
     # This overflow lane keeps a tighter paid ceiling.
     timeout-minutes: 20

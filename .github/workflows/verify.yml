@@ -330,39 +330,58 @@ jobs:
         shell: pwsh
         run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}')
 
-  # WarpBuild Azure BYOC proof lane (issue #961, owner 2026-10-01: KEEP
-  # Blacksmith in the pool until WarpBuild is fully up; USE Blacksmith for runs
-  # that would otherwise get stuck). This job runs the same required Windows
-  # section suite on the WarpBuild BYOC label, but it is deliberately OUTSIDE
-  # every required aggregate: `continue-on-error: true` and absent from
-  # verification-closure's needs. An unqueued or quota-stalled WarpBuild pool
-  # therefore cannot block a merge - the Blacksmith sections above remain the
-  # required proof. Primary fork protection is the repository's
-  # all_external_contributors approval policy (docs/self-hosted-windows-runner.md);
-  # the head-repo if-guard is defense-in-depth against fork PRs reaching our
-  # Azure subscription's VMs. max-parallel 2 matches the live
-  # standardDASv4Family quota (10 vCPUs = 2 concurrent Standard_D4as_v4).
+  # WarpBuild Azure BYOC proof lane (issue #961). This job runs the same
+  # required Windows section suite on the WarpBuild BYOC labels, distributed
+  # across the three active stacks (East US / East US 2 / Central US). It is
+  # deliberately OUTSIDE every required aggregate: `continue-on-error: true`
+  # and absent from verification-closure's needs. An unqueued or quota-stalled
+  # WarpBuild pool therefore cannot block a merge — the GitHub-hosted sections
+  # above remain the required proof. Primary fork protection is the
+  # repository's all_external_contributors approval policy
+  # (docs/self-hosted-windows-runner.md); the head-repo if-guard is
+  # defense-in-depth against fork PRs reaching our Azure subscription's VMs.
+  # max-parallel 2 matches the live standardDASv4Family quota per stack.
   windows-offline-warpbuild-proof:
     needs: [fast-classifier, manual-preflight]
-    # Disabled (leading false) while the WarpBuild pool is not accepting jobs:
-    # queued proof jobs sat for hours and held the workflow open. The guard
-    # body stays so re-enable is a one-token change when issue #961 proves
-    # warp-custom-warpbuild-win2022-canary actually picks up.
     if: >-
-      false &&
       !cancelled() && github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       needs.fast-classifier.outputs.validation_result != 'failure' &&
       (needs.fast-classifier.outputs.selection_result != 'success' ||
        needs.fast-classifier.outputs.run_long != 'false')
     continue-on-error: true
-    name: windows-offline-warpbuild-proof (${{ matrix.section }})
+    name: windows-offline-warpbuild-proof (${{ matrix.section }}, ${{ matrix.region }})
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
         section: [1, 2, 3, 4, 5, 6, 7, 8]
-    runs-on: warp-custom-warpbuild-win2022-canary
+        include:
+          - section: 1
+            region: use1
+            warp_label: warp-custom-warpbuild-win2022-canary
+          - section: 2
+            region: use2
+            warp_label: warp-custom-warpbuild-win2022-use2
+          - section: 3
+            region: cus
+            warp_label: warp-custom-warpbuild-win2022-cus
+          - section: 4
+            region: use1
+            warp_label: warp-custom-warpbuild-win2022-canary
+          - section: 5
+            region: use2
+            warp_label: warp-custom-warpbuild-win2022-use2
+          - section: 6
+            region: cus
+            warp_label: warp-custom-warpbuild-win2022-cus
+          - section: 7
+            region: use1
+            warp_label: warp-custom-warpbuild-win2022-canary
+          - section: 8
+            region: use2
+            warp_label: warp-custom-warpbuild-win2022-use2
+    runs-on: ${{ matrix.warp_label }}
     timeout-minutes: 40
     env:
       SELECTION_BASE: ${{ github.event.pull_request.base.sha }}
