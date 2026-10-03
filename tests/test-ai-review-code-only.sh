@@ -123,6 +123,22 @@ printf '["data/ignored.txt"]\n' > "$TMP/rejected.json"
 must_fail "$SANDBOX" ensure-code-only "$R" rejected-ignored --paths-file "$TMP/rejected.json" --base "$BASE"
 pass 'ambiguous, evidence, and ignored paths refuse before publication'
 
+# The repository's own gate declaration is the single hidden path a sealed
+# review may carry (#1239); its siblings stay refused.
+mkdir -p "$R/.ai-devops"
+printf '{"schema_version":1}\n' > "$R/.ai-devops/task-gates.json"
+printf '{"x":1}\n' > "$R/.ai-devops/other.json"
+git -C "$R" add .ai-devops && git -C "$R" commit -qm gates
+printf '[".ai-devops/task-gates.json"]\n' > "$TMP/gates.json"
+GATES_EXPORT="$("$SANDBOX" ensure-code-only "$R" gatedecl --paths-file "$TMP/gates.json" --base "$BASE")" \
+  || fail 'the gate declaration was refused'
+[ -f "$GATES_EXPORT/.ai-devops/task-gates.json" ] || fail 'the gate declaration is missing from the export'
+printf '[".ai-devops/other.json"]\n' > "$TMP/rejected.json"
+must_fail "$SANDBOX" ensure-code-only "$R" rejected-gates-sibling --paths-file "$TMP/rejected.json" --base "$BASE"
+printf '[".AI-DEVOPS/task-gates.json"]\n' > "$TMP/rejected.json"
+must_fail "$SANDBOX" ensure-code-only "$R" rejected-gates-case --paths-file "$TMP/rejected.json" --base "$BASE"
+pass 'only the exact gate declaration passes the hidden-path refusal'
+
 LINK_BLOB="$(printf 'data/tracked.txt' | git -C "$R" hash-object -w --stdin)"
 git -C "$R" update-index --add --cacheinfo "120000,$LINK_BLOB,src/linked.py"
 git -C "$R" commit -qm linked-code-path

@@ -23,6 +23,7 @@ DENIED_PARTS = {
 CODE_SUFFIXES = {".bash", ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".java", ".js", ".jsx", ".mjs", ".cjs", ".py", ".ps1", ".rs", ".sh", ".ts", ".tsx"}
 CONTRACT_SUFFIXES = {".graphql", ".json", ".proto", ".sql", ".yaml", ".yml"}
 CONTRACT_PARTS = {"contract", "contracts", "migration", "migrations", "schema", "schemas", "types"}
+GATE_DECLARATION = ".ai-devops/task-gates.json"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -84,6 +85,10 @@ def safe_path(raw):
     parts = raw.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         fail("noncanonical approved path")
+    # A private repository's own gate declaration is policy, never licensed
+    # rows; it is the one hidden path a sealed review may see, exactly (#1239).
+    if raw == GATE_DECLARATION:
+        return raw
     lower = [part.lower() for part in parts]
     if any(part in DENIED_PARTS or part.startswith(".") for part in lower):
         fail("evidence or hidden path refused")
@@ -153,8 +158,11 @@ def current_bytes(source, path):
     # The approved spelling passed the denied-parts check; the resolved
     # location must pass it too, or a link could rename a denied directory
     # into an approved-looking one.
-    lowered = [part.lower() for part in resolved.relative_to(resolved_root).parts]
-    if any(part in DENIED_PARTS or part.startswith(".") for part in lowered):
+    relative = resolved.relative_to(resolved_root)
+    lowered = [part.lower() for part in relative.parts]
+    if relative.as_posix() == GATE_DECLARATION and relative.as_posix() == path:
+        pass
+    elif any(part in DENIED_PARTS or part.startswith(".") for part in lowered):
         fail("approved path resolves into a refused location")
     value = item.read_bytes()
     validate_text(value)
