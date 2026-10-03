@@ -4,6 +4,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/bin/ai-muse"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-part.sh"
 
 # Timing budgets are measured, not guessed: a constant that is generous on an
 # idle CI runner is a lost race on a loaded developer box. See fix_test_ai.md
@@ -81,7 +82,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_MUSE_TEST_DIR="$TMP"
-startup_reason_cases
+if ai_test_part_active; then startup_reason_cases; fi
 mkdir -p "$TMP/installed/bin"
 if MSYS=winsymlinks:nativestrict ln -s "$SCRIPT" "$TMP/installed/bin/ai-muse" 2>/dev/null && [ -L "$TMP/installed/bin/ai-muse" ]; then
   check 'installed symlink executes with repository configuration' "AI_MUSE_CALLER=codex '$TMP/installed/bin/ai-muse' --help"
@@ -259,7 +260,7 @@ failure_phase_cases(){
   if (cd "$REPO" && eval "$ENV MUSE_STUB_CALLS_FILE='$calls' '$SCRIPT' reconcile phase-retained") > "$TMP/phase-reconcile.log" 2>&1; then rc=0; else rc=$?; fi
   if [ "$rc" -ne 0 ] && grep -q 'retained Muse evidence bytes changed' "$TMP/phase-reconcile.log" && ! grep -q start_failed "$TMP/phase-reconcile.log" && [ "$digest" = "$(sha256sum "$raw")" ] && [ "$count" -eq "$(wc -l < "$calls")" ] && jq -e '.status=="active"' "$m" >/dev/null; then ok 'retained evidence failure preserves ownership and never claims startup'; else bad 'retained evidence failure preserves ownership and never claims startup'; fi
 }
-failure_phase_cases
+if ai_test_part_active; then failure_phase_cases; fi
 if [ "${AI_MUSE_PHASE_TESTS_ONLY:-0}" = 1 ]; then
   printf '\n%d passed, %d failed, 0 skipped\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
 fi
@@ -267,6 +268,9 @@ if [ "${AI_MUSE_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   muse_recovery_cases
   printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; ((FAIL==0)); exit $?
 fi
+# Windows CI runs the main flow below as three parts (tests/test-ai-muse-part2.sh,
+# -part3.sh); see tests/lib-test-part.sh.
+if ai_test_part_active; then
 mkdir -p "$TMP/link-probe-target"
 if ln -s "$TMP/link-probe-target" "$TMP/link-probe" 2>/dev/null; then
   rm -rf -- "$TMP/link-probe"; OUTSIDE_REPORTS="$TMP/outside-reports"; mkdir -p "$OUTSIDE_REPORTS"; printf safe > "$OUTSIDE_REPORTS/sentinel"
@@ -402,6 +406,9 @@ POST_LAUNCH_LOG="$TMP/post-launch-interrupt.log"; POST_LAUNCH_RC=0
 POST_LAUNCH_META="$(find "$TMP/state" -name 'codex--post-launch-interrupt.json' -type f -print -quit)"
 check 'post-launch interruption cannot be misclassified as local preparation failure' "test '$POST_LAUNCH_RC' -ne 0 && jq -e '.status==\"provider_outcome_uncertain\" and .session_id==null and .failure_reason==\"interrupted-local-observer\"' '$POST_LAUNCH_META'"
 check 'unknown launched provider work cannot be deleted reconciled or retried' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' delete post-launch-interrupt\" && ! eval \"$ENV '$SCRIPT' reconcile post-launch-interrupt\" && ! eval \"$ENV '$SCRIPT' new post-launch-interrupt --prompt duplicate\""
+fi  # part 1
+ai_test_part 2
+if ai_test_part_active; then
 mkdir -p "$TMP/state/credential.lock.d"; touch -d '5 minutes ago' "$TMP/state/credential.lock.d"
 NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)"
 check 'tracked historic reports do not block a new exact destination' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
@@ -503,9 +510,12 @@ FAILURE_META="$(find "$TMP/state" -name 'codex--failure-followup.json' -type f)"
 check 'failed follow-up is marked uncertain' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=fail '$SCRIPT' ask failure-followup --prompt retry\"; jq -e '.status==\"provider_outcome_uncertain\" and (.last_failure_report|length>0)' '$FAILURE_META'"
 check 'uncertain session cannot continue without reconciliation' "cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
 check 'interrupted turn state cannot continue without reconciliation' "tmp='${STALE_META}.tmp'; jq '.status=\"turn_in_progress\"' '$STALE_META' > \"\$tmp\" && mv \"\$tmp\" '$STALE_META'; cd '$REPO' && ! eval \"$ENV '$SCRIPT' ask stale --prompt blocked\""
+check 'exact retained completion can reconcile an interrupted local observer without replay' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" && jq -e '.status==\"active\" and .retained_turn.finalized==true' '$STALE_META'"
+fi  # part 2
+ai_test_part 3
+if ai_test_part_active; then
 WRONG_NEW="$(cd "$REPO" && eval "$ENV '$SCRIPT' new wrong-followup --prompt test" 2>&1)"
 WRONG_META="$(find "$TMP/state" -name 'codex--wrong-followup.json' -type f)"
-check 'exact retained completion can reconcile an interrupted local observer without replay' "cd '$REPO' && eval \"$ENV '$SCRIPT' reconcile stale\" && jq -e '.status==\"active\" and .retained_turn.finalized==true' '$STALE_META'"
 check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask wrong-followup --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' '$WRONG_META'"
 check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new mixed-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask mixed-followup --prompt mixed\""
 check 'conflicting start-event session is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new start-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixedstart '$SCRIPT' ask start-followup --prompt mixed\""
@@ -588,5 +598,6 @@ if command -v cygpath >/dev/null 2>&1; then
   sed -n '/^# Windows: WinGet installs the 1Password CLI/,/^fi$/p' "$SCRIPT" > "$TMP/opfallback.sh"
   check 'op missing from PATH resolves to the WinGet package folder' "env -i PATH=/usr/bin LOCALAPPDATA='$(cygpath -w "$TMP/la")' bash -c '. \"$TMP/opfallback.sh\"; command -v op'"
 fi
+fi  # part 3
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

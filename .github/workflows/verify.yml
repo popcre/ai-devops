@@ -223,7 +223,7 @@ jobs:
           bash tests/test-public-boundary.sh
           bash tests/test-markdown-links.sh
 
-  # Ordinary pull requests divide the Windows-sensitive lane into eight declared
+  # Ordinary pull requests divide the Windows-sensitive lane into twelve declared
   # sections that run at the same time on independent machines (#210): idle
   # qualified self-hosted hosts when available, Blacksmith otherwise. This is
   # real parallelism on separate hardware, not several processes competing
@@ -280,7 +280,7 @@ jobs:
        needs.fast-classifier.outputs.run_long != 'false')
     name: windows-offline-section (${{ matrix.section }}, ${{ matrix.lane }})
     strategy:
-      # One failing section must never hide the result of the other five:
+      # One failing section must never hide the result of the others:
       # the whole point of sectioning is that a useful failure arrives early
       # and the rest of the evidence still lands.
       fail-fast: false
@@ -294,9 +294,12 @@ jobs:
       # head gets the Blacksmith literal regardless of what the router (or a
       # tampered config) reports.
       matrix:
-        include: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":7,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":8,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
+        include: ${{ fromJSON(github.event.pull_request.head.repo.full_name == github.repository && needs.runner-router.outputs.windows_matrix || '[{"section":1,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":2,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":3,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":4,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":5,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":6,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":7,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":8,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":9,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":10,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":11,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}, {"section":12,"lane":"blacksmith","runs_on":"blacksmith-4vcpu-windows-2025"}]') }}
     runs-on: ${{ matrix.runs_on }}
-    # Eight sections since 2026-09-29 (#185): section 1 reached this 40-minute
+    # Twelve sections since 2026-10-02: the Qwen and Muse suites run as parts
+    # (tests/lib-test-part.sh) so each section fits the 20-minute Blacksmith
+    # dispatch lane (windows-offline-blacksmith.yml).
+    # Eight sections from 2026-09-29 (#185): section 1 reached this 40-minute
     # ceiling on EDGE-RUNN-ENVY (37-55 minutes), so test-ai-deepseek-agent.sh
     # and test-ai-gh.sh moved to their own sections 7 and 8.
     # Six sections after PR #666's serial Gemini, GLM and Muse Code section
@@ -326,10 +329,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $short | Out-Null
           "TEMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
           "TMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Windows-sensitive section ${{ matrix.section }} of 8
+      - name: Windows-sensitive section ${{ matrix.section }} of 12
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/8' -ChangedSince $env:SELECTION_BASE
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/12' -ChangedSince $env:SELECTION_BASE
       - name: Remove the short TEMP tree on a reused machine
         if: ${{ always() && matrix.lane == 'qualified-self-hosted' }}
         shell: pwsh
@@ -428,7 +431,7 @@ jobs:
 
           if [ "$EVENT" = 'pull_request' ]; then
             lane_result="$SECTION_RESULT"
-            lane_name='the eight Windows sections'
+            lane_name='the twelve Windows sections'
           else
             lane_result="$COMPLETE_RESULT"
             lane_name='the complete Windows matrix'

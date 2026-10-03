@@ -14,24 +14,36 @@ ai_test_record() {
   printf '%s\t%s\t%s\n' "$AI_TEST_SUITE" "$1" "$2" >> "$AI_TEST_REPORT_FILE"
 }
 
+# Suites split with lib-test-part.sh report only the selected part's checks.
+ai_test_counted() { ! declare -F ai_test_part_active >/dev/null || ai_test_part_active; }
+
 ok() {
+  ai_test_counted || return 0
   PASS=$((PASS + 1))
   printf '  ok   %s\n' "$1"
   ai_test_record pass "$1"
 }
 
 bad() {
+  ai_test_counted || return 0
   FAIL=$((FAIL + 1))
   printf '  FAIL %s\n' "$1"
   ai_test_record fail "$1"
 }
 
 skip() {
+  ai_test_counted || return 0
   SKIP=$((SKIP + 1))
   printf '  skip %s\n' "$1"
   ai_test_record skip "$1"
 }
 
+ai_test_status() { return "$1"; }
+
 check() {
-  if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi
+  # Some checks test the previous command's "$?"; keep it intact for eval.
+  local status=$?
+  ai_test_counted || return 0
+  # Restored inside the if-condition, where set -e cannot abort the suite.
+  if eval "ai_test_status $status; $2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi
 }
