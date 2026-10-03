@@ -195,16 +195,21 @@ complete deterministic Bash set on Linux. For ordinary pull requests, Windows
 runs every PowerShell suite plus the Bash suites classified as Windows-sensitive;
 the separate `windows-reviewer-safety` lane owns Codex and Grok. A fallback
 watchdog reruns those omitted suites if the preferred lane does not report
-success. Since 2026-10-01 Blacksmith is out of the runner pool (Albert). CI
-uses GitHub-hosted runners (`ubuntu-24.04`, `windows-2025`) and, when idle,
-qualified self-hosted hosts (EDGE-RUNN-ENVY / `ai-devops-windows-qualified`) as
-extra capacity. WarpBuild Azure BYOC (`warp-custom-warpbuild-win2022-canary`) is
-the final option only after GitHub-hosted and edge-runn-envy are full; the
-manual `windows-offline-warpbuild` workflow is the on-demand overflow lane. Only the manual runner
-qualification workflow still targets self-hosted machines. Required check names
-are unchanged. On pull requests the `runner-router` job gives ordinary Windows
-sections to idle qualified self-hosted hosts first, then GitHub-hosted, then
-WarpBuild when both are full (`config/ci-runner-routing.json`,
+success. The verify test jobs (Linux and Windows) run on Blacksmith
+(`blacksmith-4vcpu-ubuntu-2404`, `blacksmith-4vcpu-windows-2025`; owner
+2026-10-02: "use blacksmith to run your tests"). Exceptions: idle qualified
+self-hosted hosts take Windows sections as extra capacity (`runner-router`,
+below) and run the preferred reviewer lane; the free `push-settle` quiet
+window and the watchdog/drift workflows run on GitHub-hosted `ubuntu-24.04`. A non-required WarpBuild
+Azure BYOC Windows canary also exists (`warp-custom-warpbuild-win2022-canary`,
+`warpbuild-win2022-canary.yml`);
+required CI is not migrated there (see [`warpbuild-azure-byoc.md`](warpbuild-azure-byoc.md)). Required check names
+are unchanged, so a green Blacksmith run is the required `verification-closure`
+merge check (Albert, 2026-09-23). One addition: on pull requests the
+`runner-router` job gives ordinary Windows sections to idle qualified self-hosted
+hosts (EDGE-RUNN-ENVY and any host labelled `ai-devops-windows-qualified`) as
+extra capacity. Any section it cannot place there stays on Blacksmith. It never
+routes to GitHub-hosted runners (`config/ci-runner-routing.json`,
 `tools/ci/runner-router.cjs`). Scheduled and manual
 Windows jobs split the complete Bash set across independent sections; PowerShell runs once in its declared
 section. Qualification and local no-argument runs keep the complete Bash plus
@@ -309,7 +314,7 @@ more if a job arrives mid-series, because a 65-minute run started while idle wil
 otherwise be handed one. Both are per-host: a job on any other runner in the pool
 never blocks you, and nothing here serialises the pool. Use
 `bin/ai-test-local --check-collision` for a read-only decision without starting
-tests. A busy independent self-hosted runner or GitHub-hosted job
+tests. A busy independent self-hosted runner, GitHub-hosted job, or Blacksmith
 job remains usable capacity; only the same physical host or shared installed
 runtime is inside the stop boundary.
 When several machines genuinely share one installed runtime, set

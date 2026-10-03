@@ -1,13 +1,12 @@
 {
-  "_comment": "Where verify.yml runs its Windows sections (tools/ci/runner-router.cjs). Owner decision 2026-10-01: Blacksmith is out of the pool (turned off). Preference order: idle qualified self-hosted Windows hosts (edge-runn-envy / ai-devops-windows-qualified) first as extra capacity, then GitHub-hosted Windows runners; WarpBuild Azure BYOC is the final option only after GitHub-hosted and edge-runn-envy are full. A section goes to a qualified host only when one is online and idle at routing time; remaining sections go to GitHub-hosted unless that lane is full, in which case they go to WarpBuild.",
-  "schema_version": 3,
+  "_comment": "Where verify.yml runs its Windows sections (tools/ci/runner-router.cjs). Required sections stay on Blacksmith (blacksmith_windows) with idle qualified self-hosted hosts (ai-devops-windows-qualified) as extra capacity - owner ruling 2026-10-01: KEEP Blacksmith in the pool until WarpBuild is fully up; USE Blacksmith for runs that would otherwise get stuck. Owner 2026-10-02: use blacksmith to run your tests. WarpBuild Azure BYOC (warpbuild_windows, popcre-ci-use1, win-2022) is not a routing target; it is proven only by warpbuild-win2022-canary.yml. GitHub-hosted runners are never a routing target. Manual full-suite Blacksmith lane lives in windows-offline-blacksmith.yml.",
+  "schema_version": 2,
   "max_active_runs_sampled": 15,
   "windows_sections": 8,
-  "github_windows": "windows-2025",
-  "github_windows_limit": 8,
+  "blacksmith_windows": "blacksmith-4vcpu-windows-2025",
+  "warpbuild_windows": "warp-custom-warpbuild-win2022-canary",
   "qualified_windows": ["self-hosted", "Windows", "X64", "ai-devops-windows-qualified"],
   "qualified_label": "ai-devops-windows-qualified",
-  "warpbuild_windows": "warp-custom-warpbuild-win2022-canary",
   "reserve_qualified_for_reviewer_events": ["workflow_dispatch"],
   "reserved_qualified_hosts": 1
 }

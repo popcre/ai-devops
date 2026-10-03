@@ -59,9 +59,9 @@ does not pay to load them. Read only the matching row and its named sources.
 - Runner labels, host membership, active jobs, pull-request heads, check results,
   issue status, and provider versions must be resolved live. Historical values
   explain a guardrail but never prove current state.
-- The Windows workflow has a GitHub-hosted offline lane and a qualified
+- The Windows workflow has a Blacksmith offline lane and a qualified
   self-hosted reviewer-safety lane. The qualified pool is additional capacity,
-  not a replacement for hosted runners. Qualification uses its documented
+  not a replacement for Blacksmith. Qualification uses its documented
   candidate label; public fork approval remains `all_external_contributors`.
 - A merge-queue ejection can leave a pull request OPEN. Use `bin/ai-pr-wait`
   instead of watching PR state, and never rerun a green result for an identical

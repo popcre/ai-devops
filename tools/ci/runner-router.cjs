@@ -1,30 +1,28 @@
 'use strict';
-// Windows section routing pool (Blacksmith removed — it is turned off).
-// Preference order:
-// 1. idle qualified self-hosted hosts (EDGE-RUNN-ENVY and any other host
-//    labelled ai-devops-windows-qualified) as extra capacity
-// 2. GitHub-hosted Windows runners
-// 3. WarpBuild Azure BYOC — final option, only after GitHub-hosted and
-//    edge-runn-envy are full
-// run() never throws: any lookup error keeps the all-GitHub plan.
+// Gives idle qualified self-hosted Windows hosts (EDGE-RUNN-ENVY and any other
+// host labelled ai-devops-windows-qualified) ordinary verify.yml Windows
+// sections as extra capacity. Every other section stays on Blacksmith, the
+// lane that always has capacity (owner ruling 2026-10-01: KEEP Blacksmith in
+// the pool until WarpBuild is fully up; USE Blacksmith for runs that would
+// otherwise get stuck; 2026-10-02: "use blacksmith to run your tests").
+// WarpBuild Azure BYOC is NOT routed here; it is proven only by
+// warpbuild-win2022-canary.yml. run() never throws: any lookup error keeps the
+// all-Blacksmith plan, so routing can only add capacity and never sends work
+// back to the GitHub-hosted queue.
 
 function range(n) { return Array.from({ length: n }, (_, i) => i + 1); }
 
-function decide(cfg, { event, idleQualified, githubFull = false, foreign = false }) {
+function decide(cfg, { event, idleQualified, foreign }) {
   const reserve = cfg.reserve_qualified_for_reviewer_events.includes(event) ? cfg.reserved_qualified_hosts : 0;
   // A foreign head never runs on our machines: not the self-hosted pool and
   // not the WarpBuild BYOC VMs in our own Azure subscription. Both stay zero;
-  // every section falls through to GitHub-hosted.
+  // every section falls through to Blacksmith.
   let selfHosted = foreign ? 0 : Math.max(0, Math.min(cfg.windows_sections, (idleQualified || 0) - reserve));
-  const limit = cfg.github_windows_limit == null ? cfg.windows_sections : cfg.github_windows_limit;
-  let github = githubFull ? 0 : Math.max(0, Math.min(cfg.windows_sections, limit));
   return {
     idle_qualified: idleQualified || 0,
-    github_full: !!githubFull,
     windows_matrix: range(cfg.windows_sections).map(section => {
       if (selfHosted > 0) { selfHosted -= 1; return { section, lane: 'qualified-self-hosted', runs_on: cfg.qualified_windows }; }
-      if (github > 0) { github -= 1; return { section, lane: 'github-hosted', runs_on: cfg.github_windows }; }
-      return { section, lane: 'warpbuild', runs_on: cfg.warpbuild_windows };
+      return { section, lane: 'blacksmith', runs_on: cfg.blacksmith_windows };
     }),
   };
 }
@@ -58,25 +56,24 @@ function isForeignHead(context) {
   return !!head && (!head.repo || head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`);
 }
 
-async function run({ github, poolGithub, context, core, cfg, githubFull = false }) {
+async function run({ github, poolGithub, context, core, cfg }) {
   let idle = 0;
   const foreign = isForeignHead(context);
   if (foreign) {
-    core.info('Pull request head is outside this repository; every Windows section stays on GitHub-hosted runners.');
+    core.info('Pull request head is outside this repository; every Windows section stays on Blacksmith.');
     poolGithub = null;
   }
   try {
     if (poolGithub) idle = Math.max(0, (await countIdleQualified(poolGithub, context, cfg)) - (await queuedQualifiedJobs(github, context, cfg)));
   } catch (error) {
-    core.warning(`Qualified pool unknown (${error.message}); every Windows section stays on GitHub-hosted runners.`);
+    core.warning(`Qualified pool unknown (${error.message}); every Windows section stays on Blacksmith.`);
     idle = 0;
   }
-  const plan = decide(cfg, { event: context.eventName, idleQualified: idle, githubFull, foreign });
+  const plan = decide(cfg, { event: context.eventName, idleQualified: idle, foreign });
   core.info(`idle_qualified=${plan.idle_qualified}`);
-  core.info(`github_full=${plan.github_full}`);
   for (const w of plan.windows_matrix) core.info(`windows section ${w.section} -> ${w.lane}`);
   core.setOutput('windows_matrix', JSON.stringify(plan.windows_matrix));
-  core.summary.addRaw(`Runner routing: idle qualified Windows hosts ${plan.idle_qualified}; GitHub-hosted full ${plan.github_full}.\n\n` +
+  core.summary.addRaw(`Runner routing: idle qualified Windows hosts ${plan.idle_qualified}.\n\n` +
     plan.windows_matrix.map(w => `- Windows section ${w.section}: ${w.lane}`).join('\n') + '\n');
   await core.summary.write();
   return plan;

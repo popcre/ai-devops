@@ -4,7 +4,9 @@
 [#142](https://github.com/popcre/ai-devops/pull/142).
 **Applies to:** `windows-offline` and `windows-reviewer-safety` in
 [`.github/workflows/verify.yml`](../.github/workflows/verify.yml).
-`linux-offline` is unchanged and still runs on GitHub's `ubuntu-24.04`.
+`linux-offline` runs on Blacksmith `blacksmith-4vcpu-ubuntu-2404`; every
+"hosted" lane below means Blacksmith (owner 2026-10-02: "use blacksmith to run
+your tests").
 
 ## Why this exists
 
@@ -32,7 +34,7 @@ and scheduled verification remains hosted.
 ### Why the reviewer suites have their own lane
 
 For pull requests, `windows-offline-section` runs the Windows-sensitive Bash set
-and all PowerShell suites, divided into five declared sections on five
+and all PowerShell suites, divided into eight declared sections on eight
 independent hosted machines (issue #210), while `windows-reviewer-safety` requires hosted Codex and
 Grok proof. A qualified-pool diagnostic is available only on an explicit full
 manual run. The section boundaries live
@@ -47,7 +49,8 @@ aggregate job keeps the stable name `windows-offline` and fails closed on any
 lane result other than success. The ordinary pull-request
 hosted matrix omits Codex and Grok only after assigning both unchanged suites
 to `windows-reviewer-fallback-codex` and `windows-reviewer-fallback-grok` on
-independent `windows-2025` hosts (P6). Together those jobs
+independent Blacksmith `blacksmith-4vcpu-windows-2025` hosts (P6; owner
+2026-10-02: "use blacksmith to run your tests"). Together those jobs
 is the required pull-request and scheduled proof. The qualified self-hosted
 lane remains available on an explicit full manual run for host-bound diagnosis,
 but it cannot queue or fail a repository-wide verification run. Its 30-minute
