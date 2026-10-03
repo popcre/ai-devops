@@ -34,7 +34,13 @@ def event_lock(directory):
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = physical(directory / ".append.lock")
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
-    deadline = time.monotonic() + 10
+    # The lock is kernel-owned, so a longer wait can only be caused by a LIVE
+    # writer, never a crashed one. Ten seconds was too tight for concurrent
+    # reviews finishing together on one machine: each append re-reads and
+    # re-parses the whole growing ledger, and a busy window destroyed a
+    # completed paid review whose evidence could not be recorded in time
+    # (#1254). Sixty seconds keeps every wrapper honest without stranding.
+    deadline = time.monotonic() + 60
     acquired = False
     try:
         while not acquired:

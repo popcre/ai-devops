@@ -376,7 +376,36 @@ TMP_REPORT="$(mktemp "$REPORT_DIR/.pool-report.XXXXXX")"
 reviewer_event_publish_report "$provider" "$OUT" || die 'report publication failed; local evidence retained.'
 
 AFTER_IDENTITY="$("$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"})" || AFTER_IDENTITY=""
-if [ -z "$AFTER_IDENTITY" ] || [ "$AFTER_IDENTITY" != "$SOURCE_IDENTITY" ]; then
+# The post-review identity gate mirrors the packet verifier's forward-move
+# tolerance (plan review-packet-race step B, PR #639): another session
+# legitimately landing unrelated work can move the shared target ref (for a
+# linked worktree, remote-tracking refs are COMMON to every worktree of the
+# repository) while this paid review runs, and a strict whole-string compare
+# destroys the completed report for a diff that did not change by one byte
+# (#1254: a completed muse APPROVE at head 5b5a9f9 was retained stale when
+# origin/main moved forward mid-review). HEAD, digest, base, merge-base and
+# every structural field stay STRICT; only the target tip may move, and only
+# FORWARD, proven by ancestry in this same repository. A rewrite, a backward
+# move, a changed head or a changed digest refuses exactly as before.
+identity_stable() { # identity_stable BEFORE_JSON AFTER_JSON REPO
+  local before="$1" after="$2" repo="$3" field b_target a_target b_ref a_ref
+  if ! { jq -e 'type=="object" and (.head|type=="string")' <<<"$before" >/dev/null 2>&1 && \
+         jq -e 'type=="object" and (.head|type=="string")' <<<"$after"  >/dev/null 2>&1; }; then
+    # Not a parseable packet identity: keep the strict byte compare.
+    [ -n "$after" ] && [ "$after" = "$before" ]
+    return
+  fi
+  for field in repository head source_digest base merge_base rule requested_base; do
+    [ "$(jq -r --arg f "$field" '.[$f] // ""' <<<"$before")" = "$(jq -r --arg f "$field" '.[$f] // ""' <<<"$after")" ] || return 1
+  done
+  b_ref="$(jq -r '.target_ref // ""' <<<"$before")"; a_ref="$(jq -r '.target_ref // ""' <<<"$after")"
+  [ "$b_ref" = "$a_ref" ] || return 1
+  b_target="$(jq -r '.target // ""' <<<"$before")"; a_target="$(jq -r '.target // ""' <<<"$after")"
+  [ "$b_target" = "$a_target" ] && return 0
+  [ -n "$b_target" ] && [ -n "$a_target" ] || return 1
+  git -C "$repo" merge-base --is-ancestor "$b_target" "$a_target" 2>/dev/null
+}
+if ! identity_stable "$SOURCE_IDENTITY" "$AFTER_IDENTITY" "$REPO_ROOT"; then
   mv "$OUT" "$OUT.stale" 2>/dev/null || true
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure source-identity-changed --report "$OUT.stale" >/dev/null 2>&1 || true
   die 'source identity changed during review; paid report retained as stale.'
