@@ -216,6 +216,15 @@ Follow this exact stage brief and treat its named prior artifact as the input co
 
 $(cat "$AI_REVIEW_BRIEF_FILE")"
 fi
+if [ -n "${AI_REVIEW_OPERATION:-}" ]; then
+  [ "$MODE" = final-check ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "review operation needs final-check, not $MODE."; }
+  # shellcheck source=../tools/lib/review-operation.sh
+  . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/review-operation.sh" || die 'cannot load the review operation list.'
+  OPERATION_REQUEST="$(review_operation_request "$AI_REVIEW_OPERATION")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "unknown review operation: $AI_REVIEW_OPERATION"; }
+  DECISION="$DECISION
+
+$OPERATION_REQUEST"
+fi
 PACKET_ARGS=(build "$REVIEW_DIR" "$TAG" --identity "$SOURCE_IDENTITY" --decision "$DECISION" --class medium)
 [ -z "$TESTS_COMMAND" ] || PACKET_ARGS+=(--tests "$TESTS_COMMAND")
 PACKET_DIR="$($PACKET "${PACKET_ARGS[@]}")" \
@@ -300,6 +309,7 @@ chmod 600 "$TMP_REPORT" 2>/dev/null || die 'could not protect temporary report o
   printf '# Codex review — %s\n\n' "$MODE"
   printf '| field | value |\n|---|---|\n'
   printf '| repository | `%s` |\n| reviewed commit | `%s` |\n| source digest | `%s` |\n' "$REPO_ROOT" "$(jq -r .head "$STATE")" "$(jq -r .source_digest "$STATE")"
+  [ -z "${AI_REVIEW_OPERATION:-}" ] || printf '| operation | `%s` |\n' "$AI_REVIEW_OPERATION"
   printf '| run | `%s` |\n| caller | `%s` |\n| elapsed seconds | `%s` |\n| sandbox | `read-only` |\n\n' "$RUN_ID" "$CALLER" "$ELAPSED"
   printf '## Result\n\n'; cat "$TMP_OUT"
 } > "$TMP_REPORT"

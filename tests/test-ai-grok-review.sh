@@ -1379,6 +1379,19 @@ else
   check "front_door_refuses_glm_out_of_rotation" "[ '$RC_GLM' -eq 2 ]"
 fi
 bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
+bash "$FRONT" codex final-check --operation not-an-operation > "$TMP/front-opbad" 2>&1; RC_FRONT_OPBAD=$?
+check "front_door_refuses_unknown_operation" "[ '$RC_FRONT_OPBAD' -eq 2 ] && grep -q 'unknown --operation not-an-operation' '$TMP/front-opbad'"
+bash "$FRONT" codex final-check --operation stale-linux-manifest-recovery > /dev/null 2>&1; RC_FRONT_OPSTALE=$?
+check "front_door_refuses_unbindable_stale_manifest_operation" "[ '$RC_FRONT_OPSTALE' -eq 2 ]"
+bash "$FRONT" codex plan-review --operation first-managed-install > "$TMP/front-opplan" 2>&1; RC_FRONT_OPPLAN=$?
+check "front_door_refuses_operation_on_plan_review" "[ '$RC_FRONT_OPPLAN' -eq 2 ] && grep -q 'final-check exact-head review mode' '$TMP/front-opplan'"
+for op_mode in diff-review security-review visual-review; do
+  bash "$FRONT" codex "$op_mode" --operation first-managed-install > "$TMP/front-opmode" 2>&1; RC_FRONT_OPMODE=$?
+  check "front_door_refuses_operation_on_$op_mode" "[ '$RC_FRONT_OPMODE' -eq 2 ] && grep -q 'final-check exact-head review mode' '$TMP/front-opmode'"
+done
+bash "$FRONT" codex final-check --operation first-managed-install --operation first-managed-install > /dev/null 2>&1; RC_FRONT_OPDUP=$?
+check "front_door_refuses_repeated_operation" "[ '$RC_FRONT_OPDUP' -eq 2 ]"
+check "front_door_never_forwards_inherited_operation" "grep -q '^export AI_REVIEW_OPERATION=\"\$operation\"' '$FRONT'"
 check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 
 check "pool_passes_max_turns_only_to_grok" "grep -q 'qwen)  RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -q 'gemini) RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -q 'muse)  RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -Fq '[ -z \"\$RUNNER_MAX_TURNS\" ] || RUNNER_ARGS+=(--max-turns' '$POOL'"
@@ -1433,6 +1446,7 @@ if [ "$1" = delete ]; then
 fi
 git remote get-url origin > "$(dirname "$0")/origin-url" 2>/dev/null || true
 BRIEF="$4"
+cp "$BRIEF" "$(dirname "$0")/last-brief" 2>/dev/null || true
 HEAD="$(grep -oE 'head commit is [0-9a-f]{7,40}' "$BRIEF" | head -1 | sed 's/.*is //')"
 case "${POOL_RUNNER_MODE:-approve}" in
   approve) printf 'Analysis of the change with evidence lines and sibling checks across the full diff, including the boundary, refusal and fail-closed paths the adapter contract requires. Head under review: %s. The review covered the registry eligibility decision at the front door, the evidence packet identity binding before and after the paid run, the lifecycle begin and finish accounting, the verdict-to-head binding rule, the report floor, and every fail-closed refusal path a pool review must keep. Findings are grouped by severity with file and line references, and the sibling-class sweep ran over each guard before this verdict was written, exactly as the harness requires of every pool review.\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
@@ -1484,6 +1498,24 @@ check "pool_gemini_argv_omits_max_turns" "grep -q '^new pool-gemini-' '$POOLTMP/
 check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runner-args' && ! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
 check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
+# --operation (issue #658): a named installation operation reaches the reviewer
+# request as the exact approval line the install gate greps for, the report
+# records it, an unknown name never dispatches, and without one the brief stays
+# free of any operation request.
+rm -f "$POOLTMP/last-brief"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=legacy-managed-launcher-refresh bash "$POOL" qwen final-check ) > "$POOLTMP/out-op" 2>&1; RC_OP=$?
+OP_REPORT="$(tail -1 "$POOLTMP/out-op")"
+check "pool_operation_brief_requests_exact_line" "[ '$RC_OP' -eq 0 ] && grep -Fqx 'Approved legacy-managed-launcher-refresh.' '$POOLTMP/last-brief' && grep -q \"installation operation 'legacy-managed-launcher-refresh'\" '$POOLTMP/last-brief'"
+check "pool_operation_report_records_operation" "[ -f '$OP_REPORT' ] && grep -Fq '| operation | \`legacy-managed-launcher-refresh\` |' '$OP_REPORT'"
+OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=stale-linux-manifest-recovery bash "$POOL" qwen final-check ) > "$POOLTMP/out-opbad" 2>&1; RC_OPBAD=$?
+check "pool_unknown_operation_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -q 'unknown review operation' '$POOLTMP/out-opbad' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
+OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=first-managed-install bash "$POOL" qwen security-review ) > "$POOLTMP/out-opmode" 2>&1; RC_OPMODE=$?
+check "pool_operation_outside_final_check_never_dispatches" "[ '$RC_OPMODE' -ne 0 ] && grep -q 'review operation needs final-check' '$POOLTMP/out-opmode' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
+rm -f "$POOLTMP/last-brief"
+( cd "$POOLTMP/fakerepo" && export_pool && unset AI_REVIEW_OPERATION && bash "$POOL" qwen final-check ) > /dev/null 2>&1
+check "pool_without_operation_requests_no_approval_line" "[ -f '$POOLTMP/last-brief' ] && ! grep -q '^Approved ' '$POOLTMP/last-brief' && ! grep -q 'installation operation' '$POOLTMP/last-brief'"
 # Grok's 120-turn budget must reach the engine dispatch, not just the legacy
 # argv. The fake engine records the exact engine contract args.
 rm -f "$POOLTMP/engine-args"

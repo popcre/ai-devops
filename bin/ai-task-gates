@@ -1537,6 +1537,29 @@ cmd_authorize_install(){
   reviewed_commit="$(awk -F'|' '$2 ~ /reviewed commit/ {gsub(/[^0-9a-f]/,"",$3); print $3}' "$report_real")"
   [ "$reviewed_commit" = "$target_head" ] || blocked 'ai-task-gates: STOP. Review does not name exact target.'
   [ "$(tail -n 2 "$report_real" | tr -d '\r')" = $'## Verdict\nAPPROVE' ] || blocked 'ai-task-gates: STOP. Exact-head independent review has not approved release.'
+  # A migration review approves exactly one operation: the report's recorded
+  # operation (written by the review wrapper from `ai-review --operation`) must
+  # be the requested one, and no sibling operation may be approved beside it.
+  local requested_operation="" sibling_operation
+  if [ "$legacy_migration" -eq 1 ]; then requested_operation=legacy-managed-launcher-refresh
+  elif [ "$first_install" -eq 1 ]; then requested_operation=first-managed-install
+  elif [ "$recover_launchers" -eq 1 ]; then requested_operation=partial-managed-launcher-recovery
+  elif [ "$stale_manifest_recovery" -eq 1 ]; then requested_operation=stale-linux-manifest-recovery
+  fi
+  if [ -n "$requested_operation" ]; then
+    for sibling_operation in legacy-managed-launcher-refresh first-managed-install partial-managed-launcher-recovery stale-linux-manifest-recovery; do
+      [ "$sibling_operation" = "$requested_operation" ] && continue
+      ! grep -Fqx "Approved $sibling_operation." "$report_real" || blocked 'ai-task-gates: STOP. Review approves more than the requested installation operation.'
+    done
+    if [ "$requested_operation" != stale-linux-manifest-recovery ]; then
+      # Only the wrapper-written header (before the first "## Result" line) is
+      # trusted; reviewer text below it cannot supply the operation row.
+      local report_header
+      report_header="$(tr -d '\r' < "$report_real" | sed '/^## Result$/,$d')"
+      grep -q '^## Result$' <(tr -d '\r' < "$report_real") &&
+        [ "$(grep -c '^| operation | ' <<<"$report_header")" = 1 ] && grep -Fqx "| operation | \`$requested_operation\` |" <<<"$report_header" || blocked 'ai-task-gates: STOP. Review report does not record the requested installation operation.'
+    fi
+  fi
   if [ "$legacy_migration" -eq 1 ]; then
     grep -Fqx 'Approved legacy-managed-launcher-refresh.' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve the legacy managed launcher migration operation.'
   fi
