@@ -457,8 +457,9 @@ inventory disposition only; do not pool with the user quota.
   `Albert Hazan <u2giants@users.noreply.github.com>` before the first commit.
 - **Every GitHub call through `bin/ai-gh`** / `gh_call`. No `gh run watch`, no
   open-ended `until` loops; waits use `bin/ai-pr-wait` / `bin/ai-gh-wait`.
-- **Long waits (>~10 min)** are registered with `ai-blocker-watch wait`, then
-  the turn ends. Polling inside a turn is the exception.
+- **Long waits** use bounded in-session `ai-pr-wait` / `ai-gh-wait` with an
+  explicit `--timeout-minutes` deadline. If the wait outlives the turn, leave
+  the issue/PR as the card (registration is OUT; #1183 child 3).
 - **One unproven live outcome per session.** If code lands without live proof,
   leave a `- [ ] live proof` checklist item on the same issue before the session
   ends (leftover-proof issues superseded 2026-09-29 by

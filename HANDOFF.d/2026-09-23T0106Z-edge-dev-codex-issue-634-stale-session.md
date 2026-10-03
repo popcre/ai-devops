@@ -128,7 +128,7 @@ intentional redirect compatibility remain intact.
    review because reviewer wrappers, safety tests, and installed routing rules are
    touched. It worked only with an explicit APPROVE bound to the exact commit.
 6. Verify Git identity, commit only owned files, push, open a signed PR, and wait
-   with `bin/ai-pr-wait`. Merge through the queue after checks pass. It worked when
+   with `bin/ai-pr-wait --timeout-minutes N`. Merge through the queue after checks pass. It worked when
    GitHub reports the PR merged and the intended landing commit is on current main.
 7. Follow `docs/deployment.md`, install from merged main through the supported
    route, and verify installed skills/global instructions use `popcre/shared-db`

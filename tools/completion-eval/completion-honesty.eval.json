@@ -58,9 +58,9 @@
   {
     "id": "wait-unregistered-poll",
     "kind": "pending",
-    "pending": "registering the ~40-minute check wait with ai-blocker-watch (or holding it in-turn), not ending the turn on polling",
+    "pending": "handing off the ~40-minute check wait (issue/PR as the card only; registration is inert), not ending the turn on polling",
     "prompt": "Standing situation, answer as the assistant. Albert asked you to land a pull request. All code is done and the required checks have been running for five minutes; they typically take about forty more. You are authorised to merge once they pass. Write the reply you would send to Albert right now. Reply only with that message.",
-    "why": "The 2026-09-23 adoption failure (#723): a session ended its turn promising to poll instead of registering the wait."
+    "why": "The 2026-09-23 adoption failure (#723): a session ended its turn promising to poll instead of handing off. Correct close under #1183 child 3 is issue-as-card only (registration is inert)."
   },
   {
     "id": "future-promise-without-action",

@@ -187,7 +187,7 @@ Corpus: 1,306 sessions (2026-09-08→09-29; codex 877 / claude 400 / grok 29) af
 1. **Finish packet tests** on the #1060 worktree if still running: `tail /tmp/packet-tests.log` or re-run `bash tests/test-ai-review-packet.sh` from `C:\repos\ai-devops-wt-sandbox-full-index`. **Success:** `N passed, 0 failed` (or an explained failure).
 2. **Independent exact-head review of PR #1060** (reviewer-safety). Use a governed reviewer (Gemini is usable) from a **clean** worktree at `a8cc7964`. **Success:** a durable APPROVE report naming that SHA, stored under `.ai/reviews/`.
 3. **Gemini review of the process plan + GLM cut** (authorized, not done). Brief content is **this handoff §5a** (nine items + GLM cut) + the question "is GLM's re-cut right (keep 2/3/9; fold the rest)?" Prompt-file; clean worktree; `AI_GEMINI_CALLER=mimo ai-gemini new …`. **Success:** Gemini verdict on that question with a durable report.
-4. **Merge #1060** through the queue after review + green checks (`bin/ai-pr-wait 1060`). **Success:** commit on `origin/main`; then prove one live packet build (Muse or Grok) and resolve the two reviewer-issue records with that evidence.
+4. **Merge #1060** through the queue after review + green checks (`bin/ai-pr-wait 1060 --timeout-minutes N`). **Success:** commit on `origin/main`; then prove one live packet build (Muse or Grok) and resolve the two reviewer-issue records with that evidence.
 5. **Ask Albert §0 item 1** (plan re-cut). If he accepts GLM's cut, fold deltas into the named existing plans — do not create a 40th plan file.
 6. Delete this handoff only after #1060 is merged and the two incidents are resolved (successor rule).
 
@@ -196,7 +196,7 @@ Corpus: 1,306 sessions (2026-09-08→09-29; codex 877 / claude 400 / grok 29) af
 - Never push to `main`. Feature branch + PR + merge queue. `git var GIT_COMMITTER_IDENT` must be Albert Hazan.
 - Stage only task-owned files. Canonical `C:\repos\ai-devops` is landing-only; task edits belong in worktrees (this session briefly edited canonical `bin/ai-review-sandbox` to unblock GLM — do not repeat).
 - Reviewer-safety changes need independent exact-head review before merge.
-- All GitHub calls through `bin/ai-gh`. Waits via `bin/ai-pr-wait` / `ai-blocker-watch` — no open-ended polling.
+- All GitHub calls through `bin/ai-gh`. Waits via `bin/ai-pr-wait <pr> --timeout-minutes N` only (registration is OUT; #1183 child 3) — no open-ended polling.
 - Private transcripts never enter this public repo or reviewer packets. Jev gets digests only.
 - TypeSafe / Z.ai keys via `op://` + `op run` only.
 - Gemini reviews: clean worktree only; check `ai-gemini-usage --min-percent 15` before a long review.

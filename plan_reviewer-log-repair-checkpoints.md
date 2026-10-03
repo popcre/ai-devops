@@ -192,7 +192,7 @@ installer dependency set; the shared helpers stay under `tools/`, owned by #308.
 
 9. **Update `docs/reviewer-issues.md`, `skills/shared/log-reviewer-issue/SKILL.md`, tool help, and `AGENTS.md`.** The repair workflow must begin by showing/resuming the last round, inspect only the bounded interval, and complete the round only after the existing closure audit. State plainly that resolved incidents remain in place and no Markdown archive exists. Dependency: behavior and command names finalized. **You'll know it worked when** documentation parity/context audits pass and a fresh operator can follow the documented commands without this plan.
 
-10. **Run repository verification, exact-head independent review, and PR landing.** Because this changes reviewer evidence tooling and safety tests, obtain one read-only exact-head final review before merge. Verify Git identity before committing; stage only task-owned files; push a feature branch; open the PR; use `bin/ai-pr-wait <pr>` for bounded CI/merge-queue waiting; fix failures; merge through the queue; confirm the exact commit on `origin/main`. Dependency: Steps 1–9. **You'll know it worked when** all required checks and exact-head review are green, the PR is merged, and `origin/main` contains the merge commit.
+10. **Run repository verification, exact-head independent review, and PR landing.** Because this changes reviewer evidence tooling and safety tests, obtain one read-only exact-head final review before merge. Verify Git identity before committing; stage only task-owned files; push a feature branch; open the PR; use `bin/ai-pr-wait <pr> --timeout-minutes N` for bounded CI/merge-queue waiting; fix failures; merge through the queue; confirm the exact commit on `origin/main`. Dependency: Steps 1–9. **You'll know it worked when** all required checks and exact-head review are green, the PR is merged, and `origin/main` contains the merge commit.
 
 11. **Install and live-prove the first round.** Use the documented repository installer on each in-scope reviewer host, preserve machine-local configuration, start a round against a controlled fixture or a safely observable real interval, classify every candidate, complete it, append one new event, and prove the next round begins after the prior boundary while still detecting the new event. Save redacted verification evidence under `tests/verification/`. Dependency: merged main. **You'll know it worked when** the installed command reports the completed checkpoint, the second round excludes old records and includes the new record, and the original incident packages remain unchanged.
 
@@ -240,7 +240,7 @@ Keep the existing `tests/test-ai-reviewer-issue.sh` assertions green. Run the re
 - Keep canonical checkout landing-only. Implementation uses its own current-upstream worktree and feature branch.
 - Verify `git var GIT_COMMITTER_IDENT` before the first commit.
 - Reviewer safety-path changes require one independent read-only exact-head final review.
-- Use `bin/ai-pr-wait <pr>`; do not hand-roll CI polling.
+- Use `bin/ai-pr-wait <pr> --timeout-minutes N`; do not hand-roll CI polling.
 - Installation changes require reading `docs/deployment.md` before modifying or invoking deployment behavior.
 - No application database or shared-database change belongs in this work.
 - Do not add a generated archive/index that concurrent sessions must rewrite.

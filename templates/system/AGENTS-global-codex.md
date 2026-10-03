@@ -248,7 +248,7 @@ the task needs the detail.
 - **Wait on CI with the repository's bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
-  Use `bin/ai-pr-wait <pr>` for a pull request.
+  Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request.
 - Reuse the repository's shared plans, workflows, harnesses, and provider
   helpers before adding another copy. Any new shared artifact needs an explicit owner, necessity, and consolidation or retirement path.
 

@@ -78,7 +78,7 @@ The planning deliverables are the plan, this handoff, one `AGENTS.md` router row
 - Concurrent duplicates must get explicit rejection. `IgnoreNew` without a result is not sufficient.
 - Installation and live proof are protected actions, one host/outcome per session, with independent review. A task-gate refusal stops work.
 - Do not stop, restart, replace, relabel, or reconfigure the GitHub runner service.
-- Every GitHub call uses `bin/ai-gh`; waits use `bin/ai-pr-wait`; all write work uses an isolated current-upstream worktree.
+- Every GitHub call uses `bin/ai-gh`; waits use `bin/ai-pr-wait --timeout-minutes N`; all write work uses an isolated current-upstream worktree.
 - The public repository must never contain private machine-atlas facts, credentials, raw environment, or security evidence contents.
 
 ## 8. Access and environment

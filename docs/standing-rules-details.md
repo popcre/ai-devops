@@ -34,10 +34,10 @@ line in the body. Never leave it unowned.
   to one agent in sequence.
 - Every dispatch prompt says: create a uniquely named worktree and verify its
   branch before every commit; only the agent that opened an issue closes it;
-  and any wait that may exceed ~10 minutes is REGISTERED with ai-blocker-watch
-  — by the subagent itself unless the dispatcher holds it — never polled
-  ad hoc. Name the blocker and the owning/parked issue in the prompt so the
-  subagent can register without guessing.
+  and every wait uses a bounded in-session tool with an explicit deadline
+  (`ai-pr-wait --timeout-minutes N` / `ai-gh-wait --timeout-minutes N`). Never
+  poll ad hoc. If the wait will outlive the turn, leave the issue or pull
+  request as the card — do not create a waiter, registry entry, or park-state.
 
 ## Quiet tool output
 

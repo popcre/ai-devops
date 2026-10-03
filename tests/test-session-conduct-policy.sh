@@ -18,7 +18,7 @@ for file in "$router" "$codex" "$claude"; do
 done
 
 check 'router requires the bounded pull-request waiter and immediate failure reporting' \
-  "grep -Fq 'Use \`bin/ai-pr-wait <pr>\` for a pull request, surface a failing check or queue' '$router'"
+  "grep -Fq 'Use \`bin/ai-pr-wait <pr> --timeout-minutes N\` for a pull request, surface a failing check or queue' '$router'"
 check 'router requires useful work during long checks' \
   "grep -Fq 'ejection immediately, and do independent useful work while long checks run.' '$router'"
 check 'router requires ownership, reuse justification, and retirement' \
