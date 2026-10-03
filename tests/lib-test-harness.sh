@@ -44,6 +44,6 @@ check() {
   # Some checks test the previous command's "$?"; keep it intact for eval.
   local status=$?
   ai_test_counted || return 0
-  ai_test_status "$status"
-  if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi
+  # Restored inside the if-condition, where set -e cannot abort the suite.
+  if eval "ai_test_status $status; $2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi
 }

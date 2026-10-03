@@ -272,7 +272,7 @@ check 'Gemini, GLM and Muse Code run in different sections within the same 90-mi
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 check 'manual WarpBuild lane runs the same complete section mapping' \
-  'grep -qF "section: $sections_expected" "$warpbuild_workflow" && grep -qF "matrix.section }} of $shard_count" "$warpbuild_workflow" && grep -qF "matrix.section }}/$shard_count" "$warpbuild_workflow" && grep -qF -- "-Shard" "$warpbuild_workflow" && grep -qF "all eight WarpBuild sections succeeded" "$warpbuild_workflow"'
+  'grep -qF "section: $sections_expected" "$warpbuild_workflow" && grep -qF "matrix.section }} of $shard_count" "$warpbuild_workflow" && grep -qF "matrix.section }}/$shard_count" "$warpbuild_workflow" && grep -qF -- "-Shard" "$warpbuild_workflow" && grep -qF "all twelve WarpBuild sections succeeded" "$warpbuild_workflow"'
 check 'WarpBuild stays manual, bounded, independently hosted and fail-closed' \
   'grep -q "^  workflow_dispatch:" "$warpbuild_workflow" && ! grep -Eq "^  (pull_request|schedule|merge_group|workflow_run):" "$warpbuild_workflow" && grep -qF "runs-on: warp-custom-warpbuild-win2022-canary" "$warpbuild_workflow" && grep -qF "timeout-minutes: 20" "$warpbuild_workflow" && grep -qF "fail-fast: false" "$warpbuild_workflow" && grep -qF "failing closed" "$warpbuild_workflow"'
 # Sections run at the same time on independent hosted machines, and one failing

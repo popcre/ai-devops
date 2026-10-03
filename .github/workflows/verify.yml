@@ -223,7 +223,7 @@ jobs:
           bash tests/test-public-boundary.sh
           bash tests/test-markdown-links.sh
 
-  # Ordinary pull requests divide the Windows-sensitive lane into eight declared
+  # Ordinary pull requests divide the Windows-sensitive lane into twelve declared
   # sections that run at the same time on independent machines (#210): idle
   # qualified self-hosted hosts when available, Blacksmith otherwise. This is
   # real parallelism on separate hardware, not several processes competing
@@ -278,7 +278,7 @@ jobs:
        needs.fast-classifier.outputs.run_long != 'false')
     name: windows-offline-section (${{ matrix.section }}, ${{ matrix.lane }})
     strategy:
-      # One failing section must never hide the result of the other five:
+      # One failing section must never hide the result of the others:
       # the whole point of sectioning is that a useful failure arrives early
       # and the rest of the evidence still lands.
       fail-fast: false
@@ -296,7 +296,7 @@ jobs:
     runs-on: ${{ matrix.runs_on }}
     # Twelve sections since 2026-10-02: the Qwen and Muse suites run as parts
     # (tests/lib-test-part.sh) so each section fits the 20-minute paid lane.
-    # Eight sections since 2026-09-29 (#185). 90 minutes since 2026-10-01:
+    # Eight sections from 2026-09-29 (#185). 90 minutes since 2026-10-01:
     # GitHub-hosted Windows is slower than the retired Blacksmith lane
     # (Blacksmith measured ~2x faster per suite), and sections 2 and 3 hit the
     # old 40-minute ceiling twice on this pool. Prefer ENVY when idle for speed.
@@ -475,7 +475,7 @@ jobs:
 
           if [ "$EVENT" = 'pull_request' ]; then
             lane_result="$SECTION_RESULT"
-            lane_name='the eight Windows sections'
+            lane_name='the twelve Windows sections'
           else
             lane_result="$COMPLETE_RESULT"
             lane_name='the complete Windows matrix'

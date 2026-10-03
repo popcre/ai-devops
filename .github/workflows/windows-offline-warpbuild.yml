@@ -84,7 +84,7 @@ jobs:
         run: |
           set -uo pipefail
           if [ "$RESULT" = 'success' ]; then
-            printf 'windows-offline-warpbuild: all eight WarpBuild sections succeeded.\n'
+            printf 'windows-offline-warpbuild: all twelve WarpBuild sections succeeded.\n'
             exit 0
           fi
           printf 'windows-offline-warpbuild: sections reported %s; failing closed.\n' "$RESULT" >&2
