@@ -173,6 +173,13 @@ build outside it (older than the floor, or a new major), before the provider is
 contacted. If the doctor reports `UNQUALIFIED`, run the provider installer to
 bring the CLI to the policy version; do not work around the refusal.
 
+**Credentials.** The paid child runs in a cleared environment, so an exported
+`XAI_API_KEY` is dropped unless the wrapper forwards it. Grok's OAuth session
+(`~/.grok/auth.json`) wins when present. Without it, the wrapper forwards only
+`XAI_API_KEY`, from the caller or from the owner-only store written by
+`ai-grok-review store-key` (1Password read at maintenance time only, never during
+a review). If doctor reports `auth : MISSING`, run `ai-grok-review store-key`.
+
 **`grok doctor` is not an auth check.** It checks "terminal, clipboard, color, and input
 support" — which is why it once reported "You are not authenticated" while `grok models`
 and real calls worked. Never tell Albert to log in based on `grok doctor` alone.

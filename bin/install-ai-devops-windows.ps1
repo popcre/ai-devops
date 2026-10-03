@@ -1332,6 +1332,14 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
     } else {
         Write-Note 'Git Bash is needed to prepare the Qwen key store.'
     }
+    $grokBash = Get-GitBash
+    $grokWrapper = (Join-Path $RepoPath 'bin\ai-grok-review') -replace '\\', '/'
+    if ($grokBash -and (Test-Path -LiteralPath (Join-Path $RepoPath 'bin\ai-grok-review'))) {
+        # API-key fallback used only when no Grok OAuth session (auth.json) exists.
+        $grokKeyProbe = Invoke-NativeProbe -Command $grokBash.Source -Arguments @('--noprofile', '--norc', $grokWrapper, 'store-key', '--if-missing')
+        if ($grokKeyProbe.ExitCode -eq 0) { Write-Note 'Grok protected per-user key store is ready.' }
+        else { Write-Note 'Grok key store setup failed; Grok reviews need an OAuth session until ai-grok-review store-key succeeds.' }
+    }
     Write-Note "Verify model access and completion with: ai-qwen doctor --live"
 } else {
     Write-Note "Qwen Code CLI not found. Install/login separately if you want the qwen-code skill to run local Qwen jobs."
