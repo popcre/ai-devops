@@ -17,7 +17,7 @@ function Write-Receipt($Fixture) {
   @('#!/usr/bin/env bash','# Managed by ai-devops install-machine-tools.ps1.',"# source-sha=$sha","# source-hash=$hash",('export HOME="' + $homeBash + '"'),('exec "' + $sourceBash + '" "$@"')) | Set-Content -LiteralPath $Fixture.Launcher -Encoding ASCII
   @('@echo off','rem Managed by ai-devops install-machine-tools.ps1.',"rem source-sha=$sha","rem source-hash=$hash",('set "HOME=' + $env:USERPROFILE + '"'),('"' + $gitBash + '" "' + $sourceBash + '" %*')) | Set-Content -LiteralPath "$($Fixture.Launcher).cmd" -Encoding ASCII
 }
-function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool]$LegacyMigration = $false, [bool]$FirstInstall = $false, [bool]$RecoverLaunchers = $false) {
+function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool]$LegacyMigration = $false, [bool]$FirstInstall = $false, [bool]$RecoverLaunchers = $false, [bool]$OperationInBody = $false) {
   $blobs=@()
   foreach($file in @('config/task-gates.json','.ai-devops/task-gates.json')) { $blobs += (git -C $Fixture.Repo rev-parse ($Target + ':' + $file)).Trim() }
   $bytes=[Text.Encoding]::UTF8.GetBytes(($blobs -join [char]10) + [char]10)
@@ -34,7 +34,7 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   $report=Join-Path $reviewDir 'approved-review.md'
   $operation = if ($LegacyMigration) { 'Approved legacy-managed-launcher-refresh.' } elseif ($FirstInstall) { 'Approved first-managed-install.' } elseif ($RecoverLaunchers) { 'Approved partial-managed-launcher-recovery.' } else { 'Approved source update.' }
   $operationRow = if ($operation -match '^Approved ((legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery))\.$') { @('| operation | ' + [char]96 + $Matches[1] + [char]96 + ' |') } else { @() }
-  @(@('# Review',('| reviewed commit | ' + [char]96 + $Target + [char]96 + ' |'),('| source digest | ' + [char]96 + $sourceDigest + [char]96 + ' |')) + $operationRow + @($operation,'## Verdict','APPROVE')) | Set-Content -LiteralPath $report -Encoding ASCII
+  @(@('# Review',('| reviewed commit | ' + [char]96 + $Target + [char]96 + ' |'),('| source digest | ' + [char]96 + $sourceDigest + [char]96 + ' |')) + $(if ($OperationInBody) { @() } else { $operationRow }) + @('## Result') + $(if ($OperationInBody) { $operationRow } else { @() }) + @($operation,'## Verdict','APPROVE')) | Set-Content -LiteralPath $report -Encoding ASCII
   $reportHash=(Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
   $bashReport=(& $bash -c 'cygpath -u -- "$1"' 'ai-devops' $report).Trim()
   $stateDir=Join-Path (Split-Path -Parent $Fixture.Launcher) ('review-lifecycle\runs\' + $identity.repository_key + '\codex\codex')
@@ -343,6 +343,12 @@ try {
   Remove-Item -LiteralPath $first.Launcher, "$($first.Launcher).cmd"
   $firstHead=(git -C $first.Repo rev-parse HEAD).Trim()
   Invoke-Gate $first -ExpectedHead $firstHead -ExpectFailure -FailureContains 'authorization is missing'
+  # Reviewer text below '## Result' cannot supply the wrapper's operation row (#658).
+  $firstBody=New-Fixture first-install-body-row
+  Remove-Item -LiteralPath $firstBody.Launcher, "$($firstBody.Launcher).cmd"
+  $firstBodyHead=(git -C $firstBody.Repo rev-parse HEAD).Trim()
+  Write-TestAuthorization $firstBody $firstBodyHead $firstBodyHead $false $true $false $true | Out-Null
+  Invoke-Gate $firstBody -ExpectedHead $firstBodyHead -ExpectFailure -FailureContains 'does not bind exactly the requested installation operation'
   Write-TestAuthorization $first $firstHead $firstHead $false $true | Out-Null
   Invoke-Gate $first -ExpectedHead $firstHead
 

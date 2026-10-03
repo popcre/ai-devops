@@ -1464,7 +1464,12 @@ cmd_authorize_install(){
       ! grep -Fqx "Approved $sibling_operation." "$report_real" || blocked 'ai-task-gates: STOP. Review approves more than the requested installation operation.'
     done
     if [ "$requested_operation" != stale-linux-manifest-recovery ]; then
-      [ "$(grep -c '^| operation | ' "$report_real")" = 1 ] && grep -Fqx "| operation | \`$requested_operation\` |" "$report_real" || blocked 'ai-task-gates: STOP. Review report does not record the requested installation operation.'
+      # Only the wrapper-written header (before the first "## Result" line) is
+      # trusted; reviewer text below it cannot supply the operation row.
+      local report_header
+      report_header="$(tr -d '\r' < "$report_real" | sed '/^## Result$/,$d')"
+      grep -q '^## Result$' <(tr -d '\r' < "$report_real") &&
+        [ "$(grep -c '^| operation | ' <<<"$report_header")" = 1 ] && grep -Fqx "| operation | \`$requested_operation\` |" <<<"$report_header" || blocked 'ai-task-gates: STOP. Review report does not record the requested installation operation.'
     fi
   fi
   if [ "$legacy_migration" -eq 1 ]; then

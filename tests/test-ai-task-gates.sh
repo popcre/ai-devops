@@ -363,12 +363,14 @@ check 'mentioning a sensitive install mode is not approval' \
   "rc 3 '$TMP/first-install' authorize-install $first_proof --first-install"
 # A report that also approves a sibling operation, or records no operation or a
 # different one, must not authorize the requested operation (issue #658).
-for op_case in sibling missing-row other-row; do
+for op_case in sibling missing-row other-row body-row; do
   cp "$TMP/first-report-backup" "$first_report"
   case "$op_case" in
     sibling) sed -i 's/^Approved first-managed-install\.$/&\nApproved legacy-managed-launcher-refresh./' "$first_report" ;;
     missing-row) sed -i '/^| operation | /d' "$first_report" ;;
     other-row) sed -i 's/^| operation | .*$/| operation | `partial-managed-launcher-recovery` |/' "$first_report" ;;
+    # Reviewer text below "## Result" cannot supply the wrapper's operation row.
+    body-row) sed -i '/^| operation | /d; s/^## Result$/&\n\n| operation | `first-managed-install` |/' "$first_report" ;;
   esac
   op_hash="$(sha256sum "$first_report" | cut -d' ' -f1)"
   jq --arg hash "$op_hash" '.report_sha256=$hash' "$first_lifecycle" > "$TMP/first-lifecycle-updated"

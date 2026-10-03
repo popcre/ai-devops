@@ -349,7 +349,7 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
     $requestedOperation = if ($LegacyMigration) { 'legacy-managed-launcher-refresh' } elseif ($FirstInstall) { 'first-managed-install' } elseif ($RecoverLaunchers) { 'partial-managed-launcher-recovery' } else { '' }
     if ($requestedOperation) {
         $siblingApprovals = @('legacy-managed-launcher-refresh','first-managed-install','partial-managed-launcher-recovery','stale-linux-manifest-recovery') | Where-Object { $_ -cne $requestedOperation } | Where-Object { $sibling = 'Approved ' + $_ + '.'; $lines | Where-Object { $_ -ceq $sibling } }
-        $operationRows = @($lines | Where-Object { $_.StartsWith('| operation | ') })
+        $resultIndex = [Array]::IndexOf([string[]]$lines, '## Result'); $headerLines = if ($resultIndex -gt 0) { @($lines[0..($resultIndex - 1)]) } else { @() }; $operationRows = @($headerLines | Where-Object { $_.StartsWith('| operation | ') })
         if ($siblingApprovals -or $operationRows.Count -ne 1 -or $operationRows[0] -cne ('| operation | ' + [char]96 + $requestedOperation + [char]96 + ' |')) {
             throw 'Review report does not bind exactly the requested installation operation.'
         }
