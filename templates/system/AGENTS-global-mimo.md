@@ -170,6 +170,7 @@ the task needs the detail.
   assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
   that review with `ai-review --implementer <your engine>` unless you are Claude
   Code or Codex.
+  Small owner entries (below) skip only that reviewer APPROVE.
   Before production trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
   The sole narrow exception is `shared-db`'s activated automatic migration
@@ -189,6 +190,14 @@ the task needs the detail.
   Outside-sourced bulk loads into curated Master Data also use that governed
   route. Prove the target database immediately before every write. Load
   `shared-db-change` for the full procedure.
+  **Small owner entry** (owner ruling 2026-10-02, verbatim: "yes, small
+  entries can skip the reviewer"): an owner-requested row-data write of at
+  most 10 rows, with no structure, schema, security change, or deletion, run
+  as one guarded transaction asserting the exact row count after proving the
+  target database, with Albert's request quoted verbatim in the linked issue,
+  skips the AI reviewer APPROVE and keeps every other gate:
+  `ai-task-gates check --before database --small-owner-entry <issue-url>
+  --row-count N --owner-quote "<quote>"`. Details doc: "Small owner entries".
 - **Shared-db structural work is claim-first.** Claim exact objects on the
   existing issue and start; no orchestrator chat or marker is required. Scope
   stays the minimum: only work that changes the database's SHAPE, or a curated

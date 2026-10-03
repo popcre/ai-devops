@@ -1099,4 +1099,86 @@ for args in 'start --class' 'start --class prose --reason' 'start --base' 'check
     "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
 done
 
+# Owner ruling 2026-10-02 ("yes, small entries can skip the reviewer"): a
+# small owner-requested row-data write (1..10 rows) may pass the database gate
+# without an AI reviewer, but only when the gate itself reads the repository's
+# issue from GitHub (through ai-gh) and finds the owner's words verbatim.
+newrepo "$TMP/small-entry" popcre/some-app
+( cd "$TMP/small-entry" && "$GATES" start --class code >/dev/null 2>&1 )
+SMALL_URL='https://github.com/popcre/some-app/issues/7'
+SMALL_Q='add the three Hasbro contacts'
+mkdir -p "$TMP/small-gh"
+jq -n --arg u "$SMALL_URL" '{url:$u, author:{login:"u2giants"}, body:"Owner request (verbatim): \"add the three Hasbro contacts\"", comments:[]}' > "$TMP/small-gh/7.json"
+jq -n '{url:"https://github.com/popcre/some-app/issues/8", author:{login:"someone"}, body:"x", comments:[{author:{login:"stranger"}, body:"add the three Hasbro contacts"}]}' > "$TMP/small-gh/8.json"
+jq -n '{url:"https://github.com/popcre/some-app/issues/10", user:{login:"someone"}, body:"x", comments:[{user:{login:"popcre"}, body:"please add the two Mattel licensor rows"}]}' > "$TMP/small-gh/10.json"
+jq -n '{url:"https://github.com/popcre/some-app/issues/1",author:{login:"u2giants"}, body:"add the three Hasbro contacts", comments:[]}' > "$TMP/small-gh/9.json"
+cat > "$TMP/small-gh/gh" <<EOF
+#!/usr/bin/env bash
+# Fake real gh behind ai-gh: serves issue JSON fixtures by number.
+[ "\$1 \$2" = "issue view" ] || { [ "\$1" = api ] && { echo '{"resources":{"core":{"limit":5000,"remaining":5000,"reset":0}}}'; exit 0; }; exit 0; }
+f="$TMP/small-gh/\$3.json"; [ -f "\$f" ] && cat "\$f" || exit 1
+EOF
+chmod +x "$TMP/small-gh/gh"
+export AI_GH_REAL_GH="$TMP/small-gh/gh" AI_GH_STATE_DIR="$TMP/small-gh/state" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_NO_WAIT=1
+SMALL="--before database --small-owner-entry"
+check 'database without reviewer or small entry stays blocked' \
+  "rc 3 '$TMP/small-entry' check --before database"
+check 'a 3-row owner entry passes the database gate without a reviewer' \
+  "out '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' | grep -q 'allowed as a small owner-requested entry'"
+check 'a 10-row owner entry is still small' \
+  "rc 0 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 10 --owner-quote '$SMALL_Q'"
+check 'an 11-row entry needs a reviewer' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 11 --owner-quote '$SMALL_Q'"
+check 'a zero or non-numeric row count is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 0 --owner-quote '$SMALL_Q' && rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3x --owner-quote '$SMALL_Q'"
+check 'a missing row count is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --owner-quote '$SMALL_Q'"
+check 'a quote absent from the issue is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote 'delete every contact row'"
+check 'a trivially short quote is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote 'add'"
+check 'a non-issue URL is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://example.com/x' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'an issue from another repository is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/other/issues/7' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'a quote written only by a non-owner is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/some-app/issues/8' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'GitHub returning a different issue is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/some-app/issues/9' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'an unreadable issue is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/some-app/issues/404' --row-count 3 --owner-quote '$SMALL_Q'"
+newrepo "$TMP/small-undeclared" popcre/some-app; echo change > "$TMP/small-undeclared/app.txt"
+check 'a small entry without a declared task is refused (no unrecorded release)' \
+  "! rc 0 '$TMP/small-undeclared' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
+newrepo "$TMP/small-corrupt" popcre/some-app
+check 'an unrecordable release is refused' \
+  "( cd '$TMP/small-corrupt' && '$GATES' start --class code >/dev/null 2>&1 ) && f=\"\$(state_file_for '$TMP/small-corrupt')\" && jq '.overrides = \"broken\"' \"\$f\" > \"\$f.x\" && mv \"\$f.x\" \"\$f\" && rc 3 '$TMP/small-corrupt' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'small-entry options without --small-owner-entry fail' \
+  "rc 1 '$TMP/small-entry' check --before database --row-count 3"
+check 'small entry and reviewer approval together fail' \
+  "rc 1 '$TMP/small-entry' check $SMALL '$SMALL_URL' --reviewer-approval /nonexistent"
+check 'small entry never releases other actions' \
+  "rc 3 '$TMP/small-entry' check --before production --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'the small-entry release is recorded in task state' \
+  "jq -e '.overrides|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-entry')\" >/dev/null"
+check 'an owner request quoted only in an owner comment (REST user.login) qualifies' \
+  "rc 0 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/some-app/issues/10' --row-count 2 --owner-quote 'add the two Mattel licensor rows'"
+check 'a whitespace-padded quote under 12 real characters is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote 'add the     '"
+newrepo "$TMP/small-infra" popcre/some-app
+( cd "$TMP/small-infra" && "$GATES" start --class code >/dev/null 2>&1 )
+mkdir -p "$TMP/small-infra/infra"; printf 'x\n' > "$TMP/small-infra/infra/main.tf"
+check 'an infrastructure change set never qualifies as a small owner entry' \
+  "! rc 0 '$TMP/small-infra' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
+newrepo "$TMP/small-structural" popcre/some-app
+( cd "$TMP/small-structural" && "$GATES" start --class code >/dev/null 2>&1 )
+mkdir -p "$TMP/small-structural/db/migrations"; printf 'select 1;\n' > "$TMP/small-structural/db/migrations/001.sql"
+check 'a structural change set never qualifies as a small owner entry' \
+  "! rc 0 '$TMP/small-structural' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' && ! jq -e '(.overrides // [])|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-structural')\" >/dev/null 2>&1"
+unset AI_GH_REAL_GH AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS AI_GH_NO_WAIT
+for args in 'check --small-owner-entry' 'check --row-count' 'check --owner-quote'; do
+  check "missing value for '$args' fails fast instead of looping" \
+    "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
+done
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
