@@ -706,6 +706,12 @@ if ai_test_part_active; then
 # Part 1 calibrates startup polling from its first review; a standalone part 2
 # polls with a generous bound instead (loops still stop as soon as ready).
 [ -n "${QWEN_STARTUP_TICKS:-}" ] || QWEN_STARTUP_TICKS="$(scale_ticks 1200)"
+# Part 1 hardens the fixture sanitizer through the installer (and tests that);
+# a standalone part 2 applies the same hardening as setup only.
+if [ "$AI_TEST_PART" != all ]; then
+  env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen >/dev/null 2>&1     || { printf 'part 2 setup: Qwen fixture hardening failed
+' >&2; exit 1; }
+fi
 cp "$REPO/a.txt" "$TMP/a-before-live-drift"
 echo mutate-source-dirty > "$TMP/mode"
 if run new live-dirty --prompt review >/dev/null 2>&1; then bad 'same-turn dirty source drift rejects the response'; else ok 'same-turn dirty source drift rejects the response'; fi

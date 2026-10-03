@@ -26,6 +26,7 @@ skills/shared/ask-glm/**
 skills/shared/grok-cli/**
 templates/delegation/debate-turn.md
 tests/lib-test-harness.sh
+tests/lib-test-part.sh
 tests/lib-test-timing.sh
 tests/grok-auth-link-cases.sh
 tests/test-all.ps1
