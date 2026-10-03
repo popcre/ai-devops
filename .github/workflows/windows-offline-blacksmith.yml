@@ -1,14 +1,17 @@
-name: windows-offline-warpbuild
+name: windows-offline-blacksmith
 
-# Manual WarpBuild re-run of the windows-offline sections for one ref.
-# WarpBuild Azure BYOC is the final option in the runner pool, used only after
-# GitHub-hosted runners and edge-runn-envy are full. This dispatch-only workflow
-# is the on-demand overflow lane when the preferred pool cannot take the work.
+# Manual Blacksmith re-run of the windows-offline sections for one ref
+# (issue #210). Albert's 2026-09-10 "manual-only" ruling is replaced: on
+# 2026-09-23 he wrote "send everything to blacksmith" and "a Blacksmith run
+# produces a main check". Every required verify.yml job now runs on Blacksmith
+# runners under its unchanged check name, so the required merge checks are
+# themselves Blacksmith runs. This dispatch-only workflow stays as a way to
+# push a queued ref through Blacksmith concurrently on demand.
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch, tag or commit SHA to verify on WarpBuild
+        description: Branch, tag or commit SHA to verify on Blacksmith
         required: true
         type: string
       requester_task:
@@ -23,23 +26,25 @@ on:
 concurrency:
   # Keyed on the ref, not the input as a whole: a second dispatch against the
   # same branch supersedes the first rather than paying for two runs at once.
-  group: windows-offline-warpbuild-${{ github.event.inputs.ref }}
+  group: windows-offline-blacksmith-${{ github.event.inputs.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  windows-offline-warpbuild-section:
+  windows-offline-blacksmith-section:
     strategy:
-      # One failing section must not hide the other sections - same reasoning as
+      # One failing section must not hide the other five - same reasoning as
       # the free lane's windows-offline-section in verify.yml.
       fail-fast: false
       matrix:
         section: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-    runs-on: warp-custom-warpbuild-win2022-canary
+    runs-on: blacksmith-4vcpu-windows-2025
     # The free hosted lane bounds the same work at 40 minutes (verify.yml).
-    # This overflow lane keeps a tighter paid ceiling.
+    # Blacksmith measured roughly 2x faster per suite on 2026-09-10 evidence
+    # (tests/verification/repo-throughput/issue-210-blacksmith-baseline-20260910.md),
+    # so this keeps headroom without paying for a much longer ceiling.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -56,36 +61,38 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
-            throw 'The WarpBuild Windows runner image does not provide jq.'
+            throw 'The Blacksmith Windows runner image does not provide jq.'
           }
       - name: Shorten TEMP so nested mktemp trees stay under the Windows path limit
-        # Deep default TEMP roots cross the 260-char Windows path cap and fail
-        # silently when suites nest their own mktemp trees (see tests/verification
-        # for the prior parallel-run incident with the same root cause).
+        # Blacksmith's default runneradmin TEMP (C:\Users\runneradmin\AppData\Local\Temp)
+        # is far deeper than GitHub-hosted's (D:\a\_temp), and these suites nest their
+        # own mktemp trees below it - long enough to cross the 260-char Windows path
+        # cap and fail silently (see tests/verification for the prior parallel-run
+        # incident with the same root cause). A short root avoids it.
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path C:\t | Out-Null
           "TEMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
           "TMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Windows-sensitive section ${{ matrix.section }} of 12 (WarpBuild)
+      - name: Windows-sensitive section ${{ matrix.section }} of 12 (Blacksmith)
         shell: pwsh
         run: |
           .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/12'
 
-  windows-offline-warpbuild:
-    needs: [windows-offline-warpbuild-section]
+  windows-offline-blacksmith:
+    needs: [windows-offline-blacksmith-section]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
-      - name: Aggregate the WarpBuild Windows lane
+      - name: Aggregate the Blacksmith Windows lane
         env:
-          RESULT: ${{ needs.windows-offline-warpbuild-section.result }}
+          RESULT: ${{ needs.windows-offline-blacksmith-section.result }}
         run: |
           set -uo pipefail
           if [ "$RESULT" = 'success' ]; then
-            printf 'windows-offline-warpbuild: all twelve WarpBuild sections succeeded.\n'
+            printf 'windows-offline-blacksmith: all twelve Blacksmith sections succeeded.\n'
             exit 0
           fi
-          printf 'windows-offline-warpbuild: sections reported %s; failing closed.\n' "$RESULT" >&2
+          printf 'windows-offline-blacksmith: sections reported %s; failing closed.\n' "$RESULT" >&2
           exit 1

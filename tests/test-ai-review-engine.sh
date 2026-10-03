@@ -427,6 +427,196 @@ check "grok_door_report_carries_stopreason_metadata" "grep -q 'end_turn' '$STUB_
 check "grok_door_requires_runner_token_even_with_stub" \
   "! (unset AI_REVIEW_RUNNER_CORE; AI_GROK_BIN='$STUB_GROK' AI_GROK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/x.md' DOOR_HEAD='$HEAD_SHA' bash '$GROK_DOOR' review) 2>/dev/null"
 
+# --- deepseek (OpenCode) door on the same runner ----------------------------
+# Program done needs one native door (grok) AND one OpenCode door on the same
+# runner. These checks prove the OpenCode shape keeps the same contracts and
+# the same structural forcing function.
+echo '== deepseek door (OpenCode) on the shared runner'
+DS_DOOR="$REPO_ROOT/tools/lib/review-doors/deepseek.sh"
+DOORS_JSON_REAL="$REPO_ROOT/config/review-runner-doors.json"
+
+check "doors_registry_registers_deepseek_opencode_door" \
+  "jq -e '.deepseek.door==\"tools/lib/review-doors/deepseek.sh\" and .deepseek.harness==\"opencode\"' '$DOORS_JSON_REAL'"
+check "doors_registry_gives_deepseek_both_contracts" \
+  "jq -e '.deepseek.contract==[\"review\",\"implement\"]' '$DOORS_JSON_REAL'"
+check "doors_registry_keeps_grok_beside_deepseek" \
+  "jq -e '.grok.door==\"tools/lib/review-doors/grok.sh\"' '$DOORS_JSON_REAL'"
+
+check "deepseek_adapter_source_has_no_packet_remove" "! grep -nE 'PACKET(_BIN)?[[:space:]]+remove|ai-review-packet[[:space:]]+remove' '$DS_DOOR' | grep -q ."
+check "deepseek_adapter_source_has_no_sandbox_delete" "! grep -nE 'remove-copy|remove_code_only|sandbox.*remove' '$DS_DOOR' | grep -q ."
+check "deepseek_adapter_source_has_no_lifecycle_terminal" "! grep -nE 'ai-review-lifecycle|rlc_lifecycle|lifecycle (finish|fail|begin)' '$DS_DOOR' | grep -q ."
+check "deepseek_adapter_keeps_provider_bits" \
+  "grep -q 'DS_MODEL=' '$DS_DOOR' && grep -q 'resolve_opencode' '$DS_DOOR' && grep -q 'extract_report' '$DS_DOOR' && grep -q 'install_profile' '$DS_DOOR'"
+check "deepseek_adapter_selects_opencode_profile" \
+  "grep -q 'config/opencode-deepseek' '$DS_DOOR' && grep -q 'deepseek-review' '$DS_DOOR' && grep -q 'deepseek-implement' '$DS_DOOR'"
+check "deepseek_review_agent_profile_exists" \
+  "test -f '$REPO_ROOT/config/opencode-deepseek/agent/deepseek-review.md'"
+
+# Structural forcing function: the OpenCode door refuses without the runner token.
+set +e
+( unset AI_REVIEW_RUNNER_CORE; bash "$DS_DOOR" review ) >"$TMP/ds-bypass.out" 2>"$TMP/ds-bypass.err"
+DS_BYPASS_RC=$?
+set -e
+check "deepseek_door_refuses_without_runner_token" \
+  "test '$DS_BYPASS_RC' -ne 0 && grep -q 'bypasses the shared runner' '$TMP/ds-bypass.err'"
+check "deepseek_door_refusal_is_exit_2" "test '$DS_BYPASS_RC' -eq 2"
+
+# Structural forcing function: pool refuses a bypassed deepseek review.
+set +e
+( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_POOL_RUNNER_DEEPSEEK="$NOT_ENGINE" \
+    AI_POOL_CALLER=codex bash "$POOL" deepseek diff-review ) >"$TMP/pool-ds-bypass.out" 2>"$TMP/pool-ds-bypass.err"
+POOL_DS_BYPASS_RC=$?
+set -e
+check "pool_refuses_bypass_for_deepseek_door" \
+  "test '$POOL_DS_BYPASS_RC' -ne 0 && grep -q 'bypasses the shared review runner' '$TMP/pool-ds-bypass.err'"
+check "pool_deepseek_bypass_refusal_names_the_engine" "grep -q 'ai-review-engine' '$TMP/pool-ds-bypass.err'"
+
+# The shipped registry is authoritative for deepseek too: a foreign JSON that
+# unregisters it must not drop the structural gate.
+rm -f "$TMP/engine-invoked.log"
+set +e
+( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_ENGINE_BIN="$FAKE_ENGINE" \
+    AI_REVIEW_RUNNER_DOORS_JSON="$SHRUNK_DOORS" \
+    AI_POOL_CALLER=codex bash "$POOL" deepseek diff-review ) >"$TMP/pool-ds-shrunk.out" 2>"$TMP/pool-ds-shrunk.err"
+POOL_DS_SHRUNK_RC=$?
+set -e
+check "pool_keeps_deepseek_door_when_registry_unregisters_deepseek" \
+  "grep -q 'invoked: review --provider deepseek' '$TMP/engine-invoked.log'"
+check "pool_deepseek_shrunk_registry_never_reaches_legacy_runner" \
+  "test '$POOL_DS_SHRUNK_RC' -eq 99"
+
+# Structural forcing function: preflight refuses the same bypass for deepseek.
+rm -f "$TMP/engine-invoked.log"
+set +e
+( cd "$PREPO" && AI_REVIEW_QUARANTINE_DIR="$TMP/pf-state" \
+    AI_REVIEW_ENGINE_BIN="$FAKE_ENGINE" \
+    AI_POOL_CALLER=codex bash "$PREFLIGHT_BIN" check deepseek "$PREPO" ) >"$TMP/pf-ds-bypass.out" 2>"$TMP/pf-ds-bypass.err"
+PF_DS_BYPASS_RC=$?
+set -e
+check "preflight_refuses_bypass_for_deepseek_door" \
+  "test '$PF_DS_BYPASS_RC' -ne 0 && grep -qi 'refus' '$TMP/pf-ds-bypass.err' && test ! -f '$TMP/engine-invoked.log'"
+rm -f "$TMP/engine-invoked.log"
+set +e
+( cd "$PREPO" && AI_REVIEW_QUARANTINE_DIR="$TMP/pf-state" \
+    AI_REVIEW_ENGINE_BIN="$FAKE_ENGINE" AI_REVIEW_RUNNER_DOORS_JSON="$SHRUNK_DOORS" \
+    AI_POOL_CALLER=codex bash "$PREFLIGHT_BIN" check deepseek "$PREPO" ) >"$TMP/pf-ds-shrunk.out" 2>"$TMP/pf-ds-shrunk.err"
+PF_DS_SHRUNK_RC=$?
+set -e
+check "preflight_refuses_deepseek_bypass_even_when_registry_unregisters_deepseek" \
+  "test '$PF_DS_SHRUNK_RC' -ne 0 && grep -qi 'refus' '$TMP/pf-ds-shrunk.err' && test ! -f '$TMP/engine-invoked.log'"
+
+# The front door dispatches an ordinary DeepSeek review through the pool
+# (and so the shared runner), the same route as the other rotation reviewers.
+# The --code-only attachment-only route stays a separate path.
+echo '== front door routes deepseek through the pool'
+FRONT="$REPO_ROOT/bin/ai-review"
+STUB_POOL="$TMP/stub-pool"
+cat > "$STUB_POOL" <<EOF
+#!/usr/bin/env bash
+printf 'pool-invoked: %s\n' "\$*" >> "$TMP/stub-pool.log"
+exit 0
+EOF
+chmod +x "$STUB_POOL"
+rm -f "$TMP/stub-pool.log"
+set +e
+( cd "$PREPO" && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$STUB_POOL" \
+    AI_POOL_CALLER=codex bash "$FRONT" deepseek diff-review ) >"$TMP/front-ds.out" 2>"$TMP/front-ds.err"
+FRONT_DS_RC=$?
+set -e
+check "front_door_routes_deepseek_to_pool" \
+  "test '$FRONT_DS_RC' -eq 0 && grep -q 'pool-invoked: deepseek diff-review' '$TMP/stub-pool.log'"
+check "front_door_deepseek_no_longer_forces_code_only" \
+  "! grep -q 'explicit code-only route' '$TMP/front-ds.err'"
+printf '{\n  "version": 1,\n  "providers": { "deepseek": { "registry_state": "absent", "reason": "test" } }\n}\n' > "$TMP/ds-absent-registry.json"
+rm -f "$TMP/stub-pool.log"
+set +e
+( cd "$PREPO" && AI_REVIEW_REGISTRY_FILE="$TMP/ds-absent-registry.json" \
+    AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$STUB_POOL" \
+    AI_POOL_CALLER=codex bash "$FRONT" deepseek diff-review ) >"$TMP/front-ds-absent.out" 2>"$TMP/front-ds-absent.err"
+FRONT_DS_ABSENT_RC=$?
+set -e
+check "front_door_deepseek_respects_reviewer_registry" \
+  "test '$FRONT_DS_ABSENT_RC' -ne 0 && grep -q 'not a registered reviewer' '$TMP/front-ds-absent.err' && test ! -f '$TMP/stub-pool.log'"
+
+# End-to-end review through the runner with the OpenCode door and a stub
+# OpenCode binary: the same runner contracts (packet + report + lifecycle) as
+# the native grok door, offline.
+echo '== deepseek review contract through the runner (stub OpenCode)'
+STUB_OC="$TMP/stub-opencode"
+cat > "$STUB_OC" <<EOF
+#!/usr/bin/env bash
+# Offline stub OpenCode: accepts the door's run contract and emits JSONL.
+out=''
+dir=''
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    --dir) dir="\$2"; shift 2 ;;
+    --agent|--format|--model) shift 2 ;;
+    run|--auto) shift ;;
+    *) shift ;;
+  esac
+done
+cat > /dev/null
+cat <<'JSON'
+{"type":"sessionID","sessionID":"stub-session-1"}
+{"type":"text","part":{"text":"I read the evidence packet and every changed hunk against the stated intent. The lock release path is correct, the digest is recomputed at the terminal transition, and no path writes outside managed storage. The scoreboard append is checked and an accounting failure keeps the lock for recovery rather than reporting success. Sibling issues of the same class were checked across the module and none remain. No blocking findings in this change set."}}
+{"type":"tool_use","part":{"state":{"status":"ok"}}}
+{"type":"text","part":{"text":"## Verdict\nAPPROVE"}}
+JSON
+EOF
+chmod +x "$STUB_OC"
+
+DS_REPORT="$TMP/ds-stub-report.md"
+set +e
+AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+  AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+  DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+  DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$DS_REPORT" \
+  DOOR_HEAD="$HEAD_SHA" \
+  bash "$DS_DOOR" review >"$TMP/ds-stub-door.out" 2>"$TMP/ds-stub-door.err"
+DS_STUB_RC=$?
+set -e
+check "deepseek_door_parses_opencode_envelope_to_report_shape" \
+  "test '$DS_STUB_RC' -eq 0 && grep -q '## Verdict' '$DS_REPORT'"
+check "deepseek_door_report_carries_opencode_metadata" \
+  "grep -q 'opencode' '$DS_REPORT' && grep -q 'deepseek-api/deepseek-flash' '$DS_REPORT'"
+check "deepseek_door_report_binds_reviewed_head" "grep -q '$HEAD_SHA' '$DS_REPORT'"
+check "deepseek_door_requires_runner_token_even_with_stub" \
+  "! (unset AI_REVIEW_RUNNER_CORE; AI_DEEPSEEK_OPENCODE='$STUB_OC' AI_DEEPSEEK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/ds-x.md' DOOR_HEAD='$HEAD_SHA' bash '$DS_DOOR' review) 2>/dev/null"
+
+# Full review contract for deepseek through the runner: packet + report.
+export AI_REVIEW_DOOR_DEEPSEEK="$DS_DOOR"
+set +e
+( cd "$MREPO" && timeout 90 env AI_DEEPSEEK_OPENCODE="$STUB_OC" AI_DEEPSEEK_ALLOW_NO_CREDS=1 \
+    AI_REVIEW_DOOR_DEEPSEEK="$DS_DOOR" \
+    "$ENGINE" review --provider deepseek --name engine-ds-e2e --repo "$MREPO" \
+    --mode diff-review --caller codex ) >"$TMP/ds-e2e.out" 2>"$TMP/ds-e2e.err"
+DS_E2E_RC=$?
+set -e
+check "deepseek_review_contract_succeeds_through_runner" "test '$DS_E2E_RC' -eq 0"
+DS_REPORT_PATH="$(tail -1 "$TMP/ds-e2e.out" 2>/dev/null || true)"
+check "deepseek_review_contract_leaves_packet_and_report" \
+  "test -s '$DS_REPORT_PATH' && grep -q '## Verdict' '$DS_REPORT_PATH' && find '$AI_REVIEW_PACKET_STORE' -name MANIFEST.md | grep -q ."
+check "deepseek_report_records_runner_stamp" "grep -q 'review-lifecycle-core/1' '$DS_REPORT_PATH'"
+check "deepseek_report_binds_reviewed_head" "grep -q '$HEAD_SHA' '$DS_REPORT_PATH'"
+DS_STATE_FILE="$(grep -Rsl '\"provider\": \"deepseek\"' "$AI_REVIEW_LIFECYCLE_DIR/runs" 2>/dev/null | head -1)"
+check "deepseek_lifecycle_records_completed_verdict_with_packet" \
+  "test -n '$DS_STATE_FILE' && jq -e '.status==\"completed\" and .verdict==\"APPROVE\"' '$DS_STATE_FILE' && jq -e '.packet_sha256|test(\"^[0-9a-f]{64}\")' '$DS_STATE_FILE'"
+check "deepseek_review_cleanup_removed_working_sandbox_after_store" \
+  "! find '$AI_REVIEW_SANDBOX_DIR' -maxdepth 1 -type d -name 'rlc-deepseek-*' 2>/dev/null | grep -q ."
+
+# Both contracts stay in the runner: deepseek implement runs through it too.
+export AI_REVIEW_DOOR_DEEPSEEK="$IMPL_DOOR_OK"
+set +e
+( cd "$MREPO" && timeout 90 env AI_REVIEW_DOOR_DEEPSEEK="$IMPL_DOOR_OK" \
+    "$ENGINE" implement --provider deepseek --name engine-ds-impl --repo "$MREPO" \
+    --prompt-file "$TMP/impl-prompt.txt" --caller codex --keep ) >"$TMP/ds-impl.out" 2>"$TMP/ds-impl.err"
+DS_IMPL_RC=$?
+set -e
+DS_IMPL_WT="$(tail -1 "$TMP/ds-impl.out" 2>/dev/null || true)"
+check "deepseek_implement_contract_runs_through_runner" \
+  "test '$DS_IMPL_RC' -eq 0 && test -d '$DS_IMPL_WT' && test -f '$DS_IMPL_WT/impl.txt'"
+
 # --- engine doctor ----------------------------------------------------------
 echo '== engine doctor'
 check "engine_doctor_reports_core_stamp" "'$ENGINE' doctor | grep -q 'review-lifecycle-core/1'"

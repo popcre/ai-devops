@@ -200,7 +200,7 @@ for changed_state in "$GOOD_HEAD|deadbeef|$BASE_SHA" "$PROSE_HEAD|deadbeef|$GOOD
   check "head, base or queue movement invalidates path classification" "test '$RC' -eq 1 && printf '%s' \"\$OUT\" | grep -q 'changed during path classification'"
 done
 
-FALLBACK_JOBS="$(printf 'windows-offline\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nfast-classifier / classify\tsuccess\tcompleted\nwindows-reviewer-safety\tcancelled\tcompleted\nwindows-reviewer-fallback-codex\tsuccess\tcompleted\nwindows-reviewer-fallback-grok\tsuccess\tcompleted\n')"
+FALLBACK_JOBS="$(printf 'windows-offline\tsuccess\tcompleted\nlinux-offline\tsuccess\tcompleted\nfast-classifier / select\tsuccess\tcompleted\nfast-classifier / validate\tsuccess\tcompleted\nwindows-reviewer-safety\tcancelled\tcompleted\nwindows-reviewer-fallback-codex\tsuccess\tcompleted\nwindows-reviewer-fallback-grok\tsuccess\tcompleted\n')"
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$FALLBACK_JOBS"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
 check "same-head equivalent fallback covers a cancelled original lane" "test '$RC' -eq 0 && printf '%s' \"\$OUT\" | grep -q 'identical reviewer suites'"
@@ -213,7 +213,7 @@ check "completed equivalent fallback avoids waiting for redundant running lane" 
 set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tsuccess\n')" "$(printf '%s' "$FALLBACK_JOBS" | sed 's/cancelled\tcompleted/skipped\tcompleted/')"
 OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?
 check "code with a skipped original lane still requires complete equivalent fallback" "test '$RC' -eq 0"
-for mutation in fallback-failed fallback-missing fallback-grok-failed fallback-grok-missing other-failed other-pending original-failed original-missing missing-status; do
+for mutation in fallback-failed fallback-missing fallback-grok-failed fallback-grok-missing other-failed other-pending original-failed original-missing missing-status select-missing validate-missing validate-failed legacy-classify-only; do
   jobs="$FALLBACK_JOBS"
   case "$mutation" in
     fallback-failed) jobs="$(printf '%s' "$jobs" | sed 's/windows-reviewer-fallback-codex\tsuccess/windows-reviewer-fallback-codex\tfailure/')" ;;
@@ -225,6 +225,10 @@ for mutation in fallback-failed fallback-missing fallback-grok-failed fallback-g
     original-failed) jobs="$(printf '%s' "$jobs" | sed 's/cancelled\tcompleted/failure\tcompleted/')" ;;
     original-missing) jobs="$(printf '%s' "$jobs" | sed '/windows-reviewer-safety/d')" ;;
     missing-status) jobs="$(printf '%s' "$jobs" | sed 's/\tcompleted//g')" ;;
+    select-missing) jobs="$(printf '%s' "$jobs" | sed '/^fast-classifier \/ select\t/d')" ;;
+    validate-missing) jobs="$(printf '%s' "$jobs" | sed '/^fast-classifier \/ validate\t/d')" ;;
+    validate-failed) jobs="$(printf '%s' "$jobs" | sed 's/fast-classifier \/ validate\tsuccess/fast-classifier \/ validate\tfailure/')" ;;
+    legacy-classify-only) jobs="$(printf '%s' "$jobs" | sed -e '/^fast-classifier \/ select\t/d' -e 's/^fast-classifier \/ validate\t/fast-classifier \/ classify\t/')" ;;
   esac
   set_world "$GOOD_HEAD" deadbeef "$(printf '9001\tcompleted\tcancelled\n')" "$jobs"
   OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-reviewer-safety)"; RC=$?

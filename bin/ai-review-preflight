@@ -759,8 +759,11 @@ check_provider() { # PROVIDER REPO LIVE BASE
   if [ "$provider" = muse ]; then
     # A real Muse live turn outlasts the 10s check budget; ai-muse doctor --live
     # enforces its own 90s turn limit, so give the whole call room (#842).
+    # The offline doctor spawns ~40 short processes; on Windows hosts where each
+    # Git Bash fork costs ~0.3s (4837) it takes ~12s, past the 10s check budget,
+    # so it gets its own bounded budget. A timeout still never means healthy.
     if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
-    else out="$(AI_MUSE_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
+    else out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_DOCTOR_TIMEOUT:-30}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
   elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
     if [ "$provider" = gemini ]; then out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
     # A StepCode live turn takes about 8-9s, too close to the 10s check budget.
@@ -777,7 +780,7 @@ check_provider() { # PROVIDER REPO LIVE BASE
     sleep "${AI_REVIEW_TIMEOUT_RETRY_DELAY:-2}"
     if [ "$provider" = muse ]; then
       if [ "$live" = 1 ]; then out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
-      else out="$(AI_MUSE_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
+      else out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_DOCTOR_TIMEOUT:-30}s" "$wrapper" doctor 2>&1)"; rc=$?; fi
     elif [ "$live" = 1 ] && [ "$provider" != glm ]; then
       if [ "$provider" = gemini ]; then out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
       elif [ "$provider" = stepfun ]; then out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?

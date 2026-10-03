@@ -18,7 +18,7 @@ for file in "$router" "$codex" "$claude"; do
 done
 
 check 'router requires the bounded pull-request waiter and immediate failure reporting' \
-  "grep -Fq 'Use \`bin/ai-pr-wait <pr>\` for a pull request, surface a failing check or queue' '$router'"
+  "grep -Fq 'Use \`bin/ai-pr-wait <pr> --timeout-minutes N\` for a pull request, surface a failing check or queue' '$router'"
 check 'router requires useful work during long checks' \
   "grep -Fq 'ejection immediately, and do independent useful work while long checks run.' '$router'"
 check 'router requires ownership, reuse justification, and retirement' \
@@ -57,7 +57,7 @@ check 'router requires write-capable tasks to use worktrees' \
 check 'router scopes Windows runner exclusion to the physical host or runtime' \
   "grep -Fq 'same physical' '$router' && grep -Fq 'shared installed runtime' '$router'"
 check 'router preserves remote and hosted Windows capacity' \
-  "grep -Fq 'busy remote self-hosted runner does' '$router' && grep -Fq 'GitHub-hosted and WarpBuild lanes remain' '$router'"
+  "grep -Fq 'busy remote self-hosted runner does' '$router' && grep -Fq 'GitHub-hosted and Blacksmith lanes remain' '$router'"
 check 'runner guidance routes scheduling decisions through the scoped probe' \
   "grep -Fq 'bin/ai-test-local --check-collision' '$router' && grep -Fq 'bin/ai-test-local --check-collision' '$ROOT/docs/task-router.md'"
 

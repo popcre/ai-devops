@@ -52,7 +52,7 @@ This session was planning only: research the supported route, map Windows/Ubuntu
 - Normal `C:\repos\ai-devops` had unrelated dirty work. Planning used a clean detached worktree; never absorb unrelated files.
 - `C:\repos\ansible` was inspected read-only and appeared clean on `main`; it was not edited.
 - GLM 5.3 reviewed that published baseline in session `ast-grep-management-plan-review` and returned **REVISE**. The plan was corrected for its two blockers and five hardening suggestions.
-- Shipping: `ai-devops` requires a feature branch, pull request, merge queue, and `bin/ai-pr-wait`; never direct-push main. Ansible policy and auto-apply behavior must be freshly reconciled before mutation.
+- Shipping: `ai-devops` requires a feature branch, pull request, merge queue, and `bin/ai-pr-wait --timeout-minutes N`; never direct-push main. Ansible policy and auto-apply behavior must be freshly reconciled before mutation.
 - Deployment: N/A for planning docs. Production package installation is unstarted and unauthorized.
 
 ## 4. Everything we tried that did NOT work

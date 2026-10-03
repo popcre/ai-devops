@@ -105,7 +105,7 @@ Verification gate per child is in `IMPLEMENTATION-PLAN.md` §9–10.
 - Never push `main`. Branch + PR + merge queue. `git var GIT_COMMITTER_IDENT` = Albert Hazan.
 - Stage only task-owned files. Canonical `C:\repos\ai-devops` landing-only.
 - Reviewer-safety paths: independent exact-head APPROVE before merge; `ai-task-gates start --class …`.
-- `bin/ai-gh` for GitHub API; `ai-pr-wait` / `ai-blocker-watch` for waits >~10 min.
+- `bin/ai-gh` for GitHub API; `bin/ai-pr-wait <pr> --timeout-minutes N` for waits; leave the issue/PR as the card if the wait outlives the turn (registration is OUT; #1183 child 3).
 - Windows: Git Bash `C:\Program Files\Git\bin\bash.exe`.
 - No new root `plan_*.md`; no item 3; no item 9 tool; no loss ledger; no lease TTL; no wall-clock primary asserts.
 - One unproven live outcome per session **per subagent** when running the orchestrator prompt.

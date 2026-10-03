@@ -54,7 +54,7 @@ pipeline. The recovery procedure lives in
   the honest way past one is to redeclare the task at the stronger class and
   then do what that class actually requires.
 - Wait on CI through **bounded, event-aware** tools.
-  Use `bin/ai-pr-wait <pr>` for a pull request, surface a failing check or queue
+  Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request, surface a failing check or queue
   ejection immediately, and do independent useful work while long checks run.
   Make every GitHub call through `bin/ai-gh` (machine-wide lock, spacing, hourly
   budget, and rate-limit back-off) — this is a rule for callers, not something the
@@ -62,9 +62,12 @@ pipeline. The recovery procedure lives in
   migrated; other waits use `bin/ai-gh-wait`. At most one
   GitHub call every 5 minutes per waiter; never `gh run watch`, and never an
   open-ended `until`/`while` loop around `gh` — every wait needs a deadline or
-  iteration cap (#401). Any wait that may exceed ~10 minutes is REGISTERED with
-  `ai-blocker-watch wait` and the turn ends; polling is the exception for short
-  waits (#723, `docs/standing-rules-details.md`).
+  iteration cap (#401). Use bounded in-session `ai-pr-wait` /
+  `ai-gh-wait` with an **explicit** `--timeout-minutes` deadline only; there is
+  no required waiter registry, TTL service, or park-state store (voluntary
+  inert registration is permitted, unrequired, unmeasured). If the wait will outlive
+  the turn, leave the existing issue or pull request as the card and return
+  later — GitHub notifications are the reminder (#1183 child 3, #511).
 - Reuse before adding another plan, workflow, harness, or provider copy. Every
   new shared artifact needs an owner, a reason the
   shared home cannot serve the need, and a retirement or consolidation path.
@@ -81,7 +84,7 @@ pipeline. The recovery procedure lives in
 | Context size or routing ownership | [`docs/context-spec.md`](docs/context-spec.md), relevant STATUS in [`plan_context-engineering-consolidation.md`](plan_context-engineering-consolidation.md) | One owner per rule; measure before and after |
 | Standing behavior, trigger quality, false completion, “instructions not working,” or transcript work | Matching row in [`docs/task-router.md`](docs/task-router.md) | Preserve client parity, safety gates, and private-data boundaries |
 | Tool, workflow, prompt, install, model, secret, or machine setup | The matching row in [`docs/task-router.md`](docs/task-router.md) | Read the affected verification header before edits |
-| BlockerWatch registration, waking, dependency links, scheduler health, or repair | [`plan_blockerwatch-reliability-repair.md`](plan_blockerwatch-reliability-repair.md) STATUS, then the BlockerWatch row in [`docs/task-router.md`](docs/task-router.md) | Do not trust exit 0 until the plan's reconciliation and live-health gates are complete |
+| BlockerWatch waking (registration is OUT), dependency links, scheduler health, or repair | [`plan_blockerwatch-reliability-repair.md`](plan_blockerwatch-reliability-repair.md) STATUS, then the BlockerWatch row in [`docs/task-router.md`](docs/task-router.md) | Do not trust exit 0 until the plan's reconciliation and live-health gates are complete |
 | Reviewer, provider, CI, runner, throughput, active plan, or known incident | [`docs/task-router.md`](docs/task-router.md) | Resolve current status; preserve safety behavior |
 | Repeated tests/reviews, interrupted runs, or workflow delivery efficiency | [`plan_workflow-efficiency.md`](plan_workflow-efficiency.md) STATUS, issue #650 | One measured outcome per session; reuse existing repairs and retain source-bound safety |
 | Evidence-only commit churn, unrelated-main review invalidation, or Jujutsu pilot | [`plan_agent_evidence_and_jujutsu_pilot.md`](plan_agent_evidence_and_jujutsu_pilot.md) STATUS, issue #903 | Reconcile existing owners first; GitHub stays authoritative; pilot remains reversible |
@@ -113,7 +116,7 @@ pipeline. The recovery procedure lives in
 - Never overlap a local full test series with a GitHub job on the same physical
   Windows host or a shared installed runtime. Check that boundary with
   `bin/ai-test-local --check-collision`; a busy remote self-hosted runner does
-  not create a machine-wide stop, and GitHub-hosted and WarpBuild lanes remain
+  not create a machine-wide stop, and GitHub-hosted and Blacksmith lanes remain
   usable. For runner or CI work, follow [`docs/task-router.md`](docs/task-router.md).
 - Do not verify the same commit twice. The merge queue tests the exact landing
   commit; rerun only a failed or changed result.

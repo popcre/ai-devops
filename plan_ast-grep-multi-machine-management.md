@@ -290,7 +290,7 @@ Dependencies: Steps 1–4.
 
 1. Before each repository's first commit, run `git var GIT_COMMITTER_IDENT`; require `Albert Hazan <u2giants@users.noreply.github.com>`.
 2. In `ai-devops`, stage only owned files and run the relevant suite from `docs/development.md`, including the pin, Windows, global/context, installer, and PowerShell parse tests.
-3. In `ai-devops`, create a `codex/` feature branch, push it, open a pull request, enter the merge queue, and use `bin/ai-pr-wait <pr>` until the exact merge commit is verified on `origin/main`.
+3. In `ai-devops`, create a `codex/` feature branch, push it, open a pull request, enter the merge queue, and use `bin/ai-pr-wait <pr> --timeout-minutes N` until the exact merge commit is verified on `origin/main`.
 4. In `ansible`, stage/test only owned files and prepare the exact commit locally. Do not push/merge a host-affecting main change before the production gate if that action can trigger apply. If live policy permits a non-triggering feature branch, it may be pushed for review; otherwise preserve the tested local commit until Step 7.
 5. On each Windows computer, update from clean current `ai-devops` and run the supported bootstrap; never use a one-off npm command.
 6. Reopen Codex for Windows, Claude for Windows, and old terminals.

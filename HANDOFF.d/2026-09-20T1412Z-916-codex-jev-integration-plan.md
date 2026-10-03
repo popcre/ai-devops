@@ -187,7 +187,7 @@ resolved it; it changed no files or design.
   upstream worktree and feature-branch PR.
 - One unproven live outcome per session. Issue #643 is an umbrella plan issue,
   not a bundle for leftover proofs.
-- GitHub calls use `bin/ai-gh`; waits use `bin/ai-pr-wait`.
+- GitHub calls use `bin/ai-gh`; waits use `bin/ai-pr-wait --timeout-minutes N`.
 - Jev is advisory/asymmetric. It cannot approve, mutate, omit, or satisfy proof.
 - Initial external data is only allowlisted, live-public `popcre/ai-devops` text.
   Private/licensed/shared-db/transcript data is prohibited.

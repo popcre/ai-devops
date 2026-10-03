@@ -30,13 +30,13 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
 | Global instructions (`CLAUDE.md`, Codex `AGENTS.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
 | Claude tool permissions (`~/.claude/settings.json` allow list) | repo → machine, **checked every run (step 5b)**; merged in when missing, never removed | `bin/ai-claude-permissions` (list: `config/claude-permissions.allow`) |
-| Blocker-watch timer (wakes parked cross-issue waits) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
+| Blocker-watch timer (re-surfaces stuck state; registration is OUT) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
 | Auto-memory | machine ↔ private memory hub (lossless transaction) | `bin/ai-memory-sync` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
 | Codex's own memory feature (separate store from Claude's; OFF by default) | enabled on machine, **checked every run (step 6c)** | `bin/ai-codex-memories` |
 | Memory-index hook (blocks a memory from going unindexed) | installed on machine, **checked every run (step 6c2)** | `bin/ai-install-memory-hook` |
-| Claude closeout hook (forces BlockerWatch registration on waiting language) | installed on machine, **checked every run (step 6c2b)** | `bin/ai-install-completion-check-hook` |
+| Claude closeout hook (keeps a turn from closing while work is still named) | installed on machine, **checked every run (step 6c2b)** | `bin/ai-install-completion-check-hook` |
 | ZCode skills, globals, and completion-check hook | repo → machine (Windows only), **checked every run (step 6c3)** | `bin/install-ai-devops-windows.ps1` (skills/globals), `bin/ai-install-completion-check-hook --client zcode` |
 | Weekly read-only memory-health report | per-machine task, **checked every run (step 6d)** | `bin/install-memory-health-task.ps1` → `bin/ai-memory-health` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
@@ -112,13 +112,14 @@ clone + `./install.sh` (Ubuntu) first.
    `bin/ai-blocker-watch schedule`. It is idempotent on both platforms (Windows
    `schtasks /F` re-points the existing task; Linux/macOS rewrites one marked
    user-crontab line), so run it every sync rather than probing first. This is
-   NOT cosmetic: the globals tell every Claude, Codex and ZCode session to park a
-   cross-issue wait with `ai-blocker-watch wait` and end the turn, and only this
-   scheduled `tick` ever wakes that session again. The command and the rule text
+   NOT cosmetic: the globals tell every Claude, Codex and ZCode session to
+   leave the cross-issue state on the issue/PR as the card and end the turn
+   (registration is not required). The scheduled `tick` re-surfaces stuck state.
+   The command and the rule text
    arrive with a plain `git pull`; the timer does not, so a machine onboarded
    before the blocker watch existed would park work that nothing resumes. Report
    the verdict out loud. If it dies because neither `schtasks` nor `crontab` is
-   available, say so plainly — waits on that machine must not be parked.
+   available, say so plainly — do not leave background waits on that machine.
 2. **Check the Phase 2 wiring (secrets, MCP, SSH) — never skip this.** Report each
    item as present or missing:
    - `~/.config/ai-devops/op-service-account` (the vault-locked 1Password
@@ -301,8 +302,9 @@ clone + `./install.sh` (Ubuntu) first.
 6c2b. **Install the Claude closeout hook:** `bin/ai-install-completion-check-hook`
    (Claude is the default client; `--check` reports drift). Idempotent; strictly
    additive to `~/.claude/settings.json`. Without it, a session that ends on
-   waiting language is never forced to hold an `ai-blocker-watch wait`, so the
-   BlockerWatch rule is honor-system only (issue #878). `ai-devops doctor` fails
+   waiting language is not required to hold any BlockerWatch wait
+   (registration is OUT; #1183 child 3). Residual honor-system wording about
+   a registration rule is obsolete (issue #878). `ai-devops doctor` fails
    when it is missing. Report the verdict out loud.
 6c3. **Register the ZCode completion-check hook (Windows, when ZCode is
    installed):** `bin/ai-install-completion-check-hook --client zcode`. Idempotent;

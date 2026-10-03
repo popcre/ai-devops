@@ -154,7 +154,7 @@ NOT in this plan:
 ## 12. Access
 
 - `gh` is authenticated as `u2giants`, which has admin on popcre/ai-devops.
-- Use `bin/ai-pr-wait <pr>` for CI waits. No secrets are needed.
+- Use `bin/ai-pr-wait <pr> --timeout-minutes N` for CI waits. No secrets are needed.
 
 ## 13. Done, risks, open questions
 

@@ -86,7 +86,8 @@ cd /worksp/ai-devops
    by a later explicitly initiated sync after Claude creates the project.
 8. Schedules **BlockerWatch** — the `ai-blocker-watch` system (optional stage):
    a marked, idempotent user crontab entry running `ai-blocker-watch tick`, so
-   waiting sessions on this machine are woken when their blocker closes. Windows
+   legacy wait records on this machine are re-surfaced (registration is OUT;
+   #1183 child 3). Windows
    machines get the same outcome from `bin/install-ai-devops-windows.ps1`, which
    registers the Task Scheduler job via the same `schedule` command. Only the
    machine named by `propagate_on_host` in `config/blocker-watch.json` posts

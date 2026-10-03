@@ -290,7 +290,7 @@ closes it.
    requalification warning, and the test evidence. Do NOT write "Fixes #" for
    any issue, and do not reference issue #3264 as yours — it is another
    session's. Gate: PR URL printed.
-8. Wait on CI with `bin/ai-pr-wait <pr>` (bounded, event-aware; never
+8. Wait on CI with `bin/ai-pr-wait <pr> --timeout-minutes N` (bounded, event-aware; never
    `gh run watch`; at most one GitHub call per 5 minutes per waiter). While
    checks run, do independent useful work (e.g. draft the §0 item-3 follow-up
    proposal text for Albert, without opening it). Gate: required checks green;
@@ -327,7 +327,7 @@ closes it.
   worktree. Verify the worktree branch before EVERY commit.
 - Stage only task-owned files: `bin/ai-gemini`, `tests/test-ai-gemini.sh`,
   `HANDOFF.d/<this-file>`. Never `git add -A`; never commit `.tmp-*` scratch.
-- Every GitHub call through `bin/ai-gh`; waits through `bin/ai-pr-wait` /
+- Every GitHub call through `bin/ai-gh`; waits through `bin/ai-pr-wait --timeout-minutes N` /
   `bin/ai-gh-wait`; ≤1 GitHub call per 5 min per waiter; no open-ended loops.
 - `ai-task-gates` class `reviewer-safety` is already declared for this
   worktree; it rechecks the real change set before ship actions and cannot be
