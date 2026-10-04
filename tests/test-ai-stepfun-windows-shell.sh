@@ -43,8 +43,8 @@ check 'refuses wsl name' bash -c "\"$GATE\" wsl.exe ls; test \$? -eq 126"
 # Allow cat in folder — will fail at runner resolve without allowlist, so we
 # only assert it does not exit 126 at the grammar layer. Use a stub runner.
 mkdir -p "$TMP/bin"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/cat"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/npm"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/bin/cat"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/bin/npm"
 chmod +x "$TMP/bin/cat" "$TMP/bin/npm"
 export GATE_PATH="$TMP/bin:/usr/bin:/bin"
 check 'allows cat in folder (stub)' bash -c "\"$GATE\" cat readme.md; test \$? -eq 0"
@@ -55,7 +55,7 @@ check 'refuses unknown npm flag' bash -c "\"$GATE\" npm --prefix /tmp test; test
 # Production allowlist/hash path (no test-mode fallback).
 export AI_STEPFUN_TEST_MODE=0
 mkdir -p "$TMP/stubs2"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/stubs2/cat"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/stubs2/cat"
 chmod +x "$TMP/stubs2/cat"
 echo 'missing allowlist refuses' >/dev/null
 if AI_STEPFUN_RUNNERS_JSON="$TMP/missing.json" AI_STEPFUN_REVIEW_DIR="$TMP/folder" GATE_PATH="$TMP/stubs2" bash "$GATE" cat r.md >/dev/null 2>&1; then
