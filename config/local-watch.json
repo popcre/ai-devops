@@ -2,7 +2,7 @@
   "_comment": "Watchdog duty pool settings (docs/watchdog-duty-pool.md). watch_hosts: ordered preference of machines that may hold the claim; nicknames match config/blocker-watch.json (edge-dev = this Windows desktop COMPUTERNAME, edge-dev3 = Ubuntu desktop hostname, hetz = Ubuntu VPS hostname). claim_issue_title: standing GitHub issue whose body carries the claim marker; claim_issue is the number once created (0 = look up by title). repo: where the claim issue lives. lease_ttl_minutes: default max(15, 3 x the slowest tool tick); a leader renews on each successful duty tick. lock_stale_minutes: an overlapping tick is refused until the lock is this old. log_max_bytes: tick.log rotates past this size. tools: the duty-pool watchdogs tick-all runs when this host holds the claim; tick_minutes is the schedule cadence and the lease basis. Override the whole file with AI_LOCAL_WATCH_CONFIG.",
   "repo": "popcre/ai-devops",
   "watch_hosts": ["edge-dev", "edge-dev3", "hetz"],
-  "claim_issue": 0,
+  "claim_issue": 1288,
   "claim_issue_title": "local-watch-leader",
   "lease_ttl_minutes": 15,
   "lock_stale_minutes": 20,
