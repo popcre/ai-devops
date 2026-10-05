@@ -15,7 +15,7 @@
 | 2. Phase B — requalification versioning (Gemini/Qwen) | ✅ done | 2026-10-05 | PR #1201 merged `544207c8`; versioned last-good records; leftover proof #1204 **closed** three gates live (failed canary kept last good; success published new version) |
 | 3. Phase C — failure-class split (outage vs code) | ✅ done | 2026-10-02 | PR #1218 merged `44a7e446`; tools/reviewer_admission.py + bin/ai-reviewer-issue; bare 403/404 stay code |
 | 4. Phase D — runner + adapters (forcing function) | ✅ done | 2026-10-05 | PR #1209 + #1225 merged; leftover proof #1257 **closed** live `20261005T014515-151480-20815` |
-| 5. Phase E — retire copies + metrics proof | ⬜ waiting on clean window | 2026-10-05 | Window measured **NOT MET** 2026-10-05T17:19Z: 5.6/14 days since #1135 `a5bc30be` (target 2026-10-14); only 20 non-null `packet_sha256` runs (need 50 with zero missing-packet). Artifact: `~/.local/state/ai-devops/review-lifecycle/phase-e-window-20261005.txt`. Do **not** retire helpers early; when met, dispatch metrics subagent then a separate reviewer-safety PR. |
+| 5. Phase E — retire copies + metrics proof | ⬜ waiting on clean window | 2026-10-05 | Window re-measured **NOT MET** 2026-10-05T18:54Z: 5.66/14 days since #1135 `a5bc30be` (target 2026-10-14T02:56Z); 20 non-null `packet_sha256` runs of 50 required (grok 18, deepseek 2); missing-packet notes: 16 of 20 recorded packet_dirs absent on disk, 20 grok/deepseek verdict rows without packet. Artifact: `~/.local/state/ai-devops/review-lifecycle/phase-e-window-20261005.txt`. Do **not** retire helpers early; when met, dispatch metrics subagent then a separate reviewer-safety PR. |
 
 **GitHub issues (parent + children):**
 | Issue | Step |
