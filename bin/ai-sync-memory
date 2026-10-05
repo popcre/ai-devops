@@ -98,7 +98,8 @@ prune_empty_sections() {
       if (pending_header == "") return
       has_body = 0
       for (i = 1; i <= pending_n; i++) {
-        if (pending_body[i] ~ /[^ 	]/) { has_body = 1; break }
+        # Ignore CR: a CRLF blank line is contentless, not a body.
+        if (pending_body[i] ~ /[^ 	\r]/) { has_body = 1; break }
       }
       if (has_body) {
         print pending_header
