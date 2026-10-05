@@ -185,16 +185,46 @@ fi
 echo unexpected; exit 1
 FEOF
 chmod +x "$TMP/bin/fakegrok" "$TMP/bin/fakekimi" "$TMP/bin/pb-doctor"
+# The cheap lane only bumps the pin of a provider that is ALREADY qualified:
+# it validates the asserted old pin against the real prior pin in the
+# qualification record. run_pb/run_sf therefore seed that history the first
+# time they see a provider, exactly as a previous full qualification would
+# have left it (same wrapper bytes, qualified under the OLD pin).
+PB_PIN_FROM="${PB_PIN_FROM:-1.0.0}"
+seed_qual() { # PROVIDER WRAPPER_PATH OLD_PIN
+  local prov="$1" wrapper="$2" old="$3" w c
+  w="$(sha256sum "$wrapper" | awk '{print $1}')"
+  c="1111111111111111111111111111111111111111111111111111111111111111"
+  mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
+  jq -nc --arg p "$prov" --arg w "$w" --arg c "$c" --arg v "$old" \
+    '{version:1,provider:$p,wrapper_sha256:$w,cli_sha256:$c,cli_version:"0.0.0",policy_mode:"minimum",policy_version:$v,qualified_epoch:1,
+      versions:[{wrapper_sha256:$w,cli_sha256:$c,cli_version:"0.0.0",policy_mode:"minimum",policy_version:$v,qualified_epoch:1}]}' \
+    > "$AI_REVIEW_QUARANTINE_DIR/$prov-live-qualified.json"
+}
+# Test scaffolding: the helpers below stand in for "this provider was
+# previously qualified". They re-seed whenever the record is missing or was
+# written against a different stub wrapper, so a helper always presents a
+# legitimate prior qualification for the bytes it is about to run. The
+# wrapper-identity REFUSAL is exercised by an explicit test below, which plants
+# a record against different bytes on purpose.
+ensure_qual() { # PROVIDER WRAPPER_PATH OLD_PIN
+  local prov="$1" wrapper="$2" old="$3" rec w
+  rec="$AI_REVIEW_QUARANTINE_DIR/$prov-live-qualified.json"
+  [ -f "$rec" ] || { seed_qual "$prov" "$wrapper" "$old"; return 0; }
+  w="$(sha256sum "$wrapper" | awk '{print $1}')"
+  [ "$(jq -r '.wrapper_sha256 // ""' "$rec")" = "$w" ] || seed_qual "$prov" "$wrapper" "$old"
+}
 run_pb() {
   # pin-bump-qualify is a PIN-ONLY lane and refuses without proof. Inject the
   # assertion from the fixture policy so call sites stay readable: TO is always
-  # the pin the fixture currently declares, FROM is a distinct earlier pin.
+  # the pin the fixture currently declares, FROM is the seeded prior pin.
   if [ "${1:-}" = pin-bump-qualify ]; then
     local pb_prov="${2:-}" pb_from pb_to
     [ "$#" -ge 2 ] || { echo 'run_pb: pin-bump-qualify needs a provider' >&2; return 2; }
     shift 2
     pb_to="$(jq -r --arg p "$pb_prov" '.providers[$p].supported_version // ""' "$PB_POLICY")"
-    pb_from="${PB_PIN_FROM:-0.0.1}"
+    pb_from="$PB_PIN_FROM"
+    ensure_qual "$pb_prov" "$TMP/bin/pb-doctor" "$pb_from"
     env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
         AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
         AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
@@ -264,13 +294,14 @@ fi
 echo unexpected; exit 1
 FEOF
 chmod +x "$TMP/bin/pb-doctor-pinaware"
+seed_qual grok "$TMP/bin/pb-doctor-pinaware" "$PB_PIN_FROM"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor-pinaware" \
     AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
     PATH="$TMP/bin:$PATH" \
     FAKE_GROK_VERSION=1.0.5 \
-    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 0.0.1 "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only "$PB_PIN_FROM" "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
 [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'pin mismatch' \
   && ok "a version-rejecting doctor still yields pin-mismatch (not provider-unhealthy)" \
   || { bad "a version-rejecting doctor still yields pin-mismatch (not provider-unhealthy)"; printf '%s\n' "$PB_OUT"; }
@@ -308,13 +339,13 @@ PB_OUT="$(run_pb pin-bump-qualify qwen 2>&1)"; PB_RC=$?
 # A failed doctor or a failed live smoke quarantines and never publishes.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 PB_OUT="$(PB_DOCTOR_FAIL=1 FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
-[ "$PB_RC" -ne 0 ] && ! test -f "$TMP/state/grok-live-qualified.json" \
+[ "$PB_RC" -ne 0 ] && jq -e '.versions|length==1' "$TMP/state/grok-live-qualified.json" >/dev/null 2>&1 \
   && ok "a failed doctor never publishes a qualification" \
   || { bad "a failed doctor never publishes a qualification"; printf '%s\n' "$PB_OUT"; }
 run_pb clear grok >/dev/null 2>&1 || true
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 PB_OUT="$(PB_LIVE_FAIL=1 FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
-[ "$PB_RC" -ne 0 ] && ! test -f "$TMP/state/grok-live-qualified.json" \
+[ "$PB_RC" -ne 0 ] && jq -e '.versions|length==1' "$TMP/state/grok-live-qualified.json" >/dev/null 2>&1 \
   && ok "a failed live smoke never publishes a qualification" \
   || { bad "a failed live smoke never publishes a qualification"; printf '%s\n' "$PB_OUT"; }
 
@@ -334,7 +365,7 @@ PB_OUT="$(PB_DRIFT_CLI=1 FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2
   && ok "CLI drift after live checks is refused" \
   || { bad "CLI drift after live checks is refused"; printf '%s\n' "$PB_OUT"; }
 check "CLI drift never publishes a qualification for untested bytes" \
-  "! test -f '$TMP/state/grok-live-qualified.json'"
+  "jq -e '.versions|length==1' '$TMP/state/grok-live-qualified.json'"
 
 # The hash must bind the CLI the WRAPPER actually launches (override / private
 # install path), not a same-named binary that merely sits on PATH. Drift the
@@ -347,7 +378,7 @@ PB_OUT="$(AI_GROK_BIN="$TMP/bin/fakegrok-alt" PB_DRIFT_CLI=1 FAKE_GROK_VERSION=1
   && ok "drift of the wrapper-resolved CLI (override path) is refused" \
   || { bad "drift of the wrapper-resolved CLI (override path) is refused"; printf '%s\n' "$PB_OUT"; }
 check "the override-path CLI is the one bound into the record (not the PATH decoy)" \
-  "! test -f '$TMP/state/grok-live-qualified.json'"
+  "jq -e '.versions|length==1' '$TMP/state/grok-live-qualified.json'"
 
 # A failed qualification after a stale pin-mismatch was recognized must leave
 # the provider quarantined. Clearing early (or failing to restore) would leave
@@ -368,7 +399,7 @@ PB_OUT="$(PB_DRIFT_WRAPPER=1 FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify gro
   && ok "wrapper drift after live checks is refused" \
   || { bad "wrapper drift after live checks is refused"; printf '%s\n' "$PB_OUT"; }
 check "a failed qualification leaves the stale pin-mismatch quarantine in place (provider never left usable)" \
-  "run_pb status grok | jq -e '.usable==false and .failure_class==\"pin-mismatch\"' && ! test -f '$TMP/state/grok-live-qualified.json'"
+  "run_pb status grok | jq -e '.usable==false and .failure_class==\"pin-mismatch\"' && jq -e '.versions|length==1' '$TMP/state/grok-live-qualified.json'"
 
 # Same invariant when the CLI is what drifted under a stale pin-mismatch.
 PB_OUT="$(PB_DRIFT_CLI=1 FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
@@ -405,6 +436,7 @@ echo unexpected; exit 1
 FEOF
 chmod +x "$TMP/bin/pb-doctor-newq"
 # Bake ROOT into the stub environment via a wrapper export.
+seed_qual grok "$TMP/bin/pb-doctor-newq" "$PB_PIN_FROM"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor-newq" \
@@ -412,7 +444,7 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     PATH="$TMP/bin:$PATH" \
     ROOT="$ROOT" \
     FAKE_GROK_VERSION=1.0.5 \
-    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 0.0.1 "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only "$PB_PIN_FROM" "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
 [ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'left grok quarantine in place' \
   && ok "a newer quarantine recorded during the live check is not cleared" \
   || { bad "a newer quarantine recorded during the live check is not cleared"; printf '%s\n' "$PB_OUT"; }
@@ -439,6 +471,7 @@ if [ "\${1:-}" = doctor ]; then echo health ok; exit 0; fi
 echo unexpected; exit 1
 FEOF
 chmod +x "$TMP/bin/pb-doctor-newpinq"
+seed_qual grok "$TMP/bin/pb-doctor-newpinq" "$PB_PIN_FROM"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor-newpinq" \
@@ -446,7 +479,7 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     PATH="$TMP/bin:$PATH" \
     ROOT="$ROOT" \
     FAKE_GROK_VERSION=1.0.5 \
-    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 0.0.1 "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only "$PB_PIN_FROM" "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
 [ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'left grok quarantine in place' \
   && ok "an identical same-second pin-mismatch replacement is not cleared (record_id identity)" \
   || { bad "an identical same-second pin-mismatch replacement is not cleared (record_id identity)"; printf '%s\n' "$PB_OUT"; }
@@ -497,7 +530,7 @@ FAKE_GROK_VERSION=1.0.16 run_pb pin-bump-qualify grok >/dev/null 2>&1 || true
 check "the current qualification keeps policy_mode and policy_version" \
   "jq -e '.policy_mode==\"minimum\" and .policy_version==\"1.0.5\"' '$TMP/state/grok-live-qualified.json'"
 check "the qualification history keeps policy_mode and policy_version" \
-  "jq -e '(.versions|length)==2 and (.versions[0].policy_mode==\"minimum\") and (.versions[0].policy_version==\"1.0.5\") and (.versions[1].policy_mode==\"minimum\") and (.versions[1].policy_version==\"1.0.5\")' '$TMP/state/grok-live-qualified.json'"
+  "jq -e '(.versions|length)>=2 and all(.versions[]; (.policy_mode|type)==\"string\" and (.policy_version|type)==\"string\" and .policy_mode==\"minimum\") and (.versions[-1].policy_version==\"1.0.5\")' '$TMP/state/grok-live-qualified.json'"
 
 # When Kimi borrows another user's credentials the live turn runs THAT user's
 # binary. If it cannot be resolved the lane must refuse (fail-closed), never
@@ -512,17 +545,18 @@ fi
 echo unexpected; exit 1
 FEOF
 chmod +x "$TMP/bin/pb-doctor-kimi-switch"
+seed_qual kimi "$TMP/bin/pb-doctor-kimi-switch" "$PB_PIN_FROM"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_KIMI_WRAPPER="$TMP/bin/pb-doctor-kimi-switch" \
     AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
     PATH="$TMP/bin:$PATH" \
-    "$SCRIPT" pin-bump-qualify kimi --assert-pin-only 0.0.1 "$(jq -r '.providers.kimi.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
+    "$SCRIPT" pin-bump-qualify kimi --assert-pin-only "$PB_PIN_FROM" "$(jq -r '.providers.kimi.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
 [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'cannot be resolved' \
   && ok "kimi user-switch with an unresolvable binary is refused" \
   || { bad "kimi user-switch with an unresolvable binary is refused"; printf '%s\n' "$PB_OUT"; }
 check "no qualification is published when the switched binary is unknown" \
-  "! test -f '$TMP/state/kimi-live-qualified.json'"
+  "jq -e '.versions|length==1' '$TMP/state/kimi-live-qualified.json'"
 
 # When the borrowed-user binary is reachable but does NOT satisfy the version
 # pin, that miss must be caught on the switched bytes (pin-mismatch), not
@@ -546,12 +580,13 @@ exec bash -c "\$2"
 FEOF
 chmod +x "$TMP/bin/su"
 # The caller's binary satisfies the pin; only the borrowed-user binary does not.
+seed_qual kimi "$TMP/bin/pb-doctor-kimi-switch" "$PB_PIN_FROM"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_KIMI_WRAPPER="$TMP/bin/pb-doctor-kimi-switch" \
     AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
     PATH="$TMP/bin:$PATH" \
-    "$SCRIPT" pin-bump-qualify kimi --assert-pin-only 0.0.1 "$(jq -r '.providers.kimi.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
+    "$SCRIPT" pin-bump-qualify kimi --assert-pin-only "$PB_PIN_FROM" "$(jq -r '.providers.kimi.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
 [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'pin mismatch' \
   && ok "a version miss on the borrowed-user binary is caught as pin-mismatch" \
   || { bad "a version miss on the borrowed-user binary is caught as pin-mismatch"; printf '%s\n' "$PB_OUT"; }
@@ -623,13 +658,14 @@ run_sf() {
   if [ "${1:-}" = pin-bump-qualify ]; then
     local sf_prov="${2:-}"; shift 2
     sf_to="$(jq -r --arg p "$sf_prov" '.providers[$p].supported_version // ""' "$SF_POLICY")"
+    ensure_qual "$sf_prov" "$TMP/bin/sf-doctor" "$PB_PIN_FROM"
     env AI_PROVIDER_VERSIONS_FILE="$SF_POLICY" \
         AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
         AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/sf-doctor" \
         AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
         HOME="$SF_HOME" \
         PATH="$TMP/bin:$PATH" \
-        "$SCRIPT" pin-bump-qualify "$sf_prov" --assert-pin-only 0.0.1 "$sf_to" "$@"
+        "$SCRIPT" pin-bump-qualify "$sf_prov" --assert-pin-only "$PB_PIN_FROM" "$sf_to" "$@"
   else
     env AI_PROVIDER_VERSIONS_FILE="$SF_POLICY" \
         AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
@@ -680,7 +716,7 @@ SEOF
 chmod +x "$SF_HOME/.stepcode/bin/step"
 PB_OUT="$(AI_STEPFUN_STEP_BIN="$SF_HOME/.stepcode/bin/step" run_sf pin-bump-qualify stepfun 2>&1)"; PB_RC=$?
 [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'could not resolve' \
-  && ! test -f "$TMP/state/stepfun-live-qualified.json" \
+  && jq -e '.versions|length==1' "$TMP/state/stepfun-live-qualified.json" >/dev/null 2>&1 \
   && ok "a wrong-identity StepFun override is refused (never silently replaced)" \
   || { bad "a wrong-identity StepFun override is refused (never silently replaced)"; printf '%s\n' "$PB_OUT"; }
 
@@ -731,14 +767,20 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
   || { bad "a policy fingerprint mismatch is refused (asserted pin vs policy file)"; printf '%s\n' "$PB_OUT"; }
 
 # 4. A behaviour-changing wrapper edit must take the FULL qualification path.
-#    Seed qualification history against a different wrapper hash, then bump the
-#    pin: the wrapper is no longer the one that was qualified, so the cheap
-#    lane must refuse rather than publish evidence for the new bytes.
+#    Seed qualification history against a different wrapper hash but the REAL
+#    prior pin, so the old-pin proof passes and the wrapper identity is what
+#    refuses: the cheap lane must not publish evidence for unqualified bytes.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
-cat > "$TMP/state/grok-live-qualified.json" <<'SEOF'
-{"version":1,"provider":"grok","wrapper_sha256":"0000000000000000000000000000000000000000000000000000000000000000","cli_sha256":"1111111111111111111111111111111111111111111111111111111111111111","cli_version":"1.0.13","policy_mode":"minimum","policy_version":"1.0.5","qualified_epoch":1,"versions":[{"wrapper_sha256":"0000000000000000000000000000000000000000000000000000000000000000","cli_sha256":"1111111111111111111111111111111111111111111111111111111111111111","cli_version":"1.0.13","policy_mode":"minimum","policy_version":"1.0.5","qualified_epoch":1}]}
-SEOF
-PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+jq -nc --arg v "$PB_PIN_FROM" \
+  '{version:1,provider:"grok",wrapper_sha256:"0000000000000000000000000000000000000000000000000000000000000000",cli_sha256:"1111111111111111111111111111111111111111111111111111111111111111",cli_version:"0.0.0",policy_mode:"minimum",policy_version:$v,qualified_epoch:1,versions:[{wrapper_sha256:"0000000000000000000000000000000000000000000000000000000000000000",cli_sha256:"1111111111111111111111111111111111111111111111111111111111111111",cli_version:"0.0.0",policy_mode:"minimum",policy_version:$v,qualified_epoch:1}]}' \
+  > "$TMP/state/grok-live-qualified.json"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.15 \
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only "$PB_PIN_FROM" "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
 [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'wrapper changed' \
   && ok "a behaviour-changing wrapper edit is refused by the cheap lane" \
   || { bad "a behaviour-changing wrapper edit is refused by the cheap lane"; printf '%s\n' "$PB_OUT"; }
@@ -748,16 +790,49 @@ check "the refused wrapper change publishes no new qualification" \
 # 5. The SAME wrapper the provider was qualified on is accepted — the refusal
 #    above is about wrapper identity, not about having history at all.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
-PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
-good_wrapper_sha="$(jq -r .wrapper_sha256 "$TMP/state/grok-live-qualified.json")"
-rm -rf "$TMP/state"; mkdir -p "$TMP/state"
-jq -nc --arg w "$good_wrapper_sha" --arg v "$(jq -r '.providers.grok.supported_version' "$PB_POLICY")" \
-  '{version:1,provider:"grok",wrapper_sha256:$w,cli_sha256:"1111111111111111111111111111111111111111111111111111111111111111",cli_version:"1.0.13",policy_mode:"minimum",policy_version:$v,qualified_epoch:1,versions:[{wrapper_sha256:$w,cli_sha256:"1111111111111111111111111111111111111111111111111111111111111111",cli_version:"1.0.13",policy_mode:"minimum",policy_version:$v,qualified_epoch:1}]}' \
-  > "$TMP/state/grok-live-qualified.json"
+seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM"
 PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
 [ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'PASS pin-bump-qualify provider=grok' \
   && ok "the already-qualified wrapper still qualifies on a pin bump" \
   || { bad "the already-qualified wrapper still qualifies on a pin bump"; printf '%s\n' "$PB_OUT"; }
+
+# 6. An INVENTED old pin is not proof: it must name the pin the provider was
+#    really last qualified under.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.15 \
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 9.9.9 "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'real prior pin' \
+  && jq -e '.versions|length==1' "$TMP/state/grok-live-qualified.json" >/dev/null 2>&1 \
+  && ok "an invented old pin is refused (must name the real prior pin)" \
+  || { bad "an invented old pin is refused (must name the real prior pin)"; printf '%s\n' "$PB_OUT"; }
+
+# 7. With no qualification history there is no pin to bump: a FIRST
+#    qualification is not a pin bump and must take the full path.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.15 \
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only "$PB_PIN_FROM" "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'no qualification record' \
+  && ok "the cheap lane refuses when there is no qualification history" \
+  || { bad "the cheap lane refuses when there is no qualification history"; printf '%s\n' "$PB_OUT"; }
+
+# 8. The policy fingerprint covers the command and model lock too, so a change
+#    there is a policy change and not a pin bump.
+fp_out="$("$ROOT/bin/ai-provider-version" fingerprint grok 2>/dev/null)"
+case "$fp_out" in
+  *:*:*:*) ok "the policy fingerprint covers mode, pin, command, and model lock" ;;
+  *) bad "the policy fingerprint covers mode, pin, command, and model lock (got: $fp_out)" ;;
+esac
 
 # Execute-bit cases. NTFS/Git Bash synthesises the execute bit for every
 # regular file (chmod -x is a no-op), so a non-executable candidate cannot be
@@ -798,7 +873,7 @@ SEOF
   chmod -x "$TMP/bin/fakegrok-noexec"
   PB_OUT="$(AI_GROK_BIN="$TMP/bin/fakegrok-noexec" FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
   [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'could not resolve' \
-    && ! test -f "$TMP/state/grok-live-qualified.json" \
+    && jq -e '.versions|length==1' "$TMP/state/grok-live-qualified.json" >/dev/null 2>&1 \
     && ok "a non-executable Grok override is refused (no fallback, no false evidence)" \
     || { bad "a non-executable Grok override is refused (no fallback, no false evidence)"; printf '%s\n' "$PB_OUT"; }
   check "the refused override never becomes a false pin-mismatch quarantine" \
@@ -810,7 +885,7 @@ SEOF
   chmod -x "$TMP/bin/fakekimi-noexec"
   PB_OUT="$(AI_KIMI_BIN="$TMP/bin/fakekimi-noexec" FAKE_KIMI_VERSION=2.0.0 run_pb pin-bump-qualify kimi 2>&1)"; PB_RC=$?
   [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'could not resolve' \
-    && ! test -f "$TMP/state/kimi-live-qualified.json" \
+    && jq -e '.versions|length==1' "$TMP/state/kimi-live-qualified.json" >/dev/null 2>&1 \
     && ok "a non-executable Kimi override is refused (no fallback, no false evidence)" \
     || { bad "a non-executable Kimi override is refused (no fallback, no false evidence)"; printf '%s\n' "$PB_OUT"; }
 fi

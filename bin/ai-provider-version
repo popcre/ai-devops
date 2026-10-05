@@ -32,10 +32,12 @@
 #       Print the provider CLI command name this policy names (for resolving
 #       and hashing the installed binary in the pin-only qualification lane).
 #   ai-provider-version fingerprint <provider>
-#       Print a stable fingerprint of the provider's pin policy
-#       (supported_version + version_match). A pin bump changes it, which is
-#       how a `pin-mismatch` quarantine auto-restores when the pin is updated
-#       in the same change.
+#       Print a stable fingerprint of the provider's whole pin policy
+#       (version_match, supported_version, command, model_pin). A pin bump
+#       changes it, which is how a `pin-mismatch` quarantine auto-restores when
+#       the pin is updated in the same change; a change to the command name or
+#       the model lock changes it too, so a policy edit can never be mistaken
+#       for a pin bump.
 #   ai-provider-version policy-file
 #       Print the resolved policy path.
 #
@@ -135,7 +137,10 @@ case "${1:-}" in
             printf '%s\n' "$c" ;;
   fingerprint) [ $# -eq 2 ] || die 'usage: ai-provider-version fingerprint <provider>'
             want="$(required_version "$2")"; mode="$(match_mode "$2")"
-            printf '%s:%s\n' "$mode" "$want" ;;
+            cmd="$(jq -r --arg p "$2" '.providers[$p].command // ""' "$(load_policy)")"
+            model="$(jq -r --arg p "$2" '.providers[$p].model_pin // ""' "$(load_policy)")"
+            [[ -z "$model" || "$model" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "malformed model_pin '$model' for $2"
+            printf '%s:%s:%s:%s\n' "$mode" "$want" "$cmd" "$model" ;;
   policy-file) load_policy >/dev/null; policy_file; printf '\n' ;;
   -h|--help|'') sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command '$1'" ;;
