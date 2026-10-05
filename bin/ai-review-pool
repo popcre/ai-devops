@@ -377,14 +377,15 @@ case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STA
 # Binding and the analysis floor are judged on the MODEL BODY - stdout only,
 # captured separately from the runner's stderr chrome. The analysis is the
 # text on the far side of the verdict block: before a terminal `## Verdict`
-# (this brief's shape) or after a leading one (ai-gemini's contract, which
-# puts the verdict first and the findings after - ai-gemini:303,383-386).
-# Only a heading that IS the first non-empty line counts as leading; a
-# provisional leading block followed by a later final heading still judges
-# the text before the final. A footer-only body has no analysis on either
+# (this brief's shape, which every provider is told to use) or, for Gemini
+# only, after a leading one (ai-gemini's non-governed contract requires
+# `## Verdict` first and the findings after - ai-gemini:303,383-386). No
+# other provider's runner imposes a leading verdict, so for them a leading
+# `## Verdict` is just a provisional block and the analysis still sits
+# before the final heading. A footer-only body has no analysis on either
 # side and is still refused.
 FIRST_NONEMPTY="$(awk 'NF{print NR; exit}' "$TMP_TEXT")"
-if [ "$VERDICT_LINE" -gt 0 ] && [ "${FIRST_NONEMPTY:-0}" -eq "$VERDICT_LINE" ]; then
+if [ "$provider" = gemini ] && [ "$VERDICT_LINE" -gt 0 ] && [ "${FIRST_NONEMPTY:-0}" -eq "$VERDICT_LINE" ]; then
   ANALYSIS_START="$((VERDICT_LINE + 2))"  # skip the heading and its one verdict word
   ANALYSIS_END=0                          # 0 = through end of body
 else

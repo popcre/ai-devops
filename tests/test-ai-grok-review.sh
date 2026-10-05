@@ -1579,10 +1579,14 @@ check "pool_adapter_floor_counts_only_text_before_the_final_verdict" "[ '$RC_PO'
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" qwen security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
 check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
 # Pool-path contract for ai-gemini's verdict-first shape (finding on PR #1291):
-# a realistic leading `## Verdict` + analysis body is accepted by the pool
-# gate, and a footer-only empty body is still refused.
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" qwen security-review ) > "$POOLTMP/out-gshape" 2>&1; RC_GSHAPE=$?
+# a realistic leading `## Verdict` + analysis body is accepted for Gemini
+# (whose runner requires the verdict first), refused for every other provider
+# (whose brief puts the verdict last), and a footer-only empty body is still
+# refused.
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" gemini final-check ) > "$POOLTMP/out-gshape" 2>&1; RC_GSHAPE=$?
 check "pool_adapter_accepts_a_verdict_first_gemini_shaped_body" "[ '$RC_GSHAPE' -eq 0 ] && grep -q APPROVE '$POOLTMP/out-gshape'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" qwen security-review ) > "$POOLTMP/out-gshape-qwen" 2>&1; RC_GSHAPE_QWEN=$?
+check "pool_adapter_refuses_verdict_first_for_non_gemini_providers" "[ '$RC_GSHAPE_QWEN' -ne 0 ]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=footerempty bash "$POOL" qwen security-review ) > "$POOLTMP/out-fempty" 2>&1; RC_FEMPTY=$?
 check "pool_adapter_refuses_a_footer_only_empty_body" "[ '$RC_FEMPTY' -ne 0 ]"
 # A rewritten target tip (moved BACKWARD to a non-descendant) is real drift
