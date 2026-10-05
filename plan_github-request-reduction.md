@@ -68,7 +68,7 @@ Installed P1 reporting (#660) and the rest of the handoff remain open.
 **Start:** reconcile current upstream, read this STATUS and the
 [active handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md),
 then finish the first actionable unproved outcome under #658. The original
-[discovery handoff](HANDOFF.d/2026-09-20T1801Z-916-codex-github-request-reduction.md)
+the discovery handoff (retired; see git history)
 remains historical context.
 Each row is a separate outcome with one accountable owner under the current
 orchestrator. The parent is a tracking record; distinct proof outcomes stay on

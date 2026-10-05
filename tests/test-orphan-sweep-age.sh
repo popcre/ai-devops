@@ -47,6 +47,9 @@ echo '== ai-review-sandbox sweep-orphans'
 # --- the age rule: old orphan removed, young sandbox kept (default 2 hours) ---
 OLD="$(plant orphan-old '3 hours ago')"
 YOUNG="$(plant orphan-young '10 minutes ago')"
+# remove_sandbox logs the canonicalized path (pwd -P); capture that before
+# the sweep deletes the directory so the log assertion matches on Windows CI.
+OLD_PHYSICAL="$(cd "$OLD" 2>/dev/null && pwd -P)" || OLD_PHYSICAL="$OLD"
 SWEEP_ERR="$TMP/sweep.err"
 set +e
 "$SCRIPT" sweep-orphans 2> "$SWEEP_ERR"
@@ -55,7 +58,7 @@ set -e
 check "sweep_exits_zero"                 "[ '$SWEEP_RC' -eq 0 ]"
 check "old_orphan_removed"               "[ ! -d '$OLD' ]"
 check "young_sandbox_kept"               "[ -d '$YOUNG' ]"
-check "old_orphan_delete_logged"         "grep -q 'deleted review snapshot $OLD' '$SWEEP_ERR'"
+check "old_orphan_delete_logged"         "grep -q 'deleted review snapshot $OLD_PHYSICAL' '$SWEEP_ERR'"
 rmdir "$YOUNG" 2>/dev/null || rm -rf "$YOUNG"
 
 # --- custom threshold: only entries past the given age are removable ---------

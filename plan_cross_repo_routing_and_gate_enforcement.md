@@ -4,7 +4,7 @@
 
 **Parent outcome:** [popcre/ai-devops#159](https://github.com/popcre/ai-devops/issues/159)
 
-**Active handoff:** [`HANDOFF.d/2026-09-11T0001Z-edge-dev-codex-issue-335-phase5-boundary.md`](HANDOFF.d/2026-09-11T0001Z-edge-dev-codex-issue-335-phase5-boundary.md)
+**Active handoff:** `HANDOFF.d/2026-09-11T0001Z-edge-dev-codex-issue-335-phase5-boundary.md` (retired; see git history)
 
 Phase 4 is closed; the active handoff preserves the Phase 5 boundary only. PR
 #330 is an unrelated Qwen workstream; do not cancel, rerun, or diagnose it as

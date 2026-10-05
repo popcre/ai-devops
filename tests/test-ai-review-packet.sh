@@ -80,7 +80,14 @@ assert actual == decision
 PY"
 check "large_decision_packet_verifies" "'$SCRIPT' verify '$LONG_PKT'"
 check "decision_file_and_text_are_exclusive" "! '$SCRIPT' build '$R' invalid-decision --decision text --decision-file '$LONG_DECISION' >/dev/null 2>&1 && ! '$SCRIPT' build '$R' invalid-decision --decision-file '$LONG_DECISION' --decision text >/dev/null 2>&1"
-check "decision_file_symlink_is_refused" "ln -s '$LONG_DECISION' '$TMP/decision-link' && ! '$SCRIPT' build '$R' invalid-decision --decision-file '$TMP/decision-link' >/dev/null 2>&1"
+# On Windows CI runners, ln -s may fall back to a copy; only assert the
+# symlink refusal on a real link (same pattern as test-ai-review-sandbox-delete-guard).
+ln -s "$LONG_DECISION" "$TMP/decision-link" 2>/dev/null
+if [ -L "$TMP/decision-link" ]; then
+  check "decision_file_symlink_is_refused" "! '$SCRIPT' build '$R' invalid-decision --decision-file '$TMP/decision-link' >/dev/null 2>&1"
+else
+  skip "decision_file_symlink_is_refused (this filesystem cannot create a real symlink)"
+fi
 check "missing_decision_file_is_refused" "! '$SCRIPT' build '$R' invalid-decision --decision-file '$TMP/missing-decision' >/dev/null 2>&1"
 check "empty_decision_file_is_refused" ": > '$TMP/empty-decision' && ! '$SCRIPT' build '$R' invalid-decision --decision-file '$TMP/empty-decision' >/dev/null 2>&1"
 
