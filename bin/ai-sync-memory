@@ -72,6 +72,62 @@ public_ai_devops_hub() {
   esac
 }
 
+# Exact "## …" title match that tolerates CRLF. A plain `grep -Fqx` misses a
+# title that ends in CR, so every later merge treated the title as absent and
+# appended another one. That is how a single MEMORY.md grew 23 empty
+# "Local entries preserved during migration" headers.
+section_header_present() {
+  local file="$1" title="$2"
+  awk -v title="$title" '
+    { line = $0; sub(/\r$/, "", line); if (line == title) { found = 1; exit } }
+    END { exit (found ? 0 : 1) }
+  ' "$file"
+}
+
+# Drop "## …" headers whose body is only blanks (until the next ## or EOF).
+# Entry lines can later vanish via forget/tombstone/prune; the empty shell they
+# left behind was then copied forever by the next merge. Keep every non-empty
+# section byte-for-byte; only the empty shells go.
+prune_empty_sections() {
+  local index="$1" tmp
+  [[ -f "$index" ]] || return 0
+  [[ "$DRY_RUN" == "--dry-run" ]] && return 0
+  tmp="$index.empty.$$"
+  awk '
+    function flush_pending(  i, has_body) {
+      if (pending_header == "") return
+      has_body = 0
+      for (i = 1; i <= pending_n; i++) {
+        if (pending_body[i] ~ /[^ 	]/) { has_body = 1; break }
+      }
+      if (has_body) {
+        print pending_header
+        for (i = 1; i <= pending_n; i++) print pending_body[i]
+      }
+      pending_header = ""
+      pending_n = 0
+    }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (line ~ /^## /) {
+        flush_pending()
+        pending_header = $0
+        pending_n = 0
+        next
+      }
+      if (pending_header != "") {
+        pending_n++
+        pending_body[pending_n] = $0
+        next
+      }
+      print
+    }
+    END { flush_pending() }
+  ' "$index" > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$index"
+}
+
 # MEMORY.md is a recall index written independently by every machine. During
 # migration, a pull must preserve local-only entries while accepting the hub's
 # entries. Start from the hub index, then append any local link lines it lacks.
@@ -134,7 +190,7 @@ merge_memory_index() {
     return 1
   fi
   if [[ -s "$additions" ]]; then
-    if ! { { grep -Fqx "## Local entries preserved during migration" "$tmp" ||
+    if ! { { section_header_present "$tmp" "## Local entries preserved during migration" ||
         printf '\n## Local entries preserved during migration\n\n' >> "$tmp"; } &&
       cat "$additions" >> "$tmp"; }; then
       rm -f "$tmp" "$additions"
@@ -142,6 +198,10 @@ merge_memory_index() {
     fi
   fi
   rm -f "$additions"
+  if ! prune_empty_sections "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
   if ! mv -f "$tmp" "$output"; then
     rm -f "$tmp"
     return 1
@@ -231,7 +291,7 @@ ensure_index_coverage() {
       if [[ "$DRY_RUN" == "--dry-run" ]]; then
         echo "[dry-run] index $label/$base"
       else
-        if [[ "$added" -eq 0 ]] && ! grep -Fqx "## Recovered union entries" "$index"; then
+        if [[ "$added" -eq 0 ]] && ! section_header_present "$index" "## Recovered union entries"; then
           printf '\n## Recovered union entries\n\n' >> "$index"
         fi
         printf -- '- [%s](%s) - Portable fact preserved by lossless sync.\n' "${base%.md}" "$base" >> "$index"
@@ -239,6 +299,7 @@ ensure_index_coverage() {
       added=$((added+1))
     fi
   done
+  prune_empty_sections "$index"
 }
 
 usage() {
@@ -315,6 +376,7 @@ apply_tombstones() {
       mv -f "$tmp" "$index"
     fi
   done < <(tombstoned_names "$forget")
+  prune_empty_sections "$dir/MEMORY.md"
 }
 
 case "$DIRECTION" in
@@ -514,6 +576,7 @@ case "$DIRECTION" in
             }
           ' "$prune_index" > "$prune_tmp" || { rm -f "$prune_tmp"; exit 1; }
           mv -f "$prune_tmp" "$prune_index"
+          prune_empty_sections "$prune_index"
           echo "  pruned dead index entries in memory/$b_proj"
           continue
         fi
@@ -544,6 +607,7 @@ case "$DIRECTION" in
         exit 1
       fi
       mv -f "$tmp" "$index"
+      prune_empty_sections "$index"
     fi
     echo "  tombstoned $file in memory/$proj — every machine drops it on its next pull."
     echo "  The ai-memory-sync parent commits and pushes this private-hub change; direct inner-tool use leaves it for explicit private-hub review."

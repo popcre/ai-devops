@@ -63,6 +63,16 @@
         "test-ai-memory-sync.sh",
         "test-ai-memory-sync-fanout.sh"
       ],
+      "bin/ai-sync-memory": [
+        "test-ai-memory-sync.sh",
+        "test-ai-sync-memory-public-containment.sh",
+        "test-ai-sync-memory-empty-sections.sh"
+      ],
+      "bin/ai-sync-memory.cmd": [
+        "test-ai-memory-sync.sh",
+        "test-ai-sync-memory-public-containment.sh",
+        "test-ai-sync-memory-empty-sections.sh"
+      ],
       "bin/ai-muse": [
         "test-ai-muse.sh",
         "test-ai-muse-part2.sh",
