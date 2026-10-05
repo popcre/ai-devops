@@ -363,14 +363,20 @@ registry_reason() { # PROVIDER
 # stepfun_opencode_bin echoes the OpenCode binary the StepFun wrapper will use.
 # Same resolution as bin/ai-stepfun: AI_STEPFUN_OPENCODE override, else the
 # pinned install under ~/.local/lib/ai-devops/opencode/<version>/...
+# Use the resolved real dir (not the symlink dir) so a PATH invocation still
+# finds config/opencode/version — same rule as REGISTRY_FILE above.
 stepfun_opencode_bin() {
   local oc_version root bin
   if [ -n "${AI_STEPFUN_OPENCODE:-}" ]; then
     printf '%s' "$AI_STEPFUN_OPENCODE"
     return 0
   fi
-  root="$(cd "$SCRIPT_DIR/.." && pwd)"
+  root="$(cd "$REGISTRY_REAL_DIR/.." && pwd)"
   oc_version="$(tr -d ' \r\n' < "$root/config/opencode/version" 2>/dev/null || true)"
+  if [ -z "$oc_version" ] && [ -f "$SCRIPT_DIR/../config/opencode/version" ]; then
+    root="$(cd "$SCRIPT_DIR/.." && pwd)"
+    oc_version="$(tr -d ' \r\n' < "$root/config/opencode/version" 2>/dev/null || true)"
+  fi
   bin="$HOME/.local/lib/ai-devops/opencode/$oc_version/node_modules/opencode-ai/bin/opencode.exe"
   if [ -x "$bin" ]; then
     printf '%s' "$bin"
