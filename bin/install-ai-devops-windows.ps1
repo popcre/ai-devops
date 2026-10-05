@@ -1278,6 +1278,32 @@ if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
     Write-Note "Git Bash not found, so the worktree reap was not scheduled. Install Git for Windows and rerun this script."
 }
 
+# Watchdog duty pool: local timed tasks for CI alarms (queue-slow, runner-pool,
+# membership drift, merge-queue drift). Claim/lease rotation across
+# watch_hosts; free Actions stay backup only. Never paid Blacksmith.
+Write-Step "Scheduling the watchdog duty pool (local-watch)"
+$lwInPool = $false
+try {
+    $lwConfig = Get-Content -Raw (Join-Path $RepoPath 'config\local-watch.json') | ConvertFrom-Json
+    $lwHosts = @($lwConfig.watch_hosts | ForEach-Object { "$_".ToLowerInvariant() })
+    $lwInPool = $lwHosts -contains $env:COMPUTERNAME.ToLowerInvariant()
+} catch { }
+if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1') {
+    Write-Note "Test mode: not touching this computer's scheduled tasks (local-watch)."
+} elseif (-not $lwInPool) {
+    Write-Note "This computer is not in the watchdog duty pool (watch_hosts); local-watch not scheduled."
+} elseif ($bwBash) {
+    $lwTool = (Join-Path $RepoPath 'bin\ai-local-watch') -replace '\\', '/'
+    $lwProbe = Invoke-NativeProbe -Command $bwBash.Source -Arguments @('-lc', "'$lwTool' schedule")
+    if ($lwProbe.ExitCode -eq 0) {
+        Write-Note "Watchdog duty pool timer scheduled. CI alarms now run as local timed tasks with claim/lease failover."
+    } else {
+        Write-Note "Could not schedule local-watch: $($lwProbe.Output -join ' ')"
+    }
+} else {
+    Write-Note "Git Bash not found, so local-watch was not scheduled. Install Git for Windows and rerun this script."
+}
+
 Write-Step "Checking optional logins"
 if (Get-Command gh -ErrorAction SilentlyContinue) {
     $ghGate = (Join-Path $PSScriptRoot 'ai-gh') -replace '\\', '/'

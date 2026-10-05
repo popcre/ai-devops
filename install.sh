@@ -311,11 +311,14 @@ restore_install_crontab() {
   local tmp
   strip_managed_cron() {
     awk -v bw="$REPO_ROOT/bin/ai-blocker-watch" \
-        -v reap="$REPO_ROOT/bin/ai-reap-shared-db-worktrees" '
+        -v reap="$REPO_ROOT/bin/ai-reap-shared-db-worktrees" \
+        -v lw="$REPO_ROOT/bin/ai-local-watch" '
       index($0,"# ai-devops blocker-watch (managed by ai-blocker-watch schedule") == 0 &&
       index($0,"# ai-devops worktree-reap (managed by ai-reap-shared-db-worktrees schedule") == 0 &&
+      index($0,"# ai-devops ai-local-watch (managed by ai-local-watch schedule") == 0 &&
       index($0,"\047" bw "\047 tick") == 0 &&
-      index($0,"\047" reap "\047 run") == 0 { print }
+      index($0,"\047" reap "\047 run") == 0 &&
+      index($0,"\047" lw "\047 tick-all") == 0 { print }
     '
   }
   if $SUDO test -f "$BACKUP_DIR/crontab"; then
@@ -333,7 +336,8 @@ restore_install_crontab() {
     # actor added during this attempt.
     [ -z "$(crontab -l 2>/dev/null | strip_managed_cron)" ] || return 1
     "$REPO_ROOT/bin/ai-blocker-watch" unschedule &&
-      "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" unschedule
+      "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" unschedule &&
+      "$REPO_ROOT/bin/ai-local-watch" unschedule
   else
     return 1
   fi
@@ -687,6 +691,12 @@ run_stage optional "Blocker watch scheduling" "$REPO_ROOT/bin/ai-blocker-watch" 
 # command per platform. Machines with no shared-db checkout schedule the sweep
 # anyway; the run itself exits 0 with "nothing to reap" until one appears.
 run_stage optional "Shared-db worktree reap scheduling" "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" schedule
+
+# Optional: watchdog duty pool — local timed CI alarms (queue-slow, runner-pool,
+# membership drift, merge-queue drift) with claim/lease failover across
+# watch_hosts (docs/watchdog-duty-pool.md). Only a pool member schedules;
+# others exit 0 with "not in watch_hosts". Free Actions stay backup only.
+run_stage optional "Watchdog duty pool (local-watch) scheduling" "$REPO_ROOT/bin/ai-local-watch" schedule
 
 publish_install_manifest() {
   local source_sha staged owner group

@@ -1,117 +1,34 @@
 name: windows-queue-watchdog
 
-# Albert cannot see the runner queues himself (#210). This workflow watches a
-# verify.yml run from the moment it starts: if the windows-offline-section
-# matrix (Blacksmith, owner 2026-10-02) has not picked up its jobs within a few
-# minutes, it leaves one comment on the pull request naming the delay. It
-# never dispatches or reroutes anything itself.
+# BACKUP ONLY. The primary queue-slow alarm is the local timed task
+# `ai-windows-queue-watch` on the watchdog duty pool (edge-dev / edge-dev3 /
+# hetz; docs/watchdog-duty-pool.md). This workflow stays as a rare free-runner
+# smoke and manual dispatch. It never uses a paid runner.
+#
+# What it does when dispatched: runs one `ai-windows-queue-watch scan` pass and
+# leaves a single marker comment on any pull request whose Windows sections
+# stayed queued past the threshold. Primary cadence is the 2-minute local tick.
 on:
-  workflow_run:
-    workflows: [verify]
-    types: [in_progress]
-
-# One watcher per pull-request branch. Every verify start fired a fresh
-# eight-minute watcher, so a busy branch stacked several of them in the queue
-# they were meant to watch. A newer verify run makes the older watcher
-# obsolete, so it is cancelled rather than left queued behind.
-concurrency:
-  group: windows-queue-watchdog-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
-  cancel-in-progress: true
+  workflow_dispatch:
+  schedule:
+    # Weekly smoke on a free runner (claim-stale backup is optional; weekly is
+    # the cheap heartbeat). Minute 41 stays off other crons.
+    - cron: '41 13 * * 1'
 
 permissions:
+  contents: read
   actions: read
   pull-requests: write
 
 jobs:
-  watch-section-pickup:
-    if: github.event.workflow_run.event == 'pull_request'
+  backup-scan:
     runs-on: ubuntu-24.04
-    # Bounded well under the 35-minute section ceiling: this only needs to
-    # catch a slow *start*, not watch the run to completion.
     timeout-minutes: 8
     steps:
-      - name: Watch section pickup and flag a slow start
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
-        with:
-          script: |
-            const run = context.payload.workflow_run;
-            const prs = run.pull_requests || [];
-            if (prs.length === 0) {
-              core.info('No same-repo pull request on this run; nothing to flag.');
-              return;
-            }
-            const prNumber = prs[0].number;
-
-            // Instant pickup is the norm (checkout overhead alone measured
-            // ~15s in the 2026-09-10 baseline evidence). Flag a start delay
-            // only once it clearly stopped looking like normal variance.
-            const flagAfterMs = 3 * 60 * 1000;
-            const deadlineMs = 7 * 60 * 1000;
-            const pollMs = 20 * 1000;
-            const start = Date.now();
-
-            let flagged = false;
-            while (Date.now() - start < deadlineMs) {
-              const { data } = await github.rest.actions.listJobsForWorkflowRun({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: run.id,
-                filter: 'latest',
-                per_page: 100,
-              });
-              const sections = data.jobs.filter(j => j.name.startsWith('windows-offline-section'));
-              if (sections.length === 0) {
-                // Sections job set hasn't appeared yet, or this run skipped
-                // Windows entirely (prose-only change). Either way, nothing
-                // to flag yet - keep polling until the deadline.
-              } else {
-                const stillQueued = sections.filter(j => j.status === 'queued');
-                const elapsed = Date.now() - start;
-                if (stillQueued.length === 0) {
-                  core.info(`All ${sections.length} Windows sections picked up after ${Math.round(elapsed / 1000)}s.`);
-                  return;
-                }
-                if (elapsed >= flagAfterMs && !flagged) {
-                  const minutes = Math.round(elapsed / 60000);
-                  const body = [
-                    `**Windows checks are running slow to start.**`,
-                    ``,
-                    `${stillQueued.length} of ${sections.length} Windows sections are still queued after ` +
-                      `about ${minutes} minute(s), which is unusual for this repo - they normally start ` +
-                      `almost instantly.`,
-                    ``,
-                    `Windows sections run on Blacksmith (owner 2026-10-02). Ask Claude to check the ` +
-                      `Blacksmith runner queue for this pull request.`,
-                  ].join('\n');
-                  const marker = '<!-- windows-queue-watchdog -->';
-                  const { data: comments } = await github.rest.issues.listComments({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: prNumber,
-                    per_page: 100,
-                  });
-                  const existing = comments.find(c => c.body && c.body.includes(marker));
-                  const commentBody = `${marker}\n${body}`;
-                  if (existing) {
-                    await github.rest.issues.updateComment({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      comment_id: existing.id,
-                      body: commentBody,
-                    });
-                  } else {
-                    await github.rest.issues.createComment({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      issue_number: prNumber,
-                      body: commentBody,
-                    });
-                  }
-                  flagged = true;
-                }
-              }
-              await new Promise(resolve => setTimeout(resolve, pollMs));
-            }
-            if (!flagged) {
-              core.info('Sections never appeared or resolved without crossing the flag threshold.');
-            }
+      - uses: actions/checkout@v4
+      - name: One backup scan (same tool as the local tick)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bin/ai-windows-queue-watch scan
