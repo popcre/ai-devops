@@ -266,12 +266,12 @@ run_opencode_turn(){
     [ -d "/c/Program Files/Git/usr/bin" ] || die 'Git for Windows is required (usr/bin)'
     # Closed gate PATH: GNU tools only from Git usr/bin + runner allowlist dir.
     # Do not put Git cmd (git/ssh) or System32 on the gate PATH.
-    gate_path="/c/Program Files/Git/usr/bin"
+    gate_path="/c/Program Files/Git/usr/bin:/c/Program Files/Git/mingw64/bin"
     timeout_win="/c/Program Files/Git/usr/bin/timeout"
     [ -x "$timeout_win" ] || timeout_win="$(command -v timeout || true)"
     ( for name in $(compgen -e); do
         case "$name" in
-          PATH|SYSTEMROOT|LANG|LC_ALL|TERM|SSL_CERT_FILE|SSL_CERT_DIR|PSModuleAnalysisCachePath|AI_STEPFUN_*) ;;
+          PATH|SYSTEMROOT|LANG|LC_ALL|TERM|SSL_CERT_FILE|SSL_CERT_DIR|PSModuleAnalysisCachePath|AI_STEPFUN_TIMEOUT|AI_STEPFUN_MODEL|AI_STEPFUN_BASE_URL|AI_STEPFUN_RUNNERS_JSON|AI_STEPFUN_REVIEW_DIR) ;;
           *) unset "$name" 2>/dev/null || true ;;
         esac
       done
@@ -447,9 +447,61 @@ credit_stop(){
   reviewer_credit_exit
 }
 
+# write_windows_runners: install-time-ish provisioning of the hashed runner
+# allowlist used by bin/ai-stepfun-windows-shell. Fail closed if a runner
+# cannot be located or hashed.
+write_windows_runners(){
+  local out="${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
+  [ ! -L "$out" ] || return 1
+  # Verify-only unless missing or --write-runners.
+  if [ "${1:-}" != --write-runners ] && [ -s "$out" ]; then
+    command -v jq >/dev/null 2>&1 || return 1
+    jq -e 'type=="object" and length>0' "$out" >/dev/null 2>&1 || return 1
+    local n p w g bad=0 tsv
+    tsv="$(jq -r 'to_entries[] | [.key, (.value.path // empty), (.value.sha256 // empty)] | @tsv' "$out" 2>/dev/null)" || return 1
+    [ -n "$tsv" ] || return 1
+    while IFS=$'\t' read -r n p w; do
+      [ -n "$n" ] && [ -n "$p" ] && [ -n "$w" ] || { bad=1; break; }
+      [ ! -L "$p" ] || { bad=1; break; }
+      g="$(sha256sum "$p" 2>/dev/null | awk '{print $1}')" || { bad=1; break; }
+      [ "$g" = "$w" ] || { bad=1; break; }
+    done <<<"$tsv"
+    [ "$bad" = 0 ] || return 1
+    return 0
+  fi
+  command -v jq >/dev/null 2>&1 || return 1
+  command -v sha256sum >/dev/null 2>&1 || return 1
+  local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Program Files/nodejs:/c/Program Files/Git/mingw64/bin:/c/Python313:/c/Python312:/c/Python311"
+  local json="{" first=1 name path hash
+  for name in ls cat head bash sh jq npm node pytest python python3 go cargo dotnet; do
+    path="$(PATH="$sanitized" command -v "$name" 2>/dev/null || true)"
+    [ -n "$path" ] && [ -x "$path" ] || continue
+    case "$path" in *WindowsApps*) continue ;; esac
+    hash="$(sha256sum "$path" | awk '{print $1}')"
+    [ "$first" = 1 ] || json+=","
+    first=0
+    json+="\"$name\":{\"path\":$(printf '%s' "$path" | jq -Rs .),\"sha256\":\"$hash\"}"
+  done
+  json+="}"
+  [ "$first" = 1 ] && return 1
+  printf '%s\n' "$json" | jq -e 'type=="object" and length>0' >/dev/null 2>&1 || return 1
+  mkdir -p "$(dirname "$out")"
+  local tmp="$out.tmp.$$"
+  printf '%s\n' "$json" > "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  [ ! -L "$out" ] || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$out"
+  [ -s "$out" ] && [ ! -L "$out" ]
+}
+
 cmd_doctor(){
-  local live=0
-  [ "${1:-}" != --live ] || live=1
+  local live=0 write_runners=""
+  for a in "$@"; do
+    case "$a" in
+      --live) live=1 ;;
+      --write-runners) write_runners=--write-runners ;;
+    esac
+  done
   require_engine
   printf 'PASS  engine: %s\n' "$ENGINE"
   case "$ENGINE" in
@@ -474,6 +526,13 @@ cmd_doctor(){
         # Linux OpenCode turns only run under bubblewrap (#1086).
         bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed on Linux (sudo apt-get install bubblewrap)\n'; exit 1; }
         printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
+      else
+        if [ -n "${AI_STEPFUN_PLATFORM:-}" ] && [ "$(uname -s 2>/dev/null | cut -c1-5)" != MINGW ] && [ "$(uname -s 2>/dev/null | cut -c1-4)" != MSYS ]; then
+          : # forced platform on non-Windows host (CI stub): skip provisioning
+        else
+          write_windows_runners "$write_runners" || { printf 'FAIL Windows runner allowlist missing or hash-mismatched (repair: ai-stepfun doctor --write-runners)\n'; exit 1; }
+        fi
+        printf 'PASS  Windows runner allowlist (hashed): %s\n' "${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
       fi
       ;;
   esac
@@ -654,8 +713,7 @@ ai-stepfun review [--repo DIR] [--base REF] [--assert-head SHA] --prompt TEXT|--
 ai-stepfun ask [--repo DIR] PROMPT                              second opinion (disposable writable copy)
 ai-stepfun implement [--repo DIR] [--ref REF] --prompt TEXT|--prompt-file FILE
                                                                  write and run code in a new remote-less clone (never commits)
-ai-stepfun doctor [--live]                                       install, engine, key store (and one live call)
-ai-stepfun store-key [--if-missing]                              refresh the protected key store from 1Password
+ai-stepfun doctor [--live] [--write-runners]                      health check; Windows may re-pin runner allowlist
 Engine: StepCode on Linux (bubblewrap) or OpenCode on Windows (folder + test shell).
 EOF
 }
