@@ -401,10 +401,10 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
 check "the newer quarantine still stands after qualification" \
   "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.failure_class==\"out-of-credit\"'"
 
-# A NEWER pin-mismatch (same class, possibly the same second) written during
-# the live check must also survive: identity is the COMPLETE record, not class
-# + second-resolution time. Use a different duration so the record differs
-# even when the clock does not advance.
+# A NEWER pin-mismatch (same class, same second, same duration) written during
+# the live check must also survive: identity is the record_id, not the field
+# values an ABA replacement can copy. Use the SAME duration so only record_id
+# distinguishes the records.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 jq '.providers.grok.supported_version = "1.0.15"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
 FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok >/dev/null 2>&1 || true
@@ -412,8 +412,9 @@ jq '.providers.grok.supported_version = "1.0.5"' "$PB_POLICY" > "$PB_POLICY.new"
 cat > "$TMP/bin/pb-doctor-newpinq" <<FEOF
 #!/usr/bin/env bash
 if [ "\${1:-}" = doctor ] && [ "\${2:-}" = --live ]; then
-  # Replace the stale pin-mismatch with a NEW one (different expiry) mid-live.
-  python "\$ROOT/tools/reviewer_admission.py" quarantine grok --reason pin-mismatch --seconds 99 --directory "\$AI_REVIEW_QUARANTINE_DIR" >/dev/null 2>&1 || true
+  # Replace the stale pin-mismatch with a NEW one (same class, same second,
+  # same duration) mid-live: only record_id differs.
+  python "\$ROOT/tools/reviewer_admission.py" quarantine grok --reason pin-mismatch --seconds 1800 --directory "\$AI_REVIEW_QUARANTINE_DIR" >/dev/null 2>&1 || true
   echo live smoke ok; exit 0
 fi
 if [ "\${1:-}" = doctor ]; then echo health ok; exit 0; fi
@@ -429,10 +430,21 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     FAKE_GROK_VERSION=1.0.5 \
     "$SCRIPT" pin-bump-qualify grok 2>&1)"; PB_RC=$?
 [ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'left grok quarantine in place' \
-  && ok "a newer pin-mismatch record is not cleared (full-record compare)" \
-  || { bad "a newer pin-mismatch record is not cleared (full-record compare)"; printf '%s\n' "$PB_OUT"; }
-check "the newer pin-mismatch still stands after qualification" \
+  && ok "an identical same-second pin-mismatch replacement is not cleared (record_id identity)" \
+  || { bad "an identical same-second pin-mismatch replacement is not cleared (record_id identity)"; printf '%s\n' "$PB_OUT"; }
+check "the replacement pin-mismatch still stands after qualification" \
   "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.failure_class==\"pin-mismatch\"'"
+# record_id is what makes the identity check ABA-safe: two records written in
+# the same second with the same fields still differ.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+run_pb quarantine grok pin-mismatch --seconds 60 >/dev/null 2>&1
+rec1="$(run_pb status grok | jq -r '.record_id // ""')"
+run_pb clear grok >/dev/null 2>&1 || true
+run_pb quarantine grok pin-mismatch --seconds 60 >/dev/null 2>&1
+rec2="$(run_pb status grok | jq -r '.record_id // ""')"
+[ -n "$rec1" ] && [ -n "$rec2" ] && [ "$rec1" != "$rec2" ] \
+  && ok "every quarantine record carries a unique record_id" \
+  || { bad "every quarantine record carries a unique record_id"; echo "rec1=$rec1 rec2=$rec2"; }
 
 # The clear must also preserve scoped usage-limit backoffs.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"

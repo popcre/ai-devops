@@ -166,7 +166,8 @@ def credit(directory, provider, paths, record, seconds):
                 data = load(directory, provider)
                 now = int(time.time())
                 data['global'] = {'version': 1, 'provider': provider, 'failure_class': 'out-of-credit',
-                                  'created_epoch': now, 'expires_epoch': now + seconds}
+                                  'created_epoch': now, 'expires_epoch': now + seconds,
+                                  'record_id': new_record_id()}
                 publish(directory, provider, data)
         except (OSError, ValueError, TypeError) as error:
             print('reviewer admission: out-of-credit quarantine not recorded: ' + str(error), file=sys.stderr)
@@ -197,6 +198,12 @@ def valid_global(record, provider):
             and type(record.get('expires_epoch')) is int
             and type(record.get('created_epoch')) is int
             and isinstance(record.get('failure_class'), str))
+
+
+def new_record_id():
+    # Unique per quarantine record so a same-second replacement can never be
+    # confused with the record it replaced (ABA race on clear).
+    return hashlib.sha256(os.urandom(32)).hexdigest()
 
 
 @contextlib.contextmanager
@@ -415,7 +422,8 @@ def main():
                 if args.seconds <= 0:
                     raise ValueError('quarantine seconds must be positive')
                 data['global'] = {'version': 1, 'provider': args.provider, 'failure_class': args.reason,
-                                  'created_epoch': now, 'expires_epoch': now + args.seconds}
+                                  'created_epoch': now, 'expires_epoch': now + args.seconds,
+                                  'record_id': new_record_id()}
                 publish(args.directory, args.provider, data); result = data['global']
             else:
                 result = data.get('global')
