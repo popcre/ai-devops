@@ -45,5 +45,5 @@ check() {
   local status=$?
   ai_test_counted || return 0
   # Restored inside the if-condition, where set -e cannot abort the suite.
-  if eval "ai_test_status $status; $2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi
+  if eval "ai_test_status $status; $2"; then ok "$1"; else bad "$1"; fi
 }

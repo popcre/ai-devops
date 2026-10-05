@@ -1431,7 +1431,15 @@ cmd_authorize_install(){
   [[ "$start_head" =~ ^[0-9a-f]{40}$ ]] || blocked 'ai-task-gates: STOP. Installation task lacks recorded pre-update HEAD.'
   [[ "$target_head" =~ ^[0-9a-f]{40}$ ]] && [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse HEAD)" ] || blocked 'ai-task-gates: STOP. Candidate HEAD differs from requested target.'
   [ -n "$reviewer_approval" ] && [ -n "$review_report" ] && [ -n "$installed_checkout" ] && [ -n "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Install authority needs an assigned AI reviewer APPROVE, exact review, checkout, and launcher.'
-  approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target_head" "$TOPLEVEL")" || blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
+  if ! approval_summary="$(reviewer_approval_summary "$reviewer_approval" deploy "$target_head" "$TOPLEVEL")"; then
+    printf 'DEBUG reviewer_approval_summary FAILED\n' >&2
+    printf 'DEBUG reviewer_approval=%s\n' "$reviewer_approval" >&2
+    printf 'DEBUG target_head=%s\n' "$target_head" >&2
+    printf 'DEBUG TOPLEVEL=%s\n' "$TOPLEVEL" >&2
+    printf 'DEBUG approval file:\n' >&2
+    cat "$reviewer_approval" >&2 2>/dev/null
+    blocked 'ai-task-gates: STOP. The reviewer approval does not bind an assigned, independent APPROVE to deploying this exact target.'
+  fi
   [ $((legacy_migration + first_install + recover_launchers + stale_manifest_recovery)) -le 1 ] || blocked 'ai-task-gates: STOP. Choose one installation migration mode.'
   if [ "$start_head" = "$target_head" ] && [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then
     blocked 'ai-task-gates: STOP. Empty release needs an installed receipt or explicit reviewed legacy migration.'
@@ -1520,7 +1528,20 @@ cmd_authorize_install(){
     fi
   else
     [ -f "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Installed launcher missing.'
-    windows_launcher_route "$expected_source" "$installed_launcher" || blocked 'ai-task-gates: STOP. Installed Windows launcher routing differs.'
+    if ! windows_launcher_route "$expected_source" "$installed_launcher"; then
+      printf 'DEBUG windows_launcher_route FAILED\n' >&2
+      printf 'DEBUG expected_source=%s\n' "$expected_source" >&2
+      printf 'DEBUG installed_launcher=%s\n' "$installed_launcher" >&2
+      printf 'DEBUG USERPROFILE=%s\n' "${USERPROFILE:-unset}" >&2
+      printf 'DEBUG PROGRAMFILES=%s\n' "${PROGRAMFILES:-unset}" >&2
+      printf 'DEBUG LOCALAPPDATA=%s\n' "${LOCALAPPDATA:-unset}" >&2
+      printf 'DEBUG bash launcher:\n' >&2
+      tr -d '\r' < "$installed_launcher" | cat -n >&2
+      printf 'DEBUG cmd launcher:\n' >&2
+      tr -d '\r' < "$installed_launcher.cmd" | cat -n >&2
+      printf 'DEBUG expected_source cygpath -wa: %s\n' "$(cygpath -wa "$expected_source" 2>/dev/null | tr '[:upper:]' '[:lower:]')" >&2
+      blocked 'ai-task-gates: STOP. Installed Windows launcher routing differs.'
+    fi
     if [ "$legacy_migration" -eq 1 ]; then
       [ -z "$WINDOWS_RECEIPT_SHA" ] || blocked 'ai-task-gates: STOP. Same-commit migration requires a legacy launcher without a receipt.'
     fi
@@ -1592,7 +1613,21 @@ cmd_authorize_install(){
       '.status=="completed" and .verdict=="APPROVE" and .stale==false and .head==$head and .source_digest==$source and .report_path==$report and .report_sha256==$hash' \
       "$lifecycle_state" >/dev/null 2>&1; then lifecycle_ok=1; break; fi
   done
-  [ "$lifecycle_ok" -eq 1 ] || blocked 'ai-task-gates: STOP. Review report has no completed, matching lifecycle record.'
+  if [ "$lifecycle_ok" -ne 1 ]; then
+    printf 'DEBUG lifecycle check FAILED\n' >&2
+    printf 'DEBUG report_real=%s\n' "$report_real" >&2
+    printf 'DEBUG report_hash=%s\n' "$report_hash" >&2
+    printf 'DEBUG target_head=%s\n' "$target_head" >&2
+    printf 'DEBUG reviewed_digest=%s\n' "$reviewed_digest" >&2
+    printf 'DEBUG lifecycle_root=%s\n' "$lifecycle_root" >&2
+    printf 'DEBUG repo_key=%s\n' "$repo_key" >&2
+    for lifecycle_state in "$lifecycle_root/runs/$repo_key/"*/*/*.json; do
+      [ -f "$lifecycle_state" ] || continue
+      printf 'DEBUG lifecycle_state=%s\n' "$lifecycle_state" >&2
+      cat "$lifecycle_state" >&2
+    done
+    blocked 'ai-task-gates: STOP. Review report has no completed, matching lifecycle record.'
+  fi
   local receipt_checkout="$installed_root" receipt_launcher="$installed_launcher" receipt_report="$report_real"
   local launcher_hash="" cmd_hash="" source_hash="" manifest_hash="" linux_link_target=""
   local inventory_json='[]'

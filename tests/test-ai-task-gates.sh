@@ -79,6 +79,9 @@ make_approved_report(){
   # Resolve with pwd -P (not realpath) so the stored path matches what
   # reviewer_approval_summary computes via cd+pwd -P on Windows CI runners.
   report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")"
+  printf 'DEBUG make_approved_report: report=%s\n' "$report" >&2
+  printf 'DEBUG make_approved_report: pwd -P of dirname=%s\n' "$(cd "$(dirname "$report")" && pwd -P)" >&2
+  printf 'DEBUG make_approved_report: cygpath -wa of report=%s\n' "$(cygpath -wa "$report" 2>/dev/null || echo none)" >&2
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
   key="$("$ROOT/bin/ai-review-lifecycle" identity "$dir" | jq -r .repository_key)" || return 1
   state_dir="$AI_REVIEW_LIFECYCLE_DIR/runs/$key/codex/codex"
