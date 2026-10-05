@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# ai-runner-pool-watch — alarm when the qualified Windows runner pool is empty.
+#
+# WHY THIS EXISTS. `linux-offline` is the only required check on main, and both
+# Windows jobs are skipped on merge_group. A completely dead Windows pool does
+# not block merging and produces no red signal anywhere — Windows coverage just
+# silently disappears. This watch lists the runner roster (Administration:
+# Read-only token) and alarms when zero online hosts carry
+# `ai-devops-windows-qualified`. Primary is a local timed task on the watchdog
+# duty pool; free GitHub Actions are backup only. Never Blacksmith.
+#
+# Usage:
+#   ai-runner-pool-watch tick      one duty tick (claim, then check)
+#   ai-runner-pool-watch check     check without claiming (log only)
+#   ai-runner-pool-watch schedule|unschedule
+#
+# Exit codes: 0 ok/warning; 1 alarm (0 online) or tool failure; 3 not leader.
+#
+# Environment:
+#   AI_RUNNER_POOL_WATCH_HOME     state (default ~/.ai-devops/runner-pool-watch)
+#   AI_RUNNER_POOL_WATCH_CONFIG   settings (default <repo>/config/local-watch.json)
+#   AI_RUNNER_POOL_WATCH_HOST     hostname override (tests)
+#   AI_RUNNER_POOL_WATCH_GH       gh/ai-gh override (tests)
+#   RUNNER_POOL_READ_TOKEN        Administration: Read-only (never logged)
+set -euo pipefail
+
+_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
+# shellcheck source=tools/lib/local-watch.sh
+. "$TOOL_ROOT/tools/lib/local-watch.sh"
+
+TOOL_NAME='ai-runner-pool-watch'
+HOME_DIR="${AI_RUNNER_POOL_WATCH_HOME:-$HOME/.ai-devops/runner-pool-watch}"
+CONFIG="${AI_RUNNER_POOL_WATCH_CONFIG:-$TOOL_ROOT/config/local-watch.json}"
+LOG="$HOME_DIR/tick.log"
+GH="${AI_RUNNER_POOL_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
+CLAIM="${AI_LOCAL_WATCH_BIN:-$TOOL_ROOT/bin/ai-local-watch}"
+LABEL='ai-devops-windows-qualified'
+REPO="${AI_RUNNER_POOL_WATCH_REPO:-popcre/ai-devops}"
+
+cfg(){ jq -er "$1" "$CONFIG" || die "config $CONFIG has no $1"; }
+
+cmd_check(){
+  mkdir -p "$HOME_DIR"
+  rotate_log "$LOG" "$(cfg .log_max_bytes 2>/dev/null || echo 5000000)"
+  local roster online
+  if [ -z "${RUNNER_POOL_READ_TOKEN:-}" ]; then
+    printf '%s ALARM: RUNNER_POOL_READ_TOKEN is not set; cannot see the runner pool\n' "$(stamp)" >> "$LOG"
+    note "RUNNER_POOL_READ_TOKEN is not set"
+    return 1
+  fi
+  if ! roster="$(GH_TOKEN="$RUNNER_POOL_READ_TOKEN" "$GH" api "repos/$REPO/actions/runners" --paginate 2>"$HOME_DIR/roster.err")"; then
+    printf '%s ALARM: could not read the runner API\n' "$(stamp)" >> "$LOG"
+    sed -n '1,4p' "$HOME_DIR/roster.err" >&2 || true
+    return 1
+  fi
+  online="$(printf '%s' "$roster" | jq --arg l "$LABEL" '[.runners[]
+    | select(.status == "online")
+    | select(.labels | map(.name) | index($l))]
+    | length')"
+  printf '%s pool: online=%s label=%s\n' "$(stamp)" "$online" "$LABEL" >> "$LOG"
+  if [ "$online" -eq 0 ]; then
+    printf '%s ALARM: qualified Windows pool fully offline\n' "$(stamp)" >> "$LOG"
+    note "the qualified Windows pool is fully offline"
+    return 1
+  fi
+  if [ "$online" -eq 1 ]; then
+    printf '%s WARN: only one qualified Windows host online\n' "$(stamp)" >> "$LOG"
+    note "only one qualified Windows host online"
+    return 0
+  fi
+  note "online hosts carrying $LABEL: $online"
+  return 0
+}
+
+cmd_tick(){
+  local claim_rc=0
+  "$CLAIM" claim || claim_rc=$?
+  if [ "$claim_rc" -eq 3 ]; then
+    note "skip: another host holds the claim"
+    return 3
+  fi
+  if [ "$claim_rc" -ne 0 ]; then
+    note "claim failed; not posting an alarm from a host that cannot hold the lease"
+    return 1
+  fi
+  cmd_check
+}
+
+cmd_schedule(){
+  register_timer 60 "$TOOL_ROOT/bin/ai-runner-pool-watch" tick
+}
+cmd_unschedule(){ unregister_timer; }
+
+case "${1:-}" in
+  tick) cmd_tick ;;
+  check) cmd_check ;;
+  schedule) cmd_schedule ;;
+  unschedule) cmd_unschedule ;;
+  -h|--help|help) sed -n '2,28p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command; see ai-runner-pool-watch --help" ;;
+esac

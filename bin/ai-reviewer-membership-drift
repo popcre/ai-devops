@@ -1,37 +1,65 @@
-#!/usr/bin/env node
-// Fail when ai-devops config/reviewer-registry.json and the shared-db reviewer
-// allocator (scripts/manage-migration-author-lanes.mjs on main) disagree about
-// which providers are in the review rotation. The allocator is the source of
-// truth; the registry must mirror it. Providers that review outside the
-// allocator are listed in config/reviewer-membership-scope.json.
-// Usage: ai-reviewer-membership-drift [--lanes-file PATH] [--registry PATH] [--scope PATH]
-'use strict'
-const fs = require('fs'); const path = require('path'); const { execFileSync } = require('child_process')
-const root = path.resolve(__dirname, '..')
-const args = process.argv.slice(2); const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d }
-const registryPath = opt('--registry', path.join(root, 'config/reviewer-registry.json'))
-const scopePath = opt('--scope', path.join(root, 'config/reviewer-membership-scope.json'))
-const lanesFile = opt('--lanes-file', null)
-let src
-try {
-  src = lanesFile ? fs.readFileSync(lanesFile, 'utf8')
-    : execFileSync('bash', [path.join(root, 'bin/ai-gh'), 'api', 'repos/popcre/shared-db/contents/scripts/manage-migration-author-lanes.mjs?ref=main', '-H', 'Accept: application/vnd.github.raw'], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, AI_GH_CALLER: 'ai-reviewer-membership-drift' } })
-} catch (e) { console.error('ERROR could not read the shared-db allocator: ' + e.message.split('\n')[0]); process.exit(2) }
-const block = (name, open, close) => { const i = src.indexOf(`export const ${name} = Object.freeze(${open}`); if (i < 0) { console.error(`ERROR allocator has no ${name}`); process.exit(2) } return src.slice(i, src.indexOf(close, i)) }
-const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1])
-const rows = [...block('REVIEWERS', '[', '\n])').matchAll(/name:'([^']+)',\s*provider:'([^']+)'/g)].map((m) => ({ name: m[1], provider: m[2] }))
-const off = new Set([...quoted(block('RETIRED_REVIEWERS', '[', '])')), ...quoted(block('QUARANTINED_REVIEWERS', '[', '])'))])
-if (!rows.length) { console.error('ERROR allocator REVIEWERS parsed empty'); process.exit(2) }
-const allocator = new Set(rows.filter((r) => !off.has(r.name)).map((r) => r.provider))
-const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8')).providers
-const outside = new Set(Object.keys(JSON.parse(fs.readFileSync(scopePath, 'utf8')).outside_allocator || {}))
-const problems = []
-for (const [p, v] of Object.entries(registry)) {
-  if (outside.has(p)) continue
-  const reg = v.registry_state === 'registered'
-  if (reg && !allocator.has(p)) problems.push(`${p}: registered in ai-devops but retired, quarantined, or missing in the shared-db allocator`)
-  if (!reg && allocator.has(p)) problems.push(`${p}: ${v.registry_state} in ai-devops but active in the shared-db allocator`)
+#!/usr/bin/env bash
+# ai-reviewer-membership-drift — wrapper: duty-pool tick/schedule plus the
+# existing Node compare (now ai-reviewer-membership-drift.cjs).
+#
+# Usage:
+#   ai-reviewer-membership-drift tick      duty tick (claim, offline suite, compare)
+#   ai-reviewer-membership-drift schedule|unschedule
+#   ai-reviewer-membership-drift [args]    pass-through to the Node compare
+#
+# Exit: 0 ok; 1 drift/alarm; 2 usage; 3 not leader (tick only).
+set -euo pipefail
+
+_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
+# shellcheck source=tools/lib/local-watch.sh
+. "$TOOL_ROOT/tools/lib/local-watch.sh"
+
+TOOL_NAME='ai-reviewer-membership-drift'
+HOME_DIR="${AI_MEMBERSHIP_DRIFT_HOME:-$HOME/.ai-devops/reviewer-membership-drift}"
+CONFIG="${AI_LOCAL_WATCH_CONFIG:-$TOOL_ROOT/config/local-watch.json}"
+LOG="$HOME_DIR/tick.log"
+NODE_TOOL="$TOOL_ROOT/bin/ai-reviewer-membership-drift.cjs"
+CLAIM="${AI_LOCAL_WATCH_BIN:-$TOOL_ROOT/bin/ai-local-watch}"
+
+cfg(){ jq -er "$1" "$CONFIG" 2>/dev/null || echo 5000000; }
+
+cmd_tick(){
+  mkdir -p "$HOME_DIR"
+  rotate_log "$LOG" "$(cfg .log_max_bytes)"
+  local claim_rc=0
+  "$CLAIM" claim || claim_rc=$?
+  if [ "$claim_rc" -eq 3 ]; then
+    note "skip: another host holds the claim"
+    return 3
+  fi
+  if [ "$claim_rc" -ne 0 ]; then
+    note "claim failed; not alarming without leadership"
+    return 1
+  fi
+  local rc=0
+  printf '%s membership-drift tick\n' "$(stamp)" >> "$LOG"
+  bash "$TOOL_ROOT/tests/test-ai-reviewer-membership-drift.sh" >> "$LOG" 2>&1 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    node "$NODE_TOOL" >> "$LOG" 2>&1 || rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    printf '%s ALARM: membership drift (exit %s)\n' "$(stamp)" "$rc" >> "$LOG"
+  else
+    printf '%s OK membership matches\n' "$(stamp)" >> "$LOG"
+  fi
+  return "$rc"
 }
-for (const p of allocator) if (!registry[p]) problems.push(`${p}: active in the shared-db allocator but missing from ai-devops registry`)
-if (problems.length) { console.log('DRIFT reviewer membership differs (fix both in one change; see docs/reviewer-rotation-rules.md):'); problems.forEach((l) => console.log('  ' + l)); process.exit(1) }
-console.log('OK reviewer membership matches the shared-db allocator: ' + [...allocator].sort().join(', '))
+
+cmd_schedule(){ register_timer 360 "$TOOL_ROOT/bin/ai-reviewer-membership-drift" tick; }
+cmd_unschedule(){ unregister_timer; }
+
+case "${1:-}" in
+  tick) cmd_tick ;;
+  schedule) cmd_schedule ;;
+  unschedule) cmd_unschedule ;;
+  -h|--help|help)
+    sed -n '2,16p' "$_self" | sed 's/^# \{0,1\}//'
+    ;;
+  *) exec node "$NODE_TOOL" "$@" ;;
+esac

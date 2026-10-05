@@ -1,18 +1,24 @@
 name: Reviewer membership drift
 
+# BACKUP ONLY. The primary membership-drift alarm is the local timed task
+# `ai-reviewer-membership-drift tick` on the watchdog duty pool
+# (docs/watchdog-duty-pool.md). This workflow stays for PR path checks and a
+# weekly free-runner smoke. It never uses a paid runner.
+#
 # Fails when config/reviewer-registry.json and the shared-db allocator
-# (u2giants/shared-db scripts/manage-migration-author-lanes.mjs on main)
 # disagree about rotation membership. Not a required check: a red run is an
-# alarm to fix both sides in one change, not a merge blocker for unrelated work.
+# alarm to fix both sides in one change, not a merge blocker.
 on:
-  schedule:
-    - cron: '17 */6 * * *'
   workflow_dispatch:
+  schedule:
+    # Weekly smoke (primary is every 6h local at minute 17).
+    - cron: '17 15 * * 1'
   pull_request:
     paths:
       - config/reviewer-registry.json
       - config/reviewer-membership-scope.json
       - bin/ai-reviewer-membership-drift
+      - bin/ai-reviewer-membership-drift.cjs
       - tests/test-ai-reviewer-membership-drift.sh
 
 jobs:
@@ -29,4 +35,4 @@ jobs:
       - name: Compare with shared-db main
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node bin/ai-reviewer-membership-drift
+        run: node bin/ai-reviewer-membership-drift.cjs

@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# ai-windows-queue-watch — flag Windows sections that stay queued on a PR verify.
+#
+# WHY THIS EXISTS. Albert cannot see the GitHub or self-hosted runner queues
+# himself. When a free windows-offline-section matrix has not picked up within
+# a few minutes (unusual on this public repo), leave ONE comment on the pull
+# request. Primary is a 2-minute local timed task on the watchdog duty pool
+# (replaces the Action that fired on every verify). Free Actions backup only.
+# Never recommend Blacksmith.
+#
+# Usage:
+#   ai-windows-queue-watch tick     one duty tick (claim, then scan)
+#   ai-windows-queue-watch scan     scan without claiming (log only)
+#   ai-windows-queue-watch schedule|unschedule
+#
+# Exit codes: 0 ok; 1 alarm/tool failure; 3 not leader.
+#
+# Environment:
+#   AI_WINDOWS_QUEUE_WATCH_HOME    state (default ~/.ai-devops/windows-queue-watch)
+#   AI_WINDOWS_QUEUE_WATCH_CONFIG  settings (default <repo>/config/local-watch.json)
+#   AI_WINDOWS_QUEUE_WATCH_HOST    hostname override (tests)
+#   AI_WINDOWS_QUEUE_WATCH_GH      gh/ai-gh override (tests)
+#   AI_WINDOWS_QUEUE_WATCH_NOW     freeze now (tests)
+set -euo pipefail
+
+_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
+# shellcheck source=tools/lib/local-watch.sh
+. "$TOOL_ROOT/tools/lib/local-watch.sh"
+
+TOOL_NAME='ai-windows-queue-watch'
+HOME_DIR="${AI_WINDOWS_QUEUE_WATCH_HOME:-$HOME/.ai-devops/windows-queue-watch}"
+CONFIG="${AI_WINDOWS_QUEUE_WATCH_CONFIG:-$TOOL_ROOT/config/local-watch.json}"
+LOG="$HOME_DIR/tick.log"
+GH="${AI_WINDOWS_QUEUE_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
+CLAIM="${AI_LOCAL_WATCH_BIN:-$TOOL_ROOT/bin/ai-local-watch}"
+MARKER='<!-- windows-queue-watchdog -->'
+REPO="${AI_WINDOWS_QUEUE_WATCH_REPO:-popcre/ai-devops}"
+FLAG_AFTER_SEC=180
+MAX_PRS=5
+
+cfg(){ jq -er "$1" "$CONFIG" || die "config $CONFIG has no $1"; }
+now_epoch(){ date -u +%s; }
+
+# Create or update the single marker comment on a PR. Never duplicates.
+post_or_update_comment(){
+  local pr="$1" body="$2" existing
+  existing="$("$GH" issue view "$pr" --repo "$REPO" --json comments \
+    --jq ".comments[] | select(.body | contains(\"$MARKER\")) | .id" 2>/dev/null | head -1 || true)"
+  if [ -n "$existing" ]; then
+    "$GH" api "repos/$REPO/issues/comments/$existing" -X PATCH \
+      -f body="$MARKER
+$body" >/dev/null
+  else
+    "$GH" pr comment "$pr" --repo "$REPO" --body "$MARKER
+$body" >/dev/null
+  fi
+}
+
+cmd_scan(){
+  mkdir -p "$HOME_DIR"
+  rotate_log "$LOG" "$(cfg .log_max_bytes 2>/dev/null || echo 5000000)"
+  local runs_json prs
+  runs_json="$("$GH" api "repos/$REPO/actions/workflows/verify.yml/runs?status=in_progress&per_page=20" 2>/dev/null)" \
+    || { printf '%s ALARM: cannot list verify runs\n' "$(stamp)" >> "$LOG"; return 1; }
+  prs="$(printf '%s' "$runs_json" | jq -r --argjson max "$MAX_PRS" '
+    [.workflow_runs[] | select(.event == "pull_request") | .pull_requests[0].number // empty]
+    | unique | .[:$max] | .[]')"
+  if [ -z "$prs" ]; then
+    printf '%s scan: no in-progress PR verify runs\n' "$(stamp)" >> "$LOG"
+    return 0
+  fi
+  local pr run_id jobs_json sections total queued elapsed body
+  for pr in $prs; do
+    run_id="$(printf '%s' "$runs_json" | jq -r --argjson pr "$pr" '
+      [.workflow_runs[] | select(.event == "pull_request")
+       | select((.pull_requests[0].number // 0) == $pr)]
+      | sort_by(.run_started_at) | last | .id')"
+    [ -n "$run_id" ] && [ "$run_id" != "null" ] || continue
+    jobs_json="$("$GH" api "repos/$REPO/actions/runs/$run_id/jobs?filter=latest&per_page=100" 2>/dev/null)" || continue
+    sections="$(printf '%s' "$jobs_json" | jq '[.jobs[] | select(.name | startswith("windows-offline-section"))]')"
+    total="$(printf '%s' "$sections" | jq 'length')"
+    [ "$total" -gt 0 ] || continue
+    queued="$(printf '%s' "$sections" | jq '[.[] | select(.status == "queued")] | length')"
+    [ "$queued" -gt 0 ] || continue
+    # Age since the run started; flag only past the threshold.
+    local started now
+    started="$(printf '%s' "$runs_json" | jq -r --argjson id "$run_id" '.workflow_runs[] | select(.id == $id) | .run_started_at')"
+    now="$(date -u +%s)"
+    local started_epoch
+    started_epoch="$(date -u -d "$started" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$started" +%s 2>/dev/null || echo "$now")"
+    elapsed=$((now - started_epoch))
+    [ "$elapsed" -ge "$FLAG_AFTER_SEC" ] || continue
+    body="$(printf '**Windows checks are running slow to start.**\n\n%s of %s Windows sections are still queued after about %s minute(s). Free hosted runners normally start almost instantly on this public repo.\n\nWait on the free lane, or tell an agent to investigate the pool. Do not switch this pull request to a paid runner.\n' \
+      "$queued" "$total" "$((elapsed / 60))")"
+    post_or_update_comment "$pr" "$body"
+    printf '%s flagged pr=%s queued=%s/%s elapsed=%ss\n' "$(stamp)" "$pr" "$queued" "$total" "$elapsed" >> "$LOG"
+  done
+  return 0
+}
+
+cmd_tick(){
+  local claim_rc=0
+  "$CLAIM" claim || claim_rc=$?
+  if [ "$claim_rc" -eq 3 ]; then
+    note "skip: another host holds the claim"
+    return 3
+  fi
+  if [ "$claim_rc" -ne 0 ]; then
+    note "claim failed; not scanning without leadership"
+    return 1
+  fi
+  cmd_scan
+}
+
+cmd_schedule(){
+  register_timer 2 "$TOOL_ROOT/bin/ai-windows-queue-watch" tick
+}
+cmd_unschedule(){ unregister_timer; }
+
+case "${1:-}" in
+  tick) cmd_tick ;;
+  scan) cmd_scan ;;
+  schedule) cmd_schedule ;;
+  unschedule) cmd_unschedule ;;
+  -h|--help|help) sed -n '2,26p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command; see ai-windows-queue-watch --help" ;;
+esac

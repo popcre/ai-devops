@@ -8,6 +8,8 @@
 #   ai-merge-queue-drift --ruleset FILE      use a fixture ruleset JSON (offline)
 #   ai-merge-queue-drift --offline           ruleset comparison skipped
 #   ai-merge-queue-drift --root DIR          check another checkout/fixture tree
+#   ai-merge-queue-drift tick                duty-pool tick (claim, suite + offline)
+#   ai-merge-queue-drift schedule|unschedule register the daily local timer
 #
 # Three checks:
 #   (a) the live ruleset (default: repos/<repo>/rulesets/<id> via bin/ai-gh)
@@ -30,6 +32,48 @@ DEFAULT_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
 ROOT="$DEFAULT_ROOT"
 ruleset_arg=''
 offline=false
+
+# Duty-pool commands (plan P3). Shared harness lives in tools/lib/local-watch.sh.
+case "${1:-}" in
+  tick|schedule|unschedule)
+    # shellcheck source=tools/lib/local-watch.sh
+    . "$DEFAULT_ROOT/tools/lib/local-watch.sh"
+    TOOL_NAME='ai-merge-queue-drift'
+    HOME_DIR="${AI_MERGE_QUEUE_DRIFT_HOME:-$HOME/.ai-devops/merge-queue-drift}"
+    LOG="$HOME_DIR/tick.log"
+    LW_CONFIG="${AI_LOCAL_WATCH_CONFIG:-$DEFAULT_ROOT/config/local-watch.json}"
+    case "$1" in
+      tick)
+        mkdir -p "$HOME_DIR"
+        rotate_log "$LOG" "$(jq -er '.log_max_bytes // 5000000' "$LW_CONFIG" 2>/dev/null || echo 5000000)"
+        claim_rc=0
+        "${AI_LOCAL_WATCH_BIN:-$DEFAULT_ROOT/bin/ai-local-watch}" claim || claim_rc=$?
+        if [ "$claim_rc" -eq 3 ]; then
+          note "skip: another host holds the claim"
+          exit 3
+        fi
+        if [ "$claim_rc" -ne 0 ]; then
+          note "claim failed; not alarming without leadership"
+          exit 1
+        fi
+        rc=0
+        printf '%s merge-queue-drift tick\n' "$(stamp)" >> "$LOG"
+        bash "$DEFAULT_ROOT/tests/test-ai-merge-queue-drift.sh" >> "$LOG" 2>&1 || rc=$?
+        if [ "$rc" -eq 0 ]; then
+          "$SELF_PATH" --offline >> "$LOG" 2>&1 || rc=$?
+        fi
+        if [ "$rc" -ne 0 ]; then
+          printf '%s ALARM: merge-queue drift (exit %s)\n' "$(stamp)" "$rc" >> "$LOG"
+        else
+          printf '%s OK no drift\n' "$(stamp)" >> "$LOG"
+        fi
+        exit "$rc"
+        ;;
+      schedule) register_timer 1440 "$SELF_PATH" tick; exit 0 ;;
+      unschedule) unregister_timer; exit 0 ;;
+    esac
+    ;;
+esac
 
 while [ "$#" -gt 0 ]; do
   case "$1" in

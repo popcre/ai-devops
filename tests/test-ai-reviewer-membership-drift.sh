@@ -2,7 +2,7 @@
 # Offline test for bin/ai-reviewer-membership-drift using fixture allocator/registry files.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
-BIN="$ROOT/bin/ai-reviewer-membership-drift"
+BIN="$ROOT/bin/ai-reviewer-membership-drift.cjs"
 cat > "$T/lanes.mjs" <<'M'
 export const REVIEWERS = Object.freeze([
   { name:'grok-4.6', provider:'grok', wrapper:'ai-grok-review' },

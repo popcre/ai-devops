@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# ai-local-watch — watchdog duty-pool claim/lease and tick-all.
+#
+# WHY THIS EXISTS. Routine CI watchdogs run as local timed tasks on Albert's
+# machines (edge-dev / edge-dev3 / hetz). Those machines do not all stay up, so
+# duty is not pinned to one host: a short claim/lease on one standing GitHub
+# issue names who may post public alarms. Whichever pool member is alive and
+# holds the claim runs the ticks; the others skip. Free GitHub Actions stay
+# backup only. Never paid Blacksmith.
+#
+# Claim marker (issue body, one block):
+#   <!-- local-watch-claim -->
+#   leader=<hostname>
+#   lease_until=<UTC ISO>
+#   renewed_at=<UTC ISO>
+#
+# Usage:
+#   ai-local-watch claim            ensure I hold the lease (claim or renew)
+#   ai-local-watch release          drop the lease if I hold it
+#   ai-local-watch status           print leader + lease age (exit 0 always)
+#   ai-local-watch tick-all         claim, then run each duty tool's tick
+#   ai-local-watch schedule|unschedule   register tick-all on this host
+#
+# Exit codes (claim / tick-all leadership):
+#   0  I hold the lease (claimed, renewed, or already leader)
+#   3  another host holds a fresh lease (skip; do not post)
+#   1  alarm / tool failure / claim API error (never treat as leadership)
+#
+# Environment:
+#   AI_LOCAL_WATCH_HOME     state (default ~/.ai-devops/local-watch)
+#   AI_LOCAL_WATCH_CONFIG   settings (default <repo>/config/local-watch.json)
+#   AI_LOCAL_WATCH_HOST     hostname override (tests)
+#   AI_LOCAL_WATCH_NOW      freeze "now" as UTC ISO (tests)
+#   AI_LOCAL_WATCH_REPO     repo override (tests)
+set -euo pipefail
+
+_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
+# shellcheck source=tools/lib/local-watch.sh
+. "$TOOL_ROOT/tools/lib/local-watch.sh"
+
+TOOL_NAME='ai-local-watch'
+HOME_DIR="${AI_LOCAL_WATCH_HOME:-$HOME/.ai-devops/local-watch}"
+CONFIG="${AI_LOCAL_WATCH_CONFIG:-$TOOL_ROOT/config/local-watch.json}"
+LOG="$HOME_DIR/tick.log"
+GH="${AI_LOCAL_WATCH_GH:-$TOOL_ROOT/bin/ai-gh}"
+MARKER='<!-- local-watch-claim -->'
+
+cfg(){ jq -er "$1" "$CONFIG" || die "config $CONFIG has no $1"; }
+this_host(){ printf '%s' "${AI_LOCAL_WATCH_HOST:-$(hostname)}" | lower; }
+now_iso(){ printf '%s' "${AI_LOCAL_WATCH_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; }
+repo(){ printf '%s' "${AI_LOCAL_WATCH_REPO:-$(cfg .repo)}"; }
+
+in_pool(){
+  local h
+  h="$(this_host)"
+  jq -e --arg h "$h" '.watch_hosts | map(ascii_downcase) | index($h) != null' "$CONFIG" >/dev/null
+}
+
+# --- claim marker I/O -------------------------------------------------------
+
+# claim_issue_number: configured number, else first open issue with the title.
+claim_issue_number(){
+  local n
+  n="$(cfg .claim_issue)"
+  if [ "$n" != "0" ] && [ -n "$n" ]; then printf '%s' "$n"; return 0; fi
+  local title
+  title="$(cfg .claim_issue_title)"
+  "$GH" issue list --repo "$(repo)" --state open --search "in:title $title" \
+    --json number,title --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null | head -1
+}
+
+ensure_claim_issue(){
+  local n title
+  n="$(claim_issue_number || true)"
+  if [ -n "$n" ]; then printf '%s' "$n"; return 0; fi
+  title="$(cfg .claim_issue_title)"
+  n="$("$GH" issue create --repo "$(repo)" --title "$title" \
+    --body "$MARKER
+leader=
+lease_until=
+renewed_at=
+" --label bug 2>/dev/null | grep -oE '[0-9]+$' | tail -1)" \
+    || die "could not create the claim issue"
+  printf '%s' "$n"
+}
+
+# read_claim -> "leader\tlease_until" or empty if missing/unreadable
+read_claim(){
+  local n body
+  n="$1"
+  body="$("$GH" issue view "$n" --repo "$(repo)" --json body --jq .body 2>/dev/null)" || return 1
+  printf '%s' "$body" | awk -v m="$MARKER" '
+    index($0, m) { grab=1; next }
+    grab && /^leader=/ { sub(/^leader=/,""); leader=$0 }
+    grab && /^lease_until=/ { sub(/^lease_until=/,""); lease=$0 }
+    grab && /^renewed_at=/ { sub(/^renewed_at=/,""); renewed=$0 }
+    grab && /^$/ && leader != "" { exit }
+    END { if (leader != "") printf "%s\t%s\t%s\n", leader, lease, renewed }
+  '
+}
+
+write_claim(){
+  local n="$1" leader="$2" lease="$3" renewed="$4"
+  "$GH" issue edit "$n" --repo "$(repo)" --body "$MARKER
+leader=$leader
+lease_until=$lease
+renewed_at=$renewed
+" >/dev/null || return 1
+}
+
+lease_expired(){
+  local lease="$1" now
+  now="$(now_iso)"
+  # Missing or unparsable lease is expired (recoverable) — never "fresh forever".
+  [ -z "$lease" ] && return 0
+  case "$lease" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) return 0 ;;
+  esac
+  # expired when lease_until <= now (both UTC ISO; lexicographic is correct)
+  [ "$(printf '%s\n%s\n' "$lease" "$now" | sort | head -1)" = "$lease" ]
+}
+
+# claim_now: 0 = I hold it; 3 = other fresh leader; 1 = API failure
+claim_now(){
+  in_pool || die "$(this_host) is not in watch_hosts; cannot claim"
+  local n parsed leader lease renewed me now ttl new_lease
+  me="$(this_host)"
+  now="$(now_iso)"
+  ttl="$(cfg .lease_ttl_minutes)"
+  new_lease="$(date -u -d "$now + $ttl minutes" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -v+${ttl}M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || python3 -c "from datetime import datetime,timedelta,timezone; print((datetime.now(timezone.utc)+timedelta(minutes=$ttl)).strftime('%Y-%m-%dT%H:%M:%SZ'))")"
+  n="$(ensure_claim_issue)" || return 1
+  parsed="$(read_claim "$n")" || { note "cannot read claim issue $n"; return 1; }
+  if [ -n "$parsed" ]; then
+    leader="$(printf '%s' "$parsed" | cut -f1 | lower)"
+    lease="$(printf '%s' "$parsed" | cut -f2)"
+    if [ "$leader" = "$me" ]; then
+      write_claim "$n" "$me" "$new_lease" "$now" || { note "cannot renew lease"; return 1; }
+      note "renewed lease until $new_lease"
+      return 0
+    fi
+    if ! lease_expired "$lease"; then
+      note "skip: leader=$leader lease_until=$lease"
+      return 3
+    fi
+  fi
+  write_claim "$n" "$me" "$new_lease" "$now" || { note "cannot claim"; return 1; }
+  note "claimed duty until $new_lease"
+  return 0
+}
+
+cmd_claim(){
+  mkdir -p "$HOME_DIR"
+  claim_now
+}
+
+cmd_release(){
+  local n parsed leader
+  n="$(claim_issue_number)" || die "no claim issue"
+  [ -n "$n" ] || die "no claim issue"
+  parsed="$(read_claim "$n")" || die "cannot read claim issue"
+  leader="$(printf '%s' "$parsed" | cut -f1 | lower)"
+  if [ "$leader" != "$(this_host)" ]; then
+    note "I am not the leader ($leader); nothing to release"
+    return 0
+  fi
+  write_claim "$n" "" "" "$(now_iso)" || die "cannot release"
+  note "released the claim"
+}
+
+cmd_status(){
+  local n parsed leader lease renewed age
+  n="$(claim_issue_number || true)"
+  if [ -z "$n" ]; then
+    printf 'leader=none (no claim issue)\n'
+    return 0
+  fi
+  parsed="$(read_claim "$n" || true)"
+  if [ -z "$parsed" ]; then
+    printf 'leader=none issue=%s\n' "$n"
+    return 0
+  fi
+  leader="$(printf '%s' "$parsed" | cut -f1)"
+  lease="$(printf '%s' "$parsed" | cut -f2)"
+  renewed="$(printf '%s' "$parsed" | cut -f3)"
+  if lease_expired "$lease"; then age=expired; else age=fresh; fi
+  printf 'leader=%s lease_until=%s renewed_at=%s lease=%s issue=%s me=%s\n' \
+    "$leader" "$lease" "$renewed" "$age" "$n" "$(this_host)"
+}
+
+cmd_tick_all(){
+  mkdir -p "$HOME_DIR"
+  if ! in_pool; then
+    note "$(this_host) is not in watch_hosts; nothing to do"
+    return 0
+  fi
+  take_lock "$HOME_DIR/tick.lock" "$(cfg .lock_stale_minutes)"
+  rotate_log "$LOG" "$(cfg .log_max_bytes 2>/dev/null || echo 5000000)"
+  local rc=0
+  claim_now || rc=$?
+  if [ "$rc" -eq 3 ]; then
+    printf '%s skip: not leader\n' "$(stamp)" >> "$LOG"
+    unlock
+    return 3
+  fi
+  if [ "$rc" -ne 0 ]; then
+    printf '%s ALARM: claim failed (exit %s)\n' "$(stamp)" "$rc" >> "$LOG"
+    unlock
+    return 1
+  fi
+  printf '%s duty: leader=%s\n' "$(stamp)" "$(this_host)" >> "$LOG"
+  local name cmd tool_rc tool_bin tick_min last_file last_epoch now_epoch due
+  now_epoch="$(date -u +%s)"
+  while IFS=$'\t' read -r name cmd tick_min; do
+    [ -n "$name" ] || continue
+    cmd="${cmd//$'\r'/}"
+    name="${name//$'\r'/}"
+    tick_min="${tick_min//$'\r'/}"
+    [ -n "$tick_min" ] || tick_min=2
+    # Honor per-tool cadence: skip when the tool ran within tick_minutes.
+    last_file="$HOME_DIR/.last-$name"
+    last_epoch=0
+    [ -f "$last_file" ] && last_epoch="$(cat "$last_file" 2>/dev/null || echo 0)"
+    due=$(( now_epoch - last_epoch >= tick_min * 60 ))
+    if [ "$due" -eq 0 ]; then
+      printf '%s tool %s skipped (cadence %sm)\n' "$(stamp)" "$name" "$tick_min" >> "$LOG"
+      continue
+    fi
+    tool_bin=""
+    if [ -x "$cmd" ]; then
+      tool_bin="$cmd"
+    elif [ -x "$TOOL_ROOT/bin/$cmd" ]; then
+      tool_bin="$TOOL_ROOT/bin/$cmd"
+    elif command -v "$cmd" >/dev/null 2>&1; then
+      tool_bin="$(command -v "$cmd")"
+    fi
+    if [ -n "$tool_bin" ]; then
+      tool_rc=0
+      "$tool_bin" tick >> "$LOG" 2>&1 || tool_rc=$?
+      printf '%s tool %s exit %s\n' "$(stamp)" "$name" "$tool_rc" >> "$LOG"
+      date -u +%s > "$last_file"
+      [ "$tool_rc" -eq 0 ] || [ "$tool_rc" -eq 3 ] || rc=$tool_rc
+    else
+      printf '%s tool %s missing (%s)\n' "$(stamp)" "$name" "$cmd" >> "$LOG"
+    fi
+  done < <(jq -r '.tools | to_entries[] | [.key, .value.command, (.value.tick_minutes // 2)] | @tsv' "$CONFIG")
+  unlock
+  return "$rc"
+}
+
+cmd_schedule(){
+  in_pool || die "$(this_host) is not in watch_hosts; not scheduling"
+  mkdir -p "$HOME_DIR"
+  # tick-all is the single entry: each tool's own schedule is optional.
+  register_timer 2 "$TOOL_ROOT/bin/ai-local-watch" tick-all
+}
+
+cmd_unschedule(){
+  unregister_timer
+}
+
+case "${1:-}" in
+  claim) cmd_claim ;;
+  release) cmd_release ;;
+  status) cmd_status ;;
+  tick-all) cmd_tick_all ;;
+  schedule) cmd_schedule ;;
+  unschedule) cmd_unschedule ;;
+  -h|--help|help) sed -n '2,40p' "$_self" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command; see ai-local-watch --help" ;;
+esac

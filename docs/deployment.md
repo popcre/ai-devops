@@ -107,6 +107,10 @@ cd /worksp/ai-devops
    CI **watchdog** timers (queue-slow, runner-pool, drift) belong to the
    **watchdog duty pool** — see [`watchdog-duty-pool.md`](watchdog-duty-pool.md)
    for claim/lease rotation and how to add a machine; never paid Blacksmith.
+   The installer schedules `ai-local-watch tick-all` (Task Scheduler / user
+   crontab) only on hosts listed in `config/local-watch.json` `watch_hosts`
+   (edge-dev, edge-dev3, hetz). That single entry claims the duty lease and
+   runs the four watchdog ticks. GitHub Actions stay as a free weekly backup.
 10. Records exact source, config, owned symlinks, config files, managed
     skill markers, and hashes in `/etc/ai-devops/install-manifest.tsv`.
 11. Runs `ai-devops doctor`.

@@ -100,14 +100,18 @@ to click through them.
   enough for duty.
 - Declare the move “done” without a two-host failover drill and live proof.
 
-## 7. Current state (2026-10-02)
+## 7. Current state (2026-10-05)
 
 | Piece | State |
 |---|---|
 | Plan + this runbook | Landed in `popcre/ai-devops` |
-| Claim/tick tools + installers | **Not built yet** — implement plan P0–P5 first |
-| Free Actions backup | Exists in spirit via PR #1193 direction (watchdogs off Blacksmith) |
+| Shared harness | `tools/lib/local-watch.sh` (schedule / lock / log) |
+| Claim/lease + tick-all | `bin/ai-local-watch` + `config/local-watch.json` (`watch_hosts`, claim issue) |
+| Duty tools | `ai-windows-queue-watch`, `ai-runner-pool-watch`, `ai-reviewer-membership-drift tick`, `ai-merge-queue-drift tick` |
+| Installers | `install-ai-devops-windows.ps1` and `install.sh` schedule `ai-local-watch` on pool members |
+| Free Actions backup | Watchdog/drift workflows are `ubuntu-24.04` weekly smoke + dispatch; no paid runners |
+| Live failover drill | **Proven on edge-dev ↔ edge-dev3** (2026-10-05): expired lease → edge-dev3 claim → edge-dev `skip: leader=edge-dev3` → release → edge-dev reclaim. Claim issue #1288. runner-pool live tick + edge-dev3/hetz timer install still open (owner issue #1287). |
 
-Fresh session: implement the plan; keep this runbook as the **contract** the
-tools and docs must match. When a row of the plan’s STATUS turns done, update
-§7 here in the same PR.
+Fresh session: finish the live proof (D4 in the plan). Keep this runbook as the
+**contract** the tools and docs must match. When a row of the plan’s STATUS turns
+done, update §7 here in the same PR.
