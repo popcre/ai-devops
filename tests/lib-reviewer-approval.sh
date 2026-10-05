@@ -13,7 +13,10 @@ mint_reviewer_approval(){
   base="$(mktemp -d "$dir/approval.XXXXXX")"; run="$(basename "$base" | tr -c 'A-Za-z0-9\n' x)"
   report="$base/grok-$mode-$run.md"
   printf '| reviewed commit | `%s` |\n\n## Verdict\nAPPROVE\n' "$head" > "$report"
-  report="$(realpath -- "$report")"; hash="$(sha256sum "$report" | cut -d' ' -f1)"
+  # Resolve with pwd -P (not realpath) so the stored path matches what
+  # reviewer_approval_summary computes via cd+pwd -P on Windows CI runners
+  # where realpath may return a different path format (C:/ vs /c/).
+  report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")"; hash="$(sha256sum "$report" | cut -d' ' -f1)"
   state="$AI_REVIEW_LIFECYCLE_DIR/runs/$key/grok/claude/$run.json"
   mkdir -p "$(dirname "$state")"
   jq -n --arg h "$head" --arg p "$report" --arg s "$hash" --arg k "$key" --arg d "$digest" --arg r "$run" --arg m "$mode" \

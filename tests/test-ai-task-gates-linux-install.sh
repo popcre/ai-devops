@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Exercise the real Linux source gate using only temporary checkouts and
 # launcher/manifest paths. The fixture mode refuses GitHub origins.
+# The install verification route is Linux-only (ai-task-gates:1052).
 set -uo pipefail
+[ "$(uname -s)" = Linux ] || { echo 'SKIP: install verification route is Linux-only'; exit 0; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d /tmp/ai-task-gates-linux.XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT

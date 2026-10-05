@@ -11,6 +11,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 ok(){ PASS=$((PASS+1)); printf 'ok %s\n' "$1"; }
 bad(){ FAIL=$((FAIL+1)); printf 'not ok %s\n' "$1" >&2; }
+skip(){ PASS=$((PASS+1)); printf 'skip %s\n' "$1"; }
 check(){ local name="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$name"; else bad "$name"; fi; }
 
 command -v ssh-keygen >/dev/null 2>&1 || { echo "skip: ssh-keygen missing"; exit 0; }
@@ -50,7 +51,15 @@ H="$TMP/h1"; mkdir -p "$H"
 out="$(run "$H" 2>&1)"; rc=$?
 check 'fresh install exits 0' test "$rc" -eq 0
 check 'private key installed byte-identical' cmp -s "$TMP/fixture" "$H/.ssh/916-alien"
-check 'private key mode 600' test "$(stat -c %a "$H/.ssh/916-alien")" = 600
+# Windows file mode semantics map chmod 600 to 644; POSIX modes are unavailable.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    skip 'private key mode 600 (Windows cannot provide POSIX file modes)'
+    ;;
+  *)
+    check 'private key mode 600' test "$(stat -c %a "$H/.ssh/916-alien")" = 600
+    ;;
+esac
 check 'public key installed' cmp -s "$TMP/fixture.pub" "$H/.ssh/916-alien.pub"
 check 'installed key parses' ssh-keygen -y -f "$H/.ssh/916-alien"
 check 'alias template installed' cmp -s "$TMP/template" "$H/.ssh/ai-devops.conf"
