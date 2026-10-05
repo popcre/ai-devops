@@ -540,5 +540,174 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
 check "the borrowed-user version miss quarantines with pin-mismatch" \
   "env AI_PROVIDER_VERSIONS_FILE=\"$PB_POLICY\" AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status kimi | jq -e '.failure_class==\"pin-mismatch\"'"
 
+# == the hashed file must be the file the WRAPPER runs (Codex High 2026-10-05) ==
+# provider_cli_binary used to take the first EXISTING candidate. The wrappers
+# only run a candidate that is executable and (StepFun) identifies as StepCode,
+# so a looser rule here hashes one file while the live smoke runs another:
+# false evidence. These tests pin the resolver to the wrapper's own rules.
+echo '== provider_cli_binary matches the wrapper resolver (executable + identity)'
+SF_POLICY="$TMP/sf-policy.json"
+cat > "$SF_POLICY" <<'SEOF'
+{
+  "schema_version": 1,
+  "providers": {
+    "stepfun": {
+      "command": "step",
+      "supported_version": "1.2.0",
+      "version_match": "minimum",
+      "qualified_on": "2026-09-15",
+      "exact_install_command": null,
+      "notes": "fixture: minimum floor"
+    }
+  }
+}
+SEOF
+SF_HOME="$TMP/sf-home"
+SF_RESOLVED="$TMP/sf-wrapper-resolved"
+mkdir -p "$SF_HOME/.stepcode/bin"
+# The good StepCode step: identifies correctly and satisfies the pin.
+cat > "$TMP/bin/step" <<'SEOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --help ]; then printf 'step - AI coding assistant\n'; exit 0; fi
+if [ "${1:-}" = --version ]; then printf 'step 1.2.3 (deadbeef) [stable]\n'; exit 0; fi
+echo health ok
+SEOF
+chmod +x "$TMP/bin/step"
+# Stub wrapper that mirrors bin/ai-stepfun step_bin() exactly and records the
+# file it resolved, so the test can prove preflight hashed THAT file.
+cat > "$TMP/bin/sf-doctor" <<FEOF
+#!/usr/bin/env bash
+sf_cli() {
+  if [ -n "\${AI_STEPFUN_STEP_BIN:-}" ]; then
+    [ -x "\$AI_STEPFUN_STEP_BIN" ] && "\$AI_STEPFUN_STEP_BIN" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || return 1
+    printf '%s' "\$AI_STEPFUN_STEP_BIN"; return 0
+  fi
+  local b c
+  for c in "\$HOME/.stepcode/bin/step" "\$(command -v step 2>/dev/null || true)"; do
+    [ -n "\$c" ] && [ -x "\$c" ] || continue
+    "\$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || continue
+    b="\$c"; break
+  done
+  [ -n "\${b:-}" ] || return 1
+  printf '%s' "\$b"
+}
+if [ "\${1:-}" = doctor ]; then
+  cli="\$(sf_cli)" || { echo 'step binary not resolved' >&2; exit 1; }
+  printf '%s' "\$cli" > "$SF_RESOLVED"
+  "\$cli" --version >/dev/null 2>&1 || true
+  echo health ok; exit 0
+fi
+echo unexpected; exit 1
+FEOF
+chmod +x "$TMP/bin/sf-doctor"
+run_sf() {
+  env AI_PROVIDER_VERSIONS_FILE="$SF_POLICY" \
+      AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+      AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/sf-doctor" \
+      AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+      HOME="$SF_HOME" \
+      PATH="$TMP/bin:$PATH" \
+      "$SCRIPT" "$@"
+}
+
+# 1. An identity-mismatched first candidate (Smallstep's `step`) is skipped:
+#    the wrapper would never run it, so its bytes must never be hashed.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+cat > "$SF_HOME/.stepcode/bin/step" <<'SEOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --help ]; then printf 'step - a client for managing certificates\n'; exit 0; fi
+if [ "${1:-}" = --version ]; then printf 'step 1.2.3 (deadbeef) [stable]\n'; exit 0; fi
+echo unexpected
+SEOF
+chmod +x "$SF_HOME/.stepcode/bin/step"
+PB_OUT="$(run_sf pin-bump-qualify stepfun 2>&1)"; PB_RC=$?
+[ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'PASS pin-bump-qualify provider=stepfun' \
+  && test "$(cat "$SF_RESOLVED")" = "$TMP/bin/step" \
+  && ok "an identity-mismatched first candidate is skipped" \
+  || { bad "an identity-mismatched first candidate is skipped"; printf '%s\n' "$PB_OUT"; }
+check "hashed file == wrapper-resolved file (identity-mismatched candidate is not hashed)" \
+  "test \"\$(cat '$SF_RESOLVED')\" = '$TMP/bin/step' && test \"\$(jq -r .cli_sha256 '$TMP/state/stepfun-live-qualified.json')\" = \"\$(sha256sum '$TMP/bin/step' | awk '{print \$1}')\""
+
+# 2. Clean single-candidate path: the published hash is exactly the wrapper's file.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+rm -f "$SF_HOME/.stepcode/bin/step"
+PB_OUT="$(run_sf pin-bump-qualify stepfun 2>&1)"; PB_RC=$?
+[ "$PB_RC" -eq 0 ] \
+  && test "$(cat "$SF_RESOLVED")" = "$TMP/bin/step" \
+  && test "$(jq -r .cli_sha256 "$TMP/state/stepfun-live-qualified.json")" = "$(sha256sum "$TMP/bin/step" | awk '{print $1}')" \
+  && ok "the qualification hash binds the exact file the wrapper resolves" \
+  || { bad "the qualification hash binds the exact file the wrapper resolves"; printf '%s\n' "$PB_OUT"; }
+
+# 3. A StepFun override that is not StepCode is refused, never replaced by
+#    another installed binary (ai-stepfun #1086).
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+cat > "$SF_HOME/.stepcode/bin/step" <<'SEOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --help ]; then printf 'step - a client for managing certificates\n'; exit 0; fi
+echo unexpected
+SEOF
+chmod +x "$SF_HOME/.stepcode/bin/step"
+PB_OUT="$(AI_STEPFUN_STEP_BIN="$SF_HOME/.stepcode/bin/step" run_sf pin-bump-qualify stepfun 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'could not resolve' \
+  && ! test -f "$TMP/state/stepfun-live-qualified.json" \
+  && ok "a wrong-identity StepFun override is refused (never silently replaced)" \
+  || { bad "a wrong-identity StepFun override is refused (never silently replaced)"; printf '%s\n' "$PB_OUT"; }
+
+# Execute-bit cases. NTFS/Git Bash synthesises the execute bit for every
+# regular file (chmod -x is a no-op), so a non-executable candidate cannot be
+# built there; probe once and skip the cases only that filesystem cannot
+# express. They run for real on the Linux CI lanes, where the wrappers live.
+NE_PROBE="$TMP/ne-probe"
+printf '#!/usr/bin/env bash\ntrue\n' > "$NE_PROBE"
+chmod -x "$NE_PROBE" 2>/dev/null
+if [ -x "$NE_PROBE" ]; then
+  skip "a non-executable first candidate is skipped (this filesystem cannot clear the execute bit)"
+  skip "the non-executable candidate is not the hashed file"
+  skip "a non-executable Grok override is refused (no fallback, no false evidence)"
+  skip "the refused override never becomes a false pin-mismatch quarantine"
+  skip "a non-executable Kimi override is refused (no fallback, no false evidence)"
+else
+  # 4. A non-executable first candidate is skipped, never hashed.
+  rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+  cat > "$SF_HOME/.stepcode/bin/step" <<'SEOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --help ]; then printf 'step - AI coding assistant\n'; exit 0; fi
+if [ "${1:-}" = --version ]; then printf 'step 1.2.3 (deadbeef) [stable]\n'; exit 0; fi
+echo health ok
+SEOF
+  chmod -x "$SF_HOME/.stepcode/bin/step"
+  PB_OUT="$(run_sf pin-bump-qualify stepfun 2>&1)"; PB_RC=$?
+  [ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'PASS pin-bump-qualify provider=stepfun' \
+    && test "$(cat "$SF_RESOLVED")" = "$TMP/bin/step" \
+    && ok "a non-executable first candidate is skipped (wrapper would never run it)" \
+    || { bad "a non-executable first candidate is skipped (wrapper would never run it)"; printf '%s\n' "$PB_OUT"; }
+  check "the non-executable candidate is not the hashed file" \
+    "test \"\$(cat '$SF_RESOLVED')\" = '$TMP/bin/step' && test \"\$(jq -r .cli_sha256 '$TMP/state/stepfun-live-qualified.json')\" = \"\$(sha256sum '$TMP/bin/step' | awk '{print \$1}')\""
+
+  # 5. Grok: an existing but non-executable override is refused. resolve_grok
+  #    dies on it — preflight must not hash it, not fall through to a PATH
+  #    decoy, and not record a false pin-mismatch.
+  rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+  printf '#!/usr/bin/env bash\nif [ "${1:-}" = --version ]; then printf "fakegrok 1.0.15 (abc) [stable]\\n"; exit 0; fi\necho health ok\n' > "$TMP/bin/fakegrok-noexec"
+  chmod -x "$TMP/bin/fakegrok-noexec"
+  PB_OUT="$(AI_GROK_BIN="$TMP/bin/fakegrok-noexec" FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+  [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'could not resolve' \
+    && ! test -f "$TMP/state/grok-live-qualified.json" \
+    && ok "a non-executable Grok override is refused (no fallback, no false evidence)" \
+    || { bad "a non-executable Grok override is refused (no fallback, no false evidence)"; printf '%s\n' "$PB_OUT"; }
+  check "the refused override never becomes a false pin-mismatch quarantine" \
+    "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.usable==true'"
+
+  # 6. Kimi: same override rule as Grok (ai-kimi resolve_kimi dies on it).
+  rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+  printf '#!/usr/bin/env bash\nif [ "${1:-}" = --version ]; then printf "fakekimi 2.0.0\\n"; exit 0; fi\necho health ok\n' > "$TMP/bin/fakekimi-noexec"
+  chmod -x "$TMP/bin/fakekimi-noexec"
+  PB_OUT="$(AI_KIMI_BIN="$TMP/bin/fakekimi-noexec" FAKE_KIMI_VERSION=2.0.0 run_pb pin-bump-qualify kimi 2>&1)"; PB_RC=$?
+  [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'could not resolve' \
+    && ! test -f "$TMP/state/kimi-live-qualified.json" \
+    && ok "a non-executable Kimi override is refused (no fallback, no false evidence)" \
+    || { bad "a non-executable Kimi override is refused (no fallback, no false evidence)"; printf '%s\n' "$PB_OUT"; }
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
