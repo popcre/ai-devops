@@ -30,15 +30,15 @@ Albert reported edge-dev's LAN IP changed and asked that (1) the setup hold the 
 
 | Host | LAN | Tailscale | SSH config deployed | Live SSH proved |
 | --- | --- | --- | --- | --- |
-| edge-dev | 192.168.0.192 | 100.75.135.31 | yes (this box) | ssh -G + self |
-| 4837 | 192.168.2.131 | 100.123.87.44 | yes | `hostname` → al8960ofc |
-| 916 | 10.0.5.55 | 100.110.219.31 | yes | ssh -G proved |
-| edge-runn-envy | 192.168.2.225 | 100.104.201.6 | yes (created ~/.ssh/config Include) | `hostname` → edge-runn-envy |
-| edge-dev3 | 192.168.3.42 | 100.66.9.69 | yes | `hostname` → edge-dev3 |
-| edgesynology1 | 192.168.3.100 | 100.107.131.35 | yes (client on others) | `hostname` → edgesynology1 |
-| edgesynology2 | 192.168.3.101 | 100.107.131.36 | (same template) | alias edge2 |
-| hetz root + ai | — | 100.66.37.58 | yes (Include prepended both users) | ssh -G proved |
-| **edge-alien** | 192.168.3.51 | **100.112.207.98** (was 100.65.60.70) | **NOT deployed** | SSH port 22 times out |
+| edge-dev | (see private atlas) | (see private atlas) | yes (this box) | ssh -G + self |
+| 4837 | (see private atlas) | (see private atlas) | yes | `hostname` → al8960ofc |
+| 916 | (see private atlas) | (see private atlas) | yes | ssh -G proved |
+| edge-runn-envy | (see private atlas) | (see private atlas) | yes (created ~/.ssh/config Include) | `hostname` → edge-runn-envy |
+| edge-dev3 | (see private atlas) | (see private atlas) | yes | `hostname` → edge-dev3 |
+| edgesynology1 | (see private atlas) | (see private atlas) | yes (client on others) | `hostname` → edgesynology1 |
+| edgesynology2 | (see private atlas) | (see private atlas) | (same template) | alias edge2 |
+| hetz root + ai | — | (see private atlas) | yes (Include prepended both users) | ssh -G proved |
+| **edge-alien** | (see private atlas) | **(see private atlas)** (was (see private atlas)) | **NOT deployed** | SSH port 22 times out |
 
 **Private config commits (already on origin/main of u2giants/ai-devops-private-config):**
 - `52f4314` — LAN-first template + atlas fleet map + IP refresh
@@ -65,14 +65,14 @@ Networking only — do NOT run setup-machine.ps1 or install skills/MCP/hooks.
 2. **Nested-quote remote one-liners** (scp + ssh with embedded quotes) → `unexpected EOF while looking for matching`. Fixed by `ssh/deploy-ssh-config.sh` (scp template, then simple ssh checks).
 3. **`sh /tmp/ensure-include.sh` on Windows remotes** → `/tmp` not shared / no such file. Windows default shell on envy is cmd.exe; paths must be `%USERPROFILE%\.ssh\...`.
 4. **`grep` in ssh command on 4837** → `'grep' is not recognized` (cmd.exe). Use PowerShell or findstr on those hosts.
-5. **edge-alien SCP** → `Connection timed out` on both Tailscale 100.112.207.98 and LAN 192.168.3.51. Tailscale says the node is online; nothing accepts TCP/22 (same shape as historical t16).
+5. **edge-alien SCP** → `Connection timed out` on both Tailscale (see private atlas) and LAN (see private atlas). Tailscale says the node is online; nothing accepts TCP/22 (same shape as historical t16).
 
 ## 5. Root causes and key findings
 
 - **Route policy inversion:** Match blocks must come BEFORE Host blocks (OpenSSH takes the first value). Pattern for dual-homed hosts: `Match host X !exec "ping <LAN>"` sets `HostName <TAILSCALE>`; `Host X` has `HostName <LAN>`. Probe: `ping -c 1 -W 1 <ip> || ping.exe -n 1 -w 800 <ip>` (Linux first — see template comments about the NUL file and 800s hang).
-- **HostKeyAlias** stays on the Tailscale IP (or a stable name) so known_hosts matches regardless of LAN vs Tailscale dial. edge-alien keeps `HostKeyAlias 100.65.60.70` on purpose (historical known_hosts key) even though HostName is now 100.112.207.98.
-- **edge-dev3 LAN is 192.168.3.42**, not the atlas's old 10.0.5.154. **edge-alien Tailscale is 100.112.207.98**, not 100.65.60.70.
-- **LAN is not fully bridged:** 192.168.0.x (edge-dev) cannot ping 192.168.2.225 (envy) or 192.168.3.51 (alien); 4837 (192.168.2.131) reaches 192.168.3.x but not edge-dev's 192.168.0.192. The ping probe is the right per-client decider.
+- **HostKeyAlias** stays on the Tailscale IP (or a stable name) so known_hosts matches regardless of LAN vs Tailscale dial. edge-alien keeps `HostKeyAlias (see private atlas)` on purpose (historical known_hosts key) even though HostName is now (see private atlas).
+- **edge-dev3 LAN is (see private atlas)**, not the atlas's old (see private atlas). **edge-alien Tailscale is (see private atlas)**, not (see private atlas).
+- **LAN is not fully bridged:** 192.168.0.x (edge-dev) cannot ping (see private atlas) (envy) or (see private atlas) (alien); 4837 ((see private atlas)) reaches 192.168.3.x but not edge-dev's (see private atlas). The ping probe is the right per-client decider.
 - **envy's LAN does not answer ICMP** even from 4837 (same subnet) — LAN-first will always fall back to Tailscale for envy unless ICMP is opened. Still correct behaviour.
 - **`ssh -G`** is the cheap verify for which address a name resolves to on that client; then one real `ssh <host> hostname` for the live proof.
 - Fleet installer: `u2giants/ai-devops-private-config` → `ssh/deploy-ssh-config.sh <host>`.
@@ -83,7 +83,7 @@ Networking only — do NOT run setup-machine.ps1 or install skills/MCP/hooks.
    - `scp /c/Users/ahazan/.local/share/ai-devops-private-config/ssh/ssh-config.template edge-alien:.ssh/ai-devops.conf`
    - Ensure `Include ai-devops.conf` is first in that user's `~/.ssh/config`.
    - Verify: `ssh -G edge-dev` from edge-alien prints a hostname; `ssh -o BatchMode=yes edge-alien hostname` returns `edge-alien` (or its Windows hostname).
-   - **You'll know it worked when** both checks pass and the live SSH round-trip uses the new template (e.g. `ssh -G 4837` from edge-alien shows either 192.168.2.131 or 100.123.87.44, not a bare name).
+   - **You'll know it worked when** both checks pass and the live SSH round-trip uses the new template (e.g. `ssh -G 4837` from edge-alien shows either (see private atlas) or (see private atlas), not a bare name).
    - Tick and close [popcre/ai-devops#1302](https://github.com/popcre/ai-devops/issues/1302).
 2. Optional spare-PC work: paste the recipe in §3 to Claude on any machine that should join the fleet network without the full toolkit. Verify with the recipe's step 5.
 
@@ -103,13 +103,13 @@ Networking only — do NOT run setup-machine.ps1 or install skills/MCP/hooks.
 - Private config checkout: `C:\Users\ahazan\.local\share\ai-devops-private-config` (main, clean, pushed).
 - SSH key: `~/.ssh/916-alien` — restored from 1Password vault `vibe_coding`, item `916-alien SSH key` (never print the value).
 - Installed SSH aliases: `~/.ssh/ai-devops.conf` (Include first in `~/.ssh/config`).
-- Tailscale is up on edge-dev (`100.75.135.31`).
+- Tailscale is up on edge-dev (`(see private atlas)`).
 
 ## 9. Open questions and risks
 
 - **edge-alien SSH is dead** (2026-10-05, 1:25 PM EST): Tailscale node online, TCP/22 times out on both LAN and Tailscale. Unknown whether sshd is down, firewalled, or the host is in a weird state. Same failure shape as historical t16. Risk: it stays unreachable and keeps the old config indefinitely — tracked as #1302.
 - **916 / edge-alien intermittently powered** — do not assume either is online; check `tailscale status` first.
-- **HostKeyAlias 100.65.60.70 on edge-alien** is a deliberate stale-looking alias so known_hosts keeps working. If known_hosts is rebuilt from scratch, use the Tailscale IP consistently instead.
+- **HostKeyAlias (see private atlas) on edge-alien** is a deliberate stale-looking alias so known_hosts keeps working. If known_hosts is rebuilt from scratch, use the Tailscale IP consistently instead.
 - If a future LAN renumber happens (as edge-dev's did), update `ssh/ssh-config.template` + `machines/machine-atlas.md` in the private repo and re-run `ssh/deploy-ssh-config.sh` across the fleet.
 
 ---
