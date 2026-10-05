@@ -111,6 +111,7 @@ VERDICT: APPROVE 1111111111111111111111111111111111111111'; elif [ "${MOCK_MODE:
 APPROVE'; else response='## Verdict
 APPROVE'; fi
 if [ "${MOCK_MODE:-normal}" = denied ]; then printf '{"status":"SUCCESS","conversation_id":"%s","response":"","denied_actions":[{"action":"command","display_name":"RunCommand"}]}\n' "$cid"; exit 0; fi
+if [ "${MOCK_MODE:-normal}" = provider-error ]; then printf '{"status":"ERROR","error":"provider exploded","conversation_id":"%s","response":""}\n' "$cid"; exit 0; fi
 printf '{"status":"SUCCESS","conversation_id":"%s","response":%s}\n' "$cid" "$(printf %s "$response" | jq -Rs .)"
 EOF
 chmod +x "$TMP/bin/"*
@@ -223,12 +224,16 @@ POOL_OUT="$( (cd "$RP" && MOCK_MODE=normal AI_GEMINI_BODY_STDOUT=1 "$SCRIPT" new
 check 'pool contract emits the model verdict body on stdout for the pool gate' "printf '%s\n' \"\$POOL_OUT\" | awk '/^## Verdict[[:space:]]*\$/{getline; gsub(/^[[:space:]]+|[[:space:]]+\$/,\"\"); print; exit}' | grep -Eqx 'APPROVE|REJECT|BLOCKED'"
 check 'pool contract keeps the PASS line off stdout and on stderr' "! printf '%s\n' \"\$POOL_OUT\" | grep -q '^PASS session=' && grep -q '^PASS session=poolbody' '$TMP/pool.err'"
 check 'ai-review-pool sets the gemini body-on-stdout contract' "grep -q 'AI_GEMINI_BODY_STDOUT=1' '$ROOT/bin/ai-review-pool'"
+check 'ai-review-pool maps empty or blocked verdict to missing-verdict, not provider-failed' "grep -q 'AI_REVIEW_EMPTY_VERDICT' '$ROOT/bin/ai-review-pool' && grep -q -- '--failure missing-verdict' '$ROOT/bin/ai-review-pool' && grep -q 'reroute' '$ROOT/bin/ai-review-pool'"
+check 'ai-review-pool books missing-verdict only on the marker, never on bare exit 81' "grep -qF '^AI_REVIEW_EMPTY_VERDICT ' '$ROOT/bin/ai-review-pool' && ! grep -q 'eq 81 ] ||' '$ROOT/bin/ai-review-pool'"
 R4="$TMP/repo4"; make_repo "$R4"; check 'normal review writes a durable report' "new_run '$R4' good normal && find '$R4/.ai/reviews' -type f -size +0c | grep -q ."
 RLARGE="$TMP/repo-large"; make_repo "$RLARGE"
 python3 -c 'import sys; open(sys.argv[1], "w").write("A" * 150000)' "$TMP/large-prompt.txt"
 check 'large prompt reaches Gemini intact without a single oversized argument' "(cd '$RLARGE' && '$SCRIPT' new large-prompt --prompt-file '$TMP/large-prompt.txt') && test \"\$(cat '$MOCK_STREAM_BYTES')\" -ge 150000"
 check 'large streamed review retains the exact conversation and completes' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for large-prompt)\""
-check 'streamed result with a different conversation is refused' "! (cd '$RLARGE' && MOCK_MODE=stream-wrong-conversation '$SCRIPT' new large-wrong --prompt-file '$TMP/large-prompt.txt') && test \"\$(jq -r .status \"\$(meta_for large-wrong)\")\" = RECOVERY_REQUIRED"
+set +e; (cd "$RLARGE" && MOCK_MODE=stream-wrong-conversation "$SCRIPT" new large-wrong --prompt-file "$TMP/large-prompt.txt") >"$TMP/large-wrong.out" 2>"$TMP/large-wrong.err"; LARGE_WRONG_RC=$?; set -e
+check 'streamed result with a different conversation is refused' "test '$LARGE_WRONG_RC' -ne 0 && test \"\$(jq -r .status \"\$(meta_for large-wrong)\")\" = RECOVERY_REQUIRED"
+check 'streamed conversation mismatch is not booked as missing-verdict' "test '$LARGE_WRONG_RC' -ne 81 && ! grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/large-wrong.err'"
 export MOCK_PROTECTED="$RLARGE"
 check 'streamed source mutation refuses the review' "! (cd '$RLARGE' && MOCK_MODE=stream-mutate-protected '$SCRIPT' new large-drift --prompt-file '$TMP/large-prompt.txt')"
 STREAM_FAILURE="$(jq -r .failure_artifact "$(meta_for large-drift)")"
@@ -243,7 +248,12 @@ check 'duplicate new is refused' "! new_run '$R4' good normal"
 GOOD_AFTER="$( { sha256sum "$GOOD_META"; (cd "$R4" && find .ai/reviews -type f -print0 | sort -z | xargs -0 sha256sum); (cd "$GOOD_COPY" && find . -type f -print0 | sort -z | xargs -0 sha256sum); } | sha256sum | cut -d' ' -f1 )"
 check 'duplicate new preserves metadata report packet and private copy byte-for-byte' "test '$GOOD_BEFORE' = '$GOOD_AFTER'"
 check 'duplicate new never invokes the provider' "test '$GOOD_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
-check 'wrong resumed conversation ID is rejected' "! (cd '$R4' && MOCK_MODE=wrongid '$SCRIPT' ask good --prompt follow-up)"
+# Classification (Codex 2026-10-05): wrong-conversation and provider errors
+# must keep their own failure class and never be booked as missing-verdict.
+set +e; (cd "$R4" && MOCK_MODE=wrongid "$SCRIPT" ask good --prompt follow-up) >"$TMP/wrongid.out" 2>"$TMP/wrongid.err"; WRONGID_RC=$?; set -e
+check 'wrong resumed conversation ID is rejected' "test '$WRONGID_RC' -ne 0"
+check 'wrong conversation is not booked as missing-verdict' "test '$WRONGID_RC' -ne 81 && ! grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/wrongid.err'"
+check 'wrong conversation never prints PASS' "! grep -q '^PASS session=' '$TMP/wrongid.out' '$TMP/wrongid.err'"
 new_run "$R4" frozen-model normal >/dev/null
 FROZEN_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'follow-up refuses configured model drift before provider contact' "! (cd '$R4' && AI_GEMINI_MODEL=gemini-other '$SCRIPT' ask frozen-model --prompt follow-up) && test '$FROZEN_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
@@ -257,6 +267,19 @@ printf before-model > "$R4/dirty.txt"
 check 'write during model verification is rejected' "! new_run '$R4' modelwrite mutate-model"
 check 'empty response is rejected' "! new_run '$R4' empty empty"
 check 'invalid verdict word is rejected' "! new_run '$R4' badverdict badverdict"
+# Reroute-on-empty (child 1): empty / blocked turns are review-step failures
+# (exit 81 + AI_REVIEW_EMPTY_VERDICT), never a PASS and never provider-failed.
+set +e; new_run "$R4" empty-marker empty >"$TMP/empty-marker.out" 2>"$TMP/empty-marker.err"; EMPTY_MARKER_RC=$?; set -e
+check 'empty verdict exits 81 as a review-step failure' "test '$EMPTY_MARKER_RC' -eq 81"
+check 'empty verdict emits the AI_REVIEW_EMPTY_VERDICT marker' "grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/empty-marker.err'"
+check 'empty verdict never prints PASS' "! grep -q '^PASS session=' '$TMP/empty-marker.out' '$TMP/empty-marker.err'"
+set +e; new_run "$R4" badverdict-marker badverdict >"$TMP/badverdict-marker.out" 2>"$TMP/badverdict-marker.err"; BADVERDICT_MARKER_RC=$?; set -e
+check 'malformed verdict exits 81 and never prints PASS' "test '$BADVERDICT_MARKER_RC' -eq 81 && ! grep -q '^PASS session=' '$TMP/badverdict-marker.out' '$TMP/badverdict-marker.err'"
+# A provider error is not an empty verdict: it keeps its provider-failed class
+# (exit 1, no marker), never 81 / missing-verdict.
+set +e; new_run "$R4" provider-error provider-error >"$TMP/provider-error.out" 2>"$TMP/provider-error.err"; PROVIDER_ERROR_RC=$?; set -e
+check 'provider error is rejected' "test '$PROVIDER_ERROR_RC' -ne 0"
+check 'provider error is not booked as missing-verdict' "test '$PROVIDER_ERROR_RC' -ne 81 && ! grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/provider-error.err'"
 # Out of credit (Albert, 2026-09-24): its own quarantine directory, so the
 # recorded global quarantine cannot refuse the later tests in this file.
 cp -a "$AI_REVIEW_QUARANTINE_DIR" "$TMP/credit-q"; cp -a "$AI_REVIEW_QUARANTINE_DIR" "$TMP/credit-q2"
@@ -266,6 +289,7 @@ check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CRED
 check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: .*ai.studio/projects' '$TMP/credit.err'"
 check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global gemini --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
 check 'ordinary provider failure is not reported as out of credit' "! AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' new_run '$R4' plain-fail fail 2>'$TMP/plain.err'; ! grep -q 'OUT OF CREDIT' '$TMP/plain.err'"
+check 'ordinary provider failure is not booked as missing-verdict' "! grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/plain.err'"
 BAD_META="$(meta_for badverdict)"
 check 'rejected provider output is durably linked from session state' "jq -e '.failure_stage==\"turn\" and (.failure_artifact|length>0)' '$BAD_META' && test -s \"\$(jq -r .failure_artifact '$BAD_META')\""
 if case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) true;; *) false;; esac; then
@@ -458,7 +482,12 @@ else
 '
 fi
 check 'brief forbids shell commands the headless runtime auto-denies' "test \"\$(grep -c 'never call run_command' '$SCRIPT')\" -eq 2 && ! grep -q 'you may run commands' '$SCRIPT'"
-check 'governed denied-tool turn fails naming the denied tool' "! (gov_run govdenied denied 2>&1 | tee '$TMP/govdenied.err' >/dev/null; exit \${PIPESTATUS[0]}) && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/govdenied.err'"
-check 'plain denied-tool turn fails naming the denied tool' "! (new_run '$RG' plaindenied denied 2>&1 | tee '$TMP/plaindenied.err' >/dev/null; exit \${PIPESTATUS[0]}) && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/plaindenied.err'"
+set +e; (gov_run govdenied denied) >"$TMP/govdenied.out" 2>"$TMP/govdenied.err"; GOVDENIED_RC=$?; set -e
+check 'governed denied-tool turn fails naming the denied tool' "test '$GOVDENIED_RC' -ne 0 && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/govdenied.err'"
+check 'governed denied-tool turn is a review-step failure (exit 81 + marker)' "test '$GOVDENIED_RC' -eq 81 && grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/govdenied.err'"
+check 'governed denied-tool turn never prints PASS' "! grep -q '^PASS session=' '$TMP/govdenied.out' '$TMP/govdenied.err'"
+set +e; (new_run "$RG" plaindenied denied) >"$TMP/plaindenied.out" 2>"$TMP/plaindenied.err"; PLAINDENIED_RC=$?; set -e
+check 'plain denied-tool turn fails naming the denied tool' "test '$PLAINDENIED_RC' -ne 0 && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/plaindenied.err'"
+check 'plain denied-tool turn is a review-step failure and never PASS' "test '$PLAINDENIED_RC' -eq 81 && grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/plaindenied.err' && ! grep -q '^PASS session=' '$TMP/plaindenied.out' '$TMP/plaindenied.err'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

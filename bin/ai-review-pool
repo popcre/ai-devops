@@ -344,6 +344,21 @@ if [ "$PROVIDER_RC" -ne 0 ]; then
     "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure out-of-credit --report "$TMP_TEXT" >/dev/null 2>&1 || true
     exit 92
   fi
+  # Empty / blocked / no-verdict turns are a REVIEW-STEP failure and reroute
+  # (child 1). They must never be booked as provider-failed, which the action
+  # taxonomy treats as a `result` and would redden the PR test verdict.
+  # The empty-verdict contract is three-part (Codex 2026-10-05): the runner
+  # must exit 81, print the AI_REVIEW_EMPTY_VERDICT marker on its own line,
+  # AND be a provider whose wrapper defines that contract (ai-gemini's
+  # die_empty_verdict). A bare nonzero exit (including 81) is not enough —
+  # another provider can exit 81 for an unrelated failure — and neither is a
+  # marker-shaped line in unrelated stderr (a diagnostic quoting the
+  # contract). All three must hold or the turn stays provider-failed.
+  if [ "$PROVIDER_RC" -eq 81 ] && [ "$provider" = gemini ] \
+     && grep -q '^AI_REVIEW_EMPTY_VERDICT ' "$TMP_ERR" 2>/dev/null; then
+    "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true
+    die "$provider returned an empty or blocked verdict; review-step failure, reroute (never a PASS)."
+  fi
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure provider-failed --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die "$provider runner exited nonzero ($PROVIDER_RC); diagnostic retained in the lifecycle record."
 fi
@@ -356,7 +371,7 @@ if [ -z "$SNAPSHOT_DIGEST_AFTER" ] || [ "$SNAPSHOT_DIGEST_AFTER" != "$SNAPSHOT_D
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure snapshot-drifted --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die 'the review snapshot changed during the review; verdict refused.'
 fi
-[ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure invalid-provider-envelope >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
+[ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure empty-report >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
 
 # The prompt asks for an early provisional verdict and the final verdict LAST
 # under a literal heading, so only the last `## Verdict` heading counts; an
@@ -365,13 +380,28 @@ VERDICT_LINE="$(awk '/^## Verdict[[:space:]]*$/{n=NR} END{print n+0}' "$TMP_TEXT
 VERDICT="$(awk -v n="$VERDICT_LINE" 'n>0 && NR==n+1{gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
 case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
 # Binding and the analysis floor are judged on the MODEL BODY - stdout only,
-# captured separately from the runner's stderr chrome, and only the text
-# before the final verdict heading counts.
-if ! awk -v h="$REVIEW_HEAD" -v n="$VERDICT_LINE" 'NR>=n{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
+# captured separately from the runner's stderr chrome. The analysis is the
+# text on the far side of the verdict block: before a terminal `## Verdict`
+# (this brief's shape, which every provider is told to use) or, for Gemini
+# only, after a leading one (ai-gemini's non-governed contract requires
+# `## Verdict` first and the findings after - ai-gemini:303,383-386). No
+# other provider's runner imposes a leading verdict, so for them a leading
+# `## Verdict` is just a provisional block and the analysis still sits
+# before the final heading. A footer-only body has no analysis on either
+# side and is still refused.
+FIRST_NONEMPTY="$(awk 'NF{print NR; exit}' "$TMP_TEXT")"
+if [ "$provider" = gemini ] && [ "$VERDICT_LINE" -gt 0 ] && [ "${FIRST_NONEMPTY:-0}" -eq "$VERDICT_LINE" ]; then
+  ANALYSIS_START="$((VERDICT_LINE + 2))"  # skip the heading and its one verdict word
+  ANALYSIS_END=0                          # 0 = through end of body
+else
+  ANALYSIS_START=1
+  ANALYSIS_END="$VERDICT_LINE"            # stop before the final verdict heading
+fi
+if ! awk -v h="$REVIEW_HEAD" -v s="$ANALYSIS_START" -v e="$ANALYSIS_END" 'NR<s{next} e>0 && NR>=e{exit} index($0, h){found=1} END{exit found?0:1}' "$TMP_TEXT"; then
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure verdict-not-bound-to-head --report "$TMP_TEXT" >/dev/null 2>&1 || true
   die "$provider verdict did not name the reviewed head; refusing unbound verdict."
 fi
-BODY_BYTES="$(awk -v n="$VERDICT_LINE" 'NR>=n{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
+BODY_BYTES="$(awk -v s="$ANALYSIS_START" -v e="$ANALYSIS_END" 'NR<s{next} e>0 && NR>=e{exit} {b += length($0) + 1} END {print b+0}' "$TMP_TEXT")"
 [ "$BODY_BYTES" -ge 400 ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure report-floor --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider analysis body is below the minimum analysis floor (runner chrome excluded)."; }
 
 OUT="$REPORT_DIR/${provider}-${mode}-${RUN_ID}.md"; [ ! -e "$OUT" ] || die "unique report collision: $OUT"

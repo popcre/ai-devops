@@ -1459,6 +1459,13 @@ case "${POOL_RUNNER_MODE:-approve}" in
   drift) printf 'Analysis with findings and severity groups covering the adapter contract, long enough to clear the minimum report floor before the drift check is reached. Head under review: %s. Registry eligibility, packet identity, lifecycle accounting and the verdict binding were all examined, with file and line references per finding and a sibling-class sweep, before this verdict.\n\n## Verdict\nAPPROVE\n' "$HEAD"; touch "$(dirname "$0")/flip" ;;
   credit) _cr_p="$(printf '%s' "$2" | cut -d- -f2)"; printf 'AI_REVIEWER_OUT_OF_CREDIT provider=%s code=insufficient_quota\nOUT OF CREDIT: stub - then run: ai-review-preflight clear %s\n' "$_cr_p" "$_cr_p" >&2; exit 92 ;;
   chrome) printf 'runner progress chrome naming the head %s with enough padding text that a whole-buffer byte floor would pass if chrome were counted toward the analysis floor, which is exactly what this mode must not reward\n' "$HEAD" >&2; printf 'Short body.\n\n## Verdict\nAPPROVE\n' ;;
+  # Verdict-first shape (ai-gemini's leading `## Verdict` contract): the
+  # analysis and the head binding sit AFTER the verdict block. The pool gate
+  # must accept this, or every valid Gemini response fails one gate.
+  geminishape) printf '## Verdict\nAPPROVE\n\nAnalysis of the change with evidence lines and sibling checks across the full diff, including the boundary, refusal and fail-closed paths the adapter contract requires. Head under review: %s. The review covered the registry eligibility decision at the front door, the evidence packet identity binding before and after the paid run, the lifecycle begin and finish accounting, the verdict-to-head binding rule, the report floor, and every fail-closed refusal path a pool review must keep. Findings are grouped by severity with file and line references, and the sibling-class sweep ran over each guard before this verdict was written, exactly as the harness requires of every pool review.\n' "$HEAD" ;;
+  # Footer-only body: a leading verdict word and nothing else. No analysis on
+  # either side of the block, so the pool gate must still refuse it.
+  footerempty) printf '## Verdict\nAPPROVE\n' ;;
 esac
 EOF
 chmod +x "$POOLTMP/packet" "$POOLTMP/lifecycle" "$POOLTMP/runner"
@@ -1571,6 +1578,18 @@ check "pool_adapter_binds_head_only_before_the_final_verdict" "[ '$RC_HAF' -ne 0
 check "pool_adapter_floor_counts_only_text_before_the_final_verdict" "[ '$RC_PO' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-po'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" qwen security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
 check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
+# Pool-path contract for ai-gemini's verdict-first shape (finding on PR #1291):
+# a realistic leading `## Verdict` + analysis body is accepted for Gemini
+# (whose runner requires the verdict first), refused for every other provider
+# (whose brief puts the verdict last), and a footer-only empty body is still
+# refused.
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" gemini final-check ) > "$POOLTMP/out-gshape" 2>&1; RC_GSHAPE=$?
+GSHAPE_REPORT="$(tail -1 "$POOLTMP/out-gshape" 2>/dev/null)"
+check "pool_adapter_accepts_a_verdict_first_gemini_shaped_body" "[ '$RC_GSHAPE' -eq 0 ] && [ -f '$GSHAPE_REPORT' ] && grep -q APPROVE '$GSHAPE_REPORT'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" qwen security-review ) > "$POOLTMP/out-gshape-qwen" 2>&1; RC_GSHAPE_QWEN=$?
+check "pool_adapter_refuses_verdict_first_for_non_gemini_providers" "[ '$RC_GSHAPE_QWEN' -ne 0 ]"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=footerempty bash "$POOL" qwen security-review ) > "$POOLTMP/out-fempty" 2>&1; RC_FEMPTY=$?
+check "pool_adapter_refuses_a_footer_only_empty_body" "[ '$RC_FEMPTY' -ne 0 ]"
 # A rewritten target tip (moved BACKWARD to a non-descendant) is real drift
 # and must still destroy the paid report.
 ( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_HEAD" "$FAKE_BASE" && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?

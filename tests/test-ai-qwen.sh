@@ -518,6 +518,77 @@ check 'Qwen preloader survives the runtime re-exec, deletes its handoff, and sta
 # Issue #1032: --sandbox forwards NODE_OPTIONS into the container, where the host
 # preloader path does not exist; the preloader must remove itself once consumed.
 check 'Qwen preloader removes itself from NODE_OPTIONS so a sandboxed child never requires a host-only path' "printf '%s' '$PRELOAD_PROOF' | jq -e '.nodeOptions==\"absent\"'"
+# Any other host-only --require is the same sandbox break. The strip is total.
+# Node on Windows resolves only Windows-style paths when NODE_OPTIONS carries
+# more than one --require, so spell both that way here.
+printf 'module.exports={};\n' > "$TMP/host-only-helper.js"
+printf 'module.exports={};\n' > "$TMP/other.js"
+# Windows Node resolves only Windows-style paths in multi-require NODE_OPTIONS;
+# Git Bash's pwd -W is rejected by Linux Bash, so fall back to POSIX there.
+win_path(){ (cd "$1" && { pwd -W 2>/dev/null || pwd; }); }
+PRELOAD_WIN="$(win_path "$(dirname "$REPO_ROOT/tools/qwen-provider-env-preload.cjs")")/qwen-provider-env-preload.cjs"
+HELPER_WIN="$(win_path "$TMP")/host-only-helper.js"
+OTHER_WIN="$(win_path "$TMP")/other.js"
+printf 'preload-test-secret\n' > "$TMP/preload-extra-secret"; chmod 600 "$TMP/preload-extra-secret"
+PRELOAD_EXTRA="$(env -u SANDBOX_FLAGS AI_QWEN_SECRET_FILE="$TMP/preload-extra-secret" NODE_OPTIONS="--require=$HELPER_WIN --require=$PRELOAD_WIN --max-old-space-size=256" node -e 'process.stdout.write(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS||"absent"}))')"
+check 'Qwen preloader strips every --require from NODE_OPTIONS, not only its own' "printf '%s' '$PRELOAD_EXTRA' | jq -e '.nodeOptions==\"--max-old-space-size=256\"'"
+printf 'preload-test-secret\n' > "$TMP/preload-space-secret"; chmod 600 "$TMP/preload-space-secret"
+PRELOAD_SPACE="$(env -u SANDBOX_FLAGS AI_QWEN_SECRET_FILE="$TMP/preload-space-secret" NODE_OPTIONS="--require $PRELOAD_WIN -r $OTHER_WIN" node -e 'process.stdout.write(process.env.NODE_OPTIONS||"absent")')"
+check 'Qwen preloader strips --require and -r in both equals and spaced forms' "test \"\$PRELOAD_SPACE\" = 'absent'"
+# Codex 2026-10-05: whitespace-splitting broke any quoted argument that
+# contains spaces. A `--require "/path/with spaces/mod.js"` used to leave the
+# fragments `/path/with` and `spaces/mod.js"` in NODE_OPTIONS, so the
+# sandboxed child still died on a host-only path. Set NODE_OPTIONS in-process
+# (node itself never parses it here) so the preloader's tokenizer is what is
+# under test, then require the preloader and read back what it left.
+mkdir -p "$TMP/spaced dir"
+printf 'module.exports={};\n' > "$TMP/spaced dir/spaced helper.js"
+printf 'module.exports={};\n' > "$TMP/spaced dir/other helper.js"
+PRELOAD_CJS="$REPO_ROOT/tools/qwen-provider-env-preload.cjs"
+strip_node_options() {
+  node -e '
+    process.env.NODE_OPTIONS = process.argv[1];
+    delete process.env.AI_QWEN_SECRET_FILE;
+    delete process.env.SANDBOX_FLAGS;
+    require(process.argv[2]);
+    process.stdout.write(process.env.NODE_OPTIONS || "absent");
+  ' -- "$1" "$PRELOAD_CJS"
+}
+strip_sandbox_flags() {
+  printf 'k\n' > "$TMP/preload-spaced-flags-secret"; chmod 600 "$TMP/preload-spaced-flags-secret"
+  node -e '
+    process.env.SANDBOX_FLAGS = process.argv[1];
+    process.env.AI_QWEN_SECRET_FILE = process.argv[2];
+    require(process.argv[3]);
+    process.stdout.write(process.env.SANDBOX_FLAGS || "");
+  ' -- "$1" "$TMP/preload-spaced-flags-secret" "$PRELOAD_CJS"
+}
+SPACED_ONE="$(strip_node_options "--require \"$TMP/spaced dir/spaced helper.js\" --max-old-space-size=256")"
+SPACED_EQ="$(strip_node_options "--require=\"$TMP/spaced dir/spaced helper.js\" --max-old-space-size=256")"
+SPACED_R="$(strip_node_options "-r \"$TMP/spaced dir/spaced helper.js\" -r \"$TMP/spaced dir/other helper.js\"")"
+SPACED_KEEP="$(strip_node_options "--title \"my app\" --max-old-space-size=256")"
+SPACED_STALE="$(strip_sandbox_flags "--env BAILIAN_CODING_PLAN_API_KEY=\"old value with spaces\" --rm")"
+SPACED_STALE_EQ="$(strip_sandbox_flags "--env=\"BAILIAN_CODING_PLAN_API_KEY=old value\" --rm")"
+check 'Qwen preloader strips a quoted spaced --require with no leftover fragments' \
+  "test \"\$SPACED_ONE\" = '--max-old-space-size=256'"
+check 'Qwen preloader strips a quoted spaced --require= form with no leftover fragments' \
+  "test \"\$SPACED_EQ\" = '--max-old-space-size=256'"
+check 'Qwen preloader strips a quoted spaced -r with no leftover fragments' \
+  "test \"\$SPACED_R\" = 'absent'"
+check 'Qwen preloader keeps a spaced non-require option quoted and intact' \
+  "test \"\$SPACED_KEEP\" = '--title \"my app\" --max-old-space-size=256'"
+check 'Qwen sandbox forward drops a quoted stale secret without leaving fragments' \
+  "test \"\$SPACED_STALE\" = '--rm --env BAILIAN_CODING_PLAN_API_KEY'"
+check 'Qwen sandbox forward drops a quoted spaced --env= stale secret without leaving fragments' \
+  "test \"\$SPACED_STALE_EQ\" = '--rm --env BAILIAN_CODING_PLAN_API_KEY'"
+# Windows paths contain backslashes; inside double quotes only \\ and \" are
+# escapes — every other \x pair must survive as a literal backslash.
+SPACED_WIN="$(strip_node_options "--require \"C:\\Program Files\\vendor\\mod.js\" --max-old-space-size=256")"
+check 'Qwen preloader preserves Windows backslashes in a quoted spaced --require' \
+  "test \"\$SPACED_WIN\" = '--max-old-space-size=256'"
+SPACED_WIN_KEEP="$(strip_node_options "--title \"C:\\my app\" --max-old-space-size=256")"
+check 'Qwen preloader keeps Windows backslashes intact in a non-require quoted option' \
+  "test \"\$SPACED_WIN_KEEP\" = '--title \"C:\\\\my app\" --max-old-space-size=256'"
 # --sandbox forwards only a fixed provider-variable list; the key must reach the
 # container by name (docker copies the value from its env), never as NAME=value argv.
 check 'Qwen preloader forwards the key into the sandbox by name only' "printf '%s' '$PRELOAD_PROOF' | jq -e '.sandboxFlags==\"--env BAILIAN_CODING_PLAN_API_KEY\"'"

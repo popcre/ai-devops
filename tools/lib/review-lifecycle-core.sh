@@ -570,7 +570,7 @@ rlc_run_review() {
   fi
 
   [ -s "$body_file" ] || {
-    rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" invalid-provider-envelope "" "$packet_dir" "$packet_sha"
+    rlc_lifecycle_fail "$state" "$(( $(date +%s)-started ))" empty-report "" "$packet_dir" "$packet_sha"
     rlc_cleanup_after_store 0 "$repo" "$tag" "$packet_dir"
     rm -f "$brief" "$body_file" "$identity_file"
     rlc_die "$provider returned an empty report."
