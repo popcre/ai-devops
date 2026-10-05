@@ -932,7 +932,8 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN [ALLOW_FIRST]
   local policy_bin cli_version_text cli_version prior_raw prior_versions now
   local out rc mode want class clear_stale_pin_mismatch clear_stale_pin_record clear_rc switched_as switched_bin
   local fingerprint_before fingerprint_after prior_wrappers prior_pin _fp_rest
-  local policy_path cur_entry prev_entry proof prior_mode prior_cmd prior_model policy_cmd policy_model
+  local policy_path cur_entry prev_entry proof prior_mode prior_cmd prior_model policy_cmd policy_model proot prel
+  local wdir wroot wrel wbase _w_old _w_new
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$provider" in
     gemini|qwen)
@@ -978,10 +979,13 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN [ALLOW_FIRST]
   policy_path="$("$policy_bin" policy-file 2>/dev/null | tr -d '\r\n')" || policy_path=""
   cur_entry=""
   [ -z "$policy_path" ] || cur_entry="$(jq -c --arg p "$provider" '.providers[$p] // empty' "$policy_path" 2>/dev/null)" || cur_entry=""
-  prev_entry=""; proof=""; prior_versions="[]"
+  prev_entry=""; proof=""; prior_versions="[]"; prel=""; proot=""
+  # Repo-relative spellings must come from git itself: the policy path is an
+  # MSYS path while `rev-parse --show-toplevel` reports a drive-letter path, so
+  # stripping one from the other silently never matches.
   if [ -n "$cur_entry" ] && proot="$(git -C "$(dirname "$policy_path")" rev-parse --show-toplevel 2>/dev/null)"; then
-    prel="${policy_path#"$proot"/}"
-    prev_entry="$(git -C "$proot" show "HEAD:$prel" 2>/dev/null | jq -c --arg p "$provider" '.providers[$p] // empty' 2>/dev/null)" || prev_entry=""
+    prel="$(git -C "$(dirname "$policy_path")" rev-parse --show-prefix 2>/dev/null)$(basename "$policy_path")" || prel=""
+    [ -z "$prel" ] || prev_entry="$(git -C "$proot" show "HEAD:$prel" 2>/dev/null | jq -c --arg p "$provider" '.providers[$p] // empty' 2>/dev/null)" || prev_entry=""
   fi
   if [ -n "$prev_entry" ] && [ "$prev_entry" != "null" ]; then
     [ "$(printf '%s' "$prev_entry" | jq -r '.supported_version // ""')" = "$old_pin" ] \
@@ -1048,26 +1052,37 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN [ALLOW_FIRST]
   cli_version_text="$(timeout "${CHECK_TIMEOUT}s" "$cli_bin" --version 2>/dev/null || true)"
   cli_version="$("$policy_bin" parse "$cli_version_text")"
 
-  # The cheap lane may only bless bytes that are already known. A behaviour
-  # change to the provider wrapper must take the full qualification path. With
-  # qualification history the wrapper hash must be one that was already
-  # qualified; without history the wrapper at least must be unchanged in its
-  # own work tree (a committed wrapper edit is exactly what must not ride this
-  # lane). A first qualification outside any work tree is only allowed behind
-  # the explicit --allow-first-qualification attestation, and it still has to
-  # pass doctor and the live smoke below before any history is recorded.
+  # WRAPPER IDENTITY. The cheap lane may only bless bytes that are already
+  # known, and the wrapper must be the one the PREVIOUS pin was blessed
+  # against. Two bindings, applied in every proof branch:
+  #   - qualification history: the wrapper hash must be one already recorded;
+  #   - git: the wrapper must be unchanged since the commit that established
+  #     the previous policy pin, AND have no uncommitted edits. A committed
+  #     behaviour change after that commit is exactly what must not ride here.
+  # --allow-first-qualification waives only the absence of history; it never
+  # waives these bindings when they are checkable.
+  wdir="$(dirname "$wrapper")"
+  wroot="$(git -C "$wdir" rev-parse --show-toplevel 2>/dev/null)" || wroot=""
   if [ "$prior_versions" != "[]" ] && [ -n "$prior_versions" ]; then
     prior_wrappers="$(printf '%s' "$prior_versions" | jq -r '[.[].wrapper_sha256 // empty] | unique | join(",")')"
     case ",$prior_wrappers," in
       *",$before_sha,"*) : ;;
       *) die "$provider wrapper changed since the last qualification (hash $before_sha is not in the recorded set); behaviour-changing wrapper edits must take the full qualification path, never the cheap pin-only lane." ;;
     esac
-  elif [ "$proof" != first-qualification ]; then
-    wdir="$(dirname "$wrapper")"
-    if wroot="$(git -C "$wdir" rev-parse --show-toplevel 2>/dev/null)"; then
-      wrel="${wrapper#"$wroot"/}"
-      [ -z "$(git -C "$wroot" status --porcelain -- "$wrel" 2>/dev/null)" ] \
-        || die "$provider wrapper $wrel has uncommitted edits and no qualification history; behaviour-changing wrapper edits must take the full qualification path, never the cheap pin-only lane."
+  fi
+  if [ -n "$wroot" ]; then
+    wrel="$(git -C "$wdir" rev-parse --show-prefix 2>/dev/null)$(basename "$wrapper")" || wrel=""
+    [ -n "$wrel" ] || wrel="$(basename "$wrapper")"
+    [ -z "$(git -C "$wroot" status --porcelain -- "$wrel" 2>/dev/null)" ] \
+      || die "$provider wrapper $wrel has uncommitted edits; behaviour-changing wrapper edits must take the full qualification path, never the cheap pin-only lane."
+    wbase=""
+    [ -z "$prel" ] || wbase="$(git -C "$wroot" log -1 --format=%H -- "$prel" 2>/dev/null)" || wbase=""
+    [ -n "$wbase" ] || wbase="HEAD"
+    if git -C "$wroot" cat-file -e "$wbase:$wrel" 2>/dev/null; then
+      _w_old="$(git -C "$wroot" rev-parse "$wbase:$wrel" 2>/dev/null)" || _w_old=""
+      _w_new="$(git -C "$wroot" rev-parse "HEAD:$wrel" 2>/dev/null)" || _w_new=""
+      [ -z "$_w_old" ] || [ "$_w_old" = "$_w_new" ] \
+        || die "$provider wrapper $wrel changed since the commit that set the previous policy pin; a behaviour-changing wrapper edit must take the full qualification path, never the cheap pin-only lane."
     fi
   fi
 

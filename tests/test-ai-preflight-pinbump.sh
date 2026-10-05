@@ -881,6 +881,75 @@ PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
   || { bad "a simultaneous command rename is refused (not a pin bump)"; printf '%s\n' "$PB_OUT"; }
 jq '.providers.grok.command = "fakegrok"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
 
+# 13/14. A behaviour-changing WRAPPER edit — committed or not — must never ride
+#        the cheap lane. Fixture: a tiny repo whose committed policy pin is
+#        1.0.0 and whose wrapper is committed alongside it; the pin is then
+#        bumped in the working tree while the wrapper is edited too.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+GR="$TMP/git-proof"
+rm -rf "$GR"; mkdir -p "$GR"
+git -C "$GR" init -q; git -C "$GR" config user.name Test; git -C "$GR" config user.email t@example.com
+cat > "$GR/wrapper.sh" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then printf 'fakegrok 1.0.0 (abc) [stable]\n'; exit 0; fi
+echo health ok
+EOF
+chmod +x "$GR/wrapper.sh"
+cat > "$GR/policy.json" <<'EOF'
+{"schema_version":1,"providers":{"grok":{"command":"fakegrok","supported_version":"1.0.0","version_match":"minimum","qualified_on":"2026-09-03","exact_install_command":null,"notes":"fixture"}}}
+EOF
+git -C "$GR" add wrapper.sh policy.json && git -C "$GR" commit -qm init
+jq '.providers.grok.supported_version = "1.0.1"' "$GR/policy.json" > "$GR/policy.json.new" && mv "$GR/policy.json.new" "$GR/policy.json"
+printf '\n# behaviour change\n' >> "$GR/wrapper.sh"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$GR/policy.json" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$GR/wrapper.sh" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.1 \
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 1.0.0 1.0.1 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'uncommitted edits' \
+  && ok "an uncommitted wrapper edit is refused by the cheap lane" \
+  || { bad "an uncommitted wrapper edit is refused by the cheap lane"; printf '%s\n' "$PB_OUT"; }
+git -C "$GR" add wrapper.sh && git -C "$GR" commit -qm wrapper-change
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$GR/policy.json" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$GR/wrapper.sh" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.1 \
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 1.0.0 1.0.1 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'since the commit that set the previous policy pin' \
+  && ok "a committed wrapper edit is refused by the cheap lane" \
+  || { bad "a committed wrapper edit is refused by the cheap lane"; printf '%s\n' "$PB_OUT"; }
+
+# 15. The same shape with an UNCHANGED wrapper is a genuine pin bump and is
+#     accepted — the refusals above are about wrapper identity, not about git.
+GR2="$TMP/git-proof-ok"
+rm -rf "$GR2"; mkdir -p "$GR2"
+git -C "$GR2" init -q; git -C "$GR2" config user.name Test; git -C "$GR2" config user.email t@example.com
+cat > "$GR2/wrapper.sh" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then printf 'fakegrok 1.0.0 (abc) [stable]\n'; exit 0; fi
+echo health ok
+EOF
+chmod +x "$GR2/wrapper.sh"
+cat > "$GR2/policy.json" <<'EOF'
+{"schema_version":1,"providers":{"grok":{"command":"fakegrok","supported_version":"1.0.0","version_match":"minimum","qualified_on":"2026-09-03","exact_install_command":null,"notes":"fixture"}}}
+EOF
+git -C "$GR2" add wrapper.sh policy.json && git -C "$GR2" commit -qm init
+jq '.providers.grok.supported_version = "1.0.1"' "$GR2/policy.json" > "$GR2/policy.json.new" && mv "$GR2/policy.json.new" "$GR2/policy.json"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$GR2/policy.json" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$GR2/wrapper.sh" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.1 \
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 1.0.0 1.0.1 2>&1)"; PB_RC=$?
+[ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'PASS pin-bump-qualify provider=grok' \
+  && ok "an unmodified wrapper with a pin-only policy edit is accepted" \
+  || { bad "an unmodified wrapper with a pin-only policy edit is accepted"; printf '%s\n' "$PB_OUT"; }
+
 # Execute-bit cases. NTFS/Git Bash synthesises the execute bit for every
 # regular file (chmod -x is a no-op), so a non-executable candidate cannot be
 # built there; probe once and skip the cases only that filesystem cannot
