@@ -486,11 +486,16 @@ def compact_tool_messages(messages):
     """Stub out older tool results once the in-full budget is exceeded.
 
     Only the most recent COMPACT_KEEP_RESULTS tool messages keep their full
-    body. Stubs are stable once written, so later rounds can still cache-hit
-    the compacted prefix. tool_call_id pairing is preserved.
+    body (at least one stays in full so the turn keeps its latest evidence).
+    Stubs are stable once written, so later rounds can still cache-hit the
+    compacted prefix. tool_call_id pairing is preserved. A stub is never
+    applied when it would not shrink the message.
     """
     tool_idxs = [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "tool"]
-    if len(tool_idxs) <= COMPACT_KEEP_RESULTS:
+    if not tool_idxs:
+        return messages
+    keep_n = max(1, COMPACT_KEEP_RESULTS)
+    if len(tool_idxs) <= keep_n:
         return messages
 
     def content_len(m):
@@ -500,7 +505,8 @@ def compact_tool_messages(messages):
     total = sum(content_len(messages[i]) for i in tool_idxs)
     if total <= COMPACT_BUDGET_CHARS:
         return messages
-    keep = set(tool_idxs[-COMPACT_KEEP_RESULTS:])
+    keep = set(tool_idxs[-keep_n:])
+    stub_len = len(COMPACT_STUB)
     for i in tool_idxs:
         if i in keep:
             continue
@@ -509,8 +515,12 @@ def compact_tool_messages(messages):
         cur = messages[i]
         if cur.get("content") == COMPACT_STUB:
             continue
-        total -= content_len(cur)
+        cur_len = content_len(cur)
+        if cur_len <= stub_len:
+            continue  # stubbing would not shrink
+        total -= cur_len
         cur["content"] = COMPACT_STUB
+        total += stub_len
     return messages
 
 

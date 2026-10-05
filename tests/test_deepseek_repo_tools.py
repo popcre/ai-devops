@@ -263,6 +263,23 @@ with tempfile.TemporaryDirectory() as tmp:
         again = [dict(m) for m in cmsgs]
         t.compact_tool_messages(cmsgs)
         check("compaction stubs are stable across rounds", cmsgs == again)
+        # Zero keep must not retain every result (Python -0: slice bug).
+        t.COMPACT_KEEP_RESULTS = 0
+        zero = [{"role": "tool", "tool_call_id": f"z{i}", "content": "Q" * 5000} for i in range(4)]
+        t.compact_tool_messages(zero)
+        check("zero keep still compacts and keeps at least one result",
+              sum(1 for m in zero if m["content"] == t.COMPACT_STUB) == 3
+              and sum(1 for m in zero if m["content"].startswith("Q")) == 1)
+        # A result shorter than the stub is never rewritten (no growth).
+        t.COMPACT_KEEP_RESULTS = 1
+        short = [
+            {"role": "tool", "tool_call_id": "s0", "content": "tiny"},
+            {"role": "tool", "tool_call_id": "s1", "content": "E" * 5000},
+        ]
+        t.COMPACT_BUDGET_CHARS = 10
+        t.compact_tool_messages(short)
+        check("compaction never grows a short result",
+              short[0]["content"] == "tiny" and short[1]["content"].startswith("E"))
     finally:
         t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS = saved_budget, saved_keep
 
