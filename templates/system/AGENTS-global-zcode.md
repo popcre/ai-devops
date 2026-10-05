@@ -111,6 +111,13 @@ the task needs the detail.
   around and never turned into a request for Albert's approval. Ending a turn with
   authorized work still undone is the same failure as asking permission to
   start it.
+- **Restate a short job plan before work.** Anything beyond a known one-phrase
+  command (wrap up, push and commit, and similar) gets five to six plain lines
+  the agent drafts — Goal, Where, Do only, Do not, Done when, Then — shown in
+  the normal reply as a confirmation of understanding, then executed when the
+  request is unambiguous and safe. Pause only for a genuine business-meaning
+  choice. Never hand Albert the template to fill in; he corrects yours if wrong.
+  This is understanding, not a request for approval.
 - **Live proof is required before an outcome is closed.** If live proof is not
   yet done, leave a checklist item on the **same** GitHub issue (e.g. `- [ ] live
   proof`) and name it in the session's closing note. Do **not** open a
