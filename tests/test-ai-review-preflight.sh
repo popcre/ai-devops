@@ -323,8 +323,11 @@ check "DeepSeek status is available with its doctor contract" "$SCRIPT status de
 check "DeepSeek preflight uses its doctor contract" "$SCRIPT check deepseek '$REPO' | grep -q 'health=ok'"
 check "StepFun is usable on Linux with its doctor contract" "AI_STEPFUN_PLATFORM=Linux $SCRIPT status stepfun | jq -e '.status==\"installed-healthy\" and .usable==true'"
 check "StepFun preflight passes on Linux" "AI_STEPFUN_PLATFORM=Linux $SCRIPT check stepfun '$REPO' | grep -q 'health=ok'"
-check "StepFun is unsupported-platform on Windows without OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH=\"$(dirname "$(command -v jq)"):/usr/bin:/bin\" $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
-check "StepFun preflight refuses on Windows without an engine" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH=\"$(dirname "$(command -v jq)"):/usr/bin:/bin\" $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
+# Restricted PATH: essential tools only, so `command -v opencode` fails and
+# the StepFun engine-miss path is reachable on Windows CI runners.
+WIN_TEST_PATH="/mingw64/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin:$(dirname "$(command -v python3 || command -v python)")"
+check "StepFun is unsupported-platform on Windows without OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH=\"$WIN_TEST_PATH\" $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
+check "StepFun preflight refuses on Windows without an engine" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH=\"$WIN_TEST_PATH\" $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
 check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux under bubblewrap, or Windows folder + test shell'"
 check "StepFun is not statically unsupported on Windows with OpenCode (folder + test shell)" "! AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE=/bin/true $SCRIPT status stepfun | jq -e '.failure_class==\"unsupported-platform\"'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
