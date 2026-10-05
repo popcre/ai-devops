@@ -36,14 +36,19 @@ import subprocess
 import sys
 import time
 
-MAX_TOOL_CALLS = int(os.environ.get("DEEPSEEK_TOOLS_MAX_CALLS", "40"))
-MAX_ROUNDS = int(os.environ.get("DEEPSEEK_TOOLS_MAX_ROUNDS", "16"))
-MAX_FILE_BYTES = 256 * 1024          # whole-file read without a range
-MAX_SCAN_BYTES = 16 * 1024 * 1024    # ranged read or grep of one file
+MAX_TOOL_CALLS = int(os.environ.get("DEEPSEEK_TOOLS_MAX_CALLS", "16"))
+MAX_ROUNDS = int(os.environ.get("DEEPSEEK_TOOLS_MAX_ROUNDS", "8"))
+MAX_FILE_BYTES = 64 * 1024           # whole-file read without a range
+MAX_SCAN_BYTES = 4 * 1024 * 1024     # ranged read or grep of one file
 GREP_SECONDS = float(os.environ.get("DEEPSEEK_TOOLS_GREP_SECONDS", "30"))
-MAX_OUTPUT_CHARS = 60000
-MAX_GREP_MATCHES = 200
-MAX_LIST_ENTRIES = 500
+MAX_OUTPUT_CHARS = int(os.environ.get("DEEPSEEK_TOOLS_MAX_OUTPUT_CHARS", "8000"))
+MAX_GREP_MATCHES = int(os.environ.get("DEEPSEEK_TOOLS_MAX_GREP_MATCHES", "40"))
+MAX_LIST_ENTRIES = 80
+# Keep only this many characters of tool results in the request. Older results
+# are stubbed so each paid round does not resend the whole exploration.
+COMPACT_BUDGET_CHARS = int(os.environ.get("DEEPSEEK_TOOLS_COMPACT_BUDGET_CHARS", "24000"))
+COMPACT_KEEP_RESULTS = int(os.environ.get("DEEPSEEK_TOOLS_COMPACT_KEEP_RESULTS", "4"))
+COMPACT_STUB = "[earlier tool result omitted for size; re-run the tool if you still need it]"
 
 DENY_DIRS = {".git", "node_modules", ".ai"}
 SECRET_GLOBS = [
@@ -473,7 +478,40 @@ NOTICE = ("You have a disposable, remote-less copy of the repository. list_dir, 
           "write_file edits files in it and run_command runs code, builds, and tests in it (no network, no "
           "credentials). Your edits are discarded after this turn and are not part of the pull request. "
           "Paths are relative to the repository root. Open the files you need to verify claims before "
-          "concluding and cite path:line for evidence. Your tool budget is {n} calls.")
+          "concluding and cite path:line for evidence. Your tool budget is {n} calls. "
+          "Earlier tool results may be omitted to save space; re-read with tools if you need them again.")
+
+
+def compact_tool_messages(messages):
+    """Stub out older tool results once the in-full budget is exceeded.
+
+    Only the most recent COMPACT_KEEP_RESULTS tool messages keep their full
+    body. Stubs are stable once written, so later rounds can still cache-hit
+    the compacted prefix. tool_call_id pairing is preserved.
+    """
+    tool_idxs = [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "tool"]
+    if len(tool_idxs) <= COMPACT_KEEP_RESULTS:
+        return messages
+
+    def content_len(m):
+        c = m.get("content")
+        return len(c) if isinstance(c, str) else 0
+
+    total = sum(content_len(messages[i]) for i in tool_idxs)
+    if total <= COMPACT_BUDGET_CHARS:
+        return messages
+    keep = set(tool_idxs[-COMPACT_KEEP_RESULTS:])
+    for i in tool_idxs:
+        if i in keep:
+            continue
+        if total <= COMPACT_BUDGET_CHARS:
+            break
+        cur = messages[i]
+        if cur.get("content") == COMPACT_STUB:
+            continue
+        total -= content_len(cur)
+        cur["content"] = COMPACT_STUB
+    return messages
 
 
 # DeepSeek sometimes writes its tool calls as raw DSML markup in the message
@@ -587,6 +625,7 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
                                   "result_chars": len(result), "refused": result.startswith("Error:"),
                                   "counted": counted}) + "\n")
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+    compact_tool_messages(messages)
     if calls >= MAX_TOOL_CALLS or rnd + 1 >= MAX_ROUNDS:
         # Last round: no tools offered, so the model must answer.
         body.pop("tools", None)
