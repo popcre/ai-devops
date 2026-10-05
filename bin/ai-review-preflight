@@ -181,6 +181,8 @@ normalize_qualification_versions() { # RAW_JSON -> JSON array
         agy_sha256: .agy_sha256,
         agy_version: .agy_version,
         model: .model,
+        cli_sha256: .cli_sha256,
+        cli_version: .cli_version,
         qualified_epoch: .qualified_epoch
       } | with_entries(select(.value != null)) ]
     else [] end' 2>/dev/null || printf '[]\n'
@@ -199,7 +201,11 @@ qualification_versions() { # PROVIDER -> JSON array
 }
 
 legacy_record_version() { # PROVIDER -> schema number the provider wrapper accepts
-  case "$1" in gemini) printf 2 ;; qwen) printf 3 ;; *) return 1 ;; esac
+  # gemini/qwen wrappers validate their own schema numbers. The pin-bump lane
+  # records under schema 1 for every other provider; those wrappers do not read
+  # this store (they are not in LIVE_QUALIFIED_PROVIDERS), so the number is
+  # evidence metadata only and never a review gate.
+  case "$1" in gemini) printf 2 ;; qwen) printf 3 ;; *) printf 1 ;; esac
 }
 
 # write_qualification_store PROVIDER VERSIONS_JSON SELECTED_JSON writes the
@@ -237,6 +243,8 @@ publish_qualification_version() { # PROVIDER PRIOR_VERSIONS_JSON NEW_VERSION_JSO
         or ((.agy_sha256 // "") != ($new.agy_sha256 // ""))
         or ((.agy_version // "") != ($new.agy_version // ""))
         or ((.model // "") != ($new.model // ""))
+        or ((.cli_sha256 // "") != ($new.cli_sha256 // ""))
+        or ((.cli_version // "") != ($new.cli_version // ""))
       ) ] + [$new] | .[-32:]')" || return 1
   write_qualification_store "$provider" "$versions" "$new_version"
 }
@@ -473,6 +481,7 @@ explain_failure() {
     unsupported-platform) printf 'This provider has no engine on this operating system (StepFun: Ubuntu/Linux under bubblewrap, or Windows folder + test shell). Use another registered reviewer; never emulate or force it.\n' ;;
     not-registered) printf 'The provider is not carried in the reviewer registry, so it cannot receive a review no matter how healthy its local install is. Re-entry is a reviewed registry change backed by a live well-formed verdict, never an edit made to unblock an allocation.\n' ;;
     live-qualification-required) printf 'The reviewer live qualification no longer matches its wrapper, runtime, or preloader bytes. A pull of new toolkit code re-qualifies it automatically via the repository post-merge hook; to restore it now run: ai-review-preflight requalify\n' ;;
+    pin-mismatch) printf 'The installed provider CLI does not satisfy config/provider-cli-versions.json (below the floor, a new major, or an exact-pin miss). This is not a hard exact-pin rule: a version_match "minimum" provider accepts any same-major build at or above its floor, so an auto-updated provider is never blocked here. Fix by installing a satisfying build, or bump the pin in the same change and run: ai-review-preflight pin-bump-qualify <provider>\n' ;;
     probe-no-output) printf 'The health probe returned no diagnostic output. This is not proof the provider is broken. Retry after the short cooldown; if it persists, check the wrapper manually. Never treat empty output as healthy.\n' ;;
     provider-timeout) printf 'The health probe exceeded its time budget. This is a transient liveness problem, not an identity or auth failure. A short cooldown applies; retry after it expires. A timeout never means the provider is healthy and never authorizes a review.\n' ;;
     authentication-failed|provider-unhealthy) printf 'Quarantine this provider and correct the named health failure before assigning a review.\n' ;;
@@ -829,6 +838,146 @@ check_provider() { # PROVIDER REPO LIVE BASE
     "$provider" "$repo" "$([ "$live" = 1 ] && [ "$provider" != glm ] && printf live-verified || printf not-separately-exposed)"
 }
 
+# provider_cli_binary PROVIDER prints the path of the installed provider CLI
+# named by config/provider-cli-versions.json, resolved through PATH. The name
+# is read from the one versioned contract (ai-provider-version command), never
+# hardcoded here, so a renamed binary cannot leave a stale literal behind.
+provider_cli_binary() { # PROVIDER
+  local provider="$1" policy_bin cmd path
+  policy_bin="${AI_PROVIDER_VERSION_BIN:-$REGISTRY_REAL_DIR/ai-provider-version}"
+  [ -x "$policy_bin" ] || die "ai-provider-version is not executable: $policy_bin"
+  cmd="$("$policy_bin" command "$provider")" || return 1
+  path="$(command -v "$cmd" 2>/dev/null || true)"
+  [ -n "$path" ] && [ -e "$path" ] || return 1
+  printf '%s' "$path"
+}
+
+# pin_bump_qualify PROVIDER is the FAST PATH for a version-pin-bump-only change
+# (Muse 2b shape, #1183 child 5): hash the binary, run doctor, one live smoke.
+#
+# This is NOT the rejected hard exact-pin lane. Version policy is whatever
+# config/provider-cli-versions.json says, read only through ai-provider-version.
+# `version_match: "minimum"` (Grok, owner ruling 2026-09-23 on #686) accepts any
+# same-major build at or above the floor, so a provider that auto-updates past
+# the pin is never blocked by this path and never earns a quarantine here. The
+# lane only:
+#   - auto-quarantines on pin mismatch (the installed build FAILS policy), and
+#   - auto-restores that quarantine when the pin is updated in the same change
+#     (running this command IS the pin update), then
+#   - records the cheap qualification in the existing hash-pin store (the same
+#     one Gemini's live qualification uses — never a second store).
+# It deliberately does NOT add the provider to LIVE_QUALIFIED_PROVIDERS: a
+# later auto-update stays usable under the floor policy without re-running this
+# lane. Full live qualification (qualify gemini|qwen) remains the path for
+# behaviour changes; this lane is the cheap one for a pin bump.
+pin_bump_qualify() { # PROVIDER
+  local provider="$1" wrapper cli_bin cli_sha before_sha after_sha file
+  local policy_bin cli_version_text cli_version prior_raw prior_versions now
+  local out rc mode want class
+  valid_provider "$provider" || die "unknown provider '$provider'."
+  case "$provider" in
+    gemini|qwen)
+      die "pin-bump-qualify is the cheap lane for version-pin bumps only; $provider has its own full live qualification (ai-review-preflight qualify $provider)." ;;
+  esac
+  need jq; need timeout; need sha256sum; need awk
+  policy_bin="${AI_PROVIDER_VERSION_BIN:-$REGISTRY_REAL_DIR/ai-provider-version}"
+  [ -x "$policy_bin" ] || die "ai-provider-version is not executable: $policy_bin"
+  wrapper="$(provider_wrapper "$provider")"; [ -x "$wrapper" ] || die "provider wrapper is not executable: $wrapper"
+  cli_bin="$(provider_cli_binary "$provider")" || die "could not resolve the $provider CLI binary to hash (is its command on PATH?)."
+
+  # Auto-restore. This command runs because the pin is being updated in this
+  # change, so a pin-mismatch quarantine recorded against the OLD pin is stale.
+  # Clearing it first lets a build that satisfies the NEW pin restore cleanly;
+  # a build that still fails policy is re-quarantined below and stays down.
+  if active_quarantine "$provider"; then
+    if [ "$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // ""')" = pin-mismatch ]; then
+      admission_store clear "$provider" >/dev/null
+      note "ai-review-preflight: cleared stale pin-mismatch quarantine for $provider (the pin is being updated in this change)."
+    else
+      die "$provider has an active $(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // "unknown"') quarantine; clear it before pin-bump qualification."
+    fi
+  fi
+
+  before_sha="$(sha256sum "$wrapper" | awk '{print $1}')"
+  cli_sha="$(sha256sum "$cli_bin" | awk '{print $1}')"
+  cli_version_text="$(timeout "${CHECK_TIMEOUT}s" "$cli_bin" --version 2>/dev/null || true)"
+  cli_version="$("$policy_bin" parse "$cli_version_text")"
+  mode="$("$policy_bin" match "$provider")"
+  want="$("$policy_bin" required "$provider")"
+  note "ai-review-preflight: pin-bump-qualify $provider: wrapper=$before_sha cli=$cli_sha version=${cli_version:-unreadable} policy=$mode:${want:-unpinned}"
+
+  # Cheap fixed check 1: the wrapper doctor (binary present + health probe).
+  set +e; out="$(timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?; set -e
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then class=provider-timeout
+    elif [ -z "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then class=probe-no-output
+    else class="$(classify_failure "$out")"; fi
+    quarantine "$provider" "$class"
+    printf 'ai-review-preflight: pin-bump-qualify %s doctor failed: %s\n' "$provider" "$class" >&2
+    printf '%s\n' "$out" | tail -12 >&2
+    return 1
+  fi
+
+  # Cheap fixed check 2: the version pin. ai-provider-version enforces the
+  # policy exactly as written — a "minimum" provider accepts newer same-major
+  # builds, so this never becomes a hard exact pin on an auto-updater.
+  set +e; "$policy_bin" check "$provider" "$cli_version_text" >/dev/null; rc=$?; set -e
+  if [ "$rc" -ne 0 ]; then
+    quarantine "$provider" pin-mismatch
+    printf 'ai-review-preflight: pin-bump-qualify %s pin mismatch: installed version %s does not satisfy policy %s:%s.\n' \
+      "$provider" "${cli_version:-unreadable}" "$mode" "${want:-unpinned}" >&2
+    printf 'ai-review-preflight: auto-quarantined %s (pin-mismatch). Update the pin in this same change (or install a satisfying build) and re-run pin-bump-qualify to auto-restore.\n' "$provider" >&2
+    return 1
+  fi
+
+  # One live smoke. A pin bump is blessed by exactly one live turn, not a full
+  # re-qualification; behaviour changes still take the qualify path.
+  set +e
+  if [ "$provider" = muse ]; then
+    out="$(AI_MUSE_CALLER=preflight timeout "${AI_REVIEW_MUSE_QUALIFY_TIMEOUT:-240}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+  elif [ "$provider" = gemini ]; then
+    out="$(timeout "${AI_REVIEW_GEMINI_QUALIFY_TIMEOUT:-1800}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+  elif [ "$provider" = stepfun ]; then
+    out="$(timeout "${AI_REVIEW_STEPFUN_QUALIFY_TIMEOUT:-120}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+  else
+    out="$(timeout "${LIVE_PROBE_TIMEOUT}s" "$wrapper" doctor --live 2>&1)"; rc=$?
+  fi
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then class=provider-timeout
+    elif [ -z "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then class=probe-no-output
+    else class="$(classify_failure "$out")"; fi
+    quarantine "$provider" "$class"
+    printf 'ai-review-preflight: pin-bump-qualify %s live smoke failed: %s\n' "$provider" "$class" >&2
+    printf '%s\n' "$out" | tail -12 >&2
+    return 1
+  fi
+
+  # Untested bytes are never authorized: the wrapper must not have changed
+  # under us during the canary (same rule as qualify_gemini / qualify_qwen).
+  after_sha="$(sha256sum "$wrapper" | awk '{print $1}')"
+  [ "$before_sha" = "$after_sha" ] || {
+    printf 'ai-review-preflight: %s wrapper changed during pin-bump qualification; untested bytes are not authorized.\n' "$provider" >&2
+    return 1
+  }
+
+  # Record in the existing hash-pin store (qualification_file), never a second
+  # store. The record is evidence of this cheap bless; it does NOT gate the
+  # provider (not in LIVE_QUALIFIED_PROVIDERS), so a later auto-update under
+  # the floor policy keeps working without a re-run.
+  file="$(qualification_file "$provider")"
+  prior_raw="$(cat "$file" 2>/dev/null || true)"
+  prior_versions="$(qualification_versions "$provider")"
+  now="$(now_epoch)"
+  publish_qualification_version "$provider" "$prior_versions" \
+    "$(jq -nc --arg sha "$after_sha" --arg cli "$cli_sha" --arg ver "$cli_version" --arg mode "$mode" --arg want "$want" --argjson at "$now" \
+        '{wrapper_sha256:$sha,cli_sha256:$cli,cli_version:$ver,policy_mode:$mode,policy_version:$want,qualified_epoch:$at}')" \
+    || { restore_qualification_versions "$provider" "$prior_raw"; printf 'ai-review-preflight: %s pin-bump qualification did not publish; the previous record stays valid.\n' "$provider" >&2; return 1; }
+  note "ai-review-preflight: pin-bump-qualified $provider (wrapper $after_sha, cli $cli_sha, version ${cli_version:-unreadable}, policy $mode:${want:-unpinned})."
+  printf 'PASS pin-bump-qualify provider=%s cli_version=%s policy=%s:%s cli_sha256=%s\n' \
+    "$provider" "${cli_version:-unreadable}" "$mode" "${want:-unpinned}" "$cli_sha"
+}
+
 usage() {
   cat <<EOF
 Usage:
@@ -836,6 +985,7 @@ Usage:
   ai-review-preflight quarantine <provider> <failure-class> [--seconds N]
   ai-review-preflight clear <provider>
   ai-review-preflight qualify gemini|qwen
+  ai-review-preflight pin-bump-qualify <provider>
   ai-review-preflight requalify [provider]
   ai-review-preflight status [provider]
   ai-review-preflight usable [provider]
@@ -885,6 +1035,9 @@ case "$cmd" in
   qualify)
     [ "$#" -eq 1 ] || die 'usage: ai-review-preflight qualify gemini|qwen'
     case "${1:-}" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; *) die 'usage: ai-review-preflight qualify gemini|qwen' ;; esac ;;
+  pin-bump-qualify)
+    [ "$#" -eq 1 ] || die 'usage: ai-review-preflight pin-bump-qualify <provider>'
+    pin_bump_qualify "$1" ;;
   requalify) requalify "$@" ;;
   status)
     provider="${1:-}"

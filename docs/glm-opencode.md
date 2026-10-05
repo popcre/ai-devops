@@ -209,7 +209,10 @@ them and `/global/health` stopped answering for minutes at a time (median refres
 number) review sessions idle longer than `AI_GLM_REVIEW_RETENTION_HOURS` (24), and
 `ai-glm prune` retires the whole backlog. `doctor` only reports how many idle reviews
 remain: it runs inside the governed-review preflight (60s), which a prune pass overran
-(popcre/shared-db PR 3243, 2026-09-18). Which records are due is decided by one jq
+(popcre/shared-db PR 3243, 2026-09-18). The same rule covers implementation-job
+dead-owner reconciliation: `doctor` only reports how many open implementation job
+records may need it, and the reconcile sweep runs in `ai-glm prune` under its own
+budget, never inline in the check path (#1183 child 5). Which records are due is decided by one jq
 pass over all records, not several spawns per record; anything that pass cannot read
 falls back to the per-record check. The batch is small on purpose: OpenCode boots a session's
 directory instance to delete it (about a second each), so a large batch would slow the
@@ -294,7 +297,7 @@ and names `ai-glm server start` as the retry command.
 | `implementation job ... is already starting/running` | The same repository, caller, and name already has an owner | Inspect `ai-glm show <name>`. Do not retry. Abort it by name if it must stop. |
 | `implementation job ... is completed/failed/aborted` | A truthful terminal record is retained for diagnosis and safe name reuse. `outcome` distinguishes completed, partial, no-change, abort, timeout, usage, permission, and artifact-export failure. | Inspect the artifact and cleanup fields, manually review any `.incomplete.patch`, then run `ai-glm delete <name>` when no longer needed. Never treat an incomplete patch as safe or tested. |
 | `outcome: artifact-export-failed` | Changed incomplete work could not be made durable in both patch and report files. | The exact validated remote-less clone is preserved and named in stderr. Inspect it in place. Never add a remote or copy it over the real repository. |
-| `ambiguous implementation job state was preserved` | Doctor could not prove record schema, canonical paths, dead owner, matching lock, and exact server state | Inspect `ai-glm list` and `show`. Do not delete the clone or metadata by hand. |
+| `ambiguous implementation job state was preserved` | `ai-glm prune` could not prove record schema, canonical paths, dead owner, matching lock, and exact server state (doctor only reports the open count; the sweep runs in prune) | Inspect `ai-glm list` and `show`. Do not delete the clone or metadata by hand. |
 | `review session CHANGED the working tree` | A review wrote something (should be impossible) | Session is marked failed; inspect `git status` before anything else |
 | `ZAI_API_KEY resolved EMPTY` | The `op://` reference points at a blank field | Fix `ZAI_API_KEY` in `config/mcp.env.example` and re-run `setup-secrets.sh` |
 | Unit sits in `failed` | `StartLimitBurst` tripped after repeated crashes | Fix the cause, then `ai-glm server start` |

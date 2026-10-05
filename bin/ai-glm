@@ -2422,6 +2422,20 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   trap 'PRUNE_SIGNAL=130' INT
   trap 'PRUNE_SIGNAL=143' TERM
   shopt -s nullglob
+  # One record index for the whole pass: reconcile and the due scan below both
+  # read every record, and each build costs a bounded chunk of jq/stat spawns.
+  local GLM_INDEX_CACHED
+  GLM_INDEX_CACHED="$(glm_record_index)"
+  # Dead-owner reconciliation is a maintenance sweep, not a check-path action.
+  # Doctor only reports how many open implementation job records may need it
+  # (report, never act — the governed-review preflight window cannot afford one
+  # open record's re-reads and server round-trips). The action runs here, on an
+  # explicitly unbounded `ai-glm prune`, under prune's own budget. A bounded
+  # batch (`ai-glm new`'s retire step) must not wander into it for the same
+  # reason it skips the unrecorded-sandbox sweep below.
+  if [ "$limit" -eq 0 ]; then
+    reconcile_implementation_records || warn "ambiguous implementation job state was preserved; inspect ai-glm list/show"
+  fi
   local due=()
   mapfile -t due < <(glm_due_review_records "$cutoff")
   for mp in "${due[@]}"; do
@@ -2950,16 +2964,27 @@ cmd_doctor() {
     printf 'PASS  old glm-claude config removed\n'
   fi
   chk "retired ai-glm-agent fully gone"    bash -c "! command -v ai-glm-agent"
-  # Reconcile only records with exact schema, canonical clone, dead owner, matching
-  # stale lock, and exact server evidence. Old unrecorded directories have no such
-  # ownership proof and must never be swept automatically.
+  # Report, never act: dead-owner reconciliation is a maintenance sweep and belongs
+  # to `ai-glm prune` (unbounded), which has its own budget. Doctor runs inside the
+  # governed-review preflight window (bin/ai-review-preflight CHECK_TIMEOUT, default
+  # 10s), and one open implementation record could cost >10s on a loaded Windows
+  # host (dead-owner recovery re-reads fields and talks to the server). An inline
+  # reconcile here is exactly the sweep class that once blew every review's preflight.
   # Both record scans below share one index; each build reads every record.
   local GLM_INDEX_CACHED
   GLM_INDEX_CACHED="$(glm_record_index)"
-  if reconcile_implementation_records; then
-    printf 'PASS  implementation job records reconciled safely\n'
+  local open_jobs=0 jtype jstate jnewest jf
+  while IFS=$'\t' read -r jf jtype jnewest jstate; do
+    [ -n "$jf" ] || continue
+    case "$jtype:$jstate" in
+      implementation:settled) ;;
+      implementation:*|'?':*) open_jobs=$((open_jobs + 1)) ;;
+    esac
+  done < <(glm_index)
+  if [ "$open_jobs" -eq 0 ]; then
+    printf 'PASS  no open implementation job records need reconciliation\n'
   else
-    printf 'WARN  ambiguous implementation job state was preserved; inspect ai-glm list/show\n'
+    printf 'WARN  %s open implementation job record(s) may need dead-owner reconciliation; run: ai-glm prune\n' "$open_jobs"
   fi
   # Report, never act: removals belong to `new` (bounded) and `ai-glm prune`. Doctor
   # runs inside the governed-review preflight window, which a prune pass overran.
