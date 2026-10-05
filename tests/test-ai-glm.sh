@@ -776,6 +776,29 @@ check "new retires a bounded batch before creating a session" "printf '%s' \"\$N
 DOCTOR_FN="$(sed -n '/^cmd_doctor()/,/^}/p' "$AI_GLM")"
 check "doctor reports review retention through prune's due scan" "printf '%s' \"\$DOCTOR_FN\" | grep -q 'glm_due_review_records' && printf '%s' \"\$DOCTOR_FN\" | grep -q 'idle review session(s) older than'"
 check "doctor never runs a prune pass" "! printf '%s' \"\$DOCTOR_FN\" | grep -q 'cmd_prune'"
+
+# Maintenance out of the hot path (#1183 child 5): dead-owner reconciliation is a
+# sweep, so doctor only reports how many open implementation job records may need
+# it. Acting here is what once blew the governed-review preflight window.
+check "doctor never runs a reconcile pass" "! printf '%s' \"\$DOCTOR_FN\" | grep -q 'reconcile_implementation_records'"
+check "doctor reports open implementation job records instead of reconciling" \
+  "printf '%s' \"\$DOCTOR_FN\" | grep -q 'no open implementation job records need reconciliation' && printf '%s' \"\$DOCTOR_FN\" | grep -q 'run: ai-glm prune'"
+check "prune reconciles implementation records only on the unbounded pass" \
+  "sed -n '/^cmd_prune()/,/^}/p' '$AI_GLM' | grep -q 'reconcile_implementation_records' && sed -n '/^cmd_prune()/,/^}/p' '$AI_GLM' | grep -q 'limit\" -eq 0'"
+# A failed reconcile leaves ambiguous job state behind; prune must not report
+# success while that state was preserved (Codex final-check 2026-10-05).
+check "prune carries the reconcile failure into its exit status" \
+  "sed -n '/^cmd_prune()/,/^}/p' '$AI_GLM' | grep -q 'reconcile_rc=1' && sed -n '/^cmd_prune()/,/^}/p' '$AI_GLM' | grep -q 'reconcile_rc\" -eq 0'"
+PR_FAIL_STATE="$TMP/prune-state-recon-fail"; mkdir -p "$PR_FAIL_STATE/sessions"
+AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_FAIL_STATE" bash -c '
+  source "$AI_GLM_SOURCE"
+  server_up(){ return 0; }
+  glm_retention_problem(){ :; }
+  reconcile_implementation_records(){ return 1; }
+  glm_due_review_records(){ :; }
+  sandbox_references(){ printf "%s\n" none; }
+  cmd_prune' >/dev/null 2>&1; pr_fail_rc=$?
+check "prune exits non-zero when reconciliation fails" "test '$pr_fail_rc' -ne 0"
 # Doctor and prune share one retention rule; an unusable value is a doctor FAIL, not arithmetic.
 retention_problem() { # HOURS -> the rule's complaint, empty when sound
   AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$TMP/retention-state" AI_GLM_REVIEW_RETENTION_HOURS="$1" \

@@ -166,7 +166,8 @@ def credit(directory, provider, paths, record, seconds):
                 data = load(directory, provider)
                 now = int(time.time())
                 data['global'] = {'version': 1, 'provider': provider, 'failure_class': 'out-of-credit',
-                                  'created_epoch': now, 'expires_epoch': now + seconds}
+                                  'created_epoch': now, 'expires_epoch': now + seconds,
+                                  'record_id': new_record_id()}
                 publish(directory, provider, data)
         except (OSError, ValueError, TypeError) as error:
             print('reviewer admission: out-of-credit quarantine not recorded: ' + str(error), file=sys.stderr)
@@ -197,6 +198,12 @@ def valid_global(record, provider):
             and type(record.get('expires_epoch')) is int
             and type(record.get('created_epoch')) is int
             and isinstance(record.get('failure_class'), str))
+
+
+def new_record_id():
+    # Unique per quarantine record so a same-second replacement can never be
+    # confused with the record it replaced (ABA race on clear).
+    return hashlib.sha256(os.urandom(32)).hexdigest()
 
 
 @contextlib.contextmanager
@@ -357,7 +364,7 @@ def classify(paths, extra_text, provider):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear', 'credit', 'classify'))
+    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear', 'clear-global', 'credit', 'classify'))
     parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen','stepfun'))
     parser.add_argument('--directory', type=pathlib.Path)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
@@ -365,6 +372,7 @@ def main():
     parser.add_argument('--run-id', default=''); parser.add_argument('--observed', type=int)
     parser.add_argument('--seconds', type=int, default=1800); parser.add_argument('--reason', default='')
     parser.add_argument('--evidence', type=pathlib.Path)
+    parser.add_argument('--expect-record', default='')
     parser.add_argument('--scan', type=pathlib.Path, action='append', default=[])
     parser.add_argument('--text', default='')
     parser.add_argument('--record', action='store_true')
@@ -394,11 +402,28 @@ def main():
             if args.action == 'clear':
                 data = {'version': 2, 'provider': args.provider, 'global': None, 'backoffs': {}}
                 publish(args.directory, args.provider, data); result = {'cleared': True}
+            elif args.action == 'clear-global':
+                # Drop only the global quarantine. Scoped usage-limit backoffs
+                # stay: a qualification clear must never erase a live credit
+                # or usage record that says this reviewer is still ineligible.
+                # --expect-record makes the clear a compare-and-swap: it runs
+                # only if the current global is still the exact record the
+                # caller captured, so a replacement written mid-qualification
+                # (even within the same second) can never be erased.
+                if args.expect_record:
+                    expected = json.loads(args.expect_record)
+                    if data.get('global') != expected:
+                        result = {'cleared': False, 'reason': 'record-changed'}
+                        print(json.dumps(result, sort_keys=True, allow_nan=False))
+                        return
+                data['global'] = None
+                publish(args.directory, args.provider, data); result = {'cleared': 'global'}
             elif args.action == 'quarantine':
                 if args.seconds <= 0:
                     raise ValueError('quarantine seconds must be positive')
                 data['global'] = {'version': 1, 'provider': args.provider, 'failure_class': args.reason,
-                                  'created_epoch': now, 'expires_epoch': now + args.seconds}
+                                  'created_epoch': now, 'expires_epoch': now + args.seconds,
+                                  'record_id': new_record_id()}
                 publish(args.directory, args.provider, data); result = data['global']
             else:
                 result = data.get('global')
