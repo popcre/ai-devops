@@ -39,7 +39,7 @@ is closed; #166 subsequently merged through the protected queue as `d49100a2`.
 
 **September 14 continuation order:** #397 → #394 → #393 → #271 → #398 →
 #337 → #166 → #159, with #396 consumer follow-through before #398. The
-[current handoff](HANDOFF.d/2026-09-14T2133Z-edge-dev-codex-reviewer-acceptance-continuation.md)
+the current handoff (retired; see git history)
 records preserved commits, the delivered separate queue-policy repair PR459,
 GLM 5.3's legacy-Qwen recommendation and remaining release gates. The #396
 consumer preparation's source/test changes exactly match merged shared-db

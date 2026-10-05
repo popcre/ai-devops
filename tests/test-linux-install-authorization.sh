@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Offline Linux installer/updater front-door tests. No /etc or GitHub access.
 set -euo pipefail
+[ "$(uname -s)" = Linux ] || { echo 'SKIP: Linux installer authorization tests are Linux-only'; exit 0; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 printf '{"schema_version":1,"verdict":"APPROVE"}\n' > "$TMP/approval.json"

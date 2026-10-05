@@ -272,7 +272,7 @@ GLM's preservation-warning wording, so paid canaries were not replayed.
 Private proof: `C:/Temp/397-complete-coverage-proof.json`,
 `397-installed-source-proof.json`, `397-installed-machine-doctor.log`,
 `397-installed-refusal.log`, and `397-installed-healthy.log`. The
-[continuation record](../../../HANDOFF.d/2026-09-14T2133Z-edge-dev-codex-reviewer-acceptance-continuation.md)
+the continuation record (retired; see git history)
 retains exact reports, failed attempts, private-work boundaries and downstream
 acceptance gates. #397's recovery slice is accepted. Its earlier automatic
 closure at PR460 landing was corrected by reopening until this final gate

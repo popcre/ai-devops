@@ -375,6 +375,33 @@ a local pre-check, not a replacement for CI: GitHub remains the authority on
 whether a branch is green, and the reviewer suites in particular must be proven
 on the Windows runner.
 
+### Windows CI platform differences
+
+`windows-offline-complete` (the full suite on Blacksmith Windows) exposes platform
+bugs the PR-section path can miss. Patterns that have already cost a day
+(2026-10-02, fixes in #1242):
+
+- **Symlinks.** `ln -s` falls back to a copy on many Windows hosts. Tests that
+  assert symlink refusal must skip with a reason when `[ -L ]` is false, the same
+  way `test-uninstall.sh` already does — do not fail closed on a missing platform
+  feature.
+- **File modes.** `chmod 600` maps to `644` under Git Bash. Skip POSIX mode
+  assertions on MINGW/MSYS/CYGWIN; keep the security intent elsewhere.
+- **`realpath` vs `pwd -P`.** On Windows CI these return different formats
+  (`C:/Users/...` vs `/c/Users/...`). A fixture that stores a resolved path must
+  use the **same** resolution function as the validator. `tests/lib-reviewer-approval.sh`
+  is the reference fix (use `cd` + `pwd -P`).
+- **Restricted `PATH`.** `PATH=/usr/bin:/bin` drops jq on Windows (it lives under
+  `C:\Program Files\jq\`). Always add `$(dirname "$(command -v jq)")` when a test
+  narrows PATH.
+- **Linux-only suites.** Suites whose names or product contract say Linux-only
+  (`test-ai-task-gates-linux-install.sh`, `test-linux-install-authorization.sh`)
+  must `exit 0` with a skip reason on non-Linux rather than call a
+  "Linux-only" route and fail.
+
+Do not paper these over with blanket skips of whole suites. Platform-correct
+skips with a named reason are fine; dropping coverage is not.
+
 Installer behavior has lightweight, dependency-free tests:
 
 ```bash

@@ -20,13 +20,35 @@ account identifiers in this public repository. Resolve live values with `az` and
 | Canary workflow | `.github/workflows/warpbuild-win2022-canary.yml` — manual `workflow_dispatch` only, non-required |
 | Canary proof | Green 2026-09-30 and 2026-10-05 on eastus only: [run 36731941680 job 109943590499](https://github.com/popcre/ai-devops/actions/runs/36731941680/job/109943590499). Windows NT 10.0.20348, X64, git/pwsh/node/bash present; VM and OS disk deleted after the job |
 | Multi-region canary | use2/cus **blocked** (2026-10-05): WarpBuild gallery image not in those regions (`GalleryImageNotFound`). Jobs queue forever; VM create loops and fails. |
-| Required CI | **Still Blacksmith** (`blacksmith-4vcpu-windows-2025`). Cut-over PR `mimo/warpbuild-required-cutover` / #1220 is **not merged**; latest checks failed broadly (see below). |
-| Owner rule (2026-10-01) | **Blacksmith stays in the pool until WarpBuild is fully up.** Use Blacksmith for runs that would otherwise get stuck. Do not turn Blacksmith off. Do not stop WarpBuild bring-up. |
+| Required CI | **Still Blacksmith** (`blacksmith-4vcpu-windows-2025`). Practice-lane PR #1220 **MERGED 2026-10-02** (merge `5970c621`) — non-blocking `windows-offline-warpbuild-proof` beside Blacksmith required. Hard cut-over is still not landed. |
+| Owner rule (2026-10-01) | **Blacksmith stays in the pool until WarpBuild is fully up.** Use Blacksmith for runs that would otherwise get stuck. Do not turn Blacksmith off. Do not stop WarpBuild bring-up. "Fully up" is a technical judgment (AI); only the cost choice is Albert's. |
 | Owner rule (2026-10-02) | **No West Europe.** US regions only (eastus / eastus2 / centralus). |
+| Azure quota (2026-10-02, eastus) | `standardDASv4Family` **8/10** vCPU, regional `cores` **8/12**. Fits **two** 4-vCPU VMs. Target 40 / 64 for ten. Quota is per family **and** per region. |
+| Quota raise path | Programmatic support ticket is **blocked** on this subscription (`InvalidSupportPlan`, Free plan). `az quota` / Microsoft.Quota RP are not available. Portal **Usage + quotas → Request increase** is the working path. |
 
-### Cut-over attempt (not landed)
+### Practice lane and post-merge verify (2026-10-02)
 
-Branch `mimo/warpbuild-required-cutover` re-points required Windows `runs-on` to the WarpBuild label. PR #1220 was opened/closed/reopened several times. Latest verification on that branch failed: `doc-safety`, `linux-offline-shard` 2/4, all `windows-offline-section` 1–8, `windows-reviewer-fallback-*`, `verification-closure`. Do not merge those changes until the failures are diagnosed and Blacksmith remains a live fallback per the owner rule. Open sibling PR #1193 (`mimo/runner-pool-github-envy-warpbuild`) is a different routing preference and must not silently drop WarpBuild or Blacksmith.
+PR #1220 landed the **practice lane** (`windows-offline-warpbuild-proof`:
+`continue-on-error`, `max-parallel: 2`, fork-guarded, label
+`warp-custom-warpbuild-win2022-canary`). It is outside `verification-closure`.
+Required Windows stayed on Blacksmith.
+
+Post-merge full required Windows verify on main (`windows-offline-complete`,
+run `37004196465`) was red on sections 1/2/4/5 — **not a WarpBuild regression**.
+The same suites already failed on 2026-09-29 (run `36545978861`) before #1220.
+Root causes are Windows platform test bugs (see pitfalls). Fixes: PR #1242
+(`mimo/win-complete-suite-fix`). After that lands, re-dispatch verify on main
+and post the green required job URL on #961.
+
+### Practice lane is NOT the hard cut-over
+
+An earlier hard cut of required `runs-on` to the WarpBuild label failed broadly
+(`doc-safety`, `linux-offline-shard` 2/4, all `windows-offline-section` 1–8,
+`windows-reviewer-fallback-*`, `verification-closure`). Do **not** re-point
+required Windows until the full suite is proven green on BYOC and Blacksmith
+remains a live fallback. Open sibling PR #1193
+(`mimo/runner-pool-github-envy-warpbuild`) is a different routing preference
+and must not silently drop WarpBuild or Blacksmith.
 
 ## Runbook
 
@@ -121,16 +143,94 @@ a reviewed cut-over.
 
 ## Pitfalls already paid for (do not repeat)
 
+Everything in this section was learned the hard way across the 2026-09-28
+bring-up, the 2026-09-30 canary/stuck-queue work, and the 2026-10-02
+practice-lane land. Read it before touching stacks, runners, or the proof lane.
+
+**First five minutes when something looks wrong**
+
+1. Job `queued` with empty `runner_name` → runner-group public flag, then quota.
+2. Job never appears in org runners → VM is booting or already dead; capture
+   `C:\warpbuilds\runner.github.stdout.log` **now**.
+3. Many proof jobs waiting → that is capacity (2 VMs × every open PR), not an
+   outage. Do not "fix" it by moving proof jobs to Blacksmith.
+4. A suite fails on `windows-offline-complete` but passed on the PR sections →
+   Windows platform trap (section C), not WarpBuild.
+5. Do not turn Blacksmith off to "force" WarpBuild to catch up.
+
+### A. Standing up a stack / VM
+
 | Mistake | What actually happens | Do this instead |
 |---|---|---|
 | Assumed ARM template = ARM64 CPU | ARM is Azure Resource Manager; VMs are still x64 | Keep `arch: x64` and `Standard_D*` |
 | Passed signed template URL through `cmd.exe` / `az` | `&` splits the command; `az` cannot fetch the URL | Download template to a file, use `--template-file` |
 | Trusted `status: pending` after ARM success | Stack never activates until WarpBuild syncs | `POST /stacks/{id}/sync`, then re-list |
 | Used `GET /stacks/{id}` for the deploy link | Detail body has no `actions` | `GET /stacks/{id}/actions` |
-| Expected one family in one region to cover 24+ vCPUs | Quota is per family per region | Split across DASv4 / DSv4 / DDSv4 and regions; cheapest first |
-| Created a region we did not want | Extra spend / latency | US only: eastus, eastus2, centralus. **No West Europe** |
-| Queued job while runner looked online | Public repo + runner group | Set `allows_public_repositories` on the group |
+| Signed template URL expired mid-flow | Deploy fails with a bad URI | Fetch a fresh `redirect_url` from `/actions`; do not cache SAS links |
+| Treated `az vm list-usage` empty output as "no quota used" | Happens while `Microsoft.Compute` is still unregistered | Register the provider first, then re-read usage |
+| PATCHed runner storage to 256 GB | API returned 200; disk stayed 150 GB | Re-read live size; vendor floor 256 GB is still unproven for the full suite |
+| Assumed one family in one region covers 24+ vCPUs | Quota is **per family per region** (`DASv4` ≠ `DSv4` ≠ `DDSv4`) | Split across families and regions; cheapest first |
+| Created a region we did not want | Extra spend / latency | US only: eastus, eastus2, centralus. **No West Europe** (owner 2026-10-02) |
+| Left `wb-*` VMs or orphan disks around after a failed run | They eat quota and block the next job | Safe to delete when no canary/proof job is running |
 | Assumed a new stack would run Windows jobs | VM create fails `GalleryImageNotFound` outside eastus | WarpBuild `win-2022-x64-core` image is eastus-only until they replicate it |
+
+### B. Jobs stuck in `queued`
+
+| Mistake | What actually happens | Do this instead |
+|---|---|---|
+| Runner online + correct label, job still queued for hours | Public repo needs runner-group public access | Set `allows_public_repositories=true` on the runner group (see below) |
+| Guessed OS vs quota vs labels | Wastes hours | Read `runner.github.stdout.log` on the live VM (below) |
+| Waited to capture logs | Ephemeral VM dies in ~40–120s after failed pickup | `az vm run-command` **immediately** with a tiny log-tail script |
+| `az vm run-command` preempted / ResourceNotFound | A newer op wins; the VM is already gone | Retry once on the other `wb-*` VM; do not loop |
+| Thought only 2 proof jobs were "stuck" | Every open PR adds 8 proof jobs; 2 VMs serve the whole org queue | Capacity fact, not a bug. Raise quota or accept the wait |
+| Expected Blacksmith to take WarpBuild proof jobs | Proof lane has **no Blacksmith fallback by design** — it *is* the WarpBuild proof | Leave it; required CI already runs on Blacksmith |
+| Assumed a green PR section path proves the full suite | `windows-offline-section` is **PR-only**; `windows-offline-complete` is the manual/schedule full suite | Always prove `windows-offline-complete` on main after a change |
+| Left proof jobs queued across many PR commits | PR concurrency `cancel-in-progress` **discards** the queue when a new commit lands | More machines is the real fix; do not weaken required checks |
+
+### C. Windows CI test traps (cost a full day on 2026-10-02)
+
+These are not WarpBuild bugs — they are Windows platform differences that the
+full suite exposes. Details live in `docs/development.md` ("Windows CI platform
+differences"); the short version:
+
+| Mistake | What actually happens | Do this instead |
+|---|---|---|
+| Asserted symlink behavior | `ln -s` falls back to a **copy** on Windows | Skip with a reason when `[ -L ]` is false |
+| Asserted `chmod 600` mode bits | Git Bash maps it to `644` | Skip POSIX mode checks on MINGW/MSYS/CYGWIN |
+| Mixed `realpath` and `pwd -P` across a stored path and a validator | `C:/Users/...` vs `/c/Users/...` never match; ~20 tests fail at once | Use the **same** resolver on both sides (`tests/lib-reviewer-approval.sh` is the reference) |
+| Set `PATH=/usr/bin:/bin` in a test | jq disappears (it lives under `C:\Program Files\jq\`) | Add `$(dirname "$(command -v jq)")` when narrowing PATH |
+| Ran Linux-only suites on Windows | Product prints `STOP … Linux-only` and the test fails | `exit 0` with a skip reason on non-Linux |
+
+### D. Quota, cost, and support
+
+| Mistake | What actually happens | Do this instead |
+|---|---|---|
+| Tried to open an Azure support ticket via API on this subscription | 202 then `InvalidSupportPlan` — Free plan cannot file tickets | Portal **Usage + quotas → Request increase** |
+| Called `az quota create` / Microsoft.Quota RP | `MissingSubscription` / resource type not found | Same portal path; do not keep retrying the RP |
+| Assumed quota is "Azure-wide" | It is per family per region | Measure `az vm list-usage --location <region>` before promising concurrency |
+| Underestimated proof-lane demand | 8 jobs × every open PR against 2 VMs | Budget concurrency from quota, not from `max-parallel` alone |
+| Compared WarpBuild cost to Blacksmith before invoices | Nothing is measured yet | Wait for real invoices before any cost decision |
+
+### E. Safety / process (repeatedly binding)
+
+- **Do not turn Blacksmith off** (owner, 2026-10-01) until WarpBuild is fully
+  up **and** Albert makes a fresh cost decision.
+- **Never** put secrets, API keys, signed vendor URLs, subscription GUIDs, or
+  account emails in this public repo. Resolve live with `az account show` and
+  `op run`. `C:\debuginit.txt` on a BYOC VM can contain credential blobs —
+  do not paste it into chat or tickets.
+- **Never** retrieve, type, or log an Azure password through an agent. The
+  Microsoft consent link opens a real sign-in page.
+- Two distinct grants exist: **directory admin consent** and an **Azure ARM
+  template**. Preview exact roles/scopes before any infrastructure change;
+  independent review APPROVE is required. Do not treat
+  `ai-task-gates check` "no changes" output as permission to bypass that.
+- Check **names** (`windows-offline`, `windows-offline-section (N, lane)`, …)
+  must stay stable or required gates break. Keep
+  `windows-offline-blacksmith.yml` usable as the manual escape hatch.
+- Oracle / Teams-bot subscription stays frozen. Dedicated CI subscription only.
+- No Spot for required-test evidence. Disk floor is 256 GB per vendor docs;
+  the live canary used 150 GB and only proved the tooling canary.
 
 ## Public-repo runner group (hard requirement)
 

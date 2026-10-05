@@ -527,7 +527,7 @@ EOF
 chmod +x "$TMP/error-page-gh"
 error_deadline=$(( $(/usr/bin/date +%s) + 30 ))
 AI_GH_STATE_DIR="$TMP/error-page-state" PR_WAIT_RECEIPT_ID="$(printf '%032d' 0)" \
-  AI_GH_COST_CONTEXT="v1:$(printf '%064d' 0)" \
+  AI_GH_COST_CONTEXT="v1:$(printf '%064d' 0)" PATH="$(dirname "$(command -v jq)"):/usr/bin:/bin" \
   bash "$ROOT/tools/github-requests/pr-status-complete.sh" "$TMP/error-page-gh" "$PYTHON_RUNNER" \
   "$ROOT/bin/ai-process-supervisor" "$(command -v bash)" o r 1 "$error_deadline" 10 0 "$TMP/error-page-source" \
   > "$TMP/error-page-out" 2> "$TMP/error-page-err"; error_page_rc=$?

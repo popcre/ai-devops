@@ -7,6 +7,7 @@ SOURCE="$ROOT/bin/setup-secrets.sh"
 failures=0
 ok() { printf 'ok - %s\n' "$1"; }
 bad() { printf 'not ok - %s\n' "$1"; failures=$((failures + 1)); }
+skip() { printf 'skip - %s\n' "$1"; }
 
 PYTHON=""
 for candidate in python3 python; do
@@ -144,16 +145,20 @@ mkdir -p "$link_tmp/repo/bin" "$link_tmp/usr/bin" "$link_tmp/rel"
   sed -n '/^_self="\${BASH_SOURCE\[0\]}"$/,/^unset _self _dir$/p' "$SOURCE"
   printf 'printf %%s "$REPO_ROOT"\n'
 } > "$link_tmp/repo/bin/probe.sh"
-ln -s "$link_tmp/repo/bin/probe.sh" "$link_tmp/usr/bin/probe.sh"
-ln -s "../usr/bin/probe.sh" "$link_tmp/rel/chained.sh"
-want="$(cd "$link_tmp/repo" && pwd -P)"
-direct="$(bash "$link_tmp/usr/bin/probe.sh")"
-chained="$(bash "$link_tmp/rel/chained.sh")"
-if grep -q '^REPO_ROOT=' "$link_tmp/repo/bin/probe.sh" &&
-   [ "$direct" = "$want" ] && [ "$chained" = "$want" ]; then
-  ok "setup-secrets resolves REPO_ROOT through symlinks"
+ln -s "$link_tmp/repo/bin/probe.sh" "$link_tmp/usr/bin/probe.sh" 2>/dev/null
+ln -s "../usr/bin/probe.sh" "$link_tmp/rel/chained.sh" 2>/dev/null
+if [ -L "$link_tmp/usr/bin/probe.sh" ] && [ -L "$link_tmp/rel/chained.sh" ]; then
+  want="$(cd "$link_tmp/repo" && pwd -P)"
+  direct="$(bash "$link_tmp/usr/bin/probe.sh")"
+  chained="$(bash "$link_tmp/rel/chained.sh")"
+  if grep -q '^REPO_ROOT=' "$link_tmp/repo/bin/probe.sh" &&
+     [ "$direct" = "$want" ] && [ "$chained" = "$want" ]; then
+    ok "setup-secrets resolves REPO_ROOT through symlinks"
+  else
+    bad "setup-secrets resolves REPO_ROOT through symlinks (got '$direct' / '$chained', want '$want')"
+  fi
 else
-  bad "setup-secrets resolves REPO_ROOT through symlinks (got '$direct' / '$chained', want '$want')"
+  skip "setup-secrets resolves REPO_ROOT through symlinks (this filesystem cannot create real symlinks)"
 fi
 rm -rf "$link_tmp"
 

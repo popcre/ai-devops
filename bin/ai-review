@@ -233,7 +233,7 @@ if [ "$code_only" -eq 1 ]; then
   esac
   code_prompt="$code_prompt Original source HEAD: $source_head. Synthetic review HEAD: $synthetic_head. Cite both identities in your findings."
   result_file="$(mktemp)" || { printf 'ai-review: cannot reserve private review output.\n' >&2; exit 3; }
-  if ( cd "$snapshot" && "$wrapper" send "$code_prompt" --review --model deepseek-v4-pro --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file"; then provider_rc=0; else provider_rc=$?; fi
+  if ( cd "$snapshot" && "$wrapper" send "$code_prompt" --review --model deepseek-flash --base HEAD~1 --assert-head "$synthetic_head" --governed-verdict "$synthetic_head" ) > "$result_file"; then provider_rc=0; else provider_rc=$?; fi
   # DeepSeek retains its packet and transcript under this sanitized repository.
   # Keep it after dispatch, including a failed or stale response, for recovery.
   "$SANDBOX" verify-code-only "$snapshot" --assert-head "$source_head" >/dev/null || { rm -f "$result_file"; printf 'ai-review: source or export changed during code-only review; verdict refused. Retained evidence: %s\n' "$snapshot" >&2; exit 3; }

@@ -1,7 +1,7 @@
 # Windows runner maintenance elevation plan
 
 Issue: [#262](https://github.com/popcre/ai-devops/issues/262)
-Companion handoff: [`HANDOFF.d/2026-09-17T1804Z-edge-dev-codex-windows-runner-maintenance-elevation.md`](HANDOFF.d/2026-09-17T1804Z-edge-dev-codex-windows-runner-maintenance-elevation.md)
+Companion handoff: `HANDOFF.d/2026-09-17T1804Z-edge-dev-codex-windows-runner-maintenance-elevation.md` (retired; see git history)
 
 ## STATUS
 
