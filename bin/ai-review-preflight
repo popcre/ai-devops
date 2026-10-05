@@ -951,7 +951,23 @@ pin_bump_qualify() { # PROVIDER
   [ -n "$want" ] || die "$provider has no version pin in config/provider-cli-versions.json; pin-bump-qualify is only for a pin bump."
   note "ai-review-preflight: pin-bump-qualify $provider: wrapper=$before_sha cli=$cli_sha version=${cli_version:-unreadable} policy=$mode:${want:-unpinned}"
 
-  # Cheap fixed check 1: the wrapper doctor (binary present + health probe).
+  # Cheap fixed check 1: the version pin, BEFORE the wrapper doctor. The
+  # provider wrappers (Grok in particular) reject a version policy miss inside
+  # their own doctor, so running doctor first would classify a pin mismatch as
+  # provider-unhealthy and make the pin-mismatch quarantine/restore path
+  # unreachable. ai-provider-version enforces the policy exactly as written —
+  # a "minimum" provider accepts newer same-major builds, so this never
+  # becomes a hard exact pin on an auto-updater.
+  set +e; "$policy_bin" check "$provider" "$cli_version_text" >/dev/null; rc=$?; set -e
+  if [ "$rc" -ne 0 ]; then
+    quarantine "$provider" pin-mismatch
+    printf 'ai-review-preflight: pin-bump-qualify %s pin mismatch: installed version %s does not satisfy policy %s:%s.\n' \
+      "$provider" "${cli_version:-unreadable}" "$mode" "${want:-unpinned}" >&2
+    printf 'ai-review-preflight: auto-quarantined %s (pin-mismatch). Update the pin in this same change (or install a satisfying build) and re-run pin-bump-qualify to auto-restore.\n' "$provider" >&2
+    return 1
+  fi
+
+  # Cheap fixed check 2: the wrapper doctor (binary present + health probe).
   set +e; out="$(timeout "${DOCTOR_PROBE_TIMEOUT}s" "$wrapper" doctor 2>&1)"; rc=$?; set -e
   if [ "$rc" -ne 0 ]; then
     if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then class=provider-timeout
@@ -981,18 +997,6 @@ pin_bump_qualify() { # PROVIDER
         return 1
       fi
     fi
-  fi
-
-  # Cheap fixed check 2: the version pin. ai-provider-version enforces the
-  # policy exactly as written — a "minimum" provider accepts newer same-major
-  # builds, so this never becomes a hard exact pin on an auto-updater.
-  set +e; "$policy_bin" check "$provider" "$cli_version_text" >/dev/null; rc=$?; set -e
-  if [ "$rc" -ne 0 ]; then
-    quarantine "$provider" pin-mismatch
-    printf 'ai-review-preflight: pin-bump-qualify %s pin mismatch: installed version %s does not satisfy policy %s:%s.\n' \
-      "$provider" "${cli_version:-unreadable}" "$mode" "${want:-unpinned}" >&2
-    printf 'ai-review-preflight: auto-quarantined %s (pin-mismatch). Update the pin in this same change (or install a satisfying build) and re-run pin-bump-qualify to auto-restore.\n' "$provider" >&2
-    return 1
   fi
 
   # One live smoke. A pin bump is blessed by exactly one live turn, not a full

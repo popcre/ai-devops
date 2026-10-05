@@ -221,6 +221,44 @@ check "the quarantine class is pin-mismatch" \
 check "pin-mismatch guidance names the same-change restore" \
   "run_pb explain pin-mismatch | grep -q 'same change'"
 
+# Real wrappers reject a version policy miss INSIDE their doctor. Preflight
+# must classify that as pin-mismatch (by checking the pin first), not as
+# provider-unhealthy — otherwise the pin-mismatch restore path is unreachable.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+cat > "$TMP/bin/pb-doctor-pinaware" <<'FEOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = doctor ]; then
+  # Mirror Grok's doctor: it enforces the version policy itself and fails.
+  want="$("${AI_PROVIDER_VERSION_BIN:-ai-provider-version}" required grok 2>/dev/null || true)"
+  have="${FAKE_GROK_VERSION:-}"
+  if [ -n "$want" ] && [ -n "$have" ]; then
+    case "$want" in
+      "$have") ;;
+      *)
+        want_major="${want%%.*}"; have_major="${have%%.*}"
+        if [ "$want_major" = "$have_major" ] && [ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | tail -1)" = "$have" ]; then :; else
+          echo "version policy: UNQUALIFIED — installed $have, requires $want."; exit 1
+        fi ;;
+    esac
+  fi
+  echo health ok; exit 0
+fi
+echo unexpected; exit 1
+FEOF
+chmod +x "$TMP/bin/pb-doctor-pinaware"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor-pinaware" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.5 \
+    "$SCRIPT" pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'pin mismatch' \
+  && ok "a version-rejecting doctor still yields pin-mismatch (not provider-unhealthy)" \
+  || { bad "a version-rejecting doctor still yields pin-mismatch (not provider-unhealthy)"; printf '%s\n' "$PB_OUT"; }
+check "the quarantine class stays pin-mismatch even when the doctor also rejects the version" \
+  "env AI_PROVIDER_VERSIONS_FILE=\"$PB_POLICY\" AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.failure_class==\"pin-mismatch\"'"
+
 # Auto-restore when the pin is updated in the same change: bump the floor to the
 # installed build and re-run; the stale pin-mismatch quarantine clears itself.
 jq '.providers.grok.supported_version = "1.0.5"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
