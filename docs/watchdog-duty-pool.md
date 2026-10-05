@@ -63,22 +63,26 @@ to click through them.
 1. **Prereqs on the new host:** Git, Git Bash or bash, Node + jq as required by
    the tools, `bin/ai-gh` auth (`u2giants` / documented identity), repo
    checkout (worktree or clone), no secret in the repo.
-2. **Name:** add the host’s short nickname to `watch_hosts` in
+2. **Host-local secrets env:** write `~/.config/ai-devops/secrets/watchdog.env`
+   (chmod 600) on the host so scheduled `ai-runner-pool-watch` can see
+   `RUNNER_POOL_READ_TOKEN` (mechanism in §7). Never put the value in the
+   public repo or crontab line.
+3. **Name:** add the host’s short nickname to `watch_hosts` in
    `config/local-watch.json` (ordered preference). Record any alias in the
    `_comment` (same style as `blocker-watch.json`).
-3. **Install timers:** run the repo installer (`install.ps1` on Windows,
+4. **Install timers:** run the repo installer (`install.ps1` on Windows,
    `install.sh` on Linux) **or** the marked crontab block documented in the
    plan’s D2 if the host is production-constrained (hetz). Test mode
    (`AI_DEVOPS_INSTALL_TEST_MODE=1`) must not touch tasks — use it first.
-4. **Verify claim path:** `bin/ai-local-watch status` (or the plan’s named
+5. **Verify claim path:** `bin/ai-local-watch status` (or the plan’s named
    helper) prints leader + lease age; `claim` when stale is allowed; `skip`
    when another host is fresh.
-5. **One live tick** per watchdog tool on the new host; log line in
+6. **One live tick** per watchdog tool on the new host; log line in
    `~/.ai-devops/<tool>/tick.log`.
-6. **Failover drill** (required once per new host): freeze the current leader’s
+7. **Failover drill** (required once per new host): freeze the current leader’s
    renewal (stop its timers or wait past TTL), confirm **this** host claims and
    posts **once**; restore the old leader and confirm it does not double-post.
-7. **Proof:** attach log excerpts (claim/renew/skip + one alarm) to the owner
+8. **Proof:** attach log excerpts (claim/renew/skip + one alarm) to the owner
    issue checklist `- [ ] live proof`. Update the pool table in this file if
    the host is permanent.
 
@@ -113,7 +117,27 @@ to click through them.
 | Live failover drill | **Proven on edge-dev ↔ edge-dev3** (2026-10-05): expired lease → edge-dev3 claim → edge-dev `skip: leader=edge-dev3` → release → edge-dev reclaim. Claim issue #1288. |
 | Live proof (D4) | **Proven 2026-10-05:** one tick per duty tool; runner-pool `pool: online=1 label=ai-devops-windows-qualified` (exit 0, WARN one host) on edge-dev and on duty host edge-dev3. Claim issue #1288, owner issue #1287. |
 | Timer install | edge-dev Task Scheduler `\ai-devops\ai-local-watch`; edge-dev3 and hetz crontab `*/2` `bin/ai-local-watch tick-all`. |
-| Open gap | Scheduled `ai-runner-pool-watch` still alarms `RUNNER_POOL_READ_TOKEN is not set` on edge-dev3/hetz — installers do not provision that env var. One-off check with the token (1Password → `op run` → env) proves the tool. Track on #1287. |
+| Runner-pool token | **Provisioned** on every duty host via a user-only env file (below). Owner issue #1287. |
+
+### Runner-pool token (`RUNNER_POOL_READ_TOKEN`)
+
+Scheduled `ai-runner-pool-watch` needs a GitHub Administration: Read-only token
+to list the runner roster. The value lives only in 1Password vault `vibe_coding`
+(item `GitHub PAT ai-devops RUNNER pool read token`); installers do not copy it
+into the repo or crontab.
+
+Mechanism (no secret values in this file):
+
+1. On each duty host, write a **user-only** env file
+   `~/.config/ai-devops/secrets/watchdog.env` (chmod 600) whose contents set
+   `export RUNNER_POOL_READ_TOKEN=…` (value from the vault item above).
+2. `bin/ai-runner-pool-watch` sources that file when `RUNNER_POOL_READ_TOKEN`
+   is not already set (override the path with `AI_DEVOPS_SECRETS_ENV`).
+3. Provision the file only through a protected pipe, never argv, chat, logs,
+   or a commit — e.g. `op read "op://…/RUNNER_POOL_READ_TOKEN" | ssh <host>
+   'umask 077; …'`.
+4. Never store the value in the public repo, the crontab line, or any log.
+   Rotate by rewriting the env file on every duty host from the vault.
 
 Keep this runbook as the **contract** the tools and docs must match. When a row
 of the plan’s STATUS turns done, update §7 here in the same PR.

@@ -10,11 +10,11 @@ Operator / agent runbook (name, add-a-machine, claim rules): [`docs/watchdog-dut
 |---|---|---|---|
 | P0 | Shared local-watch harness (`schedule` / `tick` / log / lock) reused, not copied | ✅ done | `tools/lib/local-watch.sh`; `tests/test-local-watch-claim.sh` (lock/rotate) |
 | P0b | Multi-host claim/lease helper (`ai-local-watch claim`) + `watch_hosts` config | ✅ done | `bin/ai-local-watch`; `config/local-watch.json`; claim tests 14/14 |
-| P1 | Runner-pool watch as a local timed task (primary on claim holder) | ✅ done | `bin/ai-runner-pool-watch`; `tests/test-ai-runner-pool-watch.sh` 10/10 |
+| P1 | Runner-pool watch as a local timed task (primary on claim holder) | ✅ done | `bin/ai-runner-pool-watch`; `tests/test-ai-runner-pool-watch.sh` 12/12 |
 | P2 | Windows queue-slow watch as a local timed task (replaces Action-on-every-verify) | ✅ done | `bin/ai-windows-queue-watch`; `tests/test-ai-windows-queue-watch.sh` 7/7 |
 | P3 | Membership-drift + merge-queue-drift as local timed tasks | ✅ done | `bin/ai-reviewer-membership-drift` tick + `ai-merge-queue-drift tick`; existing suites green |
 | P4 | Free GitHub Actions kept only as backup; paid Blacksmith gone from watchdogs | ✅ done | Four workflows `ubuntu-24.04` backup-only; `grep blacksmith` clean on watchdog/drift YML |
-| P5 | Installer + docs updated; live proof on **edge-dev, edge-dev3, and hetz** (failover proven) | 🟡 mostly done | installers + docs landed; claim #1288; failover drill edge-dev↔edge-dev3 proven; live proof (D4) done 2026-10-05 (runner-pool `pool: online=1` on edge-dev + duty host edge-dev3); timers installed all three hosts. Remaining: scheduled `ai-runner-pool-watch` lacks `RUNNER_POOL_READ_TOKEN` on edge-dev3/hetz (issue #1287). |
+| P5 | Installer + docs updated; live proof on **edge-dev, edge-dev3, and hetz** (failover proven) | ✅ done | installers + docs landed; claim #1288; failover drill edge-dev↔edge-dev3 proven; live proof (D4) done 2026-10-05 (runner-pool `pool: online=1` on edge-dev + duty host edge-dev3); timers installed all three hosts. `RUNNER_POOL_READ_TOKEN` provisioned on edge-dev3/hetz via user-only `~/.config/ai-devops/secrets/watchdog.env`; live `check` on both hosts `pool: online=1` (2026-10-05 6:08 PM EST). Issue #1287. |
 
 **Where a fresh session starts:** P0. Do not open P1 until P0’s verification gate is green. Re-read this STATUS table before each phase; the plan is stale the moment a row turns done.
 

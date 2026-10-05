@@ -66,6 +66,15 @@ unset RUNNER_POOL_READ_TOKEN
 check 'missing token is an alarm' "bash $SCRIPT check; [ \$? -eq 1 ]"
 export RUNNER_POOL_READ_TOKEN=dummy
 
+echo 'secrets env file'
+roster 1 online
+unset RUNNER_POOL_READ_TOKEN
+printf 'export RUNNER_POOL_READ_TOKEN=dummy\n' > "$TMP/watchdog.env"
+chmod 600 "$TMP/watchdog.env"
+check 'secrets env file supplies the token' "AI_DEVOPS_SECRETS_ENV='$TMP/watchdog.env' bash $SCRIPT check; [ \$? -eq 0 ]"
+check 'missing secrets file still alarms' "AI_DEVOPS_SECRETS_ENV='$TMP/missing.env' bash $SCRIPT check; [ \$? -eq 1 ]"
+export RUNNER_POOL_READ_TOKEN=dummy
+
 echo 'claim gate'
 cat > "$TMP/bin/ai-local-watch" <<'EOF'
 #!/usr/bin/env bash
