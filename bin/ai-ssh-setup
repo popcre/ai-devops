@@ -122,6 +122,21 @@ install_config() {
     ok "Installed $conf"
   fi
 
+  # Silent LAN probe the Match-exec lines call as %d/.ssh/ai-lan-probe (cmd.exe
+  # picks the .cmd under Windows OpenSSH; sh runs the script everywhere else).
+  local probe
+  for probe in ai-lan-probe ai-lan-probe.cmd; do
+    if [ -f "$SSH_DIR/$probe" ] && cmp -s "$ROOT/config/ssh/$probe" "$SSH_DIR/$probe"; then
+      continue
+    elif [ "$DRY_RUN" -eq 1 ]; then
+      printf '[dry-run] would install %s\n' "$SSH_DIR/$probe"
+    else
+      cp "$ROOT/config/ssh/$probe" "$SSH_DIR/$probe.new" && chmod 755 "$SSH_DIR/$probe.new" &&
+        mv -f "$SSH_DIR/$probe.new" "$SSH_DIR/$probe" || { warn "Could not write $SSH_DIR/$probe"; return 1; }
+      ok "Installed $SSH_DIR/$probe"
+    fi
+  done
+
   local want
   if [ -f "$main" ]; then
     # Drop any existing managed Include (and its old marker comment), then put

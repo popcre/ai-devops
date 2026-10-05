@@ -698,6 +698,11 @@ if (Test-Path $sshTmpl) {
   New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
   Copy-Item $sshTmpl $aidevConf -Force
   try { icacls $aidevConf /inheritance:r | Out-Null; icacls $aidevConf /grant:r "$($env:USERNAME):(R,W)" | Out-Null } catch {}
+  # Silent LAN probe the Match-exec lines call as %d/.ssh/ai-lan-probe (cmd.exe
+  # picks the .cmd; Git Bash ssh runs the sh script).
+  foreach ($probe in 'ai-lan-probe', 'ai-lan-probe.cmd') {
+    Copy-Item (Join-Path $RepoPath "config\ssh\$probe") (Join-Path $sshDir $probe) -Force
+  }
   $incLine = "Include ai-devops.conf"
   if (-not (Test-Path $mainConf)) {
     Set-Content -Path $mainConf -Value $incLine -Encoding ascii

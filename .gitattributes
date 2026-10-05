@@ -26,6 +26,7 @@ mcp/**        text eol=lf
 # Per-suite CI manifest files and their loader are consumed by Bash+jq; CRLF
 # in them corrupts values and shebang lines (#1001).
 config/ci-suites/** text eol=lf
+config/ssh/ai-lan-probe text eol=lf
 tools/ci-suites/* text eol=lf
 
 # P1 test receipts and review snapshots must see identical Python bytes.

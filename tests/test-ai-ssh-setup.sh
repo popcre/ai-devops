@@ -63,6 +63,9 @@ esac
 check 'public key installed' cmp -s "$TMP/fixture.pub" "$H/.ssh/916-alien.pub"
 check 'installed key parses' ssh-keygen -y -f "$H/.ssh/916-alien"
 check 'alias template installed' cmp -s "$TMP/template" "$H/.ssh/ai-devops.conf"
+check 'LAN probe installed' cmp -s "$ROOT/config/ssh/ai-lan-probe" "$H/.ssh/ai-lan-probe"
+check 'LAN probe .cmd installed' cmp -s "$ROOT/config/ssh/ai-lan-probe.cmd" "$H/.ssh/ai-lan-probe.cmd"
+check 'LAN probe fails silently on an unreachable address' bash -c 'out="$(sh "$1" 192.0.2.1 2>&1)"; rc=$?; [ "$rc" -ne 0 ] && [ -z "$out" ]' _ "$H/.ssh/ai-lan-probe"
 check 'config created with Include' test "$(cat "$H/.ssh/config")" = 'Include ai-devops.conf'
 check 'no secret printed' bash -c '! grep -q "PRIVATE KEY" <<<"$1"' _ "$out"
 check 'op never given secret in argv' bash -c '! grep -q "PRIVATE KEY" "$1"' _ "$TMP/op.log"

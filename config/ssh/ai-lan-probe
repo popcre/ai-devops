@@ -1,0 +1,17 @@
+#!/bin/sh
+# ai-lan-probe <ip> — exit 0 when <ip> answers one ping within ~1 s, silently.
+#
+# Called from Match-exec lines in ~/.ssh/ai-devops.conf as
+#   !exec "%d/.ssh/ai-lan-probe <ip>"
+# ai-ssh-setup / setup-machine.ps1 install it (and ai-lan-probe.cmd, which
+# cmd.exe picks for Windows OpenSSH) into ~/.ssh. Output must stay silent:
+# Windows OpenSSH shows Match-exec stdout and stderr on every connect, and
+# Linux OpenSSH shows stderr. Here sh owns the redirect, so /dev/null is safe.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Git Bash ssh: "ping" is Windows ping.exe. Reply lines carry "TTL=";
+    # "Destination host unreachable" exits 0 but has none.
+    ping -n 1 -w 800 "$1" 2>/dev/null | grep -q 'TTL=' ;;
+  *)
+    ping -c 1 -W 1 "$1" >/dev/null 2>&1 ;;
+esac
