@@ -183,6 +183,8 @@ normalize_qualification_versions() { # RAW_JSON -> JSON array
         model: .model,
         cli_sha256: .cli_sha256,
         cli_version: .cli_version,
+        policy_mode: .policy_mode,
+        policy_version: .policy_version,
         qualified_epoch: .qualified_epoch
       } | with_entries(select(.value != null)) ]
     else [] end' 2>/dev/null || printf '[]\n'
@@ -909,7 +911,7 @@ provider_cli_binary() { # PROVIDER
 pin_bump_qualify() { # PROVIDER
   local provider="$1" wrapper cli_bin cli_sha before_sha after_sha after_cli_sha file
   local policy_bin cli_version_text cli_version prior_raw prior_versions now
-  local out rc mode want class clear_stale_pin_mismatch
+  local out rc mode want class clear_stale_pin_mismatch switched_as switched_bin
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$provider" in
     gemini|qwen)
@@ -943,6 +945,10 @@ pin_bump_qualify() { # PROVIDER
   cli_version="$("$policy_bin" parse "$cli_version_text")"
   mode="$("$policy_bin" match "$provider")"
   want="$("$policy_bin" required "$provider")"
+  # A pin-bump lane with no pin is meaningless: ai-provider-version treats an
+  # empty pin as a satisfied check, which would publish evidence that binds no
+  # version at all. Refuse here; the provider simply has no pin to bump.
+  [ -n "$want" ] || die "$provider has no version pin in config/provider-cli-versions.json; pin-bump-qualify is only for a pin bump."
   note "ai-review-preflight: pin-bump-qualify $provider: wrapper=$before_sha cli=$cli_sha version=${cli_version:-unreadable} policy=$mode:${want:-unpinned}"
 
   # Cheap fixed check 1: the wrapper doctor (binary present + health probe).
@@ -955,6 +961,26 @@ pin_bump_qualify() { # PROVIDER
     printf 'ai-review-preflight: pin-bump-qualify %s doctor failed: %s\n' "$provider" "$class" >&2
     printf '%s\n' "$out" | tail -12 >&2
     return 1
+  fi
+
+  # Kimi may borrow another user's credentials and execute THAT user's
+  # ~/.kimi-code/bin/kimi for the live turn (ai-kimi run_turn). The bytes that
+  # run are the switched user's binary, not the caller's — re-resolve and
+  # re-hash those before the live smoke so evidence binds the tested bytes.
+  if [ "$provider" = kimi ]; then
+    switched_as="$(printf '%s' "$out" | sed -n 's/.*borrowed from user "\([^"]*\)".*/\1/p' | head -1)"
+    if [ -n "$switched_as" ]; then
+      switched_bin="$(su - "$switched_as" -c 'printf %s "$HOME/.kimi-code/bin/kimi"' 2>/dev/null || true)"
+      if [ -n "$switched_bin" ] && [ -e "$switched_bin" ]; then
+        cli_bin="$switched_bin"
+        cli_sha="$(sha256sum "$cli_bin" | awk '{print $1}')"
+        cli_version_text="$(timeout "${CHECK_TIMEOUT}s" "$cli_bin" --version 2>/dev/null || true)"
+        cli_version="$("$policy_bin" parse "$cli_version_text")"
+      else
+        printf 'ai-review-preflight: kimi live smoke would run as user %s but its binary cannot be resolved; untested bytes are not authorized.\n' "$switched_as" >&2
+        return 1
+      fi
+    fi
   fi
 
   # Cheap fixed check 2: the version pin. ai-provider-version enforces the

@@ -331,5 +331,50 @@ PB_OUT="$(FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
 check "the provider is usable again only after full success" \
   "run_pb status grok | jq -e '.usable==true'"
 
+# A pin-bump lane with no pin would publish evidence that binds no version at
+# all (ai-provider-version treats an empty pin as satisfied). Refuse it.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+jq '.providers.kimi.supported_version = null' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+PB_OUT="$(FAKE_KIMI_VERSION=2.0.0 run_pb pin-bump-qualify kimi 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'no version pin' \
+  && ok "an unpinned provider is refused (nothing to bump)" \
+  || { bad "an unpinned provider is refused (nothing to bump)"; printf '%s\n' "$PB_OUT"; }
+jq '.providers.kimi.supported_version = "2.0.0"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+
+# policy_mode and policy_version must survive into the version history, not be
+# dropped on the next publication.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok >/dev/null 2>&1 || true
+FAKE_GROK_VERSION=1.0.16 run_pb pin-bump-qualify grok >/dev/null 2>&1 || true
+check "the current qualification keeps policy_mode and policy_version" \
+  "jq -e '.policy_mode==\"minimum\" and .policy_version==\"1.0.5\"' '$TMP/state/grok-live-qualified.json'"
+check "the qualification history keeps policy_mode and policy_version" \
+  "jq -e '(.versions|length)==2 and (.versions[0].policy_mode==\"minimum\") and (.versions[0].policy_version==\"1.0.5\") and (.versions[1].policy_mode==\"minimum\") and (.versions[1].policy_version==\"1.0.5\")' '$TMP/state/grok-live-qualified.json'"
+
+# When Kimi borrows another user's credentials the live turn runs THAT user's
+# binary. If it cannot be resolved the lane must refuse (fail-closed), never
+# publish the caller's hash as evidence for bytes that never ran.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+cat > "$TMP/bin/pb-doctor-kimi-switch" <<'FEOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = doctor ]; then
+  echo 'auth          : borrowed from user "nosuchuser"'
+  echo health ok; exit 0
+fi
+echo unexpected; exit 1
+FEOF
+chmod +x "$TMP/bin/pb-doctor-kimi-switch"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_KIMI_WRAPPER="$TMP/bin/pb-doctor-kimi-switch" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    "$SCRIPT" pin-bump-qualify kimi 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'cannot be resolved' \
+  && ok "kimi user-switch with an unresolvable binary is refused" \
+  || { bad "kimi user-switch with an unresolvable binary is refused"; printf '%s\n' "$PB_OUT"; }
+check "no qualification is published when the switched binary is unknown" \
+  "! test -f '$TMP/state/kimi-live-qualified.json'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
