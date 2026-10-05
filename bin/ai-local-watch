@@ -207,12 +207,22 @@ cmd_tick_all(){
     return 1
   fi
   printf '%s duty: leader=%s\n' "$(stamp)" "$(this_host)" >> "$LOG"
-  local name cmd tool_rc
+  local name cmd tool_rc tool_bin
   while IFS=$'\t' read -r name cmd; do
     [ -n "$name" ] || continue
-    if command -v "$cmd" >/dev/null 2>&1 || [ -x "$TOOL_ROOT/bin/$cmd" ]; then
+    cmd="${cmd//$'\r'/}"
+    name="${name//$'\r'/}"
+    tool_bin=""
+    if [ -x "$cmd" ]; then
+      tool_bin="$cmd"
+    elif [ -x "$TOOL_ROOT/bin/$cmd" ]; then
+      tool_bin="$TOOL_ROOT/bin/$cmd"
+    elif command -v "$cmd" >/dev/null 2>&1; then
+      tool_bin="$(command -v "$cmd")"
+    fi
+    if [ -n "$tool_bin" ]; then
       tool_rc=0
-      "$TOOL_ROOT/bin/$cmd" tick >> "$LOG" 2>&1 || tool_rc=$?
+      "$tool_bin" tick >> "$LOG" 2>&1 || tool_rc=$?
       printf '%s tool %s exit %s\n' "$(stamp)" "$name" "$tool_rc" >> "$LOG"
       [ "$tool_rc" -eq 0 ] || [ "$tool_rc" -eq 3 ] || rc=$tool_rc
     else

@@ -178,8 +178,15 @@ case "$*" in
 esac
 EOF
 chmod +x "$TMP/bin/ai-gh"
-# Stub the duty tool so tick-all has something to run
-cat > "$TMP/config.json" <<'EOF'
+# A real duty tool tick-all can run (absolute path).
+cat > "$TMP/demo-watch" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = tick ] || exit 2
+echo demo-tick-ok
+exit 0
+EOF
+chmod +x "$TMP/demo-watch"
+cat > "$TMP/config.json" <<EOF
 {
   "repo": "o/r",
   "watch_hosts": ["edge-dev", "edge-dev3", "hetz"],
@@ -189,12 +196,13 @@ cat > "$TMP/config.json" <<'EOF'
   "lock_stale_minutes": 20,
   "log_max_bytes": 5000000,
   "tools": {
-    "demo": { "tick_minutes": 2, "command": "true" }
+    "demo": { "tick_minutes": 2, "command": "$TMP/demo-watch" }
   }
 }
 EOF
 run tick-all 2>/dev/null; rc=$?
 check 'tick-all as leader succeeds and logs duty' "[ $rc -eq 0 ] && grep -q 'duty: leader=edge-dev' '$TMP/home/tick.log'"
+check 'tick-all runs the duty tool tick' "grep -q 'tool demo exit 0' '$TMP/home/tick.log' && grep -q 'demo-tick-ok' '$TMP/home/tick.log'"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
