@@ -273,6 +273,9 @@ $knownHostsTmplRaw = (& $gitBash $privateConfigTool path ssh_known_hosts | Selec
 $knownHostsPathExitCode = $LASTEXITCODE
 if ($knownHostsPathExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($knownHostsTmplRaw)) { throw "Protected SSH host keys are unavailable." }
 $knownHostsTmpl = ConvertFrom-GitBashPath -Path $knownHostsTmplRaw -GitBashPath $gitBash
+# Optional: LAN-first name map for the hosts file (step 5e). Missing is not fatal.
+$lanHostsTmplRaw = (& $gitBash $privateConfigTool path lan_first_hosts 2>$null | Select-Object -Last 1)
+$lanHostsTmpl = if ($LASTEXITCODE -eq 0 -and $lanHostsTmplRaw) { ConvertFrom-GitBashPath -Path $lanHostsTmplRaw.Trim() -GitBashPath $gitBash } else { $null }
 
 # Railway's official MCP is bundled into its CLI. Reconcile the current official
 # npm package even when setup-machine.ps1 is run directly. npm install is
@@ -736,6 +739,38 @@ $knownHostsSync = Join-Path $RepoPath "bin\sync-ssh-known-hosts.ps1"
 if ((Test-Path $knownHostsTmpl) -and (Test-Path $knownHostsSync)) {
   try { & $knownHostsSync -TemplatePath $knownHostsTmpl -KnownHostsPath $knownHosts } catch { Warn "Could not install managed SSH server keys: $_" }
 } else { Warn "Managed SSH server-key source is missing - skipping it." }
+
+# --------------------------------------------------------------------------
+# 5e. Hosts file - LAN-first machine names (mstsc / ssh / anything by name)
+# --------------------------------------------------------------------------
+# Writes a managed block listing each machine's LAN address then its Tailscale
+# address. Windows returns both in file order, so a connection by name tries
+# LAN first and falls back to Tailscale. Needs an elevated shell.
+Step "Hosts file (LAN-first names, e.g. edge-dev3)"
+$hostsFile = Join-Path $env:windir 'System32\drivers\etc\hosts'
+if (-not ($lanHostsTmpl -and (Test-Path $lanHostsTmpl))) {
+  Warn "LAN-first host list unavailable from private config - skipping hosts file."
+} elseif (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  Warn "Not elevated - hosts file not updated. Re-run sync from an elevated shell to resolve names LAN-first."
+} else {
+  $self = $env:COMPUTERNAME.ToLowerInvariant()
+  $entries = @(Get-Content $lanHostsTmpl | Where-Object { $_ -match '^\s*\d' } | ForEach-Object { $_.Trim() } |
+    Where-Object { ($_ -split '\s+')[-1].ToLowerInvariant() -ne $self })
+  $begin = '# BEGIN ai-devops lan-first'; $end = '# END ai-devops lan-first'
+  $old = if (Test-Path $hostsFile) { [System.IO.File]::ReadAllText($hostsFile) } else { '' }
+  # The block goes at the TOP: Tailscale's own MagicDNS section also lists the
+  # bare name, and the first matching line wins the ordering.
+  $kept = [regex]::Replace($old, "(?s)$([regex]::Escape($begin)).*?$([regex]::Escape($end))\r?\n?", '').Trim()
+  $new = if ($entries.Count) { "$begin`r`n$($entries -join "`r`n")`r`n$end`r`n$kept`r`n" } else { "$kept`r`n" }
+  if ($new -ne $old) {
+    try {
+      Copy-Item $hostsFile "$hostsFile.ai-devops.bak" -Force
+      [System.IO.File]::WriteAllText($hostsFile, $new, [System.Text.Encoding]::ASCII)
+      ipconfig /flushdns | Out-Null
+      Ok "Hosts file: $($entries.Count) LAN-first entries written (backup: hosts.ai-devops.bak)"
+    } catch { Warn "Could not write hosts file: $_" }
+  } else { Ok "Hosts file already current" }
+}
 
 # --------------------------------------------------------------------------
 # 6. Best-effort: wire MCP servers into Claude Desktop config
