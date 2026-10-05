@@ -58,7 +58,7 @@ action_taxonomy_detail() {
   # Empty reviewer verdict: detect from the check name or summary. This is the
   # carve-out that keeps an empty verdict off the PR test verdict.
   case "$name_blob $summary_blob" in
-    *empty\ report*|*empty-report*|*empty.report*|*empty\ verdict*|*empty-verdict*|*empty.verdict*|*no\ verdict*|*no-verdict*|*no.verdict*|*malformed\ verdict*|*malformed-verdict*|*malformed.verdict*|*empty_provider_stream*|*empty-provider-stream*)
+    *empty\ report*|*empty-report*|*empty.report*|*empty\ verdict*|*empty-verdict*|*empty.verdict*|*no\ verdict*|*no-verdict*|*no.verdict*|*missing\ verdict*|*missing-verdict*|*missing.verdict*|*malformed\ verdict*|*malformed-verdict*|*malformed.verdict*|*empty_provider_stream*|*empty-provider-stream*|*invalid-provider-envelope*|*invalid.provider.envelope*)
       printf 'empty-verdict\n'; return 0 ;;
   esac
 
@@ -89,7 +89,7 @@ action_taxonomy_check() {
 # never `result` and never reddens the PR test verdict.
 action_taxonomy_review() {
   case "${1:-}" in
-    empty-report|empty-verdict|empty_provider_stream|no-verdict|malformed-verdict)
+    empty-report|empty-verdict|empty_provider_stream|no-verdict|missing-verdict|malformed-verdict|invalid-provider-envelope)
       printf 'review-step\n' ;;
     provider-timeout|timeout|allowance-exhausted|out-of-credit|rate-limit|killed|interrupted)
       printf 'capacity/infra\n' ;;

@@ -46,34 +46,23 @@ if (secretFile) {
 }
 
 // Issue #1032: once the key is in the environment this preloader has no work
-// left, so drop its own --require from NODE_OPTIONS. Otherwise Qwen's --sandbox
-// forwards NODE_OPTIONS into the container, where this host path does not
+// left, so drop every --require from NODE_OPTIONS. Otherwise Qwen's --sandbox
+// forwards NODE_OPTIONS into the container, where a host-only path does not
 // exist, and every sandboxed review dies with MODULE_NOT_FOUND before any
-// model call. The host re-exec chain keeps working because the key itself is
-// an ordinary inherited variable.
+// model call. This preloader's own --require is the one the wrapper sets, but
+// any other host --require that rides along is the same class of break, so the
+// strip is total: a sandboxed child must never be told to require a host path.
+// The host re-exec chain keeps working because the key itself is an ordinary
+// inherited variable.
 if (process.env.NODE_OPTIONS) {
-  // Compare real paths: on Windows the wrapper may spell this file as an MSYS
-  // path (/d/...) or with different case/separators than __filename.
-  const path = require('node:path');
-  const canon = (p) => {
-    let v = String(p).replace(/^["']|["']$/g, '');
-    if (process.platform === 'win32') {
-      v = v.replace(/^\/([a-zA-Z])\//, '$1:/');
-    }
-    try { v = fs.realpathSync.native(v); } catch { v = path.resolve(v); }
-    return process.platform === 'win32' ? v.replace(/\//g, '\\').toLowerCase() : v;
-  };
-  const self = canon(__filename);
   const opts = process.env.NODE_OPTIONS.split(/\s+/).filter(Boolean);
   const kept = [];
   for (let i = 0; i < opts.length; i += 1) {
     const m = /^(?:--require|-r)(?:=(.*))?$/.exec(opts[i]);
     if (m) {
-      const target = m[1] !== undefined ? m[1] : opts[i + 1];
-      if (target !== undefined && canon(target) === self) {
-        if (m[1] === undefined) i += 1;
-        continue;
-      }
+      // `--require=VALUE` is one token; `--require VALUE` is two.
+      if (m[1] === undefined) i += 1;
+      continue;
     }
     kept.push(opts[i]);
   }

@@ -223,6 +223,7 @@ POOL_OUT="$( (cd "$RP" && MOCK_MODE=normal AI_GEMINI_BODY_STDOUT=1 "$SCRIPT" new
 check 'pool contract emits the model verdict body on stdout for the pool gate' "printf '%s\n' \"\$POOL_OUT\" | awk '/^## Verdict[[:space:]]*\$/{getline; gsub(/^[[:space:]]+|[[:space:]]+\$/,\"\"); print; exit}' | grep -Eqx 'APPROVE|REJECT|BLOCKED'"
 check 'pool contract keeps the PASS line off stdout and on stderr' "! printf '%s\n' \"\$POOL_OUT\" | grep -q '^PASS session=' && grep -q '^PASS session=poolbody' '$TMP/pool.err'"
 check 'ai-review-pool sets the gemini body-on-stdout contract' "grep -q 'AI_GEMINI_BODY_STDOUT=1' '$ROOT/bin/ai-review-pool'"
+check 'ai-review-pool maps empty or blocked verdict to missing-verdict, not provider-failed' "grep -q 'AI_REVIEW_EMPTY_VERDICT' '$ROOT/bin/ai-review-pool' && grep -q -- '--failure missing-verdict' '$ROOT/bin/ai-review-pool' && grep -q 'reroute' '$ROOT/bin/ai-review-pool'"
 R4="$TMP/repo4"; make_repo "$R4"; check 'normal review writes a durable report' "new_run '$R4' good normal && find '$R4/.ai/reviews' -type f -size +0c | grep -q ."
 RLARGE="$TMP/repo-large"; make_repo "$RLARGE"
 python3 -c 'import sys; open(sys.argv[1], "w").write("A" * 150000)' "$TMP/large-prompt.txt"
@@ -257,6 +258,14 @@ printf before-model > "$R4/dirty.txt"
 check 'write during model verification is rejected' "! new_run '$R4' modelwrite mutate-model"
 check 'empty response is rejected' "! new_run '$R4' empty empty"
 check 'invalid verdict word is rejected' "! new_run '$R4' badverdict badverdict"
+# Reroute-on-empty (child 1): empty / blocked turns are review-step failures
+# (exit 81 + AI_REVIEW_EMPTY_VERDICT), never a PASS and never provider-failed.
+set +e; new_run "$R4" empty-marker empty >"$TMP/empty-marker.out" 2>"$TMP/empty-marker.err"; EMPTY_MARKER_RC=$?; set -e
+check 'empty verdict exits 81 as a review-step failure' "test '$EMPTY_MARKER_RC' -eq 81"
+check 'empty verdict emits the AI_REVIEW_EMPTY_VERDICT marker' "grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/empty-marker.err'"
+check 'empty verdict never prints PASS' "! grep -q '^PASS session=' '$TMP/empty-marker.out' '$TMP/empty-marker.err'"
+set +e; new_run "$R4" badverdict-marker badverdict >"$TMP/badverdict-marker.out" 2>"$TMP/badverdict-marker.err"; BADVERDICT_MARKER_RC=$?; set -e
+check 'malformed verdict exits 81 and never prints PASS' "test '$BADVERDICT_MARKER_RC' -eq 81 && ! grep -q '^PASS session=' '$TMP/badverdict-marker.out' '$TMP/badverdict-marker.err'"
 # Out of credit (Albert, 2026-09-24): its own quarantine directory, so the
 # recorded global quarantine cannot refuse the later tests in this file.
 cp -a "$AI_REVIEW_QUARANTINE_DIR" "$TMP/credit-q"; cp -a "$AI_REVIEW_QUARANTINE_DIR" "$TMP/credit-q2"
@@ -458,7 +467,12 @@ else
 '
 fi
 check 'brief forbids shell commands the headless runtime auto-denies' "test \"\$(grep -c 'never call run_command' '$SCRIPT')\" -eq 2 && ! grep -q 'you may run commands' '$SCRIPT'"
-check 'governed denied-tool turn fails naming the denied tool' "! (gov_run govdenied denied 2>&1 | tee '$TMP/govdenied.err' >/dev/null; exit \${PIPESTATUS[0]}) && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/govdenied.err'"
-check 'plain denied-tool turn fails naming the denied tool' "! (new_run '$RG' plaindenied denied 2>&1 | tee '$TMP/plaindenied.err' >/dev/null; exit \${PIPESTATUS[0]}) && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/plaindenied.err'"
+set +e; (gov_run govdenied denied) >"$TMP/govdenied.out" 2>"$TMP/govdenied.err"; GOVDENIED_RC=$?; set -e
+check 'governed denied-tool turn fails naming the denied tool' "test '$GOVDENIED_RC' -ne 0 && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/govdenied.err'"
+check 'governed denied-tool turn is a review-step failure (exit 81 + marker)' "test '$GOVDENIED_RC' -eq 81 && grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/govdenied.err'"
+check 'governed denied-tool turn never prints PASS' "! grep -q '^PASS session=' '$TMP/govdenied.out' '$TMP/govdenied.err'"
+set +e; (new_run "$RG" plaindenied denied) >"$TMP/plaindenied.out" 2>"$TMP/plaindenied.err"; PLAINDENIED_RC=$?; set -e
+check 'plain denied-tool turn fails naming the denied tool' "test '$PLAINDENIED_RC' -ne 0 && grep -q 'headless runtime denied a tool (RunCommand)' '$TMP/plaindenied.err'"
+check 'plain denied-tool turn is a review-step failure and never PASS' "test '$PLAINDENIED_RC' -eq 81 && grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/plaindenied.err' && ! grep -q '^PASS session=' '$TMP/plaindenied.out' '$TMP/plaindenied.err'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

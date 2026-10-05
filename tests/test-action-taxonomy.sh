@@ -51,6 +51,10 @@ check "empty-report review failure is review-step" \
   "test \"$(rev empty-report)\" = 'review-step'"
 check "empty-verdict review failure is review-step" \
   "test \"$(rev empty-verdict)\" = 'review-step'"
+check "missing-verdict (the name the wrappers write) is review-step" \
+  "test \"$(rev missing-verdict)\" = 'review-step'"
+check "invalid-provider-envelope (empty provider report) is review-step" \
+  "test \"$(rev invalid-provider-envelope)\" = 'review-step'"
 check "provider timeout review failure is capacity/infra" \
   "test \"$(rev provider-timeout)\" = 'capacity/infra'"
 check "allowance exhaustion is capacity/infra" \
@@ -68,7 +72,7 @@ check "empty-verdict detail is empty-verdict" \
   "test \"$(det FAILURE x 'empty report')\" = 'empty-verdict'"
 
 check "no empty-verdict path returns result" \
-  "test \"$(rev empty-report)\" != 'result' && test \"$(rev empty-verdict)\" != 'result' && test \"$(rev no-verdict)\" != 'result' && test \"$(rev malformed-verdict)\" != 'result' && test \"$(act FAILURE empty-verdict x)\" != 'result'"
+  "test \"$(rev empty-report)\" != 'result' && test \"$(rev empty-verdict)\" != 'result' && test \"$(rev no-verdict)\" != 'result' && test \"$(rev missing-verdict)\" != 'result' && test \"$(rev malformed-verdict)\" != 'result' && test \"$(rev invalid-provider-envelope)\" != 'result' && test \"$(act FAILURE empty-verdict x)\" != 'result'"
 
 # End-to-end: the classification ai-pr-wait and report-scheduled-failure run.
 check "report-scheduled-failure classifies a cancelled need as capacity/infra" \

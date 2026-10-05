@@ -518,6 +518,20 @@ check 'Qwen preloader survives the runtime re-exec, deletes its handoff, and sta
 # Issue #1032: --sandbox forwards NODE_OPTIONS into the container, where the host
 # preloader path does not exist; the preloader must remove itself once consumed.
 check 'Qwen preloader removes itself from NODE_OPTIONS so a sandboxed child never requires a host-only path' "printf '%s' '$PRELOAD_PROOF' | jq -e '.nodeOptions==\"absent\"'"
+# Any other host-only --require is the same sandbox break. The strip is total.
+# Node on Windows resolves only Windows-style paths when NODE_OPTIONS carries
+# more than one --require, so spell both that way here.
+printf 'module.exports={};\n' > "$TMP/host-only-helper.js"
+printf 'module.exports={};\n' > "$TMP/other.js"
+PRELOAD_WIN="$(cd "$(dirname "$REPO_ROOT/tools/qwen-provider-env-preload.cjs")" && pwd -W)/qwen-provider-env-preload.cjs"
+HELPER_WIN="$(cd "$TMP" && pwd -W)/host-only-helper.js"
+OTHER_WIN="$(cd "$TMP" && pwd -W)/other.js"
+printf 'preload-test-secret\n' > "$TMP/preload-extra-secret"; chmod 600 "$TMP/preload-extra-secret"
+PRELOAD_EXTRA="$(env -u SANDBOX_FLAGS AI_QWEN_SECRET_FILE="$TMP/preload-extra-secret" NODE_OPTIONS="--require=$HELPER_WIN --require=$PRELOAD_WIN --max-old-space-size=256" node -e 'process.stdout.write(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS||"absent"}))')"
+check 'Qwen preloader strips every --require from NODE_OPTIONS, not only its own' "printf '%s' '$PRELOAD_EXTRA' | jq -e '.nodeOptions==\"--max-old-space-size=256\"'"
+printf 'preload-test-secret\n' > "$TMP/preload-space-secret"; chmod 600 "$TMP/preload-space-secret"
+PRELOAD_SPACE="$(env -u SANDBOX_FLAGS AI_QWEN_SECRET_FILE="$TMP/preload-space-secret" NODE_OPTIONS="--require $PRELOAD_WIN -r $OTHER_WIN" node -e 'process.stdout.write(process.env.NODE_OPTIONS||"absent")')"
+check 'Qwen preloader strips --require and -r in both equals and spaced forms' "test \"\$PRELOAD_SPACE\" = 'absent'"
 # --sandbox forwards only a fixed provider-variable list; the key must reach the
 # container by name (docker copies the value from its env), never as NAME=value argv.
 check 'Qwen preloader forwards the key into the sandbox by name only' "printf '%s' '$PRELOAD_PROOF' | jq -e '.sandboxFlags==\"--env BAILIAN_CODING_PLAN_API_KEY\"'"
