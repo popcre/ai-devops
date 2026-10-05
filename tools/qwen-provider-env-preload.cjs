@@ -24,7 +24,7 @@ function splitArgs(str) {
     const c = str[i];
     if (quote) {
       if (c === quote) { quote = null; continue; }
-      if (quote === '"' && c === '\\' && i + 1 < str.length) { cur += str[i + 1]; i += 1; continue; }
+      if (quote === '"' && c === '\\' && i + 1 < str.length && (str[i + 1] === '\\' || str[i + 1] === '"')) { cur += str[i + 1]; i += 1; continue; }
       cur += c;
       continue;
     }

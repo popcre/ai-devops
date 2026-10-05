@@ -105,7 +105,7 @@ if [ "$allow_key" = 1 ]; then
   [ -n "$keep_qwen_key" ] && [ -f "$preload" ] && [ -f "$secret_file" ] || exit 86
   printf "%s\n" "$keep_qwen_key" > "$secret_file" || exit 87
   unset keep_qwen_key
-  clean_env+=("AI_QWEN_SECRET_FILE=$secret_file" "NODE_OPTIONS=--require=$preload" "OPENAI_BASE_URL=$base_url" "OPENAI_MODEL=$model")
+  clean_env+=("AI_QWEN_SECRET_FILE=$secret_file" "NODE_OPTIONS=--require=\"$preload\"" "OPENAI_BASE_URL=$base_url" "OPENAI_MODEL=$model")
 fi
 [ -z "${AI_QWEN_TEST_DIR:-}" ] || clean_env+=("AI_QWEN_TEST_DIR=$AI_QWEN_TEST_DIR")
 exec "${clean_env[@]}" "$bash_bin" --noprofile --norc -c '\''exec "$@"'\'' qwen-clean "$@"

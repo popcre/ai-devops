@@ -581,6 +581,14 @@ check 'Qwen sandbox forward drops a quoted stale secret without leaving fragment
   "test \"\$SPACED_STALE\" = '--rm --env BAILIAN_CODING_PLAN_API_KEY'"
 check 'Qwen sandbox forward drops a quoted spaced --env= stale secret without leaving fragments' \
   "test \"\$SPACED_STALE_EQ\" = '--rm --env BAILIAN_CODING_PLAN_API_KEY'"
+# Windows paths contain backslashes; inside double quotes only \\ and \" are
+# escapes — every other \x pair must survive as a literal backslash.
+SPACED_WIN="$(strip_node_options "--require \"C:\\Program Files\\vendor\\mod.js\" --max-old-space-size=256")"
+check 'Qwen preloader preserves Windows backslashes in a quoted spaced --require' \
+  "test \"\$SPACED_WIN\" = '--max-old-space-size=256'"
+SPACED_WIN_KEEP="$(strip_node_options "--title \"C:\\my app\" --max-old-space-size=256")"
+check 'Qwen preloader keeps Windows backslashes intact in a non-require quoted option' \
+  "test \"\$SPACED_WIN_KEEP\" = '--title \"C:\\\\my app\" --max-old-space-size=256'"
 # --sandbox forwards only a fixed provider-variable list; the key must reach the
 # container by name (docker copies the value from its env), never as NAME=value argv.
 check 'Qwen preloader forwards the key into the sandbox by name only' "printf '%s' '$PRELOAD_PROOF' | jq -e '.sandboxFlags==\"--env BAILIAN_CODING_PLAN_API_KEY\"'"
