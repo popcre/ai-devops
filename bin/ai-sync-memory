@@ -126,6 +126,10 @@ prune_empty_sections() {
     }
     END { flush_pending() }
   ' "$index" > "$tmp" || { rm -f "$tmp"; return 1; }
+  if cmp -s "$tmp" "$index"; then
+    rm -f "$tmp"
+    return 0
+  fi
   mv -f "$tmp" "$index"
 }
 
