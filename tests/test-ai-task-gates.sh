@@ -76,6 +76,9 @@ make_approved_report(){
       # The review wrapper records the requested operation in the report table.
       sed -i "/^| source digest | /a | operation | $(printf '\140')$operation$(printf '\140') |" "$report" ;;
   esac
+  # Resolve with pwd -P (not realpath) so the stored path matches what
+  # reviewer_approval_summary computes via cd+pwd -P on Windows CI runners.
+  report="$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")"
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
   key="$("$ROOT/bin/ai-review-lifecycle" identity "$dir" | jq -r .repository_key)" || return 1
   state_dir="$AI_REVIEW_LIFECYCLE_DIR/runs/$key/codex/codex"
