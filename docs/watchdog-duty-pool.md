@@ -110,8 +110,10 @@ to click through them.
 | Duty tools | `ai-windows-queue-watch`, `ai-runner-pool-watch`, `ai-reviewer-membership-drift tick`, `ai-merge-queue-drift tick` |
 | Installers | `install-ai-devops-windows.ps1` and `install.sh` schedule `ai-local-watch` on pool members |
 | Free Actions backup | Watchdog/drift workflows are `ubuntu-24.04` weekly smoke + dispatch; no paid runners |
-| Live failover drill | **Proven on edge-dev ↔ edge-dev3** (2026-10-05): expired lease → edge-dev3 claim → edge-dev `skip: leader=edge-dev3` → release → edge-dev reclaim. Claim issue #1288. runner-pool live tick + edge-dev3/hetz timer install still open (owner issue #1287). |
+| Live failover drill | **Proven on edge-dev ↔ edge-dev3** (2026-10-05): expired lease → edge-dev3 claim → edge-dev `skip: leader=edge-dev3` → release → edge-dev reclaim. Claim issue #1288. |
+| Live proof (D4) | **Proven 2026-10-05:** one tick per duty tool; runner-pool `pool: online=1 label=ai-devops-windows-qualified` (exit 0, WARN one host) on edge-dev and on duty host edge-dev3. Claim issue #1288, owner issue #1287. |
+| Timer install | edge-dev Task Scheduler `\ai-devops\ai-local-watch`; edge-dev3 and hetz crontab `*/2` `bin/ai-local-watch tick-all`. |
+| Open gap | Scheduled `ai-runner-pool-watch` still alarms `RUNNER_POOL_READ_TOKEN is not set` on edge-dev3/hetz — installers do not provision that env var. One-off check with the token (1Password → `op run` → env) proves the tool. Track on #1287. |
 
-Fresh session: finish the live proof (D4 in the plan). Keep this runbook as the
-**contract** the tools and docs must match. When a row of the plan’s STATUS turns
-done, update §7 here in the same PR.
+Keep this runbook as the **contract** the tools and docs must match. When a row
+of the plan’s STATUS turns done, update §7 here in the same PR.
