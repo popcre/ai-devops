@@ -911,7 +911,7 @@ provider_cli_binary() { # PROVIDER
 pin_bump_qualify() { # PROVIDER
   local provider="$1" wrapper cli_bin cli_sha before_sha after_sha after_cli_sha file
   local policy_bin cli_version_text cli_version prior_raw prior_versions now
-  local out rc mode want class clear_stale_pin_mismatch switched_as switched_bin
+  local out rc mode want class clear_stale_pin_mismatch clear_stale_pin_epoch switched_as switched_bin
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$provider" in
     gemini|qwen)
@@ -931,9 +931,11 @@ pin_bump_qualify() { # PROVIDER
   # failure). A failure below either re-quarantines or leaves the stale
   # pin-mismatch in place, so an unqualified provider is never left usable.
   clear_stale_pin_mismatch=0
+  clear_stale_pin_epoch=""
   if active_quarantine "$provider"; then
     if [ "$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // ""')" = pin-mismatch ]; then
       clear_stale_pin_mismatch=1
+      clear_stale_pin_epoch="$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.created_epoch // ""')"
     else
       die "$provider has an active $(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // "unknown"') quarantine; clear it before pin-bump qualification."
     fi
@@ -1061,16 +1063,18 @@ pin_bump_qualify() { # PROVIDER
     || { restore_qualification_versions "$provider" "$prior_raw"; printf 'ai-review-preflight: %s pin-bump qualification did not publish; the previous record stays valid.\n' "$provider" >&2; return 1; }
   # Only now is it safe to drop a stale pin-mismatch quarantine: the new
   # qualification record is on disk. Recheck the quarantine is still the
-  # stale pin-mismatch we intended to clear — a newer authentication or
-  # credit quarantine recorded during the live check must survive. Clear
-  # only the global quarantine, never the scoped usage-limit backoffs.
+  # SAME stale pin-mismatch record we intended to clear (class AND creation
+  # epoch) — a newer pin-mismatch or any other quarantine recorded during
+  # the live check must survive. Clear only the global quarantine, never
+  # the scoped usage-limit backoffs.
   if [ "$clear_stale_pin_mismatch" = 1 ]; then
     if active_quarantine "$provider" \
-       && [ "$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // ""')" = pin-mismatch ]; then
+       && [ "$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // ""')" = pin-mismatch ] \
+       && [ "$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.created_epoch // ""')" = "$clear_stale_pin_epoch" ]; then
       admission_store clear-global "$provider" >/dev/null
       note "ai-review-preflight: cleared stale pin-mismatch quarantine for $provider (the pin is being updated in this change)."
     else
-      note "ai-review-preflight: left $provider quarantine in place (it is no longer the stale pin-mismatch; a newer record must stand)."
+      note "ai-review-preflight: left $provider quarantine in place (it is not the stale pin-mismatch we intended to clear; a newer record must stand)."
     fi
   fi
   note "ai-review-preflight: pin-bump-qualified $provider (wrapper $after_sha, cli $after_cli_sha, version ${cli_version:-unreadable}, policy $mode:${want:-unpinned})."

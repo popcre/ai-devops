@@ -401,6 +401,37 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
 check "the newer quarantine still stands after qualification" \
   "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.failure_class==\"out-of-credit\"'"
 
+# A NEWER pin-mismatch (same class, different epoch) written during the live
+# check must also survive: identity is class + created_epoch, not class alone.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+jq '.providers.grok.supported_version = "1.0.15"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok >/dev/null 2>&1 || true
+jq '.providers.grok.supported_version = "1.0.5"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+cat > "$TMP/bin/pb-doctor-newpinq" <<FEOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = doctor ] && [ "\${2:-}" = --live ]; then
+  # Replace the stale pin-mismatch with a NEW one (fresh epoch) mid-live.
+  python "\$ROOT/tools/reviewer_admission.py" quarantine grok --reason pin-mismatch --seconds 60 --directory "\$AI_REVIEW_QUARANTINE_DIR" >/dev/null 2>&1 || true
+  echo live smoke ok; exit 0
+fi
+if [ "\${1:-}" = doctor ]; then echo health ok; exit 0; fi
+echo unexpected; exit 1
+FEOF
+chmod +x "$TMP/bin/pb-doctor-newpinq"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor-newpinq" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    ROOT="$ROOT" \
+    FAKE_GROK_VERSION=1.0.5 \
+    "$SCRIPT" pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'left grok quarantine in place' \
+  && ok "a newer pin-mismatch (fresh epoch) is not cleared" \
+  || { bad "a newer pin-mismatch (fresh epoch) is not cleared"; printf '%s\n' "$PB_OUT"; }
+check "the newer pin-mismatch still stands after qualification" \
+  "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.failure_class==\"pin-mismatch\"'"
+
 # The clear must also preserve scoped usage-limit backoffs.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 jq '.providers.grok.supported_version = "1.0.15"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
