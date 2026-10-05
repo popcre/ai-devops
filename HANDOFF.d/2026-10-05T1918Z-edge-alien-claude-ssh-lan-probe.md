@@ -57,7 +57,7 @@ the `Host` blocks.
     account token held in the User environment variable `OP_SERVICE_ACCOUNT_TOKEN`.
   - known_hosts was merged with `bin/sync-ssh-known-hosts.ps1`.
   - `ssh -o BatchMode=yes 4837 hostname` prints `al8960ofc`.
-  - `ssh -G edge-dev` resolves to `100.75.135.31`, the Tailscale address, because its LAN address `192.168.0.192` is
+  - `ssh -G edge-dev` resolves to (private), the Tailscale address, because its LAN address (private) is
     not reachable from edge-alien.
 - **The probe fix**, pushed to main:
   - `popcre/ai-devops` **b950db8**:
