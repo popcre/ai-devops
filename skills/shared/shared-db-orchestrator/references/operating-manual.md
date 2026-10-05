@@ -109,8 +109,9 @@ dependency record: the blocker watcher's tick parses it on every open issue and
 records any missing native "blocked by" link itself (ai-devops #596), so links
 can no longer be forgotten. Filing a dependency still owns it, though: the
 session that files or identifies "this cannot proceed until N closes" either
-registers `ai-blocker-watch wait N --for M` and ends its turn (the watcher wakes
-it when N closes), or hands the wait to a NAMED session/owner in the issue —
+leaves the issue/PR as the card and ends its turn (registration is not
+required; the bounded janitor re-surfaces stuck state), or names the owning
+session/owner in the issue —
 never to "a future session." Deferring to an unnamed future owner left the
 #3180 follow-through unregistered for ~15 hours until Albert asked.
 
@@ -342,6 +343,17 @@ conclusions are re-proved. The
 production job then independently repeats its evidence checks, acquires the
 global production lock, performs the fresh dry-run immediately before the write,
 and records post-apply ledger and catalog proof.
+
+Launching the run (owner ruling, Albert 2026-10-02, verbatim: "let AI launch it
+and remove that rule permanently."): guarded merge does not start the
+merged-main preview by itself. Any AI session may launch it for an approved,
+merged change: in the shared-db checkout run `ai-task-gates check --before
+shared-db-promotion`, then dispatch `shared-supabase-migrations.yml` on `main`
+with target `preview`, mode `apply`, and `merged_preview_source_pr` set to the
+merged PR. The automatic promotion then runs with every check above unchanged.
+A refusal (for example an APPROVE without its `production-risk-assessment`
+block) is fixed at its cause by the allocator-assigned reviewer re-issuing a
+complete verdict, then the run is launched again; never bypassed.
 
 ## Release and recovery
 

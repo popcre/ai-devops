@@ -39,7 +39,7 @@ jobs:
       # the free lane's windows-offline-section in verify.yml.
       fail-fast: false
       matrix:
-        section: [1, 2, 3, 4, 5, 6, 7, 8]
+        section: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     runs-on: blacksmith-4vcpu-windows-2025
     # The free hosted lane bounds the same work at 40 minutes (verify.yml).
     # Blacksmith measured roughly 2x faster per suite on 2026-09-10 evidence
@@ -74,10 +74,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path C:\t | Out-Null
           "TEMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
           "TMP=C:\t" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Windows-sensitive section ${{ matrix.section }} of 8 (Blacksmith)
+      - name: Windows-sensitive section ${{ matrix.section }} of 12 (Blacksmith)
         shell: pwsh
         run: |
-          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/8'
+          .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/12'
 
   windows-offline-blacksmith:
     needs: [windows-offline-blacksmith-section]
@@ -91,7 +91,7 @@ jobs:
         run: |
           set -uo pipefail
           if [ "$RESULT" = 'success' ]; then
-            printf 'windows-offline-blacksmith: all eight Blacksmith sections succeeded.\n'
+            printf 'windows-offline-blacksmith: all twelve Blacksmith sections succeeded.\n'
             exit 0
           fi
           printf 'windows-offline-blacksmith: sections reported %s; failing closed.\n' "$RESULT" >&2

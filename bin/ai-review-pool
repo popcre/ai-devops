@@ -22,7 +22,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
+usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini|deepseek> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -53,6 +53,7 @@ case "$provider" in
   muse)  RUNNER="$ROOT/ai-muse";         RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
   qwen)  RUNNER="$ROOT/ai-qwen";         RUNNER_MAX_TURNS="" ;; # ai-qwen owns its 120-turn/60m review budget and rejects --max-turns
   gemini) RUNNER="$ROOT/ai-gemini";      RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
+  deepseek) RUNNER="$ROOT/ai-review-engine"; RUNNER_MAX_TURNS="" ;; # OpenCode door: no session-runner copy; only the shared runner may dispatch it
   ''|-h|--help|help) usage; [ -n "$provider" ] || exit 0; exit 2 ;;
   *) printf 'ai-review-pool: error: %s is not a pool provider with a session runner.\n' "$provider" >&2; exit 2 ;;
 esac
@@ -75,7 +76,7 @@ fi
 # AI_REVIEW_ENGINE_BIN is refused here, before ENGINE is resolved, so a
 # wrapper cannot point the runner at a look-alike that skips every governance
 # step while still satisfying the door's token check.
-for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN; do
+for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_POOL_RUNNER_DEEPSEEK AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN; do
   if [ -n "${!_hook_var:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
     die "$_hook_var is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute a review binary."
   fi
@@ -253,6 +254,15 @@ if [ -n "${AI_REVIEW_REVIEWER_APPROVAL:-}" ] && [ -f "$AI_REVIEW_REVIEWER_APPROV
 
 Assigned AI reviewer approval governing this review: $(basename "$AI_REVIEW_REVIEWER_APPROVAL")"; fi
 
+if [ -n "${AI_REVIEW_OPERATION:-}" ]; then
+  [ "$mode" = final-check ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "review operation needs final-check, not $mode."; }
+  # shellcheck source=../tools/lib/review-operation.sh
+  . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/review-operation.sh" || die 'cannot load the review operation list.'
+  OPERATION_REQUEST="$(review_operation_request "$AI_REVIEW_OPERATION")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "unknown review operation: $AI_REVIEW_OPERATION"; }
+  DECISION="$DECISION
+
+$OPERATION_REQUEST"
+fi
 TMP_BRIEF="$(mktemp "$REPORT_DIR/.pool-brief.XXXXXX")"; TMP_TEXT="$(mktemp "$REPORT_DIR/.pool-output.XXXXXX")"; TMP_ERR="$(mktemp "$REPORT_DIR/.pool-stderr.XXXXXX")"
 CHANGED_FILES=""
 if [ -n "$OPT_BASE" ]; then
@@ -369,13 +379,43 @@ TMP_REPORT="$(mktemp "$REPORT_DIR/.pool-report.XXXXXX")"
 {
   printf '# %s pool review — %s\n\n| field | value |\n|---|---|\n' "$provider" "$mode"
   printf '| provider | `%s` |\n| repository | `%s` |\n| reviewed commit | `%s` |\n| source digest | `%s` |\n' "$provider" "$REPO_ROOT" "$REVIEW_HEAD" "$REVIEW_DIGEST"
+  [ -z "${AI_REVIEW_OPERATION:-}" ] || printf '| operation | `%s` |\n' "$AI_REVIEW_OPERATION"
   printf '| run | `%s` |\n| caller | `%s` |\n| elapsed seconds | `%s` |\n| tools | read-only session runner |\n\n## Result\n\n' "$RUN_ID" "$CALLER" "$ELAPSED"
   cat "$TMP_TEXT"
 } > "$TMP_REPORT"; [ -s "$TMP_REPORT" ] || die 'report assembly was empty.'; mv "$TMP_REPORT" "$OUT"; TMP_REPORT=""
 reviewer_event_publish_report "$provider" "$OUT" || die 'report publication failed; local evidence retained.'
 
 AFTER_IDENTITY="$("$PACKET" resolve "$REPO_ROOT" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"})" || AFTER_IDENTITY=""
-if [ -z "$AFTER_IDENTITY" ] || [ "$AFTER_IDENTITY" != "$SOURCE_IDENTITY" ]; then
+# The post-review identity gate mirrors the packet verifier's forward-move
+# tolerance (plan review-packet-race step B, PR #639): another session
+# legitimately landing unrelated work can move the shared target ref (for a
+# linked worktree, remote-tracking refs are COMMON to every worktree of the
+# repository) while this paid review runs, and a strict whole-string compare
+# destroys the completed report for a diff that did not change by one byte
+# (#1254: a completed muse APPROVE at head 5b5a9f9 was retained stale when
+# origin/main moved forward mid-review). HEAD, digest, base, merge-base and
+# every structural field stay STRICT; only the target tip may move, and only
+# FORWARD, proven by ancestry in this same repository. A rewrite, a backward
+# move, a changed head or a changed digest refuses exactly as before.
+identity_stable() { # identity_stable BEFORE_JSON AFTER_JSON REPO
+  local before="$1" after="$2" repo="$3" field b_target a_target b_ref a_ref
+  if ! { jq -e 'type=="object" and (.head|type=="string")' <<<"$before" >/dev/null 2>&1 && \
+         jq -e 'type=="object" and (.head|type=="string")' <<<"$after"  >/dev/null 2>&1; }; then
+    # Not a parseable packet identity: keep the strict byte compare.
+    [ -n "$after" ] && [ "$after" = "$before" ]
+    return
+  fi
+  for field in repository head source_digest base merge_base rule requested_base; do
+    [ "$(jq -r --arg f "$field" '.[$f] // ""' <<<"$before")" = "$(jq -r --arg f "$field" '.[$f] // ""' <<<"$after")" ] || return 1
+  done
+  b_ref="$(jq -r '.target_ref // ""' <<<"$before")"; a_ref="$(jq -r '.target_ref // ""' <<<"$after")"
+  [ "$b_ref" = "$a_ref" ] || return 1
+  b_target="$(jq -r '.target // ""' <<<"$before")"; a_target="$(jq -r '.target // ""' <<<"$after")"
+  [ "$b_target" = "$a_target" ] && return 0
+  [ -n "$b_target" ] && [ -n "$a_target" ] || return 1
+  git -C "$repo" merge-base --is-ancestor "$b_target" "$a_target" 2>/dev/null
+}
+if ! identity_stable "$SOURCE_IDENTITY" "$AFTER_IDENTITY" "$REPO_ROOT"; then
   mv "$OUT" "$OUT.stale" 2>/dev/null || true
   "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure source-identity-changed --report "$OUT.stale" >/dev/null 2>&1 || true
   die 'source identity changed during review; paid report retained as stale.'

@@ -1,14 +1,10 @@
 name: windows-queue-watchdog
 
-# Albert cannot see the GitHub or self-hosted runner queues himself, so he has
-# no way to know when it would be worth paying for Blacksmith (#210). This
-# workflow watches a verify.yml run from the moment it starts: if the free
-# windows-offline-section matrix has not picked up all four jobs within a few
-# minutes - which is unusual, since hosted concurrency is normally unmetered
-# on this public repo - it leaves one comment on the pull request naming the
-# delay and saying to ask Claude to route that PR to windows-offline-blacksmith
-# instead. It never dispatches Blacksmith itself: routing there is always a
-# deliberate, paid choice a person makes, never an automatic fallback.
+# Albert cannot see the runner queues himself (#210). This workflow watches a
+# verify.yml run from the moment it starts: if the windows-offline-section
+# matrix (Blacksmith, owner 2026-10-02) has not picked up its jobs within a few
+# minutes, it leaves one comment on the pull request naming the delay. It
+# never dispatches or reroutes anything itself.
 on:
   workflow_run:
     workflows: [verify]
@@ -29,7 +25,7 @@ permissions:
 jobs:
   watch-section-pickup:
     if: github.event.workflow_run.event == 'pull_request'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     # Bounded well under the 35-minute section ceiling: this only needs to
     # catch a slow *start*, not watch the run to completion.
     timeout-minutes: 8
@@ -84,8 +80,8 @@ jobs:
                       `about ${minutes} minute(s), which is unusual for this repo - they normally start ` +
                       `almost instantly.`,
                     ``,
-                    `If you want this to run now instead of waiting, tell Claude to route this pull ` +
-                      `request to Blacksmith (paid, near-instant start) instead of waiting on the free lane.`,
+                    `Windows sections run on Blacksmith (owner 2026-10-02). Ask Claude to check the ` +
+                      `Blacksmith runner queue for this pull request.`,
                   ].join('\n');
                   const marker = '<!-- windows-queue-watchdog -->';
                   const { data: comments } = await github.rest.issues.listComments({

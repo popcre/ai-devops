@@ -346,6 +346,14 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
     if ($RecoverLaunchers -and -not ($lines | Where-Object { $_ -ceq 'Approved partial-managed-launcher-recovery.' })) {
         throw 'Review report did not approve partial managed launcher recovery.'
     }
+    $requestedOperation = if ($LegacyMigration) { 'legacy-managed-launcher-refresh' } elseif ($FirstInstall) { 'first-managed-install' } elseif ($RecoverLaunchers) { 'partial-managed-launcher-recovery' } else { '' }
+    if ($requestedOperation) {
+        $siblingApprovals = @('legacy-managed-launcher-refresh','first-managed-install','partial-managed-launcher-recovery','stale-linux-manifest-recovery') | Where-Object { $_ -cne $requestedOperation } | Where-Object { $sibling = 'Approved ' + $_ + '.'; $lines | Where-Object { $_ -ceq $sibling } }
+        $resultIndex = [Array]::IndexOf([string[]]$lines, '## Result'); $headerLines = if ($resultIndex -gt 0) { @($lines[0..($resultIndex - 1)]) } else { @() }; $operationRows = @($headerLines | Where-Object { $_.StartsWith('| operation | ') })
+        if ($siblingApprovals -or $operationRows.Count -ne 1 -or $operationRows[0] -cne ('| operation | ' + [char]96 + $requestedOperation + [char]96 + ' |')) {
+            throw 'Review report does not bind exactly the requested installation operation.'
+        }
+    }
     $reviewRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $report))
     $expectedReportDir = Join-Path $reviewRoot '.ai\reviews'
     if (([IO.Path]::GetFullPath((Split-Path -Parent $report)).TrimEnd('\')) -ine ([IO.Path]::GetFullPath($expectedReportDir).TrimEnd('\'))) {
@@ -1331,6 +1339,14 @@ if (Get-Command qwen -ErrorAction SilentlyContinue) {
         }
     } else {
         Write-Note 'Git Bash is needed to prepare the Qwen key store.'
+    }
+    $grokBash = Get-GitBash
+    $grokWrapper = (Join-Path $RepoPath 'bin\ai-grok-review') -replace '\\', '/'
+    if ($grokBash -and (Test-Path -LiteralPath (Join-Path $RepoPath 'bin\ai-grok-review'))) {
+        # API-key fallback used only when no Grok OAuth session (auth.json) exists.
+        $grokKeyProbe = Invoke-NativeProbe -Command $grokBash.Source -Arguments @('--noprofile', '--norc', $grokWrapper, 'store-key', '--if-missing')
+        if ($grokKeyProbe.ExitCode -eq 0) { Write-Note 'Grok protected per-user key store is ready.' }
+        else { Write-Note 'Grok key store setup failed; Grok reviews need an OAuth session until ai-grok-review store-key succeeds.' }
     }
     Write-Note "Verify model access and completion with: ai-qwen doctor --live"
 } else {

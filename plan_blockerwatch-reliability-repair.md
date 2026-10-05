@@ -15,11 +15,11 @@ Written 2026-09-20 on `916-alien` by Codex from `origin/main`
 | # | Deliverable | Status | Evidence required |
 |---|---|---|---|
 | 0 | Reconcile live incidents and inventory every wait | ⬜ open | Redacted baseline under `tests/verification/blocker-watch/` |
-| 1 | Atomic, idempotent registration and two-sided reconciliation | ⬜ open | Tests in §10 |
+| 1 | Atomic, idempotent registration and two-sided reconciliation | ⛔ superseded (#1183 c3) | Registration is OUT; inert `wait`/`has-wait` only |
 | 2 | Correct resume/fresh selection and classified harness failures | ⬜ open | Tests in §10 |
 | 3 | Recovery lifecycle, leases, and durable health | ⬜ open | Tests in §10 |
 | 4 | Correct dependency scanning, pagination, and host failover | ⬜ open | Tests in §10 |
-| 5 | Enforced registration and installed-instruction parity | ⬜ open | Tests in §10 |
+| 5 | Enforced registration and installed-instruction parity | ⛔ superseded (#1183 c3) | No client requires `ai-blocker-watch wait` |
 | 6 | Staged rollout and separate live proofs | ⬜ open | One owner issue per unproven outcome |
 | 7 | Reconcile predecessor plans, issues, and handoffs | ⬜ open | Main/GitHub/install state agree |
 
@@ -61,8 +61,10 @@ scheduler result; and installed globals still teaching removed `--note` syntax.
 
 ### 4. Scope
 
-In scope: registration, storage, deduplication, migration, reconciliation,
-cancel/retry/repair/status/doctor, scheduler health, harness continuation,
+In scope (SUPERSEDED for registration by #1183 child 3 / #1061 Step 4B:
+registration is OUT; inert `wait`/`has-wait` only): storage, deduplication,
+migration, reconciliation, cancel/retry/repair/status/doctor, scheduler health,
+harness continuation,
 cross-repo metadata, pagination, managed-link lifecycle, leadership failover,
 privacy, installed guidance, all legacy waits, #2995, #617, #632, and #655.
 
@@ -248,10 +250,9 @@ idempotent edge repair may be multi-host, public posts require the lease.
 
 #### Phase 5 — enforce and install the contract
 
-5.1. Extend `bin/ai-completion-check-hook` and client guidance to refuse a
-blocked/waiting completion without a validated owner issue/wait artifact. Codex
-needs an equivalent checked closeout command. **Gate:** every client rejects an
-unregistered fixture and accepts a validated marker.
+5.1. SUPERSEDED by #1183 child 3 / #1061 Step 4B: do not refuse completions for
+missing wait artifacts. Turn-end state lives on the issue; registration is OUT.
+**Gate:** no client requires `ai-blocker-watch wait`.
 
 5.2. Version command help, three global templates, `docs/blocker-watch.md`, and
 installed contract. Extend `bin/ai-adopt-globals`, installers, and

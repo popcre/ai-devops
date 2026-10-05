@@ -1386,7 +1386,9 @@ with event_lock(sys.argv[2]):
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             self.assertEqual(child.stdout.readline().strip(), "locked")
-            with patch.object(events.time, "monotonic", side_effect=[0, 11]):
+            # The busy deadline is 60 seconds (#1254): a live writer holding
+            # the kernel lock past it still refuses; a dead one cannot hold it.
+            with patch.object(events.time, "monotonic", side_effect=[0, 61]):
                 with self.assertRaises(events.Blocked):
                     with events.event_lock(self.root):
                         self.fail("live owner lock was taken")

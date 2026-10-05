@@ -100,7 +100,7 @@ al8960ofc/Hetz with t16 residual, 10 started.
   class is `installation`. Also: `bin/ai-task-gates` from the canonical checkout
   `C:\repos\ai-devops` sees **other sessions' dirty reviewer-safety files** and
   wrongly escalates to protected `reviewer-safety`. Always run task-gates and
-  `ai-pr-wait` from a **clean worktree** of the PR branch with `--base origin/main`.
+  `bin/ai-pr-wait <pr> --timeout-minutes N` from a **clean worktree** of the PR branch with `--base origin/main`.
 - First CI on #1168: `test-markdown-links.sh` failed on
   `tests/verification/shared-db-coordination-deletion/2026-09-30T045654Z.md`
   (`link escapes repository` — one too many `..` segments). Fixed on the PR as

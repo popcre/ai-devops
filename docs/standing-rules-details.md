@@ -34,10 +34,10 @@ line in the body. Never leave it unowned.
   to one agent in sequence.
 - Every dispatch prompt says: create a uniquely named worktree and verify its
   branch before every commit; only the agent that opened an issue closes it;
-  and any wait that may exceed ~10 minutes is REGISTERED with ai-blocker-watch
-  — by the subagent itself unless the dispatcher holds it — never polled
-  ad hoc. Name the blocker and the owning/parked issue in the prompt so the
-  subagent can register without guessing.
+  and every wait uses a bounded in-session tool with an explicit deadline
+  (`ai-pr-wait --timeout-minutes N` / `ai-gh-wait --timeout-minutes N`). Never
+  poll ad hoc. If the wait will outlive the turn, leave the issue or pull
+  request as the card — do not create a waiter, registry entry, or park-state.
 
 ## Quiet tool output
 
@@ -62,6 +62,17 @@ running only after its guarded merge and merged-main preview. That lane must
 independently re-prove the one open structural work issue, immutable preview
 evidence, production target, bounded allowlist, fresh dry-run, exclusive lock,
 and post-apply result; missing evidence stops for an engineer.
+
+Owner ruling (2026-10-02, Albert Hazan, verbatim: "let AI launch it and remove
+that rule permanently."): the earlier bar on a session-made dispatch of that
+lane is removed permanently. An AI session may launch the merged-preview apply
+run of `shared-supabase-migrations.yml` (target preview, mode apply, the merged
+source PR) that starts the automatic promotion, for an approved, merged
+shared-db change, after `ai-task-gates check --before shared-db-promotion`
+passes in the shared-db checkout. The workflow's own re-proof, risk assessment,
+lock, and evidence checks stay binding; a refusal there is fixed at its cause,
+never bypassed. This allows no manual production command and no other
+workflow, repository, or infrastructure action.
 
 Owner ruling (2026-09-28, Albert Hazan, verbatim: "never ask a human to approve.
 as i have said at least 1000 times, i am a solo vibe coder with no technical
@@ -91,6 +102,43 @@ APPROVE and every other evidence gate still apply. Workflow detail:
 its full checklist lives in `skills/shared/shared-db-orchestrator/` and
 `skills/shared/shared-db-change/`. That exception authorizes no manual
 production command.
+
+## Small owner entries
+
+Owner ruling (2026-10-02, Albert Hazan, from chat, verbatim): Q: "should small
+owner-requested record entries skip the AI reviewer?" A: "yes, small entries
+can skip the reviewer".
+
+"Small" is defined narrowly (an implementing assumption; a broader reading
+needs a new owner ruling). A write qualifies only when ALL hold:
+
+1. Albert asked for it, and the linked GitHub issue quotes his request verbatim.
+2. It writes application row data only: no structure, schema, migration,
+   security-rule, permission, or curated Master Data bulk-load change, and no
+   deletion of any row.
+3. It touches at most 10 rows in the shared database.
+4. It runs as one guarded transaction that first proves the target database
+   and asserts the exact affected row count, rolling back on any mismatch.
+
+Such a write skips only the assigned-AI-reviewer APPROVE. Every other gate
+stays: task declaration, class escalation, protected-class seals, target
+identity proof, claim rules, and live proof. Run:
+
+    ai-task-gates check --before database \
+      --small-owner-entry https://github.com/OWNER/REPO/issues/N \
+      --row-count 3 --owner-quote "<Albert's words, verbatim>"
+
+The issue must belong to the repository being worked on; the gate reads it
+from GitHub itself (through `ai-gh`), and the quote (one line, at least 12 characters) must appear in text authored by
+an owner account (`u2giants` or `popcre`). A declared task is required so the
+release is always recorded. The gate refuses a row count outside 1..10, a multi-line
+quote, a quote missing from the issue body or comments, any action other than
+`database`, any change set above `code` (structure, security, infrastructure,
+or a protected class), and combining it with `--reviewer-approval`. It checks
+the file change set, not the SQL: row-data-only and no-deletion are, like the
+row count below, part of the caller's declared contract. The row
+count and the transaction guard are the caller's declared contract; the
+release, URL, row count, and quote digest are recorded in the task state.
 
 ## Reviewer rotation details
 

@@ -141,24 +141,34 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
   assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
   that review with `ai-review --implementer <your engine>` unless you are Claude
   Code or Codex.
+  Small owner entries (below) skip only that reviewer APPROVE.
   The sole narrow exception is `shared-db`'s activated automatic migration
   promotion workflow, which re-proves the one open structural work issue and
   its evidence or stops for an engineer.
-  This exception authorizes no manual production command, session-made workflow
-  dispatch, other repository, infrastructure action, or bypass. Before
-  production trigger or Terraform-state work, read the details doc.
+  Owner ruling (2026-10-02, verbatim: "let AI launch it and remove that rule
+  permanently"): an AI session may launch that workflow's merged-preview run for
+  an approved, merged change after `ai-task-gates check --before
+  shared-db-promotion` passes. This exception authorizes no manual production command,
+  other repository, infrastructure action, or bypass of the workflow's own
+  checks. Before production trigger or Terraform-state work, read the details
+  doc.
 - **Shared database:** reading schema and safe samples is open; row data
   belongs to the application. Every STRUCTURE change, and every outside bulk
   load into curated Master Data, is authored first in `popcre/shared-db` via
   branch and PR. Prove the target database before every write. Load
   `shared-db-change` for the procedure.
+  **Small owner entry** (owner ruling 2026-10-02, verbatim: "yes, small
+  entries can skip the reviewer"): an owner-requested row-data write of at
+  most 10 rows, with no structure, schema, security change, or deletion, run
+  as one guarded transaction asserting the exact row count after proving the
+  target database, with Albert's request quoted verbatim in the linked issue,
+  skips the AI reviewer APPROVE and keeps every other gate:
+  `ai-task-gates check --before database --small-owner-entry <issue-url>
+  --row-count N --owner-quote "<quote>"`. Details doc: "Small owner entries".
 - **Shared-db structural work is claim-first.** Claim exact objects on the
   existing issue and start; no orchestrator chat or marker is required. Scope
   stays the minimum: only database SHAPE changes or a curated Master Data
   load; never proofs, reports, tooling, or docs.
-- **Label every shared-db ticket.** Whenever a `popcre/shared-db` issue number
-  appears in a reply, say beside it whether it is orchestrator work (it changes
-  database structure) or non-orchestrator work (it does not).
 - **Sign everything posted to GitHub** with `Posted by Claude chat <id> on
   <machine>`, where `<id>` is `$CLAUDE_CODE_SESSION_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.
@@ -194,12 +204,14 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - **Albert does not merge — you do.** Merge every PR you were authorized to
   create, except DesignFlow or one Albert said he will review first.
 - **A documentation-only pull request skips checks without asking:** if every
-  changed file is prose, `gh pr merge --squash --admin` immediately; any code,
-  test, script, workflow, or config file means normal checks.
+  changed file is prose, merge it immediately the normal way (merge queue where
+  one exists, never `--admin`); repositories with a prose fast path report every
+  required check green in seconds. Any code, test, script, workflow, or config
+  file means normal checks.
 - **Wait on CI with the bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
-  Use `bin/ai-pr-wait <pr>` for a pull request.
+  Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request.
 - Reuse the repository's shared plans, workflows, harnesses, and provider
   helpers before adding another copy. Any new shared artifact needs an explicit owner, necessity, and consolidation or retirement path.
 

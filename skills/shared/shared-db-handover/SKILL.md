@@ -71,10 +71,10 @@ the ones that save the next session a day:
 in the issue and leave a ten-page briefing in `HANDOFF.d/`. A ten-page briefing pasted
 into an issue is a ten-page briefing nobody reads.
 
-**A dependency you file is yours to register — never to "a future session."** The session
-that files or identifies "this cannot proceed until N closes" either registers
-`ai-blocker-watch wait N --for M` and ends its turn (the watcher will wake it when N
-closes), or hands the wait to a NAMED session/owner in the issue. Deferring to an
+**A dependency you file is yours to own — never "a future session."** The session
+that files or identifies "this cannot proceed until N closes" either leaves the
+issue/PR as the card and ends its turn (registration is not required; the bounded
+janitor re-surfaces stuck state), or names the owning session/owner in the issue. Deferring to an
 unnamed future owner is the anti-pattern that left popcre/shared-db#3180 unregistered
 for ~15 hours until Albert asked (ai-devops #596). The `depends_on:` line in the
 `db-work-scope` block is the durable record — the watcher's tick derives the native

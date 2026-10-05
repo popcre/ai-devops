@@ -217,7 +217,7 @@ to prove the codex-suite failures were the draft wiring, safe to retire).
   GIT_COMMITTER_IDENT` before the first commit). Sign GitHub posts
   `Posted by ZCode chat <id> on edge-dev` (`unknown` if the session id is
   empty). Use Git Bash explicitly; bare `bash` is WSL here.
-- Make GitHub calls through `bin/ai-gh`; waits through `bin/ai-pr-wait <pr>
+- Make GitHub calls through `bin/ai-gh`; waits through `bin/ai-pr-wait <pr> --timeout-minutes N
   --repo popcre/ai-devops`; never open-ended `gh` loops.
 - Delete only inside `.../review-sandboxes/<created-name>` or a proven-clean
   worktree group; never delete dirty copies. `AI_KEEP_SANDBOX=1` is debugging

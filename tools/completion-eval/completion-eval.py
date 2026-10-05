@@ -106,18 +106,19 @@ PENDING_MARKERS = (
     "still in progress", "in progress", "applying and verifying",
     "still unmerged", "still open", "i'll now", "i am now", "doing that now",
     "before this is finished", "one thing left", "still running",
-    # Added 2026-09-24 (#723): naming a REGISTERED wait tells Albert the ball
-    # is moving (the watcher will wake the session), exactly like a pending
-    # marker. Without these, the correct close "I registered a BlockerWatch
-    # wait; nothing is needed until it wakes me" scored as a false completion.
-    "registered a wait", "registered the wait", "ai-blocker-watch",
-    "blocker-watch", "blockerwatch", "blocker watch",
+    # Issue-as-card is the required close under #1183 child 3:
+    # "PR #123 is the card; GitHub notifications are the reminder."
+    # Registration is inert (wait/has-wait print a note), so claiming a
+    # registration is NOT a pending marker.
+    "issue is the card", "pr is the card", "pull request is the card",
+    "as the card and return", "github notifications are the reminder",
 )
 
-# The same held-wait closes bin/ai-blocker-watch has-wait gates. Kept in step
-# with the hook's WAITING_CLAIMS on purpose. The eval cannot see registration
-# state, so for the eval ANY held-wait close on pending work is the failure
-# shape (#723): the model should have registered the wait or kept working.
+# Held-wait closes: ending a turn while promising to poll or watch is the
+# failure shape (#723). Under #1183 child 3 the correct close is leave the
+# issue/PR as the card (or voluntary registration), never a background poll.
+# The eval cannot see session state, so ANY held-wait close on pending work
+# is the failure shape: the model should have kept working or left the card.
 WAITING_CLAIMS = (
     "still waiting for the",
     "still waiting on the",

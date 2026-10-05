@@ -293,7 +293,7 @@ One dated line each (STATUS bullet or issue comment). **No** new plan files.
 
 ### Step 8 — Merge and live proof
 
-- `bin/ai-gh pr merge` / queue; `bin/ai-pr-wait <pr>`.
+- `bin/ai-gh pr merge` / queue; `bin/ai-pr-wait <pr> --timeout-minutes N`.
 - Confirm squash/merge commit on `origin/main`.
 - Live proof: `ai-glm doctor` on edge-dev with a **seeded** orphan backlog (e.g. 20 fake dirs) finishes inside the 10s window; paste timing into the PR or handoff.
 - Update STATUS rows in **this plan** (mandatory `session-docs-update` / plan-file gate). Mark step 8 done only with the live artifact named.
@@ -326,7 +326,7 @@ Never write "add tests" without the names above.
 - `git var GIT_COMMITTER_IDENT` must be `Albert Hazan <u2giants@users.noreply.github.com>`.
 - Stage only task-owned files. Canonical `C:\repos\ai-devops` is **landing-only**.
 - **Reviewer-safety path:** `bin/ai-glm` and `tests/test-ai-glm.sh` need **one read-only exact-head independent APPROVE** before merge (`ai-task-gates check --before review|ship`).
-- All GitHub calls through `bin/ai-gh`. Waits via `bin/ai-pr-wait` / `ai-blocker-watch`. No open-ended `until` loops. Waits >~10 minutes are registered, then the turn ends.
+- All GitHub calls through `bin/ai-gh`. Waits via bounded in-session `bin/ai-pr-wait` / `bin/ai-gh-wait` with an explicit `--timeout-minutes` deadline only. No open-ended `until` loops, no required waiter registry, no TTL service, no park-state store (voluntary inert registration remains permitted). If a wait outlives the turn, leave the issue/PR as the card (#1183 child 3).
 - Windows: wrappers need Git Bash (`C:\Program Files\Git\bin\bash.exe`), not WSL `bash`.
 - Do not add a new root `plan_*.md`. Do not re-run #168. Do not implement item 3 or item 9.
 - Do not use raw wall-clock asserts. Do not re-add prune/reconcile sweeps to doctor's check path.

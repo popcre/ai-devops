@@ -29,7 +29,7 @@ instructions, memory, gcloud, **and the secret/MCP/SSH plumbing** (Phase 2 of
 |---|---|---|
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
 | Global instructions (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
-| Blocker-watch timer (wakes parked cross-issue waits) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
+| Blocker-watch timer (re-surfaces stuck state; registration is OUT) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
 | Auto-memory | machine ↔ private memory hub (lossless transaction) | `bin/ai-memory-sync` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
 | Local AI commands (Grok, Kimi, DeepSeek, GLM launcher) | repo → machine, checked every run | `bin/ai-machine-tools-doctor` + narrow platform installer |
@@ -66,13 +66,14 @@ clone + `./install.sh` on Ubuntu).
    `bin/ai-blocker-watch schedule`. It is idempotent on both platforms (Windows
    `schtasks /F` re-points the existing task; Linux/macOS rewrites one marked
    user-crontab line), so run it every sync rather than probing first. This is
-   NOT cosmetic: the globals tell every Claude, Codex and ZCode session to park a
-   cross-issue wait with `ai-blocker-watch wait` and end the turn, and only this
-   scheduled `tick` ever wakes that session again. The command and the rule text
+   NOT cosmetic: the globals tell every Claude, Codex and ZCode session to
+   leave the cross-issue state on the issue/PR as the card and end the turn
+   (registration is not required). The scheduled `tick` re-surfaces stuck state.
+   The command and the rule text
    arrive with a plain `git pull`; the timer does not, so a machine onboarded
    before the blocker watch existed would park work that nothing resumes. Report
    the verdict out loud. If it dies because neither `schtasks` nor `crontab` is
-   available, say so plainly — waits on that machine must not be parked.
+   available, say so plainly — do not leave background waits on that machine.
 2. **Check the Phase 2 wiring (secrets, MCP, SSH) — never skip.** Report each item
    present/missing:
    - `~/.config/ai-devops/op-service-account` (vault-locked 1Password SA token file).
@@ -211,8 +212,9 @@ clone + `./install.sh` on Ubuntu).
 5c3. **Install the Claude closeout hook:** `bin/ai-install-completion-check-hook`
    (Claude is the default client; `--check` reports drift). Idempotent; strictly
    additive to `~/.claude/settings.json`. Without it, a session that ends on
-   waiting language is never forced to hold an `ai-blocker-watch wait`, so the
-   BlockerWatch rule is honor-system only (issue #878). `ai-devops doctor` fails
+   waiting language is not required to hold any BlockerWatch wait
+   (registration is OUT; #1183 child 3). Residual honor-system wording about
+   a registration rule is obsolete (issue #878). `ai-devops doctor` fails
    when it is missing. Run it from a Codex sync too.
 5d. Check the weekly read-only memory audit exists (`ai-memory-health` scheduled
    task on Windows, registered by `bin/install-memory-health-task.ps1`). If absent,

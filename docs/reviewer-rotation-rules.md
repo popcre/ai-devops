@@ -82,25 +82,23 @@ allocator but stayed registered here, and a session spent an hour trying it.
     credit pause — that path needs two repos, tests, and a review. Reserve
     roster edits for permanent retirement or a real membership change.
 
-12. **StepFun is Ubuntu-only and outside the allocator.** Owner instruction,
-    2026-09-25: add StepFun Step 5 as a reviewer on Ubuntu only (StepCode is
-    not yet available on Windows) and let it write, implement, and execute
-    code. `bin/ai-stepfun` refuses to run off Linux and preflight reports
-    `unsupported-platform` there. Its reviews and `ask` may write and run
-    code only inside a disposable, remote-less review copy that is discarded
-    (owner instruction 2026-09-28, #974); `ai-stepfun implement` writes in a
-    new remote-less clone; a run that commits or adds a remote is refused.
-    Every StepFun turn runs under bubblewrap with an empty home, /tmp and
-    /run and a cleared environment, so the model never sees SSH keys or the
-    agent socket, git or gh credentials, the 1Password token, or the Docker
-    socket; with no caller credential inside, it cannot push anywhere (the
-    only credential inside is StepFun's own API key, which StepCode needs
-    and could expose; it spends only StepFun credit). The
-    commit/remote refusal is an extra end-state check on top of that. Only
-    /usr, /etc, StepCode and the run's own folder are mounted. Accepted
-    exposure: the network is shared (the StepFun API needs it), so an
-    implement run can reach loopback services and the internet without any
-    of the caller's credentials.
-    `ai-stepfun` refuses to run without bubblewrap. The shared-db allocator has no platform field,
-    so StepFun is listed in `config/reviewer-membership-scope.json` and is
-    never assigned by the allocator.
+12. **StepFun is outside the allocator; Linux is bubblewrap-isolated, Windows
+    is folder + test shell (weaker).** Owner instruction 2026-09-25: StepFun
+    on Ubuntu only with bubblewrap. Owner instruction 2026-09-30 (MiMo chat,
+    *folder + test shell*): Windows may run `review`/`ask` via the pinned
+    OpenCode engine inside a disposable remote-less folder with a gated test
+    command path (`bin/ai-stepfun-windows-shell`). **Windows is not
+    rule-12 equivalent and is not mount-isolated.** On Windows, OpenCode file
+    tools are removed (`tools:` map — the only enforcement on pin 1.18.12);
+    `implement` is refused; exploration/tests run through the gate
+    (`ls`/`cat`/`head` in-folder + allowlisted test runners). Residual
+    (owner-accepted 2026-09-30): in-folder scripts and runner abuse are
+    arbitrary user-level code; network is shared. Linux turns still run under
+    bubblewrap with an empty home, /tmp and /run and a cleared environment,
+    so the model never sees SSH keys or the agent socket, git or gh
+    credentials, the 1Password token, or the Docker socket. The
+    commit/remote refusal is an extra end-state check. Accepted exposure on
+    Linux: shared network (StepFun API). The shared-db allocator has no
+    platform field, so StepFun is listed in
+    `config/reviewer-membership-scope.json` and is never assigned by the
+    allocator.

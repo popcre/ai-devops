@@ -78,6 +78,12 @@ cat > "$TMP/bin/slow-muse-live" <<'EOF'
 [ "${2:-}" = --live ] && sleep 2
 echo health ok
 EOF
+cat > "$TMP/bin/slow-muse-doctor" <<'EOF'
+#!/usr/bin/env bash
+[ "${AI_MUSE_CALLER:-}" = preflight ] || { echo missing-caller >&2; exit 1; }
+sleep 2
+echo health ok
+EOF
 cat > "$TMP/bin/gemini" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -319,8 +325,8 @@ check "StepFun is usable on Linux with its doctor contract" "AI_STEPFUN_PLATFORM
 check "StepFun preflight passes on Linux" "AI_STEPFUN_PLATFORM=Linux $SCRIPT check stepfun '$REPO' | grep -q 'health=ok'"
 check "StepFun is unsupported-platform on Windows without OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH=\"$(dirname "$(command -v jq)"):/usr/bin:/bin\" $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
 check "StepFun preflight refuses on Windows without an engine" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH=\"$(dirname "$(command -v jq)"):/usr/bin:/bin\" $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
-check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'only on Ubuntu/Linux'"
-check "StepFun is unsupported-platform on Windows even with OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE=/bin/true $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\"'"
+check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux under bubblewrap, or Windows folder + test shell'"
+check "StepFun is not statically unsupported on Windows with OpenCode (folder + test shell)" "! AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE=/bin/true $SCRIPT status stepfun | jq -e '.failure_class==\"unsupported-platform\"'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
 # AI_DEEPSEEK_TEST_DIR makes the wrapper honor this isolated HOME; production
 # mode intentionally anchors the key store to the OS user profile instead.
@@ -331,6 +337,10 @@ export AI_REVIEW_MUSE_WRAPPER="$TMP/bin/requires-muse-caller"
 check "Muse preflight supplies its mandatory caller identity" "$SCRIPT check muse '$REPO' | grep -q 'health=ok'"
 check "Muse live preflight outlasts the short check budget" "AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-live' $SCRIPT check muse '$REPO' --live | grep -q 'health=ok'"
 check "Muse live preflight still times out past its own budget" "AI_REVIEW_MUSE_QUALIFY_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-live' $SCRIPT check muse '$REPO' --live 2>&1 | grep -q 'provider-timeout'"
+"$SCRIPT" clear muse >/dev/null 2>&1 || true
+check "Muse offline doctor outlasts the short check budget" "AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-doctor' $SCRIPT check muse '$REPO' | grep -q 'health=ok'"
+"$SCRIPT" clear muse >/dev/null 2>&1 || true
+check "Muse offline doctor still times out past its own budget" "AI_REVIEW_MUSE_DOCTOR_TIMEOUT=1 AI_REVIEW_MUSE_WRAPPER='$TMP/bin/slow-muse-doctor' $SCRIPT check muse '$REPO' 2>&1 | grep -q 'muse probe timed out'"
 "$SCRIPT" clear muse >/dev/null 2>&1 || true
 
 export AI_REVIEW_KIMI_WRAPPER="$TMP/bin/noauth"
@@ -418,7 +428,7 @@ check "global quarantine update preserves scoped refusal" "$SCRIPT quarantine ki
 # A doctor cut off by the check budget is a timeout, even when its partial
 # output mentions a credential (#720).
 printf '#!/usr/bin/env bash\necho "credential    : managed 1Password reference"\nsleep 5\n' > "$TMP/bin/slow-cred"; chmod +x "$TMP/bin/slow-cred"
-SLOW_OUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/slow-cred" $SCRIPT check deepseek "$REPO" 2>&1)"
+SLOW_OUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_LIVE_PROBE_TIMEOUT=1 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/slow-cred" $SCRIPT check deepseek "$REPO" 2>&1)"
 printf '%s' "$SLOW_OUT" | grep -q 'deepseek failed: provider-timeout' && ok "timed-out doctor is classified as a timeout, not an auth failure" || bad "timed-out doctor is classified as a timeout, not an auth failure"
 
 echo '== P7 timeout diagnosis: bounded probe, timeout-is-not-identity, timeout-never-approves'
@@ -426,7 +436,7 @@ echo '== P7 timeout diagnosis: bounded probe, timeout-is-not-identity, timeout-n
 # probe_first_call_bounded: a hanging first probe terminates and leaves no child.
 printf '#!/usr/bin/env bash\nsleep 30\n' > "$TMP/bin/hang-first"; chmod +x "$TMP/bin/hang-first"
 HANG_START=$(date +%s)
-HANG_OUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-first" $SCRIPT check deepseek "$REPO" 2>&1)"; HANG_RC=$?
+HANG_OUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_LIVE_PROBE_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-first" $SCRIPT check deepseek "$REPO" 2>&1)"; HANG_RC=$?
 HANG_ELAPSED=$(( $(date +%s) - HANG_START ))
 check "probe_first_call_bounded" "[ '$HANG_RC' -ne 0 ] && [ '$HANG_ELAPSED' -lt 15 ] && printf '%s' '$HANG_OUT' | grep -q 'provider-timeout'"
 "$SCRIPT" clear deepseek >/dev/null 2>&1 || true
@@ -434,13 +444,13 @@ check "probe_first_call_bounded" "[ '$HANG_RC' -ne 0 ] && [ '$HANG_ELAPSED' -lt 
 # probe_timeout_not_identity_failure: timeout exit status is classified as
 # provider-timeout, not authentication-failed or provider-unhealthy.
 printf '#!/usr/bin/env bash\nsleep 5\n' > "$TMP/bin/hang-clean"; chmod +x "$TMP/bin/hang-clean"
-TOUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-clean" $SCRIPT check deepseek "$REPO" 2>&1)"
+TOUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_LIVE_PROBE_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-clean" $SCRIPT check deepseek "$REPO" 2>&1)"
 printf '%s' "$TOUT" | grep -q 'deepseek failed: provider-timeout' && ! printf '%s' "$TOUT" | grep -qE 'authentication-failed|provider-unhealthy|identity' && ok "probe_timeout_not_identity_failure" || bad "probe_timeout_not_identity_failure"
 "$SCRIPT" clear deepseek >/dev/null 2>&1 || true
 
 # probe_timeout_never_approves: a transient timeout never yields health=ok.
 printf '#!/usr/bin/env bash\nsleep 5\n' > "$TMP/bin/hang-approve"; chmod +x "$TMP/bin/hang-approve"
-AOUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-approve" $SCRIPT check deepseek "$REPO" 2>&1)"; ARC=$?
+AOUT="$(AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_LIVE_PROBE_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-approve" $SCRIPT check deepseek "$REPO" 2>&1)"; ARC=$?
 [ "$ARC" -ne 0 ] && ! printf '%s' "$AOUT" | grep -q 'health=ok' && ok "probe_timeout_never_approves" || bad "probe_timeout_never_approves"
 "$SCRIPT" clear deepseek >/dev/null 2>&1 || true
 
@@ -452,7 +462,7 @@ printf '%s' "$EOUT" | grep -q 'probe-no-output' && ! printf '%s' "$EOUT" | grep 
 
 # Transient timeout uses a short cooldown; auth failure uses the full cooldown.
 printf '#!/usr/bin/env bash\nsleep 5\n' > "$TMP/bin/hang-cool"; chmod +x "$TMP/bin/hang-cool"
-AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_TIMEOUT_COOLDOWN_SECONDS=7 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-cool" $SCRIPT check deepseek "$REPO" >/dev/null 2>&1 || true
+AI_REVIEW_PREFLIGHT_TIMEOUT=1 AI_REVIEW_DOCTOR_PROBE_TIMEOUT=1 AI_REVIEW_LIVE_PROBE_TIMEOUT=1 AI_REVIEW_TIMEOUT_RETRY_DELAY=0 AI_REVIEW_TIMEOUT_COOLDOWN_SECONDS=7 AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/hang-cool" $SCRIPT check deepseek "$REPO" >/dev/null 2>&1 || true
 COOL_STATUS="$($SCRIPT status deepseek)"
 printf '%s' "$COOL_STATUS" | jq -e '.failure_class=="provider-timeout"' >/dev/null && ok "timeout quarantine records provider-timeout" || bad "timeout quarantine records provider-timeout"
 "$SCRIPT" clear deepseek >/dev/null 2>&1 || true

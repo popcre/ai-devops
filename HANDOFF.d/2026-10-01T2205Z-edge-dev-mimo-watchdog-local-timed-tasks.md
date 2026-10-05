@@ -40,8 +40,8 @@ watchdogs can be plain timed tasks with automatic rotation when PCs are down.
 | Outcome | State | Artifact |
 |---|---|---|
 | Cost diagnosis (Windows Blacksmith bulk; public repo = free hosted) | Done (analysis) | This handoff §5 |
-| Free-runner + ENVY + WarpBuild pool, drop Blacksmith | **PR #1193 OPEN** — `verification-closure` was green, then **merge conflicts** with `origin/main` (verify.yml, routing.json, development.md, edge-dev3-rdp doc, test-ci-runner-router.sh, test-workflow-policy.sh, runner-router.cjs) | https://github.com/popcre/ai-devops/pull/1193 branch `mimo/runner-pool-github-envy-warpbuild` worktree `C:\repos\ai-devops-wt-runner-pool` |
-| Abandoned-push settle (90s quiet window on PRs) | On PR #1193 (commit `7c6cc86a`); **not on main until #1193 lands** | Same PR; `push-settle` job proved green on that PR run |
+| Free-runner + ENVY + WarpBuild pool, drop Blacksmith | **MERGED** 2026-10-02 5:08 PM EDT — PR #1193 merge `30d944e0` | https://github.com/popcre/ai-devops/pull/1193 |
+| Abandoned-push settle (90s quiet window on PRs) | **Landed with #1193** | `push-settle` on that PR run; now on `main` via `30d944e0` |
 | Implementation plan (local timed tasks + failover) | **Landed** | `plan_watchdog-local-timed-tasks.md` → PR #1232 merge `9a5b7bc8` |
 | Multi-host rotation in plan | **Landed** | PR #1233 merge `1fd20262` |
 | **Watchdog duty pool** runbook (add a machine, claim rules) | **Landed** | `docs/watchdog-duty-pool.md` → PR #1234 merge `0d72a002` |
@@ -74,22 +74,17 @@ watchdogs can be plain timed tasks with automatic rotation when PCs are down.
 
 ## 6. Exact next steps
 
-1. **Land PR #1193** (highest value; unsticks free CI):
-   - From worktree `C:\repos\ai-devops-wt-runner-pool` (or a fresh worktree of
-     `mimo/runner-pool-github-envy-warpbuild`):
-     `git fetch origin main && git merge origin/main`
-   - Resolve the seven conflicted files (keep free-runner labels + push-settle;
-     drop Blacksmith; keep tests consistent with `tests/test-workflow-policy.sh`
-     / `tests/test-ci-runner-router.sh`).
-   - Focused tests: `bash tests/test-workflow-policy.sh`,
-     `bash tests/test-ci-runner-router.sh` (via Git Bash).
-   - Push, wait on `verification-closure`, merge PR #1193, confirm on
-     `origin/main`.
+1. ~~Land PR #1193~~ **DONE** — merged `30d944e0` 2026-10-02 5:08 PM EDT.
+   Do **not** re-resolve the old conflicts. Confirm with
+   `gh pr view 1193 --repo popcre/ai-devops --json state,mergeCommit`.
 2. **Implement plan P0–P5** from `plan_watchdog-local-timed-tasks.md` STATUS
    (P0 harness → P0b claim → watches → backup Actions → install + **two-host
    failover drill**). Keep `docs/watchdog-duty-pool.md` §7 current.
 3. **Name an owner issue** for the remaining workstream when claiming it
    (this file’s `issue:` is null — open one at claim time; do not bundle).
+4. Worktree `C:\repos\ai-devops-wt-runner-pool` may still hold follow-on CI
+   commits (`155d92b`); **do not delete** until another session proves that
+   work either landed or is intentionally kept.
 
 **Verify success:** #1193 merged on `main` with no `blacksmith-` labels in
 watchdog/verify paths; plan STATUS rows cite real artifacts; failover drill

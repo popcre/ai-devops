@@ -1,0 +1,7 @@
+{
+  "name": "stepfun-windows-shell-fixture",
+  "scripts": {
+    "test": "node -e \"require('fs').writeFileSync('ok','1')\"",
+    "test:unit": "node -e \"process.exit(0)\""
+  }
+}

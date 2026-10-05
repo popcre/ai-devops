@@ -74,7 +74,7 @@ Rules for the block:
 
 ## Process rules never override this
 
-Skills, orchestrator procedures, handoff formats, and repository contracts
+Skills, procedures, handoff formats, and repository contracts
 govern how you *do the work* and what you write *into files*. They never govern
 what you say to Albert. A skill demanding detailed status means detailed status
 in the issue, plan, or handoff — the reply to Albert stays under 120 words.
@@ -170,6 +170,7 @@ the task needs the detail.
   assigned AI reviewer's exact-head APPROVE report (popcre/ai-devops#996); run
   that review with `ai-review --implementer <your engine>` unless you are Claude
   Code or Codex.
+  Small owner entries (below) skip only that reviewer APPROVE.
   Before production trigger or Terraform-state work, read
   `popcre/ai-devops/docs/cloud-build-prod-trigger-incident-2026-07-20.md`.
   The sole narrow exception is `shared-db`'s activated automatic migration
@@ -177,22 +178,31 @@ the task needs the detail.
   must independently re-prove the one open structural work issue, immutable
   preview evidence, production target, bounded allowlist, fresh dry-run,
   exclusive lock, and post-apply result. Missing evidence stops for an engineer.
-  This exception authorizes no manual production command, session-made workflow
-  dispatch, other repository, infrastructure action, or bypass.
+  Owner ruling (2026-10-02, verbatim: "let AI launch it and remove that rule
+  permanently"): an AI session may launch that workflow's merged-preview run for
+  an approved, merged change after `ai-task-gates check --before
+  shared-db-promotion` passes.
+  This exception authorizes no manual production command, other repository,
+  infrastructure action, or bypass of the workflow's own checks.
 - **Shared database:** reading schema and safe sample data is open. Application
   row data belongs to the application. Every shared-database STRUCTURE change
   is authored first in `popcre/shared-db` through its branch-and-PR workflow.
   Outside-sourced bulk loads into curated Master Data also use that governed
   route. Prove the target database immediately before every write. Load
   `shared-db-change` for the full procedure.
+  **Small owner entry** (owner ruling 2026-10-02, verbatim: "yes, small
+  entries can skip the reviewer"): an owner-requested row-data write of at
+  most 10 rows, with no structure, schema, security change, or deletion, run
+  as one guarded transaction asserting the exact row count after proving the
+  target database, with Albert's request quoted verbatim in the linked issue,
+  skips the AI reviewer APPROVE and keeps every other gate:
+  `ai-task-gates check --before database --small-owner-entry <issue-url>
+  --row-count N --owner-quote "<quote>"`. Details doc: "Small owner entries".
 - **Shared-db structural work is claim-first.** Claim exact objects on the
   existing issue and start; no orchestrator chat or marker is required. Scope
   stays the minimum: only work that changes the database's SHAPE, or a curated
   Master Data load. Proofs, monitoring, reports, tooling, scripts, docs, and
   repository maintenance never go there.
-- **Label every shared-db ticket.** Whenever a `popcre/shared-db` issue number
-  appears in a reply, say beside it whether it is orchestrator work (it changes
-  database structure) or non-orchestrator work (it does not).
 - **Sign everything posted to GitHub** with `Posted by Codex chat <id> on
   <machine>`, where `<id>` is `$CODEX_THREAD_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.
@@ -231,13 +241,14 @@ the task needs the detail.
   authorized to create, except DesignFlow and a PR Albert explicitly said he
   wants to review first.
 - **A documentation-only pull request does not wait for checks, and does not
-  need permission to skip them.** If every changed file is prose, merge it with
-  `gh pr merge --squash --admin` immediately. If even one changed file is code,
+  need permission to skip them.** If every changed file is prose, merge it
+  immediately the normal way (merge queue where one exists, never `--admin`).
+  If even one changed file is code,
   tests, scripts, workflows, or configuration, the normal checks apply.
 - **Wait on CI with the repository's bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
-  Use `bin/ai-pr-wait <pr>` for a pull request.
+  Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request.
 - Reuse the repository's shared plans, workflows, harnesses, and provider
   helpers before adding another copy. Any new shared artifact needs an explicit owner, necessity, and consolidation or retirement path.
 

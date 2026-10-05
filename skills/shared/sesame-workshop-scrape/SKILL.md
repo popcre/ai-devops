@@ -150,8 +150,8 @@ The 25 brands are Sesame Street plus every international co-production
 
 ## Database landing
 
-The schema for landing this extract is requested through the shared-db
-orchestrator, never authored from this repo. Structure changes to the shared
+The schema for landing this extract is claimed claim-first on the existing
+`popcre/shared-db` issue and authored in that repo, never from this one. Structure changes to the shared
 database go through `popcre/shared-db` first (branch + PR), per the
 `shared-db-change` skill. Row data produced by a scrape is the scraping
 session's own to write, but the tables it lands in are not.

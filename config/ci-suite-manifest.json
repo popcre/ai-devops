@@ -65,10 +65,14 @@
       ],
       "bin/ai-muse": [
         "test-ai-muse.sh",
+        "test-ai-muse-part2.sh",
+        "test-ai-muse-part3.sh",
         "test-ai-lock-doctor.sh"
       ],
       "bin/ai-muse.cmd": [
         "test-ai-muse.sh",
+        "test-ai-muse-part2.sh",
+        "test-ai-muse-part3.sh",
         "test-ai-lock-doctor.sh"
       ],
       "bin/ai-memory-sync.cmd": [
@@ -119,10 +123,12 @@
       ],
       "bin/ai-qwen": [
         "test-ai-qwen.sh",
+        "test-ai-qwen-part2.sh",
         "test-ai-lock-doctor.sh"
       ],
       "bin/ai-qwen.cmd": [
         "test-ai-qwen.sh",
+        "test-ai-qwen-part2.sh",
         "test-ai-lock-doctor.sh"
       ],
       "bin/ai-qwen-cli": [
@@ -133,10 +139,12 @@
       ],
       "bin/ai-muse-code": [
         "test-ai-muse-code.sh",
+        "test-ai-muse-code-part2.sh",
         "test-muse-opencode-contract.sh"
       ],
       "bin/ai-muse-code.cmd": [
         "test-ai-muse-code.sh",
+        "test-ai-muse-code-part2.sh",
         "test-muse-opencode-contract.sh"
       ],
       "bin/ai-jev-scripts": [
@@ -255,5 +263,5 @@
       ]
     }
   },
-  "windows_offline_section_count": 8
+  "windows_offline_section_count": 12
 }

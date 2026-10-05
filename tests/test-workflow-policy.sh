@@ -31,11 +31,11 @@ windows_timeout="$(sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p
 reviewer_timeout="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 fallback_timeout="$(sed -n '/^  windows-reviewer-fallback-codex:/,/^  windows-reviewer-fallback-grok:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 fallback_grok_timeout="$(sed -n '/^  windows-reviewer-fallback-grok:/,/^  windows-reviewer-safety:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
-section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
+section_timeout="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 check 'complete Windows sections retain the existing timeout bound' '[ "$windows_timeout" = 105 ]'
 check 'reviewer Windows job keeps measured headroom' '[ -n "$reviewer_timeout" ] && [ "$reviewer_timeout" -ge 30 ]'
 check 'hosted reviewer fallback covers measured worst case and stays bounded' '[ -n "$fallback_timeout" ] && [ "$fallback_timeout" -ge 50 ] && [ "$fallback_timeout" -le 60 ] && [ -n "$fallback_grok_timeout" ] && [ "$fallback_grok_timeout" -ge 50 ] && [ "$fallback_grok_timeout" -le 60 ]'
-check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: blacksmith-4vcpu-ubuntu-2404' '$fast_workflow'"
+check 'fast classifier is a separate reusable hosted-Ubuntu workflow' "grep -q 'uses: ./.github/workflows/fast-classifier.yml' '$workflow' && grep -q '^  workflow_call:' '$fast_workflow' && grep -q 'runs-on: blacksmith-4vcpu-ubuntu-2404' '$fast_workflow' && ! grep -q 'runs-on: ubuntu-' '$fast_workflow'"
 check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources' '$workflow' && grep -q 'Dir::Etc::sourceparts=-' '$workflow'"
 # P3 splits selection from fast validation. The assertions below check each
 # expensive job's dependencies and required outcomes directly. They do not
@@ -58,10 +58,10 @@ job_has() {
 long_jobs_select_run_long_ok() {
   job_has linux-offline-shard linux-offline "outputs.run_long != 'false'" || return 1
   job_has linux-offline merge-group-evidence "outputs.run_long != 'false'" || return 1
-  job_has windows-offline-section windows-offline-warpbuild-proof "outputs.run_long != 'false'" || return 1
+  job_has windows-offline-section windows-offline-complete "outputs.run_long != 'false'" || return 1
   job_has windows-offline-complete windows-offline "outputs.run_long != 'false'" || return 1
   job_has linux-offline-shard linux-offline "outputs.selection_result != 'success'" || return 1
-  job_has windows-offline-section windows-offline-warpbuild-proof "outputs.selection_result != 'success'" || return 1
+  job_has windows-offline-section windows-offline-complete "outputs.selection_result != 'success'" || return 1
   job_has windows-offline-complete windows-offline "outputs.selection_result != 'success'" || return 1
 }
 reviewer_jobs_select_reviewer_ok() {
@@ -79,7 +79,7 @@ reviewer_jobs_select_reviewer_ok() {
 expensive_jobs_carry_validation_stop_ok() {
   job_has linux-offline-shard linux-offline "outputs.validation_result != 'failure'" || return 1
   job_has linux-offline merge-group-evidence "outputs.validation_result != 'failure'" || return 1
-  job_has windows-offline-section windows-offline-warpbuild-proof "outputs.validation_result != 'failure'" || return 1
+  job_has windows-offline-section windows-offline-complete "outputs.validation_result != 'failure'" || return 1
   job_has windows-offline-complete windows-offline "outputs.validation_result != 'failure'" || return 1
   job_has reviewer-safety-start-deadline windows-reviewer-fallback-codex "outputs.validation_result != 'failure'" || return 1
   job_has windows-reviewer-fallback-codex windows-reviewer-fallback-grok "outputs.validation_result != 'failure'" || return 1
@@ -241,7 +241,7 @@ check 'hosted reviewer proofs are independent Codex and Grok jobs' \
 # Inputs are byte-sorted; comm under a UTF-8 locale (Git Bash) collates
 # differently and silently misreports membership, so every comm is C-locale.
 check 'every set comparison uses byte order on every platform'   "! grep -nE '(^|[^_=A-Z])comm -' '$0' | grep -v 'LC_ALL=C comm -'"
-section_block="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow")"
+section_block="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow")"
 aggregate_block="$(sed -n '/^  windows-offline:$/,/^  windows-reviewer-safety:/p' "$workflow")"
 shard_union="$(jq -r '.windows_offline_shards[][]' "$manifest" | tr -d '\r' | LC_ALL=C sort)"
 shard_count="$(jq '.windows_offline_shards | length' "$manifest" | tr -d '\r')"
@@ -272,7 +272,7 @@ check 'Gemini, GLM and Muse Code run in different sections within the same 40-mi
 check 'the workflow runs exactly the sections the manifest declares' \
   '[ "$sections_declared" = "$sections_expected" ] && printf "%s" "$section_block" | grep -qF "matrix.section }}/$shard_count"'
 check 'manual Blacksmith lane runs the same complete section mapping' \
-  'grep -qF "section: $sections_expected" "$blacksmith_workflow" && grep -qF "matrix.section }} of $shard_count" "$blacksmith_workflow" && grep -qF "matrix.section }}/$shard_count" "$blacksmith_workflow" && grep -qF -- "-Shard" "$blacksmith_workflow" && grep -qF "all eight Blacksmith sections succeeded" "$blacksmith_workflow"'
+  'grep -qF "section: $sections_expected" "$blacksmith_workflow" && grep -qF "matrix.section }} of $shard_count" "$blacksmith_workflow" && grep -qF "matrix.section }}/$shard_count" "$blacksmith_workflow" && grep -qF -- "-Shard" "$blacksmith_workflow" && grep -qF "all twelve Blacksmith sections succeeded" "$blacksmith_workflow"'
 check 'Blacksmith stays manual, bounded, independently hosted and fail-closed' \
   'grep -q "^  workflow_dispatch:" "$blacksmith_workflow" && ! grep -Eq "^  (pull_request|schedule|merge_group|workflow_run):" "$blacksmith_workflow" && grep -qF "runs-on: blacksmith-4vcpu-windows-2025" "$blacksmith_workflow" && grep -qF "timeout-minutes: 20" "$blacksmith_workflow" && grep -qF "fail-fast: false" "$blacksmith_workflow" && grep -qF "failing closed" "$blacksmith_workflow"'
 # Sections run at the same time on independent hosted machines, and one failing
@@ -339,7 +339,7 @@ grep -Fq '|| github.sha' "$workflow" || {
 # part of an hour. Asserted per job, not as a fragment count: a new Windows job
 # must carry the same event isolation.
 windows_merge_group_isolated_ok() {
-  job_has windows-offline-section windows-offline-warpbuild-proof "github.event_name == 'pull_request'" || return 1
+  job_has windows-offline-section windows-offline-complete "github.event_name == 'pull_request'" || return 1
   job_has windows-offline-complete windows-offline "github.event_name != 'merge_group'" || return 1
   job_has windows-offline windows-reviewer-safety "github.event_name != 'merge_group'" || return 1
   job_has reviewer-runner-availability windows-reviewer-preferred "github.event_name != 'merge_group'" || return 1
@@ -352,43 +352,29 @@ check 'physical Windows routing and fallback jobs are skipped on merge_group' wi
 # Pull requests use the hosted Windows-sensitive assignment. Schedule and
 # workflow_dispatch keep the complete sharded runner as the backstop.
 grep -Fq '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' "$workflow" &&
-[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 3 ] &&
+[ "$(grep -cF '.\tests\test-all.ps1' "$workflow")" -eq 2 ] &&
 printf '%s' "$complete_block" | grep -Fq '.\tests\test-all.ps1 -Shard' &&
-sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow" | grep -F "github.event_name == 'pull_request'" >/dev/null &&
+sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow" | grep -F "github.event_name == 'pull_request'" >/dev/null &&
 sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | grep -F "github.event_name != 'pull_request'" >/dev/null || {
   printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2
   exit 1
 }
-# The WarpBuild BYOC proof lane (issue #961) runs the same required Windows
-# suite but must never be load-bearing: continue-on-error, absent from
-# verification-closure's needs, guarded against fork heads (those VMs are our
-# Azure subscription), on the WarpBuild label, and capped at the live quota
-# (standardDASv4Family 10 vCPUs = 2 concurrent Standard_D4as_v4 VMs). The
-# required Blacksmith sections must never borrow these properties by accident,
-# so the checks below read the proof job's own block only.
+# Pull-request Windows tests run only on Blacksmith (owner 2026-10-02: "use
+# blacksmith to run your tests"). verify.yml never routes to the WarpBuild
+# label; WarpBuild is proven only by its own canary workflow (issue #961).
 proof_ok() {
-  local proof
-  proof="$(job_block windows-offline-warpbuild-proof windows-offline-complete)"
-  [ -n "$proof" ] || return 1
-  printf '%s' "$proof" | grep -qF 'continue-on-error: true' || return 1
-  printf '%s' "$proof" | grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' || return 1
-  printf '%s' "$proof" | grep -qF 'runs-on: warp-custom-warpbuild-win2022-canary' || return 1
-  printf '%s' "$proof" | grep -qF 'max-parallel: 2' || return 1
-  printf '%s' "$proof" | grep -qF 'section: [1, 2, 3, 4, 5, 6, 7, 8]' || return 1
-  printf '%s' "$proof" | grep -qF '.\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard' || return 1
-  # Not load-bearing: verification-closure must not depend on it.
-  ! grep -qF 'windows-offline-warpbuild-proof' <(sed -n '/^  verification-closure:/,/^  report-scheduled-failure:/p' "$workflow") || return 1
-  # And the required section matrix must never route to the WarpBuild label.
-  ! grep -qF 'warp-custom-warpbuild-win2022-canary' <(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow") || return 1
+  ! grep -qF 'windows-offline-warpbuild-proof' "$workflow" || return 1
+  ! grep -qF 'warp-custom-warpbuild-win2022-canary' "$workflow" || return 1
+  grep -qF 'runs-on: warp-custom-warpbuild-win2022-canary' "$ROOT/.github/workflows/warpbuild-win2022-canary.yml" || return 1
 }
-check 'the WarpBuild proof lane is non-blocking, fork-guarded, quota-capped and outside the required aggregate' proof_ok
+check 'pull-request Windows tests run only on Blacksmith; WarpBuild stays in its own canary' proof_ok
 # The fork-isolation guard on the required section matrix is security-critical:
 # a foreign head must always get the all-Blacksmith literal regardless of what
 # the router reports. This test reads the matrix expression itself and fails if
 # the head-repo check or the Blacksmith fallback is removed or weakened.
 fork_guard_ok() {
   local section_block matrix_line
-  section_block="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-warpbuild-proof:/p' "$workflow")"
+  section_block="$(sed -n '/^  windows-offline-section:/,/^  windows-offline-complete:/p' "$workflow")"
   [ -n "$section_block" ] || { echo 'fork_guard: empty section block' >&2; return 1; }
   matrix_line="$(printf '%s
 ' "$section_block" | grep 'include:')"
@@ -442,7 +428,13 @@ fixed_windows_ok() {
   job_has windows-reviewer-fallback-grok windows-reviewer-safety 'runs-on: blacksmith-4vcpu-windows-2025' || return 1
 }
 check 'the fixed non-preferred Windows verify jobs run on Blacksmith' fixed_windows_ok
-if grep -E '^[[:space:]]*runs-on:' "$workflow" | grep -Eq 'ubuntu-24\.04|ubuntu-latest|^[[:space:]]*runs-on:[[:space:]]*windows-2025'; then
+# The only GitHub-hosted job in verify.yml or the fast classifier it calls
+# (checked above) is the free push-settle quiet window; it never gates on a
+# test result and sleeps at most 90 seconds (owner
+# 2026-10-01 abandoned-push cost control); every test job runs on Blacksmith
+# (owner 2026-10-02: "use blacksmith to run your tests").
+check 'push-settle is the single free GitHub-hosted job' "[ \"\$(grep -cE '^[[:space:]]*runs-on:[[:space:]]*ubuntu-24\.04' '$workflow')\" -eq 1 ] && job_has push-settle linux-offline-shard 'runs-on: ubuntu-24.04'"
+if sed '/^  push-settle:/,/^  linux-offline-shard:/d' "$workflow" | grep -E '^[[:space:]]*runs-on:' | grep -Eq 'ubuntu-24\.04|ubuntu-latest|^[[:space:]]*runs-on:[[:space:]]*windows-2025'; then
   printf 'FAIL: verify jobs must not use GitHub-hosted runners
 ' >&2
   exit 1
@@ -497,7 +489,7 @@ check 'the four balanced sections partition every runnable Bash suite exactly on
 cancel_aware_ok() {
   job_has linux-offline-shard linux-offline '!cancelled()' || return 1
   job_has linux-offline merge-group-evidence '!cancelled()' || return 1
-  job_has windows-offline-section windows-offline-warpbuild-proof '!cancelled()' || return 1
+  job_has windows-offline-section windows-offline-complete '!cancelled()' || return 1
   job_has windows-offline-complete windows-offline '!cancelled()' || return 1
   job_has windows-offline windows-reviewer-safety '!cancelled()' || return 1
   job_has reviewer-runner-availability windows-reviewer-preferred '!cancelled()' || return 1

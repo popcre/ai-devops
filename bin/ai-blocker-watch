@@ -14,10 +14,11 @@
 #      dependency. When an issue in a configured repo closes, every OPEN issue
 #      it was blocking gets one comment naming the closed blocker. Closing that
 #      parent later repeats the step one level up, so a chain unwinds by itself.
-#   2. Wake. A session that runs `wait` is registered with its harness, session
-#      ID and directory. When its blocker closes, the watcher resumes that exact
-#      session headlessly (claude -p --resume / codex exec resume /
-#      zcode --resume) with a prompt to recheck and continue.
+#   2. Wake (legacy records only; `wait` is inert under #1183 child 3). Older
+#      wait records may still carry harness/session ID and directory. When such
+#      a blocker closes, the watcher may resume that session headlessly
+#      (claude -p --resume / codex exec resume / zcode --resume) with a prompt to
+#      recheck and continue. New work leaves the issue/PR as the card instead.
 #   3. Unowned-blocker alarm. A blocker nobody owns stalls every session behind
 #      it. Each alarm scan finds OPEN issues that block another OPEN issue yet
 #      have no assignee, no `owner:` line, no open linked pull request and no
@@ -212,7 +213,7 @@ ensure_labels(){ # ensure_labels <owner/repo> — labels are cheap and idempoten
 }
 
 cmd_wait(){
-  note "registration is no longer required; use bounded ai-pr-wait in-turn, or leave the issue/PR as the card and return later"
+  note "registration is no longer required; use bounded ai-pr-wait <pr> --timeout-minutes N in-turn, or leave the issue/PR as the card and return later"
   return 0
 }
 
@@ -570,12 +571,12 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
     prompt="ai-blocker-watch: $why"
     [ -z "$(jq -r '.for // ""' "$f")" ] || prompt="$prompt You were waiting on it for $(jq -r .for "$f")."
     [ -z "$(jq -r '.note // ""' "$f")" ] || prompt="$prompt Your note: $(jq -r .note "$f")."
-    prompt="$prompt Recheck the wait's final state, then continue the work you were waiting to do. When you finish, or are blocked again, comment the result on ${parked_issue:-your work issue}. If something else now blocks you, register a new wait with ai-blocker-watch."
+    prompt="$prompt Recheck the wait's final state, then continue the work you were waiting to do. When you finish, or are blocked again, comment the result on ${parked_issue:-your work issue}. If something else now blocks you, leave that issue or pull request as the card and return later — registration is not required."
   else
     local pr pn; read -r pr pn <<<"$(parse_ref "$parked_issue")"
     local fresh_reason="the session that registered it is gone"
     [ "$codex_child" = 0 ] || fresh_reason="the original Codex subagent cannot be resumed independently"
-    prompt="ai-blocker-watch: you are a NEW session picking up parked work, because $fresh_reason. The wait was released: $why The full brief is in $parked_url. Read that issue and all of its comments first (gh issue view $pn -R $pr --comments). Follow the repository's AGENTS.md. Create your own worktree from current upstream before you edit anything. Then continue the next steps the brief names. When you finish, or are blocked again, comment the result on that issue. If you are blocked again, register a new wait with: ai-blocker-watch wait <blocker> --for $parked_issue --brief-file <file>."
+    prompt="ai-blocker-watch: you are a NEW session picking up parked work, because $fresh_reason. The wait was released: $why The full brief is in $parked_url. Read that issue and all of its comments first (gh issue view $pn -R $pr --comments). Follow the repository's AGENTS.md. Create your own worktree from current upstream before you edit anything. Then continue the next steps the brief names. When you finish, or are blocked again, comment the result on that issue. If you are blocked again, leave that issue or pull request as the card and return later - registration is not required."
     cwd="$main_checkout"
   fi
   local cfgkey=harness; [ "$mode" = resumed ] || cfgkey=harness_fresh
@@ -613,7 +614,7 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
       local tmp="$f.tmp"
       jq --arg at "$(now_iso)" --arg p "${prog:-<empty command>}" \
         '.state="unrunnable" | .error=("harness program not found on this machine: " + $p) | .checked_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
-      note "cannot wake $h session $s: harness program not found on this machine: ${prog:-<empty command>}; wait $wid is now unrunnable (re-register the wait once the program is installed)"
+      note "cannot wake $h session $s: harness program not found on this machine: ${prog:-<empty command>}; wait $wid is now unrunnable (leave the issue as the card once the program is installed)"
     fi
     FAILED=1; return
   fi

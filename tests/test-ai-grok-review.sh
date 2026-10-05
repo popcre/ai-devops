@@ -160,6 +160,7 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s\n' \
   "${XDG_CONFIG_HOME:-}" "${XDG_CACHE_HOME:-}" "${XDG_DATA_HOME:-}" \
   "${APPDATA:-}" "${LOCALAPPDATA:-}" >> "$TMPDIR_FOR_TEST/isolation-homes.txt"
 printf '%s\n' "$([ -f "${GROK_HOME:-}/auth.json" ] && printf visible || printf missing)" >> "$TMPDIR_FOR_TEST/isolation-auth.txt"
+printf '%s|%s\n' "${XAI_API_KEY:-none}" "${OPERATOR_SECRET_FIXTURE:-stripped}" >> "$TMPDIR_FOR_TEST/isolation-key.txt"
 if printf '%s\n' "$@" | grep -qx inspect; then
   case "${AI_GROK_TEST_INSPECT_MODE:-ok}" in
     badshape) printf '%s\n' '{}' ;;
@@ -580,6 +581,7 @@ echo "== max_turns_always_present / permissions_are_fixed =="
 : > "$TMP/argv.txt"
 : > "$TMP/isolation-homes.txt"
 : > "$TMP/isolation-auth.txt"
+: > "$TMP/isolation-key.txt"
 mkdir -p "$AI_GROK_AUTH_HOME"
 printf 'fixture-auth\n' > "$AI_GROK_AUTH_HOME/auth.json"
 run new t1 --prompt "review this" >/dev/null 2>&1
@@ -594,7 +596,7 @@ check "prompt says not read-only and edits are discarded" "grep -q 'You are NOT 
 T1_DIR="$(run show t1 | jq -r '.review_dir')"
 check "writable review dir is a snapshot, not the caller checkout" "[ -d '$T1_DIR' ] && [ \"\$(cd '$T1_DIR' && pwd -P)\" != \"\$(cd '$REPO' && pwd -P)\" ]"
 check "writable review snapshot has no git remote" "[ -z \"\$(git -C '$T1_DIR' remote)\" ]"
-check "reviewer child env is cleared of operator secrets" "test \"\$(grep -cF 'env -i \"\${base_env[@]}\"' '$SCRIPT')\" -eq 2"
+check "reviewer child env is cleared of operator secrets" "test \"\$(grep -cF 'run_clean_env \"\${base_env[@]}\"' '$SCRIPT')\" -eq 2"
 check "caller checkout is verified unchanged after every turn" "grep -q 'changed during the Grok turn' '$SCRIPT'"
 check "legacy live-checkout sessions are refused" "grep -q 'bound to the live checkout' '$SCRIPT'"
 check "new disables web search"           "grep -q -- '--disable-web-search' '$TMP/argv.txt'"
@@ -602,6 +604,19 @@ check "new passes --no-memory"            "grep -q -- '--no-memory' '$TMP/argv.t
 check "review disables ambient MCP, hook, and compatibility session imports" "grep -qx 'false|false|false|false' '$TMP/isolation.txt'"
 check "inspect and paid children share one empty user home separate from GROK_HOME" "isolation_homes_match"
 check "inspect and paid children both retain credential reachability through GROK_HOME" "test \"\$(grep -cx visible '$TMP/isolation-auth.txt')\" -eq 2"
+check "OAuth session present: no API key is forwarded" "test \"\$(grep -cx 'none|stripped' '$TMP/isolation-key.txt')\" -eq 2"
+
+echo "== api_key_store_forwarded_only_without_oauth_session =="
+: > "$TMP/isolation-key.txt"; : > "$TMP/argv.txt"
+KEY_HOME="$TMP/key-auth"; mkdir -p "$KEY_HOME" "$TMP/key-store"; chmod 700 "$TMP/key-store"
+printf 'xai-fixture-store-key\n' > "$TMP/key-store/grok-xai-api-key"; chmod 600 "$TMP/key-store/grok-xai-api-key"
+AI_GROK_AUTH_HOME="$KEY_HOME" AI_GROK_KEY_STORE="$TMP/key-store/grok-xai-api-key" OPERATOR_SECRET_FIXTURE=leaked XAI_API_KEY= run new tkey --prompt "review this" >/dev/null 2>&1
+check "protected key store reaches both Grok children as XAI_API_KEY" "test \"\$(grep -cx 'xai-fixture-store-key|stripped' '$TMP/isolation-key.txt')\" -eq 2"
+check "forwarded key never appears in Grok argv" "! grep -q 'xai-fixture-store-key' '$TMP/argv.txt'"
+check "review path never calls 1Password" "! sed -n '/^resolve_xai_api_key() {/,/^}/p' '$SCRIPT' | grep -q 'op read'"
+: > "$TMP/isolation-key.txt"
+AI_GROK_AUTH_HOME="$KEY_HOME" AI_GROK_KEY_STORE="$TMP/key-store/missing" XAI_API_KEY= run new tkey2 --prompt "review this" >/dev/null 2>&1
+check "no store and no OAuth session forwards nothing" "! grep -q 'xai-' '$TMP/isolation-key.txt'"
 check "Windows reviewer isolates USERPROFILE for the native Grok child" "grep -q '\"USERPROFILE=\$isolated_native_user_home\"' '$REPO_ROOT/bin/ai-grok-review'"
 check "Windows reviewer isolates every XDG root for the native Grok child" "grep -q '\"XDG_CONFIG_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review' && grep -q '\"XDG_CACHE_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review' && grep -q '\"XDG_DATA_HOME=\$isolated_native_user_home' '$REPO_ROOT/bin/ai-grok-review'"
 check "review denies MCP meta-tools"       "grep -q -- '--disallowed-tools search_tool,use_tool,Agent' '$TMP/argv.txt' && grep -q -- '--deny MCPTool(\\*)' '$TMP/argv.txt'"
@@ -1352,25 +1367,65 @@ POOL="$REPO_ROOT/bin/ai-review-pool"
 bash "$FRONT" kimi security-review >/dev/null 2>&1; RC_KIMI=$?
 check "front_door_refuses_unregistered_provider" "[ '$RC_KIMI' -eq 2 ]"
 check "front_door_refusal_names_the_registry_state" "bash '$FRONT' kimi security-review 2>&1 | grep -q 'not a registered reviewer'"
-# Registered GLM must not be refused as unregistered. A short timeout keeps the
-# offline suite from starting a real review when the front door accepts it.
-timeout 3 bash "$FRONT" glm security-review 2>&1 | grep -q 'not a registered reviewer'; RC_GLM_UNREG=$?
-check "front_door_does_not_refuse_registered_glm" "[ '$RC_GLM_UNREG' -ne 0 ]"
+# GLM is a rotation reviewer again (owner instruction 2026-09-30). The old
+# "refuses glm out of rotation" check encoded the 2026-09-18 pause. Draw
+# eligibility from the registry instead of a hardcoded expectation.
+GLM_STATE="$(jq -r '.providers.glm.registry_state // "absent"' "$REPO_ROOT/config/reviewer-registry.json" 2>/dev/null || echo absent)"
+if [ "$GLM_STATE" = registered ]; then
+  bash "$FRONT" glm security-review >/dev/null 2>&1; RC_GLM=$?
+  check "front_door_accepts_registered_glm_from_registry" "[ '$RC_GLM' -ne 2 ]"
+else
+  bash "$FRONT" glm security-review >/dev/null 2>&1; RC_GLM=$?
+  check "front_door_refuses_glm_out_of_rotation" "[ '$RC_GLM' -eq 2 ]"
+fi
 bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
+bash "$FRONT" codex final-check --operation not-an-operation > "$TMP/front-opbad" 2>&1; RC_FRONT_OPBAD=$?
+check "front_door_refuses_unknown_operation" "[ '$RC_FRONT_OPBAD' -eq 2 ] && grep -q 'unknown --operation not-an-operation' '$TMP/front-opbad'"
+bash "$FRONT" codex final-check --operation stale-linux-manifest-recovery > /dev/null 2>&1; RC_FRONT_OPSTALE=$?
+check "front_door_refuses_unbindable_stale_manifest_operation" "[ '$RC_FRONT_OPSTALE' -eq 2 ]"
+bash "$FRONT" codex plan-review --operation first-managed-install > "$TMP/front-opplan" 2>&1; RC_FRONT_OPPLAN=$?
+check "front_door_refuses_operation_on_plan_review" "[ '$RC_FRONT_OPPLAN' -eq 2 ] && grep -q 'final-check exact-head review mode' '$TMP/front-opplan'"
+for op_mode in diff-review security-review visual-review; do
+  bash "$FRONT" codex "$op_mode" --operation first-managed-install > "$TMP/front-opmode" 2>&1; RC_FRONT_OPMODE=$?
+  check "front_door_refuses_operation_on_$op_mode" "[ '$RC_FRONT_OPMODE' -eq 2 ] && grep -q 'final-check exact-head review mode' '$TMP/front-opmode'"
+done
+bash "$FRONT" codex final-check --operation first-managed-install --operation first-managed-install > /dev/null 2>&1; RC_FRONT_OPDUP=$?
+check "front_door_refuses_repeated_operation" "[ '$RC_FRONT_OPDUP' -eq 2 ]"
+check "front_door_never_forwards_inherited_operation" "grep -q '^export AI_REVIEW_OPERATION=\"\$operation\"' '$FRONT'"
 check "front_door_refuses_unknown_provider" "[ '$RC_NONSENSE' -eq 2 ]"
 
 check "pool_passes_max_turns_only_to_grok" "grep -q 'qwen)  RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -q 'gemini) RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -q 'muse)  RUNNER=.*RUNNER_MAX_TURNS=\"\"' '$POOL' && grep -Fq '[ -z \"\$RUNNER_MAX_TURNS\" ] || RUNNER_ARGS+=(--max-turns' '$POOL'"
 POOLTMP="$(mktemp -d)"
 mkdir -p "$POOLTMP/fakerepo"
-( cd "$POOLTMP/fakerepo" && git init -q && printf '.ai/\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm init && git remote add origin 'https://user:p@ss@GitHub.com/org/repo.git' )
+( cd "$POOLTMP/fakerepo" && git init -q && printf '.ai/\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm init && printf 'x\n' > x && git add x && git -c user.email=t@t -c user.name=t commit -qm second && git remote add origin 'https://user:p@ss@GitHub.com/org/repo.git' )
 FAKE_HEAD="$(git -C "$POOLTMP/fakerepo" rev-parse HEAD)"
+FAKE_BASE="$(git -C "$POOLTMP/fakerepo" rev-parse HEAD~1)"
 cat > "$POOLTMP/packet" <<'EOF'
 #!/usr/bin/env bash
+# resolve emits a packet identity. JSON mode (default) exercises the pool's
+# field-wise identity gate; POOL_IDENTITY_MODE=plain keeps the legacy
+# non-JSON strict byte-compare fallback under test. The target tip flips
+# from POOL_ID_TGT_BEFORE to POOL_ID_TGT_AFTER once the runner touches
+# ./flip, modelling a shared target ref that moved while the review ran.
 case "$1" in
-  resolve) if [ -f "$(dirname "$0")/flip" ]; then printf 'identity-after\n'; else printf 'identity-before\n'; fi ;;
+  resolve)
+    if [ "${POOL_IDENTITY_MODE:-json}" = plain ]; then
+      if [ -f "$(dirname "$0")/flip" ]; then printf 'identity-after\n'; else printf 'identity-before\n'; fi
+      exit 0
+    fi
+    repo="${POOL_ID_REPO:-$(pwd)}"
+    head="${POOL_ID_HEAD:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
+    base="${POOL_ID_BASE:-0000000000000000000000000000000000000000}"
+    tgt="${POOL_ID_TGT_BEFORE:-$head}"
+    digest="${POOL_ID_DIGEST:-deadbeef}"
+    if [ -f "$(dirname "$0")/flip" ]; then tgt="${POOL_ID_TGT_AFTER:-$head}"; digest="${POOL_ID_DIGEST_AFTER:-$digest}"; fi
+    printf '{"schema_version":1,"repository":"%s","base":"%s","head":"%s","target":"%s","target_ref":"origin/main","merge_base":"%s","source_digest":"%s","rule":"merge-base of HEAD with origin/main (no --base was given)","requested_base":null}\n' \
+      "$repo" "$base" "$head" "$tgt" "$base" "$digest"
+    ;;
   *) exit 0 ;;
 esac
 EOF
+export_pool_id(){ export POOL_ID_REPO="$PWD" POOL_ID_HEAD="$FAKE_HEAD" POOL_ID_BASE="$FAKE_BASE" POOL_ID_DIGEST="deadbeef" POOL_IDENTITY_MODE="${1:-json}" POOL_ID_TGT_BEFORE="${2:-}" POOL_ID_TGT_AFTER="${3:-}"; }
 cat > "$POOLTMP/lifecycle" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
@@ -1391,6 +1446,7 @@ if [ "$1" = delete ]; then
 fi
 git remote get-url origin > "$(dirname "$0")/origin-url" 2>/dev/null || true
 BRIEF="$4"
+cp "$BRIEF" "$(dirname "$0")/last-brief" 2>/dev/null || true
 HEAD="$(grep -oE 'head commit is [0-9a-f]{7,40}' "$BRIEF" | head -1 | sed 's/.*is //')"
 case "${POOL_RUNNER_MODE:-approve}" in
   approve) printf 'Analysis of the change with evidence lines and sibling checks across the full diff, including the boundary, refusal and fail-closed paths the adapter contract requires. Head under review: %s. The review covered the registry eligibility decision at the front door, the evidence packet identity binding before and after the paid run, the lifecycle begin and finish accounting, the verdict-to-head binding rule, the report floor, and every fail-closed refusal path a pool review must keep. Findings are grouped by severity with file and line references, and the sibling-class sweep ran over each guard before this verdict was written, exactly as the harness requires of every pool review.\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
@@ -1442,6 +1498,24 @@ check "pool_gemini_argv_omits_max_turns" "grep -q '^new pool-gemini-' '$POOLTMP/
 check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runner-args' && ! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
 check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
+# --operation (issue #658): a named installation operation reaches the reviewer
+# request as the exact approval line the install gate greps for, the report
+# records it, an unknown name never dispatches, and without one the brief stays
+# free of any operation request.
+rm -f "$POOLTMP/last-brief"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=legacy-managed-launcher-refresh bash "$POOL" qwen final-check ) > "$POOLTMP/out-op" 2>&1; RC_OP=$?
+OP_REPORT="$(tail -1 "$POOLTMP/out-op")"
+check "pool_operation_brief_requests_exact_line" "[ '$RC_OP' -eq 0 ] && grep -Fqx 'Approved legacy-managed-launcher-refresh.' '$POOLTMP/last-brief' && grep -q \"installation operation 'legacy-managed-launcher-refresh'\" '$POOLTMP/last-brief'"
+check "pool_operation_report_records_operation" "[ -f '$OP_REPORT' ] && grep -Fq '| operation | \`legacy-managed-launcher-refresh\` |' '$OP_REPORT'"
+OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=stale-linux-manifest-recovery bash "$POOL" qwen final-check ) > "$POOLTMP/out-opbad" 2>&1; RC_OPBAD=$?
+check "pool_unknown_operation_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -q 'unknown review operation' '$POOLTMP/out-opbad' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
+OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=first-managed-install bash "$POOL" qwen security-review ) > "$POOLTMP/out-opmode" 2>&1; RC_OPMODE=$?
+check "pool_operation_outside_final_check_never_dispatches" "[ '$RC_OPMODE' -ne 0 ] && grep -q 'review operation needs final-check' '$POOLTMP/out-opmode' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
+rm -f "$POOLTMP/last-brief"
+( cd "$POOLTMP/fakerepo" && export_pool && unset AI_REVIEW_OPERATION && bash "$POOL" qwen final-check ) > /dev/null 2>&1
+check "pool_without_operation_requests_no_approval_line" "[ -f '$POOLTMP/last-brief' ] && ! grep -q '^Approved ' '$POOLTMP/last-brief' && ! grep -q 'installation operation' '$POOLTMP/last-brief'"
 # Grok's 120-turn budget must reach the engine dispatch, not just the legacy
 # argv. The fake engine records the exact engine contract args.
 rm -f "$POOLTMP/engine-args"
@@ -1473,7 +1547,7 @@ check "pool_muse_keep_sandbox_short_circuits_the_release" "[ '$RC_KEEP' -eq 0 ] 
 DEL_AFTER_FAIL="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
 check "pool_muse_failed_verdict_retains_the_session" "[ '$RC_RELFAIL' -ne 0 ] && [ '$DEL_AFTER_FAIL' -eq '$DEL_BASE' ]"
 rm -f "$POOLTMP/flip"
-( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_SANDBOX_DIR="$SBXROOT" POOL_RUNNER_MODE=drift bash "$POOL" muse final-check ) > "$POOLTMP/out-reldrift" 2>&1; RC_RELDRIFT=$?
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_HEAD" "$FAKE_BASE" && AI_REVIEW_SANDBOX_DIR="$SBXROOT" POOL_RUNNER_MODE=drift bash "$POOL" muse final-check ) > "$POOLTMP/out-reldrift" 2>&1; RC_RELDRIFT=$?
 DEL_AFTER_DRIFT="$(grep -c '^delete pool-muse-' "$POOLTMP/runner-args" 2>/dev/null || true)"
 check "pool_muse_stale_review_retains_the_session" "[ '$RC_RELDRIFT' -ne 0 ] && [ '$DEL_AFTER_DRIFT' -eq '$DEL_BASE' ]"
 rm -f "$POOLTMP/flip"
@@ -1497,9 +1571,30 @@ check "pool_adapter_binds_head_only_before_the_final_verdict" "[ '$RC_HAF' -ne 0
 check "pool_adapter_floor_counts_only_text_before_the_final_verdict" "[ '$RC_PO' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-po'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=tiny bash "$POOL" qwen security-review ) > "$POOLTMP/out-tiny" 2>&1; RC_TINY=$?
 check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 'minimum analysis floor' '$POOLTMP/out-tiny'"
-( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
+# A rewritten target tip (moved BACKWARD to a non-descendant) is real drift
+# and must still destroy the paid report.
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_HEAD" "$FAKE_BASE" && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
 rm -f "$POOLTMP/flip"
-check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift'"
+check "pool_adapter_refuses_source_drift_during_review" "[ '$RC_DRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-drift' && ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '\.stale$'"
+STALE_BEFORE_FORWARD="$(ls "$POOLTMP/fakerepo/.ai/reviews/" 2>/dev/null | grep -c '\.stale$' || true)"
+# A target tip that only moved FORWARD (old tip is an ancestor of the new
+# tip) leaves the reviewed base..head diff byte-identical: the completed
+# report must survive (#1254 — origin/main moved while the paid round ran).
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_BASE" "$FAKE_HEAD" && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-forward" 2>&1; RC_FORWARD=$?
+rm -f "$POOLTMP/flip"
+FORWARD_REPORT="$(tail -1 "$POOLTMP/out-forward" 2>/dev/null)"
+check "pool_adapter_keeps_a_paid_report_across_a_forward_target_move" "[ '$RC_FORWARD' -eq 0 ] && [ -f '$FORWARD_REPORT' ] && grep -q APPROVE '$FORWARD_REPORT'"
+STALE_AFTER_FORWARD="$(ls "$POOLTMP/fakerepo/.ai/reviews/" 2>/dev/null | grep -c '\.stale$' || true)"
+check "pool_adapter_forward_move_leaves_no_stale_report" "[ '$STALE_AFTER_FORWARD' -eq '$STALE_BEFORE_FORWARD' ]"
+# A changed digest under a forward-moving target is still refused: only the
+# tip gains tolerance, never the reviewed content.
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_BASE" "$FAKE_HEAD" && POOL_RUNNER_MODE=drift POOL_ID_DIGEST_AFTER=feedface bash "$POOL" qwen security-review ) > "$POOLTMP/out-fwdigest" 2>&1; RC_FWDIGEST=$?
+rm -f "$POOLTMP/flip"
+check "pool_adapter_forward_move_never_tolerates_a_changed_digest" "[ '$RC_FWDIGEST' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-fwdigest'"
+# A non-JSON identity keeps the strict byte-compare fallback.
+( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id plain && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-plaindrift" 2>&1; RC_PLAINDRIFT=$?
+rm -f "$POOLTMP/flip"
+check "pool_adapter_plain_identity_keeps_the_strict_compare" "[ '$RC_PLAINDRIFT' -ne 0 ] && grep -q 'source identity changed during review' '$POOLTMP/out-plaindrift'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=credit bash "$POOL" qwen security-review ) > "$POOLTMP/out-credit" 2>&1; RC_CREDIT=$?
 check "pool_adapter_passes_out_of_credit_through" "[ '$RC_CREDIT' -eq 92 ] && grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=qwen code=insufficient_quota' '$POOLTMP/out-credit' && grep -q '^OUT OF CREDIT: ' '$POOLTMP/out-credit'"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok visual-review ) > "$POOLTMP/out-visual" 2>&1; RC_VISUAL=$?
@@ -1527,7 +1622,7 @@ SNAPSHOT_ORIGIN="$(cat "$POOLTMP/origin-url" 2>/dev/null)"
 check "pool_adapter_strips_credentials_from_the_snapshot_origin" "[ -n '$SNAPSHOT_ORIGIN' ] && [ "'$SNAPSHOT_ORIGIN'" = "'https://github.com/org/repo.git'" ]"
 SANDBOX_PIN_LINE="$(grep -n '^SANDBOX=' "$POOL" | head -1 | cut -d: -f1)"
 MODELS_SOURCE_LINE2="$(grep -n '\. "$MODELS_ENV"' "$POOL" | head -1 | cut -d: -f1)"
-check "pool_adapter_gates_the_sandbox_tool_hook" "grep -q 'AI_REVIEW_SANDBOX_BIN' '$POOL' && grep -q 'AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN' '$POOL'"
+check "pool_adapter_gates_the_sandbox_tool_hook" "grep -q 'AI_REVIEW_SANDBOX_BIN' '$POOL' && grep -q 'AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_POOL_RUNNER_DEEPSEEK AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN' '$POOL'"
 check "pool_adapter_pins_the_sandbox_tool_before_models_env" "[ -n '$SANDBOX_PIN_LINE' ] && [ -n '$MODELS_SOURCE_LINE2' ] && [ '$SANDBOX_PIN_LINE' -lt '$MODELS_SOURCE_LINE2' ]"
 check "front_door_gates_the_pool_wrapper_hook" "grep -q 'AI_POOL_TEST_HOOKS=1 to substitute the pool adapter' '$FRONT'"
 check "pool_adapter_redacts_credential_shaped_diagnostics" "grep -q 'REDACTED' '$POOL'"

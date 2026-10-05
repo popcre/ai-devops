@@ -152,7 +152,7 @@ equivalent_fallback_proven() { # completed same-run replacement, never a failed 
   # succeeded to replace the original reviewer lane. Every other reported job
   # must already be complete and clean. Explicitly require the core jobs too;
   # an incomplete API response is not coverage.
-  for job in windows-reviewer-fallback-codex windows-reviewer-fallback-grok windows-offline linux-offline 'fast-classifier / classify'; do
+  for job in windows-reviewer-fallback-codex windows-reviewer-fallback-grok windows-offline linux-offline 'fast-classifier / select' 'fast-classifier / validate'; do
     printf '%s\n' "$jobs" | awk -F'\t' -v want="$job" '$1==want && $2=="success" && $3=="completed" {found=1} END {exit !found}' || return 1
   done
   printf '%s\n' "$jobs" | awk -F'\t' '$1=="windows-reviewer-safety" {found=1} END {exit !found}' || return 1
@@ -171,8 +171,34 @@ $jobs
 EOF
 }
 
+# Advisory lanes run with continue-on-error and sit outside verification-closure
+# (verify.yml windows-offline-warpbuild-proof, capacity-capped BYOC pool). While
+# one is still queued the whole run reads "queued", which used to stall every
+# merge for hours. Such a run is evidence only when verification-closure has
+# already succeeded and every NON-advisory job is complete and clean; anything
+# else stays fail-closed.
+ADVISORY_JOB_PREFIX='windows-offline-warpbuild-proof ('
+advisory_only_pending() {
+  local jobs job conclusion status
+  jobs="$(printf '%s\n' "$1" | sed 's/\r$//')"
+  # An incomplete API response is not coverage: the closure and core jobs must
+  # each be present and successful, never merely absent.
+  for job in verification-closure linux-offline 'fast-classifier / select' 'fast-classifier / validate'; do
+    printf '%s\n' "$jobs" | awk -F'\t' -v want="$job" '$1==want && $2=="success" && $3=="completed" {found=1} END {exit !found}' || return 1
+  done
+  while IFS="$(printf '\t')" read -r job conclusion status; do
+    [ -n "$job" ] || continue
+    case "$job" in "$ADVISORY_JOB_PREFIX"*) continue ;; esac
+    [ "$status" = completed ] || return 1
+    case "$conclusion" in success|skipped) ;; *) return 1 ;; esac
+  done <<EOF
+$jobs
+EOF
+}
+
 RUN_ID=''
 FALLBACK_RUNS=' '
+ADVISORY_RUNS=' '
 while IFS="$(printf '\t')" read -r id status conclusion; do
   [ -n "$id" ] || continue
   if [ "$status:$conclusion" != completed:success ]; then
@@ -183,6 +209,13 @@ while IFS="$(printf '\t')" read -r id status conclusion; do
       if equivalent_fallback_proven "$candidate_jobs"; then
         [ "$(read_queue_state)" = "$QUEUE_STATE" ] || reject 'the queued source or base changed during fallback verification'
         FALLBACK_RUNS="$FALLBACK_RUNS$id "
+        RUN_ID="$id"
+        continue
+      fi
+      if [ "$status" != completed ] && advisory_only_pending "$candidate_jobs"; then
+        [ "$(read_queue_state)" = "$QUEUE_STATE" ] || reject 'the queued source or base changed during advisory-lane verification'
+        printf 'ai-merge-group-evidence: run %s complete except advisory %s* jobs\n' "$id" "$ADVISORY_JOB_PREFIX"
+        ADVISORY_RUNS="$ADVISORY_RUNS$id "
         RUN_ID="$id"
         continue
       fi ;;
@@ -202,6 +235,9 @@ if [ "${#REQUIRED_JOBS[@]}" -gt 0 ]; then
   [ -n "$JOBS" ] || reject "run $RUN_ID reports no jobs; its coverage cannot be confirmed"
   if [[ "$FALLBACK_RUNS" = *" $RUN_ID "* ]]; then
     equivalent_fallback_proven "$JOBS" || reject 'the qualified fallback or other exact-head job evidence changed'
+  fi
+  if [[ "$ADVISORY_RUNS" = *" $RUN_ID "* ]]; then
+    advisory_only_pending "$JOBS" || reject 'the advisory-lane exact-head job evidence changed'
   fi
   for job in "${REQUIRED_JOBS[@]}"; do
     line="$(printf '%s\n' "$JOBS" | awk -F'\t' -v want="$job" '$1 == want { print $2; exit }')"

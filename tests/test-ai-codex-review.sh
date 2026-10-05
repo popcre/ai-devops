@@ -107,6 +107,20 @@ fi
 check "prompt_names_the_packet_relative_to_the_review_directory" "grep -hq 'Read [.]ai-review[^ ]*/MANIFEST[.]md' '$TMP/args'/prompt-*"
 check "prompt_sends_no_absolute_snapshot_path" "! grep -hq 'Read /' '$TMP/args'/prompt-*"
 check "prompt_demands_all_findings_and_sibling_issues" "grep -hq 'Return ALL findings in one pass' '$TMP/args'/prompt-* && grep -hq 'sibling issues' '$TMP/args'/prompt-*"
+check "report_without_operation_records_none" "! grep -q '| operation |' '$OUT'"
+check "prompt_without_operation_requests_no_approval_line" "! grep -hq 'installation operation' '$TMP/args'/prompt-*"
+# --operation (issue #658): the exact approval line reaches the Codex request
+# and the report records the operation; an unknown name never reaches Codex.
+rm -f "$TMP/args"/prompt-*
+OP_OUT="$(cd "$R" && AI_REVIEW_OPERATION=first-managed-install "$SCRIPT" final-check)"
+check "operation_prompt_requests_exact_line" "grep -hqx 'Approved first-managed-install.' '$TMP/args'/prompt-*"
+check "operation_report_records_operation" "[ -s '$OP_OUT' ] && grep -Fq '| operation | \`first-managed-install\` |' '$OP_OUT'"
+rm -f "$TMP/args"/prompt-*
+(cd "$R" && AI_REVIEW_OPERATION=bogus-operation "$SCRIPT" final-check) > "$TMP/op-bad.out" 2>&1; OP_BAD_RC=$?
+check "unknown_operation_never_reaches_codex" "[ '$OP_BAD_RC' -ne 0 ] && grep -q 'unknown review operation' '$TMP/op-bad.out' && ! ls '$TMP/args'/prompt-* >/dev/null 2>&1"
+rm -f "$TMP/args"/prompt-*
+(cd "$R" && AI_REVIEW_OPERATION=first-managed-install "$SCRIPT" security-review) > "$TMP/op-mode.out" 2>&1; OP_MODE_RC=$?
+check "operation_outside_final_check_never_reaches_codex" "[ '$OP_MODE_RC' -ne 0 ] && grep -q 'review operation needs final-check' '$TMP/op-mode.out' && ! ls '$TMP/args'/prompt-* >/dev/null 2>&1"
 check "source_is_unchanged_by_successful_review" "[ \"$BEFORE\" = \"\$('$REPO_ROOT/bin/ai-review-sandbox' digest '$R')\" ]"
 if [ -n "${SYSTEMROOT:-}" ]; then
   export AI_PRIVATE_HELPER_WIN="$(cygpath -w "$REPO_ROOT/bin/windows-private-file.ps1")"

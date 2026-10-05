@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$REPO_ROOT/bin/ai-qwen"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-part.sh"
 check 'Qwen delegates only pure adapter primitives to the shared helper' "grep -q 'provider-wrapper-common.sh' '$SCRIPT' && grep -q 'provider_wrapper_valid_name' '$SCRIPT' && grep -q 'provider_wrapper_sha256_file' '$SCRIPT'"
 
 # Timing budgets are measured, not guessed: a constant that is generous on an
@@ -474,6 +475,9 @@ crash_recorded_worker(){ # SUPERVISOR PROVIDER EXPECTED_LOCK_LABEL
   [ "$rc" -ne 0 ] || { bad 'crashed review worker must report a nonzero result'; return 1; }
 }
 
+# Windows CI runs the main flow below as two parts (tests/test-ai-qwen-part2.sh);
+# see tests/lib-test-part.sh.
+if ai_test_part_active; then
 echo 'ai-qwen tests'
 check 'missing crash worker cannot signal the test process group' '( kill(){ printf called > "$TMP/invalid-crash-signal"; }; wait(){ :; }; crash_recorded_worker 0 0 missing >/dev/null 2>&1; rc=$?; [ "$rc" -ne 0 ] && [ ! -e "$TMP/invalid-crash-signal" ] )'
 check 'syntax is valid' "bash -n '$SCRIPT'"
@@ -488,6 +492,16 @@ cp "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js" "$TMP/bad-sanitizer.js"
 sed 's/delete sanitized\[key\];/void key;/' "$TMP/bad-sanitizer.js" > "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js"
 check 'behavioral verifier rejects a sanitizer that retains the credential' "! '$AI_QWEN_SANITIZER_ROOT/node/bin/node' '$REPO_ROOT/tools/verify-qwen-child-env-sanitizer.mjs' '$AI_QWEN_SANITIZER_ROOT'"
 mv "$TMP/bad-sanitizer.js" "$AI_QWEN_SANITIZER_ROOT/lib/chunks/chunk-test.js"
+# Qwen 0.24.7 ships the sanitizer minified on one line; the installer must
+# patch it and the verifier must execute it. Two declarations stay refused.
+MIN_ROOT="$TMP/qwen-minified"; mkdir -p "$MIN_ROOT/lib/chunks"; cp -R "$AI_QWEN_SANITIZER_ROOT/node" "$MIN_ROOT/node"
+MIN_BUNDLE='init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=["QWEN_SERVER_TOKEN","QWEN_DAEMON_TOKEN",PRIVATE_ACP_CAPABILITY_ENV];var INTERNAL_SECRET_ENV_VAR_NAMES=new Set(INTERNAL_SECRET_ENV_VARS.map(name=>name.toUpperCase()));function isInternalSecretEnvVar(name){return INTERNAL_SECRET_ENV_VAR_NAMES.has(name.toUpperCase())}__name(isInternalSecretEnvVar,"isInternalSecretEnvVar");function sanitizeChildEnv(env=process.env){const sanitized={...env};for(const key of Object.keys(sanitized)){if(isInternalSecretEnvVar(key)){delete sanitized[key]}}return sanitized}__name(sanitizeChildEnv,"sanitizeChildEnv");export{sanitizeChildEnv};'
+printf '%s\n' "$MIN_BUNDLE" > "$MIN_ROOT/lib/chunks/chunk-min.js"
+env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$MIN_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen >/dev/null 2>&1 \
+  && grep -Fq 'var INTERNAL_SECRET_ENV_VARS=["BAILIAN_CODING_PLAN_API_KEY","QWEN_SERVER_TOKEN"' "$MIN_ROOT/lib/chunks/chunk-min.js" \
+  && ok 'provider installer hardens the minified Qwen 0.24 sanitizer' || bad 'provider installer hardens the minified Qwen 0.24 sanitizer'
+printf '%s\n' "${MIN_BUNDLE/init_esbuild_shims();/init_esbuild_shims();var INTERNAL_SECRET_ENV_VARS=[\"X\"];}" > "$MIN_ROOT/lib/chunks/chunk-min.js"
+check 'provider installer refuses an ambiguous Qwen sanitizer bundle' "! env HOME='$TMP/installer-home' PATH='$STUB:$PATH' AI_QWEN_SANITIZER_ROOT='$MIN_ROOT' bash '$REPO_ROOT/bin/install-ai-provider-clis.sh' qwen"
 
 : > "$TMP/argv.txt"
 INITIAL_STARTED=$SECONDS
@@ -681,6 +695,23 @@ printf 'changed during follow-up evidence preparation\n' >> "$REPO/a.txt"; FOLLO
 [ "$FOLLOWUP_PREPARE_RC" -ne 0 ] && [ "$CALLS_BEFORE_FOLLOWUP_PREPARE" = "$(wc -l < "$TMP/argv.txt")" ] && ok 'follow-up source drift during packet rebuild blocks before provider contact' || bad 'follow-up source drift during packet rebuild blocks before provider contact'
 git -C "$REPO" checkout -q -- a.txt
 
+run transcript review-1 >/dev/null 2>&1
+check 'transcript copy stays in ignored review directory' "/usr/bin/find '$REPO/.ai/reviews' -name 'qwen-review-1-*.jsonl' | grep -q ."
+check 'local transcript discovery receives no provider credential' "! grep -qx BAILIAN_CODING_PLAN_API_KEY '$TMP/qwen-credential-names'"
+run delete review-1 >/dev/null 2>&1
+check 'delete removes the private review copy' "test ! -d '$REVIEW_DIR'"
+fi  # part 1
+ai_test_part 2
+if ai_test_part_active; then
+# Part 1 calibrates startup polling from its first review; a standalone part 2
+# polls with a generous bound instead (loops still stop as soon as ready).
+[ -n "${QWEN_STARTUP_TICKS:-}" ] || QWEN_STARTUP_TICKS="$(scale_ticks 1200)"
+# Part 1 hardens the fixture sanitizer through the installer (and tests that);
+# a standalone part 2 applies the same hardening as setup only.
+if [ "$AI_TEST_PART" != all ]; then
+  env HOME="$TMP/installer-home" PATH="$STUB:$PATH" AI_QWEN_SANITIZER_ROOT="$AI_QWEN_SANITIZER_ROOT" bash "$REPO_ROOT/bin/install-ai-provider-clis.sh" qwen >/dev/null 2>&1     || { printf 'part 2 setup: Qwen fixture hardening failed
+' >&2; exit 1; }
+fi
 cp "$REPO/a.txt" "$TMP/a-before-live-drift"
 echo mutate-source-dirty > "$TMP/mode"
 if run new live-dirty --prompt review >/dev/null 2>&1; then bad 'same-turn dirty source drift rejects the response'; else ok 'same-turn dirty source drift rejects the response'; fi
@@ -788,11 +819,6 @@ check 'implementation does not touch live checkout' "test ! -e '$REPO/qwen.txt'"
 check 'implementation removes disposable worktree' "test \"\$(git -C '$REPO' worktree list | wc -l)\" -eq 1"
 
 echo review > "$TMP/mode"
-run transcript review-1 >/dev/null 2>&1
-check 'transcript copy stays in ignored review directory' "/usr/bin/find '$REPO/.ai/reviews' -name 'qwen-review-1-*.jsonl' | grep -q ."
-check 'local transcript discovery receives no provider credential' "! grep -qx BAILIAN_CODING_PLAN_API_KEY '$TMP/qwen-credential-names'"
-run delete review-1 >/dev/null 2>&1
-check 'delete removes the private review copy' "test ! -d '$REVIEW_DIR'"
 DOCTOR_ONE="$(run doctor)"
 check 'doctor checks installed interface without a model call' "printf '%s\\n' \"\$DOCTOR_ONE\" | grep -Eq '^qwen runtime sha256: [0-9a-f]{64}$'"
 check 'doctor secures a fresh Qwen home before checking its session store' "sed -n '/^cmd_doctor()/,/^}/p' '$SCRIPT' | grep -q 'secure_qwen_home'"
@@ -1049,5 +1075,6 @@ echo review > "$TMP/mode"
 if (cd "$REPO" && AI_QWEN_STARTUP_TIMEOUT_SECONDS=soon bash "$SCRIPT" new bad-deadline --prompt review) >/dev/null 2>&1; then bad 'a non-numeric startup deadline is refused'; else ok 'a non-numeric startup deadline is refused'; fi
 
 recovery_cases
+fi  # part 2
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 ((FAIL == 0))

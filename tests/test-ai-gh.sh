@@ -539,8 +539,12 @@ check 'no header snapshot request after a secondary refusal' "! grep -q 'api --i
 rm -f "$TMP/state/backoff_until" "$TMP/state/quota"
 
 # ai-gh-wait
-AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --interval 60 -- run view 1 >/dev/null 2>&1; rc=$?
+AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --timeout-minutes 1 --interval 60 -- run view 1 >/dev/null 2>&1; rc=$?
 check 'wait refuses an interval below 300 seconds' "[ $rc -eq 3 ]"
+AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --interval 300 -- run view 1 >/dev/null 2>&1; rc=$?
+check 'wait requires an explicit --timeout-minutes deadline' "[ $rc -eq 3 ]"
+AI_DEVOPS_TEST_MODE=0 "$WAIT" --until-regex x --timeout-minutes 0 --interval 300 -- run view 1 >/dev/null 2>&1; rc=$?
+check 'wait refuses a zero deadline' "[ $rc -eq 3 ]"
 AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 FAKE_MODE=counter "$WAIT" --until-regex completed --interval 1 --timeout-minutes 1 -- run view 1 > "$TMP/wout" 2>/dev/null; rc=$?
 check 'wait exits 0 when the state matches' "[ $rc -eq 0 ] && grep -q completed '$TMP/wout' && [ \$(cat '$FAKE_COUNT') -eq 2 ]"
 check 'wait default interval is at least 300 seconds' "grep -q '^INTERVAL=300' '$WAIT' && grep -q '^MIN=300' '$WAIT'"
@@ -553,9 +557,13 @@ echo $(( $(date +%s) + 15 )) > "$TMP/state/backoff_until"
 AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 FAKE_MODE=counter timeout 60 "$WAIT" --until-regex completed --interval 1 --timeout-minutes 1 -- run view 1 > "$TMP/wout" 2> "$TMP/werr"; rc=$?
 check 'wait stretches its delay through a recorded back-off, then succeeds' "[ $rc -eq 0 ] && grep -q 'back-off active' '$TMP/werr'"
 rm -f "$TMP/state/backoff_until"
-AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 timeout 90 "$WAIT" --until-regex never-matches --interval 30 --timeout-minutes 0 -- run view 1 >/dev/null 2>&1; rc=$?
+# Deadline path: pin the deadline to epoch 1 so the waiter exits 2 after one
+# poll without a real 60s sleep.
+AI_GH_WAIT_TEST_DEADLINE_EPOCH=1 \
+  AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 timeout 20 \
+  "$WAIT" --until-regex never-matches --interval 1 --timeout-minutes 1 -- run view 1 >/dev/null 2>&1; rc=$?
 check 'wait exits 2 at its deadline' "[ $rc -eq 2 ]"
-AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 timeout 20 "$WAIT" --until-regex x --interval 1 -- run watch 1 >/dev/null 2>&1; rc=$?
+AI_DEVOPS_TEST_MODE=1 AI_GH_WAIT_TEST_MIN_INTERVAL=1 timeout 20 "$WAIT" --until-regex x --timeout-minutes 1 --interval 1 -- run watch 1 >/dev/null 2>&1; rc=$?
 check 'wait does not retry a command the throttle refuses' "[ $rc -eq 3 ]"
 cat > "$TMP/pending-gh" <<'EOF'
 #!/usr/bin/env bash

@@ -195,11 +195,14 @@ complete deterministic Bash set on Linux. For ordinary pull requests, Windows
 runs every PowerShell suite plus the Bash suites classified as Windows-sensitive;
 the separate `windows-reviewer-safety` lane owns Codex and Grok. A fallback
 watchdog reruns those omitted suites if the preferred lane does not report
-success. Since 2026-09-23 every CI job (Linux and Windows) runs on Blacksmith
-(`blacksmith-4vcpu-ubuntu-2404`, `blacksmith-4vcpu-windows-2025`), not the
-GitHub-hosted queue or the self-hosted pool; only the manual runner
-qualification workflow still targets self-hosted machines. A non-required
-WarpBuild Azure BYOC Windows canary also exists (`warp-custom-win2022-canary`);
+success. The verify test jobs (Linux and Windows) run on Blacksmith
+(`blacksmith-4vcpu-ubuntu-2404`, `blacksmith-4vcpu-windows-2025`; owner
+2026-10-02: "use blacksmith to run your tests"). Exceptions: idle qualified
+self-hosted hosts take Windows sections as extra capacity (`runner-router`,
+below) and run the preferred reviewer lane; the free `push-settle` quiet
+window and the watchdog/drift workflows run on GitHub-hosted `ubuntu-24.04`. A non-required WarpBuild
+Azure BYOC Windows canary also exists (`warp-custom-warpbuild-win2022-canary`,
+`warpbuild-win2022-canary.yml`);
 required CI is not migrated there (see [`warpbuild-azure-byoc.md`](warpbuild-azure-byoc.md)). Required check names
 are unchanged, so a green Blacksmith run is the required `verification-closure`
 merge check (Albert, 2026-09-23). One addition: on pull requests the
@@ -372,17 +375,50 @@ a local pre-check, not a replacement for CI: GitHub remains the authority on
 whether a branch is green, and the reviewer suites in particular must be proven
 on the Windows runner.
 
+### Windows CI platform differences
+
+`windows-offline-complete` (the full suite on Blacksmith Windows) exposes platform
+bugs the PR-section path can miss. Patterns that have already cost a day
+(2026-10-02, fixes in #1242):
+
+- **Symlinks.** `ln -s` falls back to a copy on many Windows hosts. Tests that
+  assert symlink refusal must skip with a reason when `[ -L ]` is false, the same
+  way `test-uninstall.sh` already does — do not fail closed on a missing platform
+  feature.
+- **File modes.** `chmod 600` maps to `644` under Git Bash. Skip POSIX mode
+  assertions on MINGW/MSYS/CYGWIN; keep the security intent elsewhere.
+- **`realpath` vs `pwd -P`.** On Windows CI these return different formats
+  (`C:/Users/...` vs `/c/Users/...`). A fixture that stores a resolved path must
+  use the **same** resolution function as the validator. `tests/lib-reviewer-approval.sh`
+  is the reference fix (use `cd` + `pwd -P`).
+- **Restricted `PATH`.** `PATH=/usr/bin:/bin` drops jq on Windows (it lives under
+  `C:\Program Files\jq\`). Always add `$(dirname "$(command -v jq)")` when a test
+  narrows PATH.
+- **Linux-only suites.** Suites whose names or product contract say Linux-only
+  (`test-ai-task-gates-linux-install.sh`, `test-linux-install-authorization.sh`)
+  must `exit 0` with a skip reason on non-Linux rather than call a
+  "Linux-only" route and fail.
+
+Do not paper these over with blanket skips of whole suites. Platform-correct
+skips with a named reason are fine; dropping coverage is not.
+
 Installer behavior has lightweight, dependency-free tests:
 
 ```bash
 python3 tests/test-ai-doc-reachability.py
 bash tests/test-ai-install-skills.sh
 bash tests/test-ai-memory-sync.sh
-bash tests/test-ai-qwen.sh
+AI_TEST_PART=all bash tests/test-ai-qwen.sh
 bash tests/test-codex-trigger-eval.sh
 bash tests/test-installer-parity.sh
 bash tests/test-ai-adopt-globals.sh
 ```
+
+The long Qwen and Muse suites (`test-ai-qwen.sh`, `test-ai-muse.sh`,
+`test-ai-muse-code.sh`) run as parts so each Windows CI section stays under
+its time limit: the suite file runs part 1 and `tests/<suite>-partN.sh` runs
+part N. `AI_TEST_PART=all` runs every part in one process; see
+`tests/lib-test-part.sh`.
 
 `tests/test-ai-adopt-globals.sh` covers `bin/ai-adopt-globals`, the wrapper that
 replaces a machine's always-loaded globals **without losing its machine

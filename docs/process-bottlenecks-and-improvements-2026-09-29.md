@@ -127,7 +127,7 @@ filters on required checks, #401 and #204 stay closed.
 | **One shared GitHub identity (largely fixed)** | Work stopped on rate-limit holds; background scans starving interactive work | Scheduled watchers used the personal token; BlockerWatch was ~95% of measured managed traffic; three machines ticked on the same minute (secondary limit) | Whole-fleet pauses on the owner's budget | Keep App `pop-ai-watchers` for scheduled ticks (PR #1006) and the per-machine tick stagger (PRs #999, #1003, #1004). Finish #658 remaining rows (installed attribution, BlockerWatch savings proof, host matrix, measured acceptance) — already owned by `plan_github-request-reduction.md` / `plan_cut-unneeded-github-traffic.md` |
 | **Reviewer preflights and qualification** | Reviews fail "doctor did not answer within 60s"; pin bump costs two days; out-of-quota discovered after failure | Sweeps inside the check path; too-short timeouts; no headroom check; multiple membership sources | Multi-day reviewer outages; competing fix PRs | Bounded O(1) preflight, pin-only lane, single registry, headroom gate before long reviews (`ai-gemini-usage` pattern is the model — extend or do not duplicate) |
 | **Handoffs and succession** | Hours of re-orientation; claims left under dead names; briefs wiped; marker rotation (#3570 → #3655-style chains) | Handoff as ceremony; ephemeral scratch state; required orchestrator role | Most wall-clock was coordination, waiting, handover, re-orientation | Coordination deletion (landed: claim-first, no marker, no chat conductor). Keep handoffs for **unfinished work only**. Positive machine-checkable conditions in handoff text, never bare negative instructions |
-| **Waiters and background helpers** | 31 helpers running against stopped targets; orphan 14-hour background tasks; 24-hour repeat of one ~6-hour test | No liveness, no TTL, no no-progress detector; waits do not expire | Days of apparent activity with zero delivery | Self-expiring waiters, background-task TTL + auto-reap with a summary, "N identical failures ⇒ stop" detector, park-with-state instead of cold-start redo |
+| **Waiters and background helpers** | 31 helpers running against stopped targets; orphan 14-hour background tasks; 24-hour repeat of one ~6-hour test | No liveness, no TTL, no no-progress detector; waits do not expire | Days of apparent activity with zero delivery | **NOT ADOPTED as TTL/park-state** (#1183 c3). Bounded in-session deadlines + issue-as-card only |
 
 ---
 
@@ -178,11 +178,13 @@ Concrete mechanisms and a numbered playbook. Several pieces have already landed;
 
 1. **Auto-cancel superseded runs (landed — keep it).** Runs are grouped by PR number, so a new push cancels the old build. Live proof: a second commit cancelled all three jobs of the first; the merge-queue run skipped both Windows jobs with zero runner minutes versus ~100 before. Keep the policy test. Residual risk is a workflow that reintroduces SHA-keyed grouping or Windows-on-merge-queue.
 
+> **SUPERSEDED by §2b (Muse-agreed, 2026-09-30) and #1183 child 3.** Draft items below that add park-with-state, self-expiring waiters, or background-task TTL are **not** adopted. The agreed shape is bounded in-session `ai-pr-wait`/`ai-gh-wait` with an explicit `--timeout-minutes` deadline only; turn-end state lives on the issue. Required BlockerWatch registration is OUT.
+
 2. **Ejection-aware waiters that terminate on every terminal outcome.** A merge-queue ejection leaves the PR OPEN; a waiter that only watches for "merged" waits forever. `bin/ai-pr-wait` must end on merge, ejection, closure, or failure — and must say which. That is already the contract in `docs/task-router.md`; make every caller obey it, and reject waits started without a deadline.
 
 3. **Capacity routing so one slow Windows job does not block everything.** Short reviewer-safety work on free GitHub-hosted runners (public repo). ENVY preferred lane with a pre-check that actually runs on the PR path (the bug that sent 20 runs to the slow lane is fixed). Blacksmith overflow for stuck Windows jobs (#742). Windows jobs skipped on `merge_group`. Affected-test selection so a one-file change does not buy every suite (landed 2026-09-25; finish P4/P5 acceptance). Prefer a short Windows job on the queue over the 75-minute one.
 
-4. **Park versus redo.** A long wait must park with a machine-readable state file (target, deadline, owner) and be resumable. A cold restart that re-reads everything and re-owns the queue is a redo, and it is how hours disappear. BlockerWatch wakeups should resume the parked session or consume that state file.
+4. **Park versus redo.** **NOT ADOPTED** under #1183 child 3 (no park-state store). A long wait leaves the issue/PR as the card; the turn ends.
 
 5. **Separate lanes and identities.** Scheduled background traffic on App `pop-ai-watchers`; interactive work stays personal. Per-machine watcher ticks stay staggered (minutes 3 / 6 / 9 past each 10-minute mark). Keep both; add a regression check that schedules stay desynchronized and scheduled ticks stay on the app.
 
@@ -190,7 +192,7 @@ Concrete mechanisms and a numbered playbook. Several pieces have already landed;
 
 7. **No-progress detection.** If the same test fails the same way N times, stop and report the category. No session may repeat a multi-hour suite for a day. The 24-hour loop (owner-reported) is exactly this failure.
 
-8. **Do independent useful work while waiting (rule already exists — make it structural).** A session that is waiting on CI should be doing another bounded task, or the turn should end with the wait registered. Sitting in the turn polling is forbidden and is also how secondary rate limits get tripped.
+8. **Do independent useful work while waiting (rule already exists — make it structural).** A session that is waiting on CI should be doing another bounded task, or the turn should end with the issue/PR as the card (registration is OUT). Sitting in the turn polling is forbidden and is also how secondary rate limits get tripped.
 
 ### 6.2 Numbered playbook
 
@@ -198,11 +200,11 @@ Concrete mechanisms and a numbered playbook. Several pieces have already landed;
 2. **Make every waiter ejection-aware and deadline-bounded** in the tools (`ai-pr-wait` / `ai-gh-wait`), not only in prose. Waiter terminates on every terminal outcome and names the category. *(Small; under `plan_workflow-efficiency.md` / task-router PR-CI row.)*
 3. **Category in CI reporting:** timeout, kill, and rate-limit reported as capacity. Needed by issue #210 lineage and `plan_workflow-efficiency.md` P7. *(M; highest payoff of the remaining CI work.)*
 4. **Finish capacity routing:** keep hosted short job + ENVY + Blacksmith; do not raise ceilings; bring the temporary 150-minute internal limit down as real capacity lands; third host if the pool still has ~15% headroom. *(M/L; runner-pool lineage, #209 successor work, `plan_windows-runner-maintenance-elevation.md` for maintenance only.)*
-5. **Self-expiring waiters and background-task TTL** with a one-line summary on reap. *(M; new small tool change — put it under `plan_blockerwatch-reliability-repair.md` or `plan_workflow-efficiency.md`; do not open a new plan.)*
+5. **Self-expiring waiters and background-task TTL** — **NOT ADOPTED** under #1183 child 3 (no TTL service).
 6. **Aggregate per-push workflows with concurrency groups** on the shared-db side to finish what #3744/#3746 started; keep ai-devops workflows as they are once grouping tests are green. *(M; shared-db non-orchestrator work plus this repo's workflow-policy tests.)*
 7. **Quota failures park, never re-review.** If the only failing checks are rate-limit/capacity, do not invalidate approvals and do not start a new review cycle. *(S; policy + one test.)*
 8. **Ban open-ended waits in session instructions** (already the standing rule) and add a cheap lint/guard so a handoff cannot instruct an unbounded loop. *(S.)*
-9. **Park-with-state** for any wait over ~10 minutes: deadline, owner, target. Resume, never redo. *(M; depends on 5.)*
+9. **Park-with-state** — **NOT ADOPTED** under #1183 child 3 (no park-state store). Leave the issue/PR as the card.
 10. **Keep the stagger and the app identity** and add the regression check. *(S; already owned under #658.)*
 
 ---
@@ -285,7 +287,7 @@ So nobody "fixes" this by adding process back:
 
 1. **Finish the coordination-deletion residuals** (globals on Hetz, machine-tools duplicates, parked-issue tidy) and never re-add the ticket mill, orchestrator role, markers, or required wait registration.
 2. **Label timeout / kill / rate-limit as capacity** in CI and waiter reporting — and never let a capacity failure invalidate an exact-head approval.
-3. **Make waits die:** self-expiring waiters, background-task TTL, park-with-state instead of cold-start redo.
+3. **Make waits die:** **NOT ADOPTED as TTL/park-state** (#1183 c3). Bounded explicit deadlines + leave the issue/PR as the card.
 4. **Keep long Windows work off the merge critical path** and finish real capacity routing (hosted short job, ENVY, Blacksmith, affected-test selection) — without raising ceilings.
 5. **Take maintenance out of the hot path:** O(1) preflight, pin-only qualification, one reviewer registry, empty-verdict = failure.
 

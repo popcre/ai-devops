@@ -71,6 +71,11 @@ make_approved_report(){
   report="$dir/.ai/reviews/codex-final-check-test.md"
   printf '# Exact review\n\n| reviewed commit | %s%s%s |\n| source digest | %s%s%s |\n\n## Result\n\nApproved fixture source and routes.\nApproved %s.\n\n## Verdict\nAPPROVE\n' \
     "$(printf '\140')" "$target" "$(printf '\140')" "$(printf '\140')" "$digest" "$(printf '\140')" "$operation" > "$report"
+  case "$operation" in
+    legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery)
+      # The review wrapper records the requested operation in the report table.
+      sed -i "/^| source digest | /a | operation | $(printf '\140')$operation$(printf '\140') |" "$report" ;;
+  esac
   report_hash="$(sha256sum "$report" | cut -d' ' -f1)"
   key="$("$ROOT/bin/ai-review-lifecycle" identity "$dir" | jq -r .repository_key)" || return 1
   state_dir="$AI_REVIEW_LIFECYCLE_DIR/runs/$key/codex/codex"
@@ -120,6 +125,30 @@ check 'canonical shared-db identity retains the structural class and gates' \
   "jq -e '.observed_class==\"shared-db\" and ([\"governed-issue-claim\",\"preview-target-proof\",\"production-promotion-authorization\"]- .required_gates|length==0)' <<<\"\$db_canonical\""
 check 'redirected pre-transfer shared-db identity retains identical structural gates' \
   "[ \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_canonical\")\" = \"\$(jq -cS '[.observed_class,.required_gates,.forbidden_actions]' <<<\"\$db_redirected\")\" ]"
+
+printf 'shared-db promotion launch (owner ruling 2026-10-02)\n'
+for repo in db-canonical db-redirected; do
+  mkdir -p "$TMP/$repo/migrations"; printf 'select 1;\n' > "$TMP/$repo/migrations/001.sql"
+  git -C "$TMP/$repo" add -A; git -C "$TMP/$repo" commit -qm migration
+done
+check 'canonical shared-db may launch the promotion run for a merged change' \
+  "rc 0 '$TMP/db-canonical' check --before shared-db-promotion"
+check 'redirected shared-db identity may launch the promotion run' \
+  "rc 0 '$TMP/db-redirected' check --before shared-db-promotion"
+check 'the promotion launch never unlocks a manual production action' \
+  "! rc 0 '$TMP/db-canonical' check --before production"
+newrepo "$TMP/db-app" u2giants/licensor-source-data
+mkdir -p "$TMP/db-app/db/migrations"; printf 'select 1;\n' > "$TMP/db-app/db/migrations/001.sql"
+git -C "$TMP/db-app" add -A; git -C "$TMP/db-app" commit -qm migration
+check 'an application repository with SQL cannot launch the promotion run' \
+  "rc 3 '$TMP/db-app' check --before shared-db-promotion"
+newrepo "$TMP/code-promo" popcre/shared-db
+printf 'x\n' > "$TMP/code-promo/tool.sh"; git -C "$TMP/code-promo" add -A; git -C "$TMP/code-promo" commit -qm code
+( cd "$TMP/code-promo" && "$GATES" start --class code >/dev/null 2>&1 )
+check 'a non-shared-db class in the shared-db repository cannot launch it' \
+  "rc 3 '$TMP/code-promo' check --before shared-db-promotion"
+check 'a reviewer approval cannot carry the launch to a non-shared-db class' \
+  "out '$TMP/code-promo' check --before shared-db-promotion --reviewer-approval x | grep -q 'opens only for the shared-db class'"
 
 printf 'consumer declarations\n'
 mkdir -p "$TMP/class/.ai-devops"
@@ -332,6 +361,23 @@ jq --arg hash "$first_hash" '.report_sha256=$hash' "$first_lifecycle" > "$TMP/fi
 mv "$TMP/first-lifecycle-updated" "$first_lifecycle"
 check 'mentioning a sensitive install mode is not approval' \
   "rc 3 '$TMP/first-install' authorize-install $first_proof --first-install"
+# A report that also approves a sibling operation, or records no operation or a
+# different one, must not authorize the requested operation (issue #658).
+for op_case in sibling missing-row other-row body-row; do
+  cp "$TMP/first-report-backup" "$first_report"
+  case "$op_case" in
+    sibling) sed -i 's/^Approved first-managed-install\.$/&\nApproved legacy-managed-launcher-refresh./' "$first_report" ;;
+    missing-row) sed -i '/^| operation | /d' "$first_report" ;;
+    other-row) sed -i 's/^| operation | .*$/| operation | `partial-managed-launcher-recovery` |/' "$first_report" ;;
+    # Reviewer text below "## Result" cannot supply the wrapper's operation row.
+    body-row) sed -i '/^| operation | /d; s/^## Result$/&\n\n| operation | `first-managed-install` |/' "$first_report" ;;
+  esac
+  op_hash="$(sha256sum "$first_report" | cut -d' ' -f1)"
+  jq --arg hash "$op_hash" '.report_sha256=$hash' "$first_lifecycle" > "$TMP/first-lifecycle-updated"
+  mv "$TMP/first-lifecycle-updated" "$first_lifecycle"
+  check "install operation binding refuses $op_case report" \
+    "rc 3 '$TMP/first-install' authorize-install $first_proof --first-install"
+done
 cp "$TMP/first-report-backup" "$first_report"
 first_hash="$(sha256sum "$first_report" | cut -d' ' -f1)"
 jq --arg hash "$first_hash" '.report_sha256=$hash' "$first_lifecycle" > "$TMP/first-lifecycle-updated"
@@ -843,10 +889,45 @@ check 'the protected stop says there is no reviewer-approval path' \
   "out '$TMP/lsd' check --before review --reviewer-approval \"\$(appr '$TMP/lsd' review)\" | grep -Fq 'no reviewer-approval'"
 rm -f "$TMP/lsd/warner-bros/assets.csv"
 
+printf 'reviewed private data writer release (#1239)\n'
+newrepo "$TMP/writer" u2giants/licensor-source-data
+mkdir -p "$TMP/writer/reconciliation/x" "$TMP/writer/.ai-devops"
+( cd "$TMP/writer" && "$GATES" start --class private-tooling ) >/dev/null
+printf 'export default 1;\n' > "$TMP/writer/reconciliation/x/writer.mjs"
+check 'an undeclared repository keeps database sealed for a writer' \
+  "out '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database)\" | grep -Fq 'no reviewer-approval'"
+# The declaration lands on the base first, through its own PR. That PR changes
+# only the repository's gate file, which is private-tooling (it carries no
+# licensed rows), so its own sealed code-only review can start.
+rm -f "$TMP/writer/reconciliation/x/writer.mjs"
+printf '%s\n' '{"schema_version":1,"gates":{"private-tooling":{"required":["synthetic-fixtures-only","reviewed-private-data-writer"]}}}' > "$TMP/writer/.ai-devops/task-gates.json"
+check 'the declaration PR itself is private-tooling and reaches code-only review' \
+  "rc 0 '$TMP/writer' check --before code-only-review"
+git -C "$TMP/writer" add -A && git -C "$TMP/writer" commit -qm declare
+( cd "$TMP/writer" && "$GATES" start --class private-tooling --base HEAD ) >/dev/null
+printf 'export default 1;\n' > "$TMP/writer/reconciliation/x/writer.mjs"
+check 'a declared writer reaches the reviewer-approval step for database' \
+  "out '$TMP/writer' check --before database | grep -Fq 'obtain an assigned AI reviewer APPROVE'"
+check 'and is still refused without that approval' \
+  "rc 3 '$TMP/writer' check --before database"
+check 'an approval that is not an exact-head lifecycle APPROVE is refused' \
+  "out '$TMP/writer' check --before database --reviewer-approval '$TMP/writer/.ai-devops/task-gates.json' | grep -Fq 'not a lifecycle-recorded'"
+check 'the release never opens production for the same writer' \
+  "out '$TMP/writer' check --before production --reviewer-approval \"\$(appr '$TMP/writer' production)\" | grep -Fq 'no reviewer-approval'"
+check 'the release never opens a formal review' \
+  "rc 3 '$TMP/writer' check --before review"
+printf 'id,name\n1,secret\n' > "$TMP/writer/reconciliation/x/rows.csv"
+check 'one licensed row keeps database sealed despite the declaration' \
+  "out '$TMP/writer' check --before database --reviewer-approval \"\$(appr '$TMP/writer' database)\" | grep -Fq 'no reviewer-approval'"
+rm -rf "$TMP/writer"
+
 printf 'private code review keeps evidence and mutation boundaries\n'
 newrepo "$TMP/private" 'u2giants/licensor-source-data'
 mkdir -p "$TMP/private/disney-dcpvault" "$TMP/private/.ai-devops"
 printf '# synthetic loader code only\n' > "$TMP/private/disney-dcpvault/loader.py"
+# A synthetic fixture under the licensed folder keeps this change set in
+# private-evidence; the gate file alone is private-tooling (#1239).
+printf 'id\n0\n' > "$TMP/private/disney-dcpvault/fixture.csv"
 cat > "$TMP/private/.ai-devops/task-gates.json" <<'EOF'
 {"schema_version":1,"paths":[{"glob":"disney-dcpvault/**","class":"private-evidence"}],"gates":{"private-evidence":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]},"private-tooling":{"required":["synthetic-fixtures-only"],"forbidden_actions":["deploy","infrastructure","production"]}}}
 EOF
@@ -1023,7 +1104,11 @@ jq '.action_gates = {"teleport": {"require_gate": {"prose": "whatever"}}}' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-action.json"
 jq '.action_gates["code-only-review"].require_gate["made-up-class"] = "whatever"' \
   "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-class.json"
+jq '.reviewer_release.database["private-evidence"] = "whatever"' \
+  "$ROOT/config/task-gates.json" > "$SCHEMA_TMP/bad-release.json"
 newrepo "$TMP/schema-repo"
+check 'a reviewer release naming private-evidence fails closed' \
+  "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-release.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
 check 'an action-gate naming an unknown action fails closed' \
   "[ \"\$(AI_TASK_GATES_FILE='$SCHEMA_TMP/bad-action.json' out '$TMP/schema-repo' check --before review >/dev/null 2>&1; echo \$?)\" = 4 ]"
 check 'an action-gate naming an undeclared class fails closed' \
@@ -1032,6 +1117,88 @@ check 'an action-gate naming an undeclared class fails closed' \
 # A flag given without its value must fail fast, never spin: on 2026-09-17 an
 # orphaned `start --class` burned 11 CPU-hours and starved the local GLM server.
 for args in 'start --class' 'start --class prose --reason' 'start --base' 'check --before' 'check --acknowledge' 'check --reviewer-approval' 'check --base'; do
+  check "missing value for '$args' fails fast instead of looping" \
+    "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
+done
+
+# Owner ruling 2026-10-02 ("yes, small entries can skip the reviewer"): a
+# small owner-requested row-data write (1..10 rows) may pass the database gate
+# without an AI reviewer, but only when the gate itself reads the repository's
+# issue from GitHub (through ai-gh) and finds the owner's words verbatim.
+newrepo "$TMP/small-entry" popcre/some-app
+( cd "$TMP/small-entry" && "$GATES" start --class code >/dev/null 2>&1 )
+SMALL_URL='https://github.com/popcre/some-app/issues/7'
+SMALL_Q='add the three Hasbro contacts'
+mkdir -p "$TMP/small-gh"
+jq -n --arg u "$SMALL_URL" '{url:$u, author:{login:"u2giants"}, body:"Owner request (verbatim): \"add the three Hasbro contacts\"", comments:[]}' > "$TMP/small-gh/7.json"
+jq -n '{url:"https://github.com/popcre/some-app/issues/8", author:{login:"someone"}, body:"x", comments:[{author:{login:"stranger"}, body:"add the three Hasbro contacts"}]}' > "$TMP/small-gh/8.json"
+jq -n '{url:"https://github.com/popcre/some-app/issues/10", user:{login:"someone"}, body:"x", comments:[{user:{login:"popcre"}, body:"please add the two Mattel licensor rows"}]}' > "$TMP/small-gh/10.json"
+jq -n '{url:"https://github.com/popcre/some-app/issues/1",author:{login:"u2giants"}, body:"add the three Hasbro contacts", comments:[]}' > "$TMP/small-gh/9.json"
+cat > "$TMP/small-gh/gh" <<EOF
+#!/usr/bin/env bash
+# Fake real gh behind ai-gh: serves issue JSON fixtures by number.
+[ "\$1 \$2" = "issue view" ] || { [ "\$1" = api ] && { echo '{"resources":{"core":{"limit":5000,"remaining":5000,"reset":0}}}'; exit 0; }; exit 0; }
+f="$TMP/small-gh/\$3.json"; [ -f "\$f" ] && cat "\$f" || exit 1
+EOF
+chmod +x "$TMP/small-gh/gh"
+export AI_GH_REAL_GH="$TMP/small-gh/gh" AI_GH_STATE_DIR="$TMP/small-gh/state" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_NO_WAIT=1
+SMALL="--before database --small-owner-entry"
+check 'database without reviewer or small entry stays blocked' \
+  "rc 3 '$TMP/small-entry' check --before database"
+check 'a 3-row owner entry passes the database gate without a reviewer' \
+  "out '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' | grep -q 'allowed as a small owner-requested entry'"
+check 'a 10-row owner entry is still small' \
+  "rc 0 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 10 --owner-quote '$SMALL_Q'"
+check 'an 11-row entry needs a reviewer' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 11 --owner-quote '$SMALL_Q'"
+check 'a zero or non-numeric row count is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 0 --owner-quote '$SMALL_Q' && rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3x --owner-quote '$SMALL_Q'"
+check 'a missing row count is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --owner-quote '$SMALL_Q'"
+check 'a quote absent from the issue is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote 'delete every contact row'"
+check 'a trivially short quote is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote 'add'"
+check 'a non-issue URL is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://example.com/x' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'an issue from another repository is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/other/issues/7' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'a quote written only by a non-owner is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/some-app/issues/8' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'GitHub returning a different issue is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/some-app/issues/9' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'an unreadable issue is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/some-app/issues/404' --row-count 3 --owner-quote '$SMALL_Q'"
+newrepo "$TMP/small-undeclared" popcre/some-app; echo change > "$TMP/small-undeclared/app.txt"
+check 'a small entry without a declared task is refused (no unrecorded release)' \
+  "! rc 0 '$TMP/small-undeclared' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
+newrepo "$TMP/small-corrupt" popcre/some-app
+check 'an unrecordable release is refused' \
+  "( cd '$TMP/small-corrupt' && '$GATES' start --class code >/dev/null 2>&1 ) && f=\"\$(state_file_for '$TMP/small-corrupt')\" && jq '.overrides = \"broken\"' \"\$f\" > \"\$f.x\" && mv \"\$f.x\" \"\$f\" && rc 3 '$TMP/small-corrupt' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'small-entry options without --small-owner-entry fail' \
+  "rc 1 '$TMP/small-entry' check --before database --row-count 3"
+check 'small entry and reviewer approval together fail' \
+  "rc 1 '$TMP/small-entry' check $SMALL '$SMALL_URL' --reviewer-approval /nonexistent"
+check 'small entry never releases other actions' \
+  "rc 3 '$TMP/small-entry' check --before production --small-owner-entry '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
+check 'the small-entry release is recorded in task state' \
+  "jq -e '.overrides|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-entry')\" >/dev/null"
+check 'an owner request quoted only in an owner comment (REST user.login) qualifies' \
+  "rc 0 '$TMP/small-entry' check $SMALL 'https://github.com/popcre/some-app/issues/10' --row-count 2 --owner-quote 'add the two Mattel licensor rows'"
+check 'a whitespace-padded quote under 12 real characters is refused' \
+  "rc 3 '$TMP/small-entry' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote 'add the     '"
+newrepo "$TMP/small-infra" popcre/some-app
+( cd "$TMP/small-infra" && "$GATES" start --class code >/dev/null 2>&1 )
+mkdir -p "$TMP/small-infra/infra"; printf 'x\n' > "$TMP/small-infra/infra/main.tf"
+check 'an infrastructure change set never qualifies as a small owner entry' \
+  "! rc 0 '$TMP/small-infra' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q'"
+newrepo "$TMP/small-structural" popcre/some-app
+( cd "$TMP/small-structural" && "$GATES" start --class code >/dev/null 2>&1 )
+mkdir -p "$TMP/small-structural/db/migrations"; printf 'select 1;\n' > "$TMP/small-structural/db/migrations/001.sql"
+check 'a structural change set never qualifies as a small owner entry' \
+  "! rc 0 '$TMP/small-structural' check $SMALL '$SMALL_URL' --row-count 3 --owner-quote '$SMALL_Q' && ! jq -e '(.overrides // [])|map(select(.kind==\"small-owner-entry\"))|length>0' \"\$(state_file_for '$TMP/small-structural')\" >/dev/null 2>&1"
+unset AI_GH_REAL_GH AI_GH_STATE_DIR AI_GH_MIN_SPACING_SECONDS AI_GH_NO_WAIT
+for args in 'check --small-owner-entry' 'check --row-count' 'check --owner-quote'; do
   check "missing value for '$args' fails fast instead of looping" \
     "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
 done

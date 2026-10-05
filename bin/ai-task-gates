@@ -61,6 +61,7 @@ usage: ai-task-gates <command> [options]
   start --class CLASS [--reason TEXT] [--base REF]
         Record the intended task class for this repository and worktree.
   check --before ACTION [--acknowledge TEXT] [--reviewer-approval REPORT]
+        [--small-owner-entry ISSUE_URL --row-count N --owner-quote TEXT]
         [--target-head SHA] [--installed-checkout PATH] [--installed-launcher PATH]
         [--first-install]
         Recompute the change set and decide whether ACTION may start.
@@ -81,6 +82,13 @@ usage: ai-task-gates <command> [options]
   version
 
 ACTION is one of: review code-only-review pr-wait ship deploy database infrastructure production
+  shared-db-promotion
+
+shared-db-promotion is the one owner-authorized (Albert, 2026-10-02) launch of
+shared-db's merged-preview run that starts its automatic production promotion
+workflow for an approved, merged change. It opens only for the shared-db class
+in a repository whose policy requires production-promotion-authorization; it
+never allows a manual production command or a bypass of the workflow.
 EOF
 }
 
@@ -108,6 +116,17 @@ validate_action_gates(){
     valid_action "$action" || fail_closed "action_gates names undeclared action '$action'."
     valid_class "$class" || fail_closed "action_gates names undeclared class '$class' for action '$action'."
   done < <(jqr '.action_gates // {} | to_entries[] | .key as $a | (.value.require_gate // {}) | keys[] | [$a,.] | @tsv' "$POLICY_FILE")
+  # A reviewer release names an action, a protected class, and the gate a
+  # repository must declare for that class. Each part must be real, or a typo
+  # would silently leave the release unreachable or mis-scoped (#1239).
+  local gate
+  while IFS=$'\t' read -r action class gate; do
+    [ -n "$action" ] || continue
+    valid_action "$action" || fail_closed "reviewer_release names undeclared action '$action'."
+    valid_class "$class" || fail_closed "reviewer_release names undeclared class '$class' for action '$action'."
+    [ "$class" != private-evidence ] || fail_closed "reviewer_release may never release private-evidence."
+    [ -n "$gate" ] || fail_closed "reviewer_release for '$action'/'$class' names no gate."
+  done < <(jqr '.reviewer_release // {} | to_entries[] | .key as $a | .value | to_entries[] | [$a,.key,(.value|tostring)] | @tsv' "$POLICY_FILE")
 }
 
 # The class table is read once. Classification asks for a rank on every rule of
@@ -365,6 +384,51 @@ reviewer_approval_summary(){
   esac
   jq -r --arg a "$action" --arg m "$mode" --arg x "$report_hash" \
     '"APPROVE by \(.provider) (implementer \(.implementer_engine), run \(.run_id), \($m)) for \($a) at \(.head) report sha256:\($x)"' "$row"
+}
+
+# A small owner-requested entry (owner ruling 2026-10-02: "yes, small entries
+# can skip the reviewer") releases ONLY the reviewer APPROVE for the database
+# action: an owner-requested row-data write of 1..10 rows, no structure,
+# schema, security change, or deletion, run as one guarded transaction that
+# asserts the exact row count after proving the target database. The issue
+# must belong to this repository and quote the owner's request verbatim; the
+# gate itself reads the issue (url, author, body, comments) from GitHub through
+# the managed ai-gh transport, never from a caller-supplied file. The quote (at least 12 characters, one line) must appear in
+# text authored by an owner account (OWNER_LOGINS). Only an empty, prose, or
+# code change set qualifies: a structural, security, infrastructure, or
+# protected class never does. A declared task (start) is required so the
+# release is always recorded. The row count and
+# transaction guard are the caller's declared contract, recorded in the task
+# state for audit; escalation and every other gate still run first.
+# Usage: small_owner_entry_summary ACTION ISSUE_URL ROWS QUOTE CLASS
+OWNER_LOGINS='["u2giants","popcre"]'
+small_owner_entry_summary(){
+  local action="$1" url="$2" rows="$3" quote="$4" class="$5" repo num json text
+  _soe_stop(){ printf 'ai-task-gates: STOP. %s\n' "$*" >&2; return 1; }
+  [ "$action" = database ] || { _soe_stop '--small-owner-entry applies only to --before database.'; return 1; }
+  case "$class" in none|prose|code) ;; *) _soe_stop "A small owner entry is row data only; the \"$class\" change set needs --reviewer-approval."; return 1 ;; esac
+  [[ "$url" =~ ^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/[1-9][0-9]*$ ]] \
+    || { _soe_stop '--small-owner-entry needs a GitHub issue URL (https://github.com/OWNER/REPO/issues/N).'; return 1; }
+  repo="${BASH_REMATCH[1]}"; num="${url##*/}"
+  [ "${repo,,}" = "${IDENTITY,,}" ] || { _soe_stop "The owner-request issue must belong to $IDENTITY (got $repo)."; return 1; }
+  [[ "$rows" =~ ^[1-9][0-9]?$ ]] && [ "$rows" -le 10 ] \
+    || { _soe_stop "A small owner entry needs --row-count between 1 and 10 (got \"$rows\"); larger writes need --reviewer-approval."; return 1; }
+  local squeezed="${quote//[[:space:]]/}"
+  [ "${#squeezed}" -ge 12 ] && [[ "$quote" != *$'\n'* ]] && [[ "$quote" != *$'\r'* ]] \
+    || { _soe_stop 'A small owner entry needs a one-line --owner-quote of at least 12 non-space characters with the owner request verbatim.'; return 1; }
+  [ -f "$(state_path)" ] || { _soe_stop 'A small owner entry needs a declared task (ai-task-gates start) so the release is recorded.'; return 1; }
+  json="$(AI_GH_CALLER=ai-task-gates "$SCRIPT_DIR/ai-gh" issue view "$num" -R "$repo" --json url,author,body,comments 2>/dev/null)" \
+    || { _soe_stop "Issue $url could not be read from GitHub."; return 1; }
+  jq -e --arg u "$url" '.url == $u and (.body|type=="string")' >/dev/null 2>&1 <<<"$json" \
+    || { _soe_stop "GitHub did not return issue $url."; return 1; }
+  text="$(jq -r --argjson owners "$OWNER_LOGINS" '
+    ([{author:.author, user:.user, body:.body}] + (.comments // []))[]
+    | select((.author.login // .user.login // "" | ascii_downcase) as $l | $owners | index($l))
+    | .body // empty' <<<"$json" | tr -d '\r')"
+  grep -qF -- "$quote" <<<"$text" \
+    || { _soe_stop "Issue $url does not quote the owner request verbatim in owner-authored text (--owner-quote not found)."; return 1; }
+  printf 'small owner entry %s, %s row(s), quote sha256:%s verified in issue; caller must run one guarded transaction asserting exactly %s row(s) after target-database proof' \
+    "$url" "$rows" "$(printf '%s' "$quote" | sha256sum | cut -d' ' -f1)" "$rows"
 }
 
 # --------------------------------------------------------------------------
@@ -639,11 +703,15 @@ toolkit_source_receipt(){
 cmd_check(){
   local action="" acknowledge="" reviewer_approval="" approval_summary="" base="" start_head="" source_changed_count=0
   local target_head="" installed_checkout="" installed_launcher="" first_install=0
+  local small_entry="" small_rows="" small_quote=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --before) need_value "$@"; action="$2"; shift 2 ;;
       --acknowledge) need_value "$@"; acknowledge="$2"; shift 2 ;;
       --reviewer-approval) need_value "$@"; reviewer_approval="$2"; shift 2 ;;
+      --small-owner-entry) need_value "$@"; small_entry="$2"; shift 2 ;;
+      --row-count) need_value "$@"; small_rows="$2"; shift 2 ;;
+      --owner-quote) need_value "$@"; small_quote="$2"; shift 2 ;;
       --base) need_value "$@"; base="$2"; shift 2 ;;
       --target-head) need_value "$@"; target_head="$2"; shift 2 ;;
       --installed-checkout) need_value "$@"; installed_checkout="$2"; shift 2 ;;
@@ -653,6 +721,11 @@ cmd_check(){
     esac
   done
   [ -n "$action" ] || die 'check requires --before ACTION.'
+  if [ -z "$small_entry" ]; then
+    [ -z "$small_rows$small_quote" ] || die '--row-count and --owner-quote need --small-owner-entry.'
+  else
+    [ -z "$reviewer_approval" ] || die '--small-owner-entry and --reviewer-approval are mutually exclusive.'
+  fi
   require_jq; load_policy
   valid_action "$action" || die "unknown action: $action"
   if [ "$action" = deploy ]; then
@@ -712,7 +785,7 @@ cmd_check(){
   # helper on central defaults alone.
   if [ "$IDENTITY_RESOLVED" != true ]; then
     case "$action" in
-      deploy|database|infrastructure|production)
+      deploy|database|infrastructure|production|shared-db-promotion)
         fail_closed "repository identity is unresolved; refusing to start '$action'." ;;
     esac
   fi
@@ -750,7 +823,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   if [ -z "$declared" ]; then
     if [ "$OBSERVED_CLASS" = none ]; then
       case "$action" in
-        deploy|database|infrastructure|production|code-only-review)
+        deploy|database|infrastructure|production|shared-db-promotion|code-only-review)
           fail_closed "no changes and no task class were found; refusing to start '$action' without an explicit declaration." ;;
       esac
       # An action bound to per-action proofs can never take the empty-change-set
@@ -805,6 +878,13 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     printf 'ai-task-gates: escalation to "%s" acknowledged: %s\n' "$OBSERVED_CLASS" "$acknowledge"
   fi
 
+  # 1b. The shared-db promotion launch (owner ruling, Albert 2026-10-02: "let AI
+  # launch it and remove that rule permanently") belongs to the shared-db class
+  # only. No acknowledge or reviewer approval can carry it to another class.
+  if [ "$action" = shared-db-promotion ] && [ "$effective" != shared-db ]; then
+    blocked "$(printf 'ai-task-gates: STOP. "shared-db-promotion" opens only for the shared-db class; the effective class here is "%s" in %s.' "$effective" "$IDENTITY")"
+  fi
+
   # 2. Forbidden action for the observed class.
   local required_gate effective_gate forbidden required reviewer_release=0 reviewer_gate line
   for line in "${CONTRIBUTORS[@]}"; do
@@ -823,9 +903,30 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
   forbidden="$(printf '%s\n' "$effective_gate" | sed -n 's/^forbidden\t//p')"
   required="$(printf '%s\n' "$required_gate" | sed -n 's/^required\t//p' | paste -sd, -)"
   if printf '%s\n' "$forbidden" | grep -qx -- "$action"; then
+    # A protected forbidden action stays sealed unless the central policy names
+    # a reviewer release for exactly this action and EFFECTIVE class, and the
+    # merged gates for that class declare the release gate (the repository's
+    # own declaration, as for code-only-review). The release only reaches the
+    # reviewer-approval step below; it never lets the action start without an
+    # assigned AI reviewer's exact-head APPROVE (#1239).
+    local release_gate=""
     if [ "$protected" = true ]; then
+      release_gate="$(jqr --arg a "$action" --arg c "$effective" '.reviewer_release[$a][$c] // empty' "$POLICY_FILE")"
+      if [ -n "$release_gate" ] && ! printf '%s\n' "$effective_gate" | sed -n 's/^required\t//p' | grep -qx -- "$release_gate"; then
+        release_gate=""
+      fi
+    fi
+    if [ "$protected" = true ] && [ -z "$release_gate" ]; then
       blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no reviewer-approval and no acknowledge path.\nNarrow the change set out of protected paths, or change this policy through its own reviewed path.' \
         "$action" "$effective" "$IDENTITY")"
+    fi
+    if [ -n "$small_entry" ]; then
+      approval_summary="$(small_owner_entry_summary "$action" "$small_entry" "$small_rows" "$small_quote" "$effective")" || exit "$EX_BLOCKED"
+      state_record_override small-owner-entry "$action" "$approval_summary" "$effective" \
+        && jq -e --arg r "$approval_summary" '.overrides | map(select(.kind=="small-owner-entry" and .reason==$r)) | length > 0' "$(state_path)" >/dev/null 2>&1 \
+        || blocked 'ai-task-gates: STOP. The small owner entry could not be recorded in the task state; nothing was released.'
+      printf 'ai-task-gates: "%s" allowed as a small owner-requested entry (no AI reviewer, owner ruling 2026-10-02): %s\n' "$action" "$approval_summary"
+      return 0
     fi
     if [ -z "$reviewer_approval" ]; then
       blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, obtain an assigned AI reviewer APPROVE of this exact head through ai-review (a plan-review suffices for review, pr-wait, and code-only-review) and re-run with --reviewer-approval <that report>.' \
@@ -852,6 +953,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       "$action" "$needs_gate" "$effective" "$IDENTITY")"
   fi
 
+  [ -z "$small_entry" ] || printf 'ai-task-gates: note: "%s" is not reviewer-gated here; --small-owner-entry was not needed and was not recorded.\n' "$action" >&2
   printf 'ai-task-gates: "%s" may start for effective class "%s" in %s.\n' "$action" "$effective" "$IDENTITY"
   [ -n "$required" ] && printf 'required gates: %s\n' "$required"
   return 0
@@ -1435,6 +1537,29 @@ cmd_authorize_install(){
   reviewed_commit="$(awk -F'|' '$2 ~ /reviewed commit/ {gsub(/[^0-9a-f]/,"",$3); print $3}' "$report_real")"
   [ "$reviewed_commit" = "$target_head" ] || blocked 'ai-task-gates: STOP. Review does not name exact target.'
   [ "$(tail -n 2 "$report_real" | tr -d '\r')" = $'## Verdict\nAPPROVE' ] || blocked 'ai-task-gates: STOP. Exact-head independent review has not approved release.'
+  # A migration review approves exactly one operation: the report's recorded
+  # operation (written by the review wrapper from `ai-review --operation`) must
+  # be the requested one, and no sibling operation may be approved beside it.
+  local requested_operation="" sibling_operation
+  if [ "$legacy_migration" -eq 1 ]; then requested_operation=legacy-managed-launcher-refresh
+  elif [ "$first_install" -eq 1 ]; then requested_operation=first-managed-install
+  elif [ "$recover_launchers" -eq 1 ]; then requested_operation=partial-managed-launcher-recovery
+  elif [ "$stale_manifest_recovery" -eq 1 ]; then requested_operation=stale-linux-manifest-recovery
+  fi
+  if [ -n "$requested_operation" ]; then
+    for sibling_operation in legacy-managed-launcher-refresh first-managed-install partial-managed-launcher-recovery stale-linux-manifest-recovery; do
+      [ "$sibling_operation" = "$requested_operation" ] && continue
+      ! grep -Fqx "Approved $sibling_operation." "$report_real" || blocked 'ai-task-gates: STOP. Review approves more than the requested installation operation.'
+    done
+    if [ "$requested_operation" != stale-linux-manifest-recovery ]; then
+      # Only the wrapper-written header (before the first "## Result" line) is
+      # trusted; reviewer text below it cannot supply the operation row.
+      local report_header
+      report_header="$(tr -d '\r' < "$report_real" | sed '/^## Result$/,$d')"
+      grep -q '^## Result$' <(tr -d '\r' < "$report_real") &&
+        [ "$(grep -c '^| operation | ' <<<"$report_header")" = 1 ] && grep -Fqx "| operation | \`$requested_operation\` |" <<<"$report_header" || blocked 'ai-task-gates: STOP. Review report does not record the requested installation operation.'
+    fi
+  fi
   if [ "$legacy_migration" -eq 1 ]; then
     grep -Fqx 'Approved legacy-managed-launcher-refresh.' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve the legacy managed launcher migration operation.'
   fi

@@ -86,7 +86,8 @@ cd /worksp/ai-devops
    by a later explicitly initiated sync after Claude creates the project.
 8. Schedules **BlockerWatch** — the `ai-blocker-watch` system (optional stage):
    a marked, idempotent user crontab entry running `ai-blocker-watch tick`, so
-   waiting sessions on this machine are woken when their blocker closes. Windows
+   legacy wait records on this machine are re-surfaced (registration is OUT;
+   #1183 child 3). Windows
    machines get the same outcome from `bin/install-ai-devops-windows.ps1`, which
    registers the Task Scheduler job via the same `schedule` command. Only the
    machine named by `propagate_on_host` in `config/blocker-watch.json` posts
@@ -188,6 +189,12 @@ independent exact-head review must examine the full target source and the
 operation. The one-use authority records hashes of both launcher files and
 the installed gate source, which the installer checks again before refreshing
 the launcher receipt. This route refuses launchers that already have a receipt.
+Ask for an operation's approval line with `ai-review <provider> final-check
+--operation <name>` (`legacy-managed-launcher-refresh`,
+`first-managed-install`, or `partial-managed-launcher-recovery`); the reviewer
+request then names the exact `Approved <name>.` line, and the report records
+the operation. Stale-manifest recovery is not accepted there, because its
+approval must also bind host-specific hashes.
 
 The route accepts only the supported `popcre/ai-devops` and redirected
 `u2giants/ai-devops` GitHub origins. It compares the full release range,

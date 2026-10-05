@@ -9,6 +9,7 @@ bin/ai-muse*
 bin/ai-process-supervisor*
 bin/ai-provider-version*
 bin/ai-review*
+bin/ai-deepseek*
 bin/windows-private-file.ps1
 config/ci-suite-manifest.json
 config/ci-suites/**
@@ -26,6 +27,7 @@ skills/shared/ask-glm/**
 skills/shared/grok-cli/**
 templates/delegation/debate-turn.md
 tests/lib-test-harness.sh
+tests/lib-test-part.sh
 tests/lib-test-timing.sh
 tests/grok-auth-link-cases.sh
 tests/test-all.ps1
@@ -53,6 +55,7 @@ bin/setup-opencode-muse.sh
 config/muse-code/**
 config/opencode/**
 config/opencode-muse/**
+config/opencode-deepseek/**
 config/opencode-stepfun/**
 config/systemd/opencode-*
 tests/fixtures/**
@@ -62,6 +65,7 @@ tools/ci/stop-process-tree.ps1
 tools/lib/provider-wrapper-common.sh
 tools/lib/review-lifecycle-core.sh
 tools/lib/review-doors/*
+tools/lib/review-operation.sh
 tools/lib/task-gates.sh
 tools/reviewer_admission.py
 tools/reviewer_event_guard.sh

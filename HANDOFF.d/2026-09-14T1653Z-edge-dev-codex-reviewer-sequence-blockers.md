@@ -294,7 +294,7 @@ Qwen stale-base incident20260910T081507Z-edge-dev-qwen-1166 remains #393.
    `bash tests/test-workflow-policy.sh` through Git Bash; renew exact-head review
    on the rebased head, identifying any conflict/content changes. Gate: full discovery union,
    focused tests and exact reviewed content remain valid.
-3. Push/open the code PR, use `bin/ai-pr-wait <pr>` for bounded CI, ship through
+3. Push/open the code PR, use `bin/ai-pr-wait <pr> --timeout-minutes N` for bounded CI, ship through
    the queue and verify origin/main. Start the changed-head full drift run through
    `bin/ai-verify-run start` with this task and explicit purpose, following its
    help/schema; never use an unchanged rerun. Gate: all five hosted complete

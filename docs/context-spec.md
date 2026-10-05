@@ -109,6 +109,16 @@ refuses to start on a private class unless that repository's own
 that class. Opening the route is therefore each private repository's own
 reviewed decision, made once in its own policy file rather than per review.
 
+A second, equally narrow exception is the central `reviewer_release` map
+(#1239). Today it names one entry: `database` for `private-tooling`, released
+by the gate `reviewed-private-data-writer`. When the effective class is
+`private-tooling` and the repository's own policy declares that gate, an
+owner-requested row write authored as writer code reaches the reviewer-approval
+step instead of the protected stop: it still needs an assigned AI reviewer's
+lifecycle-recorded `final-check` or `security-review` APPROVE of the exact head
+(`--reviewer-approval`). It never releases `private-evidence`, so one licensed
+row in the change set keeps the action sealed, and it opens no other action.
+
 `bin/ai-task-gates` records the declared class at the start of work and
 rechecks the complete change set before any expensive or risky action. The
 stronger of the declared and observed classes is the effective class whose

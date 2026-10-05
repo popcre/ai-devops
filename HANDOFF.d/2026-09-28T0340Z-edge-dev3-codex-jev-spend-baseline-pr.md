@@ -46,7 +46,7 @@ Albert asked a subagent to measure one existing paid model decision Jev could re
 
 1. Verify this handoff commit is pushed and read the PR's **new** `headRefOid`; send it and the eight-plus-one file diff to the coordinator for a fresh merge decision. You'll know it worked when the coordinator explicitly approves that exact SHA and the PR diff contains no other task-owned changes.
 2. Recheck required CI for that exact head through `bin/ai-gh`. Inspect any failure's exact job log and stop for a new decision if a check fails or the head moves. You'll know it worked when every required check is SUCCESS or an expected SKIPPED result at the approved head.
-3. Run `ai-task-gates check --before ship`; merge through GitHub's protected-branch/merge-queue route using `bin/ai-gh`, then wait with `bin/ai-pr-wait 904 --repo popcre/ai-devops` within its bounded deadline. You'll know it worked when PR #904 reports MERGED and the merge queue's required checks pass. Register `ai-blocker-watch wait` before ending a turn on a wait that may exceed ten minutes; use the existing issue #643 as owner and a fresh brief.
+3. Run `ai-task-gates check --before ship`; merge through GitHub's protected-branch/merge-queue route using `bin/ai-gh`, then wait with `bin/ai-pr-wait 904 --timeout-minutes N --repo popcre/ai-devops` within its bounded deadline. You'll know it worked when PR #904 reports MERGED and the merge queue's required checks pass. Registration is OUT (#1183 child 3): leave the issue/PR as the card instead.
 4. Fetch `origin/main`, verify the merged change and no-go record are present, and post a concise signed no-go outcome on issue #643 using `bin/ai-gh`. Do not close #643: it owns the separate advisory Jev pilot. You'll know it worked when the intended commit is on `origin/main` and the issue comment links the merged PR and says no runtime integration was added.
 5. Retire **this** handoff only when the PR, issue comment, and merged-main proof are complete. Git history preserves it. You'll know it worked when no open Jev spend-reduction handoff remains and the plan STATUS still has no open row.
 
@@ -66,3 +66,8 @@ Use `AGENTS.md` and the repository task router. GitHub calls go through `bin/ai-
 The only live uncertainty is whether required CI passes the **new** exact head and whether the coordinator renews merge approval. A fresh upstream commit may appear; reconcile only if necessary and get another exact-head decision if it changes the PR. The main substantive conclusion is settled no-go by the plan's locked rule; future newly instrumented callers require a new baseline, not an unsupported continuation of this one. No shared-db change or handover occurred.
 
 **Self-audit:** (1) A newcomer can continue from §§1–3, 6–8 with repo, PR, head, tests, commands, and gates stated. (2) §§2, 4–5 preserve purpose and failed approaches. (3) §§0–9 cover background, current state, evidence, constraints, risks, and verification. (4) The §0 sweep found no Albert decision; its only approval item is the coordinator's new exact-head merge decision, also stated in §§3, 6–7, and 9. All ten required sections are present; no raw private content or secret value is included.
+
+
+---
+
+**Correction (2026-10-02, #1183 child 3):** BlockerWatch registration is OUT. Do not `ai-blocker-watch wait`. Use bounded `bin/ai-pr-wait <pr> --timeout-minutes N` while in-turn; otherwise leave the issue/PR as the card. Posted by MiMo chat ses_ffe5f0c8401dffeRM9Gymq5wr on edge-dev
