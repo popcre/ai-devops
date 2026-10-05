@@ -47,15 +47,14 @@ function Get-PrivatePath([string]$Key) {
 }
 
 # --- prerequisites ----------------------------------------------------------
-Step 'Prerequisites (jq, gh auth, op)'
+Step 'Prerequisites (jq, op)'
 if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
   winget install --id jqlang.jq -e --scope machine --accept-package-agreements --accept-source-agreements | Out-Host
   $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
 }
-gh auth status *> $null
-if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI is not signed in; run: gh auth login' }
+# GitHub sign-in is checked (and prompted) by bin/ai-private-config.
 if (-not (Get-Command op -ErrorAction SilentlyContinue)) { throw '1Password CLI (op) is required.' }
-Ok 'jq, gh and op available'
+Ok 'jq and op available'
 
 # --- 1Password: process-scoped token only -----------------------------------
 Step '1Password service account (this process only)'
