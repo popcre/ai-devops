@@ -46,6 +46,9 @@ printf 'hub fact\n' > "$FIXTURE/memory/sample/hub.md"
     printf '%s\r\n' '## Local entries preserved during migration'
     printf '\r\n'
   done
+  # A title whose only "body" is a CR blank line is still empty.
+  printf '%s\r\n' '## Recovered union entries'
+  printf '\r\n'
   printf '%s\r\n' '## Recovered union entries'
   printf '\r\n'
 } > "$LOCAL/projects/C--repos-sample/memory/MEMORY.md"
