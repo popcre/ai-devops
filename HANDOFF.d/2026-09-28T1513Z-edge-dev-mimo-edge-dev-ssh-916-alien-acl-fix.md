@@ -24,7 +24,7 @@ owner: mimo/edge-dev-ssh-916-alien-acl-fix
 
 **Not part of this workstream and nobody on it**
 
-- **Broad Windows firewall rule `OpenSSH-Server-In-TCP` is still enabled (Any/Any)** beside the Tailscale-only rule. Repo docs (`docs/windows-openssh-tailscale.md`) say the broad rule should stay disabled. Recommend: a Windows host-maintenance session disable it and keep only `OpenSSH Server - Tailscale only` (LocalAddress `edge-dev-tailscale`, RemoteAddress `100.64.0.0/10`). Not fixed here under wrap-up scope freeze.
+- **Broad Windows firewall rule `OpenSSH-Server-In-TCP` is still enabled (Any/Any)** beside the Tailscale-only rule. Repo docs (`docs/windows-openssh-tailscale.md`) say the broad rule should stay disabled. Recommend: a Windows host-maintenance session disable it and keep only `OpenSSH Server - Tailscale only` (LocalAddress `edge-dev-tailscale`, RemoteAddress `[private-addr]/10`). Not fixed here under wrap-up scope freeze.
 - **`popcre/shared-db` orchestrator-marker #3653** is OPEN and owned by the edge-dev3 claude route (successor of 3570). This session did not hold it and must not claim it. Non-orchestrator issue **#3662** (Supabase MCP Windows live proof) is already CLOSED; the proof was done on edge-dev itself.
 
 **Instruction to the next session:** put the whole of section 0 to the owner in ONE message before starting work.
@@ -118,7 +118,7 @@ Related issue (already closed before we finished): [popcre/shared-db #3662](http
 - **Concurrent checkout (C:\repos\ai-devops):** do not touch `scripts/ai-housekeeping/move-bulk-to-d.ps1` (modified by another session) or `HANDOFF.d/2026-09-20T0029Z-edge-dev-kimi-grok-trap-exit-status.md` (another session's handoff). Stage only this file if you commit it.
 - **Do not rewrite root `HANDOFF.md`** (already the v1 pointer).
 - **Wrap-up scope freeze was in force** at the end of this session: no new issues, no firewall repair, no "while we're here" cleanups. Those live in §0/§6.
-- **This repository is public.** Never commit transcripts, concrete private host addresses (use the host alias placeholders above), or private key material. Only the documented Tailscale `100.64.0.0/10` range notation is allowed. 916-alien **public** key is already published in-repo; the private key stays in 1Password / `~/.ssh/916-alien` with tight ACLs.
+- **This repository is public.** Never commit transcripts, concrete private host addresses (use the host alias placeholders above), or private key material. Only the documented Tailscale `[private-addr]/10` range notation is allowed. 916-alien **public** key is already published in-repo; the private key stays in 1Password / `~/.ssh/916-alien` with tight ACLs.
 - **Times in human notes are EST (America/New_York).** Filenames may stay UTC.
 
 ## 8. Access and environment
