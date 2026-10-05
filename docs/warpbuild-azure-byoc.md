@@ -18,7 +18,8 @@ account identifiers in this public repository. Resolve live values with `az` and
 | Runner sets | `warp-custom-win2022-canary` / `warp-custom-warpbuild-win2022-canary` (eastus); `warp-custom-win2022-use2` / `warp-custom-warpbuild-win2022-use2` (eastus2); `warp-custom-win2022-cus` / `warp-custom-warpbuild-win2022-cus` (centralus). On-demand, image `windows-server-2022`, arch x64 |
 | Instance types (cheapest first) | `Standard_D4as_v4`, `Standard_D4s_v4`, `Standard_D4ds_v4` on every runner — fallback list, not a sum |
 | Canary workflow | `.github/workflows/warpbuild-win2022-canary.yml` — manual `workflow_dispatch` only, non-required |
-| Canary proof | Green 2026-09-30 on eastus: [run 36731941680 job 109943590499](https://github.com/popcre/ai-devops/actions/runs/36731941680/job/109943590499). Windows NT 10.0.20348, X64, git/pwsh/node/bash present; VM and OS disk deleted after the job |
+| Canary proof | Green 2026-09-30 and 2026-10-05 on eastus only: [run 36731941680 job 109943590499](https://github.com/popcre/ai-devops/actions/runs/36731941680/job/109943590499). Windows NT 10.0.20348, X64, git/pwsh/node/bash present; VM and OS disk deleted after the job |
+| Multi-region canary | use2/cus **blocked** (2026-10-05): WarpBuild gallery image not in those regions (`GalleryImageNotFound`). Jobs queue forever; VM create loops and fails. |
 | Required CI | **Still Blacksmith** (`blacksmith-4vcpu-windows-2025`). Cut-over PR `mimo/warpbuild-required-cutover` / #1220 is **not merged**; latest checks failed broadly (see below). |
 | Owner rule (2026-10-01) | **Blacksmith stays in the pool until WarpBuild is fully up.** Use Blacksmith for runs that would otherwise get stuck. Do not turn Blacksmith off. Do not stop WarpBuild bring-up. |
 | Owner rule (2026-10-02) | **No West Europe.** US regions only (eastus / eastus2 / centralus). |
@@ -43,8 +44,13 @@ do not pass signed URLs through `cmd.exe`.
   `Standard DDSv4`). Plan 4-vCPU boxes against each family's vCPU limit. One
   family in one region will not yield 24+ vCPUs on the default quota.
 - US regions only: eastus, eastus2, centralus. **No West Europe** (owner
-  2026-10-02). Vendor docs once said Azure BYOC was East US only; East US 2
-  and Central US stacks were created successfully via the API in 2026-10.
+  2026-10-02).
+- **Windows image is East US only (hard blocker, 2026-10-05).** WarpBuild
+  community gallery `win-2022-x64-core` / `2026.09.2901` is not replicated to
+  eastus2 or centralus. VM create fails with `GalleryImageNotFound`. Stacks can
+  be created and stay `active`, but jobs never get a runner outside eastus
+  until WarpBuild replicates the image (contact support@warpbuild.com). East US
+  canary is the only proven region.
 
 ### 1. Create a stack (new region)
 
@@ -124,6 +130,7 @@ a reviewed cut-over.
 | Expected one family in one region to cover 24+ vCPUs | Quota is per family per region | Split across DASv4 / DSv4 / DDSv4 and regions; cheapest first |
 | Created a region we did not want | Extra spend / latency | US only: eastus, eastus2, centralus. **No West Europe** |
 | Queued job while runner looked online | Public repo + runner group | Set `allows_public_repositories` on the group |
+| Assumed a new stack would run Windows jobs | VM create fails `GalleryImageNotFound` outside eastus | WarpBuild `win-2022-x64-core` image is eastus-only until they replicate it |
 
 ## Public-repo runner group (hard requirement)
 
