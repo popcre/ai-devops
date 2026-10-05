@@ -926,12 +926,13 @@ provider_cli_binary() { # PROVIDER
 # later auto-update stays usable under the floor policy without re-running this
 # lane. Full live qualification (qualify gemini|qwen) remains the path for
 # behaviour changes; this lane is the cheap one for a pin bump.
-pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN
-  local provider="$1" old_pin="$2" new_pin="$3"
+pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN [ALLOW_FIRST]
+  local provider="$1" old_pin="$2" new_pin="$3" allow_first="${4:-0}"
   local wrapper cli_bin cli_sha before_sha after_sha after_cli_sha file
   local policy_bin cli_version_text cli_version prior_raw prior_versions now
   local out rc mode want class clear_stale_pin_mismatch clear_stale_pin_record clear_rc switched_as switched_bin
   local fingerprint_before fingerprint_after prior_wrappers prior_pin _fp_rest
+  local policy_path cur_entry prev_entry proof prior_mode prior_cmd prior_model policy_cmd policy_model
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$provider" in
     gemini|qwen)
@@ -941,7 +942,6 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN
   policy_bin="${AI_PROVIDER_VERSION_BIN:-$REGISTRY_REAL_DIR/ai-provider-version}"
   [ -x "$policy_bin" ] || die "ai-provider-version is not executable: $policy_bin"
   wrapper="$(provider_wrapper "$provider")"; [ -x "$wrapper" ] || die "provider wrapper is not executable: $wrapper"
-  cli_bin="$(provider_cli_binary "$provider")" || die "could not resolve the $provider CLI binary to hash (is its command on PATH?)."
 
   # The cheap lane may bless a PIN BUMP and nothing else. The caller asserts
   # old -> new; the policy file must agree with the new pin, and the whole
@@ -951,23 +951,79 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN
   # policy change, not a pin bump: refuse it.
   fingerprint_before="$("$policy_bin" fingerprint "$provider")" || die "could not read the $provider policy fingerprint."
   mode="${fingerprint_before%%:*}"; _fp_rest="${fingerprint_before#*:}"; want="${_fp_rest%%:*}"
+  policy_cmd="$("$policy_bin" command "$provider" 2>/dev/null || true)"
+  policy_model="$("$policy_bin" model "$provider" 2>/dev/null || true)"
   [ -n "$want" ] || die "$provider has no version pin in config/provider-cli-versions.json; pin-bump-qualify is only for a pin bump."
   [ -n "$old_pin" ] && [ -n "$new_pin" ] || die 'pin-bump-qualify requires the expected old and new pin (--assert-pin-only); the cheap lane is for a pin bump only, so prove it or take the full qualification path.'
   [ "$old_pin" != "$new_pin" ] || die "assert-pin-only: old and new pin are identical ('$old_pin'); that is not a pin bump."
   [ "$want" = "$new_pin" ] \
     || die "$provider policy fingerprint is '$fingerprint_before' but --assert-pin-only claims the new pin is '$new_pin'; the assertion and the policy file disagree."
 
-  # The asserted old pin is only proof if it is the pin this provider was
-  # actually last qualified under. Nothing to compare against means nothing to
-  # bump: a first qualification is NOT a pin bump and must take the full path.
+  # PIN-ONLY PROOF. Two independent proofs of the same fact exist, and either
+  # one is enough because either one rules out a behaviour change riding the
+  # cheap lane:
+  #
+  #   (a) GIT: the policy entry committed at HEAD differs from the current one
+  #       ONLY in supported_version (exactly old -> new) — version_match,
+  #       command, and model_pin are unchanged — and the provider wrapper is
+  #       unchanged in this change. This is also the BOOTSTRAP path: a first
+  #       qualification of an unmodified installed wrapper is a pin bump.
+  #   (b) RECORD: this provider was already qualified under exactly old_pin,
+  #       with the same non-pin policy fields, on exactly these wrapper bytes.
+  #
+  # The proof has to survive a COMMITTED wrapper edit too, which is why (a)
+  # compares against the committed policy entry and refuses when the wrapper
+  # moved, and why (b) refuses when the wrapper hash is unknown. With neither
+  # proof available there is nothing to bump: refuse.
+  policy_path="$("$policy_bin" policy-file 2>/dev/null | tr -d '\r\n')" || policy_path=""
+  cur_entry=""
+  [ -z "$policy_path" ] || cur_entry="$(jq -c --arg p "$provider" '.providers[$p] // empty' "$policy_path" 2>/dev/null)" || cur_entry=""
+  prev_entry=""; proof=""; prior_versions="[]"
+  if [ -n "$cur_entry" ] && proot="$(git -C "$(dirname "$policy_path")" rev-parse --show-toplevel 2>/dev/null)"; then
+    prel="${policy_path#"$proot"/}"
+    prev_entry="$(git -C "$proot" show "HEAD:$prel" 2>/dev/null | jq -c --arg p "$provider" '.providers[$p] // empty' 2>/dev/null)" || prev_entry=""
+  fi
+  if [ -n "$prev_entry" ] && [ "$prev_entry" != "null" ]; then
+    [ "$(printf '%s' "$prev_entry" | jq -r '.supported_version // ""')" = "$old_pin" ] \
+      || die "$provider committed policy pin is '$(printf '%s' "$prev_entry" | jq -r '.supported_version // ""')' but --assert-pin-only claims the old pin is '$old_pin'; run this against the uncommitted pin bump, or name the pin that is actually committed."
+    [ "$(printf '%s' "$cur_entry" | jq -r '.supported_version // ""')" = "$new_pin" ] \
+      || die "$provider current policy pin does not match --assert-pin-only's new pin '$new_pin'."
+    [ "$(jq -nc --argjson a "$prev_entry" --argjson b "$cur_entry" \
+        '($a.version_match // "exact") == ($b.version_match // "exact")
+         and ($a.command // "") == ($b.command // "")
+         and (($a.model_pin // "") == ($b.model_pin // ""))')" = "true" ] \
+      || die "$provider version_match, command, or model_pin also changed in this policy edit; that is a policy change, not a pin bump — take the full qualification path."
+    proof="git"
+  fi
   prior_versions="$(qualification_versions "$provider")"
-  [ "$prior_versions" != "[]" ] && [ -n "$prior_versions" ] \
-    || die "$provider has no qualification record; the cheap lane only bumps the pin of a provider that is already qualified, so take the full qualification path instead."
-  prior_pin="$(printf '%s' "$prior_versions" | jq -r '.[-1].policy_version // ""')"
-  [ -n "$prior_pin" ] && [ "$prior_pin" != "null" ] \
-    || die "$provider qualification record names no prior pin; cannot prove this is a pin bump."
-  [ "$old_pin" = "$prior_pin" ] \
-    || die "assert-pin-only old pin '$old_pin' does not match the real prior pin '$prior_pin' this provider was last qualified under; name the real prior pin."
+  if [ "$proof" != git ] && [ "$prior_versions" != "[]" ] && [ -n "$prior_versions" ]; then
+    prior_pin="$(printf '%s' "$prior_versions" | jq -r '.[-1].policy_version // ""')"
+    [ -n "$prior_pin" ] && [ "$prior_pin" != "null" ] \
+      || die "$provider qualification record names no prior pin; cannot prove this is a pin bump."
+    [ "$old_pin" = "$prior_pin" ] \
+      || die "assert-pin-only old pin '$old_pin' does not match the real prior pin '$prior_pin' this provider was last qualified under; name the real prior pin."
+    prior_mode="$(printf '%s' "$prior_versions" | jq -r '.[-1].policy_mode // ""')"
+    [ "$prior_mode" = "$mode" ] \
+      || die "$provider version_match changed since the last qualification ($prior_mode -> $mode); that is a policy change, not a pin bump."
+    prior_cmd="$(printf '%s' "$prior_versions" | jq -r '.[-1].policy_command // ""')"
+    if [ -n "$prior_cmd" ] && [ "$prior_cmd" != "null" ]; then
+      [ "$prior_cmd" = "$(printf '%s' "$cur_entry" | jq -r '.command // ""')" ] \
+        || die "$provider command name changed since the last qualification; that is a policy change, not a pin bump."
+    fi
+    prior_model="$(printf '%s' "$prior_versions" | jq -r '.[-1].policy_model // ""')"
+    if [ -n "$prior_model" ] && [ "$prior_model" != "null" ]; then
+      [ "$prior_model" = "$(printf '%s' "$cur_entry" | jq -r '.model_pin // ""')" ] \
+        || die "$provider model lock changed since the last qualification; that is a policy change, not a pin bump."
+    fi
+    proof="record"
+  fi
+  [ -n "$proof" ] || [ "${allow_first:-0}" = 1 ] \
+    || die "$provider cannot be proven pin-only: no committed policy entry to diff and no qualification record to compare. Take the full qualification path, or pass --allow-first-qualification for a first qualification."
+  [ -n "$proof" ] || proof="first-qualification"
+
+  # Only now is it worth resolving the installed CLI: the pin-only proof is a
+  # cheap refusal and must fire before any binary is hashed or run.
+  cli_bin="$(provider_cli_binary "$provider")" || die "could not resolve the $provider CLI binary to hash (is its command on PATH?)."
 
   # Auto-restore. This command runs because the pin is being updated in this
   # change, so a pin-mismatch quarantine recorded against the OLD pin is stale.
@@ -993,13 +1049,27 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN
   cli_version="$("$policy_bin" parse "$cli_version_text")"
 
   # The cheap lane may only bless bytes that are already known. A behaviour
-  # change to the provider wrapper must take the full qualification path: the
-  # wrapper hash must be one this provider was already qualified on.
-  prior_wrappers="$(printf '%s' "$prior_versions" | jq -r '[.[].wrapper_sha256 // empty] | unique | join(",")')"
-  case ",$prior_wrappers," in
-    *",$before_sha,"*) : ;;
-    *) die "$provider wrapper changed since the last qualification (hash $before_sha is not in the recorded set); behaviour-changing wrapper edits must take the full qualification path, never the cheap pin-only lane." ;;
-  esac
+  # change to the provider wrapper must take the full qualification path. With
+  # qualification history the wrapper hash must be one that was already
+  # qualified; without history the wrapper at least must be unchanged in its
+  # own work tree (a committed wrapper edit is exactly what must not ride this
+  # lane). A first qualification outside any work tree is only allowed behind
+  # the explicit --allow-first-qualification attestation, and it still has to
+  # pass doctor and the live smoke below before any history is recorded.
+  if [ "$prior_versions" != "[]" ] && [ -n "$prior_versions" ]; then
+    prior_wrappers="$(printf '%s' "$prior_versions" | jq -r '[.[].wrapper_sha256 // empty] | unique | join(",")')"
+    case ",$prior_wrappers," in
+      *",$before_sha,"*) : ;;
+      *) die "$provider wrapper changed since the last qualification (hash $before_sha is not in the recorded set); behaviour-changing wrapper edits must take the full qualification path, never the cheap pin-only lane." ;;
+    esac
+  elif [ "$proof" != first-qualification ]; then
+    wdir="$(dirname "$wrapper")"
+    if wroot="$(git -C "$wdir" rev-parse --show-toplevel 2>/dev/null)"; then
+      wrel="${wrapper#"$wroot"/}"
+      [ -z "$(git -C "$wroot" status --porcelain -- "$wrel" 2>/dev/null)" ] \
+        || die "$provider wrapper $wrel has uncommitted edits and no qualification history; behaviour-changing wrapper edits must take the full qualification path, never the cheap pin-only lane."
+    fi
+  fi
 
   note "ai-review-preflight: pin-bump-qualify $provider: wrapper=$before_sha cli=$cli_sha version=${cli_version:-unreadable} policy=$mode:${want:-unpinned} pin=$old_pin->$new_pin"
 
@@ -1122,8 +1192,8 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN
   prior_versions="$(qualification_versions "$provider")"
   now="$(now_epoch)"
   publish_qualification_version "$provider" "$prior_versions" \
-    "$(jq -nc --arg sha "$after_sha" --arg cli "$after_cli_sha" --arg ver "$cli_version" --arg mode "$mode" --arg want "$want" --argjson at "$now" \
-        '{wrapper_sha256:$sha,cli_sha256:$cli,cli_version:$ver,policy_mode:$mode,policy_version:$want,qualified_epoch:$at}')" \
+    "$(jq -nc --arg sha "$after_sha" --arg cli "$after_cli_sha" --arg ver "$cli_version" --arg mode "$mode" --arg want "$want" --arg cmd "$policy_cmd" --arg model "$policy_model" --argjson at "$now" \
+        '{wrapper_sha256:$sha,cli_sha256:$cli,cli_version:$ver,policy_mode:$mode,policy_version:$want,policy_command:$cmd,policy_model:$model,qualified_epoch:$at}')" \
     || { restore_qualification_versions "$provider" "$prior_raw"; printf 'ai-review-preflight: %s pin-bump qualification did not publish; the previous record stays valid.\n' "$provider" >&2; return 1; }
   # Only now is it safe to drop a stale pin-mismatch quarantine: the new
   # qualification record is on disk. The clear is a compare-and-swap on the
@@ -1150,7 +1220,7 @@ Usage:
   ai-review-preflight quarantine <provider> <failure-class> [--seconds N]
   ai-review-preflight clear <provider>
   ai-review-preflight qualify gemini|qwen
-  ai-review-preflight pin-bump-qualify <provider> --assert-pin-only <old-pin> <new-pin>
+  ai-review-preflight pin-bump-qualify <provider> --assert-pin-only <old-pin> <new-pin> [--allow-first-qualification]
   ai-review-preflight requalify [provider]
   ai-review-preflight status [provider]
   ai-review-preflight usable [provider]
@@ -1202,19 +1272,22 @@ case "$cmd" in
     case "${1:-}" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; *) die 'usage: ai-review-preflight qualify gemini|qwen' ;; esac ;;
   pin-bump-qualify)
     provider="${1:-}"; shift || true
-    old_pin=""; new_pin=""; saw_assert=0
+    old_pin=""; new_pin=""; saw_assert=0; allow_first=0
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --assert-pin-only)
           [ "$#" -ge 3 ] || die 'usage: ai-review-preflight pin-bump-qualify <provider> --assert-pin-only <old-pin> <new-pin>'
           [ "$saw_assert" -eq 0 ] || die '--assert-pin-only may be supplied only once.'
           saw_assert=1; old_pin="$2"; new_pin="$3"; shift 3 ;;
+        --allow-first-qualification)
+          [ "$allow_first" -eq 0 ] || die '--allow-first-qualification may be supplied only once.'
+          allow_first=1; shift ;;
         *) die "unknown option '$1'." ;;
       esac
     done
     [ "$saw_assert" -eq 1 ] \
       || die 'usage: ai-review-preflight pin-bump-qualify <provider> --assert-pin-only <old-pin> <new-pin> — the cheap lane is for a pin bump only; prove it with the expected old and new pin, or take the full qualification path.'
-    pin_bump_qualify "$provider" "$old_pin" "$new_pin" ;;
+    pin_bump_qualify "$provider" "$old_pin" "$new_pin" "$allow_first" ;;
   requalify) requalify "$@" ;;
   status)
     provider="${1:-}"

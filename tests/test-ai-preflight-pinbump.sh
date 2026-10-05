@@ -191,14 +191,17 @@ chmod +x "$TMP/bin/fakegrok" "$TMP/bin/fakekimi" "$TMP/bin/pb-doctor"
 # time they see a provider, exactly as a previous full qualification would
 # have left it (same wrapper bytes, qualified under the OLD pin).
 PB_PIN_FROM="${PB_PIN_FROM:-1.0.0}"
-seed_qual() { # PROVIDER WRAPPER_PATH OLD_PIN
-  local prov="$1" wrapper="$2" old="$3" w c
+seed_qual() { # PROVIDER WRAPPER_PATH OLD_PIN POLICY_FILE
+  local prov="$1" wrapper="$2" old="$3" pfile="$4" w c smode scmd smodel
   w="$(sha256sum "$wrapper" | awk '{print $1}')"
   c="1111111111111111111111111111111111111111111111111111111111111111"
+  smode="$(jq -r --arg p "$prov" '.providers[$p].version_match // "exact"' "$pfile")"
+  scmd="$(jq -r --arg p "$prov" '.providers[$p].command // ""' "$pfile")"
+  smodel="$(jq -r --arg p "$prov" '.providers[$p].model_pin // ""' "$pfile")"
   mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
-  jq -nc --arg p "$prov" --arg w "$w" --arg c "$c" --arg v "$old" \
-    '{version:1,provider:$p,wrapper_sha256:$w,cli_sha256:$c,cli_version:"0.0.0",policy_mode:"minimum",policy_version:$v,qualified_epoch:1,
-      versions:[{wrapper_sha256:$w,cli_sha256:$c,cli_version:"0.0.0",policy_mode:"minimum",policy_version:$v,qualified_epoch:1}]}' \
+  jq -nc --arg p "$prov" --arg w "$w" --arg c "$c" --arg v "$old" --arg m "$smode" --arg cmd "$scmd" --arg model "$smodel" \
+    '{version:1,provider:$p,wrapper_sha256:$w,cli_sha256:$c,cli_version:"0.0.0",policy_mode:$m,policy_version:$v,policy_command:$cmd,policy_model:$model,qualified_epoch:1,
+      versions:[{wrapper_sha256:$w,cli_sha256:$c,cli_version:"0.0.0",policy_mode:$m,policy_version:$v,policy_command:$cmd,policy_model:$model,qualified_epoch:1}]}' \
     > "$AI_REVIEW_QUARANTINE_DIR/$prov-live-qualified.json"
 }
 # Test scaffolding: the helpers below stand in for "this provider was
@@ -207,12 +210,12 @@ seed_qual() { # PROVIDER WRAPPER_PATH OLD_PIN
 # legitimate prior qualification for the bytes it is about to run. The
 # wrapper-identity REFUSAL is exercised by an explicit test below, which plants
 # a record against different bytes on purpose.
-ensure_qual() { # PROVIDER WRAPPER_PATH OLD_PIN
-  local prov="$1" wrapper="$2" old="$3" rec w
+ensure_qual() { # PROVIDER WRAPPER_PATH OLD_PIN POLICY_FILE
+  local prov="$1" wrapper="$2" old="$3" pfile="$4" rec w
   rec="$AI_REVIEW_QUARANTINE_DIR/$prov-live-qualified.json"
-  [ -f "$rec" ] || { seed_qual "$prov" "$wrapper" "$old"; return 0; }
+  [ -f "$rec" ] || { seed_qual "$prov" "$wrapper" "$old" "$pfile"; return 0; }
   w="$(sha256sum "$wrapper" | awk '{print $1}')"
-  [ "$(jq -r '.wrapper_sha256 // ""' "$rec")" = "$w" ] || seed_qual "$prov" "$wrapper" "$old"
+  [ "$(jq -r '.wrapper_sha256 // ""' "$rec")" = "$w" ] || seed_qual "$prov" "$wrapper" "$old" "$pfile"
 }
 run_pb() {
   # pin-bump-qualify is a PIN-ONLY lane and refuses without proof. Inject the
@@ -224,7 +227,7 @@ run_pb() {
     shift 2
     pb_to="$(jq -r --arg p "$pb_prov" '.providers[$p].supported_version // ""' "$PB_POLICY")"
     pb_from="$PB_PIN_FROM"
-    ensure_qual "$pb_prov" "$TMP/bin/pb-doctor" "$pb_from"
+    ensure_qual "$pb_prov" "$TMP/bin/pb-doctor" "$pb_from" "$PB_POLICY"
     env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
         AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
         AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
@@ -294,7 +297,7 @@ fi
 echo unexpected; exit 1
 FEOF
 chmod +x "$TMP/bin/pb-doctor-pinaware"
-seed_qual grok "$TMP/bin/pb-doctor-pinaware" "$PB_PIN_FROM"
+seed_qual grok "$TMP/bin/pb-doctor-pinaware" "$PB_PIN_FROM" "$PB_POLICY"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor-pinaware" \
@@ -436,7 +439,7 @@ echo unexpected; exit 1
 FEOF
 chmod +x "$TMP/bin/pb-doctor-newq"
 # Bake ROOT into the stub environment via a wrapper export.
-seed_qual grok "$TMP/bin/pb-doctor-newq" "$PB_PIN_FROM"
+seed_qual grok "$TMP/bin/pb-doctor-newq" "$PB_PIN_FROM" "$PB_POLICY"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor-newq" \
@@ -471,7 +474,7 @@ if [ "\${1:-}" = doctor ]; then echo health ok; exit 0; fi
 echo unexpected; exit 1
 FEOF
 chmod +x "$TMP/bin/pb-doctor-newpinq"
-seed_qual grok "$TMP/bin/pb-doctor-newpinq" "$PB_PIN_FROM"
+seed_qual grok "$TMP/bin/pb-doctor-newpinq" "$PB_PIN_FROM" "$PB_POLICY"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor-newpinq" \
@@ -545,7 +548,7 @@ fi
 echo unexpected; exit 1
 FEOF
 chmod +x "$TMP/bin/pb-doctor-kimi-switch"
-seed_qual kimi "$TMP/bin/pb-doctor-kimi-switch" "$PB_PIN_FROM"
+seed_qual kimi "$TMP/bin/pb-doctor-kimi-switch" "$PB_PIN_FROM" "$PB_POLICY"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_KIMI_WRAPPER="$TMP/bin/pb-doctor-kimi-switch" \
@@ -580,7 +583,7 @@ exec bash -c "\$2"
 FEOF
 chmod +x "$TMP/bin/su"
 # The caller's binary satisfies the pin; only the borrowed-user binary does not.
-seed_qual kimi "$TMP/bin/pb-doctor-kimi-switch" "$PB_PIN_FROM"
+seed_qual kimi "$TMP/bin/pb-doctor-kimi-switch" "$PB_PIN_FROM" "$PB_POLICY"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_KIMI_WRAPPER="$TMP/bin/pb-doctor-kimi-switch" \
@@ -658,7 +661,7 @@ run_sf() {
   if [ "${1:-}" = pin-bump-qualify ]; then
     local sf_prov="${2:-}"; shift 2
     sf_to="$(jq -r --arg p "$sf_prov" '.providers[$p].supported_version // ""' "$SF_POLICY")"
-    ensure_qual "$sf_prov" "$TMP/bin/sf-doctor" "$PB_PIN_FROM"
+    ensure_qual "$sf_prov" "$TMP/bin/sf-doctor" "$PB_PIN_FROM" "$SF_POLICY"
     env AI_PROVIDER_VERSIONS_FILE="$SF_POLICY" \
         AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
         AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/sf-doctor" \
@@ -790,7 +793,7 @@ check "the refused wrapper change publishes no new qualification" \
 # 5. The SAME wrapper the provider was qualified on is accepted — the refusal
 #    above is about wrapper identity, not about having history at all.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
-seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM"
+seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM" "$PB_POLICY"
 PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
 [ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'PASS pin-bump-qualify provider=grok' \
   && ok "the already-qualified wrapper still qualifies on a pin bump" \
@@ -799,7 +802,7 @@ PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
 # 6. An INVENTED old pin is not proof: it must name the pin the provider was
 #    really last qualified under.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
-seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM"
+seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM" "$PB_POLICY"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
     AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
@@ -833,6 +836,50 @@ case "$fp_out" in
   *:*:*:*) ok "the policy fingerprint covers mode, pin, command, and model lock" ;;
   *) bad "the policy fingerprint covers mode, pin, command, and model lock (got: $fp_out)" ;;
 esac
+
+# 9. BOOTSTRAP: with no history at all, --allow-first-qualification still runs
+#    the doctor and the live smoke and records history, so a fresh machine can
+#    put a provider on the map without a separate full-qualification command.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.15 \
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only "$PB_PIN_FROM" "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" --allow-first-qualification 2>&1)"; PB_RC=$?
+[ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'PASS pin-bump-qualify provider=grok' \
+  && ok "a first qualification bootstraps with --allow-first-qualification" \
+  || { bad "a first qualification bootstraps with --allow-first-qualification"; printf '%s\n' "$PB_OUT"; }
+check "the bootstrap records history for later pin bumps" \
+  "jq -e '(.versions|length)>=1 and (.wrapper_sha256|test(\"^[0-9a-f]{64}\$\"))' '$TMP/state/grok-live-qualified.json'"
+
+# 10. The record carries command and model history, so a later policy edit to
+#     either is detectable and is not a pin bump.
+check "the qualification record carries command and model history" \
+  "jq -e '(.policy_command|type)==\"string\" and (.policy_command|length)>0 and (.policy_model|type)==\"string\"' '$TMP/state/grok-live-qualified.json'"
+
+# 11. A simultaneous change to version_match is refused: it is a policy change,
+#     not a pin bump. Rewrite the fixture's match mode under a record that
+#     qualified the OLD mode, then bump the pin.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM" "$PB_POLICY"
+jq '.providers.grok.version_match = "exact"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'policy change' \
+  && ok "a simultaneous version_match change is refused (not a pin bump)" \
+  || { bad "a simultaneous version_match change is refused (not a pin bump)"; printf '%s\n' "$PB_OUT"; }
+jq '.providers.grok.version_match = "minimum"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+
+# 12. A simultaneous change to the command name is refused for the same reason.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM" "$PB_POLICY"
+jq '.providers.grok.command = "grok2"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'policy change' \
+  && ok "a simultaneous command rename is refused (not a pin bump)" \
+  || { bad "a simultaneous command rename is refused (not a pin bump)"; printf '%s\n' "$PB_OUT"; }
+jq '.providers.grok.command = "fakegrok"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
 
 # Execute-bit cases. NTFS/Git Bash synthesises the execute bit for every
 # regular file (chmod -x is a no-op), so a non-executable candidate cannot be
