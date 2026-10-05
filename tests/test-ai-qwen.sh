@@ -523,9 +523,12 @@ check 'Qwen preloader removes itself from NODE_OPTIONS so a sandboxed child neve
 # more than one --require, so spell both that way here.
 printf 'module.exports={};\n' > "$TMP/host-only-helper.js"
 printf 'module.exports={};\n' > "$TMP/other.js"
-PRELOAD_WIN="$(cd "$(dirname "$REPO_ROOT/tools/qwen-provider-env-preload.cjs")" && pwd -W)/qwen-provider-env-preload.cjs"
-HELPER_WIN="$(cd "$TMP" && pwd -W)/host-only-helper.js"
-OTHER_WIN="$(cd "$TMP" && pwd -W)/other.js"
+# Windows Node resolves only Windows-style paths in multi-require NODE_OPTIONS;
+# Git Bash's pwd -W is rejected by Linux Bash, so fall back to POSIX there.
+win_path(){ (cd "$1" && { pwd -W 2>/dev/null || pwd; }); }
+PRELOAD_WIN="$(win_path "$(dirname "$REPO_ROOT/tools/qwen-provider-env-preload.cjs")")/qwen-provider-env-preload.cjs"
+HELPER_WIN="$(win_path "$TMP")/host-only-helper.js"
+OTHER_WIN="$(win_path "$TMP")/other.js"
 printf 'preload-test-secret\n' > "$TMP/preload-extra-secret"; chmod 600 "$TMP/preload-extra-secret"
 PRELOAD_EXTRA="$(env -u SANDBOX_FLAGS AI_QWEN_SECRET_FILE="$TMP/preload-extra-secret" NODE_OPTIONS="--require=$HELPER_WIN --require=$PRELOAD_WIN --max-old-space-size=256" node -e 'process.stdout.write(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS||"absent"}))')"
 check 'Qwen preloader strips every --require from NODE_OPTIONS, not only its own' "printf '%s' '$PRELOAD_EXTRA' | jq -e '.nodeOptions==\"--max-old-space-size=256\"'"
