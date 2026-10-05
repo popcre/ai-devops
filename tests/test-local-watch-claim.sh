@@ -107,6 +107,16 @@ EOF
 run claim 2>/dev/null; rc=$?
 check 'an expired lease can be stolen (exit 0)' "[ $rc -eq 0 ] && grep -q 'leader=edge-dev' '$TMP/state/body'"
 
+# Unparsable lease must expire (never stall duty)
+cat > "$TMP/state/body" <<'EOF'
+<!-- local-watch-claim -->
+leader=edge-dev3
+lease_until=not-a-date
+renewed_at=2026-10-02T10:45:00Z
+EOF
+run claim 2>/dev/null; rc=$?
+check 'an unparsable lease is treated as expired' "[ $rc -eq 0 ] && grep -q 'leader=edge-dev' '$TMP/state/body'"
+
 # API failure must not look like leadership
 rm -f "$TMP/state/body"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/bin/ai-gh"
@@ -203,6 +213,9 @@ EOF
 run tick-all 2>/dev/null; rc=$?
 check 'tick-all as leader succeeds and logs duty' "[ $rc -eq 0 ] && grep -q 'duty: leader=edge-dev' '$TMP/home/tick.log'"
 check 'tick-all runs the duty tool tick' "grep -q 'tool demo exit 0' '$TMP/home/tick.log' && grep -q 'demo-tick-ok' '$TMP/home/tick.log'"
+# Second immediate tick-all must skip a 2-minute-cadence tool
+run tick-all 2>/dev/null; rc=$?
+check 'tick-all skips a tool still inside its cadence' "grep -q 'tool demo skipped (cadence 2m)' '$TMP/home/tick.log'"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

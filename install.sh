@@ -318,7 +318,7 @@ restore_install_crontab() {
       index($0,"# ai-devops ai-local-watch (managed by ai-local-watch schedule") == 0 &&
       index($0,"\047" bw "\047 tick") == 0 &&
       index($0,"\047" reap "\047 run") == 0 &&
-      index($0,"\047" lw "\047 tick-all") == 0 { print }
+      index($0,"\047" lw "\047") == 0 { print }
     '
   }
   if $SUDO test -f "$BACKUP_DIR/crontab"; then

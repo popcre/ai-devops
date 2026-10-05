@@ -32,7 +32,9 @@ jobs:
           # Listing self-hosted runners requires repository *administration*
           # rights, which the built-in GITHUB_TOKEN cannot be granted. The
           # fine-grained RUNNER_POOL_READ_TOKEN (Administration: Read-only)
-          # is the existing credential. Never log the token.
+          # is the existing credential. The tool reads RUNNER_POOL_READ_TOKEN;
+          # GH_TOKEN is kept for ai-gh passthrough. Never log either token.
+          RUNNER_POOL_READ_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
           GH_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
         run: |
           set -euo pipefail

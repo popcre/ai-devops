@@ -112,8 +112,13 @@ renewed_at=$renewed
 lease_expired(){
   local lease="$1" now
   now="$(now_iso)"
-  # expired when lease_until is empty, unparsable, or <= now
+  # Missing or unparsable lease is expired (recoverable) — never "fresh forever".
   [ -z "$lease" ] && return 0
+  case "$lease" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) return 0 ;;
+  esac
+  # expired when lease_until <= now (both UTC ISO; lexicographic is correct)
   [ "$(printf '%s\n%s\n' "$lease" "$now" | sort | head -1)" = "$lease" ]
 }
 
@@ -193,7 +198,7 @@ cmd_tick_all(){
     return 0
   fi
   take_lock "$HOME_DIR/tick.lock" "$(cfg .lock_stale_minutes)"
-  rotate_log "$LOG" "$(cfg .log_max_bytes)"
+  rotate_log "$LOG" "$(cfg .log_max_bytes 2>/dev/null || echo 5000000)"
   local rc=0
   claim_now || rc=$?
   if [ "$rc" -eq 3 ]; then
@@ -207,11 +212,23 @@ cmd_tick_all(){
     return 1
   fi
   printf '%s duty: leader=%s\n' "$(stamp)" "$(this_host)" >> "$LOG"
-  local name cmd tool_rc tool_bin
-  while IFS=$'\t' read -r name cmd; do
+  local name cmd tool_rc tool_bin tick_min last_file last_epoch now_epoch due
+  now_epoch="$(date -u +%s)"
+  while IFS=$'\t' read -r name cmd tick_min; do
     [ -n "$name" ] || continue
     cmd="${cmd//$'\r'/}"
     name="${name//$'\r'/}"
+    tick_min="${tick_min//$'\r'/}"
+    [ -n "$tick_min" ] || tick_min=2
+    # Honor per-tool cadence: skip when the tool ran within tick_minutes.
+    last_file="$HOME_DIR/.last-$name"
+    last_epoch=0
+    [ -f "$last_file" ] && last_epoch="$(cat "$last_file" 2>/dev/null || echo 0)"
+    due=$(( now_epoch - last_epoch >= tick_min * 60 ))
+    if [ "$due" -eq 0 ]; then
+      printf '%s tool %s skipped (cadence %sm)\n' "$(stamp)" "$name" "$tick_min" >> "$LOG"
+      continue
+    fi
     tool_bin=""
     if [ -x "$cmd" ]; then
       tool_bin="$cmd"
@@ -224,11 +241,12 @@ cmd_tick_all(){
       tool_rc=0
       "$tool_bin" tick >> "$LOG" 2>&1 || tool_rc=$?
       printf '%s tool %s exit %s\n' "$(stamp)" "$name" "$tool_rc" >> "$LOG"
+      date -u +%s > "$last_file"
       [ "$tool_rc" -eq 0 ] || [ "$tool_rc" -eq 3 ] || rc=$tool_rc
     else
       printf '%s tool %s missing (%s)\n' "$(stamp)" "$name" "$cmd" >> "$LOG"
     fi
-  done < <(jq -r '.tools | to_entries[] | [.key, .value.command] | @tsv' "$CONFIG")
+  done < <(jq -r '.tools | to_entries[] | [.key, .value.command, (.value.tick_minutes // 2)] | @tsv' "$CONFIG")
   unlock
   return "$rc"
 }
