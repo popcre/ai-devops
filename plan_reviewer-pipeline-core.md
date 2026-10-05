@@ -11,24 +11,27 @@
 | Step | Status | Last updated | Evidence / next gate |
 |---|---|---|---|
 | 0. Confirm fleet membership and out-of-scope list | ✅ done | 2026-09-29 | §4, §8; owner-corrected fleet Muse/Grok/Qwen/StepFun/DeepSeek/Gemini |
-| 1. Phase A — evidence retention (safe first PR) | ✅ done | 2026-10-02 | PR #1135 merged `fd857196`; store-before-delete + re-bind + lifecycle packet args; tests packet/sandbox/lifecycle; leftover proof #1163 |
-| 2. Phase B — requalification versioning (Gemini/Qwen) | ✅ done | 2026-10-02 | PR #1201 merged `544207c8`; versioned last-good records; tests/test-ai-review-preflight.sh; leftover proof #1204 |
+| 1. Phase A — evidence retention (safe first PR) | ✅ done | 2026-10-05 | PR #1135 merged `fd857196`; store-before-delete + re-bind + lifecycle packet args; leftover proof #1163 **closed** live `20261005T164800-501907-21834` (`packet_sha256=375d493f…`) |
+| 2. Phase B — requalification versioning (Gemini/Qwen) | ✅ done | 2026-10-05 | PR #1201 merged `544207c8`; versioned last-good records; leftover proof #1204 **closed** three gates live (failed canary kept last good; success published new version) |
 | 3. Phase C — failure-class split (outage vs code) | ✅ done | 2026-10-02 | PR #1218 merged `44a7e446`; tools/reviewer_admission.py + bin/ai-reviewer-issue; bare 403/404 stay code |
-| 4. Phase D — runner + adapters (forcing function) | 🟡 code landed | 2026-10-02 | PR #1209 merged (runner + Grok native door + forcing function). PR #1225 DeepSeek OpenCode door APPROVE at `4d64b36e`/f79b02a2, final CI. Leftover proof #1257. |
-| 5. Phase E — retire copies + metrics proof | ⬜ open | 2026-10-02 | §9 Phase E; measure before/after (needs clean window after D) |
+| 4. Phase D — runner + adapters (forcing function) | ✅ done | 2026-10-05 | PR #1209 + #1225 merged; leftover proof #1257 **closed** live `20261005T014515-151480-20815` |
+| 5. Phase E — retire copies + metrics proof | ⬜ waiting on clean window | 2026-10-05 | Window measured **NOT MET** 2026-10-05T17:19Z: 5.6/14 days since #1135 `a5bc30be` (target 2026-10-14); only 20 non-null `packet_sha256` runs (need 50 with zero missing-packet). Artifact: `~/.local/state/ai-devops/review-lifecycle/phase-e-window-20261005.txt`. Do **not** retire helpers early; when met, dispatch metrics subagent then a separate reviewer-safety PR. |
 
 **GitHub issues (parent + children):**
 | Issue | Step |
 |---|---|
-| [#1110](https://github.com/popcre/ai-devops/issues/1110) | Parent — stop 24-48h reviewer breakage |
+| [#1110](https://github.com/popcre/ai-devops/issues/1110) | Parent — **closed** 2026-10-05 (children + leftover proofs done; Phase E waiting on window) |
 | [#1111](https://github.com/popcre/ai-devops/issues/1111) | Keep full review evidence (Phase A) |
 | [#1112](https://github.com/popcre/ai-devops/issues/1112) | Requalification keeps last good (24-48h fix) |
 | [#1114](https://github.com/popcre/ai-devops/issues/1114) | One runner + native/OpenCode doors |
 | [#1115](https://github.com/popcre/ai-devops/issues/1115) | Outage vs code failure classes |
+| [#1163](https://github.com/popcre/ai-devops/issues/1163) | Leftover proof Phase A — **closed** live |
+| [#1204](https://github.com/popcre/ai-devops/issues/1204) | Leftover proof Phase B — **closed** live |
+| [#1257](https://github.com/popcre/ai-devops/issues/1257) | Leftover proof Phase D — **closed** live |
 
 Harness design: [docs/reviewer-harness-consolidation.md](docs/reviewer-harness-consolidation.md)
 
-**Fresh-session start:** open a new current-upstream worktree, read this STATUS table, start **only Phase A** in that session. Re-read later phases before starting each one (drift check).
+**Fresh-session start:** Phase A–D and leftover proofs are done. Only Phase E remains: re-measure the clean window (14 days from 2026-09-30, or 50 reviews with zero missing-packet incidents), then metrics + a separate reviewer-safety helper-retire PR. Do not start Phase A again.
 
 ---
 
