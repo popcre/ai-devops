@@ -365,7 +365,7 @@ sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | gre
 proof_ok() {
   ! grep -qF 'windows-offline-warpbuild-proof' "$workflow" || return 1
   ! grep -qF 'warp-custom-warpbuild-win2022-canary' "$workflow" || return 1
-  grep -qF 'runs-on: warp-custom-warpbuild-win2022-canary' "$ROOT/.github/workflows/warpbuild-win2022-canary.yml" || return 1
+  grep -qE 'runs-on:.*warp-custom-warpbuild|warp_label:.*warp-custom-warpbuild' "$ROOT/.github/workflows/warpbuild-win2022-canary.yml" || return 1
 }
 check 'pull-request Windows tests run only on Blacksmith; WarpBuild stays in its own canary' proof_ok
 # The fork-isolation guard on the required section matrix is security-critical:
