@@ -154,12 +154,23 @@ echo health ok
 FEOF
 cat > "$TMP/bin/pb-doctor" <<'FEOF'
 #!/usr/bin/env bash
+# Resolve the provider CLI the way a real wrapper does: an explicit override
+# wins over PATH. The doctor stub LAUNCHES it so drift tests exercise the same
+# bytes preflight hashes (a stub that never runs the CLI cannot catch a
+# hash/live mismatch).
+pb_cli() {
+  if [ -n "${AI_GROK_BIN:-}" ]; then printf '%s' "$AI_GROK_BIN"; return 0; fi
+  if [ -n "${AI_KIMI_BIN:-}" ]; then printf '%s' "$AI_KIMI_BIN"; return 0; fi
+  if [ -n "${AI_STEPFUN_STEP_BIN:-}" ]; then printf '%s' "$AI_STEPFUN_STEP_BIN"; return 0; fi
+  command -v fakegrok 2>/dev/null || command -v fakekimi
+}
 if [ "${1:-}" = doctor ] && [ "${2:-}" = --live ]; then
   [ "${PB_LIVE_FAIL:-0}" = 0 ] || { echo live failed >&2; exit 1; }
+  "$(pb_cli)" --version >/dev/null 2>&1 || true
   # Simulate an auto-update mid-qualification: rewrite the provider CLI or
   # the wrapper after the live smoke has exercised the previous bytes.
   if [ "${PB_DRIFT_CLI:-0}" != 0 ]; then
-    printf '\n# cli-drift\n' >> "${PB_DRIFT_CLI_TARGET:-$(command -v fakegrok)}"
+    printf '\n# cli-drift\n' >> "$(pb_cli)"
   fi
   if [ "${PB_DRIFT_WRAPPER:-0}" != 0 ]; then
     printf '\n# wrapper-drift\n' >> "$0"
@@ -168,6 +179,7 @@ if [ "${1:-}" = doctor ] && [ "${2:-}" = --live ]; then
 fi
 if [ "${1:-}" = doctor ]; then
   [ "${PB_DOCTOR_FAIL:-0}" = 0 ] || { echo 'NOT AUTHENTICATED: login required' >&2; exit 1; }
+  "$(pb_cli)" --version >/dev/null 2>&1 || true
   echo health ok; exit 0
 fi
 echo unexpected; exit 1
@@ -266,6 +278,19 @@ PB_OUT="$(PB_DRIFT_CLI=1 FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2
   && ok "CLI drift after live checks is refused" \
   || { bad "CLI drift after live checks is refused"; printf '%s\n' "$PB_OUT"; }
 check "CLI drift never publishes a qualification for untested bytes" \
+  "! test -f '$TMP/state/grok-live-qualified.json'"
+
+# The hash must bind the CLI the WRAPPER actually launches (override / private
+# install path), not a same-named binary that merely sits on PATH. Drift the
+# override binary while PATH's decoy stays still: with a PATH-only hash this
+# would publish evidence for bytes the live smoke never ran.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+cp "$TMP/bin/fakegrok" "$TMP/bin/fakegrok-alt"
+PB_OUT="$(AI_GROK_BIN="$TMP/bin/fakegrok-alt" PB_DRIFT_CLI=1 FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'provider CLI changed' \
+  && ok "drift of the wrapper-resolved CLI (override path) is refused" \
+  || { bad "drift of the wrapper-resolved CLI (override path) is refused"; printf '%s\n' "$PB_OUT"; }
+check "the override-path CLI is the one bound into the record (not the PATH decoy)" \
   "! test -f '$TMP/state/grok-live-qualified.json'"
 
 # A failed qualification after a stale pin-mismatch was recognized must leave

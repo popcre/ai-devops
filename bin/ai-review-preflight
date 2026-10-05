@@ -838,18 +838,54 @@ check_provider() { # PROVIDER REPO LIVE BASE
     "$provider" "$repo" "$([ "$live" = 1 ] && [ "$provider" != glm ] && printf live-verified || printf not-separately-exposed)"
 }
 
-# provider_cli_binary PROVIDER prints the path of the installed provider CLI
-# named by config/provider-cli-versions.json, resolved through PATH. The name
-# is read from the one versioned contract (ai-provider-version command), never
-# hardcoded here, so a renamed binary cannot leave a stale literal behind.
+# provider_cli_binary PROVIDER prints the path of the provider CLI that the
+# provider wrapper actually executes, resolved the same way the wrappers do
+# (explicit override first, then private install paths, then PATH). The name is
+# read from the one versioned contract (ai-provider-version command), never
+# hardcoded here. Hashing only the PATH hit would certify bytes the live smoke
+# never exercised when a wrapper prefers an override or a private install path
+# (Grok, Kimi, StepFun).
 provider_cli_binary() { # PROVIDER
-  local provider="$1" policy_bin cmd path
+  local provider="$1" policy_bin cmd path c
   policy_bin="${AI_PROVIDER_VERSION_BIN:-$REGISTRY_REAL_DIR/ai-provider-version}"
   [ -x "$policy_bin" ] || die "ai-provider-version is not executable: $policy_bin"
   cmd="$("$policy_bin" command "$provider")" || return 1
-  path="$(command -v "$cmd" 2>/dev/null || true)"
-  [ -n "$path" ] && [ -e "$path" ] || return 1
-  printf '%s' "$path"
+  case "$provider" in
+    grok)
+      if [ -n "${AI_GROK_BIN:-}" ] && [ -e "${AI_GROK_BIN}" ]; then
+        printf '%s' "$AI_GROK_BIN"; return 0
+      fi
+      for c in "$(command -v "$cmd" 2>/dev/null || true)" \
+               "$HOME/.local/bin/grok" "$HOME/.grok/bin/grok" "$HOME/.grok/bin/grok.exe" \
+               /home/ai/.local/bin/grok /usr/local/bin/grok; do
+        [ -n "$c" ] && [ -e "$c" ] && { printf '%s' "$c"; return 0; }
+      done
+      return 1 ;;
+    kimi)
+      if [ -n "${AI_KIMI_BIN:-}" ] && [ -e "${AI_KIMI_BIN}" ]; then
+        printf '%s' "$AI_KIMI_BIN"; return 0
+      fi
+      for c in "$(command -v "$cmd" 2>/dev/null || true)" \
+               "${KIMI_CODE_HOME:-$HOME/.kimi-code}/bin/kimi" \
+               "${KIMI_CODE_HOME:-$HOME/.kimi-code}/bin/kimi.exe" \
+               "$HOME/.kimi-code/bin/kimi" "$HOME/.kimi-code/bin/kimi.exe" \
+               /home/ai/.kimi-code/bin/kimi /usr/local/bin/kimi; do
+        [ -n "$c" ] && [ -e "$c" ] && { printf '%s' "$c"; return 0; }
+      done
+      return 1 ;;
+    stepfun)
+      if [ -n "${AI_STEPFUN_STEP_BIN:-}" ] && [ -e "${AI_STEPFUN_STEP_BIN}" ]; then
+        printf '%s' "$AI_STEPFUN_STEP_BIN"; return 0
+      fi
+      for c in "$HOME/.stepcode/bin/step" "$(command -v "$cmd" 2>/dev/null || true)"; do
+        [ -n "$c" ] && [ -e "$c" ] && { printf '%s' "$c"; return 0; }
+      done
+      return 1 ;;
+    *)
+      path="$(command -v "$cmd" 2>/dev/null || true)"
+      [ -n "$path" ] && [ -e "$path" ] || return 1
+      printf '%s' "$path" ;;
+  esac
 }
 
 # pin_bump_qualify PROVIDER is the FAST PATH for a version-pin-bump-only change
