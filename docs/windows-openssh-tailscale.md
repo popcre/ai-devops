@@ -23,7 +23,7 @@ The target state is:
 - The `916-alien` public key is authorized for the Windows administrator
   account. Its private key is never copied or written during this procedure.
 - Windows Firewall permits SSH/TCP 22 only where the destination is the PC's
-  Tailscale IPv4 address and the source is within Tailscale's `100.64.0.0/10`
+  Tailscale IPv4 address and the source is within Tailscale's `[private-addr]/10`
   IPv4 range.
 - WinRM is stopped and disabled; it has no listener or custom firewall rule.
 
@@ -110,7 +110,7 @@ Remove-NetFirewallRule -DisplayName 'OpenSSH Server — Tailscale only' -ErrorAc
 New-NetFirewallRule `
   -DisplayName 'OpenSSH Server — Tailscale only' `
   -Direction Inbound -Action Allow -Protocol TCP -LocalPort 22 `
-  -LocalAddress $tsIp -RemoteAddress '100.64.0.0/10' -Profile Any
+  -LocalAddress $tsIp -RemoteAddress '[private-addr]/10' -Profile Any
 
 Restart-Service sshd
 ```
@@ -130,7 +130,7 @@ Test-NetConnection -ComputerName $tsIp -Port 22
 
 Success requires `sshd` to be running, WinRM to be stopped with `StartMode`
 `Disabled`, and `TcpTestSucceeded : True`. Windows displays the firewall CIDR
-as `100.64.0.0/255.192.0.0`, which is expected.
+as `[private-addr]/255.192.0.0`, which is expected.
 
 From `916-alien`, test the actual public-key authentication:
 
