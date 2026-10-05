@@ -552,7 +552,7 @@ strip_node_options() {
     delete process.env.SANDBOX_FLAGS;
     require(process.argv[2]);
     process.stdout.write(process.env.NODE_OPTIONS || "absent");
-  ' "$1" "$PRELOAD_CJS"
+  ' -- "$1" "$PRELOAD_CJS"
 }
 strip_sandbox_flags() {
   printf 'k\n' > "$TMP/preload-spaced-flags-secret"; chmod 600 "$TMP/preload-spaced-flags-secret"
@@ -561,7 +561,7 @@ strip_sandbox_flags() {
     process.env.AI_QWEN_SECRET_FILE = process.argv[2];
     require(process.argv[3]);
     process.stdout.write(process.env.SANDBOX_FLAGS || "");
-  ' "$1" "$TMP/preload-spaced-flags-secret" "$PRELOAD_CJS"
+  ' -- "$1" "$TMP/preload-spaced-flags-secret" "$PRELOAD_CJS"
 }
 SPACED_ONE="$(strip_node_options "--require \"$TMP/spaced dir/spaced helper.js\" --max-old-space-size=256")"
 SPACED_EQ="$(strip_node_options "--require=\"$TMP/spaced dir/spaced helper.js\" --max-old-space-size=256")"
