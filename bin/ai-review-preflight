@@ -871,9 +871,9 @@ provider_cli_binary() { # PROVIDER
 # lane. Full live qualification (qualify gemini|qwen) remains the path for
 # behaviour changes; this lane is the cheap one for a pin bump.
 pin_bump_qualify() { # PROVIDER
-  local provider="$1" wrapper cli_bin cli_sha before_sha after_sha file
+  local provider="$1" wrapper cli_bin cli_sha before_sha after_sha after_cli_sha file
   local policy_bin cli_version_text cli_version prior_raw prior_versions now
-  local out rc mode want class
+  local out rc mode want class clear_stale_pin_mismatch
   valid_provider "$provider" || die "unknown provider '$provider'."
   case "$provider" in
     gemini|qwen)
@@ -887,12 +887,15 @@ pin_bump_qualify() { # PROVIDER
 
   # Auto-restore. This command runs because the pin is being updated in this
   # change, so a pin-mismatch quarantine recorded against the OLD pin is stale.
-  # Clearing it first lets a build that satisfies the NEW pin restore cleanly;
-  # a build that still fails policy is re-quarantined below and stays down.
+  # The clear is DEFERRED until qualification fully succeeds (including a
+  # published record): clearing first would leave the provider usable if a
+  # later step failed without re-quarantining (wrapper/CLI drift, publish
+  # failure). A failure below either re-quarantines or leaves the stale
+  # pin-mismatch in place, so an unqualified provider is never left usable.
+  clear_stale_pin_mismatch=0
   if active_quarantine "$provider"; then
     if [ "$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // ""')" = pin-mismatch ]; then
-      admission_store clear "$provider" >/dev/null
-      note "ai-review-preflight: cleared stale pin-mismatch quarantine for $provider (the pin is being updated in this change)."
+      clear_stale_pin_mismatch=1
     else
       die "$provider has an active $(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // "unknown"') quarantine; clear it before pin-bump qualification."
     fi
@@ -953,11 +956,19 @@ pin_bump_qualify() { # PROVIDER
     return 1
   fi
 
-  # Untested bytes are never authorized: the wrapper must not have changed
-  # under us during the canary (same rule as qualify_gemini / qualify_qwen).
+  # Untested bytes are never authorized: neither the wrapper nor the provider
+  # CLI may change under us during the canary (same rule as qualify_gemini /
+  # qualify_qwen). The CLI hash is taken again here and must match the hash of
+  # the bytes the live smoke actually exercised, so a CLI update mid-qualification
+  # can never produce evidence for bytes that were not tested.
   after_sha="$(sha256sum "$wrapper" | awk '{print $1}')"
+  after_cli_sha="$(sha256sum "$cli_bin" | awk '{print $1}')"
   [ "$before_sha" = "$after_sha" ] || {
     printf 'ai-review-preflight: %s wrapper changed during pin-bump qualification; untested bytes are not authorized.\n' "$provider" >&2
+    return 1
+  }
+  [ "$cli_sha" = "$after_cli_sha" ] || {
+    printf 'ai-review-preflight: %s provider CLI changed during pin-bump qualification; untested bytes are not authorized.\n' "$provider" >&2
     return 1
   }
 
@@ -970,12 +981,19 @@ pin_bump_qualify() { # PROVIDER
   prior_versions="$(qualification_versions "$provider")"
   now="$(now_epoch)"
   publish_qualification_version "$provider" "$prior_versions" \
-    "$(jq -nc --arg sha "$after_sha" --arg cli "$cli_sha" --arg ver "$cli_version" --arg mode "$mode" --arg want "$want" --argjson at "$now" \
+    "$(jq -nc --arg sha "$after_sha" --arg cli "$after_cli_sha" --arg ver "$cli_version" --arg mode "$mode" --arg want "$want" --argjson at "$now" \
         '{wrapper_sha256:$sha,cli_sha256:$cli,cli_version:$ver,policy_mode:$mode,policy_version:$want,qualified_epoch:$at}')" \
     || { restore_qualification_versions "$provider" "$prior_raw"; printf 'ai-review-preflight: %s pin-bump qualification did not publish; the previous record stays valid.\n' "$provider" >&2; return 1; }
-  note "ai-review-preflight: pin-bump-qualified $provider (wrapper $after_sha, cli $cli_sha, version ${cli_version:-unreadable}, policy $mode:${want:-unpinned})."
+  # Only now is it safe to drop a stale pin-mismatch quarantine: the new
+  # qualification record is on disk. Anything that failed above left the
+  # provider quarantined (or re-quarantined it).
+  if [ "$clear_stale_pin_mismatch" = 1 ]; then
+    admission_store clear "$provider" >/dev/null
+    note "ai-review-preflight: cleared stale pin-mismatch quarantine for $provider (the pin is being updated in this change)."
+  fi
+  note "ai-review-preflight: pin-bump-qualified $provider (wrapper $after_sha, cli $after_cli_sha, version ${cli_version:-unreadable}, policy $mode:${want:-unpinned})."
   printf 'PASS pin-bump-qualify provider=%s cli_version=%s policy=%s:%s cli_sha256=%s\n' \
-    "$provider" "${cli_version:-unreadable}" "$mode" "${want:-unpinned}" "$cli_sha"
+    "$provider" "${cli_version:-unreadable}" "$mode" "${want:-unpinned}" "$after_cli_sha"
 }
 
 usage() {

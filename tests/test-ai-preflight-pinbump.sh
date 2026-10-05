@@ -156,6 +156,14 @@ cat > "$TMP/bin/pb-doctor" <<'FEOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = doctor ] && [ "${2:-}" = --live ]; then
   [ "${PB_LIVE_FAIL:-0}" = 0 ] || { echo live failed >&2; exit 1; }
+  # Simulate an auto-update mid-qualification: rewrite the provider CLI or
+  # the wrapper after the live smoke has exercised the previous bytes.
+  if [ "${PB_DRIFT_CLI:-0}" != 0 ]; then
+    printf '\n# cli-drift\n' >> "${PB_DRIFT_CLI_TARGET:-$(command -v fakegrok)}"
+  fi
+  if [ "${PB_DRIFT_WRAPPER:-0}" != 0 ]; then
+    printf '\n# wrapper-drift\n' >> "$0"
+  fi
   echo live smoke ok; exit 0
 fi
 if [ "${1:-}" = doctor ]; then
@@ -249,6 +257,54 @@ PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
 [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'quarantine' \
   && ok "an active non-pin-mismatch quarantine is not cleared by the lane" \
   || { bad "an active non-pin-mismatch quarantine is not cleared by the lane"; printf '%s\n' "$PB_OUT"; }
+
+# A CLI that updates underneath the live smoke is refused: the published
+# evidence must bind the bytes that were actually tested.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+PB_OUT="$(PB_DRIFT_CLI=1 FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'provider CLI changed' \
+  && ok "CLI drift after live checks is refused" \
+  || { bad "CLI drift after live checks is refused"; printf '%s\n' "$PB_OUT"; }
+check "CLI drift never publishes a qualification for untested bytes" \
+  "! test -f '$TMP/state/grok-live-qualified.json'"
+
+# A failed qualification after a stale pin-mismatch was recognized must leave
+# the provider quarantined. Clearing early (or failing to restore) would leave
+# an unqualified provider usable — the exact High finding this guards.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+# Raise the floor so the installed build is below it, producing a real
+# pin-mismatch quarantine to restore later.
+jq '.providers.grok.supported_version = "1.0.15"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok >/dev/null 2>&1 || true
+check "the stale pin-mismatch quarantine is set up first" \
+  "run_pb status grok | jq -e '.status==\"quarantined\" and .failure_class==\"pin-mismatch\"'"
+# Now update the pin in the same change (the auto-restore scenario).
+jq '.providers.grok.supported_version = "1.0.5"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+# Wrapper drift is a failure that does NOT re-quarantine: with a premature
+# clear it would leave the provider usable. It must stay down.
+PB_OUT="$(PB_DRIFT_WRAPPER=1 FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'wrapper changed' \
+  && ok "wrapper drift after live checks is refused" \
+  || { bad "wrapper drift after live checks is refused"; printf '%s\n' "$PB_OUT"; }
+check "a failed qualification leaves the stale pin-mismatch quarantine in place (provider never left usable)" \
+  "run_pb status grok | jq -e '.usable==false and .failure_class==\"pin-mismatch\"' && ! test -f '$TMP/state/grok-live-qualified.json'"
+
+# Same invariant when the CLI is what drifted under a stale pin-mismatch.
+PB_OUT="$(PB_DRIFT_CLI=1 FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'provider CLI changed' \
+  && ok "CLI drift under a stale pin-mismatch is refused" \
+  || { bad "CLI drift under a stale pin-mismatch is refused"; printf '%s\n' "$PB_OUT"; }
+check "CLI drift also leaves the provider quarantined (never left usable)" \
+  "run_pb status grok | jq -e '.usable==false and .failure_class==\"pin-mismatch\"'"
+
+# And the deferred clear still fires on the full success path.
+PB_OUT="$(FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'cleared stale pin-mismatch quarantine' \
+  && printf '%s' "$PB_OUT" | grep -q 'PASS pin-bump-qualify provider=grok' \
+  && ok "the deferred clear still runs once qualification fully succeeds" \
+  || { bad "the deferred clear still runs once qualification fully succeeds"; printf '%s\n' "$PB_OUT"; }
+check "the provider is usable again only after full success" \
+  "run_pb status grok | jq -e '.usable==true'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
