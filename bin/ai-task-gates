@@ -1087,7 +1087,7 @@ linux_review_authority(){
   [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$candidate")" = "$source_digest" ] || return 1
   review_root="$(git -C "$(dirname "$report")" rev-parse --show-toplevel 2>/dev/null)" || return 1
   review_root="$(cd "$review_root" && pwd -P)" || return 1
-  case "$(readlink -f "$report")" in "$review_root"/.ai/reviews/*) ;; *) return 1 ;; esac
+  case "$(cd "$(dirname "$report")" && pwd -P)/$(basename "$report")" in "$review_root"/.ai/reviews/*) ;; *) return 1 ;; esac
   [ "$review_root" != "$candidate" ] && [ "$(git -C "$review_root" rev-parse HEAD)" = "$target" ] || return 1
   [ -z "$(git -C "$review_root" status --porcelain=v1 --untracked-files=all)" ] || return 1
   common="$(cd "$(git -C "$checkout" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" || return 1
@@ -1525,7 +1525,7 @@ cmd_authorize_install(){
       [ -z "$WINDOWS_RECEIPT_SHA" ] || blocked 'ai-task-gates: STOP. Same-commit migration requires a legacy launcher without a receipt.'
     fi
   fi
-  report_real="$(readlink -f "$review_report" 2>/dev/null)" || blocked 'ai-task-gates: STOP. Review report unavailable.'
+  report_real="$(cd "$(dirname "$review_report")" 2>/dev/null && pwd -P)/$(basename "$review_report")" || blocked 'ai-task-gates: STOP. Review report unavailable.'
   reviewed_root="$(git -C "$(dirname "$report_real")" rev-parse --show-toplevel 2>/dev/null)" || blocked 'ai-task-gates: STOP. Review report is outside a Git checkout.'
   reviewed_root="$(cd "$reviewed_root" && pwd -P)" || blocked 'ai-task-gates: STOP. Reviewed checkout unavailable.'
   [ "$reviewed_root" != "$candidate_root" ] || blocked 'ai-task-gates: STOP. Protected review and installation must use separate tasks.'
