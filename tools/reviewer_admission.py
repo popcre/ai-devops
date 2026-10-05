@@ -357,7 +357,7 @@ def classify(paths, extra_text, provider):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear', 'credit', 'classify'))
+    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear', 'clear-global', 'credit', 'classify'))
     parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen','stepfun'))
     parser.add_argument('--directory', type=pathlib.Path)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
@@ -394,6 +394,12 @@ def main():
             if args.action == 'clear':
                 data = {'version': 2, 'provider': args.provider, 'global': None, 'backoffs': {}}
                 publish(args.directory, args.provider, data); result = {'cleared': True}
+            elif args.action == 'clear-global':
+                # Drop only the global quarantine. Scoped usage-limit backoffs
+                # stay: a qualification clear must never erase a live credit
+                # or usage record that says this reviewer is still ineligible.
+                data['global'] = None
+                publish(args.directory, args.provider, data); result = {'cleared': 'global'}
             elif args.action == 'quarantine':
                 if args.seconds <= 0:
                     raise ValueError('quarantine seconds must be positive')

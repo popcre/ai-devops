@@ -1060,11 +1060,18 @@ pin_bump_qualify() { # PROVIDER
         '{wrapper_sha256:$sha,cli_sha256:$cli,cli_version:$ver,policy_mode:$mode,policy_version:$want,qualified_epoch:$at}')" \
     || { restore_qualification_versions "$provider" "$prior_raw"; printf 'ai-review-preflight: %s pin-bump qualification did not publish; the previous record stays valid.\n' "$provider" >&2; return 1; }
   # Only now is it safe to drop a stale pin-mismatch quarantine: the new
-  # qualification record is on disk. Anything that failed above left the
-  # provider quarantined (or re-quarantined it).
+  # qualification record is on disk. Recheck the quarantine is still the
+  # stale pin-mismatch we intended to clear — a newer authentication or
+  # credit quarantine recorded during the live check must survive. Clear
+  # only the global quarantine, never the scoped usage-limit backoffs.
   if [ "$clear_stale_pin_mismatch" = 1 ]; then
-    admission_store clear "$provider" >/dev/null
-    note "ai-review-preflight: cleared stale pin-mismatch quarantine for $provider (the pin is being updated in this change)."
+    if active_quarantine "$provider" \
+       && [ "$(printf '%s' "$ACTIVE_QUARANTINE" | jq -r '.failure_class // ""')" = pin-mismatch ]; then
+      admission_store clear-global "$provider" >/dev/null
+      note "ai-review-preflight: cleared stale pin-mismatch quarantine for $provider (the pin is being updated in this change)."
+    else
+      note "ai-review-preflight: left $provider quarantine in place (it is no longer the stale pin-mismatch; a newer record must stand)."
+    fi
   fi
   note "ai-review-preflight: pin-bump-qualified $provider (wrapper $after_sha, cli $after_cli_sha, version ${cli_version:-unreadable}, policy $mode:${want:-unpinned})."
   printf 'PASS pin-bump-qualify provider=%s cli_version=%s policy=%s:%s cli_sha256=%s\n' \

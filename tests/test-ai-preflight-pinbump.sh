@@ -369,6 +369,53 @@ PB_OUT="$(FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
 check "the provider is usable again only after full success" \
   "run_pb status grok | jq -e '.usable==true'"
 
+# The post-qualification clear must never erase a NEWER quarantine recorded
+# during the live check (auth/credit), and must never wipe scoped backoffs.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+jq '.providers.grok.supported_version = "1.0.15"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok >/dev/null 2>&1 || true
+jq '.providers.grok.supported_version = "1.0.5"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+cat > "$TMP/bin/pb-doctor-newq" <<FEOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = doctor ] && [ "\${2:-}" = --live ]; then
+  # Simulate a credit/auth quarantine recorded while the live turn runs.
+  python "\$ROOT/tools/reviewer_admission.py" quarantine grok --reason out-of-credit --seconds 60 --directory "\$AI_REVIEW_QUARANTINE_DIR" >/dev/null 2>&1 || true
+  echo live smoke ok; exit 0
+fi
+if [ "\${1:-}" = doctor ]; then echo health ok; exit 0; fi
+echo unexpected; exit 1
+FEOF
+chmod +x "$TMP/bin/pb-doctor-newq"
+# Bake ROOT into the stub environment via a wrapper export.
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor-newq" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    ROOT="$ROOT" \
+    FAKE_GROK_VERSION=1.0.5 \
+    "$SCRIPT" pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'left grok quarantine in place' \
+  && ok "a newer quarantine recorded during the live check is not cleared" \
+  || { bad "a newer quarantine recorded during the live check is not cleared"; printf '%s\n' "$PB_OUT"; }
+check "the newer quarantine still stands after qualification" \
+  "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.failure_class==\"out-of-credit\"'"
+
+# The clear must also preserve scoped usage-limit backoffs.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+jq '.providers.grok.supported_version = "1.0.15"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok >/dev/null 2>&1 || true
+jq '.providers.grok.supported_version = "1.0.5"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+printf 'evidence\n' > "$TMP/evidence.txt"
+now_ts="$(date +%s)"
+run_pb observe-refusal grok --profile testhash --model grok-4.6 --run-id testrun --observed "$now_ts" --seconds 600 --reason usage-limit --evidence "$TMP/evidence.txt" >/dev/null 2>&1 || true
+PB_OUT="$(FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
+[ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'cleared stale pin-mismatch quarantine' \
+  && ok "the pin-mismatch quarantine clears on success even with backoffs present" \
+  || { bad "the pin-mismatch quarantine clears on success even with backoffs present"; printf '%s\n' "$PB_OUT"; }
+check "scoped usage-limit backoffs survive the qualification clear" \
+  "run_pb admission grok --profile testhash --model grok-4.6 --json | jq -e '.state==\"backoff\"'"
+
 # A pin-bump lane with no pin would publish evidence that binds no version at
 # all (ai-provider-version treats an empty pin as satisfied). Refuse it.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
