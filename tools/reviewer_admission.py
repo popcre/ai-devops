@@ -365,6 +365,7 @@ def main():
     parser.add_argument('--run-id', default=''); parser.add_argument('--observed', type=int)
     parser.add_argument('--seconds', type=int, default=1800); parser.add_argument('--reason', default='')
     parser.add_argument('--evidence', type=pathlib.Path)
+    parser.add_argument('--expect-record', default='')
     parser.add_argument('--scan', type=pathlib.Path, action='append', default=[])
     parser.add_argument('--text', default='')
     parser.add_argument('--record', action='store_true')
@@ -398,6 +399,16 @@ def main():
                 # Drop only the global quarantine. Scoped usage-limit backoffs
                 # stay: a qualification clear must never erase a live credit
                 # or usage record that says this reviewer is still ineligible.
+                # --expect-record makes the clear a compare-and-swap: it runs
+                # only if the current global is still the exact record the
+                # caller captured, so a replacement written mid-qualification
+                # (even within the same second) can never be erased.
+                if args.expect_record:
+                    expected = json.loads(args.expect_record)
+                    if data.get('global') != expected:
+                        result = {'cleared': False, 'reason': 'record-changed'}
+                        print(json.dumps(result, sort_keys=True, allow_nan=False))
+                        return
                 data['global'] = None
                 publish(args.directory, args.provider, data); result = {'cleared': 'global'}
             elif args.action == 'quarantine':

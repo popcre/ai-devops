@@ -401,8 +401,10 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
 check "the newer quarantine still stands after qualification" \
   "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.failure_class==\"out-of-credit\"'"
 
-# A NEWER pin-mismatch (same class, different epoch) written during the live
-# check must also survive: identity is class + created_epoch, not class alone.
+# A NEWER pin-mismatch (same class, possibly the same second) written during
+# the live check must also survive: identity is the COMPLETE record, not class
+# + second-resolution time. Use a different duration so the record differs
+# even when the clock does not advance.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 jq '.providers.grok.supported_version = "1.0.15"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
 FAKE_GROK_VERSION=1.0.5 run_pb pin-bump-qualify grok >/dev/null 2>&1 || true
@@ -410,8 +412,8 @@ jq '.providers.grok.supported_version = "1.0.5"' "$PB_POLICY" > "$PB_POLICY.new"
 cat > "$TMP/bin/pb-doctor-newpinq" <<FEOF
 #!/usr/bin/env bash
 if [ "\${1:-}" = doctor ] && [ "\${2:-}" = --live ]; then
-  # Replace the stale pin-mismatch with a NEW one (fresh epoch) mid-live.
-  python "\$ROOT/tools/reviewer_admission.py" quarantine grok --reason pin-mismatch --seconds 60 --directory "\$AI_REVIEW_QUARANTINE_DIR" >/dev/null 2>&1 || true
+  # Replace the stale pin-mismatch with a NEW one (different expiry) mid-live.
+  python "\$ROOT/tools/reviewer_admission.py" quarantine grok --reason pin-mismatch --seconds 99 --directory "\$AI_REVIEW_QUARANTINE_DIR" >/dev/null 2>&1 || true
   echo live smoke ok; exit 0
 fi
 if [ "\${1:-}" = doctor ]; then echo health ok; exit 0; fi
@@ -427,8 +429,8 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     FAKE_GROK_VERSION=1.0.5 \
     "$SCRIPT" pin-bump-qualify grok 2>&1)"; PB_RC=$?
 [ "$PB_RC" -eq 0 ] && printf '%s' "$PB_OUT" | grep -q 'left grok quarantine in place' \
-  && ok "a newer pin-mismatch (fresh epoch) is not cleared" \
-  || { bad "a newer pin-mismatch (fresh epoch) is not cleared"; printf '%s\n' "$PB_OUT"; }
+  && ok "a newer pin-mismatch record is not cleared (full-record compare)" \
+  || { bad "a newer pin-mismatch record is not cleared (full-record compare)"; printf '%s\n' "$PB_OUT"; }
 check "the newer pin-mismatch still stands after qualification" \
   "env AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status grok | jq -e '.failure_class==\"pin-mismatch\"'"
 
