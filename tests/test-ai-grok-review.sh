@@ -1584,7 +1584,8 @@ check "pool_adapter_enforces_the_report_floor" "[ '$RC_TINY' -ne 0 ] && grep -q 
 # (whose brief puts the verdict last), and a footer-only empty body is still
 # refused.
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" gemini final-check ) > "$POOLTMP/out-gshape" 2>&1; RC_GSHAPE=$?
-check "pool_adapter_accepts_a_verdict_first_gemini_shaped_body" "[ '$RC_GSHAPE' -eq 0 ] && grep -q APPROVE '$POOLTMP/out-gshape'"
+GSHAPE_REPORT="$(tail -1 "$POOLTMP/out-gshape" 2>/dev/null)"
+check "pool_adapter_accepts_a_verdict_first_gemini_shaped_body" "[ '$RC_GSHAPE' -eq 0 ] && [ -f '$GSHAPE_REPORT' ] && grep -q APPROVE '$GSHAPE_REPORT'"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=geminishape bash "$POOL" qwen security-review ) > "$POOLTMP/out-gshape-qwen" 2>&1; RC_GSHAPE_QWEN=$?
 check "pool_adapter_refuses_verdict_first_for_non_gemini_providers" "[ '$RC_GSHAPE_QWEN' -ne 0 ]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=footerempty bash "$POOL" qwen security-review ) > "$POOLTMP/out-fempty" 2>&1; RC_FEMPTY=$?
