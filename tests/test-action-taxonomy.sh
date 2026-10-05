@@ -47,14 +47,17 @@ check "rate-limit detail is report-only rate-limit-capacity" \
 check "ordinary failure detail is test-failure" \
   "test \"$(det FAILURE linux-offline)\" = 'test-failure'"
 
-check "empty-report review failure is review-step" \
+check "empty-report (empty provider report) is review-step" \
   "test \"$(rev empty-report)\" = 'review-step'"
 check "empty-verdict review failure is review-step" \
   "test \"$(rev empty-verdict)\" = 'review-step'"
 check "missing-verdict (the name the wrappers write) is review-step" \
   "test \"$(rev missing-verdict)\" = 'review-step'"
-check "invalid-provider-envelope (empty provider report) is review-step" \
-  "test \"$(rev invalid-provider-envelope)\" = 'review-step'"
+# Codex 2026-10-05: `invalid-provider-envelope` is NOT an empty verdict.
+# ai-claude-review books it for wrong-model and permission-denial failures,
+# which are real results. Empty provider reports book `empty-report` instead.
+check "invalid-provider-envelope (wrong model or permission denial) is result" \
+  "test \"$(rev invalid-provider-envelope)\" = 'result'"
 check "provider timeout review failure is capacity/infra" \
   "test \"$(rev provider-timeout)\" = 'capacity/infra'"
 check "allowance exhaustion is capacity/infra" \
@@ -70,9 +73,11 @@ check "empty-verdict in the check summary is review-step, never result" \
   "test \"$(act FAILURE windows-reviewer-safety 'empty report from provider')\" = 'review-step'"
 check "empty-verdict detail is empty-verdict" \
   "test \"$(det FAILURE x 'empty report')\" = 'empty-verdict'"
+check "invalid-provider-envelope in a summary is a result, not empty-verdict" \
+  "test \"$(act FAILURE x 'invalid-provider-envelope')\" = 'result' && test \"$(det FAILURE x 'invalid-provider-envelope')\" = 'test-failure'"
 
 check "no empty-verdict path returns result" \
-  "test \"$(rev empty-report)\" != 'result' && test \"$(rev empty-verdict)\" != 'result' && test \"$(rev no-verdict)\" != 'result' && test \"$(rev missing-verdict)\" != 'result' && test \"$(rev malformed-verdict)\" != 'result' && test \"$(rev invalid-provider-envelope)\" != 'result' && test \"$(act FAILURE empty-verdict x)\" != 'result'"
+  "test \"$(rev empty-report)\" != 'result' && test \"$(rev empty-verdict)\" != 'result' && test \"$(rev no-verdict)\" != 'result' && test \"$(rev missing-verdict)\" != 'result' && test \"$(rev malformed-verdict)\" != 'result' && test \"$(act FAILURE empty-verdict x)\" != 'result'"
 
 # End-to-end: the classification ai-pr-wait and report-scheduled-failure run.
 check "report-scheduled-failure classifies a cancelled need as capacity/infra" \

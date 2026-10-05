@@ -304,10 +304,16 @@ verify_turn(){
   fi
   [ "$envelope_ok" = 1 ] && [ "$conv_ok" = 1 ] && [ "$verdict_ok" = 1 ] && return 0
   preserve_failure "$ACTIVE_META" "$f" turn
+  # Out of credit is a capacity stop and must win over every verdict
+  # classification, including on a non-SUCCESS envelope carrying the
+  # billing error.
   gemini_credit_stop "$f"
-  gemini_denied_stop "$f"
+  # Classification order (Codex 2026-10-05): envelope and conversation
+  # validity first. A wrong-conversation or provider-error response that
+  # happens to carry denied_actions is not an empty verdict.
   [ "$envelope_ok" = 1 ] || die 'Gemini returned an unsuccessful provider response; evidence preserved'
   [ "$conv_ok" = 1 ] || die 'Gemini returned the wrong conversation; evidence preserved'
+  gemini_denied_stop "$f"
   if [ -n "$GOVERNED_HEAD" ]; then
     die_empty_verdict 'no usable Gemini governed verdict; evidence preserved'
   fi

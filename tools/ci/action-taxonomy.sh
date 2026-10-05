@@ -56,9 +56,13 @@ action_taxonomy_detail() {
   esac
 
   # Empty reviewer verdict: detect from the check name or summary. This is the
-  # carve-out that keeps an empty verdict off the PR test verdict.
+  # carve-out that keeps an empty verdict off the PR test verdict. Only the
+  # empty-report family counts here: `invalid-provider-envelope` is NOT an
+  # empty verdict (ai-claude-review books it for wrong-model and
+  # permission-denial failures, which are real results), so it must never be
+  # carved out of `result`.
   case "$name_blob $summary_blob" in
-    *empty\ report*|*empty-report*|*empty.report*|*empty\ verdict*|*empty-verdict*|*empty.verdict*|*no\ verdict*|*no-verdict*|*no.verdict*|*missing\ verdict*|*missing-verdict*|*missing.verdict*|*malformed\ verdict*|*malformed-verdict*|*malformed.verdict*|*empty_provider_stream*|*empty-provider-stream*|*invalid-provider-envelope*|*invalid.provider.envelope*)
+    *empty\ report*|*empty-report*|*empty.report*|*empty\ verdict*|*empty-verdict*|*empty.verdict*|*no\ verdict*|*no-verdict*|*no.verdict*|*missing\ verdict*|*missing-verdict*|*missing.verdict*|*malformed\ verdict*|*malformed-verdict*|*malformed.verdict*|*empty_provider_stream*|*empty-provider-stream*)
       printf 'empty-verdict\n'; return 0 ;;
   esac
 
@@ -86,10 +90,13 @@ action_taxonomy_check() {
 }
 
 # Review-step actions. Empty verdict fails the review and reroutes; it is
-# never `result` and never reddens the PR test verdict.
+# never `result` and never reddens the PR test verdict. Only the empty-report
+# family is review-step: `invalid-provider-envelope` is a real result
+# (ai-claude-review books it for wrong-model and permission-denial failures),
+# so it falls through to `result`. Empty provider reports book `empty-report`.
 action_taxonomy_review() {
   case "${1:-}" in
-    empty-report|empty-verdict|empty_provider_stream|no-verdict|missing-verdict|malformed-verdict|invalid-provider-envelope)
+    empty-report|empty-verdict|empty_provider_stream|no-verdict|missing-verdict|malformed-verdict)
       printf 'review-step\n' ;;
     provider-timeout|timeout|allowance-exhausted|out-of-credit|rate-limit|killed|interrupted)
       printf 'capacity/infra\n' ;;
