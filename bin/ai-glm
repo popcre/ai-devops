@@ -2407,7 +2407,7 @@ glm_orphan_sandbox_report() { # CUTOFF
 }
 
 cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
-  local limit="${1:-0}" cutoff mp d tag rc removed=0 kept=0 referenced=""
+  local limit="${1:-0}" cutoff mp d tag rc removed=0 kept=0 referenced="" reconcile_rc=0
   case "$limit" in ''|*[!0-9]*) die "the prune removal limit must be a whole number (0 means no limit)." ;; esac
   local bad; bad="$(glm_retention_problem)"; [ -z "$bad" ] || die "$bad"
   # Server sessions and local records leave together; never orphan either side.
@@ -2434,7 +2434,7 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   # batch (`ai-glm new`'s retire step) must not wander into it for the same
   # reason it skips the unrecorded-sandbox sweep below.
   if [ "$limit" -eq 0 ]; then
-    reconcile_implementation_records || warn "ambiguous implementation job state was preserved; inspect ai-glm list/show"
+    reconcile_implementation_records || { reconcile_rc=1; warn "ambiguous implementation job state was preserved; inspect ai-glm list/show"; }
   fi
   local due=()
   mapfile -t due < <(glm_due_review_records "$cutoff")
@@ -2486,7 +2486,9 @@ cmd_prune() { # cmd_prune [MAX_REMOVALS] — 0 when nothing due was left behind
   fi
   [ "$PRUNE_SIGNAL" = 0 ] || exit "$PRUNE_SIGNAL"
   note "pruned $removed idle GLM review item(s) older than ${RETENTION_HOURS}h; $kept kept for a stated reason."
-  [ "$kept" -eq 0 ]
+  # Ambiguous job state left behind is not a clean prune: do not report success
+  # while a reconciliation pass failed and its records were preserved.
+  [ "$kept" -eq 0 ] && [ "$reconcile_rc" -eq 0 ]
 }
 
 reconcile_implementation_record() { # conservative dead-owner recovery; never trusts PID alone

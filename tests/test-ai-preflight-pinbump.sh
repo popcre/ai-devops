@@ -800,7 +800,8 @@ PB_OUT="$(FAKE_GROK_VERSION=1.0.15 run_pb pin-bump-qualify grok 2>&1)"; PB_RC=$?
   || { bad "the already-qualified wrapper still qualifies on a pin bump"; printf '%s\n' "$PB_OUT"; }
 
 # 6. An INVENTED old pin is not proof: it must name the pin the provider was
-#    really last qualified under.
+#    really last qualified under. The invented pin is still LOWER than the new
+#    pin so the upgrade-direction check does not fire first.
 rm -rf "$TMP/state"; mkdir -p "$TMP/state"
 seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM" "$PB_POLICY"
 PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
@@ -809,11 +810,45 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
     AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
     PATH="$TMP/bin:$PATH" \
     FAKE_GROK_VERSION=1.0.15 \
-    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 9.9.9 "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 0.0.0 "$(jq -r '.providers.grok.supported_version // ""' "$PB_POLICY")" 2>&1)"; PB_RC=$?
 [ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'real prior pin' \
   && jq -e '.versions|length==1' "$TMP/state/grok-live-qualified.json" >/dev/null 2>&1 \
   && ok "an invented old pin is refused (must name the real prior pin)" \
   || { bad "an invented old pin is refused (must name the real prior pin)"; printf '%s\n' "$PB_OUT"; }
+
+# 6b. A pin LOWERING is not a bump: the cheap lane only moves the policy floor
+#     upward. Otherwise a lowered minimum re-admits refused builds and can
+#     clear a pin-mismatch quarantine without full qualification.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+seed_qual grok "$TMP/bin/pb-doctor" "$PB_PIN_FROM" "$PB_POLICY"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.15 \
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 1.0.13 1.0.0 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'not an upgrade' \
+  && jq -e '.versions|length==1' "$TMP/state/grok-live-qualified.json" >/dev/null 2>&1 \
+  && ok "a lowered policy pin is refused (the cheap lane only upgrades)" \
+  || { bad "a lowered policy pin is refused (the cheap lane only upgrades)"; printf '%s\n' "$PB_OUT"; }
+
+# 6c. Same refusal on the honest assertion shape: the committed pin lowered to
+#     a smaller value with both sides named correctly is still a downgrade.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+seed_qual grok "$TMP/bin/pb-doctor" 1.0.13 "$PB_POLICY"
+jq '.providers.grok.supported_version = "1.0.5"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_GROK_WRAPPER="$TMP/bin/pb-doctor" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    FAKE_GROK_VERSION=1.0.5 \
+    "$SCRIPT" pin-bump-qualify grok --assert-pin-only 1.0.13 1.0.5 2>&1)"; PB_RC=$?
+jq '.providers.grok.supported_version = "1.0.13"' "$PB_POLICY" > "$PB_POLICY.new" && mv "$PB_POLICY.new" "$PB_POLICY"
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'not an upgrade' \
+  && ok "a committed pin lowered 1.0.13->1.0.5 is refused even when both pins are named" \
+  || { bad "a committed pin lowered 1.0.13->1.0.5 is refused even when both pins are named"; printf '%s\n' "$PB_OUT"; }
 
 # 7. With no qualification history there is no pin to bump: a FIRST
 #    qualification is not a pin bump and must take the full path.

@@ -957,6 +957,13 @@ pin_bump_qualify() { # PROVIDER OLD_PIN NEW_PIN [ALLOW_FIRST]
   [ -n "$want" ] || die "$provider has no version pin in config/provider-cli-versions.json; pin-bump-qualify is only for a pin bump."
   [ -n "$old_pin" ] && [ -n "$new_pin" ] || die 'pin-bump-qualify requires the expected old and new pin (--assert-pin-only); the cheap lane is for a pin bump only, so prove it or take the full qualification path.'
   [ "$old_pin" != "$new_pin" ] || die "assert-pin-only: old and new pin are identical ('$old_pin'); that is not a pin bump."
+  # A pin bump is an UPGRADE of the policy floor. Lowering the pin widens the
+  # accepted set downward and can re-admit a build that was already refused;
+  # that is a policy change for the full qualification path, never a cheap-lane
+  # bump. This checks the DIRECTION of the asserted transition only — it does
+  # not turn a "minimum" provider into an exact pin (owner ruling 2026-09-23).
+  [ "$(printf '%s\n%s\n' "$old_pin" "$new_pin" | sort -V | tail -n1)" = "$new_pin" ] \
+    || die "assert-pin-only: '$old_pin' -> '$new_pin' is not an upgrade; the cheap lane only bumps the policy pin upward (take the full qualification path to lower it)."
   [ "$want" = "$new_pin" ] \
     || die "$provider policy fingerprint is '$fingerprint_before' but --assert-pin-only claims the new pin is '$new_pin'; the assertion and the policy file disagree."
 
