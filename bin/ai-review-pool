@@ -347,10 +347,10 @@ if [ "$PROVIDER_RC" -ne 0 ]; then
   # Empty / blocked / no-verdict turns are a REVIEW-STEP failure and reroute
   # (child 1). They must never be booked as provider-failed, which the action
   # taxonomy treats as a `result` and would redden the PR test verdict.
-  # Exit 81 is reserved for that case alone (die_empty_verdict in the
-  # wrappers); wrong-conversation mismatch and ordinary provider failures exit
-  # 1 and fall through to provider-failed below.
-  if [ "$PROVIDER_RC" -eq 81 ] || grep -q '^AI_REVIEW_EMPTY_VERDICT ' "$TMP_ERR" 2>/dev/null; then
+  # The AI_REVIEW_EMPTY_VERDICT marker is the contract: only a turn that
+  # printed it is booked missing-verdict. A bare nonzero exit (including 81)
+  # is not enough — another provider can exit 81 for an unrelated failure.
+  if grep -q '^AI_REVIEW_EMPTY_VERDICT ' "$TMP_ERR" 2>/dev/null; then
     "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true
     die "$provider returned an empty or blocked verdict; review-step failure, reroute (never a PASS)."
   fi
