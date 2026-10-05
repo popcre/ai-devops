@@ -2,7 +2,7 @@
 
 ## STATUS — read first
 
-Planning date: 2026-09-27 EDT. Parent: [ai-devops #903](https://github.com/popcre/ai-devops/issues/903). This is a planning document; it authorizes no production change or default-tool switch. [Current continuation handoff](HANDOFF.d/2026-09-28T1136Z-edge-dev3-codex-agent-evidence-903-wrapup.md) carries the next-session brief; the [planning handoff](HANDOFF.d/2026-09-28T0250Z-edge-dev3-codex-agent-evidence-jj-plan.md) remains the historical plan record.
+Planning date: 2026-09-27 EDT. Parent: [ai-devops #903](https://github.com/popcre/ai-devops/issues/903). This is a planning document; it authorizes no production change or default-tool switch. [Current continuation handoff](HANDOFF.d/2026-09-28T1136Z-edge-dev3-codex-agent-evidence-903-wrapup.md) carries the next-session brief; the the planning handoff (retired; see git history) remains the historical plan record.
 
 | Step | Outcome | State | Acceptance evidence |
 |---|---|---|---|
