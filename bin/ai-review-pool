@@ -374,9 +374,25 @@ fi
 [ -s "$TMP_TEXT" ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure empty-report >/dev/null 2>&1 || true; die "$provider returned an empty report."; }
 
 # The prompt asks for an early provisional verdict and the final verdict LAST
-# under a literal heading, so only the last `## Verdict` heading counts; an
-# earlier (provisional) one must never be read as the final answer.
-VERDICT_LINE="$(awk '/^## Verdict[[:space:]]*$/{n=NR} END{print n+0}' "$TMP_TEXT")"
+# under a literal heading, so only the last `## Verdict` heading counts for
+# providers whose brief uses that shape.  Gemini is the exception: its runner
+# (ai-gemini:303) validates the FIRST `## Verdict` block, so the pool must
+# agree with that gate or a contradictory body (REJECT first, APPROVE last)
+# would be recorded as approval while ai-gemini already accepted the REJECT.
+# For Gemini, contradictory verdicts are refused (fail closed).  For other
+# providers a provisional-then-final pair is expected; only the last counts.
+if [ "$provider" = gemini ]; then
+  ALL_VERDICTS="$(awk '/^## Verdict[[:space:]]*$/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/,""); if($0 ~ /^(APPROVE|REJECT|BLOCKED)$/) print}' "$TMP_TEXT")"
+  UNIQUE_VERDICTS="$(printf '%s\n' "$ALL_VERDICTS" | sort -u)"
+  VERDICT_COUNT="$(printf '%s\n' "$UNIQUE_VERDICTS" | grep -c . || true)"
+  if [ "$VERDICT_COUNT" -gt 1 ]; then
+    "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true
+    die "$provider returned contradictory ## Verdict values; refusing ambiguous verdict."
+  fi
+  VERDICT_LINE="$(awk '/^## Verdict[[:space:]]*$/{print NR; exit}' "$TMP_TEXT")"
+else
+  VERDICT_LINE="$(awk '/^## Verdict[[:space:]]*$/{n=NR} END{print n+0}' "$TMP_TEXT")"
+fi
 VERDICT="$(awk -v n="$VERDICT_LINE" 'n>0 && NR==n+1{gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' "$TMP_TEXT")"
 case "$VERDICT" in APPROVE|REJECT|BLOCKED) ;; *) "$LIFECYCLE" fail --state "$STATE" --elapsed "$ELAPSED" --failure missing-verdict --report "$TMP_TEXT" >/dev/null 2>&1 || true; die "$provider returned no valid ## Verdict.";; esac
 # Binding and the analysis floor are judged on the MODEL BODY - stdout only,
