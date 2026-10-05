@@ -981,8 +981,10 @@ pin_bump_qualify() { # PROVIDER
 
   # Kimi may borrow another user's credentials and execute THAT user's
   # ~/.kimi-code/bin/kimi for the live turn (ai-kimi run_turn). The bytes that
-  # run are the switched user's binary, not the caller's — re-resolve and
-  # re-hash those before the live smoke so evidence binds the tested bytes.
+  # run are the switched user's binary, not the caller's — re-resolve,
+  # re-hash, and re-check the version pin on those bytes before the live
+  # smoke so evidence binds the tested bytes and an unsupported build cannot
+  # slip through on the caller's version check.
   if [ "$provider" = kimi ]; then
     switched_as="$(printf '%s' "$out" | sed -n 's/.*borrowed from user "\([^"]*\)".*/\1/p' | head -1)"
     if [ -n "$switched_as" ]; then
@@ -992,6 +994,13 @@ pin_bump_qualify() { # PROVIDER
         cli_sha="$(sha256sum "$cli_bin" | awk '{print $1}')"
         cli_version_text="$(timeout "${CHECK_TIMEOUT}s" "$cli_bin" --version 2>/dev/null || true)"
         cli_version="$("$policy_bin" parse "$cli_version_text")"
+        set +e; "$policy_bin" check "$provider" "$cli_version_text" >/dev/null; rc=$?; set -e
+        if [ "$rc" -ne 0 ]; then
+          quarantine "$provider" pin-mismatch
+          printf 'ai-review-preflight: pin-bump-qualify %s pin mismatch on the borrowed-user binary: installed version %s does not satisfy policy %s:%s.\n' \
+            "$provider" "${cli_version:-unreadable}" "$mode" "${want:-unpinned}" >&2
+          return 1
+        fi
       else
         printf 'ai-review-preflight: kimi live smoke would run as user %s but its binary cannot be resolved; untested bytes are not authorized.\n' "$switched_as" >&2
         return 1

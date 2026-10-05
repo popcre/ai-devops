@@ -414,5 +414,39 @@ PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
 check "no qualification is published when the switched binary is unknown" \
   "! test -f '$TMP/state/kimi-live-qualified.json'"
 
+# When the borrowed-user binary is reachable but does NOT satisfy the version
+# pin, that miss must be caught on the switched bytes (pin-mismatch), not
+# hidden behind the caller's passing version check.
+rm -rf "$TMP/state"; mkdir -p "$TMP/state"
+mkdir -p "$TMP/fakehome-nosuchuser/.kimi-code/bin"
+cat > "$TMP/fakehome-nosuchuser/.kimi-code/bin/kimi" <<'FEOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then printf 'kimi 1.0.0\n'; exit 0; fi
+echo health ok
+FEOF
+chmod +x "$TMP/fakehome-nosuchuser/.kimi-code/bin/kimi"
+cat > "$TMP/bin/su" <<FEOF
+#!/usr/bin/env bash
+# Test stub for su - user -c cmd: run cmd with HOME pointed at the fake home.
+[ "\${1:-}" = "-" ] || exit 1
+user="\$2"; shift 2
+[ "\${1:-}" = "-c" ] || exit 1
+export HOME="$TMP/fakehome-\$user"
+exec bash -c "\$2"
+FEOF
+chmod +x "$TMP/bin/su"
+# The caller's binary satisfies the pin; only the borrowed-user binary does not.
+PB_OUT="$(env AI_PROVIDER_VERSIONS_FILE="$PB_POLICY" \
+    AI_PROVIDER_VERSION_BIN="$ROOT/bin/ai-provider-version" \
+    AI_REVIEW_KIMI_WRAPPER="$TMP/bin/pb-doctor-kimi-switch" \
+    AI_REVIEW_QUARANTINE_DIR="$TMP/state" \
+    PATH="$TMP/bin:$PATH" \
+    "$SCRIPT" pin-bump-qualify kimi 2>&1)"; PB_RC=$?
+[ "$PB_RC" -ne 0 ] && printf '%s' "$PB_OUT" | grep -q 'pin mismatch' \
+  && ok "a version miss on the borrowed-user binary is caught as pin-mismatch" \
+  || { bad "a version miss on the borrowed-user binary is caught as pin-mismatch"; printf '%s\n' "$PB_OUT"; }
+check "the borrowed-user version miss quarantines with pin-mismatch" \
+  "env AI_PROVIDER_VERSIONS_FILE=\"$PB_POLICY\" AI_REVIEW_QUARANTINE_DIR=\"$TMP/state\" \"$SCRIPT\" status kimi | jq -e '.failure_class==\"pin-mismatch\"'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
