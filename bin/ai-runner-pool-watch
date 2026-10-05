@@ -21,6 +21,8 @@
 #   AI_RUNNER_POOL_WATCH_CONFIG   settings (default <repo>/config/local-watch.json)
 #   AI_RUNNER_POOL_WATCH_HOST     hostname override (tests)
 #   AI_RUNNER_POOL_WATCH_GH       gh/ai-gh override (tests)
+#   AI_DEVOPS_SECRETS_ENV         host-local secrets env file (default
+#                                 ~/.config/ai-devops/secrets/watchdog.env)
 #   RUNNER_POOL_READ_TOKEN        Administration: Read-only (never logged)
 set -euo pipefail
 
@@ -40,9 +42,20 @@ REPO="${AI_RUNNER_POOL_WATCH_REPO:-popcre/ai-devops}"
 
 cfg(){ jq -er "$1" "$CONFIG" || die "config $CONFIG has no $1"; }
 
+# Host-local secrets (chmod 600) so the scheduled tick can see the token
+# without putting it in the public repo or crontab. See docs/watchdog-duty-pool.md §7.
+load_secrets_env(){
+  [ -n "${RUNNER_POOL_READ_TOKEN:-}" ] && return 0
+  local f="${AI_DEVOPS_SECRETS_ENV:-$HOME/.config/ai-devops/secrets/watchdog.env}"
+  [ -f "$f" ] || return 0
+  # shellcheck disable=SC1090
+  . "$f"
+}
+
 cmd_check(){
   mkdir -p "$HOME_DIR"
   rotate_log "$LOG" "$(cfg .log_max_bytes 2>/dev/null || echo 5000000)"
+  load_secrets_env
   local roster online
   if [ -z "${RUNNER_POOL_READ_TOKEN:-}" ]; then
     printf '%s ALARM: RUNNER_POOL_READ_TOKEN is not set; cannot see the runner pool\n' "$(stamp)" >> "$LOG"
