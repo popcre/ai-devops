@@ -181,9 +181,28 @@ RECEIPT_HEAD="$(jq -r .identity.head "$RECEIPT")"; RECEIPT_PACKET="$(jq -r .pack
 check "a receipt already bound to another generated session refuses" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$RECEIPT_PACKET' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session wrong-session' >/dev/null 2>&1"
 check "wrong source packet cannot be rebound as a continuation" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$(printf f%.0s {1..64})' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session $RECEIPT_ID' >/dev/null 2>&1"
 if ln -s "$RECEIPT" "$TMP/linked-receipt.json" 2>/dev/null; then
-check "linked continuation receipt refuses" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$TMP/linked-receipt.json' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$RECEIPT_PACKET' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session $RECEIPT_ID' >/dev/null 2>&1"
+  # MSYS ln -s defaults to a regular deep copy. Prove the actual native kind
+  # before claiming link-refusal coverage; Windows junction coverage below is
+  # mandatory and does not depend on native file-symlink privileges.
+  LINK_FIXTURE_KIND="$("$RECEIPT_PYTHON" - "$TMP/linked-receipt.json" "$RECEIPT" <<'PYLINKKIND'
+import os,stat,sys
+link,original=sys.argv[1:]
+observed=os.lstat(link)
+if stat.S_ISLNK(observed.st_mode) or getattr(observed,'st_file_attributes',0)&0x400:
+    print('native-link')
+elif os.name=='nt' and stat.S_ISREG(observed.st_mode) and (observed.st_dev,observed.st_ino)!=(os.stat(original).st_dev,os.stat(original).st_ino) and open(link,'rb').read()==open(original,'rb').read():
+    print('regular-copy')
+else:
+    raise SystemExit('link fixture has unknown native metadata or content')
+PYLINKKIND
+  )"
+  if [ "$LINK_FIXTURE_KIND" = native-link ]; then
+    check "native linked continuation receipt refuses" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$TMP/linked-receipt.json' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$RECEIPT_PACKET' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session $RECEIPT_ID' >/dev/null 2>&1"
+  else
+    check "MSYS emulated link is a verified independent regular receipt copy" "[ '$LINK_FIXTURE_KIND' = regular-copy ] && PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$TMP/linked-receipt.json' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$RECEIPT_PACKET' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session $RECEIPT_ID'"
+  fi
 else
-  printf "  skip linked receipt refusal: filesystem cannot create symlinks\n"; SKIP=$((SKIP+1))
+  printf "  FAIL required link fixture could not be created\n"; FAIL=$((FAIL+1))
 fi
 # Exercise the actual packet verifier's create-only republish, not the packet stub.
 REAL_REPO="$TMP/real-packet-repo"; mkdir -p "$REAL_REPO/.ai/reviews"
