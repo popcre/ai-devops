@@ -3,40 +3,37 @@
 Companion handoff: [`HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-efficiency.md`](HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-efficiency.md)
 (That handoff links back here. Root `HANDOFF.md` stays the static pointer.)
 
+**Revision 2026-10-06 (owner):** the executing session is a **coordinator only**.
+It does not implement. It spins up **one subagent per phase (including Phase 4)**,
+parallelizes independent phases, and **runs the whole plan through to the end on
+its own** (code → tests → PR → merge → live proof). No stop for the owner unless
+a genuine business-meaning choice appears.
+
 ## STATUS
 
 | Step | State | Evidence (artifact, never a bare number) |
 |---|---|---|
-| P1.1 rate_limited provider-only | ✅ done | `951d55dc`, `8e9364ad`; `bash tests/test-ai-stepfun.sh`: 80 passed, 0 failed, 2 platform skips; 402 quota exits without retry |
-| P1.2 retry only on failure | ✅ done | `951d55dc`; successful verdict with stderr 429 retained by the same suite |
-| P1.3 false-positive guard test | ✅ done | `951d55dc`; provider-channel, JSONL-text, and non-rate failure cases in `tests/test-ai-stepfun.sh` |
-| P2.1 drop duplicated VERDICT preamble (OpenCode) | ✅ done | `9f3db3d4`; semantic prompt tests: 77 passed, 0 failed, 2 platform skips |
-| P2.2 move unique `$rel`/`$head` to prompt end | ✅ done | `9f3db3d4`; stable-prefix assertion in `tests/test-ai-stepfun.sh` |
-| P2.3 dead compaction cleanup or comment | ✅ done | `9f3db3d4`; `jq empty config/opencode-stepfun/opencode.json` passed |
-| P3.1 Windows gate: `grep`/`head -n` | ✅ done | `2e50a4c7`; hash-pinned grep, bounded search and slices; Windows-shell suite 52 passed, 0 failed |
-| P3.2 Windows agent tools / docs | ✅ done | `2e50a4c7`; Windows agent and live documentation match gate grammar |
-| P3.3 path-clamp adversarial tests | ✅ done | `2e50a4c7`; `tests/test-ai-stepfun-windows-shell.sh`: 52 passed, 0 failed |
-| P4.1 resume session on 429 retry | ⏭ skipped — security criterion unmet | `6b4375e5`; engine session files live in model-writable per-turn state deleted after each turn; saved ID alone cannot resume without retaining that state |
-| P4.2 optional warm cache dir (security judgment) | ⏭ skipped — security criterion unmet | `6b4375e5`; cross-review leakage analysis in `docs/config-inventory.md` and fake-engine isolation test in `tests/test-ai-stepfun.sh` |
-| P5.1 record cache/session counters | ✅ done | `b07d79fb`; fixture test and owner-only sidecar; StepFun suite 80 passed, 0 failed, 2 platform skips |
-| P5.2 live proof on both platforms | ⬜ open | Linux `bin/ai-stepfun doctor --live`: `OK engine=stepcode model=step/step-5-preview live=verified`; Windows live provider proof and post-merge confirmation pending on [landing issue #1336](https://github.com/popcre/ai-devops/issues/1336) |
+| W0 coordinator setup (branch, gates, briefs) | ✅ done with variance | `ai-task-gates start --class reviewer-safety`; integration worktree from `73cf6714`; phase briefs delivered in agent dispatch messages because the revised §9 was still uncommitted on edge-dev, so no brief files were created |
+| W1a Phase 1 subagent (retry detector) | ✅ done | `951d55dc`, `8e9364ad`; StepFun suite 80 passed, 0 failed, 2 platform skips; 402 quota exits without retry |
+| W1b Phase 3 subagent (Windows gate) | ✅ done | `2e50a4c7`; Windows-shell suite 52 passed, 0 failed |
+| W2a Phase 2 subagent (prompt de-dup) | ✅ done | `9f3db3d4`; semantic prompt suite 77 passed, 0 failed, 2 platform skips |
+| W2b Phase 4 subagent (sessions/cache) | ⏭ skip-unsafe | `6b4375e5`; session files require model-writable state deleted by LOCKED-7; warm cache risks cross-review content or key leakage; isolation regression passed |
+| W3 Phase 5 subagent (measure + live proof) | ✅ counters; live proof open | `b07d79fb`; 80 StepFun checks and 52 Windows-shell checks passed; Linux and installed Windows `doctor --live` passed; updated-install proof pending |
+| W4 integrate, PR, exact-head review if required, merge | ⬜ in progress | [PR #1337](https://github.com/popcre/ai-devops/pull/1337); independent Muse approved `3f3a738e`, then preserved coordinator plan was integrated, so a fresh exact-head review is required |
+| Live proof checklist on landing issue | ⬜ open | [Issue #1336](https://github.com/popcre/ai-devops/issues/1336) retains `- [ ] live proof` until post-merge updated-install checks |
 
 **Muse review (2026-10-06):** `VERDICT: REVISE plan` —
-`.ai/reviews/muse-stepfun-token-efficiency-plan-r2-20261006T124204Z-968393-5381.md`
-(session `stepfun-token-efficiency-plan-r2`). Six must-fix items folded in
-below (P1.1/1.2/2.1/3.1/4). Do not reopen B1–B3.
+`.ai/reviews/muse-stepfun-token-efficiency-plan-r2-20261006T124204Z-968393-5381.md`.
+Six must-fix items are already in the phase briefs (B1–B3 / M1–M3). Do not reopen.
 
 **GLM 5.3 review (2026-10-06):** `VERDICT: REVISE plan` —
-`.ai/reviews/glm-stepfun-token-efficiency-plan-review-ec1b178ec9de9d8716c24d5484644b6f534d3a9419e849d75c63f21b8b86c711.md`
-(session `stepfun-token-efficiency-plan-review`). Confirmed Muse B1–B3/M1–M3
-closed. F1 (stderr must keep bare `429`, case-insensitive) and F2 (`detect_engine`
-before `$full`) folded into P1.1 and P2.1. F3 advisory rows folded into P1.3/P3.3.
+`.ai/reviews/glm-stepfun-token-efficiency-plan-review-ec1b178ec9de9d8716c24d5484644b6f534d3a9419e849d75c63f21b8b86c711.md`.
+F1/F2/F3 folded in (stderr keeps bare `429`; `detect_engine` before `$full`).
 
-*File rename note:* this plan was first written as `plan_stepfun-token-efficiency.md`
-but `.gitignore` `**/*token*` hid it from reviewer snapshots. Renamed to
-`plan_stepfun-harness-efficiency.md` so it is reviewable and committable.
+*File rename note:* never name a doc `*token*` — `.gitignore` `**/*token*` hides it.
 
-**Where a fresh session starts:** Phase 1 (P1.1). Re-read Phases 2–5 before starting each later phase (drift check). Nothing is implemented yet; this plan is the only written design.
+**Execution record:** Waves 0–3 are recorded in STATUS. Wave 4 and post-merge
+live proof remain open.
 
 ---
 
@@ -55,6 +52,8 @@ When this is done:
   (especially on Windows).
 - The same instructions are not paid for twice in one turn.
 - We can measure cache hits instead of guessing.
+- The work **ships**: tests green, PR merged on `origin/main`, live proof on the
+  landing issue — without asking the owner to babysit.
 
 If any step below conflicts with this goal, the goal wins — stop and flag it.
 
@@ -76,11 +75,10 @@ Linux implementation runs.
 
 ## 3. What triggered this work
 
-Owner request (MiMo chat, 2026-10-06): after two read-only audits (Windows
-harness + Linux harness) of StepFun token use — persistent sessions, maximum
-caching, and no duplicate resends — write a plan to fix every finding. No
-implementation was authorized in that request beyond writing the plan and
-running it by Muse.
+Owner (MiMo chat, 2026-10-06): two audits of StepFun token use, then a fix plan
+reviewed by Muse and GLM. Later the same day: **rewrite the plan so the session
+acts only as coordinator, one subagent per phase (including Phase 4), parallel
+where independent, and the session sees the whole plan through to the end.**
 
 Reproduce the current waste without live paid calls:
 
@@ -97,554 +95,529 @@ Reproduce the current waste without live paid calls:
 **In scope**
 
 - `bin/ai-stepfun` retry/detection, prompt assembly, session flags, logging.
-- `bin/ai-stepfun-windows-shell` command grammar (search/slice verbs only).
-- `config/opencode-stepfun/opencode.json` and agent profiles
-  (`stepfun-review.md`, `stepfun-review-windows.md`; implement profiles only if
-  a change is shared).
+- `bin/ai-stepfun-windows-shell` command grammar (search/slice verbs only) and
+  runner allowlist provisioning for `grep`/`head`.
+- `config/opencode-stepfun/opencode.json` and agent profiles.
 - Tests: `tests/test-ai-stepfun.sh`, `tests/test-ai-stepfun-windows-shell.sh`.
-- Matching docs: `docs/config-inventory.md` StepFun row, `skills/shared/stepfun/SKILL.md`,
-  `docs/reviewer-rotation-rules.md` StepFun row if behavior changes, this plan's STATUS.
-- Measurement of cache/session counters (offline fixtures + optional live doctor).
+- Matching docs and this plan's STATUS as waves complete.
+- Phase 4 session/cache work **in scope** (owner 2026-10-06: include Phase 4).
+- Measurement + live proof + PR merge — the coordinator owns shipping.
 
 **NOT in this plan**
 
 - Changing StepFun model pin, pricing, credits, or the allocator membership row.
 - GLM / Muse / DeepSeek / Grok / Qwen wrappers (except as read-only reference).
 - `bin/ai-review-packet` packet format or seal rules (keep injecting by reference).
-- Windows mount isolation or bubblewrap on Windows (owner-accepted residual,
-  `docs/reviewer-rotation-rules.md` rule 12 area).
+- Windows mount isolation or bubblewrap on Windows (owner-accepted residual).
 - Provider API changes, new MCP servers, or 1Password changes.
 - Implementing `implement` on Windows (still refused by design).
-- Live paid StepFun traffic beyond the optional Phase 5 doctor measurement.
+- Softening any safety gate (path clamp, wipe, no-remote, implement-never-retry).
 
 ## 5. Current state of the code
 
-All of this is **committed on the current upstream of `main`** as of the audit
-(2026-10-06). No fix work has been started. The landing checkout is
-landing-only; implement in a dedicated worktree.
+All of this is **on `origin/main`** as of 2026-10-06 (`73cf671` plan landed).
+No fix work has been started. The landing checkout is landing-only.
 
 | Area | State | Exact refs |
 |---|---|---|
-| Retry / rate detect | Works, **wrong trigger** | `bin/ai-stepfun:176-193` (`rate_limited`, `run_step_retry`) |
-| Credit detect (correct pattern) | Works | `bin/ai-stepfun:439-448` (`credit_stop`) |
-| StepCode turn | Sessionless | `bin/ai-stepfun:405` (`step -p --no-session`), comment `:357` |
-| OpenCode per-run tree | Fresh + deleted | `bin/ai-stepfun:210-219`, `:240`, `:303`, `:344` |
-| Review prompt | Duplicates agent VERDICT text; unique `$rel` early | `bin/ai-stepfun:600-607`; `config/opencode-stepfun/agent/stepfun-review.md:38-42` |
-| Windows review tools | Only `bash` + shell | `config/opencode-stepfun/agent/stepfun-review-windows.md:5-17` |
-| Windows shell grammar | `ls\|cat\|head` one path, no flags | `bin/ai-stepfun-windows-shell:256-261` |
-| OpenCode config | No cache keys; inert `compaction` | `config/opencode-stepfun/opencode.json:7-12`, `:17-19` |
-| Packet injection | By reference (`MANIFEST.md`) — keep | `bin/ai-stepfun:600-601` |
-| Tests | Genuine 429 covered; false-positive **not** covered | `tests/test-ai-stepfun.sh:139`, `:212` (wipe assert) |
+| Retry / rate detect | Works, **wrong trigger** | `bin/ai-stepfun` `rate_limited` / `run_step_retry` (~176–200) |
+| Credit detect (correct pattern) | Works | `credit_stop` (~439–448) |
+| StepCode turn | Sessionless | `--no-session` (~405), comment ~357 |
+| OpenCode per-run tree | Fresh + deleted | ~210–219, ~240, ~303, ~344 |
+| Review prompt | Duplicates VERDICT; unique `$rel` early | `cmd_review` `$full` (~605–612); `stepfun-review.md:38-42` |
+| Windows review tools | Only `bash` + shell | `stepfun-review-windows.md:5-17` |
+| Windows shell grammar | `ls\|cat\|head` one path, no flags | `ai-stepfun-windows-shell` (~256–261) |
+| OpenCode config | No cache keys; inert `compaction` | `opencode.json:7-12`, `:17-19` |
+| Packet injection | By reference — keep | `$rel/MANIFEST.md` in review prompt |
+| Tests | Genuine 429 covered; false-positive **not** | `tests/test-ai-stepfun.sh` ~139 |
 
 ## 6. Key findings and root cause
 
-From two read-only audits (Windows `explore-1`, Linux `explore-2`, 2026-10-06).
-
 1. **HIGH — False-positive rate-limit retry re-buys whole turns.**  
    `rate_limited()` greps the *entire assistant output* for bare
-   `429|rate_limited|Too Many Requests` (`bin/ai-stepfun:184`). `run_step_retry`
-   re-runs when that matches **even if `rc=0`** (`:188-189`), up to
-   `RATE_RETRIES=2` (`:180`) after `RATE_PAUSE=65s`. A successful review that
-   merely quotes "429" is discarded and re-sent. `credit_stop` already does this
-   correctly (provider channels only: stderr + `^4[0-9][0-9]: {` on stdout,
-   `:439-448`).
+   `429|rate_limited|Too Many Requests`. `run_step_retry` re-runs when that
+   matches **even if `rc=0`**, up to `RATE_RETRIES=2` after `RATE_PAUSE=65s`.
+   `credit_stop` already does provider-channel-only correctly.
 
 2. **HIGH (Windows) — exploration is whole-file `cat` only.**  
-   Gate allows `ls|cat|head` with exactly one path and no flags
-   (`ai-stepfun-windows-shell:256-261`); `head -n N` is refused as "extra args".
-   Agent disables `read/glob/grep/list/find` (`stepfun-review-windows.md:7-14`).
-   Finding a symbol forces full-file tokens.
+   Gate allows `ls|cat|head` one path, no flags; agent disables
+   `read/glob/grep/list/find`. Finding a symbol forces full-file tokens.
+   `grep` also needs runner-allowlist provisioning and a closed-grammar /
+   metachar-filter rework (code label: "Layer 1: closed grammar").
 
 3. **MED — retries and every wrapper turn are cold.**  
-   No `--session`/`--continue`/`--resume`. StepCode: `--no-session` (`:405`).
-   OpenCode: fresh XDG per turn, deleted after (`:240`, `:303`, `:344`);
-   `sessionID` is never captured (`:306` extracts only `type=="text"`).
-   Contrast: `bin/ai-deepseek:129,135` persists `--session`; `bin/ai-muse:794`
-   resumes exact sessions.
+   No `--session`/`--continue`. StepCode `--no-session`. OpenCode fresh XDG
+   wiped after; `sessionID` never captured. Contrast `bin/ai-deepseek` /
+   `bin/ai-muse` session persistence.
 
 4. **MED — no provider cache configuration; prefix cache can be broken.**  
-   `config/opencode-stepfun/opencode.json` has only `baseURL`/`apiKey`
-   (`:17-19`). Review prompt embeds per-run unique `$rel` early (`:601`) and
-   `$head` in the verdict template (`:605-607`), weakening any cross-run prefix
-   reuse. StepFun Linux uses only `config/opencode-stepfun/`, not GLM's
-   `config/opencode/`.
+   Review prompt embeds per-run unique `$rel` early. No cache keys in
+   `opencode.json`.
 
 5. **MED/LOW — duplicated instructions.**  
-   Review `$full` preamble (`:600-607`) nearly verbatim repeats
-   `stepfun-review.md:29-42` (and the Windows profile `:20-38`), including
-   VERDICT format twice (~150–200 tokens/review).
-
-6. **LOW — dead `compaction` block** in `opencode.json:7-12` for single-shot
-   runs (Muse tuning copied in; inert).
+   Review `$full` repeats agent-profile VERDICT text (~150–200 tokens/review).
 
 **Already efficient — do not "fix"**
 
-- One model turn per invocation; no parallel fan-out; no conversation history
-  re-send across `review`/`ask`/`implement` (`:610`, `:643`).
-- Sealed packet injected **by reference**, never inlined (`:601`).
-- Short static agent profiles; Windows omits 8 tool schemas.
-- `--no-extensions --no-skills --no-prompt-templates --no-themes` on StepCode
-  (`:407`).
-- `credit_stop` correctly ignores assistant content (`:439-448`).
-- Implement is never blindly retried (`:179`).
-- Identity-keyed `REVIEW_TAG` reuses sandbox copies (`:585`).
-- Host-side digest checks are free in tokens (`:613-615`).
+- One model turn per invocation; no history re-send across review/ask/implement.
+- Sealed packet by reference, never inlined.
+- Short static agent profiles; Windows omits unused tool schemas.
+- `credit_stop` ignores assistant content; implement never auto-retried.
+- Identity-keyed `REVIEW_TAG`; host-side digest checks are free in tokens.
 
 ## 7. Approaches considered and REJECTED, and why
 
 | Approach | Why rejected |
 |---|---|
-| Inline the whole review packet / diff into the prompt | Already avoided on purpose; seals stay authoritative; packet-by-reference is cheaper and safer. Do not regress. |
-| Remove bubblewrap / stop wiping the per-run tree to "keep cache" | Security boundary (#1086): no SSH/git/gh/1P sockets or keys. Token savings do not justify credential exposure. Any warm state is **additive and optional**, never a removal of the wipe. |
-| Enable full `grep`/`read`/`glob` tools on Windows | Residual risk: Windows is not mount-isolated. Prefer a *narrower* gate expansion (`grep -n`, `head -n`) over reopening file tools wholesale. If the gate cannot express it safely, fall back to documenting accepted cost. |
-| Retry implement runs like review/ask | Explicitly out: "Implementation runs are never re-run blindly: the clone is kept" (`:179`). Keep. |
-| Change model / raise timeout / shrink REPORT_FLOOR | Not token efficiency; changes review quality or safety floor (`:53`). |
-| Copy GLM's `config/opencode/` for StepFun | StepFun owns `config/opencode-stepfun/` (`:63`, `:216-218`); sharing would blur profiles and break the Windows pin. |
-| "Just measure live with paid calls" first | Owner asked for a fix plan; measurement is Phase 5 and must not block Phases 1–3. |
+| Coordinator implements everything itself | Owner 2026-10-06: coordinator only; one subagent per phase. |
+| One mega-subagent for all phases | Loses parallelism and isolation; owner asked for per-phase agents. |
+| Inline the whole review packet into the prompt | Regresses seal model and token cost. |
+| Remove bubblewrap / stop wiping the per-run tree | Security boundary (#1086). Warm state is additive only. |
+| Full `read`/`glob`/`grep` tools on Windows | Not mount-isolated. Prefer narrow gate expansion; descope `grep` if unsafe. |
+| Retry implement runs like review/ask | Explicitly forbidden (`implement-never-retried`). |
+| Share GLM's `config/opencode/` | StepFun owns `config/opencode-stepfun/`. |
+| Stop mid-plan and ask the owner for a go/no-go per wave | Owner: see the plan through to the end on its own. |
 
 ## 8. Design decisions already made (dated)
 
 **LOCKED (do not relitigate)**
 
-1. *(2026-10-06)* `rate_limited` must match **provider error channels only**
-   (stderr + StepCode `^429: \{` / `^4[0-9][0-9]: \{` on stdout), never
-   assistant body text — mirror `credit_stop` (`:439-448`).
-2. *(2026-10-06)* Retry only when the turn **failed** (`rc != 0`) **or** a true
-   provider 429 is present. A successful review that quotes "429" is kept.
-3. *(2026-10-06)* `implement` is never auto-retried (`:179` stays).
-4. *(2026-10-06)* Sealed packet stays by reference (`MANIFEST.md`); never inline.
-5. *(2026-10-06)* Verdict-format instructions live in **one** place for OpenCode
-   paths (the agent profile); the user prompt must not repeat them.
-6. *(2026-10-06)* Unique per-run paths (`$rel`) and `$head` move to the **end**
-   of the user prompt so the static prefix stays cache-stable across retries.
-7. *(2026-10-06)* Security wipe of per-run XDG/home/tmpfs remains. Session or
-   cache persistence is only allowed if it does not leak credentials into the
-   model sandbox.
+1. *(2026-10-06)* `rate_limited` matches **provider error channels only** —
+   stderr may keep word-bounded bare `429` (case-insensitive; GLM F1) plus
+   `rate_limited` / `Too Many Requests` / `HTTP 429`; stdout only `^429: \{`
+   and `^4[0-9][0-9]: \{`; OpenCode JSONL only non-`text` error events.
+   Never match assistant body.
+2. *(2026-10-06)* Retry only when the turn failed (`rc != 0`) **or** report is
+   empty/malformed with a true provider 429. A well-formed report is kept even
+   if error channels mention 429 (Muse M2).
+3. *(2026-10-06)* `implement` is never auto-retried.
+4. *(2026-10-06)* Sealed packet stays by reference.
+5. *(2026-10-06)* Verdict-format instructions live in **one** place on OpenCode
+   (agent profile). Gate on `ENGINE` after `detect_engine` (GLM F2), never on
+   `STEPFUN_OC_AGENT` alone (Muse B1).
+6. *(2026-10-06)* Unique `$rel` / `$head` move to the **end** of the user prompt.
+7. *(2026-10-06)* Security wipe of per-run XDG/home/tmpfs remains (LOCKED-7).
+   Session/cache persistence is allowed only if it does not leak credentials or
+   cross-review content into the model sandbox.
+8. *(2026-10-06)* Coordinator never implements and never bypasses a gate to
+   "finish faster". Phase 4 is **in scope**; if security criteria cannot be met,
+   the Phase 4 subagent reports `skip-unsafe` with evidence — it does not weaken
+   the wipe.
+9. *(2026-10-06)* One subagent per phase. Parallel only when file sets are
+   disjoint (see §9 wave graph). Coordinator holds the integration branch.
 
-**OPEN (implementer's judgment, with criteria)**
+**OPEN (subagent judgment, with criteria)**
 
-A. *(2026-10-06)* Exact Windows gate grammar for `grep`/`head -n`: allow the
-   minimum that enables content search and slices, still path-clamped to the
-   review folder, still rejecting `-r` recursion outside, `--`, and absolute
-   host paths. Criteria: adversarial table in Phase 3 all green; residual risk
-   no worse than today's `cat` of whole files (which already dumps content).
-B. *(2026-10-06)* Whether to persist an OpenCode `sessionID` per identity for
-   429 retry resume vs. re-send. Criteria: resume must not reuse a tree that
-   held secrets; prefer a session id file under `$STATE_DIR` that is **not**
-   inside the model-visible sandbox copy.
-C. *(2026-10-06)* Warm cache dir (outside bubblewrap) vs. accepted cold start.
-   Criteria: documented in `docs/config-inventory.md`; default stays safe (off
-   or isolated); measure before claiming a win.
-D. *(2026-10-06)* Whether StepFun's openai-compatible endpoint does automatic
-   prefix caching at all. Criteria: Phase 5 counters (`cache.read` /
-   equivalent) or documented API behavior; if no cache exists, Phase 2 is still
-   worth it for input-token de-duplication.
+A. Windows gate grammar exactness (P3.1): adversarial table all green; if not,
+   ship `head -n` only and skip `grep`.
+B. Session resume (P4.1): session id under `$STATE_DIR`, never inside the
+   model-visible copy; wipe still runs.
+C. Warm cache (P4.2): outside bubblewrap; cross-review leakage analysis required.
+D. Whether StepFun's API does automatic prefix caching — Phase 5 measures.
 
-## 9. The plan — numbered, ordered steps
+## 9. Execution model — coordinator + phase subagents
 
-### Phase 1 — Stop false-positive full re-sends (highest impact, self-contained)
+### 9.1 Coordinator contract (the executing session)
 
-**Context cut point.** After Phase 1 lands and tests pass, a fresh session may
-start Phase 2 after re-reading this plan.
+The coordinator **only**:
 
-#### P1.1 Make `rate_limited` provider-channel-only
+1. Declares task class (`ai-task-gates start --class code` or `reviewer-safety`
+   if the change set is treated as reviewer-wrapper code) and rechecks before
+   PR wait / ship.
+2. Creates **one integration worktree** (not the landing checkout) on branch
+   `mimo/stepfun-harness-efficiency-impl` from current `origin/main`.
+3. Writes each phase brief (§9.4) into a file under the worktree
+   `.ai/tmp/phase-briefs/` (gitignored) and **spawns one subagent per phase**.
+4. Enforces the wave graph and file ownership (§9.2). Does not edit harness
+   source itself.
+5. Runs the focused suites after each wave, fixes **integration-only** issues
+   (merge conflicts, STATUS updates), and records STATUS artifacts.
+6. Opens the PR, obtains any required exact-head independent review
+   (reviewer-wrapper path), merges through the queue, confirms `origin/main`.
+7. Ensures live-proof checklist item is created on the landing issue and Phase 5
+   reports the proof (or names who holds it).
+8. Updates this STATUS table and the companion handoff as waves complete.
 
-*Revised 2026-10-06 (Muse M1): exact stderr shapes + `$out.jsonl` wiring.*
+Coordinator **must not**: implement phase steps, weaken gates, push `main`,
+delete another session's files, or ask the owner for technical approval.
 
-- **Change:** `bin/ai-stepfun:184` (`rate_limited`). Replace whole-output grep
-  with the same channel discipline as `credit_stop` (`:439-448`):
+If a subagent returns incomplete work or a blocker without verbatim evidence,
+the coordinator **resumes that subagent** (or re-spawns with a delta brief) —
+it does not silently take over and implement.
+
+### 9.2 Wave graph and file ownership (max safe parallelism)
+
+```
+Wave 0: coordinator setup (branch, gates, briefs)
+    │
+    ├──────────────┬──────────────┐
+    ▼              ▼              │
+Wave 1a         Wave 1b          │
+Phase 1         Phase 3          │   PARALLEL (disjoint owners)
+retry detect    Windows gate     │
+    │              │              │
+    └──────┬───────┘              │
+           ▼                      │
+Wave 2a         Wave 2b          │
+Phase 2         Phase 4          │   PARALLEL after Phase 1 lands
+prompt de-dup   sessions/cache   │   (both need retry code; file lock below)
+    │              │              │
+    └──────┬───────┘              │
+           ▼                      │
+Wave 3: Phase 5 (measure + live proof)  after Waves 1–2
+           │
+Wave 4: integrate, PR, review, merge, verify main
+```
+
+| Phase | Owns (write) | May read | Parallel with |
+|---|---|---|---|
+| **1** | `bin/ai-stepfun` (`rate_limited`, `run_step_retry`, retry helpers only), `tests/test-ai-stepfun.sh` | anything | **3** |
+| **2** | `bin/ai-stepfun` (`cmd_review`, `cmd_ask` prompt assembly only), `config/opencode-stepfun/agent/stepfun-review.md`, `opencode.json` | anything | **4** (after 1) |
+| **3** | `bin/ai-stepfun-windows-shell`, `bin/ai-stepfun` (`write_windows_runners` only), `config/opencode-stepfun/agent/stepfun-review-windows.md`, `tests/test-ai-stepfun-windows-shell.sh`, `tests/fixtures/stepfun-windows-shell/`, docs rows | anything | **1** |
+| **4** | `bin/ai-stepfun` (`run_stepcode`, `run_opencode_turn`, session helpers, `run_step_retry` session args **only after 1 merges**) | anything | **2** (after 1) |
+| **5** | `bin/ai-stepfun` (logging/counters only), counter tests, landing-issue notes | anything | none (last) |
+
+**Integration rule (same-file safety):** all subagents work in the **same
+integration worktree**, but only the owner listed above may write a given
+slice. If two waves must touch `bin/ai-stepfun`, the coordinator runs them
+**sequentially in that file** (Wave 2a then Wave 2b, or the reverse if 4 is
+started first — default **2a then 2b**). Wave 1a and 1b may run truly in
+parallel because their write slices are disjoint (Phase 3's `write_windows_runners`
+is a different function than Phase 1's retry detector).
+
+Alternative if conflicts bite: give each phase its own worktree off the
+integration branch and have the coordinator `git merge` phase branches in wave
+order. Default is one shared worktree + ownership table.
+
+### 9.3 Subagent rules (all phases)
+
+- Report **done** only with verification-gate evidence (command + result path).
+- Report **blocked** with verbatim evidence; do not weaken a gate to finish.
+- Never commit to `main`; never push. Coordinator owns git.
+- Never call 1Password. Never log key material.
+- Keep edits inside the owned slice; if a step needs a file outside the slice,
+  say so in the report and stop that step.
+- Run only the named tests for the phase; coordinator runs the full suites.
+
+### 9.4 Phase subagent briefs
+
+Each brief is written to `.ai/tmp/phase-briefs/phase-N.md` in the integration
+worktree and passed to the subagent. The brief contains: path of this plan,
+owned files, the step text below, locked decisions, adversarial tables, and
+"verification gate + how to report".
+
+---
+
+#### Phase 1 — Stop false-positive full re-sends
+**Subagent:** `phase1-retry` · **Wave 1a** · **Depends on:** none
+
+##### P1.1 Make `rate_limited` provider-channel-only
+
+*Revised 2026-10-06 (Muse M1 + GLM F1).*
+
+- **Change:** `bin/ai-stepfun` `rate_limited`. Same channel discipline as
+  `credit_stop`:
   - **Stderr — provider channel only** (never assistant body). Case-insensitive.
-    Must include: word-bounded `429`, `rate_limited`, `Too Many Requests`,
-    `HTTP 429`. Do **not** drop bare `429` on stderr — today's detector relies
-    on it (e.g. `429 rate limit exceeded`); M2 already makes stderr false
-    positives harmless when the report is well-formed. Match `"status": 429`
-    JSON shapes too. (*Revised 2026-10-06 after GLM F1: the earlier "never
-    bare 429" wording would regress real retries.*)
-  - **Stdout — provider shapes only:** `^429: \{` and `^4[0-9][0-9]: \{`
-    (StepCode HTTP-error lines). Never match assistant prose.
-  - **OpenCode JSONL:** when `$out` is a raw JSONL dump (fallback `:309`/`:352`),
-    also scan sibling `$out.jsonl` if present; count only non-`text` error
-    events. `run_step_retry` must discover that sibling explicitly.
-  - `tests/fixtures/muse-opencode/usage-1.18.12.json` is a shape reference
-    only — do not copy Muse's fixture wholesale.
-- **Behavior when done:** a successful review whose body says "429" or
-  "rate_limited" is treated as success; a real provider 429 still retries.
-- **Depends on:** nothing.
-- **Verification gate:** `tests/test-ai-stepfun.sh` includes P1.3 cases; suite
-  green. `grep -n rate_limited bin/ai-stepfun` shows the narrowed pattern.
+    Include: word-bounded `429`, `rate_limited`, `Too Many Requests`,
+    `HTTP 429`, `"status": 429` JSON shapes. **Do not drop bare `429` on stderr.**
+  - **Stdout — provider rate-limit shape only:** `^429: \{`.
+    Never match assistant prose or a `402: {` quota error; the latter must
+    reach the out-of-credit handler without a retry (`8e9364ad` review fix).
+  - **OpenCode JSONL:** when `$out` is a raw JSONL dump, scan sibling
+    `$out.jsonl` if present; count only non-`text` error events.
+    `run_step_retry` must discover that sibling explicitly.
+- **Behavior:** a successful review whose body says "429" is kept; a real
+  provider 429 still retries.
+- **Verification gate:** `bash tests/test-ai-stepfun.sh` green including P1.3
+  rows; `grep -n rate_limited bin/ai-stepfun` shows the narrowed detector.
 
-#### P1.2 Retry only on failure or true provider 429
+##### P1.2 Retry only on failure or true provider 429
 
-*Revised 2026-10-06 (Muse M2): never discard a well-formed report on rc=0.*
+*Revised 2026-10-06 (Muse M2).*
 
-- **Change:** `bin/ai-stepfun:185-193` (`run_step_retry`). Current logic:
-  `rate_limited "$2" && [ "$n" -lt "$RATE_RETRIES" ] || return "$rc"` — retries
-  even when `rc=0` if the text matched. New logic:
-  - `rc=0` and report **well-formed** (non-empty; VERDICT when required) →
-    return 0 immediately, even if error channels mention 429 (in-run tool
-    retry that still succeeded).
-  - `rc=0` and report **empty/malformed** and provider-429 in error channels →
-    retry up to `RATE_RETRIES`.
+- **Change:** `run_step_retry` logic:
+  - `rc=0` and report **well-formed** → return 0 (keep even if stderr says 429).
+  - `rc=0` and report **empty/malformed** and provider-429 → retry.
   - `rc!=0` and provider-429 → retry.
-  - `rc!=0` and not 429 → return that rc (no blind retry).
-- **Behavior when done:** no successful report is discarded; failed non-429
-  turns do not spin.
-- **Depends on:** P1.1 (shared detector).
-- **Verification gate:** P1.3 unit tests; `tests/test-ai-stepfun.sh` green.
+  - `rc!=0` and not 429 → return rc (no blind retry).
+- **Verification gate:** P1.3 tests green.
 
-#### P1.3 Guard tests (adversarial + happy)
+##### P1.3 Guard tests (adversarial + happy)
 
-Add to `tests/test-ai-stepfun.sh`. (`config/ci-suites/test-ai-stepfun.sh.json`
-— confirm whether those suite JSONs exist; if absent, no wiring needed.)
+Add to `tests/test-ai-stepfun.sh`:
 
 | Test name / case | Input | Expected |
 |---|---|---|
-| `keeps-review-that-quotes-429` | rc=0 output whose body contains `429` and `rate_limited` and `Too Many Requests` | no retry; report kept; verdict accepted |
-| `keeps-good-verdict-despite-stderr-429` | rc=0, well-formed VERDICT, stderr mentions `rate_limited` | no retry; report kept (Muse M2) |
-| `keeps-review-that-quotes-402-text` | rc=0 body mentions billing/quota words | no retry (credit path unchanged) |
-| `retries-on-stdout-429-json` | stdout line `429: {"error":{"code":"rate_limited"}}`, rc≠0 or empty report | retry up to N; pause honored |
+| `keeps-review-that-quotes-429` | rc=0 body contains `429` / `rate_limited` / `Too Many Requests` | no retry; report kept |
+| `keeps-good-verdict-despite-stderr-429` | rc=0, well-formed VERDICT, stderr mentions `rate_limited` | no retry; kept |
+| `keeps-review-that-quotes-402-text` | rc=0 body mentions billing/quota | no retry |
+| `402 quota provider error` | StepCode stdout `402: {` quota error | one attempt; exit 92 without rate-limit pause |
+| `retries-on-stdout-429-json` | stdout `429: {json}`, empty/malformed report | retry |
 | `retries-on-stderr-rate_limited` | stderr `rate_limited` / `Too Many Requests` / `HTTP 429` / word-bounded `429` (any case) | retry |
-| `retries-on-jsonl-error-429` | provider-429 only in `$out.jsonl` error events, empty/malformed report | retry |
-| `no-retry-on-bash-failure` | rc=1, stderr `command not found` | return rc; no retry |
-| `implement-never-auto-retried` | implement path + 429 | no `run_step_retry` loop (existing `:179`) |
+| `retries-on-jsonl-error-429` | provider-429 only in `$out.jsonl` error events | retry |
+| `no-retry-on-bash-failure` | rc=1, `command not found` | return rc; no retry |
+| `implement-never-auto-retried` | implement path + 429 | no retry loop |
 
-**Adversarial cases (trust boundary: provider output is external input)**
+**Adversarial (provider output is external input)**
 
-| External input | Hostile case | Test that proves it |
+| External input | Hostile case | Test |
 |---|---|---|
-| Assistant report text | Contains `429`, `rate_limited`, `Too Many Requests` | `keeps-review-that-quotes-429` |
-| Assistant report text | Quoted HTTP error blob in a code sample | `keeps-review-that-quotes-429` (or dedicated code-sample case) |
-| StepCode stdout | `429: {json}` provider error | `retries-on-stdout-429-json` |
-| OpenCode stderr | rate limit prose | `retries-on-stderr-rate_limited` |
-| OpenCode JSONL | `type=="text"` containing the word 429 | must **not** count as rate limit (add if fixture exists) |
-| Tool failure | non-zero rc, no 429 | `no-retry-on-bash-failure` |
+| Assistant report | quotes 429 / rate_limited | `keeps-review-that-quotes-429` |
+| Assistant report | quoted HTTP error blob | `keeps-review-that-quotes-429` |
+| StepCode stdout | `429: {json}` | `retries-on-stdout-429-json` |
+| OpenCode stderr | rate-limit prose | `retries-on-stderr-rate_limited` |
+| OpenCode JSONL | `type=="text"` with "429" | must **not** count |
+| Tool failure | rc=1, no 429 | `no-retry-on-bash-failure` |
 
-- **Verification gate:** every row above names a test that exists and passes.
-  Suite command: `bash tests/test-ai-stepfun.sh` (Git Bash on Windows).
+---
 
-### Phase 2 — De-duplicate prompts and stabilize prefixes
+#### Phase 2 — De-duplicate prompts and stabilize prefixes
+**Subagent:** `phase2-prompts` · **Wave 2a** · **Depends on:** Phase 1 merged
+(same file `bin/ai-stepfun`)
 
-**Context cut point.** Re-read Phases 3–5 before starting later work.
+##### P2.1 Drop duplicated VERDICT / preamble on OpenCode paths
 
-#### P2.1 Drop duplicated VERDICT / preamble on OpenCode paths
+*Revised 2026-10-06 (Muse B1 + GLM F2).*
 
-*Revised 2026-10-06 (Muse B1): gate on engine, not `STEPFUN_OC_AGENT`.*
+- **Change:** In `cmd_review` (and `cmd_ask` if it gains the same gate):
+  1. **Call `detect_engine` at the top** before assembling `$full` (`ENGINE` is
+     empty until `run_step` detects it).
+  2. Keep a short operational preamble (disposable copy, no remotes, do not
+     edit `$rel`, read `MANIFEST.md`).
+  3. Remove the repeated "Be specific… VERDICT: …" block **only when
+     `ENGINE=opencode`** (those strings live in the agent profiles).
+  4. **Do not** key off `STEPFUN_OC_AGENT` alone (StepCode would lose VERDICT
+     instructions).
+- **Verification gate:** VERDICT instruction block appears **once** in the
+  assembled prompt when `ENGINE=opencode`; StepCode still has it in `$full`.
 
-- **Change:** `bin/ai-stepfun` `cmd_review`. **First call `detect_engine` at
-  the top of `cmd_review`** (and `cmd_ask` if it ever needs the same gate) —
-  `ENGINE` is empty until `run_step` detects it, so evaluating the gate while
-  assembling `$full` would silently no-op on Windows (*GLM F2*). Then keep a
-  short operational preamble (disposable copy, no remotes, do not edit `$rel`,
-  read `MANIFEST.md`). Remove the repeated "Be specific… VERDICT: …" block
-  **only when `ENGINE=opencode`**, because those strings already live in
-  `stepfun-review.md:34-42` / `stepfun-review-windows.md:28-38`. **Do not** key
-  off `STEPFUN_OC_AGENT` alone — `cmd_review` sets it unconditionally and
-  StepCode ignores agent profiles, so that would strip the only VERDICT
-  instructions StepCode gets.
-- **Behavior when done:** one copy of verdict format per turn on OpenCode;
-  StepCode unchanged. `$head` still appears in the user prompt's final-line
-  template (required for the exact sha) but see P2.2.
-- **Depends on:** none (can parallel P1).
-- **Verification gate:** assert the VERDICT instruction block appears **once**
-  in the assembled prompt when `ENGINE=opencode` (semantic check — required),
-  and that StepCode still has it in `$full`. Suite green.
+##### P2.2 Move unique `$rel` / `$head` to the prompt end
 
-#### P2.2 Move unique `$rel` / `$head` to the prompt end
+- **Change:** static prose first; `$rel`, `$head`, `$prompt` body last.
+- **Verification gate:** `$rel` does not appear in the first N lines of the
+  assembled prompt (or golden prefix fixture under `tests/fixtures/stepfun/`).
 
-- **Change:** `bin/ai-stepfun:600-607`. Reorder so the static prose (role,
-  rules, verdict instructions when needed) comes first; `$rel`, `$head`, and
-  `$prompt` body last. Same for `cmd_ask` preamble (`:643`) if it gains unique
-  text later.
-- **Behavior when done:** two retries of the same review share a long stable
-  prefix (helps provider prefix cache if it exists; harmless if not).
-- **Depends on:** P2.1 (avoid reshuffling twice).
-- **Verification gate:** unit/string test or a small shell assertion that
-  `$rel` does not appear in the first N lines of the assembled prompt; or a
-  golden prompt fixture under `tests/fixtures/stepfun/` compared by stable
-  prefix.
+##### P2.3 Handle dead `compaction` block
 
-#### P2.3 Handle dead `compaction` block
+- **Change:** `config/opencode-stepfun/opencode.json` — delete inert block or
+  document it in `config/opencode-stepfun/README.md`. Do not retune without
+  Phase 5 numbers.
+- **Verification gate:** config parses; offline doctor / profile tests pass.
 
-- **Change:** `config/opencode-stepfun/opencode.json:7-12`. Either delete the
-  inert block (preferred if OpenCode ignores it for single-turn `run`) or leave
-  it with a one-line comment in a sibling `config/opencode-stepfun/README.md`
-  saying it is intentional for long in-run tool loops. Do not "tune" values
-  without measurement (Phase 5).
-- **Verification gate:** config still parses; `ai-stepfun doctor` (offline) or
-  tests that load the profile still pass.
+---
 
-### Phase 3 — Windows exploration cost (search + slices)
+#### Phase 3 — Windows exploration cost
+**Subagent:** `phase3-windows` · **Wave 1b** · **Depends on:** none (parallel Phase 1)
 
-**Context cut point.** Security-sensitive; adversarial table is mandatory.
+##### P3.1 Extend Windows gate grammar
 
-#### P3.1 Extend Windows gate grammar
+*Revised 2026-10-06 (Muse B2/B3). Fallback: ship `head -n` alone and skip `grep`.*
 
-*Revised 2026-10-06 (Muse B2/B3): runner allowlist + Layer-0 metachar filter.
-Fallback if grep stays too risky: ship `head -n` alone and skip grep.*
+Three parts — all required **if** `grep` ships:
 
-- **Change (three parts, all required if `grep` ships):**
-  1. **Runner allowlist** (`bin/ai-stepfun` `write_windows_runners` ~`:479`,
-     `bin/ai-stepfun-windows-shell` `run()` ~`:180`): provision `grep` with the
-     same hashed-binary pin as `ls`/`cat`/`head` (Git `usr/bin` path + sha256).
-     Hash-mismatch and missing-binary tests required. Without this, grammar
-     changes never execute.
-  2. **Closed-grammar / metachar filter** (code labels this "Layer 1: closed
-     grammar" at `bin/ai-stepfun-windows-shell:52`; the plan previously said
-     "Layer-0"): today
-     `INNER` refuses `*?[]{}()|$&;<>` before grammar parse — so `grep foo.*bar`
-     dies before the `grep` branch runs. Rework: exempt the **pattern token
-     only** (still path-clamped), or require `-F` and a plain pattern with its
-     own deny list. Specify the exact rule and test it.
-  3. **Grammar** (`bin/ai-stepfun-windows-shell:256-261`):
-     - `ls <path>` / `cat <path>` unchanged.
-     - `head -n N <path>` — only `-n` and a positive decimal `N` (no `-N`,
-       no `head -5`, no glued `-n5`).
-     - `grep -n -F <pattern> <path>` — require both flags; **deny** `-r`,
-       `-R`, `--include`, `-e`, `--`, glued forms (`-n5`, `--include=`),
-       multiple files, leading-dash patterns (require a non-dash pattern).
-     - Keep forbidding `git`/`gh`/`op`/`curl`/etc. (`:276-277`).
-- **Behavior when done:** the model can find a symbol without `cat` of every
-  file; path clamp still fail-closed; grep cannot smuggle metacharacters into
-  the filter bypass.
-- **Depends on:** nothing (parallel with Phase 2).
-- **Verification gate:** `tests/test-ai-stepfun-windows-shell.sh` cases below
-  green; every `check "…"` in that suite still passes; allowlist hash tests
-  green.
+1. **Runner allowlist** (`write_windows_runners` + `run()` pin path): provision
+   `grep` with the same hashed-binary pin as `ls`/`cat`/`head` (Git `usr/bin`
+   + sha256). Hash-mismatch tests required.
+2. **Closed-grammar / metachar filter** (code: "Layer 1: closed grammar"):
+   today `INNER` refuses `*?[]{}()|$&;<>` before tokenization. Exempt the
+   **pattern token only** (still path-clamped), or require `-F` + plain
+   pattern with its own deny list. Test the exact rule.
+3. **Grammar:**
+   - `ls <path>` / `cat <path>` unchanged.
+   - `head -n N <path>` — only `-n` and positive decimal `N` (no `-N`,
+     no `head -5`, no glued `-n5`).
+   - `grep -n -F <pattern> <path>` — require both flags; deny `-r`, `-R`,
+     `--include`, `-e`, `--`, glued forms, multiple files, leading-dash patterns.
+   - Keep forbidding `git`/`gh`/`op`/`curl`/etc.
 
-**Adversarial cases (trust boundary: model-supplied shell strings)**
+- **Verification gate:** `bash tests/test-ai-stepfun-windows-shell.sh` green
+  including allowlist hash tests.
 
-| External input | Hostile case | Test that proves it |
+**Adversarial (model-supplied shell strings)**
+
+| External input | Hostile case | Test |
 |---|---|---|
-| path operand | `../outside/secret` | REFUSE (existing `assert_in_folder` tests + new) |
-| path operand | `C:\Windows\System32\...` or `//host/share` | REFUSE |
-| `head` flags | `head -c 100 file` / `head -n -1 file` | REFUSE unknown/unsafe flags |
-| `grep` flags | `grep -r pattern .` | REFUSE `-r` |
-| `grep` flags | `grep -e x -e y file` / `--` smuggling | REFUSE |
-| `grep` flags | glued `-n5`, `--include=*.c` | REFUSE |
-| `grep` pattern | leading-dash `grep -n -F -x file` parses as flags | REFUSE; require non-dash pattern |
-| `grep` pattern | metacharacters that bypass Layer-0 (`foo.*bar`) | allow only if P3.1.2 exempts pattern token; else REFUSE |
-| `grep` output | `grep -n -F .* hugefile` dumps more than `cat` | document accepted cost or row-cap |
-| `grep` arity | zero paths or >1 path | REFUSE |
-| `grep` pattern | empty `''` (matches every line) | REFUSE or row-cap |
-| `head` | `-n 999999999` whole-file dump | REFUSE or document accepted cost |
-| argv shape | `head -n 5 file extra` / `head -5 file` / `head -N 5 file` | REFUSE; only `-n N` |
-| allowlist | `grep` binary hash mismatch | REFUSE run (provisioning test) |
-| pattern | `.*` with huge file — allowed (token cost is model's), no path escape | allow + document |
+| path | `../outside/secret`, UNC, `C:\Windows\...` | REFUSE |
+| `head` flags | `-c`, `-n -1`, `-N`, glued | REFUSE |
+| `grep` flags | `-r`, `-e`, `--`, glued, `--include=` | REFUSE |
+| `grep` pattern | leading-dash, empty `''`, metachar bypass | REFUSE or explicit allow+test |
+| `grep` arity | 0 or >1 path | REFUSE |
+| argv shape | extra args | REFUSE |
+| allowlist | `grep` binary hash mismatch | REFUSE |
+| output volume | `.*` hugefile / `-n 999999999` | document cost or row-cap |
 
-#### P3.2 Windows agent profile + docs
+##### P3.2 Windows agent profile + docs
 
-- **Change:**
-  - `config/opencode-stepfun/agent/stepfun-review-windows.md:20-23` — update the
-    allowed shell verbs list to match P3.1; keep file tools disabled unless the
-    implementer proves the gate is equivalent (default: keep disabled).
-  - `docs/config-inventory.md` StepFun Windows sentence; `skills/shared/stepfun/SKILL.md`
-    Windows platform note if commands change; `plan_stepfun-windows-folder-shell.md`
-    is a historical plan — do **not** rewrite it; note the change here instead.
-- **Verification gate:** docs match grammar; no stale "only ls|cat|head" claim
-  remains in live docs (search those files).
+- Update `stepfun-review-windows.md` verb list; keep file tools disabled by
+  default. Update `docs/config-inventory.md` / skill Windows notes. Do **not**
+  rewrite historical `plan_stepfun-windows-folder-shell.md`.
+- **Verification gate:** no stale "only ls|cat|head" claim in live docs.
 
-#### P3.3 Windows suite updates
+##### P3.3 Windows suite updates
 
-- **Change:** `tests/test-ai-stepfun-windows-shell.sh` — add allow/deny cases
-  from the adversarial table; create fixtures under `tests/fixtures/stepfun-windows-shell/` if needed (suite's `FIX=` var exists but is unused).
-- **Verification gate:** full file green in Git Bash; CI suite JSON still lists
-  the file (`config/ci-suites/test-ai-stepfun-windows-shell.sh.json`).
+- Add allow/deny rows; create `tests/fixtures/stepfun-windows-shell/` if needed.
+- **Verification gate:** full suite green in Git Bash.
 
-### Phase 4 — Persistent sessions / warm cache (security-sensitive)
+---
 
-*Revised 2026-10-06 (Muse M3): default SKIP. Persistence fights LOCKED-7 wipe.*
+#### Phase 4 — Persistent sessions / warm cache
+**Subagent:** `phase4-sessions` · **Wave 2b** · **Depends on:** Phase 1 merged
 
-**Context cut point.** Re-read §8 OPEN A–D and the #1086 comments before
-starting. **Default: skip Phase 4.** Muse M3: OpenCode session state lives in
-the per-run XDG tree wiped at `:303`/`:344`, so a saved session id points at
-deleted state — resume needs an owner-accepted wipe exception, which LOCKED-7
-forbids without that exception. 429 retries are rare and `RATE_PAUSE` dominates
-cost more than tokens. Do Phase 4 only with a written owner exception.
+*Owner 2026-10-06: Phase 4 is IN SCOPE (not default-skip). Security gates still
+bind. If they cannot be met, deliver `skip-unsafe` with evidence — never weaken
+LOCKED-7 wipe.*
 
-#### P4.1 Resume on 429 retry (OpenCode + StepCode if supported)
+##### P4.1 Resume on 429 retry (OpenCode + StepCode if supported)
 
-- **Change:** `bin/ai-stepfun:185-193` and engine runners (`run_stepcode`,
-  `run_opencode_turn`).
-  - Capture OpenCode `sessionID` from the JSONL/`--format json` stream (today
-    only `type=="text"` is taken at `:306`).
-  - On retry of the **same** review identity, pass `--session <id>` (or the
-    engine's resume flag) instead of a brand-new turn **if** the engine
-    documents it and the session state lives outside the model-visible copy.
-  - StepCode: evaluate `STEP_AUTOPILOT=1` in-run resume (`:177`, `:397`);
-    `--no-session` (`:405`) stays for **cross-invocation** isolation unless
-    OPEN-B is resolved in favor of resume.
-- **Behavior when done:** a 429 mid-review does not re-send the entire system +
-  tools + prompt when resume is available; fallback is today's cold retry.
-- **Depends on:** Phase 1 (retry only when appropriate); OPEN-B judgment.
-- **Verification gate:** offline test with a fake engine that asserts the second
-  attempt passes a session flag when the first returned a session id; no secret
-  paths in `$STATE_DIR` session files (chmod 700/600 as elsewhere).
+- Capture OpenCode `sessionID` from the JSONL/`--format json` stream (today only
+  `type=="text"` is taken).
+- On retry of the **same** review identity, pass `--session <id>` (or engine
+  resume flag) if the engine documents it **and** session state lives outside
+  the model-visible copy.
+- StepCode: evaluate `STEP_AUTOPILOT=1` in-run resume; `--no-session` stays for
+  **cross-invocation** isolation unless OPEN-B is resolved in favor of resume.
+- **Verification gate:** fake-engine test that attempt 2 passes a session flag
+  when attempt 1 returned a session id; session files under `$STATE_DIR` only
+  (chmod 700/600); wipe still runs.
 
-#### P4.2 Optional warm cache dir
+##### P4.2 Warm cache dir (optional, leakage-gated)
 
-- **Change:** only if OPEN-C approves **and** Phase 4 is not skipped. A
-  per-user cache directory **outside** bubblewrap `$home` (Linux) and outside
-  the Windows disposable folder, read-only to the model if exposed at all.
-  **Must include a cross-review leakage analysis** (Muse M3): cached content
-  from one review must not become model-visible in another. Default off or
-  documented-as-accepted.
-- **Depends on:** P4.1; security review comment in the PR.
-- **Verification gate:** `ai-stepfun doctor --live` or offline equivalent shows
-  the path; `docs/config-inventory.md` records the choice; no credentials in
-  that directory; leakage analysis written in the PR.
+- Per-user cache **outside** bubblewrap `$home` and the Windows disposable
+  folder. **Must include cross-review leakage analysis** (cached content from
+  one review must not become model-visible in another).
+- **Verification gate:** doctor shows the path; `docs/config-inventory.md`
+  records the choice; no credentials in that directory; leakage analysis in the
+  PR body.
 
-### Phase 5 — Measure, then claim
+**If security criteria fail:** mark P4.1/P4.2 `skip-unsafe` in STATUS with the
+exact failed criterion; leave cold-retry behavior intact.
 
-#### P5.1 Record cache / session / retry counters
+---
 
-- **Change:** `bin/ai-stepfun` should log (to `$STATE_DIR/reports/…` sidecar or
-  the existing reviewer event stream) for each turn:
-  - engine, whether resumed, retry count, input/output tokens if the JSONL has
-    them, `cache.read`/`cache.write` if present (Muse fixture shape:
-    `tests/fixtures/muse-opencode/usage-1.18.12.json` is a reference only).
-- **Verification gate:** a fixture-driven test parses a sample JSONL and writes
-  the counters; no API key material in logs.
+#### Phase 5 — Measure, then claim
+**Subagent:** `phase5-measure` · **Wave 3** · **Depends on:** Waves 1–2 merged
 
-#### P5.2 Live proof
+##### P5.1 Record cache / session / retry counters
 
-- **Change:** none in code. After Phases 1–4 merge, run one real `ai-stepfun
-  doctor --live` and (only if an ordinary review is already needed) one review;
-  record before/after token notes in the landing issue.
-- **Live proof is required before this plan is closed.** Leave
-  `- [ ] live proof` on the **same** GitHub issue that lands the code. Do not
-  open a second ticket.
+- Log per turn: engine, resumed?, retry count, input/output tokens if present,
+  `cache.read`/`cache.write` if present (Muse fixture is a shape reference only).
+- **Verification gate:** fixture-driven test writes counters; no key material.
+
+##### P5.2 Live proof
+
+- One real `ai-stepfun doctor --live` after merge; optional one ordinary review
+  if already needed. Record notes on the **same** landing issue.
+- Leave `- [ ] live proof` on that issue until proof is posted. Do not open a
+  second ticket.
+
+---
+
+### 9.5 Wave-by-wave coordinator checklist
+
+| Wave | Action | Done when |
+|---|---|---|
+| 0 | `ai-task-gates start`, integration worktree, brief files, STATUS | worktree clean off `origin/main`; briefs written |
+| 1a+1b | Spawn `phase1-retry` and `phase3-windows` **in parallel** | both reports green; `bash tests/test-ai-stepfun.sh` and `bash tests/test-ai-stepfun-windows-shell.sh` pass |
+| 2a | Spawn `phase2-prompts` | prompt-assemble tests green |
+| 2b | Spawn `phase4-sessions` | resume tests green **or** STATUS `skip-unsafe` with criterion |
+| 3 | Spawn `phase5-measure` | counters test green; doctor --live run |
+| 4 | Commit, push, PR, required exact-head review, merge queue | `origin/main` contains the work; STATUS artifacts cited |
+| 5 | Landing issue live-proof box; handoff STATUS refresh | checklist present; handoff truthful |
 
 ## 10. Tests required
 
 | Suite / command | Must stay green / gain |
 |---|---|
-| `bash tests/test-ai-stepfun.sh` | All existing checks; add P1.3 rows; add prompt-assemble assertions (P2.1–P2.2); optional fake-engine session test (P4.1) |
-| `bash tests/test-ai-stepfun-windows-shell.sh` | All existing `check` lines; add P3.3 allow/deny rows |
-| `config/ci-suites/test-ai-stepfun.sh.json` | Updated if case names are enumerated |
-| `config/ci-suites/test-ai-stepfun-windows-shell.sh.json` | Same |
-| Offline `ai-stepfun doctor` | Still passes after config/profile edits |
+| `bash tests/test-ai-stepfun.sh` | Existing + P1.3 rows + P2 prompt asserts + P4 fake-engine + P5 counter fixture |
+| `bash tests/test-ai-stepfun-windows-shell.sh` | Existing + P3.3 allow/deny + allowlist hash |
+| `config/ci-suites/test-ai-stepfun*.json` | Update only if they enumerate cases |
+| Offline `ai-stepfun doctor` | Passes after profile/config edits |
 
-Never "add tests" as a step — the tables above are the tests.
+Never "add tests" as a step — the tables name the tests.
 
 ## 11. Constraints, standing rules, and gotchas in force
 
-- **Branch:** feature branch + PR + merge queue; never push `main`. Documentation-only PRs (prose only) may skip waiting on checks and merge immediately the normal way; if any changed file is code/tests/config, normal checks apply.
-- **Worktree:** implement in a dedicated current-upstream worktree, not the
-  landing checkout `C:\repos\ai-devops`.
-- **Git identity before commit:** `git var GIT_COMMITTER_IDENT` must show
+- **Branch:** feature branch + PR + merge queue; never push `main`.
+- **Worktree:** integration worktree for implementation; landing checkout is
+  landing-only (`C:\repos\ai-devops`).
+- **Git identity before commit:**
   `Albert Hazan <u2giants@users.noreply.github.com>`.
-- **Stage only task-owned files.** No broad staging; no destructive reset/force-push.
-- **This repo is public:** never commit transcripts, secrets, raw keys, or
-  private artifacts. Secrets by 1Password **title only** (`vibe_coding` /
-  `stepfun step5 ai api key`).
-- **No human approval prompts** for technical work; AI reviewers gate technical
-  production actions. This change is toolkit code + tests + docs — normal review.
-- **Preserve capability:** if a fix cannot land without removing a safety gate
-  (path clamp, bubblewrap, no-remote checks, implement-never-retry), stop and
-  report `Blocked —` rather than weakening the gate.
-- **PowerShell compatibility** of wrappers must remain; run Bash tests through
-  Git Bash on Windows.
-- **Reviewer safety path:** changes to reviewer wrappers/evidence tools may need
-  one read-only exact-head final review before merge (`AGENTS.md`). Treat
-  `bin/ai-stepfun*` as reviewer-wrapper code — plan for that review.
-- **Do not verify the same commit twice**; merge queue tests the landing commit.
+- **Stage only task-owned files.** Public repo: no secrets/transcripts.
+- **Reviewer safety path:** `bin/ai-stepfun*` is reviewer-wrapper code — expect
+  one read-only exact-head final review before merge.
+- **Preserve capability:** never remove path clamp, bubblewrap, no-remote
+  checks, or implement-never-retry. `Blocked —` if a fix cannot land safely.
+- **PowerShell-compatible** wrappers; Bash tests via Git Bash on Windows.
+- **Never name a doc `*token*`** (`.gitignore` `**/*token*`).
+- **Long reviewer jobs:** detach (`Start-Process`) or accept `.ai/reviews/`
+  reports if stdout is empty.
 - **Time in human text is EST** with zone named.
-- **ai-devops task class:** declare with `ai-task-gates start --class` before
-  implementation sessions (class name per `docs/task-router.md` / wrapper class
-  used for reviewer tooling). Planning-only sessions that only write this file
-  still record STATUS honestly.
+- **No human approval for technical work.** Owner questions only for business
+  meaning (§0 of the handoff).
 
 ## 12. Access and environment
 
-- **Machine:** `edge-dev` (Windows) for authoring; Linux host where StepCode is
-  installed for StepCode-path testing.
-- **CLIs:** `git`, Git Bash, `ai-stepfun` (and `ai-stepfun doctor --live` for
-  Phase 5), OpenCode pin 1.18.12 via the existing installer pattern
-  (`bin/setup-opencode-glm.ps1` is the install ancestor per
-  `plan_stepfun-windows-folder-shell.md` — there is no separate
-  `setup-opencode-stepfun.ps1`; that is not a gap).
-- **Secrets:** none in the plan. Key store is owner-only
-  `~/.config/ai-devops/secrets/stepfun-api-key` created by `ai-stepfun store-key`
-  (item `stepfun step5 ai api key` in vault `vibe_coding`). Reviews never call
-  1Password.
-- **Local run:** `bash tests/test-ai-stepfun.sh` and
-  `bash tests/test-ai-stepfun-windows-shell.sh` from the worktree root in Git
-  Bash. Do not run live paid StepFun jobs while a full local suite collides with
-  shared runners (`bin/ai-test-local --check-collision` if using that path).
-- **Muse review of this plan:** `ai-muse` with the stable name
-  `stepfun-token-efficiency-plan`; set `AI_MUSE_CALLER` to the current client
-  (`claude` or `codex` per session — **this MiMo session used `codex` only if
-  the wrapper accepts it; otherwise the wrapper's supported caller list wins**).
-  Read the report path the wrapper prints.
+- Machine `edge-dev` (Windows). Git Bash:
+  `C:\Program Files\Git\bin\bash.exe`. Python: `$env:MIMO_PYTHON`.
+- `ai-glm` / `ai-muse` healthy; callers `AI_GLM_CALLER=codex`,
+  `AI_MUSE_CALLER=codex` work from MiMo here.
+- Secrets by title only: vault `vibe_coding`, item `stepfun step5 ai api key`.
+  Reviews never call 1Password.
+- Integration worktree path is chosen by the coordinator at Wave 0 and recorded
+  in STATUS.
 
 ## 13. Definition of done + risks and open questions
 
-**Definition of done**
+**Definition of done (coordinator closes without asking the owner)**
 
-- [ ] Phases 1–3 implemented in a worktree branch with named tests green.
-- [ ] Phase 4 only if security criteria (§8 OPEN B–C) are met, or explicitly
-      skipped with a STATUS row saying "skipped — security criterion unmet".
-- [ ] Phase 5 counters logged; live proof checklist item on the landing issue
-      ticked or left open with a named owner.
-- [ ] Docs touched only where behavior changed (`docs/config-inventory.md`,
-      skill, rotation row if needed); STATUS table updated with artifacts
-      (paths/SHAs/commands), never bare counts.
-- [ ] `git var GIT_COMMITTER_IDENT` correct; only task-owned files staged.
-- [ ] PR opened; checks green or doc-only path used correctly; merged through
-      the normal queue; `origin/main` shows the commit.
-- [ ] Handoff updated if the session ends mid-work; this plan's STATUS kept
-      truthful by whoever executes a row.
+- [ ] Waves 0–3 complete; every phase subagent reported with gate evidence.
+- [ ] Phase 4 either landed or STATUS `skip-unsafe` with the exact failed
+      security criterion (never a silent skip).
+- [ ] Both test suites green; offline doctor green.
+- [ ] PR merged on `origin/main`; commit cited in STATUS (not a bare number).
+- [ ] `- [ ] live proof` on the landing issue; P5.2 evidence posted or named
+      owner if a live call is blocked.
+- [ ] Handoff + this STATUS truthful.
 
 **Risks / rollback**
 
 | Risk | Mitigation / rollback |
 |---|---|
-| Narrower 429 detection misses a real provider error shape | Keep stderr match; add fixture for StepCode `429: {`; roll back P1.1 only if false-negatives appear — never go back to whole-output grep |
-| Windows gate expansion enables path escape | Adversarial table + fail-closed `assert_in_folder`; roll back P3.1 to `ls\|cat\|head` |
-| Session resume leaks state across reviews | Session id only under `$STATE_DIR`; never in the model copy; wipe still runs |
-| Prefix reordering breaks a brittle test that greps prompt order | Fix the test to assert semantics (VERDICT once, `$rel` late), not line numbers of `$full` |
-| False "cache win" claimed | Phase 5 only reports measured counters; no marketing language in docs |
+| Subagents conflict in `bin/ai-stepfun` | Ownership table + sequential Wave 2; or per-phase branches merged in wave order |
+| Narrower 429 detection misses a real shape | GLM F1 stderr set; roll back P1.1 only if false-negatives appear |
+| Windows gate enables path escape | Adversarial table; roll back P3.1 to `ls\|cat\|head` |
+| Phase 4 resume leaks state | Session id only under `$STATE_DIR`; wipe stays; else `skip-unsafe` |
+| False "cache win" claimed | Phase 5 counters only; no marketing language |
+| Reviewer-safety PR blocks | Run exact-head review (`ai-review`) before merge; do not `--admin` |
 
 **Open questions (criteria in §8)**
 
-1. Does `api.stepfun.ai` openai-compatible surface do automatic prefix caching?
-2. Should P4 land at all? **Muse M3 default: no — skip Phase 4.** P1–P3 are
-   enough unless the owner grants a wipe exception.
-3. Exact caller string Muse/wrappers accept from a MiMo session (§12).
-   *Observed 2026-10-06: `AI_MUSE_CALLER=codex` works from MiMo on edge-dev.*
-4. Does `grep` ship (with Layer-0 + allowlist work) or descope to `head -n`
-   only? Criteria: adversarial table all green; if not, ship `head -n` alone.
+1. Prefix caching on StepFun API? (Phase 5 measures.)
+2. `grep` on Windows or `head -n` only? (Adversarial green or descope.)
+3. Phase 4 resume vs wipe exception? (P4 reports landed or `skip-unsafe`.)
 
 ---
 
 ## Self-audit (mandatory — preserved answers)
 
-1. **Could a brand-new AI session with no project knowledge execute this plan
-   without asking anything?**  
-   **Yes.** Sections 2–5 give the repo, hosts, branch policy, and exact
-   `file:line` current state; Section 9 names every file and a verification
-   gate per step; Section 10 names the test suites; Section 12 says how to run
-   them in Git Bash and that secrets are title-only. The only judgment calls
-   are explicitly labeled OPEN in Section 8 with criteria.
+1. **Could a brand-new AI session execute without asking anything?**
+   **Yes.** §9.1 is the coordinator contract; §9.2 is the wave/file graph;
+   §9.4 is one brief per phase with gates; §10 names suites; §13 says ship
+   without a mid-plan go/no-go. Judgment calls are labeled OPEN with criteria.
 
-2. **Does the plan carry every piece of background, nuance, and reasoning?**  
-   **Yes.** Section 6 ranks the audit findings with evidence; Section 7 records
-   rejected approaches (inline packet, remove bubblewrap, full Windows tools,
-   retry implement, share GLM config); Section 8 locks the safety-relevant
-   decisions (provider-only 429, no implement retry, packet-by-reference,
-   keep the wipe) so the implementer cannot "improve" them away. Gap found and
-   fixed during drafting: Open question 3 (Muse caller for MiMo) is now stated
-   instead of assumed.
+2. **Does the plan carry background, nuance, and reasoning?**
+   **Yes.** §6 findings with evidence; §7 rejected approaches (including
+   "coordinator implements" and "stop per wave"); §8 locks safety and the
+   coordinator/Phase-4 rules so they cannot be "improved" away.
 
-3. **Is the ultimate goal clear enough for a wrong-step judgment call?**  
-   **Yes.** Section 1 states token spend on the code under review, lists what
-   becomes true, and includes "If any step conflicts with this goal, the goal
-   wins — stop and flag it." Example application: if P3.1 cannot be made safe,
-   skip it rather than weaken the clamp — that follows the goal without
-   relitigating security.
+3. **Is the ultimate goal clear for wrong-step judgment?**
+   **Yes.** §1 states token spend on the code under review **and** that the
+   work ships through merge + live proof; "if a step conflicts with this goal,
+   the goal wins — stop and flag it." Example: skip `grep` rather than weaken
+   the path clamp — still meets the goal.
 
-**Checklist:** 13 sections present; goal in business English up front;
-self-contained; rejected approaches recorded; concrete files + gates;
-adversarial tables on both trust boundaries (provider output, model shell);
-locked vs open labeled; out-of-scope list; tests named; terms defined;
-secrets by location; DoD includes commit/push/CI; handoff linked both ways.
+**Checklist:** 13 sections present (execution model added as §9); goal in
+business English; self-contained; rejected approaches recorded; concrete files
++ gates; adversarial tables on both trust boundaries; locked vs open labeled;
+out-of-scope list; tests named; secrets by location; DoD includes commit/push/
+CI/merge/live proof; handoff linked both ways.
