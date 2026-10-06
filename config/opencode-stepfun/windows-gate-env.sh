@@ -22,6 +22,13 @@
 if [ "${AI_STEPFUN_SHELL_GATE:-}" = "1" ]; then
   return 0 2>/dev/null || true
 fi
+# Fail closed on misconfiguration: without a gate to exec into, the shell
+# must die rather than let the command run ungated (an unset-variable
+# expansion error alone does not stop a bash -c mid-BASH_ENV).
+if [ -z "${AI_STEPFUN_GATE_BIN:-}" ]; then
+  printf 'windows-gate-env: AI_STEPFUN_GATE_BIN unset; refusing to run ungated\n' >&2
+  exit 77
+fi
 __stepfun_gate_run(){
   [ -z "${AI_STEPFUN_GATE_LOG:-}" ] || \
     printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BASH_COMMAND" \

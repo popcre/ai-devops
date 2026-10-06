@@ -275,6 +275,8 @@ run_opencode_turn(){
     # sandbox while doctor stayed green on the leaked host PATH (#1343).
     local jq_dir
     jq_dir="$(dirname "$(command -v jq 2>/dev/null || true)")"
+    [ -n "$jq_dir" ] && [ "$jq_dir" != "." ] \
+      || die 'jq is required for the Windows gate (runner lookup fails closed without it)'
     case ":$gate_path:" in *":$jq_dir:"*) ;; *) gate_path="$jq_dir:$gate_path" ;; esac
     timeout_win="/c/Program Files/Git/usr/bin/timeout"
     [ -x "$timeout_win" ] || timeout_win="$(command -v timeout || true)"

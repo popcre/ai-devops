@@ -18,8 +18,10 @@ argv=("$@")
 case "${argv[0]}" in
   -c|-lc|-ec)
     # Direct form used by the windows BASH_ENV trap (windows-gate-env.sh):
-    # gate -c INNER — same payload semantics as the bash -c wrapper form.
+    # gate -c INNER — same payload semantics as the bash -c wrapper form,
+    # and exactly one payload (extras are refused, not silently dropped).
     [ "${#argv[@]}" -ge 2 ] || REFUSE 'missing -c payload'
+    [ "${#argv[@]}" -eq 2 ] || REFUSE 'extra args after -c payload'
     INNER="${argv[1]}"
     ;;
   bash|bash.exe|sh|sh.exe|*/bash|*/bash.exe|*/sh|*/sh.exe)

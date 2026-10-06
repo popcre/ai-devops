@@ -189,5 +189,23 @@ else
   echo "FAIL bash script runner re-gating, got: $out"; fail=$((fail+1))
 fi
 
+# Hardening from the #1344 review: the direct -c form refuses extra argv, and
+# the trap template fails closed when AI_STEPFUN_GATE_BIN is unset.
+check 'refuses extra args after -c payload' bash -c "\"$GATE\" -c 'cat r.md' extra; test \$? -eq 126"
+if out="$(cd "$TMP/folder" && env -u AI_STEPFUN_GATE_BIN \
+    BASH_ENV="$GATE_ENV" \
+    AI_STEPFUN_REVIEW_DIR="$TMP/folder" \
+    AI_STEPFUN_SHELL_GATE=0 \
+    GATE_PATH="$TMP/stubs3" \
+    bash -c 'cat readme.md' 2>/dev/null)"; then
+  echo 'FAIL unset gate bin still ran'; fail=$((fail+1))
+else
+  if [ -z "$out" ]; then
+    echo 'ok   unset AI_STEPFUN_GATE_BIN fails closed (no command output)'; pass=$((pass+1))
+  else
+    echo "FAIL unset gate bin leaked output: $out"; fail=$((fail+1))
+  fi
+fi
+
 printf 'passed=%s failed=%s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
