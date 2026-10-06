@@ -104,6 +104,14 @@ allocator but stayed registered here, and a session spent an hour trying it.
     the rotation. The allocator has no platform field; a machine whose
     `ai-review-preflight usable` reports stepfun unusable skips it.
 
+
+13. **Grok is the fallback, not a peer.** Owner preference 2026-09-27
+    (shared-db#3592; allocator change shared-db#3593, merge 907758e3): the
+    allocator rotates GLM, Qwen, Muse, Gemini, DeepSeek, then StepFun, and
+    draws Grok only when none of those can take the exact review (slot 1,
+    slot 2, merged-PR reuse, and failed-reviewer replacement). Grok stays
+    registered and active.
+
 ---
 
 ## Reviewer lookup table (wrapper → pin → reroute)
