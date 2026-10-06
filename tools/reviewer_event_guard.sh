@@ -119,14 +119,31 @@ reviewer_event_guard(){
   # `kill -0` across process trees is unreliable, so liveness comes from
   # the event ledger, not the PID. A finished run_id fails closed later
   # (require-report/publish-report refuse to rewrite a completed invocation).
+  # qualify-live / doctor --live is its own safety proof, even when auto_requalify
+  # launches it from inside an open review. It must never inherit that review's
+  # run_id via the open-run rule: the probe runs in a private fixture (a different
+  # repository), so binding its sandbox onto the review run is refused
+  # ("sandbox evidence source differs from invocation"). Only the probe recorder's
+  # own direct child keeps that qualification invocation.
+  local entry_cmd="${1:-}" entry_live=0
+  [ "$entry_cmd" = qualify-live ] && entry_live=1
+  [ "$entry_cmd" = doctor ] && [ "${2:-}" = --live ] && entry_live=1
   if [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] && [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] \
      && [ -n "${AI_REVIEW_EVENT_PARENT:-}" ]; then
-    if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ] || reviewer_event_run_is_open; then
+    if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ]; then
+      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
+      export -n AI_REVIEW_EVENT_OWNER_PID
+      return 0
+    fi
+    if [ "$entry_live" -eq 0 ] && reviewer_event_run_is_open; then
       AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
       export -n AI_REVIEW_EVENT_OWNER_PID
       return 0
     fi
   fi
+  # Declining inherit (e.g. a qualify-live probe launched from an open review)
+  # must begin its own invocation on a clean identity, never resume the outer run.
+  unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID
   local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation
   local -a event_env=()
   root="$(cd "$(dirname "$wrapper")/.." && pwd -P)"
