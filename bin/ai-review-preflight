@@ -631,7 +631,9 @@ LIVE_QUALIFIED_PROVIDERS="gemini qwen"
 # record_requalify_failure PROVIDER OUTPUT_FILE persists a failed automatic
 # requalification as a reviewer issue (#804). A failure that cannot be
 # recorded is still printed, so it is never silently skipped.
+REQUALIFY_FAILURE_CLASS=""
 record_requalify_failure() { # PROVIDER OUTPUT_FILE
+  REQUALIFY_FAILURE_CLASS=""
   local provider="$1" output="$2" issue_bin="${AI_REVIEWER_ISSUE_BIN:-$SCRIPT_DIR/ai-reviewer-issue}" out id
   if [ -x "$issue_bin" ]; then
     out="$("$issue_bin" record --provider "$provider" \
@@ -643,6 +645,7 @@ record_requalify_failure() { # PROVIDER OUTPUT_FILE
 ai-reviewer-issue record itself failed."
     printf '%s\n' "$out" >&2
     id="$(printf '%s\n' "$out" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+    REQUALIFY_FAILURE_CLASS="$(printf '%s\n' "$out" | sed -n 's/^ai-reviewer-issue: class //p' | tail -n1)"
   else
     id=""
     printf 'ai-review-preflight: ai-reviewer-issue is unavailable at %s; failure NOT recorded.\n' "$issue_bin" >&2
@@ -701,6 +704,15 @@ requalify_provider() { # PROVIDER
   printf '%s\n' "$qualify_output" > "$output"
   record_requalify_failure "$provider" "$output"
   rm -f "$output"
+  # A provider-side capacity event (quota or allowance exhausted, rate limit)
+  # says nothing about the installed bytes. The reviewer stays quarantined
+  # (its qualification is still stale, so it cannot be drawn) and the issue is
+  # recorded, but the requalification step itself must not fail an
+  # installation for days or weeks until the provider's quota resets.
+  if [ "$REQUALIFY_FAILURE_CLASS" = "provider-outage/capacity" ]; then
+    printf 'ai-review-preflight: %s requalification deferred: provider capacity event, not a code defect; the installation step passes but the reviewer stays quarantined (NOT usable) until a later requalify succeeds.\n' "$provider" >&2
+    return 0
+  fi
   return 1
 }
 
@@ -1301,6 +1313,7 @@ usage() {
 Usage:
   ai-review-preflight check <provider> <repo> [--base REF] [--live]
   ai-review-preflight quarantine <provider> <failure-class> [--seconds N]
+  ai-review-preflight pause <provider> <verified-failure-class> [--seconds 3600]
   ai-review-preflight known-broken <provider> <reason> [--issue N]
   ai-review-preflight clear <provider>
   ai-review-preflight qualify gemini|qwen
@@ -1343,6 +1356,24 @@ case "$cmd" in
     provider="${1:-}"; repo="${2:-}"; shift 2 || true; live=0; base=""
     while [ "$#" -gt 0 ]; do case "$1" in --live) live=1; shift ;; --base) base="${2:-}"; shift 2 ;; *) die "unknown option '$1'." ;; esac; done
     check_provider "$provider" "$repo" "$live" "$base" ;;
+  pause-status)
+    provider="${1:-}"; shift || true
+    valid_provider "$provider" || die "unknown provider '$provider'."
+    [ "$#" -eq 0 ] || die "unexpected argument '$1'."
+    admission_store pause-status "$provider" ;;
+  pause)
+    provider="${1:-}"; class="${2:-}"; shift 2 || true; seconds=3600; observed=""; observed_set=0
+    valid_provider "$provider" || die "unknown provider '$provider'."
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --seconds) [ "$#" -ge 2 ] || die 'missing seconds'; seconds="$2"; shift 2 ;;
+        --observed) [ "$#" -ge 2 ] && [ "$observed_set" -eq 0 ] && [ -n "$2" ] || die 'missing or repeated observed epoch'; observed="$2"; observed_set=1; shift 2 ;;
+        *) die "unexpected argument '$1'." ;;
+      esac
+    done
+    pause_args=(pause "$provider" --reason "$class" --seconds "$seconds")
+    [ -z "$observed" ] || pause_args+=(--observed "$observed")
+    admission_store "${pause_args[@]}" ;;
   quarantine)
     provider="${1:-}"; class="${2:-}"; shift 2 || true; seconds="$COOLDOWN"
     [ "${1:-}" != --seconds ] || { seconds="${2:-}"; shift 2; }

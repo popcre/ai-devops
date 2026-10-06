@@ -1,5 +1,5 @@
 ---
-issue: null
+issue: 1336
 status: OPEN
 owner: mimo/stepfun-harness-efficiency
 ---
@@ -14,13 +14,15 @@ Plan: [`plan_stepfun-harness-efficiency.md`](../plan_stepfun-harness-efficiency.
 
 - **BLOCKING — start of coding:** none. The plan is written and reviewed. Albert
   must simply say whether to implement Phases 1–3 now (recommended) or wait.
-- **RECOVERABLE:** whether Phase 4 (session resume / warm cache) should ever
-  land. Muse M3 and GLM both say default **skip**. Recommendation: skip unless
-  Albert grants a written wipe exception.
+- **RECOVERABLE:** none.
 - **Already settled — do NOT re-ask:** (2026-10-06) fix StepFun token waste;
   plan first, then reviewers, then code. Owner never asked to implement yet.
+  Phase 4 outcome is `skip-unsafe` (STATUS W2b) — settled by security gates,
+  not an owner question.
 - **Not Albert's call:** detector regex, test names, Windows gate grammar,
   whether grep ships or descopes to `head -n` only (technical; plan OPEN-Q4).
+  Wipe and security exceptions are the same: technical gate decisions, never an
+  owner business question and never granted by Albert.
 
 Put the whole business list to him in ONE message before starting coding.
 
@@ -51,7 +53,7 @@ Windows reads, cold sessions, duplicated prompts).
 | GLM 5.3 review | Done — `VERDICT: REVISE`; F1/F2/F3 folded in | `.ai/reviews/glm-stepfun-token-efficiency-plan-review-ec1b178ec9de9d8716c24d5484644b6f534d3a9419e849d75c63f21b8b86c711.md` |
 | Plan renamed off `.gitignore` `**/*token*` | Done | was `plan_stepfun-token-efficiency.md` |
 | Code Phases 1–5 | **Not started** | all plan STATUS rows `⬜ open` |
-| Live proof | **OPEN** | leave `- [ ] live proof` on the landing issue |
+| Live proof | **OPEN** | leave `- [ ] live proof` on [issue #1336](https://github.com/popcre/ai-devops/issues/1336) |
 | First Muse name `stepfun-token-efficiency-plan` | Failed launch (no session) | fenced; not replayed |
 
 Committed/pushed: this handoff + the plan ship as a **prose** PR at wrap-up
@@ -100,22 +102,26 @@ tools, retry implement) are in plan §7 — do not re-walk them.
 ## 6. Exact next steps
 
 1. Read [`plan_stepfun-harness-efficiency.md`](../plan_stepfun-harness-efficiency.md)
-   STATUS + §8 locked decisions + Muse/GLM revision notes in P1/P2/P3/P4.
+   STATUS + §8 locks + **§9 execution model** (coordinator + one subagent per
+   phase, including Phase 4 — owner rewrite 2026-10-06).
 2. Optional: second Muse or GLM pass on the revised plan (not required — both
    must-fix sets are folded in).
-3. `ai-task-gates start --class code` (or `reviewer-safety` if the change set
-   is treated as reviewer-wrapper code). Open a dedicated worktree — never
-   edit the landing checkout `C:\repos/ai-devops` except to land.
+3. `ai-task-gates start --class reviewer-safety` — StepFun wrapper changes
+   (`bin/ai-stepfun*`) are class `reviewer-safety` in `config/task-gates.json`,
+   which **requires** `exact-head-independent-review`. Never `code`. Open a
+   dedicated worktree — never edit the landing checkout `C:\repos/ai-devops`
+   except to land.
 4. Implement **Phase 1 only** (P1.1 provider-channel detector, P1.2 retry only
    on failure/empty report, P1.3 tests). You'll know it worked when
    `bash tests/test-ai-stepfun.sh` is green including
    `keeps-review-that-quotes-429` and `keeps-good-verdict-despite-stderr-429`.
 5. Then Phase 2 (prompt de-dup + `$rel` late), Phase 3 (Windows `head -n`;
    `grep` only if allowlist + metachar tests pass — else descope to `head -n`).
-6. Phase 4 **skip** unless owner grants a wipe exception. Phase 5 counters +
-   live proof checklist on the landing issue.
-7. PR → merge queue → confirm `origin/main`. Leave `- [ ] live proof` on the
-   same issue until a real StepFun run is recorded.
+6. Phase 4 stays **skip-unsafe** (STATUS W2b). A wipe or security exception is
+   never sought from the owner — those are AI-reviewer or security-gate
+   decisions. Phase 5 counters + live proof checklist on issue #1336.
+7. PR → merge queue → confirm `origin/main`. Leave `- [ ] live proof` on issue
+   #1336 until a real StepFun run is recorded.
 
 ## 7. Constraints and gotchas in force
 
@@ -125,8 +131,12 @@ tools, retry implement) are in plan §7 — do not re-walk them.
   `Albert Hazan <u2giants@users.noreply.github.com>` before commit.
 - Stage only task-owned files. This repo is public — no secrets, no raw
   transcripts.
-- Reviewer wrappers may need one read-only exact-head final review before
-  merge (`AGENTS.md`).
+- Reviewer wrappers **require** one read-only exact-head independent review
+  before merge (class `reviewer-safety` → `exact-head-independent-review`;
+  `config/task-gates.json`).
+- Consolidation routing (AGENTS.md): harness consolidation → #167;
+  provider-wrapper sharing → #169; plan-backlog consolidation → #168 under
+  #159.
 - **Never name a doc `*token*`** — `.gitignore` `**/*token*` hides it from
   git, snapshots, and reviewers.
 - Keep bubblewrap / XDG wipe / implement-never-auto-retry / packet-by-reference.
@@ -151,7 +161,7 @@ tools, retry implement) are in plan §7 — do not re-walk them.
 
 1. Does StepFun's openai-compatible API do automatic prefix caching? (P5
    measures; do not claim wins without counters.)
-2. Phase 4 land or stay skipped? Default skip (Muse M3 / GLM).
+2. Phase 4 stays `skip-unsafe` (STATUS W2b). Settled — no owner exception.
 3. Ship `grep` on Windows or `head -n` only? Criteria: adversarial table green.
 4. Risk: a literal follow of an older P1.1 wording ("never bare 429") would
    regress real retries — current plan text keeps bare `429` on stderr only.
@@ -164,7 +174,8 @@ tools, retry implement) are in plan §7 — do not re-walk them.
 1. **Could a stranger continue cold?** Yes — §§1–2 name the repo and goal;
    §3 names every artifact; §4 lists failed launches and the gitignore trap;
    §6 is ordered with gates; §7–8 cover rules and access.
-2. **Every owner question in §0?** Yes — start coding, Phase 4 exception.
+2. **Every owner question in §0?** Yes — start coding only. Phase 4 is a
+   settled security-gate result (`skip-unsafe`), not an owner question.
    Technical items are not in §0.
 3. **Dead ends preserved?** Yes — §4 (Muse detach, gitignore, WSL, callers)
    and plan §7 (rejected designs).
