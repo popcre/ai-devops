@@ -40,7 +40,7 @@
     },
     "stepfun": {
       "registry_state": "registered",
-      "reason": "StepFun Step 5 (step/step-5-preview, bin/ai-stepfun). In the shared-db allocator rotation as stepfun-step-5-preview since 2026-10-02 (owner instruction 2026-09-25: \"put stepfun into the reviewer rotation\"; popcre/shared-db PR #3657, merge 25de9e7c). A machine whose ai-review-preflight reports stepfun unusable is never drawn it."
+      "reason": "StepFun Step 5 (step/step-5-preview, bin/ai-stepfun). In the shared-db allocator rotation as stepfun-step-5-preview since 2026-10-02 (owner instruction 2026-09-25: \"put stepfun into the reviewer rotation\"; popcre/shared-db PR #3657, merge 25de9e7c). The allocator skips stepfun on any machine whose ai-review-preflight reports it unusable."
     }
   }
 }
