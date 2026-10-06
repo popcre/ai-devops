@@ -91,7 +91,9 @@ allocator but stayed registered here, and a session spent an hour trying it.
     rule-12 equivalent and is not mount-isolated.** On Windows, OpenCode file
     tools are removed (`tools:` map — the only enforcement on pin 1.18.12);
     `implement` is refused; exploration/tests run through the gate
-    (`ls`/`cat`/`head` in-folder + allowlisted test runners). Residual
+    (`ls`/`cat`, `head -n` for 1–200 lines, and hash-pinned `grep -n -F`
+    capped at 200 literal matches, all in-folder, plus allowlisted test
+    runners). Residual
     (owner-accepted 2026-09-30): in-folder scripts and runner abuse are
     arbitrary user-level code; network is shared. Linux turns still run under
     bubblewrap with an empty home, /tmp and /run and a cleared environment,
