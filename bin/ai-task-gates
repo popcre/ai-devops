@@ -95,7 +95,14 @@ EOF
 # --------------------------------------------------------------------------
 # Contract loading
 # --------------------------------------------------------------------------
-jqr(){ jq -r "$@" | tr -d '\r'; }
+# Strip CR in the shell rather than through a tr process: each extra process
+# costs a visible fraction of a second under Git Bash on Windows. The sentinel
+# keeps trailing blank lines exact, and jq's own exit status is returned.
+jqr(){
+  local out rc
+  out="$(jq -r "$@"; rc=$?; printf x; exit "$rc")"; rc=$?
+  out="${out%x}"; printf '%s' "${out//$'\r'/}"; return "$rc"
+}
 require_jq(){ command -v jq >/dev/null 2>&1 || die 'jq is required.'; }
 
 load_policy(){
@@ -132,10 +139,14 @@ validate_action_gates(){
 # The class table is read once. Classification asks for a rank on every rule of
 # every changed path, and a jq process per question is slow enough on Windows to
 # be felt as a pause before every gate.
-declare -A TG_RANK=() TG_PROT=()
+declare -A TG_RANK=() TG_PROT=() TG_ACTION=()
 load_class_table(){
-  local class rank protected
-  TG_RANK=(); TG_PROT=()
+  local class rank protected action
+  TG_RANK=(); TG_PROT=(); TG_ACTION=()
+  while IFS= read -r action; do
+    [ -n "$action" ] || continue
+    TG_ACTION["$action"]=1
+  done < <(jqr '.actions|arrays|.[]|strings' "$POLICY_FILE")
   while IFS=$'	' read -r class rank protected; do
     [ -n "$class" ] || continue
     TG_RANK["$class"]="$rank"; TG_PROT["$class"]="$protected"
@@ -145,7 +156,7 @@ load_class_table(){
 class_rank(){ printf '%s' "${TG_RANK[$1]:-}"; }
 class_protected(){ printf '%s' "${TG_PROT[$1]:-}"; }
 valid_class(){ [ -n "${TG_RANK[$1]:-}" ]; }
-valid_action(){ jq -e --arg a "$1" '.actions|index($a)!=null' "$POLICY_FILE" >/dev/null 2>&1; }
+valid_action(){ [ -n "${1:-}" ] && [ -n "${TG_ACTION[$1]:-}" ]; }
 
 # Every path rule that applies to this identity: central defaults first, then
 # every matching central rule, then the consumer declaration. Resolution takes
