@@ -1205,7 +1205,7 @@ if ($installBash) {
     } else {
         $exitCode = Invoke-BashGate -Bash $installBash -CommandText "'$requalify' requalify"
         if ($exitCode -eq 0) {
-            Write-Note "Reviewer qualifications are current."
+            Write-Note "Reviewer requalification passed; any reviewer deferred for a provider capacity event stays quarantined (see the output above)."
         } else {
             Write-Note "Automatic reviewer requalification failed (exit $exitCode); it is recorded as a reviewer issue and the reviewer stays quarantined. See the output above."
         }

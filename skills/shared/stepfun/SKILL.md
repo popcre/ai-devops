@@ -18,6 +18,9 @@ Linux (owner instruction 2026-09-25): bubblewrap plus StepCode or the OpenCode
 harness (#1086). Windows (owner instruction 2026-09-30): `review` and `ask` run
 through the pinned OpenCode engine in a disposable folder with a gated test
 shell; `implement` is refused there.
+The Windows shell permits in-folder `ls`/`cat`, `head -n N` for 1–200 lines,
+and `grep -n -F` for up to 200 literal matches. Windows file tools remain
+disabled; the runner binaries are hash-pinned.
 
 ## Sandbox
 

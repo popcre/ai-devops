@@ -49,6 +49,11 @@ if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   [ "${2:-}" != --live ] || { [ "${MOCK_QWEN_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; }
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
+  if [ "${MOCK_QWEN_FAIL:-0}" = capacity ]; then
+    printf 'live probe    : FAILED — allowance-exhaustion (provider quota exhausted; resets at 11-01 16:00:00 UTC)\n'
+    printf 'diagnostic    : /safe/.ai/reviews/qwen-qualification/failure.json\n'
+    exit 1
+  fi
   if [ "${MOCK_QWEN_FAIL:-0}" = 1 ]; then
     printf 'live probe    : FAILED — authentication-failure\n'
     printf 'diagnostic    : /safe/.ai/reviews/qwen-qualification/failure.json\n'
@@ -249,6 +254,11 @@ REQUALIFY_ID="$(printf '%s\n' "$REQUALIFY_OUT" | sed -n 's/.*reviewer issue: //p
   && jq -e --arg p qwen '.provider==$p and (.reported_command|test("requalify qwen")) and .evidence.complete_error_log==null and .evidence.session_details=="details.redacted.txt"' "$TMP/reviewer-issues/$REQUALIFY_ID/issue.json" >/dev/null \
   && ok "the recorded failure names the provider and the requalify command" || bad "the recorded failure names the provider and the requalify command"
 check "a failed automatic requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+printf '%064d\n' 4 | tr 0 b > "$AI_QWEN_TEST_RUNTIME_FILE"
+CAPACITY_OUT="$(MOCK_QWEN_FAIL=capacity $SCRIPT requalify qwen 2>&1)"; CAPACITY_RC=$?
+[ "$CAPACITY_RC" -eq 0 ] && printf '%s' "$CAPACITY_OUT" | grep -q 'reviewer issue:' && printf '%s' "$CAPACITY_OUT" | grep -q 'requalification deferred: provider capacity' \
+  && ok "a provider capacity failure is recorded but does not fail requalify" || bad "a provider capacity failure is recorded but does not fail requalify"
+check "a capacity-deferred requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "a failed requalification is retried, not silently abandoned" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 printf '{"version":1,"providers":{"qwen":{"registry_state":"absent","reason":"retired for this fixture"}}}\n' > "$TMP/qwen-omitted.json"
 check "an unregistered reviewer is skipped without a canary" ": > '$MOCK_QWEN_MODE_LOG'; printf '%064d\n' 3 | tr 0 b > '$AI_QWEN_TEST_RUNTIME_FILE'; AI_REVIEW_REGISTRY_FILE='$TMP/qwen-omitted.json' $SCRIPT requalify qwen && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
