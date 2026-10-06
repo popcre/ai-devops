@@ -112,6 +112,7 @@ if (mode === 'timeout') process.exit(124);
 if (mode === 'tool-budget') { console.error('Run aborted: tool-call budget of 3 exceeded (--max-tool-calls); observed 4.'); process.exit(55); }
 if (mode === 'wall-budget') { console.error('Run aborted: wall-clock budget of 900s exceeded (--max-wall-time).'); process.exit(55); }
 if (mode === 'turn-budget') { console.error('Reached max session turns for this session. Increase the number of turns by specifying maxSessionTurns in settings.json.'); process.exit(53); }
+if (mode === 'quota-terminal') { const m='Quota exhausted: Your token-plan 1-month quota has been exhausted. The quota will reset at 11-01 16:00:00 UTC.'; console.log(JSON.stringify({type:'assistant',session_id:'qwen-session-1',message:{model:'qwen3.8-max',content:[{type:'text',text:m}]}})); console.log(JSON.stringify({type:'result',subtype:'error_during_execution',session_id:'qwen-session-1',is_error:true,error:{message:m}})); process.exit(1); }
 if (mode === 'terminal-error') { console.log(JSON.stringify({type:'result',subtype:'error',session_id:'qwen-session-1',is_error:true,result:'secret raw payload'})); process.exit(1); }
 if (mode.startsWith('content-filter')) {
   const error = '[API Error: 400 InternalError.Algo.DataInspectionFailed: PRIVATE_FILTER_BODY API_KEY=synthetic-secret]';
@@ -921,6 +922,10 @@ else
   bad 'model mismatch leaves only safe actionable metadata'
 fi
 qualification_retention_cases
+echo quota-terminal > "$TMP/mode"; QUOTA_DOCTOR="$(run doctor --live 2>&1)"
+check 'token-plan quota in the terminal record is allowance exhaustion with its reset time' "jq -e 'select(.failure_class==\"allowance-exhaustion\" and .provider_quota_reset_at==\"11-01 16:00:00 UTC\")' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
+check 'live doctor names the quota reset time' "printf '%s' \"\$QUOTA_DOCTOR\" | grep -qF 'FAILED — allowance-exhaustion (Qwen Token Plan quota exhausted; resets at 11-01 16:00:00 UTC)'"
+check 'token-plan quota doctor output is provider-outage, not a code defect or out-of-credit' "printf '%s' \"\$QUOTA_DOCTOR\" > '$TMP/quota-doctor.txt' && python3 '$REPO_ROOT/tools/reviewer_admission.py' classify qwen --text 'automatic qwen requalification failed' --scan '$TMP/quota-doctor.txt' | jq -e '.stream==\"provider-outage\" and .failure_class!=\"out-of-credit\"' >/dev/null"
 for fixture in authentication allowance model-unavailable transport empty fail terminal-error content-filter-result content-filter-assistant content-filter-stderr content-filter-stderr-success timeout runtime-drift; do
   echo "$fixture" > "$TMP/mode"
   run doctor --live >/dev/null 2>&1 || true

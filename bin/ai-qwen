@@ -767,6 +767,30 @@ provider_api_error() { # provider_api_error FILE
   printf '%s' "$msg"
 }
 
+# Qwen reports a used-up Token Plan allowance only inside the terminal error
+# record (or assistant text), e.g. "Quota exhausted: Your token-plan 1-month
+# quota has been exhausted. The quota will reset at 11-01 16:00:00 UTC." That
+# is plan allowance exhaustion, never a code defect, and never out-of-credit
+# (DashScope reuses insufficient_quota for rate limits; see reviewer_admission).
+provider_quota_message() { # STREAM; prints the first provider quota refusal
+  local msg
+  [ -s "$1" ] || return 1
+  msg="$(jq -r 'select(.type=="result") | (.error.message? // empty), (if (.result|type)=="string" then .result else empty end)' "$1" 2>/dev/null \
+    | grep -m1 -Ei 'quota[^.]{0,40}(exhaust|exceed|reached)|insufficient_quota' || true)"
+  if [ -z "$msg" ]; then
+    msg="$(jq -r 'select(.type=="assistant") | (.message.content // [])[] | select(.type=="text") | .text' "$1" 2>/dev/null \
+      | grep -m1 -Ei 'quota[^.]{0,40}(exhaust|exceed|reached)|insufficient_quota' || true)"
+  fi
+  [ -n "$msg" ] || return 1
+  printf '%s' "$msg"
+}
+provider_quota_reset() { # STREAM; prints the provider-stated reset time, if any
+  local msg
+  msg="$(jq -r 'select(.type=="result") | (.error.message? // empty), (if (.result|type)=="string" then .result else empty end)' "$1" 2>/dev/null; \
+    jq -r 'select(.type=="assistant") | (.message.content // [])[] | select(.type=="text") | .text' "$1" 2>/dev/null)" || true
+  printf '%s' "$msg" | grep -m1 -oEi 'reset at [0-9]{1,4}-[0-9]{1,2}(-[0-9]{1,2})? [0-9]{1,2}:[0-9]{2}(:[0-9]{2})?( UTC)?' | sed -E 's/^[Rr]eset at //' || true
+}
+
 qualification_failure_class() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADER_SHA
   local stream="$1" stderr="$2" provider_rc="$3" runtime_sha="$4" preloader_sha="$5" returned
   returned="$(model_from "$stream")"
@@ -775,6 +799,7 @@ qualification_failure_class() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELOADE
   elif provider_content_filter "$stream" "$stderr"; then printf 'content-filter'
   elif grep -Eqi 'unauth|authentication|invalid[ _-]?(api[ _-]?)?key|login required|401' "$stderr"; then printf 'authentication-failure'
   elif grep -Eqi 'allowance|quota|usage limit|credit|insufficient|429' "$stderr"; then printf 'allowance-exhaustion'
+  elif provider_quota_message "$stream" >/dev/null; then printf 'allowance-exhaustion'
   elif grep -Eqi 'model[^[:alnum:]]+(unavailable|unsupported|unknown|invalid|not found|rejected)|404' "$stderr"; then printf 'requested-model-unavailable'
   elif [ -n "$returned" ] && [ "$returned" != "$QWEN_MODEL" ]; then printf 'returned-model-mismatch'
   elif tail -20 "$stream" | jq -e 'select(.type=="result" and (.is_error==true or .subtype=="error"))' >/dev/null 2>&1; then printf 'terminal-result-error'
@@ -819,6 +844,7 @@ write_qualification_diagnostic() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELO
   write_meta "$file" "$(jq -nc --arg host "$host" --arg at "$(date -u +%FT%TZ)" --arg class "$class" \
     --arg requested "$QWEN_MODEL" --arg wrapper "$(sha256_file "${BASH_SOURCE[0]}")" --arg runtime "$runtime_sha" \
     --arg preloader "$preloader_sha" --arg returned "$returned" --arg subtype "$terminal_subtype" \
+    --arg reset "$(provider_quota_reset "$stream" 2>/dev/null || true)" \
     --argjson exit_status "${provider_rc:-null}" --argjson terminal_exists "$terminal_exists" --argjson terminal_error "$terminal_error" \
     '{version:1,provider:"qwen",failure_class:$class,host:$host,timestamp:$at,requested_model:$requested,
       wrapper_sha256:$wrapper,runtime_sha256:(if ($runtime|length)>0 then $runtime else null end),
@@ -826,7 +852,7 @@ write_qualification_diagnostic() { # STREAM STDERR PROVIDER_RC RUNTIME_SHA PRELO
       provider_exit_status:$exit_status,terminal_record_exists:$terminal_exists,
       terminal_subtype:(if ($subtype|length)>0 then $subtype else null end),
       terminal_error:$terminal_error,returned_model:(if ($returned|length)>0 then $returned else null end),
-      stderr_classification:$class}')" || return 1
+      stderr_classification:$class,provider_quota_reset_at:(if ($reset|length)>0 then $reset else null end)}')" || return 1
   reviewer_event_publish_report qwen "$file" || return 1
   QUALIFICATION_DIAGNOSTIC_PATH="$file"
 }
@@ -1556,7 +1582,11 @@ cmd_doctor() {
       QUALIFICATION_DIAGNOSTIC_PATH=""
       if write_qualification_diagnostic "$tmp" "$tmp.err" "$provider_rc" "$runtime_sha" "$preloader_sha" "$failure_override"; then
         diagnostic="$QUALIFICATION_DIAGNOSTIC_PATH"
-        echo "FAILED — $(jq -r .failure_class "$diagnostic")"
+        if [ "$(jq -r .failure_class "$diagnostic")" = allowance-exhaustion ] && [ "$(jq -r '.provider_quota_reset_at // empty' "$diagnostic")" != "" ]; then
+          echo "FAILED — allowance-exhaustion (Qwen Token Plan quota exhausted; resets at $(jq -r .provider_quota_reset_at "$diagnostic"))"
+        else
+          echo "FAILED — $(jq -r .failure_class "$diagnostic")"
+        fi
         echo "diagnostic    : $diagnostic"
       else
         echo "FAILED — diagnostic-write-failure"
@@ -1630,8 +1660,8 @@ classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_RE
     printf 'timed-out'
   elif [ -s "$err" ] && grep -Eqi 'Reached max session turns|Run aborted: tool-call budget .* exceeded' "$err"; then
     printf 'turn_limit_cancelled'
-  elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$out"; } \
-    || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)' "$err"; }; then
+  elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)|quota[^.]{0,40}exhausted' "$out"; } \
+    || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)|quota[^.]{0,40}exhausted' "$err"; }; then
     printf 'usage-limit'
   elif [ "${QWEN_STARTUP_EXPIRED:-0}" = 1 ]; then
     printf 'timed-out'
