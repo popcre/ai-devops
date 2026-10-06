@@ -458,7 +458,10 @@ write_windows_runners(){
     command -v jq >/dev/null 2>&1 || return 1
     jq -e 'type=="object" and length>0' "$out" >/dev/null 2>&1 || return 1
     local n p w g bad=0 tsv
-    tsv="$(jq -r 'to_entries[] | [.key, (.value.path // empty), (.value.sha256 // empty)] | @tsv' "$out" 2>/dev/null)" || return 1
+    # jq.exe on Windows ends every -r line with CRLF; strip the trailing CR so
+    # `read` never pins it onto the hash (#1266 residual, observed with jq
+    # 1.8.2 on Git-for-Windows hosts where every entry compared unequal).
+    tsv="$(jq -r 'to_entries[] | [.key, (.value.path // empty), (.value.sha256 // empty)] | @tsv' "$out" 2>/dev/null | sed 's/\r$//')" || return 1
     [ -n "$tsv" ] || return 1
     while IFS=$'\t' read -r n p w; do
       [ -n "$n" ] && [ -n "$p" ] && [ -n "$w" ] || { bad=1; break; }
@@ -581,7 +584,9 @@ cmd_review(){
   mkdir -p "$STATE_DIR/reports"; chmod 700 "$STATE_DIR" "$STATE_DIR/reports" 2>/dev/null || true
   identity="$(mktemp "$STATE_DIR/identity.XXXXXX")"; REVIEW_IDENTITY="$identity"; trap cleanup_copy EXIT
   "$PACKET_BIN" resolve "$repo" ${base:+--base "$base"} ${assert:+--assert-head "$assert"} > "$identity" || die 'could not resolve the exact review identity.'
-  head="$(jq -r .head "$identity")"
+  # jq.exe on Windows ends the -r line with CRLF; strip it or every formal
+  # verdict comparison against $head fails (#1266 residual).
+  head="$(jq -r .head "$identity" | sed 's/\r$//')"
   REVIEW_REPO="$repo"; REVIEW_TAG="stepfun-$(sha256sum < "$identity" | cut -c1-24)"
   trap cleanup_copy EXIT
   copy="$(AI_REVIEW_SANDBOX_BASE="$base" "$SANDBOX_BIN" ensure-copy "$repo" "$REVIEW_TAG")" || die 'could not build the disposable review copy.'

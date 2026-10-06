@@ -193,6 +193,42 @@ echo '== ai-stepfun OpenCode engine'
 export AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/bin/opencode"
 check "macOS and unknown systems are refused" "for plat in Darwin FreeBSD; do out=\$(AI_STEPFUN_PLATFORM=\$plat '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform || exit 1; done"
 check "Windows is allowed with OpenCode (folder + test shell)" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor 2>&1); printf '%s' \"\$out\" | grep -q 'OK engine=opencode'"
+# Regression (#1266 residual): jq.exe on Windows ends every -r line with CRLF.
+# One shim, built unconditionally, serves the Windows-host allowlist checks
+# below and the Linux review check in the OpenCode block.
+crlf_bin="$TMP/crlfjq"; mkdir -p "$crlf_bin"
+real_jq="$(command -v jq)"
+cat > "$crlf_bin/jq" <<SHIM
+#!/bin/sh
+# jq.exe on Windows: CRLF on every stdout line, exit codes intact (jq -e
+# truthiness decides privacy classification), so the shim keeps both.
+_t="\$(mktemp 2>/dev/null)" || _t="./.jq-crlf.\$\$"
+"$real_jq" "\$@" > "\$_t"
+_rc=\$?
+sed 's/\$/\r/' "\$_t"
+rm -f "\$_t"
+exit "\$_rc"
+SHIM
+chmod +x "$crlf_bin/jq"
+printf '{"a":"b"}\n' | "$crlf_bin/jq" -r .a | od -c | grep -q '\\r' \
+  || { echo 'FAIL crlf jq shim does not emit CR'; FAIL=$((FAIL+1)); }
+# Only reproducible on a real Windows host: a forced platform on a non-Windows
+# uname skips provisioning (the CI stub path).
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    good_bash="$(sha256sum "$(command -v bash)" | awk '{print $1}')"
+    printf '{"bash":{"path":"%s","sha256":"%s"}}\n' "$(command -v bash)" "$good_bash" > "$TMP/win-runners.json"
+    out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners.json" PATH="$crlf_bin:$PATH" "$SCRIPT" doctor 2>&1)"
+    check "crlf-emitting jq still verifies the runner allowlist" "printf '%s' '$out' | grep -q 'PASS  Windows runner allowlist'"
+    bad_bash="$(printf '%064d' 7)"
+    printf '{"bash":{"path":"%s","sha256":"%s"}}\n' "$(command -v bash)" "$bad_bash" > "$TMP/win-runners-bad.json"
+    out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners-bad.json" PATH="$crlf_bin:$PATH" "$SCRIPT" doctor 2>&1)"
+    check "crlf-emitting jq still refuses a mismatched runner hash" "printf '%s' '$out' | grep -q 'FAIL Windows runner allowlist'"
+    ;;
+  *)
+    SKIP=$((SKIP + 2)); echo 'SKIP  Windows-host allowlist verify checks (not a Windows filesystem)'
+    ;;
+esac
 # The OpenCode cases need a Linux filesystem (owner-only key store) and bubblewrap.
 if [ "$(uname -s)" != Linux ]; then
   SKIP=$((SKIP + 1)); echo 'SKIP  OpenCode engine cases (not a Linux filesystem)'
@@ -203,6 +239,15 @@ check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT
 check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 5 ]"
 check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
 check "OpenCode review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
+mode verdict
+if PATH="$crlf_bin:$PATH" "$SCRIPT" review --repo "$TMP/repo" --prompt 'check f' >"$TMP/crlf-review.out" 2>"$TMP/crlf-review.err" \
+  && grep -q "VERDICT: APPROVE $HEAD_SHA" "$TMP/crlf-review.out"; then
+  ok crlf_emitting_jq_still_accepts_a_well_formed_verdict
+else
+  bad crlf_emitting_jq_still_accepts_a_well_formed_verdict
+  echo '----- crlf review stdout:'; cat "$TMP/crlf-review.out" 2>/dev/null
+  echo '----- crlf review stderr:'; cat "$TMP/crlf-review.err" 2>/dev/null
+fi
 check "OpenCode review uses the review agent" "grep -qx 'stepfun-review' '$TMP/args.oc'"
 check "OpenCode implement uses the implement agent and a remote-less clone" "mode impl; out=\$('$SCRIPT' implement --repo '$TMP/repo' --prompt 'add new.py' 2>&1); wt=\$(printf '%s\n' \"\$out\" | sed -n 's/^CLONE //p'); [ -n \"\$wt\" ] && [ -f \"\$wt/new.py\" ] && [ -z \"\$(git -C \"\$wt\" remote)\" ] && grep -qx 'stepfun-implement' '$TMP/args.oc'"
 check "OpenCode ask answers from a disposable copy" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES"

@@ -83,5 +83,36 @@ else
   echo 'ok   missing hash pin refuses'; pass=$((pass+1))
 fi
 
+# Regression (#1266 residual): jq.exe on Windows ends every -r line with CRLF,
+# so the gate compared the pinned path/hash against "<value>\r" and refused
+# every runner. A jq shim that reproduces the CRLF artifact must not change
+# either outcome.
+crlf_bin="$TMP/crlfjq"; mkdir -p "$crlf_bin"
+real_jq="$(command -v jq)"
+cat > "$crlf_bin/jq" <<SHIM
+#!/bin/sh
+# jq.exe on Windows: CRLF on every stdout line, exit codes intact (jq -e
+# truthiness), so the shim keeps both.
+_t="\$(mktemp 2>/dev/null)" || _t="./.jq-crlf.\$\$"
+"$real_jq" "\$@" > "\$_t"
+_rc=\$?
+sed 's/\$/\r/' "\$_t"
+rm -f "\$_t"
+exit "\$_rc"
+SHIM
+chmod +x "$crlf_bin/jq"
+printf '{"a":"b"}\n' | "$crlf_bin/jq" -r .a | od -c | grep -q '\\r' \
+  || { echo 'FAIL crlf jq shim does not emit CR'; fail=$((fail+1)); }
+if AI_STEPFUN_RUNNERS_JSON="$TMP/runners.json" AI_STEPFUN_REVIEW_DIR="$TMP/folder" GATE_PATH="$TMP/stubs2" PATH="$crlf_bin:$PATH" bash "$GATE" cat r.md >/dev/null 2>&1; then
+  echo 'ok   crlf-emitting jq still allows a valid hash'; pass=$((pass+1))
+else
+  echo 'FAIL crlf-emitting jq refused a valid hash'; fail=$((fail+1))
+fi
+if AI_STEPFUN_RUNNERS_JSON="$TMP/runners-bad.json" AI_STEPFUN_REVIEW_DIR="$TMP/folder" GATE_PATH="$TMP/stubs2" PATH="$crlf_bin:$PATH" bash "$GATE" cat r.md >/dev/null 2>&1; then
+  echo 'FAIL crlf-emitting jq allowed a hash mismatch'; fail=$((fail+1))
+else
+  echo 'ok   crlf-emitting jq still refuses a mismatched hash'; pass=$((pass+1))
+fi
+
 printf 'passed=%s failed=%s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
