@@ -33,7 +33,20 @@ case "$MODE" in review|implement) ;; *) printf 'grok door: usage: grok.sh review
 # makes prompt caching work, and a fixed permission set is what keeps the
 # review boundary explicit. --permission-mode auto / --always-approve are
 # deliberately NOT used (bin/ai-grok-review STEP 0 notes).
-GROK_MODEL="${AI_GROK_MODEL:-grok-4.5}"
+# The pin comes from config/provider-cli-versions.json (model_pin), the same
+# source the installers write into ~/.grok/config.toml allowed_models. A
+# hard-coded copy here drifted (grok-4.5 vs the grok-4.6 pin) and Grok refused
+# every formal review: "isn't allowed by allowed_models".
+grok_model_pin() {
+  local here cfg pin=""
+  here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")")" && pwd)"
+  cfg="$here/../../../config/provider-cli-versions.json"
+  if [ -f "$cfg" ] && command -v jq >/dev/null 2>&1; then
+    pin="$(jq -r '.providers.grok.model_pin // empty' "$cfg" 2>/dev/null | tr -d '\r')"
+  fi
+  printf '%s' "${pin:-grok-4.6}"
+}
+GROK_MODEL="${AI_GROK_MODEL:-$(grok_model_pin)}"
 GROK_MAX_TURNS="${DOOR_MAX_TURNS:-${AI_GROK_MAX_TURNS:-32}}"
 GROK_WAIT="${AI_GROK_WAIT_TIMEOUT:-1800}"
 # Review is not read-only (issue #974): the model may run commands and edit

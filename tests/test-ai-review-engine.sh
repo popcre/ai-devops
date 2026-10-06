@@ -403,6 +403,7 @@ while [ \$# -gt 0 ]; do
   case "\$1" in
     --output-format) shift; shift ;;
     --prompt-file) prompt="\$2"; shift 2 ;;
+    --model) printf '%s\n' "\$2" > "$TMP/stub-grok-model"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -423,6 +424,8 @@ AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
 STUB_RC=$?
 set -e
 check "grok_door_parses_provider_envelope_to_report_shape" "test '$STUB_RC' -eq 0 && grep -q '## Verdict' '$STUB_REPORT'"
+check "grok_door_uses_config_model_pin" \
+  "test \"\$(cat '$TMP/stub-grok-model')\" = \"\$(jq -r '.providers.grok.model_pin' '$REPO_ROOT/config/provider-cli-versions.json')\""
 check "grok_door_report_carries_stopreason_metadata" "grep -q 'end_turn' '$STUB_REPORT'"
 check "grok_door_requires_runner_token_even_with_stub" \
   "! (unset AI_REVIEW_RUNNER_CORE; AI_GROK_BIN='$STUB_GROK' AI_GROK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/x.md' DOOR_HEAD='$HEAD_SHA' bash '$GROK_DOOR' review) 2>/dev/null"
