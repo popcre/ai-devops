@@ -267,6 +267,15 @@ run_opencode_turn(){
     # Closed gate PATH: GNU tools only from Git usr/bin + runner allowlist dir.
     # Do not put Git cmd (git/ssh) or System32 on the gate PATH.
     gate_path="/c/Program Files/Git/usr/bin:/c/Program Files/Git/mingw64/bin"
+    # The gate resolves and hash-verifies runners with jq and sha256sum.
+    # sha256sum ships with Git for Windows; jq does not, so the host's jq
+    # directory (resolved before the environment is cleared; require_engine
+    # already proved jq exists) joins the closed gate PATH. Without it every
+    # gated command refused with "runner allowlist missing" inside the
+    # sandbox while doctor stayed green on the leaked host PATH (#1343).
+    local jq_dir
+    jq_dir="$(dirname "$(command -v jq 2>/dev/null || true)")"
+    case ":$gate_path:" in *":$jq_dir:"*) ;; *) gate_path="$jq_dir:$gate_path" ;; esac
     timeout_win="/c/Program Files/Git/usr/bin/timeout"
     [ -x "$timeout_win" ] || timeout_win="$(command -v timeout || true)"
     # Real bash.exe for OpenCode's shell. OPENCODE_GIT_BASH_PATH pins the
@@ -282,7 +291,6 @@ run_opencode_turn(){
     [ -f "$win_git_bash" ] || die "Git for Windows bash.exe is required: $win_git_bash"
     win_git_bash_w="$(cygpath -w "$win_git_bash" 2>/dev/null || true)"
     [ -n "$win_git_bash_w" ] || die "cannot resolve the Windows path of $win_git_bash"
-    AI_STEPFUN_GATE_BIN="$gate"
     win_gate_env="$OC_PROFILE_SRC/windows-gate-env.sh"
     [ -f "$win_gate_env" ] || die "Windows gate BASH_ENV template is missing: $win_gate_env"
     ( for name in $(compgen -e); do
@@ -485,7 +493,7 @@ write_windows_runners(){
   fi
   command -v jq >/dev/null 2>&1 || return 1
   command -v sha256sum >/dev/null 2>&1 || return 1
-  local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Program Files/nodejs:/c/Program Files/Git/mingw64/bin:/c/Python313:/c/Python312:/c/Python311"
+  local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Program Files/nodejs:/c/Program Files/Git/mingw64/bin:/c/Program Files/jq:/c/Python313:/c/Python312:/c/Python311"
   local json="{" first=1 name path hash
   for name in ls cat head bash sh jq npm node pytest python python3 go cargo dotnet; do
     path="$(PATH="$sanitized" command -v "$name" 2>/dev/null || true)"
@@ -522,11 +530,18 @@ win_shell_contract(){
   env_sh="$OC_PROFILE_SRC/windows-gate-env.sh"
   [ -f "$env_sh" ] || { printf 'FAIL gated shell contract: %s missing\n' "$env_sh"; return 1; }
   gp="/c/Program Files/Git/usr/bin:/c/Program Files/Git/mingw64/bin"
+  # Probe with the sandbox's closed PATH (plus jq, as the turn provisions):
+  # a gate that only works via a leaked host PATH proves nothing (#1343).
+  local jq_dir
+  jq_dir="$(dirname "$(command -v jq 2>/dev/null || true)")"
+  [ -n "$jq_dir" ] && [ "$jq_dir" != "." ] || { printf 'FAIL gated shell contract: jq not found on this host\n'; return 1; }
+  case ":$gp:" in *":$jq_dir:"*) ;; *) gp="$jq_dir:$gp" ;; esac
   mkdir -p "$STATE_DIR"
   probe="$(mktemp -d "$STATE_DIR/doctor-contract.XXXXXX")"
   echo stepfun-doctor-canary > "$probe/note.txt"
   out=""; rc=0
   out="$(cd "$probe" && \
+    env PATH="$gp" \
     AI_STEPFUN_REVIEW_DIR="$probe" AI_STEPFUN_SHELL_GATE=0 \
     GATE_PATH="$gp" \
     AI_STEPFUN_RUNNERS_JSON="${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}" \
@@ -539,6 +554,7 @@ win_shell_contract(){
   fi
   rc=0
   ( cd "$probe" && \
+    env PATH="$gp" \
     AI_STEPFUN_REVIEW_DIR="$probe" AI_STEPFUN_SHELL_GATE=0 \
     GATE_PATH="$gp" \
     AI_STEPFUN_RUNNERS_JSON="${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}" \
