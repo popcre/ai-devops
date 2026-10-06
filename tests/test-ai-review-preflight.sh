@@ -205,6 +205,17 @@ echo '== requalification keeps last good (#1112)'
 # is kept, a failed canary never deletes the last good approval, and untested
 # bytes are never authorized.
 check "Qwen starts from a live-qualified last good version" "$SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+echo '== known-broken providers are un-drawable even when live-qualified (#1035)'
+# Regression for the shared-db allocator drawing qwen-3.8-max while Qwen was
+# known-broken on edge-dev (until ai-devops#1035). A live qualification must not
+# make a known-broken provider drawable: preflight reports it un-drawable with
+# failure_class provider_unavailable BEFORE any replacement sequence is spent,
+# so the allocator's allocatableReviewers() skips it. Clearing the marker restores
+# the already-qualified provider without re-qualifying.
+check "Qwen is drawable while live-qualified (baseline)" "$SCRIPT usable qwen | jq -e '.status==\"installed-healthy\" and .usable==true'"
+check "known-broken Qwen is un-drawable with provider_unavailable despite a current qualification" "$SCRIPT known-broken qwen 'Qwen is broken on edge-dev until ai-devops#1035' --issue 1035 && $SCRIPT usable qwen | jq -e '.status==\"known-broken\" and .failure_class==\"provider_unavailable\" and .usable==false'"
+check "known-broken Qwen is skipped before a sequence is consumed (usable false)" "$SCRIPT usable qwen | jq -e '.usable==false'"
+check "clearing known-broken restores the live-qualified Qwen to drawable (no re-qualification)" "$SCRIPT clear qwen && $SCRIPT usable qwen | jq -e '.status==\"installed-healthy\" and .usable==true'"
 check "failed canary keeps previous version (no quarantine)" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 cp "$TMP/bin/good" "$TMP/bin/good-mutated"
 printf '\n# mutated wrapper for issue 1112\n' >> "$TMP/bin/good-mutated"
