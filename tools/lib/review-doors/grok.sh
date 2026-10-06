@@ -33,7 +33,20 @@ case "$MODE" in review|implement) ;; *) printf 'grok door: usage: grok.sh review
 # makes prompt caching work, and a fixed permission set is what keeps the
 # review boundary explicit. --permission-mode auto / --always-approve are
 # deliberately NOT used (bin/ai-grok-review STEP 0 notes).
-GROK_MODEL="${AI_GROK_MODEL:-grok-4.5}"
+# The pin comes from config/provider-cli-versions.json (model_pin), the same
+# source the installers write into ~/.grok/config.toml allowed_models. A
+# hard-coded copy here drifted (grok-4.5 vs the grok-4.6 pin) and Grok refused
+# every formal review: "isn't allowed by allowed_models".
+grok_model_pin() {
+  local here cfg pin=""
+  here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")")" && pwd)"
+  cfg="$here/../../../config/provider-cli-versions.json"
+  if [ -f "$cfg" ] && command -v jq >/dev/null 2>&1; then
+    pin="$(jq -r '.providers.grok.model_pin // empty' "$cfg" 2>/dev/null | tr -d '\r')"
+  fi
+  printf '%s' "${pin:-grok-4.6}"
+}
+GROK_MODEL="${AI_GROK_MODEL:-$(grok_model_pin)}"
 GROK_MAX_TURNS="${DOOR_MAX_TURNS:-${AI_GROK_MAX_TURNS:-32}}"
 GROK_WAIT="${AI_GROK_WAIT_TIMEOUT:-1800}"
 # Review is not read-only (issue #974): the model may run commands and edit
@@ -118,6 +131,49 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
   } > "$dest"
 }
 
+# Grok CLI cancels the WHOLE headless turn (stopReason "cancelled",
+# cancellationCategory PermissionCancelled) when a shell command uses a form no
+# --allow rule covers: variable assignment, env wrapper, git -c, $(...) or
+# backtick substitution, or quoted < > that look like redirection. Same limit
+# and same bounded recovery as bin/ai-grok-review: warn up front, then resume
+# the same session (permissions unchanged) with a corrective message.
+SHELL_RULE="Shell rule (Grok CLI limit): a shell command containing a variable assignment (FOO=1 cmd, export FOO=1), the env wrapper, git -c, \$(...) or backtick substitution, or angle brackets (even inside quotes, e.g. git log --format='<%ae>') is refused, and a refused command CANCELS your turn. Use one plain command per call. When something needs variables or such forms, write a small script under .git/review-scratch/ with your file tool and run: bash .git/review-scratch/run.sh"
+GROK_PERMISSION_RESUMES="${AI_GROK_PERMISSION_RESUMES:-3}"
+
+permission_cancelled() { # permission_cancelled RESULT_JSON -> 0 only on ONE native PermissionCancelled witness
+  # Bound to this result's sessionId AND requestId (the native prompt_id), as in
+  # bin/ai-grok-review: exactly one matching turn_completed line, symlinks
+  # refused, whitespace-tolerant JSON. A leftover or other-category cancel
+  # (max_turns_reached) never qualifies.
+  local result="$1" py
+  [ "$(jq -r '.stopReason // ""' "$result" 2>/dev/null)" = cancelled ] || return 1
+  for py in python3 python; do command -v "$py" >/dev/null 2>&1 && break; py=""; done
+  [ -n "$py" ] || return 1
+  "$py" - "$result" "${GROK_HOME:-${HOME:-}/.grok}/sessions" <<'PY'
+import json, pathlib, re, sys
+try: result = json.loads(pathlib.Path(sys.argv[1]).read_text())
+except Exception: sys.exit(1)
+sid, req = result.get('sessionId'), result.get('requestId')
+ok = lambda v: isinstance(v, str) and re.fullmatch(r'[A-Za-z0-9-]{1,80}', v)
+root = pathlib.Path(sys.argv[2])
+if not (ok(sid) and ok(req)) or not root.is_dir() or root.is_symlink(): sys.exit(1)
+cats = []
+for parent in root.iterdir():
+    stream = parent / sid / 'updates.jsonl'
+    if parent.is_symlink() or (parent / sid).is_symlink() or stream.is_symlink() or not stream.is_file(): continue
+    for line in stream.read_text(errors='replace').splitlines():
+        if not re.search(r'"sessionUpdate"\s*:\s*"turn_completed"', line): continue
+        try: ev = json.loads(line)
+        except ValueError: continue
+        par = ev.get('params', {}) if isinstance(ev, dict) else {}
+        up = par.get('update', {}) if isinstance(par, dict) else {}
+        if not isinstance(up, dict) or par.get('sessionId') != sid or up.get('prompt_id') != req or up.get('stop_reason') != 'cancelled': continue
+        meta = par.get('_meta', {})
+        cats.append(meta.get('cancellationCategory') if isinstance(meta, dict) else None)
+sys.exit(0 if cats == ['PermissionCancelled'] else 1)
+PY
+}
+
 main() {
   local grok cwd out prompt_full rc
   grok="$(resolve_grok)" || exit $?
@@ -132,6 +188,7 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
+    printf '%s\n\n' "$SHELL_RULE"
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading.\n'
   } > "$prompt_full"
@@ -152,6 +209,28 @@ main() {
   fi
   rc=$?
   set -e
+
+  local n=0 sid rpf used left="$GROK_MAX_TURNS"
+  case "$GROK_PERMISSION_RESUMES" in ''|*[!0-9]*) GROK_PERMISSION_RESUMES=0 ;; esac
+  [ "$GROK_PERMISSION_RESUMES" -le 5 ] || GROK_PERMISSION_RESUMES=5
+  while [ "$rc" -eq 0 ] && [ "$n" -lt "$GROK_PERMISSION_RESUMES" ] && permission_cancelled "$out"; do
+    # num_turns is per invocation; a missing count is charged as one turn.
+    used="$(jq -r '.num_turns // 1' "$out")"; case "$used" in ''|*[!0-9]*) used=1 ;; esac
+    left=$(( left - used )); [ "$left" -ge 1 ] || break
+    n=$((n + 1)); sid="$(jq -r '.sessionId' "$out")"
+    printf 'grok door: Grok refused a shell command form (PermissionCancelled); resuming session %s (%s of %s, %s turns left).\n' "$sid" "$n" "$GROK_PERMISSION_RESUMES" "$left" >&2
+    mv -f "$out" "$out.cancelled$n"   # keep the confirmed cancelled result
+    rpf="$(mktemp)"
+    printf '%s\n' "The Grok CLI refused your last shell command and cancelled it; nothing ran. $SHELL_RULE. Do not retry that form. Continue the same $MODE task from where you stopped and finish with the required '## Verdict' section." > "$rpf"
+    set +e
+    env -u GROK_CLAUDE_1PASSWORD_HELPER \
+      "$grok" --cwd "$cwd" --model "$GROK_MODEL" -r "$sid" --prompt-file "$rpf" \
+        --max-turns "$left" "${GROK_PERMS[@]}" --output-format json \
+        > "$out" 2> "$out.err"
+    rc=$?
+    set -e
+    rm -f "$rpf"
+  done
 
   if [ "$rc" -eq 92 ]; then
     printf 'AI_REVIEWER_OUT_OF_CREDIT grok door\n' >&2

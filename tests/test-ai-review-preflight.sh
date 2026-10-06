@@ -49,6 +49,11 @@ if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   [ "${2:-}" != --live ] || { [ "${MOCK_QWEN_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; }
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
+  if [ "${MOCK_QWEN_FAIL:-0}" = capacity ]; then
+    printf 'live probe    : FAILED — allowance-exhaustion (provider quota exhausted; resets at 11-01 16:00:00 UTC)\n'
+    printf 'diagnostic    : /safe/.ai/reviews/qwen-qualification/failure.json\n'
+    exit 1
+  fi
   if [ "${MOCK_QWEN_FAIL:-0}" = 1 ]; then
     printf 'live probe    : FAILED — authentication-failure\n'
     printf 'diagnostic    : /safe/.ai/reviews/qwen-qualification/failure.json\n'
@@ -205,6 +210,17 @@ echo '== requalification keeps last good (#1112)'
 # is kept, a failed canary never deletes the last good approval, and untested
 # bytes are never authorized.
 check "Qwen starts from a live-qualified last good version" "$SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+echo '== known-broken providers are un-drawable even when live-qualified (#1035)'
+# Regression for the shared-db allocator drawing qwen-3.8-max while Qwen was
+# known-broken on edge-dev (until ai-devops#1035). A live qualification must not
+# make a known-broken provider drawable: preflight reports it un-drawable with
+# failure_class provider_unavailable BEFORE any replacement sequence is spent,
+# so the allocator's allocatableReviewers() skips it. Clearing the marker restores
+# the already-qualified provider without re-qualifying.
+check "Qwen is drawable while live-qualified (baseline)" "$SCRIPT usable qwen | jq -e '.status==\"installed-healthy\" and .usable==true'"
+check "known-broken Qwen is un-drawable with provider_unavailable despite a current qualification" "$SCRIPT known-broken qwen 'Qwen is broken on edge-dev until ai-devops#1035' --issue 1035 && $SCRIPT usable qwen | jq -e '.status==\"known-broken\" and .failure_class==\"provider_unavailable\" and .usable==false'"
+check "known-broken Qwen is skipped before a sequence is consumed (usable false)" "$SCRIPT usable qwen | jq -e '.usable==false'"
+check "clearing known-broken restores the live-qualified Qwen to drawable (no re-qualification)" "$SCRIPT clear qwen && $SCRIPT usable qwen | jq -e '.status==\"installed-healthy\" and .usable==true'"
 check "failed canary keeps previous version (no quarantine)" "! MOCK_QWEN_FAIL=1 $SCRIPT qualify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 cp "$TMP/bin/good" "$TMP/bin/good-mutated"
 printf '\n# mutated wrapper for issue 1112\n' >> "$TMP/bin/good-mutated"
@@ -238,6 +254,11 @@ REQUALIFY_ID="$(printf '%s\n' "$REQUALIFY_OUT" | sed -n 's/.*reviewer issue: //p
   && jq -e --arg p qwen '.provider==$p and (.reported_command|test("requalify qwen")) and .evidence.complete_error_log==null and .evidence.session_details=="details.redacted.txt"' "$TMP/reviewer-issues/$REQUALIFY_ID/issue.json" >/dev/null \
   && ok "the recorded failure names the provider and the requalify command" || bad "the recorded failure names the provider and the requalify command"
 check "a failed automatic requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+printf '%064d\n' 4 | tr 0 b > "$AI_QWEN_TEST_RUNTIME_FILE"
+CAPACITY_OUT="$(MOCK_QWEN_FAIL=capacity $SCRIPT requalify qwen 2>&1)"; CAPACITY_RC=$?
+[ "$CAPACITY_RC" -eq 0 ] && printf '%s' "$CAPACITY_OUT" | grep -q 'reviewer issue:' && printf '%s' "$CAPACITY_OUT" | grep -q 'requalification deferred: provider capacity' \
+  && ok "a provider capacity failure is recorded but does not fail requalify" || bad "a provider capacity failure is recorded but does not fail requalify"
+check "a capacity-deferred requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "a failed requalification is retried, not silently abandoned" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 printf '{"version":1,"providers":{"qwen":{"registry_state":"absent","reason":"retired for this fixture"}}}\n' > "$TMP/qwen-omitted.json"
 check "an unregistered reviewer is skipped without a canary" ": > '$MOCK_QWEN_MODE_LOG'; printf '%064d\n' 3 | tr 0 b > '$AI_QWEN_TEST_RUNTIME_FILE'; AI_REVIEW_REGISTRY_FILE='$TMP/qwen-omitted.json' $SCRIPT requalify qwen && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
@@ -483,6 +504,25 @@ printf '%s' "$COOL_STATUS" | jq -e '.failure_class=="provider-timeout"' >/dev/nu
 
 # Drift is reported as drift, not as a timeout.
 check "drift is reported as drift" "$SCRIPT explain provider-timeout | grep -q 'transient liveness' && $SCRIPT explain authentication-failed | grep -q 'Quarantine'"
+
+# #1346: the public pause interface preserves a stronger credit hold atomically.
+"$SCRIPT" quarantine grok out-of-credit --seconds 7200 >/dev/null 2>&1
+PAUSE_JSON="$($SCRIPT pause grok wrapper-crash --seconds 3600)"
+printf '%s' "$PAUSE_JSON" | jq -e --argjson minimum "$(( $(date +%s) + 7000 ))" '.failure_class=="out-of-credit" and .expires_epoch >= $minimum' >/dev/null && ok "failure pause preserves stronger credit hold" || bad "failure pause preserves stronger credit hold"
+"$SCRIPT" pause grok wrapper-crash --seconds 30 >/dev/null 2>&1 && bad "failure pause refuses wrong duration" || ok "failure pause refuses wrong duration"
+"$SCRIPT" pause grok '' --seconds 3600 >/dev/null 2>&1 && bad "failure pause refuses unnamed cause" || ok "failure pause refuses unnamed cause"
+"$SCRIPT" clear grok >/dev/null 2>&1
+OBSERVED_PAUSE="$(( $(date +%s) - 120 ))"
+PAUSE_INITIAL="$($SCRIPT pause grok provider-timeout --observed "$OBSERVED_PAUSE" --seconds 3600)"
+PAUSE_READBACK="$($SCRIPT pause-status grok)"
+[ "$PAUSE_INITIAL" = "$PAUSE_READBACK" ] && ok "pause-status reads exact persisted hold" || bad "pause-status reads exact persisted hold"
+PAUSE_RETRY="$($SCRIPT pause grok provider-timeout --seconds 3600 --observed "$OBSERVED_PAUSE")"
+[ "$PAUSE_INITIAL" = "$PAUSE_RETRY" ] && ok "observed failure retry never extends original hour" || bad "observed failure retry never extends original hour"
+PAUSE_EXPIRED="$($SCRIPT pause grok provider-timeout --observed 0 --seconds 3600)"
+printf '%s' "$PAUSE_EXPIRED" | jq -e '.status=="expired"' >/dev/null && [ "$PAUSE_READBACK" = "$($SCRIPT pause-status grok)" ] && ok "expired historical pause leaves current hold untouched" || bad "expired historical pause leaves current hold untouched"
+"$SCRIPT" pause grok provider-timeout --observed "$(( $(date +%s) + 3600 ))" >/dev/null 2>&1 && bad "pause refuses future observation" || ok "pause refuses future observation"
+"$SCRIPT" pause grok provider-timeout --observed malformed >/dev/null 2>&1 && bad "pause refuses malformed observation" || ok "pause refuses malformed observation"
+"$SCRIPT" clear grok >/dev/null 2>&1
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -166,11 +166,18 @@ printf 'exec %q "$@"\n' "$REAL_PYTHON3" >> "$TMP/race-bin/python3"
 chmod +x "$TMP/race-bin/python3"; cp "$TMP/bin/agy" "$RACE_AGY"; RACE_SHA="$(sha256sum < "$RACE_AGY" | awk '{print $1}')"; write_qualification 1.1.14 gemini-3.8-flash-high "$RACE_SHA"; : > "$MOCK_AGY_CALLS"
 check 'runtime replacement during inventory is refused before provider contact' "! (cd '$RACE_REPO' && PATH='$TMP/race-bin':\"\$PATH\" AI_GEMINI_BIN='$RACE_AGY' '$SCRIPT' new inventory-runtime-race --prompt review) && test -f '$TMP/race-bin/python3.done' && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.15
-check 'agy version drift re-quarantines before provider contact' "! '$SCRIPT' new stale-runtime --prompt review && test ! -s '$MOCK_AGY_CALLS'"
+check 'agy version drift re-quarantines before provider contact' "! AI_GEMINI_AUTO_REQUALIFY=0 '$SCRIPT' new stale-runtime --prompt review && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.14 gemini-other
 check 'model drift re-quarantines before provider contact' "! '$SCRIPT' new stale-model --prompt review && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification 1.1.14 gemini-3.8-flash-high "$(printf '%064d' 0)"
-check 'same-version runtime byte drift re-quarantines before provider contact' "! '$SCRIPT' new stale-runtime-bytes --prompt review && test ! -s '$MOCK_AGY_CALLS'"
+check 'same-version runtime byte drift re-quarantines before provider contact' "! AI_GEMINI_AUTO_REQUALIFY=0 '$SCRIPT' new stale-runtime-bytes --prompt review && test ! -s '$MOCK_AGY_CALLS'"
+# 2026-10-06: agy self-updated and every review refused until someone ran
+# qualify-live by hand. Runtime-only drift now reruns the full live
+# qualification once, records it, and continues; model drift never does.
+AUTOQ_REPO="$TMP/autoq-repo"; make_repo "$AUTOQ_REPO"; write_qualification 1.1.15
+check 'runtime-only drift requalifies live automatically then reviews' "(cd '$AUTOQ_REPO' && '$SCRIPT' new autoq --prompt review) 2>'$TMP/autoq.err' | grep -q '^PASS' && grep -q 'requalifying automatically' '$TMP/autoq.err' && jq -e '.agy_version==\"1.1.14\"' '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json' >/dev/null"
+write_qualification 1.1.14 gemini-other; : > "$MOCK_AGY_CALLS"
+check 'model drift never auto-requalifies' "! (cd '$AUTOQ_REPO' && '$SCRIPT' new autoq-model --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
 printf '{"version":2,"provider":"gemini"}\n' > "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json"
 check 'missing qualification fields fail closed before provider contact' "! '$SCRIPT' new malformed --prompt review && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification

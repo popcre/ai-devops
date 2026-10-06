@@ -195,10 +195,15 @@ the installed gate source, which the installer checks again before refreshing
 the launcher receipt. This route refuses launchers that already have a receipt.
 Ask for an operation's approval line with `ai-review <provider> final-check
 --operation <name>` (`legacy-managed-launcher-refresh`,
-`first-managed-install`, or `partial-managed-launcher-recovery`); the reviewer
-request then names the exact `Approved <name>.` line, and the report records
-the operation. Stale-manifest recovery is not accepted there, because its
-approval must also bind host-specific hashes.
+`first-managed-install`, `partial-managed-launcher-recovery`, or
+`stale-linux-manifest-recovery`); the reviewer request then names the exact
+`Approved <name>.` line, and the report records the operation. For
+`stale-linux-manifest-recovery`, run the review on the affected Linux host: the
+review wrapper itself reads `/usr/local/bin/ai-task-gates` and
+`/etc/ai-devops/install-manifest.tsv` (no caller input) and writes the stale
+manifest SHA and hash plus the live installed SHA and gate hash into both the
+reviewer request and the wrapper-written report header. If that host evidence
+cannot be read, no reviewer starts.
 
 The route accepts only the supported `popcre/ai-devops` and redirected
 `u2giants/ai-devops` GitHub origins. It compares the full release range,
@@ -349,7 +354,9 @@ before the one-use authorization can be consumed.
 If the installed Linux manifest names an older source SHA than the live clean
 checkout, the independent exact-head report must explicitly name
 `Approved stale-linux-manifest-recovery.` and bind the stale manifest SHA and file hash
-plus the live installed SHA and gate hash. The separate installation task then
+plus the live installed SHA and gate hash. The gate trusts the operation and
+evidence rows only in the wrapper-written header before `## Result`; rows in
+reviewer text never count. The separate installation task then
 uses `authorize-install --stale-manifest-recovery` for one pinned target update.
 Without that exact reviewed evidence, the updater stops before changing the
 installed checkout.
@@ -362,7 +369,9 @@ each fast-forward with hooks disabled and run one explicit
 `ai-review-preflight requalify` during installation, so a failed canary can
 never masquerade as a pull or install failure mid-update. A failed automatic
 requalification is recorded with `ai-reviewer-issue record`; it fails
-`update.sh` and is printed (without aborting later skill stages) by the
+`update.sh` (except a `provider-outage/capacity` event such as an exhausted
+quota, which is recorded and leaves the reviewer quarantined but does not fail
+the install) and is printed (without aborting later skill stages) by the
 Windows installer, and the reviewer stays quarantined
 (`live-qualification-required`) until it is fixed. A live canary can take up
 to its qualification timeout (default 30 minutes per reviewer), so a pull

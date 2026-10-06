@@ -1079,10 +1079,14 @@ linux_review_authority(){
     stale_sha="$(jq -r .linux_manifest_recorded_sha "$auth")"
     stale_manifest_hash="$(jq -r .linux_manifest_sha256 "$auth")"
     stale_source_hash="$(jq -r .installed_source_sha256 "$auth")"
-    grep -Fqx "| stale manifest SHA | \`$stale_sha\` |" "$report" || return 1
-    grep -Fqx "| stale manifest hash | \`$stale_manifest_hash\` |" "$report" || return 1
-    grep -Fqx "| live installed SHA | \`$old\` |" "$report" || return 1
-    grep -Fqx "| live gate hash | \`$stale_source_hash\` |" "$report" || return 1
+    local stale_header
+    stale_header="$(tr -d '\r' < "$report" | sed '/^## Result$/,$d')"
+    grep -q '^## Result$' <(tr -d '\r' < "$report") || return 1
+    grep -Fqx "| operation | \`stale-linux-manifest-recovery\` |" <<<"$stale_header" || return 1
+    grep -Fqx "| stale manifest SHA | \`$stale_sha\` |" <<<"$stale_header" || return 1
+    grep -Fqx "| stale manifest hash | \`$stale_manifest_hash\` |" <<<"$stale_header" || return 1
+    grep -Fqx "| live installed SHA | \`$old\` |" <<<"$stale_header" || return 1
+    grep -Fqx "| live gate hash | \`$stale_source_hash\` |" <<<"$stale_header" || return 1
   fi
   [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$candidate")" = "$source_digest" ] || return 1
   review_root="$(git -C "$(dirname "$report")" rev-parse --show-toplevel 2>/dev/null)" || return 1
@@ -1534,13 +1538,16 @@ cmd_authorize_install(){
   [ "$reviewed_common" = "$candidate_common" ] || blocked 'ai-task-gates: STOP. Review and installation do not share Git ownership.'
   [ "$(git -C "$reviewed_root" rev-parse HEAD 2>/dev/null)" = "$target_head" ] || blocked 'ai-task-gates: STOP. Reviewed checkout moved from exact target.'
   [ -z "$(git -C "$reviewed_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Reviewed checkout is dirty.'
-  reviewed_commit="$(awk -F'|' '$2 ~ /reviewed commit/ {gsub(/[^0-9a-f]/,"",$3); print $3}' "$report_real")"
+  # Read the reviewed commit only from the wrapper-written header (before the
+  # first "## Result" line); a runner door may repeat its own header table
+  # below it, and reviewer text never names the target.
+  reviewed_commit="$(sed '/^## Result$/,$d' "$report_real" | awk -F'|' '$2 ~ /reviewed commit/ {gsub(/[^0-9a-f]/,"",$3); print $3}')"
   [ "$reviewed_commit" = "$target_head" ] || blocked 'ai-task-gates: STOP. Review does not name exact target.'
   [ "$(tail -n 2 "$report_real" | tr -d '\r')" = $'## Verdict\nAPPROVE' ] || blocked 'ai-task-gates: STOP. Exact-head independent review has not approved release.'
   # A migration review approves exactly one operation: the report's recorded
   # operation (written by the review wrapper from `ai-review --operation`) must
   # be the requested one, and no sibling operation may be approved beside it.
-  local requested_operation="" sibling_operation
+  local requested_operation="" sibling_operation report_header=""
   if [ "$legacy_migration" -eq 1 ]; then requested_operation=legacy-managed-launcher-refresh
   elif [ "$first_install" -eq 1 ]; then requested_operation=first-managed-install
   elif [ "$recover_launchers" -eq 1 ]; then requested_operation=partial-managed-launcher-recovery
@@ -1551,14 +1558,12 @@ cmd_authorize_install(){
       [ "$sibling_operation" = "$requested_operation" ] && continue
       ! grep -Fqx "Approved $sibling_operation." "$report_real" || blocked 'ai-task-gates: STOP. Review approves more than the requested installation operation.'
     done
-    if [ "$requested_operation" != stale-linux-manifest-recovery ]; then
-      # Only the wrapper-written header (before the first "## Result" line) is
-      # trusted; reviewer text below it cannot supply the operation row.
-      local report_header
-      report_header="$(tr -d '\r' < "$report_real" | sed '/^## Result$/,$d')"
-      grep -q '^## Result$' <(tr -d '\r' < "$report_real") &&
-        [ "$(grep -c '^| operation | ' <<<"$report_header")" = 1 ] && grep -Fqx "| operation | \`$requested_operation\` |" <<<"$report_header" || blocked 'ai-task-gates: STOP. Review report does not record the requested installation operation.'
-    fi
+    # Only the wrapper-written header (before the first "## Result" line) is
+    # trusted; reviewer text below it cannot supply the operation row or the
+    # stale-manifest host evidence rows.
+    report_header="$(tr -d '\r' < "$report_real" | sed '/^## Result$/,$d')"
+    grep -q '^## Result$' <(tr -d '\r' < "$report_real") &&
+      [ "$(grep -c '^| operation | ' <<<"$report_header")" = 1 ] && grep -Fqx "| operation | \`$requested_operation\` |" <<<"$report_header" || blocked 'ai-task-gates: STOP. Review report does not record the requested installation operation.'
   fi
   if [ "$legacy_migration" -eq 1 ]; then
     grep -Fqx 'Approved legacy-managed-launcher-refresh.' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve the legacy managed launcher migration operation.'
@@ -1571,12 +1576,12 @@ cmd_authorize_install(){
   fi
   if [ "$stale_manifest_recovery" -eq 1 ]; then
     grep -Fqx 'Approved stale-linux-manifest-recovery.' "$report_real" || blocked 'ai-task-gates: STOP. Review did not approve stale Linux manifest recovery.'
-    grep -Fqx "| stale manifest SHA | \`$manifest_recorded_sha\` |" "$report_real" &&
-      grep -Fqx "| stale manifest hash | \`$stale_manifest_hash\` |" "$report_real" &&
-      grep -Fqx "| live installed SHA | \`$installed_head\` |" "$report_real" &&
-      grep -Fqx "| live gate hash | \`$stale_live_hash\` |" "$report_real" || blocked 'ai-task-gates: STOP. Review did not bind exact stale manifest and live source evidence.'
+    grep -Fqx "| stale manifest SHA | \`$manifest_recorded_sha\` |" <<<"$report_header" &&
+      grep -Fqx "| stale manifest hash | \`$stale_manifest_hash\` |" <<<"$report_header" &&
+      grep -Fqx "| live installed SHA | \`$installed_head\` |" <<<"$report_header" &&
+      grep -Fqx "| live gate hash | \`$stale_live_hash\` |" <<<"$report_header" || blocked 'ai-task-gates: STOP. Review did not bind exact stale manifest and live source evidence.'
   fi
-  reviewed_digest="$(awk -F'|' '$2 ~ /source digest/ {gsub(/[^0-9a-f]/,"",$3); print $3}' "$report_real")"
+  reviewed_digest="$(sed '/^## Result$/,$d' "$report_real" | awk -F'|' '$2 ~ /source digest/ {gsub(/[^0-9a-f]/,"",$3); print $3}')"
   actual_digest="$("$SCRIPT_DIR/ai-review-sandbox" digest "$candidate_root")" || blocked 'ai-task-gates: STOP. Candidate source digest unavailable.'
   [ -n "$reviewed_digest" ] && [ "$reviewed_digest" = "$actual_digest" ] || blocked 'ai-task-gates: STOP. Review source digest differs from candidate.'
   [ "$reviewed_digest" = "$("$SCRIPT_DIR/ai-review-sandbox" digest "$reviewed_root")" ] || blocked 'ai-task-gates: STOP. Reviewed checkout source digest changed.'

@@ -1,6 +1,6 @@
 ---
 name: stepfun
-description: Use StepFun Step 5 (step-5-preview) through ai-stepfun. Formal reviews with a VERDICT line and second opinions (both may run code and edit files in a disposable remote-less copy), and implementation runs that write and execute code in an isolated remote-less clone. Ubuntu/Linux only (StepCode or OpenCode, always under bubblewrap); Windows is refused. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion.
+description: Use StepFun Step 5 (step-5-preview) through ai-stepfun. Formal reviews with a VERDICT line and second opinions (both may run code and edit files in a disposable remote-less copy), and implementation runs that write and execute code in an isolated remote-less clone. Allocator rotation reviewer (shared-db#3657). Linux runs StepCode or OpenCode under bubblewrap; Windows runs review/ask through the OpenCode folder + test shell, and implement is refused there. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion.
 ---
 
 # stepfun
@@ -14,16 +14,21 @@ not read-only.
 
 ## Platform
 
-Ubuntu/Linux only (owner instruction 2026-09-25). `ai-stepfun` refuses Windows,
-because its shell-enabled turns need the bubblewrap sandbox (#1086). Install
-bubblewrap and StepCode (or the OpenCode harness).
+Linux (owner instruction 2026-09-25): bubblewrap plus StepCode or the OpenCode
+harness (#1086). Windows (owner instruction 2026-09-30): `review` and `ask` run
+through the pinned OpenCode engine in a disposable folder with a gated test
+shell; `implement` is refused there.
+The Windows shell permits in-folder `ls`/`cat`, `head -n N` for 1–200 lines,
+and `grep -n -F` for up to 200 literal matches. Windows file tools remain
+disabled; the runner binaries are hash-pinned.
 
 ## Sandbox
 
 Every turn runs against a disposable, remote-less copy or clone. StepCode turns
 additionally run under bubblewrap: the model sees only its own folder, with an
-empty home, /tmp and /run and a cleared environment; OpenCode turns get the
-same sandbox. OpenCode turns run against
+empty home, /tmp and /run and a cleared environment; OpenCode turns on Linux get the
+same sandbox. Windows turns are not mount-isolated: see the owner-accepted
+Windows residual in `docs/reviewer-rotation-rules.md` rule 12. OpenCode turns run against
 the same disposable copy with a per-run profile and the key exported only into
 the child environment.
 
@@ -55,10 +60,10 @@ ai-stepfun implement --repo . --prompt-file task.md
 
 ## Membership
 
-`stepfun` is registered in `config/reviewer-registry.json` and listed as
-outside the shared-db allocator: the allocator has no platform awareness, so it
-never assigns StepFun. Use it when a session wants a reviewer, or when Albert
-asks for StepFun.
+`stepfun` is registered in `config/reviewer-registry.json` and is an active
+shared-db allocator reviewer (shared-db#3657). The allocator draws it only on a
+machine where `ai-review-preflight usable stepfun` passes. Also use it when
+Albert asks for StepFun.
 
 ## Failures
 

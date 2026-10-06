@@ -213,10 +213,13 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
   --issue <issue> --pr <pr> --head-sha <exact-head>
 ```
 
-The GitHub-backed cursor rotates the six active reviewers -- Grok 4.6, GLM 5.3
-(restored 2026-09-30), Muse Spark 1.3 Contributor, Qwen 3.8 Max, Gemini 3.8
-Flash, and DeepSeek V4.1 Flash
-(re-entered 2026-09-23 with read-only repository tools) -- then repeats across
+The GitHub-backed cursor rotates the six preferred reviewers -- GLM 5.3
+(restored 2026-09-30), Qwen 3.8 Max, Muse Spark 1.3 Contributor, Gemini 3.8
+Flash, DeepSeek V4.1 Flash (re-entered 2026-09-23 with read-only repository
+tools), and StepFun Step 5 (shared-db#3657; skipped where preflight reports it
+unusable). Grok 4.6 stays active but is drawn only when none of those can take
+the exact review, including slot 2 and failed-reviewer replacement (owner
+preference 2026-09-27, shared-db#3592; shared-db#3593, merge 907758e3) -- then repeats across
 machines and restarts. Kimi K3, the old text-only `deepseek-chat`, and Codex are out of rotation
 (owner instruction; `RETIRED_REVIEWERS` in the allocator and `absent` in
 `config/reviewer-registry.json`): never route a review to them and never wait
@@ -233,7 +236,7 @@ carrying the head SHA above a substantive report. Registry re-entry is always a
 reviewed shared-db change backed by that evidence; it is never an edit made to
 unblock an allocation. Retrying the same
 issue/PR/head returns the same assignment. Use only the returned wrapper:
-`ai-muse`, `ai-grok-review`, `ai-qwen`, `ai-gemini`, or
+`ai-muse`, `ai-grok-review`, `ai-glm`, `ai-qwen`, `ai-gemini`, `ai-stepfun`, or
 `ai-deepseek-agent send --review --governed-verdict <sha> --model deepseek-flash`. Never override its model or
 reasoning pin, and never call `agy` directly.
 

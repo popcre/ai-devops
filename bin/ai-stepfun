@@ -179,13 +179,31 @@ load_key(){
 # the run. Implementation runs are never re-run blindly: the clone is kept.
 RATE_RETRIES="${AI_STEPFUN_RATE_RETRIES:-2}"
 RATE_PAUSE="${AI_STEPFUN_RATE_PAUSE:-65}"
-# StepCode prints "429: {json}" on stdout; OpenCode surfaces rate limits in
-# stderr or JSONL error events. Match either shape.
-rate_limited(){ grep -qE '(^429: \{.*rate_limited|rate_limited|429|Too Many Requests)' "$1" "$1.stderr" 2>/dev/null; }
+# StepCode prints HTTP errors on stdout; only status 429 is a rate signal.
+# OpenCode uses stderr or JSONL error events. Assistant text, including JSONL
+# text events, is never a rate signal.
+rate_limited(){
+  local out="$1"
+  grep -Eiq '(^|[^[:alnum:]_])429([^[:alnum:]_]|$)|rate_limited|too many requests' "$out.stderr" 2>/dev/null && return 0
+  grep -Eq '^429: \{' "$out" 2>/dev/null && return 0
+  [ -s "$out.jsonl" ] || return 1
+  jq -r 'select(.type != "text" and (.type == "error" or .error != null)) | tostring' "$out.jsonl" 2>/dev/null \
+    | grep -Eiq '(^|[^[:alnum:]_])429([^[:alnum:]_]|$)|rate_limited|too many requests'
+}
+
+retry_report_well_formed(){
+  local out="$1" last
+  [ -s "$out" ] || return 1
+  [ -n "${STEPFUN_EXPECT_HEAD:-}" ] || return 0
+  last="$(sed '/^[[:space:]]*$/d' "$out" | tail -n1 | tr -d '\r')"
+  [[ "$last" =~ ^[[:space:]]*VERDICT:[[:space:]]*(APPROVE|REVISE|REJECT)[[:space:]]+${STEPFUN_EXPECT_HEAD}[[:space:]]*$ ]]
+}
 run_step_retry(){ # same arguments as run_step; disposable-copy turns only
   local n=0 rc
   while :; do
+    STEPFUN_RETRY_COUNT="$n"
     rc=0; run_step "$@" || rc=$?
+    if [ "$rc" -eq 0 ] && retry_report_well_formed "$2"; then return 0; fi
     rate_limited "$2" && [ "$n" -lt "$RATE_RETRIES" ] || return "$rc"
     n=$((n + 1)); note "StepFun rate limit reached; retrying in ${RATE_PAUSE}s ($n/$RATE_RETRIES)."
     sleep "$RATE_PAUSE"
@@ -196,11 +214,38 @@ run_step_retry(){ # same arguments as run_step; disposable-copy turns only
 # selected engine. Dispatches to StepCode (Ubuntu) or OpenCode (Windows/fallback).
 run_step(){
   detect_engine
+  local rc=0
   case "$ENGINE" in
-    stepcode) run_stepcode "$@" ;;
-    opencode) run_opencode_turn "$@" ;;
+    stepcode) run_stepcode "$@" || rc=$? ;;
+    opencode) run_opencode_turn "$@" || rc=$? ;;
     *) die 'no engine available (StepCode or OpenCode)' ;;
   esac
+  record_turn_counters "$2" "${STEPFUN_RETRY_COUNT:-0}" || note 'could not record StepFun turn counters'
+  return "$rc"
+}
+
+# Only fixed numeric usage fields leave the raw OpenCode event stream. Never
+# copy session IDs, prompts, tool arguments, errors, or provider credentials.
+# StepCode has no JSONL usage channel, so its unavailable values stay null.
+record_turn_counters(){
+  local out="$1" retry="$2" report
+  mkdir -p "$STATE_DIR/reports" || return 1
+  chmod 700 "$STATE_DIR" "$STATE_DIR/reports" 2>/dev/null || true
+  report="$(mktemp "$STATE_DIR/reports/turn.XXXXXX.json")" || return 1
+  chmod 600 "$report" 2>/dev/null || true
+  if [ -s "$out.jsonl" ] && command -v jq >/dev/null 2>&1; then
+    jq -s --arg engine "$ENGINE" --argjson retry "$retry" '
+      [ .[] | select(.type == "step_finish") | .part.tokens | select(type == "object") ] as $t
+      | def sum_field($field): if any($t[]; .[$field] | type == "number")
+          then ([$t[] | .[$field] | numbers] | add) else null end;
+        def sum_cache($field): if any($t[]; .cache[$field] | type == "number")
+          then ([$t[] | .cache[$field] | numbers] | add) else null end;
+        {engine:$engine, resumed:false, retry_count:$retry,
+         input_tokens:sum_field("input"), output_tokens:sum_field("output"),
+         cache_read_tokens:sum_cache("read"), cache_write_tokens:sum_cache("write")}
+    ' "$out.jsonl" > "$report" 2>/dev/null && [ -s "$report" ] && return 0
+  fi
+  printf '{"engine":"%s","resumed":false,"retry_count":%s,"input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null}\n' "$ENGINE" "$retry" > "$report"
 }
 
 # ---- OpenCode engine (Windows, or any host without StepCode) ----
@@ -458,7 +503,10 @@ write_windows_runners(){
     command -v jq >/dev/null 2>&1 || return 1
     jq -e 'type=="object" and length>0' "$out" >/dev/null 2>&1 || return 1
     local n p w g bad=0 tsv
-    tsv="$(jq -r 'to_entries[] | [.key, (.value.path // empty), (.value.sha256 // empty)] | @tsv' "$out" 2>/dev/null)" || return 1
+    # jq.exe on Windows ends every -r line with CRLF; strip the trailing CR so
+    # `read` never pins it onto the hash (#1266 residual, observed with jq
+    # 1.8.2 on Git-for-Windows hosts where every entry compared unequal).
+    tsv="$(jq -r 'to_entries[] | [.key, (.value.path // empty), (.value.sha256 // empty)] | @tsv' "$out" 2>/dev/null | sed 's/\r$//')" || return 1
     [ -n "$tsv" ] || return 1
     while IFS=$'\t' read -r n p w; do
       [ -n "$n" ] && [ -n "$p" ] && [ -n "$w" ] || { bad=1; break; }
@@ -473,7 +521,7 @@ write_windows_runners(){
   command -v sha256sum >/dev/null 2>&1 || return 1
   local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Program Files/nodejs:/c/Program Files/Git/mingw64/bin:/c/Python313:/c/Python312:/c/Python311"
   local json="{" first=1 name path hash
-  for name in ls cat head bash sh jq npm node pytest python python3 go cargo dotnet; do
+  for name in ls cat head grep bash sh jq npm node pytest python python3 go cargo dotnet; do
     path="$(PATH="$sanitized" command -v "$name" 2>/dev/null || true)"
     [ -n "$path" ] && [ -x "$path" ] || continue
     case "$path" in *WindowsApps*) continue ;; esac
@@ -565,7 +613,7 @@ cleanup_copy(){
 # (MANIFEST.md, identity, patch) is built inside it, and the packet is
 # re-verified after the model answers.
 cmd_review(){
-  local repo="." prompt="" base="" assert="" head identity copy work packet rel before after out report body
+  local repo="." prompt="" base="" assert="" head identity copy work packet rel before after out report body STEPFUN_EXPECT_HEAD
   while [ "$#" -gt 0 ]; do case "$1" in
     --repo) repo="${2:?--repo needs a value}"; shift 2 ;;
     --base) base="${2:?--base needs a value}"; shift 2 ;;
@@ -575,13 +623,19 @@ cmd_review(){
     *) die "review: unknown argument $1" ;;
   esac; done
   [ -n "$prompt" ] || die 'review needs --prompt or --prompt-file.'
+  # Prompt instructions depend on the actual engine, not the selected agent:
+  # StepCode has no agent profile carrying the required verdict format.
+  detect_engine
   require_engine
   repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || die "not a Git repository: $repo"
   load_key
   mkdir -p "$STATE_DIR/reports"; chmod 700 "$STATE_DIR" "$STATE_DIR/reports" 2>/dev/null || true
   identity="$(mktemp "$STATE_DIR/identity.XXXXXX")"; REVIEW_IDENTITY="$identity"; trap cleanup_copy EXIT
   "$PACKET_BIN" resolve "$repo" ${base:+--base "$base"} ${assert:+--assert-head "$assert"} > "$identity" || die 'could not resolve the exact review identity.'
-  head="$(jq -r .head "$identity")"
+  # jq.exe on Windows ends the -r line with CRLF; strip it or every formal
+  # verdict comparison against $head fails (#1266 residual).
+  head="$(jq -r .head "$identity" | sed 's/\r$//')"
+  STEPFUN_EXPECT_HEAD="$head"
   REVIEW_REPO="$repo"; REVIEW_TAG="stepfun-$(sha256sum < "$identity" | cut -c1-24)"
   trap cleanup_copy EXIT
   copy="$(AI_REVIEW_SANDBOX_BASE="$base" "$SANDBOX_BIN" ensure-copy "$repo" "$REVIEW_TAG")" || die 'could not build the disposable review copy.'
@@ -597,14 +651,21 @@ cmd_review(){
   [ -z "$(git -C "$work" remote 2>/dev/null)" ] || die 'the writable review copy has a remote; refusing to run.'
   before="$("$SANDBOX_BIN" digest "$repo")"
   out="$STATE_DIR/reports/$(date -u +%Y%m%dT%H%M%SZ)-${head:0:12}-$$.md"
-  local full="You are an independent code reviewer working in a disposable, remote-less copy of the repository. You may read files, run commands, builds and tests, and edit files here; every edit is discarded afterwards and is not part of the PR. Never commit, push, or touch any remote, and never edit $rel.
-Read $rel/MANIFEST.md first: it states the exact base, the head $head, and the patch under review. You may open any other file to confirm a finding.
-
-$prompt
+  local full="You are an independent code reviewer working in a disposable, remote-less copy of the repository. You may read files, run commands, builds and tests, and edit files here; every edit is discarded afterwards and is not part of the PR. Never commit, push, or touch any remote.
+Read the sealed review packet's MANIFEST.md first: it states the exact base, head, and patch under review. Do not edit the packet. You may open any other file to confirm a finding."
+  if [ "$ENGINE" = stepcode ]; then
+    full+="
 
 Return ALL findings, each citing files and line numbers. End your answer with exactly one final line of the form:
-VERDICT: APPROVE $head
-or VERDICT: REVISE $head, or VERDICT: REJECT $head. Nothing may follow that line."
+VERDICT: APPROVE <head sha>
+or VERDICT: REVISE <head sha>, or VERDICT: REJECT <head sha>. Nothing may follow that line."
+  fi
+  full+="
+
+Review packet: $rel/MANIFEST.md
+Exact head SHA for the final verdict: $head
+
+$prompt"
   reviewer_event_evidence require-report stepfun || die 'could not reserve durable review evidence.'
   STEPFUN_OC_AGENT="$OC_AGENT_REVIEW"
   if ! run_step_retry "$work" "$out" "$full" "$WRITE_TOOLS" write; then

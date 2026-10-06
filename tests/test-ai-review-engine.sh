@@ -23,6 +23,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENGINE="$REPO_ROOT/bin/ai-review-engine"
 CORE="$REPO_ROOT/tools/lib/review-lifecycle-core.sh"
 GROK_DOOR="$REPO_ROOT/tools/lib/review-doors/grok.sh"
+DEEPSEEK_DOOR="$REPO_ROOT/tools/lib/review-doors/deepseek.sh"
+MUSE_DOOR="$REPO_ROOT/tools/lib/review-doors/muse.sh"
+QWEN_DOOR="$REPO_ROOT/tools/lib/review-doors/qwen.sh"
+GEMINI_DOOR="$REPO_ROOT/tools/lib/review-doors/gemini.sh"
+STEPFUN_DOOR="$REPO_ROOT/tools/lib/review-doors/stepfun.sh"
+DOORS_JSON="$REPO_ROOT/config/review-runner-doors.json"
 POOL="$REPO_ROOT/bin/ai-review-pool"
 PASS=0; FAIL=0; SKIP=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
@@ -92,6 +98,30 @@ set -e
 check "door_refuses_without_runner_token" "test '$DOOR_BYPASS_RC' -ne 0 && grep -q 'bypasses the shared runner' '$TMP/door-bypass.err'"
 check "door_refusal_is_exit_2" "test '$DOOR_BYPASS_RC' -eq 2"
 
+# Every rotation reviewer has a registered door: the four migrated in
+# mimo/phasee-four-doors plus the two already proven. A missing door or a
+# missing registry row is the Phase D completeness gap that nulls packet
+# identity for that provider.
+echo '== doors registry completeness (six rotation reviewers)'
+check "registry_lists_grok" "jq -e 'has(\"grok\")' '$DOORS_JSON' >/dev/null"
+check "registry_lists_deepseek" "jq -e 'has(\"deepseek\")' '$DOORS_JSON' >/dev/null"
+check "registry_lists_muse" "jq -e 'has(\"muse\")' '$DOORS_JSON' >/dev/null"
+check "registry_lists_qwen" "jq -e 'has(\"qwen\")' '$DOORS_JSON' >/dev/null"
+check "registry_lists_gemini" "jq -e 'has(\"gemini\")' '$DOORS_JSON' >/dev/null"
+check "registry_lists_stepfun" "jq -e 'has(\"stepfun\")' '$DOORS_JSON' >/dev/null"
+check "registry_door_files_exist" "for p in grok deepseek muse qwen gemini stepfun; do test -f \"\$REPO_ROOT/\$(jq -r --arg p \"\$p\" '.[\$p].door' '$DOORS_JSON')\" || exit 1; done"
+
+for _door_pair in "muse:$MUSE_DOOR" "qwen:$QWEN_DOOR" "gemini:$GEMINI_DOOR" "stepfun:$STEPFUN_DOOR"; do
+  _dname="${_door_pair%%:*}"
+  _dpath="${_door_pair#*:}"
+  set +e
+  ( unset AI_REVIEW_RUNNER_CORE; bash "$_dpath" review ) >"$TMP/door-$_dname-bypass.out" 2>"$TMP/door-$_dname-bypass.err"
+  _drc=$?
+  set -e
+  check "door_${_dname}_refuses_without_runner_token" "test '$_drc' -eq 2 && grep -q 'bypasses the shared runner' '$TMP/door-$_dname-bypass.err'"
+done
+unset _door_pair _dname _dpath _drc
+
 # --- structural forcing function: pool refuses a bypassed runner ------------
 echo '== structural forcing function (pool)'
 NOT_ENGINE="$TMP/not-the-engine.sh"
@@ -123,10 +153,19 @@ set -e
 check "pool_refuses_bypass_for_runner_doors" "test '$POOL_BYPASS_RC' -ne 0 && grep -q 'bypasses the shared review runner' '$TMP/pool-bypass.err'"
 check "pool_bypass_refusal_names_the_engine" "grep -q 'ai-review-engine' '$TMP/pool-bypass.err'"
 
-# Unregistered providers keep their existing session-runner path (muse is not
-# in the doors registry), so a plain substitution is still allowed under hooks.
-# Provider preflight is stubbed: this check proves dispatch routing, not the
-# host's Muse health (a missing provider binary must not decide the outcome).
+# Unregistered providers would keep their legacy session-runner path, but all
+# six pool providers are now registered doors, so that path has no live subject
+# among them. The honest replacement guard: every pool provider IS a registered
+# door (so a plain AI_POOL_RUNNER_* substitution is refused as a bypass), and
+# the legacy fallback remains in the pool for any future unregistered provider.
+echo '== pool providers are all registered doors (legacy path has no live subject)'
+for _pp in grok muse qwen gemini deepseek stepfun; do
+  check "pool_provider_${_pp}_is_a_registered_door" "jq -e 'has(\"'$_pp'\")' '$DOORS_JSON' >/dev/null"
+done
+unset _pp
+check "pool_keeps_legacy_fallback_for_future_unregistered_providers" \
+  "grep -q 'Legacy session-runner fallback only' '$POOL' && grep -q 'AI_POOL_RUNNER_MUSE' '$POOL'"
+# A plain substitution for a registered door is a bypass and must be refused.
 POOL_PF_STUB="$TMP/pool-preflight-stub"
 cat > "$POOL_PF_STUB" <<'EOF'
 #!/usr/bin/env bash
@@ -139,8 +178,8 @@ set +e
     AI_POOL_CALLER=codex bash "$POOL" muse diff-review ) >"$TMP/pool-muse.out" 2>"$TMP/pool-muse.err"
 POOL_MUSE_RC=$?
 set -e
-# The stub exits 99; the pool must have LAUNCHED it (not refused as bypass).
-check "pool_still_dispatches_unregistered_doors" "grep -q 'must never be used' '$TMP/pool-muse.err' || test '$POOL_MUSE_RC' -eq 99"
+check "pool_refuses_runner_substitution_for_registered_door" \
+  "test '$POOL_MUSE_RC' -ne 0 && grep -q 'bypasses the shared review runner' '$TMP/pool-muse.err' && ! grep -q 'must never be used' '$TMP/pool-muse.err'"
 
 # --- structural forcing function: AI_REVIEW_ENGINE_BIN is a gated test hook --
 echo '== structural forcing function (engine bin gate)'
@@ -219,6 +258,15 @@ check "preflight_refuses_bypass_even_when_registry_unregisters_grok" \
 
 # --- door adapter purity ----------------------------------------------------
 echo '== adapter purity'
+for _pdoor in "$GROK_DOOR" "$DEEPSEEK_DOOR" "$MUSE_DOOR" "$QWEN_DOOR" "$GEMINI_DOOR" "$STEPFUN_DOOR"; do
+  _pname="$(basename "$_pdoor" .sh)"
+  check "adapter_${_pname}_has_no_packet_remove" "! grep -nE 'PACKET(_BIN)?[[:space:]]+remove|ai-review-packet[[:space:]]+remove' '$_pdoor' | grep -q ."
+  check "adapter_${_pname}_has_no_sandbox_delete" "! grep -nE 'remove-copy|remove_code_only|sandbox.*remove' '$_pdoor' | grep -q ."
+  check "adapter_${_pname}_has_no_lifecycle_terminal" "! grep -nE 'ai-review-lifecycle|rlc_lifecycle|lifecycle (finish|fail|begin)' '$_pdoor' | grep -q ."
+  check "adapter_${_pname}_has_no_lock_or_cleanup" "! grep -nE 'lock_acquire|unlock_session|cleanup_after_store|PACKET remove' '$_pdoor' | grep -q ."
+  check "adapter_${_pname}_keeps_provider_bits" "grep -q 'extract_report' '$_pdoor' && grep -qE 'MODEL=' '$_pdoor'"
+done
+unset _pdoor _pname
 check "adapter_source_has_no_packet_remove" "! grep -nE 'PACKET(_BIN)?[[:space:]]+remove|ai-review-packet[[:space:]]+remove' '$GROK_DOOR' | grep -q ."
 check "adapter_source_has_no_sandbox_delete" "! grep -nE 'remove-copy|remove_code_only|sandbox.*remove' '$GROK_DOOR' | grep -q ."
 check "adapter_source_has_no_lifecycle_terminal" "! grep -nE 'ai-review-lifecycle|rlc_lifecycle|lifecycle (finish|fail|begin)' '$GROK_DOOR' | grep -q ."
@@ -300,6 +348,97 @@ STATE_FILE="$(grep -Rsl '"status": "completed"' "$AI_REVIEW_LIFECYCLE_DIR/runs" 
 check "lifecycle_records_packet_identity" "test -n '$STATE_FILE' && jq -e '.packet_sha256|test(\"^[0-9a-f]{64}\")' '$STATE_FILE' && jq -e '.packet_dir|type==\"string\" and length>0' '$STATE_FILE'"
 check "lifecycle_records_completed_verdict" "test -n '$STATE_FILE' && jq -e '.status==\"completed\" and .verdict==\"APPROVE\"' '$STATE_FILE'"
 check "lifecycle_records_runner_fields_on_report" "grep -q 'runner | \`ai-review-engine\`' '$REPORT_PATH'"
+
+# --- Phase D completeness: each migrated door emits packet identity ---------
+# The four doors migrated in mimo/phasee-four-doors must finish through the
+# same packet-aware lifecycle terminal as grok/deepseek. A mock door stands
+# in for the provider; the runner (not the door) owns packet seal/store and
+# writes packet_dir + packet_sha256 into the lifecycle state.
+echo '== packet identity per migrated door (mock door through the runner)'
+for _prov in muse qwen gemini stepfun; do
+  _mock="$TMP/mock-door-$_prov.sh"
+  cat > "$_mock" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+[ "\${AI_REVIEW_RUNNER_CORE:-}" = "review-lifecycle-core/1" ] || { echo 'mock: missing runner token' >&2; exit 2; }
+[ -f "\${DOOR_PACKET_DIR:-/nonexistent}/MANIFEST.md" ] || { echo 'mock: packet missing' >&2; exit 2; }
+body='Reviewed head is quoted above. The change is correct on its own terms, the surrounding module was checked for sibling defects and none remain, and the tests that cover this path are present and meaningful. No blocking findings in this change set. The evidence packet was read first and every claim below is grounded in it.'
+{
+  printf '# %s mock review\n\n' '$_prov'
+  printf 'Reviewed head: %s\n\n' "\$DOOR_HEAD"
+  printf '%s\n\n' "\$body"
+  printf -- '---\n\n## Verdict\nAPPROVE\n'
+} > "\$DOOR_REPORT_OUT"
+exit 0
+EOF
+  chmod +x "$_mock"
+  _ov="AI_REVIEW_DOOR_$(printf '%s' "$_prov" | tr '[:lower:]' '[:upper:]')"
+  set +e
+  ( cd "$MREPO" && env "$_ov=$_mock" timeout 90 "$ENGINE" review --provider "$_prov" \
+      --name "engine-$_prov" --repo "$MREPO" --mode diff-review --caller codex ) \
+    >"$TMP/e2e-$_prov.out" 2>"$TMP/e2e-$_prov.err"
+  _prc=$?
+  set -e
+  check "door_${_prov}_review_succeeds_through_runner" "test '$_prc' -eq 0"
+  _pstate="$(grep -Rsl '"provider": "'"$_prov"'"' "$AI_REVIEW_LIFECYCLE_DIR/runs" 2>/dev/null | head -1)"
+  check "door_${_prov}_lifecycle_records_packet_sha256" \
+    "test -n '$_pstate' && jq -e '.packet_sha256|test(\"^[0-9a-f]{64}\")' '$_pstate'"
+  check "door_${_prov}_lifecycle_records_packet_dir" \
+    "test -n '$_pstate' && jq -e '.packet_dir|type==\"string\" and length>0' '$_pstate'"
+  check "door_${_prov}_leaves_durable_packet" \
+    "find '$AI_REVIEW_PACKET_STORE' -name MANIFEST.md | grep -q ."
+done
+unset _prov _mock _ov _prc _pstate
+
+# --- --operation install-gate contract through the runner -------------------
+# A named installation operation must reach the reviewer request as the exact
+# approval line the install gate greps for, and the report must record it
+# (issue #658). The mock door echoes its prompt so the brief is inspectable.
+echo '== --operation through the runner (install gate)'
+OP_DOOR="$TMP/op-door.sh"
+cat > "$OP_DOOR" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "${AI_REVIEW_RUNNER_CORE:-}" = "review-lifecycle-core/1" ] || exit 2
+body='Reviewed head is quoted in the request. The installation operation under review was checked against the change, the surrounding launcher paths show no sibling defects, and the tests covering this path are present. No blocking findings in this change set. The evidence packet was read first and every claim below is grounded in it.'
+{
+  printf '# operation mock review\n\n'
+  printf 'Reviewed head: %s\n\n' "$DOOR_HEAD"
+  printf '%s\n\n' "$body"
+  printf -- '---\n\n## Request as given to the reviewer\n\n'
+  cat "$DOOR_PROMPT_FILE"
+  printf -- '\n---\n\n## Verdict\nAPPROVE\n'
+} > "$DOOR_REPORT_OUT"
+exit 0
+EOF
+chmod +x "$OP_DOOR"
+set +e
+( cd "$MREPO" && env AI_REVIEW_DOOR_QWEN="$OP_DOOR" timeout 90 "$ENGINE" review --provider qwen \
+    --name engine-op --repo "$MREPO" --mode final-check --caller codex \
+    --operation legacy-managed-launcher-refresh ) >"$TMP/op.out" 2>"$TMP/op.err"
+OP_RC=$?
+set -e
+check "operation_review_succeeds_through_runner" "test '$OP_RC' -eq 0"
+OP_REPORT="$(tail -1 "$TMP/op.out" 2>/dev/null || true)"
+check "operation_report_records_operation" "test -s '$OP_REPORT' && grep -Fq '| operation | \`legacy-managed-launcher-refresh\` |' '$OP_REPORT'"
+check "operation_brief_requests_exact_line" "test -s '$OP_REPORT' && grep -Fqx 'Approved legacy-managed-launcher-refresh.' '$OP_REPORT'"
+# An unknown operation must never dispatch, and a non-final-check mode must
+# never dispatch either.
+rm -f "$AI_REVIEW_LIFECYCLE_DIR/runs"/* 2>/dev/null || true
+set +e
+( cd "$MREPO" && env AI_REVIEW_DOOR_QWEN="$OP_DOOR" timeout 90 "$ENGINE" review --provider qwen \
+    --name engine-opbad --repo "$MREPO" --mode final-check --caller codex \
+    --operation not-a-real-operation ) >"$TMP/opbad.out" 2>"$TMP/opbad.err"
+OPBAD_RC=$?
+set -e
+check "operation_unknown_never_dispatches" "test '$OPBAD_RC' -ne 0 && grep -qi 'unknown review operation' '$TMP/opbad.err'"
+set +e
+( cd "$MREPO" && env AI_REVIEW_DOOR_QWEN="$OP_DOOR" timeout 90 "$ENGINE" review --provider qwen \
+    --name engine-opmode --repo "$MREPO" --mode diff-review --caller codex \
+    --operation first-managed-install ) >"$TMP/opmode.out" 2>"$TMP/opmode.err"
+OPMODE_RC=$?
+set -e
+check "operation_outside_final_check_never_dispatches" "test '$OPMODE_RC' -ne 0 && grep -qi 'final-check' '$TMP/opmode.err'"
 
 # --- report floor refusal through the runner --------------------------------
 echo '== report floor refusal'
@@ -403,6 +542,7 @@ while [ \$# -gt 0 ]; do
   case "\$1" in
     --output-format) shift; shift ;;
     --prompt-file) prompt="\$2"; shift 2 ;;
+    --model) printf '%s\n' "\$2" > "$TMP/stub-grok-model"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -423,9 +563,53 @@ AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
 STUB_RC=$?
 set -e
 check "grok_door_parses_provider_envelope_to_report_shape" "test '$STUB_RC' -eq 0 && grep -q '## Verdict' '$STUB_REPORT'"
+check "grok_door_uses_config_model_pin" \
+  "test \"\$(cat '$TMP/stub-grok-model')\" = \"\$(jq -r '.providers.grok.model_pin' '$REPO_ROOT/config/provider-cli-versions.json')\""
 check "grok_door_report_carries_stopreason_metadata" "grep -q 'end_turn' '$STUB_REPORT'"
 check "grok_door_requires_runner_token_even_with_stub" \
   "! (unset AI_REVIEW_RUNNER_CORE; AI_GROK_BIN='$STUB_GROK' AI_GROK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/x.md' DOOR_HEAD='$HEAD_SHA' bash '$GROK_DOOR' review) 2>/dev/null"
+
+# Grok cancels a headless turn on a refused shell form (PermissionCancelled);
+# the door resumes the same session (remaining turn budget) instead of failing.
+# Stub: first call writes a native witness of category $PC_CAT (spaced JSON,
+# bound to sessionId/requestId) and returns cancelled; a -r call approves.
+STUB_PC="$TMP/stub-grok-pc"
+cat > "$STUB_PC" <<'STUBEOF'
+#!/usr/bin/env bash
+mt=""; resumed=0
+while [ $# -gt 0 ]; do
+  case "$1" in -r) resumed=1; shift 2 ;; --max-turns) mt="$2"; shift 2 ;; *) shift ;; esac
+done
+if [ "$resumed" = 1 ]; then
+  echo "resumed:$mt" >> "$PC_CALLS"
+  printf '%s\n' '{"text":"## Verdict\nAPPROVE","stopReason":"end_turn","num_turns":1,"sessionId":"sid-pc1","requestId":"req-2","modelUsage":{"grok-4.6-build":{}}}'
+  exit 0
+fi
+echo "first:$mt" >> "$PC_CALLS"
+mkdir -p "$GROK_HOME/sessions/x/sid-pc1"
+printf '%s\n' "{\"params\": {\"sessionId\": \"sid-pc1\", \"update\": {\"sessionUpdate\": \"turn_completed\", \"prompt_id\": \"req-1\", \"stop_reason\": \"cancelled\"}, \"_meta\": {\"cancellationCategory\": \"$PC_CAT\"}}}" > "$GROK_HOME/sessions/x/sid-pc1/updates.jsonl"
+printf '%s\n' '{"text":"","stopReason":"cancelled","num_turns":4,"sessionId":"sid-pc1","requestId":"req-1"}'
+STUBEOF
+chmod +x "$STUB_PC"
+run_pc_door() { # run_pc_door CATEGORY TAG -> sets PC_RC
+  rm -rf "$TMP/pc-home-$2"; : > "$TMP/pc-calls-$2"
+  set +e
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 GROK_HOME="$TMP/pc-home-$2" \
+    PC_CAT="$1" PC_CALLS="$TMP/pc-calls-$2" DOOR_MAX_TURNS=10 \
+    AI_GROK_BIN="$STUB_PC" AI_GROK_ALLOW_NO_CREDS=1 \
+    DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+    DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$TMP/pc-report-$2.md" \
+    DOOR_HEAD="$HEAD_SHA" \
+    bash "$GROK_DOOR" review >/dev/null 2>"$TMP/pc-door-$2.err"
+  PC_RC=$?
+  set -e
+}
+run_pc_door PermissionCancelled perm
+check "grok_door_resumes_permission_cancelled_turn_with_remaining_budget" \
+  "test '$PC_RC' -eq 0 && grep -q APPROVE '$TMP/pc-report-perm.md' && test \"\$(tr '\n' ' ' < '$TMP/pc-calls-perm')\" = 'first:10 resumed:6 '"
+run_pc_door max_turns_reached turns
+check "grok_door_does_not_resume_turn_limit_cancel" \
+  "test '$PC_RC' -ne 0 && test \"\$(tr '\n' ' ' < '$TMP/pc-calls-turns')\" = 'first:10 '"
 
 # --- deepseek (OpenCode) door on the same runner ----------------------------
 # Program done needs one native door (grok) AND one OpenCode door on the same
