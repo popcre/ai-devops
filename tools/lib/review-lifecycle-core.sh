@@ -452,7 +452,7 @@ rlc_write_report() { # rlc_write_report OUT PROVIDER MODE REPO HEAD DIGEST RUN C
 rlc_run_review() {
   # rlc_run_review PROVIDER NAME REPO [BASE] [ASSERT_HEAD] [MODE] [PROMPT_FILE] [CALLER] [TESTS] [MAX_TURNS]
   local provider="$1" name="$2" repo="$3" base="${4:-}" assert_head="${5:-}"
-  local mode="${6:-diff-review}" prompt_file="${7:-}" caller="${8:-ai-review-engine}" tests_cmd="${9:-}" max_turns="${10:-}"
+  local mode="${6:-diff-review}" prompt_file="${7:-}" caller="${8:-ai-review-engine}" tests_cmd="${9:-}" max_turns="${10:-}" operation="${11:-}"
   local started identity state review_dir packet_dir packet_sha tag run_id
   local body report verdict elapsed digest head stored_ok=0 stored="" body_file brief identity_file
   local snapshot_before snapshot_after after_identity extra_fields
@@ -523,6 +523,23 @@ rlc_run_review() {
     security-review) decision='Judge only security risks: authorization, data leakage, injection, secrets, file boundaries, and permissions.';;
     final-check) decision='Give the final go/no-go judgment for shipping this exact source state.';;
   esac
+
+  # --operation (issue #658): a named installation operation reaches the
+  # reviewer request as the exact approval line the install gate greps for.
+  # Only final-check may carry one; an unknown name never dispatches.
+  # Host evidence (stale-linux-manifest-recovery) is read from the machine and
+  # bound into the report header so the install gate can re-check it.
+  local operation_request="" operation_evidence=""
+  if [ -n "$operation" ]; then
+    [ "$mode" = final-check ] || rlc_die "review operation needs final-check, not $mode."
+    # shellcheck source=review-operation.sh
+    . "$RLC_ROOT/tools/lib/review-operation.sh" || rlc_die 'cannot load the review operation list.'
+    operation_evidence="$(review_operation_evidence "$operation")" || rlc_die "cannot read host evidence for review operation: $operation"
+    operation_request="$(review_operation_request "$operation" "$operation_evidence")" || rlc_die "unknown review operation: $operation"
+    decision="$decision
+
+$operation_request"
+  fi
 
   if [ -n "$base" ]; then
     local resolved_base
@@ -600,6 +617,10 @@ rlc_run_review() {
   mkdir -p "$(dirname "$report")"
   extra_fields="| tools | door ${provider} |
 | packet | \`${packet_sha}\` |"
+  [ -z "$operation" ] || extra_fields="$extra_fields
+| operation | \`${operation}\` |"
+  [ -z "$operation_evidence" ] || extra_fields="$extra_fields
+$operation_evidence"
   rlc_write_report "$report" "$provider" "$mode" "$repo" "$head" "$digest" "$run_id" "$caller" "$elapsed" "$body_file" "$extra_fields"
 
   after_identity=""

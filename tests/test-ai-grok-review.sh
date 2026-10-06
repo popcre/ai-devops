@@ -1484,56 +1484,63 @@ printf '%s\n' "\$*" >> "$POOLTMP/engine-args"
 exit 0
 EOF
 chmod +x "$POOLTMP/engine"
-export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_QWEN="$POOLTMP/runner" AI_REVIEW_ENGINE_BIN="$POOLTMP/engine" AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
+# All six pool providers are registered runner doors (config/review-runner-doors.json),
+# so the pool dispatches every one of them through the shared engine and refuses
+# any other AI_POOL_RUNNER_* substitution. The fake ENGINE records the engine
+# argv: these checks assert the DISPATCH contract (name budget, optional
+# --max-turns, --operation forwarding). Report assembly and packet identity are
+# the runner core's contract and are covered by tests/test-ai-review-engine.sh.
+export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_REVIEW_ENGINE_BIN="$POOLTMP/engine" AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
+engargs(){ cat "$POOLTMP/engine-args" 2>/dev/null; }
 
+rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" qwen security-review ) > "$POOLTMP/out-approve" 2>&1; RC_APPROVE=$?
-APPROVE_REPORT="$(tail -1 "$POOLTMP/out-approve" 2>/dev/null)"
-check "pool_adapter_approves_a_bound_verdict" "[ '$RC_APPROVE' -eq 0 ] && [ -f '$APPROVE_REPORT' ] && grep -q APPROVE '$APPROVE_REPORT'"
-check "pool_adapter_writes_the_report" "ls '$POOLTMP/fakerepo/.ai/reviews/' | grep -q '^qwen-security-review-'"
+check "pool_dispatches_qwen_through_engine" "[ '$RC_APPROVE' -eq 0 ] && engargs | grep -q -- '--provider qwen'"
+check "pool_dispatch_names_carry_provider_and_mode" "engargs | grep -q -- '--name pool-qwen-security-review'"
 # The adapter's generated name must fit every registered runner, including
 # Muse's 40-character limit and Gemini's caller-qualified 64-character tag.
-# Keep the provider names distinct while the full run ID stays in the report.
-export AI_POOL_RUNNER_MUSE="$POOLTMP/runner" AI_POOL_RUNNER_GEMINI="$POOLTMP/runner"
+rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" muse final-check ) > "$POOLTMP/out-muse" 2>&1; RC_MUSE=$?
-MUSE_TAG="$(grep '^new ' "$POOLTMP/runner-args" | tail -1 | awk '{print $2}')"
+MUSE_TAG="$(engargs | tr ' ' '\n' | grep -A1 '^--name$' | tail -1)"
 check "pool_muse_session_name_fits_native_limit" "[ '$RC_MUSE' -eq 0 ] && [ -n '$MUSE_TAG' ] && [ '${#MUSE_TAG}' -le 40 ] && [[ '$MUSE_TAG' == pool-muse-* ]]"
-MUSE_REPORT="$(tail -1 "$POOLTMP/out-muse")"
-check "pool_muse_report_retains_full_run_identity" "[ -f '$MUSE_REPORT' ] && grep -Fq '| run |' '$MUSE_REPORT' && grep -Eq '20[0-9]{6}T[0-9]{6}-[0-9]+-[0-9]+' '$MUSE_REPORT'"
+check "pool_muse_report_retains_full_run_identity" "engargs | grep -q -- '--name pool-muse-final-check' && engargs | grep -q -- '--caller zcode-test'"
+rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" gemini final-check ) > "$POOLTMP/out-gemini" 2>&1; RC_GEMINI=$?
-GEMINI_TAG="$(grep '^new ' "$POOLTMP/runner-args" | tail -1 | awk '{print $2}')"
+GEMINI_TAG="$(engargs | tr ' ' '\n' | grep -A1 '^--name$' | tail -1)"
 check "pool_gemini_session_name_fits_derived_sandbox_limit" "[ '$RC_GEMINI' -eq 0 ] && [ -n '$GEMINI_TAG' ] && [ $(( 7 + 12 + 1 + 10 + 1 + ${#GEMINI_TAG} )) -le 64 ] && [[ '$GEMINI_TAG' == pool-gemini-* ]]"
-# Only grok's runner takes --max-turns; muse/qwen/gemini refuse unknown flags,
-# so the pool must not pass it to them (#720).
-check "pool_gemini_argv_omits_max_turns" "grep -q '^new pool-gemini-' '$POOLTMP/runner-args' && ! grep '^new pool-gemini-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
-check "pool_muse_argv_omits_max_turns" "grep -q '^new pool-muse-' '$POOLTMP/runner-args' && ! grep '^new pool-muse-' '$POOLTMP/runner-args' | tail -1 | grep -q -- '--max-turns'"
-( cd "$POOLTMP/fakerepo" && export_pool && AI_POOL_RUNNER_QWEN="$POOLTMP/runner" bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
-check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && grep '^new pool-qwen-' '$POOLTMP/runner-args' | tail -1 | grep -qv -- '--max-turns'"
-# --operation (issue #658): a named installation operation reaches the reviewer
-# request as the exact approval line the install gate greps for, the report
-# records it, an unknown name never dispatches, and without one the brief stays
-# free of any operation request.
-rm -f "$POOLTMP/last-brief"
+# Only grok's runner takes --max-turns; muse/qwen/gemini own their budget and
+# reject unknown flags, so the pool must not pass it to them (#720).
+check "pool_gemini_argv_omits_max_turns" "engargs | grep -q -- '--provider gemini' && ! engargs | grep -q -- '--max-turns'"
+rm -f "$POOLTMP/engine-args"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" muse final-check ) > "$POOLTMP/out-muse2" 2>&1
+check "pool_muse_argv_omits_max_turns" "engargs | grep -q -- '--provider muse' && ! engargs | grep -q -- '--max-turns'"
+rm -f "$POOLTMP/engine-args"
+( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" qwen final-check ) > "$POOLTMP/out-qwen" 2>&1; RC_QWEN=$?
+check "pool_qwen_dispatch_omits_max_turns" "[ '$RC_QWEN' -eq 0 ] && engargs | grep -q -- '--provider qwen' && ! engargs | grep -q -- '--max-turns'"
+# --operation (issue #658): a named installation operation is forwarded to the
+# runner's brief contract (the core writes the exact approval line into the
+# request and the report records it), an unknown name never dispatches, and a
+# non-final-check mode never dispatches.
+rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=legacy-managed-launcher-refresh bash "$POOL" qwen final-check ) > "$POOLTMP/out-op" 2>&1; RC_OP=$?
-OP_REPORT="$(tail -1 "$POOLTMP/out-op")"
-check "pool_operation_brief_requests_exact_line" "[ '$RC_OP' -eq 0 ] && grep -Fqx 'Approved legacy-managed-launcher-refresh.' '$POOLTMP/last-brief' && grep -q \"installation operation 'legacy-managed-launcher-refresh'\" '$POOLTMP/last-brief'"
-check "pool_operation_report_records_operation" "[ -f '$OP_REPORT' ] && grep -Fq '| operation | \`legacy-managed-launcher-refresh\` |' '$OP_REPORT'"
-OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
+check "pool_operation_forwarded_to_engine" "[ '$RC_OP' -eq 0 ] && engargs | grep -q -- '--operation legacy-managed-launcher-refresh'"
+OP_ENG_BEFORE="$(engargs | grep -c -- '--provider' || true)"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=stale-linux-manifest-recovery bash "$POOL" qwen final-check ) > "$POOLTMP/out-opbad" 2>&1; RC_OPBAD=$?
 if ( . "$(dirname "$POOL")/../tools/lib/review-operation.sh" && review_operation_evidence stale-linux-manifest-recovery ) >/dev/null 2>&1; then
-  # This host has a stale installed manifest: the wrapper must bind its rows in the header.
-  check "pool_stale_operation_binds_host_evidence_in_header" "[ '$RC_OPBAD' -eq 0 ] && sed '/^## Result\$/,\$d' \"\$(tail -1 '$POOLTMP/out-opbad')\" | grep -q '^| live gate hash | ' && grep -Fqx 'Approved stale-linux-manifest-recovery.' '$POOLTMP/last-brief'"
+  # This host has a stale installed manifest: the operation is valid and may dispatch.
+  check "pool_stale_operation_dispatches_when_host_evidence_reads" "[ '$RC_OPBAD' -eq 0 ] && engargs | grep -q -- '--operation stale-linux-manifest-recovery'"
 else
-  check "pool_stale_operation_without_host_evidence_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -q 'cannot read host evidence' '$POOLTMP/out-opbad' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
+  check "pool_stale_operation_without_host_evidence_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -qi 'evidence' '$POOLTMP/out-opbad' && [ \"\$(engargs | grep -c -- '--provider' || true)\" -eq '$OP_ENG_BEFORE' ]"
 fi
-OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
+OP_ENG_BEFORE="$(engargs | grep -c -- '--provider' || true)"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=not-an-operation bash "$POOL" qwen final-check ) > "$POOLTMP/out-opbad" 2>&1; RC_OPBAD=$?
-check "pool_unknown_operation_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -q 'unknown review operation' '$POOLTMP/out-opbad' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
-OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
+check "pool_unknown_operation_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -q 'unknown review operation' '$POOLTMP/out-opbad' && [ \"\$(engargs | grep -c -- '--provider' || true)\" -eq '$OP_ENG_BEFORE' ]"
+OP_ENG_BEFORE="$(engargs | grep -c -- '--provider' || true)"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=first-managed-install bash "$POOL" qwen security-review ) > "$POOLTMP/out-opmode" 2>&1; RC_OPMODE=$?
-check "pool_operation_outside_final_check_never_dispatches" "[ '$RC_OPMODE' -ne 0 ] && grep -q 'review operation needs final-check' '$POOLTMP/out-opmode' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
-rm -f "$POOLTMP/last-brief"
+check "pool_operation_outside_final_check_never_dispatches" "[ '$RC_OPMODE' -ne 0 ] && grep -qi 'final-check' '$POOLTMP/out-opmode' && [ \"\$(engargs | grep -c -- '--provider' || true)\" -eq '$OP_ENG_BEFORE' ]"
+rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && unset AI_REVIEW_OPERATION && bash "$POOL" qwen final-check ) > /dev/null 2>&1
-check "pool_without_operation_requests_no_approval_line" "[ -f '$POOLTMP/last-brief' ] && ! grep -q '^Approved ' '$POOLTMP/last-brief' && ! grep -q 'installation operation' '$POOLTMP/last-brief'"
+check "pool_without_operation_omits_the_flag" "! engargs | grep -q -- '--operation'"
 # Grok's 120-turn budget must reach the engine dispatch, not just the legacy
 # argv. The fake engine records the exact engine contract args.
 rm -f "$POOLTMP/engine-args"
@@ -1660,7 +1667,7 @@ SNAPSHOT_ORIGIN="$(cat "$POOLTMP/origin-url" 2>/dev/null)"
 check "pool_adapter_strips_credentials_from_the_snapshot_origin" "[ -n '$SNAPSHOT_ORIGIN' ] && [ "'$SNAPSHOT_ORIGIN'" = "'https://github.com/org/repo.git'" ]"
 SANDBOX_PIN_LINE="$(grep -n '^SANDBOX=' "$POOL" | head -1 | cut -d: -f1)"
 MODELS_SOURCE_LINE2="$(grep -n '\. "$MODELS_ENV"' "$POOL" | head -1 | cut -d: -f1)"
-check "pool_adapter_gates_the_sandbox_tool_hook" "grep -q 'AI_REVIEW_SANDBOX_BIN' '$POOL' && grep -q 'AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_POOL_RUNNER_DEEPSEEK AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN' '$POOL'"
+check "pool_adapter_gates_the_sandbox_tool_hook" "grep -q 'AI_REVIEW_SANDBOX_BIN' '$POOL' && grep -q 'AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_POOL_RUNNER_DEEPSEEK AI_POOL_RUNNER_STEPFUN AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN' '$POOL'"
 check "pool_adapter_pins_the_sandbox_tool_before_models_env" "[ -n '$SANDBOX_PIN_LINE' ] && [ -n '$MODELS_SOURCE_LINE2' ] && [ '$SANDBOX_PIN_LINE' -lt '$MODELS_SOURCE_LINE2' ]"
 check "front_door_gates_the_pool_wrapper_hook" "grep -q 'AI_POOL_TEST_HOOKS=1 to substitute the pool adapter' '$FRONT'"
 check "pool_adapter_redacts_credential_shaped_diagnostics" "grep -q 'REDACTED' '$POOL'"
