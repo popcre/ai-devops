@@ -233,6 +233,18 @@ jq '.declared_class="reviewer-safety"' "$class_state" > "$class_state.tmp" && mv
 check 'a protected task cannot issue installation authority' \
   "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 jq '.declared_class="installation"' "$class_state" > "$class_state.tmp" && mv "$class_state.tmp" "$class_state"
+# A runner door repeats its own "reviewed commit" table below "## Result"
+# (Muse door, #1322). The gate must read the target only from the header.
+dup_report_door(){
+  local report="$1" target="$2" hash state
+  hash="$(sha256sum "$report" | cut -d' ' -f1)"
+  awk -v t="$target" '{print} /^## Result$/ {printf "\n# Muse review - runner door\n\n| field | value |\n|---|---|\n| reviewed commit | `%s` |\n", t}' "$report" > "$report.tmp" && mv "$report.tmp" "$report"
+  state="$(grep -rl "$hash" "$AI_REVIEW_LIFECYCLE_DIR/runs")" || return 1
+  jq --arg s "$(sha256sum "$report" | cut -d' ' -f1)" '.report_sha256=$s' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+}
+dup_report_door "$class_report" "$class_target"
+check 'a runner-door header repeated below Result still names the exact target' \
+  "[ \"\$(grep -c 'reviewed commit' '$class_report')\" = 2 ]"
 check 'a separate installation task can issue exact reviewed authority' \
   "rc 0 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 check 'the issued authority binds old and target commits' \
