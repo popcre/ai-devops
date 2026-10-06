@@ -24,6 +24,11 @@ checks for argument dispatch, isolated snapshot, caller-source preservation,
 wrong report head, malformed verdict, insufficient body, chrome-only body,
 model snapshot mutation, wrong dispatch head and ungated test substitution.
 Existing shared-door dispatch suite: 18 passed, 0 failed.
+Shared native-engine suite: 152 passed, 0 failed. The broad native GLM wrapper
+suite reports 307 passed and 64 failed on both the candidate and clean fetched
+upstream `6c2d0022`; all 64 failed case names are identical. These existing
+loss-reconciliation and implementation-job cases are not claimed repaired by
+this dispatch change. Scratch output remains private for investigation.
 
 ## Gemini native timeout repair
 
