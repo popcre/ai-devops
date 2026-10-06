@@ -360,9 +360,27 @@ The complete matrix has historically taken 60–75 minutes. A queued job has not
 failed; an in-progress job must be left alone. Do not restart, sleep or use the
 computer during qualification.
 
+### Lighter-jobs bar: the sections scope
+
+The complete matrix has outgrown the 150-minute ceiling on older hardware
+(EDGE-ALIEN #1312, edge-runn-xps #1353). A qualified host only ever receives
+pull-request sections from `verify.yml`, so the owner's lighter-jobs decision
+(2026-10-06) judges it on exactly that work. Give the candidate a custom label
+that only it carries, then dispatch with that label:
+
+```powershell
+gh api -X POST repos/popcre/ai-devops/actions/runners/<runner-id>/labels -f "labels[]=qualify-<host>"
+gh workflow run windows-runner-qualification.yml -R popcre/ai-devops -f scope=sections -f runner_label=qualify-<host>
+```
+
+All 12 sections must pass, each within the same 40-minute ceiling the
+pull-request lane uses, plus the shared host gate and workspace cleanup. Remove
+the custom label afterwards. A sections pass admits the host through section 6
+exactly as a complete pass does.
+
 ## 6. Admit the host to ordinary CI
 
-Only after the exact qualification job is green:
+Only after the exact qualification job (complete or sections scope) is green:
 
 1. add `ai-devops-windows-qualified`;
 2. keep `ai-devops-windows` for future requalification;

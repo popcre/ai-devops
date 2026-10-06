@@ -2,6 +2,16 @@ name: qualify Windows runner
 
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: complete = full matrix in one job (150 min); sections = the 12 pull-request sections, each held to the 40-minute section ceiling
+        type: choice
+        options: [complete, sections]
+        default: complete
+      runner_label:
+        description: sections only - a custom label carried by exactly the candidate host, so every section lands on it
+        type: string
+        default: ''
   pull_request:
     paths:
       - .github/workflows/windows-runner-qualification.yml
@@ -12,7 +22,9 @@ permissions:
 
 jobs:
   qualify:
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'workflow_dispatch' || inputs.scope != 'sections')
     runs-on: [self-hosted, Windows, X64, ai-devops-windows]
     # The complete matrix takes 60-75 minutes on the fastest qualified host.
     # EDGE-ALIEN was still passing tests at 90 minutes on 2026-09-02 (run
@@ -28,38 +40,7 @@ jobs:
 
       - name: Prove host security and service-visible dependencies
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $build = [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').CurrentBuildNumber
-          if ($build -lt 22000) { throw "Windows 11 is required; build is $build." }
-          $evidencePath = 'C:\ProgramData\ai-devops\windows-runner-security.json'
-          if (-not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) {
-            throw 'Administrator security preflight evidence is missing.'
-          }
-          $evidence = Get-Content -Raw -LiteralPath $evidencePath | ConvertFrom-Json
-          if ($evidence.schema_version -ne 1) { throw 'Administrator security preflight schema is unsupported.' }
-          if ($evidence.windows_build -ne $build) { throw 'Administrator security preflight is for a different Windows build.' }
-          if (-not $evidence.tpm_present -or -not $evidence.tpm_ready -or -not $evidence.secure_boot) {
-            throw 'Administrator security preflight did not prove TPM and Secure Boot.'
-          }
-          $evidenceAge = [DateTime]::UtcNow - [DateTime]::Parse($evidence.recorded_at_utc).ToUniversalTime()
-          if ([math]::Abs($evidenceAge.TotalHours) -gt 24) {
-            throw 'Administrator security preflight evidence is not fresh.'
-          }
-          foreach ($tool in @('git', 'gh', 'jq', 'pwsh', 'node', 'python')) {
-            if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-              throw "$tool is not visible to the runner service account."
-            }
-          }
-          if (-not (Test-Path 'C:\Program Files\Git\bin\bash.exe')) {
-            throw 'Git Bash is not installed at the supported machine-wide path.'
-          }
-          $runnerService = Get-Service | Where-Object Name -Like 'actions.runner.*'
-          if (@($runnerService).Count -ne 1) { throw "Exactly one GitHub Actions runner service is required; found $(@($runnerService).Count)." }
-          if ($runnerService.Status -ne 'Running') { throw 'GitHub Actions runner service is not running.' }
-          $serviceConfig = $runnerService | ForEach-Object { Get-CimInstance Win32_Service -Filter "Name='$($_.Name)'" }
-          if ($serviceConfig.StartMode -ne 'Auto') { throw 'GitHub Actions runner service is not automatic.' }
-          "Qualified host build=$build runner=$env:RUNNER_NAME security_evidence_age_minutes=$([math]::Round($evidenceAge.TotalMinutes))"
+        run: .\tools\ci\assert-windows-runner-host.ps1
 
       - name: Complete offline Windows and Bash suites
         shell: pwsh
@@ -69,6 +50,65 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          $unexpected = git status --short --untracked-files=all
+          if ($unexpected) {
+            $unexpected | Write-Error
+            throw 'Qualification left repository changes in the runner workspace.'
+          }
+
+  # Lighter-jobs admission (owner 2026-10-06: "keep it for lighter jobs, set up
+  # the shorter test"). A qualified host only ever receives pull-request
+  # sections from verify.yml, so it is judged on exactly that work: each of the
+  # 12 sections, run as verify.yml runs it, must pass within the same 40-minute
+  # section ceiling. The complete job above stays available for a host that
+  # can carry the whole matrix.
+  qualify-sections:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.scope == 'sections' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        section: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    name: qualify section ${{ matrix.section }} of 12
+    runs-on: [self-hosted, Windows, X64, ai-devops-windows, "${{ inputs.runner_label }}"]
+    timeout-minutes: 40
+    steps:
+      - name: Refuse an unpinned or malformed host label
+        shell: pwsh
+        env:
+          RUNNER_LABEL: ${{ inputs.runner_label }}
+        run: |
+          if ($env:RUNNER_LABEL -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$' -or
+              $env:RUNNER_LABEL -in @('self-hosted', 'Windows', 'X64', 'ai-devops-windows', 'ai-devops-windows-qualified')) {
+            throw 'sections scope needs a custom label carried only by the candidate host.'
+          }
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          clean: true
+
+      - name: Prove host security and service-visible dependencies
+        shell: pwsh
+        run: .\tools\ci\assert-windows-runner-host.ps1
+
+      - name: Shorten TEMP on a reused self-hosted machine
+        shell: pwsh
+        run: |
+          $short = Join-Path 'C:\t' '${{ github.run_id }}-q${{ matrix.section }}'
+          New-Item -ItemType Directory -Force -Path $short | Out-Null
+          "TEMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=$short" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Windows-sensitive section ${{ matrix.section }} of 12
+        shell: pwsh
+        run: .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/12'
+
+      - name: Prove clean reusable workspace
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path 'C:\t' '${{ github.run_id }}-q${{ matrix.section }}')
           $unexpected = git status --short --untracked-files=all
           if ($unexpected) {
             $unexpected | Write-Error
