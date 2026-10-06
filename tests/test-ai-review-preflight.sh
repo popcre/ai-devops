@@ -495,5 +495,13 @@ printf '%s' "$COOL_STATUS" | jq -e '.failure_class=="provider-timeout"' >/dev/nu
 # Drift is reported as drift, not as a timeout.
 check "drift is reported as drift" "$SCRIPT explain provider-timeout | grep -q 'transient liveness' && $SCRIPT explain authentication-failed | grep -q 'Quarantine'"
 
+# #1346: the public pause interface preserves a stronger credit hold atomically.
+"$SCRIPT" quarantine grok out-of-credit --seconds 7200 >/dev/null 2>&1
+PAUSE_JSON="$($SCRIPT pause grok wrapper-crash --seconds 3600)"
+printf '%s' "$PAUSE_JSON" | jq -e --argjson minimum "$(( $(date +%s) + 7000 ))" '.failure_class=="out-of-credit" and .expires_epoch >= $minimum' >/dev/null && ok "failure pause preserves stronger credit hold" || bad "failure pause preserves stronger credit hold"
+"$SCRIPT" pause grok wrapper-crash --seconds 30 >/dev/null 2>&1 && bad "failure pause refuses wrong duration" || ok "failure pause refuses wrong duration"
+"$SCRIPT" pause grok '' --seconds 3600 >/dev/null 2>&1 && bad "failure pause refuses unnamed cause" || ok "failure pause refuses unnamed cause"
+"$SCRIPT" clear grok >/dev/null 2>&1
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

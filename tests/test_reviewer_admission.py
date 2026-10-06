@@ -22,6 +22,38 @@ class AdmissionTests(unittest.TestCase):
         self.evidence = self.directory / 'terminal.json'
         self.evidence.write_text('{"terminal":"usage-limit"}')
 
+    def test_failure_pause_preserves_stronger_credit_and_scoped_backoff(self):
+        hold = {'version': 1, 'provider': 'kimi', 'failure_class': 'out-of-credit',
+                'created_epoch': 900, 'expires_epoch': 10000, 'record_id': 'original'}
+        data = {'global': hold, 'backoffs': {'profile': {'unchanged': True}}}
+        actual = api.pause_failure(data, 'kimi', 'provider-timeout', 1000)
+        self.assertEqual(actual, hold)
+        self.assertEqual(data['backoffs'], {'profile': {'unchanged': True}})
+
+    def test_failure_pause_extends_active_hold_without_changing_credit_reason(self):
+        hold = {'version': 1, 'provider': 'kimi', 'failure_class': 'out-of-credit',
+                'created_epoch': 900, 'expires_epoch': 1100, 'record_id': 'original'}
+        data = {'global': hold, 'backoffs': {}}
+        actual = api.pause_failure(data, 'kimi', 'wrapper-crash', 1000)
+        self.assertEqual(actual['expires_epoch'], 4600)
+        self.assertEqual(actual['failure_class'], 'out-of-credit')
+        self.assertEqual(actual['created_epoch'], 900)
+        self.assertNotEqual(actual['record_id'], 'original')
+
+    def test_failure_pause_rejects_missing_cause_wrong_duration_and_malformed_hold(self):
+        for reason, seconds in [('', 3600), ('provider-timeout', 1), ('provider-timeout', 86400)]:
+            with self.assertRaises(ValueError):
+                api.pause_failure({'global': None}, 'kimi', reason, 1000, seconds)
+        with self.assertRaises(ValueError):
+            api.pause_failure({'global': {'provider': 'other'}}, 'kimi', 'wrapper-crash', 1000)
+
+    def test_expired_hold_does_not_mask_new_named_failure(self):
+        data = {'global': {'version': 1, 'provider': 'kimi', 'failure_class': 'out-of-credit',
+                           'created_epoch': 100, 'expires_epoch': 1000, 'record_id': 'old'}}
+        actual = api.pause_failure(data, 'kimi', 'wrapper-crash', 1000)
+        self.assertEqual(actual['failure_class'], 'wrapper-crash')
+        self.assertEqual(actual['expires_epoch'], 4600)
+
     def observe(self, **kwargs):
         args = dict(directory=self.directory, provider='kimi', profile='profile-a',
                     model='model-a', run_id='run-a', observed=1000, now=1000,

@@ -362,9 +362,31 @@ def classify(paths, extra_text, provider):
     return classify_event('\n'.join(chunks), provider)
 
 
+def pause_failure(data, provider, reason, now, seconds=3600):
+    """Monotonic one-hour hold; existing credit and scoped backoffs survive."""
+    if seconds != 3600 or not re.fullmatch(r'[a-z][a-z0-9_.-]{0,79}', reason):
+        raise ValueError('failure pause requires a named cause and exactly 3600 seconds')
+    existing = data.get('global')
+    if existing is not None and not valid_global(existing, provider):
+        raise ValueError('existing global hold is malformed')
+    expiry = now + seconds
+    if existing and existing['expires_epoch'] > now:
+        if existing['expires_epoch'] >= expiry:
+            return existing
+        result = dict(existing)
+        result['expires_epoch'] = expiry
+        result['record_id'] = new_record_id()
+    else:
+        result = {'version': 1, 'provider': provider, 'failure_class': reason,
+                  'created_epoch': now, 'expires_epoch': expiry,
+                  'record_id': new_record_id()}
+    data['global'] = result
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'global', 'clear', 'clear-global', 'credit', 'classify'))
+    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'pause', 'global', 'clear', 'clear-global', 'credit', 'classify'))
     parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen','stepfun'))
     parser.add_argument('--directory', type=pathlib.Path)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
@@ -418,6 +440,9 @@ def main():
                         return
                 data['global'] = None
                 publish(args.directory, args.provider, data); result = {'cleared': 'global'}
+            elif args.action == 'pause':
+                result = pause_failure(data, args.provider, args.reason, now, args.seconds)
+                publish(args.directory, args.provider, data)
             elif args.action == 'quarantine':
                 if args.seconds <= 0:
                     raise ValueError('quarantine seconds must be positive')
