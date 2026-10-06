@@ -1463,6 +1463,10 @@ case "${POOL_RUNNER_MODE:-approve}" in
   # analysis and the head binding sit AFTER the verdict block. The pool gate
   # must accept this, or every valid Gemini response fails one gate.
   geminishape) printf '## Verdict\nAPPROVE\n\nAnalysis of the change with evidence lines and sibling checks across the full diff, including the boundary, refusal and fail-closed paths the adapter contract requires. Head under review: %s. The review covered the registry eligibility decision at the front door, the evidence packet identity binding before and after the paid run, the lifecycle begin and finish accounting, the verdict-to-head binding rule, the report floor, and every fail-closed refusal path a pool review must keep. Findings are grouped by severity with file and line references, and the sibling-class sweep ran over each guard before this verdict was written, exactly as the harness requires of every pool review.\n' "$HEAD" ;;
+  # Contradictory verdicts: first says REJECT, last says APPROVE. For Gemini
+  # the pool must refuse (ai-gemini validates the first). For other providers
+  # the last verdict is authoritative.
+  contradictory) printf '## Verdict\nREJECT\n\nFindings grouped by severity with file and line references across the full diff, including boundary, refusal and fail-closed paths, the evidence packet identity binding, lifecycle accounting, the report floor and the sibling-class sweep over every guard, written long enough to clear the minimum analysis floor on its own. Head under review: %s.\n\n## Verdict\nAPPROVE\n' "$HEAD" ;;
   # Footer-only body: a leading verdict word and nothing else. No analysis on
   # either side of the block, so the pool gate must still refuse it.
   footerempty) printf '## Verdict\nAPPROVE\n' ;;
@@ -1590,6 +1594,14 @@ check "pool_adapter_accepts_a_verdict_first_gemini_shaped_body" "[ '$RC_GSHAPE' 
 check "pool_adapter_refuses_verdict_first_for_non_gemini_providers" "[ '$RC_GSHAPE_QWEN' -ne 0 ]"
 ( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=footerempty bash "$POOL" qwen security-review ) > "$POOLTMP/out-fempty" 2>&1; RC_FEMPTY=$?
 check "pool_adapter_refuses_a_footer_only_empty_body" "[ '$RC_FEMPTY' -ne 0 ]"
+# Contradictory verdicts (REJECT first, APPROVE last) must fail closed for
+# Gemini - trusting the last would flip a REJECT into an approval.  For other
+# providers the last verdict is authoritative (provisional + final is normal).
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=contradictory bash "$POOL" gemini final-check ) > "$POOLTMP/out-contrad" 2>&1; RC_CONTRAD=$?
+check "pool_adapter_refuses_contradictory_verdicts_gemini" "[ '$RC_CONTRAD' -ne 0 ] && grep -q 'contradictory' '$POOLTMP/out-contrad'"
+( cd "$POOLTMP/fakerepo" && export_pool && POOL_RUNNER_MODE=contradictory bash "$POOL" qwen security-review ) > "$POOLTMP/out-contrad-qwen" 2>&1; RC_CONTRAD_QWEN=$?
+CONTRAD_QWEN_REPORT="$(tail -1 "$POOLTMP/out-contrad-qwen" 2>/dev/null)"
+check "pool_adapter_takes_last_verdict_for_non_gemini_contradictory" "[ '$RC_CONTRAD_QWEN' -eq 0 ] && grep -q APPROVE '$CONTRAD_QWEN_REPORT'"
 # A rewritten target tip (moved BACKWARD to a non-descendant) is real drift
 # and must still destroy the paid report.
 ( cd "$POOLTMP/fakerepo" && export_pool && export_pool_id json "$FAKE_HEAD" "$FAKE_BASE" && POOL_RUNNER_MODE=drift bash "$POOL" qwen security-review ) > "$POOLTMP/out-drift" 2>&1; RC_DRIFT=$?
