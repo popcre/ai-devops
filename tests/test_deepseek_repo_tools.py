@@ -228,6 +228,64 @@ with tempfile.TemporaryDirectory() as tmp:
     rc = subprocess.run([sys.executable, HELPER, "step", root, req, resp, log, "1"]).returncode
     check("a plain answer is still final", rc == 0)
 
+    # compact_tool_messages stubs older tool results once over budget.
+    cmsgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "tool_calls": [{"id": "c0", "type": "function",
+                                              "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c0", "content": "A" * 5000},
+        {"role": "assistant", "tool_calls": [{"id": "c1", "type": "function",
+                                              "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "B" * 5000},
+        {"role": "assistant", "tool_calls": [{"id": "c2", "type": "function",
+                                              "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c2", "content": "C" * 5000},
+        {"role": "assistant", "tool_calls": [{"id": "c3", "type": "function",
+                                              "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c3", "content": "D" * 5000},
+        {"role": "assistant", "tool_calls": [{"id": "c4", "type": "function",
+                                              "function": {"name": "read_file", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c4", "content": "E" * 5000},
+    ]
+    saved_budget, saved_keep = t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS
+    t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS = 8000, 2
+    try:
+        t.compact_tool_messages(cmsgs)
+        tool_msgs = [m for m in cmsgs if m.get("role") == "tool"]
+        check("compaction stubs older tool results",
+              tool_msgs[0]["content"] == t.COMPACT_STUB and tool_msgs[1]["content"] == t.COMPACT_STUB
+              and tool_msgs[2]["content"] == t.COMPACT_STUB)
+        check("compaction keeps recent tool results",
+              tool_msgs[3]["content"].startswith("D") and tool_msgs[4]["content"].startswith("E"))
+        check("compaction preserves tool_call_id pairing",
+              [m["tool_call_id"] for m in tool_msgs] == ["c0", "c1", "c2", "c3", "c4"])
+        again = [dict(m) for m in cmsgs]
+        t.compact_tool_messages(cmsgs)
+        check("compaction stubs are stable across rounds", cmsgs == again)
+        # Zero keep must not retain every result (Python -0: slice bug).
+        t.COMPACT_KEEP_RESULTS = 0
+        zero = [{"role": "tool", "tool_call_id": f"z{i}", "content": "Q" * 5000} for i in range(4)]
+        t.compact_tool_messages(zero)
+        check("zero keep still compacts and keeps at least one result",
+              sum(1 for m in zero if m["content"] == t.COMPACT_STUB) == 3
+              and sum(1 for m in zero if m["content"].startswith("Q")) == 1)
+        # A result shorter than the stub is never rewritten (no growth).
+        t.COMPACT_KEEP_RESULTS = 1
+        short = [
+            {"role": "tool", "tool_call_id": "s0", "content": "tiny"},
+            {"role": "tool", "tool_call_id": "s1", "content": "E" * 5000},
+        ]
+        t.COMPACT_BUDGET_CHARS = 10
+        t.compact_tool_messages(short)
+        check("compaction never grows a short result",
+              short[0]["content"] == "tiny" and short[1]["content"].startswith("E"))
+    finally:
+        t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS = saved_budget, saved_keep
+
+    check("tool output cap is far below the old 60k default", t.MAX_OUTPUT_CHARS <= 8000)
+    check("round and call budgets are tightened", t.MAX_ROUNDS <= 8 and t.MAX_TOOL_CALLS <= 16)
+
 names = {x["function"]["name"] for x in t.TOOLS}
 check("write_file and run_command are offered", {"write_file", "run_command"} <= names)
 print(f"{'FAILED ' + str(len(FAILED)) if FAILED else 'all passed'}")

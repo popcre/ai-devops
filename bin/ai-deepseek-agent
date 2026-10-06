@@ -225,7 +225,7 @@ unset DEEPSEEK_API_KEY
 exec 9<<<"$keep_key"
 keep_key=""
 clean=(/usr/bin/env -i "PATH=${PATH:-}" "HOME=${HOME:-}" "AI_DEEPSEEK_SECRET_FD=9" "AI_DEEPSEEK_REEXEC=1")
-for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL DEEPSEEK_MODEL AI_DEEPSEEK_TEST_DIR AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
+for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL DEEPSEEK_MODEL AI_DEEPSEEK_TEST_DIR AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS DEEPSEEK_TOOLS_MAX_OUTPUT_CHARS DEEPSEEK_TOOLS_MAX_GREP_MATCHES DEEPSEEK_TOOLS_COMPACT_BUDGET_CHARS DEEPSEEK_TOOLS_COMPACT_KEEP_RESULTS SOURCE_ATTACH_MAX_BYTES SOURCE_ATTACH_SMALL_BYTES AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
   [ -z "${!name:-}" ] || clean+=("$name=${!name}")
 done
 exec "${clean[@]}" /usr/bin/bash --noprofile --norc "$script" "$@"
@@ -908,7 +908,44 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
     source_files+=("$snapshot/$file")
   done < <(git -C "$snapshot" ls-files --others --exclude-standard -z)
   printf '%s\0' "${source_files[@]}" > "$REVIEW_SOURCE_IDENTITY.files" || return 1
-  MSG="$(SOURCE_ATTACHMENT_MODE=1 with_files_appended "$MSG" "${source_files[@]}")" || return 1
+  # Repository tools can read the snapshot copy, so large source bodies stay
+  # out of the message (they are inventoried) and are re-read on demand. Small
+  # evidence files and the identity packet / patch still ride along — otherwise
+  # a large review attaches every file and resends those bytes every tool round.
+  # MANIFEST.md and identity.json are never truncated: they are the review's
+  # identity, not optional context.
+  local small_max="${SOURCE_ATTACH_SMALL_BYTES:-4096}"
+  local attached=() indexed=() file
+  for file in "${source_files[@]}"; do
+    case "$file" in
+      "$saved/MANIFEST.md"|"$saved/identity.json")
+        attached+=("$file"); continue;;
+      "$patch")
+        attached+=("$file"); continue;;
+    esac
+    if [ -L "$file" ]; then
+      indexed+=("$file")
+    elif [ -f "$file" ] && [ "$(wc -c < "$file")" -le "$small_max" ]; then
+      attached+=("$file")
+    else
+      indexed+=("$file")
+    fi
+  done
+  # Identity files attach whole; other bodies (including the patch) may be
+  # truncated for token cost. The full patch remains only in the sealed packet.
+  [ "${#attached[@]}" -eq 0 ] || {
+    local identity_files=() body_files=()
+    for file in "${attached[@]}"; do
+      case "$file" in
+        "$saved/MANIFEST.md"|"$saved/identity.json") identity_files+=("$file");;
+        *) body_files+=("$file");;
+      esac
+    done
+    [ "${#identity_files[@]}" -eq 0 ] || MSG="$(SOURCE_ATTACHMENT_MODE=1 with_files_appended "$MSG" "${identity_files[@]}")" || return 1
+    [ "${#body_files[@]}" -eq 0 ] || MSG="$(SOURCE_ATTACHMENT_MODE=1 SOURCE_ATTACH_MAX_BYTES="${SOURCE_ATTACH_MAX_BYTES:-65536}" \
+      with_files_appended "$MSG" "${body_files[@]}")" || return 1
+  }
+  [ "${#indexed[@]}" -eq 0 ] || MSG="$(with_files_inventory "$MSG" "${indexed[@]}")" || return 1
   "$SOURCE_TOOLS/ai-review-packet" verify "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || return 1
 }
 
@@ -1143,7 +1180,10 @@ PY
 with_files_appended() {
   # Git Bash owns file reads so its supported Windows filenames remain readable.
   # Length framing transports NUL bytes without ever placing them in a shell var.
+  # SOURCE_ATTACH_MAX_BYTES (when set) keeps only the head of an oversized
+  # attachment and records the full digest so truncation is visible.
   local msg="$1" file; shift
+  local max_bytes="${SOURCE_ATTACH_MAX_BYTES:-}" total shown
   printf '%s' "$msg"
   [ "$#" -gt 0 ] || return 0
   {
@@ -1152,11 +1192,23 @@ with_files_appended() {
         printf 'symlink\n'
         readlink -n -- "$file" | wc -c
         readlink -n -- "$file" || exit 1
+        printf '%s\n%s\n' "-1" "-"
       else
         [ -f "$file" ] || { echo "Error: file not found: $file" >&2; exit 1; }
         printf 'file\n'
-        wc -c < "$file" || exit 1
-        cat -- "$file" || exit 1
+        if [ -n "$max_bytes" ]; then
+          total=$(wc -c < "$file") || exit 1
+          shown=$total
+          [ "$shown" -le "$max_bytes" ] || shown=$max_bytes
+          printf '%s\n' "$shown"
+          head -c "$shown" -- "$file" || exit 1
+          # Full-file digest stays the identity; the header marks truncation.
+          printf '%s\n%s\n' "$total" "$(sha256sum -- "$file" | awk '{print $1}')"
+        else
+          wc -c < "$file" || exit 1
+          cat -- "$file" || exit 1
+          printf '%s\n%s\n' "-1" "-"
+        fi
       fi
     done
   } | "$PYTHON" -c '
@@ -1170,6 +1222,12 @@ for path in sys.argv[1:]:
     if count < 0: raise ValueError("invalid attachment length")
     data = stream.read(count)
     if len(data) != count: raise ValueError("incomplete attachment bytes")
+    total_line = stream.readline().strip()
+    full_hash_line = stream.readline().strip()
+    try:
+        total = int(total_line)
+    except ValueError:
+        total = -1
     try:
         text = data.decode("utf-8")
         if "\0" in text: raise ValueError("binary attachment")
@@ -1177,11 +1235,48 @@ for path in sys.argv[1:]:
     except (UnicodeDecodeError, ValueError):
         text = base64.b64encode(data).decode("ascii")
         encoding = "symlink-target-base64" if kind == b"symlink" else "base64"
-    sys.stdout.write(f"\n\n--- {path} ---\nEncoding: {encoding}\nBytes: {count}\nSHA256: {hashlib.sha256(data).hexdigest()}\n\n")
+    shown_hash = hashlib.sha256(data).hexdigest()
+    if full_hash_line and full_hash_line != b"-":
+        full_hash = full_hash_line.decode("ascii", errors="replace")
+    else:
+        full_hash = shown_hash
+    sys.stdout.write(f"\n\n--- {path} ---\nEncoding: {encoding}\nBytes: {count}\nSHA256: {full_hash}\n")
+    if total > count:
+        sys.stdout.write(
+            f"Truncated: showing first {count} of {total} bytes; SHA256 is the full-file digest. "
+            f"Prefix SHA256: {shown_hash}. "
+            f"The complete file is NOT in this message and NOT readable via repository tools "
+            f"unless it is also listed as repository source; if you need the hidden bytes, say so "
+            f"and return BLOCKED rather than guessing.\n"
+        )
+    sys.stdout.write("\n")
     sys.stdout.write(text)
     sys.stdout.write(f"\n--- end {path} ---")
 if stream.read(1): raise ValueError("unexpected attachment bytes")
 ' "$@"
+}
+
+with_files_inventory() {
+  # One line per file (path, size, digest) instead of the body. Used when
+  # repository tools can already read those files from the disposable copy.
+  # Symlinks are recorded as links and never followed — repository tools
+  # refuse them, so the inventory must not silently expand a link target.
+  local msg="$1" file; shift
+  printf '%s' "$msg"
+  [ "$#" -gt 0 ] || return 0
+  printf '\n\n--- source file inventory (bodies omitted; read via repository tools) ---\n'
+  for file in "$@"; do
+    if [ -L "$file" ]; then
+      printf '%s  symlink -> %s (target not followed)\n' "$file" "$(readlink -- "$file")"
+      continue
+    fi
+    [ -f "$file" ] || { echo "Error: file not found: $file" >&2; return 1; }
+    local size hash
+    size=$(wc -c < "$file") || return 1
+    hash=$(sha256sum -- "$file" | awk '{print $1}') || return 1
+    printf '%s  %s bytes  sha256:%s\n' "$file" "$size" "$hash"
+  done
+  printf '%s\n' "--- end source file inventory ---"
 }
 
 # DeepSeek reaches this wrapper over an API. A review gives it repository tools
