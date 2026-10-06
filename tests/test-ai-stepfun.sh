@@ -111,6 +111,12 @@ case "$STUB_MODE" in
             printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail.\\nVERDICT: REVISE %s"}}\n' "$head" ;;
   jsonltext429) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
                 printf '{"type":"text","part":{"text":"The code quotes HTTP 429 rate_limited. Analysis complete.\\nVERDICT: APPROVE %s"}}\n' "$head" ;;
+  stateprobe) if [ -e "$XDG_DATA_HOME/previous-review" ] || [ -e "$XDG_CACHE_HOME/previous-review" ]; then
+                printf '{"type":"text","part":{"text":"leaked previous review state"}}\n'
+              else
+                printf '{"type":"text","part":{"text":"isolated review state"}}\n'
+              fi
+              touch "$XDG_DATA_HOME/previous-review" "$XDG_CACHE_HOME/previous-review" ;;
   *) printf '{"type":"text","part":{"text":"ok"}}\n' ;;
 esac
 STUB
@@ -305,6 +311,10 @@ fi
 check "OpenCode review uses the review agent" "grep -qx 'stepfun-review' '$TMP/args.oc'"
 check "OpenCode implement uses the implement agent and a remote-less clone" "mode impl; out=\$('$SCRIPT' implement --repo '$TMP/repo' --prompt 'add new.py' 2>&1); wt=\$(printf '%s\n' \"\$out\" | sed -n 's/^CLONE //p'); [ -n \"\$wt\" ] && [ -f \"\$wt/new.py\" ] && [ -z \"\$(git -C \"\$wt\" remote)\" ] && grep -qx 'stepfun-implement' '$TMP/args.oc'"
 check "OpenCode ask answers from a disposable copy" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES"
+mode stateprobe
+"$SCRIPT" ask --repo "$TMP/repo" 'first isolated turn' > "$TMP/stateprobe-first.out" 2>/dev/null; rc1=$?
+"$SCRIPT" ask --repo "$TMP/repo" 'second isolated turn' > "$TMP/stateprobe-second.out" 2>/dev/null; rc2=$?
+check "OpenCode data and cache from one review are invisible to the next" "[ $rc1 = 0 ] && [ $rc2 = 0 ] && grep -qx 'isolated review state' '$TMP/stateprobe-first.out' && grep -qx 'isolated review state' '$TMP/stateprobe-second.out' && ! ls -d '$AI_STEPFUN_STATE_DIR'/oc-run.* >/dev/null 2>&1"
 check "OpenCode rejects a turn directory that has a remote" "mode ok; git -C '$TMP/repo' remote add origin https://example.com/x.git 2>/dev/null; ! '$SCRIPT' ask --repo '$TMP/repo' x >/dev/null 2>&1; git -C '$TMP/repo' remote remove origin"
   rm -f "$TMP/args.bwrap"
   check "Linux OpenCode turn runs under bubblewrap with an empty home and no host root" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES && grep -qx -- '--unshare-all' '$TMP/args.bwrap' && grep -qx -- '--tmpfs' '$TMP/args.bwrap' && grep -qx \"\$HOME\" '$TMP/args.bwrap' && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx / && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx /etc"

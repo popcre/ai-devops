@@ -126,6 +126,18 @@ tools run via git-bash on Windows).
 | **DeepSeek debates** (`ai-deepseek-agent`) | Bounded text-and-file debates used by the shared `deepseek-second-opinion` skill | ✅ repo-owned wrapper and skill; each turn resends the stored conversation | The installer copies the key from the managed 1Password reference into an owner-only per-user store. Reviews read only that store; `ai-deepseek-agent store-key` explicitly refreshes it outside a review. |
 | **StepFun Step 5** (`ai-stepfun`, StepCode CLI `step`) | Allocator rotation reviewer (shared-db#3657) and Linux implementer used by the shared `stepfun` skill | ✅ repo-owned wrapper, skill, and offline suite. Reviews and `ask` may write and run code only inside a disposable, remote-less review copy (#974); `implement` gets read/bash/edit/write with auto approval in a new remote-less clone; a run that commits or adds a remote is refused. Every turn runs under bubblewrap with an empty home, /tmp and /run and a cleared environment, so no SSH, git, gh, 1Password, or Docker credentials or sockets are visible; reviews use the shared sealed evidence packet. On Linux it refuses to run without bubblewrap; Windows runs review/ask only, through the OpenCode folder + test shell. Its hashed runner allowlist permits in-folder `ls` and `cat`, `head -n` for 1–200 lines, and `grep -n -F` for up to 200 literal matches; the path clamp and disabled file tools remain. A large single match line can still cost tokens, as with `cat`. The Linux OpenCode engine gets the same bubblewrap sandbox with a fresh per-run state tree (#1086). Live review and implementation proven on 2026-09-25 | Key is the vibe_coding item `stepfun step5 ai api key`, copied once by `ai-stepfun store-key` into the owner-only `~/.config/ai-devops/secrets/stepfun-api-key`; endpoint `https://api.stepfun.ai/v1`, model `step/step-5-preview` |
 
+StepFun session and cache decision (2026-10-06): 429 retries remain cold, and no
+warm directory is shared across reviews. OpenCode can accept a session ID, but
+its session files live in writable per-turn XDG state that is deleted after the
+turn. A saved ID alone cannot restore those files. Retaining the tree for a
+retry would also retain model-writable data that could contain the exported
+StepFun key. StepCode's session directory has the same exposure when mounted
+for a resumed turn. Sharing a warm cache across reviews could expose one
+review's copied code, tool output, or key to another. The fake-engine suite
+checks that data and cache markers from one OpenCode turn are absent in the
+next; neither engine resumes across wrapper turns. This keeps the #1086 wipe
+and cross-review isolation in force; no cache hit or token saving is claimed.
+
 The completed reconciliation plan is [`plan_sync-machine-wrapper-reconciliation.md`](../plan_sync-machine-wrapper-reconciliation.md). The command catalog now covers Grok, Kimi, Qwen, GLM, and DeepSeek launchers.
 
 ## GLM: persistent sessions on a local OpenCode server
