@@ -1672,6 +1672,59 @@ LSM_OUT="$(STATE_DIR="$LSM"; normalize_remote() { printf '%s' "$1"; }; eval "$(s
 check "session_lookup_finds_the_record_via_one_grep" "[ '$LSM_OUT' = '$LSM/sessions/a/x.json rc=0| rc=1' ]"
 rm -rf "$LSM"
 
+# Nested runner inheritance (durable-publish): ai-review-pool reserves
+# require-report, then launches the provider runner from its re-entered body.
+# The runner must inherit that SAME run_id (not begin a second invocation),
+# or the reserved obligation is left unfilled and cleanup reports
+# "required report is not durably published" even though the review text
+# is already on disk.
+NEST_TMP="$(mktemp -d)"
+GUARD_SRC="$REPO_ROOT/tools/reviewer_event_guard.sh"
+export AI_REVIEW_EVENT_DIR="$NEST_TMP/events"
+cat > "$NEST_TMP/inner.sh" <<'INNER'
+source "$GUARD_SRC"
+reviewer_event_guard qwen "$GUARD_SRC" new x
+echo "INHERIT=$?"
+INNER
+# 1. Direct child of the recorder still inherits (parent-match).
+cat > "$NEST_TMP/t1.sh" <<'T1'
+source "$GUARD_SRC"
+export AI_REVIEW_EVENT_PROVIDER=qwen
+export AI_REVIEW_EVENT_RUN_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+export AI_REVIEW_EVENT_PARENT="$$"
+bash "$NEST_TMP/inner.sh"
+T1
+NEST_DIRECT_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" bash "$NEST_TMP/t1.sh" 2>&1 || true)"
+printf '%s\n' "$NEST_DIRECT_OUT" | grep -q 'INHERIT=0' \
+  && ok "direct_child_inherits_open_invocation" \
+  || bad "direct_child_inherits_open_invocation (got: $NEST_DIRECT_OUT)"
+# 2. Nested grandchild (pool body launched the runner) inherits while the
+#    recorder is still alive — this is the pool → ai-qwen/ai-gemini/ai-muse shape.
+cat > "$NEST_TMP/t2.sh" <<'T2'
+source "$GUARD_SRC"
+export AI_REVIEW_EVENT_PROVIDER=qwen
+export AI_REVIEW_EVENT_RUN_ID=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+export AI_REVIEW_EVENT_PARENT="$$"
+bash "$NEST_TMP/middle.sh"
+T2
+cat > "$NEST_TMP/middle.sh" <<'M'
+bash "$NEST_TMP/inner.sh"
+M
+NEST_NESTED_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" bash "$NEST_TMP/t2.sh" 2>&1 || true)"
+printf '%s\n' "$NEST_NESTED_OUT" | grep -q 'INHERIT=0' \
+  && ok "nested_runner_inherits_open_invocation" \
+  || bad "nested_runner_inherits_open_invocation (got: $NEST_NESTED_OUT)"
+# 3. A later process must NOT inherit without a live recorder parent.
+NEST_DEAD_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" \
+  AI_REVIEW_EVENT_PROVIDER=qwen \
+  AI_REVIEW_EVENT_RUN_ID=cccccccccccccccccccccccccccccccc \
+  bash "$NEST_TMP/inner.sh" 2>&1 || true)"
+printf '%s\n' "$NEST_DEAD_OUT" | grep -q 'INHERIT=0' \
+  && bad "missing_recorder_parent_refuses_inheritance (got: $NEST_DEAD_OUT)" \
+  || ok "missing_recorder_parent_refuses_inheritance"
+unset AI_REVIEW_EVENT_DIR
+rm -rf "$NEST_TMP"
+
 echo
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

@@ -64,14 +64,25 @@ reviewer_event_guard(){
   # This re-entry already belongs to the outer recorded invocation. Nothing
   # may launch between DeepSeek's credential handoff and its secret scrub.
   [ "$provider" != deepseek ] || [ "${AI_DEEPSEEK_REEXEC:-}" != 1 ] || return 0
-  if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ] && [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ]; then
-    # The outer event recorder remains alive for the full invocation. Keep its
-    # PID as a shell-local liveness witness for Windows, where a sibling MSYS
-    # shell can briefly fail to see the inner wrapper PID via `kill -0`.
-    AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$AI_REVIEW_EVENT_PARENT}"
-    export -n AI_REVIEW_EVENT_OWNER_PID
-    unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER
-    return 0
+  # Two shapes inherit the SAME invocation:
+  #   1. Direct child of the recorder (parent-match).
+  #   2. Nested runner the already-re-entered pool launched. ai-review-pool
+  #      reserves require-report, then spawns the provider runner; that runner
+  #      must publish onto the same run_id or the reserved obligation is left
+  #      unfilled ("required report is not durably published") even though the
+  #      review text is on disk.
+  # PROVIDER + RUN_ID identify the open invocation. Parent-match stays the
+  # direct-child fast path. Nested grandchildren also inherit: on Windows/MSYS
+  # `kill -0` across process trees is unreliable (same reason OWNER_PID is a
+  # shell-local witness), so liveness is NOT required here. A finished run_id
+  # fails closed later — require-report/publish-report refuse to rewrite a
+  # completed invocation.
+  if [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] && [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ]; then
+    if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ] || [ -n "${AI_REVIEW_EVENT_PARENT:-}" ]; then
+      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
+      export -n AI_REVIEW_EVENT_OWNER_PID
+      return 0
+    fi
   fi
   local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation
   local -a event_env=()
