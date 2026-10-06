@@ -114,5 +114,98 @@ else
   echo 'ok   crlf-emitting jq still refuses a mismatched hash'; pass=$((pass+1))
 fi
 
+# BASH_ENV gate routing (config/opencode-stepfun/windows-gate-env.sh): the
+# DEBUG trap must exec the gate copy before the model command runs, the
+# gate-set marker must stop the trap from re-arming inside a verified
+# runner, and the allowlisted bash <script> runner must not be re-gated.
+# #1229 shipped a PATH shim that no Windows process could spawn, so every
+# in-sandbox bash tool call died with NotFound: ChildProcess.spawn before a
+# single gated command ran (shared-db#3943); these checks pin the contract.
+GATE_ENV="$ROOT/config/opencode-stepfun/windows-gate-env.sh"
+[ -f "$GATE_ENV" ] || { echo 'FAIL windows-gate-env.sh missing'; fail=$((fail+1)); }
+mkdir -p "$TMP/stubs3"
+printf '#!/bin/sh\nprintf "be=%%s marker=%%s\\n" "${BASH_ENV:-none}" "${AI_STEPFUN_SHELL_GATE:-0}"\n' > "$TMP/stubs3/cat"
+chmod +x "$TMP/stubs3/cat"
+cat_hash="$(sha256sum "$TMP/stubs3/cat" | awk '{print $1}')"
+printf '{"cat":{"path":"%s","sha256":"%s"}}\n' "$TMP/stubs3/cat" "$cat_hash" > "$TMP/runners3.json"
+
+trap_env(){ # trap_env CMD -> runs `bash -c CMD` with the trap wiring
+  BASH_ENV="$GATE_ENV" \
+  AI_STEPFUN_GATE_BIN="$GATE" \
+  AI_STEPFUN_REVIEW_DIR="$TMP/folder" \
+  AI_STEPFUN_RUNNERS_JSON="$TMP/runners3.json" \
+  AI_STEPFUN_SHELL_GATE=0 \
+  GATE_PATH="$TMP/stubs3" \
+  bash -c "$1"
+}
+out="$(trap_env 'cat readme.md' 2>/dev/null)" || true
+if [ "$out" = "be=none marker=1" ]; then
+  echo 'ok   BASH_ENV trap routes cat through the gate (marker set, BASH_ENV cleared)'; pass=$((pass+1))
+else
+  echo "FAIL BASH_ENV trap routing, got: $out"; fail=$((fail+1))
+fi
+out="$(BASH_ENV="$GATE_ENV" \
+  AI_STEPFUN_GATE_BIN="$GATE" \
+  AI_STEPFUN_REVIEW_DIR="$TMP/folder" \
+  AI_STEPFUN_RUNNERS_JSON="$TMP/runners3.json" \
+  AI_STEPFUN_SHELL_GATE=0 \
+  AI_STEPFUN_GATE_LOG="$TMP/gate-audit.log" \
+  GATE_PATH="$TMP/stubs3" \
+  bash -c 'cat readme.md' 2>/dev/null)" || true
+if [ "$out" = "be=none marker=1" ] && grep -q 'cat readme.md' "$TMP/gate-audit.log" 2>/dev/null; then
+  echo 'ok   gated command is recorded in the per-run audit log'; pass=$((pass+1))
+else
+  echo "FAIL audit log, got: $out / $(cat "$TMP/gate-audit.log" 2>/dev/null)"; fail=$((fail+1))
+fi
+if trap_env 'whoami' >/dev/null 2>&1; then
+  echo 'FAIL BASH_ENV trap let a non-allowlisted command run'; fail=$((fail+1))
+else
+  rc=$?
+  if [ "$rc" -eq 126 ]; then
+    echo 'ok   BASH_ENV trap refuses non-allowlisted command (126)'; pass=$((pass+1))
+  else
+    echo "FAIL BASH_ENV trap refusal rc=$rc (want 126)"; fail=$((fail+1))
+  fi
+fi
+out="$(BASH_ENV="$GATE_ENV" AI_STEPFUN_SHELL_GATE=1 bash -c 'printf "freed\n"' 2>/dev/null)"
+if [ "$out" = "freed" ]; then
+  echo 'ok   gate marker skips the trap for verified runners'; pass=$((pass+1))
+else
+  echo "FAIL gate marker skip, got: $out"; fail=$((fail+1))
+fi
+# The allowlisted bash <script> runner runs inside one gate pass: the trap
+# execs the gate once, the gate verifies the stub bash hash and execs it
+# with the marker set and BASH_ENV cleared, so the script is not re-gated.
+printf '#!/bin/sh\nexec /usr/bin/bash "$@"\n' > "$TMP/stubs3/bash"
+chmod +x "$TMP/stubs3/bash"
+bash_hash="$(sha256sum "$TMP/stubs3/bash" | awk '{print $1}')"
+printf '{"cat":{"path":"%s","sha256":"%s"},"bash":{"path":"%s","sha256":"%s"}}\n' \
+  "$TMP/stubs3/cat" "$cat_hash" "$TMP/stubs3/bash" "$bash_hash" > "$TMP/runners3.json"
+echo 'echo "script-ran marker=${AI_STEPFUN_SHELL_GATE:-0} be=${BASH_ENV:-none}"' > "$TMP/folder/t.sh"
+out="$(trap_env 'bash t.sh' 2>/dev/null)" || true
+if [ "$out" = "script-ran marker=1 be=none" ]; then
+  echo 'ok   allowlisted bash script runner not re-gated'; pass=$((pass+1))
+else
+  echo "FAIL bash script runner re-gating, got: $out"; fail=$((fail+1))
+fi
+
+# Hardening from the #1344 review: the direct -c form refuses extra argv, and
+# the trap template fails closed when AI_STEPFUN_GATE_BIN is unset.
+check 'refuses extra args after -c payload' bash -c "\"$GATE\" -c 'cat r.md' extra; test \$? -eq 126"
+if out="$(cd "$TMP/folder" && env -u AI_STEPFUN_GATE_BIN \
+    BASH_ENV="$GATE_ENV" \
+    AI_STEPFUN_REVIEW_DIR="$TMP/folder" \
+    AI_STEPFUN_SHELL_GATE=0 \
+    GATE_PATH="$TMP/stubs3" \
+    bash -c 'cat readme.md' 2>/dev/null)"; then
+  echo 'FAIL unset gate bin still ran'; fail=$((fail+1))
+else
+  if [ -z "$out" ]; then
+    echo 'ok   unset AI_STEPFUN_GATE_BIN fails closed (no command output)'; pass=$((pass+1))
+  else
+    echo "FAIL unset gate bin leaked output: $out"; fail=$((fail+1))
+  fi
+fi
+
 printf 'passed=%s failed=%s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
