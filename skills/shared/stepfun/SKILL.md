@@ -14,16 +14,18 @@ not read-only.
 
 ## Platform
 
-Ubuntu/Linux only (owner instruction 2026-09-25). `ai-stepfun` refuses Windows,
-because its shell-enabled turns need the bubblewrap sandbox (#1086). Install
-bubblewrap and StepCode (or the OpenCode harness).
+Linux (owner instruction 2026-09-25): bubblewrap plus StepCode or the OpenCode
+harness (#1086). Windows (owner instruction 2026-09-30): `review` and `ask` run
+through the pinned OpenCode engine in a disposable folder with a gated test
+shell; `implement` is refused there.
 
 ## Sandbox
 
 Every turn runs against a disposable, remote-less copy or clone. StepCode turns
 additionally run under bubblewrap: the model sees only its own folder, with an
-empty home, /tmp and /run and a cleared environment; OpenCode turns get the
-same sandbox. OpenCode turns run against
+empty home, /tmp and /run and a cleared environment; OpenCode turns on Linux get the
+same sandbox. Windows turns are not mount-isolated: see the owner-accepted
+Windows residual in `docs/reviewer-rotation-rules.md` rule 12. OpenCode turns run against
 the same disposable copy with a per-run profile and the key exported only into
 the child environment.
 
@@ -55,10 +57,10 @@ ai-stepfun implement --repo . --prompt-file task.md
 
 ## Membership
 
-`stepfun` is registered in `config/reviewer-registry.json` and listed as
-outside the shared-db allocator: the allocator has no platform awareness, so it
-never assigns StepFun. Use it when a session wants a reviewer, or when Albert
-asks for StepFun.
+`stepfun` is registered in `config/reviewer-registry.json` and is an active
+shared-db allocator reviewer (shared-db#3657). The allocator draws it only on a
+machine where `ai-review-preflight usable stepfun` passes. Also use it when
+Albert asks for StepFun.
 
 ## Failures
 

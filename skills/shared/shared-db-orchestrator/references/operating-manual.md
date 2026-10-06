@@ -234,7 +234,7 @@ carrying the head SHA above a substantive report. Registry re-entry is always a
 reviewed shared-db change backed by that evidence; it is never an edit made to
 unblock an allocation. Retrying the same
 issue/PR/head returns the same assignment. Use only the returned wrapper:
-`ai-muse`, `ai-grok-review`, `ai-qwen`, `ai-gemini`, or
+`ai-muse`, `ai-grok-review`, `ai-glm`, `ai-qwen`, `ai-gemini`, `ai-stepfun`, or
 `ai-deepseek-agent send --review --governed-verdict <sha> --model deepseek-flash`. Never override its model or
 reasoning pin, and never call `agy` directly.
 
