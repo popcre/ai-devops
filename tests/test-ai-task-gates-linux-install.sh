@@ -247,13 +247,24 @@ drift_digest="$("$TMP/candidate/bin/ai-review-sandbox" digest "$TMP/candidate")"
 drift_report="$TMP/drift-reviewed/.ai/reviews/approved.md"
 manifest_hash="$(sha256sum "$TMP/etc/install-manifest.tsv" | cut -d' ' -f1)"
 live_hash="$(sha256sum "$TMP/installed/bin/ai-task-gates" | cut -d' ' -f1)"
-printf '# Review\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n| stale manifest SHA | `%s` |\n| stale manifest hash | `%s` |\n| live installed SHA | `%s` |\n| live gate hash | `%s` |\n\nApproved stale-linux-manifest-recovery.\n\n## Verdict\nAPPROVE\n' \
-  "$drifted" "$drift_digest" "$protected" "$manifest_hash" "$drifted" "$live_hash" > "$drift_report"
-drift_report_hash="$(sha256sum "$drift_report" | cut -d' ' -f1)"
+# The wrapper-owned evidence helper must produce exactly the rows the gate
+# recomputes from the host, in the header before "## Result".
+drift_evidence="$(. "$ROOT/tools/lib/review-operation.sh" && review_operation_evidence_from "$TMP/bin/ai-task-gates" "$TMP/etc/install-manifest.tsv")" || { echo 'FAIL: evidence helper read the fixture host'; exit 1; }
+[ "$drift_evidence" = "$(printf '| stale manifest SHA | `%s` |\n| stale manifest hash | `%s` |\n| live installed SHA | `%s` |\n| live gate hash | `%s` |' "$protected" "$manifest_hash" "$drifted" "$live_hash")" ] &&
+  echo 'PASS: evidence helper computes stale manifest and live gate rows from the host' || { echo 'FAIL: evidence helper rows'; exit 1; }
+drift_request="$(. "$ROOT/tools/lib/review-operation.sh" && review_operation_request stale-linux-manifest-recovery "$drift_evidence")"
+grep -Fqx 'Approved stale-linux-manifest-recovery.' <<<"$drift_request" && grep -Fqx "| live gate hash | \`$live_hash\` |" <<<"$drift_request" &&
+  echo 'PASS: stale request carries host evidence and the approval line' || { echo 'FAIL: stale request'; exit 1; }
 drift_key="$("$TMP/drift-reviewed/bin/ai-review-lifecycle" identity "$TMP/drift-reviewed" | jq -r .repository_key)"
 mkdir -p "$AI_REVIEW_LIFECYCLE_DIR/runs/$drift_key/codex/codex"
-jq -nc --arg h "$drifted" --arg d "$drift_digest" --arg p "$drift_report" --arg s "$drift_report_hash" \
-  '{status:"completed",verdict:"APPROVE",stale:false,head:$h,source_digest:$d,report_path:$p,report_sha256:$s}' > "$AI_REVIEW_LIFECYCLE_DIR/runs/$drift_key/codex/codex/approved.json"
+write_drift_report(){ # $1 = header rows, $2 = body rows
+  printf '# Review\n\n| reviewed commit | `%s` |\n| source digest | `%s` |\n| operation | `stale-linux-manifest-recovery` |\n%s\n\n## Result\n\n%s\nApproved stale-linux-manifest-recovery.\n\n## Verdict\nAPPROVE\n' \
+    "$drifted" "$drift_digest" "$1" "$2" > "$drift_report"
+  drift_report_hash="$(sha256sum "$drift_report" | cut -d' ' -f1)"
+  jq -nc --arg h "$drifted" --arg d "$drift_digest" --arg p "$drift_report" --arg s "$drift_report_hash" \
+    '{status:"completed",verdict:"APPROVE",stale:false,head:$h,source_digest:$d,report_path:$p,report_sha256:$s}' > "$AI_REVIEW_LIFECYCLE_DIR/runs/$drift_key/codex/codex/approved.json"
+}
+write_drift_report "$drift_evidence" ""
 drift_policy="$(printf '%s\n%s\n' "$(git -C "$TMP/candidate" rev-parse "$drifted:config/task-gates.json")" "$(git -C "$TMP/candidate" rev-parse "$drifted:.ai-devops/task-gates.json")" | sha256sum | cut -d' ' -f1)"
 drift_auth="$TMP/state/install-authorizations/$drifted.json"
 jq -nc --arg target "$drifted" --arg recorded "$protected" --arg path "$TMP/installed" --arg launcher "$TMP/bin/ai-task-gates" \
@@ -269,6 +280,11 @@ cp "$TMP/drift-auth-original" "$drift_auth"
 printf '# tampered manifest\n' >> "$TMP/etc/install-manifest.tsv"
 expect_stop 'stale recovery refuses modified manifest bytes' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
 manifest "$protected"
+write_drift_report "" "$drift_evidence"
+jq --arg s "$drift_report_hash" '.review_report_sha256=$s' "$TMP/drift-auth-original" > "$drift_auth"
+expect_stop 'stale recovery refuses evidence rows supplied only by reviewer text' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
+write_drift_report "$drift_evidence" ""
+cp "$TMP/drift-auth-original" "$drift_auth"
 expect_ok 'reviewed stale recovery reserves exact host state' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
 expect_ok 'reviewed stale recovery resumes despite prior source drift' gate resume "$TMP/installed" "$drifted"
 manifest "$drifted"

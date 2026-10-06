@@ -216,11 +216,13 @@ Follow this exact stage brief and treat its named prior artifact as the input co
 
 $(cat "$AI_REVIEW_BRIEF_FILE")"
 fi
+OPERATION_EVIDENCE=""
 if [ -n "${AI_REVIEW_OPERATION:-}" ]; then
   [ "$MODE" = final-check ] || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "review operation needs final-check, not $MODE."; }
   # shellcheck source=../tools/lib/review-operation.sh
   . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/review-operation.sh" || die 'cannot load the review operation list.'
-  OPERATION_REQUEST="$(review_operation_request "$AI_REVIEW_OPERATION")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "unknown review operation: $AI_REVIEW_OPERATION"; }
+  OPERATION_EVIDENCE="$(review_operation_evidence "$AI_REVIEW_OPERATION")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "cannot read host evidence for review operation: $AI_REVIEW_OPERATION"; }
+  OPERATION_REQUEST="$(review_operation_request "$AI_REVIEW_OPERATION" "$OPERATION_EVIDENCE")" || { "$LIFECYCLE" fail --state "$STATE" --elapsed 0 --failure packet-failed >/dev/null 2>&1 || true; die "unknown review operation: $AI_REVIEW_OPERATION"; }
   DECISION="$DECISION
 
 $OPERATION_REQUEST"
@@ -310,6 +312,7 @@ chmod 600 "$TMP_REPORT" 2>/dev/null || die 'could not protect temporary report o
   printf '| field | value |\n|---|---|\n'
   printf '| repository | `%s` |\n| reviewed commit | `%s` |\n| source digest | `%s` |\n' "$REPO_ROOT" "$(jq -r .head "$STATE")" "$(jq -r .source_digest "$STATE")"
   [ -z "${AI_REVIEW_OPERATION:-}" ] || printf '| operation | `%s` |\n' "$AI_REVIEW_OPERATION"
+  [ -z "${OPERATION_EVIDENCE:-}" ] || printf '%s\n' "$OPERATION_EVIDENCE"
   printf '| run | `%s` |\n| caller | `%s` |\n| elapsed seconds | `%s` |\n| sandbox | `read-only` |\n\n' "$RUN_ID" "$CALLER" "$ELAPSED"
   printf '## Result\n\n'; cat "$TMP_OUT"
 } > "$TMP_REPORT"
