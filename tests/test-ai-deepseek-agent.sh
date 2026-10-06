@@ -166,6 +166,44 @@ OP_EXE_RESULT="$(OP_PHYSICAL="$TMP/op-exe-only/op"; eval "$(grep -F 'case "$OP_P
 check "op named without .exe resolves to the real op.exe" "[ '$OP_EXE_RESULT' = '$TMP/op-exe-only/op.exe' ]"
 check "help succeeds" "bash '$SCRIPT' --help"; check "unknown command fails" "! bash '$SCRIPT' unknown"
 run(){ (cd "$TMP/repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test "$SCRIPT" "$@"); }
+receipt_continuation_regressions() {
+  # The source receipt is wrapper-produced before the paid request, not prose.
+mkdir -p "$TMP/repo/.ai/reviews"
+RECEIPT="$TMP/repo/.ai/reviews/governed-source-fixture.json"
+RECEIPT_OUT="$(AI_REVIEW_SOURCE_RECEIPT_FILE="$RECEIPT" DEEPSEEK_STUB_REPLY=$'source binding\n## Verdict\nAPPROVE' run send source-session-binding --review)"
+RECEIPT_ID="$(printf '%s\n' "$RECEIPT_OUT" | sed -n 's/^SESSION_ID: //p')"
+check "generated session is bound to exact source receipt before provider call" "test -n '$RECEIPT_ID' && jq -e --arg sid '$RECEIPT_ID' '.provider==\"deepseek\" and .session_id==\$sid and (.receipt_sha256|test(\"^[0-9a-f]{64}$\"))' '$TMP/receipt-at-provider.json'"
+check "source receipt remains protected and source identity stays unchanged" "test ! -L '$RECEIPT' && jq -e --arg head \"\$(git -C '$TMP/repo' rev-parse HEAD)\" '.schema_version==1 and .identity.head==\$head' '$RECEIPT'"
+sed -n '/^bind_review_source_session()/,/^}/p' "$SCRIPT" > "$TMP/receipt-helper.sh"
+RECEIPT_PYTHON="$(command -v python3 || command -v python)"
+RECEIPT_HEAD="$(jq -r .identity.head "$RECEIPT")"; RECEIPT_PACKET="$(jq -r .packet_sha256 "$RECEIPT")"
+check "a receipt already bound to another generated session refuses" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$RECEIPT_PACKET' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session wrong-session' >/dev/null 2>&1"
+check "wrong source packet cannot be rebound as a continuation" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$(printf f%.0s {1..64})' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session $RECEIPT_ID' >/dev/null 2>&1"
+if ln -s "$RECEIPT" "$TMP/linked-receipt.json" 2>/dev/null; then
+check "linked continuation receipt refuses" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$TMP/linked-receipt.json' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$RECEIPT_PACKET' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session $RECEIPT_ID' >/dev/null 2>&1"
+else
+  printf "  skip linked receipt refusal: filesystem cannot create symlinks\n"; SKIP=$((SKIP+1))
+fi
+# Exercise the actual packet verifier's create-only republish, not the packet stub.
+REAL_REPO="$TMP/real-packet-repo"; mkdir -p "$REAL_REPO/.ai/reviews"
+git -C "$REAL_REPO" init -q; git -C "$REAL_REPO" config user.name Test; git -C "$REAL_REPO" config user.email test@example.com
+printf '.ai/\n.ai-review-*\n' > "$REAL_REPO/.git/info/exclude"
+printf 'real packet fixture\n' > "$REAL_REPO/source.txt"; git -C "$REAL_REPO" add source.txt; git -C "$REAL_REPO" commit -qm fixture
+"$ROOT/bin/ai-review-packet" resolve "$REAL_REPO" --base HEAD > "$REAL_REPO/.ai/identity.json"
+REAL_PACKET="$("$ROOT/bin/ai-review-packet" build "$REAL_REPO" continuation-real --identity "$REAL_REPO/.ai/identity.json")"
+REAL_RECEIPT="$REAL_REPO/.ai/reviews/source.json"
+AI_REVIEW_SOURCE_RECEIPT_FILE="$REAL_RECEIPT" "$ROOT/bin/ai-review-packet" verify "$REAL_PACKET" --identity "$REAL_REPO/.ai/identity.json" >/dev/null
+REAL_HEAD="$(git -C "$REAL_REPO" rev-parse HEAD)"; REAL_HASH="$(cat "$REAL_PACKET/MANIFEST.sha256")"; RECEIPT_PYTHON="$(command -v python3 || command -v python)"
+cp "$REAL_RECEIPT" "$TMP/original-receipt.json"
+check "actual source packet receipt can bind a generated session" "PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session'"
+check "real packet verifier republishes unchanged original receipt after companion binding" "AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' '$ROOT/bin/ai-review-packet' verify '$REAL_PACKET' --identity '$REAL_REPO/.ai/identity.json' >/dev/null && cmp -s '$REAL_RECEIPT' '$TMP/original-receipt.json'"
+check "same exact generated session companion retry remains create-only and idempotent" "PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session'"
+printf '\n' >> "$REAL_RECEIPT"
+check "changed original bytes cannot inherit a continuation companion" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session' >/dev/null 2>&1"
+cp "$TMP/original-receipt.json" "$REAL_RECEIPT"; : > "$REAL_RECEIPT.continuation.json"
+check "truncated companion is refused rather than replaced" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session' >/dev/null 2>&1 && test ! -s '$REAL_RECEIPT.continuation.json'"
+}
+
 if [ "${AI_DEEPSEEK_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   printf 'retained attachment\n' > "$TMP/repo/recovery-evidence.txt"
   AI_DEEPSEEK_TEST_LEDGER_FAILURE=publish run send recovery-paid --file recovery-evidence.txt > "$TMP/recovery.out" 2>&1
@@ -208,37 +246,7 @@ if [ "${AI_DEEPSEEK_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   check "proven HTTP failure finalizes locally but remains non-authorizing" "! run finalize '$HTTP_ID' >'$TMP/http-final.out' 2>&1 && grep -q 'retained-http-500' '$TMP/http-final.out' && test '$HTTP_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
   check "repeated incomplete finalization stays nonzero" "! run finalize '$HTTP_ID' >'$TMP/http-repeat.out' 2>&1 && test '$HTTP_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
   check "explicit continuation survives a retained HTTP refusal" "run reply '$HTTP_ID' legitimate-new-turn >'$TMP/http-next.out' 2>&1 && test \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" -eq '$((HTTP_CALLS+1))'"
-  # The source receipt is wrapper-produced before the paid request, not prose.
-mkdir -p "$TMP/repo/.ai/reviews"
-RECEIPT="$TMP/repo/.ai/reviews/governed-source-fixture.json"
-RECEIPT_OUT="$(AI_REVIEW_SOURCE_RECEIPT_FILE="$RECEIPT" DEEPSEEK_STUB_REPLY=$'source binding\n## Verdict\nAPPROVE' run send source-session-binding --review)"
-RECEIPT_ID="$(printf '%s\n' "$RECEIPT_OUT" | sed -n 's/^SESSION_ID: //p')"
-check "generated session is bound to exact source receipt before provider call" "test -n '$RECEIPT_ID' && jq -e --arg sid '$RECEIPT_ID' '.provider==\"deepseek\" and .session_id==\$sid and (.receipt_sha256|test(\"^[0-9a-f]{64}$\"))' '$TMP/receipt-at-provider.json'"
-check "source receipt remains protected and source identity stays unchanged" "test ! -L '$RECEIPT' && jq -e --arg head \"\$(git -C '$TMP/repo' rev-parse HEAD)\" '.schema_version==1 and .identity.head==\$head' '$RECEIPT'"
-sed -n '/^bind_review_source_session()/,/^}/p' "$SCRIPT" > "$TMP/receipt-helper.sh"
-RECEIPT_PYTHON="$(command -v python3 || command -v python)"
-RECEIPT_HEAD="$(jq -r .identity.head "$RECEIPT")"; RECEIPT_PACKET="$(jq -r .packet_sha256 "$RECEIPT")"
-check "a receipt already bound to another generated session refuses" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$RECEIPT_PACKET' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session wrong-session' >/dev/null 2>&1"
-check "wrong source packet cannot be rebound as a continuation" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$(printf f%.0s {1..64})' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session $RECEIPT_ID' >/dev/null 2>&1"
-ln -s "$RECEIPT" "$TMP/linked-receipt.json" 2>/dev/null && check "linked continuation receipt refuses" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$TMP/linked-receipt.json' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$RECEIPT_PACKET' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session $RECEIPT_ID' >/dev/null 2>&1"
-# Exercise the actual packet verifier's create-only republish, not the packet stub.
-REAL_REPO="$TMP/real-packet-repo"; mkdir -p "$REAL_REPO/.ai/reviews"
-git -C "$REAL_REPO" init -q; git -C "$REAL_REPO" config user.name Test; git -C "$REAL_REPO" config user.email test@example.com
-printf '.ai/\n.ai-review-*\n' > "$REAL_REPO/.git/info/exclude"
-printf 'real packet fixture\n' > "$REAL_REPO/source.txt"; git -C "$REAL_REPO" add source.txt; git -C "$REAL_REPO" commit -qm fixture
-"$ROOT/bin/ai-review-packet" resolve "$REAL_REPO" --base HEAD > "$REAL_REPO/.ai/identity.json"
-REAL_PACKET="$("$ROOT/bin/ai-review-packet" build "$REAL_REPO" continuation-real --identity "$REAL_REPO/.ai/identity.json")"
-REAL_RECEIPT="$REAL_REPO/.ai/reviews/source.json"
-AI_REVIEW_SOURCE_RECEIPT_FILE="$REAL_RECEIPT" "$ROOT/bin/ai-review-packet" verify "$REAL_PACKET" --identity "$REAL_REPO/.ai/identity.json" >/dev/null
-REAL_HEAD="$(git -C "$REAL_REPO" rev-parse HEAD)"; REAL_HASH="$(cat "$REAL_PACKET/MANIFEST.sha256")"; RECEIPT_PYTHON="$(command -v python3 || command -v python)"
-cp "$REAL_RECEIPT" "$TMP/original-receipt.json"
-check "actual source packet receipt can bind a generated session" "PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session'"
-check "real packet verifier republishes unchanged original receipt after companion binding" "AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' '$ROOT/bin/ai-review-packet' verify '$REAL_PACKET' --identity '$REAL_REPO/.ai/identity.json' >/dev/null && cmp -s '$REAL_RECEIPT' '$TMP/original-receipt.json'"
-check "same exact generated session companion retry remains create-only and idempotent" "PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session'"
-printf '\n' >> "$REAL_RECEIPT"
-check "changed original bytes cannot inherit a continuation companion" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session' >/dev/null 2>&1"
-cp "$TMP/original-receipt.json" "$REAL_RECEIPT"; : > "$REAL_RECEIPT.continuation.json"
-check "truncated companion is refused rather than replaced" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session' >/dev/null 2>&1 && test ! -s '$REAL_RECEIPT.continuation.json'"
+  receipt_continuation_regressions
 check "shell syntax is valid" "bash -n '$SCRIPT'"
   printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]; exit $?
 fi
@@ -676,4 +684,7 @@ check "the turn intent records repository access so recovery keeps it" "test -n 
 check "wrapper runs each tool step under the wall-budget timeout" "grep -q 'timeout -k 5 \"\$max_time\" \"\$PYTHON\" \"\$SOURCE_TOOLS/../tools/deepseek_repo_tools.py\" step' '$SCRIPT'"
 check "repo-tools helper offline cases (case, trailing dot, streams, large files, budgets)" "python '$ROOT/tests/test_deepseek_repo_tools.py' >/dev/null"
 check "shell syntax is valid" "bash -n '$SCRIPT'"
+if [ "${AI_DEEPSEEK_SOURCE_TESTS_ONLY:-0}" != 1 ]; then
+  receipt_continuation_regressions
+fi
 printf 'passed %d, failed %d, skipped %d\n' "$PASS" "$FAIL" "$SKIP"; [ "$FAIL" -eq 0 ]
