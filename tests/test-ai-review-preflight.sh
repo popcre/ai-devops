@@ -330,6 +330,17 @@ check "StepFun is unsupported-platform on Windows without OpenCode" "AI_STEPFUN_
 check "StepFun preflight refuses on Windows without an engine" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH=\"$WIN_TEST_PATH\" $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
 check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux under bubblewrap, or Windows folder + test shell'"
 check "StepFun is not statically unsupported on Windows with OpenCode (folder + test shell)" "! AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE=/bin/true $SCRIPT status stepfun | jq -e '.failure_class==\"unsupported-platform\"'"
+# Default install path must satisfy preflight even when AI_STEPFUN_OPENCODE is
+# unset — otherwise a healthy Windows OpenCode setup is reported unsupported.
+# Pin the path from config/opencode/version so a version bump cannot silently
+# skip this branch. Restrict PATH like the sibling Windows engine-miss tests so
+# a host `opencode` on PATH cannot satisfy the probe instead of the default path.
+fake_oc_home="$TMP/oc-default-home"
+fake_oc_ver="$(tr -d ' \r\n' < "$ROOT/config/opencode/version" 2>/dev/null || echo 1.18.12)"
+mkdir -p "$fake_oc_home/.local/lib/ai-devops/opencode/$fake_oc_ver/node_modules/opencode-ai/bin"
+printf '#!/bin/sh\nexit 0\n' > "$fake_oc_home/.local/lib/ai-devops/opencode/$fake_oc_ver/node_modules/opencode-ai/bin/opencode.exe"
+chmod +x "$fake_oc_home/.local/lib/ai-devops/opencode/$fake_oc_ver/node_modules/opencode-ai/bin/opencode.exe"
+check "StepFun is usable on Windows via the default OpenCode install path" "HOME='$fake_oc_home' PATH=\"$WIN_TEST_PATH\" AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 $SCRIPT status stepfun | jq -e '.status==\"installed-healthy\" and .usable==true'"
 mkdir -p "$TMP/noauth-home" "$TMP/noauth-config"
 # AI_DEEPSEEK_TEST_DIR makes the wrapper honor this isolated HOME; production
 # mode intentionally anchors the key store to the OS user profile instead.
