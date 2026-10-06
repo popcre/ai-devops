@@ -66,7 +66,7 @@ this implementation must not be presented as complete provider coverage.
 Offline verification covers fixed endpoint/timeout, redirect refusal, invalid
 key/no network, malformed payload/no holds, fresh scope, claim refusal,
 read-only checks, one-hour exhaustion-only pause and existing hourly scheduling.
-Existing Gemini allowance regression suite: 39 passed, 0 failed.
+Existing Gemini allowance regression suite: 39 passed, 0 failed on the author's unshimmed machine, reverified after actual dependency integration. The independent Muse disposable sandbox produced 20 passed / 19 failed because timeout-mediated fixture execution was denied with Operation not permitted; Gemini source and tests are unchanged from the merged base. This is retained as an environment limitation, not a reviewer 39/39 claim.
 Integrated credit Python tests: 31 passed against merged pause API edcccb4dcfaddf85ba7dd7cc6f799d4c4e7027d9, including actual stronger-hold preservation, truthful accepted requests, original-observation windows and invalid timestamps for all four providers. The registered isolated real pause CLI preserves the stronger record and refuses malformed duration. Existing Windows generated-launcher
 tests: 53 passed; CMD launcher audit passed. The registered credit suite also
 requires the real merged pause CLI, preserves a stronger isolated hold and
@@ -80,6 +80,7 @@ Live read-only observations at 2:52 PM EDT October 6, 2026: Gemini available;
 DeepSeek available. No hold changed by this read-only proof.
 GLM official read-only qualification at 3:25 PM EDT October 6, 2026 returned
 code 200 / success true and both qualified CREDIT_LIMIT periods positive.
+The pinned official reader also accepts successful code 0 envelopes (its success predicates at lines 1093–1102). The helper requires an integer code of 0 or 200 and rejects explicit success false; qualified period and numeric checks still apply. The live qualification observed code 200, not code 0.
 This one-off proof did not publish a credential cache or alter the runtime.
 
 Remaining qualification evidence (October 6, 2026): Grok authenticated account
@@ -124,6 +125,6 @@ before any child launch. This checks executable format, not vendor authenticity;
 the existing same-user per-user installation trust boundary remains accepted.
 Missing discovery, forged environment roots, plain text, truncated/nonexecutable
 PE files, outside-root paths and symbolic links refuse before credential-bearing tools.
-Folder identifiers and allocation/free semantics follow Microsoft's
-[known-folder definitions](https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid)
-and [SHGetKnownFolderPath contract](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath).
+Folder identifiers follow Microsoft's
+[known-folder definitions](https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid).
+The separately verified official API allocation/free contract is retained in private qualification evidence.
