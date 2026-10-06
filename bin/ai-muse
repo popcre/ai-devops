@@ -292,6 +292,15 @@ muse_code_stage(){ # run only a private copy verified after it was made, so swap
   rm -f -- "$cache"; MUSE_CODE_CACHE_FILE="$cache"; MUSE_CODE_CACHE_ID="$(muse_code_identity "$BIN" "$dir/muse-$want$MUSE_EXE")"
   BIN="$dir/muse-$want$MUSE_EXE"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds
 }
+muse_code_reported_version(){ # never fails the caller: an unreadable version is named as such
+  local line=
+  line=$(muse_code_run --version 2>/dev/null | head -n 1 | tr -d '\015') || true
+  printf '%s' "${line:-unreadable}"
+}
+muse_code_pin_refusal(){ # one clear sentence naming found vs supported
+  printf 'unsupported Muse Code version: reported [%s]; supported pin is %s (config/muse-code/version)' \
+    "$(muse_code_reported_version)" "$VERSION"
+}
 muse_code_pinned(){
   local want; want="$(muse_code_sha256)" && [ ${#want} -eq 64 ] && [ ! -L "$BIN" ] || return 1
   [ "${MUSE_CODE_VERSION_OK:-}" = "$BIN:$want" ] && return 0 # identity cache hit: this exact file already passed both checks
@@ -353,7 +362,7 @@ linked_below_home(){ # true when the path or any ancestor below the profile home
 require_runtime(){
   if [ "$ENGINE" = muse-code ]; then
     [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL Muse Code $VERSION is not installed at $BIN."
-    { muse_code_stage && muse_code_pinned; } || die "local_dependency_unavailable: LOCAL Muse Code cannot start or is not the pinned $VERSION. Run: AI_MUSE_CALLER=$CALLER AI_MUSE_ENGINE=muse-code ai-muse doctor"
+    { muse_code_stage && muse_code_pinned; } || die "local_dependency_unavailable: $(muse_code_pin_refusal). Run: AI_MUSE_CALLER=$CALLER AI_MUSE_ENGINE=muse-code ai-muse doctor"
     return 0
   fi
   [ -x "$BIN" ] || die "local_dependency_unavailable: LOCAL OpenCode is not installed. Run: $ROOT/bin/setup-opencode-muse.sh"
@@ -1176,7 +1185,13 @@ cmd_doctor(){
   printf 'ai-muse doctor (engine: %s)\n\n' "$ENGINE"
   if [ "$ENGINE" = muse-code ]; then
     check "pinned Muse Code $VERSION is installed" test -x "$BIN"
-    check "Muse Code is the pinned $VERSION file and reports it" eval 'muse_code_stage && muse_code_pinned'
+    # On a pin miss name found vs supported so the failure is not just a bare pin.
+    if eval 'muse_code_stage && muse_code_pinned' >/dev/null 2>&1; then
+      printf 'PASS  Muse Code is the pinned %s file and reports it\n' "$VERSION"
+    else
+      printf 'FAIL  %s\n' "$(muse_code_pin_refusal)"
+      failures=$((failures+1))
+    fi
     # First-party catalog truth: Meta's own capability and price record, never a
     # hand-pinned config. A missing or invisible model row is the drift alarm
     # this exists to raise (#542).
