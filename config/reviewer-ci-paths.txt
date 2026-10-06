@@ -60,6 +60,8 @@ config/opencode-stepfun/**
 config/systemd/opencode-*
 tests/fixtures/**
 tests/test-reviewer-ci-paths.sh
+tests/test-ai-review-credit-watch.sh
+tests/test_review_credit_watch.py
 tools/ci/classify-changes.sh
 tools/ci/stop-process-tree.ps1
 tools/lib/provider-wrapper-common.sh
@@ -72,5 +74,9 @@ tools/reviewer_event_guard.sh
 tools/reviewer_events.py
 tools/reviewer_maintenance.py
 tools/reviewer_usage.py
+tools/deepseek_balance.py
+tools/glm_credit.py
+tools/stepfun_credit.py
+tools/reviewer_credit_watch.py
 .github/workflows/fast-classifier.yml
 .github/workflows/verify.yml
