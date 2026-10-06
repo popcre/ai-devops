@@ -38,6 +38,9 @@ case "$MODE" in review|implement) ;; *) printf 'stepfun door: usage: stepfun.sh 
 # Repository root, for the pinned OpenCode install and the StepFun profile.
 SF_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SF_PROFILE_SRC="$SF_ROOT/config/opencode-stepfun"
+# The one StepCode bubblewrap launch, shared with bin/ai-stepfun.
+# shellcheck source=../stepfun-sandbox.sh
+source "$SF_ROOT/tools/lib/stepfun-sandbox.sh"
 SF_OC_VERSION="$(tr -d ' \r\n' < "$SF_ROOT/config/opencode/version" 2>/dev/null || true)"
 
 # Model pins. StepCode uses the step/ id; the OpenCode profile pins
@@ -280,31 +283,36 @@ main() {
     rc=$?
     rm -rf "$xdg"
   else
-    # StepCode on Linux. Rotation rule 12 (#1086): every turn runs under
-    # bubblewrap with only the system trees, the CLI, and the disposable copy
-    # mounted; home and /tmp are empty and the environment is cleared.
+    # StepCode on Linux. Rotation rule 12 (#1086): every turn runs under the
+    # shared bubblewrap launch (tools/lib/stepfun-sandbox.sh) with the system
+    # trees, the CLI, the packet, and the disposable copy mounted.
     bin="$(resolve_stepcode)" || { rm -f "$prompt_full"; exit 127; }
-    command -v bwrap >/dev/null 2>&1 || {
+    local bwrap timeout_bin
+    bwrap="${AI_STEPFUN_BWRAP:-$(PATH=/usr/bin:/bin command -v bwrap 2>/dev/null || true)}"
+    [ -n "$bwrap" ] && [ -x "$bwrap" ] || {
       printf 'stepfun door: unsupported-platform: StepCode turns require bubblewrap (bwrap) on Linux.\n' >&2
       rm -f "$prompt_full"
       exit 2
     }
     local home_tmp
+    timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)"
     home_tmp="$(mktemp -d)"
+    # The packet usually lives outside the workdir; mount it read-only so the
+    # model can read MANIFEST.md as the preamble tells it to.
+    local -a packet_bind=()
+    case "$DOOR_PACKET_DIR" in "$DOOR_WORKDIR"|"$DOOR_WORKDIR"/*) ;; *) packet_bind=(--ro-bind "$DOOR_PACKET_DIR" "$DOOR_PACKET_DIR") ;; esac
+    local prompt_text; prompt_text="$(cat "$prompt_full")"
     (
       export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
       export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
-      timeout "$SF_TIMEOUT" bwrap --die-with-parent --unshare-all --share-net \
-        --ro-bind /usr /usr --ro-bind /etc /etc --dev /dev --proc /proc \
-        --tmpfs /tmp --tmpfs /run --tmpfs "$home_tmp" \
-        --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
+      stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" \
+        "${packet_bind[@]}" \
         --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --chdir "$DOOR_WORKDIR" -- \
-        "$bin" -p --no-session --model "$SF_STEP_MODEL" \
-        --approval-mode acceptEdits --non-interactive-approval allow \
+        -p --no-session --model "$SF_STEP_MODEL" \
+        --approval-mode auto --non-interactive-approval allow \
         --no-extensions --no-skills --no-prompt-templates --no-themes \
-        --no-approve --no-update-check -- "$(cat "$prompt_full")" \
-        > "$log" 2> "$out.err"
-    )
+        --no-approve --no-update-check -- "$prompt_text"
+    ) < /dev/null > "$log" 2> "$out.err"
     rc=$?
     rm -rf "$home_tmp"
   fi

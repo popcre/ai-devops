@@ -130,7 +130,7 @@ if [ "$(uname -s)" != Linux ]; then
   SKIP=$((SKIP + 1)); echo 'SKIP  stubbed Linux path (not a Linux filesystem)'
 else
 check "doctor passes with the stub and a protected key store" "'$SCRIPT' doctor | grep -q '^OK engine=stepcode'"
-check "doctor prints one PASS line per check for the shared-db allocator" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 4 ] && mode ok && [ \"\$('$SCRIPT' doctor --live | grep -c '^PASS  ')\" = 5 ]"
+check "doctor prints one PASS line per check for the shared-db allocator" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 4 ] && mode ok && [ \"\$('$SCRIPT' doctor --live | grep -c '^PASS  ')\" = 6 ]"
 check "doctor refuses a key store that is not owner-only" "chmod 644 '$AI_STEPFUN_KEY_STORE'; ! '$SCRIPT' doctor >/dev/null; rc=\$?; chmod 600 '$AI_STEPFUN_KEY_STORE'; [ \$rc = 0 ]"
 check "live doctor makes one call and sees the answer" "mode ok; '$SCRIPT' doctor --live | grep -q 'live=verified'"
 check "the key reaches step through the environment, never argv" "mode ok; '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key' && ! grep -q stub-key '$STUB_ARGS'"
@@ -231,6 +231,25 @@ STUB
   out="$(OP_SERVICE_ACCOUNT_TOKEN=planted-op HOME="$RH" AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STATE_DIR="$RH/state" AI_STEPFUN_BWRAP="$REAL_BWRAP" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" "$SCRIPT" doctor --live 2>&1)"
   check "real sandbox: the model cannot see home or environment secrets" "printf '%s' \"\$out\" | grep -q 'live=verified'"
   check "real sandbox: writes to the real home do not escape" "[ ! -e '$RH/escape' ]"
+  # The shared-runner door must start StepCode with the same mounts (the door
+  # once lacked the /lib64 link, so execvp failed while doctor stayed green).
+  DOOR="$ROOT/tools/lib/review-doors/stepfun.sh"
+  mkdir -p "$RH/dw" "$RH/dp"; printf 'probe\n' > "$RH/dp/MANIFEST.md"; printf 'say ok\n' > "$RH/dprompt"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+p="$(printf '%s\n' "$@" | sed -n 's/^Your evidence packet is at \(.*\)\/MANIFEST.md.*/\1/p')"
+[ ! -r "$p/MANIFEST.md" ] || grep -q planted /proc/self/environ || echo STEPFUN-OK
+STUB
+  set +e
+  OP_SERVICE_ACCOUNT_TOKEN=planted-op HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1
+  drc=$?
+  set -e
+  check "real sandbox: the review door starts StepCode and sees the packet, not caller secrets" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport'"
+  check "door probe: doctor --live also runs a turn through the review door" "printf '%s' \"\$out\" | grep -q 'PASS  live call through the review door answered'"
   rm -rf "$RH"
 else
   skip "real sandbox checks (bubblewrap unavailable here)"; skip "real sandbox escape check"

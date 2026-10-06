@@ -41,6 +41,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REAL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../tools/reviewer_event_guard.sh
 declare -F reviewer_credit_scan >/dev/null || source "$REAL_DIR/../tools/reviewer_event_guard.sh"
+# shellcheck source=../tools/lib/stepfun-sandbox.sh
+source "$REAL_DIR/../tools/lib/stepfun-sandbox.sh"
 
 # StepCode model id; the OpenCode profile pins stepfun-api/step-5-preview.
 MODEL="${AI_STEPFUN_MODEL:-step/step-5-preview}"
@@ -417,6 +419,8 @@ run_opencode_turn(){
 # Accepted exposure: the network is shared (the model API needs it), so an
 # implement run can reach loopback services and the internet, but it holds no
 # credential of the caller's with which to act on them.
+# Environment kept when the OpenCode turn clears it (the StepCode turn uses
+# STEPFUN_SANDBOX_ENV_ALLOW from the shared sandbox library).
 STEP_ENV_ALLOW=" LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR "
 run_stepcode(){
   local dir="$1" out="$2" prompt="$3" tools="${4:-}" bin rc=0 approval=strict fallback=deny dir_bind=--ro-bind bwrap agent
@@ -427,27 +431,17 @@ run_stepcode(){
   bwrap="$(bwrap_bin)" || die 'bubblewrap (bwrap) is required to sandbox StepFun. Install: sudo apt-get install bubblewrap'
   mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR" 2>/dev/null || true
   agent="$(mktemp -d "$STATE_DIR/agent.XXXXXX")"; chmod 700 "$agent"
-  # Only the system trees programs need, read-only: never `/` itself, so a
-  # checkout or data outside the home (/srv, /data, /mnt, ...) stays invisible.
-  local -a sys_binds=(); sandbox_sys_binds
   # Resolve host programs before the environment is cleared, so a file planted
   # in a user-writable PATH entry can never run outside the sandbox.
   local timeout_bin; timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)" || die 'timeout is missing from /usr/bin.'
   (
-    local name home="$HOME"
-    for name in $(compgen -e); do
-      case "$STEP_ENV_ALLOW" in *" $name "*) ;; *) unset "$name" 2>/dev/null || true ;; esac
-    done
+    local home="$HOME"
     export HOME="$home" PATH="$home/.stepcode/agent/bin:/usr/local/bin:/usr/bin:/bin"
     export STEP_API_KEY="$STEP_KEY" STEP_BASE_URL="$BASE_URL" STEP_AUTOPILOT=1 STEP_CODING_AGENT_DIR="$agent"
-    exec "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
-      "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
-      --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
-      --tmpfs "$home" \
-      --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
+    stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$TIMEOUT" "$bin" \
       --ro-bind-try "$home/.stepcode/agent/bin" "$home/.stepcode/agent/bin" \
       --bind "$agent" "$agent" "$dir_bind" "$dir" "$dir" --chdir "$dir" -- \
-      "$bin" -p --no-session --model "$MODEL" "${tool_args[@]}" \
+      -p --no-session --model "$MODEL" "${tool_args[@]}" \
       --approval-mode "$approval" --non-interactive-approval "$fallback" \
       --no-extensions --no-skills --no-prompt-templates --no-themes \
       --no-approve --no-update-check -- "$prompt"
@@ -456,24 +450,8 @@ run_stepcode(){
   return "$rc"
 }
 
-# sandbox_sys_binds: fills the caller's sys_binds array with the read-only
-# system trees a sandboxed program needs; never `/` itself.
-sandbox_sys_binds(){
-  sys_binds=(--ro-bind /usr /usr)
-  local top
-  for top in /bin /sbin /lib /lib32 /lib64 /libx32; do
-    if [ -L "$top" ]; then sys_binds+=(--symlink "$(readlink "$top")" "$top")
-    elif [ -d "$top" ]; then sys_binds+=(--ro-bind "$top" "$top"); fi
-  done
-  # /etc is never bound whole (it can hold secrets such as /etc/environment):
-  # only loader, name-service, certificate and locale files (#1086).
-  sys_binds+=(--dir /etc)
-  local e
-  for e in /etc/passwd /etc/group /etc/nsswitch.conf /etc/resolv.conf /etc/hosts /etc/host.conf /etc/gai.conf /etc/ld.so.cache /etc/ld.so.conf /etc/ld.so.conf.d /etc/localtime /etc/timezone /etc/alternatives /etc/ssl/certs /etc/ca-certificates /etc/ca-certificates.conf /etc/pki/tls/certs /etc/mime.types /etc/protocols /etc/services /etc/os-release /etc/lsb-release /etc/debian_version /etc/inputrc /etc/bash.bashrc /etc/profile /etc/locale.alias /etc/gitattributes; do
-    { [ -e "$e" ] || [ -L "$e" ]; } && sys_binds+=(--ro-bind "$e" "$e")
-  done
-  return 0
-}
+# sandbox_sys_binds: the shared system-tree list (tools/lib/stepfun-sandbox.sh).
+sandbox_sys_binds(){ stepfun_sys_binds; }
 
 bwrap_bin(){
   local b="${AI_STEPFUN_BWRAP:-$(PATH=/usr/bin:/bin command -v bwrap 2>/dev/null || true)}"
@@ -542,6 +520,25 @@ write_windows_runners(){
   [ -s "$out" ] && [ ! -L "$out" ]
 }
 
+# door_probe: one live turn through the shared-runner door, the path every
+# allocator review takes, so a green doctor means a review can start. The
+# token only lets the door run; no review, packet store, or report is kept.
+door_probe(){
+  local door="${AI_STEPFUN_DOOR:-$REAL_DIR/../tools/lib/review-doors/stepfun.sh}" t rc=0
+  mkdir -p "$STATE_DIR"; t="$(mktemp -d "$STATE_DIR/door-probe.XXXXXX")"
+  mkdir -p "$t/work" "$t/packet"
+  printf 'Health probe: there is nothing to review.\n' > "$t/packet/MANIFEST.md"
+  printf 'Reply with exactly the text STEPFUN-OK and nothing else.\n' > "$t/prompt"
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR="$t/work" DOOR_PACKET_DIR="$t/packet" \
+    DOOR_PROMPT_FILE="$t/prompt" DOOR_REPORT_OUT="$t/report" DOOR_HEAD=0000000000000000000000000000000000000000 \
+    DOOR_TIMEOUT=120 bash "$door" review > "$t/out" 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ] || ! grep -q 'STEPFUN-OK' "$t/report" 2>/dev/null; then
+    printf 'FAIL live call through the review door did not answer (exit %s)\n' "$rc"; tail -n 5 "$t/out"; rm -rf "$t"; return 1
+  fi
+  rm -rf "$t"
+  printf 'PASS  live call through the review door answered\n'
+}
+
 cmd_doctor(){
   local live=0 write_runners=""
   for a in "$@"; do
@@ -594,6 +591,7 @@ cmd_doctor(){
     fi
     rm -rf "$tmp"
     printf 'PASS  live StepFun call answered (model %s)\n' "$MODEL"
+    [ "$ENGINE" != stepcode ] || door_probe || exit 1
   fi
   printf 'OK engine=%s model=%s live=%s\n' "$ENGINE" "$MODEL" "$([ "$live" = 1 ] && echo verified || echo not-run)"
 }
