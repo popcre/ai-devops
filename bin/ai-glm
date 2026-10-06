@@ -75,7 +75,18 @@ PORT="${AI_GLM_PORT:-4096}"
 BASE="http://127.0.0.1:$PORT"
 PROVIDER="zai-coding-plan"
 MODEL="${AI_GLM_MODEL:-glm-5.3}"
-CALLER="${AI_GLM_CALLER:-claude}"
+# Caller identity: explicit AI_GLM_CALLER (or --caller) wins; otherwise the
+# harness is detected (mimo/claude/codex/zcode). Never default to a wrong
+# engine name — independence recording keys off this value. main() fails
+# closed when no caller remains.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
+CALLER=''
+caller_rc=0
+CALLER="$(provider_wrapper_resolve_caller "${AI_GLM_CALLER:-}")" || caller_rc=$?
+if [ "$caller_rc" -eq 2 ]; then
+  printf 'ai-glm: error: caller name %s is not path-safe (letters, digits, . _ - only; no leading dot).\n' "${AI_GLM_CALLER:-<empty>}" >&2
+  exit 2
+fi
 TIMEOUT="${AI_GLM_TIMEOUT:-1800}"        # seconds to wait for one GLM turn
 LOCK_TIMEOUT="${AI_GLM_LOCK_TIMEOUT:-300}"
 # The default is resolved below, AFTER the canonical IS_WINDOWS detection: a cold
@@ -3057,6 +3068,24 @@ while [ "$#" -gt 0 ]; do
     *)              [ -n "$ARG" ] && ARG="$ARG $1" || ARG="$1"; shift ;;
   esac
 done
+
+# Caller may arrive via --caller after startup detection. Refuse an empty or
+# path-unsafe name before any session record or provider turn uses it.
+# Help/usage never starts a review and needs no caller identity.
+case "$CMD" in
+  -h|--help|help) usage; return 0 ;;
+esac
+if [ -z "$CALLER" ]; then
+  CALLER="$(provider_wrapper_detect_caller 2>/dev/null || true)"
+fi
+if [ -z "$CALLER" ]; then
+  die 'caller_identity_missing; GLM did not start.
+  The assistant running this command could not be detected.
+  Set AI_GLM_CALLER to the assistant (or pass --caller NAME), then rerun:
+    export AI_GLM_CALLER=mimo   # or: claude, codex, zcode
+    AI_GLM_CALLER=mimo ai-glm doctor'
+fi
+provider_wrapper_valid_caller "$CALLER" || die "caller name $CALLER is not path-safe (letters, digits, . _ - only; no leading dot)."
 
 case "$CMD" in
   new)        [ -n "$ARG" ] || die "usage: ai-glm new <name> ..."; cmd_new "$ARG" ;;
