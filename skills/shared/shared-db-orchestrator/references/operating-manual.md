@@ -213,10 +213,11 @@ node scripts/manage-migration-author-lanes.mjs --assign-reviewer \
   --issue <issue> --pr <pr> --head-sha <exact-head>
 ```
 
-The GitHub-backed cursor rotates the six active reviewers -- Grok 4.6, GLM 5.3
+The GitHub-backed cursor rotates the seven active reviewers -- Grok 4.6, GLM 5.3
 (restored 2026-09-30), Muse Spark 1.3 Contributor, Qwen 3.8 Max, Gemini 3.8
-Flash, and DeepSeek V4.1 Flash
-(re-entered 2026-09-23 with read-only repository tools) -- then repeats across
+Flash, DeepSeek V4.1 Flash
+(re-entered 2026-09-23 with read-only repository tools), and StepFun Step 5
+(shared-db#3657, merged 2026-10-01; skipped where preflight reports it unusable) -- then repeats across
 machines and restarts. Kimi K3, the old text-only `deepseek-chat`, and Codex are out of rotation
 (owner instruction; `RETIRED_REVIEWERS` in the allocator and `absent` in
 `config/reviewer-registry.json`): never route a review to them and never wait
