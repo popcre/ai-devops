@@ -880,6 +880,53 @@ require_review_head() {
   printf '%s' "$head"
 }
 
+bind_review_source_session() { # internally generated ID; original receipt stays immutable
+  [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || return 0
+  "$PYTHON" - "$AI_REVIEW_SOURCE_RECEIPT_FILE" "$1" "$REPO_ROOT" "$REVIEW_HEAD" "$REVIEW_SOURCE_HASH" "$SOURCE_TOOLS/../tools" <<'PYRECEIPT'
+import hashlib, json, os, re, stat, sys, tempfile
+path, sid, root, head, packet, helpers = sys.argv[1:]
+sys.path.insert(0, helpers)
+from reviewer_maintenance import physical, Blocked
+try:
+    path = str(physical(path))
+    root = str(physical(root))
+    def protected_bytes(file):
+        file = str(physical(file))
+        descriptor = os.open(file, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+        with os.fdopen(descriptor, 'rb') as handle:
+            observed = os.fstat(handle.fileno())
+            if not stat.S_ISREG(observed.st_mode) or observed.st_size > 131072 or (os.name != 'nt' and (observed.st_mode & 0o077 or observed.st_uid != os.getuid())):
+                raise ValueError('receipt is not protected')
+            return handle.read()
+    raw = protected_bytes(path)
+    value = json.loads(raw)
+    identity = value.get('identity', {})
+    if value.get('schema_version') != 1 or value.get('packet_sha256') != packet or identity.get('head') != head or str(physical(identity.get('repository', ''))) != root or not re.fullmatch(r'[0-9a-f]{64}', identity.get('source_digest', '')) or not re.fullmatch(r'[A-Za-z0-9._-]+', sid):
+        raise ValueError('source receipt identity differs from wrapper source')
+    binding = {'schema_version': 1, 'provider': 'deepseek', 'session_id': sid, 'packet_sha256': packet, 'source_digest': identity['source_digest'], 'receipt_sha256': hashlib.sha256(raw).hexdigest()}
+    target = path + '.continuation.json'
+    canonical = (json.dumps(binding, indent=2, sort_keys=True) + '\n').encode('utf-8')
+    if os.path.lexists(target):
+        if protected_bytes(target) != canonical:
+            raise ValueError('existing continuation companion differs from this exact session/source')
+    else:
+        fd, temporary = tempfile.mkstemp(prefix='.deepseek-continuation-', dir=os.path.dirname(path))
+        try:
+            with os.fdopen(fd, 'wb') as handle:
+                handle.write(canonical)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try: os.link(temporary, target)
+            except FileExistsError:
+                if protected_bytes(target) != canonical: raise ValueError('racing continuation companion differs')
+        finally:
+            if os.path.exists(temporary): os.unlink(temporary)
+except (OSError, ValueError, TypeError, KeyError, Blocked) as error:
+    print('Error: DeepSeek source-session receipt binding refused: ' + str(error), file=sys.stderr)
+    sys.exit(1)
+PYRECEIPT
+}
+
 prepare_review_source() { # session id; preserve complete formal-review evidence
   local id="$1" snapshot saved file
   git -C "$REPO_ROOT" check-ignore --no-index -q -- .ai/deepseek-sessions/ \
@@ -947,6 +994,7 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
   }
   [ "${#indexed[@]}" -eq 0 ] || MSG="$(with_files_inventory "$MSG" "${indexed[@]}")" || return 1
   "$SOURCE_TOOLS/ai-review-packet" verify "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || return 1
+  bind_review_source_session "$id" || return 1
 }
 
 verify_review_source() {
