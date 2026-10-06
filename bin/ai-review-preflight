@@ -51,6 +51,7 @@ need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installe
 valid_provider() { case "$1" in claude|grok|kimi|glm|muse|gemini|qwen|codex|deepseek|stepfun) return 0 ;; *) return 1 ;; esac; }
 provider_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
 qualification_file() { printf '%s/%s-live-qualified.json' "$STATE_DIR" "$1"; }
+known_broken_file() { printf '%s/%s-known-broken.json' "$STATE_DIR" "$1"; }
 now_epoch() { date +%s; }
 
 admission_store() {
@@ -388,6 +389,12 @@ stepfun_opencode_bin() {
 # health_status PROVIDER prints the install-health object and returns 0 only
 # when the local install is healthy, unquarantined, and live-qualified.
 health_status() { # PROVIDER
+  # A standing known-broken ruling wins over every other health signal,
+  # including a current live qualification: the provider is un-drawable until
+  # the blocking issue lands. Reported as provider_unavailable so the recovery
+  # path matches the standing rule. This runs before static_status so a
+  # qualified-but-broken provider can never be drawn.
+  if known_broken "$1"; then printf '%s\n' "$ACTIVE_KNOWN_BROKEN" | jq -c '. + {status:"known-broken",failure_class:"provider_unavailable"}'; return 1; fi
   if static_status "$1"; then return 1; fi
   if [ "$1" = stepfun ]; then
     case "${AI_STEPFUN_PLATFORM:-$(uname -s)}" in
@@ -479,6 +486,34 @@ quarantine() { # PROVIDER CLASS [SECONDS]
 active_quarantine() { # PROVIDER -> 0 active, 1 absent/expired
   ACTIVE_QUARANTINE="$(admission_store global "$1")" || die 'invalid quarantine record.'
   [ "$ACTIVE_QUARANTINE" != null ]
+}
+
+# known_broken PROVIDER -> 0 when this host carries a standing known-broken
+# marker. Unlike the transient cooldown quarantine, this is an operator ruling
+# that a provider is broken HERE until a named blocking issue lands (for example
+# "qwen is broken on edge-dev until ai-devops#1035"). It does not expire and is
+# cleared only by `clear` once the issue is fixed. A known-broken provider is
+# never drawn -- even when a live qualification is current -- so the shared-db
+# allocator skips it before it can spend a replacement sequence on it (the
+# provider_unavailable recovery path). Health is reported as un-drawable with
+# failure_class provider_unavailable to match that standing rule.
+known_broken() { # PROVIDER -> 0 known-broken, 1 not
+  local f; f="$(known_broken_file "$1")"
+  [ -f "$f" ] || return 1
+  ACTIVE_KNOWN_BROKEN="$(jq -c 'if type=="object" and .provider then . else empty end' "$f" 2>/dev/null)" || ACTIVE_KNOWN_BROKEN=""
+  [ -n "$ACTIVE_KNOWN_BROKEN" ]
+}
+
+mark_known_broken() { # PROVIDER REASON [ISSUE]
+  local provider="$1" reason="$2" issue="${3:-}" f tmp
+  valid_provider "$provider" || die "unknown provider '$provider'."
+  [ -n "$reason" ] || die 'known-broken requires a reason.'
+  mkdir -p "$STATE_DIR"
+  f="$(known_broken_file "$provider")"; tmp="$f.tmp.$$"
+  jq -nc --arg provider "$provider" --arg reason "$reason" --arg issue "$issue" --arg marked "$(date -u +%FT%TZ)" \
+    '{provider:$provider,reason:$reason,blocking_issue:(if $issue=="" then null else $issue end),marked_at:$marked}' > "$tmp"
+  mv "$tmp" "$f"
+  note "ai-review-preflight: marked $provider known-broken (un-drawable, provider_unavailable): $reason"
 }
 
 classify_failure() { # OUTPUT
@@ -1266,6 +1301,7 @@ usage() {
 Usage:
   ai-review-preflight check <provider> <repo> [--base REF] [--live]
   ai-review-preflight quarantine <provider> <failure-class> [--seconds N]
+  ai-review-preflight known-broken <provider> <reason> [--issue N]
   ai-review-preflight clear <provider>
   ai-review-preflight qualify gemini|qwen
   ai-review-preflight pin-bump-qualify <provider> --assert-pin-only <old-pin> <new-pin> [--allow-first-qualification]
@@ -1314,7 +1350,14 @@ case "$cmd" in
     quarantine "$provider" "$class" "$seconds" ;;
   clear)
     provider="${1:-}"; valid_provider "$provider" || die "unknown provider '$provider'."
-    admission_store clear "$provider" >/dev/null; note "ai-review-preflight: cleared $provider quarantine and scoped backoffs." ;;
+    admission_store clear "$provider" >/dev/null; rm -f "$(known_broken_file "$provider")"; note "ai-review-preflight: cleared $provider quarantine, known-broken marker, and scoped backoffs." ;;
+  known-broken)
+    provider="${1:-}"; shift || true
+    reason="${1:-}"; shift || true
+    issue=""
+    while [ "$#" -gt 0 ]; do case "$1" in --issue) issue="${2:-}"; shift 2 ;; *) die "unknown argument '$1'." ;; esac; done
+    [ -n "$provider" ] && [ -n "$reason" ] || die 'usage: ai-review-preflight known-broken <provider> <reason> [--issue N]'
+    mark_known_broken "$provider" "$reason" "$issue" ;;
   qualify)
     [ "$#" -eq 1 ] || die 'usage: ai-review-preflight qualify gemini|qwen'
     case "${1:-}" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; *) die 'usage: ai-review-preflight qualify gemini|qwen' ;; esac ;;
