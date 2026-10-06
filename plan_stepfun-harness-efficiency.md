@@ -19,16 +19,20 @@ a genuine business-meaning choice appears.
 | W2a Phase 2 subagent (prompt de-dup) | ✅ done | `9f3db3d4`; semantic prompt suite 77 passed, 0 failed, 2 platform skips |
 | W2b Phase 4 subagent (sessions/cache) | ⏭ skip-unsafe | `6b4375e5`; session files require model-writable state deleted by LOCKED-7; warm cache risks cross-review content or key leakage; isolation regression passed |
 | W3 Phase 5 subagent (measure + live proof) | ✅ counters; live proof open | `b07d79fb`; 80 StepFun checks and 52 Windows-shell checks passed; Linux and installed Windows `doctor --live` passed; updated-install proof pending |
-| W4 integrate, PR, exact-head review if required, merge | ⬜ in progress | [PR #1337](https://github.com/popcre/ai-devops/pull/1337); independent Muse approved `3f3a738e`, then preserved coordinator plan was integrated, so a fresh exact-head review is required |
+| W4 integrate, PR, required exact-head independent review, merge | ⬜ in progress | [PR #1337](https://github.com/popcre/ai-devops/pull/1337); independent Muse approved `3f3a738e`, then preserved coordinator plan was integrated, so a fresh exact-head independent review is required (class `reviewer-safety` → `exact-head-independent-review` per `config/task-gates.json`) |
 | Live proof checklist on landing issue | ⬜ open | [Issue #1336](https://github.com/popcre/ai-devops/issues/1336) retains `- [ ] live proof` until post-merge updated-install checks |
 
-**Muse review (2026-10-06):** `VERDICT: REVISE plan` —
-`.ai/reviews/muse-stepfun-token-efficiency-plan-r2-20261006T124204Z-968393-5381.md`.
-Six must-fix items are already in the phase briefs (B1–B3 / M1–M3). Do not reopen.
+**Muse review (2026-10-06):** `VERDICT: REVISE plan`. Six must-fix items are
+already in the phase briefs (B1–B3 / M1–M3). Do not reopen. Report path is
+machine-local under gitignored `.ai/reviews/` (not a repo artifact — `.gitignore`
+ignores that directory): `muse-stepfun-token-efficiency-plan-r2-20261006T124204Z-968393-5381.md`
+on `edge-dev`.
 
-**GLM 5.3 review (2026-10-06):** `VERDICT: REVISE plan` —
-`.ai/reviews/glm-stepfun-token-efficiency-plan-review-ec1b178ec9de9d8716c24d5484644b6f534d3a9419e849d75c63f21b8b86c711.md`.
-F1/F2/F3 folded in (stderr keeps bare `429`; `detect_engine` before `$full`).
+**GLM 5.3 review (2026-10-06):** `VERDICT: REVISE plan`. F1/F2/F3 folded in
+(stderr keeps bare `429`; `detect_engine` before `$full`). Report path is
+machine-local under gitignored `.ai/reviews/` (not a repo artifact):
+`glm-stepfun-token-efficiency-plan-review-ec1b178ec9de9d8716c24d5484644b6f534d3a9419e849d75c63f21b8b86c711.md`
+on `edge-dev`.
 
 *File rename note:* never name a doc `*token*` — `.gitignore` `**/*token*` hides it.
 
@@ -221,9 +225,10 @@ D. Whether StepFun's API does automatic prefix caching — Phase 5 measures.
 
 The coordinator **only**:
 
-1. Declares task class (`ai-task-gates start --class code` or `reviewer-safety`
-   if the change set is treated as reviewer-wrapper code) and rechecks before
-   PR wait / ship.
+1. Declares task class `ai-task-gates start --class reviewer-safety` (StepFun
+   wrapper changes `bin/ai-stepfun*` map to that class in
+   `config/task-gates.json`, which requires `exact-head-independent-review`;
+   never `code`) and rechecks before PR wait / ship.
 2. Creates **one integration worktree** (not the landing checkout) on branch
    `mimo/stepfun-harness-efficiency-impl` from current `origin/main`.
 3. Writes each phase brief (§9.4) into a file under the worktree
@@ -232,9 +237,11 @@ The coordinator **only**:
    source itself.
 5. Runs the focused suites after each wave, fixes **integration-only** issues
    (merge conflicts, STATUS updates), and records STATUS artifacts.
-6. Opens the PR, obtains any required exact-head independent review
-   (reviewer-wrapper path), merges through the queue, confirms `origin/main`.
-7. Ensures live-proof checklist item is created on the landing issue and Phase 5
+6. Opens the PR, obtains the required exact-head independent review
+   (class `reviewer-safety` → `exact-head-independent-review` for
+   `bin/ai-stepfun*`), merges through the queue, confirms `origin/main`.
+7. Ensures live-proof checklist item is created on issue
+   [#1336](https://github.com/popcre/ai-devops/issues/1336) and Phase 5
    reports the proof (or names who holds it).
 8. Updates this STATUS table and the companion handoff as waves complete.
 
@@ -384,12 +391,18 @@ Add to `tests/test-ai-stepfun.sh`:
      empty until `run_step` detects it).
   2. Keep a short operational preamble (disposable copy, no remotes, do not
      edit `$rel`, read `MANIFEST.md`).
-  3. Remove the repeated "Be specific… VERDICT: …" block **only when
-     `ENGINE=opencode`** (those strings live in the agent profiles).
+  3. Remove the repeated "Be specific… VERDICT: …" block from `$full` **only
+     when `ENGINE=opencode`** — those strings live in the agent profiles, not
+     in the user prompt. After this cut there is **no** separate exact-head
+     verdict template left in `$full`; only the head line (`Exact head SHA for
+     the final verdict: $head`) remains.
   4. **Do not** key off `STEPFUN_OC_AGENT` alone (StepCode would lose VERDICT
      instructions).
-- **Verification gate:** VERDICT instruction block appears **once** in the
-  assembled prompt when `ENGINE=opencode`; StepCode still has it in `$full`.
+- **Verification gate (matches merged tests):** with `ENGINE=opencode` the
+  user prompt `$full` contains **no** `VERDICT: APPROVE` line, and each agent
+  profile carries exactly one (see "OpenCode keeps exactly one verdict-format
+  instruction in either review profile" in `tests/test-ai-stepfun.sh`);
+  StepCode keeps the block in `$full` exactly once.
 
 ##### P2.2 Move unique `$rel` / `$head` to the prompt end
 
@@ -411,27 +424,35 @@ Add to `tests/test-ai-stepfun.sh`:
 
 ##### P3.1 Extend Windows gate grammar
 
-*Revised 2026-10-06 (Muse B2/B3). Fallback: ship `head -n` alone and skip `grep`.*
+*Revised 2026-10-06 (Muse B2/B3). Decided and merged: `grep` ships alongside
+`head -n`, under the rules below (`bin/ai-stepfun-windows-shell`,
+`tests/test-ai-stepfun-windows-shell.sh`).*
 
-Three parts — all required **if** `grep` ships:
+Three parts — all required (they landed together):
 
 1. **Runner allowlist** (`write_windows_runners` + `run()` pin path): provision
    `grep` with the same hashed-binary pin as `ls`/`cat`/`head` (Git `usr/bin`
    + sha256). Hash-mismatch tests required.
 2. **Closed-grammar / metachar filter** (code: "Layer 1: closed grammar"):
-   today `INNER` refuses `*?[]{}()|$&;<>` before tokenization. Exempt the
-   **pattern token only** (still path-clamped), or require `-F` + plain
-   pattern with its own deny list. Test the exact rule.
+   `INNER` refuses `*?[]{}()|$&;<>` before tokenization. Decided rule: the
+   **pattern token only** is exempt (still path-clamped) and must be a
+   `-F` fixed string — **never a regex**. `.*` and `foo.*bar` match those
+   literal characters only. Pattern deny list: empty, leading-dash, backslash,
+   backtick, and quote characters.
 3. **Grammar:**
    - `ls <path>` / `cat <path>` unchanged.
    - `head -n N <path>` — only `-n` and positive decimal `N` (no `-N`,
-     no `head -5`, no glued `-n5`).
-   - `grep -n -F <pattern> <path>` — require both flags; deny `-r`, `-R`,
-     `--include`, `-e`, `--`, glued forms, multiple files, leading-dash patterns.
+     no `head -5`, no glued `-n5`); `N` ≤ 200.
+   - `grep -n -F <pattern> <path>` — require both flags; the pattern is
+     fixed-string data (`-F`), never a regex; deny `-r`, `-R`,
+     `--include`, `-e`, `--`, glued forms, multiple files, leading-dash
+     patterns, empty patterns, backslash/backtick/quote characters.
    - Keep forbidding `git`/`gh`/`op`/`curl`/etc.
+   - **Output caps (model cannot disable):** `head` at 200 lines; `grep` at 200
+     matches (`grep -m 200`).
 
 - **Verification gate:** `bash tests/test-ai-stepfun-windows-shell.sh` green
-  including allowlist hash tests.
+  including allowlist hash tests and the 200-line/match cap tests.
 
 **Adversarial (model-supplied shell strings)**
 
@@ -440,11 +461,13 @@ Three parts — all required **if** `grep` ships:
 | path | `../outside/secret`, UNC, `C:\Windows\...` | REFUSE |
 | `head` flags | `-c`, `-n -1`, `-N`, glued | REFUSE |
 | `grep` flags | `-r`, `-e`, `--`, glued, `--include=` | REFUSE |
-| `grep` pattern | leading-dash, empty `''`, metachar bypass | REFUSE or explicit allow+test |
+| `grep` pattern | leading-dash, empty `''`, backslash/backtick/quote | REFUSE |
+| `grep` pattern | `foo.*bar`, `.*` (metacharacters) | ALLOW as literal fixed-string data (`-F`); tested |
 | `grep` arity | 0 or >1 path | REFUSE |
 | argv shape | extra args | REFUSE |
 | allowlist | `grep` binary hash mismatch | REFUSE |
-| output volume | `.*` hugefile / `-n 999999999` | document cost or row-cap |
+| `head` count | `-n 999999999` | REFUSE (`N` ≤ 200) |
+| output volume | huge match set / long file | hard cap 200 lines (`head`) / 200 matches (`grep -m 200`); not model-disableable |
 
 ##### P3.2 Windows agent profile + docs
 
@@ -506,8 +529,10 @@ exact failed criterion; leave cold-retry behavior intact.
 ##### P5.2 Live proof
 
 - One real `ai-stepfun doctor --live` after merge; optional one ordinary review
-  if already needed. Record notes on the **same** landing issue.
-- Leave `- [ ] live proof` on that issue until proof is posted. Do not open a
+  if already needed. Record notes on the landing issue
+  [#1336](https://github.com/popcre/ai-devops/issues/1336) ("Ship StepFun
+  harness token-efficiency fixes").
+- Leave `- [ ] live proof` on issue #1336 until proof is posted. Do not open a
   second ticket.
 
 ---
@@ -543,8 +568,13 @@ Never "add tests" as a step — the tables name the tests.
 - **Git identity before commit:**
   `Albert Hazan <u2giants@users.noreply.github.com>`.
 - **Stage only task-owned files.** Public repo: no secrets/transcripts.
-- **Reviewer safety path:** `bin/ai-stepfun*` is reviewer-wrapper code — expect
-  one read-only exact-head final review before merge.
+- **Reviewer safety path:** `bin/ai-stepfun*` is reviewer-wrapper code — class
+  `reviewer-safety` in `config/task-gates.json`, which **requires**
+  `exact-head-independent-review` before merge. Never declare these changes
+  `code`.
+- **Consolidation routing (AGENTS.md):** harness consolidation → #167;
+  provider-wrapper sharing → #169; plan-backlog consolidation → #168 under
+  parent #159. This plan adds no new shared harness copy.
 - **Preserve capability:** never remove path clamp, bubblewrap, no-remote
   checks, or implement-never-retry. `Blocked —` if a fix cannot land safely.
 - **PowerShell-compatible** wrappers; Bash tests via Git Bash on Windows.
@@ -575,7 +605,7 @@ Never "add tests" as a step — the tables name the tests.
       security criterion (never a silent skip).
 - [ ] Both test suites green; offline doctor green.
 - [ ] PR merged on `origin/main`; commit cited in STATUS (not a bare number).
-- [ ] `- [ ] live proof` on the landing issue; P5.2 evidence posted or named
+- [ ] `- [ ] live proof` on issue #1336; P5.2 evidence posted or named
       owner if a live call is blocked.
 - [ ] Handoff + this STATUS truthful.
 
@@ -594,7 +624,8 @@ Never "add tests" as a step — the tables name the tests.
 
 1. Prefix caching on StepFun API? (Phase 5 measures.)
 2. `grep` on Windows or `head -n` only? (Adversarial green or descope.)
-3. Phase 4 resume vs wipe exception? (P4 reports landed or `skip-unsafe`.)
+3. Phase 4 stays `skip-unsafe` (STATUS W2b). Settled: a wipe or security
+   exception is never sought from the owner — security gates decide.
 
 ---
 
