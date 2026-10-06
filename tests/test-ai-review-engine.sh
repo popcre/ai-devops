@@ -430,6 +430,36 @@ check "grok_door_report_carries_stopreason_metadata" "grep -q 'end_turn' '$STUB_
 check "grok_door_requires_runner_token_even_with_stub" \
   "! (unset AI_REVIEW_RUNNER_CORE; AI_GROK_BIN='$STUB_GROK' AI_GROK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/x.md' DOOR_HEAD='$HEAD_SHA' bash '$GROK_DOOR' review) 2>/dev/null"
 
+# Grok cancels a headless turn on a refused shell form (PermissionCancelled);
+# the door resumes the same session instead of failing the review.
+PC_HOME="$TMP/pc-grok-home"; mkdir -p "$PC_HOME/sessions/x/sid-pc1"
+STUB_PC="$TMP/stub-grok-pc"
+cat > "$STUB_PC" <<STUBEOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = -r ]; then
+    echo resumed >> "$TMP/stub-pc-calls"
+    printf '%s\n' '{"text":"## Verdict\\nAPPROVE","stopReason":"end_turn","num_turns":1,"sessionId":"sid-pc1","modelUsage":{"grok-4.6-build":{}}}'
+    exit 0
+  fi
+done
+echo first >> "$TMP/stub-pc-calls"
+printf '%s\n' '{"params":{"update":{"sessionUpdate":"turn_completed","stop_reason":"cancelled"},"_meta":{"cancellationCategory":"PermissionCancelled"}}}' > "$PC_HOME/sessions/x/sid-pc1/updates.jsonl"
+printf '%s\n' '{"text":"","stopReason":"cancelled","num_turns":1,"sessionId":"sid-pc1"}'
+STUBEOF
+chmod +x "$STUB_PC"
+set +e
+AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 GROK_HOME="$PC_HOME" \
+  AI_GROK_BIN="$STUB_PC" AI_GROK_ALLOW_NO_CREDS=1 \
+  DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+  DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$TMP/pc-report.md" \
+  DOOR_HEAD="$HEAD_SHA" \
+  bash "$GROK_DOOR" review >/dev/null 2>"$TMP/pc-door.err"
+PC_RC=$?
+set -e
+check "grok_door_resumes_permission_cancelled_turn" \
+  "test '$PC_RC' -eq 0 && grep -q APPROVE '$TMP/pc-report.md' && test \"\$(tr '\n' ' ' < '$TMP/stub-pc-calls')\" = 'first resumed '"
+
 # --- deepseek (OpenCode) door on the same runner ----------------------------
 # Program done needs one native door (grok) AND one OpenCode door on the same
 # runner. These checks prove the OpenCode shape keeps the same contracts and

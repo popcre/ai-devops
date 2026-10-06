@@ -131,6 +131,27 @@ extract_report() { # extract_report RESULT_JSON DEST HEAD MODE
   } > "$dest"
 }
 
+# Grok CLI cancels the WHOLE headless turn (stopReason "cancelled",
+# cancellationCategory PermissionCancelled) when a shell command uses a form no
+# --allow rule covers: variable assignment, env wrapper, git -c, $(...) or
+# backtick substitution, or quoted < > that look like redirection. Same limit
+# and same bounded recovery as bin/ai-grok-review: warn up front, then resume
+# the same session (permissions unchanged) with a corrective message.
+SHELL_RULE="Shell rule (Grok CLI limit): a shell command containing a variable assignment (FOO=1 cmd, export FOO=1), the env wrapper, git -c, \$(...) or backtick substitution, or angle brackets (even inside quotes, e.g. git log --format='<%ae>') is refused, and a refused command CANCELS your turn. Use one plain command per call. When something needs variables or such forms, write a small script under .git/review-scratch/ with your file tool and run: bash .git/review-scratch/run.sh"
+GROK_PERMISSION_RESUMES="${AI_GROK_PERMISSION_RESUMES:-3}"
+
+permission_cancelled() { # permission_cancelled RESULT_JSON -> 0 on a native PermissionCancelled
+  local result="$1" sid stream
+  [ "$(jq -r '.stopReason // ""' "$result" 2>/dev/null)" = cancelled ] || return 1
+  sid="$(jq -r '.sessionId // ""' "$result" 2>/dev/null)"
+  printf '%s' "$sid" | grep -Eq '^[A-Za-z0-9-]{1,80}$' || return 1
+  for stream in "${GROK_HOME:-${HOME:-}/.grok}"/sessions/*/"$sid"/updates.jsonl; do
+    [ -f "$stream" ] || continue
+    grep '"sessionUpdate":"turn_completed"' "$stream" | tail -1 | grep -q '"cancellationCategory":"PermissionCancelled"' && return 0
+  done
+  return 1
+}
+
 main() {
   local grok cwd out prompt_full rc
   grok="$(resolve_grok)" || exit $?
@@ -145,6 +166,7 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
+    printf '%s\n\n' "$SHELL_RULE"
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading.\n'
   } > "$prompt_full"
@@ -165,6 +187,24 @@ main() {
   fi
   rc=$?
   set -e
+
+  local n=0 sid rpf
+  case "$GROK_PERMISSION_RESUMES" in ''|*[!0-9]*) GROK_PERMISSION_RESUMES=0 ;; esac
+  [ "$GROK_PERMISSION_RESUMES" -le 5 ] || GROK_PERMISSION_RESUMES=5
+  while [ "$rc" -eq 0 ] && [ "$n" -lt "$GROK_PERMISSION_RESUMES" ] && permission_cancelled "$out"; do
+    n=$((n + 1)); sid="$(jq -r '.sessionId' "$out")"
+    printf 'grok door: Grok refused a shell command form (PermissionCancelled); resuming session %s (%s of %s).\n' "$sid" "$n" "$GROK_PERMISSION_RESUMES" >&2
+    rpf="$(mktemp)"
+    printf '%s\n' "The Grok CLI refused your last shell command and cancelled it; nothing ran. $SHELL_RULE. Do not retry that form. Continue the same review from where you stopped and finish with the required '## Verdict' section." > "$rpf"
+    set +e
+    env -u GROK_CLAUDE_1PASSWORD_HELPER \
+      "$grok" --cwd "$cwd" --model "$GROK_MODEL" -r "$sid" --prompt-file "$rpf" \
+        --max-turns "$GROK_MAX_TURNS" "${GROK_PERMS[@]}" --output-format json \
+        > "$out" 2> "$out.err"
+    rc=$?
+    set -e
+    rm -f "$rpf"
+  done
 
   if [ "$rc" -eq 92 ]; then
     printf 'AI_REVIEWER_OUT_OF_CREDIT grok door\n' >&2
