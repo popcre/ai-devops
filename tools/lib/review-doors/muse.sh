@@ -219,7 +219,7 @@ main() {
   log="$out"
   set +e
   if [ "$MU_ENGINE" = muse-code ]; then
-    sid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || printf 'muse-door-%s' "$$")"
+    sid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || python3 -c 'import uuid;print(uuid.uuid4())' 2>/dev/null || python -c 'import uuid;print(uuid.uuid4())' 2>/dev/null || printf '%08x-%04x-%04x-%04x-%012x' "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM$RANDOM")"
     workspace="$(native_path "$DOOR_WORKDIR")"
     # Review (#974): writes and a sandboxed shell inside the disposable,
     # remote-less copy the runner built; no approval prompts, no web, no
