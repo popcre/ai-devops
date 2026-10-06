@@ -1381,8 +1381,7 @@ fi
 bash "$FRONT" nonsense security-review >/dev/null 2>&1; RC_NONSENSE=$?
 bash "$FRONT" codex final-check --operation not-an-operation > "$TMP/front-opbad" 2>&1; RC_FRONT_OPBAD=$?
 check "front_door_refuses_unknown_operation" "[ '$RC_FRONT_OPBAD' -eq 2 ] && grep -q 'unknown --operation not-an-operation' '$TMP/front-opbad'"
-bash "$FRONT" codex final-check --operation stale-linux-manifest-recovery > /dev/null 2>&1; RC_FRONT_OPSTALE=$?
-check "front_door_refuses_unbindable_stale_manifest_operation" "[ '$RC_FRONT_OPSTALE' -eq 2 ]"
+check "front_door_accepts_host_bound_stale_manifest_operation" "( . '$(dirname "$FRONT")/../tools/lib/review-operation.sh' && review_operation_valid stale-linux-manifest-recovery )"
 bash "$FRONT" codex plan-review --operation first-managed-install > "$TMP/front-opplan" 2>&1; RC_FRONT_OPPLAN=$?
 check "front_door_refuses_operation_on_plan_review" "[ '$RC_FRONT_OPPLAN' -eq 2 ] && grep -q 'final-check exact-head review mode' '$TMP/front-opplan'"
 for op_mode in diff-review security-review visual-review; do
@@ -1520,6 +1519,14 @@ check "pool_operation_brief_requests_exact_line" "[ '$RC_OP' -eq 0 ] && grep -Fq
 check "pool_operation_report_records_operation" "[ -f '$OP_REPORT' ] && grep -Fq '| operation | \`legacy-managed-launcher-refresh\` |' '$OP_REPORT'"
 OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=stale-linux-manifest-recovery bash "$POOL" qwen final-check ) > "$POOLTMP/out-opbad" 2>&1; RC_OPBAD=$?
+if ( . "$(dirname "$POOL")/../tools/lib/review-operation.sh" && review_operation_evidence stale-linux-manifest-recovery ) >/dev/null 2>&1; then
+  # This host has a stale installed manifest: the wrapper must bind its rows in the header.
+  check "pool_stale_operation_binds_host_evidence_in_header" "[ '$RC_OPBAD' -eq 0 ] && sed '/^## Result\$/,\$d' \"\$(tail -1 '$POOLTMP/out-opbad')\" | grep -q '^| live gate hash | ' && grep -Fqx 'Approved stale-linux-manifest-recovery.' '$POOLTMP/last-brief'"
+else
+  check "pool_stale_operation_without_host_evidence_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -q 'cannot read host evidence' '$POOLTMP/out-opbad' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
+fi
+OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=not-an-operation bash "$POOL" qwen final-check ) > "$POOLTMP/out-opbad" 2>&1; RC_OPBAD=$?
 check "pool_unknown_operation_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -q 'unknown review operation' '$POOLTMP/out-opbad' && [ \"\$(grep -c '^new ' '$POOLTMP/runner-args')\" -eq '$OP_NEW_BEFORE' ]"
 OP_NEW_BEFORE="$(grep -c '^new ' "$POOLTMP/runner-args")"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=first-managed-install bash "$POOL" qwen security-review ) > "$POOLTMP/out-opmode" 2>&1; RC_OPMODE=$?
