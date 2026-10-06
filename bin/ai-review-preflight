@@ -661,8 +661,10 @@ ai-reviewer-issue record itself failed."
 requalify_expected_file() { printf '%s/%s-requalify-marker.json' "$STATE_DIR" "$1"; }
 
 # requalify_provider PROVIDER returns 0 when the provider's live qualification
-# is current or was just re-established, and 1 when a requalification attempt
-# failed (already recorded and surfaced by then).
+# is current or was just re-established, 2 when the live canary was refused by
+# a provider-side quota or outage (recorded; the reviewer stays quarantined),
+# and 1 when a requalification attempt failed for any other reason (already
+# recorded and surfaced by then).
 requalify_provider() { # PROVIDER
   local provider="$1" file marker output rc qualify_output
   if [ "$(registry_state "$provider")" != registered ]; then
@@ -706,15 +708,17 @@ requalify_provider() { # PROVIDER
 }
 
 # requalify_failure_is_provider_outage OUTPUT is true only when the live
-# canary itself ran and the provider refused it for capacity reasons (quota,
-# allowance, credit, or service outage). Every other failure (hash drift,
-# untested bytes, authentication, timeout, publish errors) is a real defect.
+# canary itself ran and its reported probe failure is a provider capacity
+# refusal (quota, allowance, credit, or provider service outage). Only the
+# probe's FAILED line is inspected, never hashes, credential lines, or other
+# diagnostic text, so a real defect (authentication, drift, untested bytes,
+# timeout, publish errors) can never be relabeled as an outage.
 requalify_failure_is_provider_outage() { # OUTPUT
+  local failed
   printf '%s' "$1" | grep -q 'live qualification failed; the previous qualification version stays valid' || return 1
-  case "$(classify_failure "$1")" in
-    out-of-credit|allowance-exhausted|service-unavailable) return 0 ;;
-    *) return 1 ;;
-  esac
+  failed="$(printf '%s\n' "$1" | grep -E '^[[:space:]]*live probe[[:space:]]*: FAILED' || true)"
+  [ "$(printf '%s' "$failed" | grep -c .)" = 1 ] || return 1
+  printf '%s' "$failed" | grep -Eqi 'FAILED — (allowance-exhaustion|provider-outage|capacity)( |$)'
 }
 
 # requalify re-runs the live qualification for every named provider (default:

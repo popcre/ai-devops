@@ -49,6 +49,11 @@ if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   [ "${2:-}" != --live ] || { [ "${MOCK_QWEN_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; }
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
+  if [ "${MOCK_QWEN_AUTH_403:-0}" = 1 ]; then
+    printf 'credential    : quota 403 429 service unavailable allowance\n'
+    printf 'live probe    : FAILED — authentication-failure (HTTP 403 quota 429)\n'
+    exit 1
+  fi
   if [ "${MOCK_QWEN_QUOTA:-0}" = 1 ]; then
     printf 'live probe    : FAILED — allowance-exhaustion (provider quota exhausted; resets at 11-01 16:00:00 UTC)\n'
     exit 1
@@ -254,6 +259,7 @@ REQUALIFY_ID="$(printf '%s\n' "$REQUALIFY_OUT" | sed -n 's/.*reviewer issue: //p
   && ok "the recorded failure names the provider and the requalify command" || bad "the recorded failure names the provider and the requalify command"
 QUOTA_OUT="$(MOCK_QWEN_QUOTA=1 $SCRIPT requalify qwen 2>&1)"; QUOTA_RC=$?
 [ "$QUOTA_RC" -eq 0 ] && printf '%s' "$QUOTA_OUT" | grep -q 'WARNING: qwen requalification blocked by a provider-side outage' && printf '%s' "$QUOTA_OUT" | grep -q 'reviewer issue:' && ok "provider quota exhaustion warns, is recorded, and does not fail requalify" || bad "provider quota exhaustion warns, is recorded, and does not fail requalify"
+check "authentication failure stays fatal even when output mentions 403, 429, quota, or service unavailable" "! MOCK_QWEN_AUTH_403=1 $SCRIPT requalify qwen"
 check "provider quota exhaustion leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "a failed automatic requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
 check "a failed requalification is retried, not silently abandoned" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
