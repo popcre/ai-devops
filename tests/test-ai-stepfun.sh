@@ -27,7 +27,8 @@ cat >> "$TMP/bin/step" <<'STUB'
 [ "${1:-}" = --version ] && { echo 0.1.1; exit 0; }
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant with read, bash, edit, write tools'; exit 0; }
 printf '%s\n' "$@" > "$STUB_ARGS"; printf '%s\n' "${STEP_API_KEY:-}" > "$STUB_ARGS.key"; env > "$STUB_ARGS.env"
-prompt="${@: -1}"; head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
+prompt="${@: -1}"; printf '%s\n' "$prompt" > "$STUB_ARGS.prompt"
+head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
 attempt(){ n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"; }
 case "$STUB_MODE" in
   ok) echo STEPFUN-OK ;;
@@ -98,7 +99,8 @@ cat >> "$TMP/bin/opencode" <<'STUB'
 [ "${1:-}" = --version ] && { echo 1.18.12; exit 0; }
 printf '%s\n' "$@" > "$STUB_ARGS"
 dir="."; while [ $# -gt 0 ]; do [ "$1" = --dir ] && { dir="$2"; shift; }; shift; done
-prompt="$(cat)"; head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
+prompt="$(cat)"; printf '%s\n' "$prompt" > "$STUB_ARGS.prompt"
+head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
 case "$STUB_MODE" in
   ok) printf '{"type":"text","part":{"text":"STEPFUN-OK"}}\n' ;;
   verdict) printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail in f:1.\\n\\nVERDICT: APPROVE %s"}}\n' "$head" ;;
@@ -126,6 +128,8 @@ check "live doctor makes one call and sees the answer" "mode ok; '$SCRIPT' docto
 check "the key reaches step through the environment, never argv" "mode ok; '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key' && ! grep -q stub-key '$STUB_ARGS'"
 
 check "review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
+check "StepCode retains its only verdict-format instructions" "[ \"\$(grep -c '^VERDICT: APPROVE <head sha>' '$STUB_ARGS.prompt')\" = 1 ] && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$STUB_ARGS.prompt'"
+check "StepCode puts review-specific values after stable instructions" "! sed '/^Review packet:/,\$d' '$STUB_ARGS.prompt' | grep -Eq '[0-9a-f]{40}' && tail -n1 '$STUB_ARGS.prompt' | grep -qx 'check f'"
 check "every turn runs inside the sandbox with an empty home and /tmp" "grep -qx -- --unshare-all '$STUB_ARGS.bwrap' && grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx '$HOME' && grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx /tmp"
 check "the sandbox never mounts the whole filesystem, only system trees" "! grep -x -A1 -- --ro-bind '$STUB_ARGS.bwrap' | grep -qx / && grep -x -A1 -- --ro-bind '$STUB_ARGS.bwrap' | grep -qx /usr"
 check "the sandbox also hides /run (agent, D-Bus, and Docker sockets)" "grep -A1 -x -- --tmpfs '$STUB_ARGS.bwrap' | grep -qx /run"
@@ -278,6 +282,11 @@ check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT
 check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 5 ]"
 check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
 check "OpenCode review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
+check "OpenCode keeps exactly one verdict-format instruction in either review profile" "[ \"\$(grep -c '^VERDICT: APPROVE' '$ROOT/config/opencode-stepfun/agent/stepfun-review.md')\" = 1 ] && [ \"\$(grep -c '^VERDICT: APPROVE' '$ROOT/config/opencode-stepfun/agent/stepfun-review-windows.md')\" = 1 ] && ! grep -q '^VERDICT: APPROVE' '$TMP/args.oc.prompt'"
+check "OpenCode puts review-specific values after stable instructions" "! sed '/^Review packet:/,\$d' '$TMP/args.oc.prompt' | grep -Eq '[0-9a-f]{40}' && grep -qx 'Exact head SHA for the final verdict: $HEAD_SHA' '$TMP/args.oc.prompt' && tail -n1 '$TMP/args.oc.prompt' | grep -qx 'check f'"
+cp "$TMP/args.oc.prompt" "$TMP/first-review.prompt"
+mode verdict; "$SCRIPT" review --repo "$TMP/repo" --prompt 'different review request' >/dev/null 2>&1
+check "OpenCode review keeps the same stable prefix across prompts" "sed '/^Review packet:/,\$d' '$TMP/first-review.prompt' > '$TMP/first-prefix' && sed '/^Review packet:/,\$d' '$TMP/args.oc.prompt' > '$TMP/second-prefix' && cmp -s '$TMP/first-prefix' '$TMP/second-prefix' && tail -n1 '$TMP/args.oc.prompt' | grep -qx 'different review request'"
 rm -f "$TMP/args.oc.n"; mode jsonl429
 "$SCRIPT" review --repo "$TMP/repo" --prompt x > "$TMP/jsonl429.out" 2>/dev/null; rc=$?
 check "retries-on-jsonl-error-429" "[ $rc = 0 ] && grep -q 'VERDICT: REVISE' '$TMP/jsonl429.out' && [ \"\$(cat '$TMP/args.oc.n')\" = 2 ]"
