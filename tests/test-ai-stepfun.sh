@@ -93,7 +93,7 @@ check "a different program named step is not accepted as StepCode" "! AI_STEPFUN
 # --dir target, as a real agent would.
 cat > "$TMP/bin/opencode" <<STUB
 #!/usr/bin/env bash
-STUB_ARGS='$TMP/args.oc'; STUB_MODE="\$(cat '$TMP/mode' 2>/dev/null)"
+STUB_ARGS='$TMP/args.oc'; STUB_MODE="\$(cat '$TMP/mode' 2>/dev/null)"; STUB_FIXTURE='$ROOT/tests/fixtures/muse-opencode/usage-1.18.12.json'
 STUB
 cat >> "$TMP/bin/opencode" <<'STUB'
 [ "${1:-}" = --version ] && { echo 1.18.12; exit 0; }
@@ -111,6 +111,8 @@ case "$STUB_MODE" in
             printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail.\\nVERDICT: REVISE %s"}}\n' "$head" ;;
   jsonltext429) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
                 printf '{"type":"text","part":{"text":"The code quotes HTTP 429 rate_limited. Analysis complete.\\nVERDICT: APPROVE %s"}}\n' "$head" ;;
+  usage) jq -c '.events[]' "$STUB_FIXTURE"
+         printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail.\\nVERDICT: APPROVE %s"}}\n' "$head" ;;
   stateprobe) if [ -e "$XDG_DATA_HOME/previous-review" ] || [ -e "$XDG_CACHE_HOME/previous-review" ]; then
                 printf '{"type":"text","part":{"text":"leaked previous review state"}}\n'
               else
@@ -299,6 +301,10 @@ check "retries-on-jsonl-error-429" "[ $rc = 0 ] && grep -q 'VERDICT: REVISE' '$T
 rm -f "$TMP/args.oc.n"; mode jsonltext429
 "$SCRIPT" review --repo "$TMP/repo" --prompt x > "$TMP/jsonltext429.out" 2>/dev/null; rc=$?
 check "keeps-jsonl-text-that-quotes-429" "[ $rc = 0 ] && grep -q 'VERDICT: APPROVE' '$TMP/jsonltext429.out' && [ \"\$(cat '$TMP/args.oc.n')\" = 1 ]"
+mode usage
+"$SCRIPT" review --repo "$TMP/repo" --prompt 'measure usage' >/dev/null 2>&1; rc=$?
+check "OpenCode usage fixture writes numeric counters only" "[ $rc = 0 ] && jq -e -s 'any(.[]; .engine == \"opencode\" and .resumed == false and .retry_count == 0 and .input_tokens == 12336 and .output_tokens == 344 and .cache_read_tokens == 23266 and .cache_write_tokens == 0)' '$AI_STEPFUN_STATE_DIR'/reports/turn.*.json >/dev/null && ! grep -l 'stub-key\|synthetic-session\|message1' '$AI_STEPFUN_STATE_DIR'/reports/turn.*.json >/dev/null"
+check "retry counter records the second attempt" "jq -e -s 'any(.[]; .engine == \"opencode\" and .retry_count == 1 and .input_tokens == null)' '$AI_STEPFUN_STATE_DIR'/reports/turn.*.json >/dev/null"
 mode verdict
 if PATH="$crlf_bin:$PATH" "$SCRIPT" review --repo "$TMP/repo" --prompt 'check f' >"$TMP/crlf-review.out" 2>"$TMP/crlf-review.err" \
   && grep -q "VERDICT: APPROVE $HEAD_SHA" "$TMP/crlf-review.out"; then
