@@ -15,7 +15,7 @@ a genuine business-meaning choice appears.
 |---|---|---|
 | W0 coordinator setup (branch, gates, briefs) | ✅ done with variance | `ai-task-gates start --class reviewer-safety`; integration worktree from `73cf6714`; phase briefs delivered in agent dispatch messages because the revised §9 was still uncommitted on edge-dev, so no brief files were created |
 | W1a Phase 1 subagent (retry detector) | ✅ done | `951d55dc`, `8e9364ad`; StepFun suite 80 passed, 0 failed, 2 platform skips; 402 quota exits without retry |
-| W1b Phase 3 subagent (Windows gate) | ✅ done | `2e50a4c7`; Windows-shell suite 52 passed, 0 failed |
+| W1b Phase 3 subagent (Windows gate) | ✅ done | `2e50a4c7`, `0d8e1248`; Windows and Linux shell suites each passed 52, 0 failed; Windows junction fixture proves the path escape guard |
 | W2a Phase 2 subagent (prompt de-dup) | ✅ done | `9f3db3d4`; semantic prompt suite 77 passed, 0 failed, 2 platform skips |
 | W2b Phase 4 subagent (sessions/cache) | ⏭ skip-unsafe | `6b4375e5`; session files require model-writable state deleted by LOCKED-7; warm cache risks cross-review content or key leakage; isolation regression passed |
 | W3 Phase 5 subagent (measure + live proof) | ✅ counters; live proof open | `b07d79fb`; 80 StepFun checks and 52 Windows-shell checks passed; Linux and installed Windows `doctor --live` passed; updated-install proof pending |
