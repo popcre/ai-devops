@@ -33,11 +33,12 @@ classification_contains() {
   grep "$@" >/dev/null
 }
 classifier_consumer_regression() {
-  local scratch status
+  local scratch status expected_error=0
   scratch="$(mktemp -d)" || return 1
   # This controlled producer waits until the early consumer has closed, then
   # writes again. It proves the pipe hazard, not the timing of the CI incident.
   (
+    export LC_ALL=C
     printf 'reviewer=true\n'
     for ((i=0; i<200; i++)); do
       [[ -f "$scratch/closed" ]] && break
@@ -46,9 +47,28 @@ classifier_consumer_regression() {
     [[ -f "$scratch/closed" ]] || exit 90
     printf 'trailing=true\n' || exit "$?"
     : >"$scratch/early-complete"
-  ) | { grep -q '^reviewer=true$'; : >"$scratch/closed"; }
+  ) 2>"$scratch/early-error" | (
+    grep -q '^reviewer=true$' || exit 91
+    # Close this isolated consumer's read descriptor before releasing the
+    # producer. Publishing first would race the shell's descriptor cleanup.
+    exec 0<&-
+    : >"$scratch/closed"
+  )
   status=$?
-  if [[ "$status" -ne 141 || -e "$scratch/early-complete" ]]; then
+  if [[ -s "$scratch/early-error" ]]; then
+    if [[ "$(wc -l <"$scratch/early-error")" -eq 1 ]] &&
+       grep -Eq '^.*printf: write error: Broken pipe$' "$scratch/early-error"; then
+      expected_error=1
+    else
+      cat "$scratch/early-error" >&2
+      rm -rf "$scratch"; return 1
+    fi
+  fi
+  # Bash can inherit ignored SIGPIPE and report the EPIPE write error as 1;
+  # with default SIGPIPE it exits 141. Both must prove a failed trailing write.
+  if [[ ! -f "$scratch/closed" || -e "$scratch/early-complete" ]] ||
+     ! { [[ "$status" -eq 141 ]] || [[ "$status" -eq 1 && "$expected_error" -eq 1 ]]; }; then
+    printf 'unexpected early-consumer result: %s\n' "$status" >&2
     rm -rf "$scratch"; return 1
   fi
   (
