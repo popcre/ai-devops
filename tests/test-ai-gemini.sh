@@ -125,7 +125,7 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.8-flash-high\"' '$FIXTURES/model-mismatch.json'"
-check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.4'"
+check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.5'"
 mkdir -p "$TMP/fallback-home/.local/bin"
 cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
 FALLBACK_PATH="/mingw64/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
@@ -176,10 +176,23 @@ check 'same-version runtime byte drift re-quarantines before provider contact' "
 # qualification once, records it, and continues; model drift never does.
 AUTOQ_REPO="$TMP/autoq-repo"; make_repo "$AUTOQ_REPO"; write_qualification 1.1.15
 check 'runtime-only drift requalifies live automatically then reviews' "(cd '$AUTOQ_REPO' && '$SCRIPT' new autoq --prompt review) 2>'$TMP/autoq.err' | grep -q '^PASS' && grep -q 'requalifying automatically' '$TMP/autoq.err' && jq -e '.agy_version==\"1.1.14\"' '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json' >/dev/null"
+check 'record_qualification preserves prior versions in the store' "jq -e '(.versions|type)==\"array\" and (.versions|length)==2 and ([.versions[]|select(.agy_version==\"1.1.15\")]|length)==1 and ([.versions[]|select(.agy_version==\"1.1.14\")]|length)==1 and .agy_version==\"1.1.14\"' '$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json' >/dev/null"
 write_qualification 1.1.14 gemini-other; : > "$MOCK_AGY_CALLS"
 check 'model drift never auto-requalifies' "! (cd '$AUTOQ_REPO' && '$SCRIPT' new autoq-model --prompt review) && test ! -s '$MOCK_AGY_CALLS'"
 printf '{"version":2,"provider":"gemini"}\n' > "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json"
 check 'missing qualification fields fail closed before provider contact' "! '$SCRIPT' new malformed --prompt review && test ! -s '$MOCK_AGY_CALLS'"
+# A record whose wrapper/model line up but whose other fields fail the full
+# schema validation must never trigger auto-requalify.
+printf '{"version":2,"provider":"gemini","wrapper_sha256":"%s","agy_sha256":"not-a-hash","agy_version":"1.1.15","model":"gemini-3.8-flash-high","qualified_epoch":1}\n' "$WRAPPER_SHA" > "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json"
+: > "$MOCK_AGY_CALLS"
+check 'malformed record does not auto-requalify' "! (cd '$AUTOQ_REPO' && '$SCRIPT' new bad-record --prompt review) 2>'$TMP/bad-record.err' && ! grep -q 'requalifying automatically' '$TMP/bad-record.err' && test ! -s '$MOCK_AGY_CALLS'"
+# Invalid request source must die before auto_requalify can spend live
+# qualification allowance on a request that would fail anyway.
+write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new 'bad name!' --prompt review) 2>"$TMP/badname.err"; BADNAME_RC=$?; set -e
+check 'invalid session name never auto-requalifies' "test '$BADNAME_RC' -ne 0 && grep -q 'invalid session name' '$TMP/badname.err' && ! grep -q 'requalifying automatically' '$TMP/badname.err' && test ! -s '$MOCK_AGY_CALLS'"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new misspf --prompt-file /nonexistent) 2>"$TMP/misspf.err"; MISSPF_RC=$?; set -e
+check 'missing prompt file never auto-requalifies' "test '$MISSPF_RC' -ne 0 && grep -q 'prompt file not found' '$TMP/misspf.err' && ! grep -q 'requalifying automatically' '$TMP/misspf.err' && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification
 
 echo '== byte identity and exact identity gates'
