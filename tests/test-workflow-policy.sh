@@ -27,6 +27,46 @@ classify() {
   printf '%s\n' "$result"
 }
 
+# Drain classifier output even after matching: an early reader exit can turn
+# the producer's final write into SIGPIPE under pipefail.
+classification_contains() {
+  grep "$@" >/dev/null
+}
+classifier_consumer_regression() {
+  local scratch status
+  scratch="$(mktemp -d)" || return 1
+  # This controlled producer waits until the early consumer has closed, then
+  # writes again. It proves the pipe hazard, not the timing of the CI incident.
+  (
+    printf 'reviewer=true\n'
+    for ((i=0; i<200; i++)); do
+      [[ -f "$scratch/closed" ]] && break
+      sleep 0.01
+    done
+    [[ -f "$scratch/closed" ]] || exit 90
+    printf 'trailing=true\n' || exit "$?"
+    : >"$scratch/early-complete"
+  ) | { grep -q '^reviewer=true$'; : >"$scratch/closed"; }
+  status=$?
+  if [[ "$status" -ne 141 || -e "$scratch/early-complete" ]]; then
+    rm -rf "$scratch"; return 1
+  fi
+  (
+    printf 'reviewer=true\n'
+    for ((i=0; i<1000; i++)); do printf 'trailing=%s\n' "$i" || exit "$?"; done
+    : >"$scratch/drained-complete"
+  ) | classification_contains '^reviewer=true$'
+  status=$?
+  if [[ "$status" -ne 0 || ! -f "$scratch/drained-complete" ]]; then
+    rm -rf "$scratch"; return 1
+  fi
+  (printf 'reviewer=true\n'; exit 23) | classification_contains '^reviewer=true$'
+  status=$?
+  rm -rf "$scratch"
+  [[ "$status" -eq 23 ]]
+}
+check 'classifier consumers drain trailing writes and preserve producer failure' classifier_consumer_regression
+
 windows_timeout="$(sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 reviewer_timeout="$(sed -n '/^  windows-reviewer-preferred:/,/^  reviewer-safety-start-deadline:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
 fallback_timeout="$(sed -n '/^  windows-reviewer-fallback-codex:/,/^  windows-reviewer-fallback-grok:/p' "$workflow" | sed -n 's/^[[:space:]]*timeout-minutes:[[:space:]]*//p' | tr -d '\r' | head -1)"
@@ -44,13 +84,12 @@ check 'Linux dependency refresh ignores unrelated runner feeds' "grep -q 'Dir::E
 job_block() {
   sed -n "/^  $1:/,/^  $2:/p" "$workflow"
 }
-# Capture the block first: `sed | grep -q` under `set -o pipefail` reports a
-# false negative on Linux, where grep -q closes the pipe after the first match
-# and sed's broken-pipe exit status is then what the pipeline returns.
+# Capture the block and drain its predicate reader: even a captured block can
+# exceed the pipe buffer, so an early grep exit can break printf under pipefail.
 job_has() {
   local block
   block="$(job_block "$1" "$2")"
-  printf '%s' "$block" | grep -Fq "$3"
+  printf '%s' "$block" | grep -F "$3" >/dev/null
 }
 # Every long-suite job selects on the run-long output, not on the whole
 # classifier result, and every reviewer-lane job selects on the reviewer
@@ -134,24 +173,24 @@ check 'every fixed non-preferred Windows job runs on Blacksmith; routed sections
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
-check 'docs are prose-only' "classify pull_request 'docs/example.md' | grep -q '^run_long=false$'"
-check 'root plans are prose-only' "classify pull_request 'plan_example.md' | grep -q '^run_long=false$'"
-check 'skills always run long' "classify pull_request 'skills/shared/example/SKILL.md' | grep -q '^run_long=true$'"
-check 'code runs long' "classify pull_request 'bin/ai-example' | grep -q '^run_long=true$'"
-check 'workflow changes run long' "classify pull_request '.github/workflows/verify.yml' | grep -q '^workflow=true$'"
-check 'PowerShell changes run long' "classify pull_request 'tests/example.ps1' | grep -q '^powershell=true$'"
-check 'test fixtures run long' "classify pull_request 'tests/fixtures/example/data.md' | grep -q '^test_fixtures=true$'"
-check 'unrelated code skips reviewer lane' "classify pull_request 'bin/ai-example' | grep -q '^reviewer=false$'"
+check 'docs are prose-only' "classify pull_request 'docs/example.md' | classification_contains '^run_long=false$'"
+check 'root plans are prose-only' "classify pull_request 'plan_example.md' | classification_contains '^run_long=false$'"
+check 'skills always run long' "classify pull_request 'skills/shared/example/SKILL.md' | classification_contains '^run_long=true$'"
+check 'code runs long' "classify pull_request 'bin/ai-example' | classification_contains '^run_long=true$'"
+check 'workflow changes run long' "classify pull_request '.github/workflows/verify.yml' | classification_contains '^workflow=true$'"
+check 'PowerShell changes run long' "classify pull_request 'tests/example.ps1' | classification_contains '^powershell=true$'"
+check 'test fixtures run long' "classify pull_request 'tests/fixtures/example/data.md' | classification_contains '^test_fixtures=true$'"
+check 'unrelated code skips reviewer lane' "classify pull_request 'bin/ai-example' | classification_contains '^reviewer=false$'"
 check 'every declared reviewer dependency selects reviewer lane' \
-  ". '$ROOT/tools/lib/task-gates.sh'; while IFS= read -r pattern; do pattern=\${pattern%\$'\\r'}; case \"\$pattern\" in ''|'#'*) continue ;; esac; sample=\${pattern//\*\*\/nested\/file}; sample=\${sample//\*/file}; tg_legacy_classify pull_request <<<\"\$sample\" | grep -q '^reviewer=true$' || exit 1; done < '$ROOT/config/reviewer-ci-paths.txt'"
+  ". '$ROOT/tools/lib/task-gates.sh'; while IFS= read -r pattern; do pattern=\${pattern%\$'\\r'}; case \"\$pattern\" in ''|'#'*) continue ;; esac; sample=\${pattern//\*\*\/nested\/file}; sample=\${sample//\*/file}; tg_legacy_classify pull_request <<<\"\$sample\" | classification_contains '^reviewer=true$' || exit 1; done < '$ROOT/config/reviewer-ci-paths.txt'"
 check 'reviewer path policy is safe after a Windows CRLF checkout' \
   "tmp=\$(mktemp -d); mkdir -p \"\$tmp/config\"; sed 's/\$/\\r/' '$ROOT/config/reviewer-ci-paths.txt' >\"\$tmp/config/reviewer-ci-paths.txt\"; saved_root=\$TG_LIB_REPO_ROOT; TG_LIB_REPO_ROOT=\$tmp; result=\$(tg_legacy_classify pull_request <<<'bin/ai-codex-review'); TG_LIB_REPO_ROOT=\$saved_root; rm -rf \"\$tmp\"; grep -Fqx 'reviewer=true' <<<\"\$result\""
 check 'representative shared reviewer paths select reviewer lane' \
-  ". '$ROOT/tools/lib/task-gates.sh'; for path in 'tools/reviewer_event_guard.sh' 'tools/reviewer_events.py' 'tools/reviewer_maintenance.py' 'tools/lib/provider-wrapper-common.sh' 'config/provider-cli-versions.json' 'tests/lib-test-timing.sh' '.github/workflows/verify.yml'; do tg_legacy_classify pull_request <<<\"\$path\" | grep -q '^reviewer=true$' || exit 1; done"
-check 'non-PR events always run reviewer lane' "classify schedule 'docs/example.md' | grep -q '^reviewer=true$' && classify workflow_dispatch 'docs/example.md' | grep -q '^reviewer=true$'"
-check 'non-PR events always run long' "classify schedule 'docs/example.md' | grep -q '^run_long=true$' && classify workflow_dispatch 'docs/example.md' | grep -q '^run_long=true$' && classify merge_group 'docs/example.md' | grep -q '^run_long=true$'"
-check 'mixed changes fail closed' "printf 'docs/example.md\nbin/ai-example\n' | bash '$classifier' pull_request | grep -q '^run_long=true$'"
-check 'skills-to-docs rename paths fail closed' "printf 'skills/shared/example/SKILL.md\ndocs/example.md\n' | bash '$classifier' pull_request | grep -q '^run_long=true$'"
+  ". '$ROOT/tools/lib/task-gates.sh'; for path in 'tools/reviewer_event_guard.sh' 'tools/reviewer_events.py' 'tools/reviewer_maintenance.py' 'tools/lib/provider-wrapper-common.sh' 'config/provider-cli-versions.json' 'tests/lib-test-timing.sh' '.github/workflows/verify.yml'; do tg_legacy_classify pull_request <<<\"\$path\" | classification_contains '^reviewer=true$' || exit 1; done"
+check 'non-PR events always run reviewer lane' "classify schedule 'docs/example.md' | classification_contains '^reviewer=true$' && classify workflow_dispatch 'docs/example.md' | classification_contains '^reviewer=true$'"
+check 'non-PR events always run long' "classify schedule 'docs/example.md' | classification_contains '^run_long=true$' && classify workflow_dispatch 'docs/example.md' | classification_contains '^run_long=true$' && classify merge_group 'docs/example.md' | classification_contains '^run_long=true$'"
+check 'mixed changes fail closed' "printf 'docs/example.md\nbin/ai-example\n' | bash '$classifier' pull_request | classification_contains '^run_long=true$'"
+check 'skills-to-docs rename paths fail closed' "printf 'skills/shared/example/SKILL.md\ndocs/example.md\n' | bash '$classifier' pull_request | classification_contains '^run_long=true$'"
 
 actual_bash="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.sh' ! -name 'test-all.sh' -printf '%f\n' | LC_ALL=C sort)"
 actual_pwsh="$(find "$ROOT/tests" -maxdepth 1 -type f -name 'test-*.ps1' ! -name 'test-all.ps1' -printf '%f\n' | LC_ALL=C sort)"
@@ -283,9 +322,9 @@ check 'sections run on independent hosted machines and all keep reporting' \
 # exact name and stay fail-closed: any lane result other than success, or a skip
 # the classifier did not justify, fails the aggregate.
 check 'one stable aggregate publishes the whole Windows lane' \
-  '[ -n "$aggregate_block" ] && printf "%s" "$aggregate_block" | grep -qF "needs: [fast-classifier, manual-preflight, windows-offline-section, windows-offline-complete]"'
+  '[ -n "$aggregate_block" ] && printf "%s" "$aggregate_block" | classification_contains -F "needs: [fast-classifier, manual-preflight, windows-offline-section, windows-offline-complete]"'
 check 'the aggregate fails closed on anything but a justified skip' \
-  'printf "%s" "$aggregate_block" | grep -qF "failing closed" && printf "%s" "$aggregate_block" | grep -qF "exit 1"'
+  'printf "%s" "$aggregate_block" | classification_contains -F "failing closed" && printf "%s" "$aggregate_block" | classification_contains -F "exit 1"'
 # The scheduled backstop must watch the complete matrix, never a section of it.
 check 'the scheduled reporter watches the complete Windows matrix' \
   "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -qF 'windows-offline-complete'"
