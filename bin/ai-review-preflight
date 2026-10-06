@@ -710,7 +710,7 @@ requalify_provider() { # PROVIDER
   # recorded, but the requalification step itself must not fail an
   # installation for days or weeks until the provider's quota resets.
   if [ "$REQUALIFY_FAILURE_CLASS" = "provider-outage/capacity" ]; then
-    printf 'ai-review-preflight: %s requalification deferred: provider capacity event, not a code defect; the reviewer stays quarantined until a later requalify succeeds.\n' "$provider" >&2
+    printf 'ai-review-preflight: %s requalification deferred: provider capacity event, not a code defect; the installation step passes but the reviewer stays quarantined (NOT usable) until a later requalify succeeds.\n' "$provider" >&2
     return 0
   fi
   return 1

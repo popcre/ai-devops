@@ -369,7 +369,9 @@ each fast-forward with hooks disabled and run one explicit
 `ai-review-preflight requalify` during installation, so a failed canary can
 never masquerade as a pull or install failure mid-update. A failed automatic
 requalification is recorded with `ai-reviewer-issue record`; it fails
-`update.sh` and is printed (without aborting later skill stages) by the
+`update.sh` (except a `provider-outage/capacity` event such as an exhausted
+quota, which is recorded and leaves the reviewer quarantined but does not fail
+the install) and is printed (without aborting later skill stages) by the
 Windows installer, and the reviewer stays quarantined
 (`live-qualification-required`) until it is fixed. A live canary can take up
 to its qualification timeout (default 30 minutes per reviewer), so a pull
