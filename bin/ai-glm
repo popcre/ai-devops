@@ -79,7 +79,7 @@ MODEL="${AI_GLM_MODEL:-glm-5.3}"
 # harness is detected (mimo/claude/codex/zcode). Never default to a wrong
 # engine name — independence recording keys off this value. main() fails
 # closed when no caller remains.
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
+source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
 CALLER=''
 caller_rc=0
 CALLER="$(provider_wrapper_resolve_caller "${AI_GLM_CALLER:-}")" || caller_rc=$?

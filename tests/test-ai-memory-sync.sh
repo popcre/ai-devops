@@ -169,6 +169,7 @@ private_sync() {
   AI_MEMORY_HUB="$HUB_A" AI_MEMORY_LOG="$LOG_A" \
   AI_GH_REAL_GH="$TMP/fake-gh" AI_GH_STATE_DIR="$TMP/gh-state" \
   AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true \
   GH_LOG="$TMP/gh.log" FAKE_VISIBILITY="$1" \
     bash "$ROOT/bin/ai-memory-sync" sync
 }
