@@ -1,112 +1,17 @@
-#!/usr/bin/env python3
-"""Hourly non-generating credit observations through the existing duty pool.
-
-check reads only; tick first claims the existing duty lease and applies only
-explicit exhaustion holds. No scheduler, credential fetch, unpause or roster edit.
-"""
-import datetime
-import json
-import math
-import pathlib
-import subprocess
-import sys
-
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-UNQUALIFIED = ('glm', 'grok', 'muse', 'qwen', 'stepfun')
-
-def fresh(value, now):
-    try:
-        checked = datetime.datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
-        return 0 <= (now - checked).total_seconds() <= 120
-    except (TypeError, ValueError):
-        return False
-
-def normalize(provider, value, now):
-    result = {'provider': provider, 'state': 'unknown', 'reason': 'unqualified-response'}
-    if not isinstance(value, dict) or value.get('provider') != provider or not fresh(value.get('checked_at'), now):
-        return result
-    if provider == 'deepseek':
-        if (value.get('qualified_version') != 'user-balance-v1'
-                or value.get('source_kind') != 'official-user-balance'
-                or value.get('model_scope') != 'deepseek-flash'
-                or not isinstance(value.get('credential_profile_scope'), str)
-                or not value['credential_profile_scope'].startswith('sha256:')
-                or len(value['credential_profile_scope']) != 71):
-            return result
-        if value.get('state') in ('available', 'exhausted'):
-            result.update(state=value['state'], reason=value['reason'])
-        return result
-    buckets = {}
-    groups = value.get('groups')
-    if not isinstance(groups, list):
-        return result
-    for group in groups:
-        if not isinstance(group, dict) or not isinstance(group.get('buckets'), list):
-            return result
-        for bucket in group['buckets']:
-            if isinstance(bucket, dict) and bucket.get('id') in ('gemini-weekly', 'gemini-5h'):
-                remaining = bucket.get('remaining_percent')
-                if type(remaining) not in (int, float) or not math.isfinite(remaining) or not 0 <= remaining <= 100:
-                    return result
-                if bucket['id'] in buckets:
-                    return result
-                buckets[bucket['id']] = remaining
-    if set(buckets) != {'gemini-weekly', 'gemini-5h'}:
-        return result
-    # Any authoritative zero bucket exhausts the account; unknown buckets never
-    # become available. Positive data is an observation, not admission readiness.
-    exhausted = 0 in buckets.values()
-    result.update(state='exhausted' if exhausted else 'available', reason='reported-exhaustion' if exhausted else 'reported-capacity',
-                  scope_identity='unknown', provenance='current-authenticated-agy-usage')
-    return result
-
-def read_provider(provider, run=subprocess.run, now=None):
-    command = [str(ROOT / 'bin' / ('ai-gemini-usage' if provider == 'gemini' else 'ai-deepseek-agent')),
-               '--json' if provider == 'gemini' else 'balance']
-    try:
-        response = run(command, capture_output=True, text=True, timeout=75 if provider == 'gemini' else 10, check=False)
-        if response.returncode != 0 or len(response.stdout) > 65536:
-            raise ValueError('unreadable')
-        return normalize(provider, json.loads(response.stdout), now or datetime.datetime.now(datetime.timezone.utc))
-    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, KeyError):
-        return {'provider': provider, 'state': 'unknown', 'reason': 'read-unavailable'}
-
-def main(args=None, run=subprocess.run):
-    args = sys.argv[1:] if args is None else args
-    if args in (['--help'], ['help']):
-        print('ai-review-credit-watch check|tick; scheduled hourly by ai-local-watch tick-all')
-        return 0
-    if args not in (['check'], ['tick']):
-        return 2
-    if args == ['tick']:
-        try:
-            claimed = run([str(ROOT / 'bin/ai-local-watch'), 'claim'], stdout=subprocess.DEVNULL,
-                          stderr=subprocess.DEVNULL, timeout=60, check=False)
-            if claimed.returncode != 0:
-                print('credit-watch: duty claim unavailable; no observations or holds')
-                return claimed.returncode
-        except (OSError, subprocess.TimeoutExpired):
-            print('credit-watch: duty claim unavailable; no observations or holds')
-            return 1
-    failed = False
-    for provider in ('gemini', 'deepseek'):
-        observation = read_provider(provider, run=run)
-        hold = 'unchanged'
-        if args == ['tick'] and observation['state'] == 'exhausted':
-            try:
-                paused = run([str(ROOT / 'bin/ai-review-preflight'), 'pause', provider,
-                              'out-of-credit', '--seconds', '3600'], stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, timeout=10, check=False)
-                hold = 'applied' if paused.returncode == 0 else 'failed'
-            except (OSError, subprocess.TimeoutExpired):
-                hold = 'failed'
-            failed |= hold == 'failed'
-        # Deliberately discard all numeric balances, allowance, profile hashes,
-        # response bodies and stderr. Available never clears an existing hold.
-        print(json.dumps({**observation, 'hold': hold}, separators=(',', ':')))
-    for provider in UNQUALIFIED:
-        print(json.dumps({'provider': provider, 'state': 'unknown', 'reason': 'no-qualified-interface', 'hold': 'unchanged'}, separators=(',', ':')))
-    return 1 if failed else 0
-
-if __name__ == '__main__':
-    sys.exit(main())
+#!/usr/bin/env bash
+# Thin cross-platform entrypoint; ai-local-watch owns the only schedule.
+set -euo pipefail
+SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+case "${OSTYPE:-}" in
+  msys*|cygwin*)
+    export AI_REVIEW_CREDIT_WATCH_BASH="$(cygpath -w "$BASH")"
+    ;;
+esac
+if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+  exec python3 "$ROOT/tools/reviewer_credit_watch.py" "$@"
+elif command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+  exec python "$ROOT/tools/reviewer_credit_watch.py" "$@"
+fi
+printf 'credit-watch: Python runtime unavailable\n' >&2
+exit 1

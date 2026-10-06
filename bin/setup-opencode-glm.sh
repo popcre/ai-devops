@@ -101,14 +101,14 @@ fi
 chmod 0600 "$PW_FILE"
 
 # ---------------------------------------------------------------------------
-# 4. Launcher (resolves the Z.ai key at exec time; no plaintext key at rest)
+# 4. Launcher (vault-authoritative provisioning and protected quota-reader cache)
 # ---------------------------------------------------------------------------
 info "Installing $BIN_DIR/opencode-glm-launch"
 cat > "$BIN_DIR/opencode-glm-launch" <<EOF
 #!/usr/bin/env bash
 # Managed by ai-devops setup-opencode-glm.sh.
 # systemd -> this launcher -> op run -> opencode serve. The Z.ai key never touches
-# a unit file, an argv, or a file at rest.
+# a unit file or argv. Provisioning publishes an owner-only quota-reader cache.
 set -euo pipefail
 CFG_DIR="\${AI_DEVOPS_CONFIG_DIR:-\$HOME/.config/ai-devops}"
 TOKEN_FILE="\$CFG_DIR/op-service-account"
@@ -137,6 +137,14 @@ if [ -z "\${ZAI_API_KEY:-}" ]; then
   export OP_SERVICE_ACCOUNT_TOKEN AI_GLM_LAUNCH_REEXEC=1
   exec op run --env-file "\$MCP_ENV" -- "\$0" "\$@"
 fi
+
+# Cache publication occurs outside reviewer/watch paths. Failure preserves the
+# original GLM server; the credit reader remains UNKNOWN until safely bound.
+_credit_python="\$(command -v python3 || command -v python || true)"
+if [ -z "\$_credit_python" ] || ! printf '%s' "\$ZAI_API_KEY" | env -u ZAI_API_KEY "\$_credit_python" "$REPO_ROOT/tools/glm_credit.py" publish; then
+  echo 'WARNING: GLM credit cache unavailable; existing GLM server remains enabled.' >&2
+fi
+unset _credit_python
 
 # OpenCode's built-in zai-coding-plan provider reads ZHIPU_API_KEY.
 export ZHIPU_API_KEY="\$ZAI_API_KEY"
