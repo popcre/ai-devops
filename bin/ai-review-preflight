@@ -701,7 +701,20 @@ requalify_provider() { # PROVIDER
   printf '%s\n' "$qualify_output" > "$output"
   record_requalify_failure "$provider" "$output"
   rm -f "$output"
+  if requalify_failure_is_provider_outage "$qualify_output"; then return 2; fi
   return 1
+}
+
+# requalify_failure_is_provider_outage OUTPUT is true only when the live
+# canary itself ran and the provider refused it for capacity reasons (quota,
+# allowance, credit, or service outage). Every other failure (hash drift,
+# untested bytes, authentication, timeout, publish errors) is a real defect.
+requalify_failure_is_provider_outage() { # OUTPUT
+  printf '%s' "$1" | grep -q 'live qualification failed; the previous qualification version stays valid' || return 1
+  case "$(classify_failure "$1")" in
+    out-of-credit|allowance-exhausted|service-unavailable) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # requalify re-runs the live qualification for every named provider (default:
@@ -709,7 +722,7 @@ requalify_provider() { # PROVIDER
 # the installed bytes. Called automatically by the repository's post-merge
 # hook and by update.sh after a pull; safe to run by hand at any time.
 requalify() { # [PROVIDER...]
-  local provider failed=0
+  local provider failed=0 rc
   local providers=("$@")
   [ "$#" -gt 0 ] || read -r -a providers <<< "$LIVE_QUALIFIED_PROVIDERS"
   for provider in "${providers[@]}"; do
@@ -717,7 +730,12 @@ requalify() { # [PROVIDER...]
       *" $provider "*) ;;
       *) die "requalify only knows: $LIVE_QUALIFIED_PROVIDERS (got '$provider')." ;;
     esac
-    requalify_provider "$provider" || failed=1
+    rc=0; requalify_provider "$provider" || rc=$?
+    case "$rc" in
+      0) ;;
+      2) printf 'ai-review-preflight: WARNING: %s requalification blocked by a provider-side outage or exhausted quota; %s stays quarantined and is not drawn, but this is not a toolkit defect, so requalify does not fail.\n' "$provider" "$provider" >&2 ;;
+      *) failed=1 ;;
+    esac
   done
   return "$failed"
 }
