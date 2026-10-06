@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fail when ai-devops config/reviewer-registry.json and the shared-db reviewer
-// allocator (scripts/manage-migration-author-lanes.mjs on main) disagree about
+// allocator (scripts/lib/lanes/reviewer-roster.mjs on main) disagree about
 // which providers are in the review rotation. The allocator is the source of
 // truth; the registry must mirror it. Providers that review outside the
 // allocator are listed in config/reviewer-membership-scope.json.
@@ -15,7 +15,10 @@ const lanesFile = opt('--lanes-file', null)
 let src
 try {
   src = lanesFile ? fs.readFileSync(lanesFile, 'utf8')
-    : execFileSync('bash', [path.join(root, 'bin/ai-gh'), 'api', 'repos/popcre/shared-db/contents/scripts/manage-migration-author-lanes.mjs?ref=main', '-H', 'Accept: application/vnd.github.raw'], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, AI_GH_CALLER: 'ai-reviewer-membership-drift' } })
+    // The roster moved out of the allocator entrypoint into
+    // scripts/lib/lanes/reviewer-roster.mjs (re-exported by
+    // manage-migration-author-lanes.mjs); read the module that defines it.
+    : execFileSync('bash', [path.join(root, 'bin/ai-gh'), 'api', 'repos/popcre/shared-db/contents/scripts/lib/lanes/reviewer-roster.mjs?ref=main', '-H', 'Accept: application/vnd.github.raw'], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, AI_GH_CALLER: 'ai-reviewer-membership-drift' } })
 } catch (e) { console.error('ERROR could not read the shared-db allocator: ' + e.message.split('\n')[0]); process.exit(2) }
 const block = (name, open, close) => { const i = src.indexOf(`export const ${name} = Object.freeze(${open}`); if (i < 0) { console.error(`ERROR allocator has no ${name}`); process.exit(2) } return src.slice(i, src.indexOf(close, i)) }
 const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1])
