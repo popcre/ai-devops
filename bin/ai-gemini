@@ -46,7 +46,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   reviewer_event_guard gemini "$_AI_EVENT_SELF" "$@"
   unset _AI_EVENT_SELF
 fi
-VERSION=0.2.4
+VERSION=0.2.5
 QUALIFICATION_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
 CALLER="${AI_GEMINI_CALLER:-codex}"
@@ -80,30 +80,74 @@ die_empty_verdict(){
   printf 'ai-gemini: error: %s\n' "$*" >&2
   exit 81
 }
+# normalize_qualification_versions RAW_JSON -> JSON array. Handles both the
+# legacy single-object record and the versioned {versions:[...]} store the
+# protected preflight path writes (bin/ai-review-preflight publish pattern).
+normalize_qualification_versions(){
+  printf '%s\n' "$1" | jq -c '
+    if ((.versions|type)=="array") then [.versions[]]
+    elif ((.wrapper_sha256|type)=="string") then [ {
+        wrapper_sha256: .wrapper_sha256,
+        agy_sha256: .agy_sha256,
+        agy_version: .agy_version,
+        model: .model,
+        qualified_epoch: .qualified_epoch
+      } | with_entries(select(.value != null)) ]
+    else [] end' 2>/dev/null || printf '[]\n'
+}
+qualification_versions(){
+  local raw
+  [ -f "$QUALIFICATION_FILE" ] || { printf '[]\n'; return 0; }
+  raw="$(cat "$QUALIFICATION_FILE" 2>/dev/null)" || { printf '[]\n'; return 0; }
+  [ -n "$raw" ] || { printf '[]\n'; return 0; }
+  normalize_qualification_versions "$raw"
+}
 runtime_qualified(){
-  local a="$1" expected_wrapper expected_agy expected_agy_sha expected_model actual_wrapper actual_agy actual_agy_sha
+  local a="$1" actual_wrapper actual_agy actual_agy_sha versions match
   [ -f "$QUALIFICATION_FILE" ] || return 1
   jq -e '.version==2 and .provider=="gemini" and (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_version|type=="string" and length>0) and (.model|type=="string" and length>0) and (.qualified_epoch|type=="number")' "$QUALIFICATION_FILE" >/dev/null 2>&1 || return 1
-  expected_wrapper="$(jq -r .wrapper_sha256 "$QUALIFICATION_FILE")"
-  expected_agy="$(jq -r .agy_version "$QUALIFICATION_FILE")"
-  expected_agy_sha="$(jq -r .agy_sha256 "$QUALIFICATION_FILE")"
-  expected_model="$(jq -r .model "$QUALIFICATION_FILE")"
   actual_wrapper="$(sha256sum "${BASH_SOURCE[0]}" 2>/dev/null | awk '{print $1}')"
-  [ "$expected_wrapper" = "$actual_wrapper" ] && [ "$expected_model" = "$MODEL" ] || return 1
   actual_agy="$(timeout "${AI_GEMINI_VERSION_TIMEOUT:-30}s" "$a" --version 2>/dev/null)" || return 1
   actual_agy_sha="$(sha256sum < "$a" 2>/dev/null | awk '{print $1}')"
-  [ "$expected_agy" = "$actual_agy" ] && [ "$expected_agy_sha" = "$actual_agy_sha" ]
+  versions="$(qualification_versions)"
+  match="$(printf '%s\n' "$versions" | jq -c --arg sha "$actual_wrapper" --arg agy "$actual_agy" --arg agy_sha "$actual_agy_sha" --arg model "$MODEL" '
+    [ .[] | select(
+      (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+      (.agy_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+      (.agy_version|type=="string" and length>0) and
+      (.model|type=="string" and length>0) and
+      (.qualified_epoch|type=="number") and
+      .wrapper_sha256==$sha and .agy_sha256==$agy_sha and .agy_version==$agy and .model==$model
+    ) ][0] // empty')" || return 1
+  [ -n "$match" ] && [ "$match" != "null" ]
 }
 live_qualified(){ local a; a="$(raw_agy 2>/dev/null)" || return 1; runtime_qualified "$a"; }
 # qualify_live proves safety in-process; without this the proof is discarded and the
 # next plain `doctor` re-quarantines, which reads to a caller as a local dependency fault.
 record_qualification(){
-  local a tmp
+  local a tmp w av as m e prior versions new_version
   a="$(raw_agy)" || return 1
   mkdir -p "$QUALIFICATION_DIR" || return 1
   chmod 700 "$QUALIFICATION_DIR" 2>/dev/null || true
+  w="$(sha256sum "${BASH_SOURCE[0]}" | awk '{print $1}')" || return 1
+  av="$("$a" --version)" || return 1
+  as="$(sha256sum < "$a" | awk '{print $1}')" || return 1
+  m="$MODEL"
+  e="$(date -u +%s)"
+  new_version="$(jq -nc --arg w "$w" --arg av "$av" --arg as "$as" --arg m "$m" --argjson e "$e" \
+    '{wrapper_sha256:$w,agy_version:$av,agy_sha256:$as,model:$m,qualified_epoch:$e}')" || return 1
+  prior="$(qualification_versions)"
+  versions="$(printf '%s\n' "$prior" | jq -c --argjson new "$new_version" '
+    [ .[] | select(
+      .wrapper_sha256 != $new.wrapper_sha256
+      or ((.agy_sha256 // "") != ($new.agy_sha256 // ""))
+      or ((.agy_version // "") != ($new.agy_version // ""))
+      or ((.model // "") != ($new.model // ""))
+    ) ] + [$new] | .[-32:]')" || return 1
   tmp="$QUALIFICATION_FILE.$$"
-  jq -n --arg w "$(sha256sum "${BASH_SOURCE[0]}" | awk '{print $1}')"         --arg av "$("$a" --version)"         --arg as "$(sha256sum < "$a" | awk '{print $1}')"         --arg m "$MODEL"         --argjson e "$(date -u +%s)"         '{version:2,provider:"gemini",wrapper_sha256:$w,agy_version:$av,agy_sha256:$as,model:$m,qualified_epoch:$e}' > "$tmp" || { rm -f "$tmp"; return 1; }
+  jq -nc --argjson versions "$versions" --argjson selected "$new_version" \
+    '{version:2,provider:"gemini"} + $selected + {versions:$versions}' > "$tmp" || { rm -f "$tmp"; return 1; }
+  jq -e '.version==2 and .provider=="gemini" and (.versions|type=="array") and (.versions|length>0) and (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.qualified_epoch|type=="number")' "$tmp" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$QUALIFICATION_FILE"
 }
 QUARANTINED=1
@@ -134,9 +178,21 @@ live_qualified && QUARANTINED=0
 # qualification once, in its own private fixture, instead of refusing. The proof
 # is identical to `ai-gemini qualify-live`; a failure keeps the quarantine.
 auto_requalify(){
-  local self a
+  local self a actual_wrapper versions match
   [ "$QUARANTINED" -eq 1 ] && [ "${AI_GEMINI_AUTO_REQUALIFY:-1}" = 1 ] && [ -f "$QUALIFICATION_FILE" ] || return 0
-  [ "$(jq -r .wrapper_sha256 "$QUALIFICATION_FILE" 2>/dev/null)" = "$(sha256sum "${BASH_SOURCE[0]}" | awk '{print $1}')" ] && [ "$(jq -r .model "$QUALIFICATION_FILE" 2>/dev/null)" = "$MODEL" ] || return 0
+  jq -e '.version==2 and .provider=="gemini" and (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_sha256|type=="string" and test("^[0-9a-f]{64}$")) and (.agy_version|type=="string" and length>0) and (.model|type=="string" and length>0) and (.qualified_epoch|type=="number")' "$QUALIFICATION_FILE" >/dev/null 2>&1 || return 0
+  actual_wrapper="$(sha256sum "${BASH_SOURCE[0]}" | awk '{print $1}')"
+  versions="$(qualification_versions)"
+  match="$(printf '%s\n' "$versions" | jq -c --arg sha "$actual_wrapper" --arg model "$MODEL" '
+    [ .[] | select(
+      (.wrapper_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+      (.agy_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+      (.agy_version|type=="string" and length>0) and
+      (.model|type=="string" and length>0) and
+      (.qualified_epoch|type=="number") and
+      .wrapper_sha256==$sha and .model==$model
+    ) ][0] // empty')" || return 0
+  [ -n "$match" ] && [ "$match" != "null" ] || return 0
   a="$(raw_agy 2>/dev/null)" && timeout "${AI_GEMINI_VERSION_TIMEOUT:-30}s" "$a" --version >/dev/null 2>&1 || return 0
   self="$(readlink -f "${BASH_SOURCE[0]}")"
   printf 'ai-gemini: agy runtime changed since the last live qualification; requalifying automatically\n' >&2
@@ -146,6 +202,24 @@ auto_requalify(){
 }
 require_local_runtime(){ local a; a="$(agy)"; timeout 30s "$a" --version >/dev/null 2>&1 || die 'local_dependency_unavailable: the LOCAL agy runtime cannot start or its version probe timed out. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 request(){ if [ "${1:-}" = --prompt ]; then printf %s "${2:-}"; elif [ "${1:-}" = --prompt-file ]; then [ -f "${2:-}" ] || die 'prompt file not found'; cat "$2"; elif [ ! -t 0 ]; then cat; else die 'provide --prompt, --prompt-file, or standard input'; fi; }
+# validate_request_source: non-consuming pre-check of the session name and
+# prompt source so an invalid request dies before auto_requalify can spend
+# live qualification allowance or change qualification state. Never reads stdin.
+validate_request_source(){
+  local -a args=("$@") idx=1
+  if [ "${args[idx]:-}" = --governed-verdict ]; then idx=$((idx+2)); fi
+  name_ok "${args[idx]:-}" || die 'invalid session name'
+  idx=$((idx+1))
+  case "${args[idx]:-}" in
+    --prompt)
+      [ $((idx+1)) -lt "${#args[@]}" ] || die '--prompt requires a value.';;
+    --prompt-file)
+      [ $((idx+1)) -lt "${#args[@]}" ] || die '--prompt-file requires a value.'
+      [ -f "${args[idx+1]}" ] || die 'prompt file not found';;
+    *)
+      [ ! -t 0 ] || die 'provide --prompt, --prompt-file, or standard input';;
+  esac
+}
 write(){ local f="$1" j="$2" t; mkdir -p "$(dirname "$f")"; t="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"; printf '%s\n' "$j" > "$t"; mv -f "$t" "$f"; }
 update_state(){ local f="$1" status="$2" detail="${3:-}" j; j="$(jq -c --arg s "$status" --arg d "$detail" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status=$s | .status_detail=$d | .updated_at=$t' "$f")" || die 'invalid session metadata'; write "$f" "$j"; }
 secure_private(){ local p="$1" mode="$2" win sid; chmod "$mode" "$p" 2>/dev/null || return 1; case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1 && command -v powershell.exe >/dev/null 2>&1 || return 1; win="$(cygpath -w "$p")"; sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n')"; case "$sid" in S-1-*) ;; *) return 1;; esac; if [ -d "$p" ]; then icacls "$win" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null 2>&1 || return 1; else icacls "$win" /inheritance:r /grant:r "*${sid}:(F)" >/dev/null 2>&1 || return 1; fi; powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$ExpectedSid) try { if ([IO.Directory]::Exists($Path)) { $Acl = New-Object Security.AccessControl.DirectorySecurity($Path, [Security.AccessControl.AccessControlSections]::Access) } else { $Acl = New-Object Security.AccessControl.FileSecurity($Path, [Security.AccessControl.AccessControlSections]::Access) }; if (-not $Acl.AreAccessRulesProtected) { exit 1 }; $Full = [Security.AccessControl.FileSystemRights]::FullControl; $CurrentHasFull = $false; foreach ($Rule in @($Acl.Access | Where-Object AccessControlType -eq ([Security.AccessControl.AccessControlType]::Allow))) { $RuleSid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($ExpectedSid, "S-1-5-18", "S-1-5-32-544")) { exit 1 }; if ($RuleSid -eq $ExpectedSid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $CurrentHasFull = $true } }; if (-not $CurrentHasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" >/dev/null 2>&1;; esac; }
@@ -483,5 +557,5 @@ if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then
   done
   set -- "${source_args[@]}"
 fi
-case "${1:-}" in new|ask) auto_requalify;; esac
+case "${1:-}" in new|ask) validate_request_source "$@"; auto_requalify;; esac
 case "${1:-}" in new) take_governed "$@"; shift; [ -z "$GOVERNED_HEAD" ] || shift 2; new "$@";; ask) take_governed "$@"; shift; [ -z "$GOVERNED_HEAD" ] || shift 2; ask "$@";; list) list;; delete) shift; delete "${1:-}";; doctor) shift; QUALIFYING=1; case "${1:-}" in '') doctor ;; --identity) [ "$#" -eq 1 ] || die 'usage: ai-gemini doctor [--identity|--live]'; doctor_identity ;; --live) [ "$#" -eq 1 ] || die 'usage: ai-gemini doctor [--identity|--live]'; qualify_live ;; *) die 'usage: ai-gemini doctor [--identity|--live]' ;; esac;; qualify-live) shift; [ "$#" -eq 0 ] || die 'usage: ai-gemini qualify-live'; QUALIFYING=1; qualify_live;; --version) echo "ai-gemini $VERSION";; -h|--help|help) usage;; *) usage >&2; exit 2;; esac
