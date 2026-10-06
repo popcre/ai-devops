@@ -40,7 +40,7 @@
     },
     "stepfun": {
       "registry_state": "registered",
-      "reason": "StepFun Step 5 (step-5-preview) via bin/ai-stepfun: Linux under bubblewrap (StepCode or OpenCode), or Windows via the OpenCode folder + test shell (owner 2026-09-30). Added by owner instruction 2026-09-25; reviews may run code and tests and edit files only inside a disposable, remote-less review copy (issue #974). Active in the shared-db allocator rotation (popcre/shared-db#3657, merged 2026-10-01); the allocator skips it on any machine where ai-review-preflight reports it unusable."
+      "reason": "StepFun Step 5 (step-5-preview) via bin/ai-stepfun: Linux under bubblewrap (StepCode or OpenCode), or Windows via the OpenCode folder + test shell (owner 2026-09-30). Added by owner instruction 2026-09-25; reviews may run code and tests and edit files only inside a disposable, remote-less review copy (issue #974). In the shared-db allocator rotation as stepfun-step-5-preview since 2026-10-02 (owner instruction 2026-09-25: \"put stepfun into the reviewer rotation\"; popcre/shared-db PR #3657, merge 25de9e7c); the allocator skips stepfun on any machine whose ai-review-preflight reports it unusable."
     }
   }
 }
