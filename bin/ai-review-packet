@@ -93,7 +93,10 @@
 set -euo pipefail
 
 VERSION="1.3.0"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Parameter expansion instead of a dirname process: this program starts
+# hundreds of times per review suite, and each process is slow on Windows.
+_self_dir="${BASH_SOURCE[0]}"; case "$_self_dir" in */*) _self_dir="${_self_dir%/*}" ;; *) _self_dir=. ;; esac
+SCRIPT_DIR="$(cd "${_self_dir:-/}" && pwd)"; unset _self_dir
 
 # ONE PACKET PER SESSION, NOT ONE PER DIRECTORY.
 #
@@ -995,8 +998,8 @@ hash_packet() { # hash_packet PACKET_DIR
   ( cd "$pkt" || exit 1
     while IFS= read -r -d '' file; do
       printf 'path\0%s\0bytes\0%s\0sha256\0%s\0' \
-        "${file#./}" "$(wc -c < "$file" | tr -d ' ')" \
-        "$(sha256sum "$file" | cut -d' ' -f1)"
+        "${file#./}" "$(n="$(wc -c < "$file")"; printf '%s' "${n// /}")" \
+        "$(h="$(sha256sum "$file")"; printf '%s' "${h%% *}")"
       test_progress || exit 1
     done < <(find . -type f ! -path "./$HASHFILE" -print0 | LC_ALL=C sort -z)
   ) | sha256sum | cut -d' ' -f1

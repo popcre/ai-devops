@@ -74,7 +74,10 @@
 set -euo pipefail
 
 VERSION="1.7.0"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Parameter expansion instead of a dirname process: this program starts
+# hundreds of times per review suite, and each process is slow on Windows.
+_self_dir="${BASH_SOURCE[0]}"; case "$_self_dir" in */*) _self_dir="${_self_dir%/*}" ;; *) _self_dir=. ;; esac
+SCRIPT_DIR="$(cd "${_self_dir:-/}" && pwd)"; unset _self_dir
 
 SANDBOX_DIR="${AI_REVIEW_SANDBOX_DIR:-$HOME/.local/state/ai-devops/review-sandboxes}"
 MARKER=".ai-review-sandbox"
@@ -244,19 +247,23 @@ source_inventory() { # source_inventory ROOT OUTPUT — NUL-safe review-visible 
   test_progress || { rm -f "$list" "$diff"; return 1; }
   : > "$output"
   printf 'head_tree\0%s\0tracked_diff_bytes\0%s\0tracked_diff_sha256\0%s\0' \
-    "$tree" "$(wc -c < "$diff" | tr -d ' ')" "$(sha256sum "$diff" | cut -d' ' -f1)" >> "$output"
+    "$tree" "$(n="$(wc -c < "$diff")"; printf '%s' "${n// /}")" "$(h="$(sha256sum "$diff")"; printf '%s' "${h%% *}")" >> "$output"
   test_progress || { rm -f "$list" "$diff"; return 1; }
   while IFS= read -r -d '' rel; do
     if generated_review_path "$root" "$rel"; then continue; fi
     if [ -L "$root/$rel" ]; then
       kind=symlink
-      bytes="$(readlink -n "$root/$rel" | wc -c | tr -d ' ')" || { rm -f "$list" "$diff"; return 1; }
-      digest="$(readlink -n "$root/$rel" | sha256sum | cut -d' ' -f1)" || { rm -f "$list" "$diff"; return 1; }
+      bytes="$(readlink -n "$root/$rel" | wc -c)" || { rm -f "$list" "$diff"; return 1; }
+      digest="$(readlink -n "$root/$rel" | sha256sum)" || { rm -f "$list" "$diff"; return 1; }
+      bytes="${bytes// /}"; digest="${digest%% *}"
     elif [ -f "$root/$rel" ]; then
       [ -r "$root/$rel" ] || { rm -f "$list" "$diff"; return 1; }
       kind=file
-      bytes="$(wc -c < "$root/$rel" | tr -d ' ')" || { rm -f "$list" "$diff"; return 1; }
-      digest="$(sha256sum "$root/$rel" | cut -d' ' -f1)" || { rm -f "$list" "$diff"; return 1; }
+      # Shell expansions trim the output: tr and cut processes per file are
+      # a measurable share of every review on Windows (#1355).
+      bytes="$(wc -c < "$root/$rel")" || { rm -f "$list" "$diff"; return 1; }
+      digest="$(sha256sum "$root/$rel")" || { rm -f "$list" "$diff"; return 1; }
+      bytes="${bytes// /}"; digest="${digest%% *}"
     else
       rm -f "$list" "$diff"
       return 1
@@ -273,7 +280,7 @@ source_digest() { # source_digest ROOT
   inventory="$(mktemp)"
   source_inventory "$1" "$inventory" \
     || { rm -f "$inventory"; die "could not read the complete review-visible source inventory in $1"; }
-  digest="$(sha256sum "$inventory" | cut -d' ' -f1)"
+  digest="$(sha256sum "$inventory")"; digest="${digest%% *}"
   rm -f "$inventory"
   printf '%s' "$digest"
 }
