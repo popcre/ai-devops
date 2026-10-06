@@ -27,7 +27,7 @@ printf '#!/usr/bin/env bash\nprintf fake-key\n' > "$TMP/bin/op"
 cat > "$MBIN/muse-bin-$VERSION.exe" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
-  --version) [ -z "${MUSE_STUB_SWAP:-}" ] || printf '#!/usr/bin/env bash\ntouch "%s"\n' "$MUSE_STUB_SWAP_MARK" > "$MUSE_STUB_SWAP"; [ -z "${MUSE_STUB_SIDE_ENV_FILE:-}" ] || env >> "$MUSE_STUB_SIDE_ENV_FILE"; printf 'Muse Code 1.4.2 (%s)\n' "${MUSE_STUB_VERSION:-1.4.2-R4684.1}";;
+  --version) [ -z "${MUSE_STUB_SWAP:-}" ] || printf '#!/usr/bin/env bash\ntouch "%s"\n' "$MUSE_STUB_SWAP_MARK" > "$MUSE_STUB_SWAP"; [ -z "${MUSE_STUB_SIDE_ENV_FILE:-}" ] || env >> "$MUSE_STUB_SIDE_ENV_FILE"; printf 'Muse Code %s (%s)\n' "${MUSE_STUB_PRODUCT:-1.4.2}" "${MUSE_STUB_VERSION:-__PIN_VERSION__}";;
   exec)
     [ -z "${MUSE_STUB_ENV_FILE:-}" ] || env | sort > "$MUSE_STUB_ENV_FILE"
     [ -z "${MUSE_STUB_ARGS_FILE:-}" ] || printf '%s\n' "$@" > "$MUSE_STUB_ARGS_FILE"
@@ -79,6 +79,7 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$TMP/bin/op" "$MBIN/muse-bin-$VERSION.exe"
+sed -i "s/__PIN_VERSION__/$VERSION/" "$MBIN/muse-bin-$VERSION.exe"
 # The fingerprint has no override: run a private copy of the tool that pins the stub.
 mkdir -p "$TMP/tool"; cp -R "$ROOT/bin" "$ROOT/config" "$ROOT/tools" "$TMP/tool/"; SCRIPT="$TMP/tool/bin/ai-muse"
 sha256sum "$MBIN/muse-bin-$VERSION.exe" | cut -d' ' -f1 > "$TMP/tool/config/muse-code/sha256"
@@ -100,7 +101,7 @@ check 'reviewer_usage muse-code adapter unit cases' "'$PYTHON' '$ROOT/tests/fixt
 check 'deletion admission refuses inaccessible parents without claiming absent stores' "bash '$ROOT/tests/fixtures/muse-code/delete_cases.sh'"
 check 'default engine is muse-code' "cd '$REPO' && eval \"USERPROFILE='$HOME_FIX' PATH='$TMP/bin:$PATH' AI_MUSE_CALLER=claude '$SCRIPT' doctor\" 2>&1 | grep -q 'engine: muse-code'"
 check 'doctor proves the pinned Muse Code version' "cd '$REPO' && eval \"$ENV '$SCRIPT' doctor\" | grep -q 'PASS  Muse Code is the pinned'"
-check 'doctor refuses an unpinned Muse Code version' "cd '$REPO' && rm -f '$HOME_FIX/.local/share/ai-devops/muse-code-bin/'.verified-* && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' doctor\""
+check 'doctor refuses an unpinned Muse Code version and names the supported pin' "cd '$REPO' && rm -f '$HOME_FIX/.local/share/ai-devops/muse-code-bin/'.verified-* && out=\$(eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' doctor\" 2>&1); rc=\$?; [ \$rc -ne 0 ] && printf '%s' \"\$out\" | grep -q 'unsupported Muse Code version' && printf '%s' \"\$out\" | grep -q 'supported pin is $VERSION'"
 check 'doctor reads the first-party catalog and reports limits, price and currency' "cd '$REPO' && out=\$(eval \"$ENV '$SCRIPT' doctor\"); rc=\$?; [ \$rc -eq 0 ] && printf '%s\\n' \"\$out\" | grep -q 'PASS  Muse Code model catalog is present and parseable' && printf '%s\\n' \"\$out\" | grep -q 'PASS  model catalog has a row for muse-spark-1.3-contributor' && printf '%s\\n' \"\$out\" | grep -q 'PASS  model row for muse-spark-1.3-contributor is visible' && printf '%s\\n' \"\$out\" | grep -q 'context_limit=1007997' && printf '%s\\n' \"\$out\" | grep -q 'output_limit=128000' && printf '%s\\n' \"\$out\" | grep -q 'input=0.10' && printf '%s\\n' \"\$out\" | grep -q 'cached=0.002' && printf '%s\\n' \"\$out\" | grep -q 'is_current=true'"
 # #773: the review preflight gives this doctor 10s on hosts where a jq launch or
 # a 400 MB hash costs about a second each, so its launches stay bounded.
@@ -147,7 +148,7 @@ if (mkdir -p "$TMP/jt2" && cmd //c mklink //J "$(cygpath -w "$TMP/jt2-link")" "$
   write_catalog
 else printf 'SKIP  doctor refuses a linked catalog directory (no junctions)
 '; fi
-check 'turn refuses an unpinned Muse Code version without contact' "cd '$REPO' && rm -f '$TMP/provider-args' '$HOME_FIX/.local/share/ai-devops/muse-code-bin/'.verified-* && ! eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' new pin --prompt test\" && test ! -e '$TMP/provider-args'"
+check 'turn refuses an unpinned Muse Code version and names the supported pin, without contact' "cd '$REPO' && rm -f '$TMP/provider-args' '$HOME_FIX/.local/share/ai-devops/muse-code-bin/'.verified-* && out=\$(eval \"$ENV MUSE_STUB_VERSION=9.9.9 '$SCRIPT' new pin --prompt test\" 2>&1); rc=\$?; [ \$rc -ne 0 ] && test ! -e '$TMP/provider-args' && printf '%s' \"\$out\" | grep -q 'unsupported Muse Code version' && printf '%s' \"\$out\" | grep -q 'supported pin is $VERSION'"
 check 'new session completes and returns the final answer' "cd '$REPO' && eval \"$ENV '$SCRIPT' new first --prompt test\" | grep -qx first"
 check 'provider prompt demands all findings and sibling issues' "grep -rq 'Return ALL findings in one pass' '$REPO/.ai/reviews' && grep -rq 'sibling issues' '$REPO/.ai/reviews' && grep -rq 'MANIFEST.md first' '$REPO/.ai/reviews'"
 check 'review launch is writable only in its disposable copy: no web, personal context or prompts (#974)' "for f in exec --json --disable-approval --disable-web-tools --no-foreign-personal-context --user-input-auto-resolve; do grep -qx -- \"\$f\" '$TMP/provider-args' || exit 1; done && ! grep -qx -- --disable-write '$TMP/provider-args' && ! grep -qx -- --disable-shell '$TMP/provider-args' && grep -qx 'muse-spark-1.3-contributor' '$TMP/provider-args'"
