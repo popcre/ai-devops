@@ -423,6 +423,38 @@ def head_mismatch_detail(repo, expected_head, sandbox_head):
     return message
 
 
+def sandbox_source_chain(sandbox):
+    """Original repo behind a managed-copy chain (pool sandbox -> runner copy).
+
+    ai-review-pool snapshots the live tree, then the provider runner
+    (ai-muse/ai-qwen/...) snapshots again from inside that copy. Each
+    .ai-review-sandbox marker names its immediate source; the original
+    repository is the first source that is not itself a managed sandbox.
+    """
+    current = physical(sandbox)
+    seen = set()
+    while True:
+        marker = current / ".ai-review-sandbox"
+        if not marker.is_file():
+            return current
+        _, data = snapshot(marker, "log")
+        if not data:
+            return current
+        lines = data.decode("utf-8").splitlines()
+        if not lines or lines[0].startswith("{"):
+            return current
+        try:
+            source = physical(lines[0])
+        except Blocked:
+            return current
+        if source in seen or source == current:
+            return source
+        seen.add(source)
+        if not (source / ".ai-review-sandbox").is_file():
+            return source
+        current = source
+
+
 def bind_sandbox(directory, provider, run_id, sandbox, original_id=None):
     with event_lock(directory):
         start = invocation(directory, provider, run_id, active=True)
@@ -434,7 +466,14 @@ def bind_sandbox(directory, provider, run_id, sandbox, original_id=None):
                     "recovered sandbox invocation identity changed")
             expected_head = original["head"]
         marker, boundary, data, lines, owners = sandbox_marker(sandbox)
-        require(physical(lines[0]) == physical(start["repo"]), "sandbox evidence source differs from invocation")
+        # Accept either the immediate source or the original repo behind a
+        # managed-copy chain (pool sandbox -> runner copy). Both are snapshots
+        # of the invocation's repository; refusing the chain left the pool's
+        # reserved require-report unfilled ("required report is not durably
+        # published") after a completed review.
+        chain_root = sandbox_source_chain(marker.parent)
+        require(physical(lines[0]) == physical(start["repo"]) or chain_root == physical(start["repo"]),
+                "sandbox evidence source differs from invocation")
         sandbox_head = git_value("-C", str(marker.parent), "rev-parse", "HEAD")
         if sandbox_head != expected_head:
             # Diagnose only on the refusal path; a matching head never scans the source.
