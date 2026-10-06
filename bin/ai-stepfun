@@ -286,13 +286,14 @@ run_opencode_turn(){
     # never executed one gated command (shared-db#3943). Commands still
     # cannot run ungated: the BASH_ENV DEBUG trap execs the gate before the
     # first command executes.
-    local win_git_bash win_git_bash_w win_gate_env
+    local win_git_bash win_git_bash_w win_gate_env win_gate_log
     win_git_bash="/c/Program Files/Git/bin/bash.exe"
     [ -f "$win_git_bash" ] || die "Git for Windows bash.exe is required: $win_git_bash"
     win_git_bash_w="$(cygpath -w "$win_git_bash" 2>/dev/null || true)"
     [ -n "$win_git_bash_w" ] || die "cannot resolve the Windows path of $win_git_bash"
     win_gate_env="$OC_PROFILE_SRC/windows-gate-env.sh"
     [ -f "$win_gate_env" ] || die "Windows gate BASH_ENV template is missing: $win_gate_env"
+    win_gate_log="$win_home/gate-audit.log"
     ( for name in $(compgen -e); do
         case "$name" in
           PATH|SYSTEMROOT|LANG|LC_ALL|TERM|SSL_CERT_FILE|SSL_CERT_DIR|PSModuleAnalysisCachePath|AI_STEPFUN_TIMEOUT|AI_STEPFUN_MODEL|AI_STEPFUN_BASE_URL|AI_STEPFUN_RUNNERS_JSON|AI_STEPFUN_REVIEW_DIR) ;;
@@ -309,6 +310,7 @@ run_opencode_turn(){
         GATE_PATH="$gate_path" \
         AI_STEPFUN_RUNNERS_JSON="${AI_STEPFUN_RUNNERS_JSON:-$home_dir/.config/ai-devops/secrets/stepfun-windows-runners.json}" \
         AI_STEPFUN_GATE_BIN="$gate" \
+        AI_STEPFUN_GATE_LOG="$win_gate_log" \
         BASH_ENV="$win_gate_env" \
         OPENCODE_GIT_BASH_PATH="$win_git_bash_w" \
         XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
@@ -546,9 +548,11 @@ win_shell_contract(){
     GATE_PATH="$gp" \
     AI_STEPFUN_RUNNERS_JSON="${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}" \
     AI_STEPFUN_GATE_BIN="$REAL_DIR/ai-stepfun-windows-shell" \
+    AI_STEPFUN_GATE_LOG="$probe/gate-audit.log" \
     BASH_ENV="$env_sh" \
     "$git_bash" -c 'cat note.txt' 2>/dev/null)" || rc=$?
-  if [ "$rc" -ne 0 ] || [ "$out" != "stepfun-doctor-canary" ]; then
+  if [ "$rc" -ne 0 ] || [ "$out" != "stepfun-doctor-canary" ] \
+     || ! grep -q 'cat note.txt' "$probe/gate-audit.log" 2>/dev/null; then
     printf 'FAIL gated shell contract: allowlisted cat did not run through the gate (rc=%s out=%s)\n' "$rc" "${out:0:80}"
     rm -rf "$probe"; return 1
   fi

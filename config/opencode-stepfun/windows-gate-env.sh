@@ -7,6 +7,13 @@
 # and execs the gate directly in its `gate -c INNER` form (Layer 0), so no
 # model command ever runs outside the gate.
 #
+# The audit write before the exec is load-bearing, not decoration: under
+# OpenCode's pseudo-console an immediate exec from the trap deadlocks the
+# shell (observed live: bash stuck thread-waiting on the console before any
+# child exists), while a write first completes (#1343). It also records
+# every gated command to $AI_STEPFUN_GATE_LOG (per-run, deleted with the
+# turn's home).
+#
 # The gate itself sets AI_STEPFUN_SHELL_GATE=1 and clears BASH_ENV before
 # exec'ing an already hash-verified runner, which both stops this file from
 # re-arming inside the gate (recursion) and keeps the allowlisted
@@ -15,4 +22,11 @@
 if [ "${AI_STEPFUN_SHELL_GATE:-}" = "1" ]; then
   return 0 2>/dev/null || true
 fi
-trap 'unset BASH_ENV; exec "$AI_STEPFUN_GATE_BIN" -c "$BASH_COMMAND"' DEBUG
+__stepfun_gate_run(){
+  [ -z "${AI_STEPFUN_GATE_LOG:-}" ] || \
+    printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BASH_COMMAND" \
+      >> "$AI_STEPFUN_GATE_LOG" 2>/dev/null || true
+  unset BASH_ENV
+  exec "$AI_STEPFUN_GATE_BIN" -c "$BASH_COMMAND"
+}
+trap '__stepfun_gate_run' DEBUG

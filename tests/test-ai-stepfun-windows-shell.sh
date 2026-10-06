@@ -144,6 +144,19 @@ if [ "$out" = "be=none marker=1" ]; then
 else
   echo "FAIL BASH_ENV trap routing, got: $out"; fail=$((fail+1))
 fi
+out="$(BASH_ENV="$GATE_ENV" \
+  AI_STEPFUN_GATE_BIN="$GATE" \
+  AI_STEPFUN_REVIEW_DIR="$TMP/folder" \
+  AI_STEPFUN_RUNNERS_JSON="$TMP/runners3.json" \
+  AI_STEPFUN_SHELL_GATE=0 \
+  AI_STEPFUN_GATE_LOG="$TMP/gate-audit.log" \
+  GATE_PATH="$TMP/stubs3" \
+  bash -c 'cat readme.md' 2>/dev/null)" || true
+if [ "$out" = "be=none marker=1" ] && grep -q 'cat readme.md' "$TMP/gate-audit.log" 2>/dev/null; then
+  echo 'ok   gated command is recorded in the per-run audit log'; pass=$((pass+1))
+else
+  echo "FAIL audit log, got: $out / $(cat "$TMP/gate-audit.log" 2>/dev/null)"; fail=$((fail+1))
+fi
 if trap_env 'whoami' >/dev/null 2>&1; then
   echo 'FAIL BASH_ENV trap let a non-allowlisted command run'; fail=$((fail+1))
 else
