@@ -292,10 +292,12 @@ muse_code_stage(){ # run only a private copy verified after it was made, so swap
   rm -f -- "$cache"; MUSE_CODE_CACHE_FILE="$cache"; MUSE_CODE_CACHE_ID="$(muse_code_identity "$BIN" "$dir/muse-$want$MUSE_EXE")"
   BIN="$dir/muse-$want$MUSE_EXE"; MUSE_CODE_VERIFIED="$BIN:$want" # hashed just above; a third 400 MB pass costs seconds
 }
-muse_code_reported_version(){ # never fails the caller: an unreadable version is named as such
-  local line=
-  line=$(muse_code_run --version 2>/dev/null | head -n 1 | tr -d '\015') || true
-  printf '%s' "${line:-unreadable}"
+muse_code_reported_version(){ # only a hash-verified binary may run; an unverified file is named as such
+  local line want
+  want="$(muse_code_sha256)" || true
+  [ "${MUSE_CODE_VERIFIED:-}" = "$BIN:$want" ] || { printf "%s" "not-hash-verified"; return 0; }
+  line=$(muse_code_run --version 2>/dev/null | head -n 1 | tr -d '\015' | tr -cd '\11\12\40-\176') || true
+  printf "%s" "${line:-unreadable}"
 }
 muse_code_pin_refusal(){ # one clear sentence naming found vs supported
   printf 'unsupported Muse Code version: reported [%s]; supported pin is %s (config/muse-code/version)' \
