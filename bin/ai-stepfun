@@ -476,7 +476,7 @@ write_windows_runners(){
   command -v sha256sum >/dev/null 2>&1 || return 1
   local sanitized="/c/Program Files/Git/usr/bin:/c/Program Files/Git/cmd:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Program Files/nodejs:/c/Program Files/Git/mingw64/bin:/c/Python313:/c/Python312:/c/Python311"
   local json="{" first=1 name path hash
-  for name in ls cat head bash sh jq npm node pytest python python3 go cargo dotnet; do
+  for name in ls cat head grep bash sh jq npm node pytest python python3 go cargo dotnet; do
     path="$(PATH="$sanitized" command -v "$name" 2>/dev/null || true)"
     [ -n "$path" ] && [ -x "$path" ] || continue
     case "$path" in *WindowsApps*) continue ;; esac
