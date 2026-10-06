@@ -499,6 +499,71 @@ prepare(){
   classify_paths "$IDENTITY" "$CHANGED_PATHS"
 }
 
+# A review classifies the same unchanged inventory about ten times (packet
+# build, resolve, verify, and snapshot copies, on both the preflight and the
+# review path), and every run costs dozens of processes: ~7 s each under Git
+# Bash on Windows (#1355). `explain --paths-from FILE` is a pure function of
+# the bytes hashed below, so a result is reused only when every one of them is
+# byte-identical: this program and its library, the central policy, the
+# consumer declaration, the recorded task state, the repository identity and
+# top level, the requested output form, and the exact path inventory. Any
+# change is a new key. Only a successful result is stored, in the same private
+# state directory that already holds the recorded task class. Set
+# AI_TASK_GATES_EXPLAIN_CACHE=0 to disable.
+explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
+  local f state; local -a present=()
+  state="$(state_path)" || return 1
+  {
+    printf 'ai-task-gates-explain-cache-v1\0%s\0%s\0%s\0%s\0' "$1" "$IDENTITY" "$TOPLEVEL" "$POLICY_FILE"
+    for f in "${BASH_SOURCE[0]}" "$ROOT/tools/lib/task-gates.sh" "$POLICY_FILE" "$CONSUMER_FILE" "$state"; do
+      if [ -f "$f" ]; then printf 'file\0%s\0' "$f"; present+=("$f"); else printf 'absent\0%s\0' "$f"; fi
+    done
+    # One process hashes every present file; its per-file lines carry the
+    # names, so a file moving between slots still changes the key.
+    sha256sum -- "${present[@]}" || return 1
+    # Callers write the inventory to a fresh temporary file each time, so
+    # only its bytes, never its name, are part of the key.
+    printf 'inventory\0'; sha256sum < "$2" || return 1
+  } | sha256sum | cut -d' ' -f1
+}
+
+cmd_explain_cached(){
+  local arg as_json=false paths_from="" other=false key="" dir file out rc
+  local -a args=("$@")
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) as_json=true; shift ;;
+      --paths-from) paths_from="${2:-}"; shift 2 2>/dev/null || shift ;;
+      *) other=true; shift ;;
+    esac
+  done
+  if [ "${AI_TASK_GATES_EXPLAIN_CACHE:-1}" = 0 ] || [ "$other" = true ] \
+     || [ -z "$paths_from" ] || [ "$paths_from" = - ] || [ ! -f "$paths_from" ]; then
+    cmd_explain "${args[@]+"${args[@]}"}"; return
+  fi
+  require_jq; resolve_repo
+  dir="$STATE_DIR/explain-cache"
+  key="$(explain_cache_key "$as_json" "$paths_from")" || key=""
+  case "$key" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+    *) cmd_explain "${args[@]}"; return ;;
+  esac
+  file="$dir/$key"
+  if [ -f "$file" ] && [ ! -L "$file" ]; then cat "$file"; return; fi
+  out="$(cmd_explain "${args[@]}"; rc=$?; printf x; exit "$rc")"; rc=$?
+  out="${out%x}"; printf '%s' "$out"
+  [ "$rc" -eq 0 ] || return "$rc"
+  # An input that changed while the answer was computed would file a new
+  # answer under the old key; store only when the key still holds.
+  [ "$(explain_cache_key "$as_json" "$paths_from" 2>/dev/null)" = "$key" ] || return 0
+  # A failed store only loses the reuse; it never changes the answer.
+  ( umask 077; mkdir -p "$dir" 2>/dev/null && chmod 0700 "$dir" 2>/dev/null
+    tmp="$(mktemp "$dir/.tmp.XXXXXX" 2>/dev/null)" || exit 0
+    printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$file" || rm -f "$tmp"
+    find "$dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null ) || true
+  return 0
+}
+
 cmd_explain(){
   local as_json=false base="" paths_from=""
   while [ $# -gt 0 ]; do
@@ -1663,7 +1728,7 @@ main(){
     check) cmd_check "$@" ;;
     authorize-install) cmd_authorize_install "$@" ;;
     install-verify) cmd_install_verify "$@" ;;
-    explain) cmd_explain "$@" ;;
+    explain) cmd_explain_cached "$@" ;;
     status) cmd_status "$@" ;;
     end) cmd_end "$@" ;;
     classify)

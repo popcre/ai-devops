@@ -1206,4 +1206,42 @@ for args in 'check --small-owner-entry' 'check --row-count' 'check --owner-quote
     "out=\$(timeout 10 bash '$GATES' $args 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'requires a value'"
 done
 
+# #1355: `explain --paths-from FILE` reuses an earlier answer only while every
+# input is byte-identical; any change to them is a fresh classification.
+newrepo "$TMP/xcache" popcre/ai-devops
+XC="$TMP/xcache"; XP="$TMP/xcache-paths"; printf 'docs/a.md\n' > "$XP"
+xc_class(){ ( cd "$XC" && "$GATES" explain --json --paths-from "$XP" ) | jq -r .effective_class; }
+xc_count(){ find "$AI_TASK_GATES_DIR/explain-cache" -maxdepth 1 -type f ! -name '.tmp.*' 2>/dev/null | wc -l | tr -d ' '; }
+first="$(cd "$XC" && "$GATES" explain --json --paths-from "$XP")"; before="$(xc_count)"
+second="$(cd "$XC" && "$GATES" explain --json --paths-from "$XP")"
+uncached="$(cd "$XC" && AI_TASK_GATES_EXPLAIN_CACHE=0 "$GATES" explain --json --paths-from "$XP")"
+check 'explain cache returns the uncached answer byte for byte' "[ -n '$first' ] && [ '$first' = '$second' ] && [ '$second' = '$uncached' ] && [ '$before' -ge 1 ] && [ \"\$(xc_count)\" = '$before' ]"
+cp "$XP" "$XP.copy"
+check 'the same inventory in a fresh temporary file reuses the answer' "[ \"\$(cd '$XC' && '$GATES' explain --json --paths-from '$XP.copy')\" = '$first' ] && [ \"\$(xc_count)\" = '$before' ]"
+check 'explain cache never applies to an explain without --paths-from FILE' "[ \"\$(cd '$XC' && '$GATES' explain --json | jq -r .effective_class)\" != '' ] && [ \"\$(xc_count)\" = '$before' ]"
+printf 'bin/ai-review-lifecycle\n' > "$XP"
+check 'a changed path inventory is classified afresh' "[ \"\$(xc_class)\" = reviewer-safety ]"
+printf 'docs/a.md\n' > "$XP"
+( cd "$XC" && "$GATES" start --class private-evidence >/dev/null 2>&1 )
+check 'a newly recorded task class is honoured over a cached answer' "[ \"\$(xc_class)\" = private-evidence ]"
+( cd "$XC" && "$GATES" end >/dev/null 2>&1 )
+check 'clearing the task class is honoured over a cached answer' "[ \"\$(xc_class)\" != private-evidence ]"
+mkdir -p "$XC/.ai-devops"; xc_class >/dev/null
+printf '{"schema_version":1,"paths":[{"glob":"docs/**","class":"private-evidence"}]}\n' > "$XC/.ai-devops/task-gates.json"
+check 'a changed consumer declaration is classified afresh' "[ \"\$(xc_class)\" = private-evidence ]"
+printf 'not json\n' > "$XC/.ai-devops/task-gates.json"
+check 'a corrupt consumer declaration still fails closed with a cache present' "! ( cd '$XC' && '$GATES' explain --json --paths-from '$XP' ) >/dev/null 2>&1"
+rm -rf "$XC/.ai-devops"
+cp "$AI_TASK_GATES_FILE" "$TMP/xcache-policy.json"
+( cd "$XC" && AI_TASK_GATES_FILE="$TMP/xcache-policy.json" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
+jq '.rules += [{"match":"*/ai-devops","paths":[{"glob":"docs/**","class":"reviewer-safety"}],"gates":{}}]' "$AI_TASK_GATES_FILE" > "$TMP/xcache-policy.json"
+check 'a changed central policy at the same path is classified afresh' "[ \"\$(cd '$XC' && AI_TASK_GATES_FILE='$TMP/xcache-policy.json' '$GATES' explain --json --paths-from '$XP' | jq -c .)\" = \"\$(cd '$XC' && AI_TASK_GATES_FILE='$TMP/xcache-policy.json' AI_TASK_GATES_EXPLAIN_CACHE=0 '$GATES' explain --json --paths-from '$XP' | jq -c .)\" ] && [ \"\$(cd '$XC' && AI_TASK_GATES_FILE='$TMP/xcache-policy.json' '$GATES' explain --json --paths-from '$XP' | jq -r .effective_class)\" = reviewer-safety ]"
+git -C "$XC" remote set-url origin https://github.com/popcre/some-other-repo.git
+check 'a changed repository identity is classified afresh' "[ \"\$(cd '$XC' && '$GATES' explain --json --paths-from '$XP' | jq -r .repository)\" = popcre/some-other-repo ]"
+check 'the explain cache directory is private' "[ \"\$(stat -c %a '$AI_TASK_GATES_DIR/explain-cache' 2>/dev/null || echo 700)\" = 700 ]"
+
+# jqr keeps jq's exact bytes (trailing blank lines, CRLF) and its exit status.
+JQR_FN="$(sed -n '/^jqr(){$/,/^}$/p' "$GATES")"
+check 'jqr strips CR, keeps trailing blank lines, and returns jq status' "eval \"\$JQR_FN\"; a=\"\$(printf '[\"a\\\\r\",\"\",\"\"]' | jqr '.[]'; printf x)\"; [ \"\$a\" = \$'a\\n\\n\\nx' ] && ! printf 'nope' | jqr . >/dev/null 2>&1"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
