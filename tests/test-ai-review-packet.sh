@@ -213,6 +213,59 @@ check "provisional_cannot_approve"            "grep -q 'cannot approve a change'
 # --- hashing ------------------------------------------------------------------
 check "hash_file_written"                     "[ -s '$PKT/MANIFEST.sha256' ]"
 check "fresh_packet_verifies"                 "'$SCRIPT' verify '$PKT'"
+
+# --- CRLF-emitting jq (#1266 residual) ----------------------------------------
+# jq.exe on Windows ends every -r line with CRLF, so identity fields captured
+# for verification carried a trailing CR and verify died with
+# source-head-mismatch / source-base-mismatch. A jq shim reproducing the
+# artifact must leave resolve+verify working.
+CRLF_BIN="$TMP/crlfjq"; mkdir -p "$CRLF_BIN"
+REAL_JQ="$(command -v jq)"
+cat > "$CRLF_BIN/jq" <<SHIM
+#!/bin/sh
+# jq.exe on Windows: CRLF on every stdout line, exit codes intact (jq -e
+# truthiness decides privacy classification), so the shim keeps both.
+_t="\$(mktemp 2>/dev/null)" || _t="./.jq-crlf.\$\$"
+"$REAL_JQ" "\$@" > "\$_t"
+_rc=\$?
+sed 's/\$/\r/' "\$_t"
+rm -f "\$_t"
+exit "\$_rc"
+SHIM
+chmod +x "$CRLF_BIN/jq"
+printf '{"a":"b"}\n' | "$CRLF_BIN/jq" -r .a | od -c | grep -q '\\r' \
+  || bad 'crlf jq shim does not emit CR'
+CRLF_ID="$TMP/crlf-identity.json"
+PATH="$CRLF_BIN:$PATH" "$SCRIPT" resolve "$R" > "$CRLF_ID" 2>/dev/null
+if PATH="$CRLF_BIN:$PATH" "$SCRIPT" verify "$PKT" --identity "$CRLF_ID" >/dev/null 2>&1; then
+  ok crlf_jq_resolve_and_verify_succeed
+else
+  bad crlf_jq_resolve_and_verify_succeed
+fi
+# A value that GENUINELY ends in CR must survive byte-exact on an LF-emitting
+# jq (codex final-check rounds 2 and 3): an unconditional strip would silently
+# accept this identity against the clean repository path, so the refusal is
+# the proof. The rewrite goes through python, not sed: $R contains the sed
+# delimiter and a broken substitution would fake the refusal.
+CR_ID="$TMP/cr-identity.json"
+PATH="$CRLF_BIN:$PATH" "$SCRIPT" resolve "$R" 2>/dev/null > "$CR_ID"
+CR_OK=0
+python - "$CR_ID" "$R" <<'PY' || CR_OK=1
+import json, sys
+path, repo = sys.argv[1], sys.argv[2]
+data = json.load(open(path, encoding="utf-8"))
+data["repository"] = repo + "\r"
+with open(path, "w", encoding="utf-8", newline="") as fh:
+    json.dump(data, fh)
+PY
+if [ "$CR_OK" = 1 ]; then
+  bad genuine_trailing_cr_rewrite_failed
+elif PATH="$CRLF_BIN:$PATH" "$SCRIPT" verify "$PKT" --identity "$CR_ID" >/dev/null 2>&1; then
+  bad genuine_trailing_cr_repository_is_stripped
+else
+  ok genuine_trailing_cr_repository_refused_byte_exact
+fi
+
 check "live-source_packet_is_not_retained_evidence" "! '$SCRIPT' verify-retained '$PKT'"
 check "hash_mismatch_fails_verification" \
   "echo tamper >> '$PKT/patch.diff'; ! '$SCRIPT' verify '$PKT'"

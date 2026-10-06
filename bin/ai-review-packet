@@ -156,6 +156,25 @@ test_progress() {
 
 canon() { (cd "$1" 2>/dev/null && pwd -P) || die "no such directory: $1"; }
 
+# jq.exe on Windows ends every -r output line with CRLF (observed with jq 1.8.2
+# on Git-for-Windows hosts). Every `jq -r` text capture in this script is
+# compared against clean git/tool output, so the artifact CR broke packet
+# verification on Windows (source-head-mismatch, source-base-mismatch, ...).
+# The strip is CALIBRATED, never unconditional: `repository` accepts any
+# string, and a legitimate value ending in CR must survive byte-exact on an
+# LF-emitting jq (Linux). The probe detects the artifact once; when it is
+# present, jq.exe doubled a value's own trailing CR, and stripping exactly one
+# still preserves the original bytes (#1266 residual, codex final-check round 2).
+_jq_crlf=0
+if [ "$(printf '{"v":"x"}' | jq -r .v 2>/dev/null)" = "$(printf 'x\r')" ]; then _jq_crlf=1; fi
+jqr() {
+  local _v _rc=0
+  _v="$(jq -r "$@")" || _rc=$?
+  if [ "$_jq_crlf" = 1 ]; then _v="${_v%$'\r'}"; fi
+  printf '%s' "$_v"
+  return "$_rc"
+}
+
 # A linked worktree is exactly the case where `.git` is a file, not a directory.
 is_worktree() { [ -f "$1/.git" ] && ! [ -d "$1/.git" ]; }
 
@@ -244,7 +263,7 @@ retain_packet() { # retain_packet PACKET_DIR -> prints durable path; 0 on succes
   root="$(sed -n '1p' "$d/$MARKER")"
   tag="$(sed -n '2p' "$d/$MARKER")"
   [ -n "$tag" ] || tag="$(basename "$d")"
-  source="$(jq -r .repository "$d/identity.json")"
+  source="$(jqr .repository "$d/identity.json")"
 
   # Isolation is decided HERE, while both paths still exist, so a relocated
   # live-source packet can never later claim to be isolated evidence.
@@ -422,8 +441,8 @@ cmd_resolve() {
 validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   local file="$1" review="${2:-}" source head base digest ref target
   validate_identity_schema "$file"
-  source="$(jq -r .repository "$file")"; head="$(jq -r .head "$file")"
-  base="$(jq -r .base "$file")"; digest="$(jq -r .source_digest "$file")"
+  source="$(jqr .repository "$file")"; head="$(jqr .head "$file")"
+  base="$(jqr .base "$file")"; digest="$(jqr .source_digest "$file")"
   if jq -e '.code_only.mode == "code-only"' "$file" >/dev/null 2>&1; then
     [ -n "$review" ] && [ -f "$source/.ai-review-sandbox" ] && [ -f "$review/.ai-review-sandbox" ] \
       || die "code-only source and review markers required."
@@ -432,10 +451,10 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
       && [ "$(jq -Sc . "$review/.ai-review-sandbox")" = "$sealed" ] \
       || die "code-only marker and packet identity differ."
     "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$source" \
-      --assert-head "$(jq -r .code_only.original_head "$file")" \
+      --assert-head "$(jqr .code_only.original_head "$file")" \
       || die "code-only source export changed."
     "$SCRIPT_DIR/ai-review-sandbox" verify-code-only "$review" \
-      --assert-head "$(jq -r .code_only.original_head "$file")" \
+      --assert-head "$(jqr .code_only.original_head "$file")" \
       || die "code-only source or export changed."
   elif [ -f "$source/.ai-review-sandbox" ] && jq -e '.mode == "code-only"' "$source/.ai-review-sandbox" >/dev/null 2>&1; then
     die "code-only export lacks a sealed code-only packet identity."
@@ -444,7 +463,7 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
   fi
   [ "$(git -C "$source" rev-parse HEAD)" = "$head" ] || die "source-head-mismatch"
   [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$source")" = "$digest" ] || die "source-digest-mismatch"
-  ref="$(jq -r .target_ref "$file")"; target="$(jq -r .target "$file")"
+  ref="$(jqr .target_ref "$file")"; target="$(jqr .target "$file")"
   # The target REF is a moving pointer over an immutable sealed comparison. A
   # FORWARD move (recorded tip still an ancestor of the live tip) leaves the
   # sealed base..head diff byte-identical, so it is tolerated with a warning —
@@ -469,13 +488,13 @@ validate_identity() { # validate_identity JSON [REVIEW_ROOT]
     fi
   fi
   BASE_SHA=""; BASE_RULE=""; TARGET_REF=""; TARGET_SHA=""
-  resolve_base "$source" "$(jq -r .requested_base "$file")"
+  resolve_base "$source" "$(jqr .requested_base "$file")"
   # TARGET_SHA is deliberately NOT re-checked here: it is the ref's live tip by
   # construction, so it legitimately differs after a tolerated forward move.
   # Tip semantics are enforced by the ancestry check above; the re-resolved
   # BASE_SHA / TARGET_REF equality and the merge-base equality stay strict.
   [ "$BASE_SHA" = "$base" ] && [ "$TARGET_REF" = "$ref" ] || die "source-base-mismatch"
-  [ "$(git -C "$source" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jq -r .merge_base "$file")" ] || die "source-merge-base-mismatch"
+  [ "$(git -C "$source" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jqr .merge_base "$file")" ] || die "source-merge-base-mismatch"
   if [ -n "$review" ]; then
     local review_source="$review"
     if jq -e '.code_only.mode == "code-only"' "$file" >/dev/null 2>&1; then
@@ -502,8 +521,8 @@ validate_identity_schema() { # validate the captured identity without consulting
 validate_retained_identity() { # validate sealed snapshot without trusting moved source
   local file="$1" review="$2" source head base digest review_source
   validate_identity_schema "$file"
-  source="$(jq -r .repository "$file")"; head="$(jq -r .head "$file")"
-  base="$(jq -r .base "$file")"; digest="$(jq -r .source_digest "$file")"
+  source="$(jqr .repository "$file")"; head="$(jqr .head "$file")"
+  base="$(jqr .base "$file")"; digest="$(jqr .source_digest "$file")"
   if jq -e '.code_only.mode == "code-only"' "$file" >/dev/null 2>&1; then
     [ "$(jq -Sc . "$review/.ai-review-sandbox")" = "$(jq -Sc .code_only "$file")" ] \
       || die "retained code-only marker mismatch"
@@ -519,7 +538,7 @@ validate_retained_identity() { # validate sealed snapshot without trusting moved
   [ "$(git -C "$review" rev-parse HEAD)" = "$head" ] || die "snapshot-head-mismatch"
   [ "$("$SCRIPT_DIR/ai-review-sandbox" digest "$review")" = "$digest" ] || die "snapshot-digest-mismatch"
   git -C "$review" cat-file -e "$base" || die "snapshot-base-missing"
-  [ "$(git -C "$review" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jq -r .merge_base "$file")" ] || die "snapshot-merge-base-mismatch"
+  [ "$(git -C "$review" merge-base "$base" "$head" 2>/dev/null || true)" = "$(jqr .merge_base "$file")" ] || die "snapshot-merge-base-mismatch"
 }
 
 # A governed caller may request a durable, exact identity receipt. This is
@@ -528,7 +547,7 @@ publish_receipt() { # publish_receipt PACKET HASH
   local pkt="$1" hash="$2" receipt="${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" source parent tmp
   [ -n "$receipt" ] || return 0
   case "$receipt" in [A-Za-z]:*) receipt="$(cygpath -u "$receipt")" ;; esac
-  source="$(jq -r .repository "$pkt/identity.json")"
+  source="$(jqr .repository "$pkt/identity.json")"
   [ ! -L "$source/.ai" ] && [ ! -L "$source/.ai/reviews" ] && [ ! -L "$receipt" ] || die "source-receipt-linked-path"
   parent="$(canon "$(dirname "$receipt")")"
   [ "$parent" = "$(canon "$source")/.ai/reviews" ] || die "source-receipt-outside-reports"
@@ -620,7 +639,7 @@ cmd_build() {
     || die "$root has no commits yet; there is nothing to review."
   if [ -n "$OPT_IDENTITY" ]; then
     validate_identity "$OPT_IDENTITY" "$root"
-    BASE_SHA="$(jq -r .base "$OPT_IDENTITY")"; BASE_RULE="$(jq -r .rule "$OPT_IDENTITY")"
+    BASE_SHA="$(jqr .base "$OPT_IDENTITY")"; BASE_RULE="$(jqr .rule "$OPT_IDENTITY")"
     [ -z "$OPT_BASE" ] || [ "$(git -C "$root" rev-parse "$OPT_BASE")" = "$BASE_SHA" ] || die "requested-base-mismatch"
   else
     resolve_base "$root" "$OPT_BASE"   # sets BASE_SHA and BASE_RULE; not a subshell
@@ -958,8 +977,8 @@ EOF
     local identity_args=()
     [ -z "$OPT_BASE" ] || identity_args+=(--base "$OPT_BASE")
     cmd_resolve "$real_root" "${identity_args[@]}" > "$pkt/identity.json"
-    [ "$(jq -r .base "$pkt/identity.json")" = "$base" ] || die "source-base-moved"
-    [ "$(jq -r .head "$pkt/identity.json")" = "$head" ] || die "source-head-moved"
+    [ "$(jqr .base "$pkt/identity.json")" = "$base" ] || die "source-base-moved"
+    [ "$(jqr .head "$pkt/identity.json")" = "$head" ] || die "source-head-moved"
     validate_identity "$pkt/identity.json" "$root"
   fi
   test_progress || { rm -rf "$pkt"; die "could not publish packet preparation progress."; }
@@ -1005,7 +1024,7 @@ cmd_verify() {
     fi
     [ -s "$pkt/$MANIFEST" ] && [ -f "$pkt/$PATCH" ] || die "packet-evidence-missing"
     expected_patch="$(mktemp)"
-    git -C "$root" diff --binary "$(jq -r .base "$pkt/identity.json")" "$(jq -r .head "$pkt/identity.json")" > "$expected_patch" \
+    git -C "$root" diff --binary "$(jqr .base "$pkt/identity.json")" "$(jqr .head "$pkt/identity.json")" > "$expected_patch" \
       || { rm -f "$expected_patch"; die "packet-diff-unavailable"; }
     git -C "$root" diff --binary HEAD >> "$expected_patch" \
       || { rm -f "$expected_patch"; die "packet-diff-unavailable"; }

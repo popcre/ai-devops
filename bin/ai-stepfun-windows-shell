@@ -171,9 +171,12 @@ run(){
   local allow="${AI_STEPFUN_RUNNERS_JSON:-${HOME}/.config/ai-devops/secrets/stepfun-windows-runners.json}"
   local real=""
   if [ -f "$allow" ] && [ ! -L "$allow" ] && command -v jq >/dev/null 2>&1; then
-    real="$(jq -r --arg n "$runner_lc" '.[$n].path // .[$n] // empty' "$allow" 2>/dev/null || true)"
+    # jq.exe on Windows ends every -r line with CRLF; strip the trailing CR or
+    # the path exists-check and the hash compare both refuse every runner
+    # (#1266 residual, observed with jq 1.8.2 on Git-for-Windows hosts).
+    real="$(jq -r --arg n "$runner_lc" '.[$n].path // .[$n] // empty' "$allow" 2>/dev/null | sed 's/\r$//' || true)"
     local want=""
-    want="$(jq -r --arg n "$runner_lc" '.[$n].sha256 // empty' "$allow" 2>/dev/null || true)"
+    want="$(jq -r --arg n "$runner_lc" '.[$n].sha256 // empty' "$allow" 2>/dev/null | sed 's/\r$//' || true)"
     [ -n "$real" ] || REFUSE 'runner not in allowlist'
     [ -n "$want" ] || REFUSE 'runner hash pin missing'
     [ -e "$real" ] || REFUSE 'runner path not executable'
