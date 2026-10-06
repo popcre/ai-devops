@@ -36,6 +36,19 @@ case "$MODE" in review|implement) ;; *) printf 'gemini door: usage: gemini.sh re
 # --permission-mode / --always-approve style flags are deliberately not used.
 GE_MODEL="${AI_GEMINI_MODEL:-gemini-3.8-flash-high}"
 GE_TIMEOUT="${DOOR_TIMEOUT:-${AI_GEMINI_TIMEOUT:-3600}}"
+# GNU timeout accepts bare seconds; agy requires an explicit Go duration unit.
+# Keep one bounded budget for both, preserving their shared s/m/h syntax.
+# Reject zero, negative, malformed and overflowing budgets before any call.
+if [[ "$GE_TIMEOUT" =~ ^[0-9]+([.][0-9]+)?$ ]]; then GE_TIMEOUT="${GE_TIMEOUT}s"; fi
+if ! [[ "$GE_TIMEOUT" =~ ^[0-9]+([.][0-9]+)?[smh]$ ]] \
+  || ! LC_ALL=C awk -v value="$GE_TIMEOUT" 'BEGIN {
+    unit=substr(value,length(value),1); number=substr(value,1,length(value)-1)+0;
+    seconds=number*(unit=="h" ? 3600 : unit=="m" ? 60 : 1);
+    exit !(seconds>0 && seconds<=2147483647)
+  }'; then
+  printf 'gemini door: invalid bounded timeout duration.\n' >&2
+  exit 2
+fi
 
 # On Windows the managed agy runtime and its --dir children want Windows
 # paths (same conversion the other doors use).
