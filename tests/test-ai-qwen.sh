@@ -924,7 +924,7 @@ fi
 qualification_retention_cases
 echo quota-terminal > "$TMP/mode"; QUOTA_DOCTOR="$(run doctor --live 2>&1)"
 check 'token-plan quota in the terminal record is allowance exhaustion with its reset time' "jq -e 'select(.failure_class==\"allowance-exhaustion\" and .provider_quota_reset_at==\"11-01 16:00:00 UTC\")' '$QWEN_DIAGNOSTICS'/*.json >/dev/null"
-check 'live doctor names the quota reset time' "printf '%s' \"\$QUOTA_DOCTOR\" | grep -qF 'FAILED — allowance-exhaustion (Qwen Token Plan quota exhausted; resets at 11-01 16:00:00 UTC)'"
+check 'live doctor names the quota reset time' "printf '%s' \"\$QUOTA_DOCTOR\" | grep -qF 'FAILED — allowance-exhaustion (provider quota exhausted; resets at 11-01 16:00:00 UTC)'"
 check 'token-plan quota doctor output is provider-outage, not a code defect or out-of-credit' "printf '%s' \"\$QUOTA_DOCTOR\" > '$TMP/quota-doctor.txt' && python3 '$REPO_ROOT/tools/reviewer_admission.py' classify qwen --text 'automatic qwen requalification failed' --scan '$TMP/quota-doctor.txt' | jq -e '.stream==\"provider-outage\" and .failure_class!=\"out-of-credit\"' >/dev/null"
 for fixture in authentication allowance model-unavailable transport empty fail terminal-error content-filter-result content-filter-assistant content-filter-stderr content-filter-stderr-success timeout runtime-drift; do
   echo "$fixture" > "$TMP/mode"

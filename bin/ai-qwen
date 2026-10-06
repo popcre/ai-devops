@@ -1583,7 +1583,7 @@ cmd_doctor() {
       if write_qualification_diagnostic "$tmp" "$tmp.err" "$provider_rc" "$runtime_sha" "$preloader_sha" "$failure_override"; then
         diagnostic="$QUALIFICATION_DIAGNOSTIC_PATH"
         if [ "$(jq -r .failure_class "$diagnostic")" = allowance-exhaustion ] && [ "$(jq -r '.provider_quota_reset_at // empty' "$diagnostic")" != "" ]; then
-          echo "FAILED — allowance-exhaustion (Qwen Token Plan quota exhausted; resets at $(jq -r .provider_quota_reset_at "$diagnostic"))"
+          echo "FAILED — allowance-exhaustion (provider quota exhausted; resets at $(jq -r .provider_quota_reset_at "$diagnostic"))"
         else
           echo "FAILED — $(jq -r .failure_class "$diagnostic")"
         fi
@@ -1660,8 +1660,8 @@ classify_incomplete_state() { # classify_incomplete_state OUTPUT STDERR AWAIT_RE
     printf 'timed-out'
   elif [ -s "$err" ] && grep -Eqi 'Reached max session turns|Run aborted: tool-call budget .* exceeded' "$err"; then
     printf 'turn_limit_cancelled'
-  elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)|quota[^.]{0,40}exhausted' "$out"; } \
-    || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)|quota[^.]{0,40}exhausted' "$err"; }; then
+  elif { [ -s "$out" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)|quota[^.]{0,40}exhausted|insufficient_quota' "$out"; } \
+    || { [ -s "$err" ] && grep -Eqi 'usage limit reached|billing (cycle|limit)|quota (reached|exceeded)|quota[^.]{0,40}exhausted|insufficient_quota' "$err"; }; then
     printf 'usage-limit'
   elif [ "${QWEN_STARTUP_EXPIRED:-0}" = 1 ]; then
     printf 'timed-out'
