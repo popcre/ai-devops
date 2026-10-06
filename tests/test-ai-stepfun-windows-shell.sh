@@ -168,5 +168,33 @@ else
   echo 'ok   crlf-emitting jq still refuses a mismatched hash'; pass=$((pass+1))
 fi
 
+# The Windows CI lane runs this suite, not test-ai-stepfun.sh. Prove the real
+# Git-for-Windows provisioning path for an older list: doctor must leave it
+# untouched until --write-runners is explicit, then back it up and re-pin grep.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    printf '#!/bin/sh\n[ "${1:-}" = --version ] && echo 1.18.12\n' > "$TMP/opencode-stub"
+    chmod +x "$TMP/opencode-stub"
+    printf 'offline-test-key\n' > "$TMP/stepfun-key"
+    chmod 600 "$TMP/stepfun-key"
+    cp "$TMP/runners.json" "$TMP/doctor-runners.json"
+    doctor_runners="$TMP/doctor-runners.json"
+    old_hash="$(sha256sum "$doctor_runners" | awk '{print $1}')"
+    doctor(){ AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/opencode-stub" \
+      AI_STEPFUN_STATE_DIR="$TMP/doctor-state" AI_STEPFUN_KEY_STORE="$TMP/stepfun-key" \
+      AI_STEPFUN_RUNNERS_JSON="$doctor_runners" "$ROOT/bin/ai-stepfun" doctor "$@"; }
+    if doctor > "$TMP/doctor-before.out" 2>&1; then rc=0; else rc=$?; fi
+    check 'Windows doctor refuses missing grep and head' bash -c '[ "$1" -ne 0 ] && grep -q "missing required runners: ls,head,grep,bash,sh" "$2"' _ "$rc" "$TMP/doctor-before.out"
+    check 'Windows doctor does not silently rewrite old list' test "$(sha256sum "$doctor_runners" | awk '{print $1}')" = "$old_hash"
+    if doctor --write-runners > "$TMP/doctor-repin.out" 2>&1; then rc=0; else rc=$?; fi
+    check 'Windows explicit repair succeeds' test "$rc" -eq 0
+    check 'Windows explicit repair pins all shell verbs' jq -e '(["ls","cat","head","grep","bash","sh"] - keys) == []' "$doctor_runners"
+    backups=("$doctor_runners".backup.*)
+    check 'Windows explicit repair keeps the original list' cmp -s "$TMP/runners.json" "${backups[0]}"
+    check 'Windows doctor accepts the repaired list' doctor
+    check 'Windows grep runs through its new pinned binary' env AI_STEPFUN_RUNNERS_JSON="$doctor_runners" bash "$GATE" grep -n -F needle search.txt
+    ;;
+esac
+
 printf 'passed=%s failed=%s\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
