@@ -22,6 +22,86 @@ class AdmissionTests(unittest.TestCase):
         self.evidence = self.directory / 'terminal.json'
         self.evidence.write_text('{"terminal":"usage-limit"}')
 
+    def test_failure_pause_preserves_stronger_credit_and_scoped_backoff(self):
+        hold = {'version': 1, 'provider': 'kimi', 'failure_class': 'out-of-credit',
+                'created_epoch': 900, 'expires_epoch': 10000, 'record_id': 'original'}
+        data = {'global': hold, 'backoffs': {'profile': {'unchanged': True}}}
+        actual = api.pause_failure(data, 'kimi', 'provider-timeout', 1000)
+        self.assertEqual(actual, hold)
+        self.assertEqual(data['backoffs'], {'profile': {'unchanged': True}})
+
+    def test_failure_pause_extends_active_hold_without_changing_credit_reason(self):
+        hold = {'version': 1, 'provider': 'kimi', 'failure_class': 'out-of-credit',
+                'created_epoch': 900, 'expires_epoch': 1100, 'record_id': 'original'}
+        data = {'global': hold, 'backoffs': {}}
+        actual = api.pause_failure(data, 'kimi', 'wrapper-crash', 1000)
+        self.assertEqual(actual['expires_epoch'], 4600)
+        self.assertEqual(actual['failure_class'], 'out-of-credit')
+        self.assertEqual(actual['created_epoch'], 900)
+        self.assertNotEqual(actual['record_id'], 'original')
+
+    def test_failure_pause_refuses_non_integer_duration_and_non_string_cause(self):
+        for seconds in (3600.0, True, False, '3600', None):
+            with self.subTest(seconds=seconds):
+                data = {'global': None}
+                with self.assertRaises(ValueError):
+                    api.pause_failure(data, 'kimi', 'provider-timeout', 1000, seconds)
+                self.assertEqual(data, {'global': None})
+        for reason in (None, 3600, {}, True):
+            with self.subTest(reason=reason):
+                with self.assertRaises(ValueError):
+                    api.pause_failure({'global': None}, 'kimi', reason, 1000)
+        for now in (1000.0, True, None):
+            with self.subTest(now=now):
+                with self.assertRaises(ValueError):
+                    api.pause_failure({'global': None}, 'kimi', 'provider-timeout', now)
+
+    def test_failure_pause_rejects_missing_cause_wrong_duration_and_malformed_hold(self):
+        for reason, seconds in [('', 3600), ('provider-timeout', 1), ('provider-timeout', 86400)]:
+            with self.assertRaises(ValueError):
+                api.pause_failure({'global': None}, 'kimi', reason, 1000, seconds)
+        with self.assertRaises(ValueError):
+            api.pause_failure({'global': {'provider': 'other'}}, 'kimi', 'wrapper-crash', 1000)
+
+    def test_expired_hold_does_not_mask_new_named_failure(self):
+        data = {'global': {'version': 1, 'provider': 'kimi', 'failure_class': 'out-of-credit',
+                           'created_epoch': 100, 'expires_epoch': 1000, 'record_id': 'old'}}
+        actual = api.pause_failure(data, 'kimi', 'wrapper-crash', 1000)
+        self.assertEqual(actual['failure_class'], 'wrapper-crash')
+        self.assertEqual(actual['expires_epoch'], 4600)
+
+    def test_observed_failure_window_is_fixed_and_replay_is_monotonic(self):
+        data = {'global': None, 'backoffs': {}}
+        initial = api.pause_failure(data, 'kimi', 'provider-timeout', 1000, observed=900)
+        self.assertEqual(initial['created_epoch'], 900)
+        self.assertEqual(initial['expires_epoch'], 4500)
+        self.assertEqual(api.pause_failure(data, 'kimi', 'provider-timeout', 1200, observed=900), initial)
+        snapshot = json.dumps(data, sort_keys=True)
+        expired = api.pause_failure(data, 'kimi', 'provider-timeout', 4500, observed=900)
+        self.assertEqual(expired['status'], 'expired')
+        self.assertEqual(json.dumps(data, sort_keys=True), snapshot)
+        for observed in (True, False, 900.0, -1, 1001, '900'):
+            with self.subTest(observed=observed):
+                with self.assertRaises(ValueError):
+                    api.pause_failure({'global': None}, 'kimi', 'provider-timeout', 1000, observed=observed)
+
+    def test_pause_status_and_expired_cli_do_not_rewrite_protected_record(self):
+        data = {'version': 2, 'provider': 'kimi', 'global': {
+            'version': 1, 'provider': 'kimi', 'failure_class': 'out-of-credit',
+            'created_epoch': 100, 'expires_epoch': 1000, 'record_id': 'retained'}, 'backoffs': {}}
+        api.publish(self.directory, 'kimi', data)
+        file = self.directory / 'kimi.json'
+        before, modified = file.read_bytes(), file.stat().st_mtime_ns
+        command = [sys.executable, str(MODULE), 'pause-status', 'kimi', '--directory', str(self.directory)]
+        actual = json.loads(subprocess.check_output(command, text=True))
+        self.assertEqual(actual, data['global'])
+        command = [sys.executable, str(MODULE), 'pause', 'kimi', '--directory', str(self.directory),
+                   '--reason', 'provider-timeout', '--seconds', '3600', '--observed', '0']
+        self.assertEqual(json.loads(subprocess.check_output(command, text=True))['status'], 'expired')
+        self.assertEqual((file.read_bytes(), file.stat().st_mtime_ns), (before, modified))
+        file.write_text('{"version":2,"provider":"other","global":null,"backoffs":{}}')
+        self.assertNotEqual(subprocess.run([sys.executable, str(MODULE), 'pause-status', 'kimi', '--directory', str(self.directory)], capture_output=True).returncode, 0)
+
     def observe(self, **kwargs):
         args = dict(directory=self.directory, provider='kimi', profile='profile-a',
                     model='model-a', run_id='run-a', observed=1000, now=1000,
