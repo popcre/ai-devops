@@ -25,6 +25,10 @@ grep -Fq 'run: .\tests\test-all.ps1' "$workflow" || fail 'qualification must run
 grep -Fq 'git status --short --untracked-files=all' "$workflow" || fail 'qualification must prove reusable workspace cleanup'
 
 # Sections scope: the lighter-jobs admission bar.
+grep -Fq '      - tools/ci/assert-windows-runner-host.ps1' "$workflow" || fail 'a host gate change must trigger the qualification workflow'
+grep -Fq 'needs: sections-host-pin' "$workflow" || fail 'sections must wait for the hosted host-pin proof'
+grep -Fq 'must be carried by exactly one runner' "$workflow" || fail 'the host pin must prove a single candidate runner'
+grep -Fq 'already in the qualified pool' "$workflow" || fail 'the host pin must refuse a qualified pool host'
 grep -Fq 'options: [complete, sections]' "$workflow" || fail 'qualification must offer the sections scope'
 grep -Fq "inputs.scope != 'sections'" "$workflow" || fail 'the complete job must not also run for a sections dispatch'
 grep -Fq 'section: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]' "$workflow" || fail 'sections scope must cover all 12 pull-request sections'

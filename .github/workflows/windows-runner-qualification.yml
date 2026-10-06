@@ -16,6 +16,7 @@ on:
     paths:
       - .github/workflows/windows-runner-qualification.yml
       - tests/test-windows-runner-qualification-workflow.sh
+      - tools/ci/assert-windows-runner-host.ps1
 
 permissions:
   contents: read
@@ -62,7 +63,41 @@ jobs:
   # 12 sections, run as verify.yml runs it, must pass within the same 40-minute
   # section ceiling. The complete job above stays available for a host that
   # can carry the whole matrix.
+  # Fail closed on a hosted runner before any self-hosted job is queued: an
+  # empty, malformed or shared label would otherwise queue forever or land on
+  # a pool host. The label must be carried by exactly one registered runner,
+  # and that runner must not already be in the qualified pool.
+  sections-host-pin:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.scope == 'sections' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Prove the label pins exactly one candidate host
+        env:
+          RUNNER_LABEL: ${{ inputs.runner_label }}
+          GH_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          case "$RUNNER_LABEL" in
+            self-hosted|Windows|X64|ai-devops-windows|ai-devops-windows-qualified)
+              echo "::error::runner_label must be a custom label, not a shared pool label."; exit 1 ;;
+          esac
+          if ! printf '%s' "$RUNNER_LABEL" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'; then
+            echo "::error::runner_label is empty or malformed."; exit 1
+          fi
+          [ -n "$GH_TOKEN" ] || { echo "::error::RUNNER_POOL_READ_TOKEN is unavailable; cannot prove the host pin."; exit 1; }
+          hosts="$(gh api "repos/$REPO/actions/runners" --paginate \
+            --jq ".runners[] | select(any(.labels[]; .name == \"$RUNNER_LABEL\")) | {name, qualified: any(.labels[]; .name == \"ai-devops-windows-qualified\")}")"
+          count="$(printf '%s' "$hosts" | grep -c . || true)"
+          [ "$count" -eq 1 ] || { echo "::error::runner_label must be carried by exactly one runner; found $count."; exit 1; }
+          if printf '%s' "$hosts" | grep -q '"qualified":true'; then
+            echo "::error::the pinned runner is already in the qualified pool."; exit 1
+          fi
+          echo "Pinned candidate: $hosts"
+
   qualify-sections:
+    needs: sections-host-pin
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.scope == 'sections' }}
     strategy:
       fail-fast: false
