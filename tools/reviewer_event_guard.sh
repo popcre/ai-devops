@@ -55,6 +55,44 @@ reviewer_event_cleanup_allowed(){
   }
 }
 
+# True when AI_REVIEW_EVENT_RUN_ID has a started row and no finished row.
+# Used instead of `kill -0` for nested inheritance: Windows/MSYS cannot
+# reliably liveness-check a PID across process trees.
+reviewer_event_run_is_open(){
+  local python event_tool name run_id
+  local -a evidence_env=()
+  run_id="${AI_REVIEW_EVENT_RUN_ID:-}"
+  [[ "$run_id" =~ ^[0-9a-f]{32}$ ]] || return 1
+  python="$(command -v python3 || command -v python)" || return 1
+  event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_events.py"
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
+    [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
+  done
+  env -i "${evidence_env[@]}" "$python" - "$run_id" <<'PY'
+import json, os, sys
+from pathlib import Path
+run_id = sys.argv[1]
+base = os.environ.get("AI_REVIEW_EVENT_DIR") or (
+    (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops/reviewer-events")
+path = Path(base) / "events.jsonl"
+if not path.is_file():
+    sys.exit(1)
+started = finished = False
+for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    try:
+        row = json.loads(line)
+    except ValueError:
+        continue
+    if row.get("run_id") != run_id:
+        continue
+    if row.get("event") == "started":
+        started = True
+    elif row.get("event") == "finished":
+        finished = True
+sys.exit(0 if started and not finished else 1)
+PY
+}
+
 reviewer_event_guard(){
   local provider="$1" wrapper="$2"; shift 2
   case "${1:-}" in
@@ -71,14 +109,15 @@ reviewer_event_guard(){
   #      must publish onto the same run_id or the reserved obligation is left
   #      unfilled ("required report is not durably published") even though the
   #      review text is on disk.
-  # PROVIDER + RUN_ID identify the open invocation. Parent-match stays the
-  # direct-child fast path. Nested grandchildren also inherit: on Windows/MSYS
-  # `kill -0` across process trees is unreliable (same reason OWNER_PID is a
-  # shell-local witness), so liveness is NOT required here. A finished run_id
-  # fails closed later — require-report/publish-report refuse to rewrite a
-  # completed invocation.
-  if [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] && [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ]; then
-    if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ] || [ -n "${AI_REVIEW_EVENT_PARENT:-}" ]; then
+  # PROVIDER + RUN_ID identify the open invocation. Parent-match is the
+  # direct-child path. Nested grandchildren (pool -> runner) also inherit
+  # while that invocation is still open in the ledger — Windows/MSYS
+  # `kill -0` across process trees is unreliable, so liveness comes from
+  # the event ledger, not the PID. A finished run_id fails closed later
+  # (require-report/publish-report refuse to rewrite a completed invocation).
+  if [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] && [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] \
+     && [ -n "${AI_REVIEW_EVENT_PARENT:-}" ]; then
+    if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ] || reviewer_event_run_is_open; then
       AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
       export -n AI_REVIEW_EVENT_OWNER_PID
       return 0

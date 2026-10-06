@@ -448,7 +448,7 @@ def sandbox_source_chain(sandbox):
         except Blocked:
             return current
         if source in seen or source == current:
-            return source
+            return current
         seen.add(source)
         if not (source / ".ai-review-sandbox").is_file():
             return source
