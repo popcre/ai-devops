@@ -364,8 +364,10 @@ def classify(paths, extra_text, provider):
 
 def pause_failure(data, provider, reason, now, seconds=3600):
     """Monotonic one-hour hold; existing credit and scoped backoffs survive."""
-    if seconds != 3600 or not re.fullmatch(r'[a-z][a-z0-9_.-]{0,79}', reason):
+    if type(seconds) is not int or seconds != 3600 or not isinstance(reason, str) or not re.fullmatch(r'[a-z][a-z0-9_.-]{0,79}', reason):
         raise ValueError('failure pause requires a named cause and exactly 3600 seconds')
+    if type(now) is not int:
+        raise ValueError('failure pause requires an integer observation time')
     existing = data.get('global')
     if existing is not None and not valid_global(existing, provider):
         raise ValueError('existing global hold is malformed')

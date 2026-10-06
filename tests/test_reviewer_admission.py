@@ -40,6 +40,22 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(actual['created_epoch'], 900)
         self.assertNotEqual(actual['record_id'], 'original')
 
+    def test_failure_pause_refuses_non_integer_duration_and_non_string_cause(self):
+        for seconds in (3600.0, True, False, '3600', None):
+            with self.subTest(seconds=seconds):
+                data = {'global': None}
+                with self.assertRaises(ValueError):
+                    api.pause_failure(data, 'kimi', 'provider-timeout', 1000, seconds)
+                self.assertEqual(data, {'global': None})
+        for reason in (None, 3600, {}, True):
+            with self.subTest(reason=reason):
+                with self.assertRaises(ValueError):
+                    api.pause_failure({'global': None}, 'kimi', reason, 1000)
+        for now in (1000.0, True, None):
+            with self.subTest(now=now):
+                with self.assertRaises(ValueError):
+                    api.pause_failure({'global': None}, 'kimi', 'provider-timeout', now)
+
     def test_failure_pause_rejects_missing_cause_wrong_duration_and_malformed_hold(self):
         for reason, seconds in [('', 3600), ('provider-timeout', 1), ('provider-timeout', 86400)]:
             with self.assertRaises(ValueError):
