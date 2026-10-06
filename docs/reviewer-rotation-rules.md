@@ -10,7 +10,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
    `bin/ai-reviewer-membership-drift` compares the two and fails on any
    difference; the `Reviewer membership drift` workflow runs it every six hours
    and on registry changes. Providers that review outside the allocator
-   (Codex approval gate, StepFun on Ubuntu/Linux) are listed in
+   (the Codex approval gate) are listed in
    `config/reviewer-membership-scope.json`.
 2. **Unreachable reviewer: check membership, then move on.** Run
    `bin/ai-reviewer-membership-drift` or read the registry first. If the
@@ -82,7 +82,7 @@ allocator but stayed registered here, and a session spent an hour trying it.
     credit pause — that path needs two repos, tests, and a review. Reserve
     roster edits for permanent retirement or a real membership change.
 
-12. **StepFun is outside the allocator; Linux is bubblewrap-isolated, Windows
+12. **StepFun is in the allocator rotation; Linux is bubblewrap-isolated, Windows
     is folder + test shell (weaker).** Owner instruction 2026-09-25: StepFun
     on Ubuntu only with bubblewrap. Owner instruction 2026-09-30 (MiMo chat,
     *folder + test shell*): Windows may run `review`/`ask` via the pinned
@@ -98,10 +98,11 @@ allocator but stayed registered here, and a session spent an hour trying it.
     so the model never sees SSH keys or the agent socket, git or gh
     credentials, the 1Password token, or the Docker socket. The
     commit/remote refusal is an extra end-state check. Accepted exposure on
-    Linux: shared network (StepFun API). The shared-db allocator has no
-    platform field, so StepFun is listed in
-    `config/reviewer-membership-scope.json` and is never assigned by the
-    allocator.
+    Linux: shared network (StepFun API). Owner instruction 2026-09-25 ("put
+    stepfun into the reviewer rotation"): the shared-db allocator row
+    `stepfun-step-5-preview` (popcre/shared-db PR #3657, 2026-10-02) puts it in
+    the rotation. The allocator has no platform field; a machine whose
+    `ai-review-preflight usable` reports stepfun unusable skips it.
 
 ---
 
@@ -134,6 +135,6 @@ tells Albert in the same session, and rotates (rules 10–11). Muse capacity
 | **DeepSeek** | `ai-deepseek-agent` (via `ai-review deepseek <mode> --code-only`) | OpenCode `1.18.12` (`config/opencode/version`). Model pin `deepseek-flash` (DeepSeek V4.1 Flash). Not in `provider-cli-versions.json`. | Rotation reviewer. Also freeform multi-turn debate. | Next registered rotation reviewer. | Formal rotation reviews on the read-only `ai-deepseek-agent`. Any other model id is refused before credential use. |
 | **Kimi** | `ai-kimi` | `config/provider-cli-versions.json`: `supported_version` null (not pinned; presence sufficient). Model pin `kimi-code/k3`. | **Absent from rotation** (account out of credit since 2026-09-10). Structurally read-only reviews when active. | n/a — not in rotation. Never retry. | Re-entry requires a reviewed registry change backed by a live well-formed verdict. Historical evidence retained. |
 | **GLM** | `ai-glm` | OpenCode `1.18.12` (`config/opencode/version`). Model pin `glm-5.3`. Agent pins in `config/opencode/agent/*.md`. Not in `provider-cli-versions.json`. | Rotation reviewer (restored 2026-09-30). Also explicitly requested second opinion. | Next registered rotation reviewer. GLM never reviews GLM-orchestrated (ZCode) work. | Windows runs `ai-glm` on the Ubuntu host over SSH. |
-| **StepFun** | `ai-stepfun` | `bin/ai-stepfun` enforces its own floor 0.1.1 (StepCode). Not in `provider-cli-versions.json`. OpenCode `1.18.12` for the Windows path. Model pin `step-5-preview`. | Reviews / second opinions outside the allocator. Ubuntu/Linux only (bubblewrap). Windows: folder + test shell via OpenCode (not rule-12 equivalent). | Outside allocator — never drawn. If down, use a rotation reviewer. | Windows `implement` is refused. Never assigned to a Windows session by the allocator. |
+| **StepFun** | `ai-stepfun` | `bin/ai-stepfun` enforces its own floor 0.1.1 (StepCode). Not in `provider-cli-versions.json`. OpenCode `1.18.12` for the Windows path. Model pin `step-5-preview`. | Rotation reviewer (shared-db row `stepfun-step-5-preview`, since 2026-10-02). Linux: bubblewrap. Windows: folder + test shell via OpenCode (not rule-12 equivalent). | Next registered rotation reviewer. A machine whose preflight reports stepfun unusable skips it. | Windows `implement` is refused. |
 | **ZCode** | `ai-zcode` (headless driver only) | n/a | Interactive client (GLM-5.3 desktop agent). **Not a reviewer.** | n/a | No ZCode reviewer, ever (owner ruling 2026-09-17). |
 | **MiMo** | `ai-mimo` (headless driver only) | n/a | Interactive client. **Not a reviewer.** | n/a | No MiMo reviewer. |
