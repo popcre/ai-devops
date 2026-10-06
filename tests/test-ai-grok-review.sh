@@ -1677,10 +1677,17 @@ rm -rf "$LSM"
 # The runner must inherit that SAME run_id (not begin a second invocation),
 # or the reserved obligation is left unfilled and cleanup reports
 # "required report is not durably published" even though the review text
-# is already on disk.
+# is already on disk. Inheritance requires a live ledger `started` row with
+# the same provider and no `finished` row (open-ledger gate).
 NEST_TMP="$(mktemp -d)"
 GUARD_SRC="$REPO_ROOT/tools/reviewer_event_guard.sh"
 export AI_REVIEW_EVENT_DIR="$NEST_TMP/events"
+mkdir -p "$AI_REVIEW_EVENT_DIR"
+seed_open_run(){ # seed_open_run RUN_ID PROVIDER
+  printf '%s\n' "{\"schema_version\":1,\"event\":\"started\",\"provider\":\"$2\",\"operation\":\"invocation\",\"run_id\":\"$1\",\"timestamp\":\"2026-10-06T00:00:00+00:00\",\"repo\":\"$REPO_ROOT\",\"head\":\"$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo 0000000000000000000000000000000000000000)\",\"caller\":\"test\"}" >> "$AI_REVIEW_EVENT_DIR/events.jsonl"
+}
+seed_open_run aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa qwen
+seed_open_run bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb qwen
 cat > "$NEST_TMP/inner.sh" <<'INNER'
 source "$GUARD_SRC"
 reviewer_event_guard qwen "$GUARD_SRC" new x
@@ -1699,7 +1706,7 @@ printf '%s\n' "$NEST_DIRECT_OUT" | grep -q 'INHERIT=0' \
   && ok "direct_child_inherits_open_invocation" \
   || bad "direct_child_inherits_open_invocation (got: $NEST_DIRECT_OUT)"
 # 2. Nested grandchild (pool body launched the runner) inherits while the
-#    recorder is still alive — this is the pool → ai-qwen/ai-gemini/ai-muse shape.
+#    run is still open in the ledger — pool → ai-qwen/ai-gemini/ai-muse.
 cat > "$NEST_TMP/t2.sh" <<'T2'
 source "$GUARD_SRC"
 export AI_REVIEW_EVENT_PROVIDER=qwen
@@ -1714,7 +1721,7 @@ NEST_NESTED_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" bash "$NEST_TMP/t
 printf '%s\n' "$NEST_NESTED_OUT" | grep -q 'INHERIT=0' \
   && ok "nested_runner_inherits_open_invocation" \
   || bad "nested_runner_inherits_open_invocation (got: $NEST_NESTED_OUT)"
-# 3. A later process must NOT inherit without a live recorder parent.
+# 3. A later process must NOT inherit without a recorder parent / open run.
 NEST_DEAD_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" \
   AI_REVIEW_EVENT_PROVIDER=qwen \
   AI_REVIEW_EVENT_RUN_ID=cccccccccccccccccccccccccccccccc \
@@ -1722,6 +1729,51 @@ NEST_DEAD_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" \
 printf '%s\n' "$NEST_DEAD_OUT" | grep -q 'INHERIT=0' \
   && bad "missing_recorder_parent_refuses_inheritance (got: $NEST_DEAD_OUT)" \
   || ok "missing_recorder_parent_refuses_inheritance"
+# 4. A finished run_id must not inherit (open-ledger gate).
+printf '%s\n' "{\"schema_version\":1,\"event\":\"finished\",\"provider\":\"qwen\",\"operation\":\"invocation\",\"run_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"timestamp\":\"2026-10-06T00:00:01+00:00\",\"repo\":\"$REPO_ROOT\",\"head\":\"0000000000000000000000000000000000000000\",\"caller\":\"test\",\"exit_code\":0}" >> "$AI_REVIEW_EVENT_DIR/events.jsonl"
+NEST_FIN_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" bash "$NEST_TMP/t2.sh" 2>&1 || true)"
+printf '%s\n' "$NEST_FIN_OUT" | grep -q 'INHERIT=0' \
+  && bad "finished_run_refuses_inheritance (got: $NEST_FIN_OUT)" \
+  || ok "finished_run_refuses_inheritance"
+# 5. Provider mismatch must not inherit (open-ledger gate is provider-bound).
+seed_open_run dddddddddddddddddddddddddddddddd gemini
+NEST_PROV_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" \
+  AI_REVIEW_EVENT_PROVIDER=qwen \
+  AI_REVIEW_EVENT_RUN_ID=dddddddddddddddddddddddddddddddd \
+  AI_REVIEW_EVENT_PARENT="$$" \
+  bash "$NEST_TMP/inner.sh" 2>&1 || true)"
+printf '%s\n' "$NEST_PROV_OUT" | grep -q 'INHERIT=0' \
+  && bad "provider_mismatch_refuses_inheritance (got: $NEST_PROV_OUT)" \
+  || ok "provider_mismatch_refuses_inheritance"
+# 6. sandbox_source_chain walks managed-copy markers to the original repo.
+CHAIN_OUT="$(cd "$REPO_ROOT/tools" && python3 - <<'PY' 2>&1
+from pathlib import Path
+import tempfile, os, sys
+sys.path.insert(0, ".")
+from reviewer_events import sandbox_source_chain
+tmp = Path(tempfile.mkdtemp())
+# pool sandbox (source = original repo) -> runner copy (source = pool sandbox)
+original = tmp / "original-repo"; original.mkdir()
+pool = tmp / "pool-sandbox"; pool.mkdir()
+runner = tmp / "runner-copy"; runner.mkdir()
+(pool / ".ai-review-sandbox").write_text(f"{original}\nsource_digest=x\nevidence_format=1\n")
+(runner / ".ai-review-sandbox").write_text(f"{pool}\nsource_digest=x\nevidence_format=1\n")
+chain = sandbox_source_chain(runner)
+print("CHAIN_OK" if chain == original.resolve() or chain == original else f"CHAIN_FAIL {chain}")
+# cycle: A -> B -> A must not loop
+a = tmp / "a"; b = tmp / "b"; a.mkdir(); b.mkdir()
+(a / ".ai-review-sandbox").write_text(f"{b}\nsource_digest=x\nevidence_format=1\n")
+(b / ".ai-review-sandbox").write_text(f"{a}\nsource_digest=x\nevidence_format=1\n")
+c = sandbox_source_chain(a)
+print("CYCLE_OK" if c in (a.resolve(), b.resolve(), a, b) else f"CYCLE_FAIL {c}")
+PY
+)"
+printf '%s\n' "$CHAIN_OUT" | grep -q 'CHAIN_OK' \
+  && ok "sandbox_source_chain_walks_to_original_repo" \
+  || bad "sandbox_source_chain_walks_to_original_repo (got: $CHAIN_OUT)"
+printf '%s\n' "$CHAIN_OUT" | grep -q 'CYCLE_OK' \
+  && ok "sandbox_source_chain_cycle_terminates" \
+  || bad "sandbox_source_chain_cycle_terminates (got: $CHAIN_OUT)"
 unset AI_REVIEW_EVENT_DIR
 rm -rf "$NEST_TMP"
 

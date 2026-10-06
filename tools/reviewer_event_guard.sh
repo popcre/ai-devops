@@ -59,19 +59,20 @@ reviewer_event_cleanup_allowed(){
 # Used instead of `kill -0` for nested inheritance: Windows/MSYS cannot
 # reliably liveness-check a PID across process trees.
 reviewer_event_run_is_open(){
-  local python event_tool name run_id
+  local python name run_id provider
   local -a evidence_env=()
   run_id="${AI_REVIEW_EVENT_RUN_ID:-}"
+  provider="${AI_REVIEW_EVENT_PROVIDER:-}"
   [[ "$run_id" =~ ^[0-9a-f]{32}$ ]] || return 1
+  [ -n "$provider" ] || return 1
   python="$(command -v python3 || command -v python)" || return 1
-  event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_events.py"
   for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
     [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
   done
-  env -i "${evidence_env[@]}" "$python" - "$run_id" <<'PY'
+  env -i "${evidence_env[@]}" "$python" - "$run_id" "$provider" <<'PY'
 import json, os, sys
 from pathlib import Path
-run_id = sys.argv[1]
+run_id, provider = sys.argv[1], sys.argv[2]
 base = os.environ.get("AI_REVIEW_EVENT_DIR") or (
     (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops/reviewer-events")
 path = Path(base) / "events.jsonl"
@@ -85,6 +86,9 @@ for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         continue
     if row.get("run_id") != run_id:
         continue
+    if row.get("provider") != provider:
+        # A run_id is only open for the provider that started it.
+        sys.exit(1)
     if row.get("event") == "started":
         started = True
     elif row.get("event") == "finished":
