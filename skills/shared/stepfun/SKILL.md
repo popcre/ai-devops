@@ -1,6 +1,6 @@
 ---
 name: stepfun
-description: Use StepFun Step 5 (step-5-preview) through ai-stepfun. Formal reviews with a VERDICT line and second opinions (both may run code and edit files in a disposable remote-less copy), and implementation runs that write and execute code in an isolated remote-less clone. Ubuntu/Linux only (StepCode or OpenCode, always under bubblewrap); Windows is refused. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion.
+description: Use StepFun Step 5 (step-5-preview) through ai-stepfun. Formal reviews with a VERDICT line and second opinions (both may run code and edit files in a disposable remote-less copy), and implementation runs that write and execute code in an isolated remote-less clone. Allocator rotation reviewer (shared-db#3657). Linux runs StepCode or OpenCode under bubblewrap; Windows runs review/ask through the OpenCode folder + test shell, and implement is refused there. Use for "ask StepFun", "StepFun review", "Step 5", "have StepFun implement this", or a StepFun second opinion.
 ---
 
 # stepfun
