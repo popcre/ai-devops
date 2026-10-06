@@ -22,7 +22,20 @@ echo canary > "$TMP/host/secret.txt"
 echo ok > "$TMP/folder/readme.md"
 printf 'foo.*bar\n.*\nneedle\n' > "$TMP/folder/search.txt"
 awk 'BEGIN { for (i=0; i<205; i++) print "needle" }' > "$TMP/folder/long.txt"
-ln -s "$TMP/host/secret.txt" "$TMP/folder/linked.txt"
+# Git Bash `ln -s` can create a regular copy under a Windows runner account;
+# such a copy cannot exercise the path-escape guard. A directory junction does
+# not require symlink privilege and Git Bash resolves it as a linked directory.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    powershell.exe -NoProfile -Command "New-Item -ItemType Junction -Path '$(cygpath -w "$TMP/folder/linked")' -Target '$(cygpath -w "$TMP/host")' | Out-Null" </dev/null
+    ;;
+  *) ln -s "$TMP/host" "$TMP/folder/linked" ;;
+esac
+if [ ! -L "$TMP/folder/linked" ] ||
+   [ "$(cd "$TMP/folder/linked" && pwd -P)" != "$(cd "$TMP/host" && pwd -P)" ]; then
+  echo 'FAIL linked fixture is not a real path escape' >&2
+  exit 1
+fi
 export AI_STEPFUN_REVIEW_DIR="$TMP/folder"
 export GATE_PATH="/usr/bin:/bin"
 export AI_STEPFUN_TEST_MODE=1
@@ -61,7 +74,7 @@ check 'head output is capped at 200 lines' bash -c 'test "$("$1" head -n 200 lon
 check 'grep output is capped at 200 matches' bash -c 'test "$("$1" grep -n -F needle long.txt | wc -l)" -eq 200' _ "$GATE"
 check 'refuses parent path in head' refuses head -n 2 ../host/secret.txt
 check 'refuses parent path in grep' refuses grep -n -F needle ../host/secret.txt
-check 'refuses symlink target outside folder' refuses grep -n -F needle linked.txt
+check 'refuses linked directory outside folder' refuses grep -n -F canary linked/secret.txt
 check 'refuses Windows absolute path' refuses grep -n -F needle 'C:\Windows\System32\secret.txt'
 check 'refuses network path' refuses grep -n -F needle //host/share
 check 'refuses head -c' refuses head -c 100 search.txt
