@@ -1546,6 +1546,31 @@ check "pool_without_operation_omits_the_flag" "! engargs | grep -q -- '--operati
 rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-grkeng" 2>&1; RC_GRKENG=$?
 check "pool_grok_argv_keeps_max_turns" "grep -q -- '--provider grok' '$POOLTMP/engine-args' && grep -q -- '--max-turns 120' '$POOLTMP/engine-args'"
+# --- legacy session-runner adapter path -----------------------------------
+# The shipped doors registry now registers all six providers, so the pool
+# dispatches every one through the shared engine. The legacy adapter contracts
+# (one-shot session release, verdict binding, drift, floor, credit) live in the
+# session-runner fallback that the pool keeps "for the shrunk-registry test
+# path". Shrink the SHIPPED registry to the pre-Phase-D pair (grok+deepseek)
+# so qwen/muse/gemini fall through to that path. Restore before any later
+# assertion; the trap covers the failure path too.
+DOORS_SHIPPED="$REPO_ROOT/config/review-runner-doors.json"
+DOORS_BACKUP="$POOLTMP/doors-backup.json"
+cp "$DOORS_SHIPPED" "$DOORS_BACKUP"
+restore_doors(){ cp "$DOORS_BACKUP" "$DOORS_SHIPPED" 2>/dev/null || true; }
+trap restore_doors EXIT
+cat > "$DOORS_SHIPPED" <<'DOORS_EOF'
+{
+  "schema_version": 1,
+  "_comment": "test-time shrink for legacy adapter path; restored on exit",
+  "runner_core": "review-lifecycle-core/1",
+  "runner_entry": "bin/ai-review-engine",
+  "grok": {"door": "tools/lib/review-doors/grok.sh", "contract": ["review", "implement"]},
+  "deepseek": {"door": "tools/lib/review-doors/deepseek.sh", "contract": ["review", "implement"]}
+}
+DOORS_EOF
+# Re-export with the session-runner hooks the legacy adapter path needs.
+export_pool(){ export AI_REVIEW_PACKET_BIN="$POOLTMP/packet" AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle" AI_POOL_RUNNER_QWEN="$POOLTMP/runner" AI_POOL_RUNNER_MUSE="$POOLTMP/runner" AI_POOL_RUNNER_GEMINI="$POOLTMP/runner" AI_POOL_RUNNER_GROK="$POOLTMP/runner" AI_REVIEW_ENGINE_BIN="$POOLTMP/engine" AI_POOL_TEST_HOOKS=1 AI_POOL_CALLER=zcode-test AI_REVIEW_EVENT_DIR="$POOLTMP/events"; mkdir -p "$POOLTMP/events"; }
 # Issue #711 Phase 5 (B'): a one-shot pool review releases the runner's session
 # through the runner's own delete path once the verdict is accounted, from
 # inside the snapshot; a refused or skipped release must never fail or narrow
@@ -1673,6 +1698,8 @@ check "front_door_gates_the_pool_wrapper_hook" "grep -q 'AI_POOL_TEST_HOOKS=1 to
 check "pool_adapter_redacts_credential_shaped_diagnostics" "grep -q 'REDACTED' '$POOL'"
 check "pool_adapter_runner_overrides_require_test_hooks" "grep -q 'AI_POOL_TEST_HOOKS=1 to substitute a review binary' '$POOL'"
 check "pool_adapter_refuses_a_non_sha_head" "grep -q 'not a full commit SHA' '$POOL'"
+# Restore the shipped doors registry before tearing down the backup.
+restore_doors
 rm -rf "$POOLTMP"
 
 # Issue #686: session lookup must not spawn jq per record (it took ~15 minutes

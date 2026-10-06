@@ -90,9 +90,9 @@ RC_OP=$?
 check "pool_operation_forwarded_to_engine" "[ '$RC_OP' -eq 0 ] && engargs | grep -q -- '--operation legacy-managed-launcher-refresh'"
 
 OP_ENG_BEFORE="$(engargs | grep -c -- '--provider' || true)"
-( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=stale-linux-manifest-recovery bash "$POOL" qwen final-check ) > "$POOLTMP/out-opbad" 2>&1
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=not-an-operation bash "$POOL" qwen final-check ) > "$POOLTMP/out-opbad" 2>&1
 RC_OPBAD=$?
-check "pool_unknown_operation_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -qi 'unknown review operation' '$POOLTMP/out-opbad' && [ \"\$(engargs | grep -c -- '--provider' || true)\" -eq '$OP_ENG_BEFORE' ]"
+check "pool_unknown_operation_never_dispatches" "[ '$RC_OPBAD' -ne 0 ] && grep -q 'unknown review operation' '$POOLTMP/out-opbad' && [ \"\$(engargs | grep -c -- '--provider' || true)\" -eq '$OP_ENG_BEFORE' ]"
 
 OP_ENG_BEFORE="$(engargs | grep -c -- '--provider' || true)"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_OPERATION=first-managed-install bash "$POOL" qwen security-review ) > "$POOLTMP/out-opmode" 2>&1
