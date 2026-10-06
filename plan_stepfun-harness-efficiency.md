@@ -7,19 +7,19 @@ Companion handoff: [`HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-ef
 
 | Step | State | Evidence (artifact, never a bare number) |
 |---|---|---|
-| P1.1 rate_limited provider-only | ⬜ open | — |
-| P1.2 retry only on failure | ⬜ open | — |
-| P1.3 false-positive guard test | ⬜ open | — |
-| P2.1 drop duplicated VERDICT preamble (OpenCode) | ⬜ open | — |
-| P2.2 move unique `$rel`/`$head` to prompt end | ⬜ open | — |
-| P2.3 dead compaction cleanup or comment | ⬜ open | — |
-| P3.1 Windows gate: `grep`/`head -n` | ⬜ open | — |
-| P3.2 Windows agent tools / docs | ⬜ open | — |
-| P3.3 path-clamp adversarial tests | ⬜ open | — |
-| P4.1 resume session on 429 retry | ⬜ open | — |
-| P4.2 optional warm cache dir (security judgment) | ⬜ open | — |
-| P5.1 record cache/session counters | ⬜ open | — |
-| P5.2 live proof on both platforms | ⬜ open | leave `- [ ] live proof` on the landing issue |
+| P1.1 rate_limited provider-only | ✅ done | `951d55dc`; `bash tests/test-ai-stepfun.sh`: 72 passed, 0 failed, 2 platform skips |
+| P1.2 retry only on failure | ✅ done | `951d55dc`; successful verdict with stderr 429 retained by the same suite |
+| P1.3 false-positive guard test | ✅ done | `951d55dc`; provider-channel, JSONL-text, and non-rate failure cases in `tests/test-ai-stepfun.sh` |
+| P2.1 drop duplicated VERDICT preamble (OpenCode) | ✅ done | `9f3db3d4`; semantic prompt tests: 77 passed, 0 failed, 2 platform skips |
+| P2.2 move unique `$rel`/`$head` to prompt end | ✅ done | `9f3db3d4`; stable-prefix assertion in `tests/test-ai-stepfun.sh` |
+| P2.3 dead compaction cleanup or comment | ✅ done | `9f3db3d4`; `jq empty config/opencode-stepfun/opencode.json` passed |
+| P3.1 Windows gate: `grep`/`head -n` | ✅ done | `2e50a4c7`; hash-pinned grep, bounded search and slices; Windows-shell suite 52 passed, 0 failed |
+| P3.2 Windows agent tools / docs | ✅ done | `2e50a4c7`; Windows agent and live documentation match gate grammar |
+| P3.3 path-clamp adversarial tests | ✅ done | `2e50a4c7`; `tests/test-ai-stepfun-windows-shell.sh`: 52 passed, 0 failed |
+| P4.1 resume session on 429 retry | ⏭ skipped — security criterion unmet | `6b4375e5`; engine session files live in model-writable per-turn state deleted after each turn; saved ID alone cannot resume without retaining that state |
+| P4.2 optional warm cache dir (security judgment) | ⏭ skipped — security criterion unmet | `6b4375e5`; cross-review leakage analysis in `docs/config-inventory.md` and fake-engine isolation test in `tests/test-ai-stepfun.sh` |
+| P5.1 record cache/session counters | ✅ done | `b07d79fb`; fixture test and owner-only sidecar; StepFun suite 80 passed, 0 failed, 2 platform skips |
+| P5.2 live proof on both platforms | ⬜ open | Linux `bin/ai-stepfun doctor --live`: `OK engine=stepcode model=step/step-5-preview live=verified`; Windows live provider proof and post-merge confirmation pending on [landing issue #1336](https://github.com/popcre/ai-devops/issues/1336) |
 
 **Muse review (2026-10-06):** `VERDICT: REVISE plan` —
 `.ai/reviews/muse-stepfun-token-efficiency-plan-r2-20261006T124204Z-968393-5381.md`
