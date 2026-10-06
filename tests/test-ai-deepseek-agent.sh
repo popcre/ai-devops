@@ -174,7 +174,8 @@ RECEIPT_OUT="$(AI_REVIEW_SOURCE_RECEIPT_FILE="$RECEIPT" DEEPSEEK_STUB_REPLY=$'so
 RECEIPT_ID="$(printf '%s\n' "$RECEIPT_OUT" | sed -n 's/^SESSION_ID: //p')"
 check "generated session is bound to exact source receipt before provider call" "test -n '$RECEIPT_ID' && jq -e --arg sid '$RECEIPT_ID' '.provider==\"deepseek\" and .session_id==\$sid and (.receipt_sha256|test(\"^[0-9a-f]{64}$\"))' '$TMP/receipt-at-provider.json'"
 check "source receipt remains protected and source identity stays unchanged" "test ! -L '$RECEIPT' && jq -e --arg head \"\$(git -C '$TMP/repo' rev-parse HEAD)\" '.schema_version==1 and .identity.head==\$head' '$RECEIPT'"
-sed -n '/^bind_review_source_session()/,/^}/p' "$SCRIPT" > "$TMP/receipt-helper.sh"
+printf 'SOURCE_TOOLS=%q\n' "$ROOT/bin" > "$TMP/receipt-helper.sh"
+sed -n '/^bind_review_source_session()/,/^}/p' "$SCRIPT" >> "$TMP/receipt-helper.sh"
 RECEIPT_PYTHON="$(command -v python3 || command -v python)"
 RECEIPT_HEAD="$(jq -r .identity.head "$RECEIPT")"; RECEIPT_PACKET="$(jq -r .packet_sha256 "$RECEIPT")"
 check "a receipt already bound to another generated session refuses" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$RECEIPT' REPO_ROOT='$TMP/repo' REVIEW_HEAD='$RECEIPT_HEAD' REVIEW_SOURCE_HASH='$RECEIPT_PACKET' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session wrong-session' >/dev/null 2>&1"
@@ -198,6 +199,26 @@ cp "$REAL_RECEIPT" "$TMP/original-receipt.json"
 check "actual source packet receipt can bind a generated session" "PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session'"
 check "real packet verifier republishes unchanged original receipt after companion binding" "AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' '$ROOT/bin/ai-review-packet' verify '$REAL_PACKET' --identity '$REAL_REPO/.ai/identity.json' >/dev/null && cmp -s '$REAL_RECEIPT' '$TMP/original-receipt.json'"
 check "same exact generated session companion retry remains create-only and idempotent" "PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session'"
+if "$RECEIPT_PYTHON" -c 'import os,sys; sys.exit(0 if os.name == "nt" else 1)'; then
+  WINDOWS_ALIAS="$("$RECEIPT_PYTHON" - "$REAL_RECEIPT" <<'PYWINALIAS'
+import os,sys
+print(os.path.abspath(sys.argv[1]).upper())
+PYWINALIAS
+)"
+  check "native Windows receipt spelling preserves exact generated session" "PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$WINDOWS_ALIAS' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session'"
+  "$RECEIPT_PYTHON" - "$TMP/junction-repo" "$REAL_REPO" <<'PYWINLINK'
+import os,subprocess,sys
+link,target=map(os.path.abspath,sys.argv[1:])
+result=subprocess.run(['cmd.exe','/d','/c','mklink','/J',link,target],capture_output=True,text=True)
+if result.returncode or not os.path.isdir(link):
+    raise SystemExit('native Windows fixture could not create junction: '+result.stderr)
+PYWINLINK
+  check "native Windows junction receipt parent refuses before provider" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$TMP/junction-repo/.ai/reviews/source.json' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session' >/dev/null 2>&1"
+  "$RECEIPT_PYTHON" - "$TMP/junction-repo" <<'PYWINUNLINK'
+import os,sys
+os.rmdir(sys.argv[1])
+PYWINUNLINK
+fi
 printf '\n' >> "$REAL_RECEIPT"
 check "changed original bytes cannot inherit a continuation companion" "! PYTHON='$RECEIPT_PYTHON' AI_REVIEW_SOURCE_RECEIPT_FILE='$REAL_RECEIPT' REPO_ROOT='$REAL_REPO' REVIEW_HEAD='$REAL_HEAD' REVIEW_SOURCE_HASH='$REAL_HASH' bash -c 'source \"$TMP/receipt-helper.sh\"; bind_review_source_session real-generated-session' >/dev/null 2>&1"
 cp "$TMP/original-receipt.json" "$REAL_RECEIPT"; : > "$REAL_RECEIPT.continuation.json"

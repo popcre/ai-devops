@@ -882,13 +882,16 @@ require_review_head() {
 
 bind_review_source_session() { # internally generated ID; original receipt stays immutable
   [ -n "${AI_REVIEW_SOURCE_RECEIPT_FILE:-}" ] || return 0
-  "$PYTHON" - "$AI_REVIEW_SOURCE_RECEIPT_FILE" "$1" "$REPO_ROOT" "$REVIEW_HEAD" "$REVIEW_SOURCE_HASH" <<'PYRECEIPT'
+  "$PYTHON" - "$AI_REVIEW_SOURCE_RECEIPT_FILE" "$1" "$REPO_ROOT" "$REVIEW_HEAD" "$REVIEW_SOURCE_HASH" "$SOURCE_TOOLS/../tools" <<'PYRECEIPT'
 import hashlib, json, os, re, stat, sys, tempfile
-path, sid, root, head, packet = sys.argv[1:]
+path, sid, root, head, packet, helpers = sys.argv[1:]
+sys.path.insert(0, helpers)
+from reviewer_maintenance import physical, Blocked
 try:
+    path = str(physical(path))
+    root = str(physical(root))
     def protected_bytes(file):
-        if os.path.realpath(file) != os.path.abspath(file):
-            raise ValueError('linked receipt path')
+        file = str(physical(file))
         descriptor = os.open(file, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
         with os.fdopen(descriptor, 'rb') as handle:
             observed = os.fstat(handle.fileno())
@@ -898,7 +901,7 @@ try:
     raw = protected_bytes(path)
     value = json.loads(raw)
     identity = value.get('identity', {})
-    if value.get('schema_version') != 1 or value.get('packet_sha256') != packet or identity.get('head') != head or os.path.realpath(identity.get('repository', '')) != os.path.realpath(root) or not re.fullmatch(r'[0-9a-f]{64}', identity.get('source_digest', '')) or not re.fullmatch(r'[A-Za-z0-9._-]+', sid):
+    if value.get('schema_version') != 1 or value.get('packet_sha256') != packet or identity.get('head') != head or str(physical(identity.get('repository', ''))) != root or not re.fullmatch(r'[0-9a-f]{64}', identity.get('source_digest', '')) or not re.fullmatch(r'[A-Za-z0-9._-]+', sid):
         raise ValueError('source receipt identity differs from wrapper source')
     binding = {'schema_version': 1, 'provider': 'deepseek', 'session_id': sid, 'packet_sha256': packet, 'source_digest': identity['source_digest'], 'receipt_sha256': hashlib.sha256(raw).hexdigest()}
     target = path + '.continuation.json'
@@ -918,7 +921,7 @@ try:
                 if protected_bytes(target) != canonical: raise ValueError('racing continuation companion differs')
         finally:
             if os.path.exists(temporary): os.unlink(temporary)
-except (OSError, ValueError, TypeError, KeyError) as error:
+except (OSError, ValueError, TypeError, KeyError, Blocked) as error:
     print('Error: DeepSeek source-session receipt binding refused: ' + str(error), file=sys.stderr)
     sys.exit(1)
 PYRECEIPT
