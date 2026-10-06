@@ -91,7 +91,13 @@ allocator but stayed registered here, and a session spent an hour trying it.
     rule-12 equivalent and is not mount-isolated.** On Windows, OpenCode file
     tools are removed (`tools:` map — the only enforcement on pin 1.18.12);
     `implement` is refused; exploration/tests run through the gate
-    (`ls`/`cat`/`head` in-folder + allowlisted test runners). Residual
+    (`ls`/`cat`/`head` in-folder + allowlisted test runners). OpenCode's
+    shell is the real Git `bash.exe`, pinned via `OPENCODE_GIT_BASH_PATH`;
+    every command routes through the gate by a `BASH_ENV` DEBUG trap
+    (`config/opencode-stepfun/windows-gate-env.sh`) — a contract
+    `ai-stepfun doctor` proves on every Windows host (the retired #1229
+    PATH shim was a script named `bash.exe` that Windows never spawned;
+    shared-db#3943). Residual
     (owner-accepted 2026-09-30): in-folder scripts and runner abuse are
     arbitrary user-level code; network is shared. Linux turns still run under
     bubblewrap with an empty home, /tmp and /run and a cleared environment,

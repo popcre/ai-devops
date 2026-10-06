@@ -16,6 +16,12 @@ REFUSE(){ printf 'stepfun-shell: refused (%s)\n' "$*" >&2; exit 126; }
 if [ "$#" -eq 0 ]; then REFUSE 'empty'; fi
 argv=("$@")
 case "${argv[0]}" in
+  -c|-lc|-ec)
+    # Direct form used by the windows BASH_ENV trap (windows-gate-env.sh):
+    # gate -c INNER — same payload semantics as the bash -c wrapper form.
+    [ "${#argv[@]}" -ge 2 ] || REFUSE 'missing -c payload'
+    INNER="${argv[1]}"
+    ;;
   bash|bash.exe|sh|sh.exe|*/bash|*/bash.exe|*/sh|*/sh.exe)
     if [ "${#argv[@]}" -eq 1 ]; then REFUSE 'shell without command'; fi
     case "${argv[1]}" in
@@ -194,6 +200,11 @@ run(){
     cd "$REVIEW_DIR"
     # Keep system dirs so shebangs (env/bash) resolve; no shim re-entry.
     export PATH="${GATE_PATH:-/usr/bin:/bin}:/usr/bin:/bin"
+    # The caller's BASH_ENV DEBUG trap (windows-gate-env.sh) must not re-arm
+    # inside this hash-verified runner (recursion, or re-gating the
+    # allowlisted bash <script> runner).
+    export AI_STEPFUN_SHELL_GATE=1
+    unset BASH_ENV
     exec "$real" "$@"
   fi
   # No allowlist: fail closed unless an offline test explicitly stubs GATE_PATH.
@@ -202,6 +213,8 @@ run(){
     [ -n "$real" ] || REFUSE 'runner not in allowlist'
     cd "$REVIEW_DIR"
     export PATH="${GATE_PATH:-/usr/bin:/bin}:/usr/bin:/bin"
+    export AI_STEPFUN_SHELL_GATE=1
+    unset BASH_ENV
     exec "$real" "$@"
   fi
   REFUSE 'runner allowlist missing'
