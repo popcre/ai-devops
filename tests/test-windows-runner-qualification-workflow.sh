@@ -27,6 +27,10 @@ grep -Fq 'git status --short --untracked-files=all' "$workflow" || fail 'qualifi
 # Sections scope: the lighter-jobs admission bar.
 grep -Fq '      - tools/ci/assert-windows-runner-host.ps1' "$workflow" || fail 'a host gate change must trigger the qualification workflow'
 grep -Fq 'needs: sections-host-pin' "$workflow" || fail 'sections must wait for the hosted host-pin proof'
+grep -Fq "if: \${{ needs.sections-host-pin.result == 'success' &&" "$workflow" || fail 'sections must run only after a successful host-pin proof'
+grep -Fq 'its sections would queue forever' "$workflow" || fail 'the host pin must refuse an offline runner'
+grep -Fq 'not a Windows X64 ai-devops-windows candidate' "$workflow" || fail 'the host pin must refuse a non-candidate runner'
+grep -Fq "tr '[:upper:]' '[:lower:]'" "$workflow" || fail 'the shared-label denylist must be case-insensitive'
 grep -Fq 'must be carried by exactly one runner' "$workflow" || fail 'the host pin must prove a single candidate runner'
 grep -Fq 'already in the qualified pool' "$workflow" || fail 'the host pin must refuse a qualified pool host'
 grep -Fq 'options: [complete, sections]' "$workflow" || fail 'qualification must offer the sections scope'

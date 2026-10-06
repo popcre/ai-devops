@@ -79,8 +79,8 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          case "$RUNNER_LABEL" in
-            self-hosted|Windows|X64|ai-devops-windows|ai-devops-windows-qualified)
+          case "$(printf '%s' "$RUNNER_LABEL" | tr '[:upper:]' '[:lower:]')" in
+            self-hosted|windows|x64|linux|arm64|ai-devops-windows|ai-devops-windows-qualified)
               echo "::error::runner_label must be a custom label, not a shared pool label."; exit 1 ;;
           esac
           if ! printf '%s' "$RUNNER_LABEL" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'; then
@@ -88,17 +88,19 @@ jobs:
           fi
           [ -n "$GH_TOKEN" ] || { echo "::error::RUNNER_POOL_READ_TOKEN is unavailable; cannot prove the host pin."; exit 1; }
           hosts="$(gh api "repos/$REPO/actions/runners" --paginate \
-            --jq ".runners[] | select(any(.labels[]; .name == \"$RUNNER_LABEL\")) | {name, qualified: any(.labels[]; .name == \"ai-devops-windows-qualified\")}")"
+            --jq ".runners[] | select(any(.labels[]; (.name | ascii_downcase) == (\"$RUNNER_LABEL\" | ascii_downcase))) | {name, status, qualified: any(.labels[]; .name == \"ai-devops-windows-qualified\"), candidate: ([.labels[].name] as \$l | all(\"self-hosted\", \"Windows\", \"X64\", \"ai-devops-windows\"; . as \$w | \$l | index(\$w)))} | @json")"
           count="$(printf '%s' "$hosts" | grep -c . || true)"
           [ "$count" -eq 1 ] || { echo "::error::runner_label must be carried by exactly one runner; found $count."; exit 1; }
           if printf '%s' "$hosts" | grep -q '"qualified":true'; then
             echo "::error::the pinned runner is already in the qualified pool."; exit 1
           fi
+          printf '%s' "$hosts" | grep -q '"candidate":true' || { echo "::error::the pinned runner is not a Windows X64 ai-devops-windows candidate."; exit 1; }
+          printf '%s' "$hosts" | grep -q '"status":"online"' || { echo "::error::the pinned runner is offline; its sections would queue forever."; exit 1; }
           echo "Pinned candidate: $hosts"
 
   qualify-sections:
     needs: sections-host-pin
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.scope == 'sections' }}
+    if: ${{ needs.sections-host-pin.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.scope == 'sections' }}
     strategy:
       fail-fast: false
       max-parallel: 1
