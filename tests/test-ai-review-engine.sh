@@ -542,6 +542,7 @@ while [ \$# -gt 0 ]; do
   case "\$1" in
     --output-format) shift; shift ;;
     --prompt-file) prompt="\$2"; shift 2 ;;
+    --model) printf '%s\n' "\$2" > "$TMP/stub-grok-model"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -562,9 +563,53 @@ AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
 STUB_RC=$?
 set -e
 check "grok_door_parses_provider_envelope_to_report_shape" "test '$STUB_RC' -eq 0 && grep -q '## Verdict' '$STUB_REPORT'"
+check "grok_door_uses_config_model_pin" \
+  "test \"\$(cat '$TMP/stub-grok-model')\" = \"\$(jq -r '.providers.grok.model_pin' '$REPO_ROOT/config/provider-cli-versions.json')\""
 check "grok_door_report_carries_stopreason_metadata" "grep -q 'end_turn' '$STUB_REPORT'"
 check "grok_door_requires_runner_token_even_with_stub" \
   "! (unset AI_REVIEW_RUNNER_CORE; AI_GROK_BIN='$STUB_GROK' AI_GROK_ALLOW_NO_CREDS=1 DOOR_MODE=review DOOR_WORKDIR='$MREPO' DOOR_PACKET_DIR='$MREPO' DOOR_PROMPT_FILE='$TMP/impl-prompt.txt' DOOR_REPORT_OUT='$TMP/x.md' DOOR_HEAD='$HEAD_SHA' bash '$GROK_DOOR' review) 2>/dev/null"
+
+# Grok cancels a headless turn on a refused shell form (PermissionCancelled);
+# the door resumes the same session (remaining turn budget) instead of failing.
+# Stub: first call writes a native witness of category $PC_CAT (spaced JSON,
+# bound to sessionId/requestId) and returns cancelled; a -r call approves.
+STUB_PC="$TMP/stub-grok-pc"
+cat > "$STUB_PC" <<'STUBEOF'
+#!/usr/bin/env bash
+mt=""; resumed=0
+while [ $# -gt 0 ]; do
+  case "$1" in -r) resumed=1; shift 2 ;; --max-turns) mt="$2"; shift 2 ;; *) shift ;; esac
+done
+if [ "$resumed" = 1 ]; then
+  echo "resumed:$mt" >> "$PC_CALLS"
+  printf '%s\n' '{"text":"## Verdict\nAPPROVE","stopReason":"end_turn","num_turns":1,"sessionId":"sid-pc1","requestId":"req-2","modelUsage":{"grok-4.6-build":{}}}'
+  exit 0
+fi
+echo "first:$mt" >> "$PC_CALLS"
+mkdir -p "$GROK_HOME/sessions/x/sid-pc1"
+printf '%s\n' "{\"params\": {\"sessionId\": \"sid-pc1\", \"update\": {\"sessionUpdate\": \"turn_completed\", \"prompt_id\": \"req-1\", \"stop_reason\": \"cancelled\"}, \"_meta\": {\"cancellationCategory\": \"$PC_CAT\"}}}" > "$GROK_HOME/sessions/x/sid-pc1/updates.jsonl"
+printf '%s\n' '{"text":"","stopReason":"cancelled","num_turns":4,"sessionId":"sid-pc1","requestId":"req-1"}'
+STUBEOF
+chmod +x "$STUB_PC"
+run_pc_door() { # run_pc_door CATEGORY TAG -> sets PC_RC
+  rm -rf "$TMP/pc-home-$2"; : > "$TMP/pc-calls-$2"
+  set +e
+  AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 GROK_HOME="$TMP/pc-home-$2" \
+    PC_CAT="$1" PC_CALLS="$TMP/pc-calls-$2" DOOR_MAX_TURNS=10 \
+    AI_GROK_BIN="$STUB_PC" AI_GROK_ALLOW_NO_CREDS=1 \
+    DOOR_MODE=review DOOR_WORKDIR="$MREPO" DOOR_PACKET_DIR="$MREPO" \
+    DOOR_PROMPT_FILE="$TMP/impl-prompt.txt" DOOR_REPORT_OUT="$TMP/pc-report-$2.md" \
+    DOOR_HEAD="$HEAD_SHA" \
+    bash "$GROK_DOOR" review >/dev/null 2>"$TMP/pc-door-$2.err"
+  PC_RC=$?
+  set -e
+}
+run_pc_door PermissionCancelled perm
+check "grok_door_resumes_permission_cancelled_turn_with_remaining_budget" \
+  "test '$PC_RC' -eq 0 && grep -q APPROVE '$TMP/pc-report-perm.md' && test \"\$(tr '\n' ' ' < '$TMP/pc-calls-perm')\" = 'first:10 resumed:6 '"
+run_pc_door max_turns_reached turns
+check "grok_door_does_not_resume_turn_limit_cancel" \
+  "test '$PC_RC' -ne 0 && test \"\$(tr '\n' ' ' < '$TMP/pc-calls-turns')\" = 'first:10 '"
 
 # --- deepseek (OpenCode) door on the same runner ----------------------------
 # Program done needs one native door (grok) AND one OpenCode door on the same
