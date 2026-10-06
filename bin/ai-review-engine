@@ -32,6 +32,7 @@ ai-review-engine — shared review runner (review + implement).
       [--prompt-file F] [--base REF] [--assert-head SHA]
       [--mode plan-review|diff-review|security-review|final-check]
       [--caller NAME] [--tests CMD] [--max-turns N]
+      [--operation NAME]  (final-check only; asks for the exact approval line)
 
   ai-review-engine implement --provider P --name N --repo PATH
       [--prompt-file F] [--ref REF] [--caller NAME] [--max-turns N] [--keep]
@@ -51,6 +52,7 @@ die() { printf 'ai-review-engine: error: %s\n' "$*" >&2; exit 2; }
 
 contract=""; provider=""; name=""; repo=""; prompt_file=""; base=""; assert_head=""
 mode="diff-review"; caller="ai-review-engine"; tests_cmd=""; max_turns=""; ref=""; keep=0
+operation=""
 
 [ "$#" -gt 0 ] || { usage >&2; exit 2; }
 case "$1" in
@@ -73,6 +75,7 @@ while [ "$#" -gt 0 ]; do
     --caller) caller="${2:-}"; shift 2 ;;
     --tests) tests_cmd="${2:-}"; shift 2 ;;
     --max-turns) max_turns="${2:-}"; shift 2 ;;
+    --operation) operation="${2:-}"; shift 2 ;;
     --ref) ref="${2:-}"; shift 2 ;;
     --keep) keep=1; shift ;;
     *) die "unknown option: $1" ;;
@@ -89,6 +92,18 @@ case "$mode" in
   *) die "invalid --mode: $mode" ;;
 esac
 
+# --operation is validated HERE, before any lifecycle state or packet work, so
+# an unknown name or a non-final-check mode never dispatches a provider (the
+# same refusal shape ai-review and the legacy pool path had).
+if [ -n "$operation" ]; then
+  OP_LIB="$ROOT/tools/lib/review-operation.sh"
+  [ -f "$OP_LIB" ] || die 'cannot load the review operation list.'
+  # shellcheck source=../tools/lib/review-operation.sh
+  . "$OP_LIB" || die 'cannot load the review operation list.'
+  review_operation_valid "$operation" || die "unknown review operation: $operation"
+  [ "$mode" = final-check ] || die "review operation needs final-check, not $mode."
+fi
+
 # The core exports the runner token before any door is invoked, so a door
 # that is called without it refuses (second structural refusal).
 rlc_init
@@ -96,7 +111,7 @@ rlc_export_runner_token
 
 case "$contract" in
   review)
-    rlc_run_review "$provider" "$name" "$repo" "$base" "$assert_head" "$mode" "$prompt_file" "$caller" "$tests_cmd" "$max_turns"
+    rlc_run_review "$provider" "$name" "$repo" "$base" "$assert_head" "$mode" "$prompt_file" "$caller" "$tests_cmd" "$max_turns" "$operation"
     ;;
   implement)
     rlc_run_implement "$provider" "$name" "$repo" "$prompt_file" "$ref" "$caller" "$max_turns" "$keep"
