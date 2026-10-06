@@ -631,7 +631,9 @@ LIVE_QUALIFIED_PROVIDERS="gemini qwen"
 # record_requalify_failure PROVIDER OUTPUT_FILE persists a failed automatic
 # requalification as a reviewer issue (#804). A failure that cannot be
 # recorded is still printed, so it is never silently skipped.
+REQUALIFY_FAILURE_CLASS=""
 record_requalify_failure() { # PROVIDER OUTPUT_FILE
+  REQUALIFY_FAILURE_CLASS=""
   local provider="$1" output="$2" issue_bin="${AI_REVIEWER_ISSUE_BIN:-$SCRIPT_DIR/ai-reviewer-issue}" out id
   if [ -x "$issue_bin" ]; then
     out="$("$issue_bin" record --provider "$provider" \
@@ -643,6 +645,7 @@ record_requalify_failure() { # PROVIDER OUTPUT_FILE
 ai-reviewer-issue record itself failed."
     printf '%s\n' "$out" >&2
     id="$(printf '%s\n' "$out" | sed -n 's/^ai-reviewer-issue: recorded //p')"
+    REQUALIFY_FAILURE_CLASS="$(printf '%s\n' "$out" | sed -n 's/^ai-reviewer-issue: class //p' | tail -n1)"
   else
     id=""
     printf 'ai-review-preflight: ai-reviewer-issue is unavailable at %s; failure NOT recorded.\n' "$issue_bin" >&2
@@ -701,6 +704,15 @@ requalify_provider() { # PROVIDER
   printf '%s\n' "$qualify_output" > "$output"
   record_requalify_failure "$provider" "$output"
   rm -f "$output"
+  # A provider-side capacity event (quota or allowance exhausted, rate limit)
+  # says nothing about the installed bytes. The reviewer stays quarantined
+  # (its qualification is still stale, so it cannot be drawn) and the issue is
+  # recorded, but the requalification step itself must not fail an
+  # installation for days or weeks until the provider's quota resets.
+  if [ "$REQUALIFY_FAILURE_CLASS" = "provider-outage/capacity" ]; then
+    printf 'ai-review-preflight: %s requalification deferred: provider capacity event, not a code defect; the reviewer stays quarantined until a later requalify succeeds.\n' "$provider" >&2
+    return 0
+  fi
   return 1
 }
 
