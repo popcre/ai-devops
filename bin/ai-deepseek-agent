@@ -789,15 +789,6 @@ PY
     # evidence. The copy is deleted when the turn ends, so edits are discarded.
     # The helper never sees the key; this wrapper still owns every request.
     tools_root="$(make_turn_workspace "$tools_root")" || { echo 'Error: could not create the disposable DeepSeek workspace.' >&2; return 1; }
-    if [ -n "${REVIEW_SOURCE_PACKET:-}" ] && [ -d "$REVIEW_SOURCE_PACKET" ]; then
-      # Full patch is always readable via tools even when the message
-      # attachment was truncated for token cost.
-      for pe in "$REVIEW_SOURCE_PACKET/patch.full.diff" "$REVIEW_SOURCE_PACKET/patch.diff"; do
-        [ -f "$pe" ] || continue
-        cp "$pe" "$tools_root/review-evidence.patch" 2>/dev/null || true
-        break
-      done
-    fi
     ACTIVE_TURN_WORKSPACE="$tools_root"
     REPO_TOOLS_LOG="$resp_file.tools.jsonl"; REPO_TOOLS_USED=1
     "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_repo_tools.py" init "$msgs_file" "$MODEL" "$req_file" || { drop_turn_workspace; return 1; }
@@ -921,11 +912,15 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
   # out of the message (they are inventoried) and are re-read on demand. Small
   # evidence files and the identity packet / patch still ride along — otherwise
   # a large review attaches every file and resends those bytes every tool round.
+  # MANIFEST.md and identity.json are never truncated: they are the review's
+  # identity, not optional context.
   local small_max="${SOURCE_ATTACH_SMALL_BYTES:-4096}"
   local attached=() indexed=() file
   for file in "${source_files[@]}"; do
     case "$file" in
-      "$saved/MANIFEST.md"|"$saved/identity.json"|"$patch")
+      "$saved/MANIFEST.md"|"$saved/identity.json")
+        attached+=("$file"); continue;;
+      "$patch")
         attached+=("$file"); continue;;
     esac
     if [ -L "$file" ]; then
@@ -936,8 +931,20 @@ prepare_review_source() { # session id; preserve complete formal-review evidence
       indexed+=("$file")
     fi
   done
-  [ "${#attached[@]}" -eq 0 ] || MSG="$(SOURCE_ATTACHMENT_MODE=1 SOURCE_ATTACH_MAX_BYTES="${SOURCE_ATTACH_MAX_BYTES:-65536}" \
-    with_files_appended "$MSG" "${attached[@]}")" || return 1
+  # Identity files attach whole; other bodies (including the patch) may be
+  # truncated for token cost. The full patch remains only in the sealed packet.
+  [ "${#attached[@]}" -eq 0 ] || {
+    local identity_files=() body_files=()
+    for file in "${attached[@]}"; do
+      case "$file" in
+        "$saved/MANIFEST.md"|"$saved/identity.json") identity_files+=("$file");;
+        *) body_files+=("$file");;
+      esac
+    done
+    [ "${#identity_files[@]}" -eq 0 ] || MSG="$(SOURCE_ATTACHMENT_MODE=1 with_files_appended "$MSG" "${identity_files[@]}")" || return 1
+    [ "${#body_files[@]}" -eq 0 ] || MSG="$(SOURCE_ATTACHMENT_MODE=1 SOURCE_ATTACH_MAX_BYTES="${SOURCE_ATTACH_MAX_BYTES:-65536}" \
+      with_files_appended "$MSG" "${body_files[@]}")" || return 1
+  }
   [ "${#indexed[@]}" -eq 0 ] || MSG="$(with_files_inventory "$MSG" "${indexed[@]}")" || return 1
   "$SOURCE_TOOLS/ai-review-packet" verify "$REVIEW_SOURCE_PACKET" --identity "$REVIEW_SOURCE_IDENTITY" >/dev/null || return 1
 }
@@ -1237,7 +1244,10 @@ for path in sys.argv[1:]:
     if total > count:
         sys.stdout.write(
             f"Truncated: showing first {count} of {total} bytes; SHA256 is the full-file digest. "
-            f"Prefix SHA256: {shown_hash}. Full file is in the review packet and repository tools workspace\n"
+            f"Prefix SHA256: {shown_hash}. "
+            f"The complete file is NOT in this message and NOT readable via repository tools "
+            f"unless it is also listed as repository source; if you need the hidden bytes, say so "
+            f"and return BLOCKED rather than guessing.\n"
         )
     sys.stdout.write("\n")
     sys.stdout.write(text)
