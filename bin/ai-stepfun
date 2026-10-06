@@ -179,13 +179,29 @@ load_key(){
 # the run. Implementation runs are never re-run blindly: the clone is kept.
 RATE_RETRIES="${AI_STEPFUN_RATE_RETRIES:-2}"
 RATE_PAUSE="${AI_STEPFUN_RATE_PAUSE:-65}"
-# StepCode prints "429: {json}" on stdout; OpenCode surfaces rate limits in
-# stderr or JSONL error events. Match either shape.
-rate_limited(){ grep -qE '(^429: \{.*rate_limited|rate_limited|429|Too Many Requests)' "$1" "$1.stderr" 2>/dev/null; }
+# StepCode prints HTTP errors on stdout. OpenCode uses stderr or JSONL error
+# events. Assistant text, including JSONL text events, is never a rate signal.
+rate_limited(){
+  local out="$1"
+  grep -Eiq '(^|[^[:alnum:]_])429([^[:alnum:]_]|$)|rate_limited|too many requests' "$out.stderr" 2>/dev/null && return 0
+  grep -Eq '^4[0-9][0-9]: \{' "$out" 2>/dev/null && return 0
+  [ -s "$out.jsonl" ] || return 1
+  jq -r 'select(.type != "text" and (.type == "error" or .error != null)) | tostring' "$out.jsonl" 2>/dev/null \
+    | grep -Eiq '(^|[^[:alnum:]_])429([^[:alnum:]_]|$)|rate_limited|too many requests'
+}
+
+retry_report_well_formed(){
+  local out="$1" last
+  [ -s "$out" ] || return 1
+  [ -n "${STEPFUN_EXPECT_HEAD:-}" ] || return 0
+  last="$(sed '/^[[:space:]]*$/d' "$out" | tail -n1 | tr -d '\r')"
+  [[ "$last" =~ ^[[:space:]]*VERDICT:[[:space:]]*(APPROVE|REVISE|REJECT)[[:space:]]+${STEPFUN_EXPECT_HEAD}[[:space:]]*$ ]]
+}
 run_step_retry(){ # same arguments as run_step; disposable-copy turns only
   local n=0 rc
   while :; do
     rc=0; run_step "$@" || rc=$?
+    if [ "$rc" -eq 0 ] && retry_report_well_formed "$2"; then return 0; fi
     rate_limited "$2" && [ "$n" -lt "$RATE_RETRIES" ] || return "$rc"
     n=$((n + 1)); note "StepFun rate limit reached; retrying in ${RATE_PAUSE}s ($n/$RATE_RETRIES)."
     sleep "$RATE_PAUSE"
@@ -568,7 +584,7 @@ cleanup_copy(){
 # (MANIFEST.md, identity, patch) is built inside it, and the packet is
 # re-verified after the model answers.
 cmd_review(){
-  local repo="." prompt="" base="" assert="" head identity copy work packet rel before after out report body
+  local repo="." prompt="" base="" assert="" head identity copy work packet rel before after out report body STEPFUN_EXPECT_HEAD
   while [ "$#" -gt 0 ]; do case "$1" in
     --repo) repo="${2:?--repo needs a value}"; shift 2 ;;
     --base) base="${2:?--base needs a value}"; shift 2 ;;
@@ -587,6 +603,7 @@ cmd_review(){
   # jq.exe on Windows ends the -r line with CRLF; strip it or every formal
   # verdict comparison against $head fails (#1266 residual).
   head="$(jq -r .head "$identity" | sed 's/\r$//')"
+  STEPFUN_EXPECT_HEAD="$head"
   REVIEW_REPO="$repo"; REVIEW_TAG="stepfun-$(sha256sum < "$identity" | cut -c1-24)"
   trap cleanup_copy EXIT
   copy="$(AI_REVIEW_SANDBOX_BASE="$base" "$SANDBOX_BIN" ensure-copy "$repo" "$REVIEW_TAG")" || die 'could not build the disposable review copy.'

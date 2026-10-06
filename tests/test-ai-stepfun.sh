@@ -28,6 +28,7 @@ cat >> "$TMP/bin/step" <<'STUB'
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant with read, bash, edit, write tools'; exit 0; }
 printf '%s\n' "$@" > "$STUB_ARGS"; printf '%s\n' "${STEP_API_KEY:-}" > "$STUB_ARGS.key"; env > "$STUB_ARGS.env"
 prompt="${@: -1}"; head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
+attempt(){ n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"; }
 case "$STUB_MODE" in
   ok) echo STEPFUN-OK ;;
   verdict) printf 'Analysis of the change with plenty of detail in f:1.\n\nVERDICT: APPROVE %s\n' "$head" ;;
@@ -37,6 +38,13 @@ case "$STUB_MODE" in
   write) touch MUTATED; git remote -v > "$STUB_ARGS.remote" 2>&1; echo "rc=$?" >> "$STUB_ARGS.remote"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   rate) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
         if [ "$n" -lt 1 ]; then echo '429: {"message":"request limited RPM reached","type":"rate_limited"}'; else printf 'Analysis of the change with plenty of detail.\nVERDICT: REVISE %s\n' "$head"; fi ;;
+  quote429) attempt; printf 'The code sample says 429: {"code":"rate_limited"}; the note says Too Many Requests. Review complete.\nVERDICT: APPROVE %s\n' "$head" ;;
+  goodstderr429) attempt; echo 'RATE_LIMITED: HTTP 429 Too Many Requests' >&2; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
+  quote402) attempt; printf 'The code sample quotes 402 insufficient_quota and billing. Review complete.\nVERDICT: APPROVE %s\n' "$head" ;;
+  stdout429) attempt; if [ "$n" -eq 0 ]; then echo '429: {"error":{"code":"rate_limited"}}'; exit 1; fi; printf 'Analysis of the change with plenty of detail.\nVERDICT: REVISE %s\n' "$head" ;;
+  stderr:*) attempt; if [ "$n" -eq 0 ]; then printf '%s\n' "${STUB_MODE#stderr:}" >&2; exit 1; fi; printf 'Analysis of the change with plenty of detail.\nVERDICT: REVISE %s\n' "$head" ;;
+  bashfail) attempt; echo 'command not found' >&2; exit 1 ;;
+  implrate) attempt; echo '429 rate limit exceeded' >&2; exit 1 ;;
   impl) printf 'print(1)\n' > new.py; echo 'Created new.py and ran it.' ;;
   implcommit) printf 'x\n' > c.txt; git add c.txt; git -c user.name=m -c user.email=m@m commit -qm sneaky; echo done ;;
   askwrite) touch ASKED; echo 'answer' ;;
@@ -96,6 +104,11 @@ case "$STUB_MODE" in
   verdict) printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail in f:1.\\n\\nVERDICT: APPROVE %s"}}\n' "$head" ;;
   impl) printf 'print(1)\n' > "$dir/new.py"; printf '{"type":"text","part":{"text":"Created new.py and ran it."}}\n' ;;
   askok) printf '{"type":"text","part":{"text":"The loop is bounded by RATE_RETRIES."}}\n' ;;
+  jsonl429) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
+            if [ "$n" -eq 0 ]; then printf '{"type":"error","error":{"data":{"message":"HTTP 429 Too Many Requests","status":429}}}\n'; exit 1; fi
+            printf '{"type":"text","part":{"text":"Analysis of the change with plenty of detail.\\nVERDICT: REVISE %s"}}\n' "$head" ;;
+  jsonltext429) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
+                printf '{"type":"text","part":{"text":"The code quotes HTTP 429 rate_limited. Analysis complete.\\nVERDICT: APPROVE %s"}}\n' "$head" ;;
   *) printf '{"type":"text","part":{"text":"ok"}}\n' ;;
 esac
 STUB
@@ -137,6 +150,32 @@ check "review rejects an answer when the caller's checkout changed" "mode touchc
 rm -f "$TMP/repo/CALLER_TOUCHED"
 check "the review copy is a git copy with no remote" "grep -qx 'rc=0' '$STUB_ARGS.remote' && [ \"\$(grep -vc '^rc=' '$STUB_ARGS.remote')\" = 0 ]"
 check "review retries a rate limit and then succeeds" "rm -f '$STUB_ARGS.n'; mode rate; '$SCRIPT' review --repo '$TMP/repo' --prompt x 2>/dev/null | grep -q 'VERDICT: REVISE'"
+rm -f "$STUB_ARGS.n"; mode quote429
+"$SCRIPT" review --repo "$TMP/repo" --prompt x > "$TMP/quote429.out" 2>/dev/null; rc=$?
+check "keeps-review-that-quotes-429" "[ $rc = 0 ] && grep -q 'VERDICT: APPROVE' '$TMP/quote429.out' && [ \"\$(cat '$STUB_ARGS.n')\" = 1 ]"
+rm -f "$STUB_ARGS.n"; mode goodstderr429
+"$SCRIPT" review --repo "$TMP/repo" --prompt x > "$TMP/goodstderr429.out" 2>/dev/null; rc=$?
+check "keeps-good-verdict-despite-stderr-429" "[ $rc = 0 ] && grep -q 'VERDICT: APPROVE' '$TMP/goodstderr429.out' && [ \"\$(cat '$STUB_ARGS.n')\" = 1 ]"
+rm -f "$STUB_ARGS.n"; mode quote402
+"$SCRIPT" review --repo "$TMP/repo" --prompt x > "$TMP/quote402.out" 2>/dev/null; rc=$?
+check "keeps-review-that-quotes-402-text" "[ $rc = 0 ] && grep -q 'VERDICT: APPROVE' '$TMP/quote402.out' && [ \"\$(cat '$STUB_ARGS.n')\" = 1 ]"
+rm -f "$STUB_ARGS.n"; mode stdout429
+"$SCRIPT" review --repo "$TMP/repo" --prompt x > "$TMP/stdout429.out" 2>/dev/null; rc=$?
+check "retries-on-stdout-429-json" "[ $rc = 0 ] && grep -q 'VERDICT: REVISE' '$TMP/stdout429.out' && [ \"\$(cat '$STUB_ARGS.n')\" = 2 ]"
+for shape in 'rate_limited' 'Too Many Requests' 'HTTP 429' '429 rate limit exceeded' '429 RATE LIMIT EXCEEDED'; do
+  rm -f "$STUB_ARGS.n"; mode "stderr:$shape"
+  "$SCRIPT" review --repo "$TMP/repo" --prompt x > "$TMP/stderr429.out" 2>/dev/null; rc=$?
+  check "retries-on-stderr-$shape" "[ $rc = 0 ] && grep -q 'VERDICT: REVISE' '$TMP/stderr429.out' && [ \"\$(cat '$STUB_ARGS.n')\" = 2 ]"
+done
+rm -f "$STUB_ARGS.n"; mode 'stderr:1429 request failed'
+"$SCRIPT" review --repo "$TMP/repo" --prompt x > /dev/null 2>/dev/null; rc=$?
+check "ignores-unbounded-429-on-stderr" "[ $rc != 0 ] && [ \"\$(cat '$STUB_ARGS.n')\" = 1 ]"
+rm -f "$STUB_ARGS.n"; mode bashfail
+"$SCRIPT" review --repo "$TMP/repo" --prompt x > /dev/null 2>/dev/null; rc=$?
+check "no-retry-on-bash-failure" "[ $rc != 0 ] && [ \"\$(cat '$STUB_ARGS.n')\" = 1 ]"
+rm -f "$STUB_ARGS.n"; mode implrate
+"$SCRIPT" implement --repo "$TMP/repo" --prompt x > /dev/null 2>/dev/null; rc=$?
+check "implement-never-auto-retried" "[ $rc != 0 ] && [ \"\$(cat '$STUB_ARGS.n')\" = 1 ]"
 out="$(mode credit; "$SCRIPT" review --repo "$TMP/repo" --prompt x 2>&1)"; rc=$?
 check "out of credit exits 92 with the contract line" "[ $rc = 92 ] && printf '%s' \"\$out\" | grep -q 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota' && printf '%s' \"\$out\" | grep -q 'OUT OF CREDIT: .*platform.stepfun.ai'"
 
@@ -239,6 +278,12 @@ check "OpenCode doctor passes with the stub and a protected key store" "'$SCRIPT
 check "OpenCode doctor prints one PASS line per check" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 5 ]"
 check "OpenCode doctor names the OpenCode binary" "'$SCRIPT' doctor | grep -q 'OpenCode'"
 check "OpenCode review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""
+rm -f "$TMP/args.oc.n"; mode jsonl429
+"$SCRIPT" review --repo "$TMP/repo" --prompt x > "$TMP/jsonl429.out" 2>/dev/null; rc=$?
+check "retries-on-jsonl-error-429" "[ $rc = 0 ] && grep -q 'VERDICT: REVISE' '$TMP/jsonl429.out' && [ \"\$(cat '$TMP/args.oc.n')\" = 2 ]"
+rm -f "$TMP/args.oc.n"; mode jsonltext429
+"$SCRIPT" review --repo "$TMP/repo" --prompt x > "$TMP/jsonltext429.out" 2>/dev/null; rc=$?
+check "keeps-jsonl-text-that-quotes-429" "[ $rc = 0 ] && grep -q 'VERDICT: APPROVE' '$TMP/jsonltext429.out' && [ \"\$(cat '$TMP/args.oc.n')\" = 1 ]"
 mode verdict
 if PATH="$crlf_bin:$PATH" "$SCRIPT" review --repo "$TMP/repo" --prompt 'check f' >"$TMP/crlf-review.out" 2>"$TMP/crlf-review.err" \
   && grep -q "VERDICT: APPROVE $HEAD_SHA" "$TMP/crlf-review.out"; then
