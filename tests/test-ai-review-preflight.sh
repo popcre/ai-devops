@@ -502,6 +502,17 @@ printf '%s' "$PAUSE_JSON" | jq -e --argjson minimum "$(( $(date +%s) + 7000 ))" 
 "$SCRIPT" pause grok wrapper-crash --seconds 30 >/dev/null 2>&1 && bad "failure pause refuses wrong duration" || ok "failure pause refuses wrong duration"
 "$SCRIPT" pause grok '' --seconds 3600 >/dev/null 2>&1 && bad "failure pause refuses unnamed cause" || ok "failure pause refuses unnamed cause"
 "$SCRIPT" clear grok >/dev/null 2>&1
+OBSERVED_PAUSE="$(( $(date +%s) - 120 ))"
+PAUSE_INITIAL="$($SCRIPT pause grok provider-timeout --observed "$OBSERVED_PAUSE" --seconds 3600)"
+PAUSE_READBACK="$($SCRIPT pause-status grok)"
+[ "$PAUSE_INITIAL" = "$PAUSE_READBACK" ] && ok "pause-status reads exact persisted hold" || bad "pause-status reads exact persisted hold"
+PAUSE_RETRY="$($SCRIPT pause grok provider-timeout --seconds 3600 --observed "$OBSERVED_PAUSE")"
+[ "$PAUSE_INITIAL" = "$PAUSE_RETRY" ] && ok "observed failure retry never extends original hour" || bad "observed failure retry never extends original hour"
+PAUSE_EXPIRED="$($SCRIPT pause grok provider-timeout --observed 0 --seconds 3600)"
+printf '%s' "$PAUSE_EXPIRED" | jq -e '.status=="expired"' >/dev/null && [ "$PAUSE_READBACK" = "$($SCRIPT pause-status grok)" ] && ok "expired historical pause leaves current hold untouched" || bad "expired historical pause leaves current hold untouched"
+"$SCRIPT" pause grok provider-timeout --observed "$(( $(date +%s) + 3600 ))" >/dev/null 2>&1 && bad "pause refuses future observation" || ok "pause refuses future observation"
+"$SCRIPT" pause grok provider-timeout --observed malformed >/dev/null 2>&1 && bad "pause refuses malformed observation" || ok "pause refuses malformed observation"
+"$SCRIPT" clear grok >/dev/null 2>&1
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
