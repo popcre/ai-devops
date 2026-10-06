@@ -35,7 +35,7 @@ case "$STUB_MODE" in
   verdict) printf 'Analysis of the change with plenty of detail in f:1.\n\nVERDICT: APPROVE %s\n' "$head" ;;
   noverdict) echo 'Looks fine.' ;;
   short) printf 'ok\nVERDICT: APPROVE %s\n' "$head" ;;
-  credit) echo '402: {"message":"You exceeded your current quota, please check your plan and billing details","type":"quota_exceeded"}' ;;
+  credit) attempt; echo '402: {"message":"You exceeded your current quota, please check your plan and billing details","type":"quota_exceeded"}' ;;
   write) touch MUTATED; git remote -v > "$STUB_ARGS.remote" 2>&1; echo "rc=$?" >> "$STUB_ARGS.remote"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   rate) n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"
         if [ "$n" -lt 1 ]; then echo '429: {"message":"request limited RPM reached","type":"rate_limited"}'; else printf 'Analysis of the change with plenty of detail.\nVERDICT: REVISE %s\n' "$head"; fi ;;
@@ -188,8 +188,9 @@ check "no-retry-on-bash-failure" "[ $rc != 0 ] && [ \"\$(cat '$STUB_ARGS.n')\" =
 rm -f "$STUB_ARGS.n"; mode implrate
 "$SCRIPT" implement --repo "$TMP/repo" --prompt x > /dev/null 2>/dev/null; rc=$?
 check "implement-never-auto-retried" "[ $rc != 0 ] && [ \"\$(cat '$STUB_ARGS.n')\" = 1 ]"
+rm -f "$STUB_ARGS.n"
 out="$(mode credit; "$SCRIPT" review --repo "$TMP/repo" --prompt x 2>&1)"; rc=$?
-check "out of credit exits 92 with the contract line" "[ $rc = 92 ] && printf '%s' \"\$out\" | grep -q 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota' && printf '%s' \"\$out\" | grep -q 'OUT OF CREDIT: .*platform.stepfun.ai'"
+check "out of credit exits 92 without retrying 402" "[ $rc = 92 ] && [ \"\$(cat '$STUB_ARGS.n')\" = 1 ] && ! printf '%s' \"\$out\" | grep -q 'retrying in' && printf '%s' \"\$out\" | grep -q 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota' && printf '%s' \"\$out\" | grep -q 'OUT OF CREDIT: .*platform.stepfun.ai'"
 
 out="$(mode impl; "$SCRIPT" implement --repo "$TMP/repo" --prompt 'add new.py' 2>&1)"
 wt="$(printf '%s\n' "$out" | sed -n 's/^CLONE //p')"

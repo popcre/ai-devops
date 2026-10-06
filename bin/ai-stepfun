@@ -179,12 +179,13 @@ load_key(){
 # the run. Implementation runs are never re-run blindly: the clone is kept.
 RATE_RETRIES="${AI_STEPFUN_RATE_RETRIES:-2}"
 RATE_PAUSE="${AI_STEPFUN_RATE_PAUSE:-65}"
-# StepCode prints HTTP errors on stdout. OpenCode uses stderr or JSONL error
-# events. Assistant text, including JSONL text events, is never a rate signal.
+# StepCode prints HTTP errors on stdout; only status 429 is a rate signal.
+# OpenCode uses stderr or JSONL error events. Assistant text, including JSONL
+# text events, is never a rate signal.
 rate_limited(){
   local out="$1"
   grep -Eiq '(^|[^[:alnum:]_])429([^[:alnum:]_]|$)|rate_limited|too many requests' "$out.stderr" 2>/dev/null && return 0
-  grep -Eq '^4[0-9][0-9]: \{' "$out" 2>/dev/null && return 0
+  grep -Eq '^429: \{' "$out" 2>/dev/null && return 0
   [ -s "$out.jsonl" ] || return 1
   jq -r 'select(.type != "text" and (.type == "error" or .error != null)) | tostring' "$out.jsonl" 2>/dev/null \
     | grep -Eiq '(^|[^[:alnum:]_])429([^[:alnum:]_]|$)|rate_limited|too many requests'
