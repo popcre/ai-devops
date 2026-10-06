@@ -7,7 +7,7 @@ Companion handoff: [`HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-ef
 
 | Step | State | Evidence (artifact, never a bare number) |
 |---|---|---|
-| P1.1 rate_limited provider-only | ✅ done | `951d55dc`; `bash tests/test-ai-stepfun.sh`: 72 passed, 0 failed, 2 platform skips |
+| P1.1 rate_limited provider-only | ✅ done | `951d55dc`, `8e9364ad`; `bash tests/test-ai-stepfun.sh`: 80 passed, 0 failed, 2 platform skips; 402 quota exits without retry |
 | P1.2 retry only on failure | ✅ done | `951d55dc`; successful verdict with stderr 429 retained by the same suite |
 | P1.3 false-positive guard test | ✅ done | `951d55dc`; provider-channel, JSONL-text, and non-rate failure cases in `tests/test-ai-stepfun.sh` |
 | P2.1 drop duplicated VERDICT preamble (OpenCode) | ✅ done | `9f3db3d4`; semantic prompt tests: 77 passed, 0 failed, 2 platform skips |
