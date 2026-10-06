@@ -15,5 +15,33 @@
     "migrated_in": "fix/1114-opencode-deepseek-door",
     "harness": "opencode",
     "notes": "First OpenCode door on the same runner. Profile config/opencode-deepseek selects the model pin and tool set; formal pool reviews dispatch through the engine. Session CLIs bin/ai-deepseek and bin/ai-deepseek-agent remain for named sessions and debates."
+  },
+  "muse": {
+    "door": "tools/lib/review-doors/muse.sh",
+    "contract": ["review", "implement"],
+    "migrated_in": "mimo/phasee-four-doors",
+    "harness": "muse-code",
+    "notes": "Muse Code pinned CLI by default; AI_MUSE_ENGINE=opencode rolls onto the pinned OpenCode profile config/opencode-muse. Sessions never cross engines. Session CLI bin/ai-muse remains for persistent named sessions; formal pool reviews dispatch through the engine."
+  },
+  "qwen": {
+    "door": "tools/lib/review-doors/qwen.sh",
+    "contract": ["review", "implement"],
+    "migrated_in": "mimo/phasee-four-doors",
+    "harness": "qwen-code",
+    "notes": "Native Qwen Code CLI. Container sandbox preferred; a host without Docker/podman falls back to the reviewer-only tool set. Fingerprint requalification stays in bin/ai-review-preflight (Phase B versioned records). Session CLI bin/ai-qwen remains for persistent named sessions."
+  },
+  "gemini": {
+    "door": "tools/lib/review-doors/gemini.sh",
+    "contract": ["review", "implement"],
+    "migrated_in": "mimo/phasee-four-doors",
+    "harness": "agy",
+    "notes": "Local agy runtime. Fingerprint requalification stays in bin/ai-review-preflight (Phase B versioned records) and is never owned by the door. Session CLI bin/ai-gemini remains for persistent named sessions."
+  },
+  "stepfun": {
+    "door": "tools/lib/review-doors/stepfun.sh",
+    "contract": ["review", "implement"],
+    "migrated_in": "mimo/phasee-four-doors",
+    "harness": "stepcode|opencode",
+    "notes": "StepCode under bubblewrap on Ubuntu/Linux; pinned OpenCode profile config/opencode-stepfun on Windows (folder + test shell, owner 2026-09-30). Platform rule: unsupported-platform when no engine fits, never quarantine. Session CLI bin/ai-stepfun remains for named sessions and debates."
   }
 }

@@ -1538,7 +1538,10 @@ cmd_authorize_install(){
   [ "$reviewed_common" = "$candidate_common" ] || blocked 'ai-task-gates: STOP. Review and installation do not share Git ownership.'
   [ "$(git -C "$reviewed_root" rev-parse HEAD 2>/dev/null)" = "$target_head" ] || blocked 'ai-task-gates: STOP. Reviewed checkout moved from exact target.'
   [ -z "$(git -C "$reviewed_root" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Reviewed checkout is dirty.'
-  reviewed_commit="$(awk -F'|' '$2 ~ /reviewed commit/ {gsub(/[^0-9a-f]/,"",$3); print $3}' "$report_real")"
+  # Read the reviewed commit only from the wrapper-written header (before the
+  # first "## Result" line); a runner door may repeat its own header table
+  # below it, and reviewer text never names the target.
+  reviewed_commit="$(sed '/^## Result$/,$d' "$report_real" | awk -F'|' '$2 ~ /reviewed commit/ {gsub(/[^0-9a-f]/,"",$3); print $3}')"
   [ "$reviewed_commit" = "$target_head" ] || blocked 'ai-task-gates: STOP. Review does not name exact target.'
   [ "$(tail -n 2 "$report_real" | tr -d '\r')" = $'## Verdict\nAPPROVE' ] || blocked 'ai-task-gates: STOP. Exact-head independent review has not approved release.'
   # A migration review approves exactly one operation: the report's recorded
@@ -1578,7 +1581,7 @@ cmd_authorize_install(){
       grep -Fqx "| live installed SHA | \`$installed_head\` |" <<<"$report_header" &&
       grep -Fqx "| live gate hash | \`$stale_live_hash\` |" <<<"$report_header" || blocked 'ai-task-gates: STOP. Review did not bind exact stale manifest and live source evidence.'
   fi
-  reviewed_digest="$(awk -F'|' '$2 ~ /source digest/ {gsub(/[^0-9a-f]/,"",$3); print $3}' "$report_real")"
+  reviewed_digest="$(sed '/^## Result$/,$d' "$report_real" | awk -F'|' '$2 ~ /source digest/ {gsub(/[^0-9a-f]/,"",$3); print $3}')"
   actual_digest="$("$SCRIPT_DIR/ai-review-sandbox" digest "$candidate_root")" || blocked 'ai-task-gates: STOP. Candidate source digest unavailable.'
   [ -n "$reviewed_digest" ] && [ "$reviewed_digest" = "$actual_digest" ] || blocked 'ai-task-gates: STOP. Review source digest differs from candidate.'
   [ "$reviewed_digest" = "$("$SCRIPT_DIR/ai-review-sandbox" digest "$reviewed_root")" ] || blocked 'ai-task-gates: STOP. Reviewed checkout source digest changed.'

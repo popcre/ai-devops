@@ -100,7 +100,8 @@ tools, retry implement) are in plan §7 — do not re-walk them.
 ## 6. Exact next steps
 
 1. Read [`plan_stepfun-harness-efficiency.md`](../plan_stepfun-harness-efficiency.md)
-   STATUS + §8 locked decisions + Muse/GLM revision notes in P1/P2/P3/P4.
+   STATUS + §8 locks + **§9 execution model** (coordinator + one subagent per
+   phase, including Phase 4 — owner rewrite 2026-10-06).
 2. Optional: second Muse or GLM pass on the revised plan (not required — both
    must-fix sets are folded in).
 3. `ai-task-gates start --class code` (or `reviewer-safety` if the change set

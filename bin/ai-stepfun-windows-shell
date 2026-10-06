@@ -51,11 +51,10 @@ case "${argv[0]}" in
 esac
 
 # --- Layer 1: closed grammar -------------------------------------------------
-# Allow quotes only around path tokens that contain spaces; otherwise no
-# shell metacharacters at all.
+# Quotes group operands containing spaces. No shell evaluates the resulting
+# tokens; only a literal grep pattern may contain shell metacharacters.
 case "$INNER" in
   *[[:cntrl:]]*) REFUSE 'control character' ;;
-  *';'*|*'&'*|*'|'*|*'('*|*')'*|*'{'*|*'}'*|*'['*|*']'*|*'<'*|*'>'*|*'`'*|*'$'*|*'~'*|*'*'*|*'?'*|*'!'*|*'%'*|*'^'*|*'@'*) REFUSE 'metacharacter' ;;
 esac
 
 # Tokenize on spaces; keep quoted path tokens together (simple state machine).
@@ -83,6 +82,21 @@ done
 [ "$in_q" -eq 0 ] || REFUSE 'unterminated quote'
 [ -n "$cur" ] && tokens+=("$cur")
 [ "${#tokens[@]}" -ge 1 ] || REFUSE 'empty command'
+
+# The exact grep pattern token is data passed to grep -F, never a shell.
+# All other tokens retain the original metacharacter ban.
+for ((i=0; i<${#tokens[@]}; i++)); do
+  if [ "$i" -eq 3 ] && [ "${tokens[0]}" = grep ] &&
+     [ "${tokens[1]:-}" = -n ] && [ "${tokens[2]:-}" = -F ]; then
+    case "${tokens[i]}" in
+      ''|-*|*\\*|*'`'*|*'"'*|*"'"*) REFUSE 'grep pattern' ;;
+    esac
+    continue
+  fi
+  case "${tokens[i]}" in
+    *';'*|*'&'*|*'|'*|*'('*|*')'*|*'{'*|*'}'*|*'['*|*']'*|*'<'*|*'>'*|*'`'*|*'$'*|*'~'*|*'*'*|*'?'*|*'!'*|*'%'*|*'^'*|*'@'*) REFUSE 'metacharacter' ;;
+  esac
+done
 
 # '=' env-prefix smuggle (but allow npm run name with '='? no — names are [A-Za-z0-9._:-])
 case "${tokens[0]}" in
@@ -115,6 +129,7 @@ export AI_STEPFUN_REVIEW_DIR="$REVIEW_DIR"
 assert_in_folder(){
   local raw="$1" norm
   case "$raw" in
+    ''|-*|/*) REFUSE 'path operand' ;;
     *:*) REFUSE 'path with colon' ;;
     *..*) REFUSE 'parent path' ;;
     /c/*|/C/*|///*|\\\\*|*\\*) case "$raw" in
@@ -256,11 +271,27 @@ case "$runner_lc" in
     done
     run "${tokens[@]:1}"
     ;;
-  ls|cat|head)
+  ls|cat)
     [ -n "$sub" ] || REFUSE 'missing path'
     [ "${#tokens[@]}" -eq 2 ] || REFUSE 'extra args'
     assert_in_folder "$sub"
     run "$sub"
+    ;;
+  head)
+    [ "$sub" = -n ] || REFUSE 'head flag'
+    [ "${#tokens[@]}" -eq 4 ] || REFUSE 'head arity'
+    case "${tokens[2]}" in ''|*[!0-9]*|0) REFUSE 'head count' ;; esac
+    [ "${tokens[2]}" -le 200 ] 2>/dev/null || REFUSE 'head count'
+    assert_in_folder "${tokens[3]}"
+    run -n "${tokens[2]}" "${tokens[3]}"
+    ;;
+  grep)
+    [ "$sub" = -n ] && [ "${tokens[2]:-}" = -F ] || REFUSE 'grep flags'
+    [ "${#tokens[@]}" -eq 5 ] || REFUSE 'grep arity'
+    case "${tokens[3]}" in ''|-*) REFUSE 'grep pattern' ;; esac
+    assert_in_folder "${tokens[4]}"
+    # The model cannot disable this cap. -F treats patterns as literal data.
+    run -n -F -m 200 "${tokens[3]}" "${tokens[4]}"
     ;;
   bash|sh)
     case "${tokens[1]:-}" in

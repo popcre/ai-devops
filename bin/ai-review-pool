@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ai-review-pool — fail-closed approval-gate reviews for the pool providers
-# (grok, muse, qwen, gemini) that the reviewer registry carries.
+# that the reviewer registry carries, including GLM's protected native sessions.
 #
 # The front door (bin/ai-review) dispatches here after checking
 # config/reviewer-registry.json. This adapter mirrors the claude/codex
@@ -22,7 +22,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini|deepseek> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
+usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini|deepseek|stepfun|glm> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -48,12 +48,18 @@ die(){ printf 'ai-review-pool: error: %s\n' "$*" >&2; exit 3; }
 umask 077
 
 provider="${1:-}"; mode="${2:-}"
+# Legacy session-runner fallback only: a provider registered in
+# config/review-runner-doors.json is dispatched through the shared review
+# runner below and never reaches these. They stay for the shrunk-registry
+# test path and for any provider not yet migrated.
 case "$provider" in
   grok)  RUNNER="$ROOT/ai-grok-review";  RUNNER_MAX_TURNS="${AI_POOL_RUNNER_MAX_TURNS:-120}" ;; # same review budget as ai-qwen; 32 ran out on a 48-file change
   muse)  RUNNER="$ROOT/ai-muse";         RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
   qwen)  RUNNER="$ROOT/ai-qwen";         RUNNER_MAX_TURNS="" ;; # ai-qwen owns its 120-turn/60m review budget and rejects --max-turns
   gemini) RUNNER="$ROOT/ai-gemini";      RUNNER_MAX_TURNS="" ;; # runner owns its budget; no --max-turns flag
   deepseek) RUNNER="$ROOT/ai-review-engine"; RUNNER_MAX_TURNS="" ;; # OpenCode door: no session-runner copy; only the shared runner may dispatch it
+  stepfun) RUNNER="$ROOT/ai-stepfun";    RUNNER_MAX_TURNS="" ;; # runner owns its budget; platform rule lives in the door and bin/ai-stepfun
+  glm) RUNNER="$ROOT/ai-glm"; RUNNER_MAX_TURNS="" ;; # native wrapper owns model, protected credentials, packet and session budget
   ''|-h|--help|help) usage; [ -n "$provider" ] || exit 0; exit 2 ;;
   *) printf 'ai-review-pool: error: %s is not a pool provider with a session runner.\n' "$provider" >&2; exit 2 ;;
 esac
@@ -76,7 +82,7 @@ fi
 # AI_REVIEW_ENGINE_BIN is refused here, before ENGINE is resolved, so a
 # wrapper cannot point the runner at a look-alike that skips every governance
 # step while still satisfying the door's token check.
-for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_POOL_RUNNER_DEEPSEEK AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN; do
+for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_POOL_RUNNER_GEMINI AI_POOL_RUNNER_DEEPSEEK AI_POOL_RUNNER_STEPFUN AI_REVIEW_ENGINE_BIN AI_REVIEW_SANDBOX_BIN AI_POOL_RUNNER_GLM; do
   if [ -n "${!_hook_var:-}" ] && [ "${AI_POOL_TEST_HOOKS:-0}" != 1 ]; then
     die "$_hook_var is a test hook; set AI_POOL_TEST_HOOKS=1 to substitute a review binary."
   fi
@@ -108,6 +114,17 @@ _runner_door_registered() {
 if _runner_door_registered "$provider"; then
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 'must be run inside a Git repository.'
   REPO_ROOT="$(git rev-parse --show-toplevel)"
+  # --operation (issue #658) is validated HERE, before the engine is invoked,
+  # so an unknown name or a non-final-check mode never dispatches anything.
+  if [ -n "${AI_REVIEW_OPERATION:-}" ]; then
+    [ "$mode" = final-check ] || die "review operation needs final-check, not $mode."
+    # shellcheck source=../tools/lib/review-operation.sh
+    . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/review-operation.sh" || die 'cannot load the review operation list.'
+    review_operation_valid "$AI_REVIEW_OPERATION" || die "unknown review operation: $AI_REVIEW_OPERATION"
+    # Host evidence (stale-linux-manifest-recovery) must read before dispatch,
+    # same gate as the legacy path: no evidence, no review.
+    review_operation_evidence "$AI_REVIEW_OPERATION" >/dev/null || die "cannot read host evidence for review operation: $AI_REVIEW_OPERATION"
+  fi
   # AI_POOL_RUNNER_* may only name the engine itself. Anything else is a
   # bypassed review and is refused before any lifecycle state exists.
   _pool_sub_var="AI_POOL_RUNNER_$(printf '%s' "$provider" | tr '[:lower:]' '[:upper:]')"
@@ -129,6 +146,9 @@ if _runner_door_registered "$provider"; then
   # override is already folded into RUNNER_MAX_TURNS) and nothing for runners
   # that own their budget and reject the flag.
   [ -z "$RUNNER_MAX_TURNS" ] || _engine_args+=(--max-turns "$RUNNER_MAX_TURNS")
+  # --operation (issue #658) rides the same brief contract through the engine;
+  # the core enforces final-check and the exact approval line.
+  [ -z "${AI_REVIEW_OPERATION:-}" ] || _engine_args+=(--operation "$AI_REVIEW_OPERATION")
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --base|--assert-head|--tests)
@@ -144,6 +164,8 @@ case "$provider" in
   muse)   [ -z "${AI_POOL_RUNNER_MUSE:-}" ] || RUNNER="$AI_POOL_RUNNER_MUSE" ;;
   qwen)   [ -z "${AI_POOL_RUNNER_QWEN:-}" ] || RUNNER="$AI_POOL_RUNNER_QWEN" ;;
   gemini) [ -z "${AI_POOL_RUNNER_GEMINI:-}" ] || RUNNER="$AI_POOL_RUNNER_GEMINI" ;;
+  stepfun) [ -z "${AI_POOL_RUNNER_STEPFUN:-}" ] || RUNNER="$AI_POOL_RUNNER_STEPFUN" ;;
+  glm) [ -z "${AI_POOL_RUNNER_GLM:-}" ] || RUNNER="$AI_POOL_RUNNER_GLM" ;;
 esac
 [ -f "$MODELS_ENV" ] && . "$MODELS_ENV"
 [ -x "$RUNNER" ] || [ -f "$RUNNER" ] || die "session runner not found for $provider: $RUNNER"
