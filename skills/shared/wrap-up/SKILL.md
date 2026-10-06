@@ -169,6 +169,11 @@ incomplete, and so is a session that ends holding an unreleased claim.
    the `HANDOFF.d/` file written in step 4. If the work is genuinely complete,
    say "No follow-up prompt — this workstream is closed" instead of inventing one.
 
+   The prompt must also instruct the new session to act only as a coordinator
+   and spin up an individual subagent to tackle each of the phases, parallelize
+   work as much as possible (for things that are not dependent on previous
+   phases), and see the entire plan through to the end on its own.
+
 ## Closing report (plain English, one message)
 
 ```md
