@@ -1313,6 +1313,7 @@ usage() {
 Usage:
   ai-review-preflight check <provider> <repo> [--base REF] [--live]
   ai-review-preflight quarantine <provider> <failure-class> [--seconds N]
+  ai-review-preflight pause <provider> <verified-failure-class> [--seconds 3600]
   ai-review-preflight known-broken <provider> <reason> [--issue N]
   ai-review-preflight clear <provider>
   ai-review-preflight qualify gemini|qwen
@@ -1355,6 +1356,24 @@ case "$cmd" in
     provider="${1:-}"; repo="${2:-}"; shift 2 || true; live=0; base=""
     while [ "$#" -gt 0 ]; do case "$1" in --live) live=1; shift ;; --base) base="${2:-}"; shift 2 ;; *) die "unknown option '$1'." ;; esac; done
     check_provider "$provider" "$repo" "$live" "$base" ;;
+  pause-status)
+    provider="${1:-}"; shift || true
+    valid_provider "$provider" || die "unknown provider '$provider'."
+    [ "$#" -eq 0 ] || die "unexpected argument '$1'."
+    admission_store pause-status "$provider" ;;
+  pause)
+    provider="${1:-}"; class="${2:-}"; shift 2 || true; seconds=3600; observed=""; observed_set=0
+    valid_provider "$provider" || die "unknown provider '$provider'."
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --seconds) [ "$#" -ge 2 ] || die 'missing seconds'; seconds="$2"; shift 2 ;;
+        --observed) [ "$#" -ge 2 ] && [ "$observed_set" -eq 0 ] && [ -n "$2" ] || die 'missing or repeated observed epoch'; observed="$2"; observed_set=1; shift 2 ;;
+        *) die "unexpected argument '$1'." ;;
+      esac
+    done
+    pause_args=(pause "$provider" --reason "$class" --seconds "$seconds")
+    [ -z "$observed" ] || pause_args+=(--observed "$observed")
+    admission_store "${pause_args[@]}" ;;
   quarantine)
     provider="${1:-}"; class="${2:-}"; shift 2 || true; seconds="$COOLDOWN"
     [ "${1:-}" != --seconds ] || { seconds="${2:-}"; shift 2; }
