@@ -484,5 +484,133 @@ check "batched_digest_tolerates_crlf_stat" \
   "[ \"\$(PATH='$BATCH/crlf':\"\$PATH\" '$SCRIPT' digest '$BATCH/r')\" = '$BATCH_FAST' ]"
 rm -rf "$BATCH"
 
+# --- one privacy verdict per review (#1355) ---------------------------------
+# A counting gate proves how often the classifier really runs. Reuse happens
+# only inside a review's private scope, and only while every bound input holds.
+PV="$TMP/privacy"; mkdir -p "$PV/bin" "$PV/scope"; chmod 700 "$PV/scope"
+cat > "$PV/bin/ai-task-gates" <<'GATE'
+#!/usr/bin/env bash
+printf x >> "${PV_COUNT:?}"
+class="$(cat "${PV_CLASS:?}")"
+# Name inputs the way the real gate does (AI_TASK_GATES_INPUTS_TO), unless told not to.
+if [ -n "${AI_TASK_GATES_INPUTS_TO:-}" ] && [ -z "${PV_NO_INPUTS:-}" ]; then
+  { printf '%s\n' "$0" "${PV_STATE:?}" "$PWD/.ai-devops/task-gates.json"; [ -z "${PV_POLICY:-}" ] || printf '%s\n' "$PV_POLICY"; } > "$AI_TASK_GATES_INPUTS_TO"
+fi
+if [ -n "${PV_POLICY:-}" ]; then
+  printf '{"effective_class":"%s","policy_file":"%s"}\n' "$class" "$PV_POLICY"
+else
+  printf '{"effective_class":"%s"}\n' "$class"
+fi
+GATE
+chmod +x "$PV/bin/ai-task-gates"
+git -C "$PV" init -q r; echo a > "$PV/r/a.txt"
+export PV_COUNT="$PV/count" PV_CLASS="$PV/class" PV_STATE="$PV/state.json"
+pv_runs(){ local c; c="$(cat "$PV_COUNT" 2>/dev/null)"; printf '%s' "${#c}"; }
+pv(){ AI_TASK_GATES_BIN="$PV/bin/ai-task-gates" AI_REVIEW_PRIVACY_SCOPE="$PV/scope" "$SCRIPT" "$@" >/dev/null 2>&1; }
+pv_reset(){ rm -f "$PV_COUNT" "$PV/scope"/*; echo "$1" > "$PV_CLASS"; echo '{}' > "$PV_STATE"; }
+# A review this suite runs inside must not lend its scope to these cases.
+unset AI_REVIEW_PRIVACY_SCOPE
+
+pv_reset code
+pv is-private "$PV/r"; r1=$?
+pv assert-public "$PV/r"; r2=$?
+pv is-private "$PV/r"; r3=$?
+check "privacy_verdict_public_reused_within_scope" "[ $r1 = 1 ] && [ $r2 = 0 ] && [ $r3 = 1 ] && [ \"\$(pv_runs)\" = 1 ]"
+
+pv_reset code
+pv is-private "$PV/r"
+echo new > "$PV/r/new.txt"
+echo private-evidence > "$PV_CLASS"
+pv is-private "$PV/r"; r=$?
+check "privacy_verdict_new_file_reclassifies" "[ $r = 0 ] && [ \"\$(pv_runs)\" = 2 ]"
+rm -f "$PV/r/new.txt"
+
+pv_reset code
+mkdir -p "$PV/r/.ai-devops"; echo '{}' > "$PV/r/.ai-devops/task-gates.json"
+pv is-private "$PV/r"
+echo '{"x":1}' > "$PV/r/.ai-devops/task-gates.json"
+echo private-tooling > "$PV_CLASS"
+pv is-private "$PV/r"; r=$?
+check "privacy_verdict_declaration_change_reclassifies" "[ $r = 0 ] && [ \"\$(pv_runs)\" = 2 ]"
+rm -rf "$PV/r/.ai-devops"
+
+pv_reset code
+echo v1 > "$PV/policy.json"
+PV_POLICY="$PV/policy.json" pv is-private "$PV/r"
+echo v2 > "$PV/policy.json"; echo private-evidence > "$PV_CLASS"
+PV_POLICY="$PV/policy.json" pv is-private "$PV/r"; r=$?
+check "privacy_verdict_policy_change_reclassifies" "[ $r = 0 ] && [ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+git -C "$PV/r" remote add origin https://example.invalid/a/b.git
+pv is-private "$PV/r"
+git -C "$PV/r" remote set-url origin https://example.invalid/a/c.git
+pv is-private "$PV/r"
+check "privacy_verdict_remote_change_reclassifies" "[ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset private-evidence
+pv is-private "$PV/r"
+pv assert-public "$PV/r"; r=$?
+check "privacy_verdict_private_stays_private" "[ $r != 0 ] && [ \"\$(pv_runs)\" = 1 ]"
+
+pv_reset none
+pv is-private "$PV/r"; r1=$?
+pv is-private "$PV/r"; r2=$?
+check "privacy_verdict_unknown_never_stored" "[ $r1 = 2 ] && [ $r2 = 2 ] && [ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+for i in 1 2; do AI_TASK_GATES_BIN="$PV/bin/ai-task-gates" "$SCRIPT" is-private "$PV/r" >/dev/null 2>&1; done
+check "privacy_verdict_no_scope_always_classifies" "[ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+ln -s "$PV/scope" "$PV/scope-link"
+for i in 1 2; do AI_TASK_GATES_BIN="$PV/bin/ai-task-gates" AI_REVIEW_PRIVACY_SCOPE="$PV/scope-link" "$SCRIPT" is-private "$PV/r" >/dev/null 2>&1; done
+check "privacy_verdict_linked_scope_ignored" "[ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+pv is-private "$PV/r"
+for f in "$PV/scope"/*; do mv "$f" "$PV/planted"; ln -s "$PV/planted" "$f"; done
+echo private-evidence > "$PV_CLASS"
+pv is-private "$PV/r"; r=$?
+# MSYS `ln -s` may copy instead of linking; only a real link proves this case.
+if [ -L "$(ls -d "$PV/scope"/* | head -1)" ] || [ "$r" = 0 ]; then
+  check "privacy_verdict_linked_record_ignored" "[ $r = 0 ] && [ \"\$(pv_runs)\" = 2 ]"
+fi
+
+pv_reset code
+pv is-private "$PV/r"
+echo '#' >> "$PV/bin/ai-task-gates"
+pv is-private "$PV/r"
+check "privacy_verdict_gate_change_reclassifies" "[ \"\$(pv_runs)\" = 2 ]"
+pv_reset code
+pv is-private "$PV/r"
+echo '{"declared_class":"private-evidence"}' > "$PV_STATE"; echo private-evidence > "$PV_CLASS"
+pv is-private "$PV/r"; r=$?
+check "privacy_verdict_task_state_change_reclassifies" "[ $r = 0 ] && [ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+PV_NO_INPUTS=1 pv is-private "$PV/r"
+PV_NO_INPUTS=1 pv is-private "$PV/r"
+check "privacy_verdict_gate_without_inputs_never_stored" "[ \"\$(pv_runs)\" = 2 ] && [ -z \"\$(ls -A '$PV/scope')\" ]"
+
+pv_reset code
+pv is-private "$PV/r"
+AI_TASK_GATES_FILE="$PV/other.json" pv is-private "$PV/r"
+check "privacy_verdict_gate_setting_change_reclassifies" "[ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+pv is-private "$PV/r"
+for f in "$PV/scope"/*; do chmod 644 "$f"; done
+pv is-private "$PV/r"
+check "privacy_verdict_shared_record_ignored" "[ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+pv is-private "$PV/r"
+for f in "$PV/scope"/*; do printf 'ai-review-privacy-verdict-v1 %s public\n' "${f##*/}" > "$f"; chmod 600 "$f"; done
+echo private-evidence > "$PV_CLASS"
+pv is-private "$PV/r"; r=$?
+check "privacy_verdict_record_without_inputs_ignored" "[ $r = 0 ] && [ \"\$(pv_runs)\" = 2 ]"
+unset PV_COUNT PV_CLASS PV_STATE
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

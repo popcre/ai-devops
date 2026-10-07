@@ -1815,6 +1815,43 @@ NEST_FIN_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" bash "$NEST_TMP/t2.s
 printf '%s\n' "$NEST_FIN_OUT" | grep -q 'INHERIT=0' \
   && bad "finished_run_refuses_inheritance (got: $NEST_FIN_OUT)" \
   || ok "finished_run_refuses_inheritance"
+# #1355: each review gets one private privacy-verdict scope for its lifetime;
+# a nested review keeps the outer scope, and the scope is gone afterwards.
+# The guard finds its event recorder beside the wrapper's bin/ directory.
+export AI_REVIEW_PRIVACY_BASE="$NEST_TMP/privacy-base"
+mkdir -p "$NEST_TMP/fake/bin"; ln -s "$REPO_ROOT/tools" "$NEST_TMP/fake/tools"
+cat > "$NEST_TMP/fake/bin/scope-wrapper.sh" <<'W'
+s="${AI_REVIEW_PRIVACY_SCOPE:-}"
+printf 'SCOPE=%s MODE=%s\n' "$s" "$(stat -c %a "$s" 2>/dev/null)"
+W
+SCOPE_OUT="$(env -u AI_REVIEW_PRIVACY_SCOPE -u AI_REVIEW_EVENT_PROVIDER -u AI_REVIEW_EVENT_RUN_ID -u AI_REVIEW_EVENT_PARENT \
+  bash -c 'source "$1"; reviewer_event_guard qwen "$2" x' _ "$GUARD_SRC" "$NEST_TMP/fake/bin/scope-wrapper.sh" 2>/dev/null | grep '^SCOPE=')"
+SCOPE_DIR="$(printf '%s' "$SCOPE_OUT" | sed -n 's/^SCOPE=\([^ ]*\) .*/\1/p')"
+# Git Bash synthesizes modes on NTFS; there the scope's privacy is the user
+# profile's ACL (it lives under $HOME), checked by being under the base.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) case "$SCOPE_OUT" in "SCOPE=$NEST_TMP/privacy-base/scope."*) scope_mode=ok ;; *) scope_mode=bad ;; esac ;;
+  *) case "$SCOPE_OUT" in *" MODE=700") scope_mode=ok ;; *) scope_mode=bad ;; esac ;;
+esac
+[ -n "$SCOPE_DIR" ] && [ "$scope_mode" = ok ] && [ ! -e "$SCOPE_DIR" ] \
+  && ok "review_privacy_scope_private_and_removed" \
+  || bad "review_privacy_scope_private_and_removed (got: $SCOPE_OUT)"
+mkdir -m 700 "$NEST_TMP/outer-scope"
+SCOPE_OUT="$(AI_REVIEW_PRIVACY_SCOPE="$NEST_TMP/outer-scope" env -u AI_REVIEW_EVENT_PROVIDER -u AI_REVIEW_EVENT_RUN_ID -u AI_REVIEW_EVENT_PARENT \
+  bash -c 'source "$1"; reviewer_event_guard qwen "$2" x' _ "$GUARD_SRC" "$NEST_TMP/fake/bin/scope-wrapper.sh" 2>/dev/null | grep '^SCOPE=')"
+case "$SCOPE_OUT" in "SCOPE=$NEST_TMP/outer-scope "*|"SCOPE= "*|'') r=bad ;; *) r=ok ;; esac
+[ "$r" = ok ] && ok "new_invocation_gets_its_own_privacy_scope" || bad "new_invocation_gets_its_own_privacy_scope (got: $SCOPE_OUT)"
+# A direct child of the recorder inherits the open review and its scope.
+seed_open_run eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee qwen
+cat > "$NEST_TMP/scope-inherit.sh" <<'SI'
+source "$GUARD_SRC"
+export AI_REVIEW_EVENT_PROVIDER=qwen AI_REVIEW_EVENT_RUN_ID=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee AI_REVIEW_EVENT_PARENT="$$"
+export AI_REVIEW_PRIVACY_SCOPE="$NEST_TMP/outer-scope"
+bash -c 'source "$1"; reviewer_event_guard qwen "$1" x; echo "SCOPE=$AI_REVIEW_PRIVACY_SCOPE"' _ "$GUARD_SRC"
+SI
+SCOPE_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" bash "$NEST_TMP/scope-inherit.sh" 2>/dev/null | grep '^SCOPE=')"
+[ "$SCOPE_OUT" = "SCOPE=$NEST_TMP/outer-scope" ] && ok "inherited_review_keeps_outer_privacy_scope" || bad "inherited_review_keeps_outer_privacy_scope (got: $SCOPE_OUT)"
+unset AI_REVIEW_PRIVACY_BASE
 # 5. Provider mismatch must not inherit (open-ledger gate is provider-bound).
 seed_open_run dddddddddddddddddddddddddddddddd gemini
 NEST_PROV_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" \

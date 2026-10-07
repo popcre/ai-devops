@@ -1278,6 +1278,23 @@ git -C "$XC" remote set-url origin https://github.com/popcre/some-other-repo.git
 check 'a changed repository identity is classified afresh' "[ \"\$(cd '$XC' && '$GATES' explain --json --paths-from '$XP' | jq -r .repository)\" = popcre/some-other-repo ]"
 check 'the explain cache directory is private' "[ \"\$(stat -c %a '$AI_TASK_GATES_DIR/explain-cache' 2>/dev/null || echo 700)\" = 700 ]"
 
+# #1355: AI_TASK_GATES_INPUTS_TO names every file an explain answer read, so
+# a review can reuse that answer only while each one is unchanged. The answer
+# itself is byte-identical with or without the list.
+git -C "$XC" remote set-url origin https://github.com/popcre/ai-devops.git
+XI="$TMP/xcache-inputs"
+plain="$(cd "$XC" && AI_TASK_GATES_EXPLAIN_CACHE=0 "$GATES" explain --json --paths-from "$XP")"
+listed="$(cd "$XC" && AI_TASK_GATES_EXPLAIN_CACHE=0 AI_TASK_GATES_INPUTS_TO="$XI" "$GATES" explain --json --paths-from "$XP")"
+check 'explain inputs list leaves the answer byte-identical' "[ -n '$plain' ] && [ '$plain' = '$listed' ]"
+( cd "$XC" && "$GATES" start --class code >/dev/null 2>&1 )
+( cd "$XC" && AI_TASK_GATES_INPUTS_TO="$XI" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
+state_file="$(ls "$AI_TASK_GATES_DIR"/*.json | while read -r f; do jq -e --arg t "$(cd "$XC" && pwd -P)" '.' "$f" >/dev/null 2>&1 && grep -qxF "$f" "$XI" && echo "$f"; done | head -1)"
+check 'explain inputs list names the task state file start wrote' "[ -n '$state_file' ] && [ -f '$state_file' ]"
+check 'explain inputs list names the policy, library, program and declaration' "grep -qxF '$AI_TASK_GATES_FILE' '$XI' && grep -q '/tools/lib/task-gates.sh\$' '$XI' && grep -q '/bin/ai-task-gates\$' '$XI' && grep -q '/.ai-devops/task-gates.json\$' '$XI' && ! grep -qv '^/' '$XI'"
+( cd "$XC" && "$GATES" end >/dev/null 2>&1 )
+rm -f "$XI"
+check 'a failed explain writes no inputs list' "! ( cd '$XC' && AI_TASK_GATES_INPUTS_TO='$XI' '$GATES' explain --json --paths-from /nonexistent ) >/dev/null 2>&1; [ ! -s '$XI' ]"
+
 # jqr keeps jq's exact bytes (trailing blank lines, CRLF) and its exit status.
 # #1355: the one-pass rule table and the per-question readers must agree. A
 # non-string rule match forces the readers without changing what applies.
