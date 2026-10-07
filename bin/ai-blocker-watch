@@ -134,9 +134,9 @@ gh_call(){
   # owner in the call, falls back to the personal login: nothing stops.
   local owner tok
   if [ "$BW_APP" = 1 ] && owner="$(gh_owner "$@")" && tok="$("$APP_TOKEN" token "$owner" 2>/dev/null)"; then
-    GH_TOKEN="$tok" gh_selected_call "$@"
+    GH_TOKEN="$tok" BW_SELECTED_APP=1 BW_SELECTED_APP_OWNER="$owner" gh_selected_call "$@"
   else
-    gh_selected_call "$@"
+    BW_SELECTED_APP=0 BW_SELECTED_APP_OWNER='' gh_selected_call "$@"
   fi
 }
 # Share only successful identical fallback reads during this tick. Selection
@@ -145,7 +145,7 @@ gh_call(){
 gh_selected_call(){
   local context key file temporary rc after
   if [ "${AI_GH_OPERATION:-}" != bw.wake_miss ] || [ -z "${BW_WAKE_CACHE:-}" ] ||
-     ! context="$("$TOOL_ROOT/tools/github-requests/pr-status-context" 2>/dev/null)"; then
+     ! context="$(gh_selected_context)"; then
     AI_GH_CALLER=ai-blocker-watch "$GH" "$@"; return
   fi
   key="$(printf '%s\0' "$context" "${GH_HOST:-github.com}" "$@" | sha256sum | cut -d' ' -f1)" || {
@@ -164,10 +164,20 @@ gh_selected_call(){
   # A local login change while an opaque CLI request ran invalidates reuse.
   if [ "$rc" = 0 ] && wake_cache_valid "$BW_WAKE_CACHE" &&
      [ "$(wc -c < "$temporary")" -le 4096 ] &&
-     after="$("$TOOL_ROOT/tools/github-requests/pr-status-context" 2>/dev/null)" && [ "$after" = "$context" ]; then
+     after="$(gh_selected_context)" && [ "$after" = "$context" ]; then
     mv "$temporary" "$file" || rm -f -- "$temporary"
   else rm -f -- "$temporary"; fi
   return "$rc"
+}
+gh_selected_context(){
+  local context
+  if [ "${BW_SELECTED_APP:-0}" = 1 ]; then
+    # A real installation token normally has no /user identity. Only the App
+    # helper's authenticated mint metadata can qualify its selected context.
+    context="$("$APP_TOKEN" context "${BW_SELECTED_APP_OWNER:-}" 2>/dev/null)" || return 1
+    [[ "$context" =~ ^app-v1:[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$context"
+  else "$TOOL_ROOT/tools/github-requests/pr-status-context" 2>/dev/null; fi
 }
 wake_cache_valid(){
   local directory="$1" path name details

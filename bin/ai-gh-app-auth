@@ -16,6 +16,8 @@
 #                                   (vibe_coding / "GitHub App - pop-ai-watchers")
 #                                   into this machine's protected key file
 #   ai-gh-app-auth status          say whether this machine is set up (no secrets)
+#   ai-gh-app-auth context <owner> print only a locally verified App context
+#                                   for the exact selected GH_TOKEN; no network
 #
 # Exit status: 0 ok; 3 this machine has no app key (callers fall back to the
 # personal login, so nothing stops); 1 any other failure.
@@ -46,8 +48,78 @@ jwt(){
 # App-authenticated calls (JWT) are not counted against any user allowance.
 app_get(){ curl -fsS --max-time 20 -H "Authorization: Bearer $1" -H 'Accept: application/vnd.github+json' "$API/$2"; }
 
+# Optional read sharing is Linux-qualified. These checks add no requirement to
+# the existing token command: missing/legacy/insecure metadata only disables
+# sharing, never token selection, minting or personal fallback.
+context_private_path(){
+  local path="$1" mode="$2" details
+  [ ! -L "$path" ] || return 1
+  if [ "$mode" = 700 ]; then [ -d "$path" ] || return 1
+  else [ -f "$path" ] && [ "$(stat -c %s "$path" 2>/dev/null)" -le 65536 ] || return 1; fi
+  details="$(stat -c '%u %a' "$path" 2>/dev/null)" || return 1
+  [ "$details" = "$(id -u) $mode" ]
+}
+
+save_context_metadata(){
+  # installation, response and tok remain in cmd_token's shell scope. Neither
+  # the token nor response body becomes an external command argument.
+  local owner="$1" token_hash metadata temporary
+  [ "$(uname -s)" = Linux ] && context_private_path "$DIR" 700 || return 1
+  context_private_path "$DIR/token-$owner" 600 || return 1
+  # Invalidate older binding before parsing the new response, including the
+  # unlikely case that a provider repeats token bytes with changed scope.
+  if [ -e "$DIR/context-$owner" ] || [ -L "$DIR/context-$owner" ]; then
+    context_private_path "$DIR/context-$owner" 600 || return 1
+  fi
+  temporary="$(mktemp "$DIR/context-$owner.XXXXXX")" || return 1
+  if ! printf '{"schema":0}\n' > "$temporary" || ! mv -f -- "$temporary" "$DIR/context-$owner"; then
+    rm -f -- "$temporary"; return 1
+  fi
+  token_hash="$(printf '%s' "$tok" | sha256sum | cut -d' ' -f1)" || return 1
+  metadata="$(printf '%s\n%s\n' "$installation" "$response" | jq -ecs --arg owner "$owner" --arg app "$APP_ID" --arg hash "$token_hash" '
+    .[0] as $i | .[1] as $t |
+    select(($i.id|type)=="number" and $i.id>0 and ($i.id|floor)==$i.id and
+      ($i.app_id|tostring)==$app and ($i.account.login|ascii_downcase)==$owner and
+      ($t.expires_at|type)=="string" and ($t.permissions|type)=="object" and
+      ($t.permissions|to_entries|all(.[]; (.key|test("^[a-z_]+$")) and (.value=="read" or .value=="write"))) and
+      ($t.repository_selection=="all" or $t.repository_selection=="selected")) |
+    {schema:1,host:"github.com",owner:$owner,app_id:$i.app_id,installation_id:$i.id,
+     expires_epoch:($t.expires_at|fromdateiso8601),permissions:$t.permissions,
+     repository_selection:$t.repository_selection,
+     repository_ids:(if $t|has("repositories") then ($t.repositories|map(.id)|sort|unique) else null end),
+     token_sha256:$hash}' 2>/dev/null)" || return 1
+  temporary="$(mktemp "$DIR/context-$owner.XXXXXX")" || return 1
+  if ! printf '%s\n' "$metadata" > "$temporary"; then rm -f -- "$temporary"; return 1; fi
+  # A foreign metadata path is preserved. Token behavior remains unchanged.
+  context_private_path "$DIR/context-$owner" 600 || { rm -f -- "$temporary"; return 1; }
+  mv -f -- "$temporary" "$DIR/context-$owner"
+}
+
+cmd_context(){
+  local owner="${1:-}" exp tok extra hash canonical now
+  [[ "$owner" =~ ^[A-Za-z0-9-]+$ ]] && [ "${GH_HOST:-github.com}" = github.com ] &&
+    [ -n "${GH_TOKEN:-}" ] && [ "$(uname -s)" = Linux ] || return 1
+  owner="${owner,,}"
+  context_private_path "$DIR" 700 && context_private_path "$DIR/token-$owner" 600 &&
+    context_private_path "$DIR/context-$owner" 600 || return 1
+  read -r exp tok extra < "$DIR/token-$owner" || return 1
+  [[ "$exp" =~ ^[0-9]{1,12}$ ]] && [ -z "${extra:-}" ] && [ "$tok" = "$GH_TOKEN" ] || return 1
+  now="$(date +%s)"; [ "$exp" -gt "$now" ] || return 1
+  hash="$(printf '%s' "$GH_TOKEN" | sha256sum | cut -d' ' -f1)" || return 1
+  canonical="$(jq -ecS --arg owner "$owner" --arg app "$APP_ID" --arg hash "$hash" --argjson now "$now" '
+    select(keys==["app_id","expires_epoch","host","installation_id","owner","permissions","repository_ids","repository_selection","schema","token_sha256"] and
+      .schema==1 and .host=="github.com" and .owner==$owner and (.app_id|tostring)==$app and
+      (.installation_id|type)=="number" and .installation_id>0 and (.installation_id|floor)==.installation_id and
+      (.expires_epoch|type)=="number" and .expires_epoch>$now and (.expires_epoch|floor)==.expires_epoch and
+      .token_sha256==$hash and (.permissions|type)=="object" and
+      (.permissions|to_entries|all(.[]; (.key|test("^[a-z_]+$")) and (.value=="read" or .value=="write"))) and
+      (.repository_selection=="all" or .repository_selection=="selected") and
+      (.repository_ids==null or ((.repository_ids|type)=="array" and (.repository_ids|all(.[]; type=="number" and .>0 and floor==.)))))' "$DIR/context-$owner" 2>/dev/null)" || return 1
+  printf 'app-v1:%s\n' "$(printf '%s' "$canonical" | sha256sum | cut -d' ' -f1)"
+}
+
 cmd_token(){
-  local owner="${1:-}" cache now exp tok J inst
+  local owner="${1:-}" cache now exp tok J inst installation response
   [[ "$owner" =~ ^[A-Za-z0-9-]+$ ]] || { say "usage: token <owner>"; exit 1; }
   [ -f "$KEY" ] || exit 3
   owner="${owner,,}"
@@ -58,13 +130,17 @@ cmd_token(){
     printf '%s\n' "$tok"; return 0
   fi
   J="$(jwt)" || { say "cannot sign with the app key"; exit 1; }
-  inst="$(app_get "$J" "users/$owner/installation" | jq -r '.id // empty')" ||
+  installation="$(app_get "$J" "users/$owner/installation")" ||
     { say "app is not installed for $owner"; exit 1; }
+  inst="$(printf '%s' "$installation" | jq -r '.id // empty')" || { say "app is not installed for $owner"; exit 1; }
   [ -n "$inst" ] || { say "app is not installed for $owner"; exit 1; }
-  tok="$(curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $J" -H 'Accept: application/vnd.github+json' \
-    "$API/app/installations/$inst/access_tokens" | jq -r '.token // empty')" || { say "token request failed for $owner"; exit 1; }
+  response="$(curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $J" -H 'Accept: application/vnd.github+json' \
+    "$API/app/installations/$inst/access_tokens")" || { say "token request failed for $owner"; exit 1; }
+  tok="$(printf '%s' "$response" | jq -r '.token // empty')" || { say "token request failed for $owner"; exit 1; }
   [ -n "$tok" ] || { say "token request returned nothing for $owner"; exit 1; }
   printf '%s %s\n' "$((now + 3300))" "$tok" > "$cache.tmp" && mv -f "$cache.tmp" "$cache"
+  save_context_metadata "$owner" ||
+    say 'optional App read-sharing metadata unavailable; token behavior unchanged'
   printf '%s\n' "$tok"
 }
 
@@ -91,6 +167,7 @@ cmd_status(){
 
 case "${1:-}" in
   token) shift; cmd_token "$@" ;;
+  context) shift; cmd_context "$@" ;;
   install) cmd_install ;;
   status) cmd_status ;;
   *) say "usage: ai-gh-app-auth token <owner> | install | status"; exit 1 ;;

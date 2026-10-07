@@ -833,18 +833,29 @@ if [ "$(uname -s)" = Linux ]; then
   sed 's/\[ "${AI_DEVOPS_TEST_MODE:-0}" = 1 \] || BW_APP=1/BW_APP=1/' "$SCRIPT" > "$TMP/app-toolkit/bin/ai-blocker-watch"
   chmod +x "$TMP/app-toolkit/bin/ai-blocker-watch"
   cp "$ROOT/tools/github-requests/pr-status-context" "$TMP/app-toolkit/tools/github-requests/pr-status-context"
+  export APP_CONTEXT_HELPER="$ROOT/bin/ai-gh-app-auth" AI_GH_APP_DIR="$TMP/app-context"
+  mkdir -p "$AI_GH_APP_DIR"; chmod 700 "$AI_GH_APP_DIR"
+  app_expiry="$(( $(date +%s) + 3600 ))"
+  printf '%s ghs_app_fixture\n' "$app_expiry" > "$AI_GH_APP_DIR/token-o"
+  app_hash="$(printf ghs_app_fixture | sha256sum | cut -d' ' -f1)"
+  jq -cn --arg hash "$app_hash" --argjson expiry "$app_expiry" \
+    '{schema:1,host:"github.com",owner:"o",app_id:5112061,installation_id:42,expires_epoch:$expiry,permissions:{issues:"write"},repository_selection:"all",repository_ids:null,token_sha256:$hash}' > "$AI_GH_APP_DIR/context-o"
+  chmod 600 "$AI_GH_APP_DIR/token-o" "$AI_GH_APP_DIR/context-o"
   cat > "$TMP/app-toolkit/bin/ai-gh-app-auth" <<'APP'
 #!/usr/bin/env bash
+if [ "$1" = context ]; then exec "$APP_CONTEXT_HELPER" "$@"; fi
 [ ! -f "$FAKE/app-unavailable" ] || exit 1
-printf 'fixture-b\n'
+printf 'ghs_app_fixture\n'
 APP
   chmod +x "$TMP/app-toolkit/bin/ai-gh-app-auth"
   old_script="$SCRIPT"; SCRIPT="$TMP/app-toolkit/bin/ai-blocker-watch"
   printf 'fixture-a\n' > "$FAKE/auth-token"; : > "$FAKE/calls"; BW tick >/dev/null 2>&1
   check 'same selected App credential shares one fallback read' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 1 ]"
+  check 'App sharing works without a fabricated numeric user identity' "! GH_TOKEN=ghs_app_fixture '$ROOT/tools/github-requests/pr-status-context'"
   touch "$FAKE/drop-app"; : > "$FAKE/calls"; BW tick >/dev/null 2>&1
   check 'App to personal fallback never reuses App response' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 2 ]"
   SCRIPT="$old_script"; rm -f "$FAKE/app-unavailable"
+  unset APP_CONTEXT_HELPER AI_GH_APP_DIR
   export AI_BLOCKER_WATCH_HOME="$old_home" AI_BLOCKER_WATCH_CONFIG="$old_config"
   unset AI_GH_REAL_GH AI_GH_STATE_DIR
 fi
