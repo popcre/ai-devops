@@ -82,3 +82,15 @@ tools/stepfun_credit.py
 tools/reviewer_credit_watch.py
 .github/workflows/fast-classifier.yml
 .github/workflows/verify.yml
+bin/mcp-launcher-install-windows.ps1
+bin/mcp-secret-launch.ps1
+bin/mcp-session-guard.mjs
+config/mcp-remote-runtime/package.json
+config/mcp-remote-runtime/package-lock.json
+tests/test-mcp-env-launch.ps1
+tests/test-mcp-launcher-synthetic-windows.ps1
+tests/test-mcp-remote-header-freshness.sh
+tests/test-mcp-session-guard.sh
+tools/lib/mcp-launcher-install-gate.sh
+tools/lib/mcp-launcher-install-windows-verify.sh
+tools/lib/mcp-remote-render.sh
