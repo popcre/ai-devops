@@ -134,4 +134,36 @@ export MOCK_AGY_HOOK_ARM="$TMP/hook-arm-b" MOCK_AGY_HOOK="$TMP/hook-base.sh"
 set +e; (cd "$RR" && "$SCRIPT" ask --base "$RR_SHA" base-race --prompt follow) >"$TMP/race-b.out" 2>"$TMP/race-b.err"; RACE_B_RC=$?; set -e
 unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
 check 'post-lock requested base revalidation refuses a substituted session' "test '$RACE_B_RC' -ne 0 && test -f '$TMP/hook-fired-b' && grep -q 'requested base differs from the sealed review identity' '$TMP/race-b.err'"
+# The --assert-head sibling: a replacement plus a checkout advance leaves the
+# pre-lock assertion holding while the review would resume on another HEAD.
+(cd "$RR" && "$SCRIPT" new assert-race --prompt review) >/dev/null
+CR_META="$(find "$TMP/state/sessions" -name '*assert-race*.json' | head -1)"
+CR_HEAD="$(jq -r .head "$CR_META")"
+cat > "$TMP/hook-assert.sh" <<EOF
+#!/usr/bin/env bash
+: > '$TMP/hook-fired-c'
+git -C '$RR' commit --allow-empty -qm 'advance under the review'
+NEW_HEAD="\$(git -C '$RR' rev-parse HEAD)"
+jq --arg h "\$NEW_HEAD" '.head=\$h' '$CR_META' > '$CR_META.tmp' && mv '$CR_META.tmp' '$CR_META'
+EOF
+rm -f "$TMP/hook-fired-c"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm-c" MOCK_AGY_HOOK="$TMP/hook-assert.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$CR_HEAD" assert-race --prompt follow) >"$TMP/race-c.out" 2>"$TMP/race-c.err"; RACE_C_RC=$?; set -e
+unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
+check 'post-lock assert-head revalidation refuses a substituted session' "test '$RACE_C_RC' -ne 0 && test -f '$TMP/hook-fired-c' && grep -q 'asserted head no longer matches the reviewed source' '$TMP/race-c.err'"
+# The live-head leg alone: the binding still matches the frozen session head,
+# but the checkout advanced under the pre-lock assertion.
+(cd "$RR" && "$SCRIPT" new assert-live --prompt review) >/dev/null
+CL_META="$(find "$TMP/state/sessions" -name '*assert-live*.json' | head -1)"
+CL_HEAD="$(jq -r .head "$CL_META")"
+cat > "$TMP/hook-live.sh" <<EOF
+#!/usr/bin/env bash
+: > '$TMP/hook-fired-d'
+git -C '$RR' commit --allow-empty -qm 'advance again under the review'
+EOF
+rm -f "$TMP/hook-fired-d"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm-d" MOCK_AGY_HOOK="$TMP/hook-live.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$CL_HEAD" assert-live --prompt follow) >"$TMP/race-d.out" 2>"$TMP/race-d.err"; RACE_D_RC=$?; set -e
+unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
+check 'post-lock assert-head revalidation also catches a checkout advance' "test '$RACE_D_RC' -ne 0 && test -f '$TMP/hook-fired-d' && grep -q 'asserted head no longer matches the reviewed source' '$TMP/race-d.err'"
 printf 'ok tests\n'

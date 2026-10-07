@@ -621,21 +621,24 @@ fi
 }
 report(){ local r="$1" n="$2" m="$3" o="$4" rel p physical tmp body; rel=".ai/reviews/gemini-$(short_name "$n" 64)-$(date -u +%Y%m%dT%H%M%SZ)-$$.md"; p="$r/$rel"; [ ! -L "$r/.ai" ] && [ ! -L "$r/.ai/reviews" ] || die 'review report destination uses a link'; git -C "$r" check-ignore --no-index -q -- "$rel" 2>/dev/null || die 'review report destination is not safely Git-ignored'; git -C "$r" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 && die 'review report destination is tracked'; mkdir -p "$r/.ai/reviews" || die 'cannot create review report directory'; physical="$(cd "$r/.ai/reviews" && pwd -P)"; case "$physical" in "$(cd "$r" && pwd -P)"/*) ;; *) die 'review report destination escapes repository' ;; esac; body="$(jq -r '.response // ""' "$o" 2>/dev/null | tr -d '[:space:]')"; [ -n "$body" ] || die_empty_verdict 'Gemini returned an empty review body; refusing an empty PASS'; tmp="$(mktemp "$r/.ai/reviews/.gemini-report.XXXXXX")" || die 'cannot create review report'; { jq -er .response "$o"; printf '\n\n---\n'; jq -er '"Provider: Gemini\\nModel: " + .model + "\\nConversation: " + .conversation_id + "\\nHead: " + .head + "\\nPacket: " + .packet_sha256' "$m"; } > "$tmp" || { rm -f "$tmp"; die 'cannot render review report'; }; mv -f "$tmp" "$p" || { rm -f "$tmp"; die 'cannot publish review report'; }; [ -s "$p" ] || die 'review report is empty'; reviewer_event_publish_report gemini "$p" || die 'durable publication failed; local evidence retained'; printf %s "$p"; }
 # revalidate_locked_source REPO HEAD_JSON BASE_JSON
-# The governed SHA and the requested base are first validated before the
-# session lock is taken (validate_request_source and ask). A concurrent
-# delete/recreate can substitute a same-named session in that window and bind
-# the verdict to the wrong source state, so both are re-checked here, under
-# the lock. HEAD_JSON carries the .head the verdict binds to (the resolved
-# source identity for new, the session metadata re-read under the lock for
-# ask); BASE_JSON carries the .base the requested --base must still resolve
-# to (the same identity for new, the sealed packet identity for ask). Returns
-# 1 with REVALIDATE_REASON set when the binding no longer holds; the caller
-# refuses without marking the session for recovery, because a binding mismatch
-# is a bad request rather than damaged session evidence.
+# The governed SHA, the requested base, and the asserted head are first
+# validated before the session lock is taken (validate_request_source and
+# ask). A concurrent delete/recreate can substitute a same-named session in
+# that window and bind the verdict to the wrong source state, so all three
+# are re-checked here, under the lock. HEAD_JSON carries the .head the verdict
+# binds to (the resolved source identity for new, the session metadata re-read
+# under the lock for ask); BASE_JSON carries the .base the requested --base
+# must still resolve to (the same identity for new, the sealed packet identity
+# for ask). The asserted head is checked against both the binding and the live
+# source, because a session replacement and a checkout advance can each leave
+# the pre-lock assertion holding while the review resumes on a different HEAD.
+# Returns 1 with REVALIDATE_REASON set when a binding no longer holds; the
+# caller refuses without marking the session for recovery, because a binding
+# mismatch is a bad request rather than damaged session evidence.
 revalidate_locked_source(){
-  local repo="$1" head_json="$2" base_json="$3" live_base frozen_head frozen_base
+  local repo="$1" head_json="$2" base_json="$3" live_head live_base frozen_head frozen_base
   REVALIDATE_REASON=''
-  [ -n "$GOVERNED_HEAD" ] || [ -n "$OPT_BASE" ] || return 0
+  [ -n "$GOVERNED_HEAD" ] || [ -n "$OPT_BASE" ] || [ -n "$OPT_ASSERT_HEAD" ] || return 0
   frozen_head="$(jq -r '.head // empty' "$head_json" 2>/dev/null)"
   frozen_base="$(jq -r '.base // empty' "$base_json" 2>/dev/null)"
   if [ -n "$GOVERNED_HEAD" ]; then
@@ -648,6 +651,14 @@ revalidate_locked_source(){
     live_base="$(git -C "$repo" rev-parse --verify --quiet "${OPT_BASE}^{commit}" 2>/dev/null)"
     if [ -z "$live_base" ] || [ "$live_base" != "$frozen_base" ]; then
       REVALIDATE_REASON='requested base differs from the sealed review identity'
+      return 1
+    fi
+  fi
+  if [ -n "$OPT_ASSERT_HEAD" ]; then
+    live_head="$(git -C "$repo" rev-parse --verify --quiet HEAD^{commit} 2>/dev/null)"
+    if [ -z "$frozen_head" ] || [ "$OPT_ASSERT_HEAD" != "$frozen_head" ] \
+      || [ -z "$live_head" ] || [ "$OPT_ASSERT_HEAD" != "$live_head" ]; then
+      REVALIDATE_REASON='asserted head no longer matches the reviewed source'
       return 1
     fi
   fi
