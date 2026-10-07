@@ -77,13 +77,14 @@ resolve_grok() {
 # Credentials presence only — never print a key. A missing store is a local
 # dependency failure, not a provider fault.
 require_credentials() {
-  if [ -s "${AI_GROK_AUTH_HOME:-${HOME:-}/.grok}/auth.json" ] || [ -n "${XAI_API_KEY:-}" ]; then
+  # Subscription OAuth login only; a paid XAI_API_KEY never counts.
+  if [ -s "${AI_GROK_AUTH_HOME:-${HOME:-}/.grok}/auth.json" ]; then
     return 0
   fi
   if [ "${AI_GROK_ALLOW_NO_CREDS:-0}" = 1 ]; then
     return 0
   fi
-  printf 'grok door: no cached credentials and no XAI_API_KEY. Run grok login, or set AI_GROK_ALLOW_NO_CREDS=1 for offline tests.\n' >&2
+  printf 'grok door: no Grok subscription login (auth.json); a paid XAI_API_KEY is never used. Run grok login, or set AI_GROK_ALLOW_NO_CREDS=1 for offline tests.\n' >&2
   return 127
 }
 
