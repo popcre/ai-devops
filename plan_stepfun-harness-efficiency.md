@@ -1,7 +1,9 @@
 # IMPLEMENTATION PLAN — StepFun harness token efficiency (2026-10-06)
 
 Companion handoff: [`HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-efficiency.md`](HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-efficiency.md)
-(That handoff links back here. Root `HANDOFF.md` stays the static pointer.)
+(That write-once handoff describes the 2026-10-06 pre-implementation state;
+this STATUS and issue #1336 carry the current outcome. Root `HANDOFF.md` stays
+the static pointer.)
 
 **Revision 2026-10-06 (owner):** the executing session is a **coordinator only**.
 It does not implement. It spins up **one subagent per phase (including Phase 4)**,
@@ -16,11 +18,37 @@ a genuine business-meaning choice appears.
 | W0 coordinator setup (branch, gates, briefs) | ✅ done with variance | `ai-task-gates start --class reviewer-safety`; integration worktree from `73cf6714`; phase briefs delivered in agent dispatch messages because the revised §9 was still uncommitted on edge-dev, so no brief files were created |
 | W1a Phase 1 subagent (retry detector) | ✅ done | `951d55dc`, `8e9364ad`; StepFun suite 80 passed, 0 failed, 2 platform skips; 402 quota exits without retry |
 | W1b Phase 3 subagent (Windows gate) | ✅ done | `2e50a4c7`, `0d8e1248`; Windows and Linux shell suites each passed 52, 0 failed; Windows junction fixture proves the path escape guard |
-| W2a Phase 2 subagent (prompt de-dup) | ✅ done | `9f3db3d4`; semantic prompt suite 77 passed, 0 failed, 2 platform skips |
+| W2a Phase 2 subagent (prompt de-dup) | ✅ done, compaction repaired | `9f3db3d4`; semantic prompt suite 77 passed, 0 failed, 2 platform skips; [PR #1360](https://github.com/popcre/ai-devops/pull/1360) restored the qualified compaction block and documented its unmeasured effect in `config/opencode-stepfun/README.md` |
 | W2b Phase 4 subagent (sessions/cache) | ⏭ skip-unsafe | `6b4375e5`; session files require model-writable state deleted by LOCKED-7; warm cache risks cross-review content or key leakage; isolation regression passed |
-| W3 Phase 5 subagent (measure + live proof) | ✅ counters; live proof open | `b07d79fb`; 80 StepFun checks and 52 Windows-shell checks passed; Linux and installed Windows `doctor --live` passed; updated-install proof pending |
-| W4 integrate, PR, required exact-head independent review, merge | ⬜ in progress | [PR #1337](https://github.com/popcre/ai-devops/pull/1337); independent Muse approved `3f3a738e`, then preserved coordinator plan was integrated, so a fresh exact-head independent review is required (class `reviewer-safety` → `exact-head-independent-review` per `config/task-gates.json`) |
-| Live proof checklist on landing issue | ⬜ open | [Issue #1336](https://github.com/popcre/ai-devops/issues/1336) retains `- [ ] live proof` until post-merge updated-install checks |
+| W3 Phase 5 subagent (measure + live proof) | ✅ measurement delivered; live proof blocked | `b07d79fb`; original suites passed 80 StepFun checks and 52 Windows-shell checks, 0 failures. StepCode exposes no usage or cache counters, so numeric savings remain unmeasured. Installed Linux `ai-stepfun doctor --live` at 6:19 AM EDT on 2026-10-07 exited 92 with `AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota`; it did not return `STEPFUN-OK`. An earlier real StepFun review returned HTTP 402 `quota_exceeded` without a reset time. Updated-install end-to-end proof remains open. |
+| W4 integrate, PR, required exact-head independent review, merge | ✅ merged | [PR #1337](https://github.com/popcre/ai-devops/pull/1337): Muse approved exact head `962ef01a37cccb9bd6a0aeff9a7dab450d28c4d1`, merged as `61d95fe9`; [repair PR #1360](https://github.com/popcre/ai-devops/pull/1360): DeepSeek approved exact head `8b78d12db70c560c504f2749583f52fcc65d0826`, merged as `ea45ba40`; required original suites and merge checks passed. Subsequent support repairs through [PR #1364](https://github.com/popcre/ai-devops/pull/1364) are on `origin/main` at `37070ecf`. |
+| Live proof checklist on landing issue | ⬜ blocked | [Issue #1336](https://github.com/popcre/ai-devops/issues/1336) retains `- [ ] live proof`. Owner: StepFun account/billing. Resume installed checks after credit is available; no reset time was provided. |
+
+**Merged code and installation repair chain on `origin/main` (through `37070ecf`):**
+[#1337](https://github.com/popcre/ai-devops/pull/1337) `61d95fe9` shipped the harness;
+[#1360](https://github.com/popcre/ai-devops/pull/1360) `ea45ba40` restored compaction
+and repaired Windows runner health checks;
+[#1368](https://github.com/popcre/ai-devops/pull/1368) `1b7e4fbf` allowed reviewed
+stale Linux installation recovery;
+[#1372](https://github.com/popcre/ai-devops/pull/1372) `c2cff70f` preserved Windows
+`SystemDrive` in Muse's clean runtime;
+[#1373](https://github.com/popcre/ai-devops/pull/1373) `2978e422` mounted StepCode
+loader paths in the review door;
+[#1375](https://github.com/popcre/ai-devops/pull/1375) `ff83bde0` selected the
+supported StepCode approval mode; and
+[#1380](https://github.com/popcre/ai-devops/pull/1380) `5dedefdf` supplied the
+isolated StepCode model catalog and resolver in the review door; and
+[#1364](https://github.com/popcre/ai-devops/pull/1364) `37070ecf` aligned the
+review-door sandbox launch with the wrapper and made doctor probe it. These
+StepFun commits are ancestors of `origin/main`. A real model verdict remains
+unproved because the provider has exhausted its available credit.
+
+The [Muse Git Bash readiness repair #1381](https://github.com/popcre/ai-devops/pull/1381)
+merged as `e1ff6b71` on `origin/main`. Its separate Windows shell runner still
+fails at spawn; installed-baseline testing reproduced that failure. The open
+[Windows task-gate ACL repair #1382](https://github.com/popcre/ai-devops/pull/1382)
+addresses a separate privacy defect. Neither is a substitute for StepFun's
+credit-blocked live proof or a new prerequisite to its completion.
 
 **Muse review (2026-10-06):** `VERDICT: REVISE plan`. Six must-fix items are
 already in the phase briefs (B1–B3 / M1–M3). Do not reopen. Report path is
@@ -36,8 +64,10 @@ on `edge-dev`.
 
 *File rename note:* never name a doc `*token*` — `.gitignore` `**/*token*` hides it.
 
-**Execution record:** Waves 0–3 are recorded in STATUS. Wave 4 and post-merge
-live proof remain open.
+**Execution record:** Waves 0–2, Wave 3 counter logging, Wave 4 merge, and the
+supporting repair chain are recorded in STATUS. Updated-install end-to-end
+proof remains open on issue #1336 because StepFun returned 402/exit 92. No
+token-savings or cache-hit claim is made while provider counters are unavailable.
 
 ---
 
@@ -117,10 +147,11 @@ Reproduce the current waste without live paid calls:
 - Implementing `implement` on Windows (still refused by design).
 - Softening any safety gate (path clamp, wipe, no-remote, implement-never-retry).
 
-## 5. Current state of the code
+## 5. Baseline before implementation
 
-All of this is **on `origin/main`** as of 2026-10-06 (`73cf671` plan landed).
-No fix work has been started. The landing checkout is landing-only.
+This table describes `origin/main` at `73cf671` on 2026-10-06, before the
+implementation began. The shipped state and remaining live-proof gate are in
+STATUS above. The landing checkout remains landing-only.
 
 | Area | State | Exact refs |
 |---|---|---|
@@ -131,7 +162,7 @@ No fix work has been started. The landing checkout is landing-only.
 | Review prompt | Duplicates VERDICT; unique `$rel` early | `cmd_review` `$full` (~605–612); `stepfun-review.md:38-42` |
 | Windows review tools | Only `bash` + shell | `stepfun-review-windows.md:5-17` |
 | Windows shell grammar | `ls\|cat\|head` one path, no flags | `ai-stepfun-windows-shell` (~256–261) |
-| OpenCode config | No cache keys; inert `compaction` | `opencode.json:7-12`, `:17-19` |
+| OpenCode config | No cache keys; explicit `compaction` settings whose effect versus defaults was unmeasured | `opencode.json:7-12`, `:17-19` |
 | Packet injection | By reference — keep | `$rel/MANIFEST.md` in review prompt |
 | Tests | Genuine 429 covered; false-positive **not** | `tests/test-ai-stepfun.sh` ~139 |
 
@@ -410,12 +441,17 @@ Add to `tests/test-ai-stepfun.sh`:
 - **Verification gate:** `$rel` does not appear in the first N lines of the
   assembled prompt (or golden prefix fixture under `tests/fixtures/stepfun/`).
 
-##### P2.3 Handle dead `compaction` block
+##### P2.3 Preserve and document qualified `compaction` settings
 
-- **Change:** `config/opencode-stepfun/opencode.json` — delete inert block or
-  document it in `config/opencode-stepfun/README.md`. Do not retune without
-  Phase 5 numbers.
-- **Verification gate:** config parses; offline doctor / profile tests pass.
+- **Decision after repair:** Keep the previously qualified block in
+  `config/opencode-stepfun/opencode.json` (`auto: true`, `prune: false`,
+  `tail_turns: 8`, `reserved: 32768`). The Phase 2 deletion did not establish
+  that OpenCode defaults preserve review correctness.
+  `config/opencode-stepfun/README.md` records this limit. Do not remove or tune
+  the block for token savings without paired measurements and retained-fact and
+  isolation checks.
+- **Verification gate:** config parses; offline doctor / profile tests pass;
+  the README records the preservation and measurement criteria.
 
 ---
 
@@ -601,13 +637,16 @@ Never "add tests" as a step — the tables name the tests.
 **Definition of done (coordinator closes without asking the owner)**
 
 - [ ] Waves 0–3 complete; every phase subagent reported with gate evidence.
-- [ ] Phase 4 either landed or STATUS `skip-unsafe` with the exact failed
+- [x] Phase 4 either landed or STATUS `skip-unsafe` with the exact failed
       security criterion (never a silent skip).
-- [ ] Both test suites green; offline doctor green.
-- [ ] PR merged on `origin/main`; commit cited in STATUS (not a bare number).
-- [ ] `- [ ] live proof` on issue #1336; P5.2 evidence posted or named
-      owner if a live call is blocked.
-- [ ] Handoff + this STATUS truthful.
+- [x] Original StepFun and Windows-shell suites green (80/0 and 52/0); earlier
+      offline and live doctor checks passed before the updated-install run.
+- [x] Phase 5 counters recorded as unavailable; no measured savings claimed.
+- [x] PRs merged on `origin/main`; merge commits and review evidence cited in STATUS.
+- [ ] `- [ ] live proof` on issue #1336; StepFun account/billing must restore
+      credit before a fresh installed live doctor and real verdict can pass.
+- [x] Current STATUS and issue name the blocker; companion handoff is the
+      write-once pre-implementation record.
 
 **Risks / rollback**
 
