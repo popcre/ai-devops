@@ -232,7 +232,7 @@ expect_ok 'legacy symlink migration finalizes with new receipt' gate finalize "$
 # A historical manifest can lag the live checkout after an earlier unguarded
 # update. It must be reviewed as a distinct recovery operation covering the
 # full manifest-to-target range and the live source bytes.
-rm -f "$TMP/state/install-completions/last.json"
+[ "$(jq -r .target_head "$TMP/state/install-completions/last.json")" = "$protected" ] || { echo 'FAIL: stale recovery fixture lost the completed release'; exit 1; }
 printf '# changed gate bytes\n' >> "$TMP/candidate/bin/ai-task-gates"
 git -C "$TMP/candidate" add bin/ai-task-gates
 git -C "$TMP/candidate" commit -qm drifted-gate-source
@@ -274,6 +274,8 @@ jq -nc --arg target "$drifted" --arg recorded "$protected" --arg path "$TMP/inst
 cp "$drift_auth" "$TMP/drift-auth-original"
 jq '.stale_manifest_recovery=false' "$TMP/drift-auth-original" > "$drift_auth"
 expect_stop 'stale recovery cannot be presented as ordinary upgrade' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
+jq --arg old "$ordinary" '.linux_manifest_recorded_sha=$old' "$TMP/drift-auth-original" > "$drift_auth"
+expect_stop 'stale authority cannot claim a different completed baseline' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
 jq '.installed_source_sha256="0000000000000000000000000000000000000000000000000000000000000000"' "$TMP/drift-auth-original" > "$drift_auth"
 expect_stop 'stale recovery refuses mismatched live source hash' gate preflight "$TMP/candidate" "$drifted" --caller-pinned
 cp "$TMP/drift-auth-original" "$drift_auth"
