@@ -121,9 +121,147 @@ RECOVERY_CASES
   check 'GLM waits for a new assistant, preserves failed publication, and observes expired completion without replay' "test '$result' -eq 0 && grep -q 'RECOVERY_OK expired observation=1 submissions=0' '$fixture/result.log'"
   if [ "$result" -ne 0 ]; then printf 'recovery fixture exit=%s\n' "$result"; cat "$fixture/result.log" "$fixture/first.log" "$fixture/final.log" 2>/dev/null; fi
 }
+
+# Reconstructed public-schema fixture, informed by actual5569 code1310 diagnostic.
+# The live assistant envelope was not retained and is not represented as evidence.
+glm_terminal_error_cases(){
+  local fixture="$TMP/terminal-error" result
+  mkdir -p "$fixture"; chmod 700 "$fixture"
+  cat > "$fixture/cases.sh" <<'ERROR_CASES'
+set -e
+source "$AI_GLM_SOURCE"
+STATE_DIR="$FIXTURE"; meta="$FIXTURE/exact.json"
+mkdir -p "$FIXTURE/repo" "$FIXTURE/packet"
+git -C "$FIXTURE/repo" init -q; git -C "$FIXTURE/repo" config user.name Test; git -C "$FIXTURE/repo" config user.email test@example.com
+printf fixture > "$FIXTURE/repo/source"; git -C "$FIXTURE/repo" add source; git -C "$FIXTURE/repo" commit -qm fixture
+HEAD_FIXTURE=$(git -C "$FIXTURE/repo" rev-parse HEAD); BASE_FIXTURE=$HEAD_FIXTURE
+printf '%064d' 0 | tr 0 b > "$FIXTURE/packet/MANIFEST.sha256"
+jq -n --arg h "$HEAD_FIXTURE" --arg b "$BASE_FIXTURE" '{type:"review",name:"exact",caller:"codex",model:"glm-5.3",provider:"zai-coding-plan",opencode_session_id:"session-exact",remote_turn:{state:"pending",original_invocation_id:("a"*32),head:$h,base:$b,packet_sha256:("b"*64),previous_message_id:"old",started_at:"2026-10-07T11:58:22Z"}}' > "$meta"
+jq --arg root "$FIXTURE/repo" --arg boundary "$FIXTURE/packet" '.repository_root=$root | .remote_turn.boundary_root=$boundary' "$meta" > "$FIXTURE/with-root"; mv "$FIXTURE/with-root" "$meta"
+chmod 600 "$meta"
+cp "$meta" "$FIXTURE/original"
+printf 'OLD5371 immutable success' > "${meta%.json}.terminal.json"
+msg='{"id":"new-error","finish":"error","model":{"id":"glm-5.3","providerID":"zai-coding-plan"},"error":{"message":"HTTP429 code1310 Weekly/Monthly Limit Exhausted"}}'
+preflight_fixture(){ printf '%s\n' "$*" >> "$FIXTURE/pauses"; }
+REVIEW_PREFLIGHT_BIN=preflight_fixture
+persist_review_error "$meta" "$msg"
+jq -e '.remote_turn.state=="terminal-error" and .remote_turn.authorizing==false' "$meta" >/dev/null
+[ "$(cat "${meta%.json}.terminal.json")" = 'OLD5371 immutable success' ]
+receipt="$(jq -r .remote_turn.error_path "$meta")"; cp "$receipt" "$FIXTURE/receipt-original"
+observed="$(jq -r .observed_epoch "$receipt")"
+grep -q -- "--observed $observed" "$FIXTURE/pauses"
+api(){ printf forbidden >> "$FIXTURE/network"; return 99; }
+require_review_server(){ printf forbidden >> "$FIXTURE/network"; return 99; }
+send_prompt(){ printf forbidden >> "$FIXTURE/network"; return 99; }
+record_diagnostic(){ printf '%s\n' "$*" >> "$FIXTURE/diagnostics"; }
+for attempt in 1 2; do
+  if (recover_review_error "$meta") > "$FIXTURE/recover-$attempt.log" 2>&1; then exit 10; fi
+  grep -q 'terminal-error non-authorizing' "$FIXTURE/recover-$attempt.log"
+done
+[ ! -e "$FIXTURE/network" ]
+[ "$(jq -r .observed_epoch "$receipt")" = "$observed" ]
+# Exercise the real public recovery route and the publication-crash window.
+CALLER=codex; REPO_OVERRIDE="$FIXTURE/repo"; PROMPT_TEXT=''; PROMPT_FILE=''; OPT_BASE=''; OPT_TESTS=''; OPT_DECISION=''; OPT_ASSERT_HEAD=''; LOCK_TIMEOUT=1
+repo_id(){ printf fixture; }; meta_path(){ printf '%s/exact.json' "$FIXTURE"; }
+packet_fixture(){ case "$1" in path) printf '%s/packet' "$FIXTURE";; verify|verify-retained) return 0;; *) return 1;; esac; }; PACKET_BIN=packet_fixture
+if (cmd_recover exact) > "$FIXTURE/public-recover.log" 2>&1; then exit 19; fi
+grep -q 'terminal-error non-authorizing' "$FIXTURE/public-recover.log"
+jq '.remote_turn.state="pending" | del(.remote_turn.error_path,.remote_turn.error_sha256)' "$meta" > "$FIXTURE/pending"; chmod 600 "$FIXTURE/pending"; mv "$FIXTURE/pending" "$meta"
+if (cmd_recover exact) > "$FIXTURE/crash-recover.log" 2>&1; then exit 20; fi
+grep -q 'terminal-error non-authorizing' "$FIXTURE/crash-recover.log"
+[ ! -e "$FIXTURE/network" ]
+# New pending error: one bounded message observation, then local-only recovery.
+cp "$meta" "$FIXTURE/completed-error-meta"
+mv "$receipt" "$FIXTURE/error-held"
+jq '.remote_turn.state="pending" | del(.remote_turn.error_path,.remote_turn.error_sha256)' "$meta" > "$FIXTURE/pending"; chmod 600 "$FIXTURE/pending"; mv "$FIXTURE/pending" "$meta"
+require_review_server(){ :; }
+ERROR_FIXTURE_JSON="$msg"
+last_assistant(){ printf read >> "$FIXTURE/message-reads"; printf '%s' "$ERROR_FIXTURE_JSON"; }
+await_turn(){ printf forbidden >> "$FIXTURE/network"; return 99; }
+if (cmd_recover exact) > "$FIXTURE/pending-error.log" 2>&1; then exit 21; fi
+grep -q 'terminal-error non-authorizing' "$FIXTURE/pending-error.log"
+[ "$(cat "$FIXTURE/message-reads")" = read ] && [ ! -e "$FIXTURE/network" ]
+# Same normalized immutable receipt cannot be rewritten or freshen observation.
+rm "$receipt"; mv "$FIXTURE/error-held" "$receipt"; cp "$FIXTURE/completed-error-meta" "$meta"; chmod 600 "$meta"
+
+
+# Every changed original binding must fail before any call.
+for field in head base packet_sha256 original_invocation_id previous_message_id; do
+  jq --arg k "$field" '.remote_turn[$k]="forged"' "$meta" > "$FIXTURE/tampered"; chmod 600 "$FIXTURE/tampered"
+  if (review_error_receipt "$FIXTURE/tampered") >/dev/null 2>&1; then exit 11; fi
+done
+for field in caller name model provider opencode_session_id; do
+  jq --arg k "$field" '.[$k]="forged"' "$meta" > "$FIXTURE/tampered"; chmod 600 "$FIXTURE/tampered"
+  if (review_error_receipt "$FIXTURE/tampered") >/dev/null 2>&1; then exit 12; fi
+done
+for filter in '.model.id="other"' '.model.providerID="other"' '.id="old"' '.finish="stop"' 'del(.error)' '.error.message=""'; do
+  wrong="$(jq "$filter" <<<"$msg")"
+  if persist_review_error "$meta" "$wrong" >/dev/null 2>&1; then exit 13; fi
+done
+# Tamper exact stored bytes; recovery checks both binding and digest.
+jq '.assistant_id="changed"' "$receipt" > "$FIXTURE/replaced"; chmod 600 "$FIXTURE/replaced"; mv "$FIXTURE/replaced" "$receipt"
+if (recover_review_error "$meta") >/dev/null 2>&1; then exit 14; fi
+cp "$FIXTURE/receipt-original" "$receipt"; chmod 600 "$receipt"
+# Old successful receipt is never accepted as current terminal-error evidence.
+cp "${meta%.json}.terminal.json" "$receipt"
+if (recover_review_error "$meta") >/dev/null 2>&1; then exit 15; fi
+cp "$FIXTURE/receipt-original" "$receipt"; chmod 600 "$receipt"
+# Symlink and permissive receipt fail closed.
+if [ "$IS_WINDOWS" = 0 ]; then
+  chmod 644 "$receipt"
+  if (review_error_receipt "$meta") >/dev/null 2>&1; then exit 16; fi
+  chmod 600 "$receipt"
+fi
+mv "$receipt" "$FIXTURE/held"
+ln -s "$FIXTURE/held" "$receipt"
+if [ -L "$receipt" ]; then
+  if (review_error_receipt "$meta") >/dev/null 2>&1; then exit 17; fi
+fi
+rm "$receipt"; mv "$FIXTURE/held" "$receipt"
+[ ! -e "$FIXTURE/network" ]
+
+# The actual merged monotonic store preserves an existing longer hold exactly.
+preflight_actual(){
+  if [ "$1" = pause ]; then
+    python3 "$TOOLS/reviewer_admission.py" pause glm --reason "$3" --seconds "$5" --observed "$7" --directory "$FIXTURE/admission"
+  elif [ "$1" = pause-status ]; then
+    python3 "$TOOLS/reviewer_admission.py" pause-status glm --directory "$FIXTURE/admission"
+  else printf capacity-called >> "$FIXTURE/capacity-calls"; printf '{"schema_version":1,"provider":"glm","state":"unknown"}'; fi
+}
+now=$(date +%s)
+python3 "$TOOLS/reviewer_admission.py" quarantine glm --reason stronger-fixture --seconds 7200 --directory "$FIXTURE/admission" >/dev/null
+preflight_actual pause glm out-of-credit --seconds 3600 --observed "$observed" > "$FIXTURE/held-before"
+preflight_actual pause glm out-of-credit --seconds 3600 --observed "$observed" > "$FIXTURE/held-after"
+cmp "$FIXTURE/held-before" "$FIXTURE/held-after"
+REVIEW_PREFLIGHT_BIN=preflight_actual
+if capacity_gate >/dev/null 2>&1; then exit 18; fi
+[ ! -e "$FIXTURE/capacity-calls" ]
+# No hold: unknown retains original review capability; expired hold cannot block it.
+python3 "$TOOLS/reviewer_admission.py" clear-global glm --directory "$FIXTURE/admission" >/dev/null
+capacity_gate >/dev/null 2>&1
+[ -s "$FIXTURE/capacity-calls" ]
+
+# Proven terminal error finalization permits a new guarded same-conversation turn.
+remote_turn_pending "$meta" && exit 23
+jq -e '.last_failed_turn.state=="terminal-error" and .last_failed_turn.authorizing==false' "$meta" >/dev/null
+old_error_invocation="$(jq -r .last_failed_turn.original_invocation_id "$meta")"
+AI_REVIEW_EVENT_RUN_ID=$(printf '%032d' 2); REVIEW_HEAD=$HEAD_FIXTURE; REVIEW_BASE=$BASE_FIXTURE; PACKET_HASH=$(printf '%064d' 0 | tr 0 b); REVIEW_DIR="$FIXTURE/packet"
+mark_remote_turn_pending "$meta" new-error
+remote_turn_pending "$meta"
+jq -e --arg original "$old_error_invocation" '.last_failed_turn.original_invocation_id==$original and .remote_turn.original_invocation_id!=$original' "$meta" >/dev/null
+if (review_error_receipt "$meta") >/dev/null 2>&1; then exit 24; fi
+[ "$(cat "${meta%.json}.terminal.json")" = 'OLD5371 immutable success' ]
+printf 'ERROR_RECEIPT_OK no-provider-calls original-success-preserved\n'
+ERROR_CASES
+  AI_GLM_SOURCE="$AI_GLM" TOOLS="$REPO_ROOT/tools" FIXTURE="$fixture" bash "$fixture/cases.sh" > "$fixture/result.log" 2>&1
+  result=$?
+  check 'GLM immutable terminal-error recovery preserves original bindings and makes no provider calls' "test '$result' -eq 0 && grep -q ERROR_RECEIPT_OK '$fixture/result.log'"
+  if [ "$result" -ne 0 ]; then printf 'error fixture exit=%s\n' "$result"; tail -15 "$fixture/result.log"; fi
+}
 if [ "${AI_GLM_RECOVERY_TESTS_ONLY:-0}" = 1 ]; then
   trap 'rm -rf "$TMP"' EXIT
   glm_recovery_cases
+  glm_terminal_error_cases
   printf '%d passed, %d failed\n' "$PASS" "$FAIL"
   ((FAIL == 0)); exit $?
 fi
@@ -1581,5 +1719,6 @@ check "a stale error from the previous turn is not mistaken for this turn" \
 rm -rf "$PERR_TMP"
 
 glm_recovery_cases
+glm_terminal_error_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
