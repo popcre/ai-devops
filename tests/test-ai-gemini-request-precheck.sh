@@ -166,6 +166,22 @@ set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$RR_SHA" bind --prompt follow)
 unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
 check 'post-lock status revalidation refuses a session flagged under the window' "test '$F_RC' -ne 0 && test -f '$TMP/hook-fired' && grep -q 'session requires recovery before reuse' '$TMP/f.err'"
 restore_meta "$RR_SHA" "$ORIG_MODEL" COMPLETE
+# A coherent same-name replacement: every field the checks above revalidate
+# is preserved, and only the immutable session identity is swapped. Without
+# the identity re-check this would resume a different provider conversation
+# under the caller's name.
+jq --arg c 'conv-original' --arg t '2020-01-01T00:00:00Z' '.conversation_id=$c | .created_at=$t' "$META" > "$META.tmp" && mv "$META.tmp" "$META"
+cat > "$TMP/hook.sh" <<EOF
+#!/usr/bin/env bash
+: > '$TMP/hook-fired'
+jq --arg c 'conv-good' --arg t '2021-01-01T00:00:00Z' '.conversation_id=\$c | .created_at=\$t' '$META' > '$META.tmp' && mv '$META.tmp' '$META'
+EOF
+rm -f "$TMP/hook-fired"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm" MOCK_AGY_HOOK="$TMP/hook.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$RR_SHA" bind --prompt follow) >"$TMP/g.out" 2>"$TMP/g.err"; G_RC=$?; set -e
+unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
+check 'a coherent same-name replacement is refused under the lock' "test '$G_RC' -ne 0 && test -f '$TMP/hook-fired' && grep -q 'session identity changed; start a new review' '$TMP/g.err'"
+check 'the replacement left every revalidated binding intact' "test \"\$(jq -r .status '$META')\" = COMPLETE && test \"\$(jq -r .model '$META')\" = '$ORIG_MODEL' && test \"\$(jq -r .head '$META')\" = '$RR_SHA' && test \"\$(jq -r .conversation_id '$META')\" = conv-good"
 # Asserted head: a replacement plus a checkout advance leaves the pre-lock
 # assertion holding while the review would resume on another HEAD. Runs last
 # because the hook moves the repository tip.
