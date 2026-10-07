@@ -513,23 +513,62 @@ check "out_of_credit_prints_machine_line" "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT p
 check "out_of_credit_prints_human_line" "grep -q '^OUT OF CREDIT: .*console.x.ai' '$TMP/credit.err'"
 check "out_of_credit_gives_no_retry_hint" "! grep -q 'Retry once' '$TMP/credit.err'"
 check "out_of_credit_does_not_wait_for_the_result_deadline" "test '$CREDIT_ELAPSED' -lt 450"
-check "out_of_credit_records_quarantine" "\"$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' global grok --directory '$TMP/credit-quarantine' | jq -e '.failure_class==\"out-of-credit\"'"
+check "out_of_credit_records_capacity_hold" "\"$(command -v python3 || command -v python)\" '$REPO_ROOT/tools/reviewer_admission.py' capacity-status grok --directory '$TMP/credit-quarantine' | jq -e '.failure_class==\"out-of-credit\"'"
 check "out_of_credit_leaves_no_stranded_work_lock" "test -z \"\$(find '$AI_GROK_STATE_DIR/locks' -type d -name 'work--*.lock.d' -print -quit 2>/dev/null)\""
 echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
 
-CAP_NOW="$(date -u +%FT%TZ)"
-GROK_EXHAUSTED="$(jq -nc --arg now "$CAP_NOW" '{schema_version:1,provider:"grok",state:"exhausted",checked_at:$now,provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
+CAPACITY_PREFLIGHT_STUB="$TMP/capacity-preflight"
+cat > "$CAPACITY_PREFLIGHT_STUB" <<'CAPACITY_STUB_EOF'
+#!/usr/bin/env bash
+set -u
+[ "$#" -eq 3 ] && [ "$1" = capacity ] && [ "$2" = grok ] && [ "$3" = --json ] || exit 64
+response="${AI_REVIEW_CAPACITY_TEST_RESPONSE:-}"
+delay="${AI_REVIEW_CAPACITY_TEST_DELAY:-0}"
+case "$delay" in ''|0) ;; *[!0-9]*) exit 64;; *) sleep "$delay";; esac
+printf '%s\n' "$response" | jq -e '
+  .schema_version == 1 and .provider == "grok" and
+  (.state == "available" or .state == "exhausted") and
+  ((.state == "available" and .reason == "reported-capacity") or
+   (.state == "exhausted" and .reason == "reported-exhaustion")) and
+  (.provider_version|type == "string" and length > 0) and
+  (.credential_profile_scope == "fixture-profile") and (.model_scope == "grok-4.6") and
+  (.source_kind == "synthetic-fixture") and (.reset_at == null)
+' >/dev/null 2>&1 || exit 65
+checked_at="$(date -u +%FT%TZ)" || exit 66
+printf '%s\n' "$response" | jq -c --arg checked_at "$checked_at" '.checked_at = $checked_at'
+CAPACITY_STUB_EOF
+chmod +x "$CAPACITY_PREFLIGHT_STUB"
+
+GROK_EXHAUSTED="$(jq -nc '{schema_version:1,provider:"grok",state:"exhausted",checked_at:"1970-01-01T00:00:00Z",provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
+GROK_AVAILABLE="$(jq -nc '{schema_version:1,provider:"grok",state:"available",checked_at:"1970-01-01T00:00:00Z",provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-capacity",reset_at:null}')"
+check "capacity stub accepts exact arguments and mints response time" "AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_AVAILABLE' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json | jq -e '.provider==\"grok\" and .checked_at != \"1970-01-01T00:00:00Z\"'"
+GROK_WRONG_PROVIDER="$(jq -c '.provider="glm"' <<<"$GROK_AVAILABLE")"
+GROK_WRONG_STATE="$(jq -c '.state="unknown"' <<<"$GROK_AVAILABLE")"
+GROK_WRONG_REASON="$(jq -c '.reason="reported-exhaustion"' <<<"$GROK_AVAILABLE")"
+check "capacity stub refuses extra or missing arguments" "! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_AVAILABLE' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json extra >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_AVAILABLE' '$CAPACITY_PREFLIGHT_STUB' capacity grok >/dev/null 2>&1"
+check "capacity stub refuses malformed, wrong provider, state, or reason" "! AI_REVIEW_CAPACITY_TEST_RESPONSE='not-json' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_WRONG_PROVIDER' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_WRONG_STATE' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_WRONG_REASON' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_AVAILABLE' '$CAPACITY_PREFLIGHT_STUB' capacity glm --json >/dev/null 2>&1"
 rm -f "$TMP/provider-contacted"
-GROK_BLOCKED="$(AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_EXHAUSTED" run new capacity-exhausted --prompt review 2>&1)"; GROK_BLOCKED_RC=$?
-check "exhausted Grok capacity submits zero model turns" "test '$GROK_BLOCKED_RC' -ne 0 && test ! -e '$TMP/provider-contacted' && printf '%s' \"\$GROK_BLOCKED\" | grep -q 'not submitted'"
-check "exhausted Grok capacity creates no session record" "! grep -R -l capacity-exhausted '$AI_GROK_STATE_DIR/session-records' 2>/dev/null"
-GROK_AVAILABLE="$(jq -nc --arg now "$(date -u +%FT%TZ)" '{schema_version:1,provider:"grok",state:"available",checked_at:$now,provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-capacity",reset_at:null}')"
+GROK_BLOCKED="$(AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_EXHAUSTED" AI_REVIEW_PREFLIGHT_BIN="$CAPACITY_PREFLIGHT_STUB" AI_REVIEW_CAPACITY_TEST_DELAY=2 run new capacity-exhausted --prompt review 2>&1)"; GROK_BLOCKED_RC=$?
+capacity_failure_diagnostic() {
+  local status="$1" contact="$2" expected_state="$3" expected_reason="$4" session_id="$5" sessions actual_state=unknown actual_reason=unknown
+  sessions="$(find "$AI_GROK_STATE_DIR/session-records" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+  while IFS= read -r diagnostic; do
+    actual_state="$(jq -r 'select(.provider=="grok" and .session_id=="'"$session_id"'" and (.quota_result.state|IN("available","exhausted","unknown"))) | .quota_result.state' "$diagnostic" 2>/dev/null | tail -1)"
+    actual_reason="$(jq -r 'select(.provider=="grok" and .session_id=="'"$session_id"'" and (.quota_result.reason|IN("reported-capacity","reported-exhaustion","malformed-response","stale-response","wrong-scope","unsupported-interface"))) | .quota_result.reason' "$diagnostic" 2>/dev/null | tail -1)"
+    [ -n "$actual_state" ] || actual_state=unknown
+    [ -n "$actual_reason" ] || actual_reason=unknown
+  done < <(find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' 2>/dev/null)
+  printf 'capacity fixture diagnostic: exit_status=%s provider_contacted=%s session_count=%s expected_quota_state=%s expected_quota_reason=%s actual_quota_state=%s actual_quota_reason=%s\n' "$status" "$contact" "$sessions" "$expected_state" "$expected_reason" "$actual_state" "$actual_reason" >&2
+}
+if [ "$GROK_BLOCKED_RC" -ne 0 ] && [ ! -e "$TMP/provider-contacted" ] && printf '%s' "$GROK_BLOCKED" | grep -q 'not submitted'; then ok "exhausted Grok capacity submits zero model turns"; else capacity_failure_diagnostic "$GROK_BLOCKED_RC" "$(test -e "$TMP/provider-contacted" && echo true || echo false)" exhausted reported-exhaustion capacity-exhausted; bad "exhausted Grok capacity submits zero model turns"; fi
+if ! grep -R -l capacity-exhausted "$AI_GROK_STATE_DIR/session-records" 2>/dev/null; then ok "exhausted Grok capacity creates no session record"; else capacity_failure_diagnostic "$GROK_BLOCKED_RC" "$(test -e "$TMP/provider-contacted" && echo true || echo false)" exhausted reported-exhaustion capacity-exhausted; bad "exhausted Grok capacity creates no session record"; fi
 rm -f "$TMP/provider-contacted"
-AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_AVAILABLE" run new capacity-available --prompt review >/dev/null 2>&1
-check "available Grok capacity submits one intended model turn" "test -e '$TMP/provider-contacted'"
-check "available Grok capacity is retained in exact-run diagnostics" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.provider==\"grok\" and .session_id==\"capacity-available\" and .quota_result.state==\"available\")' {} + | grep available >/dev/null"
+AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_AVAILABLE" AI_REVIEW_PREFLIGHT_BIN="$CAPACITY_PREFLIGHT_STUB" AI_REVIEW_CAPACITY_TEST_DELAY=2 run new capacity-available --prompt review >/dev/null 2>&1
+GROK_AVAILABLE_RC=$?
+if [ "$GROK_AVAILABLE_RC" -eq 0 ] && [ -e "$TMP/provider-contacted" ]; then ok "available Grok capacity submits one intended model turn"; else capacity_failure_diagnostic "$GROK_AVAILABLE_RC" "$(test -e "$TMP/provider-contacted" && echo true || echo false)" available reported-capacity capacity-available; bad "available Grok capacity submits one intended model turn"; fi
+if find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' -exec jq -e 'select(.provider=="grok" and .session_id=="capacity-available" and .quota_result.state=="available")' {} + | grep available >/dev/null; then ok "available Grok capacity is retained in exact-run diagnostics"; else capacity_failure_diagnostic "$GROK_AVAILABLE_RC" "$(test -e "$TMP/provider-contacted" && echo true || echo false)" available reported-capacity capacity-available; bad "available Grok capacity is retained in exact-run diagnostics"; fi
 
 echo "ai-grok-review tests"
 
@@ -1779,6 +1818,43 @@ NEST_FIN_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" bash "$NEST_TMP/t2.s
 printf '%s\n' "$NEST_FIN_OUT" | grep -q 'INHERIT=0' \
   && bad "finished_run_refuses_inheritance (got: $NEST_FIN_OUT)" \
   || ok "finished_run_refuses_inheritance"
+# #1355: each review gets one private privacy-verdict scope for its lifetime;
+# a nested review keeps the outer scope, and the scope is gone afterwards.
+# The guard finds its event recorder beside the wrapper's bin/ directory.
+export AI_REVIEW_PRIVACY_BASE="$NEST_TMP/privacy-base"
+mkdir -p "$NEST_TMP/fake/bin"; ln -s "$REPO_ROOT/tools" "$NEST_TMP/fake/tools"
+cat > "$NEST_TMP/fake/bin/scope-wrapper.sh" <<'W'
+s="${AI_REVIEW_PRIVACY_SCOPE:-}"
+printf 'SCOPE=%s MODE=%s\n' "$s" "$(stat -c %a "$s" 2>/dev/null)"
+W
+SCOPE_OUT="$(env -u AI_REVIEW_PRIVACY_SCOPE -u AI_REVIEW_EVENT_PROVIDER -u AI_REVIEW_EVENT_RUN_ID -u AI_REVIEW_EVENT_PARENT \
+  bash -c 'source "$1"; reviewer_event_guard qwen "$2" x' _ "$GUARD_SRC" "$NEST_TMP/fake/bin/scope-wrapper.sh" 2>/dev/null | grep '^SCOPE=')"
+SCOPE_DIR="$(printf '%s' "$SCOPE_OUT" | sed -n 's/^SCOPE=\([^ ]*\) .*/\1/p')"
+# Git Bash synthesizes modes on NTFS; there the scope's privacy is the user
+# profile's ACL (it lives under $HOME), checked by being under the base.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) case "$SCOPE_OUT" in "SCOPE=$NEST_TMP/privacy-base/scope."*) scope_mode=ok ;; *) scope_mode=bad ;; esac ;;
+  *) case "$SCOPE_OUT" in *" MODE=700") scope_mode=ok ;; *) scope_mode=bad ;; esac ;;
+esac
+[ -n "$SCOPE_DIR" ] && [ "$scope_mode" = ok ] && [ ! -e "$SCOPE_DIR" ] \
+  && ok "review_privacy_scope_private_and_removed" \
+  || bad "review_privacy_scope_private_and_removed (got: $SCOPE_OUT)"
+mkdir -m 700 "$NEST_TMP/outer-scope"
+SCOPE_OUT="$(AI_REVIEW_PRIVACY_SCOPE="$NEST_TMP/outer-scope" env -u AI_REVIEW_EVENT_PROVIDER -u AI_REVIEW_EVENT_RUN_ID -u AI_REVIEW_EVENT_PARENT \
+  bash -c 'source "$1"; reviewer_event_guard qwen "$2" x' _ "$GUARD_SRC" "$NEST_TMP/fake/bin/scope-wrapper.sh" 2>/dev/null | grep '^SCOPE=')"
+case "$SCOPE_OUT" in "SCOPE=$NEST_TMP/outer-scope "*|"SCOPE= "*|'') r=bad ;; *) r=ok ;; esac
+[ "$r" = ok ] && ok "new_invocation_gets_its_own_privacy_scope" || bad "new_invocation_gets_its_own_privacy_scope (got: $SCOPE_OUT)"
+# A direct child of the recorder inherits the open review and its scope.
+seed_open_run eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee qwen
+cat > "$NEST_TMP/scope-inherit.sh" <<'SI'
+source "$GUARD_SRC"
+export AI_REVIEW_EVENT_PROVIDER=qwen AI_REVIEW_EVENT_RUN_ID=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee AI_REVIEW_EVENT_PARENT="$$"
+export AI_REVIEW_PRIVACY_SCOPE="$NEST_TMP/outer-scope"
+bash -c 'source "$1"; reviewer_event_guard qwen "$1" x; echo "SCOPE=$AI_REVIEW_PRIVACY_SCOPE"' _ "$GUARD_SRC"
+SI
+SCOPE_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" bash "$NEST_TMP/scope-inherit.sh" 2>/dev/null | grep '^SCOPE=')"
+[ "$SCOPE_OUT" = "SCOPE=$NEST_TMP/outer-scope" ] && ok "inherited_review_keeps_outer_privacy_scope" || bad "inherited_review_keeps_outer_privacy_scope (got: $SCOPE_OUT)"
+unset AI_REVIEW_PRIVACY_BASE
 # 5. Provider mismatch must not inherit (open-ledger gate is provider-bound).
 seed_open_run dddddddddddddddddddddddddddddddd gemini
 NEST_PROV_OUT="$(NEST_TMP="$NEST_TMP" GUARD_SRC="$GUARD_SRC" \

@@ -279,6 +279,7 @@ oc_bin(){
 # per #974); implement uses the implement agent. Both are write-capable.
 # Caller sets STEPFUN_OC_AGENT to choose; defaults to the review agent.
 run_opencode_turn(){
+  reviewer_credit_prepare || return 1
   local dir="$1" out="$2" prompt="$3" agent="${STEPFUN_OC_AGENT:-$OC_AGENT_REVIEW}" rc=0 log oc
   oc="$(oc_bin)" || die "OpenCode $OC_VERSION is not installed. Run bin/setup-opencode-glm.sh first."
   [ -d "$dir" ] || die "OpenCode turn directory is gone: $dir"
@@ -345,7 +346,7 @@ run_opencode_turn(){
       cp "$win_home/shim/bash" "$win_home/shim/bash.exe"
       printf '@echo off\r\nbash "%%~dp0bash" %%*\r\n' > "$win_home/shim/bash.cmd"
       export PATH="$win_home/shim:$gate_path"
-      printf '%s' "$prompt" | "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
+      printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" -- "$timeout_win" "$TIMEOUT" "$oc" run --agent "$agent" --auto \
         --format json --model "$OC_PROVIDER/$OC_MODEL_ID" --dir "$dir" \
         > "$log" 2>"$out.stderr"
     )
@@ -378,7 +379,7 @@ run_opencode_turn(){
     export HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" STEPFUN_API_KEY="$STEP_KEY" \
       XDG_CONFIG_HOME="$xdg/config" XDG_DATA_HOME="$xdg/data" \
       XDG_STATE_HOME="$xdg/state" XDG_CACHE_HOME="$xdg/cache"
-    printf '%s' "$prompt" | "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
+    printf '%s' "$prompt" | reviewer_credit_run stepfun "$log" "$out.stderr" -- "$timeout_bin" "$TIMEOUT" "$bwrap" --die-with-parent --unshare-all --share-net \
       "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
       --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
       --tmpfs "$home" \
@@ -428,6 +429,7 @@ run_opencode_turn(){
 # STEPFUN_SANDBOX_ENV_ALLOW from the shared sandbox library).
 STEP_ENV_ALLOW=" LANG LC_ALL TERM SSL_CERT_FILE SSL_CERT_DIR "
 run_stepcode(){
+  reviewer_credit_prepare || return 1
   local dir="$1" out="$2" prompt="$3" tools="${4:-}" bin rc=0 approval=strict fallback=deny dir_bind=--ro-bind bwrap agent
   [ "${5:-}" != write ] || { approval=auto; fallback=allow; dir_bind=--bind; }
   local -a tool_args=(--no-tools)
@@ -454,7 +456,7 @@ run_stepcode(){
     local home="$HOME"
     export HOME="$home" PATH="$home/.stepcode/agent/bin:/usr/local/bin:/usr/bin:/bin"
     export STEP_API_KEY="$STEP_KEY" STEP_BASE_URL="$BASE_URL" STEP_AUTOPILOT=1 STEP_CODING_AGENT_DIR="$agent"
-    stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$TIMEOUT" "$bin" \
+    STEPFUN_CREDIT_OUTPUT="$out" STEPFUN_CREDIT_STDERR="$out.stderr" stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$TIMEOUT" "$bin" \
       --ro-bind-try "$home/.stepcode/agent/bin" "$home/.stepcode/agent/bin" \
       --bind "$agent" "$agent" "${prompt_binds[@]}" "$dir_bind" "$dir" "$dir" --chdir "$dir" -- \
       -p --no-session --model "$MODEL" "${tool_args[@]}" \
@@ -479,6 +481,8 @@ bwrap_bin(){
 # "4xx: {json}" lines StepCode prints on stdout for an HTTP error. A review
 # that merely quotes a billing message must not be read as out of credit.
 credit_stop(){
+  reviewer_capacity_current stepfun "$1" || true
+  reviewer_capacity_current stepfun "$1.jsonl" || true
   local ev="$1.provider-errors"
   grep -E '^4[0-9][0-9]: \{' "$1" > "$ev" 2>/dev/null || true
   reviewer_credit_scan stepfun "$1.stderr" "$ev" || true
@@ -563,7 +567,11 @@ door_probe(){
   AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR="$t/work" DOOR_PACKET_DIR="$t/packet" \
     DOOR_PROMPT_FILE="$t/prompt" DOOR_REPORT_OUT="$t/report" DOOR_HEAD=0000000000000000000000000000000000000000 \
     DOOR_TIMEOUT=120 bash "$door" review > "$t/out" 2>&1 || rc=$?
-  if [ "$rc" -ne 0 ] || ! grep -q 'STEPFUN-OK' "$t/report" 2>/dev/null; then
+  # The door wraps the probe in its review framing, so the model may answer
+  # with a short review instead of the literal token. The door writes a report
+  # only when the model returned text, so a report with a Verdict section after
+  # exit 0 proves the live turn ran.
+  if [ "$rc" -ne 0 ] || ! grep -q '^## Verdict' "$t/report" 2>/dev/null; then
     printf 'FAIL live call through the review door did not answer (exit %s)\n' "$rc"; tail -n 5 "$t/out"; rm -rf "$t"; return 1
   fi
   rm -rf "$t"

@@ -1,0 +1,7 @@
+{
+  "kind": "bash",
+  "windows": [
+    "offline"
+  ],
+  "windows_section": 5
+}

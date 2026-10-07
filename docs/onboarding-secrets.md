@@ -148,11 +148,11 @@ from Claude Code, and these are *verified* limitations:
   into the config.
 - **npx needs a `cmd /c` wrapper** to spawn on Windows.
 - **Remote/HTTP MCP servers** (`devops-mcp`, `synology-monitor`) run through the
-  `mcp-remote` stdio shim. Note that `mcp-remote` **also** does not expand
-  `${VAR}` in `--header` (verified — its parser stores the header value
-  verbatim). So the bearer token is resolved to a real value by a launcher that
-  `op read`s it in memory just before starting `mcp-remote`; only the URL and
-  the `op://` reference ever appear in the config or the script.
+  pinned `mcp-remote@0.1.38` stdio shim. Its `--header` parser expands
+  `${VAR}` from the child environment; isolated Linux and Windows requests
+  proved the bearer reached a synthetic authenticated MCP server while process
+  arguments retained only the placeholder. The launcher resolves the bearer in
+  memory at start. Only the URL and `op://` reference appear in client config.
 
 It also restores the **916-alien SSH key** from 1Password
 (`op://vibe_coding/916-alien SSH key/...`) to `~\.ssh\916-alien` (+ `.pub`) with

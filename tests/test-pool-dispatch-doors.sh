@@ -124,6 +124,89 @@ set -e
 check "pool_refuses_runner_substitution_for_registered_door" \
   "test '$BYPASS_RC' -ne 0 && grep -q 'bypasses the shared review runner' '$POOLTMP/out-bypass' && ! grep -q 'must never be used' '$POOLTMP/out-bypass'"
 
+# ---------------------------------------------------------------------------
+# Passing-report reuse (#1428): the same reviewer, mode, head, whole-source
+# digest, repository and base returns the earlier APPROVE with no provider
+# call; any difference, --force, or a lookup error dispatches normally.
+# ---------------------------------------------------------------------------
+set +e
+REUSE_HEAD="$(git -C "$POOLTMP/fakerepo" rev-parse HEAD)"
+REUSE_KEY="$(printf 'key' | sha256sum | cut -d' ' -f1)"
+REUSE_DIGEST="$(printf 'digest' | sha256sum | cut -d' ' -f1)"
+OTHER_DIGEST="$(printf 'other' | sha256sum | cut -d' ' -f1)"
+LCDIR="$POOLTMP/lifecycle-store"
+cat > "$POOLTMP/lifecycle-id" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = identity ]; then
+  jq -nc --arg h "$REUSE_HEAD" --arg d "\${FAKE_DIGEST:-$REUSE_DIGEST}" --arg k "$REUSE_KEY" '{schema_version:1,head:\$h,source_digest:\$d,repository_key:\$k}'
+fi
+exit 0
+EOF
+chmod +x "$POOLTMP/lifecycle-id"
+make_pass(){ # make_pass PROVIDER MODE RUN VERDICT [HEAD]
+  local provider="$1" mode="$2" run="$3" verdict="$4" head="${5:-$REUSE_HEAD}" report sha
+  mkdir -p "$POOLTMP/fakerepo/.ai/reviews" "$LCDIR/runs/$REUSE_KEY/$provider/zcode"
+  report="$POOLTMP/fakerepo/.ai/reviews/$provider-$mode-$run.md"
+  printf '# %s %s\n\n| field | value |\n|---|---|\n| reviewed commit | `%s` |\n| source digest | `%s` |\n\n## Result\n\nAnalysis of %s.\n\n## Verdict\n%s\n' \
+    "$provider" "$mode" "$head" "$REUSE_DIGEST" "$head" "$verdict" > "$report"
+  sha="$(sha256sum "$report" | cut -d' ' -f1)"
+  jq -n --arg p "$provider" --arg m "$mode" --arg r "$run" --arg v "$verdict" --arg h "$head" --arg d "$REUSE_DIGEST" \
+    --arg k "$REUSE_KEY" --arg rp "$report" --arg s "$sha" \
+    '{schema_version:1,status:"completed",provider:$p,run_id:$r,caller:"zcode",review_mode:$m,base:null,repository_key:$k,head:$h,source_digest:$d,verdict:$v,failure_class:null,report_path:$rp,report_sha256:$s,stale:false,finished_at:"2026-10-07T00:00:00Z"}' \
+    > "$LCDIR/runs/$REUSE_KEY/$provider/zcode/$run.json"
+}
+reuse_run(){ # reuse_run OUT PROVIDER MODE [ARGS...]
+  local out="$1"; shift
+  rm -f "$POOLTMP/engine-args"
+  ( cd "$POOLTMP/fakerepo" && export_pool && export AI_REVIEW_LIFECYCLE_BIN="$POOLTMP/lifecycle-id" AI_REVIEW_LIFECYCLE_DIR="$LCDIR" && bash "$POOL" "$@" ) > "$POOLTMP/$out" 2> "$POOLTMP/$out.err"
+}
+make_pass qwen diff-review 20261007T000000-1-1 APPROVE
+reuse_run reuse-1 qwen diff-review; RC=$?
+check "reuse_same_head_digest" "[ '$RC' -eq 0 ] && [ ! -e '$POOLTMP/engine-args' ] && [ \"\$(tail -1 '$POOLTMP/reuse-1')\" = '$POOLTMP/fakerepo/.ai/reviews/qwen-diff-review-20261007T000000-1-1.md' ] && grep -q 'no provider call' '$POOLTMP/reuse-1.err'"
+reuse_run reuse-2 qwen diff-review; RC=$?
+check "reuse_second_identical_run_makes_zero_provider_calls" "[ '$RC' -eq 0 ] && [ ! -e '$POOLTMP/engine-args' ]"
+FAKE_DIGEST="$OTHER_DIGEST" reuse_run reuse-digest qwen diff-review
+check "no_reuse_on_digest_change" "engargs | grep -q -- '--provider qwen'"
+reuse_run reuse-mode qwen final-check
+check "no_reuse_on_mode_change" "engargs | grep -q -- '--mode final-check'"
+reuse_run reuse-provider stepfun diff-review
+check "no_reuse_for_another_provider" "engargs | grep -q -- '--provider stepfun'"
+reuse_run reuse-force qwen diff-review --force
+check "force_bypasses_reuse" "engargs | grep -q -- '--provider qwen' && ! engargs | grep -q -- '--force' && grep -q -- '--force given' '$POOLTMP/reuse-force.err'"
+reuse_run reuse-base qwen diff-review --base HEAD~1
+check "no_reuse_on_base_change" "engargs | grep -q -- '--base HEAD~1'"
+make_pass gemini diff-review 20261007T000000-1-2 REJECT
+reuse_run reuse-reject gemini diff-review
+check "no_reuse_of_a_reject" "engargs | grep -q -- '--provider gemini'"
+make_pass muse diff-review 20261007T000000-1-3 APPROVE 0000000000000000000000000000000000000000
+reuse_run reuse-head muse diff-review
+check "no_reuse_on_head_change" "engargs | grep -q -- '--provider muse'"
+make_pass deepseek diff-review 20261007T000000-1-4 APPROVE
+printf 'tampered\n' >> "$POOLTMP/fakerepo/.ai/reviews/deepseek-diff-review-20261007T000000-1-4.md"
+reuse_run reuse-tamper deepseek diff-review
+check "no_reuse_of_a_changed_report" "engargs | grep -q -- '--provider deepseek'"
+make_pass qwen final-check 20261007T000000-1-5 APPROVE
+AI_REVIEW_OPERATION=legacy-managed-launcher-refresh reuse_run reuse-op qwen final-check
+check "no_reuse_for_a_review_operation" "engargs | grep -q -- '--operation legacy-managed-launcher-refresh'"
+printf '{not json' > "$LCDIR/runs/$REUSE_KEY/qwen/zcode/corrupt.json"
+reuse_run reuse-corrupt qwen diff-review; RC=$?
+check "corrupt_events_falls_through" "[ '$RC' -eq 0 ] && engargs | grep -q -- '--provider qwen' && grep -q 'lookup unavailable; running a normal review' '$POOLTMP/reuse-corrupt.err'"
+rm -f "$LCDIR/runs/$REUSE_KEY/qwen/zcode/corrupt.json" "$POOLTMP/engine-args"
+( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_LIFECYCLE_DIR="$LCDIR" bash "$POOL" qwen diff-review ) > /dev/null 2> "$POOLTMP/reuse-noid.err"
+check "identity_failure_falls_through" "engargs | grep -q -- '--provider qwen' && grep -q 'lookup unavailable' '$POOLTMP/reuse-noid.err'"
+reuse_run reuse-tests qwen diff-review --tests true
+check "no_reuse_when_tests_requested" "engargs | grep -q -- '--tests true' && grep -q -- '--tests given' '$POOLTMP/reuse-tests.err'"
+make_pass glm diff-review 20261007T000000-1-6 APPROVE
+jq '.base="ffffffffffffffffffffffffffffffffffffffff"' "$LCDIR/runs/$REUSE_KEY/glm/zcode/20261007T000000-1-6.json" > "$POOLTMP/b.json" && mv "$POOLTMP/b.json" "$LCDIR/runs/$REUSE_KEY/glm/zcode/20261007T000000-1-6.json"
+( cd "$POOLTMP/fakerepo" && AI_REVIEW_LIFECYCLE_DIR="$LCDIR" python3 "$REPO_ROOT/tools/reviewer_events.py" find-passing-report glm diff-review "$REUSE_HEAD" "$REUSE_DIGEST" "$REUSE_KEY" ) > "$POOLTMP/unresolved-base" 2>&1
+make_pass glm final-check 20261007T000000-1-8 APPROVE
+( cd "$POOLTMP/fakerepo" && AI_REVIEW_LIFECYCLE_DIR="$LCDIR" python3 "$REPO_ROOT/tools/reviewer_events.py" find-passing-report glm final-check "$REUSE_HEAD" "$REUSE_DIGEST" "$REUSE_KEY" ) > "$POOLTMP/resolved-control" 2>&1
+check "no_reuse_when_recorded_base_unresolvable" "grep -qx null '$POOLTMP/unresolved-base' && grep -q '\"provider\": \"glm\"' '$POOLTMP/resolved-control'"
+make_pass qwen diff-review 20261007T000000-1-7 REJECT
+jq '.finished_at="2026-10-08T00:00:00Z"' "$LCDIR/runs/$REUSE_KEY/qwen/zcode/20261007T000000-1-7.json" > "$POOLTMP/r.json" && mv "$POOLTMP/r.json" "$LCDIR/runs/$REUSE_KEY/qwen/zcode/20261007T000000-1-7.json"
+reuse_run reuse-newer-reject qwen diff-review
+check "newer_reject_supersedes_older_approve" "engargs | grep -q -- '--provider qwen'"
+
 echo
 echo "test-pool-dispatch-doors: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

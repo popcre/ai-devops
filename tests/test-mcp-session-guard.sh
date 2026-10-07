@@ -58,7 +58,7 @@ EOF
 # Session client: like Claude, owns the helper's stdin and can close it.
 cat > "$TMP/session.js" <<'EOF'
 // usage: session.js <guard.mjs> <pidfile> <mode> <command> [args...]
-//   mode=hold — keep stdin open;  mode=eof — end stdin after the helper starts.
+//   mode=hold — keep stdin open; mode=eof — wait for the test's explicit close.
 const { spawn } = require('child_process')
 const fs = require('fs')
 const [guard, pidfile, mode, command, ...rest] = process.argv.slice(2)
@@ -71,7 +71,13 @@ const ready = setInterval(() => {
   if (fs.existsSync(pidfile) && fs.statSync(pidfile).size > 0) {
     clearInterval(ready)
     process.stdout.write('READY\n')
-    if (mode === 'eof') setTimeout(() => child.stdin.end(), 1500)
+    if (mode === 'eof') {
+      const close = setInterval(() => {
+        if (!fs.existsSync(pidfile + '.close')) return
+        clearInterval(close)
+        child.stdin.end(() => fs.writeFileSync(pidfile + '.eof', 'closed'))
+      }, 50)
+    }
   }
 }, 50)
 child.on('exit', (code) => process.exit(code ?? 0))
@@ -81,6 +87,24 @@ alive() {
   # Node's process.kill(pid, 0) is reliable for native Windows PIDs; Git Bash
   # kill -0 is not (it can miss live node.exe processes).
   "$NODE" -e "try{process.kill(Number(process.argv[1]),0);process.exit(0)}catch{process.exit(1)}" "$1" 2>/dev/null
+}
+
+wait_reaped() {
+  # Observe both native PIDs in one process. The six-second upper bound
+  # covers the guard's 250ms EOF grace, 2s force fallback and Windows
+  # taskkill startup, while staying below the fixture's 15s natural exit.
+  "$NODE" -e '
+    const pids = process.argv.slice(1).map(Number)
+    if (!pids.length || pids.some(p => !Number.isInteger(p) || p <= 0)) process.exit(2)
+    const deadline = Date.now() + 6000
+    const check = () => {
+      const live = pids.some(pid => { try { process.kill(pid, 0); return true } catch { return false } })
+      if (!live) process.exit(0)
+      if (Date.now() >= deadline) process.exit(1)
+      setTimeout(check, 50)
+    }
+    check()
+  ' "$@" 2>/dev/null
 }
 
 wait_ready() {
@@ -116,12 +140,14 @@ rm -f "$TMP/pid1" "$TMP/pid1.kid"
   >"$TMP/out1" 2>"$TMP/err1" &
 SESSION=$!
 wait_ready "$TMP/pid1" || fail "helper did not start (stdin-eof case): $(cat "$TMP/err1" 2>/dev/null)"
+wait_ready "$TMP/pid1.kid" || fail "grandchild did not start (stdin-eof case)"
 HELPER_PID="$(cat "$TMP/pid1")"
 KID_PID="$(cat "$TMP/pid1.kid" 2>/dev/null || true)"
 alive "$HELPER_PID" || fail "helper not alive before stdin close"
-sleep 2
-alive "$HELPER_PID" && fail "helper still alive after stdin EOF (pid $HELPER_PID)"
-[ -n "$KID_PID" ] && alive "$KID_PID" && fail "grandchild still alive after stdin EOF (pid $KID_PID)"
+alive "$KID_PID" || fail "grandchild not alive before stdin close"
+printf 'close\n' > "$TMP/pid1.close"
+wait_ready "$TMP/pid1.eof" || fail "session did not close stdin (stdin-eof case)"
+wait_reaped "$HELPER_PID" "$KID_PID" || fail "helper tree still alive after stdin EOF (helper $HELPER_PID; grandchild $KID_PID)"
 wait "$SESSION" 2>/dev/null || true
 ok "stdin_eof_kills_helper_and_grandchild"
 
@@ -133,13 +159,14 @@ rm -f "$TMP/pid2" "$TMP/pid2.kid"
   >"$TMP/out2" 2>"$TMP/err2" &
 SESSION=$!
 wait_ready "$TMP/pid2" || fail "helper did not start (session-kill case): $(cat "$TMP/err2" 2>/dev/null)"
+wait_ready "$TMP/pid2.kid" || fail "grandchild did not start (session-kill case)"
 HELPER_PID="$(cat "$TMP/pid2")"
 KID_PID="$(cat "$TMP/pid2.kid" 2>/dev/null || true)"
+alive "$HELPER_PID" || fail "helper not alive before session SIGKILL"
+alive "$KID_PID" || fail "grandchild not alive before session SIGKILL"
 kill -9 "$SESSION" 2>/dev/null || true
 wait_sigkill "$SESSION"
-sleep 2
-alive "$HELPER_PID" && fail "helper still alive after session SIGKILL (pid $HELPER_PID)"
-[ -n "$KID_PID" ] && alive "$KID_PID" && fail "grandchild still alive after session SIGKILL (pid $KID_PID)"
+wait_reaped "$HELPER_PID" "$KID_PID" || fail "helper tree still alive after session SIGKILL (helper $HELPER_PID; grandchild $KID_PID)"
 ok "session_sigkill_reaps_helper_tree"
 
 # --- 3. normal child exit is forwarded ---------------------------------
@@ -168,11 +195,14 @@ EOF
     >"$TMP/outcmd" 2>"$TMP/errcmd" &
   GUARD_CMD=$!
   wait_ready "$TMP/pidcmd" || fail "helper did not start via .cmd shim: $(cat "$TMP/errcmd" 2>/dev/null)"
+  wait_ready "$TMP/pidcmd.kid" || fail "grandchild did not start via .cmd shim"
   HELPER_PID="$(cat "$TMP/pidcmd")"
+  KID_PID="$(cat "$TMP/pidcmd.kid")"
   alive "$HELPER_PID" || fail "cmd shim helper not alive (pid $HELPER_PID; err=$(cat "$TMP/errcmd" 2>/dev/null))"
+  printf 'close\n' > "$TMP/pidcmd.close"
+  wait_ready "$TMP/pidcmd.eof" || fail "session did not close stdin (.cmd shim case)"
+  wait_reaped "$HELPER_PID" "$KID_PID" || fail "cmd shim helper tree leaked after stdin EOF (helper $HELPER_PID; grandchild $KID_PID)"
   wait "$GUARD_CMD" 2>/dev/null || true
-  sleep 1
-  alive "$HELPER_PID" && fail "cmd shim helper leaked after stdin EOF (pid $HELPER_PID; err=$(cat "$TMP/errcmd" 2>/dev/null))"
   ok "windows_cmd_shim_starts_and_reaps"
 else
   ok "windows_cmd_shim_starts_and_reaps (skipped, not Windows)"

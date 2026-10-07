@@ -219,7 +219,7 @@ Run focused suites first, then the repository’s required local/CI suites per `
 - **Do not recommend or auto-dispatch Blacksmith** in any remaining copy.
 - Task Scheduler: copy `install-ai-devops-windows.ps1` patterns (Git Bash preferred over WSL bash; test mode; `schtasks /F`). Do not replace OS binaries.
 - Independent review is required before merge if this touches reviewer wrappers, evidence tools, safety tests, or installed routing rules (AGENTS.md). `ai-task-gates start --class` accordingly (`code` or escalate).
-- One unproven outcome per session: if live proof is not finished, leave a checklist item on the **same** owner issue.
+- Continue authorized live proofs when actual gates allow; if genuinely blocked, leave a checklist item on the **same** owner issue.
 - Label times in human output as EST.
 
 ## 12. Access and environment

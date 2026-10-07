@@ -222,7 +222,7 @@ file:line evidence and non-obvious discoveries:
 **Step 12. Land.**
 - Tests green (`tests/test-ai-mimo.sh`, `tests/test-configure-mimocode-mcps.ps1`, install/adopt fixture suites, `test-ai-devops-doctor*` if present).
 - Worktree branch → PR → merge queue → confirm `origin/main`.
-- Install on edge-dev from the merged commit (or leave a `- [ ] live proof` checklist item on the same issue if live install cannot run in the landing session — **one unproven outcome per session**; leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
+- Install on edge-dev from the merged commit; continue authorized live proof when actual gates allow. If genuinely blocked, leave a `- [ ] live proof` checklist item on the same issue; never open a leftover-proof issue.
 - BlockerWatch: add `mimo` harness entries in the same PR; first live wake is a separate live-proof if not done here.
 
 ## 10. Tests required
@@ -251,7 +251,7 @@ Register every new test in `config/ci-suite-manifest.json`.
 - Never write skills into `~/.agents/skills` for MiMo-managed installs.
 - Never start the Desktop GUI as a headless fallback.
 - Never pass `--yolo` / `--dangerously-skip-permissions` from caller input into `mimo run`.
-- One unproven outcome per session: if live `mimo run` is not proven in the landing session, leave a `- [ ] live proof` checklist item on the same issue (leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
+- Verify live `mimo run` within the authorized scope when actual gates allow. If genuinely blocked, leave a `- [ ] live proof` checklist item on the same issue; never open a leftover-proof issue.
 
 ## 12. Access and environment
 

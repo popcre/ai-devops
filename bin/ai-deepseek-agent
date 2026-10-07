@@ -802,7 +802,7 @@ PY
       [ "$max_time" -le "$CALL_TIMEOUT" ] || max_time="$CALL_TIMEOUT"
       [ "$max_time" -gt 0 ] || { echo "Error: repository tool loop exceeded its ${DEEPSEEK_TOOLS_MAX_WALL:-900}s wall budget." >&2; rc=1; break; }
     fi
-    printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$DEEPSEEK_PROVIDER_KEY" | curl -sS -o "$resp_file" -w '%{http_code}' \
+    printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$DEEPSEEK_PROVIDER_KEY" | reviewer_credit_run deepseek "$resp_file" "$resp_file.stderr" -- curl -sS -o "$resp_file" -w '%{http_code}' \
       --connect-timeout "$CONNECT_TIMEOUT" --max-time "$max_time" \
       "$BASE_URL/chat/completions" \
       -H @- \
@@ -824,6 +824,7 @@ PY
   drop_turn_workspace
   http_code="$(cat "$status_file" 2>/dev/null || true)"
   pending_observed "$resp_file" "$rc" "$http_code" || return 1
+  reviewer_capacity_current deepseek "$resp_file" || true
   if [ "$rc" -ne 0 ]; then
     echo "Error: provider-transport-failure: DeepSeek request failed or exceeded ${CALL_TIMEOUT}s; private response: $resp_file" >&2
     publish_failure_evidence request-failed || return 1
@@ -1467,7 +1468,7 @@ case "$SUBCMD" in
     fi
     ;;
   list)
-    find "$SESS_DIR" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' -printf '%T@ %f\n' 2>/dev/null \
+    find "$SESS_DIR" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' ! -name '*.credit-refusal.*.json' -printf '%T@ %f\n' 2>/dev/null \
       | sort -rn | sed -E 's/^[^ ]+ //; s/\.json$//'
     ;;
 

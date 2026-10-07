@@ -22,7 +22,7 @@ def die(message: str) -> "None":
 
 
 def posix_main(
-    command: list[str], stop_file: str | None = None, timeout_seconds: int | None = None
+    command: list[str], stop_file: str | None = None, timeout_seconds: int | None = None, credit_monitor=None
 ) -> int:
     child = subprocess.Popen(command, start_new_session=True)
     pgid = child.pid
@@ -52,6 +52,13 @@ def posix_main(
             except ProcessLookupError:
                 pass
             deadline = time.monotonic() + 3
+        if credit_monitor and not stopped_by and not stop_requested and credit_monitor.safe_check():
+            stop_requested = True
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            deadline = time.monotonic() + 3
         if timeout_deadline and not stop_requested and time.monotonic() >= timeout_deadline:
             stop_requested = True
             try:
@@ -68,7 +75,10 @@ def posix_main(
             group_alive = True
         if direct_rc is not None and not group_alive:
             if stop_requested:
-                return 124
+                if credit_monitor and credit_monitor.publication_failed:
+                    print("credit refusal receipt could not be preserved; owned provider tree stopped", file=sys.stderr)
+                    return 1
+                return 92 if credit_monitor and credit_monitor.hit else 124
             return 128 + stopped_by if stopped_by else direct_rc
         if stopped_by or stop_requested:
             # Finish group escalation before the shell wrapper's five-second
@@ -83,7 +93,7 @@ def posix_main(
 
 
 def windows_main(
-    command: list[str], stop_file: str | None = None, timeout_seconds: int | None = None
+    command: list[str], stop_file: str | None = None, timeout_seconds: int | None = None, credit_monitor=None
 ) -> int:
     from ctypes import wintypes
 
@@ -173,6 +183,12 @@ def windows_main(
                 error = ctypes.get_last_error()
                 kernel32.CloseHandle(job)
                 die(f"TerminateJobObject failed ({error})")
+        if credit_monitor and not stopped_by and not stop_requested and credit_monitor.safe_check():
+            stop_requested = True
+            if not kernel32.TerminateJobObject(job, 92):
+                error = ctypes.get_last_error()
+                kernel32.CloseHandle(job)
+                die(f"TerminateJobObject failed ({error})")
         if timeout_deadline and not stop_requested and time.monotonic() >= timeout_deadline:
             stop_requested = True
             if not kernel32.TerminateJobObject(job, 124):
@@ -187,7 +203,10 @@ def windows_main(
         if direct_rc is not None and accounting.ActiveProcesses == 0:
             kernel32.CloseHandle(job)
             if stop_requested:
-                return 124
+                if credit_monitor and credit_monitor.publication_failed:
+                    print("credit refusal receipt could not be preserved; owned provider tree stopped", file=sys.stderr)
+                    return 1
+                return 92 if credit_monitor and credit_monitor.hit else 124
             return 128 + stopped_by if stopped_by else direct_rc
         time.sleep(0.1)
 
@@ -196,11 +215,14 @@ def main() -> int:
     args = sys.argv[1:]
     stop_file = None
     timeout_seconds = None
-    while len(args) >= 2 and args[0] in {"--stop-file", "--timeout-seconds"}:
+    credit_options = {}
+    while len(args) >= 2 and args[0] in {"--stop-file", "--timeout-seconds", "--credit-provider", "--credit-output", "--credit-stderr", "--credit-marker"}:
         option, value = args[0], args[1]
         args = args[2:]
         if option == "--stop-file":
             stop_file = value
+        elif option.startswith("--credit-"):
+            credit_options[option] = value
         else:
             try:
                 timeout_seconds = int(value)
@@ -212,11 +234,22 @@ def main() -> int:
         args = args[1:]
     if not args:
         die("usage: ai-process-supervisor [--stop-file PATH] [--timeout-seconds N] -- COMMAND [ARG ...]")
+    credit_monitor = None
+    if credit_options:
+        if len(credit_options) != 4:
+            die("credit inspection requires provider, output, stderr and marker")
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tools"))
+        from reviewer_credit_stream import Monitor
+        try:
+            credit_monitor = Monitor(credit_options["--credit-provider"], credit_options["--credit-output"],
+                                     credit_options["--credit-stderr"], credit_options["--credit-marker"])
+        except ValueError as exc:
+            die(str(exc))
     try:
         return (
-            windows_main(args, stop_file, timeout_seconds)
+            windows_main(args, stop_file, timeout_seconds, credit_monitor)
             if os.name == "nt"
-            else posix_main(args, stop_file, timeout_seconds)
+            else posix_main(args, stop_file, timeout_seconds, credit_monitor)
         )
     except FileNotFoundError as exc:
         die(f"command not found: {exc.filename}")

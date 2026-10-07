@@ -111,6 +111,10 @@ load_policy(){
     "$POLICY_FILE" >/dev/null 2>&1 || fail_closed "invalid task-gate contract: $POLICY_FILE"
   load_class_table
   validate_action_gates
+  # Loaded here, in the main shell: merged_gate runs in command substitutions.
+  # Always reread, as every other part of the contract is.
+  TG_TABLE_LOADED=""; load_rule_table
+  TG_CONSUMER_LOADED=""; [ -z "$CONSUMER_FILE" ] || load_consumer_table
 }
 
 # Per-action proof bindings must name real actions and real classes before any
@@ -158,12 +162,68 @@ class_protected(){ printf '%s' "${TG_PROT[$1]:-}"; }
 valid_class(){ [ -n "${TG_RANK[$1]:-}" ]; }
 valid_action(){ [ -n "${1:-}" ] && [ -n "${TG_ACTION[$1]:-}" ]; }
 
+# The central path rules and gates are read in one jq pass, the consumer
+# declaration in another, instead of one jq per rule per question: merged_gate
+# alone asked up to a dozen times per call (#1355). A contract whose values
+# could not survive the row format (non-string match or value, newline, or
+# the unit separator) keeps the per-question readers, which stay the reference.
+TG_TABLE_LOADED=""; TG_TABLE_OK=0; TG_CONSUMER_LOADED=""
+declare -a TG_MATCHES=()
+declare -A TG_ROWS=() TG_CONSUMER_ROWS=()
+tg_rows_filter='
+  def ok: type=="string" and (test("[\n\u001f]")|not);
+  def gate($k): (.gates//{}) | to_entries[] | .key as $c | .value
+    | ((.required//[])[] | [$k,"required",$c,.]), ((.forbidden_actions//[])[] | [$k,"forbidden",$c,.]);
+  def paths($k): (.paths//[])[] | [$k,"path","",([.glob,.class]|@tsv)];
+  def rows: (.default | paths("D"), gate("D")), (.rules[] | .match as $m | paths("R"+$m), gate("R"+$m));
+  if $consumer then (if . == null or . == false then error("not a declaration") else {default:., rules:[]} end) else . end
+  | if ([rows[]] + [.rules[].match] | all(ok)) and ((.default.gates//{}|keys) + [.rules[]|.gates//{}|keys[]] | all(ok))
+  then "OK", (.rules[] | ["M","match","",.match]), rows else "FALLBACK" end
+  | if type=="array" then join("\u001f") else . end'
+tg_table_rows(){ # tg_table_rows FILE ASSOC CONSUMER; fills ASSOC[key]; returns 1 for a fallback contract
+  local -n rows="$2"; local status key kind class value
+  { IFS= read -r status || return 1
+    [ "$status" = OK ] || return 1
+    while IFS=$'\x1f' read -r key kind class value; do
+      if [ "$key" = M ]; then TG_MATCHES+=("$value"); continue; fi
+      rows["$key"$'\x1f'"$kind"$'\x1f'"$class"]+="$value"$'\n'
+    done
+  } < <(jqr --argjson consumer "$3" "$tg_rows_filter" "$1" 2>/dev/null || printf 'FALLBACK\n')
+}
+load_rule_table(){
+  # Keyed on the file: install checks swap POLICY_FILE between revisions.
+  [ "$TG_TABLE_LOADED" = "$POLICY_FILE" ] && return 0
+  TG_TABLE_LOADED="$POLICY_FILE"; TG_MATCHES=(); TG_ROWS=()
+  if tg_table_rows "$POLICY_FILE" TG_ROWS false; then TG_TABLE_OK=1; else TG_TABLE_OK=0; TG_MATCHES=(); TG_ROWS=(); fi
+}
+load_consumer_table(){
+  [ "$TG_CONSUMER_LOADED" = "$CONSUMER_FILE" ] && return 0
+  TG_CONSUMER_LOADED="$CONSUMER_FILE"; TG_CONSUMER_ROWS=()
+  [ -f "$CONSUMER_FILE" ] || return 0
+  local -a saved=("${TG_MATCHES[@]+"${TG_MATCHES[@]}"}")
+  # The consumer file is read as the "default" of its own table.
+  tg_table_rows "$CONSUMER_FILE" TG_CONSUMER_ROWS true \
+    || TG_CONSUMER_ROWS=([fallback]=1)
+  TG_MATCHES=("${saved[@]+"${saved[@]}"}")
+}
+
 # Every path rule that applies to this identity: central defaults first, then
 # every matching central rule, then the consumer declaration. Resolution takes
 # the STRONGEST class per path across all of them, so a later source can only
 # strengthen a class and can never weaken one.
 applicable_path_rules(){
   local identity="$1" pattern
+  load_rule_table; load_consumer_table
+  if [ "$TG_TABLE_OK" = 1 ] && [ -z "${TG_CONSUMER_ROWS[fallback]:-}" ]; then
+    printf '%s' "${TG_ROWS[D$'\x1f'path$'\x1f']:-}"
+    for pattern in "${TG_MATCHES[@]+"${TG_MATCHES[@]}"}"; do
+      [ -n "$pattern" ] || continue
+      tg_identity_match "$pattern" "$identity" || continue
+      printf '%s' "${TG_ROWS[R$pattern$'\x1f'path$'\x1f']:-}"
+    done
+    printf '%s' "${TG_CONSUMER_ROWS[D$'\x1f'path$'\x1f']:-}"
+    return 0
+  fi
   jqr '.default.paths[]|[.glob,.class]|@tsv' "$POLICY_FILE"
   while IFS= read -r pattern; do
     [ -n "$pattern" ] || continue
@@ -178,7 +238,22 @@ applicable_path_rules(){
 # Merged gate for one class: union of required proofs and forbidden actions
 # from the central default, every matching central rule, and the consumer file.
 merged_gate(){
-  local identity="$1" class="$2" pattern
+  local identity="$1" class="$2" pattern kind
+  load_rule_table; load_consumer_table
+  if [ "$TG_TABLE_OK" = 1 ] && [ -z "${TG_CONSUMER_ROWS[fallback]:-}" ]; then
+    for kind in required forbidden; do
+      {
+        printf '%s' "${TG_ROWS[D$'\x1f'$kind$'\x1f'$class]:-}"
+        for pattern in "${TG_MATCHES[@]+"${TG_MATCHES[@]}"}"; do
+          [ -n "$pattern" ] || continue
+          tg_identity_match "$pattern" "$identity" || continue
+          printf '%s' "${TG_ROWS[R$pattern$'\x1f'$kind$'\x1f'$class]:-}"
+        done
+        printf '%s' "${TG_CONSUMER_ROWS[D$'\x1f'$kind$'\x1f'$class]:-}"
+      } | LC_ALL=C sort -u | sed "s/^/$kind\t/"
+    done
+    return 0
+  fi
   {
     jqr --arg c "$class" '(.default.gates[$c].required//[])[]' "$POLICY_FILE"
     while IFS= read -r pattern; do
@@ -216,7 +291,10 @@ resolve_repo(){
   # substitutions, where an exit would end only the subshell and the run would
   # quietly continue on the central rules alone - dropping exactly the stricter
   # local rules a corrupt declaration should have made us stop for.
-  if [ -f "$CONSUMER_FILE" ] && ! jq -e . "$CONSUMER_FILE" >/dev/null 2>&1; then
+  # A declaration the one-pass table reader accepted is valid JSON; only a
+  # fallback needs the separate parse.
+  load_consumer_table
+  if [ -n "${TG_CONSUMER_ROWS[fallback]:-}" ] && ! jq -e . "$CONSUMER_FILE" >/dev/null 2>&1; then
     fail_closed "consumer declaration is not valid JSON: $CONSUMER_FILE"
   fi
 }
@@ -562,6 +640,21 @@ cmd_explain_cached(){
     printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$file" || rm -f "$tmp"
     find "$dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null ) || true
   return 0
+}
+
+# AI_TASK_GATES_INPUTS_TO=FILE (#1355): after a successful explain, name every
+# file the answer depended on, one absolute path per line, so a caller that
+# reuses the answer can prove each one is unchanged. This includes the state
+# file under whatever HOME a launcher set. The answer itself is unchanged; an
+# unwritable list leaves the caller without one, and it then never reuses.
+explain_write_inputs(){
+  local out="${AI_TASK_GATES_INPUTS_TO:-}" f
+  [ -n "$out" ] || return 0
+  [ -n "$TOPLEVEL" ] || resolve_repo
+  { for f in "$REAL_DIR/$(basename "${BASH_SOURCE[0]}")" "$ROOT/tools/lib/task-gates.sh" "$POLICY_FILE" "$CONSUMER_FILE" "$(state_path)"; do
+      case "$f" in /*) ;; *) f="$PWD/$f" ;; esac
+      printf '%s\n' "$f"
+    done; } > "$out" 2>/dev/null || { rm -f "$out" 2>/dev/null; return 0; }
 }
 
 cmd_explain(){
@@ -1267,11 +1360,9 @@ cmd_install_verify(){
   common="$(cd "$(git -C "$installed" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" || blocked 'ai-task-gates: STOP. Installed Git ownership unavailable.'
   [ "$common" = "$(cd "$(git -C "$candidate_root" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" ] || blocked 'ai-task-gates: STOP. Candidate and installed checkout have different Git ownership.'
   [ "$(git -C "$candidate_root" rev-parse HEAD)" = "$target" ] || blocked 'ai-task-gates: STOP. Candidate source differs from pinned target.'
-  if [ "$phase" = preflight ]; then
-    [ "$(git -C "$candidate_root" rev-parse refs/remotes/origin/main 2>/dev/null)" = "$target" ] || blocked 'ai-task-gates: STOP. Target is not exact fetched origin/main.'
-  else
-    git -C "$candidate_root" merge-base --is-ancestor "$target" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Installed target is not in fetched origin/main history.'
-  fi
+  # Every phase requires a merged release. A pinned target need not be the tip:
+  # later merges may land between exact-head review/authorization and install.
+  git -C "$candidate_root" merge-base --is-ancestor "$target" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Target is not in fetched origin/main history.'
   if [ "$fixture" -eq 0 ]; then case "$origin_url" in
     https://github.com/popcre/ai-devops|https://github.com/popcre/ai-devops.git|git@github.com:popcre/ai-devops|git@github.com:popcre/ai-devops.git|ssh://git@github.com/popcre/ai-devops|ssh://git@github.com/popcre/ai-devops.git|https://github.com/u2giants/ai-devops|https://github.com/u2giants/ai-devops.git|git@github.com:u2giants/ai-devops|git@github.com:u2giants/ai-devops.git|ssh://git@github.com/u2giants/ai-devops|ssh://git@github.com/u2giants/ai-devops.git) ;;
     *) blocked 'ai-task-gates: STOP. Unsupported installed origin.' ;;
@@ -1532,12 +1623,25 @@ cmd_authorize_install(){
     blocked 'ai-task-gates: STOP. Empty release needs an installed receipt or explicit reviewed legacy migration.'
   fi
   if [ "$start_head" != "$target_head" ] && [ "$legacy_migration" -eq 1 ]; then
-    blocked 'ai-task-gates: STOP. Legacy migration is only for an unchanged checkout.'
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*) ;;
+      *) blocked 'ai-task-gates: STOP. Linux legacy migration is only for an unchanged checkout.' ;;
+    esac
   fi
   git -C "$TOPLEVEL" merge-base --is-ancestor "$start_head" "$target_head" 2>/dev/null || blocked 'ai-task-gates: STOP. Pre-update HEAD is not ancestor of candidate.'
-  [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse refs/remotes/origin/main 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate is not exact fetched origin/main.'
+  git -C "$TOPLEVEL" merge-base --is-ancestor "$target_head" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Candidate is not in fetched origin/main history.'
   [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout is dirty.'
   prepare "$start_head" ""
+  if [ "$legacy_migration" -eq 1 ] && [ "$start_head" != "$target_head" ]; then
+    local legacy_classes legacy_class legacy_protected
+    legacy_classes="$(install_release_classes "$start_head" "$target_head" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Cannot classify the legacy Windows release range.'
+    while IFS=$'\t' read -r legacy_class legacy_protected; do
+      [ -n "$legacy_class" ] || continue
+      if [ "$legacy_protected" = true ] && [ "$legacy_class" != reviewer-safety ]; then
+        blocked "ai-task-gates: STOP. Legacy Windows update crosses stronger '$legacy_class' changes."
+      fi
+    done <<< "$legacy_classes"
+  fi
   if [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then
     [ "$OBSERVED_CLASS" = reviewer-safety ] || blocked "ai-task-gates: STOP. Release class is '$OBSERVED_CLASS'; use its own gate."
   fi
@@ -1617,7 +1721,11 @@ cmd_authorize_install(){
     [ -f "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Installed launcher missing.'
     windows_launcher_route "$expected_source" "$installed_launcher" || blocked 'ai-task-gates: STOP. Installed Windows launcher routing differs.'
     if [ "$legacy_migration" -eq 1 ]; then
-      [ -z "$WINDOWS_RECEIPT_SHA" ] || blocked 'ai-task-gates: STOP. Same-commit migration requires a legacy launcher without a receipt.'
+      [ -z "$WINDOWS_RECEIPT_SHA" ] || blocked 'ai-task-gates: STOP. Legacy migration requires a launcher without a receipt.'
+    elif [ -z "$WINDOWS_RECEIPT_SHA" ]; then
+      blocked 'ai-task-gates: STOP. Windows legacy launchers require the reviewed legacy migration route.'
+    else
+      git -C "$installed_root" merge-base --is-ancestor "$WINDOWS_RECEIPT_SHA" "$installed_head" 2>/dev/null || blocked 'ai-task-gates: STOP. Windows receipt is not ancestor of the installed checkout.'
     fi
   fi
   report_real="$(cd "$(dirname "$review_report")" 2>/dev/null && pwd -P)/$(basename "$review_report")" || blocked 'ai-task-gates: STOP. Review report unavailable.'
@@ -1718,6 +1826,7 @@ cmd_authorize_install(){
     fi
   fi
   if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then
+    source_hash="$(sha256sum "$expected_source" | cut -d' ' -f1)"
     receipt_checkout="$(cygpath -aw "$installed_root")" || blocked 'ai-task-gates: STOP. Installed Windows path unavailable.'
     receipt_launcher="$(cygpath -aw "$installed_launcher")" || blocked 'ai-task-gates: STOP. Launcher Windows path unavailable.'
     receipt_report="$(cygpath -aw "$report_real")" || blocked 'ai-task-gates: STOP. Review Windows path unavailable.'
@@ -1732,8 +1841,8 @@ cmd_authorize_install(){
     --arg launcher "$receipt_launcher" --arg policy "$policy_digest" --arg source "$reviewed_digest" \
     --arg report "$receipt_report" --arg report_hash "$report_hash" --arg request "$approval_summary" \
     --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson stale "$stale_manifest_recovery" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" --arg manifest_recorded_sha "${manifest_recorded_sha:-}" \
-    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
+    --arg windows_receipt_sha "${WINDOWS_RECEIPT_SHA:-}" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,windows_receipt_sha:$windows_receipt_sha,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
     && ln -- "$auth_stage" "$auth_path" && rm -- "$auth_stage" || blocked 'ai-task-gates: STOP. Could not write install authority.'
 
   printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$start_head"
@@ -1746,7 +1855,7 @@ main(){
     check) cmd_check "$@" ;;
     authorize-install) cmd_authorize_install "$@" ;;
     install-verify) cmd_install_verify "$@" ;;
-    explain) cmd_explain_cached "$@" ;;
+    explain) cmd_explain_cached "$@" && explain_write_inputs ;;
     status) cmd_status "$@" ;;
     end) cmd_end "$@" ;;
     classify)

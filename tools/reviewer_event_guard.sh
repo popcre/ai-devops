@@ -151,8 +151,8 @@ reviewer_event_guard(){
   # must begin its own invocation on a clean identity, never resume the outer run.
   # Drop the outer owner PID too: a fresh invocation must record THIS guard,
   # not a stale/dead parent PID that would make the run look proven-dead.
-  unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_OWNER_PID
-  local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation
+  unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_OWNER_PID AI_REVIEW_PRIVACY_SCOPE
+  local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation privacy_scope=""
   local -a event_env=()
   root="$(cd "$(dirname "$wrapper")/.." && pwd -P)"
   python="$(command -v python3 || command -v python)" || { printf 'reviewer event recording requires Python 3\n' >&2; exit 1; }
@@ -182,6 +182,23 @@ reviewer_event_guard(){
   trap 'received=HUP; observed_signal=HUP; [ -z "$child" ] || kill -HUP "$child" 2>/dev/null || true' HUP
   # Bash normally ignores INT in asynchronous children. Reset inherited signal
   # dispositions before entering the wrapper so its cancellation traps work.
+  # One privacy verdict per review (#1355): the sandbox classifies the source
+  # once and its later checks in this review reuse that answer only while the
+  # inventory and the classification inputs are unchanged. The scope lives
+  # only as long as this invocation; a nested review keeps the outer scope.
+  privacy_scope=""
+  if [ -z "${AI_REVIEW_PRIVACY_SCOPE:-}" ]; then
+    # Under the user's own state root, never a shared temporary directory: on
+    # Windows the profile's ACL is the only owner-only boundary (Git Bash
+    # modes are synthesized), the same trust the gate's explain cache uses.
+    local privacy_base="${AI_REVIEW_PRIVACY_BASE:-$HOME/.local/state/ai-devops/review-privacy}"
+    if ( umask 077; mkdir -p "$privacy_base" ) 2>/dev/null && [ ! -L "$privacy_base" ] && chmod 700 "$privacy_base" 2>/dev/null; then
+      privacy_scope="$( umask 077; mktemp -d "$privacy_base/scope.XXXXXX" 2>/dev/null)" \
+        && chmod 700 "$privacy_scope" && export AI_REVIEW_PRIVACY_SCOPE="$privacy_scope" || privacy_scope=""
+    fi
+    # A killed supervisor cannot remove its scope; clear those a day later.
+    find "$privacy_base" -mindepth 1 -maxdepth 1 -type d -name 'scope.*' -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
+  fi
   env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
   # Record the child so loss is refused while it can still publish.
   child_pid_recorded="$(os_pid "$child")"
@@ -195,6 +212,7 @@ reviewer_event_guard(){
     [ -n "$received" ] || break
   done
   trap - TERM INT HUP
+  [ -z "$privacy_scope" ] || rm -rf -- "$privacy_scope"
   # A signal proves its name, not who sent it or whether remote paid work ended.
   # Keep that observation after the interrupted-wait loop clears `received`.
   facts='{"phase":"wrapper-exit"}'
@@ -240,3 +258,91 @@ reviewer_credit_exit(){
 }
 
 reviewer_credit_stop(){ reviewer_credit_scan "$@" || true; reviewer_credit_exit; }
+
+# Only supervisor-owned structured receipts may assert subscription exhaustion
+# or automatic refill dates. Arbitrary text scans retain billing-only meaning.
+REVIEWER_CREDIT_INVOCATION_TAG="${AI_REVIEW_EVENT_RUN_ID:-$BASHPID-$RANDOM}"
+reviewer_capacity_current(){ reviewer_capacity_scan "$1" "$2.credit-refusal.$REVIEWER_CREDIT_INVOCATION_TAG.json"; }
+reviewer_capacity_scan(){
+  local provider="$1" marker="$2" python tool dir out rc=0
+  [ -s "$marker" ] || return 3
+  python="$(command -v python3 || command -v python)" || return 1
+  tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_admission.py"
+  dir="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
+  out="$("$python" "$tool" credit "$provider" --directory "$dir" --marker "$marker" --record)" || rc=$?
+  [ "$rc" = 0 ] || return "$rc"
+  REVIEWER_CREDIT_HIT="$out"
+}
+
+# Run one exact command under the existing cross-platform owned-tree supervisor.
+# Inspection is incremental inside that supervisor, not a second polling process.
+# The private refusal marker remains alongside the run's existing evidence.
+reviewer_credit_prepare(){
+  REVIEWER_CREDIT_PYTHON="$(command -v python3 || command -v python)" || return 1
+  REVIEWER_CREDIT_SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd -P)/ai-process-supervisor"
+}
+reviewer_credit_run(){
+  local provider="$1" output="$2" stderr="$3"; shift 3
+  [ "${1:-}" != -- ] || shift
+  local python supervisor marker="$output.credit-refusal.$REVIEWER_CREDIT_INVOCATION_TAG.json" rc=0 arg command_bin child received='' term_trap int_trap hup_trap
+  [ -n "${REVIEWER_CREDIT_PYTHON:-}" ] || reviewer_credit_prepare || return 1
+  python="$REVIEWER_CREDIT_PYTHON"; supervisor="$REVIEWER_CREDIT_SUPERVISOR"
+  command_bin="$(command -v "$1")" || return 127
+  shift
+  local argument_exclusions="${MSYS2_ARG_CONV_EXCL:-}" shell_launcher='' shell_command=''
+  local -a paths=("$supervisor" "$output" "$stderr" "$marker")
+  case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*)
+    # Git Bash resolves executable shebang launchers as commands too. Win32
+    # cannot execute them directly, so retain Bash's execution semantics inside
+    # the same supervised Job Object; actual native executables stay direct.
+    if [ "$(head -c 2 "$command_bin" 2>/dev/null)" = '#!' ]; then
+      shell_launcher="$(command -v bash)" || return 127
+      shell_launcher="$(cygpath -w "$shell_launcher")" || return 1
+    fi
+    for arg in "${!paths[@]}"; do paths[$arg]="$(cygpath -w "${paths[$arg]}")" || return 1; done
+    if [ -z "$shell_launcher" ]; then
+      command_bin="$(cygpath -w "$command_bin")" || return 1
+    fi
+    # Native Python otherwise converts an env(1) PATH= argument to a Windows
+    # semicolon list. Its MSYS child must receive the original POSIX PATH to
+    # find the credential boundary's tools. Retain caller exclusions as well.
+    case ";$argument_exclusions;" in
+      *';*;'*) ;; # The caller already excludes every argument.
+      *) argument_exclusions="${argument_exclusions:+$argument_exclusions;}PATH=";;
+    esac;;
+  esac
+  local -a child_command=("$command_bin" "$@")
+  if [ -n "$shell_launcher" ]; then
+    # A native parent makes the MSYS startup parser expand separate @file and
+    # brace/wildcard arguments before Bash receives them. Transport one shell
+    # program instead, single-quoting every argument as a literal Bash word.
+    # Nothing from the caller is interpolated as executable shell syntax.
+    for arg in "${child_command[@]}"; do
+      shell_command+="'${arg//\'/\'\\\'\'}' "
+    done
+    child_command=("$shell_launcher" --noprofile --norc -c "exec $shell_command")
+  fi
+  term_trap="$(trap -p TERM)"; int_trap="$(trap -p INT)"; hup_trap="$(trap -p HUP)"
+  MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
+  trap 'received=TERM; kill -TERM "$child" 2>/dev/null || true' TERM
+  trap 'received=INT; kill -INT "$child" 2>/dev/null || true' INT
+  trap 'received=HUP; kill -TERM "$child" 2>/dev/null || true' HUP
+  while :; do
+    local signal_before="$received"
+    wait "$child" || rc=$?
+    [ "$received" != "$signal_before" ] || break
+  done
+  trap - TERM INT HUP
+  [ -z "$term_trap" ] || eval "$term_trap"
+  [ -z "$int_trap" ] || eval "$int_trap"
+  [ -z "$hup_trap" ] || eval "$hup_trap"
+  case "$received" in TERM) rc=143;; INT) rc=130;; HUP) rc=129;; esac
+  if [ "$rc" -eq 92 ] && [ -s "$marker" ]; then
+    reviewer_capacity_scan "$provider" "$marker" || true
+    [ -z "${REVIEWER_CREDIT_HIT:-}" ] || printf '%s\n' "$REVIEWER_CREDIT_HIT" >&2
+    # Existing failed-turn parsers already inspect stderr. Give them normalized
+    # error evidence, never arbitrary model response or private provider bodies.
+    cat "$marker" >> "$stderr"
+  fi
+  return "$rc"
+}

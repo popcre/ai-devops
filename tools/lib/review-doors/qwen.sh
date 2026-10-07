@@ -10,6 +10,8 @@
 #   bash qwen.sh review|implement
 # with the runner token and DOOR_* environment contract below.
 set -euo pipefail
+DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
 
 # ---------------------------------------------------------------------------
 # Structural forcing function: a door invoked without the runner token is a
@@ -174,14 +176,15 @@ main() {
   (
     cd "$DOOR_WORKDIR" || exit 1
     if [ -n "$QWEN_KEY" ]; then export OPENAI_API_KEY="$QWEN_KEY"; else unset OPENAI_API_KEY || true; fi
-    timeout "$QWEN_TIMEOUT" "$qwen" "${args[@]}" < "$prompt_full" > "$out" 2> "$out.err"
+    reviewer_credit_run qwen "$out" "$out.err" -- timeout "$QWEN_TIMEOUT" "$qwen" "${args[@]}" < "$prompt_full" > "$out" 2> "$out.err"
   )
   rc=$?
   set -e
   QWEN_KEY=""
 
   if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT qwen door\n' >&2
+    reviewer_capacity_current qwen "$out" || true
+    reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92
   fi

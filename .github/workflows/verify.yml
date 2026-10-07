@@ -322,7 +322,7 @@ jobs:
       - name: Shorten TEMP on a reused self-hosted machine
         # The self-hosted profile puts TEMP deep enough that nested suite temp
         # trees cross the 260-char Windows path limit.
-        if: ${{ matrix.lane == 'qualified-self-hosted' }}
+        if: ${{ matrix.lane != 'blacksmith' }}
         shell: pwsh
         run: |
           $short = Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}'
@@ -336,7 +336,7 @@ jobs:
         run: |
           .\tests\test-all.ps1 -WindowsPullRequest -ExcludeReviewerSafety -Shard '${{ matrix.section }}/12' -ChangedSince $env:SELECTION_BASE
       - name: Remove the short TEMP tree on a reused machine
-        if: ${{ always() && matrix.lane == 'qualified-self-hosted' }}
+        if: ${{ always() && matrix.lane != 'blacksmith' }}
         shell: pwsh
         run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}')
 

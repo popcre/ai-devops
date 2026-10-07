@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 python3 "$ROOT/tests/test_review_credit_watch.py"
+python3 "$ROOT/tests/test_glm_credit_reset.py"
 
 # Exercise the real dependency's public CLI with only isolated test state.
 # A missing pause API must fail this suite rather than silently qualify a watch
