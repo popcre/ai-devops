@@ -473,14 +473,32 @@ persist_review_terminal() { # META ASSISTANT_JSON; retain before optional local 
 }
 
 review_error_receipt() { # META [ASSISTANT_JSON]; absent JSON verifies retained record
-  local meta="$1" msg="${2:-}" input="" result runtime rc=0
+  local meta="$1" msg="${2:-}" mode="${3:-live}" input="" result runtime rc=0 identity_capture="" packet_capture="" repository boundary name
   runtime="$(command -v python3 || command -v python)" || return 1
   if [ -n "$msg" ]; then
     input="$(mktemp "${meta}.error-input.XXXXXX")" || return 1
     chmod 600 "$input" && printf '%s' "$msg" > "$input" || { rm -f "$input"; return 1; }
   fi
-  result="$("$runtime" - "$WRAPPER_DIR/../tools" "$meta" "$input" <<'ERROR_RECEIPT'
-import json,os,re,stat,sys,time
+  # Native Windows Python cannot execute extensionless Bash helpers. The
+  # already-running shell captures only bounded read-only identity/path output;
+  # Python still qualifies every retained binding before granting time authority.
+  if [ -n "$input" ] && [ "$mode" = historical ]; then
+    identity_capture="$(mktemp "${meta}.error-identity.XXXXXX")" || { rm -f "$input"; return 1; }
+    packet_capture="$(mktemp "${meta}.error-packet.XXXXXX")" || { rm -f "$input" "$identity_capture"; return 1; }
+    chmod 600 "$identity_capture" "$packet_capture" || { rm -f "$input" "$identity_capture" "$packet_capture"; return 1; }
+    repository="$(jq -er '.repository_root | select(type=="string" and length>0)' "$meta")" || repository=""
+    boundary="$(jq -er '.remote_turn.boundary_root | select(type=="string" and length>0)' "$meta")" || boundary=""
+    name="$(jq -er '.name | select(type=="string" and length>0)' "$meta")" || name=""
+    if [ -z "$repository" ] || ! timeout 10 bash "$REVIEW_LIFECYCLE_BIN" identity "$repository" > "$identity_capture" 2>/dev/null; then
+      : > "$identity_capture"
+    fi
+    if [ -z "$boundary" ] || [ -z "$name" ] || ! timeout 10 bash "$PACKET_BIN" path "$boundary" "glm-$name" > "$packet_capture" 2>/dev/null; then
+      : > "$packet_capture"
+    fi
+  fi
+  result="$("$runtime" - "$WRAPPER_DIR/../tools" "$meta" "$input" "$mode" "$identity_capture" "$packet_capture" <<'ERROR_RECEIPT'
+import datetime,hashlib,json,os,re,stat,sys,time
+from pathlib import Path
 sys.path.insert(0,sys.argv[1])
 from reviewer_maintenance import physical,publish,read_json,require
 meta=physical(sys.argv[2]); m=read_json(meta); t=m.get('remote_turn',{})
@@ -494,6 +512,54 @@ require(isinstance(m.get('opencode_session_id'),str) and re.fullmatch(r'[A-Za-z0
 identity={k:m[k] for k in ['name','caller','model','provider','opencode_session_id']}
 binding={k:t[k] for k in ['original_invocation_id','head','base','packet_sha256','previous_message_id','started_at']}
 target=physical(meta.parent/(meta.stem+'.'+t['original_invocation_id']+'.error.json'))
+
+require(sys.argv[4] in ('live','historical'),'invalid internal observation mode')
+def utc_epoch(value):
+    require(isinstance(value,str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z',value),'invalid original observation time')
+    return int(datetime.datetime.strptime(value,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp())
+def protected_bytes(path):
+    path=physical(path); info=path.stat()
+    require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=32768,'unsafe original observation evidence')
+    if os.name!='nt': require(info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o600,'unprotected original observation evidence')
+    return path.read_bytes()
+def protected_json(path):
+    def unique(pairs):
+        result={}
+        for key,value in pairs:
+            require(key not in result,'duplicate original observation field');result[key]=value
+        return result
+    raw=protected_bytes(path); value=json.loads(raw,object_pairs_hook=unique)
+    return value,hashlib.sha256(raw).hexdigest()
+def observation_bounds(epoch):
+    start=utc_epoch(t['started_at']); deadline=t.get('deadline_epoch')
+    require(type(deadline) is int and type(epoch) is int and start<=epoch<=deadline and epoch<=int(time.time()),'original observation outside turn bounds')
+def historical_observation():
+    # Only existing exact-bound private records qualify historical hold authority.
+    # An unavailable proof is UNKNOWN, while ERROR persistence remains supported.
+    try:
+        run=m.get('last_diagnostic_run_id'); require(isinstance(run,str) and re.fullmatch(r'[A-Za-z0-9._-]{1,128}',run),'unbound original diagnostic')
+        identity,_=protected_json(sys.argv[5])
+        key=identity.get('repository_key'); require(isinstance(key,str) and re.fullmatch(r'[0-9a-f]{64}',key),'unbound original repository key')
+        root=physical(m['repository_root']);require(physical(identity.get('repository_root',''))==root,'original repository identity changed')
+        diag_root=physical(os.environ.get('AI_REVIEW_LIFECYCLE_DIR',str(Path.home()/'.local/state/ai-devops/review-lifecycle')))
+        diag,diag_hash=protected_json(diag_root/'diagnostics'/key/'glm'/m['caller']/(run+'.json'))
+        require(diag.get('schema_version')==1 and diag.get('provider')=='glm' and diag.get('caller')==m['caller'] and diag.get('run_id')==run and diag.get('session_id')==m['name'] and physical(diag.get('repository_root',''))==root and diag.get('head')==t['head'] and diag.get('truncated') is False,'original diagnostic binding changed')
+        from reviewer_events import evidence_root,location
+        required,required_hash=protected_json(evidence_root(location(),t['original_invocation_id'])/'required.json')
+        require(required=={'schema_version':1,'provider':'glm','caller':m['caller'],'run_id':t['original_invocation_id'],'head':t['head']},'original invocation evidence changed')
+        packet_text=protected_bytes(sys.argv[6]).decode('utf-8').strip()
+        require(bool(packet_text) and '\n' not in packet_text and '\r' not in packet_text,'invalid original packet path')
+        packet=physical(packet_text)
+        require((packet/'MANIFEST.sha256').read_text().strip()==t['packet_sha256'],'original packet changed')
+        packet_identity,packet_hash=protected_json(packet/'identity.json')
+        require(packet_identity.get('head')==t['head'] and packet_identity.get('base')==t['base'] and packet_identity.get('source_digest')==diag.get('source_digest') and isinstance(diag.get('source_digest'),str) and re.fullmatch(r'[0-9a-f]{64}',diag['source_digest']),'original source binding changed')
+        events=diag.get('events');require(isinstance(events,list),'missing original terminal events')
+        matches=[event for event in events if isinstance(event,dict) and event.get('phase')=='terminal' and event.get('last_observation_type')=='provider-error' and event.get('provider_terminal_reason')=='error' and event.get('failure_class')==failure]
+        require(len(matches)==1 and diag.get('terminal_summary')==matches[0],'ambiguous original terminal observation')
+        epoch=utc_epoch(matches[0]['observed_at']);observation_bounds(epoch)
+        return {'state':'known','source':'retained-diagnostic','epoch':epoch,'diagnostic_sha256':diag_hash,'required_sha256':required_hash,'packet_identity_sha256':packet_hash}
+    except Exception:
+        return {'state':'unknown','source':'unproven-historical','epoch':None}
 if sys.argv[3]:
     msg=read_json(sys.argv[3]); model=msg.get('model',{})
     require(msg.get('finish')=='error' and isinstance(msg.get('id'),str) and msg['id'] and msg['id']!=t['previous_message_id'],'not a fresh terminal error')
@@ -502,33 +568,51 @@ if sys.argv[3]:
     detail=str(msg['error'].get('message') or msg['error'].get('data',{}).get('message') or msg['error'].get('name') or '')
     require(bool(detail),'empty terminal error cause')
     failure='provider-quota-exhausted' if ('1310' in detail or 'Limit Exhausted' in detail or 'quota' in detail.lower()) else 'provider-error'
-    value={'schema_version':1,'identity':identity,'binding':binding,'assistant_id':msg['id'],'finish':'error','authorizing':False,'failure_class':failure,'observed_epoch':int(time.time())}
+    captured=int(time.time())
     if target.exists():
-        old=read_json(target); value['observed_epoch']=old.get('observed_epoch'); require(old==value,'conflicting immutable error receipt')
-    else: publish(target,value)
+        old=read_json(target)
+        require(old.get('identity')==identity and old.get('binding')==binding and old.get('assistant_id')==msg['id'] and old.get('finish')=='error' and old.get('failure_class')==failure,'conflicting immutable error receipt')
+    else:
+        observation={'state':'known','source':'live-handler','epoch':captured} if sys.argv[4]=='live' else historical_observation()
+        if observation['state']=='known':
+            try: observation_bounds(observation['epoch'])
+            except Exception: observation={'state':'unknown','source':'unproven-turn-bounds','epoch':None}
+        value={'schema_version':2,'identity':identity,'binding':binding,'assistant_id':msg['id'],'finish':'error','authorizing':False,'failure_class':failure,'observed_epoch':observation['epoch'],'original_observation':observation,'captured_epoch':captured}
+        publish(target,value)
 value=read_json(target)
 info=target.stat(); require(stat.S_ISREG(info.st_mode) and info.st_nlink==1,'unsafe terminal error file')
 if os.name!='nt': require(info.st_uid==os.getuid() and not info.st_mode & 0o077,'unprotected terminal error file')
-require(value.get('schema_version')==1 and value.get('identity')==identity and value.get('binding')==binding and value.get('finish')=='error' and value.get('authorizing') is False,'terminal error binding changed')
+require(value.get('schema_version') in (1,2) and value.get('identity')==identity and value.get('binding')==binding and value.get('finish')=='error' and value.get('authorizing') is False,'terminal error binding changed')
 require(isinstance(value.get('assistant_id'),str) and value['assistant_id'] and value['assistant_id']!=t['previous_message_id'],'terminal error watermark changed')
-require(value.get('failure_class') in ('provider-error','provider-quota-exhausted') and type(value.get('observed_epoch')) is int and 0<=value['observed_epoch']<=int(time.time()),'invalid terminal error observation')
-print(json.dumps({'path':str(target),'failure_class':value['failure_class'],'observed_epoch':value['observed_epoch']},separators=(',',':')))
+require(value.get('failure_class') in ('provider-error','provider-quota-exhausted'),'invalid terminal error cause')
+observation=value.get('original_observation') if value['schema_version']==2 else {'state':'unknown','source':'legacy-unproven','epoch':None}
+require(isinstance(observation,dict) and observation.get('state') in ('known','unknown'),'invalid original observation')
+if observation['state']=='known':
+    require(observation.get('source') in ('live-handler','retained-diagnostic') and value.get('observed_epoch')==observation.get('epoch'),'original observation identity changed')
+    observation_bounds(observation['epoch'])
+    if observation['source']=='retained-diagnostic':
+        require(all(isinstance(observation.get(k),str) and re.fullmatch(r'[0-9a-f]{64}',observation[k]) for k in ('diagnostic_sha256','required_sha256','packet_identity_sha256')),'unbound original observation provenance')
+else: require(observation.get('epoch') is None and (value['schema_version']==1 or value.get('observed_epoch') is None),'unknown observation cannot publish a hold')
+if value['schema_version']==2: require(type(value.get('captured_epoch')) is int and 0<=value['captured_epoch']<=int(time.time()),'invalid error capture telemetry')
+print(json.dumps({'path':str(target),'failure_class':value['failure_class'],'observed_epoch':observation['epoch'],'observation_state':observation['state']},separators=(',',':')))
 ERROR_RECEIPT
 )" || rc=$?
   [ -z "$input" ] || rm -f "$input"
+  [ -z "$identity_capture" ] || rm -f "$identity_capture"
+  [ -z "$packet_capture" ] || rm -f "$packet_capture"
   [ "$rc" -eq 0 ] || return "$rc"
   printf '%s' "$result"
 }
 
 persist_review_error() { # META ASSISTANT_JSON
   local meta="$1" receipt digest path failure observed
-  receipt="$(review_error_receipt "$meta" "${2:-}")" || return 1
+  receipt="$(review_error_receipt "$meta" "${2:-}" "${3:-live}")" || return 1
   path="$(jq -r .path <<<"$receipt")"; digest="$(sha256sum "$path" | cut -d' ' -f1)" || return 1
   write_meta "$meta" "$(jq --arg path "$path" --arg digest "$digest" '.remote_turn.state="terminal-error" | .remote_turn.authorizing=false | .remote_turn.error_path=$path | .remote_turn.error_sha256=$digest | .last_failed_turn=.remote_turn' "$meta")" || return 1
   receipt="$(review_error_receipt "$meta")" || return 1
   [ "$(jq -r .remote_turn.error_path "$meta")" = "$path" ] && [ "$(jq -r .remote_turn.error_sha256 "$meta")" = "$(sha256sum "$path" | cut -d' ' -f1)" ] && jq -e '.last_failed_turn==.remote_turn and .remote_turn.state=="terminal-error" and .remote_turn.authorizing==false' "$meta" >/dev/null || return 1
   failure="$(jq -r .failure_class <<<"$receipt")"; observed="$(jq -r .observed_epoch <<<"$receipt")"
-  if [ "$failure" = provider-quota-exhausted ]; then
+  if [ "$failure" = provider-quota-exhausted ] && [ "$(jq -r .observation_state <<<"$receipt")" = known ]; then
     "$REVIEW_PREFLIGHT_BIN" pause glm out-of-credit --seconds 3600 --observed "$observed" >/dev/null || return 1
   fi
 }
@@ -540,7 +624,7 @@ recover_review_error() { # META: local-only, never a verdict or a provider read
   [ "$path" = "$(jq -r .remote_turn.error_path "$1")" ] && [ "$digest" = "$(jq -r .remote_turn.error_sha256 "$1")" ] || die 'terminal error bytes changed; no provider call was made.'
   ACTIVE_DIAG_REPO="$(jq -r .repository_root "$1")"; ACTIVE_DIAG_SESSION="$(jq -r .name "$1")"
   ACTIVE_DIAG_RUN="$(jq -r '.last_diagnostic_run_id // empty' "$1")"
-  ACTIVE_DIAG_STARTED_EPOCH="$(jq -r .observed_epoch <<<"$receipt")"
+  ACTIVE_DIAG_STARTED_EPOCH="$(jq -r 'if .observation_state=="known" then .observed_epoch else 0 end' <<<"$receipt")"
   record_diagnostic terminal provider-error --terminal-reason error --cancellation-confirmation not-requested --failure-class "$(jq -r .failure_class <<<"$receipt")"
   printf 'RETAINED terminal-error non-authorizing session=%s original-head=%s; no provider call made.\n' "$(jq -r .name "$1")" "$(jq -r .remote_turn.head "$1")"
   return 1
@@ -1290,7 +1374,7 @@ provider_turn_error() { # provider_turn_error ASSISTANT_JSON NAME [IMPLEMENTATIO
       --arg f "$failure" --arg now "$(date -u +%FT%TZ)" || return 1
     return 125
   fi
-  if [ -n "$TURN_META" ]; then persist_review_error "$TURN_META" "$msg" || die "could not preserve the exact terminal error; original session remains fenced."; fi
+  if [ -n "$TURN_META" ]; then persist_review_error "$TURN_META" "$msg" "${GLM_RETAINED_ERROR_OBSERVATION:-live}" || die "could not preserve the exact terminal error; original session remains fenced."; fi
   record_diagnostic terminal provider-error --terminal-reason error --cancellation-confirmation not-requested --failure-class "$failure"
   die "GLM provider returned an error and ended the turn ($failure): $detail
        Session $name was not given a verdict; retain or recover its exact diagnostic, never resubmit this turn."
@@ -1533,6 +1617,7 @@ cmd_new() {
 }
 
 cmd_recover() { # exact session only; never sends or resends a prompt
+  local GLM_RETAINED_ERROR_OBSERVATION=historical
   local name="$1" root rid mp sid lock packet boundary expected state msg terminal digest report text tokens binding stale=0 observed
   valid_name "$name" || die 'invalid GLM session name.'
   [ -z "$PROMPT_TEXT$PROMPT_FILE$OPT_BASE$OPT_TESTS$OPT_DECISION$OPT_ASSERT_HEAD" ] || die 'recover cannot submit a prompt or change the original review evidence.'
@@ -1574,7 +1659,7 @@ cmd_recover() { # exact session only; never sends or resends a prompt
     # exited. It never renews the original provider/polling deadline.
     msg="$(last_assistant "$sid")" || die 'could not observe the exact pending GLM result; session remains fenced.'
     if printf '%s' "$msg" | jq -e '.finish=="error"' >/dev/null; then
-      persist_review_error "$mp" "$msg" || die 'could not preserve observed terminal error; no resubmission occurred.'
+      persist_review_error "$mp" "$msg" historical || die 'could not preserve observed terminal error; no resubmission occurred.'
       recover_review_error "$mp"; return $?
     fi
     if ! printf '%s' "$msg" | jq -e --arg previous "$(jq -r .remote_turn.previous_message_id "$mp")" --arg model "$MODEL" --arg provider "$PROVIDER" \
