@@ -76,7 +76,7 @@ files = [root / name for name in (
 blocks = []
 for file in files:
     match = re.search(r"^- \*\*Own coordinator progress\.\*\*.*?(?=\n- |\Z)",
-                      file.read_text(), re.M | re.S)
+                      file.read_text(encoding="utf-8"), re.M | re.S)
     if not match:
         sys.exit(f"FAIL: {file.name} has no coordinator contract")
     blocks.append(" ".join(match.group().split()))
