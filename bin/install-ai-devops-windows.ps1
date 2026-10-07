@@ -263,6 +263,52 @@ function Get-TargetPolicyDigest([string]$Path, [string]$TargetHead) {
     return ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
 }
 
+function Assert-PrivateInstallAuthority([string]$IssuedPath, [string]$ReadPath) {
+    $profile = [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\')
+    $dir = [IO.Path]::GetFullPath((Split-Path -Parent $ReadPath)).TrimEnd('\')
+    if (-not ($dir.Equals($profile, [StringComparison]::OrdinalIgnoreCase) -or
+        $dir.StartsWith($profile + '\', [StringComparison]::OrdinalIgnoreCase))) {
+        throw 'Reviewed toolkit install authorization is outside the private user profile.'
+    }
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $allow = @($sid, 'S-1-5-18', 'S-1-5-32-544')
+    $sealPath = "$IssuedPath.seal"
+    $objects = @($ReadPath, $sealPath)
+    while ($true) {
+        $objects += $dir
+        if ($dir.Equals($profile, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $dir = Split-Path -Parent $dir
+    }
+    foreach ($path in $objects) {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Reviewed toolkit install authorization has a reparse point.'
+        }
+        $acl = Get-Acl -LiteralPath $path -ErrorAction Stop
+        if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid) {
+            throw 'Reviewed toolkit install authorization has a foreign owner.'
+        }
+        $hasFull = $false
+        foreach ($rule in $acl.Access) {
+            $ruleSid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+            if ($ruleSid -notin $allow -or $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
+                throw 'Reviewed toolkit install authorization has broad access.'
+            }
+            if ($ruleSid -eq $sid -and (($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq [Security.AccessControl.FileSystemRights]::FullControl)) {
+                $hasFull = $true
+            }
+        }
+        if (-not $hasFull) { throw 'Reviewed toolkit install authorization lacks owner control.' }
+    }
+    $digest = (Get-FileHash -LiteralPath $ReadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $protected = [Convert]::FromBase64String((Get-Content -Raw -LiteralPath $sealPath).Trim())
+    $entropy = [Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($IssuedPath))
+    $unsealed = [Security.Cryptography.ProtectedData]::Unprotect($protected, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    if ([Text.Encoding]::UTF8.GetString($unsealed) -cne $digest) {
+        throw 'Reviewed toolkit install authorization seal does not match its bytes.'
+    }
+}
+
 function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string]$InstalledHead, [bool]$LegacyMigration, [bool]$FirstInstall, [bool]$RecoverLaunchers) {
     $fixture = $env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and
         (Get-CanonicalRemote $env:AI_DEVOPS_TEST_EXPECTED_REMOTE) -notmatch '^github[.]com/'
@@ -277,6 +323,7 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
         # Revalidate the exact pending grant below; do not reserve a second one.
         $authPath = $consumingPath
     }
+    Assert-PrivateInstallAuthority -IssuedPath (Join-Path $authDir "$TargetHead.json") -ReadPath $authPath
     try { $auth = Get-Content -Raw -LiteralPath $authPath | ConvertFrom-Json } catch { throw 'Reviewed toolkit install authorization is malformed.' }
     $expectedCheckout = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     $recordedCheckout = [IO.Path]::GetFullPath([string]$auth.installed_checkout).TrimEnd('\')

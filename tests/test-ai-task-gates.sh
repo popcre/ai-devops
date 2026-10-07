@@ -206,9 +206,13 @@ chmod +x "$TMP/fake-os/uname"
 case "$(/usr/bin/uname -s)" in
   MINGW*|MSYS*|CYGWIN*) ;;
   *)
-    cat > "$TMP/fake-os/powershell.exe" <<'EOF'
+cat > "$TMP/fake-os/powershell.exe" <<'EOF'
 #!/bin/sh
-case "$*" in *'GetCurrent().User.Value'*) printf 'S-1-5-21-1000\r\n' ;; esac
+case "$*" in
+  *'$env:USERPROFILE'*) printf '%s\n' "$USERPROFILE" ;;
+  *'GetCurrent().User.Value'*) printf 'S-1-5-21-1000\r\n' ;;
+  *'ProtectedData]::Protect'*) printf 'fake-seal\n' ;;
+esac
 EOF
     cat > "$TMP/fake-os/icacls" <<'EOF'
 #!/bin/sh
@@ -217,9 +221,10 @@ EOF
     chmod +x "$TMP/fake-os/powershell.exe" "$TMP/fake-os/icacls"
     ;;
 esac
-class_saved_home="$HOME"; class_saved_path="$PATH"
+class_saved_home="$HOME"; class_saved_path="$PATH"; class_saved_state="$AI_TASK_GATES_DIR"
 class_saved_profile="${USERPROFILE:-}"; class_saved_programfiles="${PROGRAMFILES:-}"
 export HOME="$TMP/class-home" PATH="$TMP/fake-os:$PATH" USERPROFILE="$TMP/class-home" PROGRAMFILES='C:\Program Files'
+export AI_TASK_GATES_DIR="$HOME/state"
 if ! command -v cygpath >/dev/null 2>&1; then
   mkdir -p "$TMP/fake-cygpath"
   cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
@@ -508,6 +513,7 @@ rmdir "$TMP/class-candidate/infra"
 git -C "$TMP/class-candidate" rm -q bin/ai-review
 git -C "$TMP/class-candidate" commit -qm 'finish mixed tests'
 export HOME="$class_saved_home" PATH="$class_saved_path"
+export AI_TASK_GATES_DIR="$class_saved_state"
 if [ -n "$class_saved_profile" ]; then export USERPROFILE="$class_saved_profile"; else unset USERPROFILE; fi
 if [ -n "$class_saved_programfiles" ]; then export PROGRAMFILES="$class_saved_programfiles"; else unset PROGRAMFILES; fi
 
@@ -535,7 +541,8 @@ git -C "$TMP/deleted-reviewer" commit -qm 'installed reviewer source'
 ( cd "$TMP/deleted-reviewer" && "$GATES" start --class reviewer-safety ) >/dev/null
 installed_head="$(git -C "$TMP/deleted-reviewer" rev-parse HEAD)"
 git -C "$TMP/deleted-reviewer" worktree add -q --detach "$TMP/deleted-candidate" "$installed_head"
-export HOME="$TMP/class-home" PATH="$TMP/fake-os:$TMP/fake-cygpath:$class_saved_path"
+export HOME="$TMP/class-home" PATH="$TMP/fake-os:$TMP/fake-cygpath:$class_saved_path" USERPROFILE="$TMP/class-home"
+export AI_TASK_GATES_DIR="$HOME/state"
 rm -f "$class_launcher"
 ln -s "$TMP/deleted-reviewer/bin/ai-task-gates" "$class_launcher"
 ( cd "$TMP/deleted-candidate" && "$GATES" start --class installation ) >/dev/null
@@ -562,6 +569,8 @@ git -C "$TMP/deleted-reviewer" merge --ff-only -q "$deleted_target"
 check 'preflight rejects an installed checkout that already moved' \
   "rc 3 '$TMP/deleted-candidate' check --before deploy $deleted_proof --reviewer-approval \"\$(appr '$TMP/deleted-candidate' deploy)\""
 export HOME="$class_saved_home" PATH="$class_saved_path"
+export AI_TASK_GATES_DIR="$class_saved_state"
+if [ -n "$class_saved_profile" ]; then export USERPROFILE="$class_saved_profile"; else unset USERPROFILE; fi
 
 newrepo "$TMP/empty-release"
 mkdir -p "$TMP/empty-release/.ai-devops" "$TMP/empty-release/bin"
@@ -584,7 +593,9 @@ EOF
 chmod +x "$TMP/fake-os/uname"
 saved_home="$HOME"; saved_path="$PATH"; saved_programfiles="${PROGRAMFILES:-}"; saved_profile="${USERPROFILE:-}"
 export HOME="$TMP/empty-home" PATH="$TMP/fake-os:$TMP/fake-cygpath:$PATH" USERPROFILE="$TMP/empty-home"
+export AI_TASK_GATES_DIR="$HOME/state"
 export PROGRAMFILES='C:\Program Files'
+( cd "$TMP/empty-release" && "$GATES" start --class installation ) >/dev/null
 empty_launcher="$HOME/.local/bin/ai-task-gates"
 empty_proof="--installed-checkout $TMP/empty-release --installed-launcher $empty_launcher --reviewer-approval $(appr "$TMP/empty-release" deploy)"
 check 'first install requires an explicit first-install claim' \
@@ -669,6 +680,7 @@ unset AI_DEVOPS_ETC
 if [ -n "$saved_programfiles" ]; then export PROGRAMFILES="$saved_programfiles"; else unset PROGRAMFILES; fi
 if [ -n "$saved_profile" ]; then export USERPROFILE="$saved_profile"; else unset USERPROFILE; fi
 export HOME="$saved_home" PATH="$saved_path"
+export AI_TASK_GATES_DIR="$class_saved_state"
 
 newrepo "$TMP/redirected-toolkit" u2giants/ai-devops
 mkdir -p "$TMP/redirected-toolkit/.ai-devops" "$TMP/redirected-toolkit/bin"
@@ -678,7 +690,7 @@ git -C "$TMP/redirected-toolkit" add .ai-devops/task-gates.json bin/ai-task-gate
 git -C "$TMP/redirected-toolkit" commit -qm 'redirected origin base'
 ( cd "$TMP/redirected-toolkit" && "$GATES" start --class reviewer-safety ) >/dev/null
 git -C "$TMP/redirected-toolkit" worktree add -q --detach "$TMP/redirected-candidate" HEAD
-export HOME="$TMP/class-home" PATH="$TMP/fake-os:$TMP/fake-cygpath:$class_saved_path"
+export HOME="$TMP/class-home" PATH="$TMP/fake-os:$TMP/fake-cygpath:$class_saved_path" USERPROFILE="$TMP/class-home" AI_TASK_GATES_DIR="$TMP/class-home/state"
 rm -f "$class_launcher"
 ln -s "$TMP/redirected-toolkit/bin/ai-task-gates" "$class_launcher"
 ( cd "$TMP/redirected-candidate" && "$GATES" start --class installation ) >/dev/null
@@ -690,7 +702,8 @@ git -C "$TMP/redirected-toolkit" update-ref refs/remotes/origin/main "$redirecte
 redirected_report="$(make_approved_report "$TMP/redirected-candidate" "$redirected_target")"
 check 'the documented u2giants GitHub origin retains toolkit install route' \
   "rc 0 '$TMP/redirected-candidate' authorize-install --target-head '$redirected_target' --installed-checkout '$TMP/redirected-toolkit' --installed-launcher '$class_launcher' --review-report '$redirected_report' --reviewer-approval \"\$(appr '$TMP/redirected-candidate' deploy)\""
-export HOME="$class_saved_home" PATH="$class_saved_path"
+export HOME="$class_saved_home" PATH="$class_saved_path" AI_TASK_GATES_DIR="$class_saved_state"
+if [ -n "$class_saved_profile" ]; then export USERPROFILE="$class_saved_profile"; else unset USERPROFILE; fi
 
 newrepo "$TMP/mixed-explain"
 mkdir -p "$TMP/mixed-explain/.ai-devops" "$TMP/mixed-explain/bin" "$TMP/mixed-explain/services/api"
@@ -1247,7 +1260,7 @@ done
 newrepo "$TMP/xcache" popcre/ai-devops
 XC="$TMP/xcache"; XP="$TMP/xcache-paths"; printf 'docs/a.md\n' > "$XP"
 xc_class(){ ( cd "$XC" && "$GATES" explain --json --paths-from "$XP" ) | jq -r .effective_class; }
-xc_count(){ find "$AI_TASK_GATES_DIR/explain-cache" -maxdepth 1 -type f ! -name '.tmp.*' 2>/dev/null | wc -l | tr -d ' '; }
+xc_count(){ find "$AI_TASK_GATES_DIR/explain-cache" -maxdepth 1 -type f ! -name '.tmp.*' ! -name '*.seal' 2>/dev/null | wc -l | tr -d ' '; }
 first="$(cd "$XC" && "$GATES" explain --json --paths-from "$XP")"; before="$(xc_count)"
 second="$(cd "$XC" && "$GATES" explain --json --paths-from "$XP")"
 uncached="$(cd "$XC" && AI_TASK_GATES_EXPLAIN_CACHE=0 "$GATES" explain --json --paths-from "$XP")"
@@ -1289,14 +1302,20 @@ case "$(uname -s)" in
     state_entry="$(find "$AI_TASK_GATES_DIR" -maxdepth 1 -type f -name '*.json' | head -1)"
     check 'the Windows recorded task class has a private native ACL' \
       "[ -n '$state_entry' ] && private_windows_acl '$state_entry' no"
+    auth_check="$TMP/check-private-install-authority.ps1"
+    sed -n '/^function Assert-PrivateInstallAuthority(/,/^}/p' "$ROOT/bin/install-ai-devops-windows.ps1" > "$auth_check"
+    printf '\nAssert-PrivateInstallAuthority -IssuedPath $args[0] -ReadPath $args[1]\n' >> "$auth_check"
+    check 'the Windows installer accepts a newly sealed private authority file' \
+      "powershell.exe -NoProfile -NonInteractive -File \"\$(cygpath -w '$auth_check')\" \"\$(cygpath -w '$state_entry')\" \"\$(cygpath -w '$state_entry')\""
     cache_entry="$(find "$AI_TASK_GATES_DIR/explain-cache" -maxdepth 1 -type f | head -1)"
     check 'the Windows explain cache entry has a private native ACL' \
       "[ -n '$cache_entry' ] && private_windows_acl '$cache_entry' no"
-    shared_parent="$TMP/shared-state/ai-devops"
+    shared_home="$TMP/shared-state-home"
+    shared_parent="$shared_home/.local/state/ai-devops"
     mkdir -p "$shared_parent/review-lifecycle" "$shared_parent/task-gates"
     printf 'keep\n' > "$shared_parent/review-lifecycle/owner-canary"
     icacls "$(cygpath -w "$shared_parent")" /grant:r '*S-1-5-11:(OI)(CI)M' '*S-1-5-32-545:(OI)(CI)RX' >/dev/null
-    ( cd "$XC" && AI_TASK_GATES_DIR="$shared_parent/task-gates" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
+    ( cd "$XC" && unset AI_TASK_GATES_DIR; HOME="$shared_home" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
     check 'Windows repairs explicit broad grants on the shared state parent' \
       "private_windows_acl '$shared_parent' && private_windows_acl '$shared_parent/task-gates'"
     check 'other reviewer state remains owner-accessible after parent repair' \
@@ -1306,6 +1325,12 @@ case "$(uname -s)" in
     icacls "$(cygpath -w "$unsafe_parent")" /grant:r '*S-1-1-0:(OI)(CI)M' >/dev/null
     check 'a custom state parent with broad access is refused without changing its ACL' \
       "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$unsafe_parent/task-gates' '$GATES' explain --json --paths-from '$XP' ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ] && powershell.exe -NoProfile -NonInteractive -Command '& { param([string]\$Path) \$Acl=Get-Acl -LiteralPath \$Path; if (@(\$Acl.Access | Where-Object { \$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq \"S-1-1-0\" }).Count -eq 0) { exit 1 } }' \"\$(cygpath -w '$unsafe_parent')\""
+    unsafe_grandparent="$TMP/unsafe-grandparent"
+    mkdir -p "$unsafe_grandparent/private"
+    icacls "$(cygpath -w "$unsafe_grandparent")" /grant:r '*S-1-1-0:(OI)(CI)M' >/dev/null
+    icacls "$(cygpath -w "$unsafe_grandparent/private")" /inheritance:r >/dev/null
+    check 'a custom state grandparent with broad access is refused' \
+      "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$unsafe_grandparent/private/task-gates' '$GATES' explain --json --paths-from '$XP' ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ]"
     old_state_root="$TMP/old-state"
     ( cd "$XC" && AI_TASK_GATES_DIR="$old_state_root" "$GATES" start --class code --base main ) >/dev/null
     old_state_file="$(find "$old_state_root" -maxdepth 1 -type f -name '*.json' | head -1)"
@@ -1315,9 +1340,26 @@ case "$(uname -s)" in
     ( cd "$XC" && AI_TASK_GATES_DIR="$old_state_root" "$GATES" start --class code --base main ) >/dev/null
     check 'start reissues an old broad declaration as a private file' \
       "private_windows_acl '$old_state_file' no && ( cd '$XC' && AI_TASK_GATES_DIR='$old_state_root' '$GATES' status ) | jq -e '.declared_class==\"code\"'"
-    jq 'del(.windows_acl_generation)' "$old_state_file" > "$old_state_file.old" && mv "$old_state_file.old" "$old_state_file"
-    check 'a private legacy Windows declaration still needs reissue' \
+    jq '.declared_class="production" | .windows_acl_generation=1' "$old_state_file" > "$old_state_file.old" && mv "$old_state_file.old" "$old_state_file"
+    check 'a forged generation marker cannot authenticate changed task state' \
       "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$old_state_root' '$GATES' check --before review ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ]"
+    check 'the Windows installer refuses bytes that differ from the user seal' \
+      "! powershell.exe -NoProfile -NonInteractive -File \"\$(cygpath -w '$auth_check')\" \"\$(cygpath -w '$old_state_file')\" \"\$(cygpath -w '$old_state_file')\""
+    ( cd "$XC" && AI_TASK_GATES_DIR="$old_state_root" "$GATES" start --class code --base main ) >/dev/null
+    rm -f "$old_state_file.seal"
+    check 'an old private Windows declaration without a user seal still needs reissue' \
+      "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$old_state_root' '$GATES' check --before review ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ]"
+    ( cd "$XC" && AI_TASK_GATES_DIR="$old_state_root" "$GATES" start --class code --base main ) >/dev/null
+    spoof_cache_root="$TMP/cache-spoof"
+    spoof_expected="$(cd "$XC" && AI_TASK_GATES_DIR="$spoof_cache_root" AI_TASK_GATES_EXPLAIN_CACHE=0 "$GATES" explain --json --paths-from "$XP")"
+    ( cd "$XC" && AI_TASK_GATES_DIR="$spoof_cache_root" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
+    spoof_cache_entry="$(find "$spoof_cache_root/explain-cache" -maxdepth 1 -type f ! -name '*.seal' | head -1)"
+    printf 'forged cache answer\n' > "$spoof_cache_entry"
+    check 'a changed Windows explain cache entry is computed afresh' \
+      "[ \"\$(cd '$XC' && AI_TASK_GATES_DIR='$spoof_cache_root' '$GATES' explain --json --paths-from '$XP')\" = '$spoof_expected' ] && private_windows_acl '$spoof_cache_entry' no"
+    rm -f "$spoof_cache_entry.seal"
+    check 'an unsealed preexisting Windows cache entry is recomputed' \
+      "[ \"\$(cd '$XC' && AI_TASK_GATES_DIR='$spoof_cache_root' '$GATES' explain --json --paths-from '$XP')\" = '$spoof_expected' ] && private_windows_acl '$spoof_cache_entry.seal' no"
     acl_reject="$TMP/acl-reject"
     ( cd "$XC" && AI_TASK_GATES_DIR="$acl_reject" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
     icacls "$(cygpath -w "$acl_reject")" /grant:r '*S-1-1-0:R' >/dev/null
