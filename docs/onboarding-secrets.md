@@ -45,8 +45,13 @@ For the do-this-now steps, see the **"Set up a new machine"** section of
    file → every app and machine picks it up.
 
 4. **Resolve once, with a single-flight guard.** One `op run --env-file`
-   resolves the shared set at session start. Ubuntu keeps it in the login-shell
-   environment. Windows shares a 15-minute, per-user DPAPI-encrypted cache; an
+   resolves the shared set at interactive shell start on Ubuntu. Noninteractive
+   login shells do not load credentials automatically. Start Codex outside an
+   already credential-loaded interactive shell to keep its process environment
+   clear. A script that deliberately needs the
+   old shell behavior sets `AI_DEVOPS_RESOLVE_SHELL_SECRETS=1` when sourcing the
+   managed shell snippet; provider wrappers normally use protected stores or
+   resolve their own key. Windows shares a 15-minute, per-user DPAPI-encrypted cache; an
    OS mutex permits only one refresh while parallel MCP startups wait. Plaintext
    values exist only in child-process memory and never in MCP configuration.
 
@@ -113,11 +118,12 @@ explicitly requested `glm-5.3` model.
 - `bin/setup-secrets.sh` stores the token, drops `mcp.env`, and installs a
   managed shell snippet (`~/.config/ai-devops/shellrc`, sourced by `~/.bashrc`
   and `~/.profile`; POSIX-safe so it also works under `dash`).
-- On login the snippet loads the vault-locked token, then resolves all of
+- In an interactive shell the snippet loads the vault-locked token, then resolves all of
   `mcp.env` with one `op run` into the shell environment (it never
   overwrites a value you set yourself). So every app's `.mcp.json` `${...}`
-  placeholder — and every other CLI (`supabase`, scripts) — is authorized with
-  no special launcher. You just run `claude`.
+  placeholder and other CLIs launched from that shell are authorized. A
+  noninteractive caller must use a managed launcher or explicitly opt in when
+  sourcing the snippet.
 - **Why shell-export and not an `op run` wrapper here?** It's the pattern that
   already works on `hetz`, so nothing regresses; it authorizes *all* tools in
   the session, not only Claude; and it's the simplest mental model for a
