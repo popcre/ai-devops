@@ -1,5 +1,6 @@
 """Synthetic maintenance contract tests, run by test-ai-reviewer-issue.sh."""
 import copy
+import datetime
 import importlib.util
 import json
 import os
@@ -79,9 +80,11 @@ esac
         with self.ledger.open("ab") as output:
             output.write(json.dumps(event).encode() + b"\n")
 
-    def invocation(self, rid="run-1", code=1, provider="grok", finish=True):
+    def invocation(self, rid="run-1", code=1, provider="grok", finish=True, owner_pid=None):
         row = {"schema_version": 1, "provider": provider, "event": "started", "run_id": rid,
                "repo": str(self.toolkit), "head": self.sha, "caller": "codex", "timestamp": "same-time"}
+        if owner_pid is not None:
+            row["owner_pid"] = owner_pid
         self.write(row)
         if finish:
             self.write({**row, "event": "finished", "exit_code": code})
@@ -1402,6 +1405,138 @@ with event_lock(sys.argv[2]):
                 child.wait(timeout=5)
             child.stdout.close()
             child.stderr.close()
+
+    # ---- evidence-lost: non-GLM providers, proven-dead owner, verify accept ----
+
+    def _lost_sandbox(self, provider, name="lost-test", owner_line=None, reports=()):
+        """Build a sandbox + source tree ready for reconcile-lost."""
+        source = self.root / "lost-source"
+        reviews = source / ".ai" / "reviews"
+        reviews.mkdir(parents=True, exist_ok=True)
+        for report_name in reports:
+            (reviews / report_name).write_text("still here\n")
+        sandbox = self.root / f"{provider}-{name}-0123456789ab"
+        sandbox.mkdir(exist_ok=True)
+        marker = sandbox / ".ai-review-sandbox"
+        lines = [str(source)]
+        if owner_line:
+            lines.append("evidence_format=1")
+            lines.append(owner_line)
+        marker.write_text("\n".join(lines) + "\n")
+        return sandbox, source
+
+    def _finished_lost_invocation(self, provider, rid):
+        row = {"schema_version": 1, "provider": provider, "event": "started", "run_id": rid,
+               "repo": str(self.toolkit), "head": self.sha, "caller": "codex",
+               "timestamp": "2026-10-07T12:00:00+00:00"}
+        self.write(row)
+        events.require_report(self.root, provider, rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+
+    def test_non_glm_finished_loss_records_when_no_report_exists(self):
+        rid = "c" * 32
+        self._finished_lost_invocation("codex", rid)
+        sandbox, _ = self._lost_sandbox("codex", owner_line=f"evidence_owner=codex:{rid}")
+        events.record_lost(self.root, "codex", rid, sandbox, "provider exit 1, report gone")
+        path = self.root / "evidence" / rid / "evidence-lost.json"
+        self.assertTrue(path.is_file())
+        row = json.loads(path.read_text())
+        self.assertEqual(row["report_state"], "lost")
+        self.assertEqual(row["provider"], "codex")
+
+    def test_loss_still_refuses_when_report_exists(self):
+        rid = "d" * 32
+        self._finished_lost_invocation("gemini", rid)
+        report_name = "gemini-lost-test-20260911T000000Z-99.md"
+        sandbox, _ = self._lost_sandbox("gemini", owner_line=f"evidence_owner=gemini:{rid}",
+                                        reports=(report_name,))
+        # reconcile-lost searches the source's .ai/reviews and refuses the loss.
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "gemini", sandbox, "report still exists")
+
+    def test_loss_still_refuses_when_artifact_exists(self):
+        rid = "e" * 32
+        self._finished_lost_invocation("qwen", rid)
+        sandbox, _ = self._lost_sandbox("qwen", owner_line=f"evidence_owner=qwen:{rid}")
+        artifact_dir = self.root / "evidence" / rid / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        (artifact_dir / ("0" * 64 + ".json")).write_text("{}\n")
+        with self.assertRaises(events.Blocked):
+            events.record_lost(self.root, "qwen", rid, sandbox, "artifact exists")
+
+    def test_started_never_finished_requires_proven_dead(self):
+        rid = "f" * 32
+        self.invocation(rid=rid, code=1, provider="muse", finish=False)
+        events.require_report(self.root, "muse", rid)
+        sandbox, _ = self._lost_sandbox("muse", owner_line=f"evidence_owner=muse:{rid}")
+        # Fresh start: fail-closed, wrapper may still be alive.
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "muse", rid, sandbox, "killed mid-run")
+        # Age the started timestamp past the dead-owner window (2h).
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        stale = (datetime.datetime.now(datetime.timezone.utc) -
+                 datetime.timedelta(hours=3)).isoformat()
+        for row in rows:
+            if row.get("run_id") == rid and row.get("event") == "started":
+                row["timestamp"] = stale
+        self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        events.record_lost(self.root, "muse", rid, sandbox, "killed mid-run")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_killed_wrapper_dead_owner_pid_records_loss(self):
+        """A wrapper killed before finish: recorded owner PID is dead → loss ok."""
+        rid = "c1" + "0" * 30
+        # 99999999 is never a live PID on this machine.
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=99999999)
+        events.require_report(self.root, "glm", rid)
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        events.record_lost(self.root, "glm", rid, sandbox, "wrapper killed before publication")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_live_owner_pid_still_refuses(self):
+        """A live review that still owes a report stays fail-closed."""
+        rid = "c2" + "0" * 30
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=os.getpid())
+        events.require_report(self.root, "glm", rid)
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "glm", rid, sandbox, "not dead")
+
+    def test_verify_accepts_matching_evidence_lost_without_ledger_row(self):
+        rid = "b" * 32
+        # required.json + evidence-lost.json with matching identity, no ledger row.
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        required = {"schema_version": 1, "run_id": rid, "provider": "glm",
+                    "head": "0" * 40, "caller": "local-recovery"}
+        (root / "required.json").write_text(json.dumps(required) + "\n")
+        lost = {**required, "sandbox": "glm-x-0123456789ab", "report_state": "lost",
+                "reason": "fixture", "recorded_at": "2026-10-07T00:00:00Z",
+                "historical_source_authorization": "unknown"}
+        (root / "evidence-lost.json").write_text(json.dumps(lost) + "\n")
+        self.assertEqual(events.verify_reports(self.root, "glm", rid), [rid + "/evidence-lost"])
+
+    def test_verify_rejects_evidence_lost_identity_mismatch(self):
+        rid = "a1" + "0" * 30
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        required = {"schema_version": 1, "run_id": rid, "provider": "glm",
+                    "head": "0" * 40, "caller": "local-recovery"}
+        (root / "required.json").write_text(json.dumps(required) + "\n")
+        lost = {**required, "head": "1" * 40, "sandbox": "glm-x-0123456789ab",
+                "report_state": "lost", "reason": "fixture", "recorded_at": "x",
+                "historical_source_authorization": "unknown"}
+        (root / "evidence-lost.json").write_text(json.dumps(lost) + "\n")
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "glm", rid)
+
+    def test_run_id_provider_refuses_loss_without_run_id(self):
+        rid = "a2" + "0" * 30
+        self._finished_lost_invocation("codex", rid)
+        sandbox, source = self._lost_sandbox("codex", name="no-owner")
+        # No evidence_owner line → legacy path → no run_id → fail closed for codex.
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "codex", sandbox, "legacy path")
 
 
 if __name__ == "__main__":

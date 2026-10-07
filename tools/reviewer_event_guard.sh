@@ -149,7 +149,7 @@ reviewer_event_guard(){
   root="$(cd "$(dirname "$wrapper")/.." && pwd -P)"
   python="$(command -v python3 || command -v python)" || { printf 'reviewer event recording requires Python 3\n' >&2; exit 1; }
   event_tool="$root/tools/reviewer_events.py"
-  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_EVENT_RUN_ID; do
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_OWNER_PID; do
     [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
   done
   name="AI_${provider^^}_CALLER"; [ -z "${!name:-}" ] || event_env+=("$name=${!name}")

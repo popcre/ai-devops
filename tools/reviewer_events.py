@@ -122,6 +122,45 @@ def evidence_root(directory, run_id):
     return physical(directory / "evidence" / run_id)
 
 
+def _owner_pid_from_env():
+    value = os.environ.get("AI_REVIEW_EVENT_OWNER_PID", "")
+    return int(value) if value.isdigit() else None
+
+
+def process_alive(pid):
+    """Same-machine liveness for a recorded wrapper PID; never trusted alone."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def wrapper_proven_dead(start):
+    """A killed wrapper left an owner PID that is no longer alive.
+
+    No recorded owner PID means death cannot be proven from the process
+    alone; the caller falls back to the dead-owner age window. The PID is
+    evidence of the supervisor running when the invocation began; if that
+    process is gone and nothing finished, the paid report will never arrive.
+    """
+    pid = start.get("owner_pid")
+    return isinstance(pid, int) and pid > 0 and not process_alive(pid)
+
+
 def require_report(directory, provider, run_id):
     with event_lock(directory):
         start = invocation(directory, provider, run_id, active=True)
@@ -236,8 +275,38 @@ def missing_prepared(directory, provider, run_id, references):
     return missing
 
 
+def _evidence_lost_identity(directory, provider, run_id):
+    """Return (required, lost_row) when a no-ledger evidence-lost record is self-consistent."""
+    root = evidence_root(directory, run_id)
+    required_path = root / "required.json"
+    lost_path = root / "evidence-lost.json"
+    if not required_path.is_file() or not lost_path.is_file():
+        return None
+    required = read_json(required_path)
+    row = read_json(lost_path)
+    if (required.get("schema_version") == 1 and required.get("run_id") == run_id and
+            required.get("provider") == provider and
+            row.get("schema_version") == 1 and row.get("run_id") == run_id and
+            row.get("provider") == provider and
+            row.get("head") == required.get("head") and
+            row.get("caller") == required.get("caller") and
+            row.get("report_state") == "lost" and
+            isinstance(row.get("reason"), str) and row["reason"].strip()):
+        return required, row
+    return None
+
+
 def verify_reports(directory, provider, run_id):
-    start = invocation(directory, provider, run_id)
+    try:
+        start = invocation(directory, provider, run_id)
+    except Blocked:
+        # A loss record whose identity matches required.json is terminal even
+        # with no ledger row (e.g. local-recovery fixtures).  This is verify
+        # only: record_lost still demands a ledger row for live accounting.
+        pre = _evidence_lost_identity(directory, provider, run_id)
+        if pre is not None:
+            return [run_id + "/evidence-lost"]
+        raise
     root = evidence_root(directory, run_id)
     if not (root / "required.json").exists():
         return []
@@ -937,19 +1006,33 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
     return {"run_id": run_id, "report_count": len(report_values), "historical_source_authorization": "unknown"}
 
 
-LOST_REPORT_PROVIDERS = {"glm"}
+LOST_REPORT_PROVIDERS = {"codex", "gemini", "glm", "grok", "kimi", "muse", "qwen"}
+
+# Providers whose on-disk report names embed the evidence run_id (review-lifecycle-core).
+# For these the only sound search when no run_id is at hand is to refuse the loss.
+RUN_ID_REPORT_PROVIDERS = {"codex", "deepseek", "stepfun"}
 
 
-def lost_report_candidates(provider, sandbox, source, since=None):
+def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
     """Reports this review could still have written; any one of them refuses a loss record."""
-    match = re.fullmatch(re.escape(provider) + r"-(.+)-[0-9a-f]{12}", sandbox.name)
-    require(match, "sandbox name does not identify its review")
-    # Only this exact review name: a sibling such as NAME-r3 is a different review.
-    pattern = re.compile(re.escape(provider + "-" + match[1] + "-") +
-                         r"(?:\d{8}T\d{6}Z|[0-9a-f]{64})(?:\.incomplete)?\.md")
     reviews = source / ".ai" / "reviews"
     if not reviews.is_dir():
         return []
+    if run_id is not None and provider in RUN_ID_REPORT_PROVIDERS:
+        # Report names that embed the run_id are unambiguous for this invocation.
+        pattern = re.compile(re.escape(provider) + r"-.+-" + re.escape(run_id) + r"(?:\.incomplete)?\.md")
+        return sorted(path for path in reviews.iterdir() if pattern.fullmatch(path.name) and
+                      (since is None or path.stat().st_mtime >= since))
+    if run_id is None and provider in RUN_ID_REPORT_PROVIDERS:
+        require(False,
+                "reconcile-lost cannot prove a " + provider + " report is gone without its run_id; use reconcile-sandbox")
+    match = re.fullmatch(re.escape(provider) + r"-(.+)-[0-9a-f]{12}", sandbox.name)
+    require(match, "sandbox name does not identify its review")
+    # Only this exact review name: a sibling such as NAME-r3 is a different review.
+    # The tail covers {ts|hash} plus optional incomplete- prefix, pid/random
+    # suffixes (gemini/grok/muse) and .incomplete suffix (qwen/kimi).
+    pattern = re.compile(re.escape(provider + "-" + match[1] + "-") +
+                         r"(?:incomplete-)?(?:\d{8}T\d{6}Z|[0-9a-f]{32}|[0-9a-f]{64})(?:-\d+)*?(?:\.incomplete)?\.md")
     return sorted(path for path in reviews.iterdir() if pattern.fullmatch(path.name) and
                   (since is None or path.stat().st_mtime >= since))
 
@@ -959,14 +1042,41 @@ def lost_blockers(root):
     return sorted(list((root / "artifacts").glob("*.json")) + list((root / "prepared").glob("*.json")))
 
 
+def _proven_dead(directory, run_id, start=None):
+    """True only when a started-but-never-finished invocation is provably dead.
+
+    Either proof is enough: (1) a recorded owner PID that is no longer
+    alive (the wrapper was killed), or (2) the start timestamp is older
+    than DEAD_OWNER_WINDOW_SECONDS with no finished row. A live wrapper
+    always finishes or is reaped within that window on this machine;
+    anything younger stays fail-closed ("still active").
+    """
+    DEAD_OWNER_WINDOW_SECONDS = 2 * 3600
+    if start is not None and wrapper_proven_dead(start):
+        return True
+    _, data = snapshot(directory / "events.jsonl", "jsonl")
+    rows = [json.loads(line) for line in data.splitlines() if line.strip()]
+    starts = [r for r in rows if r.get("run_id") == run_id and r.get("event") == "started"]
+    if len(starts) != 1 or any(r.get("run_id") == run_id and r.get("event") == "finished" for r in rows):
+        return False
+    try:
+        started = datetime.datetime.fromisoformat(starts[0]["timestamp"])
+    except (KeyError, ValueError):
+        return False
+    age = (datetime.datetime.now(datetime.timezone.utc) - started).total_seconds()
+    return age > DEAD_OWNER_WINDOW_SECONDS
+
+
 def record_lost(directory, provider, run_id, sandbox, reason):
     start = invocation(directory, provider, run_id)
     if start.get("operation") != "local-reconciliation":
-        # A running provider may still publish its paid result; only a finished invocation can have lost it.
-        # (Legacy markers predate evidence ownership, so no live run can own one.)
+        # A running provider may still publish its paid result; only a finished
+        # invocation — or one whose owner is provably dead — can have lost it.
         _, data = snapshot(directory / "events.jsonl", "jsonl")
-        require(any(json.loads(line).get("run_id") == run_id and json.loads(line).get("event") == "finished"
-                    for line in data.splitlines()), "reviewer invocation is still active; loss not recorded")
+        has_finished = any(json.loads(line).get("run_id") == run_id and json.loads(line).get("event") == "finished"
+                           for line in data.splitlines())
+        require(has_finished or _proven_dead(directory, run_id, start),
+                "reviewer invocation is still active; loss not recorded")
     root = evidence_root(directory, run_id)
     require((root / "required.json").is_file(), "sandbox evidence requirement is missing; loss not recorded")
     require(not any(root.glob("*.report.json")), "published evidence exists; it is partial, not lost")
@@ -982,8 +1092,9 @@ def reconcile_lost(directory, provider, sandbox, reason):
     """Owner-recorded terminal state for a review whose report provably no longer exists."""
     require(isinstance(reason, str) and reason.strip() and "\n" not in reason and len(reason) <= 500,
             "reconcile-lost requires the owner's one-line reason (at most 500 characters)")
-    # Report-existence proof depends on each provider's report naming; only GLM's is known here.
-    # Another provider could keep a recoverable report this search would miss.
+    # Report-existence proof depends on each provider's report naming.
+    # A provider outside LOST_REPORT_PROVIDERS could keep a recoverable report
+    # this search would miss — fail closed for it rather than inventing loss.
     require(provider in LOST_REPORT_PROVIDERS, "reconcile-lost cannot prove a " + provider + " report is gone; use reconcile-sandbox")
     sandbox = physical(sandbox)
     marker = physical(sandbox / ".ai-review-sandbox")
@@ -1022,7 +1133,7 @@ def reconcile_lost(directory, provider, sandbox, reason):
                 started = invocation(directory, provider, run_id)["timestamp"]
                 # A report older than the invocation belongs to an earlier turn, never to this one.
                 since = datetime.datetime.fromisoformat(started).timestamp() - 60
-                found = lost_report_candidates(provider, sandbox, source, since)
+                found = lost_report_candidates(provider, sandbox, source, since, run_id=run_id)
                 require(not found, "a report from this invocation may still exist; recover it: " + (str(found[0]) if found else ""))
                 record_lost(directory, provider, run_id, sandbox, reason)
     return {"sandbox": str(sandbox), "owners": owners, "report_state": "lost",
@@ -1076,6 +1187,7 @@ def main():
                  "operation": kind, "parent_run_id": parent if re.fullmatch(r"[0-9a-f]{32}", parent) else None,
                  "run_id": uuid.uuid4().hex, "timestamp": now(), "repo": git_value("rev-parse", "--show-toplevel"),
                  "head": git_value("rev-parse", "HEAD"),
+                 "owner_pid": _owner_pid_from_env(),
                  "caller": os.environ.get("AI_" + provider.upper() + "_CALLER",
                            os.environ.get("AI_" + provider.upper() + "_REVIEW_CALLER",
                                           "codex" if provider in {"claude", "codex", "gemini"} else "unknown"))}
