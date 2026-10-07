@@ -157,6 +157,17 @@ The provider supplies the month, day and time; the monthly window only bounds
 the unique year resolution and never invents a reset schedule. Only a typed
 terminal provider error qualifies; quoted assistant text does not.
 
+When a known subscription reset becomes due, an installation whose existing
+qualification was deferred solely by capacity may automatically retry the
+existing qualification once for that reset. The recorded wrapper and runtime
+subject must still match exactly. A successful qualification returns the
+reviewer to the pool through the ordinary readiness checks; authentication,
+membership, security and other stronger holds remain binding. An already
+qualified reviewer gets no extra live call. The existing hourly watcher and
+ordinary readiness checks perform this recovery without a new timer, including
+Qwen and Gemini resets recorded from provider errors without a predictive
+quota reader. Missing or unqualified reset metadata does not trigger the retry.
+
 Kimi subscriptions reset, but Kimi remains suspended in the current reviewer
 registry. Its [official error reference](https://www.kimi.com/code/docs/en/kimi-code/error-reference.html)
 distinguishes five-hour, legacy weekly and monthly quota exhaustion from
