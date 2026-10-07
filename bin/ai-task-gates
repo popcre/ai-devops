@@ -351,13 +351,28 @@ private_state_directory(){
     MINGW*|MSYS*|CYGWIN*)
       command -v cygpath >/dev/null 2>&1 && command -v icacls >/dev/null 2>&1 && command -v powershell.exe >/dev/null 2>&1 || return 1
       win="$(cygpath -w "$dir")" || return 1
-      sid="$(powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path) try { $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; [Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { exit 1 } }' "$win" 2>/dev/null | tr -d '\r\n')"
+      sid="$(powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path) try { $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; $Sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $Owner=(Get-Acl -LiteralPath $Path -ErrorAction Stop).GetOwner([Security.Principal.SecurityIdentifier]).Value; if ($Owner -ne $Sid) { exit 1 }; $Sid } catch { exit 1 } }' "$win" 2>/dev/null | tr -d '\r\n')"
       case "$sid" in S-1-*) ;; *) return 1 ;; esac
       icacls "$win" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null 2>&1 || return 1
+      # Existing user state can have explicit broad grants; inheritance:r
+      # alone does not remove those grants from the shared ai-devops parent.
+      icacls "$win" /remove:g '*S-1-5-11' '*S-1-5-32-545' >/dev/null 2>&1 || return 1
       powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$Sid) try { $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; $Acl = Get-Acl -LiteralPath $Path -ErrorAction Stop; if (-not $Acl.AreAccessRulesProtected) { exit 1 }; if ($Acl.Owner -ne $Sid -and $Acl.Owner -ne ([Security.Principal.SecurityIdentifier]$Sid).Translate([Security.Principal.NTAccount]).Value) { exit 1 }; $Full = [Security.AccessControl.FileSystemRights]::FullControl; $HasFull = $false; foreach ($Rule in $Acl.Access) { $RuleSid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($Sid,"S-1-5-18","S-1-5-32-544")) { exit 1 }; if ($Rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { exit 1 }; if ($RuleSid -eq $Sid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $HasFull = $true } }; if (-not $HasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" >/dev/null 2>&1 || return 1
       ;;
     *) chmod 0700 "$dir" || return 1 ;;
   esac
+}
+
+private_state_root(){
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # The shared ai-devops state parent on edge-dev had explicit
+      # Authenticated Users Modify; leaving it writable makes this root
+      # replaceable even when the root and cache child are protected.
+      private_state_directory "$(dirname "$STATE_DIR")" || return 1
+      ;;
+  esac
+  private_state_directory "$STATE_DIR"
 }
 
 state_field(){
@@ -368,7 +383,7 @@ state_field(){
 
 state_write(){
   local file; file="$(state_path)"
-  private_state_directory "$STATE_DIR" || fail_closed 'task state directory is not private.'
+  private_state_root || fail_closed 'task state directory or parent is not private.'
   printf '%s\n' "$1" > "$file.tmp" && mv -f "$file.tmp" "$file"
 }
 
@@ -568,8 +583,8 @@ cmd_explain_cached(){
     *) cmd_explain "${args[@]}"; return ;;
   esac
   file="$dir/$key"
-  private_state_directory "$STATE_DIR" && private_state_directory "$dir" \
-    || fail_closed 'explain cache directory is not private.'
+  private_state_root && private_state_directory "$dir" \
+    || fail_closed 'explain cache directory or parent is not private.'
   if [ -f "$file" ] && [ ! -L "$file" ]; then cat "$file"; return; fi
   out="$(cmd_explain "${args[@]}"; rc=$?; printf x; exit "$rc")"; rc=$?
   out="${out%x}"; printf '%s' "$out"
