@@ -127,7 +127,7 @@ extract_report() { # extract_report LOG DEST HEAD MODE
     printf '| model | `%s` |\n| harness | `qwen-code` |\n' "$QWEN_MODEL"
     printf '| turns | `%s` |\n| reviewed commit | `%s` |\n\n' "$turns" "$head"
     printf -- '---\n\n'
-    if printf '%s' "$text" | grep -qF '## Verdict'; then
+    if grep -qF '## Verdict' <<< "$text"; then
       printf '### Findings and reasoning\n\n'
       printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
       printf '\n---\n\n'

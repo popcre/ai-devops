@@ -180,7 +180,7 @@ extract_report() { # extract_report RESULT_FILE DEST HEAD MODE ENGINE
     printf '| model | `%s` |\n| engine | `%s` |\n' "$MU_MODEL" "$engine"
     printf '| reviewed commit | `%s` |\n\n' "$head"
     printf -- '---\n\n'
-    if printf '%s' "$text" | grep -qF '## Verdict'; then
+    if grep -qF '## Verdict' <<< "$text"; then
       printf '### Findings and reasoning\n\n'
       printf '%s\n' "$text" | sed -n '1,/^## Verdict/p' | sed '/^## Verdict/d'
       printf '\n---\n\n'

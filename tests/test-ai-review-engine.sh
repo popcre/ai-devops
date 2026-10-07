@@ -90,6 +90,52 @@ check "report_floor_rejects_bare_decision" "! bash -c 'set -e; . \"'$CORE'\"; rl
 check "report_floor_accepts_substance" "bash -c 'set -e; . \"'$CORE'\"; rlc_report_floor_ok \"'$FLOOR_REAL'\"'"
 
 # --- structural forcing function: door refuses without the runner token -----
+# A heading probe must consume long provider output without SIGPIPE under
+# pipefail. Extract only the real parser function, keeping these fixtures
+# offline and outside any credential/profile/provider startup path.
+echo '== long provider verdict parsing'
+parse_door_fixture() {
+  local provider="$1" body="$2" result="$3" envelope="$TMP/verdict-$1.json" type=text
+  [ "$provider" != qwen ] || type=result
+  jq -nc --rawfile body "$body" --arg type "$type" \
+    '{type:$type,part:{text:$body},text:$body,response:$body,result:$body,stopReason:"completed",is_error:false}' > "$envelope"
+  [ "$provider" != stepfun ] || envelope="$body"
+  (
+    set -euo pipefail
+    DS_PROVIDER=fixture; DS_MODEL=fixture; DS_AGENT=fixture
+    MU_MODEL=fixture; QWEN_MODEL=fixture; SF_STEP_MODEL=fixture
+    eval "$(sed -n '/^extract_report() {/,/^}/p' "$REPO_ROOT/tools/lib/review-doors/$provider.sh")"
+    extract_report "$envelope" "$result" 0123456789012345678901234567890123456789 review stepcode
+  )
+}
+VERDICT_LONG="$TMP/verdict-long.txt"
+{
+  printf 'Format reminder: use ## Verdict for the final decision.\n'
+  printf '%140000s\n' '' | tr ' ' x
+  printf '## Verdict\nAPPROVE\n'
+} > "$VERDICT_LONG"
+VERDICT_MISSING="$TMP/verdict-missing.txt"
+printf 'Analysis complete; terminal decision absent.\n' > "$VERDICT_MISSING"
+VERDICT_MALFORMED="$TMP/verdict-malformed.txt"
+printf 'Analysis complete.\n## Verdict\nUNKNOWN\n' > "$VERDICT_MALFORMED"
+for verdict_provider in deepseek grok muse gemini stepfun; do
+  verdict_report="$TMP/verdict-$verdict_provider.md"
+  parse_door_fixture "$verdict_provider" "$VERDICT_LONG" "$verdict_report"
+  check "${verdict_provider}_long_response_preserves_terminal_approval" \
+    "[ \"\$(rlc_parse_verdict '$verdict_report')\" = APPROVE ] && [ \"\$(grep -c '^## Verdict$' '$verdict_report')\" = 1 ]"
+  parse_door_fixture "$verdict_provider" "$VERDICT_MISSING" "$verdict_report"
+  check "${verdict_provider}_missing_verdict_stays_blocked" \
+    "[ \"\$(rlc_parse_verdict '$verdict_report')\" = BLOCKED ]"
+  parse_door_fixture "$verdict_provider" "$VERDICT_MALFORMED" "$verdict_report"
+  check "${verdict_provider}_malformed_terminal_verdict_is_not_approval" \
+    "[ \"\$(rlc_parse_verdict '$verdict_report')\" != APPROVE ]"
+done
+# Qwen currently retains only the final result line. Do not broaden that
+# independent extraction defect here; its long multiline answer must refuse
+# approval instead of acquiring an invented terminal decision.
+check "qwen_truncated_long_response_stays_blocked" \
+  "! parse_door_fixture qwen '$VERDICT_LONG' '$TMP/verdict-qwen.md' || [ \"\$(rlc_parse_verdict '$TMP/verdict-qwen.md')\" != APPROVE ]"
+
 echo '== structural forcing function (doors)'
 set +e
 ( unset AI_REVIEW_RUNNER_CORE; bash "$GROK_DOOR" review ) >"$TMP/door-bypass.out" 2>"$TMP/door-bypass.err"
