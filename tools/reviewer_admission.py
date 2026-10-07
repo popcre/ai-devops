@@ -9,6 +9,7 @@ import contextlib
 import datetime
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
@@ -31,11 +32,24 @@ def reset_epoch(value):
     parsed = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
     if parsed.tzinfo is None:
         raise ValueError('capacity reset needs timezone')
-    return int(parsed.timestamp())
+    return math.ceil(parsed.timestamp())
+
+
+def qualified_reset(provider, value, now):
+    if provider not in SUBSCRIPTIONS or value is None:
+        return None
+    try:
+        epoch = reset_epoch(value)
+        maximum = (8 if provider in ('glm', 'gemini') else 32) * 86400
+        return value if now < epoch <= now + maximum else None
+    except (ValueError, TypeError, OverflowError):
+        return None
 
 
 def capacity_observation(data, provider, observation, now):
     """Reconcile qualified reader output; clock expiry never releases capacity."""
+    if not isinstance(observation, dict) or observation.get('provider') != provider:
+        return {'status': 'unchanged', 'reason': 'wrong-provider'}
     state = observation.get('state')
     observed = observation.get('observed_epoch')
     profile = observation.get('credential_profile_scope')
@@ -58,8 +72,13 @@ def capacity_observation(data, provider, observation, now):
             data['capacity_hold'] = None
             return {'status': 'restored'}
         return {'status': 'unchanged'}
-    reset = observation.get('reset_at') if provider in SUBSCRIPTIONS else None
-    epoch = reset_epoch(reset)
+    reset = qualified_reset(provider, observation.get('reset_at'), now)
+    try:
+        epoch = reset_epoch(reset)
+        if epoch is not None and epoch <= now:
+            reset = epoch = None
+    except (ValueError, TypeError, OverflowError):
+        reset = epoch = None
     data['capacity_hold'] = {'provider': provider, 'failure_class': 'allowance-exhausted' if provider in SUBSCRIPTIONS else 'out-of-credit',
         'credential_profile_scope': profile, 'model_scope': model,
         'observed_epoch': observed, 'reset_at': reset,
@@ -212,30 +231,24 @@ def classify_event(text, provider=None):
     return STREAM_CODE, 'code-config'
 
 
-def credit(directory, provider, paths, record, seconds):
+def credit(directory, provider, paths, record, seconds, marker_paths=()):
     """Exit 0 with the two contract lines on a match, 3 on no match."""
     if provider not in CREDIT_MESSAGES:
         raise ValueError('no out-of-credit message for provider')
     allowance = False
     reset = None
     if provider in SUBSCRIPTIONS:
-        for path in paths:
+        for path in marker_paths:
             if path.is_file() and not path.is_symlink() and path.stat().st_size <= CREDIT_SCAN_BYTES:
                 try:
                     marker = json.loads(path.read_text())
                     if marker.get('provider') == provider and marker.get('failure_class') == 'allowance-exhausted':
                         allowance = True
                         value = marker.get('reset_at')
-                        if value and reset_epoch(value) > int(time.time()):
-                            reset = value
+                        reset = qualified_reset(provider, value, int(time.time()))
                 except (ValueError, TypeError, AttributeError):
                     pass
     if credit_match(paths, provider) is None:
-        if provider in SUBSCRIPTIONS:
-            for path in paths:
-                if path.is_file() and not path.is_symlink():
-                    text = path.read_text(errors='replace')[-CREDIT_SCAN_BYTES:].lower()
-                    allowance |= bool(re.search(r'(?:weekly|monthly|5.hour|hour allocated|usage allocated|usage limit|quota).{0,50}(?:exhausted|exceeded|reached)|(?:exhausted|exceeded).{0,50}(?:quota|allowance)', text))
         if not allowance:
             return 3
     machine = ('AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=%s code=quota_exhausted' if allowance else 'AI_REVIEWER_OUT_OF_CREDIT provider=%s code=insufficient_quota') % provider
@@ -248,9 +261,16 @@ def credit(directory, provider, paths, record, seconds):
             with locked(directory, provider):
                 data = load(directory, provider)
                 now = int(time.time())
+                prior = data.get('capacity_hold')
+                if prior:
+                    prior_reset = prior.get('reset_at')
+                    if not prior_reset or not reset:
+                        reset = None
+                    else:
+                        reset = prior_reset if reset_epoch(prior_reset) >= reset_epoch(reset) else reset
                 data['capacity_hold'] = {'provider': provider, 'failure_class': 'allowance-exhausted' if allowance else 'out-of-credit',
-                    'credential_profile_scope': os.environ.get('AI_REVIEW_ADMISSION_PROFILE') or None,
-                    'model_scope': os.environ.get('AI_REVIEW_ADMISSION_MODEL') or None,
+                    'credential_profile_scope': (prior or {}).get('credential_profile_scope') or os.environ.get('AI_REVIEW_ADMISSION_PROFILE') or None,
+                    'model_scope': (prior or {}).get('model_scope') or os.environ.get('AI_REVIEW_ADMISSION_MODEL') or None,
                     'observed_epoch': now, 'reset_at': reset, 'next_check_epoch': reset_epoch(reset) if reset else now,
                     'record_id': new_record_id()}
                 publish(directory, provider, data)
@@ -489,6 +509,7 @@ def main():
     parser.add_argument('--evidence', type=pathlib.Path)
     parser.add_argument('--expect-record', default='')
     parser.add_argument('--scan', type=pathlib.Path, action='append', default=[])
+    parser.add_argument('--marker', type=pathlib.Path, action='append', default=[])
     parser.add_argument('--text', default='')
     parser.add_argument('--record', action='store_true')
     parser.add_argument('--observation-file', type=pathlib.Path)
@@ -504,7 +525,7 @@ def main():
         seconds = args.seconds if args.seconds != 1800 else CREDIT_SECONDS
         if not 1 <= seconds <= 86400:
             raise ValueError('out-of-credit quarantine must be between one second and one day')
-        raise SystemExit(credit(args.directory, args.provider, args.scan, args.record, seconds))
+        raise SystemExit(credit(args.directory, args.provider, args.scan, args.record, seconds, args.marker))
     if args.action == 'profile':
         result = home_profile(args.home)
     elif args.action == 'observe':

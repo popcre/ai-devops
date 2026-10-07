@@ -154,7 +154,7 @@ def normalize(provider, value, now):
     exhausted_resets = [resets[key] for key, amount in buckets.items() if amount == 0]
     try:
         parsed = [datetime.datetime.fromisoformat(v.replace('Z', '+00:00')) for v in exhausted_resets]
-        result['reset_at'] = max(parsed).isoformat() if parsed and all(v.tzinfo for v in parsed) else None
+        result['reset_at'] = max(parsed).isoformat() if parsed and all(v.tzinfo and v > now for v in parsed) else None
     except (ValueError, TypeError, AttributeError):
         result['reset_at'] = None
     profile = value.get('credential_profile_scope')
