@@ -759,4 +759,12 @@ check 'ai-gh-wait requires an explicit --timeout-minutes deadline' \
 check 'sync skills do not force BlockerWatch registration' \
   "! grep -RIn --include='SKILL.md' -E 'forces BlockerWatch registration|wakes parked cross-issue waits|waits on that machine must not be parked' '$ROOT/skills'"
 
+# CR handling (#1355): raw jq/gh output keeps the CR strip, non-raw skips it.
+eval "$(sed -n '/^bw_raw(){/,/^}/p' "$SCRIPT")"
+raw_all(){ local a; for a in -r -j -q -t -rc -er --jq --raw-output0 --join-output --template; do bw_raw "$a" || return 1; done; }
+check 'raw flags keep the CR strip: -r -j -q -t -rc --jq --raw-output0' raw_all
+check 'non-raw flags skip the CR strip: -c -e -n --arg' '! bw_raw -c && ! bw_raw -e && ! bw_raw -n && ! bw_raw --arg x y'
+printf '{"x":"a\\rb"}' > "$TMP/cr.json"
+check 'raw jq output still has its CR stripped off Windows' "[ \"\$(bash -c 'eval \"\$(sed -n \"/^case \\\"\\\${OSTYPE/,/^jq(){/p\" \"$SCRIPT\")\"; jq -r .x \"$TMP/cr.json\"' | od -An -c | tr -d ' ')\" = 'ab\\n' ]"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

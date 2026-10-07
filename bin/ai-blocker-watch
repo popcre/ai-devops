@@ -173,7 +173,7 @@ command -v jq >/dev/null || die "jq is required"
 # off Windows skip the tr process: same bytes, one process fewer per call.
 case "${OSTYPE:-}" in msys*|cygwin*|win*) BW_CR=1 ;; *) BW_CR=0 ;; esac
 bw_raw(){ # true when any argument could ask jq or the GitHub CLI for raw text
-  local a; for a; do case "$a" in --raw-output*|--join-output|--jq|--jq=*|--template*|-[a-zA-Z]*[rjqt]*) return 0 ;; esac; done; return 1
+  local a; for a; do case "$a" in --raw-output*|--join-output|--jq|--jq=*|--template*|-[rjqt]*|-[a-zA-Z]*[rjqt]*) return 0 ;; esac; done; return 1
 }
 jq(){ if [ "$BW_CR" = 0 ] && ! bw_raw "$@"; then command jq "$@"; else command jq "$@" | tr -d '\r'; fi; }
 [ -f "$CONFIG" ] || die "config not found: $CONFIG"
