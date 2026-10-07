@@ -12,8 +12,8 @@
 //
 // Section-only hosts (#1312; owner 2026-10-06: "keep it for lighter jobs." and
 // "set this machine up to take one test piece at a time") carry
-// ai-devops-windows-section but not the qualified label. They passed the
-// sections-scope qualification, not the full matrix, so each idle one takes at
+// ai-devops-windows-section but not the qualified label. They have only some
+// sections measured green with headroom, so each idle one takes at
 // most one section (in cfg.section_lane_order) and nothing else: no complete
 // matrix, no reviewer proof. A host carrying both labels counts only as
 // qualified. Busy, offline or unknown means the section stays on Blacksmith.

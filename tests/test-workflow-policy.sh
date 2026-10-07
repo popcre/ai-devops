@@ -319,9 +319,15 @@ check 'the routing config matches the manifest and never targets a GitHub-hosted
   '[ "$(jq -r .windows_sections "$routing")" = "$shard_count" ] && [ "$(jq -r .blacksmith_windows "$routing")" = blacksmith-4vcpu-windows-2025 ] && [ "$(jq -r .warpbuild_windows "$routing")" = warp-custom-warpbuild-win2022-canary ] && [ "$(jq -c .qualified_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-qualified\"]" ] && ! grep -Eq "\"(windows-20[0-9][0-9]|ubuntu-[0-9][0-9]\\.[0-9][0-9])\"" "$routing"'
 # #1312: the section-only lane (EDGE-ALIEN) has its own label, never the
 # qualified one, and no workflow job targets it directly - only the router's
-# one-section-per-idle-host plan can send work there.
+# one-section-per-idle-host plan can send work there. Both short-TEMP steps of
+# the section job are guarded for every non-Blacksmith lane.
+section_temp_guarded() {
+  local lane_guard="matrix.lane != 'blacksmith' }}"
+  printf '%s\n' "$section_block" | grep -A4 -F 'name: Shorten TEMP on a reused self-hosted machine' | grep -F 'if: ${{' | grep -qF "$lane_guard" &&
+    printf '%s\n' "$section_block" | grep -A1 -F 'name: Remove the short TEMP tree on a reused machine' | grep -F 'if: ${{ always() &&' | grep -qF "$lane_guard"
+}
 check 'the section-only lane has its own label and is reachable only through the router' \
-  '[ "$(jq -c .section_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-section\"]" ] && [ "$(jq -r .section_label "$routing")" = ai-devops-windows-section ] && ! grep -rqF ai-devops-windows-section "$ROOT/.github/workflows" && [ "$(grep -c "matrix.lane != '"'"'blacksmith'"'"'" "$workflow")" -eq 2 ]'
+  '[ "$(jq -c .section_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-section\"]" ] && [ "$(jq -r .section_label "$routing")" = ai-devops-windows-section ] && ! grep -rqF ai-devops-windows-section "$ROOT/.github/workflows" && section_temp_guarded'
 sections_expected="[$(seq -s ', ' 1 "$shard_count")]"
 check 'declared sections cover the ordinary hosted lane exactly, with no suite twice' \
   '[ "$shard_union" = "$hosted_without_reviewer" ] && [ "$(printf "%s\n" "$shard_union" | LC_ALL=C sort -u)" = "$shard_union" ]'

@@ -375,8 +375,10 @@ gh workflow run windows-runner-qualification.yml -R popcre/ai-devops -f scope=se
 
 All 12 sections must pass, each within the same 40-minute ceiling the
 pull-request lane uses, plus the shared host gate and workspace cleanup. Remove
-the custom label afterwards. A sections pass admits the host through section 6
-exactly as a complete pass does.
+the custom label afterwards. A sections pass where every section also has clear headroom under the ceiling
+admits the host through section 6 exactly as a complete pass does; a host
+that is green only on some sections, or close to the ceiling, takes the
+section-only lane below instead and never gets the qualified label.
 
 ### Section-only lane: one section at a time
 

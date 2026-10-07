@@ -9,7 +9,7 @@
   "qualified_label": "ai-devops-windows-qualified",
   "section_windows": ["self-hosted", "Windows", "X64", "ai-devops-windows-section"],
   "section_label": "ai-devops-windows-section",
-  "_section_comment": "Section-only lane (#1312, owner 2026-10-06: keep EDGE-ALIEN for lighter jobs; set it up to take one test piece at a time). A host labelled ai-devops-windows-section (and NOT ai-devops-windows-qualified) passed the sections-scope qualification but not the full matrix; each idle one takes at most one pull-request section, chosen in section_lane_order. It never carries the qualified label, so it never takes windows-offline-complete or windows-reviewer-preferred.",
+  "_section_comment": "Section-only lane (#1312, owner 2026-10-06: keep EDGE-ALIEN for lighter jobs; set it up to take one test piece at a time). A host labelled ai-devops-windows-section (and NOT ai-devops-windows-qualified) has measured-green sections with headroom (not the full matrix or every section); each idle one takes at most one pull-request section, chosen in section_lane_order. It never carries the qualified label, so it never takes windows-offline-complete or windows-reviewer-preferred.",
   "section_lane_order": [3, 4, 6],
   "_section_lane_order_comment": "Only sections EDGE-ALIEN finished well inside the 40-minute ceiling in run 37628253929 (3: 15m, 4: 20.5m, 6: 26m). Sections 2 (33m), 7 (36m) and 8 (39m) are too close; 1, 5 and 9-12 are not yet measured green. Add a section only after a measured pass with headroom.",
   "reserve_qualified_for_reviewer_events": ["workflow_dispatch"],
