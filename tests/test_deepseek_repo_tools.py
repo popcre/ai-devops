@@ -282,23 +282,25 @@ def main():
             t.compact_tool_messages(short)
             check("compaction never grows a short result",
                   short[0]["content"] == "tiny" and short[1]["content"].startswith("E"))
-            # test_prefix_stable_across_rounds: simulate rounds appending results;
-            # every request must extend the previous one byte-for-byte except on
-            # the rare compaction rounds, and those rewrite only once per batch.
+            # test_prefix_stable_across_rounds: each round appends results and
+            # compacts; the previously sent request must be a byte-exact prefix.
             t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS = 24000, 4
             convo = [{"role": "system", "content": "sys"}, {"role": "user", "content": "q"}]
-            prev, rewrites, rounds = None, 0, 16
-            for r in range(rounds):
-                convo.append({"role": "assistant", "tool_calls": [{"id": f"r{r}", "type": "function",
-                              "function": {"name": "read_file", "arguments": "{}"}}]})
-                convo.append({"role": "tool", "tool_call_id": f"r{r}", "content": chr(65 + r) * 3000})
-                t.compact_tool_messages(convo)
+            prev, broken = None, 0
+            for r in range(12):
+                sent = len(convo)
+                convo.append({"role": "assistant", "content": None, "tool_calls": []})
+                for k in range(6):
+                    convo.append({"role": "tool", "tool_call_id": f"r{r}{k}", "content": chr(65 + r) * 7000})
+                t.compact_tool_messages(convo, sent)
                 cur = json.dumps(convo)
                 if prev is not None and not cur.startswith(prev[:-1]):
-                    rewrites += 1
+                    broken += 1
                 prev = cur
-            check("prefix stable across rounds (append-only between batched compactions)",
-                  rewrites <= 3 and convo[-1]["content"].startswith("P"))
+            check("prefix stable across rounds (sent messages never rewritten)",
+                  broken == 0 and convo[-1]["content"].startswith("L"))
+            check("new results still compact when over budget",
+                  any(m.get("content") == t.COMPACT_STUB for m in convo[-6:]))
         finally:
             t.COMPACT_BUDGET_CHARS, t.COMPACT_KEEP_RESULTS = saved_budget, saved_keep
 

@@ -482,20 +482,18 @@ NOTICE = ("You have a disposable, remote-less copy of the repository. list_dir, 
           "Earlier tool results may be omitted to save space; re-read with tools if you need them again.")
 
 
-def compact_tool_messages(messages):
-    """Stub out older tool results once the in-full budget is exceeded.
+def compact_tool_messages(messages, sent=0):
+    """Stub new tool results once the in-full budget is exceeded.
 
-    Append-only for the provider prefix cache: rounds under budget never touch
-    earlier messages, so each request is the previous one plus new turns. When
-    the budget is exceeded, every tool result older than the most recent
-    COMPACT_KEEP_RESULTS is stubbed in one pass (not just enough to fit), so the
-    next several rounds append again without rewriting history. Stubs are
-    stable once written. At least one result stays in full; tool_call_id pairing
-    is preserved; a stub is never applied when it would not shrink the message.
+    Append-only for the provider prefix cache: messages[:sent] were already
+    sent and are never rewritten, so every request is the previous request
+    plus new turns and the cached prefix keeps hitting. Only results added
+    since the last request may be stubbed, oldest first, and only while the
+    whole history is over COMPACT_BUDGET_CHARS. The newest
+    COMPACT_KEEP_RESULTS results (at least one) always stay in full.
+    tool_call_id pairing is preserved; a stub never grows a message.
     """
     tool_idxs = [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "tool"]
-    if not tool_idxs:
-        return messages
     keep_n = max(1, COMPACT_KEEP_RESULTS)
     if len(tool_idxs) <= keep_n:
         return messages
@@ -505,14 +503,18 @@ def compact_tool_messages(messages):
         return len(c) if isinstance(c, str) else 0
 
     total = sum(content_len(messages[i]) for i in tool_idxs)
-    if total <= COMPACT_BUDGET_CHARS:
-        return messages
     stub_len = len(COMPACT_STUB)
     for i in tool_idxs[:-keep_n]:
+        if total <= COMPACT_BUDGET_CHARS:
+            break
+        if i < sent:
+            continue  # already sent: rewriting it would break the cached prefix
         cur = messages[i]
-        if cur.get("content") == COMPACT_STUB or content_len(cur) <= stub_len:
-            continue  # already stubbed, or stubbing would not shrink
+        cur_len = content_len(cur)
+        if cur.get("content") == COMPACT_STUB or cur_len <= stub_len:
+            continue
         cur["content"] = COMPACT_STUB
+        total += stub_len - cur_len
     return messages
 
 
@@ -611,6 +613,7 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
         assistant.update(role="assistant", tool_calls=tcs)
     else:
         assistant["role"] = "assistant"
+    sent = len(messages)  # everything before this was already sent; never rewrite it
     messages.append(assistant)
     if leaked and not tcs:
         messages.append({"role": "user", "content": LEAK_NUDGE})
@@ -627,7 +630,7 @@ def cmd_step(root, req_file, resp_file, log_file, rnd):
                                   "result_chars": len(result), "refused": result.startswith("Error:"),
                                   "counted": counted}) + "\n")
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
-    compact_tool_messages(messages)
+    compact_tool_messages(messages, sent)
     if calls >= MAX_TOOL_CALLS or rnd + 1 >= MAX_ROUNDS:
         # Last round: no tools offered, so the model must answer.
         body.pop("tools", None)
