@@ -251,7 +251,10 @@ main() {
   {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
-    printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
+    printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
+    # StepCode refuses destructive commands (rm -rf and the like) when no
+    # person can confirm, and the refusal ends the turn with no report.
+    printf 'Never run destructive commands such as rm -rf, even inside the copy: this harness refuses them without a person present and the refusal ends your turn with no report. The copy is discarded afterwards, so cleanup is never needed.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
