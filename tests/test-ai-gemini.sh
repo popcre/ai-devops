@@ -210,9 +210,15 @@ set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new --governed-verdict notasha badsha --p
 check 'bad governed SHA never auto-requalifies' "test '$BADSHA_RC' -ne 0 && grep -q 'governed verdict head' '$TMP/badsha.err' && ! grep -q 'requalifying automatically' '$TMP/badsha.err' && test ! -s '$MOCK_AGY_CALLS'"
 set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new badbase --base nosuchref --prompt review) 2>"$TMP/badbase.err"; BADBASE_RC=$?; set -e
 check 'bad base ref never auto-requalifies' "test '$BADBASE_RC' -ne 0 && grep -q 'base ref not found' '$TMP/badbase.err' && ! grep -q 'requalifying automatically' '$TMP/badbase.err' && test ! -s '$MOCK_AGY_CALLS'"
+# Force incomplete reusable-session state so the pre-check, not paid
+# requalification, rejects the follow-up.
+AUTOQ_META="$(meta_for autoq)"
+jq '.status="PREPARED"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
+write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
 set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askstale.err"; ASKSTALE_RC=$?; set -e
-check 'ask incomplete/stale session never auto-requalifies' "test '$ASKSTALE_RC' -ne 0 && grep -qE 'session requires recovery|configured model differs|working checkout changed' '$TMP/askstale.err' && ! grep -q 'requalifying automatically' '$TMP/askstale.err' && test ! -s '$MOCK_AGY_CALLS'"
-# Force model mismatch on the same reusable session.
+check 'ask incomplete/stale session never auto-requalifies' "test '$ASKSTALE_RC' -ne 0 && grep -q 'session requires recovery' '$TMP/askstale.err' && ! grep -q 'requalifying automatically' '$TMP/askstale.err' && test ! -s '$MOCK_AGY_CALLS'"
+# Restore COMPLETE then force model mismatch on the same reusable session.
+jq '.status="COMPLETE"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
 write_qualification 1.1.14 gemini-other; : > "$MOCK_AGY_CALLS"
 set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askmodel.err"; ASKMODEL_RC=$?; set -e
 check 'ask model-mismatched session never auto-requalifies' "test '$ASKMODEL_RC' -ne 0 && grep -q 'configured model differs' '$TMP/askmodel.err' && ! grep -q 'requalifying automatically' '$TMP/askmodel.err' && test ! -s '$MOCK_AGY_CALLS'"
