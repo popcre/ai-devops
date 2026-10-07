@@ -674,7 +674,7 @@ check 'cohort symlink is rejected' "jq -se '.[-1].unknown_reason == \"metadata_u
 # Parser adversarial matrix: malformed types, enums, opaque-label injection, duplicate and dangling joins fail closed.
 mkdir -p "$TMP/evidence-invalid"
 base='{"schema":4,"utc":"2026-09-28T05:00:00Z","measurement":"workflow_evidence","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","cohort_id":null,"target_ordinal":null,"source_verified":"unknown","source_fingerprint_start":null,"source_fingerprint_end":null,"install_generation_binding":null,"event_kind":"unknown","eligible_utc_ms":null,"observed_utc_ms":null,"delivered_utc_ms":null,"delivery_boundary":"unknown","clock_quality":"unknown","clock_error_bound_ms":null,"latency_ms":null,"unknown_reason":"metadata_absent"}'
-for bad in type enum injection duplicate dangling mismatch future schema clock source event delivery latency; do
+for bad in type enum injection duplicate dangling mismatch future schema clock source event delivery latency forged duplicate_key; do
   d="$TMP/evidence-invalid/$bad"; mkdir -p "$d"; f="$d/2026-09-28.jsonl"; printf '%s\n' "$base" > "$f"
   case "$bad" in
     type) jq -c '.target_ordinal=true' "$f" > "$f.tmp" ;;
@@ -690,12 +690,37 @@ for bad in type enum injection duplicate dangling mismatch future schema clock s
     event) jq -c '.event_kind="pr_merged"|.eligible_utc_ms=null' "$f" > "$f.tmp" ;;
     delivery) jq -c '.delivery_boundary="terminal_report"|.delivered_utc_ms=null' "$f" > "$f.tmp" ;;
     latency) jq -c '.latency_ms=1' "$f" > "$f.tmp" ;;
+    forged) jq -c '.cohort_id="0123456789abcdef0123456789abcdef"|.source_verified="verified"|.source_fingerprint_start=("a"*64)|.source_fingerprint_end=("a"*64)|.install_generation_binding=("c"*64)|.clock_quality="verified_bound"|.clock_error_bound_ms=1|.event_kind="check_completed"|.eligible_utc_ms=1000|.observed_utc_ms=2000|.delivered_utc_ms=3000|.delivery_boundary="terminal_report"|.latency_ms=2000|.unknown_reason="none"' "$f" > "$f.tmp" ;;
+    duplicate_key) sed 's/"schema":4/"schema":4,"schema":4/' "$f" > "$f.tmp" ;;
   esac
   mv "$f.tmp" "$f"
   [ "$bad" = dangling ] || printf '%s\n' '{"schema":3,"utc":"2026-09-28T05:00:00Z","measurement":"workflow_outcome","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","outcome":"checks_failed","elapsed_ms":1}' >> "$f"
   "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$d" > "$d/out" 2> "$d/err"; rc=$?
   check "schema4 $bad fixture fails closed" "[ $rc -eq 1 ] && [ ! -s '$d/out' ] && ! grep -q 'https://token' '$d/err'"
 done
+mkdir -p "$TMP/cohort-duplicate/measurements"; chmod 700 "$TMP/cohort-duplicate/measurements"
+sed 's/"schema":1/"schema":1,"schema":1/' "$TMP/cohort-state/measurements/cohort.json" > "$TMP/cohort-duplicate/measurements/cohort.json"; chmod 600 "$TMP/cohort-duplicate/measurements/cohort.json"
+AI_GH_STATE_DIR="$TMP/cohort-duplicate" gh_measure_read_cohort
+check 'duplicate cohort keys never establish a cohort' "[ '$GH_MEASURE_COHORT_REASON' = metadata_untrusted ] && [ -z '$GH_MEASURE_COHORT_ID' ]"
+if [ "$(uname -s)" = Linux ]; then
+  timeout 5 "$PYTHON_RUNNER" - "$ROOT" "$TMP/cohort-race" <<'PY'
+import os, pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / 'tools/github-requests'))
+import report
+directory = pathlib.Path(sys.argv[2]); directory.mkdir(mode=0o700)
+path = directory / 'cohort.json'
+path.write_text('{"schema":1,"cohort_id":"0123456789abcdef0123456789abcdef","phase":"baseline","clock_status":null,"source_generation":null,"target_map":null}'); path.chmod(0o600)
+original = os.open
+def swap_to_fifo(name, flags, *args, **kwargs):
+    if name == 'cohort.json':
+        path.unlink(); os.mkfifo(path, 0o600)
+    return original(name, flags, *args, **kwargs)
+os.open = swap_to_fifo
+assert report.read_cohort(directory) == {'cohort_id': None, 'unknown_reason': 'metadata_untrusted'}
+PY
+  race_rc=$?
+  check 'cohort replacement with FIFO during open fails safely without blocking' "[ '$race_rc' -eq 0 ]"
+fi
 printf '%s' '{"data":{"rateLimit":{"cost":4,"remaining":"bad","resetAt":"FIXTURE_CANARY"}}}' |
   gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?

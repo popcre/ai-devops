@@ -9,9 +9,70 @@ another collector. Raw daily records stay in the private machine state directory
 import collections
 import hashlib
 import json
+import os
 import pathlib
 import re
+import stat
 import sys
+from pr_status_singleflight import unix_private
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def read_cohort(directory):
+    """Read only this fixed optional metadata inode; never wait on a FIFO."""
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        try:
+            os.lstat(pathlib.Path(directory) / "cohort.json")
+        except FileNotFoundError:
+            return {"cohort_id": None, "unknown_reason": "metadata_absent"}
+        except OSError:
+            pass
+        return {"cohort_id": None, "unknown_reason": "metadata_untrusted"}
+    descriptor = None
+    try:
+        # Walk through directory descriptors so ancestor substitution cannot
+        # redirect the metadata read. This operation never creates a directory.
+        path = pathlib.Path(directory).absolute()
+        descriptor = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        for part in path.parts[1:]:
+            if part == "..":
+                raise ValueError("invalid metadata path")
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_fd
+        if not unix_private(path, "directory", owner=descriptor) or stat.S_IMODE(os.fstat(descriptor).st_mode) != 0o700:
+            raise ValueError("invalid metadata directory")
+        file_fd = os.open("cohort.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
+        with os.fdopen(file_fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not unix_private(path / "cohort.json", "file", owner=stream.fileno())
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 16384):
+                raise ValueError("invalid metadata inode")
+            data = stream.read(16385)
+        if len(data) > 16384:
+            raise ValueError("invalid metadata size")
+        row = json.loads(data, object_pairs_hook=unique_object)
+        if (not isinstance(row, dict) or set(row) != {"schema", "cohort_id", "phase", "clock_status", "source_generation", "target_map"}
+                or type(row["schema"]) is not int or row["schema"] != 1
+                or not valid_workflow_id(row["cohort_id"]) or row["phase"] not in {"baseline", "candidate"}
+                or any(row[key] is not None for key in ("clock_status", "source_generation", "target_map"))):
+            raise ValueError("invalid metadata object")
+        return {"cohort_id": row["cohort_id"], "unknown_reason": "source_unknown"}
+    except FileNotFoundError:
+        return {"cohort_id": None, "unknown_reason": "metadata_absent"}
+    except (OSError, ValueError, TypeError, KeyError, RecursionError):
+        return {"cohort_id": None, "unknown_reason": "metadata_untrusted"}
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def summarize(directory):
@@ -51,6 +112,7 @@ def summarize(directory):
                     raise ValueError("invalid time")
                 stamps.append(stamp)
                 if row.get("schema") == 4:
+                    row = json.loads(line, object_pairs_hook=unique_object)
                     if (type(row.get("schema")) is not int or set(row) != EVIDENCE_KEYS or row.get("measurement") != "workflow_evidence"
                             or row.get("caller") != "ai-pr-wait" or row.get("workflow") != "pr_wait"
                             or not valid_workflow_id(row.get("workflow_id")) or row["workflow_id"] in evidence
@@ -307,6 +369,10 @@ def valid_latency(value):
 
 
 def evidence_consistent(row):
+    # Initial collection has no reviewed source-generation or clock adapter.
+    # Future states are reserved labels, never accepted qualification today.
+    if row["source_verified"] != "unknown" or row["clock_quality"] != "unknown" or row["latency_ms"] is not None:
+        return False
     source_fields = (row["source_fingerprint_start"], row["source_fingerprint_end"], row["install_generation_binding"])
     if row["source_verified"] == "verified" and (any(value is None for value in source_fields)
                                                    or source_fields[0] != source_fields[1]):
@@ -352,6 +418,9 @@ def valid_principal(value):
 
 if __name__ == "__main__":
     try:
+        if len(sys.argv) == 3 and sys.argv[1] == "--cohort":
+            print(json.dumps(read_cohort(sys.argv[2]), separators=(",", ":")))
+            sys.exit(0)
         if len(sys.argv) != 2 or not pathlib.Path(sys.argv[1]).is_dir():
             raise ValueError("a measurements directory is required")
         print(json.dumps(summarize(sys.argv[1]), indent=2))

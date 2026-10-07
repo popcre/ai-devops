@@ -128,28 +128,17 @@ gh_measure_workflow_outcome(){
 # unavailable metadata is evidence of an unknown cohort; it never affects the
 # caller's result.
 gh_measure_read_cohort(){
-  local base file mode uid owner size dmode duid
-  base="${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}"; file="$base/measurements/cohort.json"
+  local helper python result
   GH_MEASURE_COHORT_ID=''; GH_MEASURE_TARGET_ORDINAL=''; GH_MEASURE_COHORT_REASON=metadata_absent
-  if [ -L "$file" ]; then GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; fi
-  [ -e "$file" ] || return 0
-  case "$(uname -s 2>/dev/null || true)" in MINGW*|MSYS*|CYGWIN*) GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0 ;; esac
-  [ ! -L "$base" ] || { GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
-  [ -d "$base/measurements" ] && [ ! -L "$base/measurements" ] || { GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
-  dmode=$(stat -c '%a' -- "$base/measurements" 2>/dev/null || printf 0); duid=$(stat -c '%u' -- "$base/measurements" 2>/dev/null || printf -1)
-  [ "$dmode" = 700 ] && [ "$duid" = "$(id -u)" ] || { GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
-  [ ! -L "$file" ] && [ -f "$file" ] || { GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
-  size=$(wc -c < "$file" 2>/dev/null) || { GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
-  [ "$size" -le 16384 ] || { GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
-  mode=$(stat -c '%a' -- "$file" 2>/dev/null || printf 0); uid=$(stat -c '%u' -- "$file" 2>/dev/null || printf -1); owner=$(id -u)
-  [ "$mode" = 600 ] && [ "$uid" = "$owner" ] || { GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
-  GH_MEASURE_COHORT_ID=$(jq -er 'select(type == "object" and (keys|sort == ["clock_status","cohort_id","phase","schema","source_generation","target_map"])
-    and (.schema == 1) and (.cohort_id|type == "string") and (.cohort_id|test("^[0-9a-f]{32}$"))
-    and (.phase == "baseline" or .phase == "candidate") and .clock_status == null
-    and .source_generation == null and .target_map == null) | .cohort_id' "$file" 2>/dev/null) || { GH_MEASURE_COHORT_ID=''; GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
-  [[ "$GH_MEASURE_COHORT_ID" =~ ^[0-9a-f]{32}$ ]] || { GH_MEASURE_COHORT_ID=''; GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
-  GH_MEASURE_TARGET_ORDINAL=''
-  GH_MEASURE_COHORT_REASON=source_unknown
+  helper="${BASH_SOURCE[0]%/*}/report.py"
+  python="${PYTHON_RUNNER:-}"
+  [ -n "$python" ] || python="$(command -v python3 || command -v python || true)"
+  if [ -z "$python" ] || [ ! -f "$helper" ]; then GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; fi
+  result="$("$python" "$helper" --cohort "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" 2>/dev/null)" || { GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
+  GH_MEASURE_COHORT_REASON="$(printf '%s' "$result" | jq -r '.unknown_reason // empty' 2>/dev/null)"
+  case "$GH_MEASURE_COHORT_REASON" in metadata_absent|metadata_untrusted) return 0 ;; source_unknown) ;; *) GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0 ;; esac
+  GH_MEASURE_COHORT_ID="$(printf '%s' "$result" | jq -r '.cohort_id // empty' 2>/dev/null)"
+  [[ "$GH_MEASURE_COHORT_ID" =~ ^[0-9a-f]{32}$ ]] || { GH_MEASURE_COHORT_ID=''; GH_MEASURE_COHORT_REASON=metadata_untrusted; }
 }
 
 gh_measure_source_bookend(){
@@ -181,6 +170,7 @@ gh_measure_workflow_evidence(){
   [ -n "$PR_WAIT_ELIGIBLE_UTC_MS" ] || PR_WAIT_EVENT_KIND=unknown
   if [ "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" = terminal_report ] &&
     { [ -z "$PR_WAIT_OBSERVED_UTC_MS" ] || [ -z "$PR_WAIT_DELIVERED_UTC_MS" ] || [ "$PR_WAIT_DELIVERED_UTC_MS" -lt "$PR_WAIT_OBSERVED_UTC_MS" ]; }; then PR_WAIT_DELIVERY_BOUNDARY=unknown; fi
+  [ "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" != unknown ] || PR_WAIT_DELIVERED_UTC_MS=''
   record=$(printf '{"schema":4,"utc":"%s","measurement":"workflow_evidence","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"%s","cohort_id":%s,"target_ordinal":null,"source_verified":"unknown","source_fingerprint_start":null,"source_fingerprint_end":null,"install_generation_binding":null,"event_kind":"%s","eligible_utc_ms":%s,"observed_utc_ms":%s,"delivered_utc_ms":%s,"delivery_boundary":"%s","clock_quality":"unknown","clock_error_bound_ms":null,"latency_ms":null,"unknown_reason":"%s"}' \
     "$utc" "$id" "$cohort_json" "${PR_WAIT_EVENT_KIND:-unknown}" "${PR_WAIT_ELIGIBLE_UTC_MS:-null}" "${PR_WAIT_OBSERVED_UTC_MS:-null}" "${PR_WAIT_DELIVERED_UTC_MS:-null}" "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" "$reason")
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"

@@ -593,6 +593,19 @@ for terminal in MERGED CLOSED; do
   done
 done
 
+if [ -e /dev/full ] && [ "$(uname -s)" = Linux ]; then
+  for terminal in MERGED CLOSED; do
+    state="$TMP/full-evidence-$terminal"; mkdir -p "$state/measurements"; chmod 700 "$state/measurements"
+    EVIDENCE_TERMINAL="$terminal" EVIDENCE_CALLS="$state/calls" AI_GH_STATE_DIR="$state" \
+      AI_PR_WAIT_SNAPSHOT_DIR="$state/snapshot" AI_PR_WAIT_TEST_CONTEXT_KEY='' \
+      AI_GH_REAL_GH="$TMP/evidence-bin/gh" PATH="$TMP/evidence-bin:/usr/bin:/bin:$PATH" \
+      bash "$CMD" 1 --repo o/r --timeout-minutes 1 > /dev/full 2> "$state/errors"; rc=$?
+    expected=0; [ "$terminal" = MERGED ] || expected=1
+    check 'failed terminal output preserves native result without claiming delivery' \
+      "[ '$rc' -eq '$expected' ] && jq -se '[.[]|select(.schema==4)][0] | .delivery_boundary == \"unknown\" and .delivered_utc_ms == null' '$state/measurements/'*.jsonl && grep -q 'write error' '$state/errors'"
+  done
+fi
+
 check "the cross-process cache preserves privacy, completeness, cancellation and recovery" \
   "python3 '$ROOT/tests/test-ai-pr-status-singleflight.py' -q"
 

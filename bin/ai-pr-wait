@@ -269,7 +269,12 @@ case "$(uname -s 2>/dev/null || true)" in
     ;;
 esac
 
-say() { printf '%s\n' "$*"; }
+say() {
+  local rc
+  printf '%s\n' "$*"; rc=$?
+  if [ "$rc" -ne 0 ] && [ "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" = terminal_report ]; then PR_WAIT_REPORT_FAILED=1; fi
+  return "$rc"
+}
 
 WAS_QUEUED=0
 QUEUED_HEAD=''
@@ -301,8 +306,10 @@ PR_WAIT_DELIVERED_UTC_MS=''
 PR_WAIT_SOURCE_VERIFIED=unknown
 PR_WAIT_CLOCK_QUALITY=unknown
 PR_WAIT_DELIVERY_BOUNDARY=unknown
+PR_WAIT_REPORT_FAILED=0
 emit_workflow_evidence(){
   [ "$GH_COST_READY" = 1 ] || return 0
+  if [ "$PR_WAIT_REPORT_FAILED" != 0 ]; then PR_WAIT_DELIVERY_BOUNDARY=unknown; PR_WAIT_DELIVERED_UTC_MS=''; fi
   gh_measure_source_bookend
   gh_measure_workflow_evidence ai-pr-wait pr_wait "$PR_WAIT_RECEIPT_ID" ||
     printf 'ai-pr-wait: request measurement unavailable: workflow evidence not saved\n' >&2
