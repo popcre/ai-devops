@@ -168,7 +168,14 @@ LAST_ALARM="$HOME_DIR/last-alarm"; LAST_LINKS="$HOME_DIR/last-links"
 LOGS="$HOME_DIR/logs"
 command -v jq >/dev/null || die "jq is required"
 # Windows jq and gh builds can end lines with CR; strip it so values compare cleanly.
-jq(){ command jq "$@" | tr -d '\r'; }
+# Only Windows builds add CR line endings; elsewhere a CR can reach stdout only
+# inside raw (-r/-j) text, because JSON output escapes it. So non-raw jq runs
+# off Windows skip the tr process: same bytes, one process fewer per call.
+case "${OSTYPE:-}" in msys*|cygwin*|win*) BW_CR=1 ;; *) BW_CR=0 ;; esac
+bw_raw(){ # true when any argument could ask jq/gh for raw text output
+  local a; for a; do case "$a" in --raw-output*|--join-output|--jq|--jq=*|--template*|-[a-zA-Z]*[rjqt]*) return 0 ;; esac; done; return 1
+}
+jq(){ if [ "$BW_CR" = 0 ] && ! bw_raw "$@"; then command jq "$@"; else command jq "$@" | tr -d '\r'; fi; }
 [ -f "$CONFIG" ] || die "config not found: $CONFIG"
 # Config cache (#1355 fix 6): one jq pass per run reads every plain top-level
 # value, so the dozens of cfg calls a tick makes stop starting a jq (and a tr)
@@ -207,7 +214,21 @@ cfg(){ # cfg <jq path>: prints exactly what `jq -r <path> "$CONFIG"` prints
 }
 mkdir -p "$WAITS" "$LOGS"; touch "$NOTIFIED"
 
-now_iso(){ date -u +%Y-%m-%dT%H:%M:%SZ; }
+# utc_fmt <strftime> [epoch]: what `date -u +<fmt>` (or -d @epoch) prints, from
+# bash's own printf when bash is 5+ (EPOCHSECONDS era), else from date.
+utc_fmt(){
+  if [ "${BASH_VERSINFO[0]}" -ge 5 ]; then TZ=UTC0 printf "%($1)T\n" "${2:--1}"
+  elif [ -n "${2:-}" ]; then date -u -d "@$2" "+$1"; else date -u "+$1"; fi
+}
+# utc_ago <n> <minutes|hours>: `date -u -d "-<n> <unit>" +%FT%TZ`; anything
+# but a plain small count still goes to date so failures stay the same.
+utc_ago(){
+  if [[ "$1" =~ ^[0-9]{1,9}$ ]] && [ -n "${EPOCHSECONDS:-}" ]; then
+    local m=60; [ "$2" = hours ] && m=3600
+    utc_fmt %Y-%m-%dT%H:%M:%SZ $(( EPOCHSECONDS - 10#$1 * m ))
+  else date -u -d "-$1 $2" +%Y-%m-%dT%H:%M:%SZ; fi
+}
+now_iso(){ utc_fmt %Y-%m-%dT%H:%M:%SZ; }
 # jfields <file> <jq expr>...: JF[i] = what "$(jq -r <expr> <file>)" would
 # print, from ONE jq run (#1355 fix 6). Plain strings come back directly;
 # anything whose -r text is not the plain string (numbers, objects, NUL or
@@ -250,7 +271,7 @@ parse_ref(){ # owner/repo#N -> "owner/repo N"
   [[ "$1" =~ ^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)$ ]] || die "expected owner/repo#N, got: $1"
   printf '%s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 }
-gh_api(){ gh_call api "$@" | tr -d '\r'; }
+gh_api(){ if [ "$BW_CR" = 0 ] && ! bw_raw "$@"; then gh_call api "$@"; else gh_call api "$@" | tr -d '\r'; fi; }
 
 link(){ # link <blocked> <blocker> [blocker id, when already read]
   local br bn kr kn id="${3:-}"
@@ -484,7 +505,7 @@ propagate(){
   local start since repo n dep dr dn key
   start="$(now_iso)"
   if [ -s "$SCAN" ]; then since="$(cat "$SCAN")"
-  else since="$(date -u -d "-$(cfg .first_scan_lookback_minutes) minutes" +%Y-%m-%dT%H:%M:%SZ)"; fi
+  else since="$(utc_ago "$(cfg .first_scan_lookback_minutes)" minutes)"; fi
   # One search query per BATCH of repos, never one per repo: ai-gh already
   # throttles GitHub, and a per-repo loop costs one search per repo per tick.
   # GitHub caps a search q at 256 characters, so batches flush before the
@@ -701,7 +722,7 @@ The wait was released ($why) but $orphan_reason, and no usable fresh continuatio
     FAILED=1; return
   fi
   if [ "$DRY" = 1 ]; then note "would start a $mode $h session in $cwd (wait released: $why)"; return; fi
-  log="$LOGS/$wid-$(date -u +%Y%m%dT%H%M%S).log"
+  log="$LOGS/$wid-$(utc_fmt %Y%m%dT%H%M%S).log"
   local tmp="$f.tmp"
   jq --arg at "$(now_iso)" --arg m "$mode" '.state="waking" | .mode=$m | .attempts+=1 | .last_attempt_at=$at' "$f" > "$tmp" && mv "$tmp" "$f"
   note "$mode $h session $s in $cwd (wait released: $why); log $log"
@@ -897,7 +918,7 @@ alarm_scan(){ # alarm_scan <dry 0|1>
   rm -rf "$ALARM_TICK"
   (umask 077; mkdir -p "$ALARM_TICK/cache"; printf '0' > "$ALARM_TICK/agql")
   local -A seen=() sttl=() spar=() stall=() sage=() salarmed=() sdepth=() sact=()
-  cutoff="$(date -u -d "-$(cfgd .alarm_stall_hours 24) hours" +%Y-%m-%dT%H:%M:%SZ)"
+  cutoff="$(utc_ago "$(cfgd .alarm_stall_hours 24)" hours)"
   # Pass 1: the shared open-issue snapshot gives every OPEN blocker of an
   # OPEN issue (with assignees for free; owned ones drop out).
   local pg
@@ -953,7 +974,7 @@ alarm_scan(){ # alarm_scan <dry 0|1>
     sdepth[$key]="$(depth_of "${key%#*}" "${key#*#}" "")"
   done
   local day body drepo title dnum sorted depth_prio line pri="" rest=""
-  day="$(date -u +%Y-%m-%d)"
+  day="$(utc_fmt %Y-%m-%d)"
   body="$HOME_DIR/digest-$day.md"
   drepo="$(cfgd .alarm_digest_repo popcre/ai-devops)"
   depth_prio="$(cfgd .alarm_depth_priority 3)"
@@ -1214,7 +1235,7 @@ stuck_watchdog_scan(){
   [ -f "$script" ] && command -v node >/dev/null 2>&1 || { note "stuck watchdog: node or $script missing"; FAILED=1; return 0; }
   tok="$("$auth" token popcre 2>/dev/null)" || { note "stuck watchdog: no app token on this machine"; FAILED=1; return 0; }
   [ "$DRY" = 1 ] || rerun="$("$GH" auth token 2>/dev/null || true)"
-  log="$LOGS/stuck-watchdog-$(date -u +%Y%m%dT%H%M%S).log"
+  log="$LOGS/stuck-watchdog-$(utc_fmt %Y%m%dT%H%M%S).log"
   local -a args=(--json "$HOME_DIR/stuck-report.json"); [ "$DRY" = 1 ] && args+=(--dry-run)
   if GH_TOKEN="$tok" RERUN_TOKEN="$rerun" timeout 300 node "$script" "${args[@]}" >"$log" 2>&1; then
     [ "$DRY" = 1 ] || now_iso > "$last"
