@@ -925,7 +925,7 @@ muse_credit_stop(){
   local out="$1" ev
   reviewer_capacity_current muse "$out" || true
   ev="$(tmp_file)" || return 0
-  [ ! -f "$out" ] || jq -c 'select(type=="object")|if (.type//"")=="error" then .error elif ((.payload_type//"")|test("terminal[.]failed")) then (.payload|objects|del(.text)) elif ((.payload_type//"")|test("error|fail";"i")) then (.payload|objects|del(.text)) else empty end' "$out" > "$ev" 2>/dev/null || true
+  [ ! -f "$out" ] || jq -c 'select(type=="object")|if (.type//"")=="error" then .error elif ((.payload_type//"")|test("^run[.]terminal[.]failed$")) then (.payload|objects|del(.text)) else empty end' "$out" > "$ev" 2>/dev/null || true
   printf 'ai-muse: error: %s\n' "$TURN_ERROR" > "$ev.note"
   reviewer_credit_scan muse "$out.stderr" "$ev" || true
   [ -z "${REVIEWER_CREDIT_HIT:-}" ] || cat "$ev.note" >&2

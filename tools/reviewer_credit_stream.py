@@ -57,7 +57,7 @@ def error_payload(provider: str, row: object) -> object | None:
         return None
     if kind == "error" and isinstance(row.get("error"), (dict, str)):
         return row["error"]
-    if provider == "muse" and re.search(r"(?:terminal\.failed|error|fail)", str(row.get("payload_type", ""))):
+    if provider == "muse" and row.get("payload_type") == "run.terminal.failed":
         payload = row.get("payload")
         if isinstance(payload, dict):
             return {k: v for k, v in payload.items() if k not in ("text", "response", "content")}

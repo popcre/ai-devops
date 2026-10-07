@@ -51,6 +51,8 @@ class CreditStreamTests(unittest.TestCase):
     def test_muse_terminal_text_and_gemini_response_ignored(self):
         self.assertIsNone(refusal("muse", error_payload("muse", {"payload_type": "run.terminal.failed", "payload": {"terminal": "failed", "text": "insufficient_quota"}})))
         self.assertIsNone(refusal("gemini", error_payload("gemini", {"status": "ERROR", "response": "out of credits", "error": {"code": "INTERNAL"}})))
+        for kind in ("run.tool.failed", "run.tool.error", "unknown.failed"):
+            self.assertIsNone(error_payload("muse", {"payload_type": kind, "payload": {"error": {"message": "out of credits"}}}))
 
     def test_ordinary_rate_limit_not_credit(self):
         for provider in ("grok", "muse", "qwen", "gemini", "deepseek", "stepfun", "glm"):
@@ -234,6 +236,19 @@ class CreditStreamTests(unittest.TestCase):
         self.assertLess(elapsed, 2)
         self.assertEqual(json.loads(self.marker.read_text())["failure_class"], "out-of-credit")
         print(f"credit detection and cooperative teardown: {elapsed:.3f}s")
+
+    def test_detection_precedes_existing_stubborn_child_escalation(self):
+        source = f"import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);open({str(self.out)!r},'w').write('{{\"type\":\"error\",\"error\":{{\"message\":\"out of credits\"}}}}\\n');time.sleep(20)"
+        started = time.monotonic(); child = self.run_supervisor(source)
+        while not self.marker.exists() and time.monotonic() - started < 2:
+            time.sleep(.01)
+        self.assertTrue(self.marker.exists())
+        detection = time.monotonic() - started
+        _, err = child.communicate(timeout=5)
+        self.assertEqual(child.returncode, 92, err)
+        self.assertLess(detection, 1)
+        self.assertLess(time.monotonic() - started, 5)
+        print(f"stubborn child detection={detection:.3f}s; existing owned-tree teardown={time.monotonic()-started:.3f}s")
 
     def test_success_and_failure_unchanged(self):
         for code in (0, 7):
