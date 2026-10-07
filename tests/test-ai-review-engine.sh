@@ -967,6 +967,59 @@ DS_IMPL_WT="$(tail -1 "$TMP/ds-impl.out" 2>/dev/null || true)"
 check "deepseek_implement_contract_runs_through_runner" \
   "test '$DS_IMPL_RC' -eq 0 && test -d '$DS_IMPL_WT' && test -f '$DS_IMPL_WT/impl.txt'"
 
+# Both native engines cross the same secret-file / clean-environment boundary.
+muse_boundary_offline() {
+  local engine="$1" dir="$TMP/muse-boundary-$1" result rc
+  mkdir -p "$dir/work" "$dir/packet"
+  printf 'review fixture' > "$dir/prompt"
+  cat > "$dir/provider" <<'FIXTURE'
+#!/usr/bin/env bash
+# Only fake sentinels enter this process; inspect names, never dump values.
+case "$*" in *fake-native-provider*|*fake-foreign*) exit 78;; esac
+for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIGGER_ACCESS_TOKEN TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET AI_MUSE_KEY AI_MUSE_SECRET_FILE AI_MUSE_KEY_ENV AI_MUSE_TEST_DIR MUSE_STUB_SECRET; do
+  [ -z "${!name+x}" ] || exit 73
+done
+/usr/bin/bash --noprofile --norc -c 'for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIGGER_ACCESS_TOKEN TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET; do [ -z "${!name+x}" ] || exit 77; done' || exit 77
+case "$1" in
+  exec) [ "${META_API_KEY:-}" = fake-native-provider ] && [ -z "${MODEL_API_KEY+x}" ] || exit 74
+    printf '%s\n' '{"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"## Verdict\nAPPROVE"}}';;
+  run) [ "${MODEL_API_KEY:-}" = fake-native-provider ] && [ -z "${META_API_KEY+x}" ] || exit 75
+    cat >/dev/null
+    printf '%s\n' '{"type":"text","part":{"text":"## Verdict\nAPPROVE"}}';;
+  *) exit 76;;
+esac
+FIXTURE
+  chmod 700 "$dir/provider"
+  env -i PATH="$PATH" HOME="$dir" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
+    DOOR_WORKDIR="$dir/work" DOOR_PACKET_DIR="$dir/packet" DOOR_PROMPT_FILE="$dir/prompt" DOOR_REPORT_OUT="$dir/report" DOOR_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa DOOR_TIMEOUT=10 \
+    AI_MUSE_ENGINE="$engine" AI_MUSE_BIN="$dir/provider" AI_MUSE_OPENCODE="$dir/provider" AI_MUSE_KEY=fake-native-provider \
+    STEPFUN_API_KEY=fake-foreign SUPABASE_ACCESS_TOKEN=fake-foreign SUPABASE_SERVICE_ROLE_KEY=fake-foreign TRIGGER_ACCESS_TOKEN=fake-foreign TRIGGER_SECRET_KEY=fake-foreign TYPESAFE_API_KEY=fake-foreign ZAI_API_KEY=fake-foreign ARBITRARY_CALLER_SECRET=fake-foreign AI_MUSE_TEST_DIR=fake-test-path MUSE_STUB_SECRET=fake-foreign \
+    bash "$MUSE_DOOR" review >"$dir/stdout" 2>"$dir/stderr" || return 1
+  grep -q APPROVE "$dir/report" && ! grep -rq 'fake-native-provider\|fake-foreign' "$dir/report" "$dir/stdout" "$dir/stderr"
+}
+for engine in muse-code opencode; do
+  if muse_boundary_offline "$engine"; then PASS=$((PASS+1)); printf 'PASS native %s clean credential boundary\n' "$engine"; else FAIL=$((FAIL+1)); printf 'FAIL native %s clean credential boundary\n' "$engine"; fi
+done
+
+# The shared boundary refuses linked handoffs and consumes private files before exec.
+set +e
+(
+  . "$REPO_ROOT/tools/lib/muse-credential-boundary.sh"
+  printf 'fake-boundary-key\n' > "$TMP/boundary-key"; chmod 600 "$TMP/boundary-key"
+  ln -s "$TMP/boundary-key" "$TMP/boundary-link"
+  env -i AI_MUSE_SECRET_FILE="$TMP/boundary-link" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" fixture /usr/bin/true
+) >/dev/null 2>"$TMP/boundary-refusal.err"
+rc=$?
+if [ "$rc" = 86 ] && [ -f "$TMP/boundary-key" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi
+(
+  . "$REPO_ROOT/tools/lib/muse-credential-boundary.sh"
+  env -i AI_MUSE_SECRET_FILE="$TMP/boundary-key" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" fixture /usr/bin/false
+) >/dev/null 2>"$TMP/boundary-provider-failure.err"
+rc=$?
+if [ "$rc" = 1 ] && [ ! -e "$TMP/boundary-key" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi
+
+set -e
+
 # --- engine doctor ----------------------------------------------------------
 echo '== engine doctor'
 check "engine_doctor_reports_core_stamp" "'$ENGINE' doctor | grep -q 'review-lifecycle-core/1'"
