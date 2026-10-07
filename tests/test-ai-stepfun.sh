@@ -83,7 +83,7 @@ while [ "$#" -gt 0 ]; do case "$1" in
   --chdir) cd "$2" || exit 97; shift 2 ;;
   --setenv) [ "$2" = HOME ] || export "$2=$3"; shift 3 ;;
   --die-with-parent|--unshare-all|--share-net) shift ;;
-  --dev|--proc|--tmpfs) shift 2 ;;
+  --dev|--proc|--tmpfs|--dir) shift 2 ;;
   *) shift 3 ;;
 esac; done
 exec "$@"

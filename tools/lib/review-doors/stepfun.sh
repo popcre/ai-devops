@@ -82,16 +82,21 @@ unsupported_platform() {
 resolve_stepcode() {
   local b c
   if [ -n "${AI_STEPFUN_STEP_BIN:-}" ]; then
-    [ -x "$AI_STEPFUN_STEP_BIN" ] && "$AI_STEPFUN_STEP_BIN" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || return 1
+    [ -x "$AI_STEPFUN_STEP_BIN" ] && stepcode_identity_ok "$AI_STEPFUN_STEP_BIN" || return 1
     printf '%s' "$AI_STEPFUN_STEP_BIN"; return 0
   fi
   for c in "${HOME:-}/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
     [ -n "$c" ] && [ -x "$c" ] || continue
-    "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || continue
+    stepcode_identity_ok "$c" || continue
     b="$c"; break
   done
   [ -n "${b:-}" ] || return 1
   printf '%s' "$b"
+}
+
+stepcode_identity_ok() { # stepcode_identity_ok BIN
+  NO_COLOR=1 "$1" --help 2>/dev/null | head -n1 |
+    sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' | grep -q '^step - AI coding assistant'
 }
 
 resolve_opencode() {
@@ -203,6 +208,23 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT AGENT
     return 127
   }
   cp "$src" "$xdg/agent/${agent}.md"
+}
+
+# StepCode 0.1.1 reads its custom catalog from ~/.stepcode/models.json. The
+# disposable review HOME has no caller catalog, so supply only our pinned model
+# from this door's temporary, nonsecret file. Retire this projection when the
+# pinned StepCode can discover its built-in Step model in an empty HOME.
+write_stepcode_catalog() { # write_stepcode_catalog DEST
+  local model_id
+  case "$SF_STEP_MODEL" in
+    step/*) model_id="${SF_STEP_MODEL#step/}"; model_id="${model_id%%:*}"; [ -n "$model_id" ] || return 1 ;;
+    *) return 1 ;;
+  esac
+  jq -n --arg base "$SF_BASE_URL" --arg id "$model_id" '{providers: {step: {
+    baseUrl: $base, api: "openai-completions", apiKey: "$STEP_API_KEY",
+    models: [{id: $id, name: ("StepFun " + $id),
+      contextWindow: 131072, maxTokens: 32768}]
+  }}}' > "$1" && chmod 600 "$1"
 }
 
 # Parse the provider envelope into OUR report shape: findings first, verdict
@@ -358,6 +380,15 @@ main() {
     local home_tmp
     timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)"
     home_tmp="$(mktemp -d)"
+    # StepCode reads its model catalog from ~/.stepcode/models.json; the empty
+    # sandbox HOME gets only our pinned model (#1380).
+    local model_catalog
+    model_catalog="$(mktemp)"
+    if ! write_stepcode_catalog "$model_catalog"; then
+      printf 'stepfun door: local_dependency_unavailable: StepCode model catalog could not be prepared.\n' >&2
+      rm -f "$model_catalog" "$prompt_full"; rm -rf "$home_tmp"
+      exit 127
+    fi
     # The packet usually lives outside the workdir; mount it read-only so the
     # model can read MANIFEST.md as the preamble tells it to.
     local -a packet_bind=()
@@ -381,7 +412,8 @@ main() {
     # pause, as bin/ai-stepfun does.
     local attempt rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
-    local -a sandbox_args=("${packet_bind[@]}" "${work_binds[@]}" --chdir "$work")
+    local -a sandbox_args=(--dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json"
+      "${packet_bind[@]}" "${work_binds[@]}" --chdir "$work")
     for attempt in 1 2 3; do
       sf_rpc_turn "$prompt_full"
       rc=$?
@@ -391,7 +423,7 @@ main() {
       printf 'stepfun door: StepFun rate limit reached; retrying in %ss (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
       sleep "$rate_pause"
     done
-    rm -rf "$home_tmp"; [ -z "$scratch" ] || rm -rf "$scratch"
+    rm -f "$model_catalog"; rm -rf "$home_tmp"; [ -z "$scratch" ] || rm -rf "$scratch"
   fi
   set -e
   SF_KEY=""

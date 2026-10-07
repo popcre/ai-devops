@@ -42,12 +42,22 @@ stepfun_sandbox_exec(){
   while [ "$#" -gt 0 ] && [ "$1" != -- ]; do extra+=("$1"); shift; done
   [ "$#" -gt 0 ] && shift
   stepfun_sys_binds
+  # /etc/resolv.conf may point into /run, which is an empty tmpfs here: bind
+  # only that one resolver file, never its directory (it can hold sockets).
+  local -a resolver_binds=()
+  local resolver_target
+  if [ -L /etc/resolv.conf ]; then
+    resolver_target="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
+    case "$resolver_target" in
+      /run/*) [ ! -f "$resolver_target" ] || resolver_binds=(--dir "$(dirname "$resolver_target")" --ro-bind "$resolver_target" "$resolver_target") ;;
+    esac
+  fi
   for name in $(compgen -e); do
     case "$STEPFUN_SANDBOX_ENV_ALLOW" in *" $name "*) ;; *) unset "$name" 2>/dev/null || true ;; esac
   done
   exec "$timeout_bin" "$secs" "$bwrap" --die-with-parent --unshare-all --share-net \
     "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
-    --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
+    "${resolver_binds[@]}" \
     --tmpfs "$HOME" \
     --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
     "${extra[@]}" -- "$bin" "$@"

@@ -130,8 +130,28 @@ if [ "$(uname -s)" = Linux ] && command -v bwrap >/dev/null 2>&1 && command -v c
   mkdir -p "$TMP/stepfun-door/bin" "$TMP/stepfun-door/work" "$TMP/stepfun-door/packet"
   cat > "$TMP/stepfun-door/step.c" <<'EOF'
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+static int check_isolation(void) {
+    char catalog[4096];
+    snprintf(catalog, sizeof(catalog), "%s/.stepcode/models.json", getenv("HOME"));
+    FILE *source = fopen(catalog, "r");
+    if (!source) { fputs("StepCode catalog missing from isolated HOME\n", stderr); return 1; }
+    FILE *copy = fopen("captured-models.json", "w");
+    if (!copy) return 1;
+    int byte;
+    while ((byte = fgetc(source)) != EOF) fputc(byte, copy);
+    fclose(copy);
+    fclose(source);
+    FILE *write_test = fopen(catalog, "a");
+    if (write_test) { fclose(write_test); fputs("StepCode catalog is writable\n", stderr); return 1; }
+    FILE *resolver = fopen("/etc/resolv.conf", "r");
+    if (!resolver) { fputs("Resolver target missing inside sandbox\n", stderr); return 1; }
+    fclose(resolver);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   if (argc > 1 && strcmp(argv[1], "--help") == 0) { puts("step - AI coding assistant"); return 0; }
   if (argc > 1 && strcmp(argv[1], "--version") == 0) { puts("step-fixture-version"); return 0; }
@@ -146,12 +166,14 @@ int main(int argc, char **argv) {
       return 1;
     }
     if (!fallback || strcmp(fallback, "allow") != 0) return 1;
+    if (check_isolation() != 0) return 1;
     char *args[] = {argv[0], "--version", NULL};
     execv(argv[0], args);
   }
   if (argc > 2 && strcmp(argv[1], "--mode") == 0 && strcmp(argv[2], "rpc") == 0) {
     /* The door's RPC turn: prompt, settle, then the last assistant text. */
     static char line[1 << 20];
+    if (check_isolation() != 0) return 1;
     if (!fgets(line, sizeof line, stdin)) return 3;
     puts("{\"id\":\"door-prompt\",\"type\":\"response\",\"success\":true}");
     puts("{\"type\":\"agent_settled\"}"); fflush(stdout);
@@ -187,9 +209,54 @@ EOF
           AI_STEPFUN_ALLOW_NO_CREDS=1 DOOR_TIMEOUT=10 DOOR_WORKDIR="$TMP/stepfun-door/work" \
           DOOR_PACKET_DIR="$TMP/stepfun-door/packet" DOOR_PROMPT_FILE="$TMP/stepfun-door/prompt" \
           DOOR_REPORT_OUT="$TMP/stepfun-door/report" DOOR_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)" \
-          bash "$STEPFUN_DOOR" review > "$TMP/stepfun-door/door.out" 2>&1; then
+          bash "$STEPFUN_DOOR" implement > "$TMP/stepfun-door/door.out" 2>&1; then
           check 'StepFun door uses supported writable approval and runs step --version' \
             "grep -q 'step-fixture-version' '$TMP/stepfun-door/report'"
+          check 'StepFun door binds only the pinned nonsecret model read-only' \
+            "jq -e '.providers | keys == [\"step\"] and .step.api == \"openai-completions\" and .step.apiKey == \"\$STEP_API_KEY\" and (.step.models | map(.id) == [\"step-5-preview\"])' '$TMP/stepfun-door/work/captured-models.json' >/dev/null"
+          # The fixture captured the actual door-generated catalog. Where the
+          # pinned binary is installed, prove its offline model discovery with
+          # that same catalog and with the catalog absent in an empty HOME.
+          STEP_REAL_BIN="$(command -v step 2>/dev/null || true)"
+          [ -x "$STEP_REAL_BIN" ] || STEP_REAL_BIN="${HOME:-}/.stepcode/bin/step"
+          if [ -x "$STEP_REAL_BIN" ] && NO_COLOR=1 "$STEP_REAL_BIN" --help 2>/dev/null | head -n1 |
+            sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' | grep -q '^step - AI coding assistant'; then
+            mkdir -p "$TMP/stepfun-door/real-home"
+            STEP_REAL_LOADER=()
+            for _step_top in /lib /lib64; do
+              if [ -L "$_step_top" ]; then STEP_REAL_LOADER+=(--symlink "$(readlink "$_step_top")" "$_step_top")
+              elif [ -d "$_step_top" ]; then STEP_REAL_LOADER+=(--ro-bind "$_step_top" "$_step_top"); fi
+            done
+            env -i HOME="$TMP/stepfun-door/real-home" PATH=/usr/local/bin:/usr/bin:/bin STEP_API_KEY=nonsecret-test-value \
+              bwrap --die-with-parent --unshare-all --ro-bind /usr /usr "${STEP_REAL_LOADER[@]}" \
+              --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
+              --tmpfs "$TMP/stepfun-door/real-home" --ro-bind "$(dirname "$STEP_REAL_BIN")" "$(dirname "$STEP_REAL_BIN")" \
+              -- "$STEP_REAL_BIN" --no-extensions --list-models > "$TMP/stepfun-door/empty-models.out" 2>&1
+            check 'Pinned StepCode refuses an empty isolated catalog' \
+              "grep -q 'No models available' '$TMP/stepfun-door/empty-models.out'"
+            env -i HOME="$TMP/stepfun-door/real-home" PATH=/usr/local/bin:/usr/bin:/bin STEP_API_KEY=nonsecret-test-value \
+              bwrap --die-with-parent --unshare-all --ro-bind /usr /usr "${STEP_REAL_LOADER[@]}" \
+              --ro-bind /etc /etc --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
+              --tmpfs "$TMP/stepfun-door/real-home" --dir "$TMP/stepfun-door/real-home/.stepcode" \
+              --ro-bind "$TMP/stepfun-door/work/captured-models.json" "$TMP/stepfun-door/real-home/.stepcode/models.json" \
+              --ro-bind "$(dirname "$STEP_REAL_BIN")" "$(dirname "$STEP_REAL_BIN")" \
+              -- "$STEP_REAL_BIN" --no-extensions --list-models > "$TMP/stepfun-door/isolated-models.out" 2>&1
+            check 'Pinned StepCode lists only the door-pinned model offline' \
+              "test \"\$(awk 'NR > 1 {print \$1 \"/\" \$2}' '$TMP/stepfun-door/isolated-models.out')\" = step/step-5-preview"
+          else
+            skip 'Pinned StepCode offline catalog proof requires the installed StepCode binary'
+          fi
+          if AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_STEP_BIN="$TMP/stepfun-door/bin/step" \
+            AI_STEPFUN_MODEL=step/step-3.7-flash AI_STEPFUN_ALLOW_NO_CREDS=1 DOOR_TIMEOUT=10 \
+            DOOR_WORKDIR="$TMP/stepfun-door/work" DOOR_PACKET_DIR="$TMP/stepfun-door/packet" \
+            DOOR_PROMPT_FILE="$TMP/stepfun-door/prompt" DOOR_REPORT_OUT="$TMP/stepfun-door/override-report" \
+            DOOR_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)" bash "$STEPFUN_DOOR" implement \
+            > "$TMP/stepfun-door/override-door.out" 2>&1; then
+            check 'StepFun door catalog follows an explicit Step model override' \
+              "jq -e '.providers.step.models | map(.id) == [\"step-3.7-flash\"]' '$TMP/stepfun-door/work/captured-models.json' >/dev/null"
+          else
+            bad 'StepFun door catalog follows an explicit Step model override'
+          fi
         else
           bad 'StepFun door uses supported writable approval and runs step --version'
         fi
