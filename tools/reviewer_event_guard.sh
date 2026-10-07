@@ -144,7 +144,7 @@ reviewer_event_guard(){
   # Declining inherit (e.g. a qualify-live probe launched from an open review)
   # must begin its own invocation on a clean identity, never resume the outer run.
   unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID
-  local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation
+  local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation privacy_scope=""
   local -a event_env=()
   root="$(cd "$(dirname "$wrapper")/.." && pwd -P)"
   python="$(command -v python3 || command -v python)" || { printf 'reviewer event recording requires Python 3\n' >&2; exit 1; }
@@ -169,6 +169,15 @@ reviewer_event_guard(){
   trap 'received=HUP; observed_signal=HUP; [ -z "$child" ] || kill -HUP "$child" 2>/dev/null || true' HUP
   # Bash normally ignores INT in asynchronous children. Reset inherited signal
   # dispositions before entering the wrapper so its cancellation traps work.
+  # One privacy verdict per review (#1355): the sandbox classifies the source
+  # once and its later checks in this review reuse that answer only while the
+  # inventory and the classification inputs are unchanged. The scope lives
+  # only as long as this invocation; a nested review keeps the outer scope.
+  privacy_scope=""
+  if [ -z "${AI_REVIEW_PRIVACY_SCOPE:-}" ]; then
+    privacy_scope="$(mktemp -d "${TMPDIR:-/tmp}/ai-review-privacy.XXXXXX" 2>/dev/null)" \
+      && export AI_REVIEW_PRIVACY_SCOPE="$privacy_scope" || privacy_scope=""
+  fi
   env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
   [ -z "$received" ] || kill "-$received" "$child" 2>/dev/null || true
   while true; do
@@ -179,6 +188,7 @@ reviewer_event_guard(){
     [ -n "$received" ] || break
   done
   trap - TERM INT HUP
+  [ -z "$privacy_scope" ] || rm -rf -- "$privacy_scope"
   # A signal proves its name, not who sent it or whether remote paid work ended.
   # Keep that observation after the interrupted-wait loop clears `received`.
   facts='{"phase":"wrapper-exit"}'

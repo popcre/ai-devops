@@ -353,11 +353,22 @@ gates_bin() {
 # unclassifiable inventory fails closed; Git's quoted display names are never
 # parsed as paths.
 source_is_private() { # source_is_private ROOT; 0 private, 1 public, 2 unknown
-  local root="$1" paths decision python
+  local root="$1" paths decision python scope key="" stored policy policy_sha=none verdict=""
   python="$(command -v python3 || command -v python)" || return 2
   paths="$(mktemp)" || return 2
-  if ! git -C "$root" ls-files -co --exclude-standard -z | "$python" -c '
-import sys
+  local gates_bin; gates_bin="$(gates_bin)"
+  [ -x "$gates_bin" ] || { rm -f "$paths"; return 2; }
+  # One verdict per review (#1355). A reviewer front door gives each review a
+  # private, short-lived scope directory (tools/reviewer_event_guard.sh); in it
+  # a definite answer is filed under a key over this exact inventory, the
+  # source root, its origin URL, the consumer declaration contents and the
+  # gate program, and reused only while all of them still match and the
+  # policy file the gate reported still has the same contents. No scope, an
+  # unusable scope, or any unreadable input means the gate runs, as before.
+  scope="${AI_REVIEW_PRIVACY_SCOPE:-}"
+  case "$scope" in /*) [ -d "$scope" ] && [ ! -L "$scope" ] && [ -O "$scope" ] || scope="" ;; *) scope="" ;; esac
+  if ! key="$(git -C "$root" ls-files -co --exclude-standard -z | "$python" -c '
+import hashlib, os, subprocess, sys
 names=[n.decode("utf-8", "surrogateescape") for n in sys.stdin.buffer.read().split(b"\0") if n]
 if any("\n" in n or "\r" in n for n in names): sys.exit(2)
 # Write bytes: a name outside the console code page (observed as U+F00A from
@@ -365,10 +376,43 @@ if any("\n" in n or "\r" in n for n in names): sys.exit(2)
 # two answers are a complete paths file and a refusal. The inventory is the
 # real tracked+untracked set only — no phantom path is invented, so an empty
 # repository classifies as none and fails closed below.
-sys.stdout.buffer.write(b"\n".join([n.encode("utf-8", "surrogateescape") for n in names]) + b"\n")
-' > "$paths"; then rm -f "$paths"; return 2; fi
-  local gates_bin; gates_bin="$(gates_bin)"
-  [ -x "$gates_bin" ] || return 2
+data=b"\n".join([n.encode("utf-8", "surrogateescape") for n in names]) + b"\n"
+with open(sys.argv[1], "wb") as f: f.write(data)
+root, gates, scope = sys.argv[2:5]
+if not scope: sys.exit(0)
+h=hashlib.sha256()
+def put(b):
+    b=b if isinstance(b, bytes) else b.encode("utf-8", "surrogateescape")
+    h.update(len(b).to_bytes(8, "big")); h.update(b)
+def content(path):
+    if not os.path.lexists(path): return b"absent"
+    with open(path, "rb") as f: return b"file " + hashlib.sha256(f.read()).hexdigest().encode()
+try:
+    remote=subprocess.run(["git", "-C", root, "remote", "get-url", "origin"], capture_output=True)
+    top=subprocess.run(["git", "-C", root, "rev-parse", "--show-toplevel"], capture_output=True, check=True).stdout.strip()
+    put("ai-review-privacy-verdict-v1"); put(root); put(top)
+    put(str(remote.returncode)); put(remote.stdout)
+    put(gates); put(content(gates))
+    put(content(os.path.join(top.decode("utf-8", "surrogateescape"), ".ai-devops", "task-gates.json")))
+    put(data)
+except Exception:
+    sys.exit(0)
+print(h.hexdigest())
+' "$paths" "$root" "$gates_bin" "$scope")"; then rm -f "$paths"; return 2; fi
+  case "$key" in *[!0-9a-f]*|'') key="" ;; esac
+  [ "${#key}" -eq 64 ] || key=""
+  if [ -n "$key" ] && [ -f "$scope/$key" ] && [ ! -L "$scope/$key" ]; then
+    stored="$(< "$scope/$key")" 2>/dev/null || stored=""
+    case "$stored" in
+      private\ *|public\ *)
+        policy="${stored#* }"; policy_sha="${policy%% *}"; policy="${policy#* }"
+        if [ "$policy_sha" = none ] || [ "$(sha256sum < "$policy" 2>/dev/null | cut -d' ' -f1)" = "$policy_sha" ]; then
+          rm -f "$paths"
+          [ "${stored%% *}" = private ] && return 0
+          return 1
+        fi ;;
+    esac
+  fi
   decision="$(cd "$root" && "$gates_bin" explain --json --paths-from "$paths" 2>/dev/null)" \
     || { rm -f "$paths"; return 2; }
   rm -f "$paths"
@@ -379,9 +423,24 @@ sys.stdout.buffer.write(b"\n".join([n.encode("utf-8", "surrogateescape") for n i
   # as the task gate itself does for the review action. "none" (empty
   # inventory) is NOT public: the comment above says an empty or unclassifiable
   # inventory fails closed, and the caller treats 2 as refuse-everything.
-  printf '%s' "$decision" | jq -e '.effective_class == "private-evidence" or .effective_class == "private-tooling"' >/dev/null 2>&1 && return 0
-  printf '%s' "$decision" | jq -e '.effective_class != "none" and (.effective_class|type=="string")' >/dev/null 2>&1 && return 1
-  return 2
+  if printf '%s' "$decision" | jq -e '.effective_class == "private-evidence" or .effective_class == "private-tooling"' >/dev/null 2>&1; then
+    verdict=private
+  elif printf '%s' "$decision" | jq -e '.effective_class != "none" and (.effective_class|type=="string")' >/dev/null 2>&1; then
+    verdict=public
+  fi
+  [ -n "$verdict" ] || return 2
+  if [ -n "$key" ]; then
+    # Only a definite answer is filed; a failed write only loses the reuse.
+    policy="$(printf '%s' "$decision" | jq -r '.policy_file // empty' 2>/dev/null)" || policy="?"
+    policy_sha=none
+    if [ -n "$policy" ]; then policy_sha="$(sha256sum < "$policy" 2>/dev/null | cut -d' ' -f1)" || policy_sha=""; fi
+    case "$policy_sha" in none|[0-9a-f]*)
+      ( umask 077; tmp="$(mktemp "$scope/.tmp.XXXXXX" 2>/dev/null)" || exit 0
+        printf '%s %s %s' "$verdict" "$policy_sha" "$policy" > "$tmp" && mv -f "$tmp" "$scope/$key" || rm -f "$tmp" ) || true ;;
+    esac
+  fi
+  [ "$verdict" = private ] && return 0
+  return 1
 }
 
 require_public_source() { # ROOT
