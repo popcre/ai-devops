@@ -654,7 +654,7 @@ rm -f "$TMP/cancel-unbound-called"
 OUT="$(CANCEL_REQUIRED=false CANCEL_OID=h2 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/cancel-unbound-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/cancel-unbound-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
 check "a requirement result from a different commit cannot excuse cancellation" "test '$RC' -eq 1"
 check "requirement policy is queried on both complete-status pages and cache v1 is retired" \
-  "test \"$(grep -c 'isRequired(pullRequestNumber:\$PR)' "$ROOT/tools/github-requests/pr-status-complete.sh")\" -eq 2 && grep -q -- '--key \"v2 ' '$CMD' && ! grep -q -- '--key \"v1 ' '$CMD'"
+  "test \"$(grep -c 'isRequired(pullRequestNumber:\$PR)' "$ROOT/tools/github-requests/pr-status-complete.sh")\" -eq 2 && grep -q -- '--key \"v3 ' '$CMD' && ! grep -q -- '--key \"v1 ' '$CMD'"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

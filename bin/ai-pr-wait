@@ -174,7 +174,7 @@ bounded_gh() {
     # ejection freshly; its own history cannot be delegated to another waiter.
     [ "$WAS_QUEUED" -eq 0 ] || force=(--force-refresh)
     AI_GH_CALLER=ai-pr-wait AI_GH_COST_CONTEXT="${SNAP_CONTEXT:-}" "$PYTHON_RUNNER" "$SNAP_HELPER_ARG" \
-      --state-dir "$SNAP_STATE_ARG" --key "v2 $SNAP_CONTEXT $REPO $PR $cache_target" \
+      --state-dir "$SNAP_STATE_ARG" --key "v3 $SNAP_CONTEXT $REPO $PR $cache_target" \
       --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" --cap-supervisor-timeout --defer-source-mark \
       --age-file "$SNAP_AGE_ARG" --source-file "$SNAP_SOURCE_ARG" "${force[@]+"${force[@]}"}" -- "${command[@]}"
   else

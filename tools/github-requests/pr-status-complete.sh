@@ -41,7 +41,7 @@ page() {
   return "$rc"
 }
 
-Q="$(page "{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state mergedAt closedAt headRefOid isInMergeQueue mergeCommit{oid} commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(last:100){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name conclusion completedAt isRequired(pullRequestNumber:$PR)} ... on StatusContext{context state isRequired(pullRequestNumber:$PR)}}}}}}}}}rateLimit{cost remaining resetAt}}")" || exit $?
+Q="$(page "{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state mergedAt closedAt headRefOid isInMergeQueue mergeCommit{oid} commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(last:100){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name conclusion status detailsUrl completedAt isRequired(pullRequestNumber:$PR)} ... on StatusContext{context state isRequired(pullRequestNumber:$PR)}}}}}}}}}rateLimit{cost remaining resetAt}}")" || exit $?
 first_head="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.headRefOid // empty')" || exit 4
 pages=0
 while printf '%s' "$Q" | jq -e '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage == true' >/dev/null 2>&1; do
@@ -50,7 +50,7 @@ while printf '%s' "$Q" | jq -e '.data.repository.pullRequest.commits.nodes[0].co
   cursor="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.startCursor // empty')"
   [ -n "$cursor" ] || exit 4
   quoted_cursor="$(jq -nr --arg value "$cursor" '$value|@json')"
-  PAGE="$(page "{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){headRefOid commits(last:1){nodes{commit{oid statusCheckRollup{contexts(last:100,before:$quoted_cursor){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name conclusion completedAt isRequired(pullRequestNumber:$PR)} ... on StatusContext{context state isRequired(pullRequestNumber:$PR)}}}}}}}}}rateLimit{cost remaining resetAt}}")" || exit $?
+  PAGE="$(page "{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){headRefOid commits(last:1){nodes{commit{oid statusCheckRollup{contexts(last:100,before:$quoted_cursor){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name conclusion status detailsUrl completedAt isRequired(pullRequestNumber:$PR)} ... on StatusContext{context state isRequired(pullRequestNumber:$PR)}}}}}}}}}rateLimit{cost remaining resetAt}}")" || exit $?
   first_total="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount // empty')"
   printf '%s' "$PAGE" | jq -e --arg head "$first_head" --argjson total "$first_total" \
     '(.errors | not) and (.data.repository.pullRequest.headRefOid == $head) and (.data.repository.pullRequest.commits.nodes[0].commit.oid == $head) and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount == $total) and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes | type == "array") and (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage | type == "boolean")' >/dev/null 2>&1 || exit 4
