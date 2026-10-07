@@ -1087,25 +1087,31 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
         return None
     pattern = "*/*/*.json" if provider == "any" else provider + "/*/*.json"
     best = None
+    latest_judgment = ""
     for path in sorted(root.glob(pattern)):
         if path.is_symlink() or not path.is_file():
             continue
         row = json.loads(path.read_text(encoding="utf-8"))
         require(isinstance(row, dict), f"lifecycle record is not an object: {path.name}")
-        if not (row.get("schema_version") == 1 and row.get("status") == "completed" and
-                row.get("verdict") == "APPROVE" and row.get("stale") is False and
-                row.get("failure_class") is None and row.get("head") == head and
+        if not (row.get("schema_version") == 1 and row.get("head") == head and
                 row.get("source_digest") == source_digest and row.get("repository_key") == repo_key and
                 (provider == "any" or row.get("provider") == provider) and
                 row.get("provider") == path.parent.parent.name and
                 row.get("review_mode") in (None, mode)):
+            continue
+        # A later REJECT (or BLOCKED) on the same source supersedes an older
+        # APPROVE: remember the newest real judgment of any kind.
+        if row.get("status") == "completed" and row.get("verdict") in {"REJECT", "BLOCKED"}:
+            latest_judgment = max(latest_judgment, row.get("finished_at") or "")
+        if not (row.get("status") == "completed" and row.get("verdict") == "APPROVE" and
+                row.get("stale") is False and row.get("failure_class") is None):
             continue
         if implementer and row.get("implementer_engine") and row["implementer_engine"] != implementer:
             continue
         recorded_base = row.get("base") or ""
         if recorded_base:
             resolved = git_value("rev-parse", "--verify", "--quiet", "--end-of-options", recorded_base + "^{commit}")
-            if resolved != base:
+            if not resolved or resolved != base:
                 continue
         elif base:
             continue
@@ -1128,7 +1134,7 @@ def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key
         finished = row.get("finished_at") or ""
         if best is None or finished > best[0]:
             best = (finished, str(report_path), row)
-    if best is None:
+    if best is None or (latest_judgment and latest_judgment >= best[0]):
         return None
     return {"report": best[1], "provider": best[2]["provider"], "run_id": best[2]["run_id"],
             "review_mode": mode, "head": head, "source_digest": source_digest, "finished_at": best[0]}

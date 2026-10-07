@@ -95,10 +95,11 @@ unset _hook_var
 # this mode, head, whole-source digest, repository and resolved base, print
 # that report path and stop before any provider call. --force always
 # dispatches. A review operation or a reviewer-approval-governed review asks a
-# different question, so neither is ever reused. Every lookup error falls
+# different question, and --tests asks for fresh test evidence, so none of
+# them is ever reused. A newer REJECT/BLOCKED on the same source wins. Every lookup error falls
 # through to a normal review and says so; nothing is skipped silently.
 # ---------------------------------------------------------------------------
-_pool_force=0; _pool_base=""; _pool_assert=""; _pool_args=("${@:3}")
+_pool_force=0; _pool_tests=0; _pool_base=""; _pool_assert=""; _pool_args=("${@:3}")
 set -- "$provider" "$mode"
 _i=0
 while [ "$_i" -lt "${#_pool_args[@]}" ]; do
@@ -111,6 +112,7 @@ while [ "$_i" -lt "${#_pool_args[@]}" ]; do
         _v="${_pool_args[$((_i+1))]}"; set -- "$@" "$_v"
         [ "$_a" != --base ] || _pool_base="$_v"
         [ "$_a" != --assert-head ] || _pool_assert="$_v"
+        [ "$_a" != --tests ] || _pool_tests=1
         _i=$((_i+2)); continue
       fi ;;
   esac
@@ -139,6 +141,8 @@ pool_reuse_lookup(){ # 0 = reused (path printed), 2 = no match, other = lookup e
 }
 if [ "$_pool_force" = 1 ]; then
   printf 'ai-review-pool: --force given; passing-report reuse skipped.\n' >&2
+elif [ "$_pool_tests" = 1 ]; then
+  printf 'ai-review-pool: --tests given; fresh test evidence requested, passing-report reuse skipped.\n' >&2
 elif [ -z "${AI_REVIEW_OPERATION:-}" ] && [ -z "${AI_REVIEW_REVIEWER_APPROVAL:-}" ]; then
   _reuse_rc=0; pool_reuse_lookup || _reuse_rc=$?
   case "$_reuse_rc" in

@@ -194,6 +194,18 @@ check "corrupt_events_falls_through" "[ '$RC' -eq 0 ] && engargs | grep -q -- '-
 rm -f "$LCDIR/runs/$REUSE_KEY/qwen/zcode/corrupt.json" "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && AI_REVIEW_LIFECYCLE_DIR="$LCDIR" bash "$POOL" qwen diff-review ) > /dev/null 2> "$POOLTMP/reuse-noid.err"
 check "identity_failure_falls_through" "engargs | grep -q -- '--provider qwen' && grep -q 'lookup unavailable' '$POOLTMP/reuse-noid.err'"
+reuse_run reuse-tests qwen diff-review --tests true
+check "no_reuse_when_tests_requested" "engargs | grep -q -- '--tests true' && grep -q -- '--tests given' '$POOLTMP/reuse-tests.err'"
+make_pass glm diff-review 20261007T000000-1-6 APPROVE
+jq '.base="ffffffffffffffffffffffffffffffffffffffff"' "$LCDIR/runs/$REUSE_KEY/glm/zcode/20261007T000000-1-6.json" > "$POOLTMP/b.json" && mv "$POOLTMP/b.json" "$LCDIR/runs/$REUSE_KEY/glm/zcode/20261007T000000-1-6.json"
+( cd "$POOLTMP/fakerepo" && AI_REVIEW_LIFECYCLE_DIR="$LCDIR" python3 "$REPO_ROOT/tools/reviewer_events.py" find-passing-report glm diff-review "$REUSE_HEAD" "$REUSE_DIGEST" "$REUSE_KEY" ) > "$POOLTMP/unresolved-base" 2>&1
+make_pass glm final-check 20261007T000000-1-8 APPROVE
+( cd "$POOLTMP/fakerepo" && AI_REVIEW_LIFECYCLE_DIR="$LCDIR" python3 "$REPO_ROOT/tools/reviewer_events.py" find-passing-report glm final-check "$REUSE_HEAD" "$REUSE_DIGEST" "$REUSE_KEY" ) > "$POOLTMP/resolved-control" 2>&1
+check "no_reuse_when_recorded_base_unresolvable" "grep -qx null '$POOLTMP/unresolved-base' && grep -q '\"provider\": \"glm\"' '$POOLTMP/resolved-control'"
+make_pass qwen diff-review 20261007T000000-1-7 REJECT
+jq '.finished_at="2026-10-08T00:00:00Z"' "$LCDIR/runs/$REUSE_KEY/qwen/zcode/20261007T000000-1-7.json" > "$POOLTMP/r.json" && mv "$POOLTMP/r.json" "$LCDIR/runs/$REUSE_KEY/qwen/zcode/20261007T000000-1-7.json"
+reuse_run reuse-newer-reject qwen diff-review
+check "newer_reject_supersedes_older_approve" "engargs | grep -q -- '--provider qwen'"
 
 echo
 echo "test-pool-dispatch-doors: $PASS passed, $FAIL failed"
