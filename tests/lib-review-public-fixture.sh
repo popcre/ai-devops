@@ -19,6 +19,11 @@ repo="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 2
 repo="$(cd "$repo" && pwd -P)" || exit 2
 case "$repo/" in
   "$fixture_root/"*)
+    # Name this mock's inputs (itself and the declaration; it reads no
+    # policy, library or task state), so review-scoped reuse is exercised.
+    if [ -n "${AI_TASK_GATES_INPUTS_TO:-}" ]; then
+      printf '%s\n' "$mock_dir/ai-task-gates" "$repo/.ai-devops/task-gates.json" > "$AI_TASK_GATES_INPUTS_TO"
+    fi
     printf '{"identity_resolved":true,"effective_class":"code","observed_class":"code"}\n'
     ;;
   *) exit 2 ;;

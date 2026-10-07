@@ -51,6 +51,52 @@ check('manual runs keep one qualified host free for the reviewer proof', () => {
 check('more idle hosts than sections never over-assigns', () => {
   assert.strictEqual(decide(cfg, { event: 'pull_request', idleQualified: 50 }).windows_matrix.filter(x => x.lane !== 'blacksmith').length, cfg.windows_sections);
 });
+check('the section-only lane uses its own label, never the qualified one', () => {
+  assert.deepStrictEqual(cfg.section_windows, ['self-hosted', 'Windows', 'X64', cfg.section_label]);
+  assert.ok(!cfg.section_windows.includes(cfg.qualified_label));
+  assert.notStrictEqual(cfg.section_label, cfg.qualified_label);
+  // Pinned to EDGE-ALIEN's measured-with-headroom sections (run 37628253929, #1312).
+  assert.deepStrictEqual(cfg.section_lane_order, [3, 4, 6]);
+  assert.strictEqual(new Set(cfg.section_lane_order).size, cfg.section_lane_order.length);
+  for (const s of cfg.section_lane_order) assert.ok(Number.isInteger(s) && s >= 1 && s <= cfg.windows_sections);
+});
+check('a section outside section_lane_order never reaches a section-only host', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: 0, idleSection: cfg.windows_sections });
+  for (const w of p.windows_matrix) {
+    if (w.lane === 'section-self-hosted') assert.ok(cfg.section_lane_order.includes(w.section));
+  }
+  assert.strictEqual(p.windows_matrix.filter(x => x.lane === 'section-self-hosted').length, cfg.section_lane_order.length);
+});
+check('section-only hosts skip sections a qualified host already holds', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: cfg.section_lane_order[0], idleSection: 1 });
+  const taken = p.windows_matrix.filter(x => x.lane === 'section-self-hosted');
+  assert.ok(taken.length <= 1);
+  for (const w of taken) assert.ok(w.section > cfg.section_lane_order[0]);
+});
+check('one idle section-only host takes exactly one section, the first in section_lane_order', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: 0, idleSection: 1 });
+  const taken = p.windows_matrix.filter(x => x.lane === 'section-self-hosted');
+  assert.strictEqual(taken.length, 1);
+  assert.strictEqual(taken[0].section, cfg.section_lane_order[0]);
+  assert.deepStrictEqual(taken[0].runs_on, cfg.section_windows);
+  assert.strictEqual(p.windows_matrix.filter(x => x.lane === 'blacksmith').length, cfg.windows_sections - 1);
+});
+check('section-only and qualified hosts never take the same section', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: cfg.windows_sections, idleSection: 1 });
+  assert.strictEqual(p.windows_matrix.filter(x => x.lane === 'section-self-hosted').length, 0);
+  const q = decide(cfg, { event: 'pull_request', idleQualified: 2, idleSection: 3 });
+  assert.strictEqual(q.windows_matrix.filter(x => x.lane === 'qualified-self-hosted').length, 2);
+  assert.strictEqual(q.windows_matrix.filter(x => x.lane === 'section-self-hosted').length, 3);
+});
+check('a manual run keeps the reviewer reserve and still gives section-only hosts one section each', () => {
+  const p = decide(cfg, { event: 'workflow_dispatch', idleQualified: 1, idleSection: 1 });
+  assert.strictEqual(p.windows_matrix.filter(x => x.lane === 'qualified-self-hosted').length, 0);
+  assert.strictEqual(p.windows_matrix.filter(x => x.lane === 'section-self-hosted').length, 1);
+});
+check('a foreign head never reaches a section-only host', () => {
+  const p = decide(cfg, { event: 'pull_request', idleQualified: 0, idleSection: 5, foreign: true });
+  assert.strictEqual(lanes(p.windows_matrix), allBlacksmith);
+});
 check('a foreign head never reaches the self-hosted pool or WarpBuild', () => {
   const p = decide(cfg, { event: 'pull_request', idleQualified: 50, foreign: true });
   assert.strictEqual(lanes(p.windows_matrix), allBlacksmith);
@@ -77,6 +123,7 @@ function fakePool(runners, throws = false) {
 const envy = (busy, labels = ['self-hosted', cfg.qualified_label]) => ({ status: 'online', busy, labels: labels.map(name => ({ name })) });
 const ctx = { repo: { owner: 'o', repo: 'r' }, runId: 1, eventName: 'pull_request' };
 const lanesOut = core => lanes(JSON.parse(core.out.windows_matrix));
+const sectionOnly = Array.from({ length: cfg.windows_sections }, (_, k) => (k + 1 === cfg.section_lane_order[0] ? 'section-self-hosted' : 'blacksmith')).join(',');
 
 (async () => {
   const cases = [
@@ -88,6 +135,21 @@ const lanesOut = core => lanes(JSON.parse(core.out.windows_matrix));
       { github: fakeGithub([{ status: 'queued', labels: ['self-hosted', cfg.qualified_label] }]), poolGithub: fakePool([envy(false)]) }, allBlacksmith],
     ['busy, offline and unqualified hosts are never used',
       { github: fakeGithub(), poolGithub: fakePool([envy(true), envy(false, ['self-hosted', 'ai-devops-windows']), { ...envy(false), status: 'offline' }]) }, allBlacksmith],
+    ['an idle section-only host takes one section only',
+      { github: fakeGithub(), poolGithub: fakePool([envy(false, ['self-hosted', 'ai-devops-windows', cfg.section_label])]) }, sectionOnly],
+    ['a busy or offline section-only host leaves every section on Blacksmith',
+      { github: fakeGithub(), poolGithub: fakePool([envy(true, ['self-hosted', cfg.section_label]), { ...envy(false, ['self-hosted', cfg.section_label]), status: 'offline' }]) }, allBlacksmith],
+    ['a section job already waiting for the section-only host claims it first',
+      { github: fakeGithub([{ status: 'queued', labels: ['self-hosted', cfg.section_label] }]), poolGithub: fakePool([envy(false, ['self-hosted', cfg.section_label])]) }, allBlacksmith],
+    ['queued qualified and section jobs each claim only their own pool',
+      { github: fakeGithub([{ status: 'queued', labels: ['self-hosted', cfg.qualified_label] }, { status: 'queued', labels: ['self-hosted', cfg.section_label] }]),
+        poolGithub: fakePool([envy(false), envy(false, ['self-hosted', cfg.section_label]), envy(false, ['self-hosted', cfg.section_label])]) }, sectionOnly],
+    ['a queued job carrying both labels claims a qualified host, not a section host',
+      { github: fakeGithub([{ status: 'queued', labels: ['self-hosted', cfg.qualified_label, cfg.section_label] }]),
+        poolGithub: fakePool([envy(false), envy(false, ['self-hosted', cfg.section_label])]) }, sectionOnly],
+    ['a host with both labels counts only as qualified',
+      { github: fakeGithub(), poolGithub: fakePool([envy(false, ['self-hosted', cfg.qualified_label, cfg.section_label])]) }, 'qualified-self-hosted' + allBlacksmith.slice('blacksmith'.length)],
+    ['a failed pool lookup never routes to a section-only host', { github: fakeGithub([], true), poolGithub: fakePool([envy(false, ['self-hosted', cfg.section_label])]) }, allBlacksmith],
   ];
   for (const [label, deps, expected] of cases) {
     const core = fakeCore();
