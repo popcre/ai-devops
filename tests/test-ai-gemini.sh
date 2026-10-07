@@ -106,8 +106,7 @@ esac
 cid=conv-good
 if [[ "$args" == *"--conversation"* ]] && [ "${MOCK_MODE:-normal}" = wrongid ]; then cid=conv-wrong; fi
 if [ "${MOCK_MODE:-normal}" = empty ]; then response=''; elif [ "${MOCK_MODE:-normal}" = badverdict ]; then response='## Verdict
-PASS'; elif [ "${MOCK_MODE:-normal}" = governed ]; then response='Findings: none blocking in file.txt.
-VERDICT: APPROVE 1111111111111111111111111111111111111111'; elif [ "${MOCK_MODE:-normal}" = governed-heading ]; then response='## Verdict
+PASS'; elif [ "${MOCK_MODE:-normal}" = governed ]; then gov_sha="$(printf '%s' "$args" | grep -oE 'VERDICT: APPROVE [0-9a-f]{40}' | head -1 | awk '{print $3}')"; response="$(printf 'Findings: none blocking in file.txt.\nVERDICT: APPROVE %s' "${gov_sha:-1111111111111111111111111111111111111111}")"; elif [ "${MOCK_MODE:-normal}" = governed-heading ]; then response='## Verdict
 APPROVE'; else response='## Verdict
 APPROVE'; fi
 if [ "${MOCK_MODE:-normal}" = denied ]; then printf '{"status":"SUCCESS","conversation_id":"%s","response":"","denied_actions":[{"action":"command","display_name":"RunCommand"}]}\n' "$cid"; exit 0; fi
@@ -263,8 +262,8 @@ R3J="$TMP/repo3j"; make_repo "$R3J"; printf '/.tmp-*\n' >> "$R3J/.gitignore"; gi
 check 'untracked root .tmp-* scratch churn is tolerated' "new_run '$R3J' protected-root-tmp mutate-protected-root-tmp"
 check 'a tracked root .tmp-* file stays protected' "! new_run '$R3J' protected-tracked-tmp mutate-protected-tracked-tmp"
 check 'a .tmp-* file below the root stays protected' "! new_run '$R3J' protected-deep-tmp mutate-protected-deep-tmp"
-GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
+GH="$(git -C "$RG" rev-parse HEAD)"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }
 check 'governed mode emits the terminal verdict on standard output' "gov_run govok governed | tail -1 | grep -qx 'VERDICT: APPROVE $GH'"
 check 'governed mode rejects the non-governed heading verdict' "! gov_run govbad governed-heading"
