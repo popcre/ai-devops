@@ -38,4 +38,5 @@ AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off \
   { echo 'FAIL: shared transport did not read allocator'; exit 1; }
 [ -f "$T/gh-state/last_call_ms" ] || { echo 'FAIL: allocator read bypassed shared admission'; exit 1; }
 [ "$(wc -l < "$T/gh.log")" -eq 1 ] || { echo 'FAIL: unexpected allocator reads'; exit 1; }
+grep -q 'contents/scripts/lib/lanes/reviewer-roster.mjs' "$T/gh.log" || { echo 'FAIL: roster not read from scripts/lib/lanes/reviewer-roster.mjs'; exit 1; }
 echo 'PASS test-ai-reviewer-membership-drift'
