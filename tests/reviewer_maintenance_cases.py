@@ -1785,6 +1785,67 @@ with event_lock(sys.argv[2]):
             else:
                 os.environ["AI_KIMI_STATE_DIR"] = prior
 
+    def test_hidden_staging_file_refuses_loss(self):
+        """Hidden mktemp staging (no .md, leading dot) is recoverable — refuse loss."""
+        rid = "a7" + "0" * 30
+        self._finished_lost_invocation("codex", rid)
+        # Production staging: mktemp "$REPORT_DIR/.codex-report.XXXXXX"
+        sandbox, _ = self._lost_sandbox("codex", name="hidden-stage",
+                                        reports=(".codex-report.Xf3Kq2",))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "codex", sandbox, "hidden staging still on disk")
+
+    def test_log_failure_dump_refuses_loss(self):
+        """Codex failure dumps are .log files with the run_id in the name."""
+        rid = "a8" + "0" * 30
+        self._finished_lost_invocation("codex", rid)
+        report = f"codex-final-check-failed-{rid}.log"
+        sandbox, _ = self._lost_sandbox("codex", name="log-dump", reports=(report,))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "codex", sandbox, "failure log still on disk")
+
+    def test_stale_suffix_move_refuses_loss(self):
+        """mv "$OUT" "$OUT.stale" keeps a recoverable report that is not a .md name."""
+        rid = "a9" + "0" * 30
+        self._finished_lost_invocation("muse", rid)
+        report = "muse-final-check-20261007T181703-576761-439.md.stale"
+        sandbox, _ = self._lost_sandbox("muse", name="stale-move", reports=(report,))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "muse", sandbox, "stale-moved report still on disk")
+
+    def test_unreadable_review_dir_refuses_loss(self):
+        """An incomplete search must refuse loss, never report an empty candidate list."""
+        rid = "b1" + "0" * 30
+        self._finished_lost_invocation("gemini", rid)
+        sandbox, source = self._lost_sandbox("gemini", name="unreadable")
+        reviews = source / ".ai" / "reviews"
+        (reviews / "gemini-x-20260917T152549-99.md").write_text("maybe here\n")
+        original = Path.rglob
+
+        def walk_that_fails(self, pattern):
+            if self == reviews or (self.is_absolute() and str(self).endswith("reviews")):
+                raise PermissionError("review tree is unreadable")
+            return original(self, pattern)
+
+        with patch.object(Path, "rglob", walk_that_fails):
+            with self.assertRaises(events.Blocked):
+                events.reconcile_lost(self.root, "gemini", sandbox, "search cannot prove absence")
+
+    def test_positive_ledger_references_refuse_loss(self):
+        """A finished row with evidence_references is publication proof."""
+        rid = "b2" + "0" * 30
+        row = {"schema_version": 1, "provider": "codex", "event": "started", "run_id": rid,
+               "repo": str(self.toolkit), "head": self.sha, "caller": "codex",
+               "timestamp": "2026-10-07T12:00:00+00:00"}
+        self.write(row)
+        events.require_report(self.root, "codex", rid)
+        self.write({**row, "event": "finished", "exit_code": 0,
+                    "evidence_references": [rid + "/" + ("a" * 64)]})
+        sandbox, _ = self._lost_sandbox("codex", name="positive-ledger")
+        with self.assertRaisesRegex(events.Blocked, "published evidence exists"):
+            events.record_lost(self.root, "codex", rid, sandbox, "ledger says published")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
 
 if __name__ == "__main__":
     suite = unittest.main(verbosity=1, exit=False)

@@ -1043,45 +1043,81 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
 LOST_REPORT_PROVIDERS = {"codex", "gemini", "glm", "grok", "kimi", "muse", "qwen"}
 
 
-def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
-    """Reports this review could still have written; any one of them refuses a loss record.
-
-    Production report names do not share one shape: glm/grok/qwen use
-    `{provider}-{name}-{key}.md`, gemini/muse/kimi embed the session name
-    under a caller-prefixed sandbox tag, and codex writes
-    `codex-{mode}-{ts-pid-random}.md` with no separate key. Keys are
-    timestamps, 24-character Qwen hashes, or 32/64-character digests.
-    Deriving the name from the sandbox tag therefore misses live reports
-    (false loss). Kimi also writes its canonical `review-<stamp>.md` into
-    the durable job directory outside `.ai/reviews` before optional
-    mirroring — a report still sitting there is as recoverable as a mirror.
-    Search every provider report that carries a timestamp or content-hash
-    key, the Kimi canonical location, and any that embeds the evidence
-    run_id — a sibling hit is a safe refusal, never a false loss.
-    """
-    key = r"(?:\d{8}T\d{6}Z?|[0-9a-f]{24}|[0-9a-f]{32}|[0-9a-f]{64})"
-    patterns = [re.compile(re.escape(provider) + r"-.+" + key + r".*\.md")]
-    if provider == "kimi":
-        # Canonical artifact name from bin/ai-kimi render_review_artifact.
-        patterns.append(re.compile(r"review-" + key + r".*\.md"))
-    if run_id is not None:
-        patterns.append(re.compile(re.escape(provider) + r"-.+-" + re.escape(run_id) + r"(?:\.incomplete)?\.md"))
-    found = []
-    def consider(path):
-        if since is not None and path.stat().st_mtime < since:
-            return
-        if any(p.fullmatch(path.name) for p in patterns):
-            found.append(path)
-    reviews = source / ".ai" / "reviews"
-    if reviews.is_dir():
-        for path in reviews.iterdir():
-            consider(path)
+def _report_search_roots(provider, source):
+    """Every tree a provider may leave a recoverable report or staging file in."""
+    roots = [source / ".ai" / "reviews"]
     if provider == "kimi":
         jobs = Path(os.environ.get("AI_KIMI_STATE_DIR") or
                     (Path.home() / ".local/state/ai-devops/kimi")) / "jobs"
-        if jobs.is_dir():
-            for path in jobs.rglob("*"):
-                consider(path)
+        roots.append(jobs)
+    return roots
+
+
+def _recoverable_report_file(path, provider, run_id):
+    """True when this file could still be the review's report or staging.
+
+    Recovery shapes are not one suffix: final `.md` reports, `.log` failure
+    dumps, hidden mktemp staging (`.codex-report.XXXXXX`), `.stale` /
+    `.accounting-failed` moves, and `.incomplete` patches. Associate by
+    provider/run identity in the name or body — never by an extension
+    allowlist, which always misses the next shape. An unreadable body is
+    treated as recoverable so a permission edge cannot invent a loss.
+    """
+    name = path.name
+    if run_id is not None and run_id in name:
+        return True
+    if re.search(r"(?i)(?:^|[^a-z0-9])" + re.escape(provider) + r"(?:[^a-z0-9]|$)", name):
+        return True
+    if provider == "kimi" and name.startswith("review-"):
+        return True
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(65536)
+    except OSError:
+        return True
+    if run_id is not None and run_id.encode("utf-8") in head:
+        return True
+    if b"## Verdict" in head and provider.encode("utf-8") in head.lower():
+        return True
+    return False
+
+
+def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
+    """Recoverable files this review could still have written; any one refuses a loss record.
+
+    Prefer positive publication evidence (evidence-store `*.report.json`)
+    over this negative search. When the search runs it must be exhaustive:
+    every regular file under the review and job trees, hidden entries and
+    non-`.md` names included. A sibling hit is a safe refusal, never a false
+    loss. An incomplete or unreadable walk refuses loss rather than reporting
+    an empty candidate list.
+    """
+    found = []
+    def consider(path):
+        try:
+            if not path.is_file():
+                return
+        except OSError:
+            found.append(path)
+            return
+        if since is not None:
+            try:
+                if path.stat().st_mtime < since:
+                    return
+            except OSError:
+                pass  # unstatable: cannot prove it is older than the invocation
+        if _recoverable_report_file(path, provider, run_id):
+            found.append(path)
+    for root in _report_search_roots(provider, source):
+        if not root.exists():
+            continue
+        require(root.is_dir(), "report search root is not a directory; loss not recorded")
+        try:
+            entries = list(root.rglob("*"))
+        except OSError as error:
+            raise Blocked(f"report search incomplete under {root}; loss not recorded: {error}")
+        for path in entries:
+            consider(path)
     return sorted(found)
 
 
@@ -1163,6 +1199,16 @@ def record_lost(directory, provider, run_id, sandbox, reason):
     root = evidence_root(directory, run_id)
     require((root / "required.json").is_file(), "sandbox evidence requirement is missing; loss not recorded")
     require(not any(root.glob("*.report.json")), "published evidence exists; it is partial, not lost")
+    # Positive ledger publication also refuses loss: a finished row carrying
+    # evidence_references is proof the report was published, even if a receipt
+    # file were somehow missing from the evidence store.
+    _, lost_scan = snapshot(directory / "events.jsonl", "jsonl")
+    for line in lost_scan.splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row.get("run_id") == run_id and row.get("event") == "finished" and row.get("evidence_references"):
+            require(False, "published evidence exists; it is partial, not lost")
     require(not lost_blockers(root), "required patch or prepared evidence exists; loss not recorded")
     path = root / "evidence-lost.json"
     if not path.exists():
