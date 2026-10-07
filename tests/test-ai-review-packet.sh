@@ -17,6 +17,8 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON="$(command -v python3 || command -v python)" || { echo "Python is required" >&2; exit 1; }
+export PYTHON
 SCRIPT="$REPO_ROOT/bin/ai-review-packet"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
@@ -250,7 +252,7 @@ fi
 CR_ID="$TMP/cr-identity.json"
 PATH="$CRLF_BIN:$PATH" "$SCRIPT" resolve "$R" 2>/dev/null > "$CR_ID"
 CR_OK=0
-python - "$CR_ID" "$R" <<'PY' || CR_OK=1
+"$PYTHON" - "$CR_ID" "$R" <<'PY' || CR_OK=1
 import json, sys
 path, repo = sys.argv[1], sys.argv[2]
 data = json.load(open(path, encoding="utf-8"))

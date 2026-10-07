@@ -6,6 +6,8 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON="$(command -v python3 || command -v python)" || { echo "Python is required" >&2; exit 1; }
+export PYTHON
 AI_GLM="$REPO_ROOT/bin/ai-glm"
 PASS=0; FAIL=0
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-test-harness.sh"
@@ -716,9 +718,10 @@ check "implementation records are not review-pruned" "test -f '$PR_STATE/session
 check "idle unrecorded review sandbox is pruned"    "test ! -e '$PR_SB/glm-orphan-0123456789ab'"
 check "a new unrecorded sandbox (review starting) is kept" "test -d '$PR_SB/glm-building-new-0123456789ab'"
 # An interrupt during a server delete finishes that review under its build lock, then stops.
+# "intrz" sorts after "intr" in every locale (en_US collation puts "intr2" first).
 PR_STATE="$TMP/prune-state-int"; PR_SB="$TMP/prune-sandboxes-int"; : > "$PR_CALLS"
 mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB"
-pr_meta intr review "$PR_OLD"; pr_meta intr2 review "$PR_OLD"
+pr_meta intr review "$PR_OLD"; pr_meta intrz review "$PR_OLD"
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_CALLS="$PR_CALLS" bash -c '
   source "$AI_GLM_SOURCE"
   server_up(){ return 0; }
@@ -728,7 +731,7 @@ AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_
     kill -INT $$; }
   cmd_prune' >/dev/null 2>&1; pr_int_rc=$?
 check "an interrupted prune never strands a record without its session" "grep -qx 'DELETE /session/sid-intr' '$PR_CALLS' && test ! -e '$PR_STATE/sessions/rid1/claude--intr.json' && test ! -e '$PR_SB/glm-intr-0123456789ab' && test ! -e '$PR_CALLS.race'"
-check "an interrupted prune stops after the review in hand" "test '$pr_int_rc' -eq 130 && ! grep -q sid-intr2 '$PR_CALLS' && test -f '$PR_STATE/sessions/rid1/claude--intr2.json' && test -d '$PR_SB/glm-intr2-0123456789ab'"
+check "an interrupted prune stops after the review in hand" "test '$pr_int_rc' -eq 130 && ! grep -q sid-intrz '$PR_CALLS' && test -f '$PR_STATE/sessions/rid1/claude--intrz.json' && test -d '$PR_SB/glm-intrz-0123456789ab'"
 check "an interrupted prune still releases its build lock" "! ls -d '$PR_SB'/*.lock >/dev/null 2>&1"
 # A review whose report is provably gone gets an explicit, owner-recorded terminal state (#442).
 PR_STATE="$TMP/prune-state-lost"; PR_SB="$TMP/prune-sandboxes-lost"; PR_ROOT="$TMP/prune-root-lost"; : > "$PR_CALLS"
@@ -740,19 +743,19 @@ pr_meta present review "$PR_OLD"; pr_source present ''
 printf 'report\n' > "$PR_ROOT/.ai/reviews/glm-present-20260911T000000Z.md"
 printf 'sibling\n' > "$PR_ROOT/.ai/reviews/glm-lost-r3-20260911T000000Z.md"
 # Owned by an invocation whose report publication failed; its only report is an earlier turn's.
-lost_rid="$(cd "$PR_ROOT" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x && python "$REPO_ROOT/tools/reviewer_events.py" begin glm)"
-python "$REPO_ROOT/tools/reviewer_events.py" require-report glm "$lost_rid" >/dev/null 2>&1
+lost_rid="$(cd "$PR_ROOT" && git init -q && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x && "$PYTHON" "$REPO_ROOT/tools/reviewer_events.py" begin glm)"
+"$PYTHON" "$REPO_ROOT/tools/reviewer_events.py" require-report glm "$lost_rid" >/dev/null 2>&1
 pr_meta owned review "$PR_OLD"; pr_source owned "$(printf 'evidence_format=1\nevidence_owner=glm:%s' "$lost_rid")"
 printf 'old turn\n' > "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"; touch -d '3 days ago' "$PR_ROOT/.ai/reviews/glm-owned-20260901T000000Z.md"
 run_prune 1
 check "before reconciliation every lost-evidence review is kept" "test -d '$PR_SB/glm-lost-0123456789ab' && test -d '$PR_SB/glm-lostorphan-0123456789ab' && test -d '$PR_SB/glm-owned-0123456789ab'"
 lost() { "$REPO_ROOT/bin/ai-reviewer-issue" evidence reconcile-lost glm "$PR_SB/glm-$1-0123456789ab" "$2" >/dev/null 2>&1; }
 check "reconcile-lost requires the owner's reason" "! lost lost ''"
-check "reconcile-lost refuses providers whose report naming it cannot search" "python '$REPO_ROOT/tools/reviewer_events.py' reconcile-lost gemini '$PR_SB/glm-lost-0123456789ab' 'gone' 2>&1 | grep -q 'cannot prove a gemini report'"
+check "reconcile-lost refuses providers whose report naming it cannot search" "'$PYTHON' '$REPO_ROOT/tools/reviewer_events.py' reconcile-lost gemini '$PR_SB/glm-lost-0123456789ab' 'gone' 2>&1 | grep -q 'cannot prove a gemini report'"
 check "reconcile-lost refuses while the review's report still exists" "! lost present 'owner confirmed report gone'"
 check "reconcile-lost records a legacy loss once, idempotently" "lost lost 'caller worktree deleted' && lost lost 'caller worktree deleted' && lost lostorphan 'caller worktree deleted' && test \"\$(grep -l 'caller worktree deleted' '$AI_REVIEW_EVENT_DIR'/evidence/*/evidence-lost.json | wc -l | tr -d ' ')\" -eq 2"
 check "reconcile-lost refuses an invocation that is still running" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
-python "$REPO_ROOT/tools/reviewer_events.py" finish glm "$lost_rid" 0 >/dev/null 2>&1
+"$PYTHON" "$REPO_ROOT/tools/reviewer_events.py" finish glm "$lost_rid" 0 >/dev/null 2>&1
 lost_patch="$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/artifacts/$(printf '%064d' 0).json"
 mkdir -p "$(dirname "$lost_patch")"; printf '{}\n' > "$lost_patch"
 check "reconcile-lost refuses while a required patch is unpublished" "! lost owned 'report publication failed' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$lost_rid/evidence-lost.json'"
@@ -1070,7 +1073,7 @@ run_fake_impl() { # NAME [pause point] [ready] [release] [turn result] [failure 
       source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"
       cd "$JOB_REPO"
       export AI_GLM_CALLER=codex
-      AI_REVIEW_EVENT_RUN_ID="$(python "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_events.py" begin glm invocation)" || exit 1
+      AI_REVIEW_EVENT_RUN_ID="$("$PYTHON" "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_events.py" begin glm invocation)" || exit 1
       export AI_REVIEW_EVENT_RUN_ID
       if [ "$JOB_FAIL" = publication ]; then reviewer_event_publish_report(){ return 1; }; fi
       require_server(){ :; }; server_up(){ return 0; }; api(){ printf "{}"; }
@@ -1285,7 +1288,7 @@ bind_fixture_owner() {
   AI_GLM_SOURCE="$AI_GLM" OWNER_FIXTURE="$1" JOB_REPO="$TMP/repoA" bash -c '
     source "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_event_guard.sh"
     cd "$JOB_REPO"; export AI_GLM_CALLER=codex
-    AI_REVIEW_EVENT_RUN_ID="$(python "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_events.py" begin glm invocation)" || exit 1
+    AI_REVIEW_EVENT_RUN_ID="$("$PYTHON" "$(dirname "$AI_GLM_SOURCE")/../tools/reviewer_events.py" begin glm invocation)" || exit 1
     export AI_REVIEW_EVENT_RUN_ID
     jq "del(.evidence_run_id)" "$OWNER_FIXTURE" > "$OWNER_FIXTURE.tmp" && mv "$OWNER_FIXTURE.tmp" "$OWNER_FIXTURE" || exit 1
     reviewer_event_evidence bind-owner glm "$OWNER_FIXTURE" || exit 1
