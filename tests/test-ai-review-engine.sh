@@ -877,6 +877,20 @@ check "front_door_routes_deepseek_to_pool" \
   "test '$FRONT_DS_RC' -eq 0 && grep -q 'pool-invoked: deepseek diff-review' '$TMP/stub-pool.log'"
 check "front_door_deepseek_no_longer_forces_code_only" \
   "! grep -q 'explicit code-only route' '$TMP/front-ds.err'"
+# #1427: ai-review strips generic pay-per-use keys before dispatch.
+cat > "$TMP/stub-pool-env" <<EOF
+#!/usr/bin/env bash
+env > "$TMP/stub-pool-env.log"
+exit 0
+EOF
+chmod +x "$TMP/stub-pool-env"; rm -f "$TMP/stub-pool-env.log"
+set +e
+( cd "$PREPO" && export OPENAI_API_KEY=fake-1427 CODEX_API_KEY=fake-1427 GEMINI_API_KEY=fake-1427 GOOGLE_API_KEY=fake-1427 \
+    AI_GEMINI_KEY=fake-1427 AI_QWEN_KEY=fake-1427 ANTHROPIC_API_KEY=fake-1427 && AI_POOL_TEST_HOOKS=1 AI_REVIEW_POOL_BIN="$TMP/stub-pool-env" \
+    AI_POOL_CALLER=codex bash "$FRONT" deepseek diff-review ) >"$TMP/front-keys.out" 2>"$TMP/front-keys.err"
+set -e
+check "ai_review_strips_generic_keys" \
+  "test -s '$TMP/stub-pool-env.log' && ! grep -q 'fake-1427' '$TMP/stub-pool-env.log'"
 printf '{\n  "version": 1,\n  "providers": { "deepseek": { "registry_state": "absent", "reason": "test" } }\n}\n' > "$TMP/ds-absent-registry.json"
 rm -f "$TMP/stub-pool.log"
 set +e

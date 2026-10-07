@@ -74,6 +74,10 @@ check "nothing was pushed" '[ "$(git -C "$T/origin.git" rev-list --all | wc -l)"
 check "cleanup refuses unlanded commits" '! "$BIN" cleanup t1 2>/dev/null && [ -d "$T/state/work/t1" ]'
 check "land fetches the branch into the repository" '"$BIN" land t1 >/dev/null && [ "$(git -C "$T/src" rev-parse deepseek/t1)" = "$(git -C "$T/state/work/t1" rev-parse HEAD)" ]'
 check "cleanup after land removes the clone" '"$BIN" cleanup t1 >/dev/null && [ ! -d "$T/state/work/t1" ] && [ ! -d "$T/state/tasks/t1" ]'
+# #1427: an ambient DEEPSEEK_MODEL never selects the paid Pro model.
+envout="$(DEEPSEEK_MODEL=deepseek-v4-pro "$BIN" implement t1427 --repo "$T/src" --prompt "env model" 2>&1)"
+check "deepseek_implement_ignores_model_env" '[ "$(jq -r .model "$T/state/tasks/t1427/meta.json")" = deepseek-flash ] && grep -q "ignoring DEEPSEEK_MODEL" <<<"$envout"'
+"$BIN" cleanup t1427 --force >/dev/null 2>&1 || true
 echo 'DEEPSEEK_API_KEY=op://vault/other/credential' >> "$T/cfg/mcp.env"
 check "ambiguous 1Password reference refused" '! "$BIN" implement t2 --repo "$T/src" --prompt x 2>/dev/null'
 
