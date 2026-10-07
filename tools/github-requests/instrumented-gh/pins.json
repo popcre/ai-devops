@@ -1,0 +1,11 @@
+{
+  "owner": "popcre/ai-devops#660",
+  "prototype_platform": "linux-amd64",
+  "upstream_version": "2.101.0",
+  "upstream_commit": "0cf1092493af067646fc5f3db9421c6a6ec9c938",
+  "source_url": "https://codeload.github.com/cli/cli/tar.gz/0cf1092493af067646fc5f3db9421c6a6ec9c938",
+  "source_sha256": "057c1bfc07ecee96fcb0a121b482464a3f10063532bace358ee37d57214ea150",
+  "toolchain_version": "go1.27.1",
+  "toolchain_url": "https://go.dev/dl/go1.27.1.linux-amd64.tar.gz",
+  "toolchain_sha256": "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"
+}
