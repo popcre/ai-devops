@@ -37,6 +37,10 @@ class AdmissionTests(unittest.TestCase):
             return json.loads(result.stdout)
         self.assertFalse(claim()['claimed'])
         command[-1]='first'
+        before=self.directory.joinpath('qwen.json').read_bytes()
+        checked=subprocess.run(command+['--check-only'],capture_output=True,text=True)
+        self.assertTrue(json.loads(checked.stdout)['ready'])
+        self.assertEqual(self.directory.joinpath('qwen.json').read_bytes(),before)
         self.assertTrue(claim()['claimed'])
         self.assertEqual(claim()['reason'],'already-attempted')
         data=api.load(self.directory,'qwen')

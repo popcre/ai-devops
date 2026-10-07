@@ -555,6 +555,7 @@ def main():
     parser.add_argument('--marker', type=pathlib.Path, action='append', default=[])
     parser.add_argument('--text', default='')
     parser.add_argument('--record', action='store_true')
+    parser.add_argument('--check-only', action='store_true')
     parser.add_argument('--observation-file', type=pathlib.Path)
     args = parser.parse_args()
     now = int(time.time())
@@ -593,11 +594,13 @@ def main():
                         or not args.run_id or reset.get('record_id') != args.run_id
                         or reset.get('failure_class') != 'allowance-exhausted'
                         or not reset.get('reset_at') or reset_epoch(reset['reset_at']) > now
-                        or not re.fullmatch('[0-9a-f]{64}', args.expect_record)
+                        or (not args.check_only and not re.fullmatch('[0-9a-f]{64}', args.expect_record))
                         or any(record['expires_epoch'] > now for record in data['backoffs'].values())):
                     result = {'claimed': False, 'reason': 'not-due-or-stronger-hold'}
                 elif prior_attempt and prior_attempt.get('reset_record_id') == reset.get('record_id'):
                     result = {'claimed': False, 'reason': 'already-attempted'}
+                elif args.check_only:
+                    result = {'claimed': False, 'ready': True}
                 else:
                     data['reset_qualification_attempt'] = {'reset_record_id': reset['record_id'],
                         'subject_sha256': args.expect_record, 'started_epoch': now}

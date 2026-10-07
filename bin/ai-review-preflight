@@ -408,8 +408,11 @@ health_status() { # PROVIDER
   # path matches the standing rule. This runs before static_status so a
   # qualified-but-broken provider can never be drawn.
   if known_broken "$1"; then printf '%s\n' "$ACTIVE_KNOWN_BROKEN" | jq -c '. + {status:"known-broken",failure_class:"provider_unavailable"}'; return 1; fi
-  if static_status "$1" >/dev/null; then
+  local initial_static
+  if initial_static="$(static_status "$1")"; then
+    RESET_REQUALIFY_ATTEMPTED=0
     reset_requalify "$1" >/dev/null || true
+    if [ "$RESET_REQUALIFY_ATTEMPTED" = 0 ]; then printf '%s\n' "$initial_static"; return 1; fi
     if static_status "$1"; then return 1; fi
   fi
   if [ "$1" = stepfun ]; then
@@ -673,20 +676,25 @@ reset_requalify() { # only a due reset of an exact capacity-deferred installatio
   [ "$(registry_state "$provider")" = registered ] || return 0
   known_broken "$provider" && return 0
   active_quarantine "$provider" && return 0
-  # Preserve a current qualification; this path is never a health probe.
-  case "$provider" in gemini) gemini_live_qualified && return 0;; qwen) qwen_live_qualified && return 0;; esac
   marker="$(requalify_expected_file "$provider")"
   [ -f "$marker" ] && [ ! -L "$marker" ] || return 0
   recorded="$(jq -c '.capacity_deferral.subject // empty' "$marker")" || return 1
   [ -n "$recorded" ] || return 0
   capacity_record="$(jq -r '.capacity_deferral.capacity_record_id // empty' "$marker")"
   [ -n "$capacity_record" ] || return 0
+  # Cheap persisted eligibility comes before additional runtime identity checks.
+  admission_store capacity-status "$provider" >/dev/null || return 1
+  claim="$(admission_store reset-qualification-claim "$provider" --run-id "$capacity_record" --check-only)" || return 1
+  [ "$(printf '%s' "$claim" | jq -r '.ready // false')" = true ] || return 0
+  # Preserve a current qualification; this path is never a health probe.
+  case "$provider" in gemini) gemini_live_qualified && return 0;; qwen) qwen_live_qualified && return 0;; esac
   subject="$(qualification_subject "$provider")" || return 0
   [ "$subject" = "$recorded" ] || return 0
   # Expiration lifts only its own allowance hold, retaining the exact reset receipt.
   admission_store capacity-status "$provider" >/dev/null || return 1
   claim="$(admission_store reset-qualification-claim "$provider" --run-id "$capacity_record" --expect-record "$(printf '%s' "$subject" | sha256sum | awk '{print $1}')")" || return 1
   [ "$(printf '%s' "$claim" | jq -r .claimed)" = true ] || return 0
+  RESET_REQUALIFY_ATTEMPTED=1
   requalify_provider "$provider"
 }
 
