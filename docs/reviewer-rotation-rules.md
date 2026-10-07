@@ -87,8 +87,10 @@ allocator but stayed registered here, and a session spent an hour trying it.
     model as the capacity hold. Either may clear only that matching capacity hold,
     never an authentication, safety, maintenance or membership restriction.
     Passing a reset date restores candidacy, not proof of current capacity or
-    permission to skip ordinary readiness and security checks. Missing account
-    identity or ambiguous reset metadata cannot restore access. Pay-as-you-go
+    permission to skip ordinary readiness and security checks. Opaque account
+    identity is required for early positive-observation relief. A qualified exact
+    provider reset can lift its own recorded capacity hold without account
+    identity; ambiguous reset metadata cannot. Pay-as-you-go
     depletion never clears because a guessed hourly cooldown passed.
     The allocator already skips quarantined providers.
     Never edit `RETIRED_REVIEWERS` or `config/reviewer-registry.json` for a
@@ -129,8 +131,12 @@ alone are not live proof of refill.
 
 Gemini's authenticated `agy /usage` reader already preserves per-bucket reset
 times, but its qualified response does not establish opaque account identity.
-Qwen error output may report a reset delay; that refusal is evidence for the
-specific run, not a qualified non-generating available observation. Do not
+Qwen's [official Token Plan FAQ](https://docs.modelstudio.console.alibabacloud.com/en/model-studio/token-plan-personal-faq)
+describes a monthly subscription quota reset anchored to the subscription,
+not the first day of the calendar month. The exact provider refusal can report
+that account's next reset; it is not a qualified non-generating available
+observation. Product editions and older quota rules differ, so do not derive an
+account's reset from a generic plan duration or a rate-limit retry delay. Do not
 infer an account from a home-directory hash or re-enable either subscription
 solely because an unqualified date or local cooldown passed. A qualified exact
 provider reset may restore matching capacity candidacy without another provider
