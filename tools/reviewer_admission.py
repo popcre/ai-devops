@@ -80,6 +80,8 @@ def capacity_observation(data, provider, observation, now):
     if not valid_scope(profile, model):
         profile = model = None
     hold = data.get('capacity_hold')
+    if hold and hold.get('failure_class') == 'out-of-credit' and provider in SUBSCRIPTIONS:
+        return {'status': 'unchanged', 'reason': 'paid-balance-hold-not-subscription-allowance'}
     if hold and (hold.get('credential_profile_scope') != profile or hold.get('model_scope') != model) and not (state == 'exhausted' and not hold.get('credential_profile_scope')):
         return {'status': 'unchanged', 'reason': 'wrong-scope'}
     if hold and observed <= hold['observed_epoch']:
@@ -288,11 +290,17 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
                 data = load(directory, provider)
                 now = int(time.time())
                 prior = data.get('capacity_hold')
+                failure_class = 'allowance-exhausted' if allowance else 'out-of-credit'
                 if prior:
+                    if prior.get('failure_class') == 'out-of-credit' and allowance:
+                        failure_class = 'out-of-credit'
+                        reset = None
                     prior_reset = prior.get('reset_at')
-                    if prior_reset and reset:
+                    if prior_reset and reset and failure_class == 'allowance-exhausted':
                         reset = prior_reset if reset_epoch(prior_reset) >= reset_epoch(reset) else reset
-                data['capacity_hold'] = {'provider': provider, 'failure_class': 'allowance-exhausted' if allowance else 'out-of-credit',
+                if failure_class == 'out-of-credit':
+                    reset = None
+                data['capacity_hold'] = {'provider': provider, 'failure_class': failure_class,
                     'credential_profile_scope': (prior or {}).get('credential_profile_scope'),
                     'model_scope': (prior or {}).get('model_scope'),
                     'observed_epoch': now, 'reset_at': reset, 'next_check_epoch': reset_epoch(reset) if reset else now,
@@ -569,7 +577,7 @@ def main():
             data = load(args.directory, args.provider)
             if args.action == 'capacity-status':
                 result = capacity_status(data)
-                if result and args.provider in SUBSCRIPTIONS and result.get('reset_at') and reset_epoch(result['reset_at']) <= now:
+                if result and args.provider in SUBSCRIPTIONS and result.get('failure_class') == 'allowance-exhausted' and result.get('reset_at') and reset_epoch(result['reset_at']) <= now:
                     data['last_capacity_reset'] = result
                     data['capacity_hold'] = None
                     publish(args.directory, args.provider, data)

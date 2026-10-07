@@ -17,6 +17,22 @@ spec.loader.exec_module(api)
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_subscription_quota_reset_never_lifts_prior_paid_funds_hold(self):
+        import time
+        now=int(time.time())
+        for provider in ('qwen','glm'):
+            prior={'provider':provider,'failure_class':'out-of-credit','credential_profile_scope':'account','model_scope':'model','observed_epoch':now-50,'reset_at':None,'next_check_epoch':now,'record_id':'paid-funds'}
+            api.publish(self.directory,provider,{'version':2,'provider':provider,'global':None,'backoffs':{},'capacity_hold':prior})
+            self.evidence.write_text(json.dumps({'provider':provider,'failure_class':'allowance-exhausted','reset_at':datetime.datetime.fromtimestamp(now+3600,datetime.timezone.utc).isoformat()}))
+            result=subprocess.run([sys.executable,str(MODULE),'credit',provider,'--directory',str(self.directory),'--marker',str(self.evidence),'--record'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            data=api.load(self.directory,provider)
+            self.assertEqual(data['capacity_hold']['failure_class'],'out-of-credit')
+            self.assertIsNone(data['capacity_hold']['reset_at'])
+            for state in ('available','exhausted'):
+                observation={'provider':provider,'state':state,'observed_epoch':now+1,'credential_profile_scope':'account','model_scope':'model','reset_at':datetime.datetime.fromtimestamp(now+7200,datetime.timezone.utc).isoformat()}
+                self.assertEqual(api.capacity_observation(data,provider,observation,now+1)['reason'],'paid-balance-hold-not-subscription-allowance')
+                self.assertEqual(data['capacity_hold']['failure_class'],'out-of-credit')
     def test_eastern_display_without_iana_handles_spring_and_fall_boundaries(self):
         with mock.patch.object(api, 'ZoneInfo', side_effect=api.ZoneInfoNotFoundError()):
             for utc, suffix in (('2026-03-08T06:59:59Z','01:59 AM EST'),('2026-03-08T07:00:00Z','03:00 AM EDT'),('2026-11-01T05:59:59Z','01:59 AM EDT'),('2026-11-01T06:00:00Z','01:00 AM EST')):
