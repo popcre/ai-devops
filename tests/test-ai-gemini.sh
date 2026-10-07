@@ -125,7 +125,7 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.8-flash-high\"' '$FIXTURES/model-mismatch.json'"
-check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.6'"
+check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.7'"
 mkdir -p "$TMP/fallback-home/.local/bin"
 cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
 FALLBACK_PATH="/mingw64/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
@@ -203,6 +203,28 @@ set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new autoq --prompt review) 2>"$TMP/newdup
 check 'new duplicate session never auto-requalifies' "test '$NEWDUP_RC' -ne 0 && grep -q 'session already exists' '$TMP/newdup.err' && ! grep -q 'requalifying automatically' '$TMP/newdup.err' && test ! -s '$MOCK_AGY_CALLS'"
 set +e; (cd "$TMP" && "$SCRIPT" new norepo --prompt review) 2>"$TMP/norepo.err"; NORREPO_RC=$?; set -e
 check 'non-repo cwd never auto-requalifies' "test '$NORREPO_RC' -ne 0 && grep -q 'Git repository' '$TMP/norepo.err' && ! grep -q 'requalifying automatically' '$TMP/norepo.err' && test ! -s '$MOCK_AGY_CALLS'"
+# Governed SHA, base/assert refs, and reusable-session state also die before
+# paid requalification.
+write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new --governed-verdict notasha badsha --prompt review) 2>"$TMP/badsha.err"; BADSHA_RC=$?; set -e
+check 'bad governed SHA never auto-requalifies' "test '$BADSHA_RC' -ne 0 && grep -q 'governed verdict head' '$TMP/badsha.err' && ! grep -q 'requalifying automatically' '$TMP/badsha.err' && test ! -s '$MOCK_AGY_CALLS'"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new badbase --base nosuchref --prompt review) 2>"$TMP/badbase.err"; BADBASE_RC=$?; set -e
+check 'bad base ref never auto-requalifies' "test '$BADBASE_RC' -ne 0 && grep -q 'base ref not found' '$TMP/badbase.err' && ! grep -q 'requalifying automatically' '$TMP/badbase.err' && test ! -s '$MOCK_AGY_CALLS'"
+# Force incomplete reusable-session state so the pre-check, not paid
+# requalification, rejects the follow-up.
+AUTOQ_META="$(meta_for autoq)"
+jq '.status="PREPARED"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
+write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askstale.err"; ASKSTALE_RC=$?; set -e
+check 'ask incomplete/stale session never auto-requalifies' "test '$ASKSTALE_RC' -ne 0 && grep -q 'session requires recovery' '$TMP/askstale.err' && ! grep -q 'requalifying automatically' '$TMP/askstale.err' && test ! -s '$MOCK_AGY_CALLS'"
+# Restore COMPLETE then force session-model mismatch (session .model, not
+# the qualification record) on the same reusable session.
+jq '.status="COMPLETE"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
+jq '.model="gemini-other-model"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
+write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askmodel.err"; ASKMODEL_RC=$?; set -e
+check 'ask model-mismatched session never auto-requalifies' "test '$ASKMODEL_RC' -ne 0 && grep -q 'configured model differs' '$TMP/askmodel.err' && ! grep -q 'requalifying automatically' '$TMP/askmodel.err' && test ! -s '$MOCK_AGY_CALLS'"
+jq '.model="gemini-3.8-flash-high"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
 write_qualification
 
 echo '== byte identity and exact identity gates'
@@ -416,9 +438,15 @@ check 'a stalled ask() identity resolve fails in time and names the bound' "test
 set +e; REFUSE_OUT="$(cd "$SLOW_ASK" && "$SCRIPT" new refused --assert-head 0000000000000000000000000000000000000000 --prompt review 2>&1)"; set -e
 check 'a genuine identity refusal is not worded as a timeout' "printf '%s' '$REFUSE_OUT' | grep -q 'source identity refused' && ! printf '%s' '$REFUSE_OUT' | grep -qiE 'timed out|deadline|time limit'"
 R7="$TMP/repo7"; make_repo "$R7"; new_run "$R7" stale normal >/dev/null; printf next >> "$R7/file.txt"; git -C "$R7" add file.txt; git -C "$R7" commit -qm next
-check 'follow-up refuses a changed repository head' "! (cd '$R7' && '$SCRIPT' ask stale --prompt later)"
+# Keep qualification current so the follow-up reaches ask_existing (and begin)
+# instead of dying in guard_quarantine before recovery can be recorded.
+write_qualification; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$R7" && "$SCRIPT" ask stale --prompt later) 2>"$TMP/stalehead.err"; STALEHEAD_RC=$?; set -e
+check 'follow-up refuses a changed repository head' "test '$STALEHEAD_RC' -ne 0"
+check 'changed-head follow-up never auto-requalifies' "! grep -q 'requalifying automatically' '$TMP/stalehead.err' && test ! -s '$MOCK_AGY_CALLS'"
 check 'stale-head refusal becomes recovery-required' "test \"\$(jq -r .status \"\$(meta_for stale)\")\" = RECOVERY_REQUIRED"
 check 'delete refuses uncertain evidence' "! (cd '$R7' && '$SCRIPT' delete stale)"
+write_qualification
 
 R8="$TMP/repo8"; make_repo "$R8"; new_run "$R8" source-tracked normal >/dev/null; printf changed >> "$R8/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'follow-up refuses uncommitted tracked source drift' "! (cd '$R8' && '$SCRIPT' ask source-tracked --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
