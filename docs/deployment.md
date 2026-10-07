@@ -332,7 +332,7 @@ cd /worksp/ai-devops-candidate
 ```
 
 The updater verifies the candidate and installed checkout relationship, fetches
-and pins `origin/main`, records an installation task in the exact target
+`origin/main`, requires the pinned SHA to be in its history, records an installation task in the exact target
 candidate, runs its gate, then advances only the named
 installed checkout. Later updates can run from the installed checkout itself.
 `install.sh` checks the same pending authorization before its first machine
