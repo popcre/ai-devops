@@ -1,0 +1,169 @@
+{
+  "owner": "popcre/ai-devops#660",
+  "time_edt": "2026-10-07 10:28 AM EDT",
+  "scope": "isolated Linux prototype; not installed or fleet acceptance",
+  "pins": {
+    "owner": "popcre/ai-devops#660",
+    "prototype_platform": "linux-amd64",
+    "upstream_version": "2.101.0",
+    "upstream_commit": "0cf1092493af067646fc5f3db9421c6a6ec9c938",
+    "source_url": "https://codeload.github.com/cli/cli/tar.gz/0cf1092493af067646fc5f3db9421c6a6ec9c938",
+    "source_sha256": "057c1bfc07ecee96fcb0a121b482464a3f10063532bace358ee37d57214ea150",
+    "toolchain_version": "go1.27.1",
+    "toolchain_url": "https://go.dev/dl/go1.27.1.linux-amd64.tar.gz",
+    "toolchain_sha256": "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"
+  },
+  "binary_hashes": {
+    "baseline": "ed22f767c76812232350c3a42de49cb2698d68413d5c55a037992d806a7e465c",
+    "instrumented": "df8d7abb0dd57e89e19cd3e4a90e10f8a5e6270aabc167be063ca74676ca8c99"
+  },
+  "source_sha256": {
+    "tools/github-requests/instrumented-gh/build.py": "6981c41deddeb18689b207f3d2296791dbfa6c0c39bfbbf1e0253b5d949aba45",
+    "tools/github-requests/instrumented-gh/httpcounter.go": "f335704892f503a9c25b4934b037ce35d75eb50bda71542d4796655ed6a7ad92",
+    "tools/github-requests/instrumented-gh/httpcounter_test.go": "29d09f29dd6c245053fa8d1544bca41fbf6506611284be43430443e2bfd1072b",
+    "tools/github-requests/instrumented-gh/measure_overhead.py": "a7a69ad529a1df7e033c23aca29677f25f9c073a3f7069e59fd04e8dfcb6bce6",
+    "tools/github-requests/instrumented-gh/pins.json": "ec449947123011e52e77cf26dc595ffe91e3210e1c691aca9e8b54c973e1e9ab",
+    "tools/github-requests/instrumented-gh/run.py": "ef89a4d857e3f7c4f718352b78dc2373019e26d11e9cdc97406941deb2315607",
+    "tools/github-requests/instrumented-gh/test_offline.py": "bb19e3c5760e2c3c6985a07b360855e778ad4cea88396bdd8fce4485308cd387",
+    "tools/github-requests/instrumented-gh/test_prototype.py": "08a8e8a44b63756406b22890d1962660834bab7bcdd84f9c776ca733663ceffc"
+  },
+  "proof": {
+    "offline_metadata_cases": 4,
+    "full_cli_fixture_cases": 9,
+    "concurrent_real_server_writes": 20,
+    "go_race": "PASS",
+    "pagination_requests": 3,
+    "hidden_retry_requests": 4,
+    "hidden_retry_logical_pages": 3,
+    "stdout_stderr_exit_status_parity": "PASS",
+    "cache_hit_observed_writes": 0,
+    "missing_finish": "unknown",
+    "cancellation_status": 143,
+    "cancellation_requests": 1,
+    "descendant_counter_environment": "absent",
+    "no_installation_or_routing_change": true,
+    "windows": "unsupported",
+    "fleet_total_http_requests": null
+  },
+  "direct_counter_local_fixture": {
+    "platform": "linux-amd64",
+    "paired_outcomes": 20,
+    "p95_ms": {
+      "baseline": 82.55650597857311,
+      "instrumented": 82.77669100789353
+    },
+    "p95_overhead_percent": 0.26670827054813273,
+    "passes_5_percent": true,
+    "scope": "direct binary private-pipe local fixture; excludes generic qualification runner and installed workflow",
+    "samples_ms": {
+      "baseline": [
+        79.94210097240284,
+        74.56792198354378,
+        79.37605399638414,
+        79.63897899026051,
+        79.01305600535125,
+        82.55650597857311,
+        79.61113902274519,
+        78.48410302540287,
+        78.35854799486697,
+        79.9505909672007,
+        80.19903500098735,
+        82.1911909733899,
+        80.66451596096158,
+        81.36163500603288,
+        79.55782097997144,
+        79.34020599350333,
+        79.81386303436011,
+        82.48292101779953,
+        79.84276599017903,
+        82.7253779862076
+      ],
+      "instrumented": [
+        82.77669100789353,
+        80.84741100901738,
+        80.48986399080604,
+        84.15210200473666,
+        81.97389199631289,
+        79.24240198917687,
+        76.07893599197268,
+        80.69304999662563,
+        81.04757399996743,
+        79.67571204062551,
+        80.99232497625053,
+        80.39743104018271,
+        79.574246017728,
+        79.80316400062293,
+        80.0187109853141,
+        80.15733299544081,
+        78.91009998274967,
+        81.5189199638553,
+        80.27866401243955,
+        74.40187700558454
+      ]
+    }
+  },
+  "rejected_python_qualification_helper": {
+    "platform": "linux-amd64",
+    "paired_outcomes": 20,
+    "p95_ms": {
+      "baseline": 82.50997698633,
+      "instrumented": 138.0710779922083
+    },
+    "p95_overhead_percent": 67.33864562231484,
+    "passes_5_percent": false,
+    "scope": "qualification-only Python/hash runner versus direct native baseline; excludes installed workflow",
+    "samples_ms": {
+      "baseline": [
+        80.80337900901213,
+        80.7117969961837,
+        81.93626400316134,
+        80.46642900444567,
+        81.06987702194601,
+        80.57906402973458,
+        79.27844597725198,
+        80.92556899646297,
+        79.49630299117416,
+        80.2521689911373,
+        78.88175500556827,
+        80.56265499908477,
+        72.91205204091966,
+        78.99273798102513,
+        80.13623696751893,
+        82.50997698633,
+        79.22915503149852,
+        82.21867500105873,
+        88.6070670094341,
+        80.16681199660525
+      ],
+      "instrumented": [
+        138.0710779922083,
+        128.35418398026377,
+        135.80342003842816,
+        137.71651504794136,
+        137.03267002711073,
+        132.95136601664126,
+        136.49352599168196,
+        134.03577596182004,
+        135.3204119950533,
+        134.61710599949583,
+        137.35577801708132,
+        136.50244200835004,
+        138.0605159793049,
+        133.83977202465758,
+        138.11629498377442,
+        129.8401799867861,
+        133.1200809800066,
+        134.405443968717,
+        130.26334100868553,
+        126.29142700461671
+      ]
+    }
+  },
+  "limits": [
+    "No installed workflow latency acceptance",
+    "No full client-constructor census",
+    "Observed completed writes are not server quota cost",
+    "Forced termination and partial writes remain unknown",
+    "Python runner is qualification-only; rejected for production routing"
+  ]
+}
