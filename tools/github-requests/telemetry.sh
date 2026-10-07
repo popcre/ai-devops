@@ -31,6 +31,7 @@ gh_measure_init(){
   GH_MEASURE_EXECUTED=0
   GH_MEASURE_PRINCIPAL=unknown
   GH_MEASURE_REQUEST_CLASS=unknown
+  GH_MEASURE_BUCKET=unknown
 }
 
 gh_measure_clock(){
@@ -54,7 +55,7 @@ gh_measure_finish(){
   [[ "$GH_MEASURE_CLOCK" =~ ^[0-9]{13}$ ]] || return 1
   elapsed=$(( GH_MEASURE_CLOCK - GH_MEASURE_START ))
   (( elapsed >= 0 )) || elapsed=0
-  [ "$GH_MEASURE_OPERATION" = api.graphql ] && bucket=graphql
+  if [ "$GH_MEASURE_OPERATION" = api.graphql ] || [ "${GH_MEASURE_BUCKET:-unknown}" = graphql ]; then bucket=graphql; fi
   [ "$status" = 0 ] && result=success
   [ "$status" = 75 ] && result=deferred
   TZ=UTC printf -v utc '%(%FT%TZ)T' -1

@@ -368,6 +368,7 @@ elif [ "${1:-}" = pr ] || [ "${1:-}" = issue ]; then
 fi
 select_buckets
 if [ "${1:-}" = api ] && [ "$endpoint" = graphql ]; then
+  GH_MEASURE_BUCKET=graphql
   # jq is an installed toolkit dependency. A GraphQL call cannot safely
   # claim success if its HTTP-200 application errors cannot be classified.
   command -v jq >/dev/null 2>&1 || { say "jq is required to classify GraphQL responses"; exit 3; }

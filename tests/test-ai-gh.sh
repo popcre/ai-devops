@@ -769,9 +769,15 @@ check 'missing malformed and overlong quota rows remain unknown' "jq -e '.bucket
 for operation in bw.snapshot bw.alarm_issue bw.link_issue; do
   AI_GH_STATE_DIR="$TMP/operation-label-state" AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION="$operation" \
     AI_GH_REAL_GH="$FAKE" FAKE_MODE=graphql-pages "$GH" api graphql > "$TMP/operation-output" 2> "$TMP/operation-error"; operation_rc=$?
-  check "GraphQL retains the $operation caller operation and output" "[ $operation_rc -eq 0 ] && [ \$(wc -l < '$TMP/operation-output') -eq 2 ] && jq -se '.[-1].operation == \"$operation\" and .[-1].caller == \"ai-blocker-watch\"' '$TMP/operation-label-state/measurements/'*.jsonl"
+  check "GraphQL retains the $operation caller operation and output" "[ $operation_rc -eq 0 ] && [ \$(wc -l < '$TMP/operation-output') -eq 2 ] && jq -se '.[-1].operation == \"$operation\" and .[-1].caller == \"ai-blocker-watch\" and .[-1].bucket == \"graphql\"' '$TMP/operation-label-state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/operation-label-state/measurements' >/dev/null"
 done
 AI_GH_STATE_DIR="$TMP/operation-label-state" AI_GH_CALLER=ai-blocker-watch AI_GH_OPERATION=bw.snapshot \
   AI_GH_REAL_GH="$FAKE" FAKE_MODE=graphql-jq-scalar "$GH" api graphql --jq '.data.viewer.login' >/dev/null 2>&1; operation_rc=$?
-check 'transformed GraphQL retains the snapshot operation and classification' "[ $operation_rc -eq 0 ] && jq -se '.[-1].operation == \"bw.snapshot\" and .[-1].request_class == \"graphql_transformed_unobservable\"' '$TMP/operation-label-state/measurements/'*.jsonl"
+check 'transformed GraphQL retains the snapshot operation and classification' "[ $operation_rc -eq 0 ] && jq -se '.[-1].operation == \"bw.snapshot\" and .[-1].request_class == \"graphql_transformed_unobservable\" and .[-1].bucket == \"graphql\"' '$TMP/operation-label-state/measurements/'*.jsonl && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/operation-label-state/measurements' | jq -e '.graphql_transformed_unobservable == 1'"
+mkdir "$TMP/operation-invalid-report"
+for mutation in '.caller = "interactive"' '.bucket = "unknown"'; do
+  jq -s ".[ -1 ] | $mutation" "$TMP/operation-label-state/measurements/"*.jsonl > "$TMP/operation-invalid-report/$(date -u +%F).jsonl"
+  "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/operation-invalid-report" >/dev/null 2>&1; operation_rc=$?
+  check "transformed caller label rejects invalid metadata: $mutation" "[ $operation_rc -eq 1 ]"
+done
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
