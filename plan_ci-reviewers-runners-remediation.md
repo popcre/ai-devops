@@ -303,8 +303,8 @@ against the 2026-10-02 evidence.
 - One observed reviewer/CI health timeout classified in the new distinct
   terminal state — proven not to be recorded as a bad review.
 
-**Risk:** these are long-running. One row per session; a bundled "cleanup" pass
-is how the previous rows stayed open.
+**Risk:** these are long-running. Verify each authorized row separately and
+continue when actual dependencies, ownership and safety gates allow.
 
 ### Phase D — Quota and traffic as a hard budget
 
@@ -458,8 +458,8 @@ polling); D → sustainable reviewer volume; E wraps all of them.
   only, Phase D).
 - **No secrets and no raw transcript content** in this public repository. Session
   references stay machine + engine + identifier.
-- **Do not** bundle several unproven steps into one session
-  (`plan_live-proof-session-sizing`).
+- Verify each authorized live outcome separately; continue when actual
+  dependencies, ownership and safety gates allow.
 
 ## 10. Open questions for Albert (business meaning only)
 

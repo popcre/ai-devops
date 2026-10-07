@@ -72,7 +72,7 @@ Plain-English diagnosis (not in git; do not commit transcripts): `C:\Users\ahaza
 
 **In this plan**
 
-- One standing rule: a session owns one unproven live-behavior outcome.
+- Historical scope, revoked 2026-10-07 EDT: one unproven outcome per session. Current instruction: verify and continue the authorized scope when actual gates allow.
 - Cheap tests so the phrase cannot be dropped or line-wrapped.
 - One sentence in the shared-db handover skill so leftover proofs are not bundled when filed.
 - Stop the #401 STATUS table from pointing several unproven steps at 3027, without stealing work from a live 3027 session.
@@ -195,7 +195,7 @@ git grep -n "Live proof owner (routed 2026-09-16): \[shared-db#3027\]" origin/ma
 - `templates/system/CLAUDE-global.md` — new bullet immediately after the **Start immediately.** bullet (after line 112 on `9b205e22`).
 - `templates/system/AGENTS-global-codex.md` — same place (after line 94 on `9b205e22`).
 
-**Insert this exact bullet, one line, do not wrap the marked phrase:**
+**Historical implementation, revoked 2026-10-07 EDT — never insert or restore this bullet:**
 
 ```
 - **One unproven outcome per session.** A session owns one unproven live-behavior outcome; refuse a bundle of leftover proofs or "take tickets N, M, and P to production" as one job — split them first, or stop and say the job is too big.
