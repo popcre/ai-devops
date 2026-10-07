@@ -46,7 +46,28 @@ jwt(){
 }
 
 # App-authenticated calls (JWT) are not counted against any user allowance.
-app_get(){ curl -fsS --max-time 20 -H "Authorization: Bearer $1" -H 'Accept: application/vnd.github+json' "$API/$2"; }
+# JWTs arrive only through stdin and continue through an anonymous pipe to
+# curl's config reader; process arguments and diagnostics contain no value.
+app_request(){
+  local method="$1" route="$2" jwt_value extra
+  case "$method:$route" in
+    GET:users/*/installation) [[ "$route" =~ ^users/[A-Za-z0-9-]+/installation$ ]] || return 1 ;;
+    POST:app/installations/*/access_tokens) [[ "$route" =~ ^app/installations/[0-9]{1,20}/access_tokens$ ]] || return 1 ;;
+    *) return 1 ;;
+  esac
+  IFS= read -r jwt_value || return 1
+  if IFS= read -r extra || [ -n "${extra:-}" ]; then return 1; fi
+  [[ "$jwt_value" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] || return 1
+  if [ "$method" = POST ]; then
+    printf 'header = "Authorization: Bearer %s"\n' "$jwt_value" |
+      curl --config - -fsS --max-time 20 -X POST -H 'Accept: application/vnd.github+json' "$API/$route"
+  else
+    printf 'header = "Authorization: Bearer %s"\n' "$jwt_value" |
+      curl --config - -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "$API/$route"
+  fi
+}
+app_get(){ app_request GET "$1"; }
+app_post(){ app_request POST "$1"; }
 
 # Optional read sharing is Linux-qualified. These checks add no requirement to
 # the existing token command: missing/legacy/insecure metadata only disables
@@ -130,12 +151,11 @@ cmd_token(){
     printf '%s\n' "$tok"; return 0
   fi
   J="$(jwt)" || { say "cannot sign with the app key"; exit 1; }
-  installation="$(app_get "$J" "users/$owner/installation")" ||
+  installation="$(printf '%s\n' "$J" | app_get "users/$owner/installation")" ||
     { say "app is not installed for $owner"; exit 1; }
   inst="$(printf '%s' "$installation" | jq -r '.id // empty')" || { say "app is not installed for $owner"; exit 1; }
   [ -n "$inst" ] || { say "app is not installed for $owner"; exit 1; }
-  response="$(curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $J" -H 'Accept: application/vnd.github+json' \
-    "$API/app/installations/$inst/access_tokens")" || { say "token request failed for $owner"; exit 1; }
+  response="$(printf '%s\n' "$J" | app_post "app/installations/$inst/access_tokens")" || { say "token request failed for $owner"; exit 1; }
   tok="$(printf '%s' "$response" | jq -r '.token // empty')" || { say "token request failed for $owner"; exit 1; }
   [ -n "$tok" ] || { say "token request returned nothing for $owner"; exit 1; }
   printf '%s %s\n' "$((now + 3300))" "$tok" > "$cache.tmp" && mv -f "$cache.tmp" "$cache"

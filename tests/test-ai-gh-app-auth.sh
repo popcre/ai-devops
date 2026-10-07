@@ -15,6 +15,19 @@ mkdir -p "$TMP/bin" "$TMP/app" "$TMP/api"; chmod 700 "$TMP/app"
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:1024 -out "$TMP/app/pop-ai-watchers.pem" >/dev/null 2>&1 || exit 1
 cat > "$TMP/bin/curl" <<'CURL'
 #!/usr/bin/env bash
+case " $* " in *' Authorization: Bearer '*) echo jwt-in-argv >> "$FIXTURE/audit"; exit 2 ;; esac
+config_stdin=0; previous=''
+for argument in "$@"; do
+  [ "$previous" != --config ] || [ "$argument" != - ] || config_stdin=1
+  previous="$argument"
+done
+[ "$config_stdin" = 1 ] || { echo missing-protected-header >> "$FIXTURE/audit"; exit 2; }
+config="$(cat)"
+if [[ "$config" = *$'\n'* ]] || ! printf '%s\n' "$config" |
+  grep -Eq '^header = "Authorization: Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"$'; then
+  echo malformed-protected-header >> "$FIXTURE/audit"; exit 2
+fi
+echo authenticated-stdin >> "$FIXTURE/audit"
 url="${!#}"
 case "$url" in
   */users/o/installation) echo installation >> "$FIXTURE/calls"; cat "$FIXTURE/installation" ;;
@@ -30,6 +43,7 @@ expiry="$(date -u -d '+1 hour' +%FT%TZ)"
 jq -cn --arg expires "$expiry" '{token:"ghs_synthetic_installation",expires_at:$expires,permissions:{issues:"write",contents:"read"},repository_selection:"selected",repositories:[{id:9},{id:2}]}' > "$FIXTURE/token"
 "$SCRIPT" token o > "$TMP/minted" 2> "$TMP/errors"
 check 'mint preserves token bytes and uses only the original two calls' "grep -qx ghs_synthetic_installation '$TMP/minted' && [ \"\$(wc -l < '$FIXTURE/calls')\" = 2 ]"
+check 'both authenticated calls receive JWT only through protected stdin' "[ \"\$(grep -cx authenticated-stdin '$FIXTURE/audit')\" = 2 ] && ! grep -q 'jwt-in-argv\|missing-protected-header\|malformed-protected-header' '$FIXTURE/audit'"
 check 'mint metadata stores binding fields without token or response bodies' "jq -e '.installation_id==42 and .app_id==5112061 and .repository_ids==[2,9] and .permissions.issues==\"write\" and .host==\"github.com\" and .owner==\"o\" and (has(\"token\")|not)' '$AI_GH_APP_DIR/context-o' && ! grep -q ghs_synthetic_installation '$AI_GH_APP_DIR/context-o'"
 export GH_TOKEN=ghs_synthetic_installation
 "$SCRIPT" context o > "$TMP/context" 2>> "$TMP/errors"
@@ -80,5 +94,10 @@ printf '1 ghs_synthetic_installation\n' > "$AI_GH_APP_DIR/token-o"
 check 'unqualified mint response retains original token and bounded calls' "cmp '$TMP/minted' '$TMP/unbound' && [ \"\$(wc -l < '$FIXTURE/calls')\" = 4 ] && grep -q 'metadata unavailable' '$TMP/unbound-errors'"
 check 'unqualified renewal cannot retain an older scope binding' "! '$SCRIPT' context o"
 check 'diagnostics and public context never expose token bytes' "! grep -q ghs_synthetic_installation '$TMP/errors' '$TMP/context' '$TMP/unbound-errors'"
+{ printf 'set -uo pipefail\nAPI=https://api.github.com\n'; sed -n '/^app_request(){/,/^}/p' "$SCRIPT"; } > "$TMP/request-only.sh"
+check 'malformed JWT cannot reach curl config' "! printf '%s\\n' 'bad\"jwt' | bash -c 'source \"\$1\"; app_request GET users/o/installation' bash '$TMP/request-only.sh'"
+check 'extra config lines cannot follow an otherwise valid JWT' "! printf '%s\\n%s\\n' 'abc.def.ghi' 'url=https://other.example' | bash -c 'source \"\$1\"; app_request GET users/o/installation' bash '$TMP/request-only.sh'"
+check 'invalid route config values fail before curl' "! printf '%s\\n' 'abc.def.ghi' | bash -c 'source \"\$1\"; app_request POST \"app/installations/not-an-id/access_tokens\"' bash '$TMP/request-only.sh'"
+check 'malformed JWT and config attempts add no authenticated requests' "[ \"\$(wc -l < '$FIXTURE/calls')\" = 4 ] && [ \"\$(grep -cx authenticated-stdin '$FIXTURE/audit')\" = 4 ]"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
