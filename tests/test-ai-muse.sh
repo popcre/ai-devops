@@ -152,7 +152,15 @@ case "${1:-}" in
     fi
     [ "${MUSE_STUB_MODE:-}" = malformed ] && { printf 'not-json\n'; exit 0; }
     [ "${MUSE_STUB_MODE:-}" = partialmalformed ] && { printf '{"type":"step_start","sessionID":"ses_partial","part":{}}\nnot-json\n'; exit 0; }
-    [ "${MUSE_STUB_MODE:-}" = slow ] && { [ -z "${MUSE_STUB_PID_FILE:-}" ] || printf '%s\n' "$$" > "$MUSE_STUB_PID_FILE"; trap '[ -z "${MUSE_STUB_TERM_MARKER:-}" ] || printf stopped > "$MUSE_STUB_TERM_MARKER"; exit 143' HUP INT TERM; sleep "${MUSE_STUB_DELAY:-2}"; }
+    [ "${MUSE_STUB_MODE:-}" = slow ] && {
+      [ -z "${MUSE_STUB_PID_FILE:-}" ] || printf '%s\n' "$$" > "$MUSE_STUB_PID_FILE"
+      trap '[ -z "${MUSE_STUB_TERM_MARKER:-}" ] || printf stopped > "$MUSE_STUB_TERM_MARKER"; exit 143' HUP INT TERM
+      if [ -n "${MUSE_STUB_DESCENDANT_PID_FILE:-}" ]; then
+        sleep "${MUSE_STUB_DELAY:-2}" & slow_descendant=$!
+        printf '%s\n' "$slow_descendant" > "$MUSE_STUB_DESCENDANT_PID_FILE"
+        wait "$slow_descendant"
+      else sleep "${MUSE_STUB_DELAY:-2}"; fi
+    }
     if [ -n "${MUSE_STUB_SWAP_REVIEWS:-}" ]; then
       mv "$MUSE_STUB_SWAP_REVIEWS" "$MUSE_STUB_SWAP_REVIEWS.safe"
       ln -s "$MUSE_STUB_OUTSIDE" "$MUSE_STUB_SWAP_REVIEWS" || { mv "$MUSE_STUB_SWAP_REVIEWS.safe" "$MUSE_STUB_SWAP_REVIEWS"; exit 71; }
@@ -316,11 +324,22 @@ POST_META="$(find "$TMP/state" -name 'codex--post-process-interrupt.json' -type 
 kill -TERM "$POST_PID" 2>/dev/null || true; wait "$POST_PID" 2>/dev/null || true
 check 'interrupt after provider exit but before classification marks outcome uncertain' "test -f '$POST_META' && jq -e '.status==\"provider_outcome_uncertain\"' '$POST_META'"
 rm -f "$TMP/muse-child-pid" "$TMP/muse-child-stopped"
-(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 MUSE_STUB_PID_FILE="$TMP/muse-child-pid" MUSE_STUB_TERM_MARKER="$TMP/muse-child-stopped" "$SCRIPT" new hup-turn --prompt test >/dev/null 2>&1) & MUSE_HUP_PID=$!
-poll_worker_until "$MUSE_HUP_PID" "$(budget 30 30)" 'the provider child announced itself' '[ -s "$TMP/muse-child-pid" ]' || true
-MUSE_CHILD_PID="$(cat "$TMP/muse-child-pid" 2>/dev/null || echo 0)"; kill -HUP "$MUSE_HUP_PID" 2>/dev/null || true; wait "$MUSE_HUP_PID" 2>/dev/null || true
+(cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode MUSE_STUB_MODE=slow MUSE_STUB_DELAY=30 MUSE_STUB_PID_FILE="$TMP/muse-child-pid" MUSE_STUB_DESCENDANT_PID_FILE="$TMP/muse-descendant-pid" MUSE_STUB_TERM_MARKER="$TMP/muse-child-stopped" "$SCRIPT" new hup-turn --prompt test >/dev/null 2>&1) & MUSE_HUP_PID=$!
+poll_worker_until "$MUSE_HUP_PID" "$(budget 30 30)" 'the provider child and its descendant announced themselves' '[ -s "$TMP/muse-child-pid" ] && [ -s "$TMP/muse-descendant-pid" ]' || true
+MUSE_CHILD_PID="$(cat "$TMP/muse-child-pid" 2>/dev/null || echo 0)"; MUSE_DESCENDANT_PID="$(cat "$TMP/muse-descendant-pid" 2>/dev/null || echo 0)"
+sleep 30 & MUSE_HUP_SIBLING_PID=$!
+kill -HUP "$MUSE_HUP_PID" 2>/dev/null || true; wait "$MUSE_HUP_PID" 2>/dev/null || true
 MUSE_HUP_META="$(find "$TMP/state" -name 'codex--hup-turn.json' -type f -print -quit)"
-check 'HUP stops and waits for the provider child before releasing an uncertain session' "test -f '$TMP/muse-child-stopped' && ! kill -0 '$MUSE_CHILD_PID' 2>/dev/null && jq -e '.status==\"provider_outcome_uncertain\"' '$MUSE_HUP_META'"
+MUSE_HUP_TERM_PROOF="test -f '$TMP/muse-child-stopped'"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*)
+  # Windows stops the owned Job Object directly. No POSIX TERM trap executes,
+  # so assert actual child death and session state instead of a trap receipt.
+  MUSE_HUP_TERM_PROOF=:;;
+esac
+check 'HUP stops and waits for the provider child before releasing an uncertain session' "$MUSE_HUP_TERM_PROOF && ! kill -0 '$MUSE_CHILD_PID' 2>/dev/null && jq -e '.status==\"provider_outcome_uncertain\" and .failure_reason==\"interrupted-local-observer\"' '$MUSE_HUP_META' && test -z \"\$(find '$TMP/state/locks' -maxdepth 1 -type d -name '*--hup-turn.lock.d' -print)\""
+check 'HUP provider containment preserves an unrelated owned sibling' "kill -0 '$MUSE_HUP_SIBLING_PID' 2>/dev/null"
+check 'HUP stops the owned provider descendant before returning' "test '$MUSE_DESCENDANT_PID' -gt 0 && ! kill -0 '$MUSE_DESCENDANT_PID' 2>/dev/null"
+kill -TERM "$MUSE_HUP_SIBLING_PID" 2>/dev/null || true; wait "$MUSE_HUP_SIBLING_PID" 2>/dev/null || true
 rm -f "$TMP/muse-publish-target"
 (cd "$REPO" && exec env USERPROFILE="$HOME_FIX" HOME="$TMP/roaming-home" PATH="$TMP/bin:$PATH" AI_MUSE_STATE_DIR="$TMP/state" AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes" AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_PRE_PUBLISH_MARKER="$TMP/muse-publish-target" AI_MUSE_TEST_PRE_PUBLISH_DELAY=3 "$SCRIPT" new no-clobber --prompt test >/dev/null 2>&1) & MUSE_TARGET_PID=$!
 poll_worker_until "$MUSE_TARGET_PID" "$(budget 30 30)" 'the publication target was published' '[ -s "$TMP/muse-publish-target" ]' || true
