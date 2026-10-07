@@ -269,8 +269,8 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
                     else:
                         reset = prior_reset if reset_epoch(prior_reset) >= reset_epoch(reset) else reset
                 data['capacity_hold'] = {'provider': provider, 'failure_class': 'allowance-exhausted' if allowance else 'out-of-credit',
-                    'credential_profile_scope': (prior or {}).get('credential_profile_scope') or os.environ.get('AI_REVIEW_ADMISSION_PROFILE') or None,
-                    'model_scope': (prior or {}).get('model_scope') or os.environ.get('AI_REVIEW_ADMISSION_MODEL') or None,
+                    'credential_profile_scope': (prior or {}).get('credential_profile_scope'),
+                    'model_scope': (prior or {}).get('model_scope'),
                     'observed_epoch': now, 'reset_at': reset, 'next_check_epoch': reset_epoch(reset) if reset else now,
                     'record_id': new_record_id()}
                 publish(directory, provider, data)
