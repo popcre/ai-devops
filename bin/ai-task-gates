@@ -374,6 +374,11 @@ windows_current_sid(){
   powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n'
 }
 
+windows_profile_home(){
+  [ -n "${USERPROFILE:-}" ] || return 1
+  cygpath -u "$(cygpath -aw "$USERPROFILE")"
+}
+
 private_state_directory(){
   local dir="$1" win sid
   [ ! -L "$dir" ] && mkdir -p "$dir" || return 1
@@ -472,13 +477,15 @@ private_state_file(){
 # tree, under a parent whose entire ancestor chain rejects foreign writers.
 WINDOWS_SEAL_KEY_PRIVATE=0
 windows_seal_key(){
-  local keydir="$HOME/.local/state/.ai-task-gates-seal" key="$HOME/.local/state/.ai-task-gates-seal/key.bin" win
+  local profile keydir key win
+  profile="$(windows_profile_home)" || return 1
+  keydir="$profile/.local/state/.ai-task-gates-seal"; key="$keydir/key.bin"
   [ "$WINDOWS_SEAL_KEY_PRIVATE" -eq 0 ] || return 0
-  if [ ! -d "$HOME/.local/state" ]; then
-    windows_private_ancestors "$HOME" || return 1
-    mkdir -p "$HOME/.local/state" || return 1
+  if [ ! -d "$profile/.local/state" ]; then
+    windows_private_ancestors "$profile" || return 1
+    mkdir -p "$profile/.local/state" || return 1
   fi
-  windows_private_ancestors "$HOME/.local/state" || return 1
+  windows_private_ancestors "$profile/.local/state" || return 1
   private_state_directory "$keydir" || return 1
   if [ ! -e "$key" ] && [ ! -L "$key" ]; then
     win="$(cygpath -w "$key")" || return 1
@@ -489,8 +496,9 @@ windows_seal_key(){
 }
 
 windows_file_mac(){ # WINDOWS_PATH DIGEST
-  local win_key
-  win_key="$(cygpath -w "$HOME/.local/state/.ai-task-gates-seal/key.bin")" || return 1
+  local profile win_key
+  profile="$(windows_profile_home)" || return 1
+  win_key="$(cygpath -w "$profile/.local/state/.ai-task-gates-seal/key.bin")" || return 1
   powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$KeyPath,[string]$Path,[string]$Digest) try { $Key=[IO.File]::ReadAllBytes($KeyPath); if ($Key.Length -ne 32) { exit 1 }; $Bytes=[Text.Encoding]::UTF8.GetBytes($Path+"`n"+$Digest); $Hmac=[System.Security.Cryptography.HMACSHA256]::new($Key); [Convert]::ToBase64String($Hmac.ComputeHash($Bytes)) } catch { exit 1 } }' "$win_key" "$1" "$2" | tr -d '\r\n'
 }
 
@@ -1925,9 +1933,10 @@ cmd_authorize_install(){
     --arg report "$receipt_report" --arg report_hash "$report_hash" --arg request "$approval_summary" \
     --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson stale "$stale_manifest_recovery" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" --arg manifest_recorded_sha "${manifest_recorded_sha:-}" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
-    && ln -- "$auth_stage" "$auth_path" && rm -- "$auth_stage" \
-    && windows_seal_file "$auth_path" || blocked 'ai-task-gates: STOP. Could not write private install authority.'
+    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" || { rm -f -- "$auth_stage"; blocked 'ai-task-gates: STOP. Could not write private install authority.'; }
+  ln -- "$auth_stage" "$auth_path" || { rm -f -- "$auth_stage"; blocked 'ai-task-gates: STOP. Could not write private install authority.'; }
+  rm -- "$auth_stage" || { rm -f -- "$auth_path"; blocked 'ai-task-gates: STOP. Could not write private install authority.'; }
+  windows_seal_file "$auth_path" || { rm -f -- "$auth_path" "$auth_path.seal"; blocked 'ai-task-gates: STOP. Could not seal private install authority.'; }
 
   printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$start_head"
 }

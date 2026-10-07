@@ -1,11 +1,36 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $installer = Join-Path $root 'bin\install-ai-devops-windows.ps1'
-$temp = Join-Path ([IO.Path]::GetTempPath()) ('ai-devops-source-gate-' + [guid]::NewGuid())
+$fixtureStateParent = Join-Path $env:USERPROFILE '.local\state'
+New-Item -ItemType Directory -Path $fixtureStateParent -Force | Out-Null
+$temp = Join-Path $fixtureStateParent ('ai-devops-source-gate-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $temp | Out-Null
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+& icacls.exe $temp '/inheritance:r' '/grant:r' "*$($sid):(OI)(CI)(F)" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Cannot protect Windows source-gate fixture.' }
+$sealKeyDir = Join-Path $fixtureStateParent '.ai-task-gates-seal'
+New-Item -ItemType Directory -Path $sealKeyDir -Force | Out-Null
+& icacls.exe $sealKeyDir '/inheritance:r' '/grant:r' "*$($sid):(OI)(CI)(F)" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Cannot protect Windows source-gate seal key.' }
+$sealKeyPath = Join-Path $sealKeyDir 'key.bin'
+if (-not (Test-Path -LiteralPath $sealKeyPath)) {
+  $key = New-Object byte[] 32
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try { $rng.GetBytes($key) } finally { $rng.Dispose() }
+  $stream = [IO.File]::Open($sealKeyPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+  try { $stream.Write($key, 0, $key.Length) } finally { $stream.Dispose() }
+}
 
 function Assert([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw "FAIL: $Message" }
+}
+function Write-TestAuthoritySeal([string]$IssuedPath, [string]$ReadPath) {
+  if (-not $ReadPath) { $ReadPath = $IssuedPath }
+  $digest = (Get-FileHash -LiteralPath $ReadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $key = [IO.File]::ReadAllBytes($sealKeyPath)
+  $bytes = [Text.Encoding]::UTF8.GetBytes(([IO.Path]::GetFullPath($IssuedPath) + "`n" + $digest))
+  $hmac = [Security.Cryptography.HMACSHA256]::new($key)
+  [IO.File]::WriteAllText("$IssuedPath.seal", [Convert]::ToBase64String($hmac.ComputeHash($bytes)) + "`n")
 }
 function Write-Receipt($Fixture) {
   $sha=(git -C $Fixture.Repo rev-parse HEAD).Trim()
@@ -58,6 +83,7 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
     }
   }
   @{schema_version=1;target_head=$Target;installed_head=$Base;installed_checkout=$Fixture.Repo;installed_launcher=$Fixture.Launcher;policy_digest=$policy;source_digest=$sourceDigest;review_report=$report;review_report_sha256=$reportHash;reviewer_approval='APPROVE by grok (implementer claude, assignment alloc-test-1) for deploy';legacy_migration=$LegacyMigration;first_install=$FirstInstall;recover_launchers=$RecoverLaunchers;managed_inventory=$inventory;installed_launcher_sha256=$launcherHash;installed_cmd_sha256=$cmdHash;installed_source_sha256=$installedSourceHash;issued_at='2026-09-28T00:00:00Z'} | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $authPath -Encoding ASCII
+  Write-TestAuthoritySeal $authPath
   return $authPath
 }
 function New-Fixture([string]$Name) {
@@ -236,8 +262,13 @@ try {
     $tampered=$savedAuth | ConvertFrom-Json
     $tampered.installed_head='0' * 40
     $tampered | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $pending -Encoding ASCII
+    Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'seal does not match its bytes'
+    Write-TestAuthoritySeal ($pending -replace '\.consuming$', '') $pending
     Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'does not match installed source'
-  } finally { [IO.File]::WriteAllText($pending, $savedAuth) }
+  } finally {
+    [IO.File]::WriteAllText($pending, $savedAuth)
+    Write-TestAuthoritySeal ($pending -replace '\.consuming$', '') $pending
+  }
   Invoke-Gate $protected -ExpectedHead $protectedHead
   Remove-Item -LiteralPath $pending
   Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'authorization is missing'
@@ -264,6 +295,7 @@ try {
   $row=Get-Content -Raw -LiteralPath $staleAuth | ConvertFrom-Json
   $row.policy_digest='0' * 64
   $row | ConvertTo-Json -Compress | Set-Content -LiteralPath $staleAuth -Encoding ASCII
+  Write-TestAuthoritySeal $staleAuth
   Invoke-Gate $stale -ExpectedHead $staleTarget -ExpectFailure -FailureContains 'does not match installed source, target, or policy'
   Assert ((git -C $stale.Repo rev-parse HEAD).Trim() -eq $staleBase) 'stale authorization advanced checkout'
   $staleAuth=Write-TestAuthorization $stale $staleTarget $staleBase
@@ -286,6 +318,7 @@ try {
     Set-Content -LiteralPath $forgedRow.review_report -Encoding ASCII
   $forgedRow.review_report_sha256=(Get-FileHash -LiteralPath $forgedRow.review_report -Algorithm SHA256).Hash.ToLowerInvariant()
   $forgedRow | ConvertTo-Json -Compress | Set-Content -LiteralPath $forgedAuth -Encoding ASCII
+  Write-TestAuthoritySeal $forgedAuth
   Invoke-Gate $forged -ExpectedHead $forgedTarget -ExpectFailure -FailureContains 'source digest or commit differs'
   $forgedAuth=Write-TestAuthorization $forged $forgedTarget $forgedBase
   $forgedLife=Get-ChildItem -LiteralPath (Join-Path (Split-Path -Parent $forged.Launcher) 'review-lifecycle') -Filter fixture.json -Recurse | Select-Object -First 1
@@ -451,6 +484,7 @@ try {
       'partial catalog changed the gate launcher'
     $stampPending=Join-Path (Split-Path -Parent $stamp.Launcher) ('install-authorizations\' + $stampTarget + '.json.consuming')
     Assert (Test-Path -LiteralPath $stampIssued -PathType Leaf) 'partial catalog consumed authority'
+    Assert (Test-Path -LiteralPath "$stampIssued.seal" -PathType Leaf) 'partial catalog lost authority seal'
     $env:AI_DEVOPS_TEST_FAIL_AFTER_GATE='1'
     $injectedFailed=$false
     try { & (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1') -RepoPath $stamp.Repo `
@@ -513,6 +547,7 @@ try {
     Assert ((Get-Content -LiteralPath $stamp.Launcher)[2] -ceq "# source-sha=$stampTarget") `
       'locked direct launcher refresh did not stamp the approved source'
     Assert (-not (Test-Path -LiteralPath $stampPending)) 'successful locked launcher refresh did not consume authority'
+    Assert (-not (Test-Path -LiteralPath "$stampIssued.seal")) 'successful locked launcher refresh left its authority seal'
     Assert (-not (Test-Path -LiteralPath $stampTransaction)) `
       'successful retry left a pending launcher transaction'
     Assert ([IO.File]::ReadAllText($fixturePathStore) -ceq $fixturePathAfter) `
