@@ -54,18 +54,21 @@ allocator but stayed registered here, and a session spent an hour trying it.
     2026-09-24: "the session that hit that error should A) know that that's
     why it failed, and B) tell me in that same session." When a provider
     refuses a run for lack of paid credit, the Grok, Muse, Qwen, Gemini,
-    DeepSeek and StepFun wrappers stop at once and exit **92**, printing on stderr:
+    DeepSeek and StepFun wrappers distinguish the refusal with exit **92**, printing on stderr:
 
     ```
     AI_REVIEWER_OUT_OF_CREDIT provider=<provider> code=insufficient_quota
     OUT OF CREDIT: <which account, where to add credits> - then run: ai-review-preflight clear <provider>
     ```
 
-    They also record a one-hour `out-of-credit` quarantine, so
+    Failure detection must inspect provider error channels while the child is
+    running; classification after the child exits alone does not prove an
+    immediate stop. Keep the original process supervision and uncertain-work
+    fences when stopping a refused run. They also record an `out-of-credit` quarantine, so
     `ai-review-preflight usable <provider>` refuses the provider until it is
     cleared. The session that sees exit 92 or either line must, in its very
-    next reply to Albert, quote the `OUT OF CREDIT:` line (which provider needs
-    credits and where), then rotate to the next reviewer. Never retry the same
+    next reply to Albert, report the provider and whether subscription quota or
+    prepaid funds are exhausted, then rotate to the next reviewer. Never retry the same
     provider, never report it as a generic failure, and never leave the news
     for another session. The shared-db governed-review runner reports the line
     verbatim in its `REFUSED` result with replacement code
@@ -77,11 +80,72 @@ allocator but stayed registered here, and a session spent an hour trying it.
 11. **Credit pause is a one-command switch, not a roster edit.** Owner rule,
     2026-09-30: subscription credit pauses must be as easy as on/off. Use
     `ai-review-preflight quarantine <provider> out-of-credit` to turn a
-    provider off and `ai-review-preflight clear <provider>` to turn it back
-    on after a refill. The allocator already skips quarantined providers.
+    provider off and `ai-review-preflight clear <provider>` for an explicit
+    verified refill. Automatic subscription restoration requires qualified
+    provider-owned reset metadata whose due time has passed, or a fresh
+    qualified available observation bound to the same credential profile and
+    model as the capacity hold. Either may clear only that matching capacity hold,
+    never an authentication, safety, maintenance or membership restriction.
+    Passing a reset date restores candidacy, not proof of current capacity or
+    permission to skip ordinary readiness and security checks. Missing account
+    identity or ambiguous reset metadata cannot restore access. Pay-as-you-go
+    depletion never clears because a guessed hourly cooldown passed.
+    The allocator already skips quarantined providers.
     Never edit `RETIRED_REVIEWERS` or `config/reviewer-registry.json` for a
     credit pause — that path needs two repos, tests, and a review. Reserve
     roster edits for permanent retirement or a real membership change.
+
+### Billing and reset evidence
+
+Albert's October 7, 2026 instruction identifies GLM, Qwen, Gemini and Kimi as
+subscriptions, and Muse, Grok, StepFun and DeepSeek as pay-as-you-go. These are
+the configured account types, not a claim that every provider product has that
+billing model. Subscriptions can have multiple independent quota windows;
+pay-as-you-go accounts can also have rate limits or spending caps. A rate limit,
+concurrency refusal, authentication error or generic HTTP 402/403/429 must not
+be relabelled as depleted funds without specific provider evidence.
+
+GLM reset metadata exists: the [official pinned ZCode quota mapper](https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/packages/services/src/usage-stats/providers/bigmodelUsageQuotaMapper.ts)
+preserves `nextResetTime` for each quota limit. The [official display consumer](https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/packages/ui/src/lib/codingPlanQuotaPresentation.ts)
+passes that value directly to JavaScript `new Date`, establishing epoch
+milliseconds; its category mapping confirms five-hour and weekly model buckets.
+The previous toolkit reader
+discarded that field; an earlier report that GLM has no reset metadata was too
+broad. `tools/glm_credit.py` preserves plausible epoch-millisecond timestamps
+for its already-qualified five-hour and weekly model buckets. Missing,
+malformed, stale or implausibly distant timestamps remain unknown without
+discarding a valid capacity observation. If multiple model buckets are
+exhausted, the reported restoration time is their latest reset only when each
+exhausted bucket has a valid reset. The earliest exhausted-bucket reset can
+schedule a recheck; it cannot clear the hold while a later independent exhausted
+bucket remains. Passing the qualified latest reset lifts only the matching
+subscription capacity hold; ordinary checks still decide whether a review runs.
+Tool-only limits and subscription `nextRenewTime` do not prove model recovery.
+The [official usage rules](https://docs.z.ai/devpack/overview) describe five-hour
+and weekly credit windows; [reset cards](https://docs.z.ai/devpack/faq) can restart
+those cycles. Exact bucket shape must remain qualified against the official
+reader and sanitized installed observations; timestamps
+alone are not live proof of refill.
+
+Gemini's authenticated `agy /usage` reader already preserves per-bucket reset
+times, but its qualified response does not establish opaque account identity.
+Qwen error output may report a reset delay; that refusal is evidence for the
+specific run, not a qualified non-generating available observation. Do not
+infer an account from a home-directory hash or re-enable either subscription
+solely because an unqualified date or local cooldown passed. A qualified exact
+provider reset may restore matching capacity candidacy without another provider
+query; a fresh same-account available observation may restore it sooner.
+
+Kimi subscriptions reset, but Kimi remains suspended in the current reviewer
+registry. Its [official error reference](https://www.kimi.com/code/docs/en/kimi-code/error-reference.html)
+distinguishes five-hour, legacy weekly and monthly quota exhaustion from
+concurrent-request and membership-verification failures. The current
+[official managed usage API](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/reference/server-api.md)
+documents `limit5h`, `limit7d`, `monthTotal` and `monthCode` windows with optional
+RFC3339 `resetAt` fields. That newer interface has not qualified the installed
+wrapper/account path; no account-specific Kimi reset date or automatic reviewer
+activation follows from the documentation. A restored subscription balance
+does not remove the separate suspended-membership restriction.
 
 12. **StepFun is in the allocator rotation; Linux is bubblewrap-isolated, Windows
     is folder + test shell (weaker).** Owner instruction 2026-09-25: StepFun
