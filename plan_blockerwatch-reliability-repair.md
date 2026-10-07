@@ -276,7 +276,7 @@ GitHub effects.
 
 6.3. Prove Claude/Codex/ZCode resume and fresh modes, leader failover, auth
 repair, cross-repo HTS release, and interrupted publication as separate outcomes.
-One session and one issue per unproven outcome. **Gate:** each proof names deployed
+Continue the authorized outcomes when actual gates allow. **Gate:** each proof names deployed
 commit/config/schedule and shows no duplicate execution/comment.
 
 #### Phase 7 — close the loop

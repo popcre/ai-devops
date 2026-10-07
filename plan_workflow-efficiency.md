@@ -115,7 +115,7 @@ No implementation experiments were performed in the planning task. A Windows `.c
 
 **Locked:** preserve source/digest/merge-base integrity, private-data boundaries, reviewer containment, production authorization, recoverable destructive operations and genuine shared-runtime collision guards. Keep a stable aggregate check that rejects missing, cancelled and failed required evidence. Full default and scheduled testing remain available. Unknown dependency coverage cannot silently narrow.
 
-**Locked:** one current roadmap (#650), reused existing issue owners, one live outcome/session, one scoped installed proof for each changed capability. This publication changes prose only. No automatic approval of future gate weakening or production actions is implied.
+**Locked:** one current roadmap (#650), reused existing issue owners, authorized outcomes continued when actual gates allow, one scoped installed proof for each changed capability. This publication changes prose only. No automatic approval of future gate weakening or production actions is implied.
 
 **Locked:** local focused tests are development feedback; PR CI is authoritative relevant platform proof; merge-group validation protects a changed integration. Do not describe different trees as identical commits. Additional review stages need a distinct unresolved risk. Reviewer-safety gets one exact-head independent final review; ordinary prose does not buy a paid reviewer.
 

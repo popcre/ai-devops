@@ -22,10 +22,10 @@
 | 7. Evaluate task-class/skill disagreement logging | open | 2026-09-20 | §9.9; public synthetic eval prompts only |
 | 8. Reconcile adoption, installation, documentation, and retirement | open | 2026-09-20 | §9.10 and §13 |
 
-**Fresh-session start:** begin at §9.1 in a new current-upstream worktree. Execute
-only one numbered outcome per session. Before each later phase, load the
-`fresh-session` skill, reread this STATUS table plus that phase, and update this
-file in the same session so downstream instructions do not drift.
+**Fresh-session start:** begin at §9.1 in a new current-upstream worktree.
+Complete the authorized outcomes when actual dependencies, ownership and safety
+gates allow. Before each later phase, reread this STATUS table plus that phase
+and update this file so downstream instructions do not drift.
 
 ## 1. The ultimate goal — what we are trying to achieve
 
@@ -252,9 +252,9 @@ Baseline for this plan: `origin/main` commit
 - Configuration owns model, timeouts, size/call limits, labels, questions, and
   thresholds. Tests may override paths/endpoints through explicit test hooks;
   production callers may not silently replace safety settings.
-- Every phase is a separate branch/PR/session and one unproven live outcome. A
-  phase that lands without live proof opens exactly one phase-specific proof
-  issue before that session ends.
+- Verify each authorized phase separately and continue when actual gates allow.
+  If genuinely blocked without live proof, leave a proof-gap checklist item on
+  the same issue; never open a leftover-proof issue.
 - Reviewer phases are `reviewer-safety` work. They require the repository's
   protected gate, full affected suites, and one read-only exact-head independent
   final review before merge.

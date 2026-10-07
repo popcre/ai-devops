@@ -93,7 +93,7 @@ count `gh_api`/`gh_call` sites in the tick path; compare with a replay fixture
 - Disabling BlockerWatch, lengthening the 10-minute tick, lengthening the
   5-minute waiter floor, or dropping wakes/alarms/links to save calls.
 - A new webhook service, cloud broker, or remote coordinator.
-- Implementing more than one step per session (see STATUS).
+- Claiming completion without proving each authorized step (see STATUS).
 
 ## 5. Current state of the code
 

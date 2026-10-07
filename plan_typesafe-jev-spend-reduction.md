@@ -1,6 +1,6 @@
 # IMPLEMENTATION PLAN — measured Jev token savings (2026-09-27)
 
-**Parent issue:** [#643](https://github.com/popcre/ai-devops/issues/643). **Handoff:** retired after the no-go baseline. **Owner:** the session implementing the first open row, one row per session.
+**Parent issue:** [#643](https://github.com/popcre/ai-devops/issues/643). **Handoff:** retired after the no-go baseline. **Owner:** the session implementing the authorized remaining rows, with each outcome verified.
 
 ## STATUS — read first
 

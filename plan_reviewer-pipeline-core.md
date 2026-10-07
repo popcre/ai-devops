@@ -127,7 +127,7 @@ Nothing in Phases A–E is implemented yet. Proposal drafts live in `.ai/tmp/` (
 3. One core owns governance; adapters only call the provider and return a report (or implement result).
 4. Primary artifact = suggestion report + evidence packet. Report floor is `MIN_REPORT_CHARS=200` (`bin/ai-review-lifecycle:267-276`).
 5. Lifecycle terminal vocabulary stays `APPROVE|REJECT|BLOCKED` plus `failure_class` — not a new approve/reject product.
-6. Phase A (evidence retention) is the first and only landing step of the next implementing session.
+6. Phase A (evidence retention) lands first; continue authorized later phases when their actual dependencies and safety gates allow.
 7. Fingerprint requalification set remains `LIVE_QUALIFIED_PROVIDERS="gemini qwen"` until Phase B changes the **record shape**, not the set.
 
 **OPEN (implementer judgment allowed)**

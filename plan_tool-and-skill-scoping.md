@@ -187,7 +187,7 @@ Locked (do not relitigate):
 - One catalog of definitions; membership is data beside it. No second copy.
 - Protected skills stay global and auto-invocable.
 - Measure before and after every change with the same method.
-- One phase = one session = one issue; each phase ends with live proof or a
+- Verify each authorized phase and continue when actual gates allow; each phase ends with live proof or a
   `- [ ] live proof` checklist item on that same issue (leftover-proof issues superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md)).
 
 Open (implementer's judgment, with criteria):
