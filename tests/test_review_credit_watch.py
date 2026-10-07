@@ -423,7 +423,7 @@ class CreditTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, '{"status":"unchanged"}')
         out = io.StringIO()
         with contextlib.redirect_stdout(out): self.assertEqual(watch.main(['tick'], run=run), 0)
-        pauses = [c for c in calls if any(arg.endswith('ai-review-preflight') for arg in c)]
+        pauses = [c for c in calls if 'capacity-observe' in c]
         self.assertIn('capacity-observe', pauses[0])
         self.assertEqual(len(pauses), 1)
         self.assertNotIn('private', out.getvalue())

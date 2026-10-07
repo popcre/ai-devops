@@ -211,6 +211,16 @@ def main(args=None, run=subprocess.run):
             print('credit-watch: duty claim unavailable; no observations or holds')
             return 1
     failed = False
+    if args == ['tick']:
+        # The existing scheduler owns reset-time qualification, including Qwen
+        # whose predictive allowance reader remains unsupported.
+        for provider in ('gemini', 'qwen'):
+            try:
+                response = run(tool_command('ai-review-preflight', 'reset-requalify', provider),
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1900, check=False)
+                failed |= response.returncode != 0
+            except (OSError, subprocess.TimeoutExpired):
+                failed = True
     for provider in ('gemini', 'deepseek', 'glm', 'stepfun'):
         observation = read_provider(provider, run=run)
         hold = 'unchanged'

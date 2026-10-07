@@ -408,7 +408,10 @@ health_status() { # PROVIDER
   # path matches the standing rule. This runs before static_status so a
   # qualified-but-broken provider can never be drawn.
   if known_broken "$1"; then printf '%s\n' "$ACTIVE_KNOWN_BROKEN" | jq -c '. + {status:"known-broken",failure_class:"provider_unavailable"}'; return 1; fi
-  if static_status "$1"; then return 1; fi
+  if static_status "$1" >/dev/null; then
+    reset_requalify "$1" >/dev/null || true
+    if static_status "$1"; then return 1; fi
+  fi
   if [ "$1" = stepfun ]; then
     case "${AI_STEPFUN_PLATFORM:-$(uname -s)}" in
       MINGW*|MSYS*|CYGWIN*|Windows*|windows*)
@@ -647,6 +650,44 @@ qualify_gemini() {
 # stale-check case in requalify_provider.
 LIVE_QUALIFIED_PROVIDERS="gemini qwen"
 
+qualification_subject() { # exact current wrapper and local non-generating identity
+  local provider="$1" wrapper identity rc=0
+  wrapper="$(provider_wrapper "$provider")"
+  [ -f "$wrapper" ] || return 1
+  identity="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)" || rc=$?
+  [ "$rc" -eq 0 ] || return 1
+  [ "$(printf '%s\n' "$identity" | wc -l | tr -d ' ')" -eq 1 ] || return 1
+  case "$provider" in
+    qwen) printf '%s\n' "$identity" | grep -Eq '^IDENTITY runtime_sha256=[0-9a-f]{64} preloader_sha256=[0-9a-f]{64}$' || return 1 ;;
+    gemini) printf '%s\n' "$identity" | grep -Eq '^IDENTITY agy=[^ ]+ agy_sha256=[0-9a-f]{64} model=[^ ]+ ' || return 1 ;;
+    *) return 1 ;;
+  esac
+  jq -nc --arg wrapper "$(sha256sum "$wrapper" | awk '{print $1}')" \
+    --arg identity "$(printf '%s' "$identity" | sha256sum | awk '{print $1}')" \
+    '{wrapper_sha256:$wrapper,identity_sha256:$identity}'
+}
+
+reset_requalify() { # only a due reset of an exact capacity-deferred installation
+  local provider="$1" marker recorded subject claim
+  case "$provider" in gemini|qwen) ;; *) return 0;; esac
+  [ "$(registry_state "$provider")" = registered ] || return 0
+  known_broken "$provider" && return 0
+  active_quarantine "$provider" && return 0
+  # Preserve a current qualification; this path is never a health probe.
+  case "$provider" in gemini) gemini_live_qualified && return 0;; qwen) qwen_live_qualified && return 0;; esac
+  marker="$(requalify_expected_file "$provider")"
+  [ -f "$marker" ] && [ ! -L "$marker" ] || return 0
+  recorded="$(jq -c '.capacity_deferral.subject // empty' "$marker")" || return 1
+  [ -n "$recorded" ] || return 0
+  subject="$(qualification_subject "$provider")" || return 0
+  [ "$subject" = "$recorded" ] || return 0
+  # Expiration lifts only its own allowance hold, retaining the exact reset receipt.
+  admission_store capacity-status "$provider" >/dev/null || return 1
+  claim="$(admission_store reset-qualification-claim "$provider" --expect-record "$(printf '%s' "$subject" | sha256sum | awk '{print $1}')")" || return 1
+  [ "$(printf '%s' "$claim" | jq -r .claimed)" = true ] || return 0
+  requalify_provider "$provider"
+}
+
 # record_requalify_failure PROVIDER OUTPUT_FILE persists a failed automatic
 # requalification as a reviewer issue (#804). A failure that cannot be
 # recorded is still printed, so it is never silently skipped.
@@ -686,7 +727,7 @@ requalify_expected_file() { printf '%s/%s-requalify-marker.json' "$STATE_DIR" "$
 # is current or was just re-established, and 1 when a requalification attempt
 # failed (already recorded and surfaced by then).
 requalify_provider() { # PROVIDER
-  local provider="$1" file marker output rc qualify_output
+  local provider="$1" file marker output rc qualify_output attempted_subject
   if [ "$(registry_state "$provider")" != registered ]; then
     note "ai-review-preflight: $provider is not carried in the reviewer registry; automatic requalification skips it."
     return 0
@@ -711,6 +752,7 @@ requalify_provider() { # PROVIDER
     note "ai-review-preflight: $provider live qualification is stale (wrapper, runtime, or preloader changed); re-qualifying."
   fi
   output="$(mktemp "${TMPDIR:-/tmp}/requalify.XXXXXX")"
+  attempted_subject="$(qualification_subject "$provider")" || { rm -f "$output"; printf 'ai-review-preflight: %s exact current qualification identity is unavailable; no live canary submitted.\n' "$provider" >&2; return 1; }
   set +e
   qualify_output="$(case "$provider" in gemini) qualify_gemini ;; qwen) qualify_qwen ;; esac 2>&1)"
   rc=$?
@@ -729,6 +771,9 @@ requalify_provider() { # PROVIDER
   # recorded, but the requalification step itself must not fail an
   # installation for days or weeks until the provider's quota resets.
   if [ "$REQUALIFY_FAILURE_CLASS" = "provider-outage/capacity" ]; then
+    [ "$(qualification_subject "$provider")" = "$attempted_subject" ] || return 1
+    write_atomic "$marker" "$(jq -nc --arg p "$provider" --argjson at "$(now_epoch)" --argjson subject "$attempted_subject" \
+      '{version:1,provider:$p,expected_epoch:$at,capacity_deferral:{subject:$subject,observed_epoch:$at}}')"
     printf 'ai-review-preflight: %s requalification deferred: provider capacity event, not a code defect; the installation step passes but the reviewer stays quarantined (NOT usable) until a later requalify succeeds.\n' "$provider" >&2
     return 0
   fi
@@ -1386,6 +1431,11 @@ case "$cmd" in
     valid_provider "$provider" || die "unknown provider '$provider'."
     [ "$#" -eq 0 ] || die 'unexpected capacity-status argument'
     admission_store capacity-status "$provider" ;;
+  reset-requalify)
+    provider="${1:-}"; shift || true
+    valid_provider "$provider" || die "unknown provider '$provider'."
+    [ "$#" -eq 0 ] || die 'unexpected reset-requalify argument'
+    reset_requalify "$provider" ;;
   capacity-observe)
     provider="${1:-}"; shift || true
     valid_provider "$provider" || die "unknown provider '$provider'."

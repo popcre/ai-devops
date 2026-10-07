@@ -542,7 +542,7 @@ def pause_failure(data, provider, reason, now, seconds=3600, observed=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'pause', 'pause-status', 'capacity-status', 'capacity-observe', 'global', 'clear', 'clear-global', 'credit', 'classify'))
+    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'pause', 'pause-status', 'capacity-status', 'capacity-observe', 'reset-qualification-claim', 'global', 'clear', 'clear-global', 'credit', 'classify'))
     parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen','stepfun'))
     parser.add_argument('--directory', type=pathlib.Path)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
@@ -586,6 +586,22 @@ def main():
                     data['capacity_hold'] = None
                     publish(args.directory, args.provider, data)
                     result = None
+            elif args.action == 'reset-qualification-claim':
+                reset = data.get('last_capacity_reset')
+                prior_attempt = data.get('reset_qualification_attempt')
+                if (not reset or data.get('capacity_hold') or data.get('global')
+                        or reset.get('failure_class') != 'allowance-exhausted'
+                        or not reset.get('reset_at') or reset_epoch(reset['reset_at']) > now
+                        or not re.fullmatch('[0-9a-f]{64}', args.expect_record)
+                        or any(record['expires_epoch'] > now for record in data['backoffs'].values())):
+                    result = {'claimed': False, 'reason': 'not-due-or-stronger-hold'}
+                elif prior_attempt and prior_attempt.get('reset_record_id') == reset.get('record_id'):
+                    result = {'claimed': False, 'reason': 'already-attempted'}
+                else:
+                    data['reset_qualification_attempt'] = {'reset_record_id': reset['record_id'],
+                        'subject_sha256': args.expect_record, 'started_epoch': now}
+                    publish(args.directory, args.provider, data)
+                    result = {'claimed': True}
             elif args.action == 'capacity-observe':
                 if not args.observation_file or args.observation_file.is_symlink():
                     raise ValueError('capacity observation needs regular file')

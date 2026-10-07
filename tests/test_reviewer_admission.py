@@ -17,6 +17,27 @@ spec.loader.exec_module(api)
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_due_reset_claim_once_preserves_stronger_holds_and_new_reset_can_retry(self):
+        import time
+        now=int(time.time())
+        receipt={'provider':'qwen','failure_class':'allowance-exhausted','observed_epoch':now-60,'reset_at':datetime.datetime.fromtimestamp(now-1,datetime.timezone.utc).isoformat(),'record_id':'first'}
+        data={'version':2,'provider':'qwen','global':None,'backoffs':{},'last_capacity_reset':receipt}
+        api.publish(self.directory,'qwen',data)
+        command=[sys.executable,str(MODULE),'reset-qualification-claim','qwen','--directory',str(self.directory),'--expect-record','a'*64]
+        def claim():
+            result=subprocess.run(command,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            return json.loads(result.stdout)
+        self.assertTrue(claim()['claimed'])
+        self.assertEqual(claim()['reason'],'already-attempted')
+        data=api.load(self.directory,'qwen')
+        data['last_capacity_reset']['record_id']='second'
+        data['global']={'provider':'qwen','failure_class':'authentication-failed','created_epoch':now,'expires_epoch':now+3600}
+        api.publish(self.directory,'qwen',data)
+        self.assertFalse(claim()['claimed'])
+        data['global']=None
+        api.publish(self.directory,'qwen',data)
+        self.assertTrue(claim()['claimed'])
     def test_subscription_quota_reset_never_lifts_prior_paid_funds_hold(self):
         import time
         now=int(time.time())
