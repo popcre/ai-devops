@@ -358,6 +358,27 @@ plus the live installed SHA and gate hash. The gate trusts the operation and
 evidence rows only in the wrapper-written header before `## Result`; rows in
 reviewer text never count. The separate installation task then
 uses `authorize-install --stale-manifest-recovery` for one pinned target update.
+
+Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
+
+- Run `update.sh` from the candidate worktree, never from the installed
+  checkout; otherwise it stops with `candidate and installed checkout must differ`.
+- Run `authorize-install` with the **candidate's** `bin/ai-task-gates`. The
+  installed launcher points into the installed checkout, so while that checkout
+  predates a gate fix it still runs the old gate (it refused a valid report with
+  `Review does not name exact target` until the candidate's copy was used).
+- The review, authorization and `update.sh` must all name the current
+  `origin/main`. Any merge in between (even a docs-only one) makes `update.sh`
+  stop with `candidate checkout is not the exact fetched target`; reset both
+  worktrees to the new head and redo the review and authorization.
+- Pass the review report at the path the review wrote it; a copy elsewhere is
+  not accepted.
+- `another installation is active for this checkout` can be a leftover
+  `setup-desktop-apps.sh --claude-only --wait-for-desktop-exit` started by an
+  earlier install that inherited the checkout lock and waits until the Claude
+  desktop app exits. Find the holder with
+  `fuser -v ~/.local/state/ai-devops/task-gates/install-*.lock`; stopping that
+  waiter is safe because the next install starts it again.
 Without that exact reviewed evidence, the updater stops before changing the
 installed checkout.
 
