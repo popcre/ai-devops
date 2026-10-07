@@ -136,6 +136,16 @@ int main(int argc, char **argv) {
   if (argc > 1 && strcmp(argv[1], "--help") == 0) { puts("step - AI coding assistant"); return 0; }
   if (argc > 1 && strcmp(argv[1], "--version") == 0) { puts("step-fixture-version"); return 0; }
   if (argc > 1 && strcmp(argv[1], "-p") == 0) {
+    const char *approval = NULL, *fallback = NULL;
+    for (int i = 2; i + 1 < argc; i++) {
+      if (strcmp(argv[i], "--approval-mode") == 0) approval = argv[i + 1];
+      if (strcmp(argv[i], "--non-interactive-approval") == 0) fallback = argv[i + 1];
+    }
+    if (!approval || strcmp(approval, "auto") != 0) {
+      fprintf(stderr, "Error: Invalid approval mode. Valid values: confirm, auto, strict\n");
+      return 1;
+    }
+    if (!fallback || strcmp(fallback, "allow") != 0) return 1;
     char *args[] = {argv[0], "--version", NULL};
     execv(argv[0], args);
   }
@@ -143,6 +153,13 @@ int main(int argc, char **argv) {
 }
 EOF
   if cc -o "$TMP/stepfun-door/bin/step" "$TMP/stepfun-door/step.c"; then
+    if "$TMP/stepfun-door/bin/step" -p --approval-mode acceptEdits --non-interactive-approval allow \
+      > "$TMP/stepfun-door/invalid-mode.out" 2>&1; then
+      bad 'StepFun fixture rejects unsupported approval mode'
+    else
+      check 'StepFun fixture rejects unsupported approval mode' \
+        "grep -q 'Invalid approval mode' '$TMP/stepfun-door/invalid-mode.out'"
+    fi
     STEP_DOOR_INTERPRETER="$(readelf -l "$TMP/stepfun-door/bin/step" | sed -n 's/.*Requesting program interpreter: \([^]]*\)].*/\1/p')"
     case "$STEP_DOOR_INTERPRETER" in
       /lib/*|/lib64/*)
@@ -160,10 +177,10 @@ EOF
           DOOR_PACKET_DIR="$TMP/stepfun-door/packet" DOOR_PROMPT_FILE="$TMP/stepfun-door/prompt" \
           DOOR_REPORT_OUT="$TMP/stepfun-door/report" DOOR_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)" \
           bash "$STEPFUN_DOOR" review > "$TMP/stepfun-door/door.out" 2>&1; then
-          check 'StepFun door launches step --version through the real sandbox' \
+          check 'StepFun door uses supported writable approval and runs step --version' \
             "grep -q 'step-fixture-version' '$TMP/stepfun-door/report'"
         else
-          bad 'StepFun door launches step --version through the real sandbox'
+          bad 'StepFun door uses supported writable approval and runs step --version'
         fi
         ;;
       *) skip 'StepFun door loader regression requires an ELF interpreter under /lib or /lib64' ;;

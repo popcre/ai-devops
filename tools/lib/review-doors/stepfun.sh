@@ -307,7 +307,7 @@ main() {
         --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
         --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --chdir "$DOOR_WORKDIR" -- \
         "$bin" -p --no-session --model "$SF_STEP_MODEL" \
-        --approval-mode acceptEdits --non-interactive-approval allow \
+        --approval-mode auto --non-interactive-approval allow \
         --no-extensions --no-skills --no-prompt-templates --no-themes \
         --no-approve --no-update-check -- "$(cat "$prompt_full")" \
         > "$log" 2> "$out.err"
