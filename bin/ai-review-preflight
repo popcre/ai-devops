@@ -657,7 +657,11 @@ qualification_subject() { # exact current wrapper and local non-generating ident
   local provider="$1" wrapper identity rc=0
   wrapper="$(provider_wrapper "$provider")"
   [ -f "$wrapper" ] || return 1
-  identity="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)" || rc=$?
+  if [ "$provider" = gemini ]; then
+    identity="$(AI_GEMINI_CALLER=preflight timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)" || rc=$?
+  else
+    identity="$(timeout "${CHECK_TIMEOUT}s" "$wrapper" doctor --identity 2>/dev/null)" || rc=$?
+  fi
   [ "$rc" -eq 0 ] || return 1
   [ "$(printf '%s\n' "$identity" | wc -l | tr -d ' ')" -eq 1 ] || return 1
   case "$provider" in

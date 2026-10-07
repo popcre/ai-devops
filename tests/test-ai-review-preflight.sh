@@ -100,6 +100,14 @@ cat > "$TMP/bin/gemini" <<'EOF'
 # Like bin/ai-gemini: no detectable harness caller means refuse (installer
 # terminal). Preflight must name itself as the caller.
 [ "${AI_GEMINI_CALLER:-}" = preflight ] || { echo caller_identity_missing >&2; exit 2; }
+[ -z "${MOCK_GEMINI_MODE_LOG:-}" ] || printf '%s %s\n' "${1:-}" "${2:-}" >> "$MOCK_GEMINI_MODE_LOG"
+if [ "${1:-}" = qualify-live ] && [ "${MOCK_GEMINI_FAIL:-0}" = capacity ]; then
+  receipt="$(mktemp)"
+  printf '{"provider":"gemini","failure_class":"allowance-exhausted"}\n' > "$receipt"
+  "$MOCK_ADMISSION_PYTHON" "$MOCK_ADMISSION_TOOL" credit gemini --directory "$AI_REVIEW_QUARANTINE_DIR" --marker "$receipt" --record
+  rm -f "$receipt"
+  exit 1
+fi
 case "${1:-}" in
   qualify-live) [ "${MOCK_GEMINI_FAIL:-0}" = 0 ] || exit 70; [ "${MOCK_GEMINI_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; [ "${MOCK_GEMINI_MUTATE_RUNTIME:-0}" = 0 ] || printf '%064d\n' 0 | tr 0 b > "$MOCK_AGY_SHA_FILE"; printf 'QUALIFIED session=test model=%s exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=/tmp/test\n' "${MOCK_GEMINI_MODEL:-gemini-3.8-flash-high}" ;;
   doctor) if [ "${2:-}" = --live ]; then printf 'live\n' >> "$MOCK_GEMINI_LIVE_CONTACT"; printf 'QUALIFIED session=live model=gemini-3.8-flash-high exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=/tmp/live\n'; exit 0; fi; if [ "${2:-}" != --identity ] && [ "${MOCK_GEMINI_NORMAL_DOCTOR_FAIL:-0}" = 1 ]; then exit 124; fi; status=QUARANTINED; rc=3; [ "${2:-}" = --identity ] && { status=IDENTITY; rc=0; }; [ ! -f "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json" ] || { [ "${2:-}" = --identity ] || status=PASS; rc=0; }; printf '%s agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=test\n' "$status" "${MOCK_AGY_VERSION:-1.1.19}" "$(cat "$MOCK_AGY_SHA_FILE")" "${MOCK_GEMINI_MODEL:-gemini-3.8-flash-high}"; exit "$rc" ;;
@@ -315,6 +323,16 @@ unset MOCK_QWEN_CONTACT_FILE
 check "a failed requalification is retried, not silently abandoned" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 printf '{"version":1,"providers":{"qwen":{"registry_state":"absent","reason":"retired for this fixture"}}}\n' > "$TMP/qwen-omitted.json"
 check "an unregistered reviewer is skipped without a canary" ": > '$MOCK_QWEN_MODE_LOG'; printf '%064d\n' 3 | tr 0 b > '$AI_QWEN_TEST_RUNTIME_FILE'; AI_REVIEW_REGISTRY_FILE='$TMP/qwen-omitted.json' $SCRIPT requalify qwen && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+export MOCK_GEMINI_MODE_LOG="$TMP/gemini-reset-calls"
+printf '%064d\n' 7 | tr 0 d > "$MOCK_AGY_SHA_FILE"
+check "Gemini stale capacity deferral captures caller-qualified exact subject" "env -u AI_GEMINI_CALLER -u CODEX_THREAD_ID -u CLAUDECODE MOCK_GEMINI_FAIL=capacity $SCRIPT requalify gemini && jq -e '.capacity_deferral.subject.identity_sha256|length==64' '$AI_REVIEW_QUARANTINE_DIR/gemini-requalify-marker.json'"
+check "Gemini unknown reset makes no additional identity or live call" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER $SCRIPT reset-requalify gemini && test ! -s '$MOCK_GEMINI_MODE_LOG'"
+jq --arg at "$reset_past" '.capacity_hold.reset_at=$at' "$AI_REVIEW_QUARANTINE_DIR/gemini.json" > "$TMP/gemini-due.json"
+mv "$TMP/gemini-due.json" "$AI_REVIEW_QUARANTINE_DIR/gemini.json"
+check "Gemini due reset restores qualification with explicit preflight caller" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER -u CODEX_THREAD_ID -u CLAUDECODE $SCRIPT reset-requalify gemini && test \"\$(grep -c '^qualify-live ' '$MOCK_GEMINI_MODE_LOG')\" -eq 1"
+check "healthy Gemini reset adds no identity or live calls" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER $SCRIPT reset-requalify gemini && test ! -s '$MOCK_GEMINI_MODE_LOG'"
+check "healthy Gemini status retains one existing identity check" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER $SCRIPT status gemini | jq -e '.usable==true' && test \"\$(grep -c '^doctor --identity$' '$MOCK_GEMINI_MODE_LOG')\" -eq 1 && ! grep -q '^qualify-live ' '$MOCK_GEMINI_MODE_LOG'"
+unset MOCK_GEMINI_MODE_LOG
 unset AI_REVIEWER_ISSUE_DIR
 check "requalify recovers the reviewer on the next successful run" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 
