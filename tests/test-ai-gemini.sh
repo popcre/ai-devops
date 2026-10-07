@@ -217,11 +217,14 @@ jq '.status="PREPARED"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp
 write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
 set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askstale.err"; ASKSTALE_RC=$?; set -e
 check 'ask incomplete/stale session never auto-requalifies' "test '$ASKSTALE_RC' -ne 0 && grep -q 'session requires recovery' '$TMP/askstale.err' && ! grep -q 'requalifying automatically' '$TMP/askstale.err' && test ! -s '$MOCK_AGY_CALLS'"
-# Restore COMPLETE then force model mismatch on the same reusable session.
+# Restore COMPLETE then force session-model mismatch (session .model, not
+# the qualification record) on the same reusable session.
 jq '.status="COMPLETE"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
-write_qualification 1.1.14 gemini-other; : > "$MOCK_AGY_CALLS"
+jq '.model="gemini-other-model"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
+write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
 set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askmodel.err"; ASKMODEL_RC=$?; set -e
 check 'ask model-mismatched session never auto-requalifies' "test '$ASKMODEL_RC' -ne 0 && grep -q 'configured model differs' '$TMP/askmodel.err' && ! grep -q 'requalifying automatically' '$TMP/askmodel.err' && test ! -s '$MOCK_AGY_CALLS'"
+jq '.model="gemini-3.8-flash-high"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
 write_qualification
 
 echo '== byte identity and exact identity gates'
@@ -435,7 +438,9 @@ check 'a stalled ask() identity resolve fails in time and names the bound' "test
 set +e; REFUSE_OUT="$(cd "$SLOW_ASK" && "$SCRIPT" new refused --assert-head 0000000000000000000000000000000000000000 --prompt review 2>&1)"; set -e
 check 'a genuine identity refusal is not worded as a timeout' "printf '%s' '$REFUSE_OUT' | grep -q 'source identity refused' && ! printf '%s' '$REFUSE_OUT' | grep -qiE 'timed out|deadline|time limit'"
 R7="$TMP/repo7"; make_repo "$R7"; new_run "$R7" stale normal >/dev/null; printf next >> "$R7/file.txt"; git -C "$R7" add file.txt; git -C "$R7" commit -qm next
-write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
+# Keep qualification current so the follow-up reaches ask_existing (and begin)
+# instead of dying in guard_quarantine before recovery can be recorded.
+write_qualification; : > "$MOCK_AGY_CALLS"
 set +e; (cd "$R7" && "$SCRIPT" ask stale --prompt later) 2>"$TMP/stalehead.err"; STALEHEAD_RC=$?; set -e
 check 'follow-up refuses a changed repository head' "test '$STALEHEAD_RC' -ne 0"
 check 'changed-head follow-up never auto-requalifies' "! grep -q 'requalifying automatically' '$TMP/stalehead.err' && test ! -s '$MOCK_AGY_CALLS'"
