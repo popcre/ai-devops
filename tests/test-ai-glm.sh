@@ -863,7 +863,7 @@ PR_STATE="$TMP/prune-state-int"; PR_SB="$TMP/prune-sandboxes-int"; : > "$PR_CALL
 mkdir -p "$PR_STATE/sessions/rid1" "$PR_SB"
 pr_meta intr review "$PR_OLD"; pr_meta intrz review "$PR_OLD"
 AI_GLM_SOURCE="$AI_GLM" AI_GLM_STATE_DIR="$PR_STATE" AI_REVIEW_SANDBOX_DIR="$PR_SB" PR_CALLS="$PR_CALLS" \
-  "$PYTHON" -c 'import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execvp(sys.argv[1], sys.argv[1:])' bash -c '
+  env --default-signal=INT bash -c '
   source "$AI_GLM_SOURCE"
   server_up(){ return 0; }
   permission_http(){ printf "%s %s\n" "$1" "$2" >> "$PR_CALLS"; HTTP_STATUS=200; HTTP_BODY="{}"
