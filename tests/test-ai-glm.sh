@@ -170,6 +170,7 @@ REVIEW_LIFECYCLE_BIN="$FIXTURE/lifecycle-read"; PACKET_BIN="$FIXTURE/packet-read
 timeout(){ if [ "${OBSERVATION_HELPER_CASE:-}" = helper-timeout ];then return 124;fi;command timeout "$@"; }
 preflight_fixture(){ printf '%s\n' "$*" >> "$FIXTURE/pauses"; }
 REVIEW_PREFLIGHT_BIN=preflight_fixture
+: > "$FIXTURE/pauses"
 # Reconstructed public schema, never a claimed retained live assistant envelope.
 prepare(){
  "$PYTHON" - "$FIXTURE" "$1" <<'FIXTURE_PY'
@@ -216,7 +217,7 @@ prepare known;meta="$FIXTURE/meta-known.json"
 persist_review_error "$meta" "$msg" historical
 receipt="$(jq -r .remote_turn.error_path "$meta")";expected="$(cat "$FIXTURE/expected-epoch")"
 jq -e --argjson epoch "$expected" '.original_observation.state=="known" and .observed_epoch==$epoch and .captured_epoch>$epoch' "$receipt" >/dev/null
-grep -q -- "--observed $expected" "$FIXTURE/pauses"
+[ ! -s "$FIXTURE/pauses" ] # #1404: error evidence alone never invents a one-hour credit pause.
 cp "$receipt" "$FIXTURE/immutable-known"
 # A later readback is telemetry only; no HTTP and no immutable time renewal.
 api(){ exit 91; };send_prompt(){ exit 92; };require_review_server(){ exit 93; };record_diagnostic(){ :; }

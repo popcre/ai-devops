@@ -176,7 +176,7 @@ class CreditStreamTests(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "native fake launcher is POSIX; Windows actual doors covered by Bash suites")
     def test_six_formal_doors_stop_hung_provider_error(self):
         fixture = self.base / "provider"
-        fixture.write_text('#!/usr/bin/env python3\nimport os,time\nprint(os.environ["FAKE_PROVIDER_ERROR"],flush=True)\ntime.sleep(30)\n')
+        fixture.write_text('#!/usr/bin/env python3\nimport os,time\nprint(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),"error.json")).read(),flush=True)\ntime.sleep(30)\n')
         fixture.chmod(0o700)
         prompt = self.base / "prompt.md"; prompt.write_text("review fixture")
         env = dict(os.environ)
@@ -191,7 +191,7 @@ class CreditStreamTests(unittest.TestCase):
                 current = env.copy(); current[variable] = str(fixture)
                 current[f"AI_{provider.upper()}_ALLOW_NO_CREDS"] = "1"
                 if provider == "stepfun": current["AI_STEPFUN_ENGINE"] = "opencode"
-                current["FAKE_PROVIDER_ERROR"] = json.dumps({"type": "error", "error": {"code": "402", "message": "Insufficient Balance"}})
+                (self.base / "error.json").write_text(json.dumps({"type": "error", "error": {"code": "402", "message": "Insufficient Balance"}}))
                 started = time.monotonic()
                 result = subprocess.run(["bash", str(ROOT / f"tools/lib/review-doors/{provider}.sh"), "review"],
                                         env=current, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5)
