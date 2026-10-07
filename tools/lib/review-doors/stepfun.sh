@@ -289,6 +289,15 @@ main() {
       rm -f "$prompt_full"
       exit 2
     }
+    # Linux limits each argv string to 128 KiB. A complete review prompt can
+    # exceed that; StepCode's supported @file input preserves every byte.
+    local -a prompt_args=() prompt_binds=()
+    if [ "$(wc -c < "$prompt_full")" -gt 65536 ]; then
+      prompt_args=("--" "@$prompt_full")
+      prompt_binds=(--ro-bind "$prompt_full" "$prompt_full")
+    else
+      prompt_args=("--" "$(cat "$prompt_full")")
+    fi
     # StepCode is dynamically linked. Its ELF interpreter lives under /lib64
     # on this host; keep the system loader roots visible without mounting /.
     local home_tmp top
@@ -305,11 +314,11 @@ main() {
         --ro-bind /usr /usr "${loader_binds[@]}" --ro-bind /etc /etc --dev /dev --proc /proc \
         --tmpfs /tmp --tmpfs /run --tmpfs "$home_tmp" \
         --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
-        --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --chdir "$DOOR_WORKDIR" -- \
+        --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" "${prompt_binds[@]}" --chdir "$DOOR_WORKDIR" -- \
         "$bin" -p --no-session --model "$SF_STEP_MODEL" \
         --approval-mode auto --non-interactive-approval allow \
         --no-extensions --no-skills --no-prompt-templates --no-themes \
-        --no-approve --no-update-check -- "$(cat "$prompt_full")" \
+        --no-approve --no-update-check "${prompt_args[@]}" \
         > "$log" 2> "$out.err"
     )
     rc=$?
