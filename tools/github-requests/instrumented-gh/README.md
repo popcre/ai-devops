@@ -11,6 +11,10 @@ unmodified/instrumented binaries in a new private output directory. It changes
 only the two upstream API client constructors, the CLI finalization point and
 the new internal counter package. Modules retain upstream `go.mod`/`go.sum`.
 No binary or upstream source archive belongs in this repository.
+Archives are copied into Linux memfd snapshots, sealed against write/grow/shrink
+before hashing, and extracted from those same verified immutable bytes.
+Qualification execution likewise uses a verified sealed ELF snapshot held by
+the parent; replacing the original pathname cannot select a different program.
 
 The counter composes `httptrace.WroteRequest` with existing hooks. It observes
 successful completed writes, including hidden retries; failed writes are
@@ -36,8 +40,10 @@ python3 tools/github-requests/instrumented-gh/test_prototype.py /PRIVATE/new-bui
 python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json
 ```
 
-The offline suite runs without Go or network and proves only metadata
-validation. A real build requires the verified archives, Linux/amd64, a C
+The offline suite runs without Go or network and proves metadata validation
+plus Linux replacement/sealing boundaries. Its Linux sealing tests refuse
+unsupported kernels; Windows runs metadata-only and explicitly does not qualify
+sealed execution. A real build requires the verified archives, Linux/amd64, a C
 compiler for `go test -race`, network access for checksum-verified upstream Go
 modules, and OpenSSL for the disposable local TLS fixture. Missing real
 qualification prerequisites fail; they are not skipped or counted as passes.

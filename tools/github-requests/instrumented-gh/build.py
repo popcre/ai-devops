@@ -9,17 +9,10 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+from contextlib import ExitStack
+from sealed import verified_snapshot
 
 HERE = pathlib.Path(__file__).resolve().parent
-
-
-def verify(path, expected):
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("invalid archive")
-    with path.open("rb") as stream:
-        actual = hashlib.file_digest(stream, "sha256").hexdigest()
-    if actual != expected:
-        raise ValueError("archive checksum mismatch")
 
 
 def patch(source):
@@ -46,6 +39,11 @@ def patch(source):
 
 
 def main():
+    with ExitStack() as snapshots:
+        build(snapshots)
+
+
+def build(snapshots):
     parser = argparse.ArgumentParser()
     parser.add_argument("--archives", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
@@ -54,15 +52,15 @@ def main():
         raise ValueError("Linux prototype only")
     pins = json.loads((HERE / "pins.json").read_text())
     source_tar, go_tar = args.archives / "gh.tar.gz", args.archives / "go.tar.gz"
-    verify(source_tar, pins["source_sha256"])
-    verify(go_tar, pins["toolchain_sha256"])
+    source_snapshot = snapshots.enter_context(verified_snapshot(source_tar, pins["source_sha256"]))
+    go_snapshot = snapshots.enter_context(verified_snapshot(go_tar, pins["toolchain_sha256"]))
     args.output.mkdir(mode=0o700, parents=True, exist_ok=True)
     if args.output.is_symlink() or args.output.stat().st_uid != os.getuid() or args.output.stat().st_mode & 0o077:
         raise ValueError("private output directory required")
     build_root = pathlib.Path(tempfile.mkdtemp(prefix="build-", dir=args.output))
     toolchain = build_root / "toolchain"
     toolchain.mkdir()
-    with tarfile.open(go_tar) as archive:
+    with tarfile.open(fileobj=go_snapshot) as archive:
         archive.extractall(toolchain, filter="data")
     go = toolchain / "go/bin/go"
     env = {key: value for key, value in os.environ.items()
@@ -73,7 +71,8 @@ def main():
     for kind in ("baseline", "instrumented"):
         extracted = build_root / kind
         extracted.mkdir()
-        with tarfile.open(source_tar) as archive:
+        source_snapshot.seek(0)
+        with tarfile.open(fileobj=source_snapshot) as archive:
             archive.extractall(extracted, filter="data")
         source = extracted / ("cli-" + pins["upstream_commit"])
         if kind == "instrumented":

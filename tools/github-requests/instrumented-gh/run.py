@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Isolated Linux prototype runner. Metadata never shares command output."""
 import argparse
-import hashlib
 import json
 import os
-import pathlib
-import re
 import select
 import signal
 import subprocess
@@ -55,16 +52,15 @@ def validate(raw):
 
 
 def run_counted(binary, arguments, host, digest):
-    if not re.fullmatch(r"[0-9a-f]{64}", digest):
-        raise ValueError("invalid binary pin")
-    binary = pathlib.Path(binary)
-    if binary.is_symlink() or not binary.is_file():
-        raise ValueError("invalid binary")
-    with binary.open("rb") as stream:
-        if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
-            raise ValueError("binary pin mismatch")
     if os.name != "posix" or os.uname().sysname != "Linux":
         raise ValueError("Linux prototype only")
+    from sealed import verified_snapshot
+
+    with verified_snapshot(binary, digest) as executable:
+        return run_verified(executable, binary, arguments, host)
+
+
+def run_verified(executable, binary, arguments, host):
     read_fd, write_fd = os.pipe()
     env = os.environ.copy()
     env["AI_GH_HTTP_COUNTER_FD"] = str(write_fd)
@@ -74,7 +70,11 @@ def run_counted(binary, arguments, host, digest):
     raw = bytearray()
     overflow = eof = False
     try:
-        child = subprocess.Popen([str(binary), *arguments], env=env, pass_fds=(write_fd,), start_new_session=True)
+        # Resolve the PARENT's still-open immutable memfd. The child receives
+        # no executable descriptor and cannot leak it into descendants.
+        pinned_exec = f"/proc/{os.getpid()}/fd/{executable.fileno()}"
+        child = subprocess.Popen([str(binary), *arguments], executable=pinned_exec,
+                                 env=env, pass_fds=(write_fd,), start_new_session=True)
         os.close(write_fd)
         write_fd = -1
 
