@@ -642,6 +642,21 @@ cmd_explain_cached(){
   return 0
 }
 
+# AI_TASK_GATES_INPUTS_TO=FILE (#1355): after a successful explain, name every
+# file the answer depended on, one absolute path per line, so a caller that
+# reuses the answer can prove each one is unchanged. This includes the state
+# file under whatever HOME a launcher set. The answer itself is unchanged; an
+# unwritable list leaves the caller without one, and it then never reuses.
+explain_write_inputs(){
+  local out="${AI_TASK_GATES_INPUTS_TO:-}" f
+  [ -n "$out" ] || return 0
+  [ -n "$TOPLEVEL" ] || resolve_repo
+  { for f in "$REAL_DIR/$(basename "${BASH_SOURCE[0]}")" "$ROOT/tools/lib/task-gates.sh" "$POLICY_FILE" "$CONSUMER_FILE" "$(state_path)"; do
+      case "$f" in /*) ;; *) f="$PWD/$f" ;; esac
+      printf '%s\n' "$f"
+    done; } > "$out" 2>/dev/null || { rm -f "$out" 2>/dev/null; return 0; }
+}
+
 cmd_explain(){
   local as_json=false base="" paths_from=""
   while [ $# -gt 0 ]; do
@@ -1824,7 +1839,7 @@ main(){
     check) cmd_check "$@" ;;
     authorize-install) cmd_authorize_install "$@" ;;
     install-verify) cmd_install_verify "$@" ;;
-    explain) cmd_explain_cached "$@" ;;
+    explain) cmd_explain_cached "$@" && explain_write_inputs ;;
     status) cmd_status "$@" ;;
     end) cmd_end "$@" ;;
     classify)

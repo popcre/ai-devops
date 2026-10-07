@@ -492,6 +492,10 @@ cat > "$PV/bin/ai-task-gates" <<'GATE'
 #!/usr/bin/env bash
 printf x >> "${PV_COUNT:?}"
 class="$(cat "${PV_CLASS:?}")"
+# Name inputs the way the real gate does (AI_TASK_GATES_INPUTS_TO), unless told not to.
+if [ -n "${AI_TASK_GATES_INPUTS_TO:-}" ] && [ -z "${PV_NO_INPUTS:-}" ]; then
+  { printf '%s\n' "$0" "${PV_STATE:?}" "$PWD/.ai-devops/task-gates.json"; [ -z "${PV_POLICY:-}" ] || printf '%s\n' "$PV_POLICY"; } > "$AI_TASK_GATES_INPUTS_TO"
+fi
 if [ -n "${PV_POLICY:-}" ]; then
   printf '{"effective_class":"%s","policy_file":"%s"}\n' "$class" "$PV_POLICY"
 else
@@ -500,10 +504,12 @@ fi
 GATE
 chmod +x "$PV/bin/ai-task-gates"
 git -C "$PV" init -q r; echo a > "$PV/r/a.txt"
-export PV_COUNT="$PV/count" PV_CLASS="$PV/class"
+export PV_COUNT="$PV/count" PV_CLASS="$PV/class" PV_STATE="$PV/state.json"
 pv_runs(){ local c; c="$(cat "$PV_COUNT" 2>/dev/null)"; printf '%s' "${#c}"; }
 pv(){ AI_TASK_GATES_BIN="$PV/bin/ai-task-gates" AI_REVIEW_PRIVACY_SCOPE="$PV/scope" "$SCRIPT" "$@" >/dev/null 2>&1; }
-pv_reset(){ rm -f "$PV_COUNT" "$PV/scope"/*; echo "$1" > "$PV_CLASS"; }
+pv_reset(){ rm -f "$PV_COUNT" "$PV/scope"/*; echo "$1" > "$PV_CLASS"; echo '{}' > "$PV_STATE"; }
+# A review this suite runs inside must not lend its scope to these cases.
+unset AI_REVIEW_PRIVACY_SCOPE
 
 pv_reset code
 pv is-private "$PV/r"; r1=$?
@@ -573,7 +579,35 @@ pv is-private "$PV/r"
 echo '#' >> "$PV/bin/ai-task-gates"
 pv is-private "$PV/r"
 check "privacy_verdict_gate_change_reclassifies" "[ \"\$(pv_runs)\" = 2 ]"
-unset PV_COUNT PV_CLASS
+pv_reset code
+pv is-private "$PV/r"
+echo '{"declared_class":"private-evidence"}' > "$PV_STATE"; echo private-evidence > "$PV_CLASS"
+pv is-private "$PV/r"; r=$?
+check "privacy_verdict_task_state_change_reclassifies" "[ $r = 0 ] && [ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+PV_NO_INPUTS=1 pv is-private "$PV/r"
+PV_NO_INPUTS=1 pv is-private "$PV/r"
+check "privacy_verdict_gate_without_inputs_never_stored" "[ \"\$(pv_runs)\" = 2 ] && [ -z \"\$(ls -A '$PV/scope')\" ]"
+
+pv_reset code
+pv is-private "$PV/r"
+AI_TASK_GATES_FILE="$PV/other.json" pv is-private "$PV/r"
+check "privacy_verdict_gate_setting_change_reclassifies" "[ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+pv is-private "$PV/r"
+for f in "$PV/scope"/*; do chmod 644 "$f"; done
+pv is-private "$PV/r"
+check "privacy_verdict_shared_record_ignored" "[ \"\$(pv_runs)\" = 2 ]"
+
+pv_reset code
+pv is-private "$PV/r"
+for f in "$PV/scope"/*; do printf 'ai-review-privacy-verdict-v1 %s public\n' "${f##*/}" > "$f"; chmod 600 "$f"; done
+echo private-evidence > "$PV_CLASS"
+pv is-private "$PV/r"; r=$?
+check "privacy_verdict_record_without_inputs_ignored" "[ $r = 0 ] && [ \"\$(pv_runs)\" = 2 ]"
+unset PV_COUNT PV_CLASS PV_STATE
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
