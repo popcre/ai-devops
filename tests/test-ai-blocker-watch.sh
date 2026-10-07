@@ -30,6 +30,16 @@ out(){ if [ -n "$jqarg" ]; then jq -r "$jqarg" <<<"$1"; else printf '%s\n' "$1";
 bodyfile=""; for i in "${!args[@]}"; do [ "${args[$i]}" = --body-file ] && bodyfile="${args[$((i+1))]}"; done
 [ -n "$bodyfile" ] && cp "$bodyfile" "$F/body"
 case "$*" in
+  "auth token"*)
+    if [ -f "$F/unsafe-file" ]; then
+      cached="$(find "$AI_BLOCKER_WATCH_HOME/tick.lock" -regextype posix-extended -type f -regex '.*/[0-9a-f]{64}' 2>/dev/null | head -1)"
+      if [ -n "$cached" ]; then chmod 644 "$cached"; rm -f "$F/unsafe-file"; fi
+    fi
+    if [ -f "$F/symlink-file" ]; then
+      cached="$(find "$AI_BLOCKER_WATCH_HOME/tick.lock" -regextype posix-extended -type f -regex '.*/[0-9a-f]{64}' 2>/dev/null | head -1)"
+      if [ -n "$cached" ]; then rm -f -- "$cached"; ln -s "$F/foreign-response" "$cached"; rm -f "$F/symlink-file"; fi
+    fi
+    printf '%s\n' "${GH_TOKEN:-$(cat "$F/auth-token" 2>/dev/null || echo '')}" ;;
   "label create"*) rm -f "$F/nolabel"; exit 0 ;;
   "repo view"*) out '{"nameWithOwner":"o/r"}' ;;
   "search issues"*--label*) out "$(cat "$F/find.json" 2>/dev/null || echo '[]')" ;;
@@ -67,7 +77,16 @@ case "$*" in
   *labels=ready-for-fixer*) out "$(cat "$F/fixer.json" 2>/dev/null || echo '[]')" ;;
   *issues/31/comments*) out "$(cat "$F/comments31.json" 2>/dev/null || echo '[]')" ;;
   *repos/o/r/pulls/5*) out "$(cat "$F/pull5.json" 2>/dev/null || echo '{"merged":true}')" ;;
-  *repos/o/r/issues/5*) pr=null; [ -f "$F/is_pr" ] && pr='{"url":"x"}'; out "{\"id\":55,\"state\":\"$(cat "$F/state5" 2>/dev/null || echo open)\",\"title\":\"gate bug\",\"pull_request\":$pr}" ;;
+  *repos/o/r/issues/5*)
+    if [ -f "$F/read-fail-once" ]; then rm -f "$F/read-fail-once"; exit 1; fi
+    if [ -f "$F/switch-token" ]; then mv "$F/switch-token" "$F/auth-token"; fi
+    if [ -f "$F/drop-app" ]; then mv "$F/drop-app" "$F/app-unavailable"; fi
+    if [ -f "$F/unsafe-cache" ]; then
+      cache="$(find "$AI_BLOCKER_WATCH_HOME/tick.lock" -mindepth 1 -maxdepth 1 -type d -name 'wake.*' | head -1)"
+      chmod 755 "$cache"
+      rm -f "$F/unsafe-cache"
+    fi
+    pr=null; [ -f "$F/is_pr" ] && pr='{"url":"x"}'; out "{\"id\":55,\"state\":\"$(cat "$F/state5" 2>/dev/null || echo open)\",\"title\":\"gate bug\",\"pull_request\":$pr}" ;;
   *) out '{"id":1,"state":"open","title":"x"}' ;;
 esac
 EOF
@@ -758,5 +777,76 @@ check 'ai-gh-wait requires an explicit --timeout-minutes deadline' \
   "grep -q 'explicit deadline only' '$ROOT/bin/ai-gh-wait' && ! grep -q '^INTERVAL=300; TIMEOUT=120' '$ROOT/bin/ai-gh-wait'"
 check 'sync skills do not force BlockerWatch registration' \
   "! grep -RIn --include='SKILL.md' -E 'forces BlockerWatch registration|wakes parked cross-issue waits|waits on that machine must not be parked' '$ROOT/skills'"
+
+# Same-target fallback sharing is qualified only for private POSIX tick caches.
+if [ "$(uname -s)" = Linux ]; then
+  old_home="$AI_BLOCKER_WATCH_HOME"; old_config="$AI_BLOCKER_WATCH_CONFIG"
+  export AI_BLOCKER_WATCH_HOME="$TMP/home-wake-share" AI_GH_REAL_GH="$TMP/gh" AI_GH_STATE_DIR="$TMP/wake-identity"
+  jq '.links_enabled=false | .alarm_enabled=false | .propagate_on_host="other-host"' "$TMP/config.json" > "$TMP/wake-config.json"
+  export AI_BLOCKER_WATCH_CONFIG="$TMP/wake-config.json"
+  mkdir -p "$AI_GH_STATE_DIR/identities"; chmod 700 "$AI_GH_STATE_DIR" "$AI_GH_STATE_DIR/identities"
+  printf '%064d' 1 > "$AI_GH_STATE_DIR/principal-salt"; chmod 600 "$AI_GH_STATE_DIR/principal-salt"
+  for credential in fixture-a fixture-b; do
+    token_hash="$(printf '%s\n' "$credential" | sha256sum | cut -d' ' -f1)"
+    identity_key="$(printf '3 github.com %s' "$token_hash" | sha256sum | cut -d' ' -f1)"
+    printf '123 1\n' > "$AI_GH_STATE_DIR/identities/$identity_key"; chmod 600 "$AI_GH_STATE_DIR/identities/$identity_key"
+  done
+  printf 'fixture-a\n' > "$FAKE/auth-token"; echo open > "$FAKE/state5"
+  rm -f "$FAKE/is_pr" "$FAKE/fail"
+  for number in 1 2 3; do mkwait "share-$number" o/r#5 claude "share-$number" waiting 0 '' '' "$TMP/work" "$AI_BLOCKER_WATCH_HOME/waits" >/dev/null; done
+  : > "$FAKE/calls"; BW tick >/dev/null 2>&1
+  check 'three same-target waits share one successful fallback read' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 1 ] && jq -se 'all(.[]; .state==\"waiting\")' '$AI_BLOCKER_WATCH_HOME/waits/'*.json"
+  : > "$FAKE/calls"; touch "$FAKE/read-fail-once"; BW tick >/dev/null 2>&1 || true
+  check 'failed fallback read is retried rather than shared' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 2 ]"
+  printf 'fixture-b\n' > "$FAKE/switch-token"; : > "$FAKE/calls"; BW tick >/dev/null 2>&1
+  check 'credential change invalidates a successful fallback observation' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 2 ]"
+  rm -f "$FAKE/auth-token"; : > "$FAKE/calls"; BW tick >/dev/null 2>&1
+  check 'unknown access context keeps all fallback reads' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 3 ]"
+  printf 'fixture-a\n' > "$FAKE/auth-token"; echo closed > "$FAKE/state5"; : > "$FAKE/calls"; : > "$FAKE/resumed"
+  BW tick >/dev/null 2>&1
+  check 'fresh next-tick closure wakes every same-target waiter' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 1 ] && [ \"\$(grep -c '|claude share-' '$FAKE/resumed')\" = 3 ] && jq -se 'all(.[]; .state==\"woken\")' '$AI_BLOCKER_WATCH_HOME/waits/'*.json"
+  check 'tick cache is removed after successful completion' "[ ! -e '$AI_BLOCKER_WATCH_HOME/tick.lock' ]"
+  mkdir -p "$AI_BLOCKER_WATCH_HOME/tick.lock/wake.ABCDEF"; chmod 700 "$AI_BLOCKER_WATCH_HOME/tick.lock/wake.ABCDEF"
+  printf '%s\n' blocker-watch-wake-cache-v1 > "$AI_BLOCKER_WATCH_HOME/tick.lock/wake.ABCDEF/.owner"; chmod 600 "$AI_BLOCKER_WATCH_HOME/tick.lock/wake.ABCDEF/.owner"
+  touch -d '2 days ago' "$AI_BLOCKER_WATCH_HOME/tick.lock"
+  BW tick >/dev/null 2>&1
+  check 'stale tick cache cannot prevent lock recovery' "[ ! -e '$AI_BLOCKER_WATCH_HOME/tick.lock' ]"
+  mkdir -p "$AI_BLOCKER_WATCH_HOME/tick.lock/wake.FOREGN"; echo preserve > "$AI_BLOCKER_WATCH_HOME/tick.lock/wake.FOREGN/foreign"
+  touch -d '2 days ago' "$AI_BLOCKER_WATCH_HOME/tick.lock"
+  BW tick >/dev/null 2>&1 || true
+  check 'unowned stale tick entries are preserved' "grep -qx preserve '$AI_BLOCKER_WATCH_HOME/tick.lock/wake.FOREGN/foreign'"
+  rm -rf -- "$AI_BLOCKER_WATCH_HOME/tick.lock"
+  for number in 1 2 3; do mkwait "share-$number" o/r#5 claude "share-$number" waiting 0 '' '' "$TMP/work" "$AI_BLOCKER_WATCH_HOME/waits" >/dev/null; done
+  echo open > "$FAKE/state5"; touch "$FAKE/unsafe-cache"; : > "$FAKE/calls"
+  BW tick >/dev/null 2>&1
+  check 'unsafe tick cache protection disables sharing and preserves entries' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 3 ] && [ -d '$AI_BLOCKER_WATCH_HOME/tick.lock' ]"
+  rm -rf -- "$AI_BLOCKER_WATCH_HOME/tick.lock"
+  touch "$FAKE/unsafe-file"; : > "$FAKE/calls"; BW tick >/dev/null 2>&1
+  check 'unsafe response file protection disables cache reads' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 3 ]"
+  rm -rf -- "$AI_BLOCKER_WATCH_HOME/tick.lock"
+  echo foreign > "$FAKE/foreign-response"; touch "$FAKE/symlink-file"; : > "$FAKE/calls"; BW tick >/dev/null 2>&1
+  check 'foreign response symlink is never read or removed' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 3 ] && grep -qx foreign '$FAKE/foreign-response' && find '$AI_BLOCKER_WATCH_HOME/tick.lock' -type l | grep -q ."
+  rm -rf -- "$AI_BLOCKER_WATCH_HOME/tick.lock"
+  # A disposable toolkit copy exercises the real app-selection branch with
+  # synthetic tokens; production has no transport or app-auth bypass knob.
+  mkdir -p "$TMP/app-toolkit/bin" "$TMP/app-toolkit/tools/github-requests"
+  sed 's/\[ "${AI_DEVOPS_TEST_MODE:-0}" = 1 \] || BW_APP=1/BW_APP=1/' "$SCRIPT" > "$TMP/app-toolkit/bin/ai-blocker-watch"
+  chmod +x "$TMP/app-toolkit/bin/ai-blocker-watch"
+  cp "$ROOT/tools/github-requests/pr-status-context" "$TMP/app-toolkit/tools/github-requests/pr-status-context"
+  cat > "$TMP/app-toolkit/bin/ai-gh-app-auth" <<'APP'
+#!/usr/bin/env bash
+[ ! -f "$FAKE/app-unavailable" ] || exit 1
+printf 'fixture-b\n'
+APP
+  chmod +x "$TMP/app-toolkit/bin/ai-gh-app-auth"
+  old_script="$SCRIPT"; SCRIPT="$TMP/app-toolkit/bin/ai-blocker-watch"
+  printf 'fixture-a\n' > "$FAKE/auth-token"; : > "$FAKE/calls"; BW tick >/dev/null 2>&1
+  check 'same selected App credential shares one fallback read' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 1 ]"
+  touch "$FAKE/drop-app"; : > "$FAKE/calls"; BW tick >/dev/null 2>&1
+  check 'App to personal fallback never reuses App response' "[ \"\$(grep -c 'api repos/o/r/issues/5 ' '$FAKE/calls')\" = 2 ]"
+  SCRIPT="$old_script"; rm -f "$FAKE/app-unavailable"
+  export AI_BLOCKER_WATCH_HOME="$old_home" AI_BLOCKER_WATCH_CONFIG="$old_config"
+  unset AI_GH_REAL_GH AI_GH_STATE_DIR
+fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
