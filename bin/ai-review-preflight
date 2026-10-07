@@ -388,6 +388,19 @@ stepfun_opencode_bin() {
 
 # health_status PROVIDER prints the install-health object and returns 0 only
 # when the local install is healthy, unquarantined, and live-qualified.
+capacity_admission() { # PROVIDER -> current hold, with due-only read-only refresh
+  local provider="$1" hold credit_python
+  hold="$(admission_store capacity-status "$provider")" || return 1
+  if [ "$hold" != null ] && [ "$(printf '%s' "$hold" | jq -r '.next_check_epoch')" -le "$(now_epoch)" ]; then
+    case "$provider" in gemini|deepseek|glm|stepfun)
+      credit_python="$(command -v python3 || command -v python)" || return 1
+      "$credit_python" "$REGISTRY_REAL_DIR/../tools/reviewer_credit_watch.py" refresh "$provider" >/dev/null 2>&1 || true ;;
+    esac
+    hold="$(admission_store capacity-status "$provider")" || return 1
+  fi
+  printf '%s\n' "$hold"
+}
+
 health_status() { # PROVIDER
   # A standing known-broken ruling wins over every other health signal,
   # including a current live qualification: the provider is un-drawable until
@@ -409,6 +422,12 @@ health_status() { # PROVIDER
     esac
   fi
   if active_quarantine "$1"; then printf '%s\n' "$ACTIVE_QUARANTINE" | jq -c '. + {status:"quarantined"}'; return 1; fi
+  local capacity_hold
+  capacity_hold="$(capacity_admission "$1")" || return 1
+  if [ "$capacity_hold" != null ]; then
+    printf '%s\n' "$capacity_hold" | jq -c '. + {status:"capacity-held"}'
+    return 1
+  fi
   printf '{"provider":"%s","status":"installed-healthy"}
 ' "$1"
 }
@@ -813,20 +832,10 @@ check_provider() { # PROVIDER REPO LIVE BASE
     return 3
   fi
   local capacity_hold
-  capacity_hold="$(admission_store capacity-status "$provider")" || return 1
+  capacity_hold="$(capacity_admission "$provider")" || return 1
   if [ "$capacity_hold" != null ]; then
-    if [ "$(printf '%s' "$capacity_hold" | jq -r '.next_check_epoch')" -le "$(now_epoch)" ]; then
-      case "$provider" in gemini|deepseek|glm|stepfun)
-        local credit_python
-        credit_python="$(command -v python3 || command -v python)" || return 1
-        "$credit_python" "$REGISTRY_REAL_DIR/../tools/reviewer_credit_watch.py" refresh "$provider" >/dev/null 2>&1 || true ;;
-      esac
-      capacity_hold="$(admission_store capacity-status "$provider")" || return 1
-    fi
-    if [ "$capacity_hold" != null ]; then
       printf 'ai-review-preflight: %s is held for %s; reset %s.\n' "$provider" "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" "$(printf '%s' "$capacity_hold" | jq -r '.reset_at // "unavailable"')" >&2
       return 3
-    fi
   fi
   out="$(default_admission "$provider")" || return 1
   if [ "$(printf '%s' "$out" | jq -r .state)" = backoff ]; then
