@@ -6,9 +6,6 @@ see [`architecture.md`](architecture.md); for the canonical guide see
 
 ## Prerequisites
 
-For #660's isolated measurement build and its separate offline/live proof
-boundaries, see the [outgoing-write counter prototype](../tools/github-requests/instrumented-gh/README.md).
-
 - Bash, `git`, `curl`, `jq`, `ripgrep` (`rg`), `gh`.
 - `node`/`npm`, `python3`/`pip3` (checked by `install.sh`; optional for most work).
 - `claude` and `codex` CLIs for exercising the workflow (optional for editing
