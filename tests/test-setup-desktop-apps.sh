@@ -44,8 +44,16 @@ cat > "$T/cfg/state/mcp-catalog.json" <<'EOF'
  "codex-cli":{"command":"/usr/bin/codex","args":["mcp-server"],"env":{"MCP_TOOL_TIMEOUT":"1"}}}
 EOF
 
-CLAUDE_DESKTOP_STATE=running "$ROOT/bin/setup-desktop-apps.sh" --claude-only >/dev/null
-sleep 0.2; pkill -f -- "--claude-only --wait-for-desktop-exit" 2>/dev/null
+# Run under a held installer checkout lock on fd 9, exactly as update.sh does;
+# the background waiter must not inherit it (edge-dev3 2026-10-06).
+LOCK="$T/install.lock"
+( exec 9>"$LOCK"; flock -n 9 || exit 1
+  CLAUDE_DESKTOP_STATE=running "$ROOT/bin/setup-desktop-apps.sh" --claude-only >/dev/null )
+sleep 0.2
+if command -v flock >/dev/null 2>&1; then
+  ( exec 8>"$LOCK"; flock -n 8 ) && ok "desktop waiter does not hold the installer lock" || bad "desktop waiter inherited the installer lock (fd 9)"
+fi
+pkill -f -- "--claude-only --wait-for-desktop-exit" 2>/dev/null
 grep -q '"railway"' "$CLAUDE_DESKTOP_CONFIG" && ok "running Claude Desktop: config untouched" || bad "wrote while Claude Desktop ran"
 
 CLAUDE_DESKTOP_STATE=stopped "$ROOT/bin/setup-desktop-apps.sh" >/dev/null || bad "script failed"

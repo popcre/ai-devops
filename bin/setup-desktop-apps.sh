@@ -42,6 +42,8 @@ for arg in "$@"; do
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
+# A detached waiter must not keep an inherited installer lock alive.
+[ "$WAIT" -eq 1 ] && exec 9>&-
 
 ok()   { printf '  ok %s\n' "$*"; }
 warn() { printf '  [WARN] %s\n' "$*"; }
@@ -105,7 +107,10 @@ claude_desktop_step() {
   if claude_desktop_running; then
     if [ "$WAIT" -eq 0 ]; then
       mkdir -p "$(dirname "$WAIT_LOG")"
-      nohup "$0" --claude-only --wait-for-desktop-exit >"$WAIT_LOG" 2>&1 &
+      # 9>&-: never hand the installer's checkout lock (fd 9, taken by
+      # update.sh/install.sh) to this hours-long waiter, or every later
+      # update fails with "another installation is active".
+      nohup "$0" --claude-only --wait-for-desktop-exit >"$WAIT_LOG" 2>&1 9>&- &
       warn "Claude Desktop is open, so its MCP list was NOT changed yet."
       warn "  Fully quit it (tray icon > Quit); the change applies then."
       warn "  Result: $WAIT_LOG"
