@@ -435,9 +435,13 @@ check 'a stalled ask() identity resolve fails in time and names the bound' "test
 set +e; REFUSE_OUT="$(cd "$SLOW_ASK" && "$SCRIPT" new refused --assert-head 0000000000000000000000000000000000000000 --prompt review 2>&1)"; set -e
 check 'a genuine identity refusal is not worded as a timeout' "printf '%s' '$REFUSE_OUT' | grep -q 'source identity refused' && ! printf '%s' '$REFUSE_OUT' | grep -qiE 'timed out|deadline|time limit'"
 R7="$TMP/repo7"; make_repo "$R7"; new_run "$R7" stale normal >/dev/null; printf next >> "$R7/file.txt"; git -C "$R7" add file.txt; git -C "$R7" commit -qm next
-check 'follow-up refuses a changed repository head' "! (cd '$R7' && '$SCRIPT' ask stale --prompt later)"
+write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$R7" && "$SCRIPT" ask stale --prompt later) 2>"$TMP/stalehead.err"; STALEHEAD_RC=$?; set -e
+check 'follow-up refuses a changed repository head' "test '$STALEHEAD_RC' -ne 0"
+check 'changed-head follow-up never auto-requalifies' "! grep -q 'requalifying automatically' '$TMP/stalehead.err' && test ! -s '$MOCK_AGY_CALLS'"
 check 'stale-head refusal becomes recovery-required' "test \"\$(jq -r .status \"\$(meta_for stale)\")\" = RECOVERY_REQUIRED"
 check 'delete refuses uncertain evidence' "! (cd '$R7' && '$SCRIPT' delete stale)"
+write_qualification
 
 R8="$TMP/repo8"; make_repo "$R8"; new_run "$R8" source-tracked normal >/dev/null; printf changed >> "$R8/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'follow-up refuses uncommitted tracked source drift' "! (cd '$R8' && '$SCRIPT' ask source-tracked --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""
