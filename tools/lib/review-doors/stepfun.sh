@@ -303,12 +303,26 @@ main() {
     }
     # StepCode is dynamically linked. Its ELF interpreter lives under /lib64
     # on this host; keep the system loader roots visible without mounting /.
-    local home_tmp model_catalog top
+    local home_tmp model_catalog resolver_target top
     local -a loader_binds=()
+    local -a resolver_binds=()
     for top in /lib /lib64; do
       if [ -L "$top" ]; then loader_binds+=(--symlink "$(readlink "$top")" "$top")
       elif [ -d "$top" ]; then loader_binds+=(--ro-bind "$top" "$top"); fi
     done
+    # /etc/resolv.conf may point into /run, which is replaced with an empty
+    # tmpfs. Bind only that one resolver file; its directory may hold sockets.
+    if [ -L /etc/resolv.conf ]; then
+      resolver_target="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
+      case "$resolver_target" in
+        /run/*)
+          [ -f "$resolver_target" ] || { printf 'stepfun door: local_dependency_unavailable: resolver target missing.\n' >&2; rm -f "$prompt_full"; exit 127; }
+          resolver_binds=(--dir "$(dirname "$resolver_target")" --ro-bind "$resolver_target" "$resolver_target")
+          ;;
+        /etc/*|/usr/*) ;;
+        *) printf 'stepfun door: local_dependency_unavailable: resolver target is outside sandbox system trees.\n' >&2; rm -f "$prompt_full"; exit 127 ;;
+      esac
+    fi
     home_tmp="$(mktemp -d)"
     model_catalog="$(mktemp)"
     if ! write_stepcode_catalog "$model_catalog"; then
@@ -322,7 +336,8 @@ main() {
       export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
       timeout "$SF_TIMEOUT" bwrap --die-with-parent --unshare-all --share-net \
         --ro-bind /usr /usr "${loader_binds[@]}" --ro-bind /etc /etc --dev /dev --proc /proc \
-        --tmpfs /tmp --tmpfs /run --tmpfs "$home_tmp" \
+        --tmpfs /tmp --tmpfs /run "${resolver_binds[@]}" \
+        --tmpfs "$home_tmp" \
         --dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json" \
         --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
         --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --chdir "$DOOR_WORKDIR" -- \

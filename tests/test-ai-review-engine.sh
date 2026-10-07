@@ -159,6 +159,9 @@ int main(int argc, char **argv) {
     fclose(source);
     FILE *write_test = fopen(catalog, "a");
     if (write_test) { fclose(write_test); fputs("StepCode catalog is writable\n", stderr); return 1; }
+    FILE *resolver = fopen("/etc/resolv.conf", "r");
+    if (!resolver) { fputs("Resolver target missing inside sandbox\n", stderr); return 1; }
+    fclose(resolver);
     char *args[] = {argv[0], "--version", NULL};
     execv(argv[0], args);
   }
