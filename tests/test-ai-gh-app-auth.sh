@@ -7,6 +7,7 @@ if [ "$(uname -s)" != Linux ]; then
 fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/bin/ai-gh-app-auth"
+REAL_CURL="$(command -v curl)"; ORIGINAL_PATH="$PATH"
 TMP="$(mktemp -d)"; trap 'rm -rf -- "$TMP"' EXIT
 PASS=0; FAIL=0
 check(){ if eval "$2" >/dev/null 2>&1; then PASS=$((PASS+1)); else printf 'FAIL %s\n' "$1"; FAIL=$((FAIL+1)); fi; }
@@ -15,6 +16,7 @@ mkdir -p "$TMP/bin" "$TMP/app" "$TMP/api"; chmod 700 "$TMP/app"
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:1024 -out "$TMP/app/pop-ai-watchers.pem" >/dev/null 2>&1 || exit 1
 cat > "$TMP/bin/curl" <<'CURL'
 #!/usr/bin/env bash
+[ "${1:-}" = -q ] || { echo ambient-config-enabled >> "$FIXTURE/audit"; exit 2; }
 case " $* " in *' Authorization: Bearer '*) echo jwt-in-argv >> "$FIXTURE/audit"; exit 2 ;; esac
 config_stdin=0; previous=''
 for argument in "$@"; do
@@ -43,7 +45,7 @@ expiry="$(date -u -d '+1 hour' +%FT%TZ)"
 jq -cn --arg expires "$expiry" '{token:"ghs_synthetic_installation",expires_at:$expires,permissions:{issues:"write",contents:"read"},repository_selection:"selected",repositories:[{id:9},{id:2}]}' > "$FIXTURE/token"
 "$SCRIPT" token o > "$TMP/minted" 2> "$TMP/errors"
 check 'mint preserves token bytes and uses only the original two calls' "grep -qx ghs_synthetic_installation '$TMP/minted' && [ \"\$(wc -l < '$FIXTURE/calls')\" = 2 ]"
-check 'both authenticated calls receive JWT only through protected stdin' "[ \"\$(grep -cx authenticated-stdin '$FIXTURE/audit')\" = 2 ] && ! grep -q 'jwt-in-argv\|missing-protected-header\|malformed-protected-header' '$FIXTURE/audit'"
+check 'both authenticated calls receive JWT only through protected stdin' "[ \"\$(grep -cx authenticated-stdin '$FIXTURE/audit')\" = 2 ] && ! grep -q 'jwt-in-argv\|missing-protected-header\|malformed-protected-header\|ambient-config-enabled' '$FIXTURE/audit'"
 check 'mint metadata stores binding fields without token or response bodies' "jq -e '.installation_id==42 and .app_id==5112061 and .repository_ids==[2,9] and .permissions.issues==\"write\" and .host==\"github.com\" and .owner==\"o\" and (has(\"token\")|not)' '$AI_GH_APP_DIR/context-o' && ! grep -q ghs_synthetic_installation '$AI_GH_APP_DIR/context-o'"
 export GH_TOKEN=ghs_synthetic_installation
 "$SCRIPT" context o > "$TMP/context" 2>> "$TMP/errors"
@@ -99,5 +101,14 @@ check 'malformed JWT cannot reach curl config' "! printf '%s\\n' 'bad\"jwt' | ba
 check 'extra config lines cannot follow an otherwise valid JWT' "! printf '%s\\n%s\\n' 'abc.def.ghi' 'url=https://other.example' | bash -c 'source \"\$1\"; app_request GET users/o/installation' bash '$TMP/request-only.sh'"
 check 'invalid route config values fail before curl' "! printf '%s\\n' 'abc.def.ghi' | bash -c 'source \"\$1\"; app_request POST \"app/installations/not-an-id/access_tokens\"' bash '$TMP/request-only.sh'"
 check 'malformed JWT and config attempts add no authenticated requests' "[ \"\$(wc -l < '$FIXTURE/calls')\" = 4 ] && [ \"\$(grep -cx authenticated-stdin '$FIXTURE/audit')\" = 4 ]"
+mkdir -p "$TMP/hostile-home" "$TMP/local-api/users/o" "$TMP/real-curl-bin"
+cp "$FIXTURE/installation" "$TMP/local-api/users/o/installation"
+printf 'trace = "%s"\noutput = "%s"\n' "$TMP/ambient-trace" "$TMP/ambient-output" > "$TMP/hostile-home/.curlrc"
+ln -s "$REAL_CURL" "$TMP/real-curl-bin/curl"
+# This transfer reads only a local fixture through file://; it proves a real
+# curl ignores hostile trace/output defaults without contacting any service.
+printf 'abc.def.ghi\n' | PATH="$TMP/real-curl-bin:$ORIGINAL_PATH" HOME="$TMP/hostile-home" CURL_HOME="$TMP/hostile-home" \
+  bash -c 'source "$1"; API="$2"; app_request GET users/o/installation' bash "$TMP/request-only.sh" "file://$TMP/local-api" > "$TMP/local-result"
+check 'hostile ambient curlrc cannot enable traces or redirect authenticated output' "cmp '$FIXTURE/installation' '$TMP/local-result' && [ ! -e '$TMP/ambient-trace' ] && [ ! -e '$TMP/ambient-output' ]"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

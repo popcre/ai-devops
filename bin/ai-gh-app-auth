@@ -60,10 +60,10 @@ app_request(){
   [[ "$jwt_value" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] || return 1
   if [ "$method" = POST ]; then
     printf 'header = "Authorization: Bearer %s"\n' "$jwt_value" |
-      curl --config - -fsS --max-time 20 -X POST -H 'Accept: application/vnd.github+json' "$API/$route"
+      curl -q --config - -fsS --max-time 20 -X POST -H 'Accept: application/vnd.github+json' "$API/$route"
   else
     printf 'header = "Authorization: Bearer %s"\n' "$jwt_value" |
-      curl --config - -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "$API/$route"
+      curl -q --config - -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "$API/$route"
   fi
 }
 app_get(){ app_request GET "$1"; }
