@@ -340,8 +340,8 @@ EOF
 #!/usr/bin/env sh
 # [ai-devops] managed by setup-secrets.sh — do not edit by hand.
 # \$1 = server URL, \$2 = op:// ref to the bearer token, \$3+ = extra mcp-remote flags.
-# mcp-remote does NOT expand \\\${VAR} in --header, so the token must be a real value
-# before it runs: resolve it in memory here and pass it straight through.
+# Pinned mcp-remote expands header placeholders from its environment. Keep the
+# bearer value out of argv while retaining the same authenticated request.
 # Keep the refresh lock through op's exit, not through its children.
 if [ -s "$TOKEN_FILE" ]; then
   OP_SERVICE_ACCOUNT_TOKEN="\$(cat "$TOKEN_FILE")"
@@ -376,7 +376,10 @@ esac
   echo "ai-devops: \$REF resolved EMPTY — not starting \$URL" >&2
   exit 1
 }
-exec "$NODE_BIN" "$GUARD_JS" npx -y mcp-remote@0.1.38 "\$URL" --header "Authorization: Bearer \$TOK" "\$@"
+MCP_REMOTE_AUTH_HEADER="Bearer \$TOK"
+export MCP_REMOTE_AUTH_HEADER
+unset TOK
+exec "$NODE_BIN" "$GUARD_JS" npx -y mcp-remote@0.1.38 "\$URL" --header 'Authorization:\${MCP_REMOTE_AUTH_HEADER}' "\$@"
 EOF
   chmod 755 "$REMOTE_SH"
   ok "Wrote $REMOTE_SH"

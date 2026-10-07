@@ -111,7 +111,11 @@ if ($Mode -eq 'Remote') {
   $token = [Environment]::GetEnvironmentVariable($name, 'Process')
   $remoteCommand = Join-Path $cfgDir 'mcp-runtime\node_modules\.bin\mcp-remote.cmd'
   if (-not (Test-Path -LiteralPath $remoteCommand)) { throw "Pinned MCP remote command is missing: $remoteCommand" }
-  & $nodeCmd.Source $guardJs $remoteCommand $Url --header "Authorization: Bearer $token" @CommandArgs
+  # mcp-remote@0.1.38 expands this placeholder itself. The guarded child sees
+  # the bearer value in its environment, while process argv remains value-free.
+  [Environment]::SetEnvironmentVariable('MCP_REMOTE_AUTH_HEADER', "Bearer $token", 'Process')
+  $token = $null
+  & $nodeCmd.Source $guardJs $remoteCommand $Url --header 'Authorization:${MCP_REMOTE_AUTH_HEADER}' @CommandArgs
 } else {
   if (-not $CommandArgs -or $CommandArgs.Count -eq 0) { throw 'No MCP command was supplied.' }
   $command = $CommandArgs[0]
