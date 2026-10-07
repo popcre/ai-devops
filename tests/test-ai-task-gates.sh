@@ -1253,6 +1253,18 @@ check 'a changed repository identity is classified afresh' "[ \"\$(cd '$XC' && '
 check 'the explain cache directory is private' "[ \"\$(stat -c %a '$AI_TASK_GATES_DIR/explain-cache' 2>/dev/null || echo 700)\" = 700 ]"
 
 # jqr keeps jq's exact bytes (trailing blank lines, CRLF) and its exit status.
+# #1355: the one-pass rule table and the per-question readers must agree. A
+# non-string rule match forces the readers without changing what applies.
+TABLE="$(mktemp -d)"; git init -q "$TABLE/r"; mkdir -p "$TABLE/r/.ai-devops" "$TABLE/r/src"
+printf '%s' '{"paths":[{"glob":"src/**","class":"shared-db"}],"gates":{"shared-db":{"required":["zz-proof","a-proof"],"forbidden_actions":["deploy"]},"prose":{"required":["r"]}}}' > "$TABLE/r/.ai-devops/task-gates.json"
+echo x > "$TABLE/r/src/a.sql"; echo y > "$TABLE/r/README.md"
+jq '.rules += [{"match":5}]' "$ROOT/config/task-gates.json" > "$TABLE/fallback.json"
+cp "$ROOT/config/task-gates.json" "$TABLE/fast.json"
+table_run(){ (cd "$TABLE/r" && for a in review deploy ship; do AI_TASK_GATES_FILE="$TABLE/$1.json" "$GATES" check --before "$a" 2>&1; echo "rc=$?"; done); }
+check 'one-pass rule table matches the per-question readers' \
+  "[ \"\$(table_run fast)\" = \"\$(table_run fallback)\" ] && table_run fast | grep -q 'a-proof'"
+rm -rf "$TABLE"
+
 JQR_FN="$(sed -n '/^jqr(){$/,/^}$/p' "$GATES")"
 check 'jqr strips CR, keeps trailing blank lines, and returns jq status' "eval \"\$JQR_FN\"; a=\"\$(printf '[\"a\\\\r\",\"\",\"\"]' | jqr '.[]'; printf x)\"; [ \"\$a\" = \$'a\\n\\n\\nx' ] && ! printf 'nope' | jqr . >/dev/null 2>&1"
 

@@ -1008,6 +1008,7 @@ file_stats() { # file_stats PATH...; fills FS_BYTES and FS_SHA in argument order
     if [ "${#chunk[@]}" -gt 0 ]; then
       n="${#FS_BYTES[@]}"
       while IFS= read -r line; do
+        line="${line%$'\r'}"
         case "$line" in ''|*[!0-9]*) return 1 ;; esac
         FS_BYTES+=("$line")
       done < <(stat -c %s -- "${chunk[@]}" 2>/dev/null || echo x)
@@ -1015,7 +1016,7 @@ file_stats() { # file_stats PATH...; fills FS_BYTES and FS_SHA in argument order
       local m="${#FS_SHA[@]}"
       while IFS= read -r line; do
         # Same field the per-file reader keeps, escape marker included.
-        line="${line%% *}"; n="${line#\\}"
+        line="${line%$'\r'}"; line="${line%% *}"; n="${line#\\}"
         case "$n" in *[!0-9a-f]*) return 1 ;; esac
         [ "${#n}" -eq 64 ] || return 1
         FS_SHA+=("$line")
@@ -1025,6 +1026,7 @@ file_stats() { # file_stats PATH...; fills FS_BYTES and FS_SHA in argument order
     [ -n "$p" ] || break
     chunk=("$p"); len=$((${#p} + 3))
   done
+  [ "${#FS_SHA[@]}" -eq "$#" ] && [ "${#FS_BYTES[@]}" -eq "$#" ]
 }
 
 hash_packet() { # hash_packet PACKET_DIR
