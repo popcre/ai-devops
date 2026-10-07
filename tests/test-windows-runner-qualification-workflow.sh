@@ -44,6 +44,10 @@ grep -Fq "$section_cmd" "$ROOT/.github/workflows/verify.yml" || fail 'verify.yml
 [ "$(grep -Fc 'timeout-minutes: 40' "$workflow")" -eq 1 ] || fail 'each section must be held to the 40-minute section ceiling'
 [ "$(grep -Fc 'git status --short --untracked-files=all' "$workflow")" -eq 2 ] || fail 'every qualification job must prove reusable workspace cleanup'
 
+for wf in "$workflow" "$ROOT/.github/workflows/verify.yml"; do
+  grep -Fq 'TMPDIR=$($short -replace' "$wf" || fail "$(basename "$wf") must point TMPDIR at the short TEMP root for Git Bash"
+done
+
 if grep -Fq 'edge-dev' "$workflow"; then
   fail 'qualification must not route through the legacy shared-host label'
 fi
