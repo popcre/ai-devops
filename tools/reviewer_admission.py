@@ -236,19 +236,25 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
     if provider not in CREDIT_MESSAGES:
         raise ValueError('no out-of-credit message for provider')
     allowance = False
+    marker_paid = False
     reset = None
-    if provider in SUBSCRIPTIONS:
-        for path in marker_paths:
-            if path.is_file() and not path.is_symlink() and path.stat().st_size <= CREDIT_SCAN_BYTES:
-                try:
-                    marker = json.loads(path.read_text())
-                    if marker.get('provider') == provider and marker.get('failure_class') == 'allowance-exhausted':
-                        allowance = True
-                        value = marker.get('reset_at')
-                        reset = qualified_reset(provider, value, int(time.time()))
-                except (ValueError, TypeError, AttributeError):
-                    pass
-    if credit_match(paths, provider) is None:
+    for path in marker_paths:
+        if path.is_file() and not path.is_symlink() and path.stat().st_size <= CREDIT_SCAN_BYTES:
+            try:
+                marker = json.loads(path.read_text())
+                if marker.get('provider') != provider:
+                    continue
+                if marker.get('failure_class') == 'allowance-exhausted' and provider in SUBSCRIPTIONS:
+                    allowance = True
+                    reset = qualified_reset(provider, marker.get('reset_at'), int(time.time()))
+                elif marker.get('failure_class') == 'out-of-credit':
+                    error = marker.get('error')
+                    if isinstance(error, dict):
+                        text = ' '.join(error.get(key, '') for key in ('code', 'message') if isinstance(error.get(key), str))
+                        marker_paid |= credit_match_text(text, provider) is not None
+            except (ValueError, TypeError, AttributeError):
+                pass
+    if not marker_paid and credit_match(paths, provider) is None:
         if not allowance:
             return 3
     machine = ('AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=%s code=quota_exhausted' if allowance else 'AI_REVIEWER_OUT_OF_CREDIT provider=%s code=insufficient_quota') % provider
