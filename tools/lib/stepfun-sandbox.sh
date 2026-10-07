@@ -55,7 +55,9 @@ stepfun_sandbox_exec(){
   for name in $(compgen -e); do
     case "$STEPFUN_SANDBOX_ENV_ALLOW" in *" $name "*) ;; *) unset "$name" 2>/dev/null || true ;; esac
   done
-  exec "$timeout_bin" "$secs" "$bwrap" --die-with-parent --unshare-all --share-net \
+  # -k: a turn that ignores SIGTERM is killed 10s later, so no caller waits
+  # past its deadline.
+  exec "$timeout_bin" -k 10 "$secs" "$bwrap" --die-with-parent --unshare-all --share-net \
     "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
     "${resolver_binds[@]}" \
     --tmpfs "$HOME" \

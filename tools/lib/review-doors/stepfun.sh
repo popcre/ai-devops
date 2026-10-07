@@ -312,6 +312,11 @@ sf_rpc_turn() {
   printf '%s\n' "$text" > "$log"
 }
 
+# Temporary trees this door made; removed on every exit, killed runs included.
+SF_TEMP_PATHS=()
+sf_temp_cleanup() { [ "${#SF_TEMP_PATHS[@]}" -eq 0 ] || rm -rf -- "${SF_TEMP_PATHS[@]}" 2>/dev/null || true; }
+trap sf_temp_cleanup EXIT
+
 main() {
   local engine bin prompt_full out log rc agent
   engine="$(select_engine)" || exit $?
@@ -348,7 +353,7 @@ main() {
     # Review: the model works in a private copy, as on Linux, so its test
     # runs never change the runner's sealed copy (snapshot drift).
     if [ "$MODE" = review ]; then
-      oc_scratch="$(mktemp -d)"; oc_dir="$oc_scratch/work"
+      oc_scratch="$(mktemp -d)"; oc_dir="$oc_scratch/work"; SF_TEMP_PATHS+=("$oc_scratch")
       cp -a "$DOOR_WORKDIR" "$oc_dir" || { rm -rf "$xdg" "$oc_scratch"; rm -f "$prompt_full"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
     fi
     (
@@ -379,11 +384,11 @@ main() {
     }
     local home_tmp
     timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)"
-    home_tmp="$(mktemp -d)"
+    home_tmp="$(mktemp -d)"; SF_TEMP_PATHS+=("$home_tmp")
     # StepCode reads its model catalog from ~/.stepcode/models.json; the empty
     # sandbox HOME gets only our pinned model (#1380).
     local model_catalog
-    model_catalog="$(mktemp)"
+    model_catalog="$(mktemp)"; SF_TEMP_PATHS+=("$model_catalog")
     if ! write_stepcode_catalog "$model_catalog"; then
       printf 'stepfun door: local_dependency_unavailable: StepCode model catalog could not be prepared.\n' >&2
       rm -f "$model_catalog" "$prompt_full"; rm -rf "$home_tmp"
@@ -400,7 +405,7 @@ main() {
     local scratch="" work="$DOOR_WORKDIR"
     local -a work_binds=(--bind "$DOOR_WORKDIR" "$DOOR_WORKDIR")
     if [ "$MODE" = review ]; then
-      scratch="$(mktemp -d)"; work="$scratch/work"
+      scratch="$(mktemp -d)"; work="$scratch/work"; SF_TEMP_PATHS+=("$scratch")
       cp -a "$DOOR_WORKDIR" "$work" || { rm -rf "$scratch" "$home_tmp"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
       work_binds=(--ro-bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --bind "$work" "$work")
     fi
@@ -410,11 +415,11 @@ main() {
     # declines every such question: the model is told no and keeps reviewing.
     # An HTTP 429 that outlasts StepCode's own retry reruns the turn after a
     # pause, as bin/ai-stepfun does.
-    local attempt rate_retries=0
+    local rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
     local -a sandbox_args=(--dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json"
       "${packet_bind[@]}" "${work_binds[@]}" --chdir "$work")
-    for attempt in 1 2 3; do
+    while :; do
       sf_rpc_turn "$prompt_full"
       rc=$?
       [ "$rc" -ne 0 ] || break
