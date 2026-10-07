@@ -812,6 +812,22 @@ check_provider() { # PROVIDER REPO LIVE BASE
     printf '%s\n' "$ACTIVE_QUARANTINE" | jq -r '"ai-review-preflight: " + .provider + " is quarantined until epoch " + (.expires_epoch|tostring) + " (" + .failure_class + ")."' >&2
     return 3
   fi
+  local capacity_hold
+  capacity_hold="$(admission_store capacity-status "$provider")" || return 1
+  if [ "$capacity_hold" != null ]; then
+    if [ "$(printf '%s' "$capacity_hold" | jq -r '.next_check_epoch')" -le "$(now_epoch)" ]; then
+      case "$provider" in gemini|deepseek|glm|stepfun)
+        local credit_python
+        credit_python="$(command -v python3 || command -v python)" || return 1
+        "$credit_python" "$REGISTRY_REAL_DIR/../tools/reviewer_credit_watch.py" refresh "$provider" >/dev/null 2>&1 || true ;;
+      esac
+      capacity_hold="$(admission_store capacity-status "$provider")" || return 1
+    fi
+    if [ "$capacity_hold" != null ]; then
+      printf 'ai-review-preflight: %s is held for %s; reset %s.\n' "$provider" "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" "$(printf '%s' "$capacity_hold" | jq -r '.reset_at // "unavailable"')" >&2
+      return 3
+    fi
+  fi
   out="$(default_admission "$provider")" || return 1
   if [ "$(printf '%s' "$out" | jq -r .state)" = backoff ]; then
     printf 'ai-review-preflight: %s has an active scoped usage-limit backoff.\n' "$provider" >&2
@@ -1356,6 +1372,16 @@ case "$cmd" in
     provider="${1:-}"; repo="${2:-}"; shift 2 || true; live=0; base=""
     while [ "$#" -gt 0 ]; do case "$1" in --live) live=1; shift ;; --base) base="${2:-}"; shift 2 ;; *) die "unknown option '$1'." ;; esac; done
     check_provider "$provider" "$repo" "$live" "$base" ;;
+  capacity-status)
+    provider="${1:-}"; shift || true
+    valid_provider "$provider" || die "unknown provider '$provider'."
+    [ "$#" -eq 0 ] || die 'unexpected capacity-status argument'
+    admission_store capacity-status "$provider" ;;
+  capacity-observe)
+    provider="${1:-}"; shift || true
+    valid_provider "$provider" || die "unknown provider '$provider'."
+    [ "$#" -eq 2 ] && [ "$1" = --observation-file ] || die 'capacity-observe needs observation file'
+    admission_store capacity-observe "$provider" --observation-file "$2" ;;
   pause-status)
     provider="${1:-}"; shift || true
     valid_provider "$provider" || die "unknown provider '$provider'."

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import struct
 import uuid
+import tempfile
 
 from reviewer_maintenance import physical, Blocked
 
@@ -123,9 +124,11 @@ def normalize(provider, value, now):
         if value.get('state') in ('available', 'exhausted'):
             expected_reason = 'reported-capacity' if value['state'] == 'available' else 'reported-exhaustion'
             if value.get('reason') == expected_reason:
-                result.update(state=value['state'], reason=expected_reason)
+                result.update(state=value['state'], reason=expected_reason,
+                    credential_profile_scope=value['credential_profile_scope'], model_scope=value['model_scope'], reset_at=value.get('reset_at'))
         return result
     buckets = {}
+    resets = {}
     groups = value.get('groups')
     if not isinstance(groups, list):
         return result
@@ -140,6 +143,7 @@ def normalize(provider, value, now):
                 if bucket['id'] in buckets:
                     return result
                 buckets[bucket['id']] = remaining
+                resets[bucket['id']] = bucket.get('reset_time')
     if set(buckets) != {'gemini-weekly', 'gemini-5h'}:
         return result
     # Any authoritative zero bucket exhausts the account; unknown buckets never
@@ -147,7 +151,31 @@ def normalize(provider, value, now):
     exhausted = 0 in buckets.values()
     result.update(state='exhausted' if exhausted else 'available', reason='reported-exhaustion' if exhausted else 'reported-capacity',
                   scope_identity='unknown', provenance='current-authenticated-agy-usage')
+    exhausted_resets = [resets[key] for key, amount in buckets.items() if amount == 0]
+    try:
+        parsed = [datetime.datetime.fromisoformat(v.replace('Z', '+00:00')) for v in exhausted_resets]
+        result['reset_at'] = max(parsed).isoformat() if parsed and all(v.tzinfo for v in parsed) else None
+    except (ValueError, TypeError, AttributeError):
+        result['reset_at'] = None
+    profile = value.get('credential_profile_scope')
+    if isinstance(profile, str) and re.fullmatch(r'sha256:[0-9a-f]{64}', profile):
+        result.update(credential_profile_scope=profile, model_scope='gemini-3.8-flash')
     return result
+
+
+def reconcile(provider, observation, run=subprocess.run):
+    """Only qualified normalized observations enter the existing admission store."""
+    with tempfile.TemporaryDirectory(prefix='reviewer-capacity-') as directory:
+        path = pathlib.Path(directory) / 'observation.json'
+        path.write_text(json.dumps(observation))
+        response = run(tool_command('ai-review-preflight', 'capacity-observe', provider, '--observation-file', str(path)),
+                       capture_output=True, text=True, timeout=10, check=False)
+        if response.returncode != 0:
+            return 'failed'
+        try:
+            return json.loads(response.stdout)['status']
+        except (ValueError, KeyError, TypeError):
+            return 'failed'
 
 def read_provider(provider, run=subprocess.run, now=None):
     try:
@@ -164,6 +192,9 @@ def read_provider(provider, run=subprocess.run, now=None):
 
 def main(args=None, run=subprocess.run):
     args = sys.argv[1:] if args is None else args
+    if len(args) == 2 and args[0] == 'refresh' and args[1] in ('gemini', 'deepseek', 'glm', 'stepfun'):
+        observation = read_provider(args[1], run=run)
+        return 1 if reconcile(args[1], observation, run) == 'failed' else 0
     if args in (['--help'], ['help']):
         print('ai-review-credit-watch check|tick; scheduled hourly by ai-local-watch tick-all')
         return 0
@@ -183,20 +214,15 @@ def main(args=None, run=subprocess.run):
     for provider in ('gemini', 'deepseek', 'glm', 'stepfun'):
         observation = read_provider(provider, run=run)
         hold = 'unchanged'
-        if args == ['tick'] and observation['state'] == 'exhausted':
+        if args == ['tick'] and observation['state'] in ('available', 'exhausted'):
             try:
-                paused = run(tool_command('ai-review-preflight', 'pause', provider,
-                                          'out-of-credit', '--seconds', '3600',
-                                          '--observed', str(observation['observed_epoch'])), stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, timeout=10, check=False)
-                # A successful monotonic request may preserve a stronger hold.
-                hold = 'accepted' if paused.returncode == 0 else 'failed'
+                hold = reconcile(provider, observation, run)
             except (OSError, subprocess.TimeoutExpired):
                 hold = 'failed'
             failed |= hold == 'failed'
         # Deliberately discard all numeric balances, allowance, profile hashes,
         # response bodies and stderr. Available never clears an existing hold.
-        public = {key: value for key, value in observation.items() if key != 'observed_epoch'}
+        public = {key: value for key, value in observation.items() if key not in ('observed_epoch','credential_profile_scope','model_scope')}
         print(json.dumps({**public, 'hold': hold}, separators=(',', ':')))
     for provider in UNQUALIFIED:
         print(json.dumps({'provider': provider, 'state': 'unknown', 'reason': 'no-qualified-interface', 'hold': 'unchanged'}, separators=(',', ':')))
