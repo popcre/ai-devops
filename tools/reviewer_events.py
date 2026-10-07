@@ -293,7 +293,13 @@ def missing_prepared(directory, provider, run_id, references):
 
 
 def _evidence_lost_identity(directory, provider, run_id):
-    """Return (required, lost_row) when a no-ledger evidence-lost record is self-consistent."""
+    """Return (required, lost_row) for a historical local-recovery loss only.
+
+    A no-ledger pair is accepted solely for the documented local-recovery
+    fixture shape (caller=local-recovery, empty/zero head). Any other
+    missing-ledger pair is unproven and must stay fail-closed — a live
+    review cannot fabricate its own terminal loss this way.
+    """
     root = evidence_root(directory, run_id)
     required_path = root / "required.json"
     lost_path = root / "evidence-lost.json"
@@ -301,12 +307,16 @@ def _evidence_lost_identity(directory, provider, run_id):
         return None
     required = read_json(required_path)
     row = read_json(lost_path)
+    head = required.get("head")
+    historical_head = head in (None, "", "0" * 40, "0" * 64)
     if (required.get("schema_version") == 1 and required.get("run_id") == run_id and
             required.get("provider") == provider and
+            required.get("caller") == "local-recovery" and
+            historical_head and
             row.get("schema_version") == 1 and row.get("run_id") == run_id and
             row.get("provider") == provider and
-            row.get("head") == required.get("head") and
-            row.get("caller") == required.get("caller") and
+            row.get("head") == head and
+            row.get("caller") == "local-recovery" and
             row.get("report_state") == "lost" and
             isinstance(row.get("reason"), str) and row["reason"].strip()):
         return required, row
@@ -1096,8 +1106,14 @@ def record_lost(directory, provider, run_id, sandbox, reason):
         _, data = snapshot(directory / "events.jsonl", "jsonl")
         has_finished = any(json.loads(line).get("run_id") == run_id and json.loads(line).get("event") == "finished"
                            for line in data.splitlines())
-        require(has_finished or _proven_dead(directory, run_id, start),
-                "reviewer invocation is still active; loss not recorded")
+        if start.get("operation") == "async-submission":
+            # A detached worker outlives the submitting supervisor (Kimi durable
+            # jobs). Supervisor death is not death of the publisher: refuse
+            # loss until the invocation itself is finished.
+            require(has_finished, "reviewer invocation is still active; loss not recorded")
+        else:
+            require(has_finished or _proven_dead(directory, run_id, start),
+                    "reviewer invocation is still active; loss not recorded")
     root = evidence_root(directory, run_id)
     require((root / "required.json").is_file(), "sandbox evidence requirement is missing; loss not recorded")
     require(not any(root.glob("*.report.json")), "published evidence exists; it is partial, not lost")

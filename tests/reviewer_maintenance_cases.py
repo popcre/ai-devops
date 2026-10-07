@@ -1622,6 +1622,46 @@ with event_lock(sys.argv[2]):
         with self.assertRaises(events.Blocked):
             events.verify_reports(self.root, "glm", rid)
 
+    def test_verify_rejects_no_ledger_loss_without_historical_markers(self):
+        """A live review cannot fabricate a terminal loss with no ledger row."""
+        rid = "b1" + "0" * 30
+        root = self.root / "evidence" / rid
+        root.mkdir(parents=True, exist_ok=True)
+        required = {"schema_version": 1, "run_id": rid, "provider": "glm",
+                    "head": "a" * 40, "caller": "codex"}
+        (root / "required.json").write_text(json.dumps(required) + "\n")
+        lost = {**required, "sandbox": "glm-x-0123456789ab", "report_state": "lost",
+                "reason": "fabricated", "recorded_at": "2026-10-07T00:00:00Z",
+                "historical_source_authorization": "unknown"}
+        (root / "evidence-lost.json").write_text(json.dumps(lost) + "\n")
+        with self.assertRaises(events.Blocked):
+            events.verify_reports(self.root, "glm", rid)
+
+    def test_async_submission_refuses_loss_without_finish(self):
+        """A detached worker outlives the supervisor: supervisor death is not loss."""
+        rid = "d0" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "kimi", rid, sandbox, "supervisor gone, worker may publish")
+        self.assertFalse((self.root / "evidence" / rid / "evidence-lost.json").exists())
+
+    def test_async_submission_loss_allowed_after_finish(self):
+        rid = "d1" + "0" * 30
+        row = {"schema_version": 1, "provider": "kimi", "event": "started", "run_id": rid,
+               "operation": "async-submission", "repo": str(self.toolkit), "head": self.sha,
+               "caller": "kimi", "timestamp": "same-time", "owner_pid": 99999999}
+        self.write(row)
+        events.require_report(self.root, "kimi", rid)
+        self.write({**row, "event": "finished", "exit_code": 1})
+        sandbox, _ = self._lost_sandbox("kimi", owner_line=f"evidence_owner=kimi:{rid}")
+        events.record_lost(self.root, "kimi", rid, sandbox, "worker finished without a report")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
     def test_codex_legacy_loss_allowed_when_no_report_exists(self):
         rid = "a2" + "0" * 30
         self._finished_lost_invocation("codex", rid)
