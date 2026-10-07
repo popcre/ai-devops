@@ -12,6 +12,8 @@ $sealKeyDir = Join-Path $fixtureStateParent '.ai-task-gates-seal'
 New-Item -ItemType Directory -Path $sealKeyDir -Force | Out-Null
 & icacls.exe $sealKeyDir '/inheritance:r' '/grant:r' "*$($sid):(OI)(CI)(F)" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Cannot protect Windows source-gate seal key.' }
+& icacls.exe $sealKeyDir '/setowner' "*$sid" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Cannot own Windows source-gate seal key directory.' }
 $sealKeyPath = Join-Path $sealKeyDir 'key.bin'
 if (-not (Test-Path -LiteralPath $sealKeyPath)) {
   $key = New-Object byte[] 32
@@ -20,6 +22,8 @@ if (-not (Test-Path -LiteralPath $sealKeyPath)) {
   $stream = [IO.File]::Open($sealKeyPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
   try { $stream.Write($key, 0, $key.Length) } finally { $stream.Dispose() }
 }
+& icacls.exe $sealKeyPath '/setowner' "*$sid" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Cannot own Windows source-gate seal key.' }
 
 function Assert([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw "FAIL: $Message" }
@@ -31,6 +35,10 @@ function Write-TestAuthoritySeal([string]$IssuedPath, [string]$ReadPath) {
   $bytes = [Text.Encoding]::UTF8.GetBytes(([IO.Path]::GetFullPath($IssuedPath) + "`n" + $digest))
   $hmac = [Security.Cryptography.HMACSHA256]::new($key)
   [IO.File]::WriteAllText("$IssuedPath.seal", [Convert]::ToBase64String($hmac.ComputeHash($bytes)) + "`n")
+  foreach ($path in @($IssuedPath, $ReadPath, "$IssuedPath.seal")) {
+    & icacls.exe $path '/setowner' "*$sid" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Cannot own Windows source-gate authority fixture: $path" }
+  }
 }
 function Write-Receipt($Fixture) {
   $sha=(git -C $Fixture.Repo rev-parse HEAD).Trim()
@@ -68,6 +76,8 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
     ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $stateDir 'fixture.json') -Encoding ASCII
   $authDir=Join-Path (Split-Path -Parent $Fixture.Launcher) 'install-authorizations'
   New-Item -ItemType Directory -Path $authDir -Force | Out-Null
+  & icacls.exe $authDir '/setowner' "*$sid" | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot own Windows source-gate authority directory.' }
   $authPath=Join-Path $authDir "$Target.json"
   $launcherHash = if (($LegacyMigration -or $RecoverLaunchers) -and (Test-Path -LiteralPath $Fixture.Launcher)) { (Get-FileHash -LiteralPath $Fixture.Launcher -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
   $cmdHash = if (($LegacyMigration -or $RecoverLaunchers) -and (Test-Path -LiteralPath "$($Fixture.Launcher).cmd")) { (Get-FileHash -LiteralPath "$($Fixture.Launcher).cmd" -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
@@ -106,6 +116,8 @@ function New-Fixture([string]$Name) {
   git -C $repo push -u origin main | Out-Null
   $launcherDir=Join-Path $temp "$Name-launchers"
   New-Item -ItemType Directory -Path $launcherDir | Out-Null
+  & icacls.exe $launcherDir '/setowner' "*$sid" | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot own Windows source-gate launcher directory.' }
   $fixture=@{ Repo=$repo; Remote=$remote; Launcher=(Join-Path $launcherDir 'ai-task-gates') }
   Write-Receipt $fixture
   return $fixture
