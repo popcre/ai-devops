@@ -35,6 +35,28 @@ passes. Ordinary required CI must not route to it before then.
 
 ## 1. Qualify the computer itself
 
+### Recover SSH trust through the enrolled runner
+
+The existing qualification workflow has a separate `ssh-host-trust` dispatch
+scope for a bounded read-only identity check. Use a custom label carried by
+exactly one online Windows X64 runner and an `expected_peer_digest` from fresh
+authenticated Tailscale peer metadata. The digest is SHA256 of the lowercase
+peer hostname, newline, node ID, newline, node public key, encoded as UTF-8.
+The diagnostic matches that hostname against the actual OS hostname and binds
+the job to the hosted pin's exact registered runner name and dispatched source
+commit. Qualified hosts are allowed only for this diagnostic scope; section
+qualification retains its existing refusal of already-qualified hosts.
+
+The three-minute job reads only the fixed OpenSSH RSA, Ed25519 and ECDSA public
+files beneath `C:\ProgramData\ssh`, rejecting missing, oversized, linked or
+reparse-point files. It publishes the bound node digest and allowlisted SHA256
+key fingerprints only after all checks succeed. It cannot refresh security
+evidence, qualify a host, execute operator-supplied commands or alter SSH trust.
+Review the exact source before dispatch, match the resulting run's source to
+that reviewed commit, and compare its fingerprints with the endpoint before
+any separately gated trust update. A missing or mismatched node binding stops
+recovery; network discovery alone never authorizes accepting a new key.
+
 Use a dedicated Windows 11 Pro computer with current Windows Updates, TPM 2.0,
 Secure Boot, at least 16 GB RAM and ample free disk. Keep it powered on, awake and
 connected to the internet while jobs run. The LAN itself is not required; the
