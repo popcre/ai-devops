@@ -572,7 +572,8 @@ die(){ printf '%s\\n' "$*" >&2; exit 1; }
     def test_failed_publication_still_records_exact_terminal_exit(self):
         result = self.guard(operation="unpublished")
         self.assertEqual(result.returncode, 7)
-        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()
+                if json.loads(line).get("event") in {"started", "finished"}]
         self.assertEqual([row["event"] for row in rows], ["started", "finished"])
         self.assertEqual(rows[-1]["exit_code"], 7)
         self.assertEqual(rows[-1]["evidence_state"], "publication-incomplete")
@@ -594,7 +595,8 @@ die(){ printf '%s\\n' "$*" >&2; exit 1; }
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(result.stdout, "unchanged input\n")
         self.assertEqual(result.stderr, "synthetic stderr\n")
-        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()
+                if json.loads(line).get("event") in {"started", "finished"}]
         self.assertEqual([r["event"] for r in rows], ["started", "finished"])
         self.assertEqual(rows[-1]["exit_code"], 7)
 
@@ -603,7 +605,8 @@ die(){ printf '%s\\n' "$*" >&2; exit 1; }
         for provider in providers:
             result = self.guard(provider)
             self.assertEqual(result.returncode, 0, result.stderr)
-        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()
+                if json.loads(line).get("event") in {"started", "finished"}]
         self.assertEqual({r["provider"] for r in rows}, set(providers))
         self.assertEqual(len(rows), 2 * len(providers))
 
@@ -1306,7 +1309,10 @@ wait "$job"
                                  "/usr/bin/bash" if os.name == "nt" else self.bash, str(self.wrapper)],
                                 cwd=self.toolkit, env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 137, result.stderr)
-        self.assertEqual(len(self.ledger.read_text().splitlines()), 1)
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines() if line.strip()]
+        starts = [r for r in rows if r.get("event") == "started"]
+        self.assertEqual(len(starts), 1)
+        self.assertFalse(any(r.get("event") == "finished" for r in rows))
         self.assertEqual(self.engine.start()["candidates"][0]["classification"], "completion-unproven")
 
     def test_log_prefix_and_json_snapshot_continuity(self):
@@ -1469,10 +1475,10 @@ with event_lock(sys.argv[2]):
         self.invocation(rid=rid, code=1, provider="muse", finish=False)
         events.require_report(self.root, "muse", rid)
         sandbox, _ = self._lost_sandbox("muse", owner_line=f"evidence_owner=muse:{rid}")
-        # Fresh start: fail-closed, wrapper may still be alive.
+        # Fresh start, no PID: fail-closed, wrapper may still be alive.
         with self.assertRaisesRegex(events.Blocked, "still active"):
             events.record_lost(self.root, "muse", rid, sandbox, "killed mid-run")
-        # Age the started timestamp past the dead-owner window (2h).
+        # Age the started timestamp past the dead-owner window (2h), still no PID.
         rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
         stale = (datetime.datetime.now(datetime.timezone.utc) -
                  datetime.timedelta(hours=3)).isoformat()
@@ -1482,6 +1488,23 @@ with event_lock(sys.argv[2]):
         self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
         events.record_lost(self.root, "muse", rid, sandbox, "killed mid-run")
         self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_live_owner_pid_blocks_loss_even_if_old(self):
+        """Age alone must NEVER mark dead while a live owner PID exists."""
+        rid = "c0" + "0" * 30
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=os.getpid())
+        events.require_report(self.root, "glm", rid)
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        # Age the start past the window — PID is alive, so loss must still refuse.
+        rows = [json.loads(line) for line in self.ledger.read_text().splitlines()]
+        stale = (datetime.datetime.now(datetime.timezone.utc) -
+                 datetime.timedelta(hours=3)).isoformat()
+        for row in rows:
+            if row.get("run_id") == rid and row.get("event") == "started":
+                row["timestamp"] = stale
+        self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "glm", rid, sandbox, "live owner blocks loss")
 
     def test_killed_wrapper_dead_owner_pid_records_loss(self):
         """A wrapper killed before finish: recorded owner PID is dead → loss ok."""
@@ -1501,6 +1524,49 @@ with event_lock(sys.argv[2]):
         sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
         with self.assertRaisesRegex(events.Blocked, "still active"):
             events.record_lost(self.root, "glm", rid, sandbox, "not dead")
+
+    def test_child_publisher_blocks_loss(self):
+        """A still-alive child that can publish blocks loss even if owner PID is dead."""
+        rid = "c3" + "0" * 30
+        # Owner PID is dead (99999999), but a live child PID exists.
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=99999999)
+        events.require_report(self.root, "glm", rid)
+        # Record a live child (the current process) via the sidecar file.
+        child_file = self.root / "evidence" / rid / "child_pid"
+        child_file.write_text(str(os.getpid()) + "\n")
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        with self.assertRaisesRegex(events.Blocked, "still active"):
+            events.record_lost(self.root, "glm", rid, sandbox, "child can still publish")
+
+    def test_dead_owner_and_dead_child_records_loss(self):
+        """Both owner and child dead → loss is recordable."""
+        rid = "c4" + "0" * 30
+        self.invocation(rid=rid, code=1, provider="glm", finish=False, owner_pid=99999999)
+        events.require_report(self.root, "glm", rid)
+        child_file = self.root / "evidence" / rid / "child_pid"
+        child_file.write_text("99999998\n")
+        sandbox, _ = self._lost_sandbox("glm", owner_line=f"evidence_owner=glm:{rid}")
+        events.record_lost(self.root, "glm", rid, sandbox, "all dead")
+        self.assertTrue((self.root / "evidence" / rid / "evidence-lost.json").is_file())
+
+    def test_begin_stores_owner_pid(self):
+        """Normal begin stores the owner PID from the environment."""
+        os.environ["AI_REVIEW_EVENT_OWNER_PID"] = str(os.getpid())
+        try:
+            import uuid as _uuid
+            run_id = _uuid.uuid4().hex
+            row = {"schema_version": 1, "event": "started", "provider": "glm",
+                   "operation": "invocation", "parent_run_id": None,
+                   "run_id": run_id, "timestamp": "2026-10-07T12:00:00+00:00",
+                   "repo": str(self.toolkit), "head": self.sha,
+                   "owner_pid": events._owner_pid_from_env(),
+                   "caller": "test"}
+            self.write(row)
+            starts = [json.loads(l) for l in self.ledger.read_text().splitlines()
+                      if json.loads(l).get("run_id") == run_id]
+            self.assertEqual(starts[0].get("owner_pid"), os.getpid())
+        finally:
+            del os.environ["AI_REVIEW_EVENT_OWNER_PID"]
 
     def test_verify_accepts_matching_evidence_lost_without_ledger_row(self):
         rid = "b" * 32
@@ -1530,13 +1596,32 @@ with event_lock(sys.argv[2]):
         with self.assertRaises(events.Blocked):
             events.verify_reports(self.root, "glm", rid)
 
-    def test_run_id_provider_refuses_loss_without_run_id(self):
+    def test_codex_legacy_loss_allowed_when_no_report_exists(self):
         rid = "a2" + "0" * 30
         self._finished_lost_invocation("codex", rid)
-        sandbox, source = self._lost_sandbox("codex", name="no-owner")
-        # No evidence_owner line → legacy path → no run_id → fail closed for codex.
+        sandbox, _ = self._lost_sandbox("codex", name="no-owner")
+        # No evidence_owner line → legacy local-reconciliation path. Broad
+        # provider-wide search finds no report, so the loss is real.
+        events.reconcile_lost(self.root, "codex", sandbox, "legacy path, report gone")
+        self.assertTrue(any(self.root.glob("evidence/*/evidence-lost.json")))
+
+    def test_codex_broad_search_finds_production_report_names(self):
+        rid = "a3" + "0" * 30
+        self._finished_lost_invocation("codex", rid)
+        # Production Codex report name: codex-{mode}-{ts}-{pid}-{random}.md
+        report = "codex-with-report-20260917T152549-12345-6789.md"
+        sandbox, _ = self._lost_sandbox("codex", name="with-report", reports=(report,))
         with self.assertRaises(events.Blocked):
-            events.reconcile_lost(self.root, "codex", sandbox, "legacy path")
+            events.reconcile_lost(self.root, "codex", sandbox, "report still on disk")
+
+    def test_gemini_broad_search_finds_production_report_names(self):
+        rid = "a4" + "0" * 30
+        self._finished_lost_invocation("gemini", rid)
+        # Production Gemini report name: gemini-{name}-{ts}-{pid}.md
+        report = "gemini-gem-tag-20260917T152549-99.md"
+        sandbox, _ = self._lost_sandbox("gemini", name="gem-tag", reports=(report,))
+        with self.assertRaises(events.Blocked):
+            events.reconcile_lost(self.root, "gemini", sandbox, "report still on disk")
 
 
 if __name__ == "__main__":

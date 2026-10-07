@@ -128,16 +128,25 @@ def _owner_pid_from_env():
 
 
 def process_alive(pid):
-    """Same-machine liveness for a recorded wrapper PID; never trusted alone."""
+    """Same-machine liveness for a recorded wrapper PID; never trusted alone.
+
+    On Windows a Git Bash `$$` is an MSYS pid, not a Win32 one. OpenProcess
+    failure is ambiguous: access-denied means the process exists, only
+    ERROR_INVALID_PARAMETER proves it is gone. Treat anything uncertain as
+    alive so a live review stays fail-closed.
+    """
     if not isinstance(pid, int) or pid <= 0:
         return False
     if os.name == "nt":
         import ctypes
-        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetLastError(0)
+        handle = kernel32.OpenProcess(0x1000, False, pid)
         if handle:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            kernel32.CloseHandle(handle)
             return True
-        return False
+        error = kernel32.GetLastError()
+        return error != 87  # ERROR_INVALID_PARAMETER → no such process
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -145,20 +154,48 @@ def process_alive(pid):
     except PermissionError:
         return True
     except OSError:
-        return False
+        return True  # uncertain → assume alive (fail-closed)
     return True
 
 
-def wrapper_proven_dead(start):
-    """A killed wrapper left an owner PID that is no longer alive.
+def _recorded_pids(rows, run_id, directory=None):
+    """Every PID that could still publish this invocation: owner and child."""
+    pids = []
+    for row in rows:
+        if row.get("run_id") != run_id:
+            continue
+        if row.get("event") == "started" and isinstance(row.get("owner_pid"), int):
+            pids.append(row["owner_pid"])
+    if directory is not None:
+        child_file = evidence_root(directory, run_id) / "child_pid"
+        if child_file.is_file():
+            try:
+                pid = int(child_file.read_text().strip())
+                if pid > 0 and pid not in pids:
+                    pids.append(pid)
+            except (ValueError, OSError):
+                pass
+    return pids
 
-    No recorded owner PID means death cannot be proven from the process
-    alone; the caller falls back to the dead-owner age window. The PID is
-    evidence of the supervisor running when the invocation began; if that
-    process is gone and nothing finished, the paid report will never arrive.
+
+def wrapper_proven_dead(start, rows=None, run_id=None, directory=None):
+    """A killed wrapper left PIDs that are all no longer alive.
+
+    Checks the owner PID and every recorded child PID.  No recorded PID
+    means death cannot be proven from the process alone; the caller falls
+    back to the dead-owner age window.  Any live PID fails closed.
     """
+    pids = []
     pid = start.get("owner_pid")
-    return isinstance(pid, int) and pid > 0 and not process_alive(pid)
+    if isinstance(pid, int) and pid > 0:
+        pids.append(pid)
+    if rows is not None and run_id is not None:
+        for extra in _recorded_pids(rows, run_id, directory):
+            if extra not in pids:
+                pids.append(extra)
+    if not pids:
+        return False
+    return all(not process_alive(p) for p in pids)
 
 
 def require_report(directory, provider, run_id):
@@ -305,7 +342,9 @@ def verify_reports(directory, provider, run_id):
         # only: record_lost still demands a ledger row for live accounting.
         pre = _evidence_lost_identity(directory, provider, run_id)
         if pre is not None:
-            return [run_id + "/evidence-lost"]
+            root = evidence_root(directory, run_id)
+            if not any(root.glob("*.report.json")) and not lost_blockers(root):
+                return [run_id + "/evidence-lost"]
         raise
     root = evidence_root(directory, run_id)
     if not (root / "required.json").exists():
@@ -1008,33 +1047,33 @@ def reconcile_sandbox(directory, provider, sandbox, metadata, reports):
 
 LOST_REPORT_PROVIDERS = {"codex", "gemini", "glm", "grok", "kimi", "muse", "qwen"}
 
-# Providers whose on-disk report names embed the evidence run_id (review-lifecycle-core).
-# For these the only sound search when no run_id is at hand is to refuse the loss.
-RUN_ID_REPORT_PROVIDERS = {"codex", "deepseek", "stepfun"}
-
 
 def lost_report_candidates(provider, sandbox, source, since=None, run_id=None):
-    """Reports this review could still have written; any one of them refuses a loss record."""
+    """Reports this review could still have written; any one of them refuses a loss record.
+
+    Production report names do not share one shape: glm/grok/qwen use
+    `{provider}-{name}-{key}.md`, gemini/muse/kimi embed the session name
+    under a caller-prefixed sandbox tag, and codex writes
+    `codex-{mode}-{ts-pid-random}.md` with no separate key. Deriving the
+    name from the sandbox tag therefore misses live reports (false loss).
+    Search every provider report that carries a timestamp or content-hash
+    key, and also any that embeds the evidence run_id — a sibling hit is a
+    safe refusal, never a false loss.
+    """
     reviews = source / ".ai" / "reviews"
     if not reviews.is_dir():
         return []
-    if run_id is not None and provider in RUN_ID_REPORT_PROVIDERS:
-        # Report names that embed the run_id are unambiguous for this invocation.
-        pattern = re.compile(re.escape(provider) + r"-.+-" + re.escape(run_id) + r"(?:\.incomplete)?\.md")
-        return sorted(path for path in reviews.iterdir() if pattern.fullmatch(path.name) and
-                      (since is None or path.stat().st_mtime >= since))
-    if run_id is None and provider in RUN_ID_REPORT_PROVIDERS:
-        require(False,
-                "reconcile-lost cannot prove a " + provider + " report is gone without its run_id; use reconcile-sandbox")
-    match = re.fullmatch(re.escape(provider) + r"-(.+)-[0-9a-f]{12}", sandbox.name)
-    require(match, "sandbox name does not identify its review")
-    # Only this exact review name: a sibling such as NAME-r3 is a different review.
-    # The tail covers {ts|hash} plus optional incomplete- prefix, pid/random
-    # suffixes (gemini/grok/muse) and .incomplete suffix (qwen/kimi).
-    pattern = re.compile(re.escape(provider + "-" + match[1] + "-") +
-                         r"(?:incomplete-)?(?:\d{8}T\d{6}Z|[0-9a-f]{32}|[0-9a-f]{64})(?:-\d+)*?(?:\.incomplete)?\.md")
-    return sorted(path for path in reviews.iterdir() if pattern.fullmatch(path.name) and
-                  (since is None or path.stat().st_mtime >= since))
+    key = r"(?:\d{8}T\d{6}Z?|[0-9a-f]{32}|[0-9a-f]{64})"
+    patterns = [re.compile(re.escape(provider) + r"-.+" + key + r".*\.md")]
+    if run_id is not None:
+        patterns.append(re.compile(re.escape(provider) + r"-.+-" + re.escape(run_id) + r"(?:\.incomplete)?\.md"))
+    found = []
+    for path in reviews.iterdir():
+        if since is not None and path.stat().st_mtime < since:
+            continue
+        if any(p.fullmatch(path.name) for p in patterns):
+            found.append(path)
+    return sorted(found)
 
 
 def lost_blockers(root):
@@ -1045,20 +1084,29 @@ def lost_blockers(root):
 def _proven_dead(directory, run_id, start=None):
     """True only when a started-but-never-finished invocation is provably dead.
 
-    Either proof is enough: (1) a recorded owner PID that is no longer
-    alive (the wrapper was killed), or (2) the start timestamp is older
-    than DEAD_OWNER_WINDOW_SECONDS with no finished row. A live wrapper
-    always finishes or is reaped within that window on this machine;
-    anything younger stays fail-closed ("still active").
+    Age alone is NEVER sufficient while a live owner PID or child PID exists.
+    Proof requires either (1) every recorded PID is no longer alive, or
+    (2) no PID is recorded and the start is older than the dead-owner window
+    with no finished row.  Anything younger or still-alive stays fail-closed.
     """
     DEAD_OWNER_WINDOW_SECONDS = 2 * 3600
-    if start is not None and wrapper_proven_dead(start):
-        return True
     _, data = snapshot(directory / "events.jsonl", "jsonl")
     rows = [json.loads(line) for line in data.splitlines() if line.strip()]
     starts = [r for r in rows if r.get("run_id") == run_id and r.get("event") == "started"]
     if len(starts) != 1 or any(r.get("run_id") == run_id and r.get("event") == "finished" for r in rows):
         return False
+    effective_start = start if start is not None else starts[0]
+    pids = _recorded_pids(rows, run_id, directory)
+    pid_owner = effective_start.get("owner_pid")
+    if isinstance(pid_owner, int) and pid_owner > 0 and pid_owner not in pids:
+        pids.append(pid_owner)
+    if pids:
+        # Any live PID blocks loss regardless of age.
+        if any(process_alive(p) for p in pids):
+            return False
+        # Every recorded PID is dead — proven-dead regardless of age.
+        return True
+    # No PID recorded at all: age window is the only signal.
     try:
         started = datetime.datetime.fromisoformat(starts[0]["timestamp"])
     except (KeyError, ValueError):
@@ -1193,6 +1241,14 @@ def main():
                                           "codex" if provider in {"claude", "codex", "gemini"} else "unknown"))}
         append(directory, event)
         print(event["run_id"])
+    elif operation == "note-child":
+        require(len(sys.argv) == 5, "note-child requires provider, run_id and child pid")
+        child_pid = int(sys.argv[4])
+        require(child_pid > 0, "note-child requires a positive pid")
+        root = evidence_root(directory, sys.argv[3])
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "child_pid").write_text(str(child_pid) + "\n")
+        print(json.dumps({"run_id": sys.argv[3], "child_pid": child_pid}))
     elif operation == "verify-owner":
         require(len(sys.argv) == 4, "invalid implementation owner verification")
         print(json.dumps({"references": verify_owner(directory, provider, sys.argv[3])}))
@@ -1230,8 +1286,8 @@ def main():
         facts = provenance(json.loads(sys.argv[5]) if len(sys.argv) == 6 else None)
         publication_incomplete = []
         def finish(rows):
-            matches = [r for r in rows if r.get("run_id") == run_id]
-            require(len(matches) == 1 and matches[0].get("event") == "started" and
+            matches = [r for r in rows if r.get("run_id") == run_id and r.get("event") == "started"]
+            require(len(matches) == 1 and
                     matches[0].get("provider") == provider, "event has no unique matching start")
             try:
                 references = verify_reports(directory, provider, run_id)

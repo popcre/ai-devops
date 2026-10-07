@@ -159,8 +159,10 @@ reviewer_event_guard(){
   [ "$provider" != deepseek ] || [ "${1:-}" != finalize ] || operation=local-finalization
   [ "$provider" != glm ] || [ "${1:-}" != recover ] || operation=local-finalization
   [ "$provider" != muse ] || [ "${1:-}" != reconcile ] || operation=local-finalization
-  event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
+  # Owner PID must be set before begin so normal top-level runs store it.
   AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
+  event_env+=("AI_REVIEW_EVENT_OWNER_PID=$AI_REVIEW_EVENT_OWNER_PID")
+  event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
   export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID
   # Forward only to this invocation's child; never search process names or
   # change another review's state. A killed supervisor leaves an unmatched start.
@@ -170,6 +172,8 @@ reviewer_event_guard(){
   # Bash normally ignores INT in asynchronous children. Reset inherited signal
   # dispositions before entering the wrapper so its cancellation traps work.
   env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
+  # Record the child so loss is refused while it can still publish.
+  env -i "${event_env[@]}" AI_REVIEW_EVENT_RUN_ID="$event_id" "$python" "$event_tool" note-child "$provider" "$event_id" "$child" >/dev/null 2>&1 || true
   [ -z "$received" ] || kill "-$received" "$child" 2>/dev/null || true
   while true; do
     received=''
