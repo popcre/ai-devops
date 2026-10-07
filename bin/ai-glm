@@ -136,7 +136,14 @@ need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installe
 need curl; need jq; need git
 
 capacity_gate() {
-  local out state
+  local out state hold
+  hold="$("$REVIEW_PREFLIGHT_BIN" pause-status glm 2>/dev/null)" || { warn 'GLM protected hold could not be verified; no review submitted.'; return 3; }
+  if ! printf '%s' "$hold" | jq -e ' .==null or (type=="object" and .provider=="glm" and (.expires_epoch|type=="number") and (.failure_class|type=="string"))' >/dev/null 2>&1; then
+    warn 'GLM protected hold is malformed; no review submitted.'; return 3
+  fi
+  if printf '%s' "$hold" | jq -e --argjson now "$(date +%s)" 'type=="object" and .expires_epoch>$now' >/dev/null; then
+    warn 'GLM review was not submitted because a protected provider hold is active.'; return 3
+  fi
   out="$("$REVIEW_PREFLIGHT_BIN" capacity glm --json 2>/dev/null || true)"
   if ! printf '%s\n' "$out" | jq -e '.schema_version==1 and .provider=="glm" and (.state|IN("available","exhausted","unknown"))' >/dev/null 2>&1; then
     out="$(jq -nc --arg at "$(date -u +%FT%TZ)" '{schema_version:1,provider:"glm",state:"unknown",checked_at:$at,provider_version:"unknown",credential_profile_scope:null,model_scope:null,source_kind:"wrapper",reason:"malformed-response",reset_at:null}')"
@@ -463,6 +470,80 @@ persist_review_terminal() { # META ASSISTANT_JSON; retain before optional local 
   [ -n "$version" ] || version=unavailable
   write_meta "$meta" "$(jq --arg branch "$branch" --arg version "$version" '.remote_turn.report_branch=(.remote_turn.report_branch // $branch) | .remote_turn.report_server_version=(.remote_turn.report_server_version // $version)' "$meta")" || return 1
   restore_report_context "$meta"
+}
+
+review_error_receipt() { # META [ASSISTANT_JSON]; absent JSON verifies retained record
+  local meta="$1" msg="${2:-}" input="" result runtime rc=0
+  runtime="$(command -v python3 || command -v python)" || return 1
+  if [ -n "$msg" ]; then
+    input="$(mktemp "${meta}.error-input.XXXXXX")" || return 1
+    chmod 600 "$input" && printf '%s' "$msg" > "$input" || { rm -f "$input"; return 1; }
+  fi
+  result="$("$runtime" - "$WRAPPER_DIR/../tools" "$meta" "$input" <<'ERROR_RECEIPT'
+import json,os,re,stat,sys,time
+sys.path.insert(0,sys.argv[1])
+from reviewer_maintenance import physical,publish,read_json,require
+meta=physical(sys.argv[2]); m=read_json(meta); t=m.get('remote_turn',{})
+for key,pattern in [('original_invocation_id',r'[0-9a-f]{32}'),('head',r'[0-9a-f]{40}'),('base',r'[0-9a-f]{40}'),('packet_sha256',r'[0-9a-f]{64}')]:
+    require(isinstance(t.get(key),str) and re.fullmatch(pattern,t[key]),'unbound error turn '+key)
+require(m.get('type')=='review' and m.get('model')=='glm-5.3' and m.get('provider')=='zai-coding-plan','wrong error review model')
+require(isinstance(t.get('previous_message_id'),str),'missing error watermark')
+require(all(isinstance(m.get(k),str) and m[k] for k in ['name','caller']),'missing error owner')
+require(isinstance(t.get('started_at'),str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z',t['started_at']),'missing original observation')
+require(isinstance(m.get('opencode_session_id'),str) and re.fullmatch(r'[A-Za-z0-9_-]+',m['opencode_session_id']),'invalid error session')
+identity={k:m[k] for k in ['name','caller','model','provider','opencode_session_id']}
+binding={k:t[k] for k in ['original_invocation_id','head','base','packet_sha256','previous_message_id','started_at']}
+target=physical(meta.parent/(meta.stem+'.'+t['original_invocation_id']+'.error.json'))
+if sys.argv[3]:
+    msg=read_json(sys.argv[3]); model=msg.get('model',{})
+    require(msg.get('finish')=='error' and isinstance(msg.get('id'),str) and msg['id'] and msg['id']!=t['previous_message_id'],'not a fresh terminal error')
+    require(model.get('id')==m['model'] and model.get('providerID')==m['provider'],'terminal error model mismatch')
+    require(isinstance(msg.get('error'),dict),'missing terminal error cause')
+    detail=str(msg['error'].get('message') or msg['error'].get('data',{}).get('message') or msg['error'].get('name') or '')
+    require(bool(detail),'empty terminal error cause')
+    failure='provider-quota-exhausted' if ('1310' in detail or 'Limit Exhausted' in detail or 'quota' in detail.lower()) else 'provider-error'
+    value={'schema_version':1,'identity':identity,'binding':binding,'assistant_id':msg['id'],'finish':'error','authorizing':False,'failure_class':failure,'observed_epoch':int(time.time())}
+    if target.exists():
+        old=read_json(target); value['observed_epoch']=old.get('observed_epoch'); require(old==value,'conflicting immutable error receipt')
+    else: publish(target,value)
+value=read_json(target)
+info=target.stat(); require(stat.S_ISREG(info.st_mode) and info.st_nlink==1,'unsafe terminal error file')
+if os.name!='nt': require(info.st_uid==os.getuid() and not info.st_mode & 0o077,'unprotected terminal error file')
+require(value.get('schema_version')==1 and value.get('identity')==identity and value.get('binding')==binding and value.get('finish')=='error' and value.get('authorizing') is False,'terminal error binding changed')
+require(isinstance(value.get('assistant_id'),str) and value['assistant_id'] and value['assistant_id']!=t['previous_message_id'],'terminal error watermark changed')
+require(value.get('failure_class') in ('provider-error','provider-quota-exhausted') and type(value.get('observed_epoch')) is int and 0<=value['observed_epoch']<=int(time.time()),'invalid terminal error observation')
+print(json.dumps({'path':str(target),'failure_class':value['failure_class'],'observed_epoch':value['observed_epoch']},separators=(',',':')))
+ERROR_RECEIPT
+)" || rc=$?
+  [ -z "$input" ] || rm -f "$input"
+  [ "$rc" -eq 0 ] || return "$rc"
+  printf '%s' "$result"
+}
+
+persist_review_error() { # META ASSISTANT_JSON
+  local meta="$1" receipt digest path failure observed
+  receipt="$(review_error_receipt "$meta" "${2:-}")" || return 1
+  path="$(jq -r .path <<<"$receipt")"; digest="$(sha256sum "$path" | cut -d' ' -f1)" || return 1
+  write_meta "$meta" "$(jq --arg path "$path" --arg digest "$digest" '.remote_turn.state="terminal-error" | .remote_turn.authorizing=false | .remote_turn.error_path=$path | .remote_turn.error_sha256=$digest | .last_failed_turn=.remote_turn' "$meta")" || return 1
+  receipt="$(review_error_receipt "$meta")" || return 1
+  [ "$(jq -r .remote_turn.error_path "$meta")" = "$path" ] && [ "$(jq -r .remote_turn.error_sha256 "$meta")" = "$(sha256sum "$path" | cut -d' ' -f1)" ] && jq -e '.last_failed_turn==.remote_turn and .remote_turn.state=="terminal-error" and .remote_turn.authorizing==false' "$meta" >/dev/null || return 1
+  failure="$(jq -r .failure_class <<<"$receipt")"; observed="$(jq -r .observed_epoch <<<"$receipt")"
+  if [ "$failure" = provider-quota-exhausted ]; then
+    "$REVIEW_PREFLIGHT_BIN" pause glm out-of-credit --seconds 3600 --observed "$observed" >/dev/null || return 1
+  fi
+}
+
+recover_review_error() { # META: local-only, never a verdict or a provider read
+  local receipt path digest
+  receipt="$(review_error_receipt "$1")" || die 'retained terminal error is unproven; no provider call was made.'
+  path="$(jq -r .path <<<"$receipt")"; digest="$(sha256sum "$path" | cut -d' ' -f1)"
+  [ "$path" = "$(jq -r .remote_turn.error_path "$1")" ] && [ "$digest" = "$(jq -r .remote_turn.error_sha256 "$1")" ] || die 'terminal error bytes changed; no provider call was made.'
+  ACTIVE_DIAG_REPO="$(jq -r .repository_root "$1")"; ACTIVE_DIAG_SESSION="$(jq -r .name "$1")"
+  ACTIVE_DIAG_RUN="$(jq -r '.last_diagnostic_run_id // empty' "$1")"
+  ACTIVE_DIAG_STARTED_EPOCH="$(jq -r .observed_epoch <<<"$receipt")"
+  record_diagnostic terminal provider-error --terminal-reason error --cancellation-confirmation not-requested --failure-class "$(jq -r .failure_class <<<"$receipt")"
+  printf 'RETAINED terminal-error non-authorizing session=%s original-head=%s; no provider call made.\n' "$(jq -r .name "$1")" "$(jq -r .remote_turn.head "$1")"
+  return 1
 }
 
 restore_report_context() {
@@ -1209,9 +1290,10 @@ provider_turn_error() { # provider_turn_error ASSISTANT_JSON NAME [IMPLEMENTATIO
       --arg f "$failure" --arg now "$(date -u +%FT%TZ)" || return 1
     return 125
   fi
+  if [ -n "$TURN_META" ]; then persist_review_error "$TURN_META" "$msg" || die "could not preserve the exact terminal error; original session remains fenced."; fi
   record_diagnostic terminal provider-error --terminal-reason error --cancellation-confirmation not-requested --failure-class "$failure"
   die "GLM provider returned an error and ended the turn ($failure): $detail
-       Session $name was not given a verdict; retry after the provider recovers."
+       Session $name was not given a verdict; retain or recover its exact diagnostic, never resubmit this turn."
 }
 
 await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> assistant JSON
@@ -1480,11 +1562,21 @@ cmd_recover() { # exact session only; never sends or resends a prompt
   fi
   jq -e '.remote_turn|(.previous_message_id|type=="string") and (.original_invocation_id|type=="string" and test("^[0-9a-f]{32}$"))' "$mp" >/dev/null || die 'legacy pending turn lacks a proven watermark or original invocation identity; retain it for exact evidence inspection, never resubmit it.'
   GLM_RECOVERY_EVENT_RUN_ID="$(jq -r .remote_turn.original_invocation_id "$mp")"
+  if [ "$state" = terminal-error ]; then recover_review_error "$mp"; return $?; fi
+  if [ "$state" = pending ] && { [ -e "${mp%.json}.$GLM_RECOVERY_EVENT_RUN_ID.error.json" ] || [ -L "${mp%.json}.$GLM_RECOVERY_EVENT_RUN_ID.error.json" ]; }; then
+    # A crash between immutable publication and metadata commit is local-only.
+    persist_review_error "$mp" || die 'retained error conflicts with this invocation; no provider call made.'
+    recover_review_error "$mp"; return $?
+  fi
   if [ "$state" = pending ]; then
     require_review_server
     # One bounded read can recover a result that finished after the wrapper
     # exited. It never renews the original provider/polling deadline.
     msg="$(last_assistant "$sid")" || die 'could not observe the exact pending GLM result; session remains fenced.'
+    if printf '%s' "$msg" | jq -e '.finish=="error"' >/dev/null; then
+      persist_review_error "$mp" "$msg" || die 'could not preserve observed terminal error; no resubmission occurred.'
+      recover_review_error "$mp"; return $?
+    fi
     if ! printf '%s' "$msg" | jq -e --arg previous "$(jq -r .remote_turn.previous_message_id "$mp")" --arg model "$MODEL" --arg provider "$PROVIDER" \
       '.id != null and .id != $previous and .finish=="stop" and .model.id==$model and .model.providerID==$provider' >/dev/null; then
       TURN_META="$mp"; msg="$(await_turn "$sid" "$name" review "$boundary")"; TURN_META=""
