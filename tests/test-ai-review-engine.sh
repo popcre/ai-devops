@@ -975,10 +975,11 @@ muse_boundary_offline() {
   cat > "$dir/provider" <<'FIXTURE'
 #!/usr/bin/env bash
 # Only fake sentinels enter this process; inspect names, never dump values.
-for name in STEPFUN_API_KEY SUPABASE_SERVICE_ROLE_KEY TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET AI_MUSE_KEY AI_MUSE_SECRET_FILE AI_MUSE_KEY_ENV AI_MUSE_TEST_DIR MUSE_STUB_SECRET; do
+case "$*" in *fake-native-provider*|*fake-foreign*) exit 78;; esac
+for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIGGER_ACCESS_TOKEN TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET AI_MUSE_KEY AI_MUSE_SECRET_FILE AI_MUSE_KEY_ENV AI_MUSE_TEST_DIR MUSE_STUB_SECRET; do
   [ -z "${!name+x}" ] || exit 73
 done
-/usr/bin/bash --noprofile --norc -c 'for name in STEPFUN_API_KEY SUPABASE_SERVICE_ROLE_KEY TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET; do [ -z "${!name+x}" ] || exit 77; done' || exit 77
+/usr/bin/bash --noprofile --norc -c 'for name in STEPFUN_API_KEY SUPABASE_ACCESS_TOKEN SUPABASE_SERVICE_ROLE_KEY TRIGGER_ACCESS_TOKEN TRIGGER_SECRET_KEY TYPESAFE_API_KEY ZAI_API_KEY ARBITRARY_CALLER_SECRET; do [ -z "${!name+x}" ] || exit 77; done' || exit 77
 case "$1" in
   exec) [ "${META_API_KEY:-}" = fake-native-provider ] && [ -z "${MODEL_API_KEY+x}" ] || exit 74
     printf '%s\n' '{"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"## Verdict\nAPPROVE"}}';;
@@ -992,7 +993,7 @@ FIXTURE
   env -i PATH="$PATH" HOME="$dir" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 \
     DOOR_WORKDIR="$dir/work" DOOR_PACKET_DIR="$dir/packet" DOOR_PROMPT_FILE="$dir/prompt" DOOR_REPORT_OUT="$dir/report" DOOR_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa DOOR_TIMEOUT=10 \
     AI_MUSE_ENGINE="$engine" AI_MUSE_BIN="$dir/provider" AI_MUSE_OPENCODE="$dir/provider" AI_MUSE_KEY=fake-native-provider \
-    STEPFUN_API_KEY=fake-foreign SUPABASE_SERVICE_ROLE_KEY=fake-foreign TRIGGER_SECRET_KEY=fake-foreign TYPESAFE_API_KEY=fake-foreign ZAI_API_KEY=fake-foreign ARBITRARY_CALLER_SECRET=fake-foreign AI_MUSE_TEST_DIR=fake-test-path MUSE_STUB_SECRET=fake-foreign \
+    STEPFUN_API_KEY=fake-foreign SUPABASE_ACCESS_TOKEN=fake-foreign SUPABASE_SERVICE_ROLE_KEY=fake-foreign TRIGGER_ACCESS_TOKEN=fake-foreign TRIGGER_SECRET_KEY=fake-foreign TYPESAFE_API_KEY=fake-foreign ZAI_API_KEY=fake-foreign ARBITRARY_CALLER_SECRET=fake-foreign AI_MUSE_TEST_DIR=fake-test-path MUSE_STUB_SECRET=fake-foreign \
     bash "$MUSE_DOOR" review >"$dir/stdout" 2>"$dir/stderr" || return 1
   grep -q APPROVE "$dir/report" && ! grep -rq 'fake-native-provider\|fake-foreign' "$dir/report" "$dir/stdout" "$dir/stderr"
 }
