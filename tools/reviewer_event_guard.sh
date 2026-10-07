@@ -128,6 +128,11 @@ reviewer_event_guard(){
   local entry_cmd="${1:-}" entry_live=0
   [ "$entry_cmd" = qualify-live ] && entry_live=1
   [ "$entry_cmd" = doctor ] && [ "${2:-}" = --live ] && entry_live=1
+  # Detached Kimi workers outlive their async-submission recorder. Give the
+  # worker its own invocation; only that recorder's direct child reuses it.
+  if [ "$provider" = kimi ]; then
+    case "$entry_cmd" in __review-worker|__review-worker-env) entry_live=1 ;; esac
+  fi
   if [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] && [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] \
      && [ -n "${AI_REVIEW_EVENT_PARENT:-}" ]; then
     if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ]; then
@@ -143,6 +148,9 @@ reviewer_event_guard(){
   fi
   # Declining inherit (e.g. a qualify-live probe launched from an open review)
   # must begin its own invocation on a clean identity, never resume the outer run.
+  if [ "$provider" = kimi ]; then
+    case "$entry_cmd" in __review-worker|__review-worker-env) unset AI_REVIEW_EVENT_OWNER_PID ;; esac
+  fi
   unset AI_REVIEW_EVENT_PARENT AI_REVIEW_EVENT_PROVIDER AI_REVIEW_EVENT_RUN_ID
   local root python event_id child='' result=0 received='' observed_signal='' facts event_tool name operation=invocation
   local -a event_env=()

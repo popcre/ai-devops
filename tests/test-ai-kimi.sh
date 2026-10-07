@@ -393,6 +393,33 @@ check "start returns a durable job id" "test -n '$JOB_ID'"
 check "status reports a durable phase" "run status durable | jq -e '.phase == \"preflight\" or .phase == \"starting\" or .phase == \"running\" or .phase == \"finalizing\" or .phase == \"completed\"'"
 run wait durable >/dev/null 2>&1
 check "worker finalizes only on resume hint" "run status durable | jq -e '.phase == \"completed\" and .terminal_reason == \"session.resume_hint\"'"
+DURABLE_META="$(find "$AI_KIMI_STATE_DIR/jobs" -path '*claude--durable/job.json' -print -quit)"
+DURABLE_WORKSPACE="$(jq -r .review_workspace "$DURABLE_META")"
+DURABLE_EVENT="$(sed -n 's/^evidence_owner=kimi://p' "$DURABLE_WORKSPACE/.ai-review-sandbox" | tail -1)"
+SUBMISSION_EVENT="$(jq -rs '[.[] | select(.provider=="kimi" and .event=="started" and .operation=="async-submission")] | last | .run_id' "$AI_REVIEW_EVENT_DIR/events.jsonl")"
+check "detached worker owns evidence independently of its submission" \
+  "test -n '$DURABLE_EVENT' && test '$DURABLE_EVENT' != '$SUBMISSION_EVENT' && test -f '$AI_REVIEW_EVENT_DIR/evidence/$DURABLE_EVENT/required.json' && test ! -e '$AI_REVIEW_EVENT_DIR/evidence/$SUBMISSION_EVENT/required.json'"
+check "worker terminal event retains its verified report obligation" \
+  "jq -e 'select(.run_id==\"$DURABLE_EVENT\" and .event==\"finished\" and .exit_code==0 and .evidence_state==\"verified\" and (.evidence_references|length)>0)' '$AI_REVIEW_EVENT_DIR/events.jsonl' >/dev/null"
+check "asynchronous submission completes without closing worker evidence" \
+  "jq -e 'select(.run_id==\"$SUBMISSION_EVENT\" and .event==\"finished\" and .exit_code==0 and .evidence_state==\"verified\")' '$AI_REVIEW_EVENT_DIR/events.jsonl' >/dev/null"
+# Both private worker doors must replace an inherited owner with their fresh
+# recorder. The probe uses the real event guard and synthetic metadata only.
+mkdir -p "$TMP/owner-probe/bin"
+ln -s "$REPO_ROOT/tools" "$TMP/owner-probe/tools"
+cat > "$TMP/owner-probe/bin/worker" <<'OWNER_PROBE'
+#!/usr/bin/env bash
+source "$OWNER_GUARD"
+reviewer_event_guard kimi "$0" "$@"
+[ "$AI_REVIEW_EVENT_OWNER_PID" = "$PPID" ] || exit 17
+printf 'owner-is-new-recorder\n' > "$OWNER_PROOF"
+OWNER_PROBE
+chmod +x "$TMP/owner-probe/bin/worker"
+for worker_door in __review-worker __review-worker-env; do
+  rm -f "$TMP/owner-proof"
+  (cd "$REPO" && AI_REVIEW_EVENT_OWNER_PID=99999999 OWNER_GUARD="$REPO_ROOT/tools/reviewer_event_guard.sh" OWNER_PROOF="$TMP/owner-proof" bash "$TMP/owner-probe/bin/worker" "$worker_door") >/dev/null 2>&1
+  check "$worker_door records its own supervisor as owner" "grep -qx owner-is-new-recorder '$TMP/owner-proof'"
+done
 check "durable job records measured preparation and provider timing" "run status durable | jq -e '.timing.snapshot_seconds >= 0 and .timing.test_seconds >= 0 and .timing.packet_seconds >= 0 and .timing.provider_seconds >= 0 and .timing.model_steps == \"unavailable\"'"
 check "result is available after terminal proof" "run result durable | grep -q APPROVE"
 check "completed review has one hashed canonical artifact" "run status durable | jq -e '.artifact_kind == \"complete\" and (.artifact_sha256|length)==64 and (.artifact_paths.canonical|length)>0'"
