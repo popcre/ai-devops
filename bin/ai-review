@@ -2,7 +2,7 @@
 # ai-review — the only supported approval-gate front door.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer exact-head APPROVE report> [review options]' '       [--implementer ENGINE] names the implementing engine recorded for gate independence (default: AI_IMPLEMENTER_ENGINE, else detected)' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       [--operation NAME] asks the reviewer for the exact line "Approved NAME." (legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery|stale-linux-manifest-recovery)' '       ai-review doctor'; }
+usage(){ printf '%s\n' 'Usage: ai-review <provider> <plan-review|diff-review|security-review|visual-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force]' '       ai-review deepseek <diff-review|security-review|final-check> --code-only --paths-file JSON [--base REF] [--assert-head SHA]' '       ai-review <provider> <mode> --reviewer-approval <assigned AI reviewer exact-head APPROVE report> [review options]' '       [--implementer ENGINE] names the implementing engine recorded for gate independence (default: AI_IMPLEMENTER_ENGINE, else detected)' '       Private code-only reviews use the attachment-only DeepSeek reviewer; CLI reviewers have no proven source-read boundary.' '       [--operation NAME] asks the reviewer for the exact line "Approved NAME." (legacy-managed-launcher-refresh|first-managed-install|partial-managed-launcher-recovery|stale-linux-manifest-recovery)' '       ai-review doctor'; }
 # bin/* is symlinked onto PATH, so resolve the real script location before
 # looking for the repository's own files; $SCRIPT_DIR is the symlink directory.
 REAL_DIR="$ROOT"
@@ -63,7 +63,7 @@ case "${1:-}" in
 esac
 shift; mode="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$mode" in plan-review|diff-review|security-review|visual-review|final-check) ;; *) usage >&2; exit 2;; esac
-implementer="${AI_IMPLEMENTER_ENGINE:-}"; reviewer_approval=""; code_only=0; operation=""; paths_file=""; review_base=""; review_head=""; tests_command=""; wrapper_args=()
+implementer="${AI_IMPLEMENTER_ENGINE:-}"; reviewer_approval=""; code_only=0; operation=""; paths_file=""; review_base=""; review_head=""; tests_command=""; force_review=0; wrapper_args=()
 [ -n "$pool_provider" ] && wrapper_args+=("$pool_provider")
 wrapper_args+=("$mode")
 while [ "$#" -gt 0 ]; do
@@ -77,6 +77,8 @@ while [ "$#" -gt 0 ]; do
     --operation)
       [ "$#" -ge 2 ] && [ -z "$operation" ] || { usage >&2; exit 2; }
       operation="$2"; shift 2 ;;
+    --force)
+      force_review=1; shift ;;
     --code-only)
       [ "$code_only" -eq 0 ] || { usage >&2; exit 2; }
       code_only=1; shift ;;
@@ -123,6 +125,12 @@ if [ "$review_provider" = deepseek ] && [ "$code_only" -ne 1 ]; then
   pool_provider="deepseek"
   wrapper="${AI_REVIEW_POOL_BIN:-$ROOT/ai-review-pool}"
   wrapper_args=("deepseek" "${wrapper_args[@]}")
+fi
+# --force (#1428) only means something to the pool adapter: it bypasses the
+# reuse of an earlier passing report for the same reviewer, mode and source.
+if [ "$force_review" = 1 ]; then
+  [ -n "$pool_provider" ] && [ "$code_only" -eq 0 ] || { printf 'ai-review: --force applies only to pool reviewers.\n' >&2; exit 2; }
+  wrapper_args+=(--force)
 fi
 if [ "$code_only" -eq 1 ]; then
   [ "$review_provider" = deepseek ] || { printf 'ai-review: code-only mode requires the attachment-only DeepSeek reviewer.\n' >&2; exit 2; }
