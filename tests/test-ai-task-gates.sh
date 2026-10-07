@@ -264,11 +264,15 @@ check 'reviewer-safety installation keeps independent review and routing proof' 
   "out '$TMP/class-candidate' explain --json | jq -e '.required_gates | index(\"exact-head-independent-review\") != null and index(\"installed-routing-proof\") != null'"
 check 'reviewer-safety deploy remains forbidden even with reviewer approval' \
   "rc 3 '$TMP/class-candidate' check --before deploy $class_proof --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
-class_state="$(state_file_for "$TMP/class-candidate")"
-jq '.declared_class="reviewer-safety"' "$class_state" > "$class_state.tmp" && mv "$class_state.tmp" "$class_state"
+class_baseline="$(git -C "$TMP/class" rev-parse HEAD)"
+git -C "$TMP/class-candidate" checkout -q --detach "$class_baseline"
+( cd "$TMP/class-candidate" && "$GATES" start --class reviewer-safety ) >/dev/null
+git -C "$TMP/class-candidate" checkout -q --detach "$class_target"
 check 'a protected task cannot issue installation authority' \
   "rc 3 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
-jq '.declared_class="installation"' "$class_state" > "$class_state.tmp" && mv "$class_state.tmp" "$class_state"
+git -C "$TMP/class-candidate" checkout -q --detach "$class_baseline"
+( cd "$TMP/class-candidate" && "$GATES" start --class installation ) >/dev/null
+git -C "$TMP/class-candidate" checkout -q --detach "$class_target"
 # A runner door repeats its own "reviewed commit" table below "## Result"
 # (Muse door, #1322). The gate must read the target only from the header.
 dup_report_door(){
