@@ -16,6 +16,10 @@ on:
         description: ssh-host-trust only - SHA256 binding from authenticated Tailscale peer metadata
         type: string
         default: ''
+      expected_source_sha:
+        description: ssh-host-trust only - independently reviewed immutable commit SHA
+        type: string
+        default: ''
   pull_request:
     paths:
       - .github/workflows/windows-runner-qualification.yml
@@ -86,12 +90,16 @@ jobs:
           RUNNER_LABEL: ${{ inputs.runner_label }}
           DIAGNOSTIC_SCOPE: ${{ inputs.scope }}
           EXPECTED_PEER_DIGEST: ${{ inputs.expected_peer_digest }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          DISPATCHED_SOURCE_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           if [ "$DIAGNOSTIC_SCOPE" = ssh-host-trust ]; then
             [[ "$EXPECTED_PEER_DIGEST" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::ssh-host-trust requires an authenticated peer digest."; exit 1; }
+            [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::ssh-host-trust requires an independently reviewed source commit."; exit 1; }
+            [ "$DISPATCHED_SOURCE_SHA" = "$EXPECTED_SOURCE_SHA" ] || { echo "::error::dispatched source differs from the reviewed commit; refusing diagnostic."; exit 1; }
           fi
           case "$(printf '%s' "$RUNNER_LABEL" | tr '[:upper:]' '[:lower:]')" in
             self-hosted|windows|x64|linux|arm64|ai-devops-windows|ai-devops-windows-qualified)
@@ -127,20 +135,25 @@ jobs:
         shell: pwsh
         env:
           PINNED_RUNNER_NAME: ${{ needs.sections-host-pin.outputs.pinned_runner_name }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          DISPATCHED_SOURCE_SHA: ${{ github.sha }}
         run: |
+          if ($env:EXPECTED_SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$' -or $env:DISPATCHED_SOURCE_SHA -cne $env:EXPECTED_SOURCE_SHA) {
+            throw 'The dispatched diagnostic source does not match the independently reviewed commit.'
+          }
           if ([string]::IsNullOrWhiteSpace($env:PINNED_RUNNER_NAME) -or $env:RUNNER_NAME -cne $env:PINNED_RUNNER_NAME) {
             throw 'The diagnostic runner does not match the hosted host pin.'
           }
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.expected_source_sha }}
           clean: true
 
       - name: Prove checkout matches the dispatched immutable source
         shell: pwsh
         env:
-          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
         run: |
           if ((git rev-parse HEAD) -cne $env:EXPECTED_SOURCE_SHA) {
             throw 'The diagnostic checkout does not match its dispatched source.'

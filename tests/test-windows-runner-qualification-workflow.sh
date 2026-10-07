@@ -58,7 +58,9 @@ import pathlib, sys
 text = pathlib.Path(sys.argv[1]).read_text()
 job = text.split('  ssh-host-trust:\n', 1)[1].split('\n  qualify-sections:', 1)[0]
 for required in ('needs: sections-host-pin', "inputs.scope == 'ssh-host-trust'", 'timeout-minutes: 3',
-                 '$env:RUNNER_NAME -cne $env:PINNED_RUNNER_NAME', 'ref: ${{ github.sha }}',
+                 '$env:RUNNER_NAME -cne $env:PINNED_RUNNER_NAME', 'ref: ${{ inputs.expected_source_sha }}',
+                 '$env:DISPATCHED_SOURCE_SHA -cne $env:EXPECTED_SOURCE_SHA',
+                 'EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}',
                  '(git rev-parse HEAD) -cne $env:EXPECTED_SOURCE_SHA',
                  'EXPECTED_PEER_DIGEST: ${{ inputs.expected_peer_digest }}',
                  'run: .\\tools\\ci\\read-windows-ssh-host-trust.ps1'):
@@ -67,6 +69,18 @@ for forbidden in ('assert-windows-runner-host', 'test-all.ps1', 'qualification-r
     assert forbidden not in job, forbidden
 assert '[ "$DIAGNOSTIC_SCOPE" != ssh-host-trust ]' in text
 assert '[[ "$EXPECTED_PEER_DIGEST" =~ ^[0-9a-f]{64}$ ]]' in text
+assert '[ "$DISPATCHED_SOURCE_SHA" = "$EXPECTED_SOURCE_SHA" ]' in text
+assert '[[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]' in text
+# Execute the exact hosted refusal block with wrong/moved and matched source.
+import os, subprocess
+block = text.split('          if [ "$DIAGNOSTIC_SCOPE" = ssh-host-trust ]; then\n', 1)[1].split('\n          fi', 1)[0]
+expected = '1' * 40
+for source, success in ((expected, True), ('2' * 40, False), ('', False)):
+    env = dict(os.environ, EXPECTED_PEER_DIGEST='a' * 64, EXPECTED_SOURCE_SHA=expected, DISPATCHED_SOURCE_SHA=source)
+    result = subprocess.run(['bash', '-c', block], env=env, capture_output=True)
+    assert (result.returncode == 0) is success
+env = dict(os.environ, EXPECTED_PEER_DIGEST='a' * 64, EXPECTED_SOURCE_SHA='', DISPATCHED_SOURCE_SHA=expected)
+assert subprocess.run(['bash', '-c', block], env=env, capture_output=True).returncode != 0
 source = pathlib.Path(sys.argv[2]).read_text()
 for required in ('param()', 'C:\\ProgramData\\ssh\\ssh_host_', 'kind+"_key.pub"',
                  '0x08200000', 'info.Attr & 0x410', 'WaitForExit(15000)',

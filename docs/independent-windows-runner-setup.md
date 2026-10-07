@@ -50,10 +50,16 @@ qualification retains its existing refusal of already-qualified hosts.
 The three-minute job reads only the fixed OpenSSH RSA, Ed25519 and ECDSA public
 files beneath `C:\ProgramData\ssh`, rejecting missing, oversized, linked or
 reparse-point files. It publishes the bound node digest and allowlisted SHA256
-key fingerprints only after all checks succeed. It cannot refresh security
+key fingerprints only after all checks succeed. Supply `expected_source_sha`
+as the exact independently reviewed immutable commit: the hosted pin rejects a
+dispatch that resolves to any other commit before queuing a diagnostic. The
+runtime repeats that check before checkout, checks out the supplied reviewed
+commit, and verifies the resulting HEAD before executing the fingerprint reader.
+It cannot refresh security
 evidence, qualify a host, execute operator-supplied commands or alter SSH trust.
-Review the exact source before dispatch, match the resulting run's source to
-that reviewed commit, and compare its fingerprints with the endpoint before
+Review the exact source before dispatch, supply that reviewed SHA independently
+of the dispatch's selected ref, match the resulting run's source to that same
+reviewed commit, and compare its fingerprints with the endpoint before
 any separately gated trust update. A missing or mismatched node binding stops
 recovery; network discovery alone never authorizes accepting a new key.
 
