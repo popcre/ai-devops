@@ -175,8 +175,16 @@ reviewer_event_guard(){
   # only as long as this invocation; a nested review keeps the outer scope.
   privacy_scope=""
   if [ -z "${AI_REVIEW_PRIVACY_SCOPE:-}" ]; then
-    privacy_scope="$(mktemp -d "${TMPDIR:-/tmp}/ai-review-privacy.XXXXXX" 2>/dev/null)" \
-      && export AI_REVIEW_PRIVACY_SCOPE="$privacy_scope" || privacy_scope=""
+    # Under the user's own state root, never a shared temporary directory: on
+    # Windows the profile's ACL is the only owner-only boundary (Git Bash
+    # modes are synthesized), the same trust the gate's explain cache uses.
+    local privacy_base="${AI_REVIEW_PRIVACY_BASE:-$HOME/.local/state/ai-devops/review-privacy}"
+    if ( umask 077; mkdir -p "$privacy_base" ) 2>/dev/null && [ ! -L "$privacy_base" ] && chmod 700 "$privacy_base" 2>/dev/null; then
+      privacy_scope="$( umask 077; mktemp -d "$privacy_base/scope.XXXXXX" 2>/dev/null)" \
+        && chmod 700 "$privacy_scope" && export AI_REVIEW_PRIVACY_SCOPE="$privacy_scope" || privacy_scope=""
+    fi
+    # A killed supervisor cannot remove its scope; clear those a day later.
+    find "$privacy_base" -mindepth 1 -maxdepth 1 -type d -name 'scope.*' -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
   fi
   env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
   [ -z "$received" ] || kill "-$received" "$child" 2>/dev/null || true
