@@ -36,6 +36,7 @@ function Write-TestAuthoritySeal([string]$IssuedPath, [string]$ReadPath) {
   $hmac = [Security.Cryptography.HMACSHA256]::new($key)
   [IO.File]::WriteAllText("$IssuedPath.seal", [Convert]::ToBase64String($hmac.ComputeHash($bytes)) + "`n")
   foreach ($path in @($IssuedPath, $ReadPath, "$IssuedPath.seal")) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
     & icacls.exe $path '/setowner' "*$sid" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Cannot own Windows source-gate authority fixture: $path" }
   }
