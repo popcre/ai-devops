@@ -124,7 +124,7 @@ def evidence_root(directory, run_id):
 
 def _owner_pid_from_env():
     value = os.environ.get("AI_REVIEW_EVENT_OWNER_PID", "")
-    return int(value) if value.isdigit() else None
+    return int(value) if re.fullmatch(r"[0-9]+", value) else None
 
 
 def process_alive(pid):
@@ -1216,6 +1216,7 @@ def main():
         print(event["run_id"])
     elif operation == "note-child":
         require(len(sys.argv) == 5, "note-child requires provider, run_id and child pid")
+        require(re.fullmatch(r"[0-9a-f]{32}", sys.argv[3]), "invalid invocation identity")
         child_pid = int(sys.argv[4])
         require(child_pid > 0, "note-child requires a positive pid")
         root = evidence_root(directory, sys.argv[3])
@@ -1265,6 +1266,8 @@ def main():
             matches = [r for r in rows if r.get("run_id") == run_id and r.get("event") == "started"]
             require(len(matches) == 1 and
                     matches[0].get("provider") == provider, "event has no unique matching start")
+            require(not any(r.get("run_id") == run_id and r.get("event") == "finished" for r in rows),
+                    "invocation already has a terminal row")
             try:
                 references = verify_reports(directory, provider, run_id)
             except (Blocked, OSError, ValueError):

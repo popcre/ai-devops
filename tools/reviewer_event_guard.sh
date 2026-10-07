@@ -125,18 +125,24 @@ reviewer_event_guard(){
   # repository), so binding its sandbox onto the review run is refused
   # ("sandbox evidence source differs from invocation"). Only the probe recorder's
   # own direct child keeps that qualification invocation.
+  # Resolve a bash pid to the OS/Win32 pid process_alive can see.
+  # Git Bash `$$` is an MSYS pid; OpenProcess cannot see it (a live
+  # shell would read as dead and open a false-loss window).
+  os_pid() {
+    if [ -r "/proc/$1/winpid" ]; then cat "/proc/$1/winpid"; else printf '%s\n' "$1"; fi
+  }
   local entry_cmd="${1:-}" entry_live=0
   [ "$entry_cmd" = qualify-live ] && entry_live=1
   [ "$entry_cmd" = doctor ] && [ "${2:-}" = --live ] && entry_live=1
   if [ "${AI_REVIEW_EVENT_PROVIDER:-}" = "$provider" ] && [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] \
      && [ -n "${AI_REVIEW_EVENT_PARENT:-}" ]; then
     if [ "${AI_REVIEW_EVENT_PARENT:-}" = "$PPID" ]; then
-      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
+      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$(os_pid "${AI_REVIEW_EVENT_PARENT:-$$}")}"
       export -n AI_REVIEW_EVENT_OWNER_PID
       return 0
     fi
     if [ "$entry_live" -eq 0 ] && reviewer_event_run_is_open; then
-      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-${AI_REVIEW_EVENT_PARENT:-$$}}"
+      AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$(os_pid "${AI_REVIEW_EVENT_PARENT:-$$}")}"
       export -n AI_REVIEW_EVENT_OWNER_PID
       return 0
     fi
@@ -160,7 +166,18 @@ reviewer_event_guard(){
   [ "$provider" != glm ] || [ "${1:-}" != recover ] || operation=local-finalization
   [ "$provider" != muse ] || [ "${1:-}" != reconcile ] || operation=local-finalization
   # Owner PID must be set before begin so normal top-level runs store it.
-  AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
+  # On Git Bash `$$` is an MSYS pid; Win32 OpenProcess needs the Win32 pid
+  # (/proc/<msys>/winpid) or a live owner would read as dead (fail-open).
+  if [ -z "${AI_REVIEW_EVENT_OWNER_PID:-}" ]; then
+    AI_REVIEW_EVENT_OWNER_PID=""
+    if [ -r "/proc/$$/winpid" ]; then
+      IFS= read -r AI_REVIEW_EVENT_OWNER_PID < "/proc/$$/winpid" || true
+    fi
+    if [ -z "$AI_REVIEW_EVENT_OWNER_PID" ]; then
+      AI_REVIEW_EVENT_OWNER_PID="$("$python" -c 'import os; print(os.getppid())' 2>/dev/null || true)"
+    fi
+    AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
+  fi
   event_env+=("AI_REVIEW_EVENT_OWNER_PID=$AI_REVIEW_EVENT_OWNER_PID")
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
   export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID
@@ -179,7 +196,12 @@ reviewer_event_guard(){
   env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
   # Record the child so loss is refused while it can still publish.
   # Clear child_pending only after the PID is durably recorded.
-  if env -i "${event_env[@]}" AI_REVIEW_EVENT_RUN_ID="$event_id" "$python" "$event_tool" note-child "$provider" "$event_id" "$child" >/dev/null 2>&1; then
+  child_pid_recorded=""
+  if [ -r "/proc/$child/winpid" ]; then
+    read -r child_pid_recorded < "/proc/$child/winpid" || true
+  fi
+  child_pid_recorded="${child_pid_recorded:-$child}"
+  if env -i "${event_env[@]}" AI_REVIEW_EVENT_RUN_ID="$event_id" "$python" "$event_tool" note-child "$provider" "$event_id" "$child_pid_recorded" >/dev/null 2>&1; then
     rm -f "$pending_file"
   fi
   [ -z "$received" ] || kill "-$received" "$child" 2>/dev/null || true
