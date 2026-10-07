@@ -10,9 +10,10 @@ across 5 machines that **share one 1Password service account**, were each
 launching the 1Password MCP through a launcher that re-resolved **11 `op://`
 secrets on every single MCP-server start**. That burst of service-account
 requests exceeded 1Password's **per-hour request cap** and temporarily **locked
-the account** — the "storm." The fix caps 1Password to **≤1 refresh per 15
-minutes per machine** regardless of how many windows/servers/subagents launch,
-by resolving all secrets once and reusing a local DPAPI-encrypted cache. All of
+the account** — the "storm." On Windows, the fix caps 1Password to **≤1 refresh per 15
+minutes per profile** regardless of how many windows/servers/subagents launch,
+by resolving all secrets once and reusing a local DPAPI-encrypted cache. Linux
+remote MCP launchers resolve their bearer afresh at launch. All of
 it lives in the `ai-devops` repo so it reaches every machine via bootstrap.
 
 ## Background: how MCP secrets are launched on Windows
@@ -196,9 +197,12 @@ repo changes are committed and pushed.
 
 ## Known remaining / secondary items
 
-- **Windows process-command-line exposure (historical owner decision,
-  2026-08-21; corrected 2026-10-07):** the former launcher passed its resolved
-  bearer in `--header` process arguments. The pinned `mcp-remote@0.1.38` does
+- **Windows process-command-line exposure (owner decision 2026-08-21,
+  implementation corrected 2026-10-07):** the owner accepted the earlier argv
+  exposure and rejected a custom proxy or extra service, while permitting a
+  native environment-sourced bearer mechanism if the client supported one.
+  The former launcher passed its resolved bearer in `--header` process
+  arguments. The pinned `mcp-remote@0.1.38` does
   support environment expansion in that argument, contrary to the earlier
   investigation. Isolated authenticated Linux and Windows requests proved the
   bearer reaches the server while the process command line holds only a

@@ -31,6 +31,7 @@ cat > "$tmp/bin/node-mock" <<'SH'
 printf '%s\n' "$MCP_REMOTE_AUTH_HEADER" > "$PROOF_DIR/header"
 printf '%s\n' "$@" > "$PROOF_DIR/argv"
 printf '%s' "${DEVOPS_MCP_TOKEN:-}${NAS_MCP_TOKEN:-}" > "$PROOF_DIR/stale-env"
+printf '%s' "${OP_SERVICE_ACCOUNT_TOKEN:-}" > "$PROOF_DIR/service-env"
 SH
 chmod +x "$tmp/bin/flock" "$tmp/bin/op" "$tmp/bin/node-mock"
 
@@ -39,7 +40,7 @@ export TOKEN_FILE="$tmp/no-service-token" CFG_DIR="$tmp" NODE_BIN="$tmp/bin/node
 chmod +x "$tmp/launcher"
 
 export PATH="$tmp/bin:$PATH" PROOF_DIR="$tmp"
-export DEVOPS_MCP_TOKEN='old-synthetic-token' NAS_MCP_TOKEN='old-synthetic-token'
+export DEVOPS_MCP_TOKEN='old-synthetic-token' NAS_MCP_TOKEN='old-synthetic-token' OP_SERVICE_ACCOUNT_TOKEN='old-synthetic-service-token'
 for ref in devops_token nas_token; do
   "$tmp/launcher" 'https://example.invalid/mcp' "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/$ref"
   grep -qx 'Bearer new-synthetic-token' "$tmp/header" || { echo "FAIL: $ref did not use fresh vault value" >&2; exit 1; }
@@ -48,6 +49,7 @@ for ref in devops_token nas_token; do
     echo "FAIL: $ref exposed a bearer value in argv" >&2; exit 1
   fi
   test ! -s "$tmp/stale-env" || { echo "FAIL: $ref passed stale parent values to the child" >&2; exit 1; }
+  test ! -s "$tmp/service-env" || { echo "FAIL: $ref passed the vault service-account token to the child" >&2; exit 1; }
 done
 rm -f -- "$tmp/header" "$tmp/argv"
 if FAKE_OP_FAIL=1 "$tmp/launcher" 'https://example.invalid/mcp' 'op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token' > "$tmp/failed-read.out" 2>&1; then

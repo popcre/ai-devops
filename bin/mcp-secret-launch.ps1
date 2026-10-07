@@ -71,6 +71,9 @@ function Import-Cache {
 if ($Mode -eq 'Capture') { Write-EncryptedCache; exit 0 }
 Ensure-Cache
 Import-Cache
+# A cache refresh loads the vault service-account token into this process. Only
+# the dedicated 1Password MCP below should receive it, never unrelated children.
+[Environment]::SetEnvironmentVariable('OP_SERVICE_ACCOUNT_TOKEN', $null, 'Process')
 
 # Session guard: every MCP helper is started under bin/mcp-session-guard.mjs so
 # it dies with the session (stdin EOF, parent death, process-group / job kill).
@@ -115,6 +118,8 @@ if ($Mode -eq 'Remote') {
   # the bearer value in its environment, while process argv remains value-free.
   [Environment]::SetEnvironmentVariable('MCP_REMOTE_AUTH_HEADER', "Bearer $token", 'Process')
   $token = $null
+  [Environment]::SetEnvironmentVariable('DEVOPS_MCP_TOKEN', $null, 'Process')
+  [Environment]::SetEnvironmentVariable('NAS_MCP_TOKEN', $null, 'Process')
   & $nodeCmd.Source $guardJs $remoteCommand $Url --header 'Authorization:${MCP_REMOTE_AUTH_HEADER}' @CommandArgs
 } else {
   if (-not $CommandArgs -or $CommandArgs.Count -eq 0) { throw 'No MCP command was supplied.' }
