@@ -193,6 +193,22 @@ cat > "$TMP/fake-os/uname" <<'EOF'
 printf 'MINGW64_NT\n'
 EOF
 chmod +x "$TMP/fake-os/uname"
+# This Linux-only fixture spoofs Windows to test launcher routing. Its ACL
+# tools are stubs; the native ACL behavior is checked on real Windows below.
+case "$(/usr/bin/uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) ;;
+  *)
+    cat > "$TMP/fake-os/powershell.exe" <<'EOF'
+#!/bin/sh
+case "$*" in *'GetCurrent().User.Value'*) printf 'S-1-5-21-1000\r\n' ;; esac
+EOF
+    cat > "$TMP/fake-os/icacls" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+    chmod +x "$TMP/fake-os/powershell.exe" "$TMP/fake-os/icacls"
+    ;;
+esac
 class_saved_home="$HOME"; class_saved_path="$PATH"
 class_saved_profile="${USERPROFILE:-}"; class_saved_programfiles="${PROGRAMFILES:-}"
 export HOME="$TMP/class-home" PATH="$TMP/fake-os:$PATH" USERPROFILE="$TMP/class-home" PROGRAMFILES='C:\Program Files'
@@ -200,7 +216,7 @@ if ! command -v cygpath >/dev/null 2>&1; then
   mkdir -p "$TMP/fake-cygpath"
   cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
 #!/bin/sh
-case "$1" in -u|-wa|-aw) printf '%s\n' "$2" ;; *) exit 2 ;; esac
+case "$1" in -u|-w|-wa|-aw) printf '%s\n' "$2" ;; *) exit 2 ;; esac
 EOF
   chmod +x "$TMP/fake-cygpath/cygpath"
   export PATH="$TMP/fake-cygpath:$PATH"
@@ -286,7 +302,7 @@ if ! command -v cygpath >/dev/null 2>&1; then
   mkdir -p "$TMP/fake-cygpath"
   cat > "$TMP/fake-cygpath/cygpath" <<'EOF'
 #!/bin/sh
-case "$1" in -u|-wa) printf '%s\n' "$2" ;; *) exit 2 ;; esac
+case "$1" in -u|-w|-wa) printf '%s\n' "$2" ;; *) exit 2 ;; esac
 EOF
   chmod +x "$TMP/fake-cygpath/cygpath"
   export PATH="$TMP/fake-cygpath:$PATH"
@@ -1250,7 +1266,32 @@ jq '.rules += [{"match":"*/ai-devops","paths":[{"glob":"docs/**","class":"review
 check 'a changed central policy at the same path is classified afresh' "[ \"\$(cd '$XC' && AI_TASK_GATES_FILE='$TMP/xcache-policy.json' '$GATES' explain --json --paths-from '$XP' | jq -c .)\" = \"\$(cd '$XC' && AI_TASK_GATES_FILE='$TMP/xcache-policy.json' AI_TASK_GATES_EXPLAIN_CACHE=0 '$GATES' explain --json --paths-from '$XP' | jq -c .)\" ] && [ \"\$(cd '$XC' && AI_TASK_GATES_FILE='$TMP/xcache-policy.json' '$GATES' explain --json --paths-from '$XP' | jq -r .effective_class)\" = reviewer-safety ]"
 git -C "$XC" remote set-url origin https://github.com/popcre/some-other-repo.git
 check 'a changed repository identity is classified afresh' "[ \"\$(cd '$XC' && '$GATES' explain --json --paths-from '$XP' | jq -r .repository)\" = popcre/some-other-repo ]"
-check 'the explain cache directory is private' "[ \"\$(stat -c %a '$AI_TASK_GATES_DIR/explain-cache' 2>/dev/null || echo 700)\" = 700 ]"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Git Bash can report a Unix mode while NTFS still grants other users
+    # access. Assert the native ACL on the state parent, cache, and entry.
+    private_windows_acl(){
+      local win sid
+      win="$(cygpath -w "$1")" || return 1
+      sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n')"
+      powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$Sid,[string]$MustProtect) try { $Acl=Get-Acl -LiteralPath $Path -ErrorAction Stop; if ($MustProtect -eq "yes" -and -not $Acl.AreAccessRulesProtected) { exit 1 }; $Full=[Security.AccessControl.FileSystemRights]::FullControl; $HasFull=$false; foreach ($Rule in $Acl.Access) { $RuleSid=$Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($Sid,"S-1-5-18","S-1-5-32-544")) { exit 1 }; if ($Rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { exit 1 }; if ($RuleSid -eq $Sid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $HasFull=$true } }; if (-not $HasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" "${2:-yes}" >/dev/null 2>&1
+    }
+    check 'the Windows state parent and explain cache have private native ACLs' \
+      "private_windows_acl '$AI_TASK_GATES_DIR' && private_windows_acl '$AI_TASK_GATES_DIR/explain-cache'"
+    cache_entry="$(find "$AI_TASK_GATES_DIR/explain-cache" -maxdepth 1 -type f | head -1)"
+    check 'the Windows explain cache entry has a private native ACL' \
+      "[ -n '$cache_entry' ] && private_windows_acl '$cache_entry' no"
+    acl_reject="$TMP/acl-reject"
+    ( cd "$XC" && AI_TASK_GATES_DIR="$acl_reject" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
+    icacls "$(cygpath -w "$acl_reject")" /grant '*S-1-5-11:R' >/dev/null
+    check 'an explicit broad Windows state grant refuses cache use' \
+      "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$acl_reject' '$GATES' explain --json --paths-from '$XP' ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ]"
+    ;;
+  *)
+    check 'the explain cache directory is private' \
+      "[ \"\$(stat -c %a '$AI_TASK_GATES_DIR/explain-cache')\" = 700 ]"
+    ;;
+esac
 
 # jqr keeps jq's exact bytes (trailing blank lines, CRLF) and its exit status.
 JQR_FN="$(sed -n '/^jqr(){$/,/^}$/p' "$GATES")"

@@ -340,6 +340,26 @@ classify_paths(){
 state_key(){ printf '%s\0%s' "$IDENTITY" "$TOPLEVEL" | sha256sum | cut -d' ' -f1; }
 state_path(){ printf '%s/%s.json' "$STATE_DIR" "$(state_key)"; }
 
+# Git Bash chmod does not remove inherited NTFS grants. The state root is
+# protected as well as its cache child: a writable parent could replace the
+# child after its ACL was checked. Refuse use when the native ACL cannot be
+# proved private rather than accepting a Unix mode reported by Git Bash.
+private_state_directory(){
+  local dir="$1" win sid
+  [ ! -L "$dir" ] && mkdir -p "$dir" || return 1
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      command -v cygpath >/dev/null 2>&1 && command -v icacls >/dev/null 2>&1 && command -v powershell.exe >/dev/null 2>&1 || return 1
+      win="$(cygpath -w "$dir")" || return 1
+      sid="$(powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path) try { $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; [Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { exit 1 } }' "$win" 2>/dev/null | tr -d '\r\n')"
+      case "$sid" in S-1-*) ;; *) return 1 ;; esac
+      icacls "$win" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null 2>&1 || return 1
+      powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$Sid) try { $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; $Acl = Get-Acl -LiteralPath $Path -ErrorAction Stop; if (-not $Acl.AreAccessRulesProtected) { exit 1 }; if ($Acl.Owner -ne $Sid -and $Acl.Owner -ne ([Security.Principal.SecurityIdentifier]$Sid).Translate([Security.Principal.NTAccount]).Value) { exit 1 }; $Full = [Security.AccessControl.FileSystemRights]::FullControl; $HasFull = $false; foreach ($Rule in $Acl.Access) { $RuleSid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($Sid,"S-1-5-18","S-1-5-32-544")) { exit 1 }; if ($Rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { exit 1 }; if ($RuleSid -eq $Sid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $HasFull = $true } }; if (-not $HasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" >/dev/null 2>&1 || return 1
+      ;;
+    *) chmod 0700 "$dir" || return 1 ;;
+  esac
+}
+
 state_field(){
   local file; file="$(state_path)"
   [ -f "$file" ] || return 0
@@ -348,8 +368,7 @@ state_field(){
 
 state_write(){
   local file; file="$(state_path)"
-  mkdir -p "$STATE_DIR" || die "cannot create state directory: $STATE_DIR"
-  chmod 0700 "$STATE_DIR" 2>/dev/null || true
+  private_state_directory "$STATE_DIR" || fail_closed 'task state directory is not private.'
   printf '%s\n' "$1" > "$file.tmp" && mv -f "$file.tmp" "$file"
 }
 
@@ -514,7 +533,7 @@ explain_cache_key(){ # explain_cache_key AS_JSON PATHS_FILE
   local f state; local -a present=()
   state="$(state_path)" || return 1
   {
-    printf 'ai-task-gates-explain-cache-v1\0%s\0%s\0%s\0%s\0' "$1" "$IDENTITY" "$TOPLEVEL" "$POLICY_FILE"
+    printf 'ai-task-gates-explain-cache-v2\0%s\0%s\0%s\0%s\0' "$1" "$IDENTITY" "$TOPLEVEL" "$POLICY_FILE"
     for f in "${BASH_SOURCE[0]}" "$ROOT/tools/lib/task-gates.sh" "$POLICY_FILE" "$CONSUMER_FILE" "$state"; do
       if [ -f "$f" ]; then printf 'file\0%s\0' "$f"; present+=("$f"); else printf 'absent\0%s\0' "$f"; fi
     done
@@ -549,6 +568,8 @@ cmd_explain_cached(){
     *) cmd_explain "${args[@]}"; return ;;
   esac
   file="$dir/$key"
+  private_state_directory "$STATE_DIR" && private_state_directory "$dir" \
+    || fail_closed 'explain cache directory is not private.'
   if [ -f "$file" ] && [ ! -L "$file" ]; then cat "$file"; return; fi
   out="$(cmd_explain "${args[@]}"; rc=$?; printf x; exit "$rc")"; rc=$?
   out="${out%x}"; printf '%s' "$out"
@@ -557,8 +578,7 @@ cmd_explain_cached(){
   # answer under the old key; store only when the key still holds.
   [ "$(explain_cache_key "$as_json" "$paths_from" 2>/dev/null)" = "$key" ] || return 0
   # A failed store only loses the reuse; it never changes the answer.
-  ( umask 077; mkdir -p "$dir" 2>/dev/null && chmod 0700 "$dir" 2>/dev/null
-    tmp="$(mktemp "$dir/.tmp.XXXXXX" 2>/dev/null)" || exit 0
+  ( umask 077; tmp="$(mktemp "$dir/.tmp.XXXXXX" 2>/dev/null)" || exit 0
     printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$file" || rm -f "$tmp"
     find "$dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null ) || true
   return 0
