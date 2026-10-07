@@ -64,6 +64,7 @@ write_stubs() {
   cat > "$TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
+  "auth token") printf 'fixture-repository-token\n' ;;
   "run list") cat "$STUB_DIR/runs" ;;
   "run view") cat "$STUB_DIR/jobs" ;;
   "api graphql")
@@ -303,6 +304,35 @@ for mutation in required unknown duplicate wrong-job wrong-head wrong-run wrong-
   OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
   check "same-run advisory cancellation remains fail-closed for $mutation" "test '$RC' -eq 1"
 done
+
+# Exercise the real production context reader; no test context override.
+unset AI_PR_WAIT_TEST_CONTEXT_KEY
+export AI_PR_WAIT_SNAPSHOT_DIR="$TMP/production-cache"
+mkdir -m 700 -p "$TMP/production-state/identities"
+export AI_GH_STATE_DIR="$TMP/production-state"
+for identity in missing unknown; do
+  set_cancel_world
+  if [ "$identity" = unknown ]; then
+    fixture_hash="$(printf 'fixture-repository-token\n' | sha256sum | cut -d' ' -f1)"
+    fixture_key="$(printf '3 github.com %s' "$fixture_hash" | sha256sum | cut -d' ' -f1)"
+    printf 'unknown 1\n' > "$AI_GH_STATE_DIR/identities/$fixture_key"
+    printf '%064d\n' 0 > "$AI_GH_STATE_DIR/principal-salt"
+    chmod 600 "$AI_GH_STATE_DIR/identities/$fixture_key" "$AI_GH_STATE_DIR/principal-salt"
+  fi
+  # Live-shaped 35 jobs, preserving the six original mandatory successes.
+  jq --arg head "$GOOD_HEAD" '.[0].jobs += [range(107;135)|{id:.,name:("section-"+tostring),status:"completed",conclusion:"success",run_id:9001,run_attempt:1,head_sha:$head}]|.[0].total_count=35' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs"
+  OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+  check "production $identity identity uses uncached complete policy with 35 genuine-shaped jobs" "test '$RC' -eq 0 && test ! -e '$AI_PR_WAIT_SNAPSHOT_DIR'"
+  for mutation in unknown wrong-head; do
+    cp "$TMP/cancel-policy" "$TMP/restore-policy"
+    if [ "$mutation" = unknown ]; then jq 'del(.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].isRequired)' "$TMP/cancel-policy" > "$TMP/change"
+    else jq '.data.repository.pullRequest.headRefOid="wrong"' "$TMP/cancel-policy" > "$TMP/change"; fi
+    mv "$TMP/change" "$TMP/cancel-policy"
+    OUT="$(RUN --ref "$REF" --merge-group-sha deadbeef --repo popcre/ai-devops --require windows-offline --require windows-reviewer-safety)"; RC=$?
+    check "production $identity identity still refuses $mutation policy" "test '$RC' -eq 1"
+    mv "$TMP/restore-policy" "$TMP/cancel-policy"
+  done
+ done
 
 printf '\n%s passed, %s failed, 0 skipped\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
