@@ -264,9 +264,6 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
         if not allowance:
             return 3
     machine = ('AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=%s code=quota_exhausted' if allowance else 'AI_REVIEWER_OUT_OF_CREDIT provider=%s code=insufficient_quota') % provider
-    reset_label = datetime.datetime.fromtimestamp(reset_epoch(reset), ZoneInfo('America/New_York')).strftime('%B %d, %Y at %I:%M %p %Z') if reset else 'unavailable'
-    human = ('ALLOWANCE EXHAUSTED: %s; automatic return at provider reset; reset %s.' % (provider, reset_label) if allowance else 'OUT OF CREDIT: %s; automatic return requires verified paid balance.' % CREDIT_MESSAGES[provider])
-    print(machine); print(human)
     if record:
         # A recording failure must never hide the diagnosis or delay the stop.
         try:
@@ -287,7 +284,11 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
                     'record_id': new_record_id()}
                 publish(directory, provider, data)
         except (OSError, ValueError, TypeError) as error:
+            reset = None
             print('reviewer admission: out-of-credit quarantine not recorded: ' + str(error), file=sys.stderr)
+    reset_label = datetime.datetime.fromtimestamp(reset_epoch(reset), ZoneInfo('America/New_York')).strftime('%B %d, %Y at %I:%M %p %Z') if reset else 'unavailable'
+    human = ('ALLOWANCE EXHAUSTED: %s; automatic return at provider reset; reset %s.' % (provider, reset_label) if allowance else 'OUT OF CREDIT: %s; automatic return requires verified paid balance.' % CREDIT_MESSAGES[provider])
+    print(machine); print(human)
     return 0
 
 
