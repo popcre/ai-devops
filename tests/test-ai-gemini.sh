@@ -263,8 +263,8 @@ R3J="$TMP/repo3j"; make_repo "$R3J"; printf '/.tmp-*\n' >> "$R3J/.gitignore"; gi
 check 'untracked root .tmp-* scratch churn is tolerated' "new_run '$R3J' protected-root-tmp mutate-protected-root-tmp"
 check 'a tracked root .tmp-* file stays protected' "! new_run '$R3J' protected-tracked-tmp mutate-protected-tracked-tmp"
 check 'a .tmp-* file below the root stays protected' "! new_run '$R3J' protected-deep-tmp mutate-protected-deep-tmp"
-GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
+GH="$(git -C "$RG" rev-parse HEAD)"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }
 check 'governed mode emits the terminal verdict on standard output' "gov_run govok governed | tail -1 | grep -qx 'VERDICT: APPROVE $GH'"
 check 'governed mode rejects the non-governed heading verdict' "! gov_run govbad governed-heading"
