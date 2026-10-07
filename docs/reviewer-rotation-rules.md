@@ -142,6 +142,21 @@ solely because an unqualified date or local cooldown passed. A qualified exact
 provider reset may restore matching capacity candidacy without another provider
 query; a fresh same-account available observation may restore it sooner.
 
+For the qualified International monthly Token Plan, a fresh typed provider
+quota-exhaustion error may state `The quota will reset at MM-DD HH:mm:ss UTC.`
+The [official Alibaba Codex guidance](https://www.alibabacloud.com/help/tc/model-studio/codex)
+distinguishes token-plan exhaustion from request throttling and identifies the
+reported reset time as UTC. Runtime-bound sanitized qualification diagnostics
+preserve this actual date grammar. Resolve the omitted year only when exactly
+one valid candidate in the observation's UTC year or following year is in the
+future and no more than 32 days after that fresh observation. This also handles
+December-to-January rollover without assuming the current year. Invalid dates,
+including invalid leap days, out-of-window dates, ambiguous candidates, other
+plan editions, missing UTC, and time-only messages leave the reset unknown.
+The provider supplies the month, day and time; the monthly window only bounds
+the unique year resolution and never invents a reset schedule. Only a typed
+terminal provider error qualifies; quoted assistant text does not.
+
 Kimi subscriptions reset, but Kimi remains suspended in the current reviewer
 registry. Its [official error reference](https://www.kimi.com/code/docs/en/kimi-code/error-reference.html)
 distinguishes five-hour, legacy weekly and monthly quota exhaustion from
