@@ -42,7 +42,8 @@ done
 . "$ROOT/tools/lib/task-gates.sh"
 
 POLICY_FILE="${AI_TASK_GATES_FILE:-$ROOT/config/task-gates.json}"
-STATE_DIR="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}"
+DEFAULT_STATE_DIR="$HOME/.local/state/ai-devops/task-gates"
+STATE_DIR="${AI_TASK_GATES_DIR:-$DEFAULT_STATE_DIR}"
 REPO_POLICY_BIN="${AI_REPO_POLICY_BIN:-$SCRIPT_DIR/ai-repo-policy}"
 CONSUMER_FILE_NAME=".ai-devops/task-gates.json"
 
@@ -219,6 +220,29 @@ resolve_repo(){
   if [ -f "$CONSUMER_FILE" ] && ! jq -e . "$CONSUMER_FILE" >/dev/null 2>&1; then
     fail_closed "consumer declaration is not valid JSON: $CONSUMER_FILE"
   fi
+  if [ "${STATE_FILE_CHECKED:-0}" -eq 0 ]; then
+    local current_state
+    current_state="$(state_path)"
+    STATE_FILE_TRUSTED=1
+    if [ -e "$current_state" ] || [ -L "$current_state" ]; then
+      private_state_file "$current_state" || STATE_FILE_TRUSTED=0
+      # A pre-repair file might lose broad inherited ACEs when its parent is
+      # sealed, but its bytes could already have been changed. Only a fresh
+      # start under the native ACL contract may be used as Windows authority.
+      if [ "$STATE_FILE_TRUSTED" -eq 1 ]; then
+        case "$(uname -s)" in
+          MINGW*|MSYS*|CYGWIN*) jq -e '.windows_acl_generation == 1' "$current_state" >/dev/null 2>&1 || STATE_FILE_TRUSTED=0 ;;
+        esac
+      fi
+    fi
+    STATE_FILE_CHECKED=1
+    if [ "$STATE_FILE_TRUSTED" -eq 0 ]; then
+      case "${TASK_GATES_COMMAND:-}" in
+        start|end) ;; # An explicit new declaration or clear can recover.
+        *) fail_closed 'recorded task state is not private; reissue the task declaration.' ;;
+      esac
+    fi
+  fi
 }
 
 # The base to diff committed work against. An explicit --base wins, then the
@@ -344,6 +368,14 @@ state_path(){ printf '%s/%s.json' "$STATE_DIR" "$(state_key)"; }
 # protected as well as its cache child: a writable parent could replace the
 # child after its ACL was checked. Refuse use when the native ACL cannot be
 # proved private rather than accepting a Unix mode reported by Git Bash.
+windows_private_acl(){ # windows_private_acl NATIVE_PATH SID REQUIRE_PROTECTED
+  powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$Sid,[string]$RequireProtected) try { $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; $Acl = Get-Acl -LiteralPath $Path -ErrorAction Stop; if ($Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $Sid) { exit 1 }; if ($RequireProtected -eq "yes" -and -not $Acl.AreAccessRulesProtected) { exit 1 }; $Full = [Security.AccessControl.FileSystemRights]::FullControl; $HasFull = $false; foreach ($Rule in $Acl.Access) { $RuleSid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($Sid,"S-1-5-18","S-1-5-32-544")) { exit 1 }; if ($Rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { exit 1 }; if ($RuleSid -eq $Sid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $HasFull = $true } }; if (-not $HasFull) { exit 1 } } catch { exit 1 } }' "$1" "$2" "$3" >/dev/null 2>&1
+}
+
+windows_current_sid(){
+  powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n'
+}
+
 private_state_directory(){
   local dir="$1" win sid
   [ ! -L "$dir" ] && mkdir -p "$dir" || return 1
@@ -357,44 +389,75 @@ private_state_directory(){
       # Existing user state can have explicit broad grants; inheritance:r
       # alone does not remove those grants from the shared ai-devops parent.
       icacls "$win" /remove:g '*S-1-5-11' '*S-1-5-32-545' >/dev/null 2>&1 || return 1
-      powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$Sid) try { $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 }; $Acl = Get-Acl -LiteralPath $Path -ErrorAction Stop; if (-not $Acl.AreAccessRulesProtected) { exit 1 }; if ($Acl.Owner -ne $Sid -and $Acl.Owner -ne ([Security.Principal.SecurityIdentifier]$Sid).Translate([Security.Principal.NTAccount]).Value) { exit 1 }; $Full = [Security.AccessControl.FileSystemRights]::FullControl; $HasFull = $false; foreach ($Rule in $Acl.Access) { $RuleSid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($Sid,"S-1-5-18","S-1-5-32-544")) { exit 1 }; if ($Rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { exit 1 }; if ($RuleSid -eq $Sid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $HasFull = $true } }; if (-not $HasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" >/dev/null 2>&1 || return 1
+      windows_private_acl "$win" "$sid" yes || return 1
       ;;
     *) chmod 0700 "$dir" || return 1 ;;
   esac
 }
 
+STATE_ROOT_PRIVATE=0
 private_state_root(){
+  local parent sid win
+  [ "$STATE_ROOT_PRIVATE" -eq 0 ] || return 0
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
       # The shared ai-devops state parent on edge-dev had explicit
       # Authenticated Users Modify; leaving it writable makes this root
       # replaceable even when the root and cache child are protected.
-      private_state_directory "$(dirname "$STATE_DIR")" || return 1
+      parent="$(dirname "$STATE_DIR")"
+      if [ "$STATE_DIR" = "$DEFAULT_STATE_DIR" ]; then
+        private_state_directory "$parent" || return 1
+      else
+        [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
+        win="$(cygpath -w "$parent")" || return 1
+        sid="$(windows_current_sid)"; case "$sid" in S-1-*) ;; *) return 1 ;; esac
+        windows_private_acl "$win" "$sid" no || return 1
+      fi
       ;;
   esac
-  private_state_directory "$STATE_DIR"
+  private_state_directory "$STATE_DIR" || return 1
+  STATE_ROOT_PRIVATE=1
+}
+
+private_state_file(){
+  local file="$1" win sid
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      win="$(cygpath -w "$file")" || return 1
+      sid="$(windows_current_sid)"; case "$sid" in S-1-*) ;; *) return 1 ;; esac
+      windows_private_acl "$win" "$sid" no || return 1
+      ;;
+  esac
 }
 
 state_field(){
   local file; file="$(state_path)"
+  [ "${STATE_FILE_TRUSTED:-1}" -eq 1 ] || return 0
   [ -f "$file" ] || return 0
   jqr --arg f "$1" '.[$f] // empty' "$file" 2>/dev/null || true
 }
 
 state_write(){
-  local file; file="$(state_path)"
+  local file tmp; file="$(state_path)"
   private_state_root || fail_closed 'task state directory or parent is not private.'
-  printf '%s\n' "$1" > "$file.tmp" && mv -f "$file.tmp" "$file"
+  tmp="$(mktemp "$STATE_DIR/.state.XXXXXXXX")" || fail_closed 'cannot create private task state.'
+  printf '%s\n' "$1" > "$tmp" && chmod 0600 "$tmp" && mv -f -- "$tmp" "$file" \
+    && private_state_file "$file" || fail_closed 'cannot protect task state.'
+  STATE_FILE_TRUSTED=1
 }
 
 state_record_override(){
-  local kind="$1" action="$2" reason="$3" observed="$4" file
+  local kind="$1" action="$2" reason="$3" observed="$4" file tmp
   file="$(state_path)"
   [ -f "$file" ] || return 0
+  [ "${STATE_FILE_TRUSTED:-0}" -eq 1 ] || fail_closed 'recorded task state is not private.'
+  tmp="$(mktemp "$STATE_DIR/.state.XXXXXXXX")" || blocked 'ai-task-gates: STOP. Cannot create private task state override.'
   jq --arg k "$kind" --arg a "$action" --arg r "$reason" --arg o "$observed" \
      --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '.overrides = ((.overrides // []) + [{kind:$k,action:$a,reason:$r,observed_class:$o,at:$t}])' \
-     "$file" > "$file.tmp" && mv -f "$file.tmp" "$file"
+     "$file" > "$tmp" && chmod 0600 "$tmp" && mv -f -- "$tmp" "$file" \
+     && private_state_file "$file" || blocked 'ai-task-gates: STOP. Cannot protect task state override.'
 }
 
 # An approval is a reviewer report the lifecycle recorded as a completed,
@@ -498,7 +561,7 @@ cmd_start(){
     --arg class "$class" --arg reason "$reason" --arg base "$BASE_REF" \
     --arg start_head "$(git -C "$TOPLEVEL" rev-parse HEAD)" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema_version:($v|tonumber),identity:$identity,worktree:$worktree,declared_class:$class,reason:$reason,base:$base,start_head:$start_head,started_at:$at,overrides:[]}')"
+    '{schema_version:($v|tonumber),windows_acl_generation:1,identity:$identity,worktree:$worktree,declared_class:$class,reason:$reason,base:$base,start_head:$start_head,started_at:$at,overrides:[]}')"
   printf 'task class "%s" recorded for %s (%s)\n' "$class" "$IDENTITY" "$TOPLEVEL"
   [ -n "$BASE_REF" ] && printf 'base: %s\n' "${BASE_REF:0:12}"
   return 0
@@ -1758,7 +1821,7 @@ cmd_authorize_install(){
     receipt_report="$(cygpath -aw "$report_real")" || blocked 'ai-task-gates: STOP. Review Windows path unavailable.'
   fi
   auth_dir="$STATE_DIR/install-authorizations"; auth_path="$auth_dir/$target_head.json"
-  mkdir -p "$auth_dir" && chmod 0700 "$STATE_DIR" "$auth_dir" || blocked 'ai-task-gates: STOP. Cannot protect install state.'
+  private_state_directory "$auth_dir" || blocked 'ai-task-gates: STOP. Cannot protect install state.'
   [ ! -e "$auth_path" ] && [ ! -L "$auth_path" ] || blocked 'ai-task-gates: STOP. Authorization already exists for target.'
   local auth_stage
   auth_stage="$(mktemp "$auth_dir/.authority.XXXXXXXX")" || blocked 'ai-task-gates: STOP. Could not protect install authority.'
@@ -1769,13 +1832,19 @@ cmd_authorize_install(){
     --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson stale "$stale_manifest_recovery" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" --arg manifest_recorded_sha "${manifest_recorded_sha:-}" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
-    && ln -- "$auth_stage" "$auth_path" && rm -- "$auth_stage" || blocked 'ai-task-gates: STOP. Could not write install authority.'
+    && ln -- "$auth_stage" "$auth_path" && rm -- "$auth_stage" \
+    && private_state_file "$auth_path" || blocked 'ai-task-gates: STOP. Could not write private install authority.'
 
   printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$start_head"
 }
 
 main(){
   local command="${1:-}"; [ $# -gt 0 ] && shift
+  TASK_GATES_COMMAND="$command"
+  case "$command" in
+    start|status|end|explain|check|authorize-install|install-verify)
+      private_state_root || fail_closed 'task state directory or parent is not private.' ;;
+  esac
   case "$command" in
     start) cmd_start "$@" ;;
     check) cmd_check "$@" ;;

@@ -15,6 +15,14 @@ PASS=0; FAIL=0
 LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # A custom state root must already have a private parent. This is a
+    # disposable fixture, not the shared per-user ai-devops state parent.
+    test_sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
+    icacls "$(cygpath -w "$TMP")" /inheritance:r /grant:r "*${test_sid}:(OI)(CI)(F)" >/dev/null || exit 1
+    ;;
+esac
 export AI_TASK_GATES_DIR="$TMP/state"
 export AI_TASK_GATES_FILE="$ROOT/config/task-gates.json"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
@@ -1293,6 +1301,23 @@ case "$(uname -s)" in
       "private_windows_acl '$shared_parent' && private_windows_acl '$shared_parent/task-gates'"
     check 'other reviewer state remains owner-accessible after parent repair' \
       "[ \"\$(cat '$shared_parent/review-lifecycle/owner-canary')\" = keep ] && printf 'owner-ok\\n' >> '$shared_parent/review-lifecycle/owner-canary'"
+    unsafe_parent="$TMP/unsafe-custom-parent"
+    mkdir -p "$unsafe_parent"
+    icacls "$(cygpath -w "$unsafe_parent")" /grant:r '*S-1-1-0:(OI)(CI)M' >/dev/null
+    check 'a custom state parent with broad access is refused without changing its ACL' \
+      "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$unsafe_parent/task-gates' '$GATES' explain --json --paths-from '$XP' ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ] && powershell.exe -NoProfile -NonInteractive -Command '& { param([string]\$Path) \$Acl=Get-Acl -LiteralPath \$Path; if (@(\$Acl.Access | Where-Object { \$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq \"S-1-1-0\" }).Count -eq 0) { exit 1 } }' \"\$(cygpath -w '$unsafe_parent')\""
+    old_state_root="$TMP/old-state"
+    ( cd "$XC" && AI_TASK_GATES_DIR="$old_state_root" "$GATES" start --class code --base main ) >/dev/null
+    old_state_file="$(find "$old_state_root" -maxdepth 1 -type f -name '*.json' | head -1)"
+    icacls "$(cygpath -w "$old_state_file")" /grant:r '*S-1-1-0:R' >/dev/null
+    check 'a broad saved task declaration is refused before check' \
+      "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$old_state_root' '$GATES' check --before review ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ]"
+    ( cd "$XC" && AI_TASK_GATES_DIR="$old_state_root" "$GATES" start --class code --base main ) >/dev/null
+    check 'start reissues an old broad declaration as a private file' \
+      "private_windows_acl '$old_state_file' no && ( cd '$XC' && AI_TASK_GATES_DIR='$old_state_root' '$GATES' status ) | jq -e '.declared_class==\"code\"'"
+    jq 'del(.windows_acl_generation)' "$old_state_file" > "$old_state_file.old" && mv "$old_state_file.old" "$old_state_file"
+    check 'a private legacy Windows declaration still needs reissue' \
+      "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$old_state_root' '$GATES' check --before review ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ]"
     acl_reject="$TMP/acl-reject"
     ( cd "$XC" && AI_TASK_GATES_DIR="$acl_reject" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
     icacls "$(cygpath -w "$acl_reject")" /grant:r '*S-1-1-0:R' >/dev/null
