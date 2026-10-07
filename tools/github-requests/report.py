@@ -30,6 +30,14 @@ def read_cohort(directory):
     """Read only this fixed optional metadata inode; never wait on a FIFO."""
     if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
         try:
+            # MSYS stores a FIFO as a .lnk object that native Python does not
+            # resolve through the requested name. Presence is untrusted;
+            # never open either representation on an unsupported platform.
+            try:
+                os.lstat(pathlib.Path(directory) / "cohort.json.lnk")
+                return {"cohort_id": None, "unknown_reason": "metadata_untrusted"}
+            except FileNotFoundError:
+                pass
             os.lstat(pathlib.Path(directory) / "cohort.json")
         except FileNotFoundError:
             return {"cohort_id": None, "unknown_reason": "metadata_absent"}

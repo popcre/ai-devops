@@ -655,6 +655,20 @@ if mkfifo "$TMP/cohort-fifo/measurements/cohort.json" 2>/dev/null; then
   AI_GH_STATE_DIR="$TMP/cohort-fifo" timeout 5 bash -c 'source "$1"; gh_measure_read_cohort; [ "$GH_MEASURE_COHORT_REASON" = metadata_untrusted ]' bash "$ROOT/tools/github-requests/telemetry.sh"; cohort_rc=$?
   check 'FIFO cohort cannot block the original workflow' "[ '$cohort_rc' -eq 0 ]"
 fi
+"$PYTHON_RUNNER" - "$ROOT" "$TMP/cohort-link-representation" <<'PY'
+import os, pathlib, sys, types
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "tools/github-requests"))
+import report
+directory = pathlib.Path(sys.argv[2])
+directory.mkdir()
+# Exercise unsupported-platform semantics without changing pathlib's platform.
+report.os = types.SimpleNamespace(name="nt", lstat=os.lstat)
+assert report.read_cohort(directory) == {"cohort_id": None, "unknown_reason": "metadata_absent"}
+(directory / "cohort.json.lnk").write_bytes(b"opaque MSYS pipe representation")
+assert report.read_cohort(directory) == {"cohort_id": None, "unknown_reason": "metadata_untrusted"}
+PY
+cohort_link_rc=$?
+check 'unsupported platform never mistakes an MSYS pipe representation for absent metadata' "[ '$cohort_link_rc' -eq 0 ]"
 for bad in malformed extra mode oversize; do
   d="$TMP/cohort-$bad"; mkdir -p "$d/measurements"; chmod 700 "$d/measurements"
   case "$bad" in
