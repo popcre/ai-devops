@@ -22,7 +22,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini|deepseek|stepfun|glm> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
+usage(){ printf '%s\n' 'Usage: ai-review-pool <grok|muse|qwen|gemini|deepseek|stepfun|glm> <plan-review|diff-review|security-review|final-check> [--tests CMD] [--base REF] [--assert-head SHA] [--force]' '       Env: AI_POOL_RUNNER_<PROVIDER> overrides the session runner for tests.'; }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -88,6 +88,66 @@ for _hook_var in AI_POOL_RUNNER_GROK AI_POOL_RUNNER_MUSE AI_POOL_RUNNER_QWEN AI_
   fi
 done
 unset _hook_var
+# ---------------------------------------------------------------------------
+# Passing-report reuse (#1428). The same reviewer re-reviewing the same exact
+# source in the same mode spends a full paid review to learn nothing new. When
+# the lifecycle store already holds a verified APPROVE from THIS provider for
+# this mode, head, whole-source digest, repository and resolved base, print
+# that report path and stop before any provider call. --force always
+# dispatches. A review operation or a reviewer-approval-governed review asks a
+# different question, so neither is ever reused. Every lookup error falls
+# through to a normal review and says so; nothing is skipped silently.
+# ---------------------------------------------------------------------------
+_pool_force=0; _pool_base=""; _pool_assert=""; _pool_args=("${@:3}")
+set -- "$provider" "$mode"
+_i=0
+while [ "$_i" -lt "${#_pool_args[@]}" ]; do
+  _a="${_pool_args[$_i]}"
+  if [ "$_a" = --force ]; then _pool_force=1; _i=$((_i+1)); continue; fi
+  set -- "$@" "$_a"
+  case "$_a" in
+    --base|--assert-head|--tests)
+      if [ $((_i+1)) -lt "${#_pool_args[@]}" ]; then
+        _v="${_pool_args[$((_i+1))]}"; set -- "$@" "$_v"
+        [ "$_a" != --base ] || _pool_base="$_v"
+        [ "$_a" != --assert-head ] || _pool_assert="$_v"
+        _i=$((_i+2)); continue
+      fi ;;
+  esac
+  _i=$((_i+1))
+done
+unset _pool_args _i _a _v
+pool_reuse_lookup(){ # 0 = reused (path printed), 2 = no match, other = lookup error
+  local repo identity head digest key base="" found report
+  repo="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  identity="$("$LIFECYCLE" identity "$repo" 2>/dev/null)" || return 1
+  head="$(jq -r '.head // empty' <<<"$identity" 2>/dev/null)" || return 1
+  digest="$(jq -r '.source_digest // empty' <<<"$identity" 2>/dev/null)" || return 1
+  key="$(jq -r '.repository_key // empty' <<<"$identity" 2>/dev/null)" || return 1
+  [ -n "$head" ] && [ -n "$digest" ] && [ -n "$key" ] || return 1
+  if [ -n "$_pool_assert" ]; then
+    [ "$(git -C "$repo" rev-parse --verify --quiet --end-of-options "$_pool_assert^{commit}" 2>/dev/null)" = "$head" ] || return 1
+  fi
+  if [ -n "$_pool_base" ]; then
+    base="$(git -C "$repo" rev-parse --verify --quiet --end-of-options "$_pool_base^{commit}" 2>/dev/null)" || return 1
+  fi
+  found="$(cd "$repo" && python3 "$ROOT/../tools/reviewer_events.py" find-passing-report "$provider" "$mode" "$head" "$digest" "$key" "$base" "${AI_REVIEW_IMPLEMENTER:-}")" || return 1
+  report="$(jq -r '.report // empty' <<<"$found" 2>/dev/null)" || return 1
+  [ -n "$report" ] || return 2
+  printf 'ai-review-pool: reusing passing %s %s report for head %s (source digest %s); no provider call. Pass --force to review again.\n' "$provider" "$mode" "$head" "$digest" >&2
+  printf '%s\n' "$report"
+}
+if [ "$_pool_force" = 1 ]; then
+  printf 'ai-review-pool: --force given; passing-report reuse skipped.\n' >&2
+elif [ -z "${AI_REVIEW_OPERATION:-}" ] && [ -z "${AI_REVIEW_REVIEWER_APPROVAL:-}" ]; then
+  _reuse_rc=0; pool_reuse_lookup || _reuse_rc=$?
+  case "$_reuse_rc" in
+    0) exit 0 ;;
+    2) ;;
+    *) printf 'ai-review-pool: passing-report lookup unavailable; running a normal review.\n' >&2 ;;
+  esac
+  unset _reuse_rc
+fi
 # ---------------------------------------------------------------------------
 # Structural forcing function (plan_reviewer-pipeline-core §9 Phase D).
 # A provider whose door is registered in config/review-runner-doors.json MUST

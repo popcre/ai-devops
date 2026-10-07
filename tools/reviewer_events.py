@@ -1043,7 +1043,106 @@ def finish_reconciliation(directory, provider, run_id, references):
     append(directory, terminal)
 
 
+def lifecycle_location():
+    """The lifecycle state store, resolved exactly as bin/ai-review-lifecycle does."""
+    if os.environ.get("AI_REVIEW_LIFECYCLE_DIR"):
+        return physical(os.environ["AI_REVIEW_LIFECYCLE_DIR"])
+    home = os.environ.get("HOME") or str(Path.home())
+    return physical(str(Path(home) / ".local/state/ai-devops/review-lifecycle"))
+
+
+def report_verdict(text):
+    """The verdict word under the LAST literal "## Verdict" heading, or None."""
+    lines = text.splitlines()
+    verdict = None
+    for index, line in enumerate(lines):
+        if re.fullmatch(r"\s*##\s+Verdict\s*", line):
+            following = [value.strip().strip("*").strip() for value in lines[index + 1:] if value.strip()]
+            verdict = following[0] if following else None
+    return verdict
+
+
+def find_passing_report(state_dir, provider, mode, head, source_digest, repo_key, base="", implementer=""):
+    """Return the newest reusable APPROVE report for this exact review request.
+
+    The reviewer event ledger (events.jsonl) records invocations but not the
+    review mode, the source digest or the verdict, and runner-door reviews do
+    not publish their report there; the lifecycle run record is the one store
+    that binds provider, mode, head, digest, verdict and the report checksum,
+    so it is the lookup source. A match requires every one of: a completed,
+    non-stale APPROVE with no failure; the same provider (or any, for "any"),
+    mode, head, whole-source digest, repository, resolved base and (when both
+    are known) implementing engine; no review operation; and a report file
+    whose checksum still matches and which itself names the head, the digest
+    and a final APPROVE. A malformed record raises: the caller then runs a
+    normal review rather than guessing.
+    """
+    require(re.fullmatch(r"[0-9a-f]{40}", head), "lookup head is not a full commit SHA")
+    require(re.fullmatch(r"[0-9a-f]{64}", source_digest), "lookup source digest is not a SHA-256")
+    require(re.fullmatch(r"[0-9a-f]{64}", repo_key), "lookup repository key is not a SHA-256")
+    require(mode in {"plan-review", "diff-review", "security-review", "final-check"}, "unknown review mode")
+    require(base == "" or re.fullmatch(r"[0-9a-f]{40}", base), "lookup base is not a full commit SHA")
+    root = Path(state_dir) / "runs" / repo_key
+    if not root.is_dir():
+        return None
+    pattern = "*/*/*.json" if provider == "any" else provider + "/*/*.json"
+    best = None
+    for path in sorted(root.glob(pattern)):
+        if path.is_symlink() or not path.is_file():
+            continue
+        row = json.loads(path.read_text(encoding="utf-8"))
+        require(isinstance(row, dict), f"lifecycle record is not an object: {path.name}")
+        if not (row.get("schema_version") == 1 and row.get("status") == "completed" and
+                row.get("verdict") == "APPROVE" and row.get("stale") is False and
+                row.get("failure_class") is None and row.get("head") == head and
+                row.get("source_digest") == source_digest and row.get("repository_key") == repo_key and
+                (provider == "any" or row.get("provider") == provider) and
+                row.get("provider") == path.parent.parent.name and
+                row.get("review_mode") in (None, mode)):
+            continue
+        if implementer and row.get("implementer_engine") and row["implementer_engine"] != implementer:
+            continue
+        recorded_base = row.get("base") or ""
+        if recorded_base:
+            resolved = git_value("rev-parse", "--verify", "--quiet", "--end-of-options", recorded_base + "^{commit}")
+            if resolved != base:
+                continue
+        elif base:
+            continue
+        report = row.get("report_path")
+        run_id = row.get("run_id")
+        if not (isinstance(report, str) and isinstance(run_id, str) and
+                Path(report).name == f"{row['provider']}-{mode}-{run_id}.md"):
+            continue
+        report_path = Path(report)
+        if report_path.is_symlink() or not report_path.is_file():
+            continue
+        data = report_path.read_bytes()
+        if digest(data) != row.get("report_sha256"):
+            continue
+        text = data.decode("utf-8")
+        if ("| reviewed commit | `" + head + "` |") not in text or ("| source digest | `" + source_digest + "` |") not in text:
+            continue
+        if re.search(r"^\| operation \|", text, re.M) or report_verdict(text) != "APPROVE":
+            continue
+        finished = row.get("finished_at") or ""
+        if best is None or finished > best[0]:
+            best = (finished, str(report_path), row)
+    if best is None:
+        return None
+    return {"report": best[1], "provider": best[2]["provider"], "run_id": best[2]["run_id"],
+            "review_mode": mode, "head": head, "source_digest": source_digest, "finished_at": best[0]}
+
+
 def main():
+    if sys.argv[1] == "find-passing-report":
+        # find-passing-report PROVIDER|any MODE HEAD DIGEST REPO_KEY [BASE_SHA] [IMPLEMENTER]
+        require(len(sys.argv) in {7, 8, 9}, "find-passing-report requires provider, mode, head, digest and repository key")
+        provider = sys.argv[2]
+        require(provider == "any" or provider in {"claude", "codex", "deepseek", "gemini", "glm", "grok", "kimi",
+                                                  "muse", "qwen", "stepfun"}, "unknown reviewer provider")
+        print(json.dumps(find_passing_report(lifecycle_location(), provider, *sys.argv[3:])))
+        return
     if sys.argv[1] == "verify-sandbox":
         require(len(sys.argv) == 3, "invalid sandbox evidence verification")
         print(json.dumps({"references": verify_sandbox(location(), sys.argv[2])}))
