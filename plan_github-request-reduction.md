@@ -1134,6 +1134,77 @@ Verification: `active_fault_new_rollback_authority`,
 `active_rollback_restores_coherent_predecessor`,
 `active_rollback_concurrent_mutation_refused`.
 
+**Phase C4 — deactivation and uninstall lifecycle.** Extend the existing
+`uninstall.sh`, not a new generic uninstaller. Add fixed
+`--scope github-request-reduction --deactivate-partial
+--authorization-id <ID>` for recoverable partial deactivation. Native Windows
+has no corresponding full uninstaller: extend only existing
+`bin/install-ai-devops-windows.ps1 -Scope github-request-reduction
+-RemovePartialScope -AuthorizationId <ID>` for that fixed scope. This removes
+the selected partial state by safely restoring its verified predecessor
+routes; it does not remove services or fixed maintenance tasks. Do not add an
+arbitrary removal path, operation, service/task selector or payload root.
+
+Require new exact review operation `github-request-reduction-partial-uninstall`
+and line `Approved github-request-reduction-partial-uninstall.`. Review uses
+`bin/ai-review --operation github-request-reduction-partial-uninstall
+--installation-inventory <protected file>`; wrapper independently binds active
+partial receipt/transaction, current host/runtime/routes/ACLs/schedule definitions,
+retained predecessor backups and all current payload references. Add wrapper
+header `uninstall intent` (`deactivate-partial` or Linux `full-uninstall`),
+`current payload reference inventory SHA256` and `safe predecessor inventory
+SHA256`, alongside the rollback lifecycle's exact header fields. Authorize via
+`ai-task-gates authorize-install --scope github-request-reduction --uninstall
+--uninstall-intent deactivate-partial|full-uninstall --inventory <protected file>
+--review-report <exact uninstall APPROVE> --reviewer-approval <same report>`.
+Authority schema 1 sets `operation=partial-uninstall`, new one-use transaction
+ID, intent, exact source/review/host/runtime hashes, active receipt/route hashes,
+reference inventory hash, predecessor safety hash and protected backup hashes.
+Consumed install/rollback authority cannot authorize removal. Existing Linux
+`--full` must accept `--partial-authorization-id <ID>` when active partial state
+exists; absence or wrong full-uninstall intent refuses before destructive work.
+Ordinary uninstall modes also detect active partial routes rather than silently
+classify them as harmless full-manifest drift.
+
+Acquire the same protected machine lock before route/state writes, retain
+checkout/maintenance locks and pending-old-runtime preflight. Back up exact
+owned destinations/state first; verify active receipt, current route hashes,
+ACLs, backups and references again before every mutation. States: active ->
+uninstall-issued -> uninstall-reserved -> uninstall-backed-up ->
+predecessor-restored (deactivation) or owned-partial-routes-removed (Linux full
+uninstall) -> uninstall-verified -> uninstall-consumed/retired. Interruptions
+retain pending uninstall authority/journal; exact retry proves completed steps,
+never replays consumed authority or destroys another actor's change.
+
+Partial deactivation defaults to restoring only verified safe previous owned
+routes, schedule definitions and protected maintenance payload. Verify original
+capabilities before consuming authority. If old source is unsafe, security
+state cannot be preserved, a route/receipt has drifted or a predecessor backup
+is unproven, stop deactivation and use new reviewed forward repair. Preserve
+the active route and report INCOMPLETE; never restore known unsafe security
+source just to finish removal. Full Linux uninstall includes owned active
+partial command routes, owned schedule pointers/definitions and receipt/payload
+references in its recoverable preview/backup/removal contract. Preserve foreign
+or drifted routes and report nonzero INCOMPLETE, with exact remaining references,
+not completion. No removal of Windows service/fixed maintenance task or action
+outside existing allowlisted ownership contract is introduced.
+
+Never delete immutable payload while any recorded or newly observed consumer
+still references it, or when reference ownership/completeness is unknown.
+Archive/retire a no-longer-active receipt, keep recoverable backup history and
+record retained payload as retained when references remain. Payload cleanup is
+allowed only after exact reviewed absence of references and recoverable archive;
+otherwise report INCOMPLETE and coordinator-owned repair. Gate phases are
+`uninstall-preflight`, `uninstall-backed-up`, `uninstall-mutated`,
+`uninstall-verified`, `uninstall-finalize`, each bound to its exact new authority.
+Verification: `partial_uninstall_new_authority_required`,
+`partial_deactivate_restores_safe_predecessor`,
+`partial_deactivate_unsafe_predecessor_forward_repair`,
+`partial_uninstall_interrupt_retry`, `partial_uninstall_replay_refused`,
+`partial_uninstall_tamper_refused`, `full_uninstall_active_partial_owned_routes`,
+`full_uninstall_foreign_or_drifted_incomplete`,
+`partial_payload_referenced_retained`.
+
 **Phase D/E — reviewed landing and one host outcome.** Focused tests, native
 platform proof, exact-head assigned independent review, normal required CI and
 merge queue precede installation. Confirm exact fetched merged source and
@@ -1146,7 +1217,8 @@ accepted #914/#925/#868 proofs. P1/P8 measured savings remain separate gates.
 Before that landing, update the canonical instructions in `docs/deployment.md`
 with fixed Linux/Windows scope interfaces, exact operation review/inventory,
 separate partial/full state, one-use authority, retry/rollback and full-install
-reconciliation. Update `docs/independent-windows-runner-setup.md` maintenance
+reconciliation, fixed deactivation/uninstall interfaces and INCOMPLETE semantics.
+Update `docs/independent-windows-runner-setup.md` maintenance
 contract with the supported protected-payload refresh interface, retained
 fixed task/action/runtime defenses and exact old-primary/new-helper namespace
 binding. These are implementation steps, not current host permissions. Gate:
@@ -1172,6 +1244,8 @@ Trust-boundary adversarial matrix:
 | Machine installation | Full/partial installs from different clones, old pending runtime | `different_clone_full_partial_race_refused`, `old_pending_install_preflight_refused` |
 | Typed baseline | Missing receipt presented as verified full state, unknown old owner | `typed_legacy_baseline_no_forged_fullproof`, `legacy_wrapper_header_source_owner_bound` |
 | Active rollback | Consumed install authority, tampered receipt/backup, mixed restoration | `active_fault_new_rollback_authority`, `active_rollback_install_authority_replay_refused`, `active_rollback_restores_coherent_predecessor` |
+| Uninstall | Consumed authority, interrupted/tampered state, foreign active route | `partial_uninstall_replay_refused`, `partial_uninstall_interrupt_retry`, `partial_uninstall_tamper_refused`, `full_uninstall_foreign_or_drifted_incomplete` |
+| Predecessor/payload removal | Unsafe old source or referenced payload deletion | `partial_deactivate_unsafe_predecessor_forward_repair`, `partial_payload_referenced_retained` |
 | Owned route/rollback | Another actor changed destination or ACL | `partial_rollback_concurrent_change_refused` |
 | Schedule | Different principal/cadence/action or foreign task | `schedule_semantics_preserved` |
 | Privileged maintenance | Redirected fixed action, skipped runtime hashes, hostile autoload/env | Existing `tests/test-windows-runner-maintenance.ps1` regressions |
@@ -1240,6 +1314,20 @@ header/operation/approval-line semantics, with no full receipt fabricated.
 Active-fault fixtures cover all lifecycle boundaries, restored original
 capabilities, authority replay, current-route changes and protected backup/
 receipt tampering; rollback failure must retain a named safe forward-repair path.
+Extend existing `tests/test-uninstall.sh` with every Linux lifecycle case in
+Phase C4, preserving its current recoverable full/minimal/purge/preview tests.
+Add the native partial-deactivation/removal cases to
+`tests/test-github-toolkit-release.ps1` and supported maintenance fixtures;
+prove fixed `-RemovePartialScope`, no extra service/task removal, exact fresh
+uninstall authority, safe predecessor restoration and original capability,
+interruptions/replays/tampering, referenced-payload retention and nonzero
+INCOMPLETE for drift/foreign references. No success message may hide active
+owned partial routes that the requested full uninstall failed to account for.
+Actual public-boundary command is `bash tests/test-public-boundary.sh`; retain
+its real passing receipt/source identity. A wrong reviewer packet filename is
+an evidence defect, not a claimed scanner/source fix. Markdown suite requires
+the supported Python interpreter on PATH; failed/missing-command output cannot
+be relabeled PASS.
 
 ### 11. Constraints and operational traps
 
@@ -1287,6 +1375,9 @@ stops that host with exact evidence and coordinator ownership.
   capability evidence, and issue checklist updated with no unowned gap.
 - [ ] P7 fleet coverage and P1/P8 measured acceptance are complete before #658
   closes; full install consolidation path is tested, not deferred invention.
+- [ ] Partial deactivation and full uninstall lifecycle are exact-authority,
+  recoverable and tested; unsafe/foreign/drifted/referenced remnants report
+  INCOMPLETE with coordinator ownership instead of hidden completion.
 
 Risks: route inventory can miss hardcoded callers, immutable runtime ACLs can
 require unavailable supported elevation, mutable host/source facts invalidate
