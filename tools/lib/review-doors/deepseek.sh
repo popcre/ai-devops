@@ -32,6 +32,7 @@ case "$MODE" in review|implement) ;; *) printf 'deepseek door: usage: deepseek.s
 
 # Repository root, for the pinned OpenCode install and the profile source.
 DS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$DS_ROOT/tools/reviewer_event_guard.sh"
 PROFILE_SRC="$DS_ROOT/config/opencode-deepseek"
 OC_VERSION="$(tr -d ' \r\n' < "$DS_ROOT/config/opencode/version" 2>/dev/null || true)"
 
@@ -188,7 +189,7 @@ main() {
            XDG_CACHE_HOME="$(native_path "$xdg/cache")"
     if [ -n "$DS_KEY" ]; then export DEEPSEEK_API_KEY="$DS_KEY"; else unset DEEPSEEK_API_KEY || true; fi
     printf '%s' "$(cat "$prompt_full")" \
-      | timeout "$DS_TIMEOUT" "$oc" run --agent "$DS_AGENT" --auto \
+      | reviewer_credit_run deepseek "$log" "$out.err" -- timeout "$DS_TIMEOUT" "$oc" run --agent "$DS_AGENT" --auto \
           --format json --model "$DS_PROVIDER/$DS_MODEL" \
           --dir "$(native_path "$DOOR_WORKDIR")" \
           > "$log" 2> "$out.err"
@@ -199,8 +200,9 @@ main() {
   rm -rf "$xdg"
 
   if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT deepseek door\n' >&2
+    reviewer_capacity_current deepseek "$log" || true
     rm -f "$prompt_full"
+    reviewer_credit_exit
     exit 92
   fi
   if [ "$rc" -ne 0 ] || [ ! -s "$log" ]; then

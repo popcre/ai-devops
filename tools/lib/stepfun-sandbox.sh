@@ -57,7 +57,11 @@ stepfun_sandbox_exec(){
   done
   # -k: a turn that ignores SIGTERM is killed 10s later, so no caller waits
   # past its deadline.
-  exec "$timeout_bin" -k 10 "$secs" "$bwrap" --die-with-parent --unshare-all --share-net \
+  local -a launch=(exec)
+  if [ -n "${STEPFUN_CREDIT_OUTPUT:-}" ]; then
+    launch=(reviewer_credit_run stepfun "$STEPFUN_CREDIT_OUTPUT" "$STEPFUN_CREDIT_STDERR" --)
+  fi
+  "${launch[@]}" "$timeout_bin" -k 10 "$secs" "$bwrap" --die-with-parent --unshare-all --share-net \
     "${sys_binds[@]}" --dev /dev --proc /proc --tmpfs /tmp --tmpfs /run \
     "${resolver_binds[@]}" \
     --tmpfs "$HOME" \

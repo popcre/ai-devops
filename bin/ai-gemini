@@ -89,7 +89,7 @@ declare -F reviewer_credit_scan >/dev/null || source "$(dirname "$(readlink -f "
 # field of a non-SUCCESS result (never response text, which can quote billing
 # phrases) for billing
 # exhaustion; on a match print the diagnosis and exit 92 so the caller stops now.
-gemini_credit_stop(){ local o="$1" ev="$1.credit"; [ ! -f "$o" ] || jq -r 'select(type=="object" and .status!="SUCCESS")|(.error//""|tostring)' "$o" > "$ev" 2>/dev/null || true; reviewer_credit_scan gemini "$o.stderr" "$ev" || true; rm -f "$ev"; reviewer_credit_exit; }
+gemini_credit_stop(){ local o="$1" ev="$1.credit"; reviewer_capacity_current gemini "$o" || true; reviewer_capacity_current gemini "$o.stream" || true; [ ! -f "$o" ] || jq -r 'select(type=="object" and .status!="SUCCESS")|(.error//""|tostring)' "$o" > "$ev" 2>/dev/null || true; reviewer_credit_scan gemini "$o.stderr" "$ev" || true; rm -f "$ev"; reviewer_credit_exit; }
 SANDBOX="${AI_REVIEW_SANDBOX_BIN:-$HERE/ai-review-sandbox}"
 PACKET="${AI_REVIEW_PACKET_BIN:-$HERE/ai-review-packet}"
 ACTIVE_META=''; ACTIVE_LOCKS=''; ACTIVE_TERMINAL=0; ACTIVE_CHILD=''; ACTIVE_STREAM_INPUT=''; ACTIVE_STREAM_OUTPUT=''
@@ -527,9 +527,9 @@ call(){
     cd "$d" && a="$(agy)"
     if [ -n "$c" ]; then set -- --conversation "$c"; else set -- --new-project; fi
     if [ "$streamed" -eq 1 ]; then
-      exec timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --input-format stream-json --output-format stream-json --print-timeout "$TIMEOUT" --print '' < "$ACTIVE_STREAM_INPUT"
+      reviewer_credit_run gemini "$output" "$o.stderr" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --input-format stream-json --output-format stream-json --print-timeout "$TIMEOUT" --print '' < "$ACTIVE_STREAM_INPUT"
     else
-      exec timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --output-format json --print-timeout "$TIMEOUT" --print "$p"
+      reviewer_credit_run gemini "$output" "$o.stderr" -- timeout "$TIMEOUT" "$a" "$@" --sandbox --mode accept-edits --model "$MODEL" --output-format json --print-timeout "$TIMEOUT" --print "$p"
     fi
   ) > "$output" 2>"$o.stderr" & ACTIVE_CHILD=$!
   rc=0; wait "$ACTIVE_CHILD" || rc=$?; ACTIVE_CHILD=''

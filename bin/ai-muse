@@ -839,7 +839,7 @@ run_turn(){
     printf '%s\n' "$provider_key" > "$key_file" || die 'could not write the private Muse credential handoff.'
     chmod 600 "$key_file" 2>/dev/null || die 'could not protect the private Muse credential handoff.'
     protect_windows_path "$key_file" file || die 'could not enforce the private Muse credential-handoff ACL.'
-    ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; exec "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
+    ( [ -z "$PUBLISH_FD" ] || eval "exec ${PUBLISH_FD}>&-"; reviewer_credit_run muse "$out" "$out.stderr" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" "$bash_bin" --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary "$timeout_bin" "$TIMEOUT" "$BIN" "${args[@]}" ${prompt_arg[@]+"${prompt_arg[@]}"} ) > "$out" 2> "$out.stderr" & TURN_PID=$!
     MUSE_FAILURE_PHASE=provider-turn
     ACTIVE_META="$meta"; test_interrupt_at post_launch
     [ -z "$meta" ] || heartbeat_meta "$meta" "$TURN_PID"
@@ -923,6 +923,7 @@ parse_turn(){ # shared terminal parser; never launches the provider
 # exhaustion; on a match print the diagnosis and exit 92 so the caller stops now.
 muse_credit_stop(){
   local out="$1" ev
+  reviewer_capacity_current muse "$out" || true
   ev="$(tmp_file)" || return 0
   [ ! -f "$out" ] || jq -c 'select(type=="object")|if (.type//"")=="error" then .error elif ((.payload_type//"")|test("terminal[.]failed")) then (.payload|objects|del(.text)) elif ((.payload_type//"")|test("error|fail";"i")) then (.payload|objects|del(.text)) else empty end' "$out" > "$ev" 2>/dev/null || true
   printf 'ai-muse: error: %s\n' "$TURN_ERROR" > "$ev.note"

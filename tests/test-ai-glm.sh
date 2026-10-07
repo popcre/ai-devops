@@ -26,6 +26,7 @@ GLM_START_WALL=$(( GLM_START_DEADLINE * 5 / 2 ))
 [ "$GLM_START_WALL" -lt 5 ] && GLM_START_WALL=5
 
 TMP="$(mktemp -d)"
+export AI_REVIEW_QUARANTINE_DIR="$TMP/credit-holds"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 glm_recovery_cases(){
@@ -149,7 +150,7 @@ jq -e '.remote_turn.state=="terminal-error" and .remote_turn.authorizing==false'
 [ "$(cat "${meta%.json}.terminal.json")" = 'OLD5371 immutable success' ]
 receipt="$(jq -r .remote_turn.error_path "$meta")"; cp "$receipt" "$FIXTURE/receipt-original"
 observed="$(jq -r .observed_epoch "$receipt")"
-grep -q -- "--observed $observed" "$FIXTURE/pauses"
+[ ! -e "$FIXTURE/pauses" ] # Error evidence alone never invents a one-hour credit pause.
 api(){ printf forbidden >> "$FIXTURE/network"; return 99; }
 require_review_server(){ printf forbidden >> "$FIXTURE/network"; return 99; }
 send_prompt(){ printf forbidden >> "$FIXTURE/network"; return 99; }

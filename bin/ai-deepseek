@@ -28,6 +28,7 @@ set -euo pipefail
 
 SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+source "$ROOT/tools/reviewer_event_guard.sh"
 IS_WINDOWS=0
 case "$(uname -s 2>/dev/null || echo unknown)" in MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1;; esac
 # On Windows the managed files live under the Windows profile, not Git Bash's HOME.
@@ -115,7 +116,7 @@ run_opencode() { # command... ; the key is exported, so it never appears in any 
   ( unset OP_SERVICE_ACCOUNT_TOKEN
     export DEEPSEEK_API_KEY="$DEEPSEEK_KEY"
     export XDG_CONFIG_HOME="$(native_path "$STATE_DIR/xdg/config")" XDG_DATA_HOME="$(native_path "$STATE_DIR/xdg/data")" XDG_STATE_HOME="$(native_path "$STATE_DIR/xdg/state")"
-    exec "$@" )
+    if [ "$1" = reviewer_credit_run ]; then "$@"; else exec "$@"; fi )
 }
 
 run_turn() { # name model session-or-empty
@@ -128,9 +129,13 @@ run_turn() { # name model session-or-empty
   local args=(run --agent "$AGENT" --auto --format json --model "$PROVIDER/$model" --dir "$(native_path "$dir")")
   [ -z "$session" ] || args+=(--session "$session")
   set +e
-  printf '%s' "$PROMPT" | run_opencode timeout "$TIMEOUT" "$OC_BIN" "${args[@]}" > "$log" 2> "$log.stderr"
+  printf '%s' "$PROMPT" | run_opencode reviewer_credit_run deepseek "$log" "$log.stderr" -- timeout "$TIMEOUT" "$OC_BIN" "${args[@]}" > "$log" 2> "$log.stderr"
   rc=$?; set -e
   DEEPSEEK_KEY=""
+  if [ "$rc" -eq 92 ]; then
+    reviewer_capacity_current deepseek "$log" || true
+    reviewer_credit_exit
+  fi
   if [ -z "$session" ]; then
     session="$(jq -r 'select(.sessionID) | .sessionID' "$log" 2>/dev/null | head -1)"
     [ -z "$session" ] || { jq --arg s "$session" '.session=$s' "$(task_dir "$name")/meta.json" > "$(task_dir "$name")/meta.tmp" && mv "$(task_dir "$name")/meta.tmp" "$(task_dir "$name")/meta.json"; }

@@ -32,6 +32,7 @@ case "$MODE" in review|implement) ;; *) printf 'muse door: usage: muse.sh review
 
 # Repository root, for the pinned engine install and the OpenCode profile.
 MU_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$MU_ROOT/tools/reviewer_event_guard.sh"
 
 # Runtime engine: Meta's Muse Code CLI (default) or the pinned OpenCode
 # harness (rollback). Sessions never cross engines: each engine records its
@@ -226,7 +227,7 @@ main() {
     # personal context. Same flags bin/ai-muse uses for a review turn.
     (
       if [ -n "$MU_KEY" ]; then export META_API_KEY="$MU_KEY"; else unset META_API_KEY || true; fi
-      timeout "$MU_TIMEOUT" "$bin" exec --json --model "$MU_MODEL" --session-id "$sid" \
+      reviewer_credit_run muse "$log" "$out.err" -- timeout "$MU_TIMEOUT" "$bin" exec --json --model "$MU_MODEL" --session-id "$sid" \
         --workspace "$workspace" --disable-approval --disable-web-tools \
         --no-foreign-personal-context --user-input-auto-resolve \
         --prompt-file "$(native_path "$prompt_full")" \
@@ -245,7 +246,7 @@ main() {
              XDG_CACHE_HOME="$(native_path "$xdg/cache")"
       if [ -n "$MU_KEY" ]; then export META_API_KEY="$MU_KEY"; else unset META_API_KEY || true; fi
       printf '%s' "$(cat "$prompt_full")" \
-        | timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \
+        | reviewer_credit_run muse "$log" "$out.err" -- timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \
             --format json --model "$MU_MODEL" \
             --dir "$(native_path "$DOOR_WORKDIR")" \
             > "$log" 2> "$out.err"
@@ -257,7 +258,8 @@ main() {
   MU_KEY=""
 
   if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT muse door\n' >&2
+    reviewer_capacity_current muse "$log" || true
+    reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92
   fi

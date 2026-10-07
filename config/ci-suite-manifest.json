@@ -191,11 +191,13 @@
         "test-ai-memory-index-hook.sh"
       ],
       "bin/ai-process-supervisor": [
+        "test-reviewer-credit-stream.sh",
         "test-mcp-launch-lock.sh",
         "test-mcp-session-guard.sh",
         "test-ai-review-sandbox.sh"
       ],
       "bin/ai-process-supervisor.cmd": [
+        "test-reviewer-credit-stream.sh",
         "test-mcp-launch-lock.sh",
         "test-mcp-session-guard.sh",
         "test-ai-review-sandbox.sh"

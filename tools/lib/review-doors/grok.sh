@@ -10,6 +10,8 @@
 #   bash grok.sh review|implement
 # with the runner token and DOOR_* environment contract below.
 set -euo pipefail
+DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
 
 # ---------------------------------------------------------------------------
 # Structural forcing function: a door invoked without the runner token is a
@@ -197,12 +199,12 @@ main() {
   out="$(mktemp)"
   set +e
   if [ "$MODE" = implement ]; then
-    env -u GROK_CLAUDE_1PASSWORD_HELPER \
+    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" --prompt-file "$prompt_full" \
         --max-turns "$GROK_MAX_TURNS" "${GROK_PERMS[@]}" --output-format json \
         > "$out" 2> "$out.err"
   else
-    env -u GROK_CLAUDE_1PASSWORD_HELPER \
+    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" --prompt-file "$prompt_full" \
         --max-turns "$GROK_MAX_TURNS" "${GROK_PERMS[@]}" --output-format json \
         > "$out" 2> "$out.err"
@@ -223,7 +225,7 @@ main() {
     rpf="$(mktemp)"
     printf '%s\n' "The Grok CLI refused your last shell command and cancelled it; nothing ran. $SHELL_RULE. Do not retry that form. Continue the same $MODE task from where you stopped and finish with the required '## Verdict' section." > "$rpf"
     set +e
-    env -u GROK_CLAUDE_1PASSWORD_HELPER \
+    reviewer_credit_run grok "$out" "$out.err" -- env -u GROK_CLAUDE_1PASSWORD_HELPER \
       "$grok" --cwd "$cwd" --model "$GROK_MODEL" -r "$sid" --prompt-file "$rpf" \
         --max-turns "$left" "${GROK_PERMS[@]}" --output-format json \
         > "$out" 2> "$out.err"
@@ -233,7 +235,8 @@ main() {
   done
 
   if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT grok door\n' >&2
+    reviewer_capacity_current grok "$out" || true
+    reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92
   fi

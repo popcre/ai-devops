@@ -72,6 +72,10 @@ tools/lib/review-operation.sh
 tools/lib/stepfun-sandbox.sh
 tools/lib/task-gates.sh
 tools/reviewer_admission.py
+tools/reviewer_credit_stream.py
+tests/test_reviewer_credit_stream.py
+tests/test-reviewer-credit-stream.sh
+tests/test_glm_credit_reset.py
 tools/reviewer_event_guard.sh
 tools/reviewer_events.py
 tools/reviewer_maintenance.py

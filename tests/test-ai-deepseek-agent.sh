@@ -375,7 +375,7 @@ AI_REVIEW_QUARANTINE_DIR="$TMP/credit-q" DEEPSEEK_STUB_CREDIT="$ROOT/tests/fixtu
 check "out of credit exits 92" "test '$credit_rc' -eq 92"
 check "out of credit prints the machine line" "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=deepseek code=insufficient_quota' '$TMP/credit.err'"
 check "out of credit prints the human line with the top-up page" "grep -q '^OUT OF CREDIT: .*platform.deepseek.com' '$TMP/credit.err'"
-check "out of credit records the quarantine" "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global deepseek --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check "out of credit records the capacity hold" "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' capacity-status deepseek --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
 check "an ordinary HTTP failure is not reported as out of credit" "! grep -q 'OUT OF CREDIT' '$TMP/http.err'"
 DEEPSEEK_STUB_INVALID=1 run send malformed >"$TMP/malformed.out" 2>"$TMP/malformed.err"; malformed_rc=$?
 MALFORMED_SESSION="$(sed -n 's/^Retained turn session: //p' "$TMP/malformed.err")"
