@@ -46,7 +46,13 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   $authPath=Join-Path $authDir "$Target.json"
   $launcherHash = if (($LegacyMigration -or $RecoverLaunchers) -and (Test-Path -LiteralPath $Fixture.Launcher)) { (Get-FileHash -LiteralPath $Fixture.Launcher -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
   $cmdHash = if (($LegacyMigration -or $RecoverLaunchers) -and (Test-Path -LiteralPath "$($Fixture.Launcher).cmd")) { (Get-FileHash -LiteralPath "$($Fixture.Launcher).cmd" -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
-  $installedSourceHash = if ($LegacyMigration -or $FirstInstall -or $RecoverLaunchers) { (Get-FileHash -LiteralPath (Join-Path $Fixture.Repo 'bin/ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+  $installedSourceHash = (& $bash -c 'set -o pipefail; git -C "$1" cat-file blob "$2:bin/ai-task-gates" | sha256sum | cut -d" " -f1' 'ai-devops' $Fixture.Repo $Base).Trim()
+  $receiptSha = ''
+  if (-not $RecoverLaunchers -and (Test-Path -LiteralPath $Fixture.Launcher)) {
+    foreach ($line in @(Get-Content -LiteralPath $Fixture.Launcher)) {
+      if ($line -cmatch '^# source-sha=([0-9a-f]{40})$') { $receiptSha=$Matches[1] }
+    }
+  }
   $inventory=@()
   if ($RecoverLaunchers) {
     $directory=Split-Path -Parent $Fixture.Launcher
@@ -57,7 +63,7 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
       }
     }
   }
-  @{schema_version=1;target_head=$Target;installed_head=$Base;installed_checkout=$Fixture.Repo;installed_launcher=$Fixture.Launcher;policy_digest=$policy;source_digest=$sourceDigest;review_report=$report;review_report_sha256=$reportHash;reviewer_approval='APPROVE by grok (implementer claude, assignment alloc-test-1) for deploy';legacy_migration=$LegacyMigration;first_install=$FirstInstall;recover_launchers=$RecoverLaunchers;managed_inventory=$inventory;installed_launcher_sha256=$launcherHash;installed_cmd_sha256=$cmdHash;installed_source_sha256=$installedSourceHash;issued_at='2026-09-28T00:00:00Z'} | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $authPath -Encoding ASCII
+  @{schema_version=1;target_head=$Target;installed_head=$Base;installed_checkout=$Fixture.Repo;installed_launcher=$Fixture.Launcher;policy_digest=$policy;source_digest=$sourceDigest;review_report=$report;review_report_sha256=$reportHash;reviewer_approval='APPROVE by grok (implementer claude, assignment alloc-test-1) for deploy';legacy_migration=$LegacyMigration;first_install=$FirstInstall;recover_launchers=$RecoverLaunchers;managed_inventory=$inventory;installed_launcher_sha256=$launcherHash;installed_cmd_sha256=$cmdHash;installed_source_sha256=$installedSourceHash;windows_receipt_sha=$receiptSha;issued_at='2026-09-28T00:00:00Z'} | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $authPath -Encoding ASCII
   return $authPath
 }
 function New-Fixture([string]$Name) {
@@ -67,6 +73,7 @@ function New-Fixture([string]$Name) {
   git init -b main $repo | Out-Null
   git -C $repo config user.name test
   git -C $repo config user.email test@example.invalid
+  git -C $repo config core.autocrlf false
   'fixture' | Set-Content (Join-Path $repo 'README.md')
   New-Item -ItemType Directory -Path (Join-Path $repo '.ai-devops') | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $repo 'bin') | Out-Null
@@ -84,12 +91,13 @@ function New-Fixture([string]$Name) {
   Write-Receipt $fixture
   return $fixture
 }
-function Invoke-Gate($Fixture, [switch]$ExpectFailure, [string]$ExpectedHead = '', [string]$FailureContains = '') {
+function Invoke-Gate($Fixture, [switch]$ExpectFailure, [string]$ExpectedHead = '', [string]$FailureContains = '', [switch]$LauncherGate) {
   $oldMode=$env:AI_DEVOPS_INSTALL_TEST_MODE; $oldRemote=$env:AI_DEVOPS_TEST_EXPECTED_REMOTE; $oldLauncher=$env:AI_DEVOPS_TEST_LAUNCHER
   try {
     $env:AI_DEVOPS_INSTALL_TEST_MODE='1'; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$Fixture.Remote; $env:AI_DEVOPS_TEST_LAUNCHER=$Fixture.Launcher
     $failed=$false
-    try { & $installer -RepoPath $Fixture.Repo -SkipGitInstall -SourceGateOnly -ExpectedHead $ExpectedHead *>$null } catch { $failed=$true; $failureText=$_.Exception.Message; if (-not $ExpectFailure) { Write-Host "Unexpected source-gate error: $failureText" } }
+    $gateMode = if ($LauncherGate) { @{ LauncherGateOnly=$true } } else { @{ SourceGateOnly=$true } }
+    try { & $installer -RepoPath $Fixture.Repo -SkipGitInstall @gateMode -ExpectedHead $ExpectedHead *>$null } catch { $failed=$true; $failureText=$_.Exception.Message; if (-not $ExpectFailure) { Write-Host "Unexpected source-gate error: $failureText" } }
     if ($ExpectFailure) { Assert $failed 'hostile source state passed' } else { Assert (-not $failed) 'valid source state failed' }
     if ($FailureContains) { Assert ($failureText.Contains($FailureContains)) "unexpected refusal: $failureText" }
   } finally { $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote; $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher }
@@ -236,7 +244,7 @@ try {
     $tampered=$savedAuth | ConvertFrom-Json
     $tampered.installed_head='0' * 40
     $tampered | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $pending -Encoding ASCII
-    Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'does not match installed source'
+    Invoke-Gate $protected -ExpectedHead $protectedHead -ExpectFailure -FailureContains 'original installed gate source changed'
   } finally { [IO.File]::WriteAllText($pending, $savedAuth) }
   Invoke-Gate $protected -ExpectedHead $protectedHead
   Remove-Item -LiteralPath $pending
@@ -402,6 +410,52 @@ try {
   Invoke-Gate $legacy -ExpectFailure
   Write-TestAuthorization $legacy (git -C $legacy.Repo rev-parse HEAD).Trim() (git -C $legacy.Repo rev-parse HEAD).Trim() $true | Out-Null
   Invoke-Gate $legacy -ExpectedHead (git -C $legacy.Repo rev-parse HEAD).Trim()
+
+  # A source-only update must retain the actual old checkout and receipt
+  # through the second, launcher-only gate. Four-line launchers formerly
+  # changed operation/baseline after the fast-forward and stranded authority.
+  $legacyAdvance=New-Fixture legacy-cross-commit
+  $legacyBase=(git -C $legacyAdvance.Repo rev-parse HEAD).Trim()
+  $bashLines=@(Get-Content -LiteralPath $legacyAdvance.Launcher)
+  $cmdLines=@(Get-Content -LiteralPath "$($legacyAdvance.Launcher).cmd")
+  @($bashLines[0],$bashLines[1],$bashLines[4],$bashLines[5]) | Set-Content -LiteralPath $legacyAdvance.Launcher -Encoding ASCII
+  @($cmdLines[0],$cmdLines[1],$cmdLines[4],$cmdLines[5]) | Set-Content -LiteralPath "$($legacyAdvance.Launcher).cmd" -Encoding ASCII
+  'protected legacy advance' | Set-Content (Join-Path $legacyAdvance.Repo 'bin/ai-task-gates')
+  git -C $legacyAdvance.Repo add bin/ai-task-gates
+  git -C $legacyAdvance.Repo commit -m protected-legacy-advance | Out-Null
+  git -C $legacyAdvance.Repo push origin main | Out-Null
+  $legacyTarget=(git -C $legacyAdvance.Repo rev-parse HEAD).Trim()
+  git -C $legacyAdvance.Repo reset --hard $legacyBase | Out-Null
+  $legacyIssued=Write-TestAuthorization $legacyAdvance $legacyTarget $legacyBase $true
+  Invoke-Gate $legacyAdvance -ExpectedHead $legacyTarget
+  Assert ((git -C $legacyAdvance.Repo rev-parse HEAD).Trim() -ceq $legacyTarget) 'reviewed legacy update did not advance'
+  Invoke-Gate $legacyAdvance -LauncherGate -ExpectedHead $legacyTarget
+  $legacyPending="$legacyIssued.consuming"
+  Assert (Test-Path -LiteralPath $legacyPending) 'launcher preflight prematurely consumed authority'
+  $tamperedLegacy=Get-Content -Raw -LiteralPath $legacyPending | ConvertFrom-Json
+  $tamperedLegacy.installed_source_sha256='0'*64
+  $tamperedLegacy | ConvertTo-Json -Compress -Depth 4 | Set-Content -LiteralPath $legacyPending -Encoding ASCII
+  Invoke-Gate $legacyAdvance -LauncherGate -ExpectedHead $legacyTarget -ExpectFailure -FailureContains 'original installed gate source changed'
+
+  # The actual checkout and the installed receipt can differ before this
+  # task starts. Neither is substituted for the other in the reviewed grant.
+  $staleReceipt=New-Fixture stale-windows-receipt
+  'ordinary earlier advance' | Add-Content (Join-Path $staleReceipt.Repo 'README.md')
+  git -C $staleReceipt.Repo add README.md
+  git -C $staleReceipt.Repo commit -m already-advanced | Out-Null
+  git -C $staleReceipt.Repo push origin main | Out-Null
+  $staleBase=(git -C $staleReceipt.Repo rev-parse HEAD).Trim()
+  'protected receipt advance' | Set-Content (Join-Path $staleReceipt.Repo 'bin/ai-task-gates')
+  git -C $staleReceipt.Repo add bin/ai-task-gates
+  git -C $staleReceipt.Repo commit -m protected-receipt-advance | Out-Null
+  git -C $staleReceipt.Repo push origin main | Out-Null
+  $staleTarget=(git -C $staleReceipt.Repo rev-parse HEAD).Trim()
+  git -C $staleReceipt.Repo reset --hard $staleBase | Out-Null
+  Write-TestAuthorization $staleReceipt $staleTarget $staleBase | Out-Null
+  Invoke-Gate $staleReceipt -ExpectedHead $staleTarget
+  Invoke-Gate $staleReceipt -LauncherGate -ExpectedHead $staleTarget
+  Write-Receipt $staleReceipt
+  Invoke-Gate $staleReceipt -LauncherGate -ExpectedHead $staleTarget -ExpectFailure -FailureContains 'original Windows source receipt changed'
 
   $stamp=New-Fixture direct-stamp
   Copy-Item -LiteralPath $installer -Destination (Join-Path $stamp.Repo 'bin\install-ai-devops-windows.ps1')

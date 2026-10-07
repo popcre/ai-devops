@@ -296,16 +296,22 @@ EOF
   export PATH="$TMP/fake-cygpath:$PATH"
 fi
 windows_source="$(cygpath -u "$TMP/class/bin/ai-task-gates")"
+windows_receipt="$(git -C "$TMP/class" rev-parse HEAD)"
+windows_hash="$(sha256sum "$TMP/class/bin/ai-task-gates" | cut -d' ' -f1)"
 rm "$class_launcher"
 cat > "$class_launcher" <<EOF
 #!/usr/bin/env bash
 # Managed by ai-devops install-machine-tools.ps1.
+# source-sha=$windows_receipt
+# source-hash=$windows_hash
 export HOME="$HOME"
 exec "$windows_source" "\$@"
 EOF
 cat > "$class_launcher.cmd" <<EOF
 @echo off
 rem Managed by ai-devops install-machine-tools.ps1.
+rem source-sha=$windows_receipt
+rem source-hash=$windows_hash
 set "HOME=$USERPROFILE"
 "$PROGRAMFILES\Git\bin\bash.exe" "$windows_source" %*
 EOF
@@ -354,6 +360,22 @@ check 'same-commit legacy migration binds managed launcher and source bytes' \
 check 'legacy authority records exact launcher and source hashes' \
   "jq -e '.legacy_migration==true and (.installed_launcher_sha256|length)==64 and (.installed_cmd_sha256|length)==64 and (.installed_source_sha256|length)==64' '$AI_TASK_GATES_DIR/install-authorizations/$legacy_target.json'"
 rm -f "$AI_TASK_GATES_DIR/install-authorizations/$legacy_target.json"
+git -C "$TMP/legacy-primary" worktree add -q --detach "$TMP/legacy-advance" "$legacy_target"
+( cd "$TMP/legacy-advance" && "$GATES" start --class installation ) >/dev/null
+printf '# new reviewed gate\n' >> "$TMP/legacy-advance/bin/ai-task-gates"
+git -C "$TMP/legacy-advance" add bin/ai-task-gates
+git -C "$TMP/legacy-advance" commit -qm 'protected legacy cross-commit release'
+legacy_advance_target="$(git -C "$TMP/legacy-advance" rev-parse HEAD)"
+git -C "$TMP/legacy-advance" update-ref refs/remotes/origin/main "$legacy_advance_target"
+legacy_advance_report="$(make_approved_report "$TMP/legacy-advance" "$legacy_advance_target" legacy-managed-launcher-refresh)"
+( cd "$TMP/legacy-advance-reviewed" && "$GATES" start --class reviewer-safety --base "$legacy_target" ) >/dev/null
+legacy_advance_proof="--target-head $legacy_advance_target --installed-checkout $TMP/legacy-primary --installed-launcher $class_launcher --review-report $legacy_advance_report --reviewer-approval $(appr "$TMP/legacy-advance" deploy "$legacy_advance_target")"
+check 'legacy Windows cross-commit migration binds the original installed source' \
+  "rc 0 '$TMP/legacy-advance' authorize-install $legacy_advance_proof --legacy-migration"
+check 'legacy cross-commit authority retains old checkout and empty original receipt' \
+  "jq -e '.legacy_migration==true and .installed_head==\"$legacy_target\" and .windows_receipt_sha==\"\"' '$AI_TASK_GATES_DIR/install-authorizations/$legacy_advance_target.json'"
+rm -f "$AI_TASK_GATES_DIR/install-authorizations/$legacy_advance_target.json"
+git -C "$TMP/legacy-primary" update-ref refs/remotes/origin/main "$legacy_target"
 sed -i 's/\\Git\\bin\\bash.exe/\\Other\\bash.exe/' "$class_launcher.cmd"
 check 'legacy migration refuses a changed command route' \
   "rc 3 '$TMP/legacy-install' authorize-install $legacy_proof --legacy-migration"

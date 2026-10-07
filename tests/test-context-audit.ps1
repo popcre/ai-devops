@@ -23,6 +23,8 @@ $safetyLines = [ordered]@{
 # Rules that must appear in BOTH client globals, carried separately from the
 # safety lines so a safety deletion does not accidentally decide parity.
 $parityLines = @(
+    "Complete the authorized scope",
+    "Completing one child or phase is never a reason to stop",
     "# Response Style",
     "Account for the whole job",
     "**Still open**",
@@ -334,6 +336,11 @@ try {
     Write-Host "PASS: both repair conditions are enforced independently in one client and both clients"
 
     # ------------------------------------------------------ cross-client parity
+    New-AuditFixture -Path $fixture -CodexExtra "Take the first unticked child, do only that one, tick it and stop."
+    $result = Invoke-Audit -Path $fixture -Strict
+    if ($result.exit -eq 0 -or $result.report.crossClientParity.mismatches -notcontains 'revoked automatic child-stop mandate') {
+        throw 'Strict mode accepted the revoked child-stop mandate beside the continuation rule.'
+    }
     New-AuditFixture -Path $fixture -OmitSafetyFromCodexOnly @("GPT-5.6 effort")
     $result = Invoke-Audit -Path $fixture -Strict
     if ($result.report.crossClientParity.mismatches -notcontains "GPT-5.6 low or medium only") {

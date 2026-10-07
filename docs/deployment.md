@@ -188,13 +188,20 @@ writing either file.
 The full installer refreshes launchers after ordinary updates as well, so the
 next release starts from the current installed-source receipt. A source-only
 update must be followed by a full install before beginning another release.
-If a legacy four-line launcher already points at an unchanged current-main
-checkout, use the explicit `authorize-install --legacy-migration` route. The
+For Windows four-line launchers, use the explicit
+`authorize-install --legacy-migration` route, including a reviewed cross-commit
+update. Linux legacy migration remains an unchanged-checkout operation. The
 independent exact-head review must examine the full target source and the
 `legacy-managed-launcher-refresh` operation; its approved report must contain the exact line `Approved legacy-managed-launcher-refresh.` for that
 operation. The one-use authority records hashes of both launcher files and
-the installed gate source, which the installer checks again before refreshing
-the launcher receipt. This route refuses launchers that already have a receipt.
+the original installed gate source, which the installer checks again before
+refreshing the launcher receipt. It retains the original checkout baseline
+through source-only advancement and launcher stamping; the original source
+hash is verified against that exact commit, not the newer working tree.
+This route refuses launchers that already have a receipt. Receipted Windows
+updates bind the actual old checkout and the original receipt SHA separately,
+so a clean checkout that is ahead of its receipt is never substituted for the
+receipt's release range. An altered receipt or original-source binding refuses.
 Ask for an operation's approval line with `ai-review <provider> final-check
 --operation <name>` (`legacy-managed-launcher-refresh`,
 `first-managed-install`, `partial-managed-launcher-recovery`, or
