@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tmp="$(mktemp -d)"
+trap 'rm -rf -- "$tmp"' EXIT
+
+awk '/^  cat > "\$REMOTE_SH" <<EOF$/ { copy=1; next }
+     copy && /^EOF$/ { exit }
+     copy { print }' "$repo/bin/setup-secrets.sh" > "$tmp/template"
+test -s "$tmp/template" || { echo 'FAIL: remote launcher template missing' >&2; exit 1; }
+
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/flock" <<'SH'
+#!/bin/sh
+while [ "$#" -gt 0 ] && [ "$1" != op ]; do shift; done
+[ "$#" -gt 0 ] || exit 2
+exec "$@"
+SH
+cat > "$tmp/bin/op" <<'SH'
+#!/bin/sh
+[ "$1" = read ] || exit 2
+[ "${FAKE_OP_FAIL:-}" != 1 ] || exit 1
+case "$2" in
+  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token|op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) printf 'new-synthetic-token' ;;
+  *) exit 2 ;;
+esac
+SH
+cat > "$tmp/bin/node-mock" <<'SH'
+#!/bin/sh
+printf '%s\n' "$MCP_REMOTE_AUTH_HEADER" > "$PROOF_DIR/header"
+printf '%s\n' "$@" > "$PROOF_DIR/argv"
+SH
+chmod +x "$tmp/bin/flock" "$tmp/bin/op" "$tmp/bin/node-mock"
+
+export TOKEN_FILE="$tmp/no-service-token" CFG_DIR="$tmp" NODE_BIN="$tmp/bin/node-mock" GUARD_JS="$tmp/guard"
+{ printf 'cat <<EOF\n'; cat "$tmp/template"; printf 'EOF\n'; } | bash > "$tmp/launcher"
+chmod +x "$tmp/launcher"
+
+export PATH="$tmp/bin:$PATH" PROOF_DIR="$tmp"
+export DEVOPS_MCP_TOKEN='old-synthetic-token' NAS_MCP_TOKEN='old-synthetic-token'
+for ref in devops_token nas_token; do
+  "$tmp/launcher" 'https://example.invalid/mcp' "op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/$ref"
+  grep -qx 'Bearer new-synthetic-token' "$tmp/header" || { echo "FAIL: $ref did not use fresh vault value" >&2; exit 1; }
+  grep -Fxq 'Authorization:${MCP_REMOTE_AUTH_HEADER}' "$tmp/argv" || { echo "FAIL: $ref lost the argv placeholder" >&2; exit 1; }
+  if grep -Eq 'old-synthetic-token|new-synthetic-token' "$tmp/argv"; then
+    echo "FAIL: $ref exposed a bearer value in argv" >&2; exit 1
+  fi
+done
+rm -f -- "$tmp/header" "$tmp/argv"
+if FAKE_OP_FAIL=1 "$tmp/launcher" 'https://example.invalid/mcp' 'op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token' > "$tmp/failed-read.out" 2>&1; then
+  echo 'FAIL: vault read failure was accepted' >&2; exit 1
+fi
+if [ -e "$tmp/header" ] || [ -e "$tmp/argv" ]; then
+  echo 'FAIL: remote MCP started after vault read failure' >&2; exit 1
+fi
+if "$tmp/launcher" 'https://example.invalid/mcp' 'op://unmanaged/token' > "$tmp/invalid.out" 2>&1; then
+  echo 'FAIL: unmanaged token reference was accepted' >&2; exit 1
+fi
+echo 'PASS: both remote MCP launchers prefer fresh allowlisted vault values and keep argv value-free'

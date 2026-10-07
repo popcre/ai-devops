@@ -364,12 +364,12 @@ _aidev_flock() {
   flock --close -w 90 "$CFG_DIR/op-refresh.lock" "\$@"
 }
 case "\$REF" in
-  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token) TOK="\${DEVOPS_MCP_TOKEN:-}" ;;
-  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) TOK="\${NAS_MCP_TOKEN:-}" ;;
-  *) TOK= ;;
+  op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token|op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token) ;;
+  *) echo "ai-devops: unmanaged remote MCP reference — not starting \$URL" >&2; exit 1 ;;
 esac
-[ -n "\$TOK" ] || TOK="\$(_aidev_flock op read "\$REF")" || {
-  echo "ai-devops: serialized fallback FAILED for \$REF — not starting \$URL" >&2
+# Resolve at launch even if the parent process still carries an older token.
+TOK="\$(_aidev_flock op read "\$REF")" || {
+  echo "ai-devops: serialized remote token refresh FAILED for \$REF — not starting \$URL" >&2
   exit 1
 }
 [ -n "\$TOK" ] || {
