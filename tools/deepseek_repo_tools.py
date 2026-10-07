@@ -485,11 +485,13 @@ NOTICE = ("You have a disposable, remote-less copy of the repository. list_dir, 
 def compact_tool_messages(messages):
     """Stub out older tool results once the in-full budget is exceeded.
 
-    Only the most recent COMPACT_KEEP_RESULTS tool messages keep their full
-    body (at least one stays in full so the turn keeps its latest evidence).
-    Stubs are stable once written, so later rounds can still cache-hit the
-    compacted prefix. tool_call_id pairing is preserved. A stub is never
-    applied when it would not shrink the message.
+    Append-only for the provider prefix cache: rounds under budget never touch
+    earlier messages, so each request is the previous one plus new turns. When
+    the budget is exceeded, every tool result older than the most recent
+    COMPACT_KEEP_RESULTS is stubbed in one pass (not just enough to fit), so the
+    next several rounds append again without rewriting history. Stubs are
+    stable once written. At least one result stays in full; tool_call_id pairing
+    is preserved; a stub is never applied when it would not shrink the message.
     """
     tool_idxs = [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "tool"]
     if not tool_idxs:
@@ -505,22 +507,12 @@ def compact_tool_messages(messages):
     total = sum(content_len(messages[i]) for i in tool_idxs)
     if total <= COMPACT_BUDGET_CHARS:
         return messages
-    keep = set(tool_idxs[-keep_n:])
     stub_len = len(COMPACT_STUB)
-    for i in tool_idxs:
-        if i in keep:
-            continue
-        if total <= COMPACT_BUDGET_CHARS:
-            break
+    for i in tool_idxs[:-keep_n]:
         cur = messages[i]
-        if cur.get("content") == COMPACT_STUB:
-            continue
-        cur_len = content_len(cur)
-        if cur_len <= stub_len:
-            continue  # stubbing would not shrink
-        total -= cur_len
+        if cur.get("content") == COMPACT_STUB or content_len(cur) <= stub_len:
+            continue  # already stubbed, or stubbing would not shrink
         cur["content"] = COMPACT_STUB
-        total += stub_len
     return messages
 
 
