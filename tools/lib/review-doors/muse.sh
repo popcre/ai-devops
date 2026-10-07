@@ -210,11 +210,13 @@ main() {
   # disposable copy. The runner owns seal/store; this only points the model.
   prompt_full="$(mktemp)"
   {
-    printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
+    # Cache-stable layout (#1430): fixed text first, run facts last.
+    printf 'Your evidence packet'"'"'s MANIFEST.md path is given under RUN FACTS at the end. Read it first.\n'
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
-    printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
+    printf 'Quote the full reviewed head SHA given under RUN FACTS in your report.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
+    printf '\n## RUN FACTS (muse door)\nEvidence packet: %s/MANIFEST.md\nReviewed head commit: %s\n' "$DOOR_PACKET_DIR" "$DOOR_HEAD"
   } > "$prompt_full"
   chmod 600 "$prompt_full" 2>/dev/null || true
 

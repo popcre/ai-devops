@@ -107,6 +107,23 @@ rm -f "$POOLTMP/engine-args"
 ( cd "$POOLTMP/fakerepo" && export_pool && bash "$POOL" grok security-review ) > "$POOLTMP/out-grkeng" 2>&1
 check "pool_grok_argv_keeps_max_turns" "grep -q -- '--provider grok' '$POOLTMP/engine-args' && grep -q -- '--max-turns 120' '$POOLTMP/engine-args'"
 
+# Cache-stable brief (#1430): briefs for two different heads share an identical
+# byte prefix through the decision text and verdict format; per-review facts
+# (head SHA, digest) come only after it, and the head SHA is still quoted.
+# The engine's rlc_write_brief is the brief every registered door receives.
+HEAD1=1111111111111111111111111111111111111111; HEAD2=2222222222222222222222222222222222222222
+( . "$REPO_ROOT/tools/lib/review-lifecycle-core.sh" \
+  && rlc_write_brief "$POOLTMP/brief1" final-check "$HEAD1" digest-one "$POOLTMP/copy-one" .ai/pkt-one 'Decide the fixed question.' 'exit 0' 'a.txt' \
+  && rlc_write_brief "$POOLTMP/brief2" final-check "$HEAD2" digest-two "$POOLTMP/copy-two" .ai/pkt-two 'Decide the fixed question.' 'exit 1' 'b.txt' ) > /dev/null 2>&1
+prefix_through_verdict(){ sed -n '1,/^APPROVE|REJECT|BLOCKED$/p' "$1"; }
+check "brief_prefix_stable_across_heads" \
+  "grep -qx 'APPROVE|REJECT|BLOCKED' '$POOLTMP/brief1' && prefix_through_verdict '$POOLTMP/brief1' | grep -q 'Decide the fixed question.' && [ \"\$(prefix_through_verdict '$POOLTMP/brief1')\" = \"\$(prefix_through_verdict '$POOLTMP/brief2')\" ] && ! prefix_through_verdict '$POOLTMP/brief1' | grep -qE '$HEAD1|digest-one|copy-one|a.txt'"
+check "brief_run_facts_carry_head_sha_last" \
+  "sed -n '/^## RUN FACTS/,\$p' '$POOLTMP/brief1' | grep -q 'The reviewed head commit is $HEAD1' && sed -n '/^## RUN FACTS/,\$p' '$POOLTMP/brief2' | grep -q 'The reviewed head commit is $HEAD2' && sed -n '/^## RUN FACTS/,\$p' '$POOLTMP/brief1' | grep -q 'copy-one/.ai/pkt-one/MANIFEST.md' && grep -q 'MUST quote the full reviewed head SHA' '$POOLTMP/brief1'"
+# The legacy pool brief keeps the same order: no per-run value before RUN FACTS.
+check "pool_legacy_brief_run_facts_last" \
+  "awk '/^cat <<BRIEF\$/{on=1;next} on&&/^## RUN FACTS/{exit} on' '$POOL' | grep -q DECISION && ! awk '/^cat <<BRIEF\$/{on=1;next} on&&/^## RUN FACTS/{exit} on' '$POOL' | grep -qE 'REVIEW_HEAD|REVIEW_DIGEST|CHANGED_FILES|TESTS_'"
+
 # A plain runner substitution for a registered door is a bypass and is refused.
 cat > "$POOLTMP/not-the-engine" <<'EOF'
 #!/usr/bin/env bash
