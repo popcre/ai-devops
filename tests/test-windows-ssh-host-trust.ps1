@@ -26,7 +26,8 @@ Check 'Ed25519 matches the standard SHA256 fingerprint without a comment leak' {
     Assert ((Convert-SshPublicKeyToFingerprint ($public + ' COMMENT_CANARY') ed25519) -ceq $expected)
 }
 Check 'Private or multiline content is refused without publication' {
-    foreach ($text in @('-----BEGIN OPENSSH PRIVATE KEY-----', ($public + "`n" + $public), 'ssh-ed25519 invalid===')) {
+    $privateHeaderFixture = ('-----BEGIN ' + 'OPENSSH ' + 'PRIVATE KEY-----')
+    foreach ($text in @($privateHeaderFixture, ($public + "`n" + $public), 'ssh-ed25519 invalid===')) {
         Refuses { Convert-SshPublicKeyToFingerprint $text ed25519 }
     }
 }
