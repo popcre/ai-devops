@@ -378,6 +378,27 @@ pull-request lane uses, plus the shared host gate and workspace cleanup. Remove
 the custom label afterwards. A sections pass admits the host through section 6
 exactly as a complete pass does.
 
+### Section-only lane: one section at a time
+
+A host whose sections pass is still not automatically fit for the qualified
+pool: `ai-devops-windows-qualified` also draws the manual reviewer proof
+(`windows-reviewer-preferred`) and makes the host count toward the reviewer
+reserve. Owner (2026-10-06, #1312): "keep it for lighter jobs." and "set this
+machine up to take one test piece at a time". Such a host instead gets
+`ai-devops-windows-section` (and never the qualified label). The runner router
+(`tools/ci/runner-router.cjs`, `config/ci-runner-routing.json`) gives each idle
+section-only host at most one pull-request section, in `section_lane_order`,
+after the qualified hosts take theirs. A busy, offline or unknown host leaves
+the section on Blacksmith; nothing else in any workflow targets the label.
+
+```powershell
+gh api -X POST repos/popcre/ai-devops/actions/runners/<runner-id>/labels -f "labels[]=ai-devops-windows-section"
+```
+
+EDGE-ALIEN (i7-6700, 4 cores) is the first section-only host: the complete
+matrix hit the 150-minute ceiling (run 37487753427); sections-scope evidence is
+recorded on #1312.
+
 ## 6. Admit the host to ordinary CI
 
 Only after the exact qualification job (complete or sections scope) is green:

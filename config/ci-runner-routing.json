@@ -7,6 +7,10 @@
   "warpbuild_windows": "warp-custom-warpbuild-win2022-canary",
   "qualified_windows": ["self-hosted", "Windows", "X64", "ai-devops-windows-qualified"],
   "qualified_label": "ai-devops-windows-qualified",
+  "section_windows": ["self-hosted", "Windows", "X64", "ai-devops-windows-section"],
+  "section_label": "ai-devops-windows-section",
+  "_section_comment": "Section-only lane (#1312, owner 2026-10-06: keep EDGE-ALIEN for lighter jobs; set it up to take one test piece at a time). A host labelled ai-devops-windows-section (and NOT ai-devops-windows-qualified) passed the sections-scope qualification but not the full matrix; each idle one takes at most one pull-request section, chosen in section_lane_order. It never carries the qualified label, so it never takes windows-offline-complete or windows-reviewer-preferred.",
+  "section_lane_order": [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
   "reserve_qualified_for_reviewer_events": ["workflow_dispatch"],
   "reserved_qualified_hosts": 1
 }
