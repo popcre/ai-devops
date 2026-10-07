@@ -229,7 +229,7 @@ discovery errors, not evidence that GitHub capacity improved.
 **Locked:** preserve capabilities, safety checks and concurrent workers; source
 reduction precedes claims of completion; use existing `ai-gh`/waiters/BlockerWatch;
 no hidden fallback, quota bypass or automatic mutation retry; no secret-bearing
-telemetry; one live outcome per session; compare equivalent workloads.
+telemetry; continue authorized live outcomes when actual gates allow; compare equivalent workloads.
 
 **Selected direction:** separate bucket-aware admission from reusable read
 snapshots. Keep `ai-gh` a transparent CLI boundary for existing callers. Add opt-in

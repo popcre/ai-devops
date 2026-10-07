@@ -2,6 +2,11 @@
 
 ## STATUS — read first
 
+> **Owner ruling, 2026-10-07 EDT:** completing one child, phase, measured
+> outcome or live proof never requires stopping. Continue the authorized scope
+> when actual dependencies, ownership, collision controls and safety gates allow.
+> Older per-session outcome limits and automatic phase cut points are revoked.
+
 Roadmap owner: [issue #650](https://github.com/popcre/ai-devops/issues/650), initially Codex chat `01a0bf5b-95b4-7363-8ee6-1322f3b81465` on `916-alien`. This is a planning deliverable, **not authorization to execute every row in one session**. The planning task is complete when these documents land; implementation remains open. No runtime repair is claimed by publication.
 
 Fresh session: read sections 1, 8, 11, then claim **one** row in section 9. Default first implementation is P1 under existing #633, after its short overlap/baseline check. Do not make a measurement platform a prerequisite. Re-read downstream phases before each phase; use `fresh-session` at natural cut points. Verify live state before treating the dated baseline as current.

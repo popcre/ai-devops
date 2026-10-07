@@ -1,4 +1,4 @@
-# IMPLEMENTATION PLAN — one unproven live-proof outcome per session (2026-09-16)
+# IMPLEMENTATION PLAN — live-proof ownership and completion (2026-09-16; session limits revoked)
 
 **Tracking issue:** [popcre/ai-devops #511](https://github.com/popcre/ai-devops/issues/511)
 **Handoff:** retired 2026-09-16. The original handoff and the temporary PR #520 handoff were deleted after their obligations were incorporated here.
@@ -15,7 +15,7 @@ Related: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401)
 > instructions and stop-after-one instructions below are historical, not active
 > instructions. Proof gaps remain on the same issue; live proof is still required.
 
-> **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** the leftover-proof **issue** rule below is deleted as process. A proof gap is a checklist item on the **same** GitHub issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Session-sizing honesty (one unproven outcome per session) is kept; only the issue minting is gone. Mentions of leftover-proof issues in this file are historical.
+> **Historical 2026-09-29 update:** [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md) deleted leftover-proof issue creation. Its former retention of one-outcome session limits was superseded by the 2026-10-07 owner ruling above. A proof gap remains a checklist item on the **same** GitHub issue (e.g. `- [ ] live proof`); never open a leftover-proof issue.
 
 The original refuse-bundle work is complete. The source-rule follow-up merged through PR #520; acceptance now waits only on installed-global proof and issue closure. Remaining leftover proofs stay with live [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator); do not start a second chat on them.
 
