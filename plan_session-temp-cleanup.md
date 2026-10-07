@@ -7,7 +7,7 @@ Companion (already done, Windows review sandboxes only): [plan_agent-self-cleanu
 
 | Step | Status | Evidence |
 |------|--------|----------|
-| 1. Move `/tmp` off RAM onto the SSD | ⬜ open (2026-10-07) | — |
+| 1. Move `/tmp` off RAM onto the SSD | 🟡 partial 2026-10-07 6:40 PM EDT — config done, awaiting reboot | `/etc/fstab` tmpfs line commented (backup `/etc/fstab.bak-20261007`, `findmnt --verify` 0 errors); `systemctl mask tmp.mount` → `masked` (Ubuntu ships `tmp.mount` in `local-fs.target.wants`, so the fstab edit alone would NOT move `/tmp`). Gate left: after reboot `findmnt /tmp` prints nothing |
 | 2. One session-owned temp root, exported to every engine | ⬜ open | — |
 | 3. Session wrappers delete their own temp root on exit | ⬜ open | — |
 | 4. Fix the named offenders (issue-prefixed `/tmp/<issue>-*` dirs, bare `mktemp`) | ⬜ open | — |
@@ -98,7 +98,7 @@ Open (implementer judgment): exact helper name; whether Claude Code's own scratc
 
 **Phase A (machine, edge-dev3)**
 
-1. **Move `/tmp` to SSD.** Remove the tmpfs line from `/etc/fstab` (back up to `/etc/fstab.bak-20261007` first); `sudo systemctl mask tmp.mount` is NOT needed (unit is fstab-generated). Takes effect at next reboot; schedule the reboot when no session is live (check `find-live-sessions-by-transcript-mtime` memory). Record in `templates/system/machine-atlas.md` (edge-dev3 row).
+1. **Move `/tmp` to SSD.** Remove the tmpfs line from `/etc/fstab` (back up to `/etc/fstab.bak-20261007` first) AND `sudo systemctl mask tmp.mount` — Ubuntu ships `tmp.mount` enabled via `local-fs.target.wants`, so the fstab edit alone is not enough. Takes effect at next reboot; schedule the reboot when no session is live (check `find-live-sessions-by-transcript-mtime` memory). Record in `templates/system/machine-atlas.md` (edge-dev3 row).
    Done when: after reboot `findmnt /tmp` prints nothing (plain dir on `/`) and `free -g` "shared" < 3 G.
 
 **Phase B (repo code)** — cut point: fresh session OK here.
