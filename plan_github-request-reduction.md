@@ -62,7 +62,7 @@ Installed P1 reporting (#660) and the rest of the handoff remain open.
 | P4. Coalesce duplicate status reads and waiters | Accepted: PR #948 (f55c1a6) merged after review/CI; two installed edge-dev3 waiters shared one OPEN refresh and kept independent deadline outcomes at 11:45–11:46 AM EDT; #925 closed with signed proof | Codex issue #658 orchestrator | Live same-target trace passed; terminal merge/ejection and identity isolation passed checked-in fixtures |
 | P5. Remove repeated BlockerWatch scans and writes | Snapshot live proof accepted October 1 under closed #868; category-label defect #1212 and quota-context defect #1211 remain open; repeated same-target fallback reads are under investigation | Current #658 coordinator; scoped #1211/#1212 repairs | Existing snapshot proof retained; new repairs require tests, guarded install and live proof |
 | P6. Govern aggregate account demand across hosts | Provisional decision on #658: retain local admission; no coordinator without same-principal contention evidence | Codex issue #658 orchestrator; P1/P7 samples | Simultaneous-host quota/recovery proof or evidence-backed final design record |
-| P7. Install and prove coverage across active clients and hosts | Open: #1008 code repair accepted and closed October 7 after merged #1045 evidence reconciliation; edge-dev3 manifest is 744f836f while live checkout is a8f293a; edge-dev receipt hashes match but quota admission refuses; 916/4837 launchers lack source receipts; t16 supported route is unresolved | Current #658 coordinator; exact-host reviews, runtime collision controls and installation gates | Active fleet/client/source-hash matrix and original installed paths; production remains separately gated |
+| P7. Install and prove coverage across active clients and hosts | Open: #1008 code repair accepted and closed October 7; guarded installation needs the [bounded partial-install specification](#p7-bounded-partial-installation-repair-specification), independent plan review, implementation, and host proof; prior host observations below remain historical | Current #658 coordinator; exact-host reviews, runtime collision controls and installation gates | Active fleet/client/source-hash matrix and original installed paths; production remains separately gated |
 | P8. Accept measured savings with no workflow regression | Open: no valid 20-outcome/two-busy-window comparison yet | Codex issue #658 orchestrator; P1-P7 | Comparable before/after report satisfying section 13 or independently reviewed lower-bound amendment |
 
 Update October 7, 2026, 10:05 AM EDT: Codex chat
@@ -607,3 +607,577 @@ Checklist passed: all 13 sections, dated STATUS, concrete phase targets and gate
 named adversarial tests, explicit exclusions, locked/open decisions, rejected
 approaches, secrets policy, delivery proof and reciprocal handoff/discovery links.
 No claim is made that future implementation or its acceptance is already complete.
+
+## P7 bounded partial installation repair specification
+
+### 1. Ultimate goal
+
+Install the accepted GitHub request-saving changes on active managed machines,
+so existing work uses fewer requests without losing any command, wake, alarm,
+link, privacy check, queue outcome, or safety protection. **If a step conflicts
+with this goal, the goal wins: stop and flag it to the #658 coordinator.**
+This is an installation repair within P7 and existing issue #658, not a new
+programme, plan, leftover-proof issue, or security-incident implementation.
+
+Specification state on October 7, 2026: design only; independent plan review
+and coordinator decision are required before source implementation. The existing
+STATUS and historical handoff above are this section's discovery route; no new
+handoff is created. Re-read this section, P1/P3/P5/P8, current GitHub and fetched
+upstream before each phase. Moving host, source and reviewer facts must be
+refreshed; examples do not constitute installation authority.
+
+| Delivery step | State | Acceptance artifact |
+|---|---|---|
+| A. Review bounded design and fixed route protocol | Open | Assigned independent exact-plan APPROVE and coordinator decision |
+| B. Implement shared receipt, authority and resolver | Open | Reviewed commit, adversarial receipts and platform tests |
+| C. Extend existing installers and full-install reconciliation | Open | Exact-head APPROVE, required CI, normal merge queue |
+| D. Install one inventoried host/profile outcome | Open | Protected partial receipt, original capability evidence on owning issue |
+| E. Complete fleet and measurement acceptance | Open | P7 matrix and P1/P8 evidence; no inference from merge alone |
+
+### 2. Application and environment
+
+`popcre/ai-devops` is the public recovery toolkit used by Albert's AI agents.
+It is Bash, PowerShell, Python and Node source, not a deployed web application.
+Installation supplies managed command routes, globals and scheduled operations.
+GitHub protected `main` and its merge queue are authoritative; primary checkouts
+are landing-only. Ubuntu and native Windows/Git Bash are supported platforms.
+Fleet host/profile identities come from protected configuration and current
+read-only inventories; never publish topology or infer a host from a label.
+
+Use the existing [deployment procedure](docs/deployment.md),
+[implementation-plan standard](templates/system/implementation-plan-standard.md)
+and [task router](docs/task-router.md). The full installer remains supported.
+This partial mode stages public source and changes selected owned execution
+pointers; it does not provision provider runtimes or machine services.
+
+### 3. Trigger and reproducible problem
+
+P1/P3/P5 code can be merged while installed launchers still run older source.
+#931 and #933 require original installed caller/elevated Windows coverage, and
+#660 requires installed attribution and actual consumption measurements.
+Current full installers perform unrelated package, skill, config, service,
+memory and provider operations. Existing limited host inventories do not bound
+those operations. Linux `install.sh --skip-secrets` skips Secrets wiring only;
+it still runs required protected-config sync and private-memory seed, optional
+Desktop MCP wiring, and token-backed provider stages. Source-only Windows
+installation keeps authority pending and cannot honestly issue a completed
+full installation receipt.
+
+Reproduce read-only: inspect `install.sh` stage declarations and
+`bin/ai-task-gates:linux_stage_report_valid`, then inspect
+`bin/install-ai-devops-windows.ps1` SourceGateOnly and final launcher refresh,
+and `bin/install-machine-tools.ps1` canonical complete-catalog checks. Do not
+run installation to reproduce this scope problem.
+
+### 4. Scope
+
+In scope: fixed `github-request-reduction` partial mode in existing installer
+and gate homes; immutable exact public source; fixed route catalog and
+source-verified host inventory; receipt-aware resolver; one-use exact-operation
+authority; retry/rollback; full-install reconciliation; Linux and native Windows
+proof. Managed scheduler actions and consumer invocation pointers are included
+only when explicitly inventoried and owned.
+The existing elevated Windows maintenance payload is refreshed through its
+supported protected installer stage; its fixed ProgramFiles path and fixed
+task/action are preserved. It is not an ordinary launcher-pointer switch.
+
+Not in this specification: provider/package/skill/global/MCP installation,
+credential rotation or retrieval, service installation, new scheduled tasks,
+new GitHub identities, production mutation, trust-key replacement, canonical
+tracked-file overlays, primary HEAD advance, arbitrary entrypoint selection,
+rewriting other repositories, or reducing existing commands. Preserve unrelated
+draft worktrees. Do not reuse an unfinished MCP partial-install draft or its
+authority. A full install remains an alternative only after complete all-stage
+inventory and exact operation review; it is not the current shortcut.
+
+### 5. Current source state and evidence locations
+
+Design baseline is fetched `origin/main` commit
+`75ce91136037` (resolve the full SHA from Git before implementation). No partial
+release mode exists there. `install.sh` owns Linux stages/lock/manifest/finalize.
+`bin/install-ai-devops-windows.ps1` owns Windows source gate, skills and final
+machine-tools call. `bin/install-machine-tools.ps1` owns complete-catalog
+launcher receipts. `bin/ai-task-gates` owns `cmd_authorize_install`,
+`cmd_install_verify`, `linux_manifest_receipt`, `toolkit_source_receipt`,
+`windows_launcher_route`, `windows_managed_inventory` and stage validation.
+`bin/ai-repo-identity` currently canonicalizes/validates repository URLs; extend
+this existing home for partial receipt-aware primary identity.
+
+`bin/ai-devops` resolves its source root and runs doctor/version/paths;
+`update.sh` owns the full update operation. `bin/ai-test-local`
+and other callers resolve siblings from source root. `bin/ai-blocker-watch`
+stores its source absolute path in cron/Task Scheduler actions. Therefore
+changing PATH alone does not migrate a schedule or hardcoded canonical caller.
+The transitive source closure includes telemetry, status contexts, watchdog
+code, policy/config and sibling commands, not only `bin/ai-gh`.
+
+At drafting, #1401 and #1408 were undergoing coordinator review/checks; their
+heads are not installation releases. Refresh their actual merged status and
+the exact fetched release before authority. Preserve #914/#925/#868 accepted
+proofs. #1008 closed code acceptance does not close fleet installation proof.
+Raw host inventories, runtime identities and review receipts stay protected;
+publish only sanitized acceptance evidence on the existing owning issues.
+
+### 6. Findings and root cause
+
+Full and partial installation are different claims. The Linux gate demands
+one PASS for every required full stage; a selected command install cannot
+forge that stage report or rewrite the full manifest SHA. Windows machine-tools
+refuses a selected replacement catalog because it stamps a complete-source
+receipt. A pending source gate is preparation, not completed deployment.
+
+Caller roots also matter: an immutable release command may locate helpers and
+policy in its payload, but commands performing Git work must keep the original
+caller working directory. The existing `update.sh` must operate on the durable primary
+checkout, not fetch/merge into immutable payload. `ai-task-gates` must identify
+the caller Git repository and prove the partial gate override against the old
+full receipt. A payload is never a substitute primary repository.
+
+An old tracked executable invoked by absolute canonical path cannot discover
+a resolver it does not contain. PATH cannot intercept it. Under the locked
+no-overlay/no-HEAD-advance design, its invocation owner must be switched through
+an explicitly inventoried supported pointer. Unknown/unmigratable direct paths
+remain unaccepted; do not promise invisible universal interception.
+
+### 7. Rejected approaches
+
+- Full install with `--skip-secrets`: other broad writes and provider setup
+  still execute; the current bounded inventory does not cover them.
+- SourceGateOnly/LauncherGateOnly followed by invented full receipt or consumed
+  full authority: original required stages and launchers are not proven.
+- Root installation, masked token variables, fake credentials or changed state
+  to suppress stages: alters capability or bypasses the intended gate.
+- PATH-only migration: direct and scheduled source paths can keep old code.
+- Overlay canonical tracked callers with shims: makes old Git HEAD lie about
+  executable source and violates landing-only ownership.
+- Hand-copy a guessed helper subset: dynamic sibling/import resolution loses
+  original functions. Use complete tracked public source layout as inert payload.
+- Reuse the preserved MCP draft: different scope, incomplete installer/tests,
+  and no authority for GitHub receipts or caller coverage.
+
+### 8. Locked design decisions and allowed judgment
+
+Locked by coordinator on October 7, 2026: one fixed partial mode in existing
+installers/gate; immutable complete public source without `.git` or private
+submodule payload; unchanged canonical HEAD; separate old full/new partial
+receipts; fixed source-verified catalog; protected receipt-aware resolver;
+exact-operation/host-inventory one-use authority; only owned inventoried pointer
+switches; refusal for unknown direct consumers; full-install reconciliation.
+All original subcommands and stream/exit/working-directory semantics survive.
+
+Linux payload root is `/var/lib/ai-devops/releases/github-request-reduction/<SHA>`
+with root-owned non-writable ancestors/files (0755 directories/executables,
+0644 public non-executables). Windows payload root is
+`C:/ProgramData/ai-devops/releases/github-request-reduction/<SHA>`, writable only
+by Administrators/SYSTEM and readable/executable by the inventoried runtime
+principal. No symlinks, junctions, reparse ancestors, shared hardlinks or
+runtime-writable parents. Establish ownership through supported installer
+privilege; lack of authority is a platform blocker, never an ACL relaxation.
+
+Allowed implementation judgment: code factoring inside existing homes and
+platform atomic-copy APIs, provided named invariants/tests hold. Not open:
+scope/receipt/source-root semantics. Outside consumer destination files are not
+chosen here: the inventory protocol below supplies exact owned destinations,
+which the coordinator/reviewer must approve before host mutation. An unsupported
+consumer is a concrete blocker, not permission to broaden the allowlist.
+
+### 9. Ordered implementation phases and interfaces
+
+**Phase A — plan gate.** Reconcile upstream/owners and obtain assigned independent
+read-only exact-plan APPROVE. Coordinator decides whether this specification
+may execute. No code or installation before that decision. Verification:
+plan review binds exact prose head and names no unresolved safety flaw.
+
+**Phase B1 — fixed catalog and public payload.** Add
+`config/github-toolkit-release.json` with schema 1, fixed scope, fixed public
+source entrypoints, platform route types and `payload=tracked-public-tree`.
+Do not accept a caller-provided catalog/root or arbitrary source path. Validate
+the exact catalog against current managed transport source inventory and
+`tools/ci/check-managed-github-transport.py` and its
+`tests/test-workflow-policy.sh` regressions; stale/missing/additional network
+consumer fails until the same owned code change explicitly reconciles it.
+
+Fixed extensionless routes: `ai-gh`, `ai-gh-wait`, `ai-pr-wait`,
+`ai-blocker-watch`, `ai-gh-app-auth`, `ai-workspace-status`, `ai-verify-run`,
+`ai-test-local`, `ai-merge-group-evidence`, `ai-transcript-destination-check`,
+`ai-memory-sync`, `ai-local-watch`, `ai-windows-queue-watch`,
+`ai-runner-pool-watch`, `ai-reviewer-membership-drift`, `ai-merge-queue-drift`,
+`ai-devops`, `ai-task-gates`. Matching existing tracked `.cmd` wrappers are
+catalogued separately; generate both supported Windows launcher forms only
+for an existing inventoried command route, using the established machine-tools
+renderer. `ai-reviewer-membership-drift.cjs` is a payload dependency.
+
+Fixed Windows source entrypoints: `runner-github-admission.ps1`,
+`promote-windows-runner-to-service.ps1`, `qualify-windows-runner.ps1`,
+`invoke-windows-runner-maintenance.ps1`, `windows-runner-maintenance-worker.ps1`.
+No promotion/qualification/service change is performed during installation.
+Inventory every action/pointer invoking them; existing maintenance scope,
+fixed task/action, protected payload location and elevation remain unchanged.
+Extend existing `bin/install-windows-runner-maintenance.ps1` with a guarded
+protected-payload refresh stage under the same exact partial authority. Never
+redirect its fixed scheduled action to the immutable release resolver. The
+worker and qualification code may select GitHub helper source only through
+the protected bounded active partial receipt and exact payload/catalog/host
+hash binding. Keep durable primary Git identity and old full baseline separate
+from selected partial helper source. Every existing runtime payload hash,
+fixed-action, autoload and hostile-environment defense remains mandatory.
+If this existing contract cannot bind both source namespaces without weakening
+those defenses, stop and return exact evidence to the coordinator for a design
+decision before source implementation. `ai-reviewer-start-watch` is not a current direct
+managed-transport caller; preserve it and validate any selected sibling binding
+discovered in inventory rather than silently migrating it.
+
+Stage complete `git ls-tree -r` public blobs at exact fetched merged SHA, retaining
+relative paths/executable modes. Gitlink entries are metadata only, no private
+content; exclude `.git` internals and untracked material. Reject symlink blobs
+and unsupported file modes before any switch. Required source/helper coverage
+includes `tools/github-requests`, `tools/lib`, `tools/ci`, `tools/stuck-work`,
+`config` and sibling commands such as `ai-process-supervisor`; complete tracked
+layout avoids a guessed import closure. Stage under protected same-volume
+exclusive temporary directory, hash every blob, verify permissions and rename
+atomically. Existing SHA directory must match byte-for-byte or installation
+refuses. Verification: `payload_exact_tree`, `payload_private_gitlink_excluded`,
+`payload_mutable_ancestor_refused`, `catalog_current_callers_complete`.
+
+**Phase B2 — shared receipt/identity/resolver.** Add
+`tools/lib/github-toolkit-release.sh` for `read_partial_receipt`,
+`verify_public_payload`, `verify_old_full_baseline`, `verify_route_inventory`,
+`resolve_partial_entrypoint`, `stage_partial_routes`, `rollback_partial_routes`
+and `reconcile_partial_release`. Platform receipt parsing/validation must be
+shared through new `tools/lib/github-toolkit-release.py` operations
+`validate-inventory`, `validate-authority`, `validate-receipt` and
+`validate-payload-manifest`, not permissive shell eval. Each operation uses a
+fixed schema and bounded protected file, emits sanitized status and rejects
+duplicate keys, unknown schema fields and executable data.
+Extend `bin/ai-repo-identity` with `installed-primary` and `partial-entrypoint`
+operations using only fixed protected platform receipt locations. Update
+`bin/ai-devops` source-root resolution to distinguish public payload from durable
+primary identity; doctor uses installed routes without disabling checks, while
+the existing `update.sh` finds the authenticated canonical primary and enters
+its existing full update/install gate. Do not invent an `ai-devops update`
+subcommand: preserve doctor/version/paths. Extend `update.sh` entry preflight
+to call `installed-primary` and full partial-state reconciliation before any
+fetch/source mutation. Update `bin/ai-task-gates` source-root/receipt resolution;
+policy may come from the immutable payload, task identity/change classification
+still comes from original caller Git cwd.
+
+The partial receipt is machine-protected, schema 1, with: `scope`,
+`transaction_id`, `host_identity_sha256`, `profile_identity_sha256`,
+`runtime_inventory_sha256`, `primary_checkout`, `primary_origin_identity`,
+`primary_head_unchanged`, `full_baseline_head`, `full_baseline_receipt_sha256`,
+`full_gate_sha256`, `partial_head`, `payload_root`, `payload_manifest_sha256`,
+`catalog_sha256`, `route_inventory_sha256`, `operation_review_sha256`,
+`authorization_sha256`, `stage_report_sha256`, `state=active`, and exact route
+records. Route records contain fixed command ID, route kind, approved destination,
+prior type/hash/absence/owner/ACL, new hash/target/owner/ACL and recoverable prior
+backup reference. Schedules additionally bind action, cadence, principal,
+trigger/settings and prior definition hash. Never credential values or raw
+telemetry. Host names/routes stay in private inventory; public evidence uses
+safe digests. Before every gate override prove protected partial authority,
+catalog, payload/gate hash, recorded route and the untouched full baseline.
+Never treat `partial_head` as a forged full source SHA. Fixed state home:
+Linux `/var/lib/ai-devops/github-toolkit-release/state`, Windows
+`C:/ProgramData/ai-devops/github-toolkit-release/state`. Store authority,
+journal, active receipt, stage report and protected backups below that home;
+the active receipt is `active.json`. Linux state is root-owned, 0750 directories
+and 0640 records readable only by the approved runtime group; Windows ACL grants
+Administrators/SYSTEM write and inventoried runtime identity read. No runtime
+identity writes authority/journal/receipt. Issuance through supported installer
+privilege preserves the assigned-review binding; inability to establish this
+protection blocks installation. Input inventories/reports stay owner-only;
+protected review/report hashes are frozen in authority before writes.
+
+Managed resolver is generated by existing installer renderer into inventoried
+owned route locations, preserving original arguments/stdin/stdout/stderr/exit
+code and working directory. Ordinary hot command launchers compile the reviewed fixed
+command ID and exact payload executable path at installation, not a
+user-supplied command/root. They invoke that exact path without per-call Python
+parsing or full-payload hashing. Complete tree/hash/ACL validation occurs during
+authorization, staging and explicit live audit; protected root/Admin immutable
+storage prevents runtime byte substitution. This optimization does not apply
+to the privileged maintenance worker: retain all its required runtime payload
+hash checks and source/hostile-environment verification. No PATH injection or environment
+release override. Gate/doctor/update receipt-aware paths validate exact partial
+override and primary identity using bounded schema and ownership checks, not
+every hot GitHub call. Windows admission still resolves
+the payload's reviewed `ai-gh` launch route in the same execution tree.
+Verification: `resolver_original_streams_cwd`, `gate_partial_override_proven`,
+`gate_caller_repository_preserved`, `doctor_update_primary_identity`.
+
+**Phase B3 — one-use authority and inventory protocol.** Extend
+`cmd_authorize_install` and `cmd_install_verify` in `bin/ai-task-gates` with
+`--scope github-request-reduction` and explicit `--inventory <protected file>`;
+no existing mode silently changes semantics. Add
+`authorize_partial_install`, `verify_partial_install_phase` and
+`consume_partial_install_authority` through the shared library. Extend
+`tools/lib/review-operation.sh` and the existing review wrapper operation
+allowlist for `github-request-reduction-partial-install`; exact-source assigned
+operation APPROVE must contain
+`Approved github-request-reduction-partial-install.` and wrapper-written exact
+source/policy/catalog/inventory bindings. Source implementation is
+`reviewer-safety`; per-host installation task is `installation`. Recheck gates
+before paid review/ship/install. Stale full receipt needs supported exact-host
+stale recovery binding in addition to partial operation, not blanket exemption.
+
+Inventory schema 1: fixed scope, exact host/profile/runtime identity, primary
+origin/path/head and full receipt hash, optional prior active partial receipt
+hash, exact source/catalog hash and every existing execution route. Discovery
+reads command resolution, managed launchers/profiles, cron/Task Scheduler,
+fixed Windows maintenance entry actions, and direct caller configurations.
+Every route must be source-verified against a catalog command and its original
+functions; ownership marker/installed receipt and recoverable backup must be
+proven. A source path found only by text search is a candidate, not a write
+target. The inventory lists unowned/unknown/direct-unmigratable consumers;
+any required one blocks host acceptance. No choosing arbitrary external files
+from this document. Validate schema, owner-only permissions, no symlink/reparse,
+bounded paths/records, duplicate aliases, escaping/control characters and
+current on-host identity/hash before authorization and again before writes.
+
+Authority schema 1 binds the receipt fields above plus prior active partial
+hash/absence, exact fetched `origin/main`, reviewer report+operation+head hashes,
+candidate Git common-dir identity, fixed destination inventory and
+`state=issued`. Store under protected scope-specific authority directory keyed
+by transaction ID, not the full installer authority path. No credential
+substitution. Verification: `authority_exact_operation_inventory`,
+`authority_changed_host_runtime_refused`, `authority_replay_refused`.
+
+**Phase C1 — existing installer partial branches.** Extend `install.sh` and
+`bin/install-ai-devops-windows.ps1` with fixed `--scope github-request-reduction`
+and Windows `-Scope github-request-reduction`, plus reviewed inventory input.
+Branch after supported source/authority validation and installation lock,
+before any full-stage machine/user writes. Do not clone/advance primary HEAD.
+Linux holds its checkout lock plus machine partial-route lock; Windows retains
+the existing machine mutex. Reuse `bin/install-machine-tools.ps1` renderer via
+an explicit guarded internal partial route branch, not a caller-defined
+CatalogPath bypass. Full canonical catalog validation remains unchanged for
+ordinary mode. Pass exact reviewed head and protected authority; no broad
+bootstrap/install command used to establish runtime prerequisites.
+
+Switch only inventoried existing managed launchers/profile bindings and actions.
+Schedule allowlist: existing managed BlockerWatch tick; existing managed
+ai-local-watch tick-all when present. Windows maintenance is inventoried and
+verified but its fixed task/action is not switched or relocated. Refresh only
+its existing protected ProgramFiles payload through the supported maintenance
+installer stage under exact partial authority; retain original fixed action,
+principal, S4U/Highest boundaries, protected ownership/ACL and runtime hashes.
+No new
+schedule; preserve cadence, principal, conditions, existing App identity,
+state/log paths, alarm/link/tick/queue semantics. A managed direct canonical
+consumer must have its owned invocation pointer switched to resolver; an old
+canonical script cannot be intercepted. Unowned/unsupported consumer stops
+before mutation and remains a named #658 blocker. No canonical source overlay,
+Git HEAD change or arbitrary external source edit.
+
+Transaction states: issued -> reserved (lock + baseline proven) -> staged
+(payload/backup hashes proven) -> switched (owned routes proven) -> verified
+(required partial stage receipts passed) -> active/consumed (receipt published,
+authority consumed once). Keep a protected journal recording identities and
+each mutation. Recheck predecessor identity and hash before each write;
+concurrent difference refuses, never overwrites. Interrupted staging may retry
+against exact pinned inputs; interrupted switching must restore old complete
+routes or finish the same transaction after validating every journal record.
+Rollback checks the current target still equals this transaction's own output
+before restoring backups/ACLs/schedule definitions. Changed target blocks safe
+rollback and assigns coordinator repair; never destroy someone else's update.
+Failure retains pending authority. Completion retry validates active receipt
+and consumes no new write. Record separate partial stage report; never forge
+Linux full required stages/manifest or Windows complete-source launcher receipt.
+The partial stage report has a fixed required-stage list, each recorded once
+as PASS with exact transaction/input/output receipt hashes:
+`public-source-tree-and-immutable-ownership`, `old-full-baseline-and-partial-gate-override`,
+`owned-command-and-direct-consumer-route-hashes`,
+`owned-schedule-definition-and-semantics-hashes`,
+`original-github-caller-capabilities`, `reviewer-door-requalification`,
+and `paired-route-performance`. Active receipt publication is the finalization
+output after those seven required stages, not a stage whose receipt hash would
+circularly include its own stage-report hash. Finalization binds the complete
+stage-report hash and publishes the active receipt before consuming authority.
+An absent schedule
+is a verified inventoried absence within its required stage, not an omitted
+stage. Original caller stage exercises installed success/failure/pagination
+and relevant elevated Windows transport/wake/alarm/link/queue functions.
+Reviewer-door stage invokes the existing supported
+`bin/ai-review-preflight requalify` for affected gate/routing and proves actual
+reviewer-door acceptance, preserving every provider/safety check. Do not stamp
+PASS from source hashes alone, suppress qualification or substitute a full-stage
+report. Credentials remain serialized through protected existing consumers.
+If requalification requires unbounded unrelated installation stages, stop that
+host and assign coordinator recovery; never expand scope or disable the check.
+Verification: `partial_no_unrelated_writes`, `partial_retry_exact_transaction`,
+`partial_rollback_concurrent_change_refused`, `schedule_semantics_preserved`,
+`partial_required_stages_and_reviewer_door`,
+`maintenance_partial_authority_both_namespaces`,
+`maintenance_tampered_partial_receipt_refused`.
+
+**Phase C2 — full consolidation.** Before existing full installers/updater run,
+`reconcile_partial_release` proves old full baseline, active partial payload,
+all recorded routes and pending transaction state. A subsequent partial release
+also validates predecessor receipt and uses a new exact one-use authority.
+Full update authority includes active partial inventory/receipt in its exact
+review; normal full stages remain required. Only after full stages and normal
+receipts succeed may recorded owned partial routes move back to canonical
+source, then archive partial receipt as retired with consolidation source SHA.
+On failure retain/restore coherent partial routing and pending full authority;
+do not leave mixed unrecorded routes. Payload retirement is separate recoverable
+cleanup after no active receipt/consumer references it, not installation deletion.
+Verification: `full_reconcile_partial_routes`, `full_failure_keeps_partial_live`,
+`next_partial_requires_predecessor_binding`.
+
+**Phase D/E — reviewed landing and one host outcome.** Focused tests, native
+platform proof, exact-head assigned independent review, normal required CI and
+merge queue precede installation. Confirm exact fetched merged source and
+on-host collision status. Obtain fresh per-host inventory/operation review and
+authority. Install serially on that host, prove original functions and record
+sanitized receipt/capability acceptance on the same owning #658/#660/#931/#933
+issues. Repeat only for next independently inventoried host. No duplicate
+accepted #914/#925/#868 proofs. P1/P8 measured savings remain separate gates.
+
+Before that landing, update the canonical instructions in `docs/deployment.md`
+with fixed Linux/Windows scope interfaces, exact operation review/inventory,
+separate partial/full state, one-use authority, retry/rollback and full-install
+reconciliation. Update `docs/independent-windows-runner-setup.md` maintenance
+contract with the supported protected-payload refresh interface, retained
+fixed task/action/runtime defenses and exact old-primary/new-helper namespace
+binding. These are implementation steps, not current host permissions. Gate:
+`documentation_partial_interfaces_match_source` verifies documented fixed
+interfaces against actual CLI/source, and both public-boundary/Markdown-link
+checks pass. Do not write misleading install instructions before source exists.
+
+Trust-boundary adversarial matrix:
+
+| External input | Hostile case | Named regression |
+|---|---|---|
+| Fetched source/review | Moved head, wrong operation, stale report | `authority_exact_operation_inventory` |
+| Host/profile/runtime | Different host, interpreter, user or prior receipt | `authority_changed_host_runtime_refused` |
+| Catalog | Extra/missing caller or arbitrary executable/root | `catalog_current_callers_complete` |
+| Payload tree | Private gitlink, symlink, mutable parent, wrong blob | `payload_exact_tree`, `payload_private_gitlink_excluded`, `payload_mutable_ancestor_refused` |
+| Inventory | Duplicate/escaping/control path, extra unowned destination | `inventory_unowned_duplicate_escape_refused` |
+| Partial receipt/gate | Forged full SHA, mismatched override, altered gate | `gate_partial_override_proven` |
+| Partial stage receipt | Missing/duplicate PASS, forged reviewer-door success | `partial_required_stages_and_reviewer_door` |
+| Hot route | Per-call tree hash/parser or unacceptable added latency | `hot_route_no_fulltree_parser`, `paired_route_performance` |
+| Caller context | Wrong repository cwd, immutable update target | `gate_caller_repository_preserved`, `doctor_update_primary_identity` |
+| Direct consumer | Hardcoded unrouteable canonical invocation | `direct_canonical_unmigratable_refused` |
+| Authority/journal | Replay, concurrent installer, interrupted step | `authority_replay_refused`, `partial_retry_exact_transaction` |
+| Owned route/rollback | Another actor changed destination or ACL | `partial_rollback_concurrent_change_refused` |
+| Schedule | Different principal/cadence/action or foreign task | `schedule_semantics_preserved` |
+| Privileged maintenance | Redirected fixed action, skipped runtime hashes, hostile autoload/env | Existing `tests/test-windows-runner-maintenance.ps1` regressions |
+| Maintenance authority | Wrong primary/helper namespace or tampered partial receipt | `maintenance_partial_authority_both_namespaces`, `maintenance_tampered_partial_receipt_refused` |
+| Full successor | Changed partial receipt or failed full stage | `full_reconcile_partial_routes`, `full_failure_keeps_partial_live` |
+
+### 10. Required tests and evidence
+
+Add `tests/test-github-toolkit-release.sh` and
+`tests/test-github-toolkit-release.ps1` with every named case above plus
+`resolver_original_streams_cwd`, `partial_no_unrelated_writes` and
+`next_partial_requires_predecessor_binding`,
+`partial_required_stages_and_reviewer_door`, `hot_route_no_fulltree_parser`
+and `paired_route_performance`. Performance proof requires at least twenty
+paired original-route versus partial-route observations for the same useful
+work, alternating order and holding host/runtime/principal/workload constant.
+Include routing, counter and metadata overhead in measured end-to-end latency;
+do not time only the downstream GitHub subprocess. Report sample count,
+distributions and p95 useful-work latency with receipt/source identity. Partial
+p95 may increase by at most 5%; deadlines must remain unchanged. Failure
+requires implementation repair and fresh failed/changed measurement, never a
+weaker threshold, deadline extension or omitted overhead. Use deterministic
+supported transport fixtures for offline timing and matched bounded live work
+for installed acceptance, preserving network/request-cost classification.
+Register their exact platform
+manifests under `config/ci-suites/` and select them through existing test loader;
+do not invent a second harness. Disposable fixtures must stay outside canonical
+repositories and reject production-looking test origins. Native Windows tests
+exercise PowerShell 5.1, Git Bash launchers, spaces in paths, ACL/reparse and
+scheduled-action comparisons without creating real service/tasks.
+
+Retain `tests/test-ai-task-gates.sh`,
+`tests/test-ai-task-gates-linux-install.sh`,
+`tests/test-linux-install-authorization.sh`,
+`tests/test-install-ai-devops-windows.ps1`, `tests/test-ai-machine-tools.sh`,
+`tests/test-ubuntu-install-stages.sh`, `tests/test-ai-install-manifest.sh`,
+`tests/test-ai-devops-doctor-install-state.sh`, managed transport regressions
+in `tests/test-workflow-policy.sh`, `test-ai-gh.sh`, BlockerWatch/waiter/queue tests,
+repo identity, public boundary, Markdown links and suite-loader checks. Resolve
+exact existing installation test names through `rg --files tests` at execution;
+do not guess that an unrun file passed. Full platform suites required by CI stay
+intact. Do not verify the same unchanged commit twice; repeat failed/changed
+tests only. Before a Windows local suite use collision check on the same host.
+Record actual receipt paths, source hashes/head, runtime and exit/result;
+candidate receipts are not installed acceptance.
+`tests/test-windows-runner-maintenance.ps1` is mandatory: run all its existing
+native fixed-action, payload-hash, autoload, hostile-environment, ACL and
+protected-source regressions unchanged. Extend that same suite with
+`maintenance_partial_authority_both_namespaces` and
+`maintenance_tampered_partial_receipt_refused`, proving primary/full baseline
+and selected helper release are bound independently and tampering fails before
+helper execution. Add `maintenance_fixed_action_payload_unchanged`,
+`maintenance_runtime_hash_checks_retained` and
+`maintenance_unbound_helper_source_refused`; never skip existing assertions
+to accommodate the partial route. Performance sampling distinguishes ordinary
+hot launchers from privileged maintenance: required runtime hashes remain
+included in the latter's original versus partial end-to-end measurements.
+
+### 11. Constraints and operational traps
+
+Use dedicated current-upstream worktrees, scoped staging, Albert's verified
+Git identity, `bin/ai-gh` for every GitHub call, signed public comments, normal
+merge queue and bounded event-aware waits. Coordinator serializes reviewers,
+merge/security decisions, credentials and each host installation. Protected
+production actions remain separately gated. Private inventories, routes and
+raw telemetry stay out of this public repository. No secret reads needed for
+source implementation/tests; installed proofs use original authenticated
+routes, not substituted credentials. Preserve provider/SSH/wake capabilities.
+
+State directory and release roots must be protected against the executing
+runtime user, not merely chmodded within a user-writable parent. No unsafe
+symbolic-link traversal or hardlink reuse. Known old full receipt is mandatory;
+missing/legacy/stale baseline must enter its supported exact review mode.
+Source-linked helper resolution, caller Git cwd and durable primary identity
+are three distinct roots. Never infer them from the current executable's dirname
+alone after partial installation. Keep full-stage authority semantics unchanged.
+
+### 12. Access and environment
+
+Source work needs Git, Bash, Python, Node and the existing test runner; native
+Windows fixtures require supported authenticated host access and Git Bash plus
+PowerShell. Current authenticated access and collision status are moving facts
+to establish read-only on each host. Protected host/profile inventory is
+resolved through the existing private configuration route; no public hostname,
+IP, token, username or raw task definition belongs in evidence here. Credentials
+remain in the `vibe_coding` 1Password vault via existing supported consumers;
+this mode does not retrieve/install them. Lack of existing runtime or privilege
+stops that host with exact evidence and coordinator ownership.
+
+### 13. Definition of done, risks and self-audit
+
+- [ ] Exact-plan independent APPROVE and coordinator implementation decision.
+- [ ] Fixed catalog, authority/receipt/resolver semantics and adversarial tests
+  implemented; existing full gates and original capabilities preserved.
+- [ ] Required tests/CI and independent exact-head review pass; owned source
+  committed/pushed, merged normally and verified on fetched `origin/main`.
+- [ ] Each accepted host has exact inventory/operation authority, separate
+  partial receipt, unchanged primary HEAD/full receipt, installed path/hash
+  proof, original success/failure/pagination/wake/alarm/link/queue/elevated
+  capability evidence, and issue checklist updated with no unowned gap.
+- [ ] P7 fleet coverage and P1/P8 measured acceptance are complete before #658
+  closes; full install consolidation path is tested, not deferred invention.
+
+Risks: route inventory can miss hardcoded callers, immutable runtime ACLs can
+require unavailable supported elevation, mutable host/source facts invalidate
+authority, and interrupted changes can create mixed routes. Named refusal,
+transaction and rollback cases above are mandatory. Unknown/unrouteable
+consumer or unsupported privilege blocks that specific host outcome under #658;
+the coordinator owns recovery. No business choice is needed for this source
+repair. Technical plan/review objections must be repaired before implementation,
+not forwarded to Albert as an approval request.
+
+Self-audit: (1) A fresh session has the goal/context in §§1–6, locked boundary
+in §§7–8, concrete files/interfaces/schemas/transitions/gates in §9, tests and
+access in §§10–12, and completion/rollback criteria here. (2) Rejected shortcuts,
+the direct-canonical limitation, gate override and primary-root distinction are
+explicit in §§6–9; no planning-chat dependency remains. (3) §1 makes preserved
+functionality the governing goal, with exact refusal and same-issue ownership
+when a step cannot achieve it. All thirteen sections and named adversarial
+cases are present. This is an addition to the registered existing plan, so its
+existing STATUS/router/historical handoff links satisfy discovery; coordinator
+explicitly excludes a new root plan or handoff. Self-audit passed for design;
+implementation and installed acceptance are not claimed.
