@@ -199,6 +199,18 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT AGENT
   cp "$src" "$xdg/agent/${agent}.md"
 }
 
+# StepCode 0.1.1 reads its custom catalog from ~/.stepcode/models.json. The
+# disposable review HOME has no caller catalog, so supply only our pinned model
+# from this door's temporary, nonsecret file. Retire this projection when the
+# pinned StepCode can discover its built-in Step model in an empty HOME.
+write_stepcode_catalog() { # write_stepcode_catalog DEST
+  jq -n --arg base "$SF_BASE_URL" '{providers: {step: {
+    baseUrl: $base, api: "openai-completions", apiKey: "$STEP_API_KEY",
+    models: [{id: "step-5-preview", name: "StepFun Step 5 Preview",
+      contextWindow: 131072, maxTokens: 32768}]
+  }}}' > "$1" && chmod 600 "$1"
+}
+
 # Parse the provider envelope into OUR report shape: findings first, verdict
 # last under a literal '## Verdict' heading. OpenCode speaks the text/tool_use
 # JSONL of the other OpenCode doors; StepCode prints its answer on stdout.
@@ -291,19 +303,27 @@ main() {
     }
     # StepCode is dynamically linked. Its ELF interpreter lives under /lib64
     # on this host; keep the system loader roots visible without mounting /.
-    local home_tmp top
+    local home_tmp model_catalog top
     local -a loader_binds=()
     for top in /lib /lib64; do
       if [ -L "$top" ]; then loader_binds+=(--symlink "$(readlink "$top")" "$top")
       elif [ -d "$top" ]; then loader_binds+=(--ro-bind "$top" "$top"); fi
     done
     home_tmp="$(mktemp -d)"
+    model_catalog="$(mktemp)"
+    if ! write_stepcode_catalog "$model_catalog"; then
+      printf 'stepfun door: local_dependency_unavailable: StepCode model catalog could not be prepared.\n' >&2
+      rm -f "$model_catalog" "$prompt_full"
+      rm -rf "$home_tmp"
+      exit 127
+    fi
     (
       export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
       export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
       timeout "$SF_TIMEOUT" bwrap --die-with-parent --unshare-all --share-net \
         --ro-bind /usr /usr "${loader_binds[@]}" --ro-bind /etc /etc --dev /dev --proc /proc \
         --tmpfs /tmp --tmpfs /run --tmpfs "$home_tmp" \
+        --dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json" \
         --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
         --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --chdir "$DOOR_WORKDIR" -- \
         "$bin" -p --no-session --model "$SF_STEP_MODEL" \
@@ -313,6 +333,7 @@ main() {
         > "$log" 2> "$out.err"
     )
     rc=$?
+    rm -f "$model_catalog"
     rm -rf "$home_tmp"
   fi
   set -e
