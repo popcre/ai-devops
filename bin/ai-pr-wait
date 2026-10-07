@@ -174,7 +174,7 @@ bounded_gh() {
     # ejection freshly; its own history cannot be delegated to another waiter.
     [ "$WAS_QUEUED" -eq 0 ] || force=(--force-refresh)
     AI_GH_CALLER=ai-pr-wait AI_GH_COST_CONTEXT="${SNAP_CONTEXT:-}" "$PYTHON_RUNNER" "$SNAP_HELPER_ARG" \
-      --state-dir "$SNAP_STATE_ARG" --key "v1 $SNAP_CONTEXT $REPO $PR $cache_target" \
+      --state-dir "$SNAP_STATE_ARG" --key "v2 $SNAP_CONTEXT $REPO $PR $cache_target" \
       --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" --cap-supervisor-timeout --defer-source-mark \
       --age-file "$SNAP_AGE_ARG" --source-file "$SNAP_SOURCE_ARG" "${force[@]+"${force[@]}"}" -- "${command[@]}"
   else
@@ -330,7 +330,7 @@ set_event_evidence(){
     MERGED) PR_WAIT_EVENT_KIND=pr_merged; iso="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.mergedAt // empty')"; PR_WAIT_ELIGIBLE_UTC_MS="$(iso_ms "$iso")"; [ -n "$PR_WAIT_ELIGIBLE_UTC_MS" ] || PR_WAIT_EVENT_KIND=unknown ;;
     CLOSED) PR_WAIT_EVENT_KIND=pr_closed; iso="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.closedAt // empty')"; PR_WAIT_ELIGIBLE_UTC_MS="$(iso_ms "$iso")"; [ -n "$PR_WAIT_ELIGIBLE_UTC_MS" ] || PR_WAIT_EVENT_KIND=unknown ;;
     CHECKS)
-      iso="$(printf '%s' "$Q" | jq -r '[.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] as $c | ([ $c[] | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED")) | .completedAt]) as $f | if (any($c[]; ((.conclusion==null) and (.state=="FAILURE" or .state=="ERROR"))) or ($f|length == 0) or ([ $f[] | type ] | any(. != "string"))) then empty else $f[] end')"
+      iso="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [$commit.statusCheckRollup.contexts.nodes[]?] as $c | ([ $c[] | select((.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or (.conclusion=="CANCELLED" and (.isRequired != false or ($pr.headRefOid | type) != "string" or $pr.headRefOid == "" or $commit.oid != $pr.headRefOid)))) | .completedAt]) as $f | if (any($c[]; ((.conclusion==null) and (.state=="FAILURE" or .state=="ERROR"))) or ($f|length == 0) or ([ $f[] | type ] | any(. != "string"))) then empty else $f[] end')"
       valid=1
       [ -n "$iso" ] || valid=0
       while IFS= read -r candidate; do
@@ -446,7 +446,10 @@ while :; do
   QUEUED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.isInMergeQueue')"
   MERGE_SHA="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.mergeCommit.oid // "none"')"
   ROLLUP="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // "NONE"')"
-  FAILED="$(printf '%s' "$Q" | jq -r '[.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .conclusion=="CANCELLED" or .state=="FAILURE" or .state=="ERROR") | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE"))] | join("\n")')"
+  # Only GitHub's explicit current-PR requirement result can establish an
+  # advisory cancellation. Unknown policy or an unbound commit stays terminal.
+  # Other failure conclusions retain their existing treatment.
+  FAILED="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest as $pr | $pr.commits.nodes[0].commit as $commit | [ $commit.statusCheckRollup.contexts.nodes[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or (.conclusion=="CANCELLED" and (.isRequired != false or ($pr.headRefOid | type) != "string" or $pr.headRefOid == "" or $commit.oid != $pr.headRefOid)) or .state=="FAILURE" or .state=="ERROR") | ((.name // .context) + "\t" + (.conclusion // .state // "FAILURE"))] | join("\n")')"
 
   if [ "$STATE" = "MERGED" ]; then
     set_event_evidence MERGED
