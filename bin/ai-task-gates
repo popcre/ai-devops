@@ -453,7 +453,7 @@ windows_ensure_state_ancestors(){
 }
 
 private_state_root(){
-  local parent sid win
+  local parent profile
   [ "$STATE_ROOT_PRIVATE" -eq 0 ] || return 0
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
@@ -462,8 +462,16 @@ private_state_root(){
       # replaceable even when the root and cache child are protected.
       parent="$(dirname "$STATE_DIR")"
       if [ "$STATE_DIR" = "$DEFAULT_STATE_DIR" ]; then
+        profile="$(windows_profile_home)" || return 1
+        [ "$(cygpath -u "$(cygpath -aw "$parent")")" = "$profile/.local/state/ai-devops" ] || return 1
         windows_ensure_state_ancestors || return 1
-        private_state_directory "$parent" || return 1
+        # An administrator-owned parent can already be safe while the
+        # ordinary user cannot change its ACL. Validate it before trying
+        # owner-only remediation of an unsafe user-owned parent.
+        if ! windows_private_ancestors "$parent"; then
+          private_state_directory "$parent" || return 1
+          windows_private_ancestors "$parent" || return 1
+        fi
       else
         windows_private_ancestors "$parent" || return 1
       fi
