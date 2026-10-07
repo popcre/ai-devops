@@ -179,6 +179,7 @@ check "paces_before_call" "[ \"\$(cat '$TMP'/burst.*.out | grep -c 'paced answer
 rm -rf "$AI_STEPFUN_STATE_DIR/pace" "$AI_STEPFUN_STATE_DIR/reports"; mode json
 out="$("$SCRIPT" ask --repo "$TMP/repo" x 2>/dev/null)"; rc=$?
 check "usage_parsed_into_report" "[ $rc = 0 ] && [ '$out' = 'final json answer' ] && jq -e -s 'any(.[]; .engine == \"stepcode\" and .provider_calls == 2 and .input_tokens == 130 and .output_tokens == 27 and .cache_read_tokens == 130 and .cache_write_tokens == 0)' '$AI_STEPFUN_STATE_DIR'/reports/turn.*.json >/dev/null && ! grep -l 'synthetic-session\|final json' '$AI_STEPFUN_STATE_DIR'/reports/turn.*.json >/dev/null"
+check "raw StepCode event stream is removed after the turn" "! find '$AI_STEPFUN_STATE_DIR' -name '*.events' | grep -q ."
 check "StepCode runs in json event mode" "grep -qx json '$STUB_ARGS' && grep -B1 -x json '$STUB_ARGS' | grep -qx -- --mode"
 check "the key reaches step through the environment, never argv" "mode ok; '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key' && ! grep -q stub-key '$STUB_ARGS'"
 

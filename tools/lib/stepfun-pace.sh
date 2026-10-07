@@ -12,7 +12,9 @@
 # State (owner-only): <state dir>/pace/{starts,cooldown,lock}.
 
 STEPFUN_PACE_RPM="${AI_STEPFUN_RPM:-10}"
+[[ "$STEPFUN_PACE_RPM" =~ ^[1-9][0-9]*$ ]] || STEPFUN_PACE_RPM=10
 STEPFUN_PACE_WINDOW="${AI_STEPFUN_PACE_WINDOW:-60}"
+[[ "$STEPFUN_PACE_WINDOW" =~ ^[1-9][0-9]*$ ]] || STEPFUN_PACE_WINDOW=60
 
 _stepfun_pace_dir(){ printf '%s/pace' "${1:-${AI_STEPFUN_STATE_DIR:-$HOME/.local/state/ai-devops/stepfun}}"; }
 

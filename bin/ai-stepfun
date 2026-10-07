@@ -229,6 +229,7 @@ run_step(){
     *) die 'no engine available (StepCode or OpenCode)' ;;
   esac
   record_turn_counters "$2" "${STEPFUN_RETRY_COUNT:-0}" || note 'could not record StepFun turn counters'
+  rm -f "$2.events"
   return "$rc"
 }
 
@@ -261,10 +262,10 @@ record_turn_counters(){
           then ([$t[] | .cache[$field] | numbers] | add) else null end;
         {engine:$engine, resumed:false, retry_count:$retry,
          input_tokens:sum_field("input"), output_tokens:sum_field("output"),
-         cache_read_tokens:sum_cache("read"), cache_write_tokens:sum_cache("write")}
+         provider_calls:($t | length), cache_read_tokens:sum_cache("read"), cache_write_tokens:sum_cache("write")}
     ' "$out.jsonl" > "$report" 2>/dev/null && [ -s "$report" ] && return 0
   fi
-  printf '{"engine":"%s","resumed":false,"retry_count":%s,"input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null}\n' "$ENGINE" "$retry" > "$report"
+  printf '{"engine":"%s","resumed":false,"retry_count":%s,"provider_calls":null,"input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null}\n' "$ENGINE" "$retry" > "$report"
 }
 
 # ---- OpenCode engine (Windows, or any host without StepCode) ----
