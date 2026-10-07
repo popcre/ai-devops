@@ -133,6 +133,7 @@ export AI_GLM_STATE_DIR="$TMP/state"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/lifecycle"
 export AI_DEVOPS_CONFIG_DIR="$TMP/cfg"
 export AI_GLM_PORT=59999          # nothing listens here, so "server down" paths are exercised
+export AI_GLM_CALLER=test         # explicit caller for offline tests; fail-closed paths are tested in test-reviewer-caller-detection.sh
 mkdir -p "$AI_GLM_STATE_DIR" "$AI_DEVOPS_CONFIG_DIR/opencode"
 
 glm_deadline_cases() {

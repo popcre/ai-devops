@@ -46,6 +46,7 @@ tests/test-ai-review-sandbox-delete-guard.sh
 tests/test-ai-review-sandbox-self-cleanup.sh
 tests/test-ai-review-scoreboard.sh
 tests/test-provider-wrapper-common.sh
+tests/test-reviewer-caller-detection.sh
 tests/test-verify-closure.sh
 tests/test-windows-bash-selection.sh
 tests/test-workflow-policy.sh
