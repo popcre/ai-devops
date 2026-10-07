@@ -290,9 +290,7 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
                 prior = data.get('capacity_hold')
                 if prior:
                     prior_reset = prior.get('reset_at')
-                    if prior_reset and not reset:
-                        reset = prior_reset
-                    elif prior_reset and reset:
+                    if prior_reset and reset:
                         reset = prior_reset if reset_epoch(prior_reset) >= reset_epoch(reset) else reset
                 data['capacity_hold'] = {'provider': provider, 'failure_class': 'allowance-exhausted' if allowance else 'out-of-credit',
                     'credential_profile_scope': (prior or {}).get('credential_profile_scope'),

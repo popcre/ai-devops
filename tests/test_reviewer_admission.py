@@ -68,7 +68,7 @@ class AdmissionTests(unittest.TestCase):
             return api.load(self.directory,'qwen')['capacity_hold']['reset_at']
         later=marker(7200)
         self.assertEqual(marker(3600),later)
-        self.assertEqual(marker(None),later)
+        self.assertIsNone(marker(None))
         self.assertNotEqual(marker(10800),later)
 
     def test_precise_reset_enriches_legacy_unknown_but_stale_marker_cannot(self):
