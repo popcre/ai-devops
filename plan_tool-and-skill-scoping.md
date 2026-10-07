@@ -28,10 +28,10 @@ Session record: [`HANDOFF.d/2026-09-23T1803Z-edge-dev-claude-tool-skill-scoping-
 | 4.2 Try Claude Desktop On-demand tool access; measure | ✅ done | 2026-09-24 | Already on by default (ToolSearch + deferred tools; MCP tool search auto mode). Desktop rows in 4.1 are the On-demand measurement |
 | 4.3 Gateway decision (passthrough only) | ✅ done | 2026-09-24 | No pilot. Wire MCP ~11.7k est. tokens is Desktop platform surface (not frontable); catalog servers already deferred; never front 1password |
 
-**Start here:** Albert hands sessions only the parent issue #707. Follow the
-steps in #707's body: take the first unticked phase, do only that phase, tick it,
-comment the next child issue on #707, and stop. Before each phase, re-read every
-later phase and fix anything the previous phase made untrue.
+**Start here:** Follow the authorized remaining steps on #707. Verify each
+outcome and continue while actual dependencies, ownership and safety gates
+allow. Before each phase, re-read later phases and fix anything the previous
+phase made untrue. Automatic one-child stopping was revoked 2026-10-07 EDT.
 *(Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md): parent/child issue trees are deleted as process. Track remaining phases as a checklist on the existing issue; do not open child issues. Historical text retained above.)*
 
 ---

@@ -16,8 +16,8 @@ and complete [`plan_split-ci-suite-manifest.md`](plan_split-ci-suite-manifest.md
 ## STATUS
 
 All steps open at publication. This is a planning deliverable, **not**
-authorization to execute every row in one session. One phase row per session;
-use `fresh-session` at each natural cut point. A row is `done` only with its
+authorization to execute every row. Within the owner's authorized scope,
+continue across phase boundaries when actual gates allow. A row is `done` only with its
 live-proof artifact linked — a merged PR, a green run, or an installed doctor
 output. Presence is not capability.
 
@@ -274,7 +274,7 @@ repairs land and are proven live. Do not invent competing plans.
 1. **C1–C2 — `plan_blockerwatch-reliability-repair.md` (issue #632).** All seven
    deliverable rows are open. **Start at row 0** (reconcile live incidents and
    inventory every wait; baseline under `tests/verification/blocker-watch/`),
-   then rows 1–7 in order — one phase per session. Registration stays the
+   then authorized rows 1–7 in order, continuing when actual gates allow. Registration stays the
    default for any wait over ~10 minutes. Until the plan's reconciliation and
    live-health gates are complete, verify registration, state-home ownership,
    harness readiness, scheduler health, and GitHub/local reconciliation rather
@@ -387,8 +387,8 @@ always named; exactly one rule governs doc-only merges.
 3. **E3 — Completion honesty.** "Installed and proven" is the only completion.
    A merged PR does not fix machine-local state (Phase A). Any plan row closed
    without its live-proof artifact is reopened by its owner. Keep
-   `plan_live-proof-session-sizing` discipline: one unproven outcome per
-   session, never save several for later.
+   live-proof discipline: verify each authorized outcome and continue when
+   actual dependencies, ownership and safety gates allow.
 4. **Reporting rule for timeouts.** A transient health timeout is never recorded
    as a quality failure (the mechanism is Phase C P7; this step is only the
    reporting/disposition rule).

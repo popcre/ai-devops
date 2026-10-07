@@ -90,7 +90,7 @@ The earlier [decision-layer plan](plan_typesafe-jev-decision-layer.md) §§7–1
 
 **You'll know it worked when:** the report is reproducible, has zero false approvals/unsafe omissions, and shows the chosen threshold's precision, coverage, and fallback rate. A safety or privacy miss retires this candidate rather than relaxing the bar.
 
-### Phase 3 — prove savings, decide, land (one outcome per session)
+### Phase 3 — prove savings, decide, land
 
 **9.4 Paired substitution trial.** For the same eligible public cases, run the baseline caller and a Jev-first route with the original caller as the abstention/error fallback. Do not change mandatory checks or source packets. Instrument the existing provider usage fields and Jev `usage.input_tokens`/`usage.output_tokens`; record cache reads/writes separately, request count, elapsed time, and estimated dollars using dated provider prices. A `Noul` probability is not a separate confidence score; apply the calibrated yes/no threshold directly. Save `tests/verification/jev/<target>-paired-<UTC>.md` with per-case identifiers/digests and aggregate frontier token, weighted cost, total cost, latency, coverage, and quality. Tests must prove the fallback fires and the old call is **skipped only when the Jev decision is eligible and accepted**.
 

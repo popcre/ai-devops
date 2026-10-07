@@ -8,6 +8,13 @@ Related: [popcre/ai-devops #401](https://github.com/popcre/ai-devops/issues/401)
 
 ## STATUS — read first
 
+> **Owner ruling, 2026-10-07 EDT:** automatic stopping after one child, phase,
+> or live-proof outcome is permanently revoked. Continue the authorized scope
+> and verify each outcome when actual dependencies, ownership, collision
+> controls and safety gates allow. All older session-count limits, refuse-bundle
+> instructions and stop-after-one instructions below are historical, not active
+> instructions. Proof gaps remain on the same issue; live proof is still required.
+
 > **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** the leftover-proof **issue** rule below is deleted as process. A proof gap is a checklist item on the **same** GitHub issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Session-sizing honesty (one unproven outcome per session) is kept; only the issue minting is gone. Mentions of leftover-proof issues in this file are historical.
 
 The original refuse-bundle work is complete. The source-rule follow-up merged through PR #520; acceptance now waits only on installed-global proof and issue closure. Remaining leftover proofs stay with live [shared-db#3027](https://github.com/u2giants/shared-db/issues/3027) (non-orchestrator); do not start a second chat on them.
