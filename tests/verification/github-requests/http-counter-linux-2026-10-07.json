@@ -18,14 +18,16 @@
     "instrumented": "df8d7abb0dd57e89e19cd3e4a90e10f8a5e6270aabc167be063ca74676ca8c99"
   },
   "source_sha256": {
-    "tools/github-requests/instrumented-gh/build.py": "6981c41deddeb18689b207f3d2296791dbfa6c0c39bfbbf1e0253b5d949aba45",
+    "tools/github-requests/instrumented-gh/build.py": "88f796a81d264c766eef3f7941810bc2c71733714163399c9eb39c81796f21d3",
     "tools/github-requests/instrumented-gh/httpcounter.go": "f335704892f503a9c25b4934b037ce35d75eb50bda71542d4796655ed6a7ad92",
     "tools/github-requests/instrumented-gh/httpcounter_test.go": "29d09f29dd6c245053fa8d1544bca41fbf6506611284be43430443e2bfd1072b",
     "tools/github-requests/instrumented-gh/measure_overhead.py": "a7a69ad529a1df7e033c23aca29677f25f9c073a3f7069e59fd04e8dfcb6bce6",
     "tools/github-requests/instrumented-gh/pins.json": "ec449947123011e52e77cf26dc595ffe91e3210e1c691aca9e8b54c973e1e9ab",
-    "tools/github-requests/instrumented-gh/run.py": "ef89a4d857e3f7c4f718352b78dc2373019e26d11e9cdc97406941deb2315607",
+    "tools/github-requests/instrumented-gh/run.py": "7c71b87e32833cfc57538d92eff3347e4b53347ef31a61e44c5fe41ca1b4353a",
+    "tools/github-requests/instrumented-gh/sealed.py": "f3df156c5d9c3cc5f77409f3d2323e028708e6fe81595f1019a33fdb408a298a",
     "tools/github-requests/instrumented-gh/test_offline.py": "bb19e3c5760e2c3c6985a07b360855e778ad4cea88396bdd8fce4485308cd387",
-    "tools/github-requests/instrumented-gh/test_prototype.py": "08a8e8a44b63756406b22890d1962660834bab7bcdd84f9c776ca733663ceffc"
+    "tools/github-requests/instrumented-gh/test_prototype.py": "08a8e8a44b63756406b22890d1962660834bab7bcdd84f9c776ca733663ceffc",
+    "tools/github-requests/instrumented-gh/test_sealed.py": "6609b1163d152d1d0b638c83faed6237a14bd72da199e7190d9f7d07f4725b35"
   },
   "proof": {
     "offline_metadata_cases": 4,
@@ -100,7 +102,8 @@
         80.27866401243955,
         74.40187700558454
       ]
-    }
+    },
+    "measured_revision": "457fcdd528a5f019542a3dfe56f18d257da7295b; direct counter binary hashes unchanged by seal repair"
   },
   "rejected_python_qualification_helper": {
     "platform": "linux-amd64",
@@ -157,7 +160,8 @@
         130.26334100868553,
         126.29142700461671
       ]
-    }
+    },
+    "measured_revision": "457fcdd528a5f019542a3dfe56f18d257da7295b; historical rejected helper; sealed-copy overhead not deployed or accepted"
   },
   "limits": [
     "No installed workflow latency acceptance",
@@ -165,5 +169,18 @@
     "Observed completed writes are not server quota cost",
     "Forced termination and partial writes remain unknown",
     "Python runner is qualification-only; rejected for production routing"
-  ]
+  ],
+  "valid_reject_repair": {
+    "reviewed_head": "457fcdd528a5f019542a3dfe56f18d257da7295b",
+    "classification": "valid code-defect REJECT",
+    "incident_id": "20261007T143646Z-edge-dev3-codex-1425230",
+    "linux_sealed_boundary_cases": 4,
+    "archive_and_execution_snapshot": "hash after WRITE/GROW/SHRINK/SEAL, use identical sealed bytes",
+    "pathname_replacement_after_hash": "PASS",
+    "same_inode_mutation_after_hash": "PASS",
+    "wrong_hash_symlink": "REFUSED",
+    "fresh_build_from_sealed_archives": "PASS",
+    "prior_binary_hashes_unchanged": true,
+    "independent_review": "pending on repaired exact head"
+  }
 }
