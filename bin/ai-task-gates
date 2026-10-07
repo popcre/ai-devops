@@ -111,6 +111,8 @@ load_policy(){
     "$POLICY_FILE" >/dev/null 2>&1 || fail_closed "invalid task-gate contract: $POLICY_FILE"
   load_class_table
   validate_action_gates
+  # Loaded here, in the main shell: merged_gate runs in command substitutions.
+  load_rule_table
 }
 
 # Per-action proof bindings must name real actions and real classes before any
@@ -158,12 +160,67 @@ class_protected(){ printf '%s' "${TG_PROT[$1]:-}"; }
 valid_class(){ [ -n "${TG_RANK[$1]:-}" ]; }
 valid_action(){ [ -n "${1:-}" ] && [ -n "${TG_ACTION[$1]:-}" ]; }
 
+# The central path rules and gates are read in one jq pass, the consumer
+# declaration in another, instead of one jq per rule per question: merged_gate
+# alone asked up to a dozen times per call (#1355). A contract whose values
+# could not survive the row format (non-string match or value, newline, or
+# the unit separator) keeps the per-question readers, which stay the reference.
+TG_TABLE_LOADED=0; TG_TABLE_OK=0; TG_CONSUMER_LOADED=""
+declare -a TG_MATCHES=()
+declare -A TG_ROWS=() TG_CONSUMER_ROWS=()
+tg_rows_filter='
+  def ok: type=="string" and (test("[\n\u001f]")|not);
+  def gate($k): (.gates//{}) | to_entries[] | .key as $c | .value
+    | ((.required//[])[] | [$k,"required",$c,.]), ((.forbidden_actions//[])[] | [$k,"forbidden",$c,.]);
+  def paths($k): (.paths//[])[] | [$k,"path","",([.glob,.class]|@tsv)];
+  def rows: (.default | paths("D"), gate("D")), (.rules[] | .match as $m | paths("R"+$m), gate("R"+$m));
+  if $consumer then (if . == null or . == false then error("not a declaration") else {default:., rules:[]} end) else . end
+  | if ([rows[]] + [.rules[].match] | all(ok)) and ((.default.gates//{}|keys) + [.rules[]|.gates//{}|keys[]] | all(ok))
+  then "OK", (.rules[] | ["M","match","",.match]), rows else "FALLBACK" end
+  | if type=="array" then join("\u001f") else . end'
+tg_table_rows(){ # tg_table_rows FILE ASSOC CONSUMER; fills ASSOC[key]; returns 1 for a fallback contract
+  local -n rows="$2"; local status key kind class value
+  { IFS= read -r status || return 1
+    [ "$status" = OK ] || return 1
+    while IFS=$'\x1f' read -r key kind class value; do
+      if [ "$key" = M ]; then TG_MATCHES+=("$value"); continue; fi
+      rows["$key"$'\x1f'"$kind"$'\x1f'"$class"]+="$value"$'\n'
+    done
+  } < <(jqr --argjson consumer "$3" "$tg_rows_filter" "$1" 2>/dev/null || printf 'FALLBACK\n')
+}
+load_rule_table(){
+  [ "$TG_TABLE_LOADED" = 1 ] && return 0
+  TG_TABLE_LOADED=1; TG_MATCHES=(); TG_ROWS=()
+  if tg_table_rows "$POLICY_FILE" TG_ROWS false; then TG_TABLE_OK=1; else TG_TABLE_OK=0; TG_MATCHES=(); TG_ROWS=(); fi
+}
+load_consumer_table(){
+  [ "$TG_CONSUMER_LOADED" = "$CONSUMER_FILE" ] && return 0
+  TG_CONSUMER_LOADED="$CONSUMER_FILE"; TG_CONSUMER_ROWS=()
+  [ -f "$CONSUMER_FILE" ] || return 0
+  local -a saved=("${TG_MATCHES[@]+"${TG_MATCHES[@]}"}")
+  # The consumer file is read as the "default" of its own table.
+  tg_table_rows "$CONSUMER_FILE" TG_CONSUMER_ROWS true \
+    || TG_CONSUMER_ROWS=([fallback]=1)
+  TG_MATCHES=("${saved[@]+"${saved[@]}"}")
+}
+
 # Every path rule that applies to this identity: central defaults first, then
 # every matching central rule, then the consumer declaration. Resolution takes
 # the STRONGEST class per path across all of them, so a later source can only
 # strengthen a class and can never weaken one.
 applicable_path_rules(){
   local identity="$1" pattern
+  load_rule_table; load_consumer_table
+  if [ "$TG_TABLE_OK" = 1 ] && [ -z "${TG_CONSUMER_ROWS[fallback]:-}" ]; then
+    printf '%s' "${TG_ROWS[D$'\x1f'path$'\x1f']:-}"
+    for pattern in "${TG_MATCHES[@]+"${TG_MATCHES[@]}"}"; do
+      [ -n "$pattern" ] || continue
+      tg_identity_match "$pattern" "$identity" || continue
+      printf '%s' "${TG_ROWS[R$pattern$'\x1f'path$'\x1f']:-}"
+    done
+    printf '%s' "${TG_CONSUMER_ROWS[D$'\x1f'path$'\x1f']:-}"
+    return 0
+  fi
   jqr '.default.paths[]|[.glob,.class]|@tsv' "$POLICY_FILE"
   while IFS= read -r pattern; do
     [ -n "$pattern" ] || continue
@@ -178,7 +235,22 @@ applicable_path_rules(){
 # Merged gate for one class: union of required proofs and forbidden actions
 # from the central default, every matching central rule, and the consumer file.
 merged_gate(){
-  local identity="$1" class="$2" pattern
+  local identity="$1" class="$2" pattern kind
+  load_rule_table; load_consumer_table
+  if [ "$TG_TABLE_OK" = 1 ] && [ -z "${TG_CONSUMER_ROWS[fallback]:-}" ]; then
+    for kind in required forbidden; do
+      {
+        printf '%s' "${TG_ROWS[D$'\x1f'$kind$'\x1f'$class]:-}"
+        for pattern in "${TG_MATCHES[@]+"${TG_MATCHES[@]}"}"; do
+          [ -n "$pattern" ] || continue
+          tg_identity_match "$pattern" "$identity" || continue
+          printf '%s' "${TG_ROWS[R$pattern$'\x1f'$kind$'\x1f'$class]:-}"
+        done
+        printf '%s' "${TG_CONSUMER_ROWS[D$'\x1f'$kind$'\x1f'$class]:-}"
+      } | LC_ALL=C sort -u | sed "s/^/$kind\t/"
+    done
+    return 0
+  fi
   {
     jqr --arg c "$class" '(.default.gates[$c].required//[])[]' "$POLICY_FILE"
     while IFS= read -r pattern; do
@@ -216,7 +288,10 @@ resolve_repo(){
   # substitutions, where an exit would end only the subshell and the run would
   # quietly continue on the central rules alone - dropping exactly the stricter
   # local rules a corrupt declaration should have made us stop for.
-  if [ -f "$CONSUMER_FILE" ] && ! jq -e . "$CONSUMER_FILE" >/dev/null 2>&1; then
+  # A declaration the one-pass table reader accepted is valid JSON; only a
+  # fallback needs the separate parse.
+  load_consumer_table
+  if [ -n "${TG_CONSUMER_ROWS[fallback]:-}" ] && ! jq -e . "$CONSUMER_FILE" >/dev/null 2>&1; then
     fail_closed "consumer declaration is not valid JSON: $CONSUMER_FILE"
   fi
 }
