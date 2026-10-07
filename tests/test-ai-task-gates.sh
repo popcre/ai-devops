@@ -1276,15 +1276,27 @@ case "$(uname -s)" in
       sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' 2>/dev/null | tr -d '\r\n')"
       powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$Sid,[string]$MustProtect) try { $Acl=Get-Acl -LiteralPath $Path -ErrorAction Stop; if ($MustProtect -eq "yes" -and -not $Acl.AreAccessRulesProtected) { exit 1 }; $Full=[Security.AccessControl.FileSystemRights]::FullControl; $HasFull=$false; foreach ($Rule in $Acl.Access) { $RuleSid=$Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($Sid,"S-1-5-18","S-1-5-32-544")) { exit 1 }; if ($Rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { exit 1 }; if ($RuleSid -eq $Sid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $HasFull=$true } }; if (-not $HasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" "${2:-yes}" >/dev/null 2>&1
     }
-    check 'the Windows state parent and explain cache have private native ACLs' \
-      "private_windows_acl '$AI_TASK_GATES_DIR' && private_windows_acl '$AI_TASK_GATES_DIR/explain-cache'"
+    check 'the Windows state ancestor, root, and explain cache have private native ACLs' \
+      "private_windows_acl '$(dirname "$AI_TASK_GATES_DIR")' && private_windows_acl '$AI_TASK_GATES_DIR' && private_windows_acl '$AI_TASK_GATES_DIR/explain-cache'"
+    state_entry="$(find "$AI_TASK_GATES_DIR" -maxdepth 1 -type f -name '*.json' | head -1)"
+    check 'the Windows recorded task class has a private native ACL' \
+      "[ -n '$state_entry' ] && private_windows_acl '$state_entry' no"
     cache_entry="$(find "$AI_TASK_GATES_DIR/explain-cache" -maxdepth 1 -type f | head -1)"
     check 'the Windows explain cache entry has a private native ACL' \
       "[ -n '$cache_entry' ] && private_windows_acl '$cache_entry' no"
+    shared_parent="$TMP/shared-state/ai-devops"
+    mkdir -p "$shared_parent/review-lifecycle" "$shared_parent/task-gates"
+    printf 'keep\n' > "$shared_parent/review-lifecycle/owner-canary"
+    icacls "$(cygpath -w "$shared_parent")" /grant:r '*S-1-5-11:(OI)(CI)M' '*S-1-5-32-545:(OI)(CI)RX' >/dev/null
+    ( cd "$XC" && AI_TASK_GATES_DIR="$shared_parent/task-gates" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
+    check 'Windows repairs explicit broad grants on the shared state parent' \
+      "private_windows_acl '$shared_parent' && private_windows_acl '$shared_parent/task-gates'"
+    check 'other reviewer state remains owner-accessible after parent repair' \
+      "[ \"\$(cat '$shared_parent/review-lifecycle/owner-canary')\" = keep ] && printf 'owner-ok\\n' >> '$shared_parent/review-lifecycle/owner-canary'"
     acl_reject="$TMP/acl-reject"
     ( cd "$XC" && AI_TASK_GATES_DIR="$acl_reject" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
-    icacls "$(cygpath -w "$acl_reject")" /grant '*S-1-5-11:R' >/dev/null
-    check 'an explicit broad Windows state grant refuses cache use' \
+    icacls "$(cygpath -w "$acl_reject")" /grant:r '*S-1-1-0:R' >/dev/null
+    check 'an unrecognized broad Windows state grant refuses cache use' \
       "rc=0; ( cd '$XC' && AI_TASK_GATES_DIR='$acl_reject' '$GATES' explain --json --paths-from '$XP' ) >/dev/null 2>&1 || rc=\$?; [ \$rc -eq 4 ]"
     ;;
   *)
