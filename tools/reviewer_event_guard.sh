@@ -166,18 +166,8 @@ reviewer_event_guard(){
   [ "$provider" != glm ] || [ "${1:-}" != recover ] || operation=local-finalization
   [ "$provider" != muse ] || [ "${1:-}" != reconcile ] || operation=local-finalization
   # Owner PID must be set before begin so normal top-level runs store it.
-  # On Git Bash `$$` is an MSYS pid; Win32 OpenProcess needs the Win32 pid
-  # (/proc/<msys>/winpid) or a live owner would read as dead (fail-open).
-  if [ -z "${AI_REVIEW_EVENT_OWNER_PID:-}" ]; then
-    AI_REVIEW_EVENT_OWNER_PID=""
-    if [ -r "/proc/$$/winpid" ]; then
-      IFS= read -r AI_REVIEW_EVENT_OWNER_PID < "/proc/$$/winpid" || true
-    fi
-    if [ -z "$AI_REVIEW_EVENT_OWNER_PID" ]; then
-      AI_REVIEW_EVENT_OWNER_PID="$("$python" -c 'import os; print(os.getppid())' 2>/dev/null || true)"
-    fi
-    AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$$}"
-  fi
+  # Always store the OS/Win32 pid (see os_pid above) so process_alive can see it.
+  AI_REVIEW_EVENT_OWNER_PID="${AI_REVIEW_EVENT_OWNER_PID:-$(os_pid "$$")}"
   event_env+=("AI_REVIEW_EVENT_OWNER_PID=$AI_REVIEW_EVENT_OWNER_PID")
   event_id="$(env -i "${event_env[@]}" "$python" "$event_tool" begin "$provider" "$operation")" || exit 1
   export AI_REVIEW_EVENT_PARENT="$$" AI_REVIEW_EVENT_PROVIDER="$provider" AI_REVIEW_EVENT_RUN_ID="$event_id" AI_REVIEW_EVENT_OWNER_PID
@@ -195,12 +185,8 @@ reviewer_event_guard(){
   # dispositions before entering the wrapper so its cancellation traps work.
   env --default-signal=INT --default-signal=QUIT "$BASH" "$wrapper" "$@" <&0 & child=$!
   # Record the child so loss is refused while it can still publish.
-  # Clear child_pending only after the PID is durably recorded.
-  child_pid_recorded=""
-  if [ -r "/proc/$child/winpid" ]; then
-    read -r child_pid_recorded < "/proc/$child/winpid" || true
-  fi
-  child_pid_recorded="${child_pid_recorded:-$child}"
+  # Clear child_pending only after the OS/Win32 PID is durably recorded.
+  child_pid_recorded="$(os_pid "$child")"
   if env -i "${event_env[@]}" AI_REVIEW_EVENT_RUN_ID="$event_id" "$python" "$event_tool" note-child "$provider" "$event_id" "$child_pid_recorded" >/dev/null 2>&1; then
     rm -f "$pending_file"
   fi
