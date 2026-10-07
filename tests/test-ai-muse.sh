@@ -182,6 +182,13 @@ esac
 EOF
 chmod +x "$TMP/bin/op" "$BIN/opencode.exe"
 ENV="USERPROFILE='$HOME_FIX' HOME='$TMP/roaming-home' PATH='$TMP/bin:$PATH' AI_MUSE_STATE_DIR='$TMP/state' AI_REVIEW_SANDBOX_DIR='$TMP/sandboxes' AI_MUSE_CALLER=codex AI_MUSE_ENGINE=opencode AI_MUSE_TEST_DIR='$TMP' AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe MUSE_STUB_FD_LEAK_FILE='$TMP/provider-fd-leak' MUSE_STUB_ENV_FILE='$TMP/provider-env'"
+muse_fixture_launch_failure(){
+  # Only this suite's synthetic provider output is eligible for diagnostics.
+  # Preserve the failed initial-launch reason before EXIT removes the fixture.
+  printf 'Muse fixture launch failed: %s\n' "$1" >&2
+  find "$TMP" -type f -name '*.stderr' -exec sh -c 'for f do printf "fixture stderr: %s\n" "$f"; head -60 "$f"; done' sh {} + >&2
+  exit 1
+}
 export AI_MUSE_TEST_DIR="$TMP" AI_MUSE_KEY_PROBE_URL=file:///nonexistent-probe
 mkdir -p "$HOME_FIX/.config/ai-devops/secrets"
 chmod 700 "$HOME_FIX/.config/ai-devops" "$HOME_FIX/.config/ai-devops/secrets"
@@ -410,7 +417,7 @@ fi  # part 1
 ai_test_part 2
 if ai_test_part_active; then
 mkdir -p "$TMP/state/credential.lock.d"; touch -d '5 minutes ago' "$TMP/state/credential.lock.d"
-NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)"
+NEW_OUT="$(cd "$REPO" && eval "$ENV '$SCRIPT' new debate --prompt first" 2>&1)" || muse_fixture_launch_failure "$NEW_OUT"
 check 'tracked historic reports do not block a new exact destination' "printf '%s' \"\$NEW_OUT\" | grep -q '^first'"
 if [ -n "${SYSTEMROOT:-}" ]; then
   LEGACY_LOCK_RC=0
@@ -490,7 +497,7 @@ set +e; (cd "$REPO" && eval "$ENV AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q' MUSE_
 check 'out of credit exits 92' "test '$MUSE_CREDIT_RC' -eq 92"
 check 'out of credit prints the machine line' "grep -qx 'AI_REVIEWER_OUT_OF_CREDIT provider=muse code=insufficient_quota' '$TMP/credit.err'"
 check 'out of credit prints the human line' "grep -q '^OUT OF CREDIT: .*dev.meta.ai' '$TMP/credit.err'"
-check 'out of credit records the quarantine' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' global muse --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
+check 'out of credit records the capacity hold' "\"\$(command -v python3 || command -v python)\" '$ROOT/tools/reviewer_admission.py' capacity-status muse --directory '$TMP/credit-q' | jq -e '.failure_class==\"out-of-credit\"'"
 check 'ordinary failure is not reported as out of credit' "cd '$REPO' && ! eval \"$ENV AI_REVIEW_QUARANTINE_DIR='$TMP/credit-q2' MUSE_STUB_MODE=fail '$SCRIPT' new plain-fail --prompt test\" 2>'$TMP/plain.err'; ! grep -q 'OUT OF CREDIT' '$TMP/plain.err'"
 check 'malformed provider output is rejected' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=malformed '$SCRIPT' new malformed --prompt test\""
 check 'partly malformed output preserves a recoverable session' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=partialmalformed '$SCRIPT' new partial --prompt test\"; meta=\$(find '$TMP/state' -name 'codex--partial.json' -type f); jq -e '.session_id==\"ses_partial\" and .status==\"provider_outcome_uncertain\"' \"\$meta\""
@@ -514,7 +521,7 @@ check 'exact retained completion can reconcile an interrupted local observer wit
 fi  # part 2
 ai_test_part 3
 if ai_test_part_active; then
-WRONG_NEW="$(cd "$REPO" && eval "$ENV '$SCRIPT' new wrong-followup --prompt test" 2>&1)"
+WRONG_NEW="$(cd "$REPO" && eval "$ENV '$SCRIPT' new wrong-followup --prompt test" 2>&1)" || muse_fixture_launch_failure "$WRONG_NEW"
 WRONG_META="$(find "$TMP/state" -name 'codex--wrong-followup.json' -type f)"
 check 'wrong resumed session is rejected without replacing canonical identity' "cd '$REPO' && ! eval \"$ENV MUSE_STUB_MODE=wrongsid '$SCRIPT' ask wrong-followup --prompt wrong\"; jq -e '.status==\"provider_outcome_uncertain\" and .session_id==\"ses_new\" and .returned_session_id==\"ses_wrong\"' '$WRONG_META'"
 check 'mixed-session event stream is rejected' "cd '$REPO' && eval \"$ENV '$SCRIPT' new mixed-followup --prompt test\" >/dev/null; ! eval \"$ENV MUSE_STUB_MODE=mixed '$SCRIPT' ask mixed-followup --prompt mixed\""

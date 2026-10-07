@@ -255,13 +255,30 @@ reviewer_credit_run(){
   python="$REVIEWER_CREDIT_PYTHON"; supervisor="$REVIEWER_CREDIT_SUPERVISOR"
   command_bin="$(command -v "$1")" || return 127
   shift
+  local argument_exclusions="${MSYS2_ARG_CONV_EXCL:-}" shell_launcher=''
   local -a paths=("$supervisor" "$output" "$stderr" "$marker")
   case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*)
+    # Git Bash resolves executable shebang launchers as commands too. Win32
+    # cannot execute them directly, so retain Bash's execution semantics inside
+    # the same supervised Job Object; actual native executables stay direct.
+    if [ "$(head -c 2 "$command_bin" 2>/dev/null)" = '#!' ]; then
+      shell_launcher="$(command -v bash)" || return 127
+      shell_launcher="$(cygpath -w "$shell_launcher")" || return 1
+    fi
     for arg in "${!paths[@]}"; do paths[$arg]="$(cygpath -w "${paths[$arg]}")" || return 1; done
-    command_bin="$(cygpath -w "$command_bin")" || return 1;;
+    command_bin="$(cygpath -w "$command_bin")" || return 1
+    # Native Python otherwise converts an env(1) PATH= argument to a Windows
+    # semicolon list. Its MSYS child must receive the original POSIX PATH to
+    # find the credential boundary's tools. Retain caller exclusions as well.
+    case ";$argument_exclusions;" in
+      *';*;'*) ;; # The caller already excludes every argument.
+      *) argument_exclusions="${argument_exclusions:+$argument_exclusions;}PATH=";;
+    esac;;
   esac
+  local -a child_command=("$command_bin" "$@")
+  [ -z "$shell_launcher" ] || child_command=("$shell_launcher" --noprofile --norc -c 'exec "$@"' reviewer-credit-shell "${child_command[@]}")
   term_trap="$(trap -p TERM)"; int_trap="$(trap -p INT)"; hup_trap="$(trap -p HUP)"
-  "$python" "${paths[0]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "$command_bin" "$@" <&0 & child=$!
+  MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
   trap 'received=TERM; kill -TERM "$child" 2>/dev/null || true' TERM
   trap 'received=INT; kill -INT "$child" 2>/dev/null || true' INT
   trap 'received=HUP; kill -TERM "$child" 2>/dev/null || true' HUP
