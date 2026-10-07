@@ -11,9 +11,8 @@ case "$(uname -s)" in
     sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
     icacls "$(cygpath -w "$TMP")" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null
     ;;
-  *) TMP="$(mktemp -d)" ;;
+  *) TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT ;;
 esac
-trap 'rm -rf "$TMP"' EXIT
 command -v jq >/dev/null
 command -v timeout >/dev/null
 export AI_TASK_GATES_FILE="$ROOT/config/task-gates.json"

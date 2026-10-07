@@ -299,11 +299,15 @@ function Assert-PrivateInstallAuthority([string]$IssuedPath, [string]$ReadPath) 
     }
     foreach ($path in $objects) {
         $mustBePrivate = $privatePaths -contains $path
-        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        try {
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            $acl = Get-Acl -LiteralPath $path -ErrorAction Stop
+        } catch {
+            throw 'Reviewed toolkit install authorization private path is missing or unreadable.'
+        }
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw 'Reviewed toolkit install authorization has a reparse point.'
         }
-        $acl = Get-Acl -LiteralPath $path -ErrorAction Stop
         if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $allow -or
             ($mustBePrivate -and $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid)) {
             throw 'Reviewed toolkit install authorization has a foreign owner.'
