@@ -534,6 +534,78 @@ AI_GH_STATE_DIR="$TMP/error-page-state" PR_WAIT_RECEIPT_ID="$(printf '%032d' 0)"
 check 'a nonzero upstream page with usable rateLimit still records its cost' \
   "test '$error_page_rc' -eq 7 && test \"\$(cat '$TMP/error-page-source')\" = upstream && '$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$TMP/error-page-state/measurements' | jq -e '.observed_graphql_cost_records == 1 and .observed_graphql_points == 6'"
 
+# Execute the actual event extractor against authoritative and hostile dates.
+# Sourcing only this pure helper avoids launching a waiter or contacting GitHub.
+sed -n '/^set_event_evidence(){/,/^}/p' "$CMD" > "$TMP/event-helper.sh"
+event_extract(){
+  Q="$1" PR_WAIT_OBSERVED_UTC_MS=1893456000000 bash -c \
+    'source "$1"; set_event_evidence "$2"; printf "%s:%s" "$PR_WAIT_EVENT_KIND" "${PR_WAIT_ELIGIBLE_UTC_MS:-null}"' \
+    bash "$TMP/event-helper.sh" "$2"
+}
+for terminal in MERGED CLOSED; do
+  field=mergedAt; kind=pr_merged; [ "$terminal" = MERGED ] || { field=closedAt; kind=pr_closed; }
+  event="$(event_extract "{\"data\":{\"repository\":{\"pullRequest\":{\"$field\":\"2026-01-01T00:00:00Z\"}}}}" "$terminal")"
+  check "authoritative $terminal event is retained without qualified latency" "[ '$event' = '$kind:1767225600000' ]"
+  for stamp in null '"tomorrow"' '"2026-02-30T00:00:00Z"' '"2099-01-01T00:00:00Z"'; do
+    event="$(event_extract "{\"data\":{\"repository\":{\"pullRequest\":{\"$field\":$stamp}}}}" "$terminal")"
+    check "invalid or future $terminal timestamp remains unknown" "[ '$event' = unknown:null ]"
+  done
+done
+checks_extract(){ event_extract "{\"data\":{\"repository\":{\"pullRequest\":{\"commits\":{\"nodes\":[{\"commit\":{\"statusCheckRollup\":{\"contexts\":{\"nodes\":$1}}}}]}}}}}" CHECKS; }
+event="$(checks_extract '[{"conclusion":"FAILURE","completedAt":"2026-01-02T00:00:00Z"},{"conclusion":"TIMED_OUT","completedAt":"2026-01-01T00:00:00Z"}]')"
+check 'all current failing checks yield the earliest authoritative completion' "[ '$event' = check_completed:1767225600000 ]"
+for nodes in '[{"state":"FAILURE","updatedAt":"2026-01-01T00:00:00Z"}]' \
+  '[{"conclusion":"FAILURE","completedAt":null}]' \
+  '[{"conclusion":"FAILURE","completedAt":"2026-01-01T00:00:00Z"},{"conclusion":"FAILURE","completedAt":"2026-02-30T00:00:00Z"}]' \
+  '[{"conclusion":"FAILURE","completedAt":"2026-01-01T00:00:00Z"},{"conclusion":"FAILURE","completedAt":"2099-01-01T00:00:00Z"}]' \
+  '[{"conclusion":"FAILURE","completedAt":"2026-01-01T00:00:00Z"},{"state":"ERROR"}]'; do
+  event="$(checks_extract "$nodes")"
+  check 'status-only null invalid mixed or future failures have no eligible event' "[ '$event' = unknown:null ]"
+done
+
+# Full native commands: one existing upstream query, both terminal statuses,
+# and observer destination failure retain the same useful output and exit.
+mkdir -p "$TMP/evidence-bin"
+cat > "$TMP/evidence-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$EVIDENCE_CALLS"
+printf '{"data":{"repository":{"pullRequest":{"state":"%s","mergedAt":"2026-01-01T00:00:00Z","closedAt":"2026-01-01T00:00:00Z","headRefOid":"abc","isInMergeQueue":false,"mergeCommit":{"oid":"abc"}}}}}\n' "$EVIDENCE_TERMINAL"
+EOF
+chmod +x "$TMP/evidence-bin/gh"
+for terminal in MERGED CLOSED; do
+  for broken in 0 1; do
+    state="$TMP/native-evidence-$terminal-$broken"; mkdir -p "$state/measurements"; chmod 700 "$state/measurements"
+    [ "$broken" = 0 ] || mkdir "$state/measurements/$(/usr/bin/date -u +%F).jsonl"
+    calls="$TMP/native-evidence-$terminal-$broken.calls"
+    EVIDENCE_TERMINAL="$terminal" EVIDENCE_CALLS="$calls" AI_GH_STATE_DIR="$state" \
+      AI_PR_WAIT_SNAPSHOT_DIR="$TMP/native-snapshot-$terminal-$broken" AI_PR_WAIT_TEST_CONTEXT_KEY='' \
+      AI_GH_REAL_GH="$TMP/evidence-bin/gh" PATH="$TMP/evidence-bin:/mingw64/bin:/usr/bin:/bin:$PATH" \
+      bash "$CMD" 1 --repo o/r --timeout-minutes 1 > "$state/output" 2>&1; rc=$?
+    expected=0; [ "$terminal" = MERGED ] || expected=1
+    check 'optional evidence preserves terminal output exit and one upstream call' \
+      "[ '$rc' -eq '$expected' ] && grep -q '$terminal' '$state/output' && [ \"\$(wc -l < '$calls')\" -eq 1 ] && grep -q 'mergedAt closedAt' '$calls'"
+    if [ "$broken" = 0 ]; then
+      check 'native terminal companion is consistent and never claims source or clock proof' \
+        "'$PYTHON_RUNNER' '$ROOT/tools/github-requests/report.py' '$state/measurements' | jq -e '.workflow_evidence_records == 1 and .qualified_latency_ms.count == 0'"
+    else
+      check 'observer write failure remains a visible measurement gap' "grep -q 'workflow evidence not saved' '$state/output'"
+    fi
+  done
+done
+
+if [ -e /dev/full ] && [ "$(uname -s)" = Linux ]; then
+  for terminal in MERGED CLOSED; do
+    state="$TMP/full-evidence-$terminal"; mkdir -p "$state/measurements"; chmod 700 "$state/measurements"
+    EVIDENCE_TERMINAL="$terminal" EVIDENCE_CALLS="$state/calls" AI_GH_STATE_DIR="$state" \
+      AI_PR_WAIT_SNAPSHOT_DIR="$state/snapshot" AI_PR_WAIT_TEST_CONTEXT_KEY='' \
+      AI_GH_REAL_GH="$TMP/evidence-bin/gh" PATH="$TMP/evidence-bin:/usr/bin:/bin:$PATH" \
+      bash "$CMD" 1 --repo o/r --timeout-minutes 1 > /dev/full 2> "$state/errors"; rc=$?
+    expected=0; [ "$terminal" = MERGED ] || expected=1
+    check 'failed terminal output preserves native result without claiming delivery' \
+      "[ '$rc' -eq '$expected' ] && jq -se '[.[]|select(.schema==4)][0] | .delivery_boundary == \"unknown\" and .delivered_utc_ms == null' '$state/measurements/'*.jsonl && grep -q 'write error' '$state/errors'"
+  done
+fi
+
 check "the cross-process cache preserves privacy, completeness, cancellation and recovery" \
   "python3 '$ROOT/tests/test-ai-pr-status-singleflight.py' -q"
 

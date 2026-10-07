@@ -627,6 +627,114 @@ gh_measure_workflow_outcome ai-pr-wait pr_wait "$workflow_id" checks_failed 1234
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?
 check 'GraphQL page costs link once to workflow and local reset headroom' \
   "[ $rc -eq 0 ] && [ $cache_rc -eq 2 ] && jq -e '.records == 10 and .identity_probe_invocations >= 0 and .observed_graphql_cost_records == 2 and .linked_graphql_points == 5 and .completed_workflow_receipts == 1 and .observed_graphql_windows_local_only == [{\"context_ordinal\":1,\"reset_at\":\"2026-09-28T05:00:00Z\",\"records\":2,\"min_remaining\":4988,\"max_remaining\":4990,\"observed_points\":5}]' '$TMP/report' && ! grep -q '$access_context' '$TMP/report' && ! grep -Rq FIXTURE_CANARY '$TMP/telemetry-state/measurements'"
+mkdir -p "$TMP/evidence-state/measurements"; chmod 700 "$TMP/evidence-state/measurements"
+evidence_id="$(gh_measure_workflow_id)"
+AI_GH_STATE_DIR="$TMP/evidence-state" PR_WAIT_EVENT_KIND=unknown PR_WAIT_DELIVERY_BOUNDARY=unknown \
+  gh_measure_workflow_evidence ai-pr-wait pr_wait "$evidence_id"
+AI_GH_STATE_DIR="$TMP/evidence-state" gh_measure_workflow_outcome ai-pr-wait pr_wait "$evidence_id" checks_failed 1
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/evidence-state/measurements" > "$TMP/evidence-report"; rc=$?
+check 'schema4 absent metadata remains unknown and reportable' \
+  "[ $rc -eq 0 ] && jq -e '.workflow_evidence_records == 1 and .qualified_latency_ms.count == 0 and .workflow_evidence[0].unknown_reason == \"metadata_absent\"' '$TMP/evidence-report'"
+# Schema4 metadata trust boundary: only the fixed, null-adapter contract is accepted.
+mkdir -p "$TMP/cohort-state/measurements"; chmod 700 "$TMP/cohort-state/measurements"
+printf '%s\n' '{"schema":1,"cohort_id":"0123456789abcdef0123456789abcdef","phase":"baseline","clock_status":null,"source_generation":null,"target_map":null}' > "$TMP/cohort-state/measurements/cohort.json"; chmod 600 "$TMP/cohort-state/measurements/cohort.json"
+AI_GH_STATE_DIR="$TMP/cohort-state" PR_WAIT_EVENT_KIND=unknown PR_WAIT_DELIVERY_BOUNDARY=unknown gh_measure_workflow_evidence ai-pr-wait pr_wait "$(gh_measure_workflow_id)"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) cohort_predicate='.cohort_id == null and .unknown_reason == "metadata_untrusted"' ;;
+  *) cohort_predicate='.cohort_id == "0123456789abcdef0123456789abcdef" and .unknown_reason == "source_unknown"' ;;
+esac
+check 'cohort metadata respects platform qualification and fixed null adapters' "jq -e '$cohort_predicate and .target_ordinal == null and .source_verified == \"unknown\" and .clock_quality == \"unknown\" and .latency_ms == null' '$TMP/cohort-state/measurements/'*.jsonl"
+for field in clock_status source_generation target_map; do
+  d="$TMP/cohort-nonnull-$field"; mkdir -p "$d/measurements"; chmod 700 "$d/measurements"
+  jq --arg field "$field" '.[$field]={claimed:"verified"}' "$TMP/cohort-state/measurements/cohort.json" > "$d/measurements/cohort.json"; chmod 600 "$d/measurements/cohort.json"
+  AI_GH_STATE_DIR="$d" PR_WAIT_EVENT_KIND=unknown PR_WAIT_DELIVERY_BOUNDARY=unknown gh_measure_workflow_evidence ai-pr-wait pr_wait "$(gh_measure_workflow_id)"
+  check 'nonnull clock source or target adapters cannot qualify metadata' "jq -e '.cohort_id == null and .unknown_reason == \"metadata_untrusted\" and .latency_ms == null' '$d/measurements/'*.jsonl"
+done
+mkdir -p "$TMP/cohort-fifo/measurements"; chmod 700 "$TMP/cohort-fifo/measurements"
+if mkfifo "$TMP/cohort-fifo/measurements/cohort.json" 2>/dev/null; then
+  AI_GH_STATE_DIR="$TMP/cohort-fifo" timeout 5 bash -c 'source "$1"; gh_measure_read_cohort; [ "$GH_MEASURE_COHORT_REASON" = metadata_untrusted ]' bash "$ROOT/tools/github-requests/telemetry.sh"; cohort_rc=$?
+  check 'FIFO cohort cannot block the original workflow' "[ '$cohort_rc' -eq 0 ]"
+fi
+"$PYTHON_RUNNER" - "$ROOT" "$TMP/cohort-link-representation" <<'PY'
+import os, pathlib, sys, types
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "tools/github-requests"))
+import report
+directory = pathlib.Path(sys.argv[2])
+directory.mkdir()
+# Exercise unsupported-platform semantics without changing pathlib's platform.
+report.os = types.SimpleNamespace(name="nt", lstat=os.lstat)
+assert report.read_cohort(directory) == {"cohort_id": None, "unknown_reason": "metadata_absent"}
+(directory / "cohort.json.lnk").write_bytes(b"opaque MSYS pipe representation")
+assert report.read_cohort(directory) == {"cohort_id": None, "unknown_reason": "metadata_untrusted"}
+PY
+cohort_link_rc=$?
+check 'unsupported platform never mistakes an MSYS pipe representation for absent metadata' "[ '$cohort_link_rc' -eq 0 ]"
+for bad in malformed extra mode oversize; do
+  d="$TMP/cohort-$bad"; mkdir -p "$d/measurements"; chmod 700 "$d/measurements"
+  case "$bad" in
+    malformed) printf '%s\n' '{"schema":1,"cohort_id":"bad"}' > "$d/measurements/cohort.json" ;;
+    extra) printf '%s\n' '{"schema":1,"cohort_id":"0123456789abcdef0123456789abcdef","phase":"baseline","clock_status":null,"source_generation":null,"target_map":null,"raw":"token"}' > "$d/measurements/cohort.json" ;;
+    mode) printf '%s\n' '{"schema":1,"cohort_id":"0123456789abcdef0123456789abcdef","phase":"baseline","clock_status":null,"source_generation":null,"target_map":null}' > "$d/measurements/cohort.json"; chmod 644 "$d/measurements/cohort.json" ;;
+    oversize) head -c 17000 /dev/zero > "$d/measurements/cohort.json" ;;
+  esac
+  [ "$bad" = mode ] || chmod 600 "$d/measurements/cohort.json"
+  AI_GH_STATE_DIR="$d" PR_WAIT_EVENT_KIND=unknown PR_WAIT_DELIVERY_BOUNDARY=unknown gh_measure_workflow_evidence ai-pr-wait pr_wait "$(gh_measure_workflow_id)"
+  check "cohort $bad is untrusted and remains unknown" "jq -e '.cohort_id == null and .unknown_reason == \"metadata_untrusted\"' '$d/measurements/'*.jsonl"
+done
+mkdir -p "$TMP/cohort-symlink/measurements"; chmod 700 "$TMP/cohort-symlink/measurements"
+ln -s "$TMP/cohort-state/measurements/cohort.json" "$TMP/cohort-symlink/measurements/cohort.json"
+AI_GH_STATE_DIR="$TMP/cohort-symlink" PR_WAIT_EVENT_KIND=unknown PR_WAIT_DELIVERY_BOUNDARY=unknown gh_measure_workflow_evidence ai-pr-wait pr_wait "$(gh_measure_workflow_id)"
+check 'cohort symlink is rejected' "jq -se '.[-1].unknown_reason == \"metadata_untrusted\"' '$TMP/cohort-symlink/measurements/'*.jsonl"
+# Parser adversarial matrix: malformed types, enums, opaque-label injection, duplicate and dangling joins fail closed.
+mkdir -p "$TMP/evidence-invalid"
+base='{"schema":4,"utc":"2026-09-28T05:00:00Z","measurement":"workflow_evidence","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","cohort_id":null,"target_ordinal":null,"source_verified":"unknown","source_fingerprint_start":null,"source_fingerprint_end":null,"install_generation_binding":null,"event_kind":"unknown","eligible_utc_ms":null,"observed_utc_ms":null,"delivered_utc_ms":null,"delivery_boundary":"unknown","clock_quality":"unknown","clock_error_bound_ms":null,"latency_ms":null,"unknown_reason":"metadata_absent"}'
+for bad in type enum injection duplicate dangling mismatch future schema clock source event delivery latency forged duplicate_key; do
+  d="$TMP/evidence-invalid/$bad"; mkdir -p "$d"; f="$d/2026-09-28.jsonl"; printf '%s\n' "$base" > "$f"
+  case "$bad" in
+    type) jq -c '.target_ordinal=true' "$f" > "$f.tmp" ;;
+    enum) jq -c '.event_kind="bad"' "$f" > "$f.tmp" ;;
+    injection) jq -c '.workflow_id="https://token"' "$f" > "$f.tmp" ;;
+    duplicate) cp "$f" "$f.tmp"; cat "$f.tmp" >> "$f"; rm -f "$f.tmp"; "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$d" >/dev/null 2>&1; rc=$?; check "schema4 $bad fixture fails closed" "[ $rc -eq 1 ]"; continue ;;
+    dangling) jq -c '.workflow_id="fedcba9876543210fedcba9876543210"' "$f" > "$f.tmp" ;;
+    mismatch) jq -c '.event_kind="pr_merged"|.eligible_utc_ms=1|.observed_utc_ms=2' "$f" > "$f.tmp" ;;
+    future) jq -c '.source_verified="verified"|.source_fingerprint_start=("a"*64)|.source_fingerprint_end=("b"*64)|.install_generation_binding=("c"*64)' "$f" > "$f.tmp" ;;
+    schema) jq -c '.schema="4"' "$f" > "$f.tmp" ;;
+    clock) jq -c '.clock_quality="unknown"|.clock_error_bound_ms=1|.latency_ms=0' "$f" > "$f.tmp" ;;
+    source) jq -c '.source_verified="unknown"|.source_fingerprint_start=("a"*64)' "$f" > "$f.tmp" ;;
+    event) jq -c '.event_kind="pr_merged"|.eligible_utc_ms=null' "$f" > "$f.tmp" ;;
+    delivery) jq -c '.delivery_boundary="terminal_report"|.delivered_utc_ms=null' "$f" > "$f.tmp" ;;
+    latency) jq -c '.latency_ms=1' "$f" > "$f.tmp" ;;
+    forged) jq -c '.cohort_id="0123456789abcdef0123456789abcdef"|.source_verified="verified"|.source_fingerprint_start=("a"*64)|.source_fingerprint_end=("a"*64)|.install_generation_binding=("c"*64)|.clock_quality="verified_bound"|.clock_error_bound_ms=1|.event_kind="check_completed"|.eligible_utc_ms=1000|.observed_utc_ms=2000|.delivered_utc_ms=3000|.delivery_boundary="terminal_report"|.latency_ms=2000|.unknown_reason="none"' "$f" > "$f.tmp" ;;
+    duplicate_key) sed 's/"schema":4/"schema":4,"schema":4/' "$f" > "$f.tmp" ;;
+  esac
+  mv "$f.tmp" "$f"
+  [ "$bad" = dangling ] || printf '%s\n' '{"schema":3,"utc":"2026-09-28T05:00:00Z","measurement":"workflow_outcome","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"0123456789abcdef0123456789abcdef","outcome":"checks_failed","elapsed_ms":1}' >> "$f"
+  "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$d" > "$d/out" 2> "$d/err"; rc=$?
+  check "schema4 $bad fixture fails closed" "[ $rc -eq 1 ] && [ ! -s '$d/out' ] && ! grep -q 'https://token' '$d/err'"
+done
+mkdir -p "$TMP/cohort-duplicate/measurements"; chmod 700 "$TMP/cohort-duplicate/measurements"
+sed 's/"schema":1/"schema":1,"schema":1/' "$TMP/cohort-state/measurements/cohort.json" > "$TMP/cohort-duplicate/measurements/cohort.json"; chmod 600 "$TMP/cohort-duplicate/measurements/cohort.json"
+AI_GH_STATE_DIR="$TMP/cohort-duplicate" gh_measure_read_cohort
+check 'duplicate cohort keys never establish a cohort' "[ '$GH_MEASURE_COHORT_REASON' = metadata_untrusted ] && [ -z '$GH_MEASURE_COHORT_ID' ]"
+if [ "$(uname -s)" = Linux ]; then
+  timeout 5 "$PYTHON_RUNNER" - "$ROOT" "$TMP/cohort-race" <<'PY'
+import os, pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / 'tools/github-requests'))
+import report
+directory = pathlib.Path(sys.argv[2]); directory.mkdir(mode=0o700)
+path = directory / 'cohort.json'
+path.write_text('{"schema":1,"cohort_id":"0123456789abcdef0123456789abcdef","phase":"baseline","clock_status":null,"source_generation":null,"target_map":null}'); path.chmod(0o600)
+original = os.open
+def swap_to_fifo(name, flags, *args, **kwargs):
+    if name == 'cohort.json':
+        path.unlink(); os.mkfifo(path, 0o600)
+    return original(name, flags, *args, **kwargs)
+os.open = swap_to_fifo
+assert report.read_cohort(directory) == {'cohort_id': None, 'unknown_reason': 'metadata_untrusted'}
+PY
+  race_rc=$?
+  check 'cohort replacement with FIFO during open fails safely without blocking' "[ '$race_rc' -eq 0 ]"
+fi
 printf '%s' '{"data":{"rateLimit":{"cost":4,"remaining":"bad","resetAt":"FIXTURE_CANARY"}}}' |
   gh_measure_graphql_cost ai-pr-wait graphql.pr_status pr_wait '' upstream_refresh
 "$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$TMP/telemetry-state/measurements" > "$TMP/report"; rc=$?

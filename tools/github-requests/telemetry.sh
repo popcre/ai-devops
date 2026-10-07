@@ -124,6 +124,58 @@ gh_measure_workflow_outcome(){
   gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
 }
 
+# Read the only metadata file accepted by the private companion.  Invalid or
+# unavailable metadata is evidence of an unknown cohort; it never affects the
+# caller's result.
+gh_measure_read_cohort(){
+  local helper python result
+  GH_MEASURE_COHORT_ID=''; GH_MEASURE_TARGET_ORDINAL=''; GH_MEASURE_COHORT_REASON=metadata_absent
+  helper="${BASH_SOURCE[0]%/*}/report.py"
+  python="${PYTHON_RUNNER:-}"
+  [ -n "$python" ] || python="$(command -v python3 || command -v python || true)"
+  if [ -z "$python" ] || [ ! -f "$helper" ]; then GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; fi
+  result="$("$python" "$helper" --cohort "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" 2>/dev/null)" || { GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0; }
+  GH_MEASURE_COHORT_REASON="$(printf '%s' "$result" | jq -r '.unknown_reason // empty' 2>/dev/null)"
+  case "$GH_MEASURE_COHORT_REASON" in metadata_absent|metadata_untrusted) return 0 ;; source_unknown) ;; *) GH_MEASURE_COHORT_REASON=metadata_untrusted; return 0 ;; esac
+  GH_MEASURE_COHORT_ID="$(printf '%s' "$result" | jq -r '.cohort_id // empty' 2>/dev/null)"
+  [[ "$GH_MEASURE_COHORT_ID" =~ ^[0-9a-f]{32}$ ]] || { GH_MEASURE_COHORT_ID=''; GH_MEASURE_COHORT_REASON=metadata_untrusted; }
+}
+
+gh_measure_source_bookend(){
+  PR_WAIT_SOURCE_VERIFIED=unknown
+  PR_WAIT_SOURCE_FINGERPRINT_START=''
+  PR_WAIT_SOURCE_FINGERPRINT_END=''
+  PR_WAIT_INSTALL_GENERATION_BINDING=''
+}
+
+gh_measure_workflow_evidence(){
+  local caller="${1:-}" workflow="${2:-}" id="${3:-}" utc record reason=metadata_absent cohort_json=null
+  [ "$caller:$workflow" = ai-pr-wait:pr_wait ] || return 2
+  [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 2
+  case "${PR_WAIT_EVENT_KIND:-unknown}" in pr_merged|pr_closed|check_completed|unknown) ;; *) return 2 ;; esac
+  case "${PR_WAIT_SOURCE_VERIFIED:-unknown}" in unknown|verified|changed) ;; *) return 2 ;; esac
+  case "${PR_WAIT_CLOCK_QUALITY:-unknown}" in verified_bound|unverified|jump|negative|unknown) ;; *) return 2 ;; esac
+  case "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" in terminal_report|unknown) ;; *) return 2 ;; esac
+  gh_measure_read_cohort
+  reason="$GH_MEASURE_COHORT_REASON"
+  [ "$GH_MEASURE_COHORT_REASON" = source_unknown ] || { GH_MEASURE_COHORT_ID=''; GH_MEASURE_TARGET_ORDINAL=''; }
+  [ -z "${GH_MEASURE_COHORT_ID:-}" ] || cohort_json="\"$GH_MEASURE_COHORT_ID\""
+  [[ "${PR_WAIT_OBSERVED_UTC_MS:-}" =~ ^[0-9]{1,13}$ ]] || PR_WAIT_OBSERVED_UTC_MS=''
+  [[ "${PR_WAIT_DELIVERED_UTC_MS:-}" =~ ^[0-9]{1,13}$ ]] || PR_WAIT_DELIVERED_UTC_MS=''
+  TZ=UTC printf -v utc '%(%FT%TZ)T' -1
+  [[ "${PR_WAIT_ELIGIBLE_UTC_MS:-}" =~ ^[0-9]{1,13}$ ]] || PR_WAIT_ELIGIBLE_UTC_MS=''
+  [ -z "${PR_WAIT_ELIGIBLE_UTC_MS:-}" ] || [ "$PR_WAIT_ELIGIBLE_UTC_MS" -le 9999999999999 ] || PR_WAIT_ELIGIBLE_UTC_MS=''
+  if [ "${PR_WAIT_EVENT_KIND:-unknown}" = unknown ]; then PR_WAIT_ELIGIBLE_UTC_MS=''; fi
+  if [ -n "$PR_WAIT_ELIGIBLE_UTC_MS" ] && { [ -z "$PR_WAIT_OBSERVED_UTC_MS" ] || [ "$PR_WAIT_ELIGIBLE_UTC_MS" -gt "$PR_WAIT_OBSERVED_UTC_MS" ]; }; then PR_WAIT_ELIGIBLE_UTC_MS=''; fi
+  [ -n "$PR_WAIT_ELIGIBLE_UTC_MS" ] || PR_WAIT_EVENT_KIND=unknown
+  if [ "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" = terminal_report ] &&
+    { [ -z "$PR_WAIT_OBSERVED_UTC_MS" ] || [ -z "$PR_WAIT_DELIVERED_UTC_MS" ] || [ "$PR_WAIT_DELIVERED_UTC_MS" -lt "$PR_WAIT_OBSERVED_UTC_MS" ]; }; then PR_WAIT_DELIVERY_BOUNDARY=unknown; fi
+  [ "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" != unknown ] || PR_WAIT_DELIVERED_UTC_MS=''
+  record=$(printf '{"schema":4,"utc":"%s","measurement":"workflow_evidence","caller":"ai-pr-wait","workflow":"pr_wait","workflow_id":"%s","cohort_id":%s,"target_ordinal":null,"source_verified":"unknown","source_fingerprint_start":null,"source_fingerprint_end":null,"install_generation_binding":null,"event_kind":"%s","eligible_utc_ms":%s,"observed_utc_ms":%s,"delivered_utc_ms":%s,"delivery_boundary":"%s","clock_quality":"unknown","clock_error_bound_ms":null,"latency_ms":null,"unknown_reason":"%s"}' \
+    "$utc" "$id" "$cohort_json" "${PR_WAIT_EVENT_KIND:-unknown}" "${PR_WAIT_ELIGIBLE_UTC_MS:-null}" "${PR_WAIT_OBSERVED_UTC_MS:-null}" "${PR_WAIT_DELIVERED_UTC_MS:-null}" "${PR_WAIT_DELIVERY_BOUNDARY:-unknown}" "$reason")
+  gh_measure_append "${AI_GH_STATE_DIR:-$HOME/.ai-devops/gh-throttle}/measurements" "$record"
+}
+
 # Observe quota fields carried by an upstream GraphQL response. Optional
 # remaining/resetAt stay null unless both fields validate; old cost-only
 # responses remain useful without inventing a reset window.
