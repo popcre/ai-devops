@@ -376,9 +376,11 @@ Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
 - `another installation is active for this checkout` can be a leftover
   `setup-desktop-apps.sh --claude-only --wait-for-desktop-exit` started by an
   earlier install that inherited the checkout lock and waits until the Claude
-  desktop app exits. Find the holder with
-  `fuser -v ~/.local/state/ai-devops/task-gates/install-*.lock`; stopping that
-  waiter is safe because the next install starts it again.
+  desktop app exits. Fixed in
+  [#1385](https://github.com/popcre/ai-devops/pull/1385): the waiter no longer
+  inherits the lock fd. For a waiter started before that fix, find the holder
+  with `fuser -v ~/.local/state/ai-devops/task-gates/install-*.lock`; stopping
+  it is safe because the next install starts it again.
 Without that exact reviewed evidence, the updater stops before changing the
 installed checkout.
 
