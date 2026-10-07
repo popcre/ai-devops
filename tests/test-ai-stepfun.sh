@@ -284,6 +284,13 @@ STUB
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
   check "real sandbox: the review door starts StepCode and sees the packet, not caller secrets" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport'"
   check "door leaves the runner's review copy unchanged (the model writes in a scratch copy)" "[ ! -e '$RH/dw/written-by-model' ]"
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" implement >"$RH/dout" 2>&1 || drc=$?
+  check "door implement mode writes into the runner's disposable copy" "[ '$drc' = 0 ] && [ -e '$RH/dw/written-by-model' ]"
+  rm -f "$RH/dw/written-by-model"
   # StepCode's guard asks before a dangerous command; the door declines it
   # and the turn goes on to a report.
   cat > "$RH/probe-bin/step" <<'STUB'
@@ -321,6 +328,21 @@ STUB
     DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
   check "door reruns the turn after a StepFun 429 rate limit" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && grep -q 'rate limit reached' '$RH/dout'"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_end","messages":[{"role":"assistant","content":[],"errorMessage":"402: {\"type\":\"quota_exceeded\"}"}]}'
+echo '{"type":"agent_settled"}'; read -r _
+echo '{"id":"door-text","type":"response","data":{"text":""}}'
+STUB
+  drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "door reports out of credit (exit 92) when StepFun refuses for quota" "[ '$drc' = 92 ] && grep -q AI_REVIEWER_OUT_OF_CREDIT '$RH/dout'"
   check "door probe: doctor --live also runs a turn through the review door" "printf '%s' \"\$out\" | grep -q 'PASS  live call through the review door answered'"
   rm -rf "$RH"
 else

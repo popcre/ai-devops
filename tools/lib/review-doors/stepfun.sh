@@ -283,7 +283,12 @@ sf_rpc_turn() {
   eval "exec ${to_rpc}>&-" 2>/dev/null || true
   kill "$sf_pid" 2>/dev/null || true
   wait "$sf_pid" 2>/dev/null || true
-  [ -n "$text" ] || return 1
+  if [ -z "$text" ]; then
+    # The runner reports exit 92 as out of credit; the provider error is in
+    # the agent_end error line (402 quota / insufficient balance).
+    grep -Eiq '^402: \{|quota_exceeded|insufficient_quota|insufficient balance' "$out.err" 2>/dev/null && return 92
+    return 1
+  fi
   printf '%s\n' "$text" > "$log"
 }
 
@@ -301,7 +306,7 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
-    printf 'Commands the harness judges dangerous (rm -rf and similar) are declined; do not retry them. The copy is discarded afterwards, so cleanup is never needed.\n\n'
+    printf 'Commands the harness judges dangerous (rm -rf and similar) are declined; do not retry them.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
@@ -351,12 +356,17 @@ main() {
     # model can read MANIFEST.md as the preamble tells it to.
     local -a packet_bind=()
     case "$DOOR_PACKET_DIR" in "$DOOR_WORKDIR"|"$DOOR_WORKDIR"/*) ;; *) packet_bind=(--ro-bind "$DOOR_PACKET_DIR" "$DOOR_PACKET_DIR") ;; esac
-    # The runner refuses a verdict when the review copy changes, and running
-    # the tests writes files. The model works in its own scratch copy; the
-    # runner's copy is mounted read-only at its own path.
-    local scratch
-    scratch="$(mktemp -d)"
-    cp -a "$DOOR_WORKDIR" "$scratch/work" || { rm -rf "$scratch" "$home_tmp"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
+    # Review: the runner refuses a verdict when the review copy changes, and
+    # running the tests writes files, so the model works in its own scratch
+    # copy and the runner's copy is mounted read-only at its own path.
+    # Implement: the runner's disposable copy is the work product, writable.
+    local scratch="" work="$DOOR_WORKDIR"
+    local -a work_binds=(--bind "$DOOR_WORKDIR" "$DOOR_WORKDIR")
+    if [ "$MODE" = review ]; then
+      scratch="$(mktemp -d)"; work="$scratch/work"
+      cp -a "$DOOR_WORKDIR" "$work" || { rm -rf "$scratch" "$home_tmp"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
+      work_binds=(--ro-bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --bind "$work" "$work")
+    fi
     # StepCode's command guard asks before any command it will not run
     # unattended (rm -rf, unanalysable shell). In -p mode that question ends
     # the whole turn with no report, so the turn runs in RPC mode and the door
@@ -365,8 +375,7 @@ main() {
     # pause, as bin/ai-stepfun does.
     local attempt rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
-    local -a sandbox_args=("${packet_bind[@]}" --ro-bind "$DOOR_WORKDIR" "$DOOR_WORKDIR"
-      --bind "$scratch/work" "$scratch/work" --chdir "$scratch/work")
+    local -a sandbox_args=("${packet_bind[@]}" "${work_binds[@]}" --chdir "$work")
     for attempt in 1 2 3; do
       sf_rpc_turn "$prompt_full"
       rc=$?
@@ -376,7 +385,7 @@ main() {
       printf 'stepfun door: StepFun rate limit reached; retrying in %ss (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
       sleep "$rate_pause"
     done
-    rm -rf "$home_tmp" "$scratch"
+    rm -rf "$home_tmp"; [ -z "$scratch" ] || rm -rf "$scratch"
   fi
   set -e
   SF_KEY=""
