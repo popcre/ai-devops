@@ -53,20 +53,31 @@ allocator but stayed registered here, and a session spent an hour trying it.
 10. **Out of credit is told to Albert in the same session.** Owner rule,
     2026-09-24: "the session that hit that error should A) know that that's
     why it failed, and B) tell me in that same session." When a provider
-    refuses a run for lack of paid credit, the Grok, Muse, Qwen, Gemini,
-    DeepSeek and StepFun wrappers distinguish the refusal with exit **92**, printing on stderr:
+    refuses a run for depleted paid funds or subscription allowance, the GLM,
+    Grok, Muse, Qwen, Gemini, DeepSeek and StepFun wrappers distinguish the
+    refusal with exit **92**, printing the matching machine and human lines on stderr:
 
     ```
     AI_REVIEWER_OUT_OF_CREDIT provider=<provider> code=insufficient_quota
-    OUT OF CREDIT: <which account, where to add credits> - then run: ai-review-preflight clear <provider>
+    OUT OF CREDIT: <which account, where to add credits>; automatic return requires verified paid balance.
+    ```
+
+    Subscription allowance exhaustion has a separate report:
+
+    ```
+    AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=<provider> code=quota_exhausted
+    ALLOWANCE EXHAUSTED: <provider>; automatic return at provider reset; reset <date and EST/EDT, or unavailable>.
     ```
 
     Failure detection must inspect provider error channels while the child is
     running; classification after the child exits alone does not prove an
     immediate stop. Keep the original process supervision and uncertain-work
-    fences when stopping a refused run. They also record an `out-of-credit` quarantine, so
-    `ai-review-preflight usable <provider>` refuses the provider until it is
-    cleared. The session that sees exit 92 or either line must, in its very
+    fences when stopping a refused run. The wrappers record a persistent capacity
+    hold, so `ai-review-preflight usable <provider>` refuses the provider.
+    A qualified subscription reset may lift only its matching allowance hold;
+    depleted paid funds require verified balance recovery or explicit verified
+    clearing. Neither a guessed cooldown nor a subscription reset clears a
+    separate paid-funds hold. The session that sees exit 92 or either line must, in its very
     next reply to Albert, report the provider and whether subscription quota or
     prepaid funds are exhausted, then rotate to the next reviewer. Never retry the same
     provider, never report it as a generic failure, and never leave the news
@@ -129,8 +140,11 @@ those cycles. Exact bucket shape must remain qualified against the official
 reader and sanitized installed observations; timestamps
 alone are not live proof of refill.
 
-Gemini's authenticated `agy /usage` reader already preserves per-bucket reset
-times, but its qualified response does not establish opaque account identity.
+Gemini's authenticated `agy /usage` reader already preserves per-bucket
+`reset_time` values, but its qualified response does not establish opaque
+account identity. The latest valid reset among all exhausted qualified five-hour
+and weekly buckets becomes the allowance hold's `reset_at`; a missing or invalid
+exhausted-bucket reset leaves that return time unknown.
 Qwen's [official Token Plan FAQ](https://docs.modelstudio.console.alibabacloud.com/en/model-studio/token-plan-personal-faq)
 describes a monthly subscription quota reset anchored to the subscription,
 not the first day of the calendar month. The exact provider refusal can report
