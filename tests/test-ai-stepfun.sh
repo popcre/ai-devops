@@ -262,6 +262,18 @@ STUB
     DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
   check "door retries once after the command guard ends a turn, naming the refused command" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && grep -q 'retrying once' '$RH/dout'"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+if [ ! -e ./limited ]; then : > ./limited; echo '429: {"type":"rate_limited"}' >&2; exit 1; fi
+echo STEPFUN-OK
+STUB
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_RATE_PAUSE=0 \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "door reruns the turn after a StepFun 429 rate limit" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && grep -q 'rate limit reached' '$RH/dout'"
   check "door probe: doctor --live also runs a turn through the review door" "printf '%s' \"\$out\" | grep -q 'PASS  live call through the review door answered'"
   rm -rf "$RH"
 else

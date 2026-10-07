@@ -304,12 +304,14 @@ main() {
     # model can read MANIFEST.md as the preamble tells it to.
     local -a packet_bind=()
     case "$DOOR_PACKET_DIR" in "$DOOR_WORKDIR"|"$DOOR_WORKDIR"/*) ;; *) packet_bind=(--ro-bind "$DOOR_PACKET_DIR" "$DOOR_PACKET_DIR") ;; esac
-    # StepCode's command guard ends a non-interactive turn on any command it
-    # will not run unattended, with no report and no override. One bounded
-    # retry tells the model exactly which command was refused.
-    local prompt_text attempt blocked
+    # Two failures end a StepCode -p turn with no report and are re-run whole,
+    # as bin/ai-stepfun does: an HTTP 429 that outlasts StepCode's own retry
+    # (pause, then rerun), and the command guard refusing a command it will
+    # not run unattended (rerun once, naming the refused command).
+    local prompt_text attempt blocked guard_retried=0 rate_retries=0
+    local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
     prompt_text="$(cat "$prompt_full")"
-    for attempt in 1 2; do
+    for attempt in 1 2 3 4; do
       (
         export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
         export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
@@ -322,9 +324,16 @@ main() {
           --no-approve --no-update-check -- "$prompt_text"
       ) < /dev/null > "$log" 2> "$out.err"
       rc=$?
-      [ "$rc" -ne 0 ] && [ "$attempt" = 1 ] || break
-      blocked="$(grep -m1 '^Blocked run_command:' "$out.err" | cut -c1-400 || true)"
-      [ -n "$blocked" ] || break
+      [ "$rc" -ne 0 ] || break
+      if grep -Eq '^429: \{' "$log" "$out.err" 2>/dev/null && [ "$rate_retries" -lt "$rate_max" ]; then
+        rate_retries=$((rate_retries + 1))
+        printf 'stepfun door: StepFun rate limit reached; retrying in %ss (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
+        sleep "$rate_pause"
+        continue
+      fi
+      blocked="$(grep -m1 '^Blocked run_command:' "$out.err" 2>/dev/null | cut -c1-400 || true)"
+      [ -n "$blocked" ] && [ "$guard_retried" = 0 ] || break
+      guard_retried=1
       printf 'stepfun door: the command guard ended the turn; retrying once (%s)\n' "$blocked" >&2
       prompt_text="$prompt_text"$'\n\n'"A previous attempt at this review ended with no report because the harness refused this command: $blocked"$'\n'"Do not run that command or anything like it. Use plain literal commands only."
     done
