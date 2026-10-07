@@ -27,7 +27,13 @@ cat >> "$TMP/bin/step" <<'STUB'
 [ "${1:-}" = --version ] && { echo 0.1.1; exit 0; }
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant with read, bash, edit, write tools'; exit 0; }
 printf '%s\n' "$@" > "$STUB_ARGS"; printf '%s\n' "${STEP_API_KEY:-}" > "$STUB_ARGS.key"; env > "$STUB_ARGS.env"
-prompt="${@: -1}"; printf '%s\n' "$prompt" > "$STUB_ARGS.prompt"
+prompt="${@: -1}"
+if [[ "$prompt" == @* ]]; then
+  input="${prompt#@}"
+  stat -c '%a' "$input" > "$STUB_ARGS.prompt-mode"
+  prompt="$(cat "$input")"
+fi
+printf '%s\n' "$prompt" > "$STUB_ARGS.prompt"
 head="$(printf '%s' "$prompt" | grep -oE '[0-9a-f]{40}' | head -1)"
 attempt(){ n=$(cat "$STUB_ARGS.n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_ARGS.n"; }
 case "$STUB_MODE" in
@@ -146,6 +152,11 @@ check "the review copy (not the caller's checkout) is the writable mount" "grep 
 check "review prompt no longer claims read-only and says edits are discarded" "! grep -qi 'read-only' '$STUB_ARGS' && grep -q 'discarded' '$STUB_ARGS'"
 check "review hands the model the sealed MANIFEST.md" "grep -q 'MANIFEST.md first' '$STUB_ARGS'"
 check "review runs with write and shell tools under auto approval" "grep -qx 'read,bash,edit,write,grep,find,ls' '$STUB_ARGS' && grep -qx auto '$STUB_ARGS' && grep -qx allow '$STUB_ARGS' && grep -qx -- --no-extensions '$STUB_ARGS' && grep -qx -- --no-approve '$STUB_ARGS'"
+{ head -c 180000 /dev/zero | tr '\0' 'x'; printf '\ncomplete-large-review-marker\n'; } > "$TMP/large-review.md"
+mode verdict
+"$SCRIPT" review --repo "$TMP/repo" --prompt-file "$TMP/large-review.md" > "$TMP/large-review.out" 2>"$TMP/large-review.err"; large_rc=$?
+check "complete review larger than the OS argv limit reaches StepCode unchanged" "[ '$large_rc' = 0 ] && tail -n2 '$STUB_ARGS.prompt' | cmp - '$TMP/large-review.md' && grep -q 'VERDICT: APPROVE $HEAD_SHA' '$TMP/large-review.out'"
+check "large input uses a protected read-only attachment and is removed after review" "grep -qx 600 '$STUB_ARGS.prompt-mode' && grep -qx -- --ro-bind '$STUB_ARGS.bwrap' && grep -q '^@.*/request[.]md$' '$STUB_ARGS' && ! grep -q complete-large-review-marker '$STUB_ARGS' && [ ! -e \"\$(tail -n1 '$STUB_ARGS' | cut -c2-)\" ]"
 OP_SERVICE_ACCOUNT_TOKEN=planted-op GH_TOKEN=planted-gh SSH_AUTH_SOCK=/planted.sock mode ok
 OP_SERVICE_ACCOUNT_TOKEN=planted-op GH_TOKEN=planted-gh SSH_AUTH_SOCK=/planted.sock "$SCRIPT" doctor --live >/dev/null 2>&1
 check "host timeout is resolved from /usr/bin, never a user path" "grep -q 'timeout_bin=\"\$(PATH=/usr/bin:/bin command -v timeout)\"' '$SCRIPT' && ! grep -qE '^[[:space:]]*exec timeout ' '$SCRIPT'"
@@ -344,6 +355,7 @@ check "OpenCode rejects a turn directory that has a remote" "mode ok; git -C '$T
   rm -f "$TMP/args.bwrap"
   check "Linux OpenCode turn runs under bubblewrap with an empty home and no host root" "mode askok; '$SCRIPT' ask --repo '$TMP/repo' 'bounded?' 2>/dev/null | grep -q RATE_RETRIES && grep -qx -- '--unshare-all' '$TMP/args.bwrap' && grep -qx -- '--tmpfs' '$TMP/args.bwrap' && grep -qx \"\$HOME\" '$TMP/args.bwrap' && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx / && ! grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -qx /etc"
   check "Linux OpenCode state is a fresh per-run tree: profile read-only, removed after the turn" "grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -q '/oc-run\.[^/]*/config\$' && ! ls -d \"\${AI_STEPFUN_STATE_DIR:-\$HOME/.local/state/ai-devops/stepfun}\"/oc-run.* >/dev/null 2>&1"
+  check "Linux OpenCode permits only its startup ignore-file write, never profile changes" "grep -A1 -x -- '--bind' '$TMP/args.bwrap' | grep -q '/config/opencode/[.]gitignore\$' && ! grep -A1 -x -- '--bind' '$TMP/args.bwrap' | grep -q '/config\$' && grep -A1 -x -- '--ro-bind' '$TMP/args.bwrap' | grep -q '/config\$'"
   check "Linux OpenCode doctor fails without bubblewrap" "! AI_STEPFUN_BWRAP=/nonexistent '$SCRIPT' doctor >/dev/null 2>&1 && '$SCRIPT' doctor | grep -q '^PASS  bubblewrap sandbox'"
 fi
 unset AI_STEPFUN_ENGINE AI_STEPFUN_OPENCODE AI_STEPFUN_OPENCODE_ROOT
