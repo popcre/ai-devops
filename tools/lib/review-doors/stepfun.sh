@@ -304,6 +304,12 @@ main() {
     # model can read MANIFEST.md as the preamble tells it to.
     local -a packet_bind=()
     case "$DOOR_PACKET_DIR" in "$DOOR_WORKDIR"|"$DOOR_WORKDIR"/*) ;; *) packet_bind=(--ro-bind "$DOOR_PACKET_DIR" "$DOOR_PACKET_DIR") ;; esac
+    # The runner refuses a verdict when the review copy changes, and running
+    # the tests writes files. The model works in its own scratch copy; the
+    # runner's copy is mounted read-only at its own path.
+    local scratch
+    scratch="$(mktemp -d)"
+    cp -a "$DOOR_WORKDIR" "$scratch/work" || { rm -rf "$scratch" "$home_tmp"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
     # Two failures end a StepCode -p turn with no report and are re-run whole,
     # as bin/ai-stepfun does: an HTTP 429 that outlasts StepCode's own retry
     # (pause, then rerun), and the command guard refusing a command it will
@@ -317,7 +323,7 @@ main() {
         export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
         stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" \
           "${packet_bind[@]}" \
-          --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --chdir "$DOOR_WORKDIR" -- \
+          --ro-bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --bind "$scratch/work" "$scratch/work" --chdir "$scratch/work" -- \
           -p --no-session --model "$SF_STEP_MODEL" \
           --approval-mode auto --non-interactive-approval allow \
           --no-extensions --no-skills --no-prompt-templates --no-themes \
@@ -337,7 +343,7 @@ main() {
       printf 'stepfun door: the command guard ended the turn; retrying once (%s)\n' "$blocked" >&2
       prompt_text="$prompt_text"$'\n\n'"A previous attempt at this review ended with no report because the harness refused this command: $blocked"$'\n'"Do not run that command or anything like it. Use plain literal commands only."
     done
-    rm -rf "$home_tmp"
+    rm -rf "$home_tmp" "$scratch"
   fi
   set -e
   SF_KEY=""

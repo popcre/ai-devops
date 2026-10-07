@@ -239,6 +239,7 @@ STUB
 #!/usr/bin/env bash
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
 p="$(printf '%s\n' "$@" | sed -n 's/^Your evidence packet is at \(.*\)\/MANIFEST.md.*/\1/p')"
+: > ./written-by-model
 [ ! -r "$p/MANIFEST.md" ] || grep -q planted /proc/self/environ || echo STEPFUN-OK
 STUB
   drc=0
@@ -247,6 +248,7 @@ STUB
     DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
     bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
   check "real sandbox: the review door starts StepCode and sees the packet, not caller secrets" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport'"
+  check "door leaves the runner's review copy unchanged (the model writes in a scratch copy)" "[ ! -e '$RH/dw/written-by-model' ]"
   # StepCode's guard ends a non-interactive turn on a refused command; the door
   # retries once and names the refused command to the model.
   cat > "$RH/probe-bin/step" <<'STUB'
