@@ -12,7 +12,10 @@ card and return later — GitHub notifications are the reminder. A turn may end
 with an unchecked checklist on the issue.
 
 Waiting on a PERSON is named in the reply's Still-open block: say who holds it
-and what you need.
+and what you need, and whether that work is actively in progress or idle. When
+the holder is another session, say which kind: a subagent this agent spawned
+and is waiting on, a session already running that it can see, or a session it
+is asking Albert to start.
 
 A blocker issue gets an owner at birth. Assign yourself (or the session that
 will own it) and say so, or hand it to a named queue owner with an `owner:`
