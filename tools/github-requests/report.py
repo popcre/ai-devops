@@ -19,6 +19,11 @@ def summarize(directory):
     cost_counts = collections.Counter()
     outcome_counts = collections.Counter()
     receipts = {}
+    evidence = {}
+    evidence_counts = collections.Counter()
+    evidence_gaps = collections.Counter()
+    qualified_groups = collections.defaultdict(list)
+    qualified_latency = []
     costs_with_ids = []
     observed_points = cost_records = cost_window_records = unattributed_window_records = 0
     cost_windows = {}
@@ -45,6 +50,37 @@ def summarize(directory):
                 if not isinstance(stamp, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", stamp):
                     raise ValueError("invalid time")
                 stamps.append(stamp)
+                if row.get("schema") == 4:
+                    if (type(row.get("schema")) is not int or set(row) != EVIDENCE_KEYS or row.get("measurement") != "workflow_evidence"
+                            or row.get("caller") != "ai-pr-wait" or row.get("workflow") != "pr_wait"
+                            or not valid_workflow_id(row.get("workflow_id")) or row["workflow_id"] in evidence
+                            or not valid_nullable_id(row.get("cohort_id"))
+                            or not valid_target_ordinal(row.get("target_ordinal"))
+                            or row.get("source_verified") not in SOURCE_STATES
+                            or not valid_digest(row.get("source_fingerprint_start"))
+                            or not valid_digest(row.get("source_fingerprint_end"))
+                            or not valid_digest(row.get("install_generation_binding"))
+                            or row.get("event_kind") not in EVENT_KINDS
+                            or not valid_timestamp_ms(row.get("eligible_utc_ms"))
+                            or not valid_timestamp_ms(row.get("observed_utc_ms"))
+                            or not valid_timestamp_ms(row.get("delivered_utc_ms"))
+                            or row.get("delivery_boundary") not in DELIVERY_BOUNDARIES
+                            or row.get("clock_quality") not in CLOCK_QUALITIES
+                            or not valid_error_bound(row.get("clock_error_bound_ms"))
+                            or not valid_latency(row.get("latency_ms"))
+                            or row.get("unknown_reason") not in UNKNOWN_REASONS
+                            or not evidence_consistent(row)):
+                        raise ValueError("invalid workflow evidence")
+                    evidence[row["workflow_id"]] = row
+                    evidence_counts[(row["event_kind"], row["unknown_reason"])] += 1
+                    for field in ("cohort_id", "target_ordinal", "eligible_utc_ms", "observed_utc_ms", "delivered_utc_ms", "clock_error_bound_ms", "latency_ms"):
+                        evidence_gaps[field] += row[field] is None
+                    evidence_gaps["source_verified"] += row["source_verified"] != "verified"
+                    if (row["source_verified"] == "verified" and row["cohort_id"] is not None
+                            and row["event_kind"] != "unknown" and row["delivery_boundary"] == "terminal_report"
+                            and row["clock_quality"] == "verified_bound" and row["latency_ms"] is not None):
+                        qualified_latency.append(row["latency_ms"])
+                    continue
                 if row.get("schema") == 2:
                     if (frozenset(row) not in COST_SHAPES
                             or row.get("measurement") != "observed_graphql_cost"
@@ -141,6 +177,17 @@ def summarize(directory):
             raise ValueError("cost and outcome labels disagree")
         linked_cost_records += 1
         linked_points += points
+    for workflow_id, row in evidence.items():
+        receipt = receipts.get(workflow_id)
+        if receipt is None:
+            raise ValueError("workflow evidence has no outcome receipt")
+        if receipt[:2] != (row["caller"], row["workflow"]):
+            raise ValueError("evidence and outcome labels disagree")
+        expected = {"pr_merged": "merged", "pr_closed": "closed", "check_completed": "checks_failed"}.get(row["event_kind"])
+        if expected is not None and receipt[2] != expected:
+            raise ValueError("workflow evidence and outcome disagree")
+        if row["latency_ms"] is not None:
+            qualified_groups[(row["event_kind"], row["delivery_boundary"], receipt[2])].append(row["latency_ms"])
     completed = sum(count for (_, _, outcome), count in outcome_counts.items() if outcome != "deadline")
     context_ordinals = {context: i + 1 for i, context in enumerate(sorted({key[0] for key in cost_windows}))}
     return {
@@ -158,6 +205,14 @@ def summarize(directory):
             {"context_ordinal": context_ordinals[context], "reset_at": reset_at, **window}
             for (context, reset_at), window in sorted(cost_windows.items())],
         "completed_workflow_receipts": completed,
+        "workflow_evidence_records": len(evidence),
+        "workflow_evidence": [{"event_kind": event, "unknown_reason": reason, "count": count}
+                              for (event, reason), count in sorted(evidence_counts.items())],
+        "workflow_evidence_gaps": dict(sorted(evidence_gaps.items())),
+        "qualified_latency_ms": {"count": len(qualified_latency), "max": max(qualified_latency) if qualified_latency else None},
+        "qualified_latency_by_outcome": [{"event_kind": event, "delivery_boundary": boundary, "outcome": outcome,
+                                           "count": len(values), "p95_ms": sorted(values)[(95 * len(values) + 99) // 100 - 1]}
+                                          for (event, boundary, outcome), values in sorted(qualified_groups.items())],
         "workflow_outcomes": [
             {"caller": caller, "workflow": workflow, "outcome": outcome, "count": count}
             for (caller, workflow, outcome), count in sorted(outcome_counts.items())],
@@ -211,10 +266,80 @@ RECEIPT_LABELS = {
     ("ai-pr-wait", "pr_wait", outcome)
     for outcome in ("merged", "closed", "checks_failed", "ejected", "deadline")
 } | {("ai-blocker-watch", "blocker_watch_tick", "completed")}
+EVIDENCE_KEYS = {"schema", "utc", "measurement", "caller", "workflow", "workflow_id", "cohort_id", "target_ordinal",
+                 "source_verified", "source_fingerprint_start", "source_fingerprint_end", "install_generation_binding",
+                 "event_kind", "eligible_utc_ms", "observed_utc_ms", "delivered_utc_ms", "delivery_boundary",
+                 "clock_quality", "clock_error_bound_ms", "latency_ms", "unknown_reason"}
+SOURCE_STATES = {"verified", "changed", "unknown"}
+EVENT_KINDS = {"pr_merged", "pr_closed", "check_completed", "unknown"}
+DELIVERY_BOUNDARIES = {"terminal_report", "unknown"}
+CLOCK_QUALITIES = {"verified_bound", "unverified", "jump", "negative", "unknown"}
+UNKNOWN_REASONS = {"none", "metadata_absent", "metadata_untrusted", "source_unknown", "source_changed",
+                   "event_unknown", "event_invalid", "clock_unknown", "clock_jump", "clock_negative", "delivery_unknown"}
 
 
 def valid_workflow_id(value):
     return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value) is not None
+
+
+def valid_nullable_id(value):
+    return value is None or valid_workflow_id(value)
+
+
+def valid_target_ordinal(value):
+    return value is None or (type(value) is int and 1 <= value <= 1000000000)
+
+
+def valid_digest(value):
+    return value is None or (isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None)
+
+
+def valid_timestamp_ms(value):
+    return value is None or (type(value) is int and 0 <= value <= 9999999999999)
+
+
+def valid_error_bound(value):
+    return value is None or (type(value) is int and 0 <= value <= 60000)
+
+
+def valid_latency(value):
+    return value is None or (type(value) is int and 0 <= value <= 604800000)
+
+
+def evidence_consistent(row):
+    source_fields = (row["source_fingerprint_start"], row["source_fingerprint_end"], row["install_generation_binding"])
+    if row["source_verified"] == "verified" and (any(value is None for value in source_fields)
+                                                   or source_fields[0] != source_fields[1]):
+        return False
+    if row["source_verified"] == "unknown" and any(value is not None for value in source_fields):
+        return False
+    if row["source_verified"] == "changed" and (any(value is None for value in source_fields)
+            or row["source_fingerprint_start"] == row["source_fingerprint_end"]):
+        return False
+    if (row["event_kind"] == "unknown") != (row["eligible_utc_ms"] is None):
+        return False
+    if row["clock_quality"] != "verified_bound" and (row["clock_error_bound_ms"] is not None or row["latency_ms"] is not None):
+        return False
+    if row["clock_quality"] == "verified_bound" and row["clock_error_bound_ms"] is None:
+        return False
+    if row["delivery_boundary"] == "terminal_report" and (row["observed_utc_ms"] is None or row["delivered_utc_ms"] is None):
+        return False
+    if row["eligible_utc_ms"] is not None and (row["observed_utc_ms"] is None or row["eligible_utc_ms"] > row["observed_utc_ms"]):
+        return False
+    if row["delivery_boundary"] == "terminal_report" and row["delivered_utc_ms"] < row["observed_utc_ms"]:
+        return False
+    if row["unknown_reason"] == "none" and (row["source_verified"] != "verified" or row["clock_quality"] != "verified_bound" or row["latency_ms"] is None):
+        return False
+    if row["latency_ms"] is not None:
+        if (row["source_verified"] != "verified" or row["cohort_id"] is None
+                or row["clock_quality"] != "verified_bound" or row["clock_error_bound_ms"] is None
+                or row["event_kind"] == "unknown" or row["delivery_boundary"] != "terminal_report"
+                or row["observed_utc_ms"] is None or row["delivered_utc_ms"] is None):
+            return False
+        elapsed = row["delivered_utc_ms"] - row["eligible_utc_ms"]
+        if elapsed < 0 or elapsed != row["latency_ms"]:
+            return False
+    return True
 
 
 def valid_access_context(value):
