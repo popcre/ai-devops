@@ -289,13 +289,20 @@ main() {
       rm -f "$prompt_full"
       exit 2
     }
-    local home_tmp
+    # StepCode is dynamically linked. Its ELF interpreter lives under /lib64
+    # on this host; keep the system loader roots visible without mounting /.
+    local home_tmp top
+    local -a loader_binds=()
+    for top in /lib /lib64; do
+      if [ -L "$top" ]; then loader_binds+=(--symlink "$(readlink "$top")" "$top")
+      elif [ -d "$top" ]; then loader_binds+=(--ro-bind "$top" "$top"); fi
+    done
     home_tmp="$(mktemp -d)"
     (
       export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
       export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
       timeout "$SF_TIMEOUT" bwrap --die-with-parent --unshare-all --share-net \
-        --ro-bind /usr /usr --ro-bind /etc /etc --dev /dev --proc /proc \
+        --ro-bind /usr /usr "${loader_binds[@]}" --ro-bind /etc /etc --dev /dev --proc /proc \
         --tmpfs /tmp --tmpfs /run --tmpfs "$home_tmp" \
         --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
         --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --chdir "$DOOR_WORKDIR" -- \
