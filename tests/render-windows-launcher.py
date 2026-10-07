@@ -30,12 +30,13 @@ SUBST = {
     "$logFwd":     "/C/Users/u/.config/ai-devops/opencode/server.log",
     "$launchBash": "/C/Users/u/.local/bin/opencode-glm-launch",
     "$Port":       "4096",
+    "$creditHelperBash": "/C/Users/u/repos/ai-devops/tools/glm_credit.py",
 }
 BASH_VARS = {"AI_DEVOPS_CONFIG_DIR","HOME","CFG_DIR","TOKEN_FILE","MCP_ENV","OC_HOME",
              "XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_STATE_HOME","XDG_CACHE_HOME",
              "ZAI_API_KEY","ZHIPU_API_KEY","AI_GLM_LAUNCH_REEXEC","OP_SERVICE_ACCOUNT_TOKEN",
              "OPENCODE_SERVER_USERNAME","OPENCODE_SERVER_PASSWORD","AI_GLM_PORT",
-             "AI_GLM_ATTEMPT_TIMEOUT","port","attempt","max_attempts","attempt_timeout",
+             "AI_GLM_ATTEMPT_TIMEOUT","_credit_python","port","attempt","max_attempts","attempt_timeout",
              "child","status","SECONDS","before","now","log","referenced","p","c","w","holder"}
 
 # The only variable names permitted to appear bash-escaped (\$name) in rendered
@@ -69,6 +70,8 @@ def render(body):
 
 out = render(launchers[0])
 wrapper = render(wrappers[0])
+if 'printf \'%s\' "$ZAI_API_KEY" | env -u ZAI_API_KEY "$_credit_python" "/C/Users/u/repos/ai-devops/tools/glm_credit.py" publish' not in out:
+    sys.exit("protected GLM credit cache publication lost its bound helper or stdin transport")
 # PS expands a bare $_ inside the double-quoted here-string to empty, silently
 # gutting the generated kill helper (review finding, 2026-09-18). The stray-var
 # check below now rejects it; assert the positive form too so the helper's

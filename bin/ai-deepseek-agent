@@ -38,7 +38,7 @@ set -uo pipefail
 unset DEEPSEEK_API_KEY
 
 # Preserve every invocation outcome before reusable session metadata changes.
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+if [ "${BASH_SOURCE[0]}" = "$0" ] && [ "${1:-}" != balance ]; then
   _AI_EVENT_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
   source "$(dirname "$_AI_EVENT_SELF")/../tools/reviewer_event_guard.sh"
   reviewer_event_guard deepseek "$_AI_EVENT_SELF" "$@"
@@ -89,6 +89,8 @@ CALL_TIMEOUT="${AI_DEEPSEEK_CALL_TIMEOUT:-300}"
 usage() {
   cat <<'EOF'
 Usage:
+  ai-deepseek-agent balance
+      Read official account availability once; no model call, raw balance or 1Password.
   ai-deepseek-agent send "<message>" [--file FILE]... [--model deepseek-flash] [--system "<prompt>"] [--review] [--repo-tools]
       Start a NEW conversation. Prints SESSION_ID: <id>, then the reply.
       Pinned model: deepseek-flash (DeepSeek V4.1 Flash) -- the only id this
@@ -150,7 +152,7 @@ SUBCMD="${1:-}"
 [ -n "$SUBCMD" ] && shift || true
 
 case "$SUBCMD" in
-  send|reply|show|list|doctor|finalize|store-key) ;;
+  send|reply|show|list|doctor|finalize|store-key|balance) ;;
   ""|-h|--help|help) usage; exit 0 ;;
   *) echo "Unknown subcommand: $SUBCMD" >&2; echo >&2; usage >&2; exit 2 ;;
 esac
@@ -165,7 +167,7 @@ fi
 # offline doctor never consult the model; an ambient invalid DEEPSEEK_MODEL
 # must not fence off local recovery of a retained paid turn.
 case "$SUBCMD" in
-  send|reply)
+  send|reply|balance)
     case "$MODEL" in deepseek-flash) ;; *) refuse_unsupported_model "$MODEL" ;; esac
     ;;
   doctor)
@@ -264,7 +266,7 @@ key_store_ok() {
 if [ "$SUBCMD" = store-key ] && [ "${1:-}" = --if-missing ] && key_store_ok; then
   echo 'DeepSeek protected key store already present.'; exit 0
 fi
-if [ "$SUBCMD" != store-key ] && { [ "$SUBCMD" = send ] || [ "$SUBCMD" = reply ] || { [ "$SUBCMD" = doctor ] && [ "${1:-}" = --live ]; }; } && [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+if [ "$SUBCMD" != store-key ] && { [ "$SUBCMD" = send ] || [ "$SUBCMD" = reply ] || [ "$SUBCMD" = balance ] || { [ "$SUBCMD" = doctor ] && [ "${1:-}" = --live ]; }; } && [ -z "${DEEPSEEK_API_KEY:-}" ]; then
   key_store_ok || { echo 'Error: DeepSeek protected key store is missing or insecure. Run ai-deepseek-agent store-key outside a review.' >&2; exit 1; }
   IFS= read -r DEEPSEEK_API_KEY < "$KEY_STORE" || DEEPSEEK_API_KEY=""
   [ -n "$DEEPSEEK_API_KEY" ] || { echo 'Error: DeepSeek protected key store is empty.' >&2; exit 1; }
@@ -444,7 +446,7 @@ case "$CONNECT_TIMEOUT" in ''|0|*[!0-9]*) echo 'Error: AI_DEEPSEEK_CONNECT_TIMEO
 case "$CALL_TIMEOUT" in ''|0|*[!0-9]*) echo 'Error: AI_DEEPSEEK_CALL_TIMEOUT must be a positive whole number of seconds.' >&2; exit 2;; esac
 
 REPO_ROOT=""; SESS_DIR=""; EXPECTED_SESS_DIR=""
-if [ "$SUBCMD" != doctor ]; then
+if [ "$SUBCMD" != doctor ] && [ "$SUBCMD" != balance ]; then
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     REPO_ROOT="$(git rev-parse --show-toplevel)"
   else
@@ -1358,6 +1360,11 @@ evidence and return BLOCKED instead of inferring it.
 End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED.'
 
 case "$SUBCMD" in
+  balance)
+    [ "$#" -eq 0 ] || { echo "Usage: ai-deepseek-agent balance" >&2; exit 2; }
+    # This official GET creates no conversation and reads only the protected cache.
+    printf '%s' "$DEEPSEEK_PROVIDER_KEY" | "$PYTHON" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/deepseek_balance.py"
+    ;;
   finalize)
     ID="${1:-}"; [ "$#" = 1 ] || { echo 'Usage: ai-deepseek-agent finalize <session-id>' >&2; exit 2; }
     F="$(session_path "$ID")" || exit 2
