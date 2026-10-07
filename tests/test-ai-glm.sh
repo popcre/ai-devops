@@ -1548,6 +1548,35 @@ check "touch_liveness is driven by the assistant message, not /session/status" \
 check "review and recovery call sites arm TURN_META before await_turn" \
   "[ \$(grep -c 'TURN_META=\"\$mp\"' '$AI_GLM') -eq 3 ]"
 
+# PR #1366 (2026-10-06): the provider answered HTTP 429 quota exhaustion in 4s,
+# OpenCode stored finish="error", and the wrapper polled for finish="stop" until it
+# was killed 25 minutes later. A provider error must end the turn at once.
+PERR_TMP="$(mktemp -d)"
+perr_out="$(AI_GLM_SOURCE="$AI_GLM" PERR="$PERR_TMP" timeout 30 bash -c '
+  source "$AI_GLM_SOURCE"
+  TIMEOUT=600; POLL_SECS=1; TURN_META=""; ACTIVE_DIAG_RUN=""
+  sleep(){ :; }; handle_permissions(){ :; }
+  api(){ printf "{}"; }
+  last_assistant(){ printf "%s" "{\"id\":\"msg_err\",\"finish\":\"error\",\"error\":{\"type\":\"unknown\",\"message\":\"Provider request failed with HTTP 429: Weekly/Monthly Limit Exhausted\"}}"; }
+  record_diagnostic(){ printf "%s\n" "$*" > "$PERR/diag"; }
+  await_turn sid perr-fixture review "$PERR"
+' 2>&1)"; perr_rc=$?
+check "provider error finish ends the turn immediately (no deadline wait)" "[ $perr_rc -ne 0 ] && [ $perr_rc -ne 124 ]"
+check "provider quota error is classified and reported" \
+  "printf '%s' \"\$perr_out\" | grep -q 'provider-quota-exhausted' && grep -q 'failure-class provider-quota-exhausted' '$PERR_TMP/diag'"
+perr_old="$(AI_GLM_SOURCE="$AI_GLM" PERR="$PERR_TMP" timeout 30 bash -c '
+  source "$AI_GLM_SOURCE"
+  TIMEOUT=3; POLL_SECS=1; ACTIVE_DIAG_RUN=""
+  TURN_META="$PERR/meta"; printf "%s" "{\"remote_turn\":{\"previous_message_id\":\"msg_err\"}}" > "$TURN_META"
+  handle_permissions(){ :; }; api(){ printf "{}"; }
+  last_assistant(){ printf "%s" "{\"id\":\"msg_err\",\"finish\":\"error\",\"error\":{\"message\":\"old\"}}"; }
+  record_diagnostic(){ :; }
+  await_turn sid perr-fixture review "$PERR"
+' 2>&1)"
+check "a stale error from the previous turn is not mistaken for this turn" \
+  "printf '%s' \"\$perr_old\" | grep -q 'did not complete within'"
+rm -rf "$PERR_TMP"
+
 glm_recovery_cases
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1194,6 +1194,26 @@ touch_liveness() { # touch_liveness ASSISTANT_JSON
   return 0
 }
 
+# A provider failure is terminal: OpenCode stores it as an assistant message with
+# finish="error" and stops the turn. Waiting for finish="stop" after that only burns
+# the whole turn deadline (PR #1366: HTTP 429 quota exhaustion at 4s, killed at 25m).
+provider_turn_error() { # provider_turn_error ASSISTANT_JSON NAME [IMPLEMENTATION_META]
+  local msg="$1" name="$2" impl_meta="${3:-}" detail failure=provider-error
+  detail="$(printf '%s' "$msg" | jq -r '(.error.message // .error.data.message // .error.name // "unspecified provider error") | tostring' | tr '\r\n' '  ' | cut -c1-600)"
+  case "$detail" in
+    *"HTTP 429"*|*"Limit Exhausted"*|*[Qq]uota*|*"rate limit"*|*"Rate limit"*) failure=provider-quota-exhausted;;
+  esac
+  if [ -n "$impl_meta" ]; then
+    implementation_update "$impl_meta" \
+      '.failure=$f | .failure_summary="provider returned an error and ended the turn" | .failure_detected_at=$now' \
+      --arg f "$failure" --arg now "$(date -u +%FT%TZ)" || return 1
+    return 125
+  fi
+  record_diagnostic terminal provider-error --terminal-reason error --cancellation-confirmation not-requested --failure-class "$failure"
+  die "GLM provider returned an error and ended the turn ($failure): $detail
+       Session $name was not given a verdict; retry after the provider recovers."
+}
+
 await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> assistant JSON
   local sid="$1" name="$2" mode="$3" root="$4" impl_meta="${5:-}" idle=0 msg='{}' finish stuck previous="" saved_deadline budget poll_rc
   local GLM_HTTP_DEADLINE
@@ -1231,6 +1251,9 @@ await_turn() { # await_turn SID NAME MODE SESSION_DIR [IMPLEMENTATION_META] -> a
     # `last_poll_at` is the weaker companion: the wrapper is alive and polling.
     [ -n "$previous" ] && [ "$(printf '%s' "$msg" | jq -r '.id // empty')" = "$previous" ] || touch_liveness "$msg"
     finish="$(printf '%s' "$msg" | jq -r '.finish // ""')"
+    if [ "$finish" = "error" ] && { [ -z "$previous" ] || [ "$(printf '%s' "$msg" | jq -r '.id // empty')" != "$previous" ]; }; then
+      provider_turn_error "$msg" "$name" "$impl_meta"; return $?
+    fi
     if [ "$finish" = "stop" ] && [ "$idle" -ge 2 ] && { [ -z "$previous" ] || [ "$(printf '%s' "$msg" | jq -r '.id // empty')" != "$previous" ]; }; then
       printf '%s' "$msg"; return 0
     fi
@@ -1923,6 +1946,8 @@ EXCL
     fi
     if [ "$(jq -r '.failure // empty' "$IMPL_META" 2>/dev/null)" = turn-timeout ]; then
       IMPL_FAILURE=turn-timeout
+    elif [ "$turn_rc" -eq 125 ]; then
+      IMPL_FAILURE="$(jq -r '.failure // "provider-error"' "$IMPL_META" 2>/dev/null || printf provider-error)"
     elif server_up; then
       msg="$(last_assistant "$IMPL_SID" 2>/dev/null || printf '{}')"
       if printf '%s' "$msg" | jq -r '[.content[]? | select(.type=="text") | .text] | join(" ")' 2>/dev/null |
