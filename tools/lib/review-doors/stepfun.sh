@@ -38,6 +38,12 @@ case "$MODE" in review|implement) ;; *) printf 'stepfun door: usage: stepfun.sh 
 # Repository root, for the pinned OpenCode install and the StepFun profile.
 SF_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SF_PROFILE_SRC="$SF_ROOT/config/opencode-stepfun"
+# The one StepCode bubblewrap launch, shared with bin/ai-stepfun.
+# shellcheck source=../stepfun-sandbox.sh
+source "$SF_ROOT/tools/lib/stepfun-sandbox.sh"
+# reviewer_credit_scan: the shared out-of-credit classifier.
+# shellcheck source=../../reviewer_event_guard.sh
+source "$SF_ROOT/tools/reviewer_event_guard.sh"
 SF_OC_VERSION="$(tr -d ' \r\n' < "$SF_ROOT/config/opencode/version" 2>/dev/null || true)"
 
 # Model pins. StepCode uses the step/ id; the OpenCode profile pins
@@ -257,6 +263,60 @@ extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
   } > "$dest"
 }
 
+# sf_rpc_turn PROMPT_FILE: one StepCode turn in RPC mode inside the shared sandbox.
+# Uses main's bin, bwrap, timeout_bin, home_tmp, sandbox_args, log and out.
+# Writes the final assistant text to $log; declined commands and provider
+# errors go to $out.err. Returns 0 only when the model answered.
+sf_rpc_turn() {
+  local prompt_file="$1" line typ id method text="" sf_pid
+  : > "$log"; : > "$out.err"
+  coproc SF_RPC {
+    export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
+    export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
+    stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" "${sandbox_args[@]}" -- \
+      --mode rpc --no-session --model "$SF_STEP_MODEL" --approval-mode auto \
+      --no-extensions --no-skills --no-prompt-templates --no-themes \
+      --no-approve --no-update-check 2>>"$out.err"
+  }
+  sf_pid="$SF_RPC_PID"
+  local to_rpc="${SF_RPC[1]}" from_rpc="${SF_RPC[0]}"
+  # --rawfile: a full review prompt can exceed the 128 KiB argv string limit.
+  jq -cn --rawfile m "$prompt_file" '{id:"door-prompt",type:"prompt",message:$m}' >&"$to_rpc"
+  while IFS= read -r line <&"$from_rpc"; do
+    typ="$(jq -r '.type // empty' <<<"$line" 2>/dev/null || true)"
+    case "$typ" in
+      extension_ui_request)
+        id="$(jq -r '.id // empty' <<<"$line")"; method="$(jq -r '.method // empty' <<<"$line")"
+        case "$method" in
+          confirm)
+            jq -r '"Declined: " + ((.message // .title // "") | split("\n") | map(select(test("^(Dangerous|Blocked|Shell)"))) | first // "")' <<<"$line" | cut -c1-400 >>"$out.err"
+            jq -cn --arg id "$id" '{type:"extension_ui_response",id:$id,confirmed:false}' >&"$to_rpc" ;;
+          select|input|editor)
+            jq -cn --arg id "$id" '{type:"extension_ui_response",id:$id,cancelled:true}' >&"$to_rpc" ;;
+        esac ;;
+      agent_end)
+        jq -r '[.messages[]? | select(.role=="assistant") | .errorMessage // empty] | last // empty' <<<"$line" >>"$out.err" 2>/dev/null || true ;;
+      agent_settled)
+        jq -cn '{id:"door-text",type:"get_last_assistant_text"}' >&"$to_rpc" ;;
+      response)
+        case "$(jq -r '.id // empty' <<<"$line")" in
+          door-text) text="$(jq -r '.data.text // empty' <<<"$line")"; break ;;
+          door-prompt) [ "$(jq -r '.success' <<<"$line")" = true ] || { jq -r '.error // "prompt refused"' <<<"$line" >>"$out.err"; break; } ;;
+        esac ;;
+    esac
+  done
+  eval "exec ${to_rpc}>&-" 2>/dev/null || true
+  kill "$sf_pid" 2>/dev/null || true
+  wait "$sf_pid" 2>/dev/null || true
+  [ -n "$text" ] || return 1
+  printf '%s\n' "$text" > "$log"
+}
+
+# Temporary trees this door made; removed on every exit, killed runs included.
+SF_TEMP_PATHS=()
+sf_temp_cleanup() { [ "${#SF_TEMP_PATHS[@]}" -eq 0 ] || rm -rf -- "${SF_TEMP_PATHS[@]}" 2>/dev/null || true; }
+trap sf_temp_cleanup EXIT
+
 main() {
   local engine bin prompt_full out log rc agent
   engine="$(select_engine)" || exit $?
@@ -270,7 +330,10 @@ main() {
   {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
-    printf 'The reviewed head commit is %s; quote that full SHA in your report.\n\n' "$DOOR_HEAD"
+    printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
+    printf 'Commands the harness judges dangerous (rm -rf and similar) are declined; do not retry them.\n'
+    [ "$MODE" != review ] || printf 'Work in your current directory: it is a private writable copy of the review workdir, discarded afterwards; never write to the original path.\n'
+    printf '\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
@@ -282,10 +345,16 @@ main() {
   if [ "$engine" = opencode ]; then
     bin="$(resolve_opencode)" || { rm -f "$prompt_full"; exit 127; }
     if [ "$MODE" = implement ]; then agent="stepfun-implement"; else agent="stepfun-review"; fi
-    local xdg
+    local xdg oc_dir="$DOOR_WORKDIR" oc_scratch=""
     xdg="$(mktemp -d)"
     if ! install_opencode_profile "$xdg" "$agent"; then
       rm -rf "$xdg"; rm -f "$prompt_full"; exit 127
+    fi
+    # Review: the model works in a private copy, as on Linux, so its test
+    # runs never change the runner's sealed copy (snapshot drift).
+    if [ "$MODE" = review ]; then
+      oc_scratch="$(mktemp -d)"; oc_dir="$oc_scratch/work"; SF_TEMP_PATHS+=("$oc_scratch")
+      cp -a "$DOOR_WORKDIR" "$oc_dir" || { rm -rf "$xdg" "$oc_scratch"; rm -f "$prompt_full"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
     fi
     (
       export XDG_CONFIG_HOME="$(native_path "$xdg/config")" \
@@ -296,85 +365,80 @@ main() {
       printf '%s' "$(cat "$prompt_full")" \
         | timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
             --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
-            --dir "$(native_path "$DOOR_WORKDIR")" \
+            --dir "$(native_path "$oc_dir")" \
             > "$log" 2> "$out.err"
     )
     rc=$?
-    rm -rf "$xdg"
+    rm -rf "$xdg"; [ -z "$oc_scratch" ] || rm -rf "$oc_scratch"
   else
-    # StepCode on Linux. Rotation rule 12 (#1086): every turn runs under
-    # bubblewrap with only the system trees, the CLI, and the disposable copy
-    # mounted; home and /tmp are empty and the environment is cleared.
+    # StepCode on Linux. Rotation rule 12 (#1086): every turn runs under the
+    # shared bubblewrap launch (tools/lib/stepfun-sandbox.sh) with the system
+    # trees, the CLI, the packet, and the disposable copy mounted.
     bin="$(resolve_stepcode)" || { rm -f "$prompt_full"; exit 127; }
-    command -v bwrap >/dev/null 2>&1 || {
+    local bwrap timeout_bin
+    bwrap="${AI_STEPFUN_BWRAP:-$(PATH=/usr/bin:/bin command -v bwrap 2>/dev/null || true)}"
+    [ -n "$bwrap" ] && [ -x "$bwrap" ] || {
       printf 'stepfun door: unsupported-platform: StepCode turns require bubblewrap (bwrap) on Linux.\n' >&2
       rm -f "$prompt_full"
       exit 2
     }
-    # Linux limits each argv string to 128 KiB. A complete review prompt can
-    # exceed that; StepCode's supported @file input preserves every byte.
-    local -a prompt_args=() prompt_binds=()
-    if [ "$(wc -c < "$prompt_full")" -gt 65536 ]; then
-      prompt_args=("--" "@$prompt_full")
-      prompt_binds=(--ro-bind "$prompt_full" "$prompt_full")
-    else
-      prompt_args=("--" "$(cat "$prompt_full")")
-    fi
-    # StepCode is dynamically linked. Its ELF interpreter lives under /lib64
-    # on this host; keep the system loader roots visible without mounting /.
-    local home_tmp model_catalog resolver_target top
-    local -a loader_binds=()
-    local -a resolver_binds=()
-    for top in /lib /lib64; do
-      if [ -L "$top" ]; then loader_binds+=(--symlink "$(readlink "$top")" "$top")
-      elif [ -d "$top" ]; then loader_binds+=(--ro-bind "$top" "$top"); fi
-    done
-    # /etc/resolv.conf may point into /run, which is replaced with an empty
-    # tmpfs. Bind only that one resolver file; its directory may hold sockets.
-    if [ -L /etc/resolv.conf ]; then
-      resolver_target="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
-      case "$resolver_target" in
-        /run/*)
-          [ -f "$resolver_target" ] || { printf 'stepfun door: local_dependency_unavailable: resolver target missing.\n' >&2; rm -f "$prompt_full"; exit 127; }
-          resolver_binds=(--dir "$(dirname "$resolver_target")" --ro-bind "$resolver_target" "$resolver_target")
-          ;;
-        /etc/*|/usr/*) ;;
-        *) printf 'stepfun door: local_dependency_unavailable: resolver target is outside sandbox system trees.\n' >&2; rm -f "$prompt_full"; exit 127 ;;
-      esac
-    fi
-    home_tmp="$(mktemp -d)"
-    model_catalog="$(mktemp)"
+    local home_tmp
+    timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)"
+    home_tmp="$(mktemp -d)"; SF_TEMP_PATHS+=("$home_tmp")
+    # StepCode reads its model catalog from ~/.stepcode/models.json; the empty
+    # sandbox HOME gets only our pinned model (#1380).
+    local model_catalog
+    model_catalog="$(mktemp)"; SF_TEMP_PATHS+=("$model_catalog")
     if ! write_stepcode_catalog "$model_catalog"; then
       printf 'stepfun door: local_dependency_unavailable: StepCode model catalog could not be prepared.\n' >&2
-      rm -f "$model_catalog" "$prompt_full"
-      rm -rf "$home_tmp"
+      rm -f "$model_catalog" "$prompt_full"; rm -rf "$home_tmp"
       exit 127
     fi
-    (
-      export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
-      export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
-      timeout "$SF_TIMEOUT" bwrap --die-with-parent --unshare-all --share-net \
-        --ro-bind /usr /usr "${loader_binds[@]}" --ro-bind /etc /etc --dev /dev --proc /proc \
-        --tmpfs /tmp --tmpfs /run "${resolver_binds[@]}" \
-        --tmpfs "$home_tmp" \
-        --dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json" \
-        --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
-        --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" "${prompt_binds[@]}" --chdir "$DOOR_WORKDIR" -- \
-        "$bin" -p --no-session --model "$SF_STEP_MODEL" \
-        --approval-mode auto --non-interactive-approval allow \
-        --no-extensions --no-skills --no-prompt-templates --no-themes \
-        --no-approve --no-update-check "${prompt_args[@]}" \
-        > "$log" 2> "$out.err"
-    )
-    rc=$?
-    rm -f "$model_catalog"
-    rm -rf "$home_tmp"
+    # The packet usually lives outside the workdir; mount it read-only so the
+    # model can read MANIFEST.md as the preamble tells it to.
+    local -a packet_bind=()
+    case "$DOOR_PACKET_DIR" in "$DOOR_WORKDIR"|"$DOOR_WORKDIR"/*) ;; *) packet_bind=(--ro-bind "$DOOR_PACKET_DIR" "$DOOR_PACKET_DIR") ;; esac
+    # Review: the runner refuses a verdict when the review copy changes, and
+    # running the tests writes files, so the model works in its own scratch
+    # copy and the runner's copy is mounted read-only at its own path.
+    # Implement: the runner's disposable copy is the work product, writable.
+    local scratch="" work="$DOOR_WORKDIR"
+    local -a work_binds=(--bind "$DOOR_WORKDIR" "$DOOR_WORKDIR")
+    if [ "$MODE" = review ]; then
+      scratch="$(mktemp -d)"; work="$scratch/work"; SF_TEMP_PATHS+=("$scratch")
+      cp -a "$DOOR_WORKDIR" "$work" || { rm -rf "$scratch" "$home_tmp"; printf 'stepfun door: could not copy the review workdir.\n' >&2; exit 1; }
+      work_binds=(--ro-bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --bind "$work" "$work")
+    fi
+    # StepCode's command guard asks before any command it will not run
+    # unattended (rm -rf, unanalysable shell). In -p mode that question ends
+    # the whole turn with no report, so the turn runs in RPC mode and the door
+    # declines every such question: the model is told no and keeps reviewing.
+    # An HTTP 429 that outlasts StepCode's own retry reruns the turn after a
+    # pause, as bin/ai-stepfun does.
+    local rate_retries=0
+    local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
+    local -a sandbox_args=(--dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json"
+      "${packet_bind[@]}" "${work_binds[@]}" --chdir "$work")
+    while :; do
+      sf_rpc_turn "$prompt_full"
+      rc=$?
+      [ "$rc" -ne 0 ] || break
+      grep -Eq '^429: \{' "$out.err" 2>/dev/null && [ "$rate_retries" -lt "$rate_max" ] || break
+      rate_retries=$((rate_retries + 1))
+      printf 'stepfun door: StepFun rate limit reached; retrying in %ss (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
+      sleep "$rate_pause"
+    done
+    rm -f "$model_catalog"; rm -rf "$home_tmp"; [ -z "$scratch" ] || rm -rf "$scratch"
   fi
   set -e
   SF_KEY=""
 
-  if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT stepfun door\n' >&2
+  # Out of credit: the one shared classifier reads the provider error lines
+  # (the agent_end errors land in $out.err), records the out-of-credit
+  # quarantine, and prints both contract lines; the runner keeps exit 92.
+  if [ "$rc" -eq 92 ] || { [ "$rc" -ne 0 ] && reviewer_credit_scan stepfun "$out.err"; }; then
+    [ -z "${REVIEWER_CREDIT_HIT:-}" ] || printf '%s\n' "$REVIEWER_CREDIT_HIT" >&2
+    [ -n "${REVIEWER_CREDIT_HIT:-}" ] || printf 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota\n' >&2
     rm -f "$prompt_full"
     exit 92
   fi

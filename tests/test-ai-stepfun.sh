@@ -26,6 +26,14 @@ STUB
 cat >> "$TMP/bin/step" <<'STUB'
 [ "${1:-}" = --version ] && { echo 0.1.1; exit 0; }
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant with read, bash, edit, write tools'; exit 0; }
+# RPC mode (the review door): answer the prompt with this stub's -p answer.
+if printf '%s\n' "$@" | grep -qx rpc; then
+  read -r req; msg="$(jq -r .message <<<"$req")"
+  echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+  ans="$("$0" -p -- "$msg" 2>/dev/null)"
+  echo '{"type":"agent_settled"}'; read -r _
+  jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'; exit 0
+fi
 printf '%s\n' "$@" > "$STUB_ARGS"; printf '%s\n' "${STEP_API_KEY:-}" > "$STUB_ARGS.key"; env > "$STUB_ARGS.env"
 prompt="${@: -1}"
 if [[ "$prompt" == @* ]]; then
@@ -75,7 +83,7 @@ while [ "$#" -gt 0 ]; do case "$1" in
   --chdir) cd "$2" || exit 97; shift 2 ;;
   --setenv) [ "$2" = HOME ] || export "$2=$3"; shift 3 ;;
   --die-with-parent|--unshare-all|--share-net) shift ;;
-  --dev|--proc|--tmpfs) shift 2 ;;
+  --dev|--proc|--tmpfs|--dir) shift 2 ;;
   *) shift 3 ;;
 esac; done
 exec "$@"
@@ -136,7 +144,7 @@ if [ "$(uname -s)" != Linux ]; then
   SKIP=$((SKIP + 1)); echo 'SKIP  stubbed Linux path (not a Linux filesystem)'
 else
 check "doctor passes with the stub and a protected key store" "'$SCRIPT' doctor | grep -q '^OK engine=stepcode'"
-check "doctor prints one PASS line per check for the shared-db allocator" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 4 ] && mode ok && [ \"\$('$SCRIPT' doctor --live | grep -c '^PASS  ')\" = 5 ]"
+check "doctor prints one PASS line per check for the shared-db allocator" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 4 ] && mode ok && [ \"\$('$SCRIPT' doctor --live | grep -c '^PASS  ')\" = 6 ]"
 check "doctor refuses a key store that is not owner-only" "chmod 644 '$AI_STEPFUN_KEY_STORE'; ! '$SCRIPT' doctor >/dev/null; rc=\$?; chmod 600 '$AI_STEPFUN_KEY_STORE'; [ \$rc = 0 ]"
 check "live doctor makes one call and sees the answer" "mode ok; '$SCRIPT' doctor --live | grep -q 'live=verified'"
 check "the key reaches step through the environment, never argv" "mode ok; '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key' && ! grep -q stub-key '$STUB_ARGS'"
@@ -235,6 +243,14 @@ if [ -n "$REAL_BWRAP" ] && "$REAL_BWRAP" --ro-bind /usr /usr --symlink usr/bin /
 #!/usr/bin/env bash
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
 [ "${1:-}" = --version ] && { echo 0.1.1; exit 0; }
+# RPC mode (the review door): answer the prompt with this stub's -p answer.
+if printf '%s\n' "$@" | grep -qx rpc; then
+  read -r req; msg="$(jq -r .message <<<"$req")"
+  echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+  ans="$("$0" -p -- "$msg" 2>/dev/null)"
+  echo '{"type":"agent_settled"}'; read -r _
+  jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'; exit 0
+fi
 touch "$HOME/escape" 2>/dev/null
 [ -e "$HOME/.ssh/id_test" ] || grep -q planted /proc/self/environ || echo STEPFUN-OK
 STUB
@@ -242,6 +258,92 @@ STUB
   out="$(OP_SERVICE_ACCOUNT_TOKEN=planted-op HOME="$RH" AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STATE_DIR="$RH/state" AI_STEPFUN_BWRAP="$REAL_BWRAP" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" "$SCRIPT" doctor --live 2>&1)"
   check "real sandbox: the model cannot see home or environment secrets" "printf '%s' \"\$out\" | grep -q 'live=verified'"
   check "real sandbox: writes to the real home do not escape" "[ ! -e '$RH/escape' ]"
+  # The shared-runner door must start StepCode with the same mounts (the door
+  # once lacked the /lib64 link, so execvp failed while doctor stayed green).
+  DOOR="$ROOT/tools/lib/review-doors/stepfun.sh"
+  mkdir -p "$RH/dw" "$RH/dp"; printf 'probe\n' > "$RH/dp/MANIFEST.md"; printf 'say ok\n' > "$RH/dprompt"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+# RPC mode (the review door): answer the prompt with this stub's -p answer.
+if printf '%s\n' "$@" | grep -qx rpc; then
+  read -r req; msg="$(jq -r .message <<<"$req")"
+  echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+  ans="$("$0" -p -- "$msg" 2>/dev/null)"
+  echo '{"type":"agent_settled"}'; read -r _
+  jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'; exit 0
+fi
+p="$(printf '%s\n' "$@" | sed -n 's/^Your evidence packet is at \(.*\)\/MANIFEST.md.*/\1/p')"
+: > ./written-by-model
+[ ! -r "$p/MANIFEST.md" ] || grep -q planted /proc/self/environ || echo STEPFUN-OK
+STUB
+  drc=0
+  OP_SERVICE_ACCOUNT_TOKEN=planted-op HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "real sandbox: the review door starts StepCode and sees the packet, not caller secrets" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport'"
+  check "door leaves the runner's review copy unchanged (the model writes in a scratch copy)" "[ ! -e '$RH/dw/written-by-model' ]"
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" implement >"$RH/dout" 2>&1 || drc=$?
+  check "door implement mode writes into the runner's disposable copy" "[ '$drc' = 0 ] && [ -e '$RH/dw/written-by-model' ]"
+  rm -f "$RH/dw/written-by-model"
+  # StepCode's guard asks before a dangerous command; the door declines it
+  # and the turn goes on to a report.
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"extension_ui_request","id":"c1","method":"confirm","title":"Dangerous run_command","message":"Call: x\nDangerous command requires confirmation (recursive-force-remove): run_command command=rm -rf ./x"}'
+read -r resp; ans=""
+[ "$(jq -r '.id + ":" + (.confirmed|tostring)' <<<"$resp")" = 'c1:false' ] && ans=STEPFUN-OK
+echo '{"type":"agent_settled"}'; read -r _
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
+STUB
+  rm -f "$RH/dreport"
+  drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "door declines the command guard's question and the turn still reports" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport'"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+ans=STEPFUN-OK
+if [ ! -e ./limited ]; then : > ./limited; ans=""
+  echo '{"type":"agent_end","messages":[{"role":"assistant","content":[],"errorMessage":"429: {\"type\":\"rate_limited\"}"}]}'; fi
+echo '{"type":"agent_settled"}'; read -r _
+jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'
+STUB
+  rm -f "$RH/dreport"; drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode AI_STEPFUN_RATE_PAUSE=0 \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "door reruns the turn after a StepFun 429 rate limit" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && grep -q 'rate limit reached' '$RH/dout'"
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+read -r req
+echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
+echo '{"type":"agent_end","messages":[{"role":"assistant","content":[],"errorMessage":"402: {\"type\":\"quota_exceeded\"}"}]}'
+echo '{"type":"agent_settled"}'; read -r _
+echo '{"id":"door-text","type":"response","data":{"text":""}}'
+STUB
+  drc=0
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1 || drc=$?
+  check "door reports out of credit (exit 92) through the shared classifier" "[ '$drc' = 92 ] && grep -q '^AI_REVIEWER_OUT_OF_CREDIT provider=stepfun' '$RH/dout' && grep -q '^OUT OF CREDIT: ' '$RH/dout'"
+  check "door probe: doctor --live also runs a turn through the review door" "printf '%s' \"\$out\" | grep -q 'PASS  live call through the review door answered'"
   rm -rf "$RH"
 else
   skip "real sandbox checks (bubblewrap unavailable here)"; skip "real sandbox escape check"

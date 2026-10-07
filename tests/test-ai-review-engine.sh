@@ -133,20 +133,7 @@ if [ "$(uname -s)" = Linux ] && command -v bwrap >/dev/null 2>&1 && command -v c
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-int main(int argc, char **argv) {
-  if (argc > 1 && strcmp(argv[1], "--help") == 0) { puts("step - AI coding assistant"); return 0; }
-  if (argc > 1 && strcmp(argv[1], "--version") == 0) { puts("step-fixture-version"); return 0; }
-  if (argc > 1 && strcmp(argv[1], "-p") == 0) {
-    const char *approval = NULL, *fallback = NULL;
-    for (int i = 2; i + 1 < argc; i++) {
-      if (strcmp(argv[i], "--approval-mode") == 0) approval = argv[i + 1];
-      if (strcmp(argv[i], "--non-interactive-approval") == 0) fallback = argv[i + 1];
-    }
-    if (!approval || strcmp(approval, "auto") != 0) {
-      fprintf(stderr, "Error: Invalid approval mode. Valid values: confirm, auto, strict\n");
-      return 1;
-    }
-    if (!fallback || strcmp(fallback, "allow") != 0) return 1;
+static int check_isolation(void) {
     char catalog[4096];
     snprintf(catalog, sizeof(catalog), "%s/.stepcode/models.json", getenv("HOME"));
     FILE *source = fopen(catalog, "r");
@@ -162,8 +149,38 @@ int main(int argc, char **argv) {
     FILE *resolver = fopen("/etc/resolv.conf", "r");
     if (!resolver) { fputs("Resolver target missing inside sandbox\n", stderr); return 1; }
     fclose(resolver);
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  if (argc > 1 && strcmp(argv[1], "--help") == 0) { puts("step - AI coding assistant"); return 0; }
+  if (argc > 1 && strcmp(argv[1], "--version") == 0) { puts("step-fixture-version"); return 0; }
+  if (argc > 1 && strcmp(argv[1], "-p") == 0) {
+    const char *approval = NULL, *fallback = NULL;
+    for (int i = 2; i + 1 < argc; i++) {
+      if (strcmp(argv[i], "--approval-mode") == 0) approval = argv[i + 1];
+      if (strcmp(argv[i], "--non-interactive-approval") == 0) fallback = argv[i + 1];
+    }
+    if (!approval || strcmp(approval, "auto") != 0) {
+      fprintf(stderr, "Error: Invalid approval mode. Valid values: confirm, auto, strict\n");
+      return 1;
+    }
+    if (!fallback || strcmp(fallback, "allow") != 0) return 1;
+    if (check_isolation() != 0) return 1;
     char *args[] = {argv[0], "--version", NULL};
     execv(argv[0], args);
+  }
+  if (argc > 2 && strcmp(argv[1], "--mode") == 0 && strcmp(argv[2], "rpc") == 0) {
+    /* The door's RPC turn: prompt, settle, then the last assistant text. */
+    static char line[1 << 20];
+    if (check_isolation() != 0) return 1;
+    if (!fgets(line, sizeof line, stdin)) return 3;
+    puts("{\"id\":\"door-prompt\",\"type\":\"response\",\"success\":true}");
+    puts("{\"type\":\"agent_settled\"}"); fflush(stdout);
+    if (!fgets(line, sizeof line, stdin)) return 3;
+    puts("{\"id\":\"door-text\",\"type\":\"response\",\"data\":{\"text\":\"step-fixture-version\"}}");
+    fflush(stdout);
+    return 0;
   }
   return 2;
 }
@@ -192,7 +209,7 @@ EOF
           AI_STEPFUN_ALLOW_NO_CREDS=1 DOOR_TIMEOUT=10 DOOR_WORKDIR="$TMP/stepfun-door/work" \
           DOOR_PACKET_DIR="$TMP/stepfun-door/packet" DOOR_PROMPT_FILE="$TMP/stepfun-door/prompt" \
           DOOR_REPORT_OUT="$TMP/stepfun-door/report" DOOR_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)" \
-          bash "$STEPFUN_DOOR" review > "$TMP/stepfun-door/door.out" 2>&1; then
+          bash "$STEPFUN_DOOR" implement > "$TMP/stepfun-door/door.out" 2>&1; then
           check 'StepFun door uses supported writable approval and runs step --version' \
             "grep -q 'step-fixture-version' '$TMP/stepfun-door/report'"
           check 'StepFun door binds only the pinned nonsecret model read-only' \
@@ -233,7 +250,7 @@ EOF
             AI_STEPFUN_MODEL=step/step-3.7-flash AI_STEPFUN_ALLOW_NO_CREDS=1 DOOR_TIMEOUT=10 \
             DOOR_WORKDIR="$TMP/stepfun-door/work" DOOR_PACKET_DIR="$TMP/stepfun-door/packet" \
             DOOR_PROMPT_FILE="$TMP/stepfun-door/prompt" DOOR_REPORT_OUT="$TMP/stepfun-door/override-report" \
-            DOOR_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)" bash "$STEPFUN_DOOR" review \
+            DOOR_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)" bash "$STEPFUN_DOOR" implement \
             > "$TMP/stepfun-door/override-door.out" 2>&1; then
             check 'StepFun door catalog follows an explicit Step model override' \
               "jq -e '.providers.step.models | map(.id) == [\"step-3.7-flash\"]' '$TMP/stepfun-door/work/captured-models.json' >/dev/null"
@@ -520,6 +537,24 @@ EOF
     "find '$AI_REVIEW_PACKET_STORE' -name MANIFEST.md | grep -q ."
 done
 unset _prov _mock _ov _prc _pstate
+
+# A door's out-of-credit exit (92, rotation rule 10) must survive the runner,
+# as ai-review-pool keeps it for wrappers; anything else is provider-failed.
+echo '== out of credit through the runner'
+CREDIT_DOOR="$TMP/credit-door.sh"
+cat > "$CREDIT_DOOR" <<'EOF'
+#!/usr/bin/env bash
+printf 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota\n' >&2
+exit 92
+EOF
+set +e
+( cd "$MREPO" && AI_REVIEW_DOOR_STEPFUN="$CREDIT_DOOR" timeout 90 "$ENGINE" review --provider stepfun \
+    --name engine-credit --repo "$MREPO" --mode diff-review --caller codex ) >"$TMP/e2e-credit.out" 2>"$TMP/e2e-credit.err"
+_crc=$?
+set -e
+check "runner_keeps_door_out_of_credit_exit_92" "test '$_crc' -eq 92 && grep -q '^AI_REVIEWER_OUT_OF_CREDIT ' '$TMP/e2e-credit.err'"
+check "runner_books_out_of_credit_failure" "grep -Rqs '\"out-of-credit\"' '$AI_REVIEW_LIFECYCLE_DIR/runs'"
+unset _crc
 
 # --- --operation install-gate contract through the runner -------------------
 # A named installation operation must reach the reviewer request as the exact
