@@ -82,3 +82,5 @@ tools/stepfun_credit.py
 tools/reviewer_credit_watch.py
 .github/workflows/fast-classifier.yml
 .github/workflows/verify.yml
+
+tools/lib/muse-credential-boundary.sh
