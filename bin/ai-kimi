@@ -1269,15 +1269,17 @@ review_worker() { # JOB-DIR PROMPT-FILE
   ACTIVE_JOB_META="$meta"; ACTIVE_CANCEL_FILE="$(jq -r .cancel_request "$meta")"
   write_job_state "$meta" --arg p "$$" --arg u "$(date -u +%FT%TZ)" '.phase="starting"|.worker_pid=($p|tonumber)|.updated=$u' || exit 2
   before="$(tree_state "$workdir")"; source_before="$(tree_state "$repo")"
-  write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="running"|.updated=$u' || exit 2
-  record_diagnostic "$repo" "$diag_run" "$name" launch provider-started
-  provider_started="$(date +%s)"
-  # Record the detached worker PID in the evidence store (Win32 pid on MSYS)
-  # so loss is refused while this worker can still publish the paid report.
+  # Reserve worker evidence BEFORE the startup acknowledgement (phase=running).
+  # The launcher exits on that ack and the guard may finish the invocation
+  # immediately; if reservation happened later it would fail and the paid
+  # review would die after the command reported success.
   worker_evidence_pid="$$"; [ ! -r "/proc/$$/winpid" ] || worker_evidence_pid="$(cat /proc/$$/winpid)"
   reviewer_event_evidence note-worker kimi "$worker_evidence_pid" || exit 2
   reviewer_event_evidence require-report kimi || exit 2
   reviewer_event_evidence bind-sandbox kimi "$workdir" || exit 2
+  write_job_state "$meta" --arg u "$(date -u +%FT%TZ)" '.phase="running"|.updated=$u' || exit 2
+  record_diagnostic "$repo" "$diag_run" "$name" launch provider-started
+  provider_started="$(date +%s)"
   run_turn "$workdir" "$out" "$pf" "$mode" "$sid"; rc="$RUN_TURN_RC"
   provider_seconds="$(( $(date +%s) - provider_started ))"
   write_job_state "$meta" --argjson seconds "$provider_seconds" --arg u "$(date -u +%FT%TZ)" '.timing.provider_seconds=$seconds|.timing.model_steps="unavailable"|.updated=$u' || exit 2
