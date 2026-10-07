@@ -42,7 +42,16 @@ done
 . "$ROOT/tools/lib/task-gates.sh"
 
 POLICY_FILE="${AI_TASK_GATES_FILE:-$ROOT/config/task-gates.json}"
-DEFAULT_STATE_DIR="$HOME/.local/state/ai-devops/task-gates"
+DEFAULT_STATE_HOME="$HOME"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # GitHub Actions can give a service account a HOME from another user.
+    # Native ACL checks and state must refer to the same token profile.
+    [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1 || { printf 'ai-task-gates: cannot resolve Windows user profile.\n' >&2; exit 4; }
+    DEFAULT_STATE_HOME="$(cygpath -u "$(cygpath -aw "$USERPROFILE")")" || exit 4
+    ;;
+esac
+DEFAULT_STATE_DIR="$DEFAULT_STATE_HOME/.local/state/ai-devops/task-gates"
 STATE_DIR="${AI_TASK_GATES_DIR:-$DEFAULT_STATE_DIR}"
 REPO_POLICY_BIN="${AI_REPO_POLICY_BIN:-$SCRIPT_DIR/ai-repo-policy}"
 CONSUMER_FILE_NAME=".ai-devops/task-gates.json"

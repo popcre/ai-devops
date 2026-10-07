@@ -1310,11 +1310,11 @@ case "$(uname -s)" in
       powershell.exe -NoProfile -NonInteractive -Command '& { param([string]$Path,[string]$Sid,[string]$MustProtect) try { $Acl=Get-Acl -LiteralPath $Path -ErrorAction Stop; if ($MustProtect -eq "yes" -and -not $Acl.AreAccessRulesProtected) { exit 1 }; $Full=[Security.AccessControl.FileSystemRights]::FullControl; $HasFull=$false; foreach ($Rule in $Acl.Access) { $RuleSid=$Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value; if ($RuleSid -notin @($Sid,"S-1-5-18","S-1-5-32-544")) { exit 1 }; if ($Rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { exit 1 }; if ($RuleSid -eq $Sid -and (($Rule.FileSystemRights -band $Full) -eq $Full)) { $HasFull=$true } }; if (-not $HasFull) { exit 1 } } catch { exit 1 } }' "$win" "$sid" "${2:-yes}" >/dev/null 2>&1
     }
     fresh_profile="$TMP/fresh-state-profile"
-    mkdir -p "$fresh_profile"
+    mkdir -p "$fresh_profile" "$TMP/different-home"
     icacls "$(cygpath -w "$fresh_profile")" /inheritance:r /grant:r "*${test_sid}:(OI)(CI)(F)" >/dev/null
     fresh_rc=0
-    ( cd "$XC" && HOME="$fresh_profile" USERPROFILE="$(cygpath -w "$fresh_profile")" AI_TASK_GATES_DIR= "$GATES" start --class code ) >/dev/null 2>&1 || fresh_rc=$?
-    check 'a fresh Windows profile creates protected task state and seal key' \
+    ( cd "$XC" && HOME="$TMP/different-home" USERPROFILE="$(cygpath -w "$fresh_profile")" AI_TASK_GATES_DIR= "$GATES" start --class code ) >/dev/null 2>&1 || fresh_rc=$?
+    check 'a fresh Windows token profile, distinct from HOME, creates protected task state and seal key' \
       "[ '$fresh_rc' -eq 0 ] && private_windows_acl '$fresh_profile/.local/state/ai-devops' && private_windows_acl '$fresh_profile/.local/state/ai-devops/task-gates' && private_windows_acl '$fresh_profile/.local/state/.ai-task-gates-seal' && private_windows_acl '$fresh_profile/.local/state/.ai-task-gates-seal/key.bin' no"
     check 'the Windows state ancestor, root, and explain cache have private native ACLs' \
       "private_windows_acl '$(dirname "$AI_TASK_GATES_DIR")' && private_windows_acl '$AI_TASK_GATES_DIR' && private_windows_acl '$AI_TASK_GATES_DIR/explain-cache'"
