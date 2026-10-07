@@ -15,6 +15,12 @@ Archives are copied into Linux memfd snapshots, sealed against write/grow/shrink
 before hashing, and extracted from those same verified immutable bytes.
 Qualification execution likewise uses a verified sealed ELF snapshot held by
 the parent; replacing the original pathname cannot select a different program.
+Every fixture and measurement artifact invocation uses that boundary. Builds
+require an already-created owner-only output directory beneath trusted ancestors;
+symlinks and nonsticky group/world-writable parents are refused. A retained
+directory descriptor anchors extraction and execution through publication.
+Go uses a private HOME, fixed system PATH, GOENV=off and local toolchain;
+user flags and checksum-bypass configuration are not inherited.
 
 The counter composes `httptrace.WroteRequest` with existing hooks. It observes
 successful completed writes, including hidden retries; failed writes are

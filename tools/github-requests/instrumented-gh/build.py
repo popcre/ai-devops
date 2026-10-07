@@ -10,9 +10,21 @@ import subprocess
 import tarfile
 import tempfile
 from contextlib import ExitStack
-from sealed import verified_snapshot
+from sealed import verified_snapshot, private_directory
 
 HERE = pathlib.Path(__file__).resolve().parent
+
+
+def build_environment(build_root, toolchain):
+    env = {key: value for key, value in os.environ.items()
+           if key in {"SSL_CERT_FILE", "SSL_CERT_DIR"}}
+    home = build_root / "home"
+    home.mkdir()
+    env.update(PATH="/usr/bin:/bin", HOME=str(home), TMPDIR=str(build_root), GOENV="off",
+               GOROOT=str(toolchain / "go"), GOTOOLCHAIN="local", CGO_ENABLED="0",
+               GOMODCACHE=str(build_root / "modules"), GOCACHE=str(build_root / "gocache"),
+               GOOS="linux", GOARCH="amd64")
+    return env
 
 
 def patch(source):
@@ -54,19 +66,18 @@ def build(snapshots):
     source_tar, go_tar = args.archives / "gh.tar.gz", args.archives / "go.tar.gz"
     source_snapshot = snapshots.enter_context(verified_snapshot(source_tar, pins["source_sha256"]))
     go_snapshot = snapshots.enter_context(verified_snapshot(go_tar, pins["toolchain_sha256"]))
-    args.output.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if args.output.is_symlink() or args.output.stat().st_uid != os.getuid() or args.output.stat().st_mode & 0o077:
-        raise ValueError("private output directory required")
-    build_root = pathlib.Path(tempfile.mkdtemp(prefix="build-", dir=args.output))
+    # The caller creates its output directory. Never traverse an unvalidated
+    # writable parent to create it, and retain its inode throughout the build.
+    output_fd = private_directory(args.output)
+    snapshots.callback(os.close, output_fd)
+    anchored_output = pathlib.Path(f"/proc/{os.getpid()}/fd/{output_fd}")
+    build_root = pathlib.Path(tempfile.mkdtemp(prefix="build-", dir=anchored_output))
     toolchain = build_root / "toolchain"
     toolchain.mkdir()
     with tarfile.open(fileobj=go_snapshot) as archive:
         archive.extractall(toolchain, filter="data")
     go = toolchain / "go/bin/go"
-    env = {key: value for key, value in os.environ.items()
-           if key in {"PATH", "HOME", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR"}}
-    env.update(GOTOOLCHAIN="local", CGO_ENABLED="0", GOMODCACHE=str(build_root / "modules"),
-               GOCACHE=str(build_root / "gocache"), GOOS="linux", GOARCH="amd64")
+    env = build_environment(build_root, toolchain)
     artifacts = {}
     for kind in ("baseline", "instrumented"):
         extracted = build_root / kind
@@ -82,10 +93,11 @@ def build(snapshots):
             subprocess.run([str(go), "test", "-race", "./internal/httpcounter"], cwd=source, env=race_env, check=True)
         output = build_root / ("gh-" + kind)
         subprocess.run([str(go), "build", "-trimpath", "-ldflags", "-X github.com/cli/cli/v2/internal/build.Version=" + pins["upstream_version"], "-o", str(output), "./cmd/gh"], cwd=source, env=env, check=True)
-        artifacts[kind] = {"path": str(output), "sha256": hashlib.sha256(output.read_bytes()).hexdigest()}
-    manifest = {"pins": pins, "artifacts": artifacts, "toolchain": str(go), "build_root": str(build_root),
+        artifacts[kind] = {"path": str(args.output.absolute() / build_root.name / output.name), "sha256": hashlib.sha256(output.read_bytes()).hexdigest()}
+    durable_root = args.output.absolute() / build_root.name
+    manifest = {"pins": pins, "artifacts": artifacts, "toolchain": str(durable_root / "toolchain/go/bin/go"), "build_root": str(durable_root),
                 "patch_sha256": hashlib.sha256((HERE / "httpcounter.go").read_bytes()).hexdigest(), "installed": False}
-    manifest_path = args.output / "build.json"
+    manifest_path = anchored_output / "build.json"
     descriptor = os.open(manifest_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as stream:
         json.dump(manifest, stream, indent=2)

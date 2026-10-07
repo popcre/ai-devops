@@ -3,6 +3,39 @@ import hashlib
 import os
 import stat
 import re
+import subprocess
+import pathlib
+
+
+def verified_run(artifact, args, **kwargs):
+    with verified_snapshot(artifact['path'], artifact['sha256']) as snapshot:
+        return subprocess.run([artifact['path'], *args],
+                              executable=f'/proc/{os.getpid()}/fd/{snapshot.fileno()}', **kwargs)
+
+
+def private_directory(path):
+    """Open each ancestor without symlink races; reject cross-user rename authority."""
+    path = pathlib.Path(os.path.abspath(path))
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for index, component in enumerate(path.parts[1:]):
+            info = os.fstat(fd)
+            if info.st_uid not in (0, os.getuid()):
+                raise ValueError('untrusted directory owner')
+            if info.st_mode & 0o022 and not (info.st_uid == 0 and info.st_mode & stat.S_ISVTX):
+                raise ValueError('replaceable output ancestor')
+            child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        info = os.fstat(fd)
+        if info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise ValueError('private output directory required')
+        result = fd
+        fd = None
+        return result
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def verified_snapshot(path, expected, limit=536870912):

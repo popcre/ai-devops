@@ -7,6 +7,7 @@ import os
 import pathlib
 import subprocess
 import time
+from sealed import verified_run
 
 HERE = pathlib.Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("fixtures", HERE / "test_prototype.py")
@@ -21,7 +22,7 @@ def direct(case, kind):
     if kind == "instrumented":
         env.update(AI_GH_HTTP_COUNTER_FD=str(write_fd), AI_GH_HTTP_COUNTER_HOST=case.host)
     try:
-        result = subprocess.run([artifact["path"], "api", "private"], env=env, pass_fds=(write_fd,),
+        result = verified_run(artifact, ["api", "private"], env=env, pass_fds=(write_fd,),
                                 capture_output=True, timeout=20)
         os.close(write_fd)
         write_fd = -1
@@ -64,7 +65,7 @@ def main():
                           "passes_5_percent": p95["instrumented"] <= p95["baseline"] * 1.05,
                           "scope": ("qualification-only Python/hash runner versus direct native baseline; excludes installed workflow"
                                     if args.qualification_runner else
-                                    "direct binary private-pipe local fixture; excludes generic qualification runner and installed workflow"),
+                                    "paired sealed verified binary/hash/private-pipe local fixture; excludes installed workflow"),
                           "samples_ms": times}, separators=(",", ":")))
     finally:
         fixtures.PrototypeTests.tearDownClass()

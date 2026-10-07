@@ -25,6 +25,64 @@ def archive_bytes(content):
 
 
 class SealedUse(unittest.TestCase):
+    def test_hostile_go_configuration_not_inherited(self):
+        import build
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            hostile = {'GOENV': '/attacker/config', 'GOFLAGS': '-toolexec=/attacker/run',
+                       'GOTOOLCHAIN': 'auto', 'GOSUMDB': 'off', 'GOINSECURE': '*',
+                       'HOME': '/attacker', 'PATH': '/attacker'}
+            with patch.dict(os.environ, hostile):
+                env = build.build_environment(root, root / 'toolchain')
+            self.assertEqual(env['GOENV'], 'off')
+            self.assertEqual(env['GOTOOLCHAIN'], 'local')
+            self.assertEqual(env['HOME'], str(root / 'home'))
+            for key in ('GOFLAGS', 'GOSUMDB', 'GOINSECURE'):
+                self.assertNotIn(key, env)
+
+    def test_replaceable_parent_refuses_before_creation(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            parent = pathlib.Path(scratch) / 'unsafe'
+            parent.mkdir(mode=0o777)
+            parent.chmod(0o777)
+            output = parent / 'output'
+            output.mkdir(mode=0o700)
+            with self.assertRaisesRegex(ValueError, 'replaceable output ancestor'):
+                sealed.private_directory(output)
+
+    def test_output_replaced_after_validation_stays_anchored(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            output = pathlib.Path(scratch) / 'output'
+            output.mkdir(mode=0o700)
+            fd = sealed.private_directory(output)
+            try:
+                saved = output.with_name('saved')
+                output.rename(saved)
+                output.mkdir(mode=0o700)
+                anchored = pathlib.Path(f'/proc/{os.getpid()}/fd/{fd}')
+                (anchored / 'receipt').write_text('verified')
+                self.assertFalse((output / 'receipt').exists())
+                self.assertEqual((saved / 'receipt').read_text(), 'verified')
+            finally:
+                os.close(fd)
+
+    def test_fixture_and_measurement_shared_execution_sealed(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            binary = pathlib.Path(scratch) / 'binary'
+            shutil.copyfile(sys.executable, binary)
+            artifact = {'path': str(binary), 'sha256': hashlib.sha256(binary.read_bytes()).hexdigest()}
+            original = sealed.verified_snapshot
+            def swap(path, digest):
+                snapshot = original(path, digest)
+                binary.write_bytes(b'not an executable')
+                return snapshot
+            from unittest.mock import patch
+            with patch.object(sealed, 'verified_snapshot', swap):
+                result = sealed.verified_run(artifact, ['-c', 'print("VERIFIED")'], capture_output=True)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, b'VERIFIED\n')
+
     def test_archive_replacement_after_verification_uses_original(self):
         with tempfile.TemporaryDirectory() as scratch:
             path = pathlib.Path(scratch) / "archive.tar"
