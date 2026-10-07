@@ -356,7 +356,7 @@ printf 'x\n' >> "${AI_PR_WAIT_TEST_MARKER:?}"
 if [[ "$*" == *'before:"older"'* ]]; then
   head=h1; [ "${AI_PR_WAIT_TEST_BAD_PAGE:-0}" != 1 ] || head=h2
   printf '{"data":{"repository":{"pullRequest":{"headRefOid":"%s","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"totalCount":1,"pageInfo":{"hasPreviousPage":false,"startCursor":null},"nodes":[{"name":"older failure","conclusion":"FAILURE"}]}}}}]}}}}}\n' "$head" |
-    jq -c '.data.rateLimit={cost:5,remaining:4992,resetAt:"2026-09-28T05:00:00Z"}'
+    jq -c '.data.repository.pullRequest.commits.nodes[0].commit.oid=.data.repository.pullRequest.headRefOid | .data.rateLimit={cost:5,remaining:4992,resetAt:"2026-09-28T05:00:00Z"}'
 elif [[ "$*" == *before:* ]]; then
   printf '%s\n' 'unexpected GraphQL cursor encoding' >&2
   exit 9
@@ -608,6 +608,53 @@ fi
 
 check "the cross-process cache preserves privacy, completeness, cancellation and recovery" \
   "python3 '$ROOT/tests/test-ai-pr-status-singleflight.py' -q"
+
+# Exercise the real waiter and complete reader: advisory cancellation must not
+# end a queued PR, while required or unproved cancellations remain terminal.
+cat > "$TMP/bin/date" <<'EOF'
+#!/usr/bin/env bash
+printf '1000\n'
+EOF
+cat > "$TMP/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+count=$((count + 1)); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
+if [ "$count" -gt 1 ]; then
+  printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","headRefOid":"h1","isInMergeQueue":false,"mergeCommit":{"oid":"landed"}}}}}'
+  exit 0
+fi
+jq -nc --argjson required "${CANCEL_REQUIRED:-null}" --arg conclusion "${CANCEL_CONCLUSION:-CANCELLED}" --arg oid "${CANCEL_OID:-h1}" \
+  '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:"h1",isInMergeQueue:true,mergeCommit:null,commits:{nodes:[{commit:{oid:$oid,statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false},nodes:[{name:"preferred reviewer",conclusion:$conclusion,isRequired:$required}]}}}}]}}}}}' |
+  jq -c 'if env.CANCEL_ABSENT == "1" then del(.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].isRequired) else . end'
+EOF
+chmod +x "$TMP/bin/gh" "$TMP/bin/date" "$TMP/bin/sleep"
+for required in false true null absent; do
+  rm -f "$TMP/cancel-$required-called"
+  absent=0; value="$required"; [ "$required" != absent ] || { absent=1; value=null; }
+  OUT="$(CANCEL_REQUIRED="$value" CANCEL_ABSENT="$absent" AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/cancel-$required-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/cancel-$required-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+  if [ "$required" = false ]; then
+    check "server-proven advisory cancellation preserves a queued PR until merged" \
+      "test '$RC' -eq 0 && test \"$(cat "$TMP/cancel-$required-called")\" -eq 2 && printf '%s' \"$OUT\" | grep -q MERGED"
+  else
+    check "required or unknown cancellation ($required) stays terminal" \
+      "test '$RC' -eq 1 && test \"$(cat "$TMP/cancel-$required-called")\" -eq 1 && printf '%s' \"$OUT\" | grep -q 'preferred reviewer'"
+  fi
+done
+for outcome in FAILURE TIMED_OUT; do
+  rm -f "$TMP/cancel-$outcome-called"
+  OUT="$(CANCEL_REQUIRED=false CANCEL_CONCLUSION="$outcome" AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/cancel-$outcome-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/cancel-$outcome-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+  check "advisory $outcome retains existing terminal behavior" "test '$RC' -eq 1"
+done
+rm -f "$TMP/cancel-unbound-called"
+OUT="$(CANCEL_REQUIRED=false CANCEL_OID=h2 AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/cancel-unbound-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/cancel-unbound-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "a requirement result from a different commit cannot excuse cancellation" "test '$RC' -eq 1"
+check "requirement policy is queried on both complete-status pages and cache v1 is retired" \
+  "test \"$(grep -c 'isRequired(pullRequestNumber:\$PR)' "$ROOT/tools/github-requests/pr-status-complete.sh")\" -eq 2 && grep -q -- '--key \"v3 ' '$CMD' && ! grep -q -- '--key \"v1 ' '$CMD'"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
