@@ -59,6 +59,8 @@ def build(snapshots):
     parser = argparse.ArgumentParser()
     parser.add_argument("--archives", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
+    parser.add_argument("--qualify-updater", action="store_true",
+                        help="local fixture variant using upstream updateable build tag")
     args = parser.parse_args()
     if os.name != "posix" or os.uname().sysname != "Linux":
         raise ValueError("Linux prototype only")
@@ -92,11 +94,13 @@ def build(snapshots):
             race_env = dict(env, CGO_ENABLED="1")
             subprocess.run([str(go), "test", "-race", "./internal/httpcounter"], cwd=source, env=race_env, check=True)
         output = build_root / ("gh-" + kind)
-        subprocess.run([str(go), "build", "-trimpath", "-ldflags", "-X github.com/cli/cli/v2/internal/build.Version=" + pins["upstream_version"], "-o", str(output), "./cmd/gh"], cwd=source, env=env, check=True)
+        tags = ["-tags", "updateable"] if args.qualify_updater else []
+        subprocess.run([str(go), "build", *tags, "-trimpath", "-ldflags", "-X github.com/cli/cli/v2/internal/build.Version=" + pins["upstream_version"], "-o", str(output), "./cmd/gh"], cwd=source, env=env, check=True)
         artifacts[kind] = {"path": str(args.output.absolute() / build_root.name / output.name), "sha256": hashlib.sha256(output.read_bytes()).hexdigest()}
     durable_root = args.output.absolute() / build_root.name
     manifest = {"pins": pins, "artifacts": artifacts, "toolchain": str(durable_root / "toolchain/go/bin/go"), "build_root": str(durable_root),
-                "patch_sha256": hashlib.sha256((HERE / "httpcounter.go").read_bytes()).hexdigest(), "installed": False}
+                "patch_sha256": hashlib.sha256((HERE / "httpcounter.go").read_bytes()).hexdigest(), "installed": False,
+                "qualification_build_tags": ["updateable"] if args.qualify_updater else []}
     manifest_path = anchored_output / "build.json"
     descriptor = os.open(manifest_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as stream:

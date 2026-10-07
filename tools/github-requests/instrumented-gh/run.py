@@ -7,6 +7,7 @@ import select
 import signal
 import subprocess
 import time
+import sys
 
 UNKNOWN = {"measurement": "outgoing_write_observation", "http_requests": None,
            "observed_completed_writes": None, "failed_write_attempts": None,
@@ -73,6 +74,11 @@ def run_verified(executable, binary, arguments, host):
         # Resolve the PARENT's still-open immutable memfd. The child receives
         # no executable descriptor and cannot leak it into descendants.
         pinned_exec = f"/proc/{os.getpid()}/fd/{executable.fileno()}"
+        # Upstream's supported self-executable override must stay bound to the
+        # already verified image while synchronous children start. This is a
+        # pathname to immutable bytes, not the replaceable original artifact.
+        # Explicit caller overrides retain upstream semantics (unqualified).
+        env.setdefault("GH_PATH", pinned_exec)
         child = subprocess.Popen([str(binary), *arguments], executable=pinned_exec,
                                  env=env, pass_fds=(write_fd,), start_new_session=True)
         os.close(write_fd)
@@ -121,6 +127,28 @@ def run_verified(executable, binary, arguments, host):
             child.wait()
 
 
+def eligible(arguments):
+    if not arguments:
+        return False
+    if any(arg in {'--web', '-w', '--watch'} for arg in arguments):
+        return False
+    if arguments[0] == 'api':
+        if any(arg in {'-f', '-F', '--field', '--raw-field', '--input'} or
+               arg.startswith(('-f', '-F', '--field=', '--raw-field=', '--input=')) for arg in arguments):
+            return False
+        for index, arg in enumerate(arguments):
+            if arg in ('-X', '--method') and (index + 1 == len(arguments) or arguments[index + 1] not in ('GET', 'HEAD')):
+                return False
+            if arg.startswith('--method=') and arg.split('=', 1)[1] not in ('GET', 'HEAD'):
+                return False
+            if arg.startswith('-X') and arg != '-X' and arg[2:] not in ('GET', 'HEAD'):
+                return False
+        return True
+    return tuple(arguments[:2]) in {
+        ('auth', 'status'), ('issue', 'list'), ('issue', 'view'), ('pr', 'list'), ('pr', 'view'),
+        ('pr', 'checks'), ('run', 'list'), ('run', 'view'), ('workflow', 'list'), ('workflow', 'view')}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
@@ -132,6 +160,10 @@ def main():
     arguments = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
     if args.metadata_fd < 3:
         raise ValueError("separate metadata channel required")
+    if not eligible(arguments):
+        os.write(args.metadata_fd, (json.dumps(UNKNOWN, separators=(",", ":")) + "\n").encode())
+        print('qualification command is outside the supported builtin read-only scope', file=sys.stderr)
+        raise SystemExit(2)
     status, record = run_counted(args.binary, arguments, args.api_host, args.sha256)
     os.write(args.metadata_fd, (json.dumps(record, separators=(",", ":")) + "\n").encode())
     raise SystemExit(status)

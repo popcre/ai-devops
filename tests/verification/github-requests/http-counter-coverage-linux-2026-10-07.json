@@ -1,0 +1,193 @@
+{
+  "owner": "popcre/ai-devops#660",
+  "dependency_prototype_head": "cf9189d1dcf417b84b2b21958a1fd98591940b74",
+  "current_upstream_worktree_base": "3c3301cd76ded69b4217cdf335cb1fad3191c3de",
+  "pins": {
+    "owner": "popcre/ai-devops#660",
+    "prototype_platform": "linux-amd64",
+    "upstream_version": "2.101.0",
+    "upstream_commit": "0cf1092493af067646fc5f3db9421c6a6ec9c938",
+    "source_url": "https://codeload.github.com/cli/cli/tar.gz/0cf1092493af067646fc5f3db9421c6a6ec9c938",
+    "source_sha256": "057c1bfc07ecee96fcb0a121b482464a3f10063532bace358ee37d57214ea150",
+    "toolchain_version": "go1.27.1",
+    "toolchain_url": "https://go.dev/dl/go1.27.1.linux-amd64.tar.gz",
+    "toolchain_sha256": "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"
+  },
+  "source_sha256": {
+    "tools/github-requests/instrumented-gh/README.md": "b33274e982e34bd1c97f61ae1944676a1a0e5593c3236bbc91634ef78c0bf68f",
+    "tools/github-requests/instrumented-gh/build.py": "ef4fd03636b7846c7d44e4a2d9152d99ddf5f729686b445d48708ff0f9fe65bf",
+    "tools/github-requests/instrumented-gh/httpcounter.go": "f335704892f503a9c25b4934b037ce35d75eb50bda71542d4796655ed6a7ad92",
+    "tools/github-requests/instrumented-gh/httpcounter_test.go": "29d09f29dd6c245053fa8d1544bca41fbf6506611284be43430443e2bfd1072b",
+    "tools/github-requests/instrumented-gh/measure_overhead.py": "8bfe625a83a66bfd87b68baca3ad74a35493592a6086b03a677669d071ed5b88",
+    "tools/github-requests/instrumented-gh/pins.json": "ec449947123011e52e77cf26dc595ffe91e3210e1c691aca9e8b54c973e1e9ab",
+    "tools/github-requests/instrumented-gh/run.py": "376f9892ec6d3d5417710c958b98aec328783252d69675a62e2cda4bf5352a70",
+    "tools/github-requests/instrumented-gh/sealed.py": "8fdc1e3437d14a1324d36da73b46873b49829be552bba3add70a5b52239690ee",
+    "tools/github-requests/instrumented-gh/test_offline.py": "eb10a205b12a77b51e9313a52ec54de2d952d11c05ae6f33d7b773612211b5f2",
+    "tools/github-requests/instrumented-gh/test_prototype.py": "2555ec14b2b42b95cef3812feb924e1a1532c4ed60d94779fa7530a56632ecea",
+    "tools/github-requests/instrumented-gh/test_sealed.py": "e7d77f656f71f84e147e74122ff8380891d10d8de23aa841fe03115fe69ce26e"
+  },
+  "builds": {
+    "original": {
+      "tags": [],
+      "binary_sha256": {
+        "baseline": "ed22f767c76812232350c3a42de49cb2698d68413d5c55a037992d806a7e465c",
+        "instrumented": "df8d7abb0dd57e89e19cd3e4a90e10f8a5e6270aabc167be063ca74676ca8c99"
+      }
+    },
+    "updater_qualification": {
+      "tags": [
+        "updateable"
+      ],
+      "binary_sha256": {
+        "baseline": "149c96d2ccd60fd57a726ab723be2c3238f2acfc5178786b8460c697263885b9",
+        "instrumented": "4c2609fe197edea542f43dc7f80cc33d496306f6b1878fcc4faf55da41ac980e"
+      }
+    }
+  },
+  "counter_go_modified": false,
+  "installed": false,
+  "routing_modified": false,
+  "general_http_total": null,
+  "qualification_cli_allowlist": [
+    "api GET/HEAD without field/input/body flags",
+    "auth status",
+    "issue list/view",
+    "pr list/view/checks",
+    "run list/view",
+    "workflow list/view"
+  ],
+  "excluded": [
+    "browser/watch modes",
+    "direct api GraphQL POST/fields",
+    "durable auth login/refresh/setup-git",
+    "codespace long-lived processes",
+    "skills installation/search",
+    "arbitrary aliases/extensions",
+    "caller explicit GH_PATH outside controlled fixture scope"
+  ],
+  "expected_server_received_counts": [
+    [
+      "auth status scopes/identity",
+      2
+    ],
+    [
+      "issue list pagination",
+      2
+    ],
+    [
+      "pr list pagination",
+      2
+    ],
+    [
+      "issue view number",
+      1
+    ],
+    [
+      "pr view number",
+      1
+    ],
+    [
+      "issue view comments pagination",
+      2
+    ],
+    [
+      "pr view comments pagination",
+      2
+    ],
+    [
+      "pr checks contexts pagination plus feature probes",
+      5
+    ],
+    [
+      "run list pagination plus workflow metadata pagination",
+      4
+    ],
+    [
+      "run view plus workflow metadata",
+      2
+    ],
+    [
+      "workflow list pagination",
+      2
+    ],
+    [
+      "workflow view runs pagination",
+      3
+    ],
+    [
+      "noninteractive repository context uses local state",
+      2
+    ],
+    [
+      "interactive repository network resolution",
+      3
+    ],
+    [
+      "same-host redirect",
+      2
+    ],
+    [
+      "external redirect primary/external",
+      [
+        1,
+        1
+      ]
+    ],
+    [
+      "local CONNECT proxy primary",
+      1
+    ],
+    [
+      "local Unix socket primary",
+      1
+    ],
+    [
+      "updater success primary",
+      2
+    ],
+    [
+      "updater concurrent error primary",
+      2
+    ],
+    [
+      "detached telemetry primary/child",
+      [
+        1,
+        1
+      ]
+    ],
+    [
+      "controlled nested alias/extension primary/child",
+      [
+        0,
+        1
+      ]
+    ]
+  ],
+  "proof": {
+    "updater_enabled_unittest_methods": 21,
+    "original_unittest_methods": 21,
+    "original_updater_skips": 1,
+    "builtin_subcases": 12,
+    "offline_metadata_and_scope_cases": 5,
+    "sealed_boundary_cases": 8,
+    "go_race": "PASS from paired updateable official-archive build",
+    "stdout_stderr_status_parity": "PASS for builtin cases and detached telemetry; updater TTY merged-stream/status parity PASS",
+    "updater_concurrent_failure": "observed subset retained, complete=false, total=null",
+    "unsupported_cli": "REFUSED before even nonexistent binary access",
+    "self_execution_repair": "upstream supported GH_PATH defaults to parent still-open sealed image; caller value unchanged",
+    "internal_child_diagnostic": "synchronous alias and extension self-exec preserved; no counter keys/FD; requests deliberately unobserved",
+    "detached_telemetry": "enabled preference/sample100 preserved; exactly one local child request; no counter keys/FD inherited; total remains unknown"
+  },
+  "limits": [
+    "Local trusted-server fixtures only; no installed workflow or fleet acceptance",
+    "21 methods include 12 builtin subcases; count is not a cohort or rate-limit savings measurement",
+    "Proxy CONNECT control-plane requests are outside API-host request subset",
+    "Original default build disables upstream notifier and does not prove official installed release build-feature parity",
+    "Updater variant is separate supported-tag qualification, not a deployment artifact",
+    "No inference for every possible flag, host, provider constructor or child process",
+    "Whole workflow HTTP denominator and GraphQL quota cost remain unknown",
+    "Python qualification helper remains excluded from production routing; historical failed overhead retained in earlier receipt",
+    "Windows HANDLE inheritance remains unqualified"
+  ]
+}

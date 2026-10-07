@@ -22,6 +22,20 @@ directory descriptor anchors extraction and execution through publication.
 Go uses a private HOME, fixed system PATH, GOENV=off and local toolchain;
 user flags and checksum-bypass configuration are not inherited.
 
+The qualification CLI accepts only builtin `api` GET/HEAD, `auth status`,
+`issue list/view`, `pr list/view/checks`, `run list/view`, and
+`workflow list/view`, excluding browser/watch options. It refuses other
+families before binary access. This restriction belongs to the optional
+qualification helper; the vendor CLI and installed routing are unchanged.
+For admitted commands with no caller `GH_PATH`, the helper uses upstream's
+supported override bound to its still-open verified sealed image. That keeps
+detached telemetry self-execution working without leaking counter descriptors
+or keys. Caller overrides retain their original semantics and remain outside
+the qualified scope. Durable credential setup, long-lived codespaces, skills,
+aliases and extensions are not admitted; internal synthetic child fixtures
+exercise preservation and explicitly show their HTTP requests are unobserved.
+No ephemeral image path may be persisted as a Git credential helper.
+
 The counter composes `httptrace.WroteRequest` with existing hooks. It observes
 successful completed writes, including hidden retries; failed writes are
 partial/unknown. An anonymous inherited Linux pipe carries bounded fixed
@@ -45,6 +59,19 @@ python3 tools/github-requests/instrumented-gh/build.py --archives /PRIVATE/archi
 python3 tools/github-requests/instrumented-gh/test_prototype.py /PRIVATE/new-build/build.json
 python3 tools/github-requests/instrumented-gh/measure_overhead.py /PRIVATE/new-build/build.json
 ```
+
+Create the private output directory first. The ordinary development build
+disables the update notifier using upstream's default build tags. A separate
+paired local variant uses `build.py --qualify-updater` and the supported
+upstream `updateable` tag; its manifest records that distinction. The same
+fixture command against that manifest exercises TTY update success and
+concurrent command failure. Original-build results explicitly skip this
+case and cannot qualify updater behavior or installed release feature parity.
+All proxy destinations are mapped to the local trusted server; no updater or
+telemetry request reaches GitHub. Enabled telemetry still sends one detached
+local request, excluded from the primary process observation. Global HTTP
+total remains unknown. Source-bound coverage receipts are in
+`tests/verification/github-requests/http-counter-coverage-linux-2026-10-07.json`.
 
 The offline suite runs without Go or network and proves metadata validation
 plus Linux replacement/sealing boundaries. Its Linux sealing tests refuse
