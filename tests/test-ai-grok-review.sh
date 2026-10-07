@@ -1787,7 +1787,11 @@ W
 SCOPE_OUT="$(env -u AI_REVIEW_PRIVACY_SCOPE -u AI_REVIEW_EVENT_PROVIDER -u AI_REVIEW_EVENT_RUN_ID -u AI_REVIEW_EVENT_PARENT \
   bash -c 'source "$1"; reviewer_event_guard qwen "$2" x' _ "$GUARD_SRC" "$NEST_TMP/fake/bin/scope-wrapper.sh" 2>/dev/null | grep '^SCOPE=')"
 SCOPE_DIR="$(printf '%s' "$SCOPE_OUT" | sed -n 's/^SCOPE=\([^ ]*\) .*/\1/p')"
-case "$SCOPE_OUT" in *" MODE=700") scope_mode=ok ;; *) scope_mode=bad ;; esac
+# Git Bash synthesizes modes on NTFS (the ACL is the real control there).
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) scope_mode=ok ;;
+  *) case "$SCOPE_OUT" in *" MODE=700") scope_mode=ok ;; *) scope_mode=bad ;; esac ;;
+esac
 [ -n "$SCOPE_DIR" ] && [ "$scope_mode" = ok ] && [ ! -e "$SCOPE_DIR" ] \
   && ok "review_privacy_scope_private_and_removed" \
   || bad "review_privacy_scope_private_and_removed (got: $SCOPE_OUT)"
