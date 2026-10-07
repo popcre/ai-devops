@@ -76,16 +76,21 @@ unsupported_platform() {
 resolve_stepcode() {
   local b c
   if [ -n "${AI_STEPFUN_STEP_BIN:-}" ]; then
-    [ -x "$AI_STEPFUN_STEP_BIN" ] && "$AI_STEPFUN_STEP_BIN" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || return 1
+    [ -x "$AI_STEPFUN_STEP_BIN" ] && stepcode_identity_ok "$AI_STEPFUN_STEP_BIN" || return 1
     printf '%s' "$AI_STEPFUN_STEP_BIN"; return 0
   fi
   for c in "${HOME:-}/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
     [ -n "$c" ] && [ -x "$c" ] || continue
-    "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || continue
+    stepcode_identity_ok "$c" || continue
     b="$c"; break
   done
   [ -n "${b:-}" ] || return 1
   printf '%s' "$b"
+}
+
+stepcode_identity_ok() { # stepcode_identity_ok BIN
+  NO_COLOR=1 "$1" --help 2>/dev/null | head -n1 |
+    sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' | grep -q '^step - AI coding assistant'
 }
 
 resolve_opencode() {
@@ -199,6 +204,23 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT AGENT
   cp "$src" "$xdg/agent/${agent}.md"
 }
 
+# StepCode 0.1.1 reads its custom catalog from ~/.stepcode/models.json. The
+# disposable review HOME has no caller catalog, so supply only our pinned model
+# from this door's temporary, nonsecret file. Retire this projection when the
+# pinned StepCode can discover its built-in Step model in an empty HOME.
+write_stepcode_catalog() { # write_stepcode_catalog DEST
+  local model_id
+  case "$SF_STEP_MODEL" in
+    step/*) model_id="${SF_STEP_MODEL#step/}"; model_id="${model_id%%:*}"; [ -n "$model_id" ] || return 1 ;;
+    *) return 1 ;;
+  esac
+  jq -n --arg base "$SF_BASE_URL" --arg id "$model_id" '{providers: {step: {
+    baseUrl: $base, api: "openai-completions", apiKey: "$STEP_API_KEY",
+    models: [{id: $id, name: ("StepFun " + $id),
+      contextWindow: 131072, maxTokens: 32768}]
+  }}}' > "$1" && chmod 600 "$1"
+}
+
 # Parse the provider envelope into OUR report shape: findings first, verdict
 # last under a literal '## Verdict' heading. OpenCode speaks the text/tool_use
 # JSONL of the other OpenCode doors; StepCode prints its answer on stdout.
@@ -300,19 +322,42 @@ main() {
     fi
     # StepCode is dynamically linked. Its ELF interpreter lives under /lib64
     # on this host; keep the system loader roots visible without mounting /.
-    local home_tmp top
+    local home_tmp model_catalog resolver_target top
     local -a loader_binds=()
+    local -a resolver_binds=()
     for top in /lib /lib64; do
       if [ -L "$top" ]; then loader_binds+=(--symlink "$(readlink "$top")" "$top")
       elif [ -d "$top" ]; then loader_binds+=(--ro-bind "$top" "$top"); fi
     done
+    # /etc/resolv.conf may point into /run, which is replaced with an empty
+    # tmpfs. Bind only that one resolver file; its directory may hold sockets.
+    if [ -L /etc/resolv.conf ]; then
+      resolver_target="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
+      case "$resolver_target" in
+        /run/*)
+          [ -f "$resolver_target" ] || { printf 'stepfun door: local_dependency_unavailable: resolver target missing.\n' >&2; rm -f "$prompt_full"; exit 127; }
+          resolver_binds=(--dir "$(dirname "$resolver_target")" --ro-bind "$resolver_target" "$resolver_target")
+          ;;
+        /etc/*|/usr/*) ;;
+        *) printf 'stepfun door: local_dependency_unavailable: resolver target is outside sandbox system trees.\n' >&2; rm -f "$prompt_full"; exit 127 ;;
+      esac
+    fi
     home_tmp="$(mktemp -d)"
+    model_catalog="$(mktemp)"
+    if ! write_stepcode_catalog "$model_catalog"; then
+      printf 'stepfun door: local_dependency_unavailable: StepCode model catalog could not be prepared.\n' >&2
+      rm -f "$model_catalog" "$prompt_full"
+      rm -rf "$home_tmp"
+      exit 127
+    fi
     (
       export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
       export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
       timeout "$SF_TIMEOUT" bwrap --die-with-parent --unshare-all --share-net \
         --ro-bind /usr /usr "${loader_binds[@]}" --ro-bind /etc /etc --dev /dev --proc /proc \
-        --tmpfs /tmp --tmpfs /run --tmpfs "$home_tmp" \
+        --tmpfs /tmp --tmpfs /run "${resolver_binds[@]}" \
+        --tmpfs "$home_tmp" \
+        --dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json" \
         --ro-bind "$(dirname "$bin")" "$(dirname "$bin")" \
         --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" "${prompt_binds[@]}" --chdir "$DOOR_WORKDIR" -- \
         "$bin" -p --no-session --model "$SF_STEP_MODEL" \
@@ -322,6 +367,7 @@ main() {
         > "$log" 2> "$out.err"
     )
     rc=$?
+    rm -f "$model_catalog"
     rm -rf "$home_tmp"
   fi
   set -e
