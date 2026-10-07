@@ -868,7 +868,12 @@ The partial receipt is machine-protected, schema 1, with: `scope`,
 `full_gate_sha256`, `partial_head`, `payload_root`, `payload_manifest_sha256`,
 `catalog_sha256`, `route_inventory_sha256`, `operation_review_sha256`,
 `authorization_sha256`, `stage_report_sha256`, `state=active`, and exact route
-records. Route records contain fixed command ID, route kind, approved destination,
+records. Add `baseline_kind` with exactly `verified_current`, `stale_manifest`
+or `verified_legacy_routes`, and a typed `baseline_evidence` object. A legacy
+baseline records `full_receipt_absent=true` and null full-receipt/head/hash
+fields, never invented full proof. Its proven clean primary source HEAD and
+owned route/source hashes are separate evidence, not a full install receipt.
+Route records contain fixed command ID, route kind, approved destination,
 prior type/hash/absence/owner/ACL, new hash/target/owner/ACL and recoverable prior
 backup reference. Schedules additionally bind action, cadence, principal,
 trigger/settings and prior definition hash. Never credential values or raw
@@ -916,8 +921,46 @@ operation APPROVE must contain
 `Approved github-request-reduction-partial-install.` and wrapper-written exact
 source/policy/catalog/inventory bindings. Source implementation is
 `reviewer-safety`; per-host installation task is `installation`. Recheck gates
-before paid review/ship/install. Stale full receipt needs supported exact-host
-stale recovery binding in addition to partial operation, not blanket exemption.
+before paid review/ship/install. Baseline handling is explicit:
+
+- `verified_current`: real full receipt verifies installed source/gate/routes;
+  the partial operation header records receipt hash, full source SHA, live gate
+  hash and clean primary HEAD.
+- `stale_manifest`: a real Linux manifest is present and verified against its
+  committed source, but source differs from clean live primary HEAD. Run the
+  existing `stale-linux-manifest-recovery` exact-host wrapper operation, whose
+  header binds stale manifest SHA/hash and live installed SHA/gate hash. Require
+  `Approved stale-linux-manifest-recovery.` in that exact report, plus the new
+  partial operation report at the same exact target source. Gate uses
+  `--baseline-kind stale_manifest --baseline-review-report <report>`; it checks
+  header hashes again on-host. It does not stamp a repaired full manifest.
+- `verified_legacy_routes`: missing Windows source receipt is explicitly absent;
+  each old managed launcher and source must match clean committed primary source
+  and supported ownership/route shape. The new partial operation independently
+  captures both launcher-form hashes, source hashes/ownership, missing-receipt
+  state and clean primary HEAD in its wrapper-written header. It also requires
+  the exact line `Approved verified-legacy-routes baseline.` in addition to
+  `Approved github-request-reduction-partial-install.` at the same current
+  target source. Gate uses `--baseline-kind verified_legacy_routes`; no legacy
+  unchanged-main refresh operation is borrowed when inapplicable. Unknown or
+  unproven owner/source/absence refuses authorization; absence is never proof.
+
+Extend `bin/ai-review --operation github-request-reduction-partial-install`
+with `--installation-inventory <protected file>` and
+`--baseline-kind verified_current|stale_manifest|verified_legacy_routes`.
+`tools/lib/review-operation.sh` reads fixed host receipt/launcher paths itself,
+verifies the inventory against live host state and writes the header fields:
+`partial scope`, `partial target SHA`, `catalog SHA256`, `inventory SHA256`,
+`host identity SHA256`, `runtime inventory SHA256`, `baseline kind`,
+`baseline receipt state`, `baseline receipt SHA256` (literal `absent` when
+absent), `baseline source SHA` (literal `not-established` for missing full
+proof), `clean primary HEAD`, `old launcher inventory SHA256`,
+`old source inventory SHA256`, `ownership inventory SHA256` and, when relevant,
+`stale recovery report SHA256`. Reject caller-supplied header text or invented
+digest/absence. Report records the same fields; authority binds their hashes.
+The ordinary operation approval never implies the additional legacy-baseline
+approval line. A typed legacy baseline is an accepted owned source/route
+starting point only; doctor continues reporting absent full installation state.
 
 Inventory schema 1: fixed scope, exact host/profile/runtime identity, primary
 origin/path/head and full receipt hash, optional prior active partial receipt
@@ -946,8 +989,22 @@ substitution. Verification: `authority_exact_operation_inventory`,
 and Windows `-Scope github-request-reduction`, plus reviewed inventory input.
 Branch after supported source/authority validation and installation lock,
 before any full-stage machine/user writes. Do not clone/advance primary HEAD.
-Linux holds its checkout lock plus machine partial-route lock; Windows retains
-the existing machine mutex. Reuse `bin/install-machine-tools.ps1` renderer via
+Both new full and partial installer paths, source/launcher-only modes,
+`update.sh` and direct machine-tools entrypoints acquire the same machine
+installation lock before any installed route or installation-state writes.
+Linux fixed lock is `/var/lock/ai-devops-toolkit-install.lock`, protected against
+replacement; Windows uses existing `Global\AiDevOpsToolkitInstall` mutex.
+Retain existing checkout lock and maintenance locks as additional guards,
+with acquisition order machine -> checkout -> maintenance. An updater may pass
+owned Linux machine/check-out descriptors to its direct child only after exact
+descriptor-path/parent checks; no environment flag alone proves ownership.
+Supported re-entry is only the same transaction. Old unpatched or foreign
+installers do not automatically participate. Preflight checks all inventoried
+owned old-checkout locks and known installation runtime activity/pending
+journals; a held lock, active old runtime or unresolved prior pending install
+refuses before mutation. Unknown installer ownership or unverifiable activity
+blocks, rather than claiming global exclusion. Reuse
+`bin/install-machine-tools.ps1` renderer via
 an explicit guarded internal partial route branch, not a caller-defined
 CatalogPath bypass. Full canonical catalog validation remains unchanged for
 ordinary mode. Pass exact reviewed head and protected authority; no broad
@@ -1023,6 +1080,60 @@ cleanup after no active receipt/consumer references it, not installation deletio
 Verification: `full_reconcile_partial_routes`, `full_failure_keeps_partial_live`,
 `next_partial_requires_predecessor_binding`.
 
+**Phase C3 — faulty active release recovery.** Interrupted pre-activation
+rollback may use the still-pending installation transaction, as above.
+After activation its authority is consumed: recovery requires a separate NEW
+one-use authority and exact operation review, never replay of that authority.
+Add `github-request-reduction-partial-rollback` to the same review-operation
+home, requiring `Approved github-request-reduction-partial-rollback.`.
+Review CLI is `bin/ai-review --operation github-request-reduction-partial-rollback
+--installation-inventory <protected file>`; wrapper independently reads the
+fixed active receipt/journal/backup records and current host/route state.
+Header additionally records `active partial receipt SHA256`,
+`active transaction ID`, `current route inventory SHA256`,
+`retained backup inventory SHA256`, `previous receipt state`,
+`previous receipt SHA256` (literal `absent` if verified predecessor had none)
+and `rollback target route inventory SHA256`, alongside host/runtime/catalog
+and typed baseline fields. This rollback may restore the verified previous
+owned full/legacy/partial route state, never invent a previous full receipt.
+
+Authorization CLI: `ai-task-gates authorize-install
+--scope github-request-reduction --rollback --inventory <protected file>
+--review-report <exact rollback APPROVE> --reviewer-approval <same report>`.
+Rollback authority schema 1 adds `operation=partial-rollback`, new transaction
+ID, `active_receipt_sha256`, `active_transaction_id`, current route/host/runtime
+hashes, retained backup hashes/ownership, previous receipt state/hash and exact
+target route inventory hash. It is stored separately from consumed install
+authority. Installer CLI uses `--scope github-request-reduction --rollback
+--authorization-id <new transaction ID>` (PowerShell `-Scope
+github-request-reduction -Rollback -AuthorizationId <ID>`); no arbitrary backup
+path or action argument is accepted. Installation scope interface otherwise
+uses `--inventory <protected file> --authorization-id <ID>` (Windows
+`-InstallationInventory <file> -AuthorizationId <ID>`). The scope's verifier
+adds phases `rollback-preflight`, `rollback-staged`, `rollback-restored`,
+`rollback-verified` and `rollback-finalize` bound to that exact authority.
+
+State transitions: active -> fault-recorded (keep active receipt and exact
+observed failure) -> rollback-issued -> rollback-reserved -> rollback-staged
+-> predecessor-restored -> rollback-verified -> rollback-consumed/retired.
+Hold the same machine/check-out/maintenance locks. Revalidate current outputs
+and retained backups before each restore. All routes, maintenance protected
+payload and schedule definitions must return coherently to the recorded
+predecessor, with its original capabilities verified before rollback authority
+is consumed. If current receipt, route, protected payload/ACL or backup differs
+from authorized observed state, refuse destructive restoration and use newly
+reviewed forward repair; never overwrite another actor's change. A tampered
+receipt cannot authorize its own repair: compare to protected journal and
+retained issued authority; mismatch stops automatic recovery and assigns
+coordinator diagnosis. Preserve the fault and recovery history. Successful
+rollback marks the faulty receipt retired and reactivates the exact prior
+partial receipt or verified original routes; full receipt is never forged.
+Verification: `active_fault_new_rollback_authority`,
+`active_rollback_install_authority_replay_refused`,
+`active_rollback_tampered_receipt_or_backup_refused`,
+`active_rollback_restores_coherent_predecessor`,
+`active_rollback_concurrent_mutation_refused`.
+
 **Phase D/E — reviewed landing and one host outcome.** Focused tests, native
 platform proof, exact-head assigned independent review, normal required CI and
 merge queue precede installation. Confirm exact fetched merged source and
@@ -1058,6 +1169,9 @@ Trust-boundary adversarial matrix:
 | Caller context | Wrong repository cwd, immutable update target | `gate_caller_repository_preserved`, `doctor_update_primary_identity` |
 | Direct consumer | Hardcoded unrouteable canonical invocation | `direct_canonical_unmigratable_refused` |
 | Authority/journal | Replay, concurrent installer, interrupted step | `authority_replay_refused`, `partial_retry_exact_transaction` |
+| Machine installation | Full/partial installs from different clones, old pending runtime | `different_clone_full_partial_race_refused`, `old_pending_install_preflight_refused` |
+| Typed baseline | Missing receipt presented as verified full state, unknown old owner | `typed_legacy_baseline_no_forged_fullproof`, `legacy_wrapper_header_source_owner_bound` |
+| Active rollback | Consumed install authority, tampered receipt/backup, mixed restoration | `active_fault_new_rollback_authority`, `active_rollback_install_authority_replay_refused`, `active_rollback_restores_coherent_predecessor` |
 | Owned route/rollback | Another actor changed destination or ACL | `partial_rollback_concurrent_change_refused` |
 | Schedule | Different principal/cadence/action or foreign task | `schedule_semantics_preserved` |
 | Privileged maintenance | Redirected fixed action, skipped runtime hashes, hostile autoload/env | Existing `tests/test-windows-runner-maintenance.ps1` regressions |
@@ -1115,6 +1229,17 @@ helper execution. Add `maintenance_fixed_action_payload_unchanged`,
 to accommodate the partial route. Performance sampling distinguishes ordinary
 hot launchers from privileged maintenance: required runtime hashes remain
 included in the latter's original versus partial end-to-end measurements.
+Add Linux and native Windows cases `different_clone_full_partial_race_refused`,
+`old_pending_install_preflight_refused`,
+`typed_legacy_baseline_no_forged_fullproof`,
+`legacy_wrapper_header_source_owner_bound` and every active rollback case in
+Phase C3. Exercise full/full and full/partial routes, updater/direct installer,
+source/launcher-only entry modes, exact same-transaction child re-entry and
+foreign/unpatched runtime refusal. Missing/legacy/stale fixtures prove exact
+header/operation/approval-line semantics, with no full receipt fabricated.
+Active-fault fixtures cover all lifecycle boundaries, restored original
+capabilities, authority replay, current-route changes and protected backup/
+receipt tampering; rollback failure must retain a named safe forward-repair path.
 
 ### 11. Constraints and operational traps
 
@@ -1129,8 +1254,10 @@ routes, not substituted credentials. Preserve provider/SSH/wake capabilities.
 
 State directory and release roots must be protected against the executing
 runtime user, not merely chmodded within a user-writable parent. No unsafe
-symbolic-link traversal or hardlink reuse. Known old full receipt is mandatory;
-missing/legacy/stale baseline must enter its supported exact review mode.
+symbolic-link traversal or hardlink reuse. A proven typed baseline is mandatory:
+real verified current receipt, reviewed stale Linux manifest, or independently
+reviewed verified legacy routes. Receipt absence is never full-install proof;
+unknown owner/source state refuses. Exact flags/header/approval lines are in B3.
 Source-linked helper resolution, caller Git cwd and durable primary identity
 are three distinct roots. Never infer them from the current executable's dirname
 alone after partial installation. Keep full-stage authority semantics unchanged.
