@@ -112,7 +112,9 @@ load_policy(){
   load_class_table
   validate_action_gates
   # Loaded here, in the main shell: merged_gate runs in command substitutions.
-  load_rule_table
+  # Always reread, as every other part of the contract is.
+  TG_TABLE_LOADED=""; load_rule_table
+  TG_CONSUMER_LOADED=""; [ -z "$CONSUMER_FILE" ] || load_consumer_table
 }
 
 # Per-action proof bindings must name real actions and real classes before any
@@ -165,7 +167,7 @@ valid_action(){ [ -n "${1:-}" ] && [ -n "${TG_ACTION[$1]:-}" ]; }
 # alone asked up to a dozen times per call (#1355). A contract whose values
 # could not survive the row format (non-string match or value, newline, or
 # the unit separator) keeps the per-question readers, which stay the reference.
-TG_TABLE_LOADED=0; TG_TABLE_OK=0; TG_CONSUMER_LOADED=""
+TG_TABLE_LOADED=""; TG_TABLE_OK=0; TG_CONSUMER_LOADED=""
 declare -a TG_MATCHES=()
 declare -A TG_ROWS=() TG_CONSUMER_ROWS=()
 tg_rows_filter='
@@ -189,8 +191,9 @@ tg_table_rows(){ # tg_table_rows FILE ASSOC CONSUMER; fills ASSOC[key]; returns 
   } < <(jqr --argjson consumer "$3" "$tg_rows_filter" "$1" 2>/dev/null || printf 'FALLBACK\n')
 }
 load_rule_table(){
-  [ "$TG_TABLE_LOADED" = 1 ] && return 0
-  TG_TABLE_LOADED=1; TG_MATCHES=(); TG_ROWS=()
+  # Keyed on the file: install checks swap POLICY_FILE between revisions.
+  [ "$TG_TABLE_LOADED" = "$POLICY_FILE" ] && return 0
+  TG_TABLE_LOADED="$POLICY_FILE"; TG_MATCHES=(); TG_ROWS=()
   if tg_table_rows "$POLICY_FILE" TG_ROWS false; then TG_TABLE_OK=1; else TG_TABLE_OK=0; TG_MATCHES=(); TG_ROWS=(); fi
 }
 load_consumer_table(){
