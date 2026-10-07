@@ -197,4 +197,15 @@ export MOCK_AGY_HOOK_ARM="$TMP/hook-arm" MOCK_AGY_HOOK="$TMP/hook.sh"
 set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$RR_SHA" bind --prompt follow) >"$TMP/c.out" 2>"$TMP/c.err"; C_RC=$?; set -e
 unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
 check 'post-lock assert-head revalidation refuses a substituted session' "test '$C_RC' -ne 0 && test -f '$TMP/hook-fired' && grep -q 'asserted head no longer matches the reviewed source' '$TMP/c.err'"
+# A source-shape refusal already knows its outcome, so the provider gates must
+# not mask the promised source-specific error or its recovery handling while
+# the runtime is drifting.
+git -C "$RR" commit --allow-empty -qm 'advance again for the drift case'
+write_q 1.1.15; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$RR" && "$SCRIPT" ask bind --prompt follow) >"$TMP/h.out" 2>"$TMP/h.err"; H_RC=$?; set -e
+check 'runtime drift does not mask the changed-head refusal' "test '$H_RC' -ne 0 && grep -q 'working checkout changed' '$TMP/h.err' && ! grep -q 'quarantined' '$TMP/h.err'"
+check 'the changed-head refusal still marks recovery under drift' "test \"\$(jq -r .status '$META')\" = RECOVERY_REQUIRED"
+set +e; (cd "$RR" && "$SCRIPT" new drift-assert --assert-head 0000000000000000000000000000000000000000 --prompt review) >"$TMP/i.out" 2>"$TMP/i.err"; I_RC=$?; set -e
+check 'runtime drift does not mask the assert-head refusal' "test '$I_RC' -ne 0 && grep -q 'source identity refused' '$TMP/i.err' && ! grep -q 'quarantined' '$TMP/i.err'"
+check 'the assert-head refusal spends no provider call' "test ! -s '$MOCK_AGY_CALLS'"
 printf 'ok tests\n'
