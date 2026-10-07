@@ -9,7 +9,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" AI_STEPFUN_STATE_DIR="$TMP/state" AI_STEPFUN_KEY_STORE="$TMP/home/key"
 export AI_REVIEW_QUARANTINE_DIR="$TMP/quarantine" AI_STEPFUN_STEP_BIN="$TMP/bin/step"
 export AI_REVIEW_EVENT_DIR="$TMP/events"
-export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_RATE_PAUSE=0 AI_STEPFUN_REPORT_FLOOR=20
+export AI_STEPFUN_PLATFORM=Linux AI_STEPFUN_RATE_PAUSE=0 AI_STEPFUN_REPORT_FLOOR=20 AI_STEPFUN_RPM=100000
 mkdir -p "$TMP/bin" "$HOME"
 printf 'stub-key\n' > "$AI_STEPFUN_KEY_STORE"; chmod 600 "$AI_STEPFUN_KEY_STORE"
 git -C "$TMP" init -q repo; git -C "$TMP/repo" config user.email t@example.com; git -C "$TMP/repo" config user.name T
@@ -28,12 +28,18 @@ cat >> "$TMP/bin/step" <<'STUB'
 [ "${1:-}" = --help ] && { echo 'step - AI coding assistant with read, bash, edit, write tools'; exit 0; }
 # RPC mode (the review door): answer the prompt with this stub's -p answer.
 if printf '%s\n' "$@" | grep -qx rpc; then
+  echo provider-call >> "$STUB_ARGS.calls"
   read -r req; msg="$(jq -r .message <<<"$req")"
   echo '{"id":"door-prompt","type":"response","command":"prompt","success":true}'
-  ans="$("$0" -p -- "$msg" 2>/dev/null)"
+  ans="$(STUB_INNER=1 "$0" -p -- "$msg" 2>/dev/null)"
+  # An HTTP error ends the agent with an errorMessage and no answer text.
+  if [[ "$ans" =~ ^4[0-9][0-9]:\ \{ ]]; then
+    jq -cn --arg e "$ans" '{type:"agent_end",messages:[{role:"assistant",errorMessage:$e}]}'; ans=""
+  fi
   echo '{"type":"agent_settled"}'; read -r _
   jq -cn --arg t "$ans" '{id:"door-text",type:"response",data:{text:$t}}'; exit 0
 fi
+[ -n "${STUB_INNER:-}" ] || echo provider-call >> "$STUB_ARGS.calls"
 printf '%s\n' "$@" > "$STUB_ARGS"; printf '%s\n' "${STEP_API_KEY:-}" > "$STUB_ARGS.key"; env > "$STUB_ARGS.env"
 prompt="${@: -1}"
 if [[ "$prompt" == @* ]]; then
@@ -66,6 +72,17 @@ case "$STUB_MODE" in
   touchcaller) touch "$CALLER/CALLER_TOUCHED"; printf 'Analysis of the change with plenty of detail.\nVERDICT: APPROVE %s\n' "$head" ;;
   quote) echo 'StepFun replies "You exceeded your current quota, please check your plan and billing details" when unpaid.' ;;
   askok) echo 'The loop is bounded by RATE_RETRIES.' ;;
+  # burst: the provider refuses a call that starts within 2s of the previous one.
+  burst) now=$(date +%s); last=$(tail -n1 "$STUB_ARGS.starts" 2>/dev/null || echo 0); echo "$now" >> "$STUB_ARGS.starts"
+         if [ $((now - last)) -lt 2 ]; then echo '429: {"error":{"code":"rate_limited"}}'; exit 1; fi
+         echo 'paced answer' ;;
+  # json: StepCode --mode json events, two provider calls with usage.
+  json) mu(){ jq -cn --arg t "$1" --argjson i "$2" --argjson o "$3" --argjson r "$4" \
+          '{type:"message_end",message:{role:"assistant",content:[{type:"thinking",text:""},{type:"text",text:$t}],usage:{input:$i,output:$o,cacheRead:$r,cacheWrite:0,totalTokens:($i+$o)}}}'; }
+        echo '{"type":"session","id":"synthetic-session"}'
+        jq -cn '{type:"message_end",message:{role:"user",content:[{type:"text",text:"prompt"}]}}'
+        mu '' 100 20 50; mu 'final json answer' 30 7 80
+        echo '{"type":"agent_end","messages":[]}' ;;
 esac
 STUB
 chmod +x "$TMP/bin/step"
@@ -147,6 +164,23 @@ check "doctor passes with the stub and a protected key store" "'$SCRIPT' doctor 
 check "doctor prints one PASS line per check for the shared-db allocator" "[ \"\$('$SCRIPT' doctor | grep -c '^PASS  ')\" = 4 ] && mode ok && [ \"\$('$SCRIPT' doctor --live | grep -c '^PASS  ')\" = 6 ]"
 check "doctor refuses a key store that is not owner-only" "chmod 644 '$AI_STEPFUN_KEY_STORE'; ! '$SCRIPT' doctor >/dev/null; rc=\$?; chmod 600 '$AI_STEPFUN_KEY_STORE'; [ \$rc = 0 ]"
 check "live doctor makes one call and sees the answer" "mode ok; '$SCRIPT' doctor --live | grep -q 'live=verified'"
+rm -f "$STUB_ARGS.calls"; mode ok
+"$SCRIPT" doctor --live > "$TMP/doctor-one.out" 2>&1; rc=$?
+check "doctor_single_paid_call" "[ $rc = 0 ] && grep -q 'live=verified' '$TMP/doctor-one.out' && grep -q 'review door answered' '$TMP/doctor-one.out' && [ \"\$(wc -l < '$STUB_ARGS.calls')\" = 1 ]"
+
+# Pacer (#1432): three concurrent asks against a provider that refuses any call
+# within 2s of the previous one. With a limit of 1 per 2s they wait, never 429.
+rm -f "$STUB_ARGS.calls" "$STUB_ARGS.starts"; rm -rf "$AI_STEPFUN_STATE_DIR/pace"; mode burst
+for i in 1 2 3; do
+  AI_STEPFUN_RPM=1 AI_STEPFUN_PACE_WINDOW=2 "$SCRIPT" ask --repo "$TMP/repo" x > "$TMP/burst.$i.out" 2> "$TMP/burst.$i.err" &
+done
+wait
+check "paces_before_call" "[ \"\$(cat '$TMP'/burst.*.out | grep -c 'paced answer')\" = 3 ] && [ \"\$(wc -l < '$STUB_ARGS.calls')\" = 3 ] && cat '$TMP'/burst.*.err | grep -q 'stepfun pace: waiting' && ! cat '$TMP'/burst.*.err | grep -q 'rate limit reached'"
+rm -rf "$AI_STEPFUN_STATE_DIR/pace" "$AI_STEPFUN_STATE_DIR/reports"; mode json
+out="$("$SCRIPT" ask --repo "$TMP/repo" x 2>/dev/null)"; rc=$?
+check "usage_parsed_into_report" "[ $rc = 0 ] && [ '$out' = 'final json answer' ] && jq -e -s 'any(.[]; .engine == \"stepcode\" and .provider_calls == 2 and .input_tokens == 130 and .output_tokens == 27 and .cache_read_tokens == 130 and .cache_write_tokens == 0)' '$AI_STEPFUN_STATE_DIR'/reports/turn.*.json >/dev/null && ! grep -l 'synthetic-session\|final json' '$AI_STEPFUN_STATE_DIR'/reports/turn.*.json >/dev/null"
+check "raw StepCode event stream is removed after the turn" "! find '$AI_STEPFUN_STATE_DIR' -name '*.events' | grep -q ."
+check "StepCode runs in json event mode" "grep -qx json '$STUB_ARGS' && grep -B1 -x json '$STUB_ARGS' | grep -qx -- --mode"
 check "the key reaches step through the environment, never argv" "mode ok; '$SCRIPT' doctor --live >/dev/null && grep -qx stub-key '$STUB_ARGS.key' && ! grep -q stub-key '$STUB_ARGS'"
 
 check "review accepts a well-formed verdict naming the head" "mode verdict; '$SCRIPT' review --repo '$TMP/repo' --prompt 'check f' 2>/dev/null | grep -q \"VERDICT: APPROVE $HEAD_SHA\""

@@ -41,6 +41,9 @@ SF_PROFILE_SRC="$SF_ROOT/config/opencode-stepfun"
 # The one StepCode bubblewrap launch, shared with bin/ai-stepfun.
 # shellcheck source=../stepfun-sandbox.sh
 source "$SF_ROOT/tools/lib/stepfun-sandbox.sh"
+# The shared request pacer, also used by bin/ai-stepfun (#1432).
+# shellcheck source=../stepfun-pace.sh
+source "$SF_ROOT/tools/lib/stepfun-pace.sh"
 # reviewer_credit_scan: the shared out-of-credit classifier.
 # shellcheck source=../../reviewer_event_guard.sh
 source "$SF_ROOT/tools/reviewer_event_guard.sh"
@@ -414,20 +417,23 @@ main() {
     # unattended (rm -rf, unanalysable shell). In -p mode that question ends
     # the whole turn with no report, so the turn runs in RPC mode and the door
     # declines every such question: the model is told no and keeps reviewing.
-    # An HTTP 429 that outlasts StepCode's own retry reruns the turn after a
-    # pause, as bin/ai-stepfun does.
+    # Every turn waits for a slot from the shared pacer first, so concurrent
+    # reviews are spaced instead of colliding (#1432). An HTTP 429 that still
+    # outlasts StepCode's own retry sets a shared cooldown, and the turn is
+    # rerun only after that wait, as bin/ai-stepfun does.
     local rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
     local -a sandbox_args=(--dir "$home_tmp/.stepcode" --ro-bind "$model_catalog" "$home_tmp/.stepcode/models.json"
       "${packet_bind[@]}" "${work_binds[@]}" --chdir "$work")
     while :; do
+      stepfun_pace_wait
       sf_rpc_turn "$prompt_full"
       rc=$?
       [ "$rc" -ne 0 ] || break
       grep -Eq '^429: \{' "$out.err" 2>/dev/null && [ "$rate_retries" -lt "$rate_max" ] || break
       rate_retries=$((rate_retries + 1))
-      printf 'stepfun door: StepFun rate limit reached; retrying in %ss (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
-      sleep "$rate_pause"
+      printf 'stepfun door: StepFun rate limit reached; retrying after a %ss shared cooldown (%s/%s)\n' "$rate_pause" "$rate_retries" "$rate_max" >&2
+      stepfun_pace_cooldown "$rate_pause"
     done
     rm -f "$model_catalog"; rm -rf "$home_tmp"; [ -z "$scratch" ] || rm -rf "$scratch"
   fi
