@@ -89,7 +89,10 @@ safety limits outside the repository still apply.
 
 An **assigned AI reviewer** is: for `popcre/shared-db` work, the reviewer the
 shared-db allocator draws; everywhere else, a rotation reviewer run through
-`ai-review` whose engine differs from the implementing session's. The
+`ai-review` whose engine differs from the implementing session's. Outside
+shared-db there is no draw command: the session itself picks any reviewer the
+registry lists as in rotation (`config/reviewer-registry.json`, mirrored from
+the allocator) and moves to the next one if it is unreachable. The
 implementing session never approves its own change. Authority an AI cannot
 obtain itself (a platform limit) is reported `Blocked —`; `ai-task-gates`
 approval gates take `--reviewer-approval <report>`, the assigned reviewer's

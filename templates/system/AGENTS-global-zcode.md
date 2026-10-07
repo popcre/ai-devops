@@ -218,7 +218,9 @@ the task needs the detail.
   <machine>`, where `<id>` is `$ZCODE_SESSION_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.
 - **Reviewer rotation:** the shared-db allocator is the one source of truth
-  for who reviews. Never retry one out of rotation. Reviewer wrappers never call
+  for who is in rotation and draws the reviewer for `popcre/shared-db` work; in
+  every other repository the session picks any in-rotation reviewer whose
+  engine differs from its own via `ai-review`. Never retry one out of rotation. Reviewer wrappers never call
   1Password during a review. Details: `ai-devops/docs/reviewer-rotation-rules.md`.
 - **`shared-db-orchestrator` is optional reference only** — claim-first is the
   default structural path. Its detailed safety rules stay binding whenever

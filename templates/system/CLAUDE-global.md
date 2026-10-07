@@ -183,8 +183,11 @@ Project facts live in each repository's `AGENTS.md`, machine facts in
 - **Sign everything posted to GitHub** with `Posted by Claude chat <id> on
   <machine>`, where `<id>` is `$CLAUDE_CODE_SESSION_ID` (or `unknown` when
   empty). When editing a body, keep existing signatures and add yours.
-- **Reviewer rotation:** the shared-db allocator alone decides who reviews;
-  never retry one out of rotation. Details: `docs/standing-rules-details.md`.
+- **Reviewer rotation:** the shared-db allocator alone decides who is *in*
+  rotation, and draws the reviewer for `popcre/shared-db` work; in every other
+  repository the session picks any in-rotation reviewer whose engine differs
+  from its own via `ai-review`. Never retry one out of rotation. Details:
+  `docs/standing-rules-details.md`.
 - **`shared-db-orchestrator` is optional reference only** — claim-first is the
   default structural path; its safety rules stay binding when that work runs.
 - **Route every successor from its own work,** never a predecessor's
