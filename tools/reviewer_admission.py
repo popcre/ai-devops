@@ -16,7 +16,7 @@ import re
 import sys
 import tempfile
 import time
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 CREDIT_EXIT = 92
 CREDIT_SECONDS = 3600
@@ -286,7 +286,10 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
         except (OSError, ValueError, TypeError) as error:
             reset = None
             print('reviewer admission: out-of-credit quarantine not recorded: ' + str(error), file=sys.stderr)
-    reset_label = datetime.datetime.fromtimestamp(reset_epoch(reset), ZoneInfo('America/New_York')).strftime('%B %d, %Y at %I:%M %p %Z') if reset else 'unavailable'
+    try:
+        reset_label = datetime.datetime.fromtimestamp(reset_epoch(reset), ZoneInfo('America/New_York')).strftime('%B %d, %Y at %I:%M %p %Z') if reset else 'unavailable'
+    except (ZoneInfoNotFoundError, ValueError, OverflowError):
+        reset_label = 'display unavailable; provider reset retained'
     human = ('ALLOWANCE EXHAUSTED: %s; automatic return at provider reset; reset %s.' % (provider, reset_label) if allowance else 'OUT OF CREDIT: %s; automatic return requires verified paid balance.' % CREDIT_MESSAGES[provider])
     print(machine); print(human)
     return 0

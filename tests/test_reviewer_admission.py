@@ -56,6 +56,10 @@ class AdmissionTests(unittest.TestCase):
             self.evidence.write_text(json.dumps({'provider':'qwen','failure_class':'allowance-exhausted','reset_at':value}))
             result=subprocess.run([sys.executable,str(MODULE),'credit','qwen','--directory',str(self.directory),'--marker',str(self.evidence),'--record'],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
+            effective=api.load(self.directory,'qwen')['capacity_hold']['reset_at']
+            if effective:
+                label=datetime.datetime.fromtimestamp(api.reset_epoch(effective),api.ZoneInfo('America/New_York')).strftime('%B %d, %Y at %I:%M %p %Z')
+                self.assertIn(label,result.stdout)
             return api.load(self.directory,'qwen')['capacity_hold']['reset_at']
         later=marker(7200)
         self.assertEqual(marker(3600),later)
