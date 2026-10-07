@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Keep test runs out of the live reviewer events ledger (#1435).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-events-isolation.sh"
 # Offline guard for the sanitized Muse contract fixture. This test must never call Meta.
 set -euo pipefail
 

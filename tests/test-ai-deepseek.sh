@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Keep test runs out of the live reviewer events ledger (#1435).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-events-isolation.sh"
 # Offline checks for bin/ai-deepseek: argument validation, profile guardrails,
 # and the full implement/ask/diff/cleanup lifecycle against a fake OpenCode.
 set -euo pipefail

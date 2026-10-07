@@ -8,7 +8,7 @@ reviewer_event_evidence(){
   [ -n "${AI_REVIEW_EVENT_RUN_ID:-}" ] || { printf 'durable evidence requires an invocation identity\n' >&2; return 1; }
   python="$(command -v python3 || command -v python)" || return 1
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_events.py"
-  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION; do
     [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
   done
   env -i "${evidence_env[@]}" "$python" "$event_tool" "$operation" "$provider" "$AI_REVIEW_EVENT_RUN_ID" "$@"
@@ -38,7 +38,7 @@ reviewer_event_verify_private(){
   local -a evidence_env=()
   python="$(command -v python3 || command -v python)" || return 1
   event_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/reviewer_events.py"
-  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION; do
     [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
   done
   env -i "${evidence_env[@]}" "$python" "$event_tool" "$@" >/dev/null
@@ -66,15 +66,16 @@ reviewer_event_run_is_open(){
   [[ "$run_id" =~ ^[0-9a-f]{32}$ ]] || return 1
   [ -n "$provider" ] || return 1
   python="$(command -v python3 || command -v python)" || return 1
-  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR; do
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION; do
     [ -z "${!name:-}" ] || evidence_env+=("$name=${!name}")
   done
   env -i "${evidence_env[@]}" "$python" - "$run_id" "$provider" <<'PY'
 import json, os, sys
 from pathlib import Path
 run_id, provider = sys.argv[1], sys.argv[2]
-base = os.environ.get("AI_REVIEW_EVENT_DIR") or (
-    (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops/reviewer-events")
+base = os.environ.get("AI_REVIEW_EVENT_DIR") or str(Path(
+    os.environ.get("AI_REVIEWER_STATE_BASE")
+    or (os.environ.get("HOME") or str(Path.home())) + "/.local/state/ai-devops") / "reviewer-events")
 path = Path(base) / "events.jsonl"
 if not path.is_file():
     sys.exit(1)
@@ -149,7 +150,7 @@ reviewer_event_guard(){
   root="$(cd "$(dirname "$wrapper")/.." && pwd -P)"
   python="$(command -v python3 || command -v python)" || { printf 'reviewer event recording requires Python 3\n' >&2; exit 1; }
   event_tool="$root/tools/reviewer_events.py"
-  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_EVENT_RUN_ID; do
+  for name in PATH HOME USERPROFILE SYSTEMROOT COMSPEC PATHEXT TEMP TMP TMPDIR AI_REVIEWER_STATE_BASE AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION AI_REVIEW_EVENT_RUN_ID; do
     [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
   done
   name="AI_${provider^^}_CALLER"; [ -z "${!name:-}" ] || event_env+=("$name=${!name}")
