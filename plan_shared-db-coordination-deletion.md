@@ -6,6 +6,12 @@
 
 ## STATUS — read first
 
+> **Owner ruling, 2026-10-07 EDT:** the former one-child, one-phase and
+> one-live-outcome stopping limits are permanently revoked. Any surviving
+> instructions below imposing those limits are historical. Continue authorized
+> work when actual dependencies, ownership, collision controls and safety gates
+> allow. Live proof and the same-issue proof-gap rule remain required.
+
 | Step | State | Date | Evidence / completion gate |
 |---|---|---|---|
 | 0. Freeze decision + register plan | ✅ done | 2026-09-29 | This file + `HANDOFF.d/2026-09-29T1635Z-edge-dev-mimo-c-by-deletion.md` + `AGENTS.md` task-router row |

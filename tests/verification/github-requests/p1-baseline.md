@@ -270,6 +270,39 @@ or treating full REST counters as proof of an idle account.
 
 ## Remaining evidence and blockers
 
+### Coordinator reconciliation, October 7, 2026, 10:05 AM EDT
+
+Owner: Codex chat `01a116aa-0400-7230-97d9-3fab73f00bd1`, edge-dev3,
+under #658 and #660. This supplement is a checked aggregate only; raw telemetry,
+credential contexts and host routes remain private.
+
+The report over the complete local history correctly refused malformed input.
+A read-only inspection found one October 1 record prefixed with NUL bytes. The
+original daily files were preserved unchanged. A bounded October 2–7 copy,
+excluding the entire October 1 input rather than silently repairing a record,
+produced this provisional aggregate. Its raw-artifact digest is
+`6d28c9e118ef27e38a00764ab7fa0f5c0d46a9df9b2886bc5001a57cf0ceb901`.
+Observation interval: October 1, 2026, 8:03 PM EDT through October 7, 2026,
+10:02 AM EDT (daily files use UTC boundaries).
+
+- 18,721 schema-1 call records; 1,065 workflow receipts, including 188 deadlines.
+- 800 completed BlockerWatch ticks; PR wait outcomes: 45 checks-failed,
+  31 merged, one ejected, and 188 deadlines. Active-tick comparability is unproved.
+- 624 observed GraphQL points, of which 552 link to workflow receipts.
+  Total HTTP requests and total GraphQL consumption remain unknown.
+- 35 local context/reset groups, including 32 with multiple observations;
+  observed GraphQL minimum remaining is 2,345/5,000 (46.9%). These are not
+  two workload-comparable busy windows or account-wide headroom proof.
+- 7,525 records have unknown caller attribution. Dependency-fallback reads
+  account for 9,393 call records; telemetry lacks target IDs, so their count
+  alone cannot establish redundancy or savings.
+
+The report verdict is **incomplete: busy windows, workflow outcomes, identities
+and quota observations required**. No savings, p95 useful-work latency,
+cross-host same-principal contention, zero missed events or fleet completion
+are inferred from this aggregate. #1211 quota admission and #1212 operation
+label defects are separately owned repairs. Acceptance stays on #660/#658.
+
 P1 owner (#660) retains the complete outcome: installed hashes, source-to-identity
 mapping, observed per-bucket snapshots and non-double-counted deltas, measured
 managed request/point counts or explicit uncertainty bounds, outside-client share,
