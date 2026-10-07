@@ -245,6 +245,10 @@ dup_report_door(){
 dup_report_door "$class_report" "$class_target"
 check 'a runner-door header repeated below Result still names the exact target' \
   "[ \"\$(grep -c 'reviewed commit' '$class_report')\" = 2 ]"
+# A later merge may land between review and authorization; the reviewed target
+# stays authorizable while it is in fetched origin/main history.
+class_later="$(git -C "$TMP/class" commit-tree "$class_target^{tree}" -p "$class_target" -m 'later merge')"
+git -C "$TMP/class" update-ref refs/remotes/origin/main "$class_later"
 check 'a separate installation task can issue exact reviewed authority' \
   "rc 0 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 check 'the issued authority binds old and target commits' \
@@ -292,16 +296,22 @@ EOF
   export PATH="$TMP/fake-cygpath:$PATH"
 fi
 windows_source="$(cygpath -u "$TMP/class/bin/ai-task-gates")"
+windows_receipt="$(git -C "$TMP/class" rev-parse HEAD)"
+windows_hash="$(sha256sum "$TMP/class/bin/ai-task-gates" | cut -d' ' -f1)"
 rm "$class_launcher"
 cat > "$class_launcher" <<EOF
 #!/usr/bin/env bash
 # Managed by ai-devops install-machine-tools.ps1.
+# source-sha=$windows_receipt
+# source-hash=$windows_hash
 export HOME="$HOME"
 exec "$windows_source" "\$@"
 EOF
 cat > "$class_launcher.cmd" <<EOF
 @echo off
 rem Managed by ai-devops install-machine-tools.ps1.
+rem source-sha=$windows_receipt
+rem source-hash=$windows_hash
 set "HOME=$USERPROFILE"
 "$PROGRAMFILES\Git\bin\bash.exe" "$windows_source" %*
 EOF
@@ -350,6 +360,22 @@ check 'same-commit legacy migration binds managed launcher and source bytes' \
 check 'legacy authority records exact launcher and source hashes' \
   "jq -e '.legacy_migration==true and (.installed_launcher_sha256|length)==64 and (.installed_cmd_sha256|length)==64 and (.installed_source_sha256|length)==64' '$AI_TASK_GATES_DIR/install-authorizations/$legacy_target.json'"
 rm -f "$AI_TASK_GATES_DIR/install-authorizations/$legacy_target.json"
+git -C "$TMP/legacy-primary" worktree add -q --detach "$TMP/legacy-advance" "$legacy_target"
+( cd "$TMP/legacy-advance" && "$GATES" start --class installation ) >/dev/null
+printf '# new reviewed gate\n' >> "$TMP/legacy-advance/bin/ai-task-gates"
+git -C "$TMP/legacy-advance" add bin/ai-task-gates
+git -C "$TMP/legacy-advance" commit -qm 'protected legacy cross-commit release'
+legacy_advance_target="$(git -C "$TMP/legacy-advance" rev-parse HEAD)"
+git -C "$TMP/legacy-advance" update-ref refs/remotes/origin/main "$legacy_advance_target"
+legacy_advance_report="$(make_approved_report "$TMP/legacy-advance" "$legacy_advance_target" legacy-managed-launcher-refresh)"
+( cd "$TMP/legacy-advance-reviewed" && "$GATES" start --class reviewer-safety --base "$legacy_target" ) >/dev/null
+legacy_advance_proof="--target-head $legacy_advance_target --installed-checkout $TMP/legacy-primary --installed-launcher $class_launcher --review-report $legacy_advance_report --reviewer-approval $(appr "$TMP/legacy-advance" deploy "$legacy_advance_target")"
+check 'legacy Windows cross-commit migration binds the original installed source' \
+  "rc 0 '$TMP/legacy-advance' authorize-install $legacy_advance_proof --legacy-migration"
+check 'legacy cross-commit authority retains old checkout and empty original receipt' \
+  "jq -e '.legacy_migration==true and .installed_head==\"$legacy_target\" and .windows_receipt_sha==\"\"' '$AI_TASK_GATES_DIR/install-authorizations/$legacy_advance_target.json'"
+rm -f "$AI_TASK_GATES_DIR/install-authorizations/$legacy_advance_target.json"
+git -C "$TMP/legacy-primary" update-ref refs/remotes/origin/main "$legacy_target"
 sed -i 's/\\Git\\bin\\bash.exe/\\Other\\bash.exe/' "$class_launcher.cmd"
 check 'legacy migration refuses a changed command route' \
   "rc 3 '$TMP/legacy-install' authorize-install $legacy_proof --legacy-migration"
@@ -1251,6 +1277,23 @@ check 'a changed central policy at the same path is classified afresh' "[ \"\$(c
 git -C "$XC" remote set-url origin https://github.com/popcre/some-other-repo.git
 check 'a changed repository identity is classified afresh' "[ \"\$(cd '$XC' && '$GATES' explain --json --paths-from '$XP' | jq -r .repository)\" = popcre/some-other-repo ]"
 check 'the explain cache directory is private' "[ \"\$(stat -c %a '$AI_TASK_GATES_DIR/explain-cache' 2>/dev/null || echo 700)\" = 700 ]"
+
+# #1355: AI_TASK_GATES_INPUTS_TO names every file an explain answer read, so
+# a review can reuse that answer only while each one is unchanged. The answer
+# itself is byte-identical with or without the list.
+git -C "$XC" remote set-url origin https://github.com/popcre/ai-devops.git
+XI="$TMP/xcache-inputs"
+plain="$(cd "$XC" && AI_TASK_GATES_EXPLAIN_CACHE=0 "$GATES" explain --json --paths-from "$XP")"
+listed="$(cd "$XC" && AI_TASK_GATES_EXPLAIN_CACHE=0 AI_TASK_GATES_INPUTS_TO="$XI" "$GATES" explain --json --paths-from "$XP")"
+check 'explain inputs list leaves the answer byte-identical' "[ -n '$plain' ] && [ '$plain' = '$listed' ]"
+( cd "$XC" && "$GATES" start --class code >/dev/null 2>&1 )
+( cd "$XC" && AI_TASK_GATES_INPUTS_TO="$XI" "$GATES" explain --json --paths-from "$XP" ) >/dev/null
+state_file="$(ls "$AI_TASK_GATES_DIR"/*.json | while read -r f; do jq -e --arg t "$(cd "$XC" && pwd -P)" '.' "$f" >/dev/null 2>&1 && grep -qxF "$f" "$XI" && echo "$f"; done | head -1)"
+check 'explain inputs list names the task state file start wrote' "[ -n '$state_file' ] && [ -f '$state_file' ]"
+check 'explain inputs list names the policy, library, program and declaration' "grep -qxF '$AI_TASK_GATES_FILE' '$XI' && grep -q '/tools/lib/task-gates.sh\$' '$XI' && grep -q '/bin/ai-task-gates\$' '$XI' && grep -q '/.ai-devops/task-gates.json\$' '$XI' && ! grep -qv '^/' '$XI'"
+( cd "$XC" && "$GATES" end >/dev/null 2>&1 )
+rm -f "$XI"
+check 'a failed explain writes no inputs list' "! ( cd '$XC' && AI_TASK_GATES_INPUTS_TO='$XI' '$GATES' explain --json --paths-from /nonexistent ) >/dev/null 2>&1; [ ! -s '$XI' ]"
 
 # jqr keeps jq's exact bytes (trailing blank lines, CRLF) and its exit status.
 # #1355: the one-pass rule table and the per-question readers must agree. A

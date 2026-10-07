@@ -145,7 +145,9 @@ installation task leaves `check --before deploy` forbidden for a reviewer-safety
 change. The authorization binds the candidate, review, installed checkout,
 launcher, and recorded old HEAD in the same Git repository, and is consumed
 once by the Windows installer. Fetch `origin/main` immediately before issuing
-authorization; the target must be the exact fetched release. The
+authorization; the target must be a merged release (in fetched `origin/main`
+history). Linux `update.sh` accepts it even after later merges; the Windows
+installer still requires it to equal the fetched tip. The
 installed checkout must be the durable primary checkout and the launcher must
 have its supported canonical path. Only after it passes may the
 canonical checkout fast-forward and the supported installer run. Verify the
@@ -186,13 +188,20 @@ writing either file.
 The full installer refreshes launchers after ordinary updates as well, so the
 next release starts from the current installed-source receipt. A source-only
 update must be followed by a full install before beginning another release.
-If a legacy four-line launcher already points at an unchanged current-main
-checkout, use the explicit `authorize-install --legacy-migration` route. The
+For Windows four-line launchers, use the explicit
+`authorize-install --legacy-migration` route, including a reviewed cross-commit
+update. Linux legacy migration remains an unchanged-checkout operation. The
 independent exact-head review must examine the full target source and the
 `legacy-managed-launcher-refresh` operation; its approved report must contain the exact line `Approved legacy-managed-launcher-refresh.` for that
 operation. The one-use authority records hashes of both launcher files and
-the installed gate source, which the installer checks again before refreshing
-the launcher receipt. This route refuses launchers that already have a receipt.
+the original installed gate source, which the installer checks again before
+refreshing the launcher receipt. It retains the original checkout baseline
+through source-only advancement and launcher stamping; the original source
+hash is verified against that exact commit, not the newer working tree.
+This route refuses launchers that already have a receipt. Receipted Windows
+updates bind the actual old checkout and the original receipt SHA separately,
+so a clean checkout that is ahead of its receipt is never substituted for the
+receipt's release range. An altered receipt or original-source binding refuses.
 Ask for an operation's approval line with `ai-review <provider> final-check
 --operation <name>` (`legacy-managed-launcher-refresh`,
 `first-managed-install`, `partial-managed-launcher-recovery`, or
@@ -331,7 +340,7 @@ cd /worksp/ai-devops-candidate
 ```
 
 The updater verifies the candidate and installed checkout relationship, fetches
-and pins `origin/main`, records an installation task in the exact target
+`origin/main`, requires the pinned SHA to be in its history, records an installation task in the exact target
 candidate, runs its gate, then advances only the named
 installed checkout. Later updates can run from the installed checkout itself.
 `install.sh` checks the same pending authorization before its first machine
@@ -367,10 +376,14 @@ Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
   installed launcher points into the installed checkout, so while that checkout
   predates a gate fix it still runs the old gate (it refused a valid report with
   `Review does not name exact target` until the candidate's copy was used).
-- The review, authorization and `update.sh` must all name the current
-  `origin/main`. Any merge in between (even a docs-only one) makes `update.sh`
-  stop with `candidate checkout is not the exact fetched target`; reset both
-  worktrees to the new head and redo the review and authorization.
+- The review, authorization and `update.sh` must all name the same exact SHA.
+  Since 2026-10-07 that SHA only has to be merged (in fetched `origin/main`
+  history), not the tip: later merges no longer force a redo. `update.sh`
+  advances the installed checkout to exactly the pinned SHA, never the newer
+  tip, and refuses a pinned SHA that is not merged (`explicitly approved commit
+  is not in fetched origin/main history`) or a candidate at any other SHA
+  (`candidate checkout is not the exact approved target`). The protection the
+  old tip check gave (install only published, merged code) is unchanged.
 - Pass the review report at the path the review wrote it; a copy elsewhere is
   not accepted.
 - `another installation is active for this checkout` can be a leftover

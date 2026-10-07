@@ -567,7 +567,11 @@ door_probe(){
   AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 DOOR_WORKDIR="$t/work" DOOR_PACKET_DIR="$t/packet" \
     DOOR_PROMPT_FILE="$t/prompt" DOOR_REPORT_OUT="$t/report" DOOR_HEAD=0000000000000000000000000000000000000000 \
     DOOR_TIMEOUT=120 bash "$door" review > "$t/out" 2>&1 || rc=$?
-  if [ "$rc" -ne 0 ] || ! grep -q 'STEPFUN-OK' "$t/report" 2>/dev/null; then
+  # The door wraps the probe in its review framing, so the model may answer
+  # with a short review instead of the literal token. The door writes a report
+  # only when the model returned text, so a report with a Verdict section after
+  # exit 0 proves the live turn ran.
+  if [ "$rc" -ne 0 ] || ! grep -q '^## Verdict' "$t/report" 2>/dev/null; then
     printf 'FAIL live call through the review door did not answer (exit %s)\n' "$rc"; tail -n 5 "$t/out"; rm -rf "$t"; return 1
   fi
   rm -rf "$t"

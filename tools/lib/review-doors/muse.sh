@@ -34,6 +34,8 @@ case "$MODE" in review|implement) ;; *) printf 'muse door: usage: muse.sh review
 MU_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source "$MU_ROOT/tools/reviewer_event_guard.sh"
 
+. "$MU_ROOT/tools/lib/muse-credential-boundary.sh"
+
 # Runtime engine: Meta's Muse Code CLI (default) or the pinned OpenCode
 # harness (rollback). Sessions never cross engines: each engine records its
 # own model identifier (bin/ai-muse engine case).
@@ -216,6 +218,17 @@ main() {
   } > "$prompt_full"
   chmod 600 "$prompt_full" 2>/dev/null || true
 
+  # The handoff contains the provider credential only; never place it in argv.
+  key_file="$(mktemp)" || exit 2
+  trap 'rm -f -- "$key_file"' EXIT
+  chmod 600 "$key_file" || { rm -f "$key_file"; exit 2; }
+  if [ "$MU_IS_WINDOWS" = 1 ]; then
+    ps="$(command -v pwsh.exe || command -v pwsh || command -v powershell.exe)" || { rm -f "$key_file"; exit 2; }
+    AI_DEVOPS_PRIVATE_HELPER="$(native_path "$MU_ROOT/bin/windows-private-file.ps1")" AI_DEVOPS_PRIVATE_TARGET="$(native_path "$key_file")" \
+      "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Protect-AiDevOpsPrivatePath -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null || { rm -f "$key_file"; exit 2; }
+  fi
+  printf '%s\n' "$MU_KEY" > "$key_file" || { rm -f "$key_file"; exit 2; }
+  MU_KEY=""
   out="$(mktemp)"
   log="$out"
   set +e
@@ -226,8 +239,9 @@ main() {
     # remote-less copy the runner built; no approval prompts, no web, no
     # personal context. Same flags bin/ai-muse uses for a review turn.
     (
-      if [ -n "$MU_KEY" ]; then export META_API_KEY="$MU_KEY"; else unset META_API_KEY || true; fi
-      reviewer_credit_run muse "$log" "$out.err" -- timeout "$MU_TIMEOUT" "$bin" exec --json --model "$MU_MODEL" --session-id "$sid" \
+      XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}" XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}" XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}" XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+      muse_clean_environment "$HOME" muse-code /usr/bin/env 0
+      reviewer_credit_run muse "$log" "$out.err" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" exec --json --model "$MU_MODEL" --session-id "$sid" \
         --workspace "$workspace" --disable-approval --disable-web-tools \
         --no-foreign-personal-context --user-input-auto-resolve \
         --prompt-file "$(native_path "$prompt_full")" \
@@ -244,9 +258,9 @@ main() {
              XDG_DATA_HOME="$(native_path "$xdg/data")" \
              XDG_STATE_HOME="$(native_path "$xdg/state")" \
              XDG_CACHE_HOME="$(native_path "$xdg/cache")"
-      if [ -n "$MU_KEY" ]; then export META_API_KEY="$MU_KEY"; else unset META_API_KEY || true; fi
+      muse_clean_environment "$HOME" opencode /usr/bin/env 0
       printf '%s' "$(cat "$prompt_full")" \
-        | reviewer_credit_run muse "$log" "$out.err" -- timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \
+        | reviewer_credit_run muse "$log" "$out.err" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \
             --format json --model "$MU_MODEL" \
             --dir "$(native_path "$DOOR_WORKDIR")" \
             > "$log" 2> "$out.err"

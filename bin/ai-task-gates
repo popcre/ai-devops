@@ -642,6 +642,21 @@ cmd_explain_cached(){
   return 0
 }
 
+# AI_TASK_GATES_INPUTS_TO=FILE (#1355): after a successful explain, name every
+# file the answer depended on, one absolute path per line, so a caller that
+# reuses the answer can prove each one is unchanged. This includes the state
+# file under whatever HOME a launcher set. The answer itself is unchanged; an
+# unwritable list leaves the caller without one, and it then never reuses.
+explain_write_inputs(){
+  local out="${AI_TASK_GATES_INPUTS_TO:-}" f
+  [ -n "$out" ] || return 0
+  [ -n "$TOPLEVEL" ] || resolve_repo
+  { for f in "$REAL_DIR/$(basename "${BASH_SOURCE[0]}")" "$ROOT/tools/lib/task-gates.sh" "$POLICY_FILE" "$CONSUMER_FILE" "$(state_path)"; do
+      case "$f" in /*) ;; *) f="$PWD/$f" ;; esac
+      printf '%s\n' "$f"
+    done; } > "$out" 2>/dev/null || { rm -f "$out" 2>/dev/null; return 0; }
+}
+
 cmd_explain(){
   local as_json=false base="" paths_from=""
   while [ $# -gt 0 ]; do
@@ -1345,11 +1360,9 @@ cmd_install_verify(){
   common="$(cd "$(git -C "$installed" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" || blocked 'ai-task-gates: STOP. Installed Git ownership unavailable.'
   [ "$common" = "$(cd "$(git -C "$candidate_root" rev-parse --path-format=absolute --git-common-dir)" && pwd -P)" ] || blocked 'ai-task-gates: STOP. Candidate and installed checkout have different Git ownership.'
   [ "$(git -C "$candidate_root" rev-parse HEAD)" = "$target" ] || blocked 'ai-task-gates: STOP. Candidate source differs from pinned target.'
-  if [ "$phase" = preflight ]; then
-    [ "$(git -C "$candidate_root" rev-parse refs/remotes/origin/main 2>/dev/null)" = "$target" ] || blocked 'ai-task-gates: STOP. Target is not exact fetched origin/main.'
-  else
-    git -C "$candidate_root" merge-base --is-ancestor "$target" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Installed target is not in fetched origin/main history.'
-  fi
+  # Every phase requires a merged release. A pinned target need not be the tip:
+  # later merges may land between exact-head review/authorization and install.
+  git -C "$candidate_root" merge-base --is-ancestor "$target" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Target is not in fetched origin/main history.'
   if [ "$fixture" -eq 0 ]; then case "$origin_url" in
     https://github.com/popcre/ai-devops|https://github.com/popcre/ai-devops.git|git@github.com:popcre/ai-devops|git@github.com:popcre/ai-devops.git|ssh://git@github.com/popcre/ai-devops|ssh://git@github.com/popcre/ai-devops.git|https://github.com/u2giants/ai-devops|https://github.com/u2giants/ai-devops.git|git@github.com:u2giants/ai-devops|git@github.com:u2giants/ai-devops.git|ssh://git@github.com/u2giants/ai-devops|ssh://git@github.com/u2giants/ai-devops.git) ;;
     *) blocked 'ai-task-gates: STOP. Unsupported installed origin.' ;;
@@ -1610,12 +1623,25 @@ cmd_authorize_install(){
     blocked 'ai-task-gates: STOP. Empty release needs an installed receipt or explicit reviewed legacy migration.'
   fi
   if [ "$start_head" != "$target_head" ] && [ "$legacy_migration" -eq 1 ]; then
-    blocked 'ai-task-gates: STOP. Legacy migration is only for an unchanged checkout.'
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*) ;;
+      *) blocked 'ai-task-gates: STOP. Linux legacy migration is only for an unchanged checkout.' ;;
+    esac
   fi
   git -C "$TOPLEVEL" merge-base --is-ancestor "$start_head" "$target_head" 2>/dev/null || blocked 'ai-task-gates: STOP. Pre-update HEAD is not ancestor of candidate.'
-  [ "$target_head" = "$(git -C "$TOPLEVEL" rev-parse refs/remotes/origin/main 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate is not exact fetched origin/main.'
+  git -C "$TOPLEVEL" merge-base --is-ancestor "$target_head" refs/remotes/origin/main 2>/dev/null || blocked 'ai-task-gates: STOP. Candidate is not in fetched origin/main history.'
   [ -z "$(git -C "$TOPLEVEL" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ] || blocked 'ai-task-gates: STOP. Candidate checkout is dirty.'
   prepare "$start_head" ""
+  if [ "$legacy_migration" -eq 1 ] && [ "$start_head" != "$target_head" ]; then
+    local legacy_classes legacy_class legacy_protected
+    legacy_classes="$(install_release_classes "$start_head" "$target_head" | LC_ALL=C sort -u)" || blocked 'ai-task-gates: STOP. Cannot classify the legacy Windows release range.'
+    while IFS=$'\t' read -r legacy_class legacy_protected; do
+      [ -n "$legacy_class" ] || continue
+      if [ "$legacy_protected" = true ] && [ "$legacy_class" != reviewer-safety ]; then
+        blocked "ai-task-gates: STOP. Legacy Windows update crosses stronger '$legacy_class' changes."
+      fi
+    done <<< "$legacy_classes"
+  fi
   if [ "$legacy_migration" -ne 1 ] && [ "$first_install" -ne 1 ] && [ "$recover_launchers" -ne 1 ] && [ "$stale_manifest_recovery" -ne 1 ]; then
     [ "$OBSERVED_CLASS" = reviewer-safety ] || blocked "ai-task-gates: STOP. Release class is '$OBSERVED_CLASS'; use its own gate."
   fi
@@ -1695,7 +1721,11 @@ cmd_authorize_install(){
     [ -f "$installed_launcher" ] || blocked 'ai-task-gates: STOP. Installed launcher missing.'
     windows_launcher_route "$expected_source" "$installed_launcher" || blocked 'ai-task-gates: STOP. Installed Windows launcher routing differs.'
     if [ "$legacy_migration" -eq 1 ]; then
-      [ -z "$WINDOWS_RECEIPT_SHA" ] || blocked 'ai-task-gates: STOP. Same-commit migration requires a legacy launcher without a receipt.'
+      [ -z "$WINDOWS_RECEIPT_SHA" ] || blocked 'ai-task-gates: STOP. Legacy migration requires a launcher without a receipt.'
+    elif [ -z "$WINDOWS_RECEIPT_SHA" ]; then
+      blocked 'ai-task-gates: STOP. Windows legacy launchers require the reviewed legacy migration route.'
+    else
+      git -C "$installed_root" merge-base --is-ancestor "$WINDOWS_RECEIPT_SHA" "$installed_head" 2>/dev/null || blocked 'ai-task-gates: STOP. Windows receipt is not ancestor of the installed checkout.'
     fi
   fi
   report_real="$(cd "$(dirname "$review_report")" 2>/dev/null && pwd -P)/$(basename "$review_report")" || blocked 'ai-task-gates: STOP. Review report unavailable.'
@@ -1796,6 +1826,7 @@ cmd_authorize_install(){
     fi
   fi
   if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then
+    source_hash="$(sha256sum "$expected_source" | cut -d' ' -f1)"
     receipt_checkout="$(cygpath -aw "$installed_root")" || blocked 'ai-task-gates: STOP. Installed Windows path unavailable.'
     receipt_launcher="$(cygpath -aw "$installed_launcher")" || blocked 'ai-task-gates: STOP. Launcher Windows path unavailable.'
     receipt_report="$(cygpath -aw "$report_real")" || blocked 'ai-task-gates: STOP. Review Windows path unavailable.'
@@ -1810,8 +1841,8 @@ cmd_authorize_install(){
     --arg launcher "$receipt_launcher" --arg policy "$policy_digest" --arg source "$reviewed_digest" \
     --arg report "$receipt_report" --arg report_hash "$report_hash" --arg request "$approval_summary" \
     --argjson legacy "$legacy_migration" --argjson first "$first_install" --argjson recovery "$recover_launchers" --argjson stale "$stale_manifest_recovery" --argjson inventory "$inventory_json" --arg launcher_hash "$launcher_hash" --arg cmd_hash "$cmd_hash" --arg source_hash "$source_hash" --arg manifest_hash "$manifest_hash" --arg linux_link_target "$linux_link_target" --arg manifest_recorded_sha "${manifest_recorded_sha:-}" \
-    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
+    --arg windows_receipt_sha "${WINDOWS_RECEIPT_SHA:-}" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{schema_version:1,target_head:$target,installed_head:$base,installed_checkout:$checkout,installed_launcher:$launcher,policy_digest:$policy,source_digest:$source,review_report:$report,review_report_sha256:$report_hash,reviewer_approval:$request,legacy_migration:($legacy==1),first_install:($first==1),recover_launchers:($recovery==1),stale_manifest_recovery:($stale==1),managed_inventory:$inventory,installed_launcher_sha256:$launcher_hash,installed_cmd_sha256:$cmd_hash,installed_source_sha256:$source_hash,windows_receipt_sha:$windows_receipt_sha,linux_manifest_sha256:$manifest_hash,linux_manifest_recorded_sha:$manifest_recorded_sha,linux_link_target:$linux_link_target,issued_at:$at}' > "$auth_stage" \
     && ln -- "$auth_stage" "$auth_path" && rm -- "$auth_stage" || blocked 'ai-task-gates: STOP. Could not write install authority.'
 
   printf 'ai-task-gates: exact reviewed toolkit install authorized for %s from %s.\n' "$target_head" "$start_head"
@@ -1824,7 +1855,7 @@ main(){
     check) cmd_check "$@" ;;
     authorize-install) cmd_authorize_install "$@" ;;
     install-verify) cmd_install_verify "$@" ;;
-    explain) cmd_explain_cached "$@" ;;
+    explain) cmd_explain_cached "$@" && explain_write_inputs ;;
     status) cmd_status "$@" ;;
     end) cmd_end "$@" ;;
     classify)

@@ -208,7 +208,9 @@ are unchanged, so a green Blacksmith run is the required `verification-closure`
 merge check (Albert, 2026-09-23). One addition: on pull requests the
 `runner-router` job gives ordinary Windows sections to idle qualified self-hosted
 hosts (EDGE-RUNN-ENVY and any host labelled `ai-devops-windows-qualified`) as
-extra capacity. Any section it cannot place there stays on Blacksmith. It never
+extra capacity, then at most one section from `section_lane_order` to each idle
+section-only host (`ai-devops-windows-section`, EDGE-ALIEN, #1312). Any section
+it cannot place there stays on Blacksmith. It never
 routes to GitHub-hosted runners (`config/ci-runner-routing.json`,
 `tools/ci/runner-router.cjs`). Scheduled and manual
 Windows jobs split the complete Bash set across independent sections; PowerShell runs once in its declared

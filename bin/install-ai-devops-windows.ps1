@@ -132,6 +132,21 @@ function Get-ReviewerSafetyGlobs([string]$Path, [string]$Revision) {
     return $globs
 }
 
+function Get-CommittedGateHash([string]$Path, [string]$Commit) {
+    if ($Commit -cnotmatch '^[0-9a-f]{40}$') { throw 'Installed gate commit is malformed.' }
+    $archive = Join-Path ([IO.Path]::GetTempPath()) ('ai-devops-receipt-' + [guid]::NewGuid() + '.zip')
+    $extract = "$archive.extracted"
+    try {
+        Invoke-GitCommand @('-C', $Path, 'archive', '--format=zip', "--output=$archive", $Commit, 'bin/ai-task-gates') | Out-Null
+        if ($script:LastGitExitCode -ne 0) { throw 'Could not verify the installed source receipt commit.' }
+        Expand-Archive -LiteralPath $archive -DestinationPath $extract
+        return (Get-FileHash -LiteralPath (Join-Path $extract 'bin\ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant()
+    } finally {
+        Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Get-InstalledSourceReceipt([string]$Path) {
     $launcher = Join-Path $env:USERPROFILE '.local\bin\ai-task-gates'
     if ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and $env:AI_DEVOPS_TEST_EXPECTED_REMOTE -and
@@ -189,18 +204,7 @@ function Get-InstalledSourceReceipt([string]$Path) {
         throw 'Managed ai-task-gates launcher routes differ from the supported installation.'
     }
     if ($offset -eq 2) { return 'legacy' }
-    $archive = Join-Path ([IO.Path]::GetTempPath()) ('ai-devops-receipt-' + [guid]::NewGuid() + '.zip')
-    $extract = "$archive.extracted"
-    try {
-        Invoke-GitCommand @('-C', $Path, 'archive', '--format=zip', "--output=$archive", $sha, 'bin/ai-task-gates') | Out-Null
-        if ($script:LastGitExitCode -ne 0) { throw 'Could not verify the installed source receipt commit.' }
-        Expand-Archive -LiteralPath $archive -DestinationPath $extract
-        $actualHash = (Get-FileHash -LiteralPath (Join-Path $extract 'bin\ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actualHash -cne $hash) { throw 'Managed ai-task-gates source receipt hash does not match its commit.' }
-    } finally {
-        Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    if ((Get-CommittedGateHash $Path $sha) -cne $hash) { throw 'Managed ai-task-gates source receipt hash does not match its commit.' }
     return $sha
 }
 
@@ -290,10 +294,25 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
         [bool]$auth.recover_launchers -ne $RecoverLaunchers) {
         throw 'Reviewed toolkit install authorization does not match installed source, target, or policy.'
     }
+    $currentHead = Invoke-GitCommand @('-C', $Path, 'rev-parse', 'HEAD')
+    if ($script:LastGitExitCode -ne 0 -or $currentHead.Trim() -cnotin @($InstalledHead, $TargetHead)) {
+        throw 'Installed checkout moved outside the reviewed installation transaction.'
+    }
+    Invoke-GitCommand @('-C', $Path, 'merge-base', '--is-ancestor', $InstalledHead, $TargetHead) | Out-Null
+    if ($script:LastGitExitCode -ne 0 -or $auth.installed_source_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        (Get-CommittedGateHash $Path $InstalledHead) -cne $auth.installed_source_sha256) {
+        throw 'Reviewed original installed gate source changed.'
+    }
+    $currentReceipt = Get-InstalledSourceReceipt $Path
+    $expectedReceipt = if ($currentReceipt -in @('legacy', 'missing', 'partial')) { '' } else { $currentReceipt }
+    if (-not ($auth.PSObject.Properties.Name -contains 'windows_receipt_sha') -or
+        [string]$auth.windows_receipt_sha -cne $expectedReceipt) {
+        throw 'Reviewed original Windows source receipt changed.'
+    }
     if ($LegacyMigration) {
         $bashHash = (Get-FileHash -LiteralPath $expectedLauncher -Algorithm SHA256).Hash.ToLowerInvariant()
         $cmdHash = (Get-FileHash -LiteralPath "$expectedLauncher.cmd" -Algorithm SHA256).Hash.ToLowerInvariant()
-        $sourceHash = (Get-FileHash -LiteralPath (Join-Path $Path 'bin\ai-task-gates') -Algorithm SHA256).Hash.ToLowerInvariant()
+        $sourceHash = Get-CommittedGateHash $Path $InstalledHead
         if ($auth.installed_launcher_sha256 -cne $bashHash -or $auth.installed_cmd_sha256 -cne $cmdHash -or
             $auth.installed_source_sha256 -cne $sourceHash) {
             throw 'Legacy migration launcher or installed source changed after approval.'
@@ -469,10 +488,20 @@ function Assert-ReadyRepository([string]$Path, [string]$ExpectedHead = '') {
         if (-not $ExpectedHead -and -not (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf)) {
             throw 'Reviewer safety or legacy update needs a pinned target and one-use task gate authorization.'
         }
-        $sameCommitLegacy = $receiptHead -eq 'legacy' -and $installedBaseline -eq $remoteHead.Trim()
+        $legacyMigration = $receiptHead -eq 'legacy'
         $firstInstall = $receiptHead -eq 'missing'
         $recoverLaunchers = $receiptHead -eq 'partial'
-        $authorizationPath = Assert-InstallAuthorization -Path $Path -TargetHead $remoteHead.Trim() -InstalledHead $installedBaseline -LegacyMigration $sameCommitLegacy -FirstInstall $firstInstall -RecoverLaunchers $recoverLaunchers
+        # Receipt SHA selects the full release range; the authority separately
+        # binds the actual old checkout. Keep that same old checkout through
+        # launcher stamping, even after the source-only gate fast-forwarded it.
+        $authorizationBaseline = $head.Trim()
+        $existingAuthority = if (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf) { $pendingAuthorization } else { $issuedAuthorization }
+        if ((Test-Path -LiteralPath $existingAuthority -PathType Leaf) -and $head.Trim() -ceq $remoteHead.Trim()) {
+            try { $pending = Get-Content -Raw -LiteralPath $existingAuthority | ConvertFrom-Json }
+            catch { throw 'Pending toolkit install authorization is malformed.' }
+            $authorizationBaseline = [string]$pending.installed_head
+        }
+        $authorizationPath = Assert-InstallAuthorization -Path $Path -TargetHead $remoteHead.Trim() -InstalledHead $authorizationBaseline -LegacyMigration $legacyMigration -FirstInstall $firstInstall -RecoverLaunchers $recoverLaunchers
         $consumingPath = if ($authorizationPath.EndsWith('.consuming')) { $authorizationPath } else { "$authorizationPath.consuming" }
         if ($authorizationPath -ne $consumingPath) { Move-Item -LiteralPath $authorizationPath -Destination $consumingPath }
         $script:ConsumingInstallAuthorization = $consumingPath

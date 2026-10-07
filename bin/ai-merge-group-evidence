@@ -196,9 +196,71 @@ $jobs
 EOF
 }
 
+# A cancelled overall run may retain complete required coverage. Admit ONLY
+# real same-run advisory job cancellations proven non-required by live GitHub.
+read_cancel_policy() (
+  local temp python context state deadline
+  local -a command
+  python="$(command -v python3 || command -v python)" || return 1
+  temp="$(mktemp -d)" || return 1
+  trap 'rm -rf "$temp"' EXIT
+  if [ "${AI_DEVOPS_TEST_MODE:-0}" = 1 ] && [ -n "${AI_PR_WAIT_TEST_CONTEXT_KEY:-}" ]; then
+    context="$AI_PR_WAIT_TEST_CONTEXT_KEY"
+  else
+    context="$("$ROOT/tools/github-requests/pr-status-context" 2>/dev/null)" || context=''
+  fi
+  deadline=$(( $(date +%s) + 180 ))
+  command=("$python" "$ROOT/bin/ai-process-supervisor" --timeout-seconds 180 -- bash "$ROOT/tools/github-requests/pr-status-complete.sh" "$GH" "$python" "$ROOT/bin/ai-process-supervisor"
+    "$(command -v bash)" "$REPO_OWNER" "$REPO_NAME" "$PR_NUMBER" "$deadline" 30 10 "$temp/source")
+  if [ -z "$context" ]; then
+    # Repository/app credentials need not have a numeric /user identity. As
+    # ai-pr-wait does, retain the same complete bounded frontdoor transaction
+    # without sharing a cache across unknown credential contexts.
+    AI_GH_CALLER=ai-merge-group-evidence "${command[@]}" || {
+      printf 'ai-merge-group-evidence: current cancellation policy transport unavailable\n' >&2
+      return 1
+    }
+    return
+  fi
+  state="${AI_PR_WAIT_SNAPSHOT_DIR:-$HOME/.local/state/ai-devops-pr-status}"
+  AI_GH_CALLER=ai-merge-group-evidence "$python" "$ROOT/tools/github-requests/pr_status_singleflight.py" \
+    --state-dir "$state" --key "v3 $context $REPO $PR_NUMBER $HEAD_SHA" \
+    --expected-head "$HEAD_SHA" --ttl 10 --wait-seconds 180 --cap-supervisor-timeout --defer-source-mark \
+    --age-file "$temp/age" --source-file "$temp/source" --force-refresh -- "${command[@]}"
+)
+cancelled_advisory_proven() {
+  local id="$1" run workflow jobs policy attempt
+  run="$(gh_call api "repos/$REPO/actions/runs/$id" 2>/dev/null)" || return 1
+  printf '%s' "$run" | jq -e --argjson id "$id" --arg head "$HEAD_SHA" --arg repo "$REPO" \
+    '.id==$id and .head_sha==$head and .head_repository.full_name==$repo and .repository.full_name==$repo and .event=="pull_request" and .status=="completed" and .conclusion=="cancelled" and (.run_attempt|type)=="number" and .run_attempt>0 and (.workflow_id|type)=="number"' >/dev/null || return 1
+  workflow="$(gh_call api "repos/$REPO/actions/workflows/$(printf '%s' "$run" | jq -r .workflow_id)" 2>/dev/null)" || return 1
+  printf '%s' "$workflow" | jq -e --arg path ".github/workflows/$WORKFLOW" --argjson id "$(printf '%s' "$run" | jq -r .workflow_id)" '.id==$id and .path==$path' >/dev/null || return 1
+  attempt="$(printf '%s' "$run" | jq -r .run_attempt)"
+  jobs="$(gh_call api --paginate --slurp "repos/$REPO/actions/runs/$id/attempts/$attempt/jobs?per_page=100" 2>/dev/null)" || return 1
+  # Stable complete total/positive unique IDs and original mandatory coverage.
+  printf '%s' "$jobs" | jq -e --argjson id "$id" --argjson attempt "$attempt" --arg head "$HEAD_SHA" '
+    .[0].total_count as $total | type=="array" and length>0 and
+    all(.[]; .total_count==$total and (.jobs|type)=="array") and
+    ([.[].jobs[]]|length)==$total and $total>0 and ([.[].jobs[].id]|unique|length)==$total and
+    all(.[].jobs[]; (.id|type)=="number" and .id>0 and .run_id==$id and .run_attempt==$attempt and .head_sha==$head and .status=="completed" and (.name|type)=="string" and (.conclusion=="success" or .conclusion=="skipped" or .conclusion=="cancelled"))' >/dev/null || return 1
+  printf '%s' "$jobs" | jq -e '[.[].jobs[]] as $jobs | all(["verification-closure","linux-offline","fast-classifier / select","fast-classifier / validate","windows-offline","windows-reviewer-safety"][]; . as $name | [$jobs[]|select(.name==$name)] as $matches | ($matches|length)==1 and $matches[0].conclusion=="success") and any($jobs[];.conclusion=="cancelled")' >/dev/null || return 1
+  policy="$(read_cancel_policy)" || return 1
+  printf '%s' "$policy" | jq -e --arg head "$HEAD_SHA" --argjson jobs "$jobs" --arg repo "$REPO" --argjson run "$id" '
+    .data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts as $c |
+    (.errors|not) and .data.repository.pullRequest.state=="OPEN" and
+    .data.repository.pullRequest.headRefOid==$head and .data.repository.pullRequest.commits.nodes[0].commit.oid==$head and
+    $c.pageInfo.hasPreviousPage==false and $c.totalCount==($c.nodes|length) and
+    all($jobs[].jobs[]|select(.conclusion=="cancelled"); . as $job |
+      [$c.nodes[]|select(.name==$job.name)] as $matches |
+      ($matches|length)==1 and $matches[0].isRequired==false and $matches[0].status=="COMPLETED" and $matches[0].conclusion=="CANCELLED" and
+      $matches[0].detailsUrl==("https://github.com/"+$repo+"/actions/runs/"+($run|tostring)+"/job/"+($job.id|tostring)))' >/dev/null || return 1
+  [ "$(gh_call api "repos/$REPO/actions/runs/$id" --jq '.run_attempt' 2>/dev/null)" = "$attempt" ] || return 1
+  [ "$(read_queue_state)" = "$QUEUE_STATE" ] || return 1
+}
 RUN_ID=''
 FALLBACK_RUNS=' '
 ADVISORY_RUNS=' '
+CANCELLED_ADVISORY_RUNS=' '
 while IFS="$(printf '\t')" read -r id status conclusion; do
   [ -n "$id" ] || continue
   if [ "$status:$conclusion" != completed:success ]; then
@@ -210,6 +272,12 @@ while IFS="$(printf '\t')" read -r id status conclusion; do
         [ "$(read_queue_state)" = "$QUEUE_STATE" ] || reject 'the queued source or base changed during fallback verification'
         FALLBACK_RUNS="$FALLBACK_RUNS$id "
         RUN_ID="$id"
+        continue
+      fi
+      if [ "$status:$conclusion" = completed:cancelled ] && cancelled_advisory_proven "$id"; then
+        CANCELLED_ADVISORY_RUNS="$CANCELLED_ADVISORY_RUNS$id "
+        RUN_ID="$id"
+        printf 'ai-merge-group-evidence: run %s has complete original required coverage and exact GitHub non-required cancellations\n' "$id"
         continue
       fi
       if [ "$status" != completed ] && advisory_only_pending "$candidate_jobs"; then
@@ -238,6 +306,9 @@ if [ "${#REQUIRED_JOBS[@]}" -gt 0 ]; then
   fi
   if [[ "$ADVISORY_RUNS" = *" $RUN_ID "* ]]; then
     advisory_only_pending "$JOBS" || reject 'the advisory-lane exact-head job evidence changed'
+  fi
+  if [[ "$CANCELLED_ADVISORY_RUNS" = *" $RUN_ID "* ]]; then
+    cancelled_advisory_proven "$RUN_ID" || reject 'the current same-run cancellation policy or original coverage changed'
   fi
   for job in "${REQUIRED_JOBS[@]}"; do
     line="$(printf '%s\n' "$JOBS" | awk -F'\t' -v want="$job" '$1 == want { print $2; exit }')"
