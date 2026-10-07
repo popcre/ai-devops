@@ -106,8 +106,7 @@ esac
 cid=conv-good
 if [[ "$args" == *"--conversation"* ]] && [ "${MOCK_MODE:-normal}" = wrongid ]; then cid=conv-wrong; fi
 if [ "${MOCK_MODE:-normal}" = empty ]; then response=''; elif [ "${MOCK_MODE:-normal}" = badverdict ]; then response='## Verdict
-PASS'; elif [ "${MOCK_MODE:-normal}" = governed ]; then response='Findings: none blocking in file.txt.
-VERDICT: APPROVE 1111111111111111111111111111111111111111'; elif [ "${MOCK_MODE:-normal}" = governed-heading ]; then response='## Verdict
+PASS'; elif [ "${MOCK_MODE:-normal}" = governed ]; then gov_sha="$(printf '%s' "$args" | grep -oE 'VERDICT: APPROVE [0-9a-f]{40}' | head -1 | awk '{print $3}')"; response="$(printf 'Findings: none blocking in file.txt.\nVERDICT: APPROVE %s' "${gov_sha:-1111111111111111111111111111111111111111}")"; elif [ "${MOCK_MODE:-normal}" = governed-heading ]; then response='## Verdict
 APPROVE'; else response='## Verdict
 APPROVE'; fi
 if [ "${MOCK_MODE:-normal}" = denied ]; then printf '{"status":"SUCCESS","conversation_id":"%s","response":"","denied_actions":[{"action":"command","display_name":"RunCommand"}]}\n' "$cid"; exit 0; fi
