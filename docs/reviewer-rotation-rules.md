@@ -88,6 +88,17 @@ allocator but stayed registered here, and a session spent an hour trying it.
     `tests/test-reviewer-credit.sh`. Rate limits and a bare
     `RESOURCE_EXHAUSTED` are not credit failures.
 
+    This prompt stopping guarantee covers qualified credit and allowance
+    refusals, not every ordinary reviewer failure. GLM already stops on a fresh
+    assistant message with `finish="error"` and preserves its terminal error.
+    Other ordinary failures still depend on the provider process exiting or its
+    existing timeout; a silent or unqualified failure signal can therefore wait
+    beyond 15 minutes. Do not claim all failures are detected immediately or
+    stop a legitimate retry, compaction, tool error or quoted assistant content
+    merely because it contains an error. Broader terminal-failure coverage
+    requires separately qualified provider framing while preserving these
+    capabilities.
+
 11. **Credit pause is a one-command switch, not a roster edit.** Owner rule,
     2026-09-30: subscription credit pauses must be as easy as on/off. Use
     `ai-review-preflight quarantine <provider> out-of-credit` to turn a
