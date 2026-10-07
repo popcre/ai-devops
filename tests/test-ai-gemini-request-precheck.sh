@@ -97,73 +97,88 @@ write_q 1.1.15; : > "$MOCK_AGY_CALLS"
 check 'duplicate --governed-verdict never auto-requalifies' "! (cd '$R' && '$SCRIPT' new --governed-verdict 1111111111111111111111111111111111111111 --governed-verdict 2222222222222222222222222222222222222222 dup-gov --prompt review) 2>'$TMP/dup-gov.err' && grep -q 'may be given only once' '$TMP/dup-gov.err' && ! grep -q 'requalifying automatically' '$TMP/dup-gov.err' && test ! -s '$MOCK_AGY_CALLS'"
 check 'misplaced --governed-verdict never auto-requalifies' "! (cd '$R' && '$SCRIPT' new mis-gov --governed-verdict 1111111111111111111111111111111111111111 --prompt review) 2>'$TMP/mis-gov.err' && grep -q 'must immediately follow' '$TMP/mis-gov.err' && ! grep -q 'requalifying automatically' '$TMP/mis-gov.err' && test ! -s '$MOCK_AGY_CALLS'"
 check 'trailing --governed-verdict after the prompt never auto-requalifies' "! (cd '$R' && '$SCRIPT' new trail-gov --prompt review --governed-verdict 1111111111111111111111111111111111111111) 2>'$TMP/trail-gov.err' && grep -q 'must immediately follow' '$TMP/trail-gov.err' && ! grep -q 'requalifying automatically' '$TMP/trail-gov.err' && test ! -s '$MOCK_AGY_CALLS'"
+# A prompt whose text is the flag string is data, not a flag. Prove the
+# pre-check did not misread it by reaching the ordinary duplicate refusal on
+# an existing session name instead of a --governed-verdict error.
 write_q 1.1.14
-check 'a prompt value that looks like --governed-verdict is not a flag' "(cd '$R' && '$SCRIPT' new prompt-flag --prompt --governed-verdict) 2>'$TMP/prompt-flag.err' | grep -q '^PASS'"
-# Codex 2026-10-07 HIGH: the governed SHA and the requested base must be
-# revalidated after the session lock. The hook rewrites the binding in the
-# window between the pre-lock checks and lock acquisition, which is exactly
-# what a concurrent delete/recreate of the same-named session does.
-write_q 1.1.14
+check 'a prompt value that looks like --governed-verdict is not a flag' "! (cd '$R' && '$SCRIPT' new dupsrc --prompt --governed-verdict) 2>'$TMP/prompt-flag.err' && grep -q 'session already exists' '$TMP/prompt-flag.err'"
+# Codex 2026-10-07 HIGH: the session status and frozen model, the governed
+# SHA, the requested base, and the asserted head are all validated before the
+# session lock. A competing request or a concurrent delete/recreate can change
+# any of them in that window, so each is re-checked under the lock. The hook
+# rewrites the value at the arming point, which is exactly when the race
+# window is open. One session is reused, with each corruption restored before
+# the next case, so the focused suite stays inside its time budget.
 RR="$TMP/repo-race"; make_repo "$RR"
 RR_SHA="$(git -C "$RR" rev-parse HEAD)"
-(cd "$RR" && "$SCRIPT" new --base "$RR_SHA" gov-race --prompt review) >/dev/null
-RR_META="$(find "$TMP/state/sessions" -name '*gov-race*.json' | head -1)"
-RR_IDENT="$(jq -r .review_dir "$RR_META")/.ai-review-$(jq -r .sandbox_tag "$RR_META")/identity.json"
-cat > "$TMP/hook-head.sh" <<EOF
+(cd "$RR" && "$SCRIPT" new --base "$RR_SHA" bind --prompt review) >/dev/null
+META="$(find "$TMP/state/sessions" -name '*bind*.json' | head -1)"
+IDENT="$(jq -r .review_dir "$META")/.ai-review-$(jq -r .sandbox_tag "$META")/identity.json"
+ORIG_MODEL="$(jq -r .model "$META")"
+restore_meta(){ jq --arg h "$1" --arg m "$2" --arg s "$3" '.head=$h | .model=$m | .status=$s' "$META" > "$META.tmp" && mv "$META.tmp" "$META"; }
+# Governed SHA.
+cat > "$TMP/hook.sh" <<EOF
 #!/usr/bin/env bash
-: > '$TMP/hook-fired-a'
-jq --arg h '9999999999999999999999999999999999999999' '.head=\$h' '$RR_META' > '$RR_META.tmp' && mv '$RR_META.tmp' '$RR_META'
+: > '$TMP/hook-fired'
+jq '.head="9999999999999999999999999999999999999999"' '$META' > '$META.tmp' && mv '$META.tmp' '$META'
 EOF
-rm -f "$TMP/hook-fired-a"
-export MOCK_AGY_HOOK_ARM="$TMP/hook-arm-a" MOCK_AGY_HOOK="$TMP/hook-head.sh"
-set +e; (cd "$RR" && "$SCRIPT" ask --base "$RR_SHA" --governed-verdict "$RR_SHA" gov-race --prompt follow) >"$TMP/race-a.out" 2>"$TMP/race-a.err"; RACE_A_RC=$?; set -e
+rm -f "$TMP/hook-fired"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm" MOCK_AGY_HOOK="$TMP/hook.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$RR_SHA" --governed-verdict "$RR_SHA" bind --prompt follow) >"$TMP/a.out" 2>"$TMP/a.err"; A_RC=$?; set -e
 unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
-check 'the substitution hook fired in the pre-lock window' "test -f '$TMP/hook-fired-a'"
-check 'post-lock governed SHA revalidation refuses a substituted session' "test '$RACE_A_RC' -ne 0 && test -f '$TMP/hook-fired-a' && grep -q 'governed verdict head must match the reviewed HEAD' '$TMP/race-a.err'"
-check 'a binding refusal does not mark the session for recovery' "test \"\$(jq -r .status '$RR_META')\" != RECOVERY_REQUIRED"
-(cd "$RR" && "$SCRIPT" new --base "$RR_SHA" base-race --prompt review) >/dev/null
-BR_META="$(find "$TMP/state/sessions" -name '*base-race*.json' | head -1)"
-BR_IDENT="$(jq -r .review_dir "$BR_META")/.ai-review-$(jq -r .sandbox_tag "$BR_META")/identity.json"
-cat > "$TMP/hook-base.sh" <<EOF
+check 'the substitution hook fired in the pre-lock window' "test -f '$TMP/hook-fired'"
+check 'post-lock governed SHA revalidation refuses a substituted session' "test '$A_RC' -ne 0 && test -f '$TMP/hook-fired' && grep -q 'governed verdict head must match the reviewed HEAD' '$TMP/a.err'"
+check 'a binding refusal does not mark the session for recovery' "test \"\$(jq -r .status '$META')\" != RECOVERY_REQUIRED"
+restore_meta "$RR_SHA" "$ORIG_MODEL" COMPLETE
+# Requested base.
+cat > "$TMP/hook.sh" <<EOF
 #!/usr/bin/env bash
-: > '$TMP/hook-fired-b'
-jq --arg b '8888888888888888888888888888888888888888' '.base=\$b' '$BR_IDENT' > '$BR_IDENT.tmp' && mv '$BR_IDENT.tmp' '$BR_IDENT'
+: > '$TMP/hook-fired'
+jq '.base="8888888888888888888888888888888888888888"' '$IDENT' > '$IDENT.tmp' && mv '$IDENT.tmp' '$IDENT'
 EOF
-rm -f "$TMP/hook-fired-b"
-export MOCK_AGY_HOOK_ARM="$TMP/hook-arm-b" MOCK_AGY_HOOK="$TMP/hook-base.sh"
-set +e; (cd "$RR" && "$SCRIPT" ask --base "$RR_SHA" base-race --prompt follow) >"$TMP/race-b.out" 2>"$TMP/race-b.err"; RACE_B_RC=$?; set -e
+rm -f "$TMP/hook-fired"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm" MOCK_AGY_HOOK="$TMP/hook.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --base "$RR_SHA" bind --prompt follow) >"$TMP/b.out" 2>"$TMP/b.err"; B_RC=$?; set -e
 unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
-check 'post-lock requested base revalidation refuses a substituted session' "test '$RACE_B_RC' -ne 0 && test -f '$TMP/hook-fired-b' && grep -q 'requested base differs from the sealed review identity' '$TMP/race-b.err'"
-# The --assert-head sibling: a replacement plus a checkout advance leaves the
-# pre-lock assertion holding while the review would resume on another HEAD.
-(cd "$RR" && "$SCRIPT" new assert-race --prompt review) >/dev/null
-CR_META="$(find "$TMP/state/sessions" -name '*assert-race*.json' | head -1)"
-CR_HEAD="$(jq -r .head "$CR_META")"
-cat > "$TMP/hook-assert.sh" <<EOF
+check 'post-lock requested base revalidation refuses a substituted session' "test '$B_RC' -ne 0 && test -f '$TMP/hook-fired' && grep -q 'requested base differs from the sealed review identity' '$TMP/b.err'"
+jq --arg b "$RR_SHA" '.base=$b' "$IDENT" > "$IDENT.tmp" && mv "$IDENT.tmp" "$IDENT"
+# Frozen model.
+cat > "$TMP/hook.sh" <<EOF
 #!/usr/bin/env bash
-: > '$TMP/hook-fired-c'
+: > '$TMP/hook-fired'
+jq '.model="gemini-other"' '$META' > '$META.tmp' && mv '$META.tmp' '$META'
+EOF
+rm -f "$TMP/hook-fired"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm" MOCK_AGY_HOOK="$TMP/hook.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$RR_SHA" bind --prompt follow) >"$TMP/e.out" 2>"$TMP/e.err"; E_RC=$?; set -e
+unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
+check 'post-lock frozen-model revalidation refuses a substituted session' "test '$E_RC' -ne 0 && test -f '$TMP/hook-fired' && grep -q 'configured model differs' '$TMP/e.err'"
+restore_meta "$RR_SHA" "$ORIG_MODEL" COMPLETE
+# Session status.
+cat > "$TMP/hook.sh" <<EOF
+#!/usr/bin/env bash
+: > '$TMP/hook-fired'
+jq '.status="RECOVERY_REQUIRED"' '$META' > '$META.tmp' && mv '$META.tmp' '$META'
+EOF
+rm -f "$TMP/hook-fired"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm" MOCK_AGY_HOOK="$TMP/hook.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$RR_SHA" bind --prompt follow) >"$TMP/f.out" 2>"$TMP/f.err"; F_RC=$?; set -e
+unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
+check 'post-lock status revalidation refuses a session flagged under the window' "test '$F_RC' -ne 0 && test -f '$TMP/hook-fired' && grep -q 'session requires recovery before reuse' '$TMP/f.err'"
+restore_meta "$RR_SHA" "$ORIG_MODEL" COMPLETE
+# Asserted head: a replacement plus a checkout advance leaves the pre-lock
+# assertion holding while the review would resume on another HEAD. Runs last
+# because the hook moves the repository tip.
+cat > "$TMP/hook.sh" <<EOF
+#!/usr/bin/env bash
+: > '$TMP/hook-fired'
 git -C '$RR' commit --allow-empty -qm 'advance under the review'
 NEW_HEAD="\$(git -C '$RR' rev-parse HEAD)"
-jq --arg h "\$NEW_HEAD" '.head=\$h' '$CR_META' > '$CR_META.tmp' && mv '$CR_META.tmp' '$CR_META'
+jq --arg h "\$NEW_HEAD" '.head=\$h' '$META' > '$META.tmp' && mv '$META.tmp' '$META'
 EOF
-rm -f "$TMP/hook-fired-c"
-export MOCK_AGY_HOOK_ARM="$TMP/hook-arm-c" MOCK_AGY_HOOK="$TMP/hook-assert.sh"
-set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$CR_HEAD" assert-race --prompt follow) >"$TMP/race-c.out" 2>"$TMP/race-c.err"; RACE_C_RC=$?; set -e
+rm -f "$TMP/hook-fired"
+export MOCK_AGY_HOOK_ARM="$TMP/hook-arm" MOCK_AGY_HOOK="$TMP/hook.sh"
+set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$RR_SHA" bind --prompt follow) >"$TMP/c.out" 2>"$TMP/c.err"; C_RC=$?; set -e
 unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
-check 'post-lock assert-head revalidation refuses a substituted session' "test '$RACE_C_RC' -ne 0 && test -f '$TMP/hook-fired-c' && grep -q 'asserted head no longer matches the reviewed source' '$TMP/race-c.err'"
-# The live-head leg alone: the binding still matches the frozen session head,
-# but the checkout advanced under the pre-lock assertion.
-(cd "$RR" && "$SCRIPT" new assert-live --prompt review) >/dev/null
-CL_META="$(find "$TMP/state/sessions" -name '*assert-live*.json' | head -1)"
-CL_HEAD="$(jq -r .head "$CL_META")"
-cat > "$TMP/hook-live.sh" <<EOF
-#!/usr/bin/env bash
-: > '$TMP/hook-fired-d'
-git -C '$RR' commit --allow-empty -qm 'advance again under the review'
-EOF
-rm -f "$TMP/hook-fired-d"
-export MOCK_AGY_HOOK_ARM="$TMP/hook-arm-d" MOCK_AGY_HOOK="$TMP/hook-live.sh"
-set +e; (cd "$RR" && "$SCRIPT" ask --assert-head "$CL_HEAD" assert-live --prompt follow) >"$TMP/race-d.out" 2>"$TMP/race-d.err"; RACE_D_RC=$?; set -e
-unset MOCK_AGY_HOOK MOCK_AGY_HOOK_ARM
-check 'post-lock assert-head revalidation also catches a checkout advance' "test '$RACE_D_RC' -ne 0 && test -f '$TMP/hook-fired-d' && grep -q 'asserted head no longer matches the reviewed source' '$TMP/race-d.err'"
+check 'post-lock assert-head revalidation refuses a substituted session' "test '$C_RC' -ne 0 && test -f '$TMP/hook-fired' && grep -q 'asserted head no longer matches the reviewed source' '$TMP/c.err'"
 printf 'ok tests\n'
