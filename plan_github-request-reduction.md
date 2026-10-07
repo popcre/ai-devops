@@ -77,11 +77,14 @@ The [bounded October 2–7 aggregate](tests/verification/github-requests/p1-base
 contains 1,065 receipts and 624 observed GraphQL points, but no comparable
 savings, whole-account totals or useful-work latency proof. #658 stays open.
 
-**Start:** reconcile current upstream, read this STATUS and the
-[active handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md),
-then finish the first actionable unproved outcome under #658. The original
-the discovery handoff (retired; see git history)
-remains historical context.
+**Start:** reconcile current upstream and read this STATUS, then finish the
+first actionable unproved outcome under #658 under the current coordinator
+prompt and user authority. The
+[September 28 handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md)
+is historical facts/reference only: do not inherit its scope, instructions,
+installation prohibition or stopping rule. Current user coordinator authority
+supersedes those old instructions. The original discovery handoff (retired;
+see Git history) is likewise historical context only.
 Each row is a separate outcome with one accountable owner under the current
 orchestrator. The parent is a tracking record; distinct proof outcomes stay on
 scoped child issues. A phase owner updates this table and re-reads downstream
@@ -1075,8 +1078,12 @@ review; normal full stages remain required. Only after full stages and normal
 receipts succeed may recorded owned partial routes move back to canonical
 source, then archive partial receipt as retired with consolidation source SHA.
 On failure retain/restore coherent partial routing and pending full authority;
-do not leave mixed unrecorded routes. Payload retirement is separate recoverable
-cleanup after no active receipt/consumer references it, not installation deletion.
+do not leave mixed unrecorded routes. Payload retirement is separate exact-reviewed
+recoverable cleanup after no consumer AND no active/pending/rollback predecessor,
+receipt, backup or journal reference remains, not installation deletion.
+Pin previous partial payload, exact manifest and retained backup bytes for
+the whole authorized recovery lifetime. An archived receipt is still a live
+retention reference when pending or possible authorized recovery depends on it.
 Verification: `full_reconcile_partial_routes`, `full_failure_keeps_partial_live`,
 `next_partial_requires_predecessor_binding`.
 
@@ -1166,7 +1173,18 @@ exists; absence or wrong full-uninstall intent refuses before destructive work.
 Ordinary uninstall modes also detect active partial routes rather than silently
 classify them as harmless full-manifest drift.
 
-Acquire the same protected machine lock before route/state writes, retain
+Removal uses the same supported privileged installer boundary as installation.
+Linux preflight proves effective root identity and root-owned protected state,
+release/backup/route ancestors and expected ACLs before any direct mutation,
+lock/state creation or backup write. Native Windows proves the elevated
+Administrators/SYSTEM boundary and protected ownership/ACLs before those writes.
+The caller request cannot self-elevate or skip the boundary: pass exact assigned
+AI authority through the existing supported privilege path, revalidate in the
+privileged process, and stop with coordinator-owned platform evidence if the
+privilege is unavailable. Do not use a user-writable lock or relaxed ACL to get
+removal working. This preflight precedes the existing uninstall script's direct
+mutations; merely adding scope parsing around them is insufficient.
+Then acquire the same protected machine lock before route/state writes, retain
 checkout/maintenance locks and pending-old-runtime preflight. Back up exact
 owned destinations/state first; verify active receipt, current route hashes,
 ACLs, backups and references again before every mutation. States: active ->
@@ -1189,12 +1207,29 @@ or drifted routes and report nonzero INCOMPLETE, with exact remaining references
 not completion. No removal of Windows service/fixed maintenance task or action
 outside existing allowlisted ownership contract is introduced.
 
-Never delete immutable payload while any recorded or newly observed consumer
-still references it, or when reference ownership/completeness is unknown.
+`--dry-run` (Windows fixed `-PartialScopeDryRun`) is read-only preview only:
+no authorization issuance/reservation/consumption, journal/state/lock/backup
+creation, route/schedule mutation or cleanup. It may parse an existing exact
+review and inspect permitted state without treating that as authority to act;
+unreadable protected evidence produces an incomplete preview, never invented
+completion. Ordinary user preview does not acquire privileged write access.
+
+Never delete immutable payload while any recorded or newly observed consumer,
+active or pending installation, rollback predecessor, receipt, retained backup
+or journal still references it, or when ownership/completeness is unknown.
+Maintain protected retention records pinning predecessor payload/manifest and
+backup bytes through every issued/pending/active rollback/deactivation lifetime.
 Archive/retire a no-longer-active receipt, keep recoverable backup history and
 record retained payload as retained when references remain. Payload cleanup is
-allowed only after exact reviewed absence of references and recoverable archive;
-otherwise report INCOMPLETE and coordinator-owned repair. Gate phases are
+allowed only as a separate exact-reviewed recoverable cleanup after proven
+absence of both consumer and current/pending/recovery references. First create
+a recoverable archive and prove exact restoration of payload layout, manifest,
+backup bytes, permissions/ACLs and source identity in a disposable protected
+fixture. Never delete a previous target still required by any recovery state.
+Cleanup authorization binds retention/reference inventory and archive/restoration
+receipts, rechecked under the same machine lock before deletion; any new
+reference refuses. This specification does not authorize immediate cleanup.
+Otherwise report INCOMPLETE and coordinator-owned repair. Gate phases are
 `uninstall-preflight`, `uninstall-backed-up`, `uninstall-mutated`,
 `uninstall-verified`, `uninstall-finalize`, each bound to its exact new authority.
 Verification: `partial_uninstall_new_authority_required`,
@@ -1203,7 +1238,10 @@ Verification: `partial_uninstall_new_authority_required`,
 `partial_uninstall_interrupt_retry`, `partial_uninstall_replay_refused`,
 `partial_uninstall_tamper_refused`, `full_uninstall_active_partial_owned_routes`,
 `full_uninstall_foreign_or_drifted_incomplete`,
-`partial_payload_referenced_retained`.
+`partial_payload_referenced_retained`,
+`partial_remove_ordinary_user_refused`, `partial_remove_root_admin_acl_positive`,
+`partial_dryrun_zero_effects`, `cleanup_predecessor_receipt_backup_ref_retained`,
+`rollback_after_cleanup_attempt_preserved`.
 
 **Phase D/E — reviewed landing and one host outcome.** Focused tests, native
 platform proof, exact-head assigned independent review, normal required CI and
@@ -1246,6 +1284,8 @@ Trust-boundary adversarial matrix:
 | Active rollback | Consumed install authority, tampered receipt/backup, mixed restoration | `active_fault_new_rollback_authority`, `active_rollback_install_authority_replay_refused`, `active_rollback_restores_coherent_predecessor` |
 | Uninstall | Consumed authority, interrupted/tampered state, foreign active route | `partial_uninstall_replay_refused`, `partial_uninstall_interrupt_retry`, `partial_uninstall_tamper_refused`, `full_uninstall_foreign_or_drifted_incomplete` |
 | Predecessor/payload removal | Unsafe old source or referenced payload deletion | `partial_deactivate_unsafe_predecessor_forward_repair`, `partial_payload_referenced_retained` |
+| Removal privilege/preview | Ordinary user mutation, relaxed ACL or dry-run authority side effect | `partial_remove_ordinary_user_refused`, `partial_remove_root_admin_acl_positive`, `partial_dryrun_zero_effects` |
+| Cleanup/recovery | Archived predecessor/backup deleted or reference appears during cleanup | `cleanup_predecessor_receipt_backup_ref_retained`, `rollback_after_cleanup_attempt_preserved` |
 | Owned route/rollback | Another actor changed destination or ACL | `partial_rollback_concurrent_change_refused` |
 | Schedule | Different principal/cadence/action or foreign task | `schedule_semantics_preserved` |
 | Privileged maintenance | Redirected fixed action, skipped runtime hashes, hostile autoload/env | Existing `tests/test-windows-runner-maintenance.ps1` regressions |
@@ -1323,6 +1363,15 @@ uninstall authority, safe predecessor restoration and original capability,
 interruptions/replays/tampering, referenced-payload retention and nonzero
 INCOMPLETE for drift/foreign references. No success message may hide active
 owned partial routes that the requested full uninstall failed to account for.
+Add Linux ordinary-user mutation refusal and effective-root positive fixtures,
+native Windows non-elevated refusal and Admin/SYSTEM ownership/ACL positives,
+and `partial_dryrun_zero_effects` snapshots covering all authority/journal/lock/
+backup/route/schedule/reference state before and after read-only preview.
+Add GC cases pinning previous partial payload/manifest and backup bytes through
+active/pending/rollback/archived receipt/journal references; attempted cleanup
+must leave a subsequent authorized rollback functional. Unknown reference or
+new reference after reviewed inventory must refuse cleanup. Verify recoverable
+archive restoration before the no-reference cleanup success fixture.
 Actual public-boundary command is `bash tests/test-public-boundary.sh`; retain
 its real passing receipt/source identity. A wrong reviewer packet filename is
 an evidence defect, not a claimed scanner/source fix. Markdown suite requires
