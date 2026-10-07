@@ -1443,10 +1443,14 @@ start_review_job() { # NAME [CONTINUE]
   fi
   while [ "$startup_waited" -lt "$STARTUP_TIMEOUT" ]; do
     phase="$(jq -r .phase "$dir/job.json")"
-    [ "$phase" != preflight ] && break
+    # Acknowledge only after evidence reservation: the worker sets
+    # phase=starting first, then reserves note-worker/require-report,
+    # then phase=running. Waiting for "not preflight" would return on
+    # starting and race the reservation.
+    [ "$phase" = running ] && break
     sleep 1; startup_waited=$((startup_waited+1))
   done
-  if [ "${phase:-preflight}" = preflight ]; then
+  if [ "${phase:-preflight}" != running ]; then
     lock_release "$repo_lock"
     write_job_state "$dir/job.json" --arg u "$(date -u +%FT%TZ)" '.phase="failed"|.terminal_reason="worker-start-failed"|.updated=$u'
     record_diagnostic "$repo" "$diag_run" "$name" terminal worker-start-failed --failure-class worker-start-ack-timeout --deadline-kind startup-timeout --cancellation-confirmation not-requested
