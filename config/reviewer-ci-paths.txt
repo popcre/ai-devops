@@ -66,6 +66,7 @@ tools/lib/provider-wrapper-common.sh
 tools/lib/review-lifecycle-core.sh
 tools/lib/review-doors/*
 tools/lib/review-operation.sh
+tools/lib/stepfun-sandbox.sh
 tools/lib/task-gates.sh
 tools/reviewer_admission.py
 tools/reviewer_event_guard.sh

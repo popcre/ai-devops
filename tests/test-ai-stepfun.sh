@@ -249,6 +249,23 @@ STUB
   drc=$?
   set -e
   check "real sandbox: the review door starts StepCode and sees the packet, not caller secrets" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport'"
+  # StepCode's guard ends a non-interactive turn on a refused command; the door
+  # retries once and names the refused command to the model.
+  cat > "$RH/probe-bin/step" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --help ] && { echo 'step - AI coding assistant'; exit 0; }
+if [ ! -e ./tried ]; then : > ./tried; echo 'Blocked run_command: Dangerous command requires confirmation (recursive-force-remove)' >&2; exit 1; fi
+printf '%s\n' "$@" | grep -q 'harness refused this command: Blocked run_command' && echo STEPFUN-OK
+STUB
+  rm -f "$RH/dreport"
+  set +e
+  HOME="$RH" AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_ENGINE=stepcode \
+    AI_STEPFUN_KEY_STORE="$RH/.config/ai-devops/secrets/stepfun-api-key" AI_STEPFUN_STEP_BIN="$RH/probe-bin/step" \
+    DOOR_WORKDIR="$RH/dw" DOOR_PACKET_DIR="$RH/dp" DOOR_PROMPT_FILE="$RH/dprompt" DOOR_REPORT_OUT="$RH/dreport" DOOR_HEAD=abc123 \
+    bash "$DOOR" review >"$RH/dout" 2>&1
+  drc=$?
+  set -e
+  check "door retries once after the command guard ends a turn, naming the refused command" "[ '$drc' = 0 ] && grep -q STEPFUN-OK '$RH/dreport' && grep -q 'retrying once' '$RH/dout'"
   check "door probe: doctor --live also runs a turn through the review door" "printf '%s' \"\$out\" | grep -q 'PASS  live call through the review door answered'"
   rm -rf "$RH"
 else

@@ -252,9 +252,9 @@ main() {
     printf 'Your evidence packet is at %s/MANIFEST.md. Read it first.\n' "$DOOR_PACKET_DIR"
     printf 'It contains the exact commits under review, the changed files, the full patch, and what you are being asked to decide.\n'
     printf 'The reviewed head commit is %s; quote that full SHA in your report.\n' "$DOOR_HEAD"
-    # StepCode refuses destructive commands (rm -rf and the like) when no
-    # person can confirm, and the refusal ends the turn with no report.
-    printf 'Never run destructive commands such as rm -rf, even inside the copy: this harness refuses them without a person present and the refusal ends your turn with no report. The copy is discarded afterwards, so cleanup is never needed.\n\n'
+    # StepCode refuses dangerous or unanalysable commands when no person can
+    # confirm, and the refusal ends the turn with no report.
+    printf 'Shell rule: this harness refuses, without a person present, any command it cannot fully analyse or judges dangerous, and the refusal ends your turn with no report. Use plain literal commands only: run a test suite as `bash tests/NAME.sh` with no options; never use rm -rf, sed -i, eval, or inline-code options such as bash -c, bash -x, sh -c, python -c, or node -e. The copy is discarded afterwards, so cleanup is never needed.\n\n'
     cat "$DOOR_PROMPT_FILE"
     printf '\n\n---\nFormatting requirement: structure your reply so the final answer is last, under a literal '"'"'## Verdict'"'"' heading, followed by exactly one of APPROVE, REJECT, or BLOCKED.\n'
   } > "$prompt_full"
@@ -304,19 +304,30 @@ main() {
     # model can read MANIFEST.md as the preamble tells it to.
     local -a packet_bind=()
     case "$DOOR_PACKET_DIR" in "$DOOR_WORKDIR"|"$DOOR_WORKDIR"/*) ;; *) packet_bind=(--ro-bind "$DOOR_PACKET_DIR" "$DOOR_PACKET_DIR") ;; esac
-    local prompt_text; prompt_text="$(cat "$prompt_full")"
-    (
-      export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
-      export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
-      stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" \
-        "${packet_bind[@]}" \
-        --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --chdir "$DOOR_WORKDIR" -- \
-        -p --no-session --model "$SF_STEP_MODEL" \
-        --approval-mode auto --non-interactive-approval allow \
-        --no-extensions --no-skills --no-prompt-templates --no-themes \
-        --no-approve --no-update-check -- "$prompt_text"
-    ) < /dev/null > "$log" 2> "$out.err"
-    rc=$?
+    # StepCode's command guard ends a non-interactive turn on any command it
+    # will not run unattended, with no report and no override. One bounded
+    # retry tells the model exactly which command was refused.
+    local prompt_text attempt blocked
+    prompt_text="$(cat "$prompt_full")"
+    for attempt in 1 2; do
+      (
+        export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
+        export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
+        stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" \
+          "${packet_bind[@]}" \
+          --bind "$DOOR_WORKDIR" "$DOOR_WORKDIR" --chdir "$DOOR_WORKDIR" -- \
+          -p --no-session --model "$SF_STEP_MODEL" \
+          --approval-mode auto --non-interactive-approval allow \
+          --no-extensions --no-skills --no-prompt-templates --no-themes \
+          --no-approve --no-update-check -- "$prompt_text"
+      ) < /dev/null > "$log" 2> "$out.err"
+      rc=$?
+      [ "$rc" -ne 0 ] && [ "$attempt" = 1 ] || break
+      blocked="$(grep -m1 '^Blocked run_command:' "$out.err" | cut -c1-400 || true)"
+      [ -n "$blocked" ] || break
+      printf 'stepfun door: the command guard ended the turn; retrying once (%s)\n' "$blocked" >&2
+      prompt_text="$prompt_text"$'\n\n'"A previous attempt at this review ended with no report because the harness refused this command: $blocked"$'\n'"Do not run that command or anything like it. Use plain literal commands only."
+    done
     rm -rf "$home_tmp"
   fi
   set -e
