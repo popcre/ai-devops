@@ -15,6 +15,17 @@ export AI_DEVOPS_TEST_MODE=1
 export AI_TASK_GATES_MODE=none
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+GATE_TMP="$TMP"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    gate_profile="$(cygpath -u "$USERPROFILE")"
+    mkdir -p "$gate_profile/.local/state"
+    GATE_TMP="$(mktemp -d "$gate_profile/.local/state/task-gates-lifecycle.XXXXXXXX")"
+    trap 'rm -rf "$TMP" "$GATE_TMP"' EXIT
+    gate_sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
+    icacls "$(cygpath -w "$GATE_TMP")" /inheritance:r /grant:r "*${gate_sid}:(OI)(CI)(F)" >/dev/null
+    ;;
+esac
 R="$TMP/repo"; mkdir -p "$R"; git -C "$R" init -q
 git -C "$R" config user.name Test; git -C "$R" config user.email t@example.com
 printf 'base\n' > "$R/a.txt"; git -C "$R" add a.txt; git -C "$R" commit -qm init
@@ -191,7 +202,7 @@ git -C "$GR" remote add origin 'https://github.com/popcre/ai-devops.git'
 printf 'base\n' > "$GR/README.md"; git -C "$GR" add -A; git -C "$GR" commit -qm init
 printf 'a note\n' > "$GR/docs.md"
 
-export AI_TASK_GATES_DIR="$TMP/gates"
+export AI_TASK_GATES_DIR="$GATE_TMP/gates"
 export AI_TASK_GATES_BIN="$REPO_ROOT/bin/ai-task-gates"
 ( cd "$GR" && "$AI_TASK_GATES_BIN" start --class prose --reason 'documentation only' ) >/dev/null 2>&1
 
@@ -272,7 +283,7 @@ git -C "$PRIVATE" add src/loader.py; git -C "$PRIVATE" commit -qm code-change
 printf 'untracked-prompt-sentinel\n' > "$PRIVATE/prompt.txt"
 printf '["src/loader.py"]\n' > "$TMP/approved-paths.json"
 export AI_TASK_GATES_FILE="$REPO_ROOT/config/task-gates.json"
-export AI_TASK_GATES_DIR="$TMP/private-gates"
+export AI_TASK_GATES_DIR="$GATE_TMP/private-gates"
 ( cd "$PRIVATE" && "$AI_TASK_GATES_BIN" start --class private-evidence ) >/dev/null
 PRIVATE_STUB="$TMP/private-review-stub"
 cat > "$PRIVATE_STUB" <<'EOF'

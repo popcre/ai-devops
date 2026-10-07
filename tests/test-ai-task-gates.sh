@@ -16,8 +16,9 @@ LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
 
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    mkdir -p "$HOME/.local/state"
-    TMP="$(mktemp -d "$HOME/.local/state/task-gates-tests.XXXXXXXX")" ;;
+    profile="$(cygpath -u "$USERPROFILE")"
+    mkdir -p "$profile/.local/state"
+    TMP="$(mktemp -d "$profile/.local/state/task-gates-tests.XXXXXXXX")" ;;
   *) TMP="$(mktemp -d)" ;;
 esac
 trap 'rm -rf "$TMP"' EXIT
