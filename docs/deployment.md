@@ -145,7 +145,8 @@ installation task leaves `check --before deploy` forbidden for a reviewer-safety
 change. The authorization binds the candidate, review, installed checkout,
 launcher, and recorded old HEAD in the same Git repository, and is consumed
 once by the Windows installer. Fetch `origin/main` immediately before issuing
-authorization; the target must be the exact fetched release. The
+authorization; the target must be a merged release (in fetched `origin/main`
+history), though later merges may land after it. The
 installed checkout must be the durable primary checkout and the launcher must
 have its supported canonical path. Only after it passes may the
 canonical checkout fast-forward and the supported installer run. Verify the
@@ -367,10 +368,14 @@ Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
   installed launcher points into the installed checkout, so while that checkout
   predates a gate fix it still runs the old gate (it refused a valid report with
   `Review does not name exact target` until the candidate's copy was used).
-- The review, authorization and `update.sh` must all name the current
-  `origin/main`. Any merge in between (even a docs-only one) makes `update.sh`
-  stop with `candidate checkout is not the exact fetched target`; reset both
-  worktrees to the new head and redo the review and authorization.
+- The review, authorization and `update.sh` must all name the same exact SHA.
+  Since 2026-10-07 that SHA only has to be merged (in fetched `origin/main`
+  history), not the tip: later merges no longer force a redo. `update.sh`
+  advances the installed checkout to exactly the pinned SHA, never the newer
+  tip, and refuses a pinned SHA that is not merged (`explicitly approved commit
+  is not in fetched origin/main history`) or a candidate at any other SHA
+  (`candidate checkout is not the exact approved target`). The protection the
+  old tip check gave (install only published, merged code) is unchanged.
 - Pass the review report at the path the review wrote it; a copy elsewhere is
   not accepted.
 - `another installation is active for this checkout` can be a leftover

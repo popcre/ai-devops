@@ -245,6 +245,10 @@ dup_report_door(){
 dup_report_door "$class_report" "$class_target"
 check 'a runner-door header repeated below Result still names the exact target' \
   "[ \"\$(grep -c 'reviewed commit' '$class_report')\" = 2 ]"
+# A later merge may land between review and authorization; the reviewed target
+# stays authorizable while it is in fetched origin/main history.
+class_later="$(git -C "$TMP/class" commit-tree "$class_target^{tree}" -p "$class_target" -m 'later merge')"
+git -C "$TMP/class" update-ref refs/remotes/origin/main "$class_later"
 check 'a separate installation task can issue exact reviewed authority' \
   "rc 0 '$TMP/class-candidate' authorize-install $class_proof --review-report '$class_report' --reviewer-approval \"\$(appr '$TMP/class-candidate' deploy)\""
 check 'the issued authority binds old and target commits' \
