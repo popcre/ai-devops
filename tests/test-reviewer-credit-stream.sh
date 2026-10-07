@@ -22,3 +22,27 @@ reviewer_credit_run muse "$TASK_TMP/env-out" "$TASK_TMP/env-err" -- \
   > "$TASK_TMP/env-out" 2> "$TASK_TMP/env-err"
 [ "$(cat "$TASK_TMP/env-out")" = boundary-path-ok ]
 printf 'native supervisor preserves MSYS credential boundary PATH: PASS\n'
+# A shebang launcher must receive literal argv even when native Python starts
+# MSYS Bash: its startup parser otherwise expands @files, braces and wildcards.
+cat > "$TASK_TMP/argv-fixture" <<'FIXTURE'
+#!/usr/bin/env bash
+printf '%s\0' "$@" > "$AI_REVIEW_ARGV_FIXTURE_FILE"
+IFS= read -r fixture_input || true
+printf '%s' "$fixture_input"
+FIXTURE
+chmod +x "$TASK_TMP/argv-fixture"
+printf '{"model":"deepseek-flash","messages":[]}' > "$TASK_TMP/response-file"
+export AI_REVIEW_ARGV_FIXTURE_FILE="$TASK_TMP/actual-argv"
+fixture_args=(-d "@$TASK_TMP/response-file" -w '%{http_code}' 'literal-*' \
+  "quote\"single'back\\slash" '' $'line1\nline2' \
+  '$(touch '"$TASK_TMP"'/should-not-run)' \
+  '`touch '"$TASK_TMP"'/should-not-run`' \
+  '; touch '"$TASK_TMP"'/should-not-run; #')
+printf '%s\0' "${fixture_args[@]}" > "$TASK_TMP/expected-argv"
+printf 'fixture-header\n' | reviewer_credit_run deepseek "$TASK_TMP/argv-out" \
+  "$TASK_TMP/argv-err" -- "$TASK_TMP/argv-fixture" "${fixture_args[@]}" \
+  > "$TASK_TMP/argv-out" 2> "$TASK_TMP/argv-err"
+cmp -s "$TASK_TMP/expected-argv" "$TASK_TMP/actual-argv"
+[ "$(cat "$TASK_TMP/argv-out")" = fixture-header ]
+[ ! -e "$TASK_TMP/should-not-run" ]
+printf 'native supervised shebang preserves literal argv and stdin: PASS\n'

@@ -255,7 +255,7 @@ reviewer_credit_run(){
   python="$REVIEWER_CREDIT_PYTHON"; supervisor="$REVIEWER_CREDIT_SUPERVISOR"
   command_bin="$(command -v "$1")" || return 127
   shift
-  local argument_exclusions="${MSYS2_ARG_CONV_EXCL:-}" shell_launcher=''
+  local argument_exclusions="${MSYS2_ARG_CONV_EXCL:-}" shell_launcher='' shell_command=''
   local -a paths=("$supervisor" "$output" "$stderr" "$marker")
   case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*)
     # Git Bash resolves executable shebang launchers as commands too. Win32
@@ -266,7 +266,9 @@ reviewer_credit_run(){
       shell_launcher="$(cygpath -w "$shell_launcher")" || return 1
     fi
     for arg in "${!paths[@]}"; do paths[$arg]="$(cygpath -w "${paths[$arg]}")" || return 1; done
-    command_bin="$(cygpath -w "$command_bin")" || return 1
+    if [ -z "$shell_launcher" ]; then
+      command_bin="$(cygpath -w "$command_bin")" || return 1
+    fi
     # Native Python otherwise converts an env(1) PATH= argument to a Windows
     # semicolon list. Its MSYS child must receive the original POSIX PATH to
     # find the credential boundary's tools. Retain caller exclusions as well.
@@ -276,7 +278,16 @@ reviewer_credit_run(){
     esac;;
   esac
   local -a child_command=("$command_bin" "$@")
-  [ -z "$shell_launcher" ] || child_command=("$shell_launcher" --noprofile --norc -c 'exec "$@"' reviewer-credit-shell "${child_command[@]}")
+  if [ -n "$shell_launcher" ]; then
+    # A native parent makes the MSYS startup parser expand separate @file and
+    # brace/wildcard arguments before Bash receives them. Transport one shell
+    # program instead, single-quoting every argument as a literal Bash word.
+    # Nothing from the caller is interpolated as executable shell syntax.
+    for arg in "${child_command[@]}"; do
+      shell_command+="'${arg//\'/\'\\\'\'}' "
+    done
+    child_command=("$shell_launcher" --noprofile --norc -c "exec $shell_command")
+  fi
   term_trap="$(trap -p TERM)"; int_trap="$(trap -p INT)"; hup_trap="$(trap -p HUP)"
   MSYS2_ARG_CONV_EXCL="$argument_exclusions" "$python" "${paths[0]}" --credit-provider "$provider" --credit-output "${paths[1]}" --credit-stderr "${paths[2]}" --credit-marker "${paths[3]}" -- "${child_command[@]}" <&0 & child=$!
   trap 'received=TERM; kill -TERM "$child" 2>/dev/null || true' TERM

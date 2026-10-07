@@ -1468,7 +1468,7 @@ case "$SUBCMD" in
     fi
     ;;
   list)
-    find "$SESS_DIR" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' -printf '%T@ %f\n' 2>/dev/null \
+    find "$SESS_DIR" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' ! -name '*.credit-refusal.*.json' -printf '%T@ %f\n' 2>/dev/null \
       | sort -rn | sed -E 's/^[^ ]+ //; s/\.json$//'
     ;;
 

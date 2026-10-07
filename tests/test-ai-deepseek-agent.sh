@@ -47,7 +47,11 @@ out=""; while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -d) [ -z "
 [ -z "${DEEPSEEK_STUB_DELAY:-}" ] || {
   printf '%s\n' "$$" > "$DEEPSEEK_STUB_PID_FILE"
   trap 'printf terminated > "$DEEPSEEK_STUB_TERM_MARKER"; exit 143' TERM
-  sleep "$DEEPSEEK_STUB_DELAY"
+  if [ -n "${DEEPSEEK_STUB_DESCENDANT_PID_FILE:-}" ]; then
+    sleep "$DEEPSEEK_STUB_DELAY" & delayed_descendant=$!
+    printf '%s\n' "$delayed_descendant" > "$DEEPSEEK_STUB_DESCENDANT_PID_FILE"
+    wait "$delayed_descendant"
+  else sleep "$DEEPSEEK_STUB_DELAY"; fi
 }
 if [ "${DEEPSEEK_STUB_FAIL:-0}" = 1 ]; then printf '{"error":"private-provider-error-body"}' > "$out"; printf 500
 elif [ -n "${DEEPSEEK_STUB_CREDIT:-}" ]; then cp "$DEEPSEEK_STUB_CREDIT" "$out"; printf 402
@@ -390,14 +394,25 @@ rm -f "$DEEPSEEK_STUB_PID_FILE" "$DEEPSEEK_STUB_TERM_MARKER"
 INTERRUPT_SESSION="$(run send interrupt-seed | sed -n 's/^SESSION_ID: //p')"
 interrupt_history="$TMP/repo/.ai/deepseek-sessions/$INTERRUPT_SESSION.json"
 history_before_signal="$(sha256sum "$interrupt_history"|cut -d' ' -f1)"
-(cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=5 "$SCRIPT" reply "$INTERRUPT_SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
-for _ in $(seq 1 "$(scale_ticks 100)"); do [ -d "$interrupt_history.lock" ] && [ -s "$DEEPSEEK_STUB_PID_FILE" ] && break; sleep .05; done
+(cd "$TMP/repo" && exec env HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_DELAY=30 DEEPSEEK_STUB_DESCENDANT_PID_FILE="$TMP/interrupted-descendant-pid" "$SCRIPT" reply "$INTERRUPT_SESSION" interrupted) >/dev/null 2>&1 & signal_pid=$!
+for _ in $(seq 1 "$(scale_ticks 100)"); do [ -d "$interrupt_history.lock" ] && [ -s "$DEEPSEEK_STUB_PID_FILE" ] && [ -s "$TMP/interrupted-descendant-pid" ] && break; sleep .05; done
+sleep 30 & interrupt_sibling_pid=$!
 kill -TERM "$signal_pid" 2>/dev/null || true; signal_rc=0; wait "$signal_pid" 2>/dev/null || signal_rc=$?
 check "interrupted reply exits nonzero and does not resume after lock release" "test '$signal_rc' -ne 0 && test '$history_before_signal' = \"\$(sha256sum '$interrupt_history'|cut -d' ' -f1)\""
-provider_pid="$(cat "$DEEPSEEK_STUB_PID_FILE" 2>/dev/null || echo 0)"
-check "interrupted reply stops its provider child before unlocking" "test -f '$DEEPSEEK_STUB_TERM_MARKER' && ! kill -0 '$provider_pid' 2>/dev/null"
+provider_pid="$(cat "$DEEPSEEK_STUB_PID_FILE" 2>/dev/null || echo 0)"; descendant_pid="$(cat "$TMP/interrupted-descendant-pid" 2>/dev/null || echo 0)"
+interrupt_term_proof="test -f '$DEEPSEEK_STUB_TERM_MARKER'"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*)
+  # Native Windows terminates the owned Job Object without a POSIX TERM trap.
+  # Actual child and descendant death remain required on every platform.
+  interrupt_term_proof=:;;
+esac
+check "interrupted reply stops its provider child before unlocking" "$interrupt_term_proof && test '$provider_pid' -gt 0 && ! kill -0 '$provider_pid' 2>/dev/null"
+check "interrupted reply stops its owned provider descendant" "test '$descendant_pid' -gt 0 && ! kill -0 '$descendant_pid' 2>/dev/null"
+check "interrupted reply preserves an unrelated owned sibling" "kill -0 '$interrupt_sibling_pid' 2>/dev/null"
+kill -TERM "$interrupt_sibling_pid" 2>/dev/null || true; wait "$interrupt_sibling_pid" 2>/dev/null || true
 check "interrupted reply releases its owned lock" "test ! -d '$interrupt_history.lock'"
-check "interrupted paid turn remains fenced from replay" "! run reply '$INTERRUPT_SESSION' replay >'$TMP/interrupted-replay.out' 2>&1 && grep -q 'prior paid turn remains pending' '$TMP/interrupted-replay.out'"
+interrupt_calls="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
+check "interrupted paid turn remains fenced from replay" "! run reply '$INTERRUPT_SESSION' replay >'$TMP/interrupted-replay.out' 2>&1 && grep -q 'prior paid turn remains pending' '$TMP/interrupted-replay.out' && test '$interrupt_calls' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\""
 mkdir -p "$TMP/not-a-repo"
 calls_before_nonrepo="$(wc -l < "$DEEPSEEK_CURL_ARGS")"
 (cd "$TMP/not-a-repo" && HOME="$TMP/home" PATH="$TMP/bin:$PATH" DEEPSEEK_API_KEY=test DEEPSEEK_STUB_REPLY=$'## Verdict\nAPPROVE' "$SCRIPT" send no-head --review) >/dev/null 2>&1; nonrepo_rc=$?
@@ -546,6 +561,7 @@ set -e
 check "a recovery-required session refuses continuation before any provider contact" "test '$LEDGER_CONT_RC' -ne 0 && test '$LEDGER_CALLS' -eq \"\$(wc -l < '$DEEPSEEK_CURL_ARGS')\" && grep -q 'would understate what DeepSeek saw' '$LEDGER_CONT'"
 check "the recovery marker is not mistaken for a conversation by list" "! run list | grep -q recovery-required"
 check "list excludes metadata sidecars" "test \"\$(run list|grep -c meta||true)\" -eq 0"
+printf '{}' > "$TMP/repo/.ai/deepseek-sessions/fixture.response.retained.credit-refusal.current.json"
 check "list excludes retained provider responses" "! run list | grep -q response"
 set +e
 GOV_HEAD="$(git -C "$TMP/repo" rev-parse HEAD)"
