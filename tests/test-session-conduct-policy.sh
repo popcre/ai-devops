@@ -61,5 +61,54 @@ check 'router preserves remote and hosted Windows capacity' \
 check 'runner guidance routes scheduling decisions through the scoped probe' \
   "grep -Fq 'bin/ai-test-local --check-collision' '$router' && grep -Fq 'bin/ai-test-local --check-collision' '$ROOT/docs/task-router.md'"
 
+# These two instruction-contract cases check the obligations and four-client
+# parity, including removal mutations. They do not prove live model behavior.
+if ! python3 - "$ROOT" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]) / "templates/system"
+files = [root / name for name in (
+    "CLAUDE-global.md", "AGENTS-global-codex.md",
+    "AGENTS-global-zcode.md", "AGENTS-global-mimo.md",
+)]
+blocks = []
+for file in files:
+    match = re.search(r"^- \*\*Own coordinator progress\.\*\*.*?(?=\n- |\Z)",
+                      file.read_text(), re.M | re.S)
+    if not match:
+        sys.exit(f"FAIL: {file.name} has no coordinator contract")
+    blocks.append(" ".join(match.group().split()))
+if len(set(blocks)) != 1 or len(blocks[0].split()) > 150:
+    sys.exit("FAIL: coordinator contract differs across clients or exceeds 150 words")
+
+cases = (
+    ("preparation complete with unresolved dependency is waiting, not assumed active", (
+        r"Before claiming agents are working, verify with a fresh message or existing status view",
+        r"otherwise report activity unverified",
+        r"preparation complete but waiting, blocked needing coordinator action, and complete",
+        r"Check at meaningful transitions, not on a polling schedule",
+        r"Preparation may legitimately leave agents idle; never invent busywork",
+    ), "fresh message or existing status view"),
+    ("actionable blocker is acted on and ready work resumes with safe stopping exceptions", (
+        r"Act on authorized actionable blockers and resume ready work when dependencies clear",
+        r"do not end an execution turn with either untouched",
+        r"Escalate material delays promptly with owner, impact and next safe action",
+        r"Keep decisions and messaging permissions within existing authority",
+        r"Stop when complete, genuinely externally blocked with exact state preserved, or told to stop",
+        r"Do not promise background execution the client cannot provide",
+    ), "resume ready work when dependencies clear"),
+)
+for name, obligations, removed in cases:
+    covers = lambda text: all(re.search(pattern, text) for pattern in obligations)
+    if not all(covers(block) for block in blocks) or covers(blocks[0].replace(removed, "")):
+        sys.exit(f"FAIL: {name}")
+    print(f"PASS: {name} (four clients; missing obligation rejected)")
+PY
+then
+  failures=$((failures + 1))
+fi
+
 printf '\nSESSION CONDUCT POLICY SUMMARY failures=%s\n' "$failures"
 [ "$failures" -eq 0 ]
