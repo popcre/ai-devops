@@ -125,7 +125,7 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.8-flash-high\"' '$FIXTURES/model-mismatch.json'"
-check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.7'"
+check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.6'"
 mkdir -p "$TMP/fallback-home/.local/bin"
 cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
 FALLBACK_PATH="/mingw64/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
@@ -141,9 +141,8 @@ check 'doctor rejects unknown options instead of overstating a live check' "! '$
 IDENTITY_OUT="$("$SCRIPT" doctor --identity)"
 check 'qualification identity is local and binds runtime plus configured model' "printf '%s' '$IDENTITY_OUT' | grep -Eq '^IDENTITY agy=1\\.1\\.14 agy_sha256=[0-9a-f]{64} model=gemini-3\\.8-flash-high '"
 cp "$SCRIPT" "$TMP/bin/ai-gemini-test"
-mkdir -p "$TMP/tools/lib"
+mkdir -p "$TMP/tools"
 cp "$ROOT/tools/reviewer_event_guard.sh" "$ROOT/tools/reviewer_events.py" "$ROOT/tools/reviewer_maintenance.py" "$ROOT/tools/reviewer_admission.py" "$TMP/tools/"
-cp "$ROOT/tools/lib/provider-wrapper-common.sh" "$TMP/tools/lib/"
 chmod +x "$TMP/bin/ai-gemini-test"
 SCRIPT="$TMP/bin/ai-gemini-test"
 mkdir -p "$AI_REVIEW_QUARANTINE_DIR"
@@ -194,37 +193,23 @@ set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new 'bad name!' --prompt review) 2>"$TMP/
 check 'invalid session name never auto-requalifies' "test '$BADNAME_RC' -ne 0 && grep -q 'invalid session name' '$TMP/badname.err' && ! grep -q 'requalifying automatically' '$TMP/badname.err' && test ! -s '$MOCK_AGY_CALLS'"
 set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new misspf --prompt-file /nonexistent) 2>"$TMP/misspf.err"; MISSPF_RC=$?; set -e
 check 'missing prompt file never auto-requalifies' "test '$MISSPF_RC' -ne 0 && grep -q 'prompt file not found' '$TMP/misspf.err' && ! grep -q 'requalifying automatically' '$TMP/misspf.err' && test ! -s '$MOCK_AGY_CALLS'"
-# Session shape is validated before paid requalification: ask needs an
-# existing session, new refuses a duplicate, and a non-repo cwd dies first.
+# Codex 2026-10-06: these remaining invalid requests must also die before
+# auto_requalify can spend live qualification allowance.
 write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
-set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask nosuch --prompt review) 2>"$TMP/askmiss.err"; ASKMISS_RC=$?; set -e
-check 'ask missing session never auto-requalifies' "test '$ASKMISS_RC' -ne 0 && grep -q 'session not found' '$TMP/askmiss.err' && ! grep -q 'requalifying automatically' '$TMP/askmiss.err' && test ! -s '$MOCK_AGY_CALLS'"
-set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new autoq --prompt review) 2>"$TMP/newdup.err"; NEWDUP_RC=$?; set -e
-check 'new duplicate session never auto-requalifies' "test '$NEWDUP_RC' -ne 0 && grep -q 'session already exists' '$TMP/newdup.err' && ! grep -q 'requalifying automatically' '$TMP/newdup.err' && test ! -s '$MOCK_AGY_CALLS'"
-set +e; (cd "$TMP" && "$SCRIPT" new norepo --prompt review) 2>"$TMP/norepo.err"; NORREPO_RC=$?; set -e
-check 'non-repo cwd never auto-requalifies' "test '$NORREPO_RC' -ne 0 && grep -q 'Git repository' '$TMP/norepo.err' && ! grep -q 'requalifying automatically' '$TMP/norepo.err' && test ! -s '$MOCK_AGY_CALLS'"
-# Governed SHA, base/assert refs, and reusable-session state also die before
-# paid requalification.
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new --governed-verdict not-a-sha badsha --prompt review) 2>"$TMP/badsha.err"; BADSHA_RC=$?; set -e
+check 'invalid governed SHA never auto-requalifies' "test '$BADSHA_RC' -ne 0 && grep -q '40-character commit SHA' '$TMP/badsha.err' && ! grep -q 'requalifying automatically' '$TMP/badsha.err' && test ! -s '$MOCK_AGY_CALLS'"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new badassert --assert-head zzzz --prompt review) 2>"$TMP/badassert.err"; BADASSERT_RC=$?; set -e
+check 'invalid assert-head never auto-requalifies' "test '$BADASSERT_RC' -ne 0 && grep -q 'assert head' '$TMP/badassert.err' && ! grep -q 'requalifying automatically' '$TMP/badassert.err' && test ! -s '$MOCK_AGY_CALLS'"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask missing-session --prompt review) 2>"$TMP/missask.err"; MISSASK_RC=$?; set -e
+check 'missing session ask never auto-requalifies' "test '$MISSASK_RC' -ne 0 && grep -q 'session not found' '$TMP/missask.err' && ! grep -q 'requalifying automatically' '$TMP/missask.err' && test ! -s '$MOCK_AGY_CALLS'"
+# duplicate-new: create one session under a matching qualification, then a
+# second new of the same name (with runtime drift that would auto-requalify)
+# must die before auto_requalify.
+write_qualification 1.1.14
+new_run "$AUTOQ_REPO" dupsrc normal >/dev/null
 write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
-set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new --governed-verdict notasha badsha --prompt review) 2>"$TMP/badsha.err"; BADSHA_RC=$?; set -e
-check 'bad governed SHA never auto-requalifies' "test '$BADSHA_RC' -ne 0 && grep -q 'governed verdict head' '$TMP/badsha.err' && ! grep -q 'requalifying automatically' '$TMP/badsha.err' && test ! -s '$MOCK_AGY_CALLS'"
-set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new badbase --base nosuchref --prompt review) 2>"$TMP/badbase.err"; BADBASE_RC=$?; set -e
-check 'bad base ref never auto-requalifies' "test '$BADBASE_RC' -ne 0 && grep -q 'base ref not found' '$TMP/badbase.err' && ! grep -q 'requalifying automatically' '$TMP/badbase.err' && test ! -s '$MOCK_AGY_CALLS'"
-# Force incomplete reusable-session state so the pre-check, not paid
-# requalification, rejects the follow-up.
-AUTOQ_META="$(meta_for autoq)"
-jq '.status="PREPARED"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
-write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
-set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askstale.err"; ASKSTALE_RC=$?; set -e
-check 'ask incomplete/stale session never auto-requalifies' "test '$ASKSTALE_RC' -ne 0 && grep -q 'session requires recovery' '$TMP/askstale.err' && ! grep -q 'requalifying automatically' '$TMP/askstale.err' && test ! -s '$MOCK_AGY_CALLS'"
-# Restore COMPLETE then force session-model mismatch (session .model, not
-# the qualification record) on the same reusable session.
-jq '.status="COMPLETE"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
-jq '.model="gemini-other-model"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
-write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
-set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask autoq --prompt review) 2>"$TMP/askmodel.err"; ASKMODEL_RC=$?; set -e
-check 'ask model-mismatched session never auto-requalifies' "test '$ASKMODEL_RC' -ne 0 && grep -q 'configured model differs' '$TMP/askmodel.err' && ! grep -q 'requalifying automatically' '$TMP/askmodel.err' && test ! -s '$MOCK_AGY_CALLS'"
-jq '.model="gemini-3.8-flash-high"' "$AUTOQ_META" > "$AUTOQ_META.tmp" && mv "$AUTOQ_META.tmp" "$AUTOQ_META"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new dupsrc --prompt review) 2>"$TMP/dupsrc.err"; DUPSRC_RC=$?; set -e
+check 'duplicate new never auto-requalifies' "test '$DUPSRC_RC' -ne 0 && grep -q 'session already exists' '$TMP/dupsrc.err' && ! grep -q 'requalifying automatically' '$TMP/dupsrc.err' && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification
 
 echo '== byte identity and exact identity gates'
@@ -263,12 +248,13 @@ R3J="$TMP/repo3j"; make_repo "$R3J"; printf '/.tmp-*\n' >> "$R3J/.gitignore"; gi
 check 'untracked root .tmp-* scratch churn is tolerated' "new_run '$R3J' protected-root-tmp mutate-protected-root-tmp"
 check 'a tracked root .tmp-* file stays protected' "! new_run '$R3J' protected-tracked-tmp mutate-protected-tracked-tmp"
 check 'a .tmp-* file below the root stays protected' "! new_run '$R3J' protected-deep-tmp mutate-protected-deep-tmp"
-GH=1111111111111111111111111111111111111111
 RG="$TMP/repo-gov"; make_repo "$RG"
+GH="$(git -C "$RG" rev-parse HEAD)"
 gov_run(){ (cd "$RG" && MOCK_MODE="$2" "$SCRIPT" new --governed-verdict "$GH" "$1" --prompt review); }
 check 'governed mode emits the terminal verdict on standard output' "gov_run govok governed | tail -1 | grep -qx 'VERDICT: APPROVE $GH'"
 check 'governed mode rejects the non-governed heading verdict' "! gov_run govbad governed-heading"
 check 'governed mode refuses a malformed head SHA' "! (cd '$RG' && MOCK_MODE=governed '$SCRIPT' new --governed-verdict not-a-sha govsha --prompt review)"
+check 'governed mode refuses a SHA that is not the reviewed HEAD' "! (cd '$RG' && MOCK_MODE=governed '$SCRIPT' new --governed-verdict 1111111111111111111111111111111111111111 govother --prompt review)"
 # #821: ai-review-pool judges the verdict on the runner's STDOUT, so its pool
 # contract must put the model body there (and the PASS chrome on stderr).
 RP="$TMP/repo-pool"; make_repo "$RP"
@@ -438,15 +424,9 @@ check 'a stalled ask() identity resolve fails in time and names the bound' "test
 set +e; REFUSE_OUT="$(cd "$SLOW_ASK" && "$SCRIPT" new refused --assert-head 0000000000000000000000000000000000000000 --prompt review 2>&1)"; set -e
 check 'a genuine identity refusal is not worded as a timeout' "printf '%s' '$REFUSE_OUT' | grep -q 'source identity refused' && ! printf '%s' '$REFUSE_OUT' | grep -qiE 'timed out|deadline|time limit'"
 R7="$TMP/repo7"; make_repo "$R7"; new_run "$R7" stale normal >/dev/null; printf next >> "$R7/file.txt"; git -C "$R7" add file.txt; git -C "$R7" commit -qm next
-# Keep qualification current so the follow-up reaches ask_existing (and begin)
-# instead of dying in guard_quarantine before recovery can be recorded.
-write_qualification; : > "$MOCK_AGY_CALLS"
-set +e; (cd "$R7" && "$SCRIPT" ask stale --prompt later) 2>"$TMP/stalehead.err"; STALEHEAD_RC=$?; set -e
-check 'follow-up refuses a changed repository head' "test '$STALEHEAD_RC' -ne 0"
-check 'changed-head follow-up never auto-requalifies' "! grep -q 'requalifying automatically' '$TMP/stalehead.err' && test ! -s '$MOCK_AGY_CALLS'"
+check 'follow-up refuses a changed repository head' "! (cd '$R7' && '$SCRIPT' ask stale --prompt later)"
 check 'stale-head refusal becomes recovery-required' "test \"\$(jq -r .status \"\$(meta_for stale)\")\" = RECOVERY_REQUIRED"
 check 'delete refuses uncertain evidence' "! (cd '$R7' && '$SCRIPT' delete stale)"
-write_qualification
 
 R8="$TMP/repo8"; make_repo "$R8"; new_run "$R8" source-tracked normal >/dev/null; printf changed >> "$R8/file.txt"; SOURCE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
 check 'follow-up refuses uncommitted tracked source drift' "! (cd '$R8' && '$SCRIPT' ask source-tracked --prompt later) && test '$SOURCE_CALLS' -eq \"\$(wc -l < '$MOCK_AGY_CALLS')\""

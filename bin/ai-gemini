@@ -46,37 +46,15 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   reviewer_event_guard gemini "$_AI_EVENT_SELF" "$@"
   unset _AI_EVENT_SELF
 fi
-VERSION=0.2.7
+VERSION=0.2.6
 QUALIFICATION_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
-# Caller identity: explicit AI_GEMINI_CALLER wins; otherwise the harness is
-# detected (mimo/claude/codex/zcode). Never default to a wrong engine name —
-# independence recording keys off this value. Fail closed when unknown.
-# Help/usage/version never start a review and need no caller identity.
-source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
-CALLER=''
-case "${1:-}" in
-  --version|-h|--help|help) : ;;
-  *)
-    caller_rc=0
-    CALLER="$(provider_wrapper_resolve_caller "${AI_GEMINI_CALLER:-}")" || caller_rc=$?
-    if [ "$caller_rc" -ne 0 ]; then
-      if [ "$caller_rc" -eq 2 ]; then
-        printf 'ai-gemini: error: caller name %s is not path-safe (letters, digits, . _ - only; no leading dot).\n' "${AI_GEMINI_CALLER:-<empty>}" >&2
-      else
-        printf '%s\n' \
-          'ai-gemini: error: caller_identity_missing; Gemini did not start.' \
-          '  The assistant running this review could not be detected.' \
-          '  Set AI_GEMINI_CALLER to the assistant, then rerun:' \
-          '    export AI_GEMINI_CALLER=mimo   # or: claude, codex, zcode' \
-          '    AI_GEMINI_CALLER=mimo ai-gemini doctor' >&2
-      fi
-      exit 2
-    fi
-    ;;
-esac
+CALLER="${AI_GEMINI_CALLER:-codex}"
+case "$CALLER" in ''|.*|*[!A-Za-z0-9._-]*) printf 'ai-gemini: error: caller name %s is not path-safe (letters, digits, . _ - only; no leading dot).
+' "${CALLER:-<empty>}" >&2; exit 2;; esac
 MODEL="${AI_GEMINI_MODEL:-gemini-3.8-flash-high}"
 GOVERNED_HEAD=''
+GOVERNED_HEAD_PENDING=''
 TIMEOUT="${AI_GEMINI_PRINT_TIMEOUT:-10m}"
 # Bound every prepare-phase pass before a session exists. The sandbox, packet,
 # and inventory steps below walk or copy the whole tree. A stall must die in
@@ -154,7 +132,9 @@ record_qualification(){
   chmod 700 "$QUALIFICATION_DIR" 2>/dev/null || true
   w="$(sha256sum "${BASH_SOURCE[0]}" | awk '{print $1}')" || return 1
   av="$("$a" --version)" || return 1
+  [ -n "$av" ] || return 1
   as="$(sha256sum < "$a" | awk '{print $1}')" || return 1
+  [ -n "$as" ] || return 1
   m="$MODEL"
   e="$(date -u +%s)"
   new_version="$(jq -nc --arg w "$w" --arg av "$av" --arg as "$as" --arg m "$m" --argjson e "$e" \
@@ -219,100 +199,87 @@ auto_requalify(){
   a="$(raw_agy 2>/dev/null)" && timeout "${AI_GEMINI_VERSION_TIMEOUT:-30}s" "$a" --version >/dev/null 2>&1 || return 0
   self="$(readlink -f "${BASH_SOURCE[0]}")"
   printf 'ai-gemini: agy runtime changed since the last live qualification; requalifying automatically\n' >&2
-  ( cd / && AI_GEMINI_AUTO_REQUALIFY=0 "$self" qualify-live ) >&2 || { printf 'ai-gemini: automatic live requalification failed; quarantine kept\n' >&2; return 0; }
+  ( cd / && AI_GEMINI_AUTO_REQUALIFY=0 "$self" qualify-live ) >&2 || die 'automatic live requalification failed; quarantine kept'
   live_qualified && QUARANTINED=0
+  [ "$QUARANTINED" -eq 0 ] || die 'automatic live requalification did not clear quarantine'
   return 0
 }
-require_local_runtime(){ local a; a="$(agy)"; timeout 30s "$a" --version >/dev/null 2>&1 || die 'local_dependency_unavailable: the LOCAL agy runtime cannot start or its version probe timed out. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
+require_local_runtime(){ local a; a="$(raw_agy)"; timeout 30s "$a" --version >/dev/null 2>&1 || die 'local_dependency_unavailable: the LOCAL agy runtime cannot start or its version probe timed out. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 request(){ if [ "${1:-}" = --prompt ]; then printf %s "${2:-}"; elif [ "${1:-}" = --prompt-file ]; then [ -f "${2:-}" ] || die 'prompt file not found'; cat "$2"; elif [ ! -t 0 ]; then cat; else die 'provide --prompt, --prompt-file, or standard input'; fi; }
-# validate_request_source: non-consuming pre-check of the request shape so an
-# invalid request dies before auto_requalify can spend live qualification
-# allowance or change qualification state. Covers command, governed SHA,
-# base/assert refs, session name, prompt source, repository location, and
-# session uniqueness/existence. Reusable-session state is checked inside
-# ask_existing before auto_requalify runs. Never reads stdin.
+# validate_request_source: non-consuming pre-check of the session name, prompt
+# source, governed SHA, head/base pins, and session existence so an invalid
+# request dies before auto_requalify can spend live qualification allowance or
+# change qualification state. Never reads stdin.
 validate_request_source(){
-  local cmd="${1:-}"
-  local -a args=("$@") i n r id m frozen_model gov_sha=""
-  # --governed-verdict may appear before the session name (usage order).
-  i=1
-  while [ "$i" -lt "${#args[@]}" ]; do
-    if [ "${args[i]:-}" = --governed-verdict ]; then
-      gov_sha="${args[i+1]:-}"
-      break
-    fi
-    i=$((i+1))
-  done
-  if [ -n "$gov_sha" ]; then
-    case "$gov_sha" in
+  local cmd="${1:-}" idx=1 n r id m
+  local -a args=("$@")
+  if [ "${args[idx]:-}" = --governed-verdict ]; then
+    [ $((idx+1)) -lt "${#args[@]}" ] || die 'governed verdict head must be a 40-character commit SHA'
+    case "${args[idx+1]}" in
       ????????????????????????????????????????) : ;;
-      *) die 'governed verdict head must be a 40-character commit SHA';;
+      *) die 'governed verdict head must be a 40-character commit SHA' ;;
     esac
-    case "$gov_sha" in
-      *[!0-9a-f]*) die 'governed verdict head must be a 40-character commit SHA';;
-    esac
+    case "${args[idx+1]}" in *[!0-9a-f]*) die 'governed verdict head must be a 40-character commit SHA' ;; esac
+    GOVERNED_HEAD_PENDING="${args[idx+1]}"
+    idx=$((idx+2))
+  else
+    GOVERNED_HEAD_PENDING=''
   fi
-  # --base / --assert-head are already parsed into OPT_BASE / OPT_ASSERT_HEAD.
-  if [ -n "${OPT_BASE:-}" ]; then
-    git rev-parse --verify --quiet "${OPT_BASE}^{commit}" >/dev/null 2>&1 \
-      || die "base ref not found: $OPT_BASE"
-  fi
-  if [ -n "${OPT_ASSERT_HEAD:-}" ]; then
-    case "$OPT_ASSERT_HEAD" in
-      ????????????????????????????????????????) : ;;
-      *) die 'asserted head must be a 40-character commit SHA';;
-    esac
-    case "$OPT_ASSERT_HEAD" in
-      *[!0-9a-f]*) die 'asserted head must be a 40-character commit SHA';;
-    esac
-  fi
-  n=""
-  i=1
-  while [ "$i" -lt "${#args[@]}" ]; do
-    case "${args[i]:-}" in
-      --governed-verdict) i=$((i+2)); continue;;
-      --base|--assert-head) i=$((i+2)); continue;;
-      --prompt|--prompt-file) break;;
-      -*) die "unknown option: ${args[i]}";;
-      *) n="${args[i]}"; i=$((i+1)); break;;
-    esac
-    i=$((i+1))
-  done
+  n="${args[idx]:-}"
   name_ok "$n" || die 'invalid session name'
-  case "${args[i]:-}" in
+  idx=$((idx+1))
+  case "${args[idx]:-}" in
     --prompt)
-      [ $((i+1)) -lt "${#args[@]}" ] || die '--prompt requires a value.';;
+      [ $((idx+1)) -lt "${#args[@]}" ] || die '--prompt requires a value.';;
     --prompt-file)
-      [ $((i+1)) -lt "${#args[@]}" ] || die '--prompt-file requires a value.'
-      [ -f "${args[i+1]}" ] || die 'prompt file not found';;
+      [ $((idx+1)) -lt "${#args[@]}" ] || die '--prompt-file requires a value.'
+      [ -f "${args[idx+1]}" ] || die 'prompt file not found';;
     *)
       [ ! -t 0 ] || die 'provide --prompt, --prompt-file, or standard input';;
   esac
-  r="$(root)"
+  if [ -n "$OPT_ASSERT_HEAD" ]; then
+    case "$OPT_ASSERT_HEAD" in
+      ????????????????????????????????????????) : ;;
+      *) die 'assert head must be a 40-character commit SHA' ;;
+    esac
+    case "$OPT_ASSERT_HEAD" in *[!0-9a-f]*) die 'assert head must be a 40-character commit SHA' ;; esac
+  fi
+  if [ -n "$OPT_BASE" ]; then
+    git rev-parse --verify --quiet "${OPT_BASE}^{commit}" >/dev/null 2>&1 || die 'source identity refused before snapshot creation'
+  fi
+  r="$(root)" || die 'run inside a Git repository'
   id="$(rid "$r")"
   m="$(meta "$id" "$n")"
-  case "$cmd" in
-    new)
-      [ ! -e "$m" ] || die 'session already exists'
-      # Unresolvable assert-head must reach packet identity refusal, not
-      # paid requalification. Skip requalify; new() emits the real error.
-      if [ -n "${OPT_ASSERT_HEAD:-}" ]; then
-        git rev-parse --verify --quiet "${OPT_ASSERT_HEAD}^{commit}" >/dev/null 2>&1 \
-          || SKIP_AUTO_REQUALIFY=1
-      fi
-      ;;
-    ask)
-      [ -f "$m" ] || die 'session not found'
-      [ "$(jq -r .status "$m" 2>/dev/null)" = COMPLETE ] || die 'session requires recovery before reuse'
-      frozen_model="$(jq -r '.model // empty' "$m")"
-      [ -n "$frozen_model" ] && [ "$MODEL" = "$frozen_model" ] || die 'configured model differs from this session; restore the frozen model or start a new review'
-      # Changed head must reach ask_existing after begin() so on_exit marks
-      # RECOVERY_REQUIRED. Skip requalify; do not die here.
-      if [ "$(git -C "$r" rev-parse HEAD)" != "$(jq -r .head "$m")" ]; then
-        SKIP_AUTO_REQUALIFY=1
-      fi
-      ;;
-  esac
+  local head
+  head="$(git -C "$r" rev-parse --verify HEAD^{commit} 2>/dev/null)" || die 'source identity refused before snapshot creation'
+  if [ -n "$OPT_ASSERT_HEAD" ] && [ "$OPT_ASSERT_HEAD" != "$head" ]; then
+    die 'source identity refused before snapshot creation'
+  fi
+  if [ -n "${GOVERNED_HEAD_PENDING:-}" ]; then
+    [ "$GOVERNED_HEAD_PENDING" = "$head" ] || die 'governed verdict head must match the reviewed HEAD'
+  fi
+  if [ "$cmd" = new ]; then
+    [ ! -e "$m" ] || die 'session already exists'
+  else
+    [ -f "$m" ] || die 'session not found'
+    jq -e 'type=="object" and (.status|type=="string") and ((.review_dir // "")|type=="string") and ((.sandbox_tag // "")|type=="string")' "$m" >/dev/null 2>&1 || die 'session requires recovery before reuse'
+    [ "$(jq -r .status "$m" 2>/dev/null)" = COMPLETE ] || die 'session requires recovery before reuse'
+    local frozen_model frozen_head
+    frozen_model="$(jq -r '.model // empty' "$m" 2>/dev/null)"
+    [ -z "$frozen_model" ] || [ "$MODEL" = "$frozen_model" ] || die 'configured model differs from this session; restore the frozen model or start a new review'
+    frozen_head="$(jq -r '.head // empty' "$m" 2>/dev/null)"
+    if [ -n "$frozen_head" ]; then
+      case "$frozen_head" in
+        ????????????????????????????????????????) : ;;
+        *) die 'session requires recovery before reuse' ;;
+      esac
+      case "$frozen_head" in *[!0-9a-f]*) die 'session requires recovery before reuse' ;; esac
+      [ "$frozen_head" = "$head" ] || die 'working checkout changed; start a new review'
+    fi
+    if [ -n "${GOVERNED_HEAD_PENDING:-}" ]; then
+      [ -z "$frozen_head" ] || [ "$GOVERNED_HEAD_PENDING" = "$frozen_head" ] || die 'governed verdict head must match the reviewed HEAD'
+    fi
+  fi
 }
 write(){ local f="$1" j="$2" t; mkdir -p "$(dirname "$f")"; t="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"; printf '%s\n' "$j" > "$t"; mv -f "$t" "$f"; }
 update_state(){ local f="$1" status="$2" detail="${3:-}" j; j="$(jq -c --arg s "$status" --arg d "$detail" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status=$s | .status_detail=$d | .updated_at=$t' "$f")" || die 'invalid session metadata'; write "$f" "$j"; }
@@ -597,8 +564,8 @@ finish(){
   timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$("$PACKET" path "$directory" "$tag")" >/dev/null || { rc=$?; [ "$rc" -eq 124 ] && die "final source verification timed out after $PREPARE_TIMEOUT; paid report and conversation retained"; die 'source identity changed; paid report and conversation retained'; }
   update_state "$m" COMPLETE accepted; ACTIVE_TERMINAL=1; release_locks; ACTIVE_META=''
 }
-new(){ local n="${1:-}" r id m tag d p q out c h ph tree source_tree rep now identity rc; guard_quarantine; shift || true; name_ok "$n" || die 'invalid session name'; require_local_runtime; r="$(root)"; id="$(rid "$r")"; tag="$(sandbox_tag "$id" "$n")" || exit 1; tag_ok "$tag" || die "internal error: derived sandbox tag is ${#tag} characters"; m="$(meta "$id" "$n")"; identity="$(mktemp)" || die 'cannot reserve source identity'; timeout "$PREPARE_TIMEOUT" "$PACKET" resolve "$r" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" || { rc=$?; rm -f "$identity"; [ "$rc" -eq 124 ] && die "source identity resolution timed out after $PREPARE_TIMEOUT before snapshot creation"; die 'source identity refused before snapshot creation'; }; begin_new "$m" "$(lock_path "session-$id-$CALLER-$n")"; d="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" timeout "$PREPARE_TIMEOUT" "$SANDBOX" ensure-copy "$r" "$tag")" || prep_die $? 'source snapshot build' 'no review session was started'; p="$(timeout "$PREPARE_TIMEOUT" "$PACKET" build "$d" "$tag" --identity "$identity")" || { rc=$?; rm -f "$identity"; prep_die "$rc" 'source packet build'; }; timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$p" --identity "$identity" >/dev/null || { rc=$?; rm -f "$identity"; prep_die "$rc" 'source packet verification'; }; rm -f "$identity"; h="$(git -C "$d" rev-parse HEAD)"; ph="$(cat "$p/MANIFEST.sha256")"; tree="$(bounded_inventory "$d")" || prep_die $? 'review copy inventory' 'no review session was started'; source_tree="$(bounded_source_inventory "$r")" || prep_die $? 'source inventory' 'no review session was started'; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; write "$m" "$(jq -nc --arg name "$n" --arg caller "$CALLER" --arg root "$r" --arg dir "$d" --arg tag "$tag" --arg model "$MODEL" --arg head "$h" --arg packet "$ph" --arg tree "$tree" --arg source_tree "$source_tree" --arg now "$now" '{name:$name,caller:$caller,repository_root:$root,review_dir:$dir,sandbox_tag:$tag,conversation_id:null,model:$model,head:$head,packet_sha256:$packet,review_tree_sha256:$tree,source_tree_sha256:$source_tree,status:"PREPARED",created_at:$now,updated_at:$now}')"; update_state "$m" RUNNING 'provider request in progress'; q="$(brief "$(request "$@")" "$(basename "$p")")"; out="$(mktemp)"; call "$d" "$r" '' "$q" "$out"; verify_turn "$out"; timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$p" >/dev/null || die 'evidence packet changed during the review turn; evidence preserved for recovery'; c="$(jq -r .conversation_id "$out")"; update_state "$m" VERIFYING 'turn returned; checking exact model and report'; write "$m" "$(jq -c --arg c "$c" '.conversation_id=$c' "$m")"; verify_model "$d" "$r" "$c" "$out.model"; rep="$(report "$r" "$n" "$m" "$out")"; [ -n "$rep" ] || die 'report path was empty; refusing an empty PASS'; finish "$m"; if [ -n "$GOVERNED_HEAD" ]; then jq -r .response "$out"; elif [ "${AI_GEMINI_BODY_STDOUT:-0}" = 1 ]; then jq -r .response "$out"; printf 'PASS session=%s report=%s\n' "$n" "$rep" >&2; else printf 'PASS session=%s report=%s\n' "$n" "$rep"; fi; rm -f "$out" "$out.stderr" "$out.model" "$out.model.stderr"; }
-ask_existing(){ local n="${1:-}" r id m d c q out rep actual tag frozen_model expected_tree expected_source actual_source actual_tree; guard_quarantine; shift || true; name_ok "$n" || die 'invalid session name'; require_local_runtime; r="$(root)"; id="$(rid "$r")"; m="$(meta "$id" "$n")"; [ -f "$m" ] || die 'session not found'; [ "$(jq -r .status "$m")" = COMPLETE ] || die 'session requires recovery before reuse'; frozen_model="$(jq -r '.model // empty' "$m")"; [ -n "$frozen_model" ] && [ "$MODEL" = "$frozen_model" ] || die 'configured model differs from this session; restore the frozen model or start a new review'; begin "$m" "$(lock_path "session-$id-$CALLER-$n")"; d="$(jq -r .review_dir "$m")"; c="$(jq -r .conversation_id "$m")"; actual="$(git -C "$r" rev-parse HEAD)"; [ "$actual" = "$(jq -r .head "$m")" ] || die 'working checkout changed; start a new review'; expected_source="$(jq -r '.source_tree_sha256 // empty' "$m")"; if [ -n "$expected_source" ]; then actual_source="$(bounded_source_inventory "$r")" || prep_die $? 'source inventory' 'session left for recovery'; [ "$actual_source" = "$expected_source" ] || die 'working checkout files changed between turns; start a new review'; fi; expected_tree="$(jq -r '.review_tree_sha256 // empty' "$m")"; if [ -n "$expected_tree" ]; then actual_tree="$(bounded_inventory "$d")" || prep_die $? 'review copy inventory' 'session left for recovery'; [ "$actual_tree" = "$expected_tree" ] || die 'disposable review copy changed between turns; evidence preserved for recovery'; fi; tag="$(jq -r .sandbox_tag "$m")"; timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$("$PACKET" path "$d" "$tag")" >/dev/null || prep_die $? 'evidence packet verification'; update_state "$m" RUNNING 'follow-up provider request in progress'; q="$(brief "$(request "$@")" "$(basename "$("$PACKET" path "$d" "$tag")")")"; out="$(mktemp)"; call "$d" "$r" "$c" "$q" "$out"; verify_turn "$out" "$c"; update_state "$m" VERIFYING 'turn returned; checking exact model and report'; verify_model "$d" "$r" "$c" "$out.model"; rep="$(report "$r" "$n" "$m" "$out")"; [ -n "$rep" ] || die 'report path was empty; refusing an empty PASS'; finish "$m"; if [ -n "$GOVERNED_HEAD" ]; then jq -r .response "$out"; elif [ "${AI_GEMINI_BODY_STDOUT:-0}" = 1 ]; then jq -r .response "$out"; printf 'PASS session=%s report=%s\n' "$n" "$rep" >&2; else printf 'PASS session=%s report=%s\n' "$n" "$rep"; fi; rm -f "$out" "$out.stderr" "$out.model" "$out.model.stderr"; }
+new(){ local n="${1:-}" r id m tag d p q out c h ph tree source_tree rep now identity rc; shift || true; name_ok "$n" || die 'invalid session name'; require_local_runtime; r="$(root)"; id="$(rid "$r")"; tag="$(sandbox_tag "$id" "$n")" || exit 1; tag_ok "$tag" || die "internal error: derived sandbox tag is ${#tag} characters"; m="$(meta "$id" "$n")"; auto_requalify; guard_quarantine; identity="$(mktemp)" || die 'cannot reserve source identity'; timeout "$PREPARE_TIMEOUT" "$PACKET" resolve "$r" ${OPT_BASE:+--base "$OPT_BASE"} ${OPT_ASSERT_HEAD:+--assert-head "$OPT_ASSERT_HEAD"} > "$identity" || { rc=$?; rm -f "$identity"; [ "$rc" -eq 124 ] && die "source identity resolution timed out after $PREPARE_TIMEOUT before snapshot creation"; die 'source identity refused before snapshot creation'; }; if [ -n "$GOVERNED_HEAD" ]; then [ "$GOVERNED_HEAD" = "$(jq -r .head "$identity" 2>/dev/null)" ] || { rm -f "$identity"; die 'governed verdict head must match the reviewed HEAD'; }; fi; begin_new "$m" "$(lock_path "session-$id-$CALLER-$n")"; d="$(AI_REVIEW_SANDBOX_BASE="${OPT_BASE:-}" timeout "$PREPARE_TIMEOUT" "$SANDBOX" ensure-copy "$r" "$tag")" || prep_die $? 'source snapshot build' 'no review session was started'; p="$(timeout "$PREPARE_TIMEOUT" "$PACKET" build "$d" "$tag" --identity "$identity")" || { rc=$?; rm -f "$identity"; prep_die "$rc" 'source packet build'; }; timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$p" --identity "$identity" >/dev/null || { rc=$?; rm -f "$identity"; prep_die "$rc" 'source packet verification'; }; rm -f "$identity"; h="$(git -C "$d" rev-parse HEAD)"; ph="$(cat "$p/MANIFEST.sha256")"; tree="$(bounded_inventory "$d")" || prep_die $? 'review copy inventory' 'no review session was started'; source_tree="$(bounded_source_inventory "$r")" || prep_die $? 'source inventory' 'no review session was started'; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; write "$m" "$(jq -nc --arg name "$n" --arg caller "$CALLER" --arg root "$r" --arg dir "$d" --arg tag "$tag" --arg model "$MODEL" --arg head "$h" --arg packet "$ph" --arg tree "$tree" --arg source_tree "$source_tree" --arg now "$now" '{name:$name,caller:$caller,repository_root:$root,review_dir:$dir,sandbox_tag:$tag,conversation_id:null,model:$model,head:$head,packet_sha256:$packet,review_tree_sha256:$tree,source_tree_sha256:$source_tree,status:"PREPARED",created_at:$now,updated_at:$now}')"; update_state "$m" RUNNING 'provider request in progress'; q="$(brief "$(request "$@")" "$(basename "$p")")"; out="$(mktemp)"; call "$d" "$r" '' "$q" "$out"; verify_turn "$out"; timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$p" >/dev/null || die 'evidence packet changed during the review turn; evidence preserved for recovery'; c="$(jq -r .conversation_id "$out")"; update_state "$m" VERIFYING 'turn returned; checking exact model and report'; write "$m" "$(jq -c --arg c "$c" '.conversation_id=$c' "$m")"; verify_model "$d" "$r" "$c" "$out.model"; rep="$(report "$r" "$n" "$m" "$out")"; [ -n "$rep" ] || die 'report path was empty; refusing an empty PASS'; finish "$m"; if [ -n "$GOVERNED_HEAD" ]; then jq -r .response "$out"; elif [ "${AI_GEMINI_BODY_STDOUT:-0}" = 1 ]; then jq -r .response "$out"; printf 'PASS session=%s report=%s\n' "$n" "$rep" >&2; else printf 'PASS session=%s report=%s\n' "$n" "$rep"; fi; rm -f "$out" "$out.stderr" "$out.model" "$out.model.stderr"; }
+ask_existing(){ local n="${1:-}" r id m d c q out rep actual tag frozen_model expected_tree expected_source actual_source actual_tree; shift || true; name_ok "$n" || die 'invalid session name'; require_local_runtime; r="$(root)"; id="$(rid "$r")"; m="$(meta "$id" "$n")"; [ -f "$m" ] || die 'session not found'; [ "$(jq -r .status "$m")" = COMPLETE ] || die 'session requires recovery before reuse'; frozen_model="$(jq -r '.model // empty' "$m")"; [ -n "$frozen_model" ] && [ "$MODEL" = "$frozen_model" ] || die 'configured model differs from this session; restore the frozen model or start a new review'; auto_requalify; guard_quarantine; begin "$m" "$(lock_path "session-$id-$CALLER-$n")"; [ "$(jq -r .status "$m")" = COMPLETE ] || die 'session requires recovery before reuse'; frozen_model="$(jq -r '.model // empty' "$m")"; [ -z "$frozen_model" ] || [ "$MODEL" = "$frozen_model" ] || die 'configured model differs from this session; restore the frozen model or start a new review'; d="$(jq -r .review_dir "$m")"; c="$(jq -r .conversation_id "$m")"; actual="$(git -C "$r" rev-parse HEAD)"; [ "$actual" = "$(jq -r .head "$m")" ] || die 'working checkout changed; start a new review'; expected_source="$(jq -r '.source_tree_sha256 // empty' "$m")"; if [ -n "$expected_source" ]; then actual_source="$(bounded_source_inventory "$r")" || prep_die $? 'source inventory' 'session left for recovery'; [ "$actual_source" = "$expected_source" ] || die 'working checkout files changed between turns; start a new review'; fi; expected_tree="$(jq -r '.review_tree_sha256 // empty' "$m")"; if [ -n "$expected_tree" ]; then actual_tree="$(bounded_inventory "$d")" || prep_die $? 'review copy inventory' 'session left for recovery'; [ "$actual_tree" = "$expected_tree" ] || die 'disposable review copy changed between turns; evidence preserved for recovery'; fi; tag="$(jq -r .sandbox_tag "$m")"; timeout "$PREPARE_TIMEOUT" "$PACKET" verify "$("$PACKET" path "$d" "$tag")" >/dev/null || prep_die $? 'evidence packet verification'; update_state "$m" RUNNING 'follow-up provider request in progress'; q="$(brief "$(request "$@")" "$(basename "$("$PACKET" path "$d" "$tag")")")"; out="$(mktemp)"; call "$d" "$r" "$c" "$q" "$out"; verify_turn "$out" "$c"; update_state "$m" VERIFYING 'turn returned; checking exact model and report'; verify_model "$d" "$r" "$c" "$out.model"; rep="$(report "$r" "$n" "$m" "$out")"; [ -n "$rep" ] || die 'report path was empty; refusing an empty PASS'; finish "$m"; if [ -n "$GOVERNED_HEAD" ]; then jq -r .response "$out"; elif [ "${AI_GEMINI_BODY_STDOUT:-0}" = 1 ]; then jq -r .response "$out"; printf 'PASS session=%s report=%s\n' "$n" "$rep" >&2; else printf 'PASS session=%s report=%s\n' "$n" "$rep"; fi; rm -f "$out" "$out.stderr" "$out.model" "$out.model.stderr"; }
 ask(){
   local repo_path session_file packet_dir requested rc
   if [ -n "$OPT_BASE$OPT_ASSERT_HEAD" ]; then
@@ -651,6 +618,5 @@ if [ "${1:-}" = new ] || [ "${1:-}" = ask ]; then
   done
   set -- "${source_args[@]}"
 fi
-SKIP_AUTO_REQUALIFY=0
-case "${1:-}" in new|ask) validate_request_source "$@"; [ "$SKIP_AUTO_REQUALIFY" = 1 ] || auto_requalify;; esac
+case "${1:-}" in new|ask) validate_request_source "$@";; esac
 case "${1:-}" in new) take_governed "$@"; shift; [ -z "$GOVERNED_HEAD" ] || shift 2; new "$@";; ask) take_governed "$@"; shift; [ -z "$GOVERNED_HEAD" ] || shift 2; ask "$@";; list) list;; delete) shift; delete "${1:-}";; doctor) shift; QUALIFYING=1; case "${1:-}" in '') doctor ;; --identity) [ "$#" -eq 1 ] || die 'usage: ai-gemini doctor [--identity|--live]'; doctor_identity ;; --live) [ "$#" -eq 1 ] || die 'usage: ai-gemini doctor [--identity|--live]'; qualify_live ;; *) die 'usage: ai-gemini doctor [--identity|--live]' ;; esac;; qualify-live) shift; [ "$#" -eq 0 ] || die 'usage: ai-gemini qualify-live'; QUALIFYING=1; qualify_live;; --version) echo "ai-gemini $VERSION";; -h|--help|help) usage;; *) usage >&2; exit 2;; esac
