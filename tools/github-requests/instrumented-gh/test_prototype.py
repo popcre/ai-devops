@@ -10,6 +10,7 @@ import signal
 import socket
 import ssl
 import subprocess
+from sealed import verified_run
 import sys
 import threading
 import tempfile
@@ -110,7 +111,7 @@ class PrototypeTests(unittest.TestCase):
     def execute(self, kind, args, instrument=True):
         artifact = MANIFEST["artifacts"][kind]
         if not instrument:
-            result = subprocess.run([artifact["path"], *args], env=self.env, capture_output=True, timeout=20)
+            result = verified_run(artifact, args, env=self.env, capture_output=True, timeout=20)
             return result, None
         read_fd, write_fd = os.pipe()
         try:
@@ -210,8 +211,8 @@ class PrototypeTests(unittest.TestCase):
 
     def test_descendant_does_not_inherit_counter_environment(self):
         alias = '!if [ -z "${AI_GH_HTTP_COUNTER_FD+x}" ] && [ -z "${AI_GH_HTTP_COUNTER_HOST+x}" ]; then printf "CLEAR\\n"; else exit 4; fi'
-        baseline = MANIFEST["artifacts"]["baseline"]["path"]
-        configured = subprocess.run([baseline, "alias", "set", "fixture-counter-env", alias],
+        baseline = MANIFEST["artifacts"]["baseline"]
+        configured = verified_run(baseline, ["alias", "set", "fixture-counter-env", alias],
                                     env=self.env, capture_output=True, timeout=10)
         self.assertEqual(configured.returncode, 0)
         result, metadata = self.execute("instrumented", ["fixture-counter-env"])

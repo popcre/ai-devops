@@ -18,16 +18,16 @@
     "instrumented": "df8d7abb0dd57e89e19cd3e4a90e10f8a5e6270aabc167be063ca74676ca8c99"
   },
   "source_sha256": {
-    "tools/github-requests/instrumented-gh/build.py": "88f796a81d264c766eef3f7941810bc2c71733714163399c9eb39c81796f21d3",
+    "tools/github-requests/instrumented-gh/build.py": "a5051e6328ddfb18452bb2ee505ad5ec9f69e864620c7a07c138f6aa270fba7a",
     "tools/github-requests/instrumented-gh/httpcounter.go": "f335704892f503a9c25b4934b037ce35d75eb50bda71542d4796655ed6a7ad92",
     "tools/github-requests/instrumented-gh/httpcounter_test.go": "29d09f29dd6c245053fa8d1544bca41fbf6506611284be43430443e2bfd1072b",
-    "tools/github-requests/instrumented-gh/measure_overhead.py": "a7a69ad529a1df7e033c23aca29677f25f9c073a3f7069e59fd04e8dfcb6bce6",
+    "tools/github-requests/instrumented-gh/measure_overhead.py": "8bfe625a83a66bfd87b68baca3ad74a35493592a6086b03a677669d071ed5b88",
     "tools/github-requests/instrumented-gh/pins.json": "ec449947123011e52e77cf26dc595ffe91e3210e1c691aca9e8b54c973e1e9ab",
     "tools/github-requests/instrumented-gh/run.py": "7c71b87e32833cfc57538d92eff3347e4b53347ef31a61e44c5fe41ca1b4353a",
-    "tools/github-requests/instrumented-gh/sealed.py": "f3df156c5d9c3cc5f77409f3d2323e028708e6fe81595f1019a33fdb408a298a",
+    "tools/github-requests/instrumented-gh/sealed.py": "8fdc1e3437d14a1324d36da73b46873b49829be552bba3add70a5b52239690ee",
     "tools/github-requests/instrumented-gh/test_offline.py": "bb19e3c5760e2c3c6985a07b360855e778ad4cea88396bdd8fce4485308cd387",
-    "tools/github-requests/instrumented-gh/test_prototype.py": "08a8e8a44b63756406b22890d1962660834bab7bcdd84f9c776ca733663ceffc",
-    "tools/github-requests/instrumented-gh/test_sealed.py": "6609b1163d152d1d0b638c83faed6237a14bd72da199e7190d9f7d07f4725b35"
+    "tools/github-requests/instrumented-gh/test_prototype.py": "cd812046d07f2be748ff0479cc11af5fabfa9f6ed92920073cbb4f0496f3ec42",
+    "tools/github-requests/instrumented-gh/test_sealed.py": "e7d77f656f71f84e147e74122ff8380891d10d8de23aa841fe03115fe69ce26e"
   },
   "proof": {
     "offline_metadata_cases": 4,
@@ -182,5 +182,76 @@
     "fresh_build_from_sealed_archives": "PASS",
     "prior_binary_hashes_unchanged": true,
     "independent_review": "pending on repaired exact head"
+  },
+  "sealed_execution_measurement": {
+    "platform": "linux-amd64",
+    "paired_outcomes": 20,
+    "p95_ms": {
+      "baseline": 125.68344897590578,
+      "instrumented": 128.92499001463875
+    },
+    "p95_overhead_percent": 2.5791311943980766,
+    "passes_5_percent": true,
+    "scope": "paired sealed verified binary/hash/private-pipe local fixture; excludes installed workflow",
+    "samples_ms": {
+      "baseline": [
+        120.7851690123789,
+        123.35704400902614,
+        123.32882400369272,
+        120.49278902122751,
+        122.78862099628896,
+        122.48000700492412,
+        118.91322798328474,
+        120.51840499043465,
+        116.11987301148474,
+        116.43194599309936,
+        118.83982800645754,
+        116.03584501426667,
+        125.67295704502612,
+        125.68344897590578,
+        119.84648503130302,
+        120.44840300222859,
+        118.626179988496,
+        119.2331140046008,
+        126.84318202082068,
+        121.06186599703506
+      ],
+      "instrumented": [
+        118.67652897490188,
+        121.53000698890537,
+        130.43209997704253,
+        116.25031003495678,
+        121.47170299431309,
+        122.8799149976112,
+        121.39524705708027,
+        124.05655003385618,
+        118.14595101168379,
+        116.89701199065894,
+        128.92499001463875,
+        115.01948500517756,
+        123.77608800306916,
+        119.05371298780665,
+        125.47115597408265,
+        119.94312895694748,
+        125.39676600135863,
+        122.18027701601386,
+        124.68998500844464,
+        127.9554390348494
+      ]
+    }
+  },
+  "second_valid_reject_repair": {
+    "reviewed_head": "4d2d8a2f41d0c35f395600d4ee0e67ee28c4299b",
+    "incident_id": "20261007T145428Z-edge-dev3-codex-2728588",
+    "classification": "valid code-defect REJECT",
+    "adversarial_boundary_cases": 8,
+    "offline_metadata_cases": 4,
+    "fresh_cli_cases": 9,
+    "fresh_go_race": "PASS",
+    "fixture_measurement_artifact_execution": "same sealed verified bytes",
+    "build_output": "trusted no-follow ancestry plus retained descriptor",
+    "go_environment": "private HOME, GOENV=off, fixed PATH, GOTOOLCHAIN=local; flags and checksum overrides excluded",
+    "independent_review": "pending exact repaired head",
+    "historical_distributions": "retained; earlier unsealed fixture paths are not accepted qualification"
   }
 }
