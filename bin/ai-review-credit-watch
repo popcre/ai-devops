@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Thin cross-platform entrypoint; ai-local-watch owns the only schedule.
+set -euo pipefail
+SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+case "${OSTYPE:-}" in
+  msys*|cygwin*)
+    export AI_REVIEW_CREDIT_WATCH_BASH="$(cygpath -w "$BASH")"
+    ;;
+esac
+if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+  exec python3 "$ROOT/tools/reviewer_credit_watch.py" "$@"
+elif command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+  exec python "$ROOT/tools/reviewer_credit_watch.py" "$@"
+fi
+printf 'credit-watch: Python runtime unavailable\n' >&2
+exit 1

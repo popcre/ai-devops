@@ -162,13 +162,20 @@ printf '%s\n' "$*" >> "$GH_LOG"
 case "${FAKE_VISIBILITY:-}" in true|false) printf '%s\n' "$FAKE_VISIBILITY" ;; *) exit 1 ;; esac
 GH
 chmod +x "$TMP/fake-gh"
+# The hub was built by sync_a with core.autocrlf=true (a Windows machine), so
+# its CRLF working files match LF blobs only under that same setting. Without
+# it, Git's racy-index content check (same-second mtime) intermittently sees a
+# CRLF diff and the proof would commit a spurious change. Keep one machine's
+# Git configuration consistent across both syncs.
 private_sync() {
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true \
   HOME="$HOME_A" CLAUDE_HOME="$CLAUDE_A" \
   AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=0 \
   AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_REMOTE="$REMOTE" \
   AI_MEMORY_HUB="$HUB_A" AI_MEMORY_LOG="$LOG_A" \
   AI_GH_REAL_GH="$TMP/fake-gh" AI_GH_STATE_DIR="$TMP/gh-state" \
   AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true \
   GH_LOG="$TMP/gh.log" FAKE_VISIBILITY="$1" \
     bash "$ROOT/bin/ai-memory-sync" sync
 }

@@ -52,13 +52,16 @@ def safe_id(value):
     return value
 
 
-def physical(path):
+def physical(path, *, conversion_timeout=None):
     """Reject links/junctions in every component, including configured roots."""
     text = str(path).replace("\\", "/")
     if os.name == "nt" and text.startswith("/") and not text.startswith("//"):
-        converted = subprocess.run(["cygpath", "-w", text], capture_output=True, text=True)
+        converted = subprocess.run(["cygpath", "-w", text], capture_output=True, text=True,
+                                   timeout=conversion_timeout)
         require(converted.returncode == 0, "cannot normalize Git Bash path")
         path = converted.stdout.strip()
+        if conversion_timeout is not None:
+            require(bool(path) and Path(path).is_absolute(), "nonabsolute Git Bash conversion")
     path = Path(os.path.abspath(path))
     for part in [*reversed(path.parents), path]:
         if part.exists() or part.is_symlink():

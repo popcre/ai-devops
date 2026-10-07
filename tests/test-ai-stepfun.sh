@@ -279,6 +279,7 @@ fi
 echo '== ai-stepfun OpenCode engine'
 # StepFun: Ubuntu/Linux (bubblewrap) or Windows (folder + test shell, 2026-09-30).
 export AI_STEPFUN_ENGINE=opencode AI_STEPFUN_OPENCODE="$TMP/bin/opencode"
+check "StepFun keeps its qualified compaction settings" "jq -e '.compaction == {auto:true,prune:false,tail_turns:8,reserved:32768}' '$ROOT/config/opencode-stepfun/opencode.json' >/dev/null"
 check "macOS and unknown systems are refused" "for plat in Darwin FreeBSD; do out=\$(AI_STEPFUN_PLATFORM=\$plat '$SCRIPT' doctor 2>&1); [ \$? = 2 ] && printf '%s' \"\$out\" | grep -q unsupported-platform || exit 1; done"
 check "Windows is allowed with OpenCode (folder + test shell)" "out=\$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 '$SCRIPT' doctor 2>&1); printf '%s' \"\$out\" | grep -q 'OK engine=opencode'"
 # Regression (#1266 residual): jq.exe on Windows ends every -r line with CRLF.
@@ -300,21 +301,38 @@ SHIM
 chmod +x "$crlf_bin/jq"
 printf '{"a":"b"}\n' | "$crlf_bin/jq" -r .a | od -c | grep -q '\\r' \
   || { echo 'FAIL crlf jq shim does not emit CR'; FAIL=$((FAIL+1)); }
-# Only reproducible on a real Windows host: a forced platform on a non-Windows
-# uname skips provisioning (the CI stub path).
+# A forced Windows platform with an explicit test allowlist exercises the same
+# verification path on Linux; the default forced-platform CI stub still skips
+# provisioning when no allowlist path was supplied.
+runners='{}'
+for runner in ls cat head grep bash sh; do
+  runner_path="$(readlink -f "$(command -v "$runner")")"
+  runner_hash="$(sha256sum "$runner_path" | awk '{print $1}')"
+  runners="$(jq -cn --argjson old "$runners" --arg n "$runner" --arg p "$runner_path" --arg h "$runner_hash" '$old + {($n): {path:$p,sha256:$h}}')"
+done
+printf '%s\n' "$runners" > "$TMP/win-runners.json"
+out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners.json" PATH="$crlf_bin:$PATH" "$SCRIPT" doctor 2>&1)"; rc=$?
+check "crlf-emitting jq verifies every required Windows runner" "[ $rc = 0 ] && printf '%s' '$out' | grep -q 'PASS  Windows runner allowlist'"
+jq 'del(.grep)' "$TMP/win-runners.json" > "$TMP/win-runners-old.json"
+old_hash="$(sha256sum "$TMP/win-runners-old.json" | awk '{print $1}')"
+mode ok
+out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners-old.json" PATH="$crlf_bin:$PATH" "$SCRIPT" doctor --live 2>&1)"; rc=$?
+check "live doctor refuses older list missing grep with repair path" "[ $rc != 0 ] && printf '%s' '$out' | grep -q 'FAIL Windows runner allowlist missing required runners: grep (repair: ai-stepfun doctor --write-runners)'"
+check "doctor does not silently rewrite older runner list" "[ \"$(sha256sum "$TMP/win-runners-old.json" | awk '{print $1}')\" = '$old_hash' ]"
+: > "$TMP/win-runners-empty.json"
+out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners-empty.json" "$SCRIPT" doctor 2>&1)"; rc=$?
+check "doctor leaves an existing empty allowlist untouched" "[ $rc != 0 ] && [ ! -s '$TMP/win-runners-empty.json' ] && printf '%s' '$out' | grep -q 'FAIL Windows runner allowlist'"
+jq 'del(.head,.grep)' "$TMP/win-runners.json" > "$TMP/win-runners-older.json"
+out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners-older.json" "$SCRIPT" doctor 2>&1)"; rc=$?
+check "doctor names every missing required runner" "[ $rc != 0 ] && printf '%s' '$out' | grep -q 'missing required runners: head,grep'"
+jq '.grep.sha256="deadbeef"' "$TMP/win-runners.json" > "$TMP/win-runners-bad.json"
+out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners-bad.json" PATH="$crlf_bin:$PATH" "$SCRIPT" doctor 2>&1)"; rc=$?
+check "crlf-emitting jq still refuses a mismatched runner hash" "[ $rc != 0 ] && printf '%s' '$out' | grep -q 'FAIL Windows runner allowlist'"
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    good_bash="$(sha256sum "$(command -v bash)" | awk '{print $1}')"
-    printf '{"bash":{"path":"%s","sha256":"%s"}}\n' "$(command -v bash)" "$good_bash" > "$TMP/win-runners.json"
-    out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners.json" PATH="$crlf_bin:$PATH" "$SCRIPT" doctor 2>&1)"
-    check "crlf-emitting jq still verifies the runner allowlist" "printf '%s' '$out' | grep -q 'PASS  Windows runner allowlist'"
-    bad_bash="$(printf '%064d' 7)"
-    printf '{"bash":{"path":"%s","sha256":"%s"}}\n' "$(command -v bash)" "$bad_bash" > "$TMP/win-runners-bad.json"
-    out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners-bad.json" PATH="$crlf_bin:$PATH" "$SCRIPT" doctor 2>&1)"
-    check "crlf-emitting jq still refuses a mismatched runner hash" "printf '%s' '$out' | grep -q 'FAIL Windows runner allowlist'"
-    ;;
-  *)
-    SKIP=$((SKIP + 2)); echo 'SKIP  Windows-host allowlist verify checks (not a Windows filesystem)'
+    out="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_RUNNERS_JSON="$TMP/win-runners-old.json" "$SCRIPT" doctor --write-runners 2>&1)"; rc=$?
+    check "explicit repair re-pins missing Windows runners" "[ $rc = 0 ] && jq -e 'has(\"grep\")' '$TMP/win-runners-old.json' >/dev/null"
+    check "explicit repair preserves the prior Windows allowlist" "compgen -G '$TMP/win-runners-old.json.backup.*' >/dev/null"
     ;;
 esac
 # The OpenCode cases need a Linux filesystem (owner-only key store) and bubblewrap.

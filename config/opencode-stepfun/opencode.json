@@ -4,6 +4,12 @@
   "small_model": "stepfun-api/step-5-preview",
   "share": "disabled",
   "autoupdate": false,
+  "compaction": {
+    "auto": true,
+    "prune": false,
+    "tail_turns": 8,
+    "reserved": 32768
+  },
   "provider": {
     "stepfun-api": {
       "npm": "@ai-sdk/openai-compatible",

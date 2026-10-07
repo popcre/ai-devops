@@ -49,9 +49,32 @@ fi
 VERSION=0.2.5
 QUALIFICATION_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
-CALLER="${AI_GEMINI_CALLER:-codex}"
-case "$CALLER" in ''|.*|*[!A-Za-z0-9._-]*) printf 'ai-gemini: error: caller name %s is not path-safe (letters, digits, . _ - only; no leading dot).
-' "${CALLER:-<empty>}" >&2; exit 2;; esac
+# Caller identity: explicit AI_GEMINI_CALLER wins; otherwise the harness is
+# detected (mimo/claude/codex/zcode). Never default to a wrong engine name —
+# independence recording keys off this value. Fail closed when unknown.
+# Help/usage/version never start a review and need no caller identity.
+source "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)/tools/lib/provider-wrapper-common.sh"
+CALLER=''
+case "${1:-}" in
+  --version|-h|--help|help) : ;;
+  *)
+    caller_rc=0
+    CALLER="$(provider_wrapper_resolve_caller "${AI_GEMINI_CALLER:-}")" || caller_rc=$?
+    if [ "$caller_rc" -ne 0 ]; then
+      if [ "$caller_rc" -eq 2 ]; then
+        printf 'ai-gemini: error: caller name %s is not path-safe (letters, digits, . _ - only; no leading dot).\n' "${AI_GEMINI_CALLER:-<empty>}" >&2
+      else
+        printf '%s\n' \
+          'ai-gemini: error: caller_identity_missing; Gemini did not start.' \
+          '  The assistant running this review could not be detected.' \
+          '  Set AI_GEMINI_CALLER to the assistant, then rerun:' \
+          '    export AI_GEMINI_CALLER=mimo   # or: claude, codex, zcode' \
+          '    AI_GEMINI_CALLER=mimo ai-gemini doctor' >&2
+      fi
+      exit 2
+    fi
+    ;;
+esac
 MODEL="${AI_GEMINI_MODEL:-gemini-3.8-flash-high}"
 GOVERNED_HEAD=''
 TIMEOUT="${AI_GEMINI_PRINT_TIMEOUT:-10m}"

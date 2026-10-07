@@ -470,30 +470,39 @@ credit_stop(){
   reviewer_credit_exit
 }
 
-# write_windows_runners: install-time-ish provisioning of the hashed runner
-# allowlist used by bin/ai-stepfun-windows-shell. Fail closed if a runner
-# cannot be located or hashed.
+# Verify the existing Windows runner list without changing it. All shell-gate
+# verbs need pinned binaries; a valid older list can still lack a new verb.
+WINDOWS_RUNNERS_MISSING=""
+verify_windows_runners(){
+  local out="$1" n p w g bad=0 tsv
+  WINDOWS_RUNNERS_MISSING=""
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -e 'type=="object" and length>0' "$out" >/dev/null 2>&1 || return 1
+  # jq.exe on Windows ends every -r line with CRLF; strip it before comparing
+  # paths and hashes (#1266).
+  tsv="$(jq -r 'to_entries[] | [.key, (.value.path // empty), (.value.sha256 // empty)] | @tsv' "$out" 2>/dev/null | sed 's/\r$//')" || return 1
+  [ -n "$tsv" ] || return 1
+  while IFS=$'\t' read -r n p w; do
+    [ -n "$n" ] && [ -n "$p" ] && [ -n "$w" ] || { bad=1; break; }
+    [ ! -L "$p" ] || { bad=1; break; }
+    g="$(sha256sum "$p" 2>/dev/null | awk '{print $1}')" || { bad=1; break; }
+    [ "$g" = "$w" ] || { bad=1; break; }
+  done <<<"$tsv"
+  [ "$bad" = 0 ] || return 1
+  WINDOWS_RUNNERS_MISSING="$(jq -r '["ls","cat","head","grep","bash","sh"] - keys | join(",")' "$out" 2>/dev/null | sed 's/\r$//')" || return 1
+  [ -z "$WINDOWS_RUNNERS_MISSING" ]
+}
+
+# write_windows_runners: explicit repair (or initial creation) of the hashed
+# allowlist used by bin/ai-stepfun-windows-shell. Existing lists are never
+# silently rewritten; a failed candidate leaves the old list intact.
 write_windows_runners(){
   local out="${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
   [ ! -L "$out" ] || return 1
   # Verify-only unless missing or --write-runners.
-  if [ "${1:-}" != --write-runners ] && [ -s "$out" ]; then
-    command -v jq >/dev/null 2>&1 || return 1
-    jq -e 'type=="object" and length>0' "$out" >/dev/null 2>&1 || return 1
-    local n p w g bad=0 tsv
-    # jq.exe on Windows ends every -r line with CRLF; strip the trailing CR so
-    # `read` never pins it onto the hash (#1266 residual, observed with jq
-    # 1.8.2 on Git-for-Windows hosts where every entry compared unequal).
-    tsv="$(jq -r 'to_entries[] | [.key, (.value.path // empty), (.value.sha256 // empty)] | @tsv' "$out" 2>/dev/null | sed 's/\r$//')" || return 1
-    [ -n "$tsv" ] || return 1
-    while IFS=$'\t' read -r n p w; do
-      [ -n "$n" ] && [ -n "$p" ] && [ -n "$w" ] || { bad=1; break; }
-      [ ! -L "$p" ] || { bad=1; break; }
-      g="$(sha256sum "$p" 2>/dev/null | awk '{print $1}')" || { bad=1; break; }
-      [ "$g" = "$w" ] || { bad=1; break; }
-    done <<<"$tsv"
-    [ "$bad" = 0 ] || return 1
-    return 0
+  if [ "${1:-}" != --write-runners ] && [ -e "$out" ]; then
+    verify_windows_runners "$out"
+    return $?
   fi
   command -v jq >/dev/null 2>&1 || return 1
   command -v sha256sum >/dev/null 2>&1 || return 1
@@ -515,7 +524,13 @@ write_windows_runners(){
   local tmp="$out.tmp.$$"
   printf '%s\n' "$json" > "$tmp"
   chmod 600 "$tmp" 2>/dev/null || true
+  verify_windows_runners "$tmp" || { rm -f "$tmp"; return 1; }
   [ ! -L "$out" ] || { rm -f "$tmp"; return 1; }
+  if [ -e "$out" ]; then
+    local backup="$out.backup.$(date +%Y%m%dT%H%M%S).$$"
+    cp -p -- "$out" "$backup" || { rm -f "$tmp"; return 1; }
+    chmod 600 "$backup" 2>/dev/null || true
+  fi
   mv -f "$tmp" "$out"
   [ -s "$out" ] && [ ! -L "$out" ]
 }
@@ -572,10 +587,17 @@ cmd_doctor(){
         bwrap_bin >/dev/null || { printf 'FAIL bubblewrap (bwrap) is not installed; StepFun only runs sandboxed on Linux (sudo apt-get install bubblewrap)\n'; exit 1; }
         printf 'PASS  bubblewrap sandbox: %s\n' "$(bwrap_bin)"
       else
-        if [ -n "${AI_STEPFUN_PLATFORM:-}" ] && [ "$(uname -s 2>/dev/null | cut -c1-5)" != MINGW ] && [ "$(uname -s 2>/dev/null | cut -c1-4)" != MSYS ]; then
+        if [ -n "${AI_STEPFUN_PLATFORM:-}" ] && [ -z "${AI_STEPFUN_RUNNERS_JSON:-}" ] && [ "$(uname -s 2>/dev/null | cut -c1-5)" != MINGW ] && [ "$(uname -s 2>/dev/null | cut -c1-4)" != MSYS ]; then
           : # forced platform on non-Windows host (CI stub): skip provisioning
         else
-          write_windows_runners "$write_runners" || { printf 'FAIL Windows runner allowlist missing or hash-mismatched (repair: ai-stepfun doctor --write-runners)\n'; exit 1; }
+          if ! write_windows_runners "$write_runners"; then
+            if [ -n "$WINDOWS_RUNNERS_MISSING" ]; then
+              printf 'FAIL Windows runner allowlist missing required runners: %s (repair: ai-stepfun doctor --write-runners)\n' "$WINDOWS_RUNNERS_MISSING"
+            else
+              printf 'FAIL Windows runner allowlist missing or hash-mismatched (repair: ai-stepfun doctor --write-runners)\n'
+            fi
+            exit 1
+          fi
         fi
         printf 'PASS  Windows runner allowlist (hashed): %s\n' "${AI_STEPFUN_RUNNERS_JSON:-$HOME/.config/ai-devops/secrets/stepfun-windows-runners.json}"
       fi

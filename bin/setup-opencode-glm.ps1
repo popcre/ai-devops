@@ -188,11 +188,13 @@ $binaryBash = ConvertTo-BashPath $Binary
 $homeBash   = ConvertTo-BashPath $HomeDir
 $gitBashFwd = $GitBash -replace '\\','/'      # C:/Program Files/Git/bin/bash.exe
 $cfgBash    = ConvertTo-BashPath $CfgDir
+$creditHelperBash = ConvertTo-BashPath (Join-Path $RepoPath 'tools\glm_credit.py')
 @"
 #!/usr/bin/env bash
 # Managed by ai-devops setup-opencode-glm.ps1 (Windows).
 # Scheduled Task -> Git Bash -> this launcher -> op run -> opencode serve.
-# The Z.ai key never touches a task definition, an argv, or a file at rest.
+# The Z.ai key never touches a task definition or argv; provisioning publishes
+# an owner-only quota-reader cache using the existing Windows private ACL helper.
 set -euo pipefail
 # Git Bash `$HOME is NOT reliably the Windows profile: with a roaming profile it can be a
 # network drive (Z:), and then every path below points somewhere nothing was installed.
@@ -226,6 +228,12 @@ if [ -z "`${ZAI_API_KEY:-}" ]; then
   # absolute path and let it run this script.
   exec op run --env-file "`$MCP_ENV" -- "$gitBashFwd" "`$0" "`$@"
 fi
+
+_credit_python="`$(command -v python3 || command -v python || true)"
+if [ -z "`$_credit_python" ] || ! printf '%s' "`$ZAI_API_KEY" | env -u ZAI_API_KEY "`$_credit_python" "$creditHelperBash" publish; then
+  echo 'WARNING: GLM credit cache unavailable; existing GLM server remains enabled.' >&2
+fi
+unset _credit_python
 
 export ZHIPU_API_KEY="`$ZAI_API_KEY"
 unset ZAI_API_KEY

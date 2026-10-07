@@ -113,7 +113,7 @@ The cross-platform GLM launcher reads these managed entries from
 |---|---|---|
 | `ZAI_API_KEY` | Coding Plan authentication. Exported as `ZHIPU_API_KEY` for OpenCode's built-in `zai-coding-plan` provider | 1Password reference only; never plaintext |
 | `AI_GLM_PORT` | Loopback port for the OpenCode GLM server | `4096` |
-| `AI_GLM_CALLER` | Which agent owns the session (`claude` or `codex`) | `claude` |
+| `AI_GLM_CALLER` | Which assistant owns the session (`mimo`, `claude`, `codex`, `zcode`, or another path-safe name) | Auto-detected from the running harness; required when detection is ambiguous |
 | `AI_GLM_DIAGNOSTIC_HEALTH_TIMEOUT` | One bounded local health observation before a review. It preserves the prior launch tolerance. | `30` seconds |
 
 The GLM model, agent, tools, and permissions are pinned in `config/opencode/`,

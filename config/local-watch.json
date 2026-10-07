@@ -11,6 +11,7 @@
     "windows-queue-watch": { "tick_minutes": 2, "command": "ai-windows-queue-watch" },
     "runner-pool-watch": { "tick_minutes": 60, "command": "ai-runner-pool-watch" },
     "reviewer-membership-drift": { "tick_minutes": 360, "command": "ai-reviewer-membership-drift" },
-    "merge-queue-drift": { "tick_minutes": 1440, "command": "ai-merge-queue-drift" }
+    "merge-queue-drift": { "tick_minutes": 1440, "command": "ai-merge-queue-drift" },
+    "review-credit-watch": { "tick_minutes": 60, "command": "ai-review-credit-watch" }
   }
 }
