@@ -30,6 +30,7 @@ cat > "$tmp/bin/node-mock" <<'SH'
 #!/bin/sh
 printf '%s\n' "$MCP_REMOTE_AUTH_HEADER" > "$PROOF_DIR/header"
 printf '%s\n' "$@" > "$PROOF_DIR/argv"
+printf '%s' "${DEVOPS_MCP_TOKEN:-}${NAS_MCP_TOKEN:-}" > "$PROOF_DIR/stale-env"
 SH
 chmod +x "$tmp/bin/flock" "$tmp/bin/op" "$tmp/bin/node-mock"
 
@@ -46,6 +47,7 @@ for ref in devops_token nas_token; do
   if grep -Eq 'old-synthetic-token|new-synthetic-token' "$tmp/argv"; then
     echo "FAIL: $ref exposed a bearer value in argv" >&2; exit 1
   fi
+  test ! -s "$tmp/stale-env" || { echo "FAIL: $ref passed stale parent values to the child" >&2; exit 1; }
 done
 rm -f -- "$tmp/header" "$tmp/argv"
 if FAKE_OP_FAIL=1 "$tmp/launcher" 'https://example.invalid/mcp' 'op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/devops_token' > "$tmp/failed-read.out" 2>&1; then

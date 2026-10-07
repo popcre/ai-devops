@@ -378,7 +378,7 @@ TOK="\$(_aidev_flock op read "\$REF")" || {
 }
 MCP_REMOTE_AUTH_HEADER="Bearer \$TOK"
 export MCP_REMOTE_AUTH_HEADER
-unset TOK
+unset TOK DEVOPS_MCP_TOKEN NAS_MCP_TOKEN
 exec "$NODE_BIN" "$GUARD_JS" npx -y mcp-remote@0.1.38 "\$URL" --header 'Authorization:\${MCP_REMOTE_AUTH_HEADER}' "\$@"
 EOF
   chmod 755 "$REMOTE_SH"
