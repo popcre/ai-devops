@@ -71,8 +71,11 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.scope == 'sections' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
+    outputs:
+      pinned_runner_name: ${{ steps.pin.outputs.pinned_runner_name }}
     steps:
       - name: Prove the label pins exactly one candidate host
+        id: pin
         env:
           RUNNER_LABEL: ${{ inputs.runner_label }}
           GH_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
@@ -97,6 +100,9 @@ jobs:
           printf '%s' "$hosts" | grep -q '"candidate":true' || { echo "::error::the pinned runner is not a Windows X64 ai-devops-windows candidate."; exit 1; }
           printf '%s' "$hosts" | grep -q '"status":"online"' || { echo "::error::the pinned runner is offline; its sections would queue forever."; exit 1; }
           echo "Pinned candidate: $hosts"
+          pinned_name="$(printf '%s' "$hosts" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
+          [ -n "$pinned_name" ] || { echo "::error::could not read the pinned runner name."; exit 1; }
+          echo "pinned_runner_name=$pinned_name" >> "$GITHUB_OUTPUT"
 
   qualify-sections:
     needs: sections-host-pin
@@ -118,6 +124,18 @@ jobs:
           if ($env:RUNNER_LABEL -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$' -or
               $env:RUNNER_LABEL -in @('self-hosted', 'Windows', 'X64', 'ai-devops-windows', 'ai-devops-windows-qualified')) {
             throw 'sections scope needs a custom label carried only by the candidate host.'
+          }
+
+      - name: Bind this section to the pinned runner name
+        shell: pwsh
+        env:
+          PINNED_RUNNER_NAME: ${{ needs.sections-host-pin.outputs.pinned_runner_name }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PINNED_RUNNER_NAME)) {
+            throw 'sections-host-pin did not publish a pinned runner name.'
+          }
+          if ($env:RUNNER_NAME -ne $env:PINNED_RUNNER_NAME) {
+            throw "This job is on runner '$env:RUNNER_NAME' but the pinned host is '$env:PINNED_RUNNER_NAME'. The mutable label moved; refusing a cross-host qualification."
           }
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
