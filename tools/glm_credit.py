@@ -130,11 +130,13 @@ def cached_key(config):
     return key
 
 def observation(key, *, opener=None, now=None):
-    checked = (now or datetime.datetime.now(datetime.timezone.utc)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    observed = now or datetime.datetime.now(datetime.timezone.utc)
+    checked = observed.strftime('%Y-%m-%dT%H:%M:%SZ')
     result = {'provider': 'glm', 'state': 'unknown', 'reason': 'read-unavailable',
               'checked_at': checked, 'qualified_version': 'zai-model-quota-v1',
               'source_kind': 'official-zai-model-quota', 'model_scope': MODEL,
-              'credential_profile_scope': fingerprint(key) if isinstance(key, str) else None}
+              'credential_profile_scope': fingerprint(key) if isinstance(key, str) else None,
+              'reset_at': None, 'quota_windows': []}
     try:
         if not isinstance(key, str) or not key or len(key) > 4096 or any(ord(c) < 33 or ord(c) > 126 for c in key):
             raise ValueError('invalid-key')
@@ -152,6 +154,7 @@ def observation(key, *, opener=None, now=None):
         if not isinstance(limits, list):
             raise ValueError('missing-limits')
         periods = {}
+        windows = []
         for limit in limits:
             if not isinstance(limit, dict):
                 raise ValueError('malformed-limit')
@@ -171,11 +174,33 @@ def observation(key, *, opener=None, now=None):
                     or (remaining == 0) != (used == 100)):
                 raise ValueError('malformed-or-conflicting-capacity')
             periods[period] = remaining
+            # The official ZCode mapper preserves nextResetTime per limit, and
+            # codingPlanQuotaPresentation.ts passes it directly to new Date:
+            # the provider's contract is epoch milliseconds, not guessed units.
+            # It is a quota timestamp, never the subscription nextRenewTime.
+            # Accept only plausible epoch milliseconds for the qualified bucket;
+            # malformed/missing reset metadata must not erase valid capacity.
+            reset = limit.get('nextResetTime')
+            duration = 5 * 3600 if period == (3, 5) else 7 * 86400
+            reset_at = None
+            if (type(reset) is int and observed.timestamp() * 1000 < reset
+                    <= (observed.timestamp() + duration + 60) * 1000):
+                reset_at = datetime.datetime.fromtimestamp(
+                    math.ceil(reset / 1000), datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            windows.append({'bucket': 'glm-5h' if period == (3, 5) else 'glm-weekly',
+                            'state': 'exhausted' if remaining == 0 else 'available',
+                            'reset_at': reset_at})
         if set(periods) != {(3, 5), (6, 1)}:
             raise ValueError('missing-period')
         exhausted = 0 in periods.values()
+        blocked = [window for window in windows if window['state'] == 'exhausted']
+        # All exhausted model windows must reset before lifting their capacity
+        # hold. Passing a reset never bypasses ordinary security/readiness gates.
+        reset_at = (max(window['reset_at'] for window in blocked)
+                    if blocked and all(window['reset_at'] for window in blocked) else None)
         result.update(state='exhausted' if exhausted else 'available',
-                      reason='reported-exhaustion' if exhausted else 'reported-capacity')
+                      reason='reported-exhaustion' if exhausted else 'reported-capacity',
+                      reset_at=reset_at, quota_windows=sorted(windows, key=lambda window: window['bucket']))
     except urllib.error.HTTPError as error:
         result['reason'] = 'authentication-error' if error.code in (401, 403) else 'transport-error'
     except (TimeoutError, socket.timeout):

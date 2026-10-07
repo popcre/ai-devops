@@ -50,6 +50,12 @@ if [ "${1:-}" = doctor ] && [ -n "${AI_QWEN_TEST_RUNTIME_FILE:-}" ]; then
   printf 'qwen runtime sha256: %s\n' "$(cat "$AI_QWEN_TEST_RUNTIME_FILE")"
   printf 'qwen preloader sha256: %s\n' "$(cat "$AI_QWEN_TEST_PRELOADER_FILE")"
   if [ "${MOCK_QWEN_FAIL:-0}" = capacity ]; then
+    receipt="$(mktemp)"
+    printf '{"provider":"qwen","failure_class":"allowance-exhausted"}\n' > "$receipt"
+    "${MOCK_ADMISSION_PYTHON}" "$MOCK_ADMISSION_TOOL" credit qwen --directory "$AI_REVIEW_QUARANTINE_DIR" --marker "$receipt" --record >/dev/null
+    rm -f "$receipt"
+    printf 'AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=qwen code=quota_exhausted\n'
+    printf 'ALLOWANCE EXHAUSTED: qwen; automatic return at provider reset; reset unavailable.\n'
     printf 'live probe    : FAILED — allowance-exhaustion (provider quota exhausted; resets at 11-01 16:00:00 UTC)\n'
     printf 'diagnostic    : /safe/.ai/reviews/qwen-qualification/failure.json\n'
     exit 1
@@ -94,6 +100,14 @@ cat > "$TMP/bin/gemini" <<'EOF'
 # Like bin/ai-gemini: no detectable harness caller means refuse (installer
 # terminal). Preflight must name itself as the caller.
 [ "${AI_GEMINI_CALLER:-}" = preflight ] || { echo caller_identity_missing >&2; exit 2; }
+[ -z "${MOCK_GEMINI_MODE_LOG:-}" ] || printf '%s %s\n' "${1:-}" "${2:-}" >> "$MOCK_GEMINI_MODE_LOG"
+if [ "${1:-}" = qualify-live ] && [ "${MOCK_GEMINI_FAIL:-0}" = capacity ]; then
+  receipt="$(mktemp)"
+  printf '{"provider":"gemini","failure_class":"allowance-exhausted"}\n' > "$receipt"
+  "$MOCK_ADMISSION_PYTHON" "$MOCK_ADMISSION_TOOL" credit gemini --directory "$AI_REVIEW_QUARANTINE_DIR" --marker "$receipt" --record
+  rm -f "$receipt"
+  exit 1
+fi
 case "${1:-}" in
   qualify-live) [ "${MOCK_GEMINI_FAIL:-0}" = 0 ] || exit 70; [ "${MOCK_GEMINI_MUTATE_WRAPPER:-0}" = 0 ] || printf '\n# replaced during canary\n' >> "$0"; [ "${MOCK_GEMINI_MUTATE_RUNTIME:-0}" = 0 ] || printf '%064d\n' 0 | tr 0 b > "$MOCK_AGY_SHA_FILE"; printf 'QUALIFIED session=test model=%s exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=/tmp/test\n' "${MOCK_GEMINI_MODEL:-gemini-3.8-flash-high}" ;;
   doctor) if [ "${2:-}" = --live ]; then printf 'live\n' >> "$MOCK_GEMINI_LIVE_CONTACT"; printf 'QUALIFIED session=live model=gemini-3.8-flash-high exact-resume=yes mutation-request=no-change outside-sentinel=unchanged reports=durable fixture=/tmp/live\n'; exit 0; fi; if [ "${2:-}" != --identity ] && [ "${MOCK_GEMINI_NORMAL_DOCTOR_FAIL:-0}" = 1 ]; then exit 124; fi; status=QUARANTINED; rc=3; [ "${2:-}" = --identity ] && { status=IDENTITY; rc=0; }; [ ! -f "$AI_REVIEW_QUARANTINE_DIR/gemini-live-qualified.json" ] || { [ "${2:-}" = --identity ] || status=PASS; rc=0; }; printf '%s agy=%s agy_sha256=%s model=%s disposable-copy=yes containment=test\n' "$status" "${MOCK_AGY_VERSION:-1.1.19}" "$(cat "$MOCK_AGY_SHA_FILE")" "${MOCK_GEMINI_MODEL:-gemini-3.8-flash-high}"; exit "$rc" ;;
@@ -106,6 +120,7 @@ export AI_REVIEW_CODEX_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_DEEPSEEK_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_STEPFUN_WRAPPER="$TMP/bin/good"
 export AI_REVIEW_QWEN_WRAPPER="$TMP/bin/good"
+export MOCK_ADMISSION_PYTHON="$(command -v python3 || command -v python)" MOCK_ADMISSION_TOOL="$ROOT/tools/reviewer_admission.py"
 export AI_REVIEW_GEMINI_WRAPPER="$TMP/bin/gemini"
 export MOCK_AGY_SHA_FILE="$TMP/gemini-agy-sha"
 export MOCK_GEMINI_LIVE_CONTACT="$TMP/gemini-live-contact"
@@ -264,9 +279,60 @@ CAPACITY_OUT="$(MOCK_QWEN_FAIL=capacity $SCRIPT requalify qwen 2>&1)"; CAPACITY_
 [ "$CAPACITY_RC" -eq 0 ] && printf '%s' "$CAPACITY_OUT" | grep -q 'reviewer issue:' && printf '%s' "$CAPACITY_OUT" | grep -q 'requalification deferred: provider capacity' \
   && ok "a provider capacity failure is recorded but does not fail requalify" || bad "a provider capacity failure is recorded but does not fail requalify"
 check "a capacity-deferred requalification leaves the reviewer quarantined" "$SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+export MOCK_QWEN_CONTACT_FILE="$TMP/reset-canary-calls"
+: > "$MOCK_QWEN_CONTACT_FILE"
+check "capacity deferral without a known reset never probes" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+check "unknown reset skips every additional identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_MODE_LOG'"
+check "unknown reset health uses only its existing identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT status qwen | jq -e '.failure_class==\"live-qualification-required\"' && test \"\$(grep -c -- --identity '$MOCK_QWEN_MODE_LOG')\" -eq 1 && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+reset_now="$(date +%s)"
+reset_past="$(date -u -d '@'"$((reset_now-1))" +%FT%TZ)"
+reset_future="$(date -u -d '@'"$((reset_now+3600))" +%FT%TZ)"
+reset_state="$AI_REVIEW_QUARANTINE_DIR/qwen.json"
+reset_record="$(jq -r '.capacity_deferral.capacity_record_id' "$AI_REVIEW_QUARANTINE_DIR/qwen-requalify-marker.json")"
+reset_fixture(){
+  jq -nc --arg at "$1" --arg id "$reset_record" --argjson now "$reset_now" \
+    '{version:2,provider:"qwen",global:null,backoffs:{},capacity_hold:{provider:"qwen",failure_class:"allowance-exhausted",credential_profile_scope:null,model_scope:null,observed_epoch:($now-50),reset_at:$at,next_check_epoch:$now,record_id:$id}}' > "$reset_state"
+}
+reset_fixture "$reset_past"
+jq '.capacity_hold.record_id="old-unrelated-receipt"' "$reset_state" > "$TMP/old-receipt.json"
+mv "$TMP/old-receipt.json" "$reset_state"
+check "old reset receipt cannot authorize a later same-byte deferral" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+reset_fixture "$reset_future"
+check "capacity deferral before reset never probes" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+check "future reset skips every additional identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_MODE_LOG'"
+check "future reset health uses only its existing identity check" ": > '$MOCK_QWEN_MODE_LOG'; $SCRIPT status qwen | jq -e '.failure_class==\"live-qualification-required\"' && test \"\$(grep -c -- --identity '$MOCK_QWEN_MODE_LOG')\" -eq 1 && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+reset_fixture "$reset_past"
+"$SCRIPT" quarantine qwen authentication-failed --seconds 3600 >/dev/null
+check "reset qualification preserves a stronger authentication hold" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE' && $SCRIPT pause-status qwen | jq -e '.failure_class==\"authentication-failed\"'"
+# Remove only this fixture's stronger global hold; retain its due capacity record.
+reset_python="$(command -v python3 || command -v python)"
+"$reset_python" "$ROOT/tools/reviewer_admission.py" clear-global qwen --directory "$AI_REVIEW_QUARANTINE_DIR" >/dev/null
+cp "$AI_QWEN_TEST_RUNTIME_FILE" "$TMP/reset-runtime-before"
+printf '%064d\n' 9 | tr 0 f > "$AI_QWEN_TEST_RUNTIME_FILE"
+check "reset cannot qualify bytes different from the capacity deferral" "$SCRIPT reset-requalify qwen && test ! -s '$MOCK_QWEN_CONTACT_FILE'"
+cp "$TMP/reset-runtime-before" "$AI_QWEN_TEST_RUNTIME_FILE"
+"$SCRIPT" reset-requalify qwen > "$TMP/reset-one.log" 2>&1 & reset_one=$!
+"$SCRIPT" reset-requalify qwen > "$TMP/reset-two.log" 2>&1 & reset_two=$!
+wait "$reset_one"; reset_one_rc=$?
+wait "$reset_two"; reset_two_rc=$?
+[ "$reset_one_rc" -eq 0 ] && [ "$reset_two_rc" -eq 0 ] && [ "$(wc -l < "$MOCK_QWEN_CONTACT_FILE" | tr -d ' ')" -eq 1 ] \
+  && ok "concurrent due reset qualifies once through the existing canary" || bad "concurrent due reset qualifies once through the existing canary"
+check "successful reset canary restores ordinary current qualification" "$SCRIPT status qwen | jq -e '.status==\"installed-healthy\" and .usable==true'"
+check "current qualification never repeats the reset canary" "$SCRIPT reset-requalify qwen && test \"\$(wc -l < '$MOCK_QWEN_CONTACT_FILE' | tr -d ' ')\" -eq 1"
+unset MOCK_QWEN_CONTACT_FILE
 check "a failed requalification is retried, not silently abandoned" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 printf '{"version":1,"providers":{"qwen":{"registry_state":"absent","reason":"retired for this fixture"}}}\n' > "$TMP/qwen-omitted.json"
 check "an unregistered reviewer is skipped without a canary" ": > '$MOCK_QWEN_MODE_LOG'; printf '%064d\n' 3 | tr 0 b > '$AI_QWEN_TEST_RUNTIME_FILE'; AI_REVIEW_REGISTRY_FILE='$TMP/qwen-omitted.json' $SCRIPT requalify qwen && ! grep -qx -- --live '$MOCK_QWEN_MODE_LOG' && $SCRIPT status qwen | jq -e '.status==\"quarantined\" and .failure_class==\"live-qualification-required\"'"
+export MOCK_GEMINI_MODE_LOG="$TMP/gemini-reset-calls"
+printf '%064d\n' 7 | tr 0 d > "$MOCK_AGY_SHA_FILE"
+check "Gemini stale capacity deferral captures caller-qualified exact subject" "env -u AI_GEMINI_CALLER -u CODEX_THREAD_ID -u CLAUDECODE MOCK_GEMINI_FAIL=capacity $SCRIPT requalify gemini && jq -e '.capacity_deferral.subject.identity_sha256|length==64' '$AI_REVIEW_QUARANTINE_DIR/gemini-requalify-marker.json'"
+check "Gemini unknown reset makes no additional identity or live call" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER $SCRIPT reset-requalify gemini && test ! -s '$MOCK_GEMINI_MODE_LOG'"
+jq --arg at "$reset_past" '.capacity_hold.reset_at=$at' "$AI_REVIEW_QUARANTINE_DIR/gemini.json" > "$TMP/gemini-due.json"
+mv "$TMP/gemini-due.json" "$AI_REVIEW_QUARANTINE_DIR/gemini.json"
+check "Gemini due reset restores qualification with explicit preflight caller" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER -u CODEX_THREAD_ID -u CLAUDECODE $SCRIPT reset-requalify gemini && test \"\$(grep -c '^qualify-live ' '$MOCK_GEMINI_MODE_LOG')\" -eq 1"
+check "healthy Gemini reset adds no identity or live calls" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER $SCRIPT reset-requalify gemini && test ! -s '$MOCK_GEMINI_MODE_LOG'"
+check "healthy Gemini status retains one existing identity check" ": > '$MOCK_GEMINI_MODE_LOG'; env -u AI_GEMINI_CALLER $SCRIPT status gemini | jq -e '.usable==true' && test \"\$(grep -c '^doctor --identity$' '$MOCK_GEMINI_MODE_LOG')\" -eq 1 && ! grep -q '^qualify-live ' '$MOCK_GEMINI_MODE_LOG'"
+unset MOCK_GEMINI_MODE_LOG
 unset AI_REVIEWER_ISSUE_DIR
 check "requalify recovers the reviewer on the next successful run" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
 

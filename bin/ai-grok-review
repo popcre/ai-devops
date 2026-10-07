@@ -196,6 +196,7 @@ grok_credit_scan() {
   REVIEWER_CREDIT_HIT=''
   [ "$1" != 124 ] || return 0
   ! jq -e 'has("stopReason")' "$2" >/dev/null 2>&1 || return 0
+  reviewer_capacity_current grok "$2" || true
   reviewer_credit_scan grok "$2.err" || true
 }
 
@@ -1366,7 +1367,11 @@ run_turn() { # run_turn REPO OUT PROMPT_FILE MAX_TURNS [SESSION_ID]
   [ -z "$ACTIVE_PAID_LOCK" ] || date -u +%FT%TZ > "$ACTIVE_PAID_LOCK/provider-contacted"
   [ -z "$ACTIVE_TURN_RECORD" ] || date -u +%FT%TZ > "$ACTIVE_TURN_RECORD/provider-contacted"
   set +e
-  run_clean_env "${base_env[@]}" "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" -- "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
+  local credit_out="$out" credit_err="$out.err" credit_marker="$out.credit-refusal.$REVIEWER_CREDIT_INVOCATION_TAG.json"
+  case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*)
+    credit_out="$(cygpath -w "$credit_out")"; credit_err="$(cygpath -w "$credit_err")"; credit_marker="$(cygpath -w "$credit_marker")";;
+  esac
+  run_clean_env "${base_env[@]}" "${isolation_home_env[@]}" "${GROK_ISOLATION_ENV[@]}" -- "$python_bin" "$supervisor" --stop-file "$ACTIVE_GROK_NATIVE_STOP_FILE" --credit-provider grok --credit-output "$credit_out" --credit-stderr "$credit_err" --credit-marker "$credit_marker" -- "${grok_command[@]}" "${args[@]}" > "$out" 2>"$out.err" &
   local child=$! rc waited=0 next_heartbeat="$HEARTBEAT_INTERVAL" bytes
   ACTIVE_GROK_CHILD="$child"
   while kill -0 "$child" 2>/dev/null; do

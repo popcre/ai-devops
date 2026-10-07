@@ -6,18 +6,116 @@ OS locks release on process death; atomic replacement preserves prior evidence.
 """
 import argparse
 import contextlib
+import datetime
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
 import sys
 import tempfile
 import time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 CREDIT_EXIT = 92
 CREDIT_SECONDS = 3600
 CREDIT_SCAN_BYTES = 1 << 20
+SUBSCRIPTIONS = ('glm', 'qwen', 'gemini', 'kimi')
+
+
+def reset_epoch(value):
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError('invalid capacity reset time')
+    parsed = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if parsed.tzinfo is None:
+        raise ValueError('capacity reset needs timezone')
+    return math.ceil(parsed.timestamp())
+
+
+def qualified_reset(provider, value, now):
+    if provider not in SUBSCRIPTIONS or value is None:
+        return None
+    try:
+        epoch = reset_epoch(value)
+        maximum = (8 if provider in ('glm', 'gemini') else 32) * 86400
+        return value if now < epoch <= now + maximum else None
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def eastern_reset_label(epoch):
+    """Windows Python may lack IANA data; modern US Eastern rules suffice here."""
+    instant = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc)
+    try:
+        eastern = ZoneInfo('America/New_York')
+    except ZoneInfoNotFoundError:
+        if instant.year < 2007:
+            raise ValueError('unsupported historical Eastern timezone date')
+        march_first = datetime.datetime(instant.year, 3, 1, tzinfo=datetime.timezone.utc)
+        november_first = datetime.datetime(instant.year, 11, 1, tzinfo=datetime.timezone.utc)
+        spring = march_first.replace(day=8 + (6 - march_first.weekday()) % 7, hour=7)
+        autumn = november_first.replace(day=1 + (6 - november_first.weekday()) % 7, hour=6)
+        daylight = spring <= instant < autumn
+        eastern = datetime.timezone(datetime.timedelta(hours=-4 if daylight else -5), 'EDT' if daylight else 'EST')
+    return instant.astimezone(eastern).strftime('%B %d, %Y at %I:%M %p %Z')
+
+
+def capacity_observation(data, provider, observation, now):
+    """Reconcile qualified reader output; clock expiry never releases capacity."""
+    if not isinstance(observation, dict) or observation.get('provider') != provider:
+        return {'status': 'unchanged', 'reason': 'wrong-provider'}
+    state = observation.get('state')
+    observed = observation.get('observed_epoch')
+    profile = observation.get('credential_profile_scope')
+    model = observation.get('model_scope')
+    if state == 'unknown' and data.get('capacity_hold'):
+        data['capacity_hold']['next_check_epoch'] = now + 3600
+        return {'status': 'deferred'}
+    if (state not in ('available', 'exhausted') or type(observed) is not int
+            or not 0 <= now - observed <= 300 or (state == 'available' and not valid_scope(profile, model))):
+        return {'status': 'unchanged', 'reason': 'unknown-stale-or-unscoped'}
+    if not valid_scope(profile, model):
+        profile = model = None
+    hold = data.get('capacity_hold')
+    if hold and hold.get('failure_class') == 'out-of-credit' and provider in SUBSCRIPTIONS:
+        return {'status': 'unchanged', 'reason': 'paid-balance-hold-not-subscription-allowance'}
+    if hold and (hold.get('credential_profile_scope') != profile or hold.get('model_scope') != model) and not (state == 'exhausted' and not hold.get('credential_profile_scope')):
+        return {'status': 'unchanged', 'reason': 'wrong-scope'}
+    if hold and observed <= hold['observed_epoch']:
+        return {'status': 'unchanged', 'reason': 'older-observation'}
+    if state == 'available':
+        if hold:
+            data['capacity_hold'] = None
+            return {'status': 'restored'}
+        return {'status': 'unchanged'}
+    reset = qualified_reset(provider, observation.get('reset_at'), now)
+    try:
+        epoch = reset_epoch(reset)
+        if epoch is not None and epoch <= now:
+            reset = epoch = None
+    except (ValueError, TypeError, OverflowError):
+        reset = epoch = None
+    data['capacity_hold'] = {'provider': provider, 'failure_class': 'allowance-exhausted' if provider in SUBSCRIPTIONS else 'out-of-credit',
+        'credential_profile_scope': profile, 'model_scope': model,
+        'observed_epoch': observed, 'reset_at': reset,
+        'next_check_epoch': max(now + 60, epoch) if epoch is not None else now + 3600,
+        'record_id': (hold.get('record_id') if hold else None) or new_record_id()}
+    return {'status': 'held', 'reset_at': reset}
+
+
+def capacity_status(data):
+    hold = data.get('capacity_hold')
+    if hold is not None:
+        if (not isinstance(hold, dict) or hold.get('provider') != data['provider']
+                or type(hold.get('observed_epoch')) is not int
+                or type(hold.get('next_check_epoch')) is not int
+                or hold.get('failure_class') not in ('out-of-credit', 'allowance-exhausted')):
+            raise ValueError('invalid capacity hold')
+        reset_epoch(hold.get('reset_at'))
+    return hold
 # Billing/credit exhaustion only. A plain rate limit, a bare RESOURCE_EXHAUSTED
 # or "quota exhausted" is not proof the account needs money, so it never matches.
 # Sources: real provider error bodies (xAI 403 team-credit text, OpenAI-style
@@ -92,6 +190,8 @@ PROVIDER_DOWN_PATTERNS = tuple(re.compile(p) for p in (
     r'dns (lookup|resolution) (failed|error)',
 ))
 CREDIT_MESSAGES = {
+    'glm': 'the GLM subscription allowance is exhausted',
+    'kimi': 'the Kimi subscription allowance is exhausted',
     'grok': 'the xAI (Grok) account has run out of credits or hit its monthly spending limit - add credits at https://console.x.ai',
     'muse': 'the Meta (Muse) API account has run out of credits - add credits at https://dev.meta.ai',
     'qwen': 'the Alibaba Model Studio (Qwen) account is out of balance or its free quota is used up - top up at https://usercenter2-intl.console.alibabacloud.com/billing/#/account/overview',
@@ -150,27 +250,75 @@ def classify_event(text, provider=None):
     return STREAM_CODE, 'code-config'
 
 
-def credit(directory, provider, paths, record, seconds):
+def credit(directory, provider, paths, record, seconds, marker_paths=()):
     """Exit 0 with the two contract lines on a match, 3 on no match."""
     if provider not in CREDIT_MESSAGES:
         raise ValueError('no out-of-credit message for provider')
-    if credit_match(paths, provider) is None:
-        return 3
-    machine = 'AI_REVIEWER_OUT_OF_CREDIT provider=%s code=insufficient_quota' % provider
-    human = 'OUT OF CREDIT: %s - then run: ai-review-preflight clear %s' % (CREDIT_MESSAGES[provider], provider)
-    print(machine); print(human)
+    allowance = False
+    marker_paid = False
+    preserved_paid_hold = False
+    reset = None
+    for path in marker_paths:
+        if path.is_file() and not path.is_symlink() and path.stat().st_size <= CREDIT_SCAN_BYTES:
+            try:
+                marker_now = int(time.time())
+                if not 0 <= marker_now - int(path.stat().st_mtime) <= 120:
+                    continue
+                marker = json.loads(path.read_text())
+                if marker.get('provider') != provider:
+                    continue
+                marker_observed = marker.get('observed_epoch', int(path.stat().st_mtime))
+                if type(marker_observed) is not int or not 0 <= marker_now - marker_observed <= 120:
+                    continue
+                if marker.get('failure_class') == 'allowance-exhausted' and provider in SUBSCRIPTIONS:
+                    allowance = True
+                    reset = qualified_reset(provider, marker.get('reset_at'), int(time.time()))
+                elif marker.get('failure_class') == 'out-of-credit':
+                    error = marker.get('error')
+                    if isinstance(error, dict):
+                        text = ' '.join(error.get(key, '') for key in ('code', 'message') if isinstance(error.get(key), str))
+                        marker_paid |= credit_match_text(text, provider) is not None
+            except (ValueError, TypeError, AttributeError):
+                pass
+    if not marker_paid and credit_match(paths, provider) is None:
+        if not allowance:
+            return 3
+    machine = ('AI_REVIEWER_ALLOWANCE_EXHAUSTED provider=%s code=quota_exhausted' if allowance else 'AI_REVIEWER_OUT_OF_CREDIT provider=%s code=insufficient_quota') % provider
     if record:
         # A recording failure must never hide the diagnosis or delay the stop.
         try:
             with locked(directory, provider):
                 data = load(directory, provider)
                 now = int(time.time())
-                data['global'] = {'version': 1, 'provider': provider, 'failure_class': 'out-of-credit',
-                                  'created_epoch': now, 'expires_epoch': now + seconds,
-                                  'record_id': new_record_id()}
+                prior = data.get('capacity_hold')
+                failure_class = 'allowance-exhausted' if allowance else 'out-of-credit'
+                if prior:
+                    if prior.get('failure_class') == 'out-of-credit' and allowance:
+                        preserved_paid_hold = True
+                        failure_class = 'out-of-credit'
+                        reset = None
+                    prior_reset = prior.get('reset_at')
+                    if prior_reset and reset and failure_class == 'allowance-exhausted':
+                        reset = prior_reset if reset_epoch(prior_reset) >= reset_epoch(reset) else reset
+                if failure_class == 'out-of-credit':
+                    reset = None
+                data['capacity_hold'] = {'provider': provider, 'failure_class': failure_class,
+                    'credential_profile_scope': (prior or {}).get('credential_profile_scope'),
+                    'model_scope': (prior or {}).get('model_scope'),
+                    'observed_epoch': now, 'reset_at': reset, 'next_check_epoch': reset_epoch(reset) if reset else now,
+                    'record_id': new_record_id()}
                 publish(directory, provider, data)
         except (OSError, ValueError, TypeError) as error:
+            reset = None
             print('reviewer admission: out-of-credit quarantine not recorded: ' + str(error), file=sys.stderr)
+    try:
+        reset_label = eastern_reset_label(reset_epoch(reset)) if reset else 'unavailable'
+    except (ZoneInfoNotFoundError, ValueError, OverflowError):
+        reset_label = 'display unavailable; provider reset retained'
+    human = ('ALLOWANCE EXHAUSTED: %s; automatic return at provider reset; reset %s.' % (provider, reset_label) if allowance else 'OUT OF CREDIT: %s; automatic return requires verified paid balance.' % CREDIT_MESSAGES[provider])
+    if preserved_paid_hold:
+        human = 'ALLOWANCE EXHAUSTED: %s; existing paid-balance hold remains; a subscription reset cannot restore it.' % provider
+    print(machine); print(human)
     return 0
 
 
@@ -257,6 +405,7 @@ def load(directory, provider):
         raise ValueError('invalid admission record schema')
     if data.get('global') is not None and not valid_global(data['global'], provider):
         raise ValueError('invalid global quarantine')
+    capacity_status(data)
     for key, record in data['backoffs'].items():
         if not isinstance(record, dict):
             raise ValueError('invalid scoped admission record')
@@ -393,7 +542,7 @@ def pause_failure(data, provider, reason, now, seconds=3600, observed=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'pause', 'pause-status', 'global', 'clear', 'clear-global', 'credit', 'classify'))
+    parser.add_argument('action', choices=('profile', 'admission', 'observe', 'quarantine', 'pause', 'pause-status', 'capacity-status', 'capacity-observe', 'reset-qualification-claim', 'global', 'clear', 'clear-global', 'credit', 'classify'))
     parser.add_argument('provider', choices=('claude','codex','deepseek','gemini','glm','grok','kimi','muse','qwen','stepfun'))
     parser.add_argument('--directory', type=pathlib.Path)
     parser.add_argument('--profile', default=''); parser.add_argument('--model', default='')
@@ -403,8 +552,11 @@ def main():
     parser.add_argument('--evidence', type=pathlib.Path)
     parser.add_argument('--expect-record', default='')
     parser.add_argument('--scan', type=pathlib.Path, action='append', default=[])
+    parser.add_argument('--marker', type=pathlib.Path, action='append', default=[])
     parser.add_argument('--text', default='')
     parser.add_argument('--record', action='store_true')
+    parser.add_argument('--check-only', action='store_true')
+    parser.add_argument('--observation-file', type=pathlib.Path)
     args = parser.parse_args()
     now = int(time.time())
     if args.action == 'classify':
@@ -417,7 +569,7 @@ def main():
         seconds = args.seconds if args.seconds != 1800 else CREDIT_SECONDS
         if not 1 <= seconds <= 86400:
             raise ValueError('out-of-credit quarantine must be between one second and one day')
-        raise SystemExit(credit(args.directory, args.provider, args.scan, args.record, seconds))
+        raise SystemExit(credit(args.directory, args.provider, args.scan, args.record, seconds, args.marker))
     if args.action == 'profile':
         result = home_profile(args.home)
     elif args.action == 'observe':
@@ -428,7 +580,40 @@ def main():
     else:
         with locked(args.directory, args.provider):
             data = load(args.directory, args.provider)
-            if args.action == 'clear':
+            if args.action == 'capacity-status':
+                result = capacity_status(data)
+                if result and args.provider in SUBSCRIPTIONS and result.get('failure_class') == 'allowance-exhausted' and result.get('reset_at') and reset_epoch(result['reset_at']) <= now:
+                    data['last_capacity_reset'] = result
+                    data['capacity_hold'] = None
+                    publish(args.directory, args.provider, data)
+                    result = None
+            elif args.action == 'reset-qualification-claim':
+                reset = data.get('last_capacity_reset')
+                prior_attempt = data.get('reset_qualification_attempt')
+                if (not reset or data.get('capacity_hold') or data.get('global')
+                        or not args.run_id or reset.get('record_id') != args.run_id
+                        or reset.get('failure_class') != 'allowance-exhausted'
+                        or not reset.get('reset_at') or reset_epoch(reset['reset_at']) > now
+                        or (not args.check_only and not re.fullmatch('[0-9a-f]{64}', args.expect_record))
+                        or any(record['expires_epoch'] > now for record in data['backoffs'].values())):
+                    result = {'claimed': False, 'reason': 'not-due-or-stronger-hold'}
+                elif prior_attempt and prior_attempt.get('reset_record_id') == reset.get('record_id'):
+                    result = {'claimed': False, 'reason': 'already-attempted'}
+                elif args.check_only:
+                    result = {'claimed': False, 'ready': True}
+                else:
+                    data['reset_qualification_attempt'] = {'reset_record_id': reset['record_id'],
+                        'subject_sha256': args.expect_record, 'started_epoch': now}
+                    publish(args.directory, args.provider, data)
+                    result = {'claimed': True}
+            elif args.action == 'capacity-observe':
+                if not args.observation_file or args.observation_file.is_symlink():
+                    raise ValueError('capacity observation needs regular file')
+                observation = json.loads(args.observation_file.read_text())
+                result = capacity_observation(data, args.provider, observation, now)
+                if result['status'] in ('held', 'restored', 'deferred'):
+                    publish(args.directory, args.provider, data)
+            elif args.action == 'clear':
                 data = {'version': 2, 'provider': args.provider, 'global': None, 'backoffs': {}}
                 publish(args.directory, args.provider, data); result = {'cleared': True}
             elif args.action == 'clear-global':
@@ -468,7 +653,16 @@ def main():
                 publish(args.directory, args.provider, data); result = data['global']
             else:
                 result = data.get('global')
-                if result and result.get('expires_epoch', 0) <= now:
+                if result and result.get('expires_epoch', 0) <= now and result.get('failure_class') in ('out-of-credit', 'allowance-exhausted'):
+                    if not data.get('capacity_hold'):
+                        data['capacity_hold'] = {'provider': args.provider, 'failure_class': result['failure_class'],
+                            'credential_profile_scope': None, 'model_scope': None, 'observed_epoch': result['created_epoch'],
+                            'reset_at': None, 'next_check_epoch': now, 'record_id': new_record_id()}
+                    data['legacy_capacity_evidence'] = result
+                    data['global'] = None
+                    publish(args.directory, args.provider, data)
+                    result = None
+                if result and result.get('expires_epoch', 0) <= now and result.get('failure_class') not in ('out-of-credit', 'allowance-exhausted'):
                     data['global'] = None; publish(args.directory, args.provider, data); result = None
     print(json.dumps(result, sort_keys=True, allow_nan=False))
 

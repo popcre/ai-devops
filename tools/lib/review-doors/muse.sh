@@ -32,6 +32,7 @@ case "$MODE" in review|implement) ;; *) printf 'muse door: usage: muse.sh review
 
 # Repository root, for the pinned engine install and the OpenCode profile.
 MU_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$MU_ROOT/tools/reviewer_event_guard.sh"
 
 . "$MU_ROOT/tools/lib/muse-credential-boundary.sh"
 
@@ -240,7 +241,7 @@ main() {
     (
       XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}" XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}" XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}" XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
       muse_clean_environment "$HOME" muse-code /usr/bin/env 0
-      "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" exec --json --model "$MU_MODEL" --session-id "$sid" \
+      reviewer_credit_run muse "$log" "$out.err" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" exec --json --model "$MU_MODEL" --session-id "$sid" \
         --workspace "$workspace" --disable-approval --disable-web-tools \
         --no-foreign-personal-context --user-input-auto-resolve \
         --prompt-file "$(native_path "$prompt_full")" \
@@ -259,7 +260,7 @@ main() {
              XDG_CACHE_HOME="$(native_path "$xdg/cache")"
       muse_clean_environment "$HOME" opencode /usr/bin/env 0
       printf '%s' "$(cat "$prompt_full")" \
-        | "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \
+        | reviewer_credit_run muse "$log" "$out.err" -- "${clean_env[@]}" "AI_MUSE_SECRET_FILE=$key_file" /usr/bin/bash --noprofile --norc -c "$MUSE_CREDENTIAL_BOUNDARY" muse-credential-boundary /usr/bin/timeout "$MU_TIMEOUT" "$bin" run --agent "$MU_AGENT" --auto \
             --format json --model "$MU_MODEL" \
             --dir "$(native_path "$DOOR_WORKDIR")" \
             > "$log" 2> "$out.err"
@@ -271,7 +272,8 @@ main() {
   MU_KEY=""
 
   if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT muse door\n' >&2
+    reviewer_capacity_current muse "$log" || true
+    reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92
   fi

@@ -612,9 +612,8 @@ persist_review_error() { # META ASSISTANT_JSON
   receipt="$(review_error_receipt "$meta")" || return 1
   [ "$(jq -r .remote_turn.error_path "$meta")" = "$path" ] && [ "$(jq -r .remote_turn.error_sha256 "$meta")" = "$(sha256sum "$path" | cut -d' ' -f1)" ] && jq -e '.last_failed_turn==.remote_turn and .remote_turn.state=="terminal-error" and .remote_turn.authorizing==false' "$meta" >/dev/null || return 1
   failure="$(jq -r .failure_class <<<"$receipt")"; observed="$(jq -r .observed_epoch <<<"$receipt")"
-  if [ "$failure" = provider-quota-exhausted ] && [ "$(jq -r .observation_state <<<"$receipt")" = known ]; then
-    "$REVIEW_PREFLIGHT_BIN" pause glm out-of-credit --seconds 3600 --observed "$observed" >/dev/null || return 1
-  fi
+  # Capacity holds are recorded from the exact provider error below. A generic
+  # quota/rate-limit receipt must not invent a one-hour money-credit pause.
 }
 
 recover_review_error() { # META: local-only, never a verdict or a provider read
@@ -1363,19 +1362,29 @@ touch_liveness() { # touch_liveness ASSISTANT_JSON
 # finish="error" and stops the turn. Waiting for finish="stop" after that only burns
 # the whole turn deadline (PR #1366: HTTP 429 quota exhaustion at 4s, killed at 25m).
 provider_turn_error() { # provider_turn_error ASSISTANT_JSON NAME [IMPLEMENTATION_META]
-  local msg="$1" name="$2" impl_meta="${3:-}" detail failure=provider-error
+  local msg="$1" name="$2" impl_meta="${3:-}" detail failure=provider-error marker python
   detail="$(printf '%s' "$msg" | jq -r '(.error.message // .error.data.message // .error.name // "unspecified provider error") | tostring' | tr '\r\n' '  ' | cut -c1-600)"
   case "$detail" in
     *"HTTP 429"*|*"Limit Exhausted"*|*[Qq]uota*|*"rate limit"*|*"Rate limit"*) failure=provider-quota-exhausted;;
   esac
+  declare -F reviewer_capacity_scan >/dev/null || source "$WRAPPER_DIR/../tools/reviewer_event_guard.sh"
+  marker="$(mktemp)" || return 1
+  chmod 600 "$marker" || { rm -f "$marker"; return 1; }
+  python="$(command -v python3 || command -v python)" || { rm -f "$marker"; return 1; }
+  printf '%s' "$msg" | "$python" -c 'import json,sys;sys.path.insert(0,sys.argv[1]);from reviewer_credit_stream import refusal;row=json.load(sys.stdin);receipt=refusal("glm",row.get("error"));print(json.dumps(receipt)) if receipt else None' "$WRAPPER_DIR/../tools" > "$marker" || { rm -f "$marker"; return 1; }
+  reviewer_capacity_scan glm "$marker" || true
+  rm -f "$marker"
   if [ -n "$impl_meta" ]; then
     implementation_update "$impl_meta" \
       '.failure=$f | .failure_summary="provider returned an error and ended the turn" | .failure_detected_at=$now' \
       --arg f "$failure" --arg now "$(date -u +%FT%TZ)" || return 1
+    reviewer_credit_exit
     return 125
   fi
   if [ -n "$TURN_META" ]; then persist_review_error "$TURN_META" "$msg" "${GLM_RETAINED_ERROR_OBSERVATION:-live}" || die "could not preserve the exact terminal error; original session remains fenced."; fi
   record_diagnostic terminal provider-error --terminal-reason error --cancellation-confirmation not-requested --failure-class "$failure"
+  [ -z "${REVIEWER_CREDIT_HIT:-}" ] || printf 'GLM provider returned a terminal %s; exact error evidence retained.\n' "$failure" >&2
+  reviewer_credit_exit
   die "GLM provider returned an error and ended the turn ($failure): $detail
        Session $name was not given a verdict; retain or recover its exact diagnostic, never resubmit this turn."
 }

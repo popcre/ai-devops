@@ -12,6 +12,8 @@
 #   bash gemini.sh review|implement
 # with the runner token and DOOR_* environment contract below.
 set -euo pipefail
+DOOR_CREDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$DOOR_CREDIT_ROOT/tools/reviewer_event_guard.sh"
 
 # ---------------------------------------------------------------------------
 # Structural forcing function: a door invoked without the runner token is a
@@ -152,11 +154,11 @@ main() {
     cd "$DOOR_WORKDIR" || exit 1
     if [ -n "$GE_KEY" ]; then export GEMINI_API_KEY="$GE_KEY"; fi
     if [ "$MODE" = implement ]; then
-      timeout "$GE_TIMEOUT" "$agy" --sandbox --mode accept-edits --model "$GE_MODEL" \
+      reviewer_credit_run gemini "$out" "$out.err" -- timeout "$GE_TIMEOUT" "$agy" --sandbox --mode accept-edits --model "$GE_MODEL" \
         --output-format json --print-timeout "$GE_TIMEOUT" --print "$prompt_text" \
         > "$out" 2> "$out.err"
     else
-      timeout "$GE_TIMEOUT" "$agy" --new-project --sandbox --mode accept-edits --model "$GE_MODEL" \
+      reviewer_credit_run gemini "$out" "$out.err" -- timeout "$GE_TIMEOUT" "$agy" --new-project --sandbox --mode accept-edits --model "$GE_MODEL" \
         --output-format json --print-timeout "$GE_TIMEOUT" --print "$prompt_text" \
         > "$out" 2> "$out.err"
     fi
@@ -166,7 +168,8 @@ main() {
   GE_KEY=""
 
   if [ "$rc" -eq 92 ]; then
-    printf 'AI_REVIEWER_OUT_OF_CREDIT gemini door\n' >&2
+    reviewer_capacity_current gemini "$out" || true
+    reviewer_credit_exit
     rm -f "$prompt_full"
     exit 92
   fi

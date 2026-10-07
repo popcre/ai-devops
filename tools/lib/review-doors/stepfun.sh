@@ -268,12 +268,13 @@ extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
 # Writes the final assistant text to $log; declined commands and provider
 # errors go to $out.err. Returns 0 only when the model answered.
 sf_rpc_turn() {
+  reviewer_credit_prepare || return 1
   local prompt_file="$1" line typ id method text="" sf_pid
   : > "$log"; : > "$out.err"
   coproc SF_RPC {
     export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
     export STEP_API_KEY="$SF_KEY" STEP_BASE_URL="$SF_BASE_URL" STEP_AUTOPILOT=1
-    stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" "${sandbox_args[@]}" -- \
+    STEPFUN_CREDIT_OUTPUT="$log" STEPFUN_CREDIT_STDERR="$out.err" stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$SF_TIMEOUT" "$bin" "${sandbox_args[@]}" -- \
       --mode rpc --no-session --model "$SF_STEP_MODEL" --approval-mode auto \
       --no-extensions --no-skills --no-prompt-templates --no-themes \
       --no-approve --no-update-check 2>>"$out.err"
@@ -363,7 +364,7 @@ main() {
              XDG_CACHE_HOME="$(native_path "$xdg/cache")"
       if [ -n "$SF_KEY" ]; then export STEPFUN_API_KEY="$SF_KEY"; export STEP_API_KEY="$SF_KEY"; fi
       printf '%s' "$(cat "$prompt_full")" \
-        | timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
+        | reviewer_credit_run stepfun "$log" "$out.err" -- timeout "$SF_TIMEOUT" "$bin" run --agent "$agent" --auto \
             --format json --model "$SF_OC_PROVIDER/$SF_OC_MODEL_ID" \
             --dir "$(native_path "$oc_dir")" \
             > "$log" 2> "$out.err"
@@ -432,11 +433,14 @@ main() {
   fi
   set -e
   SF_KEY=""
+  reviewer_capacity_current stepfun "$log" || true
 
   # Out of credit: the one shared classifier reads the provider error lines
   # (the agent_end errors land in $out.err), records the out-of-credit
   # quarantine, and prints both contract lines; the runner keeps exit 92.
-  if [ "$rc" -eq 92 ] || { [ "$rc" -ne 0 ] && reviewer_credit_scan stepfun "$out.err"; }; then
+  if [ "$rc" -eq 92 ] || { [ "$rc" -ne 0 ] && reviewer_credit_scan stepfun "$out.err" "$log.credit-refusal.json"; }; then
+    reviewer_capacity_current stepfun "$log" || true
+    reviewer_credit_scan stepfun "$out.err" || true
     [ -z "${REVIEWER_CREDIT_HIT:-}" ] || printf '%s\n' "$REVIEWER_CREDIT_HIT" >&2
     [ -n "${REVIEWER_CREDIT_HIT:-}" ] || printf 'AI_REVIEWER_OUT_OF_CREDIT provider=stepfun code=insufficient_quota\n' >&2
     rm -f "$prompt_full"

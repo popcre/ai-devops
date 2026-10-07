@@ -26,6 +26,7 @@ GLM_START_WALL=$(( GLM_START_DEADLINE * 5 / 2 ))
 [ "$GLM_START_WALL" -lt 5 ] && GLM_START_WALL=5
 
 TMP="$(mktemp -d)"
+export AI_REVIEW_QUARANTINE_DIR="$TMP/credit-holds"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-review-public-fixture.sh"
 ai_test_public_sources "$TMP"
 glm_recovery_cases(){
@@ -169,6 +170,7 @@ REVIEW_LIFECYCLE_BIN="$FIXTURE/lifecycle-read"; PACKET_BIN="$FIXTURE/packet-read
 timeout(){ if [ "${OBSERVATION_HELPER_CASE:-}" = helper-timeout ];then return 124;fi;command timeout "$@"; }
 preflight_fixture(){ printf '%s\n' "$*" >> "$FIXTURE/pauses"; }
 REVIEW_PREFLIGHT_BIN=preflight_fixture
+: > "$FIXTURE/pauses"
 # Reconstructed public schema, never a claimed retained live assistant envelope.
 prepare(){
  "$PYTHON" - "$FIXTURE" "$1" <<'FIXTURE_PY'
@@ -215,7 +217,7 @@ prepare known;meta="$FIXTURE/meta-known.json"
 persist_review_error "$meta" "$msg" historical
 receipt="$(jq -r .remote_turn.error_path "$meta")";expected="$(cat "$FIXTURE/expected-epoch")"
 jq -e --argjson epoch "$expected" '.original_observation.state=="known" and .observed_epoch==$epoch and .captured_epoch>$epoch' "$receipt" >/dev/null
-grep -q -- "--observed $expected" "$FIXTURE/pauses"
+[ ! -s "$FIXTURE/pauses" ] # #1404: error evidence alone never invents a one-hour credit pause.
 cp "$receipt" "$FIXTURE/immutable-known"
 # A later readback is telemetry only; no HTTP and no immutable time renewal.
 api(){ exit 91; };send_prompt(){ exit 92; };require_review_server(){ exit 93; };record_diagnostic(){ :; }
@@ -280,7 +282,7 @@ jq -e '.remote_turn.state=="terminal-error" and .remote_turn.authorizing==false'
 [ "$(cat "${meta%.json}.terminal.json")" = 'OLD5371 immutable success' ]
 receipt="$(jq -r .remote_turn.error_path "$meta")"; cp "$receipt" "$FIXTURE/receipt-original"
 observed="$(jq -r .observed_epoch "$receipt")"
-grep -q -- "--observed $observed" "$FIXTURE/pauses"
+[ ! -e "$FIXTURE/pauses" ] # Error evidence alone never invents a one-hour credit pause.
 api(){ printf forbidden >> "$FIXTURE/network"; return 99; }
 require_review_server(){ printf forbidden >> "$FIXTURE/network"; return 99; }
 send_prompt(){ printf forbidden >> "$FIXTURE/network"; return 99; }
