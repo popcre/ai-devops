@@ -1183,6 +1183,16 @@ linux_review_authority(){
   [ "$matched" -eq 1 ]
 }
 
+stale_completed_baseline_ok(){
+  local auth="$1" completed="$2" old="$3" target="$4" checkout="$5"
+  [ -f "$auth" ] &&
+    [ "$(jq -r '.stale_manifest_recovery // false' "$auth" 2>/dev/null)" = true ] &&
+    [ "$(jq -r '.linux_manifest_recorded_sha // empty' "$auth" 2>/dev/null)" = "$completed" ] &&
+    [ "$(jq -r '.installed_head // empty' "$auth" 2>/dev/null)" = "$old" ] &&
+    git -C "$checkout" merge-base --is-ancestor "$completed" "$old" 2>/dev/null &&
+    git -C "$checkout" merge-base --is-ancestor "$old" "$target" 2>/dev/null
+}
+
 linux_stage_report_valid(){
   local report="$1" expected="$2" mode owner
   [ "$report" = "$expected" ] && [ -f "$report" ] && [ ! -L "$report" ] || return 1
@@ -1350,7 +1360,8 @@ cmd_install_verify(){
     if [ -e "$pending" ]; then
       transaction="$pending"
       old="$(jq -r .installed_head "$pending")"
-      [ -z "$completed_head" ] || [ "$old" = "$completed_head" ] || { [ "$phase" = finalize ] && [ "$completed_head" = "$target" ]; } || blocked 'ai-task-gates: STOP. Protected install baseline differs from last completed release.'
+      [ -z "$completed_head" ] || [ "$old" = "$completed_head" ] || { [ "$phase" = finalize ] && [ "$completed_head" = "$target" ]; } ||
+        stale_completed_baseline_ok "$pending" "$completed_head" "$old" "$target" "$installed" || blocked 'ai-task-gates: STOP. Protected install baseline differs from last completed release.'
       linux_review_authority "$pending" "$old" "$target" "$installed" "$launcher" "$candidate_root" finalize "$manifest" || blocked 'ai-task-gates: STOP. Pending install review proof changed.'
     else
       transaction="$ordinary"
@@ -1432,7 +1443,11 @@ cmd_install_verify(){
     blocked 'ai-task-gates: STOP. Same-source Linux maintenance lacks a completed install receipt; use reviewed migration.'
   fi
   if [ -n "$completed_head" ] && [ "$old" != "$completed_head" ]; then
-    blocked 'ai-task-gates: STOP. Installation baseline differs from last completed release.'
+    stale_completed_baseline_ok "$auth" "$completed_head" "$old" "$target" "$installed" ||
+      blocked 'ai-task-gates: STOP. Installation baseline differs from last completed release.'
+  fi
+  if [ "$phase" = preflight ] && [ "$stale_recovery" -eq 1 ]; then
+    [ "$installed_head" = "$old" ] || blocked 'ai-task-gates: STOP. Reviewed stale recovery no longer matches live installed checkout.'
   fi
   git -C "$installed" merge-base --is-ancestor "$old" "$target" 2>/dev/null || blocked 'ai-task-gates: STOP. Installed receipt is not an ancestor of target.'
   class_base="$old"

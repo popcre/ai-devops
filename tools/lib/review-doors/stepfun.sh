@@ -238,12 +238,12 @@ extract_report() { # extract_report RESULT DEST HEAD MODE ENGINE
   } > "$dest"
 }
 
-# sf_rpc_turn PROMPT: one StepCode turn in RPC mode inside the shared sandbox.
+# sf_rpc_turn PROMPT_FILE: one StepCode turn in RPC mode inside the shared sandbox.
 # Uses main's bin, bwrap, timeout_bin, home_tmp, sandbox_args, log and out.
 # Writes the final assistant text to $log; declined commands and provider
 # errors go to $out.err. Returns 0 only when the model answered.
 sf_rpc_turn() {
-  local prompt="$1" line typ id method text="" sf_pid
+  local prompt_file="$1" line typ id method text="" sf_pid
   : > "$log"; : > "$out.err"
   coproc SF_RPC {
     export HOME="$home_tmp" PATH="/usr/local/bin:/usr/bin:/bin"
@@ -255,7 +255,8 @@ sf_rpc_turn() {
   }
   sf_pid="$SF_RPC_PID"
   local to_rpc="${SF_RPC[1]}" from_rpc="${SF_RPC[0]}"
-  jq -cn --arg m "$prompt" '{id:"door-prompt",type:"prompt",message:$m}' >&"$to_rpc"
+  # --rawfile: a full review prompt can exceed the 128 KiB argv string limit.
+  jq -cn --rawfile m "$prompt_file" '{id:"door-prompt",type:"prompt",message:$m}' >&"$to_rpc"
   while IFS= read -r line <&"$from_rpc"; do
     typ="$(jq -r '.type // empty' <<<"$line" 2>/dev/null || true)"
     case "$typ" in
@@ -362,13 +363,12 @@ main() {
     # declines every such question: the model is told no and keeps reviewing.
     # An HTTP 429 that outlasts StepCode's own retry reruns the turn after a
     # pause, as bin/ai-stepfun does.
-    local prompt_text attempt rate_retries=0
+    local attempt rate_retries=0
     local rate_max="${AI_STEPFUN_RATE_RETRIES:-2}" rate_pause="${AI_STEPFUN_RATE_PAUSE:-65}"
     local -a sandbox_args=("${packet_bind[@]}" --ro-bind "$DOOR_WORKDIR" "$DOOR_WORKDIR"
       --bind "$scratch/work" "$scratch/work" --chdir "$scratch/work")
-    prompt_text="$(cat "$prompt_full")"
     for attempt in 1 2 3; do
-      sf_rpc_turn "$prompt_text"
+      sf_rpc_turn "$prompt_full"
       rc=$?
       [ "$rc" -ne 0 ] || break
       grep -Eq '^429: \{' "$out.err" 2>/dev/null && [ "$rate_retries" -lt "$rate_max" ] || break

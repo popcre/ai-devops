@@ -125,7 +125,7 @@ meta_for(){ find "$TMP/state/sessions" -name "test--$1.json" -print -quit; }
 echo '== ai-gemini fixed response contracts'
 check 'empty success fixture is rejected' "! jq -e '.status==\"SUCCESS\" and (.response|length>0)' '$FIXTURES/empty-success.json'"
 check 'wrong model fixture is rejected' "! jq -e '.command.data.id==\"gemini-3.8-flash-high\"' '$FIXTURES/model-mismatch.json'"
-check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.5'"
+check 'wrapper exposes safety version' "$SCRIPT --version | grep -q '0.2.6'"
 mkdir -p "$TMP/fallback-home/.local/bin"
 cp "$TMP/bin/agy" "$TMP/fallback-home/.local/bin/agy"
 FALLBACK_PATH="/mingw64/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
@@ -194,6 +194,15 @@ set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new 'bad name!' --prompt review) 2>"$TMP/
 check 'invalid session name never auto-requalifies' "test '$BADNAME_RC' -ne 0 && grep -q 'invalid session name' '$TMP/badname.err' && ! grep -q 'requalifying automatically' '$TMP/badname.err' && test ! -s '$MOCK_AGY_CALLS'"
 set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new misspf --prompt-file /nonexistent) 2>"$TMP/misspf.err"; MISSPF_RC=$?; set -e
 check 'missing prompt file never auto-requalifies' "test '$MISSPF_RC' -ne 0 && grep -q 'prompt file not found' '$TMP/misspf.err' && ! grep -q 'requalifying automatically' '$TMP/misspf.err' && test ! -s '$MOCK_AGY_CALLS'"
+# Session shape is validated before paid requalification: ask needs an
+# existing session, new refuses a duplicate, and a non-repo cwd dies first.
+write_qualification 1.1.15; : > "$MOCK_AGY_CALLS"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" ask nosuch --prompt review) 2>"$TMP/askmiss.err"; ASKMISS_RC=$?; set -e
+check 'ask missing session never auto-requalifies' "test '$ASKMISS_RC' -ne 0 && grep -q 'session not found' '$TMP/askmiss.err' && ! grep -q 'requalifying automatically' '$TMP/askmiss.err' && test ! -s '$MOCK_AGY_CALLS'"
+set +e; (cd "$AUTOQ_REPO" && "$SCRIPT" new autoq --prompt review) 2>"$TMP/newdup.err"; NEWDUP_RC=$?; set -e
+check 'new duplicate session never auto-requalifies' "test '$NEWDUP_RC' -ne 0 && grep -q 'session already exists' '$TMP/newdup.err' && ! grep -q 'requalifying automatically' '$TMP/newdup.err' && test ! -s '$MOCK_AGY_CALLS'"
+set +e; (cd "$TMP" && "$SCRIPT" new norepo --prompt review) 2>"$TMP/norepo.err"; NORREPO_RC=$?; set -e
+check 'non-repo cwd never auto-requalifies' "test '$NORREPO_RC' -ne 0 && grep -q 'Git repository' '$TMP/norepo.err' && ! grep -q 'requalifying automatically' '$TMP/norepo.err' && test ! -s '$MOCK_AGY_CALLS'"
 write_qualification
 
 echo '== byte identity and exact identity gates'

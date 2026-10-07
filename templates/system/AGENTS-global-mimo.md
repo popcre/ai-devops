@@ -43,9 +43,13 @@ Rules for the block:
 
 - Every bullet starts with who holds it: `You —`, `Another session —`,
   `Waiting on —`, `Blocked —`.
-- A `Waiting on —` bullet names the owner and its last verified activity
-  time; an unowned item is `Blocked —` and must be assigned before the reply
-  ends.
+- A `Waiting on —` bullet names who holds it (in addition to what is waiting),
+  whether that work is actively in progress or idle, and the owner's last
+  verified activity time; an unowned item is `Blocked —` and must be assigned
+  before the reply ends.
+- An `Another session —` bullet says which kind: a subagent this agent spawned
+  and is waiting on, a session already running that it can see, or a session it
+  is asking Albert to start. Never leave it bare.
 - One line per bullet, at most five bullets, most urgent first.
 - Nothing pending may appear anywhere but here. Never write "two things worth
   telling you", "one thing to flag", or "worth noting" in the body — if it is

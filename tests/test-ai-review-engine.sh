@@ -122,6 +122,70 @@ for _door_pair in "muse:$MUSE_DOOR" "qwen:$QWEN_DOOR" "gemini:$GEMINI_DOOR" "ste
 done
 unset _door_pair _dname _dpath _drc
 
+# The Linux StepFun door must launch a dynamically linked StepCode binary
+# inside its real bubblewrap command. A shell stub misses a missing ELF loader.
+echo '== StepFun door Linux loader'
+if [ "$(uname -s)" = Linux ] && command -v bwrap >/dev/null 2>&1 && command -v cc >/dev/null 2>&1 && command -v readelf >/dev/null 2>&1 &&
+   bwrap --ro-bind / / -- /usr/bin/true >/dev/null 2>&1; then
+  mkdir -p "$TMP/stepfun-door/bin" "$TMP/stepfun-door/work" "$TMP/stepfun-door/packet"
+  cat > "$TMP/stepfun-door/step.c" <<'EOF'
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+  if (argc > 1 && strcmp(argv[1], "--help") == 0) { puts("step - AI coding assistant"); return 0; }
+  if (argc > 1 && strcmp(argv[1], "--version") == 0) { puts("step-fixture-version"); return 0; }
+  if (argc > 1 && strcmp(argv[1], "-p") == 0) {
+    char *args[] = {argv[0], "--version", NULL};
+    execv(argv[0], args);
+  }
+  if (argc > 2 && strcmp(argv[1], "--mode") == 0 && strcmp(argv[2], "rpc") == 0) {
+    /* The door's RPC turn: prompt, settle, then the last assistant text. */
+    static char line[1 << 20];
+    if (!fgets(line, sizeof line, stdin)) return 3;
+    puts("{\"id\":\"door-prompt\",\"type\":\"response\",\"success\":true}");
+    puts("{\"type\":\"agent_settled\"}"); fflush(stdout);
+    if (!fgets(line, sizeof line, stdin)) return 3;
+    puts("{\"id\":\"door-text\",\"type\":\"response\",\"data\":{\"text\":\"step-fixture-version\"}}");
+    fflush(stdout);
+    return 0;
+  }
+  return 2;
+}
+EOF
+  if cc -o "$TMP/stepfun-door/bin/step" "$TMP/stepfun-door/step.c"; then
+    STEP_DOOR_INTERPRETER="$(readelf -l "$TMP/stepfun-door/bin/step" | sed -n 's/.*Requesting program interpreter: \([^]]*\)].*/\1/p')"
+    case "$STEP_DOOR_INTERPRETER" in
+      /lib/*|/lib64/*)
+        if bwrap --ro-bind /usr /usr --ro-bind /etc /etc --dev /dev --proc /proc \
+          --tmpfs /tmp --tmpfs /run --ro-bind "$TMP/stepfun-door/bin" "$TMP/stepfun-door/bin" -- \
+          "$TMP/stepfun-door/bin/step" --version > "$TMP/stepfun-door/no-loader.out" 2>&1; then
+          bad 'StepFun door fixture requires the missing ELF interpreter'
+        else
+          check 'StepFun door fixture reproduces missing ELF interpreter' \
+            "grep -q 'No such file or directory' '$TMP/stepfun-door/no-loader.out'"
+        fi
+        printf 'Review this fixture.\n' > "$TMP/stepfun-door/prompt"
+        if AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_STEP_BIN="$TMP/stepfun-door/bin/step" \
+          AI_STEPFUN_ALLOW_NO_CREDS=1 DOOR_TIMEOUT=10 DOOR_WORKDIR="$TMP/stepfun-door/work" \
+          DOOR_PACKET_DIR="$TMP/stepfun-door/packet" DOOR_PROMPT_FILE="$TMP/stepfun-door/prompt" \
+          DOOR_REPORT_OUT="$TMP/stepfun-door/report" DOOR_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)" \
+          bash "$STEPFUN_DOOR" review > "$TMP/stepfun-door/door.out" 2>&1; then
+          check 'StepFun door launches step --version through the real sandbox' \
+            "grep -q 'step-fixture-version' '$TMP/stepfun-door/report'"
+        else
+          bad 'StepFun door launches step --version through the real sandbox'
+        fi
+        ;;
+      *) skip 'StepFun door loader regression requires an ELF interpreter under /lib or /lib64' ;;
+    esac
+  else
+    bad 'StepFun door dynamic fixture compiles'
+  fi
+else
+  skip 'StepFun door loader regression requires Linux, cc, readelf, and usable bubblewrap'
+fi
+
 # --- structural forcing function: pool refuses a bypassed runner ------------
 echo '== structural forcing function (pool)'
 NOT_ENGINE="$TMP/not-the-engine.sh"

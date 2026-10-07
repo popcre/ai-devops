@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Allocatable reviewer membership. Health is not membership: a provider whose local install is healthy is still unusable unless it is carried in the allocating registry (popcre/shared-db scripts/manage-migration-author-lanes.mjs REVIEWERS). This file is the ai-devops mirror of that membership so one command can answer 'can I use this reviewer right now'. It is a guard: never flip a provider to registered to make an allocation succeed.",
+  "description": "Allocatable reviewer membership. Health is not membership: a provider whose local install is healthy is still unusable unless it is carried in the allocating registry (popcre/shared-db scripts/lib/lanes/reviewer-roster.mjs REVIEWERS, re-exported by scripts/manage-migration-author-lanes.mjs). This file is the ai-devops mirror of that membership so one command can answer 'can I use this reviewer right now'. It is a guard: never flip a provider to registered to make an allocation succeed.",
   "providers": {
     "claude": {
       "registry_state": "absent",

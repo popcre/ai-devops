@@ -286,6 +286,10 @@ run_opencode_turn(){
   mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR" 2>/dev/null || true
   local xdg; xdg="$(mktemp -d "$STATE_DIR/oc-run.XXXXXX")"; chmod 700 "$xdg"
   install_oc_profile "$xdg"
+  # OpenCode writes this bookkeeping file at startup. Keep the actual provider
+  # and agent profile read-only; only this per-run ignore file is writable.
+  : > "$xdg/config/opencode/.gitignore"
+  chmod 600 "$xdg/config/opencode/.gitignore"
   load_key
   log="$out.jsonl"
   set +e
@@ -380,6 +384,7 @@ run_opencode_turn(){
       --tmpfs "$home" \
       --ro-bind "$oc_root" "$oc_root" \
       --ro-bind "$xdg/config" "$xdg/config" \
+      --bind "$xdg/config/opencode/.gitignore" "$xdg/config/opencode/.gitignore" \
       --bind "$xdg/data" "$xdg/data" --bind "$xdg/state" "$xdg/state" --bind "$xdg/cache" "$xdg/cache" \
       --bind "$dir" "$dir" --chdir "$dir" -- \
       "$oc" run --agent "$agent" --auto \
@@ -431,6 +436,17 @@ run_stepcode(){
   bwrap="$(bwrap_bin)" || die 'bubblewrap (bwrap) is required to sandbox StepFun. Install: sudo apt-get install bubblewrap'
   mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR" 2>/dev/null || true
   agent="$(mktemp -d "$STATE_DIR/agent.XXXXXX")"; chmod 700 "$agent"
+  local -a prompt_args=("$prompt") prompt_binds=()
+  # Linux limits each argv string to 128 KiB. A complete governed review can
+  # exceed that limit; StepCode's supported @file input preserves every byte.
+  # Overlay the input read-only inside the same bounded disposable sandbox.
+  if [ "$(printf '%s' "$prompt" | /usr/bin/wc -c)" -gt 65536 ]; then
+    local prompt_file="$agent/request.md"
+    printf '%s' "$prompt" > "$prompt_file"
+    chmod 600 "$prompt_file"
+    prompt_args=("@$prompt_file")
+    prompt_binds=(--ro-bind "$prompt_file" "$prompt_file")
+  fi
   # Resolve host programs before the environment is cleared, so a file planted
   # in a user-writable PATH entry can never run outside the sandbox.
   local timeout_bin; timeout_bin="$(PATH=/usr/bin:/bin command -v timeout)" || die 'timeout is missing from /usr/bin.'
@@ -440,11 +456,11 @@ run_stepcode(){
     export STEP_API_KEY="$STEP_KEY" STEP_BASE_URL="$BASE_URL" STEP_AUTOPILOT=1 STEP_CODING_AGENT_DIR="$agent"
     stepfun_sandbox_exec "$bwrap" "$timeout_bin" "$TIMEOUT" "$bin" \
       --ro-bind-try "$home/.stepcode/agent/bin" "$home/.stepcode/agent/bin" \
-      --bind "$agent" "$agent" "$dir_bind" "$dir" "$dir" --chdir "$dir" -- \
+      --bind "$agent" "$agent" "${prompt_binds[@]}" "$dir_bind" "$dir" "$dir" --chdir "$dir" -- \
       -p --no-session --model "$MODEL" "${tool_args[@]}" \
       --approval-mode "$approval" --non-interactive-approval "$fallback" \
       --no-extensions --no-skills --no-prompt-templates --no-themes \
-      --no-approve --no-update-check -- "$prompt"
+      --no-approve --no-update-check -- "${prompt_args[@]}"
   ) < /dev/null > "$out" 2>"$out.stderr" || rc=$?
   rm -rf "$agent"
   return "$rc"
