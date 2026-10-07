@@ -323,8 +323,9 @@ check 'the routing config matches the manifest and never targets a GitHub-hosted
 # the section job are guarded for every non-Blacksmith lane.
 section_temp_guarded() {
   local lane_guard="matrix.lane != 'blacksmith' }}"
-  printf '%s\n' "$section_block" | grep -A4 -F 'name: Shorten TEMP on a reused self-hosted machine' | grep -F 'if: ${{' | grep -qF "$lane_guard" &&
-    printf '%s\n' "$section_block" | grep -A1 -F 'name: Remove the short TEMP tree on a reused machine' | grep -F 'if: ${{ always() &&' | grep -qF "$lane_guard"
+  # The first `if:` after each step name, however many comment lines sit between.
+  printf '%s\n' "$section_block" | sed -n '/name: Shorten TEMP on a reused self-hosted machine/,$p' | grep -m1 -E '^[[:space:]]+if:' | grep -qF "$lane_guard" &&
+    printf '%s\n' "$section_block" | sed -n '/name: Remove the short TEMP tree on a reused machine/,$p' | grep -m1 -E '^[[:space:]]+if:' | grep -F 'always() &&' | grep -qF "$lane_guard"
 }
 check 'the section-only lane has its own label and is reachable only through the router' \
   '[ "$(jq -c .section_windows "$routing")" = "[\"self-hosted\",\"Windows\",\"X64\",\"ai-devops-windows-section\"]" ] && [ "$(jq -r .section_label "$routing")" = ai-devops-windows-section ] && ! grep -rqF ai-devops-windows-section "$ROOT/.github/workflows" && section_temp_guarded'

@@ -409,7 +409,9 @@ recorded on #1312.
 
 ## 6. Admit the host to ordinary CI
 
-Only after the exact qualification job (complete or sections scope) is green:
+Only after the exact qualification job is green (complete scope, or sections
+scope with clear headroom in every section as judged from its timings; otherwise
+use the section-only lane above):
 
 1. add `ai-devops-windows-qualified`;
 2. keep `ai-devops-windows` for future requalification;

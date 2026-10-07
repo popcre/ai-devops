@@ -55,7 +55,8 @@ check('the section-only lane uses its own label, never the qualified one', () =>
   assert.deepStrictEqual(cfg.section_windows, ['self-hosted', 'Windows', 'X64', cfg.section_label]);
   assert.ok(!cfg.section_windows.includes(cfg.qualified_label));
   assert.notStrictEqual(cfg.section_label, cfg.qualified_label);
-  assert.ok(cfg.section_lane_order.length > 0);
+  // Pinned to EDGE-ALIEN's measured-with-headroom sections (run 37628253929, #1312).
+  assert.deepStrictEqual(cfg.section_lane_order, [3, 4, 6]);
   assert.strictEqual(new Set(cfg.section_lane_order).size, cfg.section_lane_order.length);
   for (const s of cfg.section_lane_order) assert.ok(Number.isInteger(s) && s >= 1 && s <= cfg.windows_sections);
 });
@@ -86,6 +87,11 @@ check('section-only and qualified hosts never take the same section', () => {
   const q = decide(cfg, { event: 'pull_request', idleQualified: 2, idleSection: 3 });
   assert.strictEqual(q.windows_matrix.filter(x => x.lane === 'qualified-self-hosted').length, 2);
   assert.strictEqual(q.windows_matrix.filter(x => x.lane === 'section-self-hosted').length, 3);
+});
+check('a manual run keeps the reviewer reserve and still gives section-only hosts one section each', () => {
+  const p = decide(cfg, { event: 'workflow_dispatch', idleQualified: 1, idleSection: 1 });
+  assert.strictEqual(p.windows_matrix.filter(x => x.lane === 'qualified-self-hosted').length, 0);
+  assert.strictEqual(p.windows_matrix.filter(x => x.lane === 'section-self-hosted').length, 1);
 });
 check('a foreign head never reaches a section-only host', () => {
   const p = decide(cfg, { event: 'pull_request', idleQualified: 0, idleSection: 5, foreign: true });

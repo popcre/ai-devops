@@ -97,7 +97,7 @@ async function run({ github, poolGithub, context, core, cfg }) {
       idleSection = Math.max(0, pool.section - queued.section);
     }
   } catch (error) {
-    core.warning(`Qualified pool unknown (${error.message}); every Windows section stays on Blacksmith.`);
+    core.warning(`Self-hosted pool unknown (${error.message}); every Windows section stays on Blacksmith.`);
     idle = 0;
     idleSection = 0;
   }
