@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 MODULE = pathlib.Path(__file__).resolve().parents[1] / 'tools/reviewer_admission.py'
 spec = importlib.util.spec_from_file_location('admission', MODULE)
@@ -16,6 +17,10 @@ spec.loader.exec_module(api)
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_eastern_display_without_iana_handles_spring_and_fall_boundaries(self):
+        with mock.patch.object(api, 'ZoneInfo', side_effect=api.ZoneInfoNotFoundError()):
+            for utc, suffix in (('2026-03-08T06:59:59Z','01:59 AM EST'),('2026-03-08T07:00:00Z','03:00 AM EDT'),('2026-11-01T05:59:59Z','01:59 AM EDT'),('2026-11-01T06:00:00Z','01:00 AM EST')):
+                self.assertTrue(api.eastern_reset_label(api.reset_epoch(utc)).endswith(suffix))
     def test_stale_reset_cannot_restore_fresh_exhaustion_and_fraction_rounds_up(self):
         data={'provider':'glm'}
         observation={'provider':'glm','state':'exhausted','observed_epoch':1000,'credential_profile_scope':'scope','model_scope':'model','reset_at':'1970-01-01T00:16:39Z'}
@@ -58,7 +63,7 @@ class AdmissionTests(unittest.TestCase):
             self.assertEqual(result.returncode,0,result.stderr)
             effective=api.load(self.directory,'qwen')['capacity_hold']['reset_at']
             if effective:
-                label=datetime.datetime.fromtimestamp(api.reset_epoch(effective),api.ZoneInfo('America/New_York')).strftime('%B %d, %Y at %I:%M %p %Z')
+                label=api.eastern_reset_label(api.reset_epoch(effective))
                 self.assertIn(label,result.stdout)
             return api.load(self.directory,'qwen')['capacity_hold']['reset_at']
         later=marker(7200)

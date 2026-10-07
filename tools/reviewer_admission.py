@@ -46,6 +46,23 @@ def qualified_reset(provider, value, now):
         return None
 
 
+def eastern_reset_label(epoch):
+    """Windows Python may lack IANA data; modern US Eastern rules suffice here."""
+    instant = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc)
+    try:
+        eastern = ZoneInfo('America/New_York')
+    except ZoneInfoNotFoundError:
+        if instant.year < 2007:
+            raise ValueError('unsupported historical Eastern timezone date')
+        march_first = datetime.datetime(instant.year, 3, 1, tzinfo=datetime.timezone.utc)
+        november_first = datetime.datetime(instant.year, 11, 1, tzinfo=datetime.timezone.utc)
+        spring = march_first.replace(day=8 + (6 - march_first.weekday()) % 7, hour=7)
+        autumn = november_first.replace(day=1 + (6 - november_first.weekday()) % 7, hour=6)
+        daylight = spring <= instant < autumn
+        eastern = datetime.timezone(datetime.timedelta(hours=-4 if daylight else -5), 'EDT' if daylight else 'EST')
+    return instant.astimezone(eastern).strftime('%B %d, %Y at %I:%M %p %Z')
+
+
 def capacity_observation(data, provider, observation, now):
     """Reconcile qualified reader output; clock expiry never releases capacity."""
     if not isinstance(observation, dict) or observation.get('provider') != provider:
@@ -287,7 +304,7 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
             reset = None
             print('reviewer admission: out-of-credit quarantine not recorded: ' + str(error), file=sys.stderr)
     try:
-        reset_label = datetime.datetime.fromtimestamp(reset_epoch(reset), ZoneInfo('America/New_York')).strftime('%B %d, %Y at %I:%M %p %Z') if reset else 'unavailable'
+        reset_label = eastern_reset_label(reset_epoch(reset)) if reset else 'unavailable'
     except (ZoneInfoNotFoundError, ValueError, OverflowError):
         reset_label = 'display unavailable; provider reset retained'
     human = ('ALLOWANCE EXHAUSTED: %s; automatic return at provider reset; reset %s.' % (provider, reset_label) if allowance else 'OUT OF CREDIT: %s; automatic return requires verified paid balance.' % CREDIT_MESSAGES[provider])
