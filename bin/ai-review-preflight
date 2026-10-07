@@ -60,6 +60,13 @@ admission_store() {
   "$runtime" "$REGISTRY_REAL_DIR/../tools/reviewer_admission.py" "$@" --directory "$STATE_DIR"
 }
 
+quota_reset_label() { # ISO-8601 RESET -> "October 09, 2026 at 12:00 AM EDT" (America/New_York)
+  local runtime
+  runtime="$(command -v python3 || command -v python)" || return 1
+  "$runtime" -c 'import sys; sys.path.insert(0, sys.argv[1]); import reviewer_admission as a; print(a.eastern_reset_label(a.reset_epoch(sys.argv[2])))' \
+    "$REGISTRY_REAL_DIR/../tools" "$1" 2>/dev/null
+}
+
 kimi_effective_profile() {
   local home="${KIMI_CODE_HOME:-$HOME/.kimi-code}" owner="${AI_KIMI_OWNER:-ai}" as="" candidate binary="" found="" context
   # Only root can use the existing password-free delegation capability. All
@@ -896,7 +903,15 @@ check_provider() { # PROVIDER REPO LIVE BASE
   local capacity_hold
   capacity_hold="$(capacity_admission "$provider")" || return 1
   if [ "$capacity_hold" != null ]; then
-      printf 'ai-review-preflight: %s is held for %s; reset %s.\n' "$provider" "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" "$(printf '%s' "$capacity_hold" | jq -r '.reset_at // "unavailable"')" >&2
+      local hold_reset hold_label
+      hold_reset="$(printf '%s' "$capacity_hold" | jq -r '.reset_at // empty')"
+      if [ -n "$hold_reset" ] && [ "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" = allowance-exhausted ] \
+        && hold_label="$(quota_reset_label "$hold_reset")"; then
+        # #1431: known exhausted allowance; refuse before any provider call.
+        printf 'ai-review-preflight: %s quota exhausted until %s; skipped with no provider call.\n' "$provider" "$hold_label" >&2
+      else
+        printf 'ai-review-preflight: %s is held for %s; reset %s.\n' "$provider" "$(printf '%s' "$capacity_hold" | jq -r .failure_class)" "${hold_reset:-unavailable}" >&2
+      fi
       return 3
   fi
   out="$(default_admission "$provider")" || return 1

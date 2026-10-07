@@ -335,6 +335,15 @@ check "healthy Gemini status retains one existing identity check" ": > '$MOCK_GE
 unset MOCK_GEMINI_MODE_LOG
 unset AI_REVIEWER_ISSUE_DIR
 check "requalify recovers the reviewer on the next successful run" "$SCRIPT requalify qwen && $SCRIPT status qwen | jq -e '.status==\"installed-healthy\"'"
+# #1431 C5: a known exhausted allowance skips the reviewer until its reset.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/c5-provider-calls"\nexec "%s/bin/good" "$@"\n' "$TMP" "$TMP" > "$TMP/bin/c5-counting"
+chmod +x "$TMP/bin/c5-counting"
+c5_hold(){ jq --arg at "$1" --argjson now "$(date +%s)" '.capacity_hold={provider:"qwen",failure_class:"allowance-exhausted",credential_profile_scope:null,model_scope:null,observed_epoch:($now-60),reset_at:$at,next_check_epoch:$now,record_id:"c5-fixture"}' "$AI_REVIEW_QUARANTINE_DIR/qwen.json" > "$TMP/c5.json" && mv "$TMP/c5.json" "$AI_REVIEW_QUARANTINE_DIR/qwen.json"; }
+c5_hold "$(date -u -d '@'"$(( $(date +%s) + 86400 ))" +%FT%TZ)"
+rm -f "$TMP/c5-provider-calls"
+check "skip_until_quota_reset: future reset refuses with the EST line and makes zero provider calls" "out=\$(AI_REVIEW_QWEN_WRAPPER='$TMP/bin/c5-counting' $SCRIPT check qwen '$REPO' 2>&1); rc=\$?; [ \$rc -eq 3 ] && printf '%s' \"\$out\" | grep -Eq 'qwen quota exhausted until .* E[SD]T; skipped with no provider call' && test ! -e '$TMP/c5-provider-calls'"
+c5_hold "$(date -u -d '@'"$(( $(date +%s) - 5 ))" +%FT%TZ)"
+check "dispatch_after_reset: a passed reset lifts the hold and the provider is contacted again" "AI_REVIEW_QWEN_WRAPPER='$TMP/bin/c5-counting' $SCRIPT check qwen '$REPO' > '$TMP/c5-after.log' 2>&1; ! grep -q 'quota exhausted' '$TMP/c5-after.log' && test -s '$TMP/c5-provider-calls' && jq -e '.capacity_hold==null' '$AI_REVIEW_QUARANTINE_DIR/qwen.json'"
 
 echo '== post-merge reviewer hook (#804)'
 HOOKTEST="$TMP/hooktest"; HOOK_ORIGIN="$HOOKTEST/origin.git"; HOOK_CLONE="$HOOKTEST/clone"
