@@ -516,17 +516,56 @@ echo ok > "$TMP/mode"
 
 run() { ( cd "$REPO" && bash "$SCRIPT" "$@" ) ; }
 
-CAP_NOW="$(date -u +%FT%TZ)"
-GROK_EXHAUSTED="$(jq -nc --arg now "$CAP_NOW" '{schema_version:1,provider:"grok",state:"exhausted",checked_at:$now,provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
+CAPACITY_PREFLIGHT_STUB="$TMP/capacity-preflight"
+cat > "$CAPACITY_PREFLIGHT_STUB" <<'CAPACITY_STUB_EOF'
+#!/usr/bin/env bash
+set -u
+[ "$#" -eq 3 ] && [ "$1" = capacity ] && [ "$2" = grok ] && [ "$3" = --json ] || exit 64
+response="${AI_REVIEW_CAPACITY_TEST_RESPONSE:-}"
+delay="${AI_REVIEW_CAPACITY_TEST_DELAY:-0}"
+case "$delay" in ''|0) ;; *[!0-9]*) exit 64;; *) sleep "$delay";; esac
+printf '%s\n' "$response" | jq -e '
+  .schema_version == 1 and .provider == "grok" and
+  (.state == "available" or .state == "exhausted") and
+  ((.state == "available" and .reason == "reported-capacity") or
+   (.state == "exhausted" and .reason == "reported-exhaustion")) and
+  (.provider_version|type == "string" and length > 0) and
+  (.credential_profile_scope == "fixture-profile") and (.model_scope == "grok-4.6") and
+  (.source_kind == "synthetic-fixture") and (.reset_at == null)
+' >/dev/null 2>&1 || exit 65
+checked_at="$(date -u +%FT%TZ)" || exit 66
+printf '%s\n' "$response" | jq -c --arg checked_at "$checked_at" '.checked_at = $checked_at'
+CAPACITY_STUB_EOF
+chmod +x "$CAPACITY_PREFLIGHT_STUB"
+
+GROK_EXHAUSTED="$(jq -nc '{schema_version:1,provider:"grok",state:"exhausted",checked_at:"1970-01-01T00:00:00Z",provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-exhaustion",reset_at:null}')"
+GROK_AVAILABLE="$(jq -nc '{schema_version:1,provider:"grok",state:"available",checked_at:"1970-01-01T00:00:00Z",provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-capacity",reset_at:null}')"
+check "capacity stub accepts exact arguments and mints response time" "AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_AVAILABLE' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json | jq -e '.provider==\"grok\" and .checked_at != \"1970-01-01T00:00:00Z\"'"
+GROK_WRONG_PROVIDER="$(jq -c '.provider="glm"' <<<"$GROK_AVAILABLE")"
+GROK_WRONG_STATE="$(jq -c '.state="unknown"' <<<"$GROK_AVAILABLE")"
+GROK_WRONG_REASON="$(jq -c '.reason="reported-exhaustion"' <<<"$GROK_AVAILABLE")"
+check "capacity stub refuses extra or missing arguments" "! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_AVAILABLE' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json extra >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_AVAILABLE' '$CAPACITY_PREFLIGHT_STUB' capacity grok >/dev/null 2>&1"
+check "capacity stub refuses malformed, wrong provider, state, or reason" "! AI_REVIEW_CAPACITY_TEST_RESPONSE='not-json' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_WRONG_PROVIDER' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_WRONG_STATE' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_WRONG_REASON' '$CAPACITY_PREFLIGHT_STUB' capacity grok --json >/dev/null 2>&1 && ! AI_REVIEW_CAPACITY_TEST_RESPONSE='$GROK_AVAILABLE' '$CAPACITY_PREFLIGHT_STUB' capacity glm --json >/dev/null 2>&1"
 rm -f "$TMP/provider-contacted"
-GROK_BLOCKED="$(AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_EXHAUSTED" run new capacity-exhausted --prompt review 2>&1)"; GROK_BLOCKED_RC=$?
-check "exhausted Grok capacity submits zero model turns" "test '$GROK_BLOCKED_RC' -ne 0 && test ! -e '$TMP/provider-contacted' && printf '%s' \"\$GROK_BLOCKED\" | grep -q 'not submitted'"
-check "exhausted Grok capacity creates no session record" "! grep -R -l capacity-exhausted '$AI_GROK_STATE_DIR/session-records' 2>/dev/null"
-GROK_AVAILABLE="$(jq -nc --arg now "$(date -u +%FT%TZ)" '{schema_version:1,provider:"grok",state:"available",checked_at:$now,provider_version:"1.0.13",credential_profile_scope:"fixture-profile",model_scope:"grok-4.6",source_kind:"synthetic-fixture",reason:"reported-capacity",reset_at:null}')"
+GROK_BLOCKED="$(AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_EXHAUSTED" AI_REVIEW_PREFLIGHT_BIN="$CAPACITY_PREFLIGHT_STUB" AI_REVIEW_CAPACITY_TEST_DELAY=2 run new capacity-exhausted --prompt review 2>&1)"; GROK_BLOCKED_RC=$?
+capacity_failure_diagnostic() {
+  local status="$1" contact="$2" expected_state="$3" expected_reason="$4" session_id="$5" sessions actual_state=unknown actual_reason=unknown
+  sessions="$(find "$AI_GROK_STATE_DIR/session-records" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+  while IFS= read -r diagnostic; do
+    actual_state="$(jq -r 'select(.provider=="grok" and .session_id=="'"$session_id"'" and (.quota_result.state|IN("available","exhausted","unknown"))) | .quota_result.state' "$diagnostic" 2>/dev/null | tail -1)"
+    actual_reason="$(jq -r 'select(.provider=="grok" and .session_id=="'"$session_id"'" and (.quota_result.reason|IN("reported-capacity","reported-exhaustion","malformed-response","stale-response","wrong-scope","unsupported-interface"))) | .quota_result.reason' "$diagnostic" 2>/dev/null | tail -1)"
+    [ -n "$actual_state" ] || actual_state=unknown
+    [ -n "$actual_reason" ] || actual_reason=unknown
+  done < <(find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' 2>/dev/null)
+  printf 'capacity fixture diagnostic: exit_status=%s provider_contacted=%s session_count=%s expected_quota_state=%s expected_quota_reason=%s actual_quota_state=%s actual_quota_reason=%s\n' "$status" "$contact" "$sessions" "$expected_state" "$expected_reason" "$actual_state" "$actual_reason" >&2
+}
+if [ "$GROK_BLOCKED_RC" -ne 0 ] && [ ! -e "$TMP/provider-contacted" ] && printf '%s' "$GROK_BLOCKED" | grep -q 'not submitted'; then ok "exhausted Grok capacity submits zero model turns"; else capacity_failure_diagnostic "$GROK_BLOCKED_RC" "$(test -e "$TMP/provider-contacted" && echo true || echo false)" exhausted reported-exhaustion capacity-exhausted; bad "exhausted Grok capacity submits zero model turns"; fi
+if ! grep -R -l capacity-exhausted "$AI_GROK_STATE_DIR/session-records" 2>/dev/null; then ok "exhausted Grok capacity creates no session record"; else capacity_failure_diagnostic "$GROK_BLOCKED_RC" "$(test -e "$TMP/provider-contacted" && echo true || echo false)" exhausted reported-exhaustion capacity-exhausted; bad "exhausted Grok capacity creates no session record"; fi
 rm -f "$TMP/provider-contacted"
-AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_AVAILABLE" run new capacity-available --prompt review >/dev/null 2>&1
-check "available Grok capacity submits one intended model turn" "test -e '$TMP/provider-contacted'"
-check "available Grok capacity is retained in exact-run diagnostics" "find '$AI_REVIEW_LIFECYCLE_DIR/diagnostics' -type f -name '*.json' -exec jq -e 'select(.provider==\"grok\" and .session_id==\"capacity-available\" and .quota_result.state==\"available\")' {} + | grep available >/dev/null"
+AI_REVIEW_CAPACITY_TEST_RESPONSE="$GROK_AVAILABLE" AI_REVIEW_PREFLIGHT_BIN="$CAPACITY_PREFLIGHT_STUB" AI_REVIEW_CAPACITY_TEST_DELAY=2 run new capacity-available --prompt review >/dev/null 2>&1
+GROK_AVAILABLE_RC=$?
+if [ "$GROK_AVAILABLE_RC" -eq 0 ] && [ -e "$TMP/provider-contacted" ]; then ok "available Grok capacity submits one intended model turn"; else capacity_failure_diagnostic "$GROK_AVAILABLE_RC" "$(test -e "$TMP/provider-contacted" && echo true || echo false)" available reported-capacity capacity-available; bad "available Grok capacity submits one intended model turn"; fi
+if find "$AI_REVIEW_LIFECYCLE_DIR/diagnostics" -type f -name '*.json' -exec jq -e 'select(.provider=="grok" and .session_id=="capacity-available" and .quota_result.state=="available")' {} + | grep available >/dev/null; then ok "available Grok capacity is retained in exact-run diagnostics"; else capacity_failure_diagnostic "$GROK_AVAILABLE_RC" "$(test -e "$TMP/provider-contacted" && echo true || echo false)" available reported-capacity capacity-available; bad "available Grok capacity is retained in exact-run diagnostics"; fi
 
 echo "ai-grok-review tests"
 
