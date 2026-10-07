@@ -62,7 +62,12 @@ if [[ "$args" == *"--input-format stream-json"* ]]; then
   stream_input="$(cat)"
   printf '%s' "$stream_input" | jq -r '.message.content[0].text' | wc -c > "$MOCK_STREAM_BYTES"
   [ "${MOCK_MODE:-normal}" != stream-mutate-protected ] || printf changed >> "$MOCK_PROTECTED/file.txt"
-  printf '%s\n' '{"event":"init","conversation_id":"conv-good"}'
+  [ "${MOCK_MODE:-normal}" != stream-foreign-scratch ] || { mkdir -p "$MOCK_PROTECTED/.scratch/other-session/__pycache__"; printf x > "$MOCK_PROTECTED/.scratch/other-session/__pycache__/m.pyc"; }
+  if [ -n "${MOCK_INIT_MODEL:-}" ]; then
+    jq -nc --arg m "$MOCK_INIT_MODEL" '{event:"init",conversation_id:"conv-good",init:{model:$m}}'
+  else
+    printf '%s\n' '{"event":"init","conversation_id":"conv-good"}'
+  fi
   if [ "${MOCK_MODE:-normal}" = stream-wrong-conversation ]; then
     printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","conversation_id":"conv-wrong","response":"## Verdict\nAPPROVE"}}'
   else
@@ -247,7 +252,7 @@ R3E="$TMP/repo3e"; make_repo "$R3E"; export MOCK_PROTECTED="$R3E"
 check 'concurrent reviewer output (DeepSeek sessions, reports) during the turn is not source drift' "new_run '$R3E' concurrent-reviewers concurrent-reviewers | grep -q '^PASS'"
 R3F="$TMP/repo3f"; make_repo "$R3F"; export MOCK_PROTECTED="$R3F"
 check 'a real source edit alongside concurrent reviewer output is still rejected' "! new_run '$R3F' concurrent-source concurrent-reviewers-and-source"
-R3G="$TMP/repo3g"; make_repo "$R3G"; export MOCK_PROTECTED="$R3G"
+R3G="$TMP/repo3g"; make_repo "$R3G" no; export MOCK_PROTECTED="$R3G"
 check 'a look-alike sibling of a reviewer-owned path stays protected' "! new_run '$R3G' concurrent-lookalike concurrent-lookalike"
 R3H="$TMP/repo3h"; make_repo "$R3H"; mkdir -p "$R3H/.ai/deepseek-sessions"; printf tracked > "$R3H/.ai/deepseek-sessions/tracked.json"; git -C "$R3H" add -f .ai/deepseek-sessions/tracked.json; git -C "$R3H" commit -qm tracked-session; export MOCK_PROTECTED="$R3H"
 check 'tracked files inside the DeepSeek session directory remain protected' "! new_run '$R3H' concurrent-tracked concurrent-tracked-session"
@@ -255,8 +260,9 @@ check 'tracked files inside the DeepSeek session directory remain protected' "! 
 # change during a review from the main checkout; they are not this source.
 R3I="$TMP/repo3i"; make_repo "$R3I"; mkdir -p "$R3I/.ai/wt/other" "$R3I/.ai/wt/plain"; git -C "$R3I/.ai/wt/other" init -q; printf a > "$R3I/.ai/wt/other/work.txt"; printf a > "$R3I/.ai/wt/plain/work.txt"; export MOCK_PROTECTED="$R3I"
 check 'another session changing its ignored nested checkout is tolerated' "new_run '$R3I' protected-nested mutate-protected-nested"
-check 'a new ignored nested checkout appearing is still rejected' "! new_run '$R3I' protected-new-nested mutate-protected-new-nested"
-check 'an ignored plain folder (not a checkout) stays protected' "! new_run '$R3I' protected-nested-plain mutate-protected-nested-plain"
+# #1433: wholly ignored, untracked directories are other sessions' scratch.
+check 'a new ignored nested checkout appearing is tolerated (foreign scratch)' "new_run '$R3I' protected-new-nested mutate-protected-new-nested"
+check 'foreign_scratch_write_accepted: an ignored plain folder changing is tolerated' "new_run '$R3I' protected-nested-plain mutate-protected-nested-plain"
 # 2026-09-24 (#795): another session's untracked root `.tmp-*` scratch changes during reviews.
 R3J="$TMP/repo3j"; make_repo "$R3J"; printf '/.tmp-*\n' >> "$R3J/.gitignore"; git -C "$R3J" add .gitignore; git -C "$R3J" commit -qm ignore-tmp; printf a > "$R3J/.tmp-scratch.json"; mkdir -p "$R3J/sub"; printf a > "$R3J/sub/.tmp-deep"; printf a > "$R3J/.tmp-tracked.txt"; git -C "$R3J" add -f .tmp-tracked.txt; git -C "$R3J" commit -qm tracked-tmp; export MOCK_PROTECTED="$R3J"
 check 'untracked root .tmp-* scratch churn is tolerated' "new_run '$R3J' protected-root-tmp mutate-protected-root-tmp"
@@ -286,7 +292,15 @@ set +e; (cd "$RLARGE" && MOCK_MODE=stream-wrong-conversation "$SCRIPT" new large
 check 'streamed result with a different conversation is refused' "test '$LARGE_WRONG_RC' -ne 0 && test \"\$(jq -r .status \"\$(meta_for large-wrong)\")\" = RECOVERY_REQUIRED"
 check 'streamed conversation mismatch is not booked as missing-verdict' "test '$LARGE_WRONG_RC' -ne 81 && ! grep -q '^AI_REVIEW_EMPTY_VERDICT ' '$TMP/large-wrong.err'"
 export MOCK_PROTECTED="$RLARGE"
-check 'streamed source mutation refuses the review' "! (cd '$RLARGE' && MOCK_MODE=stream-mutate-protected '$SCRIPT' new large-drift --prompt-file '$TMP/large-prompt.txt')"
+# #1433: model identity from the main response; no separate /model call.
+printf '/.scratch/\n' >> "$RLARGE/.gitignore"; git -C "$RLARGE" add .gitignore; git -C "$RLARGE" commit -qm ignore-scratch
+export MOCK_PROTECTED="$RLARGE"
+BEFORE_MODEL_CALLS="$(grep -c ' /model ' "$MOCK_AGY_CALLS" || true)"; BEFORE_CALLS="$(wc -l < "$MOCK_AGY_CALLS")"
+check 'model_from_main_response: streamed review completes from init model' "(cd '$RLARGE' && MOCK_INIT_MODEL=gemini-3.8-flash-high MOCK_MODE=stream-foreign-scratch '$SCRIPT' new init-model --prompt-file '$TMP/large-prompt.txt') | grep -q '^PASS'"
+check 'model_from_main_response: one provider call per review, no /model call' "test \"\$(grep -c ' /model ' '$MOCK_AGY_CALLS' || true)\" = '$BEFORE_MODEL_CALLS' && test \"\$(wc -l < '$MOCK_AGY_CALLS')\" -eq \$(( $BEFORE_CALLS + 1 ))"
+check 'foreign_scratch_write_accepted: another session writing ignored scratch during a streamed turn is not drift' "test -s '$RLARGE/.scratch/other-session/__pycache__/m.pyc' && jq -e '.status==\"COMPLETE\"' \"\$(meta_for init-model)\""
+check 'a wrong model named by the main response is rejected' "! (cd '$RLARGE' && MOCK_INIT_MODEL=gemini-wrong '$SCRIPT' new init-wrong --prompt-file '$TMP/large-prompt.txt')"
+check 'tracked_write_still_rejected: streamed tracked-source mutation refuses the review' "! (cd '$RLARGE' && MOCK_MODE=stream-mutate-protected '$SCRIPT' new large-drift --prompt-file '$TMP/large-prompt.txt')"
 STREAM_FAILURE="$(jq -r .failure_artifact "$(meta_for large-drift)")"
 check 'source-drift failure preserves raw stream evidence' "test -s '${STREAM_FAILURE%.json}.stream.ndjson'"
 check 'completed state stores exact conversation' "jq -e '.status==\"COMPLETE\" and .conversation_id==\"conv-good\"' \"\$(meta_for good)\""
