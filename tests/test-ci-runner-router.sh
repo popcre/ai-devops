@@ -17,7 +17,7 @@ node - <<'JS'
 const assert = require('assert');
 const path = require('path');
 const cfg = require(path.resolve('config/ci-runner-routing.json'));
-const { decide, run } = require(path.resolve('tools/ci/runner-router.cjs'));
+const { decide, decideLinux, run } = require(path.resolve('tools/ci/runner-router.cjs'));
 let failures = 0;
 const lanes = m => m.map(x => x.lane).join(',');
 function check(label, fn) {
@@ -105,6 +105,29 @@ check('a foreign head never reaches the self-hosted pool or WarpBuild', () => {
   }
 });
 
+const allBlacksmithLinux = Array(cfg.linux_shards).fill('blacksmith').join(',');
+check('Linux: no idle host keeps every section on Blacksmith', () => {
+  const p = decideLinux(cfg, { idleLinux: 0 });
+  assert.strictEqual(lanes(p.linux_matrix), allBlacksmithLinux);
+  for (const l of p.linux_matrix) assert.strictEqual(l.runs_on, cfg.blacksmith_linux);
+  assert.deepStrictEqual(p.linux_matrix.map(x => x.shard), [1, 2, 3, 4]);
+});
+check('Linux: the self-hosted lane is the ai-devops-linux label', () => {
+  assert.deepStrictEqual(cfg.linux_self_hosted, ['self-hosted', 'Linux', 'X64', cfg.linux_label]);
+  assert.strictEqual(cfg.blacksmith_linux, 'blacksmith-4vcpu-ubuntu-2404');
+});
+check('Linux: one idle host takes exactly one section', () => {
+  const p = decideLinux(cfg, { idleLinux: 1 });
+  assert.strictEqual(p.linux_matrix.filter(x => x.lane === 'linux-self-hosted').length, 1);
+  assert.deepStrictEqual(p.linux_matrix[cfg.linux_lane_order[0] - 1].runs_on, cfg.linux_self_hosted);
+});
+check('Linux: more idle hosts than sections never over-assigns', () => {
+  assert.strictEqual(decideLinux(cfg, { idleLinux: 99 }).linux_matrix.filter(x => x.lane !== 'blacksmith').length, cfg.linux_shards);
+});
+check('Linux: a foreign head never reaches a self-hosted Linux host', () => {
+  assert.strictEqual(lanes(decideLinux(cfg, { idleLinux: 5, foreign: true }).linux_matrix), allBlacksmithLinux);
+});
+
 function fakeCore() {
   const out = {};
   return { out, info() {}, warning(m) { out._warn = (out._warn || []).concat(m); }, setOutput(k, v) { out[k] = v; },
@@ -155,6 +178,27 @@ const sectionOnly = Array.from({ length: cfg.windows_sections }, (_, k) => (k + 
     const core = fakeCore();
     await run({ ...deps, context: ctx, core, cfg });
     check(label, () => assert.strictEqual(lanesOut(core), expected));
+  }
+  const linuxHost = (busy, status = 'online') => ({ status, busy, labels: ['self-hosted', 'Linux', cfg.linux_label].map(name => ({ name })) });
+  const linuxOne = Array.from({ length: cfg.linux_shards }, (_, k) => (k + 1 === cfg.linux_lane_order[0] ? 'linux-self-hosted' : 'blacksmith')).join(',');
+  const linuxCases = [
+    ['Linux: an idle edge-dev3-linux host takes one section', { github: fakeGithub(), poolGithub: fakePool([linuxHost(false)]) }, linuxOne],
+    ['Linux: a busy or offline host leaves every section on Blacksmith', { github: fakeGithub(), poolGithub: fakePool([linuxHost(true), linuxHost(false, 'offline')]) }, allBlacksmithLinux],
+    ['Linux: a job already queued for the host claims it first',
+      { github: fakeGithub([{ status: 'queued', labels: ['self-hosted', cfg.linux_label] }]), poolGithub: fakePool([linuxHost(false)]) }, allBlacksmithLinux],
+    ['Linux: a failed pool lookup keeps every section on Blacksmith', { github: fakeGithub(), poolGithub: fakePool([], true) }, allBlacksmithLinux],
+    ['Linux: no pool token keeps every section on Blacksmith', { github: fakeGithub(), poolGithub: null }, allBlacksmithLinux],
+    ['Linux: an idle Windows host never takes a Linux section', { github: fakeGithub(), poolGithub: fakePool([envy(false)]) }, allBlacksmithLinux],
+  ];
+  for (const [label, deps, expected] of linuxCases) {
+    const core = fakeCore();
+    await run({ ...deps, context: ctx, core, cfg });
+    check(label, () => assert.strictEqual(lanes(JSON.parse(core.out.linux_matrix)), expected));
+  }
+  {
+    const core = fakeCore();
+    await run({ github: fakeGithub(), poolGithub: fakePool([linuxHost(false)]), context: { ...ctx, payload: { pull_request: { head: { repo: { full_name: 'stranger/ai-devops' } } } } }, core, cfg });
+    check('Linux: a fork pull request never reaches edge-dev3-linux', () => assert.strictEqual(lanes(JSON.parse(core.out.linux_matrix)), allBlacksmithLinux));
   }
   for (const [label, head] of [['a fork pull request never reaches a self-hosted host or WarpBuild', { repo: { full_name: 'stranger/ai-devops' } }],
                                ['a pull request from a deleted fork never reaches a self-hosted host or WarpBuild', { repo: null }]]) {
