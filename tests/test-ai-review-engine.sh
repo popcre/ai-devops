@@ -200,8 +200,10 @@ EOF
           # The fixture captured the actual door-generated catalog. Where the
           # pinned binary is installed, prove its offline model discovery with
           # that same catalog and with the catalog absent in an empty HOME.
-          STEP_REAL_BIN="${HOME:-}/.stepcode/bin/step"
-          if [ -x "$STEP_REAL_BIN" ] && "$STEP_REAL_BIN" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant'; then
+          STEP_REAL_BIN="$(command -v step 2>/dev/null || true)"
+          [ -x "$STEP_REAL_BIN" ] || STEP_REAL_BIN="${HOME:-}/.stepcode/bin/step"
+          if [ -x "$STEP_REAL_BIN" ] && NO_COLOR=1 "$STEP_REAL_BIN" --help 2>/dev/null | head -n1 |
+            sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' | grep -q '^step - AI coding assistant'; then
             mkdir -p "$TMP/stepfun-door/real-home"
             STEP_REAL_LOADER=()
             for _step_top in /lib /lib64; do
@@ -226,6 +228,17 @@ EOF
               "test \"\$(awk 'NR > 1 {print \$1 \"/\" \$2}' '$TMP/stepfun-door/isolated-models.out')\" = step/step-5-preview"
           else
             skip 'Pinned StepCode offline catalog proof requires the installed StepCode binary'
+          fi
+          if AI_REVIEW_RUNNER_CORE=review-lifecycle-core/1 AI_STEPFUN_STEP_BIN="$TMP/stepfun-door/bin/step" \
+            AI_STEPFUN_MODEL=step/step-3.7-flash AI_STEPFUN_ALLOW_NO_CREDS=1 DOOR_TIMEOUT=10 \
+            DOOR_WORKDIR="$TMP/stepfun-door/work" DOOR_PACKET_DIR="$TMP/stepfun-door/packet" \
+            DOOR_PROMPT_FILE="$TMP/stepfun-door/prompt" DOOR_REPORT_OUT="$TMP/stepfun-door/override-report" \
+            DOOR_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)" bash "$STEPFUN_DOOR" review \
+            > "$TMP/stepfun-door/override-door.out" 2>&1; then
+            check 'StepFun door catalog follows an explicit Step model override' \
+              "jq -e '.providers.step.models | map(.id) == [\"step-3.7-flash\"]' '$TMP/stepfun-door/work/captured-models.json' >/dev/null"
+          else
+            bad 'StepFun door catalog follows an explicit Step model override'
           fi
         else
           bad 'StepFun door uses supported writable approval and runs step --version'

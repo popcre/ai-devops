@@ -76,16 +76,21 @@ unsupported_platform() {
 resolve_stepcode() {
   local b c
   if [ -n "${AI_STEPFUN_STEP_BIN:-}" ]; then
-    [ -x "$AI_STEPFUN_STEP_BIN" ] && "$AI_STEPFUN_STEP_BIN" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || return 1
+    [ -x "$AI_STEPFUN_STEP_BIN" ] && stepcode_identity_ok "$AI_STEPFUN_STEP_BIN" || return 1
     printf '%s' "$AI_STEPFUN_STEP_BIN"; return 0
   fi
   for c in "${HOME:-}/.stepcode/bin/step" "$(command -v step 2>/dev/null || true)"; do
     [ -n "$c" ] && [ -x "$c" ] || continue
-    "$c" --help 2>/dev/null | head -n1 | grep -q '^step - AI coding assistant' || continue
+    stepcode_identity_ok "$c" || continue
     b="$c"; break
   done
   [ -n "${b:-}" ] || return 1
   printf '%s' "$b"
+}
+
+stepcode_identity_ok() { # stepcode_identity_ok BIN
+  NO_COLOR=1 "$1" --help 2>/dev/null | head -n1 |
+    sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' | grep -q '^step - AI coding assistant'
 }
 
 resolve_opencode() {
@@ -204,9 +209,14 @@ install_opencode_profile() { # install_opencode_profile XDG_ROOT AGENT
 # from this door's temporary, nonsecret file. Retire this projection when the
 # pinned StepCode can discover its built-in Step model in an empty HOME.
 write_stepcode_catalog() { # write_stepcode_catalog DEST
-  jq -n --arg base "$SF_BASE_URL" '{providers: {step: {
+  local model_id
+  case "$SF_STEP_MODEL" in
+    step/*) model_id="${SF_STEP_MODEL#step/}"; model_id="${model_id%%:*}"; [ -n "$model_id" ] || return 1 ;;
+    *) return 1 ;;
+  esac
+  jq -n --arg base "$SF_BASE_URL" --arg id "$model_id" '{providers: {step: {
     baseUrl: $base, api: "openai-completions", apiKey: "$STEP_API_KEY",
-    models: [{id: "step-5-preview", name: "StepFun Step 5 Preview",
+    models: [{id: $id, name: ("StepFun " + $id),
       contextWindow: 131072, maxTokens: 32768}]
   }}}' > "$1" && chmod 600 "$1"
 }
