@@ -211,7 +211,11 @@ def summarize(directory):
                 if (type(row.get("schema")) is not int or row["schema"] != 1
                         or row.get("measurement") not in ("opaque_cli_estimate", "direct_api_invocation_estimate")
                         or request_class not in ("unknown", "identity_probe", "graphql_transformed_unobservable")
-                        or (request_class == "graphql_transformed_unobservable" and operation != "api.graphql")
+                        or (request_class == "graphql_transformed_unobservable"
+                            and operation != "api.graphql"
+                            and not (caller == "ai-blocker-watch" and operation in
+                                     {"bw.snapshot", "bw.dependents", "bw.wake_miss", "bw.alarm_issue", "bw.link_issue"}
+                                     and row.get("bucket") == "graphql"))
                         or "http_requests" not in row
                         or (direct and (operation != "api.identity" or request_class != "identity_probe"))
                         or (not direct and (operation == "api.identity" or request_class == "identity_probe"))

@@ -129,7 +129,7 @@ safe_state_file(){
 put(){
   local target="$1" temp attempt
   safe_state_file "$target" || { say "invalid GitHub state file"; exit 3; }
-  temp="$(umask 077; mktemp "$target.tmp.XXXXXX")" || { say "cannot create private GitHub state file"; exit 3; }
+  temp="$(umask 077; mktemp "${target%/*}/.state-write.XXXXXX")" || { say "cannot create private GitHub state file"; exit 3; }
   printf '%s\n' "$2" > "$temp" || { rm -f -- "$temp"; say "cannot save GitHub state"; exit 3; }
   for attempt in 1 2 3; do
     safe_state_file "$target" || break
@@ -368,10 +368,11 @@ elif [ "${1:-}" = pr ] || [ "${1:-}" = issue ]; then
 fi
 select_buckets
 if [ "${1:-}" = api ] && [ "$endpoint" = graphql ]; then
+  GH_MEASURE_BUCKET=graphql
   # jq is an installed toolkit dependency. A GraphQL call cannot safely
   # claim success if its HTTP-200 application errors cannot be classified.
   command -v jq >/dev/null 2>&1 || { say "jq is required to classify GraphQL responses"; exit 3; }
-  [ "${parse_ok:-0}" != 1 ] || GH_MEASURE_OPERATION=api.graphql
+  if [ "${parse_ok:-0}" = 1 ] && [[ "$GH_MEASURE_OPERATION" != bw.* ]]; then GH_MEASURE_OPERATION=api.graphql; fi
 fi
 quota_path(){ if [ "$1" = core ]; then printf '%s/quota' "$STATE"; else printf '%s/quota.%s' "$STATE" "$1"; fi; }
 bucket_pause_path(){ printf '%s/quota-pause.%s' "$STATE" "$1"; }
@@ -462,6 +463,9 @@ if [ "$QUOTA_ACTIVE" != off ] && [ "$(cat "$STATE/quota-context" 2>/dev/null)" !
     private_dir "$STATE/quota-contexts/$previous_key" || { say "cannot protect GitHub quota context"; exit 3; }
     for file in "$STATE"/quota "$STATE"/quota.* "$STATE"/quota-pause.* "$STATE"/quota-resources; do
       [ -e "$file" ] || [ -L "$file" ] || continue
+      # An interrupted atomic write is not a resource row. Preserve it, as
+      # on restore, without importing its contents into the quota cache.
+      quota_state_name "$file" || continue
       quota_state_name "$file" && safe_state_file "$file" &&
         safe_state_file "$STATE/quota-contexts/$previous_key/${file##*/}" || { say "invalid GitHub quota state"; exit 3; }
       mv -f -- "$file" "$STATE/quota-contexts/$previous_key/" || { say "cannot save GitHub quota state"; exit 3; }
@@ -480,6 +484,7 @@ if [ "$QUOTA_ACTIVE" != off ] && [ "$(cat "$STATE/quota-context" 2>/dev/null)" !
     done
     for file in "$STATE"/quota "$STATE"/quota.*; do
       [ -f "$file" ] || continue
+      quota_state_name "$file" || continue
       read -r _ remaining limit reset < "$file"
       put "$file" "0 $remaining $limit $reset"
     done
@@ -624,7 +629,7 @@ if [ "$GRAPH_TRANSFORMED" = 1 ]; then
   # the wrapper cannot inspect the transformed body for malformed or empty
   # error messages that gh itself misses. Preserve gh's result unchanged.
   say "transformed GraphQL body cannot be independently classified; gh exit status is passed through."
-  GH_MEASURE_OPERATION=api.graphql
+  [[ "$GH_MEASURE_OPERATION" == bw.* ]] || GH_MEASURE_OPERATION=api.graphql
   GH_MEASURE_REQUEST_CLASS=graphql_transformed_unobservable
 fi
 if [ "${1:-}" = api ] && [ "${endpoint:-}" = graphql ] && [ "$GRAPH_TRANSFORMED" = 0 ] && command -v jq >/dev/null 2>&1; then
