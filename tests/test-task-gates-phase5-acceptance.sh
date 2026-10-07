@@ -8,7 +8,18 @@ PASS=0; FAIL=0
 . "$ROOT/tests/lib-test-harness.sh"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-export AI_TASK_GATES_DIR="$TMP/state"
+GATE_TMP="$TMP"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    gate_profile="$(cygpath -u "$USERPROFILE")"
+    mkdir -p "$gate_profile/.local/state"
+    GATE_TMP="$(mktemp -d "$gate_profile/.local/state/task-gates-phase5.XXXXXXXX")"
+    trap 'rm -rf "$TMP" "$GATE_TMP"' EXIT
+    gate_sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
+    icacls "$(cygpath -w "$GATE_TMP")" /inheritance:r /grant:r "*${gate_sid}:(OI)(CI)(F)" >/dev/null
+    ;;
+esac
+export AI_TASK_GATES_DIR="$GATE_TMP/state"
 export AI_TASK_GATES_FILE="$ROOT/config/task-gates.json"
 EXPENSIVE_LAUNCHES=0
 REVIEW_STARTS=0

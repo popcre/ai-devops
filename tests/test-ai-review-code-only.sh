@@ -8,6 +8,17 @@ SANDBOX="$ROOT/bin/ai-review-sandbox"
 PACKET="$ROOT/bin/ai-review-packet"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+GATE_TMP="$TMP"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    gate_profile="$(cygpath -u "$USERPROFILE")"
+    mkdir -p "$gate_profile/.local/state"
+    GATE_TMP="$(mktemp -d "$gate_profile/.local/state/task-gates-code-only.XXXXXXXX")"
+    trap 'rm -rf "$TMP" "$GATE_TMP"' EXIT
+    gate_sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
+    icacls "$(cygpath -w "$GATE_TMP")" /inheritance:r /grant:r "*${gate_sid}:(OI)(CI)(F)" >/dev/null
+    ;;
+esac
 export AI_REVIEW_SANDBOX_DIR="$TMP/sandboxes"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
@@ -226,7 +237,7 @@ printf 'print("x")
 git -C "$PRIV" add -A; git -C "$PRIV" commit -qm base
 printf '["src/loader.py"]
 ' > "$TMP/priv-paths.json"
-if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$TMP/gates-state" \
+if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$GATE_TMP/gates-state" \
    "$SANDBOX" ensure-code-only "$PRIV" undeclared --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/undeclared.out" 2>&1; then
   fail 'a direct code-only export started without the fixtures opt-in'
 fi
@@ -243,7 +254,7 @@ git -C "$DECOY" config user.email t@e.invalid; git -C "$DECOY" config user.name 
 printf 'plain
 ' > "$DECOY/plain.txt"
 git -C "$DECOY" add -A; git -C "$DECOY" commit -qm base
-if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$TMP/gates-state"    GIT_DIR="$DECOY/.git" GIT_WORK_TREE="$DECOY"    "$SANDBOX" ensure-code-only "$PRIV" undeclared-env --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/undeclared-env.out" 2>&1; then
+if AI_TASK_GATES_BIN="$ROOT/bin/ai-task-gates" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$GATE_TMP/gates-state"    GIT_DIR="$DECOY/.git" GIT_WORK_TREE="$DECOY"    "$SANDBOX" ensure-code-only "$PRIV" undeclared-env --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/undeclared-env.out" 2>&1; then
   fail 'an inherited GIT_DIR opened the sealed route without the opt-in'
 fi
 grep -Fq 'synthetic-fixtures-only' "$TMP/undeclared-env.out"   || fail 'the decoy refusal did not name the missing fixtures boundary'
@@ -256,7 +267,7 @@ printf '#!/usr/bin/env bash
 exit 0
 ' > "$PRIV/ai-task-gates"
 chmod +x "$PRIV/ai-task-gates"
-if (unset AI_TASK_GATES_BIN; cd "$PRIV" && PATH=".:$PATH" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$TMP/gates-state"     "$SANDBOX" ensure-code-only "$PRIV" planted-gate --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/planted.out" 2>&1); then
+if (unset AI_TASK_GATES_BIN; cd "$PRIV" && PATH=".:$PATH" AI_TASK_GATES_FILE="$ROOT/config/task-gates.json" AI_TASK_GATES_DIR="$GATE_TMP/gates-state"     "$SANDBOX" ensure-code-only "$PRIV" planted-gate --paths-file "$TMP/priv-paths.json" --base HEAD > "$TMP/planted.out" 2>&1); then
   fail 'a planted PATH gate opened the sealed route without the opt-in'
 fi
 grep -Fq 'synthetic-fixtures-only' "$TMP/planted.out"   || fail 'the planted-gate refusal did not name the missing fixtures boundary'

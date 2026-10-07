@@ -297,6 +297,10 @@ if (-not $fixture) {
 }
 if (Test-Path -LiteralPath $pendingAuthorization -PathType Leaf) {
   Remove-Item -LiteralPath $pendingAuthorization -Force
+  $issuedSeal = ($pendingAuthorization -replace '\.consuming$', '') + '.seal'
+  if (Test-Path -LiteralPath $issuedSeal -PathType Leaf) {
+    Remove-Item -LiteralPath $issuedSeal -Force -ErrorAction SilentlyContinue
+  }
 }
 } catch {
   $failure=$_.Exception.Message

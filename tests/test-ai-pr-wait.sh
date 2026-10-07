@@ -62,6 +62,17 @@ case "$(uname -s 2>/dev/null || true)" in
 esac
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+GATE_TMP="$TMP"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    gate_profile="$(cygpath -u "$USERPROFILE")"
+    mkdir -p "$gate_profile/.local/state"
+    GATE_TMP="$(mktemp -d "$gate_profile/.local/state/task-gates-pr-wait.XXXXXXXX")"
+    trap 'rm -rf "$TMP" "$GATE_TMP"' EXIT
+    gate_sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
+    icacls "$(cygpath -w "$GATE_TMP")" /inheritance:r /grant:r "*${gate_sid}:(OI)(CI)(F)" >/dev/null
+    ;;
+esac
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -218,7 +229,7 @@ git -C "$GR" config user.name Test; git -C "$GR" config user.email t@example.com
 git -C "$GR" remote add origin 'https://github.com/popcre/ai-devops.git'
 printf 'base\n' > "$GR/README.md"; git -C "$GR" add -A; git -C "$GR" commit -qm init
 printf 'a note\n' > "$GR/docs.md"
-export AI_TASK_GATES_DIR="$TMP/gates"
+export AI_TASK_GATES_DIR="$GATE_TMP/gates"
 ( cd "$GR" && "$ROOT/bin/ai-task-gates" start --class prose --reason 'documentation only' ) >/dev/null 2>&1
 
 # The refusal text carries backticks, so it is kept in a file rather than in a

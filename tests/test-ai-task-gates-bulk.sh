@@ -2,8 +2,17 @@
 # Focused bulk classifier regression for the Linux and Windows CI lanes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    profile="$(cygpath -u "$USERPROFILE")"
+    mkdir -p "$profile/.local/state"
+    TMP="$(mktemp -d "$profile/.local/state/task-gates-bulk.XXXXXXXX")"
+    trap 'rm -rf "$TMP"' EXIT
+    sid="$(powershell.exe -NoProfile -NonInteractive -Command '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value' | tr -d '\r\n')"
+    icacls "$(cygpath -w "$TMP")" /inheritance:r /grant:r "*${sid}:(OI)(CI)(F)" >/dev/null
+    ;;
+  *) TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT ;;
+esac
 command -v jq >/dev/null
 command -v timeout >/dev/null
 export AI_TASK_GATES_FILE="$ROOT/config/task-gates.json"
