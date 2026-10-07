@@ -37,6 +37,7 @@ param(
     [switch]$AdoptGlobals,
     [switch]$SourceGateOnly,
     [switch]$LauncherGateOnly,
+    [switch]$McpLaunchersOnly,
     [string]$ExpectedHead = '',
     # Deprecated: retiring skills is now automatic and needs no flag.
     # Accepted so older docs and scripts keep working.
@@ -52,6 +53,16 @@ if ($ExpectedHead -and $SkillsDryRun) {
 }
 if ($LauncherGateOnly -and ($SourceGateOnly -or $SkillsDryRun)) {
     throw 'LauncherGateOnly cannot be combined with source-only or dry-run modes.'
+}
+if ($McpLaunchersOnly -and ($LauncherGateOnly -or $SourceGateOnly -or $SkillsDryRun -or -not $ExpectedHead -or -not $RepoPath)) {
+    throw 'McpLaunchersOnly requires an exact target and installed checkout, without other partial modes.'
+}
+if ($McpLaunchersOnly) {
+    foreach ($key in $PSBoundParameters.Keys) {
+        if ($key -cnotin @('McpLaunchersOnly','RepoPath','ExpectedHead')) {
+            throw 'MCP-only installation refuses full toolkit options.'
+        }
+    }
 }
 
 function Write-Step {
@@ -1013,6 +1024,37 @@ if ($LauncherGateOnly) {
     return
 }
 
+if ($McpLaunchersOnly) {
+    $candidate = Split-Path -Parent $PSScriptRoot
+    $bash = Get-GitBash
+    if (-not $bash) { throw 'Git Bash is required for guarded MCP installation.' }
+    . (Join-Path $candidate 'bin\windows-private-file.ps1')
+    . (Join-Path $candidate 'bin\mcp-launcher-install-windows.ps1')
+    $cfg = Join-Path $env:USERPROFILE '.config\ai-devops'
+    $transaction = Join-Path $env:USERPROFILE ".local\state\ai-devops\mcp-launcher-transactions\$ExpectedHead"
+    # A finalized receipt is the commit point; never roll it back. Interrupted
+    # uncommitted publication restores only journal-bound owned bytes.
+    $completion = Join-Path $env:USERPROFILE ".local\state\ai-devops\task-gates\mcp-launcher-installs\$ExpectedHead.json"
+    if ((Test-Path -LiteralPath $transaction) -and -not (Test-Path -LiteralPath $completion)) {
+        Restore-McpNarrowInterruptedFiles $cfg $transaction
+        Move-Item -LiteralPath $transaction -Destination ($transaction + '.recovered-' + [guid]::NewGuid().ToString('N'))
+    }
+    # All path values travel as argv, never interpolated shell source.
+    $preflight = 'set -e; cd "$(cygpath -u "$1")"; primary=$(cygpath -u "$2"); exec ./bin/ai-task-gates install-verify --mcp-launchers-only --phase preflight --target-head "$3" --installed-checkout "$primary" --installed-launcher "$HOME/.local/bin/ai-task-gates"'
+    $gateOutput = @(& $bash.Source --noprofile --norc -c $preflight -- $candidate $RepoPath $ExpectedHead)
+    if ($LASTEXITCODE -ne 0) { throw 'MCP one-use installation preflight refused.' }
+    $gateOutput | Write-Host
+    if ($gateOutput -contains "AI_DEVOPS_MCP_INSTALL_RECOVERED=$ExpectedHead") { return }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $transaction) | Out-Null
+    Protect-AiDevOpsPrivatePath -Path (Split-Path -Parent $transaction) -Directory
+    Invoke-McpNarrowFileTransaction -ConfigurationRoot $cfg -SourceRoot $candidate -TransactionRoot $transaction -InstallRuntime -Committed { Test-Path -LiteralPath $completion } -VerifyAndFinalize {
+        & $bash.Source --noprofile --norc (Join-Path $candidate 'tools\lib\mcp-launcher-install-windows-finalize.sh') $candidate $RepoPath $ExpectedHead $transaction
+        if ($LASTEXITCODE -ne 0) { throw 'Installed MCP verification or partial receipt publication failed.' }
+    }
+    Write-Note 'MCP launchers refreshed; the full toolkit receipt and primary checkout are unchanged.'
+    return
+}
+
 if ($SkillsDryRun) {
     if (-not (Test-Path -LiteralPath $RepoPath)) {
         throw "Skills dry-run requires an existing -RepoPath: $RepoPath"
@@ -1403,6 +1445,13 @@ if (-not $SkillsDryRun -and -not ($env:AI_DEVOPS_INSTALL_TEST_MODE -eq '1' -and
     # Keep one-use authority through this final step so failure can be retried.
     & (Join-Path $RepoPath 'bin\install-machine-tools.ps1') -RepoPath $RepoPath
     if ($LASTEXITCODE -ne 0) { throw 'Managed command launcher installation failed.' }
+    $partialReceipts = Join-Path $env:USERPROFILE '.local\state\ai-devops\task-gates\mcp-launcher-installs'
+    if ((Test-Path -LiteralPath $partialReceipts) -and @(Get-ChildItem -LiteralPath $partialReceipts -Filter '*.json').Count) {
+        $supersedeBash = Get-GitBash
+        if (-not $supersedeBash) { throw 'Git Bash is required to reconcile MCP partial installation receipts.' }
+        & $supersedeBash.Source --noprofile --norc (Join-Path $RepoPath 'tools\lib\mcp-launcher-install-windows-supersede.sh') $RepoPath
+        if ($LASTEXITCODE -ne 0) { throw 'Full installation could not reconcile MCP partial receipts.' }
+    }
     $script:ConsumingInstallAuthorization = $null
 }
 Write-Step "Done"

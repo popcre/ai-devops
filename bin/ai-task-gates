@@ -40,6 +40,8 @@ done
 [ -n "$ROOT" ] || { printf 'ai-task-gates: cannot find tools/lib/task-gates.sh\n' >&2; exit 4; }
 # shellcheck source=../tools/lib/task-gates.sh
 . "$ROOT/tools/lib/task-gates.sh"
+# shellcheck source=../tools/lib/mcp-launcher-install-gate.sh
+. "$ROOT/tools/lib/mcp-launcher-install-gate.sh"
 
 POLICY_FILE="${AI_TASK_GATES_FILE:-$ROOT/config/task-gates.json}"
 STATE_DIR="${AI_TASK_GATES_DIR:-$HOME/.local/state/ai-devops/task-gates}"
@@ -67,11 +69,11 @@ usage: ai-task-gates <command> [options]
         Recompute the change set and decide whether ACTION may start.
   authorize-install --target-head SHA --installed-checkout PATH
         --installed-launcher PATH --review-report PATH --reviewer-approval REPORT
-        [--legacy-migration|--first-install|--recover-launchers|--stale-manifest-recovery]
+        [--legacy-migration|--first-install|--recover-launchers|--stale-manifest-recovery|--mcp-launchers-only]
         Issue one-use authority for an exact reviewed toolkit release.
   install-verify --phase preflight|resume|stages-complete|finalize --target-head SHA
         --installed-checkout PATH --installed-launcher /usr/local/bin/ai-task-gates
-        [--caller-pinned] [--reviewer-approval REPORT] [--stage-report PATH]
+        [--caller-pinned] [--reviewer-approval REPORT] [--stage-report PATH] [--mcp-launchers-only]
         Guard the Linux checkout update and installation transaction.
   explain [--json] [--base REF] [--paths-from FILE|-]
         Show the resolved identity, change set, class, and gates.
@@ -1347,6 +1349,7 @@ cmd_install_verify(){
     if [ -n "$surviving" ]; then rm -f -- "$surviving" || blocked 'ai-task-gates: STOP. Cannot close completed Linux authority.'; fi
     if [ -e "$stage_marker" ]; then rm -f -- "$stage_marker" || blocked 'ai-task-gates: STOP. Cannot close completed Linux stage proof.'; fi
     if [ "$phase" = finalize ] || [ "$had_leftovers" -eq 1 ]; then
+      mcp_install_supersede_full "$installed" "$target" "$completion" || blocked 'ai-task-gates: STOP. MCP partial receipts could not be reconciled.'
       printf 'AI_DEVOPS_INSTALL_RECOVERED=%s\n' "$target"
       return 0
     fi
@@ -1413,6 +1416,7 @@ cmd_install_verify(){
     if [ "$fixture" -eq 1 ] && [ "${AI_TASK_GATES_TEST_FINALIZE_CRASH_AFTER:-}" = authority ]; then kill -KILL "$$"; fi
     rm -f -- "$stage_marker" || blocked 'ai-task-gates: STOP. Cannot close Linux stage receipt.'
     if [ "$fixture" -eq 1 ] && [ "${AI_TASK_GATES_TEST_FINALIZE_CRASH_AFTER:-}" = marker ]; then kill -KILL "$$"; fi
+    mcp_install_supersede_full "$installed" "$target" "$completion" || blocked 'ai-task-gates: STOP. MCP partial receipts could not be reconciled.'
     printf 'ai-task-gates: Linux install verified at %s.\n' "$target"; return 0
   fi
   if [ "$phase" = preflight ]; then
@@ -1741,11 +1745,13 @@ cmd_authorize_install(){
 
 main(){
   local command="${1:-}"; [ $# -gt 0 ] && shift
+  local mcp_only=0 arg
+  for arg in "$@"; do [ "$arg" != --mcp-launchers-only ] || mcp_only=1; done
   case "$command" in
     start) cmd_start "$@" ;;
     check) cmd_check "$@" ;;
-    authorize-install) cmd_authorize_install "$@" ;;
-    install-verify) cmd_install_verify "$@" ;;
+    authorize-install) if [ "$mcp_only" -eq 1 ]; then cmd_authorize_mcp_install "$@"; else cmd_authorize_install "$@"; fi ;;
+    install-verify) if [ "$mcp_only" -eq 1 ]; then cmd_install_verify_mcp "$@"; else cmd_install_verify "$@"; fi ;;
     explain) cmd_explain_cached "$@" ;;
     status) cmd_status "$@" ;;
     end) cmd_end "$@" ;;

@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source_file="$repo/bin/setup-secrets.sh"
+remote_file="$repo/tools/lib/mcp-remote-render.sh"
 skill_file="$repo/skills/codex/codex-transcript-miner/SKILL.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -26,7 +27,7 @@ grep -Fq 'ai-lock-doctor --recover --older-than 90 "$CFG_DIR/op-refresh.lock"' "
   fail "MCP launcher lock helper has no bounded self-healing retry"
 grep -Fq '_aidev_exports="\$(_aidev_flock op run' "$source_file" ||
   fail "MCP launcher does not limit the lock to secret resolution"
-grep -Fq 'TOK="\$(_aidev_flock op read' "$source_file" ||
+grep -Fq 'TOK="\$(_aidev_flock op read' "$remote_file" ||
   fail "remote MCP launcher passes the refresh lock to 1Password"
 grep -Fq 'unset _aidev_names _aidev_exports' "$source_file" ||
   fail "MCP launcher leaves temporary secret-resolution variables behind"
@@ -34,5 +35,12 @@ grep -Fq 'exec "$NODE_BIN" "$GUARD_JS"' "$source_file" ||
   fail "MCP launcher does not start the server under the session guard after releasing the lock"
 grep -Fq 'mcp-session-guard.mjs' "$source_file" ||
   fail "MCP launcher generation never installs the session guard"
+grep -Fq 'MCP_REMOTE_AUTH_HEADER="Bearer \$TOK"' "$remote_file" ||
+  fail "remote MCP bearer value is not handed to the child environment"
+grep -Fq 'Authorization:\${MCP_REMOTE_AUTH_HEADER}' "$remote_file" ||
+  fail "remote MCP header must reach pinned mcp-remote as an argv placeholder"
+if grep -Fq -- '--header "Authorization: Bearer \$TOK"' "$remote_file"; then
+  fail "remote MCP launcher leaks the bearer value through process argv"
+fi
 
-echo "PASS: Codex skill header and Linux MCP lock lifetime"
+echo "PASS: Codex skill header, Linux MCP lock lifetime, and remote bearer argv isolation"

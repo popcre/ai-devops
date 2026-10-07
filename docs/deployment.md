@@ -129,6 +129,63 @@ forces that mode and `--skip-secrets` records an intentional skip.
 
 Idempotent — safe to re-run.
 
+### Guarded MCP launcher partial installation
+
+The MCP-only route refreshes remote secret launchers without advancing the
+primary checkout or asserting that a full toolkit installation completed.
+Its owner is the existing installer and `ai-task-gates` installation boundary;
+it is a temporary bounded recovery operation, superseded by the next verified
+full installation. It does not replace the full installer or StepFun proof.
+
+Prepare separate installation and reviewer worktrees at the exact fetched
+`origin/main` target, preserving the installed primary HEAD. Declare the
+installation task at its old HEAD before advancing its candidate. On the
+affected host, obtain an exact-head independent review with
+`--operation mcp-launchers-only`; the report must contain the exact line
+`Approved mcp-launchers-only.`. The wrapper records installed source,
+full-receipt/legacy state, and the launcher baseline from fixed host paths.
+The gate binds that evidence, source digest, policy, report lifecycle and
+assigned reviewer approval to separate one-use authority:
+
+```bash
+ai-task-gates authorize-install --mcp-launchers-only --target-head SHA \
+  --installed-checkout PRIMARY --installed-launcher MANAGED_GATE \
+  --review-report REPORT --reviewer-approval REPORT
+```
+
+Run the target Linux candidate's `install.sh --mcp-launchers-only
+--installed-checkout PRIMARY --expected-head SHA`, or its Windows
+`bin/install-ai-devops-windows.ps1 -McpLaunchersOnly -RepoPath PRIMARY
+-ExpectedHead SHA`. No full-install or other partial-mode options may be
+combined. An existing managed profile is required; dormant profiles remain
+untouched. Linux requires an existing reviewed Node executable. The host's
+normal gate launcher and full source receipt must remain valid throughout.
+
+The only managed destination files on Linux are
+`~/.config/ai-devops/mcp-remote-launch.sh` and `mcp-session-guard.mjs`.
+Their fixed adjacent `.stage` files are transient atomic-publication paths.
+Windows permits `mcp-remote-launch.cmd`, `mcp-session-guard.mjs`,
+`mcp-secret-launch.ps1`, and, only when absent, the scoped `mcp-runtime`
+directory. Existing runtime bytes remain unchanged and inventory-bound.
+Missing Windows runtime uses the dedicated pinned remote-only lock with
+package lifecycle scripts disabled and an internal private cache. Final proof
+compares it against a freshly installed lock-bound reference tree.
+No shared packages, services, skills, client configurations, secret values,
+managed command launchers or full-install manifests are refreshed.
+
+Protected installation state holds backups, a fixed-destination crash journal,
+one-use authority, scoped dependency cache/proof staging, and a separate
+`mcp-launcher-installs/SHA.json` receipt with `full_install_completed:false`.
+Source/head, inventory or report movement refuses before publication.
+Finalization recomputes installed payload bytes and runs disposable synthetic
+authorization/argv and session-lifetime proof; a caller-supplied pass flag
+alone cannot authorize completion. An interrupted transaction restores only
+its exact recorded prior bytes; later edits refuse recovery. A published
+partial receipt is the commit point and survives cleanup interruption.
+The next verified full receipt marks partial receipts as superseded while
+retaining their evidence. Actual authenticated managed-client reads and
+credential cutover remain separate reviewed operations.
+
 For an update containing reviewer-safety paths, leave the installed checkout
 unchanged while preparing two linked worktrees: a disposable installation
 candidate at its current HEAD and a separate reviewer candidate at the exact

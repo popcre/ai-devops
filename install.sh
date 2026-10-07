@@ -114,8 +114,14 @@ fi
 REQUIRE_SECRETS=auto
 AUTHORIZATION_TEST_ONLY=0
 reviewer_approval=""
+MCP_ONLY=0
+mcp_installed_checkout=''
+mcp_expected_head=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --mcp-launchers-only) MCP_ONLY=1; shift ;;
+    --installed-checkout) [ "$#" -ge 2 ] || exit 2; mcp_installed_checkout="$2"; shift 2 ;;
+    --expected-head) [ "$#" -ge 2 ] || exit 2; mcp_expected_head="$2"; shift 2 ;;
     --require-secrets) REQUIRE_SECRETS=yes; shift ;;
     --skip-secrets) REQUIRE_SECRETS=no; shift ;;
     --reviewer-approval)
@@ -124,10 +130,23 @@ while [ "$#" -gt 0 ]; do
     --test-authorization-only) AUTHORIZATION_TEST_ONLY=1; shift ;;
     -h|--help)
       echo "usage: ./install.sh [--require-secrets|--skip-secrets] [--reviewer-approval REPORT]"
+      echo "       ./install.sh --mcp-launchers-only --installed-checkout PRIMARY --expected-head SHA"
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+if [ "$MCP_ONLY" -eq 1 ]; then
+  [ "$REQUIRE_SECRETS" = auto ] && [ "$AUTHORIZATION_TEST_ONLY" -eq 0 ] &&
+    [ -z "$reviewer_approval" ] && [ -n "$mcp_installed_checkout" ] &&
+    [[ "$mcp_expected_head" =~ ^[0-9a-f]{40}$ ]] || {
+      warn 'MCP-only mode requires installed checkout and exact expected head, with no full-install options'; exit 2;
+    }
+  mcp_installed_checkout="$(realpath -e -- "$mcp_installed_checkout")" || exit 2
+  . "$REPO_ROOT/tools/lib/mcp-launcher-install-linux.sh"
+  mcp_linux_install "$mcp_installed_checkout" "$mcp_expected_head"
+  exit $?
+fi
+[ -z "$mcp_installed_checkout$mcp_expected_head" ] || { warn 'MCP-specific arguments require MCP-only mode'; exit 2; }
 if [ "$AUTHORIZATION_TEST_ONLY" -eq 1 ]; then
   fixture_root="$(realpath -e "$REPO_ROOT")" || exit 2
   fixture_origin="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null)" || exit 2
@@ -159,6 +178,9 @@ else
   flock -n 9 || { warn 'another installation is active for this checkout'; exit 1; }
 fi
 umask "$install_original_umask"
+# Full and scoped launcher refreshes share this profile lock.
+exec 8>"$install_lock_dir/mcp-launcher.lock" || exit 1
+flock -n 8 || { warn 'another MCP launcher installation is active'; exit 1; }
 if [ "${AI_DEVOPS_INSTALL_DEFER_FINALIZE:-0}" = 1 ] &&
    [ "${AI_DEVOPS_INSTALL_LOCK_FD:-}" != 9 ]; then
   warn 'only the lock-owning updater may defer finalization'

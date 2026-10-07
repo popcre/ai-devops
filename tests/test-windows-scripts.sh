@@ -128,7 +128,7 @@ else bad "ai-glm shim does not pin HOME"; fi
 echo "== MCP remote bridge version must be pinned =="
 if jq -e '.dependencies["mcp-remote"] == "0.1.38"' config/mcp-runtime/package.json >/dev/null \
   && grep -q "mcp-runtime\\\\node_modules\\\\.bin\\\\mcp-remote.cmd" bin/mcp-secret-launch.ps1 \
-  && grep -q 'mcp-remote@0\.1\.38' bin/setup-secrets.sh \
+  && grep -q 'mcp-remote@0\.1\.38' tools/lib/mcp-remote-render.sh \
   && ! grep -q 'mcp-remote@latest' bin/mcp-secret-launch.ps1 bin/setup-machine.ps1 bin/setup-secrets.sh; then
   ok "Windows MCP runtime pins mcp-remote and launches its stable local command"
 else
