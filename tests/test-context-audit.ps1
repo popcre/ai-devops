@@ -27,6 +27,8 @@ $parityLines = @(
     "Account for the whole job",
     "**Still open**",
     '`Waiting on',
+    "actively in progress or idle",
+    "subagent this agent spawned",
     "Process rules never override this",
     "never delegate a schema change",
     "silent about being finished",
