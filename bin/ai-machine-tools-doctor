@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 2026-09-29 transcript finding 8: install drift — extend existing doctor; never a full sweep in the check path.
 set -u
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve symlinks (e.g. /usr/local/bin launcher) before deriving the repo root.
+script_path="$(readlink -f "${BASH_SOURCE[0]}")"
+repo_root="$(cd "$(dirname "$script_path")/.." && pwd)"
 catalog=""; platform=""; profile="${USERPROFILE:-}"; target_dir=""; target_override=0
 while (($#)); do
   case "$1" in
