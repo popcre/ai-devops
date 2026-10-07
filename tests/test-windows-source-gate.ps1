@@ -228,7 +228,7 @@ try {
   # local-origin fixture; the second must refuse before touching the receipt.
   $oldMode=$env:AI_DEVOPS_INSTALL_TEST_MODE; $oldRemote=$env:AI_DEVOPS_TEST_EXPECTED_REMOTE
   $oldLauncher=$env:AI_DEVOPS_TEST_LAUNCHER; $oldReady=$env:AI_DEVOPS_TEST_LOCK_READY
-  $ready=Join-Path $temp 'first-installer-lock-ready'
+  $ready=Join-Path ([IO.Path]::GetTempPath()) ('first-installer-lock-ready-' + [guid]::NewGuid())
   $firstOut=Join-Path $temp 'first-installer.out'; $firstErr=Join-Path $temp 'first-installer.err'
   $first=$null
   try {
@@ -262,6 +262,7 @@ try {
     Assert (Test-Path -LiteralPath $pending) 'successful source gate lost retryable pending authorization'
   } finally {
     if ($first -and -not $first.HasExited) { $first.Kill(); $first.WaitForExit() }
+    Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue
     $env:AI_DEVOPS_INSTALL_TEST_MODE=$oldMode; $env:AI_DEVOPS_TEST_EXPECTED_REMOTE=$oldRemote
     $env:AI_DEVOPS_TEST_LAUNCHER=$oldLauncher; $env:AI_DEVOPS_TEST_LOCK_READY=$oldReady
   }
