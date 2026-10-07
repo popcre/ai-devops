@@ -46,7 +46,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   reviewer_event_guard gemini "$_AI_EVENT_SELF" "$@"
   unset _AI_EVENT_SELF
 fi
-VERSION=0.2.5
+VERSION=0.2.6
 QUALIFICATION_DIR="${AI_REVIEW_QUARANTINE_DIR:-$HOME/.local/state/ai-devops/review-quarantine}"
 QUALIFICATION_FILE="$QUALIFICATION_DIR/gemini-live-qualified.json"
 CALLER="${AI_GEMINI_CALLER:-codex}"
@@ -202,10 +202,12 @@ auto_requalify(){
 }
 require_local_runtime(){ local a; a="$(agy)"; timeout 30s "$a" --version >/dev/null 2>&1 || die 'local_dependency_unavailable: the LOCAL agy runtime cannot start or its version probe timed out. This is not a Gemini provider fault. Run: ai-gemini doctor'; }
 request(){ if [ "${1:-}" = --prompt ]; then printf %s "${2:-}"; elif [ "${1:-}" = --prompt-file ]; then [ -f "${2:-}" ] || die 'prompt file not found'; cat "$2"; elif [ ! -t 0 ]; then cat; else die 'provide --prompt, --prompt-file, or standard input'; fi; }
-# validate_request_source: non-consuming pre-check of the session name and
-# prompt source so an invalid request dies before auto_requalify can spend
-# live qualification allowance or change qualification state. Never reads stdin.
+# validate_request_source: non-consuming pre-check of the command, session
+# name, prompt source, repository location, and session existence so an
+# invalid request dies before auto_requalify can spend live qualification
+# allowance or change qualification state. Never reads stdin.
 validate_request_source(){
+  local cmd="${1:-}"
   local -a args=("$@") idx=1
   if [ "${args[idx]:-}" = --governed-verdict ]; then idx=$((idx+2)); fi
   name_ok "${args[idx]:-}" || die 'invalid session name'
@@ -218,6 +220,16 @@ validate_request_source(){
       [ -f "${args[idx+1]}" ] || die 'prompt file not found';;
     *)
       [ ! -t 0 ] || die 'provide --prompt, --prompt-file, or standard input';;
+  esac
+  # Full request shape before any paid requalification: repository location
+  # and session uniqueness/existence are checked here, not after auto_requalify.
+  local r id m
+  r="$(root)"
+  id="$(rid "$r")"
+  m="$(meta "$id" "${args[idx-1]:-}")"
+  case "$cmd" in
+    new) [ ! -e "$m" ] || die 'session already exists';;
+    ask) [ -f "$m" ] || die 'session not found';;
   esac
 }
 write(){ local f="$1" j="$2" t; mkdir -p "$(dirname "$f")"; t="$(mktemp "$(dirname "$f")/.tmp.XXXXXX")"; printf '%s\n' "$j" > "$t"; mv -f "$t" "$f"; }
