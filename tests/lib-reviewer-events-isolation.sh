@@ -7,6 +7,11 @@
 # A suite that already chose its own AI_REVIEW_EVENT_DIR keeps it.
 export AI_REVIEW_TEST_ISOLATION=1
 if [ -z "${AI_REVIEW_EVENT_DIR:-}" ]; then
+  # Suites own their EXIT traps, so this helper cannot remove its directory at
+  # exit. Instead it removes its own private directories left by runs that
+  # ended more than a day ago (name-scoped; never a live ledger).
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -type d -name 'ai-review-test-events.??????' -mmin +1440 \
+    -exec rm -rf {} + 2>/dev/null || true
   AI_REVIEW_EVENT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ai-review-test-events.XXXXXX")" || {
     printf 'lib-reviewer-events-isolation: cannot create a private events directory\n' >&2
     return 1 2>/dev/null || exit 1
