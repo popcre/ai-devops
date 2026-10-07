@@ -26,6 +26,7 @@ class AdmissionTests(unittest.TestCase):
             self.evidence.write_text(json.dumps({'provider':provider,'failure_class':'allowance-exhausted','reset_at':datetime.datetime.fromtimestamp(now+3600,datetime.timezone.utc).isoformat()}))
             result=subprocess.run([sys.executable,str(MODULE),'credit',provider,'--directory',str(self.directory),'--marker',str(self.evidence),'--record'],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn('existing paid-balance hold remains',result.stdout)
             data=api.load(self.directory,provider)
             self.assertEqual(data['capacity_hold']['failure_class'],'out-of-credit')
             self.assertIsNone(data['capacity_hold']['reset_at'])

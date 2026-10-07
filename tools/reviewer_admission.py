@@ -256,6 +256,7 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
         raise ValueError('no out-of-credit message for provider')
     allowance = False
     marker_paid = False
+    preserved_paid_hold = False
     reset = None
     for path in marker_paths:
         if path.is_file() and not path.is_symlink() and path.stat().st_size <= CREDIT_SCAN_BYTES:
@@ -293,6 +294,7 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
                 failure_class = 'allowance-exhausted' if allowance else 'out-of-credit'
                 if prior:
                     if prior.get('failure_class') == 'out-of-credit' and allowance:
+                        preserved_paid_hold = True
                         failure_class = 'out-of-credit'
                         reset = None
                     prior_reset = prior.get('reset_at')
@@ -314,6 +316,8 @@ def credit(directory, provider, paths, record, seconds, marker_paths=()):
     except (ZoneInfoNotFoundError, ValueError, OverflowError):
         reset_label = 'display unavailable; provider reset retained'
     human = ('ALLOWANCE EXHAUSTED: %s; automatic return at provider reset; reset %s.' % (provider, reset_label) if allowance else 'OUT OF CREDIT: %s; automatic return requires verified paid balance.' % CREDIT_MESSAGES[provider])
+    if preserved_paid_hold:
+        human = 'ALLOWANCE EXHAUSTED: %s; existing paid-balance hold remains; a subscription reset cannot restore it.' % provider
     print(machine); print(human)
     return 0
 
